@@ -258,26 +258,34 @@ describe('A PARENT EXPRESSION OVER A FOLD OF POINTS, ROWS OR MATRICES', () => {
   // read each coordinate as `{re, im}`: `Sum(P) + (1, 1)` gave `NaN`
   // coordinates. `Product` of a list of matrices was typed `number`, and
   // `Product(Q) + 1` was compiled as the sum of two numbers.
+  // `Sum(P)` over a list of points has the type `integer | tuple<…>` (the
+  // sum of an empty list is `0`), so its shape is known only at run time,
+  // and a sum with a point declines (rule R3 of "Shapes are settled at
+  // compile time", `docs/COMPILATION-MODEL.md`). The compiled code tested
+  // the value of `Sum(P)` at run time. The interpreter gives the point.
   test.each([
-    [
-      'real points',
-      'list<tuple<real, real>>',
-      ['Add', ['Sum', 'P'], ['Tuple', 1, 1]],
-      [
-        [1, 2],
-        [3, 4],
-      ],
-      [5, 7],
-      '(5, 7)',
-    ],
-    [
-      'complex points',
-      'list<tuple<complex, complex>>',
-      ['Add', ['Sum', 'P'], ['Tuple', 1, 1]],
-      ROWS,
-      [c(5, 2), 7],
-      '((5 + 2i), 7)',
-    ],
+    ['real points', 'list<tuple<real, real>>', '(5, 7)'],
+    ['complex points', 'list<tuple<complex, complex>>', '((5 + 2i), 7)'],
+  ])('%s: a sum of the fold and a point declines', (_, type, evaluated) => {
+    const ce = new ComputeEngine();
+    ce.declare('P', type);
+    const expr = ['Add', ['Sum', 'P'], ['Tuple', 1, 1]];
+    const r = compile(ce.box(expr as any));
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    const value =
+      type === 'list<tuple<real, real>>'
+        ? [
+            [1, 2],
+            [3, 4],
+          ]
+        : ROWS;
+    const ce2 = new ComputeEngine();
+    ce2.assign('P', ce2.box(toJson(value, true) as any));
+    expect(ce2.box(expr as any).evaluate().toString()).toBe(evaluated);
+  });
+
+  test.each([
     [
       'real matrices',
       'list<matrix<real^2x2>>',

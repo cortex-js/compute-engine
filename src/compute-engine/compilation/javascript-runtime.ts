@@ -4616,15 +4616,6 @@ export const SYS_HELPERS = {
     selectWith(absent, clauses),
   // A point arm of such a selection, lifted whole rather than indexed.
   wholeArm: (value: unknown): WholeArm => new WholeArm(value),
-  // An arm whose type is a point or a list of points: an array with no
-  // array in it is the point, lifted whole; any other value is the list,
-  // an ordinary list arm (`WholeArm`).
-  pointOrPoints: (value: unknown): unknown =>
-    Array.isArray(value) &&
-    value.length > 0 &&
-    value.every((x) => !Array.isArray(x))
-      ? new WholeArm(value)
-      : value,
   // The restriction `value\{conditions\}` (a restriction) over a LIST of conditions:
   // one masked value per condition, `absent` (the value of one position
   // that is not selected: `NaN` or its complex form for a number, a point
@@ -4955,27 +4946,23 @@ export const SYS_HELPERS = {
           a[0] * b[1] - a[1] * b[0],
         ]
       : NaN,
-  // `Abs` over a value whose static type admits BOTH a point and a point
-  // list (the `list<tuple<…>> | tuple<…>` union a point-consuming document
-  // function declares): the shape is only known at run time, so dispatch on
-  // it here the way `evaluate()` dispatches on the operand's kind — a number
-  // is `Math.abs`, a complex object its modulus, an array of scalars a POINT
-  // (its norm; a scalar is a number or a `{re, im}` object, whose modulus
-  // `_SYS.norm` reads), and an array of arrays a point list (one norm per
-  // point). An
-  // EMPTY array is an empty point LIST — the interpreter answers the empty
-  // list for it, not the norm of no components (which is 0).
+  // `Abs` over a value whose static type is a `broadcastable` point
+  // (`broadcastable<tuple<…>>`, `isBroadcastablePointType`) or a collection
+  // of points at more than one level (`tensor<tuple<…>>`,
+  // `isNestedPointCollectionType`): one point or a tensor of points, and the
+  // type does not say which. The shape is read here the way `evaluate()`
+  // reads the operand's kind — a number is `Math.abs`, a complex object its
+  // modulus, an array of scalars a POINT (its norm; a scalar is a number or
+  // a `{re, im}` object, whose modulus `_SYS.norm` reads), and an array of
+  // arrays a list of points (one norm per point, at each level). An EMPTY
+  // array is an empty point LIST — the interpreter answers the empty list
+  // for it, not the norm of no components (which is 0).
   //
-  // A compiled array carries no tuple-versus-list tag, so a flat numeric
-  // array is read as a point. That is the only reading the operands which
-  // reach this helper admit: the compiler sends an operand here only when
-  // its type has no flat-numeric-list arm, or when it is a point SUM, for
-  // which the interpreter refuses a flat list of numbers. A NESTED array is
-  // read as a point list, never as a matrix, for the same reason: the
-  // operand types that reach this helper have no legitimate matrix value —
-  // a point-list union refuses a matrix at the call gate, and where the
-  // declaration does accept one the point subtraction errors at every
-  // element (Tycho item 253).
+  // A compiled array carries no tuple-versus-list tag. A flat array of
+  // numbers is a point for these types: each element of a tensor of points
+  // is a point, so a list at any level holds arrays, never plain numbers.
+  // A union of a point and another shape does not reach this helper: its
+  // `Abs` declines (rule R3, `compileExpr`).
   absShape: (x: unknown): unknown => {
     if (typeof x === 'number') return Math.abs(x);
     if (Array.isArray(x)) {

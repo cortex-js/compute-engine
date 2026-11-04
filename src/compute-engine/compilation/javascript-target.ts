@@ -582,6 +582,7 @@ import {
   CompileDeclineError,
   compileDiagnosticOf,
   UNSETTLED_SHAPE_CODE,
+  unsettledShapeDecline,
 } from './diagnostics.js';
 import {
   offersBigintMode,
@@ -1998,6 +1999,25 @@ function compileJSSelection(
     a.type.matches('collection<any>') ||
     isPossiblyCollectionTypedJS(a);
   if (!conds.some(collectionish)) return null;
+  // An arm whose static type is a point or a list of points
+  // (`tuple<real, real> | list<tuple<real, real>>`, the declared result of a
+  // host function) has no settled shape: the selection would have to read
+  // the value at run time to lift a point whole or to index a list. Such an
+  // arm declines (rule R3 of "Shapes are settled at compile time",
+  // `docs/COMPILATION-MODEL.md`). An input declared with this union is not
+  // such an arm: the code tests the input once where it is bound and
+  // compiles one body for each member (`compileDeclaredUnionDispatch()`), and
+  // in each body the arm has the type of the member.
+  const unsettledArm = args.find(
+    (x, i) => i % 2 === 1 && isPointOrPointListArm(x.type.type)
+  );
+  if (unsettledArm !== undefined)
+    throw unsettledShapeDecline(
+      unsettledArm,
+      `it is a branch of an element-wise selection, and its type ` +
+        `\`${typeToString(unsettledArm.type.type)}\` is a point or a list ` +
+        `of points`
+    );
   // A condition is a boolean or a flat list of booleans. A condition whose
   // type does not settle that it is flat (`tensor<boolean>`) is checked on
   // its value: the helper gives `NaN` for a mask whose value has a list
@@ -2009,15 +2029,6 @@ function compileJSSelection(
     // (its element), and a scalar arm is lifted.
     const cellOf = (t: Type): Type => {
       if (mayBePointArm(t)) return t;
-      // A point or a list of points: each cell is a point (the point lifted
-      // whole, or an element of the list).
-      if (isPointOrPointListArm(t)) {
-        const resolved = resolveTypeAlias(t);
-        if (typeof resolved !== 'string' && resolved.kind === 'union') {
-          const point = resolved.types.find((arm) => isPointElementType(arm));
-          if (point !== undefined) return point;
-        }
-      }
       if (isSubtype(t, 'indexed_collection<any>'))
         return collectionElementType(t) ?? 'unknown';
       return t;
@@ -2073,14 +2084,6 @@ function compileJSSelection(
       if (i % 2 === 0) return `() => (${compile(x, i)})`;
       if (mayBePointArm(x.type.type))
         return `() => _SYS.wholeArm(${compile(x, i)})`;
-      // An arm that is one point or a list of points (`tuple<…> |
-      // list<tuple<…>>`): a point is an array of scalar coordinates at run
-      // time, a list of points an array of arrays, so the value tells the
-      // two apart. A point is lifted whole, as the interpreter lifts it, and
-      // a list of points is indexed (`_SYS.pointOrPoints`, ROADMAP
-      // CE-223.2).
-      if (isPointOrPointListArm(x.type.type))
-        return `() => _SYS.pointOrPoints(${compile(x, i)})`;
       return `() => (${compile(x, i)})`;
     })
     .join(', ')})`;
@@ -2106,9 +2109,8 @@ function pointDepthOfArm(t: Type): number | undefined {
 /**
  * True when `t` is a union of points with scalar coordinates and lists of
  * such points, all list options with their points at one depth
- * (`tuple<real, real> | list<tuple<real, real>>`). A value of such a type is
- * a point when it is an array with no array in it, and a list of points
- * otherwise.
+ * (`tuple<real, real> | list<tuple<real, real>>`). An element-wise selection
+ * arm of this type declines in `compileJSSelection()`.
  */
 function isPointOrPointListArm(t: Type): boolean {
   const resolved = resolveTypeAlias(t);
@@ -3625,35 +3627,25 @@ function compileJSPointList(
     // makes the whole point list absent, as in the interpreter.
     const absentableSource =
       !constructedScalarSlot && isAbsentablePointListSource(a);
-    // A coordinate accessor whose operand may be a list of points: a list of
-    // coordinates (a zip source) or one coordinate (a slot), decided at run
-    // time (`isAccessorOfPossibleList`). The OPERAND decides: a list whose
-    // elements are all arrays is a list of points. The accessor's value
-    // cannot decide it, since the coordinate of a flat list can be a tuple,
-    // an array too; such a slot is guarded as an opaque one (`NaN`). The
-    // value of `name` is then an array only for a source, so it joins the
-    // `broadcastable<T>` components below. Decided before the source test,
-    // which reads the `unknown` type of the accessor as a source and throws
-    // on a scalar value.
+    // A coordinate accessor whose operand may be a point or a list of points
+    // (`isAccessorOfPossibleList`: an operand typed `collection<any> |
+    // tuple`, the type that a function literal infers for a parameter read
+    // with `PointX`) is one coordinate (a slot) or a list of coordinates (a
+    // zip source), and only the value tells which. It declines (rule R3 of
+    // "Shapes are settled at compile time", `docs/COMPILATION-MODEL.md`).
+    // Decided before the source test, which reads the `unknown` type of the
+    // accessor as a source.
     if (
       !constructedScalarSlot &&
       !absentableSource &&
       isAccessorOfPossibleList(a)
-    ) {
-      const raw = BaseCompiler.tempVar(target);
-      const operand = BaseCompiler.tempVar(target);
-      const name = BaseCompiler.tempVar(target);
-      bindings.push(`const ${raw} = ${compile(a)};`);
-      bindings.push(`const ${operand} = ${compile(a.op1)};`);
-      bindings.push(
-        `const ${name} = Array.isArray(${operand}) && ` +
-          `${operand}.every(Array.isArray) ? ${raw} : ` +
-          `Array.isArray(${raw}) ? NaN : ${raw};`
+    )
+      throw unsettledShapeDecline(
+        a,
+        `it is a component of a \`PointList\`, and its operand has the ` +
+          `type \`${typeToString(a.op1.type.type)}\`, a point or a list of ` +
+          `points`
       );
-      maybeSources.push(name);
-      parts.push(`(Array.isArray(${name}) ? ${name}[${idx}] : ${name})`);
-      continue;
-    }
     if (absentableSource) {
       // A present value is a list by the static type: only the absent value
       // is tested.

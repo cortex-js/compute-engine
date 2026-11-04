@@ -212,7 +212,9 @@ describe('an operator over a call that maps over a list argument', () => {
     const json = ['Add', 1, ['If', ['Greater', 'w', 0], ['q', 'u'], 0]];
     const result = compile(engine().box(json), { to: 'javascript' } as any) as any;
     expect(result.success).toBe(false);
-    expect(result.unsupported).toContain('u');
+    // The compilation declines with the reason of that body.
+    expect(result.diagnostic?.code).toBe('unsettled-shape');
+    expect(result.unsupported).toContain('If(0 < w, q(u), 0)');
     // With `u` declared `real`, the shape is settled.
     expect(run(json, { u: 2, w: 1 }, { u: 'real' })).toBeCloseTo(
       interpret(json, 2) as number,

@@ -137,13 +137,19 @@ describe('coordinate accessor over a point-or-point-list union', () => {
         ],
       })
     ).toEqual([180.5, 90.5]);
-    // Power, Abs and Sqrt over the coordinate compile as well.
-    for (const head of ['Abs', 'Sqrt'])
-      expect(
-        compile(ce.box([head, ['PointX', 'P']]), { fallback: false }).run!({
-          P: [4, 9],
-        })
-      ).toBe(head === 'Abs' ? 4 : 2);
+    // Power and Sqrt over the coordinate compile as well.
+    expect(
+      compile(ce.box(['Sqrt', ['PointX', 'P']]), { fallback: false }).run!({
+        P: [4, 9],
+      })
+    ).toBe(2);
+    // `Abs` declines: the coordinate can be a point (an element of the
+    // `indexed_collection` arm), whose absolute value is its norm, and only
+    // the value tells (rule R3 of "Shapes are settled at compile time",
+    // `docs/COMPILATION-MODEL.md`).
+    const abs = compile(ce.box(['Abs', ['PointX', 'P']]));
+    expect(abs.success).toBe(false);
+    expect(abs.diagnostic?.code).toBe('unsettled-shape');
     expect(
       compile(ce.box(['Power', ['PointX', 'P'], 2]), { fallback: false }).run!({
         P: [

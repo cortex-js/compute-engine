@@ -158,6 +158,49 @@ describe('CE-223.2: an arm that is a point or a list of points', () => {
       ['P']
     );
   });
+
+  // The declared union of an input is tested once where the input is bound
+  // (rule R4), so each body reads one member, also where the input is an
+  // arm of a selection. Tycho declares its point symbols in this way, with
+  // `number` coordinates, in two and in three dimensions.
+  test.each([
+    ['tuple<number, number> | list<tuple<number, number>>', [1, 2], [0, 0]],
+    [
+      'tuple<number, number, number> | list<tuple<number, number, number>>',
+      [1, 2, 3],
+      [0, 0, 0],
+    ],
+  ])('an input declared %s is an arm', (type, point, origin) => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('Q', type);
+    ce2.declare('F', 'list<boolean>');
+    const other = ['Tuple', ...origin];
+    for (const Q of [point, [point, point]]) {
+      check(ce2, ['If', 'F', 'Q', other], { F: [true, false], Q }, ['Q']);
+      check(
+        ce2,
+        ['Which', 'F', 'Q', 'True', other],
+        { F: [false, true], Q },
+        ['Q']
+      );
+    }
+  });
+
+  // The result of a host function declared with the union is not an input:
+  // its shape is known only at run time, so the selection declines (rule
+  // R3) where the compiled code tested the value at run time.
+  test('the result of a host function declared with the union declines', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('W', '(real) -> tuple<real, real> | list<tuple<real, real>>');
+    ce2.declare('F', 'list<boolean>');
+    ce2.declare('t', 'real');
+    const r = compile(ce2.box(['If', 'F', ['W', 't'], ['Tuple', 0, 0]]), {
+      to: 'javascript',
+      functions: { W: (t: number) => [t, t] },
+    } as any) as any;
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
+  });
 });
 
 describe('CE-223.3: When(B, B < 0) with B: broadcastable<number>', () => {

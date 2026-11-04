@@ -73,6 +73,13 @@ function expectUnsettled(expr: Expression): void {
   expect(r.diagnostic?.code).toBe('unsettled-shape');
 }
 
+/** Expect the compilation of `expr` to decline because the body of one
+ * member of a declared union input declines. */
+function expectMemberDecline(expr: Expression): void {
+  const r = compile(expr, { to: 'javascript' });
+  expect(r.success).toBe(false);
+}
+
 /** The values of `c` and `v` for the list branch (`c` true) or for the
  * scalar branch. */
 const branch = (c: boolean) => ({ c, v: c ? [1, 2] : -1 });
@@ -110,24 +117,20 @@ describe('Tycho item 249 — Sum/Product over a scalar-or-collection union', () 
     expectUnsettled(expr);
     expect(interpret(expr, true)).toBe(3);
     expect(interpret(expr, false)).toBe(-1);
-    const { code, run } = js(ce.box(['Sum', 'v']));
-    expect(code).toContain('Array.isArray(_c) ? _c.reduce(');
-    expect(run(branch(true))).toBe(3);
-    expect(run(branch(false))).toBe(-1);
+    // The symbol `v`, declared with the union, has one body for each
+    // member. The body of the member `integer` declines (`Sum` of a number
+    // has no indexing set), so the compilation declines: one body for both
+    // members would test the shape of `v` inside the body.
+    expectMemberDecline(ce.box(['Sum', 'v']));
   });
 
   it('Product takes the same guarded reduce', () => {
     expectUnsettled(ce.box(['Product', w]));
-    const { run } = js(ce.box(['Product', 'v']));
-    expect(run(branch(true))).toBe(2);
-    expect(run(branch(false))).toBe(-1);
+    expectMemberDecline(ce.box(['Product', 'v']));
   });
 
-  it('a declared union symbol reduces the same way', () => {
-    const expr = ce.box(['Sum', 'u']);
-    const { run } = js(expr);
-    expect(run({ u: [1, 2] })).toBe(3);
-    expect(run({ u: -1 })).toBe(-1);
+  it('a declared union symbol declines the same way', () => {
+    expectMemberDecline(ce.box(['Sum', 'u']));
   });
 
   it('the witness: `.total` of a helper returning a list or a scalar', () => {

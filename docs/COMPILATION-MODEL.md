@@ -260,7 +260,10 @@ details.
 `y: real | tuple<real, real>` and `f := t ↦ 2t`, `f(y)` compiles to
 `(Array.isArray(_.y) ? _fn_f_tuple_real__real_(_.y) : _fn_f(_.y))`, and gives
 `6` for `y = 3` and `[2, 4]` for `y = [1, 2]`. The host pays one test for
-each run.
+each run. When the body of one member declines,
+the compilation declines with the reason of that body: with
+`U: real | list<real>`, `Sum(U)` declines, because `Sum` of a number has no
+indexing set, and no body for both members tests the shape of `U` inside it.
 
 **R5. The compiler assumes that every value holds its static type.** It
 emits no test of it, for the values of the program and for the values of the
@@ -469,8 +472,8 @@ body of a user function that the code calls. The `unsupported` list has the
 conditional as `toString()` writes it, and the diagnostic has the code
 `'unsettled-shape'` and the kind `'capability'`. The values that a function
 body or the root can give (the value of each `Return` that belongs to it,
-also through a `Loop`, and its last value), and the values of the `Break`
-statements of a `Loop`, are compared in the same way, and a `Return` of a
+also through a `Loop`, and its last value) are compared in the same way,
+and a `Return` of a
 nested function literal belongs to that literal: with `M: list<real>`,
 `At(Apply(a ↦ Block(If(Length(a) > 1, Return(First(a))), Reverse(a)), M), 1)`
 declines, because the body gives a number or a list. This simple version
@@ -492,6 +495,22 @@ value the code discards is not checked: a statement of a `Block` that is not
 its last one, the body of a `Loop`, and a branch of such a conditional. An
 `Assign` has the type of its value, and
 `Block(p ≔ (0, 0); n ≔ 0; If(x > 0, p ≔ (1, 2), n ≔ 3); n)` compiles.
+A branch of an element-wise selection (a condition that is a list) whose
+type is a point or a list of points also declines on JavaScript: with a host
+function `W` declared `(real) -> tuple<real, real> | list<tuple<real, real>>`
+and `F: list<boolean>`, `If(F, W(t), (0, 0))` declines with
+`'unsettled-shape'`. An input declared with this union compiles as such a
+branch, because the code tests the input where it is bound (R4). In the same
+way, a sum with a point or with a list of points (on JavaScript), and the
+absolute value (on every target), of a value whose type admits a point and
+another shape decline (the absolute value of `list<number> |
+tuple<number, number>` included): with `L: list<tuple<real, real>>`, `W(t) + L` and
+`Sum(L) + (1, 1)` decline (the type of `Sum(L)` is
+`integer | tuple<real, real>`, because the sum of an empty list is `0`).
+A component of a `PointList` that is a coordinate of such a value declines
+too: with `p` undeclared, `PointList(p.y, p.x)` infers `collection<any> |
+tuple` for `p` and declines; declared `tuple<real, real> |
+list<tuple<real, real>>`, `p` is tested where it is bound (R4).
 
 The compiled code gives each variable one representation, which its type
 selects. So, in one scope, the values that the code assigns to a name, and

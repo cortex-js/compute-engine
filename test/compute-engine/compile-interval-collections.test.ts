@@ -948,9 +948,10 @@ describe('Interval target — a coordinate accessor over a list of points', () =
       to: 'interval-js',
       fallback: false,
     });
-    expect(sum.success).toBe(true);
-    expectEncloses(bands(sum.run!({ U: [1, 2] })), 3);
-    expectEncloses(bands(sum.run!({ U: pt(5) })), 5);
+    // The body of the member `number` declines (`Sum` of a number has no
+    // indexing set), so the compilation declines: one body for both members
+    // would test the shape of `U` inside the body.
+    expect(sum.success).toBe(false);
   });
 
   test('a helper reading a coordinate of its parameter maps over a list', () => {
@@ -1073,17 +1074,20 @@ describe('Interval target — a coordinate accessor over a list of points', () =
     ce.declare('w', 'value');
     // The other operand is not provably a number, so the element-wise
     // lowering does not apply, and the kernel must not read a possible array.
-    declines(ce, ['Add', 'U', 'w'], /may be a collection at run time/);
+    // `U` is declared with a union: the body of its member `list<number>`
+    // declines, and the compilation declines with that reason.
+    declines(ce, ['Add', 'U', 'w'], /is a collection/);
     ce.declare('v', 'collection<any> | tuple');
     declines(ce, ['Add', ['PointY', 'v'], 'w'], /may be a collection at run time/);
     // A union with an indexed-collection arm that is not a list of numbers
-    // (`list<list<number>> | number`) is refused by the same gate.
+    // (`list<list<number>> | number`) declines: the body of its member
+    // `list<list<number>>` declines, and the compilation with it.
     ce.declare('N', 'list<list<number>> | number');
-    declines(ce, ['Add', 'N', 1], /may be a collection at run time/);
+    declines(ce, ['Add', 'N', 1], /is a collection/);
     // A relation over the union or accessor shapes fails closed too: a list
     // of verdicts is not a value of this target, and a scalar kernel would
     // answer one `'maybe'` for an array.
-    declines(ce, ['Less', 'U', 3], /may be a collection at run time/);
+    declines(ce, ['Less', 'U', 3], /is a collection/);
     declines(ce, ['Less', ['PointY', 'v'], 3], /may be a collection at run time/);
     // A helper whose parameters are lists is typed from its arguments (Tycho
     // item 323): `P` returns `number`, and the implicit plot of it is a

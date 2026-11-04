@@ -10,14 +10,17 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * the NORM. Neither static rewrite (`Abs(point)` → `Norm`, `Abs(point list)`
  * → `Norm`) applied, because the operand is not provably either.
  *
- * The shape is now decided at run time (`_SYS.absShape`): a number is
+ * Where a declared union of the parameter selects a variant of the function
+ * for each member, each variant has a static shape. Where it does not (one
+ * body for both members), the sum declines (rule R3 of "Shapes are settled
+ * at compile time", `docs/COMPILATION-MODEL.md`). Before, the shape was
+ * decided at run time (`_SYS.absShape`, which a `broadcastable` point still
+ * uses): a number is
  * `Math.abs`, an array of numbers a point (its norm), an array of arrays a
  * point list (one norm per point). A compiled array carries no
  * tuple-versus-list tag, so a flat numeric array is read as a point. That
- * reading is only sound when the operand cannot legitimately hold a flat
- * list of numbers: either its type has no such arm, or it is a point SUM,
- * for which the interpreter answers an `incompatible-type` error at every
- * element.
+ * run-time test, and its exception for a point SUM, are removed: a union
+ * of a point and another shape now declines in the `Abs` lowering.
  */
 
 const DECLARATIONS = [
@@ -70,12 +73,16 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
     ).toEqual([Math.SQRT2, 2]);
   });
 
-  test('a chain of point subtractions is one n-ary Add and still lifts', () => {
+  test('a chain of point subtractions declines', () => {
     // Canonicalization flattens `P − (4, 0) − (1, 2)` into ONE `Add` with
-    // THREE operands, two of them tuple-valued. The run-time point-list lift
-    // must admit more than one provable point beside the run-time-shaped
-    // operand, or the generic flat broadcast zips the point LIST against the
-    // points' components.
+    // THREE operands, two of them tuple-valued. The declared union of the
+    // parameter `P` has no variant of `g` for each member here: the
+    // ordinary definition, one body for both members, is compiled, and in
+    // it the sum may be a point or a list of points. Its absolute value is
+    // a norm or a list of norms, and only the value tells which, so the
+    // compilation declines (rule R3 of "Shapes are settled at compile
+    // time", `docs/COMPILATION-MODEL.md`), where the code tested the value
+    // at run time. The interpreter gives the values.
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     ce.declare('y', 'real');
@@ -97,36 +104,20 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
     ce.declare('Q', 'list<tuple<number, number>>');
 
     const overList = compile(ce.box(['g', 'Q']), { to: 'javascript' });
-    expect(overList.success).toBe(true);
-    const expected = ce
-      .box(['g', ['List', ['Tuple', 5, 1], ['Tuple', 4, 2]]])
-      .N()
-      .ops!.map((op) => op.re);
-    expect(expected).toEqual([1, 1]);
+    expect(overList.success).toBe(false);
+    expect(overList.diagnostic?.code).toBe('unsettled-shape');
     expect(
-      overList.run!({
-        Q: [
-          [5, 1],
-          [4, 2],
-        ],
-      })
-    ).toEqual(expected);
-
-    const atPoint = compile(ce.parse('g\\left(\\left(x,y\\right)\\right)'), {
-      to: 'javascript',
-    });
-    expect(atPoint.success).toBe(true);
-    expect(atPoint.run!({ x: 5, y: 1 })).toBeCloseTo(
-      ce.box(['g', ['Tuple', 5, 1]]).N().re,
-      12
-    );
+      ce
+        .box(['g', ['List', ['Tuple', 5, 1], ['Tuple', 4, 2]]])
+        .N()
+        .ops!.map((op) => op.re)
+    ).toEqual([1, 1]);
   });
 
   test('an empty point list answers the empty list', () => {
-    // A point of the declared arity is never an empty array at run time, so
-    // an empty array is an empty list of points: both the run-time lift and
-    // `_SYS.absShape` map over it and answer `[]`, as the provable
-    // point-list lowering (`Q.map((p) => _SYS.norm(p))`) already does.
+    // The call compiles a copy of `g` for the list member of the union, and
+    // its point-list `Norm` lowering (`Q.map((p) => _SYS.norm(p))`) maps
+    // over the empty array and gives `[]`.
     const ce = new ComputeEngine();
     declareG(ce, 'list<tuple<number, number>> | tuple<number, number>');
     ce.declare('Q', 'list<tuple<number, number>>');
@@ -135,12 +126,15 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
     expect(r.run!({ Q: [] })).toEqual([]);
   });
 
-  test('a declaration that admits a list coordinate keeps the shape dispatch', () => {
-    // The scalar rebuild of a written point is exact only where the
-    // declaration rejects a list coordinate. `tuple<list<number>,
-    // list<number>>` admits two of them at once — a shape a single-position
-    // probe missed — and `broadcastable` coordinates admit one each; both
-    // keep the run-time dispatch (ruled 2026-09-11).
+  test('a declaration that admits a list coordinate declines for inputs declared with a union', () => {
+    // `x` and `y` are declared with a union of shapes, so the compiler
+    // compiles one body for each combination of members. For `x, y:
+    // list<real>`, the copy of `k` typed by the argument `(x, y)` has a
+    // sub-expression of static type `error` (`P − (4, 0)` with list
+    // coordinates), so that body declines, and the compilation declines
+    // with it. One body for all the members would test the shapes of `x`
+    // and `y` inside the body (rules R2 and R4 of "Shapes are settled at
+    // compile time", `docs/COMPILATION-MODEL.md`).
     for (const type of [
       'tuple<number, number> | tuple<list<number>, list<number>>',
       'tuple<broadcastable<number>, broadcastable<number>>',
@@ -156,28 +150,7 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
       const r = compile(ce.parse('k\\left(\\left(x,y\\right)\\right)'), {
         to: 'javascript',
       });
-      expect(r.success).toBe(true);
-      // `x` and `y` are declared with a union of shapes, so the compiler
-      // tries one body for each combination of members. For `x, y:
-      // list<real>`, the copy of `k` typed by the argument `(x, y)` has a
-      // sub-expression of static type `error` (`P − (4, 0)` with list
-      // coordinates), so that body declines and the root is compiled with
-      // one body for all the members. That body has no copy of `k` for
-      // scalar coordinates (`_fn_k_tuple_number__number_…`).
-      expect(r.preamble).not.toContain('_fn_k_tuple_number__number_');
-      // Scalar coordinates: one norm, the value of the interpreter.
-      expect(r.run!({ x: 5, y: 1 })).toBeCloseTo(Math.SQRT2, 12);
-      expect(r.run!({ x: 1, y: 3 })).toBeCloseTo(
-        ce.box(['k', ['Tuple', 1, 3]]).N().re,
-        12
-      );
-      // List coordinates (`x = [1, 2]`, `y = [3, 4]`) are not checked: the
-      // interpreter gives an `incompatible-type` error for this value
-      // (point arithmetic needs numeric coordinates), and the static type
-      // `number` of `k((x, y))` does not show that error, so the value of
-      // the compiled code is not specified (the compilation contract in
-      // `docs/COMPILATION-MODEL.md`, "Fail closed"). The test asserts only
-      // that the compilation succeeds.
+      expect(r.success).toBe(false);
     }
   });
 
@@ -298,12 +271,15 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
     );
   });
 
-  test('a union that admits a flat numeric list keeps the element-wise lowering', () => {
+  test('a union that admits a flat numeric list declines', () => {
     // A compiled array carries no tuple-versus-list tag. For `P: list<number>
-    // | tuple<number, number>` a flat array of numbers is a legitimate LIST,
-    // which the interpreter reads element-wise, so a bare `|P|` must NOT
-    // dispatch on the run-time shape — reading `[3, −4]` as a point would
-    // answer the norm 5 where `evaluate()` answers `[3, 4]`.
+    // | tuple<number, number>` a flat array of numbers is a list, which the
+    // interpreter reads element-wise, or a point, whose absolute value is its
+    // norm. No run-time test tells the two apart, so the function has one
+    // body for both members, and `|P|` declines (rule R3 of "Shapes are
+    // settled at compile time", `docs/COMPILATION-MODEL.md`). The
+    // element-wise lowering gave `[3, 4]` for the point `(3, −4)`, where the
+    // interpreter gives `5`.
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     ce.declare('y', 'real');
@@ -313,21 +289,11 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
     ce.assign('h', ce.box(['Function', ['Abs', 'P'], 'P']));
     ce.declare('Q', 'list<number>');
     const bare = compile(ce.box(['h', 'Q']), { to: 'javascript' });
-    expect(bare.success).toBe(true);
-    expect(String(bare.preamble ?? '') + String(bare.code)).not.toContain(
-      'absShape'
-    );
-    expect(bare.run!({ Q: [3, -4] })).toEqual(
-      ce
-        .box(['Abs', ['List', 3, -4]])
-        .evaluate()
-        .ops!.map((op) => op.re)
-    );
+    expect(bare.success).toBe(false);
+    expect(bare.diagnostic?.code).toBe('unsettled-shape');
 
-    // The same declaration, but the operand is a point SUM: adding a point to
-    // a number is an `incompatible-type` error at every element, so a flat
-    // array of numbers is not a value this operand can take and the run-time
-    // shape dispatch is sound again.
+    // The same declaration, but a call whose argument is one point compiles
+    // a copy of the helper for that point, where `P − (4, 0)` is a point.
     ce.declare('k', {
       signature: '(list<number> | tuple<number, number>) -> number',
     });
@@ -343,15 +309,6 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
     expect(sum.preamble).toContain('_SYS.norm(');
     expect(sum.run!({ x: 5, y: 1 })).toBeCloseTo(Math.SQRT2, 12);
   });
-
-  // A nested array reaching `_SYS.absShape` is read as a point LIST, never as
-  // a matrix. There is no test through the union for a matrix argument
-  // because the interpreter has no answer to compare against: the
-  // point-list union refuses a matrix at the call gate
-  // (`g([[1, 2], [3, 4]])` is `incompatible-type`, measured), and for the
-  // `list<number> | tuple<number, number>` declaration, which does accept
-  // one, the point subtraction inside the body is an `incompatible-type`
-  // error at every element and `Abs` stays inert.
 
   test('a scalar-typed parameter keeps Math.abs', () => {
     const ce = new ComputeEngine();

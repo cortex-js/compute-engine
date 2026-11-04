@@ -121,21 +121,12 @@ import { assignmentLocalsOf } from '../assignment-locals.js';
  * not inside a folded symbol value or a user-function body. A bound
  * occurrence of the same name (the index `q` of `Sum(q, Limits(q, 1, n))`
  * beside a free `q`) is a different variable, with its own type.
- *
- * When `assignedInputs` is given, the walk records in it, for each free
- * symbol that an `Assign` writes, the `Assign` nodes that write it: the
- * target is the name, or a destructuring `Tuple` whose leaf is the name
- * (`_` is not a name). An `Assign` whose target the walk finds bound (a
- * local of a `Block`, an index, a parameter) writes that binding, and is
- * not recorded: in `Loop(x ≔ 2x, Element(x, 1..3))` the target is the
- * index `x`, not an input `x`.
  */
 export function analyzeReferences(
   expr: Expression,
   target: CompileTarget<Expression>,
   varsKeys?: ReadonlySet<string>,
-  occurrences?: Map<string, Expression>,
-  assignedInputs?: Map<string, Expression[]>
+  occurrences?: Map<string, Expression>
 ): { freeSymbols: string[]; unsupported: string[] } {
   const engine = expr.engine;
   const free = new Set<string>();
@@ -163,7 +154,7 @@ export function analyzeReferences(
     return names;
   };
   // The `Assign` whose target the walk visits now, when the target is a
-  // name or a `Tuple` of names (`assignedInputs`).
+  // name or a `Tuple` of names.
   let writing: Expression | undefined;
   const addFree = (e: Expression & { symbol: string }): void => {
     // The placeholder `_` of a destructuring target (`(a, _) ≔ v`) is not
@@ -171,11 +162,6 @@ export function analyzeReferences(
     // read an input `_`.
     if (writing !== undefined && e.symbol === '_') return;
     free.add(e.symbol);
-    if (writing !== undefined && assignedInputs !== undefined) {
-      const list = assignedInputs.get(e.symbol);
-      if (list === undefined) assignedInputs.set(e.symbol, [writing]);
-      else if (!list.includes(writing)) list.push(writing);
-    }
     if (occurrences === undefined || indirectDepth !== 0) return;
     const recorded = occurrences.get(e.symbol);
     if (

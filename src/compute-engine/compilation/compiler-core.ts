@@ -86,7 +86,11 @@ import { ABS_ARG_REFUSAL, containsDerivativeHead } from './angular-unit.js';
 import { sumVariantInfo, taggedSumInType } from '../sum-representation.js';
 import type { ShapeNode } from '../boxed-expression/match-dispatch.js';
 import type { CompileTarget, InvariantPrefix, TargetSource } from './types.js';
-import { CompileDeclineError, UNION_DISPATCH_CODE } from './diagnostics.js';
+import {
+  CompileDeclineError,
+  UNION_DISPATCH_CODE,
+  unsettledShapeDecline,
+} from './diagnostics.js';
 import { bigintLaneAnalysisFor } from './compile-bigint-lane.js';
 import { emitBigintLane } from './compile-bigint-emit.js';
 import { isColorValued } from './color-space-fact.js';
@@ -98,12 +102,10 @@ import {
   isBoundPossiblyCollectionTyped,
   isGatedPoint,
   isGatedPointList,
-  isPointSumOperand,
   isRuntimePointShaped,
   literalDoubleRoundings,
   literalHasNoDoubleValue,
   typeHasPointArm,
-  unionAdmitsFlatNumericList,
 } from './compiler-type-facts.js';
 import { CompilerState } from './compiler-state.js';
 import { isEngineCompileHandler } from './engine-compile-handlers.js';
@@ -527,8 +529,7 @@ const MAX_UNION_DISPATCH_BODIES = 4;
  *
  * A member whose body is an error for every value of the member is left
  * out (`isErrorForEveryValue()`). When the body of another member declines,
- * the root is compiled with one body for all the members, as it was before
- * this dispatch existed: `undefined` is returned.
+ * the compilation declines with the reason of that body.
  *
  * `emit` compiles the root of one member. By default it is `compile()`. A
  * target that spells some roots itself (the interval target spells a
@@ -623,33 +624,28 @@ export function compileDeclaredUnionDispatch(
   // When every member is an error, the ordinary compilation declines.
   const root = tree(0, {});
   if (root === undefined) return undefined;
-  try {
-    return emitDispatch(root, target, (members) =>
-      withMembers(members, (body) => {
-        // The earlier state is restored, not cleared, when the body ends.
-        const wasMember = _compilingUnionMember.has(target);
-        _compilingUnionMember.add(target);
-        try {
-          // The body is a new tree, so the CSE analysis of the root does
-          // not hold its nodes: the body shares its repeated nodes under a
-          // CSE analysis of its own. Without it, a value built from shared
-          // subtrees (30 levels of `Beta(t, t)`) was emitted once per path.
-          return withNestedCseHarvest(body, target, [], () => emit(body));
-        } finally {
-          if (!wasMember) _compilingUnionMember.delete(target);
-        }
-      })
-    );
-  } catch (e) {
-    // A body that declines for its own reason (`Sum(U)` with `U: number`
-    // has no indexing set on javascript) sends the root to the ordinary
-    // compilation, with one body for all the members, as before this
-    // dispatch existed. A cancellation of the caller is thrown again. The
-    // test is on the name, not `instanceof`: an error of another bundle of
-    // the engine is not an instance of this bundle's class.
-    if (e instanceof Error && e.name === 'CancellationError') throw e;
-    return undefined;
-  }
+  // A body that declines for its own reason (`Sum(U)` with `U: real` has
+  // no indexing set on javascript) declines the whole compilation, with
+  // that reason. One body for all the members would have to test the
+  // shape of the input inside the body, and compiled code tests a shape
+  // only where the input is bound (rules R2 and R4 of "Shapes are settled
+  // at compile time", `docs/COMPILATION-MODEL.md`).
+  return emitDispatch(root, target, (members) =>
+    withMembers(members, (body) => {
+      // The earlier state is restored, not cleared, when the body ends.
+      const wasMember = _compilingUnionMember.has(target);
+      _compilingUnionMember.add(target);
+      try {
+        // The body is a new tree, so the CSE analysis of the root does
+        // not hold its nodes: the body shares its repeated nodes under a
+        // CSE analysis of its own. Without it, a value built from shared
+        // subtrees (30 levels of `Beta(t, t)`) was emitted once per path.
+        return withNestedCseHarvest(body, target, [], () => emit(body));
+      } finally {
+        if (!wasMember) _compilingUnionMember.delete(target);
+      }
+    })
+  );
 }
 
 /**
@@ -3566,39 +3562,23 @@ export function compileExpr(
     return core.compileExpr(engine, 'Norm', args, prec, target);
   }
 
-  // `|P|` over an operand whose static type admits both a point and a
-  // point list — the `list<tuple<…>> | tuple<…>` union a point-consuming
-  // document function declares for its parameter: neither rewrite above
-  // applies (the operand is not provably a point nor provably a point
-  // list), and the broadcast lowering below would map `Math.abs` over the
-  // components of whatever array arrives, so `|P − (4, 0)|` at a point
-  // answered `[|dx|, |dy|]` where `evaluate()` answers the norm (Tycho
-  // item 253). The shape is decided at run time instead
-  // (`_SYS.absShape`), the way the interpreter dispatches on the operand's
-  // kind. JavaScript only: the shader targets have no run-time shape.
-  //
-  // A compiled array carries no tuple-versus-list tag, so this dispatch is
-  // only sound when a flat array of numbers can ONLY be a point. That
-  // holds when the type admits no flat numeric list at all
-  // (`unionAdmitsFlatNumericList`), and it holds again when the operand is
-  // a point SUM: a provable point is added to it, and the interpreter
-  // answers an `incompatible-type` error at every element for
-  // `number − point`, so a flat list of numbers is not a value this
-  // operand can legitimately take. A top-typed operand is excluded by
-  // `isRuntimePointShaped`, so a NESTED array reaching `_SYS.absShape` can
-  // only be a point list: a MATRIX has no legitimate value here either —
-  // the point-list union refuses one at the call gate
-  // (`incompatible-type`, measured), and where the declaration does accept
-  // it the point subtraction errors at every element.
-  if (
-    h === 'Abs' &&
-    args.length === 1 &&
-    target.language === 'javascript' &&
-    isRuntimePointShaped(args[0]) &&
-    (!unionAdmitsFlatNumericList(args[0]) || isPointSumOperand(args[0]))
-  ) {
-    return `_SYS.absShape(${core.compile(args[0], target)})`;
-  }
+  // `|P|` over an operand whose static type admits a point and another
+  // shape (the union `list<tuple<…>> | tuple<…>`, or `integer |
+  // tuple<real, real>`) is the norm of a point or a list of norms, and only
+  // the value tells which: it declines (rule R3 of "Shapes are settled at
+  // compile time", `docs/COMPILATION-MODEL.md`). An input declared with the
+  // union is tested where it is bound (`compileDeclaredUnionDispatch()`),
+  // and in each body it has the type of one member. A type that also admits
+  // a flat list of numbers (`list<number> | tuple<number, number>`) declines
+  // too: the element-wise lowering below gave `[|x|, |y|]` for a point,
+  // where the interpreter gives its norm. The decline holds on every target.
+  if (h === 'Abs' && args.length === 1 && isRuntimePointShaped(args[0]))
+    throw unsettledShapeDecline(
+      args[0],
+      `its absolute value is the norm of a point or a list of norms, and ` +
+        `its type \`${typeToString(args[0].type.type)}\` admits a point ` +
+        `and another shape`
+    );
 
   // An integer power of a square matrix is the matrix power, not the
   // element-wise power. Canonicalization writes `A^n` as `MatrixPower(A,

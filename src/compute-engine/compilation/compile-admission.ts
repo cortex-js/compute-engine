@@ -77,8 +77,7 @@ export function untypedInputs(
 
 /**
  * The reference analysis of `expr` for `target` (`analyzeReferences()`):
- * the free symbols, their occurrences, and the `Assign` nodes that write
- * each free symbol (`assignedInputs`).
+ * the free symbols and their occurrences.
  *
  * If the analysis throws, the compilation declines with the code
  * `'untyped-input'` and no `value`: the types of the inputs are not known,
@@ -90,19 +89,16 @@ function inputsOf(
 ): {
   freeSymbols: string[];
   occurrences: Map<string, Expression>;
-  assignedInputs: Map<string, Expression[]>;
 } {
   try {
     const occurrences = new Map<string, Expression>();
-    const assignedInputs = new Map<string, Expression[]>();
     const { freeSymbols } = analyzeReferences(
       expr,
       target,
       target.varsKeys,
-      occurrences,
-      assignedInputs
+      occurrences
     );
-    return { freeSymbols, occurrences, assignedInputs };
+    return { freeSymbols, occurrences };
   } catch (e) {
     throwIfCallerCancellation(e, expr.engine._deadlineFrame);
     if (isCompileDeclineError(e)) throw e;
@@ -137,9 +133,9 @@ function inputsOf(
  * binds (`target.boundVars`, `isCompileBoundName()`) is not an input either.
  * A name that the compiled code assigns and that no enclosing scope of the
  * expression binds is an input when nothing declares it: with `u`
- * undeclared, `u ≔ u + 1` reads `u` before it writes it. The values that
- * the code assigns to an input are compared with the type of the input by
- * another check (`assignedInputConflict()`).
+ * undeclared, `u ≔ u + 1` reads `u` before it writes it. A write to an
+ * input declines while the code is generated (`assignLValue()`), so no
+ * compiled code writes an input.
  *
  * The type of each input is the type that `CompilationResult.freeSymbolTypes`
  * reports for it (`freeSymbolOccurrence()`). A transparent alias of
@@ -323,16 +319,14 @@ function isUntypedType(t: Readonly<Type>): boolean {
  * The names of the symbols and of the operators that the walk of the
  * admission checks (`compiledNodeWhere()`) finds in `expr`, bound or free:
  * `kept` in the code that the target keeps, `dropped` in the branches that
- * it drops (`droppedOperandsOf()`). `assignments` holds the `Assign` nodes
- * of the code that is kept.
+ * it drops (`droppedOperandsOf()`).
  */
 function namesReadIn(
   expr: Expression,
   target: CompileTarget<Expression>
-): { kept: Set<string>; dropped: Set<string>; assignments: Set<Expression> } {
+): { kept: Set<string>; dropped: Set<string> } {
   const kept = new Set<string>();
   const dropped = new Set<string>();
-  const assignments = new Set<Expression>();
   compiledNodeWhere(
     expr,
     target,
@@ -343,79 +337,11 @@ function namesReadIn(
           ? node.operator
           : undefined;
       if (name !== undefined) (isKept ? kept : dropped).add(name);
-      if (isKept && isFunction(node, 'Assign')) assignments.add(node);
       return false;
     },
     (node) => droppedOperandsOf(node, target)
   );
-  return { kept, dropped, assignments };
-}
-
-/**
- * The first `Assign` of the code that is kept whose value has a shape that
- * conflicts with the type of the input it writes (the shape classes of
- * `assignedTypesConflict()`: a number, a complex number, a string, a list,
- * a point, a matrix), or
- * `undefined` when there is none. `analysis` is the reference analysis of
- * `expr` (`inputsOf()`), which lists, for each input, the `Assign` nodes
- * that write the input and not a local of the same name.
- *
- * The compiled code reads an input in the shape of its type, the declared
- * type or the type that inference gives. Inference reads the type from a
- * read of the name, not from the values that the code assigns to it: with
- * `x: real` and `p` undeclared, in
- * `Block(If(x > 0, p ≔ [1, 2], p ≔ [3, 4]), 2p)` the read `2p` gives `p`
- * the type `number`, and the compiled code read the list as a number
- * (`null` where the interpreter gives `[2, 4]`). With `p` declared `real`,
- * the value `[1, 2]` is not a value of the type of `p`. Both decline. A
- * value whose type settles no shape, and an input whose type settles none
- * (a union of shapes, a string), are not compared. An input declared
- * `string` is not compared: the interpreter refuses a value of another
- * type for it (with `s: string`, `s ≔ 3` gives an `incompatible-type`
- * error), so the case is outside the contract of the compiled code.
- */
-function assignedInputConflict(
-  expr: Expression,
-  target: CompileTarget<Expression>,
-  analysis: ReturnType<typeof inputsOf>
-): Expression | undefined {
-  const ce = expr.engine;
-  const arity = isShaderTarget(target);
-  let kept: Set<Expression> | undefined;
-  for (const [name, assigns] of analysis.assignedInputs) {
-    if (target.boundVars?.has(name) || isCompileBoundName(name)) continue;
-    const symbol =
-      freeSymbolOccurrence(name, analysis.occurrences) ?? ce.symbol(name);
-    const declared = symbol.type.type;
-    if (shapeOfType(declared) === undefined) continue;
-    // The compiled code reads an input of type `number` as a real number
-    // (its lowered type is `number`), so a complex value assigned to it is a
-    // value of another representation: with `q: number`,
-    // `Block(If(x > 0, q ≔ 2i), q + 1)` gave `"[object Object]1"`. In the
-    // `complex` compile mode such an input is lifted to a complex number.
-    const r = resolveTypeForCompilation(declared);
-    const inputType: Readonly<Type> =
-      isSubtype(r, 'number') && !isSubtype(r, 'complex') && !complexMode(target)
-        ? 'real'
-        : declared;
-    for (const assign of assigns) {
-      const assigned = assignedTypesOf(assign).get(name);
-      if (assigned === undefined) continue;
-      // An input declared real keeps a plain number in the `complex` mode
-      // too: only a wider type is lifted.
-      if (
-        !assignedTypesConflict(
-          [inputType, assigned],
-          arity,
-          complexMode(target) && !isSubtype(r, 'real')
-        )
-      )
-        continue;
-      kept ??= namesReadIn(expr, target).assignments;
-      if (kept.has(assign)) return assign;
-    }
-  }
-  return undefined;
+  return { kept, dropped };
 }
 
 /**
@@ -722,10 +648,12 @@ function hasConflictingBranches(node: Expression, arity: boolean): boolean {
  * The values that `e` can give when its evaluation ends at its end, and not
  * at a `Return`: the last value of a `Block`, each branch that the code for
  * the target keeps of a conditional with a scalar condition
- * (`conditionalBranches()`), and each value that a `Break` of a `Loop`
- * gives (`breakValuesOf()`). A `Return`, a `Break` and a `Continue` give no
- * value here: they leave `e`. A `Loop` that ends with no `Break` gives
- * `Nothing`, which is not compared. For another node, the value is `e`.
+ * (`conditionalBranches()`). A `Return`, a `Break` and a `Continue` give
+ * no value here: they leave `e`. A `Loop` is one value, whose static type
+ * settles no shape, so it is not compared: a `Loop` whose value is used
+ * and that has a `Break` declines (`isUnrepresentableLoopValue()`), and
+ * the compiled `Break` of a loop whose value is not used carries no value.
+ * For another node, the value is `e`.
  *
  * The cases of a `Match` are held raw, and the type of a raw expression is
  * not known. When `matchCases` is given, a `Match` gives the values of its
@@ -769,10 +697,6 @@ function endValuesOf(
       if (e.nops > 0) visit(e.ops[e.nops - 1], depth + 1, inner);
       return;
     }
-    if (h === 'Loop') {
-      for (const v of breakValuesOf(e, target)) visit(v, depth + 1, inner);
-      return;
-    }
     const branches = conditionalBranches(e, shader, true);
     if (branches === undefined) values.add(e);
     else for (const b of branches) visit(b, depth + 1, inner);
@@ -782,18 +706,15 @@ function endValuesOf(
 }
 
 /**
- * The operands of the control statements `heads` in `body`, in the code
- * that the target keeps: an operand that the target drops
- * (`droppedOperandsOf()`) is not read, and neither is a nested function
- * literal (its `Return` statements belong to it) or a `Hold`. When
- * `inLoops` is false, the walk does not go into a nested `Loop` either.
- * A statement with no operand gives no value, and is not listed.
+ * The operands of the `Return` statements in `body`, in the code that the
+ * target keeps: an operand that the target drops (`droppedOperandsOf()`)
+ * is not read, and neither is a nested function literal (its `Return`
+ * statements belong to it) or a `Hold`. A `Return` with no operand gives
+ * no value, and is not listed.
  */
-function controlValuesIn(
+function returnValuesIn(
   body: Expression,
-  target: CompileTarget<Expression>,
-  head: 'Return' | 'Break',
-  inLoops: boolean
+  target: CompileTarget<Expression>
 ): Expression[] {
   const values: Expression[] = [];
   const seen = new Set<Expression>();
@@ -808,11 +729,10 @@ function controlValuesIn(
     }
     const h = e.operator;
     if (h === 'Function' || h === 'Hold') return;
-    if (h === head) {
+    if (h === 'Return') {
       if (e.nops > 0) values.push(e.ops[0]);
       return;
     }
-    if (h === 'Loop' && !inLoops) return;
     const dropped = droppedOperandsOf(e, target);
     if (dropped === undefined) codeOperandsOf(e).forEach(visit);
     else
@@ -822,19 +742,6 @@ function controlValuesIn(
   };
   visit(body);
   return values;
-}
-
-/**
- * The values that the `Break` statements of the `Loop` `loop` give: each
- * becomes the value of the loop. A `Break` of a nested loop belongs to
- * that loop, and a `Break` in a nested function literal to that literal.
- */
-function breakValuesOf(
-  loop: Expression,
-  target: CompileTarget<Expression>
-): Expression[] {
-  if (!isFunction(loop, 'Loop') || loop.nops === 0) return [];
-  return controlValuesIn(loop.ops[0], target, 'Break', false);
 }
 
 /**
@@ -855,7 +762,7 @@ function unitValuesOf(
 ): Expression[] {
   return [
     ...new Set([
-      ...controlValuesIn(body, target, 'Return', true).flatMap((v) =>
+      ...returnValuesIn(body, target).flatMap((v) =>
         endValuesOf(v, target)
       ),
       ...endValuesOf(body, target),
@@ -935,10 +842,9 @@ function hasNoSettledShape(
 }
 
 /**
- * True when `node` is a function literal or a `Loop` whose values have
- * conflicting shapes (`haveConflictingShapes()`): the values of the body of
- * the literal (`unitValuesOf()`), or the values that the `Break`
- * statements of the loop give (`breakValuesOf()`). With `M: list<real>`,
+ * True when `node` is a function literal whose values have conflicting
+ * shapes (`haveConflictingShapes()`): the values of the body of the
+ * literal (`unitValuesOf()`). With `M: list<real>`,
  * the body of `(a: list<real>) ↦ Block(If(Length(a) > 1, Return(First(a))),
  * Reverse(a))` gives a number or a list.
  */
@@ -949,15 +855,6 @@ function hasConflictingValues(
 ): boolean {
   if (isFunction(node, 'Function') && node.nops > 0)
     return haveConflictingShapes(unitValuesOf(node.ops[0], target), arity);
-  if (isFunction(node, 'Loop'))
-    return haveConflictingShapes(
-      [
-        ...new Set(
-          breakValuesOf(node, target).flatMap((v) => endValuesOf(v, target))
-        ),
-      ],
-      arity
-    );
   return false;
 }
 
@@ -2039,8 +1936,8 @@ function isUnrepresentableLoopValue(
 /**
  * The innermost value of `root` that has no settled shape, or `undefined`
  * when there is none: a conditional whose branches have conflicting shapes
- * (`hasConflictingBranches()`), or a function literal, a `Loop` or the root
- * whose values have conflicting shapes (`hasConflictingValues()`,
+ * (`hasConflictingBranches()`), or a function literal or the root whose
+ * values have conflicting shapes (`hasConflictingValues()`,
  * `unitValuesOf()`). `assertAdmitted()` declines for it.
  *
  * The compiled code gives each value one shape, which the static type
@@ -2052,8 +1949,8 @@ function isUnrepresentableLoopValue(
  * decline where the interpreter has a value, and the compiled code never
  * gives a different value.
  *
- * On the targets that are not shaders, a conditional, a function literal or
- * a `Loop` whose value the code discards is not checked
+ * On the targets that are not shaders, a conditional or a function literal
+ * whose value the code discards is not checked
  * (`operandUse()`): a statement of a `Block` that is not its last one, the
  * body of a `Loop`, and a branch of such a conditional. With `x: real`,
  * `Block(If(x > 0, p ≔ (1, 2), n ≔ 3), x)` compiles: an `Assign` has the
@@ -2275,8 +2172,8 @@ export function unsettledShapeIn(
   // checks nothing in its cases. Here the bodies are compared in the
   // canonical form that the compiled code evaluates (`matchCasePartsOf()`),
   // made in the local scope around the `Match`, and each guard and each
-  // body is checked for a conditional, a function literal or a `Loop` with
-  // values of different shapes (with no exception for a value that the
+  // body is checked for a conditional or a function literal with values of
+  // different shapes (with no exception for a value that the
   // code discards), and for a nested `Match` in the same way: with
   // `x: real`, `Match(x, MatchCase(1, [1, 2]), MatchCase(_, 3))` declines.
   // This check does not follow the calls of user functions: the walk above
@@ -2496,9 +2393,6 @@ export function unsettledShapeIn(
  * - an input with no type (`untypedInputs()`) declines next. The
  *   diagnostic has the code `'untyped-input'` and the kind
  *   `'correctness'`; its `value` is the names, separated by commas.
- * - an `Assign` whose value has a shape that conflicts with the type of the
- *   input it writes (`assignedInputConflict()`) declines last, with the
- *   code `'unsettled-shape'`; its `value` is the `Assign`.
  *
  * These checks run after the code was generated so that a more specific
  * reason to decline stays the reason that the result reports: a lowering
@@ -2536,9 +2430,6 @@ export function assertAdmitted(
     analysis.occurrences
   );
   if (names.length > 0) throwUntypedInputs(names);
-  const conflict = assignedInputConflict(root, target, analysis);
-  if (conflict !== undefined)
-    throwUnsettledShape({ node: conflict, reason: 'assignments' });
 }
 
 /**

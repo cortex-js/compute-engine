@@ -273,14 +273,18 @@ describe('COMPILE: an extremum or a sum over a scalar-or-collection union that a
     );
   });
 
-  it('S: number | list<number>, `Sum(S)` compiles and refuses a string at entry', () => {
+  it('S: number | list<number>, `Max(S)` compiles and refuses a string at entry', () => {
     // No member of this type admits a string, and the interpreter refuses
     // one. Before, the entry accepted it, because not every member is a
-    // collection, and compiled `Sum(S)` returned the string.
-    const r = compiled('number | list<number>', ['Sum', 'S']);
+    // collection, and compiled `Sum(S)` returned the string. (`Sum(S)` now
+    // declines: its body for the member `number` has no indexing set.)
+    expect(compiled('number | list<number>', ['Sum', 'S']).success).toBe(
+      false
+    );
+    const r = compiled('number | list<number>', ['Max', 'S']);
     expect(r.success).toBe(true);
     expect(r.run!({ S: 5 } as any)).toBe(5);
-    expect(r.run!({ S: [1, 2, 3] } as any)).toBe(6);
+    expect(r.run!({ S: [1, 2, 3] } as any)).toBe(3);
     expect(() => r.run!({ S: EMOJI_A } as any)).toThrow(TypeError);
     expect(() => r.run!({ S: EMOJI_A } as any)).toThrow(
       refusal('"S"', 'list<number> | number')

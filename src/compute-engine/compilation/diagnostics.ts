@@ -12,17 +12,19 @@ export const UNTYPED_INPUT_CODE = 'untyped-input';
 /**
  * The `code` of the decline of a value with no settled shape
  * (`assertAdmitted()`, `compile-admission.ts`): an `If`, a `Which` or a
- * `Match` whose branches have different shapes, or a function literal, a
- * `Loop` or the root of the compilation whose values (the value of each
- * `Return` or `Break`, and the last value) have different shapes, or a name
- * that gets values of different shape classes in one scope. The same code
- * is used for an effect that the compiled code does not reproduce as the
- * interpreter does: an assignment in a callback, in a `Comprehension` or an
- * `Integrate`, in a branch of an element-wise conditional, an assignment
- * of an enclosing loop index in a function literal, and a `Return` inside
- * a `Loop` (`UnsettledShape.reason`, `compiler-types.ts`, lists them). The
- * interpreter fallback puts the node, as `toString()` writes it, in
- * `unsupported`.
+ * `Match` whose branches have different shapes, or a function literal or
+ * the root of the compilation whose values (the value of each `Return`, and
+ * the last value) have different shapes, or a name that gets values of
+ * different shape classes in one scope. A lowering uses the same code,
+ * through `unsettledShapeDecline()`, for an operand whose type admits more
+ * than one shape, which the code would have to tell apart at run time. The
+ * same code is used for an effect that the compiled code does not reproduce
+ * as the interpreter does: an assignment in a callback, in a
+ * `Comprehension` or an `Integrate`, in a branch of an element-wise
+ * conditional, an assignment of an enclosing loop index in a function
+ * literal, and a `Return` inside a `Loop` (`UnsettledShape.reason`,
+ * `compiler-types.ts`, lists them). The interpreter fallback puts the node,
+ * as `toString()` writes it, in `unsupported`.
  */
 export const UNSETTLED_SHAPE_CODE = 'unsettled-shape';
 
@@ -56,6 +58,31 @@ export class CompileDeclineError extends Error {
     this.name = 'CompileDeclineError';
     this.diagnostic = diagnostic;
   }
+}
+
+/**
+ * The decline of a lowering for an operand `node` whose static type admits
+ * several shapes, which the code would have to tell apart at run time
+ * (rule R3 of "Shapes are settled at compile time",
+ * `docs/COMPILATION-MODEL.md`). The diagnostic has the code
+ * `'unsettled-shape'` and the kind `'capability'`; its `value` is `node`,
+ * as `toString()` writes it. `why` completes the message: what the
+ * operand is and why its shape is not settled.
+ */
+export function unsettledShapeDecline(
+  node: Expression,
+  why: string
+): CompileDeclineError {
+  const value = node.toString();
+  return new CompileDeclineError({
+    code: UNSETTLED_SHAPE_CODE,
+    kind: 'capability',
+    message:
+      `Could not compile "${value}": ${why}, so the shape of its value is ` +
+      `known only at run time. Declare one shape for it, or compile one ` +
+      `function for each shape.`,
+    value,
+  });
 }
 
 /**

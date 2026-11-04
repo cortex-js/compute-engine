@@ -45,10 +45,10 @@ import {
   isRuntimePointShaped,
   pointHasBroadcastComponent,
   presentCompilationType,
-  runtimePointShapeIsUnambiguous,
   typeMayHoldTuple,
   unfaithfulComparisonAggregate,
 } from './compiler-type-facts.js';
+import { unsettledShapeDecline } from './diagnostics.js';
 import {
   _broadcastRadicalVerdict,
   isArrayOperand as isArrayOperand__,
@@ -625,10 +625,7 @@ export function tryCompileBroadcast(
   // Set with `atomicTuple` when the OTHER operand is a list of POINTS (the
   // `Add` point-list shape below): the outer level must then map exactly
   // one level deep, where `_SYS.bcast` would descend into each point.
-  let atomicTupleOverPoints: false | 'static' | 'runtime' | 'runtime-list' =
-    false;
-  // The operand whose shape the `'runtime'` lift tests when emitting.
-  let runtimePointOperand: Expression | undefined;
+  let atomicTupleOverPoints = false;
 
   // A GATED POINT (`isGatedPoint`: a restricted point such as
   // `If(c, (0, 1))`, a point or the absent value at run time) broadcasts
@@ -641,9 +638,11 @@ export function tryCompileBroadcast(
   // two points have no product (`no-product-between-points`), a number
   // cannot be divided by a point (`no-division-by-point`), and a point
   // beside a list is a list of points in the interpreter, which a flat
-  // broadcast would zip instead. A SUM keeps the point plans below: they
-  // read a gated point beside another point as a point-or-list decided at
-  // run time (`isRuntimePointShaped`), which is correct for it. But every
+  // broadcast would zip instead. A SUM goes on to the point plans below:
+  // they decline an operand whose type admits a point and another shape
+  // (`isRuntimePointShaped`, rule R3 of "Shapes are settled at compile
+  // time" in `docs/COMPILATION-MODEL.md`), and they keep their static
+  // lowering for a provable point or list of points. But every
   // other term of the sum must then be a point or a list of points: a
   // point does not add to a number (`incompatible-type`), and `t + P` for
   // an undeclared `t` is not rejected at canonicalization.
@@ -1045,26 +1044,20 @@ export function tryCompileBroadcast(
   if (h === 'Divide' && args.length === 2 && isPointListShaped(args[1]))
     return null;
 
-  // A point ADDED to an operand whose shape is only known at run time — a
-  // parameter declared with the point-or-point-list union — is the `Add`
-  // point-list shape below when the operand turns out to be a list of
-  // points (the point is added to EVERY element) and a plain point sum
-  // when it is a point. Neither is provable here, and
-  // the flat `_SYS.bcast` zipped a list of points against the point's
-  // components (`[(5,1),(4,2)] − (4,0)` gave `[(1,−3),(4,2)]`). The outer
-  // level is therefore decided at run time (see the emission at the end
-  // of this method): an array of arrays maps, anything else zips. Every
-  // OTHER operand must be tuple-valued — one or more of them, since
-  // canonicalization flattens a chain of point subtractions into ONE
-  // n-ary `Add` (`P − (4, 0) − 2(H(i+.2), H(i+.4))` is a three-operand
-  // sum) — so that the closure applied per element is the point sum in
-  // both cases (Tycho item 253).
-  // The point is read by the COULD-form (`couldBeNumericTuple`): a point
-  // whose component types are only possibly numeric (`PointList(t, 1)`
-  // with `t` free, typed `tuple<unknown, integer>`) is a point too. Read
-  // by the strict `isNumericTuple`, `W + PointList(t, 1)` escaped this lift
-  // and was zipped flat: `W = [(1, 1), (2, 2)]` ran to `[[3, 3], [3, 3]]`
-  // where the interpreter answers `[(3, 2), (4, 3)]` at `t = 2`.
+  // A point ADDED to an operand whose type admits a point and another shape
+  // (`isRuntimePointShaped`: `list<tuple<…>> | tuple<…>`, or
+  // `integer | tuple<real, real>`, the type of the sum of a list of points)
+  // is a point sum when the operand is a point, and the `Add` point-list
+  // shape below when it is a list of points (the point is added to EVERY
+  // element). Only the value tells which, so the form declines (rule R3 of
+  // "Shapes are settled at compile time", `docs/COMPILATION-MODEL.md`).
+  // The flat `_SYS.bcast` would zip a list of points against the point's
+  // components (`[(5,1),(4,2)] − (4,0)` gave `[(1,−3),(4,2)]`). Every other
+  // operand is a point here: canonicalization flattens a chain of point
+  // subtractions into ONE n-ary `Add` (Tycho item 253). The point is read
+  // by the COULD-form (`couldBeNumericTuple`): a point whose component
+  // types are only possibly numeric (`PointList(t, 1)` with `t` free,
+  // typed `tuple<unknown, integer>`) is a point too.
   if (h === 'Add' && atomicTuple === undefined) {
     const provable = args.filter(
       (a) => !isRuntimePointShaped(a) && couldBeNumericTuple(a)
@@ -1076,18 +1069,16 @@ export function tryCompileBroadcast(
       provable.length >= 1 &&
       runtime.length === 1 &&
       args.every((a) => a === runtime[0] || couldBeNumericTuple(a))
-    ) {
-      atomicTuple = provable[0];
-      atomicTupleOverPoints = 'runtime';
-      runtimePointOperand = runtime[0];
-    }
+    )
+      throw unsettledShapeDecline(
+        runtime[0],
+        `it is added to a point, and its type ` +
+          `\`${typeToString(runtime[0].type.type)}\` admits a point and ` +
+          `another shape`
+      );
   }
 
-  // The run-time lift above has already chosen the emission for this node.
-  // The static point-list plan below can `return null` (it declines every
-  // shape it does not prove), which would throw that plan away and fail
-  // the form closed, so it must not run once the run-time plan is set.
-  if (atomicTupleOverPoints !== 'runtime' && (h === 'Add' || h === 'Divide')) {
+  if (h === 'Add' || h === 'Divide') {
     const tuples = args.filter((a) => couldBeNumericTuple(a));
     const lists = args.filter(
       (a) => !couldBeNumericTuple(a) && isArrayOperand(a)
@@ -1151,39 +1142,23 @@ export function tryCompileBroadcast(
         !isProvablyPointList(lists[0])
       )
         return null;
-      atomicTuple = tuples[0];
       // An operand that may be a point OR a list of points at run time
-      // (`isRuntimePointShaped`: the union a document helper declares for
-      // its result) beside a list of points is decided by its shape at run
-      // time (the `'runtime-list'` emission below): a list of points is
-      // zipped against the list, a point is added to every point of the
-      // list. Kept atomic in the static plan it was added whole to every
-      // point, which answered NaN at every element when the value was a
-      // list of four points (the audit document `njncrg9fkv`, `W(…) +
-      // PointList(…)` with `W` declared to return a point or a list of
-      // points).
-      if (isRuntimePointShaped(tuples[0])) {
-        // The run-time test reads the value's SHAPE: an array of arrays is
-        // a list of points, a flat array a point. A union whose arms can
-        // give both shapes to one kind of value — a point with a LIST
-        // coordinate, or a collection arm that admits plain numbers, so
-        // that a flat array of numbers looks like a point — cannot be
-        // decided that way and fails closed, naming the declaration.
-        if (!runtimePointShapeIsUnambiguous(tuples[0]))
-          throw new Error(
-            `Could not compile \`Add\`: the operand of type ` +
-              `\`${typeToString(tuples[0].type.type)}\` may be a point ` +
-              `or a list of points at run time, and its declaration also ` +
-              `admits a value whose run-time shape is the same as a ` +
-              `point's (a point with a collection coordinate, or a list ` +
-              `of numbers), so the sum with a list of points cannot be ` +
-              `decided by the value's shape. Declare the operand as a ` +
-              `point, or as a list of points (\`list<tuple<…>> | ` +
-              `tuple<…>\`).`
-          );
-        runtimePointOperand = tuples[0];
-        atomicTupleOverPoints = 'runtime-list';
-      } else atomicTupleOverPoints = 'static';
+      // (`isRuntimePointShaped`: a value whose declared type is the union of
+      // a point and a list of points) beside a list of points has no settled
+      // shape: a list of points is zipped against the list, a point is added
+      // to every point of the list, and only its value tells which. It
+      // declines (rule R3). An input declared with the union is tested once
+      // where it is bound (`compileDeclaredUnionDispatch()`), and in each
+      // body it has the type of one member.
+      if (isRuntimePointShaped(tuples[0]))
+        throw unsettledShapeDecline(
+          tuples[0],
+          `it is added to a list of points, and its type ` +
+            `\`${typeToString(tuples[0].type.type)}\` is a point or a list ` +
+            `of points`
+        );
+      atomicTuple = tuples[0];
+      atomicTupleOverPoints = true;
     }
   }
 
@@ -1480,61 +1455,6 @@ export function tryCompileBroadcast(
   if (pointListOverNumbers !== undefined) return null;
   if (atomicTuple !== undefined) {
     const bound = args.map(() => tempVar(target));
-    if (atomicTupleOverPoints === 'runtime-list') {
-      // The run-time point-or-list operand beside a list of POINTS, both
-      // evaluated once. A value that is an array of arrays (or empty) is a
-      // list of points: it is zipped against the list, point by point,
-      // and unequal lengths are the interpreter's `incompatible-dimensions`
-      // error projected to NaN. A flat array is a point, added to every
-      // point of the list. A number is the interpreter's per-element
-      // `incompatible-type` error, NaN at every position. The list operand
-      // is an array by its static type, and is not tested.
-      const m = args.indexOf(runtimePointOperand!);
-      const src = bound[m];
-      const list = bound[1 - m];
-      const p = tempVar(target);
-      const k = tempVar(target);
-      const q = tempVar(target);
-      const zipped = bound.map((b, i) => (i === m ? p : `${list}[${k}]`));
-      const mapped = bound.map((b, i) => (i === m ? b : q));
-      // A flat point of another arity than the list's points is the
-      // interpreter's dimension error, NaN; the arity is read from the
-      // list's element type, which `isProvablyPointList` proved a tuple.
-      const elt = collectionElementType(compilationType(args[1 - m]));
-      const arity =
-        elt !== undefined && typeof elt !== 'string' && elt.kind === 'tuple'
-          ? elt.elements.length
-          : undefined;
-      const arityTest =
-        arity === undefined ? '' : `${src}.length !== ${arity} ? NaN : `;
-      return (
-        `((${bound.join(', ')}) => ` +
-        `(!Array.isArray(${src}) ? ${list}.map(() => NaN) : ` +
-        `(${src}.length === 0 || Array.isArray(${src}[0])) ? ` +
-        `(${src}.length !== ${list}.length ? NaN : ` +
-        `${src}.map((${p}, ${k}) => _SYS.bcast(${closure}, ${zipped.join(', ')}))) : ` +
-        `${arityTest}${list}.map((${q}) => _SYS.bcast(${closure}, ${mapped.join(', ')}))))` +
-        `(${compiledArgs.join(', ')})`
-      );
-    }
-    if (atomicTupleOverPoints === 'runtime') {
-      const m = args.indexOf(runtimePointOperand!);
-      const src = bound[m];
-      const p = tempVar(target);
-      const inner = bound.map((b, i) => (i === m ? p : b));
-      // An EMPTY array takes the point-list branch and maps to the empty
-      // list, the answer the provable point-list lane below also gives:
-      // a point of the declared arity is never an empty array at run
-      // time, so an empty array can only be an empty list of points.
-      return (
-        `((${bound.join(', ')}) => ` +
-        `(Array.isArray(${src}) && ` +
-        `(${src}.length === 0 || Array.isArray(${src}[0])) ? ` +
-        `${src}.map((${p}) => ${bcastCall(closure, inner)}) : ` +
-        `${bcastCall(closure, bound)}))` +
-        `(${compiledArgs.join(', ')})`
-      );
-    }
     const outerParams: string[] = [];
     const outerSources: string[] = [];
     const innerArgs = args.map((a, i) => {
@@ -1554,7 +1474,7 @@ export function tryCompileBroadcast(
     // for the element `(0, 0)`). Exactly one list source reaches here
     // (the decision above declines more). The list is an array by its
     // static type (`isProvablyPointList`), and is not tested.
-    if (atomicTupleOverPoints === 'static') {
+    if (atomicTupleOverPoints) {
       return (
         `((${bound.join(', ')}) => ` +
         `${outerSources[0]}.map((${outerParams[0]}) => ${innerCall}))` +

@@ -25,6 +25,59 @@
 
 ### Behavior Changes
 
+- **A compiled element-wise selection declines for a branch that can be a
+  point or a list of points.** With a host function `W` declared
+  `(real) -> tuple<real, real> | list<tuple<real, real>>` and `F` a list of
+  booleans, `If(F, W(t), (0, 0))` now uses the interpreter (diagnostic code
+  `unsettled-shape`): the compiled JavaScript tested the value of `W(t)` at
+  run time to lift a point whole or to index a list. Declare the result of
+  `W` with one shape, or declare and compile one function for each shape.
+  An input declared with this union (`P: tuple<real, real> |
+  list<tuple<real, real>>`) still compiles as a branch: the compiled code
+  tests it once where it is bound and has one body for each shape.
+
+- **A compiled sum of a list of points and a value that can be a point or
+  a list of points declines.** With `W` declared as above and
+  `L: list<tuple<real, real>>`, `W(t) + L` now uses the interpreter
+  (diagnostic code `unsettled-shape`), where the compiled JavaScript
+  tested the value of `W(t)` at run time. Declare the result of `W` with
+  one shape. An input declared with the union (`P + L`) still compiles.
+
+- **An input declared with a union of shapes declines when the code for one
+  shape declines.** The compiled code has one body for each shape of such
+  an input. When one body could not be compiled, the code was one body for
+  all the shapes, which tested the shape of the input at run time. It now
+  declines with the reason of that body: with `U: real | list<real>`,
+  `Sum(U)` uses the interpreter (`Sum` of a number has no indexing set), and
+  so does `If(x > 0, U, x)` (in the body for `list<real>`, the branches are
+  a list and a number). Declare the input with the one shape that you pass,
+  or compile one function for each shape.
+
+- **A compiled sum of a point and a value that can be a point or another
+  shape declines, and so does its absolute value.** With `P` a list of
+  points, `Sum(P)` has the type `integer | tuple<real, real>` (the sum of
+  an empty list is `0`), and `Sum(P) + (1, 1)` now uses the interpreter
+  (diagnostic code `unsettled-shape`), where the compiled JavaScript tested
+  the value of `Sum(P)` at run time. The same applies to a function whose
+  parameter is declared `list<tuple<number, number>> | tuple<number,
+  number>` when the code has one body for both shapes: `|P − (4, 0) −
+  (1, 2)|` declines there. The absolute value of a value of type
+  `list<number> | tuple<number, number>` declines too, on every target: the
+  compiled JavaScript gave `[3, 4]` for the point `(3, -4)`, where the
+  interpreter gives `5`. Declare one shape, or compile one function for
+  each shape; a call whose argument has one shape still compiles
+  (`g((x, y))`, `g(Q)` with `Q` a list of points and `g(P) = |P − (4, 0)|`).
+
+- **A compiled `PointList` declines for a coordinate of a value that can
+  be a point or a list of points.** With `p` undeclared, `PointList(p.y,
+  p.x)` infers the type `collection<any> | tuple` for `p`, and now uses the
+  interpreter (diagnostic code `unsettled-shape`), where the compiled
+  JavaScript tested the value of `p` at run time. Declare `p`:
+  `ce.declare("p", "tuple<real, real> | list<tuple<real, real>>")` compiles
+  one body for each shape. A function literal applied where it is written
+  (`(v ↦ PointList(v.y, v.x))(P)`) still compiles: its parameter has the
+  type of the argument.
+
 - **Compiled code gives no special value for a condition or a comparison
   over an absent value.** A compiled `If` or `Which` whose condition is
   absent takes its next branch, where it gave `NaN`: `If(At(B, 9), 1, 2)`,

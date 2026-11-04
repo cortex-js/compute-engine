@@ -10,7 +10,6 @@ import {
 } from '../../common/type/primitive.js';
 import {
   broadcastingComponentKind,
-  isNumericTuple,
   isPossiblyCollectionTyped,
   isTuple,
   isTupleShapedType,
@@ -754,19 +753,18 @@ export function unionAdmitsIndexedCollection(t: Type): boolean {
 }
 
 /**
- * Is `a` an operand that MAY be a point, or a list of points, with the
- * decision left to run time? True for a union type with a tuple-shaped arm
- * (a point) beside an arm of another shape: a collection arm
- * (`list<tuple<…>> | tuple<…>`, the shape the point-consuming document
- * functions declare for their parameter) or a scalar arm
- * (`number | tuple<integer, integer>`, which is what `P − (4, 0)` is typed
- * when `P` is declared `unknown`). A provably scalar, provably point or
- * provably collection operand keeps its static lowering. A TOP type
- * (`unknown`, `any`, `value`) is FALSE: it says nothing at all about the
- * shape, so a run-time array could as well be a plain list of numbers, or a
- * matrix, that the interpreter reads element-wise. Read by the `Abs`
- * run-time shape dispatch (`_SYS.absShape`) and by the run-time point-list
- * lift of `Add` in `tryCompileBroadcast` (Tycho item 253).
+ * Is `a` an operand whose static type admits a point and another shape? True
+ * for a union type with a tuple-shaped arm (a point) beside an arm of
+ * another shape: a collection arm (`list<tuple<…>> | tuple<…>`, the shape
+ * the point-consuming document functions declare for their parameter) or a
+ * scalar arm (`integer | tuple<real, real>`, the type of the sum of a list
+ * of points, which is `0` for an empty list). The shape of such an operand
+ * is known only at run time, so the `Abs` lowering (`compileExpr`) and the
+ * point plans of `Add` (`tryCompileBroadcast`) decline for it (rule R3 of
+ * "Shapes are settled at compile time", `docs/COMPILATION-MODEL.md`). A
+ * provably scalar, provably point or provably collection operand keeps its
+ * static lowering. A TOP type (`unknown`, `any`, `value`) is FALSE: it says
+ * nothing at all about the shape.
  *
  * A NOMINAL value is atomic whatever its representation, as the whole type
  * and as a BRANCH — the interpreter binds it whole and never maps over it.
@@ -960,30 +958,6 @@ export function presentCompilationType(a: Expression): Type {
 }
 
 /**
- * For an operand `isRuntimePointShaped` admitted, can its run-time value be
- * told apart as a point or a list of points by its SHAPE alone? Every tuple
- * arm of the union must be a point of plain NUMBERS (a coordinate that is
- * itself a collection would be read as a list of points), and every other
- * arm must be a NUMBER — never an array, so the shape test cannot mistake
- * it — or a collection of POINTS (`isPointElementType`): a collection arm
- * that admits plain numbers — `list<number>`, or the
- * `indexed_collection<number | tuple<…>>` a document may declare — could
- * hold a flat array of numbers, which has the shape of a point. Read by the
- * run-time point-or-list plan of `Add`.
- */
-export function runtimePointShapeIsUnambiguous(a: Expression): boolean {
-  const r = resolveTypeForCompilation(a.type.type);
-  if (typeof r === 'string' || r.kind !== 'union') return false;
-  return r.types.every((branch) => {
-    const b = resolveTypeForCompilation(branch);
-    if (b === 'never' || isSubtype(b, 'number')) return true;
-    if (typeof b !== 'string' && b.kind === 'tuple')
-      return b.elements.every((c) => isSubtype(c.type, 'number'));
-    return isPointElementType(collectionElementType(b));
-  });
-}
-
-/**
  * The finite real number a piece of EMITTED code denotes when it is a bare
  * numeric literal — `undefined` for anything else.
  *
@@ -998,49 +972,6 @@ export function numericLiteralSource(code: string): number | undefined {
   if (trimmed === '') return undefined;
   const value = Number(trimmed);
   return Number.isFinite(value) ? value : undefined;
-}
-
-/**
- * Does a point-or-other union (`isRuntimePointShaped` above) also admit a
- * FLAT NUMERIC LIST — a run-time array of plain numbers that is NOT a point?
- * True when one of its non-tuple arms is a collection whose element type is
- * not itself tuple-shaped: `list<number> | tuple<…>` admits `[3, −4]` as a
- * list the interpreter reads element-wise, and
- * `indexed_collection<number | tuple<…>> | …` admits it too, because its
- * element type has a scalar member. An unknown element type (no element type
- * at all, or a top one) counts as admitting it, since nothing rules it out.
- *
- * A compiled array carries no tuple-versus-list tag, so for such an operand
- * a flat array of numbers is ambiguous at run time, and reading it as a
- * point would answer the norm where the interpreter answers the element-wise
- * result. The `Abs` run-time shape dispatch therefore refuses these operands
- * unless the operand is a point SUM, which the interpreter refuses for a
- * flat list (Tycho item 253).
- */
-export function unionAdmitsFlatNumericList(a: Expression): boolean {
-  const r = resolveTypeForCompilation(a.type.type);
-  if (typeof r === 'string' || r.kind !== 'union') return false;
-  for (const branch of r.types) {
-    const b = resolveTypeForCompilation(branch);
-    if (b === 'never' || isTupleShapedType(b)) continue;
-    if (!isSubtype(b, COLLECTION_SHAPE_TYPE)) continue;
-    const elt = collectionElementType(b);
-    if (elt === undefined) return true;
-    if (!isTupleShapedType(elt)) return true;
-  }
-  return false;
-}
-
-/**
- * Is `a` a sum with a provable POINT among its operands? Such a sum can
- * never hold a flat list of numbers at run time: adding a point to a number
- * is the interpreter's `incompatible-type` error, and over a list of numbers
- * that error is answered at every element. The `Abs` run-time shape dispatch
- * uses this to admit an operand whose type would otherwise also admit a flat
- * numeric list (Tycho item 253).
- */
-export function isPointSumOperand(a: Expression): boolean {
-  return isFunction(a, 'Add') && a.ops.some((o) => isNumericTuple(o));
 }
 
 /**

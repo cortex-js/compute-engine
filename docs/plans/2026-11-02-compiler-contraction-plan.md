@@ -1865,6 +1865,204 @@ compute-engine-72; base `ea4f58fa8`; staged, not committed).
   `javascript-value-facts.ts` (one reader in `compiler-type-facts.ts`), the
   `Nothing` refusals and the omission tests of callback results.
 
+The result of step 4, row 3 (admission and shapes; 2026-11-04, session
+compute-engine-cb; base `2e3ac5fd40e0b62538b39acddb1e3aa37b48e6d8`; staged,
+not committed).
+
+- **The survey, admission check (`compile-admission.ts`, 1,601 code lines
+  at base).** Probes show that each input that item 3.4.4 made a static
+  error declines before `assertAdmitted()` runs: `Block(Declare(p,
+  "real"), If(x > 0, p ≔ 1), p)` (`declaration-without-value`),
+  `1 + Assign(t, 2)` (`assignment-in-operand`), `Block(p ≔ 0, p ≔ [1, 2],
+  p)` (`assignment-type-mismatch`), `Block(If(x > 0, p ≔ [1, 2], p ≔ [3,
+  4]), 2p)` (`first-assignment-in-branch`); and a write to an input
+  (`c ≔ n + 1`, `Block(c ≔ [1, 2], c)` with `c: real`) declines in
+  `assignLValue()` (`compile-locals.ts`) while the code is generated. Kept,
+  with the rule each one serves: R1 (`untypedInputs`, `inputsOf`,
+  `untypedInputsOf`, `isUnboundUntypedName`, `isUntypedType`,
+  `throwUntypedInputs`, `assertNoDeclaredTopOperands`, `namesReadIn`; 140
+  lines); R2/R4 (`declaredUnionInputsOf`, 31); R3 for a conditional
+  (`knownCondition`, `droppedOperands`, `droppedOperandsOf`,
+  `hasScalarCondition`, `isShaderTarget`, `operandUse`,
+  `conditionalBranches`, `hasConflictingBranches`, `haveConflictingShapes`,
+  `haveConflictingTypes`, `hasNoSettledShape`; 174), for a call (the
+  `Return` values and the last value of a body: `endValuesOf`,
+  `unitValuesOf`, `hasConflictingValues`, `returnValuesIn`; 106; the static
+  type of a `Block` with a `Return` is the type of its last value only, so
+  `Block(If(1 < x, Return([1,2])), x)` is typed `real` and the values must
+  be collected), for `Match` (`matchCasePartsOf`, `caseScopes`,
+  `caseScopeOf`, `codeOperandsOf`, `localScopesOf`; 70) and for a local
+  (`assignedTypesOf`, `targetTypesOf`, `statedTypeOf`, `complexMode`,
+  `assignedTypesConflict`; 75); the R3 driver and messages
+  (`unsettledShapeIn`, `assertAdmitted`, `throwUnsettledShape`; 370). The
+  effect declines of "Fail closed" are not among R1 to R6, but each one
+  guards a value that the compiled code would get wrong, and each is still
+  reachable (probes): `scoped-assignment` (`Block(p ≔ 0,
+  Comprehension(Block(p ≔ 5, i), i ∈ [1]), p)`; CE-720 for a callback),
+  `index-assignment` (CE-723), `elementwise` (CE-722), `return-in-loop`
+  (CE-719); they stay (`assignmentConflictIn` 210, `scopedPartsOf`,
+  `changesState`, `parameterName`, `parametersOf`, `CLAUSE_OPERATORS`,
+  `clauseIndexNames`, `ownLocalNames`, `writesOuterName` 165,
+  `returnInLoopIn` 49). `assignmentConflictIn` is still reached by a local
+  with a real and a complex value, by a local of type `unknown`, and by a
+  parameter assigned a value of another shape.
+- **The survey, run-time shape tests.** A temporary probe at each site, run
+  over the 651 test files that call `compile`, gave the operand types that
+  reach it. Kept: the `broadcastable<T>` lowerings (`PointList`, `Dot`,
+  `Norm`, the point list over numbers; `broadcastable<T>` asks for the
+  element-wise map at run time, `unionShapeMembers()` does not read it as a
+  union), `_SYS.absShape` for a `broadcastable` point or a nested point
+  collection, the `NaN` guard of an opaque `PointList` component (`unknown`
+  or `value`, a test for a value outside the type; reading it as a number
+  adds a branch and removes no test), the guarded fold of `Max`/`Min` and
+  `Sum`/`Product` (`emitCollectionReduce(…, true)`, which also serves folds
+  whose elements have a settled shape), and the absence tests (rows 2 and
+  7). In `compiler-type-facts.ts`, the `isGated*` helpers,
+  `gatedCollectionArms` and `presentCompilationType` read a type without
+  its `missing` arm to choose a static shape and emit no test;
+  `jsComplexObjectTest` is the clause guard of a user function with clauses
+  (a dispatch on a declared parameter type, R2); `shapeOperandRefusal` is a
+  static decline of `Shape`/`Rank`. The 145 `Array.isArray` tests of
+  `javascript-runtime.ts` serve the emissions that stay, less the one of
+  `pointOrPoints`. The full survey (per site, with the probe hits) was the
+  scratch file `docs/scratch/2026-11-04-step4-row3-survey.md` of the
+  worktree; its content is in this record.
+- **What was removed.** In `compile-admission.ts`: `assignedInputConflict()`
+  (36 lines; a write to an input now always declines in `assignLValue()`,
+  and a name that `assignLValue()` accepts as a local is compared by
+  `assignmentConflictIn()`; a probe on its `return` line was reached by no
+  test), with the `assignedInputs` map of `analyzeReferences()`
+  (`compile-references.ts`) and the `assignments` set of `namesReadIn()`;
+  the comparison of the `Break` values of a `Loop` (`breakValuesOf()`, the
+  `Break` mode of `controlValuesIn()`, now `returnValuesIn()`, and the
+  `Loop` branches of `endValuesOf()` and `hasConflictingValues()`): every
+  target compiles `Break(v)` to `break` and drops `v`, and a loop whose
+  value is used and that has a `Break` declines as `loop-value`, so the
+  check could only decline a discarded loop value on a shader target
+  (witness `crafted`). In the targets: `_SYS.pointOrPoints` (the emission in
+  `compileJSSelection()`, its `cellOf` branch and the runtime helper); the
+  `'runtime-list'` and `'runtime'` plans of `Add` in `tryCompileBroadcast()`
+  with `runtimePointShapeIsUnambiguous()`; the `_SYS.absShape` emission for
+  a union operand in `compileExpr` (`compiler-core.ts`) with
+  `unionAdmitsFlatNumericList()` and `isPointSumOperand()`; the run-time
+  role test of a `PointList` coordinate of an operand typed
+  `collection<any> | tuple`; the fallback of
+  `compileDeclaredUnionDispatch()` that compiled one body for every member
+  of a declared union input, with shape tests inside it, when the body of
+  one member declined. Each removed test became the R3 decline, through a
+  new helper `unsettledShapeDecline()` (`diagnostics.ts`).
+- **A wrong value fixed on the way.** The `Abs` lowering of a value of type
+  `list<number> | tuple<number, number>` that is not an input took the
+  element-wise route on JavaScript: with `H` declared `(real) ->
+  list<number> | tuple<number, number>`, `|H(t)|` compiled to
+  `_SYS.bcast((_tv1) => _SYS.absAny(_tv1), H(_.t))` and gave `[3, 4]` for
+  the point `(3, -4)`, where the interpreter gives `5` (found by review round
+  1; GLSL, interval-js and Python already declined). It now declines on
+  every target.
+- **New declines, each with the declaration that settles the shape
+  (CHANGELOG, "Behavior Changes").** With `W: (real) -> tuple<real, real> |
+  list<tuple<real, real>>`, `F: list<boolean>`, `L: list<tuple<real,
+  real>>`: `If(F, W(t), (0, 0))`, `W(t) + L`, `Sum(L) + (1, 1)` (the type of
+  `Sum(L)` is `integer | tuple<real, real>`, because the sum of an empty
+  list is `0`), `|H(t)|` above. With `U: real | list<real>`: `Sum(U)`,
+  `Product(U)`, `If(x > 0, U, x)`, and on interval-js `U + w`, `U < 3`.
+  With `p` undeclared: `PointList(p.y, p.x)` (inferred `collection<any> |
+  tuple`). A function whose parameter is declared `list<tuple<number,
+  number>> | tuple<number, number>` and that the parameter dispatch emits as
+  one body: `g(Q)` with `g(P) = |P − (4, 0) − (1, 2)|`. Witnesses: Tycho
+  found no host function with a point-or-list result type (`tycho-f9`,
+  2026-11-04: 0 occurrences of `_SYS.pointOrPoints` in the whole-corpus
+  codegen records of Tycho `a34405ae0` on CE 0.178.0), and the corpus
+  measure below has no new decline, so no form has a `corpus` witness; the
+  test files that pin them (`tycho-item-249`, `tycho-item-253`, `ce-514`)
+  came from Tycho items, so they are `plausible`. These declines are what
+  R2 to R4 require, so no question goes to the user. Still compiling, with
+  the interpreter's values (tests added): an input declared
+  `tuple<number, number> | list<tuple<number, number>>` or the 3-D form
+  (Tycho declares document symbols with this union,
+  `DocumentCEManager.POINT_OR_POINT_LIST_2D`/`_3D`) as an `If` or `Which`
+  branch, `P + L` for such an input `P`, a literal applied where it is
+  written (`(v ↦ PointList(v.y, v.x))(P)`), and `k((x, y))` and `g(Q)`
+  with `g(P) = |P − (4, 0)|`.
+- **Code lines** (`.ts`, not blank, `//`, `/*` or `*`): `compilation`
+  91,168 → 91,017 (−151); `compile-admission.ts` 1,601 → 1,534. Source: 8
+  files; with the tests, CHANGELOG and `COMPILATION-MODEL.md`, 21 files, 508
+  insertions, 678 deletions. The table above estimated 1,461 + 531 + 830
+  lines "in part" for this row: most of the admission check serves R1, R3
+  or an effect decline, and most of `static-shape.ts` and
+  `compiler-type-facts.ts` chooses a static shape or is the binding
+  dispatch.
+- **Tests.** No test file deleted, no snapshot changed. One file added
+  (`compile-unsettled-shape-operands.test.ts`: the new declines, and the
+  declared union input that still compiles). Rewritten to assert the
+  decline (each pinned a compiled value of a removed run-time test):
+  `compile-admission.test.ts` (1 test), `compile-interval-collections.test.ts`
+  (`Sum(U)` and 3 messages), `compile-entry-string-refusal.test.ts` (the
+  entry refusal is now tested with `Max(S)`), `compile-call-broadcast-result-operand.test.ts`
+  (1), `tycho-item-249-union-collection-operand.test.ts` (3),
+  `tycho-item-253-abs-union-point-param.test.ts` (3 and comments),
+  `compile-complex-tensor-entries.test.ts` (2), `ce-514-point-accessor-of-possible-list.test.ts`
+  (2), `point-accessor-union-type.test.ts` (1). `compile-when-nested-mask.test.ts`:
+  the decline of the point-or-list arm and the union input arm (2-D, 3-D,
+  `If`, `Which`).
+- **The corpus measure** (Tycho frozen at `a34405ae0`, the copy of rows 1
+  and 2, a plain `git archive` with no patch; the tools of 3.4.1 with
+  records keyed by MathJSON; base run on `2e3ac5fd4`). Three candidates: the
+  first part (the admission removals and `pointOrPoints`), the four groups of
+  run-time tests, and the final tree after the review fixes. Each: 17,825
+  compiles, 13,707 keys and 77,267 values in both runs; 0 changed values, 0
+  new throws; declines javascript 47, glsl 44, interval-js 61 in both runs,
+  no new decline and none gone.
+- **Review**: Claude and Codex, two rounds. Round 1: Codex, no finding;
+  Claude, one medium (the `Abs` wrong value above, fixed with the decline),
+  four low (outdated comments of `isRuntimePointShaped`, `_SYS.absShape`
+  and `UNSETTLED_SHAPE_CODE`; a new `unknown` branch of `compileJSPointList`
+  that added code and removed no test, reverted) and two nits (a comment, a
+  two-state flag made a `boolean`), all fixed. Round 2 (Claude, on the
+  fixes): one low and one nit (outdated comments in `compile-broadcast.ts`
+  and `tycho-item-253-abs-union-point-param.test.ts`), fixed. No third
+  round: round 2 had no `high` or `medium` finding.
+- **Checks** (in the worktree, on the final tree; the 21 files are byte for
+  byte the files copied to the main tree): typecheck (after-edit hook and
+  `tsc --noEmit`), `oxlint` on the changed files, `check:deps`, the 651 test
+  files that call `compile` (30,140 passed), `test:core` (5,501 passed),
+  the full suite (1,821 suites, 77,814 tests, 0 failed, 4,295 snapshots),
+  `npm run test:python` (49 suites, 2,768 tests, 0 failed), the corpus
+  measure.
+- **Documents.** `docs/COMPILATION-MODEL.md`: R4 states that a declared
+  union input declines when the body of one member declines; "A value with
+  no settled shape declines" loses the `Break` values and gains the declines
+  above. No page under `~/dev/cortexjs.io/docs/compute-engine/` describes a
+  removed mechanism or the new declines' forms, so none was edited.
+- **Choices, each reversible.** (1) The fallback of
+  `compileDeclaredUnionDispatch()` declines (the alternative: keep one body
+  over the union with shape tests inside, which R2 forbids; it kept 28
+  compiled results in the tests). (2) The parameter dispatch
+  `emitDeclaredUnionParameterDispatch()` keeps its fallback to the ordinary
+  definition when a variant cannot be built; the in-body tests that this
+  fallback reached are now declines (`g(Q)` above). The alternative, one
+  variant per member for every body, is new code. (3) No dispatch at the
+  binding of a function-literal parameter declared with a union: such a
+  literal declines where its body needs a shape test. (4) The guarded fold
+  of `Max`/`Min`/`Sum`/`Product` stays: its tests also serve elements of a
+  settled shape (lists of rows, of points, of matrices), and removing them
+  needs a static lowering for each of six callers, which is new code and
+  not a removal (proposed as a separate task, not recorded in ROADMAP). (5)
+  The opaque `PointList` component keeps its `NaN` guard. (6) The effect
+  declines stay (each guards a wrong value).
+- **What row 4 (block locals) can rely on.** No compiled code writes an
+  input, and the admission check no longer compares the value written to an
+  input (`assignedInputConflict()` is gone); the value of a `Break` is not
+  compared. Left to row 4, all reachable today (probes above): `isBindingBlock`,
+  `hasKeptBreak`, `isUnrepresentableLoopValue` and the `nothing-value`,
+  `block-value` and `loop-value` part of `unsettledShapeIn()` (112 lines;
+  row 4 removes the loop-value and the block-as-value lowerings that they
+  guard), `returnInLoopIn` (49), and the local-shape part of
+  `assignmentConflictIn` (of its 210 lines; it also holds the effect
+  declines `index-assignment`, `elementwise` and `scoped-assignment`), with
+  `assignedTypesOf`, `targetTypesOf`, `statedTypeOf`, `complexMode` and
+  `assignedTypesConflict` (75).
+
 ## 5. The growth guard (done 2026-11-02, commit 97c3d409a)
 
 Two numbers per commit in the nightly run, kept with its result: the code

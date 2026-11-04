@@ -6,9 +6,11 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 // literal, the parameter is typed from its uses (`collection<any> | tuple`)
 // and the accessor `unknown`, which `PointList` read as a scalar slot: the
 // compiled `(v ↦ PointList(PointY(v), PointX(v)))([(1, 2, 3), (4, 5, 6)])`
-// was `[NaN, NaN]`, where the interpreter gives `[(2, 1), (5, 4)]`. The
-// `javascript` target now decides the role of such a component at run time:
-// an array is a zip source, any other value one slot.
+// was `[NaN, NaN]`, where the interpreter gives `[(2, 1), (5, 4)]`. A
+// function literal applied where it is written gets the type of its
+// argument, so the accessor has a static shape. Where the type of the
+// operand stays `collection<any> | tuple`, the compilation declines (rule R3
+// of "Shapes are settled at compile time", `docs/COMPILATION-MODEL.md`).
 
 const BODY: MathJsonExpression = ['PointList', ['PointY', 'v'], ['PointX', 'v']];
 const POINTS: MathJsonExpression = [
@@ -80,14 +82,13 @@ describe('a coordinate accessor of a possible list of points in PointList', () =
     ]);
   });
 
-  test('a tuple coordinate of a flat list is not a zip source', () => {
-    // `PointY([5, (1, 2)])` is the tuple `(1, 2)`, which `PointList` refuses
-    // (the interpreter gives an error). It is an array at run time, as a list
-    // of coordinates is: the operand, a list that is not a list of points,
-    // decides that it is one slot, guarded to `NaN`. Read as a source, it
-    // gave the points `[[1, 7], [2, 7]]`.
-    // The parameter is declared with the type that the body infers for it.
-    // A bare parameter gets the type of the argument (the next test).
+  test('a parameter declared as a point or a list of points declines', () => {
+    // With \`v\` declared \`collection<any> | tuple\`, \`PointY(v)\` is one
+    // coordinate or a list of coordinates, and only the value tells which,
+    // so the compilation declines (rule R3 of "Shapes are settled at compile
+    // time", \`docs/COMPILATION-MODEL.md\`), where the code tested the value
+    // at run time. Here the interpreter gives an error: \`PointY([5, (1,
+    // 2)])\` is the tuple \`(1, 2)\`, which is not a coordinate.
     const ce = new ComputeEngine();
     const e = ce.box([
       'Apply',
@@ -98,9 +99,9 @@ describe('a coordinate accessor of a possible list of points in PointList', () =
       ],
       ['List', 5, ['Tuple', 1, 2]],
     ]);
-    const value = compile(e, { fallback: false }).run!({}) as unknown[];
-    expect(Number.isNaN(value[0])).toBe(true);
-    expect(value[1]).toBe(7);
+    const r = compile(e);
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
   });
 
   test('a tuple coordinate of a typed flat list is declined', () => {
@@ -139,10 +140,20 @@ describe('a coordinate accessor of a possible list of points in PointList', () =
   });
 
   test('a free variable that holds a point or a list of points', () => {
-    // The role is decided on each call: a point gives one point, a list of
-    // points the list of their points, as in the interpreter.
+    // An undeclared \`p\` read with \`p.y\` is inferred \`collection<any> |
+    // tuple\`, so \`p.y\` is one coordinate or a list of coordinates, and the
+    // compilation declines (rule R3), where the code tested the value of
+    // \`p\` at run time. Declared with the union of a point and a list of
+    // points, \`p\` is tested once where it is bound, and each body has one
+    // shape.
     const ce = new ComputeEngine();
-    const r = compile(ce.parse('\\mathrm{PointList}(p.y, p.x)'), {
+    const undeclared = compile(ce.parse('\\mathrm{PointList}(p.y, p.x)'));
+    expect(undeclared.success).toBe(false);
+    expect(undeclared.diagnostic?.code).toBe('unsettled-shape');
+
+    const ce2 = new ComputeEngine();
+    ce2.declare('p', 'tuple<real, real> | list<tuple<real, real>>');
+    const r = compile(ce2.parse('\\mathrm{PointList}(p.y, p.x)'), {
       fallback: false,
     });
     expect(r.run!({ p: [1, 2] } as never)).toEqual([2, 1]);

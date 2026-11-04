@@ -558,11 +558,17 @@ describe('A value with no settled shape declines (R3)', () => {
     }
   });
 
-  test('a branch with a union type is not compared', () => {
+  // An input declared with a union is tested where it is bound, and each
+  // member has a body of its own: in the body of the member `list<real>`,
+  // the branches are a list and a number, so that body declines, and the
+  // compilation declines with its reason. One body for both members would
+  // test the shape of `U` inside the body.
+  test('a branch that is an input declared with a union declines when a member conflicts', () => {
     const ce = engine();
     ce.declare('U', 'real | list<real>');
     const r = compile(ce.box(['If', ['Greater', 'x', 0], 'U', 'x']));
-    expect(r.diagnostic?.code).not.toBe('unsettled-shape');
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
   });
 
   test('a conditional over a collection condition is element-wise', () => {
