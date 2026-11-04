@@ -15,6 +15,28 @@ are not blank and do not start (after leading white space) with `//`, `/*` or `*
 
 ## Findings
 
+**The window of this report starts after the first half of the removal.** The
+base `9cca00073` is the parent of item 3.1, but the effort began a day
+earlier with `docs/plans/2026-11-01-compiler-simplification.md`, whose
+section 5 had already applied candidates 6, 8, 9, 11, 12 and 13 (−731 source
+lines net), then candidates 7 and 8 (−1,109), and the R6 default fill (+570,
+removed again by item 3.4.5) before this base. Measured from that plan's own
+base, `2dd7fb55c` (2026-11-01), with the counting rule above (2026-11-04,
+HEAD `66c7363eb`, which includes CE-805):
+
+| | Simplification base `2dd7fb55c` | This report's base `9cca00073` | Head |
+| --- | ---: | ---: | ---: |
+| `compilation` code lines | 96,085 | 92,667 | 89,725 |
+| Change from the simplification base | | −3,418 | −6,360 (−6.6 %) |
+
+Table 2 of the simplification plan estimated 5,200 to 6,900 source lines for
+its 13 candidates; the whole effort removed 6,360. Its test column (about 760
+tests) counted tests that pinned removed behavior; those were rewritten as
+tests of the decline or of the new rule, not deleted, and every row added
+tests: the non-blank lines of `test/compute-engine/*.test.ts` rose from
+625,564 to 628,342, and the suite stayed at about 77,800 tests. The findings
+below keep this report's window.
+
 1. **How much code went.** The compiler fell from 92,667 to 89,601 code lines (−3,066, −3.3 %).
    Almost all of it went in step 4. The language release (step 3) did not shrink the compiler: by
    the plan's own records the compiler was 92,667 at the base and 92,764 when step 4 started
