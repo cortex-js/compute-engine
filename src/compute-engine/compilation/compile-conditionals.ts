@@ -295,10 +295,10 @@ export function compileExprWhich(
 
 /**
  * The restriction `v\{C\}`, the single-branch `If(C, v)`, whose condition
- * `C` is a mask of rank 1 (a flat list of conditions) by its type, or may
- * be one, with `args` in the order `[v, C]`. The caller compiles every
- * other condition (a scalar, or a mask of rank 2 or more or of a rank that
- * the type does not give) as the selection of `If`.
+ * `C` is a flat list of conditions by its type, or may be one, with `args`
+ * in the order `[v, C]`. The caller compiles every other condition (a
+ * scalar, or a mask whose type does not settle that it is flat) as the
+ * selection of `If`.
  *
  * Only the JavaScript target compiles it, with the run-time helper
  * `_SYS.restrict`. Every other target declines: the conditional forms of

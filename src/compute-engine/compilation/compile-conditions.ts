@@ -518,14 +518,14 @@ export function assertScalarCondition(
     );
   // A condition that may be a collection at run time (`B < 0` for
   // `B: broadcastable<number>` is a `broadcastable<boolean>`) selects
-  // element-wise in the interpreter when it is a list, of any rank. A
+  // element-wise in the interpreter when it is a flat list. A
   // conditional expression of the target would read the truthiness of an
   // array instead: Python raises on an array of two or more elements, and
   // the interval target answers an interval where the interpreter answers
   // a list. So when the caller names its `target`, such a condition is
   // refused. A shader target (one with `loweredSymbolType`) is exempt: a
   // variable of a shader is a uniform of a fixed type, so its value is
-  // not a list of a rank the code did not declare. A target with an
+  // not a list that the code did not declare. A target with an
   // element-wise selection (the JavaScript `_SYS.select`,
   // `target.selection`) never reaches this check with such a condition,
   // and neither does the restriction of the base compiler, which restricts

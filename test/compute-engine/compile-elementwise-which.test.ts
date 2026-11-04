@@ -520,11 +520,9 @@ describe('element-wise selection: what stays unchanged', () => {
 });
 
 /**
- * A mask of rank 2 or more (`M < 3` over a matrix `M`) selects node by node
- * (`selectNested` in the runtime, `evaluateElementwiseSelection` in the
- * interpreter). The compiled value must be the interpreter's: an error is
- * `NaN` for the whole value, as for R3, and an absent cell is `NaN` or, for
- * a cell that is not a number, `undefined`.
+ * A mask of rank 2 or more (`M < 3` over a matrix `M`), an uneven mask, an
+ * arm whose elements are lists and a string arm are static errors of the
+ * interpreter, so the compilation declines.
  */
 describe('element-wise selection: a mask of rank 2 or more', () => {
   // Selection rule of 2026-11-02: a condition is a boolean or a flat list of

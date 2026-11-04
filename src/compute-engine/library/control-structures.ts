@@ -452,9 +452,8 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         if (ifTrue === undefined)
           return BoxedType.forResult('unknown', context.engine._typeResolver);
         // A condition that is provably a mask (a collection of condition
-        // values, of any rank) selects element-wise (see
-        // `evaluateElementwiseSelection`): the result is a list that follows
-        // the mask, of the branches' types at the depth of its cells.
+        // values) selects element-wise (see `evaluateElementwiseSelection`):
+        // the result is a list of the types of the elements of the branches.
         const shape = elementwiseConditionShape([cond?.type]);
         const armList = [ifTrue, ifFalse]
           .filter((x) => x !== undefined)
@@ -536,10 +535,10 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             context.engine._typeResolver
           );
         // A condition whose type cannot be read and that may hold a list (an
-        // operand of type `unknown`) can be a mask of any rank at run time:
-        // with `c := [True, False]`, `If(c, 1, 0)` is `[1, 0]`. The result is
-        // the scalar result or the element-wise result for a mask of unknown
-        // rank.
+        // operand of type `unknown`) can be a mask at run time: with
+        // `c := [True, False]`, `If(c, 1, 0)` is `[1, 0]`. The result is the
+        // scalar result or the element-wise result for a mask whose type
+        // does not settle that it is flat.
         if (cond !== undefined && unreadableConditionMayBeMask(cond.type))
           return BoxedType.forResult(
             reduceType({
@@ -799,9 +798,8 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           arms = arms.slice(0, dflt + 1);
         }
         // A condition that is provably a mask (a collection of condition
-        // values, of any rank) selects element-wise (see
-        // `evaluateElementwiseSelection`): the result is a list that follows
-        // the masks, of the arms' types at the depth of their cells.
+        // values) selects element-wise (see `evaluateElementwiseSelection`):
+        // the result is a list of the types of the elements of the arms.
         const shape = elementwiseConditionShape(conds.map((c) => c?.type));
         if (shape) {
           const elementwise = elementwiseResultType(
@@ -873,9 +871,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         const mixed = scalarOrMaskConditionShape(conds.map((c) => c?.type));
         // Otherwise, when a condition that is not a scalar cannot be read
         // and may hold a list (two conditions of type `boolean |
-        // list<boolean>`, an operand of type `unknown`), it can be a mask of
-        // any rank at run time, and the element-wise result for a mask of
-        // unknown rank is added to the scalar result.
+        // list<boolean>`, an operand of type `unknown`), it can be a mask at
+        // run time, and the element-wise result for a mask whose type does
+        // not settle that it is flat is added to the scalar result.
         const shapeOfMasks =
           mixed ??
           (conds.some(
@@ -1209,10 +1207,10 @@ function restrictionType(
   // finite collection of boolean cells, so a condition typed
   // `set<boolean>` or `indexed_collection<boolean>` is a mask as much
   // as a `list<boolean>` is.
-  // A mask of rank 2 or more, or a mask whose rank the type does not
-  // give, selects cell by cell at every level, as the else-less
-  // `If(cond, expr)` does (see the `evaluate` handler), so the result
-  // has the type of that `If`.
+  // A mask whose type does not settle that it is flat (`tensor<boolean>`)
+  // is checked on its value: a flat value restricts as below, and a value
+  // that is not flat is the `incompatible-type` error. The result has the
+  // type of an element-wise selection by such a mask.
   const shape =
     cond === undefined ? undefined : elementwiseConditionShape([cond.type]);
   if (shape !== undefined && shape.rank !== 1)
@@ -2349,21 +2347,10 @@ function conditionCells(c: Expression): MaskList | undefined {
  * `Missing` for any other value (R4, `noMatchCell`); a position whose condition cell is `Missing` is the same
  * catchable "condition is absent" error the scalar form produces (R4′).
  *
- * A mask of rank 2 or more (a list whose elements are lists of conditions,
- * such as `M < 3` over a matrix `M`) selects by the same rule at each level.
- * At a node of the mask where some condition is a list of length `n`, every
- * list-valued condition and every list-valued selected arm must have length
- * `n`, a scalar condition or a scalar arm lifts to each position, and each
- * position is a node one level down, where each list participant is replaced
- * by its element at that position. At a node where every condition is a
- * scalar, the first clause whose condition is `True` gives its arm's value at
- * that node WHOLE, even when that value is a list: so
- * `If([True, False], [[1], [2]], 0)` is `[[1], 0]`, and with
- * `M := [[1, 2], [3, 4]]`, `If(M < 3, M, 0)` is `[[1, 2], [0, 0]]`. An arm
- * of lower rank than the mask is refused, as `M + [10, 20]` is:
- * `If(M < 3, [10, 20], 0)` is `incompatible-dimensions`. The rows of a mask may
- * have different lengths: `If([[True], [False, True]], 7, 0)` is
- * `[[7], [0, 7]]`. The result is a nested `List` that follows the mask.
+ * A condition is a boolean or a flat list of booleans. A condition whose
+ * value is a list with a list cell (`M < 3` over a matrix `M`, or
+ * `[[True], [False, True]]`) is the `incompatible-type` error, so the result
+ * is always a flat `List`.
  *
  * The zip is EAGER — conditions are materialized once into plain arrays and
  * the selection is computed in a JS loop — never a stack of lazy broadcast
@@ -2437,59 +2424,29 @@ function evaluateElementwiseSelection(
   const mismatch = broadcastLengthMismatch(ce, participants);
   if (mismatch) return mismatch;
 
-  // What stops the selection: an `incompatible-dimensions` error, which is
-  // the value of the whole expression, or `'inert'` when an arm's elements
-  // cannot be read now and the expression stays as it is.
-  let failure: Expression | 'inert' | undefined;
-
-  // 2/ Compute the selection, node by node of the mask. At a node where every
-  // condition is a scalar, it is the index of the first clause whose
-  // condition is `True` there, and `NO_MATCH` when no condition is. At a
-  // node where some condition is a list, it is one selection for each
-  // position, and the list-valued conditions there must have the same
-  // length. The first clause's condition is the collection that
-  // activated the gate, so the top node is always a list node.
+  // 2/ Compute the selection: at each position, the index of the first
+  // clause whose condition is `True` there, and `NO_MATCH` when no condition
+  // is. A lifted scalar `True` is `True` at every position. Every list
+  // condition is flat (checked above) and has the length of the first one,
+  // the collection that activated the gate.
   const reached = new Set<number>();
-  const select = (node: ReadonlyArray<MaskCell>): SelectionNode | undefined => {
-    let lists: MaskList[] | undefined;
-    for (const s of node) if (typeof s !== 'string') (lists ??= []).push(s);
-    if (lists === undefined) {
-      for (let k = 0; k < node.length; k++) {
-        if (node[k] === 'True') {
-          reached.add(k);
-          return k;
-        }
-      }
-      return NO_MATCH;
-    }
-    const conds = lists.map((l) => l.value);
-    if (conds.length > 1) {
-      const nodeMismatch = broadcastLengthMismatch(ce, conds);
-      if (nodeMismatch) {
-        failure = nodeMismatch;
-        return undefined;
+  const n = first.mask.cells.length;
+  const selection: number[] = [];
+  for (let j = 0; j < n; j++) {
+    let picked = NO_MATCH;
+    for (let k = 0; k < selectors.length; k++) {
+      const s = selectors[k];
+      if ((typeof s === 'string' ? s : s.cells[j]) === 'True') {
+        picked = k;
+        reached.add(k);
+        break;
       }
     }
-    const positions: SelectionNode[] = [];
-    const n = lists[0].cells.length;
-    for (let j = 0; j < n; j++) {
-      const child = select(
-        node.map((s) => (typeof s === 'string' ? s : s.cells[j]))
-      );
-      if (child === undefined) return undefined;
-      positions.push(child);
-    }
-    return { conds, positions };
-  };
-  const selection = select(selectors);
-  if (selection === undefined || typeof selection === 'number')
-    return failure === 'inert' ? undefined : failure;
+    selection.push(picked);
+  }
 
   // 3/ Evaluate each REACHED arm once, as a whole expression (R2).
   const values: (Expression | Expression[])[] = [];
-  // The evaluated value of each reached arm. Only the refusal of an arm of
-  // lower rank than the mask reads it (`lowerRankArmError`), for its message.
-  const armValues: Expression[] = [];
   for (let k = 0; k < arms.length; k++) {
     if (!reached.has(k)) continue;
     const value = arms[k].canonical.evaluate(options);
@@ -2499,7 +2456,6 @@ function evaluateElementwiseSelection(
     // error.
     const refused = runtimeArmError(ce, arms[k], value);
     if (refused !== undefined) return refused;
-    armValues[k] = value;
     if (!isBroadcastableCollection(value)) {
       values[k] = value;
       continue;
@@ -2510,116 +2466,31 @@ function evaluateElementwiseSelection(
     values[k] = cells;
   }
 
-  // 4/ Assemble the result, node by node. At a node one level down, the
-  // value of an arm is its element at that position when the arm is a list
-  // at the node above, and the arm itself when it is a scalar there (it
-  // lifts). A list-valued arm at a list node is checked against the
-  // list-valued conditions of that node, as at the top node. A position that
-  // no clause selects holds the absence marker of the type of that position
-  // (`noMatchCell`, which reads the arms at the depth of the position):
+  // 4/ Assemble the result. A list arm gives its element at the position,
+  // a scalar arm gives itself (it lifts). A position that no clause selects
+  // holds the absence marker of the type of that position (`noMatchCell`):
   // `NaN` when every arm puts a number there, a `NaN` point when every arm
   // puts a point there, `Missing` otherwise, as a restriction masks a cell
-  // by the type of its value. `noMatchArmTypes`, when given,
-  // replaces the types of the arms of `clauses`: a `Which` whose first mask
-  // comes after a scalar clause passes the types of all its reachable arms.
+  // by the type of its value. `noMatchArmTypes`, when given, replaces the
+  // types of the arms of `clauses`: a `Which` whose first mask comes after
+  // a scalar clause passes the types of all its reachable arms.
   const armTypes = noMatchArmTypes ?? clauses.map(({ arm }) => arm.type.type);
-  const noMatch: Expression[] = [];
-  const pick = (v: Expression | Expression[] | undefined, j: number) =>
-    Array.isArray(v) ? v[j] : v;
-  const assemble = (
-    node: SelectionList,
-    here: ReadonlyArray<Expression | Expression[] | undefined>,
-    depth: number
-  ): Expression | undefined => {
-    const result: Expression[] = [];
-    for (let j = 0; j < node.positions.length; j++) {
-      const child = node.positions[j];
-      if (child === NO_MATCH)
-        result.push((noMatch[depth] ??= noMatchCell(ce, armTypes, depth)));
-      else if (typeof child === 'number') result.push(pick(here[child], j)!);
-      else {
-        const next: (Expression | Expression[] | undefined)[] = [];
-        for (let k = 0; k < arms.length; k++) {
-          const v = pick(here[k], j);
-          if (v === undefined || !isBroadcastableCollection(v)) {
-            // An arm that is a list at the node above and a scalar at this
-            // list node has a lower rank than the mask: it is refused
-            // (`lowerRankArmError`).
-            if (v !== undefined && Array.isArray(here[k])) {
-              failure = lowerRankArmError(ce, participants, armValues[k]);
-              return undefined;
-            }
-            next[k] = v;
-            continue;
-          }
-          const cells = selectionArmCells(ce, child.conds, v);
-          if (cells === undefined || !Array.isArray(cells)) {
-            failure = cells ?? 'inert';
-            return undefined;
-          }
-          next[k] = cells;
-        }
-        const list = assemble(child, next, depth + 1);
-        if (list === undefined) return undefined;
-        result.push(list);
-      }
-    }
-    return ce._fn('List', result);
-  };
-  const result = assemble(selection, values, 1);
-  if (result === undefined) return failure === 'inert' ? undefined : failure;
-  return result;
+  let noMatch: Expression | undefined;
+  const result = selection.map((k, j) => {
+    if (k === NO_MATCH) return (noMatch ??= noMatchCell(ce, armTypes));
+    const v = values[k];
+    return Array.isArray(v) ? v[j] : v;
+  });
+  return ce._fn('List', result);
 }
 
-/**
- * The value of an element-wise selection with an arm of LOWER rank than the
- * mask: an `incompatible-dimensions` error, as `Add` refuses two tensors of
- * different shapes. With `M := [[1, 2], [3, 4]]`, `M + [10, 20]` and
- * `If(M < 3, [10, 20], 0)` are both `incompatible-dimensions` with the
- * message `2x2 vs 2`. An arm of higher rank is not refused: at a node where
- * every condition is a scalar, the selected arm's value is taken whole
- * (`If([True, False], [[1], [2]], 0)` is `[[1], 0]`). The message names the
- * shape of the mask of highest rank among `conds`, the list-valued
- * conditions, and the shape of `arm`, as `Add` writes them (`2x2`), or a
- * length when a value has no uniform shape.
- */
-function lowerRankArmError(
-  ce: ComputeEngine,
-  conds: ReadonlyArray<Expression>,
-  arm: Expression
-): Expression {
-  const shapeOf = (x: Expression): string =>
-    x.shape.length > 0 ? x.shape.join('x') : String(x.count);
-  const mask = conds.reduce((a, b) =>
-    b.shape.length > a.shape.length ? b : a
-  );
-  return ce.error(
-    'incompatible-dimensions',
-    `${shapeOf(mask)} vs ${shapeOf(arm)}`
-  );
-}
-
-/** A selection at a node of the mask where no clause selects. */
+/** The selection at a position where no clause selects. */
 const NO_MATCH = -1;
-/**
- * The selection at one node of the mask of an element-wise selection: the
- * index of the selected clause or `NO_MATCH` at a node
- * where every condition is a scalar, or a `SelectionList` at a node where
- * some condition is a list.
- */
-type SelectionNode = number | SelectionList;
 
 /**
- * The selection at a node of the mask where some condition is a list: the
- * list-valued conditions at that node (the participants of the length check
- * of a list-valued arm there) and the selection at each position.
- */
-type SelectionList = { conds: Expression[]; positions: SelectionNode[] };
-
-/**
- * The elements of `value`, the value of a selected arm at a node of an
- * element-wise selection where `value` is a list and `conds` are the
- * list-valued conditions. The result is the materialized elements when the
+ * The elements of `value`, the value of a selected arm of an element-wise
+ * selection where `value` is a list and `conds` are the list-valued
+ * conditions. The result is the materialized elements when the
  * arm has the length of the conditions, an `incompatible-dimensions` error
  * when it does not, and `undefined` when its elements cannot be read now (the
  * selection then stays inert).
@@ -2652,29 +2523,29 @@ function selectionArmCells(
  * - `scalar`: a boolean or an absent condition (it lifts to every position
  *   of a mask), and a type that is never a mask (a tuple, which is refused
  *   at boxing, and `error`).
- * - `mask`: provably a mask. `rank` and `dimensions` are given when they are
- *   known. A type with dimensions (`list<boolean^3>`, or
- *   `matrix<boolean^(2x2)>` for `M < 3` over a 2×2 matrix `M`) has its rank and
- *   dimensions. A collection of condition values without dimensions
- *   (`list<boolean>`, `indexed_collection<boolean>`) has rank 1: a literal
+ * - `mask`: provably a mask. `rank` is 1 when the type settles a flat list
+ *   of conditions, and `dimensions` gives its length when the type gives it
+ *   (`list<boolean^3>`). A collection of condition values without dimensions
+ *   (`list<boolean>`, `indexed_collection<boolean>`) is flat: a literal
  *   condition types `list<boolean^n>`, a declared or derived one
  *   `indexed_collection<boolean>`, and `indexed_collection<boolean>` is the
- *   supertype both are checked against. A type that may be a mask of any
- *   rank (`isPossiblyNestedBooleanMask`: `tensor<boolean>`,
- *   `list<boolean | list<any>>`, a ragged mask) has an unknown rank, and so
- *   has a union of masks of different ranks
- *   (`matrix<boolean^(2x2)> | list<boolean^3>`).
+ *   supertype both are checked against. A type that does not settle the
+ *   number of dimensions (`isPossiblyNestedBooleanMask`: `tensor<boolean>`,
+ *   `list<boolean | list<any>>`) has no `rank`, and so has a union of masks
+ *   of which one is not flat (`matrix<boolean^(2x2)> | list<boolean^3>`).
+ *   Such a condition is checked on its value: a value that is not flat is
+ *   the `incompatible-type` error (`evaluateElementwiseSelection()`).
  * - `possible`: a mask for some values and a scalar for others
  *   (`broadcastable<boolean>`).
  * - `unreadable`: any other type (`unknown`, `any`, a union with such an
  *   arm, and a union of a scalar and a mask such as `boolean | list<boolean>`).
- *   At run time such a condition can be a scalar or a mask of any rank.
+ *   At run time such a condition can be a scalar or a mask.
  *
  * The depth cap stops a walk through a self-referential type.
  */
 type ConditionShape =
   | { kind: 'scalar' }
-  | { kind: 'mask'; rank?: number; dimensions?: number[] }
+  | { kind: 'mask'; rank?: 1; dimensions?: number[] }
   | { kind: 'possible' }
   | { kind: 'unreadable' };
 
@@ -2688,11 +2559,14 @@ function conditionShape(t: Readonly<Type>, depth = 0): ConditionShape {
       t.dimensions.length > 0 &&
       isSubtype(t.elements, CONDITION_CELL_TYPE)
     )
-      return {
-        kind: 'mask',
-        rank: t.dimensions.length,
-        dimensions: t.dimensions,
-      };
+      // A type of two dimensions or more (`matrix<boolean^(2x2)>`) is refused
+      // by the canonical form (`conditionOperand()`). It is read here only
+      // when the condition was boxed before its type was known (a symbol
+      // assigned a matrix later), and its evaluation is then the
+      // `incompatible-type` error: it is a mask with no `rank`.
+      return t.dimensions.length === 1
+        ? { kind: 'mask', rank: 1, dimensions: t.dimensions }
+        : { kind: 'mask' };
     // A tuple is a subtype of `indexed_collection`, but runtime lifts tuples
     // whole (tuple-atomic): a tuple-typed condition never activates the
     // element-wise path, so it must not flip the static shape either.
@@ -2710,8 +2584,8 @@ function conditionShape(t: Readonly<Type>, depth = 0): ConditionShape {
       if (masks.length === shapes.length) return mergeMaskShapes(masks);
       // A union of a scalar and a mask (`boolean | list<boolean>`) is a mask
       // for some values only. It is read as `unreadable`, not `possible`: on
-      // its own it keeps the scalar typing, as before masks of any rank
-      // evaluated, and beside a mask it makes the rank unknown.
+      // its own it keeps the scalar typing, and beside a mask it makes the
+      // mask not provably flat.
       if (masks.length > 0 || shapes.some((s) => s.kind === 'possible'))
         return { kind: 'unreadable' };
       return { kind: 'scalar' };
@@ -2723,30 +2597,25 @@ function conditionShape(t: Readonly<Type>, depth = 0): ConditionShape {
 }
 
 /**
- * The shape of a set of masks: their common rank, `undefined` when one rank
- * is not known or two ranks differ, and their common dimensions, `undefined`
- * when two masks have different dimensions. A mask of rank 1 without
- * dimensions does not invalidate the dimensions of another one: at run time
- * both have the same length or the selection is a dimension error.
+ * The shape of a set of masks: flat (`rank` 1) when every mask is flat, and
+ * no `rank` otherwise; their common length (`dimensions`), `undefined` when
+ * two masks have different lengths. A flat mask without dimensions does not
+ * invalidate the length of another one: at run time both have the same
+ * length or the selection is a dimension error.
  */
 function mergeMaskShapes(
-  masks: ReadonlyArray<{ rank?: number; dimensions?: number[] }>
-): { kind: 'mask'; rank?: number; dimensions?: number[] } {
-  let rank: number | undefined;
+  masks: ReadonlyArray<{ rank?: 1; dimensions?: number[] }>
+): { kind: 'mask'; rank?: 1; dimensions?: number[] } {
+  let rank: 1 | undefined;
   let dimensions: number[] | undefined;
   let dimensionsDisagree = false;
   for (const m of masks) {
     if (m.rank === undefined) return { kind: 'mask' };
-    if (rank === undefined) rank = m.rank;
-    else if (rank !== m.rank) return { kind: 'mask' };
+    rank = 1;
     const dims = m.dimensions;
     if (dims === undefined) continue;
     if (dimensions === undefined) dimensions = dims;
-    else if (
-      dimensions.length !== dims.length ||
-      dimensions.some((d, i) => d !== dims[i])
-    )
-      dimensionsDisagree = true;
+    else if (dimensions[0] !== dims[0]) dimensionsDisagree = true;
   }
   return {
     kind: 'mask',
@@ -2756,14 +2625,15 @@ function mergeMaskShapes(
 }
 
 /**
- * The rank of the masks of an element-wise conditional whose conditions have
- * the types `conds`, when every condition that may be a mask is provably one
- * of that rank (`elementwiseConditionShape`), and `undefined` otherwise. A
- * compiled selection reads it to keep the code of a flat mask unchanged.
+ * 1 when some condition of an element-wise conditional whose conditions have
+ * the types `conds` is provably a mask and every condition that may be a
+ * mask is provably flat (`elementwiseConditionShape`), and `undefined`
+ * otherwise. The compiler reads it to compile a restriction by a flat mask
+ * as a restriction.
  */
 export function elementwiseMaskRank(
   conds: ReadonlyArray<Type | undefined>
-): number | undefined {
+): 1 | undefined {
   return elementwiseConditionShape(conds)?.rank;
 }
 
@@ -2773,18 +2643,17 @@ export function elementwiseMaskRank(
  * scalar typing, or the typing of a condition that is only possibly a mask,
  * applies), otherwise:
  *
- * - `rank` and `dimensions`: the shape of the masks (`mergeMaskShapes`). The
- *   rank is not known when a condition is only possibly a mask, or when the
+ * - `rank` and `dimensions`: the shape of the masks (`mergeMaskShapes`).
+ *   There is no `rank` when a condition is only possibly a mask, or when the
  *   shape analysis cannot read a condition (a condition of type `unknown`):
- *   at run time such a condition can be a mask of any rank, and the
- *   selection then follows its shape.
+ *   such a condition is checked on its value.
  * - `firstMask`: the index of the first condition that is provably a mask.
  *   A clause before it whose condition is `True` at run time selects its arm
  *   WHOLE, so the result type joins those arms.
  */
 function elementwiseConditionShape(
   conds: ReadonlyArray<Type | undefined>
-): { rank?: number; dimensions?: number[]; firstMask: number } | undefined {
+): { rank?: 1; dimensions?: number[]; firstMask: number } | undefined {
   const shapes = conds.map((t): ConditionShape =>
     t === undefined ? { kind: 'scalar' } : conditionShape(t)
   );
@@ -2807,10 +2676,9 @@ function elementwiseConditionShape(
  * `indexed_collection`) is typed `list<boolean | list<any>>`, because the
  * comparison maps a nested element at its leaves.
  *
- * Such a mask selects element-wise whatever the rank of its value, so the
- * rank of the result is not known statically: the selection is typed
- * `list<C | list<any>>` (`elementwiseResultType`), which holds a flat result
- * and a nested one.
+ * Such a mask selects element-wise when its value is flat, and its value
+ * is the `incompatible-type` error otherwise. The selection is typed
+ * `list<C | list<any>>` (`elementwiseResultType`).
  */
 function isPossiblyNestedBooleanMask(t: Readonly<Type>): boolean {
   if (typeof t === 'string' || t.kind !== 'list') return false;
@@ -2871,29 +2739,14 @@ function armElementType(t: Readonly<Type>): Type {
   // The selection indexes a list arm position by position, so a position
   // holds an ELEMENT of the arm: a row of a matrix, `U | tensor<U>` for a
   // tensor of unknown rank (`collectionElementType`). The broadcast cell
-  // (`broadcastElementType`) is a leaf of a tensor, not its element:
-  // `If([True, False, True], [[1], [2], [3]], 0)` is `[[1], 0, [3]]`, and
-  // read by its cells the arm typed the result `vector<integer^3>`.
+  // (`broadcastElementType`) is a leaf of a tensor, not its element. A list
+  // arm whose elements are lists is refused before evaluation
+  // (`selectionArmKind()`), so for a valid arm the element and the cell
+  // differ only in a type that does not settle the depth (a tensor of
+  // unknown rank, `broadcastable<…>`).
   if (t.kind === 'list' || t.kind === 'indexed_collection')
     return collectionElementType(t) ?? broadcastElementType(t);
   return t as Type;
-}
-
-/**
- * The type an arm puts at a position `depth` levels down in an element-wise
- * selection: `armElementType` applied `depth` times, which stops at a type
- * that is not a list. Under a mask of rank 2, a matrix arm puts its cells
- * there, a vector arm its elements (each one lifts to a row of the mask),
- * and a scalar arm itself.
- */
-function armTypeAtDepth(t: Readonly<Type>, depth: number): Type {
-  let result = t as Type;
-  for (let i = 0; i < depth; i++) {
-    const next = armElementType(result);
-    if (next === result) break;
-    result = next;
-  }
-  return result;
 }
 
 /**
@@ -2920,25 +2773,22 @@ function armCellType(t: Readonly<Type>, depth = 0): Type {
 
 /**
  * The type of the value that the arms of an element-wise selection put at a
- * position `depth` levels down (`armTypeAtDepth`), joined over the arms. The
- * no-match cell there is the `unmatchedCell()` of this type: `NaN` when
+ * position (`armElementType`), joined over the arms. The no-match cell there is the `unmatchedCell()` of this type: `NaN` when
  * every arm puts a number there, a `NaN` point when every arm puts a point
  * there, `Missing` otherwise.
  */
-function noMatchPositionType(arms: ReadonlyArray<Type>, depth: number): Type {
-  return widen(...arms.map((t) => armTypeAtDepth(t, depth)));
+function noMatchPositionType(arms: ReadonlyArray<Type>): Type {
+  return widen(...arms.map((t) => armElementType(t)));
 }
 
 /**
  * The type of ONE CELL of an element-wise selection: the join of the arms'
  * element types (a list-valued arm contributes its ELEMENT type, since it is
  * indexed position-wise; a scalar arm contributes its own type, since it
- * lifts). `depth` is the number of list levels between the result and the
- * cell: the rank of the mask. Under a mask of rank 2, an arm contributes its
- * type two levels down (`armTypeAtDepth`). `contributions`, when given,
- * replaces the types the arms contribute (the possibly element-wise selection
- * passes their cells, `armCellType`); the no-match rule below still reads the
- * arms at `depth`, as the evaluation does (`noMatchCell`).
+ * lifts). `contributions`, when given, replaces the types the arms
+ * contribute (the possibly element-wise selection passes their cells,
+ * `armCellType`); the no-match rule below still reads the elements of the
+ * arms, as the evaluation does (`noMatchCell`).
  *
  * `hasDefault` — a clause whose condition is literally `True` (for `If`, an
  * else branch) — decides whether the no-match cell can occur. Without one, a
@@ -2955,8 +2805,7 @@ function noMatchPositionType(arms: ReadonlyArray<Type>, depth: number): Type {
 function elementwiseCellType(
   arms: ReadonlyArray<Type>,
   hasDefault: boolean,
-  depth = 1,
-  contributions: ReadonlyArray<Type> = arms.map((t) => armTypeAtDepth(t, depth))
+  contributions: ReadonlyArray<Type> = arms.map((t) => armElementType(t))
 ): Type {
   if (hasDefault) return widen(...contributions);
   // The no-match cell is the `unmatchedCell()` of the type of the position
@@ -2968,7 +2817,7 @@ function elementwiseCellType(
   // `missing` arm. The union is built explicitly: `widen` joins toward a
   // common supertype and would dissolve the absence marker.
   const joined = widen(...contributions);
-  const position = noMatchPositionType(arms, depth);
+  const position = noMatchPositionType(arms);
   if (isNumericValueType(position)) return widen(joined, 'number');
   const n = pointArity(position);
   if (n !== undefined) return widen(joined, nanPointType(n));
@@ -2996,8 +2845,6 @@ function elementwiseCellType(
  * that the result is never a `broadcastable` of a list type: with
  * `B: broadcastable<number>`, `If(B < 0, -B, B)` is a
  * `broadcastable<number>`, not a `broadcastable<broadcastable<number>>`.
- * A value whose mask has a lower rank than an arm is not a tensor, and the
- * list arm added below holds it.
  */
 function possiblyElementwiseResultType(
   arms: ReadonlyArray<Type>,
@@ -3008,19 +2855,19 @@ function possiblyElementwiseResultType(
     elements: elementwiseCellType(
       arms,
       hasDefault,
-      1,
       arms.map((t) => armCellType(t))
     ),
   };
   const missed = arms.filter((t) => !isSubtype(t, broadcast));
-  // When an element of an arm can be a list (a matrix, a tensor, a
-  // `broadcastable`, a value of unknown type), the mask can have a lower
-  // rank than the arm at run time, and the selection then puts a row of the
-  // arm beside a cell: with `C := [-1, 1]` and `B := [[1, 2], [3, 4]]`,
-  // `If(C < 0, B, 0)` is `[[1, 2], 0]`, which is not a tensor.
-  // `list<cell | list<any>>`, a list whose elements are cells or lists of
-  // any depth, holds that value. A scalar arm and a vector arm cannot give
-  // such a value.
+  // When an element of an arm can be a list (a tensor, a `broadcastable`, a
+  // value of unknown type), the type also admits `list<cell | list<any>>`,
+  // a list whose elements are cells or lists of any depth. No valid value
+  // has that shape: an arm value whose elements are lists is refused when
+  // the selection is evaluated (`runtimeArmError()`), for example an arm
+  // declared `unknown` whose value is `[[1, 2], [3, 4]]`, which gives an
+  // `incompatible-type` error. The option is kept so that this function
+  // gives the same type as before nested selection was removed; narrowing
+  // it to `list<cell>` changes a public type.
   if (arms.some((t) => !cannotHoldAList(armElementType(t))))
     missed.push({
       kind: 'list',
@@ -3046,18 +2893,9 @@ function possiblyElementwiseResultType(
  * `Which([1, 5] < 3, 7)` and `If([1, 5] < 3, 7)` are both `[7, NaN]`
  * (selection rule of 2026-11-02, `docs/BROADCAST-MODEL.md`). The rule reads the types of the arms and not
  * their values: an arm that no position reaches is not evaluated.
- *
- * `depth` is the number of list levels between the result and the position:
- * 1 under a mask of rank 1, 2 for a cell of a mask of rank 2. An arm puts
- * its type that many levels down there (`armTypeAtDepth`), so with
- * `M := [[1, 2], [3, 4]]`, `If(M < 3, M)` is `[[1, 2], [NaN, NaN]]`.
  */
-function noMatchCell(
-  ce: ComputeEngine,
-  arms: ReadonlyArray<Type>,
-  depth = 1
-): Expression {
-  return unmatchedCell(ce, noMatchPositionType(arms, depth));
+function noMatchCell(ce: ComputeEngine, arms: ReadonlyArray<Type>): Expression {
+  return unmatchedCell(ce, noMatchPositionType(arms));
 }
 
 /**
@@ -3102,8 +2940,9 @@ function isOpenConditionCell(t: Type): boolean {
 /**
  * True when a condition of type `t` cannot be read (`conditionShape` is
  * `unreadable`: `unknown`, `any`, a union of a scalar and a mask) and may
- * hold a list. At run time such a condition can be a mask of any rank, and
- * the selection is then element-wise. A condition that cannot hold a list (a
+ * hold a list. At run time such a condition can be a scalar or a flat mask,
+ * and with a flat mask the selection is element-wise; a nested value is an
+ * `incompatible-type` error. A condition that cannot hold a list (a
  * number, which the canonical form refuses) is not read as a mask.
  */
 function unreadableConditionMayBeMask(t: Type): boolean {
@@ -3130,7 +2969,7 @@ function unreadableConditionMayBeMask(t: Type): boolean {
  */
 function scalarOrMaskConditionShape(
   conds: ReadonlyArray<Type | undefined>
-): { rank?: number; dimensions?: number[] } | undefined {
+): { rank?: 1; dimensions?: number[] } | undefined {
   const shapes = conds.map((t): ConditionShape =>
     t === undefined ? { kind: 'scalar' } : conditionShape(t)
   );
@@ -3152,22 +2991,19 @@ function scalarOrMaskConditionShape(
  * The type of an element-wise selection, given the shape of its masks
  * (`elementwiseConditionShape`).
  *
- * - When the rank `k` of the masks is known, the result is a list of rank
- *   `k` of `elementwiseCellType` read `k` levels down: with dimensions when
- *   the masks have known common dimensions and the cell can carry them, and
- *   otherwise `k` nested plain lists (`list<C>` for a mask of rank 1 whose
- *   length is not provable). With `M := [[1, 2], [3, 4]]`, `If(M < 3, M, 0)`
- *   is a `matrix<integer^(2x2)>`.
- * - When the rank is not known, the result is `list<C | list<any>>`, a list
- *   whose elements are cells or lists of any depth, with `C` the cell type
- *   one level down: an element of the result is a cell when the mask is flat
- *   at that position and a list when it is not. This is the type
+ * - When the masks are flat (`rank` 1), the result is a list of
+ *   `elementwiseCellType`: with its length when the masks have a known
+ *   common length and the cell can carry it (`list<integer^2>`), and
+ *   `list<C>` otherwise.
+ * - When the type does not settle that the masks are flat, the result is
+ *   `list<C | list<any>>`, a list whose elements are cells or lists of any
+ *   depth, with `C` the cell type. This is the type
  *   `broadcastShapedResultType` (`common/type/utils.ts`) gives a broadcast
  *   of unknown depth.
  */
 function elementwiseResultType(
   arms: ReadonlyArray<Type>,
-  shape: { rank?: number; dimensions?: number[] },
+  shape: { rank?: 1; dimensions?: number[] },
   hasDefault: boolean
 ): Type {
   if (shape.rank === undefined)
@@ -3181,8 +3017,7 @@ function elementwiseResultType(
         ],
       }),
     };
-  const rank = shape.rank;
-  const elements = elementwiseCellType(arms, hasDefault, rank);
+  const elements = elementwiseCellType(arms, hasDefault);
   // The union-free clause (tensor-unification design §D3 rule 2): a
   // dimensioned `list` type IS the tensor claim (`isTensor` is exactly
   // `dimensions !== undefined`), and a heterogeneous cell population never
@@ -3194,18 +3029,15 @@ function elementwiseResultType(
   // no-default mixed case, whose no-match cell joins in `number`. A length
   // is written only for a cell that may carry a dimension
   // (`mayCarryDimensions`: a cell that cannot be a list), so a selection of
-  // numbers, booleans or points keeps its length; a selection of lists is
-  // a plain list.
+  // numbers, booleans or points keeps its length.
   const dimensions = shape.dimensions;
   const shaped =
     dimensions !== undefined &&
-    dimensions.length === rank &&
+    dimensions.length === 1 &&
     (typeof elements === 'string' || elements.kind !== 'union') &&
     mayCarryDimensions(elements);
   if (shaped) return { kind: 'list', elements, dimensions: [...dimensions] };
-  let result: Type = elements;
-  for (let i = 0; i < rank; i++) result = { kind: 'list', elements: result };
-  return result;
+  return { kind: 'list', elements };
 }
 
 /** Evaluate an `If` expression. */
@@ -3384,11 +3216,10 @@ function distributeOverListArms(
  * A restriction that cannot be decided now is held, spelled `If(c, e)`.
  *
  * - A finite collection of conditions (a mask) restricts element by element.
- *   A mask of rank 2 or more (a list with a list of conditions in it, such
- *   as `M < 0` over a matrix `M`) selects cell by cell at every level, as
- *   `Which` does (user decision 2026-10-23, ROADMAP CE-223.1). A mask of
- *   rank 1 zips a collection value with the mask, to the shorter of the two
- *   lengths, and restricts a scalar value whole at each position. A cell
+ *   A mask with a list of conditions in it (`M < 0` over a matrix `M`) is
+ *   the `incompatible-type` error (`evaluateElementwiseSelection()`): a
+ *   condition is a boolean or a flat list of booleans. A flat mask zips a
+ *   collection value with the mask, to the shorter of the two lengths, and restricts a scalar value whole at each position. A cell
  *   whose condition is `True` is the element, a cell whose condition is
  *   `False` is its absent value (`maskedValue`: `NaN` for a number,
  *   `Missing` otherwise), and any other cell is the held `If(c_i, elem_i)`.

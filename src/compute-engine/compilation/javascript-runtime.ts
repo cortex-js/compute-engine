@@ -2252,42 +2252,9 @@ function bcastWith(
  * A selection arm the compiler proved to be one POINT — an array at this
  * ABI, like a list arm, but a value to lift WHOLE to every position that
  * selects it (see `compileJSSelection`). `select` unwraps it.
- *
- * With a `depth` of 1 or more, the arm is a list whose values `depth` levels
- * down are points (a list of points has `depth` 1). With
- * `unknownPointDepth`, the arm is a list whose type does not give the depth
- * of its points (`list<any>`, `tensor<tuple<…>>`), and `depth` is
- * `Infinity`. `selectWith` uses each of these arms as an ordinary list arm:
- * a condition is a boolean or a flat list of booleans, and a mask whose
- * value has a list cell gives `NaN` before any arm is read. The compiler
- * still emits the depth (`wholeAt`, `pointDepthUnknown`); no helper reads it.
  */
 class WholeArm {
-  constructor(
-    readonly value: unknown,
-    readonly depth: number = 0,
-    readonly unknownPointDepth: boolean = false
-  ) {}
-}
-
-/**
- * The absence value of a position that no clause of a selection matched, for
- * each depth: `values[d - 1]` at depth `d`, and the last value at any deeper
- * level. The compiler passes it when the cells of the arms at one depth are
- * numbers and at another are not (a matrix arm `M` has a row at depth 1 and
- * a number at depth 2). `selectWith` reads only depth 1: a mask whose value
- * has a list cell gives `NaN`, so no position is deeper than 1.
- */
-class AbsentByDepth {
-  constructor(readonly values: ReadonlyArray<unknown>) {}
-}
-
-/** The absence value of an unmatched position at depth `depth` (1 or more):
- * see `AbsentByDepth`. */
-function absentAtDepth(absent: unknown, depth: number): unknown {
-  if (!(absent instanceof AbsentByDepth)) return absent;
-  const values = absent.values;
-  return values[Math.min(depth, values.length) - 1];
+  constructor(readonly value: unknown) {}
 }
 
 /**
@@ -2387,7 +2354,7 @@ function selectWith(
     const last = selectors[selectors.length - 1];
     // No condition is true: the value is absent. An absent condition is NaN.
     if (last === 'absent') return NaN;
-    if (last !== true) return wholeAbsent(absentAtDepth(absent, 1));
+    if (last !== true) return wholeAbsent(absent);
     const v = armThunks[armThunks.length - 1]();
     return v instanceof WholeArm ? v.value : v;
   }
@@ -2454,15 +2421,10 @@ function selectWith(
   const indexed: boolean[] = new Array(selectors.length).fill(false);
   for (let k = 0; k < selectors.length; k++) {
     if (reached[k] === 0) continue;
-    let v = armThunks[k]();
+    const v = armThunks[k]();
     if (v instanceof WholeArm) {
-      if (v.depth === 0) {
-        values[k] = v.value;
-        continue;
-      }
-      // A list whose points are deeper, or at a depth that its type does
-      // not give: an ordinary list arm under a flat mask.
-      v = v.value;
+      values[k] = v.value;
+      continue;
     }
     if (Array.isArray(v)) {
       if (v.length !== n) return NaN;
@@ -2480,7 +2442,7 @@ function selectWith(
       continue;
     }
     if (k < 0) {
-      out[j] = absentAtDepth(absent, 1);
+      out[j] = absent;
       continue;
     }
     out[j] = indexed[k] ? (values[k] as unknown[])[j] : values[k];
@@ -4741,31 +4703,15 @@ export const SYS_HELPERS = {
     selectWith(absent, clauses),
   // A point arm of such a selection, lifted whole rather than indexed.
   wholeArm: (value: unknown): WholeArm => new WholeArm(value),
-  // A list arm whose values `depth` levels down are points. `selectWith`
-  // uses it as an ordinary list arm: a mask whose value has a list cell
-  // gives `NaN` (`WholeArm`).
-  wholeAt: (depth: number, value: unknown): WholeArm =>
-    new WholeArm(value, depth),
   // An arm whose type is a point or a list of points: an array with no
   // array in it is the point, lifted whole; any other value is the list,
   // an ordinary list arm (`WholeArm`).
-  pointOrPoints: (depth: number, value: unknown): unknown =>
+  pointOrPoints: (value: unknown): unknown =>
     Array.isArray(value) &&
     value.length > 0 &&
     value.every((x) => !Array.isArray(x))
       ? new WholeArm(value)
-      : depth > 0
-        ? new WholeArm(value, depth)
-        : value,
-  // A list arm whose type does not give the depth of its points: an
-  // ordinary list arm. A mask whose value has a list cell gives `NaN`
-  // before the arm is read (`WholeArm`).
-  pointDepthUnknown: (value: unknown): WholeArm =>
-    new WholeArm(value, Infinity, true),
-  // The absence value of an unmatched position for each depth
-  // (`AbsentByDepth`; only depth 1 is read), passed to `selectAbsent`.
-  absentByDepth: (...values: unknown[]): AbsentByDepth =>
-    new AbsentByDepth(values),
+      : value,
   // The restriction `value\{conditions\}` (a restriction) over a LIST of conditions:
   // one masked value per condition, `absent` (the value of one position
   // that is not selected: `NaN` or its complex form for a number, a point

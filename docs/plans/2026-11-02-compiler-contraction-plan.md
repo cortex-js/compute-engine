@@ -1637,6 +1637,102 @@ measured by the step. A step that finds a corpus expression depending on the
 removed code stops and reports: that expression is a `corpus` witness, and
 the rule for it is decided by the user, not by the implementer.
 
+The result of step 4, row 1 (selection; 2026-11-03, session
+compute-engine-57; base `1359a1279`; staged, not committed).
+
+- **What was removed.** In `javascript-target.ts`, `compileJSSelection()`:
+  the `flat` flag, the `!flat` branch that built `_SYS.absentByDepth(…)`,
+  the `_SYS.wholeAt(…)` and `_SYS.pointDepthUnknown(…)` emissions,
+  `mayHoldPointAtUnknownDepth()`, and the depth argument of
+  `_SYS.pointOrPoints`. `pointOrPointListDepth()` became the predicate
+  `isPointOrPointListArm()`, because no caller reads the depth. In
+  `javascript-runtime.ts`: `AbsentByDepth`, `absentAtDepth()`, the `depth`
+  and `unknownPointDepth` fields of `WholeArm`, the `_SYS` entries
+  `wholeAt`, `pointDepthUnknown` and `absentByDepth`, and the depth branch
+  of `selectWith`. In `library/control-structures.ts`:
+  `evaluateElementwiseSelection()` is one flat loop (the recursive `select`,
+  the levels below 1 of `assemble`, `lowerRankArmError()`, the
+  `SelectionNode` and `SelectionList` types are gone); `armTypeAtDepth()` is
+  gone (at depth 1 it was `armElementType()`); `noMatchCell()`,
+  `noMatchPositionType()` and `elementwiseCellType()` lost their `depth`
+  parameter; `elementwiseResultType()` no longer nests the list once per
+  rank; `conditionShape()`, `mergeMaskShapes()` and `elementwiseMaskRank()`
+  give rank 1 or nothing. Why the code was unreachable: a condition whose
+  type is nested is refused before compilation (`conditionOperand()`,
+  `isNeverFlatMaskType()`); a condition whose type does not settle the rank
+  (choice (3) of 3.3) and whose value is nested gives `NaN` in `selectWith`
+  before an arm is read, and the `incompatible-type` error in the
+  interpreter, whose loop tests for a list cell before it reads an arm. The
+  old runtime read only depth 1 of an `AbsentByDepth`, which was the plain
+  absent value, and treated a `WholeArm` or a `pointOrPoints` of depth above
+  0 as a plain list arm: the removed wrappers did not change a value.
+- **What the survey found with nothing to remove.** `compile-conditionals.ts`,
+  `compile-conditions.ts` and `compiler-core.ts`: comments only (they
+  described the removed depth code). The GLSL, WGSL, interval-js and Python
+  targets and `compile-broadcast.ts` have no element-wise selection:
+  `assertScalarCondition()` refuses a condition that can be a list on every
+  target except JavaScript, so there was no per-target copy of one lowering
+  to merge; the one element-wise lowering is the JavaScript one.
+  `boxed-expression` has no selection code that depends on the rank.
+  `compile-match.ts` (`Match`) used none of the removed code; it stays. The
+  table above estimated `compile-conditionals.ts` 546, `compile-conditions.ts`
+  488 and `compile-match.ts` 716 lines for this row: the rank-2 code that
+  3.3 left was much smaller than these module counts.
+- **Code lines** (`.ts`, not blank, `//`, `/*` or `*`): `compilation`
+  92,764 → 92,704 (−60), `library` 80,129 → 80,028 (−101),
+  `boxed-expression` 83,745 → 83,745. Source: 6 files; with the one test
+  file, 7 files, 184 insertions, 468 deletions.
+- **Tests.** None deleted or converted: item 3.3 had already turned the
+  rank-2 value tests into assertions of the static error or the decline,
+  and those still pass. One test comment in
+  `test/compute-engine/compile-elementwise-which.test.ts` that named the
+  deleted `selectNested` was rewritten. No snapshot changed.
+- **The corpus measure** (Tycho frozen at `a34405ae0`, a plain `git archive`
+  of Tycho main with no patch, which holds Tycho's adoption of 0.178.0; the
+  tools of 3.4.1 with records keyed by MathJSON; base run on `1359a1279`,
+  candidate on the final tree): 17,825 compiles, 13,707 keys and 77,267
+  values in both runs; 0 changed values, 0 new throws. Declines: javascript
+  47, glsl 44, interval-js 61 in both runs; no new decline and no decline
+  gone.
+- **Review**: Claude and Codex, one round. Codex: no finding. Claude: three
+  low findings and one nit, all fixed (a comment whose example did not reach
+  its function, two comments that still described nested masks, the depth
+  that no caller read). No second round: no finding was `high` or `medium`.
+- **Choices, each reversible.** (1) The result type of a selection whose
+  condition is typed as a matrix, when the condition was boxed before its
+  type was known, is now `list<C | list<any>>`, not `matrix<…>`; its value is
+  the `incompatible-type` error before and after (witness `crafted`; no
+  known-limitations line, since no compiled value changes). The other option
+  was to keep the rank code for the type alone. (2) The type of a selection
+  whose condition does not settle the rank still admits `list<C | list<any>>`
+  (`elementwiseResultType()`, `possiblyElementwiseResultType()`), although
+  no valid value has that shape now: narrowing it to `list<C>` changes a
+  public type and possibly compile routing, so it is not in a pure removal.
+  Example: `If(T, 1, 0)` with `T: tensor<boolean>` is typed
+  `list<integer | list<any>>`.
+- **Seen, outside this row.** A host function declared with a result type
+  `tuple<real, real> | list<tuple<real, real>>` used as a selection arm
+  compiles with a test of the value at run time (`_SYS.pointOrPoints`).
+  This is the union-of-shapes dispatch of row 3 (admission and shapes).
+- **Checks** (in the worktree, on the tree before the review fixes; the fixes
+  were comments and the predicate): typecheck, `oxlint` on the changed
+  files, `check:deps`, 73 selection test files (6,135 passed), `test:core`
+  (5,501 passed). After the fixes, in the main tree: typecheck, `oxlint` on
+  the two changed files, the 73 compile test files that name a selection
+  (4,492 passed). The full suite did not run: the change touches neither
+  `boxed-expression` nor `common/type`. The Python target did not change.
+- **Documents.** `docs/BROADCAST-MODEL.md` and `docs/COMPILATION-MODEL.md`
+  did not describe the removed mechanisms (they state the shipped rule), and
+  no page under `~/dev/cortexjs.io/docs/compute-engine/` did (only the
+  generated `changelog.md` names masks of rank 2, as history). No CHANGELOG
+  entry: no public behavior changed.
+- **What row 2 (absence) can rely on.** `selectWith` reads one absent value
+  for every unmatched position (passed as `_SYS.selectAbsent(absent, …)`)
+  and the whole value is `wholeAbsent(absent)`; there is no absent value per
+  depth. The interpreter's unmatched cell is always `noMatchCell(ce,
+  armTypes)` at depth 1. The `'absent'` selector and cell handling of
+  `selectWith` (item 3.4.1) are unchanged and belong to row 2.
+
 ## 5. The growth guard (done 2026-11-02, commit 97c3d409a)
 
 Two numbers per commit in the nightly run, kept with its result: the code

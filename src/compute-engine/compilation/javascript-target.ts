@@ -613,7 +613,6 @@ import { literalParamsMap, pipeStageAsCall } from '../library/core.js';
 import { freeTypeVariables } from '../../common/type/instantiate.js';
 import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 import { isAccessorOfPossibleList } from '../boxed-expression/point-accessor-operand.js';
-import { elementwiseMaskRank } from '../library/control-structures.js';
 import { colorSpaceOf, isColorValued } from './color-space-fact.js';
 import {
   curriedApplication,
@@ -2045,13 +2044,12 @@ function compileJSSelection(
     a.type.matches('collection<any>') ||
     isPossiblyCollectionTypedJS(a);
   if (!conds.some(collectionish)) return null;
-  // A mask that is not provably flat (of rank 1) may have rank 2 or more at
-  // run time. The helper gives `NaN` for a mask whose value has a list cell,
-  // as the interpreter refuses such a condition. For such a mask the
-  // compiler still passes the absence value of each depth and the depth of
-  // the points of a list arm, which the helper does not read; the code of a
-  // flat mask is unchanged.
-  const flat = elementwiseMaskRank(conds.map((c) => c.type.type)) === 1;
+  // A condition is a boolean or a flat list of booleans. A condition whose
+  // type does not settle that it is flat (`tensor<boolean>`) is checked on
+  // its value: the helper gives `NaN` for a mask whose value has a list
+  // cell, as the interpreter refuses such a condition. So every list arm is
+  // indexed at one level, and a position that no clause selects has the
+  // absence value of the elements of the arms.
   if (target && absent === undefined) {
     // The cell of an arm: a point arm is lifted whole, a list arm is indexed
     // (its element), and a scalar arm is lifted.
@@ -2059,7 +2057,7 @@ function compileJSSelection(
       if (mayBePointArm(t)) return t;
       // A point or a list of points: each cell is a point (the point lifted
       // whole, or an element of the list).
-      if (pointOrPointListDepth(t) !== undefined) {
+      if (isPointOrPointListArm(t)) {
         const resolved = resolveTypeAlias(t);
         if (typeof resolved !== 'string' && resolved.kind === 'union') {
           const point = resolved.types.find((arm) => isPointElementType(arm));
@@ -2083,26 +2081,9 @@ function compileJSSelection(
       BaseCompiler.absenceKind(cellTypes, target) === 'object'
         ? nullLiteral
         : 'NaN');
-    let cellTypes = args
-      .filter((_x, i) => i % 2 === 1)
-      .map((x) => cellOf(x.type.type));
-    absent = absentOf(cellTypes);
-    // The absence value of the arms' cells at each depth: with a matrix arm
-    // `M`, `If(M < 3, M)` has a row at depth 1 and a number at depth 2. The
-    // helper reads only depth 1: a mask whose value has a list cell gives
-    // `NaN`.
-    if (!flat) {
-      const byDepth = [absent];
-      const rank = elementwiseMaskRank(conds.map((c) => c.type.type));
-      for (let d = 2; d <= (rank ?? 8); d++) {
-        const next = cellTypes.map(cellOf);
-        if (next.every((t, i) => t === cellTypes[i])) break;
-        cellTypes = next;
-        byDepth.push(absentOf(cellTypes));
-      }
-      if (byDepth.some((a) => a !== absent))
-        absent = `_SYS.absentByDepth(${byDepth.join(', ')})`;
-    }
+    absent = absentOf(
+      args.filter((_x, i) => i % 2 === 1).map((x) => cellOf(x.type.type))
+    );
   }
   if (target) {
     // The generic branch behind the fused loop's guard keeps the operand
@@ -2144,22 +2125,8 @@ function compileJSSelection(
       // two apart. A point is lifted whole, as the interpreter lifts it, and
       // a list of points is indexed (`_SYS.pointOrPoints`, ROADMAP
       // CE-223.2).
-      const pointOrList = pointOrPointListDepth(x.type.type);
-      if (pointOrList !== undefined)
-        return `() => _SYS.pointOrPoints(${flat ? 0 : pointOrList}, ${compile(x, i)})`;
-      // A list of points under a mask that may be nested: the helper uses it
-      // as an ordinary list arm, and a mask whose value has a list cell
-      // gives `NaN` (`WholeArm`).
-      const depth = flat ? undefined : pointDepthOfArm(x.type.type);
-      if (depth !== undefined)
-        return `() => _SYS.wholeAt(${depth}, ${compile(x, i)})`;
-      // A list arm whose type does not give the depth of its points but
-      // may hold points (an element type `tuple<…> | tensor<tuple<…>>`, or
-      // `any`), under a mask that may be nested: the helper uses it as an
-      // ordinary list arm, and a mask whose value has a list cell gives
-      // `NaN` (`_SYS.pointDepthUnknown`).
-      if (!flat && mayHoldPointAtUnknownDepth(x.type.type))
-        return `() => _SYS.pointDepthUnknown(${compile(x, i)})`;
+      if (isPointOrPointListArm(x.type.type))
+        return `() => _SYS.pointOrPoints(${compile(x, i)})`;
       return `() => (${compile(x, i)})`;
     })
     .join(', ')})`;
@@ -2183,16 +2150,15 @@ function pointDepthOfArm(t: Type): number | undefined {
 }
 
 /**
- * The depth of the points of the list arm of `t`, when `t` is a union of
- * points with scalar coordinates and lists of such points at one depth
- * (`tuple<real, real> | list<tuple<real, real>>` gives 1), and `undefined`
- * for any other type. A value of such a type is a point when it is an array
- * with no array in it, and a list of points otherwise.
+ * True when `t` is a union of points with scalar coordinates and lists of
+ * such points, all list options with their points at one depth
+ * (`tuple<real, real> | list<tuple<real, real>>`). A value of such a type is
+ * a point when it is an array with no array in it, and a list of points
+ * otherwise.
  */
-function pointOrPointListDepth(t: Type): number | undefined {
+function isPointOrPointListArm(t: Type): boolean {
   const resolved = resolveTypeAlias(t);
-  if (typeof resolved === 'string' || resolved.kind !== 'union')
-    return undefined;
+  if (typeof resolved === 'string' || resolved.kind !== 'union') return false;
   const scalar = (x: Type): boolean =>
     isSubtype(x, 'number') || isSubtype(x, 'boolean') || isSubtype(x, 'string');
   let point = false;
@@ -2200,40 +2166,15 @@ function pointOrPointListDepth(t: Type): number | undefined {
   for (const arm of resolved.types) {
     const r = resolveTypeAlias(arm);
     if (typeof r !== 'string' && r.kind === 'tuple') {
-      if (!r.elements.every((e) => scalar(e.type))) return undefined;
+      if (!r.elements.every((e) => scalar(e.type))) return false;
       point = true;
       continue;
     }
     const d = pointDepthOfArm(arm);
-    if (d === undefined || (depth !== undefined && depth !== d))
-      return undefined;
+    if (d === undefined || (depth !== undefined && depth !== d)) return false;
     depth = d;
   }
-  return point ? depth : undefined;
-}
-
-/**
- * May an arm of type `t` hold a point at a depth that `pointDepthOfArm`
- * cannot give? True when `t`, or one of its levels of elements, is a union
- * with a point arm beside a list arm (`tuple<…> | tensor<tuple<…>>`, the
- * element type of `tensor<tuple<…>>`), or when the elements of a level may
- * be a point (`any`, `unknown`: the elements of `list<any>` and of a bare
- * `list`). The arm itself typed `unknown` does not count: its value is a
- * scalar until proven otherwise, as everywhere in the compiler.
- */
-function mayHoldPointAtUnknownDepth(t: Type, depth = 0): boolean {
-  if (depth > 8) return false;
-  const resolved = resolveTypeAlias(t);
-  if (typeof resolved !== 'string' && resolved.kind === 'union')
-    return resolved.types.some(
-      (arm) =>
-        isPointElementType(arm) || mayHoldPointAtUnknownDepth(arm, depth + 1)
-    );
-  if (!isSubtype(resolved, 'indexed_collection<any>')) return false;
-  const next = collectionElementType(resolved);
-  if (next === undefined || next === resolved) return false;
-  if (couldMatch(next, 'tuple')) return true;
-  return mayHoldPointAtUnknownDepth(next, depth + 1);
+  return point && depth !== undefined;
 }
 
 /**

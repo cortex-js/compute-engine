@@ -3985,8 +3985,8 @@ export function compileExpr(
   // list value with the mask and truncates to the shorter of the two
   // (`If([True, True], [10, 20, 30])` is `[10, 20]`), where the one-clause
   // `Which` needs equal lengths. So that case compiles through the
-  // restriction lowering (`compileExprRestriction`). A mask of rank 2 or
-  // more, or of a rank that the type does not give, takes the `Which`
+  // restriction lowering (`compileExprRestriction`). A mask whose type
+  // does not settle that it is flat (`tensor<boolean>`) takes the `Which`
   // route below. The operands are passed without the `If` node, in the
   // order `[t, c]`, so the CSE regions of the node do not apply.
   if (
