@@ -299,6 +299,15 @@
 
 ### Resolved Issues
 
+- **An element read of a symbol that holds a list of numbers is a number in
+  compiled JavaScript, whatever the declared type of the symbol.** With `C`
+  declared as the bare type `list` and holding `[c_1, …, c_10]` over symbols
+  of type `real`, the term of `\sum_{i=0}^{\mathrm{Length}(C)-1} C[i+1] x^i`
+  is typed `any`, and the loop tested the shape of every term at run time
+  (`Array.isArray` and `_SYS.bcast`). The compiled code folds the held list
+  into a constant, so the read is a number, and the loop adds numbers with no
+  test. No value changes. The type of the expression in the interpreter does
+  not change.
 - **A list of points plus a point keeps the signed infinities in the
   component types.** With `E = real | signed_infinity | nan`,
   `L: list<tuple<E, E>>` and `P: tuple<E, E>`, the sums `L + (1, 1)` and

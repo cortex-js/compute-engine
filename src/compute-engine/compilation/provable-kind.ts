@@ -88,6 +88,62 @@ export function provableTopLevelKind(
 }
 
 /**
+ * The element type of `x` when `x` is `At(C, i)` with `C` a symbol that holds
+ * a `List` literal whose elements are all numbers, and `i` a scalar index
+ * (`indexIsScalar`). Otherwise `undefined`.
+ *
+ * The compiled code folds the held value into a preamble constant, so the
+ * read sees that list whatever the declared type of `C` says. A symbol
+ * declared with the bare type `list` has the static element type `any`, and
+ * `At(C, i)` is typed `any`, yet the value `[c_1, c_2]` over symbols typed
+ * `real` is a list of numbers. `isFree` says whether the name is the held
+ * symbol: a parameter, an index or a local that spells the same name is not.
+ */
+export function heldListElementType(
+  x: Expression,
+  isFree: (name: string) => boolean,
+  indexIsScalar: (index: Expression) => boolean
+): Type | undefined {
+  if (!isFunction(x, 'At') || x.nops !== 2) return undefined;
+  const [base, index] = x.ops;
+  if (!isSymbol(base) || !isFree(base.symbol)) return undefined;
+  const held = x.engine._getSymbolValue(base.symbol);
+  if (!isFunction(held, 'List') || held.nops === 0) return undefined;
+  if (!indexIsScalar(index)) return undefined;
+  // A symbol element is read from the engine, not from the node: the held
+  // list keeps the symbol nodes that it was assigned with, and a node bound
+  // before a later `declare` of the same name still reports the old type
+  // (`unknown`).
+  return held.ops.every((el) =>
+    (isSymbol(el) ? x.engine.box(el.symbol).type : el.type).matches('number')
+  )
+    ? 'number'
+    : undefined;
+}
+
+/**
+ * The kind of an application of a built-in operator, read by the structural
+ * rules alone: `isScalar` is asked about the OPERANDS, never about `a` itself.
+ *
+ * A caller whose `isScalar` is the predicate that is deciding the kind of `a`
+ * (`isPossiblyCollectionTypedJS`) cannot use {@link provableTopLevelKind}: its
+ * first step asks `isScalar(a)` and the predicate calls itself on the same
+ * expression without end.
+ */
+export function provableStructuralKind(
+  a: Expression,
+  isScalar: (a: Expression) => boolean
+): ProvableKind | undefined {
+  const kind = (x: Expression): ProvableKind | undefined => {
+    if (isScalar(x)) return 'scalar';
+    const n = pointWidthOfType(x.type.type);
+    if (n !== undefined) return { point: n };
+    return structuralKind(x, kind, new Set());
+  };
+  return structuralKind(a, kind, new Set());
+}
+
+/**
  * The heads that build a point from the components listed as their operands.
  *
  * `Tuple`, `Pair`, `Triple` and `Single` are the tuple spellings the engine
@@ -250,6 +306,20 @@ function structuralKind(
     )
       return first;
     return undefined;
+  }
+
+  // An element read of a symbol that holds a `List` of numbers
+  // (`heldListElementType()`). A name that the enclosing reading binds (a
+  // parameter or an index) is not the held symbol, so it declines: such a
+  // name has a kind of its own.
+  if (h === 'At') {
+    const base = ops[0];
+    if (base === undefined || !isSymbol(base) || kind(base) !== undefined)
+      return undefined;
+    return heldListElementType(x, () => true, (i) => kind(i) === 'scalar') !==
+      undefined
+      ? 'scalar'
+      : undefined;
   }
 
   if (h === 'Negate') return ops.length === 1 ? kind(ops[0]) : undefined;

@@ -93,6 +93,7 @@ import { ascribeDeclaredParameterTypes } from '../engine-declarations.js';
 import {
   provableApplicationKind,
   provableTopLevelKind,
+  provableStructuralKind,
   userFunctionLiteral,
 } from './provable-kind.js';
 import { Complex } from 'complex.js';
@@ -2657,10 +2658,15 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
     // here: a point is a JavaScript array at run time, so it IS a collection
     // for the paths this predicate guards.
     // Provenance: Tycho item 86.
+    // An application of a built-in operator is read by the same structural
+    // rules (`provableStructuralKind`): `At(C, i + 1) * x ^ i`, where `C` is
+    // declared with the bare type `list` and holds a list of scalars, is
+    // typed `any` and is a scalar.
     return (
       provableApplicationKind(e, new Set(), (a) =>
         provableTopLevelKind(a, topLevelArgIsScalar)
-      ) !== 'scalar'
+      ) !== 'scalar' &&
+      provableStructuralKind(e, topLevelArgIsScalar) !== 'scalar'
     );
   }
   // A scalar-or-collection union (`integer | vector<integer^2>`) is a scalar

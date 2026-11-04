@@ -5,6 +5,7 @@
 import { isIndexReadTuple } from '../boxed-expression/index-read-tuple.js';
 import { nonScalarEnclosingBindings } from '../boxed-expression/enclosing-binding-result-type.js';
 import { derivativeClosedForm } from './derivative-closed-form.js';
+import { heldListElementType } from './provable-kind.js';
 import { assertNoFunctionValue } from './compile-function-values.js';
 import { callWithCompiledDefaults } from './compile-parameter-defaults.js';
 import type {
@@ -5548,6 +5549,18 @@ export function staticTypeOf(
   // whatever its own type (`unknown` with no annotation): every call
   // reaches that variant with scalar values (`isScalarParam()`).
   if (isSymbol(a) && isScalarParam(a.symbol, target.boundVars)) return 'number';
+  // An element read of a symbol that holds a list of numbers reads a number,
+  // whatever the declared type of the symbol says (`heldListElementType()`).
+  // The index must be a number, and the symbol must not be a name that the
+  // code binds.
+  if (
+    heldListElementType(
+      a,
+      (name) => !target.boundVars?.has(name) && !target.varsKeys?.has(name),
+      (index) => index.type.matches('number')
+    ) !== undefined
+  )
+    return 'number';
   const variant = variantResultType(a, target);
   return variant !== undefined && mapRankOfType(variant) !== undefined
     ? variant
