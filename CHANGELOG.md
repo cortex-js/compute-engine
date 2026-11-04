@@ -589,6 +589,13 @@
 
 ### Resolved Issues
 
+- **A returned closure calls a local function that a nested block declares.**
+  `Apply(Apply(w ↦ (x ↦ If(x > 0, Block(Declare(g, "unknown", z ↦ 3),
+  x + g(0)), 0)), 1), 5)` gave `5 + g(0)`; it now gives `8`. When a call
+  ends, the nested block of a closure that the call returns is rebuilt on a
+  new scope, and the call `g(0)` did not find the local `g` in that scope.
+  (CE-794.)
+
 - **In `mode: 'complex'`, a block local with a real value compiles on the
   real lane.** With `x: real`, the compiled
   `Block(Declare(k, "unknown", Floor(x)), Cos(k)) + Floor(x)` gave the

@@ -16,7 +16,10 @@
  *   (`captureClosures`). The call `g(0)` finds its callee by the scope that
  *   holds its binding, and the frame of a later application stood for the
  *   new scope only, not for the scope the call was bound in. Now the new
- *   scope stands for the old one (`markCallableFrame`).
+ *   scope stands for the old one (`markCallableFrame`). The same holds for
+ *   the scope of a nested block of the literal (a branch of an `If`) that
+ *   declares a local function (`Declare(g, "unknown", z ↦ 3)`), which
+ *   `captureClosures` also rebuilds on a new scope.
  *
  * A closure keeps the binding of a local, not its value when the closure is
  * created (`docs/SCOPING-MODEL.md`, "Callable resolution": "Capturing a
@@ -287,5 +290,91 @@ describe('a returned closure that defines and calls a local function', () => {
     expect(
       await jsonAsync(['Apply', ['Apply', innerLocalFunction, 1], 5])
     ).toBe(8);
+  });
+});
+
+// A literal `w ↦ (x ↦ If(x > 0, Block(Declare(g, "unknown", value), body),
+// 0))`. The nested block declares the local function `g` with its value.
+const declaredInBranch = (value: unknown, body: unknown) => [
+  'Function',
+  [
+    'Function',
+    [
+      'If',
+      ['Greater', 'x', 0],
+      ['Block', ['Declare', 'g', "'unknown'", value], body],
+      0,
+    ],
+    'x',
+  ],
+  'w',
+];
+
+describe('a returned closure that declares a local function in a nested block', () => {
+  // A nested block of the returned literal is rebuilt on a new scope when
+  // the call ends (`captureClosures`), and a run of the block gives the
+  // `Declare` local a new binding in that scope. The call `g(0)` is bound to
+  // the hoisted `g`, whose home is the old scope: the new scope must stand
+  // for it. (CE-794.)
+  const witness = declaredInBranch(['Function', 3, 'z'], [
+    'Add',
+    'x',
+    ['g', 0],
+  ]);
+
+  test('the call of the local function is evaluated', () => {
+    // 5 + 3
+    expect(json(['Apply', ['Apply', witness, 1], 5])).toBe(8);
+  });
+
+  test('the closure applied several times gives the value of each call', () => {
+    const ce = new ComputeEngine();
+    ce.box(['Assign', 'h', ['Apply', witness, 1]]).evaluate();
+    expect(ce.box(['h', 5]).evaluate().json).toBe(8);
+    expect(ce.box(['h', -2]).evaluate().json).toBe(0);
+    expect(ce.box(['h', 7]).evaluate().json).toBe(10);
+  });
+
+  test('the local function reads the parameters of both literals', () => {
+    // g = z ↦ w·z + x, applied to 10, then 5: 5 + (10·2 + 5)
+    const expr = declaredInBranch(
+      ['Function', ['Add', ['Multiply', 'w', 'z'], 'x'], 'z'],
+      ['Add', 'x', ['g', 2]]
+    );
+    expect(json(['Apply', ['Apply', expr, 10], 5])).toBe(30);
+  });
+
+  test('the nested block is not in a branch', () => {
+    // w ↦ (x ↦ Block(Block(Declare(g, "unknown", z ↦ 3), x + g(0))))
+    expect(
+      json([
+        'Apply',
+        [
+          'Apply',
+          [
+            'Function',
+            [
+              'Function',
+              [
+                'Block',
+                [
+                  'Block',
+                  ['Declare', 'g', "'unknown'", ['Function', 3, 'z']],
+                  ['Add', 'x', ['g', 0]],
+                ],
+              ],
+              'x',
+            ],
+            'w',
+          ],
+          1,
+        ],
+        5,
+      ])
+    ).toBe(8);
+  });
+
+  test('evaluateAsync() gives the same value', async () => {
+    expect(await jsonAsync(['Apply', ['Apply', witness, 1], 5])).toBe(8);
   });
 });

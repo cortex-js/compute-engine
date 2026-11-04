@@ -5670,8 +5670,6 @@ function captureClosuresUncached(
       FROZEN_CHAIN_SCOPES.add(closureScope);
       // The rebuilt body keeps the assignment locals of the body.
       copyAssignmentLocals(innerBlock.localScope, closureScope);
-      // Rebuild the body's own ops against the NEW scope: a scoped `Block`
-      // nested inside the body (an `If` branch, a loop body) keeps its
       // The new scope stands for the body scope of the literal. A call in
       // the body finds its callee by the scope that holds the binding of the
       // callee (`callableBindingInContext`, `binders.ts`), and the binding of
@@ -5682,6 +5680,8 @@ function captureClosuresUncached(
       // `g` there, and `w ↦ (x ↦ Block(g := z ↦ 3, x + g(0)))` applied to
       // `1` and then to `5` gave `5 + g(0)`, not `8`.
       markCallableFrame(closureScope, innerBlock.localScope);
+      // Rebuild the body's own ops against the NEW scope: a scoped `Block`
+      // nested inside the body (an `If` branch, a loop body) keeps its
       // canonicalization-time parent chain otherwise, which reaches the stale
       // copies of these same lexical levels instead of the captured ones. That
       // is invisible for an arithmetic body — its symbols live directly in the
@@ -5755,6 +5755,17 @@ function captureClosuresUncached(
       bindings: new Map(expr.localScope.bindings),
     };
     copyAssignmentLocals(expr.localScope, scope);
+    // The new scope stands for the scope of `expr` (`markCallableFrame`): a
+    // lookup that accepts a binding of the old scope accepts a binding of
+    // this copy too. A run of a `Block` gives each `Declare` local a new
+    // binding in the scope it runs in, and a call in the block finds its
+    // callee by the scope that holds that binding
+    // (`callableBindingInContext`, `binders.ts`): the call `g(0)` is bound
+    // to the hoisted `g`, whose home is the old scope. Without this
+    // link, `w ↦ (x ↦ If(x > 0, Block(Declare(g, "unknown", z ↦ 3),
+    // x + g(0)), 0))` applied to `1` and then to `5` gave `5 + g(0)`, not
+    // `8`. (CE-794.)
+    markCallableFrame(scope, expr.localScope);
     return ce._fn(
       expr.operator!,
       expr.ops.map((op) =>
