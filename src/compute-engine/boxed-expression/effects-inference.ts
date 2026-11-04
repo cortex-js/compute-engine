@@ -36,7 +36,7 @@ import {
 } from '../collection-utils.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
 import { declaredBinders } from './binding-sites.js';
-import { reduceType } from '../../common/type/reduce.js';
+import { reduceType, typesOverlap } from '../../common/type/reduce.js';
 import { parseType } from '../../common/type/parse.js';
 import {
   effectSetToString,
@@ -604,6 +604,83 @@ export function matchesOrAbsent(
     valueExpr,
     symbol
   );
+}
+
+/**
+ * The verdict of a STORE of `value` into a symbol whose type `declared` was
+ * declared (`ce.assign`, the `Assign` operator, a `Declare` with a value):
+ *
+ * - `'match'`: the value fits the declared type (`matchesOrAbsent()`). A
+ *   read of the symbol does not test its value.
+ * - `'overlap'`: the value does not fit, but its type overlaps the declared
+ *   type, so it can evaluate to a value of the declared type. The store
+ *   accepts it, and each evaluation of the symbol tests the evaluated value
+ *   (`overlapReadError()` in `store-admission.ts`). This is the rule of an argument of a user
+ *   function, which is admitted when its type overlaps the parameter type
+ *   (`typesOverlap()`, read by `liftedOperandCannotFit()` in `validate.ts`)
+ *   and tested when it is bound. The type compared is the type the value
+ *   presents (`presentedValueType()`). Example: with `a` declared `real`
+ *   and `P` declared `tuple<real | signed_infinity | nan, real |
+ *   signed_infinity | nan>`, the value `(-sqrt(1 - a^2), a)` is typed
+ *   `tuple<complex, real>`.
+ *   The store accepts it; a read with `a = 0.5` gives `(-0.866…, 0.5)`, and
+ *   a read with `a = 5` gives an `incompatible-type` error, because the first
+ *   component is then imaginary.
+ * - `'refuse'`: the store throws.
+ *
+ * Only a value that holds a symbol which is not a constant is admitted on
+ * overlap: such a value can change when that symbol changes. A value made of
+ * literals and constants is its own final value, so its type decides, and a
+ * value that does not fit is refused at the store (`(1, 2.5)` for
+ * `tuple<integer, integer>`). These are also refused at the store, whatever
+ * their type: the symbol `Missing` at a type that excludes absence, an error
+ * value, a collection that holds a failed element, a number literal held
+ * through a restriction (`2 {a > 0}`), a value at a declared function
+ * signature and a value at a polymorphic declared type. Each of these is
+ * refused by its own rule, which an overlap must not replace.
+ *
+ * Source: ROADMAP CE-800, option 1 (user decision 2026-11-04).
+ */
+export function storeAdmission(
+  ce: ComputeEngine,
+  value: Expression,
+  declared: BoxedType,
+  effectsDeclared: boolean,
+  /** The symbol being declared/assigned, for the diagnostic. */
+  symbol?: string
+): 'match' | 'overlap' | 'refuse' {
+  if (
+    matchesOrAbsent(ce, value.type, declared, effectsDeclared, value, symbol)
+  )
+    return 'match';
+  return mayEvaluateIntoDeclaredType(ce, value, declared)
+    ? 'overlap'
+    : 'refuse';
+}
+
+/**
+ * Whether `value`, which does not fit the declared type `declared`, is
+ * admitted on overlap: see the `'overlap'` verdict of `storeAdmission()`.
+ */
+function mayEvaluateIntoDeclaredType(
+  ce: ComputeEngine,
+  value: Expression,
+  declared: BoxedType
+): boolean {
+  if (declared.isPolymorphic || hasFunctionSignature(declared.type))
+    return false;
+  if (isAbsentSymbol(value) || !value.isValid) return false;
+  if (failedElementRefusedBy(value, declared.type) !== undefined) return false;
+  // A number literal held through a restriction (`2 {a > 0}`) is that number
+  // or `Missing`, whatever value `a` takes: the literal decides, as for the
+  // ungated literal (`restrictionValueType()`).
+  if (restrictionValueType(value.type, value) !== undefined) return false;
+  const variable = value.symbols.some((id) => {
+    const def = ce.lookupDefinition(id);
+    return def === undefined || !('value' in def) || !def.value.isConstant;
+  });
+  if (!variable) return false;
+  return typesOverlap(presentedValueType(ce, value).type, declared.type);
 }
 
 export function matchesDeclaredTypeAxes(

@@ -76,10 +76,11 @@ import {
   hasSignaturePlaceholder,
   inferFunctionLiteralEffects,
   matchesDeclaredTypeAxes,
-  matchesOrAbsent,
   refineDeclaredPlaceholders,
+  storeAdmission,
   withArrowEffects,
 } from './effects-inference.js';
+import { noteOverlapAdmitted } from './store-admission.js';
 import { isEffectSubset, unionEffectSets } from '../../common/type/effects.js';
 import { declaredTypeError } from './type-compatibility-error.js';
 import { installParameterDefaults } from './parameter-defaults.js';
@@ -263,6 +264,15 @@ export class _BoxedValueDefinition
   // If `null`, the value needs to be recalculated from _defValue
   // If `undefined`, the value is not defined (for example, the symbol `True` does not have a value: the symbol itself *is* the value)
   private _value: Expression | undefined | null;
+
+  // True when the declaration's value was accepted only because its type
+  // overlaps the declared type (`storeAdmission()` gave `'overlap'`). A
+  // constant computes its value again from `_defValue` after a configuration
+  // change (precision, angular unit), which gives a new expression; that
+  // expression is recorded as admitted on overlap too
+  // (`noteOverlapAdmitted()`), so each read of the symbol still tests its
+  // evaluated value against the declared type.
+  private _overlapAdmitted = false;
 
   // True if `_value` refers to this symbol by name (a self-referential
   // binding like `a := a + 1`). Computed once whenever the value is set.
@@ -632,16 +642,25 @@ export class _BoxedValueDefinition
         // slot, i.e. the inferred track — must not fail the covariant
         // `matches()`. When the declaration STATED effects (a non-empty
         // specifier, or `pure`) they are a contract and are checked here too.
-        if (
-          !matchesOrAbsent(
-            ce,
-            this._value.type,
-            this._type,
-            this.effectsDeclared,
-            this._value,
-            this.name
-          )
-        ) {
+        //
+        // A value whose type only OVERLAPS the declared type is accepted,
+        // and each read of the symbol tests the evaluated value, as for an
+        // assignment (`storeAdmission()`, `effects-inference.ts`). A
+        // standard-library definition keeps the empirical check below.
+        let verdict = storeAdmission(
+          ce,
+          this._value,
+          this._type,
+          this.effectsDeclared,
+          this.name
+        );
+        if (verdict === 'overlap' && options?.trustedLibraryDefinition)
+          verdict = 'refuse';
+        if (verdict === 'overlap') {
+          this._overlapAdmitted = true;
+          noteOverlapAdmitted(this._value);
+        }
+        if (verdict === 'refuse') {
           if (options?.trustedLibraryDefinition) {
             // A trusted (standard-library) declaration is the author's
             // knowledge, which may exceed what the value's static type can
@@ -776,10 +795,19 @@ export class _BoxedValueDefinition
       this._defValue !== undefined &&
       this._engine._atTransientConfiguration
     )
-      return dynamicValue(this._engine, this._defValue);
-    if (this._value === null)
-      this._value = dynamicValue(this._engine, this._defValue);
+      return this._regeneratedValue();
+    if (this._value === null) this._value = this._regeneratedValue();
     return this._value;
+  }
+
+  /** The value of the declaration computed again from `_defValue`, recorded
+   * as admitted on overlap when the declaration's value was
+   * (`_overlapAdmitted`). */
+  private _regeneratedValue(): Expression | undefined {
+    const value = dynamicValue(this._engine, this._defValue);
+    if (value !== undefined && this._overlapAdmitted)
+      noteOverlapAdmitted(value);
+    return value;
   }
 
   /** For a constant, its value computed again from `_defValue` at the
@@ -790,7 +818,7 @@ export class _BoxedValueDefinition
    * `compare.ts`). */
   _valueAtCurrentPrecision(): Expression | undefined {
     if (!this._isConstant) return undefined;
-    return dynamicValue(this._engine, this._defValue);
+    return this._regeneratedValue();
   }
 
   /**
@@ -997,6 +1025,7 @@ export class _BoxedValueDefinition
       url: this.url,
       _defValue: this._defValue,
       _value: this._value,
+      _overlapAdmitted: this._overlapAdmitted,
       _isSelfReferential: this._isSelfReferential,
       _type: this._type,
       inferredType: this.inferredType,
@@ -1071,6 +1100,7 @@ export class _BoxedValueDefinition
     this.url = s.url as string | undefined;
     this._defValue = s._defValue as typeof this._defValue;
     this._value = s._value as typeof this._value;
+    this._overlapAdmitted = s._overlapAdmitted as boolean;
     this._isSelfReferential = s._isSelfReferential as boolean;
     this._type = s._type as typeof this._type;
     this.inferredType = s.inferredType as boolean;

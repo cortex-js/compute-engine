@@ -17,6 +17,7 @@ import {
 import { isSubtype, provablyAdmits } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { presentedValueType } from '../boxed-expression/effects-inference.js';
+import { isTestedAtRead } from '../boxed-expression/store-admission.js';
 import type { Type } from '../../common/type/types.js';
 import {
   isSymbol,
@@ -52,7 +53,11 @@ import { ABSENT_READS } from '../boxed-expression/conditional-value.js';
 import { tryFoldKnownSymbol } from './compile-folded-values.js';
 import { core } from './compiler-core-hooks.js';
 import { complexDiscipline } from './compile-declarations.js';
-import { PROMOTABLE_RADICAL_HEADS, wideNumericType } from './compiler-mode.js';
+import {
+  PROMOTABLE_RADICAL_HEADS,
+  typeHasComplexLeaf,
+  wideNumericType,
+} from './compiler-mode.js';
 import { containsReturn } from './compile-conditions.js';
 import { CompilerState } from './compiler-state.js';
 import { compilationType } from './compiler-type-facts.js';
@@ -484,6 +489,27 @@ export function compileInnerSymbol(
  * `docs/COMPILATION-MODEL.md`), so this check need not refuse it.
  * (`docs/ERROR-MODEL.md`, "`Missing` is a result only — user decision of
  * 2026-11-02", rule 5; ROADMAP CE-791.)
+ *
+ * A value that the store into a symbol with a declared type admitted
+ * because its type OVERLAPS the declared type (`storeAdmission()` in
+ * `effects-inference.ts`) is not refused when the compiler reads it at the
+ * real lane (`heldOnComplexLane()` is false for it): the store accepted
+ * it, and the interpreter tests its evaluated value at each read. The
+ * condition is the one of that test (`isTestedAtRead()`), so a value
+ * admitted on overlap into another symbol, or held by a symbol whose type
+ * was inferred, is compared as any other held value. Compiled
+ * code does not test it, and reads the symbol as a value of the declared
+ * type; a value outside the declared type gives an unspecified result
+ * (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code"). Such a value
+ * on the complex lane is refused: the code that reads the symbol was
+ * compiled for the lane of the declared type, and would read the `{re, im}`
+ * representation of the value as a number. Example: with `z: complex` and
+ * `r: real`, `r := z` is admitted on overlap, and `r + 1` declines, so the
+ * input `z = 2 + 0i` gives `3` in the interpreter, not the JavaScript
+ * addition of an object and a number. The same holds for a collection with
+ * complex elements: `L := zs` with `zs: list<complex>` and `L: list<real>`
+ * declines. With `a: real`, the point
+ * `P := (-sqrt(1 - a^2), a)` is on the real lane and compiles.
  */
 export function assertHeldValueType(expr: Expression): void {
   if (!isSymbol(expr)) return;
@@ -498,6 +524,11 @@ export function assertHeldValueType(expr: Expression): void {
     held !== undefined &&
     !expr.type.isUnknown &&
     !held.type.isUnknown &&
+    !(
+      isValueDef(heldDef) &&
+      isTestedAtRead(heldDef.value, held) &&
+      !heldOnComplexLane(held)
+    ) &&
     !presentedValueType(ce, held).matches(expr.type)
   )
     throw new Error(
@@ -506,6 +537,41 @@ export function assertHeldValueType(expr: Expression): void {
         `'${expr.type.toString()}' that the expression was typed with. ` +
         `The interpreter evaluates it instead.`
     );
+}
+
+/**
+ * Whether the compiled code of the value `held` can hold a complex number
+ * in the `{re, im}` representation, at the top or in an element or a
+ * component. A literal `List` or `Tuple` is walked element by element, and
+ * a scalar is answered by `core.isComplexValued()`, which follows the lane
+ * that the compiler emits for it: `-sqrt(1 - a^2)` with `a: real` is typed
+ * `complex` and is emitted on the real lane. A collection that is not a
+ * literal (a symbol `zs: list<complex>`, a `Map`) is answered from its
+ * type (`typeHasComplexLeaf()`), since `core.isComplexValued()` answers for
+ * one scalar only and is false for such a collection outside the complex
+ * discipline, while its elements are still emitted as `{re, im}` objects.
+ * Because the type decides, a collection that is not a literal and whose
+ * type has a complex leaf is counted as complex even when the compiler would
+ * emit its elements on the real lane (a broadcast `Sqrt(1 - xs^2)` with
+ * `xs: list<real>`): the read declines, and never gives a wrong value.
+ *
+ * A value typed as a record or a dictionary is always counted as complex.
+ * The element type of a record that is not closed is `tuple<string, any>`,
+ * which drops the declared field types, so `typeHasComplexLeaf()` cannot
+ * see a complex field (`Q: record{a: complex}` held by
+ * `R: record{a: real}`).
+ */
+function heldOnComplexLane(held: Expression): boolean {
+  if (
+    isFunction(held) &&
+    (held.operator === 'List' || held.operator === 'Tuple')
+  )
+    return held.ops.some(heldOnComplexLane);
+  if (core.isComplexValued(held)) return true;
+  if (isSubtype(held.type.type, 'number')) return false;
+  if (held.type.matches('record') || held.type.matches('dictionary'))
+    return true;
+  return typeHasComplexLeaf(held.type.type, undefined, complexDiscipline());
 }
 
 /**

@@ -149,6 +149,11 @@ import {
   exitCycleDepthQuery,
   exitCycleQuery,
 } from './cycle-guard.js';
+import {
+  isOverlapAdmitted,
+  isTestedAtRead,
+  overlapReadError,
+} from './store-admission.js';
 
 /**
  * The definition whose dereference a cycle has invalidated (`a = b + 1;
@@ -2010,9 +2015,16 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (def.isConstant) {
       if (options?.numericApproximation) {
         if (hold === 'never' || hold === 'evaluate' || hold === 'N')
-          return this._dereference(def.value, { numericApproximation: true });
+          return this._testedRead(
+            def.value,
+            this._dereference(def.value, { numericApproximation: true }),
+            () => this._dereference(def.value)
+          );
       } else if (hold === 'never' || hold === 'evaluate')
-        return this._dereference(def.value, options);
+        return this._testedRead(
+          def.value,
+          this._dereference(def.value, options)
+        );
     } else {
       if (
         hold === 'never' ||
@@ -2022,12 +2034,80 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         const binding = this._contextBinding();
         const expr = valueOfBinding(binding);
         if (expr === undefined) return this;
+        // The exact evaluation, which a numeric read tests (`_testedRead()`).
+        const exact = options?.numericApproximation
+          ? { ...options, numericApproximation: false }
+          : undefined;
         if (expr.operator === 'Unevaluated')
-          return expr.evaluate(options) ?? this;
-        return this._dereferenceMemoized(expr, options);
+          return this._testedRead(
+            expr,
+            expr.evaluate(options) ?? this,
+            exact && (() => expr.evaluate(exact) ?? this)
+          );
+        return this._testedRead(
+          expr,
+          this._dereferenceMemoized(expr, options),
+          exact && (() => this._dereferenceMemoized(expr, exact))
+        );
       }
     }
     return this;
+  }
+
+  /**
+   * `result`, the evaluated value of the stored value `stored` of this
+   * symbol, or an `incompatible-type` error when the store admitted `stored`
+   * on overlap only and `result` is not a value of the declared type.
+   *
+   * A store into a symbol with a declared type accepts a value whose type
+   * overlaps the declared type, as a call accepts such an argument
+   * (`storeAdmission()`, `effects-inference.ts`), and the read tests the
+   * evaluated value, as a call tests a bound argument. Example: with `a`
+   * declared `real`, `P` declared `tuple<real, real>` and the value
+   * `(-sqrt(1 - a^2), a)`, the read of `P` with `a = 5` is the error, since
+   * the first component is then imaginary. A stored value that fits the
+   * declared type is not tested: the test is one set lookup.
+   *
+   * A numeric read gives `exact`, which computes the exact evaluated value.
+   * The declared type applies to the exact value, and the approximation of
+   * a value of that type is the result of the read: with `a: real`,
+   * `q: rational`, `q := 1/a` and `a = 3`, `q.N()` is the float
+   * `0.333...`, although a float is typed `real` and is not a value of
+   * `rational`. So when `result` is refused, the exact value is tested, and
+   * `result` is given when the exact value is admitted. The exact value is
+   * computed only when `result` is refused. With `k: integer`, `k := a/2`
+   * and `a = 5`, the exact value `5/2` is refused too, and the read is the
+   * error.
+   */
+  private _testedRead(
+    stored: Expression | undefined,
+    result: Expression,
+    exact?: () => Expression
+  ): Expression {
+    const error = this._overlapReadError(stored, result);
+    if (error === undefined) return result;
+    if (exact === undefined) return error;
+    return this._overlapReadError(stored, exact()) ?? result;
+  }
+
+  /**
+   * The `incompatible-type` error of {@link _testedRead} for the evaluated
+   * value `result` of the stored value `stored`, or `undefined` when the
+   * read is not tested or `result` is admitted.
+   */
+  private _overlapReadError(
+    stored: Expression | undefined,
+    result: Expression
+  ): Expression | undefined {
+    if (stored === undefined || !isOverlapAdmitted(stored)) return undefined;
+    const def = this.valueDefinition;
+    if (def === undefined || !isTestedAtRead(def, stored)) return undefined;
+    const ce = this.engine;
+    const contract =
+      def._placeholderSkeleton !== undefined
+        ? ce.type(def._placeholderSkeleton)
+        : def.type;
+    return overlapReadError(ce, result, contract);
   }
 
   evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {
@@ -2101,7 +2181,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         ? this._guardedValueOf(binding)
         : valueOfBinding(binding);
     if (value === undefined) return this;
-    if (isNumber(value)) return numeric ? value.N() : value.evaluate(options);
+    if (isNumber(value))
+      return numeric
+        ? this._testedRead(value, value.N(), () => value.evaluate())
+        : this._testedRead(value, value.evaluate(options));
     if (numericRead && !def.isConstant && value.symbols.includes(this._id))
       return value;
 
@@ -2133,7 +2216,17 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       carried
     );
     if (node.cyclic) return parent === undefined ? value : this;
-    return node.abandoned ? this : result;
+    if (node.abandoned) return this;
+    const error = this._overlapReadError(value, result);
+    if (error === undefined) return result;
+    if (!numeric) return error;
+    // A numeric read tests the exact evaluated value, and gives `result`
+    // when that value is admitted (see `_testedRead()`).
+    const exact = await evaluateInOwnBindingsAsync(this.engine, value, {
+      ...carried,
+      numericApproximation: false,
+    });
+    return this._overlapReadError(value, exact) ?? result;
   }
 
   /**
@@ -2495,13 +2588,20 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // `8`. This is what `evaluate({ numericApproximation: true })` and the
       // asynchronous numeric read (`_NAsync`) compute, so the three agree
       // and `a + 5` under a numeric request reads `a` as `a` alone does.
-      return this._memoizedStoredValue(contextValue, 2, () =>
-        evaluateInOwnBindings(this.engine, contextValue, {
-          numericApproximation: true,
-        })
+      return this._testedRead(
+        contextValue,
+        this._memoizedStoredValue(contextValue, 2, () =>
+          evaluateInOwnBindings(this.engine, contextValue, {
+            numericApproximation: true,
+          })
+        ),
+        () => evaluateInOwnBindings(this.engine, contextValue)
       );
     }
-    return def?.value?.N() ?? this;
+    const value = def?.value;
+    return value === undefined
+      ? this
+      : this._testedRead(value, value.N(), () => value.evaluate());
   }
 
   replace(

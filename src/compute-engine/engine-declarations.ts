@@ -74,7 +74,7 @@ import {
   EffectContractError,
   inferFunctionLiteralEffects,
   matchesDeclaredTypeAxes,
-  matchesOrAbsent,
+  storeAdmission,
   hasSignaturePlaceholder,
   presentedValueType,
   refineDeclaredPlaceholders,
@@ -82,6 +82,7 @@ import {
   stripArrowEffects,
   withArrowEffects,
 } from './boxed-expression/effects-inference.js';
+import { noteOverlapAdmitted } from './boxed-expression/store-admission.js';
 import {
   constructorAssignmentError,
   declaredTypeError,
@@ -4022,7 +4023,7 @@ export function assignFn(
     // fit a DECLARED type — live in `assertAssignableValueDef` so the `Assign`
     // operator's destructuring route can ask the same question WITHOUT writing
     // (see `assertAssignable`).
-    assertAssignableValueDef(ce, id, def.value, value);
+    const verdict = assertAssignableValueDef(ce, id, def.value, value);
 
     // Everything from here to the value write is the DERIVE-AND-WRITE phase,
     // and it runs with the assumptions hidden. The validation above needed
@@ -4057,7 +4058,10 @@ export function assignFn(
       value._infer(() => contract, 'narrow');
     }
 
-    // ... and set the value
+    // ... and set the value. A value admitted on overlap only is recorded,
+    // so that each read of the symbol tests its evaluated value against the
+    // declared type (`BoxedSymbol._testedRead()`).
+    if (verdict === 'overlap') noteOverlapAdmitted(value);
     ce._setSymbolValue(id, value);
 
     return ce;
@@ -4288,13 +4292,18 @@ function deriveAndWriteAssignedType(
  * {@link assertAssignable} can ask the same question without writing anything.
  * Both routes therefore raise the identical error: same class, same message,
  * same blamed name.
+ *
+ * Returns `'overlap'` when the value is accepted only because its type
+ * overlaps the declared type (`storeAdmission()` in `effects-inference.ts`),
+ * else `'match'`. The write route records an `'overlap'` value at its store
+ * (`noteOverlapAdmitted()`), so that each read of the symbol tests it.
  */
 function assertAssignableValueDef(
   ce: IComputeEngine,
   id: string,
   def: BoxedValueDefinition,
   value: Expression
-): void {
+): 'match' | 'overlap' {
   if (def.isConstant) throw new ConstantAssignmentError(id);
 
   // A fact in force is a CONSTRAINT the new value has to satisfy: `assume(v >
@@ -4337,7 +4346,7 @@ function assertAssignableValueDef(
   // `matchesDeclaredTypeAxes` (rather than a bare `matches()`) keeps the
   // effects axis judged by its own provenance, so a `{scope}`-inferred closure
   // still fits a bare-specifier declared arrow.
-  if (def.inferredType || def.type.isUnknown) return;
+  if (def.inferredType || def.type.isUnknown) return 'match';
   // A declared PLACEHOLDER SKELETON (`a: list` — bare constructor, elements
   // to be determined) is the contract; the stored type may carry a previous
   // assignment's element REFINEMENT (`list<integer>`), which must not
@@ -4347,10 +4356,23 @@ function assertAssignableValueDef(
     def._placeholderSkeleton !== undefined
       ? ce.type(def._placeholderSkeleton)
       : def.type;
-  if (
-    !matchesOrAbsent(ce, value.type, contract, def.effectsDeclared, value, id)
-  )
-    throw declaredTypeError(id, value, contract);
+  // A value whose type only OVERLAPS the declared type is accepted, as a call
+  // argument is, and each read of the symbol tests the evaluated value
+  // (`storeAdmission()` in `effects-inference.ts`): with `a: real`, the value
+  // `(-sqrt(1 - a^2), a)` (typed `tuple<complex, real>`) is stored into
+  // `P: tuple<real, real>`, and a read of `P` with `a = 5` is an
+  // `incompatible-type` error. A value whose type does not overlap the
+  // declared type is still refused here. The verdict `'overlap'` is returned,
+  // not recorded: this check writes nothing, and the store records it.
+  const verdict = storeAdmission(
+    ce,
+    value,
+    contract,
+    def.effectsDeclared,
+    id
+  );
+  if (verdict === 'refuse') throw declaredTypeError(id, value, contract);
+  return verdict;
 }
 
 /**

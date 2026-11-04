@@ -288,14 +288,20 @@ describe('a list meets an indexed collection or a collection', () => {
 });
 
 describe('results that follow from the list meaning', () => {
-  it('refuses to assign an indexed collection to a broadcastable symbol', () => {
-    // As for a symbol declared `list<number>`: the type
-    // `indexed_collection<integer>` also holds tuples.
+  it('tests at each read an indexed collection assigned to a broadcastable symbol', () => {
+    // The type `indexed_collection<integer>` also holds tuples, so it does
+    // not match `broadcastable<number>`, but it overlaps it. The assignment
+    // accepts the symbol, as a call with a `broadcastable<number>` parameter
+    // does, and each read tests the value (ROADMAP CE-800): a list is read,
+    // and a tuple is an `incompatible-type` error.
     const ce = new ComputeEngine();
     ce.declare('icL', 'indexed_collection<integer>');
     ce.assign('icL', ce.box(['List', 1, 2]));
     ce.declare('bA', 'broadcastable<number>');
-    expect(() => ce.assign('bA', ce.box('icL'))).toThrow(/not compatible/);
+    ce.assign('bA', ce.box('icL'));
+    expect(ce.box('bA').evaluate().toString()).toBe('[1,2]');
+    ce.assign('icL', ce.box(['Tuple', 1, 2]));
+    expect(ce.box('bA').evaluate().toString()).toMatch(/incompatible-type/);
   });
 
   it('refuses a list of points for a callback over broadcastable<number>', () => {

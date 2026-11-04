@@ -311,8 +311,8 @@ import {
 import {
   effectContractErrorValue,
   isEffectContractError,
-  matchesOrAbsent,
   signatureEffects,
+  storeAdmission,
 } from '../boxed-expression/effects-inference.js';
 import {
   declaredTypeError,
@@ -14751,7 +14751,7 @@ function* declareSteps(
   // first one.
   //
   // The verdict is the one both `declareOne` branches ultimately reach —
-  // the per-axis `matchesOrAbsent` (the fresh branch through the
+  // the per-axis `storeAdmission` (the fresh branch through the
   // value-definition constructor, the upgrade branch through
   // `ce.assign`) — with the same arguments and the same error value, so
   // the diagnostic is unchanged: same code, same blamed name.
@@ -14772,15 +14772,17 @@ function* declareSteps(
     // that, could reject a value the install path accepts, so leave
     // literals to the install path.
     if (isFunction(boundValue, 'Function')) return null;
+    // A value whose type only overlaps the declared type is accepted by
+    // both install branches, and each read tests the evaluated value
+    // (`storeAdmission()`, `effects-inference.ts`).
     if (
-      matchesOrAbsent(
+      storeAdmission(
         ce,
-        boundValue.type,
+        boundValue,
         declaredType,
         effectsDeclared,
-        boundValue,
         symbolName
-      )
+      ) !== 'refuse'
     )
       return null;
     return typeCompatibilityErrorValue(

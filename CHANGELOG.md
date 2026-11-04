@@ -62,9 +62,57 @@
   static types. `withScalarFedLiteral` takes no kind argument (its
   `'finite'` kind gave the same code as `'scalar'`), and
   `scalarFedLiterals` is a `Set` of the marked literals.
+- **Custom compile targets: `CompileTarget.gpuParameterFacts` is removed.**
+  The shader targets no longer record facts about the parameters of a user
+  function or the index of a loop, so nothing read the field.
 
 ### Behavior Changes
 
+- **Compilation to GLSL and WGSL: a call is proven finite from the
+  declarations and the expression only.** A call of `sin`, `cos`, `sign`,
+  `min`, `max` or `clamp` uses the built-in when its argument is proven
+  finite in f32 from the declared types and ranges of the inputs, the
+  declared ranged result types of the user functions, the literals and the
+  operators of the argument, and calls the NaN-safe helper (`_gpu_sin`, …)
+  otherwise. The compiler no longer reads the body of a user function, the
+  values that the calls of a function pass, or the bounds of a loop to
+  prove it. These forms now call the helper where they called the
+  built-in: an operand that reads a parameter of a user function, also
+  when every call passes a finite value or the signature declares a range
+  (`F(a, b) := sin(a) + cos(b) + min(a, b)` called as `F(x, y)` gives
+  `_gpu_sin(a) + _gpu_cos(b) + _gpu_min(a, b)` in `_fn_F`); an operand
+  that reads the index of a `Sum`, a `Product` or a loop that the shader
+  does not unroll; a call of a user function whose result type has no
+  declared range (`sin(f(x))` with `f(u) := cos(u)/2` gives
+  `_gpu_sin(_fn_f(x))`); and a quotient by `cos(u)` with `u` in a bounded
+  interval. The helper gives the same value as the built-in on a finite
+  argument, so no compiled value changes; the helper costs a bit test and a
+  selection per call. To get the built-in, declare the range of an input
+  (`t: real<-5.5..5.5>`) or a result type with a range for the function:
+  with `f: (real) -> real<-1..1>`, `sin(f(x))` gives `sin(_fn_f(x))`, and
+  `sin(1000·f(x))` gives `sin(1000.0 * _fn_f(x))`. A result type with no
+  range (`(real) -> real`) keeps the helper: the body is computed in f32
+  and can overflow. A body whose f32 value leaves its declared range gives a
+  value outside its type, for which the compiled value is unspecified.
+- **An assignment to a symbol with a declared type accepts a value whose type
+  overlaps the declared type, and each read of the symbol tests the value.**
+  A function call already accepts such an argument. Before, the type of the
+  value had to match the declared type. With `E = real | signed_infinity |
+  nan`, `a` declared `real` and `P` declared `tuple<E, E>`,
+  `ce.assign("P", ce.parse("(-\\sqrt{1-a^2}, a)"))` threw "not compatible
+  with the type", because the value is typed `tuple<complex, real>`. It is
+  now accepted: `P` evaluates to `(-0.866…, 0.5)` when `a = 0.5`, and to an
+  `incompatible-type` error when `a = 5`, where the first component is
+  imaginary. This applies to `ce.assign()`, `Assign`, `ce.declare()` with a
+  value, `Declare` and a typed Epsil `let`. These are still refused when
+  assigned: a value whose type has no value in common with the declared type
+  (`ce.declare("t", "gf8"); ce.assign("t", 2)`), and a value made only of
+  literals and constants that is not of the declared type. Compiled code does
+  not test the value: it reads the symbol as a value of its declared type,
+  and a value outside that type gives an unspecified result. A compilation
+  that reads such a symbol declines when the stored value can be complex
+  (`r: real` assigned `z: complex`), so a valid input such as `z = 2 + 0i`
+  gives the interpreter's value (Tycho row 483).
 - **A sequence search that finds nothing gives `Missing`, not `Nothing`.**
   `RangeOf([1, 2, 3], [9])` is `Missing` (it was `Nothing`), and `RangeOf`
   is typed `range | missing`. `Slice(xs, RangeOf(xs, needle))` is still
@@ -89,20 +137,21 @@
   as the default, or pass the argument.
 - **Compilation: a value that can be `Nothing` declines with one
   diagnostic code, read from static types.** Compiled code has no
-  representation of `Nothing` as a value. A `Tuple` coordinate, an element
-  of a collection operation (`Map`, `Filter`, `Sum`, …), the operand of
-  `IsMissing`, `Coalesce` or `AssertPresent`, a dictionary value and the
-  symbol `Nothing` read as an operand decline with the code
-  `possible-nothing` when their static type admits `nothing` (`any`
-  does). The compiler no longer analyzes the body of a callback to show
-  that it cannot return `Nothing`, so a map whose callback result type is
-  `any` now declines: with `P: list<tuple<real, real>>`, `(u ↦ 7)(P)`
-  declines, where it compiled to `[7, 7, …]`, and so do `Map(h, 1..3)` with
-  a local function `h := k ↦ k + 1`, and `Map(g, P)` with
-  `g := p ↦ Norm(p)`. The interpreter evaluates
-  it. To compile such a map, give the callback a result type with no
-  `nothing` arm. Before, these declines had the generic code
-  `compile-error`.
+  representation of `Nothing` as a value. The symbol `Nothing` read as an
+  operand declines with the code `possible-nothing`. A `Tuple`
+  coordinate, an element of a collection operation (`Map`, `Filter`,
+  `Sum`, …), the result of the callback of `Map`, `Tabulate` or `Scan`,
+  the operand of `IsMissing`, `Coalesce` or `AssertPresent` and a
+  dictionary value decline with the same code when their static type has
+  an explicit `nothing` arm: `nothing`, `real | nothing`,
+  `list<real | nothing>`. A type such as `any` or `unknown` has no such
+  arm. Compiled code produces `Nothing` only from the symbol `Nothing` or
+  from a statement read as a value, and both decline where they occur; a
+  `Nothing` that the host supplies for a value typed `any` is outside its
+  type. The compiler no longer analyzes the body of a callback, and some
+  expressions over values typed `any` that declined now compile: with
+  `w: collection<any>`, `Sum(w)` gives `6` for `[3, 1, 2]`. Before,
+  these declines had the generic code `compile-error`.
 - **Compilation to JavaScript: a condition that can be a value other than a
   boolean declines.** Compiled code no longer tests at run time that the
   condition of `If`, `Which` or `Boole` is a boolean. When the static
@@ -193,6 +242,14 @@
 
 ### Resolved Issues
 
+- **A list of points plus a point keeps the signed infinities in the
+  component types.** With `E = real | signed_infinity | nan`,
+  `L: list<tuple<E, E>>` and `P: tuple<E, E>`, the sums `L + (1, 1)` and
+  `L + P` were typed `list<tuple<infinity | nan | real, …>>`. The type
+  `infinity` admits the complex infinity, which no such sum has, so a symbol
+  declared `list<tuple<E, E>>` refused the result. The sum is now typed
+  `list<tuple<E, E>>`, as the sum of two points has been since 0.178.0
+  (Tycho row 483).
 - **The accumulator of a fold inside a function literal is typed from the
   seed when the callback body is a block**
   ([#506](https://github.com/cortex-js/compute-engine/issues/506), reported by

@@ -161,6 +161,7 @@ import {
   inferFunctionLiteralEffects,
   presentedValueType,
 } from './boxed-expression/effects-inference.js';
+import { isTestedAtRead } from './boxed-expression/store-admission.js';
 import { effectsOf } from './boxed-expression/effects-of.js';
 import { readsOtherBindings } from './boxed-expression/names-read.js';
 import { isOperatorDef } from './boxed-expression/definition-guards.js';
@@ -8729,6 +8730,19 @@ function capturedValueMismatchEntry(
     if (def.holdUntil !== 'evaluate' && def.holdUntil !== 'never') continue;
     const value = def.value;
     if (value === undefined || value.operator === 'Unevaluated') continue;
+    // A value that the store admitted only because its type OVERLAPS the
+    // declared type of the symbol (`storeAdmission()` in
+    // `effects-inference.ts`) has a type outside the type the body was typed
+    // with by design. It is not a mismatch here: the read of the symbol in
+    // the body tests the evaluated value against the declared type
+    // (`BoxedSymbol._testedRead()`) and gives the `incompatible-type` error
+    // when the value is outside it. Example: with `a: real` and
+    // `P: tuple<real, real> := (-sqrt(1 - a^2), a)`, a call of
+    // `t ↦ P + (t, t)` gives a point when `a = 0.5` and the error when
+    // `a = 5`. The value is skipped only when that read tests it
+    // (`isTestedAtRead()`): a symbol whose type was inferred from its value
+    // has no declared type to test against.
+    if (isTestedAtRead(def, value)) continue;
     const expected = occurrence.type;
     // A value of type `unknown` (an expression whose type is not inferred
     // yet) gives no evidence of a mismatch. The ranges of a numeric type are

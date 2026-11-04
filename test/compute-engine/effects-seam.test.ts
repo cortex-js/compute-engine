@@ -72,6 +72,13 @@ describe('The Function-literal construction seam is the only builder', () => {
       'compute-engine/boxed-expression/box.ts',
       'compute-engine/boxed-expression/boxed-function.ts',
       'compute-engine/boxed-expression/boxed-operator-definition.ts',
+      // The record of the stored values that the declared-type check
+      // admitted because their type only overlaps the declared type
+      // (`noteOverlapAdmitted`): a read of the symbol tests the evaluated
+      // value against the declared type with the same store check
+      // (`storeAdmission`, read by `overlapReadError`; ROADMAP CE-800). It
+      // READS types; it never builds an arrow.
+      'compute-engine/boxed-expression/store-admission.ts',
       // (The runtime effect channel, `effects-of.ts`, no longer appears here:
       // the seam re-exported `signatureEffects` for it, and since item 142 the
       // dependency runs the other way — the seam reads the channel's shared

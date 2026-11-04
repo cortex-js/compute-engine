@@ -287,9 +287,12 @@ describe('A declared collection refuses a value with a failed element', () => {
   test.each(['tensor<number>', 'list<list<any>> | list<any>'])(
     'a value that holds itself through symbols ends the walk (%s)',
     (type) => {
-      // `y := [z]` and `z := [y]`. The result is the one the check gave
-      // before the failed-element walk: refused by the type for
-      // `tensor<number>`, admitted for the union.
+      // `y := [z]` and `z := [y]`. The walk ends, and the result is the one
+      // the type check gives: admitted for both types. For
+      // `tensor<number>`, the type of `y`, a nested list of numbers, does
+      // not match the declared type but overlaps it, so the store accepts
+      // `y` as a call with a `tensor<number>` parameter accepts it, and a
+      // read of `u` tests the evaluated value (ROADMAP CE-800).
       const run = (declare: boolean) => {
         const engine = new ComputeEngine();
         engine.assign('y', ['List', 'z']);
@@ -300,11 +303,8 @@ describe('A declared collection refuses a value with a failed element', () => {
           engine.assign('u', 'y');
         }
       };
-      for (const declare of [false, true]) {
-        if (type === 'tensor<number>')
-          expect(() => run(declare)).toThrow(/TypeCompatibilityError|Symbol "u"/);
-        else expect(() => run(declare)).not.toThrow();
-      }
+      for (const declare of [false, true])
+        expect(() => run(declare)).not.toThrow();
     }
   );
 

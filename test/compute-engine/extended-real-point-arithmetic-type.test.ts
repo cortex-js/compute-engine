@@ -97,3 +97,63 @@ describe('EXTENDED REAL POINT ARITHMETIC', () => {
     }
   });
 });
+
+/**
+ * A list of points beside a point, or beside another list of points, is
+ * added point by point, and each point sum has the component types of a sum
+ * of two points. Before the fix the cell of a list plus a point was the join
+ * of the point types, so `L + (1, 1)` and `L + P` were
+ * `list<tuple<infinity | nan | real, …>>`, and a symbol declared
+ * `list<tuple<real | signed_infinity | nan, …>>` could not be assigned them.
+ */
+describe('EXTENDED REAL POINT LIST ARITHMETIC', () => {
+  const LIST = `list<${POINT}>`;
+  function listEngine(): ComputeEngine {
+    const ce = engine();
+    ce.declare('L', `list<tuple<${E}, ${E}>>`);
+    ce.declare('M', `list<tuple<${E}, ${E}>>`);
+    ce.declare('R', `list<tuple<${E}, ${E}>>`);
+    return ce;
+  }
+  const ce = listEngine();
+  test.each<[string, string]>([
+    ['L+(1,1)', LIST],
+    ['(1,1)+L', LIST],
+    ['L+P', LIST],
+    ['P+L', LIST],
+    ['L-P', LIST],
+    ['L+M', LIST],
+    ['L-M', LIST],
+    ['-L', LIST],
+    ['2L', LIST],
+    ['L\\cdot 2', LIST],
+    ['xL', LIST],
+    ['aL', LIST],
+  ])('%s', (latex, type) => {
+    expect(ce.parse(latex).type.toString()).toBe(type);
+  });
+
+  test('a sum with a list of points can be assigned to a list of points of the same type', () => {
+    const ce = listEngine();
+    for (const latex of ['L+(1,1)', 'L+P', 'L-P', 'L+M', '2L'])
+      expect(() => ce.assign('R', ce.parse(latex))).not.toThrow();
+  });
+
+  test('the values have the static type', () => {
+    const ce = listEngine();
+    ce.assign(
+      'L',
+      ce.box([
+        'List',
+        ['Tuple', 'PositiveInfinity', 1],
+        ['Tuple', 'NaN', 'NegativeInfinity'],
+      ])
+    );
+    ce.assign('P', ce.box(['Tuple', 'NegativeInfinity', 2]));
+    for (const latex of ['L+(1,1)', 'L+P', 'L-P', 'P+L']) {
+      const e = ce.parse(latex);
+      const v = e.evaluate();
+      expect(v.type.matches(e.type)).toBe(true);
+    }
+  });
+});

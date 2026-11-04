@@ -21,6 +21,49 @@ work belongs in `TYPE_SYSTEM_ROADMAP.md` or an active file under `plans/`.
 - Absence in a numeric result normalizes to `NaN`. `Missing` remains a
   non-numeric absence value and comparisons over it use three-valued logic.
 
+### A store into a declared type: match, or overlap and a test at each read
+
+A store into a symbol whose type was declared (`ce.assign`, the `Assign`
+operator, a `Declare` with a value, a typed Epsil `let`) gives one of three
+verdicts (`storeAdmission()` in `boxed-expression/effects-inference.ts`):
+
+- **match**: the value fits the declared type (`matchesOrAbsent()`). A read of
+  the symbol does not test the value.
+- **overlap**: the value does not fit, but its type overlaps the declared type
+  (`typesOverlap()` of the type the value presents), and the value holds a
+  symbol that is not a constant. The store accepts it, as a call accepts an
+  argument of a user function whose type overlaps the parameter type
+  (`liftedOperandCannotFit()` in `boxed-expression/validate.ts`). Each read of
+  the symbol (`evaluate()`, `N()`, `evaluateAsync()`) tests the evaluated
+  value with the same verdict, and a value that the store would refuse is an
+  `incompatible-type` error at that read, as a call tests a bound argument.
+  A result that is still symbolic and whose type overlaps the declared type is
+  read as it is.
+- **refuse**: the store throws. This is the verdict for a value whose type has
+  no value in common with the declared type, and for a value of literals and
+  constants that does not fit (`(1, 2.5)` for `tuple<integer, integer>`). The
+  symbol `Missing` at a type that excludes absence, an error value, a
+  collection with a failed element, a number literal held through a
+  restriction (`2 {a > 0}`), a value at a declared function signature and a
+  value at a polymorphic declared type keep their own rules and are not
+  admitted on overlap.
+
+Example: with `a: real` and `P: tuple<real, real>`, the value
+`(-sqrt(1 - a^2), a)` is typed `tuple<complex, real>`. The store accepts it; a
+read with `a = 0.5` gives `(-0.866…, 0.5)`, and a read with `a = 5` gives
+`Error(ErrorCode("incompatible-type", "tuple<real, real>",
+"tuple<imaginary, integer>"), …)`. `ce.declare("t", "gf8"); ce.assign("t", 2)`
+still throws: the types are disjoint.
+
+The cost of the test is one set lookup at each read of a value that matched:
+only a value admitted on overlap is recorded (`noteOverlapAdmitted()`), and only
+its reads compute the verdict. Compiled code does not test the value: it reads
+the symbol as a value of its declared type (`assertHeldValueType()` accepts a
+value admitted on overlap), and a value outside the type gives an unspecified
+result, within the caveats of `COMPILATION-MODEL.md`.
+
+Source: ROADMAP CE-800, option 1 (user decision 2026-11-04; Tycho row 483).
+
 ### The subtype hierarchy and the role of `unknown`
 
 `unknown` is an inference marker, not a content type (user decisions D1 to

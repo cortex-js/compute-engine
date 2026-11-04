@@ -4345,17 +4345,24 @@ function addTypeOnTypes(
       // The points are added component by component, which is not closed
       // over `imaginary` (`(i, i) + (-i, -i)` is `(0, 0)`), so each component
       // of the joined point type is closed (`closeImaginaryPointComponents`).
-      const cell = closeImaginaryPointComponents(
-        widenAll(
-          args.map((x) =>
-            stripNumericRanges(
-              typeCouldBeNumericTuple(x.type)
-                ? numericTupleArms(x.type)
-                : pointNestOf(x.type)!.cell
-            )
-          )
-        ) as Type
+      const points = args.map((x) =>
+        typeCouldBeNumericTuple(x.type)
+          ? numericTupleArms(x.type)
+          : pointNestOf(x.type)!.cell
       );
+      // When each operand gives one tuple type, the cell is the sum of the
+      // point types component by component, as for a sum of two points
+      // (`tupleComponentwiseAddType`). The join of the point types widens a
+      // component `real | signed_infinity | nan` to `infinity | nan | real`,
+      // and `infinity` admits the complex infinity, which no sum of such
+      // components has: with `L: list<tuple<E, E>>` for that `E`, `L + (1, 1)`
+      // was not a `list<tuple<E, E>>`. A point type that is a union of tuples
+      // is left to the join.
+      const cell =
+        tupleComponentwiseAddType(points.map((t) => describeType(t))) ??
+        closeImaginaryPointComponents(
+          widenAll(points.map((t) => stripNumericRanges(t))) as Type
+        );
       // The operand of highest rank gives the shape.
       const deepest = pointLists
         .map((x) => pointNestOf(x.type)!)
