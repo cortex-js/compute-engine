@@ -2078,55 +2078,6 @@ reproduction above is the record.
 
 ## Compilation
 
-### CE-808. A JavaScript fold or `Max`/`Min` over a value computed by an empty indexed `Sum` throws where the interpreter gives 0
-
-**Status:** ready; defect, S. Found by the review of CE-806.
-**Witness:** plausible; with `L: list<real>` and `n: integer`,
-`Block(K ≔ Sum(L·i, i, 1, n), Sum(K))` at `n = 0` throws `.reduce is not
-a function` in compiled JavaScript; the interpreter gives `0`. The same
-for `Sum(Sum(L·i, i, 1, n))`, `Sum(2·Sum(L·i, i, 1, n))`, `Max(K)` in
-the same block, `Max(Sum(L·i, i, 1, n))` (the folded operand loop iterates
-the number `0`), and `Max(2·Sum(L·i, i, 1, n), 1)` (`for … of 0`). When the
-length of the term is known, the unrolled fold reads `0[0]` and gives `NaN`
-where the interpreter gives `0`.
-
-An indexed `Sum` or `Product` whose body is a list of unknown length gives
-the number `0` or `1` for an empty range, as the interpreter does, so a
-value typed as a list can be a number at run time. CE-806 added
-`isGuaranteedArray()` (`javascript-target.ts`), which tells when the
-structure of a value guarantees an array, and keeps the run-time test
-elsewhere for the forms it changed. Two older forms do not test: the
-`Sum`/`Product` fold over a list of numbers (the branch of
-`emitCollectionReduce()` without a guard), and `Max`/`Min` of an
-operand that is not element-wise arithmetic, or of several operands. Fix:
-use the same helper there, and emit the guarded form where it is false.
-This adds `Array.isArray` to sources such as `Sum(Filter(…))`; measure
-the corpus records whose code gains the test, and report them. Zero
-changed values on the corpus.
-
-### CE-807. The `PointX`/`PointY` components of a recursive point function are typed number-or-list, so the JavaScript preamble tests their shape at run time
-
-**Status:** ready; defect, S. Found by the corpus measure of CE-806. The
-first witness (`neyret/fvyda0ed67`, the term `At(C, i + 1) * x^i` of an
-indexed `Sum` with `C` declared as the bare type `list` and holding a list
-of reals) is fixed: the compile-side type of an element read of a symbol
-that holds a list of numbers is `number` (`heldListElementType()`,
-`provable-kind.ts`). On Tycho `a34405ae0`, record 8326 lost its
-`Array.isArray` seed and its `_SYS.bcast`; no other record changed, no
-value or decline changed.
-**Witness:** corpus; Tycho `neyret/zibjmkv9h9` (records 17112 and 17114,
-rows `(P(\lfloor t\rfloor))` and `(Q(t))`, with `t` declared
-`real<-0.5..10.5>`): the recursive point function `Q` compiles with no
-`Array.isArray` on 0.178.0 and with `[_tv2, _tv6].some(Array.isArray)` in
-its preamble (`_fn_Q`) on `66c7363eb`.
-
-A change after 0.178.0 widened the type of a `PointList` component
-(`PointY(Q(i - 1)) + PointX(Q(i - 1))`; the inferred return type of `Q` is
-`tuple<list<list<any>|number|tuple>|number|tuple, …>`, wider than the point
-it returns). Find the commit with a bisect between 0.178.0 and `66c7363eb`
-on this one document, and narrow the type again. Zero changed values;
-report the records that lose the test.
-
 ### CE-799. A call mapped over a list of points declines when a coordinate is a symbol with a bounded real type (Tycho row 486)
 
 **Status:** ready; defect, M. Tycho row 486 (`~/dev/tycho/docs/COMPUTE_ENGINE.md`).

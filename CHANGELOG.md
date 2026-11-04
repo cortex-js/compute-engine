@@ -299,6 +299,19 @@
 
 ### Resolved Issues
 
+- **A compiled `Sum`, `Product`, `Max` or `Min` of a list computed by an
+  empty indexed `Sum` gives the value of the interpreter.** An indexed
+  `Sum` or `Product` over a list of unknown length is the number `0` or `1`
+  for an empty range, so a value typed as a list can be a number. With
+  `L: list<real>` and `n: integer`, at `n = 0`, the compiled JavaScript of
+  `Sum(Sum(L·i, i, 1, n))`, `Sum(2·Sum(L·i, i, 1, n))` and
+  `Max(Sum(L·i, i, 1, n))` threw `.reduce is not a function`, and
+  `Max(2·Sum(L·i, i, 1, n), 1)` threw `is not iterable`. They now give `0`,
+  `0`, `0` and `1`, as `evaluate()` does. The fold and the extremum of a
+  list that is not an array by its structure (not an input, a list literal
+  or arithmetic over one) test its shape when they run, and a number is the
+  fold or the extremum of itself. The code for an input (`Sum(L)`,
+  `Max(L, 1)`) does not change.
 - **An element read of a symbol that holds a list of numbers is a number in
   compiled JavaScript, whatever the declared type of the symbol.** With `C`
   declared as the bare type `list` and holding `[c_1, …, c_10]` over symbols

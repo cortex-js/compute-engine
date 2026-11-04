@@ -329,10 +329,16 @@ list:
 - The term of an indexed `Sum` or `Product` written as a loop. The loop
   seeds its accumulator with a copy of the first term when the term is
   an array, and with the term itself when it is a number. Corpus witness:
-  a polynomial `\sum_{i=0}^{\mathrm{Length}(C)-1} C[i+1]x^i` over a list
-  `C` whose element type is not settled, so the term `C[i+1]x^i` can be
-  a number or a list. A decline would make this document evaluate each
-  value with the interpreter.
+  `\sum_{i=1}^{\mathrm{Length}(U)} \begin{cases}i & C=U[i]\\0 &
+  \top\end{cases}` with `C` and `U` lists, where the condition compares the
+  list `C` with a number, so the term can be a number or a list. A decline
+  would make this document evaluate each value with the interpreter. A
+  polynomial `\sum_{i=0}^{\mathrm{Length}(C)-1} C[i+1]x^i` is not an
+  exception when `C` is an input whose element type is declared, or a
+  symbol that holds a list of numbers: the compiled code folds the held
+  list into a constant, so `C[i+1]` is a number even when `C` is declared
+  with the bare type `list` (`heldListElementType()` in
+  `compilation/provable-kind.ts`).
 - A component of a `PointList` whose type is `broadcastable<T>`, or a
   component of a type that does not settle its shape. The component is
   one coordinate when it is a number and a list of coordinates when it
@@ -343,10 +349,10 @@ list:
   returns, so the components `Q(i-1).x + Q(i-1).y` can be a number or a
   list.
 
-In both cases a declaration removes the test: declare the element type
-of the list (`C: list<real>`) or the result type of the function
-(`Q: (real) -> tuple<real, real>`), and the compiled code has the
-settled form.
+A declaration removes the test when the union comes from an open type:
+declare the element type of a list input (`C: list<real>`) or the result
+type of the function (`Q: (real) -> tuple<real, real>`), and the compiled
+code has the settled form.
 
 A third exception, on JavaScript and `interval-js`, has no declaration
 that removes it: a value whose type is a list, but that is not an array by
@@ -364,10 +370,15 @@ such an input or literal (`isGuaranteedArray()` in
 `compilation/javascript-target.ts`). Any other
 list value (a call, a `Block` local, a symbol with a value, an indexed
 `Sum` or `Product`) keeps the run-time test of its shape in the consumers
-above: the seed of an indexed `Sum` or `Product`, `Max` or `Min` of one
-arithmetic operand, the fold of `Sum` or `Product` of a collection of
-lists, and the fold of `interval-js`. A number is then the fold or the
-extremum of itself, as in the interpreter.
+above: the seed of an indexed `Sum` or `Product`, `Max` or `Min` of a list
+operand, alone or beside other operands, the fold of `Sum` or `Product` of
+a collection of numbers or of lists, and the fold of `interval-js`. A
+number is then the fold or the extremum of itself, as in the interpreter:
+with the same `L` and `n`, `Sum(Sum(L·i, i, 1, n))` and
+`Max(2·Sum(L·i, i, 1, n), 1)` are `0` and `1` at `n = 0`. The fold of a
+list whose type states a width of fewer than five terms (`vector<3>`) is
+written term by term with no test: an indexed `Sum` or `Product` of such a term is a list of
+that width for an empty range, not a number.
 
 **R4. A declared union at an input follows R2.** With
 `y: real | tuple<real, real>` and `f := t ↦ 2t`, `f(y)` compiles to

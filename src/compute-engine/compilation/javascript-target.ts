@@ -15827,14 +15827,30 @@ function compileExtremum(
     // one position, because `rangeGatherSource` declines a gather with no
     // position at all, so the empty-input branch above has no counterpart
     // there.
-    if (nested[0]) return guardedReduce(`${compile(args[0])}.flat(Infinity)`);
+    // An operand that is not an array by its structure
+    // (`isGuaranteedArray`: an input typed as a list, a list literal, or
+    // arithmetic over one) can be a number at run time, also when its
+    // static type is a list: an indexed `Sum` or `Product` over a list of
+    // unknown length is `0` or `1` for an empty range
+    // (`Max(Sum(L·i, i, 1, n))` with `L: list<real>` at `n = 0`). Such an
+    // operand keeps the test of its shape, and a number is the extremum of
+    // itself, as in the interpreter. A gather that the loop takes reads
+    // its source by position, and the interpreter gives an error for a
+    // position into a number, so the loop needs no such test.
+    const array = isGuaranteedArray(args[0], target);
+    if (nested[0])
+      return array
+        ? guardedReduce(`${compile(args[0])}.flat(Infinity)`)
+        : `((_v) => Array.isArray(_v) ? ${guardedReduce('_v.flat(Infinity)')} : ${fn}(_v))(${compile(args[0])})`;
     const loop = emitRangeGatherReduction(
       args[0],
       target,
       identity,
       (acc, element) => `${acc} = ${fn}(${acc}, ${element});`
     );
-    return loop ?? guardedReduce(compile(args[0]));
+    if (loop !== undefined || array)
+      return loop ?? guardedReduce(compile(args[0]));
+    return `((_v) => Array.isArray(_v) ? ${guardedReduce('_v')} : ${fn}(_v))(${compile(args[0])})`;
   }
   // An operand typed as an abstract collection (`collection`,
   // `collection<integer>`, a set) is not an indexed collection, and none of
@@ -15957,6 +15973,16 @@ function compileExtremum(
       `for (const _x of ${p}) { ${step('_x')} }`;
     const body = args.map((a, i) => {
       const p = params[i]!;
+      // A list operand that is not an array by its structure
+      // (`isGuaranteedArray`) can be a number at run time: an indexed `Sum`
+      // or `Product` over a list of unknown length is `0` or `1` for an
+      // empty range (`Max(2·Sum(L·i, i, 1, n), 1)` with `L: list<real>` at
+      // `n = 0`). Such an operand keeps the test of its shape, and a number
+      // is one element of the extremum, as in the interpreter. An operand
+      // that is not an indexed collection is read through `_SYS.elts`,
+      // which gives an array or throws, so it needs no such test.
+      if (isIndexedCollectionOperand(a) && !isGuaranteedArray(a, target))
+        return `if (Array.isArray(${p})) { ${loop(nested[i] ? `${p}.flat(Infinity)` : p)} } else { ${step(p)} }`;
       if (isFolded(a, i)) return loop(nested[i] ? `${p}.flat(Infinity)` : p);
       // An operand that may be an array at run time is flattened at every
       // level, as in the single-operand projection above: its type does not
@@ -16737,6 +16763,19 @@ function emitCollectionReduce(
   // exactly-real total back as a plain number.
   if (!guarded) {
     const identity = kind === 'Sum' ? '0' : '1';
+    // A source that is not an array by its structure (`isGuaranteedArray`:
+    // an input typed as a list, a list literal, or arithmetic over one) can
+    // be a number at run time, also when its static type is a list: an
+    // indexed `Sum` or `Product` over a list of unknown length is `0` or `1`
+    // for an empty range, as in the interpreter (`Sum(Sum(L·i, i, 1, n))`
+    // with `L: list<real>` at `n = 0`). Such a source keeps the test of its
+    // shape, and a number is the fold of itself, as in the interpreter
+    // (`Sum(0)` is 0, `Product(1)` is 1).
+    const array = isGuaranteedArray(coll, target);
+    const testShape = (fold: (read: string) => string): string =>
+      array
+        ? fold(code)
+        : `((_c) => Array.isArray(_c) ? ${fold('_c')} : _c)(${code})`;
     // The SAME predicate `isComplexValued` answers the parent from
     // (`collectionFoldsReal`), so the fold's shape and its report agree: a
     // raw fold yields a number; the agnostic fold, wrapped in the complex
@@ -16761,13 +16800,23 @@ function emitCollectionReduce(
         };
         // The width comes from the static type, which every value holds,
         // a host input included: compiled code tests no shape of a value
-        // whose static shape is settled.
+        // whose static shape is settled. The compiled seed of an indexed
+        // `Sum` or `Product` whose term is a list of numbers of a known
+        // width (`vectorBodyWidth()`) is a list of that width of `0` or `1`,
+        // not a number, so an empty range gives an array and this form
+        // needs no test of the shape of its source. The interpreter gives
+        // the same list (`emptyBigOpValue()` in
+        // `symbolic/big-op-identity.ts`). If `vectorBodyWidth()` stops
+        // counting a term that `staticCollectionWidth()` counts, this form
+        // reads `0[0]` and gives `NaN`.
         return BaseCompiler.withRepeatableSource(code, target, terms);
       }
-      return reduce(code);
+      return testShape(reduce);
     }
     const combiner = kind === 'Sum' ? '_SYS.sadd' : '_SYS.smul';
-    return `_SYS.cplx((${code}).reduce(${combiner}, ${identity}))`;
+    return `_SYS.cplx(${testShape(
+      (read) => `(${read}).reduce(${combiner}, ${identity})`
+    )})`;
   }
   // Elements that are collections (points, rows, matrices): elements that
   // are arrays fold with the element-wise combiner, so a nested result matches the interpreter
