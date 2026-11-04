@@ -90,19 +90,15 @@ describe('COMPILED LIST CELL OF AN UNMATCHED POINT', () => {
     }
   });
 
-  test('a position whose condition is absent stays NaN', () => {
-    // An absent condition cell (NaN) is the interpreter's error cell, which
-    // compiles to NaN; it is not a position that no clause matched. The
-    // position whose condition is false is the NaN point.
+  test('a position whose condition is false is the NaN point', () => {
     ce.declare('c', 'list<boolean>');
     const result = compile(ce.box(['Which', 'c', ['Tuple', 1, 2]]), {
       fallback: false,
     }) as any;
     expect(result.success).toBe(true);
-    const out = result.run({ c: [true, NaN, false] });
+    const out = result.run({ c: [true, false] });
     expect(out[0]).toEqual([1, 2]);
-    expect(Number.isNaN(out[1])).toBe(true);
-    expect(out[2]).toEqual([NaN, NaN]);
+    expect(out[1]).toEqual([NaN, NaN]);
   });
 });
 

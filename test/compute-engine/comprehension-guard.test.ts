@@ -247,10 +247,36 @@ describe('COMPREHENSION GUARD — decided-true semantics and clause scope', () =
       undefined,
       {}
     );
-    // Not a bare `if x`: the value is tested for a decided boolean.
+    // Not a bare `if x`: the value is tested for a boolean that is true.
     expect(py).not.toMatch(/ if x\]/);
-    expect(py).toContain('isinstance(x, (bool, np.bool_))');
+    expect(py).toContain('isinstance(_g, (bool, np.bool_))');
     engine.assign('n', 3);
+    expect(comp.evaluate().toString()).toBe('[]');
+  });
+
+  // A relational head does not make the guard a scalar boolean: an
+  // element-wise `Equal` over a list gives a list, which is truthy in
+  // JavaScript. The guard's static type (`list<boolean>`) decides the test.
+  test('a list-valued relational guard keeps nothing', () => {
+    const engine = new ComputeEngine();
+    engine.declare('L', 'list<real>');
+    const comp = engine.box([
+      'Comprehension',
+      'x',
+      ['Element', 'x', 'L', ['Equal', 'L', 'x']],
+    ]);
+    const js = compile(comp, { fallback: false });
+    expect(js.success).toBe(true);
+    expect(js.run!({ L: [1, 2] })).toEqual([]);
+    const py = new PythonTarget().compileFunction(
+      comp,
+      'fn',
+      ['L'],
+      undefined,
+      {}
+    );
+    expect(py).toContain('isinstance(_g, (bool, np.bool_))');
+    engine.assign('L', engine.box(['List', 1, 2]));
     expect(comp.evaluate().toString()).toBe('[]');
   });
 

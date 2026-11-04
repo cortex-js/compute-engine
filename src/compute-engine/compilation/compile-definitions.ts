@@ -62,10 +62,10 @@ import {
 import { tempVar, withBoundScope } from './compiler-naming.js';
 import { collectUsedNames } from './compiler-names.js';
 import {
+  userFunctionSignature,
   signatureParamType,
   userFunctionParamsAreScalar,
 } from './compile-assignment-checks.js';
-import { userFunctionSignature } from './compile-absence.js';
 import {
   liftPromotionSuppression,
   restorePromotionSuppression,

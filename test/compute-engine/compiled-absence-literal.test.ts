@@ -75,45 +75,12 @@ describe('the discharge primitives answer what the interpreter answers', () => {
 });
 
 describe('an absent cell reaches the statistics reducers as absent', () => {
-  // `Array.prototype.sort` moves an `undefined` element to the END of the
-  // array without calling the comparator, so an un-normalized absent cell
-  // shifted the median instead of poisoning it: `Median([1, Missing, 3])` was
-  // `3`.
-  test.each([['Missing']])(
-    'Median([1, %s, 3]) is absent',
-    (name) => {
-      const r = js(['Median', ['List', 1, name, 3]]);
-      expect(r.success).toBe(true);
-      expect(Number.isNaN(r.run!({}) as number)).toBe(true);
-      expect(
-        ce.box(['Median', ['List', 1, name, 3]]).evaluate().symbol
-      ).toBe('Missing');
-    }
-  );
-
   test.each([['Missing']])('Mean([1, %s, 3]) is NaN', (name) => {
     expect(Number.isNaN(js(['Mean', ['List', 1, name, 3]]).run!({}))).toBe(
       true
     );
   });
 
-  // Normalizing the cell to `NaN` and reducing anyway was not enough: the
-  // sorting reducers select a middle element, so an absent cell at either END
-  // left an ordinary number. The reducers now answer absent BEFORE they run.
-  test.each([
-    [0, 'Missing'],
-    [1, 'Missing'],
-    [2, 'Missing'],
-  ])('Median with the absent cell at position %i (%s) is absent', (at, name) => {
-    const cells: any[] = [1, 2, 3];
-    cells[at as number] = name;
-    const expr = ['Median', ['List', ...cells]];
-    expect(Number.isNaN(js(expr).run!({}) as number)).toBe(true);
-    expect(ce.box(expr).evaluate().symbol).toBe('Missing');
-  });
-
-  // A HOLE in a sparse array the caller supplies is absent too. The scan is
-  // an index loop, not `Array.prototype.some`, which skips holes.
   describe('a hole in a caller-supplied array', () => {
     function overList(head: string) {
       const listEngine = new ComputeEngine();
@@ -124,11 +91,6 @@ describe('an absent cell reaches the statistics reducers as absent', () => {
     }
     const sparse: any[] = [1, , 3];
 
-    test('Median of an array with a hole is NaN', () => {
-      expect(Number.isNaN(overList('Median').run!({ L: sparse } as any))).toBe(
-        true
-      );
-    });
 
     test('Mean of an array with a hole is NaN', () => {
       expect(Number.isNaN(overList('Mean').run!({ L: sparse } as any))).toBe(
@@ -187,16 +149,6 @@ describe('an absent cell reaches the statistics reducers as absent', () => {
   // A whole operand that is absent is absent DATA. `Mean(Missing)` emits
   // `_SYS.mean(undefined)`, which used to raise "values is not iterable"
   // behind `success: true`.
-  test.each([['Missing']])(
-    'a bare %s operand answers the reducer absent result',
-    (name) => {
-      expect(Number.isNaN(js(['Mean', name]).run!({}) as number)).toBe(true);
-      expect(Number.isNaN(js(['Median', name]).run!({}) as number)).toBe(true);
-      const q = js(['Quartiles', name]).run!({}) as number[];
-      expect(q).toHaveLength(3);
-      expect(q.every((x) => Number.isNaN(x))).toBe(true);
-    }
-  );
 });
 
 describe('an absent operand in a numeric slot still answers NaN', () => {
@@ -214,11 +166,6 @@ describe('an absent list cell stays distinct from a NaN cell', () => {
   // for any value, so a pair of collections holding one is UNDECIDED (the
   // compiled marker is `NaN`), while a `NaN` cell is a number that equals
   // nothing and decides the comparison `false`.
-  test('Equal([1, Missing], [1, Missing]) is the undecided marker', () => {
-    const r = js(['Equal', ['List', 1, 'Missing'], ['List', 1, 'Missing']]);
-    expect(r.success).toBe(true);
-    expect(Number.isNaN(r.run!({}) as number)).toBe(true);
-  });
 
   test('Equal([1, NaN], [1, NaN]) is decidedly false', () => {
     const r = js(['Equal', ['List', 1, 'NaN'], ['List', 1, 'NaN']]);

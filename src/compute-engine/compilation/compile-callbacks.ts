@@ -80,6 +80,7 @@ import {
   userFunctionParamType,
 } from './compile-user-calls.js';
 import {
+  userFunctionSignature,
   groundSignature,
   signatureParamType,
   userFunctionLiteral,
@@ -94,7 +95,7 @@ import {
   userFunctionDefaults,
   userFunctionParameterTypes,
 } from './compile-parameter-defaults.js';
-import { blockLocalOf, userFunctionSignature } from './compile-absence.js';
+import { blockLocalOf } from './compile-locals.js';
 import { isIndexReadTuple } from '../boxed-expression/index-read-tuple.js';
 import type {
   DeclineNote,

@@ -896,32 +896,22 @@ compile time"). A `NaN` operand decides the comparison (`false`, or `true`
 for `NotEqual`), as in the interpreter. See `docs/ERROR-MODEL.md`, the "An
 unsupplied variable" item.
 
-The ELEMENT-WISE runtime is three-valued, and that is where an absence shows.
-(Since the user decision of 2026-11-02, two-valued comparisons, the
-interpreter answers `False` for such a cell and a branch takes its next arm;
-the compiled mark below is a value computed from an absent value, which the
-caveats of compiled code leave unspecified. The lowering is removed in step 4
-of `docs/plans/2026-11-02-compiler-contraction-plan.md`. The rest of this
-paragraph describes the interpreter before that decision.)
-An absent CELL makes its comparison undecided, so the runtime marks exactly that
-position with `NaN` — how a real target renders `Missing` in a cell — instead of
-answering a decided `false`: `Equal([1, 2, 3], Missing)` compiles to three marks
-as the interpreter answers `[Missing, Missing, Missing]`, and
-`Equal([1, Missing], 1)` compiles to `[true, NaN]` as the interpreter answers
-`[True, Missing]`. A `NaN` OPERAND is not an absence — it is a number that
-equals nothing — and still answers a decided `false`. Two consumers already read
-the mark: the selection runtime consumes a position whose condition cell is
-absent instead of offering it to a later clause, so an element-wise piecewise
-answers absent there rather than taking a branch; and the element-wise
-connective guard tests absence as `x !== x`, so a marked cell combines
-three-valued with `And`/`Or` and a decided `false` still absorbs it.
-`KroneckerDelta` is unaffected, since its codomain is numeric and it answers `0`.
-
-Making the SCALAR comparison undecided as well was measured and declined: it
-reaches the fused selection lane, the value-position connectives, the
-operand-binding rules and the short-circuit order of a chained comparison, which
-is a far wider change than the cell-level defect it would fix. The remaining
-divergences are recorded in `ROADMAP.md`.
+A compiled comparison is two-valued, also element-wise: each cell of a
+compiled `Equal` or `NotEqual` over collections (`_SYS.eq`, `_SYS.neq` on
+JavaScript) is a boolean, and so is a whole-collection comparison. With
+`Equal([1, Missing], 1)`, the compiled code gives `[true, false]` and the
+interpreter gives `[True, False]`; the compiled cell is a value computed from
+an absent operand, which the caveats of compiled code leave unspecified. A
+branch condition compiles to the same code as the comparison. A condition
+that is not provably a boolean goes through `_SYS.cond` on JavaScript, which
+reads `undefined`, `null` and `NaN` as `false`, so a branch with an absent
+condition takes its next arm, as in the interpreter. The element-wise
+selection runtime (`_SYS.select`) reads an absent condition cell the same way:
+the position is not selected by that clause, and a later clause can select
+it. A comprehension guard that is not provably a boolean is tested with
+`=== true` on JavaScript and with the Python test of `pythonGuardTest()` on
+Python. `KroneckerDelta` is not a comparison: its codomain is numeric, and
+it gives `0` where the operands are not equal.
 
 A consumer that needs tolerant equality evaluates through the interpreter, or
 asks for a compile option; none exists today.
@@ -1148,8 +1138,8 @@ value (decided by the user, 2026-10-18):
   `'true'`, as the scalar targets answer `NaN ≠ 0` with `true` (user
   decision 2026-10-25, ROADMAP CE-396). With a `partial` operand it is
   `'true'` only when the enclosures do not overlap, since `≠` holds where
-  the operand is undefined. An absent operand (an `empty` with the `missing`
-  flag) gives `'maybe'` for every relation.
+  the operand is undefined. An absent operand is an `empty` result, and the
+  verdict of a relation over it is unspecified.
 
 The interpreter fallback (`success: false`, with `fallback` not `false`)
 gives the same shapes: a number is the `interval` result of a point, and an
@@ -2531,7 +2521,8 @@ library's results to the interpreter's rules:
   `ElementMax`, `ElementMin`, through `_IA.max`, `_IA.min`, `_IA.clamp`)
   wrap their result in it. It keeps an infinite singleton (`x < y` run with
   `y: Infinity` is `'true'`, and `Max(x, y)` is `[+∞, +∞]`) and the
-  absence marker (`empty` with `missing: true`).
+  `empty` result, and an interval with a `NaN` endpoint (the numeric
+  absence marker) as it is.
 - `_IA.finiteOperand(v)` takes each operand of an arithmetic operation
   BEFORE the kernel, and answers `empty` for an infinite singleton: the
   kernels would answer `[0, +∞]` for `[0, 1] · [+∞, +∞]` and `[0, 0]` for

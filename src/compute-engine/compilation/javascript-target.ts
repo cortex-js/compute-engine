@@ -102,7 +102,6 @@ import { logSpaceProduct } from '../symbolic/log-space-product.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import {
   nanPointLiteral,
-  operandMayBeAbsent,
   unmatchedCellLiteral,
 } from './compile-absence.js';
 import { reachesCallerCodeOn } from './compile-folding.js';
@@ -862,11 +861,6 @@ const JAVASCRIPT_CONSTANTS: Record<string, string> = {
  */
 const JS_RESERVED_EMITTED_NAMES: ReadonlySet<string> = new Set([
   '_SYS',
-  // The arrow parameter an `If`/`Which` binds its condition to when the
-  // condition must be inspected twice — once against `true`, once against
-  // `false` (`BaseCompiler.exactSelect`). A user parameter of the same name
-  // inside an arm would be shadowed by it, so it is renamed on the way in.
-  '_CND',
   // The loop of a `Sum` or `Product` (`emitSumProduct`) declares its upper
   // bound as `_upper` around the body. A user name `_upper` in the body
   // would read that bound instead of its own value.
@@ -1466,15 +1460,7 @@ function assertNoMixedStringOrdering(
  * comparison with an absent operand is not specified in compiled code
  * (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code").
  *
- * The SCALAR answer is always a genuine boolean, which the branch
- * machinery depends on (`BRANCH_RELATIONS` in `base-compiler.ts`, and the
- * negation inside `kleeneRelationLeaf`). Only the ELEMENT-WISE runtime is
- * three-valued: `eqTensor` marks an absent CELL with `NaN`, which the
- * selection runtime reads as an undecided position. Making the scalar answer
- * undecided as well was measured and declined: it reaches the fused selection
- * lane, the value-position connectives, the operand-binding rules and the
- * chain's short-circuit order, which is a far wider change than the cell-level
- * defect it would fix.
+ * The answer is always a boolean, also element-wise (`eqTensor`).
  */
 function compileJSEquality(
   kind: 'Equal' | 'NotEqual',
@@ -1568,9 +1554,7 @@ function compileJSEquality(
   // `_SYS.neq` instead: scalar
   // operands compare tolerantly, an array-vs-scalar pair is element-wise, an
   // array-vs-array pair is whole-collection equality — see `eqTensor`. The
-  // gate is `isCollectionEqualityOperandJS`, which the target also declares
-  // so the branch-decidedness analysis classifies these operands identically
-  // (`CompileTarget.collectionEqualityOperand`).
+  // gate is `isCollectionEqualityOperandJS`.
   //
   // The chained form fails closed. It is not
   // a pairwise conjunction the way `a < b < c` is: the interpreter's n-ary
@@ -1596,18 +1580,6 @@ function compileJSEquality(
   // Each operand is compiled exactly once, here: the direct emission is what
   // the pair splices or binds below.
   const direct = args.map((a) => compile(a));
-  // The pairs of a chain are joined with `&&`, so a compiled pair that is
-  // `false` stops the evaluation of the operands after it. That is the
-  // interpreter's order only when the pair is also `False` in the
-  // interpreter (`evaluateChainOperands` in `library/relational-operator.ts`).
-  // An `Equal` pair with an absent operand is `false` in compiled code, but
-  // the interpreter reads `Missing` there, which is not `False`, and it goes
-  // on to evaluate the later operands. So `Equal(a, b, Random())` with `a`
-  // absent drew once in the interpreter and did not draw in compiled code.
-  // Such a chain does not compile when an impure operand comes after a pair
-  // that may read an absent operand. (A `NotEqual` pair with an absent
-  // operand is `true` in compiled code, so its chain goes on as the
-  // interpreter does.)
   // An operand is impure when it, or a value that it reads, has an effect
   // (`isTransitivelyPure`): a symbol whose stored value is `Random()` is pure
   // to `isPure`, but its compiled code draws at each place it is spliced.
@@ -1618,20 +1590,6 @@ function compileJSEquality(
   const impure = args.map(
     (a) => !isTransitivelyPure(a) || reachesCallerCodeOn(a, target)
   );
-  if (kind === 'Equal' && args.length > 2) {
-    // A `false` pair skips every later operand, so each pair before the
-    // LAST impure operand counts (`Equal(Random(), a, Random())` with `a`
-    // absent skips the second draw).
-    const lastImpure = impure.lastIndexOf(true);
-    // The test reads the TYPE (a `missing` option, `operandMayBeAbsent`).
-    for (let j = 1; j < lastImpure; j++)
-      if (operandMayBeAbsent(args[j - 1]) || operandMayBeAbsent(args[j]))
-        throw new Error(
-          'Could not compile `Equal`: a chained comparison with an operand ' +
-            'that may be absent before an operand with an effect. The ' +
-            'interpreter evaluates it instead.'
-        );
-  }
   // An IMPURE operand (the Random family) must be evaluated exactly once — the
   // interpreter evaluates each operand once. Two positions splice an operand
   // MORE than once: a COMPLEX operand is spliced twice by
@@ -1692,11 +1650,7 @@ function compileJSEquality(
   // `library/relational-operator.ts`), so an operand after that pair is not
   // evaluated and does not draw. A single scope that binds all the operands
   // before the first pair drew them all: `Equal(0.1, Random(), 0.9,
-  // Random())` drew twice, and the interpreter draws once. A compiled pair
-  // that is `false` is also `False` in the interpreter here: an `Equal`
-  // chain with an absent operand before an impure one does not compile (see
-  // above), and a `NotEqual` pair is `false` only for two present, equal
-  // operands.
+  // Random())` drew twice, and the interpreter draws once.
   if (args.length > 2 && bindings.length > 0) {
     const link = (i: number): string => {
       const rest = i + 1 < args.length ? ` && ${link(i + 1)}` : '';
@@ -2779,12 +2733,6 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
  * application such as `h(x)`. (`broadcastable<T>` is NOT a subtype of
  * `collection`, so it needs its own test.) A bare unknown SYMBOL is excluded
  * by that predicate, so plot equalities (`x^2 + y^2 = 4`) stay scalar.
- *
- * Declared on the target as `collectionEqualityOperand` as well, because the
- * branch-decidedness analysis has to classify these operands exactly as the
- * emitter does: the dispatch answers the absence marker rather than a
- * boolean, and only a condition that may carry the marker is read off its
- * own value.
  */
 function isCollectionEqualityOperandJS(a: Expression): boolean {
   return a.type.matches('collection<any>') || isPossiblyCollectionTypedJS(a);
@@ -5819,10 +5767,6 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // interpreter's own character order (`compare.ts`, decision D8).
     if (isProvablyStringOperand(args[0]))
       return joinIfString(args[0], `(${coll}).slice().sort(_SYS.cmpc)`);
-    // An absent cell (`undefined` at run time) needs no comparator case:
-    // `Array.prototype.sort` puts every `undefined` element after the others
-    // without calling the comparator, which is where the interpreter puts an
-    // absent cell (after `NaN`).
     assertNumericSortElements('Sort', args[0]!);
     return `(${coll}).slice().sort(${NAN_LAST_COMPARATOR})`;
   },
@@ -6336,13 +6280,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // pair falls back to `===` unchanged.
     if (isProvablyStringOperand(args[0])) {
       assertComparableAggregate('IndexOf', [args[1]]);
-      return compileSearchedValue(
-        'IndexOf',
-        args[1],
-        args[0],
-        compile,
-        (v) => `_SYS.idxt(${coll}, ${v})`
-      );
+      return `_SYS.idxt(${coll}, ${compile(args[1])})`;
     }
     // An AGGREGATE needle is invisible to the element test — `===` on two
     // distinct arrays is reference identity, so
@@ -6393,13 +6331,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // is false natively (it was an earlier tolerance leaf, `Math.abs(true - 1) <= tol`, that found
     // a boolean needle in a numeric haystack, and a numeric needle in a
     // boolean one, where the interpreter answers 0).
-    return compileSearchedValue(
-      'IndexOf',
-      args[1],
-      args[0],
-      compile,
-      (v) => `_SYS.idxt(${coll}, ${v})`
-    );
+    return `_SYS.idxt(${coll}, ${compile(args[1])})`;
   },
   // Higher-order: the mapping/predicate operand is compiled as a lambda
   // (`Function` literal → `(x) => …`), hoisted into an IIFE parameter so it
@@ -6829,13 +6761,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // List elements are JS arrays: `includes` would compare them by reference.
     if (structural) {
       requireStructuralNeedle('Contains', args[1]);
-      return compileSearchedValue(
-        'Contains',
-        args[1],
-        args[0],
-        compile,
-        (v) => `_SYS.hass(${coll}, ${v})`
-      );
+      return `_SYS.hass(${coll}, ${compile(args[1])})`;
     }
     // A TEXT membership test cannot be the raw SameValueZero of `includes`:
     // the interpreter compares strings by their CONDITIONED content (NFC, then
@@ -6845,22 +6771,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // code-unit sequences. `_SYS.eqt` is the same element test `IndexOf` uses,
     // and it falls back to SameValueZero for every non-text pair, so a `NaN`
     // or absent needle is found where the same marker sits, as `includes`
-    // finds it (`compileSearchedValue`).
+    // finds it.
     if (hasPossiblyTextElements(args[0]) || isProvablyTextOperand(args[1]))
-      return compileSearchedValue(
-        'Contains',
-        args[1],
-        args[0],
-        compile,
-        (v) => `_SYS.hast(${coll}, ${v})`
-      );
-    return compileSearchedValue(
-      'Contains',
-      args[1],
-      args[0],
-      compile,
-      (v) => `(${coll}).includes(${v})`
-    );
+      return `_SYS.hast(${coll}, ${compile(args[1])})`;
+    return `(${coll}).includes(${compile(args[1])})`;
   },
   // Unique elements in first-occurrence order (`Set` preserves insertion
   // order and uses SameValueZero — value equality only for primitive
@@ -6997,12 +6911,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `Could not compile \`Ordering\`: a custom ordering function is not supported; only the default ascending numeric order is.`
       );
-    // The comparator sees the CELLS here (it sorts indexes), so a cell that
-    // may be absent needs its own case: `ABSENT_LAST_COMPARATOR`.
-    const comparator = assertNumericSortElements('Ordering', args[0]!)
-      ? ABSENT_LAST_COMPARATOR
-      : NAN_LAST_COMPARATOR;
-    return `((_l, _c) => Array.from({ length: _l.length }, (_, _i) => _i + 1).sort((_a, _b) => _c(_l[_a - 1], _l[_b - 1])))(${coll}, ${comparator})`;
+    assertNumericSortElements('Ordering', args[0]!);
+    return `((_l, _c) => Array.from({ length: _l.length }, (_, _i) => _i + 1).sort((_a, _b) => _c(_l[_a - 1], _l[_b - 1])))(${coll}, ${NAN_LAST_COMPARATOR})`;
   },
   // Unbiased Fisher–Yates shuffle on a copy (`_SYS.shuffle`), consuming its
   // `n − 1` draws through the frame-aware `_SYS.drawNextRandomNumber()` in the
@@ -7040,7 +6950,6 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `Could not compile \`Any\`: only the predicate form compiles.`
       );
-    refuseKleeneQuantifier('Any', args[0], args[1]);
     if (walk)
       return emitPredicateRangeWalk('Any', args[0], args[1], compile, target, {
         init: '',
@@ -7058,7 +6967,6 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `Could not compile \`All\`: only the predicate form compiles.`
       );
-    refuseKleeneQuantifier('All', args[0], args[1]);
     if (walk)
       return emitPredicateRangeWalk('All', args[0], args[1], compile, target, {
         init: '',
@@ -7233,23 +7141,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = collArg('Element', args[1], compile);
     if (structural) {
       requireStructuralNeedle('Element', args[0]);
-      return compileSearchedValue(
-        'Element',
-        args[0],
-        args[1],
-        compile,
-        (v) => `_SYS.hass(${coll}, ${v})`
-      );
+      return `_SYS.hass(${coll}, ${compile(args[0])})`;
     }
-    // An absent value is an element where the same marker sits (see
-    // `compileSearchedValue`).
-    return compileSearchedValue(
-      'Element',
-      args[0],
-      args[1],
-      compile,
-      (v) => `(${coll}).includes(${v})`
-    );
+    // An absent value is an element where the same marker sits: the search
+    // is structural, as in the interpreter, and `includes` is SameValueZero,
+    // so no run-time absence test is needed.
+    return `(${coll}).includes(${compile(args[0])})`;
   },
   // `Pipe(x, stage)` compiles as the expression it evaluates
   // (`pipeApplication`).
@@ -11061,18 +10958,12 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // `Math.sin(_.x)` at every step evaluated it once per iteration; an
       // unrolled body repeated it once per term.
       hoistScalarInvariants: true,
-      // A non-boolean Which/When condition (e.g. NaN) fails closed at run time,
-      // matching the interpreter's throw (D6).
+      // A condition that is neither a boolean nor absent fails closed at
+      // run time (`_SYS.cond`).
       assertBoolean: (code) => `_SYS.cond(${code})`,
       // Element-wise `Which`/`If` selection over a collection-valued condition.
       selection: (args, compile, target, compileUnder) =>
         compileJSSelection(args, compile, target, compileUnder),
-      // The operands that send an `Equal`/`NotEqual` to `_SYS.eq`/`_SYS.neq`,
-      // whose answer is the absence marker when an element pair has none.
-      // The SAME predicate the equality emitter gates on
-      // (`compileJSEquality`), so the branch-decidedness analysis reads such a
-      // condition off its value and every other one off its operands.
-      collectionEqualityOperand: isCollectionEqualityOperandJS,
       // Absence capability (§3.F): numeric absence is `NaN`; the object axis is
       // `undefined`. Consumed by `IsMissing`, `Coalesce` and `AssertPresent`.
       //
@@ -11093,9 +10984,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // picks its marker from a wider type gives `NaN` (an element read by
       // `_SYS.atWithValueMarker` is returned as it is). A present
       // object-domain value (a string, an array, a record) is never `NaN`,
-      // so the test reads it as present. `isNull` tests the object null
-      // only, for the guard of an absent whole collection operand
-      // (`absentCollectionOperandGuard`), which keeps its former test.
+      // so the test reads it as present.
       absence: {
         numeric: {
           make: () => 'Number.NaN',
@@ -11104,7 +10993,6 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         },
         object: {
           nullLiteral: 'undefined',
-          isNull: (x) => `(${x} === undefined)`,
           isAbsent: jsIsAbsent,
           coalesce: jsCoalesce,
         },
@@ -13533,114 +13421,6 @@ function collArg(
  * (`docs/STRING_ROADMAP.md`, decision D13.)
  */
 /**
- * Compile the search of `Contains`, `IndexOf` or `Element` for the searched
- * value `needle`. The search is STRUCTURAL, as in the interpreter: a marker is
- * found where the same marker sits (user decision 2026-09-26,
- * `SEARCHED_VALUE_POLICY` in `library/collections.ts`). A `NaN` needle is
- * found in a list that holds `NaN`, and a written `Missing`, which lowers to
- * `undefined`, is found where a written `Missing` sits. The element tests the
- * lowerings emit are SameValueZero: `includes`, and `_SYS.eqt` (see `eqText`),
- * so no run-time absence test is needed. `search(v)` emits the search for the
- * compiled value `v`.
- *
- * A needle that may be a COMPUTED NUMERIC absence — its type has a `missing`
- * arm beside a numeric arm, and it is not the written symbol — fails closed.
- * The interpreter keeps `Missing` apart from `NaN`, so
- * `IndexOf([1, NaN], Which(c, 1))` is `0` when no branch is selected; this
- * target spells an unselected numeric `Which` as `NaN`, and the compiled
- * search would find it at position 2. The written symbol keeps compiling: it
- * lowers to `undefined`, which is a different value from `NaN` here too. So
- * does a needle whose present arms are not numeric (`character | missing`, a
- * character read that may be out of range): its absence lowers to
- * `undefined`, never to `NaN`, so the element test stays faithful.
- * (`pySearchedValue` is the Python counterpart, which must also refuse the
- * written symbol.)
- *
- * The written symbol is refused in one case: when the COLLECTION's element
- * type has a `missing` arm. `Missing` lowers to `undefined` here, so a
- * written `Missing` searched in a list that may hold an absent cell could be
- * found where the interpreter does not find it. Against a list whose
- * elements cannot be absent the written symbol is never found on either
- * route, and compiles.
- */
-function compileSearchedValue(
-  operator: string,
-  needle: Expression,
-  collection: Expression | undefined,
-  compile: (expr: Expression) => string,
-  search: (v: string) => string
-): string {
-  const t = resolveTypeForCompilation(needle.type.type);
-  const written = isSymbol(needle, 'Missing');
-  if (
-    !written &&
-    typeContainsMissing(t) &&
-    couldMatch(stripMissingFromType(t), 'number')
-  )
-    throw new Error(
-      `Could not compile \`${operator}\`: the searched value may be a computed absence (\`Missing\`), ` +
-        `which this target may spell as \`NaN\` and would then find where a \`NaN\` element sits. ` +
-        `The interpreter evaluates it instead.`
-    );
-  if (written && collectionMayHoldAbsentCell(collection))
-    throw new Error(
-      `Could not compile \`${operator}\`: the searched value is \`${needle.toString()}\` and an element ` +
-        `of the collection may be absent; this target spells an absent cell as \`undefined\`, ` +
-        `which could not tell it from the written symbol. The interpreter evaluates it instead.`
-    );
-  return search(compile(needle));
-}
-
-/** True when the element type of `collection` has a `missing` arm, so a cell
- * may be `Missing` at run time. */
-export function collectionMayHoldAbsentCell(
-  collection: Expression | undefined
-): boolean {
-  if (collection === undefined) return false;
-  const elt = collectionElementType(
-    resolveTypeForCompilation(collection.type.type)
-  );
-  return elt !== undefined && typeContainsMissing(elt);
-}
-
-/**
- * Fail closed for `Any`/`All` when a predicate answer may be absent: the
- * collection's elements may be absent (an element type with a `missing` arm,
- * on which a comparison answers `Missing`), or the predicate's own result type
- * has a `missing` arm (`x ↦ If(x > 0, Missing, False)` over present
- * elements). The interpreter combines such answers by Kleene logic, so
- * `Any([1, Missing], x ↦ x > 2)` is `Missing` (user decision 2026-09-26,
- * `evaluateQuantifier` in `library/collections.ts`). The compiled predicate
- * has no third value: an absent element lowers to `undefined`, `undefined > 2`
- * is `false`, and `some`/`every` would answer a confident `false` where the
- * interpreter is undecided. A `NaN` element needs no refusal: it compares
- * `false` in both. `Filter`, `CountIf`, `Position`, `IndexWhere` and `Find`
- * need none either, since there "not decidedly true" is "not selected" on
- * both routes (`selectionVerdict`, `library/collections.ts`). Shared by the
- * JavaScript and Python targets.
- */
-export function refuseKleeneQuantifier(
-  operator: string,
-  collection: Expression | undefined,
-  predicate: Expression | undefined
-): void {
-  if (collectionMayHoldAbsentCell(collection))
-    throw new Error(
-      `Could not compile \`${operator}\`: an element of the collection may be absent (\`Missing\`), ` +
-        `and the interpreter then answers \`Missing\` by Kleene logic, which the compiled ` +
-        `\`some\`/\`every\` cannot. The interpreter evaluates it instead.`
-    );
-  if (predicate === undefined) return;
-  const result = functionResult(resolveTypeForCompilation(predicate.type.type));
-  if (result !== undefined && typeContainsMissing(result))
-    throw new Error(
-      `Could not compile \`${operator}\`: the predicate may answer \`Missing\`, which the interpreter ` +
-        `combines by Kleene logic and the compiled \`some\`/\`every\` cannot. ` +
-        `The interpreter evaluates it instead.`
-    );
-}
-
-/**
  * The source of `Count`: as `elementsArg`, except that a symbol typed as an
  * abstract collection (declared or inferred) is read through `_SYS.elts`,
  * which accepts an array or a JavaScript `Set` at run time
@@ -13692,18 +13472,6 @@ const NAN_LAST_COMPARATOR =
   '(_a, _b) => _a === _a ? (_b === _b ? _a - _b : -1) : (_b === _b ? 1 : 0)';
 
 /**
- * `NAN_LAST_COMPARATOR` with an absent cell (`undefined`, the run-time
- * spelling of `Missing`) after every other cell, `NaN` included, and two
- * absent cells tied (the sort is stable, so they keep their order). This is
- * the interpreter's order (user decision of 2026-09-25). Used by the compiled
- * `Ordering` when the element type has a `missing` arm; the compiled `Sort`
- * does not need it, because `Array.prototype.sort` already puts every
- * `undefined` element last.
- */
-const ABSENT_LAST_COMPARATOR =
-  '(_a, _b) => _a === undefined ? (_b === undefined ? 0 : 1) : _b === undefined ? -1 : _a === _a ? (_b === _b ? _a - _b : -1) : (_b === _b ? 1 : 0)';
-
-/**
  * Fail closed when the elements of a `Sort`/`Ordering` source are not
  * provably numbers.
  *
@@ -13714,14 +13482,10 @@ const ABSENT_LAST_COMPARATOR =
  * is not a number (`boolean`, `tuple<…>`, `list<…>`, `any`, `unknown`)
  * does not compile, and the two routes never give different answers.
  *
- * An absent cell (`Missing`, typed `missing`) is allowed: the
- * interpreter sorts it after every other cell (user decision of 2026-09-25),
- * and at run time it is `undefined`, which the compiled sort puts last too.
- * So the test is on the element type less its `missing` arm. Returns `true`
- * when the element type has a `missing` arm, that is, when a cell can be
- * absent.
+ * The test is on the element type less its `missing` arm. The order of an
+ * absent cell is not specified in compiled code.
  */
-function assertNumericSortElements(kind: string, arg: Expression): boolean {
+function assertNumericSortElements(kind: string, arg: Expression): void {
   const declared = collectionElementType(arg.type.type);
   const absent = declared !== undefined && typeContainsMissing(declared);
   const elt = absent ? stripMissingFromType(declared) : declared;
@@ -13745,7 +13509,7 @@ function assertNumericSortElements(kind: string, arg: Expression): boolean {
         `interpreter leaves the sort unevaluated.`
     );
   if (elt !== undefined && (elt === 'never' || isSubtype(elt, 'number')))
-    return absent;
+    return;
   throw new Error(
     `Could not compile \`${kind}\`: the elements (type \`${declared === undefined ? 'unknown' : typeToString(declared)}\`) ` +
       `are not provably numbers; the compiled sort orders numbers only, ` +
@@ -13997,15 +13761,12 @@ function chainedTopicSlotIsSettled(
  *   a sort KEY. The key of each element is computed once, in the order of the
  *   elements, and the elements are sorted in ascending order of their keys.
  *   The keys are compared as the default order compares numbers: a `NaN` key
- *   sorts after every other key, and an absent key (`Missing`) after a `NaN`
- *   key. An absent ELEMENT sorts last whatever its key, and its key is not
- *   computed.
+ *   sorts after every other key.
  * - Otherwise `fn` is a COMPARATOR, called with two elements. A `True` result
  *   puts the first element first and `False` puts it last. A number result
  *   puts it first when negative, is a tie when zero or `NaN`, and puts it
- *   last otherwise (an absent result included). Before the comparator is
- *   called, an absent element goes after the other one, and a `NaN` element
- *   goes after a real number: the comparator is not called for these pairs.
+ *   last otherwise. Before the comparator is called, a `NaN` element goes
+ *   after a real number: the comparator is not called for these pairs.
  *
  * The order is that of `Array.prototype.sort` over the positions of the
  * elements, the algorithm that the interpreter runs on its synchronous
@@ -14035,14 +13796,10 @@ function compileJSSortWithCallback(
   const declared = isProvablyStringOperand(source)
     ? 'string'
     : collectionElementType(source.type.type);
-  // An element that may be absent (`undefined` at run time) sorts last.
+  // The type of a present element: the shape tests below read it.
   const absentElements =
     declared !== undefined && typeContainsMissing(declared);
   const elt = absentElements ? stripMissingFromType(declared) : declared;
-  const absentFirst = (a: string, b: string, rest: string): string =>
-    absentElements
-      ? `${a} === undefined ? (${b} === undefined ? 0 : 1) : ${b} === undefined ? -1 : ${rest}`
-      : rest;
   const positions = `Array.from({ length: _l.length }, (_, _i) => _i)`;
   const key = requiredArity(fn.type.type) === 1;
   // The result type of `fn` called with elements of the source, as `Map`
@@ -14088,19 +13845,11 @@ function compileJSSortWithCallback(
       throw new Error(
         `Could not compile \`Sort\`: the sort key may return a complex value, which has no order.`
       );
-    // An absent key sorts after every other key, as an absent element does.
-    const keyCmp =
-      result !== undefined && typeContainsMissing(result)
-        ? ABSENT_LAST_COMPARATOR
-        : NAN_LAST_COMPARATOR;
     const key = fnArg('Sort', fn, source, compile, [], target);
-    const keyOf = absentElements
-      ? `(_x) => _x === undefined ? undefined : _f(_x)`
-      : `(_x) => _f(_x)`;
     return (
-      `((_f, _l, _c) => { const _k = _l.map(${keyOf}); ` +
-      `return ${positions}.sort((_a, _b) => ${absentFirst('_l[_a]', '_l[_b]', '_c(_k[_a], _k[_b])')})` +
-      `.map((_i) => _l[_i]); })(${key}, ${coll}, ${keyCmp})`
+      `((_f, _l, _c) => { const _k = _l.map((_x) => _f(_x)); ` +
+      `return ${positions}.sort((_a, _b) => _c(_k[_a], _k[_b]))` +
+      `.map((_i) => _l[_i]); })(${key}, ${coll}, ${NAN_LAST_COMPARATOR})`
     );
   }
 
@@ -14176,15 +13925,12 @@ function compileJSSortWithCallback(
     [BaseCompiler.collectionElementTypeOf(source)],
     target
   );
-  const absentStep = absentElements
-    ? `if (_a === undefined) return _b === undefined ? 0 : 1; if (_b === undefined) return -1; `
-    : '';
   const nanStep = nanLast
     ? `if (_a !== _a) return _b !== _b ? 0 : 1; if (_b !== _b) return -1; `
     : '';
   return (
     `((_f, _l) => ${positions}.sort((_i, _j) => { const _a = _l[_i]; const _b = _l[_j]; ` +
-    `${absentStep}${nanStep}const _r = _f(_a, _b); return ${verdict}; })` +
+    `${nanStep}const _r = _f(_a, _b); return ${verdict}; })` +
     `.map((_i) => _l[_i]))(${cmp}, ${coll})`
   );
 }
@@ -14718,10 +14464,10 @@ function fnArg(
  *   `Position`, `Partition`): `True` selects the element, `False` or an
  *   absent value (`Missing`) does not (`selectionVerdict` in
  *   `library/collections.ts`), and any other value is an error that throws.
- * - `quantify` (`Any`, `All`): `True` and `False` decide. An absent value
- *   makes the result `Missing` by Kleene logic, and any other value leaves
- *   the quantifier unevaluated (`quantifierWalk`). The compiled `some` and
- *   `every` can give neither, so both throw.
+ * - `quantify` (`Any`, `All`): `True` and `False` decide, and an absent
+ *   value reads as `False`. Any other value leaves the quantifier
+ *   unevaluated (`quantifierWalk`), which the compiled `some` and `every`
+ *   cannot give, so it throws.
  * - `prefix` (`TakeWhile`, `DropWhile`): only `True` continues the prefix,
  *   and any other value ends it, with no error.
  *
@@ -15698,8 +15444,8 @@ function scanForDistinctElement(root: Expression): boolean {
  * while the interpreter's `.isSame()` keeps a `Tuple` apart from a `List`. A
  * list of primitives, or a primitive (which never equals a list element), is
  * admitted; any other type fails closed. A written `Missing` is
- * admitted too: `compileSearchedValue` applies its own rules for an absent
- * searched value.
+ * admitted too: it lowers to `undefined`, which the element test finds
+ * where the same marker sits.
  */
 function requireStructuralNeedle(kind: string, needle: Expression): void {
   if (isSymbol(needle, 'Missing')) return;

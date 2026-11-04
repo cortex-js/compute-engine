@@ -12,8 +12,6 @@ import type { Type } from '../../common/type/types.js';
 import type { ShapeNode } from '../boxed-expression/match-dispatch.js';
 import type { CompileTarget, InvariantPrefix, TargetSource } from './types.js';
 import type {
-  ConditionDialect,
-  ConditionNode,
   DeclineNote,
   ElementLane,
   FoldCostContext,
@@ -119,11 +117,6 @@ export interface CoreHooks {
     expr: Expression,
     target: CompileTarget<Expression>
   ): { value: Expression; elements: Expression[] | undefined } | undefined;
-  conditionNode(
-    cond: Expression,
-    canBind: boolean,
-    target?: CompileTarget<Expression>
-  ): ConditionNode | null;
   noteLocalComplex(arg: Expression, frame: Map<string, boolean>): void;
   walkMatchShape(
     engine: ComputeEngine,
@@ -143,11 +136,6 @@ export interface CoreHooks {
     bound: Set<string>,
     target: CompileTarget<Expression>
   ): boolean;
-  kleeneConditionParts(
-    node: ConditionNode,
-    target: CompileTarget<Expression>,
-    dialect: ConditionDialect
-  ): { code: TargetSource; decided: boolean };
   emitFunctionLiteralDefinition(
     h: string,
     literal: Expression & FunctionInterface,
@@ -271,11 +259,9 @@ export const core: CoreHooks = {
   operandElementLane: notInstalled('operandElementLane'),
   elementwiseClosureIsComplex: notInstalled('elementwiseClosureIsComplex'),
   constantFoldValue: notInstalled('constantFoldValue'),
-  conditionNode: notInstalled('conditionNode'),
   noteLocalComplex: notInstalled('noteLocalComplex'),
   walkMatchShape: notInstalled('walkMatchShape'),
   walkConstructorPattern: notInstalled('walkConstructorPattern'),
-  kleeneConditionParts: notInstalled('kleeneConditionParts'),
   emitFunctionLiteralDefinition: notInstalled('emitFunctionLiteralDefinition'),
   ensureUserFunctionEmitted: notInstalled('ensureUserFunctionEmitted'),
   declaredUnionMemberVariant: notInstalled('declaredUnionMemberVariant'),

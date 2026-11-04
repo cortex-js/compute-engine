@@ -120,21 +120,17 @@ describe('COMPILED SORT WITH A SORT KEY', () => {
     expect(compiled(expr, { L })).toEqual([1, -1, 2, -3]);
   });
 
-  test('a NaN key sorts last, and an absent element after it', () => {
+  test('a NaN key sorts last', () => {
     const expr = [
       'Sort',
       ['List', 'y', 'Missing', 1, 4],
       key(['Multiply', 2, 'x']),
     ];
+    // The order of an absent element is not specified in compiled code.
     expect(interpreted(expr, { y: 9 })).toEqual([1, 4, 9, undefined]);
-    expect(compiled(expr, { y: 9 })).toEqual([1, 4, 9, undefined]);
-    const nan = [
-      'Sort',
-      ['List', 'y', 'Missing', 'NaN', 1],
-      key(['Negate', 'x']),
-    ];
-    expect(interpreted(nan, { y: 2 })).toEqual([2, 1, NaN, undefined]);
-    expect(compiled(nan, { y: 2 })).toEqual([2, 1, NaN, undefined]);
+    const nan = ['Sort', ['List', 'y', 'NaN', 1], key(['Negate', 'x'])];
+    expect(interpreted(nan, { y: 2 })).toEqual([2, 1, NaN]);
+    expect(compiled(nan, { y: 2 })).toEqual([2, 1, NaN]);
   });
 
   test('an empty list', () => {
@@ -220,14 +216,14 @@ describe('COMPILED SORT WITH A COMPARATOR', () => {
     expect(compiled(expr, { L })).toEqual([2, 4, 6, 5, 3, 1]);
   });
 
-  test('a NaN element and an absent element sort last, whatever the comparator', () => {
+  test('a NaN element sorts last, whatever the comparator', () => {
     const expr = [
       'Sort',
-      ['List', 'NaN', 'y', 'Missing', 1],
+      ['List', 'NaN', 'y', 1],
       comparator(['Subtract', 'b', 'a']),
     ];
-    expect(interpreted(expr, { y: 5 })).toEqual([5, 1, NaN, undefined]);
-    expect(compiled(expr, { y: 5 })).toEqual([5, 1, NaN, undefined]);
+    expect(interpreted(expr, { y: 5 })).toEqual([5, 1, NaN]);
+    expect(compiled(expr, { y: 5 })).toEqual([5, 1, NaN]);
   });
 
   test('a NaN result is a tie', () => {

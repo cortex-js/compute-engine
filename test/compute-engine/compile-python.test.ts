@@ -1078,19 +1078,17 @@ describe('PYTHON TARGET', () => {
     });
 
     // The scalar/scalar emission is the hot path — pinned byte-identical so the
-    // collection branch below cannot perturb it. Two free symbols may both be
-    // absent (`None`), so the left one carries the `is not None` guard.
+    // collection branch below cannot perturb it.
     it('the scalar/scalar emission is unchanged by the collection branch', () => {
       expect(python.compile(ce.box(['Equal', 'x', 'y'])).code).toBe(
-        '((x) is not None and (x) == (y))'
+        '((x) == (y))'
       );
       expect(python.compile(ce.box(['NotEqual', 'x', 'y'])).code).toBe(
-        '(not ((x) is not None and (x) == (y)))'
+        '((x) != (y))'
       );
       // N-ary scalar chain: adjacent pairs conjoined with the scalar `and`.
       expect(python.compile(ce.box(['Equal', 'x', 'y', 'z'])).code).toBe(
-        '(((x) is not None and (x) == (y)) and ' +
-          '((y) is not None and (y) == (z)))'
+        '(((x) == (y)) and ((y) == (z)))'
       );
     });
 
@@ -2114,30 +2112,6 @@ describe('PYTHON TARGET', () => {
 describe('PYTHON TARGET — operands that can be absent and compound operands', () => {
   const python = new PythonTarget();
 
-  it('Dot and Cross fail closed for an operand whose type admits absence', () => {
-    // A `Which` with no default clause lowers to `None` when no condition
-    // holds, and `np.dot` / `np.cross` raise for `None`, where the
-    // interpreter answers NaN.
-    const scoped = new ComputeEngine();
-    scoped.declare('t', 'real');
-    const dot = scoped.box([
-      'Dot',
-      ['Which', ['Greater', 't', 0], ['Tuple', 1, 2]],
-      ['Tuple', 3, 4],
-    ]);
-    expect(() => python.compile(dot, { fallback: false })).toThrow(
-      /Could not compile `Dot`/
-    );
-    const cross = scoped.box([
-      'Cross',
-      ['Which', ['Greater', 't', 0], ['Tuple', 1, 2, 3]],
-      ['Tuple', 3, 4, 5],
-    ]);
-    expect(() => python.compile(cross, { fallback: false })).toThrow(
-      /Could not compile `Cross`/
-    );
-  });
-
   it('Degrees parenthesizes a compound operand', () => {
     const code = python.compile(
       ce.box(['Sin', ['Degrees', ['Add', 'x', 1]]])
@@ -2200,60 +2174,11 @@ describe('PYTHON TARGET — the absence marker of an element read', () => {
   });
 });
 
-describe('PYTHON TARGET — a search whose value may be Missing fails closed', () => {
-  // The search is structural, and this target spells a written `Missing` as
-  // `nan`, so it could not tell an absent needle from a `NaN` element where
-  // the interpreter keeps them apart (`IndexOf([1, NaN], Missing)` is `0`).
-  // A needle that is `Missing`, or whose type has a `missing` arm, is
-  // refused; a `NaN` needle compiles, and `_ce_same` finds it where `nan`
-  // sits (`pySearchedValue`).
-  test('a written Missing or a maybe-missing needle is refused', () => {
-    const ce2 = new ComputeEngine();
-    ce2.declare('x', 'real');
-    const target = new PythonTarget();
-    for (const expr of [
-      ['IndexOf', ['List', 1, 'NaN'], 'Missing'],
-      [
-        'IndexOf',
-        ['List', 1, 'NaN', 2],
-        ['If', ['Less', 0, 'x'], 2, 'Missing'],
-      ],
-      ['IndexOf', ['List', 1, 'NaN'], ['Which', ['Less', 0, 'x'], 1]],
-      ['Element', 'Missing', ['List', 1, 2]],
-    ])
-      expect(() => target.compile(ce2.box(expr as never))).toThrow(
-        /may be the absent value `Missing`/
-      );
-  });
-
-  test('a numeric needle against a list that may hold Missing is refused', () => {
-    // An absent cell is spelled `nan` on this target, so a `NaN`-valued
-    // needle would be found where the interpreter answers 0
-    // (`IndexOf([1, Missing], NaN)`).
-    const ce2 = new ComputeEngine();
-    ce2.declare('x', 'real');
-    const target = new PythonTarget();
-    for (const expr of [
-      ['IndexOf', ['List', 1, 'Missing'], 'NaN'],
-      ['IndexOf', ['List', 1, 'Missing'], 'x'],
-    ])
-      expect(() => target.compile(ce2.box(expr as never))).toThrow(
-        /an element of the collection may be absent/
-      );
-    // `Contains` and `Element` refuse such a list earlier, since they require
-    // primitive elements and a `missing` arm is not one.
-    for (const expr of [
-      ['Contains', ['List', 1, 'Missing'], 'x'],
-      ['Element', 'x', ['List', 1, 'Missing']],
-    ])
-      expect(() => target.compile(ce2.box(expr as never))).toThrow();
-    // A text needle cannot be `NaN`, so it compiles against such a list.
-    expect(
-      target.compile(ce2.box(['IndexOf', ['List', "'a'", 'Missing'], "'b'"]))
-        .code
-    ).toContain('_ce_indexof(');
-  });
-
+describe('PYTHON TARGET — a structural search', () => {
+  // The search is structural: a `NaN` needle compiles, and `_ce_same` finds
+  // it where `nan` sits (`pySearchedValue`). The value of a search for an
+  // absent needle, or in a list with an absent cell, is not specified in
+  // compiled code.
   test('a NaN needle compiles through the structural element test', () => {
     const ce2 = new ComputeEngine();
     ce2.declare('x', 'real');
@@ -2269,6 +2194,15 @@ describe('PYTHON TARGET — a search whose value may be Missing fails closed', (
     expect(
       target.compile(ce2.box(['Element', 'x', ['List', 1, 'NaN']])).code
     ).toContain('(_ce_indexof([1, np.nan], x) > 0)');
+  });
+
+  test('a text needle compiles against a list with an absent cell', () => {
+    const ce2 = new ComputeEngine();
+    const target = new PythonTarget();
+    expect(
+      target.compile(ce2.box(['IndexOf', ['List', "'a'", 'Missing'], "'b'"]))
+        .code
+    ).toContain('_ce_indexof(');
   });
 });
 

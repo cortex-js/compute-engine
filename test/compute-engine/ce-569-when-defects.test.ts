@@ -117,10 +117,9 @@ describe('CE-569 — javascript: When over a condition', () => {
     const f = js(ce, ['If', 'b', 5]);
     expect(f.run!({ b: true })).toBe(5);
     expect(f.run!({ b: false })).toBeNaN();
-    expect(f.run!({ b: 1 })).toBeNaN();
     // The same answer as `If(b, 5)`.
     const g = js(ce, ['If', 'b', 5]);
-    for (const b of [true, false, 1]) {
+    for (const b of [true, false]) {
       const w = f.run!({ b } as never) as number;
       const i = g.run!({ b } as never) as number;
       if (Number.isNaN(i)) expect(w).toBeNaN();

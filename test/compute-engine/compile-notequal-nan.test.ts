@@ -220,7 +220,7 @@ describe('compiled equality on NaN and on infinities — Python target', () => {
       '((x) == (3))'
     );
     expect(python.compile(ce.box(['Equal', 'x', 'y'])).code).toBe(
-      '((x) is not None and (x) == (y))'
+      '((x) == (y))'
     );
   });
 
@@ -229,14 +229,13 @@ describe('compiled equality on NaN and on infinities — Python target', () => {
       '((x) != (3))'
     );
     expect(python.compile(ce.box(['NotEqual', 'x', 'y'])).code).toBe(
-      '(not ((x) is not None and (x) == (y)))'
+      '((x) != (y))'
     );
   });
 
   test('a chained NotEqual conjoins the negated pairs with `and`', () => {
     expect(python.compile(ce.box(['NotEqual', 'x', 'y', 'z'])).code).toBe(
-      '(not ((x) is not None and (x) == (y))) and ' +
-        '(not ((y) is not None and (y) == (z)))'
+      '((x) != (y)) and ((y) != (z))'
     );
   });
 
@@ -269,15 +268,4 @@ describe('compiled equality on NaN and on infinities — Python target', () => {
 });
 
 describe('two absent operands are not equal', () => {
-  test('python: the exact test excludes None where both sides may be absent', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('y', 'real');
-    const r = compile(ce.parse('x = y'), { to: 'python' });
-    expect(r.code).toContain('((x) is not None and (x) == (y))');
-    // A literal on one side needs no guard: `None == 3` is already `False`.
-    expect(compile(ce.parse('x = 3'), { to: 'python' }).code).toBe(
-      '((x) == (3))'
-    );
-  });
 });

@@ -52,7 +52,6 @@ import {
   withBinderMask,
 } from './compile-declarations.js';
 import { laneMismatch, wideEntriesType } from './compile-lanes.js';
-import { compileGuardTest } from './compile-absence.js';
 import { userFunctionLiteral } from './compile-assignment-checks.js';
 import { returnedFunctionLiterals } from './compile-conditions.js';
 import { assertScalarBigOpBody } from './compile-shapes.js';
@@ -717,8 +716,7 @@ export function compileElementLoops(
       // `compileRangeIterable` agree on that element rule). So a finite
       // literal start and step make every value the name ever holds a
       // finite number — never NaN, never the `undefined` an absent caller
-      // variable reads as — which is what lets a comparison against it skip
-      // its decidedness test (`mayBeUndecided`). A CALLER-MAPPED source is
+      // variable reads as. A CALLER-MAPPED source is
       // excluded: the emitted loop then iterates the caller's own code
       // instead of the range.
       if (
@@ -806,11 +804,9 @@ export function emitElementLoops(
     // body run only for the elements the guard accepts, so the guard
     // wraps everything nested inside this clause's loop. The interpreter
     // keeps an element only when the guard evaluates to exactly `True`
-    // (`runNested`), so the emitted test is the DECIDED-TRUE test of the
-    // three-valued condition lowering, not JavaScript truthiness: a
-    // non-boolean guard (`if x`) keeps nothing, a relation over `NaN` and a
-    // `Not` of one are undecided and keep nothing, exactly as they do for a
-    // branch condition (`compileGuardTest`).
+    // (`runNested`), so a guard that is not provably a boolean is tested
+    // with `=== true`, not with JavaScript truthiness: a non-boolean guard
+    // (`if x` with `x` an integer) keeps nothing.
     //
     // The guard reads the bindings of ITS clause and the clauses before it
     // — a name bound by a LATER clause is, in the interpreter, the
@@ -838,7 +834,15 @@ export function emitElementLoops(
           visible.has(id) ? bodyTarget.var(id) : target.var(id),
         ...withBoundScope(target, [...visible]),
       };
-      inner = `if (${compileGuardTest(guard, guardTarget)}) { ${inner} }`;
+      // The interpreter keeps an element only when the guard is `True`, so
+      // a guard whose static type is not the scalar `boolean` is compared
+      // with `true`. A relational head alone is not enough: an element-wise
+      // `Equal` over a list gives a list, which is truthy.
+      const test = core.compile(guard, guardTarget);
+      const guardTest = guard.type.matches('boolean')
+        ? test
+        : `(${test}) === true`;
+      inner = `if (${guardTest}) { ${inner} }`;
     }
     let collection: string;
     if (

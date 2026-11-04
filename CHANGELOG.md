@@ -1,3 +1,44 @@
+## [Unreleased]
+
+### Breaking changes
+
+- **Custom compile targets: two `CompileTarget` members are removed.**
+  `absence.object.isNull` is gone: the guard of an absent collection at a
+  position-preserving accessor (`At`, `First`, `Length`, ...) now tests it
+  with `absence.object.isAbsent`, which a target already declares.
+  `collectionEqualityOperand` is gone with no replacement: the compiled
+  `Equal` and `NotEqual` over collections now always give a boolean, so a
+  branch condition needs no classification of its operands.
+- **`BaseCompiler` static members of the condition analysis are removed**:
+  `isAbsenceSymbol`, `operandMayBeAbsent`, `ATOMIC_FRAGMENT`,
+  `mayBeUndecided`, `compileGuardTest`, `conditionDecidability`,
+  `conditionNode`, `connectiveNode`, `isDecidedByConstruction`,
+  `operandPresenceConjuncts`, `isNanLiteral`, `absentOnlyThroughNumericSlots`,
+  `peelNegations`, `kleeneCondition`, `kleeneConditionParts`,
+  `kleeneValueLeaf`, `kleeneRelationLeaf`, `kleeneConnective`,
+  `kleeneValueConnective`, `isDecidedBooleanValue`, `withConditionOperands`,
+  `exactSelect`, `compileExactCondition`, `conditionDialects` and
+  `conditionDialectOf`, and the exported `ConditionDialect`, `ConditionNode`
+  and `CONDITION_DIALECT_JS`. A custom target compiles a branch condition
+  with `BaseCompiler.compile`, or with `BaseCompiler.guardCondition` for the
+  check that the condition is a boolean.
+
+### Behavior Changes
+
+- **Compiled code gives no special value for a condition or a comparison
+  over an absent value.** A compiled `If` or `Which` whose condition is
+  absent takes its next branch, where it gave `NaN`: `If(At(B, 9), 1, 2)`,
+  with `B` a list of 2 booleans, is `2`. A compiled `Equal` over
+  collections gives booleans: `Equal([1, Missing], 1)` was `[true, NaN]`
+  and is now `[true, false]`. These values are unspecified by the caveats
+  of compiled code (`docs/COMPILATION-MODEL.md`, "Caveats of compiled
+  code"). These expressions now compile, where they used the interpreter
+  before: `Any` and `All` over elements that may be absent; `IndexOf`,
+  `Contains` and `Element` with a searched value that may be absent; a
+  chained `Equal` with an absent operand before an impure one
+  (`Equal(x, Which(t > 0, 1), Random())`); and, on Python, `Dot` and
+  `Cross` with an operand that may be absent.
+
 ## 0.178.0 _2026-11-03_
 
 This is the language release. It narrows the language that compiled code

@@ -51,6 +51,7 @@ import { multiClauseState } from '../multi-clause.js';
 import { unrollFixedWidthCollections } from './fixed-width-unroll.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import {
+  userFunctionSignature,
   signatureParamType,
   userFunctionLiteral,
   userFunctionParamsAreScalar,
@@ -78,7 +79,6 @@ import {
   userFunctionName,
 } from './compile-cse.js';
 import { core } from './compiler-core-hooks.js';
-import { userFunctionSignature } from './compile-absence.js';
 import { NO_NAMES } from './compiler-tables.js';
 import { CompileDeclineError, UNSETTLED_SHAPE_CODE } from './diagnostics.js';
 import {

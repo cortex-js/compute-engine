@@ -1699,3 +1699,15 @@ export function isNominalAtomicType(t: Type): boolean {
   if (t.alias !== true) return true;
   return declarationOf(t)._sumVariants !== undefined;
 }
+
+/**
+ * True when a binding of type `t` holds a boolean or is absent:
+ * `boolean`, or `boolean | missing`. Shared by the targets that read such
+ * a binding in a special way (an empty array is an empty `broadcast()`
+ * column; the interval target reads `'true'`/`'false'`).
+ */
+export function isBooleanBindingType(t: Type | undefined): boolean {
+  if (t === undefined) return false;
+  const r = resolveTypeForCompilation(stripMissingFromType(t));
+  return r !== 'never' && isSubtype(r, 'boolean');
+}

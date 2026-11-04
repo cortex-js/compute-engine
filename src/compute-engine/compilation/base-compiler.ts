@@ -73,34 +73,12 @@ import {
   withVarsMappedUserFunctionHeads,
 } from './compile-statements.js';
 import {
-  ATOMIC_FRAGMENT,
-  _localNameKeys,
-  _localValueFrames,
   absenceAxisForType,
   absenceKind,
   absentDomainIsObject,
-  absentOnlyThroughNumericSlots,
-  blockLocalOf,
-  compileExactCondition,
-  compileGuardTest,
-  conditionDecidability,
-  connectiveNode,
-  exactSelect,
-  isAbsenceSymbol,
-  isBooleanBindingType,
-  isDecidedByConstruction,
-  isNanLiteral,
   isNumericOrVerdictShaped,
   isNumericShaped,
-  kleeneRelationLeaf,
-  kleeneValueLeaf,
-  mayBeUndecided,
   noBranchValue,
-  operandPresenceConjuncts,
-  operandMayBeAbsent,
-  peelNegations,
-  userFunctionSignature,
-  withConditionOperands,
 } from './compile-absence.js';
 import {
   absentCollectionOperandGuard,
@@ -461,8 +439,6 @@ import {
   compileExprAssertPresent,
   compileExprIf,
   compileExprWhich,
-  isDecidedBooleanValue,
-  kleeneValueConnective,
 } from './compile-conditionals.js';
 import {
   _runtimeMatrixProducts,
@@ -493,10 +469,13 @@ import {
   _freshLocalNames,
   _writableLoopIndices,
   assertLocalsAssignedBeforeRead,
+  _localNameKeys,
+  _localValueFrames,
   assertNoUseBeforeDeclare,
   assignLValue,
   bindingStatesEffects,
   bindsLocalFunctions,
+  blockLocalOf,
   blockLocalValueFrame,
   chainedAmbientWrite,
   chainedLocalDeclares,
@@ -541,7 +520,11 @@ import {
   scalarConditionTarget,
   spellTuplePattern,
 } from './compile-loops.js';
-import { isCompiledIndex, isNominalAtomicType } from './compiler-type-facts.js';
+import {
+  isBooleanBindingType,
+  isCompiledIndex,
+  isNominalAtomicType,
+} from './compiler-type-facts.js';
 import {
   LOCAL_BOOLEAN,
   LOCAL_UNSET,
@@ -564,8 +547,6 @@ import {
   assertNoContradictedScalarOperand,
   assertScalarCondition,
   booleanClaim,
-  conditionDialectOf,
-  conditionDialects,
   containsEarlyReturn,
   containsReturn,
   cseRegionOf,
@@ -583,8 +564,6 @@ import {
   isProvablyNonNumericBigOpBody,
   isScalarDeclaredType,
   isStatementArm,
-  kleeneCondition,
-  kleeneConnective,
   liveSelectionArms,
   mayBeCollectionCondition,
   pushCseInstance,
@@ -642,6 +621,7 @@ import {
   tryFoldKnownSymbol,
 } from './compile-folded-values.js';
 import {
+  userFunctionSignature,
   assertCapturedTypesCurrent,
   assertParameterWritesInUnit,
   assertParameterWritesMatchTypes,
@@ -1342,8 +1322,6 @@ export class BaseCompiler {
   static readonly rememberPlainBroadcast = rememberPlainBroadcast;
   static readonly compileBroadcastUnary = compileBroadcastUnary;
   static readonly tryCompilePythonElementwise = tryCompilePythonElementwise;
-  static readonly kleeneValueConnective = kleeneValueConnective;
-  static readonly isDecidedBooleanValue = isDecidedBooleanValue;
   static readonly declareValueOperand = declareValueOperand;
   static readonly declareTypeOperand = declareTypeOperand;
   static readonly declaredTypeSource = declaredTypeSource;
@@ -1655,45 +1633,12 @@ export class BaseCompiler {
   static readonly mayBeCollectionCondition = mayBeCollectionCondition;
   static readonly guardCondition = guardCondition;
   static readonly BRANCH_RELATIONS = BRANCH_RELATIONS;
-  static readonly conditionDialects = conditionDialects;
-  static readonly conditionDialectOf = conditionDialectOf;
-  static readonly isAbsenceSymbol = isAbsenceSymbol;
-  static readonly operandMayBeAbsent = operandMayBeAbsent;
-  static readonly ATOMIC_FRAGMENT = ATOMIC_FRAGMENT;
-  static readonly mayBeUndecided = mayBeUndecided;
-  static readonly compileGuardTest = compileGuardTest;
-  static readonly conditionDecidability = conditionDecidability;
-  static get conditionNode() {
-    return core.conditionNode;
-  }
-  static set conditionNode(f: CoreHooks['conditionNode']) {
-    core.conditionNode = f;
-  }
-  static readonly connectiveNode = connectiveNode;
-  static readonly isDecidedByConstruction = isDecidedByConstruction;
-  static readonly operandPresenceConjuncts = operandPresenceConjuncts;
   static readonly noBranchValue = noBranchValue;
   static readonly absenceKind = absenceKind;
   static readonly isBooleanBindingType = isBooleanBindingType;
-  static readonly isNanLiteral = isNanLiteral;
-  static readonly absentOnlyThroughNumericSlots = absentOnlyThroughNumericSlots;
   static readonly isNumericOrVerdictShaped = isNumericOrVerdictShaped;
   static readonly isNumericShaped = isNumericShaped;
   static readonly absentDomainIsObject = absentDomainIsObject;
-  static readonly peelNegations = peelNegations;
-  static readonly kleeneCondition = kleeneCondition;
-  static get kleeneConditionParts() {
-    return core.kleeneConditionParts;
-  }
-  static set kleeneConditionParts(f: CoreHooks['kleeneConditionParts']) {
-    core.kleeneConditionParts = f;
-  }
-  static readonly kleeneValueLeaf = kleeneValueLeaf;
-  static readonly kleeneRelationLeaf = kleeneRelationLeaf;
-  static readonly kleeneConnective = kleeneConnective;
-  static readonly withConditionOperands = withConditionOperands;
-  static readonly exactSelect = exactSelect;
-  static readonly compileExactCondition = compileExactCondition;
   static readonly isIntegerValued = isIntegerValued;
   static readonly isNonNegative = isNonNegative;
   static readonly MATCH_SWITCH_THRESHOLD = MATCH_SWITCH_THRESHOLD;
@@ -2028,13 +1973,10 @@ export class BaseCompiler {
 export { installUnrolledBigOpLane } from './compile-lanes.js';
 export type {
   EnclosingDefinition,
-  ConditionDialect,
-  ConditionNode,
   ElementBinder,
   MatchStatementClause,
   LoopInvariantBinding,
 } from './compiler-types.js';
-export { CONDITION_DIALECT_JS } from './compile-conditions.js';
 export {
   hasEnclosureSymbol,
   compilationType,

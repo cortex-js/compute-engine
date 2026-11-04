@@ -2246,10 +2246,6 @@ describeMaybe(
       'a user name that hides a builtin the code uses fails closed (lambda: %s)',
       (lambda) => {
         const cases: [any, Record<string, string>, string][] = [
-          // A condition that may be absent (the first element of a list
-          // that may be empty) is tested with
-          // `isinstance(_c, (bool, np.bool_))`.
-          [['If', ['First', 'bool'], 1, 2], { bool: 'list<boolean>' }, 'bool'],
           [
             ['Norm', 'x', 'isinstance'],
             // The order is declared a number or a string, so the code

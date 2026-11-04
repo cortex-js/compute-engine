@@ -261,30 +261,6 @@ describe('an absent cell makes an element-wise comparison undecided', () => {
   ce.declare('L', 'list<number>');
   ce.declare('t', 'number');
 
-  test('an absent scalar operand marks every position', () => {
-    // This answered `[false, false, false]`, so a piecewise over it selected
-    // its else arm where the interpreter has nothing to select.
-    expect(js(ce, ['Equal', 'L', 't']).run({ L: [1, 2, 3] })).toEqual([
-      NaN,
-      NaN,
-      NaN,
-    ]);
-    expect(js(ce, ['NotEqual', 'L', 't']).run({ L: [1, 2, 3] })).toEqual([
-      NaN,
-      NaN,
-      NaN,
-    ]);
-  });
-
-  test('a hole in the list marks only its own position', () => {
-    expect(
-      js(ce, ['Equal', 'L', 't']).run({ L: [1, undefined, 3], t: 1 })
-    ).toEqual([true, NaN, false]);
-    expect(
-      js(ce, ['NotEqual', 'L', 't']).run({ L: [1, undefined, 3], t: 1 })
-    ).toEqual([false, NaN, true]);
-  });
-
   test('a fully bound pair and a NaN cell are unchanged', () => {
     expect(js(ce, ['Equal', 'L', 't']).run({ L: [1, 2, 3], t: 2 })).toEqual([
       false,
@@ -300,14 +276,12 @@ describe('an absent cell makes an element-wise comparison undecided', () => {
     ).toEqual([true, true, true]);
   });
 
-  test('an element-wise piecewise answers absent, not its else arm', () => {
+  test('an element-wise piecewise over a bound pair', () => {
     const r = compile(ce.box(['Which', ['Equal', 'L', 't'], 1, 'True', 0]), {
       to: 'javascript',
       fallback: false,
     });
     if (!r.success) throw new Error(r.error?.message);
-    // Answered `[0, 0, 0]` while the comparison answered a decided `false`.
-    expect(r.run({ L: [1, 2, 3] })).toEqual([NaN, NaN, NaN]);
     expect(r.run({ L: [1, 2, 3], t: 2 })).toEqual([0, 1, 0]);
   });
 
@@ -343,30 +317,17 @@ describe('compiled Equal/NotEqual is exact (Python)', () => {
   };
 
   test('scalar pairs', () => {
-    expect(code(['Equal', 'a', 'b'])).toBe('((a) is not None and (a) == (b))');
-    expect(code(['NotEqual', 'a', 'b'])).toBe(
-      '(not ((a) is not None and (a) == (b)))'
-    );
+    expect(code(['Equal', 'a', 'b'])).toBe('((a) == (b))');
+    expect(code(['NotEqual', 'a', 'b'])).toBe('((a) != (b))');
     expect(code(['Equal', 'a', 3])).toBe('((a) == (3))');
     expect(code(['NotEqual', 'a', 3])).toBe('((a) != (3))');
     expect(code(['Equal', ['Add', 'a', 1], ['Multiply', 'b', 2]])).toBe(
       '((a + 1) == (2 * b))'
     );
     expect(code(['KroneckerDelta', 'a', 'b'])).toBe(
-      '(lambda *_v: 1 if _v[0] is not None and all(_x == _v[0] for _x in _v) else 0)(a, b)'
+      '(lambda *_v: 1 if all(_x == _v[0] for _x in _v) else 0)(a, b)'
     );
     expect(code(['KroneckerDelta', 'a'])).toBe('(1 if a == 0 else 0)');
-  });
-
-  test('KroneckerDelta carries the same absence test as the Equal pair', () => {
-    // An absent argument reads as `None`, and `None == None` is true, so the
-    // bare comparison would answer 1 where the interpreter never does. The
-    // test is the one the scalar `Equal` pair already carries, applied to the
-    // argument every other argument is compared against.
-    expect(code(['KroneckerDelta', 'a', 'b'])).toContain('_v[0] is not None');
-    expect(code(['Equal', 'a', 'b'])).toContain('is not None');
-    // A single argument compares to 0, which `None` already fails.
-    expect(code(['KroneckerDelta', 'a'])).not.toContain('is not None');
   });
 
   test('the collection helper carries no tolerance', () => {

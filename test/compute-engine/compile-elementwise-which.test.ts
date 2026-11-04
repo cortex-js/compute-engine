@@ -665,7 +665,6 @@ describe('compiled If/Which take no branch on an undecided condition', () => {
       compile(engine.box(['If', ['IsMissing', 'x'], 1, -1]), {
         fallback: false,
       })!.code ?? '';
-    expect(source).toContain('(_CND)');
     expect(source.split('Number.isNaN').length - 1).toBe(1);
   });
 

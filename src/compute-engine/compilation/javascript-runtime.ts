@@ -1831,8 +1831,8 @@ function complexVariance(
  * The static type is no help at the emission site — a bare symbol can be bound
  * to a number OR an array at call time — so the test is on the runtime value.
  *
- * It also applies the family's ABSENCE rule before the reducer runs
- * (2026-09-22): if ANY datum is absent, the answer is `absentResult()` and
+ * It also applies the family's `NaN` rule before the reducer runs
+ * (2026-09-22): if ANY datum is `NaN`, the answer is `absentResult()` and
  * the reducer is never called.
  *
  * That is the interpreter's rule, not an approximation of it. `collectData`
@@ -1843,21 +1843,10 @@ function complexVariance(
  * the interpreter and never see an absent cell, so the compiled lane has to
  * apply the rule at this boundary.
  *
- * Normalizing an absent cell to `NaN` and reducing anyway is NOT enough, and
- * was the previous attempt: the reducers that SORT select a middle element,
- * so a `NaN` outside that position leaves an ordinary number — with a written
- * `Missing` at either end, `Median([Missing, 2, 3])` and `Median([1, 2,
- * Missing])` both answered `2`. The reducers that COUNT (`mode`) and the
- * quantile ones ignore it likewise.
- *
- * Three kinds of absent datum reach here. A written absence symbol lowers to
- * the JavaScript object null `undefined` (`docs/ERROR-MODEL.md` §3); a HOLE in
- * a sparse array the caller supplied reads `undefined` too, which is why the
- * scan is an index loop and not `Array.prototype.some` (`some` skips holes);
- * and a `NaN` cell is an absence marker for this family, by `isAbsentValue`.
- * A whole operand that is absent (`Mean(Missing)` emits
- * `_SYS.mean(undefined)`) is absent data as well, and used to throw "values is
- * not iterable" behind `success: true`.
+ * The reducers that SORT select a middle element, so a `NaN` outside that
+ * position would leave an ordinary number (`Median([NaN, 2, 3])` would be
+ * `2`), which is why the test comes before the reducer. The value over an
+ * absent datum (`undefined`) is not specified in compiled code.
  *
  * A lazy iterable is materialized so the scan can see it. The sorting
  * reducers already materialize; the streaming ones (the variance family) pay
@@ -1866,9 +1855,8 @@ function complexVariance(
 function oneDatumOk<T>(
   reduce: (values: Iterable<number>) => T,
   absentResult: () => T = () => Number.NaN as unknown as T
-): (values: Iterable<number> | number | undefined | null) => T {
+): (values: Iterable<number> | number) => T {
   return (values) => {
-    if (values === undefined || values === null) return absentResult();
     if (typeof values === 'number')
       return Number.isNaN(values) ? absentResult() : reduce([values]);
     const data: ArrayLike<number> & Iterable<number> =
@@ -1876,9 +1864,7 @@ function oneDatumOk<T>(
         ? (values as unknown as ArrayLike<number> & Iterable<number>)
         : Array.from(values);
     for (let i = 0; i < data.length; i++) {
-      const v = data[i] as number | undefined | null;
-      if (v === undefined || v === null || Number.isNaN(v))
-        return absentResult();
+      if (Number.isNaN(data[i])) return absentResult();
     }
     return reduce(data);
   };
@@ -2298,10 +2284,8 @@ function wholeAbsent(absent: unknown): unknown {
  *   `undefined` for another value that is not a number (`selectAbsent`). When
  *   every condition is scalar and none is true, the whole value is `absent`,
  *   or `undefined` when `absent` is a point (`wholeAbsent`).
- *   A position whose condition cell is absent (NaN — how a real target renders
- *   `Missing`) is NaN: the position is CONSUMED, never offered to a later
- *   clause, matching the interpreter's positioned "condition is absent" error
- *   cell (R4′);
+ *   A condition or a condition cell that is absent (`undefined`, `null` or
+ *   `NaN`) is not selected, as `false` is, as in the interpreter;
  * - a scalar condition that is neither boolean nor an array fails closed with
  *   the same message as `_SYS.cond`, so a conditional that is scalar at run
  *   time behaves exactly like the ternary chain it replaced.
@@ -2317,11 +2301,12 @@ function selectWith(
   clauses: ReadonlyArray<() => unknown>
 ): unknown {
   // 1/ The conditions, in clause order.
-  const selectors: Array<true | 'absent' | unknown[]> = [];
+  const selectors: Array<true | unknown[]> = [];
   const armThunks: Array<() => unknown> = [];
   for (let k = 0; k + 1 < clauses.length; k += 2) {
     const c = clauses[k]();
-    if (c === false) continue;
+    // An absent condition is not selected, as in the interpreter.
+    if (c === false || c === undefined || c === null || c !== c) continue;
     armThunks.push(clauses[k + 1]);
     if (c === true) {
       selectors.push(true);
@@ -2330,15 +2315,6 @@ function selectWith(
     if (Array.isArray(c)) {
       selectors.push(c);
       continue;
-    }
-    if (c === undefined || c === null || c !== c) {
-      // A lifted ABSENT condition (NaN — the real-target rendering of
-      // `Missing`, which the interpreter answers with a whole-expression
-      // "condition is absent" error) decides nothing anywhere, and no later
-      // clause may decide what absence left undecided: stop, exactly as a
-      // lifted `true` does.
-      selectors.push('absent');
-      break;
     }
     throw new Error('Condition must evaluate to "True" or "False".');
   }
@@ -2352,8 +2328,7 @@ function selectWith(
   }
   if (n < 0) {
     const last = selectors[selectors.length - 1];
-    // No condition is true: the value is absent. An absent condition is NaN.
-    if (last === 'absent') return NaN;
+    // No condition is true: the value is absent.
     if (last !== true) return wholeAbsent(absent);
     const v = armThunks[armThunks.length - 1]();
     return v instanceof WholeArm ? v.value : v;
@@ -2369,41 +2344,30 @@ function selectWith(
     if (Array.isArray(s) && s.some((x) => Array.isArray(x))) return NaN;
 
   // 3/ Selection: the first clause that is `true` at each position (`-1`: no
-  // match), and the positions whose condition cell is absent. A lifted
+  // match). A lifted
   // scalar selector decides every undecided position the same way, so it is
   // applied without reading a cell.
   const selection = new Int32Array(n).fill(-1);
-  const absentCondition = new Uint8Array(n);
   const reached = new Uint8Array(selectors.length);
   let undecided = n;
   for (let k = 0; k < selectors.length && undecided > 0; k++) {
     const cells = selectors[k];
-    if (cells === true || cells === 'absent') {
-      const lifted = cells === true;
-      for (let j = 0; j < n; j++) {
-        if (selection[j] >= 0 || absentCondition[j] === 1) continue;
-        if (lifted) selection[j] = k;
-        else absentCondition[j] = 1;
-      }
-      if (lifted) reached[k] = 1;
+    if (cells === true) {
+      for (let j = 0; j < n; j++) if (selection[j] < 0) selection[j] = k;
+      reached[k] = 1;
       undecided = 0;
       break;
     }
     for (let j = 0; j < n; j++) {
-      if (selection[j] >= 0 || absentCondition[j] === 1) continue;
+      if (selection[j] >= 0) continue;
       const v = cells[j];
       if (v === true) {
         selection[j] = k;
         reached[k] = 1;
         undecided -= 1;
-      } else if (v === false) {
+      } else if (v === false || v === undefined || v === null || v !== v) {
+        // An absent cell is not selected, as `false` is.
         continue;
-      } else if (v === undefined || v === null || v !== v) {
-        // An ABSENT cell (NaN — how a real target renders `Missing`, and how a
-        // `Missing` symbol lowers through the vars object). Undecidable, and
-        // the position is CONSUMED so no later clause decides it (R4′).
-        absentCondition[j] = 1;
-        undecided -= 1;
       } else {
         // Any other cell is not a condition value at all: the interpreter
         // throws rather than picking a branch (`Which([10,20], …)`), and so
@@ -2437,10 +2401,6 @@ function selectWith(
   const out: unknown[] = new Array(n);
   for (let j = 0; j < n; j++) {
     const k = selection[j];
-    if (absentCondition[j] === 1) {
-      out[j] = NaN;
-      continue;
-    }
     if (k < 0) {
       out[j] = absent;
       continue;
@@ -3018,40 +2978,14 @@ function mulCollectionsWith(
 function eqTensor(
   a: unknown,
   b: unknown
-): boolean | number | (boolean | number | unknown[])[] {
+): boolean | (boolean | unknown[])[] {
   const aArr = Array.isArray(a);
   const bArr = Array.isArray(b);
   if (aArr && bArr) {
-    // A length mismatch is DECIDED: no value an absent cell could hold makes
-    // 2 elements equal 3.
     if (a.length !== b.length) return false;
-    // One element pair with no answer makes the WHOLE comparison undecided
-    // (user ruling of 2026-09-21, the compiled half of the rule the
-    // interpreter applies in `undecidedElementPair`,
-    // `library/relational-operator.ts`). An absent cell can stand for any
-    // value, so the cells that ARE there cannot settle whether the two
-    // collections hold the same values. The rule holds even when another
-    // pair is decidedly unequal, which is why the walk does NOT stop at the
-    // first mismatch: `[1, undefined, 3]` against `[2, undefined, 3]`
-    // answers the marker, not `false`. The marker is `NaN`, the compiled
-    // spelling of the interpreter's `Missing` (see the absence note on the
-    // scalar leaf below).
-    let undecided = false;
-    let unequal = false;
-    for (let i = 0; i < a.length; i++) {
-      // The absence test comes BEFORE the recursion. An absent cell opposite
-      // a NESTED array would otherwise reach the array-vs-scalar branch,
-      // whose per-element array reads here as a decided mismatch.
-      if (a[i] === undefined || b[i] === undefined) {
-        undecided = true;
-        continue;
-      }
-      const cmp = eqTensor(a[i], b[i]);
-      if (typeof cmp === 'number') undecided = true;
-      else if (cmp !== true) unequal = true;
-    }
-    if (undecided) return Number.NaN;
-    return !unequal;
+    for (let i = 0; i < a.length; i++)
+      if (eqTensor(a[i], b[i]) !== true) return false;
+    return true;
   }
   // Array-vs-scalar with a NUMBER on the scalar side: one exact test per
   // element, with the `{re, im}` projection and the string branch reserved
@@ -3062,7 +2996,7 @@ function eqTensor(
   if (aArr !== bArr) {
     const arr = (aArr ? a : b) as unknown[];
     const scalar = aArr ? b : a;
-    const out: (boolean | number | unknown[])[] = new Array(arr.length);
+    const out: (boolean | unknown[])[] = new Array(arr.length);
     if (typeof scalar === 'number') {
       for (let i = 0; i < arr.length; i++) {
         const x = arr[i];
@@ -3074,18 +3008,6 @@ function eqTensor(
       out[i] = aArr ? eqTensor(arr[i], b) : eqTensor(a, arr[i]);
     return out;
   }
-  // An ABSENT operand reads `undefined`, and a comparison with it is
-  // UNDECIDED: the interpreter answers `Equal([1, 2, 3], Missing)` with
-  // `[Missing, Missing, Missing]` and `Equal([1, Missing], 1)` with
-  // `[True, Missing]`, so the cell carries an absence marker, not a decided
-  // `false`. The marker is `NaN`, which is how a real target renders `Missing`
-  // in a cell: the selection runtime reads such a cell as undecided and
-  // consumes the position (see `select`). An `undefined` cell would not be
-  // read as undecided there.
-  //
-  // A `NaN` OPERAND is not absent: it is a number that equals nothing, and it
-  // keeps answering `false` below. Only a genuinely missing read is marked.
-  if (a === undefined || b === undefined) return Number.NaN;
   if (typeof a === 'string' || typeof b === 'string') return eqText(a, b);
   const part = (v: unknown): { re: number; im: number } =>
     typeof v === 'object' && v !== null && 're' in v
@@ -3109,26 +3031,17 @@ function eqTensor(
 function neqTensor(
   a: unknown,
   b: unknown
-): boolean | number | (boolean | number | unknown[])[] {
+): boolean | (boolean | unknown[])[] {
   const aArr = Array.isArray(a);
   const bArr = Array.isArray(b);
   if (aArr && bArr) {
-    // A whole-collection comparison with no answer keeps its marker under
-    // negation (user ruling of 2026-09-21): `NotEqual` must not report a
-    // confident `true` where `Equal` could not report `false`.
-    const equal = eqTensor(a, b);
-    return typeof equal === 'number' ? equal : equal !== true;
+    return eqTensor(a, b) !== true;
   }
   if (aArr)
-    return a.map((x) => neqTensor(x, b)) as (boolean | number | unknown[])[];
+    return a.map((x) => neqTensor(x, b)) as (boolean | unknown[])[];
   if (bArr)
-    return b.map((y) => neqTensor(a, y)) as (boolean | number | unknown[])[];
-  // An UNDECIDED comparison stays undecided under negation: the interpreter
-  // answers `NotEqual([1, 2, 3], Missing)` with `[Missing, Missing, Missing]`,
-  // never `[True, True, True]`. Only a decided answer is negated, so the
-  // marker is relayed rather than negated into a confident `true`.
-  const equal = eqTensor(a, b);
-  return typeof equal === 'number' ? equal : equal !== true;
+    return b.map((y) => neqTensor(a, y)) as (boolean | unknown[])[];
+  return eqTensor(a, b) !== true;
 }
 
 /**
@@ -4685,12 +4598,12 @@ export const SYS_HELPERS = {
     }
     return Math.pow(x, 1 / n);
   },
-  // Fail-closed Which/When condition guard. The interpreter requires a
-  // condition to evaluate to True/False and throws otherwise; a compiled
-  // ternary would silently treat a non-boolean (notably NaN) as falsy and take
-  // the default branch. Rethrow to match the interpreter (D6, CO-P2-24).
+  // The Which/When condition guard. `true` and `false` pass. `undefined`,
+  // `null` and `NaN` (an absent value) read as `false`, as the interpreter
+  // does not select an absent condition. Any other value throws.
   cond: (c: unknown): boolean => {
     if (c === true || c === false) return c;
+    if (c === undefined || c === null || c !== c) return false;
     throw new Error('Condition must evaluate to "True" or "False".');
   },
   // Element-wise `Which`/`If` selection over a condition that may be a
@@ -5542,9 +5455,9 @@ export const SYS_HELPERS = {
   // `javascript-target.ts`). `true` and `false` pass. For `select`, an absent
   // value (`Missing`, compiled to `undefined`) does not select the element,
   // as in the interpreter, and any other value throws. For `quantify`, an
-  // absent value and any other value throw: the interpreter answers
-  // `Missing` or stays unevaluated, which the compiled `some` and `every`
-  // cannot. For `prefix`, any value that is not `true` ends the prefix. The
+  // absent value is `false`, and any other value throws: the interpreter
+  // stays unevaluated, which the compiled `some` and `every` cannot. For
+  // `prefix`, any value that is not `true` ends the prefix. The
   // compiled lowerings test the result with the truthiness of JavaScript, so
   // without this check `1` selected an element.
   predicateResult:
@@ -5557,12 +5470,8 @@ export const SYS_HELPERS = {
       const v = f(x);
       if (v === true || v === false) return v;
       if (mode === 'prefix') return false;
-      if (mode === 'select' && v === undefined) return false;
-      throw new TypeError(
-        v === undefined
-          ? `${kind} predicate returned an absent value, which the interpreter combines by Kleene logic`
-          : `${kind} predicate must return "True" or "False"`
-      );
+      if (v === undefined) return false;
+      throw new TypeError(`${kind} predicate must return "True" or "False"`);
     },
   // The operand of an operator that only visits each element once, in any
   // order (`iterableCollectionCode`): an array as it is, the elements of a

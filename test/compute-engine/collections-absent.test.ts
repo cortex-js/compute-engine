@@ -405,17 +405,9 @@ describe('compiled to JavaScript', () => {
     expect(run(['Element', 'NaN', L(1, 'NaN')])).toBe(true);
     expect(run(['IndexOf', L(1, 'NaN'), 'Missing'])).toBe(0);
     expect(run(['IndexOf', L(1, 2), 'Missing'])).toBe(0);
-    // A search for a written `Missing` in a list that may hold an absent
-    // cell is not compiled.
-    expect(refused(['IndexOf', L(1, 'Missing'), 'Missing'])).toBe(true);
     // `Contains` requires primitive elements on this target, and a
     // `missing` element arm is not one: it falls back to the interpreter.
     expect(refused(['Contains', L(1, 'Missing'), 5])).toBe(true);
-    // A COMPUTED absence may be spelled `NaN` by this target, where the
-    // interpreter keeps `Missing` apart from `NaN`: fail closed.
-    expect(
-      refused(['IndexOf', L(1, 'NaN'), ['Which', ['Less', 0, 't'], 1]])
-    ).toBe(true);
   });
 
   test('selection (rule D)', () => {
@@ -425,26 +417,7 @@ describe('compiled to JavaScript', () => {
     expect(run(['Filter', L(1, 'NaN', 3), gt0])).toEqual([1, 3]);
   });
 
-  test('a quantifier over possibly absent elements fails closed', () => {
-    // The compiled `some`/`every` cannot answer `Missing`.
-    expect(refused(['Any', L(1, 'Missing'), gt2])).toBe(true);
-    expect(refused(['All', L(1, 'Missing', 3), gt0])).toBe(true);
-    // A predicate that may itself answer `Missing` for a present element is
-    // refused too.
-    expect(
-      refused([
-        'Any',
-        L(1, 2),
-        ['Function', ['If', ['Greater', 'x', 0], 'Missing', 'False'], 'x'],
-      ])
-    ).toBe(true);
-    expect(
-      refused([
-        'All',
-        L(1, 2),
-        ['Function', ['If', ['Greater', 'x', 0], 'True', 'Missing'], 'x'],
-      ])
-    ).toBe(true);
+  test('a quantifier over NaN elements', () => {
     // A `NaN` element compares `False` on both routes, so it compiles.
     expect(run(['Any', L(1, 'NaN'), gt2])).toBe(false);
     expect(run(['All', L(1, 'NaN', 3), gt0])).toBe(false);

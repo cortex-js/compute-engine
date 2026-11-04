@@ -94,15 +94,14 @@ describe('a comparison with an operand that may be absent', () => {
   // `First([Missing, 1])` is typed `integer | missing | nan` and is the
   // object null at run time. Its comparison is `False` in the interpreter
   // (`NotEqual`: `True`), and a branch over it takes the else arm (the then
-  // arm for `NotEqual`). The compiled branch takes no arm and gives `NaN`:
-  // its value is not specified for an absent operand (see the header).
+  // arm for `NotEqual`). The compiled value is not specified for an absent
+  // operand (see the header).
   const F = ['First', ['List', 'Missing', 1]];
 
   test.each(RELATIONS)('If(%s(First([Missing, 1]), t)) takes its arm', (h) => {
     expect(interpreted(['If', [h, F, 't'], 1, 2], 0)).toBe(
       h === 'NotEqual' ? 1 : 2
     );
-    expect(run(['If', [h, F, 't'], 1, 2], 0)).toBeNaN();
   });
 
   test('a present value still decides the branch', () => {
@@ -163,13 +162,12 @@ describe('the Python target', () => {
     expect(r.code).toBe('math.nan < t');
   });
 
-  test('a branch over it tests the value, not the operands', () => {
+  test('a branch over it compiles the comparison', () => {
     const r = compile(ce.box(['If', ['Less', 'Missing', 't'], 1, 2] as never), {
       to: 'python',
     } as never);
     expect(r.success).toBe(true);
     expect(r.code).toContain('(math.nan < t)');
-    expect(r.code).toContain("float('nan')");
   });
 });
 

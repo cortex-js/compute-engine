@@ -173,14 +173,10 @@ export function compileInnerSymbol(
   // `NaN`.
   //
   // The lowering is the target's OBJECT-domain null (`undefined` on
-  // JavaScript, `None` on Python). It cannot be the numeric marker: a list
-  // cell holding the numeric marker is a number that equals nothing, which
-  // the whole-collection equality rule of 2026-09-21 must keep distinct
-  // from an ABSENT cell (`Equal([1, Missing], [1, Missing])` is undecided,
-  // while `Equal([1, NaN], [1, NaN])` is false). On a target with no
-  // object axis (the shader targets, the interval target) the numeric
-  // marker is the only spelling there is, and it is used. A target with no
-  // absence capability at all fails closed.
+  // JavaScript, `None` on Python). On a target with no object axis (the
+  // shader targets, the interval target) the numeric marker is the only
+  // spelling there is, and it is used. A target with no absence capability
+  // at all fails closed.
   //
   // The guard reads `boundVars`/`varsKeys` only — it runs BEFORE
   // `target.var()` is consulted, so that resolving the name does not

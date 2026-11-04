@@ -1796,7 +1796,9 @@ function twoValued(value: Expression): Expression {
  * is `False` (`True` for `≠`), and the branch uses that value as it uses
  * any other: `If(0/0 > 0, 1, 0)` is `0` and `If(0/0 ≠ 0, 1, 0)` is `1` (user
  * decisions 2026-10-20, Tycho rows 411 and 413, 2026-10-23 and 2026-11-02).
- * The compiled lanes take the same arm (`BaseCompiler.conditionDecidability`).
+ * Compiled code takes the same arm for a present operand; over an absent
+ * operand its value is unspecified (docs/COMPILATION-MODEL.md, "Caveats of
+ * compiled code").
  *
  * The walk reproduces the ordinary evaluation of the condition:
  * - A relation evaluates its operands left to right and then itself over

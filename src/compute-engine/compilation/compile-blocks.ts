@@ -17,6 +17,7 @@ import {
 } from './in-place-update.js';
 import {
   _freshLocalNames,
+  _localValueFrames,
   assertLocalsAssignedBeforeRead,
   assertNoUseBeforeDeclare,
   blockLocalValueFrame,
@@ -86,7 +87,6 @@ import {
   markCheckedLiteralApplications,
   markScalarFedLiterals,
 } from './compile-callbacks.js';
-import { _localValueFrames } from './compile-absence.js';
 
 /**
  * Compile an expression as a statement list evaluated **for effect** — a
@@ -275,7 +275,7 @@ export function compileBlock(
   assertLocalsAssignedBeforeRead(args, locals);
   // A read of a local that may have no value is refused here, on every
   // target (`classifyLocalReads`).
-  classifyLocalReads(args, locals, node, target);
+  classifyLocalReads(args, locals, node);
 
   // A lone EMPTY block in a statement list evaluated for effect (a shader
   // loop body reaching `compileStatementList`) is an empty statement.

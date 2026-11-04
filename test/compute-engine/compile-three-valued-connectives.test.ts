@@ -143,13 +143,6 @@ describe('COMPILE three-valued connectives — an absent boolean read', () => {
       expect(js(ce, expr).run({ B: b, x })).toBe(interpreted(expr, b, x));
   });
 
-  it('answers NaN for an absent boolean beside a true relation', () => {
-    // The interpreter reads the absent operand as `False` and takes the else
-    // arm; the compiled value is not specified here (see the header).
-    expect(js(ce, expr).run({ B: [], x: 1 })).toBeNaN();
-    expect(interpreted(expr, [], 1)).toBe(-1);
-  });
-
   it('lets a decided FALSE relation settle it', () => {
     expect(js(ce, expr).run({ B: [], x: -1 })).toBe(-1);
     expect(interpreted(expr, [], -1)).toBe(-1);
@@ -499,19 +492,13 @@ describe('COMPILE three-valued connectives — value position', () => {
     if (a !== undefined) expect(js(ce, json).run({ BM: cell(a) })).toBe(expected);
   });
 
-  it('a false operand settles an And whose other operand is absent', () => {
-    expect(js(ce, ['And', M, 'False']).run({ BM: [] })).toBe(false);
-    expect(interpreted(['And', M, 'False'], undefined, true)).toBe(false);
-  });
-
   it('does not evaluate an operand after a settling one', () => {
-    // The second operand is the argument of an inner arrow function, entered
-    // only when the first operand is not `false`. (The run-time wrapper reads
-    // every entry of `vars` up front, so the order is checked on the code.)
+    // The second operand follows `&&`, so it is evaluated only when the
+    // first operand is not `false`. (The run-time wrapper reads every entry
+    // of `vars` up front, so the order is checked on the code.)
     const json = ['And', M, ['Greater', ['Divide', 1, 'x'], 1]];
     const { code, run } = js(ce, json);
-    expect(code).toContain('(_tv1 === false ? false : ((_tv2) =>');
-    expect(code.indexOf('_tv1 === false')).toBeLessThan(code.indexOf('1 / _.x'));
+    expect(code.indexOf('&&')).toBeLessThan(code.indexOf('1 / _.x'));
     for (const [m, x] of [
       [false, 0.5],
       [true, 0.5],

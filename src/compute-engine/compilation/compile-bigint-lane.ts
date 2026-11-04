@@ -54,10 +54,10 @@ import { BigNumericValue } from '../numeric-value/big-numeric-value.js';
 import type { CompileTarget } from './types.js';
 import { CompileDeclineError, bigintLaneError } from './diagnostics.js';
 import {
+  userFunctionSignature,
   signatureParamType,
   userFunctionLiteral,
 } from './compile-assignment-checks.js';
-import { userFunctionSignature } from './compile-absence.js';
 import {
   literalWithParameterTypes,
   parameterTypesKey,

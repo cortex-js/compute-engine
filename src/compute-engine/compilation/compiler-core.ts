@@ -37,7 +37,6 @@ import {
   isBroadcastablePointType,
   isNestedPointCollectionType,
   isPointListValue,
-  isTextAtom,
   isTuple,
   isTupleWithListCoordinate,
   nanPoint,
@@ -123,6 +122,7 @@ import {
   signatureParamType,
   userFunctionLiteral,
   userFunctionParamsAreScalar,
+  userFunctionSignature,
 } from './compile-assignment-checks.js';
 import {
   PROMOTABLE_RADICAL_HEADS,
@@ -152,18 +152,7 @@ import {
 import { namingContext, newNamingContext, tempVar } from './compiler-naming.js';
 import {
   absenceAxisForType,
-  absentOnlyThroughNumericSlots,
-  conditionDecidability,
-  connectiveNode,
-  isNanLiteral,
   isNumericOrVerdictShaped,
-  kleeneRelationLeaf,
-  kleeneValueLeaf,
-  mayBeUndecided,
-  operandMayBeAbsent,
-  peelNegations,
-  userFunctionSignature,
-  withConditionOperands,
 } from './compile-absence.js';
 import {
   appliesToEachTupleCoordinate,
@@ -294,8 +283,6 @@ import {
   memoFor,
 } from './compiler-tables.js';
 import type {
-  ConditionDialect,
-  ConditionNode,
   DeclineNote,
   ElementLane,
   FoldCostContext,
@@ -347,8 +334,6 @@ import {
   noLoweringMessage,
 } from './compile-expr-handlers.js';
 import {
-  BRANCH_RELATIONS,
-  CONDITION_DIALECT_JS,
   assertNoContradictedScalarOperand,
   assertScalarCondition,
   booleanClaim,
@@ -356,11 +341,8 @@ import {
   isContradictedScalarDeclaration,
   isContradictedScalarFunctionBody,
   isStatementArm,
-  kleeneCondition,
-  kleeneConnective,
   liveSelectionArms,
   mayBeCollectionCondition,
-  withCseOperand,
   withCseRegion,
 } from './compile-conditions.js';
 import { elementwiseMaskRank } from '../library/control-structures.js';
@@ -399,7 +381,6 @@ import {
   compileExprIf,
   compileExprRestriction,
   compileExprWhich,
-  kleeneValueConnective,
 } from './compile-conditionals.js';
 import {
   compileMatrixProduct,
@@ -1179,8 +1160,7 @@ function compileExpression(
         !isSubtype(stripped, 'number') &&
         !numericShaped &&
         !numericCells &&
-        !inValueModel &&
-        !absentOnlyThroughNumericSlots(expr)
+        !inValueModel
       )
         throw new Error(
           `Could not compile an object-domain absent ('missing') position ` +
@@ -3502,14 +3482,6 @@ export function compileExpr(
   // operand types lowers them itself.
   assertOrderedOperandsAreNumbers(h, args, target);
 
-  // `And`/`Or`/`Not` used as a VALUE over an operand that may be ABSENT
-  // (typed `boolean | missing`, `undefined` or `None` at run time) follow
-  // the Kleene tables, as in the interpreter. See `kleeneValueConnective`.
-  {
-    const kleene = kleeneValueConnective(h, args, target, node);
-    if (kleene !== undefined) return kleene;
-  }
-
   // Arithmetic, or a function applied to each coordinate (`Sin`, `Ln`,
   // `Floor`, …), over a `Tuple` with a LIST coordinate (`Tuple(A, B)` with
   // `A`, `B` declared lists, built as MathJSON) fails closed. Such a tuple
@@ -4441,101 +4413,14 @@ export function compileLoopBody(
       withCseScope(expr, i, target, () =>
         core.compileLoopBody(expr.ops[i], target)
       );
-    // A condition that is not exactly `true` or `false` when the compiled
-    // function runs runs neither branch, and execution continues with the
-    // next statement. This is the statement form of the rule the conditional
-    // expression follows: the interpreter leaves such an `If` unevaluated,
-    // so no assignment inside it happens and no `Break` under it fires. A
-    // statement has no value, so running neither branch is the whole answer.
-    //
-    // The analysis is shared with the conditional expression
-    // (`conditionDecidability`), and so is the reason for it: a comparison
-    // with a NaN or missing operand gives an ordinary `false` in JavaScript,
-    // so a condition that cannot be decided looks the same as one decided to
-    // be false, and the difference has to be read off its operands — and,
-    // for a condition built from `&&`/`||`/`!`, off the Kleene combination
-    // of its leaves' verdicts.
-    const decidability = conditionDecidability(expr.ops[0], true, condTarget);
-    // A `Not` over a value-shaped condition is lowered by exchanging the two
-    // constants the decided tests compare against, never by an emitted `!`:
-    // `!undefined` is a confident `true` (see `peelNegations`).
-    //
-    // A condition that reaches a connective is compiled to its three-valued
-    // value and then inspected the same way, so it takes the value-shaped
-    // branch below with no negation of its own (`kleeneCondition`).
-    const kind = decidability?.test.kind;
-    const valueShaped = kind === 'value' || kind === 'connective';
-    const { expr: condExpr, negate } =
-      kind === 'value'
-        ? peelNegations(expr.ops[0])
-        : { expr: expr.ops[0], negate: false };
-    const compileCond = (): string =>
-      kind === 'connective'
-        ? withCseOperand(expr, 0, condTarget, () =>
-            kleeneCondition(decidability!, condTarget)
-          )
-        : compileOp(expr, 0, condTarget, 0, condExpr);
-    let cond: string;
-    let conjuncts: ReadonlyArray<TargetSource> = [];
-    let bindings: Array<[string, TargetSource]> = [];
-    if (decidability === null || valueShaped) {
-      cond = compileCond();
-    } else {
-      // A non-trivial operand is bound to a block-scoped constant, so its
-      // computation runs once instead of once in the condition and twice
-      // more in the decidedness test (`withConditionOperands`).
-      const bound = withConditionOperands(
-        decidability.test.kind === 'operands' ? decidability.test.operands : [],
-        condTarget,
-        true,
-        (c) => {
-          conjuncts = c;
-          return compileCond();
-        },
-        CONDITION_DIALECT_JS
-      );
-      cond = bound.value;
-      bindings = bound.bindings;
-    }
+    const cond = compileOp(expr, 0, condTarget, 0, expr.ops[0]);
     const thenBranch = branch(1);
     const elseBranch = expr.ops.length > 2 ? branch(2) : undefined;
     // A block is a statement, so it splices in where the `if` did, and
     // `break`/`continue` inside a branch still reach the enclosing loop.
-    const withBindings = (body: string): string =>
-      bindings.length === 0
-        ? body
-        : `{ ${bindings
-            .map(([name, code]) => `const ${name} = ${code};`)
-            .join(' ')} ${body} }`;
-    // A condition whose VALUE has to be inspected (it may not be a boolean
-    // at all) is bound to a block-scoped constant first, so an application
-    // is evaluated once.
-    if (valueShaped) {
-      const [then, otherwise] = negate ? ['false', 'true'] : ['true', 'false'];
-      const tail =
-        elseBranch === undefined || elseBranch === ''
-          ? ''
-          : ` else if (_CND === ${otherwise}) { ${elseBranch} }`;
-      return `{ const _CND = (${cond}); if (_CND === ${then}) { ${thenBranch} }${tail} }`;
-    }
-    if (elseBranch !== undefined && elseBranch !== '') {
-      const body = `if (${cond}) { ${thenBranch} } else { ${elseBranch} }`;
-      return withBindings(
-        conjuncts.length === 0
-          ? body
-          : `if (${conjuncts.join(' && ')}) { ${body} }`
-      );
-    }
-    // With no else branch, the test that the condition is decidable joins
-    // the one `if` rather than nesting a second one inside it: the two guard
-    // the same statement, and one `if` is easier to read. The condition is
-    // parenthesized when it joins the test, because `&&` binds tighter than
-    // the `||` a condition may contain — and a connective's decidedness test
-    // is a disjunction too, which is why `withConditionTest` hands that one
-    // over already parenthesized.
-    const test =
-      conjuncts.length === 0 ? cond : [...conjuncts, `(${cond})`].join(' && ');
-    return withBindings(`if (${test}) { ${thenBranch} }`);
+    if (elseBranch !== undefined && elseBranch !== '')
+      return `if (${cond}) { ${thenBranch} } else { ${elseBranch} }`;
+    return `if (${cond}) { ${thenBranch} }`;
   }
 
   if (h === 'Block') {
@@ -4605,7 +4490,7 @@ export function compileLoopBody(
     assertLocalsAssignedBeforeRead(withDecls, bodyLocals);
     // A read of a local of the body that may have no value is refused, as
     // in `compileBlock` (`classifyLocalReads`).
-    classifyLocalReads(withDecls, bodyLocals, expr, target);
+    classifyLocalReads(withDecls, bodyLocals, expr);
     // A body-scoped `localFunctions`, filled in statement order below. Held
     // as its own binding because the field on `CompileTarget` is a
     // `ReadonlyMap`: the target exposes it for READS during compilation, and
@@ -5151,209 +5036,6 @@ export function aggregateComponentCount(
     return width;
   }
   return undefined;
-}
-
-/**
- * The decidedness analysis of one sub-expression of a branch condition, or
- * `null` when it cannot be analyzed (an impure relation on a target that
- * cannot bind, or a connective the analysis declines). Unlike
- * `conditionDecidability`, a sub-expression that is decided by construction
- * still gets a node: its VALUE takes part in the test of the connective
- * above it.
- */
-export function conditionNode(
-  cond: Expression,
-  canBind: boolean,
-  target?: CompileTarget<Expression>
-): ConditionNode | null {
-  if (isSymbol(cond, 'True') || isSymbol(cond, 'False'))
-    return {
-      negate: false,
-      test: { kind: 'operands', expr: cond, operands: [] },
-    };
-  // A symbol of type `boolean` holds `true` or `false`: the caller supplies
-  // every input with a value of its declared type, so the plain truthiness
-  // test decides it. A symbol of another type (`boolean | missing`, a
-  // number) is read by its value: only `true` and `false` select an arm.
-  if (isSymbol(cond) && isSubtype(cond.type.type, 'boolean'))
-    return {
-      negate: false,
-      test: { kind: 'operands', expr: cond, operands: [] },
-    };
-  if (!isFunction(cond))
-    return { negate: false, test: { kind: 'value', expr: cond } };
-  const h = cond.operator;
-  // `Not` is decided exactly when its operand is, so the node keeps the
-  // operand's test and records the negation separately. The negation is
-  // then applied to a DECIDED value — by exchanging the two answers of a
-  // leaf, or by a guarded negation over a connective — never by an emitted
-  // `!` over the condition itself, which would turn an undecided value into
-  // a confident `true`.
-  if (h === 'Not' && cond.nops === 1) {
-    const inner = core.conditionNode(cond.ops[0], canBind, target);
-    return inner === null ? null : { ...inner, negate: !inner.negate };
-  }
-  if (h === 'And' || h === 'Or')
-    return connectiveNode(cond, h, canBind, target);
-  if (!BRANCH_RELATIONS.has(h))
-    return { negate: false, test: { kind: 'value', expr: cond } };
-  // Whether evaluating operand `op` can have an effect: it is impure, or it
-  // runs code that the caller supplied (`reachesCallerCodeOn`: a `vars`
-  // entry `W: 'nextValue()'`, a head mapped through `functions`), also
-  // when it is a bare symbol. That code can count its calls or draw a
-  // number, so it is treated as `Random()` is treated below: evaluated
-  // once, never skipped by a test placed before it.
-  const hasEffect = (op: Expression): boolean =>
-    op.isPure !== true ||
-    (target !== undefined && reachesCallerCodeOn(op, target));
-  const condEffect = cond.isPure !== true || cond.ops.some(hasEffect);
-  // A pair with a NaN literal operand is decided whatever the other
-  // operand holds: `NaN < x` is `False` and `NaN ≠ x` is `True` in the
-  // interpreter while `x` has no value, and the plain comparison gives
-  // that answer. So it needs no test, as `True` and `False` need none.
-  if (
-    cond.nops === 2 &&
-    cond.ops.some((op) => isNanLiteral(op)) &&
-    !cond.ops.some(hasEffect)
-  )
-    return {
-      negate: false,
-      test: { kind: 'operands', expr: cond, operands: [] },
-    };
-  // An `Equal`/`NotEqual` over an operand that may be a COLLECTION at run
-  // time is the one relation whose compiled value is not a genuine boolean.
-  // It lowers to the runtime dispatch (`_SYS.eq`/`_SYS.neq` in the
-  // JavaScript target), and one element pair with no answer makes that
-  // value the numeric absence marker instead of `true`/`false` (user ruling
-  // of 2026-09-21). Decidedness must therefore be read off the condition's
-  // own VALUE: the NaN test the other relations use reads an array operand
-  // as decided and the marker is a falsy value, so the branch silently took
-  // the else arm.
-  //
-  // The classification is the target's own (`collectionEqualityOperand`),
-  // so it matches the operands its emitter sends to that dispatch — one
-  // operand is enough, and an opaque top-typed application or a
-  // scalar-or-list union counts. A target that declares none keeps the
-  // conservative rule: every operand statically collection-typed. Reading
-  // an ordinary SCALAR comparison off its value would be wrong in the other
-  // direction: a NaN operand compares to a plain `false`, which the value
-  // test would take as a decided answer.
-  //
-  // A TEXT operand is excluded. A string is a collection of its characters
-  // in the lattice, but a string comparison lowers to the content-equality
-  // helper, whose answer is a genuine boolean.
-  const collectionEqualityOperand = target?.collectionEqualityOperand;
-  if (
-    (h === 'Equal' || h === 'NotEqual') &&
-    cond.nops === 2 &&
-    (collectionEqualityOperand !== undefined
-      ? cond.ops.some((op) => !isTextAtom(op) && collectionEqualityOperand(op))
-      : cond.ops.every(
-          (op) => !isTextAtom(op) && op.type.matches('collection<any>')
-        ))
-  )
-    return { negate: false, test: { kind: 'value', expr: cond } };
-  // The operands are named again inside the test. An operand with effects
-  // is therefore bound to a name first and evaluated once
-  // (`withConditionOperands` for a lone relation, `kleeneRelationLeaf`
-  // under a connective) — which needs a binding form. Without one the
-  // relation is declined: inlining the operand would run its effects at
-  // every naming. Two impure shapes are declined even with one, because
-  // the binding would change what the relation evaluates:
-  // - a CHAIN (`Less(5, 1, Random())`, three or more operands): the test
-  //   binds every operand up front, where the chain's own emitted `&&`
-  //   skips a later operand once an earlier pair is false — the draw
-  //   would happen where the plain lowering makes none;
-  // - the SAME impure node in two positions (`Less(d, d)` built from one
-  //   boxed `d`): the binding is keyed on the node (`_codeOverrides`), so
-  //   one draw would stand for the two evaluations that were written.
-  if (condEffect) {
-    if (!canBind || cond.nops > 2) return null;
-    if (cond.nops === 2 && cond.op1 === cond.op2 && hasEffect(cond.op1))
-      return null;
-  }
-  // A CHAIN (`Less(x, 0, w)`) is the Kleene conjunction of its links, as in
-  // the interpreter, where a chain stops at the first pair that is `False`:
-  // one decidedly false link decides the chain whatever an absent operand
-  // of another link holds. So with `x = 1` and `w` absent,
-  // `If(x < 0 < w, 1, 2)` is `2`. Read as one relation, the chain
-  // was tested for every operand at once, and the absent `w` made it take
-  // no arm. Every link is pure here (an impure chain is declined above), so
-  // a middle operand compiled in two links is evaluated twice with no
-  // observable difference. A chained `Equal`/`NotEqual` over an operand
-  // that may be a collection is not split: it is not a conjunction of its
-  // links (`Equal([1, 2, 3], [1, 2, 3], 3)` is the scalar `False`, where
-  // the links would broadcast), and its own lowering declines it.
-  const collectionChain =
-    (h === 'Equal' || h === 'NotEqual') &&
-    cond.ops.some(
-      (op) =>
-        !isTextAtom(op) &&
-        (collectionEqualityOperand !== undefined
-          ? collectionEqualityOperand(op)
-          : op.type.matches('collection<any>'))
-    );
-  if (cond.nops > 2 && !collectionChain) {
-    const ce = cond.engine;
-    const links: Expression[] = [];
-    for (let i = 0; i + 1 < cond.nops; i++)
-      links.push(ce._fn(h, [cond.ops[i], cond.ops[i + 1]]));
-    const nodes: ConditionNode[] = [];
-    for (const link of links) {
-      const node = core.conditionNode(link, canBind, target);
-      if (node === null) return null;
-      nodes.push(node);
-    }
-    return {
-      negate: false,
-      test: {
-        kind: 'connective',
-        expr: ce._fn('And', links),
-        op: 'And',
-        operands: nodes,
-      },
-    };
-  }
-  // A relation with a NaN operand is decided, with the value the compiled
-  // comparison already answers: `false`, so the branch takes its next arm,
-  // or `true` for `NotEqual`, so it takes its first arm (user decisions
-  // 2026-10-20, Tycho rows 411 and 413, and 2026-10-23). The relation
-  // is tested only for an ABSENT value: an operand typed with a `missing` arm
-  // (`operandMayBeAbsent`). An input that the caller leaves out is not
-  // tested: the caller supplies every input with a value of its declared
-  // type, and the result of a call that leaves one out is not specified.
-  const operands: Expression[] = [];
-  for (const op of cond.ops) {
-    if (!mayBeUndecided(op, target)) continue;
-    if (operandMayBeAbsent(op)) operands.push(op);
-  }
-  return {
-    negate: false,
-    test: { kind: 'operands', expr: cond, operands },
-  };
-}
-
-/**
- * `kleeneCondition`, and whether its value is always decided: `true` or
- * `false`, never the undecided value. A relation leaf whose operands need
- * no decidedness test is always decided (its compiled value is a genuine
- * boolean, see `ConditionTest`), and so is a connective whose operands are
- * all always decided. A value leaf is never known to be decided.
- */
-export function kleeneConditionParts(
-  node: ConditionNode,
-  target: CompileTarget<Expression>,
-  dialect: ConditionDialect
-): { code: TargetSource; decided: boolean } {
-  const t = node.test;
-  if (t.kind === 'value')
-    return {
-      code: kleeneValueLeaf(t.expr, node.negate, target, dialect),
-      decided: false,
-    };
-  if (t.kind === 'operands')
-    return kleeneRelationLeaf(t, node.negate, target, dialect);
-  return kleeneConnective(t, node.negate, target, dialect);
 }
 
 /** Walk a sum constructor pattern, appending conditions and capture
@@ -7121,11 +6803,9 @@ const hubs: CoreHooks = {
   operandElementLane,
   elementwiseClosureIsComplex,
   constantFoldValue,
-  conditionNode,
   noteLocalComplex,
   walkMatchShape,
   walkConstructorPattern,
-  kleeneConditionParts,
   emitFunctionLiteralDefinition,
   ensureUserFunctionEmitted,
   declaredUnionMemberVariant,

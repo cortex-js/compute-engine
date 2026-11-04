@@ -121,6 +121,12 @@ The first row shows where no bending exists today: a numeric hole is
 non-numeric holes (rows 2, 9) and in the three-valued logic (rows 3 to 5,
 13).
 
+**Note, 2026-11-04:** the three-valued compiled conditions of the column
+"Compiled today" were retired by step 4, row 2 of
+`docs/plans/2026-11-02-compiler-contraction-plan.md`. Replaced by: a
+compiled comparison is a boolean, and a compiled branch reads an absent
+condition (`undefined`, `null`, `NaN`) as `false`.
+
 ## 4. What the rule removes and what it keeps
 
 Line counts are the estimates of the compiler simplification plan. §5
@@ -145,6 +151,15 @@ R3 keeps `IsMissing` and `Coalesce` specified, so their readers must accept
 every spelling a producer can emit. This is a small change in
 `absenceAxisForType` and the two `absence` tables of the targets; it is not
 a deletion.
+
+**Note, 2026-11-04:** the condition analysis that remained after candidates
+7 and 8 (the decidedness of a condition, the three-valued combination of
+conditions, the `NaN` marker of a compiled collection `Equal`, the
+per-operator absent tests, `CompileTarget.absence.object.isNull` and
+`CompileTarget.collectionEqualityOperand`) was retired by step 4, row 2 of
+`docs/plans/2026-11-02-compiler-contraction-plan.md`. Replaced by: the
+producers, the accessors and the three discharges only; the guard of an
+absent collection at an accessor reads `absence.object.isAbsent`.
 
 What the rule does not remove: the decline of a `Missing` or `Nothing` in a
 value position on a target that has no object absence (GPU, interval), the
@@ -300,3 +315,9 @@ behavior.
    each as one implementer item with two review rounds, each measured on
    the corpus before staging, by the rules of the compiler simplification
    plan.
+
+**Note, 2026-11-04:** the absence code that step 5 left in the compiler was
+retired by step 4, row 2 of
+`docs/plans/2026-11-02-compiler-contraction-plan.md`. Replaced by: the rule
+R1 to R4 with no lowering for an absent operand outside the producers, the
+accessors and the discharges.

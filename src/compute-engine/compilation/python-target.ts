@@ -24,7 +24,6 @@ import {
   compileDiagnosticOf,
   compileSubject,
 } from './diagnostics.js';
-import type { ConditionDialect } from './base-compiler.js';
 import {
   BaseCompiler,
   couldBeCollectionParticipant,
@@ -59,7 +58,6 @@ import { isLibraryFoldCombiner } from './builtin-callback.js';
 import { tryGetConstant } from './constant-folding.js';
 import { reachesCallerCodeOn } from './compile-folding.js';
 import { cseSharingOff } from './compile-cse.js';
-import { operandMayBeAbsent } from './compile-absence.js';
 import {
   COINCIDENCE_BUDGET,
   realPowerReconstructionDigits,
@@ -75,7 +73,6 @@ import {
   isString,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { isRestriction } from '../boxed-expression/conditional-value.js';
 import {
   functionLiteralParameterName,
   functionLiteralParameterType,
@@ -128,8 +125,6 @@ import {
   couldBeStringOperand,
   isNonFiniteBound,
   requirePrimitiveElements,
-  refuseKleeneQuantifier,
-  collectionMayHoldAbsentCell,
   PREDICATE_RESULT_MODES,
   predicateResultCheck,
   stringRefusedEntryType,
@@ -895,55 +890,6 @@ function assertPyNoMixedStringOrdering(
 }
 
 /**
- * Operator heads whose Python lowering always produces a NUMBER (a `nan`
- * included) and never the absent value `None`: arithmetic on `None` raises
- * in Python, so the lowering of these heads never returns it. `compilePythonEquality`
- * uses it to decide whether an exact `==` needs the `is not None` guard.
- */
-const PY_ALWAYS_NUMBER_HEADS = new Set([
-  'Add',
-  'Subtract',
-  'Multiply',
-  'Divide',
-  'Negate',
-  'Power',
-  'Square',
-  'Sqrt',
-  'Root',
-  'Abs',
-  'Floor',
-  'Ceil',
-  'Round',
-  'Sign',
-  'Mod',
-  'Min',
-  'Max',
-  'Sum',
-  'Product',
-  'Length',
-  'Exp',
-  'Ln',
-  'Log',
-  'Sin',
-  'Cos',
-  'Tan',
-  'Arctan',
-  'Arctan2',
-  'Arcsin',
-  'Arccos',
-  'Sinh',
-  'Cosh',
-  'Tanh',
-  'Dot',
-  'Norm',
-  'Hypot',
-  'Gamma',
-  'Factorial',
-  'Random',
-  'RandomInteger',
-]);
-
-/**
  * Emit a Python equality test. Compiled `Equal`/`NotEqual` on numeric
  * operands is EXACT (`==`/`!=`), the IEEE 754 comparison, as on the
  * JavaScript target (`compileJSEquality`): `0.1 + 0.2 == 0.3` compiles to
@@ -1118,49 +1064,11 @@ function compilePythonEquality(
       collParts.push(collPair(args[i], args[i + 1]));
     return `(${collParts.join(' and ')})`;
   }
-  // An absent operand is the Python object `None`: `None == None` is `True`,
-  // where the interpreter answers `Missing` (never `True`) for
-  // `Equal(Missing, Missing)`. So when BOTH operands may be absent — neither
-  // is a numeric literal nor an arithmetic result, which is a number (`nan`
-  // at worst) — the left one is tested for `None` in front of the comparison,
-  // and an absent pair makes `Equal` false and `NotEqual` true, as the
-  // JavaScript target answers for `undefined`. A pair with a literal or an
-  // arithmetic result on either side needs no guard: `None == 5` is `False`.
-  //
-  // A guarded left operand is spliced TWICE (the `None` test and the
-  // comparison). That is only safe while this target has no impure lowering
-  // (`Random` and friends decline today) — bind it to a temporary if that
-  // changes, so that it is evaluated once as the interpreter evaluates it
-  // once. The JavaScript target already does that (`multiSpliced`).
-  const mayBeNone = (e: Expression): boolean =>
-    !isNumber(e) &&
-    !(
-      isFunction(e) &&
-      typeof e.operator === 'string' &&
-      PY_ALWAYS_NUMBER_HEADS.has(e.operator)
-    );
-  const pair = (a: Expression, b: Expression): string => {
-    const ca = compile(a);
-    const cb = compile(b);
-    const guard =
-      mayBeNone(a) && mayBeNone(b) ? `(${ca}) is not None and ` : '';
-    if (guard === '')
-      return `((${ca}) ${kind === 'Equal' ? '==' : '!='} (${cb}))`;
-    const equal = `(${guard}(${ca}) == (${cb}))`;
-    return kind === 'Equal' ? equal : `(not ${equal})`;
-  };
-  // A guarded pair splices its left operand twice and evaluates its right
-  // operand only when the left one is not `None`; a middle operand of a
-  // chain is spliced by two pairs. And an operand at index 2 or later of a
-  // chain is evaluated only after the pairs before it: those pairs must not
-  // stop the chain where the interpreter goes on (an absent operand), which
-  // `pythonEqualityWithBoundOperands` checks.
-  const guarded = (i: number, j: number): boolean =>
-    mayBeNone(args[i]) && mayBeNone(args[j]);
-  const splicedOnce = (i: number): boolean =>
-    (i === 0 || i === args.length - 1) &&
-    !(i + 1 < args.length && guarded(i, i + 1)) &&
-    !(i >= 1 && guarded(i - 1, i));
+  const pair = (a: Expression, b: Expression): string =>
+    `((${compile(a)}) ${kind === 'Equal' ? '==' : '!='} (${compile(b)}))`;
+  // A middle operand of a chain is spliced by two pairs, and an operand at
+  // index 2 or later of a chain is evaluated only after the pairs before it.
+  const splicedOnce = (i: number): boolean => i === 0 || i === args.length - 1;
   if (callerCode.some((c, i) => c && (!splicedOnce(i) || i >= 2)))
     return pythonEqualityWithBoundOperands(
       kind,
@@ -1168,7 +1076,6 @@ function compilePythonEquality(
       callerCode,
       compile,
       target,
-      mayBeNone,
       callerCodeDecline
     );
   if (args.length === 2) return pair(args[0], args[1]);
@@ -1184,9 +1091,8 @@ function compilePythonEquality(
  * The scalar `Equal`/`NotEqual` of `compilePythonEquality` when some operand
  * runs code that the caller supplied (`bound[i]`). Each such operand is
  * compiled once and bound to a temporary (`bindExpr`, a Python `lambda`),
- * and the pairs read the temporary. A pair with the `None` guard reads its
- * left operand twice, and a middle operand of a chain is read by two pairs,
- * so a direct splice would run the caller's code more than once.
+ * and the pairs read the temporary. A middle operand of a chain is read by
+ * two pairs, so a direct splice would run the caller's code more than once.
  *
  * The interpreter evaluates the operands from left to right and stops at the
  * first pair that is `False` (`evaluateChainOperands` in
@@ -1194,13 +1100,7 @@ function compilePythonEquality(
  * around the pairs from `(i−1, i)` on, and is evaluated only when the pairs
  * before it hold: `Equal(0.5, W, 0.5)` gives
  * `(lambda t1: (0.5 == t1) and (t1 == 0.5))(W)`. Operand 0 is bound around
- * the whole chain.
- *
- * An `Equal` pair with an absent operand is `False` in Python, where the
- * interpreter reads `Missing`, which is not `False`, and goes on to evaluate
- * the later operands. So an `Equal` chain declines when a pair that may read
- * an absent operand comes before a bound operand. The JavaScript target has
- * the same rule (`compileJSEquality`). A target with no `bindExpr` declines.
+ * the whole chain. A target with no `bindExpr` declines.
  */
 function pythonEqualityWithBoundOperands(
   kind: 'Equal' | 'NotEqual',
@@ -1208,21 +1108,12 @@ function pythonEqualityWithBoundOperands(
   bound: ReadonlyArray<boolean>,
   compile: (e: Expression) => string,
   target: CompileTarget<Expression>,
-  mayBeNone: (e: Expression) => boolean,
   decline: (where: string) => Error
 ): string {
   const bind = target.bindExpr;
   if (bind === undefined)
     throw decline('this target cannot bind it to a temporary');
   const lastBound = bound.lastIndexOf(true);
-  if (kind === 'Equal' && args.length > 2) {
-    for (let j = 1; j < lastBound; j++)
-      if (operandMayBeAbsent(args[j - 1]) || operandMayBeAbsent(args[j]))
-        throw decline(
-          'a pair before it may read an absent operand, which stops the ' +
-            'chain here but not in the interpreter'
-        );
-  }
   // Each operand is compiled once, in operand order. Caller code can also
   // write a value that an earlier operand reads (a global `y` in
   // `Equal(0, y + 1, W)`): a pair after the binding of `W` reads the earlier
@@ -1239,16 +1130,8 @@ function pythonEqualityWithBoundOperands(
     bound[i] || capture(a, i) ? BaseCompiler.tempVar(target) : undefined
   );
   const code = (i: number): string => temps[i] ?? direct[i];
-  const pair = (i: number, j: number): string => {
-    const guard =
-      mayBeNone(args[i]) && mayBeNone(args[j])
-        ? `(${code(i)}) is not None and `
-        : '';
-    if (guard === '')
-      return `((${code(i)}) ${kind === 'Equal' ? '==' : '!='} (${code(j)}))`;
-    const equal = `(${guard}(${code(i)}) == (${code(j)}))`;
-    return kind === 'Equal' ? equal : `(not ${equal})`;
-  };
+  const pair = (i: number, j: number): string =>
+    `((${code(i)}) ${kind === 'Equal' ? '==' : '!='} (${code(j)}))`;
   // Scope `i` binds operand `i` (when it is bound), then decides the pair
   // `(i−1, i)` and continues the chain.
   const link = (i: number): string => {
@@ -1770,7 +1653,7 @@ function compilePythonStatements(
     BaseCompiler.assertLocalsAssignedBeforeRead(stmts, declared);
     // A read of a local that may have no value is refused here
     // (`classifyLocalReads`).
-    BaseCompiler.classifyLocalReads(stmts, declared, scopeNode, target);
+    BaseCompiler.classifyLocalReads(stmts, declared, scopeNode);
     // Python has no block scope: the statements of the block run in the
     // scope of the enclosing function. Two things keep a local of the block
     // apart from the other variables of the function:
@@ -2114,15 +1997,15 @@ function pythonElementHeaders(
     // A GUARDED clause, `Element(x, xs, cond)`, is the `if` of a Python
     // comprehension clause, `for x in xs if cond`. The guard reads the
     // clause's own binding, so it compiles under the scope that binds it.
-    // The test is the DECIDED-TRUE test of the three-valued condition
-    // lowering, as the interpreter keeps an element only when the guard
-    // evaluates to exactly `True` (`compileGuardTest`). The statement-form
+    // The interpreter keeps an element only when the guard evaluates to
+    // exactly `True`, so a guard that is not provably a boolean is tested
+    // with `pythonGuardTest()`, not with Python truthiness. The statement-form
     // loop cannot carry this header (`compilePythonLoop` declines a guarded
     // clause before coming here).
     const guard = b.clause.ops[2];
     const guardCode =
       guard !== undefined && !isSymbol(guard, 'Nothing')
-        ? ` if ${BaseCompiler.compileGuardTest(guard, scope, PYTHON_CONDITION_DIALECT)}`
+        ? ` if ${pythonGuardTest(guard, scope)}`
         : '';
     headers.push(`for ${pattern} in ${source}${guardCode}:`);
   }
@@ -2265,62 +2148,6 @@ function compilePythonComprehension(
 // target defined it. That made `Add(toString, 1)` refuse to compile as a
 // bogus "built-in operator with no fixed arity" instead of compiling
 // `toString` as an ordinary free symbol.
-
-/**
- * Compile the search of `Contains`, `IndexOf` or `Element` for the searched
- * value `needle`. The search is STRUCTURAL, as in the interpreter: a marker is
- * found where the same marker sits, `IndexOf([1, NaN], NaN)` is `2` (user
- * decision 2026-09-26, `SEARCHED_VALUE_POLICY` in `library/collections.ts`).
- * The element test is `_ce_same` (see `PYTHON_INDEXOF_HELPER`), whose float
- * leaf reads `nan` as the same as `nan`; Python's own `in` finds a `nan` only
- * by object identity, so the lowerings never use it. `search(v)` emits the
- * search for the compiled value `v`.
- *
- * This target fails closed on a needle that may be the OBJECT-domain absence,
- * `Missing`: a written absence symbol lowers to `math.nan` here
- * (`docs/ERROR-MODEL.md` §3, since numpy raises on `None`), so the compiled
- * search would find it where a `NaN` cell sits, while the interpreter keeps
- * the two markers apart (`IndexOf([1, NaN], Missing)` is `0`). The JavaScript
- * target has an object null, `undefined`, for the written symbol and refuses
- * only a COMPUTED absence (`compileSearchedValue`).
- *
- * The same spelling makes the COLLECTION side ambiguous: a cell that is
- * `Missing` is `nan` here too, so a numeric needle that is
- * `NaN` at run time would be found where an absent cell sits
- * (`IndexOf([1, Missing], NaN)` is `0` in the interpreter). A needle that may
- * be a number is therefore refused when the collection's element type has a
- * `missing` arm.
- */
-function pySearchedValue(
-  operator: string,
-  needle: Expression,
-  collection: Expression | undefined,
-  compile: (expr: Expression) => string,
-  search: (v: string) => string
-): string {
-  // A needle whose present arms are not numeric (`character | missing`) is
-  // never confused with a `nan` element and compiles, as on JavaScript.
-  const t = resolveTypeForCompilation(needle.type.type);
-  if (
-    couldMatch(stripMissingFromType(t), 'number') &&
-    collectionMayHoldAbsentCell(collection)
-  )
-    throw new Error(
-      `Could not compile \`${operator}\`: an element of the collection may be absent, which this ` +
-        `target spells as \`nan\`, and the searched value may be a number, which could be \`NaN\`; ` +
-        `the interpreter keeps the two apart. The interpreter evaluates it instead.`
-    );
-  if (
-    isSymbol(needle, 'Missing') ||
-    (typeContainsMissing(t) && couldMatch(stripMissingFromType(t), 'number'))
-  )
-    throw new Error(
-      `Could not compile \`${operator}\`: the searched value may be the absent value \`Missing\`, ` +
-        `which this target spells as \`nan\` and could not tell from a \`NaN\` element. ` +
-        `The interpreter evaluates it instead.`
-    );
-  return search(compile(needle));
-}
 const PYTHON_OPERATORS: CompiledOperators = {
   __proto__: null as never,
   Add: ['+', 11],
@@ -2338,7 +2165,7 @@ const PYTHON_OPERATORS: CompiledOperators = {
   // it via `_SYS.pow`. See finding CO-P2-24.
   Power: ['**', 15],
   // Equal / NotEqual are NOT operators: they need the string, aggregate and
-  // collection gates and the `None` guard of `compilePythonEquality`, which
+  // collection gates of `compilePythonEquality`, which
   // emits the exact `==`/`!=` for the scalar pairs that pass them.
   LessEqual: ['<=', 9],
   GreaterEqual: ['>=', 9],
@@ -2893,9 +2720,9 @@ const PYTHON_EQCOLL_HELPER = `def _ce_eqcoll(_a, _b):
  *    an ambiguous-truth-value error). An ndarray row is therefore LIST-like,
  *    and a compiled tuple needle matches it — a deliberate choice, matching how
  *    the engine lowers `Matrix` rows (as nested lists / an ndarray);
- *  - strings are unchanged. A needle that may be the object-domain absence
- *    (`Missing`) does not reach this helper: `pySearchedValue`
- *    refuses it at compile time, since this target spells it as `nan`.
+ *  - strings are unchanged. A needle that is the object-domain absence
+ *    (`Missing`) reaches this helper as `nan`, since this target spells it
+ *    so, and is found where `nan` sits.
  *
  * The one other departure from Python equality is NaN: `nan == nan` is False,
  * where the interpreter's structural `.isSame()` compares two `NaN` as the
@@ -3511,8 +3338,8 @@ const PY_IN_PLACE_UPDATE_OPS = new WeakSet<ReadonlyArray<Expression>>();
  * admits `NaN`. For
  * `select`, an absent value does not select the element, as `Missing` does
  * not in the interpreter, and any other value raises a `TypeError`. For
- * `quantify`, an absent value and any other value raise a `TypeError`: the
- * interpreter answers `Missing` or leaves `Any`/`All` unevaluated, which
+ * `quantify`, an absent value is `False`, and any other value raises a
+ * `TypeError`: the interpreter leaves `Any`/`All` unevaluated, which
  * `any`/`all` cannot give. For `prefix`, any value that is not a boolean
  * ends the prefix.
  */
@@ -3524,10 +3351,8 @@ const PYTHON_PREDICATE_HELPER = `def _ce_predicate(_f, _kind, _mode):
         if _mode == 'prefix':
             return False
         _absent = _v is None or (isinstance(_v, (float, np.floating)) and _v != _v)
-        if _mode == 'select' and _absent:
-            return False
         if _absent:
-            raise TypeError(_kind + ' predicate returned an absent value, which the interpreter combines by Kleene logic')
+            return False
         raise TypeError(_kind + ' predicate must return "True" or "False"')
     return _p
 `;
@@ -4042,12 +3867,11 @@ function compilePythonExtremum(
   // An operand that is not provably a collection but may be one
   // (`broadcastable<number>`, `matrix | missing`, `list<vector<2>> | missing`)
   // is reduced too: NumPy reduces a number to itself and a list to its
-  // extremum. Read as a scalar, the whole list was the answer. An absent
-  // value (`None`) gives `NaN`, as the interpreter's extremum of an absent
-  // collection does. An empty list (`np.max([])` raises) gives `NaN` alone,
-  // as `Max([])` does. Beside other operands, an empty list is skipped
-  // (`None`), as `Max([], 5)` ignores it (`5`), and the answer is `NaN`
-  // when every operand is skipped (`Max([], [])`), as in the interpreter.
+  // extremum. Read as a scalar, the whole list was the answer. An empty
+  // list (`np.max([])` raises) gives `NaN` alone, as `Max([])` does. Beside
+  // other operands, an empty list is skipped (`None`), as `Max([], 5)`
+  // ignores it (`5`), and the answer is `NaN` when every operand is skipped
+  // (`Max([], [])`), as in the interpreter.
   const empty = args.length === 1 ? "float('nan')" : 'None';
   let mayBeEmpty = false;
   const parts = args.map((a) => {
@@ -4057,7 +3881,7 @@ function compilePythonExtremum(
       containsBroadcastableType(a.type.type)
     ) {
       mayBeEmpty = true;
-      return `(lambda _v: float('nan') if _v is None else (${empty} if np.size(_v) == 0 else ${reduce}(_v)))(${compile(a)})`;
+      return `(lambda _v: ${empty} if np.size(_v) == 0 else ${reduce}(_v))(${compile(a)})`;
     }
     return compile(a);
   });
@@ -4865,70 +4689,25 @@ function pyCallbackArg(
 // target defined it. That made `Add(toString, 1)` refuse to compile as a
 // bogus "built-in operator with no fixed arity" instead of compiling
 // `toString` as an ordinary free symbol.
+/**
+ * The test of a comprehension guard. The interpreter keeps an element only
+ * when the guard is `True`, so a guard whose static type is not the scalar
+ * `boolean` is tested for being a boolean that is true. A relational head
+ * alone is not enough: an element-wise `Equal` over a list gives a list.
+ */
+function pythonGuardTest(
+  guard: Expression,
+  target: CompileTarget<Expression>
+): string {
+  const code = BaseCompiler.compile(guard, target);
+  if (guard.type.matches('boolean')) return code;
+  return `(lambda _g: isinstance(_g, (bool, np.bool_)) and bool(_g))(${code})`;
+}
+
 /** `code`, parenthesized unless it is a primary expression
  * (`BaseCompiler.isAtomicSource`), for an operand of a binary operator. */
 const pyOperand = (code: string): string =>
   BaseCompiler.isAtomicSource(code) ? code : `(${code})`;
-
-/** A fragment that is already a name or a constant, so naming it again costs
- * nothing and evaluates nothing. The base compiler applies the same test. */
-const PYTHON_ATOM = /^[\w.]+$/;
-
-/**
- * Python’s test that a branch condition’s value is exactly a boolean.
- *
- * `is True` alone would be wrong: a comparison compiles to a NumPy call, whose
- * result is a `np.bool_` rather than the Python singleton. `== True` would be
- * wrong the other way, because `1 == True` is true in Python, and a value of
- * `1` must decide nothing.
- */
-const pythonIsBoolean = (x: string): string =>
-  `isinstance(${x}, (bool, np.bool_))`;
-
-/**
- * Python’s spellings of the pieces a branch condition’s decidedness test is
- * built from. The tests themselves, and the way a connective combines its
- * operands’, are the compiler’s shared analysis
- * (`BaseCompiler.conditionDecidability`); only the wording is this target’s.
- *
- * `not` is a word, so it carries its own trailing space: the fragment it
- * precedes is a name or a parenthesized expression, and `notx` would be an
- * identifier.
- */
-const PYTHON_CONDITION_DIALECT: ConditionDialect = {
-  and: 'and',
-  not: 'not ',
-  // `None` is the undecided value. Every three-valued fragment this lowering
-  // builds is a `bool`, a `np.bool_` or `None`, so `is None` decides it
-  // exactly — where `== None` and `is True` would not (`np.True_ is True` is
-  // false, and `1 == True` is true).
-  undecided: 'None',
-  trueValue: 'True',
-  falseValue: 'False',
-  isTrue: (x) => `${x} is not None and ${x}`,
-  isFalse: (x) => `${x} is not None and not ${x}`,
-  isUndecided: (x) => `${x} is None`,
-  kleeneOfValue: (x, negate) =>
-    `((${negate ? `not ${x}` : x}) if ${pythonIsBoolean(x)} else None)`,
-  ternary: (test, then, otherwise) => `(${then} if ${test} else ${otherwise})`,
-  bind: (params, body, args) =>
-    `(lambda ${params.join(', ')}: ${body})(${args.join(', ')})`,
-};
-
-// The value-position lowering of a three-valued condition needs this
-// target's spellings of the condition pieces.
-BaseCompiler.conditionDialects.set('python', PYTHON_CONDITION_DIALECT);
-
-/**
- * True when `expr` can lower to the Python absence value `None`: a
- * restriction (the single-branch `If`, typed as its arm), or any operand whose type holds a `missing` arm at
- * any depth (a `Which` with no default clause, a symbol declared with a
- * `missing` arm, a point with an absent coordinate). numpy functions such as
- * `np.dot` raise for `None`, where the interpreter answers an absence marker.
- */
-function pythonMayBeAbsent(expr: Expression): boolean {
-  return isRestriction(expr) || typeContainsMissing(expr.type.type);
-}
 
 /**
  * The Python literal for an absent selection value over arms of the given
@@ -4994,112 +4773,17 @@ function pythonSelectionArm(
 }
 
 /**
- * Produce a Python conditional expression that takes an arm only when its
- * condition is exactly `True` or `False` when the function runs. A condition
- * that is anything else takes neither arm and the value is the absence
- * literal of the arms' domain (`pythonAbsent`): `float('nan')` for a number.
- * The JavaScript target applies the same rule.
- *
- * The analysis behind it is the compiler’s, shared with the JavaScript code
- * (`BaseCompiler.conditionDecidability`), and so is the reason for it: a
- * comparison against NaN gives an ordinary `False` in Python exactly as it
- * does in JavaScript, so a condition that cannot be decided looks the same as
- * one decided to be false, and the difference has to be read off the
- * comparison’s operands. Only the wording of the tests is Python’s
- * (`PYTHON_CONDITION_DIALECT`).
- *
- * A condition built from `and`/`or`/`not` is decided by the same three-valued
- * (Kleene) tables the JavaScript target uses: an `and` is decided when one
- * operand is decided `False` — that operand settles the result whatever its
- * siblings hold — or when every operand is decided, and an `or` is the mirror
- * image. Python’s `and`/`or` short circuit and return an operand, exactly as
- * JavaScript’s `&&`/`||` do, so the connective’s ordinary emitted source is
- * the correct VALUE wherever that test holds.
- *
- * One case does not arise in Python. A compiled JavaScript function reads its
- * free symbols out of an object, where a missing entry is `undefined` and
- * every comparison against it is `false`, so the JavaScript tests include an
- * extra `!== undefined`. A compiled Python function takes its free symbols as
- * parameters, so a caller who omits one gets a `TypeError` at the call and no
- * value ever reaches a comparison. There is nothing to test, and the base
- * compiler adds no such test because this target has no such object.
- *
- * `thenCode` and `elseCode` arrive already parenthesized by the caller.
+ * A Python conditional expression: `thenCode` when `cond` is true, else
+ * `elseCode`. `thenCode` and `elseCode` arrive already parenthesized by the
+ * caller.
  */
 function compilePythonBranch(
   cond: Expression,
   thenCode: string,
   elseCode: string,
-  compileCond: (c: Expression) => string,
-  target: CompileTarget<Expression>,
-  // The value of an undecided condition: the absence literal of the arms'
-  // domain (`pythonAbsent`). Defaults to the numeric spelling.
-  absent: string = "float('nan')"
+  compileCond: (c: Expression) => string
 ): string {
-  const decidability = BaseCompiler.conditionDecidability(
-    cond,
-    target.bindExpr !== undefined,
-    target
-  );
-  // The condition is decidable by construction, so it needs no extra test.
-  if (decidability === null)
-    return `((${thenCode}) if (${compileCond(cond)}) else (${elseCode}))`;
-
-  if (
-    decidability.test.kind === 'value' ||
-    decidability.test.kind === 'connective'
-  ) {
-    // `Not` is applied by exchanging the two constants the tests compare
-    // against, never by emitting `np.logical_not`: negating a value that is
-    // not a boolean would produce a confident answer from no evidence.
-    //
-    // A condition that reaches a connective is compiled to its three-valued
-    // value — `True`, `False` or `None` — and inspected the same way. The
-    // negation, and the lazy bindings the lowering needs, are inside that
-    // value, so nothing is exchanged here.
-    const connective = decidability.test.kind === 'connective';
-    const { expr, negate } = connective
-      ? { expr: cond, negate: false }
-      : BaseCompiler.peelNegations(cond);
-    const code = connective
-      ? BaseCompiler.kleeneCondition(
-          decidability,
-          target,
-          PYTHON_CONDITION_DIALECT
-        )
-      : compileCond(expr);
-    // The value is inspected twice (once for its kind, once for its truth), so
-    // anything that is not already a name is bound to a lambda parameter and
-    // evaluated once. Both arms stay inside the lambda, so an unselected arm
-    // still never runs.
-    const body = (v: string): string =>
-      `((${thenCode}) if (${pythonIsBoolean(v)} and ${
-        negate ? `not ${v}` : v
-      }) else ((${elseCode}) if ${pythonIsBoolean(v)} else ${absent}))`;
-    if (PYTHON_ATOM.test(code)) return body(code);
-    return `(lambda _CND: ${body('_CND')})(${code})`;
-  }
-
-  // A comparison always produces a real boolean, so whether it could be
-  // decided has to be read off its operands. An operand that costs something
-  // to compute is bound to a name, which the condition then reads: the
-  // condition contains the operand once and the presence test names it once
-  // more.
-  const { value, bindings } = BaseCompiler.withConditionOperands(
-    decidability.test.operands,
-    target,
-    target.bindExpr !== undefined,
-    (conjuncts) => {
-      const code = compileCond(cond);
-      if (conjuncts.length === 0)
-        return `((${thenCode}) if (${code}) else (${elseCode}))`;
-      return `(((${thenCode}) if (${code}) else (${elseCode})) if (${conjuncts.join(
-        ' and '
-      )}) else ${absent})`;
-    },
-    PYTHON_CONDITION_DIALECT
-  );
-  return bindings.length === 0 ? value : target.bindExpr!(bindings, value);
+  return `((${thenCode}) if (${compileCond(cond)}) else (${elseCode}))`;
 }
 
 /**
@@ -5197,21 +4881,6 @@ function pythonArmResultKinds(
  * A statement has no value, so a branch cannot be spliced into the conditional
  * expression `compilePythonBranch` builds: see `pythonArmIsStatement` for what
  * has no expression form in Python and why JavaScript needs none of this.
- *
- * The condition takes the SAME decidedness test the conditional expression
- * takes, read the statement way: a condition that is not exactly `True` or
- * `False` when the compiled function runs takes NEITHER branch, and execution
- * continues with the next statement. That is the interpreter's own inertness —
- * it holds an undecidable `If` rather than choosing an arm, so no assignment
- * inside it happens and no `break` under it fires — and it is what the
- * JavaScript statement form does (`BaseCompiler.compileLoopBody`). The
- * analysis is the compiler's shared one (`BaseCompiler.conditionDecidability`);
- * only the wording is this target's (`PYTHON_CONDITION_DIALECT`).
- *
- * A temporary the test needs is emitted as an assignment statement BEFORE the
- * `if`, where the JavaScript form wraps the whole thing in a block with a
- * `const`: Python has no block scope, so there is nothing to wrap, and the
- * name is drawn from the compilation's naming context so it cannot collide.
  */
 function compilePythonIfStatement(
   args: ReadonlyArray<Expression>,
@@ -5237,87 +4906,8 @@ function compilePythonIfStatement(
     `${head}\n${indentPythonStatements(body)}`;
   const hasElse = args.length > 2 && args[2] !== undefined;
 
-  const decidability = BaseCompiler.conditionDecidability(cond, true, target);
-
-  // Decided by construction: the plain `if`/`else` needs no extra test.
-  if (decidability === null) {
-    const code = suite(`if ${compileCond(cond)}:`, branch(1));
-    return hasElse ? `${code}\n${suite('else:', branch(2))}` : code;
-  }
-
-  const kind = decidability.test.kind;
-  if (kind === 'value' || kind === 'connective') {
-    // `Not` is applied by exchanging the two constants the tests compare
-    // against, never by an emitted negation: negating a value that is not a
-    // boolean would produce a confident answer from no evidence. A condition
-    // that reaches a connective is compiled to its three-valued value and
-    // carries its own negation, so nothing is exchanged for it.
-    const connective = kind === 'connective';
-    const { expr: condExpr, negate } = connective
-      ? { expr: cond, negate: false }
-      : BaseCompiler.peelNegations(cond);
-    const code = connective
-      ? BaseCompiler.withCseOperand(node, 0, target, () =>
-          BaseCompiler.kleeneCondition(
-            decidability,
-            target,
-            PYTHON_CONDITION_DIALECT
-          )
-        )
-      : compileCond(condExpr);
-    // The value is inspected twice — once for its kind, once for its truth —
-    // so anything that is not already a name is computed into a temporary
-    // first.
-    let prelude = '';
-    let name = code;
-    if (!PYTHON_ATOM.test(code)) {
-      name = BaseCompiler.tempVar(target);
-      prelude = `${name} = ${code}\n`;
-    }
-    const isBool = pythonIsBoolean(name);
-    let out = suite(
-      `if ${isBool} and ${negate ? `not ${name}` : name}:`,
-      branch(1)
-    );
-    // The else arm repeats the boolean test rather than being a bare `else:`,
-    // so a value that is neither `True` nor `False` reaches no branch at all.
-    if (hasElse) out += `\n${suite(`elif ${isBool}:`, branch(2))}`;
-    return prelude + out;
-  }
-
-  // A comparison always produces a real boolean, so whether it could be
-  // decided has to be read off its operands. An operand that costs something
-  // to compute is bound to a name, which the condition then reads.
-  const { value, bindings } = BaseCompiler.withConditionOperands(
-    decidability.test.operands,
-    target,
-    true,
-    (conjuncts) => {
-      const code = compileCond(cond);
-      if (hasElse) {
-        const inner = `${suite(`if ${code}:`, branch(1))}\n${suite(
-          'else:',
-          branch(2)
-        )}`;
-        // With an else branch the decidedness test has to guard BOTH arms, so
-        // it is a second `if` wrapped around the selection.
-        return conjuncts.length === 0
-          ? inner
-          : suite(`if ${conjuncts.join(' and ')}:`, inner);
-      }
-      // With no else branch the two tests guard the same statement, so they
-      // join one `if`. The condition is parenthesized when it joins the test,
-      // because `and` binds tighter than the `or` a condition may contain.
-      const test =
-        conjuncts.length === 0
-          ? code
-          : [...conjuncts, `(${code})`].join(' and ');
-      return suite(`if ${test}:`, branch(1));
-    },
-    PYTHON_CONDITION_DIALECT
-  );
-  if (bindings.length === 0) return value;
-  return `${bindings.map(([n, c]) => `${n} = ${c}`).join('\n')}\n${value}`;
+  const head = suite(`if ${compileCond(cond)}:`, branch(1));
+  return hasElse ? `${head}\n${suite('else:', branch(2))}` : head;
 }
 
 /**
@@ -6358,34 +5948,11 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
           'contracts it as a matrix, but the interpreter answers one inner ' +
           'product per point.'
       );
-    // A RESTRICTED operand (`P {c}`, `L {c}`) lowers to `(…) if c else
-    // None`, and `np.dot` raises a `TypeError` for `None`, where the
-    // interpreter answers the absence marker (`NaN` for the product of two
-    // points, `Missing` for a list of points). Fail closed. Any other operand
-    // whose type admits absence (a `Which` with no default clause, a symbol
-    // with a `missing` arm, a point with an absent coordinate) can also
-    // lower to `None`, so the same test applies to its type.
-    if (args.some((a) => pythonMayBeAbsent(a)))
-      throw new Error(
-        'Could not compile `Dot`: a restricted operand is absent when its ' +
-          'condition is false, and `np.dot` has no answer for an absent ' +
-          'operand where the interpreter answers the absence marker.'
-      );
     return `np.dot(${compile(args[0])}, ${compile(args[1])})`;
   },
   Cross: (args, compile) => {
     if (args[0] == null || args[1] == null)
       throw new Error('Could not compile `Cross`: missing argument');
-    // A RESTRICTED operand (`P {c}`) lowers to `(…) if c else None`, and
-    // `np.cross` raises for `None`, where the interpreter answers the
-    // absence marker. Fail closed, as `Dot` does, also for any other operand
-    // whose type admits absence.
-    if (args.some((a) => pythonMayBeAbsent(a)))
-      throw new Error(
-        'Could not compile `Cross`: a restricted operand is absent when its ' +
-          'condition is false, and `np.cross` has no answer for an absent ' +
-          'operand where the interpreter answers the absence marker.'
-      );
     return `np.cross(${compile(args[0])}, ${compile(args[1])})`;
   },
   // A STRING norm type (`Norm(v, "Infinity")`, `Norm(m, "Frobenius")`) is
@@ -6671,17 +6238,14 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     // Both arms are conditionally evaluated: their operand indices go to the
     // compile callback, which opens the matching CSE region (`OperandCompiler`).
-    // A condition that is not exactly `True` or `False` takes neither arm and
-    // the value is the absence literal of the arms' domain — see
-    // `compilePythonBranch` and `pythonAbsent`.
+    // An arm that gives no value gives the absence literal of the arms'
+    // domain (`pythonAbsent`).
     const absent = pythonAbsent([args[1], args[2]], target);
     return compilePythonBranch(
       args[0],
       pythonSelectionArm(args[1], () => compile(args[1], 1), absent, target),
       pythonSelectionArm(args[2], () => compile(args[2], 2), absent, target),
-      (c) => compile(c),
-      target,
-      absent
+      (c) => compile(c)
     );
   },
   Which: (args, compile, target) => {
@@ -6694,8 +6258,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // condition into a silent whole-expression pick.
     for (let i = 0; i < args.length; i += 2)
       BaseCompiler.assertScalarCondition(args[i], target);
-    // A position no clause matched, and a position whose condition is
-    // undecided, answer the same thing: the absence literal of the arms'
+    // A position no clause matched answers the absence literal of the arms'
     // domain (`pythonAbsent`).
     const absent = pythonAbsent(
       args.filter((_, i) => i % 2 === 1),
@@ -6711,15 +6274,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
         pythonSelectionArm(val, () => compile(val, i + 1), absent, target);
       // `True` marks the default (else) branch.
       if (isSymbol(cond, 'True')) return `(${value()})`;
-      // A clause whose condition cannot be decided selects no clause and ends
-      // the search, with the same value as a search that matched nothing.
-      return compilePythonBranch(
-        cond,
-        value(),
-        build(i + 2),
-        (c) => (i === 0 ? compile(c) : compile(c, i)),
-        target,
-        absent
+      return compilePythonBranch(cond, value(), build(i + 2), (c) =>
+        i === 0 ? compile(c) : compile(c, i)
       );
     };
     return build(0);
@@ -7154,13 +6710,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = pyCollArg('IndexOf', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `IndexOf`: missing value');
-    return pySearchedValue(
-      'IndexOf',
-      args[1],
-      args[0],
-      compile,
-      (v) => `_ce_indexof(${coll}, ${v})`
-    );
+    return `_ce_indexof(${coll}, ${compile(args[1])})`;
   },
   Contains: (args, compile) => {
     if (args[0]) requirePrimitiveElements('Contains', args[0]);
@@ -7168,14 +6718,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args[1] == null)
       throw new Error('Could not compile `Contains`: missing value');
     // `_ce_indexof`, not `in`: Python's `in` finds a `nan` only by object
-    // identity, and the search is structural (`pySearchedValue`).
-    return pySearchedValue(
-      'Contains',
-      args[1],
-      args[0],
-      compile,
-      (v) => `(_ce_indexof(${coll}, ${v}) > 0)`
-    );
+    // identity, and the search is structural, as in the interpreter. The
+    // element test `_ce_same` (see `PYTHON_INDEXOF_HELPER`) reads `nan` as
+    // the same as `nan`.
+    return `(_ce_indexof(${coll}, ${compile(args[1])}) > 0)`;
   },
   // First-occurrence order (`dict.fromkeys` preserves insertion order).
   Unique: (args, compile) => {
@@ -7318,9 +6864,6 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `Could not compile \`Any\`: only the predicate form compiles.`
       );
-    // An absent element makes the interpreter's answer `Missing` (Kleene),
-    // which `any` cannot express: fail closed (`refuseKleeneQuantifier`).
-    refuseKleeneQuantifier('Any', args[0], args[1]);
     const fn = pyFnArg(
       'Any',
       args[1],
@@ -7336,7 +6879,6 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `Could not compile \`All\`: only the predicate form compiles.`
       );
-    refuseKleeneQuantifier('All', args[0], args[1]);
     const fn = pyFnArg(
       'All',
       args[1],
@@ -7563,18 +7105,11 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // δ: 1 when all arguments are equal — a single argument compares to 0 —
   // else 0. The comparison is EXACT (`==`), as compiled `Equal` is (see
   // `compilePythonEquality`): a `nan` argument answers 0.
-  //
-  // The variadic form tests the first argument for absence before comparing.
-  // An absent value reads as `None` on the object axis of this target, and
-  // `None == None` is true, so two absent arguments would otherwise answer 1
-  // — where the interpreter answers `Missing` and a compiled `Equal` of the
-  // same two operands answers false. Numeric absence is `nan`, which already
-  // fails the comparison against itself and so needs no test of its own.
   KroneckerDelta: (args, compile) => {
     if (args.length === 0 || args[0] == null)
       throw new Error('Could not compile `KroneckerDelta`: missing argument');
     if (args.length === 1) return `(1 if ${compile(args[0])} == 0 else 0)`;
-    return `(lambda *_v: 1 if _v[0] is not None and all(_x == _v[0] for _x in _v) else 0)(${args.map((a) => compile(a)).join(', ')})`;
+    return `(lambda *_v: 1 if all(_x == _v[0] for _x in _v) else 0)(${args.map((a) => compile(a)).join(', ')})`;
   },
   Element: (args, compile) => {
     if (args[0] == null || args[1] == null)
@@ -7582,14 +7117,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     requirePrimitiveElements('Element', args[1]);
     const coll = pyCollArg('Element', args[1], compile);
     // An absent value is an element where the same marker sits; the test is
-    // `_ce_indexof`, not `in`, for the reason `pySearchedValue` states.
-    return pySearchedValue(
-      'Element',
-      args[0],
-      args[1],
-      compile,
-      (v) => `(_ce_indexof(${coll}, ${v}) > 0)`
-    );
+    // `_ce_indexof`, not `in`, for the reason `Contains` states.
+    return `(_ce_indexof(${coll}, ${compile(args[0])}) > 0)`;
   },
   Identity: (args, compile, target) => {
     if (args[0] == null)
@@ -8024,9 +7553,6 @@ export class PythonTarget implements LanguageTarget<Expression> {
         },
         object: {
           nullLiteral: 'None',
-          // The object null only, for the guard of an absent whole
-          // collection operand (`absentCollectionOperandGuard`).
-          isNull: (x) => `(${x} is None)`,
           // A discharge (`IsMissing`, `Coalesce`, `AssertPresent`) reads
           // `None` and `NaN` as absent with the numeric axis's test
           // (`PY_ABSENT_TEST`): an object-domain position can hold `NaN`,

@@ -387,22 +387,8 @@ describe('a search finds an absent value where the same marker sits', () => {
       return r.run!({} as never);
     };
     // `NaN` is found by the SameValueZero element test. A written `Missing`
-    // compiles to `undefined`, as `Undefined` does, so a search for either in
-    // a list that may hold an absent cell is not compiled (the interpreter
-    // keeps the two apart); against a list with no absent cell it compiles
-    // and is not found.
-    expect(
-      (() => {
-        try {
-          return compile(
-            ce.box(['IndexOf', ['List', 1, 'Missing'], 'Missing'] as never),
-            { to: 'javascript', fallback: false } as never
-          ).success;
-        } catch {
-          return false;
-        }
-      })()
-    ).toBe(false);
+    // compiles to `undefined`: against a list with no absent cell it is not
+    // found.
     expect(run(['IndexOf', ['List', 1, 2], 'Missing'])).toBe(0);
     expect(run(['Contains', ['List', 1, 2], 'Missing'])).toBe(false);
     // (`Contains` over a list with a `missing` element arm is not compiled:

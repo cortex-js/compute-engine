@@ -1638,7 +1638,7 @@ removed code stops and reports: that expression is a `corpus` witness, and
 the rule for it is decided by the user, not by the implementer.
 
 The result of step 4, row 1 (selection; 2026-11-03, session
-compute-engine-57; base `1359a1279`; staged, not committed).
+compute-engine-57; base `1359a1279`; committed as `ea4f58fa8`).
 
 - **What was removed.** In `javascript-target.ts`, `compileJSSelection()`:
   the `flat` flag, the `!flat` branch that built `_SYS.absentByDepth(…)`,
@@ -1732,6 +1732,138 @@ compute-engine-57; base `1359a1279`; staged, not committed).
   depth. The interpreter's unmatched cell is always `noMatchCell(ce,
   armTypes)` at depth 1. The `'absent'` selector and cell handling of
   `selectWith` (item 3.4.1) are unchanged and belong to row 2.
+
+The result of step 4, row 2 (absence; 2026-11-04, session
+compute-engine-72; base `ea4f58fa8`; staged, not committed).
+
+- **What was removed.** The decidedness analysis of compiled conditions,
+  which tracked whether a condition can be undecided (an absent operand) and
+  combined conditions with three-valued (Kleene) logic. In
+  `compile-absence.ts`: `operandMayBeAbsent`, `isAbsenceSymbol`,
+  `ATOMIC_FRAGMENT`, `mayBeUndecided`, `compileGuardTest`,
+  `conditionDecidability`, `connectiveNode`, `isDecidedByConstruction`,
+  `operandPresenceConjuncts`, `peelNegations`, `kleeneValueLeaf`,
+  `kleeneRelationLeaf`, `withConditionOperands`, `exactSelect`,
+  `compileExactCondition`, `isNanLiteral`, `absentOnlyThroughNumericSlots`.
+  In `compiler-core.ts`: `conditionNode()`, `kleeneConditionParts()` and
+  their hooks; the statement `If` is a plain `if`/`else` (no `_CND`
+  binding). In `compile-conditions.ts`: `kleeneCondition`,
+  `kleeneConnective`, the condition dialects. In `compile-conditionals.ts`:
+  `kleeneValueConnective`, `isDecidedBooleanValue`. In the targets: the
+  Python condition dialect and the decidedness branches of its two
+  conditional lowerings; the `None` guard of Python `Equal`; the declines of
+  `Any`/`All` over an element type with a `missing` arm
+  (`refuseKleeneQuantifier`), of a searched value that may be absent
+  (`compileSearchedValue`, `pySearchedValue`, now inlined), of a chained
+  `Equal` with an absent operand before an impure one, and of Python
+  `Dot`/`Cross`; `collectionMayHoldAbsentCell`; the absent-last sort
+  comparators; the `undefined` test of `oneDatumOk`; Python `Max`/`Min` of
+  `None`; the `None` test of Python `KroneckerDelta`. In
+  `javascript-runtime.ts`: the `'absent'` selector of `selectWith`, the
+  undecided `NaN` marker of `eqTensor`/`neqTensor` (they give booleans),
+  and the absent reading of `predicateResult` in `quantify` mode. Public API:
+  `CompileTarget.absence.object.isNull` (replaced by `object.isAbsent`),
+  `CompileTarget.collectionEqualityOperand` (no replacement), about 25
+  static members of `BaseCompiler`, and the exports `ConditionDialect`,
+  `ConditionNode`, `CONDITION_DIALECT_JS` (CHANGELOG, `[Unreleased]`).
+  `absentCollectionOperandGuard` is narrowed to the accessors (`At`, `First`,
+  `Second`, `Third`, `Last`, `Length`, `Rest`, `Reverse`). Moved:
+  `_localValueFrames`/`_localNameKeys`/`blockLocalOf` to `compile-locals.ts`
+  (a shape reader in `compile-callbacks.ts` uses them),
+  `userFunctionSignature` to `compile-assignment-checks.ts`,
+  `isBooleanBindingType` to `compiler-type-facts.ts`.
+- **What stays, and why.** `absenceAxisForType`, `absentDomainIsObject`,
+  `isNumericShaped` (the producers and the discharges read them);
+  `absent-tuple-read.ts` (both readers serve an accessor over an absent
+  base); the object-domain requirement in `compileExpression` (it declines a
+  producer that GPU or interval code cannot hold); `make`, `isAbsent`,
+  `coalesce`, `nullLiteral`, `raise`, `writtenSymbol` and `coversValueModel`
+  of `CompileTarget.absence`; the producers (`nanPointLiteral`,
+  `unmatchedCellLiteral`, `_SYS.atPoint`/`atPointNoWrap`, `wholeAbsent`,
+  `selectAbsent`) and the three discharges. Tangled with shape code and
+  kept: the `scalarValue` test of `scalarAdd`/`scalarMul` (it also gives
+  `NaN` for a string or a nested array), the Python `Norm` decline for a list
+  of points behind a `missing` arm, the element type without its `missing`
+  arm in `compileJSSortWithCallback`. The interval `missing` flag was
+  already gone (2026-11-01).
+- **New code the removal needed.** `_SYS.cond` reads `undefined`, `null` and
+  `NaN` as `false` and keeps its throw for any other non-boolean value (an
+  absent condition is not selected, as in the interpreter). A comprehension
+  guard whose static type is not the scalar `boolean` is tested with
+  `=== true` (JavaScript) or `pythonGuardTest()` (Python): with a plain
+  `if (x)`, an integer guard or an element-wise `Equal` (a list) kept
+  elements where the interpreter keeps none.
+- **Code lines** (`.ts`, not blank, `//`, `/*` or `*`): `compilation` 92,704
+  → 91,406 (−1,298); `library` 80,028 → 80,028 (one comment). Source: 23
+  files, 348 insertions, 2,855 deletions.
+- **Tests.** No file deleted, no snapshot changed. Deleted tests (each
+  pinned a removed compiled value or decline): `compile-python.test.ts`
+  (Dot and Cross fail closed for an operand whose type admits absence; a
+  written Missing or a maybe-missing needle is refused; a numeric needle
+  against a list that may hold Missing is refused), `compile-equality-exact`
+  (an absent scalar operand marks every position; a hole in the list marks
+  only its own position; KroneckerDelta carries the same absence test),
+  `compile-notequal-nan` (python: the exact test excludes None),
+  `compile-three-valued-connectives` (NaN for an absent boolean beside a
+  true relation; a false operand settles an And whose other operand is
+  absent), `compiled-absence-literal` (five Median/reducer/Equal tests of
+  the absent marker), `restricted-point-accessors` (Cross of a restricted
+  point fails closed on python), `compile-js-interpreter-parity-batch` (an
+  absent element: NaN in compiled code), `take-drop-negative-count` (Flatten
+  of an absent slice), and one case of `compile-python-parity` (a user name
+  `bool` hidden by the removed condition test). Assertions removed or
+  rewritten in 13 more files; one test added
+  (`comprehension-guard`: a list-valued relational guard keeps nothing).
+- **The corpus measure** (Tycho frozen at `a34405ae0`, the copy of row 1; the
+  tools of 3.4.1 with records keyed by MathJSON; base run on `ea4f58fa8`,
+  candidate on the final tree): 17,825 compiles, 13,707 keys and 77,267
+  values in both runs; 0 changed values, 0 new throws. Declines: javascript
+  47, glsl 44, interval-js 61 in both runs; no new decline and none gone.
+  The values that the removal changes (all unspecified by the caveats, each
+  toward the interpreter: `If(At(B, 9), 1, 2)` with `B` two booleans gives
+  `2`, it gave `NaN`; `Equal([1, Missing], 1)` gives `[true, false]`, it
+  gave `[true, NaN]`) reach no corpus record.
+- **Review**: Claude and Codex, two rounds. Round 1: Codex, one high (a
+  list-valued guard read by truthiness, fixed with the type test above, on
+  both targets); Claude, two low (outdated comments; no Behavior Changes
+  entry in the CHANGELOG) and two nits (pass-through search helpers and an
+  unused parameter, removed; line form), all fixed. Round 2 (Codex, on the
+  fixes): no finding.
+- **Checks.** In the worktree, on the final tree: typecheck, `oxlint` on the
+  changed files, `check:deps`, the full suite (1,819 suites, 77,800 tests, 0
+  failed), `npm run test:python` (49 suites, 0 failed, after the one
+  parity case above was deleted), the corpus measure. In the main tree, after
+  the patch was applied over other sessions' uncommitted work: typecheck,
+  and the 24 affected test files (1,825 passed).
+- **Documents.** `docs/COMPILATION-MODEL.md`: the paragraphs on the
+  three-valued element-wise runtime and the undecided scalar comparison are
+  replaced by the two-valued rule; two interval lines that named the removed
+  `missing` flag are corrected. `docs/plans/2026-11-01-absent-value-contract.md`:
+  §3, §4 and §8 marked as retired by this row. `docs/BROADCAST-MODEL.md`:
+  no change (it describes the interpreter). `docs/ERROR-MODEL.md` §7 (a
+  dated log) still describes the removed lowering; not changed. No page
+  under `~/dev/cortexjs.io/docs/compute-engine/` describes a removed
+  mechanism.
+- **Choices, each reversible.** (1) `_SYS.cond` reads an absent condition as
+  `false`; the alternative was to let it throw (the caveats allow both). (2)
+  The per-operator absent tests above are removed in this row; the
+  alternative was to leave them for row 3. (3) The reads of a type without
+  its `missing` arm that choose a shape (`typeContainsMissing`,
+  `stripMissingFromType`, `isGated*`, about 100 sites) stay for row 3. (4)
+  `_CND` is no longer a reserved emitted name.
+- **What row 3 (admission and shapes) can rely on.** No compiled code tests
+  whether an operand is absent to compute on it; the reads of a type without
+  its `missing` arm that remain choose a shape, in `compile-broadcast.ts`,
+  `compiler-type-facts.ts`, `static-shape.ts`, `compile-point-calls.ts`,
+  `compile-user-calls.ts`, `compile-user-functions.ts`,
+  `interval-javascript-target.ts`, `javascript-target.ts`,
+  `python-target.ts` and `compile-lanes.ts`.
+- **What row 7 (error model) can rely on.** The Kleene and decidability
+  functions that the table above gives to row 7 are gone. Left for row 7:
+  the throw of `_SYS.cond` for a non-boolean value that is not absent, the
+  non-boolean throw of `predicateResult`, `isDecidedLoopIndex` in
+  `javascript-value-facts.ts` (one reader in `compiler-type-facts.ts`), the
+  `Nothing` refusals and the omission tests of callback results.
 
 ## 5. The growth guard (done 2026-11-02, commit 97c3d409a)
 

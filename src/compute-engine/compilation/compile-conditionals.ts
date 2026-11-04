@@ -1,5 +1,4 @@
-// If, Which and When expressions, Kleene value connectives, and the reads a
-// condition tests.
+// If, Which and When expressions, and the reads a condition tests.
 
 import type {
   Expression,
@@ -27,15 +26,11 @@ import {
 import {
   compileOp,
   compileOpValue,
-  operandAt,
   operandCompiler,
 } from './compile-cse.js';
 import {
-  BRANCH_RELATIONS,
-  assertNoContradictedScalarOperand,
   assertScalarCondition,
   booleanClaim,
-  conditionDialectOf,
   guardCondition,
   liveSelectionArms,
   mayBeCollectionCondition,
@@ -46,10 +41,6 @@ import { core } from './compiler-core-hooks.js';
 import {
   absenceAxisForType,
   absenceKind,
-  compileExactCondition,
-  compileGuardTest,
-  conditionDecidability,
-  exactSelect,
   nanPointLiteral,
   unmatchedCellLiteral,
   noBranchValue,
@@ -58,7 +49,6 @@ import {
   compilationType,
   isProvablyStringOperand,
 } from './compiler-type-facts.js';
-import { tempVar } from './compiler-naming.js';
 
 /**
  * An `If` in statement form. A case of `compileExpr`: it returns the code, or
@@ -128,30 +118,8 @@ export function compileExprIf(
       }
       return `${fn}(${args.map((x) => core.compile(x, target)).join(', ')})`;
     }
-    // A condition that is not exactly `true` or `false` when the compiled
-    // function runs selects neither arm; the value is then the absence
-    // marker for the result type, which for a number is NaN. See the
-    // "Branch conditions that cannot be decided" comment on
-    // `conditionDecidability`. A condition decidable by construction reports
-    // `null` and gets the plain conditional expression below.
-    const decidability = conditionDecidability(
-      args[0],
-      target.bindExpr !== undefined,
-      target
-    );
-    if (decidability === null)
-      return `((${core.compile(
-        args[0],
-        target
-      )}) ? (${arm(args[1], 1)}) : (${arm(args[2], 2)}))`;
-    const compiledCond = compileExactCondition(args[0], decidability, target);
-    return exactSelect(
-      compiledCond,
-      `(${arm(args[1], 1)})`,
-      `(${arm(args[2], 2)})`,
-      noBranchValue(node, target, coerce !== undefined),
-      target
-    );
+    const test = guardCondition(args[0], target);
+    return `((${test}) ? (${arm(args[1], 1)}) : (${arm(args[2], 2)}))`;
   }
   return undefined;
 }
@@ -204,9 +172,8 @@ export function compileExprWhich(
         : args.filter((_x, i) => i % 2 === 1),
       target
     );
-    // A position no clause matched, and a position whose condition is
-    // undecided, answer the same thing: the codomain's absence marker (see
-    // `noBranchValue`).
+    // A position no clause matched answers the codomain's absence marker
+    // (see `noBranchValue`).
     const noBranch = noBranchValue(node, target, coerce !== undefined);
     // Every value arm, and every condition after the first, sits behind a
     // ternary test: each is its own region (§5.1(b)), so nothing binds
@@ -239,54 +206,12 @@ export function compileExprWhich(
       if (isSymbol(cond, 'True') || claim === true) {
         return `(${compileArm()})`;
       }
-      // A condition that is not exactly `true` or `false` when the
-      // compiled function runs selects no clause and ends the search. See
-      // the "Branch conditions that cannot be decided" comment on
-      // `conditionDecidability`. A condition decidable by construction
-      // reports `null` and gets the plain chain of conditional
-      // expressions below.
-      const decidability = conditionDecidability(
-        cond,
-        target.bindExpr !== undefined,
-        target
-      );
-      if (decidability === null) {
-        const condCode =
-          i === 0
-            ? guardCondition(cond, target)
-            : withCseOperand(node, i, target, () =>
-                guardCondition(cond, target)
-              );
-        const valCode = compileArm();
-        return `((${condCode}) ? (${valCode}) : ${compilePair(i + 2)})`;
-      }
-      if (i === 0) {
-        const condCode = compileExactCondition(cond, decidability, target);
-        const valCode = compileArm();
-        return exactSelect(
-          condCode,
-          `(${valCode})`,
-          compilePair(i + 2),
-          noBranch,
-          target
-        );
-      }
-      // The arm and the remaining clauses are compiled BEFORE the region
-      // below is opened: they belong to sibling regions, and a temporary
-      // they bind must not land in this clause's wrapper. The condition and
-      // its decidedness test, in contrast, must both be built inside that
-      // wrapper — see `compileExactCondition`.
+      const condCode =
+        i === 0
+          ? guardCondition(cond, target)
+          : withCseOperand(node, i, target, () => guardCondition(cond, target));
       const valCode = compileArm();
-      const rest = compilePair(i + 2);
-      return withCseOperand(node, i, target, () =>
-        exactSelect(
-          compileExactCondition(cond, decidability, target),
-          `(${valCode})`,
-          rest,
-          noBranch,
-          target
-        )
-      );
+      return `((${condCode}) ? (${valCode}) : ${compilePair(i + 2)})`;
     };
     return compilePair(0);
   }
@@ -374,10 +299,6 @@ export function compileExprRestriction(
         `tell the two apart.`
     );
   // The conditions compile first, as in the scalar `If`.
-  //
-  // A literal list of scalar conditions compiles each cell to `true`
-  // exactly when that condition is decided true (`compileGuardTest`),
-  // as the scalar `If` selects.
   const conds =
     isFunction(args[1], 'List') &&
     args[1].ops.every(
@@ -386,7 +307,7 @@ export function compileExprRestriction(
         !mayBeCollectionCondition(cell.type.type)
     )
       ? `[${args[1].ops
-          .map((cell) => compileGuardTest(cell, target))
+          .map((cell) => core.compile(cell, target))
           .join(', ')}]`
       : core.compile(args[1], target);
   const val = compileOp(undefined, 0, target, 0, args[0]);
@@ -478,176 +399,4 @@ export function compileExprAssertPresent(
     return axis.coalesce(code, raise(message));
   }
   return undefined;
-}
-
-/**
- * The three-valued (Kleene) value of an `And`, `Or` or `Not` in VALUE
- * position, or `undefined` when the plain infix lowering applies.
- *
- * The plain lowering is the target's `&&`/`||`/`!` (JavaScript) or
- * `and`/`or`/`not` (Python). These decide by truthiness and return an
- * operand, so an absent operand (`undefined` or `None`, the spelling of
- * `Missing`) gives the wrong answer: with `M` absent, `M && false` is
- * `undefined` where the interpreter answers `False` (a `false` operand
- * settles an `And`), `M || false` is `false` where it answers `Missing`,
- * and `!M` is `true` where it answers `Missing`. The Kleene tables:
- *
- * - `And` is `false` when one operand is `false`, `true` when every operand
- *   is `true`, and undecided otherwise. `Or` is the mirror image.
- * - `Not` is undecided exactly when its operand is.
- *
- * The undecided value is the target's object null (`undefined`, `None`).
- *
- * The lowering is lazy, like the condition lowering (`kleeneCondition`):
- * each operand is bound before the next one is written, and an operand that
- * follows a settling one (`false` in an `And`, `true` in an `Or`) is never
- * evaluated. An operand that follows an undecided one is evaluated, because
- * the table needs it.
- *
- * Applied only when every operand is a boolean or absent, on the targets
- * with an object null (JavaScript, Python), and one of these is true:
- *
- * - an operand's static type has a `missing` arm;
- * - on JavaScript, an operand is not proven a DECIDED boolean
- *   (`isDecidedBooleanValue`): an element read out of a list, a call.
- *
- * A connective whose every operand is proven a decided boolean keeps the
- * plain infix lowering, with no extra code.
- */
-export function kleeneValueConnective(
-  h: string,
-  args: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>,
-  node?: Expression
-): TargetSource | undefined {
-  if (h !== 'And' && h !== 'Or' && h !== 'Not') return undefined;
-  if (target.language !== 'javascript' && target.language !== 'python')
-    return undefined;
-  if (args.length === 0 || (h === 'Not' && args.length !== 1)) return undefined;
-  // A caller-supplied lowering of the head (an identifier other than the
-  // target's own keyword) takes responsibility for its operands.
-  const opMap = target.operators?.(h);
-  if (
-    opMap !== undefined &&
-    /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(opMap[0]) &&
-    !['and', 'or', 'not'].includes(opMap[0])
-  )
-    return undefined;
-  /** The arms of `a`'s type: `missing`, or a boolean. `undefined` when an
-   * arm is anything else. */
-  const arms = (a: Expression): string[] | undefined => {
-    const r = resolveTypeForCompilation(a.type.type);
-    const types = typeof r !== 'string' && r.kind === 'union' ? r.types : [r];
-    const out: string[] = [];
-    for (const b of types) {
-      const t = resolveTypeForCompilation(b);
-      if (t === 'missing') out.push('missing');
-      else if (t === 'never') continue;
-      else if (isSubtype(t, 'boolean')) out.push('boolean');
-      else return undefined;
-    }
-    return out;
-  };
-  const operandArms = args.map(arms);
-  if (operandArms.some((a) => a === undefined)) return undefined;
-  if (
-    !operandArms.some((a) => a!.includes('missing')) &&
-    (target.language !== 'javascript' ||
-      args.every((a) => isDecidedBooleanValue(a, target)))
-  )
-    return undefined;
-  // A call whose declared `boolean` result its body contradicts (it answers
-  // a list) is refused here as in the plain lowering, which reaches the
-  // same check later in `compileExpr`.
-  assertNoContradictedScalarOperand(args[0].engine, h, args);
-  const d = conditionDialectOf(target);
-  // Each operand is compiled in the common-subexpression region of its
-  // edge (`withCseOperand`), as the plain lowering compiles it
-  // (`compileOp`) and as the condition lowering does (`kleeneConnective`):
-  // an operand after the first is evaluated only when the ones before it
-  // did not settle the result, so a subexpression shared inside it is
-  // bound there, and never outside the binding that may not be entered.
-  // The operand is read off `node` when there is one (`operandAt`), as
-  // `compileOp` reads it: the common-subexpression plan is keyed by the
-  // nodes of that tree, and `args` can hold other objects for them.
-  const code = (a: Expression, i: number) =>
-    withCseOperand(node, i, target, () =>
-      compileValueOperand(
-        node !== undefined ? (operandAt(node, i) ?? a) : a,
-        target
-      )
-    );
-  if (h === 'Not') {
-    const k = tempVar(target);
-    return d.bind([k], d.kleeneOfValue(k, true), [code(args[0], 0)]);
-  }
-  const settles = h === 'And' ? d.isFalse : d.isTrue;
-  const settled = h === 'And' ? d.falseValue : d.trueValue;
-  const unsettled = h === 'And' ? d.isTrue : d.isFalse;
-  const other = h === 'And' ? d.trueValue : d.falseValue;
-  const names = args.map(() => tempVar(target));
-  // Every operand was reached and none settled the result: it is the other
-  // decided value when every operand holds it, undecided otherwise.
-  let body = d.ternary(
-    names.map((k) => `(${unsettled(k)})`).join(` ${d.and} `),
-    other,
-    d.undecided
-  );
-  // The operands are compiled in their order, before the nesting is
-  // assembled from the last one out: a subexpression shared with an
-  // earlier operand is bound where that operand first meets it, as the
-  // plain lowering binds it (compiled from the last operand first, the
-  // shared `Math.sin(_.x)` of `And(sin x < 1, sin x > 0)` was computed
-  // twice).
-  const codes = args.map((a, i) => code(a, i));
-  for (let i = args.length - 1; i >= 0; i--)
-    body = d.bind([names[i]], d.ternary(settles(names[i]), settled, body), [
-      codes[i],
-    ]);
-  return body;
-}
-
-/**
- * True when the compiled value of `a` is always `true` or `false` on the
- * JavaScript target, whatever the caller passes. Proven for:
- *
- * - the symbols `True` and `False`;
- * - a symbol of type `boolean`: the host supplies every input with a value
- *   of its declared type;
- * - a comparison (`Less`, `LessEqual`, `Greater`, `GreaterEqual`, `Equal`,
- *   `NotEqual`) whose operands have no `missing` arm, are not an
- *   application of a top type (`any` or `unknown`: its value can be a
- *   collection, and `Equal` over it lowers to a run-time dispatch whose
- *   value is not always a boolean). Its compiled value is a JavaScript
- *   comparison, which is a boolean: a NaN operand gives `false` (`true`
- *   for `NotEqual`). The host supplies every input, so an input that the
- *   caller leaves out is not considered;
- * - an `And`, `Or` or `Not` whose every operand is proven.
- *
- * Anything else is not proven: a symbol of another type, an element read
- * out of a list (`undefined` past the
- * end), a call. A connective over such an operand takes the Kleene
- * lowering of `kleeneValueConnective`. Being wrong here in the cautious
- * direction costs only code size: the Kleene value of a decided boolean
- * is that boolean.
- */
-export function isDecidedBooleanValue(
-  a: Expression,
-  target: CompileTarget<Expression>
-): boolean {
-  if (isSymbol(a, 'True') || isSymbol(a, 'False')) return true;
-  if (isSymbol(a)) return isSubtype(a.type.type, 'boolean');
-  if (!isFunction(a)) return false;
-  const h = a.operator;
-  if (BRANCH_RELATIONS.has(h))
-    return a.ops.every((x) => {
-      const t = compilationType(x);
-      return (
-        !typeContainsMissing(t) &&
-        !((t === 'any' || t === 'unknown') && isFunction(x))
-      );
-    });
-  if (h === 'And' || h === 'Or' || h === 'Not')
-    return a.ops.every((x) => isDecidedBooleanValue(x, target));
-  return false;
 }

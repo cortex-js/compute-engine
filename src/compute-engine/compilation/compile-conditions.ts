@@ -1,5 +1,4 @@
-// Conditions: scalar and boolean claims, condition dialects, Kleene
-// connectives, exact conditions and guard conditions.
+// Conditions: scalar and boolean claims and guard conditions.
 
 import type {
   Expression,
@@ -22,7 +21,6 @@ import type {
   TargetSource,
 } from './types.js';
 import { descendantRegionAt, type CseRegion } from './cse.js';
-import type { ConditionDialect, ConditionNode } from './compiler-types.js';
 import {
   LOGICAL_BROADCAST_HEADS,
   SCALAR_ARITHMETIC_HEADS,
@@ -34,30 +32,10 @@ import {
 import { userFunctionLiteral } from './compile-assignment-checks.js';
 import { core } from './compiler-core-hooks.js';
 import { isStatementArm } from '../boxed-expression/conditional-value.js';
-import { tempVar } from './compiler-naming.js';
 
 // `isStatementArm()` is defined beside `restrictionParts()`, which reads a
 // single-branch `If` as a restriction only when its arm is not a statement.
 export { isStatementArm };
-
-/** The JavaScript-family spellings of {@link ConditionDialect}. */
-export const CONDITION_DIALECT_JS: ConditionDialect = {
-  and: '&&',
-  not: '!',
-  undecided: 'undefined',
-  trueValue: 'true',
-  falseValue: 'false',
-  isTrue: (x) => `${x} === true`,
-  isFalse: (x) => `${x} === false`,
-  isUndecided: (x) => `${x} === undefined`,
-  kleeneOfValue: (x, negate) =>
-    `(${x} === true ? ${negate ? 'false' : 'true'} : ${x} === false ? ${
-      negate ? 'true' : 'false'
-    } : undefined)`,
-  ternary: (test, then, otherwise) => `(${test} ? ${then} : ${otherwise})`,
-  bind: (params, body, args) =>
-    `((${params.join(', ')}) => ${body})(${args.join(', ')})`,
-};
 
 /**
  * Whether a function promises a scalar result but provably constructs a
@@ -435,14 +413,6 @@ export function isBooleanValued(expr: Expression): boolean {
 }
 
 /**
- * Compile a `Which`/`If` condition, wrapping it in the target's fail-closed
- * boolean guard (`target.assertBoolean`) when it is not provably boolean. The
- * interpreter throws on a non-boolean (e.g. `NaN`) condition rather than
- * silently taking the default branch; the guard makes the compiled code match
- * that contract (D6) where the target can express it. A provably boolean
- * condition — the common case — is emitted bare (no overhead, no churn).
- */
-/**
  * A branch condition (`If`/`Which`) must be a scalar boolean. A
  * collection-valued condition can never be one — the interpreter throws
  * ("Condition must evaluate to True or False") rather than silently taking a
@@ -579,6 +549,14 @@ export function mayBeCollectionCondition(
   });
 }
 
+/**
+ * Compile a `Which`/`If` condition, wrapped in the target's boolean guard
+ * (`target.assertBoolean`) when it is not provably boolean. The JavaScript
+ * guard (`_SYS.cond`) passes `true` and `false`, reads an absent value (`undefined`, `null`,
+ * `NaN`) as `false`, as the interpreter does not select an absent
+ * condition, and throws for any other value. A provably boolean condition
+ * is emitted bare.
+ */
 export function guardCondition(
   cond: Expression,
   target: CompileTarget<Expression>
@@ -590,84 +568,8 @@ export function guardCondition(
   return code;
 }
 
-// ───────────────────────────────────────────────────────────────────────
-// Branch conditions that cannot be decided
-//
-// A compiled `If` or `Which` whose condition is not exactly `true` or
-// `false` when the function runs takes no branch, and the value is the
-// absence marker for the result type — NaN for a number. The interpreter
-// does the same: it leaves such an application unevaluated rather than
-// choosing an arm. So does the element-wise `Which` code, for a position no
-// clause matched (`_SYS.select`).
-//
-// Choosing a branch by JavaScript truthiness instead would answer from no
-// evidence: an unset `b` is `undefined` and `"a"` is truthy, so
-// `If(b, 1, -1)` would give `-1` for the first and `1` for the second.
-//
-// A NaN operand is not such a case: `NaN > 0` is `false` and `NaN ≠ 0` is
-// `true`, so `If(x > 0, 1, -1)` gives `-1` and `If(x ≠ 0, 1, -1)` gives `1`
-// at `x = NaN`, as the interpreter and Desmos do (user decisions
-// 2026-10-20, Tycho rows 411 and 413, and 2026-10-23; from
-// 2026-09-02 to those dates both gave NaN).
-//
-// A condition built from the logical connectives is decided by the
-// three-valued (Kleene) tables, not by the emitted `&&`/`||`/`!`, which
-// answer `false` for an undecided operand and so decide from no evidence.
-// The analysis is a TREE (`ConditionNode`), and the tree compiles to one
-// three-valued VALUE (`kleeneCondition`) — `true`, `false`, or the target's
-// undecided literal (`undefined` in JavaScript, `None` in Python). The
-// selection around it then reuses the shape a condition inspected by its
-// value already had: bind the value once, take an arm when it is exactly
-// `true` or exactly `false`, and answer the absence marker otherwise.
-//
-// The lowering is LAZY, and that is the point of its shape. Each operand's
-// three-valued value is bound to a parameter before the next operand is
-// even written, so:
-//
-//   `And(p, q)`  →  k(p) bound as k; k false ⇒ false — q NEVER RUNS;
-//                   else k(q) bound as k2; k true ⇒ k2; else k2 false ⇒
-//                   false, else undecided.
-//   `Or(p, q)`   →  the mirror image, with `true` as the settling value.
-//   `Not(p)`     →  k(p) bound as k; k undecided ⇒ undecided, else `!k`.
-//
-// A decided-FALSE first conjunct therefore short-circuits exactly as `&&`
-// did, which is what the guard idiom `x ≠ 0 ∧ 1/x > 1` depends on: at
-// `x = 0` the division is never evaluated (in Python it would raise).
-// An UNDECIDED first conjunct still evaluates the second, because Kleene
-// needs it — `And(undecided, false)` is `false`.
-//
-// Because every leaf is bound once and reached at most once, an IMPURE
-// condition takes the same lowering: `If(Random() < 2 ∧ x ≠ 0, a, b)`
-// draws once per call, and answers the absence marker where `x` is absent
-// (`undefined`) instead of the arm the plain `&&` chose. What is left of the old
-// exemption is listed at `conditionNode`: a target with no binding form,
-// an impure chain, and one impure node in two positions.
-//
-// A leaf's own value is three-valued too: a relation is
-// `d ? <comparison> : undecided`, where `d` is the operand test above, and
-// a value-shaped leaf is `c === true ? true : c === false ? false :
-// undecided`. A `Not` over either exchanges the two decided answers instead
-// of emitting a `!`.
-//
-// A connective whose every leaf is decided by construction reports `null`
-// and keeps the plain conditional expression it always had, so the common
-// path emits exactly the code it emitted before. So does a lone relation, a
-// lone value-shaped condition, and a `Not` over either: those keep the
-// guard-and-compare lowering below, which is smaller than the three-valued
-// one and needs no laziness, having only one operand position.
-// ───────────────────────────────────────────────────────────────────────
-
 /**
- * The relations a branch condition can be built from. Their compiled value
- * is always a genuine boolean, so an undecided comparison is INVISIBLE in
- * that value: JavaScript answers `false` both for `NaN > 0` and for
- * `NaN <= 0`, and the tolerant equality lowering (`Math.abs(a - b) <= tol`)
- * answers `false` for a NaN operand as well. Decidedness is therefore read
- * off the comparison's OPERANDS, which is what `conditionDecidability`
- * returns for these heads. A NaN operand does not make them undecided:
- * the compiled `false` (`true` for `NotEqual`) IS the answer (user
- * decisions 2026-10-20, Tycho rows 411 and 413, and 2026-10-23), and only
- * an absent operand leaves them undecided.
+ * The relations: the heads whose compiled value is always a boolean.
  */
 export const BRANCH_RELATIONS = new Set([
   'Less',
@@ -677,143 +579,6 @@ export const BRANCH_RELATIONS = new Set([
   'Equal',
   'NotEqual',
 ]);
-
-/**
- * The spellings of the three-valued condition pieces for each target that
- * has its own (`ConditionDialect`), keyed by `CompileTarget.language`. A
- * target module registers its dialect here when it is loaded (the Python
- * target does); every other target uses {@link CONDITION_DIALECT_JS}.
- */
-export const conditionDialects = new Map<string, ConditionDialect>();
-
-export function conditionDialectOf(
-  target: CompileTarget<Expression>
-): ConditionDialect {
-  return conditionDialects.get(target.language ?? '') ?? CONDITION_DIALECT_JS;
-}
-
-/**
- * Compile a branch condition to its three-valued (Kleene) VALUE: the
- * target's `true`, `false`, or its undecided literal. See the "Branch
- * conditions that cannot be decided" comment above for the tables.
- *
- * Only a condition whose tree contains a connective comes through here. A
- * lone relation and a lone value-shaped condition keep the smaller
- * guard-and-compare lowering they always had.
- *
- * Every operand's source appears EXACTLY ONCE in the result, and every
- * operand after the first of a connective sits inside a binding that is
- * entered only when that operand is reached. So a decided-`false` first
- * conjunct still short-circuits the rest, which is what the guard idiom
- * `x ≠ 0 ∧ 1/x > 1` needs: at `x = 0` the division must not run.
- */
-export function kleeneCondition(
-  node: ConditionNode,
-  target: CompileTarget<Expression>,
-  dialect: ConditionDialect = CONDITION_DIALECT_JS
-): TargetSource {
-  return core.kleeneConditionParts(node, target, dialect).code;
-}
-
-/**
- * The three-valued value of an `And`/`Or`, folded left over its operands.
- *
- * Each step binds the value so far, answers at once when that value settles
- * the connective — `false` settles an `And`, `true` settles an `Or` — and
- * only otherwise reaches the next operand. An UNDECIDED value so far does
- * reach it, because `And(undecided, false)` is `false`: it is a settling
- * operand anywhere in the list that decides the result, not its position.
- *
- * Every operand after the first is a conditionally-evaluated position, so
- * it is compiled inside the common-subexpression region of that edge
- * (`withCseOperand`) — the same regions the `Which` clauses and the
- * element-wise connective lowering use. A temporary bound for such an
- * operand then lands inside the binding that may not be entered.
- */
-export function kleeneConnective(
-  test: {
-    readonly expr: Expression;
-    readonly op: 'And' | 'Or';
-    readonly operands: ReadonlyArray<ConditionNode>;
-  },
-  negate: boolean,
-  target: CompileTarget<Expression>,
-  dialect: ConditionDialect
-): { code: TargetSource; decided: boolean } {
-  const settled = test.op === 'And' ? dialect.falseValue : dialect.trueValue;
-  const settles = test.op === 'And' ? dialect.isFalse : dialect.isTrue;
-  const decidedOther = test.op === 'And' ? dialect.isTrue : dialect.isFalse;
-  const first = core.kleeneConditionParts(test.operands[0], target, dialect);
-  let value = first.code;
-  // When every operand is always decided (each value is `true` or
-  // `false`), the connective is the plain two-valued one, written as a
-  // conditional: `a ? b : false` for an `And`, `a ? true : b` for an `Or`.
-  // It evaluates the operands in the same order and stops at the same
-  // operand as the three-valued form, and gives the same value, with no
-  // function per operand. A `broadcast()` kernel spent several ns per cell
-  // in the three-valued form (measured 2026-10-24, ROADMAP CE-410).
-  let decided = first.decided;
-  let plain = first.code;
-  for (let i = 1; i < test.operands.length; i++) {
-    const soFar = tempVar(target);
-    // The CSE region may wrap the operand's code in bindings; its value,
-    // and so whether it is always decided, is the operand's.
-    let nextDecided = false;
-    const next = withCseOperand(test.expr, i, target, () => {
-      const parts = core.kleeneConditionParts(
-        test.operands[i],
-        target,
-        dialect
-      );
-      nextDecided = parts.decided;
-      return parts.code;
-    });
-    decided = decided && nextDecided;
-    plain =
-      test.op === 'And'
-        ? dialect.ternary(plain, next, dialect.falseValue)
-        : dialect.ternary(plain, dialect.trueValue, next);
-    const nextName = tempVar(target);
-    // The value so far is decided the other way: the answer is the next
-    // operand's. It is undecided: the answer is `false` for an `And` when
-    // the next operand is `false`, and undecided otherwise.
-    const combined = dialect.bind(
-      [nextName],
-      dialect.ternary(
-        decidedOther(soFar),
-        nextName,
-        dialect.ternary(settles(nextName), settled, dialect.undecided)
-      ),
-      [next]
-    );
-    value = dialect.bind(
-      [soFar],
-      dialect.ternary(settles(soFar), settled, combined),
-      [value]
-    );
-  }
-  if (decided)
-    return {
-      code: negate ? `${dialect.not}(${plain})` : plain,
-      decided: true,
-    };
-  if (!negate) return { code: value, decided: false };
-  // A `Not` leaves an undecided value undecided; the emitted negation runs
-  // only on a decided one.
-  const name = tempVar(target);
-  return {
-    code: dialect.bind(
-      [name],
-      dialect.ternary(
-        dialect.isUndecided(name),
-        dialect.undecided,
-        `${dialect.not}${name}`
-      ),
-      [value]
-    ),
-    decided: false,
-  };
-}
 
 /** True if the expression is provably integer-typed. */
 export function isIntegerValued(expr: Expression): boolean {

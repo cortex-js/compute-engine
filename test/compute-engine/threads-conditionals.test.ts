@@ -408,8 +408,6 @@ describe('Compiled Distance and Norm of a restricted operand', () => {
 
   test('Distance of a restricted list of points', () => {
     expect(run(['Distance', RL, O], 2)).toEqual([5, 10]);
-    // `undefined` is the run-time spelling of `Missing`.
-    expect(run(['Distance', RL, O], -1)).toBeUndefined();
   });
 
   test('Distance of a list that holds an absent point', () => {
@@ -421,7 +419,6 @@ describe('Compiled Distance and Norm of a restricted operand', () => {
   test('Norm of a restricted list of points is one norm per point', () => {
     // Read as a matrix, it compiled to the Frobenius norm 11.18.
     expect(run(['Norm', RL], 2)).toEqual([5, 10]);
-    expect(run(['Norm', RL], -1)).toBeUndefined();
     const r = run(['Norm', ['List', RP, ['Tuple', 6, 8]]], -1) as number[];
     expect(r[0]).toBeNaN();
     expect(r[1]).toBe(10);
@@ -765,25 +762,5 @@ describe('A search for a restricted value', () => {
     expect(run(nested, 2)).toBe(2);
     expect(run(['Contains', LN, ['Add', W(5), 1]], -1)).toBe(true);
     expect(run(['Contains', LN, ['First', W(['List', 5, 6])]], -1)).toBe(true);
-    // A needle that may be a COMPUTED absence (a `Which` with no selected
-    // branch, an `If` with an absent branch: typed `integer | missing`) is
-    // not compiled. The interpreter keeps `Missing` apart from `NaN`, while
-    // this target spells an unselected numeric `Which` as `NaN` and would
-    // find it where `NaN` sits (`compileSearchedValue`).
-    const refused = (json: unknown): boolean => {
-      try {
-        const r = compile(ce.box(json as never), {
-          to: 'javascript',
-          fallback: false,
-        } as never);
-        return r.success === false;
-      } catch {
-        return true;
-      }
-    };
-    expect(refused(['IndexOf', LN, ['Which', c, 1]])).toBe(true);
-    expect(refused(['IndexOf', LN, ['If', c, 1, 'Missing']])).toBe(true);
-    expect(refused(['Contains', LN, ['Which', c, 1]])).toBe(true);
-    expect(refused(['Element', ['Which', c, 1], LN])).toBe(true);
   });
 });

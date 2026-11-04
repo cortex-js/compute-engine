@@ -34,16 +34,9 @@ import { isEffectSubset } from '../../common/type/effects.js';
 import { declareValueOperand } from './compile-declarations.js';
 import { localShapeFrameOf } from './compile-shapes.js';
 import type {
-  ConditionNode,
   LocalEntry,
   LocalValueFrame,
 } from './compiler-types.js';
-import {
-  _localNameKeys,
-  _localValueFrames,
-  conditionDecidability,
-  operandMayBeAbsent,
-} from './compile-absence.js';
 import { STRICT_OPERATORS } from './compiler-tables.js';
 import { booleanClaim } from './compile-conditions.js';
 import { tempVar } from './compiler-naming.js';
@@ -720,8 +713,6 @@ export function localNameKey(name: string): object {
  *   missing branch assigns nothing), and possibly assigned when one
  *   branch can. A `Which` is walked as a chain of `If`, and an `And` or an
  *   `Or` as its first operand followed by the others, which may not run.
- *   When the compiled code may not decide the condition, the path on
- *   which no branch runs counts too (`mayRunNoBranch` below).
  * - `Break` and `Continue` end the path that reaches them: the facts of
  *   that path do not count after a branch. A `Return` does not end a
  *   path, because a target can compile a nested block to a function of
@@ -758,8 +749,7 @@ export function localNameKey(name: string): object {
 export function classifyLocalReads(
   args: ReadonlyArray<Expression>,
   locals: ReadonlyArray<string>,
-  node: Expression | undefined,
-  target: CompileTarget<Expression>
+  node: Expression | undefined
 ): void {
   // The first local that has a read of class 3.
   let unproved: string | undefined;
@@ -783,22 +773,6 @@ export function classifyLocalReads(
     (a & b & MUST) | ((a | b) & MAY);
   const withMay = (s: number, may: boolean): number =>
     may && s !== ENDED ? s | MAY : s;
-  // Whether the compiled code can run no branch for the condition `cond`
-  // of an `If` or a `Which`. A condition that the code cannot decide when
-  // it runs selects no branch, as in the interpreter: the statement then
-  // assigns nothing. The analysis is the one the targets use to emit that
-  // test (`conditionDecidability`), read as the emitters read it
-  // (`withConditionOperands`, `operandPresenceConjuncts`):
-  // - a condition decided by construction runs one branch;
-  // - a relation can be undecided only through an operand that may be
-  //   absent: a `missing` value (`operandMayBeAbsent`). An input that the
-  //   caller leaves out does not count: the caller must supply each input
-  //   with a value of its declared type, and the result of a call that
-  //   leaves one out is not specified. A `NaN` operand decides a relation;
-  // - a condition read by its value (a `boolean` input, a call) can be
-  //   undecided, and so can a connective with such an operand.
-  // GLSL and WGSL always run one branch. The answer does not depend on the
-  // local, so it is kept for all of them.
   // The value of a condition that is known at compile time.
   const provedCondition = (cond: Expression): boolean | undefined =>
     isSymbol(cond, 'True')
@@ -806,23 +780,6 @@ export function classifyLocalReads(
       : isSymbol(cond, 'False')
         ? false
         : booleanClaim(cond);
-  const noBranchMemo = new Map<Expression, boolean>();
-  const mayBeUndecided = (n: ConditionNode): boolean => {
-    const t = n.test;
-    if (t.kind === 'value') return true;
-    if (t.kind === 'connective') return t.operands.some(mayBeUndecided);
-    return t.operands.some((op) => operandMayBeAbsent(op));
-  };
-  const mayRunNoBranch = (cond: Expression): boolean => {
-    if (target.language === 'glsl' || target.language === 'wgsl') return false;
-    let known = noBranchMemo.get(cond);
-    if (known === undefined) {
-      const node = conditionDecidability(cond, true, target);
-      known = node !== null && mayBeUndecided(node);
-      noBranchMemo.set(cond, known);
-    }
-    return known;
-  };
   for (const name of valueless) {
     const binding = scope?.bindings.get(name);
     const def =
@@ -1048,12 +1005,11 @@ export function classifyLocalReads(
             ops[1] === undefined ? c : walk(ops[1], c, deferred, stmt);
           const no = ops[2] === undefined ? c : walk(ops[2], c, deferred, stmt);
           const both = join(yes, no);
-          return mayRunNoBranch(ops[0]) ? join(both, c) : both;
+          return both;
         }
         case 'Which': {
           // `Which(c1, v1, c2, v2, …)`: each condition is evaluated after
-          // the conditions before it, when they are false. A condition
-          // that the code cannot decide ends the search with no value.
+          // the conditions before it, when they are false.
           // When no condition holds, no value is evaluated, except after
           // a condition that is the symbol `True`, which ends the chain.
           let c = s;
@@ -1076,7 +1032,6 @@ export function classifyLocalReads(
             c = walk(cond, c, deferred, false);
             if (value !== undefined)
               result = join(result, walk(value, c, deferred, stmt));
-            if (mayRunNoBranch(cond)) result = join(result, c);
           }
           return fallThrough ? join(result, c) : result;
         }
@@ -1881,4 +1836,37 @@ export function bindsLocalFunctions(
   target: CompileTarget<Expression>
 ): boolean {
   return target.declare === undefined || target.language === 'python';
+}
+
+/**
+ * The frames of `blockLocalValueFrame`, innermost last, while the
+ * statements of their blocks are compiled.
+ */
+export const _localValueFrames: LocalValueFrame[] = [];
+
+/** The key of the own local `name` of a block with no scope. */
+export const _localNameKeys = new Map<string, object>();
+
+/**
+ * The block local that the symbol node `e` reads, in the innermost block
+ * being compiled that binds it (`blockLocalValueFrame`), or `undefined`.
+ * The node is matched by its definition (`valueDefinition`), so a binder
+ * nested in the block that uses the same name (a `Sum` index, a
+ * parameter) is not the local, and does not hide a free variable of the
+ * same name. A variable outside the block that the block assigns is
+ * matched too.
+ */
+export function blockLocalOf(e: Expression): LocalEntry | undefined {
+  if (!isSymbol(e)) return undefined;
+  const def = e.valueDefinition as object | undefined;
+  const frames = _localValueFrames;
+  const nameKey = _localNameKeys.get(e.symbol);
+  for (let i = frames.length - 1; i >= 0; i--) {
+    const frame = frames[i];
+    const entry =
+      (def !== undefined ? frame.byDef.get(def) : undefined) ??
+      (nameKey !== undefined ? frame.byDef.get(nameKey) : undefined);
+    if (entry !== undefined) return entry;
+  }
+  return undefined;
 }

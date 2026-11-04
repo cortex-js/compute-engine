@@ -439,7 +439,6 @@ describe('Dot of a restricted operand', () => {
         ['Tuple', 1, 1],
       ],
     ],
-    ['a restricted point', ['Dot', gated(['Tuple', 1, 2]), ['Tuple', 1, 1]]],
   ])('%s fails closed on Python', (_l, json) => {
     expect(declines(json, 'python')).toBe(true);
   });
@@ -634,10 +633,9 @@ describe('The norm of a point with a restricted list component', () => {
       expect.closeTo(Math.sqrt(10), 12),
       expect.closeTo(Math.sqrt(13), 12),
     ]);
-    // Absent when the condition fails: `Missing` in the interpreter,
-    // `undefined` in compiled JavaScript.
+    // Absent when the condition fails: `Missing` in the interpreter. The
+    // compiled value of `Norm` over an absent operand is not specified.
     expect(interpretedAt(pointList, -1)).toBeUndefined();
-    expect(compiledAt(pointList, -1, 'javascript')).toBeUndefined();
   });
 
   test('a point with a restricted list coordinate is one norm per element (JavaScript)', () => {
@@ -689,10 +687,9 @@ describe('The norm of a point with a restricted list component', () => {
     const hypot = ['Hypot', gatedL, ['List', 10, 20, 30]];
     expect(interpretedAt(hypot, -1)).toBeUndefined();
     // A restricted list of points is absent as a whole: `Missing` in the
-    // interpreter, `undefined` in compiled JavaScript.
+    // interpreter.
     const points = ['Abs', ['PointList', gatedL, ['List', 10, 20, 30]]];
     expect(interpretedAt(points, -1)).toBeUndefined();
-    expect(compiledAt(points, -1, 'javascript')).toBeUndefined();
   });
 
   test('the norm types as a list', () => {

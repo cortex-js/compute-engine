@@ -610,3 +610,43 @@ export function groundSignature(
   if (g.typeParams !== undefined && g.typeParams.length > 0) return undefined;
   return hasFreeTypeVariables(g) ? undefined : g;
 }
+
+/**
+ * The signature user-defined function `h` COMPILES AS: its declared
+ * signature (from a value definition's function type, else an operator
+ * definition's signature), with a GENERIC one read at its declared bounds.
+ * `undefined` when there is no signature, or when the bound reading leaves
+ * a type variable behind — the decline convention (never a throw).
+ *
+ * A polytype's parameter is a type VARIABLE, which the compiler can neither
+ * coerce nor decide a broadcast against, so a generic used to decline here
+ * unconditionally. Substituting each variable by its DECLARED BOUND is the
+ * reading the interpreter's own broadcast gate already performs
+ * (`paramsAreScalar` calls `substituteDeclaredBounds` before asking whether
+ * a parameter is scalar), so a function declared `(x: T) -> T where T:
+ * number` compiles exactly as the ground `(x: number) -> number` does — one
+ * emission, whose call sites then get the coercion and broadcast wraps a
+ * ground signature earns. Every admissible argument is a subtype of the
+ * bound, so no call site can reach a shape that emission was not compiled
+ * for.
+ *
+ * An UNBOUNDED variable (`where T`), or a bound that itself mentions a
+ * variable (`where T: list<U>, U`), has no ground reading: those decline,
+ * which keeps the whole-function decline and the sound interpreted
+ * fallback. Whether an emission is then actually allowed is decided by the
+ * TARGET in `ensureUserFunctionEmitted` — only JavaScript emits a generic.
+ */
+export function userFunctionSignature(
+  engine: ComputeEngine,
+  h: string
+): FunctionSignature | undefined {
+  const def = engine.lookupDefinition(h);
+  if (!def) return undefined;
+  const boxed =
+    'value' in def && def.value !== undefined
+      ? def.value.type
+      : 'operator' in def
+        ? def.operator.signature
+        : undefined;
+  return groundSignature(boxed?.type);
+}

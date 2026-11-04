@@ -426,6 +426,22 @@ export function assertUserFunctionFreeBindings(
   }
 }
 
+/** The position-preserving accessors. Compiled code gives the interpreter's
+ * value for an accessor applied to an absent collection, so these are the
+ * heads whose absent collection operand is guarded
+ * (`absentCollectionOperandGuard()`). Every other operator over an absent
+ * operand gives an unspecified value in compiled code. */
+const ABSENT_OPERAND_ACCESSORS: ReadonlySet<string> = new Set([
+  'At',
+  'First',
+  'Second',
+  'Third',
+  'Last',
+  'Length',
+  'Rest',
+  'Reverse',
+]);
+
 /** The accessors whose value over an absent collection of points is the point
  * of `NaN` coordinates (`absentCollectionOperandGuard()`). */
 const POINT_MARKER_ACCESSORS: ReadonlySet<string> = new Set([
@@ -471,26 +487,13 @@ const POINT_MARKER_ACCESSORS: ReadonlySet<string> = new Set([
  * `missing` arm, so the rule does not apply again to the inner application.
  *
  *     Length(At(x, i))
- *       ⟶  ((_tv1) => (_tv1 === undefined) ? Number.NaN : _tv1.length)(…)
+ *       ⟶  ((_tv1) => (absent _tv1) ? Number.NaN : _tv1.length)(…)
  *
- * An operator with its own `compile` handler (`ListFrom`) takes the rule
- * too: the handler lowers the inner application on the present collection.
- *
- * The rule does not apply in these cases:
- * - the target is not JavaScript. The other targets keep their existing
- *   decline: the lowering was verified against the interpreter on this
- *   target only.
- * - the head binds a variable (`Sum` with an indexing set, `Integrate`), or
- *   is a control-flow head. The operand is evaluated before the head here,
- *   which would move it out of the scope of the bound variable. The
- *   one-operand forms `Sum(xs)` and `Product(xs)` bind nothing and are
- *   admitted, although their missing-value behavior is not `propagate`:
- *   the interpreter answers `NaN` for the sum of an absent collection from
- *   the evaluate handler, and their array lowering returned a non-array
- *   operand unchanged, so the compiled sum of an absent collection was
- *   `undefined`.
- * - the operator is broadcastable. Its element-wise lowering of an absent
- *   operand is unspecified in compiled code.
+ * The rule applies only to the position-preserving accessors
+ * (`ABSENT_OPERAND_ACCESSORS`): compiled code gives the interpreter's value
+ * for an accessor applied to an absent operand, and an unspecified value
+ * for every other operator over one. It applies only on the JavaScript
+ * target: the other targets keep their decline.
  *
  * An operand that is not pure (a `Random` draw) is bound to a temporary
  * too, and tested for absence like a guarded one. The interpreter
@@ -506,11 +509,10 @@ export function absentCollectionOperandGuard(
   node: Expression | undefined
 ): TargetSource | undefined {
   if (target.language !== 'javascript') return undefined;
+  if (!ABSENT_OPERAND_ACCESSORS.has(h)) return undefined;
   const absence = target.absence;
   if (absence?.object === undefined || target.bindExpr === undefined)
     return undefined;
-  const reduction = (h === 'Sum' || h === 'Product') && args.length === 1;
-  if (CONTROL_FLOW_HEADS.has(h) && !reduction) return undefined;
   const def = lookupApplicable(h, engine.context.lexicalScope);
   if (!isOperatorDef(def)) return undefined;
   const operator = def.operator;
@@ -530,9 +532,8 @@ export function absentCollectionOperandGuard(
     !operator.lazy &&
     !ABSENCE_DISCHARGING_HEADS.has(h);
   if (
-    !reduction &&
-    (operator.broadcastable ||
-      (operator.resolvedMissingBehavior !== 'propagate' && !handles))
+    operator.broadcastable ||
+    (operator.resolvedMissingBehavior !== 'propagate' && !handles)
   )
     return undefined;
   // An operand is guarded when its type has a `missing` arm, or when it
@@ -548,9 +549,9 @@ export function absentCollectionOperandGuard(
       mayBeAbsentCollection(engine, a, target)
   );
   const guarded = args.map((_a, i) =>
-    handles && !reduction
+    handles
       ? checkedCalls[i]
-      : (reduction || operator.stripsMissingAt(i)) &&
+      : operator.stripsMissingAt(i) &&
         (presentArms[i] !== undefined || checkedCalls[i])
   );
   if (!guarded.some((x) => x)) return undefined;
@@ -588,10 +589,6 @@ export function absentCollectionOperandGuard(
     present === 'never'
       ? (functionResult(operator.signature.type) ?? 'unknown')
       : present;
-  // The sum or the product of an absent collection is `NaN` in the
-  // interpreter (the evaluate handler answers it), whatever the type: a
-  // collection whose elements may be rows sums to a row
-  // (`number | vector<2>`), and its absent value still sums to `NaN`.
   // A position-preserving accessor (`At`, `First`, `Second`, `Third`,
   // `Last`) over an absent collection of points gives the point of `NaN`
   // coordinates, the absent value of the domain of a point, as in the
@@ -604,7 +601,7 @@ export function absentCollectionOperandGuard(
       ? pointArity(codomain)
       : undefined;
   const marker =
-    reduction || (codomain !== 'never' && isSubtype(codomain, 'number'))
+    codomain !== 'never' && isSubtype(codomain, 'number')
       ? absence.numeric.make()
       : arity !== undefined
         ? core.compile(nanPoint(engine, arity), target)
@@ -673,7 +670,7 @@ export function absentCollectionOperandGuard(
       else _codeAliases.set(a, old);
     }
   }
-  const absent = names.map((n) => absence.object!.isNull(n)).join(' || ');
+  const absent = names.map((n) => absence.object!.isAbsent(n)).join(' || ');
   return target.bindExpr(bindings, `(${absent} ? ${marker} : ${body})`);
 }
 

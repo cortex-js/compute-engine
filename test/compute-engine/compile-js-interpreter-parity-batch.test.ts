@@ -198,17 +198,6 @@ describe('CE-370: Max and Min flatten every level of an element that may be a li
     expect(parity(ce, expr, 'x', X_VALUES)).toBe('declined');
   });
 
-  // The element type of `g(x)` is not numeric, so the read out of range is
-  // `Missing`, and `Max` over it is `Missing` in the interpreter. Compiled
-  // code gives `NaN` there, as the caveats of compiled code allow
-  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code").
-  test('an absent element: Missing in the interpreter, NaN in compiled code', () => {
-    const ce = engineWithG('list<real>');
-    const expr = ce.box(['Max', ['At', ['g', 'x'], 1], 1] as never);
-    const rows = parity(ce, expr, 'x', [[]]) as Array<[unknown, unknown]>;
-    expect(rows[0][1]).toBeNaN();
-    expect(expr.evaluate().symbol).toBe('Missing');
-  });
 });
 
 describe('CE-221: the sum of a point and a number declines', () => {

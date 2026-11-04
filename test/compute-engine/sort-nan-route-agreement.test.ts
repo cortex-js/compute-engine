@@ -340,42 +340,23 @@ describe('SORT AND ORDERING PUT AN ABSENT CELL LAST', () => {
     expect(value(['Sort', 'Missing'])).toBe('"Missing"');
   });
 
-  // The compiled sort orders a list with an absent cell as the interpreter
-  // does. The run-time spelling of an absent cell is `undefined` (a written
-  // `Missing` lowers to the object null of the target, `docs/ERROR-MODEL.md`
-  // §3), and `Array.prototype.sort` puts every `undefined` element last.
-  // Before, the element type `integer | missing` was not provably numeric,
-  // so the sort did not compile, and the interpreter fallback answered
-  // `[1, 3, NaN]`.
+  // The compiled sort puts a `NaN` cell last, as the interpreter does.
   test('compiled to JavaScript', () => {
     const runOf = (json: any, vars: object = {}): unknown => {
       const r = compile(eng.box(json), { fallback: false })!;
       expect(r.success).toBe(true);
       return (r.run as (v: object) => unknown)(vars);
     };
-    expect(runOf(['Sort', ['List', 3, 'Missing', 1]])).toEqual([
+    // The order of an absent cell is not specified in compiled code.
+    expect(runOf(['Sort', ['List', 'x', 3, 'NaN', 1]], { x: 2 })).toEqual([
       1,
+      2,
       3,
-      undefined,
+      NaN,
     ]);
-    expect(runOf(['Sort', ['List', 3, 'Missing', 'x']], { x: 1 })).toEqual([
-      1,
-      3,
-      undefined,
-    ]);
-    expect(
-      runOf(['Sort', ['List', 'x', 'Missing', 3, 'NaN', 'Missing', 1]], {
-        x: 2,
-      })
-    ).toEqual([1, 2, 3, NaN, undefined, undefined]);
-    expect(runOf(['Ordering', ['List', 3, 'Missing', 'x']], { x: 1 })).toEqual([
+    expect(runOf(['Ordering', ['List', 'x', 'NaN', 1]], { x: 2 })).toEqual([
       3, 1, 2,
     ]);
-    expect(
-      runOf(['Ordering', ['List', 'Missing', 'x', 'NaN', 'Missing', 1]], {
-        x: 2,
-      })
-    ).toEqual([5, 2, 3, 1, 4]);
     expect(
       value(['Ordering', ['List', 'Missing', 2, 'NaN', 'Missing', 1]])
     ).toBe('[5,2,3,1,4]');

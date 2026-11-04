@@ -312,10 +312,4 @@ describe('Compiled accessors of a restricted point', () => {
     expect(run(json, -1)).toEqual([NaN, NaN, NaN]);
   });
 
-  test('Cross of a restricted point fails closed on python', () => {
-    const r = compile(ce.box(['Cross', RP3, ['Tuple', 1, 1, 1]] as never), {
-      to: 'python',
-    } as never);
-    expect(r.success).toBe(false);
-  });
 });
