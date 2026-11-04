@@ -94,7 +94,10 @@ import { readsAsScalarThroughFreeInputs } from './compile-user-calls.js';
 import { removeDefinitionsAddedSince } from './compile-definitions.js';
 import { multiClauseState } from '../multi-clause.js';
 import { _reservedDeclareNames, assignLValue } from './compile-locals.js';
-import { mayHoldComplexElement } from './compile-complexness.js';
+import {
+  mayHoldComplexElement,
+  realLaneLocalBinding,
+} from './compile-complexness.js';
 
 /**
  * The call of a function whose body was captured, which an ambient function
@@ -388,10 +391,16 @@ export function compileExprDeclare(
     // trailing attributes dictionary), and `-1` is the WHOLE-NODE region
     // sentinel — compile it plainly rather than open the wrong region.
     const valueIndex = args.indexOf(value);
-    const valueCode =
+    // A value computed on the complex lane is converted for a local on the
+    // real lane (`realLaneLocalBinding`).
+    const valueCode = realLaneLocalBinding(
+      symbol,
+      value,
       valueIndex < 0
         ? core.compile(value, target)
-        : compileOp(node, valueIndex, target, 0, value);
+        : compileOp(node, valueIndex, target, 0, value),
+      target
+    );
     return `let ${name} = ${valueCode}`;
   }
   return undefined;
@@ -823,7 +832,14 @@ export function compileExprAssign(
     // The write must use the SAME spelling a READ of this name compiles to,
     // or the two halves of the variable disagree (`assignLValue`).
     const name = assignLValue(engine, args[0].symbol, target);
-    const code = compileOp(node, 1, target, 0, args[1]);
+    // A value computed on the complex lane is converted for a block local
+    // on the real lane (`realLaneLocalBinding`).
+    const code = realLaneLocalBinding(
+      args[0].symbol,
+      args[1],
+      compileOp(node, 1, target, 0, args[1]),
+      target
+    );
     // On a target that writes a block as a bare statement sequence (Python,
     // the shader targets), a value that compiles to several statements, or
     // to a `return`, cannot be the right side of an assignment: splicing

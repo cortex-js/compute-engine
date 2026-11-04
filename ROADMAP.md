@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-796.
+Next free reference: CE-797.
 
 **Entry format.**
 
@@ -605,6 +605,24 @@ Sorting an empty list is a one-line program; expected `[]`. Found during the wor
 reproduction above is the record.
 
 ## Evaluation, canonical forms and scoping
+
+### CE-796. Evaluating a substituted copy of a block writes a run-time type into the scope that the original block shares
+
+**Status:** ready; wrong value, M.
+**Witness:** plausible; with `x: real`, `e = Block(Declare(k, "unknown", Sqrt(x)), k + 1)`: after `e.subs({x: 4}).evaluate()`, the type of `k` in the scope of `e` is `integer` (it was `number`), and `compile(e, {mode: 'complex'})` gives `NaN` at `x = -4`; it should give `1 + 2i`, the interpreter's value.
+
+The copy that `subs` makes shares the local scope of the block with the
+original, and the evaluation of the copy's `Declare` writes the type of the
+run-time value (`2`, an `integer`) into the binding of `k`. The type of `k`
+in `e` is then narrower than its value `√x` admits. A later `e.N()` writes
+`number` again, so the type depends on the order of earlier evaluations.
+Compiled code follows the static type of a local (`localComplexDefault` in
+`src/compute-engine/compilation/compile-complexness.ts`), so it puts `k` on
+the real lane. With a parent (`e + 1`) the compiled value was wrong before
+that rule too, because the analysis of the parent reads the same type. The
+fix is in the engine: a substituted copy gets its own scope, or the
+evaluation of a `Declare` does not narrow the type of an inferred binding.
+Found by the review of CE-793 (2026-11-03).
 
 ### CE-794. A local function declared with `Declare` in a block of a closure branch is not called
 
@@ -2121,31 +2139,6 @@ restart and makes `strict` the default, whose real lane reads a `number`
 element as real. So option (a) needs a mechanism without a restart: the
 complex lane for a `number` binding at compile time, or the decline of
 option (b). Plan item 3.4.6 records this.
-
-### CE-793. In `mode: 'complex'`, an inlined `Dot` reads the complex elements of a tuple that a user function returns as real numbers
-
-**Status:** ready; wrong value, S.
-**Witness:** corpus; Tycho art/hyvhlz4chj `asOklab(c_{lavinga})` with every route on `complex` gives an oklab colour of `NaN` channels at 8 of 8 samples, where the `strict` compilation of this real-mode document gives the real colour (`c0 = 0.6225…` at `x = 1.01, y = −2.724, z = 3.052`). No plain program reproduces it yet.
-
-In the document, `p(x, y) = (\cos θ, \sin θ)` with `θ = θ_0(x, y)`, and
-`d_{00} = p(x, y)·(S + (0, 0))` with `S = (−s_x, −s_y)` (also `d_{10}`,
-`d_{01}`, `d_{11}`). In complex mode `_fn_p` returns
-`[_SYS.ccos(…), _SYS.csin(…)]`, a tuple of `{re, im}` objects, but `Dot`
-is emitted by `compileStaticInnerProduct` (`Dot` in
-`javascript-target.ts`), which multiplies each element with the real `*`:
-`((_tv12) => _tv12[0]·(…) + _tv12[1]·(…))(_fn_p(…))`. That lowering declines
-a complex operand, so its lane analysis reads the elements of the call
-`p(x, y)` as real while the definition returns complex elements. Measured
-on the corpus code of the row: with only these 8 element reads converted
-with `_SYS.crealElements`, the 8 values equal the `strict` values exactly.
-Plain programs with the same shape (`p(a, b) := (\cos q, \sin q)` with a
-`where` or `Block` local, `d(x, y) := p(x, y)·((−s(x), −s(y)) + (1, 0))`,
-signatures inferred or declared) compile `Dot` with `_SYS.complexMatmul`
-and give the right value, so the condition that selects the inlined form
-in the document is not found yet. Tycho's adoption (option A of plan item
-3.4.6: the colour lane of a real-mode document compiles in `strict`) does
-not reach it. Found by CE-751.1 (2026-11-03), which fixed the other cause
-of this row.
 
 ### CE-715. The `bigint` compile mode: the shapes it declines
 

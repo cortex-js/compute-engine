@@ -66,7 +66,10 @@ import {
   localShapeFrameOf,
 } from './compile-shapes.js';
 import { pointOrPointListUnion } from './compile-user-calls.js';
-import { localComplexDefault } from './compile-complexness.js';
+import {
+  localComplexDefault,
+  realLaneLocalBinding,
+} from './compile-complexness.js';
 import {
   _popLocalComplex,
   _pushLocalComplex,
@@ -468,10 +471,14 @@ export function compileBlock(
       );
   };
   for (const local of locals) {
-    // Under the complex discipline a local not declared real is
-    // complex-shaped from its declaration (`localComplexDefault`); the
-    // strict default is real until a complex first binding.
-    complexFrame.set(local, localComplexDefault());
+    // Under the complex discipline a local that is neither declared real
+    // nor typed real in the block's scope is complex-shaped from its
+    // declaration (`localComplexDefault`); the strict default is real until
+    // a complex first binding.
+    complexFrame.set(
+      local,
+      localComplexDefault(node?.localScope, local)
+    );
     // A typed color may first be assigned inside a loop or conditional,
     // outside the straight-line assignment scan below.
     const declared = declaredVarTypes?.[local];
@@ -797,10 +804,14 @@ export function compileBlock(
                 // NOT one of `arg`'s operands (it may come from a trailing
                 // attributes dictionary) compiles plainly.
                 const valueIndex = arg.ops.indexOf(value);
-                const valueCode =
+                const valueCode = realLaneLocalBinding(
+                  name,
+                  value,
                   valueIndex < 0
                     ? core.compile(value, stmtTarget)
-                    : compileOp(arg, valueIndex, stmtTarget, 0, value);
+                    : compileOp(arg, valueIndex, stmtTarget, 0, value),
+                  stmtTarget
+                );
                 assertExpressionValue(valueCode, stmtTarget, 'Declare', name);
                 const stored =
                   stmtTarget.assignmentValue?.(value, valueCode, stmtTarget) ??

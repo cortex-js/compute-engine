@@ -527,6 +527,16 @@
 
 ### Resolved Issues
 
+- **In `mode: 'complex'`, a block local with a real value compiles on the
+  real lane.** With `x: real`, the compiled
+  `Block(Declare(k, "unknown", Floor(x)), Cos(k)) + Floor(x)` gave the
+  string `"[object Object]1"` at `x = 1.3`; it now gives `1.5403`, the
+  interpreter's value. The same fault made the dot product of a point
+  returned by a function with a `where` local (`p(x) := (\cos θ, \sin θ)
+  \operatorname{where} θ := \operatorname{mod}(x, 1)`) give `NaN`. A local
+  whose type is real holds the real part of each value assigned to it, and
+  `NaN` for a value that is not real.
+
 - **The `sgn` of a power with an exponent that is not provably real is
   `undefined`.** A positive base raised to a complex exponent can be any
   non-zero complex number: `ce.parse('2^{\ln(-3)}').sgn` gave `'positive'`,

@@ -238,6 +238,144 @@ describe('COMPLEX MODE: the lane analysis agrees with the emitter', () => {
     const sz = ce.box(['Add', ['s', ['At', 'Z', 2]], 1]);
     expect(run(sz, { Z: [0.5, 3.75] })).toBe(1.75);
   });
+
+  test('a block local whose static type is real', () => {
+    // The `Declare` of the local `k` says `unknown`, but the engine types
+    // `k` from its value `⌊x⌋` (`integer`), so `Cos(k)` is real and the
+    // parent `+` reads the block as real. The value must be the number
+    // `cos 1 + 1`, not a string made from a `{re, im}` object.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const e = ce.box([
+      'Add',
+      ['Block', ['Declare', 'k', "'unknown'", ['Floor', 'x']], ['Cos', 'k']],
+      ['Floor', 'x'],
+    ]);
+    for (const mode of ['complex', 'strict'] as const) {
+      const value = run(e, { x: 1.3 }, mode);
+      expect(typeof value).toBe('number');
+      expect(value).toBeCloseTo(interpreted(ce, e, { x: 1.3 }) as number, 12);
+    }
+    // A local that a later binding makes complex keeps the complex lane.
+    const c = ce.box([
+      'Block',
+      ['Declare', 'k', "'unknown'", 'x'],
+      ['Assign', 'k', ['Multiply', 'k', 'ImaginaryUnit']],
+      ['Add', 'k', 1],
+    ]);
+    expect(run(c, { x: 1.3 })).toEqual({ re: 1, im: 1.3 });
+  });
+
+  test('an assignment to a real block local has the value it stores', () => {
+    // The assignment stores the real projection of `f(x)^2` in `k`, so a
+    // block that ends with it, and an assignment used as an operand, are
+    // real-valued: `Cos` and `+` read them as numbers. The language can
+    // refuse both forms (a block with an assignment as an operand, an
+    // assignment as an operand); the compilation then declines, which is
+    // not a wrong value, so only a compiled program is checked.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('b', 'real');
+    ce.declare('f', '(real) -> unknown');
+    ce.assign('f', ce.box(['Function', ['Sin', ['Multiply', 'b', 't']], 't']));
+    const assign = ['Assign', 'k', ['Power', ['f', 'x'], 2]];
+    const y = Math.sin(2.6) ** 2;
+    const trailing = ce.box([
+      'Cos',
+      ['Block', ['Declare', 'k', "'real'", 'x'], assign],
+    ]);
+    const operand = ce.box([
+      'Block',
+      ['Declare', 'k', "'unknown'", 'x'],
+      ['Add', assign, 1],
+    ]);
+    for (const mode of ['complex', 'strict'] as const) {
+      for (const [e, expected] of [
+        [trailing, Math.cos(y)],
+        [operand, y + 1],
+      ] as const) {
+        const r = compile(e, { to: 'javascript', mode } as any) as any;
+        if (r.success)
+          expect(r.run({ x: 1.3, b: 2 })).toBeCloseTo(expected, 12);
+      }
+    }
+  });
+
+  test('a real block local updated in a loop stays on the real lane', () => {
+    // `k ⩴ ⌊x⌋; for j ∈ 1..2: k ⩴ k + j; cos(k) + ⌊x⌋`. The local is real
+    // by its static type, so `Cos(k)` is emitted as `Math.cos`, as the
+    // parent `+` reads it, and the value is the number `cos 4 + 1`.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const e = ce.box([
+      'Block',
+      ['Declare', 'k', "'unknown'", ['Floor', 'x']],
+      [
+        'Loop',
+        ['Assign', 'k', ['Add', 'k', 'j']],
+        ['Element', 'j', ['Range', 1, 2]],
+      ],
+      ['Add', ['Cos', 'k'], ['Floor', 'x']],
+    ]);
+    for (const mode of ['complex', 'strict'] as const)
+      expect(run(e, { x: 1.3 }, mode)).toBeCloseTo(Math.cos(4) + 1, 12);
+  });
+
+  test('a value computed on the complex lane is converted at every binding of a real local', () => {
+    // `f(x)^2` is typed `real<0..>`, but `f` is emitted on the complex
+    // lane, so the value is a `{re, im}` object. The local `k` is real by
+    // its static type, so each binding converts the value to its real
+    // part: in an `If`, in a `Loop`, and at a leaf of a destructuring
+    // assignment. The value must be the number `f(x)^2 + 1`.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('b', 'real');
+    ce.declare('f', '(real) -> unknown');
+    ce.assign('f', ce.box(['Function', ['Sin', ['Multiply', 'b', 't']], 't']));
+    const assign = ['Assign', 'k', ['Power', ['f', 'x'], 2]];
+    for (const nested of [
+      ['If', ['Greater', 'x', 0], assign, ['Assign', 'k', 1]],
+      ['Loop', assign, ['Element', 'j', ['Range', 1, 2]]],
+      [
+        'Assign',
+        ['Tuple', 'k', 'm'],
+        ['Tuple', ['Power', ['f', 'x'], 2], 1],
+      ],
+    ]) {
+      const e = ce.box([
+        'Block',
+        ['Declare', 'k', "'unknown'", 'x'],
+        ['Declare', 'm', "'unknown'", 0],
+        nested,
+        ['Add', 'k', 1],
+      ]);
+      for (const mode of ['complex', 'strict'] as const)
+        expect(run(e, { x: 1.3, b: 2 }, mode)).toBeCloseTo(
+          Math.sin(2.6) ** 2 + 1,
+          12
+        );
+    }
+  });
+
+  test('a point returned by a definition with a real `where` local, in an inner product', () => {
+    // The local `θ` of `p` has the static type `real`, so the call
+    // `p(x)` is a point of real coordinates, and `Dot` writes out the
+    // real sum of the products: `p` must emit real coordinates, because
+    // the sum reads them as numbers. Found in the Tycho document
+    // art/hyvhlz4chj, where the value was `NaN`.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.parse('g(x) \\coloneq \\operatorname{mod}(x,1)').evaluate();
+    ce.parse(
+      'p(x) \\coloneq (\\cos\\theta, \\sin\\theta) \\operatorname{where} \\theta \\coloneq g(x)'
+    ).evaluate();
+    const e = ce.box(['Dot', ['p', 'x'], ['Tuple', 'x', 2]]);
+    for (const mode of ['complex', 'strict'] as const) {
+      const value = run(e, { x: 1.3 }, mode);
+      expect(typeof value).toBe('number');
+      expect(value).toBeCloseTo(interpreted(ce, e, { x: 1.3 }) as number, 12);
+    }
+  });
 });
 
 describe('COMPLEX MODE: a parameter that binds a collection whole keeps its elements', () => {

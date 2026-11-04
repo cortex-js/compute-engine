@@ -4612,7 +4612,10 @@ export function compileLoopBody(
     const complexFrame = new Map<string, boolean>();
     for (const s of withDecls)
       if (isFunction(s, 'Declare') && isSymbol(s.ops[0]))
-        complexFrame.set(s.ops[0].symbol, localComplexDefault());
+        complexFrame.set(
+          s.ops[0].symbol,
+          localComplexDefault(expr.localScope, s.ops[0].symbol)
+        );
     _pushLocalComplex(complexFrame);
     try {
       for (const s of withDecls) core.noteLocalComplex(s, complexFrame);
@@ -4725,9 +4728,14 @@ function compileLoopBodyStatements(
  * `compileBlock`) and the `Block` arm of `isComplexValued` (which types a
  * block from its VALUE, and so must know its locals' shapes).
  *
- * Sources, per local: an explicit `complex` type on the `Declare`, a
- * `Declare` initial value, or the FIRST `Assign` RHS (a local already known
- * complex is never demoted). The frame must be pushed while this runs, so a
+ * Sources, per local, in the strict discipline: an explicit `complex` type
+ * on the `Declare`, a `Declare` initial value, or the FIRST `Assign` RHS (a
+ * local already known complex is never demoted). In the complex discipline
+ * the frame starts at the static type of the local (`localComplexDefault`),
+ * and only an explicit `complex` or real type on the `Declare` changes it: a
+ * value computed on the complex lane is converted at the binding of a
+ * real-lane local (`realLaneLocalBinding`). The frame must be pushed while
+ * this runs, so a
  * later local whose RHS reads an earlier one resolves it through the frame.
  * A name with no entry in `frame` is not a local of this list and is left
  * alone.
@@ -4744,21 +4752,28 @@ export function noteLocalComplex(
       // real kernel (the type-based realness proof survives as an
       // optimization, design §2).
       _setLocalComplex(frame, name, false);
+    // Under the complex discipline the lane of a local is its static type
+    // (`localComplexDefault`), so no value makes it complex: a value
+    // computed on the complex lane is converted at the binding
+    // (`realLaneLocalBinding`).
     const value = declareValueOperand(arg.ops);
     if (value !== undefined) {
-      if (core.isComplexValued(value)) _setLocalComplex(frame, name, true);
+      if (!complexDiscipline() && core.isComplexValued(value))
+        _setLocalComplex(frame, name, true);
       markLocalBound(frame, name);
     }
   } else if (isFunction(arg, 'Assign') && isSymbol(arg.ops[0])) {
     const name = arg.ops[0].symbol;
-    if (frame.get(name) === false && core.isComplexValued(arg.ops[1])) {
-      // STRICT discipline (design §3, "Block local" row): a local's shape
-      // is its FIRST binding's shape, and a later complex-shaped assignment
-      // to a local bound real is a LaneMismatch DECLINE — the statements
-      // between the two bindings were compiled reading a number. Under the
-      // other modes (step 2) the local is promoted as before, which is
-      // itself the silent-wrong shape (`k := 1; k := k + 2i` reads `.re`
-      // off the number `1`) that step 3's complex discipline removes.
+    if (
+      !complexDiscipline() &&
+      frame.get(name) === false &&
+      core.isComplexValued(arg.ops[1])
+    ) {
+      // Strict discipline: a local's shape is its FIRST binding's shape, and
+      // a later complex-shaped assignment to a local bound real is a lane
+      // mismatch, which declines: the statements between the two bindings
+      // were compiled reading a number. A local that is not bound yet
+      // (`Declare(k)` then `k ⩴ 1 + 2i`) is made complex.
       if (strictLanes() && localIsBound(frame, name))
         laneMismatch('Block local', `the local \`${name}\``, arg.ops[1]);
       _setLocalComplex(frame, name, true);

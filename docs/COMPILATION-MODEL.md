@@ -124,6 +124,14 @@ interpreter's value. A line is removed when the case declines or is fixed.
   value for `z < 0`; `mode: 'complex'` gives the interpreter's value. Since
   the removal of `mode: 'auto'` (2026-11-03) this is the default, as it was
   already the value of `strict`.
+- `plausible?` — `javascript`, `mode: 'complex'`, `x: real`, `b: real`,
+  `f: (real) -> unknown` with `f(t) := sin(b·t)`:
+  `Block(Declare(L, "unknown", List(f(x)^2, 1)), L[1] + 1)` at `x = 1.3`,
+  `b = 2` gives the string `"[object Object]1"`; the interpreter gives
+  `1.2657`. `f(x)^2` is typed `real<0..>` but its code is a `{re, im}`
+  object, and the list element keeps that object while `L[1] + 1` reads a
+  number. The scalar case is converted at the binding of a real local
+  (`realLaneLocalBinding` in `compile-complexness.ts`); a list local is not.
 - `javascript`: in a loop with an outer `a = 100`, `function f() { a }` and
   `let (a, b) = (k, f())`, the compiled `b` is `k`; the interpreter gives
   `b = 100` (was CE-756).

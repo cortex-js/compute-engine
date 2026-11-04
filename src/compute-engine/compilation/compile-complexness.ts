@@ -6,9 +6,11 @@ import { shadowsLibraryName } from '../library-shadowing.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
+  Scope,
 } from '../global-types.js';
 import type { MathJsonSymbol } from '../../math-json/types.js';
-import { isOperatorDef } from '../boxed-expression/utils.js';
+import type { CompileTarget, TargetSource } from './types.js';
+import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import { finitePartOfType, isNonRealNumber } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { parseType } from '../../common/type/parse.js';
@@ -466,9 +468,89 @@ export function _setLocalComplex(
  * under the complex discipline (a local not declared real is wide, hence
  * complex-shaped, and every reference to it is lifted at use), `false`
  * otherwise (real until a complex first binding, the strict default).
+ *
+ * Under the complex discipline, a local whose STATIC type in the block's
+ * scope `scope` is real is real-shaped from its declaration too. The
+ * `Declare` of a local made by `where`, `\coloneq` or a bare assignment
+ * says `unknown`, but the engine infers the type of the local from its
+ * bindings (`k ⩴ ⌊x⌋` gives `k` the type `integer`), and every node that
+ * reads the local is typed from that type. The analysis of a parent reads
+ * those node types (`Cos(k)` is real), so the local must be real-shaped
+ * too: with `x: real`, in
+ * `Block(Declare(k, "unknown", Floor(x)), Cos(k)) + Floor(x)` the code of
+ * `Cos(k)` must be `Math.cos(k)`, a number, because the parent `+` reads
+ * it as a number. A complex-shaped `k` would make it `_SYS.ccos(k)`, a
+ * `{re, im}` object.
+ *
+ * The frame keeps that lane: under the complex discipline no binding makes
+ * the local complex (`noteLocalComplex`). The lane of a local is its static
+ * type, as the lane of every other value is. A value bound to a real-lane
+ * local whose code is a `{re, im}` object although its type is real
+ * (`f(x)^2` with `f: (real) -> unknown` is typed `real<0..>`) is converted
+ * at the binding instead, with the real-operand rule: the real part when the
+ * value is real, `NaN` otherwise (`realLaneLocalBinding`). This applies to
+ * every binding the same way: a `Declare` value, a top-level or nested
+ * `Assign`, a leaf of a destructuring assignment, an update in a loop body.
  */
-export function localComplexDefault(): boolean {
-  return complexDiscipline();
+export function localComplexDefault(scope?: Scope, name?: string): boolean {
+  if (!complexDiscipline()) return false;
+  if (scope === undefined || name === undefined) return true;
+  const def = scope.bindings.get(name);
+  return !(isValueDef(def) && def.value.type.matches('real'));
+}
+
+/**
+ * Whether `name` is a block local on the real lane under the complex
+ * discipline: its innermost complex frame says `false`
+ * (`localComplexDefault`). A binding of such a local stores the real
+ * projection of its value (`realLaneLocalBinding`), so an `Assign` to it is
+ * real-valued, also when its right-hand side is complex-valued. Outside the
+ * complex discipline the answer is `false`.
+ */
+export function isRealLaneLocal(name: string): boolean {
+  if (!complexDiscipline()) return false;
+  for (let i = CompilerState._localComplex.length - 1; i >= 0; i--) {
+    const lane = CompilerState._localComplex[i].get(name);
+    if (lane !== undefined) return lane === false;
+  }
+  return false;
+}
+
+/**
+ * Under the complex discipline, the code `code` of the value `value` that a
+ * `Declare` or an `Assign` binds to the block local `name`, converted to the
+ * real lane when the local is on the real lane (its innermost complex frame
+ * says `false`, see `localComplexDefault`) and the value is emitted as a
+ * `{re, im}` object (`isComplexValued`). The conversion is the target's
+ * element-wise real projection (`complexRealElements`, `_SYS.crealElements`
+ * on JavaScript): the real part when the value is real, `NaN` otherwise, as
+ * a call converts an argument for a parameter that the definition reads on
+ * the real lane. Without it, `k ⩴ x; If(x > 0, k ⩴ f(x)^2, k ⩴ 1); k + 1`
+ * stored the object in `k` and gave `"[object Object]1"`. A value with an
+ * imaginary part is outside the real type of the local, so `NaN` is within
+ * the caveats of compiled code. A target with no real projection declines.
+ *
+ * In every other case `code` is returned unchanged: outside the complex
+ * discipline (the strict discipline decides the lane of a local from its
+ * first binding and declines a later complex one), for a name that is not
+ * a block local, and for a local on the complex lane.
+ */
+export function realLaneLocalBinding(
+  name: string,
+  value: Expression,
+  code: TargetSource,
+  target: CompileTarget<Expression>
+): TargetSource {
+  if (!isRealLaneLocal(name) || !core.isComplexValued(value)) return code;
+  const project = target.complexRealElements;
+  if (project === undefined)
+    throw new Error(
+      `Could not compile the binding of the local \`${name}\`: its type ` +
+        `is real, its value is computed on the complex lane, and the ` +
+        `${target.language ?? 'unknown'} target has no real projection ` +
+        `for the value.`
+    );
+  return project(code);
 }
 
 /** Does the `Declare` type operand `t` name a real-only number type? */
@@ -554,7 +636,10 @@ export function checkNestedComplexRebinding(
     const inner = new Map<string, boolean>();
     for (const arg of args)
       if (isFunction(arg, 'Declare') && isSymbol(arg.ops[0]))
-        inner.set(arg.ops[0].symbol, localComplexDefault());
+        inner.set(
+          arg.ops[0].symbol,
+          localComplexDefault(stmt.localScope, arg.ops[0].symbol)
+        );
     const scope = stmt.localScope;
     if (scope)
       for (const arg of args)
@@ -565,7 +650,7 @@ export function checkNestedComplexRebinding(
             scope.bindings.has(name) &&
             !CompilerState._boundVarsCtx?.has(name)
           )
-            inner.set(name, localComplexDefault());
+            inner.set(name, localComplexDefault(scope, name));
         }
     const innerShadow =
       inner.size === 0 ? shadow : new Set([...shadow, ...inner.keys()]);
@@ -899,6 +984,13 @@ export function _isComplexValuedFunction(
   // own arm reads the last statement's VALUE under the block's locals, the
   // same analysis `compileBlock` emits from.
   if (expr.operator === 'Block') return isBlockValueComplexValued(expr);
+  // An `Assign` has the value it stores: the real projection of its
+  // right-hand side for a block local on the real lane
+  // (`realLaneLocalBinding`), the right-hand side otherwise.
+  if (expr.operator === 'Assign' && isSymbol(expr.ops[0])) {
+    if (isRealLaneLocal(expr.ops[0].symbol)) return false;
+    return expr.ops[1] !== undefined && core.isComplexValued(expr.ops[1]);
+  }
   // An indexed read answers for the ELEMENT it selects, not for the whole
   // collection: a list is emitted element by element, so its run-time array is
   // heterogeneous and the generic `ops.some(…)` recursion at the bottom of
@@ -1198,7 +1290,10 @@ export function isBlockValueComplexValued(
   const frame = new Map<string, boolean>();
   for (const arg of args)
     if (isFunction(arg, 'Declare') && isSymbol(arg.ops[0]))
-      frame.set(arg.ops[0].symbol, localComplexDefault());
+      frame.set(
+        arg.ops[0].symbol,
+        localComplexDefault(expr.localScope, arg.ops[0].symbol)
+      );
   const scope = expr.localScope;
   if (scope)
     for (const arg of args)
@@ -1209,7 +1304,7 @@ export function isBlockValueComplexValued(
           scope.bindings.has(name) &&
           !CompilerState._boundVarsCtx?.has(name)
         )
-          frame.set(name, localComplexDefault());
+          frame.set(name, localComplexDefault(scope, name));
       }
 
   _pushLocalComplex(frame);
@@ -1223,8 +1318,13 @@ export function isBlockValueComplexValued(
     if (i < 0) return false;
     const last = args[i];
     if (isFunction(last, 'Declare')) return false;
-    const value = isFunction(last, 'Assign') ? last.ops[1] : last;
-    return value !== undefined && core.isComplexValued(value);
+    if (!isFunction(last, 'Assign')) return core.isComplexValued(last);
+    // A trailing `Assign` yields the value it stored: the real projection
+    // of its right-hand side for a block local on the real lane
+    // (`realLaneLocalBinding`).
+    if (isSymbol(last.ops[0]) && isRealLaneLocal(last.ops[0].symbol))
+      return false;
+    return last.ops[1] !== undefined && core.isComplexValued(last.ops[1]);
   } finally {
     _popLocalComplex();
   }
