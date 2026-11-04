@@ -104,6 +104,7 @@ import {
   elementTypeBroadcastsWhenEmpty,
   isCoordinateRowListOperand,
   isEmptyCollectionOperand,
+  isGuaranteedArray,
   isIndexedCollectionOperand,
   isNumericIndexOperand,
   isPointListOperand,
@@ -143,7 +144,11 @@ import type {
   IntervalValue,
   OperandCompiler,
 } from './types.js';
-import { compileDiagnosticOf, KindDeclineError } from './diagnostics.js';
+import {
+  compileDiagnosticOf,
+  KindDeclineError,
+  unsettledShapeDecline,
+} from './diagnostics.js';
 import { resolveStorageHints } from './storage-hints.js';
 import {
   IntervalArithmetic,
@@ -191,7 +196,11 @@ import {
   preservesMappedSplices,
 } from './constant-folding.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
-import { intervalShapeDispatch, isOpenScalarRankType } from './static-shape.js';
+import {
+  intervalShapeDispatch,
+  isOpenScalarRankType,
+  unionShapeMembers,
+} from './static-shape.js';
 import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 
 /**
@@ -4446,8 +4455,53 @@ function compileIntervalCollectionReduce(
     compileIntervalCollectionValue(operand, target) ??
     BaseCompiler.compile(operand, target);
   // An empty run-time array answers the reduction's empty case (`Max([])`
-  // is the absence marker, `Sum([])` the identity); a non-array is the
-  // interpreter's `Sum(scalar) = scalar`.
+  // is the absence marker, `Sum([])` the identity).
+  // An input of the host or a list literal whose static type is a list of
+  // numbers, with no `missing` arm, is an array (`isGuaranteedArray`), and
+  // the fold tests no shape of it. Another symbol of that type (a `Block`
+  // local, a symbol with a value) can hold a value computed through an
+  // indexed `Sum` or `Product`, which is a number for an empty range.
+  // Another source of that type can also be the absence marker of this
+  // target, an interval and not an array: a length mismatch in a broadcast
+  // (`P + Q` with `P = [1, 2]`, `Q = [1, 2, 3]`) gives it, and the fold
+  // answers it as it stands. The test below is then a test of absence, and
+  // stays: without it, the fold reads `.reduce` of an interval, and the
+  // result is `entire` where it is now the absence marker.
+  if (
+    (isSymbol(operand) || isFunction(operand, 'List')) &&
+    isGuaranteedArray(operand, target) &&
+    isIndexedCollectionOperand(operand) &&
+    elementsProvablyNumeric &&
+    !isPossiblyNumericListOperand(operand) &&
+    !typeContainsMissing(operand.type.type)
+  ) {
+    const fold = seedless
+      ? `_c.map((_b) => typeof _b === 'number' ? _IA.point(_b) : _b)` +
+        `.reduce((_a, _b) => ${iaOp}(_a, _b))`
+      : `_c.reduce((_a, _b) => ` +
+        `${iaOp}(_a, typeof _b === 'number' ? _IA.point(_b) : _b), ${identity})`;
+    return `((_c) => _c.length === 0 ? ${empty} : ${fold})(${code})`;
+  }
+  // A source whose static type is a union of a number and a list of numbers
+  // (`real | list<real>`), a `broadcastable<number>`, or a point accessor
+  // over a point or a list of points (`isPossiblyNumericListOperand`) can
+  // be a number or a list, and compiled code does not test the shape of a
+  // value at run time: the fold declines, and the interpreter evaluates it.
+  // A symbol declared with such a union (an input or a parameter) is a
+  // binding that the host declared with a union of shapes, and keeps its
+  // one test: a number is the fold of itself, as in the interpreter
+  // (`Sum(4)` is 4). A symbol typed `broadcastable<real>` is not such a
+  // binding, and declines like `2b`.
+  if (
+    isPossiblyNumericListOperand(operand) &&
+    !(isSymbol(operand) && unionShapeMembers(compilationType(operand)))
+  )
+    throw unsettledShapeDecline(operand, 'it can be a number or a list');
+  // Every other source here has a list type. Its value is an array, or the
+  // absence marker of this target (an interval, from a length mismatch in a
+  // broadcast), or a number for a symbol declared with a union. The
+  // `Array.isArray` test below tells these apart, and a value that is not
+  // an array is the value of the fold.
   if (seedless)
     return (
       `((_c) => Array.isArray(_c) ? (_c.length === 0 ? ${empty} : ` +

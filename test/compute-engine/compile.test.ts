@@ -4355,8 +4355,43 @@ describe('Tycho item 143: Min/Max over a degraded-type Distance broadcast', () =
   // ELEMENT type, so `Distance(S, p)` cannot be proven a point-list broadcast
   // statically. It used to report the scalar `number`, which made
   // `compileExtremum` pick the variadic arm — `Math.min(<array>)`, i.e. NaN
-  // behind `success: true`. Two halves fix it: the type handler widens to
-  // `number | list<number>`, and the lowering projects on the runtime shape.
+  // behind `success: true`. The type handler widens to
+  // `number | list<number>`. Such an operand has no settled shape, and
+  // compiled code does not test the shape of a value at run time (rule R3 of
+  // "Shapes are settled at compile time", `docs/COMPILATION-MODEL.md`), so
+  // `Min`/`Max` over it declines with `unsettled-shape` and the interpreter
+  // evaluates it (ROADMAP CE-806). Before, the lowering projected on the
+  // run-time shape with `Array.isArray`. The host declares the type of the
+  // base (`list<list<number>>`) to compile it.
+  const declines = (
+    e: ComputeEngine,
+    expr: unknown,
+    value = 'Distance(S, [1,2])'
+  ): void => {
+    let error: any;
+    try {
+      compile(e.box(expr as any), { fallback: false, constantFold: false });
+    } catch (err) {
+      error = err;
+    }
+    expect(error?.diagnostic?.code).toBe('unsettled-shape');
+    expect(error?.diagnostic?.value).toBe(value);
+  };
+  /** The value of the compilation with the interpreter fallback. */
+  const fallbackRun = (
+    e: ComputeEngine,
+    expr: unknown,
+    data: Record<string, unknown>
+  ): unknown => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const r = compile(e.box(expr as any), { constantFold: false })!;
+      expect(r.success).toBe(false);
+      return r.run!(data as never);
+    } finally {
+      warn.mockRestore();
+    }
+  };
   const POINTS = ['List', ['List', 0, 0], ['List', 3, 4], ['List', 6, 8]];
   const P = ['List', 1, 2];
   const MIN_D = Math.sqrt(5); // 2.23606797749979
@@ -4402,36 +4437,36 @@ describe('Tycho item 143: Min/Max over a degraded-type Distance broadcast', () =
     expect(d.type.matches('collection')).toBe(false);
   });
 
-  it('compiles Min/Max over the broadcast on all three declaration legs', () => {
-    for (const decl of [null, 'list<list<number>>', 'indexed_collection']) {
-      // The `indexed_collection` leg must stay VALUELESS to pin the
-      // undecidable arm (an assigned bare declaration refines, Phase 1).
-      const valueless = decl === 'indexed_collection';
-      const e = engineWith(decl, !valueless);
-      const bindings = valueless ? S_DATA : undefined;
+  it('compiles Min/Max over the broadcast on the two settled declaration legs', () => {
+    for (const decl of [null, 'list<list<number>>']) {
+      const e = engineWith(decl);
       const min = compile(e.box(['Min', ['Distance', 'S', P]]), {
         fallback: false,
       })!;
       expect(min.success).toBe(true);
-      expect(min.run!(bindings)).toBeCloseTo(MIN_D, 12);
+      expect(min.run!()).toBeCloseTo(MIN_D, 12);
       const max = compile(e.box(['Max', ['Distance', 'S', P]]), {
         fallback: false,
       })!;
       expect(max.success).toBe(true);
-      expect(max.run!(bindings)).toBeCloseTo(MAX_D, 12);
+      expect(max.run!()).toBeCloseTo(MAX_D, 12);
     }
   });
 
-  it('emits a runtime shape projection, not the scalar arm', () => {
+  it('declines Min/Max over the undecidable leg, and the interpreter gives the value', () => {
+    // The `indexed_collection` leg must stay VALUELESS to keep the
+    // undecidable type (an assigned bare declaration refines, Phase 1).
     const e = engineWith('indexed_collection', false);
-    // `S` and `P` are constant, so constant folding would emit the numeric
-    // extremum instead of the runtime shape projection this test is pinning.
-    const code = compile(e.box(['Min', ['Distance', 'S', P]]), {
-      fallback: false,
-      constantFold: false,
-    })!.code;
-    expect(code).toContain('Array.isArray');
-    expect(code).not.toMatch(/^Math\.min\(/);
+    declines(e, ['Min', ['Distance', 'S', P]]);
+    declines(e, ['Max', ['Distance', 'S', P]]);
+    expect(fallbackRun(e, ['Min', ['Distance', 'S', P]], S_DATA)).toBeCloseTo(
+      MIN_D,
+      12
+    );
+    expect(fallbackRun(e, ['Max', ['Distance', 'S', P]], S_DATA)).toBeCloseTo(
+      MAX_D,
+      12
+    );
   });
 
   it('a comparison row over the broadcast agrees with the interpreter', () => {
@@ -4450,7 +4485,8 @@ describe('Tycho item 143: Min/Max over a degraded-type Distance broadcast', () =
         .evaluate()
         .toString()
     ).toBe('"True"');
-    expect(compile(near, { fallback: false })!.run!(S_DATA)).toBe(true);
+    declines(e, near.json);
+    expect(fallbackRun(e, near.json, S_DATA)).toBe(true);
     // …and a row that is genuinely false stays false (not a false-from-NaN).
     const far = e.box(['Less', ['Min', ['Distance', 'S', P]], 0.4]);
     expect(
@@ -4459,7 +4495,7 @@ describe('Tycho item 143: Min/Max over a degraded-type Distance broadcast', () =
         .evaluate()
         .toString()
     ).toBe('"False"');
-    expect(compile(far, { fallback: false })!.run!(S_DATA)).toBe(false);
+    expect(fallbackRun(e, far.json, S_DATA)).toBe(false);
   });
 
   it('treats the `collection` SUPERTYPE as undecidable too', () => {
@@ -4470,15 +4506,11 @@ describe('Tycho item 143: Min/Max over a degraded-type Distance broadcast', () =
     expect(e.box(['Distance', 'S', P]).type.toString()).toBe(
       'list<number> | number'
     );
-    // `S` and `P` are constant, so constant folding would emit the numeric
-    // extremum instead of the runtime shape projection this test is pinning.
-    const min = compile(e.box(['Min', ['Distance', 'S', P]]), {
-      fallback: false,
-      constantFold: false,
-    })!;
-    expect(min.success).toBe(true);
-    expect(min.code).toContain('Array.isArray');
-    expect(min.run!(S_DATA)).toBeCloseTo(MIN_D, 12);
+    declines(e, ['Min', ['Distance', 'S', P]]);
+    expect(fallbackRun(e, ['Min', ['Distance', 'S', P]], S_DATA)).toBeCloseTo(
+      MIN_D,
+      12
+    );
     // A genuinely non-indexed collection kind keeps the scalar verdict.
     const setEngine = new ComputeEngine();
     setEngine.declare('T', 'set<unknown>');
@@ -4487,25 +4519,20 @@ describe('Tycho item 143: Min/Max over a degraded-type Distance broadcast', () =
     );
   });
 
-  it('projects the runtime shape in the MIXED-operand extremum too', () => {
+  it('declines the MIXED-operand extremum too', () => {
     // `Min(Distance(S, p), 100)` takes the multi-operand arm, which only knew
     // the PROVABLE collection test — the undecidable operand was passed to
     // `Math.min` as a whole array → NaN behind `success: true`.
     for (const decl of ['indexed_collection', 'collection']) {
       const e = engineWith(decl, false);
-      const expr = e.box(['Min', ['Distance', 'S', P], 100]);
-      // The operands are compile-time symbolic (S binds at run time), so
-      // the lowering arms this test pins are what gets emitted.
-      const r = compile(expr, { fallback: false, constantFold: false })!;
-      expect(r.success).toBe(true);
-      expect(r.code).toContain('Array.isArray');
-      expect(r.run!(S_DATA)).toBeCloseTo(MIN_D, 12);
+      declines(e, ['Min', ['Distance', 'S', P], 100]);
+      expect(
+        fallbackRun(e, ['Min', ['Distance', 'S', P], 100], S_DATA)
+      ).toBeCloseTo(MIN_D, 12);
       // The scalar operand still wins when it is the extremum.
-      const max = compile(e.box(['Max', ['Distance', 'S', P], 100]), {
-        fallback: false,
-        constantFold: false,
-      })!;
-      expect(max.run!(S_DATA)).toBe(100);
+      expect(fallbackRun(e, ['Max', ['Distance', 'S', P], 100], S_DATA)).toBe(
+        100
+      );
     }
     // The provably-scalar fast path is untouched.
     expect(

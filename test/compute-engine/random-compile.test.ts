@@ -1795,7 +1795,7 @@ describe('a real-operand guard over an impure node shared by two positions', () 
     const expr = ce.box([
       'Block',
       ['Assign', 'f', ['Function', ['Multiply', 2, 'w']]],
-      ['Max', ['Sqrt', 'x'], ['f']],
+      ['Add', ['Sqrt', 'x'], ['f']],
     ]);
     const result = compile(expr, {
       fallback: false,
@@ -1807,7 +1807,7 @@ describe('a real-operand guard over an impure node shared by two positions', () 
       let calls = 0;
       const value = result.run!({ x, draw: () => (++calls, 1) } as any);
       expect(calls).toBe(1);
-      if (x === 4) expect(value).toBe(2);
+      if (x === 4) expect(value).toBe(4);
     }
   });
 
@@ -1818,7 +1818,7 @@ describe('a real-operand guard over an impure node shared by two positions', () 
     const expr = ce.box([
       'Block',
       ['Assign', 'f', ['Function', ['Multiply', 2, 'w']]],
-      ['Max', ['Sqrt', 'x'], ['Apply', 'f']],
+      ['Add', ['Sqrt', 'x'], ['Apply', 'f']],
     ]);
     const result = compile(expr, {
       fallback: false,
@@ -1830,7 +1830,33 @@ describe('a real-operand guard over an impure node shared by two positions', () 
       let calls = 0;
       const value = result.run!({ x, draw: () => (++calls, 1) } as any);
       expect(calls).toBe(1);
-      if (x === 4) expect(value).toBe(2);
+      if (x === 4) expect(value).toBe(4);
+    }
+  });
+
+  test('Max of a call of a block-local function declines, and the interpreter gives the value', () => {
+    // The call of a block-local function has the static type `unknown`, so
+    // `Max` of it has no settled shape and declines (ROADMAP CE-806). The
+    // fallback evaluates the block with the interpreter.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('w', 'real');
+    const expr = ce.box([
+      'Block',
+      ['Assign', 'f', ['Function', ['Multiply', 2, 'w']]],
+      ['Max', ['Sqrt', 'x'], ['f']],
+    ]);
+    expect(() =>
+      compile(expr, { fallback: false, constantFold: false })
+    ).toThrow(/it can be a number or a list/);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const result = compile(expr, { constantFold: false })!;
+      expect(result.success).toBe(false);
+      expect(result.run!({ x: 4, w: 1 } as any)).toBe(2);
+      expect(result.run!({ x: 4, w: 3 } as any)).toBe(6);
+    } finally {
+      warn.mockRestore();
     }
   });
 

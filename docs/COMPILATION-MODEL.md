@@ -288,13 +288,86 @@ two lists element by element. With
 `L = [[1, 2], [3, 4]]`. The host declares the element type
 (`list<list<real>>`) to compile it (`assertSettledFoldElements()`,
 `compilation/compile-admission.ts`). When the type settles the shape of the
-elements (all numbers, or all lists and points), the fold tests no shape at
-run time: with `L: list<tuple<real, real>>`, `Sum(L)` compiles to
+elements (all numbers, or all lists and points), the fold tests no shape of
+the elements at run time, and no shape of a source that is an array by its
+structure (the third exception below): with `L: list<tuple<real, real>>`,
+`Sum(L)` compiles to
 `(_.L).reduce((_a, _b) => _SYS.add(_a, _b), 0)`. A source typed as a union
 of a number and a list with elements of a settled shape (a parameter
 declared `list<real> | real`, `k(x)` with a host function
 `k: (real) -> real | list<real>`) keeps one test of its own shape on
-JavaScript: a number is the fold of itself, as in the interpreter.
+JavaScript: a number is the fold of itself, as in the interpreter. The
+same holds for three other consumers of a list, when the list is an
+array by its structure. The loop of an indexed `Sum` or `Product` whose
+innermost term is typed as a list copies the first term with no test of
+its shape: with `L: list<real>` and `n: integer`,
+`Sum(L·i, i, 1, n)` seeds its accumulator with `_t.slice()`. `Max` or
+`Min` of one operand typed as a list (`Min(P·(1 − v) + Q·v)` with
+`P, Q: list<real>`) reduces the list with no test of its shape. On
+`interval-js`, the fold of an input typed as a list of numbers
+(`Sum(L)`) reads the array with no test of its shape. These consumers
+still test the value for absence: on JavaScript, the `NaN` of a length
+mismatch and `undefined` are tested by value (`_v !== _v`), and the
+result stays `NaN`; on `interval-js`, a source other than a symbol or a
+list literal can be the absence marker of that target, an interval, and
+the fold keeps the `Array.isArray` test that tells it from a list. That
+test is a test of absence: the fold of an `interval-js` source that can
+be a number or a list (a `broadcastable<real>`, `Max(2b)` with
+`b: broadcastable<real>`, or a `Which` with a list branch and a number
+branch) declines with `unsettled-shape`, and the interpreter evaluates
+it. On JavaScript, `Max` or `Min` of an operand that can be a number or a
+list declines in the same way, alone or beside other operands: with
+`S: indexed_collection`, `Min(Distance(S, (1, 2)))` declines, because
+`Distance(S, (1, 2))` has the type `list<number> | number`; with
+`S: list<list<real>>` it compiles. A symbol declared with such a union (an
+input or a parameter) keeps its one test, as R2 allows.
+
+Two consumers on JavaScript are exceptions to R3, and keep a run-time
+test of the shape of a value whose type is a union of a number and a
+list:
+
+- The term of an indexed `Sum` or `Product` written as a loop. The loop
+  seeds its accumulator with a copy of the first term when the term is
+  an array, and with the term itself when it is a number. Corpus witness:
+  a polynomial `\sum_{i=0}^{\mathrm{Length}(C)-1} C[i+1]x^i` over a list
+  `C` whose element type is not settled, so the term `C[i+1]x^i` can be
+  a number or a list. A decline would make this document evaluate each
+  value with the interpreter.
+- A component of a `PointList` whose type is `broadcastable<T>`, or a
+  component of a type that does not settle its shape. The component is
+  one coordinate when it is a number and a list of coordinates when it
+  is an array. Corpus witness: a recursive point function,
+  `Q(i) = \operatorname{PointList}(1, 0)` for `i ≤ 0` and
+  `\operatorname{PointList}(Q(i-1).x + Q(i-1).y, Q(i-1).x - Q(i-1).y)`
+  otherwise, whose inferred return type is wider than the point it
+  returns, so the components `Q(i-1).x + Q(i-1).y` can be a number or a
+  list.
+
+In both cases a declaration removes the test: declare the element type
+of the list (`C: list<real>`) or the result type of the function
+(`Q: (real) -> tuple<real, real>`), and the compiled code has the
+settled form.
+
+A third exception, on JavaScript and `interval-js`, has no declaration
+that removes it: a value whose type is a list, but that is not an array by
+its structure. An indexed `Sum` or `Product` over a list of unknown length
+gives the number `0` or `1` for an empty range, as the interpreter does
+(`emptyBigOpValue()` in `symbolic/big-op-identity.ts`), so a value typed
+as a list that is computed through one can be a number at run time. With
+`L: list<real>` and `n: integer`, the inner sum of
+`Sum(L·j, i, 1, n, j, 1, i − 1)` is `0` at `i = 1`, and
+`Max(2·Sum(L·i, i, 1, n))` is `0` at `n = 0`. The compiled code tests no
+shape of a list only when the value is an input of the host typed as a
+list, a `List`, `Tuple` or `PointList` literal, element-wise arithmetic
+with one such operand, `Map(f, x)` over such a value, or `At(x, i)` of
+such an input or literal (`isGuaranteedArray()` in
+`compilation/javascript-target.ts`). Any other
+list value (a call, a `Block` local, a symbol with a value, an indexed
+`Sum` or `Product`) keeps the run-time test of its shape in the consumers
+above: the seed of an indexed `Sum` or `Product`, `Max` or `Min` of one
+arithmetic operand, the fold of `Sum` or `Product` of a collection of
+lists, and the fold of `interval-js`. A number is then the fold or the
+extremum of itself, as in the interpreter.
 
 **R4. A declared union at an input follows R2.** With
 `y: real | tuple<real, real>` and `f := t ↦ 2t`, `f(y)` compiles to

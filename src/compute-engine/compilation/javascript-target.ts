@@ -568,6 +568,7 @@ import {
   assertNoDeclaredTopOperands,
   refuseUntypedTopOperands,
 } from './compile-admission.js';
+import { isNameLocallyBoundByCompilation } from './compile-real-analysis.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { kindEntryCheck } from './kind-lowering.js';
 import { withShadowingCallsRenamed } from './shadowing-calls.js';
@@ -15856,34 +15857,60 @@ function compileExtremum(
   }
   if (args.length === 1 && checkedArray[0] !== undefined)
     return guardedReduce(checkedArray[0]);
-  // A single operand that is not PROVABLY scalar but not provably a collection
-  // either — its type admits an indexed-collection arm (`number |
+  // An operand that is not PROVABLY scalar but not provably a collection
+  // either: its type admits an indexed-collection arm (`number |
   // list<number>`, e.g. `Distance(S, p)` over a base declared with the bare
-  // `indexed_collection` type). The scalar arm `Math.min(<array>)` is `NaN` at
-  // run time, a silent wrong behind `success: true` (Tycho item 143), so
-  // project on the RUNTIME shape instead — the house idiom (see `_SYS.at`) —
-  // which matches the interpreter both ways. The operand is bound once, so an
-  // impure operand is still evaluated exactly once.
-  // A list operand whose value may be the absent `NaN` of a run-time length
-  // mismatch (`mayAnswerAbsenceAtRunTime`) is projected on the run-time
-  // shape too: the extremum of the absent value is `NaN`.
-  // The interpreter flattens every level of a list operand
-  // (`Max([[1, 2], [2, 4]], 1)` is 4), so the projection flattens every
-  // level too: an array spread one level gave `Math.max(<row>, …)`, which
-  // is `NaN`. An operand of a top type that may hold a list
-  // (`isPossiblyCollectionTypedJS`: `missing | unknown`, the type of an
-  // index into a `list<unknown>`) takes the same projection: it reached
-  // the scalar `Math.max(<array>, 1)` (ROADMAP CE-370).
+  // `indexed_collection` type), or it is of a top type that may hold a list
+  // (`isPossiblyCollectionTypedJS`: `missing | unknown`, the type of an index
+  // into a `list<unknown>`). The scalar arm `Math.min(<array>)` would be
+  // `NaN` at run time behind `success: true`, so such an operand declines
+  // below (Tycho item 143, ROADMAP CE-370).
   const mayBeArray = (a: Expression): boolean =>
     couldBeIndexedCollectionOperand(a) || isPossiblyCollectionTypedJS(a);
+  // A list operand that is an array by its structure (`isGuaranteedArray`:
+  // an input typed as a list, a list literal, or arithmetic over one) is
+  // reduced with no test of its shape. Its value can still be the
+  // `NaN` of a run-time length mismatch, or `undefined` (an absent value):
+  // these are tested by value, not by shape, and the extremum of each is
+  // `NaN`, as before.
   if (
     args.length === 1 &&
     args[0] &&
-    (mayBeArray(args[0]) ||
-      (isIndexedCollectionOperand(args[0]) &&
-        mayAnswerAbsenceAtRunTime(args[0])))
+    isIndexedCollectionOperand(args[0]) &&
+    !isPossiblyCollectionTypedJS(args[0]) &&
+    mayAnswerAbsenceAtRunTime(args[0])
   ) {
+    if (isGuaranteedArray(args[0], target))
+      return `((_v) => _v === undefined || _v !== _v ? NaN : ${guardedReduce(
+        nested[0] ? '_v.flat(Infinity)' : '_v'
+      )})(${compile(args[0])})`;
+    // An operand typed as a list that is not an array by its structure
+    // (`isGuaranteedArray`) can be a number at run time: an indexed `Sum`
+    // or `Product` over a list of unknown length is `0` or `1` for an empty
+    // range (`Max(2·Sum(L·i, i, 1, n))` at `n = 0`). The operand keeps the
+    // test of its shape, and a number is the extremum of itself, as in the
+    // interpreter.
     refuseNonNumericScalarProjection(kind, args[0]);
+    return `((_v) => Array.isArray(_v) ? ${guardedReduce('_v.flat(Infinity)')} : ${fn}(_v))(${compile(args[0])})`;
+  }
+  // An operand that may be an array but whose type does not prove one (a
+  // union of a number and a list, `broadcastable<T>`, a top-typed call
+  // such as `h(x)` with `h: (real) -> unknown`) has no settled shape, and
+  // compiled code does not test the shape of a value at run time: the
+  // extremum declines with `unsettled-shape`, and the interpreter evaluates
+  // it. The host declares the type of the operand (`list<real>`) to compile
+  // it. A symbol declared with a union of a number and a list (an input or
+  // a parameter) is a binding that the host declared with a union of
+  // shapes, and keeps its one test (rule R2 of "Shapes are settled at
+  // compile time", `docs/COMPILATION-MODEL.md`).
+  const declaredUnionBinding = (a: Expression): boolean =>
+    isSymbol(a) &&
+    couldBeIndexedCollectionOperand(a) &&
+    !isPossiblyCollectionTypedJS(a);
+  if (args.length === 1 && args[0] && mayBeArray(args[0])) {
+    refuseNonNumericScalarProjection(kind, args[0]);
+    if (!declaredUnionBinding(args[0]))
+      throw unsettledShapeDecline(args[0], 'it can be a number or a list');
     return `((_v) => Array.isArray(_v) ? ${guardedReduce('_v.flat(Infinity)')} : ${fn}(_v))(${compile(args[0])})`;
   }
   // Mixed scalars + collection operand(s): `Max`/`Min` REDUCE — fold the
@@ -15892,12 +15919,14 @@ function compileExtremum(
   // collection into a plain `Math.max(...)` call would pass an array as one
   // argument → `NaN`; instead spread each collection into a combined array and
   // reduce it. An all-empty combined array yields `NaN` (interpreter parity).
-  // An operand that is only POSSIBLY an indexed collection takes the same
-  // runtime projection as the single-operand arm above, per operand: spread it
-  // when it is an array at run time, contribute it as a single element when it
-  // is a scalar. Without it, `Min(Distance(S, p), 100)` lowered to
-  // `Math.min(<array>, 100)` → a silent `NaN` (Tycho item 143). Each operand's
-  // code appears once, so an impure operand is still evaluated exactly once.
+  // An operand that is only POSSIBLY an indexed collection declines, as in
+  // the single-operand arm above (`Min(Distance(S, p), 100)`), except a
+  // symbol declared with a union of shapes, which is spread when it is an
+  // array at run time and contributes one element when it is a number. The
+  // interpreter flattens every level of a list operand
+  // (`Max([[1, 2], [2, 4]], 1)` is 4), so such a symbol is flattened at
+  // every level. Each operand's code appears once, so an impure operand is
+  // still evaluated exactly once.
   if (
     args.some(
       (a, i) =>
@@ -15928,6 +15957,8 @@ function compileExtremum(
       // say how deep its rows are.
       if (mayBeArray(a)) {
         refuseNonNumericScalarProjection(kind, a);
+        if (!declaredUnionBinding(a))
+          throw unsettledShapeDecline(a, 'it can be a number or a list');
         return `if (Array.isArray(${p})) { ${loop(`${p}.flat(Infinity)`)} } else { ${step(p)} }`;
       }
       return step(p);
@@ -16757,8 +16788,9 @@ function emitCollectionReduce(
   );
   const reduce = (source: string): string =>
     `${source}.reduce(${combiner}, ${identity})`;
-  // A source whose static type is a list (`isSettledListSource`) is an
-  // array when it is present, so the fold tests no shape of the source. It
+  // A source whose static type is a list (`isSettledListSource`) and whose
+  // structure makes it an array (`isGuaranteedArray`) is an array when it
+  // is present, so the fold tests no shape of the source. It
   // tests only for an absent source when the type has a `missing` arm. An
   // absent value whose type has no `missing` arm (`At(W, i)` with
   // `W: list<list<real>>` and an index out of range, which the interpreter
@@ -16772,13 +16804,20 @@ function emitCollectionReduce(
   // its shape. The admission of a fold (`assertSettledFoldElements()` in
   // `compile-admission.ts`) declines such a source before the fold is
   // compiled.
+  // A source typed as a list that is not an array by its structure
+  // (`isGuaranteedArray`: an input typed as a list, a list literal, or
+  // arithmetic over one) keeps the test of its shape: an indexed `Sum` or
+  // `Product` over a list of unknown length is `0` or `1` for an empty
+  // range, as in the interpreter, so a source computed through one can be a
+  // number at run time (`Sum(2·Sum(P·i, i, 1, n))` with
+  // `P: list<list<real>>` at `n = 0`).
   let fold: string;
-  if (isSettledListSource(coll))
+  if (isSettledListSource(coll) && isGuaranteedArray(coll, target))
     fold =
       otherwise === '_c'
         ? reduce(`(${code})`)
         : `((_c) => _c === undefined ? NaN : ${reduce('_c')})(${code})`;
-  else if (isNumberOrListSource(coll))
+  else if (isSettledListSource(coll) || isNumberOrListSource(coll))
     fold = `((_c) => Array.isArray(_c) ? ${reduce('_c')} : ${otherwise})(${code})`;
   else throw unsettledShapeDecline(coll, 'it can be a number or a list');
   // When a parent reads the fold as a complex value (`isComplexValued`: an
@@ -17129,6 +17168,78 @@ function isSettledListSource(coll: Expression): boolean {
     !isSubtype(t, 'string') &&
     isSubtype(t, 'indexed_collection<any>')
   );
+}
+
+/**
+ * The scalar operators that compiled code applies to each element of a list
+ * operand (`_SYS.bcast`, or the matrix product for `Multiply`). When one
+ * operand is an array, the value is an array, or the `NaN` of a length
+ * mismatch.
+ */
+const ARRAY_PRESERVING_HEADS: ReadonlySet<string> = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Divide',
+  'Power',
+  'Square',
+  'Sqrt',
+  'Abs',
+  'Exp',
+  'Ln',
+  'Sin',
+  'Cos',
+  'Tan',
+  'Floor',
+]);
+
+/**
+ * True when the structure of `e` makes its value an array at run time, when
+ * the value is present. The static type of `e` must be a list type
+ * (`isSettledListSource`), and `e` must be one of these:
+ *
+ * - A symbol that is an input of the host: a name that the `vars` option
+ *   maps, or a symbol that the compilation does not bind and that has no
+ *   value. The host supplies a value of the declared type.
+ * - A `List`, `Tuple` or `PointList` literal.
+ * - An operator of `ARRAY_PRESERVING_HEADS` with at least one operand for
+ *   which this function is true.
+ * - `Map(f, xs)`, where this function is true for `xs`: the compiled code
+ *   is `xs.map(…)`, which gives an array.
+ * - `At(x, i)`, where `x` is such an input, or a `List` literal whose
+ *   elements are all values for which this function is true.
+ *
+ * Any other value is false, also when its static type is a list: an indexed
+ * `Sum` or `Product` over a list of unknown length gives the number `0` or
+ * `1` for an empty range, as the interpreter does, so a value computed
+ * through one (a call, a `Block` local, an `If` branch) can be a number at
+ * run time. A consumer of such a value keeps the run-time test of its shape.
+ */
+export function isGuaranteedArray(
+  e: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  if (!isSettledListSource(e)) return false;
+  if (isSymbol(e)) {
+    const name = e.symbol;
+    if (isNameLocallyBoundByCompilation(name, target)) return false;
+    if (target.varsKeys?.has(name) === true) return true;
+    return e.engine._getSymbolValue(name) === undefined;
+  }
+  if (!isFunction(e)) return false;
+  const op = e.operator;
+  if (op === 'List' || op === 'Tuple' || op === 'PointList') return true;
+  if (ARRAY_PRESERVING_HEADS.has(op))
+    return e.ops.some((a) => isGuaranteedArray(a, target));
+  if (op === 'Map' && e.nops === 2) return isGuaranteedArray(e.ops[1], target);
+  if (op === 'At' && e.nops === 2) {
+    const x = e.ops[0];
+    if (isSymbol(x)) return isGuaranteedArray(x, target);
+    if (isFunction(x, 'List'))
+      return x.ops.every((a) => isGuaranteedArray(a, target));
+  }
+  return false;
 }
 
 /**
@@ -17821,9 +17932,25 @@ function emitSumProduct(
     // branch's first-term seed (including signed zero), order and NaN policy,
     // while omitting array dispatch for an innermost scalar term.
     const scalarTerm = rest.length === 0 && isScalarValue(body, innerTarget);
+    // An innermost term whose structure makes it an array
+    // (`isGuaranteedArray`: an input typed as a list, a list literal, or
+    // arithmetic over one) is copied with no test of its shape. The term
+    // can still be the `NaN` of a length mismatch (the value of `_SYS.bcast`
+    // for lists of different lengths) or `undefined` (an absent value).
+    // These values are tested by value, not by shape, and seed the
+    // accumulator as they are, as before. Any other term keeps the test of
+    // its shape: a term whose type admits a number and a list, and a term
+    // typed as a list that can be a number at run time. An inner indexed
+    // `Sum` or `Product` over a list of unknown length is the number `0` or
+    // `1` for an empty range, as in the interpreter: with `L: list<real>`,
+    // the inner sum of `Sum(L·j, i, 1, n, j, 1, i − 1)` is `0` at `i = 1`.
+    const seed =
+      rest.length === 0 && isGuaranteedArray(body, innerTarget)
+        ? `(${val} === undefined || ${val} !== ${val} ? ${val} : ${val}.slice())`
+        : `(Array.isArray(${val}) ? ${val}.slice() : ${val})`;
     const fold = scalarTerm
       ? `${acc} = ${acc} === null ? ${val} : ${acc} ${op} ${val};`
-      : `${acc} = ${acc} === null ? (Array.isArray(${val}) ? ${val}.slice() : ${val}) : _SYS.bcast((_a, _b) => _a ${op} _b, ${acc}, ${val});`;
+      : `${acc} = ${acc} === null ? ${seed} : _SYS.bcast((_a, _b) => _a ${op} _b, ${acc}, ${val});`;
     if (elementwiseExit)
       return expression(
         (exit) =>

@@ -77,10 +77,37 @@
   `Sum(g(x))` with `g: (real) -> unknown`. A source typed `any`, `unknown`
   or `value` declines too. The interpreter evaluates these folds. Declare the element type to compile them: with `L: list<real>` or
   `L: list<list<real>>`, `Sum(L)` compiles. A fold whose element type is
-  settled has no test of the shape at run time: with
+  settled tests no shape of an element at run time, nor the shape of a
+  source that is an input, a list literal, element-wise arithmetic over one, `Map` over one, or an element of an input or a literal: with
   `L: list<tuple<real, real>>`, `Sum(L)` compiles to
   `(_.L).reduce((_a, _b) => _SYS.add(_a, _b), 0)`, where it tested each
   element and the source with `Array.isArray`. Its values do not change.
+
+- **Compilation: `Max`, `Min` and the interval fold decline over a value
+  that can be a number or a list, and three consumers of a list test no
+  shape at run time.** On JavaScript, `Max` or `Min` of an operand whose
+  type is a union of a number and a list, a `broadcastable<T>` or `unknown`
+  (`Min(Distance(S, (1, 2)))` with `S: indexed_collection`, `Max(√x, f())`
+  with a block-local `f`) now declines with the code `unsettled-shape`,
+  alone or beside other operands. On `interval-js`, a `Sum`, `Product`,
+  `Max` or `Min` of such a value (`Max(2b)` with `b: broadcastable<real>`,
+  a `Which` with a list branch and a number branch) declines too. The
+  interpreter evaluates these expressions. Declare the type of the value
+  (`S: list<list<real>>`) to compile them. An input or a parameter
+  declared with a union of a number and a list keeps its one test.
+  Code that compiled before and still compiles tests no shape where the
+  type settles it: the loop of an indexed `Sum` or `Product` whose term is
+  a list (`Sum(L·i, i, 1, n)` with `L: list<real>`), `Max` or `Min` of one
+  list operand (`Min(P·(1 − v) + Q·v)` with `P, Q: list<real>`), and the
+  `interval-js` fold of an input typed as a list of numbers (`Sum(L)`).
+  Their values do not change: a length mismatch still gives `NaN` on
+  JavaScript and the absence marker on `interval-js`. A list value that is
+  not an input, a list literal, element-wise arithmetic over one, `Map` over one, or an element of an input or a literal keeps its test,
+  because an indexed `Sum` over a list of unknown length is the number `0`
+  for an empty range (`Max(2·Sum(L·i, i, 1, n))` at `n = 0` is `0`). The
+  term of an indexed `Sum` or `Product`, and a `PointList` component, whose
+  type is a union of a number and a list keep their run-time test
+  (`docs/COMPILATION-MODEL.md`, R3).
 
 - **Compilation to GLSL and WGSL: a call is proven finite from the
   declarations and the expression only.** A call of `sin`, `cos`, `sign`,

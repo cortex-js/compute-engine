@@ -104,8 +104,20 @@ describe('element-wise Sum/Product: runtime dispatch', () => {
   });
 
   test('a scalar-at-runtime body stays scalar', () => {
+    // `M` is declared with a union of shapes, so the host may pass a number
+    // (rule R2 of `docs/COMPILATION-MODEL.md`). With `M: list<number>`, a
+    // number is a value outside the declared type, and the result is
+    // undefined (R5).
+    const e = new ComputeEngine();
+    e.declare('M', 'number | list<number>');
+    e.declare('n', 'integer');
+    const u = compile(
+      e.box(['Sum', ['Add', 'M', 'k'], ['Limits', 'k', 1, 'n']]),
+      { fallback: false }
+    )!;
     // (5+1) + (5+2)
-    expect(r.run!({ M: 5, n: 2 })).toBe(13);
+    expect(u.run!({ M: 5, n: 2 })).toBe(13);
+    expect(u.run!({ M: [10, 20], n: 2 })).toEqual([23, 43]);
   });
 
   test('the seed does not alias the caller-supplied array', () => {

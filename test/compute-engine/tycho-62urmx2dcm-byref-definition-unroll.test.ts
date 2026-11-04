@@ -558,7 +558,9 @@ describe('BY-REFERENCE DEFINITION UNROLL — shadowing', () => {
         to: 'javascript',
         fallback: false,
       } as any)
-    ).toThrow(/^Could not compile `Vsh`: /);
+      // The call `Vsh(t)` of the parameter has the type `unknown`, so `Min`
+      // of it declines first: its shape is not settled (ROADMAP CE-806).
+    ).toThrow(/^Could not compile "Vsh\(t\)": it can be a number or a list/);
 
     const fallback: any = compile(ce.box(['qsh', 'u', 'u']), {
       to: 'javascript',

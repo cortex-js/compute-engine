@@ -593,8 +593,20 @@ export function isNameBoundByCompilation(
   s: string,
   target: CompileTarget<Expression> | undefined
 ): boolean {
-  if (target?.boundVars?.has(s) === true) return true;
   if (target?.varsKeys?.has(s) === true) return true;
+  return isNameLocallyBoundByCompilation(s, target);
+}
+
+/**
+ * Does the compilation in progress bind the name `s` other than as a key of
+ * `vars` (a parameter, a `Block` local, a binder index)? A local with the
+ * same name as a `vars` key shadows the key.
+ */
+export function isNameLocallyBoundByCompilation(
+  s: string,
+  target: CompileTarget<Expression> | undefined
+): boolean {
+  if (target?.boundVars?.has(s) === true) return true;
   if (CompilerState._boundVarsCtx?.has(s) === true) return true;
   for (const frame of CompilerState._localComplex)
     if (frame.has(s)) return true;
