@@ -356,14 +356,12 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
   test('javascript declines an application with the wrong number of arguments', () => {
     // The interpreter curries `((a, b) ↦ a + b)(x)` into a function of one
     // argument, and rejects `(a ↦ a + 1)(x, y)`. A JavaScript call does
-    // neither: it answered `NaN` and `x + 1`. A partial application whose
-    // argument is a variable does not compile: the interpreter curries with
-    // the value of the argument when it evaluates the partial application
-    // (`partial-application.ts`).
+    // neither: it answered `NaN` and `x + 1`. A partial application does not
+    // compile (`partial-application.ts`).
     for (const [expr, message] of [
       [
         ['Apply', ['Function', ['Add', 'a', 'b'], 'a', 'b'], 'x'],
-        'the partial application supplies the argument `x`, which is not a machine number',
+        'a partial application or a curried call',
       ],
       [
         ['Apply', ['Function', ['Add', 'a', 1], 'a'], 'x', 'y'],

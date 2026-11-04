@@ -33,10 +33,12 @@ when it compiles. A difference that this list does not name is a defect.
   `At`, `First`, `Last`, `Rest`, `Length`, `Reverse`, and the binding of a
   callback parameter by `Map` and its relatives (`Length([1, Missing])` is 2
   on every route). Its discharge: `IsMissing`, `Coalesce` (`??`),
-  `AssertPresent` (`?!`) and a default parameter, which give the
+  `AssertPresent` (`?!`), which give the
   interpreter's value for an absent operand of any spelling (`Missing`,
-  `NaN`, `undefined`, `None`). A point (a tuple of numbers, `tuple<real,
-  real>` included) is tested at a discharge and at a default with the point
+  `NaN`, `undefined`, `None`). A parameter default is not a discharge: it
+  fills only an argument that the call leaves out (see "Function values").
+  A point (a tuple of numbers, `tuple<real,
+  real>` included) is tested at a discharge with the point
   test, which also reads the point of `NaN` coordinates as absent: no point
   is proved present by its type, as no `real` is, because a read out of
   range gives that point whatever the type says. The test is chosen from
@@ -171,13 +173,30 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `p: real` and `vars: { p: '2+3' }`, `2p` compiles to `2 * 2+3` and gives 7
   (the code is spliced without parentheses); the interpreter, with `p = 5`,
   gives 10. The `python` target groups such code.
+- `javascript`: `Fold((acc, x = 100) ↦ If(IsMissing(x), acc, acc + x), 0,
+  [1, 2, Missing])` gives 103; the interpreter gives 3. The callback's
+  default is a JavaScript default parameter, which also fills a supplied
+  `undefined` (the compiled `Missing`), so the discharge `IsMissing(x)` in
+  the body reads 100. The `python` callback fills a supplied `None` the same
+  way (`100 if x is None else x`). The same wrapper is used for the value of
+  a user function with a default passed as a callback.
+- `javascript`, `constantFold: false`, `vars: { Pi: '_.Pi' }`: with
+  `f := (x, k = Pi) ↦ x + k`, `f(1)` at `Pi = 3` gives 4 (the default `Pi`
+  is filled by its name, and `vars` maps the name to the input); the
+  interpreter gives `1 + π`. A library constant or a `symbol<…>` symbol
+  used as a default is filled by its name, so a `vars` entry or a local of
+  the same name can hide it; a constant declared by the program or the host
+  declines instead.
+- `javascript`: `Block(Declare(mk, "function", (a, k = 2) ↦ (x ↦ x + a +
+  k)), mk(1))` compiles, and `run()` returns a JavaScript function, where the
+  rule of function values declines a function returned from a call: the
+  call of a block-local function has the static type `unknown`, so the
+  decline of a call whose type is a function type does not see it. The
+  values agree with the interpreter: `Apply(mk(1), 5)` gives 8 in both.
 - `interval-js`, with `constantFold: false`: `PointX([Missing, []])` gives
   one `empty` result (the empty row is skipped when the reading of the list
   is decided, so the list is read as one point); the interpreter gives
   `[Missing, Missing]`.
-- `javascript`, `Z: list<complex>` of two elements: `Apply((k = 2) ↦ k,
-  At(Z, 9))` gives `NaN` (the argument is converted to a complex value before
-  the default's absence test reads it); the interpreter gives 2.
 - `interval-js`, `y: real` at `y = 3`: `Coalesce(1/(y - 3), 2)` gives the
   interval `[2, 2]` (`_IA.coalesce` reads the `empty` result of a pole as
   absent); the interpreter gives `~∞`.
@@ -185,14 +204,6 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `(real) -> list<real^2>` with the body `t ↦ W` (crafted: the body breaks
   the declared width): `Sum(vector(x))` at `W = [1, 2, 3]` gives 3 (the sum
   is written for two terms); the interpreter gives 6.
-- `javascript`, `c: boolean` at `c = false`, `f := (x = "d") ↦ x`
-  (plausible?): `Block(Declare(a, "unknown", If(c, "s")), f(a))` gives
-  `undefined` (the default is not filled: `argumentMayBeAbsent()` reads the
-  type of the symbol `a`, which is the string type of the branch, and
-  `mayHoldRestriction()` does not follow a symbol to its initializer); the
-  interpreter gives `"d"`. A numeric local, `a ≔ If(c, 3)` with
-  `f := (x = 5) ↦ x + 1`, agrees (6), because a numeric argument is always
-  tested for absence.
 - `javascript`, `B: broadcastable<number>`, `P: tuple<real, real>` at
   `B = 1` (plausible?): `If(B < 0, P)` gives `undefined` (the condition
   can be a list, so the run-time selection `_SYS.selectAbsent` gives
@@ -1810,64 +1821,141 @@ record lives in the definition's closure, so two artifacts never share it. A
 definition called from one place, or only from the root, is emitted unchanged.
 The rule is implemented by `memoizeSharedDefinitions` in `javascript-target.ts`.
 
+### Function values
+
+Compiled code calls a function only when it can see the callee (user decision
+of 2026-11-02, options page 5, option B, in
+`docs/plans/2026-11-02-language-axes-options.md`). A call compiles when the
+callee is a defined function, a declared function with a value (a block-local
+`Declare` of a function literal included), or a function literal at the call
+site. The callbacks of `Map`, `Filter`, `Sort`, `Fold` and `Reduce` compile
+when they are such a callee. A derivative callee, `Apply(Derivative(f, n), x)`
+(the parse of `f'(x)`), compiles when `f` is a defined function: the compiler
+resolves it to the closed form of `f` as a literal at the call site
+(`appliedDerivativeLiteral()`).
+
+These forms decline, with a reason that names the form:
+
+- a partial application or a curried call: `Apply(f, 1)` for `f` with two
+  parameters, `Apply(Apply(f, 1), u)` (`partial-application.ts`);
+- a function value passed as an argument to a user function or to `Apply`
+  (`h(x ↦ x + u)`), and a function literal with a parameter declared with a
+  function type (`h = (g: function) ↦ g(1)`) (`assertNoFunctionValue()`,
+  `compile-function-values.ts`);
+- a call whose value is a function: a function returned from a function
+  (`Apply(mk(1), u)` with `mk = a ↦ (x ↦ x + a)`);
+- a call of a function value stored in a local: a block-local function that is
+  assigned more than once, inside a nested statement, or from the result of a
+  call (`tryCompileLocalFunctionCall()`).
+
+The interpreter keeps first-class functions: lambdas, closures, currying,
+partial application and function values.
+
+| Input                                       | Before 3.4.5               | Now      |
+| ------------------------------------------- | -------------------------- | -------- |
+| `Map(x ↦ x^2, L)`                           | compiles                   | compiles |
+| `Map(f, L)` with `f` defined in the scope   | compiles                   | compiles |
+| `Apply(Apply(f, 1), u)`                     | compiles for one step      | declines |
+| `g = (k: real = 2) ↦ k + 1`, `g()`          | compiles with the fill     | compiles (`3`, completed at compile time) |
+| `h = (f: function) ↦ f(1)`, `h(x ↦ x)`      | compiles with a value ref  | declines |
+
 ### Parameters with a default value
 
 A parameter with a default value (`(x, k = 2) => x * k`, the MathJSON
-parameter `["Optional", "k", 2]`) is filled when a call leaves it out. A call
-of a declared function written in the expression needs no compiler work: its
-canonical form already holds the default (`f(3)` is `f(3, 2)`). The compiler
-fills the other calls. In each case the default is compiled as the operand
-that a call written at that place would read: a value default is the target's
-spelling of the value, a symbol default is a read of the symbol when the call
-is made, and `[]` or `{}` is a new value at each call (`({})` in JavaScript,
-`{}` in Python; the interval-js, GLSL and WGSL targets have no dictionary
-value, so a `{}` default declines there, as a written `{}` does).
+parameter `["Optional", "k", 2]`) is filled when a call leaves its argument
+out, and only then, in the interpreter and in compiled code. A call written
+with fewer arguments is completed at canonicalization: its canonical form
+already holds the default (`f(3)` is `f(3, 2)`). The compiler completes the
+other calls at compile time (`completedLiteralArguments()`): a call of a
+block-local function, an `Apply` of a literal, and a callback that its
+consumer calls with fewer arguments than the literal has parameters
+(`Map((x, k = 2) ↦ x k, L)`: `Map` calls the literal with one argument). Every
+target does this, the shaders and interval-js included.
 
-- JavaScript, a function literal compiled as a value (a `Map` callback, a
-  block-local function, the root of `compile()`): the emitted function fills
-  each parameter that the call leaves out. When the parameter's type cannot
-  hold `missing` (an annotation such as `k: number`), the fill is a JavaScript
-  default parameter, `(x, k = 2) => …`. A JavaScript default is also used for
-  a supplied `undefined`, which is the run-time value of `Missing`, and the
-  interpreter keeps a supplied `Missing`. So when the type can hold `missing`
-  (an unannotated parameter is `unknown`, or `k: number | missing = 2`), the
-  fill tests the number of arguments in a `function` expression:
-  `if (arguments.length < 2) k = 2`. A symbol default and a literal that a
-  broadcasting or complex-coercing wrapper calls take the fill in an outer
-  wrapper, so the inner wrappers receive every argument. A function from
-  `compile()` itself fills the omitted arguments before its entry checks,
-  after the definitions of its preamble, which a default can read (the
-  default `D` of a constant list is the definition `_val_D`).
-- JavaScript, a user function referenced as a value (`Map(f, L)`): its value
-  is an outer wrapper, `_fn_f$…$d`, with the same fills; its definition is
-  emitted with every parameter required, as all its written calls supply
-  them. When a default is a symbol, the wrapper is compiled where the value
-  is referenced, and is not shared: the symbol is read in that scope, as
-  for a call written there.
-- Python: a number, string or boolean default is a Python default parameter
-  (`lambda x, k=2: …`). A Python default is evaluated once, when the lambda
-  is made, so a symbol default and `[]` take an omission marker, a fresh
-  `object()` bound once around the lambda under a fresh name: `lambda x,
-  k=_tv1: …` runs the body with `d if k is _tv1 else k`.
-- GLSL and WGSL: a shader function has no default parameters. A call of a
-  literal that leaves out a parameter (a partial application applied to the
-  remaining required arguments, or the callback of a `Map` that is written
-  out element by element) is completed at the call site with the default
-  operand, compiled as a written operand. A symbol default that the target
-  cannot compile declines as the written symbol would.
-- Interval JavaScript: an application of a literal is completed at the call
-  site in the same way, so a value default is an interval constant (`_k1`).
-  A literal compiled as a value (the callback of `_IA.map`, a block-local
-  function) is a JavaScript function and takes the fills of the JavaScript
-  target, compiled by the interval target.
+An absent value supplied at a defaulted position, written or computed, is
+passed through as the argument. The interpreter then applies the rule of
+`Missing` (`docs/ERROR-MODEL.md`): `g(First([]))` with
+`g = (k: real = 2) ↦ k + 1` passes `Missing` to `g`, and the call is
+`Missing`. In compiled code the value is outside the type of the parameter
+(`NaN` at a `real` parameter), so the result is unspecified within the caveats
+below. This reverses the "or absent" half of rule R6 of
+`docs/plans/2026-11-01-absent-value-contract.md` (user decision of
+2026-11-02).
 
-A call of a block-local function is completed at the call site on every
-target, except for a local that is assigned more than once: its other values
-can have other defaults, so such a call must supply every parameter. The
-`Apply` arity checks of the targets accept any count from the number of
-required parameters to the number of parameters. A multi-clause function
-cannot have a default (it is a declaration error), so the multi-clause
-emission never sees one.
+A default is a constant: a number, a boolean, a string, `[]`, `{}`, or a
+constant symbol. A constant symbol is one of two kinds
+(`isConstantSymbolDefault()`):
+
+- a constant: a symbol that the scope of the declaration binds to a constant
+  value definition. This is a constant of the standard library (`Integers` in
+  `over: set = Integers`, `Pi`), or a symbol that the host or the program
+  declared constant (`ce.declare('W0', { isConstant: true, value: 5 })`, an
+  Epsil `const`);
+- a symbol that the parameter type lists as a literal symbol type: `Auto` in
+  `mode: symbol<Auto> | symbol<Manual> = Auto`.
+
+The default is boxed once, where the function is declared, and a call that
+leaves out the argument receives that symbol, as if the call had written it.
+Nothing is read where the call is made: a local of the same name in the scope
+of the call does not change the default. A default that names a variable
+(`(k = n) ↦ k` with `n` a user symbol), or a symbol that is not declared and
+that no `symbol<…>` parameter type lists, is a static error whose message
+says to write a constant or to pass the argument. A default on a function
+with a rest (variadic) parameter is a static error too
+(`boxed-expression/parameter-defaults.ts`,
+`canonicalFunctionLiteralArguments()` in `function-utils.ts`, and the Epsil
+parser's `default-value-invalid`).
+
+Compiled code reads a symbol default by its name where it fills the default:
+at the call, or in the wrapper of a callback. A local of the same name there,
+or a `vars` entry that maps the name to an input, would give another value
+than the constant of the declaration. So compiled code fills a symbol default
+only when it is a constant of the standard library (`Pi`, `Integers`) or a
+symbol that the parameter type lists (`mode: symbol<Auto> | symbol<Manual> =
+Auto`). It is compiled as the written symbol: a target that cannot hold the
+symbol declines, as it declines the written symbol. A default that names a
+constant declared by the program or the host declines at each place where
+compiled code fills it: a call that leaves out the argument (also a call
+that writes the default's symbol at that position), a call completed at
+compile time, and the wrapper of a callback or of a function literal
+(`compiledSymbolDefaultDeclines()`, `compile-parameter-defaults.ts`). With
+`ce.declare('W0', { isConstant: true, value: 5 })` and
+`f := (k = W0) ↦ k + 1`, the compiled `f()` declines and the interpreter
+gives 6. The Epsil program `const W = 5; function f(k = W) { k + 1 }; f()`,
+compiled as a block, declines the same way. To compile such a function,
+write the value as the default (`k = 5`), or pass the argument.
+
+| Input                                                     | Before 3.4.5                           | Now                                      |
+| --------------------------------------------------------- | -------------------------------------- | ---------------------------------------- |
+| `g = (k: real = 2) ↦ k + 1`, `g()`                        | `3`, completed at compile time         | `3`, unchanged                           |
+| `g(At(L, 100))` with `L: list<real>`                      | `3` (the `NaN` takes the default)      | `NaN + 1`, unspecified (outside `real`)  |
+| `g(x)` with `x: real` supplied as `NaN` by the host       | `3`                                    | unspecified                              |
+| `Map((k = 2) ↦ k * 2, [1, 2])`                            | `[2, 4]` through a filling wrapper     | `[2, 4]`, the literal takes one argument |
+| `(k = n) ↦ k` with `n` a variable                         | `n` read at the call site              | static error (the default is not constant) |
+| `(k = W0) ↦ k` with `W0` declared constant                | `W0` read at the call site             | `W0` of the declaration; compiled code declines |
+| a defaulted call on GLSL or interval-js                   | completed; interval declines a `NaN`   | completed, no decline                    |
+
+Where a function value can be called with fewer arguments than it has
+parameters, the emitted function fills each left-out argument:
+
+- JavaScript and interval-js, a function literal compiled as a value (a
+  callback that is not written out, a block-local function) or a user
+  function referenced as a value (`Map(f, L)`): an outer wrapper with a
+  JavaScript default parameter, `((_tv1, _tv2 = 2) => f(_tv1, _tv2))`. The
+  wrapper of a user function is defined once, as `_fn_f$d`.
+- JavaScript, a function literal compiled at the root of `compile()`: the
+  function fills each argument that the host leaves out (`undefined`) before
+  its entry checks, after the definitions of its preamble.
+- Python, a function literal compiled as a value: the parameter is declared
+  `k=None`, and the body runs with `d if k is None else k`, so that `[]` is a
+  new list at each call.
+
+A JavaScript default parameter also fills `undefined`, and the Python fill
+fills `None`, which are the spellings of `Missing` in compiled code. The
+interpreter passes such an argument to the body; the result of an operator
+on an absent operand is unspecified in compiled code, so the two agree within
+the caveats. A multi-clause function cannot have a default (it is a
+declaration error), so the multi-clause emission never sees one.
 
 ## Collections
 

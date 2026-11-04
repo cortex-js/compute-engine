@@ -6084,19 +6084,21 @@ export class Parser {
    * parameter without a default, after a `default-value-invalid` diagnostic
    * on the default.
    *
-   * A default is a number literal (with an optional sign), a string without
-   * interpolation, `true`, `false`, a symbol, the empty list `[]` or the
-   * empty dictionary `{}` (also spelled `{->}`). The value is checked against
-   * the parameter type when the function is defined, by the engine. Refused
-   * here:
+   * A default is a constant: a number literal (with an optional sign), a
+   * string without interpolation, `true`, `false`, the empty list `[]`, the
+   * empty dictionary `{}` (also spelled `{->}`), or a constant symbol (a
+   * library constant, a `const` or another symbol declared constant, or a
+   * symbol that the parameter type lists). The value
+   * is checked against the parameter type, and a symbol for being
+   * constant, when the function is defined, by the engine. Refused here:
    * - any other expression: the type language that stores a default in a
    *   signature has no spelling for it;
-   * - a symbol that names a parameter of the same list: a default is read
-   *   as if the caller had written it in the call, so it would not mean the
-   *   parameter;
+   * - a symbol that names a parameter of the same list;
    * - `Nothing` and `Missing`: `Nothing` is the value of an empty block, not
    *   an argument value, and `Missing` is a result only, not a value that a
    *   call supplies;
+   * - a default in a parameter list that has a rest parameter: a call that
+   *   leaves out an argument would not know which parameter it leaves out;
    * - a default on a `bind` parameter of a `hold` definition: the parameter
    *   names a variable that the caller writes;
    * - a default in a parameter list that has a literal parameter
@@ -6115,6 +6117,7 @@ export class Parser {
     const names = new Set<string>();
     for (const p of params) collectParamNames(p, names);
     const clause = params.some(isLiteralParamNode);
+    const rest = params.some((p) => fnOps(p)?.[0] === 'Spread');
     for (const { index, value, bound } of defaults) {
       const param = params[index];
       if (param === undefined) continue;
@@ -6123,7 +6126,12 @@ export class Parser {
             reason:
               'a default value in an overloaded signature is not supported yet',
           }
-        : bound
+        : rest
+          ? {
+              reason:
+                'a function with a rest parameter has no default values: drop the default or the rest parameter',
+            }
+          : bound
           ? {
               reason:
                 'a `bind` parameter of a `hold` definition cannot have a default value',
@@ -9675,6 +9683,12 @@ function lowerParameterDefault(
       };
     if (names.has(name))
       return { reason: 'a default value cannot name a parameter' };
+    // A symbol default must be constant: a library constant (`Integers`,
+    // `Pi`), a symbol declared constant (a `const`), or a symbol that the
+    // parameter type lists (`mode: symbol<Auto> | symbol<Manual> = Auto`).
+    // The engine checks it when the function is defined
+    // (`isConstantSymbolDefault()`), because the check reads the scopes and
+    // the parameter type.
     return { value: node };
   }
   // `NaN` has no sign: `-NaN` and `- NaN` are `NaN`.

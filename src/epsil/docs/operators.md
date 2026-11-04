@@ -252,8 +252,8 @@ annotated with a numeric type (`number`, `integer`, `real`) reads it as
 `NaN`, which such a parameter accepts. A read past the end of a list of
 points is a point whose coordinates are `NaN`: when no point matches,
 `first(filter(xs, c => c[1] > 5))` is `(NaN, NaN)`, which a parameter
-`p: tuple<number, number>` accepts. `??`, `isMissing` and a parameter
-default read such a point as absent: `ps[i] ?? (0, 0)` is `(0, 0)` when
+`p: tuple<number, number>` accepts. `??` and `isMissing` read such a point
+as absent: `ps[i] ?? (0, 0)` is `(0, 0)` when
 `i` is past the end.
 
 It is right-associative, so a chain falls through left to right:

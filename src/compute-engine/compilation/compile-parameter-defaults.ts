@@ -6,11 +6,12 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import type { CompileTarget } from './types.js';
+import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
 import {
-  isFunction,
-  isNumber,
-  isSymbol,
-} from '../boxed-expression/type-guards.js';
+  blockLocalFunction,
+  userFunctionLiteral,
+} from './compile-assignment-checks.js';
+import type { Type } from '../../common/type/types.js';
 import {
   functionLiteralParameterType,
   isRestParameter,
@@ -18,18 +19,11 @@ import {
   requiredParameterCount,
 } from '../boxed-expression/function-literal.js';
 import {
-  callSiteDefault,
+  literalSymbolNames,
   parameterDefaultOperands,
 } from '../boxed-expression/parameter-defaults.js';
+import { systemScopeBinding } from './builtin-callback.js';
 import { isValueDef } from '../boxed-expression/definition-guards.js';
-import { mayHoldRestriction } from '../boxed-expression/conditional-value.js';
-import { typeCannotBeAbsent } from '../library/core.js';
-import { couldMatch } from '../../common/type/subtype.js';
-import type { Type } from '../../common/type/types.js';
-import {
-  leafwardElementType,
-  pointArity,
-} from '../collection-utils.js';
 
 /**
  * True when the `Function` literal `literal` has a parameter with a default
@@ -47,10 +41,10 @@ export function literalHasParameterDefaults(literal: Expression): boolean {
  * written arguments `actuals`, completed with the default operand of each
  * parameter with a default that the call leaves out.
  *
- * Each added operand is the default as the call would read it if the author
- * had written it in the call (`callSiteDefault()`): a value default is the
- * value, and a symbol default is the symbol read at the call site. So the
- * caller compiles the completed call as a call that supplies every argument.
+ * Each added operand is the default, a constant. So the caller compiles the
+ * completed call as a call that supplies every argument. A symbol default
+ * that compiled code does not fill throws a decline
+ * (`compiledSymbolDefaultDeclines()`).
  *
  * Returns `actuals` itself when nothing is left out, and `undefined` when the
  * literal has a rest parameter (its arguments are not completed) or when the
@@ -72,7 +66,13 @@ export function completedLiteralArguments(
   for (const p of params.slice(actuals.length)) {
     const d = optionalParameterDefault(p);
     if (d === undefined) return undefined;
-    added.push(callSiteDefault(d));
+    assertCompiledDefaultFilled(
+      literal.engine,
+      d,
+      functionLiteralParameterType(p),
+      literal.toString()
+    );
+    added.push(d);
   }
   return [...actuals, ...added];
 }
@@ -94,73 +94,133 @@ export function literalAcceptsArgumentCount(
 }
 
 /**
- * True when a value of the static type `t` can be absent when compiled code
- * runs: its type has a `missing` or `nan` member (`typeCannotBeAbsent()`),
- * or it can be a number, which compiled code holds as a float that can be
- * `NaN` (`0/0` with `x/y` typed `real`), or it is `unknown` or `any`, or
- * it is a point (`pointArity()`: a tuple of numbers, `tuple<real, real>`
- * included). A point can be a `NaN` point, a tuple whose coordinates are
- * all `NaN`, which the readers read as absent: an accessor out of range
- * gives one for a point although the type of the point is
- * `tuple<real, real>` (`At(qs, 9)` with `qs: list<tuple<real, real>>`),
- * and the value can reach the parameter through a local, a callback or an
- * `Apply`. So every point is treated as possibly absent, as a `real`
- * scalar is. A collection, a tuple that is not a point (`tuple<string,
- * real>`), a string, a boolean, a symbol or a record cannot be absent.
+ * True when compiled code does not fill the parameter default `d` of a
+ * parameter of type `type` (`undefined` for a parameter with no
+ * annotation, or a parameter without a default when `d` is `undefined`).
+ *
+ * The interpreter reads a symbol default where the function is declared
+ * (`isConstantSymbolDefault()`). Compiled code reads a symbol by its name
+ * where the default is filled: at the call, or in the wrapper of a callback.
+ * A local of the same name there, or a `vars` entry that maps the name to
+ * an input, would give another value. So compiled code fills a symbol
+ * default only when it is a constant of the standard library that no
+ * definition of the engine hides (`Pi`, `Integers`), or a symbol that the
+ * parameter type lists (`Auto` in `mode: symbol<Auto> | symbol<Manual> =
+ * Auto`), which compiles to the symbol itself. A constant that the host
+ * declares (`ce.declare('W0', { isConstant: true, value: 5 })`) or an Epsil
+ * `const` is not filled, and the compilation declines: with
+ * `f := (k = W0) ↦ k + 1`, `f()` declines where the interpreter gives 6.
+ *
+ * A library constant or a listed symbol that a local of the call site
+ * hides, or that `vars` maps, is still filled by name: a known limitation
+ * (`docs/COMPILATION-MODEL.md`, "Known limitations").
  */
-export function mayBeAbsentAtRunTime(t: Type): boolean {
-  return (
-    !typeCannotBeAbsent(t) ||
-    couldMatch(t, 'number') ||
-    pointArity(t) !== undefined
+export function compiledSymbolDefaultDeclines(
+  engine: ComputeEngine,
+  d: Expression | undefined,
+  type: Type | undefined
+): boolean {
+  if (d === undefined || !isSymbol(d)) return false;
+  const name = d.symbol;
+  if (name === 'True' || name === 'False') return false;
+  if (type !== undefined && literalSymbolNames(type).includes(name))
+    return false;
+  const system = systemScopeBinding(engine, name);
+  return !(
+    system !== undefined &&
+    isValueDef(system) &&
+    system.value.isConstant === true &&
+    engine.lookupDefinition(name) === system
   );
 }
 
 /**
- * True when the argument `a` at a parameter whose default is `d` can be
- * absent when compiled code runs (`mayBeAbsentAtRunTime()`). A number
- * literal other than `NaN` cannot, nor can a symbol default that
- * canonicalization wrote into a call that leaves the parameter out: it is
- * the fill itself.
+ * Throw a decline when compiled code does not fill the parameter default
+ * `d` (`compiledSymbolDefaultDeclines()`). `subject` names what is
+ * compiled: the call, the function or the callback.
  */
-export function argumentMayBeAbsent(a: Expression, d: Expression): boolean {
-  if (isNumber(a) && a.isNaN !== true) return false;
-  if (isSymbol(d) && isSymbol(a, d.symbol)) return false;
-  // A restriction (`If(c, 3)`) is typed as its arm, but is absent where
-  // its condition fails; so is an expression that contains one
-  // (`If(c, If(d, True), False)`).
-  return mayBeAbsentAtRunTime(a.type.type) || mayHoldRestriction(a);
+export function assertCompiledDefaultFilled(
+  engine: ComputeEngine,
+  d: Expression | undefined,
+  type: Type | undefined,
+  subject: string
+): void {
+  if (!isSymbol(d) || !compiledSymbolDefaultDeclines(engine, d, type)) return;
+  throw new Error(
+    `Could not compile \`${subject}\`: a default that names a constant ` +
+      `declared by the program or the host (\`${d.symbol}\`) is not ` +
+      `filled in compiled code; write the value as the default, or pass ` +
+      `the argument.`
+  );
 }
 
 /**
- * Decline, on the interval target, a call that supplies an argument that
- * can be absent at run time (`mayAbsent(i)`) to a parameter with a default
- * (`defaults`, by position). The interval target fills a default only for
- * an argument that the call leaves out: its absent value, the `empty`
- * result, is also the value of a pole or a domain error (`Sqrt(y - 5)`,
- * `1/(y - 3)` at `y = 3`), so a run-time fill would replace a present
- * value by the default. The interpreter fills an absent argument
- * (`withAbsentDefaults()`, `parameter-defaults.ts`), so such a call falls
- * back to it. `count` is the number of arguments the call supplies, and
- * `what` names the call in the message. Does nothing on another target.
+ * Throw a decline when the call `expr` of a user function gets a symbol
+ * default that compiled code does not fill (`compiledSymbolDefaultDeclines()`).
+ *
+ * The engine completes a call that leaves the argument out with the default
+ * symbol when it canonicalizes the call (`f()` becomes `f(W0)`), so the
+ * test reads each argument at a position with a symbol default: an
+ * argument that is that symbol declines, also when the call wrote it
+ * (`f(W0)`). An argument that the call leaves out declines too: the
+ * compilation of a block-local function call completes it with the default
+ * (`completedLiteralArguments()`).
  */
-export function declineIntervalAbsentDefault(
-  target: CompileTarget<Expression>,
-  defaults: ReadonlyArray<Expression | undefined>,
-  count: number,
-  mayAbsent: (i: number) => boolean,
-  what: string
+export function assertCompiledCallDefaultsFilled(
+  expr: Expression,
+  target: CompileTarget<Expression>
 ): void {
-  if (target.language !== 'interval-javascript') return;
-  for (let i = 0; i < count; i++) {
-    if (defaults[i] === undefined || !mayAbsent(i)) continue;
-    throw new Error(
-      `Could not compile ${what}: argument ${i + 1} can be absent at run ` +
-        `time, at a parameter with a default value. The interval target ` +
-        `does not fill a supplied absent argument with its default: its ` +
-        `absent value is also the value of a pole or a domain error.`
-    );
+  if (!isFunction(expr)) return;
+  const h = expr.operator;
+  const local = blockLocalFunction(h, target);
+  if (local === null) return;
+  const literal = local ?? userFunctionLiteral(expr.engine, h);
+  if (literal === undefined) return;
+  // A block-local function has no declared signature: its defaults and its
+  // parameter types are those of its literal.
+  const params = literal.ops.slice(1);
+  const defaults =
+    local !== undefined
+      ? params.map((p) => optionalParameterDefault(p))
+      : userFunctionDefaults(expr.engine, h, literal);
+  const types =
+    local !== undefined
+      ? params.map((p) => functionLiteralParameterType(p))
+      : userFunctionParameterTypes(expr.engine, h, literal);
+  defaults.forEach((d, i) => {
+    if (d === undefined || !isSymbol(d)) return;
+    const arg = expr.ops[i];
+    if (arg !== undefined && !(isSymbol(arg) && arg.symbol === d.symbol))
+      return;
+    assertCompiledDefaultFilled(expr.engine, d, types[i], expr.toString());
+  });
+}
+
+/**
+ * The type of each parameter of the user function `h`, by position,
+ * `undefined` for a parameter with no annotation: the type of the
+ * signature declared for `h`, else the annotation of the parameter of its
+ * literal `literal`. The positions match those of `userFunctionDefaults()`.
+ */
+export function userFunctionParameterTypes(
+  engine: ComputeEngine,
+  h: string,
+  literal: Expression | undefined
+): (Type | undefined)[] {
+  const result: (Type | undefined)[] = [];
+  if (literal !== undefined && isFunction(literal, 'Function'))
+    literal.ops
+      .slice(1)
+      .forEach((p, i) => (result[i] = functionLiteralParameterType(p)));
+  const def = engine.lookupDefinition(h);
+  if (def !== undefined && isValueDef(def) && !def.value.inferredType) {
+    const t = def.value.type.type;
+    if (typeof t === 'object' && t.kind === 'signature')
+      [...(t.args ?? []), ...(t.optArgs ?? [])].forEach(
+        (a, i) => (result[i] = a.type)
+      );
   }
+  return result;
 }
 
 /**
@@ -169,10 +229,10 @@ export function declineIntervalAbsentDefault(
  * the signature declared for `h` (`ce.declare("fv", "(real, real = 2) ->
  * real")`, then `fv := (x, k) ↦ x + k`), else the default of the parameter
  * of its literal `literal` (`["Optional", k, 2]`). The declared default
- * comes first, as in the interpreter, which fills it before it applies the
- * literal (`applyFunctionLiteralWith()`, `boxed-function.ts`): with `g`
- * declared `(number, number = 2) -> number` and assigned `(x, k = 3) ↦ x
- * k`, `g(3, At(L, 9))` is 6.
+ * comes first, as in the interpreter, which fills it at canonicalization
+ * for a call that leaves the argument out (`makeCanonicalFunction()`,
+ * `box.ts`): with `g` declared `(number, number = 2) -> number` and
+ * assigned `(x, k = 3) ↦ x k`, `g(3)` is 6.
  */
 export function userFunctionDefaults(
   engine: ComputeEngine,
@@ -203,161 +263,6 @@ export function userFunctionDefaults(
 }
 
 /**
- * The declared type of each parameter of the user function `h`, by
- * position (`undefined` for a parameter without one): the annotation of the
- * parameter of its literal `literal`, else the parameter type of its
- * declared signature. The fill of a default reads it to choose its absence
- * test (`targetCoalesce()`): a parameter typed as a point also takes its
- * default for a `NaN` point.
- */
-export function userFunctionParameterTypes(
-  engine: ComputeEngine,
-  h: string,
-  literal: Expression | undefined
-): (Type | undefined)[] {
-  const result: (Type | undefined)[] = [];
-  if (literal !== undefined && isFunction(literal, 'Function'))
-    literal.ops
-      .slice(1)
-      .forEach((p, i) => (result[i] = functionLiteralParameterType(p)));
-  const def = engine.lookupDefinition(h);
-  if (def !== undefined && isValueDef(def) && !def.value.inferredType) {
-    const t = def.value.type.type;
-    if (typeof t === 'object' && t.kind === 'signature')
-      [...(t.args ?? []), ...(t.optArgs ?? [])].forEach(
-        (a, i) => (result[i] ??= a.type)
-      );
-  }
-  return result;
-}
-
-/**
- * The type that selects the absence test of the fill of each parameter with
- * a default (`targetCoalesce()`), by position: a point type (`pointArity()`)
- * selects the point test, which also reads a `NaN` point as absent, as the
- * interpreter's fill does (`withAbsentDefaults()`); any other type selects
- * the scalar test.
- *
- * The declared type of the parameter (`declared`) is used when it is a
- * point. Otherwise the static type of the value that reaches the parameter
- * (`passed`: the argument of a call or of an `Apply`, or the value that the
- * consumer of a callback passes) is used: with `O` the point `(0, 0)`,
- * `(p = O) ↦ PointX(p)` has no declared type for `p`, and a `NaN` point
- * passed to it takes the default. When no type of the passed value is known
- * at the site (`passed[i]` is `undefined`, `unknown` or `any`), the type of
- * the parameter (`declared`, else `inferred`) is used. If that is not a
- * point but the default is one (`defaultType(i)`), the parameter is meant
- * to receive a point and the fill could not choose its test without a test
- * of the type at run time: the compilation then declines (`what` names the
- * site in the message). A parameter whose default is not a point keeps the
- * scalar test there: it fills `NaN`, `undefined` and `null`, and passes a
- * `NaN` point through. Positions without a default (`defaultType(i)` is
- * `undefined`) are `undefined`.
- */
-export function defaultFillTypes(
-  count: number,
-  defaultType: (i: number) => Type | undefined,
-  declared: ReadonlyArray<Type | undefined>,
-  passed: ReadonlyArray<Type | undefined> | undefined,
-  inferred: ReadonlyArray<Type | undefined> | undefined,
-  what: string
-): (Type | undefined)[] {
-  const result: (Type | undefined)[] = [];
-  for (let i = 0; i < count; i++) {
-    const dt = defaultType(i);
-    if (dt === undefined) continue;
-    const d = declared[i];
-    if (d !== undefined && pointArity(d) !== undefined) {
-      result[i] = d;
-      continue;
-    }
-    // A position past the values that the site passes is left out: the
-    // fill reads `undefined`, which the scalar test reads as absent.
-    if (passed !== undefined && i >= passed.length) {
-      result[i] = d;
-      continue;
-    }
-    const p = passed?.[i];
-    if (p !== undefined && p !== 'unknown' && p !== 'any') {
-      result[i] = p;
-      continue;
-    }
-    const t = d ?? inferred?.[i];
-    if (
-      (t === undefined || pointArity(t) === undefined) &&
-      pointArity(dt) !== undefined
-    )
-      throw new Error(
-        `Could not compile ${what}: the parameter ${i + 1} has a default ` +
-          `value, and the value it receives can be a point whose type is ` +
-          `not known here. A \`NaN\` point takes the default, and the ` +
-          `compiled code cannot choose that test without a type. Declare ` +
-          `the type of the parameter.`
-      );
-    result[i] = t;
-  }
-  return result;
-}
-
-/** The parameter types of the signature type `t`, by position (the
- * required, then the optional ones), or `undefined` when `t` is not a
- * signature. */
-export function signatureParameterTypes(t: Type): Type[] | undefined {
-  if (typeof t !== 'object' || t.kind !== 'signature') return undefined;
-  return [...(t.args ?? []), ...(t.optArgs ?? [])].map((a) => a.type);
-}
-
-/** The type of an element `rank` list levels into a value of type `t`
- * (`leafwardElementType()` at each level), `t` itself for the rank 0, or
- * `undefined` when a level has no element type. A map over a list fills a
- * default for each element, so the type of the element selects its
- * test. */
-export function elementTypeAtRank(t: Type, rank: number): Type | undefined {
-  let result: Type | undefined = t;
-  for (let k = 0; k < rank && result !== undefined; k++)
-    result = leafwardElementType(result);
-  return result;
-}
-
-/**
- * The arguments `actuals` of a call, with each argument at a parameter with
- * a default (`defaults`, by position, `userFunctionDefaults()`) replaced by
- * `Coalesce(argument, default)`, so that an argument that is absent when the
- * call runs takes the default, with the absence test of `Coalesce`.
- *
- * A default fills an absent argument as it fills an argument that the call
- * leaves out (`withAbsentDefaults()`, `parameter-defaults.ts`).
- * Canonicalization replaces an argument written absent (`f(Missing)`) and
- * completes a call that leaves an argument out, but an argument that
- * becomes absent when it is evaluated (`f(At(L, 100))`) is filled when the
- * call runs. A compiled call of a user function emitted as a definition
- * fills it here, at the call site: the default is then compiled as an
- * operand written at the call site, as the interpreter reads it
- * (`callSiteDefault()`). An argument that cannot be absent at run time
- * (`argumentMayBeAbsent()`: a list, a point, a string, a boolean, a number
- * other than `NaN`) is kept, as is a symbol default that canonicalization
- * wrote into the call. Wrapping a list or a point would give it a union
- * type (`integer | list<real>`) whose shape is not settled, and the call
- * would decline.
- *
- * Returns `actuals` itself when nothing is replaced.
- */
-export function absentFilledArguments(
-  defaults: ReadonlyArray<Expression | undefined>,
-  actuals: ReadonlyArray<Expression>
-): ReadonlyArray<Expression> {
-  let result: Expression[] | undefined;
-  actuals.forEach((a, i) => {
-    const d = defaults[i];
-    if (d === undefined) return;
-    if (!argumentMayBeAbsent(a, d)) return;
-    result ??= [...actuals];
-    result[i] = a.engine.function('Coalesce', [a, callSiteDefault(d)]);
-  });
-  return result ?? actuals;
-}
-
-/**
  * True when the `Function` literal `literal` has no rest parameter, at most
  * `count` required parameters, at least `count` parameters, and a default
  * value for each parameter after the first `count`. A consumer that calls a
@@ -382,7 +287,7 @@ export function literalTakesArgumentCount(
 
 /**
  * The run-time absence test of every discharge (`IsMissing`, `Coalesce`,
- * `AssertPresent`, a parameter default) on the JavaScript targets, for a
+ * `AssertPresent`) on the JavaScript targets, for a
  * position of any domain: `NaN`, `undefined` and `null` are absent, the
  * spellings an absent value has in compiled code (R1 and R3 of
  * `docs/plans/2026-11-01-absent-value-contract.md`).
@@ -426,96 +331,3 @@ export const jsIsAbsentPoint = (x: string, n: number): string =>
 export const jsCoalescePoint = (x: string, d: string, n: number): string =>
   `((_c) => (${jsPointAbsentTest(n)}) ? ${d} : _c)(${x})`;
 
-/**
- * The compiled default of each parameter operand of a `Function` literal,
- * `params`, by position: `undefined` for a parameter without a default.
- * `compile` compiles the default operand as an operand written at the call
- * site (`callSiteDefault()`), so a symbol default is read when the call is
- * made.
- *
- * The emitted function fills a parameter with its default when the argument
- * is absent (`jsIsAbsent()`): left out (`undefined`), or supplied absent
- * (`undefined`, `null` or `NaN`, as `At(L, 100)` gives for a list of
- * numbers). The interpreter fills the same arguments with the same absence
- * test as `Coalesce` (`withAbsentDefaults()`, `parameter-defaults.ts`). A
- * JavaScript default parameter (`(x, k = 2) => …`) fills only `undefined`,
- * so it is not used. A parameter typed as a point also takes its default for
- * a `NaN` point (`targetCoalesce()` with the parameter types).
- */
-export function literalDefaultFills(
-  params: ReadonlyArray<Expression>,
-  compile: (e: Expression) => string
-): (string | undefined)[] {
-  return params.map((p) => {
-    const d = optionalParameterDefault(p);
-    return d === undefined ? undefined : compile(callSiteDefault(d));
-  });
-}
-
-/**
- * The fill of a default in a compiled JavaScript-family function on the
- * target `target` (`defaultFillingWrapper()`): `coalesce(x, d)` is `x`, or
- * `d` when `x` is absent, with `d` evaluated only then. On the JavaScript
- * target it is the target's `Coalesce` (`CompileTarget.absence`), for which
- * `undefined`, `null` and `NaN` are absent. On the interval target it is
- * `undefined`: only an argument that the call leaves out is filled, with a
- * JavaScript default parameter (see `declineIntervalAbsentDefault()`).
- *
- * `paramTypes` are the declared types of the parameters, by position. The
- * fill of a parameter typed as a point (`pointArity()`) uses the point axis
- * of the target (`CompileTarget.absence.point`), which reads a `NaN` point
- * as absent too, as the interpreter's fill does (`withAbsentDefaults()`).
- * The third argument of the returned function is the position of the
- * parameter.
- */
-export function targetCoalesce(
-  target: CompileTarget<Expression>,
-  paramTypes?: ReadonlyArray<Type | undefined>
-): ((x: string, d: string, i?: number) => string) | undefined {
-  if (target.language === 'interval-javascript') return undefined;
-  const base: (x: string, d: string) => string =
-    target.absence?.object?.coalesce ??
-    target.absence?.numeric.coalesce ??
-    ((x, d) => `(${jsIsAbsent(x)} ? ${d} : ${x})`);
-  const point = target.absence?.point;
-  if (point === undefined || paramTypes === undefined) return base;
-  return (x, d, i) => {
-    const t = i === undefined ? undefined : paramTypes[i];
-    const n = t === undefined ? undefined : pointArity(t);
-    return n === undefined ? base(x, d) : point.coalesce(x, d, n);
-  };
-}
-
-/**
- * A JavaScript function that calls `callee` with every argument, after it
- * fills each parameter whose argument is absent (left out, or supplied
- * absent, by `coalesce`, the `Coalesce` of the target, `targetCoalesce()`)
- * with its default. Without `coalesce`, only a parameter that the call
- * leaves out (`undefined`) is filled, with a JavaScript default parameter:
- * `((_tv1, _tv2 = 2) => callee(_tv1, _tv2))`
- * (`fills`, one entry per parameter, `undefined` for a parameter without a
- * default):
- * `((_tv1, _tv2) => callee(_tv1, ((_c) => Number.isNaN(_c ?? Number.NaN) ?
- * 2 : _c)(_tv2)))` on the JavaScript target, in parentheses, so that the text is an expression also at the
- * start of a statement.
- *
- * `fresh()` gives a parameter name that no other name of the emitted code
- * uses, so a symbol default that the target spells as a parameter name of
- * the callee reads the binding of the call site.
- */
-export function defaultFillingWrapper(
-  callee: string,
-  fills: ReadonlyArray<string | undefined>,
-  fresh: () => string,
-  coalesce: ((x: string, d: string, i?: number) => string) | undefined
-): string {
-  const params = fills.map(() => fresh());
-  if (coalesce === undefined)
-    return `((${params
-      .map((p, i) => (fills[i] === undefined ? p : `${p} = ${fills[i]}`))
-      .join(', ')}) => ${callee}(${params.join(', ')}))`;
-  const args = params.map((p, i) =>
-    fills[i] === undefined ? p : coalesce(p, fills[i]!, i)
-  );
-  return `((${params.join(', ')}) => ${callee}(${args.join(', ')}))`;
-}

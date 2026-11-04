@@ -67,7 +67,6 @@ import {
   isDestructuringParameter,
   isRestParameter,
   isScalarType,
-  optionalParameterDefault,
 } from '../boxed-expression/function-literal.js';
 import { multiClauseState } from '../multi-clause.js';
 import type { CompileTarget, TargetSource } from './types.js';
@@ -76,14 +75,8 @@ import {
   builtinOperatorDefinition,
 } from './builtin-callback.js';
 import {
-  absentFilledArguments,
-  argumentMayBeAbsent,
   completedLiteralArguments,
-  declineIntervalAbsentDefault,
   literalTakesArgumentCount,
-  targetCoalesce,
-  userFunctionDefaults,
-  userFunctionParameterTypes,
 } from './compile-parameter-defaults.js';
 import { isCompileBoundName } from './compiler-names.js';
 import {
@@ -111,7 +104,6 @@ import {
 import { core } from './compiler-core-hooks.js';
 import { tempVar, withBoundScope } from './compiler-naming.js';
 import { compileValueOperand } from './compile-statements.js';
-import { callSiteDefault } from '../boxed-expression/parameter-defaults.js';
 import { collectionElementTypeOf, typedTemp } from './compile-declarations.js';
 import { CompilerState } from './compiler-state.js';
 import { resetCompilationMemos, tryConstantFold } from './compile-folding.js';
@@ -1344,47 +1336,6 @@ export function tryCompileUserFunction(
         `interpreter gives an \`incompatible-type\` error for such a call. ` +
         `Fix the declaration (e.g. '-> list<number>') or evaluate instead.`
     );
-  // An argument at a parameter with a default is filled when it is absent
-  // at run time (`absentFilledArguments`), on the JavaScript target, whose
-  // emitted definitions take every argument from the call. The interval
-  // target declines such an argument (`declineIntervalAbsentDefault`).
-  // The compiled defaults for the map of a call that broadcasts over a
-  // list argument (`emitUserFunctionCall`): each absent cell is filled.
-  let mapDefaults:
-    | (() => ReadonlyArray<((x: string) => string) | undefined>)
-    | undefined;
-  if (
-    target.language === 'javascript' ||
-    target.language === 'interval-javascript'
-  ) {
-    const defaults = userFunctionDefaults(engine, h, literal);
-    const supplied = args;
-    declineIntervalAbsentDefault(
-      target,
-      defaults,
-      args.length,
-      (i) => argumentMayBeAbsent(supplied[i], defaults[i]!),
-      `a call of \`${h}\``
-    );
-    if (target.language === 'javascript') {
-      args = absentFilledArguments(defaults, args);
-      // Each fill is `x`, or the default when `x` is absent, with the
-      // target's `Coalesce` for the type of the parameter: a parameter
-      // typed as a point also takes its default for a `NaN` point.
-      const coalesce = targetCoalesce(
-        target,
-        userFunctionParameterTypes(engine, h, literal)
-      );
-      if (coalesce !== undefined && defaults.some((d) => d !== undefined))
-        mapDefaults = () =>
-          defaults.map((d, i) => {
-            if (d === undefined) return undefined;
-            const code = compileValueOperand(callSiteDefault(d), target);
-            return (x: string) => coalesce(x, code, i);
-          });
-    }
-  }
-
   // An argument that can be a collection, at a parameter declared
   // `expression` that the body reads, is bound whole by the interpreter,
   // and the body maps over it. The emitted definition reads that parameter
@@ -1411,8 +1362,7 @@ export function tryCompileUserFunction(
     engine,
     h,
     args,
-    target,
-    mapDefaults
+    target
   );
   if (pointList !== undefined) return pointList;
   checkListCoordinateTupleArgs(engine, h, args);
@@ -1633,8 +1583,7 @@ export function tryCompileUserFunction(
         literal,
         args,
         target,
-        node === undefined ? undefined : _prefixCallOverrides.get(node),
-        mapDefaults
+        node === undefined ? undefined : _prefixCallOverrides.get(node)
       );
     } catch (e) {
       if (e instanceof Error && e.name === 'CancellationError') throw e;
@@ -1812,8 +1761,7 @@ export function tryCompileUserFunction(
         target,
         coerceToComplex,
         paramsAreScalar,
-        prefixed.values.map((v) => core.compile(v, target)),
-        mapDefaults
+        prefixed.values.map((v) => core.compile(v, target))
       );
   }
 
@@ -1871,8 +1819,7 @@ export function tryCompileUserFunction(
     target,
     coerceToComplex,
     paramsAreScalar,
-    [],
-    mapDefaults
+    []
   );
 }
 
@@ -2269,40 +2216,19 @@ export function tryCompileLocalFunctionCall(
       args = completed;
     }
   }
-  // The interval target does not fill a supplied absent argument
-  // (`declineIntervalAbsentDefault`).
-  {
-    const defaults = literal.ops
-      .slice(1)
-      .map((p) => optionalParameterDefault(p));
-    const supplied = args;
-    declineIntervalAbsentDefault(
-      target,
-      defaults,
-      args.length,
-      (i) => argumentMayBeAbsent(supplied[i], defaults[i]!),
-      `a call of \`${h}\``
-    );
-  }
 
-  // A rebound local is compiled on the JavaScript target only. The interval
-  // target also binds a local function as a value, but it keeps the
-  // narrower contract (a function assigned once): a reassignment is often
-  // inside a statement-form `if`, and the interval lowering of an
-  // assignment inside a branch is not correct (see the else-less `If` note
-  // in `compileBlock`).
-  if (
-    rebound !== undefined &&
-    target.language !== undefined &&
-    target.language !== 'javascript'
-  )
+  // A rebound local is a function value stored in a local: its value is
+  // known only at run time. Compiled code calls a function only when the
+  // callee is a defined function, a declared function with a value or a
+  // function literal, so the call declines on every target
+  // (`docs/COMPILATION-MODEL.md`, "Function values").
+  if (rebound !== undefined)
     throw new Error(
       `Could not compile a call of \`${h}\`: the block-local function ` +
         `\`${h}\` is assigned more than once or inside a nested statement, ` +
-        `or from the result of a call, so the call must read its value at ` +
-        `run time, and target ` +
-        `'${target.language}' compiles a call of a block-local function ` +
-        `only when the function is assigned once.`
+        `or from the result of a call, so its value is a function value ` +
+        `known only at run time, which compiled code does not call. Declare ` +
+        `the function once with its value, or evaluate instead.`
     );
 
   // `["Function", body, ...params]` — one operand per declared parameter

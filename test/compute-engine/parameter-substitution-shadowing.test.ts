@@ -122,8 +122,14 @@ describe('a nested block reads the parameter', () => {
     // block declares its own `t`, which this declaration does not change.
     ce.declare('t', 'real');
     const expr = ce.box([[B, 't'], 5] as any);
+    // `B(t)` is a call whose value is a function, which compiled code does
+    // not return, so the compilation declines. The fallback `run` gives the
+    // interpreter's value.
     const result = compile(expr);
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(
+      /its value is a function, and compiled code does not return a function from a call/
+    );
     expect(result.run!({ t: 4 })).toBe(5);
     expect(expr.evaluate().subs({ t: 4 }).N().re).toBe(5);
   });

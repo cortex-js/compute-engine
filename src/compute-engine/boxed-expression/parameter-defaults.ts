@@ -33,32 +33,17 @@ import {
   isCharacter,
   isDictionary,
   isFunction,
-  isMissingValue,
   isNumber,
   isString,
   isSymbol,
 } from './type-guards.js';
-import { resolveTypeAlias } from '../../common/type/utils.js';
 import {
   parameterDefaultToString,
   typeToString,
 } from '../../common/type/serialize.js';
-
-/** Whether the call-site argument check admits `operand` at a parameter of
- * type `param`. Set by `init-lazy-refs.ts` at engine load to the check-only
- * mode of `validateArguments()`: importing `validate.ts` here would make a
- * circular dependency through the definition classes. The type is written
- * inline so that no type-only import makes the cycle either. */
-type OperandAdmission = (
-  ce: ComputeEngine,
-  operand: Expression,
-  param: Type
-) => boolean;
-
-let _admitsOperand: OperandAdmission | undefined;
-export function _setOperandAdmission(fn: OperandAdmission): void {
-  _admitsOperand = fn;
-}
+import { resolveTypeAlias } from '../../common/type/utils.js';
+import { isValueDef } from './definition-guards.js';
+import { journalCheckpointMapEntry } from '../checkpoint-journal.js';
 
 /** The message of a declaration that uses a default in a nested position. */
 export const NESTED_DEFAULT_MESSAGE =
@@ -67,6 +52,18 @@ export const NESTED_DEFAULT_MESSAGE =
 /** The message of a declaration whose overloaded signature has a default. */
 export const OVERLOADED_DEFAULT_MESSAGE =
   'a default value in an overloaded signature is not supported yet';
+
+/** The message of a default that is a symbol that is not constant (see
+ * {@link isConstantSymbolDefault}). A default is a constant: a symbol that
+ * names a variable would be read when the call runs, in a scope that the
+ * declaration does not know. */
+export const SYMBOL_DEFAULT_MESSAGE =
+  'a default value is a constant: write a number, a string, a boolean, `[]`, `{}`, a constant (a library constant or a symbol declared constant) or a symbol that the parameter type lists, or pass the argument';
+
+/** The message of a signature that has both a variadic parameter and a
+ * default. */
+export const VARIADIC_DEFAULT_MESSAGE =
+  'a function with a variadic parameter has no default values: drop the default or the variadic parameter';
 
 /** The message of a default on a parameter whose type mentions a type
  * variable. */
@@ -208,6 +205,11 @@ export function topLevelSignatureWithDefaults(
     throw new Error(
       `${subject}: A variadic parameter cannot have a default value`
     );
+  if (
+    t.variadicArg !== undefined &&
+    t.optArgs?.some((a) => a.default !== undefined)
+  )
+    throw new Error(`${subject}: ${VARIADIC_DEFAULT_MESSAGE}`);
   const firstWithout = t.optArgs?.findIndex((a) => a.default === undefined);
   if (
     firstWithout !== undefined &&
@@ -228,9 +230,191 @@ export function topLevelSignatureWithDefaults(
   return t.optArgs?.some((a) => a.default !== undefined) ? t : undefined;
 }
 
-/** The expression of a parameter default, boxed in the current scope. A
- * symbol default is the symbol itself: boxing it auto-declares a symbol that
- * is not declared, as writing it in an expression does. */
+/** The names of the literal symbol types (`symbol<Auto>`) that the
+ * parameter type `t` lists: `t` itself, or the arms of a union
+ * (`symbol<Auto> | symbol<Manual>`). Empty for any other type. */
+export function literalSymbolNames(t: Type): string[] {
+  const r = resolveTypeAlias(t);
+  if (typeof r !== 'object') return [];
+  if (r.kind === 'symbol') return [r.name];
+  if (r.kind !== 'union') return [];
+  const names: string[] = [];
+  for (const arm of r.types) {
+    const a = resolveTypeAlias(arm);
+    if (typeof a === 'object' && a.kind === 'symbol') names.push(a.name);
+  }
+  return names;
+}
+
+/**
+ * True when the symbol `name` is a constant default for a parameter of type
+ * `type` (`undefined` for a parameter with no annotation). This is the one
+ * check of a symbol default, for a declared signature and for a function
+ * literal. A constant symbol default is one of:
+ *
+ * - a symbol that the parameter type lists as a literal symbol type:
+ *   `Auto` in `mode: symbol<Auto> | symbol<Manual> = Auto`;
+ * - a constant: a symbol that the scope of the declaration binds to a value
+ *   definition that is constant. This is a constant of the standard library
+ *   (`Integers`, `Pi`), or a symbol that the host or the program declared
+ *   constant (`ce.declare('W0', { isConstant: true, value: 5 })`, an Epsil
+ *   `const`). A local of the same name in a scope between the declaration
+ *   and the system scope hides the outer constant, and the local is the
+ *   definition that is read.
+ *
+ * Any other symbol names a variable (`(k = n) ↦ k`), or is not declared,
+ * and is refused (`SYMBOL_DEFAULT_MESSAGE`). `Nothing` and `Missing` are
+ * not values that a call can receive in place of an argument, and are
+ * refused too. `True` and `False` are boolean values, not symbols, for a
+ * default (`literalParameterDefault()`).
+ *
+ * The default is boxed once, where the function is declared, and the call
+ * that leaves out the argument receives that symbol, as if the call had
+ * written it. Nothing is read where the call is made.
+ */
+export function isConstantSymbolDefault(
+  ce: ComputeEngine,
+  name: string,
+  type: Type | undefined
+): boolean {
+  if (name === 'Nothing' || name === 'Missing') return false;
+  if (type !== undefined && literalSymbolNames(type).includes(name))
+    return true;
+  // The declaration of the name that the program last canonicalized
+  // (`CONSTANT_DECLARATIONS`), in the nearest scope that declares the name
+  // or binds it. The mark comes before the binding: a binding can be left
+  // by an earlier run on the same engine (a notebook cell run again after
+  // an edit), and the declaration that the program makes now decides. So
+  // after an earlier `let W = 5`, `const W = 5; function f(k = W) {…}`
+  // accepts the default, and after an earlier `const W = 5`,
+  // `let W = 7; function f(k = W) {…}` refuses it. The binding decides
+  // only in a scope with no mark for the name.
+  for (
+    let scope: Scope | null | undefined = ce.context.lexicalScope;
+    scope;
+    scope = scope.parent
+  ) {
+    const mark = CONSTANT_DECLARATIONS.get(scope)?.get(name);
+    if (mark !== undefined) return mark === 'const';
+    if (scope.bindings.get(name) !== undefined) break;
+  }
+  const def = ce.lookupDefinition(name);
+  return def !== undefined && isValueDef(def) && def.value.isConstant === true;
+}
+
+/**
+ * For each scope, a mark for each name that a declaration of the scope
+ * declares: `'const'` for a constant declaration with a value (an Epsil
+ * `const W = 5`, `Declare(W, {value: 5, constant: True})`), `'variable'`
+ * for any other declaration (an Epsil `let`). Any value counts for a
+ * constant declaration, as for a constant that the host declares
+ * (`ce.declare('W', { isConstant: true, value: [1] })`): the binding is
+ * constant when the declaration has run, whatever its value.
+ *
+ * The binding of such a name is constant only when the declaration runs. A
+ * function or a lambda of a later statement of the same program
+ * (`function f(k = W)`) is canonicalized before that, when the binding is
+ * not constant yet, or does not exist yet (the static check of a program
+ * canonicalizes each top-level statement without running it). The `Declare`
+ * canonical handler records the name here, and `isConstantSymbolDefault()`
+ * accepts it as a constant. A function statement before the declaration (a
+ * hoisted `function f(k = W)` above `const W = 5`) is canonicalized before
+ * the name is recorded, so its default is refused.
+ *
+ * A mark is removed when the declaration runs (`declareSteps()` in
+ * `library/core.ts`) and when the host declares the name (`ce.declare()`):
+ * the binding then decides. A known limitation: the mark of a declaration
+ * that is canonicalized and never run stays. On an engine where `W` is a
+ * variable, canonicalize `Declare(W, {value: 5, constant: True})` without
+ * evaluating it: `(k = W) ↦ k` is then accepted as a constant default, and
+ * a call of it reads the variable `W`.
+ */
+const CONSTANT_DECLARATIONS = new WeakMap<
+  Scope,
+  Map<string, 'const' | 'variable'>
+>();
+
+/**
+ * Record the declaration of `name` in the current lexical scope, with the
+ * canonical attributes dictionary `attributes` (`undefined` when the
+ * declaration has none) and the positional initializer `initializer`
+ * (`undefined` when the declaration has none, as in
+ * `Declare(W, integer, 5, {constant: True})` it is `5`). A declaration with
+ * `constant: True` and a value (the initializer or a `value` entry of
+ * `attributes`) marks the name `'const'` in `CONSTANT_DECLARATIONS`.
+ * Any other declaration of the name (a `let`) marks it `'variable'`, so
+ * that the name is a variable for a later statement, whatever binding an
+ * earlier run left.
+ *
+ * Each write is journaled for checkpoint restore
+ * (`journalCheckpointMapEntry()`): a restore puts back the mark that the
+ * name had when the checkpoint was taken, or removes it.
+ */
+export function noteConstantDeclaration(
+  ce: ComputeEngine,
+  name: string,
+  attributes: Expression | undefined,
+  initializer?: Expression
+): void {
+  const scope = ce.context.lexicalScope;
+  let marks = CONSTANT_DECLARATIONS.get(scope);
+  if (marks === undefined) {
+    marks = new Map();
+    CONSTANT_DECLARATIONS.set(scope, marks);
+  }
+  journalCheckpointMapEntry(ce, marks, name, name);
+  marks.set(
+    name,
+    isConstantDeclarationWithValue(attributes, initializer)
+      ? 'const'
+      : 'variable'
+  );
+}
+
+/**
+ * Remove the mark of `name` in the scope `scope` from
+ * `CONSTANT_DECLARATIONS`. `ce.declare()` and the run of a `Declare`
+ * (`declareSteps()`) call it: the binding that the declaration makes then
+ * decides whether the name is a constant default. So after a constant declaration that was canonicalized
+ * and has not run, `ce.declare('W', 'integer')` makes `W` a variable
+ * for a later default. The write is journaled for checkpoint restore, as
+ * in `noteConstantDeclaration()`.
+ */
+export function forgetConstantDeclaration(
+  ce: ComputeEngine,
+  name: string,
+  scope: Scope
+): void {
+  const marks = CONSTANT_DECLARATIONS.get(scope);
+  if (marks === undefined || !marks.has(name)) return;
+  journalCheckpointMapEntry(ce, marks, name, name);
+  marks.delete(name);
+}
+
+/** True when the attributes dictionary `attributes` of a declaration has
+ * `constant: True`, and the declaration has a value: the positional
+ * `initializer`, or a `value` entry of `attributes`. The flag is read in
+ * either encoding, a symbol or a string, as the `Declare` handler reads
+ * it. */
+function isConstantDeclarationWithValue(
+  attributes: Expression | undefined,
+  initializer: Expression | undefined
+): boolean {
+  if (attributes === undefined || !isDictionary(attributes)) return false;
+  const flag = attributes.get('constant');
+  if (flag === undefined) return false;
+  if (
+    (isString(flag) ? flag.string : isSymbol(flag) ? flag.symbol : '') !==
+    'True'
+  )
+    return false;
+  return initializer !== undefined || attributes.get('value') !== undefined;
+}
+
+/** The expression of a parameter default. A symbol default is the symbol
+ * itself. A declaration accepts only a constant symbol default
+ * (`isConstantSymbolDefault()`), so the symbol is a constant or a symbol
+ * that the parameter type lists. */
 export function boxParameterDefault(
   ce: ComputeEngine,
   d: ParameterDefault
@@ -262,7 +446,10 @@ export function boxParameterDefault(
  * - `True` and `False` are the booleans; a string is a value.
  * - `["List"]` and `["Dictionary"]` with no operands are the empty list and
  *   the empty dictionary. A collection with elements is not a default value.
- * - Any other symbol is a symbol default, except `Nothing` and `Missing`.
+ * - Any other symbol, except `Nothing` and `Missing`, is a symbol default.
+ *   Whether it is allowed depends on the parameter type, which this
+ *   function does not read: the declaration and the canonicalization of the
+ *   literal check it (`isConstantSymbolDefault()`).
  * - Any other expression is not a default value.
  *
  * The printed signature of the literal then parses back to the same
@@ -298,198 +485,40 @@ export function literalParameterDefault(
   return undefined;
 }
 
-/** The names a parameter type lists when it is a literal symbol type
- * (`symbol<Auto>`) or a union of them (`symbol<Auto> | symbol<Manual>`), and
- * `undefined` for any other type. */
-function literalSymbolNames(t: Type): string[] | undefined {
-  const r = resolveTypeAlias(t);
-  if (typeof r !== 'object') return undefined;
-  if (r.kind === 'symbol') return [r.name];
-  if (r.kind !== 'union') return undefined;
-  const names: string[] = [];
-  for (const arm of r.types) {
-    const a = resolveTypeAlias(arm);
-    if (typeof a !== 'object' || a.kind !== 'symbol') return undefined;
-    names.push(a.name);
-  }
-  return names;
-}
-
 /**
- * Check the default `boxed` of the optional parameter `param` and throw when
- * it does not fit the parameter type.
+ * Check the default of the optional parameter `param` and throw when it is
+ * not a constant or does not fit the parameter type.
  *
  * - A number, a string, a boolean, `[]` or `{}` must match the parameter
  *   type: `factor: number = "a"` is refused, `xs: list<number> = []` is
  *   accepted (the type of `[]` is `list<never>`).
- * - A symbol is checked as the same symbol written as an operand at that
- *   parameter is checked when a call is boxed (`validateArguments`, in
- *   check-only mode so that the type of an undeclared symbol is not
- *   narrowed here). A declared symbol whose type does not fit is refused
- *   (`k: number = Integers`); an undeclared symbol has the type `unknown`
- *   and is accepted at every parameter type. In addition, when the
- *   parameter type lists symbols (`symbol<Auto> | symbol<Manual>`), the
- *   default must be one of them: a call site cannot make this check,
- *   because a written undeclared symbol is accepted there.
- * - With `ce.strict` set to `false`, `validateArguments` checks nothing, so
- *   a declared symbol whose type does not fit is accepted too
- *   (`k: number = Integers`). This is the same as a call in non-strict mode,
- *   which accepts `Integers` written as the operand at that parameter.
- *
- * The check is in two steps, so that a refused declaration boxes no symbol
- * (boxing an undeclared symbol auto-declares it):
- * - With `boxed` left out, the checks that need no boxed symbol: a value
- *   default, and the name of a symbol default against the symbols its
- *   parameter type lists.
- * - With `boxed`, the check of a symbol default as an operand.
+ * - A symbol must be a constant (`isConstantSymbolDefault()`), else it is
+ *   refused (`SYMBOL_DEFAULT_MESSAGE`). A constant must match the
+ *   parameter type (`over: set = Integers`). A symbol that the parameter
+ *   type lists matches it, and is not boxed here: boxing a symbol that is
+ *   not declared declares it.
  */
 function checkParameterDefault(
   ce: ComputeEngine,
   subject: string,
   param: NamedElement,
-  index: number,
-  boxed?: Expression
+  index: number
 ): void {
   const d = param.default!;
   const paramName =
     param.name !== undefined ? `"${param.name}"` : `at position ${index + 1}`;
   const display = parameterDefaultToString(d);
-  const refuse = (): never => {
+  if (d.kind === 'symbol') {
+    if (!isConstantSymbolDefault(ce, d.name, param.type))
+      throw new Error(
+        `${subject}: the default value ${display} of the parameter ${paramName}: ${SYMBOL_DEFAULT_MESSAGE}`
+      );
+    if (literalSymbolNames(param.type).includes(d.name)) return;
+  }
+  if (!boxParameterDefault(ce, d).type.matches(param.type))
     throw new Error(
       `${subject}: the default value ${display} of the parameter ${paramName} does not match its type "${typeToString(param.type)}"`
     );
-  };
-  if (d.kind !== 'symbol') {
-    // A value default boxes no symbol: box it here.
-    if (!boxParameterDefault(ce, d).type.matches(param.type)) refuse();
-    return;
-  }
-  if (boxed === undefined) {
-    const names = literalSymbolNames(param.type);
-    if (names !== undefined && !names.includes(d.name))
-      throw new Error(
-        `${subject}: the default value ${display} of the parameter ${paramName} is not one of the symbols its type lists (${names.join(', ')})`
-      );
-    return;
-  }
-  if (_admitsOperand !== undefined && !_admitsOperand(ce, boxed, param.type))
-    refuse();
-}
-
-/**
- * True when the canonical default operand `boxed` of a function literal's
- * parameter, which stands for the default `d` (see
- * {@link literalParameterDefault}), fits the parameter type `type`. The rules
- * are the rules of a default in a declared signature (see
- * {@link checkParameterDefault}): a value default must match the type; a
- * symbol default is checked as the same symbol written as an operand at that
- * parameter, and must be one of the symbols that a literal symbol type lists.
- */
-export function literalParameterDefaultFits(
-  ce: ComputeEngine,
-  d: ParameterDefault,
-  boxed: Expression,
-  type: Type
-): boolean {
-  if (d.kind !== 'symbol') return boxed.type.matches(type);
-  const names = literalSymbolNames(type);
-  if (names !== undefined && !names.includes(d.name)) return false;
-  return _admitsOperand === undefined || _admitsOperand(ce, boxed, type);
-}
-
-/** For each engine, the declaration in progress that `ce.declare` runs in a
- * given scope: the name it declares and that scope. Set by
- * {@link inDeclaringScope}. It is keyed on the engine, so that two engines do
- * not share it, and it applies only to a definition of that name, so that
- * another definition installed during the same declaration (a cycle
- * refinement, the repair of a definition that waited on this name) is not
- * boxed in that scope. */
-const DECLARING_SCOPE = new WeakMap<object, { name: string; scope: Scope }>();
-
-/**
- * Run `f`, the declaration of `name` in the scope `scope`, so that the
- * parameter defaults of the definition of `name` that it installs are boxed
- * in `scope` and not in the current scope. A symbol default that is not
- * declared is then auto-declared in `scope`, the scope of the definition
- * that uses it. Use it when the definition `f` installs is not yet held by a
- * binding of a scope (a definition built by `updateDef()`, which puts it in
- * the binding record only after its constructor ran).
- */
-export function inDeclaringScope<T>(
-  ce: ComputeEngine,
-  name: string,
-  scope: Scope | undefined,
-  f: () => T
-): T {
-  // An `undefined` scope means "the current scope": an entry of an outer
-  // declaration of the same name must not apply inside `f`, so the entry is
-  // removed for the duration of `f` and restored after it.
-  const previous = DECLARING_SCOPE.get(ce);
-  if (scope === undefined) {
-    if (previous?.name !== name) return f();
-    DECLARING_SCOPE.delete(ce);
-  } else DECLARING_SCOPE.set(ce, { name, scope });
-  try {
-    return f();
-  } finally {
-    if (previous === undefined) DECLARING_SCOPE.delete(ce);
-    else DECLARING_SCOPE.set(ce, previous);
-  }
-}
-
-/**
- * The scope that holds the binding of `name` to `def`: the first scope, from
- * the current lexical scope outward, whose binding record of `name` is `def`
- * or has `def` as its value or operator definition. `undefined` when no scope
- * of the current chain holds it.
- *
- * Limit: the search follows only the current chain of lexical scopes. A
- * definition bound in a scope outside that chain (a symbol boxed inside a
- * scope that was popped since, or bound in the scope of a captured function)
- * is not found, and the caller then boxes its defaults in the current scope,
- * so an undeclared symbol default is auto-declared there. Scopes keep no
- * link from a definition to the scope that binds it, so the search cannot
- * do better without one.
- */
-export function scopeHoldingDefinition(
-  ce: ComputeEngine,
-  name: string,
-  def: object
-): Scope | undefined {
-  for (
-    let scope: Scope | null = ce.context.lexicalScope;
-    scope;
-    scope = scope.parent
-  ) {
-    const record = scope.bindings.get(name);
-    if (record === undefined) continue;
-    if (
-      record === def ||
-      ('value' in record && record.value === def) ||
-      ('operator' in record && record.operator === def)
-    )
-      return scope;
-  }
-  return undefined;
-}
-
-/** Run `f` in the scope of the declaration of `def`, the definition of
- * `name`: the scope that holds its binding (see
- * {@link scopeHoldingDefinition}), else the scope given to
- * {@link inDeclaringScope} for `name`, else the current scope. */
-function inScopeOfDeclaration<T>(
-  ce: ComputeEngine,
-  name: string,
-  def: object,
-  f: () => T
-): T {
-  let scope = scopeHoldingDefinition(ce, name, def);
-  if (scope === undefined) {
-    const declaring = DECLARING_SCOPE.get(ce);
-    if (declaring?.name === name) scope = declaring.scope;
-  }
-  if (scope === undefined || scope === ce.context.lexicalScope) return f();
-  return ce._inScope(scope, f);
 }
 
 /** The boxed default operands of each definition, by the defaults they were
@@ -551,11 +580,10 @@ function remember(
 }
 
 /**
- * The checks of {@link installParameterDefaults} that box no symbol: the
- * position of each default in `t`, each value default against its parameter
- * type, and the name of each symbol default against the symbols its
- * parameter type lists. Throws when one fails. Returns the top-level
- * signature of `t` when it has a default, `undefined` otherwise.
+ * The checks of {@link installParameterDefaults}: the position of each
+ * default in `t`, and each default against its parameter type. Throws when
+ * one fails. Returns the top-level signature of `t` when it has a default,
+ * `undefined` otherwise.
  *
  * A setter that removes state before it installs a type (the assumptions
  * that the `type` setter of a symbol forgets) runs these checks first, so
@@ -578,46 +606,72 @@ export function checkParameterDefaultsUnboxed(
 
 /**
  * Check the parameter defaults of the type `t` that the definition `def`
- * declares, box each default once, in the declaring scope (see
- * {@link inScopeOfDeclaration}), and keep the boxed
- * operands on `def` for {@link parameterDefaultOperands}. Throws when a
- * default is in a position where it is not allowed (see
- * {@link topLevelSignatureWithDefaults}) or does not fit its parameter type.
- * Does nothing when `t` has no default.
+ * declares, box each default once, and keep the boxed operands on `def` for
+ * {@link parameterDefaultOperands}. Throws when a default is in a position
+ * where it is not allowed (see {@link topLevelSignatureWithDefaults}), is
+ * not a constant, or does not fit its parameter type. Does nothing when `t`
+ * has no default.
  *
- * A refused declaration auto-declares no symbol: the checks that need no
- * boxed symbol run first, then a symbol default that has a definition is
- * boxed and checked, and an undeclared symbol default is boxed (and
- * auto-declared) only when every check passed.
+ * The defaults are checked and boxed in the scope that receives the
+ * declaration of `def` when {@link inDeclaringScope} gives one for its
+ * name, else in the current scope.
  *
- * `name` is the name that `def` defines. `subject` starts the error messages
- * (`Operator Definition "F"`, `Symbol "g"`).
+ * `subject` starts the error messages (`Operator Definition "F"`,
+ * `Symbol "g"`).
  */
 export function installParameterDefaults(
   ce: ComputeEngine,
   def: BoxedOperatorDefinition | BoxedValueDefinition,
-  name: string,
   subject: string,
   t: Type
 ): void {
-  const sig = checkParameterDefaultsUnboxed(ce, subject, t);
-  if (sig === undefined) return;
-  const index = (i: number) => (sig.args?.length ?? 0) + i;
-  inScopeOfDeclaration(ce, name, def, () => {
-    // A symbol that has a definition is not auto-declared by boxing it.
-    sig.optArgs!.forEach((param, i) => {
-      const d = param.default;
-      if (d?.kind === 'symbol' && ce.lookupDefinition(d.name) !== undefined)
-        checkParameterDefault(
-          ce,
-          subject,
-          param,
-          index(i),
-          boxParameterDefault(ce, d)
-        );
-    });
+  const install = () => {
+    const sig = checkParameterDefaultsUnboxed(ce, subject, t);
+    if (sig === undefined) return;
     remember(def, sig, boxDefaults(ce, sig));
-  });
+  };
+  const declaring = DECLARING_SCOPE.get(ce);
+  const name = (def as { name?: unknown }).name;
+  if (
+    declaring === undefined ||
+    declaring.name !== name ||
+    declaring.scope === ce.context.lexicalScope
+  )
+    return install();
+  ce._inScope(declaring.scope, install);
+}
+
+/** For each engine, the declaration in progress that `ce.declare()` runs in
+ * a given scope: the name it declares and that scope. Set by
+ * {@link inDeclaringScope}. It is keyed on the engine, so that two engines
+ * do not share it, and it applies only to a definition of that name, so
+ * that another definition installed during the same declaration (the repair
+ * of a definition that waited on this name) is not checked in that scope. */
+const DECLARING_SCOPE = new WeakMap<object, { name: string; scope: Scope }>();
+
+/**
+ * Run `f`, the declaration of `name` in the scope `scope`, so that the
+ * parameter defaults of the definition of `name` that it installs are
+ * checked and boxed in `scope`, not in the current scope. A symbol default
+ * is a constant of the scope of the declaration: with a constant `W = 5` in
+ * an outer scope and a constant `W = 7` in the current inner scope, a
+ * declaration of `f: (k: real = W) -> real` in the outer scope gives `k`
+ * the outer `W`, 5.
+ */
+export function inDeclaringScope<T>(
+  ce: ComputeEngine,
+  name: string,
+  scope: Scope,
+  f: () => T
+): T {
+  const previous = DECLARING_SCOPE.get(ce);
+  DECLARING_SCOPE.set(ce, { name, scope });
+  try {
+    return f();
+  } finally {
+    if (previous === undefined) DECLARING_SCOPE.delete(ce);
+    else DECLARING_SCOPE.set(ce, previous);
+  }
 }
 
 /**
@@ -658,12 +712,59 @@ export function signatureDefaultOperands(
 ): ReadonlyArray<Expression | undefined> | undefined {
   if (typeof t !== 'object' || t.kind !== 'signature') return undefined;
   if (!t.optArgs?.some((a) => a.default !== undefined)) return undefined;
+  // The defaults boxed for an explicit declaration of the signature
+  // (`installParameterDefaults`) come first: the literal assigned later can
+  // name the same symbols, but bound in another scope. The operands of the
+  // literal are read only for a signature that has no such defaults, the
+  // signature derived from that literal.
   const key = defaultsKey(t);
   const known = BOXED_DEFAULTS.get(def)?.get(key);
   if (known !== undefined) return known;
+  const ofLiteral = literalDefaultOperands(def, t);
+  if (ofLiteral !== undefined) return ofLiteral;
   const operands = boxDefaults(ce, t);
   remember(def, t, operands);
   return operands;
+}
+
+/**
+ * The default operands of the canonical function literal that `def` was
+ * built from (an operator definition made by assigning a literal) or holds
+ * (a value definition), aligned with the `optArgs` of the signature `t`.
+ * `undefined` when `def` has no canonical function literal, or when the
+ * defaults of the literal are not those of `t`.
+ *
+ * The literal canonicalized each default operand in the scope where it was
+ * written, so a symbol default is bound to the constant that this scope
+ * gives it. Boxing the same name again where the call is made would read a
+ * local of the same name in the scope of the call instead
+ * (`Block(Declare(W0, integer, 7), f())` with `f := (k = W0) ↦ k + 1`, where
+ * `W0` is a constant). The parameters with a default come after the
+ * required parameters, in the order of `optArgs`.
+ */
+function literalDefaultOperands(
+  def: BoxedOperatorDefinition | BoxedValueDefinition,
+  t: FunctionSignature
+): ReadonlyArray<Expression | undefined> | undefined {
+  const lit = 'signature' in def ? def._lambdaLiteral : def.value;
+  if (lit === undefined || !lit.isCanonical || !isFunction(lit, 'Function'))
+    return undefined;
+  const operands = lit.ops
+    .slice(1)
+    .filter((p) => isFunction(p, 'Optional'))
+    .map((p) => (isFunction(p, 'Optional') ? p.op2 : undefined));
+  const optArgs = t.optArgs ?? [];
+  if (operands.length !== optArgs.length) return undefined;
+  const derived: FunctionSignature = {
+    ...t,
+    optArgs: optArgs.map((a, i) => {
+      const d = literalParameterDefault(operands[i]!);
+      return d === undefined
+        ? { ...a, default: undefined }
+        : { ...a, default: d };
+    }),
+  };
+  return defaultsKey(derived) === defaultsKey(t) ? operands : undefined;
 }
 
 /**
@@ -686,13 +787,11 @@ export function signatureDefaultOperands(
  *   `(x: number, factor: number = 2)`), nothing is inserted: the call reports
  *   `missing` for the required parameter as it does without defaults, and a
  *   default is never moved into a required position.
- * - An operand that is absent (`Missing`, `NaN`,
- *   a `NaN` point: the absence test of `Coalesce`,
- *   `isMissingValue()`) at
- *   a parameter with a default is replaced by the default too
- *   (`withAbsentDefaults()`). An operand that is present is never changed.
+ * - An operand that the call supplies is never changed, also when it is
+ *   absent (`Missing`, `NaN`): the parameter receives that value. A default
+ *   fills only a position that the call leaves out.
  *
- * Returns `ops` itself when nothing is inserted or replaced.
+ * Returns `ops` itself when nothing is inserted.
  */
 export function fillParameterDefaults(
   ops: ReadonlyArray<Expression>,
@@ -704,87 +803,11 @@ export function fillParameterDefaults(
     return ops;
   const required = signature.args?.length ?? 0;
   if (supplied < required) return ops;
-  ops = withAbsentDefaults(ops, required, defaults, callSiteDefault);
   const added: Expression[] = [];
   for (let i = supplied - required; i < defaults.length; i++) {
     const d = defaults[i];
     if (d === undefined) break;
-    added.push(callSiteDefault(d));
+    added.push(d);
   }
   return added.length === 0 ? ops : [...ops, ...added];
-}
-
-/**
- * The operands `ops` of a call, with each operand that is absent at a
- * parameter with a default replaced by `read(d)`, where `d` is the default
- * operand of that parameter. Returns `ops` itself when nothing is replaced.
- *
- * A default fills an absent argument as it fills an argument that the call
- * leaves out: `(k: real | missing = 2) ↦ k` gives 2 for `f()`, `f(Missing)`
- * and `f(At(L, 100))` with `L` a list of two elements. The default is then a
- * discharge of absence, as `Coalesce` is, and it uses the same absence test
- * (`isMissingValue()`): `Missing`, `NaN` and a `NaN`
- * point are absent. `Nothing` is not absent: a written `Nothing` operand is
- * kept as the argument, so the parameter receives `Nothing` and its default
- * is not used (`Apply((x, k = 2) ↦ k, 1, Nothing)` is `Nothing`). A
- * caller that needs to pass an absent value through a parameter declares no
- * default for it. (R6 of `docs/plans/2026-11-01-absent-value-contract.md`.)
- *
- * The operand at position `i` is the argument of the parameter at position
- * `i`: `ops` is flat. A top-level `Sequence` operand (a list of operands
- * that is not flattened yet) stands for several positions; its elements are
- * not replaced, and the positions after it are counted past it. `required`
- * is the number of parameters without a default before the first one with
- * a default, and `defaults` is aligned with the parameters after them.
- *
- * At canonicalization `read` is `callSiteDefault`, and only an operand that
- * is written absent is replaced (`f(Missing)`). At evaluation `read` also
- * evaluates the default, and the operands are the evaluated arguments, so an
- * argument that evaluates to an absent value is replaced (`f(At(L, 100))`).
- * `read` receives the index of the operand in `ops` too, so that it can
- * evaluate the default as it evaluates an operand at that position.
- */
-export function withAbsentDefaults(
-  ops: ReadonlyArray<Expression>,
-  required: number,
-  defaults: ReadonlyArray<Expression | undefined>,
-  read: (d: Expression, index: number) => Expression
-): ReadonlyArray<Expression> {
-  let result: Expression[] | undefined;
-  let position = 0;
-  for (let i = 0; i < ops.length; i++) {
-    const op = ops[i];
-    if (isFunction(op, 'Sequence')) {
-      position += op.nops;
-      continue;
-    }
-    const d = defaults[position - required];
-    position += 1;
-    if (d === undefined || !isMissingValue(op)) continue;
-    result ??= [...ops];
-    result[i] = read(d, i);
-  }
-  return result ?? ops;
-}
-
-/**
- * The operand that a call receives for the boxed default `d` of a parameter
- * that it leaves out.
- *
- * A value default (a number, a string, `True`, `False`, `[]`, `{}`) is `d`
- * itself. A symbol default is the symbol boxed again in the current scope,
- * which is the scope of the call: the default behaves exactly as the symbol
- * written in the call, and reads the binding that a written symbol reads. The
- * operand boxed at declaration is bound in the declaring scope, so a
- * declaration of the same name in a scope that encloses the call would not
- * be read through it. That operand is still used to check the default and to
- * auto-declare an undeclared symbol in the declaring scope. A call whose
- * callee can change records the lexical scope of the call. When the callee
- * changes, the call is boxed again in that scope
- * (`BoxedFunction._stampCallee()`), so a symbol default, of the old or of the
- * new definition, reads the binding of the scope of the call.
- */
-export function callSiteDefault(d: Expression): Expression {
-  if (!isSymbol(d) || d.symbol === 'True' || d.symbol === 'False') return d;
-  return d.engine.symbol(d.symbol);
 }

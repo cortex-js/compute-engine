@@ -11,7 +11,15 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 // `f(x, k = 2) = …`, `(x, k = 2) => …`, `(x, k: number = 2) => …`. A parameter
 // with a default lowers to the `Function` operand `["Optional", param,
 // default]`, and the engine completes a call that leaves the argument out.
-// The design is `docs/plans/2026-10-31-parameter-default-values.md` (R7).
+//
+// A default is a constant: a number, a string, `true` or `false`, `[]`,
+// `{}`, a library constant (`pi`, `Integers`) or a symbol that the parameter
+// type lists (`mode: symbol<Auto> | symbol<Manual> = Auto`). The engine
+// refuses any other symbol default when the function is defined
+// (`expected-a-literal-default`). A rest parameter with a default is refused
+// by the parser (`default-value-invalid`). A default fills only an argument
+// that the call leaves out; a value that the call supplies, also an absent
+// one, is passed through.
 //
 
 /** Drop the parser's `sourceOffsets` decoration and the object spellings of
@@ -187,6 +195,8 @@ describe('PARAMETER DEFAULT VALUES — parse', () => {
 describe('PARAMETER DEFAULT VALUES — invalid defaults', () => {
   const INVALID =
     'a default value is a number, a string, a boolean, a symbol, `[]` or `{}`';
+  const SYMBOL =
+    'a default value is a constant: write a number, a string, a boolean, `[]`, `{}`, a constant (a library constant or a symbol declared constant) or a symbol that the parameter type lists, or pass the argument';
 
   test.each([
     ['an expression', '(x, k = x + 1) => x'],
@@ -227,10 +237,46 @@ describe('PARAMETER DEFAULT VALUES — invalid defaults', () => {
     ]);
   });
 
-  // The parser cannot see scopes, so it refuses only the exact names. The
-  // library constant spelled `missing` is refused by the engine after name
-  // resolution; a user binding or a backticked name `missing` is a valid
-  // symbol default.
+  // The parser cannot see scopes or the library, so it accepts a symbol
+  // default. The engine checks that the symbol is constant when the function
+  // is defined.
+  test('a symbol default that names a variable is refused by the engine', () => {
+    for (const source of [
+      'let s = (x, k = Auto) => x\ns(1)',
+      'let d = 2\nlet s = (x, k = d) => x * k\ns(3)',
+      'let missing = 7\nlet f = (x, k = missing) => x + k\nf(3)',
+    ]) {
+      expect(parseDiagnostics(source)).toEqual([]);
+      const r = run(source);
+      expect(r.diagnostics[0]).toEqual([
+        'static-type-error',
+        expect.stringContaining(SYMBOL),
+        expect.any(String),
+        'expected-a-literal-default',
+      ]);
+    }
+  });
+
+  // A function statement is hoisted: it is defined before the `const` that
+  // follows it has run, so the name is not a constant there, and the default
+  // is refused, as a `let` is.
+  test('a `const` declared after the function, or a `let`, is refused', () => {
+    for (const source of [
+      'function f(k = W) { k + 1 }; const W = 5; f()',
+      'function g() { function f(k = W) { k + 1 }; const W = 5; f() }; g()',
+      'let W = 5; function f(k = W) { k + 1 }; f()',
+      'const W = 5; function g() { let W = 2; let h = (k = W) => k + 1; h() }; g()',
+    ]) {
+      const r = run(source);
+      expect(r.diagnostics[0]).toEqual([
+        'static-type-error',
+        expect.stringContaining(SYMBOL),
+        expect.any(String),
+        'expected-a-literal-default',
+      ]);
+    }
+  });
+
   test('the library constant `missing` is refused after name resolution', () => {
     expect(parseDiagnostics(`(x, k = missing) => x`)).toEqual([]);
     const r = run('let f = (x, k = missing) => x\nf(3)');
@@ -239,11 +285,13 @@ describe('PARAMETER DEFAULT VALUES — invalid defaults', () => {
     );
   });
 
-  test('a user binding named `missing` is a valid default', () => {
-    expect(
-      value('let missing = 7\nlet f = (x, k = missing) => x + k\nf(3)')
-    ).toBe(10);
-    expect(value('let f = (x, k = `missing`) => x\nf(3)')).toBe(3);
+  test('a function with a rest parameter has no default values', () => {
+    expect(parseDiagnostics('(x, k = 2, ...r) => x')).toEqual([
+      [
+        'default-value-invalid',
+        'a function with a rest parameter has no default values: drop the default or the rest parameter',
+      ],
+    ]);
   });
 
   test('a refused default leaves the parameter required', () => {
@@ -342,15 +390,90 @@ describe('PARAMETER DEFAULT VALUES — evaluate', () => {
     expect(value('let g = (d = {->}) => d\ng()')).toEqual({ dict: {} });
   });
 
-  test('a symbol default is read as if the caller wrote it', () => {
-    expect(value('let s = (x, mode = Auto) => [x, mode]\ns(1)')).toEqual([
+  test('a constant symbol default: a library constant, or a symbol that the type lists', () => {
+    expect(value('let s = (x, k = pi) => x * k\ns(1)')).toBe('Pi');
+    expect(value('let s = (x, over: set = Integers) => x in over\ns(1)')).toBe(
+      'True'
+    );
+    expect(
+      value(
+        'let s = (x, mode: symbol<Auto> | symbol<Manual> = Auto) => [x, mode]\ns(1)'
+      )
+    ).toEqual(['List', 1, 'Auto']);
+    expect(
+      value(
+        'function f(x, mode: symbol<Auto> | symbol<Manual> = Auto) { [x, mode] }\nf(1)'
+      )
+    ).toEqual(['List', 1, 'Auto']);
+  });
+
+  // A `const` of the same program, declared before the function, is a
+  // constant default, also before the declaration has run (the static check
+  // of the program canonicalizes the function without running the `const`).
+  test('a `const` of the program declared before the function', () => {
+    expect(value('const W = 5; function f(k = W) { k + 1 }; f()')).toBe(6);
+    expect(value('const V = 5; let h = (k = V) => k + 1; h()')).toBe(6);
+    // Any value of a `const` counts, as for a constant the host declares.
+    expect(value('const W = [1]; function f(k = W) { k }; f()')).toEqual([
       'List',
       1,
-      'Auto',
     ]);
-    // A lowercase library spelling resolves as in a call.
-    expect(value('let s = (x, k = pi) => x * k\ns(1)')).toBe('Pi');
-    expect(value('let d = 2\nlet s = (x, k = d) => x * k\ns(3)')).toBe(6);
+    expect(
+      value(
+        'function g() { const W = 5; function f(k = W) { k + 1 }; f() }; g()'
+      )
+    ).toBe(6);
+    expect(
+      value(
+        'function g() { const W = 5; do { let h = (k = W) => k + 1; h() } }; g()'
+      )
+    ).toBe(6);
+  });
+
+  // A program run again on the same engine (a notebook cell edited and run
+  // again) finds the binding that the earlier run left. The declaration of
+  // the program that runs now decides, not that binding.
+  test('a run on an engine that an earlier run left a binding in', () => {
+    const ce = new ComputeEngine();
+    expect(executeEpsil(ce, 'let W = 5').diagnostics).toEqual([]);
+    const a = executeEpsil(ce, 'const W = 5; function f(k = W) { k + 1 }; f()');
+    expect(a.diagnostics).toEqual([]);
+    expect(a.value?.json).toBe(6);
+
+    const ce2 = new ComputeEngine();
+    expect(executeEpsil(ce2, 'const W = 5').diagnostics).toEqual([]);
+    const b = executeEpsil(ce2, 'let W = 7; function f(k = W) { k }; f()');
+    expect(b.diagnostics.map((d) => d.message[d.message.length - 1])).toContain(
+      'expected-a-literal-default'
+    );
+
+    // A destructuring `let` makes each name of its pattern a variable, for
+    // the static check too (not only for the run).
+    const ce3 = new ComputeEngine();
+    expect(executeEpsil(ce3, 'const W = 5').diagnostics).toEqual([]);
+    const c = executeEpsil(
+      ce3,
+      'let (W, b) = (7, 0); function f(k = W) { k }; f()'
+    );
+    expect(
+      c.diagnostics.map(
+        (d) => `${d.message[0]}: ${d.message[d.message.length - 1]}`
+      )
+    ).toContain('static-type-error: expected-a-literal-default');
+  });
+
+  test('an argument that the call supplies is not replaced by the default', () => {
+    expect(value('let g = (x, k = 2) => [x, k]\ng(1, 5)')).toEqual([
+      'List',
+      1,
+      5,
+    ]);
+    expect(
+      value('let g = (x, k = 2) => [x, isMissing(k)]\ng(1, Missing)')
+    ).toEqual(['List', 1, 'True']);
+    expect(
+      value('let g = (x, k = 2) => [x, isMissing(k)]\ng(1)')
+    ).toEqual(['List', 1, 'False']);
   });
 
   test('a hold definition with a default', () => {
@@ -440,13 +563,13 @@ describe('PARAMETER DEFAULT VALUES — print', () => {
 
   test('`epsil doc` shows the default in the signature', () => {
     const { ce } = run(
-      'function f(x: number, k: number = 2) -> number { x * k }\nlet g = (xs = [], mode = Auto) => xs'
+      'function f(x: number, k: number = 2) -> number { x * k }\nlet g = (xs = [], mode = "auto") => xs'
     );
     expect(describeName(ce, 'f')?.signature).toBe(
       '(x: number, k: number = 2) -> number'
     );
     expect(describeName(ce, 'g')?.type).toBe(
-      '(xs: unknown = [], mode: unknown = Auto) -> unknown'
+      '(xs: unknown = [], mode: unknown = "auto") -> unknown'
     );
   });
 });

@@ -43,7 +43,6 @@ import {
   isDestructuringParameter,
   isScalarType,
   isWideParameterType,
-  isOptionalParameter,
   optionalParameterDefault,
   optionalParameterTarget,
 } from './function-literal.js';
@@ -315,39 +314,13 @@ function declaredParameterTypes(
   return [...(sig.args ?? []), ...(sig.optArgs ?? [])].map((a) => a.type);
 }
 
-/** Whether the declared signature of the function bound by `binding` (the
- * source that `declaredParameterTypes()` reads) gives a default value to
- * the parameter at position `i`: `ce.declare('g', '(integer, integer = 2)
- * -> integer')` gives one to the position 1. The interpreter fills it as it
- * fills the default of the literal (`userFunctionDefaults()`,
- * `compile-parameter-defaults.ts`). */
-function declaredDefaultAt(
-  binding: BoxedDefinition | undefined,
-  i: number
-): boolean {
-  if (!binding) return false;
-  let sig: Type | undefined;
-  if ('operator' in binding) {
-    if (binding.operator.inferredSignature) return false;
-    sig =
-      binding.operator._validationSignature ?? binding.operator.signature?.type;
-  } else {
-    if (binding.value.inferredType) return false;
-    sig = binding.value.type?.type;
-  }
-  if (typeof sig !== 'object' || sig.kind !== 'signature') return false;
-  const j = i - (sig.args?.length ?? 0);
-  return j >= 0 && sig.optArgs?.[j]?.default !== undefined;
-}
-
 /** Whether an argument in `args` is typed `missing` at a parameter of
  * `literal` whose type is numeric or a point (a tuple of numbers,
  * `pointArity()`). The type of the parameter is its annotation in the
  * literal, else its type in the declared signature of the function. A
- * parameter with a default value, in the literal or in the declared
- * signature (`declaredDefaultAt()`), does not count: the call gives it its
- * default in place of the absent argument, so with
- * `f := (x: integer = 2) ↦ x`, `f(First([]))` is `2`. */
+ * parameter with a default value counts as any other: a default fills only
+ * an argument that the call leaves out, so with `f := (x: integer = 2) ↦ x`,
+ * `f(First([]))` is `Missing`. */
 function alwaysAbsentAtNumericParameter(
   literal: Expression & FunctionInterface,
   binding: BoxedDefinition | undefined,
@@ -358,9 +331,7 @@ function alwaysAbsentAtNumericParameter(
   return args.some((a, i) => {
     if (
       resolveTypeAlias(a.type) !== 'missing' ||
-      i >= params.length ||
-      isOptionalParameter(params[i]) ||
-      declaredDefaultAt(binding, i)
+      i >= params.length
     )
       return false;
     if (declaredParams === null)

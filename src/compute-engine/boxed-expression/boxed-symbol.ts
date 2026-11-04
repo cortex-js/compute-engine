@@ -138,9 +138,7 @@ import {
 import { cacheOff } from '../../common/cache-switches.js';
 import {
   checkParameterDefaultsUnboxed,
-  inDeclaringScope,
   installParameterDefaults,
-  scopeHoldingDefinition,
 } from './parameter-defaults.js';
 import {
   CYCLE_DETECTED,
@@ -1581,7 +1579,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         installParameterDefaults(
           this.engine,
           symbolDef.operator,
-          this._id,
           `Operator Definition "${this._id}"`,
           signature.type
         );
@@ -1605,14 +1602,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // `binding-repair`), so the event must carry a zero parity mask —
         // the callable axis selects `type-write{either side}` identically.
         const callableBefore = defIsCallableShaped(symbolDef);
-        // The parameter defaults of the new operator definition are boxed
-        // in the scope that holds the binding of this symbol.
-        inDeclaringScope(
-          this.engine,
-          this._id,
-          scopeHoldingDefinition(this.engine, this._id, symbolDef),
-          () => updateDef(this.engine, this._id, symbolDef, { signature: t })
-        );
+        updateDef(this.engine, this._id, symbolDef, { signature: t });
         this.engine._noteStateEvent({
           kind: 'type-write',
           callableBefore,
@@ -1624,14 +1614,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // We are changing a function to a symbol — callability LEAVES the
         // binding (§2b). Zero-mask `type-write` for the same parity reason
         // as the symbol→function branch above.
-        // The parameter defaults of the new value definition are boxed in
-        // the scope that holds the binding of this symbol.
-        inDeclaringScope(
-          this.engine,
-          this._id,
-          scopeHoldingDefinition(this.engine, this._id, symbolDef),
-          () => updateDef(this.engine, this._id, symbolDef, { type: t })
-        );
+        updateDef(this.engine, this._id, symbolDef, { type: t });
         this.engine._noteStateEvent({
           kind: 'type-write',
           callableBefore: true,
@@ -1645,7 +1628,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         installParameterDefaults(
           this.engine,
           symbolDef.value,
-          this._id,
           `Symbol "${this._id}"`,
           t as Type
         );

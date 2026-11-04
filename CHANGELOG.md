@@ -78,6 +78,58 @@
     the result to a local declared before the loop, and end the block with
     the local.
 
+- **Compiled code calls only a function it can see, and a parameter default
+  fills only an argument that the call leaves out.** A compiled call compiles
+  when the callee is a defined function, a declared function with a value,
+  or a function literal at the call site; the callbacks of `Map`, `Filter`,
+  `Sort`, `Fold` and `Reduce` compile when they are such a callee, and
+  `Apply(Derivative(f, n), x)` with `f` defined compiles as before. The
+  interpreter keeps first-class functions: lambdas, closures, currying,
+  partial application and function values. Breaking changes, each with its
+  replacement:
+  - In compiled code, a curried call or a partial application
+    (`Apply(Apply(f, 1), u)`, `Apply(f, 1)`), a function passed as an
+    argument or through a parameter of function type
+    (`h = (g: function) ↦ g(1)`, `h(x ↦ x + u)`), a function returned from
+    a call (`Apply(mk(1), u)`) and a function stored in a local that is
+    assigned more than once decline: the compilation falls back to the
+    interpreter. Write the call with every argument (`f(1, u)`), call the
+    function directly in the body, or define one function per case.
+  - A default no longer fills a supplied absent value, in the interpreter
+    and in compiled code: this reverses the change of 0.177.0. With
+    `g = (k: real = 2) ↦ k + 1`, `g()` is still `3` (the default is filled
+    at canonicalization, and every target, GLSL, WGSL and `interval-js`
+    included, completes the call when it compiles it), but `g(Missing)` and
+    `g(First([]))` pass `Missing` to the body and give `Missing`, and
+    `g(0/0)` gives `NaN`. In compiled code, `g(At(L, 100))` with
+    `L: list<real>` passes `NaN`, a value outside `real`, so its result is
+    not specified. To replace an absent argument, write it in the call:
+    `g(Coalesce(At(L, 100), 2))` is `3`. A default parameter is no longer
+    one of the operators that read an absent value; `interval-js` no longer
+    declines a call that supplies a number at a defaulted parameter.
+  - A default is a constant: a number, a string, a boolean, `[]`, `{}`, a
+    library constant (`over: set = Integers`, `k: real = Pi`), a symbol
+    declared with `isConstant: true` (`weights: list<number> =
+    DefaultWeights`), a `const` of an Epsil program, or a symbol that the
+    parameter type lists (`mode: symbol<Auto> | symbol<Manual> = Auto`).
+    The default is bound where the function is declared: a local of the
+    same name at the call site does not change it. A default that names a
+    variable (`(k = n) ↦ k` with `n` declared without `isConstant`, or
+    assigned) is the static error `expected-a-literal-default` in a
+    function literal, and makes `ce.declare()` throw for a signature (in
+    0.176.0 and 0.177.0 the symbol was read at the call site): declare the
+    symbol constant, write the value, or pass the argument. In compiled
+    code, a default that is a library constant or a symbol that the type
+    lists is filled; a default that names a constant declared by the host
+    or by the program declines (write the value as the default, or pass the
+    argument).
+  - A function literal with a rest parameter has no default: a default on
+    such a literal is a static error. Pass the argument.
+  - In the JavaScript `bigint` mode, a supplied `NaN` or `null` at a
+    parameter with a default throws the entry `TypeError` of a supplied
+    value that is not an integer; only a left-out argument (`undefined`)
+    takes the default.
+
 - **The compile mode `'auto'` is removed; `'strict'` is the default of
   every target.** The lane of a compiled value follows its static type: it
   is complex for a declared `complex` input or parameter, a complex literal

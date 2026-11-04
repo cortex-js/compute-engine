@@ -15,11 +15,14 @@ import type { Type } from '../../common/type/types.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import {
   functionLiteralParameterName,
+  functionLiteralParameterType,
   isRestParameter,
   optionalParameterDefault,
 } from '../boxed-expression/function-literal.js';
-import { callSiteDefault } from '../boxed-expression/parameter-defaults.js';
-import { literalTakesArgumentCount } from './compile-parameter-defaults.js';
+import {
+  compiledSymbolDefaultDeclines,
+  literalTakesArgumentCount,
+} from './compile-parameter-defaults.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
 import {
   builtinCallbackArity,
@@ -1034,11 +1037,23 @@ function tryUnrollMap(
   // `Map` would read (`completedLiteralArguments`).
   if (!isFunction(lambda, 'Function') || !literalTakesArgumentCount(lambda, 1))
     return undefined;
+  // A symbol default that compiled code does not fill (a constant that the
+  // host or the program declares) is not substituted: the `Map` is not
+  // unrolled, and its compilation declines (`compiledSymbolDefaultDeclines()`).
   const defaults: Record<string, Expression> = {};
   for (const p of lambda.ops.slice(2)) {
     const name = functionLiteralParameterName(p);
     if (!name) return undefined;
-    defaults[name] = callSiteDefault(optionalParameterDefault(p)!);
+    const d = optionalParameterDefault(p)!;
+    if (
+      compiledSymbolDefaultDeclines(
+        expr.engine,
+        d,
+        functionLiteralParameterType(p)
+      )
+    )
+      return undefined;
+    defaults[name] = d;
   }
   const defaultOperands = Object.values(defaults);
 

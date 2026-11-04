@@ -841,7 +841,6 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       installParameterDefaults(
         this.engine,
         this,
-        this.name,
         `Operator Definition "${this.name}"`,
         value.type
       );
@@ -2322,7 +2321,6 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       installParameterDefaults(
         this.engine,
         this,
-        this.name,
         `Operator Definition "${this.name}"`,
         newSig.type
       );

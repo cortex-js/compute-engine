@@ -138,7 +138,11 @@ describe('compiled Map proves a possible Nothing separately from a broad result 
         ['Typed', 'h', '(real) -> real'],
       ]);
     expect(compile(build('h')).success).toBe(false);
-    expect(compile(build(['Typed', 'h', '(real) -> real'])).success).toBe(true);
+    // A parameter declared with a function type declines in compiled code
+    // (`docs/COMPILATION-MODEL.md`, "Function values").
+    const typed = compile(build(['Typed', 'h', '(real) -> real']));
+    expect(typed.success).toBe(false);
+    expect(typed.error).toMatch(/declared with a function type/);
   });
 
   test('a loop callback cannot borrow the contract of a shadowed parameter', () => {
@@ -151,13 +155,15 @@ describe('compiled Map proves a possible Nothing separately from a broad result 
       expect(diagnostics).toEqual([]);
       return compile(ce.box(resolveLibraryNames(program, src, ce)));
     };
+    // The parameter `h` is declared with a function type, which compiled
+    // code does not compile (`docs/COMPILATION-MODEL.md`, "Function
+    // values"): both programs decline before the callback is read.
     const shadowed = build(source);
     expect(shadowed.success).toBe(false);
-    expect(shadowed.error).toMatch(/Nothing/);
+    expect(shadowed.error).toMatch(/declared with a function type/);
     const captured = build(source.replace('for h in fs', 'for item in fs'));
-    expect(captured.success).toBe(true);
-    const run = captured.run!({}) as Function;
-    expect(run((x: number) => 2 * x, [() => undefined])).toEqual([[2, 4]]);
+    expect(captured.success).toBe(false);
+    expect(captured.error).toMatch(/declared with a function type/);
   });
 
   test.each([false, true])(
@@ -177,9 +183,17 @@ describe('compiled Map proves a possible Nothing separately from a broad result 
       expect(shadowed.success).toBe(false);
       expect(shadowed.error).toMatch(/Nothing/);
       const captured = build(source.replace('for h in fs', 'for item in fs'));
+      // A local function that is assigned twice is a function value stored
+      // in a local, which compiled code does not compile
+      // (`docs/COMPILATION-MODEL.md`, "Function values").
+      if (mutable) {
+        expect(captured.success).toBe(false);
+        expect(captured.error).toMatch(/assigned more than once/);
+        return;
+      }
       expect(captured.success).toBe(true);
       const run = captured.run!({}) as Function;
-      expect(run([() => undefined])).toEqual([mutable ? [2, 4] : [2, 3]]);
+      expect(run([() => undefined])).toEqual([[2, 3]]);
     }
   );
 
@@ -198,9 +212,12 @@ describe('compiled Map proves a possible Nothing separately from a broad result 
     const omitted = build(source);
     expect(omitted.success).toBe(false);
     expect(omitted.error).toMatch(/Nothing/);
+    // The reassigned `h` is a function value stored in a local, which
+    // compiled code does not compile (`docs/COMPILATION-MODEL.md`, "Function
+    // values"), with or without a visible `Nothing`.
     const numeric = build(source.replace('Return(Nothing)', 'Return(9)'));
-    expect(numeric.success).toBe(true);
-    expect(numeric.run!({ flag: true })).toEqual([9, 9]);
+    expect(numeric.success).toBe(false);
+    expect(numeric.error).toMatch(/assigned more than once/);
   });
 
   test('a numeric callback does not justify a source that can hold Nothing', () => {

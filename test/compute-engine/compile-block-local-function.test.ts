@@ -44,6 +44,30 @@ function program(source: string) {
 }
 
 /** The compiled program's result, and the interpreter's, for comparison. */
+/**
+ * The value of `compiled` when the compilation declines a call of a
+ * block-local function that is assigned more than once. Such a function is a
+ * function value known only at run time, and compiled code does not call a
+ * function value (`docs/COMPILATION-MODEL.md`, "Function values"). The
+ * interpreter keeps the call.
+ */
+const DECLINED = 'declined: a function value stored in a local';
+const REBOUND = /its value is a function value known only at run time/;
+
+/** `compile()`, or `undefined` when it declines a rebound local function
+ * (`REBOUND`). Any other decline throws. */
+function compileOrRebound(
+  expr: ReturnType<ComputeEngine['box']>,
+  options: Record<string, unknown>
+): ReturnType<typeof compile> | undefined {
+  try {
+    return compile(expr, options as never)!;
+  } catch (e) {
+    if (REBOUND.test(String((e as Error).message))) return undefined;
+    throw e;
+  }
+}
+
 function both(
   source: string,
   options?: {
@@ -53,11 +77,17 @@ function both(
   }
 ): { compiled: unknown; interpreted: string; code: string } {
   const expr = program(source);
-  const result = compile(expr, {
+  const result = compileOrRebound(expr, {
     to: options?.to ?? 'javascript',
     fallback: false,
     ...(options?.constantFold === false ? { constantFold: false } : {}),
-  } as never)!;
+  });
+  if (result === undefined)
+    return {
+      compiled: DECLINED,
+      interpreted: program(source).evaluate().toString(),
+      code: '',
+    };
   return {
     compiled: result.run!((options?.vars ?? {}) as never),
     // A SECOND boxing, so the compilation above never saw an evaluated engine.
@@ -432,20 +462,20 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     json: unknown,
     vars: Record<string, number | number[]> = {}
   ): { compiled: unknown; interpreted: string; code: string } {
-    const result = compile(ce.box(json as never), {
+    const result = compileOrRebound(ce.box(json as never), {
       to: 'javascript',
       fallback: false,
-    } as never)!;
+    });
     const ce2 = new ComputeEngine();
     for (const [k, v] of Object.entries(vars))
       ce2.assign(k, Array.isArray(v) ? ce2.box(['List', ...v]) : v);
     return {
-      compiled: result.run!(vars as never),
+      compiled: result === undefined ? DECLINED : result.run!(vars as never),
       interpreted: ce2
         .box(json as never)
         .evaluate()
         .toString(),
-      code: result.code as string,
+      code: result === undefined ? '' : (result.code as string),
     };
   }
 
@@ -551,7 +581,10 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     ).toThrow(/declared with 2 parameters but called with 1/);
   });
 
-  it('a top-level REASSIGNMENT is followed: each call uses the current literal', () => {
+  // A block-local function that is assigned more than once is a function
+  // value stored in a local: its calls decline. The interpreter uses the
+  // current literal at each call.
+  it('a top-level REASSIGNMENT declines; the interpreter uses the current literal', () => {
     const r = compareJson(
       [
         'Block',
@@ -562,13 +595,12 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
       ],
       { x: 3 }
     );
-    expect(r.compiled).toBe(15); // 2·3 + 3·3
-    expect(r.interpreted).toBe('15');
+    expect(r.compiled).toBe(DECLINED);
+    expect(r.interpreted).toBe('15'); // 2·3 + 3·3
   });
 
-  // A function whose value can change while the block runs is called through
-  // its run-time binding, so each call uses the value the interpreter uses
-  // at that point.
+  // A function whose value can change while the block runs is a function
+  // value known only at run time: its call declines.
   const inBranch = [
     'Block',
     ['Declare', 'k', "'function'", twice],
@@ -576,7 +608,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     ['k', 'x'],
   ];
 
-  it('a reassignment INSIDE a branch is read at run time', () => {
+  it('a reassignment INSIDE a branch declines', () => {
     // This test passes only numbers for `x`. With `x` declared
     // `real | list<real>` (as in `beforeEach`), the `If` could select
     // element by element, and an assignment in its branch declines. So the
@@ -586,26 +618,25 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     ce.declare('xs', 'list<real>');
     for (const x of [3, -3])
       expect(compareJson(inBranch, { x })).toMatchObject({
-        compiled: x > 0 ? 3 * x : 2 * x,
+        compiled: DECLINED,
         interpreted: String(x > 0 ? 3 * x : 2 * x),
       });
-    // A rebound function is not folded, even with a constant argument: the
-    // literal the compiler sees is not always the one the call runs.
+    // A call with a constant argument declines too: the literal the compiler
+    // sees is not always the one the call runs.
     const constant = compareJson([...inBranch.slice(0, -1), ['k', 2]], {
       x: 3,
     });
-    expect(constant).toMatchObject({ compiled: 6, interpreted: '6' });
-    expect(constant.code).not.toContain('return 4');
-    // …and it still broadcasts over a list.
+    expect(constant).toMatchObject({ compiled: DECLINED, interpreted: '6' });
+    // …and so does a call over a list.
     expect(
       compareJson([...inBranch.slice(0, -1), ['k', 'xs']], {
         x: 3,
         xs: [1, 2, 3],
       })
-    ).toMatchObject({ compiled: [3, 6, 9], interpreted: '[3,6,9]' });
+    ).toMatchObject({ compiled: DECLINED, interpreted: '[3,6,9]' });
   });
 
-  it('a reassignment INSIDE a loop body is read at run time', () => {
+  it('a reassignment INSIDE a loop body declines', () => {
     const r = compareJson([
       'Block',
       ['Declare', 'k', "'function'", twice],
@@ -621,11 +652,11 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
       ],
       's',
     ]);
-    expect(r.compiled).toBe(8); // 2 + 3 + 3
+    expect(r.compiled).toBe(DECLINED); // the interpreter: 2 + 3 + 3
     expect(r.interpreted).toBe('8');
   });
 
-  it('a lambda body that calls a name assigned TWICE reads it at run time', () => {
+  it('a lambda body that calls a name assigned TWICE declines', () => {
     const r = compareJson(
       [
         'Block',
@@ -637,8 +668,8 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
       ],
       { x: 3 }
     );
-    expect(r.compiled).toBe(15); // 2·3 + 3·3
-    expect(r.interpreted).toBe('15');
+    expect(r.compiled).toBe(DECLINED);
+    expect(r.interpreted).toBe('15'); // 2·3 + 3·3
   });
 
   it('an inner `Declare` of the same name is a different binding', () => {
@@ -695,7 +726,9 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
         { x: 3 }
       )
     ).toMatchObject({ compiled: 21, interpreted: '21' });
-    // With no inner `Declare`, the inner block writes the OUTER `k`: 3·3 + 3·3.
+    // With no inner `Declare`, the inner block writes the OUTER `k`, which
+    // is then assigned twice: the calls decline. The interpreter gives
+    // 3·3 + 3·3.
     expect(
       compareJson(
         outer([
@@ -704,10 +737,10 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
         ]),
         { x: 3 }
       )
-    ).toMatchObject({ compiled: 18, interpreted: '18' });
+    ).toMatchObject({ compiled: DECLINED, interpreted: '18' });
   });
 
-  it('recurses through a reassigned name', () => {
+  it('a recursion through a reassigned name declines', () => {
     const recursive = (step: unknown) =>
       F(
         [
@@ -725,7 +758,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
       ['Assign', 'f', recursive('Add')],
       ['Add', 'a', ['f', 5]],
     ]);
-    expect(r.compiled).toBe(135); // 5! + (5 + 4 + 3 + 2 + 1)
+    expect(r.compiled).toBe(DECLINED); // the interpreter: 5! + (5 + 4 + 3 + 2 + 1)
     expect(r.interpreted).toBe('135');
   });
 
@@ -775,7 +808,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     )!;
     expect(result.success).toBe(false);
     expect(result.error).toMatch(
-      /`k` is assigned more than once or inside a nested statement.*compiles a call of a block-local function only when the function is assigned once/
+      /`k` is assigned more than once or inside a nested statement.*known only at run time/
     );
   });
 
@@ -841,42 +874,40 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
 });
 
 describe('COMPILE a REASSIGNED `let`-bound lambda', () => {
-  // The `let` binding was resolved from its declaration only, so a call after
-  // `h := …` folded with the OLD literal: these programs compiled to 4, 8 and
-  // 4 where the interpreter answers 5, 9 and 13.
-  it('a call after a top-level reassignment uses the new literal', () => {
+  // A reassigned `let`-bound lambda is a function value stored in a local:
+  // its calls decline, and the interpreter uses the current literal. (The
+  // binding was once resolved from its declaration only, so a call after
+  // `h := …` folded with the OLD literal.)
+  it('a call after a top-level reassignment declines', () => {
     expect(both('let h = (k) => k + 1\nh := (k) => k + 2\nh(3)')).toMatchObject(
-      { compiled: 5, interpreted: '5' }
+      { compiled: DECLINED, interpreted: '5' }
     );
     expect(
       both('let h = (k) => k + 1\nlet a = h(3)\nh := (k) => k + 2\na + h(3)')
-    ).toMatchObject({ compiled: 9, interpreted: '9' });
+    ).toMatchObject({ compiled: DECLINED, interpreted: '9' });
   });
 
-  it('a reassignment inside a loop body is read at run time', () => {
+  it('a reassignment inside a loop body declines', () => {
     expect(
       both(
         'let h = (k) => k + 1\nlet s = 0\nfor j in 1..2 { s := s + h(1)\n h := (k) => k + 10 }\ns'
       )
-    ).toMatchObject({ compiled: 13, interpreted: '13' }); // 2 + 11
+    ).toMatchObject({ compiled: DECLINED, interpreted: '13' }); // 2 + 11
   });
 
-  it('a reassignment inside an `if` is read at run time', () => {
+  it('a reassignment inside an `if` declines', () => {
     ce.declare('n', 'real');
     const src = 'let h = (k) => k + 1\nif n > 0 { h := (k) => k + 10 }\nh(1)';
-    for (const n of [1, -1]) {
-      const { compiled } = both(src, { vars: { n } });
-      expect(compiled).toBe(n > 0 ? 11 : 2);
-    }
+    expect(both(src, { vars: { n: 1 } }).compiled).toBe(DECLINED);
     expect(program(`let n = 1\n${src}`).evaluate().toString()).toBe('11');
   });
 
-  it('a lambda that calls a reassigned local reads it at run time', () => {
+  it('a lambda that calls a reassigned local declines', () => {
     expect(
       both(
         'let h = (k) => k + 1\nconst g = (m) => h(m) * 2\nlet a = g(1)\nh := (k) => k + 10\na + g(1)'
       )
-    ).toMatchObject({ compiled: 26, interpreted: '26' }); // 4 + 22
+    ).toMatchObject({ compiled: DECLINED, interpreted: '26' }); // 4 + 22
   });
 });
 
@@ -1046,12 +1077,21 @@ describe('COMPILE a call of a block-local function with a tuple argument', () =>
     });
   });
 
-  test('a reassigned local with a scalar parameter maps over the tuple', () => {
-    const r = compare(
-      reboundForm(F(['Add', 'v', 10], ['Typed', 'v', 'real']), ['g', 'p']),
-      true
+  test('a reassigned local with a scalar parameter declines; the interpreter maps over the tuple', () => {
+    const json = reboundForm(
+      F(['Add', 'v', 10], ['Typed', 'v', 'real']),
+      ['g', 'p']
     );
-    expect(r).toEqual({ compiled: [15, 16], interpreted: [15, 16] });
+    expect(() =>
+      compile(engine(true).box(json as never), {
+        to: 'javascript',
+        fallback: false,
+      } as never)
+    ).toThrow(REBOUND);
+    const e = engine(true);
+    e.assign('p', e.box(['Tuple', 5, 6]));
+    e.assign('n', 1);
+    expect(jsValueOf(e.box(json as never).evaluate().json)).toEqual([15, 16]);
   });
 
   test('a reassigned local with an untyped parameter fails closed, with the reason', () => {
@@ -1061,7 +1101,7 @@ describe('COMPILE a call of a block-local function with a tuple argument', () =>
         to: 'javascript',
         fallback: false,
       } as never)
-    ).toThrow(/its value is known only at run time/);
+    ).toThrow(REBOUND);
     const e = engine(false);
     e.assign('p', e.box(['Tuple', 5, 6]));
     e.assign('n', 1);

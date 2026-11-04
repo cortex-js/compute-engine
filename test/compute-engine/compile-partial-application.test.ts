@@ -1,5 +1,6 @@
 /**
- * The compilation of a PARTIAL APPLICATION of a function literal.
+ * A PARTIAL APPLICATION of a function literal: in the interpreter, and in
+ * compiled code.
  *
  * The interpreter curries a call of a function literal with fewer arguments
  * than parameters (`makeLambda`, step 3, `function-utils.ts`). The value is
@@ -7,23 +8,17 @@
  * original literal when the last argument arrives, for every body. So a
  * curried value equals the full call, also for a chain of currying steps.
  *
- * The compiled code is that call of the literal (`partial-application.ts`):
+ * Compiled code does not compile a partial application or a curried call
+ * (`Apply(Apply(f, 1), u)`, `Apply(f, 1)`, a block local that holds one) on
+ * any target. The compilation declines with a reason that says so, and with
+ * `fallback: true` the expression runs in the interpreter. Compiled code
+ * calls a function only with all its arguments. A call that supplies every
+ * argument still compiles on every target.
  *
- * - A partial application with each supplied argument a machine number or a
- *   string literal, applied to the remaining arguments, is one call of the
- *   literal (javascript, interval-js, glsl, wgsl, python).
- * - Such a partial application whose value is a function compiles to the
- *   deferred residual on javascript, interval-js and python. At the root,
- *   the result has the `calling: 'lambda'` contract of a compiled
- *   `Function`. The shader targets have no function values, and decline it
- *   with a message that says so.
- * - Any other partial application declines with the reason: a supplied
- *   argument that is not such a literal (an exact rational, `Pi`, a
- *   variable, a list), a generic literal, a rest parameter.
- *
- * Before, every target declined with "the function takes 2 parameter(s) but
- * 1 argument(s) are supplied", and the Python target emitted
- * `((lambda x, y: x + y))(1)`, which raises a `TypeError` at run time.
+ * Before, a partial application whose arguments were machine numbers or
+ * strings compiled to one call of the literal, or to a deferred residual
+ * function. The interpreter keeps first-class functions and currying, so
+ * only the compiled forms were removed.
  */
 import { execFileSync } from 'node:child_process';
 import { ComputeEngine } from '../../src/compute-engine';
@@ -36,7 +31,12 @@ import { TEST_PYTHON } from './test-python';
 // its value, which stays exact.
 const NOISE: MathJsonExpression = ['Multiply', 0, ['Random']];
 /** `(x, y) ↦ x + y + 0·Random()`, a body with an effect. */
-const ADD: MathJsonExpression = ['Function', ['Add', 'x', 'y', NOISE], 'x', 'y'];
+const ADD: MathJsonExpression = [
+  'Function',
+  ['Add', 'x', 'y', NOISE],
+  'x',
+  'y',
+];
 /** `(x, y, z) ↦ x + 2y + 3z + 0·Random()`. */
 const ADD3: MathJsonExpression = [
   'Function',
@@ -85,11 +85,13 @@ function evaluated(json: MathJsonExpression, u: number): number {
     .N().re;
 }
 
-function js(json: MathJsonExpression) {
-  return compile(engine().box(json), { to: 'javascript', fallback: false });
-}
-
-const TARGETS = ['javascript', 'interval-js', 'glsl', 'wgsl', 'python'] as const;
+const TARGETS = [
+  'javascript',
+  'interval-js',
+  'glsl',
+  'wgsl',
+  'python',
+] as const;
 
 /**
  * Expect every target to decline `json` with `message`. A target declines by
@@ -154,9 +156,7 @@ describe('PARTIAL APPLICATION — the interpreter', () => {
     // `0` and `D(2)(0)` was `2`.
     const ce = engine();
     const value = (json: MathJsonExpression) => ce.box(json).evaluate().json;
-    expect(value(['Apply', ['Apply', M, 0], 'PositiveInfinity'])).toBe(
-      'NaN'
-    );
+    expect(value(['Apply', ['Apply', M, 0], 'PositiveInfinity'])).toBe('NaN');
     expect(value(['Apply', M, 0, 'PositiveInfinity'])).toBe('NaN');
     expect(value(['Apply', ['Apply', D, 2], 0])).toBe('NaN');
     expect(value(['Apply', D, 2, 0])).toBe('NaN');
@@ -201,482 +201,108 @@ describe('PARTIAL APPLICATION — the interpreter', () => {
   });
 });
 
-describe('PARTIAL APPLICATION — javascript', () => {
+const REFUSAL = /a partial application or a curried call/;
+
+describe('PARTIAL APPLICATION — compiled code declines', () => {
+  const ADD3_PURE: MathJsonExpression = [
+    'Function',
+    ['Add', 'x', 'y', 'z'],
+    'x',
+    'y',
+    'z',
+  ];
+
+  // Every case is a partial application, a call of one, or a block local that
+  // holds one.
   test.each<[string, MathJsonExpression]>([
-    ['applied to the remaining argument', ['Apply', ['Apply', ADD, 1], 'u']],
-    ['applied to all, in one step', ['Apply', ['Apply', ADD3, 1], 'u', 4]],
-    ['a float argument', ['Apply', ['Apply', ADD, 0.5], 'u']],
-    ['a pure body', ['Apply', ['Apply', PURE_ADD, 1], 'u']],
-    ['a pure product with a zero argument', ['Apply', ['Apply', M, 0], 'u']],
+    ['a curried call', ['Apply', ['Apply', PURE_ADD, 1], 'u']],
+    [
+      'a curried call of a body with an effect',
+      ['Apply', ['Apply', ADD, 1], 'u'],
+    ],
+    [
+      'a curried call that supplies every argument',
+      ['Apply', ['Apply', ADD3, 1], 'u', 4],
+    ],
     [
       'a chain of two currying steps',
-      ['Apply', ['Apply', ['Apply', ADD3, 1], 2], 'u'],
+      ['Apply', ['Apply', ['Apply', ADD3_PURE, 1], 2], 'u'],
     ],
     [
       'a chain over a body that writes a parameter',
       ['Apply', ['Apply', ['Apply', F, 1], 0], 'u'],
     ],
+    ['a partial application at the root', ['Apply', PURE_ADD, 1]],
+    ['a partial application with no argument', ['Apply', PURE_ADD]],
     [
-      'with annotated parameters',
-      [
-        'Apply',
-        [
-          'Apply',
-          [
-            'Function',
-            ['Add', 'x', 'y', NOISE],
-            ['Typed', 'x', 'real'],
-            ['Typed', 'y', 'real'],
-          ],
-          1,
-        ],
-        'u',
-      ],
+      'a partial application with a variable argument',
+      ['Apply', PURE_ADD, 'u'],
     ],
     [
-      'held by a block local',
-      ['Block', ['Assign', 'g', ['Apply', ADD, 1]], ['g', 'u']],
+      'a partial application held by a block local',
+      ['Block', ['Assign', 'g', ['Apply', PURE_ADD, 1]], ['g', 'u']],
     ],
-    [
-      'in the body of a literal',
-      [
-        'Apply',
-        [
-          'Function',
-          [
-            'Apply',
-            [
-              'Apply',
-              ['Function', ['Add', ['Multiply', 'a', 'b'], NOISE], 'a', 'b'],
-              2,
-            ],
-            'x',
-          ],
-          ['Typed', 'x', 'real'],
-        ],
-        'u',
-      ],
-    ],
-  ])('%s', (_, json) => {
-    const r = js(json);
-    expect(r.success).toBe(true);
-    for (const u of [0, 2.5, -3])
-      expect(r.run!({ u })).toBeCloseTo(evaluated(json, u), 12);
+  ])('%s declines on every target', (_, json) => {
+    expectDeclines(json, REFUSAL);
   });
 
-  test.each<[string, MathJsonExpression, number[]]>([
-    ['one argument supplied', ['Apply', ADD, 1], [2]],
-    ['no argument supplied', ['Apply', ADD], [2, 3]],
-    ['two of three arguments supplied', ['Apply', ADD3, 1, 2], [5]],
-    ['a float argument', ['Apply', ADD, 0.5], [2]],
-    ['a pure body', ['Apply', PURE_ADD, 1], [2]],
-    ['a chain of two currying steps', ['Apply', ['Apply', F, 1], 0], [3]],
-  ])('%s: the value is a compiled function', (_, json, rest) => {
-    const r = js(json);
-    expect(r.success).toBe(true);
-    expect(r.calling).toBe('lambda');
+  test('with `fallback: true` the result is the interpreter, with the reason', () => {
     const ce = engine();
-    const expected = ce
-      .box(['Apply', json, ...rest])
-      .evaluate()
-      .N().re;
-    expect((r.run as any)(...rest)).toBeCloseTo(expected, 12);
+    const result = compile(ce.box(['Apply', ['Apply', PURE_ADD, 1], 'u']), {
+      to: 'interval-js',
+      fallback: true,
+    });
+    expect(result.success).toBe(false);
+    expect((result as { error?: string }).error).toMatch(REFUSAL);
   });
 
-  test.each<[string, MathJsonExpression, RegExp]>([
-    [
-      'an argument that is not a literal',
-      ['Apply', ADD3, 'u'],
-      /the partial application supplies the argument `u`, which is not a machine number or a string literal/,
-    ],
-    [
-      'an argument with an effect',
-      ['Apply', ADD, ['Random']],
-      /the partial application supplies the argument `Random\(\)`, which is not a machine number/,
-    ],
-    [
-      'a symbol constant',
-      ['Apply', ADD, 'Pi'],
-      /the partial application supplies the argument `pi`, which is not a machine number/i,
-    ],
-    [
-      'a literal with a rest parameter',
-      [
-        'Apply',
-        [
-          'Function',
-          ['Add', 'x', ['Length', 'r'], NOISE],
-          'x',
-          'y',
-          ['Spread', 'r'],
-        ],
-        1,
-      ],
-      /a partial application of a function with a rest parameter/,
-    ],
-    [
-      'too many arguments',
-      ['Apply', PURE_ADD, 1, 2, 3],
-      /the function takes 2 parameter\(s\) but 3 argument\(s\)/,
-    ],
-  ])('declines %s', (_, json, message) => {
-    expect(() => js(json)).toThrow(message);
+  test('the interpreter still curries the declined forms', () => {
+    const value = (json: MathJsonExpression) =>
+      engine().box(json).subs({ u: 1.5 }).evaluate().N().re;
+    expect(value(['Apply', ['Apply', PURE_ADD, 1], 'u'])).toBe(2.5);
+    expect(value(['Apply', ['Apply', ['Apply', ADD3_PURE, 1], 2], 'u'])).toBe(
+      4.5
+    );
   });
 });
 
-describe('PARTIAL APPLICATION — declines where the interpreter differs from the full call', () => {
-  test('a collection argument: the interpreter gives a list of residuals', () => {
-    // `Apply(f, [1, 2])` is a list of two functions, and applying that list
-    // to `5` leaves the list of functions. The compiled code gave `[6, 7]`.
-    for (const f of [ADD, PURE_ADD]) {
-      const ce = engine();
-      const value = ce.box(['Apply', f, ['List', 1, 2]]).evaluate();
-      expect(value.operator).toBe('List');
-      expect(value.nops).toBe(2);
-      const applied = ce
-        .box(['Apply', ['Apply', f, ['List', 1, 2]], 5])
-        .evaluate();
-      expect(applied.operator).toBe('List');
-      expect(applied.ops!.every((op) => op.operator === 'Function')).toBe(
-        true
-      );
-    }
-    expectDeclines(
-      ['Apply', ['Apply', ADD, ['List', 1, 2]], 'u'],
-      /the argument `\[1,2\]`, which is not a machine number/
-    );
-    expectDeclines(
-      ['Apply', ADD, ['List', 1, 2]],
-      /the argument `\[1,2\]`, which is not a machine number/
-    );
-  });
+describe('PARTIAL APPLICATION — a call with every argument compiles', () => {
+  const u = 1.5;
 
-  test('an exact argument: the interpreter curries with its approximation', () => {
-    // Under `.N()`, the residual holds the approximation of q, which is 25
-    // in machine precision, so the value is `25 + u`; the compiled call
-    // reads the exact q, whose floor is 24.
-    const q: MathJsonExpression = [
-      'Divide',
-      ['Subtract', ['Factorial', 25], 1],
-      ['Factorial', 24],
-    ];
-    const f: MathJsonExpression = [
-      'Function',
-      ['Add', ['Floor', 'x'], 'y', NOISE],
-      'x',
-      'y',
-    ];
-    const ce = engine();
-    // The floor of q is 24; the value is 25 + u, here with u = 0.
-    expect(ce.box(['Floor', q]).evaluate().json).toBe(24);
-    expect(
-      ce
-        .box(['Apply', ['Apply', f, q], 'u'])
-        .subs({ u: 0 })
-        .N().re
-    ).toBe(25);
-    expectDeclines(
-      ['Apply', ['Apply', f, q], 'u'],
-      /which is not a machine number or a string literal/
-    );
-  });
-
-  test('a boolean argument declines: `True` can name a local', () => {
-    // A parameter or a block local can be named `True`, and the compiled
-    // residual would read it when it is called, after a reassignment.
-    const F: MathJsonExpression = [
-      'Function',
-      ['Add', ['If', 'x', 10, 20], 'y', NOISE],
-      'x',
-      'y',
-    ];
-    expectDeclines(
-      ['Apply', ['Apply', F, 'True'], 'u'],
-      /the argument `"?True"?`, which is not a machine number/
-    );
-  });
-
-  test('a decimal with more digits than a double declines', () => {
-    // At a precision of 40, the floor of 24.999999999999999999 is 24; its
-    // nearest double is 25.
-    const q: MathJsonExpression = { num: '24.999999999999999999' };
-    const f: MathJsonExpression = [
-      'Function',
-      ['Add', ['Floor', 'x'], 'y', NOISE],
-      'x',
-      'y',
-    ];
-    const ce = engine();
-    ce.precision = 40;
-    expect(
-      ce
-        .box(['Apply', ['Apply', f, q], 'u'])
-        .subs({ u: 0 })
-        .evaluate()
-        .N().re
-    ).toBe(24);
-    const ce2 = engine();
-    ce2.precision = 40;
-    expect(() =>
-      compile(ce2.box(['Apply', ['Apply', f, q], 'u']), {
-        to: 'javascript',
-        fallback: false,
-        constantFold: false,
-      })
-    ).toThrow(/which is not a machine number or a string literal/);
-  });
-
-  test('a function value in a conditional callee declines', () => {
-    // Each branch of the `If` is a residual of two parameters, and the
-    // outer call supplies one argument: the interpreter curries again, and
-    // the compiled call gave NaN.
-    const F: MathJsonExpression = [
-      'Function',
-      ['Block', ['Assign', 'y', ['Multiply', 'y', 'z']], ['Add', 'x', 'y']],
-      'x',
-      'y',
-      'z',
-    ];
-    const ce = engine();
-    ce.declare('c', 'boolean');
-    const json: MathJsonExpression = [
-      'Apply',
-      ['Apply', ['If', 'c', ['Apply', F, 1], ['Apply', F, 2]], 0],
-      'u',
-    ];
-    expect(() =>
-      compile(ce.box(json), { to: 'javascript', fallback: false })
-    ).toThrow(
-      /compiles only at the root of the compilation or as the value of an assignment to a block local/
-    );
-    // A list element declines the same way.
-    expect(() =>
-      js(['List', ['Apply', ADD, 1], ['Apply', ADD, 2]])
-    ).toThrow(/compiles only at the root of the compilation/);
-  });
-
-  test('a block local that holds a residual is called with all its arguments', () => {
-    // `g` has two parameters; the call `g(2)` supplies one, and the call of
-    // a block-local function with too few arguments declines.
-    expect(() =>
-      js(['Block', ['Assign', 'g', ['Apply', ADD3, 1]], ['g', 2]])
-    ).toThrow(/the block-local function is declared with 2 parameters but called with 1/);
-    const r = js(['Block', ['Assign', 'g', ['Apply', ADD3, 1]], ['g', 2, 'u']]);
-    expect(r.success).toBe(true);
-    expect(r.run!({ u: 3 })).toBe(evaluated(['Apply', ADD3, 1, 2, 'u'], 3));
-  });
-});
-
-describe('PARTIAL APPLICATION — javascript, the cases that declined before', () => {
-  test('a pure body that reads a block local compiles', () => {
-    // The interpreter reads `c` at the full call `g(u)`, after `c := 10`
-    // (16 for u = 5), and so does the compiled residual.
-    const json: MathJsonExpression = [
-      'Block',
-      ['Assign', 'c', 3],
-      [
-        'Assign',
-        'g',
-        ['Apply', ['Function', ['Add', 'x', 'y', 'c'], 'x', 'y'], 1],
-      ],
-      ['Assign', 'c', 10],
-      ['g', 'u'],
-    ];
-    const r = js(json);
-    expect(r.success).toBe(true);
-    for (const u of [5, -2]) expect(r.run!({ u })).toBe(evaluated(json, u));
-    expect(evaluated(json, 5)).toBe(16);
-    const other: MathJsonExpression = [
-      'Block',
-      ['Assign', 't', 1],
-      [
-        'Assign',
-        'g',
-        ['Apply', ['Function', ['Add', 'x', 'y', 't'], 'x', 'y'], 1],
-      ],
-      ['Assign', 't', 2],
-      ['g', 3],
-    ];
-    expect(evaluated(other, 0)).toBe(6);
-    expect(js(other).run!({})).toBe(6);
-  });
-
-  test('a pure body that is not simplified before the full call compiles', () => {
-    // `M(0)(u)` and `D(2)(u)` are the full calls `M(0, u)` and `D(2, u)`,
-    // whose value for u = ∞ (M) or u = 0 (D) is not a number.
-    for (const json of [
-      ['Apply', ['Apply', M, 0], 'u'],
-      ['Apply', ['Apply', D, 2], 'u'],
-    ] as MathJsonExpression[]) {
-      const r = js(json);
-      expect(r.success).toBe(true);
-      for (const u of [1.5, -3])
-        expect(r.run!({ u })).toBeCloseTo(evaluated(json, u), 12);
-    }
-    expect(js(['Apply', ['Apply', M, 0], 'u']).run!({ u: Infinity })).toBeNaN();
-    expect(js(['Apply', ['Apply', D, 2], 'u']).run!({ u: 0 })).toBeNaN();
-  });
-
-  // The inner literal is returned by the outer one, and the admission
-  // check cannot tell whether its caller passes it to a callback operator
-  // (`Filter`), where its write of `y` would not agree with the
-  // interpreter. So a returned literal that writes a name of an enclosing
-  // scope declines (CE-712.1, ROADMAP CE-720), although the interpreter and
-  // the compiled code both give 7 here. The interpreter fallback gives 7.
-  test('a partial application whose result writes a parameter declines', () => {
-    // (y, w) ↦ (x ↦ Block(Block(y := 2, y + x))): before, the curried call
-    // `W(0)` stayed unevaluated (the substitution refused to replace the
-    // target of an assignment, ROADMAP CE-698). Now `W(0)` is the deferred
-    // residual, and `W(0)(1)(5)` is the full call `W(0, 1)(5)`, 7.
-    const W: MathJsonExpression = [
-      'Function',
-      [
-        'Function',
-        ['Block', ['Block', ['Assign', 'y', 2], ['Add', 'y', 'x']]],
-        'x',
-      ],
-      'y',
-      'w',
-    ];
-    const ce = engine();
-    expect(ce.box(['Apply', W, 0]).evaluate().operator).toBe('Function');
-    const json: MathJsonExpression = [
-      'Apply',
-      ['Apply', ['Apply', W, 0], 1],
-      'u',
-    ];
-    expect(evaluated(json, 5)).toBe(7);
-    const r = compile(engine().box(json), {
+  test('javascript', () => {
+    const r = compile(engine().box(['Apply', PURE_ADD, 1, 'u']), {
       to: 'javascript',
-      constantFold: false,
+      fallback: false,
     });
-    expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
-    expect(r.run!({ u: 5 })).toBe(7);
-  });
-
-  test('a body that calls a user function compiles', () => {
-    // The interpreter curries every body the same way, whatever the
-    // effects of the functions that it calls.
-    const ce = engine();
-    ce.declare('h', '(real) -> real');
-    ce.assign('h', ce.box(['Function', ['Add', 'z', NOISE], 'z']));
-    const json: MathJsonExpression = [
-      'Apply',
-      ['Apply', ['Function', ['Add', ['h', 'x'], 'y'], 'x', 'y'], 1],
-      'u',
-    ];
-    const r = compile(ce.box(json), { to: 'javascript', fallback: false });
     expect(r.success).toBe(true);
-    expect(r.run!({ u: 5 })).toBe(
-      ce
-        .box(json)
-        .subs({ u: ce.number(5) })
-        .evaluate()
-        .N().re
-    );
+    expect((r.run as any)({ u })).toBe(2.5);
   });
-});
 
-describe('PARTIAL APPLICATION — interval-js', () => {
-  const run = (json: MathJsonExpression, u: number) => {
-    const r = compile(engine().box(json), {
+  test('interval-js', () => {
+    const r = compile(engine().box(['Apply', PURE_ADD, 1, 'u']), {
       to: 'interval-js',
       fallback: false,
     });
     expect(r.success).toBe(true);
-    return (r.run as any)({ u: { lo: u, hi: u } });
-  };
-
-  test.each<[string, MathJsonExpression]>([
-    ['applied to the remaining argument', ['Apply', ['Apply', ADD, 1], 'u']],
-    ['applied to all, in one step', ['Apply', ['Apply', ADD3, 1], 'u', 4]],
-    [
-      'held by a block local',
-      ['Block', ['Assign', 'g', ['Apply', ADD, 1]], ['g', 'u']],
-    ],
-  ])('%s', (_, json) => {
-    for (const u of [0, 2.5, -3]) {
-      const result = run(json, u);
-      const expected = evaluated(json, u);
-      expect(result.value.lo).toBeLessThanOrEqual(expected);
-      expect(result.value.hi).toBeGreaterThanOrEqual(expected);
-    }
+    const value = (r.run as any)({ u: { lo: u, hi: u } }).value;
+    expect(value.lo).toBeLessThanOrEqual(2.5);
+    expect(value.hi).toBeGreaterThanOrEqual(2.5);
   });
 
-  test('a partial application on its own compiles to a function', () => {
-    const r = compile(engine().box(['Apply', ADD, 1]), {
-      to: 'interval-js',
+  test.each(['glsl', 'wgsl'] as const)('%s', (to) => {
+    const r = compile(engine().box(['Apply', PURE_ADD, 1, 'u']), {
+      to,
       fallback: false,
     });
     expect(r.success).toBe(true);
-    expect(r.code).toBe(
-      '((_1) => (((x, y) => _IA.add(_IA.add(x, y), _k1)))(_k2, _1))'
-    );
-  });
-});
-
-describe.each(['glsl', 'wgsl'] as const)('PARTIAL APPLICATION — %s', (to) => {
-  const gpu = (json: MathJsonExpression) =>
-    compile(engine().box(json), { to, fallback: false });
-
-  // An unframed `Random()` has no WGSL form, so only GLSL compiles the call.
-  test('applied to the remaining argument, one call of the literal', () => {
-    if (to === 'wgsl') return;
-    expect(gpu(['Apply', ['Apply', ADD, 1], 'u']).code).toMatch(
-      /^\(u \+ 1\.0 \+ 0\.0 \* _gpu_rnd_draw\(/
-    );
-    expect(gpu(['Apply', ['Apply', ADD3, 1], 'u', 4]).code).toMatch(
-      /^\(2\.0 \* u \+ 13\.0 \+ 0\.0 \* _gpu_rnd_draw\(/
-    );
+    expect(r.code).toBe('(u + 1.0)');
   });
 
-  test('a pure body applied to the remaining argument', () => {
-    expect(gpu(['Apply', ['Apply', PURE_ADD, 1], 'u']).code).toBe('(u + 1.0)');
-    const pure3: MathJsonExpression = [
-      'Function',
-      ['Add', 'x', ['Multiply', 2, 'y'], ['Multiply', 3, 'z']],
-      'x',
-      'y',
-      'z',
-    ];
-    expect(gpu(['Apply', ['Apply', ['Apply', pure3, 1], 2], 'u']).code).toBe(
-      '(3.0 * u + 5.0)'
-    );
-  });
-
-  test('a function value declines: a shader has no function values', () => {
-    for (const json of [
-      ['Apply', ADD, 1],
-      ['Block', ['Assign', 'g', ['Apply', ADD, 1]], ['g', 'u']],
-    ] as MathJsonExpression[])
-      expect(() => gpu(json)).toThrow(
-        new RegExp(
-          `the value is a function of the remaining parameters \\(a partial ` +
-            `application\\), and target '${to}' has no function values`
-        )
-      );
-  });
-});
-
-describe('PARTIAL APPLICATION — python', () => {
-  const py = new PythonTarget();
-
-  test('a partial application of a pure body is a lambda', () => {
-    // Before: `((lambda x, y: x + y))(1)`, a `TypeError` at run time.
-    expect(py.compile(engine().box(['Apply', PURE_ADD, 1])).code).toBe(
-      '(lambda _1: ((lambda x, y: x + y))(1, _1))'
-    );
-    expect(
-      py.compile(engine().box(['Apply', ['Apply', PURE_ADD, 1], 'u'])).code
-    ).toBe('((lambda x, y: x + y))(1, u)');
-  });
-
-  test('a partial application of a pure body runs', () => {
+  test('python', () => {
+    const py = new PythonTarget();
+    const body = py.compile(engine().box(['Apply', PURE_ADD, 1, 'u'])).code;
+    expect(body).toBe('((lambda x, y: x + y))(1, u)');
     if (TEST_PYTHON === undefined) return;
-    const body = py.compile(
-      engine().box(['Apply', ['Apply', PURE_ADD, 1], 'u'])
-    ).code;
     const out = execFileSync(
       TEST_PYTHON,
       ['-c', `import numpy as np\nimport math\nu = 1.5\nprint(float(${body}))`],
@@ -696,24 +322,9 @@ describe('PARTIAL APPLICATION — python', () => {
       ['Apply', ['Function', ['Sin', 'u']], 5],
       /The interpreter ignores the arguments of a function with no parameter/,
     ],
-  ])('declines %s', (_, json, message) => {
-    expect(() => py.compile(engine().box(json))).toThrow(message);
-  });
-
-  test('a body with an effect declines here: `Random` has no Python lowering', () => {
-    expect(() => py.compile(engine().box(['Apply', ADD, 1]))).toThrow(
-      /`Random`/
+  ])('python declines %s', (_, json, message) => {
+    expect(() => new PythonTarget().compile(engine().box(json))).toThrow(
+      message
     );
-  });
-
-  test('a saturated call still runs', () => {
-    if (TEST_PYTHON === undefined) return;
-    const body = py.compile(engine().box(['Apply', PURE_ADD, 1, 'u'])).code;
-    const out = execFileSync(
-      TEST_PYTHON,
-      ['-c', `import numpy as np\nimport math\nu = 1.5\nprint(float(${body}))`],
-      { encoding: 'utf8' }
-    );
-    expect(Number(out.trim())).toBe(2.5);
   });
 });

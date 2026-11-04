@@ -284,12 +284,13 @@ describe('the Function literal at the root: the closure returned to the host', (
       expect(fn(3)).toBe(5n);
       expect(fn(3, 4)).toBe(7n);
       expect(fn(3n, 4n)).toBe(7n);
-      // A default fills an absent argument as it fills an argument that the
-      // call leaves out: an explicit `undefined` (`Missing`) and a `NaN`
-      // take the default too (R6 of
-      // `docs/plans/2026-11-01-absent-value-contract.md`).
+      // A default fills only an argument that the call leaves out. A
+      // JavaScript call cannot tell an explicit `undefined` from a left-out
+      // argument, so `undefined` takes the default; a supplied `NaN` is not
+      // filled, and the entry check refuses it as a value outside `integer`
+      // (`docs/COMPILATION-MODEL.md`, "Function values").
       expect(fn(3, undefined)).toBe(5n);
-      expect(fn(3, NaN)).toBe(5n);
+      expect(() => fn(3, NaN)).toThrow(/argument 2.*mode 'bigint'/);
       // A present argument that is not an integer is still checked.
       expect(() => fn(3, 4.5)).toThrow(/argument 2.*mode 'bigint'/);
     }

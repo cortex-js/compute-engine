@@ -6,16 +6,18 @@
  * closure of the result on the frame of the call, and the closure reads the
  * definitions of the frame after the call has returned. The pop of the frame
  * disposed these definitions, and with `ce._debugBindings` it also marked
- * them as dead. A closure that reads a name of the frame through a symbol of
- * its body is not affected, because the end of the call substitutes the
- * value of the parameter into the body (`bindingKeyedSubs`). But a closure
- * can also read a name of the frame by name: with `f := (x, k = d) => x * k`
- * and `o1 := d => (xs => ListFrom(Map(f, xs)))`, the call `f(x)` fills `k`
- * with the symbol default `d`, which is resolved where `f` is applied, in a
- * chain that goes through the frame of `o1`. With the debug flag,
- * `o1(7)([1, 2])` threw 'The binding of "d" belongs to the discarded scope
- * "call"'. Without the flag the value was correct, because a disposed
- * definition keeps its value.
+ * them as dead. The end of the call substitutes the value of a parameter
+ * into the body of a closure (`bindingKeyedSubs`), but a closure can hold a
+ * nested function literal that reads a name of the frame:
+ * `o1 := d => (xs => ListFrom(Map(x => x * d, xs)))`. With the debug flag, a
+ * read of a disposed definition of the frame threw 'The binding of "d"
+ * belongs to the discarded scope "call"'. Without the flag the value was
+ * correct, because a disposed definition keeps its value.
+ *
+ * Before 2026-11-02, most cases read `d` through the symbol default of a
+ * function `f := (x, k = d) => x * k` applied in the closure, which was read
+ * where the call was made. A default is now a constant, so the cases read
+ * `d` in a nested function literal of the closure.
  *
  * Now the frame is marked as retained when the call makes a closure whose
  * chain reaches the frame (`rerootOnCreatingFrame`, `function-utils.ts`),
@@ -34,8 +36,10 @@ import { executeEpsil, executeEpsilAsync } from '../../src/epsil/execute-epsil';
 
 type Json = any;
 
-/** `(x, k = d) => x * k`. */
-const F: Json = ['Function', ['Multiply', 'x', 'k'], 'x', ['Optional', 'k', 'd']];
+/** `x => x * d`: a function literal whose body reads `d`, the name of a
+ * parameter or a local of the scope where the closure that holds it is
+ * made. */
+const MUL_D: Json = ['Function', ['Multiply', 'x', 'd'], 'x'];
 
 function engine(debug: boolean, definitions: [string, Json][]): ComputeEngine {
   const ce = new ComputeEngine();
@@ -57,10 +61,9 @@ function epsil(debug: boolean, source: string): Json {
 }
 
 describe.each([true, false])('CLOSURE RETURNED BY A CALL, debug %s', (debug) => {
-  test('a closure reads a symbol default of the frame by name', () => {
+  test('a closure reads a name of the frame in a nested function literal', () => {
     const defs: [string, Json][] = [
-      ['f', F],
-      ['o1', ['Function', ['Function', ['ListFrom', ['Map', 'f', 'xs']], 'xs'], 'd']],
+      ['o1', ['Function', ['Function', ['ListFrom', ['Map', MUL_D, 'xs']], 'xs'], 'd']],
     ];
     expect(evaluated(debug, defs, [['o1', 7], ['List', 1, 2]])).toEqual([
       'List',
@@ -71,8 +74,7 @@ describe.each([true, false])('CLOSURE RETURNED BY A CALL, debug %s', (debug) => 
 
   test('the same closure, applied asynchronously', async () => {
     const ce = engine(debug, [
-      ['f', F],
-      ['o1', ['Function', ['Function', ['ListFrom', ['Map', 'f', 'xs']], 'xs'], 'd']],
+      ['o1', ['Function', ['Function', ['ListFrom', ['Map', MUL_D, 'xs']], 'xs'], 'd']],
     ]);
     const value = await ce.box([['o1', 7], ['List', 1, 2]]).evaluateAsync();
     expect(value.json).toEqual(['List', 7, 14]);
@@ -80,8 +82,7 @@ describe.each([true, false])('CLOSURE RETURNED BY A CALL, debug %s', (debug) => 
 
   test('a closure that returns a lazy view', () => {
     const ce = engine(debug, [
-      ['f', F],
-      ['o1', ['Function', ['Function', ['Map', 'f', 'xs'], 'xs'], 'd']],
+      ['o1', ['Function', ['Function', ['Map', MUL_D, 'xs'], 'xs'], 'd']],
     ]);
     const view = ce.box([['o1', 7], ['List', 1, 2]]).evaluate();
     expect(ce.function('ListFrom', [view]).evaluate().json).toEqual([
@@ -100,12 +101,11 @@ describe.each([true, false])('CLOSURE RETURNED BY A CALL, debug %s', (debug) => 
 
   test('nested closures', () => {
     const defs: [string, Json][] = [
-      ['f', F],
       [
         'g',
         [
           'Function',
-          ['Function', ['Function', ['ListFrom', ['Map', 'f', 'xs']], 'xs'], 'e'],
+          ['Function', ['Function', ['ListFrom', ['Map', MUL_D, 'xs']], 'xs'], 'e'],
           'd',
         ],
       ],
@@ -121,8 +121,7 @@ describe.each([true, false])('CLOSURE RETURNED BY A CALL, debug %s', (debug) => 
     expect(
       epsil(
         debug,
-        `let f = (x, k = d) => x * k
-let mk = (d) => (xs => ListFrom(Map(f, xs)))
+        `let mk = (d) => (xs => ListFrom(Map(x => x * d, xs)))
 let wrap = (m) => mk(m + 1)
 wrap(4)([1, 2])`
       )
@@ -143,23 +142,21 @@ c()`
     ).toBe(7);
   });
 
-  test('a closure that reads a local of the body by name', () => {
+  test('a closure that reads a local of the body in a nested function literal', () => {
     expect(
       epsil(
         debug,
-        `let f = (x, k = d) => x * k
-let b = (d0) => do { let d = 2 * d0; (xs => ListFrom(Map(f, xs))) }
+        `let b = (d0) => do { let d = 2 * d0; (xs => ListFrom(Map(x => x * d, xs))) }
 b(3)([1, 2])`
       )
     ).toEqual(['List', 6, 12]);
   });
 
-  test('a closure that reads a loop index by name', () => {
+  test('a closure that reads a loop index in a nested function literal', () => {
     expect(
       epsil(
         debug,
-        `let f = (x, k = d) => x * k
-let b = (n) => do { let h = (xs) => xs; for d in [n, 2 * n] { h = (xs => ListFrom(Map(f, xs))) }; h }
+        `let b = (n) => do { let h = (xs) => xs; for d in [n, 2 * n] { h = (xs => ListFrom(Map(x => x * d, xs))) }; h }
 b(3)([1, 2])`
       )
     ).toEqual(['List', 6, 12]);
@@ -169,9 +166,8 @@ b(3)([1, 2])`
     expect(
       epsil(
         debug,
-        `let f = (x, k = d) => x * k
-let g = (xs => xs)
-let o = (d) => do { g = (xs => ListFrom(Map(f, xs))); 0 }
+        `let g = (xs => xs)
+let o = (d) => do { g = (xs => ListFrom(Map(x => x * d, xs))); 0 }
 o(7)
 g([1, 2])`
       )
@@ -182,9 +178,8 @@ g([1, 2])`
     expect(
       epsil(
         debug,
-        `let f = (x, k = d) => x * k
-let g = (xs => xs)
-let o = (d) => do { g = (xs => ListFrom(Map(f, xs))); 0 }
+        `let g = (xs => xs)
+let o = (d) => do { g = (xs => ListFrom(Map(x => x * d, xs))); 0 }
 o(7)
 o(9)
 g([1, 2])`
@@ -196,9 +191,8 @@ g([1, 2])`
     expect(
       epsil(
         debug,
-        `let f = (x, k = d) => x * k
-let g = [(xs => xs)]
-let o = (d) => do { g = [(xs => ListFrom(Map(f, xs)))]; 0 }
+        `let g = [(xs => xs)]
+let o = (d) => do { g = [(xs => ListFrom(Map(x => x * d, xs)))]; 0 }
 o(7)
 g[1]([1, 2])`
       )
@@ -226,7 +220,7 @@ g(1)`
  * canonicalization: for a loop index, the definition in the scope of the
  * loop. A `let` local of a block is shared with the copy of the block that
  * the closure captures (`captureNestedLocals`, `function-utils.ts`), and a
- * symbol default of a function that the closure applies finds it by name.
+ * nested function literal of the closure reads it.
  * The pop of the loop or of the block disposed these definitions, and with
  * `ce._debugBindings` it also marked them as dead, so a call of the closure
  * after the pop threw 'The binding of "d" belongs to the discarded scope'.
@@ -493,12 +487,11 @@ r(2)`
     ]);
   });
 
-  test('a symbol default reads a local of the block of the closure by name', () => {
+  test('a nested function literal reads a local of the block of the closure', () => {
     expect(
       epsil(
         debug,
-        `let f = (x, k = d) => x * k
-let b = (n) => if n > 0 { let d = 3 * n; (xs => ListFrom(Map(f, xs))) } else { (xs => xs) }
+        `let b = (n) => if n > 0 { let d = 3 * n; (xs => ListFrom(Map(x => x * d, xs))) } else { (xs => xs) }
 b(2)([1, 2])`
       )
     ).toEqual(['List', 6, 12]);
@@ -508,9 +501,8 @@ b(2)([1, 2])`
     expect(
       epsil(
         debug,
-        `let f = (x, k = d) => x * k
-let g = (x) => x
-if true { let d = 5; g = (xs => ListFrom(Map(f, xs))) }
+        `let g = (x) => x
+if true { let d = 5; g = (xs => ListFrom(Map(x => x * d, xs))) }
 g([1, 2])`
       )
     ).toEqual(['List', 5, 10]);

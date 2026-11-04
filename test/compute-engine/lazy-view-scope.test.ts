@@ -1,19 +1,20 @@
 // A lazy callback view calls its callback in the context where the view was
 // created (ROADMAP CE-728, option (a)).
 //
-// With `f := (x, k = d) => x * k` and `g := (d, xs) => Map(f, xs)`, the
-// interpreter's `g(10, [1, 2])` is the lazy view `Map(f, [1, 2])`. Its
-// elements are computed when the view is read, after `g` has returned. The
-// call `f(x)` that the view makes is filled with the default `d`, and `d` is
-// read where the call takes place. Before, that was the context of the
-// reader, where `d` has no value, and the elements were `d` and `2d`. Now the
-// evaluation that creates the view inside `g` records the context of the
-// call of `g`, and each read of the view runs in it: the elements are
-// `[10, 20]`, as in the compiled function and as when the view is read
-// inside `g` (`ListFrom(Map(f, xs))`).
+// With `g := (d, xs) => Map(x => x * d, xs)`, the interpreter's
+// `g(10, [1, 2])` is a lazy view. Its elements are computed when the view is
+// read, after `g` has returned, and must be `[10, 20]`, as in the compiled
+// function and as when the view is read inside `g` (`ListFrom(Map(…))`).
+// The evaluation that creates the view inside `g` records the context of
+// the call of `g`, and each read of the view runs in it.
+//
+// Before 2026-11-02, the callback was a named function `f := (x, k = d) =>
+// x * k`, whose symbol default `d` was read where the call of `f` took
+// place. A default is now a constant, so each case writes the callback as a
+// function literal in the scope that binds `d`.
 //
 // A view created outside every function call records nothing and is read in
-// the context of its reader, as before.
+// the context of its reader.
 //
 // Mechanism: `src/compute-engine/boxed-expression/lazy-view-context.ts`.
 // Spec: docs/plans/2026-10-31-parameter-default-values.md, §11 item 6.
@@ -27,8 +28,15 @@ import {
 
 type Json = any;
 
-/** `(x, k = d) => x * k`. */
-const F: Json = ['Function', ['Multiply', 'x', 'k'], 'x', ['Optional', 'k', 'd']];
+/** `x => x * d`: a callback whose body reads `d`, a parameter or a local of
+ * the scope where the view is made. Each callback is written in that scope,
+ * so `d` is bound there. */
+const F: Json = ['Function', ['Multiply', 'x', 'd'], 'x'];
+/** `x => x > d`, `x => x < d`, `(a, x) => a + x d`, `(i, j) => i j d`. */
+const P: Json = ['Function', ['Greater', 'x', 'd'], 'x'];
+const Q: Json = ['Function', ['Less', 'x', 'd'], 'x'];
+const R: Json = ['Function', ['Add', 'a', ['Multiply', 'x', 'd']], 'a', 'x'];
+const F2: Json = ['Function', ['Multiply', 'i', 'j', 'd'], 'i', 'j'];
 
 function engine(definitions: [string, Json][]): ComputeEngine {
   const ce = new ComputeEngine();
@@ -44,10 +52,9 @@ function listed(ce: ComputeEngine, expr: Json): Json {
 }
 
 describe('LAZY VIEW CREATION CONTEXT', () => {
-  test('the ROADMAP case: a view returned by a call reads its symbol default there', () => {
-    const g: Json = ['Function', ['Map', 'f', 'xs'], 'd', 'xs'];
+  test('the ROADMAP case: a view returned by a call reads the `d` of the call', () => {
+    const g: Json = ['Function', ['Map', F, 'xs'], 'd', 'xs'];
     const ce = engine([
-      ['f', F],
       ['g', g],
     ]);
     const view = ce.box(['g', 10, ['List', 1, 2]]).evaluate();
@@ -60,7 +67,7 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
     // The same value as a read inside `g`.
     ce.assign(
       'gIn',
-      ce.box(['Function', ['ListFrom', ['Map', 'f', 'xs']], 'd', 'xs'])
+      ce.box(['Function', ['ListFrom', ['Map', F, 'xs']], 'd', 'xs'])
     );
     expect(ce.box(['gIn', 10, ['List', 1, 2]]).evaluate().json).toEqual([
       'List',
@@ -71,7 +78,7 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
     const compiled: any = compile(
       ce.box([
         'Function',
-        ['ListFrom', ['Map', 'f', 'xs']],
+        ['ListFrom', ['Map', F, 'xs']],
         'd',
         ['Typed', 'xs', "'list<real>'"],
       ]) as any,
@@ -85,7 +92,7 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
-      'let f = (x, k = d) => x * k; let g = (d, xs) => map(f, xs); g(10, [1, 2])'
+      'let g = (d, xs) => map(x => x * d, xs); g(10, [1, 2])'
     );
     expect(r.diagnostics).toEqual([]);
     expect(ce.function('ListFrom', [r.value!]).evaluate().json).toEqual([
@@ -97,8 +104,7 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
 
   test('a read by index and a read by iteration', () => {
     const ce = engine([
-      ['f', F],
-      ['g', ['Function', ['Map', 'f', 'xs'], 'd', 'xs']],
+      ['g', ['Function', ['Map', F, 'xs'], 'd', 'xs']],
     ]);
     const view = ce.box(['g', 10, ['List', 1, 2, 3]]).evaluate();
     expect(view.at(1)?.json).toBe(10);
@@ -110,8 +116,7 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
 
   test('two views made by two calls with different values live at once', () => {
     const ce = engine([
-      ['f', F],
-      ['g', ['Function', ['Map', 'f', 'xs'], 'd', 'xs']],
+      ['g', ['Function', ['Map', F, 'xs'], 'd', 'xs']],
     ]);
     const a = ce.box(['g', 10, ['List', 1, 2]]).evaluate();
     const b = ce.box(['g', 20, ['List', 1, 2]]).evaluate();
@@ -125,8 +130,7 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
     // The canonical `Map(f, [1, 2])` of the body is shared by all the calls;
     // each call records its own view.
     const ce = engine([
-      ['f', F],
-      ['g', ['Function', ['Map', 'f', ['List', 1, 2]], 'd']],
+      ['g', ['Function', ['Map', F, ['List', 1, 2]], 'd']],
     ]);
     const a = ce.box(['g', 3]).evaluate();
     const b = ce.box(['g', 4]).evaluate();
@@ -137,8 +141,7 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
 
   test('a view made by a nested call and returned through an outer call', () => {
     const ce = engine([
-      ['f', F],
-      ['g', ['Function', ['Map', 'f', 'xs'], 'd', 'xs']],
+      ['g', ['Function', ['Map', F, 'xs'], 'd', 'xs']],
       ['h', ['Function', ['g', ['Add', 'd', 1], 'xs'], 'd', 'xs']],
     ]);
     // The view reads the `d` of `g`, which `h` called with `d + 1`.
@@ -147,8 +150,7 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
 
   test('a view made in a closure that a call returns', () => {
     const ce = engine([
-      ['f', F],
-      ['outer', ['Function', ['Function', ['Map', 'f', 'xs'], 'xs'], 'd']],
+      ['outer', ['Function', ['Function', ['Map', F, 'xs'], 'xs'], 'd']],
     ]);
     expect(listed(ce, [['outer', 7], ['List', 1, 2]])).toEqual([
       'List',
@@ -165,9 +167,8 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
       'xs',
     ];
     const ce = engine([
-      ['f', F],
-      ['gIn', block(['ListFrom', ['Map', 'f', 'xs']])],
-      ['gOut', block(['Map', 'f', 'xs'])],
+      ['gIn', block(['ListFrom', ['Map', F, 'xs']])],
+      ['gOut', block(['Map', F, 'xs'])],
     ]);
     expect(ce.box(['gIn', 10, ['List', 1, 2]]).evaluate().json).toEqual([
       'List',
@@ -181,12 +182,11 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
     // The end of the call rebuilds the result to re-root the closure; the
     // rebuilt views keep their record.
     const ce = engine([
-      ['f', F],
       [
         'g',
         [
           'Function',
-          ['Map', 'f', ['Map', ['Function', ['Add', 'y', 'd'], 'y'], 'xs']],
+          ['Map', F, ['Map', ['Function', ['Add', 'y', 'd'], 'y'], 'xs']],
           'd',
           'xs',
         ],
@@ -195,23 +195,24 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
     expect(listed(ce, ['g', 10, ['List', 1, 2]])).toEqual(['List', 110, 120]);
   });
 
-  test('a view made at the top level reads the context of its reader, as before', () => {
+  test('a view made at the top level reads the top-level `d`, wherever it is read', () => {
+    // The callback is written at the top level, so its `d` is the top-level
+    // symbol, also when the view is read inside a call that has a parameter
+    // `d`.
     const ce = engine([
-      ['f', F],
       ['readIn', ['Function', ['ListFrom', 'v'], 'd', 'v']],
       ['pass', ['Function', 'v', 'd', 'v']],
     ]);
-    const top = ['Map', 'f', ['List', 1, 2]];
+    const top = ['Map', F, ['List', 1, 2]];
     expect(listed(ce, top)).toEqual([
       'List',
       'd',
       ['Multiply', 2, 'd'],
     ]);
-    // Read inside a call, the view reads the `d` of that call.
     expect(ce.box(['readIn', 10, top]).evaluate().json).toEqual([
       'List',
-      10,
-      20,
+      'd',
+      ['Multiply', 2, 'd'],
     ]);
     // Passed through a call and read outside it, the view reads `d` at the
     // top level.
@@ -227,8 +228,7 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
     // not dispose or tombstone its definitions, so a read after the call
     // does not throw when the debug check is on.
     const ce = engine([
-      ['f', F],
-      ['g', ['Function', ['Map', 'f', 'xs'], 'd', 'xs']],
+      ['g', ['Function', ['Map', F, 'xs'], 'd', 'xs']],
       ['h', ['Function', ['g', ['Add', 'd', 1], 'xs'], 'd', 'xs']],
     ]);
     ce._debugBindings = true;
@@ -261,9 +261,8 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
       'n',
     ];
     const ce = engine([
-      ['f', F],
-      ['gIn', body(['ListFrom', ['Map', 'f', ['List', 1, 2]]])],
-      ['gOut', body(['Map', 'f', ['List', 1, 2]])],
+      ['gIn', body(['ListFrom', ['Map', F, ['List', 1, 2]]])],
+      ['gOut', body(['Map', F, ['List', 1, 2]])],
     ]);
     ce._debugBindings = true;
     expect(ce.box(['gIn', 10, 1]).evaluate().json).toEqual(['List', 20, 40]);
@@ -276,11 +275,10 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
     // view. The rebuilt view keeps the record.
     const body: Json = [
       'Map',
-      'f',
+      F,
       ['List', 1, ['If', ['Greater', 'u', 0], 'n', 'n']],
     ];
     const ce = engine([
-      ['f', F],
       ['gIn', ['Function', ['ListFrom', body], 'd', 'n']],
       ['gOut', ['Function', body, 'd', 'n']],
     ]);
@@ -291,7 +289,6 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
 
   test('a view in a dictionary value', () => {
     const ce = engine([
-      ['f', F],
       [
         'g',
         [
@@ -301,7 +298,7 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
             [
               'KeyValuePair',
               "'v'",
-              ['Map', 'f', ['Map', ['Function', ['Add', 'y', 'd'], 'y'], 'xs']],
+              ['Map', F, ['Map', ['Function', ['Add', 'y', 'd'], 'y'], 'xs']],
             ],
           ],
           'd',
@@ -319,25 +316,25 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
     // The `Map` is never evaluated: `Dedup`, `Take` and `Zip` hold it. The
     // end of the call gives it a record on a new node, since the held node
     // is shared by every call of the function.
-    const ce = engine([['f', F]]);
+    const ce = engine([]);
     ce._debugBindings = true;
     const xs: Json = ['List', 5, 15, 20];
     const cases: [string, Json, Json, Json][] = [
       [
         'Dedup',
-        ['Dedup', ['Map', 'f', 'xs']],
+        ['Dedup', ['Map', F, 'xs']],
         ['List', 50, 150, 200],
         ['List', 100, 300, 400],
       ],
       [
         'Take',
-        ['Take', ['Map', 'f', 'xs'], 2],
+        ['Take', ['Map', F, 'xs'], 2],
         ['List', 50, 150],
         ['List', 100, 300],
       ],
       [
         'Zip',
-        ['Zip', ['Map', 'f', 'xs'], 'xs'],
+        ['Zip', ['Map', F, 'xs'], 'xs'],
         [
           'List',
           ['Tuple', 50, 5],
@@ -368,14 +365,13 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
     // The record of the view is made while `cl` runs, and the closure reads
     // `v` after `cl` has returned.
     const ce = engine([
-      ['f', F],
       [
         'cl',
         [
           'Function',
           [
             'Block',
-            ['Assign', 'v', ['Map', 'f', ['List', 1, 2]]],
+            ['Assign', 'v', ['Map', F, ['List', 1, 2]]],
             ['Function', ['ListFrom', 'v'], 'y'],
           ],
           'd',
@@ -399,7 +395,6 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
       'd0',
     ];
     const ce = engine([
-      ['f', F],
       // Each iteration reads its view at once: `d` is the loop index.
       [
         'inLoop',
@@ -407,7 +402,7 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
           [
             'Assign',
             'acc',
-            ['Add', 'acc', ['At', ['ListFrom', ['Map', 'f', ['List', 'd0']]], 1]],
+            ['Add', 'acc', ['At', ['ListFrom', ['Map', F, ['List', 'd0']]], 1]],
           ],
           'acc'
         ),
@@ -421,7 +416,7 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
           [
             'If',
             ['Equal', 'd', 2],
-            ['Assign', 'v', ['Map', 'f', ['List', 'd0']]],
+            ['Assign', 'v', ['Map', F, ['List', 'd0']]],
             'Nothing',
           ],
           'v'
@@ -435,8 +430,7 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
 
   test('evaluateAsync() records the context too', async () => {
     const ce = engine([
-      ['f', F],
-      ['g', ['Function', ['Map', 'f', 'xs'], 'd', 'xs']],
+      ['g', ['Function', ['Map', F, 'xs'], 'd', 'xs']],
     ]);
     const view = await ce.box(['g', 10, ['List', 1, 2]]).evaluateAsync();
     expect(ce.function('ListFrom', [view]).evaluate().json).toEqual([
@@ -448,53 +442,28 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
 });
 
 describe('LAZY VIEW CREATION CONTEXT: EACH LAZY CALLBACK OPERATOR', () => {
-  // Each body makes a view with a named callback whose last parameter has
-  // the symbol default `d`. The view is read after the call has returned,
+  // Each body makes a view with a callback literal that reads the parameter
+  // `d` of the call. The view is read after the call has returned,
   // and must agree with the same view read inside the call.
-  const ce = engine([
-    ['f', F],
-    ['p', ['Function', ['Greater', 'x', 'k'], 'x', ['Optional', 'k', 'd']]],
-    ['q', ['Function', ['Less', 'x', 'k'], 'x', ['Optional', 'k', 'd']]],
-    [
-      'r',
-      [
-        'Function',
-        ['Add', 'a', ['Multiply', 'x', 'k']],
-        'a',
-        'x',
-        ['Optional', 'k', 'd'],
-      ],
-    ],
-    // `Fill` calls its callback with the indexes of the element.
-    [
-      'f2',
-      [
-        'Function',
-        ['Multiply', 'i', 'j', 'k'],
-        'i',
-        'j',
-        ['Optional', 'k', 'd'],
-      ],
-    ],
-  ]);
+  const ce = engine([]);
   const xs = ['List', 5, 15];
   const cases: [string, Json, Json][] = [
-    ['Map', ['Map', 'f', 'xs'], ['List', 50, 150]],
-    ['Filter', ['Filter', 'xs', 'p'], ['List', 15]],
-    ['Scan', ['Scan', 'xs', 'r'], ['List', 5, 155]],
-    ['TakeWhile', ['TakeWhile', 'xs', 'q'], ['List', 5]],
-    ['DropWhile', ['DropWhile', 'xs', 'q'], ['List', 15]],
-    ['FlatMap', ['FlatMap', 'xs', 'f'], ['List', 50, 150]],
+    ['Map', ['Map', F, 'xs'], ['List', 50, 150]],
+    ['Filter', ['Filter', 'xs', P], ['List', 15]],
+    ['Scan', ['Scan', 'xs', R], ['List', 5, 155]],
+    ['TakeWhile', ['TakeWhile', 'xs', Q], ['List', 5]],
+    ['DropWhile', ['DropWhile', 'xs', Q], ['List', 15]],
+    ['FlatMap', ['FlatMap', 'xs', F], ['List', 50, 150]],
     // The bodies below do not read `xs`, so the functions take `d` only: a
     // list argument at a parameter that the body does not type would be
     // broadcast over.
-    ['Tabulate', ['Tabulate', 'f', 2], ['List', 10, 20]],
-    ['Table', ['Table', 'f', 2], ['List', 10, 20]],
-    ['Iterate', ['Take', ['Iterate', 'f', 1], 3], ['List', 10, 100, 1000]],
-    ['Take of Map', ['Take', ['Map', 'f', 'xs'], 2], ['List', 50, 150]],
+    ['Tabulate', ['Tabulate', F, 2], ['List', 10, 20]],
+    ['Table', ['Table', F, 2], ['List', 10, 20]],
+    ['Iterate', ['Take', ['Iterate', F, 1], 3], ['List', 10, 100, 1000]],
+    ['Take of Map', ['Take', ['Map', F, 'xs'], 2], ['List', 50, 150]],
     [
       'Fill',
-      ['Fill', 'f2', ['Tuple', 1, 2]],
+      ['Fill', F2, ['Tuple', 1, 2]],
       ['List', ['List', 10, 20]],
     ],
   ];
@@ -518,9 +487,9 @@ describe('LAZY VIEW CREATION CONTEXT: FRAMES, NESTED SCOPES AND HELD VIEWS', () 
     // `ys` holds a `Map` that was never evaluated, made outside every call.
     // A call that returns `ys` did not write that `Map`: the view keeps
     // reading `d` in the context of its reader.
-    const ce = engine([['f', F]]);
+    const ce = engine([]);
     ce.assign('d', ce.number(5));
-    ce.assign('ys', ce.box(['Dedup', ['Map', 'f', ['List', 1, 2]]]));
+    ce.assign('ys', ce.box(['Dedup', ['Map', F, ['List', 1, 2]]]));
     ce.assign('g', ce.box(['Function', 'ys', 'd']));
     const read = (v: any) => ce.function('ListFrom', [v]).evaluate().json;
     expect(read(ce.box('ys').evaluate())).toEqual(['List', 5, 10]);
@@ -531,7 +500,7 @@ describe('LAZY VIEW CREATION CONTEXT: FRAMES, NESTED SCOPES AND HELD VIEWS', () 
     // The frame of `h` has the frame of `g` in its scope chain. Both frames
     // stay alive while the view holds them, with the debug check of dead
     // bindings on.
-    const ce = engine([['f', F]]);
+    const ce = engine([]);
     ce._debugBindings = true;
     ce.assign(
       'g',
@@ -539,7 +508,7 @@ describe('LAZY VIEW CREATION CONTEXT: FRAMES, NESTED SCOPES AND HELD VIEWS', () 
         'Function',
         [
           'Block',
-          ['Assign', 'h', ['Function', ['Map', 'f', 'ys'], 'ys']],
+          ['Assign', 'h', ['Function', ['Map', F, 'ys'], 'ys']],
           ['h', ['List', 1, 2]],
         ],
         'd',
@@ -551,11 +520,10 @@ describe('LAZY VIEW CREATION CONTEXT: FRAMES, NESTED SCOPES AND HELD VIEWS', () 
   test('a held view in a returned comprehension keeps the scope of the comprehension', () => {
     const body: Json = [
       'Comprehension',
-      ['At', ['Dedup', ['Map', 'f', 'xs']], 'i'],
+      ['At', ['Dedup', ['Map', F, 'xs']], 'i'],
       ['Element', 'i', ['Range', 1, 2]],
     ];
     const ce = engine([
-      ['f', F],
       ['gIn', ['Function', ['ListFrom', body], 'd', 'xs']],
       ['gOut', ['Function', body, 'd', 'xs']],
     ]);
@@ -566,11 +534,11 @@ describe('LAZY VIEW CREATION CONTEXT: FRAMES, NESTED SCOPES AND HELD VIEWS', () 
   });
 
   test('a lazy operator of the host that sets callsCallbackOnRead', () => {
-    const ce = engine([['f', F]]);
-    // `HostMap(fn, xs)` applies the function named `fn` to each element of
+    const ce = engine([]);
+    // `HostMap(fn, xs)` applies the function `fn` to each element of
     // `xs` when it is read.
     const apply = (expr: any, x: any) =>
-      ce.function(expr.op1.symbol, [x]).evaluate();
+      ce.function('Apply', [expr.op1, x]).evaluate();
     ce.declare('HostMap', {
       signature: '(function, list) -> list',
       collection: {
@@ -596,7 +564,7 @@ describe('LAZY VIEW CREATION CONTEXT: FRAMES, NESTED SCOPES AND HELD VIEWS', () 
     });
     const def: any = ce.lookupDefinition('HostMap');
     expect(def.operator.collection.callsCallbackOnRead).toBe(true);
-    ce.assign('g', ce.box(['Function', ['HostMap', 'f', 'xs'], 'd', 'xs']));
+    ce.assign('g', ce.box(['Function', ['HostMap', F, 'xs'], 'd', 'xs']));
     expect(listed(ce, ['g', 10, ['List', 1, 2]])).toEqual(['List', 10, 20]);
   });
 
@@ -616,10 +584,9 @@ describe('LAZY VIEW CREATION CONTEXT: FRAMES, NESTED SCOPES AND HELD VIEWS', () 
       'r',
       ['Add', 'd', 1],
       ['Subtract', 'n', 1],
-      ['Map', 'f', ['List', 1, 2]],
+      ['Map', F, ['List', 1, 2]],
     ];
     const inBlock = engine([
-      ['f', F],
       ['r', recurse(['Block', call])],
     ]);
     expect(inBlock.box(['r', 10, 1, ['List']]).evaluate().json).toEqual([
@@ -628,7 +595,6 @@ describe('LAZY VIEW CREATION CONTEXT: FRAMES, NESTED SCOPES AND HELD VIEWS', () 
       20,
     ]);
     const inLoop = engine([
-      ['f', F],
       [
         'r',
         recurse([
@@ -652,12 +618,11 @@ describe('LAZY VIEW CREATION CONTEXT: FRAMES, NESTED SCOPES AND HELD VIEWS', () 
     // the body, and is never evaluated. (The type of `xs` is declared: the
     // body does not show that `xs` is a list.)
     const ce = engine([
-      ['f', F],
       [
         'g',
         [
           'Function',
-          ['ReleaseHold', ['Hold', ['Dedup', ['Map', 'f', 'xs']]]],
+          ['ReleaseHold', ['Hold', ['Dedup', ['Map', F, 'xs']]]],
           'd',
           ['Typed', 'xs', "'list<number>'"],
         ],
@@ -672,7 +637,7 @@ describe('LAZY VIEW CREATION CONTEXT: FRAMES, NESTED SCOPES AND HELD VIEWS', () 
     // reads. The frame of a call that returns its view is retained: its
     // definitions are not disposed. The frame of a call that reads the view
     // at once is disposed at its pop, as any frame.
-    const ce = engine([['f', F]]);
+    const ce = engine([]);
     ce._debugBindings = true;
     let spied: any = undefined;
     ce.declare('Spy', {
@@ -684,9 +649,9 @@ describe('LAZY VIEW CREATION CONTEXT: FRAMES, NESTED SCOPES AND HELD VIEWS', () 
     });
     ce.assign(
       'gIn',
-      ce.box(['Function', ['Spy', ['ListFrom', ['Map', 'f', 'xs']]], 'd', 'xs'])
+      ce.box(['Function', ['Spy', ['ListFrom', ['Map', F, 'xs']]], 'd', 'xs'])
     );
-    ce.assign('gOut', ce.box(['Function', ['Spy', ['Map', 'f', 'xs']], 'd', 'xs']));
+    ce.assign('gOut', ce.box(['Function', ['Spy', ['Map', F, 'xs']], 'd', 'xs']));
     expect(ce.box(['gIn', 10, ['List', 1, 2]]).evaluate().json).toEqual([
       'List',
       10,
@@ -699,32 +664,11 @@ describe('LAZY VIEW CREATION CONTEXT: FRAMES, NESTED SCOPES AND HELD VIEWS', () 
 });
 
 describe('LAZY VIEW CREATION CONTEXT: ENUMERATIONS, CLOSURES AND THE NUMERIC PASS', () => {
-  test('an enumeration started in the call and resumed after it has returned', () => {
-    // `StartIter(v)` takes the first element of `v` inside the call of `g`
-    // and returns `v`. The next element is taken after `g` has returned: it
-    // is computed in the context of the call too.
-    const ce = engine([['f', F]]);
-    let iterator: Iterator<any> | undefined = undefined;
-    const firsts: Json[] = [];
-    ce.declare('StartIter', {
-      signature: '(list) -> any',
-      evaluate: (ops: any) => {
-        iterator = ops[0].each();
-        firsts.push(iterator!.next().value.json);
-        return ops[0];
-      },
-    });
-    ce.assign('g', ce.box(['Function', ['StartIter', ['Map', 'f', 'xs']], 'd', 'xs']));
-    expect(ce.box(['g', 10, ['List', 1, 2]]).evaluate().operator).toBe('Map');
-    expect(firsts).toEqual([10]);
-    expect(iterator!.next().value.json).toBe(20);
-  });
-
   test('a view in the body of a function literal that host code builds and the call returns', () => {
     // `Wrap(v)` returns the literal `(y) => ListFrom(v)`. The frame of `g`
     // is retained (the walk goes into the body of the literal), and the
     // re-rooting of the literal keeps the record of its view.
-    const ce = engine([['f', F]]);
+    const ce = engine([]);
     ce._debugBindings = true;
     let spied: any = undefined;
     ce.declare('Spy', {
@@ -739,7 +683,7 @@ describe('LAZY VIEW CREATION CONTEXT: ENUMERATIONS, CLOSURES AND THE NUMERIC PAS
       evaluate: (ops: any, { engine }: any) =>
         engine.box(['Function', ['ListFrom', ops[0]], 'y']),
     });
-    ce.assign('g', ce.box(['Function', ['Spy', ['Wrap', ['Map', 'f', 'xs']]], 'd', 'xs']));
+    ce.assign('g', ce.box(['Function', ['Spy', ['Wrap', ['Map', F, 'xs']]], 'd', 'xs']));
     const closure = ce.box(['g', 10, ['List', 1, 2]]).evaluate();
     expect(spied?.value?.disposed).toBe(false);
     expect(ce.function('Apply', [closure, ce.number(0)]).evaluate().json).toEqual([
@@ -755,10 +699,9 @@ describe('LAZY VIEW CREATION CONTEXT: ENUMERATIONS, CLOSURES AND THE NUMERIC PAS
     // `h2` keeps the record of the view.
     const h2: Json = ['Function', ['Function', ['ListFrom', 'v']], 'v'];
     const ce = engine([
-      ['f', F],
       ['h2', h2],
-      ['gA', ['Function', ['h2', ['Map', 'f', 'xs']], 'd', 'xs']],
-      ['gC', ['Function', ['Apply', ['h2', ['Map', 'f', 'xs']]], 'd', 'xs']],
+      ['gA', ['Function', ['h2', ['Map', F, 'xs']], 'd', 'xs']],
+      ['gC', ['Function', ['Apply', ['h2', ['Map', F, 'xs']]], 'd', 'xs']],
     ]);
     ce._debugBindings = true;
     const closure = ce.box(['gA', 10, ['List', 1, 2]]).evaluate();
@@ -772,11 +715,10 @@ describe('LAZY VIEW CREATION CONTEXT: ENUMERATIONS, CLOSURES AND THE NUMERIC PAS
 
   test('the numeric pass of an outer call evaluates a returned view in its own context', () => {
     // `g(5, xs)` returns a view made with `d = 5`. The numeric pass of `H`,
-    // where `d = 10`, evaluates the view again and fills the default of
-    // `f` in the context of the call of `g`.
+    // where `d = 10`, evaluates the view again and reads `d` in the context
+    // of the call of `g`.
     const ce = engine([
-      ['f', F],
-      ['g', ['Function', ['Map', 'f', 'xs'], 'd', 'xs']],
+      ['g', ['Function', ['Map', F, 'xs'], 'd', 'xs']],
       ['H', ['Function', ['Block', ['Assign', 'v', ['g', 5, 'xs']], 'v'], 'd', 'xs']],
     ]);
     ce._debugBindings = true;
@@ -793,29 +735,30 @@ describe('LAZY VIEW CREATION CONTEXT: ENUMERATIONS, CLOSURES AND THE NUMERIC PAS
 
 // The asynchronous route keeps the context stack of an evaluation on its own
 // array, not on the engine's array. The numeric rewrite of the callback of a
-// lazy `Map` fills the default of a parameter of `f` by its name, so it must
-// run on that array: it ran on the engine's array, which does not hold the
-// frame of the call, and `evaluateAsync({ numericApproximation: true })` of
-// `g(10, [1, 2])` gave `[d, 2d]`.
+// lazy `Map` reads `d` in the frame of the call, so it must run on that
+// array: it ran on the engine's array, which does not hold the frame of the
+// call, and `evaluateAsync({ numericApproximation: true })` of
+// `g(10, [1, 2])` gave `[d, 2d]` (when the callback filled a symbol default
+// `d`, before 2026-11-02).
 describe('LAZY VIEW CREATION CONTEXT: THE ASYNCHRONOUS NUMERIC PASS', () => {
   const bodies: [string, Json, Json][] = [
-    ['Map(f, xs)', ['Map', 'f', 'xs'], ['List', 10, 20]],
+    ['Map(f, xs)', ['Map', F, 'xs'], ['List', 10, 20]],
     [
       'Map(x => f(x), xs)',
-      ['Map', ['Function', ['f', 'x'], 'x'], 'xs'],
+      ['Map', ['Function', [F, 'x'], 'x'], 'xs'],
       ['List', 10, 20],
     ],
     [
       'Filter(xs, x => f(x) > 15)',
-      ['Filter', 'xs', ['Function', ['Greater', ['f', 'x'], 15], 'x']],
+      ['Filter', 'xs', ['Function', ['Greater', [F, 'x'], 15], 'x']],
       ['List', 2],
     ],
     [
       'Scan(xs, (a, b) => a + f(b))',
-      ['Scan', 'xs', ['Function', ['Add', 'a', ['f', 'b']], 'a', 'b']],
+      ['Scan', 'xs', ['Function', ['Add', 'a', [F, 'b']], 'a', 'b']],
       ['List', 1, 21],
     ],
-    ['ListFrom(Map(f, xs))', ['ListFrom', ['Map', 'f', 'xs']], ['List', 10, 20]],
+    ['ListFrom(Map(f, xs))', ['ListFrom', ['Map', F, 'xs']], ['List', 10, 20]],
   ];
   for (const [name, body, expected] of bodies) {
     test(`a call that returns ${name}`, async () => {
@@ -827,8 +770,7 @@ describe('LAZY VIEW CREATION CONTEXT: THE ASYNCHRONOUS NUMERIC PASS', () => {
         evaluate: (ce: ComputeEngine) => any
       ): Promise<Json> => {
         const ce = engine([
-          ['f', F],
-          ['g', ['Function', body, 'd', 'xs']],
+              ['g', ['Function', body, 'd', 'xs']],
         ]);
         const value = await evaluate(ce);
         return ce.function('ListFrom', [value]).evaluate().json;
@@ -860,8 +802,7 @@ describe('LAZY VIEW CREATION CONTEXT: THE ASYNCHRONOUS NUMERIC PASS', () => {
     // when the evaluation is asynchronous.
     for (const route of ['evaluate', 'evaluateAsync'] as const) {
       const ce = engine([
-        ['f', F],
-        ['g', ['Function', ['Map', 'f', 'xs'], 'd', 'xs']],
+          ['g', ['Function', ['Map', F, 'xs'], 'd', 'xs']],
       ]);
       const view = await ce.box(['g', 10, ['List', 1, 2]]).evaluateAsync();
       const value =
@@ -880,8 +821,7 @@ describe('LAZY VIEW CREATION CONTEXT: THE ASYNCHRONOUS NUMERIC PASS', () => {
     // The asynchronous form of the test of the synchronous numeric pass
     // above: `H` has `d = 10`, the view was made by `g` with `d = 5`.
     const ce = engine([
-      ['f', F],
-      ['g', ['Function', ['Map', 'f', 'xs'], 'd', 'xs']],
+      ['g', ['Function', ['Map', F, 'xs'], 'd', 'xs']],
       ['H', ['Function', ['Block', ['Assign', 'v', ['g', 5, 'xs']], 'v'], 'd', 'xs']],
     ]);
     for (const numericApproximation of [false, true]) {

@@ -852,9 +852,20 @@ Three ways read a possibly absent value:
   and fails with an `expected-present` error when it is not. Use it where
   absence is a violated precondition rather than a case to handle.
 
-A default parameter is a fourth reader: `(k: real = 2) => k` gives 2 when
-the argument is left out, when it is `missing`, and when it is `NaN`, as
-`??` would.
+A default parameter is not a reader: `(k: real = 2) => k` gives 2 when the
+argument is left out, and only then. A `missing` argument is passed to the
+body (`g(first([]))` is `missing` for `g = (k: real = 2) => k + 1`), and so
+is a `NaN` argument. Write `g(x ?? 2)` to replace an absent argument.
+
+A default is a constant: a number, a string, `true`, `false`, `[]`, `{}`, a
+constant (a library constant, `over: set = Integers`, `k: real = pi`, or a
+symbol declared constant before the function is defined, such as a `const`
+written before it in the same program, with any value), or a symbol that
+the parameter type lists (`mode: symbol<Auto> | symbol<Manual> = Auto`). A
+call that leaves out the argument receives that value, as if it had written
+it. A default that names a variable (`(k = n) => k`), or a symbol that is not
+declared and that no `symbol<…>` parameter type lists, is a static error:
+write a constant, or pass the argument.
 
 Read the absent value before you compute. In the interpreter, any other
 operator over `missing` gives `missing` (`missing + 1` is `missing`), and a

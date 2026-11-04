@@ -57,11 +57,6 @@ describe('CE-726: FUNCTION-VALUED ROOT ON INTERVAL-JS', () => {
       [3],
     ],
     ['a symbol whose value is a function', 'f726', [3]],
-    [
-      'a partial application',
-      ['Apply', ['Function', ['Add', 'x', 'y'], 'x', 'y'], 1],
-      [2],
-    ],
   ])('%s is called with its arguments', (_, json, args) => {
     const r = intervalCompile(json);
     expect(r.success).toBe(true);
@@ -74,6 +69,21 @@ describe('CE-726: FUNCTION-VALUED ROOT ON INTERVAL-JS', () => {
       kind: 'interval',
       value: { lo: expected, hi: expected },
     });
+  });
+
+  // Compiled code does not build a partial application
+  // (`docs/COMPILATION-MODEL.md`, "Function values"): the root declines, and
+  // the interpreter keeps the value.
+  test('a partial application declines', () => {
+    const json: MathJsonExpression = [
+      'Apply',
+      ['Function', ['Add', 'x', 'y'], 'x', 'y'],
+      1,
+    ];
+    const r = intervalCompile(json);
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/a partial application or a curried call/);
+    expect(interpreted(json, [2])).toBe(3);
   });
 
   test('the reproduction of CE-726: run(3) is the interval of 6', () => {

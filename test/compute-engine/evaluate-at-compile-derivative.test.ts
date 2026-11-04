@@ -157,9 +157,10 @@ describe('THE COMPILED FORM OF AN EVALUATEAT', () => {
     ).toThrow(/arguments/);
   });
 
-  // A parameter called in the body with the name of a library operator:
-  // the compiled code would call the operator, so the compilation fails,
-  // as it does for the same `Apply`.
+  // A parameter called in the body with the name of a library operator
+  // receives a function value: compiled code does not pass a function value
+  // through a parameter (`docs/COMPILATION-MODEL.md`, "Function values"),
+  // so the compilation fails, as it does for the same `Apply`.
   test('a parameter with the name of a library operator', () =>
     expect(() =>
       compile(
@@ -170,7 +171,7 @@ describe('THE COMPILED FORM OF AN EVALUATEAT', () => {
         ]),
         { fallback: false }
       )
-    ).toThrow(/also the name of a library operator/));
+    ).toThrow(/does not pass a function value through a parameter/));
 });
 
 // `evaluate()` applies the function at the lower bound first. The canonical

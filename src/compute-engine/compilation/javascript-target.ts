@@ -36,11 +36,11 @@ import {
 } from './cse.js';
 import { javascriptStatements } from './javascript-statements.js';
 import {
+  assertCompiledDefaultFilled,
   jsCoalescePoint,
   jsIsAbsent,
   jsIsAbsentPoint,
   literalAcceptsArgumentCount,
-  literalDefaultFills,
   literalHasParameterDefaults,
   literalTakesArgumentCount,
 } from './compile-parameter-defaults.js';
@@ -10923,7 +10923,7 @@ export class ComputeEngineFunctionLiteral extends Function {
     /** As for `ComputeEngineFunction` (`runResult()`). */
     rawResult: boolean | 'keyed' = false,
     /** The fill of each parameter with a default value whose argument is
-     * absent: `run()` gives one `if (<p is absent>) p = …;` per such
+     * left out: `run()` gives one `if (p === undefined) p = …;` per such
      * parameter (`lambdaDefaultFill()`), and `before` and `after` are the
      * definitions of `perCall` split around the fill
      * (`splitAroundDefaultFill()`). The fill runs after `hoisted` and
@@ -10933,9 +10933,6 @@ export class ComputeEngineFunctionLiteral extends Function {
       run: () => string;
       /** The positions of the parameters with a default value. */
       positions: number[];
-      /** By position, the number of coordinates of a parameter whose fill
-       * uses the point test (`lambdaDefaultFill()`), else `undefined`. */
-      arities: ReadonlyArray<number | undefined>;
       before: string;
       after: string;
     }
@@ -10972,25 +10969,15 @@ export class ComputeEngineFunctionLiteral extends Function {
     const preamble = hoisted + perCall;
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) => {
-        // A parameter with a default value whose argument is absent (left
-        // out, or supplied absent: `undefined`, `null` or `NaN`, the test
-        // of `jsIsAbsent()`, or a `NaN` point at a parameter whose fill
-        // uses the point test, `jsIsAbsentPoint()`) is filled first, so that
-        // the entry checks read the default as they read an argument. The
-        // arguments after the parameters are kept. The fill runs the
-        // definitions of `before` again, so it runs only when an argument at
-        // such a parameter is absent.
+        // A parameter with a default value whose argument the host leaves
+        // out (`undefined`) is filled first, so that the entry checks read
+        // the default as they read an argument. An argument that the host
+        // supplies is kept, also when it is `NaN`. The arguments after the
+        // parameters are kept. The fill runs the definitions of `before`
+        // again, so it runs only when such an argument is left out.
         if (
           fill !== undefined &&
-          defaultFill!.positions.some((i) => {
-            const a = argumentsList[i];
-            if (Number.isNaN(a ?? Number.NaN)) return true;
-            const n = defaultFill!.arities[i];
-            if (n === undefined || !Array.isArray(a)) return false;
-            for (let k = 0; k < n; k++)
-              if (!Number.isNaN(a[k])) return false;
-            return true;
-          })
+          defaultFill!.positions.some((i) => argumentsList[i] === undefined)
         ) {
           const previous = setReconstructionDigits(reconstructionDigits);
           try {
@@ -12171,23 +12158,21 @@ function broadcastStrideOfType(t: Type): number {
  * `undefined` when no parameter has a default.
  *
  * `run()` is the code that `ComputeEngineFunctionLiteral` runs before each
- * call: one `if (<p is absent>) p = …;` per parameter with a default, with
- * the absence test of the discharges (`jsIsAbsent()`). An argument that the
- * call leaves out (`undefined`) and an argument that is supplied absent
- * (`undefined`, `null`, or `NaN` as `At(L, 100)` gives for a list of
- * numbers) take the default, as in the interpreter
- * (`withAbsentDefaults()`, `parameter-defaults.ts`). A JavaScript default
- * parameter (`(x, k = 2) => …`) fills only `undefined`, so it is not used.
- * A default can read a definition of the preamble (`_val_D` for a constant
- * list `D`, `_fn_g` for a user function), so `run` comes after the
- * definitions that the defaults reference (`splitAroundDefaultFill()`).
- * `defaults` is the compiled default code, which the passes that look for
- * references to definitions must also scan.
+ * call: one `if (p === undefined) p = …;` per parameter with a default. An
+ * argument that the host leaves out takes the default, as a call that
+ * leaves out an argument does in the interpreter. An argument that the host
+ * supplies is passed as it is, also when it is absent (`NaN`). A JavaScript
+ * default parameter (`(x, k = 2) => …`) is not used, so that the entry
+ * checks read the default as they read an argument. A default can read a
+ * definition of the preamble (`_val_D` for a constant list), so `run` comes
+ * after the definitions that the defaults reference
+ * (`splitAroundDefaultFill()`). `defaults` is the compiled default code,
+ * which the passes that look for references to definitions must also scan.
  *
  * `code(before, after, body)` is the function of the `code` field, with the
  * preamble definitions `before` and `after` (`splitAroundDefaultFill()`) and
  * the body statements `body` (`defaultFillFunction()`):
- * `(x, k) => { if (Number.isNaN((k) ?? Number.NaN)) k = 2; return k * x; }`.
+ * `(x, k) => { if (k === undefined) k = 2; return k * x; }`.
  *
  * A default of a parameter annotated with a non-real number type is lifted
  * to the `{ re, im }` value that the body reads (`_SYS.cplx`).
@@ -12200,43 +12185,36 @@ function lambdaDefaultFill(
   | {
       run: () => string;
       positions: number[];
-      arities: (number | undefined)[];
       defaults: string;
       code: (before: string, after: string, body: string) => string;
     }
   | undefined {
-  const fills = literalDefaultFills(literalParams, compile);
+  // The fill reads a symbol default by its name, so a default that
+  // compiled code does not fill (a constant that the host or the program
+  // declares) declines (`compiledSymbolDefaultDeclines()`).
+  const fills = literalParams.map((p) => {
+    const d = optionalParameterDefault(p);
+    if (d === undefined) return undefined;
+    assertCompiledDefaultFilled(
+      d.engine,
+      d,
+      functionLiteralParameterType(p),
+      'a `Function` literal'
+    );
+    return compile(d);
+  });
   if (!fills.some((f) => f !== undefined)) return undefined;
   const value = (i: number): string => {
     const t = functionLiteralParameterType(literalParams[i]);
     const code = fills[i]!;
     return t !== undefined && isNonRealNumber(t) ? `_SYS.cplx(${code})` : code;
   };
-  // A parameter typed as a point also takes its default for a `NaN` point
-  // (`jsIsAbsentPoint()`). A parameter with no declared type whose default
-  // is a point is meant to receive a point, and the interpreter fills a
-  // `NaN` point there, so it takes the point test of the arity of the
-  // default. The point test also reads `undefined`, `null` and `NaN` as
-  // absent, and reads no other scalar as absent (`5[0]` is `undefined`,
-  // which `Number.isNaN` reads as present), so the choice needs no test of
-  // the type at run time.
-  const arity = (i: number): number | undefined => {
-    const t =
-      functionLiteralParameterType(literalParams[i]) ??
-      optionalParameterDefault(literalParams[i])?.type.type;
-    return t === undefined ? undefined : pointArity(t);
-  };
-  const arities = fills.map((_, i) => arity(i));
-  const absent = (i: number): string => {
-    const n = arities[i];
-    return n === undefined
-      ? jsIsAbsent(params[i])
-      : jsIsAbsentPoint(params[i], n);
-  };
   const run = (): string =>
     fills
       .map((f, i) =>
-        f === undefined ? '' : `if (${absent(i)}) ${params[i]} = ${value(i)}; `
+        f === undefined
+          ? ''
+          : `if (${params[i]} === undefined) ${params[i]} = ${value(i)}; `
       )
       .join('');
   const defaults = fills
@@ -12245,7 +12223,7 @@ function lambdaDefaultFill(
   const code = (before: string, after: string, body: string): string =>
     defaultFillFunction(params, `${before}${run()}${after}${body}`);
   const positions = fills.flatMap((f, i) => (f === undefined ? [] : [i]));
-  return { run, positions, arities, defaults, code };
+  return { run, positions, defaults, code };
 }
 
 /**
@@ -12462,7 +12440,6 @@ function compileToTarget(
         ? {
             run: defaults.run,
             positions: defaults.positions,
-            arities: defaults.arities,
             ...perCallAround,
           }
         : undefined

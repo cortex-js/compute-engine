@@ -48,10 +48,13 @@ describe('A FUNCTION REDEFINED WITH A BODY THAT WRITES OUTSIDE', () => {
     expect(interval.success).toBe(false);
   });
 
-  test('a redefinition with no write outside still compiles', () => {
+  // A redefined function is a function value stored in a local, which
+  // compiled code does not compile (`docs/COMPILATION-MODEL.md`, "Function
+  // values"); the interpreter runs it.
+  test('a redefinition with no write outside declines', () => {
     const plain = 'function g(k) { k + 1 }\ng = (k) => k + 5\n[g(1)]';
     expect(run(plain)).toEqual({ value: ['List', 6], diagnostics: [] });
-    expect(compileProgram(plain).run!({} as never)).toEqual([6]);
+    expect(() => compileProgram(plain)).toThrow(/assigned more than once/);
   });
 });
 

@@ -593,7 +593,6 @@ export class _BoxedValueDefinition
         installParameterDefaults(
           ce,
           this,
-          this.name,
           `Symbol "${this.name}"`,
           type
         );

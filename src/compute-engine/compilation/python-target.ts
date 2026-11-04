@@ -84,8 +84,8 @@ import {
   isWideParameterType,
   optionalParameterDefault,
 } from '../boxed-expression/function-literal.js';
-import { callSiteDefault } from '../boxed-expression/parameter-defaults.js';
 import {
+  assertCompiledDefaultFilled,
   literalAcceptsArgumentCount,
   literalTakesArgumentCount,
 } from './compile-parameter-defaults.js';
@@ -6924,49 +6924,44 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       var: (id) => (params.includes(id) ? id : target.var(id)),
       ...BaseCompiler.withBoundScope(scope, params),
     });
-    // A parameter with a default value (`(x, k = 2) => x * k`). The default
-    // is compiled as an operand written at the call site (`callSiteDefault`),
-    // outside the scope of the parameters. The parameter is declared with
-    // the default `None`, and the body runs with the default in place of an
-    // absent argument: left out (`None`), or supplied absent (`None`, or a
-    // float or complex `NaN`, as a read past the end of a list of numbers
-    // gives), with the absence test of the discharges (`PY_ABSENT_TEST`):
-    // `(lambda x, k=None: (lambda k: …)(2 if (lambda _c: <test>)(k) else
-    // k))`. The interpreter fills the same arguments
-    // (`withAbsentDefaults()`, `parameter-defaults.ts`). The default is
-    // evaluated at each call that fills it, so a symbol default reads its
-    // value at the call, and an empty list or dictionary is a new value at
-    // each call, as in the interpreter. A native Python default (`k=2`) is
-    // not used: it does not fill a supplied absent value.
+    // A parameter with a default value (`(x, k = 2) => x * k`) receives its
+    // default when the consumer of the function value leaves its argument
+    // out. The default is a constant, compiled outside the scope of the
+    // parameters. The parameter is declared with the default `None`, and the
+    // body runs with the default in place of `None`:
+    // `(lambda x, k=None: (lambda k: …)(2 if k is None else k))`. A native
+    // Python default (`k=[]`) is not used: it would share one list between
+    // the calls. `None` is also the spelling of `Missing`; the interpreter
+    // passes an absent argument to the body, so a discharge in the body
+    // (`IsMissing(k)`) reads the default where the interpreter reads
+    // `Missing`. This is a known limitation (`docs/COMPILATION-MODEL.md`,
+    // "Known limitations"), not a difference inside the caveats.
     const declared: string[] = [];
-    const filled: [string, string, string][] = [];
+    const filled: [string, string][] = [];
     args.slice(1).forEach((p, i) => {
       const d = optionalParameterDefault(p);
       if (d === undefined) {
         declared.push(params[i]);
         return;
       }
+      // A symbol default that compiled code does not fill (a constant that
+      // the host or the program declares) declines
+      // (`compiledSymbolDefaultDeclines()`).
+      assertCompiledDefaultFilled(
+        d.engine,
+        d,
+        functionLiteralParameterType(p),
+        'a `Function` literal'
+      );
       declared.push(`${params[i]}=None`);
-      // A parameter typed as a point also takes its default for a `NaN`
-      // point (`pyPointAbsentTest()`). So does a parameter with no declared
-      // type whose default is a point: it is meant to receive a point, and
-      // the interpreter fills a `NaN` point there.
-      const t = functionLiteralParameterType(p) ?? d.type.type;
-      const n = t === undefined ? undefined : pointArity(t);
-      filled.push([
-        params[i],
-        compile(callSiteDefault(d)),
-        n === undefined ? PY_ABSENT_TEST : pyPointAbsentTest(n),
-      ]);
+      filled.push([params[i], compile(d)]);
     });
     if (filled.length === 0)
       return `(lambda ${declared.join(', ')}: ${bodyCode})`;
     return `(lambda ${declared.join(', ')}: (lambda ${filled
       .map(([n]) => n)
       .join(', ')}: ${bodyCode})(${filled
-      .map(
-        ([n, code, test]) => `${code} if (lambda _c: ${test})(${n}) else ${n}`
-      )
+      .map(([n, code]) => `${code} if ${n} is None else ${n}`)
       .join(', ')}))`;
   },
 

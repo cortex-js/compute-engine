@@ -115,13 +115,13 @@ import { pointArity } from './collection-utils.js';
 import {
   GENERIC_DEFAULT_MESSAGE,
   NESTED_DEFAULT_MESSAGE,
+  SYMBOL_DEFAULT_MESSAGE,
   boxParameterDefault,
+  isConstantSymbolDefault,
+  literalSymbolNames,
   markSignatureMarkerOperand,
-  callSiteDefault,
   literalParameterDefault,
-  literalParameterDefaultFits,
   typeHasParameterDefault,
-  withAbsentDefaults,
 } from './boxed-expression/parameter-defaults.js';
 import {
   errorValue,
@@ -975,8 +975,7 @@ export function canonicalFunctionLiteralArguments(
   };
 
   // The names of every parameter of the literal, read from the operands as
-  // written. A default value may not name one of them: the default is read
-  // where the call is made, so it would not denote the parameter.
+  // written. A default value may not name one of them.
   const writtenParameterNames = new Set<string>();
   for (const x of ops.slice(1)) {
     const target = isFunction(x, 'Optional') ? x.op1 : x;
@@ -988,7 +987,13 @@ export function canonicalFunctionLiteralArguments(
   // `param` is a symbol or an annotated symbol: a rest parameter or a
   // destructuring pattern cannot have a default. The default operand is
   // canonicalized here, in the scope where the literal is written, and must
-  // be a value that a signature can hold (`literalParameterDefault()`). Its
+  // be a constant that a signature can hold (`literalParameterDefault()`): a
+  // number, a string, a boolean, `[]`, `{}`, or a constant symbol
+  // (`isConstantSymbolDefault()`: a constant — a library constant or a
+  // symbol declared constant — or a symbol that the annotation of the
+  // parameter lists, `mode: symbol<Auto> = Auto`). The
+  // symbol is checked before the default is canonicalized, so that a
+  // refused symbol is not declared. Its
   // check against the parameter type happens after the body is
   // canonicalized, when the type that the body infers for a bare parameter
   // is known.
@@ -1025,12 +1030,24 @@ export function canonicalFunctionLiteralArguments(
         ],
         x.toString()
       );
+    if (
+      name !== undefined &&
+      name !== 'True' &&
+      name !== 'False' &&
+      !isConstantSymbolDefault(ce, name, functionLiteralParameterType(target))
+    )
+      return ce.error(
+        ['expected-a-literal-default', SYMBOL_DEFAULT_MESSAGE],
+        x.toString()
+      );
     const defaultOp = x.op2.canonical;
     if (literalParameterDefault(defaultOp) === undefined)
       return ce.error(
         [
           'expected-a-literal-default',
-          'a default value is a number, a string, a boolean, a symbol, `[]` or `{}`',
+          isSymbol(defaultOp)
+            ? SYMBOL_DEFAULT_MESSAGE
+            : 'a default value is a number, a string, a boolean, `[]` or `{}`',
         ],
         x.toString()
       );
@@ -1051,7 +1068,7 @@ export function canonicalFunctionLiteralArguments(
         [
           'expected-a-symbol',
           isFunction(x, 'Spread')
-            ? 'a rest parameter cannot follow a parameter with a default value'
+            ? 'a function with a rest parameter has no default values: drop the default or the rest parameter'
             : 'a required parameter cannot follow a parameter with a default value',
         ],
         x.toString()
@@ -1342,7 +1359,11 @@ export function canonicalFunctionLiteralArguments(
         ? binding.value.type.type
         : undefined);
     if (type === undefined) return;
-    if (!literalParameterDefaultFits(ce, d, defaultOp, type))
+    // A symbol that the annotation lists (`mode: symbol<Auto> = Auto`) fits
+    // it: it was checked before the default was canonicalized.
+    if (d.kind === 'symbol' && literalSymbolNames(type).includes(d.name))
+      return;
+    if (!defaultOp.type.matches(type))
       params[i] = ce.typeError(type, defaultOp.type, defaultOp);
   });
   let literal: Expression;
@@ -3129,53 +3150,27 @@ export function apply(
 }
 
 /**
- * The default operand of each parameter of a function literal after its
- * required parameters (`requiredParameterCount()`), `undefined` for a
- * parameter without a default: the `defaults` argument of
- * `withAbsentDefaults()`.
- */
-function literalDefaultOperands(
-  params: ReadonlyArray<Expression>
-): (Expression | undefined)[] {
-  return params
-    .slice(requiredParameterCount(params))
-    .map((p) => optionalParameterDefault(p));
-}
-
-/**
  * The arguments `args` of a call of a function literal whose parameter
  * operands are `params`, with the default operand of each parameter with a
  * default value (`["Optional", k, 2]`) that the call leaves out appended.
  *
  * Only a full call is completed: one whose arguments cover every parameter
  * before the first parameter with a default. A call with fewer arguments is
- * a partial application, and is returned unchanged. A symbol default is the
- * symbol boxed again in the current scope, so it reads the binding that the
- * same symbol written in the call reads (`callSiteDefault()`).
- *
- * In a full call, an argument that is absent (`Missing`, `NaN`, ...) at a
- * parameter with a default is replaced by the default as well
- * (`withAbsentDefaults()`): a default fills an absent argument as it fills
- * an argument that the call leaves out.
+ * a partial application, and is returned unchanged. An argument that the
+ * call supplies is kept, also when it is absent (`Missing`, `NaN`): a
+ * default fills only a parameter that the call leaves out.
  */
 export function literalArgumentsWithDefaults(
   params: ReadonlyArray<Expression>,
   args: ReadonlyArray<Expression>
 ): ReadonlyArray<Expression> {
-  const required = requiredParameterCount(params);
-  if (args.length < required) return args;
-  args = withAbsentDefaults(
-    args,
-    required,
-    literalDefaultOperands(params),
-    callSiteDefault
-  );
+  if (args.length < requiredParameterCount(params)) return args;
   if (args.length >= params.length) return args;
   const added: Expression[] = [];
   for (let i = args.length; i < params.length; i++) {
     const d = optionalParameterDefault(params[i]);
     if (d === undefined) break;
-    added.push(callSiteDefault(d));
+    added.push(d);
   }
   return added.length === 0 ? args : [...args, ...added];
 }
@@ -8836,39 +8831,6 @@ export function capturedValueMismatchNowEntry(
   return capturedValueMismatchEntry(fnExpr, capturedScope);
 }
 
-/**
- * `options` with no written argument (`ApplyOptions.exactSources`) at a
- * position where a parameter default replaced the argument: `before` are the
- * arguments of a call, and `after` are the same arguments after the fill of
- * the defaults (`withAbsentDefaults()`), which keeps each argument it does not
- * replace. The written argument of a replaced position is the absent value
- * (`At(qs, 9)` is a `NaN` point), not the default that the parameter is bound
- * to. Under `.N()`, the body reads a recorded written argument in place of its
- * parameter (`applyWrittenArguments`) or re-reads it near a jump (the
- * activation of the parameter), so with the record kept,
- * `Apply((p = O) ↦ At(p, 1), At(qs, 9)).N()` gave `NaN` where `.evaluate()`
- * gave the first coordinate of `O`.
- */
-function withoutReplacedSources(
-  options: ApplyOptions | undefined,
-  before: ReadonlyArray<Expression>,
-  after: ReadonlyArray<Expression>
-): ApplyOptions | undefined {
-  const sources = options?.exactSources;
-  if (
-    sources === undefined ||
-    before === after ||
-    !sources.some((s, i) => s !== undefined && before[i] !== after[i])
-  )
-    return options;
-  return {
-    ...options,
-    exactSources: sources.map((s, i) =>
-      before[i] !== after[i] ? undefined : s
-    ),
-  };
-}
-
 function makeLambda(
   expr: Expression,
   errorPolicy: ErrorArgPolicy = 'bubble'
@@ -9085,11 +9047,6 @@ function makeLambda(
   const withDefaults = (
     args: ReadonlyArray<Expression>
   ): ReadonlyArray<Expression> => literalArgumentsWithDefaults(params, args);
-  // The default operands of the parameters after the required ones
-  // (`literalDefaultOperands()`), for the fill of an argument that
-  // evaluates to an absent value (step 4 of `invoke`).
-  const parameterDefaults = literalDefaultOperands(params);
-  const hasParameterDefaults = parameterDefaults.some((d) => d !== undefined);
 
   // A GENERIC literal has no annotated parameter to gate on — erasure removed
   // them — yet its polytype marker IS a contract, and an ANONYMOUS application
@@ -9628,9 +9585,7 @@ function makeLambda(
     options?: ApplyOptions,
     iterationStatements?: ReadonlyArray<Expression>
   ): Expression | undefined => {
-    const suppliedArgs = args;
     args = withDefaults(args);
-    options = withoutReplacedSources(options, suppliedArgs, args);
     // BOUND-VARIABLE parameters (`bindParameters`) are eliminated first, by
     // substitution: the parameter is replaced in the body by the symbol the
     // caller passed (every occurrence of the name, inner binders included —
@@ -10033,26 +9988,9 @@ function makeLambda(
     //
     // 4/ Evaluate arguments in the calling scope before switching context
     //
-    // An argument that evaluates to an absent value (`At(L, 100)`) at a
-    // parameter with a default takes the default, evaluated as a written
-    // argument is (`withAbsentDefaults()`). The written absent arguments
-    // were replaced before (`withDefaults`). This runs before the
-    // validation. The written argument of a replaced position is not
-    // recorded behind the activation (`withoutReplacedSources()`).
-    let evaluatedArgs: Expression[];
-    if (options?.holdArguments || !hasParameterDefaults)
-      evaluatedArgs = args.map(argValue);
-    else {
-      const values = args.map(argValue);
-      const filled = withAbsentDefaults(
-        values,
-        requiredParameterCount(params),
-        parameterDefaults,
-        (d) => argValue(callSiteDefault(d))
-      );
-      options = withoutReplacedSources(options, values, filled);
-      evaluatedArgs = [...filled];
-    }
+    // An argument that evaluates to an absent value (`At(L, 100)`) is passed
+    // as it is, also at a parameter with a default.
+    let evaluatedArgs: Expression[] = args.map(argValue);
 
     // An argument that only became an error when EVALUATED (`f(g(1))` with
     // `g(1)` failing) bubbles like a literal one — see step 2.

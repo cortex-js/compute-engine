@@ -5,6 +5,8 @@
 import { isIndexReadTuple } from '../boxed-expression/index-read-tuple.js';
 import { nonScalarEnclosingBindings } from '../boxed-expression/enclosing-binding-result-type.js';
 import { derivativeClosedForm } from './derivative-closed-form.js';
+import { assertNoFunctionValue } from './compile-function-values.js';
+import { assertCompiledCallDefaultsFilled } from './compile-parameter-defaults.js';
 import type {
   Expression,
   FunctionInterface,
@@ -3000,6 +3002,14 @@ export function _compileInner(
       target
     );
     if (error !== undefined) throw new Error(error);
+    // A function value passed through a parameter, returned by a call, or
+    // a parameter declared with a function type declines
+    // (`assertNoFunctionValue()`).
+    assertNoFunctionValue(expr, target);
+    // A symbol default that compiled code does not fill declines: a
+    // constant that the host or the program declares
+    // (`assertCompiledCallDefaultsFilled()`).
+    assertCompiledCallDefaultsFilled(expr, target);
     const local = compileLocallyBoundLibraryCall(expr, target);
     if (local !== undefined) return local;
     // An arithmetic operand whose type is a function type (`g + 1` with

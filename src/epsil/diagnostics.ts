@@ -90,7 +90,7 @@ export type DiagnosticCode =
   | 'parameter-name-mismatch' // %0 = lambda parameter name, %1 = name in the type annotation — a typed declaration's annotation and its lambda initializer name the same positional parameter differently
   | 'pattern-binding-expected' // a leaf of a destructuring pattern (`((p, q)) => …`, `for (p, q) in xs`, `let (p, q) = v`) that is neither a name, `_`, nor a nested pattern — a pattern in BINDING position matches by shape alone, so it has no place for a literal to match against
   | 'pattern-element-annotation' // a per-element type annotation inside a destructuring pattern — `((p: integer, q)) => …`; a pattern position binds a name and states no type
-  | 'default-value-invalid' // %0 = the reason — a parameter default (`k = …`) that is not a number, a string, a boolean, a symbol, `[]` or `{}`; or that names a parameter of the same list, or is `Nothing` or `Missing`; or a default on a `bind` parameter, or in a clause of a multi-clause function
+  | 'default-value-invalid' // %0 = the reason — a parameter default (`k = …`) that is not a number, a string, a boolean, a symbol, `[]` or `{}`; or that names a parameter of the same list, or is `Nothing` or `Missing`; or a default on a `bind` parameter, in a clause of a multi-clause function, or in a parameter list with a rest parameter
   | 'symbol-expected'
   | 'unbalanced-verbatim-symbol' // %0 = symbol name
   | 'unexpected-symbol'; // %0 symbol, %1 = trace

@@ -154,7 +154,10 @@ describe('a lazy collection inside a list literal', () => {
     ],
   ])('%s uses the function at the statement', (_label, src) => {
     expect(run(src)).toBe('[2,3]');
-    expect(compiled(src)).toEqual([2, 3]);
+    // The reassigned `h` is a function value stored in a local, which
+    // compiled code does not compile (`docs/COMPILATION-MODEL.md`,
+    // "Function values").
+    expect(() => compiled(src)).toThrow(/assigned more than once/);
   });
 });
 

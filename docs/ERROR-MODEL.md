@@ -140,20 +140,25 @@ second marker, `Indeterminate`, of this decision is removed.
    coordinates: `First(If(c, [(1, 2), (3, 4)]))` is `(NaN, NaN)`, while
    the restricted list itself is `Missing`. A `Which` with no match
    stays `Missing`.
-   Compiled code tests every point for this absent value at a default
-   and at `AssertPresent`, as it tests every `real` for `NaN`: a point
+   Compiled code tests every point for this absent value at
+   `AssertPresent`, as it tests every `real` for `NaN`: a point
    typed `tuple<real, real>` can be the point of `NaN` coordinates that a
    read out of range gives, so no point is proved present by its type.
 3. **The readers stay**: `IsMissing`, `Coalesce`, `AssertPresent`, the
    condition of a branch, and the position-preserving accessors. The
-   readers and the default of a parameter read a `NaN` point (a point
+   readers read a `NaN` point (a point
    whose coordinates are all `NaN`) as absent, as they read `NaN` and
    `Missing`, in the interpreter and in compiled code:
    `Coalesce(At(ps, 9), (0, 0))` is `(0, 0)`. A point with one coordinate
    that is not `NaN` is present. A coordinate of an absent point is `NaN`
    (`PointX(Missing)` is `NaN`, typed `nan`), and a `NaN` point at a
    parameter declared as a point is accepted, as `NaN` is at a numeric
-   parameter: the body runs with it. Any
+   parameter: the body runs with it. A parameter default is not a
+   reader, since it fills only an argument
+   that the call leaves out (user decision of 2026-11-02, which reverses
+   the "or absent" half of R6 of
+   `docs/plans/2026-11-01-absent-value-contract.md`), so with
+   `g = (k: real = 2) ↦ k + 1`, `g(First([]))` is `Missing`. Any
    other operator over `Missing` gives `Missing` in the interpreter:
    `Missing + 2`, `Sin(Missing)`, `Max(1, Missing)`, `Sum([1,
    Missing])`, `Mean([1, Missing])`, `Norm((1, Missing))` and the
@@ -190,8 +195,8 @@ second marker, `Indeterminate`, of this decision is removed.
    this kind: `x: real` refuses `At([1, 2], 5)`, which is `NaN`.
    Since a type does not show that a read may be absent, a presence proof
    (`Coalesce` or `AssertPresent` over an expression with free
-   variables, `IsMissing`, the compiled `AssertPresent`, the default of
-   a parameter) does not read a type alone: an expression that holds a
+   variables, `IsMissing`, the compiled `AssertPresent`) does not read a
+   type alone: an expression that holds a
    read (`At`, `First`, `Second`, `Third`, `Last`, `Field`, `PointX`,
    `PointY`, `PointZ`), a `Which` or a restriction is never proved
    present (`mayHoldRestriction()`,
@@ -2243,7 +2248,7 @@ maps its channels onto it:
   mode**, chosen by the caller — never a silent default. One exception,
   decided 2026-11-01 (`docs/plans/2026-11-01-absent-value-contract.md`,
   option (a)): an operator other than a discharge (`IsMissing`, `Coalesce`,
-  `AssertPresent`, a default parameter) or a position-preserving accessor
+  `AssertPresent`) or a position-preserving accessor
   (`At`, `First`, `Last`, `Rest`, `Length`, the binding of a `Map`
   parameter) applied to an ABSENT operand gives an unspecified value in
   compiled code: the target's own value (`NaN`, `false`, `undefined`, a

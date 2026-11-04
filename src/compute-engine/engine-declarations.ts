@@ -127,6 +127,7 @@ import { countDeclaredHolder, uncountRemovedHolder } from './engine-scope.js';
 import { binderBindingOf } from './boxed-expression/binders.js';
 import {
   assertNoParameterDefault,
+  forgetConstantDeclaration,
   inDeclaringScope,
 } from './boxed-expression/parameter-defaults.js';
 import { markRetiredBinding } from './boxed-expression/forward-call-reference.js';
@@ -647,7 +648,8 @@ export function declareSymbolValue(
   // is restored only while the record still holds the placeholder value half.
   const placeholderValue = isValueDef(boxedDef) ? boxedDef.value : undefined;
   try {
-    // The parameter defaults of the declared type are boxed in `scope`.
+    // The parameter defaults of the declared type are checked and boxed in
+    // `scope`, the scope that receives the declaration.
     inDeclaringScope(ce, name, scope, () =>
       updateDef(ce, name, boxedDef, def, scope, fresh)
     );
@@ -847,7 +849,8 @@ export function declareSymbolOperator(
   // definition is then committed and stays: the binding is restored only
   // while it still holds the placeholder value half.
   try {
-    // The parameter defaults of the declared type are boxed in `scope`.
+    // The parameter defaults of the declared type are checked and boxed in
+    // `scope`, the scope that receives the declaration.
     inDeclaringScope(ce, name, scope, () =>
       updateDef(ce, name, boxedDef, def, scope, fresh)
     );
@@ -2727,6 +2730,11 @@ export function declareFn(
   }
 
   scope ??= ce.context.lexicalScope;
+
+  // The binding that this declaration makes decides whether `id` is a
+  // constant default, not a declaration of the scope that was canonicalized
+  // earlier and has not run (`forgetConstantDeclaration()`).
+  forgetConstantDeclaration(ce, id, scope);
 
   // A declaration in the global scope must not shadow a constant of a library
   // (`Pi`, `ExponentialE`, `GoldenRatio`, `True`, …), for the same reason that

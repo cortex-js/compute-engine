@@ -305,8 +305,10 @@ import {
 import { errorValue } from '../boxed-expression/error-value.js';
 import {
   NESTED_DEFAULT_MESSAGE,
+  forgetConstantDeclaration,
   installParameterDefaults,
   isSignatureMarkerOperand,
+  noteConstantDeclaration,
   typeHasParameterDefault,
 } from '../boxed-expression/parameter-defaults.js';
 import {
@@ -8121,6 +8123,33 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           }
         };
 
+        // A constant whose value is a constant default (an Epsil
+        // `const W = 5`) is a constant default for a function or a lambda
+        // of a later statement; any other declaration of the name makes it
+        // a variable again (`noteConstantDeclaration()`). `attributes` is
+        // the canonical attributes dictionary of the declaration, if any.
+        // Each symbol of a destructuring target (`let (W, b) = (7, 0)`) is
+        // a variable.
+        const markVariables = (pattern: Expression): void => {
+          if (isSymbol(pattern))
+            noteConstantDeclaration(ce, pattern.symbol, undefined);
+          else if (isFunction(pattern, 'Tuple'))
+            pattern.ops.forEach(markVariables);
+        };
+        const noteDeclaration = (
+          attributes: Expression | undefined,
+          initializer?: Expression
+        ): void => {
+          if (isSymbol(symbolExpr))
+            noteConstantDeclaration(
+              ce,
+              symbolExpr.symbol,
+              attributes,
+              initializer
+            );
+          else markVariables(symbolExpr);
+        };
+
         if (args.length === 2) {
           // The second operand is either a type (kept raw, so that a
           // type-name symbol such as `real` is not auto-declared as a
@@ -8130,22 +8159,31 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             args[1].operator === 'Dictionary' ? args[1].canonical : args[1];
           if (isDictionary(op) && op.get('type') === undefined)
             recordInitializerEvidence(undefined, op.get('value'));
+          noteDeclaration(isDictionary(op) ? op : undefined);
           return ce._fn('Declare', [symbolExpr, op]);
         }
 
         if (args.length === 3) {
           const value = args[2].canonical;
           recordInitializerEvidence(args[1], value);
+          noteDeclaration(isDictionary(value) ? value : undefined);
           return ce._fn('Declare', [symbolExpr, args[1], value]);
         }
 
-        if (args.length === 4)
+        if (args.length === 4) {
+          const attributes = args[3].canonical;
+          const initializer = args[2].canonical;
+          noteDeclaration(
+            isDictionary(attributes) ? attributes : undefined,
+            initializer
+          );
           return ce._fn('Declare', [
             symbolExpr,
             args[1],
-            args[2].canonical,
-            args[3].canonical,
+            initializer,
+            attributes,
           ]);
+        }
 
         return null;
       },
@@ -14576,7 +14614,6 @@ function* declareSteps(
         installParameterDefaults(
           ce,
           existingValueDef.value,
-          symbolName,
           `Symbol "${symbolName}"`,
           ce.type(type!).type
         );
@@ -14683,6 +14720,12 @@ function* declareSteps(
         (created as { _declaredByStatement?: boolean })._declaredByStatement =
           true;
     }
+    // The declaration has run: its binding now decides whether the name is
+    // a constant default, on both branches above, and the mark that the
+    // canonicalization of the declaration wrote is removed. Otherwise the
+    // mark of a `const W` of an earlier run hid a later binding of `W`
+    // (`forgetConstantDeclaration()`).
+    forgetConstantDeclaration(ce, symbolName, currentScope);
     const declared = currentScope.bindings.get(symbolName);
     if (uninitialized !== undefined && declared !== undefined)
       initializeBlockLocal(

@@ -3010,11 +3010,11 @@ describe('The simple rule for assignments (R3)', () => {
     );
   });
 
-  // A function literal that the body of another literal returns can reach a
-  // callback operator, so its write of the parameter `y` of the outer
-  // literal declines, although the interpreter and the compiled code agree
-  // here (7). A literal held by a `Declare` is not a callback.
-  test('a function literal returned by another literal is a callback', () => {
+  // A function literal that the body of another literal returns is a
+  // function value: the curried call of it declines (a curried call does not
+  // compile, `docs/COMPILATION-MODEL.md`, "Function values"), and the
+  // fallback gives the value of the interpreter (7).
+  test('a function literal returned by another literal declines as a curried call', () => {
     const W: MathJsonExpression = [
       'Function',
       [
@@ -3032,7 +3032,8 @@ describe('The simple rule for assignments (R3)', () => {
     ];
     const r = compile(engine().box(json));
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.diagnostic?.code).toBe('compile-error');
+    expect(r.diagnostic?.message).toContain('a curried call');
     expect(r.run!({ x: 5 })).toBe(7);
   });
 });
@@ -3245,12 +3246,18 @@ describe('The admission checks of round 2 of the review of the simple rule (R3)'
   // The inner literal is returned to the `Filter`: the interpreter gives 0,
   // the compiled code gave 5.
   test('a literal returned by a curried literal is a callback', () => {
-    declines([
-      'Block',
-      ['Assign', 'p', 0],
-      ['Filter', 'L', ['Apply', ['Function', writer, 'y'], 0]],
-      'p',
-    ]);
+    // The full application of a literal whose value is a function declines
+    // first, as a function returned by a call (`assertNoFunctionValue()`).
+    const r = compile(
+      engine().box([
+        'Block',
+        ['Assign', 'p', 0],
+        ['Filter', 'L', ['Apply', ['Function', writer, 'y'], 0]],
+        'p',
+      ])
+    );
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.message).toMatch(/does not return a function/);
     declines([
       'Block',
       ['Assign', 'p', 0],
@@ -3261,20 +3268,26 @@ describe('The admission checks of round 2 of the review of the simple rule (R3)'
   });
 
   // A stored literal behind an `If`, passed by name: the interpreter gives
-  // 0 at x = 1, the compiled code gave 5.
+  // 0 at x = 1, the compiled code gave 5. The value of `g` is a function
+  // chosen at run time, a function value stored in a local, which compiled
+  // code does not pass (`docs/COMPILATION-MODEL.md`, "Function values").
   test('a writer stored behind an If and passed by name declines', () => {
-    declines([
-      'Block',
-      ['Assign', 'p', 0],
-      stored('g', [
-        'If',
-        ['Greater', 'x', 0],
-        writer,
-        ['Function', ['Greater', 'u', 1], 'u'],
-      ]),
-      ['Filter', 'L', 'g'],
-      'p',
-    ]);
+    const r = compile(
+      engine().box([
+        'Block',
+        ['Assign', 'p', 0],
+        stored('g', [
+          'If',
+          ['Greater', 'x', 0],
+          writer,
+          ['Function', ['Greater', 'u', 1], 'u'],
+        ]),
+        ['Filter', 'L', 'g'],
+        'p',
+      ])
+    );
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/function value known only at run time/);
   });
 
   // The nested `Match` reads `t`, the list local of the case body: the

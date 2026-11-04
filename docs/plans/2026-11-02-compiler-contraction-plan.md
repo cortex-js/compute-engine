@@ -1367,6 +1367,246 @@ The Python `_ce_unset` marker is already gone. The listed lines are 742
 (623 in the named functions, 119 in the field lines), before the lowerings
 and the targets' re-compile paths for an input write, which row 4 measures.
 
+3.4.5 **Function values** (options page 5, option B with the simplified
+defaults). Staged 2026-11-03, session compute-engine-e7, worked on base
+`21fc9505b`, not committed. The rule, in the interpreter, Epsil and compiled
+code:
+
+- **Compiled code calls what it can see.** A compiled call compiles when the
+  callee is a defined function, a declared function with a value, or a
+  function literal at the call site; the callbacks of `Map`, `Filter`,
+  `Sort`, `Fold` and `Reduce` compile when they are such a callee.
+  `Apply(Derivative(f, n), x)` is kept: `appliedDerivativeLiteral()`
+  (`compile-callbacks.ts`) resolves it to the closed form of a defined `f`
+  as a literal at the call site (decided 2026-11-03 with Tycho; 10 corpus
+  records, neyret/7kn7eakzkd and neyret/g2vyb7i2oi), and it declines only
+  where it declined before.
+- **Function values decline in compiled code**
+  (`compile-function-values.ts`, `assertNoFunctionValue()`): a function
+  value passed through a parameter or as an argument, a curried call or a
+  partial application (`Apply(Apply(f, 1), u)`, `Apply(f, 1)`), a function
+  returned from a call, a parameter declared with a function type
+  (`h = (f: function) ↦ f(1)`), and a function value stored in a local that
+  is assigned more than once (a local function assigned once with a literal
+  is a callee compiled code can see). A call with fewer arguments than the
+  required parameters keeps the arity message. The interpreter keeps
+  first-class functions: lambdas, closures, currying, partial application,
+  function values.
+- **A default fills only an argument that the call leaves out**, at
+  canonicalization (`completedLiteralArguments` in compiled code), in the
+  interpreter and in compiled code. An absent value supplied at a defaulted
+  position, written (`f(Missing)`) or computed (`f(At(L, 100))`), is passed
+  through: `g = (k: real = 2) ↦ k + 1`, `g(First([]))` is `Missing` in the
+  interpreter (the 3.4.2 rule), and compiled `g(At(L, 100))` with
+  `L: list<real>` gets `NaN`, a value outside `real` (unspecified). This
+  reverses the "or absent" half of R6 (user decision 2026-11-02). A default
+  parameter is no longer a discharge (`AGENTS.md`,
+  `docs/COMPILATION-MODEL.md`, `docs/ERROR-MODEL.md`). The interval-js
+  decline of a supplied value at a defaulted position is gone. The static
+  type of a call follows (`call-result-type.ts`: `f(First([]))` with
+  `f := (x: integer = 2) ↦ x` is typed `Missing`), and argument validation
+  no longer accepts a certainly absent argument at a defaulted parameter
+  (`validate.ts`).
+- **A default is a constant.** Accepted: a number, a string, a boolean,
+  `[]`, `{}`, and a constant symbol of three kinds: a library constant
+  (`over: set = Integers`, `k: real = Pi`), a symbol declared with
+  `isConstant: true` (`weights: list<number> = DefaultWeights`; an Epsil
+  `const` of the program with any value counts, also when the function is
+  in the same program, recorded when its `Declare` is canonicalized because
+  the static check canonicalizes without running), and a symbol that the
+  parameter type lists (`mode: symbol<Auto> | symbol<Manual> = Auto`).
+  `isConstantSymbolDefault()` (`boxed-expression/parameter-defaults.ts`) is
+  the one check. The default is bound at the declaration: a local of the
+  same name at the call site does not change it (`literalDefaultOperands()`
+  takes the canonical literal's default operands; `callSiteDefault` is
+  gone). Refused, with the static error `expected-a-literal-default` in a
+  literal and a throw from `ce.declare()` for a signature: a default that
+  names a variable (`(k = n) ↦ k` with `n` declared without `isConstant`, or
+  assigned), `Nothing`, `Missing`. A literal with a rest parameter has no
+  defaults (static error). A tuple (`Optional(p, (0, 0))`) or a computed
+  expression (`2π`) is not a default value, as on the base: rule 4 allows
+  "an expression with no free symbol", but the signature language holds
+  only literals and symbols, and this item adds no new form (write a
+  constant and name it). In compiled code a symbol default is filled only
+  when it is a library constant or a `symbol<…>` symbol
+  (`compiledSymbolDefaultDeclines()`, `compile-parameter-defaults.ts`); a
+  host constant or an Epsil `const` declines at every fill site (the simple
+  sound version: a name test of the call site was wrong both ways in
+  review), so `f := (k = W0) ↦ k + 1` with `W0` declared `isConstant`
+  compiles `f()` to a decline while the interpreter gives 6.
+- **User decision 2026-11-03** (relayed by compute-engine-24; option B of
+  rule 4): a constant symbol is a valid default; the purpose of rule 4 is to
+  remove the call-site scoping rule, not to forbid a symbol as a value.
+  Witness: GitHub issue #490 (`corpus`): enumeratio asked for
+  `over: Integers` and `Auto`, and the 0.176.0 reply promised them and "for
+  any other value, declare a constant and name it". compute-engine-e7
+  extended the user's wording ("a library constant or a symbol of a
+  declared `symbol<…>` literal type") to a symbol declared `constant` by the
+  user, which keeps the second promise; compute-engine-24 agreed that it is
+  inside the decision. The other option (A): every symbol default except
+  `True` and `False` is a static error; #490's `mode` default becomes a
+  string, and `over: Integers` has no replacement.
+- **The bigint user** (enumeratio, GitHub issue #503) is assumed not to use
+  currying, partial application or a function value in a variable (section
+  6, user decision 2026-11-03); their programs (`Fold` over a `Range` with a
+  literal callback, user functions with integer parameters) are calls that
+  option B keeps. In the `bigint` mode, a supplied `NaN` or `null` at a
+  defaulted parameter now throws the entry `TypeError`; only `undefined` (a
+  left-out argument) takes the default.
+- **Tycho's census** (tycho-c6, 2026-11-03; confirmed unchanged when this
+  item started). Instrument: Tycho's codegen audit of all 757 documents
+  plus the showcase, every expression given to compile and the parse of
+  every row; Tycho worktree main `abcd7ba3e` plus adoption items 2 and 4; CE
+  0.176.0 and `609d496ee` give the same counts. Parameter defaults
+  (`Optional` parameter or a signature string with `=`): 0; Tycho's source
+  declares no signature with a default. A lambda stored in a local, a
+  lambda returned from a function, a call of a parameter, a callback that
+  is a parameter: 0. Every lambda Tycho builds is a literal callback of
+  `Map`/`Filter` (importer lowerings filter-index, function-zip,
+  minmax-broadcast, collection-bigop-lowering), a literal applied at the
+  call site (the derivative chain of `compiled-body.ts`), the defined GLSL
+  colour helper, or boxed for its type only. A function value passed
+  through a parameter: 1 document, neyret/oazduhqqid: Tycho's macro
+  threading compiles `\frac{r_s+r_p}{2}\{x<0\}` as
+  `\frac12(r_s(x, v)+r_p(x, v))` with the macro `v` passed bare, and CE
+  emitted `_fn_r_s(_.x, _fn_v)` where `r_s` uses `v` as a number: `NaN`. A
+  Tycho defect (Tycho ROADMAP IX); after 3.4.5 it declines, which Tycho
+  accepts. Not function values: `Integrate(Function(body, x), …)` (136
+  compile records, 25 documents) and one `EvaluateAt`, CE's own integrand
+  form, which stays. `f'(x)` compiles as `Apply(Derivative(f), x)` (10
+  records), kept as above.
+- **Choices beyond the rule, each reversible.** (1) A library constant is
+  checked against the parameter type also with `ce.strict = false`
+  (`k: number = Integers` is refused; the base accepted it in non-strict
+  mode; other option: skip the check when strict is off). (2) A function
+  statement that reads a `const` written after it (`function f(k = W) {…};
+  const W = 5`) is `expected-a-literal-default`, since the function is
+  hoisted before the `const` runs (other option: the code
+  `read-before-declaration`, which needs a pre-scan of the block). (3) The
+  test of `undefined` at the root of a compiled literal and in the bigint
+  entry check is the left-out argument (JavaScript cannot tell a written
+  `undefined` from a left-out one), so a compiled callback with a defaulted
+  parameter fills a supplied absent `undefined`; a discharge of that
+  parameter in the body then differs from the interpreter
+  (known-limitations line, crafted). (4) Interval-js declines
+  `Apply((f) => f(1), (x) => x + 1)` where the other targets fold it to 2
+  at compile time (a decline; crafted).
+- **Deleted and rewritten tests**: the R6 fill tests, the symbol-default
+  call-site tests (`lazy-view-outlived-symbol-default.test.ts` deleted; the
+  callbacks of `closure-frame-retained` and `lazy-view-scope` rewritten to
+  read `d` where it is written, one lazy-view test deleted, whose new form
+  gives `2d` on the base too), the compiled currying, partial-application
+  and returned-function tests (now declines; the interpreter assertions
+  kept), the point-default tests through a variable `O` (restored with `O`
+  declared `isConstant`). New: `function-values-rules.test.ts` and
+  `function-values-review-fixes.test.ts`. The compiled curried calls of
+  `issue-489-curried-function-capture` and
+  `parameter-substitution-shadowing` now expect the decline. No snapshot
+  changed.
+- **The corpus measure** (tools of `~/.claude/tools/ce-census/`, records
+  keyed by LaTeX). Tycho frozen at `44a25d4e3` with the `At` handler of
+  3.4.2, the mode split of 3.4.6 and the four builders of 3.4.4 patched (the
+  copy `tycho-snap-344` of session compute-engine-1e). Base run `base` on
+  `21fc9505b`: 17,835 compiles, the same values as 3.4.4's run `cand2`
+  (77,208 values, 0 different). Candidate run `cand` (`21fc9505b` plus this
+  item): 17,835 compiles; declines javascript 43 → 44, glsl 47 → 47,
+  interval-js 74 → 75; the only new declines are neyret/oazduhqqid, row
+  `\frac{r_{s}+r_{p}}{2}\keyword{where}x\lt0`, javascript and interval-js
+  ("the argument `v` is a function, and compiled code does not pass a
+  function value through a parameter"), as expected; no value changed
+  (77,199 values compared). The two records of that row change key, since
+  Tycho compiles the expanded form after the decline. Runs: `audit/` in the
+  scratchpad of session compute-engine-e7.
+- **Code lines** (not blank, `//`, `/*` or `*`; base `21fc9505b`): `library`
+  80,168 → 80,198, `boxed-expression` 83,913 → 83,788, `src/epsil` 17,455 →
+  17,463, `compilation` 93,043 → 92,799 (`function-utils.ts`, outside these
+  folders, also lost the run-time absent fill). Source: 32 files changed, 914
+  insertions, 1,587 deletions, plus the new `compile-function-values.ts`.
+  Tests: 22 files changed (1,245 insertions, 2,061 deletions), one deleted,
+  two new.
+- **Review**: Claude and Codex, three rounds. Round 1 (11 findings, 1
+  high): a compiled symbol default resolved by name to a call-site local
+  (high), the constant-declaration record never cleared and trusted before
+  the binding, the literal's defaults taking precedence over a declared
+  signature's, the four-operand `Declare` not recorded, three gaps of
+  `assertNoFunctionValue()`, the callback wrappers' fill of a supplied
+  `undefined` (a known-limitations line), the CHANGELOG. Round 2 (6 findings,
+  1 high): the name-based shadow guard missed callbacks (high) and declined
+  the plausible same-block Epsil `const`; a warm engine's earlier binding
+  overrode the record; checkpoint restore; a global fallback in
+  `fewerArgumentsThanParameters()`. The name test was replaced by the simple
+  sound rule: compiled code fills a symbol default only for a library
+  constant or a `symbol<…>` symbol, and declines a host or program constant
+  at every fill site (plausible witness lost: the Epsil same-block `const`
+  default and a host constant default compile to a decline; the interpreter
+  gives the value); the record got explicit 'const'/'variable' marks,
+  journaled for checkpoint restore. Round 3 (5 findings, no new high in the
+  round-2 fixes): `ce.declare()` into another scope boxed defaults in the
+  current scope (fixed), a destructuring `let` wrote no mark (fixed), marks
+  outliving a run (fixed; a canonicalized `Declare` that never runs keeps
+  its mark: crafted, known-limitations sentence in `src/epsil/docs/control-flow.md`),
+  and the round-1 `undefined` fill again (kept as the known-limitations
+  line). The round-3 fixes had no review (the third round is the last).
+- **Checks** on the final tree (`/tmp/wt-compute-engine-e7`, `21fc9505b`
+  plus this item): typecheck, lint, `check:deps`, the full suite (1,818
+  suites, 77,779 tests, 0 failed; canary 46), `npm run test:python` (49
+  suites, 2,778 tests), the corpus measure above (rerun on the final tree:
+  the same result). On the combined tree (`049107fb4`, after CE-796, CE-794,
+  CE-787, plus this item): typecheck, lint, `check:deps`, the full suite
+  (1,818 suites, 77,805 tests, 0 failed; canary 46), `npm run test:python`
+  (2,778 tests).
+- **User-facing pages** edited in `~/dev/cortexjs.io/docs/compute-engine/`:
+  `13-guide-compile.md` (defaults, absent values, a new section "Function
+  Values"), `87-reference-functions.md`, `08-guide-types.md`,
+  `06-guide-augmenting.md`. Epsil pages in this repo: `src/epsil/docs/types.md`,
+  `control-flow.md`, `operators.md`, `errors.md` (regenerated). Seen, not
+  changed (older text, not this item): the partial-application example of
+  `87-reference-functions.md` (about line 627) prints a different, equal
+  function than the source gives.
+
+What step 4, row 5, removes (code lines not blank, `//`, `/*` or `*`,
+measured on the item's tree): `partial-application.ts` (227, unreachable
+after the declines: `partialApplicationValue` and the rest of the file 138,
+`curriedLiteral` and `curriedApplication` 26, the parts of
+`partialApplicationDecline`/`partialApplicationValueDecline` after the
+refusal) and its callers in `javascript-target.ts`, `python-target.ts`,
+`interval-javascript-target.ts`, `gpu-functions.ts`,
+`compile-expression.ts`; the run-time call of a reassigned local function:
+the `rebound` branches of `tryCompileLocalFunctionCall`
+(`compile-user-functions.ts`, about 17), `compile-inner.ts` (about 8),
+`javascript-target.ts` (2), `reboundLocalNames` (`compile-loops.ts`, 180,
+most of it: the decline needs only the set of names),
+`returnedFunctionLiterals` (`compile-conditions.ts`, 17), the `literals` and
+`decline` fields of `reboundFunctionScope` and `noteLocalFunction`; and
+probably `boxed-expression/lazy-view-context.ts` (473): its records served
+the symbol default read at the call site; with the records turned off, the
+three test files that use it pass (203 tests), but a full suite with them off
+was not run. The run-time absent fill (`absentFilledArguments`,
+`literalDefaultFills`, `defaultFillingWrapper`, `targetCoalesce`,
+`mayBeAbsentAtRunTime`, `argumentMayBeAbsent`,
+`declineIntervalAbsentDefault`, `callSiteDefault`, the filling callback
+wrappers and the per-cell fill of broadcast calls) is already removed by
+this item, because it gave the default where the interpreter now passes the
+absent value.
+
+What the language release needs from item 3.4 as a whole: (1) the
+CHANGELOG: the `[Unreleased]` "Behavior Changes" section holds one entry per
+axis (3.1 to 3.4.6), each with the replacement for every form that declines
+or becomes an error; the release turns `[Unreleased]` into the version
+heading, and says at its top that it is the language release with breaking
+changes for compiled code (no entry for that exists yet); (2) the entry of
+0.177.0 "A default parameter fills a supplied absent value" is reversed by
+3.4.5's entry, which says so; (3) for npm users, section 6's last bullet
+(a CHANGELOG entry per removal with the decline that replaces it) is met by
+the per-axis entries; (4) section 6's other open bullets stay for the
+release: Tycho re-checks its rows (restriction binding, selection, the
+complex-mode documents, the `NaN` point routes), the issue #503 reply names
+the dropped bigint escalation and the function-value assumption, the issue
+#355 comment (`docs/plans/2026-11-03-issue-355-comment.md`), and the
+pending `Slice(xs, Nothing)` decision of 3.4.3; (5) the reply to issue #490
+should say that a default no longer fills a supplied absent value and that
+a variable symbol default is an error, with the constant forms that stay.
+
 The compiler side of 3.1 to 3.4 in this release is the minimum that keeps
 compiled code equal to the interpreter: the new static errors decline, the
 `NaN` point cell replaces `undefined` in the JavaScript lowering, `When` is

@@ -7343,8 +7343,9 @@ export type EntryPlan =
       bigintLists?: number[];
       /** `mode: 'bigint'`: the integer parameters (also in `bigints`) that
        * have a default value. The check skips such a parameter when its
-       * argument is absent (left out, `undefined`, `null` or `NaN`), which
-       * the default fills. `run()` fills the default value before the check,
+       * argument is left out (`undefined`), which the default fills; a
+       * supplied `null` or `NaN` is checked as any other value. `run()`
+       * fills the default value before the check,
        * and the code that `load()` makes fills it in the emitted function,
        * after the check. The default value is a `bigint`, so both give the
        * same result. */
@@ -7623,12 +7624,13 @@ export function checkEntry(
   // The `mode: 'bigint'` rules of the free-symbol route above.
   if (plan.bigints !== undefined)
     for (const i of plan.bigints) {
-      // An absent argument (left out, `undefined`, `null` or `NaN`: the
-      // absence test of the discharges, `jsIsAbsent()`) for a parameter
-      // with a default value gets the default value.
+      // A left-out argument (`undefined`) for a parameter with a default
+      // value gets the default value. A supplied absent value (`null`,
+      // `NaN`) is not filled: a default fills only an argument that the
+      // call leaves out (`docs/COMPILATION-MODEL.md`, "Function values").
       if (
         plan.bigintDefaults?.includes(i) &&
-        Number.isNaN(argumentsList[i] ?? Number.NaN)
+        argumentsList[i] === undefined
       )
         continue;
       checkBigintEntry(`argument ${i + 1}`, argumentsList[i]);

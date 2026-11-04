@@ -1,6 +1,5 @@
 // Calls over points and point lists, and the checks on their arguments.
 
-import { targetCoalesce } from './compile-parameter-defaults.js';
 import { isIndexReadTuple } from '../boxed-expression/index-read-tuple.js';
 import type {
   Expression,
@@ -94,10 +93,7 @@ export function tryCompilePointListCall(
   engine: ComputeEngine,
   h: string,
   args: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>,
-  /** The compiled defaults for a call that maps over a list argument
-   * (`emitUserFunctionCall`, `mapDefaults`). */
-  mapDefaults?: () => ReadonlyArray<((x: string) => string) | undefined>
+  target: CompileTarget<Expression>
 ): TargetSource | undefined {
   // A parameter declared `broadcastable<P>`, with `P` a point type, maps
   // to the cells of its argument, and a point is a cell: a tuple is not a
@@ -204,8 +200,7 @@ export function tryCompilePointListCall(
           args,
           params,
           scalarLists,
-          target,
-          mapDefaults
+          target
         );
       at = scalarLists.indexOf('list');
       scalarList = true;
@@ -465,24 +460,6 @@ export function tryCompilePointListCall(
     name = emitted.name;
   }
   if (name === undefined) return undefined;
-  // The fill of each parameter with a default (`mapDefaults`, the target's
-  // `Coalesce` chosen from the type of the parameter). The other arguments
-  // are filled before the call (`absentFilledArguments()`). The mapped
-  // point is filled here, for each point: at a parameter declared as a
-  // point, the interpreter gives the default to a `NaN` point of the list,
-  // so with `g := (p: tuple<number, number> = (0, 0)) ↦ PointX(p)`,
-  // `g([(1, 2), (NaN, NaN)])` is `[1, 0]`.
-  const fills =
-    target.language === 'javascript' && targetCoalesce(target) !== undefined
-      ? (mapDefaults?.() ?? [])
-      : [];
-  const pointFill = untypedElement === undefined ? fills[at] : undefined;
-  if (pointFill !== undefined) {
-    const ps = args.map(() => tempVar(target));
-    name =
-      `((${ps.join(', ')}) => ${name}(` +
-      `${ps.map((p, i) => (i === at ? pointFill(p) : p)).join(', ')}))`;
-  }
   const codes = args.map((a) => compileValueOperand(a, target));
   const temps = args.map(() => tempVar(target));
   const point = tempVar(target);
@@ -599,18 +576,7 @@ export function tryCompilePointListCall(
             `and the compiled map does not check them.`
         );
     });
-    // An element that is absent at a parameter with a default takes the
-    // default (`mapDefaults`, filled with the target's `Coalesce`), as the
-    // interpreter fills each cell of a broadcast. With no default to fill,
-    // the mapped function is the callee itself, not an arrow that only
-    // calls it.
-    const cellArgs = temps.map((t, i) =>
-      i === at || fills[i] === undefined ? t : fills[i]!(t)
-    );
-    const fn = fills.every((f, i) => i === at || f === undefined)
-      ? name
-      : `((${temps.join(', ')}) => ${name}(${cellArgs.join(', ')}))`;
-    return `_SYS.mapFn(${fn}, [${ranks.join(', ')}], ${codes.join(', ')})`;
+    return `_SYS.mapFn(${name}, [${ranks.join(', ')}], ${codes.join(', ')})`;
   }
   // The argument at the parameter typed `unknown` is passed whole to each
   // call of the map when its static type settles a value that is not a
@@ -822,8 +788,7 @@ export function compileUntypedScalarSlotCall(
   args: ReadonlyArray<Expression>,
   params: ReadonlyArray<Type | undefined>,
   scalarLists: ReadonlyArray<'list' | 'maybe' | 'untyped' | false>,
-  target: CompileTarget<Expression>,
-  mapDefaults?: () => ReadonlyArray<((x: string) => string) | undefined>
+  target: CompileTarget<Expression>
 ): TargetSource | undefined {
   const at = scalarLists.indexOf('untyped');
   const reason =
@@ -876,8 +841,7 @@ export function compileUntypedScalarSlotCall(
     target,
     args.map(() => false),
     true,
-    [],
-    mapDefaults
+    []
   );
 }
 

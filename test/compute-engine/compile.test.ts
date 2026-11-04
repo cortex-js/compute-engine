@@ -7104,9 +7104,11 @@ describe('COMPILE a call of a block local or a parameter with a library name', (
 
     test('a parameter declines on every target', () => {
       expect(valueAt3(param)).toBe(4);
-      const reason = new RegExp(
-        `the parameter \`${name}\` of the function is called in its body`
-      );
+      // The argument is a function value passed through a parameter, which
+      // compiled code does not compile (`docs/COMPILATION-MODEL.md`,
+      // "Function values").
+      const reason =
+        /the argument `\(t\) => t \+ 1` is a function, and compiled code does not pass a function value through a parameter/;
       for (const to of ['javascript', 'glsl', 'wgsl', 'python'] as const)
         expect(() =>
           compile(engine().box(param), { to, fallback: false })

@@ -246,12 +246,6 @@ import {
   selectsElementWise,
   TWO_VALUED_OPERATORS,
 } from './conditional-value.js';
-import {
-  callSiteDefault,
-  parameterDefaultOperands,
-  signatureDefaultOperands,
-  withAbsentDefaults,
-} from './parameter-defaults.js';
 import { isTransitivelyPure } from './transitive-purity.js';
 import { realExponentValue } from './imaginary-part.js';
 import {
@@ -8149,26 +8143,19 @@ export class BoxedFunction
       const exactIntegerAt = numericApproximation
         ? integerParameterPositions(def)
         : undefined;
-      // A default that fills an absent operand is evaluated as an operand
-      // at its position is (`withAbsentOperandDefaults`).
       const operandValue = (x: Expression, index: number): Expression =>
         (exactIntegerAt !== undefined && exactIntegerAt(index)) ||
         (exactExponent && index === 1)
           ? exactIntegerOperand(x, options)
           : x.evaluate(operandOptions(options));
-      const tail = withAbsentOperandDefaults(
-        this.engine,
-        def,
-        holdMap(this, (x, index) =>
-          // A value that the finiteness read of this evaluation computed
-          // for the operand (`_isMemoizableLazyCollection()`); such a read
-          // happens under a plain `evaluate()` only.
-          (exactIntegerAt !== undefined && exactIntegerAt(index)) ||
-          (exactExponent && index === 1)
-            ? operandValue(x, index)
-            : (takeEagerSourceValue(this, x) ?? operandValue(x, index))
-        ),
-        operandValue
+      const tail = holdMap(this, (x, index) =>
+        // A value that the finiteness read of this evaluation computed
+        // for the operand (`_isMemoizableLazyCollection()`); such a read
+        // happens under a plain `evaluate()` only.
+        (exactIntegerAt !== undefined && exactIntegerAt(index)) ||
+        (exactExponent && index === 1)
+          ? operandValue(x, index)
+          : (takeEagerSourceValue(this, x) ?? operandValue(x, index))
       );
 
       //
@@ -9646,7 +9633,7 @@ export class BoxedFunction
           : undefined;
       // The walk gives the event loop a turn about every 8 ms, and an abort
       // of the signal stops it there (`holdMapAsync`).
-      const evaluated = await holdMapAsync(
+      const tail = await holdMapAsync(
         this,
         async (x, index) =>
           (exactIntegerAt !== undefined && exactIntegerAt(index)) ||
@@ -9655,19 +9642,6 @@ export class BoxedFunction
             : (readValue(x) ??
               (await x.evaluateAsync(operandOptions(options)))),
         options?.signal
-      );
-      // A default value is a number, a string, a boolean, a symbol or an
-      // empty collection, so it is evaluated synchronously, as an operand at
-      // its position is on the sync route. After the `await`, the context of
-      // this evaluation (the scope of the call, which a symbol default reads)
-      // is put in place again.
-      const tail = this.engine.withEvaluationContext(options, () =>
-        withAbsentOperandDefaults(this.engine, def, evaluated, (d, index) =>
-          (exactIntegerAt !== undefined && exactIntegerAt(index)) ||
-          (exactExponent && index === 1)
-            ? exactIntegerOperand(d, options)
-            : d.evaluate(operandOptions(options))
-        )
       );
 
       //
@@ -15784,17 +15758,13 @@ const declaredConformanceSignatures = new WeakMap<
  * `apply()` in `function-utils.ts`). Before, the absent value was read as
  * `NaN` there.
  *
- * `literal` is the function literal that the call applies, when it is
- * known. A parameter that has a default value in the literal
- * (`(k = 2) ↦ k`) does not count: the application gives it its default in
- * place of the absent argument (`apply()`), so with `g` declared
- * `(number) -> number` and `g := (k = 2) ↦ k`, `g(First([]))` is `2`. The
- * caller fills the defaults of the declared signature before this check.
+ * A parameter with a default value counts as any other: a default fills
+ * only an argument that the call leaves out, so with `g` declared
+ * `(number) -> number` and `g := (k = 2) ↦ k`, `g(First([]))` is `Missing`.
  */
 function absentAtNumericParameter(
   declared: Type,
-  ops: ReadonlyArray<Expression>,
-  literal?: Expression
+  ops: ReadonlyArray<Expression>
 ): boolean {
   if (typeof declared === 'string' || declared.kind !== 'signature')
     return false;
@@ -15804,13 +15774,8 @@ function absentAtNumericParameter(
   // is `Missing` only when the other arguments are supplied.
   if (ops.length < args.length) return false;
   const opt = declared.optArgs ?? [];
-  const params = isFunction(literal, 'Function')
-    ? literal.ops.slice(1)
-    : undefined;
   return ops.some((x, i) => {
     if (!isAbsentScalarSymbol(x)) return false;
-    if (params?.[i] !== undefined && isFunction(params[i], 'Optional'))
-      return false;
     const p =
       i < args.length
         ? args[i].type
@@ -15912,33 +15877,6 @@ function declaredScalarConformance(
     ops,
     // `NaN` is accepted at a numeric parameter and checked anywhere else.
     (i) => (isNumericParam(i) ? 'handle' : 'reject')
-  );
-}
-
-/**
- * The evaluated operands `ops` of a call of the operator `def`, with each
- * operand that is absent (`Missing`, `NaN`, ...) at a parameter with a
- * default value replaced by that default, read with `value`
- * (`withAbsentDefaults()`). A default fills an absent argument as it fills
- * an argument that the call leaves out: `F(At(L, 100))` with `F` declared
- * `(k: real | missing = 2) -> real` gives the handler the operand 2. The
- * operands of a lazy operator are not evaluated here, so they are left as
- * they are: only an operand written absent is replaced, at
- * canonicalization (`fillParameterDefaults()`).
- */
-function withAbsentOperandDefaults(
-  ce: ComputeEngine,
-  def: BoxedOperatorDefinition,
-  ops: ReadonlyArray<Expression>,
-  value: (d: Expression, index: number) => Expression
-): ReadonlyArray<Expression> {
-  if (def.lazy) return ops;
-  const t = def.signature.type;
-  if (typeof t !== 'object' || t.kind !== 'signature') return ops;
-  const defaults = parameterDefaultOperands(ce, def);
-  if (defaults === undefined) return ops;
-  return withAbsentDefaults(ops, t.args?.length ?? 0, defaults, (d, i) =>
-    value(callSiteDefault(d), i)
   );
 }
 
@@ -16372,36 +16310,13 @@ function applyFunctionLiteralWith(
   // reads the whole collection, not its display preview. The body itself
   // keeps the caller's options, since it produces the result.
   //
-  // An argument that is absent at a parameter with a default in the
-  // DECLARED signature of the variable (`fv: (real, real = 2) -> real`)
-  // takes the default (`withAbsentDefaults()`). Canonicalization reads
-  // the same defaults for an argument that the call leaves out (the
-  // `valueDefaults` of `makeCanonicalFunction`, `box.ts`); the literal the
-  // variable holds need not have them (`fv := (x, k) ↦ x + k`).
-  const declaredSignature = def.inferredType ? undefined : def.type?.type;
-  const declaredDefaults =
-    declaredSignature === undefined
-      ? undefined
-      : signatureDefaultOperands(expr.engine, def, declaredSignature);
-  // The fill runs on the arguments of the call, and again on each cell of a
-  // broadcast (below): a list argument is present, but a cell of it can be
-  // absent, and the scalar parameter receives the cell.
-  const withDeclaredDefaults = (
-    args: ReadonlyArray<Expression>
-  ): ReadonlyArray<Expression> =>
-    declaredDefaults === undefined ||
-    typeof declaredSignature !== 'object' ||
-    declaredSignature.kind !== 'signature'
-      ? args
-      : withAbsentDefaults(
-          args,
-          declaredSignature.args?.length ?? 0,
-          declaredDefaults,
-          (d) => callSiteDefault(d).evaluate(operandOptions(options))
-        );
-  const ops = withDeclaredDefaults(
-    evaluatedOps ?? expr.ops.map((x) => x.evaluate(operandOptions(options)))
-  );
+  // The defaults of the DECLARED signature of the variable
+  // (`fv: (real, real = 2) -> real`) fill the arguments that the call leaves
+  // out at canonicalization (the `valueDefaults` of `makeCanonicalFunction`,
+  // `box.ts`). An argument that the call supplies is passed as it is, also
+  // when its value is absent.
+  const ops =
+    evaluatedOps ?? expr.ops.map((x) => x.evaluate(operandOptions(options)));
   // The breadcrumb of a surplus argument (`ApplyOptions.arityFrame`): this
   // call's head, whose first argument is its first operand.
   const arityFrame = { operator: expr.operator, firstArgumentIndex: 1 };
@@ -16454,15 +16369,8 @@ function applyFunctionLiteralWith(
       });
     // An absent argument at a parameter whose DECLARED type is numeric
     // makes the call `Missing`, as an operator over `Missing` gives
-    // `Missing` (`absentAtNumericParameter()`). A parameter with a default
-    // in the literal is filled by the application, not here.
-    if (
-      absentAtNumericParameter(
-        def._signatureSkeleton ?? declaredType,
-        args,
-        value
-      )
-    )
+    // `Missing` (`absentAtNumericParameter()`).
+    if (absentAtNumericParameter(def._signatureSkeleton ?? declaredType, args))
       return expr.engine.Missing;
     return declaredScalarConformance(
       expr.engine,
@@ -16576,7 +16484,7 @@ function applyFunctionLiteralWith(
             while (true) {
               const { done, value: cell } = inContext(() => items.next());
               if (done) break;
-              const zipped = inContext(() => withDeclaredDefaults(cell));
+              const zipped = cell;
               const applied = await inContext(() =>
                 zipped.some(
                   (x, i) =>
@@ -16623,7 +16531,7 @@ function applyFunctionLiteralWith(
         while (true) {
           const { done, value: cell } = items.next();
           if (done) break;
-          const zipped = withDeclaredDefaults(cell);
+          const zipped = cell;
           // A broadcast maps to the scalar LEAVES: when a zipped row is itself
           // a broadcast-admitted collection (a rank≥2 source), re-dispatch
           // through the operator name so this arm applies again, exactly as the
@@ -19898,11 +19806,9 @@ function genericRuntimeConformance(
     // An absent argument at a parameter whose DECLARED type is numeric or a
     // point makes the call `Missing` without running the body, as on the
     // route where the function is held as a value
-    // (`absentAtNumericParameter()`). The defaults of the declared
-    // signature are already filled (`withAbsentOperandDefaults()`), and a
-    // parameter with a default in the literal is filled by the application.
+    // (`absentAtNumericParameter()`).
     const declared = def._validationSignature ?? def.signature.type;
-    if (absentAtNumericParameter(declared, ops, def._lambdaLiteral))
+    if (absentAtNumericParameter(declared, ops))
       return ce.Missing;
     return declaredScalarConformance(
       ce,

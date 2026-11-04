@@ -210,4 +210,9 @@ On `interval-js`, where an empty interval is either an absent value or a
 pole, a supplied numeric argument at a defaulted position declines. Four
 review rounds (the third and fourth because fixes of the round before
 introduced or left a wrong value). Corpus: 0 new declines, 0 changed
-values.
+values. The user reversed the "or absent" half of R6 on 2026-11-02
+(options page 5, option B, in
+`docs/plans/2026-11-02-language-axes-options.md`): a default fills only an
+argument that the call leaves out, and the run-time fill of an absent
+argument is gone with item 3.4.5 of
+`docs/plans/2026-11-02-compiler-contraction-plan.md`.

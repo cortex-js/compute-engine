@@ -13,8 +13,20 @@ import { parameterDefaultOperands } from '../../src/compute-engine/boxed-express
 import { describe as describeOperand } from '../../src/compute-engine/boxed-expression/operand-descriptor';
 import { widenUnannotatedLiteralParams } from '../../src/compute-engine/boxed-expression/validate';
 
-// Default values for optional parameters (GitHub issue #490). The design is
-// in `docs/plans/2026-10-31-parameter-default-values.md`.
+// Default values for optional parameters (GitHub issue #490).
+//
+// A default is a constant: a number, a string, `True` or `False`, `[]` or
+// `{}`. A symbol as a default is a static error: a declared signature
+// throws, a function literal gets an error on the parameter, and a rest
+// parameter with a default is an error too. (The type DSL still parses a
+// symbol default, so that a printed type reads back; the declaration
+// refuses it.)
+//
+// A default fills only an argument that the call leaves out: a call written
+// with fewer arguments, a named call that skips the parameter, a hole of a
+// named call, and a call that a consumer such as `Map`, `Sort` or `Iterate`
+// makes with fewer arguments. A value that the call supplies is passed
+// through, also an absent value (`Missing`, `NaN`).
 
 /** The `rawMessage` of the error that parsing `s` throws. */
 function parseError(s: string): string | undefined {
@@ -318,45 +330,58 @@ describe('PARAMETER DEFAULT VALUES: DECLARATION', () => {
     ).toBeUndefined();
   });
 
-  test('a declared symbol default is accepted when it fits the parameter', () => {
-    const name = declareOp('(x: number, over: set = Integers) -> number');
-    expect(json(parameterDefaultOperands(ce, operatorDef(name)))).toEqual([
-      'Integers',
-    ]);
-  });
-
-  test('an undeclared symbol default is accepted at every parameter type', () => {
-    const name = declareOp('(x: number, mode: symbol = Automatic) -> number');
-    expect(json(parameterDefaultOperands(ce, operatorDef(name)))).toEqual([
-      'Automatic',
-    ]);
+  test('a symbol default that is not constant is a static error', () => {
+    const message = (d: string, k: string) =>
+      new RegExp(
+        `the default value ${d} of the parameter "${k}": a default value is a constant: write a number, a string, a boolean, .*, or pass the argument`
+      );
+    // A symbol that is not declared, at a type that lists no symbol.
     expect(() =>
-      declareOp('(x: number, over: set = UndeclaredSetName) -> number')
-    ).not.toThrow();
+      declareOp('(x: number, mode: symbol = Automatic) -> number')
+    ).toThrow(message('Automatic', 'mode'));
     expect(() =>
       declareOp('(x: number, k: number = UndeclaredNumberName) -> number')
-    ).not.toThrow();
+    ).toThrow(message('UndeclaredNumberName', 'k'));
+    // A symbol that names a variable.
+    ce.declare('userDefaultValue', { value: 5 });
+    expect(() =>
+      declareOp('(x: number, k: number = userDefaultValue) -> number')
+    ).toThrow(message('userDefaultValue', 'k'));
   });
 
-  test('a declared symbol default whose type does not fit is refused', () => {
+  test('a constant symbol default: a library constant, or a symbol that the type lists', () => {
+    expect(
+      parameterDefaultOperands(
+        ce,
+        operatorDef(declareOp('(x: number, over: set = Integers) -> number'))
+      )?.map((d) => d?.symbol)
+    ).toEqual(['Integers']);
+    expect(
+      parameterDefaultOperands(
+        ce,
+        operatorDef(
+          declareOp(
+            '(x: number, mode: symbol<Auto> | symbol<Manual> = Auto) -> number'
+          )
+        )
+      )?.map((d) => d?.symbol)
+    ).toEqual(['Auto']);
+    // A library constant must match the parameter type.
     expect(() =>
       declareOp('(x: number, k: number = Integers) -> number')
-    ).toThrow(
-      /the default value Integers of the parameter "k" does not match its type "number"/
-    );
+    ).toThrow(/does not match its type "number"/);
   });
 
-  test('a symbol default must be one of the literal symbol types of its parameter', () => {
+  test('a symbol default is refused at the type of a function parameter too', () => {
     expect(() =>
-      declareOp(
-        '(x: number, mode: symbol<Auto> | symbol<Manual> = Atuo) -> number'
-      )
-    ).toThrow(/is not one of the symbols its type lists \(Auto, Manual\)/);
+      declareOp('(x: number, f: (number) -> number = Sin) -> number')
+    ).toThrow(/a default value is a constant/);
+  });
+
+  test('a rest parameter with a default is a static error', () => {
     expect(() =>
-      declareOp(
-        '(x: number, mode: symbol<Auto> | symbol<Manual> = Auto) -> number'
-      )
-    ).not.toThrow();
+      declareOp('(x: number, k: number = 2, ...xs: number) -> number')
+    ).toThrow();
   });
 
   test('`[]` and `{}` are accepted at a list and a dictionary parameter, and the signature prints them', () => {
@@ -617,60 +642,6 @@ describe('PARAMETER DEFAULT VALUES: DECLARATION', () => {
     );
   });
 
-  test('an undeclared symbol default is declared in the scope given to `ce.declare`', () => {
-    const outer = ce.context.lexicalScope;
-    ce.pushScope();
-    try {
-      ce.declare(
-        'ScopedDefaultOp',
-        {
-          signature: '(x: number, m: symbol = ScopedDefaultSym) -> number',
-          evaluate: (ops) => ops[0],
-        },
-        outer
-      );
-      expect(ce.context.lexicalScope.bindings.has('ScopedDefaultSym')).toBe(
-        false
-      );
-      expect(outer.bindings.has('ScopedDefaultSym')).toBe(true);
-    } finally {
-      ce.popScope();
-    }
-  });
-
-  test('a retype in an inner scope boxes the defaults in the scope that holds the binding', () => {
-    const outer = ce.context.lexicalScope;
-    // An operator definition, retyped through the `type` setter of its
-    // symbol and through its `signature` setter.
-    ce.declare('RetypedOp', {
-      signature: '(x: number) -> number',
-      evaluate: (ops) => ops[0],
-    });
-    // A value definition retyped to a function type, and a value definition
-    // whose type is replaced.
-    ce.declare('RetypedValue', 'number');
-    ce.declare('RetypedFnValue', '(number) -> number');
-    ce.pushScope();
-    const inner = ce.context.lexicalScope;
-    try {
-      ce.box('RetypedOp').type =
-        '(x: number, m: symbol = RetypeSymA) -> number';
-      operatorDef('RetypedOp').signature = ce.type(
-        '(x: number, m: symbol = RetypeSymB) -> number'
-      );
-      ce.box('RetypedValue').type =
-        '(x: number, m: symbol = RetypeSymC) -> number';
-      ce.box('RetypedFnValue').type =
-        '(x: number, m: symbol = RetypeSymD) -> number';
-      for (const name of ['RetypeSymA', 'RetypeSymB', 'RetypeSymC', 'RetypeSymD']) {
-        expect(inner.bindings.has(name)).toBe(false);
-        expect(outer.bindings.has(name)).toBe(true);
-      }
-    } finally {
-      ce.popScope();
-    }
-  });
-
   test('a refused retype keeps the assumptions about the symbol', () => {
     const local = new ComputeEngine();
     local.declare('a', 'real');
@@ -684,41 +655,36 @@ describe('PARAMETER DEFAULT VALUES: DECLARATION', () => {
     expect(local.box('a').isPositive).toBe(true);
   });
 
-  test('a refused declaration does not declare its symbol default', () => {
+  test('a refused declaration does not declare the symbol of its default', () => {
     expect(() =>
       declareOp(
         '(x: number, mode: symbol<Auto> | symbol<Manual> = Atuo) -> number'
       )
-    ).toThrow(/is not one of the symbols its type lists/);
+    ).toThrow(/a default value is a constant/);
     expect(ce.lookupDefinition('Atuo')).toBeUndefined();
     // A later value default that does not fit refuses the declaration too.
     expect(() =>
-      declareOp(
-        '(x: number, m: symbol = UnusedDefaultSym, k: number = "a") -> number'
-      )
+      declareOp('(x: number, m: number = 1, k: number = "a") -> number')
     ).toThrow(/does not match its type "number"/);
-    expect(ce.lookupDefinition('UnusedDefaultSym')).toBeUndefined();
   });
 
-  test('with `ce.strict` set to `false`, a symbol default is not checked against its parameter type', () => {
-    // A call in non-strict mode accepts `Integers` written as the argument
-    // at a `number` parameter, so the declaration accepts it as a default.
+  test('with `ce.strict` set to `false`, the checks of a symbol default are the same', () => {
     const lax = new ComputeEngine();
     lax.strict = false;
+    // A library constant is checked against the parameter type as a value
+    // default is.
     expect(() =>
       lax.declare('LaxDefaultOp', {
         signature: '(x: number, k: number = Integers) -> number',
         evaluate: (ops) => ops[0],
       })
-    ).not.toThrow();
-    // The literal symbol types of a parameter are still checked.
+    ).toThrow(/does not match its type "number"/);
     expect(() =>
-      lax.declare('LaxSymbolOp', {
-        signature:
-          '(x: number, mode: symbol<Auto> | symbol<Manual> = Atuo) -> number',
+      lax.declare('LaxDefaultOp2', {
+        signature: '(x: number, k: number = UndeclaredName) -> number',
         evaluate: (ops) => ops[0],
       })
-    ).toThrow(/is not one of the symbols its type lists/);
+    ).toThrow(/a default value is a constant/);
   });
 });
 
@@ -1092,62 +1058,58 @@ describe('PARAMETER DEFAULT VALUES: NAMED ARGUMENTS AND HOLES', () => {
   });
 });
 
-describe('PARAMETER DEFAULT VALUES: SYMBOL DEFAULTS', () => {
+describe('PARAMETER DEFAULT VALUES: AN ABSENT VALUE AT A DEFAULTED POSITION', () => {
+  // A default fills an argument that the call leaves out. An argument that
+  // the call supplies is never replaced by the default, also when its value
+  // is absent (`Missing`, `NaN`, the result of an `At` outside its list or of
+  // `First` of an empty list). A numeric parameter that receives it makes the
+  // call `Missing`; a parameter of another type passes it to the body.
   const ce = new ComputeEngine();
-  test('a symbol default is inserted as the symbol', () => {
-    ce.declare('Over', { signature: '(x: number, over: set = Integers) -> number' });
-    expect(ce.box(['Over', 'x']).json).toEqual(['Over', 'x', 'Integers']);
+  ce.declare('ScaledBy', {
+    signature: '(x: number, k: number = 2) -> number',
+    evaluate: ['Function', ['Multiply', 'x', 'k'], 'x', 'k'],
   });
 
-  test('a symbol default with a value evaluates as the written symbol does', () => {
-    ce.declare('TimesK', {
-      signature: '(x: number, k: number = Pi) -> number',
-      evaluate: ([x, k]) => x.mul(k),
-    });
-    const filled = ce.box(['TimesK', 2]);
-    expect(filled.json).toEqual(['TimesK', 2, 'Pi']);
+  test('a call that leaves out the argument is filled', () => {
+    expect(ce.box(['ScaledBy', 3]).evaluate().json).toBe(6);
+  });
+
+  test('a supplied `Missing` is kept in the call and not replaced by the default', () => {
+    const e = ce.box(['ScaledBy', 3, 'Missing']);
+    expect(e.json).toEqual(['ScaledBy', 3, 'Missing']);
+    expect(e.evaluate().json).toBe('Missing');
+  });
+
+  test('a supplied `NaN` is not replaced by the default', () => {
+    expect(ce.box(['ScaledBy', 3, 'NaN']).evaluate().json).toBe('NaN');
+  });
+
+  test('the value of an `At` outside its list is not replaced by the default', () => {
     expect(
-      filled.evaluate().isSame(ce.box(['TimesK', 2, 'Pi']).evaluate())
-    ).toBe(true);
+      ce.box(['ScaledBy', 3, ['At', ['List', 1], 100]]).evaluate().json
+    ).not.toBe(6);
   });
 
-  describe('the symbol is read where the call is evaluated, as a written symbol is', () => {
-    ce.declare('d', 'number');
-    ce.assign('d', 2);
-    ce.declare('ScaledByD', {
-      signature: '(x: number, k: number = d) -> number',
-      evaluate: ([x, k]) => x.mul(k).evaluate(),
-    });
+  test('`First` of an empty list is not replaced by the default', () => {
+    expect(
+      ce.box(['ScaledBy', 3, ['First', ['List']]]).evaluate().json
+    ).toBe('Missing');
+  });
 
-    test('at the top level', () => {
-      expect(ce.box(['ScaledByD', 3]).json).toEqual(['ScaledByD', 3, 'd']);
-      expect(ce.box(['ScaledByD', 3]).evaluate().json).toBe(6);
-    });
+  test('a function literal passes a supplied absent value to its body', () => {
+    const isMissing = ['Function', ['IsMissing', 'k'], ['Optional', 'k', 0]];
+    expect(ce.box(['Apply', isMissing]).evaluate().json).toBe('False');
+    expect(ce.box(['Apply', isMissing, 'Missing']).evaluate().json).toBe(
+      'True'
+    );
+  });
 
-    test('inside a block that declares `d`', () => {
-      const block = (call: unknown) =>
-        ce
-          .box(['Block', ['Declare', 'd', "'number'", 5], call] as any)
-          .evaluate().json;
-      expect(block(['ScaledByD', 3])).toBe(15);
-      expect(block(['ScaledByD', 3, 'd'])).toBe(15);
-    });
-
-    test('inside a function whose parameter is named `d`', () => {
-      const inFunction = (call: unknown) =>
-        ce.box(['Apply', ['Function', call, 'd'], 10] as any).evaluate().json;
-      // The filled call reads the same binding as the written call.
-      expect(inFunction(['ScaledByD', 3])).toBe(
-        inFunction(['ScaledByD', 3, 'd'])
-      );
-    });
-
-    test('an assignment after the call was made changes a later evaluation', () => {
-      const e = ce.box(['ScaledByD', 3]);
-      ce.assign('d', 7);
-      expect(e.evaluate().json).toBe(21);
-      ce.assign('d', 2);
-    });
+  test('a numeric parameter of a literal that receives `Missing` or `NaN` makes the call absent', () => {
+    const lit = ['Function', 'k', ['Optional', ['Typed', 'k', "'real'"], 0]];
+    expect(ce.box(['Apply', lit]).evaluate().json).toBe(0);
+    expect(ce.box(['Apply', lit, 5]).evaluate().json).toBe(5);
+    expect(ce.box(['Apply', lit, 'Missing']).evaluate().json).toBe('Missing');
+    expect(ce.box(['Apply', lit, 'NaN']).evaluate().json).toBe('NaN');
   });
 });
 
@@ -1180,24 +1142,6 @@ describe('PARAMETER DEFAULT VALUES: REVIEW FIXES OF THE FILL', () => {
     expect(e.json).toEqual(['f', 3, 2]);
     ce.assign('f', ce.box(['Function', 'x', 'x']));
     expect(e.evaluate().json).toBe(3);
-  });
-
-  test('a symbol default reads the binding of the scope of the call', () => {
-    const ce = new ComputeEngine();
-    ce.declare('d', { value: 2, constant: true, holdUntil: 'evaluate' });
-    ce.declare('ScaledByD', {
-      signature: '(x: number, k: number = d) -> number',
-      evaluate: ([x, k]) => x.mul(k).evaluate(),
-    });
-    expect(ce.box(['ScaledByD', 3]).evaluate().json).toBe(6);
-    ce.pushScope();
-    try {
-      ce.declare('d', { value: 5, constant: true, holdUntil: 'evaluate' });
-      expect(ce.box(['ScaledByD', 3, 'd']).evaluate().json).toBe(15);
-      expect(ce.box(['ScaledByD', 3]).evaluate().json).toBe(15);
-    } finally {
-      ce.popScope();
-    }
   });
 
   test('a filled call is not boxed again when the new definition gives the same call', () => {
@@ -1306,34 +1250,6 @@ describe('PARAMETER DEFAULT VALUES: REVIEW FIXES OF THE FILL, ROUND 2', () => {
     expect(JSON.stringify(e.json)).toMatch(/incompatible-type/);
   });
 
-  test('a call boxed again after its callee changed reads a symbol default in the scope of the call', () => {
-    const ce = new ComputeEngine();
-    ce.declare('d', 'number');
-    ce.assign('d', 2);
-    ce.declare('f', {
-      signature: '(x: number, k: number = d) -> number',
-      evaluate: ['Function', ['Multiply', 'x', 'k'], 'x', 'k'],
-    });
-    const e = ce.box(['f', 3]);
-    expect(e.json).toEqual(['f', 3, 'd']);
-    expect(e.evaluate().json).toBe(6);
-    ce.assign('f', ce.box(['Function', ['Add', 'x', 'k'], 'x', 'k']));
-    // `Probe` evaluates the saved call while the parameter `d` of `H` is
-    // bound to 10. The default `d` of the call is the global `d`, as a `d`
-    // written in the call would be.
-    ce.declare('Probe', {
-      signature: '() -> number',
-      pure: false,
-      evaluate: () => e.evaluate(),
-    });
-    ce.declare('H', {
-      signature: '(d: number) -> number',
-      evaluate: ['Function', ['Probe'], 'd'],
-    });
-    expect(ce.box(['H', 10]).evaluate().json).toBe(5);
-    expect(e.evaluate().json).toBe(5);
-  });
-
   test('a replaceable operator: every call is recorded, also one that supplies every argument', () => {
     const ce = new ComputeEngine();
     ce.declare('f', {
@@ -1424,36 +1340,6 @@ describe('PARAMETER DEFAULT VALUES: REVIEW FIXES OF THE FILL, ROUND 3', () => {
     expect(JSON.stringify(fresh.json)).toMatch(/missing/);
     expect(e.evaluate().isSame(fresh)).toBe(true);
   });
-
-  test('a call boxed again after its callee changed reads a symbol default received at a hole in the scope of the call', () => {
-    const ce = new ComputeEngine();
-    ce.declare('d', 'number');
-    ce.assign('d', 2);
-    ce.declare('f', {
-      signature: '(x: number, k: number = d, factor: number = 2) -> number',
-      evaluate: ['Function', ['Multiply', 'x', 'k', 'factor'], 'x', 'k', 'factor'],
-    });
-    const e = ce.box(['f', 3, named('factor', 5)] as any);
-    expect(e.json).toEqual(['f', 3, 'd', 5]);
-    expect(e.evaluate().json).toBe(30);
-    ce.assign(
-      'f',
-      ce.box(['Function', ['Add', 'x', 'k', 'factor'], 'x', 'k', 'factor'])
-    );
-    // `Probe` evaluates the saved call while the parameter `d` of `H` is
-    // bound to 10. The default `d` of the call is the global `d`.
-    ce.declare('Probe', {
-      signature: '() -> number',
-      pure: false,
-      evaluate: () => e.evaluate(),
-    });
-    ce.declare('H', {
-      signature: '(d: number) -> number',
-      evaluate: ['Function', ['Probe'], 'd'],
-    });
-    expect(ce.box(['H', 10]).evaluate().json).toBe(10);
-    expect(e.evaluate().json).toBe(10);
-  });
 });
 
 /** The function literal `(x, k = d) => body`, as MathJSON. */
@@ -1521,7 +1407,6 @@ describe('PARAMETER DEFAULT VALUES: FUNCTION LITERALS', () => {
     ['+oo', 'PositiveInfinity'],
     ['a string', "'abc'"],
     ['a boolean', 'True'],
-    ['a symbol', 'Auto'],
     ['the empty list', ['List']],
     ['the empty dictionary', ['Dictionary']],
   ])(
@@ -1601,6 +1486,8 @@ describe('PARAMETER DEFAULT VALUES: FUNCTION LITERALS', () => {
 
   test.each([
     ['a default that names a parameter', ['Optional', 'k', 'x'], 2, 'expected-a-literal-default'],
+    ['a symbol', ['Optional', 'k', 'd'], 2, 'expected-a-literal-default'],
+    ['a symbol that the parameter type does not list', ['Optional', 'k', 'Auto'], 2, 'expected-a-literal-default'],
     ['`Nothing`', ['Optional', 'k', 'Nothing'], 2, 'expected-a-literal-default'],
     ['`Missing`', ['Optional', 'k', 'Missing'], 2, 'expected-a-literal-default'],
     ['`ComplexInfinity`', ['Optional', 'k', 'ComplexInfinity'], 2, 'expected-a-literal-default'],
@@ -1615,6 +1502,20 @@ describe('PARAMETER DEFAULT VALUES: FUNCTION LITERALS', () => {
   ])('%s is an error on the parameter', (_, param, index, code) => {
     const f = ce.box(['Function', 'x', 'x', param] as any);
     expect(parameterErrorCode(f, index)).toBe(code);
+  });
+
+  test('a library constant, or a symbol that the annotation lists, is a valid default', () => {
+    const pi = ce.box(['Function', ['Multiply', 'x', 'k'], 'x', ['Optional', 'k', 'Pi']]);
+    expect(parameterErrorCode(pi, 2)).toBeUndefined();
+    expect(ce.box(['Apply', pi, 2]).evaluate().toString()).toBe('2pi');
+    const mode = ce.box([
+      'Function',
+      'm',
+      'x',
+      ['Optional', ['Typed', 'm', "'symbol<Auto> | symbol<Manual>'"], 'Auto'],
+    ]);
+    expect(parameterErrorCode(mode, 2)).toBeUndefined();
+    expect(ce.box(['Apply', mode, 2]).evaluate().symbol).toBe('Auto');
   });
 
   test('a rest parameter or a plain parameter after an `Optional` is an error on that parameter', () => {
@@ -1641,21 +1542,37 @@ describe('PARAMETER DEFAULT VALUES: FUNCTION LITERALS', () => {
     expect(e.toString()).toMatch(/unexpected-argument/);
   });
 
-  test('a symbol default reads the binding that the same symbol written in the call reads', () => {
+  test('a symbol default is an error on the parameter, with a message that says what to write', () => {
+    const f = ce.box(defaultedLiteral('d'));
+    expect(f.isValid).toBe(false);
+    expect(parameterErrorCode(f, 2)).toBe('expected-a-literal-default');
+    expect(JSON.stringify(f.json)).toContain(
+      'a default value is a constant: write a number, a string, a boolean, `[]`, `{}`, a constant (a library constant or a symbol declared constant) or a symbol that the parameter type lists, or pass the argument'
+    );
+    // A call of the literal is an error as well: the literal is not valid.
     const ce2 = new ComputeEngine();
-    ce2.assign('d', 2);
-    const f = defaultedLiteral('d');
-    expect(ce2.box(['Apply', f, 3]).evaluate().json).toBe(6);
-    const inBlock = (call: unknown) =>
-      ce2
-        .box([
-          'Block',
-          ['Declare', 'd', "'integer'", 5],
-          call,
-        ] as any)
-        .evaluate().json;
-    expect(inBlock(['Apply', f, 3])).toBe(15);
-    expect(inBlock(['Apply', f, 3])).toBe(inBlock(['Apply', f, 3, 'd']));
+    expect(() => ce2.assign('f', ce2.box(defaultedLiteral('d')))).toThrow(
+      /expected-a-literal-default/
+    );
+  });
+
+  test('a rest parameter after a parameter with a default is an error, with a message that says why', () => {
+    const f = ce.box([
+      'Function',
+      'x',
+      'x',
+      ['Optional', 'k', 2],
+      ['Spread', 'r'],
+    ]);
+    expect(f.isValid).toBe(false);
+    expect(parameterErrorCode(f, 3)).toBe('expected-a-symbol');
+    expect(JSON.stringify(f.json)).toContain(
+      'a function with a rest parameter has no default values: drop the default or the rest parameter'
+    );
+    // A default on the rest parameter itself is an error on that parameter.
+    const g = ce.box(['Function', 'x', 'x', ['Optional', ['Spread', 'r'], 2]]);
+    expect(g.isValid).toBe(false);
+    expect(parameterErrorCode(g, 2)).toBe('expected-a-symbol');
   });
 
   test('a named argument that skips a parameter with a default gives it the default', () => {
@@ -1716,15 +1633,6 @@ describe('PARAMETER DEFAULT VALUES: READERS OF A LITERAL', () => {
     expect(
       ce.box(['Map', two, ['List', 1]] as any).evaluate().toString()
     ).toMatch(/takes 2 to 3 parameters/);
-  });
-
-  test('a symbol default is a free variable of the literal, not a parameter', () => {
-    const ce2 = new ComputeEngine();
-    const f = ce2.box(defaultedLiteral('q'));
-    expect(f.freeVariables).toEqual(['q']);
-    // Reading a symbol is not an effect: the literal is pure, as the same
-    // literal with the default 2 is.
-    expect(f.type.toString()).toBe('(x: unknown, k: unknown = q) -> number');
   });
 
   test('a user function assigned a literal takes its defaults', () => {
@@ -1892,18 +1800,6 @@ describe('PARAMETER DEFAULT VALUES: REVIEW FIXES OF FUNCTION LITERALS', () => {
     expect(ce.box(['Apply', lit, q]).N().toString()).toBe('24');
   });
 
-  test('a numeric parameter with a default fills NaN and Missing with the default', () => {
-    // A default fills an absent argument as it fills an argument that the
-    // call leaves out, with the absence test of `Coalesce`, for which `NaN`
-    // is absent (R6 of docs/plans/2026-11-01-absent-value-contract.md).
-    // Before R6, `NaN` was accepted and `Missing` was read as `NaN`.
-    const ce = new ComputeEngine();
-    const lit = ['Function', 'k', ['Optional', ['Typed', 'k', "'real'"], 0]];
-    expect(ce.box(['Apply', lit, 'NaN']).evaluate().toString()).toBe('0');
-    expect(ce.box(['Apply', lit, 'Missing']).evaluate().toString()).toBe('0');
-    expect(ce.box(['Apply', lit, 5]).evaluate().toString()).toBe('5');
-  });
-
   test('a bare parameter with a default imposes no constraint, as without the default', () => {
     const ce = new ComputeEngine();
     const withDefault = [
@@ -1918,15 +1814,14 @@ describe('PARAMETER DEFAULT VALUES: REVIEW FIXES OF FUNCTION LITERALS', () => {
       ['Typed', 'x', "'number'"],
       'k',
     ];
+    // The default fills only a left-out argument, so a supplied `Missing`
+    // gives the same value with and without the default, and neither call
+    // refuses its argument.
     const a = ce.box(['Apply', withDefault, 1, 'Missing']).evaluate();
     const b = ce.box(['Apply', without, 1, 'Missing']).evaluate();
-    // A default fills a supplied `Missing` (R6 of
-    // docs/plans/2026-11-01-absent-value-contract.md), so the values differ;
-    // neither call refuses its argument. `x·Missing` is `Missing`.
-    expect(a.toString()).toBe('2');
-    expect(b.toString()).toBe('"Missing"');
+    expect(a.toString()).toBe(b.toString());
     expect(a.operator).not.toBe('Error');
-    expect(b.operator).not.toBe('Error');
+    expect(ce.box(['Apply', withDefault, 1]).evaluate().toString()).toBe('2');
   });
 
   test('the callback compatibility rule widens a bare parameter with a default', () => {
@@ -2008,20 +1903,6 @@ describe('PARAMETER DEFAULT VALUES: REVIEW FIXES OF FUNCTION LITERALS', () => {
     expect(ce.box(['g', 3, 5]).evaluate().json).toBe(8);
   });
 
-  test('the fresh parameters of a residual differ from the symbols of a default', () => {
-    const ce = new ComputeEngine();
-    const residual = ce
-      .box([
-        'Apply',
-        ['Function', ['Multiply', 'x', 'k'], 'x', ['Optional', 'k', '_1']],
-      ])
-      .evaluate();
-    expect(residual.operator).toBe('Function');
-    expect(residual.isValid).toBe(true);
-    expect(residual.ops![2].json).toEqual(['Optional', '_2', '_1']);
-    expect(ce.box(['Apply', residual.json, 3, 5]).evaluate().json).toBe(15);
-  });
-
   test('a callback whose only parameter has a default is unary', () => {
     const ce = new ComputeEngine();
     const negate = ['Function', ['Negate', 'x'], ['Optional', 'x', 0]];
@@ -2051,77 +1932,6 @@ describe('PARAMETER DEFAULT VALUES: REVIEW FIXES OF FUNCTION LITERALS', () => {
       ['x', undefined, undefined],
       ['k', true, { kind: 'value', value: 2 }],
     ]);
-  });
-
-  test('a saved call: the default of a new literal reads the scope of the call', () => {
-    const ce = new ComputeEngine();
-    // The host keeps `e`, boxed while the pushed scope was active, and
-    // evaluates it again after `popScope()`. The debug check of dead bindings
-    // (`CE_DEBUG_BINDINGS`) reports every use of a binding of a popped scope,
-    // so it would throw here by design. The value is the subject of this test.
-    ce._debugBindings = false;
-    ce.declare('d', 'integer');
-    ce.assign('d', 1);
-    ce.assign('f', ce.box(defaultedLiteral(2)));
-    ce.pushScope();
-    ce.declare('d', 'integer');
-    ce.assign('d', 5);
-    const e = ce.box(['f', 3]);
-    expect(e.evaluate().json).toBe(6);
-    ce.popScope();
-    ce.assign('f', ce.box(defaultedLiteral('d', ['Add', 'x', 'k'])));
-    // The scope of the call was popped: the inserted default `d` reads the
-    // global `d`, not the `d` of the popped scope.
-    expect(e.evaluate().json).toBe(4);
-  });
-
-  test('a saved call evaluated in its scope: the default reads the `d` of that scope', () => {
-    const ce = new ComputeEngine();
-    ce.declare('d', 'integer');
-    ce.assign('d', 1);
-    ce.assign('f', ce.box(defaultedLiteral(2)));
-    ce.pushScope();
-    ce.declare('d', 'integer');
-    ce.assign('d', 5);
-    const e = ce.box(['f', 3]);
-    ce.assign('f', ce.box(defaultedLiteral('d', ['Add', 'x', 'k'])));
-    expect(e.evaluate().json).toBe(8);
-    ce.popScope();
-  });
-
-  test('a marker argument named like a symbol default takes the name of the literal parameter', () => {
-    const ce = new ComputeEngine();
-    ce.declare('d', 'integer');
-    ce.assign('d', 4);
-    ce.assign(
-      'g',
-      ce.box([
-        'Function',
-        ['Typed', ['Add', 'x', 'k'], "'(a: T, d: number) -> T where T'"],
-        'x',
-        ['Optional', ['Typed', 'k', "'number'"], 'd'],
-      ] as any)
-    );
-    expect(ce.box('g').type.toString()).toBe(
-      '(a: T, k: number = d) -> T where T'
-    );
-    expect(ce.box(['g', 3]).evaluate().json).toBe(7);
-  });
-
-  test('a marker argument named like a symbol default at a destructuring parameter has no name', () => {
-    const ce = new ComputeEngine();
-    ce.declare('a', 'integer');
-    ce.assign('a', 4);
-    const g = ce.box([
-      'Function',
-      ['Typed', 'k', "'(a: tuple, k: number) -> number'"],
-      ['Tuple', 'p', 'q'],
-      ['Optional', ['Typed', 'k', "'number'"], 'a'],
-    ] as any);
-    expect(g.isValid).toBe(true);
-    const text = g.type.toString();
-    expect(text).toBe('(tuple<unknown, unknown>, k: number = a) -> number');
-    expect(typeToString(parseType(text))).toBe(text);
   });
 
   test('a rewritten marker keeps the argument names of the marker', () => {

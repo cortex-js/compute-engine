@@ -133,11 +133,13 @@ A parameter with a default value is never the cause: when a named argument skips
 
 ## `default-value-invalid`
 
-A parameter's default value (the part after `=` in `function f(x, k: number = 2)` or `(x, k = 2) => …`) is not one the language accepts here. A default is a number (with an optional sign), a string, `true` or `false`, a symbol, the empty list `[]` or the empty dictionary `{}` — a value that the signature can store and print, as in `(x: number, k: number = 2) -> number`.
+A parameter's default value (the part after `=` in `function f(x, k: number = 2)` or `(x, k = 2) => …`) is not one the language accepts here. A default is a constant: a number (with an optional sign), a string, `true` or `false`, the empty list `[]`, the empty dictionary `{}`, a constant (a constant of the library, `Integers`, `Pi`, or a symbol declared constant before the function is defined) or a symbol that the parameter type lists (`mode: symbol<Auto> | symbol<Manual> = Auto`) — a value that the signature can store and print, as in `(x: number, k: number = 2) -> number`. A default fills an argument that the call leaves out, and nothing else.
 
 The message gives the reason:
-- Any other expression (`k = x + 1`, `xs = [1, 2]`) has no spelling in a signature. For a computed or non-empty default, declare a constant (`const weights = [1, 2, 3]`) and use its name as the default: the name is read when the call is evaluated, as if the caller had written it.
-- A default that names a parameter of the same list (`(x, k = x) => …`) is refused: the default is read as if the CALLER had written it, where the parameter does not exist.
+- Any other expression (`k = x + 1`, `xs = [1, 2]`) has no spelling in a signature. For a computed or non-empty default, leave the parameter required and pass the value at each call.
+- A symbol that names a variable (`k = n`, `k = weights`), or that is not declared and is not listed by a `symbol<…>` parameter type, is refused: a default is a constant, and such a symbol would be read when the call runs. Write a constant, or pass the argument.
+- A default that names a parameter of the same list (`(x, k = x) => …`) is refused.
+- A function with a rest parameter (`(x, k = 2, ...rest) => …`) has no defaults: drop the default or the rest parameter.
 - `Nothing` and `Missing` are refused: `Nothing` is the value of an empty block, not an argument value, and `Missing` is a result only, not a value that a call supplies.
 - A `bind` parameter of a `hold` definition cannot have a default: it names a variable that the caller writes.
 - A default beside a literal parameter (`function f(0, k = 2)`) is refused: a literal parameter makes the definition a clause of a multi-clause function, and a default in a multi-clause function is not supported yet, because the clause that receives a call is not always known when the call is completed with the default. For the same reason, adding a second clause to a function with a default (or a clause with a default to a function that has several) is refused when the definition runs.

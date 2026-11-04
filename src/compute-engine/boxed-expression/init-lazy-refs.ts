@@ -28,7 +28,6 @@ import {
   repairProvisionalDependents,
 } from '../function-utils.js';
 import { _setProvisionalRepair } from './provisional-application.js';
-import { _setOperandAdmission } from './parameter-defaults.js';
 
 import { add } from './arithmetic-add.js';
 import { _setFieldAddN } from '../tensor/tensor-fields.js';
@@ -50,19 +49,3 @@ _setFindUnivariateRoots(findUnivariateRoots);
 _setValidateArguments(validateArguments);
 _setFieldAddN(add);
 _setProvisionalRepair(repairProvisionalDependents);
-// The check of a symbol default of a parameter is the check of the same
-// symbol written as the argument of a call, without the narrowing of an
-// inferred type that a call makes (`noInference`).
-_setOperandAdmission((ce, operand, param) => {
-  const checked = validateArguments(
-    ce,
-    [operand],
-    { kind: 'signature', args: [{ type: param }], result: 'any' },
-    false,
-    undefined,
-    undefined,
-    undefined,
-    { noInference: true }
-  );
-  return checked === null || checked.every((x) => x.isValid);
-});

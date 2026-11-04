@@ -1,7 +1,6 @@
 // Calls of user and local functions: emission, parameter types, inlining of
 // collection-valued calls, and operand types in context.
 
-import { targetCoalesce } from './compile-parameter-defaults.js';
 import {
   describe as describeOperand,
   describeType,
@@ -193,21 +192,7 @@ export function emitUserFunctionCall(
    * reach it as that list — so it is passed the way an atomic argument
    * is, while the ordinary arguments keep their map.
    */
-  held: ReadonlyArray<string> = [],
-  /**
-   * The fill of each parameter with a default value, by position
-   * (`undefined` for a parameter without one): a function of the code of
-   * the argument that gives the argument, or the default when it is
-   * absent. Read only when the
-   * call maps the function over a list on the JavaScript target. The
-   * mapped function then fills each element that is absent with its
-   * default, with the target's `Coalesce` (`targetCoalesce()`), as the
-   * interpreter fills each cell of a broadcast: `hu(1, [NaN, 2])` with
-   * `hu(a, k = 2)` maps `(a, k) => _fn_hu(a, <k, or 2 when k is absent>)`.
-   * The call site fills a scalar argument (`absentFilledArguments()`); a
-   * list argument is present, and its cells are filled here.
-   */
-  mapDefaults?: () => ReadonlyArray<((x: string) => string) | undefined>
+  held: ReadonlyArray<string> = []
 ): TargetSource {
   const coerceToComplex = realLaneArguments(
     name,
@@ -294,25 +279,14 @@ export function emitUserFunctionCall(
       `Could not compile a call of \`${name}\`: the call maps the function ` +
         `over a list argument, which this target does not compile.`
     );
-  // With no argument to coerce, no held value and no default to fill, the
-  // mapped function is the callee itself, not an arrow that only calls it.
-  const fills =
-    target.language === 'javascript' && targetCoalesce(target) !== undefined
-      ? (mapDefaults?.() ?? [])
-      : [];
+  // With no argument to coerce and no held value, the mapped function is
+  // the callee itself, not an arrow that only calls it.
   let fn = name;
-  if (
-    coerceToComplex.some((c) => c) ||
-    held.length > 0 ||
-    fills.some((f) => f !== undefined)
-  ) {
+  if (coerceToComplex.some((c) => c) || held.length > 0) {
     const params = args.map(() => tempVar(target));
-    const filled = params.map((p, i) =>
-      fills[i] === undefined ? p : fills[i]!(p)
-    );
     fn =
       `((${params.join(', ')}) => ` +
-      `${name}(${[...filled.map(coerce), ...held].join(', ')}))`;
+      `${name}(${[...params.map(coerce), ...held].join(', ')}))`;
   }
   return `${helper}(${fn}, [${ranks.join(', ')}], ${compiledArgs.join(', ')})`;
 }

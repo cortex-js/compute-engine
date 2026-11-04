@@ -6,6 +6,10 @@
  * callee returns give the signature of the call; when they do not agree, or
  * when the callee does not return a function literal on every path, the
  * call declines with a reason.
+ *
+ * Since item 3.4.5 of the CE language release (user decision 2026-11-02),
+ * compiled code does not return a function from a call: every such call
+ * declines, and the interpreter gives the value.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -30,42 +34,70 @@ function both(source: string, to = 'javascript') {
   return { interpreted, compiled: result.run!({} as never) };
 }
 
+/**
+ * The interpreter value of `source`, and the reason the compilation for
+ * `to` declines.
+ */
+function declined(source: string, to = 'javascript') {
+  const interpreted = program(new ComputeEngine(), source)
+    .evaluate()
+    .toString();
+  let error = '';
+  try {
+    const result = compile(program(new ComputeEngine(), source), {
+      to,
+      fallback: false,
+    } as never)!;
+    expect(result.success).toBe(false);
+    error = String(result.error);
+  } catch (e) {
+    error = String((e as Error).message);
+  }
+  return { interpreted, error };
+}
+
+// Compiled code does not return a function from a call, and does not call a
+// function value stored in a local (`docs/COMPILATION-MODEL.md`, "Function
+// values"). The interpreter keeps the value.
+const RETURNED =
+  /does not return a function from a call|function value known only at run time/;
+
 describe('COMPILE a call of a function returned by a call', () => {
-  it('calls the function that a `function` definition returns', () => {
-    const r = both('function mk(n) { (x) => x + n }\nlet a = mk(2)\na(1)');
+  it('declines the function that a `function` definition returns', () => {
+    const r = declined('function mk(n) { (x) => x + n }\nlet a = mk(2)\na(1)');
     expect(r.interpreted).toBe('3');
-    expect(r.compiled).toBe(3);
+    expect(r.error).toMatch(RETURNED);
   });
 
-  it('calls the function returned from a branch', () => {
-    const r = both(
+  it('declines the function returned from a branch', () => {
+    const r = declined(
       'function mk(n) { if n > 0 { (x) => x + n } else { (x) => x - n } }\n' +
         'let a = mk(2)\nlet b = mk(-5)\n(a(1), b(1))'
     );
     expect(r.interpreted).toBe('(3, 6)');
-    expect(r.compiled).toEqual([3, 6]);
+    expect(r.error).toMatch(RETURNED);
   });
 
-  it('calls the function that a `const` lambda returns', () => {
-    const r = both('const mk = (n) => (x) => x + n\nlet a = mk(2)\na(1)');
+  it('declines the function that a `const` lambda returns', () => {
+    const r = declined('const mk = (n) => (x) => x + n\nlet a = mk(2)\na(1)');
     expect(r.interpreted).toBe('3');
-    expect(r.compiled).toBe(3);
+    expect(r.error).toMatch(RETURNED);
   });
 
-  it('broadcasts the returned function over a list, as the interpreter does', () => {
-    const r = both(
+  it('declines the returned function over a list', () => {
+    const r = declined(
       'function mk(n) { (x) => x * n }\nlet a = mk(3)\na([1, 2, 4])'
     );
     expect(r.interpreted).toBe('[3,6,12]');
-    expect(r.compiled).toEqual([3, 6, 12]);
+    expect(r.error).toMatch(RETURNED);
   });
 
-  it('reads the binding that a reassignment wrote', () => {
-    const r = both(
+  it('declines a reassigned binding', () => {
+    const r = declined(
       'const mk = (n) => (x) => x + n\nlet a = mk(2)\na = mk(10)\na(1)'
     );
     expect(r.interpreted).toBe('11');
-    expect(r.compiled).toBe(11);
+    expect(r.error).toMatch(RETURNED);
   });
 
   it('declines when the returned functions have different signatures', () => {
@@ -88,13 +120,13 @@ describe('COMPILE a call of a function returned by a call', () => {
     ).toThrow(/does not return a function literal on every path/);
   });
 
-  it('declines on interval-js, which reads no function value at run time', () => {
+  it('declines on interval-js', () => {
     expect(() =>
       both(
         'function mk(n) { (x) => x * n }\nlet a = mk(3)\na(2)',
         'interval-js'
       )
-    ).toThrow(/or from the result of a call/);
+    ).toThrow(RETURNED);
   });
 });
 

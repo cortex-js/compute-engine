@@ -20,17 +20,7 @@ import {
   functionLiteralParameterType,
   optionalParameterDefault,
 } from '../boxed-expression/function-literal.js';
-import {
-  argumentMayBeAbsent,
-  declineIntervalAbsentDefault,
-  defaultFillingWrapper,
-  defaultFillTypes,
-  elementTypeAtRank,
-  literalDefaultFills,
-  mayBeAbsentAtRunTime,
-  signatureParameterTypes,
-  targetCoalesce,
-} from './compile-parameter-defaults.js';
+import { assertCompiledDefaultFilled } from './compile-parameter-defaults.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import { descendantRegionAt } from './cse.js';
 import { compileValueOperand } from './compile-statements.js';
@@ -572,50 +562,34 @@ export function compileExprFunctionLiteral(
     // argument, and reads an absent one as `NaN`, before the arrow
     // receives it.
     // A parameter with a default value (`(x, k = 2) => x * k`) is filled
-    // when its argument is absent: left out, or supplied absent. The default
-    // is compiled as an operand written at the call site, by this target,
-    // so that a value default is the target's spelling of the value (an
-    // interval constant on the interval target) and a symbol default is
-    // read at each call, as the interpreter reads it. A consumer of the
-    // function value (`Map`, …) calls it with the arguments it has, so the
-    // fill is in the emitted function, not at the call sites.
+    // when the consumer of the function value (`Map`, …) leaves its
+    // argument out, with a JavaScript default parameter. The default is a
+    // constant, compiled by this target, so that it is the target's spelling
+    // of the value (an interval constant on the interval target). An
+    // argument that the consumer supplies is passed as it is, except
+    // `undefined` (the compiled `Missing`), which the JavaScript default
+    // parameter also fills. The interpreter passes `Missing` to the body, so
+    // a discharge in the body (`IsMissing(k)`) can read a different value:
+    // this is a known limitation (`docs/COMPILATION-MODEL.md`, "Known
+    // limitations"), not a difference inside the caveats.
     //
-    // The fill is an outer wrapper (`defaultFillingWrapper`), outside the
+    // The fill is an outer wrapper (`withDefaults` below), outside the
     // complex-coercing wrapper and the static map, so they receive every
-    // argument. Its parameter names are fresh: a symbol default can be
-    // spelled with the name of a parameter of the arrow.
-    const literalParams = ops.slice(1);
-    // An application that supplies every argument still reads a default
-    // for an argument that is absent (`f(At(L, 100))`).
-    const fills = literalDefaultFills(literalParams, (e) =>
-      compileValueOperand(e, target)
-    );
-    // The interval target fills only an argument that is left out, and
-    // declines an argument that can be absent at run time
-    // (`declineIntervalAbsentDefault`): one of the application of the
-    // literal, or one that the consumer of the literal passes (`Map`).
-    if (fills.some((f) => f !== undefined)) {
-      const defaults = literalParams.map((p) => optionalParameterDefault(p));
-      if (appliedArgs !== undefined)
-        declineIntervalAbsentDefault(
-          target,
-          defaults,
-          appliedArgs.length,
-          (i) => argumentMayBeAbsent(appliedArgs[i], defaults[i]!),
-          'a `Function` literal'
-        );
-      const passedTypes = passed?.types;
-      if (passedTypes !== undefined)
-        declineIntervalAbsentDefault(
-          target,
-          defaults,
-          passedTypes.length,
-          (i) =>
-            passedTypes[i] === undefined ||
-            mayBeAbsentAtRunTime(passedTypes[i]!),
-          'a `Function` literal'
-        );
-    }
+    // argument.
+    // The wrapper reads a symbol default by its name, so a default that
+    // compiled code does not fill (a constant that the host or the program
+    // declares) declines (`compiledSymbolDefaultDeclines()`).
+    const fills = ops.slice(1).map((p) => {
+      const d = optionalParameterDefault(p);
+      if (d === undefined) return undefined;
+      assertCompiledDefaultFilled(
+        d.engine,
+        d,
+        functionLiteralParameterType(p),
+        'a `Function` literal'
+      );
+      return compileValueOperand(d, target);
+    });
     const emittedParams = binding.emitted.map((name, i) =>
       target.language === 'javascript' &&
       !complexParam[i] &&
@@ -682,61 +656,26 @@ export function compileExprFunctionLiteral(
         : undefined;
     const maps = ranks !== undefined && ranks.some((r) => r > 0);
     // The wrapper that fills the parameters with a default value (see
-    // `fills` above), around `value`. `only` limits it to the parameters
-    // from that position on. The test of each fill is chosen from the type
-    // of the value that reaches the parameter (`defaultFillTypes()`): the
-    // argument of the `Apply`, else the value the consumer passes, an
-    // element of it inside the map (`perElement`).
-    const withDefaults = (
-      value: string,
-      only = 0,
-      perElement = false
-    ): string => {
-      const these = fills.map((f, i) => (i < only ? undefined : f));
-      if (!these.some((f) => f !== undefined)) return value;
-      const reaching =
-        appliedArgs?.map((a) => a.type.type) ??
-        passed?.types.map((t, i) =>
-          t === undefined
-            ? undefined
-            : elementTypeAtRank(t, perElement ? (ranks?.[i] ?? 0) : 0)
-        );
+    // `fills` above), around `value`:
+    // `((_tv2, _tv3 = 2) => _tv1(_tv2, _tv3))` with `value` bound to `_tv1`.
+    const withDefaults = (value: string): string => {
+      if (!fills.some((f) => f !== undefined)) return value;
       const bound = tempVar(target);
-      const wrapper = defaultFillingWrapper(
-        bound,
-        these,
-        () => tempVar(target),
-        targetCoalesce(target) === undefined
-          ? undefined
-          : targetCoalesce(
-              target,
-              defaultFillTypes(
-                these.length,
-                (i) =>
-                  these[i] === undefined
-                    ? undefined
-                    : optionalParameterDefault(literalParams[i])?.type.type,
-                literalParams.map((p) => functionLiteralParameterType(p)),
-                reaching,
-                literal === undefined
-                  ? undefined
-                  : signatureParameterTypes(literal.type.type),
-                'a `Function` literal'
-              )
-            )
-      );
+      const wrapperParams = fills.map(() => tempVar(target));
+      const wrapper =
+        `((${wrapperParams
+          .map((p, i) => (fills[i] === undefined ? p : `${p} = ${fills[i]}`))
+          .join(', ')}) => ` + `${bound}(${wrapperParams.join(', ')}))`;
       return (
         javascriptStatements(target)?.parameters([[bound, value]], wrapper) ??
         `((${bound}) => ${wrapper})(${value})`
       );
     };
     if (maps) {
-      // The map hands the callee one element per call, and each element
-      // that is absent takes the default: the fill is inside the map. A
-      // parameter that the consumer leaves out is filled outside the map
-      // too, so that the map receives a value for it.
+      // A parameter that the consumer leaves out is filled outside the map,
+      // so that the map receives a value for it.
       const mapped = staticMapCallback(
-        withDefaults(callee, 0, true),
+        callee,
         ranks!,
         target,
         passed?.types
@@ -746,7 +685,7 @@ export function compileExprFunctionLiteral(
           'Could not compile a `Function` literal: its consumer passes it ' +
             'list values, and the target has no map of a function over a list.'
         );
-      return withDefaults(mapped, passed?.types.length ?? 0);
+      return withDefaults(mapped);
     }
     return withDefaults(callee);
   }

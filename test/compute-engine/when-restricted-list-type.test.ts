@@ -503,11 +503,14 @@ describe('a user function applied to a restricted list', () => {
     expect(r.absentAsync).toBe('[0]');
   });
 
+  // A default fills only an argument that the call leaves out: a supplied
+  // `Missing` reaches the body, which gives `Missing` (item 3.4.5 of the CE
+  // language release, user decision 2026-11-02).
   test('a parameter with a default value receives Missing', async () => {
     const r = await values(['Function', ['Add', 'x', 1], ['Optional', 'x', 5]]);
     expect(r.present).toBe('[2,3]');
-    expect(r.absent).toBe('6');
-    expect(r.absentAsync).toBe('6');
+    expect(r.absent).toBe('"Missing"');
+    expect(r.absentAsync).toBe('"Missing"');
   });
 
   test('a scalar parameter maps the list and lifts the condition', async () => {

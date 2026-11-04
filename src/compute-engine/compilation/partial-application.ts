@@ -1,16 +1,9 @@
 import type { Expression, FunctionInterface } from '../global-types.js';
-import {
-  isFunction,
-  isNumber,
-  isString,
-  isSymbol,
-} from '../boxed-expression/type-guards.js';
+import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
 import { scopeForRebuild } from '../boxed-expression/binding-sites.js';
 import {
   functionLiteralBoundNames,
-  functionLiteralDeclaredSignature,
   isDestructuringParameter,
-  isRestParameter,
   optionalParameterDefault,
   optionalParameterTarget,
   requiredParameterCount,
@@ -74,12 +67,6 @@ function fixedParameterCount(params: ReadonlyArray<Expression>): number {
   return requiredParameterCount(params);
 }
 
-/** True when `literal` has a signature with type parameters. */
-function isGenericLiteral(literal: Expression): boolean {
-  const signature = functionLiteralDeclaredSignature(literal);
-  return (signature?.typeParams?.length ?? 0) > 0;
-}
-
 /**
  * True when a call of the function literal `literal` with `count` arguments
  * supplies fewer arguments than the literal needs (see the rule above).
@@ -91,71 +78,23 @@ function isUnderApplied(literal: Expression, count: number): boolean {
 }
 
 /**
- * True when `arg` is a literal whose evaluated value is the literal itself,
- * under an exact evaluation and under a numeric approximation, and whose
- * compiled value is the same: a number literal whose value is a double (an
- * integer in the safe range, or a decimal whose MathJSON form is a plain
- * JavaScript number), or a string.
- *
- * The interpreter's deferred residual holds the EVALUATED supplied argument
- * (`evaluatedKnownArgs`, `makeLambda`), which under `.N()` is its
- * approximation, and the compiled code reads the argument as it is written.
- * With `q = (25! − 1)/24!`, `f = (x, y) ↦ Floor(x) + y + 0·Random()` and
- * machine precision, `Apply(Apply(f, q), u).N()` curries with `25` and gives
- * `25 + u`, while the compiled call reads the exact `q` and gives `24 + u`.
- * Any other argument (an exact rational, an expression, a symbol such as
- * `Pi` or `u`) is declined. Such an argument can also be a collection, which
- * the interpreter maps a partial application over.
- *
- * A decimal with more digits than a double holds (`24.999999999999999999` at
- * a precision of 40) is declined: the interpreter computes with the decimal
- * (its floor is 24), and the compiled code with the nearest double (25).
- *
- * A boolean is declined too: `True` and `False` can name a parameter or a
- * block local, which the compiled residual reads when it is called.
- */
-function isLiteralArgument(arg: Expression): boolean {
-  if (isString(arg)) return true;
-  if (!isNumber(arg)) return false;
-  const value = arg.numericValue;
-  // An exact integer is held as a JavaScript number. An exact rational is
-  // not, and is declined.
-  if (typeof value === 'number') return Number.isSafeInteger(value);
-  const json = arg.json;
-  return (
-    arg.isExact === false && typeof json === 'number' && Number.isFinite(json)
-  );
-}
-
-/**
  * The reason why a partial application of `literal` to `args` does not
- * compile, or `undefined` when its value is the interpreter's deferred
- * residual and it compiles (see the conditions above). `literal` is
- * under-applied (`isUnderApplied`).
+ * compile. Compiled code calls a function only with all its arguments: a
+ * partial application, and a call of its value (currying,
+ * `Apply(Apply(f, 1), u)`), decline. The interpreter keeps them (user
+ * decision 2026-11-02, `docs/COMPILATION-MODEL.md`, "Function values").
+ * The return type keeps `undefined`, the value of a partial application
+ * that compiles, for the callers of this function.
  */
 function partialApplicationRefusal(
-  literal: Expression,
-  args: ReadonlyArray<Expression>
+  _literal: Expression,
+  _args: ReadonlyArray<Expression>
 ): string | undefined {
-  if (!isFunction(literal, 'Function')) return 'the callee is not a literal.';
-  const params = literal.ops.slice(1);
-  if (isGenericLiteral(literal))
-    return (
-      'the function is generic, and the interpreter gives an error for a ' +
-      'partial application of a generic function.'
-    );
-  if (params.some((p) => isRestParameter(p)))
-    return 'a partial application of a function with a rest parameter does not compile.';
-  const other = args.find((a) => !isLiteralArgument(a));
-  if (other !== undefined)
-    return (
-      `the partial application supplies the argument \`${other.toString()}\`, ` +
-      `which is not a machine number or a string literal. The ` +
-      `interpreter curries with the evaluated argument (its approximation ` +
-      `under a numeric evaluation) and maps over a collection argument, and ` +
-      `the compiled call reads the argument as it is written.`
-    );
-  return undefined;
+  return (
+    'a partial application or a curried call (a call with fewer arguments ' +
+    'than the function has parameters, or a call of its value) is not ' +
+    'compiled. Call the function with all its arguments, or evaluate instead.'
+  );
 }
 
 /**

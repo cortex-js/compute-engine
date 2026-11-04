@@ -17,7 +17,6 @@ import type {
 import { isOperatorDef, isValueDef } from './utils.js';
 import {
   boxParameterDefault,
-  callSiteDefault,
   literalParameterDefault,
 } from './parameter-defaults.js';
 import {
@@ -857,9 +856,8 @@ function normalizeAgainstSignature(
   // error: the slot receives the default operand. With
   // `(x, density: number = 1, factor: number = 2)`, `f(3, factor: 5)` is
   // `f(3, 1, 5)`. The default is the boxed operand that the definition keeps
-  // (`defaults`; a symbol default is boxed again here, in the scope of the
-  // call, see `callSiteDefault`), or, when the caller has none for this
-  // signature, the default boxed here. A hole at an optional parameter without a default is
+  // (`defaults`), or, when the caller has none for this signature, the
+  // default boxed here. A hole at an optional parameter without a default is
   // still `argument-optional-skipped`.
   //
   // Ahead of the unsatisfiable-`+`-tail branch below: a call that both leaves
@@ -874,10 +872,7 @@ function normalizeAgainstSignature(
     const d = sig.optArgs?.[i - required]?.default;
     if (d !== undefined) {
       const known = defaults?.[i - required];
-      filled[i] =
-        known === undefined
-          ? boxParameterDefault(ce, d)
-          : callSiteDefault(known);
+      filled[i] = known ?? boxParameterDefault(ce, d);
       continue;
     }
     holes.push(names[i] !== undefined ? `\`${names[i]}\`` : `${i + 1}`);

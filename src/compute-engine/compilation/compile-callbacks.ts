@@ -18,7 +18,6 @@ import {
   isPointListArgumentType,
   isPointTensorArgumentType,
   isPointOrPointListArgumentType,
-  pointArity,
 } from '../collection-utils.js';
 import {
   collectionElementType,
@@ -90,18 +89,11 @@ import { isPolymorphicType } from '../../common/type/instantiate.js';
 import { strictLanes, typeHasComplexLeaf } from './compiler-mode.js';
 import { compileValueOperand } from './compile-statements.js';
 import {
-  declineIntervalAbsentDefault,
-  defaultFillingWrapper,
-  defaultFillTypes,
-  elementTypeAtRank,
-  mayBeAbsentAtRunTime,
-  signatureParameterTypes,
-  targetCoalesce,
+  assertCompiledDefaultFilled,
   literalTakesArgumentCount,
   userFunctionDefaults,
   userFunctionParameterTypes,
 } from './compile-parameter-defaults.js';
-import { callSiteDefault } from '../boxed-expression/parameter-defaults.js';
 import { blockLocalOf, userFunctionSignature } from './compile-absence.js';
 import { isIndexReadTuple } from '../boxed-expression/index-read-tuple.js';
 import type {
@@ -1382,12 +1374,14 @@ export function ensureUserFunctionValueRef(
  * `expression`.
  *
  * A function with a parameter with a default value (`f := (x, k = 2) => x
- * * k`) is handed out behind one more wrapper, `$d`, that fills each
- * parameter whose argument is absent (left out, or supplied absent) with
- * its default (`defaultFillingWrapper()`): `Map(f, [1, 2])` calls the value
- * with one argument, and the interpreter fills `k` with 2. The wrapper is the outermost one,
- * so the checking and complex-coercing wrappers and the static map inside
- * it see every argument, as for a call that supplies them all. */
+ * * k`) is handed out behind one more wrapper, `$d`, that gives each
+ * parameter that the consumer leaves out its default
+ * (`valueDefaultsRef()`): `Map(f, [1, 2])` calls the value with one
+ * argument, and the interpreter fills `k` with 2. An argument that the
+ * consumer supplies is passed as it is, also when it is absent. The wrapper
+ * is the outermost one, so the checking and complex-coercing wrappers and
+ * the static map inside it see every argument, as for a call that supplies
+ * them all. */
 function userFunctionValueRef(
   engine: ComputeEngine,
   h: string,
@@ -1395,48 +1389,20 @@ function userFunctionValueRef(
   decline?: DeclineNote,
   passed?: CallbackArguments
 ): string | undefined {
-  const fill = { inside: false };
   const ref = userFunctionValueRefWithoutDefaults(
     engine,
     h,
     target,
     decline,
-    passed,
-    fill
+    passed
   );
   if (ref === undefined) return undefined;
-  const filledInside = fill.inside;
   if (
     target.language !== 'javascript' &&
     target.language !== 'interval-javascript'
   )
     return ref;
-  const defaults = valueDefaults(engine, h);
-  if (defaults === undefined) return ref;
-  // The interval target fills only an argument that the consumer leaves
-  // out, and declines one that can be absent at run time
-  // (`declineIntervalAbsentDefault`).
-  const passedTypes = passed?.types;
-  if (passedTypes !== undefined)
-    declineIntervalAbsentDefault(
-      target,
-      defaults,
-      passedTypes.length,
-      (i) =>
-        passedTypes[i] === undefined || mayBeAbsentAtRunTime(passedTypes[i]!),
-      `\`${h}\` as a function value`
-    );
-  // When the static map of the value fills each element itself
-  // (`filledInside`), this wrapper fills only the parameters that the
-  // consumer leaves out.
-  return valueDefaultsRef(
-    engine,
-    h,
-    ref,
-    target,
-    filledInside ? (passedTypes?.length ?? 0) : 0,
-    passedTypes
-  );
+  return valueDefaultsRef(engine, h, ref, target);
 }
 
 /**
@@ -1455,84 +1421,56 @@ function valueDefaults(
 }
 
 /**
- * `ref`, the value of the user function `h`, behind a wrapper that fills
- * each parameter from position `only` on whose argument is absent with its
- * default (`defaultFillingWrapper()`), or `ref` when no such parameter has
- * a default.
+ * `ref`, the value of the user function `h`, behind a wrapper that gives
+ * each parameter with a default that the consumer leaves out its default,
+ * with a JavaScript default parameter:
+ * `const _fn_f$d = ((_tv1, _tv2 = 2) => _fn_f(_tv1, _tv2))`. A default is a
+ * constant, so the wrapper is defined once. `ref` itself when no parameter
+ * has a default.
  *
- * A symbol default is read where the consumer calls the value, as if the
- * call were written there (`callSiteDefault()`): with `f := (x, k = d) =>
- * x * k`, `(d, xs) => Map(f, xs)` reads its own parameter `d`. Such a
- * wrapper is compiled in the scope of the reference, and is not shared
- * with another reference, which can see another binding of `d`. Any other
- * wrapper is defined once, as `${ref}$d` (`${ref}$d<only>` for a partial
- * one).
+ * A JavaScript default parameter also fills an argument that is
+ * `undefined`, the spelling of `Missing` in compiled code. The interpreter
+ * passes such an argument to the body. This difference is not inside the
+ * caveats of compiled code: a discharge in the body (`IsMissing(k)`) reads
+ * the default where the interpreter reads `Missing`. It is a known
+ * limitation (`docs/COMPILATION-MODEL.md`, "Known limitations").
+ *
+ * The wrapper reads a symbol default by its name, so a default that
+ * compiled code does not fill (a constant that the host or the program
+ * declares, `compiledSymbolDefaultDeclines()`) throws a decline.
  */
 function valueDefaultsRef(
   engine: ComputeEngine,
   h: string,
   ref: string,
-  target: CompileTarget<Expression>,
-  only: number,
-  reaching: ReadonlyArray<Type | undefined> | undefined
+  target: CompileTarget<Expression>
 ): string {
   const registry = target.userFunctions;
-  const defaults = valueDefaults(engine, h)?.map((d, i) =>
-    i < only ? undefined : d
-  );
+  const defaults = valueDefaults(engine, h);
   if (!registry || defaults === undefined) return ref;
-  if (!defaults.some((d) => d !== undefined)) return ref;
-  const readsBinding = defaults.some(
-    (d) => isSymbol(d) && d.symbol !== 'True' && d.symbol !== 'False'
+  const types = userFunctionParameterTypes(
+    engine,
+    h,
+    userFunctionLiteral(engine, h)
   );
-  // A parameter that receives a point also takes its default for a `NaN`
-  // point. The test is chosen from the declared type of the parameter, else
-  // from the type of the value that the consumer passes (`reaching`), or
-  // the compilation declines (`defaultFillTypes()`).
-  const literal = userFunctionLiteral(engine, h);
-  const parameterTypes =
-    targetCoalesce(target) === undefined
-      ? undefined
-      : defaultFillTypes(
-          defaults.length,
-          (i) => defaults[i]?.type.type,
-          userFunctionParameterTypes(engine, h, literal),
-          reaching,
-          literal === undefined
-            ? undefined
-            : signatureParameterTypes(literal.type.type),
-          `\`${h}\` as a function value`
-        );
-  // The name of a shared wrapper records the point tests it chose, so that
-  // a consumer that passes points and one that passes numbers do not share
-  // one wrapper.
-  const pointKey = (parameterTypes ?? [])
-    .map((t) => (t === undefined ? 0 : (pointArity(t) ?? 0)))
-    .join('_');
-  const pointSuffix = /[1-9]/.test(pointKey) ? `$p${pointKey}` : '';
-  const fillsIn = (t: CompileTarget<Expression>) =>
-    defaults.map((d) =>
-      d === undefined ? undefined : compileValueOperand(callSiteDefault(d), t)
+  defaults.forEach((d, i) =>
+    assertCompiledDefaultFilled(engine, d, types[i], h)
+  );
+  const wrapperName = `${ref}$d`;
+  if (!registry.defs.has(wrapperName)) {
+    const root = registry.root ?? target;
+    const params = defaults.map(() => tempVar(target));
+    const declared = params.map((p, i) =>
+      defaults[i] === undefined
+        ? p
+        : `${p} = ${compileValueOperand(defaults[i]!, root)}`
     );
-  if (readsBinding)
-    return `(${defaultFillingWrapper(
-      ref,
-      fillsIn(target),
-      () => tempVar(target),
-      targetCoalesce(target, parameterTypes)
-    )})`;
-  const wrapperName =
-    (only === 0 ? `${ref}$d` : `${ref}$d${only}`) + pointSuffix;
-  if (!registry.defs.has(wrapperName))
     registry.defs.set(
       wrapperName,
-      `const ${wrapperName} = ${defaultFillingWrapper(
-        ref,
-        fillsIn(registry.root ?? target),
-        () => tempVar(target),
-        targetCoalesce(target, parameterTypes)
-      )};`
+      `const ${wrapperName} = ((${declared.join(', ')}) => ` +
+        `${ref}(${params.join(', ')}));`
     );
+  }
   return wrapperName;
 }
 
@@ -1566,18 +1504,13 @@ export function contradictedScalarResult(
 
 /** `userFunctionValueRef` without the wrapper that fills the parameters
  * with a default value. `passed` is what the consumer of the value passes
- * to it (`callbackArguments`), `undefined` for a value with no consumer.
- * When the value is a static map of the function over list values, on the
- * JavaScript target, the function inside the map fills its defaults, so
- * that each element that is absent takes the default, and `fill.inside` is
- * set. */
+ * to it (`callbackArguments`), `undefined` for a value with no consumer. */
 function userFunctionValueRefWithoutDefaults(
   engine: ComputeEngine,
   h: string,
   target: CompileTarget<Expression>,
   decline?: DeclineNote,
-  passed?: CallbackArguments,
-  fill: { inside: boolean } = { inside: false }
+  passed?: CallbackArguments
 ): string | undefined {
   // A parameter declared `expression` that receives a collection takes the
   // variant typed by the values the consumer passes
@@ -1755,39 +1688,6 @@ function userFunctionValueRefWithoutDefaults(
   );
   if (pointRef !== undefined) return pointRef;
   const ranks = callbackArgumentRanks(h, passed, nParams);
-  if (ranks.some((r) => r > 0) && valueDefaults(engine, h) !== undefined) {
-    fill.inside = true;
-    const filled = valueDefaultsRef(
-      engine,
-      h,
-      callee,
-      target,
-      0,
-      passed.types.map((t, i) =>
-        t === undefined ? undefined : elementTypeAtRank(t, ranks[i] ?? 0)
-      )
-    );
-    // A wrapper written in place (a symbol default, read in the scope of
-    // this reference) is mapped in place too; a shared one is mapped once.
-    if (filled.startsWith('(')) {
-      const mapped = staticMapCallback(filled, ranks, target, passed.types);
-      if (mapped === undefined)
-        throw new Error(
-          `Could not compile the function value \`${h}\`: its consumer ` +
-            `passes it list values, and the target has no map of a ` +
-            `function over a list.`
-        );
-      return mapped;
-    }
-    return mappedValueRef(
-      filled,
-      filled,
-      ranks,
-      registry,
-      target,
-      passed.types
-    );
-  }
   return mappedValueRef(name, callee, ranks, registry, target, passed.types);
 }
 

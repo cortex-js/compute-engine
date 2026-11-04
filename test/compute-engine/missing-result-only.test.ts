@@ -692,35 +692,22 @@ describe('THE READERS READ A NAN POINT AS ABSENT', () => {
     expect(r.run!([])).toBe(true);
   });
 
-  test('a default fills a NaN point', () => {
-    const f = new ComputeEngine();
-    f.declare('O', {
-      type: 'tuple<real, real>',
-      value: ['Tuple', 0, 0],
-      constant: true,
-    } as any);
-    const Q = [
-      'Function',
-      'q',
-      ['Optional', ['Typed', 'q', "'tuple<real, real>'"], 'O'],
-    ];
+  // A default fills only an argument that the call leaves out: a `NaN`
+  // point supplied at a parameter with a default reaches the body (item
+  // 3.4.5 of the CE language release, user decision 2026-11-02).
+  test('a NaN point at a parameter with a default reaches the body', () => {
+    const Q = ['Function', 'q', ['Optional', 'q', 5]];
     const read = ['At', ['List', ['Tuple', 1, 2]], 5];
-    expect(f.box(['Apply', Q, read]).evaluate().json).toEqual([
+    expect(e.box(['Apply', Q, read]).evaluate().json).toEqual([
       'Tuple',
-      0,
-      0,
+      'NaN',
+      'NaN',
     ]);
-    const r = compile(
-      f.box([
-        'Function',
-        ['Apply', Q, ['At', 'qs', 'j']],
-        ['Typed', 'qs', "'list<tuple<real, real>>'"],
-        ['Typed', 'j', "'integer'"],
-      ]),
-      { to: 'javascript' }
-    );
+    const r = compile(typed(['Apply', Q, ['At', 'qs', 'j']]), {
+      to: 'javascript',
+    });
     expect(r.success).toBe(true);
-    expect(r.run!([[1, 2]], 5)).toEqual([0, 0]);
+    expect(r.run!([[1, 2]], 5)).toEqual([NaN, NaN]);
     expect(r.run!([[1, 2]], 1)).toEqual([1, 2]);
   });
 });
@@ -810,8 +797,10 @@ describe('A NUMBER COMPUTED FROM AN ABSENT POINT OF A LIST', () => {
   });
 });
 
-// A parameter with a default value receives the default in place of an
-// absent argument, so the call is not always absent.
+// A default fills only an argument that the call leaves out (item 3.4.5 of
+// the CE language release, user decision 2026-11-02): an absent argument
+// supplied at a parameter with a default reaches the call, which is
+// `Missing`.
 test('an absent argument at a parameter with a default', () => {
   const f = new ComputeEngine();
   f.declare('g', 'function');
@@ -820,8 +809,9 @@ test('an absent argument at a parameter with a default', () => {
     f.box(['Function', 'x', ['Optional', ['Typed', 'x', "'integer'"], 2]])
   );
   const e = f.box(['g', ['First', ['List']]]);
-  expect(e.type.toString()).toBe('integer');
-  expect(e.evaluate().json).toBe(2);
+  expect(e.type.toString()).toBe('missing');
+  expect(e.evaluate().json).toBe('Missing');
+  expect(f.box(['g']).evaluate().json).toBe(2);
 });
 
 // A read at a position that may not exist is typed as its element, but it
@@ -941,18 +931,17 @@ describe('A NAN POINT CELL AT A POINT PARAMETER THAT MAPS', () => {
   });
 });
 
-// A default fills a `NaN` point in compiled code where the interpreter fills
-// it: the test is chosen from the type of the value that reaches the
-// parameter, and a point type whose coordinates can be `NaN` may be absent.
-describe('A DEFAULT FILLS A NAN POINT IN COMPILED CODE', () => {
+// A default fills only an argument that the call leaves out (item 3.4.5 of
+// the CE language release, user decision 2026-11-02): a `NaN` point supplied
+// at a parameter with a default reaches the body, in the interpreter and in
+// compiled code. A point default is written as a symbol declared constant
+// (`O` below): a default is a number, a string, a boolean, `[]`, `{}`, a
+// constant (a library constant or a symbol declared constant) or a symbol
+// that the parameter type lists.
+describe('A NAN POINT AT A PARAMETER WITH A DEFAULT REACHES THE BODY', () => {
   const f = new ComputeEngine();
-  f.declare('O', {
-    type: 'tuple<real, real>',
-    value: ['Tuple', 0, 0],
-    constant: true,
-  } as any);
-  const G = ['Function', ['PointX', 'p'], ['Optional', 'p', 'O']];
-  f.declare('g', { value: G } as any);
+  const K = ['Function', 'p', ['Optional', 'p', 5]];
+  f.declare('k', { value: K } as any);
   f.declare('qs', 'list<tuple<real, real>>');
   f.assign('qs', f.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
   f.declare('j', 'integer');
@@ -971,103 +960,99 @@ describe('A DEFAULT FILLS A NAN POINT IN COMPILED CODE', () => {
     [3, 4],
   ];
 
-  test('an untyped parameter of a named callback of Map', () => {
-    const body = ['At', ['Map', 'g', ['At', 'qs', ['List', 1, 9]]], 2];
-    expect(f.box(body).evaluate().json).toBe(0);
-    expect(run(body, [QS], [qs])).toBe(0);
+  test('a named callback of Map', () => {
+    const body = ['Map', 'k', ['At', 'qs', ['List', 1, 9]]];
+    expect(f.box(body).evaluate().toString()).toBe('[(1, 2),(NaN, NaN)]');
+    expect(run(body, [QS], [qs])).toEqual([
+      [1, 2],
+      [NaN, NaN],
+    ]);
   });
 
-  test('an untyped parameter of an applied literal', () => {
-    const body = ['Apply', G, ['At', 'qs', 'j']];
-    expect(f.box(body).evaluate().json).toBe(0);
-    expect(run(body, [QS, J], [qs, 9])).toBe(0);
-    expect(run(body, [QS, J], [qs, 2])).toBe(3);
-  });
-
-  test('a scalar named call with a point that may be a NaN point', () => {
-    f.declare('fp', {
-      value: [
-        'Function',
-        'p',
-        ['Optional', ['Typed', 'p', "'tuple<number, number>'"], 'O'],
-      ],
-    } as any);
-    f.declare('P', 'tuple<number, number>');
-    f.assign('P', f.box(['Tuple', 'NaN', 'NaN']));
-    expect(f.box(['fp', 'P']).evaluate().json).toEqual(['Tuple', 0, 0]);
-    const P = ['Typed', 'P', "'tuple<number, number>'"];
-    expect(run(['fp', 'P'], [P], [[NaN, NaN]])).toEqual([0, 0]);
-    expect(run(['fp', 'P'], [P], [[1, NaN]])).toEqual([1, NaN]);
-  });
-
-  // Every point is possibly absent at a default fill, also a point typed
-  // `tuple<real, real>`: an accessor out of range gives a `NaN` point
-  // whatever the type of the point says.
-  const GT = [
-    'Function',
-    ['PointX', 'p'],
-    ['Optional', ['Typed', 'p', "'tuple<real, real>'"], 'O'],
-  ];
-  f.declare('gt', { value: GT } as any);
-  f.declare('k', { value: ['Function', 'p', ['Optional', 'p', 5]] } as any);
-
-  test('a local that holds a point read out of range, at a typed parameter', () => {
-    const body = ['Block', ['Assign', 'pp', ['At', 'qs', 'j']], ['gt', 'pp']];
-    expect(f.box(body).evaluate().json).toBe(0);
-    expect(run(body, [QS, J], [qs, 9])).toBe(0);
-    expect(run(body, [QS, J], [qs, 2])).toBe(3);
-  });
-
-  test('a callback of Map at a typed parameter', () => {
+  test('a literal callback of Map that calls the function', () => {
     const body = [
       'Map',
-      ['Function', ['gt', 'x'], 'x'],
+      ['Function', ['k', 'x'], 'x'],
       ['At', 'qs', ['List', 1, 9]],
     ];
-    expect(f.box(body).evaluate().toString()).toBe('[1,0]');
-    expect(run(body, [QS], [qs])).toEqual([1, 0]);
+    expect(f.box(body).evaluate().toString()).toBe('[(1, 2),(NaN, NaN)]');
+    expect(run(body, [QS], [qs])).toEqual([
+      [1, 2],
+      [NaN, NaN],
+    ]);
   });
 
-  test('an applied literal with a typed parameter', () => {
-    const body = ['Apply', GT, ['At', 'qs', 'j']];
-    expect(f.box(body).evaluate().json).toBe(0);
-    expect(run(body, [QS, J], [qs, 9])).toBe(0);
+  test('an applied literal', () => {
+    const body = ['Apply', K, ['At', 'qs', 'j']];
+    expect(f.box(body).evaluate().json).toEqual(['Tuple', 'NaN', 'NaN']);
+    expect(run(body, [QS, J], [qs, 9])).toEqual([NaN, NaN]);
+    expect(run(body, [QS, J], [qs, 2])).toEqual([3, 4]);
   });
 
-  test('a named callback whose default is a number declines', () => {
-    // The interpreter gives `[(1, 2), 5]`. The filled value is a point or a
-    // number, a shape that compiled code does not settle, so it declines.
-    const body = ['Map', 'k', ['At', 'qs', ['List', 1, 9]]];
-    expect(f.box(body).evaluate().toString()).toBe('[(1, 2),5]');
-    const r = compile(f.box(['Function', body, QS] as any), {
+  test('a local that holds a point read out of range', () => {
+    const body = ['Block', ['Assign', 'pp', ['At', 'qs', 'j']], ['k', 'pp']];
+    expect(f.box(body).evaluate().json).toEqual(['Tuple', 'NaN', 'NaN']);
+    expect(run(body, [QS, J], [qs, 9])).toEqual([NaN, NaN]);
+    expect(run(body, [QS, J], [qs, 2])).toEqual([3, 4]);
+  });
+
+  test('the root literal fills only a left-out argument', () => {
+    const fn = f.box(K as any);
+    expect(
+      f.box(['Apply', fn, ['Tuple', 'NaN', 'NaN']]).evaluate().json
+    ).toEqual(['Tuple', 'NaN', 'NaN']);
+    const r = compile(fn, { to: 'javascript' });
+    expect(r.success).toBe(true);
+    expect(r.code).not.toContain('Number.isNaN');
+    expect(r.run!([NaN, NaN])).toEqual([NaN, NaN]);
+    expect(r.run!([3, 4])).toEqual([3, 4]);
+    expect((r.run as () => unknown)()).toBe(5);
+  });
+
+  // A point default: the symbol `O`, declared constant. A left-out argument
+  // receives `O`; a supplied `NaN` point reaches the body. Compiled code
+  // does not fill a default that names a constant that the host declares
+  // (it would read `O` by its name where the default is filled), so each
+  // compilation that fills it declines.
+  const declines = (body: unknown, params: unknown[]) => {
+    const r = compile(f.box(['Function', body, ...params] as any), {
       to: 'javascript',
     });
     expect(r.success).toBe(false);
+  };
+  f.declare('O', {
+    type: 'tuple<real, real>',
+    value: ['Tuple', 0, 0],
+    isConstant: true,
+  });
+  const G = ['Function', ['PointX', 'p'], ['Optional', 'p', 'O']];
+  f.declare('g', { value: G } as any);
+
+  test('a point default: a named callback of Map', () => {
+    const body = ['Map', 'g', ['At', 'qs', ['List', 1, 9]]];
+    expect(f.box(body).evaluate().toString()).toBe('[1,NaN]');
+    declines(body, [QS]);
   });
 
-  test('the root literal fills a NaN point', () => {
-    // The parameter with no declared type takes the point test of its
-    // default; the parameter typed `tuple<number, number>` takes it from
-    // its type.
-    for (const param of [
-      'p',
-      ['Typed', 'p', "'tuple<number, number>'"],
-    ]) {
-      const fn = f.box([
-        'Function',
-        ['PointX', 'p'],
-        ['Optional', param, 'O'],
-      ] as any);
-      expect(
-        f.box(['Apply', fn, ['Tuple', 'NaN', 'NaN']]).evaluate().json
-      ).toBe(0);
-      const r = compile(fn, { to: 'javascript' });
-      expect(r.success).toBe(true);
-      expect(r.code).toContain('Number.isNaN(_c[1])');
-      expect(r.run!([NaN, NaN])).toBe(0);
-      expect(r.run!([3, 4])).toBe(3);
-      expect(r.run!()).toBe(0);
-    }
+  test('a point default: an applied literal', () => {
+    const body = ['Apply', G, ['At', 'qs', 'j']];
+    expect(f.box(body).evaluate().json).toBe('NaN');
+    declines(body, [QS, J]);
+  });
+
+  test('a point default: a named call that leaves out the argument', () => {
+    expect(f.box(['g']).evaluate().json).toBe(0);
+    expect(run(['g'], [], [])).toBe(0);
+  });
+
+  test('a point default: the root literal fills only a left-out argument', () => {
+    const fn = f.box(G as any);
+    expect(fn.isValid).toBe(true);
+    expect(f.box(['Apply', fn]).evaluate().json).toBe(0);
+    expect(
+      f.box(['Apply', fn, ['Tuple', 'NaN', 'NaN']]).evaluate().json
+    ).toBe('NaN');
+    expect(compile(fn, { to: 'javascript' }).success).toBe(false);
   });
 });
 
@@ -1167,22 +1152,26 @@ describe('ASSERTPRESENT OF A POINT THAT MAY BE A NAN POINT', () => {
   });
 });
 
-// A default of the declared signature fills an absent argument, so the call
-// is not typed `missing`.
+// A default of the declared signature fills only an argument that the call
+// leaves out (item 3.4.5 of the CE language release, user decision
+// 2026-11-02): a supplied absent argument at the numeric parameter reaches
+// the call, which is typed `missing` and gives `Missing`.
 describe('A DECLARED DEFAULT AT A NUMERIC PARAMETER', () => {
-  test('the call is typed as its value', () => {
+  test('a supplied absent argument: the call is typed missing', () => {
     const f = new ComputeEngine();
     f.declare('g', '(integer, integer = 2) -> integer');
     f.assign('g', f.box(['Function', ['Add', 'x', 'k'], 'x', 'k']));
     const call = f.box(['g', 1, ['First', ['List']]]);
-    expect(call.type.toString()).not.toBe('missing');
-    expect(call.evaluate().json).toBe(3);
+    expect(call.type.toString()).toBe('missing');
+    expect(call.evaluate().json).toBe('Missing');
+    expect(f.box(['g', 1]).evaluate().json).toBe(3);
   });
 });
 
-// A default of the function literal fills an absent argument before the
-// call is found absent, synchronously and asynchronously, whether the
-// function is held as a value or as an operator definition.
+// A default of the function literal fills only an argument that the call
+// leaves out: a supplied absent argument at the declared numeric parameter
+// gives `Missing`, synchronously and asynchronously, whether the function is
+// held as a value or as an operator definition.
 describe('A LITERAL DEFAULT AT A DECLARED NUMERIC PARAMETER', () => {
   const D = ['Function', 'k', ['Optional', 'k', 2]];
   test('the function is held as a value', async () => {
@@ -1190,9 +1179,9 @@ describe('A LITERAL DEFAULT AT A DECLARED NUMERIC PARAMETER', () => {
     f.declare('g', '(number) -> number');
     f.assign('g', f.box(D as any));
     const call = f.box(['g', ['First', ['List']]]);
-    expect(call.type.toString()).toBe('number');
-    expect(call.evaluate().json).toBe(2);
-    expect((await call.evaluateAsync()).json).toBe(2);
+    expect(call.type.toString()).toBe('missing');
+    expect(call.evaluate().json).toBe('Missing');
+    expect((await call.evaluateAsync()).json).toBe('Missing');
   });
 
   test('the function is an operator definition', async () => {
@@ -1202,8 +1191,8 @@ describe('A LITERAL DEFAULT AT A DECLARED NUMERIC PARAMETER', () => {
       evaluate: f.box(D as any),
     });
     const call = f.box(['g', ['First', ['List']]]);
-    expect(call.evaluate().json).toBe(2);
-    expect((await call.evaluateAsync()).json).toBe(2);
+    expect(call.evaluate().json).toBe('Missing');
+    expect((await call.evaluateAsync()).json).toBe('Missing');
   });
 });
 
@@ -1329,20 +1318,13 @@ describe('A FALSE RESTRICTION OF A POINT IS A NAN POINT', () => {
   });
 });
 
-// Under `.N()`, the written argument of a call is recorded and put in the
-// body in place of its parameter (`applyWrittenArguments`, `makeLambda`).
-// When a default replaced the argument because its value is absent (a read
-// out of range of a list of points is a `NaN` point), the written argument
-// is not recorded (`withoutReplacedSources()`): `.N()` and `.evaluate()`
-// agree, and so does compiled code, which folds the constant inputs with
-// `.N()`.
-describe('A DEFAULT FILLS AN ABSENT ARGUMENT UNDER N()', () => {
+// A default fills only an argument that the call leaves out (item 3.4.5 of
+// the CE language release, user decision 2026-11-02): an absent argument
+// supplied at a parameter, with or without a default, reaches the body.
+// `.evaluate()`, `.N()` and compiled code, which folds the constant inputs
+// with `.N()`, agree on the value of the body.
+describe('AN ABSENT ARGUMENT REACHES THE BODY UNDER N()', () => {
   const f = new ComputeEngine();
-  f.declare('O', {
-    type: 'tuple<real, real>',
-    value: ['Tuple', 0, 0],
-    constant: true,
-  } as any);
   f.declare('qs', 'list<tuple<real, real>>');
   f.assign('qs', f.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
   f.declare('j', 'integer');
@@ -1350,7 +1332,12 @@ describe('A DEFAULT FILLS AN ABSENT ARGUMENT UNDER N()', () => {
   f.declare('L', 'list<real>');
   f.assign('L', f.box(['List', 1.5, 2.5]));
   f.declare('g', {
-    value: ['Function', ['PointX', 'p'], ['Optional', 'p', 'O']],
+    value: [
+      'Function',
+      ['Add', ['PointX', 'p'], 'k'],
+      'p',
+      ['Optional', 'k', 0],
+    ],
   } as any);
 
   test.each([
@@ -1358,39 +1345,34 @@ describe('A DEFAULT FILLS AN ABSENT ARGUMENT UNDER N()', () => {
       'an applied literal',
       [
         'Apply',
-        ['Function', ['At', 'p', 1], ['Optional', 'p', 'O']],
+        ['Function', ['At', 'p', 'k'], 'p', ['Optional', 'k', 1]],
         ['At', 'qs', 'j'],
       ],
-      0,
+      NaN,
     ],
-    ['a named user function', ['g', ['At', 'qs', 'j']], 0],
+    ['a named user function', ['g', ['At', 'qs', 'j']], NaN],
     [
       'a jump in the body',
       [
         'Apply',
-        [
-          'Function',
-          ['If', ['Less', ['PointX', 'p'], 1], 7, 8],
-          ['Optional', 'p', 'O'],
-        ],
+        ['Function', ['If', ['Less', ['PointX', 'p'], 1], 7, 8], 'p'],
         ['At', 'qs', 'j'],
       ],
-      7,
+      8,
     ],
     [
-      'a scalar read out of range',
+      'a scalar read out of range at a parameter with a default',
       [
         'Apply',
         ['Function', ['Floor', 'k'], ['Optional', 'k', 2.5]],
         ['At', 'L', 'j'],
       ],
-      2,
+      NaN,
     ],
   ])(
     '%s: evaluate(), N() and compiled code agree',
     async (_label, body, value) => {
       const e = f.box(body as any);
-      // `.N()` gives a float (`2.0`), so the numeric values are compared.
       expect(e.evaluate().re).toBe(value);
       expect(e.N().re).toBe(value);
       expect((await e.evaluateAsync()).re).toBe(value);
@@ -1450,17 +1432,13 @@ describe('A PARTIAL APPLICATION OVER MISSING', () => {
   });
 });
 
-// At a parameter declared as a point with a default, the interpreter gives
-// the default to each `NaN` point of a list of points that the call maps
-// over. The compiled map fills each point in the same way.
-describe('A POINT DEFAULT IN A CALL THAT MAPS OVER POINTS', () => {
+// A call that maps a function with a point parameter over a list of points:
+// a `NaN` point of the list reaches the body, and a default fills only an
+// argument that the call leaves out (item 3.4.5 of the CE language release,
+// user decision 2026-11-02). The compiled map gives the same values.
+describe('A CALL THAT MAPS OVER POINTS WITH A NAN POINT', () => {
   const f = new ComputeEngine();
-  f.declare('O', {
-    type: 'tuple<real, real>',
-    value: ['Tuple', 0, 0],
-    constant: true,
-  } as any);
-  const P = ['Optional', ['Typed', 'p', "'tuple<number, number>'"], 'O'];
+  const P = ['Typed', 'p', "'tuple<number, number>'"];
   f.declare('g', { value: ['Function', ['PointX', 'p'], P] } as any);
   f.declare('g2', {
     value: [
@@ -1473,34 +1451,42 @@ describe('A POINT DEFAULT IN A CALL THAT MAPS OVER POINTS', () => {
   const QS = ['Typed', 'qs', "'list<tuple<number, number>>'"];
   const K = ['Typed', 'k', "'number'"];
   const L = ['List', ['Tuple', 1, 2], ['Tuple', 'NaN', 'NaN']];
+  const qs = [
+    [1, 2],
+    [NaN, NaN],
+  ];
 
   test.each([
-    [['g', 'qs'], ['List', 1, 0], [1, 0]],
-    [['g2', 'qs', 'k'], ['List', 6, 5], [6, 5]],
-  ])('%j: interpreter and JavaScript agree', (body, value, compiled) => {
-    const fn = ['Function', body, QS, K];
-    expect(f.box(['Apply', fn, L, 'NaN'] as any).evaluate().json).toEqual(
-      value
-    );
-    const r = compile(f.box(fn as any), { to: 'javascript' });
-    expect(r.success).toBe(true);
-    expect(r.run!([[1, 2], [NaN, NaN]], NaN)).toEqual(compiled);
-  });
+    [['g', 'qs'], [QS], [L], [qs], ['List', 1, 'NaN'], [1, NaN]],
+    [['g2', 'qs'], [QS], [L], [qs], ['List', 6, 'NaN'], [6, NaN]],
+    [
+      ['g2', 'qs', 'k'],
+      [QS, K],
+      [L, 'NaN'],
+      [qs, NaN],
+      ['List', 'NaN', 'NaN'],
+      [NaN, NaN],
+    ],
+  ])(
+    '%j: interpreter and JavaScript agree',
+    (body, params, args, jsArgs, value, compiled) => {
+      const fn = ['Function', body, ...params];
+      expect(
+        f.box(['Apply', fn, ...args] as any).evaluate().json
+      ).toEqual(value);
+      const r = compile(f.box(fn as any), { to: 'javascript' });
+      expect(r.success).toBe(true);
+      expect(r.run!(...(jsArgs as any[]))).toEqual(compiled);
+    }
+  );
 
-  test('a read out of range of the list declines', () => {
-    // The read is filled as a whole (`Coalesce(At(qs, [1, 9]), O)`), which
-    // is a list or a point, a shape that only the run time settles.
+  test('a read out of range of the list', () => {
     const g = new ComputeEngine();
-    g.declare('O', {
-      type: 'tuple<real, real>',
-      value: ['Tuple', 0, 0],
-      constant: true,
-    } as any);
     g.declare('h', {
       value: [
         'Function',
         ['PointX', 'p'],
-        ['Optional', ['Typed', 'p', "'tuple<real, real>'"], 'O'],
+        ['Typed', 'p', "'tuple<real, real>'"],
       ],
     } as any);
     const body = ['h', ['At', 'qs', ['List', 1, 9]]];
@@ -1508,10 +1494,11 @@ describe('A POINT DEFAULT IN A CALL THAT MAPS OVER POINTS', () => {
     const qs = ['List', ['Tuple', 1, 2]];
     expect(
       g.box(['Apply', ['Function', body, RQS], qs] as any).evaluate().json
-    ).toEqual(['List', 1, 0]);
+    ).toEqual(['List', 1, 'NaN']);
     const r = compile(g.box(['Function', body, RQS] as any), {
       to: 'javascript',
     });
-    expect(r.success).toBe(false);
+    expect(r.success).toBe(true);
+    expect(r.run!([[1, 2]])).toEqual([1, NaN]);
   });
 });

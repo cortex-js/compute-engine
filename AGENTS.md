@@ -44,7 +44,7 @@ nightly run, tell the user; do not take over that investigation unless asked.
   target, and `NaN`, `0`, `±Infinity`, `undefined`, a throw or a decline where
   the interpreter gives `Missing`, `Nothing`, `Indeterminate`, an unevaluated
   form or an error; and an unspecified value for every operator other than a
-  discharge (`IsMissing`, `Coalesce`, `AssertPresent`, a default parameter) or a
+  discharge (`IsMissing`, `Coalesce`, `AssertPresent`) or a
   position-preserving accessor (`At`, `First`, `Last`, `Rest`, `Length`, a `Map`
   binding) applied to an absent operand, and for everything computed from that
   value. A wrong finite number or a wrong shape for a program with inputs of

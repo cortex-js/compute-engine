@@ -308,13 +308,20 @@ describe('a binder that captures nothing is kept', () => {
 });
 
 describe('the interpreter and the compiled code agree', () => {
+  const RETURNS_A_FUNCTION =
+    /its value is a function, and compiled code does not return a function from a call/;
+
   test('F(x)(y) at x = 2, y = 3', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     ce.declare('y', 'real');
     const expr = ce.box([[F, 'x'], 'y'] as any);
+    // A call whose value is a function (`F(x)`) declines: compiled code
+    // does not return a function from a call. The fallback `run` gives the
+    // interpreter's value.
     const compiled = compile(expr);
-    expect(compiled.success).toBe(true);
+    expect(compiled.success).toBe(false);
+    expect(compiled.error).toMatch(RETURNS_A_FUNCTION);
     const run = compiled.run as (vars: Record<string, number>) => number;
     expect(run({ x: 2, y: 3 })).toEqual(8);
     expect(expr.evaluate().subs({ x: 2, y: 3 }).N().json).toEqual(8);
@@ -325,8 +332,12 @@ describe('the interpreter and the compiled code agree', () => {
     ce.declare('x', 'real');
     ce.declare('y', 'real');
     const expr = ce.box([[G, 'x'], 'y'] as any);
+    // A call whose value is a function (`F(x)`) declines: compiled code
+    // does not return a function from a call. The fallback `run` gives the
+    // interpreter's value.
     const compiled = compile(expr);
-    expect(compiled.success).toBe(true);
+    expect(compiled.success).toBe(false);
+    expect(compiled.error).toMatch(RETURNS_A_FUNCTION);
     const run = compiled.run as (vars: Record<string, number>) => number;
     expect(run({ x: 2, y: 3 })).toEqual(5);
     expect(expr.evaluate().subs({ x: 2, y: 3 }).N().json).toEqual(5);

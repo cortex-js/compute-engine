@@ -4173,10 +4173,6 @@ function kindOperandAdmitted(
   );
 }
 
-/** The type of a value that the absence test of `Coalesce` reads as absent
- * whatever it is (`isMissingValue()`): `Missing` and a `NaN`. */
-const CERTAINLY_ABSENT: Type = { kind: 'union', types: ['missing', 'nan'] };
-
 export function validateArguments(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
@@ -5075,19 +5071,6 @@ export function validateArguments(
     if (!op.isValid) {
       result.push(op);
       isValid = false;
-      i += 1;
-      continue;
-    }
-    // An operand that is certainly absent (its type is `missing` or `nan`:
-    // `Missing`, `At(L, 100)` with `L` a literal list of two numbers) at a
-    // parameter with a default value is accepted: the call replaces it by
-    // the default, as it replaces an operand that is left out
-    // (`withAbsentDefaults()`, `parameter-defaults.ts`).
-    if (
-      sig.optArgs?.[i - params.length]?.default !== undefined &&
-      isSubtype(op.type.type, CERTAINLY_ABSENT)
-    ) {
-      result.push(op);
       i += 1;
       continue;
     }
