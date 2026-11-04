@@ -11627,6 +11627,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
         if (a.isSame(0) && b.isSame(0)) return 'unsigned';
 
+        // Each rule below reads the sign from a real exponent. An exponent
+        // that is not provably real (`isExtendedReal` is `undefined` for an
+        // exponent of type `complex`, such as `ln(-3)`, which has a sign
+        // `unsigned` and so passes the test above) can rotate a positive
+        // base off the real axis, or onto the negative axis:
+        // `2^(ln(-3))` is about `-1.22 + 1.76i`, and `2^(ln(-1)/ln 2)` is
+        // `-1`. So no sign follows for such an exponent.
+        // (Witnesses: `test/compute-engine/power-sgn-complex-exponent.test.ts`.)
+        if (b.isExtendedReal !== true) return undefined;
+
         if (a.isNonNegative || (b.numerator.isOdd && b.denominator.isOdd))
           return a.sgn;
 

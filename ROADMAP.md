@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-794.
+Next free reference: CE-796.
 
 **Entry format.**
 
@@ -605,6 +605,20 @@ Sorting an empty list is a one-line program; expected `[]`. Found during the wor
 reproduction above is the record.
 
 ## Evaluation, canonical forms and scoping
+
+### CE-794. A local function declared with `Declare` in a block of a closure branch is not called
+
+**Status:** ready; wrong value, S.
+**Witness:** plausible; `Apply(Apply(w ↦ (x ↦ If(x > 0, Block(Declare(g, "unknown", z ↦ 3), x + g(0)), 0)), 1), 5)` gives `5 + g(0)` and should give `8`.
+
+Measured on `609d496ee` (2026-11-03). The same body with a first
+`Assign(g, z ↦ 3)` in place of the `Declare` gives `8`, and the old pair
+`Declare(g)` then `Assign(g, z ↦ 3)` also gives `5 + g(0)`. So the
+interpreter does not bind a function value that a `Declare` gives to a
+local of a block inside a branch of a returned closure, and the call of `g`
+stays symbolic. Since item 3.4.4 of the language release (a declaration
+has a value), `Declare(g, "unknown", v)` is the replacement of the old pair,
+so this case is easier to reach. No test pins it yet.
 
 ### CE-766. `0^x` is folded with the value that `x` has when it is boxed
 

@@ -527,6 +527,13 @@
 
 ### Resolved Issues
 
+- **The `sgn` of a power with an exponent that is not provably real is
+  `undefined`.** A positive base raised to a complex exponent can be any
+  non-zero complex number: `ce.parse('2^{\ln(-3)}').sgn` gave `'positive'`,
+  but the value is about `-1.2211 + 1.7592i`; the sign is now `undefined`.
+  `(|\pi|)^{\ln(-3)}` gave `'non-negative'` and now gives `undefined`. A
+  real exponent keeps the sign: `2^{\sqrt{2}}` is `'positive'`.
+
 - **A `Sum` or `Product` over an empty range of a vector body gives a vector.**
   With `x, y, z: real` and `n: integer<0..10>`, `Sum(i·[x, y, z], i, 1, n)`
   has the type `vector<real^3>`. At `n = 0`, `evaluate()` gave the scalar
