@@ -30,13 +30,13 @@ beforeEach(() => {
 const str = (s: string) => ({ str: s }) as const;
 
 /** The evaluated `RangeOf` answer, rendered as `"first..last"` — or the
- * literal `'Nothing'` for an absent needle, or `'Error'`/the unevaluated form
+ * literal `'Missing'` for an absent needle, or `'Error'`/the unevaluated form
  * for the other channels. Reading the span through `at()` rather than
  * `toString()` keeps a one-element span (`Range(2, 2)`, which serializes as
  * `[2]`) readable next to a wider one. */
 function span(expr: any): string {
   const v = ce.box(expr).evaluate();
-  if (v.symbol === 'Nothing') return 'Nothing';
+  if (v.symbol === 'Missing') return 'Missing';
   if (v.operator === 'Error') return `Error:${v.toString()}`;
   if (v.operator === 'RangeOf') return `symbolic:${v.toString()}`;
   const n = v.count;
@@ -62,14 +62,14 @@ describe('RangeOf — the span of the first occurrence', () => {
     );
     expect(span(['RangeOf', ['List', 9, 7, 5, 3], ['List', 9]])).toBe('1..1');
     expect(span(['RangeOf', ['List', 9, 7, 5, 3], ['List', 3]])).toBe('4..4');
-    // Absent → `Nothing`, NOT `IndexOf`'s `0`: zero is an index sentinel and
+    // Absent → `Missing`, NOT `IndexOf`'s `0`: zero is an index sentinel and
     // is not a range.
     expect(span(['RangeOf', ['List', 9, 7, 5, 3], ['List', 7, 3]])).toBe(
-      'Nothing'
+      'Missing'
     );
     // A needle longer than the subject can never fit.
     expect(span(['RangeOf', ['List', 1, 2], ['List', 1, 2, 3]])).toBe(
-      'Nothing'
+      'Missing'
     );
   });
 
@@ -84,7 +84,7 @@ describe('RangeOf — the span of the first occurrence', () => {
     // position 2, while the flat sequence `[3,4]` does not occur at all.
     const nested = ['List', ['List', 1, 2], ['List', 3, 4]];
     expect(span(['RangeOf', nested, ['List', ['List', 3, 4]]])).toBe('2..2');
-    expect(span(['RangeOf', nested, ['List', 3, 4]])).toBe('Nothing');
+    expect(span(['RangeOf', nested, ['List', 3, 4]])).toBe('Missing');
     // A SCALAR needle is a type error, not "search for this one element": to
     // search for one element use `IndexOf`, to search for a one-element
     // sequence wrap it.
@@ -100,7 +100,7 @@ describe('RangeOf — the span of the first occurrence', () => {
   test('a RANGE subject', () => {
     expect(span(['RangeOf', ['Range', 1, 10], ['List', 3, 4]])).toBe('3..4');
     expect(span(['RangeOf', ['Range', 2, 10, 2], ['List', 6, 8]])).toBe('3..4');
-    expect(span(['RangeOf', ['Range', 1, 10], ['List', 4, 3]])).toBe('Nothing');
+    expect(span(['RangeOf', ['Range', 1, 10], ['List', 4, 3]])).toBe('Missing');
   });
 
   test('a TUPLE subject', () => {
@@ -112,8 +112,8 @@ describe('RangeOf — the span of the first occurrence', () => {
     expect(span(['RangeOf', str('abcab'), str('c')])).toBe('3..3');
     expect(span(['RangeOf', str('abcab'), str('ca')])).toBe('3..4');
     // "ba" never occurs in "abcab" (a-b-c-a-b), even though both characters do.
-    expect(span(['RangeOf', str('abcab'), str('ba')])).toBe('Nothing');
-    expect(span(['RangeOf', str('abcab'), str('zz')])).toBe('Nothing');
+    expect(span(['RangeOf', str('abcab'), str('ba')])).toBe('Missing');
+    expect(span(['RangeOf', str('abcab'), str('zz')])).toBe('Missing');
     // A `list<character>` needle against a string subject is well-typed: the
     // two are siblings under `indexed_collection<character>`, and matching is
     // element-wise.
@@ -134,17 +134,17 @@ describe('RangeOf — the span of the first occurrence', () => {
     expect(truth(['ContainsSequence', evens, ['List', 4, 8]])).toBe('False');
   });
 
-  test('the result is typed `range`, and the operator `range | nothing`', () => {
+  test('the result is typed `range`, and the operator `range | missing`', () => {
     // The span is built as `Range(first, last)` with integer literals, which
     // is what makes it type as `range` (ascending, step 1, bounds ≥ 1).
     const e = ce.box(['RangeOf', str('abcab'), str('ab')]);
-    expect(e.type.toString()).toBe('nothing | range');
+    expect(e.type.toString()).toBe('missing | range');
     expect(e.evaluate().type.toString()).toBe('range');
   });
 });
 
 describe('RangeOf — the `from` parameter', () => {
-  test('the find-all loop terminates with `Nothing`', () => {
+  test('the find-all loop terminates with `Missing`', () => {
     // The returned span is always in the ORIGINAL subject's indices, so
     // find-next is `RangeOf(xs, needle, Last(r) + 1)` for non-overlapping
     // matches. Run to exhaustion here, exactly as a caller's loop would.
@@ -153,31 +153,31 @@ describe('RangeOf — the `from` parameter', () => {
     let from = 1;
     for (let guard = 0; guard < 10; guard++) {
       const r = ce.box(['RangeOf', subject, str('ab'), from]).evaluate();
-      if (r.symbol === 'Nothing') break;
+      if (r.symbol === 'Missing') break;
       const first = r.at(1)!.re;
       const last = r.at(r.count!)!.re;
       found.push(`${first}..${last}`);
       from = last + 1;
     }
     expect(found).toEqual(['1..2', '4..5', '7..8']);
-    // The loop's last `from` is `Length(xs) + 1`, which must be `Nothing`
+    // The loop's last `from` is `Length(xs) + 1`, which must be `Missing`
     // rather than an error — that is exactly why "past the end" is not a
     // domain violation.
     expect(from).toBe(9);
-    expect(span(['RangeOf', subject, str('ab'), from])).toBe('Nothing');
+    expect(span(['RangeOf', subject, str('ab'), from])).toBe('Missing');
   });
 
   test('overlapping matches are reachable with `First(r) + 1`', () => {
     expect(span(['RangeOf', str('aaaa'), str('aa')])).toBe('1..2');
     expect(span(['RangeOf', str('aaaa'), str('aa'), 2])).toBe('2..3');
     expect(span(['RangeOf', str('aaaa'), str('aa'), 3])).toBe('3..4');
-    expect(span(['RangeOf', str('aaaa'), str('aa'), 4])).toBe('Nothing');
+    expect(span(['RangeOf', str('aaaa'), str('aa'), 4])).toBe('Missing');
   });
 
-  test('`from` past the end is `Nothing`, never an error', () => {
-    expect(span(['RangeOf', str('abc'), str('a'), 4])).toBe('Nothing');
-    expect(span(['RangeOf', str('abc'), str('a'), 99])).toBe('Nothing');
-    expect(span(['RangeOf', ['List', 1, 2], ['List', 1], 3])).toBe('Nothing');
+  test('`from` past the end is `Missing`, never an error', () => {
+    expect(span(['RangeOf', str('abc'), str('a'), 4])).toBe('Missing');
+    expect(span(['RangeOf', str('abc'), str('a'), 99])).toBe('Missing');
+    expect(span(['RangeOf', ['List', 1, 2], ['List', 1], 3])).toBe('Missing');
   });
 
   test('`from` below 1 is an ERROR value', () => {
@@ -217,7 +217,7 @@ describe('the family: empty needles, per operator', () => {
     // Even over an EMPTY subject: the rejection is about the needle alone.
     expect(span(['RangeOf', str(''), str('')])).toContain('out-of-range');
     // A non-empty needle over an empty subject is simply absent.
-    expect(span(['RangeOf', str(''), str('a')])).toBe('Nothing');
+    expect(span(['RangeOf', str(''), str('a')])).toBe('Missing');
     expect(truth(['ContainsSequence', str(''), str('a')])).toBe('False');
   });
 
@@ -265,7 +265,7 @@ describe('ContainsSequence', () => {
 
   test('agrees with `RangeOf` for a non-empty needle', () => {
     for (const needle of ['ab', 'bc', 'zz', 'abcd', 'c']) {
-      const absent = span(['RangeOf', str('abc'), str(needle)]) === 'Nothing';
+      const absent = span(['RangeOf', str('abc'), str(needle)]) === 'Missing';
       expect(truth(['ContainsSequence', str('abc'), str(needle)])).toBe(
         absent ? 'False' : 'True'
       );
@@ -367,13 +367,13 @@ describe('GRAPHEME SAFETY — the three pins from the spec', () => {
   // code points are involved. Each expectation states the Unicode behavior it
   // assumes.
 
-  test('`RangeOf("x\\u0301y", "x")` is `Nothing`', () => {
+  test('`RangeOf("x\\u0301y", "x")` is `Missing`', () => {
     // NFC has NO precomposed form of `x` + COMBINING ACUTE ACCENT, so the
     // cluster stays decomposed. A code-unit search would find the `x` — but
     // the subject's CHARACTERS are [x́, y], and `x ≠ x́`.
     const subject = str('x́y');
     expect(ce.box(['Length', subject]).evaluate().re).toBe(2);
-    expect(span(['RangeOf', subject, str('x')])).toBe('Nothing');
+    expect(span(['RangeOf', subject, str('x')])).toBe('Missing');
     expect(truth(['ContainsSequence', subject, str('x')])).toBe('False');
     expect(truth(['StartsWith', subject, str('x')])).toBe('False');
     // The whole first cluster does match.
@@ -381,13 +381,13 @@ describe('GRAPHEME SAFETY — the three pins from the spec', () => {
     expect(span(['RangeOf', subject, str('y')])).toBe('2..2');
   });
 
-  test('`RangeOf("\\u{1F468}\\u200D\\u{1F469}\\u200D\\u{1F467}", "\\u{1F469}")` is `Nothing`', () => {
+  test('`RangeOf("\\u{1F468}\\u200D\\u{1F469}\\u200D\\u{1F467}", "\\u{1F469}")` is `Missing`', () => {
     // MAN + ZWJ + WOMAN + ZWJ + GIRL is ONE grapheme cluster. The woman
     // emoji's code units occur inside it, but the subject has exactly one
     // CHARACTER and it is not `\u{1F469}`.
     const family = str('\u{1F468}‍\u{1F469}‍\u{1F467}');
     expect(ce.box(['Length', family]).evaluate().re).toBe(1);
-    expect(span(['RangeOf', family, str('\u{1F469}')])).toBe('Nothing');
+    expect(span(['RangeOf', family, str('\u{1F469}')])).toBe('Missing');
     expect(truth(['ContainsSequence', family, str('\u{1F469}')])).toBe('False');
     // Nor does the MAN that begins it: a prefix cannot end mid-cluster.
     expect(truth(['StartsWith', family, str('\u{1F468}')])).toBe('False');
@@ -459,23 +459,24 @@ describe('the defining law: `Slice(xs, RangeOf(xs, needle))`', () => {
   });
 
   test('the two NEST directly — no narrowing step', () => {
-    // `RangeOf` is honestly typed `range | nothing`, and `Slice` gained a
-    // matching `span: range | nothing` arm (USER-RULED 2026-08-16), so the
-    // law's literal spelling type-checks and evaluates. Both subject kinds.
+    // `RangeOf` is typed `range | missing`, and `Slice` propagates an absent
+    // span as every collection operator propagates an absent operand (user
+    // decision 2026-11-04, ROADMAP CE-802), so the law's literal spelling
+    // type-checks and evaluates. Both subject kinds.
     const found = ce.box([
       'Slice',
       str('abcd'),
       ['RangeOf', str('abcd'), str('bc')],
     ]);
-    // Possibly-absent span ⇒ possibly-absent result, and the type says so
-    // (`sliceResultType`). The element sequence is the needle's either way.
-    expect(found.type.toString()).toBe('nothing | string');
+    // Possibly-absent span ⇒ possibly-absent result, and the type says so.
+    // The element sequence is the needle's either way.
+    expect(found.type.toString()).toBe('missing | string');
     expect([...found.each()].map((c) => c.string).join('')).toBe('bc');
     // Evaluating the node yields a string VALUE, not just a lazy `Slice` that
     // prints as one. The string-preservation step
     // (`evaluateStringPreservingCollection` in
     // `boxed-expression/boxed-function.ts`) requires the node's type to MATCH
-    // `string`, which `nothing | string` does not — so it declines on the node
+    // `string`, which `missing | string` does not — so it declines on the node
     // as authored and is re-run on the RESULT, whose span has resolved to
     // `2..3` and which therefore types exactly `string`
     // (`evaluateStringPreservingResult`, same file).
@@ -497,19 +498,19 @@ describe('the defining law: `Slice(xs, RangeOf(xs, needle))`', () => {
         .string
     ).toBe('bc');
     // And nesting them directly in Epsil — where the span keeps its
-    // `range | nothing` type — gives the same string value.
+    // `range | missing` type — gives the same string value.
     expect(
       executeEpsil(ce, 'Slice("abcd", RangeOf("abcd", "bc"))').value.string
     ).toBe('bc');
-    // An absent span still propagates on that route: `Nothing`, never a
+    // An absent span still propagates on that route: `Missing`, never a
     // fabricated empty string.
     expect(
       executeEpsil(ce, 'Slice("abcd", RangeOf("abcd", "zz"))').value.symbol
-    ).toBe('Nothing');
+    ).toBe('Missing');
   });
 
-  test('ABSENCE PROPAGATES: an unfound needle slices to `Nothing`', () => {
-    // `Slice(xs, Nothing)` is `Nothing`, so a failed search flows straight
+  test('ABSENCE PROPAGATES: an unfound needle slices to `Missing`', () => {
+    // `Slice(xs, Missing)` is `Missing`, so a failed search flows straight
     // through the composition rather than erroring or — the hazard the
     // `spanBounds` guard exists for — silently answering the WHOLE
     // collection by falling back to the positional `(start, end)` arm.
@@ -517,7 +518,7 @@ describe('the defining law: `Slice(xs, RangeOf(xs, needle))`', () => {
       ce
         .box(['Slice', str('abcd'), ['RangeOf', str('abcd'), str('zz')]])
         .evaluate().symbol
-    ).toBe('Nothing');
+    ).toBe('Missing');
     expect(
       ce
         .box([
@@ -526,21 +527,35 @@ describe('the defining law: `Slice(xs, RangeOf(xs, needle))`', () => {
           ['RangeOf', ['List', 9, 7, 5, 3], ['List', 1, 2]],
         ])
         .evaluate().symbol
-    ).toBe('Nothing');
-    // A literal `Nothing` span folds at canonicalization.
-    expect(ce.box(['Slice', str('abcd'), 'Nothing']).type.toString()).toBe(
-      'nothing'
+    ).toBe('Missing');
+    // The facets of the unevaluated node read the absent span as a span whose
+    // bounds are not known: no count, and no element, never the whole list.
+    const view = ce.box([
+      'Slice',
+      ['List', 9, 7, 5, 3],
+      ['RangeOf', ['List', 9, 7, 5, 3], ['List', 1, 2]],
+    ]);
+    expect(view.count).toBeUndefined();
+    expect(view.at(1)).toBeUndefined();
+    // A literal `Missing` span gives `Missing` at canonicalization.
+    expect(ce.box(['Slice', str('abcd'), 'Missing']).type.toString()).toBe(
+      'missing'
     );
     expect(
-      ce.box(['Slice', ['List', 1, 2, 3], 'Nothing']).evaluate().symbol
-    ).toBe('Nothing');
+      ce.box(['Slice', ['List', 1, 2, 3], 'Missing']).evaluate().symbol
+    ).toBe('Missing');
+    // `Nothing` is not an absent value: a `Nothing` span is the ordinary
+    // `incompatible-type` error.
+    const nothingSpan = ce.box(['Slice', ['List', 1, 2, 3], 'Nothing']);
+    expect(nothingSpan.isValid).toBe(false);
+    expect(nothingSpan.toString()).toContain('incompatible-type');
   });
 
   test('a span that is KNOWN to exist keeps its precise type', () => {
-    // The exact `span: range` arms still win for an operand that refutes
-    // `nothing`, which is what keeps `Slice` string-preserving: the
+    // A span that cannot be absent keeps the exact type of the `span: range`
+    // arm, which is what keeps `Slice` string-preserving: the
     // string-preservation step requires the node's type to MATCH `string`,
-    // and a `string | nothing` result would stop it firing.
+    // and a `missing | string` result would stop it firing.
     expect(
       ce.box(['Slice', str('abcdef'), ['Range', 2, 4]]).type.toString()
     ).toBe('string');
@@ -555,24 +570,21 @@ describe('the defining law: `Slice(xs, RangeOf(xs, needle))`', () => {
     );
 
     // The complement of the pin above: a POSSIBLY-absent span makes the
-    // result possibly-`Nothing`, and the type says so. The overload resolver
-    // does not produce this on its own — it admits the overlapping
-    // `range | nothing` operand on trial and prefers the more specific
-    // `span: range` arm, so it reported the bare `string` for a call that
-    // evaluates to `Nothing`. `Slice`'s `type` handler (`sliceResultType` in
-    // `src/compute-engine/library/collections.ts`) adds the `| nothing` arm
-    // exactly when the span operand's static type admits `Nothing`, and
-    // declines otherwise — which is what leaves the exact pins above intact.
+    // result possibly-`Missing`, and the type says so. The general typing
+    // adds the `missing` arm of the span to the result of an operator that
+    // propagates absence; `Slice`'s `type` handler (`sliceOfStringTypeD` in
+    // `src/compute-engine/library/collections.ts`) keeps the present part
+    // `string` for a string subject.
     const maybe = ce.box([
       'Slice',
       str('abcd'),
       ['RangeOf', str('abcd'), str('zz')],
     ]);
-    expect(maybe.type.toString()).toBe('nothing | string');
-    expect(maybe.evaluate().symbol).toBe('Nothing');
+    expect(maybe.type.toString()).toBe('missing | string');
+    expect(maybe.evaluate().symbol).toBe('Missing');
 
     // Same for a list subject: the element type is carried through, and the
-    // `| nothing` arm is added on top of it.
+    // `missing` arm is added on top of it.
     expect(
       ce
         .box([
@@ -581,7 +593,7 @@ describe('the defining law: `Slice(xs, RangeOf(xs, needle))`', () => {
           ['RangeOf', ['List', 9, 7, 5, 3], ['List', 1, 2]],
         ])
         .type.toString()
-    ).toBe('list<integer> | nothing');
+    ).toBe('list<integer> | missing');
   });
 
   test('the span is resolved ONCE per node, not once per element read', () => {
@@ -593,7 +605,7 @@ describe('the defining law: `Slice(xs, RangeOf(xs, needle))`', () => {
     // declared type, so it takes the same path) makes the re-runs visible.
     let calls = 0;
     ce.declare('CountingSpan', {
-      signature: '() -> range | nothing',
+      signature: '() -> range | missing',
       pure: true,
       evaluate: () => {
         calls += 1;

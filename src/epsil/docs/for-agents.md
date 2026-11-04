@@ -269,7 +269,7 @@ search by concept with `epsil doc <keywords>`.
   `StringJoin(xs, sep?)` to join ONE collection with an optional separator
   (a string subject means its characters, so `stringJoin("ab", "cd")` is
   `"acdb"`, not `"abcd"` — use `join` or `"\(a)\(b)"` to concatenate).
-  Substring search is `rangeOf(s, needle)` (a span, or `nothing`),
+  Substring search is `rangeOf(s, needle)` (a span, or `missing`),
   `containsSequence`, `startsWith`, `endsWith` — `c in s` is *character*
   membership. Also `StringReplace(s, target, replacement, count?)`,
   `trim`/`trimStart`/`trimEnd`, `stringRepeat`, `padStart`/`padEnd`,

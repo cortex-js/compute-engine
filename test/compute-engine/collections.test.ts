@@ -1102,7 +1102,7 @@ describe('SLICE (range)', () => {
       const v = e.evaluate();
       expect(v.operator).toBe('Slice');
     }
-    // A `List` shares NO inhabitant with `nothing | range` — a provable
+    // A `List` shares NO inhabitant with `range` — a provable
     // refutation stays a static error (§4.4).
     const e = engine.box(['Slice', list, ['List', 2, 3]]);
     expect(e.type.toString()).toBe('error');
@@ -1110,7 +1110,7 @@ describe('SLICE (range)', () => {
     expect(e.op2.op1.json).toEqual([
       'ErrorCode',
       "'incompatible-type'",
-      "'nothing | range'",
+      "'range'",
       expect.any(String),
     ]);
     // A span in the wrong slot is a type error too: `end` is a number.

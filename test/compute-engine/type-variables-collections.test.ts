@@ -82,13 +82,11 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // `docs/STRING_ROADMAP.md`); every arm carries the `where` clause. Strings
     // Phase 1 gave each of the two spans a leading string-preserving twin: a
     // contiguous run of a string's characters is a string.
-    // Strings Phase 2 added the `range | nothing` twins, so that
-    // `Slice(xs, RangeOf(xs, needle))` composes directly and an absent span
-    // slices to `Nothing`. The exact `span: range` arms stay ahead of them:
-    // the string-preservation step needs the node's type to MATCH `string`,
-    // which `string | nothing` would not.
+    // `Slice(xs, RangeOf(xs, needle))` composes through the `span: range`
+    // arms: a span typed `range | missing` is admitted with its `missing`
+    // arm stripped, and an absent span slices to `Missing`.
     expect(sig(ce, 'Slice')).toBe(
-      '((value: T, span: range) -> T where T: string) & ((value: T, span: nothing | range) -> T | nothing where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T: any) & ((value: indexed_collection<T>, span: nothing | range) -> list<T> | nothing where T: any) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T: any)'
+      '((value: T, span: range) -> T where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T: any) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T: any)'
     );
     // Strings Phase 2 promoted `DeleteAt` to the string-preservation rule:
     // what is left after removing one of a string's own characters is a

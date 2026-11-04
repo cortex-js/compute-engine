@@ -275,7 +275,7 @@ Surface forms that look like Wolfram but behave differently.
 | `stringReplace[s, t -> r]` | `stringReplace` takes positional arguments, not rules | `stringReplace(s, t, r)` |
 | `StringJoin["ab", "cd"]` | **Silently different.** `stringJoin` takes ONE collection plus an optional separator, and a string is a collection of its characters — so this reads as "join `"ab"`'s characters with the separator `"cd"`" and gives `"acdb"` | `join("ab", "cd")`, or `"\(a)\(b)"` |
 | `StringRiffle[parts, sep]` | Unknown name: the call stays **symbolic and inert**. The collection-plus-separator form is `stringJoin`'s second argument | `stringJoin(parts, sep)` |
-| `StringPosition`, `StringContainsQ`, `StringStartsQ`, `StringEndsQ` | Unknown names: **inert**. The Epsil family is generic over indexed collections and character-wise on strings, and `rangeOf` answers one *span* (or `nothing`), not a list of spans | `rangeOf(s, t)`, `containsSequence`, `startsWith`, `endsWith` |
+| `StringPosition`, `StringContainsQ`, `StringStartsQ`, `StringEndsQ` | Unknown names: **inert**. The Epsil family is generic over indexed collections and character-wise on strings, and `rangeOf` answers one *span* (or `missing`), not a list of spans | `rangeOf(s, t)`, `containsSequence`, `startsWith`, `endsWith` |
 | `StringTrim`, `StringPadLeft`, `StringPadRight` | Unknown names: **inert** (`StringTrim` gets a did-you-mean warning) | `trim`/`trimStart`/`trimEnd`, `padStart`, `padEnd` |
 | `ToExpression["3.14"]` | Unknown name: **inert**. Parsing a numeral is its own operator, and answers an error value (never `NaN`) on text that is not one | `numberFrom("3.14")` |
 | `RandomReal[]`, `RandomInteger[n]` | Inert (with a did-you-mean warning) | `random()`, `random(1..n)` |

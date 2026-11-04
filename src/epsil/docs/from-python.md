@@ -283,7 +283,7 @@ let parts = stringSplit("a b c")
 `s * n` is `stringRepeat(s, n)` and `float(s)`/`int(s)` are `numberFrom(s)`
 (which answers an error value, never NaN, on text that is not a numeral).
 `.find()`/`.index()` is `rangeOf(s, needle)`, which answers the *span* of the
-first occurrence (a `range`) or `nothing` — feed it straight to `slice`;
+first occurrence (a `range`) or `missing` — feed it straight to `slice`;
 `needle in s` (substring) is `containsSequence(s, needle)`, and
 `.startswith()`/`.endswith()` are `startsWith`/`endsWith`. Note that Epsil's
 `c in s` is **character** membership, not substring search.

@@ -1584,15 +1584,14 @@ function validateAgainstDeclaration(
 // set accepts. The RESULT type is not read here; the `type:` handler
 // (`joinResultType`) owns it.
 const JOIN_SIGNATURE = parseType('(collection<any>*) -> collection');
-// The full overload set of `Slice`. The custom `canonical` handler intercepts
-// an absent (`Nothing`) span before the default `flatten` step can drop it,
-// and must then do the argument validation the default path would have done
-// — against the SAME contract the engine registered, or a call the definition
+// The full overload set of `Slice`. The custom `canonical` handler does the
+// argument validation that the default path would have done, against the
+// SAME contract that the engine registered, or a call that the definition
 // accepts could be rejected at canonicalization (or the reverse). So the
 // handler reads the signature of the live definition
 // (`validateAgainstDeclaration`), which also follows a host redeclaration.
 const SLICE_SIGNATURE_TEXT =
-  '((value: T, span: range) -> T where T: string) & ((value: T, span: range | nothing) -> T | nothing where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T: any) & ((value: indexed_collection<T>, span: range | nothing) -> list<T> | nothing where T: any) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T: any)';
+  '((value: T, span: range) -> T where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T: any) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T: any)';
 
 /**
  * SEARCHED_VALUE_POLICY: how `Contains`, `IndexOf`, `Count(xs, v)`, `Element`
@@ -6553,18 +6552,26 @@ function appendResultTypeD(ops: ReadonlyArray<OperandDescriptor>): Type {
   };
 }
 
-/** Descriptor twin of {@link sliceResultType}. */
-function sliceResultTypeD(
+/**
+ * The result type of `Slice` over a string: `string`, and `undefined` for
+ * every other value, which keeps the type that the resolver gives.
+ *
+ * The resolver alone is less precise when a bound or the span can be
+ * absent. `RangeOf("abcd", "bc")` is typed `range | missing`, and the
+ * resolution that validation records for such an operand admits both the
+ * string arm and the list arm of the signature, so
+ * `Slice("abcd", RangeOf("abcd", "bc"))` was typed
+ * `list<character> | missing | string`. The handler receives the operands
+ * with the `missing` arm stripped, and the general typing adds it back to
+ * the result (`absorbOperandAbsence`, `derive-application-type.ts`), so
+ * that call is typed `missing | string`.
+ */
+function sliceOfStringTypeD(
   ops: ReadonlyArray<OperandDescriptor>
 ): Type | undefined {
-  if (ops.length !== 2) return undefined;
-  if (!typeIsNothingOrAdmitsNothing(ops[1].type)) return undefined;
-
-  const valueType = ops[0].type;
-  const base: Type = isSubtype(valueType, 'string')
-    ? 'string'
-    : { kind: 'list', elements: indexElementType(valueType) ?? 'any' };
-  return reduceType({ kind: 'union', types: [base, 'nothing'] });
+  if (ops[0] === undefined || !isSubtype(ops[0].type, 'string'))
+    return undefined;
+  return 'string';
 }
 
 /**
@@ -18459,32 +18466,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // arm, so a ground `string` parameter would win most-specific-wins on
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
-    // The `range | nothing` twins are what make `Slice(xs, RangeOf(xs, n))`
-    // compose directly. `RangeOf` is honestly typed `range | nothing` — the
-    // needle may be absent — and a caller should not have to narrow the union
-    // by hand before slicing. Absence PROPAGATES: `Slice(xs, Nothing)` is
-    // `Nothing`, so the honest static answer for a possibly-absent span is
-    // `T | nothing` (USER-RULED 2026-08-16). The exact `span: range` arms are
-    // kept AHEAD of them so a span that is known to exist keeps the precise
-    // `T` / `list<T>` result it has always had; that precision is
-    // load-bearing, not cosmetic — the string-preservation step requires the
-    // node's type to MATCH `string` exactly
-    // (`evaluateStringPreservingCollection` in
-    // `boxed-expression/boxed-function.ts`), and a `string | nothing` result
-    // would stop `Slice("abc", 2..3)` evaluating to a string value at all.
-    // The overload RESOLVER cannot make that split on its own, which is why
-    // the `type` handler below exists: for an operand typed `range | nothing`
-    // the resolver still selects the exact `span: range` arm and would report
-    // `string` / `list<T>`, not the `| nothing` union. The union arm is what
-    // makes the call VALIDATE (without it the operand is rejected
-    // `incompatible-type`), but overload selection admits an overlapping
-    // operand on trial and prefers the more specific arm, in either textual
-    // order — so before the handler, `Slice(xs, RangeOf(xs, n))` typed
-    // `string` while evaluating to `Nothing`. The handler re-reads the span
-    // operand's static type and adds the `| nothing` arm exactly when that
-    // type admits `Nothing`; a span that statically excludes it (a literal
-    // `2..3`, a `range`-declared symbol) is left to the resolver, so the
-    // precise result — and with it string preservation — is untouched.
+    // `Slice(xs, RangeOf(xs, needle))` composes with no handler of its own.
+    // `RangeOf` gives `Missing` when the needle does not occur, and `Slice`
+    // propagates an absent operand as every collection operator does: the
+    // validation strips the `missing` arm of the span (`range | missing`
+    // is admitted at `span: range`), and the evaluation gives `Missing` for
+    // an absent span (`docs/ERROR-MODEL.md`, "`Missing` is a result only").
+    // User decision 2026-11-04 (ROADMAP CE-802), which replaces the
+    // `Nothing` span of the user decision of 2026-08-16.
     // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
@@ -18493,49 +18482,33 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature: SLICE_SIGNATURE_TEXT,
-    // Restore the honesty the resolver drops (see above): a possibly-absent
-    // span makes the result possibly-`Nothing`. Returning `undefined` leaves
-    // the resolver's arm in place, which is the whole mechanism for keeping
-    // `Slice("abc", 2..3)` typed exactly `string`.
-    type: (ops, context) => {
-      const sliced = sliceResultTypeD(ops);
-      if (sliced !== undefined)
-        return BoxedType.forResult(sliced, context.engine._typeResolver);
-      const selected =
-        ops[0] === undefined ? undefined : selectorResultTypeD(ops[0]);
-      // The span form keeps the `nothing` arm that the signature's span
-      // overload (`range | nothing`) gives its result.
-      return BoxedType.forResult(
-        selected !== undefined && ops.length === 2
-          ? reduceType({ kind: 'union', types: [selected, 'nothing'] })
-          : selected,
+    // Returning `undefined` leaves the type of the resolver's arm in place,
+    // which keeps `Slice("abc", 2..3)` typed exactly `string`.
+    type: (ops, context) =>
+      BoxedType.forResult(
+        sliceOfStringTypeD(ops) ??
+          (ops[0] === undefined ? undefined : selectorResultTypeD(ops[0])),
         context.engine._typeResolver
-      );
-    },
-    // `Slice(xs, Nothing)` folds to `Nothing`: an absent span (the value of
-    // a `RangeOf` search that found nothing) propagates, so
-    // `Slice(xs, RangeOf(xs, needle))` is `Nothing` when the needle does not
-    // occur (user decision 2026-08-16). The evaluation of such a call builds
-    // the call again from the evaluated operands, which reaches this handler.
-    // Everything else is the default path, spelled out: `flatten` (Sequence
-    // splice), then `validateArguments` against the declared overload set.
+      ),
+    // The default path, spelled out: `flatten` (Sequence splice), then
+    // `validateArguments` against the declared overload set, with the
+    // `missing` arm stripped at each position, as the default path strips
+    // it for an operator that propagates absence (`stripsMissingAt`).
     // `Slice` is neither commutative, involutive, idempotent nor
-    // `broadcastable`, and none of its parameters is numeric-only, so the
-    // remaining steps the default path would run (operand sorting, the
-    // involution/idempotent rewrites, the missing-arm strip) are all no-ops
-    // for it. The handler also attaches the validated overload resolution to
+    // `broadcastable`, so the remaining steps the default path would run
+    // (operand sorting, the involution/idempotent rewrites) are no-ops for
+    // it. The handler also attaches the validated overload resolution to
     // the constructed call (`_resolvedOverload`), as the default path does;
     // result typing in `resolvedArm` (`boxed-expression/boxed-function.ts`)
     // reads it. The `Slice` type pins in
     // `test/compute-engine/type-variables-collections.test.ts` and
     // `test/compute-engine/collections.test.ts` cover that path.
     canonical: (ops, { engine: ce }) => {
-      if (ops.length === 2 && isSymbol(ops[1], 'Nothing')) return ce.Nothing;
       const args = flatten(ops);
       const resolutionOut: { resolution?: OverloadResolution } = {};
       const fn = ce._fn(
         'Slice',
-        validateAgainstDeclaration(ce, 'Slice', args, false, resolutionOut) ??
+        validateAgainstDeclaration(ce, 'Slice', args, true, resolutionOut) ??
           args
       );
       // Attach the resolution the operands were validated against, as the
@@ -18553,18 +18526,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return fn;
     },
     collection: refusingUnindexedSource({
-      // Collection-ness is decided PER INSTANCE, because the `range | nothing`
-      // arms let the result be `Nothing`: a `Slice` over an absent span is not
-      // a collection at all. Declaring this is also what tells the definition
-      // validator not to insist that the whole signature's result type be a
-      // collection — without it, registering the `| nothing` arms throws
-      // ("a collection handler is defined, but the signature is not a
-      // collection type"). A canonical `Slice(xs, Nothing)` folds to `Nothing`
-      // outright, so only a structurally constructed node reaches this as
-      // `false`.
-      isCollection: (expr) =>
-        !(isFunction(expr) && expr.ops.length === 2) ||
-        !isSymbol(expr.op2, 'Nothing'),
       // Without bounds (a symbolic bound, a source whose length is not known,
       // or a bound that cannot be placed in a source whose length is not a
       // safe integer) the walk yields nothing, so the view is not
@@ -19482,8 +19443,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   RangeOf: {
     examples: ['RangeOf([10, 20, 30, 40], [30, 40])'],
     description: [
-      'Return the 1-based inclusive index span of the first occurrence of `needle` as a contiguous subsequence of the indexed collection, or `Nothing` when it does not occur.',
-      "The search starts at index `from` (1 by default) and the span is always expressed in the original collection's indices, so `RangeOf(xs, needle, Last(r) + 1)` finds the next non-overlapping occurrence and the loop ends at `Nothing`.",
+      'Return the 1-based inclusive index span of the first occurrence of `needle` as a contiguous subsequence of the indexed collection, or `Missing` when it does not occur.',
+      "The search starts at index `from` (1 by default) and the span is always expressed in the original collection's indices, so `RangeOf(xs, needle, Last(r) + 1)` finds the next non-overlapping occurrence and the loop ends at `Missing`.",
       'On a string the needle is matched character by character, so a match never begins or ends inside a grapheme cluster.',
     ],
     complexity: 8200,
@@ -19500,13 +19461,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Slice` is kind-preserving, so the two sides can be a `string` and a
     // `list<character>`, which are never `==` (`docs/STRING_ROADMAP.md`,
     // design constraint 2).
-    // Absence is `Nothing`, not `IndexOf`'s `0`: `0` is an index sentinel and
-    // is not a range.
+    // Absence is `Missing`, not `IndexOf`'s `0`: `0` is an index sentinel and
+    // is not a range. `Missing` is the absent value of a position that is not
+    // a number or a point (`docs/ERROR-MODEL.md`, "One static error, one
+    // dynamic non-value per domain"), and every operator over it gives
+    // `Missing`, so `Slice(xs, RangeOf(xs, needle))` is `Missing` too.
     signature:
-      '(indexed_collection<T>, indexed_collection<T>, from: integer?) -> range | nothing where T',
+      '(indexed_collection<T>, indexed_collection<T>, from: integer?) -> range | missing where T',
     // Provable declines only. `true` is never claimed: even with both
-    // operands finite, a needle that is ABSENT evaluates to `Nothing`, which
-    // is not a collection at all, so evaluation cannot promise one.
+    // operands finite, a needle that does not occur evaluates to `Missing`,
+    // which is not a collection, so evaluation cannot promise one.
     canEnumerate: (expr) => {
       if (!isFunction(expr)) return undefined;
       if (expr.op1.isFiniteCollection === false) return false;
@@ -19527,7 +19491,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const start = from ?? 1;
       // `from` must be at least 1; index 0 and negative indices have no
       // meaning for a search reporting 1-based spans. Past the END is
-      // deliberately NOT an error, just `Nothing`: the natural find-all loop
+      // deliberately NOT an error, just `Missing`: the natural find-all loop
       // legitimately produces `Length(xs) + 1` after a match at the very end.
       if (start < 1)
         return ce.error([
@@ -19553,7 +19517,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             ce.number(i + pattern.length),
           ]);
       }
-      return ce.Nothing;
+      return ce.Missing;
     },
   },
 
@@ -25242,23 +25206,6 @@ function distinctAt(
   return undefined;
 }
 
-/** Does this static type admit the value `Nothing`?
- *
- * `nothing` is a UNIT type here, not a bottom type, so it is admitted only
- * where it literally appears: the type IS `nothing`, or it is a union with a
- * `nothing` arm (`RangeOf` is declared `range | nothing`). Testing the whole
- * union with a subtype check answers `false` — `range | nothing` is not a
- * subtype of `nothing` — so the arms have to be walked individually, which is
- * what this does. A nested union is walked recursively; nothing else (a bare
- * `any`, an `unknown`) counts, because admitting those would attach a
- * `| nothing` arm to every untyped operand. */
-function typeIsNothingOrAdmitsNothing(t: Type): boolean {
-  if (typeof t === 'string') return t === 'nothing';
-  if (t.kind === 'union')
-    return t.types.some((arm) => typeIsNothingOrAdmitsNothing(arm));
-  return false;
-}
-
 function defaultCollectionEq(a: Expression, b: Expression) {
   // Compare two collections
   if (a.operator !== b.operator) {
@@ -26413,15 +26360,18 @@ function spanBounds(
     !provablyDisjoint(op.type.type, 'range')
   )
     op = op.evaluate();
-  // `Nothing` is an ABSENT span — what `RangeOf` answers when the needle does
-  // not occur — and must never be read as an omitted argument. Falling through
-  // to the positional `(start, end)` arm would default both bounds and answer
-  // the WHOLE collection for a search that found nothing. A canonical
-  // `Slice(xs, Nothing)` folds to `Nothing` outright, so this covers the
-  // operand that only BECAME `Nothing` on the evaluation just above, plus any
-  // structurally constructed node that skipped canonicalization; `null` — "is
-  // a span, bounds unresolvable" — leaves every facet declining.
-  if (isSymbol(op, 'Nothing')) return null;
+  // `Missing` is an ABSENT span (what `RangeOf` gives when the needle does
+  // not occur), and must never be read as an omitted argument: the
+  // positional `(start, end)` arm would default both bounds and give the
+  // WHOLE collection for a search that found nothing. The evaluation of the
+  // `Slice` gives `Missing` for an absent span; this covers the facets of
+  // the unevaluated node, whose span operand can become `Missing` on the
+  // evaluation just above. `null` ("a span whose bounds cannot be read")
+  // makes every facet decline. A `Nothing` span is refused at
+  // canonicalization (`incompatible-type`), but a node built without
+  // canonicalization can still hold one, and `integerParam` reads `Nothing`
+  // as an omitted bound, so it declines here too.
+  if (isSymbol(op, 'Missing') || isSymbol(op, 'Nothing')) return null;
   if (!op.isCollection) return undefined;
   const n = smallCount(op);
   if (n === undefined || !Number.isFinite(n) || n < 1) return null;

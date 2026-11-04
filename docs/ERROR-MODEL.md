@@ -290,6 +290,14 @@ Those passages are kept as history.
 | `Add(1, Nothing)` | `1` (`Nothing` spliced out) | `incompatible-type` error |
 | `Sequence()` | `Nothing` | `Sequence()` |
 | `(3,,4)` | `(3, 4)` | `(3, Error('missing'), 4)`, a parse error |
+| `RangeOf([1, 2, 3], [9])` (decision of 2026-11-04) | `Nothing` | `Missing`, typed `range \| missing` |
+| `Slice([1, 2, 3], RangeOf([1, 2, 3], [9]))` (decision of 2026-11-04) | `Nothing` | `Missing` |
+| `Slice([1, 2, 3], Nothing)` (decision of 2026-11-04) | `Nothing` | `incompatible-type` error |
+
+A failed sequence search was the one producer of `Nothing` left after this
+decision. The user decision of 2026-11-04 (ROADMAP CE-802) made it
+`Missing`, so `Slice` has no `Nothing` case: an absent span gives `Missing`
+by the rule that every operator over `Missing` gives `Missing`.
 
 This decision supersedes, in the text below: the second member of `nan`,
 `Indeterminate`, with its exact propagation and its `isIndeterminate`

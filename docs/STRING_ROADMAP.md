@@ -662,11 +662,11 @@ host code-unit `indexOf` must still validate candidates against cluster
 boundaries and map code-unit offsets to 1-based character indices. Examples
 that lock the behavior in:
 
-- `RangeOf("x́y", "x")` → `Nothing` (no match): NFC has no precomposed
+- `RangeOf("x́y", "x")` → `Missing` (no match): NFC has no precomposed
   form of `x́` (`x` + U+0301), so the cluster stays decomposed and a
   code-unit search finds `x` — but the subject's characters are
   `[x́, y]`, and `x ≠ x́`.
-- `RangeOf("👨‍👩‍👧", "👩")` → `Nothing` (no match): the woman emoji's
+- `RangeOf("👨‍👩‍👧", "👩")` → `Missing` (no match): the woman emoji's
   code units occur inside the ZWJ family cluster, but the subject has ONE
   character, and it is not `👩`.
 - `RangeOf("ée", "e")` → `2..2`, the span of the FINAL `e` (the
@@ -675,12 +675,16 @@ that lock the behavior in:
 
 The operators:
 
-- `RangeOf(xs, needle, from?) -> range | nothing` — the SPAN of the
+- `RangeOf(xs, needle, from?) -> range | missing` — the SPAN of the
   first occurrence of `needle` as a contiguous subsequence starting at
   index `from` or later, as a 1-based inclusive index range
-  (`RangeOf([9,7,5,3], [7,5])` → `2..3`), or `Nothing` when absent.
+  (`RangeOf([9,7,5,3], [7,5])` → `2..3`), or `Missing` when absent
+  (user decision 2026-11-04, ROADMAP CE-802; it was `Nothing` from
+  2026-08-16, and `Slice(xs, Nothing)` was then `Nothing`; now
+  `Slice(xs, Missing)` is `Missing`, as every operator over `Missing`
+  is, and `Slice(xs, Nothing)` is an `incompatible-type` error).
   Signature `(indexed_collection<T>, indexed_collection<T>, integer?) ->
-  range | nothing where T` — a literal, parseable signature now that
+  range | missing where T` — a literal, parseable signature now that
   `range` is a real type (see "The `range` type"). On strings the needle
   is a string (or a `list<character>`) and the span is in character
   indices. Returning the span rather than a start index (Swift's

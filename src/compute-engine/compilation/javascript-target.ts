@@ -5925,10 +5925,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // (`docs/STRING_ROADMAP.md`, decision D8.)
 
   // The 1-based inclusive index SPAN of the first occurrence, or the
-  // interpreter's `Nothing`. `Range(a, b)` lowers to the JS array
+  // interpreter's `Missing`. `Range(a, b)` lowers to the JS array
   // `[a, …, b]`, so the span is built as that array; absence is `undefined`,
-  // the projection an OBJECT-domain `Nothing` already takes on this target
-  // (see the `At` handler's out-of-band mapping).
+  // which the caveats of compiled code allow where the interpreter gives
+  // `Missing` (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code").
   RangeOf: (args, compile, target) => {
     if (args.length < 2 || args.length > 3)
       throw new Error(
@@ -5979,7 +5979,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
               '`from` must be an integer of 1 or more',
               // No upper bound: the interpreter reads `from` with `toInteger`,
               // not `asSmallInteger`, so a large `from` is not an error value
-              // — just a search that starts past the end and answers `Nothing`.
+              // — just a search that starts past the end and answers `Missing`.
               Number.POSITIVE_INFINITY
             )} - 1)`;
     }

@@ -64,7 +64,8 @@ const CASES: Case[] = [
   },
   {
     name: 'Slice',
-    signature: '(any, any, any?) -> any',
+    // An operator with collection handlers must declare a collection result.
+    signature: '(any, any, any?) -> list',
     widened: ['Slice', 5, 1, 2],
     stock: ['Slice', ['List', 1, 2, 3, 4], 2, 3],
   },

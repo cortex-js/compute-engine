@@ -1380,11 +1380,11 @@ Range(1, 10, 3)
 
 ### rangeOf
 
-MathJSON `RangeOf` · `(indexed_collection<T>, indexed_collection<T>, from: integer?) -> nothing | range where T`
+MathJSON `RangeOf` · `(indexed_collection<T>, indexed_collection<T>, from: integer?) -> missing | range where T`
 
-Return the 1-based inclusive index span of the first occurrence of `needle` as a contiguous subsequence of the indexed collection, or `Nothing` when it does not occur.
+Return the 1-based inclusive index span of the first occurrence of `needle` as a contiguous subsequence of the indexed collection, or `Missing` when it does not occur.
 
-The search starts at index `from` (1 by default) and the span is always expressed in the original collection's indices, so `RangeOf(xs, needle, Last(r) + 1)` finds the next non-overlapping occurrence and the loop ends at `Nothing`.
+The search starts at index `from` (1 by default) and the span is always expressed in the original collection's indices, so `RangeOf(xs, needle, Last(r) + 1)` finds the next non-overlapping occurrence and the loop ends at `Missing`.
 
 On a string the needle is matched character by character, so a match never begins or ends inside a grapheme cluster.
 
@@ -1593,7 +1593,7 @@ Single(5)
 
 ### slice
 
-MathJSON `Slice` · `((value: T, span: range) -> T where T: string) & ((value: T, span: nothing | range) -> T | nothing where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T: any) & ((value: indexed_collection<T>, span: nothing | range) -> list<T> | nothing where T: any) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T: any)`
+MathJSON `Slice` · `((value: T, span: range) -> T where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T: any) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T: any)`
 
 Return a contiguous run of elements from an indexed collection.
 

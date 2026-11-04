@@ -19953,9 +19953,9 @@ function evaluateStringPreservingCollection(
  * Step 2d runs on the node as authored, and it requires the node's type to
  * MATCH `string` exactly. A `type` handler that reads a raw operand's STATIC
  * type can only report a union there: `Slice(xs, RangeOf(xs, needle))` types
- * as `nothing | string`, because `RangeOf` is honestly typed `range | nothing`
- * (the needle may be absent) and a slice over an absent span is `Nothing`.
- * `nothing | string` does not match `string`, so step 2d declines. Once the
+ * as `missing | string`, because `RangeOf` is typed `range | missing` (the
+ * needle may not occur) and a slice over an absent span is `Missing`.
+ * `missing | string` does not match `string`, so step 2d declines. Once the
  * operands have been evaluated the span is a concrete `2..3`, and the node
  * rebuilt from them types exactly `string` — but step 2d has already run by
  * then, and the evaluation result is memoized, so it would never see the
@@ -19965,8 +19965,8 @@ function evaluateStringPreservingCollection(
  * `undefined`).
  *
  * Widening step 2d's gate to accept unions would NOT be an equivalent fix: a
- * `nothing | string` node whose span really is absent must evaluate to
- * `Nothing`, which the ordinary evaluation path already produces. Only a node
+ * `missing | string` node whose span really is absent must evaluate to
+ * `Missing`, which the ordinary evaluation path already produces. Only a node
  * that has resolved to `string` may be materialized into one.
  *
  * Returns the original result unchanged when the check does not apply or

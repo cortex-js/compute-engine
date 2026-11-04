@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-804.
+Next free reference: CE-805.
 
 **Entry format.**
 
@@ -504,49 +504,29 @@ rule to the broadcast over a list of points. Expected: `L + (1, 1)` typed
 `list<tuple<E, E>>`; a symbol declared `list<tuple<E, E>>` accepts the
 result.
 
-### CE-802. A failed sequence search gives `Missing`, not `Nothing`, and the `Slice(xs, Nothing)` handler goes
+### CE-804. `Find` gives `Nothing` when no element matches, where the error model gives `Missing`
 
-**Status:** ready; design, S. User decision 2026-11-04: option 3 of the
-question in the 3.4.3 record of
-`docs/plans/2026-11-02-compiler-contraction-plan.md` (choice 8). Replaces the
-user decision of 2026-08-16 that made the failed search `Nothing`.
-**Witness:** plausible; `Slice([1, 2, 3], RangeOf([1, 2, 3], [9]))` gives
-`Nothing` on `0c201d2e9` (and `Slice([1, 2, 3], Nothing)` gives `Nothing`,
-typed `nothing`), where `At([1, 2, 3], Nothing)` is the `incompatible-type`
-error that the error model of 0.178.0 prescribes for an operator that
-receives `Nothing`.
+**Status:** decision needed; design, S. Found during CE-802.
+**Witness:** plausible; `Find([1, 2, 3], x ↦ x > 5)` gives `Nothing`, typed
+`integer | nothing`, on `fdc4d9b77`.
 
 The error model (`docs/ERROR-MODEL.md`, "One static error, one dynamic
 non-value per domain", user decision 2026-11-02) keeps `Nothing` only as the
-value of an empty block or of a statement with no value; `Missing` is the
-dynamic non-value for everything that is not a number or a point. One
-handler stayed against the rule: `RangeOf(xs, needle)` gives `Nothing` when
-the needle does not occur, and the `Slice` handler folds `Slice(xs,
-Nothing)` to `Nothing` so that `Slice(xs, RangeOf(xs, needle))` is `Nothing`
-on a failed search (`library/collections.ts`, the `Slice` entry around line
-18515, and the span reader around line 26416, which returns `null` for a
-`Nothing` span so that it is not read as an omitted argument).
+value of an empty block or of a statement with no value; a selection with no
+match gives the absent value of its domain (`NaN` for a number, `Missing`
+otherwise). `Find` (`library/collections.ts`, the `Find` entry, described
+"or Nothing if none found") still gives `Nothing`, so `Find(xs, p) + 1` is an
+`incompatible-type` error and `Coalesce(Find(xs, p), 0)` does not replace
+it (`IsMissing(Nothing)` is `False`). CE-802 made the same change for
+`RangeOf`. The options, with `Find([1, 2, 3], x ↦ x > 5)`:
 
-The change: a failed `RangeOf` search gives `Missing`; the `Slice` handler
-loses the `Nothing` fold and the `null` span case, and `Slice(xs, Missing)`
-gives `Missing` by the propagation rule of 3.4.2 (an operator with an absent
-operand gives `Missing`), so `Slice(xs, RangeOf(xs, needle))` is `Missing` on
-a failed search with no handler; `Slice(xs, Nothing)` is the ordinary
-`incompatible-type` error. The result type of `RangeOf` is `range | missing`
-(it was `nothing | range`), and the type of a `Slice` over it carries the
-`missing` arm. A program that tested the search with a comparison to
-`Nothing` uses `IsMissing` or `Coalesce`. Tests: `sequence-search.test.ts`
-(the 2026-08-16 assertions change to `Missing`), the `Slice` tests of the
-`Nothing` fold. Documents: the `RangeOf` and `Slice` descriptions in
-`library/collections.ts` (the generated reference follows), `docs/ERROR-MODEL.md`
-(the exception is gone), the user-facing collections reference under
-`~/dev/cortexjs.io/docs/compute-engine/`, a CHANGELOG entry under "Behavior
-Changes" with the old and the new value. Compiled code: check what the
-JavaScript lowering of `Slice` and `RangeOf` gives for the failed search
-today (a decline, or `undefined`) and keep it within the caveats (the absent
-value at a producer; `Missing` is read only by a discharge or an accessor).
-The other options, not chosen: keep the handler as a documented exception;
-remove it and let a failed search inside a `Slice` be an error.
+1. The absent value of the element domain: `NaN` here (a number), `Missing`
+   for `Find(["a"], x ↦ x == "b")`; typed `integer | nan` and `missing |
+   string`. As `At([1, 2], 5)` is `NaN`. Recommended.
+2. `Missing` for every element type, typed `integer | missing`.
+3. Keep `Nothing` and document `Find` as an exception to the error model.
+
+Without a decision, `Find` keeps `Nothing` (option 3, undocumented).
 
 ### CE-797. An implicitly compiled Map reuses a captured parameter from an earlier call
 

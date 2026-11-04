@@ -137,7 +137,7 @@ describe('sequence search over lists of lists', () => {
     expect(got).toEqual([2, 3]);
     expect(ev('RangeOf', subject, needle).toString()).toBe('[2,3]');
     expect(r.run!({ xss: subject, zss: [[9]] } as never)).toBeUndefined();
-    expect(ev('RangeOf', subject, [[9]]).json).toBe('Nothing');
+    expect(ev('RangeOf', subject, [[9]]).json).toBe('Missing');
   });
 });
 

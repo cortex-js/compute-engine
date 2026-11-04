@@ -65,6 +65,16 @@
 
 ### Behavior Changes
 
+- **A sequence search that finds nothing gives `Missing`, not `Nothing`.**
+  `RangeOf([1, 2, 3], [9])` is `Missing` (it was `Nothing`), and `RangeOf`
+  is typed `range | missing`. `Slice(xs, RangeOf(xs, needle))` is still
+  absent when the needle does not occur: it is `Missing`, as every operator
+  over `Missing` is, and `Coalesce(Slice(xs, RangeOf(xs, needle)), [])`
+  gives `[]`. `Slice` gives `Missing` for a `Missing` operand in any
+  position (`Slice(Missing, 2, 3)` was an `incompatible-type` error), and
+  `Slice([1, 2, 3], Nothing)` is now an `incompatible-type` error (it was
+  `Nothing`). Test a failed search with `IsMissing` or `Coalesce` (`??` in
+  Epsil), not with a comparison to `Nothing`.
 - **Compilation: a parameter default that names a constant declared by the
   host compiles.** With `ce.declare('W0', { isConstant: true, value: 5 })`
   and `f := (k = W0) ↦ k + 1`, the compiled `f()` is `f(5)` and gives 6, as
