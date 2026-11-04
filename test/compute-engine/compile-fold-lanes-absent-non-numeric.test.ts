@@ -60,10 +60,26 @@ const ROWS = [
   [c(0, 1), 3],
 ];
 
+/** Expect the compilation of `expr` with `L` declared `type` to decline
+ * with `unsettled-shape`: the type does not settle the shape of the
+ * elements of a fold (ROADMAP CE-805). */
+function declines(type: string, expr: unknown, mode?: 'complex'): void {
+  const ce = new ComputeEngine();
+  ce.declare('L', type);
+  const r = compile(ce.box(expr as any), {
+    to: 'javascript',
+    ...(mode ? { mode } : {}),
+  } as any);
+  expect(r.success).toBe(false);
+  expect(r.diagnostic?.code).toBe('unsettled-shape');
+}
+
 describe('A PARENT OF A FOLD OVER ELEMENTS OF UNKNOWN TYPE (CE-380)', () => {
-  // In the complex mode, the fold uses `_SYS.sadd`/`_SYS.smul`, which give a
-  // complex entry where an element is complex; the parent reads its entries
-  // with the same helpers, never with the JavaScript `+`.
+  // A fold over `list<unknown>` declines: an element can be a number or a
+  // list (ROADMAP CE-805). With rows declared `list<list<number>>`, in the
+  // complex mode, the fold gives a complex entry where an element is
+  // complex; the parent reads its entries with the complex helpers, never
+  // with the JavaScript `+`.
   test.each([
     ['Sum + 1', ['Add', ['Sum', 'L'], 1], [c(2, 1), 6], '[(2 + i),6]'],
     [
@@ -94,7 +110,10 @@ describe('A PARENT OF A FOLD OVER ELEMENTS OF UNKNOWN TYPE (CE-380)', () => {
       '[[2,3],[(2 + i),6]]',
     ],
   ])('%s over list<unknown>', (_, expr, compiled, evaluated) => {
-    expect(run('list<unknown>', expr, ROWS, 'complex')).toEqual(compiled);
+    declines('list<unknown>', expr, 'complex');
+    expect(run('list<list<number>>', expr, ROWS, 'complex')).toEqual(
+      compiled
+    );
     expect(evaluate('list<unknown>', expr, ROWS)).toBe(evaluated);
   });
 
@@ -104,7 +123,8 @@ describe('A PARENT OF A FOLD OVER ELEMENTS OF UNKNOWN TYPE (CE-380)', () => {
       [1, 2],
       [3, 4],
     ];
-    expect(run('list<unknown>', expr, value)).toEqual([5, 7]);
+    declines('list<unknown>', expr);
+    expect(run('list<list<real>>', expr, value)).toEqual([5, 7]);
     expect(evaluate('list<unknown>', expr, value)).toBe('[5,7]');
   });
 
@@ -143,10 +163,12 @@ describe('A PARENT OF A FOLD OVER ELEMENTS OF UNKNOWN TYPE (CE-380)', () => {
   });
 
   test('a fold of rows in the complex mode', () => {
-    for (const type of ['list<list<number>>', 'list<unknown>'])
-      expect(
-        run(type, ['Add', ['Reduce', 'L', 'Add', 0], 1], ROWS, 'complex')
-      ).toEqual([c(2, 1), 6]);
+    const expr = ['Add', ['Reduce', 'L', 'Add', 0], 1];
+    expect(run('list<list<number>>', expr, ROWS, 'complex')).toEqual([
+      c(2, 1),
+      6,
+    ]);
+    declines('list<unknown>', expr, 'complex');
   });
 });
 

@@ -278,15 +278,23 @@ where the interpreter has a value, but it never gives a different value. "A
 value with no settled shape declines", under "Fail closed", gives the
 details. A fold of the elements of a collection (a `Sum` or a `Product` of
 one collection, a `Reduce` or a `Scan` by `Add` or `Multiply`) declines in
-the same way when the element type is `any`: such an element can be a
-number or a list, and the interpreter adds two lists element by element.
-With `w: collection<any>`, `Sum(w)` declines, and `unsupported` is `["w"]`
-(`assertSettledFoldElements()`, `compilation/compile-admission.ts`). The
-same fold over elements typed `unknown` or a union of a number and a list,
-or over a source typed `any`, still compiles on JavaScript to a test of the
-shape of each element at run time, which this rule does not allow. A Tycho
-document depends on it, so the user decides whether it declines (ROADMAP
-CE-805).
+the same way when the type does not settle the shape of the elements: the
+element type is `any`, `unknown`, `expression`, a `broadcastable<T>`, or a
+union of a number and a collection, or the source is typed `any`,
+`unknown` or `value`. Such a value can be a number or a list, and the interpreter adds
+two lists element by element. With
+`L: list<unknown>`, `Sum(L)` declines with `unsettled-shape`, and
+`unsupported` is `["L"]`; the interpreter gives `[4, 6]` for
+`L = [[1, 2], [3, 4]]`. The host declares the element type
+(`list<list<real>>`) to compile it (`assertSettledFoldElements()`,
+`compilation/compile-admission.ts`). When the type settles the shape of the
+elements (all numbers, or all lists and points), the fold tests no shape at
+run time: with `L: list<tuple<real, real>>`, `Sum(L)` compiles to
+`(_.L).reduce((_a, _b) => _SYS.add(_a, _b), 0)`. A source typed as a union
+of a number and a list with elements of a settled shape (a parameter
+declared `list<real> | real`, `k(x)` with a host function
+`k: (real) -> real | list<real>`) keeps one test of its own shape on
+JavaScript: a number is the fold of itself, as in the interpreter.
 
 **R4. A declared union at an input follows R2.** With
 `y: real | tuple<real, real>` and `f := t ↦ 2t`, `f(y)` compiles to

@@ -111,9 +111,36 @@ describe('CE-215.2: the complex mode compiles a possibly-list operand', () => {
     }
   });
 
-  test('Sum(Rest(p)) + 1 over tensor<number>', () => {
+  test('Sum(Rest(p)) + 1 over tensor<number> declines', () => {
+    // The elements of a tensor of unknown rank are `number | tensor<number>`:
+    // a number or a list. The shape is not settled, and the fold declines
+    // (ROADMAP CE-805).
     const ce = new ComputeEngine();
     ce.declare('p', 'tensor<number>');
+    const r = compile(ce.box(['Add', ['Sum', ['Rest', 'p']], 1]), {
+      to: 'javascript',
+      mode: 'complex',
+    } as any) as any;
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    // The interpreter gives the value that the compilation leaves to it.
+    ce.assign(
+      'p',
+      ce.box([
+        'List',
+        ['List', 1, 2],
+        ['List', 3, 4],
+        ['List', 5, 6],
+      ])
+    );
+    expect(
+      ce.box(['Add', ['Sum', ['Rest', 'p']], 1]).evaluate().json
+    ).toEqual(['List', 9, 11]);
+  });
+
+  test('Sum(Rest(p)) + 1 over matrix<number>', () => {
+    const ce = new ComputeEngine();
+    ce.declare('p', 'matrix<number>');
     const r = compile(ce.box(['Add', ['Sum', ['Rest', 'p']], 1]), {
       to: 'javascript',
       fallback: false,

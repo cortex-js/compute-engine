@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-806.
+Next free reference: CE-807.
 
 **Entry format.**
 
@@ -2078,72 +2078,41 @@ reproduction above is the record.
 
 ## Compilation
 
-### CE-805. A JavaScript fold over elements typed `unknown` tests the shape of each element at run time
+### CE-806. JavaScript code tests the shape of a value at run time in an indexed `Sum` loop, the `Max`/`Min` wrapper and the broadcast of points
 
-**Status:** ready; design, S. User decision 2026-11-04: measure first. A
-session does the settled part, then runs the corpus audit on a prototype
-of option (a) for the unsettled part and counts the records that decline;
-if none does (Tycho's reading: a document function with a body has a
-settled element type, and the unbound case declines before the fold), take
-option (a); otherwise report the record ids to Tycho (tycho-desk checks
-them against its declaration order) and take option (b) with the exception
-stated in R3. Tycho does not declare result types for document functions
-(they are scalar functions that broadcast over lists, so a narrow result
-type would be wrong for a scalar call); asked and answered 2026-11-04.
-Found by the review of step 4, row 9
-(`docs/plans/2026-11-02-compiler-contraction-plan.md`).
-**Witness:** plausible; `Sum(Rest(g(x)))` with `g` declared `function`
-and `x: list<real>` compiles on JavaScript with a run-time test when the
-element type is `unknown`. The CE test
-`tycho-row-425-index-of-broadcastable-call.test.ts` is the origin of the
-case; Tycho (tycho-desk, 2026-11-04) says that row 425 itself is `Repeat(0,
-g(x)[1])` with `x: any` (art/mavxszbvzk), not this shape, and that for a
-document function with a body the element type is settled on 0.178.0 (a
-bare `function` with no value is the one `unknown` case, and it declines
-before the fold). No corpus record is known for the `unknown` case.
-Corpus, for the settled part below: Tycho's documents sum lists of points
-(`Sum`, `Total`), and `Sum(L)` with `L: list<tuple<real, real>>` compiles
-on `9043a313d` to the dispatching combiner although the element shape is
-settled: `((_c) => Array.isArray(_c) ? _c.reduce((_a, _b) =>
-Array.isArray(_a) || Array.isArray(_b) ? _SYS.add(_a, _b) : _SYS.sadd(_a,
-_b), 0) : _c)(_.L)` (measured 2026-11-04; the same for `g := t ↦ [t, 2t]`,
-element `vector<real^2>`).
+**Status:** decision needed; design, M. Found by the corpus measure of CE-805.
+**Witness:** corpus; on Tycho `a34405ae0` (CE `30a819700`), 23 JavaScript
+records in 14 documents and 6 interval-js records in 3 documents call
+`Array.isArray` in compiled code. None is the element fold of CE-805.
 
-R3 of `docs/COMPILATION-MODEL.md` says that a value with no settled shape
-declines, and compiled code tests no type at run time. A `Sum` or a
-`Product` of one collection, and a `Reduce` or a `Scan` by `Add` or
-`Multiply`, whose element type is `unknown` or a union of a number and a
-collection (`list<real | list<real>>`), or whose source is typed `any`
-(`Sum(g(x))` with `g: (real) -> any`, `crafted`), compiles on JavaScript
-to a fold that tests each element with `Array.isArray`
-(`elementwiseFoldCombiner()` in `javascript-target.ts`). The values are
-the interpreter's: with `w = [[1, 2], [3, 4]]`, `Sum(w)` is `[4, 6]`. Step 4,
-row 9 declines the same fold when the element type is `any`
-(`assertSettledFoldElements()` in `compile-admission.ts`), because that
-case was declined before by the `Nothing` check; the cases above compiled
-before row 9 and still compile.
+R3 of `docs/COMPILATION-MODEL.md` says that compiled code tests no type
+at run time. Four other mechanisms still do:
 
-Two parts. **The settled case first** (a removal, no decision):
-`elementwiseFoldCombiner()` emits the dispatching form by default ("correct
-for any entries"), and the fold wrapper also tests whether the source is an
-array. When the element shape is settled by the static type, emit the
-settled form: the tensor combiner (`_SYS.add`/`_SYS.mul`, or the lane's
-form) for list or point elements, the scalar combiner for scalar elements,
-and no test of the source. Zero changed values and zero new declines on the
-corpus; report the count of records whose code loses the test. Tycho asks
-that the decline below never reach this case, and it does not: the shape is
-settled. **The unsettled case** (`unknown`, a union of a number and a list,
-a source typed `any` after row 9) is the question:
+- the accumulator of a `Sum` or `Product` with an index, written as a
+  loop: `_tv = _tv === null ? (Array.isArray(_t) ? _t.slice() : _t) :
+  _SYS.bcast((_a, _b) => _a + _b, _tv, _t)` (`neyret/iej4fjazoe`,
+  `frqpa78i6s`, `57muddicpe`, `gdej6ro5yn`, `fvyda0ed67`,
+  `abus1rwa9l`, `ldadtpxkd5`, `art/lkto8x8wr5`);
+- the wrapper of `Max` and `Min` over a value that can be a list:
+  `((_v) => Array.isArray(_v) ? ((_l) => _l.length === 0 ? NaN :
+  _l.reduce(…)) : _v)` (`neyret/7vqnkhdhoj`, `nvt3ntdsxn`);
+- the broadcast of points: `const _b = (_v) => Array.isArray(_v) ? _v :
+  typeof _v === "number" ? new Array(2).fill(_v) : …`
+  (`neyret/sgtdqnj2ox`, `xyrqlhvltc`, `art/khpocp8io0`), and
+  `[_tv2, _tv6].some(Array.isArray)` (`neyret/zibjmkv9h9`);
+- the source test of an interval-js fold, `((_c) => Array.isArray(_c) ?
+  … : _c)`, also for a source typed as a list
+  (`interval-javascript-target.ts`; `neyret/pqflulcixs`,
+  `ibmtbbjyzq`, `7vqnkhdhoj`).
 
-Options: (a) decline them with `unsettled-shape`, as R3 says: Tycho row 425
-then declines until the host declares the result type of `g`; about 25
-test assertions change (`compile-fold-times-matrix`,
-`multiply-matrix-product`, `tycho-row-425-index-of-broadcastable-call`,
-`compile-extremum-collection-operand`); measure the corpus first. (b) keep
-the run-time test and state it in R3 as the one exception for a fold, with
-its reason. Recommended: (b) if the corpus measure of (a) shows more records
-than row 425 that decline, else (a). With no decision, the fold keeps its
-run-time test.
+The values are the interpreter's. Proposed, as for CE-805: emit the settled
+form where the static type settles the shape (a measure, with zero changed
+values and the count of records that lose the test), then measure a
+prototype of the decline for the rest; take the decline if no record
+declines, and otherwise report the records and state the exception in R3.
+The question for the user: apply the decision rule of CE-805 to these four
+mechanisms (recommended), or keep them as they are and state them in R3 as
+exceptions. With no decision, the code stays as it is.
 
 ### CE-799. A call mapped over a list of points declines when a coordinate is a symbol with a bounded real type (Tycho row 486)
 

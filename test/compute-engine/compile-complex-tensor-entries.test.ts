@@ -9,8 +9,8 @@
  * `success: true`. The compiler now chooses the form from the lane of the
  * operand, as for the other linear-algebra helpers: the real-only
  * `_SYS.add`/`_SYS.mul`, the complex `_SYS.cadd`/`_SYS.cmul` (every entry
- * `{re, im}`), or, when the shape is known only at run time, the
- * dispatching `_SYS.addAny`/`_SYS.mulAny`.
+ * `{re, im}`), or, when the lane is not known, `_SYS.addAny`/`_SYS.mulAny`,
+ * which read each entry as a number or a complex value.
  *
  * The compiler also read a sum of REAL points as complex-valued, so a
  * parent read each coordinate as `{re, im}`; and `Product` of a list of
@@ -134,10 +134,9 @@ describe('COMPLEX ENTRIES IN COMPILED ARRAYS', () => {
     expect(evaluated).toBe('[[2,1],[4,3]]');
   });
 
-  test('Sum of complex values from a function typed unknown', () => {
-    // The element type is known only at run time.
+  test('Sum of complex rows from a host function', () => {
     const ce = new ComputeEngine();
-    ce.declare('h', '(number) -> unknown');
+    ce.declare('h', '(number) -> list<list<complex>>');
     ce.declare('t', 'number');
     const r = compile(ce.box(['Sum', ['h', 't']]), {
       fallback: false,
@@ -153,35 +152,20 @@ describe('COMPLEX ENTRIES IN COMPILED ARRAYS', () => {
     expect(r.run!({ t: 1 })).toEqual([c(4, 2), 6]);
   });
 
-  test('An absent element of a fold from a function typed unknown is NaN', () => {
-    // The dispatching helpers read an absent element (`undefined`, `null`)
-    // as a complex value and threw, and `Product` dropped an absent scalar
-    // factor: `Product` of `[[2, 3], undefined]` was `[2, 3]`. The
-    // interpreter gives `[Missing, Missing]` for an absent operand of `Add`
-    // or `Multiply`, and compiled code may give `NaN` where the interpreter
-    // gives `Missing` (the caveats of compiled code).
+  test('A fold over a function typed unknown declines', () => {
+    // The result of `h` can be a number or a list, and compiled code does
+    // not test the shape of a value at run time: the compilation declines
+    // with `unsettled-shape` (ROADMAP CE-805). The interpreter gives
+    // `[Missing, Missing]` for an absent operand of `Add` or `Multiply`.
     for (const op of ['Sum', 'Product']) {
-      for (const value of [
-        '[[2, 3], undefined]',
-        '[[2, 3], null]',
-        '[undefined, [2, 3]]',
-        '[[{ re: 1, im: 1 }, 3], undefined]',
-      ]) {
-        const ce = new ComputeEngine();
-        ce.declare('h', '(number) -> unknown');
-        ce.declare('t', 'number');
-        const r = compile(ce.box([op, ['h', 't']]), {
-          fallback: false,
-          functions: { h: new Function(`return ${value}`) },
-        } as any);
-        // A complex entry times `NaN` is a complex value with `NaN` parts.
-        const out = r.run!({ t: 1 }) as unknown[];
-        expect(out).toHaveLength(2);
-        for (const v of out)
-          expect(
-            typeof v === 'number' ? v : (v as C).re + (v as C).im
-          ).toBeNaN();
-      }
+      const ce = new ComputeEngine();
+      ce.declare('h', '(number) -> unknown');
+      ce.declare('t', 'number');
+      const r = compile(ce.box([op, ['h', 't']]), {
+        functions: { h: () => [[2, 3], undefined] },
+      } as any);
+      expect(r.success).toBe(false);
+      expect(r.diagnostic?.code).toBe('unsettled-shape');
     }
     expect(
       new ComputeEngine()
@@ -449,29 +433,27 @@ describe('FOLDS WHOSE SHAPE THE TYPE DID NOT GIVE', () => {
   });
 
   test('Sum and Product of elements that are numbers or lists', () => {
-    // The scalar fold read two list elements as numbers and gave NaN.
+    // An element typed `broadcastable<real>` can be a number or a list, and
+    // compiled code does not test the shape of a value at run time: the
+    // compilation declines with `unsettled-shape` (ROADMAP CE-805), and the
+    // interpreter gives the value. Before, the scalar fold read two list
+    // elements as numbers and gave NaN.
     const type = 'list<broadcastable<real>>';
-    expect(
-      run(
-        type,
-        ['Sum', 'P'],
-        [
-          [1, 2],
-          [3, 4],
-        ]
-      )
-    ).toEqual([4, 6]);
-    expect(run(type, ['Sum', 'P'], [1, 2])).toBe(3);
-    expect(
-      run(
-        type,
-        ['Product', 'P'],
-        [
-          [1, 2],
-          [3, 4],
-        ]
-      )
-    ).toEqual([3, 8]);
+    for (const [op, value, expected] of [
+      ['Sum', [[1, 2], [3, 4]], '[4,6]'],
+      ['Sum', [1, 2], '3'],
+      ['Product', [[1, 2], [3, 4]], '[3,8]'],
+    ] as const) {
+      const ce = new ComputeEngine();
+      ce.declare('P', type);
+      const r = compile(ce.box([op, 'P'] as any));
+      expect(r.success).toBe(false);
+      expect(r.diagnostic?.code).toBe('unsettled-shape');
+      const toJson = (v: unknown): unknown =>
+        Array.isArray(v) ? ['List', ...v.map(toJson)] : v;
+      ce.assign('P', ce.box(toJson(value) as any));
+      expect(ce.box([op, 'P'] as any).evaluate().toString()).toBe(expected);
+    }
     const ce = new ComputeEngine();
     ce.declare('P', type);
     expect(ce.box(['Sum', 'P']).type.toString()).toBe('broadcastable<real>');

@@ -63,11 +63,43 @@ function both(
   };
 }
 
+/** Compile `expr` with the default fallback, and evaluate it with the
+ * interpreter. A fold over elements typed `unknown` has no settled shape:
+ * the compilation declines with `unsettled-shape`, and the interpreter
+ * gives the value (ROADMAP CE-805). */
+function declined(
+  type: string,
+  expr: unknown,
+  value: unknown,
+  mode?: 'complex'
+) {
+  const ce = new ComputeEngine();
+  ce.declare('L', type);
+  ce.declare('M', 'matrix<number>');
+  const r = compile(ce.box(expr as any), {
+    to: 'javascript',
+    ...(mode ? { mode } : {}),
+  } as any);
+  expect(r.success).toBe(false);
+  expect(r.diagnostic?.code).toBe('unsettled-shape');
+  ce.assign('L', ce.box(toJson(value) as any));
+  ce.assign('M', ce.box(toJson(M) as any));
+  return ce
+    .box(expr as any)
+    .evaluate()
+    .toString();
+}
+
 describe('THE PRODUCT OF A FOLD AND A MATRIX (CE-388)', () => {
+  test('list<unknown>: Sum(L) · M declines, and the interpreter gives the matrix product', () => {
+    expect(
+      declined('list<unknown>', ['Multiply', ['Sum', 'L'], 'M'], MATRICES)
+    ).toBe('[[2,2],[5,3]]');
+  });
+
   test.each([
     ['list<matrix<number>>', ['Multiply', ['Sum', 'L'], 'M']],
     ['list<tensor<number>>', ['Multiply', ['Sum', 'L'], 'M']],
-    ['list<unknown>', ['Multiply', ['Sum', 'L'], 'M']],
   ])('%s: %j is the matrix product', (type, expr) => {
     const r = both(type, expr, MATRICES);
     expect(r.compiled).toEqual([
@@ -120,9 +152,19 @@ describe('THE PRODUCT OF A FOLD AND A MATRIX (CE-388)', () => {
     expect(r.evaluated).toBe('[6,4]');
   });
 
-  test('Sum(L) · Sum(L) over list<unknown>', () => {
+  test('Sum(L) · Sum(L) over list<unknown> declines', () => {
+    expect(
+      declined(
+        'list<unknown>',
+        ['Multiply', ['Sum', 'L'], ['Sum', 'L']],
+        MATRICES
+      )
+    ).toBe('[[10,14],[21,31]]');
+  });
+
+  test('Sum(L) · Sum(L) over list<matrix<number>>', () => {
     const r = both(
-      'list<unknown>',
+      'list<matrix<number>>',
       ['Multiply', ['Sum', 'L'], ['Sum', 'L']],
       MATRICES
     );
@@ -170,9 +212,20 @@ describe('THE PRODUCT OF A FOLD AND A MATRIX (CE-388)', () => {
     expect(r.run!({ L: MATRICES, M } as never)).toBe(2);
   });
 
-  test('complex numbers in a list of unknown type', () => {
+  test('complex numbers in a list of unknown type decline', () => {
+    expect(
+      declined(
+        'list<unknown>',
+        ['Add', ['Multiply', ['Sum', 'L'], ['Sum', 'L']], 1],
+        [c(1, 1), 2],
+        'complex'
+      )
+    ).toBe('(9 + 6i)');
+  });
+
+  test('complex numbers in a list of complex numbers', () => {
     const r = both(
-      'list<unknown>',
+      'list<complex>',
       ['Add', ['Multiply', ['Sum', 'L'], ['Sum', 'L']], 1],
       [c(1, 1), 2],
       'complex'

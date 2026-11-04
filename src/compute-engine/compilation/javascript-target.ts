@@ -564,7 +564,10 @@ import {
 } from './base-compiler.js';
 import { isDeclaredTopOperand } from './compiler-type-facts.js';
 import { assertBooleanOrAbsentCondition } from './compile-conditions.js';
-import { assertNoDeclaredTopOperands } from './compile-admission.js';
+import {
+  assertNoDeclaredTopOperands,
+  refuseUntypedTopOperands,
+} from './compile-admission.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { kindEntryCheck } from './kind-lowering.js';
 import { withShadowingCallsRenamed } from './shadowing-calls.js';
@@ -12728,11 +12731,13 @@ function compileSumProduct(
     // canonicalize to. Reduce over the elements. A statically indexed
     // collection lowers to a bare `.reduce`; a possibly-collection operand (a
     // `broadcastable<T>` node or a top-typed application such as `h(x)`, e.g. a
-    // Tycho document helper typed `(number) -> unknown`, or an operand whose
-    // static type is a scalar-or-collection UNION such as the `Which` returning
-    // a 2-element list or `-1`, Tycho item 249) may be a scalar OR an array at
-    // run time, so it reduces under an `Array.isArray` guard (a runtime scalar
-    // returns itself, matching the interpreter's `Sum(scalar) = scalar`).
+    // Tycho document helper typed `(number) -> unknown`) may be a scalar OR an
+    // array at run time. Compiled code does not test the shape of a value at
+    // run time, so such an operand declines with the code `unsettled-shape`
+    // (`assertSettledFoldElements()` in `compile-admission.ts`). An operand
+    // whose static type is a union of a number and a list with elements of a
+    // settled shape (`k(x)` with `k: (real) -> real | list<real>`) keeps one
+    // test of its own shape (`emitCollectionReduce()`).
     // A dictionary/string/statically-scalar operand fails closed, matching
     // `Length`/`At`/`Reduce`. An operand that may be text at run time
     // (`string | list<number>`) fails closed too: it is an indexed collection
@@ -12802,10 +12807,9 @@ function compileSumProduct(
         );
       // An element typed `broadcastable<T>` is a number or a list at run
       // time. The scalar fold read two list elements as numbers and gave
-      // `NaN`, where the interpreter adds them element-wise: the guarded fold
-      // dispatches on each element (`foldLane` is `wide` here). The type of
-      // the fold is `broadcastable<T>` (`shapedSumType`), so a parent
-      // dispatches on the run-time shape too.
+      // `NaN`, where the interpreter adds them element-wise. The admission
+      // of the fold (`assertSettledFoldElements()`) declines it before this
+      // handler runs; the guarded fold declines it too if it does not.
       if (
         element !== undefined &&
         typeof element !== 'string' &&
@@ -12814,8 +12818,9 @@ function compileSumProduct(
         return emitCollectionReduce(kind, args[0], target, true);
       // An element typed `unknown` or `any` (the elements of
       // `L: list<unknown>`, `list<any>` or a bare `list`) may be a list at run
-      // time, and takes the guarded fold too. The scalar fold gave `null` for
-      // `L = [[1, 2], [3, 4]]`, where the interpreter answers `[4, 6]`.
+      // time, and takes the guarded fold too, which declines it. The scalar
+      // fold gave `null` for `L = [[1, 2], [3, 4]]`, where the interpreter
+      // answers `[4, 6]`.
       if (element === 'unknown' || element === 'any')
         return emitCollectionReduce(kind, args[0], target, true);
       return emitCollectionReduce(kind, args[0], target, false);
@@ -12829,20 +12834,21 @@ function compileSumProduct(
     // or a list, and the interpreter folds a list: `Sum(x)` with
     // `x = [1, 2, 3]` is 6, and with `x = [[1, 2], [3, 4]]` it is `[4, 6]`.
     // Compiled code does not test the shape of a value at run time, so the
-    // compilation declines. An input declared `any` with no value is not
-    // declined here: the admission of the root refuses it after the code is
-    // generated (`assertAdmitted()`), so the fold below is never run.
+    // compilation declines. An input declared `any` with no value declines
+    // with the code `untyped-input`, as the admission of the root refuses
+    // it (`refuseUntypedTopOperands()`).
     if (isDeclaredTopOperand(args[0])) {
       assertNoDeclaredTopOperands(kind, [args[0]], target);
       refuseNonNumericScalarProjection(kind, args[0]);
-      return emitCollectionReduce(kind, args[0], target, true);
+      refuseUntypedTopOperands(args[0]);
+      throw unsettledShapeDecline(args[0], 'it can be a number or a list');
     }
     // A symbol typed as an abstract collection (declared or inferred): adding
     // or multiplying the elements needs no positions or order, so it is read
     // through `_SYS.elts`, which accepts an array or a JavaScript `Set` at run
-    // time (`iterableCollectionCode`). The element type is not known to be
-    // scalar, so the elements combine with `elementwiseFoldCombiner`, as in
-    // the guarded fold of `emitCollectionReduce`.
+    // time (`iterableCollectionCode`). The elements combine with
+    // `elementwiseFoldCombiner`, as in the guarded fold of
+    // `emitCollectionReduce`, by the shape their type settles.
     const elements = iterableCollectionCode(kind, args[0], (e) =>
       BaseCompiler.compile(e, target)
     );
@@ -12851,7 +12857,8 @@ function compileSumProduct(
       const reduce = `(${elements}).reduce(${elementwiseFoldCombiner(
         kind,
         mixedFoldLane(args[0]),
-        kind === 'Sum' && elementsMayDifferInShape(args[0])
+        kind === 'Sum' && elementsMayDifferInShape(args[0]),
+        settledFoldElementShape(args[0])
       )}, ${kind === 'Sum' ? '0' : '1'})`;
       // A parent reads the fold as a complex value `{re, im}` when
       // `isComplexValued` says so (`collection<complex>`), but the fold
@@ -14790,10 +14797,12 @@ function nestedElementCombiner(
   // which the combiner would read as a matrix: such an arm is declined.
   // An arm whose shape the type does not state (`unknown`, or a list of
   // `unknown`: the elements of `Rest(g(x))` for `g := t ↦ [t, 2t]` and
-  // `x: any`) is folded by an `Add` fold as the compiled `Sum` folds it:
-  // with the dispatching combiner, which adds entry by entry and checks the
-  // shapes when it runs. A `Multiply` fold takes any list whose cells are
-  // numbers (or typed `unknown` or `any`), at any depth and of any shape:
+  // `x: any`) is folded by an `Add` fold as the compiled `Sum` folds it: a
+  // list of `unknown` with the tensor combiner, which adds entry by entry
+  // and checks the shapes when it runs. An element of type `unknown` is
+  // declined by the admission of the fold (`assertSettledFoldElements()`).
+  // A `Multiply` fold takes any list whose cells are numbers (or typed
+  // `unknown` or `any`), at any depth and of any shape:
   // each step is the run-time product (`_SYS.mulTensor`), which multiplies
   // two values as the interpreter does (the matrix product for a matrix,
   // the product of each pair of elements for a list whose rows have
@@ -14841,21 +14850,17 @@ function nestedElementCombiner(
     op.symbol === 'Add' &&
     (elementsMayDifferInShape(coll, true) ||
       arms.some((arm) => shapeUnknown(arm)));
-  // Elements that may be numbers or lists (`number | vector<2>`): every
-  // element is a number, or every element is a list, so an `Add` or
-  // `Multiply` fold combines with the dispatching element-wise combiner,
-  // which adds two numbers as numbers and two lists element by element.
-  // Another fold has no compiled form for them. Elements whose cells are
-  // complex (`complex | matrix<complex>`) take the complex helpers, which
-  // multiply two matrices with complex entries; the dispatching form reads
-  // them as real.
-  // A complex seed (`Reduce(p, Multiply, ImaginaryUnit)`) makes the
-  // accumulator complex from the first step, so it also takes the complex
-  // helpers, as for the definite collections below.
-  // Elements typed `unknown` or `any` (`Reduce(L, Add, 0)` with
-  // `L: list<unknown>`) may be lists too, and an `Add` fold over them takes
-  // the dispatching combiner. The scalar combiner joined two arrays as a
-  // string: `"01,23,4"` for `L = [[1, 2], [3, 4]]`.
+  // Elements that may be numbers or lists (`number | vector<2>`), or that
+  // are typed `unknown` or `any` (`Reduce(L, Add, 0)` with
+  // `L: list<unknown>`), have no settled shape: an `Add` or `Multiply` fold
+  // over them is declined by the admission of the fold
+  // (`assertSettledFoldElements()`), and another fold has no compiled form
+  // for them. The scalar combiner joined two arrays as a
+  // string: `"01,23,4"` for `L = [[1, 2], [3, 4]]`. Elements that are lists
+  // of `unknown` cells are arrays: they take the tensor combiner, with the
+  // complex helpers when the cells of the collection are complex or the
+  // seed is complex (`Reduce(p, Multiply, ImaginaryUnit)` makes the
+  // accumulator complex from the first step).
   if (mayBeCollectionType(elt) || shapeUnknown(elt)) {
     if (
       (op.symbol === 'Add' || op.symbol === 'Multiply') &&
@@ -14870,7 +14875,8 @@ function nestedElementCombiner(
         foldLane(coll) === 'complex' || seedLane === 'complex'
           ? 'complex'
           : 'wide',
-        checkShapes
+        checkShapes,
+        settledFoldElementShape(coll)
       );
     }
     // The message names the arm that has no compiled fold (`missing` in
@@ -14914,10 +14920,14 @@ function nestedElementCombiner(
       const seedLane = BaseCompiler.linearAlgebraOperandLane(init);
       if (seedLane !== 'real') lane = seedLane;
     }
+    // Every element is a list, so the combiner tests no shape at run time
+    // (`elementwiseFoldCombiner`). The seed, when it is a number, goes to
+    // the tensor helper as its first operand.
+    const elements = settledFoldElementShape(coll);
     if (op.symbol === 'Add')
-      return elementwiseFoldCombiner('Sum', lane, checkShapes);
+      return elementwiseFoldCombiner('Sum', lane, checkShapes, elements);
     if (op.symbol === 'Multiply')
-      return elementwiseFoldCombiner('Product', lane, checkShapes);
+      return elementwiseFoldCombiner('Product', lane, checkShapes, elements);
   }
   throw new Error(
     `Could not compile \`${operator}\`: a \`${op.symbol}\` fold over elements of type ` +
@@ -16722,14 +16732,13 @@ function emitCollectionReduce(
     const combiner = kind === 'Sum' ? '_SYS.sadd' : '_SYS.smul';
     return `_SYS.cplx((${code}).reduce(${combiner}, ${identity}))`;
   }
-  // A possibly-collection operand (`broadcastable<T>` / top-typed application)
-  // may be a scalar OR an array whose elements are themselves vectors/matrices
-  // at run time. Fold with the element-wise-aware combiner so a nested result
-  // matches the interpreter (`Add` broadcasts element-wise → `_SYS.add`;
-  // `Multiply` dispatches on rank → `_SYS.mul`, Hadamard for vectors and matrix
-  // product for matrices) rather than string-concatenating arrays under a bare
-  // `+`. Guard the scalar case so a runtime scalar returns itself (interpreter's
-  // `Sum(scalar) = scalar`).
+  // Elements that are collections (points, rows, matrices): elements that
+  // are arrays fold with the element-wise combiner, so a nested result matches the interpreter
+  // (`Add` adds element-wise → `_SYS.add`; `Multiply` → `_SYS.mul`, Hadamard
+  // for vectors and matrix product for matrices) rather than
+  // string-concatenating arrays under a bare `+`. The combiner tests no
+  // shape: the type settles the shape of the elements
+  // (`settledFoldElementShape`), or the compilation declines.
   const identity = kind === 'Sum' ? '0' : '1';
   // An operand that may be absent as a whole (`list<number | vector<2>> |
   // missing`) is `undefined` when absent, and the interpreter's sum or
@@ -16740,11 +16749,38 @@ function emitCollectionReduce(
   // Elements of several list shapes: a sum checks the shapes when it runs.
   // A product leaves them to the run-time product, which multiplies a
   // matrix and a row as the interpreter does.
-  const fold = `((_c) => Array.isArray(_c) ? _c.reduce(${elementwiseFoldCombiner(
+  const combiner = elementwiseFoldCombiner(
     kind,
     mixedFoldLane(coll),
-    kind === 'Sum' && elementsMayDifferInShape(coll, true)
-  )}, ${identity}) : ${otherwise})(${code})`;
+    kind === 'Sum' && elementsMayDifferInShape(coll, true),
+    settledFoldElementShape(coll)
+  );
+  const reduce = (source: string): string =>
+    `${source}.reduce(${combiner}, ${identity})`;
+  // A source whose static type is a list (`isSettledListSource`) is an
+  // array when it is present, so the fold tests no shape of the source. It
+  // tests only for an absent source when the type has a `missing` arm. An
+  // absent value whose type has no `missing` arm (`At(W, i)` with
+  // `W: list<list<real>>` and an index out of range, which the interpreter
+  // answers with `Missing`) makes the fold throw: the caveats of compiled
+  // code allow a throw where the interpreter gives `Missing`.
+  // A source whose static type is a union of a number and a list
+  // (`isNumberOrListSource`: a parameter declared `list<real> | real`, a
+  // host function typed `(real) -> real | list<real>`) keeps a test of its
+  // own shape: a number is the fold of itself, as in the interpreter
+  // (`Sum(4)` is 4). Any other source declines: its type does not settle
+  // its shape. The admission of a fold (`assertSettledFoldElements()` in
+  // `compile-admission.ts`) declines such a source before the fold is
+  // compiled.
+  let fold: string;
+  if (isSettledListSource(coll))
+    fold =
+      otherwise === '_c'
+        ? reduce(`(${code})`)
+        : `((_c) => _c === undefined ? NaN : ${reduce('_c')})(${code})`;
+  else if (isNumberOrListSource(coll))
+    fold = `((_c) => Array.isArray(_c) ? ${reduce('_c')} : ${otherwise})(${code})`;
+  else throw unsettledShapeDecline(coll, 'it can be a number or a list');
   // When a parent reads the fold as a complex value (`isComplexValued`: an
   // operand typed `broadcastable<complex>`), the fold must give one: a sum
   // of real elements, or the identity of an empty list, is a plain number.
@@ -16973,31 +17009,32 @@ function foldLane(coll: Expression): 'real' | 'complex' | 'wide' {
 }
 
 /**
- * The combiner of a `Sum`/`Product` fold whose elements may be numbers,
- * complex values `{re, im}`, or arrays (points, rows, matrices). Two arrays
- * combine element-wise (`Sum`) or by the tensor product (`Product`), with
- * the form of the helper chosen by the lane (`foldLane`): the real-only
- * `_SYS.add`/`_SYS.mul` for a real lane, the complex `_SYS.cadd`/`_SYS.cmul`
- * (every entry `{re, im}`) for a complex lane, and the dispatching
- * `_SYS.addAny`/`_SYS.mulAny` otherwise. The choice is made when the code
- * is compiled, as for the other linear-algebra helpers. Two values that are
- * not arrays combine with `_SYS.sadd`/`_SYS.smul`, which add and multiply a
- * complex value as complex: the sum of `[1+2i, 3+4i]` was the string
- * `"0[object Object][object Object]"`.
+ * The combiner of a `Sum`/`Product` fold. Elements that are numbers combine
+ * with `_SYS.sadd`/`_SYS.smul`, which add and multiply a complex value
+ * `{re, im}` as complex: with the raw `+`, the sum of `[1+2i, 3+4i]` was the
+ * string `"0[object Object][object Object]"`. Elements that are arrays
+ * (points, rows, matrices) combine element-wise (`Sum`) or by the tensor
+ * product (`Product`), with the form of the helper chosen by the lane
+ * (`foldLane`): the real-only `_SYS.add`/`_SYS.mul` for a real lane, the
+ * complex `_SYS.cadd`/`_SYS.cmul` (every entry `{re, im}`) for a complex
+ * lane, and `_SYS.addAny`/`_SYS.mulAny`, which read each entry as a number
+ * or a complex value, otherwise. The tensor helper also takes the number
+ * seed of the fold (`0` or `1`) as its first operand, and gives the other
+ * operand back unchanged.
  */
 function elementwiseFoldCombiner(
   kind: 'Sum' | 'Product',
-  // The dispatching form is the default: it is correct for any entries, and
-  // a caller that knows the operand passes `foldLane(coll)` for the faster
-  // real-only form.
-  lane: 'real' | 'complex' | 'wide' = 'wide',
+  lane: 'real' | 'complex' | 'wide',
   // The elements may be lists of several shapes (`matrix<2x2> | vector<2>`,
   // `hasSeveralListArms`): two lists whose shapes do not nest (rows of
   // different lengths) are an `incompatible-dimensions` error in the
   // interpreter, so the combiner throws for them (`_SYS.requireSameShape`)
   // instead of pairing the rows. Shapes that nest add element by element
   // along the first axes, as in the interpreter (ROADMAP CE-399).
-  checkShapes = false
+  checkShapes: boolean,
+  // The shape of the elements that their static type settles
+  // (`settledFoldElementShape`). The combiner tests no shape at run time.
+  elements: 'scalar' | 'array'
 ): string {
   const tensor =
     kind === 'Sum'
@@ -17005,7 +17042,119 @@ function elementwiseFoldCombiner(
       : { real: '_SYS.mul', complex: '_SYS.cmul', wide: '_SYS.mulAny' }[lane];
   const scalar = kind === 'Sum' ? '_SYS.sadd' : '_SYS.smul';
   const operands = checkShapes ? '(_SYS.requireSameShape(_a, _b), _b)' : '_b';
-  return `(_a, _b) => Array.isArray(_a) || Array.isArray(_b) ? ${tensor}(_a, ${operands}) : ${scalar}(_a, _b)`;
+  if (elements === 'scalar') return `(_a, _b) => ${scalar}(_a, _b)`;
+  return `(_a, _b) => ${tensor}(_a, ${operands})`;
+}
+
+/**
+ * The shape of every element of the collection `coll` when its static type
+ * settles it: `'scalar'` when each element is a number, `'array'` when each
+ * element is a list, a tensor or a point (a tuple), which compiled code
+ * holds as an array. A tensor of unknown rank is an array too: a number is
+ * not a `tensor<T>`. A source that is a union (`collection<real> | real`) is
+ * read member by member: a number member is not a collection, and its
+ * value is the fold of itself.
+ *
+ * When the type does not settle one shape, the compilation declines with
+ * the code `'unsettled-shape'`: an element typed `unknown`, `any` or
+ * `expression`, a union of a number and a list (`real | list<real>`), an
+ * element that may be absent (`missing | vector<2>`), or a source typed
+ * `unknown`. Compiled code does not test the shape of an element at run
+ * time. The admission of a fold (`assertSettledFoldElements()` in
+ * `compile-admission.ts`) declines most of these cases before the fold is
+ * compiled.
+ */
+function settledFoldElementShape(coll: Expression): 'scalar' | 'array' {
+  const shape = settledFoldElementShapeOf(coll);
+  if (shape !== undefined) return shape;
+  throw unsettledShapeDecline(
+    coll,
+    'the type does not settle the shape of the elements'
+  );
+}
+
+/**
+ * The shape that `settledFoldElementShape()` gives, or `undefined` when the
+ * type of `coll` does not settle one shape.
+ */
+function settledFoldElementShapeOf(
+  coll: Expression
+): 'scalar' | 'array' | undefined {
+  const source = resolveTypeForCompilation(stripMissingFromType(jsType(coll)));
+  const members =
+    typeof source !== 'string' && source.kind === 'union'
+      ? source.types.filter(
+          (m) => !isSubtype(resolveTypeForCompilation(m), 'number')
+        )
+      : [source];
+  const isArray = (arm: Type): boolean => {
+    const a = resolveTypeForCompilation(arm);
+    if (a === 'never' || isSubtype(a, 'string')) return false;
+    return (
+      (typeof a !== 'string' && (a.kind === 'list' || a.kind === 'tuple')) ||
+      isSubtype(a, 'indexed_collection<any>')
+    );
+  };
+  let shape: 'scalar' | 'array' | undefined;
+  for (const member of members) {
+    const elt = collectionElementType(resolveTypeForCompilation(member));
+    const r = elt === undefined ? undefined : resolveTypeForCompilation(elt);
+    if (r === undefined || r === 'never') return undefined;
+    let s: 'scalar' | 'array' | undefined;
+    if (isSubtype(r, 'number')) s = 'scalar';
+    else {
+      const arms = typeof r !== 'string' && r.kind === 'union' ? r.types : [r];
+      if (arms.every(isArray)) s = 'array';
+    }
+    if (s === undefined || (shape !== undefined && s !== shape))
+      return undefined;
+    shape = s;
+  }
+  return shape;
+}
+
+/**
+ * True when the value of `coll`, when it is present, is an indexed
+ * collection other than a string: its static type without the `missing` arm
+ * is a list type (a `list<T>`, a vector, a matrix or a tensor), a tuple, or
+ * an `indexed_collection<T>`, which compiled code holds as an array. A fold
+ * over such a source tests no shape at run time. False for a union of a
+ * number and a list, a `broadcastable<T>`, an abstract collection, and a
+ * type `unknown` or `any`.
+ */
+function isSettledListSource(coll: Expression): boolean {
+  const t = resolveTypeForCompilation(stripMissingFromType(jsType(coll)));
+  return (
+    t !== 'never' &&
+    !isSubtype(t, 'string') &&
+    isSubtype(t, 'indexed_collection<any>')
+  );
+}
+
+/**
+ * True when the static type of `coll`, without the `missing` arm, is a union
+ * of numbers and lists (`real | list<real>`, `real | tuple<real, real>`),
+ * with at least one of each: its value is a number or an array. A union
+ * with any other member (`unknown`, a set, a string) is false.
+ */
+function isNumberOrListSource(coll: Expression): boolean {
+  const t = resolveTypeForCompilation(stripMissingFromType(jsType(coll)));
+  if (typeof t === 'string' || t.kind !== 'union') return false;
+  const isNumber = (m: Type): boolean =>
+    isSubtype(resolveTypeForCompilation(m), 'number');
+  const isList = (m: Type): boolean => {
+    const r = resolveTypeForCompilation(m);
+    return (
+      r !== 'never' &&
+      !isSubtype(r, 'string') &&
+      isSubtype(r, 'indexed_collection<any>')
+    );
+  };
+  return (
+    t.types.every((m) => isNumber(m) || isList(m)) &&
+    t.types.some(isNumber) &&
+    t.types.some(isList)
+  );
 }
 
 /**

@@ -1311,13 +1311,17 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
         expect(expr.evaluate().toString()).toBe('[2,4]');
       });
 
-      test('with a call and a callback use it compiles', () => {
+      test('with a call and a callback use, the sum of the map declines', () => {
+        // The elements of `Map(g, L)` are of unknown type (the parameter of
+        // `g` is declared `expression`): the shape is not settled, and the
+        // `Sum` declines (ROADMAP CE-805). The fallback gives the value.
         const { result, value } = run([
           'Block',
           G,
           ['Add', ['Sum', ['Map', 'g', 'L']], ['g', 3]],
         ]);
-        expect(result.success).toBe(true);
+        expect(result.success).toBe(false);
+        expect(result.diagnostic?.code).toBe('unsettled-shape');
         expect(value).toBe(12);
       });
 

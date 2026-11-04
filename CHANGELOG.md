@@ -68,6 +68,20 @@
 
 ### Behavior Changes
 
+- **Compilation to JavaScript: a fold over elements whose shape the type
+  does not settle declines.** A `Sum` or a `Product` of one collection, and
+  a `Reduce` or a `Scan` by `Add` or `Multiply`, now declines with the code
+  `unsettled-shape` when an element can be a number or a list: `Sum(L)`
+  with `L: list<unknown>`, `L: list<real | list<real>>`,
+  `L: list<broadcastable<real>>` or `L: collection<expression>`, and
+  `Sum(g(x))` with `g: (real) -> unknown`. A source typed `any`, `unknown`
+  or `value` declines too. The interpreter evaluates these folds. Declare the element type to compile them: with `L: list<real>` or
+  `L: list<list<real>>`, `Sum(L)` compiles. A fold whose element type is
+  settled has no test of the shape at run time: with
+  `L: list<tuple<real, real>>`, `Sum(L)` compiles to
+  `(_.L).reduce((_a, _b) => _SYS.add(_a, _b), 0)`, where it tested each
+  element and the source with `Array.isArray`. Its values do not change.
+
 - **Compilation to GLSL and WGSL: a call is proven finite from the
   declarations and the expression only.** A call of `sin`, `cos`, `sign`,
   `min`, `max` or `clamp` uses the built-in when its argument is proven

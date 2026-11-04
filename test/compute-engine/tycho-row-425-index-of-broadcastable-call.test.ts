@@ -2,6 +2,11 @@
  * Tycho ledger row 425: an index into a `broadcastable<T>` value did not
  * include the elements of `T`.
  *
+ * The case of row 425 is `Repeat(0, g(x)[1])` with `x: any`, in the Tycho
+ * document art/mavxszbvzk. The folds that the tests below also compile
+ * (`Sum(Rest(g(x)))`, `Reduce(g(x), Add, 0)`, `Product(g(x))`) are related
+ * readers of the same call, not row 425 itself.
+ *
  * The case: `g(t) = [t, 2t]` and a parameter `x` declared `any`. The call
  * `g(x)` is typed `broadcastable<vector<2>>`: one vector of two numbers when
  * `x` is a number, and a list of such vectors when `x` is a list and the call
@@ -42,9 +47,10 @@
  *   the collection arms: the accessor or the product of a number is an
  *   error, which no type holds.
  * - `Sum` of a list of `number | vector<2>` is a number or a list.
- * - The compiled code reads elements that may be numbers or lists with the
- *   dispatching element-wise fold (`Sum`, `Reduce` with `Add` or
- *   `Multiply`), and refuses the statistics (`Max`, `Mean`, `Median`).
+ * - The compiled code declines a fold (`Sum`, `Product`, `Reduce` with
+ *   `Add` or `Multiply`) over elements that may be numbers or lists, with
+ *   the code `unsettled-shape` (ROADMAP CE-805), and refuses the statistics
+ *   (`Max`, `Mean`, `Median`).
  * - The compiled `At`, `First` and `Last` over such elements pick the
  *   absence marker from the value, as the interpreter does
  *   (`_SYS.atWithValueMarker`). The compiled value of arithmetic on an
@@ -156,11 +162,15 @@ function compileRoot(
 /** Expect the compilation of `(symbol) ↦ expr` to decline because the type
  * of `symbol` (`any`) does not settle the shape of the argument of a call of
  * a user function: the code is `unsettled-shape` and `unsupported` names
- * `symbol`. */
+ * `symbol`. A fold (`Sum`, `Product`, `Reduce`) over such a call can
+ * decline first because the shape of its elements is not settled: the
+ * caller then passes the source of the fold (`foldSource`) as
+ * `unsupported`. */
 function expectUnsettledDecline(
   ce: ComputeEngine,
   expr: Expression,
-  symbol = 'x'
+  symbol = 'x',
+  unsupported = symbol
 ): void {
   const fn = ce.box([
     'Function',
@@ -170,7 +180,28 @@ function expectUnsettledDecline(
   const r = compile(fn, { to: 'javascript' } as never);
   expect(r.success).toBe(false);
   expect(r.diagnostic?.code).toBe('unsettled-shape');
-  expect(r.unsupported).toContain(symbol);
+  expect(r.unsupported).toContain(unsupported);
+}
+
+/** The source collection of a fold (`Sum` or `Product` of one collection,
+ * `Reduce` by `Add` or `Multiply`) at the root of `expr`, as `toString()`
+ * writes it; `undefined` for any other expression. */
+function foldSource(expr: Expression): string | undefined {
+  const op = expr.operator;
+  if ((op === 'Sum' || op === 'Product') && expr.nops === 1)
+    return expr.op1.toString();
+  if (op === 'Reduce' && ['Add', 'Multiply'].includes(expr.op2.symbol ?? ''))
+    return expr.op1.toString();
+  return undefined;
+}
+
+/** Expect the compilation of `expr` to decline with `unsettled-shape`: the
+ * static type does not settle the shape of the elements of a fold (ROADMAP
+ * CE-805). */
+function expectFoldDecline(ce: ComputeEngine, json: unknown): void {
+  const r = compile(ce.box(json as any), { to: 'javascript' } as never);
+  expect(r.success).toBe(false);
+  expect(r.diagnostic?.code).toBe('unsettled-shape');
 }
 
 /** For each value of `x` (a JavaScript value and its MathJSON spelling):
@@ -559,7 +590,10 @@ describe('Tycho row 425: compiled and interpreted values agree', () => {
       );
       return;
     }
-    expectUnsettledDecline(ce, ce.box(json as any));
+    const expr = ce.box(json as any);
+    // A fold over `g(x)` declines first: its elements may be numbers or
+    // lists, and `unsupported` names the source of the fold.
+    expectUnsettledDecline(ce, expr, 'x', foldSource(expr) ?? 'x');
   });
 
   // For a number `x`, the statistics compile: the elements of `g(x)` are
@@ -616,7 +650,9 @@ describe('Tycho row 425: compiled and interpreted values agree', () => {
     ['Sum(Rest(g(x)))', ['Sum', ['Rest', ['g', 'x']]]],
     ['Reduce(Rest(g(x)), Add, 0)', ['Reduce', ['Rest', ['g', 'x']], 'Add', 0]],
   ])('x: any declines, x: list<real> compiles: %s', (_name, json) => {
-    expectUnsettledDecline(rowEngine(), rowEngine().box(json as any));
+    const any = rowEngine();
+    const expr = any.box(json as any);
+    expectUnsettledDecline(any, expr, 'x', foldSource(expr));
     const ce = rowEngine('list<real>');
     const result = compiledAndInterpreted(
       ce,
@@ -632,7 +668,9 @@ describe('Tycho row 425: compiled and interpreted values agree', () => {
     // run-time product, which multiplies such rows as the interpreter does.
     // The fold was refused before the run-time product did (ROADMAP CE-98.3).
     const json = ['Product', ['Rest', ['g', 'x']]];
-    expectUnsettledDecline(rowEngine(), rowEngine().box(json as any));
+    const any = rowEngine();
+    const expr = any.box(json as any);
+    expectUnsettledDecline(any, expr, 'x', foldSource(expr));
     const ce = rowEngine('list<real>');
     const result = compiledAndInterpreted(
       ce,
@@ -1289,14 +1327,34 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
       ],
     ],
     ['list<number | list<number>>', [[1, 2], [3]]],
-  ])('a sum over %s checks the shapes when it runs', (type, value) => {
+  ])('a sum over %s declines', (type) => {
+    // An element can be a number or a list: the shape of the elements is
+    // not settled.
     const ce = new ComputeEngine();
     ce.declare('p', type);
+    expectFoldDecline(ce, ['Sum', 'p']);
+  });
+
+  test('a sum over list<matrix<real> | vector<real>> checks the shapes when it runs', () => {
+    // A row of 3 beside a matrix of 2 rows: the shapes do not nest. A row
+    // of 2 would be added to the rows (ROADMAP CE-399).
+    const ce = new ComputeEngine();
+    ce.declare('p', 'list<matrix<real> | vector<real>>');
     const run = compile(ce.box(['Sum', 'p']), {
       to: 'javascript',
       fallback: false,
     } as never).run!;
-    expect(() => run({ p: value } as never)).toThrow();
+    expect(() =>
+      run({
+        p: [
+          [
+            [1, 2],
+            [3, 4],
+          ],
+          [10, 20, 30],
+        ],
+      } as never)
+    ).toThrow();
   });
 
   test.each(['Rest', 'Take', 'Drop', 'Most'])(
@@ -1415,9 +1473,18 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
   test.each([
     ['Product', 'p'],
     ['Reduce', 'p', 'Multiply', 1],
-  ])('%s of complex matrices beside complex numbers', (...expr) => {
+  ])('%s of complex matrices beside complex numbers declines', (...expr) => {
     const ce = new ComputeEngine();
     ce.declare('p', 'list<complex | matrix<complex>>');
+    expectFoldDecline(ce, expr);
+  });
+
+  test.each([
+    ['Product', 'p'],
+    ['Reduce', 'p', 'Multiply', 1],
+  ])('%s of complex matrices', (...expr) => {
+    const ce = new ComputeEngine();
+    ce.declare('p', 'list<matrix<complex>>');
     const run = compile(ce.box(expr as any), {
       to: 'javascript',
       fallback: false,
@@ -1434,9 +1501,15 @@ describe('Tycho row 425: operands that are unions or may be absent', () => {
     expect(result.flat().map(im)).toEqual([0, 1, 1, 0]);
   });
 
-  test('a mixed-element product with a complex seed takes the complex helpers', () => {
+  test('a mixed-element product with a complex seed declines', () => {
     const ce = new ComputeEngine();
     ce.declare('p', 'list<real | matrix<real>>');
+    expectFoldDecline(ce, ['Reduce', 'p', 'Multiply', 'ImaginaryUnit']);
+  });
+
+  test('a product of matrices with a complex seed takes the complex helpers', () => {
+    const ce = new ComputeEngine();
+    ce.declare('p', 'list<matrix<real>>');
     const run = compile(ce.box(['Reduce', 'p', 'Multiply', 'ImaginaryUnit']), {
       to: 'javascript',
       fallback: false,

@@ -19,6 +19,7 @@ import {
   resolveTypeAlias,
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
   stripMissingFromType,
+  topTypeBesideAbsence,
 } from '../../common/type/utils.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import type { CompileTarget } from './types.js';
@@ -308,29 +309,34 @@ export function assertNoDeclaredTopOperands(
 }
 
 /**
- * Decline a fold of the elements of a collection when the element type is
- * `any` (`collection<any>`, `list<any>`, a bare `collection`, the type
- * inferred for a parameter that a `Sum` reads). The folds are a `Sum` or a
+ * Decline a fold of the elements of a collection when the static type does
+ * not settle the shape of the elements. The folds are a `Sum` or a
  * `Product` of one collection, and a `Reduce` or a `Scan` whose combiner is
- * the symbol `Add` or `Multiply`. An element of type `any` can be a number
- * or a list, and the interpreter adds two lists element by element:
- * `Sum(w)` is `[4, 6]` for `w = [[1, 2], [3, 4]]`. A compiled fold would
- * have to test the shape of each element at run time, and compiled code
- * tests no shape at run time.
+ * the symbol `Add` or `Multiply`. The shape is not settled when:
  *
- * A source whose type is a union (`collection<any> | number`) declines when
- * the element type of one of its collection members is `any`. A number
- * member of the source is not an element.
+ * - the element type is `any` or `unknown` (`list<any>`, `list<unknown>`,
+ *   a bare `collection`, the elements of a call of a function declared
+ *   `function`);
+ * - the element type is a `broadcastable<T>`, or a type that admits both a
+ *   number and a list (`expression`, `list<real | list<real>>`, the
+ *   elements `T | tensor<T>` of a `tensor<T>`); a string arm is not a
+ *   list;
+ * - the source is typed `any`, `unknown` or `value` (`g(x)` with
+ *   `g: (real) -> unknown`; one of these types beside absence markers
+ *   only, `missing | unknown`, counts as that type);
+ * - the source is a union with a collection member whose element type is
+ *   not settled (`collection<any> | number`). A number member of the
+ *   source is not an element: the fold of a number is the number
+ *   (`emitCollectionReduce()` in `javascript-target.ts`).
  *
- * The element types `unknown` (`list<unknown>`, the elements of a call of a
- * function declared `function`) and a union of a number and a collection
- * (`list<real | list<real>>`), and a source typed `any`, are not declined
- * here: the JavaScript fold over them still tests the shape of each element
- * at run time (`elementwiseFoldCombiner()` in `javascript-target.ts`). R3
- * does not allow that test. These cases compiled before this check was
- * added, and a Tycho document depends on one of them (`Sum(Rest(g(x)))`
- * with `g` declared `function`), so whether they decline is a decision of
- * the user, open as ROADMAP CE-805.
+ * Such a value can be a number or a list, and the interpreter adds two
+ * lists element by element: with `L: list<unknown>`, `Sum(L)` is `[4, 6]`
+ * for `L = [[1, 2], [3, 4]]`. A compiled fold would have to test the shape
+ * of each element at run time, and compiled code tests no shape at run
+ * time. The compilation declines, and the interpreter evaluates the fold.
+ * The host declares the element type (`list<real>`, `list<list<real>>`) to
+ * compile it. A source that is an input typed `any` or `unknown` is left to
+ * the admission of the root, which refuses it with `untyped-input`.
  *
  * The decline has the code `'unsettled-shape'` and the kind
  * `'capability'`. Its `value`, which the interpreter fallback puts in
@@ -359,14 +365,51 @@ export function assertSettledFoldElements(
     typeof present === 'object' && present.kind === 'union'
       ? present.types
       : [present];
-  const unsettled = members.some((m) => {
-    const element = collectionElementType(m);
-    return (
-      element !== undefined && resolveTypeForCompilation(element) === 'any'
-    );
-  });
+  // A source typed `any`, `unknown` or `value`, or one of these beside
+  // absence markers only, may hold a number or a list of any elements.
+  const top = topTypeBesideAbsence(source.type.type) ?? present;
+  const unsettled =
+    top === 'any' ||
+    top === 'unknown' ||
+    top === 'value' ||
+    members.some((m) => {
+      const element = collectionElementType(m);
+      if (element === undefined) return false;
+      const r = resolveTypeForCompilation(element);
+      if (r === 'any' || r === 'unknown') return true;
+      if (typeof r === 'object' && r.kind === 'broadcastable') return true;
+      // A type that admits both a number and a list, such as `expression`.
+      if (isSubtype('real', r) && isSubtype('list<real>', r)) return true;
+      if (typeof r === 'string' || r.kind !== 'union') return false;
+      return (
+        r.types.some((arm) =>
+          isSubtype(resolveTypeForCompilation(arm), 'number')
+        ) &&
+        r.types.some((arm) => {
+          // A string is a collection in the type lattice, but a fold does
+          // not add it element by element: a `list<string | number>` is
+          // refused by the fold itself.
+          const a = resolveTypeForCompilation(arm);
+          return (
+            a !== 'never' &&
+            !isSubtype(a, 'string') &&
+            isSubtype(a, 'collection<any>')
+          );
+        })
+      );
+    });
   if (!unsettled) return;
   assertNoDeclaredTopOperands(h, [source], target);
+  // An input typed `any` or `unknown` (a free symbol that is not bound and
+  // has no value) is refused by the admission of the root with the code
+  // `untyped-input`, which names the input to declare (`assertAdmitted()`).
+  // A bound parameter typed `unknown` is not an input, and declines here.
+  if (
+    isSymbol(source) &&
+    isUnboundUntypedName(source.symbol, source, target) &&
+    source.engine._getSymbolValue(source.symbol) === undefined
+  )
+    return;
   const value = source.toString();
   throw new CompileDeclineError({
     code: UNSETTLED_SHAPE_CODE,
@@ -450,6 +493,20 @@ function throwUntypedInputs(names: ReadonlyArray<string>): never {
       `\`ce.declare("${names[0]}", "real")\`.`,
     value: names.join(','),
   });
+}
+
+/**
+ * Decline with the code `'untyped-input'` when `source` reads an input
+ * declared `any` with no value (`collectDeclaredTopSymbols()`), as the
+ * admission of the root refuses it. A fold over such an input can be a fold
+ * of a number or of a list, and compiled code does not test the shape of a
+ * value at run time. Call it after `assertNoDeclaredTopOperands()`, which
+ * declines every other symbol declared `any` or `value`.
+ */
+export function refuseUntypedTopOperands(source: Expression): void {
+  const found = new Set<Expression & SymbolInterface>();
+  collectDeclaredTopSymbols(source, found);
+  if (found.size > 0) throwUntypedInputs([...found].map((s) => s.symbol));
 }
 
 /**

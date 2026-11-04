@@ -760,8 +760,9 @@ export function foldsCollectionElements(coll: Expression): boolean {
   // may be a matrix, whose elements are rows: its elements are typed
   // `U | tensor<U>`, which is not an indexed collection, so the test
   // below would choose the scalar fold and read a row as one number. The
-  // guarded element-wise fold dispatches on each element, so it is the
-  // fold for such an operand.
+  // guarded element-wise fold takes such an operand. The admission of the
+  // fold (`assertSettledFoldElements()`) declines it first: the shape of its
+  // elements is not settled.
   const source = coll.isCanonical ? coll : coll.canonical;
   const t = resolveTypeForCompilation(source.type.type);
   if (typeof t !== 'string' && t.kind === 'list' && t.dimensions === null)
@@ -771,11 +772,13 @@ export function foldsCollectionElements(coll: Expression): boolean {
   const element = resolveTypeForCompilation(elt);
   // Elements that may be numbers or collections (`number | vector<2>`,
   // the elements of `Rest(g(x))` for `g(t) = [t, 2t]` and `x: any`) are,
-  // like the elements of a tensor of unknown rank, folded by the guarded
-  // element-wise fold, which dispatches on each element. The scalar fold
-  // read a row as one number (`+` of two arrays concatenated them). A
-  // `broadcastable<T>` operand, whose elements are `T | tensor<T>`, keeps
-  // the dispatching fold of its own (`foldLane` reads it as `wide`).
+  // like the elements of a tensor of unknown rank, taken by the guarded
+  // element-wise fold. The admission of the fold
+  // (`assertSettledFoldElements()`) declines them first: their shape is not
+  // settled.
+  // The scalar fold read a row as one number (`+` of two arrays
+  // concatenated them). A `broadcastable<T>` operand, whose elements are
+  // `T | tensor<T>`, is not counted here (`foldLane` reads it as `wide`).
   if (
     !(typeof t !== 'string' && t.kind === 'broadcastable') &&
     typeof element !== 'string' &&

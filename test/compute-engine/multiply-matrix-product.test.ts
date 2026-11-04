@@ -1566,12 +1566,13 @@ describe('a compiled Product of tensors of rank 3', () => {
 /**
  * A compiled `Multiply` fold (`Product`, `Reduce(L, Multiply, 1)`, `Scan`)
  * over elements of several shapes: numbers beside lists, a matrix beside a
- * row, lists whose rows have different lengths. Each step is the run-time
- * product, which multiplies two values as the interpreter does. Such a fold
- * was refused ("lists of several shapes", "whose rows may have different
- * lengths"), and a `Product` over `list<number | tensor<number>>` threw
- * "the elements have incompatible dimensions" for a matrix beside a row
- * (ROADMAP CE-98.3).
+ * row, lists whose rows have different lengths. When the elements are all
+ * lists (`list<list<number>>`), each step is the run-time product, which
+ * multiplies two values as the interpreter does (ROADMAP CE-98.3). When an
+ * element can be a number or a list (`list<unknown>`,
+ * `list<number | tensor<number>>`, `list<broadcastable<number>>`), the
+ * shape of the elements is not settled: the compilation declines with
+ * `unsettled-shape`, and the interpreter gives the value (ROADMAP CE-805).
  */
 describe('a compiled Multiply fold over elements of several shapes', () => {
   const R: Value = [[1], [2, 3]];
@@ -1611,17 +1612,31 @@ describe('a compiled Multiply fold over elements of several shapes', () => {
     expect(ce.box(['Product', 'L']).evaluate().toString()).toBe(value);
   });
 
+  // The value assigned to `L` gives the type of the elements: all lists
+  // (`list<matrix<integer^(2x2)> | vector<integer^2>>`) is a settled shape,
+  // and the fold compiles; a number beside lists is not, and the fold
+  // declines.
   it.each(cases)(
     '%s: compiled Product, Reduce and Scan',
     (_, elements, __, value) => {
       const ce = engineWith(elements);
+      const settled = elements.every((e) => Array.isArray(e));
       for (const expr of [
         ['Product', 'L'],
         ['Reduce', 'L', 'Multiply', 1],
         ['Last', ['Scan', 'L', 'Multiply', 1]],
       ] as MathJsonExpression[]) {
-        const r = compile(ce.box(expr), { to: 'javascript', fallback: false });
-        expect(r.run!({} as never)).toEqual(value);
+        if (settled) {
+          const r = compile(ce.box(expr), {
+            to: 'javascript',
+            fallback: false,
+          });
+          expect(r.run!({} as never)).toEqual(value);
+        } else {
+          const r = compile(ce.box(expr), { to: 'javascript' });
+          expect(r.success).toBe(false);
+          expect(r.diagnostic?.code).toBe('unsettled-shape');
+        }
       }
     }
   );
@@ -1629,12 +1644,12 @@ describe('a compiled Multiply fold over elements of several shapes', () => {
   it.each(cases)(
     '%s: compiled Product of an input',
     (_, elements, __, value) => {
-      for (const type of [
-        'list<unknown>',
-        'list<list<number>>',
-        'list<number | tensor<number>>',
-        'list<broadcastable<number>>',
-      ]) {
+      // Elements that are all lists have a settled shape, and the fold
+      // compiles. An element that can be a number or a list declines.
+      const types: string[] = [];
+      if (elements.every((e) => Array.isArray(e)))
+        types.push('list<list<number>>');
+      for (const type of types) {
         const ce = new ComputeEngine();
         ce.declare('L', type);
         const r = compile(ce.box(['Product', 'L']), {
@@ -1643,12 +1658,31 @@ describe('a compiled Multiply fold over elements of several shapes', () => {
         });
         expect(r.run!({ L: elements } as never)).toEqual(value);
       }
+      for (const type of [
+        'list<unknown>',
+        'list<number | tensor<number>>',
+        'list<broadcastable<number>>',
+      ]) {
+        const ce = new ComputeEngine();
+        ce.declare('L', type);
+        const r = compile(ce.box(['Product', 'L']), { to: 'javascript' });
+        expect(r.success).toBe(false);
+        expect(r.diagnostic?.code).toBe('unsettled-shape');
+      }
     }
   );
 
-  it('a sum still checks the shapes of its elements', () => {
+  it('a sum over elements of unsettled shape declines', () => {
     const ce = new ComputeEngine();
     ce.declare('L', 'list<number | tensor<number>>');
+    const r = compile(ce.box(['Sum', 'L']), { to: 'javascript' });
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
+  });
+
+  it('a sum still checks the shapes of its elements', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<matrix<number> | vector<number>>');
     const r = compile(ce.box(['Sum', 'L']), {
       to: 'javascript',
       fallback: false,

@@ -16,7 +16,8 @@
  * single number as a collection of one element where the interpreter accepts
  * one (a type with a number arm). Over a `collection<any>`, an element can
  * be a number or a list, so these operators decline: the operand needs a
- * narrower annotation, such as `collection<real>`. `Max` and
+ * narrower annotation, such as `collection<real>`. `Sum` and `Product`
+ * decline over a `collection<expression>` for the same reason. `Max` and
  * `Min` also throw for an element that is not a real number. Operators that
  * read positions or order (`At`, `Reverse`) still refuse a declared abstract
  * collection, and a dictionary is refused by all.
@@ -66,6 +67,27 @@ function callbackOverExpressions(label: string, type: string): boolean {
   return label === 'Count(w, p)' && type.endsWith('<expression>');
 }
 
+/** True for the body `Sum(w)` or `Product(w)` over a parameter whose element
+ * type is `expression`. An element of type `expression` can be a number or
+ * a list, and the interpreter adds two lists element by element. Compiled
+ * code does not test the shape of an element at run time, so the
+ * compilation declines with the code `unsettled-shape` (ROADMAP CE-805).
+ * The same body over `collection<integer>`, `set<integer>`,
+ * `collection<real>` or `list<integer>` compiles. */
+function foldOverExpressions(label: string, type: string): boolean {
+  return (
+    (label === 'Sum(w)' || label === 'Product(w)') &&
+    type.endsWith('<expression>')
+  );
+}
+
+/** True when the body over a parameter of type `type` declines with the
+ * code `unsettled-shape`: a callback or a fold over elements of type
+ * `expression`. */
+function declinesOverExpressions(label: string, type: string): boolean {
+  return callbackOverExpressions(label, type) || foldOverExpressions(label, type);
+}
+
 /** Assert that the lambda declines with the code `unsettled-shape`, and
  * that its fallback gives the interpreter's value for the elements 3, 1,
  * 2. */
@@ -103,7 +125,7 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
     'set<integer>',
   ])
     for (const [label, body, expected] of BODIES) {
-      if (callbackOverExpressions(label, type)) {
+      if (declinesOverExpressions(label, type)) {
         test(`${label} with w: ${type} declines`, () =>
           expectUnsettledDecline(body, type, expected));
         continue;
@@ -133,7 +155,7 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
     // `incompatible-type`; the compiled code throws.
     for (const [label, body] of BODIES) {
       const ce = new ComputeEngine();
-      if (!callbackOverExpressions(label, 'collection<expression>'))
+      if (!declinesOverExpressions(label, 'collection<expression>'))
         expect(() => compiled(ce, body, 'collection<expression>')(4)).toThrow(
           /not a list or a set at run time/
         );
@@ -170,7 +192,7 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
     const fn = compiled(
       new ComputeEngine(),
       ['Sum', 'w'],
-      'collection<expression>'
+      'collection<complex>'
     );
     expect(
       fn([
@@ -181,9 +203,40 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
     const prod = compiled(
       new ComputeEngine(),
       ['Product', 'w'],
-      'collection<expression>'
+      'collection<complex>'
     );
     expect(prod([{ re: 0, im: 1 }, 2])).toEqual({ re: 0, im: 2 });
+  });
+
+  test('Sum and Product of elements typed expression decline', () => {
+    // An element of type `expression` can be a number or a list: the
+    // compilation declines, and the interpreter gives the value.
+    for (const [op, value] of [
+      ['Sum', '(4 + 6i)'],
+      ['Product', '2i'],
+    ] as const) {
+      const ce = new ComputeEngine();
+      const c = compile(lambda(ce, [op, 'w'], 'collection<expression>'));
+      expect(c.success).toBe(false);
+      expect(c.diagnostic?.code).toBe('unsettled-shape');
+      const items =
+        op === 'Sum'
+          ? [
+              ['Complex', 1, 2],
+              ['Complex', 3, 4],
+            ]
+          : [['Complex', 0, 1], 2];
+      expect(
+        ce
+          .box([
+            'Apply',
+            lambda(ce, [op, 'w'], 'collection<expression>').json,
+            ['List', ...items],
+          ] as any)
+          .evaluate()
+          .toString()
+      ).toBe(value);
+    }
   });
 
   test('Re and Im of the Sum and Product of a collection<complex>', () => {
@@ -218,22 +271,39 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
     }
   });
 
-  test('Sum and Product of a broadcastable<complex> are complex values', () => {
-    // An operand typed `broadcastable<complex>` is a complex number or a list
-    // of them. The fold was read as a real number, so `Sum(c) + 1` over
-    // `[i, 2]` added `1` to a `{re, im}` object with the real `+` and gave
-    // the string `"[object Object]1"`.
-    for (const [op, list, empty] of [
-      ['Sum', { re: 3, im: 1 }, 1],
-      ['Product', { re: 1, im: 2 }, 2],
-    ] as const) {
+  test('Sum and Product of a broadcastable<complex> decline', () => {
+    // An operand typed `broadcastable<complex>` is a complex number or a
+    // list of them, and its elements are `complex | tensor<complex>`: a
+    // number or a list. The shape of the elements is not settled, so the
+    // fold declines with `unsettled-shape` (ROADMAP CE-805), and the
+    // interpreter gives the value.
+    for (const op of ['Sum', 'Product']) {
       const ce = new ComputeEngine();
       ce.declare('c', 'broadcastable<complex>');
       const expr = ce.box(['Add', [op, 'c'], 1]);
+      const r = compile(expr);
+      expect(r.success).toBe(false);
+      expect(r.diagnostic?.code).toBe('unsettled-shape');
+      ce.assign('c', ce.box(['List', 'ImaginaryUnit', 2]));
+      expect(expr.evaluate().toString()).toBe(
+        op === 'Sum' ? '(3 + i)' : '(1 + 2i)'
+      );
+    }
+  });
+
+  test('Sum and Product of a list<complex> are complex values', () => {
+    // The fold of a `list<complex>` is read as a complex value: `Sum(c) + 1`
+    // over `[i, 2]` once added `1` to a `{re, im}` object with the real `+`
+    // and gave the string `"[object Object]1"`.
+    for (const [op, list] of [
+      ['Sum', { re: 3, im: 1 }],
+      ['Product', { re: 1, im: 2 }],
+    ] as const) {
+      const ce = new ComputeEngine();
+      ce.declare('c', 'list<complex>');
+      const expr = ce.box(['Add', [op, 'c'], 1]);
       const r = compile(expr, { fallback: false });
       expect(r.run!({ c: [{ re: 0, im: 1 }, 2] } as never)).toEqual(list);
-      expect(r.run!({ c: [] } as never)).toBe(empty);
-      expect(r.run!({ c: [1, 2] } as never)).toBe(op === 'Sum' ? 4 : 3);
       ce.assign('c', ce.box(['List', 'ImaginaryUnit', 2]));
       expect(expr.evaluate().toString()).toBe(
         op === 'Sum' ? '(3 + i)' : '(1 + 2i)'
@@ -269,9 +339,9 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
     }
   });
 
-  test('the guarded fold over a function result adds complex elements', () => {
+  test('the fold over a function result adds complex elements', () => {
     const ce = new ComputeEngine();
-    ce.declare('h', '(number) -> unknown');
+    ce.declare('h', '(number) -> list<complex>');
     ce.declare('t', 'number');
     const r = compile(ce.box(['Sum', ['h', 't']]), {
       fallback: false,
@@ -283,6 +353,19 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
       },
     } as any);
     expect(r.run!({ t: 1 })).toEqual({ re: 4, im: 6 });
+  });
+
+  test('the fold over a function result typed unknown declines', () => {
+    // The result of `h` can be a number or a list, and compiled code does
+    // not test the shape of a value at run time.
+    const ce = new ComputeEngine();
+    ce.declare('h', '(number) -> unknown');
+    ce.declare('t', 'number');
+    const r = compile(ce.box(['Sum', ['h', 't']]), {
+      functions: { h: () => [1, 2] },
+    } as any);
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
   });
 
   test('the interpreter gives the same values', () => {
@@ -316,7 +399,7 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
       'list<expression>',
     ])
       for (const [label, body, expected] of BODIES)
-        if (callbackOverExpressions(label, type))
+        if (declinesOverExpressions(label, type))
           expectUnsettledDecline(body, type, expected);
         else expect(compiled(ce, body, type)([3, 1, 2])).toEqual(expected);
   });

@@ -557,8 +557,10 @@ describe('generic sums', () => {
     // collection"); since a bare-symbol callback with a signature types the
     // `Map` from that signature (`total` is `(tree<number>) -> number`), the
     // `Map` passes its own gate and the decline comes from `Sum`, which finds
-    // no indexing set behind the untyped capture ("no indexing set"). Either
-    // way it fails closed. The sum half is fine — `node(v, cs)` lowers — and
+    // no indexing set behind the untyped capture ("no indexing set"). Since
+    // ROADMAP CE-805 the admission of the fold declines first: the elements
+    // of the `Map` are of unknown type ("an element can be a number or a
+    // list"). Each way it fails closed. The sum half is fine — `node(v, cs)` lowers — and
     // this pin is here to catch the day the capture-typing gap closes.
     const ce = engine(`${TREE}
       function total(t: tree<number>) -> number {
@@ -576,6 +578,8 @@ describe('generic sums', () => {
     expect(expr.evaluate().re).toBe(6);
     const r = compile(expr);
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/no indexing set|not an indexed collection/);
+    expect(r.error).toMatch(
+      /no indexing set|not an indexed collection|an element can be a number or a list/
+    );
   });
 });
