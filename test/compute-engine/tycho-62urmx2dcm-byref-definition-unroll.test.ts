@@ -599,8 +599,7 @@ describe('BY-REFERENCE DEFINITION UNROLL — shadowing', () => {
         'Function',
         [
           'Block',
-          ['Declare', 'k', 'number'],
-          ['Assign', 'k', ['Add', 'x', 1]],
+          ['Declare', 'k', 'number', ['Add', 'x', 1]],
           ['Min', ['Vblk', 'k']],
         ],
         'x',
@@ -640,8 +639,7 @@ describe('BY-REFERENCE DEFINITION UNROLL — a multi-statement body', () => {
         'Function',
         [
           'Block',
-          ['Declare', 'w', 'number'],
-          ['Assign', 'w', ['Add', 'x', 1]],
+          ['Declare', 'w', 'number', ['Add', 'x', 1]],
           ['Min', ['Vloc', 'w']],
         ],
         'x',

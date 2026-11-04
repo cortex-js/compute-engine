@@ -100,7 +100,7 @@ const declaresInBranch = [
   [
     'If',
     ['Equal', 'w', 1],
-    ['Block', ['Declare', 'y', "'integer'"], ['Assign', 'y', 2]],
+    ['Block', ['Declare', 'y', "'integer'", 2]],
     0,
   ],
   ['Add', 's', 'x'],
@@ -392,8 +392,7 @@ const localOfBranch = (name: string, value: unknown) => [
     ['Greater', 'n', 0],
     [
       'Block',
-      ['Declare', name, "'integer'"],
-      ['Assign', name, value],
+      ['Declare', name, "'integer'", value],
       [
         'DefineFunction',
         'g',

@@ -50,6 +50,7 @@ describe('User-function purity is inferred from the body', () => {
   // (`declare` with an `evaluate` literal is the one-call route that yields
   // an OPERATOR definition with declared effects; a prior `declare` plus a
   // separate `Assign` lands the literal on the value half instead.)
+  ce.assign('a', 0);
   ce.declare('bump', {
     signature: '() scope -> unknown',
     evaluate: ce.box(['Function', ['Assign', 'a', ['Add', 'a', 1]]]),
@@ -732,7 +733,7 @@ describe('Literals are inference boundaries', () => {
     const ce = new ComputeEngine();
     const literal = ce.box([
       'Function',
-      ['Block', ['Declare', 'cb', ['Function', ['Random']]], 1],
+      ['Block', ['Declare', 'cb', "'unknown'", ['Function', ['Random']]], 1],
     ]);
     expect(specifier(literal)).toBe('');
   });
@@ -747,7 +748,7 @@ describe('Literals are inference boundaries', () => {
     const ce = new ComputeEngine();
     const literal = ce.box([
       'Function',
-      ['Block', ['Declare', 'cb', ['Function', ['Random']]], ['cb']],
+      ['Block', ['Declare', 'cb', "'unknown'", ['Function', ['Random']]], ['cb']],
     ]);
     expect(specifier(literal)).toBe('random');
   });
@@ -762,7 +763,7 @@ describe('Literals are inference boundaries', () => {
       'useCallback',
       [
         'Function',
-        ['Block', ['Declare', 'cb', ['Function', ['Random']]], ['cb']],
+        ['Block', ['Declare', 'cb', "'unknown'", ['Function', ['Random']]], ['cb']],
       ],
     ]).evaluate();
     const def = ce.lookupDefinition('useCallback')!['operator'];
@@ -914,7 +915,7 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
       'confined9x',
       [
         'Function',
-        ['Block', ['Declare', 'n', 0], ['Assign', 'n', ['Add', 'n', 1]], 'n'],
+        ['Block', ['Declare', 'n', "'unknown'", 0], ['Assign', 'n', ['Add', 'n', 1]], 'n'],
       ],
     ]).evaluate();
     const def = ce.lookupDefinition('confined9x')!['operator'];
@@ -966,7 +967,7 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
     ce.declare('n', 'integer');
     const literal = ce.box([
       'Function',
-      ['Block', ['If', 'flag9x', ['Declare', 'n', 0]], ['Assign', 'n', 5], 'n'],
+      ['Block', ['If', 'flag9x', ['Declare', 'n', "'unknown'", 0]], ['Assign', 'n', 5], 'n'],
     ]);
     expect(specifier(literal)).toBe('scope');
   });
@@ -976,7 +977,7 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
     ce.declare('n', 'integer');
     const literal = ce.box([
       'Function',
-      ['Block', ['Block', ['Declare', 'n', 0]], ['Assign', 'n', 5]],
+      ['Block', ['Block', ['Declare', 'n', "'unknown'", 0]], ['Assign', 'n', 5]],
     ]);
     expect(specifier(literal)).toBe('scope');
   });
@@ -987,7 +988,7 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
     const ce = new ComputeEngine();
     const literal = ce.box([
       'Function',
-      ['Block', ['Declare', 'n', 0], ['Assign', 'n', 1], ['Function', 'n']],
+      ['Block', ['Declare', 'n', "'unknown'", 0], ['Assign', 'n', 1], ['Function', 'n']],
     ]);
     expect(specifier(literal)).toBe('');
   });
@@ -1015,7 +1016,7 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
       'Function',
       [
         'Block',
-        ['Declare', 'n', 0],
+        ['Declare', 'n', "'unknown'", 0],
         ['Assign', 'n', 1],
         ['Function', ['Assign', 'n', ['Add', 'n', 1]]],
       ],
@@ -1035,7 +1036,7 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
       'Function',
       [
         'Block',
-        ['Declare', 'n', 0],
+        ['Declare', 'n', "'unknown'", 0],
         ['Assign', 'n', 1],
         ['Function', ['Function', ['Assign', 'n', 2]]],
       ],
@@ -1049,7 +1050,7 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
       'Function',
       [
         'Block',
-        ['Declare', 'n', 0],
+        ['Declare', 'n', "'unknown'", 0],
         ['Assign', 'n', 1],
         ['Function', ['Assign', ['Tuple', 'n', 'm'], ['Tuple', 1, 2]]],
       ],
@@ -1079,7 +1080,7 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
       'Function',
       [
         'Block',
-        ['Declare', 'n', 0],
+        ['Declare', 'n', "'unknown'", 0],
         ['Assign', 'n', 1],
         ['Function', ['Assign', 'n', 2], 'n'],
       ],
@@ -1095,8 +1096,8 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
       'Function',
       [
         'Block',
-        ['Declare', 'n', 0],
-        ['Declare', 'inc', ['Function', ['Assign', 'n', ['Add', 'n', 1]]]],
+        ['Declare', 'n', "'unknown'", 0],
+        ['Declare', 'inc', "'unknown'", ['Function', ['Assign', 'n', ['Add', 'n', 1]]]],
         ['inc'],
         'n',
       ],
@@ -1315,7 +1316,7 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
     const ce = new ComputeEngine();
     const literal = ce.box([
       'Function',
-      ['Block', ['Declare', 'x9x', 0], ['Assume', ['Greater', 'x9x', 0]]],
+      ['Block', ['Declare', 'x9x', "'unknown'", 0], ['Assume', ['Greater', 'x9x', 0]]],
     ]);
     expect(specifier(literal)).toBe('scope');
   });
@@ -1333,7 +1334,7 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
       'Function',
       [
         'Block',
-        ['Declare', 'L9x', ['List', 1, 2]],
+        ['Declare', 'L9x', "'unknown'", ['List', 1, 2]],
         ['Assign', ['Subscript', 'L9x', 1], 5],
       ],
     ]);

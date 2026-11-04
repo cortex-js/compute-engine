@@ -84,11 +84,11 @@ describe('non-numeric value in a numeric evaluate handler errors', () => {
     // The final statement is boxed at execution time, when the binding IS
     // present, so the evidence check reports the mismatch there (one stage
     // before the evaluate-handler guard, which covers bindings that appear
-    // after boxing).
-    const r = executeEpsil(
-      new ComputeEngine(),
-      'a: value\nif 1 < 2 { a = "hello" }\n2 * a'
-    );
+    // after boxing). An Epsil declaration must have a value, so the host
+    // declares `a` with no value.
+    const ce = new ComputeEngine();
+    ce.declare('a', 'value');
+    const r = executeEpsil(ce, 'if 1 < 2 { a = "hello" }\n2 * a');
     expect(r.value.toString()).toContain('incompatible-type');
   });
 
@@ -98,11 +98,11 @@ describe('non-numeric value in a numeric evaluate handler errors', () => {
     // check possible. The binding happens mid-evaluation, so the error can
     // only come from the evaluate-handler guard; it names the substituted
     // VALUE ("hello"), unlike the evidence check, which blames the symbol
-    // and its declared type.
-    const r = executeEpsil(
-      new ComputeEngine(),
-      'a: value\ndo { a = "hello"; 2 * a }'
-    );
+    // and its declared type. An Epsil declaration must have a value, so the
+    // host declares `a` with no value.
+    const ce = new ComputeEngine();
+    ce.declare('a', 'value');
+    const r = executeEpsil(ce, 'do { a = "hello"; 2 * a }');
     expect(r.value.toString()).toContain('incompatible-type');
     expect(r.value.toString()).toContain('hello');
   });

@@ -104,22 +104,22 @@ describe('interval-js: Linspace', () => {
     check(bounds(inputs.run!({ a: -1e308, b: 1e308 })));
   });
 
-  test('a count of 0 still evaluates the endpoints', () => {
+  test('an assignment in an endpoint is invalid, and the compile declines', () => {
+    // An assignment as an operand of `Linspace` is the static error
+    // `assignment-in-operand`.
     const json = [
       'Block',
       ['Assign', 'c', 0],
       ['Loop', 0, ['Element', 'k', ['Linspace', ['Assign', 'c', 1], 9, 0]]],
       'c',
     ];
-    expect(
-      engine()
-        .box(json as any)
-        .evaluate().re
-    ).toBe(1);
-    expect(compiled(json).run!({})).toEqual({
-      kind: 'interval',
-      value: { lo: 1, hi: 1 },
+    expect(engine().box(json as any).isValid).toBe(false);
+    const result = compile(engine().box(json as any), {
+      to: 'interval-js',
+      fallback: false,
     });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/invalid expression/);
   });
 
   test('a count of 0 with an infinite endpoint is the empty list; with a NaN endpoint, no value', () => {

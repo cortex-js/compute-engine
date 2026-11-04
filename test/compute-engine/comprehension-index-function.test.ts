@@ -220,8 +220,7 @@ describe('A call of an index does not declare the index in the global scope', ()
     expect(
       box(ce, [
         'Block',
-        ['Declare', 'n', "'integer'"],
-        ['Assign', 'n', 0],
+        ['Declare', 'n', "'number'", 0],
         [
           'Loop',
           ['Assign', 'n', ['Add', 'n', ['k', 1]]],

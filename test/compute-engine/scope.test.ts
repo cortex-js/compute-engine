@@ -37,10 +37,12 @@ describe('DECLARING', () => {
     expect(ce.expr('dv1').valueOf()).toEqual(42);
   });
 
-  test('["Declare"] operator without a value evaluates to Nothing', () => {
-    const result = ce.box(['Declare', 'dv2', 'integer']).evaluate();
-    expect(result.symbol).toEqual('Nothing');
-    expect(ce.expr('dv2').type.toString()).toEqual('integer');
+  test('["Declare"] operator without a value is a static error', () => {
+    const result = ce.box(['Declare', 'dv2', 'integer']);
+    expect(result.json).toEqual([
+      'Error',
+      ['ErrorCode', "'declaration-without-value'", "'dv2'"],
+    ]);
   });
 
   test("Can't declare twice in same scope", () => {
@@ -228,7 +230,12 @@ describe('DECLARING', () => {
     const late = ce3.box([
       'Block',
       ['DefineFunction', 'h', ['Function', ['Add', 'n', 1], 'n']],
-      ['Declare', 'h', "'(integer) -> integer'"],
+      [
+        'Declare',
+        'h',
+        "'(integer) -> integer'",
+        ['Function', ['Add', 'n', 2], 'n'],
+      ],
       ['h', 5],
     ] as any);
     expect(() => late.evaluate()).toThrow(
@@ -305,16 +312,13 @@ describe('DECLARING', () => {
     expect(() => ce.box(['Assign', 'c1', 6]).evaluate()).toThrow(/constant/);
   });
 
-  test('["Declare"] attributes dict: const with no value (dict in slot 2)', () => {
-    const result = ce
-      .box([
-        'Declare',
-        'c2',
-        ['Dictionary', ['KeyValuePair', 'constant', 'True']],
-      ])
-      .evaluate();
-    expect(result.symbol).toEqual('Nothing');
-    expect((ce.lookupDefinition('c2') as any).value.isConstant).toBe(true);
+  test('["Declare"] attributes dict: const with no value (dict in slot 2) is a static error', () => {
+    const result = ce.box([
+      'Declare',
+      'c2',
+      ['Dictionary', ['KeyValuePair', 'constant', 'True']],
+    ]);
+    expect(result.operator).toEqual('Error');
   });
 
   test('["Declare"] attributes dict: pure dict carrying type + value + constant', () => {
@@ -467,8 +471,7 @@ describe('DYNAMIC SCOPING', () => {
     expect(
       ce
         .function('Block', [
-          ['Declare', 'var1', 'number'],
-          ['Assign', 'var1', 10],
+          ['Declare', 'var1', 'number', 10],
           ['f'],
         ])
         .evaluate()
@@ -479,8 +482,7 @@ describe('DYNAMIC SCOPING', () => {
     expect(
       ce
         .function('Block', [
-          ['Declare', 'var1', 'number'],
-          ['Assign', 'var1', 10],
+          ['Declare', 'var1', 'number', 10],
           ['g'],
         ])
         .evaluate()
@@ -516,8 +518,7 @@ describe('FUNCTIONS WITH RETURN STATEMENT', () => {
       'Function',
       [
         'Block',
-        ['Declare', 'ret_t', 'number'],
-        ['Assign', 'ret_t', ['Multiply', 'ret_n', 2]],
+        ['Declare', 'ret_t', 'number', ['Multiply', 'ret_n', 2]],
         ['Return', 'ret_t'],
         // This statement must NOT be reached:
         ['Assign', 'ret_t', 999],
@@ -854,12 +855,7 @@ describe('BigOp + Function interaction', () => {
           'Function',
           [
             'Block',
-            ['Declare', 'clbigop_total', 'number'],
-            [
-              'Assign',
-              'clbigop_total',
-              ['Sum', 'clbigop_k', ['Limits', 'clbigop_k', 1, 'clbigop_n']],
-            ],
+            ['Declare', 'clbigop_total', 'number', ['Sum', 'clbigop_k', ['Limits', 'clbigop_k', 1, 'clbigop_n']],],
             [
               'Function',
               ['Block', ['Add', 'clbigop_total', 'clbigop_y']],
@@ -1161,8 +1157,8 @@ describe('BLOCK EVALUATION', () => {
     const engine = new ComputeEngine();
     const dup = engine.box([
       'Block',
-      ['Declare', 'a', { dict: { value: 1 } }],
-      ['Declare', 'a', { dict: { value: 2 } }],
+      ['Declare', 'a', "'unknown'", 1],
+      ['Declare', 'a', "'unknown'", 2],
       'a',
     ]);
     expect(dup.ops![1].json).toEqual([
@@ -1171,20 +1167,20 @@ describe('BLOCK EVALUATION', () => {
     ]);
     const param = engine.box([
       'Function',
-      ['Block', ['Declare', 'x', { dict: { value: 10 } }], 'x'],
+      ['Block', ['Declare', 'x', "'unknown'", 10], 'x'],
       'x',
     ]);
     expect(param.op1.ops![0].operator).toBe('Error');
     const loop = engine.box([
       'Loop',
-      ['Block', ['Declare', 'k', { dict: { value: 1 } }]],
+      ['Block', ['Declare', 'k', "'unknown'", 1]],
       ['Element', 'k', ['Range', 1, 3]],
     ]);
     expect(loop.op1.ops![0].operator).toBe('Error');
     // A nested block shadows the loop index legally.
     const nested = engine.box([
       'Loop',
-      ['Block', ['Block', ['Declare', 'k', { dict: { value: 1 } }]]],
+      ['Block', ['Block', ['Declare', 'k', "'unknown'", 1]]],
       ['Element', 'k', ['Range', 1, 3]],
     ]);
     expect(nested.op1.ops![0].ops![0].operator).toBe('Declare');

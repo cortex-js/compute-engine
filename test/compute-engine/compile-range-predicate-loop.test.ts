@@ -302,8 +302,7 @@ describe('Issue #373: predicate consumers over a finite Range compile to a count
     it('assigned to a declared local inside a block', () => {
       const expr = [
         'Block',
-        ['Declare', 'c', 'boolean'],
-        ['Assign', 'c', ['Any', ['Range', 1, 'n'], DIV3]],
+        ['Declare', 'c', 'boolean', ['Any', ['Range', 1, 'n'], DIV3]],
         ['If', 'c', 1, 0],
       ];
       const { run } = compileJs(expr);

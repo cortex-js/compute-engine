@@ -347,8 +347,7 @@ describe('the asynchronous windows agree with the synchronous route: second revi
     expect(
       await same([
         'Block',
-        ['Declare', 'c', 'real'],
-        ['Assign', 'c', { num: '1.234567890123456789012345678901234' }],
+        ['Declare', 'c', 'real', { num: '1.234567890123456789012345678901234' }],
         ['N', ['Add', 'c', 'x'], 30],
       ])
     ).toBe('x + 1.23456789012345678901');

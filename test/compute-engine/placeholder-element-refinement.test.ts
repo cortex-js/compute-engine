@@ -10,12 +10,15 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 // assignment refines the element type (kept on `_placeholderSkeleton` +
 // the reported type), while the constructor contract still rejects
 // non-collection values.
+//
+// An Epsil declaration must have a value, so the tests that need a declared
+// name with no value declare it with the host API `ce.declare()`.
 
 describe('Phase 1: placeholder element refinement', () => {
   test('R2/R3: a declared bare list refines its element from the assignment, element only', () => {
     const ce = new ComputeEngine();
     const run = (s: string) => executeEpsil(ce, s);
-    run('let a: list');
+    ce.declare('a', 'list');
     expect(ce.box('a').type.toString()).toBe('list');
     run('a = [1, 2, 3]');
     // Element only — rank and length stay open (the value's own type is
@@ -26,7 +29,8 @@ describe('Phase 1: placeholder element refinement', () => {
   test('R1: re-assignment re-refines — the refinement never hardens', () => {
     const ce = new ComputeEngine();
     const run = (s: string) => executeEpsil(ce, s);
-    run('let a: list\na = [1, 2, 3]');
+    ce.declare('a', 'list');
+    run('a = [1, 2, 3]');
     expect(ce.box('a').type.toString()).toBe('list<integer>');
     run('a = ["x", "y"]');
     expect(ce.box('a').type.toString()).toBe('list<string>');
@@ -35,7 +39,8 @@ describe('Phase 1: placeholder element refinement', () => {
   test('the constructor CONTRACT still rejects, against the skeleton', () => {
     const ce = new ComputeEngine();
     const run = (s: string) => executeEpsil(ce, s);
-    run('let a: list\na = ["x"]');
+    ce.declare('a', 'list');
+    run('a = ["x"]');
     const bad = run('a = 42');
     // The error names the SKELETON (`list`), not the refined spelling, and
     // the refinement survives the failed assignment.
@@ -53,36 +58,29 @@ describe('Phase 1: placeholder element refinement', () => {
 
   test('only placeholder spellings refine: explicit contracts never move', () => {
     const ce = new ComputeEngine();
-    executeEpsil(
-      ce,
-      ['let c: list<any>', 'c = [1, 2]', 'let d: list<integer>', 'd = [1, 2]'].join(
-        '\n'
-      )
-    );
+    ce.declare('c', 'list<any>');
+    ce.declare('d', 'list<integer>');
+    executeEpsil(ce, ['c = [1, 2]', 'd = [1, 2]'].join('\n'));
     expect(ce.box('c').type.toString()).toBe('list<any>');
     expect(ce.box('d').type.toString()).toBe('list<integer>');
   });
 
   test('STATIC: the refined element type flows through the one-shot pre-pass', () => {
+    // `k` is a declared function with no value. The pre-pass sees the
+    // declaration of `a` and its assignment.
+    const ce1 = new ComputeEngine();
+    ce1.declare('k', '(integer) -> integer');
     const r = executeEpsil(
-      new ComputeEngine(),
-      [
-        'let k: (integer) -> integer',
-        'let a: list',
-        'a = ["x", "y"]',
-        'k(a[1])',
-      ].join('\n')
+      ce1,
+      ['let a: list = []', 'a = ["x", "y"]', 'k(a[1])'].join('\n')
     );
     expect(JSON.stringify(r.diagnostics)).toContain('static-type-error');
     // The compatible case stays clean.
+    const ce2 = new ComputeEngine();
+    ce2.declare('k', '(integer) -> integer');
     const r2 = executeEpsil(
-      new ComputeEngine(),
-      [
-        'let k: (integer) -> integer',
-        'let a: list',
-        'a = [1, 2]',
-        'k(a[1])',
-      ].join('\n')
+      ce2,
+      ['let a: list = []', 'a = [1, 2]', 'k(a[1])'].join('\n')
     );
     expect(JSON.stringify(r2.diagnostics)).toBe('[]');
   });
@@ -126,7 +124,8 @@ describe('Phase 2: literal downward distribution', () => {
 
   test('Epsil route: f([a, b]) infers a and b', () => {
     const ce = new ComputeEngine();
-    executeEpsil(ce, 'let f: (list<number>) -> number\nf([a, b])');
+    ce.declare('f', '(list<number>) -> number');
+    executeEpsil(ce, 'f([a, b])');
     expect(ce.box('a').type.toString()).toBe('number');
     expect(ce.box('b').type.toString()).toBe('number');
   });

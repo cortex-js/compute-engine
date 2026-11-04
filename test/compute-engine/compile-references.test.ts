@@ -508,8 +508,7 @@ describe('COMPILE reference analysis of a declaration', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Block',
-      ['Declare', 'w', 'number'],
-      ['Assign', 'w', ['Add', 'u', 1]],
+      ['Declare', 'w', 'number', ['Add', 'u', 1]],
       ['Multiply', 'w', 2],
     ]);
     expect(compile(expr, { to: 'glsl' }).freeSymbols).toEqual(['u']);
@@ -559,18 +558,25 @@ describe('COMPILE reference analysis of a declaration', () => {
     }
   });
 
-  // The inner target of a chained assignment in a loop body is a local of
+  // The target of an assignment in a block that is a loop body is a local of
   // the body, which the generated code declares: it was listed as free
-  // (`w` below, not declared).
+  // (`w` below, not declared). A chained assignment `t := w := t + i` is
+  // the static error `assignment-in-operand`, so the body writes `w` and
+  // `t` in two statements. A first assignment in a loop body is the static
+  // error `first-assignment-in-branch`, so the body declares `w`.
   it('does not list the inner target of a chained assignment as a free symbol', () => {
     const range = ['Element', 'i', ['Range', 1, 3]];
-    const chained = ['Assign', 't', ['Assign', 'w', ['Add', 't', 'i']]];
+    const chained = [
+      'Block',
+      ['Declare', 'w', "'unknown'", ['Add', 't', 'i']],
+      ['Assign', 't', 'w'],
+    ];
     for (const to of ['javascript', 'glsl', 'python'] as const) {
-      for (const body of [chained, ['Block', chained]]) {
+      {
         const ce = new ComputeEngine();
         expect(
           compile(
-            ce.box(['Block', ['Assign', 't', 0], ['Loop', body, range], 't']),
+            ce.box(['Block', ['Assign', 't', 0], ['Loop', chained, range], 't']),
             { to }
           ).freeSymbols
         ).toEqual([]);
@@ -582,22 +588,8 @@ describe('COMPILE reference analysis of a declaration', () => {
           ce.box([
             'Block',
             ['Assign', 't', 0],
-            ['Loop', ['Block', chained], range],
-            ['Add', 't', 'w'],
-          ]),
-          { to }
-        ).freeSymbols
-      ).toEqual(['w']);
-      // A `w` that an engine scope binds is an input.
-      const declared = new ComputeEngine();
-      declared.declare('w', 'real');
-      expect(
-        compile(
-          declared.box([
-            'Block',
-            ['Assign', 't', 0],
             ['Loop', chained, range],
-            't',
+            ['Add', 't', 'w'],
           ]),
           { to }
         ).freeSymbols

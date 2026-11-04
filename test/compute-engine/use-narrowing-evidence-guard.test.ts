@@ -13,20 +13,30 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 // narrowing `x`'s type to `integer`, the conflict surfaced only at
 // evaluation, and the stored type was left contradicting the held value.
 
+// An Epsil program cannot declare a function without a definition: a
+// function-typed `let f: () -> integer` with no `function f` statement in the
+// same block is `declaration-without-value`. The functions that have only a
+// signature are declared with `ce.declare()`, which can declare a name
+// without a value.
+function engineWith(
+  signatures: Record<string, string>,
+  ce = new ComputeEngine()
+): ComputeEngine {
+  for (const [name, type] of Object.entries(signatures)) ce.declare(name, type);
+  return ce;
+}
+
+const FGK = {
+  f: '() -> integer',
+  g: '() -> number',
+  k: '(integer) -> integer',
+};
+
 describe('use-narrowing evidence guard', () => {
   test('PROGRAM persona: a use of an ASSIGNED symbol checks, not narrows', () => {
-    const ce = new ComputeEngine();
+    const ce = engineWith(FGK);
     const run = (src: string) => executeEpsil(ce, src);
-    run(
-      [
-        'let x',
-        'let f: () -> integer',
-        'let g: () -> number',
-        'let k: (integer) -> integer',
-        'x = f()',
-        'x = g()',
-      ].join('\n')
-    );
+    run(['x = f()', 'x = g()'].join('\n'));
     expect(ce.box('x').type.toString()).toBe('number');
 
     const r = run('k(x)');
@@ -72,63 +82,36 @@ describe('use-narrowing evidence guard', () => {
     // pre-pass runs, so the EXECUTED program is unaffected — see the
     // "lint-only" test below, where the same shape flags statically and
     // still evaluates.
-    const one = (lines: string[]) =>
-      executeEpsil(new ComputeEngine(), lines.join('\n')).diagnostics;
-    expect(
-      JSON.stringify(
-        one([
-          'let x',
-          'let f: () -> integer',
-          'let g: () -> number',
-          'let k: (integer) -> integer',
-          'x = f()',
-          'x = g()',
-          'k(x)',
-        ])
-      )
-    ).toContain('static-type-error');
+    const one = (
+      lines: string[],
+      signatures: Record<string, string> = FGK
+    ) => executeEpsil(engineWith(signatures), lines.join('\n')).diagnostics;
+    expect(JSON.stringify(one(['x = f()', 'x = g()', 'k(x)']))).toContain(
+      'static-type-error'
+    );
     // The possibly-incompatible refinement (user-ruled 2026-08-23): a
     // symbolic-evidence overlap mismatch carries a suggestion note to
     // annotate the declaration; a DEFINITE mismatch (disjoint literal
     // evidence, pinned elsewhere in this file) does not.
-    expect(
-      JSON.stringify(
-        one([
-          'let x',
-          'let f: () -> integer',
-          'let g: () -> number',
-          'let k: (integer) -> integer',
-          'x = f()',
-          'x = g()',
-          'k(x)',
-        ])
-      )
-    ).toContain('annotate the declaration');
+    expect(JSON.stringify(one(['x = f()', 'x = g()', 'k(x)']))).toContain(
+      'annotate the declaration'
+    );
 
     // Assignment is LAST-WRITE-WINS: the reverse order is a correct program
     // and must stay clean (a join-of-assignments model would wrongly flag it).
-    expect(
-      one([
-        'let x',
-        'let f: () -> integer',
-        'let g: () -> number',
-        'let k: (integer) -> integer',
-        'x = g()',
-        'x = f()',
-        'k(x)',
-      ])
-    ).toEqual([]);
+    expect(one(['x = g()', 'x = f()', 'k(x)'])).toEqual([]);
 
     // The evidence recorded is the RAW right-hand-side type: `v = 1 - i`
     // stores widened `number`, which `⊄ complex` — but the raw
     // `complex` fits, so no false static error.
     expect(
-      one(['let Q: (complex) -> complex', 'let v = 1 - i', 'Q(v)'])
+      one(['let v = 1 - i', 'Q(v)'], { Q: '(complex) -> complex' })
     ).toEqual([]);
 
     // A valueless symbol keeps the CAS declaration reading in one-shot
-    // programs too.
-    expect(one(['let n', 'let k: (integer) -> integer', 'k(n)'])).toEqual([]);
+    // programs too. An Epsil `let n` must have a value, so `n` is a free
+    // symbol here.
+    expect(one(['k(n)'])).toEqual([]);
   });
 
   test('the stricter evidence verdict is LINT-ONLY: the program still runs', () => {
@@ -144,9 +127,7 @@ describe('use-narrowing evidence guard', () => {
       new ComputeEngine(),
       [
         'k(n: integer) = n + 1',
-        'let y: number',
-        'y = 5',
-        'let x',
+        'let y: number = 5',
         'x = y',
         'k(x)',
       ].join('\n')
@@ -161,29 +142,23 @@ describe('use-narrowing evidence guard', () => {
     // under one arm can still be admitted by another. `number` evidence
     // fits the `(number) -> number` arm, so the call is clean even though
     // the `(integer) -> integer` arm refuses it.
-    const one = (lines: string[]) =>
-      executeEpsil(new ComputeEngine(), lines.join('\n')).diagnostics;
+    const one = (lines: string[], p: string) =>
+      executeEpsil(
+        engineWith({ p, g: '() -> number' }),
+        lines.join('\n')
+      ).diagnostics;
     expect(
-      one([
-        'let p: ((integer) -> integer) & ((number) -> number)',
-        'let g: () -> number',
-        'let x',
-        'x = g()',
-        'p(x)',
-      ])
+      one(['x = g()', 'p(x)'], '((integer) -> integer) & ((number) -> number)')
     ).toEqual([]);
 
     // When NO arm fits, the call flags and the error names the union of the
     // arms' parameter types.
     expect(
       JSON.stringify(
-        one([
-          'let p: ((integer) -> integer) & ((string) -> string)',
-          'let g: () -> number',
-          'let x',
-          'x = g()',
-          'p(x)',
-        ])
+        one(
+          ['x = g()', 'p(x)'],
+          '((integer) -> integer) & ((string) -> string)'
+        )
       )
     ).toContain('static-type-error');
   });
@@ -230,16 +205,9 @@ describe('use-narrowing evidence guard', () => {
   });
 
   test('an assigned symbol whose type already fits is admitted without a write (pre-existing matches branch)', () => {
-    const ce = new ComputeEngine();
+    const ce = engineWith({ f: '() -> integer', k: '(number) -> number' });
     const run = (src: string) => executeEpsil(ce, src);
-    run(
-      [
-        'let y',
-        'let f: () -> integer',
-        'let k: (number) -> number',
-        'y = f()',
-      ].join('\n')
-    );
+    run('y = f()');
     expect(ce.box('y').type.toString()).toBe('integer');
     const r = run('k(y)');
     expect(JSON.stringify(r.diagnostics)).toBe('[]');
@@ -256,17 +224,13 @@ describe('use-narrowing evidence guard', () => {
     // The guard originally lived only in the required-parameter loop; the
     // optional and variadic loops narrowed unconditionally, so an assigned
     // symbol could still be silently rewritten through those slots.
-    const ce = new ComputeEngine();
+    const ce = engineWith({
+      g: '() -> number',
+      opt: '(boolean, integer?) -> integer',
+      varfn: '(integer+) -> integer',
+    });
     const run = (src: string) => executeEpsil(ce, src);
-    run(
-      [
-        'let x',
-        'let g: () -> number',
-        'let opt: (boolean, integer?) -> integer',
-        'let varfn: (integer+) -> integer',
-        'x = g()',
-      ].join('\n')
-    );
+    run('x = g()');
     // Re-read under R1 overlap admission (§4.4): the `number` evidence
     // OVERLAPS `integer`, so both calls now box and stay inert instead of
     // erroring. The Epsil linter's stricter evidence check does not reach
@@ -293,8 +257,8 @@ describe('use-narrowing evidence guard', () => {
     // silenced. The RUN is unchanged: by the time `k(x)` boxes during
     // execution, `x` HOLDS 1.5, and a concrete value decides exactly.
     const r = executeEpsil(
-      new ComputeEngine(),
-      ['let k: (integer) -> integer', 'let x: number = 1.5', 'k(x)'].join('\n')
+      engineWith(FGK),
+      ['let x: number = 1.5', 'k(x)'].join('\n')
     );
     expect(JSON.stringify(r.diagnostics)).toContain('static-type-error');
     // A DEFINITE mismatch — the literal evidence `1.5` is provably
@@ -314,8 +278,8 @@ describe('use-narrowing evidence guard', () => {
     // the literal evidence even though `x`'s inferred type stays the
     // widened `real` ("more likely, not broadest").
     const r = executeEpsil(
-      new ComputeEngine(),
-      ['let k: (integer) -> integer', 'let x = 1.5', 'k(x)'].join('\n')
+      engineWith(FGK),
+      ['let x = 1.5', 'k(x)'].join('\n')
     );
     expect(JSON.stringify(r.diagnostics)).toContain('static-type-error');
   });
@@ -324,8 +288,8 @@ describe('use-narrowing evidence guard', () => {
     // The exact evidence cuts both ways: `2` inhabits `integer`, so the
     // program is clean and runs.
     const r = executeEpsil(
-      new ComputeEngine(),
-      ['let k: (integer) -> integer', 'let x = 2', 'k(x)'].join('\n')
+      engineWith(FGK),
+      ['let x = 2', 'k(x)'].join('\n')
     );
     expect(JSON.stringify(r.diagnostics)).toBe('[]');
     expect(r.value?.toString()).toBe('k(2)');
@@ -333,18 +297,14 @@ describe('use-narrowing evidence guard', () => {
 
   test('STATIC: a destructuring assignment distributes the effect per leaf', () => {
     const r = executeEpsil(
-      new ComputeEngine(),
-      ['let k: (integer) -> integer', 'let (a, b) = (1, "s")', 'k(b)'].join(
-        '\n'
-      )
+      engineWith(FGK),
+      ['let (a, b) = (1, "s")', 'k(b)'].join('\n')
     );
     expect(JSON.stringify(r.diagnostics)).toContain('static-type-error');
     // The compatible leaf stays usable.
     const r2 = executeEpsil(
-      new ComputeEngine(),
-      ['let k: (integer) -> integer', 'let (a, b) = (1, "s")', 'k(a)'].join(
-        '\n'
-      )
+      engineWith(FGK),
+      ['let (a, b) = (1, "s")', 'k(a)'].join('\n')
     );
     expect(JSON.stringify(r2.diagnostics)).toBe('[]');
   });

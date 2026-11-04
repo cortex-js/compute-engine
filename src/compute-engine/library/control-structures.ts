@@ -17,9 +17,16 @@ import type { CallbackSupply } from '../boxed-expression/callback-arity.js';
 import { canonicalCallbackOperand } from './collections.js';
 import { MACHINE_PRECISION } from '../numerics/numeric.js';
 import {
-  isInFunctionBody,
+  assignmentLocalsOf,
+  enterBranch,
+  enterFunctionBody,
+  exitBranch,
+  exitFunctionBody,
+  isInBranch,
+  isFreeSymbolDeclarationInBody,
   recordAssignmentLocals,
   recordLaterDeclarationLocals,
+  withPairedFunctionNames,
 } from '../assignment-locals.js';
 import {
   runWithEvaluationEffects,
@@ -77,8 +84,8 @@ import {
   isSubtype,
   provablyDisjoint,
 } from '../../common/type/subtype.js';
-import type { FunctionSignature, Type } from '../../common/type/types.js';
-import { isPolymorphicType, paramAt } from '../../common/type/instantiate.js';
+import type { Type } from '../../common/type/types.js';
+import { isPolymorphicType } from '../../common/type/instantiate.js';
 import { functionLiteralDeclaredSignature } from '../boxed-expression/function-literal.js';
 import { isGenericTarget } from '../multi-clause.js';
 import { canonInstallSkipped } from '../clause-identity.js';
@@ -118,6 +125,7 @@ import {
 } from '../boxed-expression/operand-descriptor.js';
 import {
   isAbsentSymbol,
+  isDictionary,
   isFunction,
   isNumber,
   isSymbol,
@@ -129,7 +137,7 @@ import {
   isListCondition,
   isStatementArm,
 } from '../boxed-expression/conditional-value.js';
-import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
+import { isValueDef } from '../boxed-expression/utils.js';
 import { widenAssignedType } from '../boxed-expression/boxed-value-definition.js';
 import {
   elementMemoFillTo,
@@ -321,10 +329,19 @@ export const BLOCK_DEFINITION: OperatorDefinition = {
   type: (args, context) => {
     if (args.length === 0)
       return BoxedType.forResult('nothing', context.engine._typeResolver);
-    return BoxedType.forResult(
-      args[args.length - 1].type,
-      context.engine._typeResolver
-    );
+    // An assignment or a declaration is a statement with no value: a block
+    // whose last statement is one has the value `Nothing`
+    // (`statementListValue()`, `function-utils.ts`).
+    const last = args[args.length - 1];
+    let structure = last.structureOf?.();
+    if (structure?.kind === 'application' && structure.head === 'Typed')
+      structure = structure.children[0]?.structureOf?.();
+    if (
+      structure?.kind === 'application' &&
+      (structure.head === 'Assign' || structure.head === 'Declare')
+    )
+      return BoxedType.forResult('nothing', context.engine._typeResolver);
+    return BoxedType.forResult(last.type, context.engine._typeResolver);
   },
   canonical: canonicalBlock,
   evaluate: evaluateBlock,
@@ -546,7 +563,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         const xs = ops.map((op, i) =>
           i === 0
             ? conditionOperand(engine, op.canonical)
-            : canonicalStatement(engine, op)
+            : canonicalBranch(engine, op)
         );
         // The condition and the then branch are required. A missing one is
         // an `Error("missing")` operand in its place, as `checkArity()` does
@@ -915,7 +932,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         const ops = args.map((x, i) =>
           i % 2 === 0
             ? conditionOperand(options.engine, x.canonical)
-            : x.canonical
+            : canonicalBranch(options.engine, x, false)
         );
         if (ops.some((x, i) => i % 2 === 0 && isListCondition(x))) {
           const armError = selectionArmError(
@@ -981,6 +998,24 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           ops[0].canonical,
           ...ops.slice(1).map((c) => c.canonical),
         ];
+        // A case of a `Match` is a branch, as a branch of an `If` is, in a
+        // block and at the top level: a first assignment of a name in it is
+        // a static error (`first-assignment-in-branch`). The case bodies
+        // stay raw, so the check reads their structure
+        // (`firstAssignmentInCase()`).
+        for (const cc of getMatchPlan(ce, ops2).segments.flatMap(
+          (seg) => seg.cases
+        )) {
+          const captures = new Set(cc.captureNames);
+          for (const part of [cc.guard, cc.body]) {
+            const name =
+              part === undefined
+                ? undefined
+                : firstAssignmentInCase(ce, part, captures);
+            if (name !== undefined)
+              return ce.error(['first-assignment-in-branch', name]);
+          }
+        }
         // An assignment in a case body to a local of the enclosing block is
         // an assignment of that local, and the static type of the local
         // must admit its value. The case bodies stay raw, so canonicalize
@@ -995,9 +1030,16 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           for (const cc of getMatchPlan(ce, ops2).segments.flatMap(
             (seg) => seg.cases
           )) {
-            for (const part of [cc.guard, cc.body])
-              if (part !== undefined && containsAssignment(part))
-                buildCaseClosure(ce, part, cc.captureNames);
+            for (const part of [cc.guard, cc.body]) {
+              if (part === undefined || !containsAssignment(part)) continue;
+              // A value of another type than the local is a static error
+              // of the `Match`, as in a branch of an `If`
+              // (`assignment-type-mismatch`).
+              const mismatch = assignmentTypeMismatchIn(
+                buildCaseClosure(ce, part, cc.captureNames)
+              );
+              if (mismatch !== undefined) return mismatch;
+            }
           }
         }
         return ce._fn('Match', ops2);
@@ -4367,13 +4409,16 @@ export function staticDeclarations(
           }
           typeOp = entry;
         }
+        // The type `"unknown"` (`Declare(k, "unknown", v)`, the form of a
+        // `where` binding and of a first `\coloneq`) states no type: the
+        // type of the local comes from its value, as when no type is given.
         const source =
           typeOp === undefined
             ? undefined
             : isString(typeOp)
               ? typeOp.string
               : sym(typeOp);
-        if (source !== undefined) {
+        if (source !== undefined && source !== 'unknown') {
           try {
             const parsed = parseType(source, ce._typeResolver);
             if (isValidType(parsed)) {
@@ -4586,13 +4631,11 @@ function canonicalBlock(
     // taken, if a later statement of the top-level block of a program had
     // not declared it (`recordLaterDeclarationLocals`).
     const laterDeclarationLocals: string[] = [];
-    // In the body of a function literal, the block also owns the names that
-    // an assignment in a nested block of a statement writes (a branch of an
-    // `if`, a loop body, a `do` block), as in Python
-    // (`nestedAssignmentNames()`). The body is canonicalized before its
-    // nested blocks, so the nested blocks find these bindings in the scope
-    // chain and do not make locals of their own.
-    const ownsNestedAssignments = isInFunctionBody();
+    // A block in a branch of a conditional or in the body of a loop
+    // (`isInBranch()`) declares no local by assignment: a first assignment
+    // of a name there is a static error. The name must be declared with a
+    // value before the branch, so that it has a value on every path.
+    const inBranch = isInBranch();
     for (const statement of ops) {
       const op = typedStatement(statement);
       const target = isFunction(op, 'Assign') ? op.ops[0] : undefined;
@@ -4609,7 +4652,6 @@ function canonicalBlock(
           : isFunction(target, 'Tuple')
             ? tuplePatternNames(target)
             : [sym(target)];
-      if (ownsNestedAssignments) names.push(...nestedAssignmentNames(ce, op));
       for (const name of names) {
         if (!name || name === 'Nothing') continue;
         if (scope.bindings.has(name) || isDeclaredInScopeChain(ce, name))
@@ -4619,6 +4661,14 @@ function canonicalBlock(
         // does not find it yet; the shadowed-parameter stack holds its name.
         // An assignment to it writes the parameter, and is not a local.
         if (isShadowedByEarlierDeclaration(ce, name)) continue;
+        if (inBranch) {
+          if (!refused.has(statement))
+            refused.set(
+              statement,
+              ce.error(['first-assignment-in-branch', name])
+            );
+          continue;
+        }
         assignmentLocals.push(name);
         if (
           ce.lookupDefinition(name) !== undefined ||
@@ -4706,6 +4756,9 @@ function canonicalBlock(
       else names.push(name);
     }
 
+  // The names that the function definition statements of this block define.
+  const functionStatementNames = functionDefinitionNames(ops);
+
   // The scope that encloses the block: the boundary of the shadow of its
   // names (`_shadowedParameterBoundary()`).
   const boundary = ce.context.lexicalScope;
@@ -4749,7 +4802,14 @@ function canonicalBlock(
           // literal binds it), it is a variable, as in `x + N`.
           // The repair runs here, once the scope of the block and its locals
           // exist, so that a local `N` stays the local.
-          const statement = canonicalStatement(ce, op);
+          // A `Declare` of a function signature without a value is valid
+          // when a function definition statement of the same name is in
+          // this block (`withPairedFunctionNames()`).
+          const statement = isFunction(typedStatement(op), 'Declare')
+            ? withPairedFunctionNames(functionStatementNames, () =>
+                canonicalStatement(ce, op)
+              )
+            : canonicalStatement(ce, op);
           return isSymbol(statement)
             ? canonicalValueOperand(ce, statement)
             : statement;
@@ -4762,7 +4822,27 @@ function canonicalBlock(
     if (later !== undefined) LATER_DECLARATIONS.delete(scope!);
   }
 
+  if (scope !== undefined)
+    statements = withUseBeforeDeclarationErrors(ce, ops, statements, scope);
+
   return ce._fn('Block', statements, { scope });
+}
+
+/**
+ * The names that the `DefineFunction` statements of the statement list
+ * `ops` define (the Epsil `function f(…) { … }` and `f(x) = …`).
+ */
+export function functionDefinitionNames(
+  ops: ReadonlyArray<Expression>
+): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const statement of ops) {
+    const op = typedStatement(statement);
+    if (!isFunction(op, 'DefineFunction')) continue;
+    const name = sym(op.ops[0]);
+    if (name) names.add(name);
+  }
+  return names;
 }
 
 /**
@@ -4779,172 +4859,235 @@ function typedStatement(op: Expression): Expression {
   return isFunction(op, 'Typed') ? op.op1 : op;
 }
 
+/**
+ * The canonical statements `statements` of the block with the scope
+ * `scope`, where each statement that uses a local of the block before the
+ * statement that declares it is replaced by the static error
+ * `["Error", ["ErrorCode", "read-before-declaration", name]]`. `ops` are the
+ * statements as they were before canonicalization, in the same order.
+ *
+ * A local of the block is a name that a `Declare` statement declares, or an
+ * assignment local (the target of a first assignment at the own level of
+ * the block, `assignmentLocalsOf()`). A use is a read of the name, or an
+ * assignment to it, that runs when the statement runs:
+ *
+ * - in a statement before the declaration (`do { a = k; let k = 2 }`);
+ * - in the value of the first assignment that declares the name
+ *   (`t = t + 1`). The value of a `Declare` reads the binding of an
+ *   enclosing scope (`let t = t * 2`), so it is not a use.
+ *
+ * A use in a function literal is not counted: it runs when the function is
+ * called, which can be after the declaration. A use in a nested scope that
+ * binds the same name (a nested block that declares it, a loop index) is a
+ * use of that binding. The error carries the source range of the use, when
+ * it has one, on its `ErrorCode` operand.
+ *
+ * This replaces the error value at run time: every local has its value
+ * from the statement that declares it, so a program that passes this check
+ * never reads a local with no value, except through a function that is
+ * called before the declaration runs.
+ */
+function withUseBeforeDeclarationErrors(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  statements: Expression[],
+  scope: Scope
+): Expression[] {
+  // A block built again from statements that are canonical already (a
+  // rebuild of a part of a canonical expression) was checked when the
+  // statements were first canonicalized, in their own scope chain.
+  if (ops.every((op) => op.isCanonical)) return statements;
+  // The index of the statement that declares each local of the block.
+  const declaredAt = new Map<string, number>();
+  const assignmentLocals = new Set(assignmentLocalsOf(scope) ?? []);
+  ops.forEach((raw, i) => {
+    const op = typedStatement(raw);
+    let names: string[] = [];
+    if (isFunction(op, 'Declare'))
+      names = isFunction(op.ops[0], 'Tuple')
+        ? tuplePatternNames(op.ops[0])
+        : [sym(op.ops[0])].filter((n): n is string => n !== undefined);
+    else if (isFunction(op, 'Assign') && op.ops[0] !== undefined)
+      names = (
+        isFunction(op.ops[0], 'Tuple')
+          ? tuplePatternNames(op.ops[0])
+          : [sym(op.ops[0])].filter((n): n is string => n !== undefined)
+      ).filter((n) => assignmentLocals.has(n));
+    for (const name of names)
+      if (name !== 'Nothing' && !declaredAt.has(name)) declaredAt.set(name, i);
+  });
+  // A function definition statement (`DefineFunction`) gives its name its
+  // value from the start of the block: the definition is hoisted. So a use
+  // of the name before any statement of the block is valid
+  // (`function g(k) { k + 1 }; g = (k) => k + 5`).
+  for (const name of functionDefinitionNames(ops)) declaredAt.delete(name);
+  if (declaredAt.size === 0) return statements;
+
+  // The nodes that `findUse()` walked with no use found, for each value of
+  // `limit` and of `shadowed`. Such a node is not walked again: a value
+  // built by sharing a node at each level (`Beta(t, t)`) has few distinct
+  // nodes but a number of paths exponential in its depth.
+  const walked = new Map<Expression, Set<string>>();
+  const shadowKeys = new WeakMap<ReadonlySet<string>, string>();
+  const shadowKey = (shadowed: ReadonlySet<string>): string => {
+    let key = shadowKeys.get(shadowed);
+    if (key === undefined) {
+      key = [...shadowed].sort().join(',');
+      shadowKeys.set(shadowed, key);
+    }
+    return key;
+  };
+  // The first use, in the canonical expression `e`, of a local whose
+  // declaration is at an index greater than `limit`, or `undefined`.
+  const findUse = (
+    e: Expression,
+    limit: number,
+    shadowed: ReadonlySet<string>
+  ): { name: string; site: [number, number] | undefined } | undefined => {
+    if (isSymbol(e)) {
+      const at = declaredAt.get(e.symbol);
+      if (at !== undefined && at > limit && !shadowed.has(e.symbol))
+        return { name: e.symbol, site: e.sourceOffsets };
+      return undefined;
+    }
+    if (isDictionary(e)) {
+      for (const value of e.values) {
+        const found = findUse(value, limit, shadowed);
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    }
+    // The operand of `Hold` is quoted: it is not evaluated, so a symbol in
+    // it is not a read of the local.
+    if (!isFunction(e) || e.operator === 'Function' || e.operator === 'Hold')
+      return undefined;
+    const visitKey = `${limit}|${shadowKey(shadowed)}`;
+    let visits = walked.get(e);
+    if (visits?.has(visitKey)) return undefined;
+    // A call of a local (`h(1)`) is a use of the local.
+    const calledAt = declaredAt.get(e.operator);
+    if (calledAt !== undefined && calledAt > limit && !shadowed.has(e.operator))
+      return { name: e.operator, site: e.sourceOffsets };
+    let inner = shadowed;
+    const bindings = e.localScope?.bindings;
+    if (bindings !== undefined) {
+      const names = [...declaredAt.keys()].filter((n) => bindings.has(n));
+      if (names.length > 0) inner = new Set([...shadowed, ...names]);
+    }
+    for (const op of e.ops) {
+      const found = findUse(op, limit, inner);
+      if (found !== undefined) return found;
+    }
+    if (visits === undefined) walked.set(e, (visits = new Set()));
+    visits.add(visitKey);
+    return undefined;
+  };
+
+  const none: ReadonlySet<string> = new Set();
+  return statements.map((statement, i) => {
+    if (!statement.isValid) return statement;
+    // The value of the first assignment that declares a name reads the
+    // name as the value of a `Declare` does (`x := x + 1` is
+    // `Declare(x, "unknown", x + 1)`): it is not a use before the
+    // declaration.
+    const found = findUse(statement, i, none);
+    if (found === undefined) return statement;
+    const code = ce.function(
+      'ErrorCode',
+      [ce.string('read-before-declaration'), ce.string(found.name)],
+      found.site === undefined
+        ? undefined
+        : { metadata: { sourceOffsets: found.site } }
+    );
+    return ce.function('Error', [code]);
+  });
+}
+
+/**
+ * The first name that the raw guard or body `part` of a case of a `Match`
+ * assigns and that no scope declares, or `undefined`.
+ *
+ * Such an assignment is a first assignment in a branch, which is a static
+ * error. A name is declared when a scope of the scope chain declares it,
+ * when it is a parameter of an enclosing function literal, when it is a
+ * capture of the pattern of the case (`captures`), or when a `Declare` in
+ * `part` declares it (a `let` local of the case). The body of a function
+ * literal in `part` is not read: a first assignment there declares a local
+ * of that body.
+ */
+function firstAssignmentInCase(
+  ce: ComputeEngine,
+  part: Expression,
+  captures: ReadonlySet<string>
+): string | undefined {
+  const declared = new Set<string>();
+  const assigned: string[] = [];
+  const targetNames = (target: Expression): string[] =>
+    isFunction(target, 'Tuple')
+      ? tuplePatternNames(target)
+      : isSymbol(target)
+        ? [target.symbol]
+        : [];
+  const walk = (e: Expression): void => {
+    if (!isFunction(e) || e.operator === 'Function') return;
+    if (e.operator === 'Declare' && e.nops > 0)
+      for (const name of targetNames(e.ops[0])) declared.add(name);
+    if (e.operator === 'Assign' && e.nops > 0)
+      assigned.push(...targetNames(e.ops[0]));
+    for (const op of e.ops) walk(op);
+  };
+  walk(part);
+  return assigned.find(
+    (name) =>
+      name !== 'Nothing' &&
+      name !== '_' &&
+      !captures.has(name) &&
+      !declared.has(name) &&
+      !isDeclaredForAssignment(ce, name) &&
+      !ce._isShadowedParameter(name)
+  );
+}
+
+/**
+ * True when `name` has a binding that an assignment writes: a binding that
+ * `lookupDefinition()` finds, other than one that the engine made for a free
+ * symbol of the body of a function literal (`isUndeclaredFreeSymbol()`).
+ */
+export function isDeclaredForAssignment(
+  ce: ComputeEngine,
+  name: string
+): boolean {
+  const def = ce.lookupDefinition(name);
+  return def !== undefined && !isUndeclaredFreeSymbol(def);
+}
+
+/**
+ * The first `assignment-type-mismatch` error in the canonical expression
+ * `e` (`localAssignmentMismatch()`, `library/core.ts`), or `undefined`.
+ */
+function assignmentTypeMismatchIn(
+  e: Expression | undefined
+): Expression | undefined {
+  if (e === undefined || !isFunction(e)) return undefined;
+  if (e.operator === 'Error') {
+    const code = e.op1;
+    return isFunction(code, 'ErrorCode') &&
+      isString(code.op1) &&
+      code.op1.string === 'assignment-type-mismatch'
+      ? e
+      : undefined;
+  }
+  for (const op of e.ops) {
+    const found = assignmentTypeMismatchIn(op);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
 /** Whether the raw expression `e` has an `Assign` at any depth. */
 function containsAssignment(e: Expression): boolean {
   if (!isFunction(e)) return false;
   return e.operator === 'Assign' || e.ops.some(containsAssignment);
-}
-
-/**
- * The names that an `Assign` in a nested block of the block statement `op`
- * writes, at any depth: in a branch of an `if`, in a loop body, in a `do`
- * block, or in the value of an assignment. `op` is not canonical. A part of
- * `op` that is canonical is not read: it was canonicalized in its own
- * scope, which decided then which binding each of its assignments writes.
- *
- * Some assignments write a binding that a nested construct makes, and not a
- * name of the enclosing block. Their names are not included:
- *
- * - an assignment in the body of a function literal: that body owns its
- *   names;
- * - an assignment to a name that a `let` or `const` (a `Declare`) or a
- *   `function` statement (a `DefineFunction`) of an enclosing nested block
- *   declares: the assignment writes that block local;
- * - an assignment to the index of a loop, of a comprehension or of a big
- *   operator (the symbol of an `Element` or `Limits` clause) in its body:
- *   the assignment writes the index;
- * - an assignment in an operand that the operator applies as a function or
- *   evaluates for each element after the statement has a value
- *   (`deferredOperands()`): the term of a `Table`, the callback of a `Map`,
- *   the term and the conditions of a comprehension. Such an operand is a
- *   function body of its own, or it is evaluated when the collection is read,
- *   which can be after the call of the function has returned.
- *
- * The term of a `Sum` or of a `Product`, and the body of a loop, are
- * evaluated again at each index while the statement is evaluated, so the
- * function body owns the names that they assign: the value of such a local
- * is kept from one index to the next.
- *
- * Thus in `function g(c) { if c { t = 1 }; t }`, the body of `g` owns `t`,
- * and a call of `g` with `c` false reads `t` before its first assignment.
- */
-function nestedAssignmentNames(ce: ComputeEngine, op: Expression): string[] {
-  const result: string[] = [];
-  // A node that the walk reached already with the same set of bound names
-  // gives no new name: it is not walked again. A body built by sharing a
-  // node at each level (`Pair(t, t)`) has few distinct nodes but a number
-  // of paths exponential in its depth: a walk of each path took about 5
-  // seconds at depth 24.
-  const visited = new Map<Expression, Set<ReadonlySet<string>>>();
-  const walk = (e: Expression, bound: ReadonlySet<string>): void => {
-    if (!isFunction(e) || e.operator === 'Function') return;
-    let seen = visited.get(e);
-    if (seen === undefined) visited.set(e, (seen = new Set()));
-    if (seen.has(bound)) return;
-    seen.add(bound);
-    // A part that is canonical already was canonicalized in its own scope,
-    // which decided then which binding each of its assignments writes
-    // (`lazyInexactElements()` in `library/core.ts` builds a function body
-    // around the canonical parts of a collection). That decision does not
-    // change.
-    if (e !== op && e.isCanonical) return;
-    let inner = bound;
-    const bind = (names: ReadonlyArray<string>): void => {
-      if (names.length === 0) return;
-      inner = new Set([...inner, ...names]);
-    };
-    if (e.operator === 'Block') {
-      for (const statement of e.ops) {
-        const s = typedStatement(statement);
-        if (isFunction(s, 'Declare') || isFunction(s, 'DefineFunction'))
-          bind(
-            isFunction(s.ops[0], 'Tuple')
-              ? tuplePatternNames(s.ops[0])
-              : [sym(s.ops[0])].filter((n) => n !== undefined)
-          );
-      }
-    } else {
-      for (const clause of e.ops)
-        if (
-          (isFunction(clause, 'Element') || isFunction(clause, 'Limits')) &&
-          clause.ops[0] !== undefined
-        )
-          bind(
-            isFunction(clause.ops[0], 'Tuple')
-              ? tuplePatternNames(clause.ops[0])
-              : [sym(clause.ops[0])].filter((n) => n !== undefined)
-          );
-    }
-    if (e !== op && e.operator === 'Assign' && e.ops[0] !== undefined) {
-      const target = e.ops[0];
-      const names = isFunction(target, 'Tuple')
-        ? tuplePatternNames(target)
-        : [sym(target)];
-      for (const name of names)
-        if (name !== undefined && name !== 'Nothing' && !inner.has(name))
-          result.push(name);
-    }
-    const deferred = deferredOperands(ce, e);
-    if (deferred === 'all') return;
-    e.ops.forEach((child, i) => {
-      if (!deferred.has(i)) walk(child, inner);
-    });
-  };
-  walk(op, new Set());
-  return result;
-}
-
-/**
- * The positions of the operands of the expression `e`, not canonical, that
- * its operator does not evaluate in the order of the statement that holds
- * `e`, or `'all'` when this is true of every operand
- * (`nestedAssignmentNames()`). The operator definition gives them:
- *
- * - an operand whose parameter type in the signature of the operator is a
- *   function type (in one arm of an overloaded signature, at least): the
- *   operator applies the operand, or makes a function literal of it, as
- *   `Table` does with its term;
- * - every operand of an operator that binds an index (a `scoped` operator)
- *   and is a lazy collection, such as `Comprehension`: its term and its
- *   conditions are evaluated when an element is read.
- *
- * An operator with no definition has no such operand.
- */
-function deferredOperands(
-  ce: ComputeEngine,
-  e: Expression
-): ReadonlySet<number> | 'all' {
-  const def =
-    e.operator === undefined ? undefined : ce.lookupDefinition(e.operator);
-  if (!isOperatorDef(def)) return NO_DEFERRED_OPERANDS;
-  const operator = def.operator;
-  if (operator.scoped && operator.collection !== undefined) return 'all';
-  const signature = operator.signature?.type;
-  if (signature === undefined || typeof signature !== 'object')
-    return NO_DEFERRED_OPERANDS;
-  const arms: FunctionSignature[] =
-    signature.kind === 'signature'
-      ? [signature]
-      : signature.kind === 'intersection'
-        ? signature.types.filter(
-            (t): t is FunctionSignature =>
-              typeof t === 'object' && t.kind === 'signature'
-          )
-        : [];
-  let result: Set<number> | undefined;
-  const count = isFunction(e) ? e.nops : 0;
-  for (let i = 0; i < count; i++)
-    if (arms.some((arm) => isFunctionParameterType(paramAt(arm, i)))) {
-      result ??= new Set();
-      result.add(i);
-    }
-  return result ?? NO_DEFERRED_OPERANDS;
-}
-
-const NO_DEFERRED_OPERANDS: ReadonlySet<number> = new Set();
-
-/**
- * True when the parameter type `t` is a function type, or a union with a
- * function type arm (`Ordering` accepts a key function or a comparison
- * function): the operand is a function, not a value of the statement.
- */
-function isFunctionParameterType(t: Type | undefined): boolean {
-  if (t === undefined) return false;
-  if (t === 'function') return true;
-  if (typeof t !== 'object') return false;
-  if (t.kind === 'signature') return true;
-  if (t.kind === 'union') return t.types.some(isFunctionParameterType);
-  return false;
 }
 
 /**
@@ -5191,14 +5334,32 @@ export function statementDeclaredNames(op: Expression): string[] {
  * engine looks it up (`lookupDefinition()`). A binding that the top-level
  * block of a program hoisted for a later statement does not count
  * (`LATER_DECLARATIONS`): the lookup continues in the enclosing scope.
+ * In the body of a function literal, a binding that the engine made for a
+ * free symbol of the body, with no value, does not count either
+ * (`isFreeSymbolDeclarationInBody()`, `assignment-locals.ts`).
  */
 function isDeclaredInScopeChain(ce: ComputeEngine, name: string): boolean {
   for (let s: Scope | null = ce.context.lexicalScope; s; s = s.parent) {
-    if (!s.bindings.has(name)) continue;
+    const binding = s.bindings.get(name);
+    if (binding === undefined) continue;
     if (LATER_DECLARATIONS.get(s)?.has(name)) continue;
+    if (isUndeclaredFreeSymbol(binding)) continue;
     return true;
   }
   return false;
+}
+
+/**
+ * True when `def` is a binding that the engine made for a free symbol of
+ * the body of a function literal that is canonicalized now, and that has
+ * no value (`isFreeSymbolDeclarationInBody()`, `assignment-locals.ts`). An
+ * assignment in the body does not treat it as a declaration.
+ */
+export function isUndeclaredFreeSymbol(def: BoxedDefinition): boolean {
+  return (
+    isValueDef(def) &&
+    isFreeSymbolDeclarationInBody(def, def.value.value !== undefined)
+  );
 }
 
 /**
@@ -5232,6 +5393,26 @@ function isShadowedByEarlierDeclaration(
  * to an ordinary variable reference. Flag it as an error instead. Bare
  * `Return` is intentionally left alone.
  */
+/**
+ * The canonical form of `op`, a branch of an `If` or a `Which`, or the body
+ * of a loop. A first assignment of a name in it is a static error
+ * (`enterBranch()`, `assignment-locals.ts`). With `statement` false, `op`
+ * is a value position (a value of a `Which`), where a bare `Break` is not
+ * refused.
+ */
+function canonicalBranch(
+  ce: ComputeEngine,
+  op: Expression,
+  statement = true
+): Expression {
+  enterBranch();
+  try {
+    return statement ? canonicalStatement(ce, op) : op.canonical;
+  } finally {
+    exitBranch();
+  }
+}
+
 function canonicalStatement(ce: ComputeEngine, op: Expression): Expression {
   if (isSymbol(op) && (op.symbol === 'Break' || op.symbol === 'Continue'))
     return ce.error(
@@ -5622,7 +5803,7 @@ function canonicalLoopLike(
     // Bare form. `Loop(body)` is a valid infinite imperative loop;
     // `Comprehension(body)` needs at least one Element clause.
     if (head === 'Comprehension') return null;
-    return ce._fn('Loop', [canonicalStatement(ce, body)]);
+    return ce._fn('Loop', [canonicalBranch(ce, body)]);
   }
 
   // Variadic Element form: bound names must not leak. The scope, its
@@ -5956,7 +6137,22 @@ function canonicalLoopLike(
         : [idxCanonical, collCanonical, guardCanonical]
     );
   });
-  const canonicalBody: Expression = canonicalStatement(ce, body);
+  // The body of a `Loop` is a branch: a first assignment of a name there is
+  // a static error. The term of a `Comprehension` is a value: a block there
+  // declares its own locals for each element.
+  // The count of branches starts again at zero for the term, so a block in
+  // the term declares its locals also when the `Comprehension` is in a
+  // branch, as for the body of a function literal (`enterFunctionBody()`).
+  let canonicalBody: Expression;
+  if (head === 'Loop') canonicalBody = canonicalBranch(ce, body);
+  else {
+    enterFunctionBody();
+    try {
+      canonicalBody = canonicalStatement(ce, body);
+    } finally {
+      exitFunctionBody();
+    }
+  }
 
   return ce._fn(head, [canonicalBody, ...canonicalIterators], {
     scope: loopScope,

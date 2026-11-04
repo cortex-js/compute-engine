@@ -114,7 +114,17 @@ export type DeclineNote = { reason?: string };
  * (`node` is then the `Loop`), and `'handler-value'` when a caller's
  * `compile` handler wrote the code of a node whose static type admits
  * shapes that conflict and the stock code of a consumer reads its value
- * (`node` is then the node of the handler).
+ * (`node` is then the node of the handler), `'block-value'` when a `Block`
+ * with a statement other than a declaration with a value (an assignment,
+ * a loop, a jump, any other statement before the last) is an operand (it
+ * is not a statement, not
+ * the body of a function, of the root or of a binder such as `Sum`, and
+ * not their last value; `node` is then the `Block`; a block whose
+ * statements before the last are only declarations with a value, as a
+ * `where` clause gives, is a value and is not refused), and
+ * `'nothing-value'` when the value of an assignment or of a declaration
+ * is used (the last statement of a block whose value is used; `node` is
+ * then the assignment).
  * `assertAdmitted()` reads the reason to write the message of the decline.
  */
 export type UnsettledShape = {
@@ -128,7 +138,9 @@ export type UnsettledShape = {
     | 'scoped-assignment'
     | 'return-in-loop'
     | 'loop-value'
-    | 'handler-value';
+    | 'handler-value'
+    | 'block-value'
+    | 'nothing-value';
 };
 
 /**

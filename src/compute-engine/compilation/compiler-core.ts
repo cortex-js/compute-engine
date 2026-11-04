@@ -693,19 +693,24 @@ function boxedInCurrentScope(expr: Expression): Expression {
     return n;
   };
   if (pathCount(expr) <= 10_000) return ce.box(expr.json);
+  // The new nodes are not canonical, and the root is made canonical once,
+  // as `ce.box()` does. A node made canonical alone is canonicalized in the
+  // scope around the root, not in the scope of its block: the target of an
+  // `Assign` that declares a local of a block was then declared in that
+  // scope, and the compiled block wrote a symbol that it does not declare.
   const memo = new Map<Expression, Expression>();
   const rebox = (e: Expression): Expression => {
     const known = memo.get(e);
     if (known !== undefined) return known;
     const r = isFunction(e)
-      ? ce.function(e.operator, e.ops.map(rebox))
+      ? ce.function(e.operator, e.ops.map(rebox), { form: 'raw' })
       : isSymbol(e)
-        ? ce.symbol(e.symbol)
+        ? ce.symbol(e.symbol, { canonical: false })
         : e;
     memo.set(e, r);
     return r;
   };
-  return rebox(expr);
+  return rebox(expr).canonical;
 }
 
 /**
@@ -4617,6 +4622,12 @@ export function compileLoopBody(
           localComplexDefault(expr.localScope, s.ops[0].symbol)
         );
     _pushLocalComplex(complexFrame);
+    // The body block stays on the stack of the nodes being compiled while
+    // its statements compile, as a block compiled by `compileBlock` does. A
+    // raw `Match` case body in the loop body is canonicalized in the scope of
+    // the innermost node on that stack (`inCompiledScope()`,
+    // `compile-match.ts`), so that it sees the locals of this block.
+    _compileParents.push(expr);
     try {
       for (const s of withDecls) core.noteLocalComplex(s, complexFrame);
       return withCseScope(expr, -1, bodyTarget, () =>
@@ -4637,6 +4648,7 @@ export function compileLoopBody(
           .join('; ')
       );
     } finally {
+      _compileParents.pop();
       _popLocalComplex();
       reserved.done();
     }

@@ -30,8 +30,7 @@ function fixture(
     kind,
     [
       'Block',
-      ['Declare', 'q', "'broadcastable<number>'"],
-      ['Assign', 'q', value],
+      ['Declare', 'q', "'broadcastable<number>'", value],
       ...tail,
       'q',
     ],

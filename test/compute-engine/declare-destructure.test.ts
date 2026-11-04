@@ -86,10 +86,11 @@ describe('Declare with a Tuple pattern', () => {
     expect(ce.symbol('a').evaluate().symbol).toBe('a');
   });
 
-  test('a pattern without a value stays inert', () => {
+  test('a pattern without a value is a static error', () => {
     const ce = new ComputeEngine();
     const r = ce.box(['Declare', ['Tuple', 'x', 'y']]).evaluate();
-    expect(r.operator).toBe('Declare');
+    expect(r.operator).toBe('Error');
+    expect(r.toString()).toContain('declaration-without-value');
   });
 });
 
@@ -648,10 +649,11 @@ describe('Declare with a Tuple pattern: compilation', () => {
   test('a destructuring declare in VALUE position fails closed', () => {
     // The rewrite ends on the last leaf's declare, whose value is that leaf's,
     // not the tuple's. Refused EXPLICITLY: it used to be desugared here too
-    // and fail closed only because `return let b = 4` is a syntax error.
+    // and fail closed only because `return let b = 4` is a syntax error. A
+    // block whose last statement is a `Declare` has the value `Nothing`.
     const expr = boxed('do { let a = 1; let (x, y) = (3, 4) }');
     expect(compile(expr)?.success).toBe(false);
-    expect(expr.evaluate().toString()).toBe('(3, 4)');
+    expect(expr.evaluate().toString()).toBe('"Nothing"');
   });
 
   test('a scalar assignment still compiles', () => {
@@ -826,10 +828,11 @@ describe('Assign with a Tuple pattern: compilation', () => {
   test('a destructuring assign in VALUE position fails closed', () => {
     // The rewrite ends on a write, whose value is one leaf's — not the
     // tuple's. A block's last statement is its value, so it is left alone and
-    // fails closed rather than silently returning the wrong thing.
+    // fails closed rather than silently returning the wrong thing. A block
+    // whose last statement is an `Assign` has the value `Nothing`.
     const expr = boxed('do { let a=1; let b=2; (a,b) := (b,a) }');
     expect(compile(expr)?.success).toBe(false);
-    expect(expr.evaluate().toString()).toBe('(2, 1)');
+    expect(expr.evaluate().toString()).toBe('"Nothing"');
   });
 
   test('any other non-symbol Assign target fails closed', () => {

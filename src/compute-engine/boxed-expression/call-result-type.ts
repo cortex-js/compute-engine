@@ -56,7 +56,12 @@ import {
 } from '../collection-utils.js';
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { signatureParamsAreScalar } from './callback-broadcast-admission.js';
-import { isFunction, isNumber, isSymbol } from './type-guards.js';
+import {
+  isDictionary,
+  isFunction,
+  isNumber,
+  isSymbol,
+} from './type-guards.js';
 import { provisionalRecursionResult } from './declared-parameter-result.js';
 import {
   noteStackDependentAnswer,
@@ -1376,6 +1381,25 @@ function isScalarResult(declared: Type): boolean {
 }
 
 /**
+ * The value of the `Declare` whose operands are `ops`: the positional
+ * value of `Declare(name, type, value)`, else the `value` key of a
+ * dictionary of attributes as the last operand. `undefined` when the
+ * declaration has no value.
+ */
+function declaredValueOf(
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  let rest = ops.slice(1);
+  let attributesValue: Expression | undefined;
+  const last = rest[rest.length - 1];
+  if (last !== undefined && isDictionary(last)) {
+    attributesValue = last.get('value');
+    rest = rest.slice(0, -1);
+  }
+  return rest[1] ?? attributesValue;
+}
+
+/**
  * The type of `Apply(fn, …args)`, where `fn` is the descriptor of a function
  * literal written in place (`x ↦ …`, not a name), derived from the literal's
  * body as `callResultType` derives the result of a call of a user function:
@@ -1866,7 +1890,20 @@ function literalBodyResultType(
           for (const op of expr.ops) {
             if (isFunction(op, 'Declare') && isSymbol(op.op1)) {
               locals.add(op.op1.symbol);
-              env.set(op.op1.symbol, describeType('unknown'));
+              // A `Declare` with a value types the local as its value, as
+              // a first `Assign` does: `Declare(q, "unknown", v)` is the
+              // declaration `q := v`. A `Declare` with no value (the
+              // signature of a function that a definition statement of the
+              // block defines) types the local `unknown`.
+              const value = declaredValueOf(op.ops);
+              if (value === undefined) {
+                env.set(op.op1.symbol, describeType('unknown'));
+                continue;
+              }
+              result = walk(value);
+              if (!result) return undefined;
+              env.set(op.op1.symbol, result);
+              memo.clear();
               continue;
             }
             if (isFunction(op, 'Assign') && isSymbol(op.op1)) {
@@ -1888,6 +1925,11 @@ function literalBodyResultType(
             result = walk(op);
             if (!result) return undefined;
           }
+          // A block whose last statement is an assignment or a declaration
+          // has the value `Nothing`, not the value of the statement.
+          const last = expr.ops[expr.ops.length - 1];
+          if (isFunction(last, 'Assign') || isFunction(last, 'Declare'))
+            return describeType('nothing');
           return result;
         } finally {
           blockDepth--;

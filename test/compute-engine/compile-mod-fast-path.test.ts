@@ -91,8 +91,7 @@ describe('compiled Mod: plain % for operands bounded inside the safe range', () 
     // as the index of a `Sum` over `Limits(j, 1, 100)` is.
     const json = [
       'Block',
-      ['Declare', 'c', "'integer'"],
-      ['Assign', 'c', 0],
+      ['Declare', 'c', "'integer'", 0],
       [
         'Loop',
         [
@@ -117,8 +116,7 @@ describe('compiled Mod: plain % for operands bounded inside the safe range', () 
     // compile time and failed with "bounds must be finite numbers".
     const json = [
       'Block',
-      ['Declare', 'c', "'integer'"],
-      ['Assign', 'c', 0],
+      ['Declare', 'c', "'integer'", 0],
       [
         'Loop',
         [

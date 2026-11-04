@@ -709,8 +709,15 @@ describe('CE-571 compileFieldFunction: review findings', () => {
       /assigns "x", which is a coordinate/
     );
     // Names that only the block assigns are its locals, not parameters.
+    // The block ends with the local: a block that ends in an assignment has
+    // the value `Nothing`.
     const local = field(
-      ce.box(['Block', ['Assign', 's', 'x'], ['Assign', 't', ['Add', 's', 1]]])
+      ce.box([
+        'Block',
+        ['Assign', 's', 'x'],
+        ['Assign', 't', ['Add', 's', 1]],
+        't',
+      ])
     );
     expect(local.success).toBe(true);
     expect(local.params).toEqual([]);

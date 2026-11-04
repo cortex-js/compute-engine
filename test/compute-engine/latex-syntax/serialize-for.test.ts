@@ -100,14 +100,14 @@ describe('COMPREHENSION with a Block body (Tycho item 172)', () => {
   // the body and the value silently changed. The body is fenced with `(…)`.
   const blockComprehension = [
     'Comprehension',
-    ['Block', ['Declare', 'd'], ['Assign', 'd', ['List', 'n', 2]], ['Sum', 'd']],
+    ['Block', ['Declare', 'd', "'unknown'", ['List', 'n', 2]], ['Sum', 'd']],
     ['Element', 'n', ['Range', 1, 3]],
   ] as any;
 
   test('box route: the block body is fenced', () => {
     const ce = new ComputeEngine();
     expect(ce.box(blockComprehension).latex).toMatchInlineSnapshot(
-      `\\left[\\left(d\\coloneq\\bigl\\lbrack n, 2\\bigr\\rbrack; \\sum d\\right) \\operatorname{for} n = 1..3\\right]`
+      `\\left[\\left(\\sum d\\text{ where }d\\coloneq\\bigl\\lbrack n, 2\\bigr\\rbrack\\right) \\operatorname{for} n = 1..3\\right]`
     );
   });
 
@@ -140,8 +140,7 @@ describe('COMPREHENSION with a Block body (Tycho item 172)', () => {
       'Comprehension',
       [
         'Block',
-        ['Declare', 'd'],
-        ['Assign', 'd', ['Multiply', 'n', 10]],
+        ['Declare', 'd', "'unknown'", ['Multiply', 'n', 10]],
         ['Add', 'd', 1],
       ],
       ['Element', 'n', ['Range', 1, 3]],
@@ -177,8 +176,7 @@ describe('LOOP with a Block body (item 172 sibling)', () => {
     'Loop',
     [
       'Block',
-      ['Declare', 's'],
-      ['Assign', 's', ['Multiply', 'i', 2]],
+      ['Declare', 's', "'unknown'", ['Multiply', 'i', 2]],
       ['Add', 's', 1],
     ],
     ['Element', 'i', ['Range', 1, 3]],
@@ -187,7 +185,7 @@ describe('LOOP with a Block body (item 172 sibling)', () => {
   test('box route: the block body is fenced', () => {
     const ce = new ComputeEngine();
     expect(ce.box(blockLoop).latex).toMatchInlineSnapshot(
-      `\\text{for }i\\text{ from }1\\text{ to }3\\text{ do }\\left(s\\coloneq2i; s+1\\right)`
+      `\\text{for }i\\text{ from }1\\text{ to }3\\text{ do }\\left(s+1\\text{ where }s\\coloneq2i\\right)`
     );
   });
 
@@ -222,14 +220,13 @@ describe('LOOP with a Block body (item 172 sibling)', () => {
       'Loop',
       [
         'Block',
-        ['Declare', 's'],
-        ['Assign', 's', ['Multiply', 'k', 2]],
+        ['Declare', 's', "'unknown'", ['Multiply', 'k', 2]],
         ['Add', 's', 1],
       ],
       ['Element', 'k', ['List', 1, 2, 3]],
     ] as any);
     expect(e.latex).toMatchInlineSnapshot(
-      `\\operatorname{Loop}(\\left(s\\coloneq2k; s+1\\right), k\\in\\bigl\\lbrack1, 2, 3\\bigr\\rbrack)`
+      `\\operatorname{Loop}(\\left(s+1\\text{ where }s\\coloneq2k\\right), k\\in\\bigl\\lbrack1, 2, 3\\bigr\\rbrack)`
     );
     expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
   });
@@ -257,8 +254,7 @@ describe('DEFAULT function serializer with a Block operand (item 172)', () => {
   // `, 3` into its last statement — a VALUE-CHANGING round trip.
   const block = [
     'Block',
-    ['Declare', 's'],
-    ['Assign', 's', 2],
+    ['Declare', 's', "'unknown'", 2],
     ['Add', 's', 1],
   ] as any;
 
@@ -266,7 +262,7 @@ describe('DEFAULT function serializer with a Block operand (item 172)', () => {
     const ce = new ComputeEngine();
     const e = ce.box(['Repeat', block, 3] as any);
     expect(e.latex).toMatchInlineSnapshot(
-      `\\mathrm{Repeat}(\\left(s\\coloneq2; s+1\\right), 3)`
+      `\\mathrm{Repeat}(\\left(s+1\\text{ where }s\\coloneq2\\right), 3)`
     );
     expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
   });
@@ -276,7 +272,7 @@ describe('DEFAULT function serializer with a Block operand (item 172)', () => {
     ce.declare('g3', '(any, any, any) -> number');
     const e = ce.box(['g3', block, 1, 2] as any);
     expect(e.latex).toMatchInlineSnapshot(
-      `\\mathrm{g3}(\\left(s\\coloneq2; s+1\\right), 1, 2)`
+      `\\mathrm{g3}(\\left(s+1\\text{ where }s\\coloneq2\\right), 1, 2)`
     );
     expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
   });
@@ -286,7 +282,7 @@ describe('DEFAULT function serializer with a Block operand (item 172)', () => {
     ce.declare('g3', '(any, any, any) -> number');
     const e = ce.box(['g3', 1, block, 2] as any);
     expect(e.latex).toMatchInlineSnapshot(
-      `\\mathrm{g3}(1, \\left(s\\coloneq2; s+1\\right), 2)`
+      `\\mathrm{g3}(1, \\left(s+1\\text{ where }s\\coloneq2\\right), 2)`
     );
     expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
   });
@@ -296,7 +292,7 @@ describe('DEFAULT function serializer with a Block operand (item 172)', () => {
     ce.declare('g3', '(any, any, any) -> number');
     const e = ce.box(['g3', 1, 2, block] as any);
     expect(e.latex).toMatchInlineSnapshot(
-      `\\mathrm{g3}(1, 2, \\left(s\\coloneq2; s+1\\right))`
+      `\\mathrm{g3}(1, 2, \\left(s+1\\text{ where }s\\coloneq2\\right))`
     );
     expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
   });
@@ -322,11 +318,10 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
   // LAST statement, made the block answer `Nothing` instead of `2`).
   // Braces were considered and rejected: `\left\lbrace s≔2\right\rbrace`
   // parses as `Set(Assign(…))` — set notation wins the collision.
-  const single = ['Block', ['Declare', 's'], ['Assign', 's', 2]] as any;
+  const single = ['Block', ['Declare', 's', "'unknown'", 2]] as any;
   const multi = [
     'Block',
-    ['Declare', 's'],
-    ['Assign', 's', 2],
+    ['Declare', 's', "'unknown'", 2],
     ['Add', 's', 1],
   ] as any;
 
@@ -335,13 +330,13 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
     expect(ce.box(single).latex).toMatchInlineSnapshot(`s\\coloneq2;`);
   });
 
-  test('parses back to the same block — with its VALUE, not `Nothing`', () => {
+  test('parses back to the same block, whose value is `Nothing`', () => {
     const ce = new ComputeEngine();
     const e = ce.parse('(s\\coloneq2;)');
     expect(e.json).toEqual(
-      asParsed(['Block', ['Declare', 's'], ['Assign', 's', 2]])
+      asParsed(['Block', ['Declare', 's', "'unknown'", 2]])
     );
-    expect(e.evaluate().json).toEqual(2);
+    expect(e.evaluate().json).toEqual('Nothing');
   });
 
   test('top-level round trip', () => {
@@ -349,7 +344,7 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
     const e = ce.box(single);
     const back = ce.parse(e.latex);
     expect(back.json).toEqual(asParsed(e.json));
-    expect(back.evaluate().json).toEqual(2);
+    expect(back.evaluate().json).toEqual('Nothing');
   });
 
   // A bare `Assign` changes an `s` outside the block: it is written in the
@@ -362,8 +357,7 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
     expect(ce.parse(e.latex).json).toEqual(['Block', ['Assign', 's', 2]]);
     const local = ce.box([
       'Block',
-      ['Declare', 's'],
-      ['Assign', 's', 2],
+      ['Declare', 's', "'unknown'", 2],
     ] as any);
     expect(local.latex).toMatchInlineSnapshot(`s\\coloneq2;`);
     expect(ce.parse(local.latex).json).toEqual(asParsed(local.json));
@@ -385,7 +379,7 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
       `\\mathrm{Repeat}(\\left(s\\coloneq2;\\right), 3)`
     );
     expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
-    expect(ce.parse(e.latex).evaluate().json).toEqual(['List', 2, 2, 2]);
+    expect(ce.parse(e.latex).evaluate().json).toEqual(['List', 'Nothing', 'Nothing', 'Nothing']);
   });
 
   test('Loop body, `for … do` spelling', () => {
@@ -427,7 +421,7 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
     expect(ce.parse(e.latex).json).toEqual(asParsed(e.json));
     // A `Comprehension` is a LAZY collection — it stays itself under
     // `evaluate()`, so compare the materialized elements.
-    expect(ce.parse(e.latex).evaluate().toString()).toEqual('[2,2,2]');
+    expect(ce.parse(e.latex).evaluate().toString()).toEqual('["Nothing","Nothing","Nothing"]');
   });
 
   // The point of keeping the block: its statements run in a LOCAL scope, so a
@@ -437,13 +431,13 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
   test('block-local assignment does not leak, before or after the round trip', () => {
     const original = new ComputeEngine();
     original.assign('s', 99);
-    expect(original.box(single).evaluate().json).toEqual(2);
+    expect(original.box(single).evaluate().json).toEqual('Nothing');
     expect(original.box('s').evaluate().json).toEqual(99);
 
     const reparsed = new ComputeEngine();
     reparsed.assign('s', 99);
     const back = reparsed.parse(new ComputeEngine().box(single).latex);
-    expect(back.evaluate().json).toEqual(2);
+    expect(back.evaluate().json).toEqual('Nothing');
     expect(reparsed.box('s').evaluate().json).toEqual(99);
 
     // Witness: without the block, the assignment leaks.
@@ -457,12 +451,14 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
   // they take no trailing marker — their LaTeX is byte-identical to before.
   test('multi-statement blocks are unchanged (no trailing `;`)', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(multi).latex).toMatchInlineSnapshot(`s\\coloneq2; s+1`);
+    expect(ce.box(multi).latex).toMatchInlineSnapshot(
+      `s+1\\text{ where }s\\coloneq2`
+    );
     expect(ce.parse(ce.box(multi).latex).json).toEqual(asParsed(ce.box(multi).json));
     expect(
       ce.box(['Repeat', multi, 3] as any).latex
     ).toMatchInlineSnapshot(
-      `\\mathrm{Repeat}(\\left(s\\coloneq2; s+1\\right), 3)`
+      `\\mathrm{Repeat}(\\left(s+1\\text{ where }s\\coloneq2\\right), 3)`
     );
   });
 
@@ -483,7 +479,7 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
       'Block',
       ['Block', ['Declare', 's', "'unknown'", 2]],
     ]);
-    expect(e.evaluate().json).toEqual(2);
+    expect(e.evaluate().json).toEqual('Nothing');
   });
 
   // The marker is a SPELLING fact — an EMPTY token segment between the last
@@ -512,12 +508,12 @@ describe('SINGLE-STATEMENT Block round trip (item 172)', () => {
     ]);
     expect(e.evaluate().json).toEqual('Nothing');
 
-    // The synthetic marker is still dropped: same block, value `2`.
+    // The synthetic marker is still dropped: same block, value `Nothing`.
     const marked = ce.parse('(s\\coloneq2;)');
     expect(marked.json).toEqual(
-      asParsed(['Block', ['Declare', 's'], ['Assign', 's', 2]])
+      asParsed(['Block', ['Declare', 's', "'unknown'", 2]])
     );
-    expect(marked.evaluate().json).toEqual(2);
+    expect(marked.evaluate().json).toEqual('Nothing');
   });
 });
 

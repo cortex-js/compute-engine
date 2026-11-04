@@ -729,7 +729,7 @@ describe('GENERIC TYPE ALIASES — box route (`DeclareType`) parity', () => {
     // `Declare` parses its declared type eagerly. A type that does not parse
     // gives an `invalid-type-declaration` error with the message of the type
     // parser, as `{str: 'nosuchtype'}` does (CE-101).
-    const r = ce.box(['Declare', 'p', { str: 'Pair' }]).evaluate();
+    const r = ce.box(['Declare', 'p', { str: 'Pair' }, 1]).evaluate();
     expect(r.operator).toBe('Error');
     expect(r.toString()).toMatch(/generic-alias-arity/);
   });

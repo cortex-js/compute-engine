@@ -16,7 +16,7 @@ import { ComputeEngine } from '../../src/compute-engine';
  * `NumericApproximation(x)` gave `5` on the asynchronous route.
  */
 
-const DECLARE_Y = ['Declare', 'y', "'real'"];
+const DECLARE_Y = ['Declare', 'y', "'real'", 3];
 
 function engine(globalY: boolean): ComputeEngine {
   const ce = new ComputeEngine();
@@ -28,25 +28,25 @@ function engine(globalY: boolean): ComputeEngine {
 }
 
 const CASES: [string, unknown, string][] = [
-  ['g(y)', ['Block', DECLARE_Y, ['g', 'y']], 'y + 0.5'],
-  ['f(y)', ['Block', DECLARE_Y, ['f', 'y']], 'y'],
-  ['Apply(f, y)', ['Block', DECLARE_Y, ['Apply', 'f', 'y']], 'y'],
-  ['Apply(g, y)', ['Block', DECLARE_Y, ['Apply', 'g', 'y']], 'y + 0.5'],
+  ['g(y)', ['Block', DECLARE_Y, ['g', 'y']], '3.5'],
+  ['f(y)', ['Block', DECLARE_Y, ['f', 'y']], '3'],
+  ['Apply(f, y)', ['Block', DECLARE_Y, ['Apply', 'f', 'y']], '3'],
+  ['Apply(g, y)', ['Block', DECLARE_Y, ['Apply', 'g', 'y']], '3.5'],
   // A nested call passes the argument on: the outer frame reads it in the
   // block, through the caller of the outer call.
-  ['g2(y)', ['Block', DECLARE_Y, ['g2', 'y']], 'y + 0.5'],
+  ['g2(y)', ['Block', DECLARE_Y, ['g2', 'y']], '3.5'],
   // The call is in a block nested in the block that declares `y`.
-  ['nested block', ['Block', DECLARE_Y, ['Block', ['g', 'y']]], 'y + 0.5'],
+  ['nested block', ['Block', DECLARE_Y, ['Block', ['g', 'y']]], '3.5'],
   // An element of `Map` that is read in the block.
   [
     'At(Map(f, [y]), 1)',
     ['Block', DECLARE_Y, ['At', ['Map', 'f', ['List', 'y']], 1]],
-    'y',
+    '3',
   ],
   [
     'At(Map(g, [y]), 1)',
     ['Block', DECLARE_Y, ['At', ['Map', 'g', ['List', 'y']], 1]],
-    'y + 0.5',
+    '3.5',
   ],
 ];
 
@@ -98,25 +98,25 @@ describe('A REMOVED LOCAL IN AN ARGUMENT, MORE FORMS', () => {
       ['Assign', 'L', ['Map', 'g', ['List', 'y']]],
       ['Block', DECLARE_Y, ['Assign', 'y', 7], ['At', 'L', 1]],
     ];
-    expect(ce.box(expr).evaluate().toString()).toBe('y + 0.5');
-    expect((await ce.box(expr).evaluateAsync()).toString()).toBe('y + 0.5');
+    expect(ce.box(expr).evaluate().toString()).toBe('3.5');
+    expect((await ce.box(expr).evaluateAsync()).toString()).toBe('3.5');
   });
 
   test('a block that is a function body', async () => {
     const ce = engine(true);
     ce.assign('F', ce.box(['Function', ['Block', DECLARE_Y, ['g', 'y']], 'n']));
     const expr = ['List', ['F', 1], ['F', 2]];
-    expect(ce.box(expr).evaluate().toString()).toBe('[y + 0.5,y + 0.5]');
+    expect(ce.box(expr).evaluate().toString()).toBe('[3.5,3.5]');
     expect((await ce.box(expr).evaluateAsync()).toString()).toBe(
-      '[y + 0.5,y + 0.5]'
+      '[3.5,3.5]'
     );
   });
 
   test('a block that is the body of a function with no parameter', async () => {
     const ce = engine(true);
     ce.assign('H', ce.box(['Function', ['Block', DECLARE_Y, ['g', 'y']]]));
-    expect(ce.box(['H']).evaluate().toString()).toBe('y + 0.5');
-    expect((await ce.box(['H']).evaluateAsync()).toString()).toBe('y + 0.5');
+    expect(ce.box(['H']).evaluate().toString()).toBe('3.5');
+    expect((await ce.box(['H']).evaluateAsync()).toString()).toBe('3.5');
   });
 
   test('a block that is the body of a recursive function', async () => {
@@ -138,9 +138,9 @@ describe('A REMOVED LOCAL IN AN ARGUMENT, MORE FORMS', () => {
         'n',
       ])
     );
-    expect(ce.box(['R', 3]).evaluate().toString()).toBe('y + 0.5');
+    expect(ce.box(['R', 3]).evaluate().toString()).toBe('3.5');
     expect((await ce.box(['R', 3]).evaluateAsync()).toString()).toBe(
-      'y + 0.5'
+      '3.5'
     );
   });
 
@@ -162,8 +162,8 @@ describe('A REMOVED LOCAL IN AN ARGUMENT, MORE FORMS', () => {
       ce.box(['G', 2]).evaluateAsync(),
     ]);
     expect(results.map((r) => r.toString())).toEqual([
-      'y + 0.5',
-      'y + 0.5',
+      '3.5',
+      '3.5',
       '1.5',
       '2.5',
     ]);
@@ -228,7 +228,7 @@ describe('CONTROLS', () => {
       ['Assign', 'h', ['Function', ['Add', 'y', 0.5]]],
       ['Block', DECLARE_Y, ['Assign', 'y', 2], ['h']],
     ];
-    expect(ce.box(expr).evaluate().toString()).toBe('y + 0.5');
-    expect((await ce.box(expr).evaluateAsync()).toString()).toBe('y + 0.5');
+    expect(ce.box(expr).evaluate().toString()).toBe('3.5');
+    expect((await ce.box(expr).evaluateAsync()).toString()).toBe('3.5');
   });
 });

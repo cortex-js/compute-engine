@@ -497,8 +497,7 @@ describe('CE-572: the review fixes', () => {
           ['At', 'S', 1],
           [
             'Block',
-            ['Declare', 'S', "'list<real^5>'"],
-            ['Assign', 'S', ['List', 1, 2, 3, 4, 5]],
+            ['Declare', 'S', "'list<real^5>'", ['List', 1, 2, 3, 4, 5]],
             ['At', 'S', 'x'],
           ],
         ]),

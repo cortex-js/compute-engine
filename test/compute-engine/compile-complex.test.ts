@@ -1344,8 +1344,7 @@ describe('COMPILE COMPLEX - complex ARGUMENT to a wide-typed user-function param
     e.parse('u(x) := x + k').evaluate();
     const blk = e.box([
       'Block',
-      ['Declare', 'k', 'complex'],
-      ['Assign', 'k', ['Complex', 1, 1]],
+      ['Declare', 'k', 'complex', ['Complex', 1, 1]],
       ['u', 2],
     ]);
     const r = compile(blk, { fallback: false });

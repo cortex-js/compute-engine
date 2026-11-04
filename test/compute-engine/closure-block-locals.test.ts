@@ -246,7 +246,9 @@ describe('a returned closure that defines and calls a local function', () => {
   });
 
   test('the local function is defined in a nested block of the closure', () => {
-    // w ↦ (x ↦ If(x > 0, Block(g := z ↦ 3, x + g(0)), 0))
+    // w ↦ (x ↦ Block(g := z ↦ 0, If(x > 0, Block(g := z ↦ 3, x + g(0)), 0)))
+    // `g` is assigned first at the block level, because a first assignment
+    // in a branch is a static error.
     expect(
       json([
         'Apply',
@@ -257,14 +259,18 @@ describe('a returned closure that defines and calls a local function', () => {
             [
               'Function',
               [
-                'If',
-                ['Greater', 'x', 0],
+                'Block',
+                ['Assign', 'g', ['Function', 0, 'z']],
                 [
-                  'Block',
-                  ['Assign', 'g', ['Function', 3, 'z']],
-                  ['Add', 'x', ['g', 0]],
+                  'If',
+                  ['Greater', 'x', 0],
+                  [
+                    'Block',
+                    ['Assign', 'g', ['Function', 3, 'z']],
+                    ['Add', 'x', ['g', 0]],
+                  ],
+                  0,
                 ],
-                0,
               ],
               'x',
             ],

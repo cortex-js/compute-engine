@@ -944,12 +944,21 @@ describe('Tycho row 413 (a): the edges of the rule', () => {
     );
     // The operands after the pair are not evaluated.
     const e = new ComputeEngine();
-    e.assign('w', 0);
-    const chain = ['Less', 0, 'ImaginaryUnit', ['Assign', 'w', 5]] as const;
+    // An assignment is not an operand, so a host operator that counts its
+    // evaluations stands for the side effect.
+    let calls = 0;
+    e.declare('bump', {
+      signature: '() -> integer',
+      evaluate: () => {
+        calls += 1;
+        return e.number(calls);
+      },
+    });
+    const chain = ['Less', 0, 'ImaginaryUnit', ['bump']] as const;
     expect(e.box(chain as never).evaluate().symbol).toBe('False');
-    expect(e.box('w').evaluate().re).toBe(0);
+    expect(calls).toBe(0);
     expect((await e.box(chain as never).evaluateAsync()).symbol).toBe('False');
-    expect(e.box('w').evaluate().re).toBe(0);
+    expect(calls).toBe(0);
   });
 
   test('a tie of two values with no order is not a true ≤', () => {

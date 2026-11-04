@@ -170,10 +170,12 @@ s = 10
 // ➔ (3, 5, 10)
 ```
 
-Each call starts with no value for such a local: a read of it before its
-first assignment in the call (`function step(k) { r = s; s = k; r }`, or
-`function g(c) { if c { t = 1 }; t }` called with `c` false) is the
-`read-before-declaration` error, not the bare symbol, as for a `let` local.
+A read of such a local before its first assignment in the function body
+(`function step(k) { r = s; s = k; r }`) is the `read-before-declaration`
+error, which `epsil check` reports before the program runs. A first
+assignment in a branch (`function g(c) { if c { t = 1 }; t }`) is the
+`first-assignment-in-branch` error: declare the local with a value before
+the branch.
 
 Reach for `const` when a name should not move at all. Constness is a property
 of the *binding*, not of the value it holds — every value is immutable

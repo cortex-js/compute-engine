@@ -44,10 +44,8 @@ const corner = (di: number): unknown => [
 ];
 const MARCH = [
   'Block',
-  ['Declare', 'v0', 'real'],
-  ['Assign', 'v0', corner(0)],
-  ['Declare', 'v1', 'real'],
-  ['Assign', 'v1', corner(1)],
+  ['Declare', 'v0', 'real', corner(0)],
+  ['Declare', 'v1', 'real', corner(1)],
   [
     'Tuple',
     [

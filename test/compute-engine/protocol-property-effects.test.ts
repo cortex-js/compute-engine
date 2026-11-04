@@ -478,12 +478,14 @@ let q = Q(n: 1)`);
 });
 
 describe('the inference channel: a function body that stores', () => {
+  // A body whose last statement is an assignment, also a store into a
+  // field, has the value `Nothing`, so the result type is `nothing`.
   test('a store into a LAYOUT field infers `state`', () => {
     expect(
       run(`${FIELD_BACKED}
 function f(x: P) { x.age = 43 }
 Type(f)`).value
-    ).toBe('TypeFrom("(x: P) state -> integer")');
+    ).toBe('TypeFrom("(x: P) state -> nothing")');
   });
 
   test('…and annotating that function `pure` is REFUSED, as an error value', () => {
@@ -507,7 +509,7 @@ function f(x: P) pure { x.age = 43 }`);
       run(`${COMPUTED}
 function f(x: Q) { x.age = 3 }
 Type(f)`).value
-    ).toBe('TypeFrom("(x: Q) state -> integer")');
+    ).toBe('TypeFrom("(x: Q) state -> nothing")');
   });
 
   test('…and annotating THAT function `pure` is refused too', () => {
@@ -531,7 +533,7 @@ function f(x: Q) pure { x.age = 3 }`);
 type Outer = object{child: Inner}
 function f(o: Outer) { o.child.age = 9 }
 Type(f)`).value
-    ).toBe('TypeFrom("(o: Outer) state -> integer")');
+    ).toBe('TypeFrom("(o: Outer) state -> nothing")');
     // The `state` effect is what this test is about; the RESULT type is
     // decided by the lambda-body widening
     // (`boxed-expression/effects-inference.ts`), which replaces a finite
@@ -544,7 +546,7 @@ Type(f)`).value
       run(`type Inner = object{age: integer}
 function f(xs: list<Inner>) { xs[1].age = 9 }
 Type(f)`).value
-    ).toBe('TypeFrom("(xs: list<Inner>) state -> integer")');
+    ).toBe('TypeFrom("(xs: list<Inner>) state -> nothing")');
   });
 
   test('an UNANNOTATED parameter is a store too — `pure` is refused', () => {
@@ -566,7 +568,7 @@ function k(x) pure { x.id = "Z" }`);
     const { ce, value } = run(`type M = object{id: string}
 function rename(x) { x.id = "X" }
 Type(rename)`);
-    expect(value).toBe('TypeFrom("(x: unknown) state -> string")');
+    expect(value).toBe('TypeFrom("(x: unknown) state -> nothing")');
     expect(run('let m = M(id: "a")\nrename(m)\nm.id', ce).value).toBe('"X"');
   });
 
@@ -615,7 +617,7 @@ function f(x: Q) { x.age = 3 }
 Type(f)`,
         ce
       ).value
-    ).toBe('TypeFrom("(x: Q) state -> integer")');
+    ).toBe('TypeFrom("(x: Q) state -> nothing")');
 
     // A LATER batch declares the protocol and the conformance; the arrow is
     // unchanged, because it never depended on them.
@@ -629,7 +631,7 @@ type Q is Aged {
       ce
     );
     expect(run('Type(f)', ce).value).toBe(
-      'TypeFrom("(x: Q) state -> integer")'
+      'TypeFrom("(x: Q) state -> nothing")'
     );
   });
 

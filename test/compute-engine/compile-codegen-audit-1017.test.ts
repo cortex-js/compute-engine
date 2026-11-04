@@ -48,9 +48,9 @@ describe('a vars entry that is a property path is a plain read', () => {
     expect(result.code).not.toContain('_cse');
   });
 
-  test('an alias written by an assignment to the other symbol reads the new value', () => {
-    // `_.b` is also the storage of `b`: sharing `cos(a)` across `b := 5`
-    // would read the value from before the assignment.
+  test('an assignment to the other symbol of an alias declines', () => {
+    // `_.b` is also the storage of `b`. A write to a symbol declared in the
+    // engine declines, and so does a block with an assignment as an operand.
     const ce = new ComputeEngine();
     for (const s of ['a', 'b', 't']) ce.declare(s, 'real');
     const term = ['Multiply', ['Cos', 'a'], ['Sin', 't']];
@@ -58,9 +58,9 @@ describe('a vars entry that is a property path is a plain read', () => {
       ce.box(['Add', term, ['Block', ['Assign', 'b', 5], term]]),
       { to: 'javascript', vars: { a: '_.b' } }
     );
-    expect(result.run!({ b: 0, t: 1 })).toBeCloseTo(
-      Math.sin(1) + Math.cos(5) * Math.sin(1),
-      14
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(
+      /"b" is not a local of the compiled expression|a block with a statement other than a declaration with a value is an operand/
     );
   });
 
@@ -239,8 +239,7 @@ describe('the value `If` that ends a function body', () => {
     const e = ['Exp', ['Multiply', 3, 'k']];
     const expr = ce.box([
       'Block',
-      ['Declare', 's', "'real'"],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'real'", 0],
       [
         'Loop',
         [
@@ -278,8 +277,7 @@ describe('Python keeps the statement-form harvest of a body `If`', () => {
       ['Less', 0, 'x'],
       [
         'Block',
-        ['Declare', 'a', "'real'"],
-        ['Assign', 'a', 1],
+        ['Declare', 'a', "'real'", 1],
         ['If', ['Less', 'a', 'x'], ['Add', big, ['Multiply', 2, big]], 0],
       ],
       0,

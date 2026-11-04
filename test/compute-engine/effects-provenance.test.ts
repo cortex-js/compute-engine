@@ -218,9 +218,14 @@ describe('EFFECTS PROVENANCE — the re-derivation cascade (W2)', () => {
 });
 
 describe('EFFECTS PROVENANCE — the typed-`let` upgrade (W3)', () => {
+  // A `let` has a value: `let q: T` with no value is
+  // `declaration-without-value`. So each typed `let` here has a value.
   test('an explicit effect specifier records the `declared` transition', () => {
     const ce = new ComputeEngine();
-    executeEpsil(ce, ['q + 1', 'let q: (number) pure -> number'].join('\n'));
+    executeEpsil(
+      ce,
+      ['q + 1', 'let q: (number) pure -> number = (x) => x'].join('\n')
+    );
     const entries = effectsEntries(ce, 'q');
     expect(entries).toHaveLength(1);
     expect(entries[0][1]).toBe('declared');
@@ -228,7 +233,7 @@ describe('EFFECTS PROVENANCE — the typed-`let` upgrade (W3)', () => {
 
   test('a bare typed `let` records no effects entry', () => {
     const ce = new ComputeEngine();
-    executeEpsil(ce, ['r + 1', 'let r: number'].join('\n'));
+    executeEpsil(ce, ['r + 1', 'let r: number = 1'].join('\n'));
     expect(effectsEntries(ce, 'r')).toEqual([]);
   });
 
@@ -239,7 +244,9 @@ describe('EFFECTS PROVENANCE — the typed-`let` upgrade (W3)', () => {
     // Pinned as the design demands: two STATIC CHECKS (no evaluation) of the
     // same program on one engine agree, and nothing leaks between them.
     const ce = new ComputeEngine();
-    const program = ['s + 1', 'let s: (number) pure -> number'].join('\n');
+    const program = ['s + 1', 'let s: (number) pure -> number = (x) => x'].join(
+      '\n'
+    );
     // `parseSource` itself auto-declares `s` (parse-time, OUTSIDE the
     // checking frames — not part of the pass's containment contract), so
     // the pinned invariant is that the CHECKS add nothing to it: same

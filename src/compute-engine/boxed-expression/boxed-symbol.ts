@@ -57,8 +57,6 @@ import type {
 import { activeRollbackFrame } from '../inference-rollback.js';
 import { contractTupleOfNarrow } from './index-read-tuple.js';
 import { typeCouldBeNumericCollection } from '../collection-utils.js';
-import { readBeforeDeclarationError } from './read-before-declaration.js';
-import { noteFailedWalk } from './incomplete-walks.js';
 
 import { mul, div } from './arithmetic-mul-div.js';
 
@@ -127,7 +125,10 @@ import { isTransitivelyPure } from './transitive-purity.js';
 import { normalizeCount, smallCount } from './collection-count.js';
 import { beginStoreGuard } from './store-guard.js';
 import { isFunctionLiteralParameter } from './function-literal.js';
-import { assignmentLocalsOf } from '../assignment-locals.js';
+import {
+  assignmentLocalsOf,
+  markFreeSymbolDeclaration,
+} from '../assignment-locals.js';
 import { isProvisionalHead } from './provisional-application.js';
 import {
   asyncEvaluationOf,
@@ -916,7 +917,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // is under a registered scratch scope, so it is made only in that case.
     if (ce._resolveOnlyDepth > 0 && scratchRootOf(ce, outerScope) === undefined)
       return;
-    ce._declareSymbolValue(name, { type: t, inferred: true }, outerScope);
+    // The binding is marked: it is not a declaration for an assignment in
+    // the body (`isFreeSymbolDeclarationInBody()`, `assignment-locals.ts`).
+    markFreeSymbolDeclaration(
+      ce._declareSymbolValue(name, { type: t, inferred: true }, outerScope)
+    );
   }
 
   private _inferWithoutFacts(
@@ -1281,7 +1286,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   /**
    * The binding this occurrence reads in the current runtime context, which
    * `_contextValue` reads the value of. A caller that needs both the value
-   * and the binding (for `_readBeforeDeclaration`) calls this once, so the
+   * and the binding calls this once, so the
    * scope chain is walked once.
    */
   private _contextBinding(): BoxedDefinition | undefined {
@@ -1300,75 +1305,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    */
   private _assertLiveRead(def: BoxedValueDefinition): void {
     assertLiveRead(this.engine, def, this._id);
-  }
-
-  /**
-   * When this occurrence has no value in the current runtime context
-   * because the binding it reads is a block local whose `let` or `const`
-   * has not run yet in this run of the block, the error value of that read.
-   * Otherwise `undefined`.
-   *
-   * A block creates the bindings of its locals when its run starts
-   * (`createBlockLocals`, `function-utils.ts`) and marks them
-   * `_uninitialized` until their `Declare` statement runs. A closure created
-   * in the block before the `Declare` holds such a binding: called before
-   * the `Declare` runs, it reads it. In JavaScript this read is an error
-   * (the temporal dead zone), and it is an error here too, not the bare
-   * symbol: in `{ let a = k; let k = 2 }` the symbol `k` of `a` would
-   * otherwise read the local later, when it has a value.
-   *
-   * The same holds for an assignment local of a block written in the body
-   * of a function literal: a name that the block assigns with no
-   * declaration visible where the block is written. A run of the block
-   * gives it a binding with no value (`declareAssignmentLocals`,
-   * `function-utils.ts`), marked `_assignmentLocal`, and the first `Assign`
-   * of the run gives it its value. In a block outside every function
-   * literal the binding is not marked, and the read stays the bare symbol
-   * (`Block(x ≔ x + 1; 2x)` is `2(x + 1)`). A read before that assignment is an
-   * error too: in `function g(k) { u = t; t = k; u }` the symbol `t` of `u`
-   * would otherwise read the local later, when it has a value. The error
-   * carries a second operand, `"assignment"`, so that the message can say
-   * that the name has no `let`. A binding that an assignment made an
-   * operator binding (`t = (x) => 2x`) has a value, and is not reported.
-   *
-   * `binding` is the binding that the read found (`_contextBinding`), so the
-   * check costs no second walk of the scope chain.
-   */
-  private _readBeforeDeclaration(
-    binding: BoxedDefinition | undefined
-  ): Expression | undefined {
-    // The error keeps the source range of this symbol, so that Epsil can
-    // match it to the static report of the same read.
-    return readBeforeDeclarationError(
-      this.engine,
-      this._id,
-      binding,
-      this.sourceOffsets
-    );
-  }
-
-  /**
-   * Record a failed walk (`noteFailedWalk()`, `incomplete-walks.ts`) when
-   * this symbol is read as a collection and has no value because it is a
-   * block local that this run has not given a value yet
-   * (`_readBeforeDeclaration`). The error is then the value of the
-   * collection that reads the symbol.
-   *
-   * A lazy view holds its source as written and reads it when its elements
-   * are read: with `t` a local of a function body that is assigned later,
-   * `Length(Map(f, t))` before the assignment read a valueless symbol, and
-   * stayed unevaluated with no error. A read of the view after the
-   * assignment reads the value, so `r = Map(f, t); t = [1]; Length(r)` is
-   * `1`.
-   *
-   * Called only by the collection reads of a symbol with no value, so a
-   * symbol that is not a block local costs one field read.
-   */
-  private _noteCollectionReadBeforeDeclaration(): void {
-    const def = this._def;
-    if (!isValueDef(def) || !def.value._blockLocal) return;
-    const error = this._readBeforeDeclaration(this._contextBinding());
-    if (error !== undefined) noteFailedWalk(error);
   }
 
   get value(): Expression | undefined {
@@ -2104,7 +2040,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         const binding = this._contextBinding();
         const expr = valueOfBinding(binding);
         if (expr === undefined)
-          return this._readBeforeDeclaration(binding) ?? this;
+          return this;
         if (expr.operator === 'Unevaluated')
           return expr.evaluate(options) ?? this;
         return this._dereferenceMemoized(expr, options);
@@ -2172,9 +2108,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       !(numeric && def.holdUntil === 'N')
     )
       return this;
-    // The binding the read finds, kept for the read-before-declaration
-    // check. A numeric read follows `_value`, which reads no binding for a
-    // self-referential value.
+    // The binding the read finds. A numeric read follows `_value`, which
+    // reads no binding for a self-referential value.
     const binding =
       def.isConstant || (numericRead && def.isSelfReferential)
         ? undefined
@@ -2185,7 +2120,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         ? this._guardedValueOf(binding)
         : valueOfBinding(binding);
     if (value === undefined)
-      return this._readBeforeDeclaration(binding) ?? this;
+      return this;
     if (isNumber(value)) return numeric ? value.N() : value.evaluate(options);
     if (numericRead && !def.isConstant && value.symbols.includes(this._id))
       return value;
@@ -2544,14 +2479,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // an unbound or self-referential symbol stays symbolic rather than
     // recursing forever.
     if (def && !def.isConstant) {
-      // What `_value` reads, with the binding it found kept for the
-      // read-before-declaration check: `N(k)` before `let k = 2` in a block
-      // is an error, as `k` is.
+      // What `_value` reads.
       const binding = def.isSelfReferential
         ? undefined
         : this._contextBinding();
       const contextValue = this._guardedValueOf(binding);
-      if (!contextValue) return this._readBeforeDeclaration(binding) ?? this;
+      if (!contextValue) return this;
       // Self-referential CONTEXT binding: a call-frame parameter bound to an
       // argument mentioning the parameter's own name (`a(t + 1)` for
       // `a(t) := …` with `t` unbound in the caller). When symbol values were
@@ -2705,8 +2638,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       const count =
         normalizeCount(this._asCollection?.count(this._value ?? this)) ??
         this._value?.count;
-      if (count === undefined && this._value === undefined)
-        this._noteCollectionReadBeforeDeclaration();
       return count ?? fromType;
     } finally {
       exitCycleQuery(def, guard);
@@ -2728,8 +2659,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       const empty =
         this._asCollection?.isEmpty?.(this._value ?? this) ??
         this._value?.isEmptyCollection;
-      if (empty === undefined && this._value === undefined)
-        this._noteCollectionReadBeforeDeclaration();
       return empty;
     } finally {
       exitCycleQuery(def, guard);
@@ -2745,8 +2674,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       const finite =
         this._asCollection?.isFinite?.(this._value ?? this) ??
         this._value?.isFiniteCollection;
-      if (finite === undefined && this._value === undefined)
-        this._noteCollectionReadBeforeDeclaration();
       return finite;
     } finally {
       exitCycleQuery(def, guard);
@@ -2783,10 +2710,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         return handlers.isEnumerable(this._value ?? this);
       }
       const value = this._value;
-      if (value === undefined) {
-        this._noteCollectionReadBeforeDeclaration();
-        return false;
-      }
+      if (value === undefined) return false;
       return value.isEnumerableCollection;
     } finally {
       exitCycleQuery(def, guard);
@@ -2825,7 +2749,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       })();
     }
     const value = this._value;
-    if (value === undefined) this._noteCollectionReadBeforeDeclaration();
     return value?.each() ?? (function* () {})();
   }
 
@@ -2866,7 +2789,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       if (result !== undefined) return result;
     }
     const value = this._value;
-    if (value === undefined) this._noteCollectionReadBeforeDeclaration();
     return value?.at?.(index);
   }
 

@@ -23,11 +23,6 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 const SCOPE_ERROR =
   'writes outside a function require a declared `scope` effect';
 
-/** The refusal of a compilation in which a read of a block local can come
- * before every assignment of it (CE-636). */
-const SOME_PATHS =
-  /a statement can read the block local "\w+" when no assignment gave it a value/;
-
 function run(source: string): {
   ce: ComputeEngine;
   value: unknown;
@@ -40,6 +35,14 @@ function run(source: string): {
     value: value.json,
     diagnostics: diagnostics.map((d) => d.message.map(String).join(' ')),
   };
+}
+
+/** The engine codes of the static errors that the run of `source` reports,
+ * and the message of each other diagnostic. */
+function staticCodes(source: string): string[] {
+  return executeEpsil(new ComputeEngine(), source).diagnostics.map((d) =>
+    String(d.message[0] === 'static-type-error' ? d.message[3] : d.message[0])
+  );
 }
 
 function expectScopeError(source: string): void {
@@ -101,12 +104,11 @@ describe('AN ASSIGNMENT TO A NEW NAME IN A FUNCTION BODY IS A LOCAL', () => {
   });
 
   test('a local assigned in one branch of an `if` only', () => {
-    // The local belongs to the function body.
-    const { value, diagnostics } = run(
-      'function g(k) { if k > 1 { t = k }; k }\n[g(1), g(2)]'
-    );
-    expect(diagnostics).toEqual([]);
-    expect(value).toEqual(['List', 1, 2]);
+    // A first assignment in a branch is a static error: the name must be
+    // declared with a value before the branch.
+    expect(
+      staticCodes('function g(k) { if k > 1 { t = k }; k }\n[g(1), g(2)]')
+    ).toEqual(['first-assignment-in-branch']);
   });
 
   test('a local that holds a function', () => {
@@ -245,10 +247,11 @@ describe('THE SCOPE OF A NAME IS DECIDED WHERE THE FUNCTION IS DEFINED', () => {
   });
 
   test('a local of a nested block', () => {
+    // A first assignment in a branch or in a loop body is a static error,
+    // so the nested blocks here are `do` blocks.
     for (const body of [
-      '{ if true { t = k + 1 }; k }',
+      '{ do { t = k + 1 }; k }',
       '{ u = do { t = k + 1; t }; u }',
-      '{ for i in [1] { t = k + i }; k }',
     ]) {
       const { value, diagnostics } = run(
         `function g(k) ${body}\nlet t = 10\n[g(1), t]`
@@ -259,10 +262,10 @@ describe('THE SCOPE OF A NAME IS DECIDED WHERE THE FUNCTION IS DEFINED', () => {
   });
 
   test('a local written in a branch and read after it', () => {
-    // The branch writes the local of the body, which is assigned in a
-    // statement of the body.
+    // The branch writes the local of the body, which is declared with a
+    // value before the branch.
     const { value, diagnostics } = run(
-      'function g(k) { if k > 1 { t = 5 }; t = t + 1; t }\ng(2)'
+      'function g(k) { t = 0; if k > 1 { t = 5 }; t = t + 1; t }\ng(2)'
     );
     expect(diagnostics).toEqual([]);
     expect(value).toBe(6);
@@ -318,17 +321,23 @@ describe('AN ANNOTATION ON THE FUNCTION DOES NOT CHANGE ITS LOCALS', () => {
   // the body as a `Typed` wrapper. The last statement is still a local
   // assignment, or a declaration of the block.
   test('a return type, the assignment is the last statement', () => {
+    // A body whose last statement is an assignment has the value `Nothing`,
+    // which is not an `integer`: the call is an `incompatible-type` error.
     const { ce, value, diagnostics } = run(
       'function f() -> integer { x = 2 }\nf()'
     );
     expect(diagnostics).toEqual([]);
-    expect(value).toBe(2);
+    expect(value).toEqual([
+      'Error',
+      ['ErrorCode', "'incompatible-type'", "'integer'", "'nothing'"],
+      ['Assign', 'x', 2],
+    ]);
     expect(ce.box('f').type.toString()).not.toContain('scope');
   });
 
   test('a return type, a `let` after the function is not written', () => {
     const { value, diagnostics } = run(
-      'function f() -> integer { y = 0; x = 2 }\nlet x = 1\nf()\nx'
+      'function f() -> nothing { y = 0; x = 2 }\nlet x = 1\nf()\nx'
     );
     expect(diagnostics).toEqual([]);
     expect(value).toBe(1);
@@ -366,6 +375,7 @@ describe('THE COMPILED ROUTES AGREE WITH THE RUN', () => {
     'Function',
     [
       'Block',
+      ['Assign', 't', 0],
       ['If', ['Greater', 'k', 1], ['Block', ['Assign', 't', 5]]],
       ['Assign', 't', ['Add', 't', 1]],
       't',
@@ -387,14 +397,16 @@ describe('THE COMPILED ROUTES AGREE WITH THE RUN', () => {
     expect(ce.box('t').evaluate().json).toBe(10);
   });
 
-  test('a local written in a branch and read after it declines', () => {
-    // At k = 0 the read of `t` comes before every assignment of it.
+  test('a local written in a branch and read after it', () => {
+    // The local is declared with a value before the branch, so every read
+    // comes after an assignment.
     const ce = new ComputeEngine();
     const fn = ce.box(IF_BRANCH as never);
     ce.assign('t', 10);
-    expect(() =>
-      compile(fn, { to: 'javascript', fallback: false } as never)
-    ).toThrow(SOME_PATHS);
+    const result = compile(fn, { to: 'javascript', fallback: false } as never)!;
+    expect(result.success).toBe(true);
+    expect(result.run!(2 as never)).toBe(6);
+    expect(result.run!(0 as never)).toBe(1);
     expect(ce.box(['Apply', fn, 2]).evaluate().json).toBe(6);
     expect(ce.box('t').evaluate().json).toBe(10);
   });
@@ -437,387 +449,123 @@ describe('THE COMPILED ROUTES AGREE WITH THE RUN', () => {
   });
 });
 
-//
-// A read of an assignment local of a function body before its first
-// assignment is the `read-before-declaration` error, as a read of a `let`
-// local before its `let` (`_readBeforeDeclaration()`,
-// `src/compute-engine/boxed-expression/boxed-symbol.ts`). Each call starts
-// with no value for the local. The error has a second operand,
-// `"assignment"`. `epsil check` reports the read when the order is certain
-// from the source (`readsBeforeAssignment()`,
-// `src/epsil/read-before-assignment.ts`).
-//
-
-const READ_BEFORE_ASSIGNMENT = (name: string) => [
-  'ErrorCode',
-  "'read-before-declaration'",
-  `'${name}'`,
-  "'assignment'",
-];
-
-function expectReadBeforeAssignment(value: unknown, name: string): void {
+/** True when `value` (MathJSON) is an `Error` whose code is `code`. */
+function expectErrorCode(value: unknown, code: string): void {
   expect(Array.isArray(value)).toBe(true);
   expect((value as unknown[])[0]).toBe('Error');
-  expect((value as unknown[])[1]).toEqual(READ_BEFORE_ASSIGNMENT(name));
+  expect(((value as unknown[])[1] as unknown[])[1]).toBe(`'${code}'`);
 }
 
-/** The static reports of `source`: the engine code and the source text of
- * the range. */
-function staticReports(source: string): [unknown, string][] {
-  return checkSource(source).diagnostics.map((d) => [
-    d.message[3],
-    source.slice(d.range[0], d.range[1]),
-  ]);
-}
-
-describe('A READ OF A LOCAL BEFORE ITS FIRST ASSIGNMENT', () => {
-  test('the reported case', () => {
-    const source = 'function g(k) { u = t; t = k; u }\ng(1)';
-    const { value } = run(source);
-    expectReadBeforeAssignment(value, 't');
-    expect(staticReports(source)).toEqual([['read-before-declaration', 't']]);
-  });
-
-  test('the same error as for a `let` local, with a second operand', () => {
-    const { value } = run('function g(k) { u = t; let t = k; u }\ng(1)');
-    expect(value).toEqual([
-      'Error',
-      ['ErrorCode', "'read-before-declaration'", "'t'"],
-    ]);
-  });
-
-  test('the message, reported once', () => {
-    // The static check reports the read in the definition. The error value
-    // of the call `g(1)` keeps the source range of the read
-    // (`readBeforeDeclarationSite()`), so the run does not report it a
-    // second time.
-    const { diagnostics } = run('function g(k) { u = t; t = k; u }\ng(1)\n0');
-    expect(diagnostics).toEqual([
-      'static-type-error `t` is read before its first assignment: the assignment makes `t` a local of the block, which has no value yet u = t read-before-declaration',
-    ]);
-  });
-
-  test('the run reports a read that the static check does not', () => {
-    const { diagnostics } = run(
-      'function g() { f = () => t; v = f(); t = 1; v }\ng()\n0'
+describe('A USE OF A LOCAL BEFORE ITS DECLARATION IS A STATIC ERROR', () => {
+  // A local of a block has its value from the statement that declares it (a
+  // `let`, or the first assignment of the name at the own level of the
+  // block). A use of the local in a statement before that one is the static
+  // error `read-before-declaration`. The value of the first assignment
+  // reads the name as the value of a `let` does, outside the block. A first assignment in a branch or in a loop
+  // body is the static error `first-assignment-in-branch`. The static check
+  // reports each error before the program runs. A use in the body of a
+  // function literal is not a use: it runs when the function is called.
+  const codes = (source: string): string[] =>
+    executeEpsil(new ComputeEngine(), source).diagnostics.map((d) =>
+      String(d.message[0] === 'static-type-error' ? d.message[3] : d.message[0])
     );
-    expect(diagnostics).toEqual([
-      'runtime-error `t` is read before its first assignment: the assignment makes `t` a local of the block, which has no value yet  read-before-declaration',
-    ]);
+
+  test.each([
+    'function g(k) { u = t; t = k; u }\ng(1)',
+    'function g(k) { u = t; let t = k; u }\ng(1)',
+    'function g() { u = sqrt(t) + t^2; t = 1; u }\ng()',
+    'function g() { u = [t, 1]; t = 1; u }\ng()',
+    // A variable outside the function is not read.
+    'function g(k) { u = t; t = k; u }\nlet t = 5\ng(1)',
+    // In the initializer of a `let`, in a condition, in an operand.
+    'function g() { let w = t + 1; t = 1; w }\ng()',
+    'function g() { if t > 0 { 1 }; t = 1 }\ng()',
+    'function g() { u = sin(t) + [t, 1][1]; t = 1; u }\ng()',
+    // An assignment in a branch before the declaration.
+    'function g(k) { if k > 1 { t = 5 }; t = t + 1; t }\ng(2)',
+    'function g(n, r) { u = 0; if r { u = t }; t = n; u }\ng(0, false)',
+    // A function literal assigned to a name, a nested function.
+    'g = (k) => do { u = t; t = k; u }\ng(1)',
+    'function f() { function g(k) { u = t; t = k; u }; g(1) }\nf()',
+    // The collection of a loop.
+    'function g() { s = 0; for i in t { s = s + 1 }; t = [1]; s }\ng()',
+    // A call of a local.
+    'function g() { u = h(1); h = (x) => x; u }\ng()',
+    'function g() { u = h(1); let h = (x) => x; u }\ng()',
+    // A block outside every function.
+    'do { u = t; t = 1; u }',
+    'do { u = h(1); h = (x) => x; u }',
+  ])('%j', (source) => {
+    expect(codes(source)).toEqual(['read-before-declaration']);
   });
 
-  test('reported once when the first read evaluated is not the first written', () => {
-    // The canonical sum puts `t^2` first, and the run reads it first: the
-    // static report is at that read.
-    const source = 'function g() { u = sqrt(t) + t^2; t = 1; u }\ng()\n0';
-    const { diagnostics } = run(source);
-    expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0]).toContain('static-type-error');
+  test('the operand of `Hold` is quoted, and is not a use', () => {
+    expect(codes('function g() { u = Hold(t); t = 1; u }\ng()')).toEqual([]);
+    const r = executeEpsil(new ComputeEngine(), 'do { Hold(k); let k = 2; k }');
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value?.toString()).toBe('2');
   });
 
-  test('a nested statement with the error is reported once', () => {
-    const { diagnostics } = run(
-      'function g() { u = [t, 1]; t = 1; u }\ng()\n0'
-    );
-    expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0]).toContain('static-type-error');
+  test.each([
+    ['function g(k) { t = t + 1; t }\ng(1)', 'function g(k) { let t = t + 1; t }\ng(1)'],
+    ['function g(k) { (t, w) := (t, 1); t }\ng(1)', 'function g(k) { let (t, w) = (t, 1); t }\ng(1)'],
+  ])('the value of a first assignment reads the name as a let does: %j', (source, withLet) => {
+    const run = (src: string) => executeEpsil(new ComputeEngine(), src);
+    expect(run(source).diagnostics).toEqual([]);
+    expect(run(source).value?.toString()).toBe(run(withLet).value?.toString());
   });
 
-  test('a variable outside the function is not read', () => {
-    const { value } = run('function g(k) { u = t; t = k; u }\nlet t = 5\ng(1)');
-    expectReadBeforeAssignment(value, 't');
+  test.each([
+    'function g(c) { if c { u = t }; t = 1; 0 }\ng(true)',
+    'function g(c) { if c { t = 1 }; t }\ng(true)',
+    'function g() { for i in t { s = i }; t = [1] }\ng()',
+  ])('a first assignment in a branch: %j', (source) => {
+    expect(codes(source)).toEqual(['first-assignment-in-branch']);
   });
 
-  test('a read in the value of the first assignment', () => {
-    for (const source of [
-      'function g(k) { t = t + 1; t }\ng(1)',
-      'function g(k) { (t, w) := (t, 1); t }\ng(1)',
-    ]) {
-      expectReadBeforeAssignment(run(source).value, 't');
-      expect(staticReports(source)).toEqual([['read-before-declaration', 't']]);
-    }
+  test('a first assignment of two names in a loop body', () => {
+    expect(
+      codes('function g() { for i in [1, 2] { s = t; t = i }; 0 }\ng()')
+    ).toEqual(['first-assignment-in-branch', 'first-assignment-in-branch']);
   });
 
-  test('a read in the initializer of a `let`, or in a condition', () => {
-    for (const source of [
-      'function g() { let w = t + 1; t = 1; w }\ng()',
-      'function g() { if t > 0 { 1 }; t = 1 }\ng()',
-      'function g() { u = sin(t) + [t, 1][1]; t = 1; u }\ng()',
-    ]) {
-      expectReadBeforeAssignment(run(source).value, 't');
-      expect(staticReports(source)).toEqual([['read-before-declaration', 't']]);
-    }
-  });
-
-  test('a local assigned in a branch, read after it', () => {
-    // The run reports the read when the branch did not run. The order is
-    // not certain from the source, and the static check reports nothing.
-    const source =
-      'function g(k) { if k > 1 { t = 5 }; t = t + 1; t }\n[g(2), g(1)]';
-    const { value } = run(source);
-    expect((value as unknown[])[1]).toBe(6);
-    expectReadBeforeAssignment((value as unknown[])[2], 't');
-    expect(staticReports(source)).toEqual([]);
-  });
-
-  test('a read in a branch before every assignment', () => {
-    // When the branch runs, no assignment ran before it.
-    const source =
-      'function g(c) { if c { u = t }; t = 1; 0 }\n[g(false), g(true)]';
-    const { value } = run(source);
-    expect((value as unknown[])[1]).toBe(0);
-    expectReadBeforeAssignment((value as unknown[])[2], 't');
-    expect(staticReports(source)).toEqual([['read-before-declaration', 't']]);
-  });
-
-  test('a name assigned in one branch only is a local of the body', () => {
-    // The function body owns `t`. When the branch does not run, the read
-    // after the `if` comes before every assignment. The order is not certain
-    // from the source, so the static check reports nothing.
-    const source = 'function g(c) { if c { t = 1 }; t }\n[g(true), g(false)]';
-    const { value, diagnostics } = run(source);
-    expect(diagnostics).toEqual([]);
-    expect((value as unknown[])[1]).toBe(1);
-    expectReadBeforeAssignment((value as unknown[])[2], 't');
-    expect(staticReports(source)).toEqual([]);
-  });
-
-  test('a loop body keeps its local from one iteration to the next', () => {
-    const source =
-      'function g() { s = 0; for i in [1, 2] { if i > 1 { s = s + t }; t = i }; s }\ng()';
-    const { value, diagnostics } = run(source);
-    expect(diagnostics).toEqual([]);
-    expect(value).toBe(1);
-    expect(staticReports(source)).toEqual([]);
-  });
-
-  test('a loop body that reads its local in the first iteration', () => {
-    const source = 'function g() { for i in [1, 2] { s = t; t = i }; 0 }\ng()';
-    expectReadBeforeAssignment(run(source).value, 't');
-    expect(staticReports(source)).toEqual([['read-before-declaration', 't']]);
-  });
-
-  test('a closure called after the assignment', () => {
-    const source = 'function g() { f = () => t; t = 1; f() }\ng()';
-    const { value, diagnostics } = run(source);
-    expect(diagnostics).toEqual([]);
-    expect(value).toBe(1);
-    expect(staticReports(source)).toEqual([]);
-  });
-
-  test('a closure called before the assignment', () => {
-    // The run reports the read. The static check does not follow the call.
-    const source = 'function g() { f = () => t; v = f(); t = 1; v }\ng()';
-    expectReadBeforeAssignment(run(source).value, 't');
-    expect(staticReports(source)).toEqual([]);
-  });
-
-  test('a read that is not evaluated', () => {
-    const { value, diagnostics } = run(
-      'function g() { u = Hold(t); t = 1; u }\ng()'
-    );
-    expect(diagnostics).toEqual([]);
-    expect(value).toEqual(['Hold', 't']);
-  });
-
-  test('each call starts with no value, also a recursive call', () => {
-    // The first call assigns `t`, and the recursive call, with `r` true,
-    // reads its own `t` before it assigns it.
-    const source =
-      'function g(n, r) { u = 0; if r { u = t }; t = n; if n > 0 { g(n - 1, true) } else { u } }';
-    expect(run(`${source}\ng(0, false)`).value).toBe(0);
-    expectReadBeforeAssignment(run(`${source}\ng(2, false)`).value, 't');
-    const { value } = run(`${source}\n[g(0, false), g(0, true)]`);
-    expect((value as unknown[])[1]).toBe(0);
-    expectReadBeforeAssignment((value as unknown[])[2], 't');
-  });
-
-  test('the top level is not changed', () => {
-    // Top-level statements are not a block, and a block outside every
-    // function keeps the bare symbol.
-    for (const source of [
-      'u = t\nt = 1\nu',
-      'do { u = t; t = 1; u }',
-      'r = do { u = t; t = 1; u }\nr',
-    ]) {
-      const { value, diagnostics } = run(source);
-      expect(diagnostics).toEqual([]);
-      expect(value).toBe(1);
-      expect(staticReports(source)).toEqual([]);
-    }
-  });
-
-  test('a function literal assigned to a name, and a nested function', () => {
-    for (const source of [
-      'g = (k) => do { u = t; t = k; u }\ng(1)',
-      'function f() { function g(k) { u = t; t = k; u }; g(1) }\nf()',
-    ]) {
-      expectReadBeforeAssignment(run(source).value, 't');
-      expect(staticReports(source)).toEqual([['read-before-declaration', 't']]);
-    }
+  test.each([
+    // A closure called after the declaration.
+    ['function g() { f = () => t; t = 1; f() }\ng()', 1],
+    ['function g() { h = (x) => 2x; h(3) }\ng()', 6],
+    ['function g() { f = () => h(3); h = (x) => 2x; f() }\ng()', 6],
+    // A function statement gives its name its value from the start of the
+    // block.
+    ['r = do { u = h(1); function h(x) { x }; u }\nr', 1],
+    // The statements of the top level of a program run one at a time, and
+    // a name that a later statement assigns is a free symbol before it.
+    ['u = t\nt = 1\nu', 1],
+    ['u = h(1)\nh = (x) => x\nu', 1],
+    ['u = h(1)\nfunction h(x) { x }\nu', 1],
+    ['s = 0\nfor i in tt { s = i }', 'Nothing'],
+    ['s = 0\nfor i in 5 { s = i }', 'Nothing'],
+  ])('valid: %j', (source, value) => {
+    const r = executeEpsil(new ComputeEngine(), source);
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.json).toEqual(value);
   });
 
   test('the host route', () => {
-    // A `Function` boxed by the host gives the same error value, as a read
-    // of a `let` local before its `Declare` does. A block outside every
-    // function keeps the bare symbol.
     const ce = new ComputeEngine();
     const fn = ce.box([
       'Function',
       ['Block', ['Assign', 'u', 't'], ['Assign', 't', 'k'], 'u'],
       'k',
     ]);
-    expectReadBeforeAssignment(ce.box(['Apply', fn, 2]).evaluate().json, 't');
-    expectReadBeforeAssignment(ce.box(['Apply', fn, 2]).N().json, 't');
-    const letFn = ce.box([
-      'Function',
-      [
-        'Block',
-        ['Declare', 'u', 'unknown'],
-        ['Assign', 'u', 't'],
-        ['Declare', 't', 'unknown'],
-        ['Assign', 't', 'k'],
-        'u',
-      ],
-      'k',
-    ]);
-    expect(ce.box(['Apply', letFn, 2]).evaluate().json).toEqual([
-      'Error',
-      ['ErrorCode', "'read-before-declaration'", "'t'"],
-    ]);
+    expect(fn.toString()).toContain(
+      'Error(ErrorCode("read-before-declaration", "t"))'
+    );
+    // The value of a first assignment reads the name outside the block.
     expect(
       ce
         .box(['Block', ['Assign', 'x', ['Add', 'x', 1]], ['Multiply', 2, 'x']])
-        .evaluate()
         .toString()
-    ).toBe('2(x + 1)');
-  });
-
-  test('a loop over a local with no value', () => {
-    // The collection is the read. Its error stops the loop, and is the
-    // value of the loop. Before, the error was not a collection, so the
-    // loop ran no iteration and the error was lost.
-    for (const [source, kind] of [
-      ['function g() { for i in t { s = i }; t = [1] }\ng()', 'assignment'],
-      ['function g() { for i in t { s = i }; let t = [1] }\ng()', 'let'],
-      [
-        'function g() { s = 0; for i in t { s = s + 1 }; t = [1]; s }\ng()',
-        'assignment',
-      ],
-    ]) {
-      const { value } = run(source);
-      if (kind === 'assignment') expectReadBeforeAssignment(value, 't');
-      else
-        expect(value).toEqual([
-          'Error',
-          ['ErrorCode', "'read-before-declaration'", "'t'"],
-        ]);
-      expect(staticReports(source)).toEqual([['read-before-declaration', 't']]);
-    }
-  });
-
-  test('a loop over a name that is not a collection, at the top level', () => {
-    // Not changed: a loop over a value that is not a collection (`5`, or a
-    // name with no value) runs no iteration.
-    for (const source of ['for i in tt { s = i }', 'for i in 5 { s = i }']) {
-      const { value, diagnostics } = run(source);
-      expect(diagnostics).toEqual([]);
-      expect(value).toBe('Nothing');
-    }
-  });
-
-  test('a call of a local with no value', () => {
-    // A call of the function that the local holds is a use of the local,
-    // as a read is. Before, `u` held the call `h(1)`, which gave `1` when
-    // it was read after the assignment.
-    const assignment = 'function g() { u = h(1); h = (x) => x; u }\ng()';
-    expectReadBeforeAssignment(run(assignment).value, 'h');
-    expect(staticReports(assignment)).toEqual([
-      ['read-before-declaration', 'h(1)'],
-    ]);
-    const declared = 'function g() { u = h(1); let h = (x) => x; u }\ng()';
-    expect(run(declared).value).toEqual([
-      'Error',
-      ['ErrorCode', "'read-before-declaration'", "'h'"],
-    ]);
-    expect(staticReports(declared)).toEqual([
-      ['read-before-declaration', 'h(1)'],
-    ]);
-  });
-
-  test('a call of a local after it has a value', () => {
-    for (const source of [
-      'function g() { h = (x) => 2x; h(3) }\ng()',
-      'function g() { f = () => h(3); h = (x) => 2x; f() }\ng()',
-    ]) {
-      const { value, diagnostics } = run(source);
-      expect(diagnostics).toEqual([]);
-      expect(value).toBe(6);
-      expect(staticReports(source)).toEqual([]);
-    }
-  });
-
-  test('a call at the top level is not changed', () => {
-    // `h` has no value when `u = h(1)` runs, so `u` holds the evaluated,
-    // unresolved call `h(1)`. The assignment of a function literal to `h`
-    // takes effect when it executes. Each top-level statement is its own
-    // top-level evaluation, so the read of `u` in the last statement
-    // resolves `h(1)` again and gives `1`.
-    {
-      const { value, diagnostics } = run('u = h(1)\nh = (x) => x\nu');
-      expect(diagnostics).toEqual([]);
-      expect(value).toBe(1);
-    }
-    // Inside a `do` block, the statements run in the top-level evaluation of
-    // the statement that holds the block, and a call evaluated while its
-    // head had no value stays unresolved for the rest of that evaluation
-    // (the sticky rule of `docs/SCOPING-MODEL.md`, "Callable resolution"):
-    // the read of `u` in the block gives `h(1)`. When the value of the block
-    // is stored (`r = do { … }`), the read of `r` in the next statement is a
-    // later top-level evaluation, and resolves it.
-    for (const [source, expected] of [
-      ['do { u = h(1); h = (x) => x; u }', ['h', 1]],
-      ['r = String(do { u = h(1); h = (x) => x; u })\nr', "'h(1)'"],
-      ['r = do { u = h(1); h = (x) => x; u }\nr', 1],
-    ] as const) {
-      const { value, diagnostics } = run(source);
-      expect(diagnostics).toEqual([]);
-      expect(value).toEqual(expected);
-    }
-    // A `function h(x) { x }` statement, which is a declaration, is
-    // available throughout its statement list and gives `1`.
-    for (const source of [
-      'u = h(1)\nfunction h(x) { x }\nu',
-      'r = do { u = h(1); function h(x) { x }; u }\nr',
-    ]) {
-      const { value, diagnostics } = run(source);
-      expect(diagnostics).toEqual([]);
-      expect(value).toBe(1);
-    }
-  });
-
-  test('a call on the host route', () => {
-    const ce = new ComputeEngine();
-    const fn = ce.box([
-      'Function',
-      [
-        'Block',
-        ['Assign', 'u', ['h', 1]],
-        ['Assign', 'h', ['Function', 'x', 'x']],
-        'u',
-      ],
-      'k',
-    ]);
-    expectReadBeforeAssignment(ce.box(['Apply', fn, 2]).evaluate().json, 'h');
-  });
-
-  test('the asynchronous route', async () => {
-    const ce = new ComputeEngine();
-    executeEpsil(ce, 'function g(k) { u = t; t = k; u }');
-    expectReadBeforeAssignment(
-      (await ce.box(['g', 1]).evaluateAsync()).json,
-      't'
-    );
+    ).not.toContain('Error');
   });
 });
 
@@ -1023,11 +771,6 @@ describe('A FUNCTION DECLARED WITH A TYPE, THEN DEFINED, COMPILES', () => {
       [2, 3],
     ],
     [
-      'a declaration with no type',
-      'let g\nfunction g(k) { k + 1 }\n[g(1), g(2)]',
-      [2, 3],
-    ],
-    [
       'a call before the declaration',
       'let a = g(3)\nlet g: (integer) -> integer\nfunction g(k) { k + 1 }\n[a]',
       [4],
@@ -1049,6 +792,14 @@ describe('A FUNCTION DECLARED WITH A TYPE, THEN DEFINED, COMPILES', () => {
     expect(interval.map((x) => x.value.lo)).toEqual(value);
   });
 
+  test('a declaration with no type is a declaration without a value', () => {
+    // Only a function type pairs with a `function` statement of the same
+    // name.
+    expect(staticCodes('let g\nfunction g(k) { k + 1 }\n[g(1), g(2)]')).toEqual(
+      ['declaration-without-value']
+    );
+  });
+
   test('a name that holds a value is not defined', () => {
     // The interpreter refuses the definition, and the compilation fails.
     const source = 'let g = 5\nfunction g(k) { k + 1 }\ng(1)';
@@ -1065,13 +816,11 @@ describe('A FUNCTION DECLARED WITH A TYPE, THEN DEFINED, COMPILES', () => {
 });
 
 //
-// A function body owns each name that an assignment in one of its nested
-// blocks writes (a branch of an `if`, a loop body, a `do` block), as in
-// Python (`nestedAssignmentNames()`,
-// `src/compute-engine/library/control-structures.ts`). A `let` in a nested
-// block declares a local of that block only, and a function literal in the
-// body owns the names of its own body. A block outside every function keeps
-// the rule of a block: it owns the names that its own statements assign.
+// A first assignment of a name at the own level of a block declares a local
+// of that block, in a function body as outside every function. A first
+// assignment in a branch of an `if` or in a loop body is a static error
+// (`first-assignment-in-branch`): the name is declared with a value before
+// the branch.
 //
 
 /** The value of `source` on the three routes: the run, the program
@@ -1084,232 +833,33 @@ function threeRoutes(source: string): {
   return { run: run(source).value, ...blockRoutes(source) };
 }
 
-/** The value of `source` on the run and on the program evaluated as one
- * block, for a program whose compilation declines: the program reads a
- * free symbol that nothing declares, and whose type is `unknown`. The
- * compilation refuses that input (`untyped-input`). */
-function interpretedRoutes(source: string): {
-  run: unknown;
-  evaluated: unknown;
-} {
-  const compiled = compile(
-    new ComputeEngine().box(parseEpsil(source)[0] as never),
-    { to: 'javascript' } as never
-  )!;
-  expect(compiled.success).toBe(false);
-  expect(compiled.diagnostic?.code).toBe('untyped-input');
-  const evaluated = new ComputeEngine()
-    .box(parseEpsil(source)[0] as never)
-    .evaluate().json;
-  return { run: run(source).value, evaluated };
-}
-
-/** The value of `source` on the run and on the program evaluated as one
- * block, for a program whose compilation declines because a read of a
- * local can come before every assignment of it (CE-636). */
-function declinedRoutes(source: string): {
-  run: unknown;
-  evaluated: unknown;
-} {
-  expect(() =>
-    compile(new ComputeEngine().box(parseEpsil(source)[0] as never), {
-      to: 'javascript',
-      fallback: false,
-    } as never)
-  ).toThrow(SOME_PATHS);
-  const evaluated = new ComputeEngine()
-    .box(parseEpsil(source)[0] as never)
-    .evaluate().json;
-  return { run: run(source).value, evaluated };
-}
-
-describe('A FUNCTION BODY OWNS THE NAMES THAT ITS NESTED BLOCKS ASSIGN', () => {
-  test('a name assigned in one branch of an `if`', () => {
-    const source = 'function g(c) { if c { t = 1 }; t }\n[g(true), g(false)]';
-    const { ce, value, diagnostics } = run(source);
-    expect(diagnostics).toEqual([]);
-    expect((value as unknown[])[1]).toBe(1);
-    expectReadBeforeAssignment((value as unknown[])[2], 't');
-    expect(ce.box('g').type.toString()).not.toContain('scope');
-    // The program evaluated as one block gives the same values.
-    const evaluated = new ComputeEngine()
-      .box(parseEpsil(source)[0] as never)
-      .evaluate().json as unknown[];
-    expect(evaluated[1]).toBe(1);
-    expectReadBeforeAssignment(evaluated[2], 't');
-  });
-
-  test.each([
-    ['a loop body', 'function g() { for i in [1, 2] { t = i }; t }\ng()', 2],
-    ['a `do` block', 'function g() { do { t = 3 }; t + 1 }\ng()', 4],
-  ])('%s: every route agrees', (_name, source, value) => {
-    expect(run(source).diagnostics).toEqual([]);
-    expect(threeRoutes(source)).toEqual({
-      run: value,
-      evaluated: value,
-      compiled: value,
-    });
-  });
-
-  // In these programs a read of `t` or `s` can come before every
-  // assignment of it, so the compilation declines (CE-636). The run and the
-  // program evaluated as one block agree.
-  test.each([
-    [
-      'a `while` loop body',
-      'function g() { n = 0; while n < 3 { n = n + 1; t = n * 2 }; t }\ng()',
-      6,
-    ],
-    [
-      'nested `if`s',
-      'function g(c, d) { if c { if d { t = 1 } else { t = 2 } }; t }\n' +
-        '[g(true, true), g(true, false)]',
-      [1, 2],
-    ],
-    [
-      'a first assignment in a branch of a loop body',
-      'function g(n) { for i in 1..n { if i == 1 { s = 0 }; s = s + i }; s }\n' +
-        '[g(3), g(4)]',
-      [6, 10],
-    ],
-    [
-      'a top-level `let` after the function is not written',
-      'function g(c) { if c { t = 5 }; t }\nlet t = 10\n[g(true), t]',
-      [5, 10],
-    ],
-  ])('%s: the run and the block agree, the compilation declines', (_name, source, value) => {
-    const list = Array.isArray(value) ? ['List', ...value] : value;
-    expect(run(source).diagnostics).toEqual([]);
-    expect(declinedRoutes(source)).toEqual({ run: list, evaluated: list });
-  });
-
-  test('a nested assignment is not the `scope` effect', () => {
-    const { ce, diagnostics } = run(
-      'function g() { for i in [1, 2] { if i > 1 { t = i } }; 0 }'
-    );
-    expect(diagnostics).toEqual([]);
-    expect(ce.box('g').type.toString()).not.toContain('scope');
-  });
-
-  test('a `let` in a branch declares a local of the branch only', () => {
-    // The assignments in the branch write the `let` local, so the body does
-    // not own `t`, and the `t` after the `if` is a free symbol.
-    // The first program reads the free `t`, which has no type: its
-    // compilation declines. In the second, the read of `u` can come before
-    // every assignment of it, so its compilation declines too.
-    for (const [source, value, routesOf] of [
-      [
-        'function g(c) { if c { let t = 1; t = 2 }; t }\ng(true)',
-        't',
-        interpretedRoutes,
-      ],
-      [
-        'function g(c) { if c { let t = 1; t = t + 1; u = t }; u }\ng(true)',
-        2,
-        declinedRoutes,
-      ],
-    ] as const) {
-      const routes = routesOf(source);
-      expect(routes.run).toEqual(value);
-      expect(routes.evaluated).toEqual(value);
-    }
-  });
-
-  test('a function literal in a branch owns the names of its body', () => {
-    const source =
-      'function g(c) { if c { u = ((k) => do { t = k; t })(2) }; [u, t] }\ng(true)';
-    const routes = declinedRoutes(source);
-    expect(routes.run).toEqual(['List', 2, 't']);
-    expect(routes.evaluated).toEqual(['List', 2, 't']);
-  });
-
-  test('the compiled function declares the local in its body', () => {
-    const ce = new ComputeEngine();
-    const fn = ce.box([
-      'Function',
-      [
-        'Block',
-        [
-          'If',
-          ['Greater', 'c', 0],
-          ['Block', ['Assign', 't', 1]],
-          ['Block', ['Assign', 't', 2]],
-        ],
-        't',
-      ],
-      'c',
-    ] as never);
-    const result = compile(fn, { to: 'javascript', fallback: false } as never)!;
-    expect(result.success).toBe(true);
-    // The declaration comes before the conditional, so the read after it
-    // sees the write in the branch.
-    expect(result.code.indexOf('let t')).toBeGreaterThan(-1);
-    expect(result.code.indexOf('let t')).toBeLessThan(
-      result.code.indexOf('t = 1')
-    );
-    expect(result.run!(1 as never)).toBe(1);
-    expect(result.run!(-1 as never)).toBe(2);
-    expect(ce.box(['Apply', fn, 1]).evaluate().json).toBe(1);
-  });
-
-  test('the top level is not changed', () => {
-    // A block outside every function owns only the names that its own
-    // statements assign: a nested block owns its own, and the `t` after it
-    // is a free symbol.
-    for (const source of [
-      'do { if true { t = 1 }; t }',
-      'for i in [1, 2] { t = i }\nt',
-    ]) {
-      const { value, diagnostics } = run(source);
-      expect(diagnostics).toEqual([]);
-      expect(value).toBe('t');
-      expect(staticReports(source)).toEqual([]);
-    }
-  });
-});
-
 describe('THE STATIC CHECK READS THE NESTED BLOCKS OF A FUNCTION BODY', () => {
-  // `epsil check` reports a read that runs before every assignment of the
-  // local, also when the first assignment is in a nested block
-  // (`readsBeforeFirstWrite()`, `src/epsil/read-before-assignment.ts`).
+  // `epsil check` reports a first assignment in a branch or a loop body,
+  // and a use before the declaration in a nested block. Each statement with
+  // an error is reported, so the code can be reported more than once.
+  const codes = (source: string): string[] => [
+    ...new Set(
+      executeEpsil(new ComputeEngine(), source).diagnostics.map((d) =>
+        String(
+          d.message[0] === 'static-type-error' ? d.message[3] : d.message[0]
+        )
+      )
+    ),
+  ];
   test.each([
-    [
-      'a read in a branch before the assignment of the branch',
-      'function g(c) { if c { u = t; t = 1 }; 0 }\ng(true)',
-    ],
-    [
-      'a read in the other branch',
-      'function g(c) { if c { t = 1 } else { u = t }; 0 }\ng(false)',
-    ],
-    ['a read in a `do` block', 'function g() { do { u = t; t = 1 }; 0 }\ng()'],
-    [
-      'a read in the first iteration of a loop body',
-      'function g() { for i in [1, 2] { s = t; t = i }; 0 }\ng()',
-    ],
-    [
-      'a read in the condition of the `if` that assigns',
-      'function g() { if t > 0 { t = 1 }; 0 }\ng()',
-    ],
-  ])('%s', (_name, source) => {
-    expect(staticReports(source)).toEqual([['read-before-declaration', 't']]);
-    // The program evaluated as one block gives the error too.
-    const ce = new ComputeEngine();
-    const value = ce.box(parseEpsil(source)[0] as never).evaluate().json;
-    expect(JSON.stringify(value)).toContain("'read-before-declaration'");
-  });
-
-  test.each([
-    [
-      'a read after an `if` that assigns in one branch',
-      'function g(c) { if c { t = 1 }; t }',
-    ],
-    [
-      'a read in a branch of a loop body, after an earlier iteration',
-      'function g(c) { for i in [1, 2] { if c { u = t; t = 1 } }; 0 }',
-    ],
-    ['a read after the loop', 'function g(xs) { for x in xs { t = x }; t }'],
-  ])('not certain: %s', (_name, source) => {
-    expect(staticReports(source)).toEqual([]);
+    ['function g(c) { if c { u = t; t = 1 }; 0 }\ng(true)', 'first-assignment-in-branch'],
+    ['function g(c) { if c { t = 1 } else { u = t }; 0 }\ng(false)', 'first-assignment-in-branch'],
+    ['function g() { do { u = t; t = 1 }; 0 }\ng()', 'read-before-declaration'],
+    ['function g() { for i in [1, 2] { s = t; t = i }; 0 }\ng()', 'first-assignment-in-branch'],
+    ['function g(c) { if c { t = 1 }; t }', 'first-assignment-in-branch'],
+    ['function g(c) { for i in [1, 2] { if c { u = t; t = 1 } }; 0 }', 'first-assignment-in-branch'],
+    ['function g(xs) { for x in xs { t = x }; t }', 'first-assignment-in-branch'],
+    // A read of `t` in the condition makes a binding for the free symbol
+    // `t`; that binding is not a declaration of the `t` that the branch
+    // assigns.
+    ['function g() { if t > 0 { t = 1 }; 0 }\ng()', 'first-assignment-in-branch'],
+  ])('%j', (source, code) => {
+    expect(codes(source)).toEqual([code]);
   });
 });
 
@@ -1386,20 +936,22 @@ describe('A CLOSURE MADE IN A NESTED BLOCK KEEPS THE LOCALS OF ITS BODY', () => 
   // (`copyAssignmentLocals()`), so an assignment in it is a local of the
   // closure, as for the same closure written as a statement of the body.
   test.each([
+    // The names that a branch assigns are declared with a value before the
+    // branch.
     [
       'a closure called in the branch',
-      'function g(c) { if c { h = () => do { u = 2; u }; v = h() } else { v = 0 }; v }\n' +
+      'function g(c) { let h = () => 0; v = 0; if c { h = () => do { u = 2; u }; v = h() }; v }\n' +
         '[g(true), g(false)]',
       ['List', 2, 0],
     ],
     [
       'the name of the closure local is not a local of the function',
-      'function g(c) { if c { h = () => do { u = 2; u }; t = h() }; [t, u] }\ng(true)',
+      'function g(c) { h = () => 0; t = 0; if c { h = () => do { u = 2; u }; t = h() }; [t, u] }\ng(true)',
       ['List', 2, 'u'],
     ],
     [
       'a closure returned from a branch',
-      'function mk(n) { if n > 0 { f = (k) => do { acc = k * n; acc + 1 } } else { f = (k) => 0 }; f }\n' +
+      'function mk(n) { f = (k) => 0; if n > 0 { f = (k) => do { acc = k * n; acc + 1 } }; f }\n' +
         'let a = mk(2)\n[a(1), a(3)]',
       ['List', 3, 7],
     ],
@@ -1413,21 +965,22 @@ describe('A CLOSURE MADE IN A NESTED BLOCK KEEPS THE LOCALS OF ITS BODY', () => 
   });
 
   test('a read of the closure local before its assignment', () => {
-    const source =
-      'function g(c) { if c { h = () => do { u = t; t = 2; u }; v = h() }; v }\ng(true)';
-    expectReadBeforeAssignment(evaluatedAsBlock(source), 't');
+    // A static error in the body of the closure.
+    expect(
+      staticCodes('function g(c) { h = () => do { u = t; t = 2; u }; h() }\ng(true)')
+    ).toEqual(['read-before-declaration']);
   });
 });
 
-describe('COMPILED CODE DECLINES A READ THAT CAN COME BEFORE EVERY ASSIGNMENT', () => {
-  // A read of a function-body local that the compiler cannot prove to come
-  // after an assignment makes the compilation fail, on every target
-  // (`classifyLocalReads()`,
-  // `src/compute-engine/compilation/compile-locals.ts`). The interpreter
-  // gives the `read-before-declaration` error for that read.
+describe('COMPILED CODE AND A LOCAL ASSIGNED IN A BRANCH', () => {
+  // A first assignment of a local in a branch or in a loop body is a static
+  // error of the canonical form, so the compilation declines: the input is
+  // not valid. A local declared with a value before the branch is assigned
+  // before every read, and the body compiles.
   const literal = (body: unknown) =>
     new ComputeEngine().box(['Function', body, 'c'] as never);
   const BRANCH = ['Block', ['If', 'c', ['Block', ['Assign', 't', 1]]], 't'];
+  const INVALID = /Could not compile invalid expression/;
 
   test('an assignment in one branch: JavaScript and interval-js decline', () => {
     expect(() =>
@@ -1435,10 +988,9 @@ describe('COMPILED CODE DECLINES A READ THAT CAN COME BEFORE EVERY ASSIGNMENT', 
         to: 'javascript',
         fallback: false,
       } as never)
-    ).toThrow(SOME_PATHS);
+    ).toThrow(INVALID);
     const ia = compile(literal(BRANCH), {
       to: 'interval-js',
-      fallback: false,
     } as never)!;
     expect(ia.success).toBe(false);
   });
@@ -1450,13 +1002,11 @@ describe('COMPILED CODE DECLINES A READ THAT CAN COME BEFORE EVERY ASSIGNMENT', 
         to: 'javascript',
         fallback: false,
       } as never)
-    ).toThrow(SOME_PATHS);
-    expect(run(`${g}g(true)`).value).toBe(1);
-    // The run gives the error.
-    expectReadBeforeAssignment(run(`${g}g(false)`).value, 't');
+    ).toThrow(INVALID);
+    expect(staticCodes(`${g}g(true)`)).toEqual(['first-assignment-in-branch']);
   });
 
-  test('a loop that runs no time', () => {
+  test('a first assignment in a loop body', () => {
     const body = [
       'Block',
       [
@@ -1467,20 +1017,19 @@ describe('COMPILED CODE DECLINES A READ THAT CAN COME BEFORE EVERY ASSIGNMENT', 
       't',
     ];
     const fn = literal(body);
-    expectReadBeforeAssignment(
+    expectErrorCode(
       fn.engine.box(['Apply', fn, 3] as never).evaluate().json,
-      't'
+      'first-assignment-in-branch'
     );
     expect(() =>
       compile(fn, { to: 'javascript', fallback: false } as never)
-    ).toThrow(SOME_PATHS);
-    const ia = compile(fn, { to: 'interval-js', fallback: false } as never)!;
-    expect(ia.success).toBe(false);
+    ).toThrow(INVALID);
   });
 
   test('interval-js: a read after a loop that runs', () => {
     const fn = literal([
       'Block',
+      ['Assign', 't', 0],
       [
         'Loop',
         ['Block', ['Assign', 't', ['Multiply', 'k', 'c']]],
@@ -1504,6 +1053,7 @@ describe('COMPILED CODE DECLINES A READ THAT CAN COME BEFORE EVERY ASSIGNMENT', 
       'an assignment in each branch of a decided condition',
       [
         'Block',
+        ['Assign', 't', 0],
         [
           'If',
           ['Greater', 'c', 0],
@@ -1517,6 +1067,8 @@ describe('COMPILED CODE DECLINES A READ THAT CAN COME BEFORE EVERY ASSIGNMENT', 
       'a read in the branch after its assignment',
       [
         'Block',
+        ['Assign', 't', 0],
+        ['Assign', 'u', 0],
         [
           'If',
           'c',
@@ -1533,12 +1085,13 @@ describe('COMPILED CODE DECLINES A READ THAT CAN COME BEFORE EVERY ASSIGNMENT', 
     expect(result.success).toBe(true);
   });
 
-  test('declines: an assignment in each branch of a condition read by its value', () => {
+  test('compiles: an assignment in each branch of a condition read by its value', () => {
     // The condition `c` selects a branch only when it is `true` or `false`.
-    // Any other value runs no branch, and the parameter `c` has no type, so
-    // the read of `t` can come before every assignment (CE-636).
+    // Any other value runs no branch: the local keeps the value of its
+    // declaration.
     const fn = literal([
       'Block',
+      ['Assign', 't', 0],
       [
         'If',
         'c',
@@ -1547,9 +1100,9 @@ describe('COMPILED CODE DECLINES A READ THAT CAN COME BEFORE EVERY ASSIGNMENT', 
       ],
       't',
     ]);
-    expect(() =>
-      compile(fn, { to: 'javascript', fallback: false } as never)
-    ).toThrow(SOME_PATHS);
+    expect(
+      compile(fn, { to: 'javascript', fallback: false } as never)!.success
+    ).toBe(true);
     expect(fn.engine.box(['Apply', fn, 'True'] as never).evaluate().json).toBe(
       1
     );
@@ -1620,22 +1173,19 @@ describe('AN ASSIGNMENT TO THE LOOP INDEX WRITES THE INDEX OF THE LOOP', () => {
 
 describe('A BLOCK BOXED BEFORE IT BECOMES A FUNCTION BODY', () => {
   // `ce.function('Function', [block])` with a block that the host boxed
-  // first: the body owns the names that its nested blocks assign, as when
-  // the `Function` is boxed in one step (`hasNestedAssignmentLocals()`,
-  // `src/compute-engine/function-utils.ts`).
+  // first: the body has the same locals as when the `Function` is boxed in
+  // one step.
   test('a name assigned in one branch', () => {
     const ce = new ComputeEngine();
     const block = ce.box([
       'Block',
+      ['Assign', 't', 0],
       ['If', 'c', ['Block', ['Assign', 't', 1]]],
       't',
     ] as never);
     const fn = ce.function('Function', [block, ce.symbol('c')]);
     expect(ce.box(['Apply', fn, 'True'] as never).evaluate().json).toBe(1);
-    expectReadBeforeAssignment(
-      ce.box(['Apply', fn, 'False'] as never).evaluate().json,
-      't'
-    );
+    expect(ce.box(['Apply', fn, 'False'] as never).evaluate().json).toBe(0);
   });
 
   test('a block with no nested assignment is kept as it is', () => {
@@ -1705,7 +1255,12 @@ describe('AN OPERAND EVALUATED FOR EACH ELEMENT OWNS ITS NAMES', () => {
   ];
   const TABLE_BRANCH = [
     'Table',
-    ['Block', ['If', ['Equal', 'k', 2], ['Block', ['Assign', 'a', 5]]], 'a'],
+    [
+      'Block',
+      ['Assign', 'a', 0],
+      ['If', ['Equal', 'k', 2], ['Block', ['Assign', 'a', 5]]],
+      'a',
+    ],
     ['Tuple', 'k', 1, 3],
   ];
 
@@ -1734,21 +1289,20 @@ describe('AN OPERAND EVALUATED FOR EACH ELEMENT OWNS ITS NAMES', () => {
         .box(['Apply', ['Function', ['Block', TABLE_ASSIGN]]] as never)
         .evaluate({ materialization: true }).json
     ).toEqual(['List', 1, 2, 3]);
-    // The term is a function body: a read of `a` when the branch did not
-    // run is a read before the first assignment.
-    const value = ce
-      .box(['Apply', ['Function', ['Block', TABLE_BRANCH]]] as never)
-      .evaluate({ materialization: true }).json as unknown[];
-    expect(value[2]).toBe(5);
-    expectReadBeforeAssignment(value[1], 'a');
-    expectReadBeforeAssignment(value[3], 'a');
+    // Each evaluation of the term declares its own `a`.
+    expect(
+      ce
+        .box(['Apply', ['Function', ['Block', TABLE_BRANCH]]] as never)
+        .evaluate({ materialization: true }).json
+    ).toEqual(['List', 0, 5, 0]);
   });
 
-  test('the term of a `Sum` keeps its local from one index to the next', () => {
+  test('the term of a `Sum` keeps a local of the body from one index to the next', () => {
     // A `Sum` term is evaluated again at each index while the statement is
-    // evaluated, as a loop body is: the function body owns `t`.
+    // evaluated, as a loop body is: the term writes the local `t` of the
+    // function body.
     const source =
-      'function g() { sum(do { if k == 1 { t = 0 }; t = t + k; t }, k, 1, 3) }\ng()';
+      'function g() { t = 0; sum(do { t = t + k; t }, k, 1, 3) }\ng()';
     expect(run(source).value).toBe(10);
   });
 });
@@ -1776,6 +1330,7 @@ describe('A READ OF A LOCAL NEXT TO ANOTHER BINDING OF ITS NAME', () => {
       'Function',
       [
         'Block',
+        ['Assign', 't', 0],
         [
           'If',
           ['Greater', 'x', 0],
@@ -1807,6 +1362,7 @@ describe('A READ OF A LOCAL NEXT TO ANOTHER BINDING OF ITS NAME', () => {
       'Function',
       [
         'Block',
+        ['Assign', 't', 0],
         [
           'If',
           ['Greater', 'x', 0],
@@ -1825,66 +1381,25 @@ describe('A READ OF A LOCAL NEXT TO ANOTHER BINDING OF ITS NAME', () => {
     expect(result.preamble).toContain('const _fn_h');
   });
 
-  test('an assignment in a loop body does not prove a read in its collection', () => {
-    // The collection `1..t` is evaluated before the body: the read of `t`
-    // there comes before every assignment. Before, the assignment in the
-    // body, which `Loop` stores first, proved the read. No path gives `t` a
-    // value before the read, so the compilation fails (CE-636).
-    const compiled = (source: string) =>
-      compile(new ComputeEngine().box(parseEpsil(source)[0] as never), {
-        to: 'javascript',
-        fallback: false,
-      } as never)!;
-    expect(() =>
-      compiled('function g() { for k in 1..t { t = 2 }; 0 }\ng()')
-    ).toThrow(/no path to that read gives "t" a value/);
-    // An earlier statement that may assign `t`: the compilation declines
-    // too.
-    const g = 'function g(c) { if c { t = 3 }; for k in 1..t { t = 2 }; 0 }\n';
-    expect(() => compiled(`${g}g(true)`)).toThrow(SOME_PATHS);
-  });
-
-  test('a node read before and after an assignment declines', () => {
-    // The body holds the node `t + 1` twice: once before the assignment
-    // `t = 5` and once after it. The read after the assignment does not
-    // prove the read before it.
-    const ce = new ComputeEngine();
-    const literal = ce.box([
-      'Function',
-      [
-        'Block',
-        ['If', 'c', ['Block', ['Assign', 't', 3]]],
-        ['Assign', 'w', ['Add', 't', 1]],
-        ['Assign', 't', 5],
-        ['Add', 't', 'w'],
-      ],
-      'c',
-    ] as never);
-    const body = literal.op1;
-    const shared = body.ops![1].op2;
-    const block = ce._fn(
-      'Block',
-      [
-        body.ops![0],
-        body.ops![1],
-        body.ops![2],
-        ce._fn('Multiply', [shared, body.ops![3]]),
-      ],
-      { scope: body.localScope }
-    );
-    const fn = ce._fn('Function', [block, ...literal.ops!.slice(1)]);
-    expect(() =>
-      compile(fn, { to: 'javascript', fallback: false } as never)
-    ).toThrow(SOME_PATHS);
+  test('an assignment in a loop body is not a declaration of a name read in its collection', () => {
+    // The first assignment of `t` is in the loop body: a static error.
+    expect(
+      staticCodes('function g() { for k in 1..t { t = 2 }; 0 }\ng()')
+    ).toEqual(['first-assignment-in-branch']);
+    expect(
+      staticCodes(
+        'function g(c) { if c { t = 3 }; for k in 1..t { t = 2 }; 0 }\ng(true)'
+      )
+    ).toEqual(['first-assignment-in-branch']);
   });
 });
 
 describe('AN ASSIGNMENT LOCAL IN A LOOP DOMAIN, A PIPE STAGE', () => {
-  test('a loop over a range with an unset local gives the read error', () => {
-    // `Range(1, t)` keeps the failed operand in place and is not a
-    // collection; the loop took it for an empty domain and answered `0`.
-    const { value } = run('function g() { for k in 1..t { t = 2 }; 0 }\ng()');
-    expect(JSON.stringify(value)).toContain('read-before-declaration');
+  test('a loop over a range with an unset local is a static error', () => {
+    // The local is first assigned in the loop body.
+    expect(
+      staticCodes('function g() { for k in 1..t { t = 2 }; 0 }\ng()')
+    ).toEqual(['first-assignment-in-branch']);
   });
 
   test('a loop over a range with a bound local still runs', () => {

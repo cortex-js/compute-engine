@@ -439,8 +439,7 @@ describe('Composition review fixes', () => {
       local
         .box([
           'Block',
-          ['Declare', 'f', 'function'],
-          ['Assign', 'f', ['Function', 100, 'y']],
+          ['Declare', 'f', 'function', ['Function', 100, 'y']],
           [callee, 3],
         ])
         .evaluate()

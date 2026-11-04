@@ -188,18 +188,15 @@ describe('A bound name that shadows a global with an error body compiles', () =>
   });
 
   // The static type of the call `G()` is read from the global `G`, so it is
-  // `error`, but the interpreter calls the block's `G` and gives 3.
-  test('a block local: Block(G := () ↦ 1, G() + u)', () => {
+  // `error`, but the interpreter calls the block's `G` and gives 3. The
+  // local is declared with `Declare`: an `Assign` of a name that the engine
+  // knows writes the engine's binding, and compiled code declines it.
+  test("a block local: Block(Declare(G, 'unknown', () ↦ 1), G() + u)", () => {
     const ce = engine();
-    const expr = ce.box([
-      'Block',
-      ['Assign', 'G', ['Function', 1]],
-      ['Add', ['G'], 'u'],
-    ]);
+    const declareG = ['Declare', 'G', "'unknown'", ['Function', 1]];
+    const expr = ce.box(['Block', declareG, ['Add', ['G'], 'u']]);
     expect(
-      ce
-        .box(['Block', ['Assign', 'G', ['Function', 1]], ['Add', ['G'], 2]])
-        .evaluate().re
+      ce.box(['Block', declareG, ['Add', ['G'], 2]]).evaluate().re
     ).toBe(3);
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);

@@ -18,8 +18,7 @@ describe('the derivative of a block with local variables', () => {
     // canonical form of `D(x ↦ (k := 2; kx), x)`.
     const block = [
       'Block',
-      ['Declare', 'k'],
-      ['Assign', 'k', 2],
+      ['Declare', 'k', "'unknown'", 2],
       ['Multiply', 'k', 'x'],
     ];
     expect(d(ce, ['D', block, 'x'])).toBe('2');
@@ -45,10 +44,8 @@ describe('the derivative of a block with local variables', () => {
         'D',
         [
           'Block',
-          ['Declare', 'a'],
-          ['Declare', 'b'],
-          ['Assign', 'a', ['Sin', 'x']],
-          ['Assign', 'b', ['Multiply', 'a', 'a']],
+          ['Declare', 'a', "'unknown'", ['Sin', 'x']],
+          ['Declare', 'b', "'unknown'", ['Multiply', 'a', 'a']],
           ['Add', 'b', 'x'],
         ],
         'x',
@@ -64,8 +61,7 @@ describe('the derivative of a block with local variables', () => {
         'D',
         [
           'Block',
-          ['Declare', 'a'],
-          ['Assign', 'a', 'x'],
+          ['Declare', 'a', "'unknown'", 'x'],
           ['Assign', 'a', ['Multiply', 3, 'a']],
           ['Power', 'a', 2],
         ],
@@ -80,7 +76,7 @@ describe('the derivative of a block with local variables', () => {
     expect(
       d(ce, [
         'D',
-        ['Block', ['Declare', 'k'], ['Assign', 'k', 2], ['Multiply', 'k', 'x']],
+        ['Block', ['Declare', 'k', "'unknown'", 2], ['Multiply', 'k', 'x']],
         'x',
       ])
     ).toBe('2');
@@ -115,8 +111,7 @@ describe('the derivative of a block with local variables', () => {
           'Function',
           [
             'Block',
-            ['Declare', 'c'],
-            ['Assign', 'c', 5],
+            ['Declare', 'c', "'unknown'", 5],
             ['Multiply', 'c', 'x'],
           ],
           'x',
@@ -132,15 +127,10 @@ describe('the derivative of a block with local variables', () => {
       ['Block', ['Assign', 'q', 2], ['Multiply', 'q', 'x']],
     ],
     [
-      'a local read before it is assigned',
-      ['Block', ['Declare', 'a'], ['Multiply', 'a', 'x']],
-    ],
-    [
       'a Sum index with the name of a local',
       [
         'Block',
-        ['Declare', 'k'],
-        ['Assign', 'k', 2],
+        ['Declare', 'k', "'unknown'", 2],
         ['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', 1, 3]],
       ],
     ],
@@ -148,28 +138,15 @@ describe('the derivative of a block with local variables', () => {
       'a local function called by name',
       [
         'Block',
-        ['Declare', 'f'],
-        ['Assign', 'f', ['Function', ['Power', 't', 2], 't']],
+        ['Declare', 'f', "'unknown'", ['Function', ['Power', 't', 2], 't']],
         ['f', 'x'],
-      ],
-    ],
-    [
-      'a name read before it is declared',
-      [
-        'Block',
-        ['Declare', 'b'],
-        ['Assign', 'b', 'a'],
-        ['Declare', 'a'],
-        ['Assign', 'a', 2],
-        ['Multiply', 'b', 'x'],
       ],
     ],
     [
       'a declaration with a type',
       [
         'Block',
-        ['Declare', 'a', "'integer'"],
-        ['Assign', 'a', ['Sin', 'x']],
+        ['Declare', 'a', "'integer'", ['Sin', 'x']],
         ['Multiply', 'a', 'x'],
       ],
     ],
@@ -177,14 +154,9 @@ describe('the derivative of a block with local variables', () => {
       'a value that is not pure',
       [
         'Block',
-        ['Declare', 'a'],
-        ['Assign', 'a', ['Random']],
+        ['Declare', 'a', "'unknown'", ['Random']],
         ['Multiply', 'a', 'a', 'x'],
       ],
-    ],
-    [
-      'a local named like an object property, read before it is assigned',
-      ['Block', ['Declare', 'toString'], ['Multiply', 'toString', 'x']],
     ],
   ])('stays unevaluated for %s', (_, block) => {
     const ce = new ComputeEngine();

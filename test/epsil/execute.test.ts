@@ -1427,17 +1427,18 @@ describe('EPSIL EXECUTE — collection-literal spread', () => {
     // pairs, got dictionary<integer>" instead of staying symbolic until the
     // value arrives. This pins the Epsil surface; the box-route twin lives
     // in `collections.test.ts` ("a spread of a VALUELESS dictionary-typed
-    // symbol stays symbolic").
-    const { value, diagnostics } = run(
-      'let d: dictionary<integer>\n{->, ...d, "z" -> 3}'
-    );
+    // symbol stays symbolic"). A `let` declaration has a value, so the
+    // valueless symbol is one that the host declares.
+    const ce = new ComputeEngine();
+    ce.declare('d', 'dictionary<integer>');
+    const { value, diagnostics } = executeEpsil(ce, '{->, ...d, "z" -> 3}');
     expect(diagnostics).toEqual([]);
     expect(value.isValid).toBe(true);
     expect(value.operator).toBe('DictionaryFrom');
     // Same program with the value present resolves to the merged dictionary.
     expect(
       run(
-        'let d: dictionary<integer>\nd = {"a" -> 1}\n{->, ...d, "z" -> 3}'
+        'let d: dictionary<integer> = {"a" -> 1}\n{->, ...d, "z" -> 3}'
       ).value.toString()
     ).toBe('{"a" -> 1, "z" -> 3}');
   });
@@ -1678,13 +1679,14 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
   });
 
   test('an annotation-only declaration pins the names too', () => {
-    // No initializer: at runtime the call permutes against the declared
-    // signature and stays inert, so a static decline would be just as false.
+    // No initializer: the declaration gives the signature of the function
+    // that the `function` statement of the same name defines. The call
+    // permutes against the declared parameter names.
     const { value, diagnostics } = run(
-      'let g : (x: number, y: string) -> number\ng(y: "ok", x: 1)'
+      'let g : (x: number, y: string) -> number\nfunction g(a, b) { a }\ng(y: "ok", x: 1)'
     );
     expect(diagnostics).toEqual([]);
-    expect(value.toString()).toBe('g(1, "ok")');
+    expect(value.toString()).toBe('1');
   });
 
   test('positional-call control: unchanged, statically clean', () => {

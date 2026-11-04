@@ -105,8 +105,7 @@ describe('SCALAR NEWTYPE — pure erasure (D11 step A)', () => {
       const n = ce
         .box([
           'Block',
-          ['Declare', 'x', 'number'],
-          ['Assign', 'x', v],
+          ['Declare', 'x', 'number', v],
           ['Add', ['Sin', 'x'], ['Power', 'x', 2]],
         ])
         .N();
@@ -250,8 +249,7 @@ describe('TUPLE-BODY CONSTRUCTOR — follows `Tuple` (D11 step B)', () => {
       const n = ce
         .box([
           'Block',
-          ['Declare', 'x', 'number'],
-          ['Assign', 'x', v],
+          ['Declare', 'x', 'number', v],
           ['Tuple', 'x', ['Sin', 'x']],
         ])
         .N();

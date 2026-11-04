@@ -592,8 +592,7 @@ describe('Invariant prefix reuse — what is NOT hoisted', () => {
       'L',
       [
         'Block',
-        ['Declare', 'a', "'real'"],
-        ['Assign', 'a', ['Add', 't', 'r']],
+        ['Declare', 'a', "'real'", ['Add', 't', 'r']],
         ['Multiply', 'r', ['m', 'a']],
       ],
       'r',

@@ -103,8 +103,7 @@ describe('CE-623: a call mapped over a list of points keeps a local named like a
         );
         const block = ce.box([
           'Block',
-          ['Declare', name, "'list<tuple<real, real>>'"],
-          ['Assign', name, ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]],
+          ['Declare', name, "'list<tuple<real, real>>'", ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]],
           call as never,
         ]);
         expect(block.evaluate().toString()).toBe('[(2, 4),(6, 8)]');

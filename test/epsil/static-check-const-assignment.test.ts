@@ -519,7 +519,7 @@ describe('EPSIL CHECK: A FUNCTION DEFINED BEFORE THE CONST', () => {
   // the block writes it (the next test).
   test.each([
     // Each assignment of the body, in a block too.
-    'function f() scope -> integer { if true { c = 2 }; c = 3; 0 }\n' +
+    'function f() scope -> integer { c = 3; if true { c = 2 }; 0 }\n' +
       'const c = 1\nf()\nc',
     // A function literal.
     'let g = () => do { c = 2 }\nconst c = 1\ng()\nc',
@@ -557,14 +557,15 @@ describe('EPSIL CHECK: A FUNCTION DEFINED BEFORE THE CONST', () => {
   });
 
   test('a write before a `let` of the function body', () => {
-    // At run time the write targets the local of the body, which is not yet
-    // declared.
+    // The write is a use of the local of the body before its declaration:
+    // a static error of the body, not a write of the constant.
     const source =
       'function f() scope -> integer { c = 2; let c = 0; 0 }\nconst c = 1\nf()\n4';
-    expect(CHECK(source)).toEqual([]);
-    expect(RUN(source).diagnostics).toEqual([
-      ['runtime-error', 'read-before-declaration', 3, 'f()'],
-    ]);
+    const expected = [
+      ['static-type-error', 'read-before-declaration', 1, 'c = 2'],
+    ];
+    expect(CHECK(source)).toEqual(expected);
+    expect(RUN(source).diagnostics).toEqual(expected);
   });
 });
 

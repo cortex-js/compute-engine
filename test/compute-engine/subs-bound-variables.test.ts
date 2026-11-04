@@ -53,8 +53,7 @@ describe('SUBS LEAVES A BOUND VARIABLE AND ITS BINDER UNCHANGED', () => {
   test('a local of a Block, declared or assigned', () => {
     const declared: Json = [
       'Block',
-      ['Declare', 'j', 'integer'],
-      ['Assign', 'j', 2],
+      ['Declare', 'j', 'integer', 2],
       ['Add', 'j', 1],
     ];
     const r1 = subs(declared, { j: 7 });

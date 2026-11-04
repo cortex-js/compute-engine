@@ -779,8 +779,7 @@ describe('N(x, p) and N(x, [p, a]): lazy collections, goals and symbolic results
     // when an element is read, after the `Block` returned.
     const local = (body: unknown) => [
       'Block',
-      ['Declare', 'c', "'integer'"],
-      ['Assign', 'c', 2],
+      ['Declare', 'c', "'integer'", 2],
       ['Map', ['Function', body, 'x'], ['Range', 1, 300]],
     ];
     const r = ce.box(['N', local(['Divide', 'x', 'c'])]).evaluate();

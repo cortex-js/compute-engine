@@ -350,7 +350,18 @@ describe('CSE HARVEST — G3 mutation', () => {
     // symbol-hood would have recorded neither.
     const declare = (pattern: any): any => [
       'Add',
-      ['Block', ['Declare', pattern, ['Tuple', 1, 2]], 1],
+      [
+        'Block',
+        [
+          'Declare',
+          pattern,
+          [
+            'Dictionary',
+            ['KeyValuePair', { sym: 'value' }, ['Tuple', 1, 2]],
+          ],
+        ],
+        1,
+      ],
       SIN6U,
       SIN6U,
       SIN6U,

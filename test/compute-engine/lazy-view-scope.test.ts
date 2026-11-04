@@ -160,7 +160,7 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
   test('a view made in a block of the body reads the block local', () => {
     const block = (inner: Json): Json => [
       'Function',
-      ['Block', ['Declare', 'd', "'number'"], ['Assign', 'd', 'd0'], inner],
+      ['Block', ['Declare', 'd', "'number'", 'd0'], inner],
       'd0',
       'xs',
     ];
@@ -251,8 +251,7 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
           'Block',
           [
             'Block',
-            ['Declare', 'd', "'number'"],
-            ['Assign', 'd', ['Multiply', 'd0', 2]],
+            ['Declare', 'd', "'number'", ['Multiply', 'd0', 2]],
             inner,
           ],
         ],
@@ -392,9 +391,8 @@ describe('LAZY VIEW CREATION CONTEXT', () => {
       'Function',
       [
         'Block',
-        ['Declare', 'acc', "'number'"],
-        ['Assign', 'acc', 0],
-        ['Declare', 'v', "'any'"],
+        ['Declare', 'acc', "'number'", 0],
+        ['Declare', 'v', "'any'", 'Nothing'],
         ['Loop', body, ['Element', 'd', ['Range', 1, 3]]],
         result,
       ],
@@ -635,7 +633,7 @@ describe('LAZY VIEW CREATION CONTEXT: FRAMES, NESTED SCOPES AND HELD VIEWS', () 
         'r',
         recurse([
           'Block',
-          ['Declare', 'w', "'any'"],
+          ['Declare', 'w', "'any'", 'Nothing'],
           ['Loop', ['Assign', 'w', call], ['Element', 'i', ['Range', 1, 1]]],
           'w',
         ]),
@@ -1183,8 +1181,7 @@ describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES', () => {
         'Sum',
         [
           'Block',
-          ['Declare', 'm', 'integer'],
-          ['Assign', 'm', 'k'],
+          ['Declare', 'm', 'integer', 'k'],
           [
             'If',
             ['Equal', 'k', 2],

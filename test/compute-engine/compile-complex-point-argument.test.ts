@@ -154,7 +154,7 @@ describe('A complex point given to an engine-level function', () => {
     ],
     [
       'a block local that holds a point',
-      ['Block', ['Declare', 'q'], ['Assign', 'q', ['At', 'P', 1]], ['h', 'q']],
+      ['Block', ['Declare', 'q', "'unknown'", ['At', 'P', 1]], ['h', 'q']],
     ],
     ['the result of a function call', ['h', ['first', 'P']]],
     [
@@ -384,17 +384,12 @@ describe('A block-local combiner that hides an engine-level function', () => {
       'Function',
       [
         'Block',
-        ['Declare', 'gs', "'function'"],
-        [
-          'Assign',
-          'gs',
-          [
+        ['Declare', 'gs', "'function'", [
             'Function',
             ['Add', 'a', 'x'],
             ['Typed', 'a', "'complex'"],
             ['Typed', 'x', "'complex'"],
-          ],
-        ],
+          ]],
         ['Add', 1, ['Reduce', 'L', 'gs', 0]],
       ],
       ['Typed', 'L', "'list<complex>'"],

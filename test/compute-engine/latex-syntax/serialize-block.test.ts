@@ -3,21 +3,19 @@ import { engine as ce, latex } from '../../utils';
 describe('BLOCK - SERIALIZATION', () => {
   test('Block with Declare, Assign, and body', () => {
     expect(
-      latex(['Block', ['Declare', 'x'], ['Assign', 'x', 5], ['Add', 'x', 1]])
-    ).toMatchInlineSnapshot(`x\\coloneq5; x+1`);
+      latex(['Block', ['Declare', 'x', "'unknown'", 5], ['Add', 'x', 1]])
+    ).toMatchInlineSnapshot(`x+1\\text{ where }x\\coloneq5`);
   });
 
   test('Block with multiple assignments', () => {
     expect(
       latex([
         'Block',
-        ['Declare', 'a'],
-        ['Assign', 'a', 1],
-        ['Declare', 'b'],
-        ['Assign', 'b', 2],
+        ['Declare', 'a', "'unknown'", 1],
+        ['Declare', 'b', "'unknown'", 2],
         ['Add', 'a', 'b'],
       ])
-    ).toMatchInlineSnapshot(`a\\coloneq1; b\\coloneq2; a+b`);
+    ).toMatchInlineSnapshot(`a+b\\text{ where }a\\coloneq1, b\\coloneq2`);
   });
 
   test('a parsed semicolon block of a local is written as a where clause', () => {

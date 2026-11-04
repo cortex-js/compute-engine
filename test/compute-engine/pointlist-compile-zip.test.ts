@@ -1185,8 +1185,7 @@ describe('PointList zip — constructed source widths', () => {
     const r = compile(
       ce.expr([
         'Block',
-        ['Declare', 'v', 'list<real>'],
-        ['Assign', 'v', ['List', 'k', 2, 3]],
+        ['Declare', 'v', 'list<real>', ['List', 'k', 2, 3]],
         ['PointList', 'v', ['List', 10, 20, 30, 40, 50], ['mutate', 'v']],
       ]),
       {

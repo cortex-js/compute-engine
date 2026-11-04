@@ -63,8 +63,7 @@ describe('COMPREHENSION GUARD — interpreter', () => {
   test('a guarded Loop visits the accepted elements only', () => {
     const loop = ce.box([
       'Block',
-      ['Declare', 's'],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'integer'", 0],
       [
         'Loop',
         ['Block', ['Assign', 's', ['Add', 's', 'k']]],
@@ -122,8 +121,7 @@ describe('COMPREHENSION GUARD — compiled', () => {
     const result = compile(
       ce.box([
         'Block',
-        ['Declare', 's'],
-        ['Assign', 's', 0],
+        ['Declare', 's', "'integer'", 0],
         [
           'Loop',
           ['Block', ['Assign', 's', ['Add', 's', 'k']]],
@@ -160,6 +158,9 @@ describe('COMPREHENSION GUARD — compiled', () => {
 
   test('Python: a guarded Loop statement declines', () => {
     const python = new PythonTarget();
+    // `s` has a value before the loop, so the loop body is not its first
+    // assignment (that would be the static error `first-assignment-in-branch`).
+    ce.declare('s', 'integer');
     expect(() =>
       python.compileFunction(
         ce.box([

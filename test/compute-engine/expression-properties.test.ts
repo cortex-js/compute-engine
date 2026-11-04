@@ -338,7 +338,7 @@ describe('SCOPED_UNKNOWNS', () => {
   it('Block: should exclude locally declared variables', () => {
     const block = engine.expr([
       'Block',
-      ['Declare', 'z', 'integer'],
+      ['Declare', 'z', 'integer', 0],
       ['Add', 'x', 'z'],
     ]);
     expect(block.unknowns).toContain('x');
@@ -512,7 +512,7 @@ describe('DEFINES', () => {
     const block = engine.box([
       'Block',
       ['Assign', 'a', 1],
-      ['Declare', 'b', 'integer'],
+      ['Declare', 'b', 'integer', 0],
       ['Add', 'a', 'b'],
     ]);
     expect(block.defines).toEqual(['a', 'b']);

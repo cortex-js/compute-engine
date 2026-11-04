@@ -436,25 +436,12 @@ their types come from the engine's declarations, and a name whose type is
 untyped parameter compiles a root `Function` with a `Typed` parameter
 instead. A transparent alias of `unknown` or
 `any` (`ce.declareType("U", "unknown", { alias: true })`) is that type, so
-an input declared `U` declines. A local of a function body is not an input,
-also when only a nested block (a loop body, a branch) assigns it. A name
-that only a nested statement of a block outside a function body assigns (a
-branch of an `If`) is an input: with `b` undeclared,
-`Block(If(a < 1, b ≔ 1); b)` declines, because the compiled code reads the
-input `b` at `a = 2`, where the interpreter has no value for `b`. The variable of an indefinite
-integral (`\int x^2 dx`) is an input, with the type of its declaration
-outside the integral. A name that the code assigns and that no scope of the
-expression binds is an input, also when the code only writes it: with `u`
-undeclared, `u ≔ If(x < 0, u, 0)` declines. An assignment to a local of the
-same name (a loop index, a local of a nested block) does not write the
-input. A value that the code assigns to an input must have the shape of the
-type of the input, declared or inferred, or the compilation declines with
-the code `'unsettled-shape'`: inference reads the type from a read of the
-name, and does not see the values that the code assigns. With `x: real` and
-`p` undeclared, `Block(If(x > 0, p ≔ [1, 2], p ≔ [3, 4]), 2p)` declines: the
-read `2p` gave `p` the type `number`, and the code gave `null` where the
-interpreter gives `[2, 4]`. An input that the code assigns values of the
-shape of its type compiles: `Block(Loop(acc ≔ acc + i, i ∈ 1..5), acc)`. The
+an input declared `U` declines. A local of a block or of a function body
+(a name that it declares, or assigns first at its own level) is not an
+input. The variable of an indefinite integral (`\int x^2 dx`) is an input,
+with the type of its declaration outside the integral. The compiled code
+never writes an input: a write to a name that the code does not declare
+declines (see "Block locals" below). The
 check runs after the code was generated: when the expression also declines
 for another reason (an operator with no lowering, a value with no settled
 shape, a timeout), that reason is the `error` and the diagnostic, and
@@ -501,12 +488,13 @@ the type of the name (declared, or inferred from its uses), must have one
 shape class: a number, a complex number, a string, a list, a point or a
 matrix. The length of a list is not part of its shape, so a local assigned
 `[1, 2]` and then `[1, 2, 3]` compiles. Otherwise the compilation declines
-with the code `'unsettled-shape'`. With `x: real`,
-`Block(p ≔ 0; If(x > 0, p ≔ [1, 2]); 2p)` declines, and so does
-`Block(p ≔ 0; p ≔ [1, 2]; p)`, although the interpreter gives `[1, 2]`: the
-order of the assignments and the paths of the code are not examined. A
-declared type settles the shape of a local: `Block(Declare(p, "real");
-p ≔ (x, 2); p)` declines. A type that a `Declare` states and that admits
+with the code `'unsettled-shape'`. A reassignment with a value of another
+type is a static error of the language (`assignment-type-mismatch`), so
+`Block(p ≔ 0; p ≔ [1, 2]; p)` and `Block(Declare(p, "real", 0); p ≔ (x, 2);
+p)` decline as invalid expressions. A number and a complex number are both
+of the type `number`, so the static error does not separate them, and
+this check does: with `x: real`, `Block(p ≔ 1; If(x > 0, p ≔ √(-x)); p)`
+declines in mode `strict` (see "Block locals" below). A type that a `Declare` states and that admits
 several shapes (`real | list<real>`, `broadcastable<number>`) is not
 checked, as a declared union of an input is not refused. The parameter of a
 function literal has the type of the parameter (and, for a literal that
@@ -518,6 +506,14 @@ of a clause. Every other occurrence of a name is the same variable, so two
 locals of the same name with no `Declare`, in two function bodies, are
 compared as one. This is the simple, sound version of the rule (ROADMAP
 CE-724 lists what a precise version would accept).
+
+A local whose first value has the type `unknown` (an untyped parameter of
+a function literal) keeps the type `unknown`: a later value does not narrow
+it. Such a local selects no representation, and the compiled code reads
+each use of it as a number. So when the code also gives it a value of
+another shape (a list, a point, a matrix, a string), the compilation
+declines with the code `'unsettled-shape'`: with `t` untyped,
+`t ↦ Block(Declare(q, "unknown", t); If(t > 0, q ≔ [2, 3]); 2q)` declines.
 
 Some assignments decline with the code `'unsettled-shape'` whatever their
 shapes, because the interpreter and the compiled code do not agree on their
@@ -567,20 +563,79 @@ effect:
   it gives `Nothing` when it ends with no `Return` (see "`Nothing` in a
   value position declines" below).
 
-A read of a block local that may have no value declines on every target.
-The compilation of the block puts each read of a local that its `Declare`
-gives no value in one of three classes: the local is assigned on every path
-before the read (the read compiles), on no path (the compilation declines),
-or on some paths only (the compilation declines too). The interpreter gives
-`read-before-declaration` for such a read, which compiled code has no form
-for. The analysis is simple and sound, so it can decline where the
-interpreter has a value. A `Return` does not end a path in this analysis,
-because some targets compile a nested block to a function of its own:
-`Block(Declare(y), If(c > 0, Return(0), y ≔ 1), y)` declines. An input that
-the caller can leave out does not make a path: with `x: real`,
-`Block(Declare(n), If(x > 5, n ≔ 1, n ≔ 2), n + 1)` compiles. The host
-avoids the decline by giving the local a value on every path before the
-read.
+**Block locals.** The rules of the language (`src/epsil/docs/declarations.md`)
+make a local simple to compile, and compiled code adds three declines:
+
+- A declaration has a value: `Declare(x, type, v)`, or a first
+  `Assign(x, v)` at the block's own level, which is the declaration. A
+  `Declare` with no value, a first assignment inside a branch, a loop body or
+  a `Match` case, and a use of a local before its declaration are static
+  errors (`declaration-without-value`, `first-assignment-in-branch`,
+  `read-before-declaration`), so the compilation declines. No compiled code
+  reads a local that has no value.
+- A local can be assigned again anywhere after its declaration (a branch, a
+  loop body, a nested block) with a value whose static type is a subtype of
+  the type of the local (its declared type, or the type of its first value,
+  where every numeric type widens to `number`). Another type is the static
+  error `assignment-type-mismatch`.
+- An assignment is a statement of a block, never an operand:
+  `Assign(t, Assign(u, v))` and `f(a ≔ 2)` are the static error
+  `assignment-in-operand`.
+- A compiled block writes only the locals that it declares and the locals
+  of an enclosing compiled block. A write to a symbol of the engine (a
+  symbol declared with `ce.declare()` or `ce.assign()`, or a free symbol
+  that the engine has already seen), an input or a `vars` name declines.
+  The interpreter changes the binding of the engine, and compiled code has
+  no binding of the engine to change. Return the value and let the host
+  assign it, or declare a local and read the local.
+- A `Block` with an assignment (or a loop) is a statement, or the body of
+  a function literal, of the compiled expression or of a binder (the body
+  of a `Sum`, a `Product`, an `Integrate` or a `Comprehension`), or the
+  last value of one of these (the last statement of a block, a branch of a
+  conditional). As any other operand it declines:
+  `1 + Block(Assign(b, x), 2b)` declines. Assign the value to a local
+  declared before the block.
+- A block whose statements before the last are only declarations with a
+  value is a value expression, and it compiles as an operand. The `where`
+  clause and the `;` parse give such a block: `P + PointList(a - ⌊a⌋ where
+  a ≔ 3.7x, 0)` is `P + PointList(Block(Declare(a, "unknown", 3.7x),
+  a - Floor(a)), 0)`, and it compiles. Each declaration binds a new name,
+  and no statement changes it after its declaration.
+- A block whose last statement is an assignment or a declaration has the
+  value `Nothing`, which compiled code has no form for: where its value is
+  used, it declines. The JavaScript code of `[1, Block(b ≔ 2)]` gave
+  `[1, 2]`, where the interpreter gives `[1, Nothing]`. A `Loop` or a
+  `While` is a statement with no value: see "`Nothing` in a value position
+  declines" below.
+- A `vars` entry is a value, the same at each read. A string entry is
+  source that the JavaScript code splices in at each read of the name
+  (`x + 2x` with `vars: {x: 'q'}` is `q + 2 * q`), so it must be a plain
+  read of a value (`'_.s'`, a name). An entry with an effect
+  (`{W: 'nextValue()'}`) runs once for each read, or not at all; the result
+  is then unspecified.
+
+| Input                                                         | Compiled code                                      |
+| ------------------------------------------------------------- | -------------------------------------------------- |
+| `Block(Declare(a, 1), Assign(b, a + 1), b)`                   | compiles                                           |
+| `Block(Assign(s, 0), Loop(Assign(s, s + f(i)), i ∈ 1..n), s)` | compiles                                           |
+| `Block(Assign(a, 1), If(c, Assign(a, 2)), a)`                 | compiles (JavaScript, GLSL; Python declines the `If` with no `else`) |
+| `Block(Declare(a), If(c, Assign(a, 1)), a)`                   | static error: `a` has no value                     |
+| `Block(Assign(a, 1), Assign(a, "x"), a)`                      | static error: `"x"` is not a `number`              |
+| `f(a ≔ 2) + a`                                                | static error: an assignment is a statement         |
+| `c ≔ n + 1` with `c` a symbol of the engine                   | declines                                           |
+| `y ≔ Loop(…)`                                                 | declines: a loop has no value                      |
+| `1 + Block(Assign(b, x), 2b)`                                 | declines: a block with an assignment is not an operand |
+| `1 + (a - ⌊a⌋ where a ≔ 3.7x)`                                | compiles: a block of declarations is a value       |
+| `[1, Block(b ≔ 2)]`                                           | declines: the value of the block is `Nothing`      |
+
+The lane of a local follows its static type (see "Compile modes"). With
+`c: real` and `x: real`, the local `a` of
+`Block(a ≔ 1; If(c > 0, a ≔ √(-x)); a)` has the type `number`. In mode
+`strict` the compilation declines (`unsettled-shape`: the local gets a real
+and a complex value; with the complex literal `2 + 3i` in place of `√(-x)`
+it declines with `lane-mismatch`). In mode `complex`, on JavaScript, it
+compiles and gives the values of the interpreter: `2i` at `c = 1, x = 4`,
+`1` at `c = -1`, `2` at `c = 1, x = -4`.
 
 **`Nothing` in a value position declines.** `Nothing` is the value of an
 empty block or of a statement with no value, and the compiled result has no

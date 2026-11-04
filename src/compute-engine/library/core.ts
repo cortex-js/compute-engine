@@ -36,6 +36,10 @@ import {
   collectTuplePattern,
   tuplePatternNames,
 } from '../boxed-expression/tuple-pattern.js';
+import {
+  isInBranch,
+  takePairedFunctionNames,
+} from '../assignment-locals.js';
 import { instantiatedResultTypeOverActuals } from '../boxed-expression/generic-instantiation.js';
 import { actualOfDescriptor } from '../boxed-expression/derive-application-type.js';
 import {
@@ -104,7 +108,11 @@ import {
   joinEvidenceTypes,
   isDeclaredLocal,
   isEvidenceLost,
+  hasUnknownFirstValue,
+  isFirstValue,
+  isOpenLocal,
   markEvidenceLost,
+  markOpenLocal,
   registerEvidenceSite,
 } from './assignment-evidence.js';
 import { isRingConstant } from './ring-constructions.js';
@@ -179,7 +187,10 @@ import {
   evaluateSolve,
 } from '../boxed-expression/solve-domain.js';
 import { findRoot, findRootAsync, fitRecordType } from '../nonlinear-fit.js';
-import { BLOCK_DEFINITION } from './control-structures.js';
+import {
+  BLOCK_DEFINITION,
+  isDeclaredForAssignment,
+} from './control-structures.js';
 // BoxedDictionary will be dynamically imported to avoid circular dependency
 import type {
   IComputeEngine as ComputeEngine,
@@ -702,9 +713,9 @@ function absenceMarkerBindingError(
  * closure reaches the same binding as a read or a write in the block. This
  * includes an assignment that replaces the half (`k = (x) => 2 * x` after
  * `let k = 1` makes the value binding an operator binding): it changes the
- * one record, which the closure holds. Then `local` is no longer
- * uninitialized, and a read of it is no longer a `read-before-declaration`
- * error.
+ * one record, which the closure holds. Then `local` is no longer marked
+ * `_uninitialized`: the mark tells the `Declare` handler which binding the
+ * run of the block made when it started.
  *
  * When `declared` was declared under a scratch scope, `local` is recorded as
  * a scratch binding too (`noteScratchBinding`), as the declaration recorded
@@ -753,30 +764,53 @@ function initializeBlockLocal(
 }
 
 /**
- * When the binding that an assignment to `name` writes (the binding that
- * `name` resolves to in the current scope chain) is a block local whose
- * `let` or `const` has not run yet in this run of the block, the
- * `read-before-declaration` error value of that write. Otherwise
- * `undefined`.
- *
- * A block creates the bindings of its locals when its run starts
- * (`createBlockLocals`, `function-utils.ts`), so in
- * `do { k = 5; let k = 2 }` the name `k` of the assignment resolves to the
- * local of the block, not to a `k` of an enclosing scope. Storing 5 in the
- * local would be lost when the `let` runs. In JavaScript this write is an
- * error (the temporal dead zone), as a read is, and it is the same error
- * here.
+ * True when the operands `args` of a `Declare` (not canonical) give the
+ * declared name a value: a positional value operand, which is not a
+ * dictionary (`Declare(x, "integer", 5)`), or a `value` entry of an
+ * attributes dictionary (`Declare(x, Dictionary(KeyValuePair("value", 5)))`,
+ * the Epsil `let x = 5`). A dictionary that is not boxed yet is read from
+ * its raw key and value pairs, without canonicalization; a boxed dictionary
+ * (the MathJSON `{dict: {value: 5}}`) is read from its keys.
  */
-function writeBeforeDeclarationError(
+function declareHasValue(args: ReadonlyArray<Expression>): boolean {
+  const hasValueEntry = (op: Expression): boolean => {
+    if (isDictionary(op)) return op.get('value') !== undefined;
+    return (
+      isFunction(op, 'Dictionary') &&
+      op.ops.some((pair) => {
+        if (!isFunction(pair) || pair.ops.length !== 2) return false;
+        const key = pair.ops[0];
+        return isString(key) ? key.string === 'value' : sym(key) === 'value';
+      })
+    );
+  };
+  if (args.length >= 4) return true;
+  if (args.length === 3)
+    return (
+      !(isFunction(args[2], 'Dictionary') || isDictionary(args[2])) ||
+      hasValueEntry(args[2])
+    );
+  if (args.length === 2) return hasValueEntry(args[1]);
+  return false;
+}
+
+/**
+ * Whether the type operand `typeOp` of a `Declare` is a function type: the
+ * type `function`, a signature, or a union or intersection of signatures.
+ */
+function declaresFunctionType(
   ce: ComputeEngine,
-  name: string | undefined
-): Expression | undefined {
-  if (name === undefined) return undefined;
-  const binding = ce.lookupDefinition(name) as
-    { _uninitialized?: boolean } | undefined;
-  return binding?._uninitialized === true
-    ? ce.error(['read-before-declaration', name])
-    : undefined;
+  typeOp: Expression | undefined
+): boolean {
+  const text = isString(typeOp) ? typeOp.string : sym(typeOp);
+  if (text === undefined) return false;
+  if (text === 'function') return true;
+  try {
+    const type = parseType(text, ce._typeResolver);
+    return type === 'function' || signatureArms(type) !== undefined;
+  } catch {
+    return false;
+  }
 }
 
 function narrowDeclaredCharacter(
@@ -3297,6 +3331,43 @@ function ascriptionViolation(
 }
 
 /**
+ * The value of a `Typed` ascription whose operand is an assignment or a
+ * declaration, or `undefined` when the operand is another expression.
+ *
+ * An assignment is a statement, so a block (or a function body) that ends
+ * in one has the value `Nothing`. The return marker of a function literal
+ * wraps the last statement of the body, so the body of `function f() ->
+ * integer { x = 2 }` ends in `Typed(Assign(x, 2), "integer")`. The operand
+ * is evaluated for its effect, and the value is `Nothing`. When the ascribed
+ * type does not admit `nothing`, the value is the `incompatible-type` error
+ * of `ascriptionViolation`, as for any other body whose value is outside the
+ * declared result type. `Nothing` cannot go through `ascriptionViolation`,
+ * which lets an absence marker pass.
+ */
+function statementAscriptionValue(
+  ce: ComputeEngine,
+  x: Expression,
+  typeOperand: Expression
+): Expression | undefined {
+  if (!isFunction(x, 'Assign') && !isFunction(x, 'Declare')) return undefined;
+  if (!isString(typeOperand) || isGroupedTypeText(typeOperand.string))
+    return undefined;
+  let ascribed: Type | undefined;
+  try {
+    ascribed = parseType(typeOperand.string, ce._typeResolver);
+  } catch {
+    return undefined;
+  }
+  if (ascribed === undefined || freeTypeVariables(ascribed).size > 0)
+    return undefined;
+  const resolved = resolveTypeAlias(ascribed);
+  if (typeof resolved !== 'string' && resolved.kind === 'signature')
+    return undefined;
+  if (isSubtype('nothing', ascribed)) return ce.Nothing;
+  return ce.typeError(ascribed, 'nothing', x);
+}
+
+/**
  * Does `value` conform to `type`, or is it the element-wise broadcast of a
  * value that conforms? A value conforms when its admission is not refuted. A
  * `List` conforms when each of its elements conforms under broadcast to the
@@ -3780,7 +3851,12 @@ function joinAssignmentEvidence(
   // type alone cannot tell). The `let` that records the alias calls this
   // first and sets the alias after it.
   target._initializerAlias = undefined;
+  // A block local whose first value has the type `unknown` keeps the type
+  // `unknown`: no later value narrows it (`markOpenLocal()`).
+  if (isOpenLocal(target)) return;
   const first = assignedType();
+  const declaration =
+    target._blockLocal === true && isFirstValue(target, first === undefined);
   if (first !== undefined) joinEvidenceOnBinding(ce, target, first);
   // The value's type is read NOW, but a read in the value of a local that a
   // later statement widens (through a loop's back edge) makes it too narrow.
@@ -3805,6 +3881,20 @@ function joinAssignmentEvidence(
     rejoin: (coarse) => {
       if (isEvidenceLost(ce, target)) return false;
       const t = assignedType();
+      // The declaration of a block local whose value still has the type
+      // `unknown` when every statement of the block is canonicalized makes
+      // the local open (`markOpenLocal()`), when a later value gave it a
+      // type: the local keeps the type `unknown`. The value is read here,
+      // not when the declaration is canonicalized: a call of a function
+      // whose result type is known only after the whole block is
+      // canonicalized (a recursive function) has the type `unknown` then.
+      if (t === undefined && declaration && target._assignmentEvidence) {
+        markOpenLocal(target);
+        markEvidenceLost(ce, target);
+        if (target.type.isUnknown) return false;
+        writeEvidenceType(ce, target, 'unknown');
+        return true;
+      }
       if (t === undefined) {
         if (!hasRead) return false;
         markEvidenceLost(ce, target);
@@ -3817,6 +3907,161 @@ function joinAssignmentEvidence(
     },
     reset: () => writeEvidenceType(ce, target, 'unknown'),
   });
+}
+
+/**
+ * The type that a local of a block takes from its first value, the value
+ * type `t` widened: every numeric type to `number`, a string type to
+ * `string`, a boolean type to `boolean`, and the element types of a list, a
+ * set and a tuple the same way (a list loses its dimensions). Any other type
+ * is kept.
+ */
+function widenLocalType(ce: ComputeEngine, t: Type): Type {
+  if (t === 'never') return t;
+  if (typeof t === 'object') {
+    if (t.kind === 'list') {
+      // A list with n dimensions (a matrix `matrix<integer^(2x2)>` has two)
+      // widens to n nested lists: `list<list<number>>`. The lengths are not
+      // kept, so a local can hold a longer list later.
+      let widened: Type = widenLocalType(ce, t.elements);
+      const rank = Math.max(1, t.dimensions?.length ?? 1);
+      for (let i = 0; i < rank; i++) widened = { kind: 'list', elements: widened };
+      return widened;
+    }
+    if (t.kind === 'set')
+      return { kind: 'set', elements: widenLocalType(ce, t.elements) };
+    if (t.kind === 'tuple')
+      return {
+        kind: 'tuple',
+        elements: t.elements.map((e) => ({
+          ...e,
+          type: widenLocalType(ce, e.type),
+        })),
+      };
+    if (t.kind === 'union') return t;
+  }
+  const bt = ce.type(t);
+  if (bt.matches('number')) return 'number';
+  // A character is a string of one character in a value, but the type
+  // `character` is not a subtype of `string`: both widen to `string`, so
+  // that `let prev = ""` then `prev = ch` is valid.
+  if (bt.matches('string') || bt.matches('character')) return 'string';
+  if (bt.matches('boolean')) return 'boolean';
+  return t;
+}
+
+/**
+ * The static error of the assignment of `value` to the local `name` of a
+ * block when the static type of `value` cannot be a subtype of the type of
+ * the local: `["Error", ["ErrorCode", "assignment-type-mismatch", name,
+ * localType, valueType]]`. Otherwise `undefined`.
+ *
+ * The type of the local is its declared type (`Declare(x, "integer", 0)`),
+ * or else the type of the values assigned to it before this one, widened by
+ * `widenLocalType()`: after `s = 0`, the value `s + 0.5` is accepted and the
+ * value `"x"` is refused. A local with no value type yet (its first
+ * assignment) is not checked, and neither is a local whose first value has
+ * the type `unknown` (`hasUnknownFirstValue()`): it can hold any value.
+ *
+ * The test is permissive where the type of the value is not settled: a
+ * value whose type is `unknown`, `any`, or holds one of them (a free
+ * symbol), and a value that is absent or has no value (`never`, `nothing`,
+ * `missing`, `error`), is accepted. A union is accepted when one of its
+ * members is accepted. For a local with no declared type, a value type that
+ * is narrower than the type of the local in the other direction (the empty
+ * list `list<never>` of `let xs = []`, then `xs = [1]`) is accepted too, and
+ * the type of the local is the join of its values.
+ */
+function localAssignmentMismatch(
+  ce: ComputeEngine,
+  name: string,
+  valueType: BoxedType,
+  value?: Expression
+): Expression | undefined {
+  const def = ce.lookupDefinition(name);
+  if (!def || !isValueDef(def)) return undefined;
+  const local = def.value;
+  if (local._blockLocal !== true || local.isConstant) return undefined;
+  if (local.value !== undefined) return undefined;
+  if (local.type.isUnknown || valueType.isUnknown) return undefined;
+  // A declared type is the contract: a first value of type `unknown` does
+  // not turn off the check of a local with a declared type.
+  if (!isDeclaredLocal(local) && hasUnknownFirstValue(local)) return undefined;
+  const open = (t: BoxedType): boolean =>
+    /\b(any|unknown|never|nothing|missing|error)\b/.test(t.toString());
+  if (open(valueType) || open(local.type)) return undefined;
+  const declared = isDeclaredLocal(local);
+  const target = declared ? local.type.type : widenLocalType(ce, local.type.type);
+  const t = valueType.type;
+  const arms = typeof t === 'object' && t.kind === 'union' ? t.types : [t];
+  const accepted = arms.some((arm) => {
+    const v = declared ? arm : widenLocalType(ce, arm);
+    return (
+      ce.type(v).matches(target) || (!declared && ce.type(target).matches(v))
+    );
+  });
+  if (accepted) return undefined;
+  // The value is accepted when its type can be a subtype of the type of the
+  // local, with the test that admits an argument at a parameter of a
+  // function (`checkType()`): only a value whose type is proved disjoint
+  // from the type of the local is refused. A value of type `complex`
+  // (`s + Sqrt(x)`) can be real, and a value of type `rational` (`m / 2`)
+  // can be an integer. With no value expression (a leaf of a destructuring
+  // assignment), the test is on the types only.
+  if (value !== undefined) {
+    if (checkType(ce, value, target).operator !== 'Error') return undefined;
+  } else if (
+    freeTypeVariables(t).size > 0 ||
+    freeTypeVariables(target).size > 0 ||
+    !provablyDisjoint(t, target)
+  )
+    return undefined;
+  return ce.error([
+    'assignment-type-mismatch',
+    name,
+    ce.type(target).toString(),
+    valueType.toString(),
+  ]);
+}
+
+/**
+ * The static error of the destructuring assignment of `value` to the
+ * `Tuple` pattern `pattern` when the value at the position of a leaf local
+ * cannot be a subtype of the type of that local (`localAssignmentMismatch()`),
+ * or `undefined`. A literal `Tuple` value of the same length is read
+ * position by position, so each leaf is checked against the expression at
+ * its position. Another value is read through the leaf types of its static
+ * type (`tuplePatternLeafTypes()`); a value whose type does not give the leaf
+ * types is not checked.
+ */
+function patternAssignmentMismatch(
+  ce: ComputeEngine,
+  pattern: Expression,
+  value: Expression
+): Expression | undefined {
+  if (!isFunction(pattern, 'Tuple')) {
+    const name = sym(pattern);
+    if (name === undefined || name === '_') return undefined;
+    return localAssignmentMismatch(ce, name, value.type, value);
+  }
+  if (isFunction(value, 'Tuple') && value.nops === pattern.nops) {
+    for (let i = 0; i < pattern.nops; i++) {
+      const mismatch = patternAssignmentMismatch(
+        ce,
+        pattern.ops[i],
+        value.ops[i]
+      );
+      if (mismatch !== undefined) return mismatch;
+    }
+    return undefined;
+  }
+  const leaves = tuplePatternLeafTypes(pattern, value.type.type);
+  if (leaves === undefined) return undefined;
+  for (const [name, t] of leaves) {
+    const mismatch = localAssignmentMismatch(ce, name, ce.type(t));
+    if (mismatch !== undefined) return mismatch;
+  }
+  return undefined;
 }
 
 /**
@@ -6025,12 +6270,20 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x, t], options) => {
         const v = x?.evaluate(options);
         if (v === undefined || t === undefined) return v;
+        const statement = statementAscriptionValue(options.engine, x, t);
+        // An error of the evaluation of the statement is the value: it is
+        // not replaced by `Nothing` or by the error of the ascription.
+        if (statement !== undefined) return v.isValid ? statement : v;
         return ascriptionViolation(options.engine, v, t) ?? v;
       },
       // Only the ascribed operand is evaluated, not the type.
       evaluateAsync: async ([x, t], options) => {
         const v = await x?.evaluateAsync(awaitedOperandOptions(options));
         if (v === undefined || t === undefined) return v;
+        const statement = statementAscriptionValue(options.engine, x, t);
+        // An error of the evaluation of the statement is the value, as in
+        // `evaluate` above.
+        if (statement !== undefined) return v.isValid ? statement : v;
         return ascriptionViolation(options.engine, v, t) ?? v;
       },
     },
@@ -7461,6 +7714,40 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // function (e.g., `2f(x)` parses as `2 * f(x)`). Mirrors what an
         // explicit `Declare`/`let f` does.
         const symbolName = sym(symbol);
+        // In a branch of a conditional or in a loop body, in a block or at
+        // the top level (`isInBranch()`), an assignment to a name that no scope declares
+        // is a first assignment, which is a static error: the name must be
+        // declared with a value before the branch. An assignment that is a
+        // statement of a block in the branch is refused by
+        // `canonicalBlock()`; this is the assignment that is the branch
+        // itself (`If(c, Assign(a, 1))`).
+        if (isInBranch()) {
+          const targets = isFunction(symbol, 'Tuple')
+            ? tuplePatternNames(symbol)
+            : symbolName !== undefined
+              ? [symbolName]
+              : [];
+          const undeclared = targets.find(
+            (name) =>
+              name !== 'Nothing' &&
+              !isDeclaredForAssignment(ce, name) &&
+              !ce._isShadowedParameter(name)
+          );
+          if (undeclared !== undefined)
+            return ce.error(['first-assignment-in-branch', undeclared]);
+        }
+        // A function value is checked against the type of the local BEFORE
+        // the retype below writes the type `function` on the local:
+        // `Block(Assign(a, 1), Assign(a, Function(x, x)), a)` is a static
+        // error. A local with no type yet takes no check, and is retyped.
+        if (symbolName && isFunction(args[1], 'Function')) {
+          const mismatch = localAssignmentMismatch(
+            ce,
+            symbolName,
+            ce.type('function')
+          );
+          if (mismatch !== undefined) return mismatch;
+        }
         if (symbolName && isFunction(args[1], 'Function')) {
           // Trigger auto-declaration if the symbol isn't declared yet
           if (!ce.lookupDefinition(symbolName)) ce.symbol(symbolName);
@@ -7563,6 +7850,27 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               // with the full message; canonicalization stays silent.
             }
           }
+        }
+
+        // An assignment to a local of a block gives a value of the local's
+        // type: `Block(Assign(a, 1), Assign(a, "x"), a)` is a static error.
+        if (symbolName !== undefined && canonRhs.isValid) {
+          const mismatch = localAssignmentMismatch(
+            ce,
+            symbolName,
+            canonRhs.type,
+            canonRhs
+          );
+          if (mismatch !== undefined) return mismatch;
+        }
+        // A destructuring assignment `(a, b) := v` gives each leaf the value
+        // at its position: each leaf is checked against the type of that
+        // value. A literal tuple value gives the expression at each position,
+        // which the check reads; another value gives the leaf types of its
+        // static tuple type.
+        if (isFunction(symbol, 'Tuple') && canonRhs.isValid) {
+          const mismatch = patternAssignmentMismatch(ce, symbol, canonRhs);
+          if (mismatch !== undefined) return mismatch;
         }
 
         // A DATA-valued RHS records assignment evidence on the target's
@@ -7669,7 +7977,35 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           symbolExpr = checkType(ce, args[0], 'symbol');
         }
 
-        if (args.length === 1) return ce._fn('Declare', [symbolExpr]);
+        // A declaration has a value: `Declare(x)` and `Declare(x, "integer")`
+        // are static errors, as is a `let x: integer` with no value. The
+        // name is declared with its value in one statement,
+        // `Declare(x, "integer", 5)`, so that a read of it never finds a
+        // local with no value.
+        //
+        // One exception: a `Declare` of a function type without a value is
+        // the signature of a function that a function definition statement
+        // of the same name in the same statement list defines
+        // (`let f: (integer) -> integer; function f(x) { x + 1 }`). The
+        // definition gives the name its value from the start of the list.
+        // A function type with no such definition is an error whose third
+        // operand `"function"` asks for the definition.
+        const pairedNames = takePairedFunctionNames();
+        if (!declareHasValue(args)) {
+          const isFunctionSignature =
+            isSymbol(symbolExpr) && declaresFunctionType(ce, args[1]);
+          if (
+            !isFunctionSignature ||
+            pairedNames?.has(sym(symbolExpr) ?? '') !== true
+          )
+            return ce.error(
+              isSymbol(symbolExpr)
+                ? isFunctionSignature
+                  ? ['declaration-without-value', symbolExpr.symbol, 'function']
+                  : ['declaration-without-value', symbolExpr.symbol]
+                : ['declaration-without-value']
+            );
+        }
 
         // A `let` with an initial value and no declared type is an
         // assignment for typing purposes: the initializer's static type is
@@ -7699,6 +8035,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             typeOp !== undefined &&
             !(isString(typeOp) && typeOp.string === 'unknown') &&
             !isSymbol(typeOp, 'unknown');
+          // The value of a declaration with a type is the first value of
+          // the local. Record it, so that a later assignment of a value of
+          // type `unknown` is not taken as the first value, which would turn
+          // off the type check of every later assignment
+          // (`localAssignmentMismatch()`).
+          if (declaresType && value !== undefined && isSymbol(symbolExpr)) {
+            const def = ce.context.lexicalScope.bindings.get(symbolExpr.symbol);
+            if (def && isValueDef(def)) isFirstValue(def.value, false);
+          }
           if (declaresType || value === undefined) return;
           if (!value.isValid) return;
           if (isFunction(value, 'Function')) return;
@@ -13417,15 +13762,6 @@ function* assignSteps(
     const refused = absenceMarkerBindingError(ce, name);
     if (refused !== undefined) return refused;
   }
-  // A write to a block local before its `let` or `const` has run in
-  // this run of the block is refused before the value is evaluated
-  // (`writeBeforeDeclarationError`). A sequence definition
-  // (`a_0 := 1`) writes no binding of the base name.
-  if (!isFunction(op1, 'Subscript'))
-    for (const name of boundNames) {
-      const refused = writeBeforeDeclarationError(ce, name);
-      if (refused !== undefined) return refused;
-    }
   //
   // Check for Subscript LHS (sequence definition)
   // e.g., Subscript(L, 0) := 1  OR  Subscript(a, n) := a_{n-1} + 1

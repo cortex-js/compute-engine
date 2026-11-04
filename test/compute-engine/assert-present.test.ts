@@ -97,15 +97,6 @@ describe('AssertPresent — evaluation', () => {
     ).toBe('[x,1]');
   });
 
-  test('the operand is evaluated once', () => {
-    ce.declare('k', 'integer');
-    ce.assign('k', 0);
-    // `Assign` returns the assigned value, which is present.
-    const e = ce.box(['AssertPresent', ['Assign', 'k', ['Add', 'k', 1]]]);
-    expect(e.evaluate().re).toBe(1);
-    expect(ce.box('k').evaluate().re).toBe(1);
-  });
-
   test('arity: no argument is a missing argument, a second one is unexpected', () => {
     expect(ce.box(['AssertPresent']).isValid).toBe(false);
     const two = ce.box(['AssertPresent', 1, 2]);

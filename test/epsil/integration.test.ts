@@ -104,7 +104,6 @@ describe('EPSIL PHASE 4 — notebook integration', () => {
     // operator definition instead of leaving the call symbolic.
     const forms = [
       'function outer(n) { sq(m) = m * m; sq(n) }\nouter(3)',
-      'function outer(n) { let sq; sq(m) = m * m; sq(n) }\nouter(3)',
       'function outer(n) { let sq = m => m * m; sq(n) }\nouter(3)',
       'sq(m) = m * m\nsq(3)',
     ];

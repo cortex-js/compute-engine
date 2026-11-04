@@ -181,39 +181,83 @@ x = 5
 Assigning to a name that was never declared does establish it, but `let` is
 the explicit and idiomatic way to introduce a mutable binding.
 
+## The rules of block locals
+
+Two rules make sure that a local always has a value when it is read:
+
+1. **A declaration has a value.** `let x = v`, `let x: integer = v`, or a
+   first assignment `x = v` at the own level of a block, declares `x` with
+   its value. `let x: integer` with no value is an error
+   (`declaration-without-value`). One declaration needs no value: a
+   function type, when a `function` statement (or a definition
+   `f(x) = …`) of the same name is in the same block. The definition gives
+   the name its value from the start of the block, so the declaration only
+   gives the signature of the function:
+   `let f: (integer) -> integer; function f(x) { x + 1 }; f(2)` is `3`. A
+   definition in an enclosing block does not count: with no definition in
+   the same block, the error asks to define `f` with a function statement
+   in the same block, or to give the declaration a value. A first assignment of a name in a branch of
+   an `if` or a `match`, or in the body of a loop, is an error too
+   (`first-assignment-in-branch`): declare the name with a value before the
+   branch. A use of a local in a statement before the statement that
+   declares it is an error (`read-before-declaration`). A use of the local
+   in the body of a function literal is not checked, because the body runs
+   when the function is called, and the check does not follow calls: in `function g() { f = () => t; v = f(); t = 1; v }`, the call
+   `f()` reads `t` before its declaration, and `g()` gives `1`.
+2. **An assignment is a statement, not a value.** `f(a := 2)` is an error
+   (`assignment-in-operand`), and `a := b := 5` is a syntax error
+   (`chained-assignment`): write two statements. A block whose last statement
+   is an assignment or a declaration has the value `Nothing`; end the block
+   with the name to give its value.
+
+A local can be assigned again after its declaration, also in a branch, a
+loop body or a nested block. The type of the new value must be able to be
+the type of the local: its declared type, or else the type of its first
+value, widened. A number
+widens to `number`, a string or a character to `string`, a boolean to
+`boolean`, and the elements of a list, a set or a tuple widen the same way.
+So `s = 0` then `s = s + 0.5` is valid, and `s = 0` then `s = "x"` is an
+error (`assignment-type-mismatch`). A local whose first value has no known
+type (an untyped parameter) accepts a value of any type.
+
+All these errors are found before the program runs: `epsil check` reports
+them, and a statement that holds one gives the error as its value.
+
+The top level of a program is not a block: its statements run one at a
+time, and a name assigned there is a name of the session. A first
+assignment in a branch or a loop body is an error at the top level too:
+`if c { a = 1 }; a` is `first-assignment-in-branch`. An assignment in a
+branch to a name of the session (assigned by an earlier top-level
+statement, or declared by the host) is not a first assignment:
+`a = 1; if c { a = 2 }; a` is valid. The rules of a use before the
+declaration and of the type of a new value apply only in a block
+(`do { … }`) and in a function body: at the top level, `a = 1; a = "x"; a`
+is valid and gives `"x"`.
+
+| Program                                    | Result                                 |
+| ------------------------------------------ | -------------------------------------- |
+| `let a = 1; b = a + 1; b`                  | `2`                                    |
+| `s = 0; for i in 1..3 { s = s + i }; s`    | `6`                                    |
+| `a = 1; if c { a = 2 }; a`                 | `2` when `c` is true, else `1`         |
+| `let a: integer; if c { a = 1 }; a`        | error: `declaration-without-value`     |
+| `let f: (integer) -> integer; function f(x) { x + 1 }; f(2)` | `3` |
+| `let f: (integer) -> integer; f(2)`        | error: `declaration-without-value`     |
+| `if c { a = 1 }; a`                        | error: `first-assignment-in-branch`    |
+| `do { if c { a = 1 }; a }`                 | error: `first-assignment-in-branch`    |
+| `do { a = 1; a = "x"; a }`                 | error: `assignment-type-mismatch`      |
+| `f(a := 2) + a`                            | error: `assignment-in-operand`         |
+| `do { b = 2 }`                             | `Nothing`                              |
+
 What an assignment writes depends on where it is written, and on what is
-declared when the function around it is defined:
-
-```mermaid
-flowchart TD
-  a["x = v"] --> top{"at the top level, or in a block<br/>outside every function?"}
-  top -- yes --> topw["writes x, establishing it if needed<br/>(a top-level block owns the names<br/>its own statements assign)"]
-  top -- "no: in a function body" --> decl{"an enclosing scope declares x<br/>when the function is defined?<br/>(a top-level let or assignment before the function,<br/>a parameter, a local of an enclosing function)"}
-  decl -- no --> local["x is a local of the function body, as with let:<br/>each call starts with no value for it"]
-  local --> read{"read before its first<br/>assignment in this call?"}
-  read -- yes --> rerr["read-before-declaration error value"]
-  read -- no --> ok["the local's value"]
-  decl -- yes --> isconst{"declared const?"}
-  isconst -- yes --> cerr["constant-assignment error value<br/>(epsil check reports it before the run)"]
-  isconst -- no --> outer["writes that binding: the scope effect,<br/>which the function must declare"]
-```
-
-In a function body, an assignment to a name that no enclosing scope
-declares makes a local of the function body, as a `let` does. This is also
-true when the assignment is in a nested block of the body — a branch of an
-`if`, the body of a loop, a `do` block —, as in Python. A function literal
-written in the body owns the names that its own body assigns, and a `let` in
-a nested block declares a local of that block only. The rule is the same
-for every function body that the engine makes from an expression: the term
-of a `Table` is applied as a function at each index, so it owns the names
-that its branches assign, while the term of a `Sum` or a `Product` is
-evaluated again at each index, as a loop body is. Which scope a name
-belongs to is decided where
-the function is **defined**, not where it is called: each call of the
-function gets its own local, and a declaration of the same name made later
-does not change what the function writes. Such an assignment does not write
-a variable outside the function, so it is not the `scope` effect, and the
-function needs no effect specifier:
+declared when the function around it is defined. In a function body, an
+assignment to a name that no enclosing scope declares, at the own level of
+the body or of a nested block, declares a local of that block, as a `let`
+does. Which scope a name belongs to is decided where the function is
+**defined**, not where it is called: each call of the function gets its own
+local, and a declaration of the same name made later does not change what
+the function writes. Such an assignment does not write a variable outside
+the function, so it is not the `scope` effect, and the function needs no
+effect specifier:
 
 ```epsil
 function g(k) { t = k + 1; t }
@@ -222,53 +266,17 @@ let t = 0
 // ➔ [2, 3, 0]
 ```
 
-Each call starts with no value for such a local. A read of the local before
-its first assignment in the call is the `read-before-declaration` error, as a
-read of a `let` local before its `let`. The read is not the bare symbol `t`,
-and it does not read a `t` outside the function:
+A use of such a local before its first assignment is an error that is found
+before the program runs:
 
 ```epsil
 function g(k) { u = t; t = k; u }
-g(1)
-// ➔ Error(ErrorCode("read-before-declaration", "t", "assignment"))
 ```
 
-The same holds for a read in the value of the first assignment
-(`t = t + 1` as the first statement), and for a read that runs when no
-assignment ran before it, such as a read after an `if` that assigns the
-local in one branch only:
-
-```epsil
-function g(c) { if c { t = 1 }; t }
-[g(true), g(false)]
-// ➔ [1, Error(ErrorCode("read-before-declaration", "t", "assignment"))]
-```
-
-The same holds for `if c { t = 1 }; t = t + 1` with `c` false. A call of the function that the local holds (`h(1)` before
-`h = (x) => x`) and the collection of a `for` loop (`for i in t { … }`
-before `t = [1, 2]`) use the local too, and give the same error; the loop
-then runs no iteration, and the error is its value. A closure that reads
-the local reads it when it is called, so
-`f = () => t; t = 1; f()` gives `1`. The body of a loop keeps its locals
-from one iteration to the next in one call, so the second iteration can read
-the value that the first one assigned.
-
-`epsil check` reports the read before the program runs when the order is
-certain from the source: the read is in a statement before every statement
-that assigns the local, or it runs before the first assignment in the
-statement that holds it (in the value of the assignment, in the condition
-of an `if` or in a branch before the assignment of that branch, in the body
-of a loop before the assignment of the first iteration). It reports
-a read of a `let` local before its `let` in the same way. The run then does
-not report the same read a second time. A read that
-comes before the first assignment only on some paths (after an `if` that
-assigns the local in one branch) is reported when it happens, by the run.
-
-A block outside every function — a `do` block, an `if` or a loop body at the
-top level of a program — owns the names that its own statements assign, but
-not the names that its nested blocks assign: each nested block owns its
-own. There, a read before the first assignment stays the bare symbol, as a
-read of an undeclared name at the top level does.
+A closure that reads a local reads it when it is called, so
+`f = () => t; t = 1; f()` gives `1`. The body of a loop keeps the locals of
+an enclosing block from one iteration to the next, so the second iteration
+reads the value that the first one assigned.
 
 An assignment to a name that an enclosing scope declares when the function
 is defined — a top-level `let` or assignment written before the function, a

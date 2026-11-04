@@ -43,8 +43,7 @@ const B = [
       ['Assign', 's', 0],
       [
         'Block',
-        ['Declare', 't', "'integer'"],
-        ['Assign', 't', 1],
+        ['Declare', 't', "'integer'", 1],
         ['Assign', 's', ['Add', 't', 'y']],
       ],
       's',
@@ -235,7 +234,7 @@ describe('a write or a declaration below a nested block', () => {
       'Block',
       [
         'Block',
-        ['Block', ['Declare', 'y'], ['Assign', 'y', 1], 'y'],
+        ['Block', ['Declare', 'y', "'unknown'", 1], 'y'],
         ['Add', 'y', 'x'],
       ],
     ]);
@@ -257,7 +256,7 @@ describe('a write or a declaration below a nested block', () => {
             'Apply',
             [
               'Function',
-              ['Block', ['Declare', 'y'], ['Assign', 'y', 3], 'y'],
+              ['Block', ['Declare', 'y', "'unknown'", 3], 'y'],
               'z',
             ],
             0,
@@ -279,7 +278,7 @@ describe('a write or a declaration below a nested block', () => {
       'y',
       [
         'Function',
-        ['Block', ['Declare', 'y', "'integer'"], ['Assign', 'y', 2], 'y'],
+        ['Block', ['Declare', 'y', "'integer'", 2], 'y'],
         'z',
       ],
     ]);
@@ -288,7 +287,7 @@ describe('a write or a declaration below a nested block', () => {
       'q',
       [
         'Function',
-        ['Block', ['Declare', 'y', "'integer'"], ['Assign', 'y', 2], 'y'],
+        ['Block', ['Declare', 'y', "'integer'", 2], 'y'],
         'z',
       ],
     ]);
@@ -363,33 +362,6 @@ describe('a write or a declaration below a nested block', () => {
     expect(JSON.stringify(saturated.json)).not.toContain('"Assign","q"');
     // The partial application applied to 1 gives the value of the full call.
     expect(json(ce, [[partial, 1], 5])).toEqual(json(ce, [saturated, 5]));
-    expect(json(ce, 'q')).toBe('q');
-  });
-
-  test('a Declare in a branch of an If does not shadow the earlier write', () => {
-    // (y, w) ↦ (x ↦ Block(Block(s := y,
-    //   Block(y := 2, If(x > 0, Declare(y), 0)), s + y + x))): the local
-    // that the Declare makes exists only after the Declare runs, so
-    // y := 2 writes the parameter.
-    const P7 = curriedLiteral([
-      'Block',
-      [
-        'Block',
-        ['Assign', 's', 'y'],
-        [
-          'Block',
-          ['Assign', 'y', 2],
-          ['If', ['Greater', 'x', 0], ['Declare', 'y'], 0],
-        ],
-        ['Add', 's', 'y', 'x'],
-      ],
-    ]);
-    const ce = new ComputeEngine();
-    const partial = ce.box([P7, 'q'] as any).evaluate();
-    expect(partial.json[0]).toBe('Function');
-    expect(json(ce, [[partial, 1], 5])).toEqual(['Add', 'q', 7]);
-    expect(json(ce, 'q')).toBe('q');
-    expect(json(ce, [[P7, 'q', 1], 5])).toEqual(['Add', 'q', 7]);
     expect(json(ce, 'q')).toBe('q');
   });
 
@@ -562,7 +534,7 @@ describe('a returned closure that writes a parameter', () => {
           'Function',
           [
             'Function',
-            ['Block', ['Declare', 'y', "'integer'"], ['Assign', 'y', 'z'], 'y'],
+            ['Block', ['Declare', 'y', "'integer'", 'z'], 'y'],
             'z',
           ],
           'y',
@@ -578,7 +550,7 @@ describe('a returned closure that writes a parameter', () => {
     // y ↦ [y, z ↦ Block(Declare(y, integer), y := 2, y)] applied to q
     const inner = [
       'Function',
-      ['Block', ['Declare', 'y', "'integer'"], ['Assign', 'y', 2], 'y'],
+      ['Block', ['Declare', 'y', "'integer'", 2], 'y'],
       'z',
     ];
     const F = ['Function', ['List', 'y', inner], 'y'];

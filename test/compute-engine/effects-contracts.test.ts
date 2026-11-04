@@ -1444,27 +1444,6 @@ describe('9 — confined vs escaping vs conditional-declare', () => {
     expect(eff(ce.box(['escaping9']))).toEqual(['scope']);
   });
 
-  it('a CONDITIONAL `Declare` does not dominate → not provably confined', () => {
-    // On the `flag`-false path the `Assign` writes through, so the explicit
-    // fallback applies: not provably confined ⇒ `scope`. Installing such a
-    // body requires the stated `scope` contract (the default-`!scope`
-    // ceiling).
-    const ce = new ComputeEngine();
-    ce.declare('conditional9', {
-      signature: '() scope -> number',
-      evaluate: ce.box([
-        'Function',
-        [
-          'Block',
-          ['If', 'flag9', ['Declare', 'k2', { str: 'number' }, 0]],
-          ['Assign', 'k2', 5],
-          'k2',
-        ],
-      ]),
-    });
-    expect(effectsOfDef(ce, 'conditional9')).toEqual(['scope']);
-  });
-
   it('confinement is INFERENCE-only: the runtime channel stays conservative', () => {
     // "The runtime `effectsOf` walk contributes `{scope}` for EVERY writer
     // application, with no binding analysis." Sound by direction: the runtime

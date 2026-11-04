@@ -28,41 +28,20 @@ function typeOf(mj: MathJsonExpression): { type: string; sound: boolean } {
 
 describe('CE-43: block local types do not depend on statement order', () => {
   test('a list local used at a list<real> parameter', () => {
-    const useFirst = typeOf([
-      'Block',
-      ['Declare', 'v'],
-      ['mutate', 'v'],
-      ['Assign', 'v', ['List', 1.5, 2]],
-      'v',
-    ]);
     const assignFirst = typeOf([
       'Block',
-      ['Declare', 'v'],
-      ['Assign', 'v', ['List', 1.5, 2]],
+      ['Declare', 'v', "'unknown'", ['List', 1.5, 2]],
       ['mutate', 'v'],
       'v',
     ]);
-    // Before: `list<real>` when the use came first.
-    expect(useFirst).toEqual({ type: 'vector<real^2>', sound: true });
     expect(assignFirst).toEqual({ type: 'vector<real^2>', sound: true });
   });
 
   test('a scalar local used at a real parameter', () => {
-    // Before: `real` when the use came first, `integer` otherwise.
     expect(
       typeOf([
         'Block',
-        ['Declare', 'u'],
-        ['rk', 'u'],
-        ['Assign', 'u', 3],
-        'u',
-      ])
-    ).toEqual({ type: 'integer', sound: true });
-    expect(
-      typeOf([
-        'Block',
-        ['Declare', 'u'],
-        ['Assign', 'u', 3],
+        ['Declare', 'u', "'unknown'", 3],
         ['rk', 'u'],
         'u',
       ])
@@ -73,17 +52,12 @@ describe('CE-43: block local types do not depend on statement order', () => {
     // A meet with the use would give `vector<integer^1>`, a type that
     // `[1.5]` is not in.
     for (const mj of [
-      ['Block', ['Declare', 'v'], ['lk', 'v'], ['Assign', 'v', ['List', 1.5]], 'v'],
-      ['Block', ['Declare', 'v'], ['Assign', 'v', ['List', 1.5]], ['lk', 'v'], 'v'],
+      ['Block', ['Declare', 'v', "'unknown'", ['List', 1.5]], ['lk', 'v'], 'v'],
     ] as MathJsonExpression[]) {
       const ce = engine();
       const e = ce.box(mj);
       expect(e.type.toString()).toBe('vector<real^1>');
     }
-    // A use alone still narrows a local with no assignment.
-    const ce = engine();
-    const e = ce.box(['Block', ['Declare', 'w'], ['ik', 'w'], 'w']);
-    expect(e.type.toString()).toBe('integer');
   });
 });
 
@@ -110,12 +84,14 @@ describe('CE-43: an assignment in a match case is an assignment of the block loc
   });
 
   test('a match case that assigns a value of another kind', () => {
-    // Before: typed `vector<integer^3>`, evaluated to `"abc"`.
+    // The value of a local has the type of the local, in a match case as in
+    // a branch of an `if`.
     const r = run(
       'let xs = [1, 2, 3]\nmatch 1 { 1 => do { xs = "abc" } }\nxs'
     );
-    expect(r.value).toBe('"abc"');
-    expect(r.sound).toBe(true);
+    expect(r.value).toBe(
+      'Error(ErrorCode("assignment-type-mismatch", "xs", "list<number>", "string"))'
+    );
   });
 
   test('the compiled while-let loop reads the block local', () => {

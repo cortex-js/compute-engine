@@ -364,9 +364,11 @@ describe('D2, D3, R7: a declaration with contents left to inference refines from
     );
     expect(ce.symbol('a').type.toString()).toBe('list<integer>');
     expect(ce.symbol('t').type.toString()).toBe('tuple<integer, string>');
+    // A `Declare` has a value (`declaration-without-value` otherwise).
     const ce2 = new ComputeEngine();
-    ce2.box(['Declare', 'q', { str: 'list<unknown>' }]).evaluate();
-    ce2.box(['Assign', 'q', ['List', 1, 2]]).evaluate();
+    ce2
+      .box(['Declare', 'q', { str: 'list<unknown>' }, ['List', 1, 2]])
+      .evaluate();
     expect(ce2.box('q').type.toString()).toBe('list<integer>');
   });
 
@@ -374,11 +376,9 @@ describe('D2, D3, R7: a declaration with contents left to inference refines from
     const ce = new ComputeEngine();
     for (const spelling of ['list', 'list<unknown>', 'list<any>', 'tuple'])
       expect(ce.type(spelling).toString()).toBe(spelling);
-    expect(ce.box(['Declare', 'q', { str: 'list<unknown>' }]).json).toEqual([
-      'Declare',
-      'q',
-      "'list<unknown>'",
-    ]);
+    expect(
+      ce.box(['Declare', 'q', { str: 'list<unknown>' }, ['List', 1, 2]]).json
+    ).toEqual(['Declare', 'q', "'list<unknown>'", ['List', 1, 2]]);
   });
 
   test('review: a recursive transparent alias ends the evidence walk', () => {

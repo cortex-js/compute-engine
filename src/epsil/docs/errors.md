@@ -33,7 +33,7 @@ The check runs twice by design: once statically, when the program is canonicaliz
 
 ## `expected-present`
 
-A presence assertion `x?!` (`AssertPresent(x)`) was evaluated on an absent value: `missing` or `NaN` (an indeterminate form such as `0/0` is `NaN`). The assertion says "this value is present, fail otherwise", and it failed; the error names the operand as written.
+A presence assertion `x?!` (`AssertPresent(x)`) was evaluated on an absent value: `missing`, `NaN`, or an indeterminate form such as `0/0`. The assertion says "this value is present, fail otherwise", and it failed; the error names the operand as written.
 
 An absent value is a data state, not a bug in itself: an index out of range (`xs[i]`), a `first(filter(…))` that found nothing, a restricted value whose condition did not hold. Decide what the program should do when it happens. Write `x ?? fallback` to replace the absent value, test it with `isMissing(x)` and branch, or keep the assertion where absence really is a violated precondition and let the error propagate (`if let v: !error = …` catches it). `Nothing` is the value of an empty block, not an absent datum, and passes the assertion.
 
@@ -138,7 +138,7 @@ A parameter's default value (the part after `=` in `function f(x, k: number = 2)
 The message gives the reason:
 - Any other expression (`k = x + 1`, `xs = [1, 2]`) has no spelling in a signature. For a computed or non-empty default, declare a constant (`const weights = [1, 2, 3]`) and use its name as the default: the name is read when the call is evaluated, as if the caller had written it.
 - A default that names a parameter of the same list (`(x, k = x) => …`) is refused: the default is read as if the CALLER had written it, where the parameter does not exist.
-- `Missing` is refused: it is a result only, not a value that a call supplies.
+- `Nothing` and `Missing` are refused: `Nothing` is the value of an empty block, not an argument value, and `Missing` is a result only, not a value that a call supplies.
 - A `bind` parameter of a `hold` definition cannot have a default: it names a variable that the caller writes.
 - A default beside a literal parameter (`function f(0, k = 2)`) is refused: a literal parameter makes the definition a clause of a multi-clause function, and a default in a multi-clause function is not supported yet, because the clause that receives a call is not always known when the call is completed with the default. For the same reason, adding a second clause to a function with a default (or a clause with a default to a function that has several) is refused when the definition runs.
 
@@ -164,9 +164,9 @@ Write `x => x + 1`; the fixit in the diagnostic replaces the arrow for you. The 
 
 ## `chained-assignment`
 
-`a = b = 5` does not chain: `=` only assigns as a whole statement, so the OUTER `=` assigns and the inner one compares — `a` receives the boolean of `b = 5`.
+An assignment is a statement, not a value, so assignments do not chain. In `a = b = 5` the OUTER `=` assigns and the inner one compares: `a` would receive the boolean of `b = 5`. In `a := b := 5` the inner assignment is an operand, which is not allowed.
 
-Write `a := b := 5` to actually chain the assignment, or `a := (b == 5)` if the comparison was the intent.
+Write two statements, `b := 5; a := b`, or `a := (b == 5)` if the comparison was the intent.
 
 ## `assign-in-condition`
 
@@ -230,7 +230,7 @@ Rename one side so the two agree — the quick fix renames the annotation's para
 
 ## `absence-marker-binding`
 
-A binding names one of the markers `Nothing` or `Missing`: a `let`, a `const`, an assignment, a function, a parameter, a loop variable or a `match` pattern. The engine recognizes these markers by their name wherever they appear — an empty block evaluates to `Nothing`, and an operand named `Missing` is read as absent — so a binding of one of them could never behave like the value it holds. They are the only library names that cannot be rebound in any scope. Every other one, including `Pi` and `Square`, is shadowed by a user binding, with one exception: at the top level of a program, a `let` or `const` of a library constant that results carry by name (`Pi`, `ExponentialE`, `GoldenRatio`) is refused with a run-time error, because a result built with the library constant would read the user value when its MathJSON is boxed again.
+A binding names one of the absence markers `Nothing` or `Missing`: a `let`, a `const`, an assignment, a function, a parameter, a loop variable or a `match` pattern. The engine recognizes these markers by their name wherever they appear — an arithmetic operand named `Nothing` is refused as a non-number, and an arithmetic operand named `Missing` is read as absent — so a binding of one of them could never behave like the value it holds. They are the only library names that cannot be rebound in any scope. Every other one, including `Pi` and `Square`, is shadowed by a user binding, with one exception: at the top level of a program, a `let` or `const` of a library constant that results carry by name (`Pi`, `ExponentialE`, `GoldenRatio`) is refused with a run-time error, because a result built with the library constant would read the user value when its MathJSON is boxed again.
 
 Choose another name. In a `match`, a bare name is a new variable, not a comparison: to test for the marker, write `== Missing`.
 
@@ -244,13 +244,25 @@ A `let` in a NESTED block is not a re-declaration: `for k in xs { if c { let k =
 
 ## `read-before-declaration`
 
-A local of a block was read or assigned before its `let` or `const` statement ran. In `do { let a = k; let k = 2; a }` the first statement reads `k`, which the block declares only in the next statement. In `do { k = 5; let k = 2 }` the first statement assigns it: the assignment does not write a `k` of an enclosing scope, because the name `k` in the block is the local.
+A statement of a block uses a local of the block before the statement that declares it. A local is declared by a `let` or a `const`, or by the first assignment of the name at the own level of the block. In `do { let a = k; let k = 2; a }` the first statement reads `k`, which the block declares only in the next statement. In `do { k = 5; let k = 2 }` the first statement assigns it. In `function g(k) { u = t; t = k; u }` the first statement reads `t`.
 
-Each run of a block — a function call, an iteration of a loop body, a run of an `if` or `do` block — gets its own bindings for the locals of the block when it starts, as in JavaScript. A closure created in the block before a `let` therefore reads the binding of its own run: in `for i in [1, 2] { fs = [...fs, () => k]; let k = i }` the two closures give `1` and `2`. Until the `let` runs, the binding has no value, and reading it or assigning it (directly, or by calling such a closure too early) is this error.
+The error is found before the program runs. Move the declaration before the first use, or give the local another name. The initializer of a `let` is not such a use: `let t = t * 2` in a nested block reads the OUTER `t`. The value of a first assignment is not such a use either: `t = t + 1` as the first assignment of `t` reads the `t` of an enclosing scope, as `let t = t + 1` does. A use in a function literal is not such a use either, because it runs when the function is called: a function can read a local that a later statement of the block declares.
 
-Move the `let` before the first read or assignment, or give the local another name. The initializer of the `let` itself is not such a read: `let t = t * 2` in a nested block reads the OUTER `t`. Top-level statements of a program are not a block, so there a name declared later is an ordinary symbol until its `let` runs.
+## `declaration-without-value`
 
-In a function body, an assignment to a name that no enclosing scope declares where the function is written makes the name a local of the block, as a `let` does, and each call starts with no value for it. A read of such a local before its first assignment is this error too: `function g(k) { u = t; t = k; u }` reads `t` in the first statement, and `t = t + 1` as the first statement reads `t` before it assigns it. A call of the function that a local holds (`h(1)` before `h = (x) => x`, or before `let h = …`) and the collection of a `for` loop (`for i in t { … }` before `t` has a value) use the local too, and are this error; the loop then runs no iteration. Assign the local before the first read, or, to read a variable outside the function, declare it before the function. A closure that reads the local is not such a read until it is called, and in a block outside every function (a `do` block at the top level of a program) a read before the first assignment stays the bare symbol.
+A `let` or a `const` declares a name without a value: `let x: integer`. A declaration gives the name its value, so that a read of the name never finds a local with no value. Write the value in the declaration: `let x: integer = 0`. To give the value later in a branch, declare the name with a first value before the branch: `let t = 0; if c { t = 1 }`. One declaration needs no value: the signature of a function that a `function` statement of the same name in the same block defines, `let f: (integer) -> integer; function f(x) { x + 1 }`.
+
+## `first-assignment-in-branch`
+
+The first assignment of a name is in a branch of an `if`, in a branch of a `match` or in the body of a loop. In `if c { t = 1 }; t`, the name `t` has no value when `c` is false. A first assignment declares a local only at the own level of a block that is not in a branch or a loop body. Declare the name with a value before the branch, `let t = 0; if c { t = 1 }; t`, or with a `let` in the branch when the name is a local of the branch only.
+
+## `assignment-in-operand`
+
+An assignment is a statement, not a value. In `f(a := 2)` and in `x = (a := 2) + 1` the assignment is an operand of another expression. Write the assignment as a statement of its own, then use the name: `a := 2; f(a)`.
+
+## `assignment-type-mismatch`
+
+An assignment gives a local a value whose type cannot be the type of the local. The type of a local is its declared type (`let n: integer = 0`), or else the type of its first value, widened: a number gives `number`, a string gives `string`, a boolean gives `boolean`, and the elements of a list, a set or a tuple widen the same way. So `s = 0` then `s = s + 0.5` is valid, and `s = 0` then `s = "x"` is this error. Use another name for a value of another type.
 
 ## `constant-assignment`
 

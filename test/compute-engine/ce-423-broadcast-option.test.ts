@@ -21,10 +21,8 @@ const CASE = (a: string, b: string): unknown => [
 ];
 const MARCH = [
   'Block',
-  ['Declare', 'v0', 'real'],
-  ['Assign', 'v0', ['At', 'F', ['Add', 'i', 1]]],
-  ['Declare', 'v1', 'real'],
-  ['Assign', 'v1', ['At', 'F', ['Add', 'i', 2]]],
+  ['Declare', 'v0', 'real', ['At', 'F', ['Add', 'i', 1]]],
+  ['Declare', 'v1', 'real', ['At', 'F', ['Add', 'i', 2]]],
   ['Tuple', CASE('v0', 'v1'), FRACTION('v0', 'v1')],
 ];
 

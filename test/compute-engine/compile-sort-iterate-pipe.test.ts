@@ -544,10 +544,9 @@ describe('COMPILED PIPE', () => {
     expect(declined(expr)).toMatch(/is not a call missing one/);
   });
 
-  test('a chained pipe is evaluated once, before the stage', () => {
-    // The stage `x ↦ 0` never reads `x`, but the interpreter evaluates the
-    // inner pipe before it applies the stage, so the assignment runs. Each
-    // route has an engine of its own: the interpreter assigns `c`.
+  test('an assignment in a chained pipe is invalid, and the compile declines', () => {
+    // An assignment as an operand of `Pipe` is the static error
+    // `assignment-in-operand`.
     const expr = [
       'Block',
       ['Assign', 'c', 0],
@@ -563,13 +562,13 @@ describe('COMPILED PIPE', () => {
       e.declare('c', 'integer');
       return e;
     };
-    expect(engine().box(expr).evaluate().re).toBe(1);
-    const result: any = compile(
-      engine().box(expr) as any,
-      { to: 'javascript', fallback: false } as any
-    );
-    expect(result.success).toBe(true);
-    expect(result.run({})).toBe(1);
+    expect(engine().box(expr).isValid).toBe(false);
+    expect(() =>
+      compile(
+        engine().box(expr) as any,
+        { to: 'javascript', fallback: false } as any
+      )
+    ).toThrow(/invalid expression/);
   });
 
   test('a call stage after a chained pipe that admits the value in one slot only', () => {

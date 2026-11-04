@@ -65,19 +65,6 @@ describe('A FUNCTION LOCAL TO A BLOCK UNDER .N() (BOX ROUTE)', () => {
     expect(result.toString()).toBe('24');
   });
 
-  test('an argument with an effect is evaluated once', () => {
-    // The operator definition evaluates the written operands itself, so the
-    // application must not evaluate them before it hands them over.
-    const expr = ce.box([
-      'Block',
-      ['Assign', 'cnt', 0],
-      ['Assign', 'hE', ['Function', ['Multiply', 2, 'x'], 'x']],
-      ['hE', ['Assign', 'cnt', ['Add', 'cnt', 1]]],
-      'cnt',
-    ]);
-    expect(expr.N().toString()).toBe('1');
-    expect(expr.evaluate().toString()).toBe('1');
-  });
 });
 
 describe('A FUNCTION LOCAL TO A BLOCK UNDER .N() (PARSE ROUTE)', () => {

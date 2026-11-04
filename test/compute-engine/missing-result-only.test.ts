@@ -59,7 +59,7 @@ describe('A DECLARED TYPE MAY NOT NAME MISSING', () => {
 
   test('a Declare statement is an invalid-type-declaration error', () => {
     expect(
-      JSON.stringify(json(['Block', ['Declare', 'q', "'real | missing'"], 'q']))
+      JSON.stringify(json(['Block', ['Declare', 'q', "'real | missing'", 1], 'q']))
     ).toMatch(/invalid-type-declaration/);
   });
 
@@ -1418,8 +1418,7 @@ describe('A PARTIAL APPLICATION OVER MISSING', () => {
       f
         .box([
           'Block',
-          ['Declare', 'h', "'(number, number) -> number'"],
-          ['Assign', 'h', ADD],
+          ['Declare', 'h', "'(number, number) -> number'", ADD],
           head,
         ] as any)
         .evaluate();

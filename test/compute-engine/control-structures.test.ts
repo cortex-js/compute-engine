@@ -110,19 +110,19 @@ describe('CONTROL STRUCTURES', () => {
       const eng = new ComputeEngine();
       const loop = eng.box([
         'Loop',
-        ['Block', ['Assign', 'acc', ['Multiply', 10, 'i']]],
+        ['Block', ['Declare', 'acc', "'unknown'", ['Multiply', 10, 'i']]],
         ['Element', 'i', ['Range', 1, 3]],
       ] as any);
       const index = loop.ops![1].ops![0];
       expect(index.type.matches('integer')).toBe(true);
       // The product inherits it.
-      const product = loop.ops![0].ops![0].ops![1];
+      const product = loop.ops![0].ops![0].ops![2];
       expect(product.type.matches('integer')).toBe(true);
       // A float-element collection must NOT claim integer.
       const eng2 = new ComputeEngine();
       const loop2 = eng2.box([
         'Loop',
-        ['Block', ['Assign', 'acc', ['Multiply', 10, 'x']]],
+        ['Block', ['Declare', 'acc', "'unknown'", ['Multiply', 10, 'x']]],
         ['Element', 'x', ['List', 0.5, 1.5]],
       ] as any);
       expect(loop2.ops![1].ops![0].type.matches('integer')).toBe(false);
@@ -134,7 +134,7 @@ describe('CONTROL STRUCTURES', () => {
       eng3.declare('xs', 'ints');
       const loop3 = eng3.box([
         'Loop',
-        ['Block', ['Assign', 'acc', ['Multiply', 10, 'x']]],
+        ['Block', ['Declare', 'acc', "'unknown'", ['Multiply', 10, 'x']]],
         ['Element', 'x', 'xs'],
       ] as any);
       expect(loop3.ops![1].ops![0].type.matches('integer')).toBe(true);

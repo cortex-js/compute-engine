@@ -345,8 +345,7 @@ describe('GLSL COMPILATION', () => {
     it('should compile a simple block with local variable', () => {
       const expr = ce.expr([
         'Block',
-        ['Declare', 'a'],
-        ['Assign', 'a', ['Cos', 't']],
+        ['Declare', 'a', "'unknown'", ['Cos', 't']],
         ['Add', 'a', 1],
       ]);
       const code = glsl.compile(expr).code;
@@ -360,8 +359,6 @@ describe('GLSL COMPILATION', () => {
     it('should compile a block with multiple locals', () => {
       const expr = ce.expr([
         'Block',
-        ['Declare', 'a'],
-        ['Declare', 'b'],
         ['Assign', 'a', ['Sin', 'x']],
         ['Assign', 'b', ['Cos', 'x']],
         ['Add', 'a', 'b'],
@@ -379,8 +376,7 @@ describe('GLSL COMPILATION', () => {
     it('should compile a block function with valid GLSL body', () => {
       const expr = ce.expr([
         'Block',
-        ['Declare', 'a'],
-        ['Assign', 'a', ['Cos', 't']],
+        ['Declare', 'a', "'unknown'", ['Cos', 't']],
         ['Add', 'a', 1],
       ]);
       const code = glsl.compileFunction(expr, 'compute', 'float', [
@@ -406,8 +402,7 @@ describe('GLSL COMPILATION', () => {
     it('should not use IIFE or let in GLSL blocks', () => {
       const expr = ce.expr([
         'Block',
-        ['Declare', 'tmp'],
-        ['Assign', 'tmp', 'x'],
+        ['Declare', 'tmp', "'unknown'", 'x'],
         ['Multiply', 'tmp', 'tmp'],
       ]);
       const code = glsl.compile(expr).code;
@@ -424,8 +419,7 @@ describe('GLSL COMPILATION', () => {
     it('should declare an integer-valued local as float', () => {
       const expr = ce.expr([
         'Block',
-        ['Declare', 'r'],
-        ['Assign', 'r', 3],
+        ['Declare', 'r', "'unknown'", 3],
         ['Add', 'r', ['Multiply', 'x', 'x']],
       ]);
       const code = glsl.compile(expr).code;
@@ -440,8 +434,7 @@ describe('GLSL COMPILATION', () => {
     it('should declare a float-literal-valued local as float', () => {
       const expr = ce.expr([
         'Block',
-        ['Declare', 'r'],
-        ['Assign', 'r', 3.0],
+        ['Declare', 'r', "'unknown'", 3.0],
         ['Add', 'r', ['Multiply', 'x', 'x']],
       ]);
       const code = glsl.compile(expr).code;
@@ -452,8 +445,7 @@ describe('GLSL COMPILATION', () => {
     it('should honor an explicit real-typed Declare as float', () => {
       const expr = ce.expr([
         'Block',
-        ['Declare', 'r', 'real'],
-        ['Assign', 'r', 3],
+        ['Declare', 'r', 'real', 3],
         ['Add', 'r', ['Multiply', 'x', 'x']],
       ]);
       const code = glsl.compile(expr).code;

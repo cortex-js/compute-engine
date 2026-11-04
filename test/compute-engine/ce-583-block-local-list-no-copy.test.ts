@@ -23,21 +23,17 @@
  *    the enclosing list with fresh local names on Python. A block with one
  *    statement that is itself a block does the same. Before, the nested
  *    block was a value, and its last statement became a `return`.
- *  - A block that uses a local before its `Declare` declines, in a block
- *    and in a loop body.
+ *  - A block that uses a local before its `Declare` is the static error
+ *    `read-before-declaration`, in a block and in a loop body.
  *  - A local of a nested block in a loop body or a branch no longer writes
  *    an outer variable of the same name (JavaScript and Python).
- *  - On Python, a `Declare` with a value assigns the value. A read of a
- *    local declared with no value on a path with no assignment declines
- *    (CE-636), so a local of a loop body no longer keeps the value of the
- *    previous pass. A `Declare` or an `Assign` whose value compiles to
- *    several statements declines.
+ *  - On Python, a `Declare` with a value assigns the value, so a local of a
+ *    loop body no longer keeps the value of the previous pass. A `Declare`
+ *    or an `Assign` whose value compiles to several statements declines.
  *  - On Python, a `Loop` index with the name of another variable of the
  *    function (a parameter, a local, a free symbol, a name that a `vars`
  *    entry reads) gets a fresh name, and the body can still assign it.
- *  - Programs whose branch conditions read a local declared with no value
- *    compile as before (ROADMAP CE-636 covers the case where the local may
- *    have no value).
+ *  - Programs whose branch conditions read a block local compile as before.
  *  - The WGSL copy before an index declines with a diagnostic, not an
  *    internal error, at a position with no place for the copy statement.
  *    No input is known to reach this, so it has no test.
@@ -61,10 +57,6 @@ import { TEST_PYTHON } from './test-python';
 const wgsl = new WGSLTarget();
 const glsl = new GLSLTarget();
 const NO_FOLD = { constantFold: false };
-/** The refusal of a read of a block local on a path with no assignment
- * (CE-636). */
-const SOME_PATHS =
-  /a statement can read the block local "\w+" when no assignment gave it a value/;
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -82,8 +74,7 @@ const UNROLLED =
 function blockLocal(body: unknown): unknown {
   return [
     'Block',
-    ['Declare', 'U', "'list<real^10>'"],
-    ['Assign', 'U', 'B'],
+    ['Declare', 'U', "'list<real^10>'", 'B'],
     body,
   ];
 }
@@ -98,8 +89,7 @@ function defineF(ce: ComputeEngine, body: unknown): void {
 function innerU(value: unknown): unknown {
   return [
     'Block',
-    ['Declare', 'U', "'list<real^10>'"],
-    ['Assign', 'U', 'C'],
+    ['Declare', 'U', "'list<real^10>'", 'C'],
     value,
   ];
 }
@@ -190,8 +180,7 @@ describe('CE-583: WGSL reads a Block local list with a proven index in place', (
       ce.box(
         blockLocal([
           'Block',
-          ['Declare', 'V', "'list<real^10>'"],
-          ['Assign', 'V', 'U'],
+          ['Declare', 'V', "'list<real^10>'", 'U'],
           ['Sum', ['At', 'V', 'k'], ['Limits', 'k', 1, 10]],
         ]) as any
       ),
@@ -247,31 +236,40 @@ describe('CE-583: a value of the same name is still copied', () => {
     // are not taken for the parameter, and the list local is indexed in
     // place.
     const ce = engine();
-    defineF(ce, ['Add', ['Block', innerU(SUM_U)], 'U']);
+    // The inner block is a statement: a block with a declaration is not an
+    // operand, so its value goes through the local `r`.
+    defineF(ce, [
+      'Block',
+      ['Declare', 'r', "'real'", 0],
+      ['Block', ['Declare', 'U', "'list<real^10>'", 'C'], ['Assign', 'r', SUM_U]],
+      ['Add', 'r', 'U'],
+    ]);
     const unrolled = UNROLLED.replace(/\bU\[/g, '_tv1[');
     const w = wgsl.compile(ce.box(['f', 'x']), NO_FOLD);
     expect(w.code).toBe('_fn_f(x)');
     expect(fnText(w.preamble!, 'fn _fn_f(')).toBe(
       'fn _fn_f(U: f32) -> f32 {\n' +
-        '  var _tv2: f32;\n' +
+        '  var r: f32;\n' +
+        '  r = 0.0;\n' +
         '  {\n' +
         '    var _tv1: array<f32, 10>;\n' +
         '    _tv1 = C;\n' +
-        `    _tv2 = ${unrolled};\n` +
+        `    r = ${unrolled};\n` +
         '  }\n' +
-        '  return U + _tv2;\n' +
+        '  return U + r;\n' +
         '}'
     );
     const g = glsl.compile(ce.box(['f', 'x']), NO_FOLD);
     expect(fnText(g.preamble!, 'float _fn_f(')).toBe(
       'float _fn_f(float U) {\n' +
-        '  float _tv2;\n' +
+        '  float r;\n' +
+        '  r = 0.0;\n' +
         '  {\n' +
         '    float[10] _tv1;\n' +
         '    _tv1 = C;\n' +
-        `    _tv2 = ${unrolled};\n` +
+        `    r = ${unrolled};\n` +
         '  }\n' +
-        '  return U + _tv2;\n' +
+        '  return U + r;\n' +
         '}'
     );
     expectSameValues(ce, w.preamble!, g.preamble!, 55 + 2.5);
@@ -283,8 +281,7 @@ describe('CE-583: a value of the same name is still copied', () => {
     ce.declare('U', 'real');
     const body = ce.box([
       'Block',
-      ['Declare', 'U', "'list<real^10>'"],
-      ['Assign', 'U', 'C'],
+      ['Declare', 'U', "'list<real^10>'", 'C'],
       SUM_U,
     ] as any);
     const unrolled = UNROLLED.replace(/\bU\[/g, '_tv1[');
@@ -317,83 +314,81 @@ describe('CE-583: a local that hides an outer local and a parameter', () => {
   test('both locals get a fresh name', () => {
     const ce = engine();
     const sum3 = ['Sum', ['At', 'U', 'k'], ['Limits', 'k', 1, 3]];
+    // A block with a declaration is not an operand, so the values go through
+    // the locals `r` and `q`.
     defineF(ce, [
-      'Add',
+      'Block',
+      ['Declare', 'r', "'real'", 0],
       [
         'Block',
-        ['Declare', 'U', "'list<real^10>'"],
-        ['Assign', 'U', 'C'],
-        [
-          'Add',
-          [
-            'Block',
-            ['Declare', 'U', "'list<real^10>'"],
-            ['Assign', 'U', 'B'],
-            sum3,
-          ],
-          sum3,
-        ],
+        ['Declare', 'U', "'list<real^10>'", 'C'],
+        ['Declare', 'q', "'real'", 0],
+        ['Block', ['Declare', 'U', "'list<real^10>'", 'B'], ['Assign', 'q', sum3]],
+        ['Assign', 'r', ['Add', 'q', sum3]],
       ],
-      'U',
+      ['Add', 'r', 'U'],
     ]);
     const inner = '((_tv2[1 - 1]) + (_tv2[2 - 1]) + (_tv2[3 - 1]))';
     const outer = '((_tv1[1 - 1]) + (_tv1[2 - 1]) + (_tv1[3 - 1]))';
     const w = wgsl.compile(ce.box(['f', 'x']), NO_FOLD);
     expect(fnText(w.preamble!, 'fn _fn_f(')).toBe(
       'fn _fn_f(U: f32) -> f32 {\n' +
-        '  var _tv4: f32;\n' +
+        '  var r: f32;\n' +
+        '  r = 0.0;\n' +
         '  {\n' +
         '    var _tv1: array<f32, 10>;\n' +
         '    _tv1 = C;\n' +
-        '    var _tv3: f32;\n' +
+        '    var q: f32;\n' +
+        '    q = 0.0;\n' +
         '    {\n' +
         '      var _tv2: array<f32, 10>;\n' +
         '      _tv2 = B;\n' +
-        `      _tv3 = ${inner};\n` +
+        `      q = ${inner};\n` +
         '    }\n' +
-        `    _tv4 = ${outer} + _tv3;\n` +
+        `    r = q + ${outer};\n` +
         '  }\n' +
-        '  return U + _tv4;\n' +
+        '  return U + r;\n' +
         '}'
     );
     const g = glsl.compile(ce.box(['f', 'x']), NO_FOLD);
     expect(fnText(g.preamble!, 'float _fn_f(')).toBe(
       'float _fn_f(float U) {\n' +
-        '  float _tv4;\n' +
+        '  float r;\n' +
+        '  r = 0.0;\n' +
         '  {\n' +
         '    float[10] _tv1;\n' +
         '    _tv1 = C;\n' +
-        '    float _tv3;\n' +
+        '    float q;\n' +
+        '    q = 0.0;\n' +
         '    {\n' +
         '      float[10] _tv2;\n' +
         '      _tv2 = B;\n' +
-        `      _tv3 = ${inner};\n` +
+        `      q = ${inner};\n` +
         '    }\n' +
-        `    _tv4 = ${outer} + _tv3;\n` +
+        `    r = q + ${outer};\n` +
         '  }\n' +
-        '  return U + _tv4;\n' +
+        '  return U + r;\n' +
         '}'
     );
     // B = 100·C, so the sums are 600 and 6.
     expectSameValues(ce, w.preamble!, g.preamble!, 600 + 6 + 2.5);
   });
 
-  test('compileFunction(): an assignment before the declaration writes the parameter', () => {
-    // The interpreter refuses this order (`read-before-declaration`). The
-    // check of the writes of a parameter reads the statements in order, so
-    // the first `Assign` is a write of the parameter `U`, and WGSL declines.
+  test('compileFunction(): an assignment before the declaration is refused', () => {
+    // The canonical form refuses this order with the static error
+    // `read-before-declaration`, and a compilation refuses an invalid
+    // expression.
     const ce = engine();
     ce.declare('U', 'real');
     const body = ce.box([
       'Block',
       ['Assign', 'U', 2],
-      ['Declare', 'U', "'real'"],
-      ['Assign', 'U', 3],
+      ['Declare', 'U', "'real'", 3],
       ['Add', 'U', 1],
     ] as any);
     expect(() =>
       wgsl.compileFunction(body, 'g', 'f32', [['U', 'f32']], NO_FOLD)
-    ).toThrow(/the body assigns the parameter "U"/);
+    ).toThrow(/read-before-declaration/);
   });
 });
 
@@ -437,7 +432,7 @@ describe('CE-583: a nested Block in statement position', () => {
     const ce = engine();
     const expr = ce.box([
       'Block',
-      ['Block', ['Declare', 'V', "'real'"], ['Assign', 'V', 'x'], 'V'],
+      ['Block', ['Declare', 'V', "'real'", 'x'], 'V'],
       ['Add', 'x', 1],
     ] as any);
     expect(wgsl.compile(expr, NO_FOLD).code).toBe(
@@ -476,21 +471,19 @@ describe('CE-583: a nested Block in statement position on Python', () => {
       'a block that assigns an outer local',
       [
         'Block',
-        ['Declare', 'W', "'real'"],
+        ['Declare', 'W', "'real'", 0],
         ['Block', ['Assign', 'W', ['Multiply', 2, 'x']]],
         ['Add', 'W', 1],
       ],
-      // The nested block assigns `W` on every path before the read, so
-      // `W` gets no start value (CE-636).
-      'W = 2 * x\nreturn W + 1',
-      'def f(x):\n    W = 2 * x\n    return W + 1\n',
+      'W = 0\nW = 2 * x\nreturn W + 1',
+      'def f(x):\n    W = 0\n    W = 2 * x\n    return W + 1\n',
       6,
     ],
     [
       'a block with a value that nothing reads',
       [
         'Block',
-        ['Block', ['Declare', 'V', "'real'"], ['Assign', 'V', 'x'], 'V'],
+        ['Block', ['Declare', 'V', "'real'", 'x'], 'V'],
         ['Add', 'x', 1],
       ],
       '_tv1 = x\n_tv1\nreturn x + 1',
@@ -501,12 +494,10 @@ describe('CE-583: a nested Block in statement position on Python', () => {
       'a block local that hides an outer local',
       [
         'Block',
-        ['Declare', 'V', "'real'"],
-        ['Assign', 'V', 3],
+        ['Declare', 'V', "'real'", 3],
         [
           'Block',
-          ['Declare', 'V', "'real'"],
-          ['Assign', 'V', 'x'],
+          ['Declare', 'V', "'real'", 'x'],
           ['Assign', 'V', ['Add', 'V', 1]],
         ],
         ['Add', 'V', 'x'],
@@ -538,16 +529,16 @@ describe('CE-583: a nested Block in statement position on Python', () => {
 
 describe('CE-583: a use of a block local before its Declare declines', () => {
   // The local exists from the start of the block, so a statement before
-  // the `Declare` uses the local. The interpreter answers
-  // `read-before-declaration`, and every target declines.
+  // the `Declare` uses the local. The canonical form holds the static error
+  // `read-before-declaration`, and every target refuses the invalid
+  // expression.
   const shapes: Array<[string, unknown]> = [
     [
       'an assignment',
       [
         'Block',
         ['Assign', 'U', 2],
-        ['Declare', 'U', "'real'"],
-        ['Assign', 'U', 3],
+        ['Declare', 'U', "'real'", 3],
         ['Add', 'U', 1],
       ],
     ],
@@ -556,8 +547,7 @@ describe('CE-583: a use of a block local before its Declare declines', () => {
       [
         'Block',
         ['Assign', 'y', ['Add', 'U', 1]],
-        ['Declare', 'U', "'real'"],
-        ['Assign', 'U', 3],
+        ['Declare', 'U', "'real'", 3],
         ['Add', 'U', 'y'],
       ],
     ],
@@ -568,11 +558,11 @@ describe('CE-583: a use of a block local before its Declare declines', () => {
       ce.declare('U', 'real');
       ce.assign('U', 10);
       const expr = ce.box(json as any);
-      expect(expr.evaluate().toString()).toBe(
+      expect(expr.isValid).toBe(false);
+      expect(expr.toString()).toContain(
         'Error(ErrorCode("read-before-declaration", "U"))'
       );
-      const decline =
-        /a statement uses the block local "U" before the `Declare` of "U"/;
+      const decline = /read-before-declaration/;
       for (const to of ['javascript', 'glsl', 'wgsl', 'python'])
         expect(() => compile(expr, { to, fallback: false })).toThrow(decline);
       // The interval target gives its decline in the result.
@@ -584,15 +574,17 @@ describe('CE-583: a use of a block local before its Declare declines', () => {
 
   test('a use in a nested scope that declares the name again compiles', () => {
     const ce = new ComputeEngine();
+    // `y` is declared first: an assignment is a first assignment only at the
+    // own level of a block, and a block with a declaration is not an operand.
     const expr = ce.box([
       'Block',
+      ['Declare', 'y', "'real'", 0],
       [
-        'Assign',
-        'y',
-        ['Block', ['Declare', 'U', "'real'"], ['Assign', 'U', 5], 'U'],
+        'Block',
+        ['Declare', 'U', "'real'", 5],
+        ['Assign', 'y', 'U'],
       ],
-      ['Declare', 'U', "'real'"],
-      ['Assign', 'U', 3],
+      ['Declare', 'U', "'real'", 3],
       ['Add', 'U', 'y'],
     ] as any);
     expect(expr.evaluate().re).toBe(8);
@@ -612,13 +604,12 @@ describe('CE-583: a block local in a loop body or a branch', () => {
       'a block in a loop body',
       [
         'Block',
-        D('V'),
-        ['Assign', 'V', 1],
+        ['Declare', 'V', "'real'", 1],
         [
           'Loop',
           [
             'Block',
-            ['Block', D('V'), ['Assign', 'V', 100]],
+            ['Block', ['Declare', 'V', "'real'", 100]],
             ['Assign', 'V', ['Multiply', 2, 'V']],
           ],
           ['Element', 'k', ['Range', 1, 3]],
@@ -633,12 +624,11 @@ describe('CE-583: a block local in a loop body or a branch', () => {
       'a block in a branch',
       [
         'Block',
-        D('V'),
-        ['Assign', 'V', 1],
+        ['Declare', 'V', "'real'", 1],
         [
           'If',
           ['Greater', 'x', 0],
-          ['Block', D('V'), ['Assign', 'V', 7]],
+          ['Block', ['Declare', 'V', "'real'", 7]],
           ['Assign', 'V', 5],
         ],
         'V',
@@ -651,15 +641,14 @@ describe('CE-583: a block local in a loop body or a branch', () => {
       'a block nested in a block of a branch',
       [
         'Block',
-        D('V'),
-        ['Assign', 'V', 1],
+        ['Declare', 'V', "'real'", 1],
         [
           'If',
           ['Greater', 'x', 0],
           [
             'Block',
             ['Assign', 'V', 2],
-            ['Block', D('V'), ['Assign', 'V', 7]],
+            ['Block', ['Declare', 'V', "'real'", 7]],
             ['Assign', 'V', ['Add', 'V', 1]],
           ],
           ['Assign', 'V', 5],
@@ -704,8 +693,7 @@ describe('CE-583: the order checks also run on a loop body', () => {
     const D = (n: string) => ['Declare', n, "'real'"];
     const expr = ce.box([
       'Block',
-      D('s'),
-      ['Assign', 's', 0],
+      ['Declare', 's', "'real'", 0],
       [
         'Loop',
         [
@@ -716,15 +704,13 @@ describe('CE-583: the order checks also run on a loop body', () => {
             ['Assign', 's', ['Add', 's', 'U']],
             'Nothing',
           ],
-          D('U'),
-          ['Assign', 'U', 100],
+          ['Declare', 'U', "'real'", 100],
         ],
         ['Element', 'k', ['Range', 1, 2]],
       ],
       's',
     ] as any);
-    const decline =
-      /a statement uses the block local "U" before the `Declare` of "U"/;
+    const decline = /read-before-declaration/;
     for (const to of ['javascript', 'python'])
       expect(() => compile(expr, { to, fallback: false })).toThrow(decline);
     expect(() => new PythonTarget().compileFunction(expr, 'f', ['U'])).toThrow(
@@ -739,24 +725,19 @@ describe('CE-583: the order checks also run on a loop body', () => {
 });
 
 describe('CE-583: a Python block local has no value from a previous pass', () => {
-  // `t` is a local of the loop body: each pass has a new `t`, which has a
-  // value only in the pass where `k = 1`. Python kept the value 5 of the
-  // first pass and gave 5. The interpreter has no number for the read in
-  // the pass where `k = 2`: its result is the symbol `t`, which compiled
-  // code cannot represent. The read is on a path with no assignment, so
-  // the compilation declines on every target (CE-636).
+  // `t` is a local of the loop body: each pass has a new `t`, which starts
+  // at 0 and becomes 5 only in the pass where `k = 1`. Python kept the value
+  // 5 of the first pass and gave 5 in the pass where `k = 2`; the value is 0.
   test('a local declared in a loop body', () => {
     const ce = new ComputeEngine();
-    const D = (n: string) => ['Declare', n, "'real'"];
     const expr = ce.box([
       'Block',
-      D('s'),
-      ['Assign', 's', 0],
+      ['Declare', 's', "'real'", 0],
       [
         'Loop',
         [
           'Block',
-          D('t'),
+          ['Declare', 't', "'real'", 0],
           ['If', ['Equal', 'k', 1], ['Assign', 't', 5], 'Nothing'],
           ['Assign', 's', ['Add', 's', ['If', ['Equal', 'k', 2], 't', 0]]],
         ],
@@ -764,74 +745,34 @@ describe('CE-583: a Python block local has no value from a previous pass', () =>
       ],
       's',
     ] as any);
-    expect(() => compile(expr, { to: 'javascript', fallback: false })).toThrow(
-      SOME_PATHS
-    );
-    expect(() => new PythonTarget().compileFunction(expr, 'f', [])).toThrow(
-      SOME_PATHS
-    );
+    expect(expr.evaluate().re).toBe(0);
+    const fn = new PythonTarget().compileFunction(expr, 'f', []);
+    expect(fn).toContain('    for k in range(1, 4):\n        _tv1 = 0\n');
+    if (TEST_PYTHON === undefined) return;
+    const out = execFileSync(TEST_PYTHON, ['-c', `${fn}\nprint(f())`])
+      .toString()
+      .trim();
+    expect(Number(out)).toBe(0);
   });
 
-  test('an implicit local of a nested block does not reach the outer read', () => {
+  test('a name assigned in a nested block does not reach the outer read', () => {
     // `W` is a local of the nested block (a bare assignment of a name that
     // nothing outside binds), so the read after the block is not that
-    // local. Python wrote `W` in the scope of the function and gave 9.
+    // local: it is the free symbol `W`. Python wrote `W` in the scope of the
+    // function and gave 9.
     const ce = new ComputeEngine();
-    const D = (n: string) => ['Declare', n, "'real'"];
     const expr = ce.box([
       'Block',
-      D('s'),
-      ['Assign', 's', 0],
-      [
-        'Loop',
-        [
-          'Block',
-          ['Block', ['Assign', 'W', ['Add', 'k', 1]]],
-          ['Assign', 's', ['Add', 's', 'W']],
-        ],
-        ['Element', 'k', ['Range', 1, 3]],
-      ],
+      ['Declare', 's', "'number'", 0],
+      ['Block', ['Assign', 'W', ['Add', 'x', 1]]],
+      ['Assign', 's', ['Add', 's', 'W']],
       's',
     ] as any);
-    expect(expr.evaluate().toString()).toMatch(/^Error\(/);
-    const fn = new PythonTarget().compileFunction(expr, 'f', []);
-    expect(fn).toContain('    for k in range(1, 4):\n        _tv1 = k + 1');
+    expect(expr.evaluate().toString()).toBe('W');
+    const fn = new PythonTarget().compileFunction(expr, 'f', ['x', 'W']);
+    expect(fn).toContain('    _tv1 = x + 1\n');
     expect(fn).not.toMatch(/^\s*W = /m);
   });
-});
-
-describe('CE-583: a Python result that can read a local with no value declines', () => {
-  // `t` has a value only when `x > 0`. The interpreter has no number for
-  // the result at x = 0, and the read is on a path with no assignment, so
-  // the compilation declines (CE-636): as the result, in a copy, in a
-  // collection, and in a function literal.
-  const D = (n: string) => ['Declare', n, "'real'"];
-  const ASSIGN_IF_X = ['If', ['Greater', 'x', 0], ['Assign', 't', 1], 'Nothing'];
-  const cases: Array<[string, unknown]> = [
-    ['the local is the result', ['Block', D('t'), ASSIGN_IF_X, 't']],
-    [
-      'a copy of the local is the result',
-      ['Block', D('t'), D('s'), ASSIGN_IF_X, ['Assign', 's', 't'], 's'],
-    ],
-    ['a list', ['Block', D('t'), ASSIGN_IF_X, ['List', 't']]],
-    ['a tuple', ['Block', D('t'), ASSIGN_IF_X, ['Tuple', 't', 1]]],
-    [
-      'a nested list',
-      ['Block', D('t'), ASSIGN_IF_X, ['List', ['List', 1, 't']]],
-    ],
-    ['Function(t)', ['Block', D('t'), ASSIGN_IF_X, ['Function', 't']]],
-  ];
-  for (const [label, json] of cases) {
-    test(label, () => {
-      const ce = new ComputeEngine();
-      ce.declare('x', 'real');
-      const expr = ce.box(json as any);
-      expect(() =>
-        new PythonTarget().compileFunction(expr, 'f', ['x'])
-      ).toThrow(SOME_PATHS);
-      expect(() => new PythonTarget().compile(expr, {})).toThrow(SOME_PATHS);
-    });
-  }
 });
 
 describe('CE-583: a Python Declare in a nested block', () => {
@@ -844,8 +785,7 @@ describe('CE-583: a Python Declare in a nested block', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Block',
-      D('s'),
-      ['Assign', 's', 0],
+      ['Declare', 's', "'real'", 0],
       [
         'Loop',
         [
@@ -871,11 +811,11 @@ describe('CE-583: a Python Declare in a nested block', () => {
 });
 
 describe('CE-583: a branch on a block local that the compiled code reads', () => {
-  const D = (n: string, t = "'integer'") => ['Declare', n, t];
-  // Each of these programs reads a local declared with no value in a branch
-  // condition, and has a value on every run. They compile and give the value
-  // of the interpreter, as before CE-583. A read of a local that may have
-  // no value is tested in `ce-636-block-local-without-value.test.ts`.
+  const D = (n: string, t = "'integer'") => ['Declare', n, t, 0];
+  // Each of these programs reads a local in a branch condition, and has a
+  // value on every run. They compile and give the value of the interpreter,
+  // as before CE-583. The local starts at 0, because a declaration has a
+  // value.
   const cases: Array<[string, unknown, number, boolean]> = [
     [
       'both arms of an If assign',
@@ -904,7 +844,7 @@ describe('CE-583: a branch on a block local that the compiled code reads', () =>
       'a first value in the first pass of a loop',
       [
         'Block',
-        D('m'),
+        D('m', "'real'"),
         [
           'Loop',
           [
@@ -929,8 +869,7 @@ describe('CE-583: a branch on a block local that the compiled code reads', () =>
       [
         'Block',
         D('n'),
-        D('f', "'any'"),
-        ['Assign', 'f', ['Function', ['If', ['Greater', 'n', 1], 10, 20]]],
+        ['Declare', 'f', "'any'", ['Function', ['If', ['Greater', 'n', 1], 10, 20]]],
         ['Assign', 'n', 2],
         ['Apply', 'f'],
       ],
@@ -999,8 +938,7 @@ describe('CE-583: a Python loop index does not overwrite another variable', () =
       'an inner loop over the index of the outer loop',
       [
         'Block',
-        D('s'),
-        ['Assign', 's', 0],
+        ['Declare', 's', "'integer'", 0],
         loop(['Block', loop(add(0), 'i', 1, 0), add('i')], 'i', 1, 5),
         's',
       ],
@@ -1010,8 +948,7 @@ describe('CE-583: a Python loop index does not overwrite another variable', () =
       'an inner loop that is a statement of the outer body',
       [
         'Block',
-        D('s'),
-        ['Assign', 's', 0],
+        ['Declare', 's', "'integer'", 0],
         loop(
           ['Block', loop(add(['Multiply', 10, 'i']), 'i', 1, 2), add('i')],
           'i',
@@ -1026,10 +963,8 @@ describe('CE-583: a Python loop index does not overwrite another variable', () =
       'a loop over the name of a block local',
       [
         'Block',
-        D('s'),
-        ['Assign', 's', 0],
-        D('k'),
-        ['Assign', 'k', 100],
+        ['Declare', 's', "'integer'", 0],
+        ['Declare', 'k', "'integer'", 100],
         loop(add('k'), 'k', 1, 3),
         ['Add', 's', 'k'],
       ],
@@ -1054,8 +989,7 @@ describe('CE-583: a Python loop index does not overwrite another variable', () =
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Block',
-      D('s'),
-      ['Assign', 's', 0],
+      ['Declare', 's', "'integer'", 0],
       loop(add('x'), 'x', 1, 3),
       ['Add', 's', 'x'],
     ] as any);
@@ -1074,15 +1008,13 @@ describe('CE-583: a Python loop index does not overwrite another variable', () =
     ce.declare('y', 'real');
     const after = ce.box([
       'Block',
-      D('s'),
-      ['Assign', 's', 0],
+      ['Declare', 's', "'integer'", 0],
       loop(add('y'), 'y', 1, 3),
       ['Add', 's', 'y'],
     ] as any);
     const before = ce.box([
       'Block',
-      D('s'),
-      ['Assign', 's', 'y'],
+      ['Declare', 's', "'integer'", 'y'],
       loop(add('y'), 'y', 1, 3),
       's',
     ] as any);
@@ -1097,13 +1029,13 @@ describe('CE-583: a Python loop index does not overwrite another variable', () =
 
   // An index with no other variable of that name keeps its name, and a
   // comprehension has its own scope in Python 3, so its variable keeps its
-  // name too.
+  // name too. `s` is a `number`: `Length` has the type `real | signed_infinity`,
+  // and a reassignment must keep the type of the local.
   test('other indices keep their names', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Block',
-      D('s'),
-      ['Assign', 's', 0],
+      ['Declare', 's', "'number'", 0],
       loop(
         add([
           'Add',
@@ -1135,8 +1067,7 @@ describe('CE-583: a Python loop index with a fresh name can be assigned', () => 
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Block',
-      D('s'),
-      ['Assign', 's', 0],
+      ['Declare', 's', "'integer'", 0],
       [
         'Loop',
         [
@@ -1172,8 +1103,7 @@ describe('CE-583: a Python Declare whose value is a block', () => {
         "'real'",
         [
           'Block',
-          ['Declare', 'a', "'real'"],
-          ['Assign', 'a', 'x'],
+          ['Declare', 'a', "'real'", 'x'],
           ['Multiply', 'a', 2],
         ],
       ],
@@ -1192,8 +1122,7 @@ describe('CE-583: a Python Declare whose value is a block', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Block',
-      ['Declare', 's', "'real'"],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'real'", 0],
       [
         'Loop',
         [
@@ -1253,8 +1182,7 @@ describe('CE-583: a nested block with one statement, in statement position', () 
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Block',
-      ['Declare', 's', "'real'"],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'real'", 0],
       [
         'Loop',
         [
@@ -1292,8 +1220,7 @@ describe('CE-583: a Python loop index and the code of a vars entry', () => {
     ce.declare('y', 'real');
     const expr = ce.box([
       'Block',
-      ['Declare', 's', "'real'"],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'real'", 0],
       [
         'Loop',
         ['Assign', 's', ['Add', 's', 'k']],
@@ -1328,8 +1255,7 @@ describe('CE-583: a Python loop index and a name read through a value', () => {
     ce.assign('a', ce.box(['Add', 'k', 1]));
     const expr = ce.box([
       'Block',
-      ['Declare', 's', "'real'"],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'real'", 0],
       [
         'Loop',
         ['Assign', 's', ['Add', 's', 'k']],
@@ -1352,8 +1278,7 @@ describe('CE-583: a Python loop index and a name read through a value', () => {
     const alpha = { sym: 'α' };
     const expr = ce.box([
       'Block',
-      ['Declare', 's', "'real'"],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'real'", 0],
       [
         'Loop',
         ['Assign', 's', ['Add', 's', alpha]],

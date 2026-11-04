@@ -303,8 +303,7 @@ describe('CE-574: the bases that keep the copying helper', () => {
     const r = wgsl.compile(
       ce.box([
         'Block',
-        ['Declare', 'T', "'list<number^10>'"],
-        ['Assign', 'T', 'S'],
+        ['Declare', 'T', "'list<number^10>'", 'S'],
         ['At', 'T', 'i'],
       ])
     );
@@ -313,21 +312,17 @@ describe('CE-574: the bases that keep the copying helper', () => {
     expect(r.code).not.toContain('_gpu_at_T_');
   });
 
-  test('a free list that the body writes: it is read from a local copy', () => {
-    // The body writes `S`, so the code reads and writes a function-scope
-    // copy of it (`_tv1`). A helper at module scope cannot name that copy.
+  test('a free list that the body writes declines', () => {
+    // A write to a symbol declared in the engine declines: compiled code
+    // writes only the locals that it declares.
     const ce = engineWith({
       S: 'list<number^10>',
       T: 'list<number^10>',
       i: 'real',
     });
-    const r = wgsl.compile(
-      ce.box(['Block', ['Assign', 'S', 'T'], ['At', 'S', 'i']])
-    );
-    expect(r.success).toBe(true);
-    expect(r.code).toMatch(/_gpu_at10\(_tv\d+, i\)/);
-    expect(r.code).not.toContain('_gpu_at__tv');
-    expect(r.preamble).not.toContain('_gpu_at__tv');
+    expect(() =>
+      wgsl.compile(ce.box(['Block', ['Assign', 'S', 'T'], ['At', 'S', 'i']]))
+    ).toThrow(/"S" is not a local of the compiled expression/);
   });
 
   test('a `vars` mapping to a struct field: a path, not a name', () => {
@@ -370,8 +365,7 @@ describe('CE-574: the bases that keep the copying helper', () => {
     // the 8192 bytes that WGSL guarantees, 2048 do.
     const block = (n: number, src: string) => [
       'Block',
-      ['Declare', 'U', `'list<real^${n}>'`],
-      ['Assign', 'U', src],
+      ['Declare', 'U', `'list<real^${n}>'`, src],
       ['At', 'U', 'x'],
     ];
     const ce = engineWith({
@@ -388,39 +382,6 @@ describe('CE-574: the bases that keep the copying helper', () => {
     expect(glsl.compile(ce.box(block(3000, 'B'))).code).toContain(
       'float[3000] U;'
     );
-  });
-
-  test('a written input whose local copy is above 8192 bytes declines', () => {
-    // The body writes `B`, so it reads and writes a function-scope copy of
-    // it, which cannot hold 3000 numbers.
-    const ce = engineWith({ B: 'list<real^3000>' });
-    expect(() =>
-      wgsl.compile(
-        ce.box([
-          'Block',
-          ['Assign', 'B', 'B'],
-          ['Sum', ['At', 'B', 'k'], ['Limits', 'k', 1, 3000]],
-        ])
-      )
-    ).toThrow(/copy \(`array<f32, 3000>`, 12000 bytes\).*'storage-buffer'/);
-  });
-
-  test('a written input read with a proven index is not copied again', () => {
-    // The body writes `S`, so it reads a function-scope copy `_tv1`, which
-    // WGSL indexes as it is.
-    const ce = engineWith({ S: 'list<number^10>', T: 'list<number^10>' });
-    const r = wgsl.compile(
-      ce.box([
-        'Block',
-        ['Assign', 'S', 'T'],
-        ['Sum', ['At', 'S', 'k'], ['Limits', 'k', 1, 10]],
-      ]),
-      { constantFold: false }
-    );
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('_tv1[1 - 1]');
-    expect(r.code).toContain('_tv1[10 - 1]');
-    expect(r.code).not.toMatch(/var _tv\d+ = _tv1;/);
   });
 
   test('a sampler-backed list keeps its texel helper', () => {

@@ -3608,8 +3608,7 @@ describe('INTEGRATE: a user function with the name of a library function', () =>
       'Integrate',
       [
         'Block',
-        ['Declare', 'Ln', "'function'"],
-        ['Assign', 'Ln', ['Function', ['Add', 't', 1], 't']],
+        ['Declare', 'Ln', "'function'", ['Function', ['Add', 't', 1], 't']],
         ['Ln', 'x'],
       ],
       ['Limits', 'x', 1, 2],

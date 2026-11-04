@@ -14,7 +14,7 @@ function sharedGraph(depth: number, locals = false, asymmetric = false) {
             [`f_${asymmetric && i > 1 ? i - 2 : i - 1}`, ['Multiply', 2, 'u']],
           ];
     const body: MathJsonExpression = locals
-      ? ['Block', ['Declare', 'q'], ['Assign', 'q', value], 'q']
+      ? ['Block', ['Declare', 'q', "'unknown'", value], 'q']
       : ['Block', value];
     ce.declare(`f_${i}`, 'function');
     ce.assign(`f_${i}`, ce.box(['Function', body, 'u']));
@@ -101,8 +101,7 @@ describe('shared function shape analysis', () => {
       };
       register('F', [
         'Block',
-        ['Declare', 'p'],
-        ['Assign', 'p', ['PointX', 'a']],
+        ['Declare', 'p', "'unknown'", ['PointX', 'a']],
         [
           'Tuple',
           ['Add', 'p', ['PointX', 'c']],

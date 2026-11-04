@@ -406,22 +406,23 @@ let p = P(age: 42)`;
     // A DECLARED but unassigned binding has the object type statically — a
     // decided type, so resolution commits to the field-backed edge — while its
     // value is still the symbol. Reading it must stay symbolic rather than
-    // answer `Nothing` behind a `string` claim.
-    expect(
-      value(`protocol Nameable { readwrite name: string }
-type P = object{name: string} is Nameable
-let q: P
-q.(Nameable.name)`)
-    ).toBe('ProtocolProperty("Nameable", "name", q)');
+    // answer `Nothing` behind a `string` claim. An Epsil declaration must
+    // have a value, so the host declares `q` with no value.
+    value(`protocol Nameable { readwrite name: string }
+type P = object{name: string} is Nameable`);
+    ce.declare('q', 'P');
+    expect(value('q.(Nameable.name)')).toBe(
+      'ProtocolProperty("Nameable", "name", q)'
+    );
   });
 
   test('…and a write onto a non-object receiver stays symbolic too', () => {
     executeEpsil(
       ce,
       `protocol Nameable { readwrite name: string }
-type P = object{name: string} is Nameable
-let q: P`
+type P = object{name: string} is Nameable`
     );
+    ce.declare('q', 'P');
     const written = ce.box([
       'ProtocolProperty',
       { str: 'Nameable' },

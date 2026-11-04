@@ -422,6 +422,9 @@ describe('COMPILE Loop — shapes that fail closed on both targets (review pins)
   });
 
   it('a statement-shaped comprehension body declines on Python', () => {
+    // A bare `Assign` as the body is the static error
+    // `assignment-in-operand`, so that compile declines on the invalid
+    // expression.
     for (const body of [
       ['Assign', 's', 'x'],
       ['Break'],
@@ -436,7 +439,7 @@ describe('COMPILE Loop — shapes that fail closed on both targets (review pins)
           ]),
           { constantFold: false }
         )
-      ).toThrow(/statement|declaration/);
+      ).toThrow(/statement|declaration|invalid expression/);
   });
 
   it('a non-numeric Range bound declines on every operand count', () => {

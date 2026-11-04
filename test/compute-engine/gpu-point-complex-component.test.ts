@@ -160,8 +160,7 @@ describe('A CALL OF A USER FUNCTION WITH A COMPLEX BODY IS COMPLEX', () => {
       ce.assign('h', ce.parse('s \\mapsto s + k'));
       const expr = ce.box([
         'Block',
-        ['Declare', 'k'],
-        ['Assign', 'k', ['Add', 'x', 'ImaginaryUnit']],
+        ['Declare', 'k', "'unknown'", ['Add', 'x', 'ImaginaryUnit']],
         ['Add', ['h', 'x'], 'k'],
       ]);
       const result = compile(expr, { to: 'javascript', mode } as any) as any;
@@ -445,8 +444,7 @@ describe('A POINT ARGUMENT DOES NOT HIDE A GLOBAL READ BY A USER FUNCTION', () =
       build: (ce) =>
         ce.box([
           'Block',
-          ['Declare', 'k', "'integer'"],
-          ['Assign', 'k', 2],
+          ['Declare', 'k', "'integer'", 2],
           ['Add', ['p', ['Tuple', 'x', 1]], 'k'],
         ]),
       vars: { x: 2 },
@@ -475,8 +473,7 @@ describe('A POINT ARGUMENT DOES NOT HIDE A GLOBAL READ BY A USER FUNCTION', () =
       build: (ce) =>
         ce.box([
           'Block',
-          ['Declare', 'k', "'integer'"],
-          ['Assign', 'k', 2],
+          ['Declare', 'k', "'integer'", 2],
           [
             'Add',
             ['a', ['Tuple', 'x', ['Multiply', 'ImaginaryUnit', 'x']]],

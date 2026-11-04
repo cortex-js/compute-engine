@@ -183,12 +183,6 @@ describe('a lazy operator at the top level under .N()', () => {
     ).toBe('1');
   });
 
-  test('an operand of the condition with an effect is evaluated once', () => {
-    const ce = new ComputeEngine();
-    ce.assign('m', 0);
-    ce.box(['If', ['Less', ['Assign', 'm', ['Add', 'm', 0.5]], 25], 0, 1]).N();
-    expect(ce.box('m').evaluate().toString()).toBe('0.5');
-  });
 });
 
 // The exact value of H is a rational with thousands of digits: evaluating it

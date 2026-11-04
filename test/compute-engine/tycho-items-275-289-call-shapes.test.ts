@@ -25,8 +25,7 @@ function pointFunction(ce: ComputeEngine): void {
 }
 const localPoint = (initializer: MathJsonExpression): MathJsonExpression => [
   'Block',
-  ['Declare', 'theta'],
-  ['Assign', 'theta', initializer],
+  ['Declare', 'theta', "'unknown'", initializer],
   ['PointList', ['Cos', 'theta'], ['Sin', 'theta']],
 ];
 

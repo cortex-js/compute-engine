@@ -50,8 +50,7 @@ const IF = ['If', ['Greater', 'x', 0], ['Sin', 'x'], ['Cos', 'x']];
  * handles the `If` without compiling it as a node. */
 const LOOP_WITH_IF = [
   'Block',
-  ['Declare', 's', 'real'],
-  ['Assign', 's', 0],
+  ['Declare', 's', 'real', 0],
   [
     'Loop',
     [
@@ -75,8 +74,8 @@ const SHAPES: [string, any, any][] = [
   ['as an operand', ['Add', 1, IF], ['Add', 1, IF]],
   [
     'in a Block',
-    ['Block', ['Declare', 't', 'real'], ['Assign', 't', IF], 't'],
-    ['Block', ['Declare', 't', 'real'], ['Assign', 't', IF], 't'],
+    ['Block', ['Declare', 't', 'real', IF], 't'],
+    ['Block', ['Declare', 't', 'real', IF], 't'],
   ],
   ['in a loop body', LOOP_WITH_IF, LOOP_WITH_IF],
   ['in a function literal', ['Apply', ['Function', IF, 'x'], 'x'], IF],
@@ -161,8 +160,7 @@ describe('the other heads lowered by name', () => {
       'Loop',
       [
         'Block',
-        ['Declare', 's', 'real'],
-        ['Assign', 's', 0],
+        ['Declare', 's', 'real', 0],
         [
           'Loop',
           ['Assign', 's', ['Add', 's', 'i']],

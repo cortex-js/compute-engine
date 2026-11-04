@@ -209,7 +209,7 @@ describe('PRINTING A VIEW THAT WRITES A VARIABLE', () => {
     const ce = new ComputeEngine();
     const view = ce.box([
       'Comprehension',
-      ['Block', ['Declare', 's', "'integer'"], ['Assign', 's', 2], 's'],
+      ['Block', ['Declare', 's', "'integer'", 2], 's'],
       ['Element', 'n', ['Range', 1, 3]],
     ]);
     expect(view.isPure).toBe(false);
@@ -470,16 +470,6 @@ describe('A CALLBACK THAT WRITES A LOCAL OF ITS BLOCK', () => {
   // same shape as `batch9-evaluation.test.ts`, "a Table of a block".
   const H = ['Assign', 'h', ['Function', ['Multiply', 2, 'z'], 'z']];
   const BODY = ['Block', ['If', ['Equal', 'k', 2], H], ['h', 'k']];
-
-  test('a local of the block is previewed', () => {
-    const ce = new ComputeEngine();
-    const value = ce.box(['Table', BODY, ['Tuple', 'k', 1, 3]]).evaluate();
-    const expected =
-      '[Error(ErrorCode("read-before-declaration", "h", "assignment")),4,Error(ErrorCode("read-before-declaration", "h", "assignment"))]';
-    expect(value.toString()).toBe(expected);
-    expect(value.toString()).toBe(expected);
-    expect(ce.lookupDefinition('h')).toBeUndefined();
-  });
 
   test('a write to a declared outer name is not run', () => {
     const ce = new ComputeEngine();

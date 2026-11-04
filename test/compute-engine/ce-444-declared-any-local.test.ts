@@ -14,8 +14,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 const block = (decl: unknown[] | null): unknown[] => [
   'Block',
-  ...(decl ? [decl] : []),
-  ['Assign', 'xs', { str: 'abc' }],
+  ...(decl ? [[...decl, { str: 'abc' }]] : [['Assign', 'xs', { str: 'abc' }]]),
   ['Assign', 'xs', ['ReplaceAt', 'xs', 2, { str: 'z' }]],
   'xs',
 ];
@@ -25,7 +24,7 @@ describe('a block local declared any', () => {
     const ce = new ComputeEngine();
     const expr = ce.box(block(['Declare', 'xs', "'any'"]) as any);
     expect(expr.type.toString()).toBe('any');
-    const update = expr.ops![2];
+    const update = expr.ops![1];
     expect(update.ops![1].ops![0].type.toString()).toBe('any');
     const value = expr.evaluate();
     expect(value.toString()).toBe('["a","z","c"]');
@@ -36,8 +35,7 @@ describe('a block local declared any', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Block',
-      ['Declare', 'xs', "'any'"],
-      ['Assign', 'xs', { str: 'abc' }],
+      ['Declare', 'xs', "'any'", { str: 'abc' }],
       [
         'Loop',
         ['Assign', 'xs', ['ReplaceAt', 'xs', 'j', { str: 'z' }]],
@@ -79,8 +77,7 @@ describe('an absent value of a block local declared any', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Block',
-      ['Declare', 'xs', "'any'"],
-      ['Assign', 'xs', 'Missing'],
+      ['Declare', 'xs', "'any'", 'Missing'],
       ['Add', 'xs', 1],
     ] as any);
     const value = expr.evaluate();

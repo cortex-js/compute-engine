@@ -149,16 +149,14 @@ describe('CE-445: an inferred callback parameter type under the numeric routes',
     test('in a block', () => {
       for (const r of allRoutes([
         'Block',
-        ['Declare', 'q', "'integer'"],
-        ['Assign', 'q', 0.5],
+        ['Declare', 'q', "'integer'", 0.5],
         'q',
       ]))
         expect(r).toMatch(/incompatible-type", "integer", "0.5"/);
       expect(
         allRoutes([
           'Block',
-          ['Declare', 'q', "'integer'"],
-          ['Assign', 'q', 2.0],
+          ['Declare', 'q', "'integer'", 2.0],
           'q',
         ])
       ).toEqual(['2', '2', '2']);

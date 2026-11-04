@@ -99,8 +99,7 @@ describe('CE-586: a symbol bound to a disposed definition is inert', () => {
     const sum = ce.box(['Sum', ['Power', 'n', 2], ['Limits', 'n', 1, 3]]);
     const block = ce.box([
       'Block',
-      ['Declare', 'a', "'integer'"],
-      ['Assign', 'a', 4],
+      ['Declare', 'a', "'integer'", 4],
       ['Multiply', 2, 'a'],
     ]);
     ce.restore(cp);

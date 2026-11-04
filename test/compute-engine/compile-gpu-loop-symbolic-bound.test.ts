@@ -43,8 +43,7 @@ const loop = (range: unknown[]) => [
  */
 const statementLoop = (range: unknown[]) => [
   'Block',
-  ['Declare', 's', "'real'"],
-  ['Assign', 's', 0],
+  ['Declare', 's', "'real'", 0],
   ['Loop', ['Assign', 's', ['Add', 's', 'j']], ['Element', 'j', ['Range', ...range]]],
   's',
 ];
@@ -103,8 +102,7 @@ describe('a Loop over a Range on a shader target', () => {
     // `Loop` evaluates to `Nothing`; the sum is read back through a local.
     const sumTo = [
       'Block',
-      ['Declare', 'c', "'integer'"],
-      ['Assign', 'c', 0],
+      ['Declare', 'c', "'integer'", 0],
       [
         'Loop',
         ['Assign', 'c', ['Add', 'c', 'j']],

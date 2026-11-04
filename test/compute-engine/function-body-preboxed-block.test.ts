@@ -1,9 +1,11 @@
 import { ComputeEngine } from '../../src/compute-engine';
 
 //
-// In the body of a function literal, a read of an assignment local before
-// its first assignment is the `read-before-declaration` error. A block
-// outside every function literal leaves the read as the bare symbol.
+// A read of an assignment local in a statement before its first assignment
+// is the static `read-before-declaration` error, in a function body and
+// outside every function literal. (The value of the first assignment reads
+// the name outside the block, as the value of a `Declare` does, so it is not
+// such a read.)
 //
 // A block that the caller boxes first, then gives to
 // `ce.function('Function', [block])`, becomes a function body there: it
@@ -15,7 +17,6 @@ const READ_BEFORE = (name: string) => [
   'ErrorCode',
   "'read-before-declaration'",
   `'${name}'`,
-  "'assignment'",
 ];
 
 /** The `ErrorCode` of the error value `x` (its breadcrumb is not compared). */
@@ -25,7 +26,12 @@ const errorCode = (x: { operator: string; json: unknown }): unknown =>
 describe('A BLOCK BOXED BEFORE IT BECOMES A FUNCTION BODY', () => {
   test('boxed in one step and boxed first give the same error', () => {
     const ce = new ComputeEngine();
-    const body = ['Block', ['Assign', 't', ['Add', 't', 1]], 't'];
+    const body = [
+      'Block',
+      ['Assign', 'u', ['Add', 't', 1]],
+      ['Assign', 't', 1],
+      'u',
+    ];
     const direct = ce.box(['Function', body] as never);
     expect(errorCode(ce.function('Apply', [direct]).evaluate())).toEqual(
       READ_BEFORE('t')
@@ -41,7 +47,7 @@ describe('A BLOCK BOXED BEFORE IT BECOMES A FUNCTION BODY', () => {
     const ce = new ComputeEngine();
     const block = ce.box([
       'Block',
-      ['Block', ['Assign', 'w', ['Add', 'w', 1]], 'w'],
+      ['Block', ['Assign', 'v', ['Add', 'w', 1]], ['Assign', 'w', 1], 'v'],
     ] as never);
     const fn = ce.function('Function', [block]);
     expect(errorCode(ce.function('Apply', [fn]).evaluate())).toEqual(
@@ -49,13 +55,16 @@ describe('A BLOCK BOXED BEFORE IT BECOMES A FUNCTION BODY', () => {
     );
   });
 
-  test('a block that never becomes a function body keeps the bare symbol', () => {
+  test('a block that never becomes a function body has the same error', () => {
     const ce = new ComputeEngine();
     const block = ce.box([
       'Block',
-      ['Assign', 't', ['Add', 't', 1]],
-      't',
+      ['Assign', 'u', ['Add', 't', 1]],
+      ['Assign', 't', 1],
+      'u',
     ] as never);
-    expect(block.evaluate().toString()).toBe('t + 1');
+    expect(block.evaluate().toString()).toBe(
+      'Error(ErrorCode("read-before-declaration", "t"))'
+    );
   });
 });

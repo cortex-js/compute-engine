@@ -123,8 +123,7 @@ describe('A CALLBACK OR A BROADCAST RECEIVES THE FAILED CELL', () => {
   test('a loop runs one turn for each cell', () => {
     const r = evaluate([
       'Block',
-      ['Declare', 'n', 'integer'],
-      ['Assign', 'n', 0],
+      ['Declare', 'n', 'integer', 0],
       [
         'Loop',
         ['Assign', 'n', ['Add', 'n', 1]],

@@ -180,23 +180,24 @@ describe('an else-less If as a block statement', () => {
 
   test('a Block arm is read through to its value statement', () => {
     ce.declare('x', 'number');
-    // `Block(y ≔ x, y)` ends in a value, so the else-less `If` around it is
-    // the value form and compiles as the one-clause `Which`.
+    // `Block(Declare(y, "unknown", x), y)` ends in a value, so the else-less
+    // `If` around it is the value form and compiles as the one-clause
+    // `Which`.
     const valueBlock = ce.box([
       'If',
       ['Greater', 'x', 0],
-      ['Block', ['Assign', 'y', 'x'], 'y'],
+      ['Block', ['Declare', 'y', "'unknown'", 'x'], 'y'],
     ]);
     const r = compile(valueBlock, { fallback: false });
     expect(r.success).toBe(true);
     expect((r.run as any)({ x: 2 })).toBe(2);
     expect((r.run as any)({ x: -2 })).toBeNaN();
-    // `Block(y ≔ x)` ends in a statement: a guard statement, declined on
-    // Python like the bare assignment arm is.
+    // `Block(Declare(y, "unknown", x))` ends in a statement: a guard
+    // statement, declined on Python like the bare assignment arm is.
     const stmtBlock = ce.box([
       'If',
       ['Greater', 'x', 0],
-      ['Block', ['Assign', 'y', 'x']],
+      ['Block', ['Declare', 'y', "'unknown'", 'x']],
     ]);
     expect(compile(stmtBlock, { to: 'python' }).success).toBe(false);
   });

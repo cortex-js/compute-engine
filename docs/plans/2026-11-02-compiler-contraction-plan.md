@@ -1032,12 +1032,40 @@ value is complex gives the target's `NaN`.
   `lane-mismatch` in `strict` (the parameter is not inferred complex); it
   compiles with `mode: 'complex'` or an annotated parameter.
   `docs/COMPILATION-MODEL.md` states the measured behavior.
-- **Not fixed.** Cause D (CE-751.1, user decision). The second mismatch of
-  art/hyvhlz4chj (an inlined `Dot` over a function that returns a tuple,
-  with complex arguments), probably the same family as D. In the default
-  mode, `Gamma(s, z)` with `z: real` at `z = -1` gives `NaN` where the
-  interpreter gives `e` (as `strict` did before): a known-limitations line
-  marked `plausible?`. CE-751 (decision (a), 2026-11-01) relies on the
+- **Not fixed in this item.** Cause D (CE-751.1, user decision): fixed
+  after this item, before the language release, in commit `eeee8e574`
+  (session compute-engine-e4, 2026-11-03, base `609d496ee`). Each
+  JavaScript definition records the lane of each numeric parameter in its
+  lane record (`recordUserFunctionParamLanes`, compile-lanes.ts), and the
+  call (`emitUserFunctionCall`, compile-user-calls.ts) converts a complex
+  argument for a parameter that the definition reads on the real lane with
+  `_SYS.crealElements` (the real part when real, `NaN` otherwise): a
+  conversion, not a decline. The cause: the parameter symbol is narrowed
+  by its use (`x` in `Floor` becomes real), so the body is real while the
+  signature type stays `unknown` and the caller lifts the argument. A
+  parameter that binds a collection whole has no lane (review finding:
+  `f([1 + i·t, 2])` gave `NaN` instead of `2 + 4i`). Measure (base runs on
+  `609d496ee`, the frozen copies above): on the complex routes one key
+  changed, `asOklab(g)` of neyret/4d9knkydej, 8 values from `NaN` channels
+  to the real colours of the `strict` code of the same row (equal exactly);
+  no other value changed (77,236 compared); on the split no value changed
+  (77,244); declines unchanged, no new decline. Code lines of
+  `compilation`: 92,763 → 92,820. The second mismatch of art/hyvhlz4chj
+  (`asOklab(c_{lavinga})`, still `NaN` at 8 of 8 samples) is not cause D:
+  cause D is converted there, but the function returns
+  `[_SYS.ccos(…), _SYS.csin(…)]` and the inlined `Dot`
+  (`compileStaticInnerProduct`) multiplies those elements with the real `*`;
+  it is ROADMAP CE-793 (ready, wrong value, S, corpus witness, no plain
+  program yet); Tycho's adoption (the split) does not reach it. CE-793 was
+  fixed in `4d9f6cab1` (2026-11-03, session compute-engine-7c): the cause
+  was the lane of the block local `θ`, not `Dot`. In mode `complex` the
+  lane of a block local is now its static type, and a value computed on the
+  complex lane is converted to its real part (`NaN` when not real) at each
+  binding of a real local; option B (a real start only when every binding
+  is the declared value or a top-level assignment) is the alternative. In the
+  default mode, `Gamma(s, z)` with `z: real` at `z = -1` gives `NaN` where
+  the interpreter gives `e` (as `strict` did before): a known-limitations
+  line marked `plausible?`. CE-751 (decision (a), 2026-11-01) relies on the
   restart that this rule removes; its entry says so.
 - **The final corpus measure** (runs `m-cx` and `m-split` on the combined
   tree, `aee059e66` plus this item, Tycho `44a25d4e3` with the `At` handler
@@ -1111,6 +1139,234 @@ function value or callback (3.4.5) whose parameter is untyped is complex
 in `complex` mode and real in `strict`; a call that sends a complex
 argument to a definition compiled real is cause D (CE-751.1).
 
+Where the measure of this item is, for the items that rerun it (CE-751.1
+and step 4, row 6; written 2026-11-03, the paths are the scratchpad of
+session compute-engine-ee and last as long as that folder does):
+`E = /private/tmp/claude-501/-Users-arno-dev-compute-engine/1431b070-f8b4-4dfd-9f14-4f617b31990d/scratchpad`.
+The frozen Tycho copies, `git archive` of `44a25d4e3` with Tycho's
+`node_modules` and `_TASK` linked: `$E/tycho-snap-cx` (the `At` handler of
+3.4.2, and every `auto` route, the four `mode` sites and the two cache keys,
+on `complex`) and `$E/tycho-snap-split` (the same, with the colour lane on
+`complex` only in a complex-mode document, Tycho's adoption). The runs:
+`$E/audit/<label>.json`, `<label>-digest.json`, `<label>-values.json` and
+`<label>.log` for `base-cx`, `base-split`, `cand-cx`, `cand-split`,
+`fix-cx`, `fix-split`, `m-cx` and `m-split`; `m-cx` and `m-split` are the
+final runs on `aee059e66` plus this item. The command, under the box lock,
+about 5 minutes a run: `AUDIT_OUT=<folder> TYCHO_SNAP=<copy>
+~/.claude/tools/ce-census/value-audit.sh <CE worktree> <label>` (it makes
+the production build itself), then
+`node ~/.claude/tools/ce-census/compare-values.mjs <base-values.json>
+<head-values.json>` for the values and `compare.mjs <base.json>
+<head.json>` for the declines.
+
+3.4.4 **Block locals** (options page 4, option A′ with the two language
+rules). Staged 2026-11-03, session compute-engine-1e, worked on base
+`609d496ee`, delivered onto `eeee8e574` (CE-751.1), not committed. The rule,
+in the interpreter, MathJSON canonicalization, Epsil and compiled code:
+
+- **A declaration has a value.** `Declare(x, type, v)`, or a first
+  `Assign(x, v)` at a block's own level, declares `x`. A `Declare` with no
+  value (`Declare(x)`, `Declare(x, type)`, a dictionary with no `value`, a
+  destructuring `Declare` with no value, Epsil `let x: integer`) is the
+  static error `declaration-without-value`, also at the top level.
+  `Declare(x)` followed by `Assign(x, v)` is not a pair. A first assignment
+  of a name in a branch of `If` or `Which`, in a `Loop` body or in a `Match`
+  case is `first-assignment-in-branch` ("declare `x` with a value before the
+  branch"), also at the top level, except for a name that an enclosing
+  scope already declares (that is a write of that name). A read of a local
+  before its declaration is `read-before-declaration` at canonicalization:
+  the run-time error value and the symbolic unset read are gone
+  (`boxed-expression/read-before-declaration.ts` and
+  `epsil/read-before-assignment.ts` deleted). A `let` in a branch block
+  (`If(c, Block(Declare(s, "unknown", x), s + 1))`) is valid.
+- **Refinement of rule 1, user decision 2026-11-03** (relayed by
+  compute-engine-24): a valueless `Declare` whose type is a function type is
+  valid when a function statement of the same name is in the same
+  statement list, since the function statement is hoisted and no read sees
+  a binding with no value: `let f: (integer) -> integer; function f(x) {
+  x + 1 }; f(2)` is 3. Without the function statement in the same list it
+  is `declaration-without-value`, with the message "define `f` with a
+  function statement in the same block, or give the declaration a value".
+  Witnesses (plausible): `test/epsil/compiled-declared-function-type.test.ts`,
+  `test/epsil/multi-clause.test.ts`,
+  `test/compute-engine/block-declared-signature-clause.test.ts`. The other
+  option (B): keep the error; the types go on the function statement, and
+  the multi-clause form with a declared signature is lost.
+- **Reassignment** keeps the local's type: `Block(Assign(a, 1), Assign(a,
+  "x"), a)` is `assignment-type-mismatch`. The check uses the compatibility
+  test of argument checking, so it refuses only a value whose type cannot
+  be the local's type (`let s: real = 0; s = s + sqrt(x)` is valid). Also
+  checked: each leaf of a destructuring assignment, a function value, a
+  `Match` case.
+- **An assignment is a statement**: an `Assign` or `Declare` as an operand
+  of anything but `Block`, a branch of `If`/`Which` or a `Loop` body (not a
+  condition, not an indexing set) is `assignment-in-operand`; a chained `a
+  := b := v` (Epsil and LaTeX) is the parse error `chained-assignment`.
+- **A block that ends in an assignment or a declaration has the value
+  `Nothing`** (it was the assigned value), kept where the block is used; a
+  function body that ends so and declares a result type other than
+  `nothing` gives `incompatible-type` when called (the engine has no static
+  check of a body against its declared result type).
+- **Compiled code**: a write to a symbol of the engine, an input or a
+  `vars` name declines (`assignLValue()`, `compile-locals.ts`); a block with
+  a statement other than a declaration with a value, used as an operand,
+  declines (`'block-value'`, `compile-admission.ts`), and a used value of an
+  assignment declines (`'nothing-value'`); a loop whose value is used
+  already declined. A block whose statements before the last are only
+  `Declare`s with a value (the `where` clause, the `;` parse) is a value and
+  compiles in any position (`isBindingBlock()`): the first version declined
+  it and the corpus measure found it (art/wccrhnzn2q, 6 javascript records),
+  so it was fixed before the final measure. A `vars` entry is a value: a
+  string entry is spliced at each read, so an entry with an effect gives an
+  unspecified result (documented; no code change, Tycho passes only plain
+  reads).
+
+- **Tycho's answers** (tycho-c6, 2026-11-03). (a) Four Tycho builders emit
+  `Declare(x)` then `Assign(x, v)`, not one: the implicit-surface march
+  kernel (`implicitMarchKernels`, `src/plot/ce-compile.ts`),
+  `surface-argument-staging.ts`, the Desmos `with` parse
+  (`desmos-import/with-dictionary.ts`) and the colour-definition builder
+  (`collectColorDefinitions`, `style-expressions.ts`); section 6 named only
+  the first (compute-engine-1e found the others in the frozen copy). All
+  four change at adoption, in the form the loaded CE parser writes for
+  `a\coloneq1;a` (probed per engine, `src/plot-core/declare-value.ts`), with
+  three Tycho readers that ignored the value of a one-statement `Declare`
+  fixed too; not on a Tycho commit yet (worktree `/tmp/wt-tycho-c6b`). (b) No
+  Tycho-built block ends in an assignment or a declaration, nests an
+  assignment in an operand, reads the value of a loop, writes a symbol it
+  does not declare, or first-assigns in a branch or a loop (all 757
+  documents and the showcase, CE 0.176.0 and `609d496ee`). (c) Every `vars`
+  entry Tycho passes is a plain read. tycho-f9 notes that Tycho
+  `6599982fe` reads `Declare(x, "unknown", v)` as a declaration in all its
+  block readers.
+- **Choices beyond the rule, each reversible.** (1) A chained assignment is
+  a parse error (other option: split it into two statements). (2) A
+  top-level `Assign` outside every block keeps its value (other option:
+  `Nothing`). (3) The static type of a local stays the join of its values;
+  the widened type (every number to `number`, `character` to `string`, a
+  nested list keeps its depth, a first value of type `unknown` admits any
+  value) is used only for the reassignment check (other option: the
+  widened type as the static type, which changes compiled lanes). (4) A
+  comprehension term and a `Sum`/`Product` body are not branches: a block
+  there declares its own locals for each element, also inside a branch
+  (witness: Tycho item 172, `[(d := [n, 2]; Sum(d)) for n = 1..3]`). (5) The
+  code `read-before-declaration` is kept for the static error. (6) The value
+  of a first assignment reads the enclosing binding, as `Declare(t,
+  "unknown", t + 1)` and the `;` parse do, so `Block(Assign(x, x + 1), 2x)`
+  and `x \coloneq x+1; 2x` agree (`2(x + 1)`; witness crafted). (7) A
+  nested block owns the names it first assigns (issue-489 test `N2` now
+  gives `2t + 5`). (8) A closure that reads a local before its declaration
+  (`function g() { f = () => t; v = f(); t = 1; v }` gives `1`) is not
+  refused: the static check does not follow calls (crafted; one sentence in
+  `src/epsil/docs/declarations.md`). (9) `Block(p := 0, Integrate(Block(p :=
+  7, t), Limits(t, 0, 1)), p)` is `assignment-in-operand`, since the
+  integration puts the `Assign` in a product (crafted). (10) A local whose
+  first value has type `unknown` and that is later given a list, point,
+  matrix or string declines in compiled code (`unsettled-shape`): its type
+  stays `unknown` (plausible; the base gave the right value only through a
+  run-time shape test).
+- **Rule 7, measured.** `Block(a := 1, If(c > 0, a := Sqrt(-x)), a)` and the
+  same with the literal `2 + 3i`: in `strict`, javascript and glsl decline
+  (`unsettled-shape` for the root, `lane-mismatch` for the literal); in
+  `complex`, javascript gives the interpreter's values (`2i` at c = 1, x =
+  4; `1` at c = -1; `2` at x = -4; `2 + 3i`); Python declines both (an `If`
+  with no `else`). Not in the corpus.
+- **Defects found and fixed in this item**: the three-operand `Declare` of a
+  list-valued local in a function body was typed `unknown` by
+  `call-result-type.ts` and compiled to `null` (the old pair and the first
+  `Assign` were right; reached by the CHANGELOG replacement, plausible); a
+  first assignment in a top-level branch made a local that disappeared
+  (`if 1 < 2 { a = 1 }; a` gave the symbol `a`); the canonical rebuild of a
+  very large shared subtree (`boxedInCurrentScope()`) took 31 s and
+  declined, now 13 ms. Recorded, not fixed (older code): CE-794 (a local
+  function declared with `Declare` in a block of a closure branch is not
+  called).
+- **The corpus measure** (tools of `~/.claude/tools/ce-census/`, records
+  keyed by LaTeX, since the builder patch changes the MathJSON of the march
+  kernels and not the LaTeX). Tycho frozen at `44a25d4e3` with the `At`
+  handler of 3.4.2 and the mode split of 3.4.6 (the copy `tycho-snap-split`
+  of 3.4.6) and the four builders patched to the three-operand `Declare`
+  (patch: the scratchpad of session compute-engine-1e,
+  `tycho-344-declare.patch`). On the base, the patch alone changes no value
+  (77,104 values). Final runs `base2` (CE `eeee8e574`) and `cand2`
+  (`eeee8e574` plus this item): 17,835 compiles in both; declines javascript
+  43, glsl 47, interval-js 74 in both runs, none new and none removed; no
+  value changed (77,208 values in 13,730 keys). With the four builders
+  unpatched (run `cand2-unpatched`), 29 rows in 10 documents change and 169
+  fewer records are compiled (art/2ki2hjsouf, art/njncrg9fkv,
+  art/wccrhnzn2q, art/khpocp8io0, art/hyvhlz4chj, art/mavxszbvzk,
+  art/ur34gk3p8x, art/60bekaymzz, neyret/crmswfhqrd, showcase/metaballs;
+  list sent to Tycho): these rows need Tycho's builder change at adoption.
+- **Code lines** (not blank, `//`, `/*` or `*`; base `eeee8e574`): `library`
+  79,794 → 80,167, `boxed-expression` 83,907 → 83,913, `src/epsil` 17,679 →
+  17,455, `compilation` 92,820 → 92,971. Source: 28 files, 1,828 insertions,
+  1,326 deletions; two files deleted. Tests: 189 files changed (2,855
+  insertions, 5,785 deletions), two new
+  (`block-locals-declaration-rules.test.ts`,
+  `compile-block-locals-rules.test.ts`); the tests that pinned the
+  run-time read of a valueless local, the definite-assignment declines and
+  the compiled writes of inputs were deleted or rewritten
+  (`ce-636-block-local-without-value.test.ts` became 3 tests); 11 inline
+  snapshots changed to the `where` print of the three-operand `Declare`, 3
+  to `let x = …` in compiled code; none marked `@fixme`.
+- **Review**: Claude and Codex, three rounds. Round 1 (12 findings, 1 high):
+  the reassignment check used a strict subtype test (high), a declared
+  local not checked after an `unknown` first value, `Typed` hid an
+  assignment error, destructuring and function values skipped the check,
+  comprehension and binder bodies in a branch, `Hold` read as a use, the
+  call type of a body that ends in an assignment, an identity `vars`
+  mapping written, the static-error matching of `execute-epsil.ts`. Round 2
+  (fixes): Codex none; Claude: `src/epsil/docs/errors.md` not generated
+  (regenerated with `scripts/build-error-docs.ts`, which also picked up
+  explanation texts that earlier items changed). Round 3 (the binding-block
+  fix): Codex none; Claude: the decline message (fixed).
+- **Checks** on the combined tree (`/tmp/wt-compute-engine-1e`, `eeee8e574`
+  plus this item, byte for byte the delivered files except the peer hunks of
+  CE-793 in `compiler-core.ts`): typecheck, lint, `check:deps`, the full
+  suite (1,816 suites, 77,805 tests, 0 failed), `npm run test:python` (49
+  suites, 2,829 tests, 0 failed), the corpus measure above.
+- **User-facing pages** edited in `~/dev/cortexjs.io/docs/compute-engine/`:
+  `84-reference-control-structures.md`, `85-reference-core.md` (also the
+  redeclaration sentence, which was wrong on the base too),
+  `07-guide-latex-syntax.md`, `13-guide-compile.md`,
+  `87-reference-functions.md`, `08-guide-types.md`, `10-guide-evaluate.md`.
+
+What 3.4.5 (function values, options page 5, option B with the simplified
+defaults) needs from this item: (1) a function-typed `Declare` with no
+value is valid only beside a function statement of the same name in the
+same list (user decision 2026-11-03); a function value in a variable is a
+`Declare` with a value or a first `Assign`, and its reassignment is
+type-checked (`Block(Assign(a, 1), Assign(a, (x) => x), a)` is an error), so
+3.4.5's decline of a function value in a variable starts from a local whose
+type is known; (2) a function body that ends in an assignment has the value
+`Nothing`, and a declared result type is checked at the call
+(`statementAscriptionValue()`, `library/core.ts`), not statically: a static
+check of a body against its declared result type does not exist; (3) the
+three-operand `Declare` now types a call of a function literal from its
+value (`call-result-type.ts`); (4) CE-794 (a function local declared with
+`Declare` in a closure branch is not called) is in the same area.
+
+What step 4, row 4, removes (measured on the item's tree, code lines not
+blank, `//`, `/*` or `*`): in `compile-locals.ts`, `classifyLocalReads`
+(302, still runs, its declines unreachable), `assertLocalsAssignedBeforeRead`
+(75, the same), `localReadWithNoWrite` (11, unreachable),
+`localReadOnSomePaths` (10, unreachable), `unassignedLocalRead` (12,
+unreachable), `loopRunsOnce` (17, feeds the read analysis only),
+`splitChainedAssignments` (21, its input is a static error),
+`chainedLocalDeclares` (26, the same), `nestedAssignmentsTo` (33, reached),
+`chainedAmbientWrite` (5, unreachable), `localVarsObjectStatement` (16,
+unreachable); `withLocalShapeFrame` (32, `compiler-core.ts`),
+`_pushLocalComplex`/`_popLocalComplex` (8, `compile-loops.ts`),
+`reachesCallerCode` (55, `compile-folding.ts`); the fields `_localComplex`
+(32 lines in 9 files), `_localVector` (32 lines in 6 files), `inputWrites`
+(23 lines) and `inputLocals` (32 lines), reached only for a local with no
+target spelling; the loop-value lowering (reached only for a loop with no
+indexing set that has only `Return`); the block-as-value lowering of a
+block with an assignment (code is generated, then the compile declines).
+The Python `_ce_unset` marker is already gone. The listed lines are 742
+(623 in the named functions, 119 in the field lines), before the lowerings
+and the targets' re-compile paths for an input write, which row 4 measures.
+
 The compiler side of 3.1 to 3.4 in this release is the minimum that keeps
 compiled code equal to the interpreter: the new static errors decline, the
 `NaN` point cell replaces `undefined` in the JavaScript lowering, `When` is
@@ -1173,8 +1429,18 @@ A rise or a fall does not make the run fail, so it does not block a release.
   left is Tycho-built, in its implicit-surface march kernel
   (`Declare(base, "integer")` then `Assign(base, …)`, and `v0` to `v7` as
   `real`; 288 compiled expressions in 32 documents): Tycho changes that
-  builder in its adoption item 4; no CE change is needed. The bigint-user
-  check is still open.
+  builder in its adoption item 4; no CE change is needed. The second check
+  is settled by assumption (user decision 2026-11-03): the bigint user is
+  enumeratio (GitHub issue #503), and the user does not know whether they
+  use currying, partial application or a function value in a variable, so
+  the release assumes they do not. The evidence of #503 supports it: their
+  programs are counting definitions (unranking Dyck paths, ballot numbers,
+  binomial sums), `Fold` over a `Range` with a literal callback, and user
+  functions with integer parameters, which option B of page 5 keeps (fully
+  applied calls and literal-lambda callbacks). The issue also asked for an
+  escalation to `bigint` from `auto`, which the complex-lane decision
+  (page 6, "The same rule for bigint") dropped: the reply to #503, deferred
+  by the user (ROADMAP CE-715), should say so at the release.
 - Tycho confirms that its complex-mode documents compile in complex mode or
   declare their inputs complex (the complex lane in its strict form).
 - Tycho's checks after the release: the 3-D point routes, point labels and

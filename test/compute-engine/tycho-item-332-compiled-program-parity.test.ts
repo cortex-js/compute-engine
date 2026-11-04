@@ -229,18 +229,19 @@ count`,
     );
   });
 
-  test('a local whose type grows on every turn of a loop still compiles', () => {
-    // `xs = (xs, 1)` nests one tuple level per turn, so re-reading the
-    // assignment's type never reaches a fixpoint. The types are then bounded
-    // in depth, which ends the growth and keeps `xs` a tuple.
-    expectParity(
+  test('a local whose type grows on every turn of a loop declines', () => {
+    // `xs = (xs, 1)` assigns a nested tuple to a local whose first value is a
+    // pair of numbers. A reassignment with a value of another type is the
+    // static error `assignment-type-mismatch`, so the compilation declines.
+    const { result } = compiled(
       `let xs = (1, 2)
 let i = 1
 while i <= 3 { xs = (xs, 1); i = i + 1 }
 let y = xs[2]
-y + i`,
-      5
+y + i`
     );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/invalid expression/);
   });
 
   test('an element read of a union of tuple types reads each tuple', () => {
@@ -437,12 +438,14 @@ s`,
     ).toEqual({ type: 'unknown', value: '8' });
   });
 
-  // The element type becomes a union of two tuple types. Each arm is read
-  // and the leaf types are joined: `q` holds `2` and then `2.5`.
+  // The element type is a union of two tuple types. Each arm is read and
+  // the leaf types are joined: `q` holds `2` and then `2.5`. The union is
+  // declared: a local keeps the type of its first value, so a reassignment
+  // cannot widen it to the union.
   test('a loop pattern over a union of tuple types joins the leaf types of the arms', () => {
     expect(
       operandTypeInSum(
-        `let ps = [(1, 2)]
+        `let ps: list<tuple<integer, integer> | tuple<string, real>> = [(1, 2)]
 let s = 0
 let n = 0
 while n < 2 {
@@ -457,11 +460,14 @@ s`,
   });
 
   test('a destructuring assignment from a union of tuple types joins the leaf types of the arms', () => {
+    // The first assignment of `a` and `b` is at the level of the block: a
+    // first assignment in a loop body is a static error.
     expect(
       operandTypeInSum(
-        `let ps = [(1, 2)]
+        `let ps: list<tuple<integer, integer> | tuple<string, real>> = [(1, 2)]
 let s = 0
 let n = 0
+(a, b) := ps[1]
 while n < 2 {
   (a, b) := ps[1]
   s = s + b
@@ -481,6 +487,7 @@ s`,
 let s = 0
 let n = 0
 let y: any = (3, 4)
+(a, b) := ps[1]
 while n < 2 {
   (a, b) := ps[1]
   s = s + b
@@ -498,7 +505,7 @@ s`,
   test('a destructuring let records the type of each leaf', () => {
     expect(
       operandTypeInSum(
-        `let ps = [(1, 2)]
+        `let ps: list<tuple<integer, integer> | tuple<string, real>> = [(1, 2)]
 let s = 0
 let n = 0
 while n < 2 {

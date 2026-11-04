@@ -20,8 +20,7 @@ describe('Loop — imperative (interpreter)', () => {
     const result = ce
       .expr([
         'Block',
-        ['Declare', 'k'],
-        ['Assign', 'k', 0],
+        ['Declare', 'k', "'unknown'", 0],
         [
           'Loop',
           [
@@ -40,8 +39,7 @@ describe('Loop — imperative (interpreter)', () => {
     const result = ce
       .expr([
         'Block',
-        ['Declare', 'k'],
-        ['Assign', 'k', 0],
+        ['Declare', 'k', "'unknown'", 0],
         [
           'Loop',
           [
@@ -66,8 +64,7 @@ describe('Loop — imperative (interpreter)', () => {
   test('Loop(Element) accumulator ends at 55, loop value is Nothing', () => {
     const expr = ce.expr([
       'Block',
-      ['Declare', 's'],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       [
         'Loop',
         ['Assign', 's', ['Add', 's', 'i']],
@@ -77,6 +74,7 @@ describe('Loop — imperative (interpreter)', () => {
     ]);
     expect(expr.evaluate().re).toBe(55);
     // The Loop itself is for effect: value Nothing.
+    ce.assign('s', 0);
     const loopOnly = ce.expr([
       'Loop',
       ['Assign', 's', 'i'],
@@ -89,8 +87,7 @@ describe('Loop — imperative (interpreter)', () => {
     const result = ce
       .expr([
         'Block',
-        ['Declare', 's'],
-        ['Assign', 's', 0],
+        ['Declare', 's', "'unknown'", 0],
         [
           'Loop',
           [
@@ -206,6 +203,7 @@ describe('Loop — imperative (interpreter)', () => {
   });
 
   test('Loop type is `nothing` for a for-effect body', () => {
+    ce.assign('s', 0);
     const expr = ce.box([
       'Loop',
       ['Assign', 's', 'i'],

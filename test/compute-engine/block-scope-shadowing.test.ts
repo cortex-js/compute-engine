@@ -60,20 +60,18 @@ describe('block-local Declare shadows a constant-named symbol', () => {
   test('local `i` shadows the imaginary unit (no Complex fold), evaluates to 4', () => {
     const block = ce.box([
       'Block',
-      ['Declare', 'i', { str: 'integer' }],
-      ['Assign', 'i', 3],
+      ['Declare', 'i', { str: 'integer' }, 3],
       ['Add', 'i', 1],
     ]);
     // The trailing `Add(i, 1)` must NOT fold to `Complex(1, 1)`.
-    expect(block.ops![2].operator).not.toBe('Complex');
+    expect(block.ops![1].operator).not.toBe('Complex');
     expect(block.evaluate().toString()).toBe('4');
   });
 
   test('local `e` shadows Euler’s number, evaluates to 6', () => {
     const block = ce.box([
       'Block',
-      ['Declare', 'e', { str: 'integer' }],
-      ['Assign', 'e', 2],
+      ['Declare', 'e', { str: 'integer' }, 2],
       ['Multiply', 'e', 3],
     ]);
     expect(block.evaluate().toString()).toBe('6');
@@ -82,8 +80,7 @@ describe('block-local Declare shadows a constant-named symbol', () => {
   test('after the Block, `i` is the imaginary unit again', () => {
     ce.box([
       'Block',
-      ['Declare', 'i', { str: 'integer' }],
-      ['Assign', 'i', 3],
+      ['Declare', 'i', { str: 'integer' }, 3],
       ['Add', 'i', 1],
     ]);
     // A fresh `Add(i, 1)` outside any block folds to the imaginary unit.
@@ -94,8 +91,7 @@ describe('block-local Declare shadows a constant-named symbol', () => {
     const python = new PythonTarget();
     const block = ce.box([
       'Block',
-      ['Declare', 'i', { str: 'integer' }],
-      ['Assign', 'i', 3],
+      ['Declare', 'i', { str: 'integer' }, 3],
       ['Add', 'i', 1],
     ]);
     const code = python.compile(block).code;

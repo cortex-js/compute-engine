@@ -108,8 +108,7 @@ describe('CE-139: D and Integrate over a variable with a list binding', () => {
     const ce = new ComputeEngine();
     const r = typeAndValue(ce, [
       'Block',
-      ['Declare', 'b', "'list<real>'"],
-      ['Assign', 'b', ['List', 1, 2]],
+      ['Declare', 'b', "'list<real>'", ['List', 1, 2]],
       ['D', ['Power', 'b', 2], 'b'],
     ]);
     expect(r.type).toBe('list<number> | number');
@@ -204,8 +203,7 @@ describe('CE-139: compiled D and Integrate over a variable with a list binding',
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Block',
-      ['Declare', 'b', "'list<real>'"],
-      ['Assign', 'b', ['List', 1, 2]],
+      ['Declare', 'b', "'list<real>'", ['List', 1, 2]],
       ['D', ['Power', 'b', 2], 'b'],
     ]);
     expect(() => compile(expr, { to: 'javascript', fallback: false })).toThrow(

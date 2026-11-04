@@ -80,6 +80,10 @@ import {
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
 import { canonicalValueOperand } from '../boxed-expression/validate.js';
 import {
+  enterFunctionBody,
+  exitFunctionBody,
+} from '../assignment-locals.js';
+import {
   broadcastingComponentKind,
   isPossiblyCollectionTyped,
   isTupleShapedType,
@@ -4066,7 +4070,16 @@ export function canonicalBigop(
   );
   // The body is a value: a bare `N` or `D` there is a variable, not the
   // library operator (it was a type error, `Σ_{k=1}^{3} N`).
-  body = canonicalValueOperand(ce, body) ?? ce.error('missing');
+  // The body is evaluated once for each index value, so a block there
+  // declares its own locals, also when the operator is in a branch: the
+  // count of branches starts again at zero for the body, as for the body of
+  // a function literal (`enterFunctionBody()`, `assignment-locals.ts`).
+  enterFunctionBody();
+  try {
+    body = canonicalValueOperand(ce, body) ?? ce.error('missing');
+  } finally {
+    exitFunctionBody();
+  }
   // The canonical body is read too: a parse form that holds no `Return`
   // node before it is canonicalized can hold one after.
   if (hasEscapingReturn(body)) body = returnError;

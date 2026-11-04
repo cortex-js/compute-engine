@@ -65,8 +65,7 @@ describe('the closure capture keeps a literal that the re-rooting would not chan
           'Function',
           [
             'Block',
-            ['Declare', 'r'],
-            ['Assign', 'r', 'b'],
+            ['Declare', 'r', "'unknown'", 'b'],
             ['Function', ['Add', 'r', 'c'], 'c'],
           ],
           'b',
@@ -94,8 +93,7 @@ describe('the closure capture keeps a literal that the re-rooting would not chan
         'Function',
         [
           'Block',
-          ['Declare', 'r'],
-          ['Assign', 'r', ['Add', ['Range', 1, 'N'], 'w']],
+          ['Declare', 'r', "'unknown'", ['Add', ['Range', 1, 'N'], 'w']],
           ['Tuple', 'r', 'r'],
         ],
         'w',

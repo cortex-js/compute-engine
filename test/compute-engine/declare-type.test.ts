@@ -773,7 +773,7 @@ describe('DeclareType statement replacement: dependent ARITY', () => {
 describe('Declare with a type string that does not parse', () => {
   it('gives an error value instead of throwing', () => {
     const ce = new ComputeEngine();
-    const r = ce.box(['Declare', 'r', { str: 'integer<<' }]).evaluate();
+    const r = ce.box(['Declare', 'r', { str: 'integer<<' }, 1]).evaluate();
     expect(r.operator).toBe('Error');
     expect(JSON.stringify(r.json)).toContain('invalid-type-declaration');
   });

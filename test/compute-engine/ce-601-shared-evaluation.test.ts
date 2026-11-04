@@ -555,7 +555,15 @@ describe('CE-601: SHARED NODES ARE EVALUATED ONCE', () => {
     // In one evaluation: a shared node read twice before the assignment.
     ce.assign('a', 1);
     const t = ce.box(['total', comprehension]);
-    const l = ce.function('List', [t, t, ce.box(['Assign', 'a', 5]), t]);
+    // An assignment is not an operand, so a host operator assigns `a`.
+    ce.declare('setA', {
+      signature: '() -> integer',
+      evaluate: () => {
+        ce.assign('a', 5);
+        return ce.number(5);
+      },
+    });
+    const l = ce.function('List', [t, t, ce.box(['setA']), t]);
     expect(l.evaluate().json).toEqual(['List', 6, 6, 5, 30]);
   });
   test('The asynchronous route: a host operator that reads a symbol by name', async () => {

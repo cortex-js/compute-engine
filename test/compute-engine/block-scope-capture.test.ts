@@ -31,8 +31,7 @@ describe('nested Block reads enclosing Block locals', () => {
     const result = ce
       .expr([
         'Block',
-        ['Declare', 'k', { str: 'integer' }],
-        ['Assign', 'k', 7],
+        ['Declare', 'k', { str: 'integer' }, 7],
         ['Block', 'k'],
       ])
       .evaluate();
@@ -43,8 +42,7 @@ describe('nested Block reads enclosing Block locals', () => {
     const result = ce
       .expr([
         'Block',
-        ['Declare', 'g', { str: 'integer' }],
-        ['Assign', 'g', 7],
+        ['Declare', 'g', { str: 'integer' }, 7],
         ['Block', ['Add', 'g', 1]],
       ])
       .evaluate();
@@ -55,8 +53,7 @@ describe('nested Block reads enclosing Block locals', () => {
     const result = ce
       .expr([
         'Block',
-        ['Declare', 'a', { str: 'integer' }],
-        ['Assign', 'a', 0],
+        ['Declare', 'a', { str: 'integer' }, 0],
         [
           'Loop',
           [
@@ -79,8 +76,7 @@ describe('nested Block reads enclosing Block locals', () => {
     const result = ce
       .expr([
         'Block',
-        ['Declare', 'm', { str: 'integer' }],
-        ['Assign', 'm', 0],
+        ['Declare', 'm', { str: 'integer' }, 0],
         [
           'Loop',
           [
@@ -99,8 +95,7 @@ describe('nested Block reads enclosing Block locals', () => {
     const result = ce
       .expr([
         'Block',
-        ['Declare', 's', { str: 'integer' }],
-        ['Assign', 's', 0],
+        ['Declare', 's', { str: 'integer' }, 0],
         [
           'Loop',
           ['Block', ['Assign', 's', ['Add', 's', 'n']]],
@@ -122,8 +117,7 @@ describe('re-entered scopes (warm engine / repeated evaluation)', () => {
   test('the same Block object with a Declare can be evaluated twice', () => {
     const expr = ce.expr([
       'Block',
-      ['Declare', 'm', { str: 'integer' }],
-      ['Assign', 'm', 0],
+      ['Declare', 'm', { str: 'integer' }, 0],
       [
         'Loop',
         [
@@ -142,14 +136,12 @@ describe('re-entered scopes (warm engine / repeated evaluation)', () => {
     const result = ce
       .expr([
         'Block',
-        ['Declare', 'acc', { str: 'integer' }],
-        ['Assign', 'acc', 0],
+        ['Declare', 'acc', { str: 'integer' }, 0],
         [
           'Loop',
           [
             'Block',
-            ['Declare', 't', { str: 'integer' }],
-            ['Assign', 't', 'n'],
+            ['Declare', 't', { str: 'integer' }, 'n'],
             ['Assign', 'acc', ['Add', 'acc', 't']],
           ],
           ['Element', 'n', ['Range', 1, 3]],
@@ -175,8 +167,7 @@ describe('nested Blocks inside function bodies', () => {
         'Function',
         [
           'Block',
-          ['Declare', 'q', { str: 'integer' }],
-          ['Assign', 'q', ['Add', 'x', 5]],
+          ['Declare', 'q', { str: 'integer' }, ['Add', 'x', 5]],
           ['Block', 'q'],
         ],
         'x',
@@ -195,10 +186,8 @@ describe('nested Blocks inside function bodies', () => {
         'Function',
         [
           'Block',
-          ['Declare', 'acc', { str: 'integer' }],
-          ['Assign', 'acc', 0],
-          ['Declare', 'i2', { str: 'integer' }],
-          ['Assign', 'i2', 1],
+          ['Declare', 'acc', { str: 'integer' }, 0],
+          ['Declare', 'i2', { str: 'integer' }, 1],
           [
             'Loop',
             [
@@ -238,9 +227,8 @@ describe('block-local semantics preserved', () => {
     const result = ce
       .expr([
         'Block',
-        ['Declare', 'k', { str: 'integer' }],
-        ['Assign', 'k', 7],
-        ['Block', ['Declare', 'k', { str: 'integer' }], ['Assign', 'k', 2], 'k'],
+        ['Declare', 'k', { str: 'integer' }, 7],
+        ['Block', ['Declare', 'k', { str: 'integer' }, 2], 'k'],
         'k',
       ])
       .evaluate();
@@ -252,8 +240,7 @@ describe('block-local semantics preserved', () => {
     const result = ce
       .expr([
         'Block',
-        ['Declare', 'k', { str: 'integer' }],
-        ['Assign', 'k', 0],
+        ['Declare', 'k', { str: 'integer' }, 0],
         ['Block', ['Assign', 'k', 5]],
         'k',
       ])
@@ -481,7 +468,7 @@ describe('captureClosures: scoped-expression re-rooting', () => {
                 ['Greater', 'n', 0],
                 [
                   'Block',
-                  ['Declare', 'y', ['Dictionary', ['KeyValuePair', 'value', 'k']]],
+                  ['Declare', 'y', "'unknown'", 'k'],
                   ['Add', 'y', ['Apply', ['make', ['Add', 'k', 1]], ['Subtract', 'n', 1]]],
                 ],
                 ['Block', 'k'],
@@ -548,8 +535,7 @@ describe('captureClosures: scoped-expression re-rooting', () => {
 describe('a lazy collection that leaves the block of its locals', () => {
   const localH = (last: any): any => [
     'Block',
-    ['Declare', 'h', { str: 'function' }],
-    ['Assign', 'h', ['Function', ['Add', 'k', 1], 'k']],
+    ['Declare', 'h', { str: 'function' }, ['Function', ['Add', 'k', 1], 'k']],
     last,
   ];
 
@@ -560,8 +546,7 @@ describe('a lazy collection that leaves the block of its locals', () => {
       'Filter with a local predicate',
       [
         'Block',
-        ['Declare', 'p', { str: 'function' }],
-        ['Assign', 'p', ['Function', ['Greater', 'k', 1], 'k']],
+        ['Declare', 'p', { str: 'function' }, ['Function', ['Greater', 'k', 1], 'k']],
         ['Filter', ['List', 1, 2, 3], 'p'],
       ],
       '[2,3]',
@@ -584,8 +569,7 @@ describe('a lazy collection that leaves the block of its locals', () => {
     const result = ce
       .expr([
         'Block',
-        ['Declare', 'xs', { str: 'list' }],
-        ['Assign', 'xs', ['List', 1, 2]],
+        ['Declare', 'xs', { str: 'list' }, ['List', 1, 2]],
         ['Map', ['Function', ['Add', 'k', 1], 'k'], 'xs'],
       ])
       .evaluate();

@@ -66,7 +66,7 @@ const withEntry: LatexDictionaryEntry = {
       const value = operand(binding, 2);
       if (name === null || value === null) return null;
       names.add(name);
-      block.push(['Declare', name], ['Assign', name, value]);
+      block.push(['Declare', name, "'unknown'", value]);
       parser.skipVisualSpace();
     } while (parser.match(','));
     if (block.length === 0) return null;
@@ -86,7 +86,7 @@ function engine(declareList: boolean): ComputeEngine {
 }
 
 const LATEX = 'n_{0}+1\\operatorname{with}n_{0}=2';
-const EXPECTED = ['Block', ['Declare', 'n_0'], ['Assign', 'n_0', 2], ['Add', 'n_0', 1]];
+const EXPECTED = ['Block', ['Declare', 'n_0', "'unknown'", 2], ['Add', 'n_0', 1]];
 
 describe('a custom binder entry with the public parser methods', () => {
   test('the binder is a new name when its base is undeclared', () => {

@@ -532,14 +532,14 @@ export function withImplicitLocalDeclares(
     );
   }
 
-  // A function body also owns the names that only an assignment in a
-  // nested block assigns (a branch of an `if`, a loop body, a `do`
-  // block): the canonicalization recorded them as assignment locals of
-  // the body (`nestedAssignmentNames()`, `library/control-structures.ts`).
-  // Declare each of them here, at the level of the body, so that the
-  // writes in the nested blocks and the reads after them use the same
-  // variable, and each call has its own. The names that a statement of
-  // this list assigns are done by the loop above.
+  // The canonicalization records the assignment locals of the block
+  // (`recordAssignmentLocals()`, `library/control-structures.ts`). A first
+  // assignment of a name in a nested block (a branch of an `if`, a loop
+  // body) is a static error (`first-assignment-in-branch`), so each
+  // recorded name is assigned first by a statement of this list, which
+  // the loop above declares. Each name that is left is declared here, at
+  // the level of the body, so that the writes in nested blocks and the
+  // reads after them use the same variable, and each call has its own.
   const ce = node!.engine;
   for (const name of assignmentLocalsOf(scope) ?? []) {
     if (seen.has(name) || !scope.bindings.has(name)) continue;
@@ -698,10 +698,12 @@ export function localNameKey(name: string): object {
  *    on every target (`localReadOnSomePaths`), after the walk, so that a
  *    read of class 2 gives its own message first.
  *
- * The interpreter has no value for a read of class 2 or 3 that finds the
- * local with no value: it reports `read-before-declaration` in a function
- * body, and it keeps the read symbolic in a top-level block. Compiled code
- * cannot give that answer. Without the refusal, JavaScript read
+ * A declaration has a value, and a first assignment of a name in a branch
+ * or a loop body is a static error (`declaration-without-value`,
+ * `first-assignment-in-branch`), so the canonical form of a valid block
+ * has no read of class 2 or 3: an expression with such a read has the
+ * static type `error`, and its compilation declines before this analysis.
+ * The analysis stays as a second check. Without the refusal, JavaScript read
  * `undefined` (`undefined != 1` is `true`), Python read the value of the
  * previous pass of a loop, WGSL read the zero that a `var` starts with,
  * and GLSL read an undefined value.
@@ -1186,9 +1188,9 @@ export function localReadWithNoWrite(name: string): never {
   throw new Error(
     `Could not compile \`Block\`: a statement reads the block local ` +
       `"${name}", and no path to that read gives "${name}" a value. ` +
-      `Inside a function body the interpreter reports that read as ` +
-      `\`read-before-declaration\`, and in a top-level block it leaves the ` +
-      `read symbolic; the compiled code would read an uninitialized ` +
+      `A local is declared with a value (\`Declare(${name}, type, value)\`, ` +
+      `or a first assignment at the level of the block); the compiled ` +
+      `code would read an uninitialized ` +
       `variable. Give "${name}" a value first, or give the local another ` +
       `name, so that "${name}" is the input.`
   );
@@ -1291,6 +1293,13 @@ export function nestedAssignmentsTo(
  * targets, a local variable of the shader and Python targets
  * (`CompileTarget.inputLocals`). A shader cannot write an input, because a
  * uniform is read-only.
+ *
+ * No program reaches this code now. A chained assignment is a static error
+ * at canonicalization (`assignment-in-operand`), and a write to an input or
+ * to a symbol of the engine declines (`engineSymbolWriteDecline()`): the
+ * compiled code writes only the locals that it declares. The local copy of
+ * an input that this function serves is removed in step 4 of
+ * `docs/plans/2026-11-02-compiler-contraction-plan.md`.
  */
 export function chainedAmbientWrite(
   lhs: Expression & { symbol: string }
@@ -1349,11 +1358,12 @@ export function splitChainedAssignments(args: ReadonlyArray<Expression>): {
  * Fail closed when a statement of a block reads one of the block's locals
  * before any statement gives it a value.
  *
- * Inside a function body (a block in a function literal), the interpreter
- * reports such a read with the `read-before-declaration` error. In a
- * top-level block it leaves the read symbolic (`Block(x ≔ x + 1; 2x)`,
- * where `x` is a local of the block, evaluates to `2(x + 1)`). In both
- * cases the compiled code has no value to give it: JavaScript read
+ * A declaration has a value, so in a valid canonical block no statement
+ * reads a local before its declaration: such a read is a static error of
+ * the canonicalization (`read-before-declaration`), and the compilation
+ * of an expression with a static error declines before this check. The
+ * check stays as a second check. The compiled code has no value to give
+ * such a read: JavaScript read
  * `undefined` and answered `NaN`, WGSL read the zero a `var` starts with,
  * GLSL read an uninitialized variable, and Python read a parameter of the
  * same name.
@@ -1453,8 +1463,10 @@ export function assertLocalsAssignedBeforeRead(
  *
  * The local of the block exists from the start of the block, so the name
  * of such a statement is the local, not a variable of an enclosing scope.
- * The interpreter reports the use with the `read-before-declaration`
- * error, for a write as for a read. The compiled code did not report it:
+ * The canonicalization makes the use a static error
+ * (`read-before-declaration`), for a write as for a read, so a valid
+ * expression has no such use, and this check stays as a second check.
+ * Before the static rule, the compiled code did not report it:
  * JavaScript threw a `ReferenceError` when the code ran, and GLSL and WGSL
  * wrote a variable before its declaration, which is not valid source.
  *
@@ -1508,7 +1520,7 @@ export function assertNoUseBeforeDeclare(
             `"${name}" before the \`Declare\` of "${name}" in the same ` +
             `block. The local exists from the start of the block, so the ` +
             `statement reads or writes the local, not a variable of an ` +
-            `enclosing scope, and the interpreter reports the use as ` +
+            `enclosing scope, and such a use is the static error ` +
             `\`read-before-declaration\`. Move the \`Declare\` before the ` +
             `first use, or give the local another name.`
         );
@@ -1517,9 +1529,9 @@ export function assertNoUseBeforeDeclare(
 export function unassignedLocalRead(name: string): never {
   throw new Error(
     `Could not compile \`Block\`: a statement reads the block local ` +
-      `"${name}" before any statement gives it a value. Inside a function ` +
-      `body the interpreter reports that read as \`read-before-declaration\`, ` +
-      `and in a top-level block it leaves the read symbolic; the compiled ` +
+      `"${name}" before any statement gives it a value. A local is ` +
+      `declared with a value (\`Declare(${name}, type, value)\`, or a first ` +
+      `assignment at the level of the block); the compiled ` +
       `code would read an uninitialized variable. Give "${name}" a value ` +
       `first, or give the ` +
       `local another name (\`Block(y ≔ ${name} + 1; 2y)\`), so that ` +
@@ -1697,6 +1709,24 @@ export function freshBlockLocalName(target: CompileTarget<Expression>): string {
   return fresh;
 }
 
+/**
+ * The decline of a write to a symbol that the compiled code does not
+ * declare: a symbol of the engine, an input, or a `vars` name. A compiled
+ * block writes only its own locals and the locals of an enclosing compiled
+ * block. The interpreter changes the binding of the engine, and compiled
+ * code has no binding of the engine to change.
+ */
+function engineSymbolWriteDecline(name: string): Error {
+  return new Error(
+    `Could not compile \`Assign\`: "${name}" is not a local of the ` +
+      `compiled expression (it is a symbol of the engine, an input or a ` +
+      `\`vars\` name), and compiled code writes only the locals that it ` +
+      `declares. Return the value and let the host assign it, or declare ` +
+      `a local with a value (\`Declare(${name}, type, value)\`, or a first ` +
+      `assignment at the level of the block) and read the local.`
+  );
+}
+
 export function assignLValue(
   engine: ComputeEngine,
   name: string,
@@ -1709,13 +1739,21 @@ export function assignLValue(
     // so a symbol the engine has a value for reads as that value and no
     // write can reach it — fail closed. Otherwise (a genuinely free symbol,
     // which is how every shader target spells one) the bare identifier is
-    // both the read and the write.
+    // both the read and the write. That is a local of the compiled code (a
+    // parameter, a loop index, a local of an enclosing compiled block or
+    // function), or else an input, and a write to an input declines
+    // (`engineSymbolWriteDecline`).
     if (engine._getSymbolValue(name) !== undefined)
       throw new Error(
         `Could not compile \`Assign\`: "${name}" has an assigned value, which ` +
           `every read of it bakes into the generated source, so this write ` +
           `would be invisible to them.`
       );
+    if (
+      target.boundVars?.has(name) !== true &&
+      localShapeFrameOf(name) === undefined
+    )
+      throw engineSymbolWriteDecline(name);
     const spelled = target.mangleId ? target.mangleId(name) : name;
     target.inputWrites?.add(spelled);
     return spelled;
@@ -1724,19 +1762,15 @@ export function assignLValue(
   // the name both use it (`CompileTarget.inputLocals`).
   if (target.inputLocals?.get(name) === resolved) return resolved;
   // A `vars` key that no binding of the expression shadows names an input
-  // that the host gives (a uniform, a Python name). A target that keeps a
-  // local copy of each written input records it, and compiles the
-  // expression again with the copy, so this emission of the write is not
-  // kept.
+  // that the host gives (a uniform, a Python name, a JavaScript `vars`
+  // mapping that spells the name as itself): the write declines, on every
+  // target.
   if (
-    target.inputLocals !== undefined &&
     target.varsKeys?.has(name) === true &&
     target.boundVars?.has(name) !== true &&
     localShapeFrameOf(name) === undefined
-  ) {
-    target.inputWrites?.add(name);
-    return resolved;
-  }
+  )
+    throw engineSymbolWriteDecline(name);
   if (resolved === name) return resolved;
   // A block local spelled with a fresh name (`withFreshBlockLocals`).
   if (_freshLocalNames.has(resolved)) return resolved;
@@ -1748,23 +1782,15 @@ export function assignLValue(
   // fresh name, and its reads and writes use that name
   // (`CompileTarget.renamedWritables`).
   if (target.renamedWritables?.has(resolved) === true) return resolved;
-  // A vars-object member access naming this very symbol (`_.s`) is the only
-  // other assignable form the built-in targets produce. Matched by string
-  // surgery, not a regexp built from `name` (a symbol may hold regexp
-  // metacharacters).
+  // A vars-object member access naming this very symbol (`_.s`) is the
+  // spelling of an input or of a `vars` name: the write declines. Matched
+  // by string surgery, not a regexp built from `name` (a symbol may hold
+  // regexp metacharacters).
   if (
     resolved.endsWith(`.${name}`) &&
     /^[A-Za-z_$][\w$]*$/.test(resolved.slice(0, -(name.length + 1)))
-  ) {
-    // A write into the vars object of the caller: the target makes that
-    // object a local copy before the body runs (`localVarsObjectStatement`).
-    if (
-      target.varsObjectName !== undefined &&
-      resolved.slice(0, -(name.length + 1)) === target.varsObjectName
-    )
-      target.inputWrites?.add(name);
-    return resolved;
-  }
+  )
+    throw engineSymbolWriteDecline(name);
   throw new Error(
     `Could not compile \`Assign\`: target '${target.language ?? 'javascript'}' ` +
       `compiles reads of "${name}" as \`${resolved}\`, which is not an ` +
@@ -1814,6 +1840,12 @@ export function assignLValue(
  * The statement assigns the parameter `_` of the compiled function. The
  * definitions of the preamble that the body calls read `_` when they run,
  * so they read the copy too.
+ *
+ * No program reaches the copy of an input now: a write to an input or to a
+ * symbol of the engine declines (`engineSymbolWriteDecline()`), and the
+ * compiled code writes only the locals that it declares. The local copy of
+ * the vars object is removed in step 4 of
+ * `docs/plans/2026-11-02-compiler-contraction-plan.md`.
  */
 export function localVarsObjectStatement(
   target: CompileTarget<Expression>

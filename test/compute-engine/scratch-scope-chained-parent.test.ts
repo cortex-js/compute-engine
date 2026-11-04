@@ -40,8 +40,7 @@ function trapDeclares(ce: ComputeEngine): StateEvent[] {
 // local scope when the block runs.
 const BLOCK = [
   'Block',
-  ['Declare', 't', "'integer'"],
-  ['Assign', 't', 3],
+  ['Declare', 't', "'integer'", 3],
   ['Add', 't', 1],
 ];
 
@@ -92,8 +91,7 @@ describe('a value shield registers its scope for its shadow declarations only', 
     ce.assign('x', 5);
     const block = ce.box([
       'Block',
-      ['Declare', 't', "'integer'"],
-      ['Assign', 't', 3],
+      ['Declare', 't', "'integer'", 3],
       ['Add', 't', 'x'],
     ]);
     const events = trapDeclares(ce);

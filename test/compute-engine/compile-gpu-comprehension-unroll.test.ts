@@ -202,8 +202,7 @@ describe.each(['glsl', 'wgsl'] as const)('%s — guards', (to) => {
     const r = shader(
       [
         'Block',
-        ['Declare', 'a'],
-        ['Assign', 'a', ['Tuple', ['Tuple', 1, 2], ['Tuple', 3, 4]]],
+        ['Declare', 'a', "'unknown'", ['Tuple', ['Tuple', 1, 2], ['Tuple', 3, 4]]],
         ['PointX', ['At', 'a', 1]],
       ],
       to
@@ -232,20 +231,15 @@ describe.each(['glsl', 'wgsl'] as const)('%s — guards', (to) => {
       'an assignment in a nested block',
       [
         'Block',
-        ['Declare', 'Q', "'list<tuple<real, real>^3>'"],
+        ['Declare', 'Q', "'list<tuple<real, real>^3>'", 'P'],
         ['If', 'cond', ['Assign', 'Q', 'P'], 'Nothing'],
         ['At', 'Q', 'k'],
       ],
     ],
     ['a copy of a tuple of points', ['Block', ['Assign', 'Q', 'T'], ['At', 'Q', 'k']]],
   ])('a block local holding %s fails closed', (_, json) => {
-    // The nested-block case assigns `Q` in one branch of an `If` only, so the
-    // read of `Q` after it can also decline because the local may have no
-    // value; either reason declines.
     const r = shader(json, to);
-    expect(r.declined).toMatch(
-      /list of points has no static shader declaration|can read the block local "Q" when no assignment gave it a value/
-    );
+    expect(r.declined).toMatch(/list of points has no static shader declaration/);
   });
 
   test('arithmetic over a list of points fails closed', () => {

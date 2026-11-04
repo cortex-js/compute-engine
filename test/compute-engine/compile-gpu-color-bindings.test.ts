@@ -30,10 +30,10 @@ describe.each(['glsl', 'wgsl'] as const)('%s color bindings', (to) => {
       const ce = engine();
       const expr = ce.expr([
         'Block',
-        typed ? ['Declare', 'c', 'color'] : ['Declare', 'c'],
-        ['Assign', 'c', color],
-        ['Declare', 'd'],
-        ['Assign', 'd', 'c'],
+        typed
+          ? ['Declare', 'c', 'color', color]
+          : ['Declare', 'c', "'unknown'", color],
+        ['Declare', 'd', "'unknown'", 'c'],
         ['AsRgb', 'd'],
       ]);
       const r = compile(expr, { to, constantFold: false });
@@ -53,8 +53,7 @@ describe.each(['glsl', 'wgsl'] as const)('%s color bindings', (to) => {
         kind === 'initializer'
           ? [['Declare', 'c', 'color', converted]]
           : [
-              ['Declare', 'c', 'color'],
-              ['Assign', 'c', color],
+              ['Declare', 'c', 'color', color],
               ['Assign', 'c', converted],
             ];
       const expr = ce.expr(['Block', ...bindings, ['AsRgb', 'c']]);
@@ -94,12 +93,12 @@ describe.each(['glsl', 'wgsl'] as const)('%s color bindings', (to) => {
     expect(r.code).not.toContain('_gpu_hsv_to_rgb');
   });
 
-  test('a declared color first assigned inside a loop has vector storage', () => {
+  test('a declared color reassigned inside a loop has vector storage', () => {
     const ce = engine();
     const r = compile(
       ce.expr([
         'Block',
-        ['Declare', 'c', 'color'],
+        ['Declare', 'c', 'color', color],
         [
           'Loop',
           ['Block', ['Assign', 'c', color]],
@@ -138,7 +137,7 @@ describe.each(['glsl', 'wgsl'] as const)('%s color bindings', (to) => {
       'localHelper',
       ce.expr([
         'Function',
-        ['Block', ['Declare', 'c', 'color'], ['Assign', 'c', converted], 'c'],
+        ['Block', ['Declare', 'c', 'color', converted], 'c'],
       ])
     );
     const r = compile(ce.expr(['AsRgb', ['localHelper']]), {
@@ -175,8 +174,7 @@ describe.each(['glsl', 'wgsl'] as const)('%s color bindings', (to) => {
     const r = compile(
       ce.expr([
         'Block',
-        ['Declare', 'c', 'color'],
-        ['Assign', 'c', ['Rgb', 'x', 0, 0, 0.5]],
+        ['Declare', 'c', 'color', ['Rgb', 'x', 0, 0, 0.5]],
         ['AsRgb', 'c'],
       ]),
       { to, constantFold: false }

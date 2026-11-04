@@ -12,7 +12,7 @@ describe.each(['glsl', 'wgsl'] as const)('%s emitted shader validity', (to) => {
         for (const cse of [false, true]) {
           for (const body of [
             ['Block', 'j'],
-            ['Block', ['Declare', 'a'], ['Assign', 'a', ['Square', 'j']], 'a'],
+            ['Block', ['Declare', 'a', "'unknown'", ['Square', 'j']], 'a'],
             ['Return', 'j'],
           ] as MathJsonExpression[]) {
             const ce = new ComputeEngine();
@@ -139,8 +139,7 @@ describe.each(['glsl', 'wgsl'] as const)('%s emitted shader validity', (to) => {
           'Function',
           [
             'Block',
-            ['Declare', 'a', 'broadcastable<number>'],
-            ['Assign', 'a', 't'],
+            ['Declare', 'a', 'broadcastable<number>', 't'],
             head === 'Hsv' ? color : ['AsRgb', color],
           ],
           ['Typed', 't', 'real'],

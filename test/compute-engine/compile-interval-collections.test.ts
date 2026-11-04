@@ -525,8 +525,7 @@ describe('Interval target — collection-valued roots', () => {
     const literal = ['Function', ['Multiply', 2, 'u'], ['Typed', 'u', 'real']];
     const block = (last: unknown) => [
       'Block',
-      ['Declare', 'h', "'function'"],
-      ['Assign', 'h', literal],
+      ['Declare', 'h', "'function'", literal],
       last,
     ];
     const valueOf = (json: unknown): unknown =>
@@ -565,8 +564,7 @@ describe('Interval target — collection-valued roots', () => {
   test('a function body that returns a collection is an array', () => {
     const body = (last: unknown) => [
       'Block',
-      ['Declare', 'z', "'real'"],
-      ['Assign', 'z', ['Add', 'u', 1]],
+      ['Declare', 'z', "'real'", ['Add', 'u', 1]],
       last,
     ];
     const valueOf = (json: unknown): unknown =>
@@ -583,8 +581,7 @@ describe('Interval target — collection-valued roots', () => {
       const literal = ['Function', b, 'u'];
       const local = [
         'Block',
-        ['Declare', 'f', "'function'"],
-        ['Assign', 'f', literal],
+        ['Declare', 'f', "'function'", literal],
         ['f', 'x'],
       ];
       for (const engineLevel of [true, false]) {
@@ -618,7 +615,7 @@ describe('Interval target — collection-valued roots', () => {
     ])
       declines(
         engine(),
-        ['Block', ['Declare', 'f', "'function'"], ['Assign', 'f', literal], use],
+        ['Block', ['Declare', 'f', "'function'", literal], use],
         /is a call of a block-local function that returns a collection/
       );
   });
@@ -629,16 +626,14 @@ describe('Interval target — collection-valued roots', () => {
   // interpreter gives an `incompatible-type` error for both shapes.
   test('a call of a block-local function that returns a collection declines when its value is not consumed whole', () => {
     const define = [
-      ['Declare', 'f', "'function'"],
-      ['Assign', 'f', ['Function', ['Tuple', 'u', 2], 'u']],
+      ['Declare', 'f', "'function'", ['Function', ['Tuple', 'u', 2], 'u']],
     ];
     const SHAPES = [
       // Through the parameter of another block-local function.
       [
         'Block',
         ...define,
-        ['Declare', 'g', "'function'"],
-        ['Assign', 'g', ['Function', ['Add', 'v', 1], 'v']],
+        ['Declare', 'g', "'function'", ['Function', ['Add', 'v', 1], 'v']],
         ['g', ['f', 'x']],
       ],
       // Through a block local.

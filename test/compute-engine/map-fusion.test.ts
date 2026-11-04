@@ -594,7 +594,8 @@ describe('Map fusion — a scope-writing body is NOT lowered', () => {
     expect(lowerMapSpine(m)).toBeUndefined();
     expect(ce.lookupDefinition('leaked')).toBeUndefined();
 
-    expect(drainRe(m)).toEqual([1, 2, 3]);
+    // The body is an `Assign`, so each call has the value `Nothing`.
+    expect(drainRe(m)).toEqual([NaN, NaN, NaN]);
 
     // Nothing escaped the per-call frame.
     expect(ce.lookupDefinition('leaked')).toBeUndefined();

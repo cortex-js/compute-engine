@@ -1478,15 +1478,15 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
       ).toBe(false);
     });
 
-    // The static type of a block local is the type of its first value. A
-    // second assignment of a list of lists does not change it, so the
-    // element type of the local is not provable, and the consumer declines.
+    // A block local declared with a type that admits a list of numbers and
+    // a list of lists, assigned one, then the other: the element type of the
+    // local is not provable, and the consumer declines.
     test.each([
       [
         'an inline literal',
         [
           'Block',
-          ['Assign', 'M', ['List', 1, 2]],
+          ['Declare', 'M', "'list<integer | list<integer>>'", ['List', 1, 2]],
           ['Assign', 'M', ['List', ['List', 1, 2]]],
           ['Map', LITERAL, 'M'],
         ],
@@ -1496,7 +1496,7 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
         [
           'Block',
           ['Assign', 'g', LITERAL],
-          ['Assign', 'M', ['List', 1, 2]],
+          ['Declare', 'M', "'list<integer | list<integer>>'", ['List', 1, 2]],
           ['Assign', 'M', ['List', ['List', 1, 2]]],
           ['Map', 'g', 'M'],
         ],

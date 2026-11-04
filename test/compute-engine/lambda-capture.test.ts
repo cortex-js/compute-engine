@@ -479,8 +479,7 @@ describe('CURRYING', () => {
         'Function',
         [
           'Block',
-          ['Declare', 'lc_t6', 'number'],
-          ['Assign', 'lc_t6', ['Add', 'lc_p6b', 'lc_q6b']],
+          ['Declare', 'lc_t6', 'number', ['Add', 'lc_p6b', 'lc_q6b']],
           // Return exits here — the Assign below must NOT execute during currying
           ['Return', 'lc_t6'],
           ['Assign', 'lc_sideEffect6', 99],

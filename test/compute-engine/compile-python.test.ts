@@ -248,6 +248,9 @@ describe('PYTHON TARGET', () => {
     });
 
     it('compiles an Assign block to a valid def', () => {
+      // A fresh engine: the shared engine knows `t` from other tests,
+      // and a write to a symbol of the engine declines.
+      const ce = new ComputeEngine();
       const expr = ce.box([
         'Block',
         ['Assign', 't', ['Multiply', 'x', 'x']],
@@ -258,6 +261,9 @@ describe('PYTHON TARGET', () => {
     });
 
     it('fails closed when a Block is used as a sub-expression', () => {
+      // A fresh engine: the shared engine knows `t` from other tests,
+      // and a write to a symbol of the engine declines.
+      const ce = new ComputeEngine();
       const block = ce.box([
         'Block',
         ['Assign', 't', ['Multiply', 'x', 'x']],
@@ -267,6 +273,9 @@ describe('PYTHON TARGET', () => {
     });
 
     it('fails closed when a Block is a function argument', () => {
+      // A fresh engine: the shared engine knows `t` from other tests,
+      // and a write to a symbol of the engine declines.
+      const ce = new ComputeEngine();
       const block = ce.box([
         'Block',
         ['Assign', 't', ['Multiply', 'x', 'x']],
@@ -276,6 +285,9 @@ describe('PYTHON TARGET', () => {
     });
 
     it('rejects a Block body for compileLambda', () => {
+      // A fresh engine: the shared engine knows `t` from other tests,
+      // and a write to a symbol of the engine declines.
+      const ce = new ComputeEngine();
       const block = ce.box([
         'Block',
         ['Assign', 't', ['Multiply', 'x', 'x']],
@@ -1606,6 +1618,9 @@ describe('PYTHON TARGET', () => {
   // range(…):`), not the base compiler's JS `for`-IIFE.
   describe('Loop → statement loops', () => {
     it('accumulator pattern compiles to a valid def', () => {
+      // A fresh engine: the shared engine knows `acc` from other tests,
+      // and a write to a symbol of the engine declines.
+      const ce = new ComputeEngine();
       const expr = ce.box([
         'Block',
         ['Assign', 'acc', 0],
@@ -1629,6 +1644,9 @@ describe('PYTHON TARGET', () => {
     });
 
     it('Loop body may be a multi-line Block (indented, no return)', () => {
+      // A fresh engine: the shared engine knows `s` from other tests,
+      // and a write to a symbol of the engine declines.
+      const ce = new ComputeEngine();
       const expr = ce.box([
         'Block',
         ['Assign', 's', 0],
@@ -1667,6 +1685,9 @@ describe('PYTHON TARGET', () => {
     });
 
     it('Loop as the final statement of a Block declines', () => {
+      // A fresh engine: the shared engine knows `acc` from other tests,
+      // and a write to a symbol of the engine declines.
+      const ce = new ComputeEngine();
       // The block hook must NOT return-prefix a `for`/`while` statement (that
       // would be `return for …:` — a SyntaxError). The value of the Block is
       // the value of the Loop, `Nothing`, which has no compiled
@@ -1687,16 +1708,27 @@ describe('PYTHON TARGET', () => {
     });
 
     it('expression-position Loop fails closed', () => {
+      // A fresh engine: the shared engine knows `acc` from other tests,
+      // and a write to a symbol of the engine declines.
+      const ce = new ComputeEngine();
+      // The body writes nothing: a write to `acc`, which the code does not
+      // declare, declines before the position of the loop is checked.
       const loop = ce.box([
         'List',
-        ['Loop', ['Assign', 'acc', 'i'], ['Element', 'i', ['Range', 1, 5]]],
+        ['Loop', ['Multiply', 'i', 2], ['Element', 'i', ['Range', 1, 5]]],
       ]);
       expect(() => python.compile(loop)).toThrow(/Loop/);
     });
 
     it('a Loop body cannot be a compileLambda body', () => {
+      // A fresh engine: the shared engine knows `acc` from other tests,
+      // and a write to a symbol of the engine declines.
+      const ce = new ComputeEngine();
+      // The first assignment of `acc` is at the level of the block: a first
+      // assignment in a loop body is a static error.
       const loop = ce.box([
         'Block',
+        ['Assign', 'acc', 0],
         ['Loop', ['Assign', 'acc', 'i'], ['Element', 'i', ['Range', 1, 5]]],
         'acc',
       ]);
@@ -1710,6 +1742,9 @@ describe('PYTHON TARGET', () => {
   // how Epsil lowers `while`: `Loop(Block(If(cond, Break), …))`.
   describe('Loop body → statement-position control flow', () => {
     it('while-pattern: If(cond, Break) compiles to an `if …:` statement', () => {
+      // A fresh engine: the shared engine knows `s` from other tests,
+      // and a write to a symbol of the engine declines.
+      const ce = new ComputeEngine();
       const expr = ce.box([
         'Block',
         ['Assign', 's', 0],
@@ -1800,9 +1835,11 @@ describe('PYTHON TARGET', () => {
       // unwrapped form emits.
       const arms = (then: any, otherwise: any) =>
         ce.box(['If', ['Greater', 'x', 0], then, otherwise] as any);
+      // The loop writes `wLoop`, a local that the block of `select` below
+      // declares: a write to a symbol of the engine declines.
       const loop = [
         'Loop',
-        ['Assign', 'x', ['Add', 'x', 1]],
+        ['Assign', 'wLoop', ['Add', 'wLoop', 1]],
         ['Element', 'i', ['Range', 1, 3]],
       ];
       for (const [bare, wrapped] of [
@@ -1848,17 +1885,18 @@ describe('PYTHON TARGET', () => {
           bare === loop
             ? ce.box([
                 'Block',
+                ['Declare', 'wLoop', "'unknown'", 0],
                 ['If', ['Greater', 'x', 0], arm, ['Continue']],
-                'x',
+                'wLoop',
               ] as any)
             : arms(arm, ['Continue']);
         const expected = python.compile(select(bare)).code;
         expect(python.compile(select(wrapped)).code).toBe(expected);
-        // The loop arm assigns the input `x`, so the code reads and writes a
-        // local copy of `x`. (The `x == x` decidedness test that preceded the
-        // selection is gone since the user decision of 2026-10-20.)
+        // The block of the loop arm declares its local first. (The `x == x`
+        // decidedness test that preceded the selection is gone since the user
+        // decision of 2026-10-20.)
         expect(expected).toMatch(
-          bare === loop ? /^_tv1 = x\nif 0 < _tv1:\n/ : /^if 0 < x:\n/
+          bare === loop ? /^wLoop = 0\nif 0 < x:\n/ : /^if 0 < x:\n/
         );
       }
       // A nested selection that mixes the two kinds is refused too.

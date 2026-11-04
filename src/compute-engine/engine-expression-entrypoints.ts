@@ -19,6 +19,7 @@ import {
 } from './boxed-expression/type-provenance.js';
 import { NumericValue } from './numeric-value/types.js';
 import { isRational } from './numerics/rationals.js';
+import { markFreeSymbolDeclaration } from './assignment-locals.js';
 import type { Rational } from './numerics/types.js';
 import type {
   BoxedDefinition,
@@ -335,8 +336,13 @@ export function createSymbolExpression(
   // against every later one.
   // (First-boxing binding divergence, Tycho item 178(a)+(c) —
   // `docs/SCOPING-MODEL.md`.)
-  if (engine._boxingState.isPersistentScope(autoScope) === false)
+  // The binding is also marked as the binding of a free symbol: in the body
+  // of a function literal, an assignment does not treat it as a declaration
+  // (`isFreeSymbolDeclarationInBody()`, `assignment-locals.ts`).
+  if (engine._boxingState.isPersistentScope(autoScope) === false) {
     engine._boxingState.noteTransientAutoDeclare(name);
+    markFreeSymbolDeclaration(def);
+  }
   const freeSym = new BoxedSymbol(engine, name, { metadata, def });
   // Provenance: binding created as a side effect of boxing a free symbol —
   // see the annotated-parameter branch above for the contract (creation

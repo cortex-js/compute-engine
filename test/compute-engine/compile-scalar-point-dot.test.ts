@@ -23,7 +23,7 @@ function fixture(value: MathJsonExpression = ['Add', 'u', 1]) {
       'Function',
       [
         'Block',
-        ['Declare', 'q', "'broadcastable<real>'"],
+        // The local is assigned first at the level of the block.
         ['Assign', 'q', ['angle', 'u']],
         ['Tuple', ['Cos', 'q'], ['Sin', 'q']],
       ],
@@ -132,7 +132,7 @@ describe('Dot over constructed scalar coordinates with broad static types', () =
         'Function',
         [
           'Block',
-          ['Declare', 'q'],
+          // The local is assigned first at the level of the block.
           ['Assign', 'q', ['angle', 'P']],
           ['Tuple', ['Cos', 'q'], ['Sin', 'q']],
         ],
@@ -161,8 +161,7 @@ describe('Dot over constructed scalar coordinates with broad static types', () =
         'Function',
         [
           'Block',
-          ['Declare', 'q'],
-          ['Assign', 'q', ['inner', 0]],
+          ['Declare', 'q', "'unknown'", ['inner', 0]],
           ['Tuple', ['PointX', 'q'], ['PointY', 'q']],
         ],
         'P',
@@ -193,11 +192,9 @@ describe('Dot over constructed scalar coordinates with broad static types', () =
     expect(r.run!({ a: [1, [1, 2]], b: [3, 4] })).toEqual([7, 11]);
   });
 
-  test('an impure operand does not reorder the reads of a pure one', () => {
-    // Both operands are bound once, in operand order, before the sum reads
-    // them: an assignment inside the second operand must not be seen by
-    // the first operand's reads, as the interpreter evaluates the first
-    // operand first.
+  test('an assignment inside an operand declines', () => {
+    // A block with an assignment as an operand declines, and so does a
+    // write to a symbol declared in the engine.
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     const expr = ce.box([
@@ -206,8 +203,10 @@ describe('Dot over constructed scalar coordinates with broad static types', () =
       ['Tuple', ['Block', ['Assign', 'x', 2], 1], 1],
     ]);
     const r = compile(expr);
-    expect(r.success).toBe(true);
-    expect(r.run!({ x: 1 })).toBe(2);
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(
+      /a block with a statement other than a declaration with a value is an operand|"x" is not a local of the compiled expression/
+    );
   });
 
   test('each impure point operand is evaluated once', () => {

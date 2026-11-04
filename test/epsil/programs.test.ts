@@ -147,12 +147,11 @@ fact(10)`);
     expect(text).toBe('3628800');
   });
 
-  test('recursive factorial (declare first, then assign the lambda)', () => {
-    // The `let f` idiom still works: the symbol exists before the lambda
-    // that captures it is created.
+  test('recursive factorial (a lambda as the value of a `let`)', () => {
+    // The lambda reads `fact` when it is called, after the declaration
+    // has given `fact` its value.
     const { text, diagnostics } = run(`
-let fact
-fact = n => if n <= 1 { 1 } else { n * fact(n - 1) }
+let fact = n => if n <= 1 { 1 } else { n * fact(n - 1) }
 fact(10)`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('3628800');

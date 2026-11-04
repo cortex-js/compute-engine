@@ -159,7 +159,6 @@ describe('Tycho row 377: the index of a GPU Sum or Product is a real counter', (
   // `_gpu_cmul`, which a shader compiler rejects.
   const inBlock = (body: unknown): unknown => [
     'Block',
-    ['Declare', 'n'],
     ['Assign', 'n', ['Add', 'x', 'ImaginaryUnit']],
     ['Add', ['Abs', 'n'], body],
   ];

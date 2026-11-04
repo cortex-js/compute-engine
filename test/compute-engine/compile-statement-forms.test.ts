@@ -165,20 +165,6 @@ const ASSIGNING: [string, any][] = [
     ],
   ],
   [
-    'a branch that writes an input',
-    [
-      'Block',
-      [
-        'Which',
-        ['Greater', 'x', 0],
-        ['Assign', 'u', 1],
-        'True',
-        ['Assign', 'u', 2],
-      ],
-      ['Add', 'u', 'x'],
-    ],
-  ],
-  [
     'a branch whose value is discarded',
     [
       'Block',
@@ -202,6 +188,26 @@ describe('WGSL: A SELECTION WHOSE BRANCHES ASSIGN, IN STATEMENT POSITION', () =>
           interpreted(src, { x, u: 5 }),
         ]);
     });
+
+  test('a branch that writes an input declines', () => {
+    // A write to a symbol declared in the engine declines.
+    expect(() =>
+      shader(
+        [
+          'Block',
+          [
+            'Which',
+            ['Greater', 'x', 0],
+            ['Assign', 'u', 1],
+            'True',
+            ['Assign', 'u', 2],
+          ],
+          ['Add', 'u', 'x'],
+        ],
+        'wgsl'
+      )
+    ).toThrow(/"u" is not a local of the compiled expression/);
+  });
 
   test('the code of an If in a block', () => {
     expect(shader(ASSIGNING[0][1], 'wgsl').code).toBe(
@@ -278,6 +284,7 @@ describe('WGSL: A SELECTION WHOSE BRANCHES ASSIGN, IN STATEMENT POSITION', () =>
         'the right side of an assignment',
         [
           'Block',
+          ['Assign', 't', 0],
           [
             'Assign',
             'q',
@@ -285,10 +292,6 @@ describe('WGSL: A SELECTION WHOSE BRANCHES ASSIGN, IN STATEMENT POSITION', () =>
           ],
           'q',
         ],
-      ],
-      [
-        'the whole body',
-        ['If', ['Greater', 'x', 0], ['Assign', 't', 1], ['Assign', 't', 2]],
       ],
     ];
     for (const [, src] of value)
@@ -336,11 +339,6 @@ const limits = ['Limits', 'k', 1, 3];
 /** [name, MathJSON]. The input `u` is 5 for the interpreter and for Python. */
 const SUMS: [string, any][] = [
   [
-    'a block that writes an input',
-    ['Sum', ['Block', ['Assign', 'u', ['Add', 'u', 'k']], 'u'], limits],
-  ],
-  ['an assignment', ['Sum', ['Assign', 'u', ['Add', 'u', 'k']], limits]],
-  [
     'a block with a local',
     [
       'Sum',
@@ -349,8 +347,8 @@ const SUMS: [string, any][] = [
     ],
   ],
   [
-    'a Product whose block ends with an assignment',
-    ['Product', ['Block', ['Assign', 't', ['Add', 'k', 1]]], limits],
+    'a Product whose block has a local',
+    ['Product', ['Block', ['Assign', 't', ['Add', 'k', 1]], 't'], limits],
   ],
   [
     'a Sum assigned in a block',
@@ -432,13 +430,14 @@ const SUMS: [string, any][] = [
       'Sum',
       [
         'Block',
+        ['Assign', 'v', 0],
         [
           'If',
           ['Greater', 'k', 1],
-          ['Assign', 'u', ['Add', 'u', 'k']],
-          ['Assign', 'u', 0],
+          ['Assign', 'v', ['Add', 'v', 'k']],
+          ['Assign', 'v', 0],
         ],
-        'u',
+        'v',
       ],
       limits,
     ],
@@ -447,7 +446,7 @@ const SUMS: [string, any][] = [
     'an empty range',
     [
       'Sum',
-      ['Block', ['Assign', 'u', ['Add', 'u', 'k']], 'u'],
+      ['Block', ['Assign', 'v', ['Add', 'x', 'k']], 'v'],
       ['Limits', 'k', 3, 1],
     ],
   ],
@@ -474,18 +473,46 @@ describe('PYTHON: A SUM WHOSE BODY IS A STATEMENT', () => {
   test('the code of the probe', () => {
     expect(py.compile(pythonEngine().box(SUMS[0][1])).code).toBe(
       [
-        '_tv1 = u',
-        '_tv2 = 0',
-        'for _tv3 in range(1, 4):',
-        '    _tv1 = _tv3 + _tv1',
-        '    _tv2 += _tv1',
-        'return _tv2',
+        '_tv1 = 0',
+        'for _tv2 in range(1, 4):',
+        '    _tv3 = _tv2 + 1',
+        '    _tv1 += _tv3 * _tv3',
+        'return _tv1',
       ].join('\n')
     );
   });
 
+  test('a body that writes an input, or that ends with an assignment, declines', () => {
+    // A write to a symbol declared in the engine declines.
+    expect(() =>
+      py.compile(
+        pythonEngine().box([
+          'Sum',
+          ['Block', ['Assign', 'u', ['Add', 'u', 'k']], 'u'],
+          limits,
+        ])
+      )
+    ).toThrow(/"u" is not a local of the compiled expression/);
+    // An assignment as the body is the static error `assignment-in-operand`.
+    expect(() =>
+      py.compile(
+        pythonEngine().box(['Sum', ['Assign', 'u', ['Add', 'u', 'k']], limits])
+      )
+    ).toThrow(/invalid expression/);
+    // A block that ends with an assignment has the value `Nothing`.
+    expect(() =>
+      py.compile(
+        pythonEngine().box([
+          'Product',
+          ['Block', ['Assign', 't', ['Add', 'k', 1]]],
+          limits,
+        ])
+      )
+    ).toThrow(/a body of type 'nothing' has no compiled form/);
+  });
+
   test('compileFunction() writes the loop in the function', () => {
-    expect(py.compileFunction(pythonEngine().box(SUMS[2][1]), 'f', [])).toBe(
+    expect(py.compileFunction(pythonEngine().box(SUMS[0][1]), 'f', [])).toBe(
       [
         'def f():',
         '    _tv1 = 0',
@@ -535,7 +562,7 @@ describe('PYTHON: A SUM WHOSE BODY IS A STATEMENT', () => {
     const ce = pythonEngine();
     const r = compile(ce.box(SUMS[0][1]), { to: 'python', fallback: false });
     expect(r.success).toBe(true);
-    expect(r.code).toContain('for _tv3 in range(1, 4):');
+    expect(r.code).toContain('for _tv2 in range(1, 4):');
   });
 
   test('a Sum in another position still declines', () => {
@@ -593,10 +620,8 @@ describe('PYTHON: A SUM WHOSE BODY IS A STATEMENT', () => {
 });
 
 describe('AN ASSIGNMENT THAT IS AN OPERAND', () => {
-  // `(t ≔ 1) + 2` has the value 3 and assigns 1 to `t`. The assignment was
-  // emitted without parentheses, `t = 1 + 2`, which assigns 3, on every
-  // target. JavaScript and GLSL now parenthesize it; Python and WGSL, where
-  // an assignment is a statement, decline.
+  // An assignment that is an operand (`(t ≔ 1) + 2`) or a function argument
+  // is the static error `assignment-in-operand`, so every target declines.
   const operand: any = [
     'Block',
     ['Assign', 't', 0],
@@ -610,23 +635,13 @@ describe('AN ASSIGNMENT THAT IS AN OPERAND', () => {
     ['Add', 't', 'w'],
   ];
 
-  test('JavaScript and GLSL parenthesize the assignment', () => {
-    const ce = new ComputeEngine();
-    const js = compile(ce.box(operand), { fallback: false });
-    expect(js.code).toContain('w = (t = 1) + 2;');
-    expect(js.run!()).toBe(4);
-    expect(ce.box(operand).evaluate().re).toBe(4);
-    const glsl = shader(operand, 'glsl');
-    expect(glsl.code).toContain('w = (t = 1.0) + 2.0;');
-    expect(runShader(glsl.code, 0)).toBe(4);
-  });
-
-  test('Python and WGSL decline', () => {
-    for (const to of ['python', 'wgsl'] as const)
+  test('every target declines', () => {
+    for (const to of ['javascript', 'glsl', 'python', 'wgsl'] as const)
       for (const src of [operand, argument]) {
         const ce = new ComputeEngine();
+        expect(ce.box(src).isValid).toBe(false);
         expect(() => compile(ce.box(src), { to, fallback: false })).toThrow(
-          /the assignment to "t" is an operand of an expression/
+          /invalid expression/
         );
       }
   });
@@ -743,32 +758,34 @@ describe('PYTHON: A ROOT ASSIGNMENT OF A SUM WITH A STATEMENT BODY', () => {
     limits,
   ];
 
-  test('the assignment is a statement, not a return', () => {
-    const code = py.compile(engineWithS().box(['Assign', 's', sum])).code;
-    expect(code).not.toMatch(/return/);
-    expect(code.split('\n').pop()).toMatch(/^\w+ = _tv\d+$/);
+  test('a root assignment declines', () => {
+    // The root is not a local of the compiled code: a write to a symbol
+    // declared in the engine declines.
+    expect(() =>
+      py.compile(engineWithS().box(['Assign', 's', sum]))
+    ).toThrow(/"s" is not a local of the compiled expression/);
   });
 
   (TEST_PYTHON === undefined ? it.skip : it)(
     'the code runs, and a block that reads the assigned name returns it',
     () => {
-      const root = py.compile(engineWithS().box(['Assign', 's', sum])).code;
       const block = py.compile(
         new ComputeEngine().box(['Block', ['Assign', 's', sum], 's'])
       ).code;
       const out = runPython(
-        `import json\ndef g():\n${indentPython(root)}\n` +
-          `def h():\n${indentPython(block)}\n` +
-          `print(json.dumps([g(), h()]))`
+        `import json\ndef h():\n${indentPython(block)}\n` +
+          `print(json.dumps([h()]))`
       );
-      // A root assignment is a statement: the function gives `None`.
-      expect(out).toEqual([null, new ComputeEngine().box(sum).evaluate().re]);
+      expect(out).toEqual([new ComputeEngine().box(sum).evaluate().re]);
     }
   );
 });
 
 describe('WGSL: AN ASSIGNMENT IN A CONDITION', () => {
   test('a condition that assigns declines', () => {
+    // `Not(flag := …)` is the static error `assignment-in-operand`. A bare
+    // assignment as the condition is not marked as an error, and WGSL
+    // declines it as an operand.
     for (const cond of [
       ['Assign', 'flag', ['Greater', 'x', 0]],
       ['Not', ['Assign', 'flag', ['Greater', 'x', 0]]],
@@ -785,37 +802,33 @@ describe('WGSL: AN ASSIGNMENT IN A CONDITION', () => {
           ] as any),
           { to: 'wgsl', fallback: false }
         )
-      ).toThrow(/the assignment to "flag" is an operand of an expression/);
+      ).toThrow(
+        /invalid expression|the assignment to "flag" is an operand of an expression/
+      );
     }
   });
 
-  test('GLSL declares the local copy of a written boolean input as a bool', () => {
-    // The only occurrence of `flag` is the target of the assignment, which
-    // has no definition: the type report read it as `unknown`, and the copy
-    // was `float _tv1 = flag;`.
+  test('GLSL declines a write to a boolean input', () => {
+    // A write to a symbol declared in the engine declines.
     const ce = new ComputeEngine();
     ce.declare('x', 'real | signed_infinity | nan');
     ce.declare('flag', 'boolean');
-    const r = compile(
-      ce.box([
-        'Block',
-        ['Assign', 't', 0],
-        [
-          'If',
-          ['Greater', 'x', 0],
-          ['Assign', 'flag', ['Greater', 'x', 1]],
-          ['Assign', 't', 2],
-        ],
-        't',
-      ]),
-      { to: 'glsl', fallback: false }
-    );
-    expect(r.code.split('\n')[0]).toBe('bool _tv1 = flag;');
-    expect(r.freeSymbolTypes?.flag).toEqual({
-      type: 'boolean',
-      lowered: 'bool',
-      provenance: 'declared',
-    });
+    expect(() =>
+      compile(
+        ce.box([
+          'Block',
+          ['Assign', 't', 0],
+          [
+            'If',
+            ['Greater', 'x', 0],
+            ['Assign', 'flag', ['Greater', 'x', 1]],
+            ['Assign', 't', 2],
+          ],
+          't',
+        ]),
+        { to: 'glsl', fallback: false }
+      )
+    ).toThrow(/"flag" is not a local of the compiled expression/);
   });
 });
 

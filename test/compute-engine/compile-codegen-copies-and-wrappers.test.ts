@@ -176,8 +176,7 @@ describe('a block-local function that is only called has no broadcast wrapper (C
   const literal = ['Function', ['Multiply', 2, 'k'], 'k'];
   const block = (...stmts: Json[]): Json => [
     'Block',
-    ['Declare', 'g', "'function'"],
-    ['Assign', 'g', literal],
+    ['Declare', 'g', "'function'", literal],
     ...stmts,
   ];
 
@@ -208,16 +207,12 @@ describe('a block-local function that is only called has no broadcast wrapper (C
     expect(run(ce, json, { LL: [[1, 2], [], [3]] })).toEqual([[2, 4], [], [6]]);
   });
 
-  test('an assignment that is the last statement gives the scalar variant', () => {
-    // The value of the block is the literal, with no consumer: the scalar
-    // variant, the bare arrow (rule R2 of
-    // `docs/plans/2026-10-31-static-shape-compilation.md`).
-    const r = compile(ce.box(block() as never), { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.code).not.toContain('_SYS.bcastFn');
-    expect(r.code).not.toContain('Array.isArray');
-    const g = (r.run as (v: unknown) => (x: unknown) => unknown)({});
-    expect(g(3)).toBe(6);
+  test('a declaration that is the last statement declines', () => {
+    // A block whose last statement is a declaration has the value `Nothing`.
+    // A declaration whose value is used declines.
+    expect(() => compile(ce.box(block() as never), { fallback: false })).toThrow(
+      /an assignment or a declaration is a statement, and its value is used/
+    );
   });
 });
 
@@ -318,13 +313,12 @@ describe('a block local replaced element by element is written in place (CE-329)
     'xs',
     ['ReplaceAt', 'xs', 'i', ['Multiply', 2, ['At', 'xs', 'i']]],
   ];
-  const declare = ['Declare', 'xs', "'list<real>'"];
+  const declare = ['Declare', 'xs', "'list<real>'", 'L'];
 
   test('the loop copies the list once, and never changes the input', () => {
     const json = [
       'Block',
       declare,
-      ['Assign', 'xs', 'L'],
       ['Loop', update, range],
       'xs',
     ];
@@ -342,7 +336,6 @@ describe('a block local replaced element by element is written in place (CE-329)
     const json = [
       'Block',
       declare,
-      ['Assign', 'xs', 'L'],
       [
         'Loop',
         [
@@ -368,7 +361,6 @@ describe('a block local replaced element by element is written in place (CE-329)
     const json = [
       'Block',
       declare,
-      ['Assign', 'xs', 'L'],
       ['Loop', update, range],
       ['Assign', 'xs', 'L'],
       ['Loop', update, range],
@@ -388,7 +380,6 @@ describe('a block local replaced element by element is written in place (CE-329)
       // assigns may have no value after a loop that runs zero times, and
       // such a read declines.
       ['Declare', 'ys', "'list<real>'", ['List']],
-      ['Assign', 'xs', 'L'],
       ['Loop', ['Block', update, ['Assign', 'ys', 'xs']], range],
       ['Add', ['Sum', 'xs'], ['Multiply', 100, ['Sum', 'ys']]],
     ];
@@ -403,7 +394,6 @@ describe('a block local replaced element by element is written in place (CE-329)
     const json = [
       'Block',
       declare,
-      ['Assign', 'xs', 'L'],
       [
         'Declare',
         'ys',
@@ -421,8 +411,7 @@ describe('a block local replaced element by element is written in place (CE-329)
     ce.declare('LS', 'list<real> | set<real>');
     const json = [
       'Block',
-      ['Declare', 'xs', "'list<real> | set<real>'"],
-      ['Assign', 'xs', 'LS'],
+      ['Declare', 'xs', "'list<real> | set<real>'", 'LS'],
       ['Loop', ['Assign', 'xs', ['ReplaceAt', 'xs', 'i', 0]], range],
       'xs',
     ];
@@ -440,8 +429,7 @@ describe('a block local replaced element by element is written in place (CE-329)
     ce.declare('S', 'string');
     const json = [
       'Block',
-      ['Declare', 'xs', "'any'"],
-      ['Assign', 'xs', 'S'],
+      ['Declare', 'xs', "'any'", 'S'],
       [
         'Loop',
         ['Assign', 'xs', ['ReplaceAt', 'xs', 'j', "'z'"]],
@@ -462,9 +450,7 @@ describe('a block local replaced element by element is written in place (CE-329)
     const json = [
       'Block',
       declare,
-      ['Assign', 'xs', 'L'],
-      ['Declare', 'f', "'function'"],
-      ['Assign', 'f', ['Function', ['Sum', 'xs']]],
+      ['Declare', 'f', "'function'", ['Function', ['Sum', 'xs']]],
       ['Loop', update, range],
       ['f'],
     ];

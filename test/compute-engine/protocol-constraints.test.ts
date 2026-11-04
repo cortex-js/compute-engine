@@ -240,9 +240,14 @@ describe('P19: the flipped pins, as working behavior', () => {
   test('`let f: (T) -> T where T: collection is Hashable` declares', () => {
     const ce = new ComputeEngine();
     ce.declareProtocol('Hashable', {});
-    expect(run(ce, 'let f: (T) -> T where T: collection is Hashable')).toEqual(
-      []
-    );
+    // A `let` without a value declares a function signature only with a
+    // `function` statement of the same name in the same block.
+    expect(
+      run(
+        ce,
+        'let f: (T) -> T where T: collection is Hashable\nfunction f(x) { x }'
+      )
+    ).toEqual([]);
   });
 
   test('the `is`-with-no-protocol-name parse diagnostic STAYS', () => {

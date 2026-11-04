@@ -312,7 +312,7 @@ describe('CE-597: names bound inside the expression are not repaired', () => {
 
   test.each([
     ['Q', ['Block', ['Assign', 'Q', 5], 'Q']],
-    ['X', ['Block', ['Declare', 'X', "'integer'"], ['Assign', 'X', 5], 'X']],
+    ['X', ['Block', ['Declare', 'X', "'integer'", 5], 'X']],
     ['Y', ['Function', ['Block', 'Y'], 'Y']],
   ] as [string, [string, ...unknown[]]][])(
     'a block or a literal declares no global `%s`',
@@ -328,8 +328,7 @@ describe('CE-597: names bound inside the expression are not repaired', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Block',
-      ['Declare', 'N', "'integer'"],
-      ['Assign', 'N', 5],
+      ['Declare', 'N', "'integer'", 5],
       'N',
     ]);
     expect(expr.unknowns).toEqual([]);

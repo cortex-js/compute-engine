@@ -13,6 +13,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { isOpenLocal } from '../boxed-expression/declared-local.js';
 import {
   resolveTypeAlias,
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
@@ -1370,6 +1371,11 @@ function assignmentConflictIn(
   // The variables whose `Declare` states a type that admits values of
   // several shapes (a union, `broadcastable<number>`).
   const declaredUnions = new Set<string>();
+  // The variables that are block locals whose first value has the type
+  // `unknown`. Such a local keeps the type `unknown` (`isOpenLocal()`), so
+  // its type selects no representation. A read of the local finds its
+  // binding (the target of an `Assign` or a `Declare` is not bound).
+  const untypedTargets = new Set<string>();
   // The types of each variable, in the order of the walk, each with the
   // node that gives it.
   const variables = new Map<
@@ -1409,6 +1415,12 @@ function assignmentConflictIn(
   const seen = new Map<Expression, [Env, Expression | undefined][]>();
   while (stack.length > 0) {
     const [node, outer, parent, outerScope] = stack.pop()!;
+    if (isSymbol(node)) {
+      const def = node.valueDefinition;
+      if (def !== undefined && isOpenLocal(def))
+        untypedTargets.add(keyOf(outer, node.symbol));
+      continue;
+    }
     if (!isFunction(node) && !isDictionary(node)) continue;
     const visits = seen.get(node);
     if (visits?.some(([env, p]) => env === outer && p === parent)) continue;
@@ -1553,6 +1565,27 @@ function assignmentConflictIn(
 
   for (const [key, entries] of variables) {
     if (declaredUnions.has(key)) continue;
+    // A variable of type `unknown` that is given a value of a shape other
+    // than a number (a list, a point, a matrix, a string) declines: the
+    // compiled code reads the variable by the static type of each use, and
+    // a use of an `unknown` operand is read as a number. With `t` untyped,
+    // `Block(Declare(q, "unknown", t), If(t > 0, q ≔ [2, 3]), 2q)` gave
+    // `[NaN, NaN]` for `t = 4`; the interpreter gives `[4, 6]`.
+    if (untypedTargets.has(key)) {
+      const nonScalar = entries.find(({ type }) => {
+        const r = resolveTypeForCompilation(type);
+        if (r === 'unknown' || r === 'any' || r === 'never' || r === 'error')
+          return false;
+        return (
+          isSubtype(r, 'string') ||
+          (!isSubtype(r, 'number') &&
+            !isSubtype(r, 'boolean') &&
+            shapeOfType(r) !== undefined)
+        );
+      });
+      if (nonScalar !== undefined)
+        return { node: nonScalar.node, reason: 'assignments' };
+    }
     const types: Readonly<Type>[] = [];
     for (const { type, node } of entries) {
       types.push(type);
@@ -1640,6 +1673,47 @@ function changesState(node: Expression): boolean {
     for (const op of codeOperandsOf(e)) stack.push(op);
   }
   return false;
+}
+
+/**
+ * True when the `Block` `block` is a value expression that binds names: each
+ * statement before the last is a `Declare` (a declaration with no value is
+ * a static error, so each one has a value), the last statement is not a
+ * `Declare`, and no node of the block is an `Assign`, a `Loop`, a `While`,
+ * a `Return`, a `Break` or a `Continue`. The `where` clause and the `;`
+ * parse give such a block. The value of each name is then the value of its
+ * declaration, and the block compiles as a value in an operand position.
+ */
+function isBindingBlock(block: Expression): boolean {
+  if (!isFunction(block, 'Block') || block.ops.length < 2) return false;
+  const last = block.ops[block.ops.length - 1];
+  if (isFunction(last, 'Declare')) return false;
+  if (!block.ops.slice(0, -1).every((s) => isFunction(s, 'Declare')))
+    return false;
+  const stack: Expression[] = [block];
+  const seen = new Set<Expression>();
+  while (stack.length > 0) {
+    const e = stack.pop()!;
+    if ((!isFunction(e) && !isDictionary(e)) || seen.has(e)) continue;
+    seen.add(e);
+    if (isDictionary(e)) {
+      stack.push(...e.values);
+      continue;
+    }
+    const h = e.operator;
+    if (h === 'Hold') continue;
+    if (
+      h === 'Assign' ||
+      h === 'Loop' ||
+      h === 'While' ||
+      h === 'Return' ||
+      h === 'Break' ||
+      h === 'Continue'
+    )
+      return false;
+    for (const op of codeOperandsOf(e)) stack.push(op);
+  }
+  return true;
 }
 
 /**
@@ -2072,6 +2146,8 @@ export function unsettledShapeIn(
   const matches: Expression[] = [];
   // The `Loop` nodes of the code that is kept.
   const loops: Expression[] = [];
+  // The `Block`, `Assign` and `Declare` nodes of the code that is kept.
+  const statementNodes: Expression[] = [];
   const error = compiledNodeWhere(
     root,
     target,
@@ -2089,6 +2165,13 @@ export function unsettledShapeIn(
       )
         matches.push(node);
       if (isFunction(node, 'Loop') && !loops.includes(node)) loops.push(node);
+      if (
+        (isFunction(node, 'Block') ||
+          isFunction(node, 'Assign') ||
+          isFunction(node, 'Declare')) &&
+        !statementNodes.includes(node)
+      )
+        statementNodes.push(node);
       // The use of each operand is recorded on every target: the check of
       // a `Loop` whose value is used (below) reads it on a shader target
       // too.
@@ -2320,6 +2403,82 @@ export function unsettledShapeIn(
   // loop) has no used value, and compiles. This check runs last, so that a
   // more specific reason (a `Return` in a loop with code after it, a
   // `Break` in a `Sum`) stays the reason.
+  // An assignment and a declaration are statements, and a block that ends
+  // in one has the value `Nothing` in the interpreter, which compiled code
+  // has no form for: where its value is used, it declines. The JavaScript
+  // code of `[1, Block(b ≔ 2)]` gave `[1, 2]` where the interpreter gives
+  // `[1, Nothing]`.
+  // A branch of a conditional is its value, also when `operandUse()`
+  // reads a condition that is not a scalar (an untyped parameter) as a
+  // use of each branch: the branch is then used only when the conditional
+  // is, and a conditional over a collection with an assignment in a branch
+  // declines on its own (`'elementwise'`).
+  const isBranchOf = (p: Expression, node: Expression): boolean =>
+    (isFunction(p, 'If') && p.ops[0] !== node) ||
+    (isFunction(p, 'Which') && p.ops.indexOf(node) % 2 === 1);
+  const valueUsed = new Map<Expression, boolean>();
+  const isValueUsed = (node: Expression): boolean => {
+    const known = valueUsed.get(node);
+    if (known !== undefined) return known;
+    valueUsed.set(node, false);
+    const result =
+      roots.has(node) ||
+      !isOperand.has(node) ||
+      (valueParents.get(node) ?? []).some(
+        (p) => !isBranchOf(p, node) || isValueUsed(p)
+      ) ||
+      (endParents.get(node) ?? []).some(isValueUsed);
+    valueUsed.set(node, result);
+    return result;
+  };
+  const nothingValue = statementNodes.find(
+    (n) => !isFunction(n, 'Block') && isValueUsed(n)
+  );
+  if (nothingValue !== undefined)
+    return { node: nothingValue, reason: 'nothing-value' };
+  // A block with an assignment is a statement, or the body of a function
+  // literal, of the root or of a binder (the first operand of a `Sum`, a
+  // `Product`, an `Integrate` or a `Comprehension`, which is a function of
+  // its index), or their last value (the last statement of a block, a
+  // branch of a conditional). In every other operand position
+  // (`1 + Block(a ≔ x, 2a)`, the value of an `Assign`) it declines: compiled
+  // code lowers such a block only as a statement list. A block whose
+  // statements before the last are only declarations with a value is a
+  // value expression, and it compiles in every operand position: the
+  // `where` clause and the `;` parse give such a block
+  // (`Block(Declare(a, "unknown", 3.7x), a - Floor(a))`). Each `Declare`
+  // binds a new name, and nothing in the block changes the value of a name
+  // after its declaration.
+  const isBodyOf = (p: Expression, node: Expression): boolean =>
+    isFunction(p) &&
+    p.ops[0] === node &&
+    (p.operator === 'Function' ||
+      p.ops
+        .slice(1)
+        .some((op) => isFunction(op, 'Limits') || isFunction(op, 'Element')));
+  const inOperand = new Map<Expression, boolean>();
+  const isInOperand = (node: Expression): boolean => {
+    const known = inOperand.get(node);
+    if (known !== undefined) return known;
+    inOperand.set(node, false);
+    const result =
+      (valueParents.get(node) ?? []).some((p) =>
+        isBranchOf(p, node) ? isInOperand(p) : !isBodyOf(p, node)
+      ) ||
+      (endParents.get(node) ?? []).some(isInOperand);
+    inOperand.set(node, result);
+    return result;
+  };
+  const blockValue = statementNodes.find(
+    (n) =>
+      isFunction(n, 'Block') &&
+      n.ops.some((s) => isFunction(s, 'Assign') || isFunction(s, 'Declare')) &&
+      !isBindingBlock(n) &&
+      isInOperand(n)
+  );
+  if (blockValue !== undefined)
+    return { node: blockValue, reason: 'block-value' };
+
   const loopValue =
     loops.find((l) => isUsed(l) && isUnrepresentableLoopValue(l, target)) ??
     caseLoops.find((l) => isUnrepresentableLoopValue(l, target));
@@ -2454,6 +2613,33 @@ function throwUnsettledShape(unsettled: UnsettledShape): never {
         `compiled representation, and the compiled loop does not carry the ` +
         `value of a \`Break\`. Use the loop as a statement, and end the ` +
         `block with the value it should have.`,
+      value,
+    });
+  if (unsettled.reason === 'nothing-value')
+    throw new CompileDeclineError({
+      code: UNSETTLED_SHAPE_CODE,
+      kind: 'capability',
+      message:
+        `Could not compile "${value}": an assignment or a declaration is a ` +
+        `statement, and its value is used here (it is the last statement ` +
+        `of a block whose value is used). Such a block has the value ` +
+        `\`Nothing\`, which has no compiled representation. End the block ` +
+        `with the value it should have.`,
+      value,
+    });
+  if (unsettled.reason === 'block-value')
+    throw new CompileDeclineError({
+      code: UNSETTLED_SHAPE_CODE,
+      kind: 'capability',
+      message:
+        `Could not compile "${value}": a block with a statement other than ` +
+        `a declaration with a value is an operand here. Such a block ` +
+        `compiles only as a statement, or as the body of a function or of ` +
+        `the compiled expression. A block that only declares names with a ` +
+        `value before its last statement (a \`where\` clause) compiles as ` +
+        `an operand. ` +
+        `Assign the value of the block to a local declared before it, and ` +
+        `read the local.`,
       value,
     });
   if (unsettled.reason === 'return-in-loop')

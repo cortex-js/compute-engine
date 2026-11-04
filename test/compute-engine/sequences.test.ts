@@ -1688,7 +1688,7 @@ describe('SEQUENCE TERMS: side effects of the recurrence', () => {
     ce.declareSequence('R', {
       base: { 0: 0 },
       recurrence:
-        '\\operatorname{If}(n > 0, \\operatorname{Block}(\\operatorname{Assign}(u, S_{n}), u + R_{n-1}), 0)',
+        '\\operatorname{If}(n > 0, \\left(u + R_{n-1} \\text{ where } u \\coloneq S_{n}\\right), 0)',
     });
     const d = ce
       .box(['WithRandomSeed', 1, ['Tuple', ['Random'], ['Random'], ['Random']]])

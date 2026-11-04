@@ -548,8 +548,7 @@ describe('A CUSTOM \\text ENTRY THAT DECLINES', () => {
     expect(syntax.parse('P \\text{and} Q')).toEqual(['And', 'P', 'Q']);
     expect(syntax.parse('\\text{let} y \\coloneq 2')).toEqual([
       'Block',
-      ['Declare', 'y'],
-      ['Assign', 'y', 2],
+      ['Declare', 'y', "'unknown'", 2],
     ]);
   });
 });

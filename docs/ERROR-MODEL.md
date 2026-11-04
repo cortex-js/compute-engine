@@ -295,6 +295,54 @@ dictionary construction, the omission by `ListFrom`, the `Map` bypass, the
 covariance family); and the parse of an empty slot to `Nothing`. Those
 passages are kept as history.
 
+### Block locals: a declaration has a value; an assignment is a statement — user decision of 2026-11-02
+
+A local of a block always has a value when it is read. There is no error
+value for a read of a local with no value, and no symbolic read of such a
+local: each case below is a static error, put in place by the
+canonicalization, so the expression is invalid, `epsil check` reports it
+before the program runs, and a compilation declines it.
+
+| Code                         | Example                                         | Replacement                         |
+| ---------------------------- | ----------------------------------------------- | ----------------------------------- |
+| `declaration-without-value`  | `Declare(x, "integer")` then `Assign(x, 5)`     | `Declare(x, "integer", 5)`          |
+| `first-assignment-in-branch` | `Block(If(c, Assign(a, 1)), a)`                 | `Block(Assign(a, 0), If(c, Assign(a, 1)), a)` |
+| `read-before-declaration`    | `Block(Assign(b, k), Declare(k, "integer", 2))` | declare `k` before the first use    |
+| `assignment-in-operand`      | `f(Assign(a, 2))`, `Assign(t, Assign(u, v))`    | `Block(Assign(a, 2), f(a))`         |
+| `assignment-type-mismatch`   | `Block(Assign(a, 1), Assign(a, "x"), a)`        | use another name                    |
+
+- A declaration is `Declare(x, type, v)`, a `Declare` whose attributes
+  dictionary has a `value` entry, or a first `Assign(x, v)` at the own level
+  of a block. The three-operand `Declare(x, "unknown", v)` of the `where`
+  clause and of the `;` parse is a declaration. `ce.declare()` and
+  `ce.assign()` do not change.
+- A first assignment in a branch of an `If` or a `Which`, or in the body of a
+  `Loop`, or in a case of a `Match`, is an error, also in a block of the
+  branch, and also at the top level, outside every block
+  (`If(c, Assign(a, 1))` boxed alone). An assignment to a name that the
+  engine declares (`ce.declare()`, an earlier top-level `Assign`) or to a
+  parameter is not a first assignment: it writes that name. The term of a
+  `Comprehension` is a value, not a branch: a block there declares its own
+  locals.
+- A use of a local in a function literal is not checked: it runs when the
+  function is called.
+- The type of a local is its declared type, or else the type of its first
+  value, widened for the test: a number to `number`, a string or a character
+  to `string`, a boolean to `boolean`, and the elements of a list, a set or a
+  tuple the same way. A value whose type is `unknown` or `any`, or is absent,
+  is accepted. The static type of the local is the join of the types of its
+  values, which is a subtype of the widened type. A local whose first value
+  has the type `unknown` (an untyped parameter) has the type `unknown`, and
+  accepts a value of any type.
+- A block whose last statement is an `Assign` or a `Declare` has the value
+  `Nothing`, which is kept where the block is used (`[1, Block(Assign(b,
+  2))]` is `[1, Nothing]`). A top-level `Assign(x, v)` outside every block
+  keeps its value `v`.
+- The LaTeX parser reads `\operatorname{let} k \coloneq v` as `Declare(k,
+  "unknown", v)`, and a chained `a \coloneq b \coloneq v` as the syntax error
+  `chained-assignment`. The Epsil parser reports `a := b := v` with the same
+  code.
+
 ### A comparison is two-valued — user decision of 2026-11-02
 
 **Settled, implemented 2026-11-02** (option A of page 3 of

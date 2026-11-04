@@ -587,7 +587,7 @@ describe('arithmetic over a read proved to find no row', () => {
   ])('a block local bound to %j gives %s in a sum', (read, value) => {
     for (const json of [
       ['Block', ['Assign', 'r', read], ['Add', 'r', 1]],
-      ['Block', ['Declare', 'r'], ['Assign', 'r', read], ['Add', 'r', 1]],
+      ['Block', ['Declare', 'r', "'unknown'", read], ['Add', 'r', 1]],
     ]) {
       const expr = ce.box(json as any);
       const v = expr.evaluate();

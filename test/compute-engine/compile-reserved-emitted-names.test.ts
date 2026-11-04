@@ -129,8 +129,7 @@ describe('Other user names equal to an emitted identifier', () => {
   test('a block local named _SYS', () => {
     const r = compiled([
       'Block',
-      ['Declare', '_SYS', "'integer'"],
-      ['Assign', '_SYS', 3],
+      ['Declare', '_SYS', "'integer'", 3],
       ['Factorial', '_SYS'],
     ]);
     expect(r.code).not.toContain('let _SYS');
@@ -191,8 +190,7 @@ describe('Other user names equal to an emitted identifier', () => {
       'Function',
       [
         'Block',
-        ['Declare', 'q', "'integer'"],
-        ['Assign', 'q', 0],
+        ['Declare', 'q', "'integer'", 0],
         [
           'Loop',
           ['Assign', 'q', ['Add', 'q', ['Factorial', '_SYS']]],
@@ -240,8 +238,7 @@ describe('A local named like an emitted identifier in the Block body of a Loop',
   // same fresh name at its declaration and at each read.
   const loopBlockBody = (local: string, upper: unknown, value: unknown) => [
     'Block',
-    ['Declare', 'q', "'integer'"],
-    ['Assign', 'q', 0],
+    ['Declare', 'q', "'integer'", 0],
     [
       'Loop',
       [

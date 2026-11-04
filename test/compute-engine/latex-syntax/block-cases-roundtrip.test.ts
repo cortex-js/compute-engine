@@ -123,18 +123,16 @@ describe('Block → one-column `cases` (serializer)', () => {
 
 describe('Block spellings left byte-identical', () => {
   test('multi-statement WITH an Assign keeps the `; ` list', () => {
-    // A local (`Declare` then `Assign`) is written `s\\coloneq2`; a bare
-    // `Assign`, which changes an `s` outside the block, is written in the
-    // function spelling. The bare `Assign` reads back unchanged; the local
-    // reads back as the one statement `Declare(s, "unknown", 2)`, which is
-    // what the parser gives every `s\\coloneq v` local.
+    // A local declared with its value, `Declare(s, "unknown", 2)`, is
+    // written as a `where` clause, which reads back as the same statement.
+    // A bare `Assign`, which changes an `s` outside the block, is written in
+    // the function spelling, in the `; ` list, and reads back unchanged.
     const local = roundtrip([
       'Block',
-      ['Declare', 's'],
-      ['Assign', 's', 2],
+      ['Declare', 's', "'unknown'", 2],
       ['Add', 's', 1],
     ]);
-    expect(local.latex).toBe('s\\coloneq2; s+1');
+    expect(local.latex).toBe('s+1\\text{ where }s\\coloneq2');
     expect(local.after).toBe(
       JSON.stringify(['Block', ['Declare', 's', "'unknown'", 2], ['Add', 's', 1]])
     );
@@ -149,9 +147,9 @@ describe('Block spellings left byte-identical', () => {
     expect(r.after).toBe(r.before);
   });
 
-  test('`Declare` + `Assign` is ONE emitted statement → trailing `;`', () => {
+  test('a typed `Declare` with a value is ONE emitted statement → trailing `;`', () => {
     // A typed `Declare` is written with `let`, which keeps the type.
-    const r = roundtrip(['Block', ['Declare', 's', "'number'"], ['Assign', 's', 2]]);
+    const r = roundtrip(['Block', ['Declare', 's', "'number'", 2]]);
     expect(r.latex).toBe('\\text{let }s\\colon number\\coloneq2;');
     expect(r.after).toBe(r.before);
   });
@@ -289,22 +287,16 @@ describe('fence interplay — the cases block in operand/body position', () => {
   });
 
   test('a `;`-spelled Block operand still takes the paren fence', () => {
+    // A typed local is written with `let` in the `; ` list.
     const r = roundtrip([
       'Repeat',
-      ['Block', ['Declare', 'q'], ['Assign', 'q', 2], ['Add', 'q', 1]],
+      ['Block', ['Declare', 'q', "'integer'", 2], ['Add', 'q', 1]],
       3,
     ]);
     expect(r.latex).toBe(
-      '\\mathrm{Repeat}(\\left(q\\coloneq2; q+1\\right), 3)'
+      '\\mathrm{Repeat}(\\left(\\text{let }q\\colon integer\\coloneq2; q+1\\right), 3)'
     );
-    // The local reads back as one `Declare(q, "unknown", 2)` statement.
-    expect(r.after).toBe(
-      JSON.stringify([
-        'Repeat',
-        ['Block', ['Declare', 'q', "'unknown'", 2], ['Add', 'q', 1]],
-        3,
-      ])
-    );
+    expect(r.after).toBe(r.before);
   });
 
   test('a bare fenced cases block parses as Delimiter(Block)', () => {
@@ -448,14 +440,6 @@ describe('all-relation Block → `\\operatorname{Block}(…)` (USER RULING 2026-
     expect(r.latex).toBe('\\operatorname{Block}(x\\lt1, y\\ne2, 3\\le z)');
     expect(r.after).toBe(r.before);
     expect(ce().parse(r.latex).operator).toBe('Block');
-  });
-
-  test('a `Declare` alone is a `let` statement, which keeps the `; ` list', () => {
-    // A `Declare` with no `Assign` after it is written `let x`; a `let`
-    // statement makes the `;` list a block, as an assignment does.
-    const r = roundtrip(['Block', ['Declare', 'x'], ['Equal', 'x', 1], ['Equal', 'y', 2]]);
-    expect(r.latex).toBe('\\text{let }x; x=1; y=2');
-    expect(r.after).toBe(r.before);
   });
 
   //

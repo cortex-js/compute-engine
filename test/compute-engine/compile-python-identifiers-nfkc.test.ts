@@ -112,20 +112,39 @@ describe('PYTHON: IDENTIFIERS WITH THE SAME NFKC FORM', () => {
     }
   );
 
-  (TEST_PYTHON === undefined ? it.skip : it)(
-    'a written global with a name that NFKC changes is read by its NFKC form',
-    () => {
-      // `u ≔ u + 1` in a function makes `u` a local initialized from the
-      // module global. Python stores the global `ﬁ = 1` under the name `fi`.
-      const e = new ComputeEngine();
-      e.declare('ﬁ', 'real');
-      const fn = py.compileFunction(
+  // Compiled code writes only its own locals: a write to a symbol of the
+  // engine declines, so no compiled function writes a module global, and
+  // the NFKC form of the name of a global is never a key of a lookup.
+  it('a write to a symbol of the engine with a name that NFKC changes declines', () => {
+    const e = new ComputeEngine();
+    e.declare('ﬁ', 'real');
+    expect(() =>
+      py.compileFunction(
         e.box(['Block', ['Assign', fi, ['Add', fi, 1]], fi]),
         'w',
         ['x']
+      )
+    ).toThrow(/"ﬁ" is not a local of the compiled expression/);
+  });
+
+  // A block local with a name that NFKC changes is written and read by the
+  // same Python name, so its value is kept.
+  (TEST_PYTHON === undefined ? it.skip : it)(
+    'a written block local with a name that NFKC changes keeps its value',
+    () => {
+      const e = new ComputeEngine();
+      e.declare('x', 'real');
+      const fn = py.compileFunction(
+        e.box([
+          'Block',
+          ['Assign', fi, 'x'],
+          ['Assign', fi, ['Add', fi, 1]],
+          fi,
+        ]),
+        'w',
+        ['x']
       );
-      expect(fn).toContain('globals().get("fi")');
-      const program = ['import json', 'ﬁ = 1', fn, 'print(json.dumps(w(0)))'];
+      const program = ['import json', fn, 'print(json.dumps(w(1)))'];
       expect(runPython(program.join('\n'))).toBe(2);
     }
   );

@@ -52,7 +52,7 @@ function run(withScope: boolean, asOperator = false) {
     );
     ce.assign('f', ['Function', ['Sin', ['Multiply', 'b', 'p']], 'p']);
     const block = ce.expr(
-      ['Block', ['Declare', 'b'], ['Assign', 'b', 1], ['f', 0.5]],
+      ['Block', ['Declare', 'b', "'unknown'", 1], ['f', 0.5]],
       withScope ? { scope: ce.createScope() } : undefined
     );
     return { ce, block, errors };
@@ -64,7 +64,7 @@ function run(withScope: boolean, asOperator = false) {
 // The type of the call `f(0.5)`, the last statement of the block.
 function callType(block: ReturnType<typeof run>['block']): string {
   if (!isFunction(block)) throw new Error('expected a Block');
-  return block.ops[2].type.toString();
+  return block.ops[1].type.toString();
 }
 
 describe('CE-542: a Block local does not shadow a name outside the Block', () => {

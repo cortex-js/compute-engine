@@ -411,15 +411,17 @@ describe('a destructuring assign the interpreter would refuse fails closed', () 
     const expr = boxedBlock(
       'do { let x: integer = 1; let y: integer = 2; (x, y) := (7, 4.5); 100*x + y }'
     );
+    // The leaf `y` is checked against its declared type when the block is
+    // canonicalized: the assignment is the static error
+    // `assignment-type-mismatch`, and the compilation declines.
     const r = compile(expr);
     expect(r?.success).toBe(false);
-    expect(r?.error).toMatch(/declared type|declared type of/);
+    expect(r?.error).toMatch(/assignment-type-mismatch/);
     expect(r?.error).toMatch(/Could not compile/);
-    // The refusal is the statement's value, and an error value short-circuits
-    // the block (it used to be discarded, and the block continued to 102).
+    // The static error is the value of the block.
     const result = expr.evaluate();
     expect(result.operator).toBe('Error');
-    expect(result.toString()).toMatch(/incompatible-type/);
+    expect(result.toString()).toMatch(/assignment-type-mismatch/);
   });
 
   test('a declared-type target fails closed even when the value FITS', () => {

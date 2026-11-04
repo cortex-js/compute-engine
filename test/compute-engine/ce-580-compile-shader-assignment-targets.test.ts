@@ -537,8 +537,7 @@ describe('CE-580 a value whose type is not certain is not checked', () => {
     // `vec2` value does not fit.
     const block = [
       'Block',
-      ['Declare', 'q'],
-      ['Assign', 'q', ['Multiply', 2, 'uv']],
+      ['Declare', 'q', "'unknown'", ['Multiply', 2, 'uv']],
       'q',
     ];
     expect(glslShader(block)).toBe(
@@ -857,8 +856,7 @@ describe('CE-580 the width of a Block local', () => {
   it('a local declared `any` that holds a point', () => {
     const json = [
       'Block',
-      ['Declare', 'p', "'any'"],
-      ['Assign', 'p', ['List', 1, 2]],
+      ['Declare', 'p', "'any'", ['List', 1, 2]],
       ['Assign', 'q', ['Sin', 'p']],
       'q',
     ];
@@ -877,8 +875,7 @@ describe('CE-580 the width of a Block local', () => {
   it('a local declared `real` that is assigned a point declines', () => {
     const json = [
       'Block',
-      ['Declare', 'p', "'real'"],
-      ['Assign', 'p', ['List', 'x', 2]],
+      ['Declare', 'p', "'real'", ['List', 'x', 2]],
       ['Assign', 'q', ['Add', 'p', 1]],
       'q',
     ];
@@ -1007,8 +1004,7 @@ describe('CE-580 complex arithmetic on a vector is refused', () => {
   // `vec2(q, 1.0)`, which is not valid source.
   const withVector = (value: unknown) => [
     'Block',
-    ['Declare', 'p', "'real'"],
-    ['Assign', 'p', ['List', 'x', 2]],
+    ['Declare', 'p', "'real'", ['List', 'x', 2]],
     ['Assign', 'q', ['Add', 'p', 1]],
     value,
   ];
@@ -1091,8 +1087,7 @@ describe('CE-580 the width of a selection, a Block, and a WGSL split', () => {
   ];
   const block = [
     'Block',
-    ['Declare', 'q'],
-    ['Assign', 'q', ['Multiply', 2, 'uv']],
+    ['Declare', 'q', "'unknown'", ['Multiply', 2, 'uv']],
     'q',
   ];
 

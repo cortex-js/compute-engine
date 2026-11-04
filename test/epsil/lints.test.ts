@@ -133,8 +133,9 @@ describe('positional `=`', () => {
 
   test('`a = b = 5` is diagnosed — it would assign a boolean', () => {
     expect(parseCodes('a = b = 5')).toContain('chained-assignment');
-    // …but the explicit spellings are not: one chains, one compares.
-    expect(parseCodes('a := b := 5')).toEqual([]);
+    // A chained `:=` is diagnosed too: an assignment is a statement, not a
+    // value. The explicit comparison is not diagnosed.
+    expect(parseCodes('a := b := 5')).toEqual(['chained-assignment']);
     expect(parseCodes('a = (b = 5)')).toEqual([]);
     expect(parseCodes('a = b == 5')).toEqual([]);
   });
@@ -188,7 +189,7 @@ describe('print hint', () => {
     // path — where the suggestion for `print` would be its own Epsil
     // spelling, `print`, so nothing is suggested at all. Never "There is no
     // print; did you mean print?".
-    expect(execDiagnostics('let print\nprint("x")')).toEqual([]);
+    expect(execDiagnostics('let print = (s) => s\nprint("x")')).toEqual([]);
   });
 
   test('other unknown calls keep the did-you-mean path', () => {

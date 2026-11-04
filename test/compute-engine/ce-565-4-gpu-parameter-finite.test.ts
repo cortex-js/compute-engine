@@ -395,20 +395,21 @@ describe.each(TARGETS)('CE-565.4 on %s', (to) => {
   });
 
   describe('a value that the code writes', () => {
-    // `x ≔ exp(x)` assigns `+∞` (in f32) to `x` for x > 88.7: the declared
-    // type of `x` describes the value that the host passes, not this one.
-    const WRITE = ['Assign', 'x', ['Exp', 'x']];
+    // `w ≔ exp(x)` assigns `+∞` (in f32) to the local `w` for x > 88.7:
+    // the declared type of `x` says nothing about the value of `w`. (A
+    // compiled block does not write the input `x` itself.)
+    const WRITE = ['Assign', 'w', ['Exp', 'x']];
 
     it('keeps the guard at the root', () => {
       const ce = new ComputeEngine();
       ce.declare('x', 'real');
-      const { code } = shader(ce, ['Block', WRITE, ['Sin', 'x']], to);
-      expect(code).toMatch(/_gpu_sin\(_tv\d+\)/);
+      const { code } = shader(ce, ['Block', WRITE, ['Sin', 'w']], to);
+      expect(code).toMatch(/_gpu_sin\(w\)/);
     });
 
     it('keeps the guard in the body of a function it is passed to', () => {
       const ce = engineWith('F', ['Function', ['Sin', 'a'], 'a'], 'function');
-      const { preamble } = shader(ce, ['Block', WRITE, ['F', 'x']], to);
+      const { preamble } = shader(ce, ['Block', WRITE, ['F', 'w']], to);
       expect(returned(preamble, '_fn_F')).toBe('_gpu_sin(a)');
     });
   });

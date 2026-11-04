@@ -107,8 +107,10 @@ describe('An input with no type is refused (R1)', () => {
     const ce = new ComputeEngine();
     const body: MathJsonExpression = [
       'Block',
-      ['Declare', 's', 'number'],
-      ['Assign', 's', 0],
+      ['Declare', 's', 'number', 0],
+      // A first assignment in a loop body is a static error: `p` is first
+      // assigned at the level of the block.
+      ['Assign', 'p', ['Tuple', 't', ['Multiply', 2, 't']]],
       [
         'Loop',
         [
@@ -213,12 +215,10 @@ describe('An input with no type is refused (R1)', () => {
     expect(r.run!({})).toBeCloseTo(0.6035108316776591, 10);
   });
 
-  // A name that only the branches of an `If` in a block assign is an
-  // input, also when the scope of the block binds it. The interpreter
-  // gives no value for a read of `b` at `x = 5` in
-  // `Block(If(x < 1, b ≔ 1); b)`, and the compiled code, which does not
-  // check that read, reads the input `b`. So the name is subject to the
-  // refusal of an input with no type.
+  // A first assignment of a name in a branch of an `If` is a static error,
+  // so the expression is invalid. When the engine declares the name, the
+  // branches write a symbol of the engine, and a write to a symbol that the
+  // compiled code does not declare declines.
   test.each([
     [
       'both branches',
@@ -226,31 +226,23 @@ describe('An input with no type is refused (R1)', () => {
     ],
     ['one branch', ['If', ['Less', 'x', 1], ['Assign', 'b', 1]]],
   ] as [string, MathJsonExpression][])(
-    'a name that only %s of a block assign is an input',
+    'a name that only %s of a block assign declines',
     (_label, statement) => {
       const json: MathJsonExpression = ['Block', statement, 'b'];
       const r = compile(engine().box(json));
       expect(r.success).toBe(false);
-      expect(r.diagnostic?.code).toBe('untyped-input');
-      expect(r.unsupported).toContain('b');
-      // Declared, `b` compiles, and the value is the interpreter's.
+      expect(r.error).toMatch(/invalid expression/);
       const ce = engine();
       ce.declare('b', 'real');
-      const typed = compile(ce.box(json), { fallback: false });
-      expect(typed.success).toBe(true);
-      expect(typed.freeSymbols).toEqual(['x', 'b']);
-      const fresh = engine();
-      fresh.declare('b', 'real');
-      fresh.assign('x', 0);
-      expect(fresh.box(json).evaluate().json).toBe(1);
-      expect(typed.run!({ x: 0, b: 7 })).toBe(1);
+      const typed = compile(ce.box(json));
+      expect(typed.success).toBe(false);
+      expect(typed.error).toMatch(/"b" is not a local of the compiled/);
     }
   );
 
-  // No scope of the block binds `q` here: the interpreter writes a binding
-  // of `q` outside the block, so `q` is an input, also when the code only
-  // writes it.
-  test('a name that the code only writes outside the block is an input', () => {
+  // A first assignment of a name in a loop body is a static error, so the
+  // expression is invalid.
+  test('a name that the code first assigns in a loop body declines', () => {
     const ce = engine();
     const r = compile(
       ce.box([
@@ -261,8 +253,7 @@ describe('An input with no type is refused (R1)', () => {
       ])
     );
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('untyped-input');
-    expect(r.unsupported).toContain('q');
+    expect(r.error).toMatch(/invalid expression/);
   });
 
   test('another reason to decline stays the reason', () => {
@@ -1226,8 +1217,8 @@ describe('The admission checks of round 2 of the review', () => {
   ): unknown => ce.box(json).subs(vars).evaluate().json;
 
   // The branches of a conditional in a statement position assign values of
-  // different shapes to `p`, which is read later. The compiled code gave
-  // `null` at `x = 1`, where the interpreter gives `[2, 4]`.
+  // different shapes to `p`, which is read later. A first assignment in a
+  // branch is a static error, so the expression is invalid and declines.
   test.each(TARGETS)(
     'values of different shapes assigned to one name decline on %s',
     (to) => {
@@ -1242,16 +1233,9 @@ describe('The admission checks of round 2 of the review', () => {
         ],
         ['Multiply', 2, 'p'],
       ];
-      expect(interpret(ce, json, { x: 1 })).toEqual(['List', 2, 4]);
       const r = compile(ce.box(json), { to });
       expect(r.success).toBe(false);
-      // On interval-js, the lowering of the `If` declines first. On a shader
-      // target, the conditional in a statement position declines first: its
-      // branches have different shapes.
-      if (to === 'interval-js') return;
-      expect(r.diagnostic?.code).toBe('unsettled-shape');
-      if (to === 'glsl' || to === 'wgsl') return;
-      expect(r.error).toMatch(/the name that it assigns gets values or types/);
+      expect(r.error).toMatch(/invalid expression/);
     }
   );
 
@@ -1286,9 +1270,10 @@ describe('The admission checks of round 2 of the review', () => {
       ],
       ['Multiply', 2, 'p'],
     ];
+    // A list after a number is the static error `assignment-type-mismatch`.
     const r = compile(ce.box(json));
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.error).toMatch(/invalid expression/);
   });
 
   // The variable of an indefinite integral is the outer input `x`, which
@@ -1328,10 +1313,10 @@ describe('The admission checks of round 2 of the review', () => {
     }
   });
 
-  // Inference gives the input `p` the type `number` from the read `2p`, but
-  // the code assigns lists to `p`. The compiled code gave `null` where the
-  // interpreter gives `[2, 4]` and `[6, 8]`. The assigned value and the
-  // type of the input have different shapes.
+  // A first assignment of `p` in a branch is a static error, so the
+  // expression is invalid. When the engine declares `p`, the branches write
+  // a symbol of the engine, and a write to a symbol that the compiled code
+  // does not declare declines.
   test.each([
     [
       'two branches',
@@ -1347,30 +1332,23 @@ describe('The admission checks of round 2 of the review', () => {
       ['If', ['Greater', 'x', 0], ['Assign', 'p', ['List', 1, 2]]],
     ],
   ] as [string, MathJsonExpression][])(
-    'a list assigned to an input inferred as a number declines: %s',
+    'a list assigned to a name in a branch declines: %s',
     (_label, statement) => {
-      const ce = engine();
       const json: MathJsonExpression = [
         'Block',
         statement,
         ['Multiply', 2, 'p'],
       ];
-      expect(interpret(ce, json, { x: 1 })).toEqual(['List', 2, 4]);
       for (const to of TARGETS) {
-        // The evaluation above assigned `p` in `ce`: a new engine.
         const r = compile(engine().box(json), { to });
         expect(r.success).toBe(false);
-        // interval-js has no lowering of a `List`, and Python none of an
-        // `If` with no `else`: these decline first.
-        if (to === 'interval-js' || to === 'python') continue;
-        expect(r.diagnostic?.code).toBe('unsettled-shape');
+        expect(r.error).toMatch(/invalid expression/);
       }
-      // A declared type of the same shape is accepted.
       const declared = engine();
       declared.declare('p', 'list<real>');
-      const d = compile(declared.box(json), { fallback: false });
-      expect(d.success).toBe(true);
-      expect(d.run!({ x: 1, p: [5, 6] })).toEqual([2, 4]);
+      const d = compile(declared.box(json));
+      expect(d.success).toBe(false);
+      expect(d.error).toMatch(/"p" is not a local of the compiled/);
     }
   );
 
@@ -1436,8 +1414,7 @@ describe('Assigned names and the shapes of their values', () => {
   test('an assignment to a loop index does not write the input', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Declare', 's', "'real'"],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'real'", 0],
       [
         'Loop',
         [
@@ -1457,9 +1434,9 @@ describe('Assigned names and the shapes of their values', () => {
     expect(r.error).toMatch(/assigns the loop index/);
   });
 
-  // The input `acc` has the type that inference gives it, a number, and the
-  // code assigns it numbers.
-  test('an input assigned values of the shape of its type compiles', () => {
+  // A first assignment of `acc` in a loop body is a static error, so the
+  // expression is invalid and declines.
+  test('a name that only a loop body assigns declines', () => {
     const json: MathJsonExpression = [
       'Block',
       [
@@ -1469,12 +1446,9 @@ describe('Assigned names and the shapes of their values', () => {
       ],
       'acc',
     ];
-    const r = compile(engine().box(json), { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!({ acc: 1 })).toBe(16);
-    const ce = engine();
-    ce.assign('acc', 1);
-    expect(ce.box(json).evaluate().json).toBe(16);
+    const r = compile(engine().box(json));
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/invalid expression/);
   });
 
   // The placeholder `_` of a destructuring target writes nothing, and is not
@@ -1493,8 +1467,8 @@ describe('Assigned names and the shapes of their values', () => {
     expect(interpret(json, 1)).toBe(3);
   });
 
-  // The declared type of an input is compared with the values that the code
-  // assigns to it. The interpreter gives an `incompatible-type` error.
+  // The interpreter gives an `incompatible-type` error. The compiled code
+  // declines: a write to a symbol declared in the engine declines.
   test.each([
     ['real', ['Assign', 'p', ['List', 1, 2]]],
     ['list<real>', ['Assign', 'p', 3]],
@@ -1517,18 +1491,19 @@ describe('Assigned names and the shapes of their values', () => {
         typed.declare('p', type);
         const r = compile(typed.box(json), { to });
         expect(r.success).toBe(false);
-        // A shader has no lowering of `2p` for a list: it declines first.
-        if (to !== 'javascript' && type !== 'real') continue;
-        expect(r.diagnostic?.code).toBe('unsettled-shape');
+        expect(r.error).toMatch(/"p" is not a local of the compiled/);
       }
     }
   );
 
   // In a function body, `p` is a local of the body, which both branches
-  // assign. The compiled code gives the interpreter's values.
+  // assign. The compiled code gives the interpreter's values. A first
+  // assignment in a branch is a static error: `p` is first assigned at the
+  // level of the block.
   test('a local that both branches assign lists compiles', () => {
     const body: MathJsonExpression = [
       'Block',
+      ['Assign', 'p', ['List', 0, 0]],
       [
         'If',
         ['Greater', 't', 0],
@@ -1549,6 +1524,8 @@ describe('Assigned names and the shapes of their values', () => {
   });
 
   // The branches give the local `p` a list and a number.
+  // A first assignment of `p` in a branch is a static error: the function
+  // literal is invalid, and its compilation declines.
   test.each(SHAPE_TARGETS)(
     'a local that the branches give different shapes declines on %s',
     (to) => {
@@ -1562,39 +1539,30 @@ describe('Assigned names and the shapes of their values', () => {
         ],
         ['Multiply', 2, 'p'],
       ];
-      expect(interpret(['f', 'x'], 1, body)).toEqual(['List', 2, 4]);
-      const r = compile(withF(body).box(['f', 'x']), { to });
+      const r = compile(engine().box(['Function', body, 't']), { to });
       expect(r.success).toBe(false);
-      // On a shader, the declaration of the local declines first.
-      if (to === 'javascript')
-        expect(r.diagnostic?.code).toBe('unsettled-shape');
+      expect(r.error).toMatch(/invalid expression/);
     }
   );
 
-  // Only one branch assigns the local `p`, and nothing assigns it before.
-  // The interpreter gives `read-before-declaration` for the read of `p`
-  // when the branch does not run, which compiled code cannot give, so the
-  // compilation declines on every target (CE-636).
-  test('a local that one branch assigns declines where it is read', () => {
+  // Only one branch assigns the local `p`, and nothing assigns it before. A
+  // first assignment in a branch is a static error: the function literal is
+  // invalid, and its compilation declines on every target.
+  test('a local that one branch assigns declines', () => {
     const body: MathJsonExpression = [
       'Block',
       ['If', ['Greater', 't', 0], ['Assign', 'p', ['List', 1, 2]]],
       ['Multiply', 2, 'p'],
     ];
-    const json: MathJsonExpression = ['f', 'x'];
-    expect(interpret(json, 1, body)).toEqual(['List', 2, 4]);
-    expect(JSON.stringify(interpret(json, -1, body))).toMatch(
-      /read-before-declaration/
-    );
     for (const to of ['javascript', 'glsl', 'wgsl']) {
-      const s = compile(withF(body).box(json), { to });
+      const s = compile(engine().box(['Function', body, 't']), { to });
       expect(s.success).toBe(false);
-      expect(s.error).toMatch(/when no assignment gave it a value/);
+      expect(s.error).toMatch(/invalid expression/);
     }
   });
 
-  // The path on which the `If` runs no branch keeps the number that `p` had
-  // before the `If`.
+  // A list after a number is the static error `assignment-type-mismatch`,
+  // so the expression is invalid and declines.
   test.each(SHAPE_TARGETS)(
     'a branch that changes the shape of an assigned name declines on %s',
     (to) => {
@@ -1604,12 +1572,9 @@ describe('Assigned names and the shapes of their values', () => {
         ['If', gt, ['Assign', 'p', ['List', 1, 2]]],
         ['Multiply', 2, 'p'],
       ];
-      expect(interpret(json, 1)).toEqual(['List', 2, 4]);
-      expect(interpret(json, -1)).toBe(0);
       const r = compile(engine().box(json), { to });
       expect(r.success).toBe(false);
-      expect(r.diagnostic?.code).toBe('unsettled-shape');
-      expect(r.error).toMatch(/the name that it assigns gets values or types/);
+      expect(r.error).toMatch(/invalid expression/);
     }
   );
 
@@ -1632,7 +1597,8 @@ describe('Assigned names and the shapes of their values', () => {
   });
 
   // With the parameter `t` typed `real`, `[t, 2]` is a list of numbers and
-  // `[[t, 2]]` is a list of lists: the values of `q` conflict, and the
+  // `[[t, 2]]` is a list of lists: the static error
+  // `assignment-type-mismatch`. The function literal is invalid, and its
   // compilation declines.
   test('a local assigned a list of numbers, then a list of lists, declines', () => {
     const body: MathJsonExpression = [
@@ -1642,11 +1608,11 @@ describe('Assigned names and the shapes of their values', () => {
       'q',
     ];
     const ce = engine();
-    ce.declare('f', 'function');
-    ce.assign('f', ce.box(['Function', body, ['Typed', 't', "'real'"]]));
-    const r = compile(ce.box(['f', 'x']));
+    const r = compile(
+      ce.box(['Function', body, ['Typed', 't', "'real'"]])
+    );
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.error).toMatch(/invalid expression/);
   });
 
   // The `p` that the nested block declares is another variable: its
@@ -1659,7 +1625,7 @@ describe('Assigned names and the shapes of their values', () => {
         ['Assign', 'p', ['List', 1, 2]],
         [
           'Block',
-          ['Declare', 'p', "'real'"],
+          ['Declare', 'p', "'real'", 0],
           ['If', gt, ['Assign', 'p', 3], ['Assign', 'p', 4]],
           'p',
         ],
@@ -1674,19 +1640,18 @@ describe('Assigned names and the shapes of their values', () => {
     }
   );
 
-  // A path that does not assign the local keeps its declared type, here
-  // `real`, which is compared with the list of the other branch.
+  // A list assigned to a local declared `real` is the static error
+  // `assignment-type-mismatch`, so the expression is invalid and declines.
   test('the declared type of a local is its shape before a conditional', () => {
     const json: MathJsonExpression = [
       'Block',
-      ['Declare', 'p', "'real'"],
-      ['Assign', 'p', 1],
+      ['Declare', 'p', "'real'", 1],
       ['If', gt, ['Assign', 'p', ['List', 1, 2]]],
       'p',
     ];
     const r = compile(engine().box(json));
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.error).toMatch(/invalid expression/);
   });
 });
 
@@ -1704,16 +1669,20 @@ describe('The paths of the code that meet after a node (R3)', () => {
     return ce.box(json).evaluate().json;
   };
 
-  const declines = (json: MathJsonExpression, to: string): void => {
+  /** A local that gets a value of another type than its first value is the
+   * static error `assignment-type-mismatch`, and a first assignment in a
+   * branch or a loop body is the static error `first-assignment-in-branch`:
+   * the expression is invalid and the compilation declines. */
+  const declinesInvalid = (json: MathJsonExpression, to: string): void => {
     const r = compile(engine().box(json), { to: to as any });
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.error).toMatch(/invalid expression/);
   };
 
   // The body of a loop can run no time: after the loop, `p` is the number
   // before it or the list of the body.
   test.each(SHAPE_TARGETS)('a loop body that changes a shape on %s', (to) => {
-    declines(
+    declinesInvalid(
       [
         'Block',
         ['Assign', 'p', 0],
@@ -1722,7 +1691,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
       ],
       to
     );
-    declines(
+    declinesInvalid(
       [
         'Block',
         ['Assign', 'p', list],
@@ -1734,7 +1703,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
   });
 
   test('a loop over a list input that changes a shape', () => {
-    declines(
+    declinesInvalid(
       [
         'Block',
         ['Assign', 'p', 0],
@@ -1747,7 +1716,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
 
   // The body of a `Sum` with an index runs zero or more times too.
   test.each(SHAPE_TARGETS)('a Sum body that changes a shape on %s', (to) => {
-    declines(
+    declinesInvalid(
       [
         'Block',
         ['Assign', 'p', 0],
@@ -1785,7 +1754,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
   // In the second pass, `p` can be the number of the first pass, and the
   // `If` can give it a list.
   test('a conditional that a second pass of a loop reaches', () => {
-    declines(
+    declinesInvalid(
       [
         'Block',
         ['Assign', 'q', 0],
@@ -1807,7 +1776,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
 
   // A `Break` takes its state to the state after the loop.
   test('a Break after an assignment of another shape', () => {
-    declines(
+    declinesInvalid(
       [
         'Block',
         ['Assign', 'p', 0],
@@ -1831,7 +1800,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
   test.each(['javascript', 'wgsl'])(
     'a Which condition that assigns on %s',
     (to) => {
-      declines(
+      declinesInvalid(
         [
           'Block',
           ['Assign', 'p', 0],
@@ -1844,7 +1813,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
   );
 
   test.each(SHAPE_TARGETS)('a Match guard that assigns on %s', (to) => {
-    declines(
+    declinesInvalid(
       [
         'Block',
         ['Assign', 'p', 0],
@@ -1863,7 +1832,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
   // The guard and the body of a case are held raw; the check reads their
   // canonical form, also with captures.
   test('a Match body with captures that assigns', () => {
-    declines(
+    declinesInvalid(
       [
         'Block',
         ['Assign', 'p', 0],
@@ -1883,7 +1852,8 @@ describe('The paths of the code that meet after a node (R3)', () => {
     );
   });
 
-  test('a Match guard that keeps the shape', () => {
+  // A guard is an operand: a block with an assignment there declines.
+  test('a Match guard that keeps the shape declines', () => {
     const json: MathJsonExpression = [
       'Block',
       ['Assign', 'p', 0],
@@ -1895,14 +1865,16 @@ describe('The paths of the code that meet after a node (R3)', () => {
       ],
       ['Multiply', 2, 'p'],
     ];
-    const r = compile(engine().box(json), { fallback: false });
-    expect(r.success).toBe(true);
-    for (const x of [1, 2]) expect(r.run!({ x })).toBe(interpret(json, x));
+    const r = compile(engine().box(json));
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(
+      /a block with a statement other than a declaration with a value is an operand here/
+    );
   });
 
   // The second operand of `Or` runs only when the first one is false.
   test('an Or operand that assigns', () => {
-    declines(
+    declinesInvalid(
       [
         'Block',
         ['Assign', 'p', 0],
@@ -1914,9 +1886,9 @@ describe('The paths of the code that meet after a node (R3)', () => {
   });
 
   // The branch that assigns the list returns: where `2p` is evaluated, `p`
-  // is the number, and the interpreter has a value. The simple rule does not
-  // examine the paths of the code: `p` gets a number and a list in one
-  // scope, so the compilation declines.
+  // is the number. A list after a number is the static error
+  // `assignment-type-mismatch`, also on a path that returns, so the
+  // compilation declines.
   test('a branch that ends in a Return, with another shape, declines', () => {
     const json: MathJsonExpression = [
       [
@@ -1935,9 +1907,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
       ],
       'x',
     ];
-    expect(interpret(json, 2)).toBe(1);
-    expect(interpret(json, -1)).toBe(0);
-    declines(json, 'javascript');
+    declinesInvalid(json, 'javascript');
   });
 
   // The rule has no flow analysis, so the depth of the code does not limit
@@ -1968,9 +1938,9 @@ describe('The paths of the code that meet after a node, round 5 of the review (R
     return ce.box(json).evaluate().json;
   };
 
-  // The guard of a case is a function that the interpreter applies: its
-  // `Return` ends the guard, and `p` is a list after the `Match` when
-  // x = 1, and a number for any other x.
+  // The guard of a case assigns a list to `p`, whose first value is a
+  // number: the static error `assignment-type-mismatch`. The expression is
+  // invalid and the compilation declines.
   test('a Return in the guard of a case of a Match', () => {
     const json: MathJsonExpression = [
       'Block',
@@ -1990,12 +1960,12 @@ describe('The paths of the code that meet after a node, round 5 of the review (R
     ];
     const r = compile(engine().box(json));
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.error).toMatch(/invalid expression/);
   });
 
-  // The body of a case is a function too: its `Return` ends the body, and
-  // `p` is a list after the `Match` when x = 1. The compilation declines
-  // (the compiled `Match` also refuses a `Return` in a case body).
+  // The body of a case assigns a list to `p`, whose first value is a
+  // number: the static error `assignment-type-mismatch`. The expression is
+  // invalid and the compilation declines.
   test('a Return in the body of a case of a Match', () => {
     const json: MathJsonExpression = [
       'Block',
@@ -2010,15 +1980,11 @@ describe('The paths of the code that meet after a node, round 5 of the review (R
     ];
     const r = compile(engine().box(json));
     expect(r.success).toBe(false);
-    expect(interpret(json, { x: 1 })).toEqual(['List', 2, 4]);
+    expect(r.error).toMatch(/invalid expression/);
   });
 
-  // No value reaches the end of the `Match` without the wildcard case:
-  // `p` is always the list.
-  // After the wildcard case, `p` is always the list, and the interpreter
-  // gives `[2, 4]`. The simple rule does not examine the order of the
-  // assignments: `p` gets a number and a list in one scope, so the
-  // compilation declines.
+  // A list after a number is the static error `assignment-type-mismatch`,
+  // so the expression is invalid and the compilation declines.
   test('a wildcard case that reassigns another shape declines', () => {
     const json: MathJsonExpression = [
       'Block',
@@ -2026,10 +1992,9 @@ describe('The paths of the code that meet after a node, round 5 of the review (R
       ['Match', 'x', ['MatchCase', '_', ['Assign', 'p', list]]],
       ['Multiply', 2, 'p'],
     ];
-    expect(interpret(json, { x: 1 })).toEqual(['List', 2, 4]);
     const r = compile(engine().box(json));
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.error).toMatch(/invalid expression/);
   });
 
   // `L > 0` is a list of booleans: the `If` selects element-wise, and the
@@ -2072,9 +2037,9 @@ describe('The paths of the code that meet after a node, round 5 of the review (R
     expect(r.run!({ x: 1 })).toBe(2048);
   });
 
-  // An assignment in the guard of a clause of a `Comprehension` does not
-  // change `p` in the interpreter, but the compiled code would change it:
-  // the compilation declines.
+  // The guard of a clause of a `Comprehension` assigns a list to `p`, whose
+  // first value is a number: the static error `assignment-type-mismatch`.
+  // The expression is invalid and the compilation declines.
   test('a guard of a Comprehension clause that assigns', () => {
     const ce = engine();
     ce.declare('M', 'list<integer>');
@@ -2099,8 +2064,7 @@ describe('The paths of the code that meet after a node, round 5 of the review (R
     ];
     const r = compile(ce.box(json));
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
-    expect(r.error).toMatch(/inside the `Comprehension`/);
+    expect(r.error).toMatch(/invalid expression/);
   });
 });
 
@@ -2127,6 +2091,15 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
     expect(r.success).toBe(false);
     expect(r.diagnostic?.code).toBe('unsettled-shape');
     expect(r.error).toMatch(pattern);
+  };
+
+  /** A local that gets a value of another type than its first value is the
+   * static error `assignment-type-mismatch`: the expression is invalid and
+   * the compilation declines. */
+  const expectInvalid = (ce: ComputeEngine, json: MathJsonExpression): void => {
+    const r = compile(ce.box(json));
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/invalid expression/);
   };
 
   // The interpreter evaluates the body of a `Comprehension` in a scope of
@@ -2173,9 +2146,8 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
     }
   });
 
-  // A false guard ends the pass before the source of the second clause.
-  // The interpreter gives 0 for every x; the compiled code gave [2, 4] for
-  // x = -1 and 6 for x = 1.
+  // The guard assigns a list to `p`, whose first value is a number: the
+  // static error `assignment-type-mismatch`.
   test('an assignment in a guard and in a later clause of a Comprehension', () => {
     const json: MathJsonExpression = [
       'Block',
@@ -2193,13 +2165,11 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
       ],
       ['Multiply', 2, 'p'],
     ];
-    expect(interpret(engine(), json, { x: -1 })).toBe(0);
-    expect(interpret(engine(), json, { x: 1 })).toBe(0);
-    expectDecline(engine(), json, /inside the `Comprehension`/);
+    expectInvalid(engine(), json);
   });
 
-  // An assignment in the source of the first clause runs once, before the
-  // comprehension, in the interpreter and in the compiled code.
+  // The source of a clause is an operand: a block with an assignment there
+  // declines.
   test('an assignment in the source of the first clause of a Comprehension', () => {
     const json: MathJsonExpression = [
       'Block',
@@ -2211,10 +2181,11 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
       ],
       'p',
     ];
-    const r = compile(engine().box(json), { fallback: false });
-    expect(r.success).toBe(true);
-    expect(interpret(engine(), json, {})).toBe(5);
-    expect(r.run!({})).toBe(5);
+    const r = compile(engine().box(json));
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(
+      /a block with a statement other than a declaration with a value is an operand here/
+    );
   });
 
   // The interpreter does not change `p` for an assignment in a bound of a
@@ -2289,15 +2260,20 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
       ['Integrate', 't', ['Limits', 't', 0, ['Block', ['Assign', 'p', 4], 1]]],
       'p',
     ];
-    expect(interpret(engine(), body, {})).toBe(7);
+    // The interpreter does not give 7 for the integrand form: the
+    // integration puts the `Assign` of the integrand into a product, which
+    // is the static error `assignment-in-operand`. The compiled code
+    // declines both forms.
+    expect(JSON.stringify(engine().box(body).evaluate().json)).toContain(
+      'assignment-in-operand'
+    );
     expect(interpret(engine(), bound, {})).toBe(4);
     expectDecline(engine(), body, /inside the `Integrate`/);
     expectDecline(engine(), bound, /inside the `Integrate`/);
   });
 
-  // A false guard of the first clause of a `Loop` ends the pass before the
-  // source of the second clause: `p` is the list when x <= 0 and 3 when
-  // x > 0.
+  // The guard assigns a list to `p`, whose first value is a number: the
+  // static error `assignment-type-mismatch`.
   test('a Loop whose pass can end after each guard and clause', () => {
     const json: MathJsonExpression = [
       'Block',
@@ -2315,9 +2291,7 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
       ],
       ['Multiply', 2, 'p'],
     ];
-    expect(interpret(engine(), json, { x: -1 })).toEqual(['List', 2, 4]);
-    expect(interpret(engine(), json, { x: 1 })).toBe(6);
-    expectDecline(engine(), json, /different shapes/);
+    expectInvalid(engine(), json);
   });
 
   // A condition of type `any` can be a list, and then the interpreter
@@ -2341,7 +2315,8 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
     ).toBe(10);
   });
 
-  // The branches of a condition of type `any` give `p` a list or a number.
+  // The branches of a condition of type `any` give `p` a list or a number:
+  // a list after a number is the static error `assignment-type-mismatch`.
   test('a condition of type any whose branches conflict', () => {
     const ce = engine();
     ce.declare('M', 'list<any>');
@@ -2351,7 +2326,7 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
       ['If', ['At', 'M', 1], ['Assign', 'p', list], ['Assign', 'p', 3]],
       ['Multiply', 2, 'p'],
     ];
-    expectDecline(ce, json, /element-wise selection/);
+    expectInvalid(ce, json);
   });
 
   test('a condition of type any whose branches change nothing', () => {
@@ -2362,9 +2337,8 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
     expect(r.diagnostic?.code).not.toBe('unsettled-shape');
   });
 
-  // The untyped parameter `c` has the type `unknown`: the walk takes it as
-  // a scalar, so the two branches are alternatives, and `p` is a list or a
-  // number after the `If`.
+  // A list after a number is the static error `assignment-type-mismatch`:
+  // the function literal is invalid.
   test('a condition of type unknown whose branches conflict', () => {
     const ce = engine();
     ce.declare('b', 'boolean');
@@ -2382,7 +2356,7 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
       ],
       'b',
     ];
-    expectDecline(ce, json, /different shapes/);
+    expectInvalid(ce, json);
   });
 
   test('a condition of type unknown whose branches agree', () => {
@@ -2417,8 +2391,7 @@ describe('Assignments in a function literal (R3)', () => {
   ): MathJsonExpression => ['Function', body, ...params];
   const local = (value: MathJsonExpression): MathJsonExpression => [
     'Block',
-    ['Declare', 'q', "'real'"],
-    ['Assign', 'q', ['Multiply', 2, 't']],
+    ['Declare', 'q', "'real'", ['Multiply', 2, 't']],
     value,
   ];
 
@@ -2447,8 +2420,7 @@ describe('Assignments in a function literal (R3)', () => {
         'Comprehension',
         [
           'Block',
-          ['Declare', 'q', "'real'"],
-          ['Assign', 'q', ['Multiply', 2, 'i']],
+          ['Declare', 'q', "'real'", ['Multiply', 2, 'i']],
           'q',
         ],
         ['Element', 'i', L3],
@@ -2516,8 +2488,8 @@ describe('Assignments in a function literal (R3)', () => {
     );
   });
 
-  // With a list for `p`, the interpreter gave 1 and the compiled code
-  // [2, 3].
+  // A list after a number is the static error `assignment-type-mismatch`,
+  // so the expression is invalid and the compilation declines.
   test('a callback that gives an outer name another shape', () => {
     const json: MathJsonExpression = [
       'Block',
@@ -2532,17 +2504,13 @@ describe('Assignments in a function literal (R3)', () => {
       ],
       ['Add', 'p', 1],
     ];
-    expect(interpret(json)).toBe(1);
-    expect(compile(engine().box(json)).diagnostic?.code).toBe(
-      'unsettled-shape'
-    );
+    expect(compile(engine().box(json)).error).toMatch(/invalid expression/);
   });
 
   test('a callback that assigns only its own names', () => {
     const q = (value: MathJsonExpression): MathJsonExpression => [
       'Block',
-      ['Declare', 'q', "'real'"],
-      ['Assign', 'q', ['Multiply', 2, 'u']],
+      ['Declare', 'q', "'real'", ['Multiply', 2, 'u']],
       value,
     ];
     expectCompiled(['Filter', L3, fn(q(['Greater', 'q', 2]), 'u')], [2, 3]);
@@ -2559,8 +2527,9 @@ describe('Assignments in a function literal (R3)', () => {
   });
 
   // A function literal applied where it is written runs after its
-  // arguments, and its assignment changes `p` after the `Apply`: `p` is a
-  // list when x > 0 and 0 otherwise.
+  // arguments, and its assignment changes `p` after the `Apply`. A list
+  // after a number is the static error `assignment-type-mismatch`, so the
+  // first expression is invalid and the compilation declines.
   test('an applied function literal that gives an outer name another shape', () => {
     const json: MathJsonExpression = [
       'Block',
@@ -2574,8 +2543,8 @@ describe('Assignments in a function literal (R3)', () => {
       ['Add', 'p', 1],
     ];
     const r = compile(engine().box(json));
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
-    expect(r.error).toMatch(/different shapes/);
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/invalid expression/);
     expectCompiled(
       [
         'Block',
@@ -2606,8 +2575,9 @@ describe('Assignments in a function literal (R3)', () => {
     ['Element', 'i', L3],
   ];
 
-  // A literal with a scalar parameter maps over a list argument, so its
-  // body runs zero or more times: with an empty `L`, `p` stays 0.
+  // A literal with a scalar parameter maps over a list argument, and its
+  // body assigns a list to `p`, whose first value is a number: the static
+  // error `assignment-type-mismatch`.
   test('an applied function literal that maps over a list and assigns an outer name', () => {
     const json: MathJsonExpression = B(
       ['Assign', 'p', 0],
@@ -2623,20 +2593,12 @@ describe('Assignments in a function literal (R3)', () => {
       ['If', ['Greater', 'x', 0], ['Assign', 'p', ['List', 3, 4]]],
       'p'
     );
-    const ce = engine();
-    ce.assign('L', ce.box(['List']));
-    ce.assign('x', -1);
-    expect(ce.box(json).evaluate().re).toBe(0);
-    const d = declined(json);
-    expect(d.code).toBe('unsettled-shape');
-    expect(d.error).toMatch(/the function passed to `Apply` assigns a name/);
+    expect(declined(json).error).toMatch(/invalid expression/);
   });
 
   // One literal object is the value of a `Declare` and the callback of a
-  // `Filter`: the callback declines also when the walk reached the
-  // literal first as the value of the `Declare`. The parts are boxed one by
-  // one, so `p` is a name of the engine: it is declared, or the compilation
-  // declines because the input `p` has no type.
+  // `Filter`. The parts are boxed one by one, so `p` is a name of the
+  // engine, and a write to a symbol declared in the engine declines.
   test('a shared function literal in a Declare and in a Filter', () => {
     const ce = engine();
     ce.declare('p', 'real');
@@ -2661,7 +2623,7 @@ describe('Assignments in a function literal (R3)', () => {
     ]);
     const r = compile(json);
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/the function passed to `Filter`/);
+    expect(r.error).toMatch(/"p" is not a local of the compiled/);
   });
 
   // A block that assigns a parameter of an enclosing function writes the
@@ -2743,7 +2705,9 @@ describe('Assignments in a function literal (R3)', () => {
   // A stored function that writes an outer name declines, whether or not
   // the write keeps the shape: the check cannot see every path by which it
   // reaches a callback operator (user decision 2026-11-01, ROADMAP CE-720).
-  // The interpreter gives [2, 2] for the second expression.
+  // In the first expression, a list after a number is the static error
+  // `assignment-type-mismatch`. The interpreter gives [2, 2] for the second
+  // expression.
   test('a stored function literal that assigns an outer name declines', () => {
     const D = (name: string, value: MathJsonExpression): MathJsonExpression => [
       'Declare',
@@ -2756,7 +2720,7 @@ describe('Assignments in a function literal (R3)', () => {
       ['Assign', 'r', ['Filter', 'L', 'g']],
       ['Add', ['Multiply', 2, 'p'], 1]
     );
-    expect(declined(json).error).toMatch(/a function \(stored, returned/);
+    expect(declined(json).error).toMatch(/invalid expression/);
     const kept = B(
       ['Assign', 'p', 0],
       D('g', fn(B(['Assign', 'p', ['Add', 'k', 1]], 'p'), 'k')),
@@ -2864,6 +2828,14 @@ describe('The simple rule for assignments (R3)', () => {
     expect(r.success).toBe(false);
     expect(r.diagnostic?.code).toBe('unsettled-shape');
   };
+  /** A local that gets a value of another type than its first value is the
+   * static error `assignment-type-mismatch`: the expression is invalid and
+   * the compilation declines. */
+  const declinesInvalid = (json: MathJsonExpression, ce = engine()): void => {
+    const r = compile(ce.box(json));
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/invalid expression/);
+  };
   const compilesTo = (
     json: MathJsonExpression,
     vars: Record<string, unknown>,
@@ -2877,8 +2849,6 @@ describe('The simple rule for assignments (R3)', () => {
     );
   };
 
-  // The interpreter gives [1, 2]: the second assignment replaces the
-  // number. The compiled code gives `p` one representation.
   test('a sequential reassignment to another shape declines', () => {
     const json: MathJsonExpression = [
       'Block',
@@ -2886,8 +2856,7 @@ describe('The simple rule for assignments (R3)', () => {
       ['Assign', 'p', ['List', 1, 2]],
       'p',
     ];
-    expect(engine().box(json).evaluate().json).toEqual(['List', 1, 2]);
-    declinesWithShape(json);
+    declinesInvalid(json);
   });
 
   test('a list of another length is the same shape', () => {
@@ -2905,7 +2874,7 @@ describe('The simple rule for assignments (R3)', () => {
   });
 
   test('a list, then a matrix, declines', () => {
-    declinesWithShape([
+    declinesInvalid([
       'Block',
       ['Assign', 'q', ['List', 'x', 2]],
       ['Assign', 'q', ['List', ['List', 'x', 2]]],
@@ -2914,7 +2883,7 @@ describe('The simple rule for assignments (R3)', () => {
   });
 
   test('a number, then a string, declines', () => {
-    declinesWithShape([
+    declinesInvalid([
       'Block',
       ['Assign', 'p', 1],
       ['Assign', 'p', "'ab'"],
@@ -2950,8 +2919,7 @@ describe('The simple rule for assignments (R3)', () => {
   test('a value that contradicts the declared type of a local declines', () => {
     declinesWithShape([
       'Block',
-      ['Declare', 'p', "'real'"],
-      ['Assign', 'p', ['Tuple', 'x', 2]],
+      ['Declare', 'p', "'real'", ['Tuple', 'x', 2]],
       'p',
     ]);
   });
@@ -2964,8 +2932,7 @@ describe('The simple rule for assignments (R3)', () => {
         ['Assign', 'p', 1],
         [
           'Block',
-          ['Declare', 'p', "'list<real>'"],
-          ['Assign', 'p', ['List', 'x', 2]],
+          ['Declare', 'p', "'list<real>'", ['List', 'x', 2]],
           'p',
         ],
         'p',
@@ -2991,7 +2958,8 @@ describe('The simple rule for assignments (R3)', () => {
   // branch. The rule does not depend on which branch runs: `p` gets a
   // number and a list.
   // The stored function `g` writes `p` with a number, and the code assigns
-  // `p` a list after the definition: `p` gets both shapes in one scope.
+  // `p` a list after the definition: a list after a number is the static
+  // error `assignment-type-mismatch`.
   test('a stored function that writes an outer name, with a later reassignment, declines', () => {
     const json: MathJsonExpression = [
       'Block',
@@ -3012,7 +2980,7 @@ describe('The simple rule for assignments (R3)', () => {
       ['If', ['Greater', 'x', 0], ['g', 1], 0],
       'p',
     ];
-    declinesWithShape(json);
+    declinesInvalid(json);
   });
 
   // An assignment of the index of an enclosing loop in a function literal
@@ -3145,34 +3113,34 @@ describe('The admission checks of the review of the simple rule (R3)', () => {
     declines(json);
   });
 
-  // An input declared `complex` assigned a real: the interpreter gives 4 at
-  // x = 1 and w = 1 + 2i, the compiled code gave {"re": null}.
+  // A write to a symbol declared in the engine declines.
   test('a real assigned to an input declared complex declines', () => {
     const ce = engine();
     ce.declare('w', 'complex');
-    declines(
-      [
+    const r = compile(
+      ce.box([
         'Block',
         ['If', ['Greater', 'x', 0], ['Assign', 'w', 3]],
         ['Add', 'w', 1],
-      ],
-      ce
+      ])
     );
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/"w" is not a local of the compiled/);
   });
 
-  // An input of type `number` is read as a real number: a complex value
-  // assigned to it gave "[object Object]1".
+  // A write to a symbol declared in the engine declines.
   test('a complex number assigned to an input of type number declines', () => {
     const ce = engine();
     ce.declare('q', 'number');
-    declines(
-      [
+    const r = compile(
+      ce.box([
         'Block',
         ['If', ['Greater', 'x', 0], ['Assign', 'q', ['Complex', 0, 2]]],
         ['Add', 'q', 1],
-      ],
-      ce
+      ])
     );
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/"q" is not a local of the compiled/);
   });
 
   test('a Match whose cases have different shapes declines', () => {
@@ -3322,7 +3290,7 @@ describe('The admission checks of round 2 of the review of the simple rule (R3)'
           1,
           [
             'Block',
-            ['Assign', 't', ['List', 1, 2]],
+            ['Declare', 't', "'unknown'", ['List', 1, 2]],
             ['Match', 'x', ['MatchCase', 1, 't'], ['MatchCase', '_', 3]],
           ],
         ],

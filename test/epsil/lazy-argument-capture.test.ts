@@ -332,8 +332,7 @@ describe('LAZY ARGUMENT CAPTURE — MathJSON route', () => {
             'xs',
             [
               'Block',
-              ['Declare', 'p'],
-              ['Assign', 'p', ['First', 'xs']],
+              ['Declare', 'p', "'unknown'", ['First', 'xs']],
               [
                 'smallest',
                 [
@@ -364,8 +363,7 @@ describe('LAZY ARGUMENT CAPTURE — MathJSON route', () => {
           'Function',
           [
             'Block',
-            ['Declare', 'p'],
-            ['Assign', 'p', 'k'],
+            ['Declare', 'p', "'unknown'", 'k'],
             ['count', ['Filter', 'xs', ['Function', ['Less', 'x', 'p'], 'x']]],
           ],
           'xs',

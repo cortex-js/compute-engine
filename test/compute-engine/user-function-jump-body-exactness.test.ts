@@ -72,14 +72,6 @@ describe('a user function with a jump body under .N()', () => {
     );
   });
 
-  test('an argument with an effect is evaluated once', () => {
-    const ce = new ComputeEngine();
-    ce.assign('f', ce.box(['Function', ['Floor', 'x'], 'x']));
-    ce.assign('n', 0);
-    ce.box(['f', ['Assign', 'n', ['Add', 'n', 1]]]).N();
-    expect(ce.box('n').evaluate().json).toBe(1);
-  });
-
   // The exact value of the sum is a rational with thousands of digits:
   // evaluating it exactly takes about 30 s (measured 2026-10-20 on an M5),
   // while the numeric route takes about 0.1 s locally and up to 4 s on a

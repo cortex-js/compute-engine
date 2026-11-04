@@ -21,14 +21,12 @@ describe('scalar facts through retained helper locals', () => {
     ce.declare('x', 'real');
     define(ce, 'f', [
       'Block',
-      ['Declare', 'q'],
-      ['Assign', 'q', ['Sin', 't']],
+      ['Declare', 'q', "'unknown'", ['Sin', 't']],
       ['Multiply', 'q', ['Abs', 'q']],
     ]);
     define(ce, 'g', [
       'Block',
-      ['Declare', 'v'],
-      ['Assign', 'v', ['f', 't']],
+      ['Declare', 'v', "'unknown'", ['f', 't']],
       ['Add', 1, ['f', 'v']],
     ]);
     const r = compile(ce.box(['Add', 2, ['g', 'x']]));
@@ -44,8 +42,7 @@ describe('scalar facts through retained helper locals', () => {
     ce.declare('x', 'real');
     define(ce, 'f', [
       'Block',
-      ['Declare', 'q'],
-      ['Assign', 'q', ['List', 't', ['Add', 't', 1]]],
+      ['Declare', 'q', "'unknown'", ['List', 't', ['Add', 't', 1]]],
       ['Multiply', 2, 'q'],
     ]);
     const r = compile(ce.box(['Add', 1, ['f', 'x']]));
@@ -61,10 +58,8 @@ describe('scalar facts through retained helper locals', () => {
     ce.declare('x', 'real');
     define(ce, 'f', [
       'Block',
-      ['Declare', 'q'],
-      ['Assign', 'q', ['List', 't', 2]],
-      ['Declare', 'v'],
-      ['Assign', 'v', ['Multiply', 2, 'q']],
+      ['Declare', 'q', "'unknown'", ['List', 't', 2]],
+      ['Declare', 'v', "'unknown'", ['Multiply', 2, 'q']],
       ['Assign', 'q', 3],
       ['Add', 'q', 'v'],
     ]);
@@ -75,20 +70,47 @@ describe('scalar facts through retained helper locals', () => {
     expect(ce.box(['f', 'x']).evaluate().json).toEqual(['List', 11, 7]);
   });
 
-  test('conditional writes retain generic code', () => {
+  // The first value `t` has the type `unknown`, so the local `q` keeps the
+  // type `unknown` and a later list value does not narrow it. A local of
+  // type `unknown` that is given a list has no settled shape, and the
+  // compilation declines; the interpreter gives the values.
+  test('a conditional list write to a local of type unknown declines', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     define(ce, 'f', [
       'Block',
-      ['Declare', 'q'],
-      ['Assign', 'q', 't'],
+      ['Declare', 'q', "'unknown'", 't'],
       ['If', ['Greater', 't', 0], ['Assign', 'q', ['List', 2, 3]]],
       ['Multiply', 2, 'q'],
     ]);
+    expect(ce.box(['f', 'x']).type.toString()).not.toMatch(/vector/);
     const r = compile(ce.box(['f', 'x']));
-    expect(r.success).toBe(true);
+    expect(r.success).toBe(false);
     expect(r.run!({ x: 4 })).toEqual([4, 6]);
     expect(r.run!({ x: -1 })).toBe(-2);
+  });
+
+  test('a local of type unknown admits a value of any type', () => {
+    for (const first of [
+      ['Declare', 'q', "'unknown'", 't'],
+      ['Assign', 'q', 't'],
+    ] as MathJsonExpression[]) {
+      const ce = new ComputeEngine();
+      const fn = ce.box([
+        'Function',
+        [
+          'Block',
+          first,
+          ['If', ['Greater', 't', 0], ['Assign', 'q', "'s'"]],
+          ['Assign', 'q', ['List', 1]],
+          'q',
+        ],
+        't',
+      ]);
+      expect(fn.isValid).toBe(true);
+      expect(fn.type.toString()).toBe('(t: unknown) -> unknown');
+      expect(ce.box(['Apply', fn, 3]).evaluate().toString()).toBe('[1]');
+    }
   });
 
   test('a nested block shadows an enclosing scalar local', () => {
@@ -96,12 +118,10 @@ describe('scalar facts through retained helper locals', () => {
     ce.declare('x', 'real');
     define(ce, 'f', [
       'Block',
-      ['Declare', 'q'],
-      ['Assign', 'q', 't'],
+      ['Declare', 'q', "'unknown'", 't'],
       [
         'Block',
-        ['Declare', 'q'],
-        ['Assign', 'q', ['List', 2, 3]],
+        ['Declare', 'q', "'unknown'", ['List', 2, 3]],
         ['Multiply', 2, 'q'],
       ],
     ]);
@@ -116,8 +136,7 @@ describe('scalar facts through retained helper locals', () => {
     define(ce, 'g', ['Multiply', 'q', 't']);
     define(ce, 'f', [
       'Block',
-      ['Declare', 'q'],
-      ['Assign', 'q', 2],
+      ['Declare', 'q', "'unknown'", 2],
       ['Add', 'q', ['g', 't']],
     ]);
     ce.declare('x', 'real');
@@ -130,8 +149,7 @@ describe('scalar facts through retained helper locals', () => {
     const ce = new ComputeEngine();
     define(ce, 'f', [
       'Block',
-      ['Declare', 'q'],
-      ['Assign', 'q', ['Add', 's', 't']],
+      ['Declare', 'q', "'unknown'", ['Add', 's', 't']],
       ['Multiply', 'q', ['Abs', 'q']],
     ]);
     ce.declare('x', 'real');
@@ -152,8 +170,7 @@ describe('scalar facts through retained helper locals', () => {
       'Sum',
       [
         'Block',
-        ['Declare', 'q'],
-        ['Assign', 'q', ['Power', 2, 'i']],
+        ['Declare', 'q', "'unknown'", ['Power', 2, 'i']],
         ['Multiply', 'q', 't'],
       ],
       ['Limits', 'i', 0, 'N'],
@@ -182,8 +199,7 @@ describe('scalar facts through retained helper locals', () => {
         },
       });
       const statements = [
-        ce.box(['Declare', 'q']),
-        ce.box(['Assign', 'q', 2]),
+        ce.box(['Declare', 'q', "'unknown'", 2]),
         ce.box([
           'If',
           kind === 'vars override' ? 'flag' : ['condition'],

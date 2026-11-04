@@ -51,8 +51,7 @@ function engine() {
 
 const term: MathJsonExpression = [
   'Block',
-  ['Declare', 'a'],
-  ['Assign', 'a', ['Power', 2, 'n']],
+  ['Declare', 'a', "'unknown'", ['Power', 2, 'n']],
   ['Divide', 'x', 'a'],
 ];
 
@@ -126,12 +125,7 @@ describe.each(['glsl', 'wgsl'] as const)(
         'Sum',
         [
           'Block',
-          ['Declare', 'a'],
-          [
-            'Assign',
-            'a',
-            ['Sum', ['Multiply', 'j', 'n'], ['Limits', 'j', 1, 'N']],
-          ],
+          ['Declare', 'a', "'unknown'", ['Sum', ['Multiply', 'j', 'n'], ['Limits', 'j', 1, 'N']]],
           ['Divide', 'a', ['Add', 'n', 1]],
         ],
         ['Limits', 'n', 0, 'N'],
@@ -145,6 +139,8 @@ describe.each(['glsl', 'wgsl'] as const)(
       expect(compile(expr).run!({ N: 3 })).toBeCloseTo(11.5, 12);
     });
 
+    // A block whose statements before the last are only declarations with
+    // a value is a value expression, and it compiles as an operand.
     test('two blocks in one body declare the same local name in separate scopes', () => {
       const ce = engine();
       ce.declare('g2', 'function');
@@ -154,11 +150,10 @@ describe.each(['glsl', 'wgsl'] as const)(
           'Function',
           [
             'Add',
-            ['Block', ['Declare', 'a'], ['Assign', 'a', ['Square', 't']], 'a'],
+            ['Block', ['Declare', 'a', "'unknown'", ['Square', 't']], 'a'],
             [
               'Block',
-              ['Declare', 'a'],
-              ['Assign', 'a', ['Multiply', 3, 't']],
+              ['Declare', 'a', "'unknown'", ['Multiply', 3, 't']],
               'a',
             ],
           ],
@@ -181,8 +176,7 @@ describe.each(['glsl', 'wgsl'] as const)(
         'Dot',
         [
           'Block',
-          ['Declare', 'p'],
-          ['Assign', 'p', ['Tuple', 't', ['Multiply', 2, 't']]],
+          ['Declare', 'p', "'unknown'", ['Tuple', 't', ['Multiply', 2, 't']]],
           'p',
         ],
         ['Tuple', 1, 1],
@@ -209,8 +203,7 @@ describe.each(['glsl', 'wgsl'] as const)(
           ['Greater', 'x', 0],
           [
             'Block',
-            ['Declare', 'q'],
-            ['Assign', 'q', 'x'],
+            ['Declare', 'q', "'unknown'", 'x'],
             ['Greater', 'q', 1],
           ],
         ]),
@@ -238,7 +231,7 @@ describe.each(['glsl', 'wgsl'] as const)(
               variable: 'fragColor.r',
               expression: ce.box([
                 'Block',
-                ['Declare', 'q'],
+                ['Declare', 'q', "'unknown'", 0],
                 ['Loop', ['Assign', 'q', 1], ['Element', 'k', ['Range', 1, 3]]],
               ] as MathJsonExpression),
             },
@@ -269,7 +262,7 @@ describe.each(['glsl', 'wgsl'] as const)(
       const r = compile(
         ce.expr([
           'Sum',
-          ['Block', ['Declare', 'a'], ['Assign', 'a', 'n'], ['Return', 'a']],
+          ['Block', ['Declare', 'a', "'unknown'", 'n'], ['Return', 'a']],
           ['Limits', 'n', 0, 'N'],
         ]),
         { to, constantFold: false }
@@ -291,8 +284,7 @@ describe.each(['glsl', 'wgsl'] as const)(
           'Function',
           [
             'Block',
-            ['Declare', 'a'],
-            ['Assign', 'a', ['Sum', 'j', ['Limits', 'j', 1, 't']]],
+            ['Declare', 'a', "'unknown'", ['Sum', 'j', ['Limits', 'j', 1, 't']]],
             ['Add', 'a', 1],
           ],
           ['Typed', 't', 'real'],
@@ -304,7 +296,9 @@ describe.each(['glsl', 'wgsl'] as const)(
       const code = source(r);
       expectValidShape(code);
       // The loop lands ahead of the assignment, which reads its accumulator.
-      expect(code).toMatch(/for \([^\n]*\n[^\n]*\n\s*}\n\s*a = _tv1;/);
+      expect(code).toMatch(
+        /for \([^\n]*\n[^\n]*\n\s*}\n\s*(?:float a;|var a: f32;)\n\s*a = _tv1;/
+      );
       expect(compile(expr).run!({ x: 3 })).toBe(7);
     });
 
@@ -317,8 +311,7 @@ describe.each(['glsl', 'wgsl'] as const)(
           'Function',
           [
             'Block',
-            ['Declare', 'a'],
-            ['Assign', 'a', 1],
+            ['Declare', 'a', "'unknown'", 1],
             ['Sum', ['Multiply', 'a', 'j'], ['Limits', 'j', 1, 't']],
           ],
           ['Typed', 't', 'real'],
@@ -337,8 +330,7 @@ describe.each(['glsl', 'wgsl'] as const)(
       const ce = engine();
       const expr = ce.box([
         'Block',
-        ['Declare', 'a'],
-        ['Assign', 'a', 0],
+        ['Declare', 'a', "'unknown'", 0],
         [
           'Loop',
           ['Assign', 'a', ['Add', 'a', ['Sum', 'j', ['Limits', 'j', 1, 't']]]],
@@ -360,6 +352,8 @@ describe('GLSL expression routes', () => {
   const glsl = new GLSLTarget();
 
   test('a compileShader body statement accepts a block operand', () => {
+    // A block of declarations is a value expression, so it compiles as the
+    // operand of an addition.
     const ce = engine();
     const shader = glsl.compileShader({
       type: 'fragment',
@@ -370,7 +364,7 @@ describe('GLSL expression routes', () => {
           variable: 'fragColor.r',
           expression: ce.expr([
             'Add',
-            ['Block', ['Declare', 'q'], ['Assign', 'q', 2], 'q'],
+            ['Block', ['Declare', 'q', "'unknown'", 2], 'q'],
             'x',
           ]),
         },
@@ -381,6 +375,29 @@ describe('GLSL expression routes', () => {
     expect(shader).toMatch(
       /float _tv1;\n\s*{\n\s*float q;\n\s*q = 2\.0;\n\s*_tv1 = q;\n\s*}\n\s*fragColor\.r = x \+ _tv1;/
     );
+  });
+
+  test('a compileShader body statement with a block operand that assigns declines', () => {
+    // A block with an assignment as the operand of an addition declines.
+    const ce = engine();
+    expect(() =>
+      glsl.compileShader({
+        type: 'fragment',
+        uniforms: [{ name: 'x', type: 'float' }],
+        outputs: [{ name: 'fragColor', type: 'vec4' }],
+        body: [
+          {
+            variable: 'fragColor.r',
+            expression: ce.expr([
+              'Add',
+              ['Block', ['Assign', 'q', 2], 'q'],
+              'x',
+            ]),
+          },
+        ],
+        constantFold: false,
+      })
+    ).toThrow(/a block with a statement other than a declaration with a value is an operand/);
   });
 });
 
@@ -414,8 +431,7 @@ describe('the Tycho noise kernel (art/hyvhlz4chj)', () => {
       ...locals.flatMap(
         ([n, v]) =>
           [
-            ['Declare', n],
-            ['Assign', n, v],
+            ['Declare', n, "'unknown'", v],
           ] as MathJsonExpression[]
       ),
       value,

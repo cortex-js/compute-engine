@@ -50,6 +50,7 @@ import { unboundSignatureHint } from '../compute-engine/boxed-expression/type-co
 // the conversion, `isSingleGraphemeCluster` decides which literals qualify.
 import { expectsCharacterNotString } from '../compute-engine/boxed-expression/validate.js';
 import { isSingleGraphemeCluster } from '../compute-engine/boxed-expression/boxed-character.js';
+import { withPairedFunctionNames } from '../compute-engine/assignment-locals.js';
 import {
   functionLiteralDeclaredSignature,
   functionLiteralReturnType,
@@ -105,7 +106,6 @@ import {
   sameParameterDomain,
 } from '../compute-engine/clause-identity.js';
 import { signatureNotes } from './signature-notes.js';
-import { readsBeforeAssignment } from './read-before-assignment.js';
 import {
   matchExhaustivenessDiagnostics,
   type AnnotationScope,
@@ -164,6 +164,22 @@ const CANONICALIZATION_ERROR_CODES = new Set([
   // route. The top level has no block: `variableRedeclarationDiagnostic`
   // reports it there.
   'variable-redeclaration',
+  // The rules of block locals (`docs/ERROR-MODEL.md`): a declaration has a
+  // value (`declaration-without-value`, minted by the `Declare` canonical
+  // handler), a first assignment of a name is at the own level of a block
+  // and not in a branch or a loop body (`first-assignment-in-branch`), a
+  // local is not used before the statement that declares it
+  // (`read-before-declaration`), both minted by `canonicalBlock`, an
+  // assignment is a statement and not an operand (`assignment-in-operand`,
+  // minted when the enclosing expression is built), and an assignment to a
+  // local gives a value of the local's type (`assignment-type-mismatch`,
+  // minted by the `Assign` canonical handler). All are settled before
+  // anything runs.
+  'declaration-without-value',
+  'first-assignment-in-branch',
+  'read-before-declaration',
+  'assignment-in-operand',
+  'assignment-type-mismatch',
   // A SECOND implementation block for one (type, protocol) pair in this batch
   // (ruling P47). The pre-pass registers conformances from the canonical
   // handler, so it is the pass that sees the collision first — and, unlike the
@@ -994,7 +1010,9 @@ function canonicalizationDiagnostics(
       // show the wrapper (`narrowedStatement`, read by `epsilSnippet`).
       const narrowed = narrowGuardedReads(statement);
       narrowedStatement = narrowed !== statement;
-      boxed = ce.box(narrowed);
+      boxed = boxTopLevelStatement(statements, narrowed, () =>
+        ce.box(narrowed)
+      );
       canonical = boxed.json;
     } catch (e) {
       // An expired time budget is the host's cancellation, not a statement
@@ -1012,13 +1030,6 @@ function canonicalizationDiagnostics(
       ce._epsilDeclarationRoute = enclosingRoute;
       afterBox?.();
     }
-
-    // A use of a local that is certain to come before the local has a
-    // value: the run gives the `read-before-declaration` error when the use
-    // runs.
-    diagnostics.push(
-      ...readBeforeAssignmentDiagnostics(boxed, statement, source)
-    );
 
     // The `match` exhaustiveness lint runs on the RAW statement (the patterns
     // are only readable there), but only after the statement is boxed: a
@@ -1430,6 +1441,30 @@ export function isDeclarationStatement(statement: MathJsonExpression): boolean {
     head === 'DeclareConformance' ||
     head === 'DefineFunction'
   );
+}
+
+/**
+ * Box `statement`, a statement of the top level of a program whose
+ * statements are `statements`, with `box`. A `let f: (integer) -> integer`
+ * without a value is the signature of a function only when a `function f`
+ * statement (`DefineFunction`) of the same name is in the same statement
+ * list (`withPairedFunctionNames()`, `assignment-locals.ts`). The top level
+ * of a program is boxed one statement at a time, so the names of its
+ * function statements are given here.
+ */
+export function boxTopLevelStatement<T>(
+  statements: ReadonlyArray<MathJsonExpression>,
+  statement: MathJsonExpression,
+  box: () => T
+): T {
+  if (operator(statement) !== 'Declare') return box();
+  const names = new Set<string>();
+  for (const s of statements) {
+    if (operator(s) !== 'DefineFunction') continue;
+    const name = symbol(operand(s, 1));
+    if (name) names.add(name);
+  }
+  return withPairedFunctionNames(names, box);
 }
 
 /** The engine error codes that mean a declaration statement DID NOT declare.
@@ -2590,53 +2625,6 @@ function writesFromFunctionBodies(
         result.push(occurrence);
   }
   return result;
-}
-
-/**
- * The diagnostics of the uses of a local, in the canonical statement
- * `boxed`, that are certain to come before the local has a value: an
- * assignment local of a function body before its first assignment, a `let`
- * or `const` local before its declaration (`readsBeforeAssignment()`,
- * `read-before-assignment.ts`).
- * `statement` is the raw top-level statement, whose range is used when the
- * canonical tree has no range for the read.
- *
- * Each diagnostic is a `static-type-error` that carries the engine code
- * `read-before-declaration`, at the symbol that reads the local. The
- * description is the one the run time gives for the error value.
- */
-function readBeforeAssignmentDiagnostics(
-  boxed: ReturnType<ComputeEngine['box']>,
-  statement: MathJsonExpression,
-  source: string
-): ParsingDiagnostic[] {
-  return readsBeforeAssignment(boxed).map(
-    ({ name, kind, read, statement: held }) => {
-      const [start, end] = read ?? held ?? statementRange(statement, source);
-      const [from, to] = held ?? statementRange(statement, source);
-      let snippet = source.slice(from, to).replaceAll(/\s+/g, ' ').trim();
-      if (snippet.length > SNIPPET_LENGTH)
-        snippet = `${snippet.slice(0, SNIPPET_LENGTH - 1)}…`;
-      return {
-        severity: 'error',
-        message: [
-          'static-type-error',
-          describeError([
-            'Error',
-            [
-              'ErrorCode',
-              { str: 'read-before-declaration' },
-              { str: name },
-              ...(kind === 'assignment' ? [{ str: 'assignment' }] : []),
-            ],
-          ]),
-          snippet,
-          'read-before-declaration',
-        ],
-        range: [start, end, start],
-      };
-    }
-  );
 }
 
 /** The source ranges of the function literals (`Function` nodes) in the raw
@@ -3867,17 +3855,47 @@ export function describeError(error: MathJsonExpression): string {
       break;
     }
     case 'read-before-declaration':
-      // Payload: [name] or [name, "assignment"]. A local of a block was read
-      // in a run of the block before its `let` or `const` statement ran in
-      // that run. With "assignment", the local is a name that a block of a
-      // function body assigns with no declaration (an assignment local), and
-      // it was read before its first assignment ran.
+      // Payload: [name]. A statement of a block uses a local of the block
+      // before the statement that declares it: a `let`, a `const`, or the
+      // first assignment of the name at the own level of the block.
       detail =
         payload.length === 0
-          ? 'a local is used before its declaration has run'
-          : payload[1] === 'assignment'
-            ? `\`${payload[0]}\` is read before its first assignment: the assignment makes \`${payload[0]}\` a local of the block, which has no value yet`
-            : `\`${payload[0]}\` is used before its \`let\` or \`const\` has run in this block`;
+          ? 'a local is used before its declaration'
+          : `\`${payload[0]}\` is used before the statement that declares it in this block`;
+      break;
+    case 'declaration-without-value':
+      // Payload: [name] or [name, "function"]. A `let` or `Declare` with
+      // no value. With "function", the declared type is a function type
+      // and no `function` statement of the same name is in the same block.
+      detail =
+        payload.length === 0
+          ? 'a declaration must give a value'
+          : payload[1] === 'function'
+            ? `\`${payload[0]}\` is declared without a value: define \`${payload[0]}\` with a function statement in the same block, or give the declaration a value`
+            : `\`${payload[0]}\` is declared without a value: write \`let ${payload[0]} = …\``;
+      break;
+    case 'first-assignment-in-branch':
+      // Payload: [name]. The first assignment of a name is in a branch of a
+      // conditional or in a loop body.
+      detail =
+        payload.length === 0
+          ? 'a name is assigned for the first time in a branch or a loop body'
+          : `\`${payload[0]}\` is assigned for the first time in a branch or a loop body: declare \`${payload[0]}\` with a value before the branch`;
+      break;
+    case 'assignment-in-operand':
+      // Payload: [name] or []. An assignment or a declaration is an operand
+      // of an expression.
+      detail =
+        payload.length === 0
+          ? 'an assignment is a statement, not a value'
+          : `the assignment of \`${payload[0]}\` is a statement, not a value: assign \`${payload[0]}\` in a statement of its own before the expression`;
+      break;
+    case 'assignment-type-mismatch':
+      // Payload: [name, local type, value type].
+      detail =
+        payload.length < 3
+          ? 'the value does not have the type of the local'
+          : `\`${payload[0]}\` has the type \`${payload[1]}\`, and the value has the type \`${payload[2]}\``;
       break;
     case 'dot-call-not-a-protocol-function': {
       // Payload: [name, receiver type]. The dot reaches protocol members

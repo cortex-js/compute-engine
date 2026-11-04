@@ -202,8 +202,7 @@ describe('CE-595: a block-local function in a narrowed arm', () => {
       const arm = ['Arctan2', ['f', 'x'], ['f', 'x']];
       const e = ce.box([
         'Block',
-        ['Declare', 'f', "'function'"],
-        ['Assign', 'f', ['Function', ['g', 'u'], 'u']],
+        ['Declare', 'f', "'function'", ['Function', ['g', 'u'], 'u']],
         nested
           ? [
               'If',

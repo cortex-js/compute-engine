@@ -752,8 +752,7 @@ describe('At — an aggregate index whose shape lives only in a local frame', ()
   test('a vector-valued `Block` local index declines, naming the width', () => {
     const m = why([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Tuple', 1, 2, 3]],
+      ['Declare', 'p', "'unknown'", ['Tuple', 1, 2, 3]],
       ['At', 'v', 'p'],
     ]);
     expect(m).toMatch(/index is the local name "p", which holds an aggregate/);
@@ -764,7 +763,7 @@ describe('At — an aggregate index whose shape lives only in a local frame', ()
     // The frame's scalar sentinel is not an aggregate: the decline must be
     // about the width, not about being framed at all.
     expect(
-      g(['Block', ['Declare', 'q'], ['Assign', 'q', 2], ['At', 'v', 'q']])
+      g(['Block', ['Declare', 'q', "'unknown'", 2], ['At', 'v', 'q']])
     ).toContain('_gpu_at3(v, q)');
   });
 
@@ -792,8 +791,7 @@ describe('At — an aggregate index whose shape lives only in a local frame', ()
     expect(
       g([
         'Block',
-        ['Declare', 'p'],
-        ['Assign', 'p', ['Tuple', 1, 2, 3]],
+        ['Declare', 'p', "'unknown'", ['Tuple', 1, 2, 3]],
         ['At', 'p', 2],
       ])
     ).toContain('return p.y');

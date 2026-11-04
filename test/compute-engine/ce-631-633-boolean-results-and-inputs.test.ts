@@ -823,15 +823,15 @@ describe('block locals matched by definition', () => {
 
   test('a block that needs no marker is emitted as before', () => {
     // Every input of the block is a read of the comparison itself, so a
-    // failed test is a failed read: no marker object, no `try`. Only the
-    // branches of an `If` assign `b`, so `b` is an input, and it is
-    // declared, as compilation refuses an input with no type.
+    // failed test is a failed read: no marker object, no `try`. The local
+    // `b` is declared with a value before the branches of the `If` assign
+    // it again.
     const ce = fresh();
-    ce.declare('b', 'real');
     for (const json of [
       [
         'Block',
         ['Assign', 'a', 0],
+        ['Assign', 'b', 0],
         ['If', ['Less', 'a', 'm'], ['Assign', 'b', 1], ['Assign', 'b', 2]],
         'b',
       ],

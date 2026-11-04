@@ -37,8 +37,7 @@ describe('Tycho item 235 — Block-local types on the JavaScript target', () => 
   test('Declare + Assign + Length compiles and runs', () => {
     const e = ce().box([
       'Block',
-      ['Declare', 'd', "'list<number>'"],
-      ['Assign', 'd', ['List', 4, 5, 4]],
+      ['Declare', 'd', "'list<number>'", ['List', 4, 5, 4]],
       ['Length', 'd'],
     ]);
     const r = compile(e, { to: 'javascript' });
@@ -60,8 +59,7 @@ describe('Tycho item 235 — Block-local types on the JavaScript target', () => 
   test('At over a Block local compiles (gather index)', () => {
     const e = ce().box([
       'Block',
-      ['Declare', 'd', "'list<number>'"],
-      ['Assign', 'd', ['List', 4, 5, 4]],
+      ['Declare', 'd', "'list<number>'", ['List', 4, 5, 4]],
       ['At', 'd', ['List', 1, 3]],
     ]);
     const r = compile(e, { to: 'javascript' });
@@ -73,12 +71,11 @@ describe('Tycho item 235 — Block-local types on the JavaScript target', () => 
     const engine = ce();
     const e = engine.box([
       'Block',
-      ['Declare', 'd', "'list<number>'"],
-      ['Assign', 'd', ['List', 4, 5, 4]],
+      ['Declare', 'd', "'list<number>'", ['List', 4, 5, 4]],
       ['Length', 'd'],
     ]);
     if (!('ops' in e) || e.ops === null) throw new Error('expected operands');
-    const read = (e as any).ops[2].ops[0];
+    const read = (e as any).ops[1].ops[0];
     expect(read.type.matches('list<any>')).toBe(true);
   });
 
@@ -88,8 +85,7 @@ describe('Tycho item 235 — Block-local types on the JavaScript target', () => 
       engine
         .box([
           'Block',
-          ['Declare', 'd', "'list<number>'"],
-          ['Assign', 'd', ['List', 4, 5, 4]],
+          ['Declare', 'd', "'list<number>'", ['List', 4, 5, 4]],
           ['Length', 'd'],
         ])
         .evaluate()
@@ -100,7 +96,7 @@ describe('Tycho item 235 — Block-local types on the JavaScript target', () => 
     const shadow = [
       'Block',
       ['Assign', 'd', ['List', 1, 2]],
-      ['Block', ['Declare', 'd', "'number'"], ['Assign', 'd', 7], ['Add', 'd', 1]],
+      ['Block', ['Declare', 'd', "'number'", 7], ['Add', 'd', 1]],
     ];
     expect(engine.box(shadow).evaluate().toString()).toBe('8');
     const r = compile(engine.box(shadow), { to: 'javascript' });
@@ -108,7 +104,9 @@ describe('Tycho item 235 — Block-local types on the JavaScript target', () => 
     expect(r.run()).toBe(8);
   });
 
-  test('reassignment of a different kind joins — Length fails closed on a maybe-string', () => {
+  test('a reassignment with a value of another type is invalid and declines', () => {
+    // A local keeps the type of its first value: a string after a list is the
+    // static error `assignment-type-mismatch`.
     const e = ce().box([
       'Block',
       ['Assign', 'd', ['List', 1, 2]],
@@ -117,7 +115,7 @@ describe('Tycho item 235 — Block-local types on the JavaScript target', () => 
     ]);
     const r = compile(e, { to: 'javascript' });
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/text at run time|string arm/);
+    expect(r.error).toMatch(/invalid expression/);
   });
 
   test('a write from a closure defined in the block joins too', () => {
@@ -155,14 +153,12 @@ describe('Tycho item 235 — Block-local types on the JavaScript target', () => 
   test('the boolean-mask read (Tycho witness shapes) compiles with interpreter parity', () => {
     const lengthShape = [
       'Block',
-      ['Declare', 'd', "'list<number>'"],
-      ['Assign', 'd', ['List', 4, 5, 4]],
+      ['Declare', 'd', "'list<number>'", ['List', 4, 5, 4]],
       ['Length', ['At', 'd', ['Equal', 'd', 4]]],
     ];
     const sumShape = [
       'Block',
-      ['Declare', 'd', "'list<number>'"],
-      ['Assign', 'd', ['List', 4, 5, 4]],
+      ['Declare', 'd', "'list<number>'", ['List', 4, 5, 4]],
       ['Sum', ['At', 'd', ['Equal', 'd', 4]]],
     ];
     expect(ce().box(lengthShape).evaluate().toString()).toBe('2');

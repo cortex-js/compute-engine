@@ -140,8 +140,8 @@ describe('A head bound to a function VALUE (declare-then-assign)', () => {
         ce.declare(
           'bump',
           spelling === 'type'
-            ? { type: '(number) scope -> number' }
-            : { signature: '(number) scope -> number' }
+            ? { type: '(number) scope -> nothing' }
+            : { signature: '(number) scope -> nothing' }
         );
         ce.assign(
           'bump',
@@ -803,7 +803,7 @@ describe('Runtime accounting stays conservative for scope writes', () => {
     // the channel split).
     const bare = ce.box([
       'Block',
-      ['Declare', 'n', 0],
+      ['Declare', 'n', "'unknown'", 0],
       ['Assign', 'n', ['Add', 'n', 1]],
       'n',
     ]);
@@ -818,7 +818,7 @@ describe('Runtime accounting stays conservative for scope writes', () => {
       'confinedCounter',
       [
         'Function',
-        ['Block', ['Declare', 'm', 0], ['Assign', 'm', ['Add', 'm', 1]], 'm'],
+        ['Block', ['Declare', 'm', "'unknown'", 0], ['Assign', 'm', ['Add', 'm', 1]], 'm'],
       ],
     ]).evaluate();
     const def = ce.lookupDefinition('confinedCounter');

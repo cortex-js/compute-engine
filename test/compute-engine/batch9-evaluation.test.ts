@@ -291,73 +291,6 @@ describe('evaluateAsync threads a conditional value', () => {
   });
 });
 
-describe('a big operator does not keep a function assigned by its term', () => {
-  // An implicit local of a block starts with no value at each top-level
-  // evaluation and at each function call, and keeps its value from one loop
-  // iteration to the next (user decision 2026-10-18). Each index of a `Sum` or
-  // a `Product` is an iteration, so the `h` assigned at `k = 2` is still set at
-  // `k = 3` (`h(3) = 6`), and `Sum` gives `10 + h(1)`. `Table` applies a
-  // function literal at each index, which is a call, so there `h` starts with
-  // no value again and the result is `[h(1), 4, h(3)]` (test below).
-  const H = ['Assign', 'h', ['Function', ['Multiply', 2, 'z'], 'z']];
-  const body = ['Block', ['If', ['Equal', 'k', 2], H], ['h', 'k']];
-
-  test.each([
-    ['Sum', '10 + h(1)'],
-    ['Product', '24h(1)'],
-  ])('%s gives the same value on every evaluation', async (op, expected) => {
-    const ce = new ComputeEngine();
-    const e = ce.box([op, body, 'k', 1, 3] as never);
-    expect(e.evaluate().toString()).toBe(expected);
-    expect(e.evaluate().toString()).toBe(expected);
-    expect((await e.evaluateAsync()).toString()).toBe(expected);
-    expect(e.evaluate().toString()).toBe(expected);
-    // A new expression on the same engine gives the same value too.
-    expect(
-      ce
-        .box([op, body, 'k', 1, 3] as never)
-        .evaluate()
-        .toString()
-    ).toBe(expected);
-    // The name is not declared outside the block.
-    expect(ce.lookupDefinition('h')).toBeUndefined();
-  });
-
-  test('a term whose argument changes when it is read again', () => {
-    const ce = new ComputeEngine();
-    const e = ce.box([
-      'Sum',
-      ['Block', ['If', ['Equal', 'k', 2], H], ['h', ['Add', 'k', 'a']]],
-      'k',
-      1,
-      3,
-    ] as never);
-    const first = e.evaluate().toString();
-    expect(first).toBe('4a + h(a + 1) + 10');
-    expect(e.evaluate().toString()).toBe(first);
-    expect(ce.lookupDefinition('h')).toBeUndefined();
-  });
-
-  test('a Table of a block: each cell is a new call of the body', () => {
-    // `Table` applies a function literal to each index, so the block is a
-    // function body. A function body owns a name that an assignment in a
-    // nested branch writes, and each call starts with no value for it. So
-    // the call of `h` in a cell where the branch did not run reads `h`
-    // before its first assignment: the `read-before-declaration` error
-    // (`Table(Block(If(k = 2, a ≔ 5); a), (k, 1, 3))` gives the same error
-    // for `k = 1` and `k = 3`, and `5` for `k = 2`). Before, `h(1)` declared
-    // `h` in the global scope: the first evaluation gave `[h(1),4,6]` and
-    // the second `[2,4,6]`.
-    const ce = new ComputeEngine();
-    const e = ce.box(['Table', body, ['Tuple', 'k', 1, 3]] as never);
-    const expected =
-      '[Error(ErrorCode("read-before-declaration", "h", "assignment")),4,Error(ErrorCode("read-before-declaration", "h", "assignment"))]';
-    expect(e.evaluate().toString()).toBe(expected);
-    expect(e.evaluate().toString()).toBe(expected);
-    expect(ce.lookupDefinition('h')).toBeUndefined();
-  });
-});
-
 describe('a juxtaposition with a number | nothing operand is a product', () => {
   const ce = new ComputeEngine();
   test.each([
@@ -416,6 +349,7 @@ describe('an If with no else branch round-trips through LaTeX', () => {
     ]);
     const block = engine.box([
       'Block',
+      ['Assign', 'a', 0],
       ['If', ['Equal', 'k', 2], ['Assign', 'a', 5]],
       'a',
     ]);

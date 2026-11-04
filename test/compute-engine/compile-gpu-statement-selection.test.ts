@@ -203,20 +203,25 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
     // Hoisted as a statement, an effect inside the selection — a write to an
     // enclosing binding, directly or in a called function — could run in
     // another order than the interpreter's. Such a selection keeps the
-    // ternary form, which declines a hoisting arm as before.
-    ce.declare('w', 'real');
+    // ternary form, which declines a hoisting arm as before. The written
+    // binding is a local of the compiled expression: a write to a symbol
+    // declared in the engine declines for another reason.
     expect(() =>
       compile(
         ce.box([
-          'If',
-          ['Greater', 'x', 0],
+          'Block',
+          ['Assign', 'w_local', 0],
           [
-            'Block',
-            ['Declare', 'q', 'real', ['Random']],
-            ['Assign', 'w', 1],
-            'q',
+            'If',
+            ['Greater', 'x', 0],
+            [
+              'Block',
+              ['Declare', 'q', 'real', ['Random']],
+              ['Assign', 'w_local', 1],
+              'q',
+            ],
+            0,
           ],
-          0,
         ]),
         { to: 'glsl', fallback: false, constantFold: false }
       )
@@ -271,36 +276,8 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
     expect(block.split('_gpu_rnd_draw(').length - 1).toBe(1);
   });
 
-  test('a selection reading a name the unit assigns keeps the ternary form', () => {
-    // Hoisted ahead of the tuple, the selection would read `k` before the
-    // assignment written before it; the ternary form declines the loop arm.
-    expect(() =>
-      compile(
-        ce.parse(
-          String.raw`k := 0; (k := 1, \operatorname{If}(k > 0, \sum_{n=1}^{\lfloor t\rfloor} n, 0))`
-        ),
-        { to: 'glsl', fallback: false, constantFold: false }
-      )
-    ).toThrow(/conditionally-evaluated branch/);
-  });
-
-  test('a write outside the selection, in any form, keeps the ternary form', () => {
+  test('a write in an operand beside the selection declines', () => {
     const loop = ['Sum', 'n', ['Limits', 'n', 1, ['Floor', 'x']]];
-    // The helper body is its own unit: its `k := 1` precedes the selection.
-    ce.declare('h_k', 'function');
-    ce.assign(
-      'h_k',
-      ce.box([
-        'Function',
-        [
-          'Block',
-          ['Declare', 'k', 'real'],
-          ['Assign', 'k', 0],
-          ['Tuple', ['Assign', 'k', 1], ['If', ['Greater', 'k', 0], loop, 0]],
-        ],
-        'x',
-      ])
-    );
     // A pure function reading the assigned global: the read is in its body.
     ce.declare('k_g', 'real');
     ce.declare('g_k', 'function');
@@ -308,9 +285,8 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
     // A nested block declaring its own `k` does not make the outer read local.
     const nestedArm = [
       'Block',
-      ['Declare', 'v', 'real'],
-      ['Assign', 'v', 'k'],
-      ['Block', ['Declare', 'k', 'real'], ['Assign', 'k', 2], 'k'],
+      ['Declare', 'v', 'real', 'k'],
+      ['Block', ['Declare', 'k', 'real', 2], 'k'],
       'v',
     ];
     // A symbol whose inlined value reads the assigned name.
@@ -321,15 +297,21 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
     // requires the function to declare the `scope` effect.
     ce.declare('k_s', 'real');
     ce.declare('setK', '(real) scope -> real');
-    ce.assign('setK', ce.box(['Function', ['Assign', 'k_s', 'v'], 'v']));
-    const declines = [
-      ['h_k', 'x'],
+    // An assignment as the last statement has the value `Nothing`, so the
+    // body ends with the value it returns.
+    ce.assign(
+      'setK',
+      ce.box(['Function', ['Block', ['Assign', 'k_s', 'v'], 'v'], 'v'])
+    );
+    // An assignment as an operand of a `Tuple` is the static error
+    // `assignment-in-operand`: the expression is invalid and the compile
+    // declines.
+    const invalid = [
       [
         'Block',
         ['Assign', 'k_a', 0],
         ['Tuple', ['Assign', 'k_a', 1], ['If', ['Greater', 'a_l', 1], loop, 0]],
       ],
-      ['Tuple', ['setK', 1], ['If', ['Greater', 'k_s', 0], loop, 0]],
       [
         'Block',
         ['Assign', 'k_g', 0],
@@ -346,8 +328,7 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
       ],
       [
         'Block',
-        ['Declare', 'k', 'real'],
-        ['Assign', 'k', 0],
+        ['Declare', 'k', 'real', 0],
         [
           'Tuple',
           ['Assign', 'k', 1],
@@ -355,14 +336,22 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
         ],
       ],
     ];
-    for (const expr of declines)
+    for (const expr of invalid)
       expect(() =>
         compile(ce.box(expr), {
           to: 'glsl',
           fallback: false,
           constantFold: false,
         })
-      ).toThrow(/conditionally-evaluated branch|multi-statement construct/);
+      ).toThrow(/invalid expression.*assignment-in-operand/s);
+    // A write to a symbol declared in the engine, here in a called
+    // function, declines.
+    expect(() =>
+      compile(
+        ce.box(['Tuple', ['setK', 1], ['If', ['Greater', 'k_s', 0], loop, 0]]),
+        { to: 'glsl', fallback: false, constantFold: false }
+      )
+    ).toThrow(/"k_s" is not a local of the compiled expression/);
   });
 
   test('a sibling draw beside a selection without effects keeps the statement form', () => {
@@ -391,17 +380,12 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
     const r = compile(
       ce.box([
         'Block',
-        ['Declare', 'q', 'real'],
-        [
-          'Assign',
-          'q',
-          [
+        ['Declare', 'q', 'real', [
             'If',
             ['Greater', 'x', 0],
             ['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]],
             0,
-          ],
-        ],
+          ]],
         'q',
       ]),
       { to: 'glsl', fallback: false, constantFold: false }
@@ -696,7 +680,7 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
       ce.box([
         'If',
         ['Greater', 'x', 0],
-        ['Block', ['Declare', 'q'], ['Assign', 'q', 2], 'q'],
+        ['Block', ['Declare', 'q', "'unknown'", 2], 'q'],
         1,
       ]),
       { to: 'glsl', fallback: false, constantFold: false }

@@ -332,6 +332,8 @@ describe('the round-3 shapes', () => {
     expect(draws(r.code!)).toBe(2);
   });
 
+  // A block of declarations is a value expression, so it compiles as an
+  // operand of a `Tuple`.
   it('a value block that draws after an earlier draw binds both in order', () => {
     const r = glsl([
       'Tuple',

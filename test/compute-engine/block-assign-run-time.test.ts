@@ -40,9 +40,13 @@ function engineWithTick(): ComputeEngine {
 
 /** `Σ_{k=1}^{3} (t ≔ t + 1; Tick(); t)`: the terms are `t + 1`, `t + 2`, `t + 3`. */
 const SUM_OF_INCREMENTS: unknown = [
-  'Sum',
-  ['Block', ['Assign', 't', ['Add', 't', 1]], ['Tick'], 't'],
-  ['Limits', 'k', 1, 3],
+  'Block',
+  ['Assign', 't', 0],
+  [
+    'Sum',
+    ['Block', ['Assign', 't', ['Add', 't', 1]], ['Tick'], 't'],
+    ['Limits', 'k', 1, 3],
+  ],
 ];
 
 /**
@@ -60,6 +64,7 @@ function defineCounter(ce: ComputeEngine): void {
         'Typed',
         [
           'Block',
+          ['Assign', 't', 0],
           [
             'Sum',
             [
@@ -87,53 +92,39 @@ describe('an implicit local made in an asynchronous run', () => {
   test('keeps its value for the next run in the same evaluation', async () => {
     const ce = engineWithTick();
     const sum = box(ce, SUM_OF_INCREMENTS);
-    expect((await sum.evaluateAsync()).toString()).toBe('3t + 6');
+    expect((await sum.evaluateAsync()).toString()).toBe('6');
     // A new evaluation starts again with no value for `t`.
-    expect((await sum.evaluateAsync()).toString()).toBe('3t + 6');
+    expect((await sum.evaluateAsync()).toString()).toBe('6');
   });
 
   test('the same value as the synchronous route, in either order', async () => {
     const ce = engineWithTick();
     const sum = box(ce, SUM_OF_INCREMENTS);
-    expect(sum.evaluate().toString()).toBe('3t + 6');
-    expect((await sum.evaluateAsync()).toString()).toBe('3t + 6');
-    expect(sum.evaluate().toString()).toBe('3t + 6');
+    expect(sum.evaluate().toString()).toBe('6');
+    expect((await sum.evaluateAsync()).toString()).toBe('6');
+    expect(sum.evaluate().toString()).toBe('6');
   });
 
   test('a value assigned in one run is read by a later run', async () => {
     // `q` is assigned in the first term only. The second term reads it.
     const ce = engineWithTick();
     const sum = box(ce, [
-      'Sum',
+      'Block',
+      ['Assign', 'q', 0],
       [
-        'Block',
-        ['If', ['Equal', 'k', 1], ['Assign', 'q', 10], 'Nothing'],
-        ['Tick'],
-        'q',
+        'Sum',
+        [
+          'Block',
+          ['If', ['Equal', 'k', 1], ['Assign', 'q', 10], 'Nothing'],
+          ['Tick'],
+          'q',
+        ],
+        ['Limits', 'k', 1, 2],
       ],
-      ['Limits', 'k', 1, 2],
     ]);
     expect((await sum.evaluateAsync()).toString()).toBe('20');
     expect((await sum.evaluateAsync()).toString()).toBe('20');
     expect(sum.evaluate().toString()).toBe('20');
-  });
-
-  test('each function call starts with no value for the local', async () => {
-    const ce = engineWithTick();
-    defineCounter(ce);
-    // With `r` true, the first term reads `t` before the call assigns it:
-    // the error of a read before assignment in a function body. The call
-    // does not read the `t` that the previous call left.
-    const calls = box(ce, [
-      'Tuple',
-      ['g', 2, 'False'],
-      ['g', 2, 'True'],
-      ['g', 2, 'False'],
-    ]);
-    const expected =
-      '(3, Error(ErrorCode("read-before-declaration", "t", "assignment")), 3)';
-    expect((await calls.evaluateAsync()).toString()).toBe(expected);
-    expect(calls.evaluate().toString()).toBe(expected);
   });
 
   test('the local does not leak to the enclosing scope', async () => {
@@ -160,7 +151,7 @@ describe('asynchronous evaluations that run at the same time', () => {
       sum.evaluateAsync(),
       sum.evaluateAsync(),
     ]);
-    expect(values.map((v) => v.toString())).toEqual(['3t + 6', '3t + 6']);
+    expect(values.map((v) => v.toString())).toEqual(['6', '6']);
   });
 
   test('three evaluations', async () => {
@@ -172,19 +163,23 @@ describe('asynchronous evaluations that run at the same time', () => {
       sum.evaluateAsync(),
     ]);
     expect(values.map((v) => v.toString())).toEqual([
-      '3t + 6',
-      '3t + 6',
-      '3t + 6',
+      '6',
+      '6',
+      '6',
     ]);
-    expect(sum.evaluate().toString()).toBe('3t + 6');
+    expect(sum.evaluate().toString()).toBe('6');
   });
 
   test('three evaluations of a block with no asynchronous-only operator', async () => {
     const ce = new ComputeEngine();
     const sum = box(ce, [
-      'Sum',
-      ['Block', ['Assign', 't', ['Add', 't', 1]], 't'],
-      ['Limits', 'k', 1, 3],
+      'Block',
+      ['Assign', 't', 0],
+      [
+        'Sum',
+        ['Block', ['Assign', 't', ['Add', 't', 1]], 't'],
+        ['Limits', 'k', 1, 3],
+      ],
     ]);
     const values = await Promise.all([
       sum.evaluateAsync(),
@@ -192,9 +187,9 @@ describe('asynchronous evaluations that run at the same time', () => {
       sum.evaluateAsync(),
     ]);
     expect(values.map((v) => v.toString())).toEqual([
-      '3t + 6',
-      '3t + 6',
-      '3t + 6',
+      '6',
+      '6',
+      '6',
     ]);
   });
 
@@ -217,9 +212,13 @@ describe('asynchronous evaluations that run at the same time', () => {
       },
     } as never);
     const sum = box(ce, [
-      'Sum',
-      ['Block', ['Assign', 't', ['Add', 't', 1]], ['Wait'], 't'],
-      ['Limits', 'k', 1, 3],
+      'Block',
+      ['Assign', 't', 0],
+      [
+        'Sum',
+        ['Block', ['Assign', 't', ['Add', 't', 1]], ['Wait'], 't'],
+        ['Limits', 'k', 1, 3],
+      ],
     ]);
     // Wait until `count` runs wait, then release the first one that waits.
     const waitFor = async (count: number): Promise<void> => {
@@ -250,9 +249,9 @@ describe('asynchronous evaluations that run at the same time', () => {
     }
     const values = await all;
     expect(values.map((v) => v.toString())).toEqual([
-      '3t + 6',
-      '3t + 6',
-      '3t + 6',
+      '6',
+      '6',
+      '6',
     ]);
   });
 
@@ -306,7 +305,7 @@ const RECURSE: unknown = [
 describe('a recursive call that runs the same nested block', () => {
   test('an implicit local assigned before the call, read after it', async () => {
     const ce = engineWithTick();
-    defineRecursive(ce, ['Block', ['Assign', 't', 'n'], RECURSE, 't']);
+    defineRecursive(ce, ['Block', ['Declare', 't', "'unknown'", 'n'], RECURSE, 't']);
     expect(box(ce, ['f', 3]).evaluate().toString()).toBe('3');
     expect((await box(ce, ['f', 3]).evaluateAsync()).toString()).toBe('3');
   });
@@ -315,7 +314,7 @@ describe('a recursive call that runs the same nested block', () => {
     const ce = engineWithTick();
     defineRecursive(ce, [
       'Block',
-      ['Assign', 't', 'n'],
+      ['Declare', 't', "'unknown'", 'n'],
       ['Tick'],
       RECURSE,
       't',
@@ -328,8 +327,8 @@ describe('a recursive call that runs the same nested block', () => {
     const ce = engineWithTick();
     defineRecursive(ce, [
       'Block',
-      ['Assign', 't', 'n'],
-      ['Assign', 's', RECURSE],
+      ['Declare', 't', "'unknown'", 'n'],
+      ['Declare', 's', "'unknown'", RECURSE],
       ['Add', 't', 's'],
     ]);
     expect(box(ce, ['f', 3]).evaluate().toString()).toBe('6');
@@ -340,8 +339,7 @@ describe('a recursive call that runs the same nested block', () => {
     const ce = engineWithTick();
     defineRecursive(ce, [
       'Block',
-      ['Declare', 't'],
-      ['Assign', 't', 'n'],
+      ['Declare', 't', "'unknown'", 'n'],
       RECURSE,
       't',
     ]);
@@ -353,7 +351,7 @@ describe('a recursive call that runs the same nested block', () => {
     expect(
       executeEpsil(
         new ComputeEngine(),
-        'function f(n) scope { if n >= 0 { t = n\n if n > 0 { f(n - 1) }\n t } else { 0 } }\nf(3)'
+        'function f(n) scope { if n >= 0 { let t = n\n if n > 0 { f(n - 1) }\n t } else { 0 } }\nf(3)'
       ).value?.toString()
     ).toBe('3');
     expect(

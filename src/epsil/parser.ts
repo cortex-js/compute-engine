@@ -6857,9 +6857,13 @@ export class Parser {
 
       // `a = b = 5` reads as "assign a the boolean (b == 5)" — coherent, but
       // never what someone writing a chained assignment means. Diagnose it;
-      // `a := b := 5` (genuinely chained) and `a = (b = 5)` (explicitly a
-      // comparison) both stay silent.
-      if (asAssign && right === this.lastBareEqualNode)
+      // `a = (b = 5)` (explicitly a comparison) stays silent. An assignment
+      // is a statement, not a value, so `a := b := 5` is diagnosed too: write
+      // two statements, `b := 5; a := b`.
+      if (
+        (asAssign && right === this.lastBareEqualNode) ||
+        (def.name === 'Assign' && operator(right) === 'Assign')
+      )
         this.error(
           ['chained-assignment'],
           this.localStart(right) ?? 0,

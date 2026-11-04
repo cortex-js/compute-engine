@@ -474,8 +474,7 @@ describe('COMPILE: BigOp and Block', () => {
       'Function',
       [
         'Block',
-        ['Declare', 'cbl_t', 'number'],
-        ['Assign', 'cbl_t', ['Add', 'cbl_x', 1]],
+        ['Declare', 'cbl_t', 'number', ['Add', 'cbl_x', 1]],
         ['Multiply', 'cbl_t', 2],
       ],
       'cbl_x',
@@ -490,8 +489,7 @@ describe('COMPILE: BigOp and Block', () => {
       'Function',
       [
         'Block',
-        ['Declare', 'cblm_t', 'number'],
-        ['Assign', 'cblm_t', ['Add', 'cblm_x', 1]],
+        ['Declare', 'cblm_t', 'number', ['Add', 'cblm_x', 1]],
         ['Multiply', 'cblm_t', 2],
       ],
       'cblm_x',

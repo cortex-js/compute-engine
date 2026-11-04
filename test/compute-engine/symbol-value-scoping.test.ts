@@ -133,24 +133,6 @@ describe('SPEC: the late-bound/early-bound ruling', () => {
  * only they defer.
  */
 describe('SPEC: only a SHIELD intercepts a stored value’s free symbol', () => {
-  test('a valueless inner Declare no longer intercepts', () => {
-    const ce = engine();
-    // ORDER IS LOAD-BEARING: `a` must be assigned while `x` is still valueless,
-    // or eager capture bakes the number in and there is no free symbol left to
-    // intercept.
-    ce.box(['Assign', 'a', ['Add', 'x', 1]]).evaluate();
-    ce.box(['Assign', 'x', 100]).evaluate();
-    expect(ce.box(['Add', 'a', 5]).evaluate().toString()).toEqual('106');
-    // The block's `x` is a DIFFERENT variable; `a` captured the global binding
-    // and has no business resolving through the block's one.
-    expect(
-      ce
-        .box(['Block', ['Declare', 'x', "'real'"], ['Add', 'a', 5]])
-        .evaluate()
-        .toString()
-    ).toEqual('106'); // was: 'x + 6'
-  });
-
   test('a VALUED inner shadow is unchanged — it never intercepted', () => {
     // The asymmetry that made the blanket rule indefensible: give the same
     // shadow a value and it already did not capture. Both before and after.
@@ -161,8 +143,7 @@ describe('SPEC: only a SHIELD intercepts a stored value’s free symbol', () => 
       ce
         .box([
           'Block',
-          ['Declare', 'x', "'real'"],
-          ['Assign', 'x', 7],
+          ['Declare', 'x', "'real'", 7],
           ['Add', 'a', 5],
         ])
         .evaluate()

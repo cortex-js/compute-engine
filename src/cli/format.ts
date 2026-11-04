@@ -524,7 +524,7 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
     case 'assign-in-condition':
       return `":=" in a condition assigns, and the assigned value becomes the test; use "==" to compare, or assign on its own line first`;
     case 'chained-assignment':
-      return `"=" only assigns as a whole statement — the second "=" here compares, so this assigns a boolean; write "a := b := 5" to chain the assignment, or parenthesize if the comparison was meant`;
+      return `An assignment is a statement, not a value, so assignments do not chain; write two statements, "b := 5; a := b", or "a := (b == 5)" if the comparison was meant`;
     case 'parameter-shadows-constant':
       return `The parameter "${args[0]}" shadows the constant of the same name: inside the body, "${args[0]}" is the argument, not the constant. Rename the parameter, or use the constant's value directly`;
     case 'zero-index':

@@ -290,26 +290,16 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
             'Sum',
             [
               'Block',
-              ['Declare', 'ceArg_4'],
-              [
-                'Assign',
-                'ceArg_4',
-                [
+              ['Declare', 'ceArg_4', "'unknown'", [
                   'Add',
                   ['Multiply', 'ceArg_0', ['Cos', turn]],
                   ['Negate', ['Multiply', 'ceArg_1', ['Sin', turn]]],
-                ],
-              ],
-              ['Declare', 'ceArg_5'],
-              [
-                'Assign',
-                'ceArg_5',
-                [
+                ],],
+              ['Declare', 'ceArg_5', "'unknown'", [
                   'Add',
                   ['Multiply', 'ceArg_0', ['Sin', turn]],
                   ['Multiply', 'ceArg_1', ['Cos', turn]],
-                ],
-              ],
+                ],],
               ['Add', 'ceArg_4', 'ceArg_5'],
             ],
             ['Limits', 'ceArg_2', 0, 'N'],
@@ -381,8 +371,7 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
 
   const withLocal = (local: string) => [
     'Block',
-    ['Declare', local, "'real'"],
-    ['Assign', local, ['Add', 'x', 1]],
+    ['Declare', local, "'real'", ['Add', 'x', 1]],
     ['Add', twice, local],
   ];
 
@@ -437,7 +426,7 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
   );
 
   it.each(['glsl', 'wgsl'] as const)(
-    '%s: a self-mapped entry compiles, also when the code writes the symbol',
+    '%s: a self-mapped entry compiles, and declines when the code writes the symbol',
     (to) => {
       const ce = engineWithF();
       const r = compile(
@@ -448,7 +437,8 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
         ] as never),
         { to, vars: { a: 'a' } }
       );
-      expect(r.success).toBe(true);
+      expect(r.success).toBe(false);
+      expect(r.error).toMatch(/is not a local of the compiled expression/);
       const plain = compile(ce.box(twice as never), {
         to,
         vars: { a: 'a' },
@@ -493,8 +483,7 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
       const r = compile(
         ce.box([
           'Block',
-          ['Declare', 'k', "'real'"],
-          ['Assign', 'k', ['Add', 'x', 1]],
+          ['Declare', 'k', "'real'", ['Add', 'x', 1]],
           ['Add', 'k', 'b'],
         ] as never),
         { to, vars: { a: 'k', b: 'u_b' } }

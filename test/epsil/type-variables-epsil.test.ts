@@ -273,8 +273,10 @@ describe('EPSIL `where` ANNOTATIONS (D13: prefix-mode termination)', () => {
       'g',
       { str: '(T) -> boolean where T: (real) -> real' },
     ]);
+    // The annotation is a function type: without a `function g` statement
+    // in the same block, the declaration needs a value.
     expect(run('let g: (T) -> boolean where T: (real) -> real').value).toBe(
-      '"Nothing"'
+      'Error(ErrorCode("declaration-without-value", "g", "function"))'
     );
   });
 
@@ -343,32 +345,29 @@ describe('EPSIL `where` ANNOTATIONS (D13: prefix-mode termination)', () => {
 describe('EPSIL `where` × the `type` statement (D13: shadowing)', () => {
   test('a quantified name shadows a nominal type of the same name', () => {
     const source =
-      'type point = tuple<number, number>\nlet f: (point) -> point where point\nf(5)';
+      'type point = tuple<number, number>\nlet f: (point) -> point where point\nfunction f(p) { p }\nf(5)';
     expect(parseDiagnostics(source)).toEqual([]);
 
     const r = run(source);
     expect(r.diagnostics).toEqual([]);
-    // `point` in the arm is the VARIABLE: an integer argument is admitted and
-    // the result is typed from it. If the nominal `point` had won, this would
-    // be an `incompatible-type` error instead.
-    expect(r.value).toBe('f(5)');
-    expect(r.type).toBe('integer');
+    // `point` in the arm is the VARIABLE: an integer argument is admitted.
+    // If the nominal `point` had won, this would be an `incompatible-type`
+    // error instead.
+    expect(r.value).toBe('5');
   });
 
   test('WITHOUT the clause the same name IS the nominal type (the capture)', () => {
     // The contrast that makes clause-stripping a capture rather than a loss:
     // drop `where point` and `point` silently means the user's tuple type.
     const r = run(
-      'type point = tuple<number, number>\nlet g: (point) -> point\ng(5)'
+      'type point = tuple<number, number>\nlet g: (point) -> point\nfunction g(p) { p }\ng(5)'
     );
-    expect(r.value).toBe(
-      'g(Error(ErrorCode("incompatible-type", "point", "5"), 5))'
-    );
+    expect(r.value).toBe('Error(ErrorCode("incompatible-type", "point", "5"), 5)');
   });
 
   test('a quantified name still binds structurally in its arm', () => {
     const r = run(
-      'type point = tuple<number, number>\nlet f: (point) -> point where point\nf((1, 2))'
+      'type point = tuple<number, number>\nlet f: (point) -> point where point\nfunction f(p) { p }\nf((1, 2))'
     );
     expect(r.diagnostics).toEqual([]);
     expect(r.type).toBe('tuple<integer, integer>');

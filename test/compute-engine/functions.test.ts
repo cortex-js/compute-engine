@@ -1209,8 +1209,7 @@ describe('N() through user-defined function application', () => {
         'Function',
         [
           'Block',
-          ['Declare', 'a', 'real'],
-          ['Assign', 'a', ['probe', 'x']],
+          ['Declare', 'a', 'real', ['probe', 'x']],
           'a',
         ],
         'x',

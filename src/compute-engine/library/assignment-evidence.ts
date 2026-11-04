@@ -125,6 +125,10 @@ export function coarsenEvidenceType(
 export {
   markDeclaredLocal,
   isDeclaredLocal,
+  isFirstValue,
+  hasUnknownFirstValue,
+  isOpenLocal,
+  markOpenLocal,
 } from '../boxed-expression/declared-local.js';
 
 type EvidenceSession = {

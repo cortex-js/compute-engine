@@ -241,23 +241,16 @@ describe('freeSymbolTypes', () => {
     expect(w.freeSymbolTypes.P.lowered).toBe('array<vec2f, 2000>');
   });
 
-  it('a local copy of an assigned list of points has the reported type', () => {
-    // The assignment writes a local (`_tv1`) in place of the input `P`. The
-    // local is declared with the type that `freeSymbolTypes` reports for `P`.
-    for (const [to, decl] of [
-      ['glsl', 'vec2[3] _tv1;'],
-      ['wgsl', 'var _tv1: array<vec2f, 3>;'],
-    ]) {
+  it('an assignment of an input list of points declines', () => {
+    // A write to a symbol declared in the engine declines.
+    for (const to of ['glsl', 'wgsl']) {
       const ce = new ComputeEngine();
       ce.declare('P', 'list<tuple<real, real>^3>');
       ce.declare('k', 'integer');
       const points = ['List', ['Tuple', 1, 2], ['Tuple', 3, 4], ['Tuple', 5, 6]];
-      const r = run(ce, to, ['Block', ['Assign', 'P', points], ['At', 'P', 'k']]);
-      expect(r.success).toBe(true);
-      expect(r.code.split('\n')[0]).toBe(decl);
-      expect(r.freeSymbolTypes.P.lowered).toBe(
-        to === 'glsl' ? 'vec2[3]' : 'array<vec2f, 3>'
-      );
+      expect(() =>
+        run(ce, to, ['Block', ['Assign', 'P', points], ['At', 'P', 'k']])
+      ).toThrow(/"P" is not a local of the compiled expression/);
     }
   });
 

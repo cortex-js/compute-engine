@@ -79,8 +79,11 @@ describe('expected-function for non-callable declared heads', () => {
     expect(app.isValid).toBe(false);
     expect(app.toString()).toContain('ErrorCode("expected-function", "a"');
     // Epsil route: `a(1-a)` is call syntax, so the program is diagnosed
-    // statically rather than staying an inert application.
-    const r = executeEpsil(new ComputeEngine(), 'a: value; a(1-a)');
+    // statically rather than staying an inert application. An Epsil
+    // declaration must have a value, so the host declares `a` with no value.
+    const ce2 = new ComputeEngine();
+    ce2.declare('a', 'value');
+    const r = executeEpsil(ce2, 'a(1-a)');
     expect(JSON.stringify(r.diagnostics)).toContain('static-type-error');
     expect(JSON.stringify(r.diagnostics)).toContain('expected-function');
   });

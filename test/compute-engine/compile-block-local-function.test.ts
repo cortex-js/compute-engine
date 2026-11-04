@@ -186,13 +186,12 @@ describe('COMPILE a block-local function definition', () => {
   });
 
   it('a FORWARD call of a `const` lambda fails closed, not at run time', () => {
-    // A `const` binding declares nothing until its own statement runs — the
-    // interpreter rejects this program too — so the call must be refused at
-    // compile time. Resolving it would emit `let a = g(3); let g = …`, whose
-    // `g(3)` reads a JavaScript temporal dead zone: a runtime `ReferenceError`
-    // behind `success: true`.
+    // A read of a local before its declaration in the same block is the
+    // static error `read-before-declaration`, so the compile declines. Emitted,
+    // `let a = g(3); let g = …` would read a JavaScript temporal dead zone: a
+    // runtime `ReferenceError` behind `success: true`.
     expect(() => both('let a = g(3)\nconst g = (k) => k + 1\na')).toThrow(
-      /Unknown operator/
+      /invalid expression.*read-before-declaration/s
     );
   });
 
@@ -454,8 +453,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     const r = compareJson(
       [
         'Block',
-        ['Declare', 'k', "'function'"],
-        ['Assign', 'k', twice],
+        ['Declare', 'k', "'function'", twice],
         ['k', 'x'],
       ],
       { x: 3 }
@@ -471,8 +469,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
   it('folds a call with a constant argument', () => {
     const r = compareJson([
       'Block',
-      ['Declare', 'k', "'function'"],
-      ['Assign', 'k', twice],
+      ['Declare', 'k', "'function'", twice],
       ['k', 3],
     ]);
     expect(r.compiled).toBe(6);
@@ -491,8 +488,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
   it('compiles with a declared signature', () => {
     const block = (arg: unknown) => [
       'Block',
-      ['Declare', 'k', "'(real) -> real'"],
-      ['Assign', 'k', twice],
+      ['Declare', 'k', "'(real) -> real'", twice],
       ['k', arg],
     ];
     expect(compareJson(block('x'), { x: 3 })).toMatchObject({
@@ -510,8 +506,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     const r = compareJson(
       [
         'Block',
-        ['Declare', 'k', "'function'"],
-        ['Assign', 'k', twice],
+        ['Declare', 'k', "'function'", twice],
         ['k', 'xs'],
       ],
       { xs: [1, 2, 3] }
@@ -534,8 +529,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     const r = compareJson(
       [
         'Block',
-        ['Declare', 'f', "'function'"],
-        ['Assign', 'f', fact],
+        ['Declare', 'f', "'function'", fact],
         ['f', 'x'],
       ],
       { x: 5 }
@@ -549,8 +543,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
       compareJson(
         [
           'Block',
-          ['Declare', 'k', "'function'"],
-          ['Assign', 'k', F(['Add', 'a', 'b'], 'a', 'b')],
+          ['Declare', 'k', "'function'", F(['Add', 'a', 'b'], 'a', 'b')],
           ['k', 'x'],
         ],
         { x: 3 }
@@ -562,10 +555,8 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     const r = compareJson(
       [
         'Block',
-        ['Declare', 'k', "'function'"],
-        ['Assign', 'k', twice],
-        ['Declare', 'a', "'unknown'"],
-        ['Assign', 'a', ['k', 'x']],
+        ['Declare', 'k', "'function'", twice],
+        ['Declare', 'a', "'unknown'", ['k', 'x']],
         ['Assign', 'k', thrice],
         ['Add', 'a', ['k', 'x']],
       ],
@@ -580,8 +571,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
   // at that point.
   const inBranch = [
     'Block',
-    ['Declare', 'k', "'function'"],
-    ['Assign', 'k', twice],
+    ['Declare', 'k', "'function'", twice],
     ['If', ['Greater', 'x', 0], ['Assign', 'k', thrice]],
     ['k', 'x'],
   ];
@@ -618,10 +608,8 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
   it('a reassignment INSIDE a loop body is read at run time', () => {
     const r = compareJson([
       'Block',
-      ['Declare', 'k', "'function'"],
-      ['Assign', 'k', twice],
-      ['Declare', 's', "'unknown'"],
-      ['Assign', 's', 0],
+      ['Declare', 'k', "'function'", twice],
+      ['Declare', 's', "'unknown'", 0],
       [
         'Loop',
         [
@@ -641,12 +629,9 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     const r = compareJson(
       [
         'Block',
-        ['Declare', 'k', "'function'"],
-        ['Assign', 'k', twice],
-        ['Declare', 'g', "'function'"],
-        ['Assign', 'g', F(['k', 'v'], 'v')],
-        ['Declare', 'a', "'unknown'"],
-        ['Assign', 'a', ['g', 'x']],
+        ['Declare', 'k', "'function'", twice],
+        ['Declare', 'g', "'function'", F(['k', 'v'], 'v')],
+        ['Declare', 'a', "'unknown'", ['g', 'x']],
         ['Assign', 'k', thrice],
         ['Add', 'a', ['g', 'x']],
       ],
@@ -657,21 +642,45 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
   });
 
   it('an inner `Declare` of the same name is a different binding', () => {
+    // With `x` declared `real | list<real>` (as in `beforeEach`), a call
+    // `k(x)` of a block-local function declines, because the argument does
+    // not settle one shape. So the test uses its own engine, with `x`
+    // declared `real`.
+    ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    // A block of declarations is a value expression, so it compiles as the
+    // value of a declaration: 3·3 + 2·3.
+    expect(
+      compareJson(
+        [
+          'Block',
+          ['Declare', 'k', "'function'", twice],
+          [
+            'Declare',
+            'a',
+            "'unknown'",
+            ['Block', ['Declare', 'k', "'function'", thrice], ['k', 'x']],
+          ],
+          ['Add', 'a', ['k', 'x']],
+        ],
+        { x: 3 }
+      )
+    ).toMatchObject({ compiled: 15, interpreted: '15' });
+    // A block with an assignment compiles only as a statement, so the inner
+    // block is a statement that assigns the outer local `a`.
     const outer = (inner: unknown[]) => [
       'Block',
-      ['Declare', 'k', "'function'"],
-      ['Assign', 'k', twice],
-      ['Declare', 'a', "'unknown'"],
-      ['Assign', 'a', ['Block', ...inner]],
+      ['Declare', 'k', "'function'", twice],
+      ['Assign', 'a', 0],
+      ['Block', ...inner],
       ['Add', 'a', ['k', 'x']],
     ];
     // The inner `k` is a function: 3·3 + 2·3.
     expect(
       compareJson(
         outer([
-          ['Declare', 'k', "'function'"],
-          ['Assign', 'k', thrice],
-          ['k', 'x'],
+          ['Declare', 'k', "'function'", thrice],
+          ['Assign', 'a', ['k', 'x']],
         ]),
         { x: 3 }
       )
@@ -680,9 +689,8 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     expect(
       compareJson(
         outer([
-          ['Declare', 'k', "'unknown'"],
-          ['Assign', 'k', 5],
-          ['Multiply', 'k', 'x'],
+          ['Declare', 'k', "'unknown'", 5],
+          ['Assign', 'a', ['Multiply', 'k', 'x']],
         ]),
         { x: 3 }
       )
@@ -692,7 +700,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
       compareJson(
         outer([
           ['Assign', 'k', thrice],
-          ['k', 'x'],
+          ['Assign', 'a', ['k', 'x']],
         ]),
         { x: 3 }
       )
@@ -712,10 +720,8 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
       );
     const r = compareJson([
       'Block',
-      ['Declare', 'f', "'function'"],
-      ['Assign', 'f', recursive('Multiply')],
-      ['Declare', 'a', "'unknown'"],
-      ['Assign', 'a', ['f', 5]],
+      ['Declare', 'f', "'function'", recursive('Multiply')],
+      ['Declare', 'a', "'unknown'", ['f', 5]],
       ['Assign', 'f', recursive('Add')],
       ['Add', 'a', ['f', 5]],
     ]);
@@ -730,8 +736,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
       compareJson(
         [
           'Block',
-          ['Declare', 'k', "'function'"],
-          ['Assign', 'k', twice],
+          ['Declare', 'k', "'function'", twice],
           [
             'If',
             ['Greater', 'x', 0],
@@ -746,8 +751,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
       compareJson(
         [
           'Block',
-          ['Declare', 'k', "'unknown'"],
-          ['Assign', 'k', twice],
+          ['Declare', 'k', "'unknown'", twice],
           ['If', ['Greater', 'x', 0], ['Assign', 'k', 5]],
           ['k', 'x'],
         ],
@@ -762,10 +766,8 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     const result = compile(
       ce.box([
         'Block',
-        ['Declare', 'k', "'function'"],
-        ['Assign', 'k', twice],
-        ['Declare', 'a', "'unknown'"],
-        ['Assign', 'a', ['k', 'x']],
+        ['Declare', 'k', "'function'", twice],
+        ['Declare', 'a', "'unknown'", ['k', 'x']],
         ['Assign', 'k', thrice],
         ['Add', 'a', ['k', 'x']],
       ] as never),
@@ -797,8 +799,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     const result = compile(
       ce.box([
         'Block',
-        ['Declare', 'k', "'function'"],
-        ['Assign', 'k', twice],
+        ['Declare', 'k', "'function'", twice],
         ['k', 'x'],
       ] as never),
       { to: 'interval-js', fallback: false } as never
@@ -821,8 +822,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
   it('the GPU targets and Python fail closed, as for the `const` form', () => {
     const json = [
       'Block',
-      ['Declare', 'k', "'function'"],
-      ['Assign', 'k', twice],
+      ['Declare', 'k', "'function'", twice],
       ['k', 'x'],
     ];
     // On Python the root `Block` lowers to statements, which the dispatch on
@@ -908,14 +908,12 @@ describe('COMPILE a call of a block-local function with a tuple argument', () =>
   ];
   const assignForm = (literal: unknown, call: unknown) => [
     'Block',
-    ['Declare', 'g', "'function'"],
-    ['Assign', 'g', literal],
+    ['Declare', 'g', "'function'", literal],
     call,
   ];
   const reboundForm = (literal: unknown, call: unknown) => [
     'Block',
-    ['Declare', 'g', "'function'"],
-    ['Assign', 'g', literal],
+    ['Declare', 'g', "'function'", literal],
     ['If', ['Greater', 'n', 0], ['Assign', 'g', literal]],
     call,
   ];

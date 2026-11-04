@@ -120,10 +120,13 @@ describe('CE-468: a valueless list of points keeps the call', () => {
   });
 
   test('an Epsil function with an annotated point parameter', () => {
+    // An Epsil declaration must have a value, so the host declares `M`
+    // with no value.
     const ce = new ComputeEngine();
+    ce.declare('M', 'list<tuple<real, real>>');
     const r = executeEpsil(
       ce,
-      'function h(p: tuple<real, real>) -> real { p.x + 10 * p.y }\nlet M: list<tuple<real, real>>\nh(M)'
+      'function h(p: tuple<real, real>) -> real { p.x + 10 * p.y }\nh(M)'
     );
     expect(r.diagnostics).toEqual([]);
     expect(r.value?.toString()).toBe('h(M)');
@@ -133,9 +136,10 @@ describe('CE-468: a valueless list of points keeps the call', () => {
 describe('CE-468: the held call keeps its binding', () => {
   test('a definition of the same name in the current scope does not take the held call', async () => {
     const ce = new ComputeEngine();
+    ce.declare('M', 'list<tuple<real, real>>');
     executeEpsil(
       ce,
-      'function h(p: tuple<real, real>) -> real { p.x + 10 * p.y }\nlet M: list<tuple<real, real>>'
+      'function h(p: tuple<real, real>) -> real { p.x + 10 * p.y }'
     );
     const call = ce.box(['h', 'M']);
     ce.pushScope();

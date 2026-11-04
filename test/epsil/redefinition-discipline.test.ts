@@ -159,12 +159,12 @@ describe('SAME-SCOPE RE-DECLARATION — `let`/`const` (ruled 2026-09-05)', () =>
       )
     ).toEqual({ value: 6, codes: [] });
     // In the SAME block, the earlier statement reads the local before its
-    // `let` has run: an error, as in JavaScript (user decision 2026-10-17).
-    // Before, it read the outer value and `g()` gave 6.
+    // `let`: a static error, as in JavaScript (user decision 2026-10-17).
     expect(
-      run('let y = 5\nfunction g() { let z = y\n let y = 1\n y + z }\ng()')
-        .value
-    ).toEqual(['Error', ['ErrorCode', "'read-before-declaration'", "'y'"]]);
+      run(
+        'let y = 5\nfunction g() { let z = y\n let y = 1\n y + z }\ng()'
+      ).codes.map(staticCodeOf)
+    ).toEqual(['read-before-declaration']);
     // A loop index, shadowed from an `if` block inside the body: every turn
     // reads the loop's fresh value, not the previous turn's shadow.
     expect(

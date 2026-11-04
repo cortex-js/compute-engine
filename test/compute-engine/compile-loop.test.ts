@@ -11,8 +11,7 @@ describe('COMPILE Loop', () => {
   test('simple loop: accumulate sum 1..10 = 55', () => {
     const expr = ce.expr([
       'Block',
-      ['Declare', 's'],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       ['Loop',
         ['Assign', 's', ['Add', 's', 'i']],
         ['Element', 'i', ['Range', 1, 10]],
@@ -27,8 +26,7 @@ describe('COMPILE Loop', () => {
   test('loop with break: sum until i > 5', () => {
     const expr = ce.expr([
       'Block',
-      ['Declare', 's'],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       ['Loop',
         ['Block',
           ['If', ['Greater', 'i', 5], ['Break'], 'Nothing'],
@@ -47,8 +45,7 @@ describe('COMPILE Loop', () => {
   test('loop with continue: sum only even numbers 1..10', () => {
     const expr = ce.expr([
       'Block',
-      ['Declare', 's'],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       ['Loop',
         ['Block',
           ['If', ['NotEqual', ['Mod', 'i', 2], 0], ['Continue'], 'Nothing'],
@@ -68,8 +65,7 @@ describe('COMPILE Loop', () => {
     // Find first i where i^2 > 50
     const expr = ce.expr([
       'Block',
-      ['Declare', 'result'],
-      ['Assign', 'result', -1],
+      ['Declare', 'result', "'unknown'", -1],
       ['Loop',
         ['If',
           ['Greater', ['Power', 'i', 2], 50],
@@ -155,8 +151,7 @@ describe('COMPILE Loop (interval-js)', () => {
   test('simple accumulation loop', () => {
     const expr = ce.expr([
       'Block',
-      ['Declare', 's'],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       ['Loop',
         ['Assign', 's', ['Add', 's', 'i']],
         ['Element', 'i', ['Range', 1, 5]],
@@ -179,8 +174,7 @@ describe('COMPILE Loop (interval-js)', () => {
   test('loop with break', () => {
     const expr = ce.expr([
       'Block',
-      ['Declare', 's'],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       ['Loop',
         ['Block',
           ['If', ['Greater', 'i', 3], ['Break'], 'Nothing'],
@@ -203,8 +197,7 @@ describe('COMPILE Loop (interval-js)', () => {
     // sum of sin(i) for i = 1..3
     const expr = ce.expr([
       'Block',
-      ['Declare', 's'],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       ['Loop',
         ['Assign', 's', ['Add', 's', ['Sin', 'i']]],
         ['Element', 'i', ['Range', 1, 3]],
@@ -241,8 +234,7 @@ describe('COMPILE Variadic Loop (comprehension)', () => {
     // The existing imperative path: accumulate sum in a block
     const expr = ce.expr([
       'Block',
-      ['Declare', 's'],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       ['Loop',
         ['Assign', 's', ['Add', 's', 'i']],
         ['Element', 'i', ['Range', 1, 3]],
@@ -257,24 +249,28 @@ describe('COMPILE Variadic Loop (comprehension)', () => {
   test('JS: Loop with single Element (body is plain expression) runs for effect', () => {
     // A `Loop` is imperative / for effect: the body value is discarded. Single
     // integer-ascending step-1 Range → counted for-loop, no result array.
+    // The local has a name that no other test of this file uses: the shared
+    // engine knows the names of the earlier tests, and a write to a symbol of
+    // the engine declines.
     const loop = [
       'Loop',
-      ['Assign', 's', ['Add', 's', ['Multiply', 'i', 2]]],
+      ['Assign', 'sEffect', ['Add', 'sEffect', ['Multiply', 'i', 2]]],
       ['Element', 'i', ['Range', 1, 3]],
     ];
-    // The value of the loop is `Nothing`, which has no compiled
-    // representation: the loop declines where its value is used.
-    expect(() => compile(ce.expr(loop as any), { fallback: false })).toThrow(
-      /`Nothing`/
-    );
     // The imperative loop runs but doesn't collect.
     const result = compile(
-      ce.expr(['Block', ['Assign', 's', 0], loop, 's'] as any)
+      ce.expr(['Block', ['Assign', 'sEffect', 0], loop, 'sEffect'] as any)
     );
     expect(result.success).toBe(true);
     expect(result.run!()).toBe(12);
     expect(result.code).not.toContain('result.push');
     expect(result.code).toContain('for (let i = 1; i <= 3; i++)');
+    // The loop alone declines: its body is the first assignment of `sEffect`,
+    // which is the static error `first-assignment-in-branch`.
+    expect(() => compile(ce.expr(loop as any), { fallback: false })).toThrow();
+    expect(JSON.stringify(ce.expr(loop as any).json)).toContain(
+      'first-assignment-in-branch'
+    );
   });
 
   test('JS: nested loop body references outer variable', () => {
@@ -388,8 +384,7 @@ describe('COMPILE Loop / single-Element Range routing', () => {
     // Reviewer P1: sum of i over Range(1, 5, 2) must be 1+3+5 = 9, not 15.
     const expr = ce.expr([
       'Block',
-      ['Declare', 's'],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       ['Loop',
         ['Assign', 's', ['Add', 's', 'i']],
         ['Element', 'i', ['Range', 1, 5, 2]],
@@ -407,8 +402,7 @@ describe('COMPILE Loop / single-Element Range routing', () => {
     // Reviewer P1: legacy `i = 5; i <= 1; i++` produces zero iterations.
     const expr = ce.expr([
       'Block',
-      ['Declare', 's'],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       ['Loop',
         ['Assign', 's', ['Add', 's', 'i']],
         ['Element', 'i', ['Range', 5, 1]],
@@ -424,8 +418,7 @@ describe('COMPILE Loop / single-Element Range routing', () => {
     // Range(1.5, 4.5) iterates 1.5, 2.5, 3.5, 4.5 → sum 12.
     const expr = ce.expr([
       'Block',
-      ['Declare', 's'],
-      ['Assign', 's', 0],
+      ['Declare', 's', "'unknown'", 0],
       ['Loop',
         ['Assign', 's', ['Add', 's', 'i']],
         ['Element', 'i', ['Range', 1.5, 4.5]],
@@ -440,16 +433,19 @@ describe('COMPILE Loop / single-Element Range routing', () => {
   test('Integer-ascending step-1 Range still uses legacy for-loop', () => {
     // Performance / readability: simple ranges should NOT pay for an array.
     // The loop is a statement: a loop whose value is used declines. Its
-    // body writes a local, so the loop is not removed as dead code.
+    // body writes a local, so the loop is not removed as dead code. The local
+    // has a name that no other test of this file uses: the shared engine
+    // knows the names of the earlier tests, and a write to a symbol of the
+    // engine declines.
     const expr = ce.expr([
       'Block',
-      ['Assign', 's', 0],
+      ['Assign', 'sLegacy', 0],
       [
         'Loop',
-        ['Assign', 's', ['Add', 's', ['Square', 'i']]],
+        ['Assign', 'sLegacy', ['Add', 'sLegacy', ['Square', 'i']]],
         ['Element', 'i', ['Range', 0, 9]],
       ],
-      's',
+      'sLegacy',
     ]);
     const result = compile(expr);
     expect(result.success).toBe(true);

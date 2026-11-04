@@ -95,6 +95,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       // The loop is a statement: a loop whose value is used declines.
       const expr = ce.expr([
         'Block',
+        ['Assign', 'acc', 0],
         [
           'Loop',
           ['Assign', 'acc', ['Add', 'acc', 'i']],
@@ -106,9 +107,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       expect(code).toContain('for (int i = 1; i <= 5; i++)');
       // The int loop counter is consumed as a float in float math (CO-P1-2):
       // `float(i)`, not a bare `i` (which is a GLSL int/float type mismatch).
-      // `acc` is an input, so the loop writes a local copy of it.
-      expect(code).toContain('float _tv1 = acc;');
-      expect(code).toContain('_tv1 = _tv1 + float(i)');
+      expect(code).toContain('acc = acc + float(i)');
       expect(code).not.toContain('let ');
       expect(code).not.toContain('() =>');
       expect(code).not.toContain('})()');
@@ -368,8 +367,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     it('should declare complex-typed variable as vec2', () => {
       const expr = ce.expr([
         'Block',
-        ['Declare', 'v'],
-        ['Assign', 'v', ['Complex', 1, 2]],
+        ['Declare', 'v', "'unknown'", ['Complex', 1, 2]],
         'v',
       ]);
       const code = glsl.compile(expr).code;
@@ -632,16 +630,27 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     });
 
     it('a Block as a sub-expression hoists as a scoped compound statement', () => {
-      const blk = ['Block', ['Declare', 'q'], ['Assign', 'q', 2], 'q'];
+      // A block of declarations is a value expression, so it compiles as an
+      // operand.
+      const blk = ['Block', ['Declare', 'q', "'unknown'", 2], 'q'];
       const code = glsl.compile(ce.box(['Add', blk, 1] as any), NO_FOLD).code;
       expect(code).toBe(
         'float _tv1;\n{\n  float q;\n  q = 2.0;\n  _tv1 = q;\n}\nreturn _tv1 + 1.0;'
       );
     });
 
+    it('a Block with an assignment as an operand declines', () => {
+      // A block with an assignment compiles only as a statement, not as the
+      // operand of an operator.
+      const blk = ['Block', ['Assign', 'q', 2], 'q'];
+      expect(() =>
+        glsl.compile(ce.box(['Add', blk, 1] as any), NO_FOLD)
+      ).toThrow(/a block with a statement other than a declaration with a value is an operand/);
+    });
+
     it('a Block in a conditional arm takes the statement form', () => {
       // The compound statement lands inside the branch that selects it.
-      const blk = ['Block', ['Declare', 'q'], ['Assign', 'q', 2], 'q'];
+      const blk = ['Block', ['Declare', 'q', "'unknown'", 2], 'q'];
       const code = glsl.compile(
         ce.box(['If', ['Greater', 'x', 0], blk, 1] as any),
         NO_FOLD
@@ -815,8 +824,7 @@ describe('GLSL vector-valued block locals declare a vecN', () => {
   it('a local assigned a 2-tuple is declared vec2', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Tuple', ['Cos', 't'], ['Sin', 't']]],
+      ['Declare', 'p', "'unknown'", ['Tuple', ['Cos', 't'], ['Sin', 't']]],
       'p',
     ]);
     const code = glsl.compileFunction(expr, 'curve', 'vec2', [['t', 'float']]);
@@ -841,8 +849,7 @@ describe('GLSL vector-valued block locals declare a vecN', () => {
   it('a Declare with a 3-tuple initial value is declared vec3', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Tuple', 't', ['Square', 't'], 1]],
+      ['Declare', 'p', "'unknown'", ['Tuple', 't', ['Square', 't'], 1]],
       'p',
     ]);
     const code = glsl.compile(expr).code;
@@ -852,8 +859,7 @@ describe('GLSL vector-valued block locals declare a vecN', () => {
   it('a scalar local still declares float', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'r'],
-      ['Assign', 'r', ['Cos', 't']],
+      ['Declare', 'r', "'unknown'", ['Cos', 't']],
       'r',
     ]);
     expect(glsl.compile(expr).code).toContain('float r;');
@@ -865,8 +871,7 @@ describe('GLSL vector-valued block locals declare a vecN', () => {
   it('a local assigned a 5-tuple is declared as the matching array type', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Tuple', 1, 2, 3, 4, 5]],
+      ['Declare', 'p', "'unknown'", ['Tuple', 1, 2, 3, 4, 5]],
       'p',
     ]);
     const code = glsl.compile(expr).code;
@@ -878,8 +883,7 @@ describe('GLSL vector-valued block locals declare a vecN', () => {
   it('a local assigned a 1-tuple is declared as the matching array type', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['List', 7]],
+      ['Declare', 'p', "'unknown'", ['List', 7]],
       'p',
     ]);
     const code = glsl.compile(expr).code;
@@ -892,10 +896,8 @@ describe('GLSL vector-valued block locals declare a vecN', () => {
   it('a local aliasing a vector local inherits its width', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Tuple', 'x', 'y']],
-      ['Declare', 'q'],
-      ['Assign', 'q', 'p'],
+      ['Declare', 'p', "'unknown'", ['Tuple', 'x', 'y']],
+      ['Declare', 'q', "'unknown'", 'p'],
       'q',
     ]);
     const code = glsl.compile(expr, { vars: { x: 'x', y: 'y' } }).code;
@@ -907,9 +909,8 @@ describe('GLSL vector-valued block locals declare a vecN', () => {
   it('a nested block local shadows an outer vector local', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Tuple', 'x', 'y']],
-      ['Block', ['Declare', 'p'], ['Assign', 'p', 'x'], 'p'],
+      ['Declare', 'p', "'unknown'", ['Tuple', 'x', 'y']],
+      ['Block', ['Declare', 'p', "'unknown'", 'x'], 'p'],
     ]);
     const code = glsl.compile(expr, { vars: { x: 'x', y: 'y' } }).code;
     expect(code).toContain('vec2 p;');
@@ -965,55 +966,39 @@ describe('GLSL vecN constructor arity (no vector-valued components)', () => {
 });
 
 // A shader local has ONE declared type, so every binding of it in a block must
-// agree on a shape. "First assignment wins" reached the very "declared
-// `float`, assigned `vec2`" mismatch the width inference exists to prevent, by
-// intra-block reassignment instead of aliasing. Disagreement fails closed:
-// neither GLSL nor WGSL has a type a scalar and a vecN both fit.
+// agree on a shape. A reassignment with a value of another type (a number,
+// then a tuple; a tuple of 2, then a tuple of 3) is the static error
+// `assignment-type-mismatch`, so the expression is invalid and the compile
+// declines.
 describe('GLSL block local with disagreeing binding shapes fails closed', () => {
   it('scalar then vector fails closed', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Cos', 't']],
+      ['Declare', 'p', "'unknown'", ['Cos', 't']],
       ['Assign', 'p', ['Tuple', 'x', 'y']],
       'p',
     ]);
     expect(() => glsl.compile(expr, { vars: { x: 'x', y: 'y' } })).toThrow(
-      /disagreeing shapes.*scalar, then 2-component aggregate/s
-    );
-  });
-
-  it('vector then scalar fails closed', () => {
-    const expr = ce.box([
-      'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Tuple', 'x', 'y']],
-      ['Assign', 'p', ['Cos', 't']],
-      'p',
-    ]);
-    expect(() => glsl.compile(expr, { vars: { x: 'x', y: 'y' } })).toThrow(
-      /disagreeing shapes.*2-component aggregate, then scalar/s
+      /invalid expression.*assignment-type-mismatch/s
     );
   });
 
   it('two different vector widths fail closed', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Tuple', 'x', 'y']],
+      ['Declare', 'p', "'unknown'", ['Tuple', 'x', 'y']],
       ['Assign', 'p', ['Tuple', 'x', 'y', 't']],
       'p',
     ]);
     expect(() => glsl.compile(expr, { vars: { x: 'x', y: 'y' } })).toThrow(
-      /disagreeing shapes/
+      /invalid expression.*assignment-type-mismatch/s
     );
   });
 
   it('repeated bindings of the SAME shape still compile', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Tuple', 'x', 'y']],
+      ['Declare', 'p', "'unknown'", ['Tuple', 'x', 'y']],
       ['Assign', 'p', ['Tuple', ['Cos', 't'], ['Sin', 't']]],
       'p',
     ]);
@@ -1039,8 +1024,7 @@ describe('GLSL matrix-valued components are aggregates, not scalars', () => {
   it('a block local bound to a matrix fails closed', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]]],
+      ['Declare', 'p', "'unknown'", ['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]]],
       'p',
     ]);
     expect(() => glsl.compile(expr)).toThrow(/matrix\/tensor-valued local/);
@@ -1064,8 +1048,7 @@ describe('GLSL zero-width aggregates fail closed', () => {
   it('a block local bound to an empty tuple fails closed', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Tuple']],
+      ['Declare', 'p', "'unknown'", ['Tuple']],
       'p',
     ]);
     expect(() => glsl.compile(expr)).toThrow(

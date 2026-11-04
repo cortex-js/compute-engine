@@ -317,8 +317,7 @@ describe('EVALUATEAT OF A BINDER OF A PARAMETER', () => {
       engine
         .box([
           'Block',
-          ['Declare', 'k', "'integer'"],
-          ['Assign', 'k', 10],
+          ['Declare', 'k', "'integer'", 10],
           ['EvaluateAt', 'f', ['Add', 'x', 1]],
         ])
         .evaluate()
@@ -328,8 +327,7 @@ describe('EVALUATEAT OF A BINDER OF A PARAMETER', () => {
     const closure = other
       .box([
         'Block',
-        ['Declare', 'k', "'integer'"],
-        ['Assign', 'k', 2],
+        ['Declare', 'k', "'integer'", 2],
         ['Function', ['Multiply', 'k', 'x'], 'x'],
       ])
       .evaluate();
@@ -429,8 +427,7 @@ describe('EVALUATEAT OF A BINDER OF A PARAMETER', () => {
       engine
         .box([
           'Block',
-          ['Declare', 'x', "'integer'"],
-          ['Assign', 'x', 10],
+          ['Declare', 'x', "'integer'", 10],
           ['EvaluateAt', 'f', 0],
         ])
         .evaluate()

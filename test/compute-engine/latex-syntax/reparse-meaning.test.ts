@@ -400,20 +400,16 @@ describe('local and outer assignments in a block', () => {
     [
       [
         'Block',
-        ['Declare', 's', "'integer'"],
-        ['Assign', 's', 1],
+        ['Declare', 's', "'integer'", 1],
         ['Add', 's', 1],
       ],
     ],
-    [['Block', ['Declare', 's', "'list<integer>'"], 's']],
-    [['Block', ['Declare', 'a'], ['Add', 'a', 1]]],
+    [['Block', ['Declare', 's', "'list<integer>'", ['List', 1]], 's']],
     [
       [
         'Block',
-        ['Declare', 'a'],
-        ['Declare', 'b'],
-        ['Assign', 'a', 1],
-        ['Assign', 'b', 2],
+        ['Declare', 'a', "'unknown'", 1],
+        ['Declare', 'b', "'unknown'", 2],
         ['Add', 'a', 'b'],
       ],
     ],
@@ -425,9 +421,9 @@ describe('local and outer assignments in a block', () => {
       ],
     ],
     // Types with an arrow or a quoted value; a symbol type.
-    [['Block', ['Declare', 'f', "'(real) -> real'"], 'f']],
-    [['Block', ['Declare', 's', '\'"a,b"\''], 's']],
-    [['Block', ['Declare', 'k', 'integer'], 'k']],
+    [['Block', ['Declare', 'f', "'(real) -> real'", ['Function', ['Add', 'x', 1], 'x']], 'f']],
+    [['Block', ['Declare', 's', '\'"a,b"\'', '\'"a,b"\''], 's']],
+    [['Block', ['Declare', 'k', 'integer', 3], 'k']],
     // A function whose body is a block of several statements.
     [
       [
@@ -461,8 +457,7 @@ describe('local and outer assignments in a block', () => {
       engine.parse('\\operatorname{let} k\\coloneq 2; kx', { form: 'raw' }).json
     ).toEqual([
       'Block',
-      ['Declare', 'k'],
-      ['Assign', 'k', 2],
+      ['Declare', 'k', "'unknown'", 2],
       ['InvisibleOperator', 'k', 'x'],
     ]);
     expect(
@@ -471,8 +466,7 @@ describe('local and outer assignments in a block', () => {
       }).json
     ).toEqual([
       'Block',
-      ['Declare', 's', "'integer'"],
-      ['Assign', 's', 1],
+      ['Declare', 's', "'integer'", 1],
       's',
     ]);
   });
@@ -491,7 +485,7 @@ describe('local and outer assignments in a block', () => {
         '\\begin{cases}\\text{let }k\\coloneq 2\\\\ k+1\\end{cases}',
         { form: 'raw' }
       ).json
-    ).toEqual(['Block', ['Declare', 'k'], ['Assign', 'k', 2], ['Add', 'k', 1]]);
+    ).toEqual(['Block', ['Declare', 'k', "'unknown'", 2], ['Add', 'k', 1]]);
   });
 
   test('the marks survive preserveLatex', () => {
@@ -508,8 +502,7 @@ describe('local and outer assignments in a block', () => {
         .json
     ).toEqual([
       'Block',
-      ['Declare', 'k', "'integer'"],
-      ['Assign', 'k', ['Error', "'missing'"]],
+      ['Declare', 'k', "'integer'", ['Error', "'missing'"]],
     ]);
   });
 
@@ -521,9 +514,8 @@ describe('local and outer assignments in a block', () => {
       }).json
     ).toEqual([
       'Block',
-      ['Declare', 's'],
+      ['Declare', 's', "'unknown'", 1],
       ['Error', "'invalid-type'", "'\\mathbb{Z}'"],
-      ['Assign', 's', 1],
       's',
     ]);
   });
@@ -534,19 +526,18 @@ describe('local and outer assignments in a block', () => {
       engine.parse('\\text{let } s\\colon integer = 1; s', { form: 'raw' }).json
     ).toEqual([
       'Block',
-      ['Declare', 's', "'integer'"],
-      ['Assign', 's', 1],
+      ['Declare', 's', "'integer'", 1],
       's',
     ]);
     expect(
       engine.parse('\\text{let } k = 2; k+1', { form: 'raw' }).json
-    ).toEqual(['Block', ['Declare', 'k'], ['Assign', 'k', 2], ['Add', 'k', 1]]);
+    ).toEqual(['Block', ['Declare', 'k', "'unknown'", 2], ['Add', 'k', 1]]);
   });
 
   test('a name is declared once per block', () => {
     const engine = new ComputeEngine();
     expect(
-      engine.parse('\\text{let } s; s\\coloneq 2; s+1').evaluate().toString()
+      engine.parse('\\text{let } s\\coloneq 1; s\\coloneq 2; s+1').evaluate().toString()
     ).toBe('3');
     expect(
       engine.parse('x\\coloneq 1; x\\coloneq x+1; x').evaluate().toString()
@@ -596,8 +587,7 @@ describe('the outer assignment without an engine', () => {
     const ls = new LatexSyntax({});
     const block = [
       'Block',
-      ['Declare', 's', 'integer'],
-      ['Assign', 's', 1],
+      ['Declare', 's', 'integer', 1],
       's',
     ];
     expect(ls.parse(ls.serialize(block as any))).toEqual(block);

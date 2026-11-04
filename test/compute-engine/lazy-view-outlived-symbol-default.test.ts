@@ -204,7 +204,7 @@ describe('A SYMBOL DEFAULT READ BY A VIEW ASSIGNED OUT OF A TOP-LEVEL LOOP', () 
     );
     const program: Json = [
       'Block',
-      ['Declare', 'h', 'any'],
+      ['Declare', 'h', 'any', 'Nothing'],
       [
         'Loop',
         [

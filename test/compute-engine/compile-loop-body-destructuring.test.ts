@@ -367,7 +367,7 @@ describe('A destructuring let whose value reads a name of the pattern', () => {
       json: [
         'Block',
         ['Declare', 'a', 'integer', 100],
-        ['Declare', 's', 'integer', 0],
+        ['Declare', 's', 'number', 0],
         loop([
           'Block',
           ['Declare', ['Tuple', 'a', 'b'], 'unknown', ['Tuple', 'k', 'a']],
@@ -383,7 +383,7 @@ describe('A destructuring let whose value reads a name of the pattern', () => {
         'Block',
         ['Declare', 'a', 'integer', 1],
         ['Declare', 'b', 'integer', 2],
-        ['Declare', 's', 'integer', 0],
+        ['Declare', 's', 'number', 0],
         loop([
           'Block',
           ['Declare', ['Tuple', 'a', 'b'], 'unknown', ['Tuple', 'b', 'a']],
@@ -394,21 +394,28 @@ describe('A destructuring let whose value reads a name of the pattern', () => {
       // Each turn reads a = 2 (the outer b): 2, 22, 222.
       expected: 222,
     },
-    {
-      name: 'an assignment in a `_` element reads the outer value',
-      json: [
-        'Block',
-        ['Declare', 'a', 'integer', 100],
-        ['Declare', 's', 'integer', 0],
-        loop(
-          ['Declare', ['Tuple', 'a', '_'], 'unknown', ['Tuple', 'k', ['Assign', 's', 'a']]],
-          1
-        ),
-        's',
-      ],
-      expected: 100,
-    },
   ];
+
+  // An assignment in an element of the value (`let (a, _) = (k, s := a)`) is
+  // the static error `assignment-in-operand`, so every target declines.
+  test('an assignment in a `_` element is a static error', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'a', 'integer', 100],
+      ['Declare', 's', 'integer', 0],
+      loop(
+        ['Declare', ['Tuple', 'a', '_'], 'unknown', ['Tuple', 'k', ['Assign', 's', 'a']]],
+        1
+      ),
+      's',
+    ] as any);
+    expect(expr.isValid).toBe(false);
+    for (const to of ['javascript', 'python', 'glsl', 'wgsl'] as const)
+      expect(() => compile(expr, { to, fallback: false })).toThrow(
+        /invalid expression/
+      );
+  });
 
   test.each(CASES)('$name: the interpreter value', ({ json, expected }) => {
     const ce = new ComputeEngine();

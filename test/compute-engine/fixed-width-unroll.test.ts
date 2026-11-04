@@ -816,12 +816,7 @@ describe('FIXED-WIDTH UNROLL — reductions over a literal list', () => {
     engine.declare('x', 'real');
     const expr = engine.box([
       'Block',
-      ['Declare', 'Max', "'function'"],
-      [
-        'Assign',
-        'Max',
-        ['Function', ['Add', ['Multiply', 2, 'a'], 'b'], 'a', 'b'],
-      ],
+      ['Declare', 'Max', "'function'", ['Function', ['Add', ['Multiply', 2, 'a'], 'b'], 'a', 'b'],],
       ['Reduce', ['List', 'x', ['Add', 'x', 1], ['Add', 'x', 2]], 'Max'],
     ]);
     const result = unrollFixedWidthCollections(expr);

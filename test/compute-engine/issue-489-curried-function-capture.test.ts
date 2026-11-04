@@ -186,8 +186,7 @@ describe('a capture by a local of a block', () => {
         'Function',
         [
           'Block',
-          ['Declare', 't', "'integer'"],
-          ['Assign', 't', 1],
+          ['Declare', 't', "'integer'", 1],
           ['Add', 't', 'y', 'x'],
         ],
         'x',
@@ -198,8 +197,7 @@ describe('a capture by a local of a block', () => {
       'Function',
       [
         'Block',
-        ['Declare', 't_1', "'integer'"],
-        ['Assign', 't_1', 1],
+        ['Declare', 't_1', "'integer'", 1],
         ['Add', 't', 't_1', 'x'],
       ],
       'x',
@@ -359,7 +357,9 @@ describe('a renamed binder with nested scopes', () => {
     'y',
   ];
   // The same with no assignment in the body block: the assignment of the
-  // inner block makes a local of the body, which owns it.
+  // inner block is a first assignment at the own level of that block, so
+  // it makes a local of the inner block. The `t` of the body is a free
+  // symbol, the same symbol as the argument `t`.
   const N2 = [
     'Function',
     [
@@ -376,25 +376,36 @@ describe('a renamed binder with nested scopes', () => {
 
   test('the inner block writes the renamed local of the body (one step)', () => {
     expect(run([[N, 't'], 5]).json).toEqual(['Add', 't', 7]);
-    expect(run([[N2, 't'], 5]).json).toEqual(['Add', 't', 7]);
+    // The local of the inner block is renamed; the free `t` of the body
+    // and the argument `t` are the same symbol: t + t + 5.
+    expect(run([[N2, 't'], 5]).json).toEqual([
+      'Add',
+      ['Multiply', 2, 't'],
+      5,
+    ]);
   });
 
   test('the inner block writes the renamed local of the body (two steps)', () => {
-    for (const F of [N, N2]) {
-      const engine = new ComputeEngine();
-      const r = run(['Apply', F, 't'], engine);
-      expect(run(['Apply', r, 5], engine).json).toEqual(['Add', 't', 7]);
-      // A second run of the same literal gives a new local.
-      expect(run(['Apply', r, 6], engine).json).toEqual(['Add', 't', 8]);
-    }
-    expect(run(['Apply', N2, 't']).json).toEqual([
+    const engine = new ComputeEngine();
+    const r = run(['Apply', N, 't'], engine);
+    expect(run(['Apply', r, 5], engine).json).toEqual(['Add', 't', 7]);
+    // A second run of the same literal gives a new local.
+    expect(run(['Apply', r, 6], engine).json).toEqual(['Add', 't', 8]);
+    const engine2 = new ComputeEngine();
+    const r2 = run(['Apply', N2, 't'], engine2);
+    expect(r2.json).toEqual([
       'Function',
       [
         'Block',
         ['Block', ['Assign', 't_1', 2], ['Add', 't', 't_1']],
-        ['Add', 't', 't_1', 'x'],
+        ['Add', 't', 't', 'x'],
       ],
       'x',
+    ]);
+    expect(run(['Apply', r2, 5], engine2).json).toEqual([
+      'Add',
+      ['Multiply', 2, 't'],
+      5,
     ]);
   });
 
@@ -405,7 +416,7 @@ describe('a renamed binder with nested scopes', () => {
   // renamed it a second time: x_1 ↦ x^(x_2).
   test.each([
     ['', []],
-    [' with a Declare', [['Declare', 't', "'integer'"]]],
+    [' with a Declare', [['Declare', 't', "'integer'", 0]]],
   ])(
     'a nested block reads the renamed parameter%s',
     (_, statements: unknown[]) => {
@@ -467,46 +478,6 @@ describe('a renamed binder with nested scopes', () => {
   ];
   const isDeclined = (e: { operator: string }) => e.operator === 'Apply';
 
-  test('a local declared in a branch with no block declines', () => {
-    const D = declaredInBranch([
-      'Block',
-      ['If', 'True', ['Declare', 't', "'integer'"], 0],
-      ['Add', 't', 'y', 'x'],
-    ]);
-    expect(isDeclined(run(['Apply', D, 't']))).toBe(true);
-    expect(isDeclined(run([[D, 't'], 5]))).toBe(true);
-  });
-
-  test('a branch that does not run declares no local: declines', () => {
-    // The t of the sum is the value t: a rename gave t + t_1 + 5, not 2t + 5.
-    const D = declaredInBranch([
-      'Block',
-      ['If', 'False', ['Declare', 't', "'integer'"], 0],
-      ['Add', 't', 'y', 'x'],
-    ]);
-    expect(isDeclined(run(['Apply', D, 't']))).toBe(true);
-    expect(isDeclined(run([[D, 't'], 5]))).toBe(true);
-  });
-
-  test('a read in the other branch of the same If: declines', () => {
-    const D = declaredInBranch([
-      'Block',
-      ['If', 'False', ['Declare', 't', "'integer'"], ['Add', 't', 'y', 'x']],
-    ]);
-    expect(isDeclined(run(['Apply', D, 't']))).toBe(true);
-    expect(isDeclined(run([[D, 't'], 5]))).toBe(true);
-  });
-
-  test('a read before a declaration in a branch: declines', () => {
-    const D = declaredInBranch([
-      'Block',
-      ['Assign', 'w', ['Add', 't', 'y']],
-      ['If', 'True', ['Declare', 't', "'integer'"], 0],
-      ['List', 'w', ['Add', 't', 'x']],
-    ]);
-    expect(isDeclined(run(['Apply', D, 't']))).toBe(true);
-  });
-
   test('a value with no name of the local is substituted', () => {
     const D = declaredInBranch([
       'Block',
@@ -565,8 +536,7 @@ describe('a held binder', () => {
         'Hold',
         [
           'Block',
-          ['Declare', 't', "'integer'"],
-          ['Assign', 't', 1],
+          ['Declare', 't', "'integer'", 1],
           ['Add', 't', 'y'],
         ],
       ],
@@ -577,8 +547,7 @@ describe('a held binder', () => {
       'Hold',
       [
         'Block',
-        ['Declare', 't_1', "'integer'"],
-        ['Assign', 't_1', 1],
+        ['Declare', 't_1', "'integer'", 1],
         ['Add', 't_1', 't'],
       ],
     ]);
@@ -772,8 +741,7 @@ describe('a nested literal below a renamed binder', () => {
         ['Greater', 'n', 0],
         [
           'Block',
-          ['Declare', 'k', "'integer'"],
-          ['Assign', 'k', ['Multiply', 'n', 10]],
+          ['Declare', 'k', "'integer'", ['Multiply', 'n', 10]],
           ['Function', 'k'],
         ],
         0,

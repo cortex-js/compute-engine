@@ -116,8 +116,7 @@ describe('COMPILE: Scoping and Closure', () => {
       'Function',
       [
         'Block',
-        ['Declare', 't', 'number'],
-        ['Assign', 't', ['Square', 'x']],
+        ['Declare', 't', 'number', ['Square', 'x']],
         ['Add', 't', 1],
       ],
       'x',

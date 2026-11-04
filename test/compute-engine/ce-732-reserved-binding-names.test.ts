@@ -128,8 +128,7 @@ describe('CE-732: a binding with a reserved name, javascript target', () => {
         'Function',
         [
           'Block',
-          ['Declare', n, R],
-          ['Assign', n, ['Multiply', 2, 'y']],
+          ['Declare', n, R, ['Multiply', 2, 'y']],
           ['Add', ['Sin', n], 'Pi'],
         ],
         ['Typed', 'y', R],
@@ -217,8 +216,7 @@ describe('CE-732: a binding with a reserved name, javascript target', () => {
     'Function',
     [
       'Block',
-      ['Declare', 's', R],
-      ['Assign', 's', 0],
+      ['Declare', 's', R, 0],
       ['Loop', ['Assign', 's', ['Add', 's', ['Multiply', 'y', n]]], ...clause],
       's',
     ],
@@ -418,12 +416,11 @@ describe('CE-732: a binding with a reserved name, javascript target', () => {
     expect(result.run!(3 as never)).toEqual([5, 6]);
   });
 
-  // A `Match` capture reads the `const` temporary that holds the subject, so
-  // a write to the capture declines, whether the capture has a reserved name
-  // or not. A write accepted for the reserved name threw "Assignment to
-  // constant variable" at run time. The `Assign` also makes the block treat
-  // the capture name as a block local that only some paths assign, and that
-  // check can run first: either reason declines.
+  // A write to a `Match` capture declines, whether the capture has a
+  // reserved name or not. A write accepted for the reserved name threw
+  // "Assignment to constant variable" at run time. An `Assign` as the value
+  // of a `MatchCase` is an assignment in an operand, which is a static error,
+  // so the expression is invalid and the compilation declines.
   test.each(['Math', 'm'])(
     'a write to a `Match` capture named `%s` declines',
     (n) => {
@@ -432,7 +429,7 @@ describe('CE-732: a binding with a reserved name, javascript target', () => {
         'Function',
         [
           'Block',
-          ['Declare', 'i', I],
+          ['Declare', 'i', I, 0],
           [
             'Loop',
             [
@@ -452,7 +449,8 @@ describe('CE-732: a binding with a reserved name, javascript target', () => {
         expect(result.success).toBe(false);
         expect(String(warn.mock.calls[0]?.[0])).toMatch(
           new RegExp(
-            `not an assignable reference|can read the block local "${n}" when no assignment gave it a value`
+            `invalid expression.*assignment-in-operand", "${n}"`,
+            's'
           )
         );
       } finally {
@@ -524,7 +522,7 @@ describe('CE-732: a local of a loop body with a reserved name', () => {
           ['Assign', 's', 0],
           [
             'Loop',
-            ['Block', ['Assign', v, 'i'], ['Assign', 's', ['Add', 's', v]]],
+            ['Block', ['Declare', v, I, 'i'], ['Assign', 's', ['Add', 's', v]]],
             ['Element', 'i', ['Range', 1, 'n']],
           ],
           's',
@@ -546,6 +544,8 @@ describe('CE-732: a local of a loop body with a reserved name', () => {
             'Loop',
             [
               'Block',
+              ['Declare', v, I, 0],
+              ['Declare', 'q', I, 0],
               ['Assign', ['Tuple', v, 'q'], 'p'],
               ['Assign', 's', ['Add', 's', v, 'q']],
             ],
@@ -560,15 +560,21 @@ describe('CE-732: a local of a loop body with a reserved name', () => {
   );
 
   test.each(['arguments', 'Math'])(
-    'the inner target of a chained assignment in a loop body: `%s`',
+    'a local whose value is assigned to another local in a loop body: `%s`',
     (v) => {
+      // A chained assignment is a static error, so the loop body has two
+      // statements.
       const code = checkLoop(
         [
           'Block',
           ['Assign', 's', 0],
           [
             'Loop',
-            ['Assign', 's', ['Assign', v, ['Add', 's', 'i']]],
+            [
+              'Block',
+              ['Declare', v, I, ['Add', 's', 'i']],
+              ['Assign', 's', v],
+            ],
             ['Element', 'i', ['Range', 1, 'n']],
           ],
           's',
@@ -597,7 +603,7 @@ describe('CE-732: a local of a loop body inside a function literal', () => {
               'Loop',
               [
                 'Block',
-                ['Assign', v, ['Multiply', 'i', 'y']],
+                ['Declare', v, R, ['Multiply', 'i', 'y']],
                 ['Assign', 's', ['Add', 's', ['Sin', v]]],
               ],
               ['Element', 'i', ['Range', 1, 'm']],

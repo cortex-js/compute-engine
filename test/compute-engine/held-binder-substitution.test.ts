@@ -237,8 +237,7 @@ describe('HELD BINDER: THE INDEX SHADOWS A PARAMETER OF THE SAME NAME', () => {
     const ce = new ComputeEngine();
     const body = [
       'Block',
-      ['Declare', 'k', 'integer'],
-      ['Assign', 'k', 2],
+      ['Declare', 'k', 'integer', 2],
       ['Add', 'k', ['Sum', 'k', ['Limits', 'k', 1, 'k']]],
     ];
     const r = apply(ce, body, 'k', 5);

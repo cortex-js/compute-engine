@@ -258,8 +258,8 @@ function assignSlots(
  * the statements after a `Declare` of a name of `params` see a local of the
  * block with that name, so an assignment to it there does not write the
  * parameter. A statement before the `Declare` still writes the parameter:
- * the interpreter refuses that order (`read-before-declaration`), so the
- * compiled function declines too.
+ * that order is a static error of the canonicalization
+ * (`read-before-declaration`), so the compiled function declines too.
  */
 function wgslAssignedParameter(
   expr: Expression,

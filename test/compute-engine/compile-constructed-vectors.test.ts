@@ -60,10 +60,8 @@ test('local vector assignments carry their widths to arithmetic and reduction', 
   const ce = engine();
   define(ce, 'local', [
     'Block',
-    ['Declare', 'a'],
-    ['Assign', 'a', ['f', 'u', 'v']],
-    ['Declare', 'b'],
-    ['Assign', 'b', ['Add', 'a', 'a']],
+    ['Declare', 'a', "'unknown'", ['f', 'u', 'v']],
+    ['Declare', 'b', "'unknown'", ['Add', 'a', 'a']],
     ['Sum', 'b'],
   ]);
   const r = compile(ce.box(['local', 'x', 'y']));
@@ -77,8 +75,7 @@ test('a local reassigned from a runtime input reads the input', () => {
   const ce = engine();
   define(ce, 'local', [
     'Block',
-    ['Declare', 'a'],
-    ['Assign', 'a', ['List', 'u', 'v']],
+    ['Declare', 'a', "'unknown'", ['List', 'u', 'v']],
     ['Assign', 'a', 'W'],
     ['Sum', 'a'],
   ]);
@@ -245,8 +242,7 @@ test.each(['Sum', 'Product'] as const)(
       const expression: MathJsonExpression = local
         ? [
             'Block',
-            ['Declare', 'v', 'list<real^2>'],
-            ['Assign', 'v', sum],
+            ['Declare', 'v', 'list<real^2>', sum],
             [head, 'v'],
           ]
         : [head, sum];

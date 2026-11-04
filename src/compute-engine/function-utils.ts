@@ -229,8 +229,6 @@ import {
   copyAssignmentLocals,
   enterFunctionBody,
   exitFunctionBody,
-  isFunctionBodyBlock,
-  markFunctionBodyBlock,
 } from './assignment-locals.js';
 
 // Lazy reference to `validateArguments` (from `boxed-expression/validate.ts`).
@@ -1130,18 +1128,6 @@ export function canonicalFunctionLiteralArguments(
     bodyOp = bodyOp.op1;
   }
 
-  // A body that was canonical before it became the body of this literal (a
-  // `Block` that the caller boxed first) was canonicalized outside every
-  // function body, so each of its nested blocks owns the names that it
-  // assigns. In a function body, the body owns them
-  // (`nestedAssignmentNames()`, `library/control-structures.ts`). When a
-  // nested block owns such a name, the body is boxed again from its MathJSON,
-  // and canonicalized below as a function body.
-  // The blocks of a body that was canonical are marked here
-  // (`markFunctionBodyBlocks()`), also when the body is kept.
-  if (bodyOp.isCanonical && markFunctionBodyBlocks(bodyOp))
-    bodyOp = ce.box(bodyOp.json, { form: 'raw' });
-
   // If the body is not scoped, we need to create a new scope
   // and add the parameters to it.
   // `["Function", ["Add", "_", 1], "_"]`
@@ -1181,10 +1167,9 @@ export function canonicalFunctionLiteralArguments(
   let provisionalHeads: ReadonlySet<string> | undefined;
   let block: Expression;
   let shadowedDefs: ReadonlyMap<string, BoxedDefinition> = new Map();
-  // The blocks canonicalized from here to the `finally` are written in the
-  // body of this literal: a read of one of their assignment locals before
-  // its first assignment is an error (`isFunctionBodyBlock()`,
-  // `assignment-locals.ts`).
+  // The body is not in a branch, also when the literal is written in one:
+  // a first assignment at the own level of the body declares a local of the
+  // body (`enterFunctionBody()`, `assignment-locals.ts`).
   enterFunctionBody();
   try {
     if (returnTypeOp === undefined) {
@@ -1212,11 +1197,6 @@ export function canonicalFunctionLiteralArguments(
       );
       block = ce.function('Block', statements);
     }
-    // A body that was canonical before it became the body of this literal
-    // (a `Block` that the caller boxed first) was not canonicalized in a
-    // function body, so its blocks recorded the rule of a block outside
-    // every function literal. They are in this body now: they were marked
-    // above (`markFunctionBodyBlocks()`), before the body was canonicalized.
     // Read the bindings the body's bare-parameter references auto-declared
     // (and shared) while the frame is still on the stack — the parameter
     // declarations below adopt them.
@@ -3294,7 +3274,31 @@ export function evaluateStatements(
     if (h === 'Return' || h === 'Break' || h === 'Continue' || h === 'Error')
       break;
   }
-  return result;
+  return statementListValue(ce, ops, result);
+}
+
+/**
+ * The value of a list of statements `ops` whose last evaluated statement
+ * gave `result`. An assignment or a declaration is a statement with no
+ * value, so a list whose last statement is an `Assign` or a `Declare` (also
+ * under the return-type annotation `Typed` of a function body) has the
+ * value `Nothing`: `Block(Assign(b, 2))` is `Nothing`. A control-flow value
+ * (`Return`, `Break`, `Continue`) and an `Error` are kept.
+ */
+function statementListValue(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  result: Expression
+): Expression {
+  const h = result.operator;
+  if (h === 'Return' || h === 'Break' || h === 'Continue' || h === 'Error')
+    return result;
+  const lastOp = ops[ops.length - 1];
+  if (lastOp === undefined) return result;
+  const last = isFunction(lastOp, 'Typed') ? lastOp.op1 : lastOp;
+  return last.operator === 'Assign' || last.operator === 'Declare'
+    ? ce.Nothing
+    : result;
 }
 
 /** The scopes recorded by `createBlockLocals()`. */
@@ -3318,7 +3322,9 @@ export function isStatementListScope(scope: Scope): boolean {
  * create a new binding for each name that a `Declare` statement of the list
  * declares (a `let` or `const` local), in the current lexical scope, where
  * these statements run. The binding has no value yet and is marked
- * `_uninitialized`. Called by `evaluateStatements` and
+ * `_uninitialized`: the mark tells the `Declare` handler that the binding
+ * is the one that the run made (`initializeBlockLocal()`,
+ * `library/core.ts`). Called by `evaluateStatements` and
  * `evaluateStatementsAsync`.
  *
  * This gives each run of the block (each iteration of a loop body, each
@@ -3334,9 +3340,9 @@ export function isStatementListScope(scope: Scope): boolean {
  * `for i in [1, 2] { fs = [...fs, () => k]; let k = i }` made closures that
  * gave `k` and `1`, not `1` and `2`.
  *
- * A read of the local before its `Declare` has run is an error
- * (`read-before-declaration`, see `BoxedSymbol.evaluate`). While the
- * initializer of the `Declare` is evaluated, the `Declare` handler hides the
+ * A read of the local before its `Declare` statement is a static error of
+ * the canonicalization (`canonicalBlock()`, `library/control-structures.ts`).
+ * While the initializer of the `Declare` is evaluated, the `Declare` handler hides the
  * binding, so `let t = t * 2` still reads the `t` of an enclosing scope.
  *
  * Only a binding that no other statement holds is replaced: a binding that
@@ -3374,9 +3380,9 @@ function createBlockLocals(
       // `ce.declare()`, so that it makes no `declare` state event: the
       // `Declare` statement makes the declaration, with its event, when it
       // runs, as it did before this binding existed. A binding with no value
-      // that a read reports as an error holds nothing that a cache could
-      // have read. The map write and the new definition half are journaled
-      // for `checkpoint()`/`restore()`, as `ce.declare()` does. The binding
+      // holds nothing that a cache could have read. The map write and the
+      // new definition half are journaled for `checkpoint()`/`restore()`, as
+      // `ce.declare()` does. The binding
       // changes what the name resolves to in this scope, so it is counted as
       // a declaration of the scope (`noteScopeDeclaration`).
       journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
@@ -3398,52 +3404,6 @@ function createBlockLocals(
 }
 
 /**
- * Record each block of `body` (the body itself, and each block nested in
- * it, a `let` initializer too) as a block written in the body of a function
- * literal (`markFunctionBodyBlock()`, `assignment-locals.ts`).
- *
- * A block that is canonicalized in a function body records this when it is
- * canonicalized. This is for a body that was canonical before it became a
- * function body (`ce.function('Function', [block])` with a block that the
- * caller boxed first): without it, a read of an assignment local before its
- * first assignment stayed the bare symbol in that body, while the same
- * `Function` boxed in one step gave the `read-before-declaration` error.
- *
- * Returns true when a block nested in `body` (not `body` itself, and not a
- * block in the body of a nested function literal) has assignment locals
- * (`assignmentLocalsOf()`, `assignment-locals.ts`): in a function body, the
- * body owns these names, so the caller canonicalizes the body again.
- */
-function markFunctionBodyBlocks(body: Expression): boolean {
-  // An expression can share a node in several places (a dictionary that
-  // holds the same value under two keys): each node is read once.
-  const seen = new Set<Expression>();
-  let nestedLocals = false;
-  const walk = (e: Expression, inLiteral: boolean): void => {
-    if (seen.has(e)) return;
-    seen.add(e);
-    if (isDictionary(e)) {
-      for (const value of e.values) walk(value, inLiteral);
-      return;
-    }
-    if (!isFunction(e)) return;
-    if (e.operator === 'Block' && e.localScope !== undefined) {
-      markFunctionBodyBlock(e.localScope);
-      if (
-        !inLiteral &&
-        e !== body &&
-        (assignmentLocalsOf(e.localScope)?.length ?? 0) > 0
-      )
-        nestedLocals = true;
-    }
-    const literal = inLiteral || e.operator === 'Function';
-    for (const op of e.ops) walk(op, literal);
-  };
-  walk(body, false);
-  return nestedLocals;
-}
-
-/**
  * When a run of a block starts, give each assignment local of the block
  * (`recordAssignmentLocals()`, `assignment-locals.ts`) a binding with no value in `run`, the scope
  * where the statements of this run write: the call frame of a function body,
@@ -3460,11 +3420,6 @@ function markFunctionBodyBlocks(body: Expression): boolean {
  * definition, or entered later in the same engine, was written by
  * `function g(k) { t = k + 1; t }`. With it, each call of `g` has its own
  * `t`, and a later declaration of `t` is not changed by a call.
- *
- * In a block written in the body of a function literal, a read of the
- * local before the run assigns it is the `read-before-declaration` error:
- * in `function g(k) { u = t; t = k; u }` the call `g(1)` is that error, not
- * the bare symbol `t`.
  */
 export function declareAssignmentLocals(
   ce: ComputeEngine,
@@ -3473,7 +3428,6 @@ export function declareAssignmentLocals(
 ): void {
   const names = assignmentLocalsOf(block);
   if (names === undefined) return;
-  const readIsError = isFunctionBodyBlock(block);
   for (const name of names) {
     if (run.bindings.has(name)) continue;
     // Installed by direct map surgery, journaled for `checkpoint()` and
@@ -3485,17 +3439,7 @@ export function declareAssignmentLocals(
     });
     half._blockLocal = true;
     ce._checkpointWindow?.noteCreated(half);
-    // In a block written in the body of a function literal, the mark tells
-    // a read that finds this binding with no value that the block has not
-    // assigned the local yet in this run: the read is the
-    // `read-before-declaration` error, not the bare symbol
-    // (`_readBeforeDeclaration` in `boxed-expression/boxed-symbol.ts`). In a
-    // block outside every function literal, the read stays the bare symbol
-    // (`isFunctionBodyBlock()`, `assignment-locals.ts`).
-    const local: BoxedDefinition & { _assignmentLocal?: boolean } = {
-      value: half,
-    };
-    if (readIsError) local._assignmentLocal = true;
+    const local: BoxedDefinition = { value: half };
     markCallableHome(local, run);
     run.bindings.set(name, local);
     noteScopeDeclaration(run);
@@ -3570,7 +3514,7 @@ export async function evaluateStatementsAsync(
     if (h === 'Return' || h === 'Break' || h === 'Continue' || h === 'Error')
       break;
   }
-  return result;
+  return statementListValue(ce, ops, result);
 }
 
 /**

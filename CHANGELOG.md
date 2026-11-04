@@ -16,6 +16,68 @@
 
 ### Behavior Changes
 
+- **A local of a block is declared with a value, and an assignment is a
+  statement.** A declaration gives its name a value, and an assignment is a
+  statement of a block, never an operand, so a local always has a value when
+  it is read. The interpreter no longer gives the
+  `read-before-declaration` error value at run time, and no longer keeps a
+  read of a local with no value as a symbol: each form below is a static
+  error in place in the canonical form, `epsil check` reports it before the
+  program runs, and a compilation declines it.
+  - `Declare(x, "integer")` then `Assign(x, 5)` is the error
+    `declaration-without-value`: write `Declare(x, "integer", 5)`. In Epsil,
+    `let x: integer` is the same error: write `let x: integer = 0`. A
+    function type with no value stays valid when a `function` statement of
+    the same name is in the same block: it gives the signature of that
+    function (`let f: (integer) -> integer; function f(x) { x + 1 }`). In
+    LaTeX, `\operatorname{let} k \coloneq v` is now `Declare(k, "unknown",
+    v)`.
+  - `f(a := 2)` is the error `assignment-in-operand`: write `a := 2; f(a)`.
+  - `a := b := v` is the syntax error `chained-assignment`, in Epsil and in
+    LaTeX: write two statements, `b := v; a := b`.
+  - A first assignment of a name in a branch of an `if`, in a case of a
+    `match` or in a loop body is the error `first-assignment-in-branch`: declare the name with a value
+    before the branch (`t = 0; if c { t = 1 }`). This applies also at the
+    top level of an Epsil program and to an `If`, `Which`, `Loop` or
+    `Match` boxed outside a block: `if c { a = 1 }; a` was valid and gave
+    the symbol `a`. An assignment in a branch to a name that the session
+    already declares writes that name, as before.
+  - A use of a local before the statement that declares it is the static
+    error `read-before-declaration`.
+  - A reassignment with a value of another type
+    (`Block(Assign(a, 1), Assign(a, "x"), a)`) is the error
+    `assignment-type-mismatch`. The type of a local is its declared type, or
+    the type of its first value widened to `number`, `string` or `boolean`.
+  - A block whose last statement is an assignment or a declaration has the
+    value `Nothing` (`Block(Assign(b, 2))` was `2`): end the block with the
+    name.
+  - A function whose declared result type does not admit `nothing`, and
+    whose body ends in an assignment or a declaration
+    (`function f() -> integer { x = 2 }`), gives the `incompatible-type`
+    error when it is called, as a body with a value of another type does. It
+    gave `Nothing`.
+
+  In compiled code (every target):
+  - A write to a symbol that the compiled code does not declare (a symbol
+    declared in the engine, an input, a `vars` name) declines. It wrote the
+    vars object, or a local copy of the input. Return the value and let the
+    host assign it, or declare a local with a value and read the local.
+  - A block with a statement other than a declaration with a value (an
+    assignment, a loop) declines as an operand
+    (`1 + Block(Assign(b, x), 2b)`, the value of an assignment). It compiles
+    as a statement, as the body of a function, of the compiled expression or
+    of a binder such as `Sum`. Assign the value to a local declared before
+    the block, and read the local. A block whose statements before the last
+    are only declarations with a value (a `where` clause,
+    `1 + (a - floor(a) where a := 3.7x)`) is a value, and compiles as an
+    operand.
+  - A block that ends in an assignment or a declaration declines where its
+    value is used: its value is `Nothing`. The JavaScript code of
+    `[1, Block(b := 2)]` gave `[1, 2]`. End the block with the name.
+  - A loop whose value is used declines, as before (`y := Loop(…)`): assign
+    the result to a local declared before the loop, and end the block with
+    the local.
+
 - **The compile mode `'auto'` is removed; `'strict'` is the default of
   every target.** The lane of a compiled value follows its static type: it
   is complex for a declared `complex` input or parameter, a complex literal

@@ -563,7 +563,7 @@ describe('GPU code supplied by the caller runs once, in order', () => {
       MOVED
     );
     both(
-      ['Add', 'W', ['Block', ['Declare', 'a'], ['Assign', 'a', ['Square', 'x']], 'a']],
+      ['Add', 'W', ['Block', ['Declare', 'a', "'unknown'", ['Square', 'x']], 'a']],
       MOVED
     );
   });
@@ -966,13 +966,15 @@ describe('GPU code supplied by the caller runs once, in order', () => {
       '((x) - (u_u) * _gpu_round_up((x) / (u_u)))'
     );
     expect(cw(['Less', 'x', 'U', 3])).toBe('(x < u_u) && (u_u < 3.0)');
+    // A block of declarations is a value expression, so it compiles as the
+    // operand of an addition.
     expect(
-      c(['Add', 'x', ['Block', ['Declare', 'a'], ['Assign', 'a', ['Square', 'x']], 'a']])
+      c(['Add', 'x', ['Block', ['Declare', 'a', "'unknown'", ['Square', 'x']], 'a']])
     ).toBe(
       'float _tv1;\n{\n  float a;\n  a = (x * x);\n  _tv1 = a;\n}\nreturn x + _tv1;'
     );
     expect(
-      cw(['Add', 'U', ['Block', ['Declare', 'a'], ['Assign', 'a', ['Square', 'x']], 'a']])
+      cw(['Add', 'U', ['Block', ['Declare', 'a', "'unknown'", ['Square', 'x']], 'a']])
     ).toBe(
       'var _tv1: f32;\n{\n  var a: f32;\n  a = (x * x);\n  _tv1 = a;\n}\nreturn u_u + _tv1;'
     );

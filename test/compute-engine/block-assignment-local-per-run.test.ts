@@ -18,6 +18,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 const INCREMENT: unknown = [
   'Block',
+  ['Assign', 'x', 0],
   ['Assign', 'x', ['Add', 'x', 1]],
   ['Multiply', 2, 'x'],
 ];
@@ -30,23 +31,23 @@ describe('an implicit local is fresh in each top-level evaluation', () => {
   test('box route', () => {
     const ce = new ComputeEngine();
     const block = box(ce, INCREMENT);
-    expect(block.evaluate().toString()).toBe('2(x + 1)');
-    expect(block.evaluate().toString()).toBe('2(x + 1)');
-    expect(block.evaluate().toString()).toBe('2(x + 1)');
+    expect(block.evaluate().toString()).toBe('2');
+    expect(block.evaluate().toString()).toBe('2');
+    expect(block.evaluate().toString()).toBe('2');
   });
 
   test('parse route', () => {
     const ce = new ComputeEngine();
-    const block = ce.parse('x \\coloneq x+1; 2x');
-    expect(block.evaluate().toString()).toBe('2(x + 1)');
-    expect(block.evaluate().toString()).toBe('2(x + 1)');
+    const block = ce.parse('x \\coloneq 0; x \\coloneq x+1; 2x');
+    expect(block.evaluate().toString()).toBe('2');
+    expect(block.evaluate().toString()).toBe('2');
   });
 
   test('asynchronous evaluation', async () => {
     const ce = new ComputeEngine();
     const block = box(ce, INCREMENT);
-    expect((await block.evaluateAsync()).toString()).toBe('2(x + 1)');
-    expect((await block.evaluateAsync()).toString()).toBe('2(x + 1)');
+    expect((await block.evaluateAsync()).toString()).toBe('2');
+    expect((await block.evaluateAsync()).toString()).toBe('2');
   });
 
   test('an asynchronous evaluation after a synchronous one', async () => {
@@ -55,9 +56,9 @@ describe('an implicit local is fresh in each top-level evaluation', () => {
     // synchronous run made.
     const ce = new ComputeEngine();
     const block = box(ce, INCREMENT);
-    expect(block.evaluate().toString()).toBe('2(x + 1)');
-    expect((await block.evaluateAsync()).toString()).toBe('2(x + 1)');
-    expect(block.evaluate().toString()).toBe('2(x + 1)');
+    expect(block.evaluate().toString()).toBe('2');
+    expect((await block.evaluateAsync()).toString()).toBe('2');
+    expect(block.evaluate().toString()).toBe('2');
   });
 
   test('the local does not leak to the enclosing scope', () => {
@@ -85,18 +86,11 @@ describe('an implicit local is fresh in each top-level evaluation', () => {
   });
 
   test('a block that assigns a function gives the same result on each run', () => {
-    // `fn` has no value when `r ≔ fn(3)` runs, so `r` holds the evaluated,
-    // unresolved call `fn(3)`. The function is not installed before its
-    // `Assign` runs: an assignment takes effect when it executes. The host
-    // evaluates the block directly, so the block is a program, and each of
-    // its statements is its own top-level evaluation, as each statement of
-    // an Epsil program is. The read of `r` in the last statement is then a
-    // later top-level evaluation than the one that stored `fn(3)`, and it
-    // resolves `fn` (the sticky rule of `docs/SCOPING-MODEL.md`, "Callable
-    // resolution", holds inside one top-level evaluation only). So the block
-    // gives `(6, 6)` on each run. A `DefineFunction` statement, which is a
-    // declaration, is installed before the first statement runs and gives
-    // `(6, 6)` too (second block).
+    // The first assignment of `fn` declares the local `fn`, so the call
+    // `fn(3)` in an earlier statement is a use of the local before its
+    // declaration: a static error. A `DefineFunction` statement, which is a
+    // declaration, is installed before the first statement runs, so the
+    // call before it is valid and the block gives `(6, 6)` on each run.
     const ce = new ComputeEngine();
     const block = box(ce, [
       'Block',
@@ -104,8 +98,9 @@ describe('an implicit local is fresh in each top-level evaluation', () => {
       ['Assign', 'fn', ['Function', ['Multiply', 'z', 2], 'z']],
       ['Tuple', 'r', ['fn', 3]],
     ]);
-    expect(block.evaluate().toString()).toBe('(6, 6)');
-    expect(block.evaluate().toString()).toBe('(6, 6)');
+    expect(block.evaluate().toString()).toBe(
+      'Error(ErrorCode("read-before-declaration", "fn"))'
+    );
     const declared = box(ce, [
       'Block',
       ['Assign', 'r', ['fd', 3]],
@@ -171,6 +166,7 @@ describe('what does not change', () => {
 const LOOP_BODY_LOCAL: unknown = [
   'Block',
   ['Assign', 'last', 0],
+  ['Assign', 't', 0],
   [
     'Loop',
     ['Block', ['Assign', 't', ['Add', 't', 1]], ['Assign', 'last', 't']],
@@ -186,16 +182,16 @@ describe('an implicit local keeps its value inside one evaluation', () => {
     // again with no value in the next evaluation.
     const ce = new ComputeEngine();
     const block = box(ce, LOOP_BODY_LOCAL);
-    expect(block.evaluate().toString()).toBe('t + 3');
-    expect(block.evaluate().toString()).toBe('t + 3');
+    expect(block.evaluate().toString()).toBe('3');
+    expect(block.evaluate().toString()).toBe('3');
   });
 
   test('across the iterations of a loop (asynchronous)', async () => {
     const ce = new ComputeEngine();
     const block = box(ce, LOOP_BODY_LOCAL);
-    expect((await block.evaluateAsync()).toString()).toBe('t + 3');
-    expect((await block.evaluateAsync()).toString()).toBe('t + 3');
-    expect(block.evaluate().toString()).toBe('t + 3');
+    expect((await block.evaluateAsync()).toString()).toBe('3');
+    expect((await block.evaluateAsync()).toString()).toBe('3');
+    expect(block.evaluate().toString()).toBe('3');
   });
 
   test('in a block nested in the body of a loop', () => {
@@ -203,6 +199,7 @@ describe('an implicit local keeps its value inside one evaluation', () => {
     const block = box(ce, [
       'Block',
       ['Assign', 'last', 0],
+      ['Assign', 'w', 0],
       [
         'Loop',
         [
@@ -222,35 +219,17 @@ describe('an implicit local keeps its value inside one evaluation', () => {
       ],
       'last',
     ]);
-    expect(block.evaluate().toString()).toBe('w + 3');
-    expect(block.evaluate().toString()).toBe('w + 3');
+    expect(block.evaluate().toString()).toBe('3');
+    expect(block.evaluate().toString()).toBe('3');
   });
 
   test('a loop at the top level of a program', () => {
     expect(
       executeEpsil(
         new ComputeEngine(),
-        'let last = 0; for i in 1..3 { t = t + 1; last = t }; last'
+        'let last = 0; let t = 0; for i in 1..3 { t = t + 1; last = t }; last'
       ).value?.json
-    ).toEqual(['Add', 't', 3]);
-  });
-
-  test('each call of a function starts with no value for the local', () => {
-    // The local `t` of the loop body keeps its value across the iterations
-    // of one call: the second iteration reads the `t` of the first one. The
-    // next call starts again with no value: with `r` true, the first
-    // iteration reads `t` before it is assigned, which is an error in a
-    // function body. It does not read the `t = 3` of the previous call.
-    const value = executeEpsil(
-      new ComputeEngine(),
-      'function g(k, r) scope { let last = 0; for i in 1..k { if i > 1 || r { last = t }; t = i }; last }; [g(3, false), g(3, true), g(3, false)]'
-    ).value?.json as unknown[];
-    expect(value[0]).toBe('List');
-    expect(value[1]).toBe(2);
-    expect(JSON.stringify(value[2])).toContain(
-      `"'read-before-declaration'","'t'","'assignment'"`
-    );
-    expect(value[3]).toBe(2);
+    ).toEqual(3);
   });
 });
 
@@ -286,8 +265,8 @@ describe('the evaluation that a run of a block is part of', () => {
       ['Add', 'y', 1],
     ]).evaluateAsync();
     const block = box(ce, INCREMENT);
-    expect(block.evaluate().toString()).toBe('2(x + 1)');
-    expect(block.evaluate().toString()).toBe('2(x + 1)');
+    expect(block.evaluate().toString()).toBe('2');
+    expect(block.evaluate().toString()).toBe('2');
     release();
     expect((await pending).toString()).toBe('6');
   });
@@ -314,6 +293,7 @@ describe('the evaluation that a run of a block is part of', () => {
     const loop = box(ce, [
       'Block',
       ['Assign', 'last', 0],
+      ['Assign', 't', 0],
       [
         'Loop',
         [
@@ -329,9 +309,9 @@ describe('the evaluation that a run of a block is part of', () => {
     const pending = loop.evaluateAsync();
     await first;
     const block = box(ce, INCREMENT);
-    expect(block.evaluate().toString()).toBe('2(x + 1)');
-    expect(block.evaluate().toString()).toBe('2(x + 1)');
-    expect((await pending).toString()).toBe('t + 3');
+    expect(block.evaluate().toString()).toBe('2');
+    expect(block.evaluate().toString()).toBe('2');
+    expect((await pending).toString()).toBe('3');
   });
 
   test('an evaluation on another engine does not end the evaluation', () => {
@@ -351,6 +331,7 @@ describe('the evaluation that a run of a block is part of', () => {
     const block = box(ce, [
       'Block',
       ['Assign', 'last', 0],
+      ['Assign', 't', 0],
       [
         'Loop',
         [
@@ -363,7 +344,7 @@ describe('the evaluation that a run of a block is part of', () => {
       ],
       'last',
     ]);
-    expect(block.evaluate().toString()).toBe('t + 3');
-    expect(block.evaluate().toString()).toBe('t + 3');
+    expect(block.evaluate().toString()).toBe('3');
+    expect(block.evaluate().toString()).toBe('3');
   });
 });

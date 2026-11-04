@@ -608,8 +608,12 @@ describe('STATEMENTS THAT ARE NOT HOISTED', () => {
 
   test('an assignment of a function literal takes effect when it runs', () => {
     const src = 'let a = String(g(3))\ng = (k) => k^2\na';
+    // The statements of the top level of a program run one at a time: `g`
+    // is a free symbol when the first statement runs.
     expect(epsil(src)).toEqual({ value: 'g(3)', diagnostics: [] });
-    expect(block(src)).toEqual('g(3)');
+    // In one block, the assignment declares the local `g`, and the call
+    // before it is a use before the declaration.
+    expect(JSON.stringify(block(src))).toContain("'read-before-declaration'");
   });
 });
 

@@ -556,10 +556,17 @@ describe('PARAMETER DEFAULT VALUES: DECLARATION', () => {
   });
 
   test('a typed `Declare` of an auto-declared symbol checks the defaults', () => {
+    // A `Declare` has a value (`declaration-without-value` otherwise), so
+    // each `Declare` here gives the function a value.
     ce.box(['UpgradedG', 1]);
     expect(() =>
       ce
-        .box(['Declare', 'UpgradedG', '\'(number, number = "a") -> number\''])
+        .box([
+          'Declare',
+          'UpgradedG',
+          '\'(number, number = "a") -> number\'',
+          ['Function', ['Add', 'a', 'b'], 'a', 'b'],
+        ])
         .evaluate()
     ).toThrow(/does not match its type "number"/);
     ce.box('UpgradedH');
@@ -567,6 +574,7 @@ describe('PARAMETER DEFAULT VALUES: DECLARATION', () => {
       'Declare',
       'UpgradedH',
       "'(number, number = 2) -> number'",
+      ['Function', ['Add', 'a', 'b'], 'a', 'b'],
     ]).evaluate();
     expect(ce.box('UpgradedH').type.toString()).toBe(
       '(number, number = 2) -> number'
@@ -1119,7 +1127,7 @@ describe('PARAMETER DEFAULT VALUES: SYMBOL DEFAULTS', () => {
     test('inside a block that declares `d`', () => {
       const block = (call: unknown) =>
         ce
-          .box(['Block', ['Declare', 'd', "'number'"], ['Assign', 'd', 5], call] as any)
+          .box(['Block', ['Declare', 'd', "'number'", 5], call] as any)
           .evaluate().json;
       expect(block(['ScaledByD', 3])).toBe(15);
       expect(block(['ScaledByD', 3, 'd'])).toBe(15);
@@ -1642,8 +1650,7 @@ describe('PARAMETER DEFAULT VALUES: FUNCTION LITERALS', () => {
       ce2
         .box([
           'Block',
-          ['Declare', 'd', "'integer'"],
-          ['Assign', 'd', 5],
+          ['Declare', 'd', "'integer'", 5],
           call,
         ] as any)
         .evaluate().json;

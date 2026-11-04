@@ -182,10 +182,12 @@ describe('complex mode — one emission per user function, lift at use (design �
     );
     expect(r.run!({})).toBeCloseTo(2 + Math.sqrt(5), 14);
     // …and the block-shadow case: a wide local shadowing an outer complex.
-    const shadow = compile(ce.box(['Block', ['Assign', 'z', 7], 'z']), {
-      ...CX,
-      constantFold: false,
-    });
+    // The local is declared with `Declare`: an `Assign` of a name that the
+    // engine knows writes the engine's binding, and compiled code declines it.
+    const shadow = compile(
+      ce.box(['Block', ['Declare', 'z', "'unknown'", 7], 'z']),
+      { ...CX, constantFold: false }
+    );
     expect(shadow.run!({ z: { re: 1, im: 1 } })).toBe(7);
   });
 

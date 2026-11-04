@@ -156,7 +156,14 @@ describe('identity is preserved across a restore', () => {
     expect(ce.box(['f', 5]).evaluate().toString()).toBe('6');
 
     expect(() =>
-      ce.box(['Declare', 'f', "'(integer) -> integer'"] as any).evaluate()
+      ce
+        .box([
+          'Declare',
+          'f',
+          "'(integer) -> integer'",
+          ['Function', ['Add', 'n', 2], 'n'],
+        ] as any)
+        .evaluate()
     ).toThrow(`The symbol "f" is already declared in this scope`);
     expect(ce.box(['f', 5]).evaluate().toString()).toBe('6');
   });

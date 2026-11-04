@@ -75,8 +75,7 @@ describe('a parameter of an applied function literal', () => {
       'a local of an enclosing block',
       [
         'Block',
-        ['Declare', 'k', "'integer'"],
-        ['Assign', 'k', 3],
+        ['Declare', 'k', "'integer'", 3],
         ['Apply', ['Function', ['Add', ['Sum', 'd'], 'k'], 'd'], evens],
       ],
     ],

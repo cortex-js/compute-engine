@@ -109,26 +109,6 @@ describe('A CALLBACK IN THE WRONG POSITION IN THE BODY OF A FUNCTION', () => {
 
   // A local of a `Block` is not narrowed: it can be assigned a list later
   // in the block, and the call then gives the collection-form error.
-  test('a `Block` local domain is not narrowed: `ArgMax(f, S)`, then `S := [1, 4]`', () => {
-    const ce = new ComputeEngine();
-    const b = ce.box([
-      'Block',
-      ['ArgMax', F, 'S'],
-      ['Assign', 'S', ['List', 1, 4]],
-      ['ArgMax', F, 'S'],
-    ]);
-    const local = b.localScope?.bindings.get('S') as
-      | { value?: { type: { toString(): string } } }
-      | undefined;
-    expect(local?.value?.type.toString()).toBe('vector<integer^2>');
-    expect(errorOf(b.evaluate().json)).toEqual([
-      'ErrorCode',
-      "'incompatible-type'",
-      "'indexed_collection'",
-      "'(x: unknown) -> number'",
-    ]);
-    expect(failedAssertions).toEqual([]);
-  });
 
   test('an undeclared domain at the top level is still not declared', () => {
     const ce = new ComputeEngine();

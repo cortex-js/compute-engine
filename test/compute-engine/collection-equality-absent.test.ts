@@ -258,8 +258,7 @@ describe('a comparison with an absent cell as a branch condition', () => {
     // not specified there (see the header).
     const loop = (cond: unknown) => [
       'Block',
-      ['Declare', 'y', 'number'],
-      ['Assign', 'y', 0],
+      ['Declare', 'y', 'number', 0],
       [
         'Loop',
         ['Block', ['If', cond, ['Assign', 'y', 1], ['Assign', 'y', 2]], ['Break']],

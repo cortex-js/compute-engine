@@ -504,8 +504,7 @@ describe('COMPILE SUM/PRODUCT: THE INDEX IS A REAL COUNTER', () => {
   // terms as strings.
   const inBlock = (body: unknown): unknown => [
     'Block',
-    ['Declare', 'n'],
-    ['Assign', 'n', ['Add', 'x', 'ImaginaryUnit']],
+    ['Declare', 'n', "'unknown'", ['Add', 'x', 'ImaginaryUnit']],
     ['Add', ['Abs', 'n'], body],
   ];
   const cases: [string, unknown][] = [
@@ -664,7 +663,7 @@ describe('COMPILE SUM/PRODUCT: A BODY THAT WRITES THE INDEX', () => {
     const result = compile(
       engine().box([
         'Sum',
-        ['Block', ['Declare', 't', I], ['Assign', 't', ['Add', 'j', 1]], 't'],
+        ['Block', ['Declare', 't', I, ['Add', 'j', 1]], 't'],
         ['Limits', 'j', 1, 'n'],
       ] as any),
       { to: 'javascript', fallback: false }
@@ -690,8 +689,7 @@ describe('COMPILE SUM/PRODUCT: A BOUND THAT READS A VARIABLE WITH THE NAME OF TH
   ];
   const block = (op: string, body: unknown, ...limits: unknown[]): unknown => [
     'Block',
-    ['Declare', 'j', I],
-    ['Assign', 'j', 2],
+    ['Declare', 'j', I, 2],
     [op, body, ...limits],
   ];
 

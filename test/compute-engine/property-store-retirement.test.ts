@@ -276,7 +276,9 @@ let p = Person(n: "Bob", age: 42)`);
 describe('a receiver whose VALUE is not an object yet stays symbolic', () => {
   // A declared-but-unassigned binding is typed by its annotation, and a nominal
   // object type is a DECIDED type — so resolution commits, but there is no
-  // object to store into. Running an authored setter against a symbol and then
+  // object to store into. An Epsil `let` must have a value, so the binding is
+  // made with the host API `ce.declare()`, which can declare a name without a
+  // value. Running an authored setter against a symbol and then
   // answering as if the store had happened would be a lie; so would calling the
   // target immutable, since its type is an object type. Stay symbolic, exactly
   // as a property READ does for the same receiver.
@@ -285,18 +287,22 @@ type Q = object{n: integer} is Aged {
   get age(self: Self) -> integer { self.n }
   set age(self: Self, v: integer) -> Self { self.n = v
     self }
-}
-let q: Q`;
+}`;
+  const declared = () => {
+    const { ce } = run(AGED);
+    ce.declare('q', 'Q');
+    return ce;
+  };
 
   test('the QUALIFIED write stays symbolic', () => {
-    const { ce } = run(AGED);
+    const ce = declared();
     expect(run('q.(Aged.age) = 5', ce).value).toBe(
       'ProtocolProperty("Aged", "age", q, 5)'
     );
   });
 
   test('the UNQUALIFIED write stays symbolic', () => {
-    const { ce } = run(AGED);
+    const ce = declared();
     expect(run('q.age = 5', ce).value).toBe('Assign(Field(q, "age"), 5)');
   });
 });

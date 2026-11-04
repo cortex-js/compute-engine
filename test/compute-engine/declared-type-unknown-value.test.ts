@@ -26,15 +26,6 @@ describe('a declared type admits a value of unknown type', () => {
     };
   };
 
-  test('assignment of an untypeable call, split spelling', () => {
-    const r = runs('let xs: list\nxs = f(0)');
-    expect(r.codes).toEqual([]);
-    // The declared contract is what the symbol reports: the value brought no
-    // element evidence, so the placeholder slot stays open (`list` is
-    // `list<unknown>`).
-    expect(r.typeOf('xs')).toBe('list');
-  });
-
   test('assignment of an untypeable call, declare-with-initializer', () => {
     const r = runs('let xs: list = f(0)');
     expect(r.codes).toEqual([]);
@@ -43,20 +34,20 @@ describe('a declared type admits a value of unknown type', () => {
 
   test('the rule is not collection-specific', () => {
     for (const t of ['number', 'string', 'boolean', 'list<number>']) {
-      const r = runs(`let v: ${t}\nv = f(0)`);
+      const r = runs(`let v: ${t} = f(0)`);
       expect(r.codes).toEqual([]);
       expect(r.typeOf('v')).toBe(t);
     }
   });
 
   test('a value the engine CAN type is still held to the contract', () => {
-    const r = runs('let xs: list\nxs = 42');
+    const r = runs('let xs: list = 42');
     expect(r.value).toContain('ErrorCode("incompatible-type", "list"');
   });
 
   test('an admitted unknown value does not harden the placeholder slot', () => {
     const ce = new ComputeEngine();
-    executeEpsil(ce, 'let xs: list\nxs = f(0)');
+    executeEpsil(ce, 'let xs: list = f(0)');
     expect(ce.box('xs').type.toString()).toBe('list');
     // A later assignment still refines the element slot from real evidence.
     executeEpsil(ce, 'xs = [1, 2, 3]');
@@ -65,7 +56,8 @@ describe('a declared type admits a value of unknown type', () => {
 
   test('a call with a known return type refines as usual', () => {
     const ce = new ComputeEngine();
-    executeEpsil(ce, 'let f: (number) -> list<number>\nlet xs: list\nxs = f(0)');
+    ce.declare('f', '(number) -> list<number>');
+    executeEpsil(ce, 'let xs: list = f(0)');
     expect(ce.box('xs').type.toString()).toBe('list<number>');
   });
 

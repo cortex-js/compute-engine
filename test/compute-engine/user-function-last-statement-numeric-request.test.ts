@@ -52,7 +52,7 @@ const exact = (ce: ComputeEngine, x: unknown = Q): string =>
 
 describe('the last statement of a user-function body under .N()', () => {
   test('a Floor in the last statement, box route', async () => {
-    const ce = boxed(['Declare', 'z'], ['Assign', 'z', 1], ['Floor', 'x']);
+    const ce = boxed(['Declare', 'z', "'unknown'", 1], ['Floor', 'x']);
     expect(n(ce)).toBe('24');
     expect(await nAsync(ce)).toBe('24');
     expect(exact(ce)).toBe('24');
@@ -69,7 +69,7 @@ describe('the last statement of a user-function body under .N()', () => {
   });
 
   test('a comparison in the last statement', async () => {
-    const ce = boxed(['Declare', 'z'], ['Assign', 'z', 1], ['Less', 'x', 25]);
+    const ce = boxed(['Declare', 'z', "'unknown'", 1], ['Less', 'x', 25]);
     expect(n(ce)).toBe('"True"');
     expect(await nAsync(ce)).toBe('"True"');
     const p = parsed('z := 1; x < 25');
@@ -79,8 +79,7 @@ describe('the last statement of a user-function body under .N()', () => {
 
   test('a Return as the last statement', async () => {
     const ce = boxed(
-      ['Declare', 'z'],
-      ['Assign', 'z', 1],
+      ['Declare', 'z', "'unknown'", 1],
       ['Return', ['Floor', 'x']]
     );
     expect(n(ce)).toBe('24');
@@ -89,8 +88,7 @@ describe('the last statement of a user-function body under .N()', () => {
 
   test('an If as the last statement', async () => {
     const ce = boxed(
-      ['Declare', 'z'],
-      ['Assign', 'z', 1],
+      ['Declare', 'z', "'unknown'", 1],
       ['If', ['Greater', 'x', 1], ['Floor', 'x'], 0]
     );
     expect(n(ce)).toBe('24');
@@ -103,8 +101,7 @@ describe('the last statement of a user-function body under .N()', () => {
 
   test('a numeric request does not leave an exact memo entry behind', () => {
     const ce = boxed(
-      ['Declare', 'z'],
-      ['Assign', 'z', 1],
+      ['Declare', 'z', "'unknown'", 1],
       ['Multiply', 2, 'x']
     );
     const numeric = n(ce, ['Sqrt', 2]);
@@ -118,8 +115,7 @@ describe('the last statement of a user-function body under .N()', () => {
 describe('the statements before the last one stay exact', () => {
   test('a := √2; a^2', async () => {
     const ce = boxed(
-      ['Declare', 'a'],
-      ['Assign', 'a', ['Sqrt', 2]],
+      ['Declare', 'a', "'unknown'", ['Sqrt', 2]],
       ['Power', 'a', 2]
     );
     expect(n(ce, 3)).toBe('2');
@@ -144,7 +140,7 @@ describe('the statements before the last one stay exact', () => {
   });
 
   test('a float argument of a block body stays cheap', () => {
-    const ce = boxed(['Declare', 'z'], ['Assign', 'z', 1], ['Floor', 'x']);
+    const ce = boxed(['Declare', 'z', "'unknown'", 1], ['Floor', 'x']);
     const start = Date.now();
     expect(n(ce, H)).toBe('9');
     // The argument is approximated once; summing 10000 exact rationals
@@ -167,8 +163,7 @@ describe('a stored expression read under a shadow, under a numeric request', () 
   const block = (ce: ComputeEngine, op: unknown) =>
     ce.box([
       'Block',
-      ['Declare', 'x', "'real'"],
-      ['Assign', 'x', 7],
+      ['Declare', 'x', "'real'", 7],
       op,
     ] as any);
 

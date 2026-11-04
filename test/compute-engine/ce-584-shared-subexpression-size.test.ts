@@ -148,8 +148,7 @@ describe('CE-584: a vars source that is a read path is shared', () => {
       ce.declare('a', 'real');
       const block = ce.box([
         'Block',
-        ['Declare', 'k', "'real'"],
-        ['Assign', 'k', ['Add', 'x', 1]],
+        ['Declare', 'k', "'real'", ['Add', 'x', 1]],
         ['Add', 'a', 'k'],
       ] as never);
       const r = compile(block, { to, vars: { a: 'k.x' }, fallback: true });

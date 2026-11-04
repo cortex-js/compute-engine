@@ -371,8 +371,7 @@ describe('WGSL COMPILATION', () => {
     it('should compile a simple block with local variable', () => {
       const expr = ce.expr([
         'Block',
-        ['Declare', 'a'],
-        ['Assign', 'a', ['Cos', 't']],
+        ['Declare', 'a', "'unknown'", ['Cos', 't']],
         ['Add', 'a', 1],
       ]);
       const code = wgsl.compile(expr).code;
@@ -386,8 +385,6 @@ describe('WGSL COMPILATION', () => {
     it('should compile a block with multiple locals', () => {
       const expr = ce.expr([
         'Block',
-        ['Declare', 'a'],
-        ['Declare', 'b'],
         ['Assign', 'a', ['Sin', 'x']],
         ['Assign', 'b', ['Cos', 'x']],
         ['Add', 'a', 'b'],
@@ -405,8 +402,7 @@ describe('WGSL COMPILATION', () => {
     it('should compile a block function with valid WGSL body', () => {
       const expr = ce.expr([
         'Block',
-        ['Declare', 'a'],
-        ['Assign', 'a', ['Cos', 't']],
+        ['Declare', 'a', "'unknown'", ['Cos', 't']],
         ['Add', 'a', 1],
       ]);
       const code = wgsl.compileFunction(expr, 'compute', 'float', [
@@ -433,8 +429,7 @@ describe('WGSL COMPILATION', () => {
     it('should not use IIFE or let in WGSL blocks', () => {
       const expr = ce.expr([
         'Block',
-        ['Declare', 'tmp'],
-        ['Assign', 'tmp', 'x'],
+        ['Declare', 'tmp', "'unknown'", 'x'],
         ['Multiply', 'tmp', 'tmp'],
       ]);
       const code = wgsl.compile(expr).code;
@@ -451,8 +446,7 @@ describe('WGSL COMPILATION', () => {
     it('should declare an integer-valued local as f32', () => {
       const expr = ce.expr([
         'Block',
-        ['Declare', 'r'],
-        ['Assign', 'r', 3],
+        ['Declare', 'r', "'unknown'", 3],
         ['Add', 'r', ['Multiply', 'x', 'x']],
       ]);
       const code = wgsl.compile(expr).code;
@@ -467,8 +461,7 @@ describe('WGSL COMPILATION', () => {
     it('should declare a float-literal-valued local as f32', () => {
       const expr = ce.expr([
         'Block',
-        ['Declare', 'r'],
-        ['Assign', 'r', 3.0],
+        ['Declare', 'r', "'unknown'", 3.0],
         ['Add', 'r', ['Multiply', 'x', 'x']],
       ]);
       const code = wgsl.compile(expr).code;
@@ -479,8 +472,7 @@ describe('WGSL COMPILATION', () => {
     it('should honor an explicit real-typed Declare as f32', () => {
       const expr = ce.expr([
         'Block',
-        ['Declare', 'r', 'real'],
-        ['Assign', 'r', 3],
+        ['Declare', 'r', 'real', 3],
         ['Add', 'r', ['Multiply', 'x', 'x']],
       ]);
       const code = wgsl.compile(expr).code;
@@ -568,6 +560,7 @@ describe('WGSL COMPILATION', () => {
       // The loop is a statement: a loop whose value is used declines.
       const expr = ce.expr([
         'Block',
+        ['Assign', 'acc', 0],
         [
           'Loop',
           ['Assign', 'acc', ['Add', 'acc', 'i']],
@@ -579,9 +572,7 @@ describe('WGSL COMPILATION', () => {
       expect(code).toContain('for (var i: i32 = 1; i <= 5; i++)');
       // The i32 loop counter is consumed as a float in float math (CO-P1-2):
       // `f32(i)`, not a bare `i` (which is a WGSL i32/f32 type mismatch).
-      // `acc` is an input, so the loop writes a local copy of it.
-      expect(code).toContain('var _tv1: f32 = acc;');
-      expect(code).toContain('_tv1 = _tv1 + f32(i)');
+      expect(code).toContain('acc = acc + f32(i)');
       expect(code).not.toContain('let ');
       expect(code).not.toContain('() =>');
       expect(code).not.toContain('})()');
@@ -600,8 +591,7 @@ describe('WGSL COMPILATION', () => {
     it('should declare complex-typed variable as vec2f', () => {
       const expr = ce.expr([
         'Block',
-        ['Declare', 'v'],
-        ['Assign', 'v', ['Complex', 1, 2]],
+        ['Declare', 'v', "'unknown'", ['Complex', 1, 2]],
         'v',
       ]);
       const code = wgsl.compile(expr).code;
@@ -836,8 +826,7 @@ describe('WGSL vector locals and vecNf constructor arity', () => {
   it('a local assigned a 2-tuple is declared vec2f', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Tuple', ['Cos', 't'], ['Sin', 't']]],
+      ['Declare', 'p', "'unknown'", ['Tuple', ['Cos', 't'], ['Sin', 't']]],
       'p',
     ]);
     const code = wgsl.compile(expr).code;
@@ -855,8 +844,7 @@ describe('WGSL vector locals and vecNf constructor arity', () => {
   it('a local assigned a 5-tuple is declared as the matching array type', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Tuple', 1, 2, 3, 4, 5]],
+      ['Declare', 'p', "'unknown'", ['Tuple', 1, 2, 3, 4, 5]],
       'p',
     ]);
     const code = wgsl.compile(expr).code;
@@ -882,10 +870,8 @@ describe('WGSL vector locals and vecNf constructor arity', () => {
   it('a local aliasing a vector local inherits its width', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Tuple', 'x', 'y']],
-      ['Declare', 'q'],
-      ['Assign', 'q', 'p'],
+      ['Declare', 'p', "'unknown'", ['Tuple', 'x', 'y']],
+      ['Declare', 'q', "'unknown'", 'p'],
       'q',
     ]);
     const code = wgsl.compile(expr, { vars: { x: 'x', y: 'y' } }).code;
@@ -896,41 +882,26 @@ describe('WGSL vector locals and vecNf constructor arity', () => {
 });
 
 // A shader local has ONE declared type, so every binding of it in a block must
-// agree on a shape. "First assignment wins" reached the very "declared `f32`,
-// assigned `vec2f`" mismatch the width inference exists to prevent, by
-// intra-block reassignment instead of aliasing.
+// agree on a shape. A reassignment with a value of another type (a number,
+// then a tuple) is the static error `assignment-type-mismatch`, so the
+// expression is invalid and the compile declines.
 describe('WGSL block local with disagreeing binding shapes fails closed', () => {
   it('scalar then vector fails closed', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Cos', 't']],
+      ['Declare', 'p', "'unknown'", ['Cos', 't']],
       ['Assign', 'p', ['Tuple', 'x', 'y']],
       'p',
     ]);
     expect(() => wgsl.compile(expr, { vars: { x: 'x', y: 'y' } })).toThrow(
-      /disagreeing shapes.*scalar, then 2-component aggregate/s
-    );
-  });
-
-  it('vector then scalar fails closed', () => {
-    const expr = ce.box([
-      'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Tuple', 'x', 'y']],
-      ['Assign', 'p', ['Cos', 't']],
-      'p',
-    ]);
-    expect(() => wgsl.compile(expr, { vars: { x: 'x', y: 'y' } })).toThrow(
-      /disagreeing shapes.*2-component aggregate, then scalar/s
+      /invalid expression.*assignment-type-mismatch/s
     );
   });
 
   it('repeated bindings of the SAME shape still compile', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Tuple', 'x', 'y']],
+      ['Declare', 'p', "'unknown'", ['Tuple', 'x', 'y']],
       ['Assign', 'p', ['Tuple', ['Cos', 't'], ['Sin', 't']]],
       'p',
     ]);
@@ -956,8 +927,7 @@ describe('WGSL matrix-valued components are aggregates, not scalars', () => {
   it('a block local bound to a matrix fails closed', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]]],
+      ['Declare', 'p', "'unknown'", ['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]]],
       'p',
     ]);
     expect(() => wgsl.compile(expr)).toThrow(/matrix\/tensor-valued local/);
@@ -976,8 +946,7 @@ describe('WGSL zero-width aggregates fail closed', () => {
   it('a block local bound to an empty tuple fails closed', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', 'p'],
-      ['Assign', 'p', ['Tuple']],
+      ['Declare', 'p', "'unknown'", ['Tuple']],
       'p',
     ]);
     expect(() => wgsl.compile(expr)).toThrow(

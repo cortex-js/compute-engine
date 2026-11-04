@@ -25,8 +25,7 @@ const jsL = [
 ];
 
 const local = (value: unknown, type = "'function'") => [
-  ['Declare', 'g', type],
-  ['Assign', 'g', value],
+  ['Declare', 'g', type, value],
 ];
 const add = ['Function', ['Add', 'a', 'b'], 'a', 'b'];
 
@@ -82,8 +81,7 @@ describe('A block-local function called with complex arguments', () => {
   test('Reduce with a declared signature and a captured local', () => {
     expectSameValue(
       fn(
-        ['Declare', 'w', "'integer'"],
-        ['Assign', 'w', 10],
+        ['Declare', 'w', "'integer'", 10],
         ...local(
           ['Function', ['Add', 'p', 'q', 'w'], 'p', 'q'],
           "'(complex, complex) -> complex'"

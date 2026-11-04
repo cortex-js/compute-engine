@@ -3423,7 +3423,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         const typeText = type === null ? null : stringValue(type);
         if (
           name === null ||
-          nops(a) > 2 ||
+          nops(a) > 3 ||
+          (nops(a) === 3 && typeText === null) ||
           (type !== null &&
             (typeText === null ||
               !isParameterTypeText(typeText) ||
@@ -3433,14 +3434,28 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           stmts.push(a);
           continue;
         }
+        // A typed declaration with its value, `Declare(k, T, v)`, is written
+        // `let k \colon T \coloneq v`, which the `let` parser reads back as
+        // that declaration (`parseLetStatement()`).
+        const value = nops(a) === 3 ? operand(a, 3) : null;
         const next = args[i + 1];
         const assigns =
+          value === null &&
           next !== undefined &&
           operator(next) === 'Assign' &&
           symbol(operand(next, 1)) === name;
         const keyword = serializeKeyword(serializer, 'let', { trail: true });
         let latex: string;
-        if (typeText) {
+        if (typeText && value !== null) {
+          latex = joinLatex([
+            keyword,
+            serializer.serialize(name),
+            '\\colon',
+            typeText,
+            '\\coloneq',
+            serializer.serialize(value),
+          ]);
+        } else if (typeText) {
           latex = joinLatex([
             keyword,
             serializer.serialize(name),
@@ -6366,7 +6381,19 @@ function parseAssign(
   lhs: MathJsonExpression,
   until?: Readonly<Terminator>
 ): MathJsonExpression | null {
-  const result = parseAssignStatement(parser, lhs, until);
+  let result = parseAssignStatement(parser, lhs, until);
+  // An assignment is a statement, not a value, so a chained assignment
+  // `a \coloneq b \coloneq 3` is a syntax error, as in Epsil: write two
+  // statements, `b \coloneq 3; a \coloneq b`.
+  if (
+    operator(result) === 'Assign' &&
+    operator(operand(result, 2)) === 'Assign'
+  )
+    result = [
+      'Assign',
+      operand(result, 1)!,
+      ['Error', "'chained-assignment'"],
+    ] as MathJsonExpression;
   if (result !== null && typeof result === 'object') {
     INFIX_ASSIGNS.add(result);
     // The recorded local reading of a `cases` row is the same `\coloneq`
@@ -7497,21 +7524,33 @@ function whereItem(
   expr: MathJsonExpression;
 } | null {
   if (isLetStatement(item)) {
-    const [declare, assign] = operands(undecorated(item));
+    // A `let` statement with a value is the block of one statement
+    // `Declare(k, T, v)`, or `Declare(k, Dictionary(…))` when the value is a
+    // dictionary (`declareWithValue()`). Any other shape has no value.
+    const statements = operands(undecorated(item));
+    const declare = statements.length === 1 ? statements[0] : null;
     const name = operand(declare, 1);
-    if (
-      name === null ||
-      operator(assign) !== 'Assign' ||
-      symbol(operand(assign, 1)) !== symbol(name)
-    )
+    let type: MathJsonExpression | null = null;
+    let value: MathJsonExpression | null = null;
+    if (operator(declare) === 'Declare' && nops(declare) === 3) {
+      type = operand(declare, 2);
+      value = operand(declare, 3);
+    } else if (
+      operator(declare) === 'Declare' &&
+      nops(declare) === 2 &&
+      operator(operand(declare, 2)) === 'Dictionary'
+    ) {
+      for (const pair of operands(operand(declare, 2))) {
+        const key = stringValue(operand(pair, 1));
+        if (key === 'value') value = operand(pair, 2);
+        else if (key === 'type') type = operand(pair, 2);
+      }
+    }
+    if (name === null || value === null)
       return { kind: 'error', expr: ['Error', "'missing-let-value'"] };
     return {
       kind: 'binding',
-      expr: declareWithValue(
-        name,
-        parser._liftRestrictions(operand(assign, 2)!),
-        operand(declare, 2)
-      ),
+      expr: declareWithValue(name, parser._liftRestrictions(value), type),
     };
   }
   const normalized = normalizeLocalAssign(item);
@@ -7576,7 +7615,8 @@ function isDictionaryValue(expr: MathJsonExpression | null): boolean {
  * Convert a sequence of statements to a Block. The first assignment of a
  * name written with `\coloneq` declares it as a local with its value, in one
  * statement: `Declare(k, "unknown", v)` (see `declareWithValue()`); a later
- * one is an `Assign(k, v)`. A `let` statement is its `Declare` and its `Assign`. An assignment written
+ * one is an `Assign(k, v)`. A `let` statement is its `Declare`, with its
+ * value. An assignment written
  * `\mathrm{Assign}(k, v)` is only the `Assign`, so it changes a `k`
  * outside the block when there is one (the `Block` serializer writes a bare
  * `Assign` that way).
@@ -7771,8 +7811,10 @@ function startsLetAssignment(parser: Parser): boolean {
 
 /**
  * Parse the statement after `let`: `k`, `k \coloneq v`, `k \colon T` or
- * `k \colon T \coloneq v`, into `Block(Declare(k[, T])[, Assign(k, v)])`
- * (see `LET_STATEMENTS`). A function definition, `f(x) \coloneq x^2`, is
+ * `k \colon T \coloneq v`, into `Block(Declare(k, T, v))`, with the type
+ * `"unknown"` when no type is written (see `declareWithValue()` and
+ * `LET_STATEMENTS`). Without a value, the `Declare` has no value operand,
+ * and the engine refuses it. A function definition, `f(x) \coloneq x^2`, is
  * read as the assignment of a function literal. The type `T` is read as text,
  * as a parameter annotation is (see `parseParameterTypeAnnotation()`), up to
  * the assignment or the end of the statement.
@@ -7808,30 +7850,35 @@ function parseLetStatement(
     if (typeEnd < 0) typeEnd = parser.index;
     parser.index = typeEnd;
     const text = typeAnnotationText(parser, typeStart, typeEnd);
+    // The value, when the statement has one. A declaration has a value, so
+    // `let k \colon T` with no value is a `Declare` with no value, which the
+    // engine refuses (`declaration-without-value`).
+    let value: MathJsonExpression | undefined = undefined;
+    if (
+      LET_ASSIGNMENT_TOKENS.some((t) => parser.matchAll(t)) ||
+      parser.match('=')
+    )
+      value = parser.parseExpression(terminator) ?? ['Error', "'missing'"];
     // A type that is not one (`\mathbb{Z}`) is an `invalid-type` error in
     // the block, which still declares the name: read as an expression, the
     // statement lost its `let` and became unrelated math.
     const statements: MathJsonExpression[] =
       text !== null
-        ? [['Declare', name, { str: text }]]
+        ? [
+            value === undefined
+              ? ['Declare', name, { str: text }]
+              : declareWithValue(name, value, { str: text }),
+          ]
         : [
-            ['Declare', name],
+            value === undefined
+              ? ['Declare', name]
+              : declareWithValue(name, value),
             [
               'Error',
               "'invalid-type'",
               { str: parser.latex(typeStart, typeEnd).trim() },
             ],
           ];
-    if (
-      LET_ASSIGNMENT_TOKENS.some((t) => parser.matchAll(t)) ||
-      parser.match('=')
-    ) {
-      const value = parser.parseExpression(terminator) ?? [
-        'Error',
-        "'missing'",
-      ];
-      statements.push(['Assign', name, value]);
-    }
     const result: MathJsonExpression = ['Block', ...statements];
     LET_STATEMENTS.add(result as object);
     return result;
@@ -7841,14 +7888,23 @@ function parseLetStatement(
   if (statement === null) return null;
   const normalized = normalizeLocalAssign(statement);
   let result: MathJsonExpression;
-  if (operator(normalized) === 'Assign')
-    result = ['Block', ['Declare', operand(normalized, 1)!], normalized];
-  else if (operator(normalized) === 'Equal' && symbol(operand(normalized, 1)))
-    // `let k = v`, as in Epsil: after `let`, `=` is the assignment.
+  // `let k \coloneq v`, and `let k = v` as in Epsil (after `let`, `=` is
+  // the assignment), declare the local with its value in one statement. A
+  // sequence definition (`let a_0 \coloneq 1`) stays an assignment.
+  if (
+    operator(normalized) === 'Assign' &&
+    operator(operand(normalized, 1)) === 'Subscript'
+  )
+    result = ['Block', normalized];
+  else if (operator(normalized) === 'Assign')
     result = [
       'Block',
-      ['Declare', operand(normalized, 1)!],
-      ['Assign', operand(normalized, 1)!, operand(normalized, 2)!],
+      declareWithValue(operand(normalized, 1)!, operand(normalized, 2)!),
+    ];
+  else if (operator(normalized) === 'Equal' && symbol(operand(normalized, 1)))
+    result = [
+      'Block',
+      declareWithValue(operand(normalized, 1)!, operand(normalized, 2)!),
     ];
   else if (symbol(normalized) !== null)
     result = ['Block', ['Declare', normalized]];

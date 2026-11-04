@@ -420,8 +420,7 @@ describe('A symbol holding a stored expression — what the memo must not serve'
       ce
         .box([
           'Block',
-          ['Declare', 'xshadow', "'real'"],
-          ['Assign', 'xshadow', 7],
+          ['Declare', 'xshadow', "'real'", 7],
           ['Add', 'ashadow', 5],
         ])
         .evaluate()
@@ -453,8 +452,7 @@ describe('A symbol holding a stored expression — what the memo must not serve'
     const block = (op: unknown) =>
       ce.box([
         'Block',
-        ['Declare', 'xroute', "'real'"],
-        ['Assign', 'xroute', 7],
+        ['Declare', 'xroute', "'real'", 7],
         op,
       ]);
     // Whatever the `N()` route answers under the shadow, the evaluate route

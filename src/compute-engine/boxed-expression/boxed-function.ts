@@ -540,7 +540,6 @@ import {
 } from '../../common/type/effects.js';
 import { numericCanonicalHandlerName } from './numeric-canonical-registry.js';
 import { noteConstantAssignmentSite } from '../constant-assignment-error.js';
-import { readBeforeDeclarationError } from './read-before-declaration.js';
 import {
   CancellationError,
   checkDeadline,
@@ -1765,6 +1764,16 @@ export class BoxedFunction
     this._numericStore = store;
     this._numericStoreFloats =
       store !== undefined && !!options?.numericStoreFloats;
+    // An assignment or a declaration is a statement of a block, never an
+    // operand: `f(Assign(a, 2))` and `Assign(t, Assign(u, v))` are static
+    // errors. The operand is replaced by the error in place, so that the
+    // expression is invalid and a compilation declines it.
+    if (
+      ops !== undefined &&
+      options?.canonical === true &&
+      !STATEMENT_OPERATORS.has(operator)
+    )
+      ops = withoutStatementOperands(ce, operator, ops);
     this._opsStorage = ops;
     this._localScope = options?.scope;
     // A closure made in the node can keep the definitions of its scope
@@ -16330,19 +16339,6 @@ function applyFunctionLiteralWith(
       );
       return awaitBody ? call.evaluateAsync(options) : call.evaluate(options);
     }
-    // A call of a local of a block that has no value yet in this run (a
-    // `let` local before its `let`, an assignment local of a function body
-    // before its first assignment) is the `read-before-declaration` error,
-    // as a read of the symbol is. The arguments are not evaluated.
-    if (value === undefined) {
-      const unset = readBeforeDeclarationError(
-        expr.engine,
-        expr.operator,
-        opDef,
-        expr.sourceOffsets
-      );
-      if (unset !== undefined) return unset;
-    }
     const evaluated =
       evaluatedOps ?? expr.ops.map((x) => x.evaluate(operandOptions(options)));
     // A name with no binding in the current scope: the application was
@@ -22858,4 +22854,63 @@ async function evaluateAsyncOverListedFlatMaps(
   }
   if (missedElements) return walkFailure;
   return answer ?? sliceFailure;
+}
+
+/**
+ * The operators whose every operand is a statement position: the
+ * statements of a `Block`, the return-type annotation of the last statement
+ * of a function body (`Typed`), a held expression, and an error that wraps
+ * its expression. An `If`, a `Which` and a `Loop` have statement
+ * positions too, but not in every operand (`isStatementPosition()`). An
+ * `Assign` or a `Declare` in another operand is a static error
+ * (`withoutStatementOperands()`).
+ */
+const STATEMENT_OPERATORS: ReadonlySet<string> = new Set([
+  'Block',
+  'Typed',
+  'Hold',
+  'Error',
+]);
+
+/**
+ * Whether the operand at index `i` of an expression with the operator
+ * `operator` (not one of `STATEMENT_OPERATORS`) is a statement position: a
+ * branch of an `If` (not its condition), a value of a `Which` (not a
+ * condition), and the body of a `Loop` (not its indexing set).
+ */
+function isStatementPosition(operator: string, i: number): boolean {
+  if (operator === 'If') return i > 0;
+  if (operator === 'Which') return i % 2 === 1;
+  if (operator === 'Loop') return i === 0;
+  return false;
+}
+
+/**
+ * `ops`, the operands of an expression with the operator `operator`,
+ * where each operand that is an `Assign` or a `Declare` and that is not in
+ * a statement position (`isStatementPosition()`) is replaced by the static
+ * error `["Error", ["ErrorCode", "assignment-in-operand", name]]`, with
+ * `name` the target of the assignment when it is a symbol. The same array
+ * when no operand is replaced.
+ */
+function withoutStatementOperands(
+  ce: ComputeEngine,
+  operator: string,
+  ops: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  let result: Expression[] | undefined = undefined;
+  ops.forEach((op, i) => {
+    const head = op.operator;
+    if (head !== 'Assign' && head !== 'Declare') return;
+    if (isStatementPosition(operator, i)) return;
+    const target = isFunction(op) ? op.ops[0] : undefined;
+    const name = isSymbol(target) ? target.symbol : undefined;
+    result ??= [...ops];
+    result[i] = ce.error(
+      name === undefined
+        ? ['assignment-in-operand']
+        : ['assignment-in-operand', name]
+    );
+  });
+  return result ?? ops;
 }

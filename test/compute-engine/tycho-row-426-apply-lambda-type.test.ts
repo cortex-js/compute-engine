@@ -607,8 +607,7 @@ describe('row 426 second review: Return', () => {
     const literal = F(
       [
         'Block',
-        ['Declare', 'i'],
-        ['Assign', 'i', 0],
+        ['Declare', 'i', "'unknown'", 0],
         [
           'Loop',
           [
@@ -696,8 +695,7 @@ describe('row 426 third review: a plain value is copied at its assignment', () =
           F(
             [
               'Block',
-              ['Declare', 'r'],
-              ['Assign', 'r', make('x')],
+              ['Declare', 'r', "'unknown'", make('x')],
               ['Assign', 'x', 100],
               'r',
             ],
@@ -714,10 +712,8 @@ describe('row 426 third review: a plain value is copied at its assignment', () =
       const ce = new ComputeEngine();
       const block: Json = [
         'Block',
-        ['Declare', 'b'],
-        ['Assign', 'b', 3],
-        ['Declare', 'r'],
-        ['Assign', 'r', make('b')],
+        ['Declare', 'b', "'unknown'", 3],
+        ['Declare', 'r', "'unknown'", make('b')],
         ['Assign', 'b', 100],
         'r',
       ];
@@ -735,10 +731,8 @@ describe('row 426 third review: a plain value is copied at its assignment', () =
       ce
         .box([
           'Block',
-          ['Declare', 'b'],
-          ['Assign', 'b', 3],
-          ['Declare', 'g'],
-          ['Assign', 'g', addTo('b')],
+          ['Declare', 'b', "'unknown'", 3],
+          ['Declare', 'g', "'unknown'", addTo('b')],
           ['Assign', 'b', 10],
           ['Apply', 'g', 1],
         ])
@@ -752,8 +746,7 @@ describe('row 426 third review: a plain value is copied at its assignment', () =
         F(
           [
             'Block',
-            ['Declare', 'g'],
-            ['Assign', 'g', addTo('a')],
+            ['Declare', 'g', "'unknown'", addTo('a')],
             ['Assign', 'a', 10],
             'g',
           ],
@@ -773,10 +766,8 @@ describe('row 426 third review: a plain value is copied at its assignment', () =
     const ce = new ComputeEngine();
     const block: Json = [
       'Block',
-      ['Declare', 'b'],
-      ['Assign', 'b', ['List', 1, 2]],
-      ['Declare', 'm'],
-      ['Assign', 'm', ['Map', F(['Multiply', 2, 'u'], 'u'), 'b']],
+      ['Declare', 'b', "'unknown'", ['List', 1, 2]],
+      ['Declare', 'm', "'unknown'", ['Map', F(['Multiply', 2, 'u'], 'u'), 'b']],
       ['Assign', 'b', ['List', 9]],
       'm',
     ];
@@ -890,8 +881,7 @@ describe('row 426 third review: a stored value with an operator that binds names
           F(
             [
               'Block',
-              ['Declare', 'r'],
-              ['Assign', 'r', make('x')],
+              ['Declare', 'r', "'unknown'", make('x')],
               ['Assign', 'x', 100],
               'r',
             ],
@@ -901,10 +891,8 @@ describe('row 426 third review: a stored value with an operator that binds names
       );
       const block: Json = [
         'Block',
-        ['Declare', 'b'],
-        ['Assign', 'b', 3],
-        ['Declare', 'r'],
-        ['Assign', 'r', make('b')],
+        ['Declare', 'b', "'unknown'", 3],
+        ['Declare', 'r', "'unknown'", make('b')],
         ['Assign', 'b', 100],
         'r',
       ];
@@ -926,8 +914,7 @@ describe('row 426 third review: a stored value with an operator that binds names
         F(
           [
             'Block',
-            ['Declare', 'r'],
-            ['Assign', 'r', stored('x')],
+            ['Declare', 'r', "'unknown'", stored('x')],
             ['Assign', 'x', 100],
             'r',
           ],
@@ -941,10 +928,8 @@ describe('row 426 third review: a stored value with an operator that binds names
     const h = ce
       .box([
         'Block',
-        ['Declare', 'b'],
-        ['Assign', 'b', 3],
-        ['Declare', 'r'],
-        ['Assign', 'r', stored('b')],
+        ['Declare', 'b', "'unknown'", 3],
+        ['Declare', 'r', "'unknown'", stored('b')],
         ['Assign', 'b', 100],
         'r',
       ])
@@ -962,7 +947,7 @@ describe('row 426 fourth review: every store of a plain value copies it', () => 
       'f',
       ce.box(
         F(
-          ['Block', ['Declare', 'r'], stmt, ['Assign', 'x', 100], ...after],
+          ['Block', stmt, ['Assign', 'x', 100], ...after],
           'x'
         )
       )
@@ -993,8 +978,7 @@ describe('row 426 fourth review: every store of a plain value copies it', () => 
       ce
         .box([
           'Block',
-          ['Declare', 'b'],
-          ['Assign', 'b', 3],
+          ['Declare', 'b', "'unknown'", 3],
           ['Declare', 'r', "'any'", iff('b')],
           ['Assign', 'b', 100],
           'r',
@@ -1052,10 +1036,8 @@ describe('row 426 fourth review: every store of a plain value copies it', () => 
     const v = ce
       .box([
         'Block',
-        ['Declare', 'b'],
-        ['Assign', 'b', 3],
-        ['Declare', 'r'],
-        ['Assign', 'r', ['Hold', ['Assign', 'b', ['Add', 'b', 1]]]],
+        ['Declare', 'b', "'unknown'", 3],
+        ['Declare', 'r', "'unknown'", ['Hold', ['Assign', 'b', ['Add', 'b', 1]]]],
         ['Assign', 'b', 100],
         'r',
       ])
@@ -1076,7 +1058,6 @@ describe('row 426 fifth review: the copy at assignment', () => {
         F(
           [
             'Block',
-            ['Declare', 'r'],
             [
               'Assign',
               ['Tuple', 'x', 'r'],
@@ -1102,8 +1083,7 @@ describe('row 426 fifth review: the copy at assignment', () => {
         F(
           [
             'Block',
-            ['Declare', 'r'],
-            ['Assign', 'r', ['Hold', ['g', 1]]],
+            ['Declare', 'r', "'unknown'", ['Hold', ['g', 1]]],
             ['Assign', 'g', F(['Multiply', 1000, 'v'], 'v')],
             'r',
           ],
@@ -1124,10 +1104,8 @@ describe('row 426 fifth review: the copy at assignment', () => {
     ce.assign('h', ce.box(F(['Multiply', 2, 'u'], 'u')));
     const held = ce.function('Hold', [ce.function('h', [ce.symbol('b')])]);
     const block = ce.function('Block', [
-      ce.box(['Declare', 'b']),
-      ce.box(['Assign', 'b', 3]),
-      ce.box(['Declare', 'h']),
-      ce.box(['Assign', 'h', F(1000, 'u')]),
+      ce.box(['Declare', 'b', "'unknown'", 3]),
+      ce.box(['Declare', 'h', "'unknown'", F(1000, 'u')]),
       ce.function('Assign', [ce.symbol('r'), held]),
       ce.box(['Assign', 'b', 100]),
       ce.symbol('r'),
@@ -1148,10 +1126,8 @@ describe('row 426 sixth review: the copy at assignment', () => {
     ce.assign('h', ce.box(F(['Multiply', 2, 'u'], 'u')));
     const held = ce.function('Hold', [ce.function('h', [ce.symbol('b')])]);
     const block = ce.function('Block', [
-      ce.box(['Declare', 'b']),
-      ce.box(['Assign', 'b', 3]),
-      ce.box(['Declare', 'h', "'(real) -> real'"]),
-      ce.box(['Assign', 'h', F(1000, 'u')]),
+      ce.box(['Declare', 'b', "'unknown'", 3]),
+      ce.box(['Declare', 'h', "'(real) -> real'", F(1000, 'u')]),
       ce.function('Assign', [ce.symbol('r'), held]),
       ce.box(['Assign', 'b', 100]),
       ce.symbol('r'),
@@ -1173,9 +1149,7 @@ describe('row 426 sixth review: the copy at assignment', () => {
       ]);
     const r = ce
       .function('Block', [
-        ce.box(['Declare', 'x']),
-        ce.box(['Assign', 'x', 3]),
-        ce.box(['Declare', 'r']),
+        ce.box(['Declare', 'x', "'unknown'", 3]),
         ce.function('Assign', [ce.symbol('r'), ce.function('Hold', [d])]),
         ce.box(['Assign', 'x', 100]),
         ce.symbol('r'),

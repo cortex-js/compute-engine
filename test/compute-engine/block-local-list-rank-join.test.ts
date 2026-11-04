@@ -17,13 +17,19 @@ import type { MathJsonExpression } from '../../src/math-json';
 const join = (a: string, b: string): string =>
   typeToString(joinEvidenceTypes(parseType(a), parseType(b)));
 
+// A local declared with a type that admits a vector and a matrix, assigned
+// a vector, then a matrix. With no declared type, the type of the local is
+// the type of its first value, widened (`list<number>`), and the second
+// assignment is the static error `assignment-type-mismatch`.
 function block(
   values: MathJsonExpression[],
   last: MathJsonExpression
 ): MathJsonExpression {
+  const [first, ...rest] = values;
   return [
     'Block',
-    ...values.map((v): MathJsonExpression => ['Assign', 'L', v]),
+    ['Declare', 'L', "'list<integer | list<integer>>'", first],
+    ...rest.map((v): MathJsonExpression => ['Assign', 'L', v]),
     last,
   ];
 }
@@ -80,10 +86,23 @@ describe('a block local assigned a vector, then a matrix', () => {
     ['List', ['List', 1, 2]],
   ];
 
+  test('with no declared type, the second value is a static error', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box([
+      'Block',
+      ['Assign', 'L', values[0]],
+      ['Assign', 'L', values[1]],
+      'L',
+    ]);
+    expect(e.toString()).toContain(
+      'Error(ErrorCode("assignment-type-mismatch", "L", "list<number>", "matrix<integer^(1x2)>"))'
+    );
+  });
+
   test('the static type admits both values', () => {
     const ce = new ComputeEngine();
     const e = ce.box(block(values, 'L'));
-    expect(e.type.toString()).toBe('list<integer | vector<integer^2>>');
+    expect(e.type.toString()).toBe('list<integer | list<integer>>');
     const value = e.evaluate();
     expect(value.toString()).toBe('[[1,2]]');
     expect(value.type.matches(e.type)).toBe(true);

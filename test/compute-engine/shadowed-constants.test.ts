@@ -30,7 +30,7 @@ describe('A GLOBAL DECLARATION OF A LIBRARY CONSTANT', () => {
 
   test('the Declare operator is refused', () => {
     const ce = new ComputeEngine();
-    expect(() => ce.box(['Declare', 'Pi', "'real'"]).evaluate()).toThrow(
+    expect(() => ce.box(['Declare', 'Pi', "'real'", 3]).evaluate()).toThrow(
       'Cannot declare "Pi" in the global scope: it is a library constant'
     );
   });
@@ -73,8 +73,7 @@ describe('A GLOBAL DECLARATION OF A LIBRARY CONSTANT', () => {
       ce
         .box([
           'Block',
-          ['Declare', 'Pi', "'real'"],
-          ['Assign', 'Pi', 3],
+          ['Declare', 'Pi', "'real'", 3],
           ['Add', 'Pi', 1],
         ])
         .evaluate()
@@ -460,8 +459,7 @@ describe('CE-103: A BLOCK LOCAL NAMED Pi AND A RESULT BUILT WITH π', () => {
     ['Limits', 'n', 1, 'PositiveInfinity'],
   ];
   const localPi: Expression[] = [
-    ['Declare', 'Pi', "'real'"],
-    ['Assign', 'Pi', 3],
+    ['Declare', 'Pi', "'real'", 3],
   ];
 
   test('an assigned closed form keeps the library π', () => {

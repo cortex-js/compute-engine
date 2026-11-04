@@ -206,8 +206,7 @@ describe('Tycho item 330: box route', () => {
         'Function',
         [
           'Block',
-          ['Declare', 'out'],
-          ['Assign', 'out', ['List']],
+          ['Declare', 'out', "'unknown'", ['List']],
           [
             'Loop',
             [
@@ -257,8 +256,7 @@ describe('Tycho item 330: box route', () => {
             'Sum',
             [
               'Block',
-              ['Declare', 'r'],
-              ['Assign', 'r', ['h', ['Add', 'n', 1]]],
+              ['Declare', 'r', "'unknown'", ['h', ['Add', 'n', 1]]],
               ['Add', 'r', ['Multiply', 'k', ['Power', 10, 'n']]],
             ],
             ['Limits', 'k', 1, 2],
@@ -285,8 +283,7 @@ describe('Tycho item 330: box route', () => {
             'Product',
             [
               'Block',
-              ['Declare', 'r'],
-              ['Assign', 'r', ['g', ['Add', 'n', 1]]],
+              ['Declare', 'r', "'unknown'", ['g', ['Add', 'n', 1]]],
               ['Multiply', 'r', ['Add', 'k', 'n']],
             ],
             ['Limits', 'k', 1, 2],

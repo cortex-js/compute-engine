@@ -212,7 +212,14 @@ describe('COMPILED PARAMETER DEFAULTS: JAVASCRIPT', () => {
   });
 
   test('a call of a block-local function is completed with the default', () => {
-    const expr = ['Block', ['Assign', 'g', defaulted(2)], ['g', 'y']];
+    // The interpreter writes an assigned name into the engine, and compiled
+    // code declines a write to a symbol of the engine. A `Declare` makes `g`
+    // a local of the block in both.
+    const expr = [
+      'Block',
+      ['Declare', 'g', "'unknown'", defaulted(2)],
+      ['g', 'y'],
+    ];
     expect(interpreted(ce, expr, { y: 3 })).toBe(6);
     const { code, value } = run(ce, expr, 'javascript', { y: 3 });
     expect(code).toContain('g(_.y, 2)');
@@ -766,7 +773,9 @@ describe('COMPILED PARAMETER DEFAULTS: A DEFAULT FILLS AN ABSENT ARGUMENT', () =
     ['q(At(P, 5))', ['Apply', Q, ['At', 'P', 5]], [0, 0]],
     [
       'a block-local function',
-      ['Block', ['Assign', 'h', K], ['h', ['At', 'L', 100]]],
+      // A `Declare` makes `h` a local of the block: the interpreter writes an
+      // assigned name into the engine, and compiled code declines that write.
+      ['Block', ['Declare', 'h', "'unknown'", K], ['h', ['At', 'L', 100]]],
       2,
     ],
   ];
@@ -934,7 +943,9 @@ describe('COMPILED PARAMETER DEFAULTS: THE FILL OF AN ABSENT ARGUMENT, ON EVERY 
     const KR = ['Function', 'k', ['Optional', ['Typed', 'k', "'real'"], 2]];
     for (const expr of [
       ['Apply', KR, ['At', 'M', 5]],
-      ['Block', ['Assign', 'g', KR], ['g', ['At', 'M', 5]]],
+      // A `Declare` makes `g` a local of the block: the interpreter writes an
+      // assigned name into the engine, and compiled code declines that write.
+      ['Block', ['Declare', 'g', "'unknown'", KR], ['g', ['At', 'M', 5]]],
     ]) {
       expect(value(ce, expr, { M: ['List', 1, 3] })).toBe(2);
       expect(run(ce, expr, 'javascript', { M: [1, 3] }).value).toBe(2);
@@ -1022,8 +1033,7 @@ describe('COMPILED PARAMETER DEFAULTS: THE FILL OF AN ABSENT ARGUMENT, ON EVERY 
     });
     const expr = ce.box([
       'Block',
-      ['Declare', 'd', "'real'"],
-      ['Assign', 'd', 7],
+      ['Declare', 'd', "'real'", 7],
       ['F5', ['First', ['List']]],
     ]);
     expect(expr.evaluate().toString()).toBe('7');

@@ -153,10 +153,8 @@ describe('CE-410: the cell loop of each compiled body', () => {
   const kernel = compile(
     ce.box([
       'Block',
-      ['Declare', 'v0', 'real'],
-      ['Assign', 'v0', ['At', 'F', ['Add', 'i', 1]]],
-      ['Declare', 'v1', 'real'],
-      ['Assign', 'v1', ['At', 'F', ['Subtract', 'i', 2]]],
+      ['Declare', 'v0', 'real', ['At', 'F', ['Add', 'i', 1]]],
+      ['Declare', 'v1', 'real', ['At', 'F', ['Subtract', 'i', 2]]],
       ['Tuple', 'v0', 'v1', ['If', ['LessEqual', 'v0', 'v1'], 1, 0]],
     ])
   );
@@ -269,8 +267,7 @@ describe('CE-410: a connective of decided comparisons', () => {
   const decided = compile(
     ce.box([
       'Block',
-      ['Declare', 'v0', 'real'],
-      ['Assign', 'v0', ['At', 'F', ['Add', 'i', 1]]],
+      ['Declare', 'v0', 'real', ['At', 'F', ['Add', 'i', 1]]],
       [
         'Tuple',
         ['If', ['And', ['LessEqual', 'v0', 0], ['Greater', 'v0', -1]], 1, 0],
@@ -305,8 +302,7 @@ describe('CE-410: a connective of decided comparisons', () => {
     const r = compile(
       ce.box([
         'Block',
-        ['Declare', 'v0', 'real'],
-        ['Assign', 'v0', ['At', 'F', ['Add', 'i', 1]]],
+        ['Declare', 'v0', 'real', ['At', 'F', ['Add', 'i', 1]]],
         ['If', ['Or', ['LessEqual', 'v0', 0], ['Greater', 'v0', 0]], 1, 0],
       ])
     );

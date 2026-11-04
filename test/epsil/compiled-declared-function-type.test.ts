@@ -54,12 +54,12 @@ const interval = (source: string, vars: Record<string, Value> = {}) =>
   compileProgram(source, 'interval-js').run(vars);
 
 const DECLARED = 'let g: (integer) -> integer\nfunction g(k) { k + 1 }\n';
-const ASSIGNED = 'let g: (integer) -> integer\ng = (k) => k + 1\n';
+const ASSIGNED = 'let g: (integer) -> integer = (k) => k + 1\n';
 const ANNOTATED = 'function g(k: integer) { k + 1 }\n';
 
 describe.each([
   ['a `let` declaration then a definition', DECLARED],
-  ['a `let` declaration then an assignment', ASSIGNED],
+  ['a `let` declaration with a function value', ASSIGNED],
   ['a parameter annotation', ANNOTATED],
 ])('A CALL OF A FUNCTION DECLARED (integer) -> integer: %s', (_, head) => {
   test('an argument that cannot be an integer is refused', () => {

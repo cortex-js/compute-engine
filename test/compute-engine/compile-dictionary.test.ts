@@ -190,9 +190,9 @@ describe('COMPILE A DICTIONARY: JAVASCRIPT', () => {
     }
   });
 
-  test('an assignment in a value is an assignment operand', () => {
-    // JavaScript has an assignment expression; Python does not, and
-    // declines as for an assignment in any other operand.
+  test('an assignment in a value declines', () => {
+    // An assignment is a statement: an assignment whose value is used
+    // declines on every target.
     const expr = [
       'Block',
       ['Assign', 'q', 1],
@@ -203,28 +203,10 @@ describe('COMPILE A DICTIONARY: JAVASCRIPT', () => {
         'q',
       ],
     ];
-    expect(compiled(expr, 'javascript').run()).toEqual(interpreted(expr));
-    expect(() => compiled(expr, 'python')).toThrow(
-      /an assignment is a statement in 'python'/
-    );
-  });
-
-  test('a write in a value is not crossed by a shared subexpression', () => {
-    const expr = [
-      'Block',
-      ['Assign', 'q', 'x'],
-      [
-        'List',
-        ['Sin', 'q'],
-        ['Dictionary', entry('a', ['Assign', 'q', ['Add', 'q', 1]])],
-        ['Sin', 'q'],
-      ],
-    ];
-    const r = compiled(expr, 'javascript');
-    expect(r.code).not.toContain('_cse');
-    const value = r.run({ x: 1 });
-    expect(value).toEqual(interpreted(expr));
-    expect(value[2]).toBeCloseTo(Math.sin(2), 12);
+    for (const to of ['javascript', 'python'])
+      expect(() => compiled(expr, to)).toThrow(
+        /an assignment or a declaration is a statement, and its value is used|an assignment is a statement in 'python'/
+      );
   });
 
   test('a dictionary with the keys `re` and `im` is not read as a complex number', () => {

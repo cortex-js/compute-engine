@@ -109,10 +109,13 @@ describe('A CALL BETWEEN THE DECLARED SIGNATURE AND THE DEFINITION', () => {
     });
   });
 
-  test('the declaration has no type', () => {
-    const src = 'let g\nlet a = String(g(2))\nfunction g(k) { 2 * k }\na';
-    expect(block(src)).toBe('"4"');
-    expect(epsil(src)).toBe('"4"');
+  test('a declaration with no type is not a signature: it needs a value', () => {
+    // Only a function type pairs with the `function` statement of the same
+    // name. A `let g` with no type and no value is an error.
+    const src = 'let g\nfunction g(k) { 2 * k }\ng(2)';
+    expect(epsilWithDiagnostics(src).diagnostics.join('\n')).toContain(
+      'declaration-without-value'
+    );
   });
 
   test('the call is checked against the declared parameter type', () => {
@@ -297,9 +300,6 @@ describe('A CALL BETWEEN THE DECLARED SIGNATURE AND THE DEFINITION', () => {
       executeEpsil(ce, stopped)
     );
     expect(first.value.toString()).toContain('step-budget');
-    expect(
-      executeEpsil(ce, 'let g: (integer) -> integer\ng(2)').value.toString()
-    ).toBe('g(2)');
     const ce2 = new ComputeEngine();
     ce2.withStepBudget({ steps: 2000 }, () => executeEpsil(ce2, stopped));
     expect(

@@ -34,7 +34,6 @@ import {
   isString,
   isSymbol,
 } from '../compute-engine/boxed-expression/type-guards.js';
-import { readBeforeDeclarationSite } from '../compute-engine/boxed-expression/read-before-declaration.js';
 import { listedElement } from '../compute-engine/boxed-expression/listed-element.js';
 import { protocolExtendsConflicts } from '../compute-engine/engine-protocols.js';
 import {
@@ -68,6 +67,7 @@ import {
   errorCode,
   frameOrderOf,
   isDeclarationStatement,
+  boxTopLevelStatement,
   staticDiagnostics,
   declaredVariableNames,
 } from './static-diagnostics.js';
@@ -631,7 +631,9 @@ function* executeEpsilSteps(
         // A `function` statement that the preparation step boxed (and so
         // installed) is not boxed a second time: it is evaluated here, at its
         // own turn.
-        boxedStmt = prepared.preboxed.get(i) ?? ce.box(stmt);
+        boxedStmt =
+          prepared.preboxed.get(i) ??
+          boxTopLevelStatement(statements, stmt, () => ce.box(stmt));
         // The driver evaluates the statement: `evaluate()` in
         // `executeEpsil`, `evaluateAsync()` in `executeEpsilAsync`.
         value = yield boxedStmt;
@@ -800,9 +802,13 @@ function* executeEpsilSteps(
             d.range[1] === constantSite?.[1]
         )) ||
       // A use of a local before it has a value: see
-      // `reportedAsReadBeforeDeclaration()`.
+      // `reportedAsBlockLocalError()`.
       (markerError !== undefined &&
-        reportedAsReadBeforeDeclaration(markerError, diagnostics));
+        reportedAsBlockLocalError(
+          markerError,
+          diagnostics,
+          statementRange(stmt, source)
+        ));
     if (i < statements.length - 1 && !reportedStatically) {
       walkValue(walkFailure, () => {
         // A `Map` or `Filter` view that holds no error can still give one
@@ -2010,9 +2016,17 @@ function nestedStatementSites(
         const range = sourceOffsetsOf(stmt);
         if (range === undefined) return;
         // The body of a function literal is the FIRST operand of
-        // `Function`.
+        // `Function`. An assignment or a declaration has no value: when it
+        // is the last statement, the block has the value `Nothing`, and the
+        // value of the statement is discarded.
+        const statementHead = operator(
+          operator(stmt) === 'Typed' ? (operands(stmt)[0] ?? stmt) : stmt
+        );
         const role: NestedStatementRole =
-          j < ops.length - 1 || loopBody
+          j < ops.length - 1 ||
+          loopBody ||
+          statementHead === 'Assign' ||
+          statementHead === 'Declare'
             ? 'discarded'
             : parent === 'Function' && index === 0
               ? 'returned'
@@ -2235,7 +2249,7 @@ function nestedStatementReporter(
       if (
         errors.length > 0 &&
         !failures.has(failureKey(errors[0])) &&
-        !reportedAsReadBeforeDeclaration(errors[0], diagnostics)
+        !reportedAsBlockLocalError(errors[0], diagnostics, origin.range)
       ) {
         failures.set(failureKey(errors[0]), undefined);
         const diagnostic = errorValueDiagnostic(
@@ -2766,32 +2780,97 @@ function constantAssignmentName(e: unknown): string | undefined {
 }
 
 /**
- * Whether `error` is a `read-before-declaration` error value that the
- * static check already reported: a use of a local before it has a value (a
- * read, a call, the collection of a `for` loop). The static check reports
- * it as a `static-type-error` with the engine code
- * `read-before-declaration`, at the range of the use. The engine keeps the
- * range of the use on the error (`readBeforeDeclarationSite()`). The two
- * are the same problem when the ranges are the same and the descriptions
- * are the same (the same name, and the same kind of local), and the run
- * does not report it a second time.
+ * The codes of the static errors of the rules of block locals
+ * (`docs/ERROR-MODEL.md`): the canonicalization puts the error in place in
+ * the statement, and the static check reports it as a `static-type-error`
+ * with the code.
  */
-function reportedAsReadBeforeDeclaration(
+const BLOCK_LOCAL_ERROR_CODES = [
+  'read-before-declaration',
+  'declaration-without-value',
+  'first-assignment-in-branch',
+  'assignment-in-operand',
+  'assignment-type-mismatch',
+];
+
+/**
+ * Whether `error` holds a static error of the rules of block locals
+ * (`BLOCK_LOCAL_ERROR_CODES`) that the static check already reported. The
+ * error is in the canonical statement, so the run gives it as the value of
+ * the statement, also inside another error (the `Invalid function` error of
+ * a `function` statement whose body holds it). The run does not report it a
+ * second time.
+ *
+ * Each block-local error that `error` holds must match a diagnostic of the
+ * static check: the same code, the same description, and a range that
+ * overlaps the source range of the error. The source range is the range of
+ * the `ErrorCode` operand or of the `Error` node when the engine recorded
+ * one (the use of a local for `read-before-declaration`), else
+ * `statementRange`, the range of the statement that gave the value. An
+ * error that holds the block-local error only in the text of its message is
+ * matched by the code and the range of the statement. A
+ * match by code alone is not sufficient: a statement can hold a static
+ * error and give a different run-time error with the same code elsewhere.
+ */
+function reportedAsBlockLocalError(
   error: Expression,
-  diagnostics: ReadonlyArray<ParsingDiagnostic>
+  diagnostics: ReadonlyArray<ParsingDiagnostic>,
+  statementRange: readonly [number, number]
 ): boolean {
-  const site = readBeforeDeclarationSite(error);
-  if (site === undefined) return false;
-  const description = describeError(error.json);
-  return diagnostics.some(
-    (d) =>
-      Array.isArray(d.message) &&
-      d.message[0] === 'static-type-error' &&
-      d.message[3] === 'read-before-declaration' &&
-      d.message[1] === description &&
-      d.range[0] === site[0] &&
-      d.range[1] === site[1]
-  );
+  const found: Expression[] = [];
+  const walk = (e: Expression): void => {
+    if (!isFunction(e)) return;
+    if (
+      e.operator === 'Error' &&
+      isFunction(e.op1, 'ErrorCode') &&
+      isString(e.op1.op1) &&
+      BLOCK_LOCAL_ERROR_CODES.includes(e.op1.op1.string)
+    ) {
+      found.push(e);
+      return;
+    }
+    for (const op of e.ops) walk(op);
+  };
+  walk(error);
+  const overlaps = (
+    d: ParsingDiagnostic,
+    site: readonly [number, number]
+  ): boolean => d.range[0] <= site[1] && site[0] <= d.range[1];
+  // An error that holds the block-local error only as text (the message of
+  // the `Invalid function` error of a `function` statement) is matched by
+  // its code, with a diagnostic in the range of the statement.
+  if (found.length === 0) {
+    const text = JSON.stringify(error.json);
+    const codes = BLOCK_LOCAL_ERROR_CODES.filter((code) => text.includes(code));
+    return (
+      codes.length > 0 &&
+      codes.every((code) =>
+        diagnostics.some(
+          (d) =>
+            Array.isArray(d.message) &&
+            d.message[0] === 'static-type-error' &&
+            d.message[3] === code &&
+            overlaps(d, statementRange)
+        )
+      )
+    );
+  }
+  return found.every((e) => {
+    const code = errorCode(e.json);
+    const description = describeError(e.json);
+    const site =
+      (isFunction(e) ? e.op1.sourceOffsets : undefined) ??
+      e.sourceOffsets ??
+      statementRange;
+    return diagnostics.some(
+      (d) =>
+        Array.isArray(d.message) &&
+        d.message[0] === 'static-type-error' &&
+        d.message[3] === code &&
+        d.message[1] === description &&
+        overlaps(d, site)
+    );
+  });
 }
 
 /** The source range of the `Assign` node that made the write, when `e` is

@@ -841,8 +841,6 @@ describe('COMPILE CSE — statement regions', () => {
     // bound, one temporary would serve both; it must be two.
     const expr = ce.box([
       'Block',
-      ['Declare', 'y', 'number'],
-      ['Declare', 'z', 'number'],
       ['Assign', 'y', probe3('u')],
       ['Assign', 'z', probe3('u')],
       ['Add', 'y', 'z'],
@@ -891,8 +889,7 @@ describe('COMPILE CSE — statement regions', () => {
       'Function',
       [
         'Block',
-        ['Declare', 'y', 'number'],
-        ['Assign', 'y', probe3('u')],
+        ['Declare', 'y', 'number', probe3('u')],
         ['Multiply', 'y', 2],
       ],
       'u',
@@ -989,12 +986,13 @@ describe('COMPILE CSE — DAG sharing', () => {
  * descendant regions included. Deliberately conservative.
  */
 describe('COMPILE CSE — mutation (G3)', () => {
-  it('does not merge reads separated by a rebinding `Block`', () => {
+  it('a rebinding `Block` as an operand declines', () => {
+    // A block with an assignment as the operand of an operator declines, so
+    // no shared subexpression can cross the write.
     const expr = () =>
       ce.box([
         'Block',
-        ['Declare', 'u', 'number'],
-        ['Assign', 'u', 1],
+        ['Declare', 'u', 'number', 1],
         [
           'Add',
           ['Square', sin6('u')],
@@ -1003,13 +1001,8 @@ describe('COMPILE CSE — mutation (G3)', () => {
           sin6('u'),
         ],
       ]);
-    const on = compile(expr(), { fallback: false });
-    const off = compile(expr(), { fallback: false, cse: false });
-
-    expect(on.code).not.toMatch(/_cse\d/);
-    expect(on.code).toBe(off.code);
-    expect((on.run as (v: any) => number)({})).toBe(
-      (off.run as (v: any) => number)({})
+    expect(() => compile(expr(), { fallback: false })).toThrow(
+      /a block with a statement other than a declaration with a value is an operand/
     );
   });
 });
@@ -1102,13 +1095,12 @@ describe('COMPILE CSE — name collisions', () => {
   it('does not capture a Block local named `_cse1`', () => {
     const expr = ce.box([
       'Block',
-      ['Declare', '_cse1', 'number'],
-      ['Assign', '_cse1', 0.3],
+      ['Declare', '_cse1', 'number', 0.3],
       probe3('_cse1'),
     ]);
     const on = compile(expr, { fallback: false });
 
-    expect(on.code).toContain('let _cse1;');
+    expect(on.code).toContain('let _cse1 = 0.3;');
     expect(on.code).toContain('const _cse2 = Math.sin(6 * _cse1)');
     expect(on.code).not.toMatch(/const _cse1\b/);
     parity(expr);

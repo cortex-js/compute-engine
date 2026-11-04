@@ -1674,9 +1674,9 @@ describe('a real-operand guard over an impure node shared by two positions', () 
   });
 
   test('a pure shared node beside an assignment to the symbol it reads declines', () => {
-    // `Max(y, Assign(y, 1), y, √x)` with one `y` node: the interpreter
-    // reads 5 at the first position and 1 at the third. One binding of `y`
-    // would read 5 at both.
+    // `Max(y, Assign(y, 1), y, √x)`: an assignment as an operand is the
+    // static error `assignment-in-operand`, so the expression is invalid and
+    // the compilation declines.
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     ce.declare('y', 'real');
@@ -1688,7 +1688,9 @@ describe('a real-operand guard over an impure node shared by two positions', () 
       y,
       ce.box(['Sqrt', 'x']),
     ]);
-    expect(declineCode(expr, 'complex')).toBe('shared-impure-operand');
+    expect(() =>
+      compile(expr, { fallback: false, constantFold: false, mode: 'complex' })
+    ).toThrow(/invalid expression/);
   });
 
   test('a symbol whose value draws is impure to the guard', () => {
@@ -1976,45 +1978,32 @@ describe('a real-operand guard reads each operand where the interpreter reads it
     return { compiled: c, interpreted: i };
   }
 
-  test('Max(√x, y, Assign(y, 1)) with y = 5 reads y before the assignment', () => {
-    const json = [
-      'Block',
-      ['Assign', 'y', 5],
-      ['Max', ['Sqrt', 'x'], 'y', ['Assign', 'y', 1]],
-    ];
-    for (const x of [1, 4]) {
-      const { compiled: c, interpreted: i } = run(json, x);
-      expect(i).toEqual([5, draw(7, 0)]);
-      expect(c).toEqual(i);
-    }
-    // A failing guard: the interpreter keeps `max(5, 2i)`, the compiled
-    // head gives NaN, and neither draws.
-    const { compiled: c, interpreted: i } = run(json, -4);
-    expect(i).toEqual(['max(5, 2i)', draw(7, 0)]);
-    expect(c).toEqual([NaN, draw(7, 0)]);
-  });
-
-  test('Max(y, √(Assign(y, 4))) with y = −1 reads y before the assignment', () => {
-    const json = [
-      'Block',
-      ['Assign', 'y', -1],
-      ['Max', 'y', ['Sqrt', ['Assign', 'y', 4]]],
-    ];
-    const { compiled: c, interpreted: i } = run(json, 0);
-    expect(i).toEqual([2, draw(7, 0)]);
-    expect(c).toEqual(i);
-  });
-
-  test('Max(y, Assign(y, 1), y, √x) reads y at each position', () => {
-    const json = [
-      'Block',
-      ['Assign', 'y', 5],
-      ['Max', 'y', ['Assign', 'y', 1], 'y', ['Sqrt', 'x']],
-    ];
-    for (const x of [1, 4]) {
-      const { compiled: c, interpreted: i } = run(json, x);
-      expect(i).toEqual([5, draw(7, 0)]);
-      expect(c).toEqual(i);
+  test('an assignment as an operand of a guarded head declines', () => {
+    // An assignment as an operand is the static error
+    // `assignment-in-operand`: the expression is invalid and the compilation
+    // declines.
+    for (const json of [
+      [
+        'Block',
+        ['Assign', 'y', 5],
+        ['Max', ['Sqrt', 'x'], 'y', ['Assign', 'y', 1]],
+      ],
+      [
+        'Block',
+        ['Assign', 'y', -1],
+        ['Max', 'y', ['Sqrt', ['Assign', 'y', 4]]],
+      ],
+      [
+        'Block',
+        ['Assign', 'y', 5],
+        ['Max', 'y', ['Assign', 'y', 1], 'y', ['Sqrt', 'x']],
+      ],
+    ]) {
+      const ce = new ComputeEngine();
+      ce.declare('x', 'real');
+      expect(() =>
+        compile(ce.box(json as any), { fallback: false, constantFold: false })
+      ).toThrow(/invalid expression/);
     }
   });
 

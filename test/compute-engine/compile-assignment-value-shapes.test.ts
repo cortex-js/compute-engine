@@ -10,8 +10,11 @@ import { TEST_PYTHON } from './test-python';
 // The compiled code of a statement whose value is not a plain expression:
 // an assignment whose value is a block or another assignment, a block whose
 // last statement is a declaration or a nested block, and a block local that
-// is read before it has a value. Each value is compared with the value of the
-// interpreter at `x = 3`.
+// is read before it has a value. Most of these forms are static errors or
+// compiler declines: a block with an assignment as an operand declines, an
+// assignment as an operand is the static error `assignment-in-operand`, and
+// a block that ends with an assignment or a declaration has the value
+// `Nothing`, which has no compiled form.
 
 const pythonHasNumpy = (() => {
   if (TEST_PYTHON === undefined || !fs.existsSync(TEST_PYTHON)) return false;
@@ -71,10 +74,11 @@ describe('an assignment whose value is a block', () => {
     expect(interpreterAt3(json)).toBe('7');
   });
 
-  test('JavaScript gives the value of the interpreter', () => {
-    const r = compile(engine().box(json));
-    expect(r.success).toBe(true);
-    expect(r.run!({ x: 3 })).toBe(7);
+  test('JavaScript declines', () => {
+    // A block with an assignment as the value of an assignment declines.
+    expect(() => compile(engine().box(json), { fallback: false })).toThrow(
+      /a block with a statement other than a declaration with a value is an operand here/
+    );
   });
 
   test('Python declines on compile() and compileFunction()', () => {
@@ -91,21 +95,17 @@ describe('an assignment whose value is a block', () => {
     ).toThrow(/the value assigned to "t" lowers to a statement sequence/);
   });
 
-  test.each(['glsl', 'wgsl'] as const)(
-    '%s stores the value of the inner block in a temporary',
-    (to) => {
-      const r = compile(engine().box(json), { to });
-      expect(r.success).toBe(true);
-      const code = gpuSource(r);
-      expectValidShaderShape(code);
-      expect(code).toMatch(/_tv1 = 2\.0 \* u;/);
-      expect(code).toMatch(/\bt = _tv1;/);
-      expect(code).toMatch(/return t \+ 1\.0;/);
-    }
-  );
+  test.each(['glsl', 'wgsl'] as const)('%s declines', (to) => {
+    expect(() => compile(engine().box(json), { to, fallback: false })).toThrow(
+      /a block with a statement other than a declaration with a value is an operand here/
+    );
+  });
 });
 
 describe('an assignment whose value is another assignment', () => {
+  // An `Assign` as the value of another `Assign` is the static error
+  // `assignment-in-operand`, so every target declines. Write the chain as two
+  // statements.
   const json: MathJsonExpression = [
     'Block',
     ['Assign', 's', 'x'],
@@ -113,149 +113,40 @@ describe('an assignment whose value is another assignment', () => {
     ['Add', 't', 1],
   ];
 
-  test('the interpreter gives 4 at x = 3', () => {
-    expect(interpreterAt3(json)).toBe('4');
+  test('the expression is invalid', () => {
+    const expr = engine().box(json);
+    expect(expr.isValid).toBe(false);
+    expect(expr.toString()).toContain('assignment-in-operand');
   });
 
-  test('JavaScript declares the inner target as a local of the block', () => {
-    // The inner write went to the caller's `vars` object (`t = _.u = s`).
-    const r = compile(engine().box(json));
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('let u;');
-    expect(r.code).not.toContain('_.u');
-    const vars = { x: 3 };
-    expect(r.run!(vars)).toBe(4);
-    expect(vars).toEqual({ x: 3 });
-  });
-
-  test.each(['glsl', 'wgsl'] as const)(
-    '%s declares the inner target and assigns it first',
+  test.each(['javascript', 'python', 'glsl', 'wgsl'] as const)(
+    '%s declines',
     (to) => {
-      // WGSL emitted `t = u = s;` (an assignment is a statement in WGSL), and
-      // both languages left `u` undeclared.
-      const r = compile(engine().box(json), { to });
-      expect(r.success).toBe(true);
-      const code = gpuSource(r);
-      expectValidShaderShape(code);
-      expect(code).toContain(to === 'wgsl' ? 'var u: f32;' : 'float u;');
-      expect(code).toMatch(/\bu = s;\n(?:.*\n)*?t = u;/);
+      expect(() =>
+        compile(engine().box(json), { to, fallback: false })
+      ).toThrow(/invalid expression/);
     }
   );
 
-  test('WGSL compileFunction() declares the inner target too', () => {
-    const code = new WGSLTarget().compileFunction(
-      engine().box(json),
-      'f',
-      'f32',
-      [['x', 'f32']]
-    );
-    expect(code).toContain('var u: f32;');
-    expect(code).toContain('u = s;');
-    expect(code).toContain('t = u;');
-  });
-
-  test.each(['bare', 'block'] as const)(
-    'WGSL splits it in a loop body (%s)',
-    (form) => {
-      const stmt: MathJsonExpression = [
-        'Assign',
-        't',
-        ['Assign', 'u', ['Add', 'u', 'i']],
-      ];
-      const loopJson: MathJsonExpression = [
-        'Block',
-        ['Assign', 't', 0],
-        ['Assign', 'u', 0],
-        [
-          'Loop',
-          form === 'bare' ? stmt : ['Block', stmt],
-          ['Element', 'i', ['Range', 1, 3]],
-        ],
-        ['Add', 't', 'u'],
-      ];
-      expect(new ComputeEngine().box(loopJson).evaluate().toString()).toBe(
-        '12'
-      );
-      expect(compile(new ComputeEngine().box(loopJson)).run!({})).toBe(12);
-      const r = compile(new ComputeEngine().box(loopJson), { to: 'wgsl' });
-      expect(r.success).toBe(true);
-      expectValidShaderShape(r.code!);
-      expect(r.code).toMatch(/u = f32\(i\) \+ u;\n\s*t = u;/);
-    }
-  );
-
-  describe.each(['bare', 'block'] as const)(
-    'in a loop body, with no enclosing declaration of the inner target (%s)',
-    (form) => {
-      // No enclosing scope binds `u`, so the interpreter declares it in the
-      // scope of the loop. The lone statement (`bare`) used to compile to
-      // `u = …; t = u;` on the shader targets with no declaration of `u`.
-      const stmt: MathJsonExpression = [
-        'Assign',
-        't',
-        ['Assign', 'u', ['Add', 't', 'i']],
-      ];
-      const loopJson: MathJsonExpression = [
-        'Block',
-        ['Assign', 't', 0],
-        [
-          'Loop',
-          form === 'bare' ? stmt : ['Block', stmt],
-          ['Element', 'i', ['Range', 1, 3]],
-        ],
-        't',
-      ];
-
-      test('the interpreter gives 6', () => {
-        expect(new ComputeEngine().box(loopJson).evaluate().toString()).toBe(
-          '6'
-        );
-      });
-
-      test('JavaScript gives the value of the interpreter', () => {
-        const r = compile(new ComputeEngine().box(loopJson));
-        expect(r.success).toBe(true);
-        expect(r.run!({})).toBe(6);
-      });
-
-      test.each(['glsl', 'wgsl'] as const)(
-        '%s declares the inner target in the loop body',
-        (to) => {
-          const r = compile(new ComputeEngine().box(loopJson), { to });
-          expect(r.success).toBe(true);
-          const code = gpuSource(r);
-          expectValidShaderShape(code);
-          const iv = to === 'wgsl' ? 'f32(i)' : 'float(i)';
-          const decl = to === 'wgsl' ? 'var u: f32;' : 'float u;';
-          expect(code).toContain(`{\n  ${decl}\n  u = ${iv} + t;\n  t = u;\n}`);
-        }
-      );
-
-      itPython('Python gives the value of the interpreter', () => {
-        const source = new PythonTarget().compileFunction(
-          new ComputeEngine().box(loopJson),
-          'f',
-          ['x']
-        );
-        expect(runPython(source, 3)).toBe(6);
-      });
-    }
-  );
-
-  itPython('Python gives the value of the interpreter', () => {
-    const source = new PythonTarget().compileFunction(engine().box(json), 'f', [
-      'x',
-    ]);
-    expect(runPython(source, 3)).toBe(4);
+  test('WGSL compileFunction() declines too', () => {
+    expect(() =>
+      new WGSLTarget().compileFunction(engine().box(json), 'f', 'f32', [
+        ['x', 'f32'],
+      ])
+    ).toThrow(/invalid expression/);
   });
 });
 
-describe('a block whose last statement is a declaration with no initial value', () => {
+describe('a block whose last statement is a declaration', () => {
   // The value of such a block is `Nothing`, which has no compiled form.
   const shapes: MathJsonExpression[] = [
-    ['Block', ['Assign', 's', 'x'], ['Declare', 't', "'real'"]],
-    ['Block', ['Assign', 's', 'x'], ['Declare', 't']],
-    ['Block', ['Assign', 's', 'x'], ['Block', ['Declare', 't']]],
+    ['Block', ['Assign', 's', 'x'], ['Declare', 't', "'real'", ['Add', 's', 1]]],
+    [
+      'Block',
+      ['Assign', 's', 'x'],
+      ['Declare', 't', "'unknown'", ['Add', 's', 1]],
+    ],
+    ['Block', ['Assign', 's', 'x'], ['Block', ['Declare', 't', "'real'", 1]]],
   ];
 
   test.each(shapes.map((s) => [s]))(
@@ -276,80 +167,83 @@ describe('a block whose last statement is a declaration with no initial value', 
       const r = compile(engine().box(json), { to });
       expect(r.success).toBe(false);
     }
-    // Python returned the value of the statement before it (`return s`), the
-    // GPU targets emitted `return var t: f32;`, JavaScript a syntax error.
     expect(() =>
       new PythonTarget().compile(engine().box(json), { fallback: false })
-    ).toThrow(
-      /a declaration with no initial value, so the value of the block is `Nothing`/
-    );
+    ).toThrow(/an assignment or a declaration is a statement, and its value/);
     expect(() => new WGSLTarget().compile(engine().box(json))).toThrow(
-      /a declaration with no initial value/
+      /an assignment or a declaration is a statement, and its value/
     );
   });
 
-  test('a declaration with an initial value still gives that value', () => {
-    const json: MathJsonExpression = [
-      'Block',
-      ['Assign', 's', 'x'],
-      ['Declare', 't', "'real'", ['Add', 's', 1]],
-    ];
-    expect(interpreterAt3(json)).toBe('4');
-    const r = compile(engine().box(json));
-    expect(r.success).toBe(true);
-    expect(r.run!({ x: 3 })).toBe(4);
+  test('a declaration with no value is a static error', () => {
+    // `Declare(t)` and `Declare(t, 'real')` have no value: the static error
+    // `declaration-without-value`.
+    for (const json of [
+      ['Block', ['Assign', 's', 'x'], ['Declare', 't', "'real'"]],
+      ['Block', ['Assign', 's', 'x'], ['Declare', 't']],
+    ] as MathJsonExpression[]) {
+      const expr = engine().box(json);
+      expect(expr.isValid).toBe(false);
+      expect(() => compile(expr, { fallback: false })).toThrow(
+        /invalid expression/
+      );
+    }
   });
 });
 
 describe('a nested block whose last statement is an assignment', () => {
+  // The value of the nested block, and of the whole block, is `Nothing`,
+  // which has no compiled form.
   const json: MathJsonExpression = [
     'Block',
     ['Assign', 's', 'x'],
     ['Block', ['Assign', 't', ['Add', 's', 1]]],
   ];
 
-  test('the interpreter gives 4 at x = 3', () => {
-    expect(interpreterAt3(json)).toBe('4');
+  test('the interpreter gives Nothing', () => {
+    expect(engine().box(json).evaluate().symbol).toBe('Nothing');
   });
 
-  test('JavaScript gives the value of the interpreter', () => {
-    expect(compile(engine().box(json)).run!({ x: 3 })).toBe(4);
-  });
-
-  test.each(['glsl', 'wgsl'] as const)(
-    '%s compile() stores the assigned name in a temporary',
+  test.each(['javascript', 'python', 'glsl', 'wgsl'] as const)(
+    '%s compile() declines',
     (to) => {
-      // Emitted `return float t;` / `return var t: f32;`.
-      const r = compile(engine().box(json), { to });
-      expect(r.success).toBe(true);
-      const code = gpuSource(r);
-      expectValidShaderShape(code);
-      expect(code).toMatch(/\bt = s \+ 1\.0;\n\s*_tv1 = t;/);
-      expect(code).toMatch(/return _tv1;$/);
+      expect(() =>
+        compile(engine().box(json), { to, fallback: false })
+      ).toThrow(/an assignment or a declaration is a statement, and its value/);
     }
   );
 
-  test('GLSL compileFunction() stores the assigned name in a temporary', () => {
-    const code = new GLSLTarget().compileFunction(
-      engine().box(json),
-      'f',
-      'float',
-      [['x', 'float']]
-    );
-    expectValidShaderShape(code);
-    expect(code).toContain('_tv1 = t;');
-    expect(code).toContain('return _tv1;');
+  test('GLSL compileFunction() declines', () => {
+    expect(() =>
+      new GLSLTarget().compileFunction(engine().box(json), 'f', 'float', [
+        ['x', 'float'],
+      ])
+    ).toThrow(/an assignment or a declaration is a statement, and its value/);
   });
 
-  test('Python compile() returns the assigned name once', () => {
-    // A second `return t` followed the first one.
-    const r = compile(engine().box(json), { to: 'python' });
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('s = x\nt = s + 1\nreturn t');
+  test('a nested block that ends with the name compiles', () => {
+    const named: MathJsonExpression = [
+      'Block',
+      ['Assign', 's', 'x'],
+      ['Block', ['Assign', 't', ['Add', 's', 1]], 't'],
+    ];
+    expect(interpreterAt3(named)).toBe('4');
+    expect(compile(engine().box(named)).run!({ x: 3 })).toBe(4);
+    for (const to of ['glsl', 'wgsl'] as const) {
+      const r = compile(engine().box(named), { to });
+      expect(r.success).toBe(true);
+      expectValidShaderShape(gpuSource(r));
+    }
   });
 
   itPython('the Python code gives the value of the interpreter', () => {
-    const r = compile(engine().box(json), { to: 'python' });
+    const named: MathJsonExpression = [
+      'Block',
+      ['Assign', 's', 'x'],
+      ['Block', ['Assign', 't', ['Add', 's', 1]], 't'],
+    ];
+    const r = compile(engine().box(named), { to: 'python' });
+    expect(r.success).toBe(true);
     const source =
       'def f(x):\n' +
       r
@@ -361,35 +255,42 @@ describe('a nested block whose last statement is an assignment', () => {
 });
 
 describe('a block local that is read before it has a value', () => {
-  // `x` has no declaration, so the assignment makes it a local of the
-  // block, and `x + 1` reads that local before it has a value. The
-  // interpreter leaves the read symbolic. JavaScript gave `NaN`, WGSL read
-  // the zero a `var` starts with, Python read the input `x`.
+  // `x` has no declaration, so the first assignment declares it as a local
+  // of the block. Its value `x + 1` reads `x` as the value of a `Declare`
+  // does: the parse route makes the statement `Declare(x, 'unknown', x +
+  // 1)`, and the two routes give the same result. The interpreter leaves
+  // the read symbolic, and every target declines.
   const boxRoute: MathJsonExpression = [
     'Block',
     ['Assign', 'x', ['Add', 'x', 1]],
     ['Multiply', 2, 'x'],
   ];
 
-  test('the interpreter leaves the read symbolic', () => {
-    const ce = new ComputeEngine();
-    expect(ce.box(boxRoute).evaluate().toString()).toBe('2(x + 1)');
-    expect(ce.parse('x \\coloneq x+1; 2x').evaluate().toString()).toBe(
+  test('the box route and the parse route stay symbolic', () => {
+    expect(new ComputeEngine().box(boxRoute).evaluate().toString()).toBe(
       '2(x + 1)'
     );
+    expect(
+      new ComputeEngine().parse('x \\coloneq x+1; 2x').evaluate().toString()
+    ).toBe('2(x + 1)');
   });
 
   test.each(['javascript', 'python', 'glsl', 'wgsl', 'interval-js'] as const)(
     '%s declines on the box route and on the parse route',
     (to) => {
-      const ce = new ComputeEngine();
-      for (const expr of [ce.box(boxRoute), ce.parse('x \\coloneq x+1; 2x')]) {
-        const r = compile(expr, { to });
-        expect(r.success).toBe(false);
-        expect(r.error ?? '').toMatch(
-          /reads the block local "x" before any statement gives it a value/
-        );
-      }
+      const boxed = compile(new ComputeEngine().box(boxRoute), { to });
+      expect(boxed.success).toBe(false);
+      expect(boxed.error ?? '').toMatch(
+        /reads the block local "x" before any statement gives it a value/
+      );
+      const parsed = compile(
+        new ComputeEngine().parse('x \\coloneq x+1; 2x'),
+        { to }
+      );
+      expect(parsed.success).toBe(false);
+      expect(parsed.error ?? '').toMatch(
+        /reads the block local "x" before any statement gives it a value/
+      );
     }
   );
 
@@ -406,7 +307,7 @@ describe('a block local that is read before it has a value', () => {
     const ce = new ComputeEngine();
     const json: MathJsonExpression = [
       'Block',
-      ['Declare', 'y'],
+      ['Assign', 'y', 0],
       ['If', ['Greater', 'x', 0], ['Assign', 'y', 1], ['Assign', 'y', 2]],
       ['Assign', 'y', ['Add', 'y', 'x']],
       'y',
@@ -426,14 +327,14 @@ describe('a block local that is read before it has a value', () => {
     );
   });
 
-  test('an outer variable is still the input', () => {
-    // With `x` declared outside the block, the assignment writes the outer
-    // `x`, as the interpreter does.
+  test('a write to an outer variable declines', () => {
+    // With `x` declared outside the block, the interpreter writes the outer
+    // `x`. A write to a symbol declared in the engine declines.
     const json: MathJsonExpression = boxRoute;
     expect(interpreterAt3(json)).toBe('8');
-    const r = compile(engine().box(json));
-    expect(r.success).toBe(true);
-    expect(r.run!({ x: 3 })).toBe(8);
+    expect(() => compile(engine().box(json), { fallback: false })).toThrow(
+      /"x" is not a local of the compiled expression/
+    );
   });
 
   test.each([
@@ -473,13 +374,7 @@ describe('Python compile() of a selection whose arm is a block with a value', ()
         [
           'If',
           ['Greater', 'x', 0],
-          ['Block', ['Assign', 's', 'x'], ['Add', 's', 1]],
-          0,
-        ],
-        [
-          'If',
-          ['Greater', 'x', 0],
-          ['Block', ['Assign', 's', 'x'], ['Assign', 't', ['Add', 's', 1]]],
+          ['Block', ['Declare', 's', "'unknown'", 'x'], ['Add', 's', 1]],
           0,
         ],
       ] as MathJsonExpression[]

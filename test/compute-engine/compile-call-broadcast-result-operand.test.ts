@@ -116,12 +116,8 @@ const CASES: [string, Json][] = [
     'Block(z := q(u); 1 + z)',
     ['Block', ['Assign', 'z', ['q', 'u']], ['Add', 1, 'z']],
   ],
-  // The value of the block is a local that holds the call: the block is not
-  // being compiled when the `+` is, so the local is read through the values
-  // that the block assigns to it.
-  ['1 + Block(z := q(u); z)', ['Add', 1, ['Block', ['Assign', 'z', ['q', 'u']], 'z']]],
-  // The value of a `Declare` in its attributes, and a destructuring
-  // assignment whose matching component is the call.
+  // The value of a `Declare` in its attributes. A block of declarations is a
+  // value expression, so it compiles as an operand.
   [
     '1 + Block(Declare(z, {value: q(u)}); z)',
     [
@@ -134,6 +130,13 @@ const CASES: [string, Json][] = [
       ],
     ],
   ],
+];
+
+// A block with an assignment as the operand of an operator declines: such a
+// block compiles only as a statement, or as the body of a function or of
+// the compiled expression.
+const BLOCK_OPERAND_CASES: [string, Json][] = [
+  ['1 + Block(z := q(u); z)', ['Add', 1, ['Block', ['Assign', 'z', ['q', 'u']], 'z']]],
   [
     '1 + Block((z, y) := (q(u), 0); z)',
     [
@@ -149,6 +152,23 @@ const CASES: [string, Json][] = [
 ];
 
 describe('an operator over a call that maps over a list argument', () => {
+  for (const [label, json] of BLOCK_OPERAND_CASES) {
+    test(`${label}: declines`, () => {
+      for (const u of ['real | list<real>', 'real', 'list<real>']) {
+        const result = compile(engine({ u }).box(json), {
+          to: 'javascript',
+        } as any) as any;
+        expect(result.success).toBe(false);
+        // For the union input, the decline of the list body is reported as
+        // a call whose argument has no settled shape.
+        if (u !== 'real | list<real>')
+          expect(result.error).toMatch(
+            /a block with a statement other than a declaration with a value is an operand/
+          );
+      }
+    });
+  }
+
   for (const [label, json] of CASES) {
     test(`${label}: the interpreter's value for a list and for a number`, () => {
       for (const u of [[1, 2, 3], 2]) {
@@ -206,21 +226,23 @@ describe('an operator over a call that maps over a list argument', () => {
     );
   });
 
-  // The local `t` holds a value built from shared subtrees: 30 levels of
+  // The local `deep` holds a value built from shared subtrees: 30 levels of
   // `Beta(t_{n-1}, t_{n-1})` have 31 distinct nodes and 2^30 paths. The
   // walk of the block visits each node once, so the compilation ends.
   test('a block local assigned a deep shared subtree next to q(u)', () => {
     const ce = engine();
     let t = ce.box('x');
     for (let i = 0; i < 30; i++) t = ce.function('Beta', [t, t]);
-    const json = ce.function('Add', [
-      ce.box(1),
-      ce.function('Block', [
-        ce.function('Assign', [ce.symbol('t'), t]),
-        ce.function('Assign', [ce.symbol('z'), ce.box(['q', 'u'])]),
-        ce.symbol('z'),
-      ]),
-    ]);
+    // The local is not named `t`: the engine already knows `t` (the
+    // parameter of `q`), and a write to a symbol of the engine declines.
+    // The block is boxed as a whole: `ce.symbol('deep')` alone would declare
+    // `deep` in the engine, and the block would then write an engine symbol.
+    const json = ce.box([
+      'Block',
+      ['Assign', 'deep', t],
+      ['Assign', 'z', ['q', 'u']],
+      ['Add', 1, 'z'],
+    ] as any);
     const result = compile(json, {
       to: 'javascript',
       fallback: false,
@@ -238,10 +260,8 @@ describe('an operator over a call that maps over a list argument', () => {
     );
   });
 
-  test('a Return of the call in a block: the sum maps over the list', () => {
-    // The interpreter gives no value here (`1 + Return([2, 4, 6])` stays
-    // unevaluated), so only the compiled value is checked: before, it was
-    // the string "2,4,61".
+  test('a block with a Return of the call as an operand declines', () => {
+    // A block with an assignment as the operand of an operator declines.
     const json = [
       'Add',
       1,
@@ -252,33 +272,12 @@ describe('an operator over a call that maps over a list argument', () => {
         0,
       ],
     ];
-    // For `u: list<real>`, the value of the block is a list (the `Return`)
-    // or a number (its last value): the compilation declines, also for the
-    // union input whose list body this is.
-    for (const u of ['real | list<real>', 'list<real>']) {
+    for (const u of ['real | list<real>', 'real', 'list<real>']) {
       const result = compile(engine({ u }).box(json), {
         to: 'javascript',
       } as any) as any;
       expect(result.success).toBe(false);
     }
-    expect(run(json, { u: 2, w: 1 }, { u: 'real' })).toBe(5);
-    // With a last value that is a list too, the shape is settled.
-    const lists = [
-      'Add',
-      1,
-      [
-        'Block',
-        ['Assign', 'z', ['q', 'u']],
-        ['If', ['Greater', 'w', 0], ['Return', 'z']],
-        'u',
-      ],
-    ];
-    expect(run(lists, { u: [1, 2, 3], w: 1 }, { u: 'list<real>' })).toEqual([
-      3, 5, 7,
-    ]);
-    expect(run(lists, { u: [1, 2, 3], w: -1 }, { u: 'list<real>' })).toEqual([
-      2, 3, 4,
-    ]);
   });
 
   test('a call in an operand of And is not evaluated before the And', () => {
