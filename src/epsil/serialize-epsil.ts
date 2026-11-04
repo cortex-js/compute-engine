@@ -40,7 +40,7 @@ import {
 } from '../compute-engine/latex-syntax/serialize-number.js';
 import {
   EmptyBlock,
-  FormattingOptions,
+  PartialFormattingOptions,
   Formatter,
   FormattingBlock,
 } from './formatter.js';
@@ -148,7 +148,7 @@ const SUPERSCRIPT_OF = new Map<string, string>(
 
 export function serializeEpsil(
   expr: MathJsonExpression,
-  options?: Partial<FormattingOptions> & {
+  options?: PartialFormattingOptions & {
     fancySymbols?: boolean;
     libraryNames?: 'epsil' | 'mathjson';
     isBound?: (name: string) => boolean;

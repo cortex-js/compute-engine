@@ -28,6 +28,13 @@ export type FormattingOptions = {
   cost: FormattingCosts;
 };
 
+/** Options as a caller passes them: any subset, `cost` included. */
+export type PartialFormattingOptions = Partial<
+  Omit<FormattingOptions, 'cost'>
+> & {
+  cost?: Partial<FormattingCosts>;
+};
+
 export type FormattingCosts = {
   softMargin: number; // Cost per character beyond the soft margin
   margin: number; // Cost per char beyond the hard margin
@@ -41,7 +48,19 @@ export type FormattingCosts = {
 // Whitespace that can be left dangling at the end of a stacked line: a plain
 // space or a tab (indent/separator padding) and the "fancy" spacing glyphs used
 // around operators/separators (four-per-em, thin, medium mathematical space).
-const TRAILING_PADDING = /[ \t\u2005\u2009\u205f]+$/;
+const PADDING = new Set([0x20, 0x09, 0x2005, 0x2009, 0x205f]);
+
+/**
+ * `s` without its trailing padding. A scan back from the end, not a
+ * `/[…]+$/` regex: the regex retries from every padding character in the
+ * string and fails at each, so it is quadratic in the length of a run of
+ * indentation, and a stacked fragment holds one run per line.
+ */
+function trimTrailingPadding(s: string): string {
+  let end = s.length;
+  while (end > 0 && PADDING.has(s.charCodeAt(end - 1))) end -= 1;
+  return s.slice(0, end);
+}
 
 /**
  * A cache of the result of a block query (`cost()`, `nextCol()`, the choice
@@ -239,7 +258,7 @@ export class StackBlock extends FormattingBlock {
       // literals, is emitted as a single inline `TextBlock` with escaped
       // newlines — never across a fragment boundary), so end-of-fragment
       // whitespace is never string content.
-      result += indent + block.serialize(offset).replace(TRAILING_PADDING, '');
+      result += indent + trimTrailingPadding(block.serialize(offset));
       // Continuation lines align to the block's starting column (`offset`),
       // per the pretty-printer contract. Use `offset` spaces — NOT
       // `indentChars(offset)`, which multiplies by `indentWidth` and treats a
@@ -379,13 +398,23 @@ export class ChoiceBlock extends FormattingBlock {
 
 export class Formatter {
   private options: FormattingOptions;
-  constructor(options?: Partial<FormattingOptions>) {
+  constructor(options?: PartialFormattingOptions) {
     if (options?.indentChar === 'space') {
       options.indentChar = '\u0020';
     } else if (options?.indentChar === 'tab') {
       options.indentChar = '\t';
     }
     this.options = {
+      indentChar: '\u0020',
+      indentCharWidth: 1,
+      indentWidth: 2,
+      margin: 80,
+      softMargin: 50,
+      aroundInfixOperator: '\u0020',
+      aroundRelationalOperator: '\u0020',
+      afterSeparator: '\u0020',
+      ...(options ?? {}),
+      // A partial `cost` overrides only the costs it names.
       cost: {
         softMargin: 0.05,
         margin: 100,
@@ -396,15 +425,6 @@ export class Formatter {
         argLinebreak: 5,
         ...(options?.cost ?? {}),
       },
-      indentChar: '\u0020',
-      indentCharWidth: 1,
-      indentWidth: 2,
-      margin: 80,
-      softMargin: 50,
-      aroundInfixOperator: '\u0020',
-      aroundRelationalOperator: '\u0020',
-      afterSeparator: '\u0020',
-      ...(options ?? {}),
     };
   }
   get cost(): FormattingCosts {

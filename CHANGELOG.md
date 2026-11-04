@@ -103,6 +103,33 @@
   (`Equal(x, Which(t > 0, 1), Random())`); and, on Python, `Dot` and
   `Cross` with an operand that may be absent.
 
+### Resolved Issues
+
+- **`serializeEpsil` takes linear time in the indentation of its output**
+  ([#508](https://github.com/cortex-js/compute-engine/issues/508), contributed
+  by [enumeratio](https://github.com/enumeratio)). The formatter trimmed the
+  padding at the end of each stacked fragment with a `/[…]+$/` regex, which is
+  quadratic in the length of each run of indentation inside the fragment. A
+  chain of 160 function literals applied to arguments, indented up to column
+  2242, took 4.2 s and now takes 0.56 s; the output is unchanged.
+- **A partial `cost` option of `serializeEpsil` overrides only the costs it
+  names** ([#508](https://github.com/cortex-js/compute-engine/issues/508),
+  contributed by [enumeratio](https://github.com/enumeratio)).
+  `{ cost: { linebreak: 3 } }` replaced every cost, left the others
+  `undefined`, and threw `TypeError: Cannot read properties of undefined
+  (reading 'cost')` on any output that needs a layout choice.
+- **A function literal that calls itself no longer reads a value computed
+  while its parameter had no value**
+  ([#507](https://github.com/cortex-js/compute-engine/issues/507), reported by
+  [enumeratio](https://github.com/enumeratio)). A regression in 0.176.0. The
+  type of a call such as `self(self, Take(f, Len(f) - 1))` asks whether the
+  `Take` is finite, which evaluates its count with `f` unbound. With a pure
+  host `Len` that gives 0 for a symbol, the count was `-1`, and the memo of
+  shared nodes gave that `-1` to the call that followed: counting the
+  elements of `[7, 8, 9, 10]` gave 3. The memo of shared nodes and the lazy
+  value memo are now neither read nor written inside a type computation
+  during a call.
+
 ## 0.178.0 _2026-11-03_
 
 This is the language release. It narrows the language that compiled code

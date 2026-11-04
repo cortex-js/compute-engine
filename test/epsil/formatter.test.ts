@@ -1,5 +1,6 @@
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
+import { Formatter, StackBlock } from '../../src/epsil/formatter';
 import { MathJsonExpression } from '../../src/math-json/types';
 
 //
@@ -394,4 +395,66 @@ describe('EPSIL FORMATTER — time is not exponential in nesting depth', () => {
       serializeEpsil(chain('Add', 10), { margin: 20, softMargin: 12 })
     ).toBe('x + y + y + y + y +\ny + y + y + y + y + y');
   }, 300_000);
+});
+
+describe('EPSIL FORMATTER — deep indentation', () => {
+  // Each level applies a function literal, whose body aligns under the open
+  // parenthesis, so at depth 160 a line starts past column 2000.
+  function chain(depth: number): MathJsonExpression {
+    let node: MathJsonExpression = ['Add', 'x0', 1];
+    for (let i = depth; i >= 1; i--) {
+      const v = `variable${i}`;
+      node = [
+        'Apply',
+        ['Function', ['List', node, ['Multiply', v, v], 'z'], v],
+        ['Add', `x${i}`, ['Multiply', 2, `y${i}`]],
+      ];
+    }
+    return node;
+  }
+
+  test('a 160-deep application chain indents past column 2000', () => {
+    const lines = serializeEpsil(chain(160)).split('\n');
+    expect(Math.max(...lines.map(leadingSpaces))).toBeGreaterThan(2000);
+    for (const line of lines) expect(/[ \t]$/.test(line)).toBe(false);
+  });
+
+  // A `/[…]+$/` regex retries from every space of a run of indentation, which
+  // is quadratic: about 18 s on this run of 100,000 spaces. A scan back from
+  // the end does not look inside the run, so the limit has a wide margin on a
+  // slow machine. The test timeout is larger than the quadratic time, so that
+  // the limit, and not the timeout, reports the failure.
+  test('the trim does not look inside a run of indentation', () => {
+    const fmt = new Formatter();
+    const text = 'a\n' + ' '.repeat(100_000) + 'b';
+    const stack = new StackBlock(fmt, fmt.text(text + '  '));
+    const start = Date.now();
+    expect(stack.serialize(0)).toBe(text);
+    expect(Date.now() - start).toBeLessThan(2000);
+  }, 300_000);
+
+  test('the output round-trips', () => {
+    const out = serializeEpsil(chain(20));
+    const [reparsed] = parseEpsil(out);
+    expect(serializeEpsil(reparsed)).toBe(out);
+  });
+});
+
+describe('EPSIL FORMATTER — a partial `cost` option', () => {
+  const expr: MathJsonExpression = [
+    'List',
+    ...Array.from({ length: 30 }, (_, i) => i + 1000),
+  ];
+
+  test('overrides only the costs it names', () => {
+    expect(serializeEpsil(expr, { ...NARROW, cost: { linebreak: 2 } })).toBe(
+      serializeEpsil(expr, NARROW)
+    );
+  });
+
+  test('a large line break cost keeps the list on one line', () => {
+    const out = serializeEpsil(expr, { cost: { linebreak: 1000 } });
+    expect(out.split('\n').length).toBe(1);
+    expect(serializeEpsil(expr).split('\n').length).toBeGreaterThan(1);
+  });
 });
