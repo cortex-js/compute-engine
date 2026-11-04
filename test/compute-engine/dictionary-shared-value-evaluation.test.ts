@@ -15,6 +15,25 @@ function pair(ce: ComputeEngine, a: Expression, b: Expression): Expression {
 }
 
 describe('EVALUATE a dictionary that shares its values', () => {
+  test.each([4, 8, 16])('a shared dictionary at depth %i evaluates its leaf once per evaluation', (depth) => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 1);
+    const leaf = ce.box(['Add', 'x', 1]);
+    const evaluate = jest.spyOn(leaf, 'evaluate');
+    let d: Expression = ce.function('Dictionary', [ce.function('KeyValuePair', [ce.string('q'), leaf])]);
+    for (let i = 0; i < depth; i++) d = pair(ce, d, d);
+    const readLeaf = (value: Expression): Expression => {
+      for (let i = 0; i <= depth; i++) value = value.get('q')!;
+      return value;
+    };
+    // Count work, rather than allowing an extra pass to hide under a timeout.
+    expect(readLeaf(d.evaluate()).re).toBe(2);
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    ce.assign('x', 5);
+    expect(readLeaf(d.evaluate()).re).toBe(6);
+    expect(evaluate).toHaveBeenCalledTimes(2);
+  });
+
   it('30 levels of `{p: d, q: d}` evaluate in linear time', () => {
     const ce = new ComputeEngine();
     let d: Expression = ce.box(['Add', 'x', 1]);

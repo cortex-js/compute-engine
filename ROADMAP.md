@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-797.
+Next free reference: CE-798.
 
 **Entry format.**
 
@@ -348,6 +348,23 @@ Type computed before `f` is assigned; a type that does not hold the value can gi
 reproduction above is the record.
 
 ## Collections, absence and broadcasting
+
+### CE-797. An implicitly compiled Map reuses a captured parameter from an earlier call
+
+**Status:** ready; wrong value.
+**Witness:** plausible; `f(d) := Sum(Map(x => x + d, Range(1, 128)))`;
+`f(1); f(2); f(3)` gives `8384; 8384; 8384`, expected
+`8384; 8512; 8640`.
+
+Reproduced with machine precision at `17ba3b407` and `ada1705cb` using
+`ce.assign('f', ce.box(['Function', ['Sum', ['Map', ['Function',
+['Add', 'x', 'd'], 'x'], ['Range', 1, 128]]], 'd']))` followed by
+`ce.box(['f', n]).evaluate()` for 1, 2, 3. Controls: the same calls with
+`ce.jit = 'off'`, or a new process with `CE_CACHE_OFF=mapcompile`, give
+`8384; 8512; 8640`. Inspect dependency validation of the compiled element
+cache in `library/map-auto-compile.ts`; the controls localize the issue to
+reuse of that cache rather than interpreter closure capture.
+
 
 ### CE-763. `Contains` of a list of valueless symbols gives `False` for a value that a symbol can hold
 

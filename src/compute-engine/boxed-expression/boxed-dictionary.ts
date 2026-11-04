@@ -596,36 +596,16 @@ export class BoxedDictionary
     if (entries.every(([, v]) => isEvaluatedValue(v, numericApproximation)))
       return this;
     const ce = this.engine;
-    // The values are evaluated one level deeper, as the operands of a
-    // function expression are (`BoxedFunction.evaluate`): a value is nested
-    // in the evaluation of the dictionary, not a top-level evaluation of its
-    // own. So a `Block` that is a value is not a program
-    // (`runsAsProgram()`, `library/control-structures.ts`), as a `Block` in
-    // a `List` or a `Tuple` is not. An evaluation of the dictionary that is
-    // not nested in another one is a new top-level evaluation
-    // (`beginTopLevelEvaluation`, `evaluation-epoch.ts`), with the same test
-    // as `BoxedFunction.evaluate`. The inherited `evaluateAsync()` runs this
-    // method, so the asynchronous route counts the same way.
+    // Cells are nested evaluations, so a Block cell is not a top-level program.
+    // Direct dictionary evaluation starts an epoch, as BoxedFunction does.
     if (ce._evaluationEffects === undefined && ce._evaluationDepth === 0)
       beginTopLevelEvaluation(ce);
-    // A dictionary can hold the same dictionary under several keys, level
-    // after level (`{p: d, q: d}`), so the number of paths is exponential
-    // in the depth while the number of nodes is linear. Within the
-    // evaluation of the outermost dictionary, the value of each pure
-    // dictionary node is computed once (`dictionaryEvaluationMemo`). CE-372.
+    // A shared dictionary DAG is evaluated once per node and context, rather
+    // than once per path. Keep entries for each numeric context: transient
+    // precision and angular-unit changes, and requested precision, do not
+    // advance engine versions. Replacing one context's entry with another
+    // would repeat shared work when a walk alternates between those contexts.
     const version = ce._anyVersion;
-    // A transient precision or angular-unit window (the engine methods
-    // `_withTransientPrecision()` and `_withTransientAngularUnit()`, which run
-    // `withTransientPrecision()` and `withTransientAngularUnit()` of
-    // `engine-numeric-configuration.ts`) moves no engine version, and a value
-    // computed in the window has the digits, or the unit, of the window;
-    // `N(x, p)` can set the requested precision with no window either
-    // (`_requestedPrecision`). So an entry also records the three settings it
-    // was computed at, and is used only at the same ones. A node keeps one
-    // entry per context: the entry of one context does not replace the entry
-    // of another, so a node read inside and outside a window at each level
-    // (`{a: d, b: W(d), c: d}`, where `W` opens a window) is still computed
-    // once per context, not once per path.
     const pure = this.isPure;
     const context: DictionaryMemoContext | undefined = pure
       ? {

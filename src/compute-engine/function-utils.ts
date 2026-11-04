@@ -5561,15 +5561,8 @@ function captureClosures(
     memo,
     kept
   );
-  // The per-scope map is read again AFTER the recursion: the children were
-  // captured under this same parent and may have created it. Keeping the
-  // map read before the recursion, and replacing it with a fresh one when
-  // that read found none, discarded every child entry as each level
-  // returned, so only the outermost node under a scope was ever memoized.
-  // A value that embeds one node once per mention of a parameter was then
-  // captured once per path after all, and the sharing this memo exists to
-  // keep was lost (the chain of Tycho ledger row 380 copied its previous
-  // level once per read).
+  // Recursion may create this parent's map. Read it after capturing children
+  // so their entries survive and shared subtrees stay shared.
   let byNode = memo.get(closureParent);
   if (byNode === undefined) {
     byNode = new Map();
@@ -10406,31 +10399,10 @@ function makeLambda(
       if (nodesReadingLeftCall !== readersBefore) retainScope(freshScope);
       if (viewsMade) carryLazyViewContexts(uncaptured, result);
 
-      // Substitute each parameter's VALUE into a partially-symbolic result that
-      // still references the parameter symbol. A body that cannot fully evaluate
-      // (e.g. `Which`/`If` with an undetermined condition) returns itself inert,
-      // referencing the raw parameter symbol rather than the bound value; once
-      // `freshScope` is popped that symbol is unbound, so every element of a
-      // lazy `Map`/`Filter`/`Tabulate` stream would otherwise lose its argument
-      // (Tycho item 26). This mirrors the comprehension stream's
-      // `comprehensionIndexSubs` fix. It is a no-op for a body that already
-      // resolved its parameters.
-      //
-      // Keyed on the parameter's BINDING, not its name. The question is "did
-      // this occurrence come from an unevaluated reference to the parameter?",
-      // and the binding answers it exactly: an occurrence resolving to the
-      // body's parameter binding did, and one that merely shares the spelling
-      // — a free symbol that arrived inside a dereferenced stored value, or an
-      // inner lambda's own re-binding of the name — did not.
-      //
-      // This replaces a name-keyed substitution that could not tell those
-      // apart and needed three heuristics to approximate the difference: a
-      // capture-avoiding walk to protect a returned lambda that re-binds the
-      // parameter, a held-conditional test, and an argument-ambiguity test for
-      // `Apply(x ↦ x + 1, x + 1)` (which must be `x + 2`, not `x + 3`). All
-      // three fall out of asking the right question: a re-binding lambda
-      // declares a DIFFERENT binding, and an `x` that came from the argument's
-      // value carries the caller's binding, so neither matches.
+      // Substitute unresolved parameter occurrences with their final values.
+      // Match the literal's binding: a same-named free symbol from an argument
+      // or a nested lambda denotes a different binding and must stay unchanged.
+      // See docs/SCOPING-MODEL.md, "Symbol identity" and "Callable resolution".
       if (hasReferencedName(result, paramNames)) {
         // ONE binding per parameter — the literal's own. `hideBodyScopeParams`
         // has removed it from `bodyScope` for the duration of the call, and

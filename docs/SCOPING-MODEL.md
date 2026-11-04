@@ -347,3 +347,41 @@ Every binding mutation reports through the engine state-event funnel. Directly
 incrementing a cache version at a write site bypasses the dependency model and
 is not allowed. The effects and cache axes are described in
 `EFFECTS-MODEL.md`.
+
+## Lazy view context lifetime
+
+A callback view records the evaluation stack through its innermost call frame,
+the creation context, and the enclosing call frames its lexical chain reaches.
+Nested block and loop scopes record binding identities, values and write
+versions at creation. Creating the record does not clone scope definitions.
+If those scopes are still live and unchanged, reads use the live stack;
+otherwise the record builds and caches copies chained onto the call frame.
+An enumeration chooses once at its first pull, so later pulls use the same
+context even after the creating call returns. A closure instead shares mutable
+block locals and observes subsequent writes.
+
+Call frames are shared rather than copied. Before a call pops, a reachability
+walk retains frames read by views in its result, including views reachable
+through closure bodies, scope bindings and dictionaries. It visits each node
+and scope once and stops below the call. Evaluating a function literal also
+retains scopes reached by that closure: a closure can escape through assignment
+rather than the returned result. This conservative rule retains a frame even
+when the closure is immediately consumed. Retention marks are weak; they do
+not keep otherwise unreachable frames alive.
+
+A retained call frame is neither disposed nor tombstoned on pop. A retained
+node scope can still dispose definitions but must not tombstone them. Retention
+therefore also affects type-contribution and assumption readers of the disposed
+flag, definition write versions, and the dead-binding debug check.
+
+Rebuilding a view carries its record, including through returned closures and
+parameter substitution. Adopting an unevaluated view held in a shared function
+body requires a new node so invocations cannot overwrite one another's record.
+Top-level views normally use their reader's context; an outward assignment can
+record the loop and block scopes it leaves, as described in "Callable resolution".
+
+The reachability walk cannot observe values stored privately by host code.
+Such an escape does not retain its call frame. Disposed definitions keep their
+values, but a later symbol evaluation can trigger the dead-binding debug check;
+a name lookup alone does not run that check. Host escapes are therefore not
+evidence that the managed reachability walk retained a frame.

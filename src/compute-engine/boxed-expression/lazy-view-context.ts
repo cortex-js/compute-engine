@@ -1,129 +1,18 @@
 /**
- * The evaluation context in which a lazy collection view that calls a
- * callback was created, and the reads of the view that run in it.
+ * Preserve the creation context of lazy collections that invoke callbacks.
  *
- * A lazy view such as `Map(f, xs)` computes its elements when it is read, not
- * when it is evaluated. A read can happen after the function whose body made
- * the view has returned. The call of the callback then took place in the
- * context of the reader, and a name that the call reads by its binding in
- * the context, such as the symbol default `d` of a parameter
- * `(x, k = d) => x * k` that the call fills, was read where the view was
- * read, not where `Map(f, xs)` was written. With
- * `g := (d, xs) => Map(f, xs)`, the elements of `g(10, [1, 2])` were `d` and
- * `2d`, while the compiled function and a read inside `g` give `[10, 20]`.
+ * Call frames stay shared with closures. Nested block and loop bindings are
+ * snapshotted when a view is created, then copied only if a read can no longer
+ * use the unchanged live scopes. An immediately consumed view can use the live stack.
+ * An enumeration fixes its context at its first pull, including later pulls
+ * after the creating call returns.
  *
- * The operators of such views set the flag `callsCallbackOnRead` of their
- * collection handlers (`Map`, `Filter`, `Scan`, `TakeWhile`, `DropWhile`,
- * `FlatMap`, `Tabulate`, `Iterate`, `Fill`, and an operator of the host that
- * sets the flag). A view of such an operator that is created during a
- * function call gets a record of the context of that call
- * (`recordLazyViewContext`):
+ * Rebuilt views must carry their creation records. Held body nodes are shared
+ * across calls, so adopting one requires a new node. A top-level view normally
+ * uses its reader's context; an outward assignment records the scopes it leaves.
  *
- * - the context stack up to and including the frame of the innermost call
- *   (the context named `call`);
- * - the context on top of the stack at the creation;
- * - when that context is a scope nested in the body between the top and the
- *   frame (a `Block`, the branch of an `If`, a loop body), the bindings of
- *   each nested scope, their values and their write versions at the
- *   creation. No scope is copied and no definition is made at the creation,
- *   so a view that the call reads at once (an operand of `ListFrom` or
- *   `Sum`, a view per loop iteration) costs little;
- * - the call frames on the stack that the scope chain of that context
- *   reaches (`frames`): the frame of the call, and the frame of each outer
- *   call whose closure the call runs.
- *
- * The frame of a call is not copied: a frame that a view can read after the
- * call stays alive. At the end of each call, before its pop, the frame is
- * marked as retained (`isRetainedScope`) when a view whose record names
- * it is reachable from the value that the call returns
- * (`retainCallFrameOfResult`; the walk also goes into the bodies and the
- * scopes of the closures of that value and into the scopes of the records
- * it meets). The
- * pop of a retained frame does not dispose its definitions and does not
- * tombstone them (`discardEvalContext`, `engine-scope.ts`), so a read after
- * the call has returned resolves the names of the frame to live definitions
- * with their declared type and their values. Each call has a new frame, and
- * no other call writes in it, so its values are those of the end of the
- * call, unless a closure that the call returned shares the frame and writes
- * in it. A call that reads its views at once (`ListFrom(Map(f, xs))`)
- * returns no view, and its frame is disposed at its pop, as any frame,
- * unless the call makes a function literal whose scope chain reaches the
- * frame, or returns a node whose chain reads it
- * (`retainScope`).
- *
- * The cost of a retained frame: its definitions are never marked
- * `disposed`, so the readers of that flag (`collectTypeContributions` in
- * `constraint-subject.ts`, `restoreAssumptions` in `checkpoint.ts`,
- * `assume.ts`) treat them as live, their
- * `_writeVersion` does not advance at the pop, and the debug check of dead
- * bindings (`ce._debugBindings`) does not cover them. The set of retained
- * frames is weak: a frame that no record and no closure holds any more is
- * freed. A view
- * that leaves a call by a way the walk does not follow (host code that keeps
- * it) does not retain the frame: a later read resolves names in disposed
- * definitions, which keep their values, so it gives the values of the call.
- * The debug check reports such a read only where it evaluates a symbol bound
- * to a disposed definition (`assertLiveBinding`, called by `boxed-symbol.ts`),
- * not where it resolves a name, such as the symbol default of a parameter.
- *
- * The nested scopes are different: they belong to the function body, which
- * every call shares, the next iteration of a loop writes another value in
- * its index, the pop of a block disposes its locals, and while another call
- * of the same function runs (a recursive call) the body scope has the frame
- * of that call as its parent. A view reads the bindings of the nested
- * scopes with their values at its creation. A read uses the live stack when
- * the context on top of the stack at the creation is still on the stack,
- * each nested scope has the parent that it had at the creation, and each of
- * its bindings is the one of the creation and was not written since
- * (`nestedScopesUnchanged`). Otherwise (the block has ended, the loop has
- * advanced, a local was assigned again, a recursive call is running, the
- * call has returned) the read uses a copy of the nested scopes, made once
- * per record by
- * `function-utils.ts` (`setLazyViewNestedScopeCopier`) and chained onto the
- * frame: each value binding gets a clone of its definition, with its
- * declared type and flags, that holds the value at the creation. A closure
- * differs here: it shares the `let` locals of a nested block
- * (`captureNestedLocals`, `function-utils.ts`), and sees a later write.
- *
- * Each read of a view with a record (its elements, an element by index, its
- * count, and the other collection facets that `BoxedFunction` dispatches to
- * the handlers) puts the stack of the record in place of the engine's stack
- * while it runs (`inLazyViewContext`, `eachInLazyViewContext`). An
- * enumeration chooses between the live stack and the copies once, when it
- * starts, and keeps the stack of its start for each step: a step that runs
- * after the call has returned reads the context of the call. An evaluation
- * of a view with a record runs in that context too (`BoxedFunction.evaluate`,
- * and `BoxedFunction.evaluateAsync` on a stack of its asynchronous
- * evaluation, `lazyViewContextStack`): the numeric pass of an outer call
- * evaluates a returned view again, and fills the default of a parameter of
- * its callback by name.
- *
- * The end of a call rebuilds the value that it returns (the re-rooting of
- * the closures, `captureClosures`, and the substitution of the parameter
- * values, `bindingKeyedSubs`), and the start of a call rewrites each
- * argument that reads locals of the caller (`bindLazyArgumentLocals`). A
- * rebuilt view takes the record of the view it replaces, also in the body
- * of a function literal (`carryLazyViewContexts`). A view that is never evaluated has
- * no record: a view of the function body that is an operand of a lazy
- * operator of the body (`Dedup(Map(f, xs))`), or a view canonicalized during
- * the call (`ReleaseHold(Hold(Dedup(Map(f, xs))))`, noted by
- * `noteLazyViewCanonicalized`). Before these rebuilds, the end of the call
- * gives such a view of its result a record of the call, on a new node,
- * because a held node of the body is shared by every call (`adoptLazyView`,
- * called by `adoptHeldLazyViews` in `function-utils.ts`). A view that the
- * call did not make (the value of a symbol that the body reads, made at the
- * top level or in another call) is not adopted.
- *
- * A view created outside every function call (at the top level, or in a
- * `Block` of the top level) has the record `null`: it is read in the context
- * of the reader, as before this record existed. One exception: an
- * assignment that stores such a view out of the loop iteration or the block
- * that made it (`h = Map(f, R)` in a loop, with `h` declared outside) gives
- * it a record of the scopes between its creation and the scope of the
- * variable (`recordOutlivedLazyViewContexts`).
- *
- * The design is in `docs/plans/2026-10-31-parameter-default-values.md`
- * (§11, item 6).
+ * See docs/SCOPING-MODEL.md, "Lazy view context lifetime", for retention,
+ * escape boundaries, and the distinction between views and closures.
  */
 
 import type {
@@ -267,54 +156,10 @@ export function isRetainedScope(scope: Scope): boolean {
 }
 
 /**
- * Mark the call frame `frame` as retained: its pop does not dispose its
- * definitions and does not tombstone them (`discardEvalContext`,
- * `engine-scope.ts`). Call it when the call creates a function literal whose
- * scope chain reaches the frame, or at the end of the call, before its pop,
- * when the value that the call returns holds a closure (or another scoped
- * node) whose scope chain reaches the frame.
- *
- * Such a closure can read the names of the frame after the call has
- * returned, also by name and not only through a symbol of its body: the
- * symbol default of a parameter of a function that the closure applies
- * (`f := (x, k = d) => x * k` and `d ↦ (xs ↦ ListFrom(Map(f, xs)))`) is
- * resolved in the context of the application of `f`, whose chain goes
- * through the frame. The definitions of the frame are then still in use, and
- * the debug check of dead bindings (`ce._debugBindings`) reported the read of
- * `d` as a read of a discarded scope. Without the debug flag the value was
- * the same, because a disposed definition keeps its value. The cost is the
- * cost of a frame that a view retains (see the header).
- *
- * Two places in `function-utils.ts` call it:
- * - the creation of a closure in the body of a running call, when its chain
- *   reaches the frame of that call (`rerootOnCreatingFrame`, called by the
- *   `Function` handler through `captureAtCreation`). The closure can leave
- *   the call by a way that the end of the call does not see: an assignment
- *   to an outer variable (`o := d ↦ Block(g := (xs ↦ ListFrom(Map(f, xs))),
- *   0)`, then `g([1, 2])`), or a value stored in an outer collection. So
- *   each call that makes such a closure retains its frame, also when the
- *   closure does not leave the call (`ListFrom(Map(x ↦ x + d, xs))`): a
- *   simple rule that is sound, at the cost above;
- * - the end of a call, when the value that it returns holds a node whose
- *   chain reads the frame and that was not made by an evaluation of a
- *   function literal in the call (a held literal, a scoped node), counted by
- *   `nodesReadingLeftCall`.
- *
- * The local scope of a node (a block, a loop, a comprehension, a big
- * operator) is marked too, when a closure has a chain that reaches it
- * (`retainScopesReachedByLiteral` in `function-utils.ts`): the closure
- * reads an index through the binding of a symbol of its body, or a `let`
- * local of a block by name. The pop
- * of such a scope still disposes its definitions, as before, and only does
- * not tombstone them (`discardEvalContext`); see there for why.
- *
- * A closure that leaves a call without one of these steps does not retain
- * the frame: a function literal that host code builds around the scope of a
- * call and keeps in its own data, or a literal that a host operator holds
- * unevaluated and stores. A later read resolves names in disposed
- * definitions, which keep their values, so it gives the values of the call,
- * and the debug check of dead bindings reports it where it evaluates a
- * symbol bound to such a definition (`assertLiveBinding`).
+ * Keep a scope's definitions available to an escaping closure or lazy view.
+ * Call frames remain live; node scopes may still dispose definitions but must
+ * not tombstone them. The weak mark does not itself keep the scope reachable.
+ * See docs/SCOPING-MODEL.md, "Lazy view context lifetime".
  */
 export function retainScope(frame: Scope): void {
   RETAINED_SCOPES.add(frame);

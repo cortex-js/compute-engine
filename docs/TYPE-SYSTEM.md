@@ -1475,3 +1475,36 @@ type:
 - Collection inference: `INFERENCE_ROADMAP.md`
 - Open type-system work: `TYPE_SYSTEM_ROADMAP.md` and active plans
 - Historical implementation chronology: `STATUS_REPORT.md` and Git history
+
+## Static binding view
+
+A function call temporarily parents its body scope onto a fresh activation
+frame and hides the body's canonical parameter and inferred valueless bindings.
+Ordinary evaluation therefore reads argument values and assignment locals from
+that frame. During type computation, `withStaticTypingView` changes lookup:
+
+- An applied body's scope exposes its own bindings, including hidden bindings.
+- Its activation frame is skipped when reached as that body's parent.
+- A lookup starting in an activation frame on the current stack reads the
+  body's static bindings instead.
+
+A captured frame reached through a different scope chain, or no longer on the
+current stack, remains visible. Such a frame belongs to the closure made by the
+call. Active applications are associated with their engine, including suspended
+applications; lookup uses the current evaluation stack rather than inferring
+membership from a history of pushes and pops. Replacing a stack must not leave
+lookup reading frames from the previous stack.
+
+The view affects only the engine whose type computation is running. A type
+handler that evaluates another engine reads that engine's ordinary bindings.
+Evaluating the same engine stays in the static view and cannot make a type
+depend on a particular call's argument values. Type handlers must not evaluate;
+`guardedTypeHandlerCall` enforces version stability in tests and when
+`CE_TYPE_PURITY_GUARD` is set.
+
+Type-cache versions exclude activation declarations and frame pops because
+those events do not change the static bindings. Sign, value, effect and other
+evaluation caches still depend on parameter values: their static-view entries
+use distinct keys (`staticViewDiverges`, `_cacheGeneration`, `_effectsOf`), and
+the application memo is bypassed. An application suspended on another stack
+still contributes to the engine's count of active bodies used by this check.

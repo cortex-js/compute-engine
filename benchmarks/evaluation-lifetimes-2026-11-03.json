@@ -1,0 +1,2680 @@
+{
+  "date": "2026-11-03",
+  "hardware": "Apple M5 Max, 18 cores",
+  "runtime": "Node v26.13.0",
+  "build": "TypeScript source via tsx; same node_modules link for each detached worktree",
+  "precision": "machine",
+  "jit": "off",
+  "runsPerProcess": 9,
+  "warmupCalls": 10,
+  "warmBatchSize": 200,
+  "ordering": "Alternating historical/current processes; accepted runs selected by CPU monitoring, with retries for typecheck overlap",
+  "quietCriteria": "No test runners/workers or CPU-bound browser renderers; sampling every 0.5 or 1 second throughout accepted runs, excluding any with a tsc or Chrome process over 50% CPU. Usual desktop and esbuild activity remained. Load average was falling from prior activity; it was not used as an idle criterion.",
+  "exclusions": "Initial boundary-only runs are not used. Monitored checkpoint runs 2, 3, 6, after2 attempt1, and nov1b attempt1 excluded for typecheck overlap. RSK timing also excluded for a typechecker overlap; its deterministic work counts remain valid.",
+  "retainedMemory": "Three GC samples per process, each yielding to another event-loop job. Holding retains 200 unconsumed results. Released follows validation of every result and release, and includes engine caches populated during validation. This is not a leak test.",
+  "runs": [
+    {
+      "checkpoint": "oct27",
+      "metadata": {
+        "root": "/tmp/wt-cache-oct27",
+        "node": "v26.13.0",
+        "runs": 9,
+        "iterations": 200,
+        "precision": "machine",
+        "entry": "core",
+        "jit": "off",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "commit": "f5d9919024319b236893d2ca1782963d64dd2ba4",
+        "allocation": "inspector sampling, 32768-byte interval; separate from timings"
+      },
+      "workloads": [
+        {
+          "name": "control",
+          "firstMs": {
+            "median": 0.004290999999966516,
+            "min": 0.0027090000000953296,
+            "max": 0.012666000000081112
+          },
+          "warmMs": {
+            "median": 0.00017854000000056659,
+            "min": 0.00013500000000021828,
+            "max": 0.0003439549999995961
+          },
+          "holdingBytes": {
+            "median": 23608,
+            "min": 18008,
+            "max": 37056
+          },
+          "releasedBytes": {
+            "median": 9536,
+            "min": 3504,
+            "max": 19680
+          },
+          "allocationSamples": 0,
+          "sampledAllocationBytesPerCall": 0,
+          "allocationIterations": 200
+        },
+        {
+          "name": "boxing",
+          "firstMs": {
+            "median": 0.05858299999999872,
+            "min": 0.04554099999995742,
+            "max": 0.30808300000012423
+          },
+          "warmMs": {
+            "median": 0.0030435400000010304,
+            "min": 0.0027968749999990905,
+            "max": 0.0050927100000012614
+          },
+          "holdingBytes": {
+            "median": 243584,
+            "min": 231224,
+            "max": 291464
+          },
+          "releasedBytes": {
+            "median": 22536,
+            "min": 12944,
+            "max": 57208
+          },
+          "allocationSamples": 27,
+          "sampledAllocationBytesPerCall": 4438.2,
+          "allocationIterations": 200
+        },
+        {
+          "name": "ordinary",
+          "firstMs": {
+            "median": 0.28295899999966423,
+            "min": 0.2286669999998594,
+            "max": 2.3975829999999405
+          },
+          "warmMs": {
+            "median": 0.031923749999998564,
+            "min": 0.029666875000000346,
+            "max": 0.05143291500000032
+          },
+          "holdingBytes": {
+            "median": 233664,
+            "min": 189720,
+            "max": 320024
+          },
+          "releasedBytes": {
+            "median": 216168,
+            "min": 175272,
+            "max": 239712
+          },
+          "allocationSamples": 253,
+          "sampledAllocationBytesPerCall": 41529.24,
+          "allocationIterations": 200
+        },
+        {
+          "name": "repeated",
+          "firstMs": {
+            "median": 0.11504199999990306,
+            "min": 0.08608300000014424,
+            "max": 0.15266599999995378
+          },
+          "warmMs": {
+            "median": 0.012878330000000915,
+            "min": 0.012582914999998139,
+            "max": 0.015172499999998763
+          },
+          "holdingBytes": {
+            "median": 89056,
+            "min": 72144,
+            "max": 109768
+          },
+          "releasedBytes": {
+            "median": 20032,
+            "min": 6496,
+            "max": 37032
+          },
+          "allocationSamples": 127,
+          "sampledAllocationBytesPerCall": 20845.12,
+          "allocationIterations": 200
+        },
+        {
+          "name": "dictionary",
+          "firstMs": {
+            "median": 0.1615830000000642,
+            "min": 0.13829200000009223,
+            "max": 0.3202499999997599
+          },
+          "warmMs": {
+            "median": 0.017536665000000083,
+            "min": 0.016583960000000387,
+            "max": 0.01928104000000076
+          },
+          "holdingBytes": {
+            "median": 172664,
+            "min": 139224,
+            "max": 189672
+          },
+          "releasedBytes": {
+            "median": 38216,
+            "min": 4776,
+            "max": 54024
+          },
+          "allocationSamples": 156,
+          "sampledAllocationBytesPerCall": 25607.96,
+          "allocationIterations": 200
+        },
+        {
+          "name": "consumed",
+          "firstMs": {
+            "median": 2.277208999999857,
+            "min": 2.0734169999996084,
+            "max": 4.392749999999978
+          },
+          "warmMs": {
+            "median": 1.0419437500000004,
+            "min": 1.0156993749999992,
+            "max": 1.1461475000000019
+          },
+          "holdingBytes": {
+            "median": 339680,
+            "min": 137520,
+            "max": 353864
+          },
+          "releasedBytes": {
+            "median": 281576,
+            "min": 79896,
+            "max": 296240
+          },
+          "allocationSamples": 11442,
+          "sampledAllocationBytesPerCall": 1878711,
+          "allocationIterations": 200
+        },
+        {
+          "name": "nested",
+          "firstMs": {
+            "median": 4.128333000000566,
+            "min": 4.037500000000364,
+            "max": 5.2213339999998425
+          },
+          "warmMs": {
+            "median": 0.1801410450000003,
+            "min": 0.1738781250000011,
+            "max": 0.24193166500000188
+          },
+          "holdingBytes": {
+            "median": 117728,
+            "min": -4008,
+            "max": 182736
+          },
+          "releasedBytes": {
+            "median": 36928,
+            "min": -69248,
+            "max": 117088
+          },
+          "allocationSamples": 1215,
+          "sampledAllocationBytesPerCall": 199522.8,
+          "allocationIterations": 200
+        },
+        {
+          "name": "closure",
+          "firstMs": {
+            "median": 0.8665409999994154,
+            "min": 0.6835000000010041,
+            "max": 1.340583000001061
+          },
+          "warmMs": {
+            "median": 0.10869792000000417,
+            "min": 0.10045499999999265,
+            "max": 0.15103541500000575
+          },
+          "holdingBytes": {
+            "median": 829112,
+            "min": 665168,
+            "max": 894904
+          },
+          "releasedBytes": {
+            "median": 822672,
+            "min": 633216,
+            "max": 909096
+          },
+          "allocationSamples": 947,
+          "sampledAllocationBytesPerCall": 155512.24,
+          "allocationIterations": 200
+        },
+        {
+          "name": "view",
+          "firstMs": {
+            "median": 1.255750000000262,
+            "min": 0.9839170000013837,
+            "max": 1.9792500000003201
+          },
+          "warmMs": {
+            "median": 0.20797208500000125,
+            "min": 0.18783499999999548,
+            "max": 0.24251249999999344
+          },
+          "holdingBytes": {
+            "median": 1204520,
+            "min": 1198352,
+            "max": 1359320
+          },
+          "releasedBytes": {
+            "median": 8256712,
+            "min": 8201136,
+            "max": 8369952
+          },
+          "allocationSamples": 1581,
+          "sampledAllocationBytesPerCall": 259638.6,
+          "allocationIterations": 200
+        }
+      ],
+      "cpuMonitoring": {
+        "samples": 14,
+        "firstUnixTime": 1793767488.3957949,
+        "lastUnixTime": 1793767501.7335339,
+        "peakTscChromeJestCpuPercent": 12.6
+      }
+    },
+    {
+      "checkpoint": "oct27",
+      "metadata": {
+        "root": "/tmp/wt-cache-oct27",
+        "node": "v26.13.0",
+        "runs": 9,
+        "iterations": 200,
+        "precision": "machine",
+        "entry": "core",
+        "jit": "off",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "commit": "f5d9919024319b236893d2ca1782963d64dd2ba4",
+        "allocation": "inspector sampling, 32768-byte interval; separate from timings"
+      },
+      "workloads": [
+        {
+          "name": "control",
+          "firstMs": {
+            "median": 0.003333999999995285,
+            "min": 0.0027079999999841675,
+            "max": 0.016874999999913598
+          },
+          "warmMs": {
+            "median": 0.00021041500000023916,
+            "min": 0.00017374999999958618,
+            "max": 0.0005541700000003402
+          },
+          "holdingBytes": {
+            "median": 20920,
+            "min": 18008,
+            "max": 30064
+          },
+          "releasedBytes": {
+            "median": 6848,
+            "min": 3504,
+            "max": 13304
+          },
+          "allocationSamples": 0,
+          "sampledAllocationBytesPerCall": 0,
+          "allocationIterations": 200
+        },
+        {
+          "name": "boxing",
+          "firstMs": {
+            "median": 0.05208300000003874,
+            "min": 0.04408300000000054,
+            "max": 0.23387500000001182
+          },
+          "warmMs": {
+            "median": 0.002863545000000158,
+            "min": 0.002820834999999988,
+            "max": 0.003771669999999858
+          },
+          "holdingBytes": {
+            "median": 245304,
+            "min": 231240,
+            "max": 284272
+          },
+          "releasedBytes": {
+            "median": 23104,
+            "min": 12960,
+            "max": 63616
+          },
+          "allocationSamples": 18,
+          "sampledAllocationBytesPerCall": 2957.24,
+          "allocationIterations": 200
+        },
+        {
+          "name": "ordinary",
+          "firstMs": {
+            "median": 0.26979099999994105,
+            "min": 0.21841700000004494,
+            "max": 2.473124999999982
+          },
+          "warmMs": {
+            "median": 0.033818749999999224,
+            "min": 0.03084874999999897,
+            "max": 0.050017085000000634
+          },
+          "holdingBytes": {
+            "median": 233664,
+            "min": 187784,
+            "max": 323864
+          },
+          "releasedBytes": {
+            "median": 216168,
+            "min": 173336,
+            "max": 240960
+          },
+          "allocationSamples": 239,
+          "sampledAllocationBytesPerCall": 39223.12,
+          "allocationIterations": 200
+        },
+        {
+          "name": "repeated",
+          "firstMs": {
+            "median": 0.10262499999998909,
+            "min": 0.08016700000007404,
+            "max": 0.14916700000003402
+          },
+          "warmMs": {
+            "median": 0.01273687500000051,
+            "min": 0.01241333000000168,
+            "max": 0.013021040000000993
+          },
+          "holdingBytes": {
+            "median": 89056,
+            "min": 72144,
+            "max": 108712
+          },
+          "releasedBytes": {
+            "median": 20032,
+            "min": 6496,
+            "max": 37032
+          },
+          "allocationSamples": 107,
+          "sampledAllocationBytesPerCall": 17560.52,
+          "allocationIterations": 200
+        },
+        {
+          "name": "dictionary",
+          "firstMs": {
+            "median": 0.1418749999997999,
+            "min": 0.12079200000016499,
+            "max": 0.37150000000019645
+          },
+          "warmMs": {
+            "median": 0.017173959999997806,
+            "min": 0.0161177100000009,
+            "max": 0.0192552099999989
+          },
+          "holdingBytes": {
+            "median": 172664,
+            "min": 139224,
+            "max": 189672
+          },
+          "releasedBytes": {
+            "median": 38216,
+            "min": 4776,
+            "max": 54024
+          },
+          "allocationSamples": 158,
+          "sampledAllocationBytesPerCall": 25937.6,
+          "allocationIterations": 200
+        },
+        {
+          "name": "consumed",
+          "firstMs": {
+            "median": 2.312249999999949,
+            "min": 2.0270000000000437,
+            "max": 4.408750000000055
+          },
+          "warmMs": {
+            "median": 1.1105331250000017,
+            "min": 1.0339591699999984,
+            "max": 1.228560835000003
+          },
+          "holdingBytes": {
+            "median": 339392,
+            "min": 133752,
+            "max": 353288
+          },
+          "releasedBytes": {
+            "median": 281288,
+            "min": 76128,
+            "max": 295664
+          },
+          "allocationSamples": 11402,
+          "sampledAllocationBytesPerCall": 1872158.6,
+          "allocationIterations": 200
+        },
+        {
+          "name": "nested",
+          "firstMs": {
+            "median": 4.050291999999899,
+            "min": 3.9394579999998314,
+            "max": 4.447500000000218
+          },
+          "warmMs": {
+            "median": 0.18210103999999774,
+            "min": 0.17287125000000286,
+            "max": 0.2044872899999973
+          },
+          "holdingBytes": {
+            "median": 117728,
+            "min": -4008,
+            "max": 182736
+          },
+          "releasedBytes": {
+            "median": 36928,
+            "min": -69248,
+            "max": 117088
+          },
+          "allocationSamples": 1236,
+          "sampledAllocationBytesPerCall": 202957.28,
+          "allocationIterations": 200
+        },
+        {
+          "name": "closure",
+          "firstMs": {
+            "median": 0.7143330000017158,
+            "min": 0.6733329999997295,
+            "max": 1.1582079999998314
+          },
+          "warmMs": {
+            "median": 0.09904145999999855,
+            "min": 0.09523666500000218,
+            "max": 0.12309666999999991
+          },
+          "holdingBytes": {
+            "median": 829112,
+            "min": 652216,
+            "max": 894904
+          },
+          "releasedBytes": {
+            "median": 822672,
+            "min": 620264,
+            "max": 909096
+          },
+          "allocationSamples": 918,
+          "sampledAllocationBytesPerCall": 150743.6,
+          "allocationIterations": 200
+        },
+        {
+          "name": "view",
+          "firstMs": {
+            "median": 1.2388749999990978,
+            "min": 0.8652089999995951,
+            "max": 2.902290999998513
+          },
+          "warmMs": {
+            "median": 0.22568854000000102,
+            "min": 0.18231770500000494,
+            "max": 0.25271916499999864
+          },
+          "holdingBytes": {
+            "median": 1204520,
+            "min": 1198432,
+            "max": 1359312
+          },
+          "releasedBytes": {
+            "median": 8256792,
+            "min": 8201136,
+            "max": 8369952
+          },
+          "allocationSamples": 1645,
+          "sampledAllocationBytesPerCall": 270167.96,
+          "allocationIterations": 200
+        }
+      ],
+      "cpuMonitoring": {
+        "samples": 13,
+        "firstUnixTime": 1793767529.82413,
+        "lastUnixTime": 1793767542.1326451,
+        "peakTscChromeJestCpuPercent": 15.2
+      }
+    },
+    {
+      "checkpoint": "before",
+      "metadata": {
+        "root": "/tmp/wt-cache-before",
+        "node": "v26.13.0",
+        "runs": 9,
+        "iterations": 200,
+        "precision": "machine",
+        "entry": "core",
+        "jit": "off",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "commit": "17ba3b40716085d82aa2f2e50457ef9ad002b937",
+        "allocation": "inspector sampling, 32768-byte interval; separate from timings"
+      },
+      "workloads": [
+        {
+          "name": "control",
+          "firstMs": {
+            "median": 0.0037499999999681677,
+            "min": 0.002124999999978172,
+            "max": 0.018958999999995285
+          },
+          "warmMs": {
+            "median": 0.0001714550000002646,
+            "min": 0.0001537500000000591,
+            "max": 0.00040041999999971265
+          },
+          "holdingBytes": {
+            "median": 20320,
+            "min": 18008,
+            "max": 30064
+          },
+          "releasedBytes": {
+            "median": 6248,
+            "min": 3504,
+            "max": 13304
+          },
+          "allocationSamples": 0,
+          "sampledAllocationBytesPerCall": 0,
+          "allocationIterations": 200
+        },
+        {
+          "name": "boxing",
+          "firstMs": {
+            "median": 0.04845799999998235,
+            "min": 0.03291699999999764,
+            "max": 0.4543750000000273
+          },
+          "warmMs": {
+            "median": 0.003052709999999479,
+            "min": 0.002813125000000127,
+            "max": 0.006161875000000237
+          },
+          "holdingBytes": {
+            "median": 248928,
+            "min": 235912,
+            "max": 290776
+          },
+          "releasedBytes": {
+            "median": 26296,
+            "min": -5048,
+            "max": 68192
+          },
+          "allocationSamples": 16,
+          "sampledAllocationBytesPerCall": 2628.2,
+          "allocationIterations": 200
+        },
+        {
+          "name": "ordinary",
+          "firstMs": {
+            "median": 0.2468749999998181,
+            "min": 0.1987500000000182,
+            "max": 2.3902080000000296
+          },
+          "warmMs": {
+            "median": 0.033268335000000204,
+            "min": 0.029753749999999853,
+            "max": 0.050496875000000045
+          },
+          "holdingBytes": {
+            "median": 244912,
+            "min": 188184,
+            "max": 319768
+          },
+          "releasedBytes": {
+            "median": 228832,
+            "min": 173736,
+            "max": 233688
+          },
+          "allocationSamples": 246,
+          "sampledAllocationBytesPerCall": 40391.04,
+          "allocationIterations": 200
+        },
+        {
+          "name": "repeated",
+          "firstMs": {
+            "median": 0.1182080000003225,
+            "min": 0.07720900000003894,
+            "max": 0.13699999999971624
+          },
+          "warmMs": {
+            "median": 0.012954999999999472,
+            "min": 0.012586249999999381,
+            "max": 0.013839375000000018
+          },
+          "holdingBytes": {
+            "median": 87864,
+            "min": 73216,
+            "max": 103280
+          },
+          "releasedBytes": {
+            "median": 18840,
+            "min": 7568,
+            "max": 30544
+          },
+          "allocationSamples": 122,
+          "sampledAllocationBytesPerCall": 20017.92,
+          "allocationIterations": 200
+        },
+        {
+          "name": "dictionary",
+          "firstMs": {
+            "median": 0.1264579999997295,
+            "min": 0.11604200000010678,
+            "max": 0.3777919999997721
+          },
+          "warmMs": {
+            "median": 0.017336665000000265,
+            "min": 0.01607833000000028,
+            "max": 0.018430000000000744
+          },
+          "holdingBytes": {
+            "median": 172232,
+            "min": 139224,
+            "max": 185688
+          },
+          "releasedBytes": {
+            "median": 37784,
+            "min": 4776,
+            "max": 51736
+          },
+          "allocationSamples": 138,
+          "sampledAllocationBytesPerCall": 22656.36,
+          "allocationIterations": 200
+        },
+        {
+          "name": "consumed",
+          "firstMs": {
+            "median": 2.399666999999681,
+            "min": 2.2582499999998618,
+            "max": 4.504500000000007
+          },
+          "warmMs": {
+            "median": 1.1022837499999991,
+            "min": 1.0813872900000023,
+            "max": 1.329265835000001
+          },
+          "holdingBytes": {
+            "median": 339136,
+            "min": 281736,
+            "max": 456888
+          },
+          "releasedBytes": {
+            "median": 135864,
+            "min": 102584,
+            "max": 304472
+          },
+          "allocationSamples": 11507,
+          "sampledAllocationBytesPerCall": 1889379.2,
+          "allocationIterations": 200
+        },
+        {
+          "name": "nested",
+          "firstMs": {
+            "median": 4.124249999999847,
+            "min": 3.977458000000297,
+            "max": 4.226875000000291
+          },
+          "warmMs": {
+            "median": 0.18052000000000135,
+            "min": 0.17492583499999909,
+            "max": 0.1883627050000041
+          },
+          "holdingBytes": {
+            "median": 131432,
+            "min": 7096,
+            "max": 178992
+          },
+          "releasedBytes": {
+            "median": 37776,
+            "min": -58144,
+            "max": 113344
+          },
+          "allocationSamples": 1253,
+          "sampledAllocationBytesPerCall": 205774,
+          "allocationIterations": 200
+        },
+        {
+          "name": "closure",
+          "firstMs": {
+            "median": 0.7443750000002183,
+            "min": 0.6294170000001031,
+            "max": 1.2889580000000933
+          },
+          "warmMs": {
+            "median": 0.11523979500000223,
+            "min": 0.10738083500000357,
+            "max": 0.13402875000000222
+          },
+          "holdingBytes": {
+            "median": 846984,
+            "min": 668128,
+            "max": 943360
+          },
+          "releasedBytes": {
+            "median": 835160,
+            "min": 519168,
+            "max": 941456
+          },
+          "allocationSamples": 927,
+          "sampledAllocationBytesPerCall": 152224.12,
+          "allocationIterations": 200
+        },
+        {
+          "name": "view",
+          "firstMs": {
+            "median": 1.11974999999984,
+            "min": 0.9606669999993755,
+            "max": 1.7849999999998545
+          },
+          "warmMs": {
+            "median": 0.2307970850000038,
+            "min": 0.21643332999999984,
+            "max": 0.26710541999999804
+          },
+          "holdingBytes": {
+            "median": 1239232,
+            "min": 1103320,
+            "max": 1243624
+          },
+          "releasedBytes": {
+            "median": 8247240,
+            "min": 8234752,
+            "max": 8277200
+          },
+          "allocationSamples": 1870,
+          "sampledAllocationBytesPerCall": 307136.76,
+          "allocationIterations": 200
+        }
+      ],
+      "cpuMonitoring": {
+        "samples": 13,
+        "firstUnixTime": 1793767542.2515001,
+        "lastUnixTime": 1793767554.5597272,
+        "peakTscChromeJestCpuPercent": 9.7
+      }
+    },
+    {
+      "checkpoint": "before",
+      "metadata": {
+        "root": "/tmp/wt-cache-before",
+        "node": "v26.13.0",
+        "runs": 9,
+        "iterations": 200,
+        "precision": "machine",
+        "entry": "core",
+        "jit": "off",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "commit": "17ba3b40716085d82aa2f2e50457ef9ad002b937",
+        "allocation": "inspector sampling, 32768-byte interval; separate from timings"
+      },
+      "workloads": [
+        {
+          "name": "control",
+          "firstMs": {
+            "median": 0.0037500000000818545,
+            "min": 0.0020839999999680003,
+            "max": 0.013749999999959073
+          },
+          "warmMs": {
+            "median": 0.0001637500000003911,
+            "min": 0.0001502099999999018,
+            "max": 0.00038562500000011824
+          },
+          "holdingBytes": {
+            "median": 20320,
+            "min": 18008,
+            "max": 30064
+          },
+          "releasedBytes": {
+            "median": 6248,
+            "min": 3504,
+            "max": 13304
+          },
+          "allocationSamples": 0,
+          "sampledAllocationBytesPerCall": 0,
+          "allocationIterations": 200
+        },
+        {
+          "name": "boxing",
+          "firstMs": {
+            "median": 0.04337499999996908,
+            "min": 0.035916000000042914,
+            "max": 0.2875420000000304
+          },
+          "warmMs": {
+            "median": 0.003170000000000073,
+            "min": 0.002740000000000009,
+            "max": 0.004194165000000112
+          },
+          "holdingBytes": {
+            "median": 248928,
+            "min": 235912,
+            "max": 290776
+          },
+          "releasedBytes": {
+            "median": 26296,
+            "min": -5048,
+            "max": 68192
+          },
+          "allocationSamples": 15,
+          "sampledAllocationBytesPerCall": 2464.96,
+          "allocationIterations": 200
+        },
+        {
+          "name": "ordinary",
+          "firstMs": {
+            "median": 0.22879200000011224,
+            "min": 0.18608400000016445,
+            "max": 2.362374999999929
+          },
+          "warmMs": {
+            "median": 0.03386583500000029,
+            "min": 0.030422499999999672,
+            "max": 0.049449789999999896
+          },
+          "holdingBytes": {
+            "median": 244912,
+            "min": 188184,
+            "max": 319800
+          },
+          "releasedBytes": {
+            "median": 228832,
+            "min": 173736,
+            "max": 233720
+          },
+          "allocationSamples": 258,
+          "sampledAllocationBytesPerCall": 42358.04,
+          "allocationIterations": 200
+        },
+        {
+          "name": "repeated",
+          "firstMs": {
+            "median": 0.10887500000012551,
+            "min": 0.08312500000010914,
+            "max": 0.1961670000000595
+          },
+          "warmMs": {
+            "median": 0.01324333499999966,
+            "min": 0.01238021000000117,
+            "max": 0.020648960000000896
+          },
+          "holdingBytes": {
+            "median": 87872,
+            "min": 76360,
+            "max": 103920
+          },
+          "releasedBytes": {
+            "median": 18848,
+            "min": 10712,
+            "max": 31184
+          },
+          "allocationSamples": 90,
+          "sampledAllocationBytesPerCall": 14767.52,
+          "allocationIterations": 200
+        },
+        {
+          "name": "dictionary",
+          "firstMs": {
+            "median": 0.12054200000011406,
+            "min": 0.10750000000007276,
+            "max": 0.2900840000002063
+          },
+          "warmMs": {
+            "median": 0.01726521000000048,
+            "min": 0.016722915000000286,
+            "max": 0.018451875000000655
+          },
+          "holdingBytes": {
+            "median": 169088,
+            "min": 139224,
+            "max": 184080
+          },
+          "releasedBytes": {
+            "median": 34640,
+            "min": 4776,
+            "max": 50128
+          },
+          "allocationSamples": 153,
+          "sampledAllocationBytesPerCall": 25116.36,
+          "allocationIterations": 200
+        },
+        {
+          "name": "consumed",
+          "firstMs": {
+            "median": 2.2991250000004584,
+            "min": 2.185082999999395,
+            "max": 4.689707999999882
+          },
+          "warmMs": {
+            "median": 1.1009162500000003,
+            "min": 1.068243124999999,
+            "max": 1.2085470850000002
+          },
+          "holdingBytes": {
+            "median": 341424,
+            "min": 281736,
+            "max": 456928
+          },
+          "releasedBytes": {
+            "median": 138152,
+            "min": 102584,
+            "max": 304480
+          },
+          "allocationSamples": 11723,
+          "sampledAllocationBytesPerCall": 1925033.84,
+          "allocationIterations": 200
+        },
+        {
+          "name": "nested",
+          "firstMs": {
+            "median": 4.112749999999323,
+            "min": 3.969583000000057,
+            "max": 4.291541999999936
+          },
+          "warmMs": {
+            "median": 0.17964687499999854,
+            "min": 0.1728287500000033,
+            "max": 0.1845408350000025
+          },
+          "holdingBytes": {
+            "median": 118608,
+            "min": 7096,
+            "max": 178992
+          },
+          "releasedBytes": {
+            "median": 37808,
+            "min": -58144,
+            "max": 113344
+          },
+          "allocationSamples": 1204,
+          "sampledAllocationBytesPerCall": 197699.92,
+          "allocationIterations": 200
+        },
+        {
+          "name": "closure",
+          "firstMs": {
+            "median": 0.7281249999996362,
+            "min": 0.5861669999994774,
+            "max": 1.3886669999992591
+          },
+          "warmMs": {
+            "median": 0.11142895500000122,
+            "min": 0.10682895499999631,
+            "max": 0.1352297899999985
+          },
+          "holdingBytes": {
+            "median": 844168,
+            "min": 668128,
+            "max": 946176
+          },
+          "releasedBytes": {
+            "median": 832344,
+            "min": 519168,
+            "max": 944272
+          },
+          "allocationSamples": 969,
+          "sampledAllocationBytesPerCall": 159119.72,
+          "allocationIterations": 200
+        },
+        {
+          "name": "view",
+          "firstMs": {
+            "median": 1.0834579999991547,
+            "min": 0.8918750000011642,
+            "max": 1.9237910000010743
+          },
+          "warmMs": {
+            "median": 0.2291791649999959,
+            "min": 0.2146260450000045,
+            "max": 0.2702020850000008
+          },
+          "holdingBytes": {
+            "median": 1225152,
+            "min": 1103352,
+            "max": 1248656
+          },
+          "releasedBytes": {
+            "median": 8247272,
+            "min": 8227952,
+            "max": 8281064
+          },
+          "allocationSamples": 1879,
+          "sampledAllocationBytesPerCall": 308603.2,
+          "allocationIterations": 200
+        }
+      ],
+      "cpuMonitoring": {
+        "samples": 24,
+        "firstUnixTime": 1793767647.207459,
+        "lastUnixTime": 1793767659.299714,
+        "peakTscChromeJestCpuPercent": 0
+      }
+    },
+    {
+      "checkpoint": "before",
+      "metadata": {
+        "root": "/tmp/wt-cache-before",
+        "node": "v26.13.0",
+        "runs": 9,
+        "iterations": 200,
+        "precision": "machine",
+        "entry": "core",
+        "jit": "off",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "commit": "17ba3b40716085d82aa2f2e50457ef9ad002b937",
+        "allocation": "inspector sampling, 32768-byte interval; separate from timings"
+      },
+      "workloads": [
+        {
+          "name": "control",
+          "firstMs": {
+            "median": 0.0030839999999443535,
+            "min": 0.002124999999978172,
+            "max": 0.01516700000001947
+          },
+          "warmMs": {
+            "median": 0.00017187500000034105,
+            "min": 0.0001625000000001364,
+            "max": 0.000417290000000321
+          },
+          "holdingBytes": {
+            "median": 20320,
+            "min": 18008,
+            "max": 30064
+          },
+          "releasedBytes": {
+            "median": 6248,
+            "min": 3504,
+            "max": 13304
+          },
+          "allocationSamples": 0,
+          "sampledAllocationBytesPerCall": 0,
+          "allocationIterations": 200
+        },
+        {
+          "name": "boxing",
+          "firstMs": {
+            "median": 0.046082999999953245,
+            "min": 0.034333000000060565,
+            "max": 0.2683749999999918
+          },
+          "warmMs": {
+            "median": 0.0029531250000002273,
+            "min": 0.00273416500000053,
+            "max": 0.003979585000000725
+          },
+          "holdingBytes": {
+            "median": 248928,
+            "min": 235912,
+            "max": 290776
+          },
+          "releasedBytes": {
+            "median": 26296,
+            "min": -5048,
+            "max": 68192
+          },
+          "allocationSamples": 24,
+          "sampledAllocationBytesPerCall": 3940.12,
+          "allocationIterations": 200
+        },
+        {
+          "name": "ordinary",
+          "firstMs": {
+            "median": 0.2716250000000855,
+            "min": 0.18904199999997218,
+            "max": 2.609042000000045
+          },
+          "warmMs": {
+            "median": 0.03262437500000033,
+            "min": 0.031141249999999444,
+            "max": 0.05033083000000033
+          },
+          "holdingBytes": {
+            "median": 244912,
+            "min": 188184,
+            "max": 319808
+          },
+          "releasedBytes": {
+            "median": 228832,
+            "min": 173736,
+            "max": 233728
+          },
+          "allocationSamples": 256,
+          "sampledAllocationBytesPerCall": 42025.2,
+          "allocationIterations": 200
+        },
+        {
+          "name": "repeated",
+          "firstMs": {
+            "median": 0.09987500000033833,
+            "min": 0.07308300000022427,
+            "max": 0.13137499999993452
+          },
+          "warmMs": {
+            "median": 0.013277709999999842,
+            "min": 0.012416459999999461,
+            "max": 0.015568959999998242
+          },
+          "holdingBytes": {
+            "median": 87872,
+            "min": 73216,
+            "max": 102864
+          },
+          "releasedBytes": {
+            "median": 18848,
+            "min": 7568,
+            "max": 31184
+          },
+          "allocationSamples": 114,
+          "sampledAllocationBytesPerCall": 18708.6,
+          "allocationIterations": 200
+        },
+        {
+          "name": "dictionary",
+          "firstMs": {
+            "median": 0.144959000000199,
+            "min": 0.12175000000024738,
+            "max": 0.29612500000030195
+          },
+          "warmMs": {
+            "median": 0.017862920000000032,
+            "min": 0.016681665000000977,
+            "max": 0.019478544999999486
+          },
+          "holdingBytes": {
+            "median": 172240,
+            "min": 139224,
+            "max": 185688
+          },
+          "releasedBytes": {
+            "median": 37792,
+            "min": 4776,
+            "max": 51736
+          },
+          "allocationSamples": 140,
+          "sampledAllocationBytesPerCall": 22982.6,
+          "allocationIterations": 200
+        },
+        {
+          "name": "consumed",
+          "firstMs": {
+            "median": 2.3462499999996,
+            "min": 2.268332999999984,
+            "max": 4.675416999999925
+          },
+          "warmMs": {
+            "median": 1.0906556249999995,
+            "min": 1.0697772899999973,
+            "max": 1.364579584999999
+          },
+          "holdingBytes": {
+            "median": 341384,
+            "min": 281736,
+            "max": 456928
+          },
+          "releasedBytes": {
+            "median": 138112,
+            "min": 102584,
+            "max": 304480
+          },
+          "allocationSamples": 11623,
+          "sampledAllocationBytesPerCall": 1908468.16,
+          "allocationIterations": 200
+        },
+        {
+          "name": "nested",
+          "firstMs": {
+            "median": 4.424207999999453,
+            "min": 4.157332999999198,
+            "max": 4.670665999999983
+          },
+          "warmMs": {
+            "median": 0.19198353999999654,
+            "min": 0.18469374999999671,
+            "max": 0.20907937500000118
+          },
+          "holdingBytes": {
+            "median": 118616,
+            "min": 7088,
+            "max": 178992
+          },
+          "releasedBytes": {
+            "median": 41272,
+            "min": -58152,
+            "max": 113344
+          },
+          "allocationSamples": 1253,
+          "sampledAllocationBytesPerCall": 205745.24,
+          "allocationIterations": 200
+        },
+        {
+          "name": "closure",
+          "firstMs": {
+            "median": 0.9784999999992579,
+            "min": 0.9355840000007447,
+            "max": 1.4075410000004922
+          },
+          "warmMs": {
+            "median": 0.1372181249999994,
+            "min": 0.11546395500000471,
+            "max": 0.21803729000000202
+          },
+          "holdingBytes": {
+            "median": 844168,
+            "min": 666464,
+            "max": 946680
+          },
+          "releasedBytes": {
+            "median": 832344,
+            "min": 529736,
+            "max": 937248
+          },
+          "allocationSamples": 980,
+          "sampledAllocationBytesPerCall": 160918.88,
+          "allocationIterations": 200
+        },
+        {
+          "name": "view",
+          "firstMs": {
+            "median": 1.1269999999985885,
+            "min": 1.0070829999986017,
+            "max": 2.1092919999991864
+          },
+          "warmMs": {
+            "median": 0.2543987500000003,
+            "min": 0.21895291499999986,
+            "max": 0.3080083350000041
+          },
+          "holdingBytes": {
+            "median": 1227176,
+            "min": 1101712,
+            "max": 1233472
+          },
+          "releasedBytes": {
+            "median": 8248848,
+            "min": 8229976,
+            "max": 8280840
+          },
+          "allocationSamples": 1881,
+          "sampledAllocationBytesPerCall": 308916.44,
+          "allocationIterations": 200
+        }
+      ],
+      "cpuMonitoring": {
+        "samples": 25,
+        "firstUnixTime": 1793767707.9065568,
+        "lastUnixTime": 1793767720.5436852,
+        "peakTscChromeJestCpuPercent": 16.1
+      }
+    },
+    {
+      "checkpoint": "nov1",
+      "metadata": {
+        "root": "/tmp/wt-cache-nov1",
+        "node": "v26.13.0",
+        "runs": 9,
+        "iterations": 200,
+        "precision": "machine",
+        "entry": "core",
+        "jit": "off",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "commit": "2bc8bf007aee0a560a4e6cf0bf76d110d48f21b4",
+        "allocation": "inspector sampling, 32768-byte interval; separate from timings"
+      },
+      "workloads": [
+        {
+          "name": "control",
+          "firstMs": {
+            "median": 0.003333999999995285,
+            "min": 0.0025830000000723885,
+            "max": 0.015209000000027117
+          },
+          "warmMs": {
+            "median": 0.0001689600000003111,
+            "min": 0.0001535400000000209,
+            "max": 0.00039979499999958534
+          },
+          "holdingBytes": {
+            "median": 20320,
+            "min": 18008,
+            "max": 30064
+          },
+          "releasedBytes": {
+            "median": 6248,
+            "min": 3504,
+            "max": 13304
+          },
+          "allocationSamples": 0,
+          "sampledAllocationBytesPerCall": 0,
+          "allocationIterations": 200
+        },
+        {
+          "name": "boxing",
+          "firstMs": {
+            "median": 0.04483299999992596,
+            "min": 0.03949999999986176,
+            "max": 0.2560839999998734
+          },
+          "warmMs": {
+            "median": 0.0030872899999997115,
+            "min": 0.0029179199999998674,
+            "max": 0.004195624999999837
+          },
+          "holdingBytes": {
+            "median": 260056,
+            "min": 248920,
+            "max": 335048
+          },
+          "releasedBytes": {
+            "median": 3856,
+            "min": -6816,
+            "max": 88480
+          },
+          "allocationSamples": 31,
+          "sampledAllocationBytesPerCall": 5091.44,
+          "allocationIterations": 200
+        },
+        {
+          "name": "ordinary",
+          "firstMs": {
+            "median": 0.3083750000000691,
+            "min": 0.21258399999987887,
+            "max": 2.6672909999999774
+          },
+          "warmMs": {
+            "median": 0.036355415000000446,
+            "min": 0.033635209999999915,
+            "max": 0.05729645500000061
+          },
+          "holdingBytes": {
+            "median": 268976,
+            "min": 167232,
+            "max": 312552
+          },
+          "releasedBytes": {
+            "median": 215688,
+            "min": 150960,
+            "max": 253848
+          },
+          "allocationSamples": 268,
+          "sampledAllocationBytesPerCall": 43998.36,
+          "allocationIterations": 200
+        },
+        {
+          "name": "repeated",
+          "firstMs": {
+            "median": 0.1014589999999771,
+            "min": 0.08483299999988958,
+            "max": 0.12708299999985684
+          },
+          "warmMs": {
+            "median": 0.013850625000000037,
+            "min": 0.012994375000000674,
+            "max": 0.016117289999999684
+          },
+          "holdingBytes": {
+            "median": 85528,
+            "min": 76632,
+            "max": 89832
+          },
+          "releasedBytes": {
+            "median": 19880,
+            "min": 10984,
+            "max": 24592
+          },
+          "allocationSamples": 131,
+          "sampledAllocationBytesPerCall": 21502.2,
+          "allocationIterations": 200
+        },
+        {
+          "name": "dictionary",
+          "firstMs": {
+            "median": 0.16362500000013824,
+            "min": 0.12329200000021956,
+            "max": 0.4609169999998812
+          },
+          "warmMs": {
+            "median": 0.01887187499999982,
+            "min": 0.018283959999998843,
+            "max": 0.020521040000000993
+          },
+          "holdingBytes": {
+            "median": 170592,
+            "min": 139224,
+            "max": 182504
+          },
+          "releasedBytes": {
+            "median": 36144,
+            "min": 4776,
+            "max": 48552
+          },
+          "allocationSamples": 173,
+          "sampledAllocationBytesPerCall": 28403.08,
+          "allocationIterations": 200
+        },
+        {
+          "name": "consumed",
+          "firstMs": {
+            "median": 2.389291999999841,
+            "min": 2.230959000000439,
+            "max": 5.1179159999996955
+          },
+          "warmMs": {
+            "median": 1.0188729199999988,
+            "min": 0.9985639550000042,
+            "max": 1.1273433299999989
+          },
+          "holdingBytes": {
+            "median": 245720,
+            "min": 122504,
+            "max": 326760
+          },
+          "releasedBytes": {
+            "median": 204192,
+            "min": 81424,
+            "max": 283392
+          },
+          "allocationSamples": 11720,
+          "sampledAllocationBytesPerCall": 1924469.64,
+          "allocationIterations": 200
+        },
+        {
+          "name": "nested",
+          "firstMs": {
+            "median": 4.232541999999739,
+            "min": 4.135333000000173,
+            "max": 6.32233400000041
+          },
+          "warmMs": {
+            "median": 0.18263396000000284,
+            "min": 0.17804791500000192,
+            "max": 0.18946666499999992
+          },
+          "holdingBytes": {
+            "median": 131952,
+            "min": -1064,
+            "max": 179048
+          },
+          "releasedBytes": {
+            "median": 38296,
+            "min": -66304,
+            "max": 113400
+          },
+          "allocationSamples": 1242,
+          "sampledAllocationBytesPerCall": 203951.96,
+          "allocationIterations": 200
+        },
+        {
+          "name": "closure",
+          "firstMs": {
+            "median": 0.7961250000007567,
+            "min": 0.6787920000006125,
+            "max": 1.8748749999995198
+          },
+          "warmMs": {
+            "median": 0.12393833000000086,
+            "min": 0.11785832999999911,
+            "max": 0.16596354000000246
+          },
+          "holdingBytes": {
+            "median": 917984,
+            "min": 672808,
+            "max": 945744
+          },
+          "releasedBytes": {
+            "median": 66000,
+            "min": -242512,
+            "max": 117984
+          },
+          "allocationSamples": 1013,
+          "sampledAllocationBytesPerCall": 166362.04,
+          "allocationIterations": 200
+        },
+        {
+          "name": "view",
+          "firstMs": {
+            "median": 1.2897499999999127,
+            "min": 1.1807090000002063,
+            "max": 1.6478750000005675
+          },
+          "warmMs": {
+            "median": 0.24045249999999213,
+            "min": 0.2285339600000043,
+            "max": 0.2782335400000011
+          },
+          "holdingBytes": {
+            "median": 1498968,
+            "min": 1377568,
+            "max": 1539856
+          },
+          "releasedBytes": {
+            "median": 178048,
+            "min": 105048,
+            "max": 202080
+          },
+          "allocationSamples": 1856,
+          "sampledAllocationBytesPerCall": 304799.08,
+          "allocationIterations": 200
+        }
+      ],
+      "cpuMonitoring": {
+        "samples": 24,
+        "firstUnixTime": 1793767626.592653,
+        "lastUnixTime": 1793767638.661345,
+        "peakTscChromeJestCpuPercent": 0
+      }
+    },
+    {
+      "checkpoint": "nov1",
+      "metadata": {
+        "root": "/tmp/wt-cache-nov1",
+        "node": "v26.13.0",
+        "runs": 9,
+        "iterations": 200,
+        "precision": "machine",
+        "entry": "core",
+        "jit": "off",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "commit": "2bc8bf007aee0a560a4e6cf0bf76d110d48f21b4",
+        "allocation": "inspector sampling, 32768-byte interval; separate from timings"
+      },
+      "workloads": [
+        {
+          "name": "control",
+          "firstMs": {
+            "median": 0.004208000000062384,
+            "min": 0.002000000000066393,
+            "max": 0.031000000000062755
+          },
+          "warmMs": {
+            "median": 0.00017791499999987082,
+            "min": 0.00013958000000002357,
+            "max": 0.00043812500000001364
+          },
+          "holdingBytes": {
+            "median": 20320,
+            "min": 18008,
+            "max": 30064
+          },
+          "releasedBytes": {
+            "median": 6248,
+            "min": 3504,
+            "max": 13304
+          },
+          "allocationSamples": 0,
+          "sampledAllocationBytesPerCall": 0,
+          "allocationIterations": 200
+        },
+        {
+          "name": "boxing",
+          "firstMs": {
+            "median": 0.050666999999975815,
+            "min": 0.03287499999987631,
+            "max": 0.36483300000008967
+          },
+          "warmMs": {
+            "median": 0.0032008350000000975,
+            "min": 0.0029079149999995477,
+            "max": 0.004150415000000293
+          },
+          "holdingBytes": {
+            "median": 260056,
+            "min": 248920,
+            "max": 335048
+          },
+          "releasedBytes": {
+            "median": 3856,
+            "min": -6816,
+            "max": 88480
+          },
+          "allocationSamples": 30,
+          "sampledAllocationBytesPerCall": 4926.8,
+          "allocationIterations": 200
+        },
+        {
+          "name": "ordinary",
+          "firstMs": {
+            "median": 0.3318749999998545,
+            "min": 0.20591699999999946,
+            "max": 2.6464579999999387
+          },
+          "warmMs": {
+            "median": 0.03634603999999968,
+            "min": 0.03417020999999977,
+            "max": 0.05676207999999974
+          },
+          "holdingBytes": {
+            "median": 268968,
+            "min": 165408,
+            "max": 312512
+          },
+          "releasedBytes": {
+            "median": 215648,
+            "min": 150960,
+            "max": 253840
+          },
+          "allocationSamples": 295,
+          "sampledAllocationBytesPerCall": 48425.84,
+          "allocationIterations": 200
+        },
+        {
+          "name": "repeated",
+          "firstMs": {
+            "median": 0.12470900000016627,
+            "min": 0.09237499999971988,
+            "max": 0.20937499999990905
+          },
+          "warmMs": {
+            "median": 0.01383478999999852,
+            "min": 0.013046249999999872,
+            "max": 0.020686249999998838
+          },
+          "holdingBytes": {
+            "median": 88904,
+            "min": 77496,
+            "max": 89832
+          },
+          "releasedBytes": {
+            "median": 19880,
+            "min": 11848,
+            "max": 24592
+          },
+          "allocationSamples": 88,
+          "sampledAllocationBytesPerCall": 14444.72,
+          "allocationIterations": 200
+        },
+        {
+          "name": "dictionary",
+          "firstMs": {
+            "median": 0.16466700000000856,
+            "min": 0.12741700000015044,
+            "max": 0.39645900000004985
+          },
+          "warmMs": {
+            "median": 0.01887187499999982,
+            "min": 0.018244165000000975,
+            "max": 0.019866664999999558
+          },
+          "holdingBytes": {
+            "median": 170592,
+            "min": 139224,
+            "max": 182504
+          },
+          "releasedBytes": {
+            "median": 36144,
+            "min": 4776,
+            "max": 48552
+          },
+          "allocationSamples": 134,
+          "sampledAllocationBytesPerCall": 21997.32,
+          "allocationIterations": 200
+        },
+        {
+          "name": "consumed",
+          "firstMs": {
+            "median": 2.3223750000006476,
+            "min": 2.257416000000376,
+            "max": 4.9409999999998035
+          },
+          "warmMs": {
+            "median": 1.0345120850000011,
+            "min": 1.0076070849999996,
+            "max": 1.1356268750000005
+          },
+          "holdingBytes": {
+            "median": 245720,
+            "min": 122504,
+            "max": 329808
+          },
+          "releasedBytes": {
+            "median": 204192,
+            "min": 81424,
+            "max": 286504
+          },
+          "allocationSamples": 11667,
+          "sampledAllocationBytesPerCall": 1915852.24,
+          "allocationIterations": 200
+        },
+        {
+          "name": "nested",
+          "firstMs": {
+            "median": 4.414958999999726,
+            "min": 4.2080419999992955,
+            "max": 4.589916000000812
+          },
+          "warmMs": {
+            "median": 0.18204187499999988,
+            "min": 0.17540250000000016,
+            "max": 0.19455812499999867
+          },
+          "holdingBytes": {
+            "median": 119096,
+            "min": -1064,
+            "max": 179048
+          },
+          "releasedBytes": {
+            "median": 38296,
+            "min": -66304,
+            "max": 113400
+          },
+          "allocationSamples": 1282,
+          "sampledAllocationBytesPerCall": 210507.32,
+          "allocationIterations": 200
+        },
+        {
+          "name": "closure",
+          "firstMs": {
+            "median": 0.833042000000205,
+            "min": 0.6630829999994603,
+            "max": 1.7185840000001917
+          },
+          "warmMs": {
+            "median": 0.13164937499999724,
+            "min": 0.12332103999999162,
+            "max": 0.16496708000000126
+          },
+          "holdingBytes": {
+            "median": 918848,
+            "min": 673664,
+            "max": 946824
+          },
+          "releasedBytes": {
+            "median": 66864,
+            "min": -241656,
+            "max": 119064
+          },
+          "allocationSamples": 1064,
+          "sampledAllocationBytesPerCall": 174709.12,
+          "allocationIterations": 200
+        },
+        {
+          "name": "view",
+          "firstMs": {
+            "median": 1.4086670000015147,
+            "min": 1.19733400000041,
+            "max": 1.8043330000000424
+          },
+          "warmMs": {
+            "median": 0.23651583500000015,
+            "min": 0.22581207999999606,
+            "max": 0.2789483350000046
+          },
+          "holdingBytes": {
+            "median": 1499064,
+            "min": 1377528,
+            "max": 1539792
+          },
+          "releasedBytes": {
+            "median": 178008,
+            "min": 105080,
+            "max": 203768
+          },
+          "allocationSamples": 1749,
+          "sampledAllocationBytesPerCall": 287222.28,
+          "allocationIterations": 200
+        }
+      ],
+      "cpuMonitoring": {
+        "samples": 25,
+        "firstUnixTime": 1793767763.239437,
+        "lastUnixTime": 1793767775.848707,
+        "peakTscChromeJestCpuPercent": 0
+      }
+    },
+    {
+      "checkpoint": "after",
+      "metadata": {
+        "root": "/tmp/wt-cache-review",
+        "node": "v26.13.0",
+        "runs": 9,
+        "iterations": 200,
+        "precision": "machine",
+        "entry": "core",
+        "jit": "off",
+        "trackedDiffSha256": "95989f4e257b829999c55e14cdc16bca9eba772e28050b08195a27a78efcd6e2",
+        "commit": "ada1705cb023852ae88667da817662ea19f366b9",
+        "allocation": "inspector sampling, 32768-byte interval; separate from timings"
+      },
+      "workloads": [
+        {
+          "name": "control",
+          "firstMs": {
+            "median": 0.003207999999972344,
+            "min": 0.002292000000011285,
+            "max": 0.01783299999999599
+          },
+          "warmMs": {
+            "median": 0.0001772950000002993,
+            "min": 0.00015541500000040286,
+            "max": 0.00047416499999997086
+          },
+          "holdingBytes": {
+            "median": 18008,
+            "min": 15056,
+            "max": 30064
+          },
+          "releasedBytes": {
+            "median": 3504,
+            "min": 984,
+            "max": 13304
+          },
+          "allocationSamples": 0,
+          "sampledAllocationBytesPerCall": 0,
+          "allocationIterations": 200
+        },
+        {
+          "name": "boxing",
+          "firstMs": {
+            "median": 0.043042000000014013,
+            "min": 0.037792000000081316,
+            "max": 0.30600000000004
+          },
+          "warmMs": {
+            "median": 0.0030406249999998637,
+            "min": 0.0027943750000008548,
+            "max": 0.0041012499999999365
+          },
+          "holdingBytes": {
+            "median": 258256,
+            "min": 250648,
+            "max": 336352
+          },
+          "releasedBytes": {
+            "median": 4432,
+            "min": -6928,
+            "max": 88480
+          },
+          "allocationSamples": 18,
+          "sampledAllocationBytesPerCall": 2958.36,
+          "allocationIterations": 200
+        },
+        {
+          "name": "ordinary",
+          "firstMs": {
+            "median": 0.24175000000013824,
+            "min": 0.20991699999990487,
+            "max": 3.8325830000001133
+          },
+          "warmMs": {
+            "median": 0.036970415000000686,
+            "min": 0.034256454999999734,
+            "max": 0.0625210400000003
+          },
+          "holdingBytes": {
+            "median": 265416,
+            "min": 161792,
+            "max": 338464
+          },
+          "releasedBytes": {
+            "median": 243416,
+            "min": 147344,
+            "max": 250344
+          },
+          "allocationSamples": 295,
+          "sampledAllocationBytesPerCall": 48423.68,
+          "allocationIterations": 200
+        },
+        {
+          "name": "repeated",
+          "firstMs": {
+            "median": 0.10062500000003638,
+            "min": 0.07983400000011898,
+            "max": 0.22354200000017954
+          },
+          "warmMs": {
+            "median": 0.013737499999999727,
+            "min": 0.01327250000000049,
+            "max": 0.014968125000000327
+          },
+          "holdingBytes": {
+            "median": 85224,
+            "min": 70592,
+            "max": 89456
+          },
+          "releasedBytes": {
+            "median": 17800,
+            "min": 6544,
+            "max": 25808
+          },
+          "allocationSamples": 122,
+          "sampledAllocationBytesPerCall": 20020,
+          "allocationIterations": 200
+        },
+        {
+          "name": "dictionary",
+          "firstMs": {
+            "median": 0.14487499999995634,
+            "min": 0.12670900000011898,
+            "max": 0.35945799999990413
+          },
+          "warmMs": {
+            "median": 0.018907500000000254,
+            "min": 0.01795312499999909,
+            "max": 0.020714375000000017
+          },
+          "holdingBytes": {
+            "median": 167752,
+            "min": 137704,
+            "max": 184048
+          },
+          "releasedBytes": {
+            "median": 34904,
+            "min": 4856,
+            "max": 51696
+          },
+          "allocationSamples": 176,
+          "sampledAllocationBytesPerCall": 28891.92,
+          "allocationIterations": 200
+        },
+        {
+          "name": "consumed",
+          "firstMs": {
+            "median": 2.4121249999998327,
+            "min": 2.3236249999999927,
+            "max": 4.833665999999994
+          },
+          "warmMs": {
+            "median": 1.09417375,
+            "min": 1.0379610400000001,
+            "max": 1.1498647900000014
+          },
+          "holdingBytes": {
+            "median": 273928,
+            "min": 128416,
+            "max": 347464
+          },
+          "releasedBytes": {
+            "median": 210664,
+            "min": 67904,
+            "max": 286952
+          },
+          "allocationSamples": 12067,
+          "sampledAllocationBytesPerCall": 1981539.36,
+          "allocationIterations": 200
+        },
+        {
+          "name": "nested",
+          "firstMs": {
+            "median": 4.371082999999999,
+            "min": 4.212249999999585,
+            "max": 4.5317919999997684
+          },
+          "warmMs": {
+            "median": 0.18223083499999576,
+            "min": 0.1763881249999986,
+            "max": 0.18886187500000232
+          },
+          "holdingBytes": {
+            "median": 124000,
+            "min": 56,
+            "max": 177440
+          },
+          "releasedBytes": {
+            "median": 28440,
+            "min": -63592,
+            "max": 113392
+          },
+          "allocationSamples": 1417,
+          "sampledAllocationBytesPerCall": 232643.96,
+          "allocationIterations": 200
+        },
+        {
+          "name": "closure",
+          "firstMs": {
+            "median": 0.8034999999999854,
+            "min": 0.7212920000001759,
+            "max": 1.7223330000006172
+          },
+          "warmMs": {
+            "median": 0.12835541499999636,
+            "min": 0.12126645500000449,
+            "max": 0.16546228999999585
+          },
+          "holdingBytes": {
+            "median": 944680,
+            "min": 663136,
+            "max": 945128
+          },
+          "releasedBytes": {
+            "median": 102904,
+            "min": -255504,
+            "max": 106408
+          },
+          "allocationSamples": 1097,
+          "sampledAllocationBytesPerCall": 180123.68,
+          "allocationIterations": 200
+        },
+        {
+          "name": "view",
+          "firstMs": {
+            "median": 1.3051250000007713,
+            "min": 1.1462500000016007,
+            "max": 1.6792089999999007
+          },
+          "warmMs": {
+            "median": 0.23016104000000268,
+            "min": 0.22386375000000044,
+            "max": 0.2720610450000004
+          },
+          "holdingBytes": {
+            "median": 1547968,
+            "min": 1539872,
+            "max": 1617704
+          },
+          "releasedBytes": {
+            "median": 163440,
+            "min": 104600,
+            "max": 375360
+          },
+          "allocationSamples": 1819,
+          "sampledAllocationBytesPerCall": 298736.04,
+          "allocationIterations": 200
+        }
+      ],
+      "cpuMonitoring": {
+        "samples": 24,
+        "firstUnixTime": 1793767605.846289,
+        "lastUnixTime": 1793767617.940592,
+        "peakTscChromeJestCpuPercent": 0
+      }
+    },
+    {
+      "checkpoint": "after",
+      "metadata": {
+        "root": "/tmp/wt-cache-review",
+        "node": "v26.13.0",
+        "runs": 9,
+        "iterations": 200,
+        "precision": "machine",
+        "entry": "core",
+        "jit": "off",
+        "trackedDiffSha256": "95989f4e257b829999c55e14cdc16bca9eba772e28050b08195a27a78efcd6e2",
+        "commit": "ada1705cb023852ae88667da817662ea19f366b9",
+        "allocation": "inspector sampling, 32768-byte interval; separate from timings"
+      },
+      "workloads": [
+        {
+          "name": "control",
+          "firstMs": {
+            "median": 0.003375000000005457,
+            "min": 0.002292000000011285,
+            "max": 0.01675000000000182
+          },
+          "warmMs": {
+            "median": 0.0001722949999998491,
+            "min": 0.00016625000000033196,
+            "max": 0.00043979000000035737
+          },
+          "holdingBytes": {
+            "median": 18008,
+            "min": 15056,
+            "max": 30064
+          },
+          "releasedBytes": {
+            "median": 3504,
+            "min": 984,
+            "max": 13304
+          },
+          "allocationSamples": 0,
+          "sampledAllocationBytesPerCall": 0,
+          "allocationIterations": 200
+        },
+        {
+          "name": "boxing",
+          "firstMs": {
+            "median": 0.049583999999867956,
+            "min": 0.03633300000001327,
+            "max": 0.31579199999987395
+          },
+          "warmMs": {
+            "median": 0.0031610449999993763,
+            "min": 0.0028233350000004976,
+            "max": 0.005561669999999594
+          },
+          "holdingBytes": {
+            "median": 258256,
+            "min": 250648,
+            "max": 338080
+          },
+          "releasedBytes": {
+            "median": 4432,
+            "min": -6928,
+            "max": 89056
+          },
+          "allocationSamples": 34,
+          "sampledAllocationBytesPerCall": 5585.08,
+          "allocationIterations": 200
+        },
+        {
+          "name": "ordinary",
+          "firstMs": {
+            "median": 0.23470900000006623,
+            "min": 0.2247500000000855,
+            "max": 2.8208750000001146
+          },
+          "warmMs": {
+            "median": 0.03644770999999992,
+            "min": 0.0338914550000004,
+            "max": 0.06280104000000052
+          },
+          "holdingBytes": {
+            "median": 265416,
+            "min": 161792,
+            "max": 338472
+          },
+          "releasedBytes": {
+            "median": 243424,
+            "min": 147344,
+            "max": 250344
+          },
+          "allocationSamples": 297,
+          "sampledAllocationBytesPerCall": 48762.36,
+          "allocationIterations": 200
+        },
+        {
+          "name": "repeated",
+          "firstMs": {
+            "median": 0.12249999999994543,
+            "min": 0.08983399999988251,
+            "max": 0.18870800000013332
+          },
+          "warmMs": {
+            "median": 0.013799579999999877,
+            "min": 0.013053124999999,
+            "max": 0.014593750000001364
+          },
+          "holdingBytes": {
+            "median": 85224,
+            "min": 70592,
+            "max": 89456
+          },
+          "releasedBytes": {
+            "median": 17800,
+            "min": 6544,
+            "max": 25808
+          },
+          "allocationSamples": 137,
+          "sampledAllocationBytesPerCall": 22487.08,
+          "allocationIterations": 200
+        },
+        {
+          "name": "dictionary",
+          "firstMs": {
+            "median": 0.16649999999981446,
+            "min": 0.1299999999996544,
+            "max": 0.34641700000020137
+          },
+          "warmMs": {
+            "median": 0.018917710000000625,
+            "min": 0.018057704999998803,
+            "max": 0.020062709999999696
+          },
+          "holdingBytes": {
+            "median": 167752,
+            "min": 137704,
+            "max": 184048
+          },
+          "releasedBytes": {
+            "median": 34904,
+            "min": 4856,
+            "max": 51696
+          },
+          "allocationSamples": 173,
+          "sampledAllocationBytesPerCall": 28406,
+          "allocationIterations": 200
+        },
+        {
+          "name": "consumed",
+          "firstMs": {
+            "median": 2.4713329999999587,
+            "min": 2.3114999999997963,
+            "max": 4.820833000000221
+          },
+          "warmMs": {
+            "median": 1.0976589599999989,
+            "min": 1.0288158350000003,
+            "max": 1.246578959999997
+          },
+          "holdingBytes": {
+            "median": 272816,
+            "min": 142640,
+            "max": 348520
+          },
+          "releasedBytes": {
+            "median": 209552,
+            "min": 82128,
+            "max": 288008
+          },
+          "allocationSamples": 12261,
+          "sampledAllocationBytesPerCall": 2013331.48,
+          "allocationIterations": 200
+        },
+        {
+          "name": "nested",
+          "firstMs": {
+            "median": 4.268291000000318,
+            "min": 4.1743749999996,
+            "max": 4.580082999999831
+          },
+          "warmMs": {
+            "median": 0.1812554199999977,
+            "min": 0.17630125000000135,
+            "max": 0.18987166499999603
+          },
+          "holdingBytes": {
+            "median": 124000,
+            "min": 8,
+            "max": 177560
+          },
+          "releasedBytes": {
+            "median": 28440,
+            "min": -63640,
+            "max": 113512
+          },
+          "allocationSamples": 1361,
+          "sampledAllocationBytesPerCall": 223479.92,
+          "allocationIterations": 200
+        },
+        {
+          "name": "closure",
+          "firstMs": {
+            "median": 0.8502079999998386,
+            "min": 0.7214579999999842,
+            "max": 1.77141599999959
+          },
+          "warmMs": {
+            "median": 0.1306824999999935,
+            "min": 0.12108958499999972,
+            "max": 0.16538146000000326
+          },
+          "holdingBytes": {
+            "median": 943816,
+            "min": 661192,
+            "max": 944648
+          },
+          "releasedBytes": {
+            "median": 102872,
+            "min": -257448,
+            "max": 105096
+          },
+          "allocationSamples": 1033,
+          "sampledAllocationBytesPerCall": 169610.96,
+          "allocationIterations": 200
+        },
+        {
+          "name": "view",
+          "firstMs": {
+            "median": 1.3822919999984151,
+            "min": 1.2709999999988213,
+            "max": 1.6337919999987207
+          },
+          "warmMs": {
+            "median": 0.24631207999999788,
+            "min": 0.22938750000000255,
+            "max": 0.316455834999997
+          },
+          "holdingBytes": {
+            "median": 1593080,
+            "min": 1539808,
+            "max": 1617824
+          },
+          "releasedBytes": {
+            "median": 208552,
+            "min": 104600,
+            "max": 375408
+          },
+          "allocationSamples": 1845,
+          "sampledAllocationBytesPerCall": 303017.2,
+          "allocationIterations": 200
+        }
+      ],
+      "cpuMonitoring": {
+        "samples": 25,
+        "firstUnixTime": 1793767680.951075,
+        "lastUnixTime": 1793767693.5768309,
+        "peakTscChromeJestCpuPercent": 38.4
+      }
+    },
+    {
+      "checkpoint": "after",
+      "metadata": {
+        "root": "/tmp/wt-cache-review",
+        "node": "v26.13.0",
+        "runs": 9,
+        "iterations": 200,
+        "precision": "machine",
+        "entry": "core",
+        "jit": "off",
+        "trackedDiffSha256": "95989f4e257b829999c55e14cdc16bca9eba772e28050b08195a27a78efcd6e2",
+        "commit": "ada1705cb023852ae88667da817662ea19f366b9",
+        "allocation": "inspector sampling, 32768-byte interval; separate from timings"
+      },
+      "workloads": [
+        {
+          "name": "control",
+          "firstMs": {
+            "median": 0.00358399999993253,
+            "min": 0.0025000000000545697,
+            "max": 0.015625
+          },
+          "warmMs": {
+            "median": 0.00018104500000049484,
+            "min": 0.00015395499999954154,
+            "max": 0.00039874999999995
+          },
+          "holdingBytes": {
+            "median": 18008,
+            "min": 15056,
+            "max": 30064
+          },
+          "releasedBytes": {
+            "median": 3504,
+            "min": 984,
+            "max": 13304
+          },
+          "allocationSamples": 0,
+          "sampledAllocationBytesPerCall": 0,
+          "allocationIterations": 200
+        },
+        {
+          "name": "boxing",
+          "firstMs": {
+            "median": 0.04862500000012915,
+            "min": 0.03674999999998363,
+            "max": 0.3090830000001006
+          },
+          "warmMs": {
+            "median": 0.0034377099999994697,
+            "min": 0.002868540000000621,
+            "max": 0.004057705000000169
+          },
+          "holdingBytes": {
+            "median": 258256,
+            "min": 250648,
+            "max": 338128
+          },
+          "releasedBytes": {
+            "median": 4432,
+            "min": -6928,
+            "max": 89104
+          },
+          "allocationSamples": 24,
+          "sampledAllocationBytesPerCall": 3940.56,
+          "allocationIterations": 200
+        },
+        {
+          "name": "ordinary",
+          "firstMs": {
+            "median": 0.26825000000008004,
+            "min": 0.22925000000009277,
+            "max": 2.8845840000001317
+          },
+          "warmMs": {
+            "median": 0.037716249999999715,
+            "min": 0.0355879200000004,
+            "max": 0.05964417000000026
+          },
+          "holdingBytes": {
+            "median": 265416,
+            "min": 161792,
+            "max": 338472
+          },
+          "releasedBytes": {
+            "median": 243424,
+            "min": 147344,
+            "max": 250344
+          },
+          "allocationSamples": 281,
+          "sampledAllocationBytesPerCall": 46129.24,
+          "allocationIterations": 200
+        },
+        {
+          "name": "repeated",
+          "firstMs": {
+            "median": 0.10474999999996726,
+            "min": 0.07699999999977081,
+            "max": 0.1474169999996775
+          },
+          "warmMs": {
+            "median": 0.013881874999999582,
+            "min": 0.013050000000000637,
+            "max": 0.014477084999998623
+          },
+          "holdingBytes": {
+            "median": 85224,
+            "min": 70592,
+            "max": 89456
+          },
+          "releasedBytes": {
+            "median": 17800,
+            "min": 6544,
+            "max": 25808
+          },
+          "allocationSamples": 115,
+          "sampledAllocationBytesPerCall": 18874.96,
+          "allocationIterations": 200
+        },
+        {
+          "name": "dictionary",
+          "firstMs": {
+            "median": 0.1530840000000353,
+            "min": 0.12854199999992488,
+            "max": 0.3555830000000242
+          },
+          "warmMs": {
+            "median": 0.01870687500000031,
+            "min": 0.017971040000002176,
+            "max": 0.019005624999999783
+          },
+          "holdingBytes": {
+            "median": 167752,
+            "min": 137704,
+            "max": 184048
+          },
+          "releasedBytes": {
+            "median": 34904,
+            "min": 4856,
+            "max": 51696
+          },
+          "allocationSamples": 152,
+          "sampledAllocationBytesPerCall": 24950.08,
+          "allocationIterations": 200
+        },
+        {
+          "name": "consumed",
+          "firstMs": {
+            "median": 2.4070419999998194,
+            "min": 2.2347910000007687,
+            "max": 4.956958999999642
+          },
+          "warmMs": {
+            "median": 1.0671089600000006,
+            "min": 1.0404781249999997,
+            "max": 1.171643335000001
+          },
+          "holdingBytes": {
+            "median": 273896,
+            "min": 142472,
+            "max": 333312
+          },
+          "releasedBytes": {
+            "median": 210632,
+            "min": 81960,
+            "max": 272896
+          },
+          "allocationSamples": 12264,
+          "sampledAllocationBytesPerCall": 2013872.92,
+          "allocationIterations": 200
+        },
+        {
+          "name": "nested",
+          "firstMs": {
+            "median": 4.295249999999214,
+            "min": 4.222750000000815,
+            "max": 4.682624999999462
+          },
+          "warmMs": {
+            "median": 0.1812893750000012,
+            "min": 0.17447333499999787,
+            "max": 0.19234603999999764
+          },
+          "holdingBytes": {
+            "median": 124000,
+            "min": 56,
+            "max": 177440
+          },
+          "releasedBytes": {
+            "median": 28440,
+            "min": -63592,
+            "max": 113392
+          },
+          "allocationSamples": 1416,
+          "sampledAllocationBytesPerCall": 232485.68,
+          "allocationIterations": 200
+        },
+        {
+          "name": "closure",
+          "firstMs": {
+            "median": 0.8385419999995065,
+            "min": 0.7044169999999212,
+            "max": 1.7122919999992519
+          },
+          "warmMs": {
+            "median": 0.12754187499999717,
+            "min": 0.12078375000000051,
+            "max": 0.17595499999999903
+          },
+          "holdingBytes": {
+            "median": 944648,
+            "min": 661192,
+            "max": 945080
+          },
+          "releasedBytes": {
+            "median": 102872,
+            "min": -257448,
+            "max": 106360
+          },
+          "allocationSamples": 1112,
+          "sampledAllocationBytesPerCall": 182592.28,
+          "allocationIterations": 200
+        },
+        {
+          "name": "view",
+          "firstMs": {
+            "median": 1.265666000001147,
+            "min": 1.241374999999607,
+            "max": 1.5620419999995647
+          },
+          "warmMs": {
+            "median": 0.23643957999999657,
+            "min": 0.22104583499999536,
+            "max": 0.3517964599999959
+          },
+          "holdingBytes": {
+            "median": 1547976,
+            "min": 1539872,
+            "max": 1617704
+          },
+          "releasedBytes": {
+            "median": 163448,
+            "min": 104600,
+            "max": 375360
+          },
+          "allocationSamples": 1885,
+          "sampledAllocationBytesPerCall": 309591.56,
+          "allocationIterations": 200
+        }
+      ],
+      "cpuMonitoring": {
+        "samples": 24,
+        "firstUnixTime": 1793767728.505559,
+        "lastUnixTime": 1793767740.590952,
+        "peakTscChromeJestCpuPercent": 0
+      }
+    }
+  ],
+  "rskWorkCounts": {
+    "before": 3089,
+    "after": 159,
+    "repetitionsPerTree": 14,
+    "result": "Independent row-insertion oracle passed on both trees; cache statistics enabled only for second call after a distinct warmup input.",
+    "reproductionScript": "import assert from 'node:assert/strict';\nimport {performance} from 'node:perf_hooks';\nimport {pathToFileURL} from 'node:url';\nconst root=process.argv[2];\nconst {ComputeEngine}=await import(pathToFileURL(root+'/src/core.ts').href);\nconst {RSK_ROW_INSERTION}=await import(pathToFileURL('/Users/arno/dev/compute-engine/test/compute-engine/fixtures/rsk-row-insertion.ts').href);\nconst oracle=(p:number[])=>{ const rows:number[][]=[];for(let v of p){let j=0;while(true){const row=rows[j]??(rows[j]=[]);const k=row.findIndex(x=>x>v);if(k<0){row.push(v);break;}[row[k],v]=[v,row[k]];j++;}}return ['List',...rows.map(r=>['List',...r])];};\nconst times=[],counts=[];\nfor(let t=0;t<7;t++){\n const ce=new ComputeEngine();ce.precision='machine';ce.jit='off';\n const f=ce.box(['Function',RSK_ROW_INSERTION,'_raw']);\n const apply=(p:number[])=>ce.function('Apply',[f,ce.box(['List',...p])]).evaluate();\n const p=[4,3,2,1];assert.deepEqual(apply(p).json,oracle(p));\n ce._cacheStats.reset();ce._cacheStats.enabled=true;\n const q=[3,1,2];const start=performance.now();const result=apply(q);times.push(performance.now()-start);\n assert.deepEqual(result.json,oracle(q));counts.push(ce._cacheStats.snapshot().caches.type.missGeneration);\n ce._cacheStats.enabled=false;\n}\nconsole.log(JSON.stringify({root,timesMs:times,typeMissGeneration:counts}));\n",
+    "rawRuns": [
+      {
+        "root": "/tmp/wt-cache-before",
+        "timesMs": [
+          55.18125000000009,
+          48.299666,
+          48.43079199999988,
+          48.644542,
+          48.59404100000006,
+          44.975832999999966,
+          47.86050000000023
+        ],
+        "typeMissGeneration": [
+          3089,
+          3089,
+          3089,
+          3089,
+          3089,
+          3089,
+          3089
+        ]
+      },
+      {
+        "root": "/tmp/wt-cache-review",
+        "timesMs": [
+          12.888750000000073,
+          9.546083000000067,
+          9.182792000000063,
+          8.507749999999987,
+          7.948333000000048,
+          7.608167000000094,
+          7.637416999999914
+        ],
+        "typeMissGeneration": [
+          159,
+          159,
+          159,
+          159,
+          159,
+          159,
+          159
+        ]
+      },
+      {
+        "root": "/tmp/wt-cache-review",
+        "timesMs": [
+          12.248415999999906,
+          9.935791999999992,
+          9.731999999999971,
+          8.169667000000004,
+          8.808624999999893,
+          8.164667000000009,
+          7.131417000000056
+        ],
+        "typeMissGeneration": [
+          159,
+          159,
+          159,
+          159,
+          159,
+          159,
+          159
+        ]
+      },
+      {
+        "root": "/tmp/wt-cache-before",
+        "timesMs": [
+          54.96625000000006,
+          48.57412499999998,
+          46.57287500000007,
+          47.89208400000007,
+          47.20383300000003,
+          45.76670899999999,
+          43.41558399999985
+        ],
+        "typeMissGeneration": [
+          3089,
+          3089,
+          3089,
+          3089,
+          3089,
+          3089,
+          3089
+        ]
+      }
+    ]
+  }
+}

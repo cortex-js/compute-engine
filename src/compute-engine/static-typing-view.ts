@@ -1,85 +1,13 @@
 /**
- * The static view of the bindings, which a type computation reads.
+ * Type computations read declared bindings, not a call's parameter values.
+ * Lookup restores hidden body bindings and skips the corresponding active
+ * call frame. Captured frames reached through other chains remain visible.
+ * The view belongs to one engine and follows its evaluation-context stack,
+ * including suspended applications.
  *
- * The type of a node of the body of a function literal comes from the
- * declared (static) bindings only: a type computation never reads the values
- * that a call gives the parameters. (ROADMAP CE-689, option (A), user
- * decision 2026-10-30.)
- *
- * A call of a function literal makes a new scope, the call frame, and
- * declares in it the parameters with the values of the arguments, and the
- * assignment locals of the body. While the call runs, the parent of the
- * body scope (the scope of the body `Block`) is the frame, and the bindings
- * that the canonicalization made in the body scope for the parameters and
- * for the inferred, valueless names are taken out of it
- * (`hideBodyScopeParams()`, `function-utils.ts`). So a name that a node of
- * the body reads by name (`lookup()`, `function-utils.ts`, and
- * `bindingInContext()`, `boxed-expression/binders.ts`) finds the binding of
- * the call, and its value.
- *
- * While a type computation of an engine runs (`withStaticTypingView()`),
- * these walks of the scope chain read the bindings as they are outside every
- * call:
- *
- * - the body scope of a function literal that is being applied (also while
- *   the application is suspended at an `await`) answers its own bindings
- *   and the bindings that the application took out of it;
- * - the frame of the application, when it is the parent of that body scope,
- *   is skipped: the walk goes on to the parent of the frame, which is the
- *   scope where the literal was defined;
- * - a frame where the walk starts (the statements of a body run in the
- *   frame) answers what the body scope answers, when the frame is on the
- *   current evaluation-context stack of the engine.
- *
- * A type is then the same in every call, and outside every call. The type
- * cache of a function expression (`BoxedFunction.type`) is keyed on a
- * version that the declarations of a call and the pop of its frame do not
- * advance (`typeVersion`, `engine-configuration-lifecycle.ts`), so the
- * nodes of a function body are not typed again at each call.
- *
- * A frame that the walk reaches in another way (the parent of the scope of
- * a closure that a call made), or a frame that is not on the current stack
- * (the captured frame of a returned closure), is read as it is: the nodes of
- * such a closure are made by the call, and the frame does not change after
- * the call.
- *
- * The frames in progress are read from the current evaluation-context stack
- * of the engine (`_evalContextStack`), not from a list of pushes and pops:
- * the stack can be replaced (the `contextStack` setter, the copy of the
- * stack that an awaited application runs on), and a frame of a suspended
- * application is then not on the current stack.
- *
- * The view belongs to the engine of the type computation. The frames, the
- * body scopes and the bindings taken out of them are recorded with the
- * engine of the application that made them (`noteHiddenBodyBindings()`),
- * and the view changes a walk only at the scopes of its own engine. A walk
- * of the scopes of another engine (a type handler of one engine that reads
- * or evaluates an expression of a second engine while a call of the second
- * engine runs) reads the bindings of the second engine as they are, and the
- * second engine reads the values of its parameters. An evaluation of the
- * same engine inside a type computation stays in the view, so that a type
- * does not depend on the values of a call: an application of a function
- * literal there reads its parameters with no value. A type handler must not
- * evaluate, but only test runs enforce it (`guardedTypeHandlerCall()`,
- * `boxed-expression/operand-descriptor.ts`, refuses a handler that moves a
- * version of the engine when `NODE_ENV` is `test` or `CE_TYPE_PURITY_GUARD`
- * is set, and an application declares its parameters, which moves one). In
- * other runs such an evaluation gives a result computed in the view, and no
- * cache keeps it for an evaluation outside the view: the caches keyed on
- * `_cacheGeneration()` get a key of their own, and the application memo is
- * not used (`validApplicationMemo()`, `function-utils.ts`).
- *
- * The other caches (sign, value, evaluation memos, effects) depend on the
- * values of the parameters. A value that one of them computes inside a type
- * computation is computed in the static view, and is stored under a key of
- * its own, so that an evaluation never reads it (`staticViewDiverges()`,
- * `ComputeEngine._cacheGeneration()`, `BoxedFunction._effectsOf()`). The
- * view differs while an application of a function literal of the engine
- * runs, also when it is suspended on a stack of its own: a count for each
- * engine of the body scopes that are being applied tells it.
- *
- * This module imports types only, so that each module can import it with
- * no dependency cycle.
+ * Value-dependent caches must distinguish computations inside this view from
+ * ordinary evaluation. Keep this module type-only to avoid dependency cycles.
+ * See docs/TYPE-SYSTEM.md, "Static binding view", for lookup and cache rules.
  */
 
 import type { Scope } from './types-kernel-evaluation.js';

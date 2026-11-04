@@ -4,22 +4,10 @@ import { RSK_ROW_INSERTION } from './fixtures/rsk-row-insertion';
 import { lookup } from '../../src/compute-engine/function-utils';
 import { withStaticTypingView } from '../../src/compute-engine/static-typing-view';
 
-// ROADMAP CE-689 (GitHub issue #487). A call of a function literal declares
-// its parameters in a new scope and pops its frame at the end. Both events
-// advance the `any` version, the key of the sign and value caches of every
-// node, because a node of the body reads the values of the parameters by
-// name. The type cache was keyed on the same version, so every cached type
-// was computed again after each call, with the same result: one `Apply` of
-// the issue's function (8 nested `Fold`s, 75 calls) recomputed 6,332 types.
-//
-// The type cache is now keyed on a second version that these two events do
-// not advance (`typeVersion`, `engine-configuration-lifecycle.ts`). That is
-// sound because a type is computed in the static view of the bindings
-// (`static-typing-view.ts`): a type computation never reads the binding that
-// a call gives a parameter, so a type is the same in every call. The sign
-// and value caches keep the `any` version: the last two blocks below are the
-// cases that CE-531 and CE-334 record as wrong when a call advances
-// nothing.
+// Function-body types read static bindings, so activation declarations and
+// frame pops must not invalidate them. Sign and value caches still depend on
+// argument values and use the ordinary version. See docs/TYPE-SYSTEM.md,
+// "Static binding view", for the lookup and invalidation rules.
 
 const fill = (n: unknown, v: unknown): unknown =>
   n === '_raw' ? v : Array.isArray(n) ? n.map((o) => fill(o, v)) : n;
@@ -66,14 +54,11 @@ describe('CE-689: the type cache across calls of a function literal', () => {
       ce._cacheStats.enabled = false;
     }
     expect(value).toBe('["List",["List",1,2],["List",3]]');
-    // 6,332 before the type version; 161 with it (the types of the nodes
-    // that the evaluation makes are cold misses, not counted here). The 161
-    // are nodes of the body of a nested literal, read in the frame of the
-    // literal that contains it and then in its own frame: the type cache is
-    // also keyed on the innermost call frame (`innermostCallFrameBody()`,
-    // `static-typing-view.ts`).
-    expect(ce._cacheStats.snapshot().caches.type.missGeneration).toBeLessThan(
-      250
+    // The warmed workload records 159 generation misses. A small allowance
+    // catches gradual invalidation drift; newly constructed nodes contribute
+    // cold misses separately. See benchmarks/README.md for the paired run.
+    expect(ce._cacheStats.snapshot().caches.type.missGeneration).toBeLessThanOrEqual(
+      170
     );
   });
 
@@ -162,7 +147,6 @@ describe('CE-689: the type cache across calls of a function literal', () => {
     // scope.
     const ce = new ComputeEngine();
     const other = new ComputeEngine();
-    let yNode: any;
     let n = 0;
     const seen: string[] = [];
     ce.declare('ReadOther689', {
@@ -191,7 +175,7 @@ describe('CE-689: the type cache across calls of a function literal', () => {
       2,
     ]);
     const sum = find(application, (e) => e.operator === 'Sum');
-    yNode = find(sum, (e) => e.symbol === 'y');
+    const yNode: any = find(sum, (e) => e.symbol === 'y');
     expect(application.evaluate().toString()).toBe('3');
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.every((v) => v === '2')).toBe(true);
@@ -341,7 +325,6 @@ describe('CE-689: the type cache across calls of a function literal', () => {
     // and the literal has no effects. The read at the start of the second
     // call served the type read outside the call.
     const ce = new ComputeEngine();
-    let literal: any;
     ce.declare('ReadLiteralType689', {
       signature: '() -> string',
       evaluate: () => ce.string(literal.type.toString()),
@@ -356,7 +339,7 @@ describe('CE-689: the type cache across calls of a function literal', () => {
 }`
     );
     const def: any = ce.lookupDefinition('outer');
-    literal = find(
+    const literal: any = find(
       def.operator._lambdaLiteral,
       (e) =>
         e.operator === 'Function' &&

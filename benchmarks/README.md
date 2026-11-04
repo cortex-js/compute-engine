@@ -513,3 +513,110 @@ hold the shared-box lock and verify that competing tests are absent.
 node --import tsx benchmarks/numeric-selection.mjs BASELINE_ROOT CANDIDATE_ROOT --check
 node --import tsx benchmarks/numeric-selection.mjs BASELINE_ROOT CANDIDATE_ROOT
 ```
+
+## Evaluation lifetimes (`evaluation-lifetimes.mjs`)
+
+Use this paired interpreter harness for ordinary calls with distinct arguments,
+repeated evaluation, dictionaries, immediately consumed lazy maps, repeated evaluation of four nested
+maps, and escaping closures and views. It sets `jit = 'off'` to exclude implicit
+compilation. Setup is untimed. First calls use fresh engines; warm batches follow
+ten warmup calls on each engine. Assertions check mathematical results, including
+all cells of every retained escaping view, outside timed sections. Warm batches
+retain their results intentionally: compare equal batch sizes. The boxing control
+separates call construction from the ordinary boxing-plus-evaluation workload. The first-call median is
+not process startup latency: the module and runtime can already be warm.
+
+Hold the box lock and verify CPU activity before timing. Run sequentially in
+alternating order against detached worktrees with the same dependencies:
+
+```sh
+RUNS=9 ITERATIONS=200 node --expose-gc --import tsx benchmarks/evaluation-lifetimes.mjs /tmp/wt-before
+RUNS=9 ITERATIONS=200 node --expose-gc --import tsx benchmarks/evaluation-lifetimes.mjs /tmp/wt-after
+```
+
+Each JSON line reports first-call and warm per-call milliseconds (median and
+range), three separate retained-heap samples while holding unconsumed results and after
+validation and release (including engine caches),
+and inspector allocation sampling at a 32 KiB interval including collected
+objects, with sample counts and estimated bytes per call. Allocation sampling
+uses at least 200 calls. GC samples yield to a new event-loop job so WeakRef
+targets can be collected. Heap deltas can be negative because GC reclaims unrelated engine/JIT
+state; neither these deltas nor allocation samples establish a leak. Repeat
+memory samples in fresh processes before interpreting differences. The constant
+control measures harness overhead. Compare only medians from repeated alternating process pairs. Smaller changes need repeated paired runs;
+ordinary Jest timing thresholds are not a substitute for that comparison.
+
+### November 3 review measurements
+
+Raw process results and measurement conditions are in
+[`evaluation-lifetimes-2026-11-03.json`](evaluation-lifetimes-2026-11-03.json).
+Apple M5 Max (18 cores), Node 26.13.0, source via tsx, machine precision,
+`jit = 'off'`; nine fresh-engine trials per process, ten warmup calls, 200
+calls per warm batch. Setup and validation are untimed. First-call figures
+are fresh-engine calls within a loaded process, not module startup.
+
+The table compares `17ba3b407` (immediately before `5029c5d77`) with
+`ada1705cb` plus comment-only source edits. It uses three accepted processes
+per tree, taking the median of their nine-trial medians. Each process was
+monitored throughout; typecheck overlaps were excluded and retried. No test
+workers or CPU-bound browser renderers were active in accepted runs. Ordinary
+desktop/esbuild activity remained. Both trees passed every mathematical check,
+including every cell of every escaped view and activation isolation after
+all calls completed. The constant control stayed near 0.0002 ms warm.
+
+| Workload | First call ms, before → after | Warm ms/call, before → after | Warm change |
+| --- | ---: | ---: | ---: |
+| boxing | 0.046 → 0.049 | 0.0031 → 0.0032 | +4% |
+| ordinary | 0.247 → 0.242 | 0.0333 → 0.0370 | +11% |
+| repeated | 0.109 → 0.105 | 0.0132 → 0.0138 | +4% |
+| dictionary | 0.126 → 0.153 | 0.0173 → 0.0189 | +9% |
+| consumed | 2.346 → 2.412 | 1.1009 → 1.0942 | -1% |
+| nested | 4.124 → 4.295 | 0.1805 → 0.1813 | +0% |
+| closure | 0.744 → 0.839 | 0.1152 → 0.1284 | +11% |
+| view | 1.120 → 1.305 | 0.2308 → 0.2364 | +2% |
+
+The broader October 27 checkpoint (`f5d991902`, two accepted processes) has
+ordinary calls at 0.0329 ms warm and closures at 0.1039 ms, versus 0.0370 and
+0.1284 ms at current HEAD: about 12% and 24% slower. The November 1 checkpoint
+(`2bc8bf007`, two accepted processes) already has ordinary calls at 0.0364 ms
+and closures at 0.1278 ms. This localizes most of these costs to the earlier
+part of the interval; it does not assign them to a single commit. First-call
+ranges are substantially wider than warm ranges; do not read their point
+estimates as evidence of small regressions. These are representative programs,
+not a corpus-wide score. The nested case repeats one four-Map expression;
+its warm result includes the evaluation caches it exercises.
+
+Allocation samples support a real cost increase on some routes: ordinary calls
+use about 41 → 47 KiB/call, closures 155 → 176 KiB/call, repeated nested maps
+201 → 227 KiB/call, and consumed maps 1864 → 1966 KiB/call. These are statistical
+allocation estimates at a 32 KiB sampling interval, not exact allocation counts.
+Escaping views are about 301 → 296 KiB/call and do not show the same increase.
+
+Holding 200 unconsumed closures uses about 824 → 923 KiB above the warmed
+baseline; holding 200 views uses 1198 → 1512 KiB. After validation and release,
+the corresponding deltas are about 813 → 100 KiB and 8054 → 160 KiB. Validation
+invokes closures and drains views, populating caches: these readings describe
+that whole lifecycle and do not establish leaks or prove which reference kept
+an object alive. Memory savings after release coexist with higher held-result
+costs.
+
+The nested-Fold fixture of issue #487 provides a counterweight to the small-call
+costs. After one distinct warmup input, the next input records exactly 3089 type
+generation misses before and 159 after, repeated fourteen times per tree, with
+an independent row-insertion oracle. A typechecker overlapped the timing probe,
+so its elapsed times are excluded. The work-count benefit supports keeping the
+static type view; the regression test's miss budget is tightened from <250 to
+≤170 to catch gradual invalidation drift. The dictionary test now counts exact
+leaf evaluations at several DAG depths rather than relying only on a timeout.
+
+Review choices: retain the store guards, static binding view and escaping-frame
+rules. The measurements do not support removing these correctness mechanisms.
+No runtime refactoring is included. Separate, measured follow-ups could target
+parameter-by-parameter result scans, repeated context-transfer walks, and stack
+copies on each lazy iterator step. Combining them would require preserving DAG
+sharing, binder identity, escape boundaries, async isolation and iterator cleanup.
+Likewise, reducing a captured frame to referenced bindings is a lifetime-design
+change, not a comment cleanup. Existing timing tests primarily catch catastrophic
+slowdowns; exact work-count tests catch particular mechanisms, while this paired
+harness supplies a repeatable baseline for smaller drift. Automated trend tracking
+across quiet runs would be a separate task.
