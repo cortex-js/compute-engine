@@ -65,6 +65,18 @@
 
 ### Behavior Changes
 
+- **Compilation: a parameter default that names a constant declared by the
+  host compiles.** With `ce.declare('W0', { isConstant: true, value: 5 })`
+  and `f := (k = W0) ↦ k + 1`, the compiled `f()` is `f(5)` and gives 6, as
+  the interpreter does. Before, the compilation declined on every target
+  (#490). Compiled code fills the value of the constant, read where the
+  function is declared, not its name, so a local of the same name or a
+  `vars` entry where the call is made does not change it. The value must be
+  a number, a string, a boolean, a list or tuple of such values, or `{}`;
+  any other value still declines. A default that names an Epsil `const`
+  still declines when the program is compiled before it runs: the constant
+  has no value at compile time. To compile such a function, write the value
+  as the default, or pass the argument.
 - **Compilation: a value that can be `Nothing` declines with one
   diagnostic code, read from static types.** Compiled code has no
   representation of `Nothing` as a value. A `Tuple` coordinate, an element

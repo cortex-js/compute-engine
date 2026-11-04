@@ -20,7 +20,7 @@ import {
   optionalParameterDefault,
 } from '../boxed-expression/function-literal.js';
 import {
-  compiledSymbolDefaultDeclines,
+  compiledDefaultOperand,
   literalTakesArgumentCount,
 } from './compile-parameter-defaults.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
@@ -1037,23 +1037,25 @@ function tryUnrollMap(
   // `Map` would read (`completedLiteralArguments`).
   if (!isFunction(lambda, 'Function') || !literalTakesArgumentCount(lambda, 1))
     return undefined;
-  // A symbol default that compiled code does not fill (a constant that the
-  // host or the program declares) is not substituted: the `Map` is not
-  // unrolled, and its compilation declines (`compiledSymbolDefaultDeclines()`).
+  // A constant that the host or the program declares is substituted by its
+  // value, not by its name (`compiledDefaultOperand()`). A constant with no
+  // value that compiled code can write is not substituted: the `Map` is not
+  // unrolled, and the compilation of the callback declines.
   const defaults: Record<string, Expression> = {};
   for (const p of lambda.ops.slice(2)) {
     const name = functionLiteralParameterName(p);
     if (!name) return undefined;
     const d = optionalParameterDefault(p)!;
-    if (
-      compiledSymbolDefaultDeclines(
+    try {
+      defaults[name] = compiledDefaultOperand(
         expr.engine,
         d,
-        functionLiteralParameterType(p)
-      )
-    )
+        functionLiteralParameterType(p),
+        'a `Function` literal'
+      );
+    } catch {
       return undefined;
-    defaults[name] = d;
+    }
   }
   const defaultOperands = Object.values(defaults);
 

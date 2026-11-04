@@ -1435,7 +1435,12 @@ code:
   sound version: a name test of the call site was wrong both ways in
   review), so `f := (k = W0) ↦ k + 1` with `W0` declared `isConstant`
   compiles `f()` to a decline while the interpreter gives 6 (decided
-  2026-11-04: compiled code fills it, ROADMAP CE-803).
+  2026-11-04: compiled code fills it, ROADMAP CE-803). Done 2026-11-04
+  (CE-803): compiled code fills the value of the constant, read from the
+  definition the default symbol was bound to where the function is
+  declared, when the value is a literal (`compiledDefaultOperand()`); an
+  Epsil `const` compiled before the program runs, and a constant whose value
+  is not a literal, still decline.
 - **User decision 2026-11-03** (relayed by compute-engine-24; option B of
   rule 4): a constant symbol is a valid default; the purpose of rule 4 is to
   remove the call-site scoping rule, not to forbid a symbol as a value.
@@ -2657,7 +2662,21 @@ on the same commit; staged, not committed).
   sources (which touches the pending decision on row 409 (a)).
   **Decision (user, 2026-11-04): `any` includes `nothing`**, as committed in
   `faef4d574`; the two `plausible` declines stay, and the explicit-arm
-  option is not taken. (2)
+  option is not taken. **Replaced later the same day (user, 2026-11-04):
+  the explicit-arm option is taken.** From the type system's point of view
+  `Nothing` is in `any`, but compiled code produces `Nothing` only through a
+  literal `Nothing` read as a value or through the value of a block that
+  ends in a statement, and both decline at their own sites; a `Nothing` that
+  the host supplies (an input, a `vars` entry, a host function) is a value
+  outside its declared type, unspecified by the caveats, the host's burden.
+  So `assertNoNothingElement()` declines only for a type with an explicit
+  `nothing` arm (`provablyAdmits('nothing', t)` becomes a test of the arm,
+  so `any` and `unknown` pass; the two producer sites keep their declines),
+  the row 7 tests that expect `possible-nothing` for an `any` result go
+  back to value tests, the CHANGELOG entry loses its "now declines"
+  examples, and `docs/COMPILATION-MODEL.md` ("A possible `Nothing` element
+  declines") and `docs/ERROR-MODEL.md` section 6 state the explicit-arm
+  rule. The work is folded into step 4, row 9 (its part 2). (2)
   `predicateResult` keeps its test (corpus witness, Tycho row 339); the
   alternative is the decline. (3) A condition of type `unknown` declines on
   JavaScript; the alternative is to keep the run-time throw for it. (4) One

@@ -36,7 +36,7 @@ import {
 } from './cse.js';
 import { javascriptStatements } from './javascript-statements.js';
 import {
-  assertCompiledDefaultFilled,
+  compiledDefaultOperand,
   jsCoalescePoint,
   jsIsAbsent,
   jsIsAbsentPoint,
@@ -11980,19 +11980,20 @@ function lambdaDefaultFill(
       code: (before: string, after: string, body: string) => string;
     }
   | undefined {
-  // The fill reads a symbol default by its name, so a default that
-  // compiled code does not fill (a constant that the host or the program
-  // declares) declines (`compiledSymbolDefaultDeclines()`).
+  // The fill would read a symbol default by its name, where a local or a
+  // `vars` entry can hide it, so a constant that the host or the program
+  // declares is filled by its value (`compiledDefaultOperand()`).
   const fills = literalParams.map((p) => {
     const d = optionalParameterDefault(p);
     if (d === undefined) return undefined;
-    assertCompiledDefaultFilled(
-      d.engine,
-      d,
-      functionLiteralParameterType(p),
-      'a `Function` literal'
+    return compile(
+      compiledDefaultOperand(
+        d.engine,
+        d,
+        functionLiteralParameterType(p),
+        'a `Function` literal'
+      )
     );
-    return compile(d);
   });
   if (!fills.some((f) => f !== undefined)) return undefined;
   const value = (i: number): string => {

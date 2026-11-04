@@ -82,7 +82,7 @@ import {
   optionalParameterDefault,
 } from '../boxed-expression/function-literal.js';
 import {
-  assertCompiledDefaultFilled,
+  compiledDefaultOperand,
   literalAcceptsArgumentCount,
   literalTakesArgumentCount,
 } from './compile-parameter-defaults.js';
@@ -6431,17 +6431,16 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
         declared.push(params[i]);
         return;
       }
-      // A symbol default that compiled code does not fill (a constant that
-      // the host or the program declares) declines
-      // (`compiledSymbolDefaultDeclines()`).
-      assertCompiledDefaultFilled(
+      // A constant that the host or the program declares is filled by its
+      // value, not by its name (`compiledDefaultOperand()`).
+      const operand = compiledDefaultOperand(
         d.engine,
         d,
         functionLiteralParameterType(p),
         'a `Function` literal'
       );
       declared.push(`${params[i]}=None`);
-      filled.push([params[i], compile(d)]);
+      filled.push([params[i], compile(operand)]);
     });
     if (filled.length === 0)
       return `(lambda ${declared.join(', ')}: ${bodyCode})`;

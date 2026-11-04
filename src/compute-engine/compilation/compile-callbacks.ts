@@ -90,7 +90,7 @@ import { isPolymorphicType } from '../../common/type/instantiate.js';
 import { strictLanes, typeHasComplexLeaf } from './compiler-mode.js';
 import { compileValueOperand } from './compile-statements.js';
 import {
-  assertCompiledDefaultFilled,
+  compiledDefaultOperand,
   literalTakesArgumentCount,
   userFunctionDefaults,
   userFunctionParameterTypes,
@@ -1435,9 +1435,9 @@ function valueDefaults(
  * the default where the interpreter reads `Missing`. It is a known
  * limitation (`docs/COMPILATION-MODEL.md`, "Known limitations").
  *
- * The wrapper reads a symbol default by its name, so a default that
- * compiled code does not fill (a constant that the host or the program
- * declares, `compiledSymbolDefaultDeclines()`) throws a decline.
+ * The wrapper would read a symbol default by its name, where a local or a
+ * `vars` entry can hide it, so a constant that the host or the program
+ * declares is filled by its value (`compiledDefaultOperand()`).
  */
 function valueDefaultsRef(
   engine: ComputeEngine,
@@ -1453,17 +1453,17 @@ function valueDefaultsRef(
     h,
     userFunctionLiteral(engine, h)
   );
-  defaults.forEach((d, i) =>
-    assertCompiledDefaultFilled(engine, d, types[i], h)
+  const operands = defaults.map((d, i) =>
+    d === undefined ? undefined : compiledDefaultOperand(engine, d, types[i], h)
   );
   const wrapperName = `${ref}$d`;
   if (!registry.defs.has(wrapperName)) {
     const root = registry.root ?? target;
     const params = defaults.map(() => tempVar(target));
     const declared = params.map((p, i) =>
-      defaults[i] === undefined
+      operands[i] === undefined
         ? p
-        : `${p} = ${compileValueOperand(defaults[i]!, root)}`
+        : `${p} = ${compileValueOperand(operands[i]!, root)}`
     );
     registry.defs.set(
       wrapperName,

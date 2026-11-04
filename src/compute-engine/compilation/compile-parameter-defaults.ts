@@ -6,7 +6,13 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import type { CompileTarget } from './types.js';
-import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
+import {
+  isDictionary,
+  isFunction,
+  isNumber,
+  isString,
+  isSymbol,
+} from '../boxed-expression/type-guards.js';
 import {
   blockLocalFunction,
   userFunctionLiteral,
@@ -41,10 +47,11 @@ export function literalHasParameterDefaults(literal: Expression): boolean {
  * written arguments `actuals`, completed with the default operand of each
  * parameter with a default that the call leaves out.
  *
- * Each added operand is the default, a constant. So the caller compiles the
- * completed call as a call that supplies every argument. A symbol default
- * that compiled code does not fill throws a decline
- * (`compiledSymbolDefaultDeclines()`).
+ * Each added operand is the default, a constant, as `compiledDefaultOperand()`
+ * gives it: the value of a constant that the host or the program declares
+ * takes the place of its name. So the caller compiles the completed call as
+ * a call that supplies every argument. A default that compiled code does
+ * not fill throws a decline.
  *
  * Returns `actuals` itself when nothing is left out, and `undefined` when the
  * literal has a rest parameter (its arguments are not completed) or when the
@@ -66,13 +73,14 @@ export function completedLiteralArguments(
   for (const p of params.slice(actuals.length)) {
     const d = optionalParameterDefault(p);
     if (d === undefined) return undefined;
-    assertCompiledDefaultFilled(
-      literal.engine,
-      d,
-      functionLiteralParameterType(p),
-      literal.toString()
+    added.push(
+      compiledDefaultOperand(
+        literal.engine,
+        d,
+        functionLiteralParameterType(p),
+        literal.toString()
+      )
     );
-    added.push(d);
   }
   return [...actuals, ...added];
 }
@@ -95,21 +103,22 @@ export function literalAcceptsArgumentCount(
 
 /**
  * True when compiled code does not fill the parameter default `d` of a
- * parameter of type `type` (`undefined` for a parameter with no
- * annotation, or a parameter without a default when `d` is `undefined`).
+ * parameter of type `type` by its name (`undefined` for a parameter with
+ * no annotation, or a parameter without a default when `d` is
+ * `undefined`).
  *
  * The interpreter reads a symbol default where the function is declared
  * (`isConstantSymbolDefault()`). Compiled code reads a symbol by its name
  * where the default is filled: at the call, or in the wrapper of a callback.
  * A local of the same name there, or a `vars` entry that maps the name to
  * an input, would give another value. So compiled code fills a symbol
- * default only when it is a constant of the standard library that no
- * definition of the engine hides (`Pi`, `Integers`), or a symbol that the
- * parameter type lists (`Auto` in `mode: symbol<Auto> | symbol<Manual> =
- * Auto`), which compiles to the symbol itself. A constant that the host
- * declares (`ce.declare('W0', { isConstant: true, value: 5 })`) or an Epsil
- * `const` is not filled, and the compilation declines: with
- * `f := (k = W0) ↦ k + 1`, `f()` declines where the interpreter gives 6.
+ * default by its name only when it is a constant of the standard library
+ * that no definition of the engine hides (`Pi`, `Integers`), or a symbol
+ * that the parameter type lists (`Auto` in `mode: symbol<Auto> |
+ * symbol<Manual> = Auto`), which compiles to the symbol itself. For any
+ * other symbol default, this function returns true, and compiled code
+ * fills the value of the constant in place of its name
+ * (`compiledDefaultOperand()`).
  *
  * A library constant or a listed symbol that a local of the call site
  * hides, or that `vars` maps, is still filled by name: a known limitation
@@ -135,47 +144,105 @@ export function compiledSymbolDefaultDeclines(
 }
 
 /**
- * Throw a decline when compiled code does not fill the parameter default
- * `d` (`compiledSymbolDefaultDeclines()`). `subject` names what is
- * compiled: the call, the function or the callback.
+ * The value of the constant that the symbol `d` names, when compiled code
+ * can write it as a literal: a number, a string, `True`, `False`, or a
+ * `List` or `Tuple` of such values, or an empty `Dictionary` (`{}`).
+ * Otherwise `undefined`.
+ *
+ * The value is read from the definition that `d` was bound to when it was
+ * boxed, not from a lookup of the name in the scope of the compilation. A
+ * default is boxed where the function is declared, and the engine fills a
+ * call that leaves the argument out with that same boxed symbol. So the
+ * value is the one that the interpreter reads, also when a local of the
+ * same name hides the constant where the call is made, or when `vars` maps
+ * the name to an input.
+ *
+ * A definition that is not constant, or a constant with no value at
+ * compile time, gives `undefined`. An Epsil `const` that the program
+ * declares is such a constant before the program runs: the declaration
+ * sets its value when it runs.
  */
-export function assertCompiledDefaultFilled(
+function foldedConstantDefault(d: Expression): Expression | undefined {
+  if (!isSymbol(d)) return undefined;
+  const def = d.valueDefinition;
+  if (def === undefined || def.isConstant !== true) return undefined;
+  const value = def.value;
+  if (value === undefined || !isLiteralValue(value)) return undefined;
+  return value;
+}
+
+/** True when `x` is a literal value that compiled code can write: see
+ * `foldedConstantDefault()`. */
+function isLiteralValue(x: Expression): boolean {
+  if (isNumber(x) || isString(x)) return true;
+  if (isSymbol(x)) return x.symbol === 'True' || x.symbol === 'False';
+  if (isFunction(x, 'List') || isFunction(x, 'Tuple'))
+    return x.ops.every(isLiteralValue);
+  // The engine boxes `{}` as a dictionary value, not as a `Dictionary`
+  // function expression.
+  return isDictionary(x) && x.count === 0;
+}
+
+/**
+ * The operand that compiled code fills for the parameter default `d` of a
+ * parameter of type `type`: `d` itself, or, for a constant that the host or
+ * the program declares (`compiledSymbolDefaultDeclines()`), the value of
+ * that constant (`foldedConstantDefault()`). With `W0` declared
+ * `ce.declare('W0', { isConstant: true, value: 5 })` and
+ * `f := (k = W0) ↦ k + 1`, `f()` compiles as `f(5)` and gives 6, as in the
+ * interpreter.
+ *
+ * Throws a decline when the constant has no value that compiled code can
+ * write. `subject` names what is compiled: the call, the function or the
+ * callback.
+ */
+export function compiledDefaultOperand(
   engine: ComputeEngine,
-  d: Expression | undefined,
+  d: Expression,
   type: Type | undefined,
   subject: string
-): void {
-  if (!isSymbol(d) || !compiledSymbolDefaultDeclines(engine, d, type)) return;
+): Expression {
+  if (!isSymbol(d) || !compiledSymbolDefaultDeclines(engine, d, type))
+    return d;
+  const value = foldedConstantDefault(d);
+  if (value !== undefined) return value;
   throw new Error(
-    `Could not compile \`${subject}\`: a default that names a constant ` +
-      `declared by the program or the host (\`${d.symbol}\`) is not ` +
-      `filled in compiled code; write the value as the default, or pass ` +
-      `the argument.`
+    `Could not compile \`${subject}\`: the default \`${d.symbol}\` names ` +
+      `a constant that has no value that compiled code can write (a ` +
+      `number, a string, a boolean, a list or tuple of such values, or ` +
+      `\`{}\`); write the ` +
+      `value as the default, or pass the argument.`
   );
 }
 
 /**
- * Throw a decline when the call `expr` of a user function gets a symbol
- * default that compiled code does not fill (`compiledSymbolDefaultDeclines()`).
+ * The call `expr` of a user function, with the value of the constant in
+ * place of each argument that is a symbol default of a constant that the
+ * host or the program declares (`compiledDefaultOperand()`). Returns `expr`
+ * itself when no argument changes.
  *
  * The engine completes a call that leaves the argument out with the default
- * symbol when it canonicalizes the call (`f()` becomes `f(W0)`), so the
- * test reads each argument at a position with a symbol default: an
- * argument that is that symbol declines, also when the call wrote it
- * (`f(W0)`). An argument that the call leaves out declines too: the
- * compilation of a block-local function call completes it with the default
+ * symbol when it canonicalizes the call (`f()` becomes `f(W0)`). So each
+ * argument at a position with such a symbol default is read: an argument
+ * that is that symbol is replaced by the value of the definition it was
+ * bound to, also when the call wrote it (`f(W0)`): a written constant has
+ * the same value. When that symbol has no value that compiled code can
+ * write, the compilation declines: the argument can be the default, or a
+ * variable of the same name that the call wrote, and the compiler cannot
+ * tell which. An argument that the call leaves out is not added here: the
+ * compilation of a block-local function call completes it
  * (`completedLiteralArguments()`).
  */
-export function assertCompiledCallDefaultsFilled(
+export function callWithCompiledDefaults(
   expr: Expression,
   target: CompileTarget<Expression>
-): void {
-  if (!isFunction(expr)) return;
+): Expression {
+  if (!isFunction(expr)) return expr;
   const h = expr.operator;
   const local = blockLocalFunction(h, target);
-  if (local === null) return;
+  if (local === null) return expr;
   const literal = local ?? userFunctionLiteral(expr.engine, h);
-  if (literal === undefined) return;
+  if (literal === undefined) return expr;
   // A block-local function has no declared signature: its defaults and its
   // parameter types are those of its literal.
   const params = literal.ops.slice(1);
@@ -187,13 +254,21 @@ export function assertCompiledCallDefaultsFilled(
     local !== undefined
       ? params.map((p) => functionLiteralParameterType(p))
       : userFunctionParameterTypes(expr.engine, h, literal);
-  defaults.forEach((d, i) => {
-    if (d === undefined || !isSymbol(d)) return;
-    const arg = expr.ops[i];
-    if (arg !== undefined && !(isSymbol(arg) && arg.symbol === d.symbol))
-      return;
-    assertCompiledDefaultFilled(expr.engine, d, types[i], expr.toString());
+  let changed = false;
+  const ops = expr.ops.map((arg, i) => {
+    const d = defaults[i];
+    if (d === undefined || !isSymbol(d)) return arg;
+    if (!(isSymbol(arg) && arg.symbol === d.symbol)) return arg;
+    const operand = compiledDefaultOperand(
+      expr.engine,
+      arg,
+      types[i],
+      expr.toString()
+    );
+    if (operand !== arg) changed = true;
+    return operand;
   });
+  return changed ? expr.engine._fn(h, ops) : expr;
 }
 
 /**

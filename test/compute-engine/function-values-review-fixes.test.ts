@@ -1,14 +1,17 @@
 /**
- * Declines of compiled code for function values and parameter defaults
- * (item 3.4.5 of the CE language release, `docs/COMPILATION-MODEL.md`,
- * "Function values"). Each case below declines, so that the host gets the
- * interpreter's value:
+ * Compiled code for function values and parameter defaults (item 3.4.5 of
+ * the CE language release, `docs/COMPILATION-MODEL.md`, "Function values").
  *
- * - a symbol default that names a constant that the host or the program
- *   declares: the interpreter reads the default where the function is
- *   declared, and compiled code would read the name where the default is
- *   filled, where a local or a `vars` entry can hide it
- *   (`compiledSymbolDefaultDeclines()`);
+ * A symbol default that names a constant that the host or the program
+ * declares: the interpreter reads the default where the function is
+ * declared. Compiled code fills the value of the constant, read from the
+ * same definition, and not the name, which a local or a `vars` entry can
+ * hide where the default is filled (`compiledDefaultOperand()`). A
+ * constant with no value that compiled code can write declines.
+ *
+ * Each other case below declines, so that the host gets the interpreter's
+ * value:
+ *
  * - a full application of a function literal whose value is a function;
  * - a call that leaves out a defaulted argument and returns a function;
  * - an `Assign` whose value is a block-local function assigned more than
@@ -42,42 +45,52 @@ describe('A default that names a constant of the host', () => {
     );
     return ce;
   }
-  const DECLINE = /constant declared by the program or the host \(`W0`\)/;
 
-  test('a block local with the name of the default declines', () => {
+  // Compiled code fills the default with the value of the constant, read
+  // where the function is declared, so a local of the same name where the
+  // call is made does not change it.
+  test('a block local with the name of the default does not change the value', () => {
     const ce = engine();
     const json = ['Block', ['Declare', 'W0', "'integer'", 7], ['f']];
     expect(ce.box(json).evaluate().toString()).toBe('6');
-    expect(() => compiled(ce, json, { constantFold: false })).toThrow(DECLINE);
+    const result = compiled(ce, json, { constantFold: false });
+    expect(result.success).toBe(true);
+    expect(result.run!({} as never)).toBe(6);
   });
 
-  test('without a local of that name, the call declines', () => {
+  test('without a local of that name, the call gives the value', () => {
     const ce = engine();
     const json = ['Block', ['Declare', 'y', "'integer'", 7], ['f']];
     expect(ce.box(json).evaluate().toString()).toBe('6');
-    expect(() => compiled(ce, json, { constantFold: false })).toThrow(DECLINE);
+    const result = compiled(ce, json, { constantFold: false });
+    expect(result.success).toBe(true);
+    expect(result.run!({} as never)).toBe(6);
   });
 
-  test('the call alone declines', () => {
+  test('the call alone gives the value', () => {
     const ce = engine();
     expect(ce.box(['f']).evaluate().toString()).toBe('6');
-    expect(() => compiled(ce, ['f'], { constantFold: false })).toThrow(
-      DECLINE
-    );
+    const result = compiled(ce, ['f'], { constantFold: false });
+    expect(result.success).toBe(true);
+    expect(result.run!({} as never)).toBe(6);
   });
 
   // The wrapper of a callback fills the default: with `vars` that map
-  // `W0` to an input, it would read the input (`[8]` for `W0 = 7`).
-  test('a callback with the default, and `vars` that map its name, declines', () => {
+  // `W0` to an input, a fill by name would read the input (`[8]` for
+  // `W0 = 7`).
+  test('a callback with the default, and `vars` that map its name, gives the value', () => {
     const ce = engine();
     const json = ['Map', 'fm', ['List', 1]];
     expect(ce.box(json).evaluate().toString()).toBe('[6]');
-    expect(() =>
-      compiled(ce, json, { constantFold: false, vars: { W0: '_.W0' } })
-    ).toThrow(DECLINE);
+    const result = compiled(ce, json, {
+      constantFold: false,
+      vars: { W0: '_.W0' },
+    });
+    expect(result.success).toBe(true);
+    expect(result.run!({ W0: 7 } as never)).toEqual([6]);
   });
 
-  test('a block-local callback with the default, in a block with a local of its name, declines', () => {
+  test('a block-local callback with the default, in a block with a local of its name, gives the value', () => {
     const ce = engine();
     const json = [
       'Block',
@@ -89,16 +102,34 @@ describe('A default that names a constant of the host', () => {
       ['Block', ['Declare', 'W0', "'integer'", 7], ['Map', 'g', ['List', 1]]],
     ];
     expect(ce.box(json).evaluate().toString()).toBe('[6]');
-    expect(() => compiled(ce, json, { constantFold: false })).toThrow(DECLINE);
+    const result = compiled(ce, json, { constantFold: false });
+    expect(result.success).toBe(true);
+    expect(result.run!({} as never)).toEqual([6]);
   });
 
-  // An Epsil `const` is a constant that the program declares.
+  // A constant whose value compiled code cannot write as a literal keeps
+  // the decline: here the value is the expression `x + 1`.
+  test('a constant whose value is not a literal declines', () => {
+    const ce = engine();
+    ce.declare('WP', {
+      isConstant: true,
+      value: ce.box(['Add', 'x', 1]),
+    } as never);
+    ce.assign('fp', ce.box(['Function', 'k', ['Optional', 'k', 'WP']]));
+    expect(() => compiled(ce, ['fp'], { constantFold: false })).toThrow(
+      /the default `WP` names a constant that has no value that compiled code can write/
+    );
+  });
+
+  // An Epsil `const` is a constant that the program declares. Its value is
+  // set when the declaration runs, so at compile time the constant has no
+  // value, and the compilation declines.
   test('a default that names an Epsil `const` declines', () => {
     const ce = new ComputeEngine();
     const [json] = parseEpsil('const W = 5; function f(k = W) { k + 1 }; f()');
     const program = ce.box(json as Json);
     expect(() => compiled(ce, program.json, { constantFold: false })).toThrow(
-      /constant declared by the program or the host \(`W`\)/
+      /the default `W` names a constant that has no value that compiled code can write/
     );
     expect(program.evaluate().toString()).toBe('6');
   });

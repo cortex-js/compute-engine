@@ -208,7 +208,7 @@ interpreter's value. A line is removed when the case declines or is fixed.
   interpreter gives `1 + π`. A library constant or a `symbol<…>` symbol
   used as a default is filled by its name, so a `vars` entry or a local of
   the same name can hide it; a constant declared by the program or the host
-  declines instead.
+  is filled by its value instead.
 - `javascript`: `Block(Declare(mk, "function", (a, k = 2) ↦ (x ↦ x + a +
   k)), mk(1))` compiles, and `run()` returns a JavaScript function, where the
   rule of function values declines a function returned from a call: the
@@ -1989,20 +1989,31 @@ Compiled code reads a symbol default by its name where it fills the default:
 at the call, or in the wrapper of a callback. A local of the same name there,
 or a `vars` entry that maps the name to an input, would give another value
 than the constant of the declaration. So compiled code fills a symbol default
-only when it is a constant of the standard library (`Pi`, `Integers`) or a
-symbol that the parameter type lists (`mode: symbol<Auto> | symbol<Manual> =
-Auto`). It is compiled as the written symbol: a target that cannot hold the
-symbol declines, as it declines the written symbol. A default that names a
-constant declared by the program or the host declines at each place where
-compiled code fills it: a call that leaves out the argument (also a call
-that writes the default's symbol at that position), a call completed at
-compile time, and the wrapper of a callback or of a function literal
-(`compiledSymbolDefaultDeclines()`, `compile-parameter-defaults.ts`). With
+by its name only when it is a constant of the standard library (`Pi`,
+`Integers`) or a symbol that the parameter type lists (`mode: symbol<Auto> |
+symbol<Manual> = Auto`). It is compiled as the written symbol: a target that
+cannot hold the symbol declines, as it declines the written symbol.
+
+A default that names a constant declared by the program or the host is
+filled by the value of that constant, not by its name, at each place where
+compiled code fills it: a call that leaves out the argument (also a call that
+writes the default's symbol at that position), a call completed at compile
+time, and the wrapper of a callback or of a function literal. The value is
+read at compile time from the definition that the default symbol was bound to
+where the function is declared, as the interpreter reads it, so a local of
+the same name or a `vars` entry does not change it
+(`compiledDefaultOperand()`, `compile-parameter-defaults.ts`). With
 `ce.declare('W0', { isConstant: true, value: 5 })` and
-`f := (k = W0) ↦ k + 1`, the compiled `f()` declines and the interpreter
-gives 6. The Epsil program `const W = 5; function f(k = W) { k + 1 }; f()`,
-compiled as a block, declines the same way. To compile such a function,
-write the value as the default (`k = 5`), or pass the argument.
+`f := (k = W0) ↦ k + 1`, the compiled `f()` is `f(5)` and gives 6, as the
+interpreter does. The value must be a literal that compiled code can write: a
+number, a string, `True`, `False`, a `List` or `Tuple` of such values, or
+`{}`. Any other value declines: with `ce.declare('WP', { isConstant: true,
+value: ce.box(['Add', 'x', 1]) })`, a call that fills `(k = WP) ↦ k`
+declines. An Epsil `const` declines too: the program
+`const W = 5; function f(k = W) { k + 1 }; f()`, compiled as a block, has no
+value for `W` at compile time, because the declaration sets it when it runs.
+To compile such a function, write the value as the default (`k = 5`), or
+pass the argument.
 
 | Input                                                     | Before 3.4.5                           | Now                                      |
 | --------------------------------------------------------- | -------------------------------------- | ---------------------------------------- |
@@ -2011,7 +2022,7 @@ write the value as the default (`k = 5`), or pass the argument.
 | `g(x)` with `x: real` supplied as `NaN` by the host       | `3`                                    | unspecified                              |
 | `Map((k = 2) ↦ k * 2, [1, 2])`                            | `[2, 4]` through a filling wrapper     | `[2, 4]`, the literal takes one argument |
 | `(k = n) ↦ k` with `n` a variable                         | `n` read at the call site              | static error (the default is not constant) |
-| `(k = W0) ↦ k` with `W0` declared constant                | `W0` read at the call site             | `W0` of the declaration; compiled code declines |
+| `(k = W0) ↦ k` with `W0` declared constant                | `W0` read at the call site             | `W0` of the declaration; compiled code fills its value |
 | a defaulted call on GLSL or interval-js                   | completed; interval declines a `NaN`   | completed, no decline                    |
 
 Where a function value can be called with fewer arguments than it has

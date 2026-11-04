@@ -366,18 +366,16 @@ describe('PARAMETER DEFAULTS: A SYMBOL DECLARED CONSTANT (GITHUB ISSUE #490)', (
       ce.declare('S4', '(x: number, w: number = Ws) -> number')
     ).toThrow(/does not match its type/);
   });
-  // Compiled code reads a symbol default by its name where the default is
-  // filled, where a local or a `vars` entry can hide it. So it does not
-  // fill a default that names a constant that the host or the program
-  // declares: the compilation declines, and the fallback gives the value
-  // of the interpreter. Constant folding would replace `F1()` with its
-  // value 6, so it is turned off for the call.
-  test('compiled code: the literal and the call decline', () => {
+  // Compiled code fills a default that names a constant that the host or
+  // the program declares with the value of that constant, read where the
+  // function is declared, as the interpreter does. Constant folding would
+  // replace `F1()` with its value 6, so it is turned off for the call.
+  test('compiled code: the literal and the call fill the value of the constant', () => {
     const r = compiled(ce, literal);
-    expect(r.success).toBe(false);
+    expect(r.success).toBe(true);
     expect((r.run as () => unknown)()).toBe(6);
     const call = compiled(ce, ['Add', ['F1'], 'u'], { constantFold: false });
-    expect(call.success).toBe(false);
+    expect(call.success).toBe(true);
     expect(call.run!({ u: 1 })).toBe(7);
   });
 });

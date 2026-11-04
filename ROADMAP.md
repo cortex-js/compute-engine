@@ -2256,39 +2256,6 @@ interpreter's value `[(2, 2), (4, 4)]` for both declarations; Tycho's pin is
 head with a bare point parameter is refined to return the point"), marked
 `todo`.
 
-### CE-803. Compiled code fills a parameter default that is a constant the host declares
-
-**Status:** ready; capability, S. User decision 2026-11-04 (option 2 of the
-3.4.5 reversible choice, plan record 3.4.5 of
-`docs/plans/2026-11-02-compiler-contraction-plan.md`).
-**Witness:** corpus; GitHub issue #490: the 0.178.0 reply told the user that
-a default is a constant and, for any value other than a library constant or
-a listed symbol, to "declare a constant and name it". With `W0` declared
-`ce.declare("W0", { isConstant: true, value: 5 })` and `f := (k = W0) ↦ k +
-1`, the interpreter gives 6 for `f()` and the compilation of `f()` declines
-on every target (`compiledSymbolDefaultDeclines()`,
-`compilation/compile-parameter-defaults.ts`; its callers in
-`compile-callbacks.ts`, `compile-function-literals.ts`,
-`fixed-width-unroll.ts`, `javascript-target.ts`, `python-target.ts`).
-
-Item 3.4.5 chose the decline because compiled code fills a symbol default
-by its name at the call site or in a callback wrapper, where a local of the
-same name or a `vars` entry would give another value, and a name test of
-the call site was wrong both ways in review. The fill for a host constant
-or an Epsil `const` reads the constant's value where the function is
-declared, as the interpreter does (`isConstantSymbolDefault()`,
-`boxed-expression/parameter-defaults.ts`): the compiler folds the value of
-the constant into the completed argument at compile time (a number, a
-string, a boolean, `[]`, `{}`, or a literal the target can emit), instead of
-emitting the name. A constant whose value the target cannot emit keeps the
-decline. The library-constant and listed-symbol fills are unchanged. Tests:
-the 3.4.5 tests that pin the decline become value tests (`f()` compiles to
-6); `docs/COMPILATION-MODEL.md` (the defaults paragraph and the
-known-limitations line on a hidden library constant, if the fold also
-removes that limitation: say so) and a CHANGELOG entry under "Behavior
-Changes" (a form that declined and now compiles). The other option, not
-chosen: leave the decline.
-
 ### CE-785. The compiler's stack limit for a nested expression fell from about 420 to about 370 levels
 
 **Status:** ready; defect, S. User decision 2026-11-03: the nightly fall of the measured limit (first compile in a warm Jest worker) from 347 at `585acfab5` to 346 at `b10958fda` is accepted; it is not a new defect.

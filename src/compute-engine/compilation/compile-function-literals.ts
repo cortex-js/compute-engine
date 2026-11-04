@@ -17,7 +17,7 @@ import {
   functionLiteralParameterType,
   optionalParameterDefault,
 } from '../boxed-expression/function-literal.js';
-import { assertCompiledDefaultFilled } from './compile-parameter-defaults.js';
+import { compiledDefaultOperand } from './compile-parameter-defaults.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import { descendantRegionAt } from './cse.js';
 import { compileValueOperand } from './compile-statements.js';
@@ -568,19 +568,21 @@ export function compileExprFunctionLiteral(
     // The fill is an outer wrapper (`withDefaults` below), outside the
     // complex-coercing wrapper and the static map, so they receive every
     // argument.
-    // The wrapper reads a symbol default by its name, so a default that
-    // compiled code does not fill (a constant that the host or the program
-    // declares) declines (`compiledSymbolDefaultDeclines()`).
+    // The wrapper would read a symbol default by its name, where a local or
+    // a `vars` entry can hide it, so a constant that the host or the
+    // program declares is filled by its value (`compiledDefaultOperand()`).
     const fills = ops.slice(1).map((p) => {
       const d = optionalParameterDefault(p);
       if (d === undefined) return undefined;
-      assertCompiledDefaultFilled(
-        d.engine,
-        d,
-        functionLiteralParameterType(p),
-        'a `Function` literal'
+      return compileValueOperand(
+        compiledDefaultOperand(
+          d.engine,
+          d,
+          functionLiteralParameterType(p),
+          'a `Function` literal'
+        ),
+        target
       );
-      return compileValueOperand(d, target);
     });
     const emittedParams = binding.emitted.map((name, i) =>
       target.language === 'javascript' &&
