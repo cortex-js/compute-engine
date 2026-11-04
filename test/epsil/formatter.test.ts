@@ -1,5 +1,6 @@
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
+import { Formatter, StackBlock } from '../../src/epsil/formatter';
 import { MathJsonExpression } from '../../src/math-json/types';
 
 //
@@ -398,11 +399,7 @@ describe('EPSIL FORMATTER — time is not exponential in nesting depth', () => {
 
 describe('EPSIL FORMATTER — deep indentation', () => {
   // Each level applies a function literal, whose body aligns under the open
-  // parenthesis, so at depth 160 a line starts past column 2000. Trimming the
-  // padding at the end of each stacked fragment with a `/[…]+$/` regex is
-  // quadratic in the length of each run of indentation, since the regex
-  // retries from every space of the run: that took about 4 s at depth 160,
-  // and a scan back from the end takes about 0.5 s.
+  // parenthesis, so at depth 160 a line starts past column 2000.
   function chain(depth: number): MathJsonExpression {
     let node: MathJsonExpression = ['Add', 'x0', 1];
     for (let i = depth; i >= 1; i--) {
@@ -416,14 +413,25 @@ describe('EPSIL FORMATTER — deep indentation', () => {
     return node;
   }
 
-  test('a 160-deep application chain indents past column 2000, quickly', () => {
+  test('a 160-deep application chain indents past column 2000', () => {
+    const lines = serializeEpsil(chain(160)).split('\n');
+    expect(Math.max(...lines.map(leadingSpaces))).toBeGreaterThan(2000);
+    for (const line of lines) expect(/[ \t]$/.test(line)).toBe(false);
+  });
+
+  // A `/[…]+$/` regex retries from every space of a run of indentation, which
+  // is quadratic: about 18 s on this run of 100,000 spaces. A scan back from
+  // the end does not look inside the run, so the limit has a wide margin on a
+  // slow machine. The test timeout is larger than the quadratic time, so that
+  // the limit, and not the timeout, reports the failure.
+  test('the trim does not look inside a run of indentation', () => {
+    const fmt = new Formatter();
+    const text = 'a\n' + ' '.repeat(100_000) + 'b';
+    const stack = new StackBlock(fmt, fmt.text(text + '  '));
     const start = Date.now();
-    const out = serializeEpsil(chain(160));
+    expect(stack.serialize(0)).toBe(text);
     expect(Date.now() - start).toBeLessThan(2000);
-    const indents = out.split('\n').map(leadingSpaces);
-    expect(Math.max(...indents)).toBeGreaterThan(2000);
-    for (const line of out.split('\n')) expect(/[ \t]$/.test(line)).toBe(false);
-  }, 60_000);
+  }, 300_000);
 
   test('the output round-trips', () => {
     const out = serializeEpsil(chain(20));
