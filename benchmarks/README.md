@@ -720,3 +720,44 @@ reads independently of elapsed time and CSE's weighted path diagnostics. Its
 mutation controls and the review's measurements and limitations are recorded in
 `shared-traversal-2026-11-03.json` and
 `../docs/plans/2026-11-03-shared-traversal-review.md`.
+
+## Closed constant folding (`closed-folding.mjs`)
+
+Use `MODE=timing node --import tsx benchmarks/closed-folding.mjs /path/to/checkout`
+for serial source compilation measurements. Hold the box lock and monitor CPU
+throughout; discard a whole process if competing work is observed. Compare
+matching source revisions and dependencies in alternating process order.
+Defaults are seven fresh-engine/expression trials, five warmups on a separate
+engine/expression, and seven warm batches of ten calls (`RUNS`, `ITERATIONS`).
+The first figure excludes process/module startup; warm calls retain applicable
+engine and expression caches. Construction, result-array allocation and numeric
+validation stay outside timers. All warm results are retained and checked.
+
+`MODE=check` (the default) checks all fixtures without timing. `ONLY` selects
+comma-separated full fixture ids, rejecting unknown ids. `MODE=work` counts
+reads of the original synthetic tower's operand arrays; `MODE=profile` also
+attributes those reads by immediate stack caller, records root cost estimates,
+folding targets and calls to `.N()` on original graph nodes, and counts function
+canonical/JSON/evaluation operations through prototype wrappers. Both restore
+instrumentation before result validation and are deliberately untimed. These
+counts cover only the outer Add nodes, excluding the base Add, number objects
+and new expression objects' operand arrays;
+function operation counts exclude number operations and other serializers.
+Uninstrumented host graphs report null reads; each record states its instrumented
+node count. The constant-parameter host retains its four-node tower instrument.
+The two-million-read instrumentation ceiling is an emergency abort, not a
+performance acceptance threshold.
+
+The closed `Add(e,e)` tower starts at `2 + sqrt(3)`, with the same operand object
+retained twice. Depths 4/8/12/13/16/24 expose the existing estimation-visit limit.
+Independent numeric results use `2^depth * (2 + Math.sqrt(3))`. Unshared copies
+at safe depths 4/8 compute the same values, with construction untimed. Every
+fixture runs with folding enabled and disabled. Host controls include a live
+slider expression on JavaScript and WGSL, a closed Map, and a shared constant
+inside/outside a function parameter binding. WGSL checks emission, not GPU
+execution. These small controls do not represent a captured document corpus.
+
+`test/compute-engine/compile-folding-work.test.ts` checks one estimator's visit
+budget, its admitted-cost control, repeated callee lookup work and invalidation
+after a definition change. It
+does not require a whole closed compilation to be linear in distinct nodes.

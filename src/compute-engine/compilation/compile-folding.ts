@@ -2065,9 +2065,26 @@ export function calleeBodyCost(
   depth: number,
   c: FoldCostContext
 ): number {
+  // Each occurrence keeps its cost and visit charge. Only the lookup of
+  // a name with no user body is shared within this estimate.
+  const byScope = (c.nonUserFunctions ??= new WeakMap());
+  const scope = engine.context ?? engine;
+  const generation = engine._cacheGeneration();
+  let absent = byScope.get(scope);
+  if (absent?.generation === generation && absent.names.has(name)) return 0;
   const literal = userFunctionLiteral(engine, name);
-  if (literal === undefined || !isFunction(literal) || literal.ops.length === 0)
+  if (
+    literal === undefined ||
+    !isFunction(literal) ||
+    literal.ops.length === 0
+  ) {
+    if (absent?.generation !== generation) {
+      absent = { generation, names: new Set() };
+      byScope.set(scope, absent);
+    }
+    absent.names.add(name);
     return 0;
+  }
   const cached = c.cache.get(name);
   // A genuine CACHE, not merely a cycle guard. Without it the name was
   // added to a set for the duration of one expansion and removed on the

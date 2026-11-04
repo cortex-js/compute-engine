@@ -18,6 +18,11 @@ import type { CompileTarget, TargetSource } from './types.js';
 export type FoldCostContext = {
   readonly cache: Map<string, number>;
   readonly inProgress: Set<string>;
+  /** Names with no user body, for one lookup scope and cache generation. */
+  nonUserFunctions?: WeakMap<
+    object,
+    { generation: number; names: Set<string> }
+  >;
   visits: number;
 };
 
