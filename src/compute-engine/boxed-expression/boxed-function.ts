@@ -544,6 +544,10 @@ import {
   isEligibleRealRewrite,
   onBranchCut,
 } from '../function-properties/index.js';
+import {
+  canonicalReadMemo,
+  setCanonicalReadMemo,
+} from './transient-canonical.js';
 
 /** One memoized collection-facet answer (see `BoxedFunction._facetMemo`). The
  * value is wrapped so that a facet legitimately answering `undefined` is
@@ -711,30 +715,6 @@ let _inStructuralRead = false;
  * (`_computeStructural` calls `x.structural`), which takes no arguments.
  */
 let _transientStructural: Map<Expression, Expression> | undefined = undefined;
-
-/**
- * The canonical forms that the CURRENT top-level `canonical` read of a raw
- * node made, by raw node, each with the lexical scope that was current when
- * it was made. `undefined` when no `canonical` read is in progress.
- *
- * The `canonical` getter of a raw node rebuilds it from its operands, and
- * each operand is canonicalized through its own getter. A raw node that is
- * an operand more than once (`Pair(t, t)`, with `t` built the same way at
- * each level) was canonicalized once for each path from the root, so the
- * canonical form was a tree with a number of nodes exponential in the depth.
- * A function literal with such a raw body of depth 24 took 4.9 s to
- * canonicalize; with this map, 1.8 ms.
- *
- * A raw node that the read meets again is given the canonical form it got
- * the first time, if the lexical scope is the same: the canonical form of a
- * raw node depends on the scope that resolves its names, and an occurrence
- * below a binder (the index of a `Sum`) is canonicalized in another scope.
- * The outermost read creates the map and drops it before it returns, also
- * when it throws, so the map keeps no expression after that read, as the
- * map of `structural` reads does ({@link _transientStructural}).
- */
-let _transientCanonical:
-  Map<Expression, { scope: Scope; result: Expression }> | undefined = undefined;
 
 /**
  * The results that the CURRENT top-level `subs()` call of a function
@@ -2520,12 +2500,13 @@ export class BoxedFunction
     // expression, for which verbatim source LaTeX would be a lie.
     //
     // A raw node met again in the same read and the same scope is given the
-    // canonical form it got the first time (see `_transientCanonical`).
+    // canonical form it got the first time (see `canonicalReadMemo()`).
     const scope = this.engine.context.lexicalScope;
-    const owner = _transientCanonical === undefined;
-    if (owner) _transientCanonical = new Map();
+    const outer = canonicalReadMemo();
+    const memo = outer ?? new Map();
+    if (outer === undefined) setCanonicalReadMemo(memo);
     else {
-      const hit = _transientCanonical!.get(this);
+      const hit = memo.get(this);
       if (hit !== undefined && hit.scope === scope) return hit.result;
     }
     try {
@@ -2538,10 +2519,10 @@ export class BoxedFunction
             : undefined
         )
       );
-      _transientCanonical!.set(this, { scope, result });
+      memo.set(this, { scope, result });
       return result;
     } finally {
-      if (owner) _transientCanonical = undefined;
+      if (outer === undefined) setCanonicalReadMemo(undefined);
     }
   }
 

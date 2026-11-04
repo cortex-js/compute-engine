@@ -129,6 +129,7 @@ import {
   withErrorFrames,
 } from './boxed-expression/error-value.js';
 import { canonicalFailureOf } from './boxed-expression/canonical-failure.js';
+import { withSeparateCanonicalReads } from './boxed-expression/transient-canonical.js';
 import {
   listRecursionPlan,
   evaluateListRecursion,
@@ -1191,7 +1192,14 @@ export function canonicalFunctionLiteralArguments(
   try {
     if (returnTypeOp === undefined) {
       if (isFunction(bodyOp, 'Block')) {
-        block = bodyOp.canonical;
+        // The canonical form of the body depends on the parameter frame
+        // pushed above, so the read neither takes nor gives the canonical
+        // forms of the reads outside this literal
+        // (`withSeparateCanonicalReads()`). Otherwise, a raw block met again
+        // in the same read (the fold refinement canonicalizes the same raw
+        // combiner once per step, with another inferred accumulator type)
+        // got the canonical form of the first step.
+        block = withSeparateCanonicalReads(() => bodyOp.canonical);
         // `get canonical` short-circuits on an invalid expression (a `Block`
         // containing an `Error` node) and returns it unbound — and therefore
         // unscoped. Rebuild it from its statements so `Block`
