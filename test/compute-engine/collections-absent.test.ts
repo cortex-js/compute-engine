@@ -251,7 +251,7 @@ describe('Rule D: selection keeps a decided True, quantifiers are two-valued', (
     [['IndexWhere', L('Missing', 3), gt0], '2'],
     [['IndexWhere', L('Missing'), gt0], '0'],
     [['Find', L('Missing', 3), gt0], '3'],
-    [['Find', L('Missing'), gt0], '"Nothing"'],
+    [['Find', L('Missing'), gt0], '"Missing"'],
     [['Partition', L(1, 'Missing', -1), gt0], '[[1],["Missing",-1]]'],
     // Quantifiers: the table of `Or` and `And`, an absent answer `False`.
     [['Any', L(1, 'Missing', 3), gt2], '"True"'],

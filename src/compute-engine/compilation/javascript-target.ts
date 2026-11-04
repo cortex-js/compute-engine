@@ -6414,13 +6414,24 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `((_f) => (${coll}).filter((_x) => _f(_x)).length)(${fnArg('CountIf', args[1], args[0], compile, [], target)})`;
   },
-  // First element satisfying the predicate; none → NaN (the interpreter's
-  // `Nothing` projected onto a real target, matching `Last`).
+  // First element satisfying the predicate. When none does, the interpreter
+  // gives the absent value of the element domain: `NaN` for a number, the
+  // point of `NaN` coordinates for a point, `Missing` otherwise. The compiled
+  // code gives the point of `NaN` coordinates for an element typed as a
+  // point (`nanPointLiteral`), so that the shape is the interpreter's, and
+  // `NaN` for every other element, which the caveats of compiled code allow
+  // where the interpreter gives `Missing` (`docs/COMPILATION-MODEL.md`).
   Find: (args, compile, target) => {
     const coll = elementsArg('Find', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `Find`: missing predicate');
-    return `((_f) => ((${coll}).find((_x) => _f(_x)) ?? NaN))(${fnArg('Find', args[1], args[0], compile, [], target)})`;
+    const element = collectionElementType(
+      stripMissingFromType(args[0].type.type)
+    );
+    const absent =
+      (element === undefined ? undefined : nanPointLiteral([element])) ??
+      'NaN';
+    return `((_f) => ((${coll}).find((_x) => _f(_x)) ?? ${absent}))(${fnArg('Find', args[1], args[0], compile, [], target)})`;
   },
   // 1-based index of the first element satisfying the predicate, or 0 if
   // none — `findIndex` is 0-based and returns -1, so `+ 1` maps both.

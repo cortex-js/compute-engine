@@ -19672,12 +19672,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Find: {
     examples: ['Find([1, 4, 9, 16], x => x > 5)'],
     description:
-      'Return the first element of the collection satisfying the predicate, or Nothing if none found.',
+      'Return the first element of the collection satisfying the predicate. When no element satisfies it, return the absent value of the domain of the elements: `NaN` for numbers, a point whose coordinates are all `NaN` for points, and `Missing` otherwise.',
     complexity: 8200,
     // Design D phase 1: the element-of link lives in the SIGNATURE (see
     // `CountIf`). The declared result stays the widest `any`: the NOT-FOUND
-    // answer is `Nothing`, so the precise `elementType | nothing` is the `type:`
-    // handler's below, not something `T` alone could say (§7 rule 1).
+    // answer is the absent value of the element domain, as for a read out of
+    // range (`absenceMarker()`), so the precise type `T | <absent value>` is
+    // the `type:` handler's below, not something `T` alone could say. Rule:
+    // `docs/ERROR-MODEL.md`, "One static error, one dynamic non-value per
+    // domain" (the table of the decisions of 2026-11-04).
     // A restricted collection, `[1,2]{c}`, is ONE held restriction over the list
     // and is threaded whole (user decision 2026-09-25): the result is computed
     // on the present collection and re-wrapped, absent as a whole once `c`
@@ -19694,21 +19697,30 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       '(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T: any',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Find', ops, 1, PER_ELEMENT_SUPPLY),
-    // Returns a single element, or `Nothing` when no element matches: the
-    // element type of the collection, not the collection type.
+    // Returns a single element, or the absent value of the element domain
+    // when no element matches: the element type of the collection, not the
+    // collection type, with the type of that absent value
+    // (`findResultTypeD()`).
     type: (ops, context) =>
       BoxedType.forResult(
-        reduceType({
-          kind: 'union',
-          types: [collectionElementType(ops[0].type) ?? 'any', 'nothing'],
-        }),
+        findResultTypeD(ops[0]?.type),
         context.engine._typeResolver
       ),
-    evaluate: ([xs, fn], { engine: ce }) => runWalk(findWalk(xs, fn, ce), ce),
+    // The element type of the operand as written decides the absent value
+    // when the evaluated source does not show it (`absenceMarker()`): with
+    // `E: list<integer>` and `E := []`, the answer is `NaN`.
+    evaluate: ([xs, fn], { engine: ce, expression }) =>
+      runWalk(findWalk(xs, fn, ce, undefined, findReadType(expression)), ce),
     // The same walk, with the predicate awaited (`asyncCallbackRoute`).
     evaluateAsync: ([xs, fn], options) =>
       runWalkAsync(
-        findWalk(xs, fn, options.engine, asyncCallbackRoute(options)),
+        findWalk(
+          xs,
+          fn,
+          options.engine,
+          asyncCallbackRoute(options),
+          findReadType(options.expression)
+        ),
         options
       ),
   },
@@ -26037,26 +26049,93 @@ function* sortWalk(
   return ce.function('List', elements);
 }
 
+/**
+ * The result type of `Find` over a source of type `source`: the element
+ * type, with the type of the absent value that `Find` gives when no element
+ * matches (`domainAbsenceMarker()`): `nan` for numeric elements
+ * (`integer | nan`), a tuple of `nan` for points
+ * (`tuple<real, real> | tuple<nan, nan>`), and `missing` otherwise
+ * (`missing | string`), as `findAbsentTypes()` gives them. The element type
+ * keeps its own `missing` arm: `Find` can select an absent cell
+ * (`Find([1, Missing], IsMissing)` is `Missing`). That arm is removed only
+ * to choose the absent value, as `absenceMarker()` does.
+ */
+function findResultTypeD(source: Type | undefined): Type {
+  const element =
+    source === undefined ? 'any' : (collectionElementType(source) ?? 'any');
+  return reduceType({
+    kind: 'union',
+    types: [element, ...findAbsentTypes(stripMissingFromType(element))],
+  });
+}
+
+/**
+ * The types of the absent values that `Find` can give for elements of the
+ * type `present`. `absenceMarker()` reads the element type of the
+ * EVALUATED source first, and that type can be narrower than the declared
+ * one, so every domain that the value can show is included:
+ * - `never` (an empty literal): `missing`;
+ * - `any` or `unknown`: `nan` and `missing`, because the absent value is
+ *   then read from the elements;
+ * - a number: `nan`; a point: the tuple of `nan` of its arity;
+ * - a union of arms of different domains (`integer | string`): `missing`,
+ *   and the absent value of each arm, because a value can hold the elements
+ *   of one arm only (`E: list<integer | string>` with `E := [1, 2]` gives
+ *   `NaN`);
+ * - anything else: `missing`.
+ */
+function findAbsentTypes(present: Type): Type[] {
+  if (present === 'never') return ['missing'];
+  if (present === 'any' || present === 'unknown') return ['nan', 'missing'];
+  if (isSubtype(present, 'number')) return ['nan'];
+  const n = pointArity(present);
+  if (n !== undefined)
+    return [
+      {
+        kind: 'tuple',
+        elements: Array.from({ length: n }, () => ({ type: 'nan' })),
+      },
+    ];
+  const r = resolveTypeAlias(present);
+  if (typeof r !== 'string' && r.kind === 'union')
+    return ['missing', ...r.types.flatMap((arm) => findAbsentTypes(arm))];
+  return ['missing'];
+}
+
+/**
+ * The element type of the source of the `Find` application `expression`,
+ * as written (the declared type of a symbol): it decides the absent value
+ * when the evaluated source does not show the domain of its elements
+ * (`absenceMarker()`).
+ */
+function findReadType(expression: Expression | undefined): Type | undefined {
+  if (expression === undefined || !isFunction(expression)) return undefined;
+  return collectionElementType(expression.op1.type.type);
+}
+
 /** The walk of `Find`, shared by its synchronous and asynchronous
  * handlers, which differ only in how the predicate is applied (`route`,
- * see `CallbackRoute`). */
+ * see `CallbackRoute`). When no element matches, the answer is the absent
+ * value of the domain of the elements (`absenceMarker()`), as for a read out
+ * of range; `readType` is the element type of the source as written. */
 function* findWalk(
   xs: Expression,
   fn: Expression,
   ce: ComputeEngine,
-  route: CallbackRoute = undefined
+  route: CallbackRoute = undefined,
+  readType: Type | undefined = undefined
 ): Generator<PromiseLike<unknown>, Expression | undefined, unknown> {
   const refused = unindexedCollectionOperandError(ce, 'Find', xs);
   if (refused) return refused;
   const f = applicable(fn);
-  if (!f) return ce.Nothing;
+  if (!f) return absenceMarker(ce, xs, readType);
   // A source that cannot be enumerated has no first match to report AND no
-  // grounds for the NOT-FOUND `Nothing` — stay inert (see
+  // grounds for the NOT-FOUND answer — stay inert (see
   // `isEnumerableSource`).
   if (!isEnumerableSource(xs)) return undefined;
   // A walk that meets an inner collection that it cannot walk ends early
   // (see `MeasuredWalk`): a match before that point is the first match,
-  // but the end of the walk is not grounds for `Nothing`.
+  // but the end of the walk is not grounds for the NOT-FOUND answer.
   const walk = new MeasuredWalk(() => xs.each());
   for (const item of walk) {
     const applied = yield* applyCallback(f, [item], route);
@@ -26073,7 +26152,7 @@ function* findWalk(
     throw predicateResultError('Find', fn);
   }
   if (walk.missedElements) return undefined;
-  return ce.Nothing;
+  return absenceMarker(ce, xs, readType);
 }
 
 /** The walk of `CountIf`, shared by its synchronous and asynchronous

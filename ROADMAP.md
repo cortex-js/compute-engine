@@ -401,30 +401,6 @@ Not part of the request: a number arm beside a point arm
 (`\{mod([1...4],2)>0:(1,2),-1\}`) stays `incompatible-type`; Tycho accepts
 that.
 
-### CE-804. `Find` gives `Nothing` when no element matches, where the error model gives `Missing`
-
-**Status:** decision needed; design, S. Found during CE-802.
-**Witness:** plausible; `Find([1, 2, 3], x ↦ x > 5)` gives `Nothing`, typed
-`integer | nothing`, on `fdc4d9b77`.
-
-The error model (`docs/ERROR-MODEL.md`, "One static error, one dynamic
-non-value per domain", user decision 2026-11-02) keeps `Nothing` only as the
-value of an empty block or of a statement with no value; a selection with no
-match gives the absent value of its domain (`NaN` for a number, `Missing`
-otherwise). `Find` (`library/collections.ts`, the `Find` entry, described
-"or Nothing if none found") still gives `Nothing`, so `Find(xs, p) + 1` is an
-`incompatible-type` error and `Coalesce(Find(xs, p), 0)` does not replace
-it (`IsMissing(Nothing)` is `False`). CE-802 made the same change for
-`RangeOf`. The options, with `Find([1, 2, 3], x ↦ x > 5)`:
-
-1. The absent value of the element domain: `NaN` here (a number), `Missing`
-   for `Find(["a"], x ↦ x == "b")`; typed `integer | nan` and `missing |
-   string`. As `At([1, 2], 5)` is `NaN`. Recommended.
-2. `Missing` for every element type, typed `integer | missing`.
-3. Keep `Nothing` and document `Find` as an exception to the error model.
-
-Without a decision, `Find` keeps `Nothing` (option 3, undocumented).
-
 ### CE-797. An implicitly compiled Map reuses a captured parameter from an earlier call
 
 **Status:** ready; wrong value.
@@ -2104,10 +2080,34 @@ reproduction above is the record.
 
 ### CE-805. A JavaScript fold over elements typed `unknown` tests the shape of each element at run time
 
-**Status:** decision needed; design, S. Found by the review of step 4, row 9 (`docs/plans/2026-11-02-compiler-contraction-plan.md`).
-**Witness:** corpus; Tycho row 425: `Sum(Rest(g(x)))` with `g` declared
-`function` and `x: list<real>` compiles on JavaScript, and the source has
-the element type `unknown`.
+**Status:** ready; design, S. User decision 2026-11-04: measure first. A
+session does the settled part, then runs the corpus audit on a prototype
+of option (a) for the unsettled part and counts the records that decline;
+if none does (Tycho's reading: a document function with a body has a
+settled element type, and the unbound case declines before the fold), take
+option (a); otherwise report the record ids to Tycho (tycho-desk checks
+them against its declaration order) and take option (b) with the exception
+stated in R3. Tycho does not declare result types for document functions
+(they are scalar functions that broadcast over lists, so a narrow result
+type would be wrong for a scalar call); asked and answered 2026-11-04.
+Found by the review of step 4, row 9
+(`docs/plans/2026-11-02-compiler-contraction-plan.md`).
+**Witness:** plausible; `Sum(Rest(g(x)))` with `g` declared `function`
+and `x: list<real>` compiles on JavaScript with a run-time test when the
+element type is `unknown`. The CE test
+`tycho-row-425-index-of-broadcastable-call.test.ts` is the origin of the
+case; Tycho (tycho-desk, 2026-11-04) says that row 425 itself is `Repeat(0,
+g(x)[1])` with `x: any` (art/mavxszbvzk), not this shape, and that for a
+document function with a body the element type is settled on 0.178.0 (a
+bare `function` with no value is the one `unknown` case, and it declines
+before the fold). No corpus record is known for the `unknown` case.
+Corpus, for the settled part below: Tycho's documents sum lists of points
+(`Sum`, `Total`), and `Sum(L)` with `L: list<tuple<real, real>>` compiles
+on `9043a313d` to the dispatching combiner although the element shape is
+settled: `((_c) => Array.isArray(_c) ? _c.reduce((_a, _b) =>
+Array.isArray(_a) || Array.isArray(_b) ? _SYS.add(_a, _b) : _SYS.sadd(_a,
+_b), 0) : _c)(_.L)` (measured 2026-11-04; the same for `g := t ↦ [t, 2t]`,
+element `vector<real^2>`).
 
 R3 of `docs/COMPILATION-MODEL.md` says that a value with no settled shape
 declines, and compiled code tests no type at run time. A `Sum` or a
@@ -2122,6 +2122,18 @@ row 9 declines the same fold when the element type is `any`
 (`assertSettledFoldElements()` in `compile-admission.ts`), because that
 case was declined before by the `Nothing` check; the cases above compiled
 before row 9 and still compile.
+
+Two parts. **The settled case first** (a removal, no decision):
+`elementwiseFoldCombiner()` emits the dispatching form by default ("correct
+for any entries"), and the fold wrapper also tests whether the source is an
+array. When the element shape is settled by the static type, emit the
+settled form: the tensor combiner (`_SYS.add`/`_SYS.mul`, or the lane's
+form) for list or point elements, the scalar combiner for scalar elements,
+and no test of the source. Zero changed values and zero new declines on the
+corpus; report the count of records whose code loses the test. Tycho asks
+that the decline below never reach this case, and it does not: the shape is
+settled. **The unsettled case** (`unknown`, a union of a number and a list,
+a source typed `any` after row 9) is the question:
 
 Options: (a) decline them with `unsettled-shape`, as R3 says: Tycho row 425
 then declines until the host declares the result type of `g`; about 25

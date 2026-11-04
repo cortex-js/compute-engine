@@ -6762,7 +6762,21 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       [BaseCompiler.collectionElementTypeOf(args[0])],
       [args[0]]
     );
-    return `(lambda _f: next((_x for _x in ${coll} if _f(_x)), float('nan')))(${fn})`;
+    // When no element satisfies the predicate, the value is the absent value
+    // of the element domain, as in the interpreter (`absenceMarker()`,
+    // `library/collections.ts`): `float('nan')` for a number, a tuple of
+    // `nan` for a point, `None` otherwise. The domain is read from the type
+    // of the elements, as the interpreter reads it (`collectionElementType`),
+    // not from what an index returns. The marker can read the collection
+    // through the name `_l`, which is bound here, and is computed only when
+    // no element matches: the sentinel `_n` marks that case, so a probe of
+    // the elements does not run on every call.
+    const absent = pyAbsenceMarkerOfElementType(
+      collectionElementType(
+        stripMissingFromType(resolveTypeForCompilation(args[0].type.type))
+      )
+    );
+    return `(lambda _f, _l, _n: (lambda _r: (${absent}) if _r is _n else _r)(next((_x for _x in _l if _f(_x)), _n)))(${fn}, ${coll}, object())`;
   },
   IndexWhere: (args, compile) => {
     const coll = pyCollArg('IndexWhere', args[0], compile);

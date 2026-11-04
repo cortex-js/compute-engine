@@ -293,11 +293,18 @@ Those passages are kept as history.
 | `RangeOf([1, 2, 3], [9])` (decision of 2026-11-04) | `Nothing` | `Missing`, typed `range \| missing` |
 | `Slice([1, 2, 3], RangeOf([1, 2, 3], [9]))` (decision of 2026-11-04) | `Nothing` | `Missing` |
 | `Slice([1, 2, 3], Nothing)` (decision of 2026-11-04) | `Nothing` | `incompatible-type` error |
+| `Find([1, 2, 3], x ↦ x > 5)` (decision of 2026-11-04) | `Nothing` | `NaN`, typed `integer \| nan` |
+| `Find([(1, 2)], p ↦ First(p) > 5)` (decision of 2026-11-04) | `Nothing` | `(NaN, NaN)` |
+| `Find(["a"], x ↦ x = "b")` (decision of 2026-11-04) | `Nothing` | `Missing`, typed `missing \| string` |
 
-A failed sequence search was the one producer of `Nothing` left after this
-decision. The user decision of 2026-11-04 (ROADMAP CE-802) made it
-`Missing`, so `Slice` has no `Nothing` case: an absent span gives `Missing`
-by the rule that every operator over `Missing` gives `Missing`.
+Two operators still produced `Nothing` after this decision: a failed
+sequence search and a `Find` with no match. The user decisions of
+2026-11-04 (ROADMAP CE-802 and CE-804) gave each the absent value of its
+domain. `RangeOf` gives `Missing`, so `Slice` has no `Nothing` case: an
+absent span gives `Missing` by the rule that every operator over `Missing`
+gives `Missing`. `Find` gives the value of a read out of range of the same
+collection: `NaN` for numbers, the `NaN` point for points, `Missing`
+otherwise.
 
 This decision supersedes, in the text below: the second member of `nan`,
 `Indeterminate`, with its exact propagation and its `isIndeterminate`

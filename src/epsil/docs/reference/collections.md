@@ -727,7 +727,7 @@ filter([1, 2, 3, 4, 5, 6], x => x % 2 == 0)
 
 MathJSON `Find` · `(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T: any`
 
-Return the first element of the collection satisfying the predicate, or Nothing if none found.
+Return the first element of the collection satisfying the predicate. When no element satisfies it, return the absent value of the domain of the elements: `NaN` for numbers, a point whose coordinates are all `NaN` for points, and `Missing` otherwise.
 
 ```epsil
 find([1, 4, 9, 16], x => x > 5)

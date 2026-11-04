@@ -192,7 +192,7 @@ const CASES: Case[] = [
     'Find',
     ['Find', 'L', ['Function', ['IsMissing', 'x'], 'x']],
     '\\mathrm{Find}(L, x \\mapsto \\mathrm{IsMissing}(x))',
-    'integer | missing | nothing',
+    'integer | missing | nan',
   ],
   [
     'Union',
@@ -345,7 +345,7 @@ describe('A DECLARED CALLBACK ON AN ABSENT CELL', () => {
     [['IndexWhere', 'L', 'b'], 'integer', '3'],
     [['Position', 'L', 'b'], 'list<integer>', '[3]'],
     [['CountIf', 'L', 'b'], 'integer', '1'],
-    [['Find', 'L', 'b'], 'integer | missing | nothing', '3'],
+    [['Find', 'L', 'b'], 'integer | missing | nan', '3'],
     [['TakeWhile', 'L', 'b'], 'list<integer | missing>', '[]'],
     [['DropWhile', 'L', 'b'], 'list<integer | missing>', '[1,"Missing",3]'],
     [['ChunkBy', 'L', 'g'], 'list<list<integer | missing>>', undefined],

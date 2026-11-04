@@ -356,7 +356,7 @@ describe('a valueless source leaves every operator inert', () => {
         .box(['Find', ['List'], P])
         .evaluate()
         .toString()
-    ).toBe('"Nothing"');
+    ).toBe('"Missing"');
     expect(
       ce
         .box(['IndexWhere', ['List'], P])

@@ -113,6 +113,16 @@
   that reads such a symbol declines when the stored value can be complex
   (`r: real` assigned `z: complex`), so a valid input such as `z = 2 + 0i`
   gives the interpreter's value (Tycho row 483).
+- **`Find` with no matching element gives the absent value of the element
+  type, not `Nothing`.** `Find([1, 2, 3], x ↦ x > 5)` is `NaN`, typed
+  `integer | nan` (it was `Nothing`), so `Coalesce(Find(xs, p), 0)` gives
+  `0` and `Find(xs, p) + 1` is `NaN` (it was an `incompatible-type` error).
+  Over a list of points the value is the point of `NaN` coordinates, and
+  over strings or other elements it is `Missing`:
+  `Find(["a"], x ↦ x = "b")` is `Missing`, typed `missing | string`. This
+  is the value that a read out of range of the same list gives. Compiled
+  JavaScript and Python give `NaN` for numbers and the `NaN` point for
+  points (compiled JavaScript gave a scalar `NaN` for points).
 - **A sequence search that finds nothing gives `Missing`, not `Nothing`.**
   `RangeOf([1, 2, 3], [9])` is `Missing` (it was `Nothing`), and `RangeOf`
   is typed `range | missing`. `Slice(xs, RangeOf(xs, needle))` is still
