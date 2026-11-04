@@ -33,6 +33,7 @@ open-source comparators — against what a mature commercial CAS does.
 | **Compilation (legacy)** | `python-performance.py` | compiled-JS · NumPy · Python | stdout |
 | **Worker threads** | `workers/*.mts` | CE (self, serial vs worker threads) | stdout |
 | **Tycho document open** | `tycho-document-open/evaluate.ts`, `rebind.ts` | CE (self; replays the `evaluate` and `rebind` calls Tycho makes when it opens `art/2ki2hjsouf`, from `2ki2hjsouf.fixture.json.gz`; ROADMAP CE-535, CE-536) | stdout |
+| **Scalar arithmetic profile** | `scalar-arithmetic.mjs` | CE source or production bundle; timings, cache counts, inspector profiles | `scalar-arithmetic-2026-11-03.json`; evaluation-cache architecture §11 |
 | **Caches of evaluated values** | `evaluation-caches.ts` | CE (self; each cache on and off with `CE_CACHE_OFF`) | stdout |
 | **Pool in a worker (browsers)** | `workers/nested-pool-browser-probe.mjs` | CE bundle in Chromium · Firefox · WebKit (needs a Playwright, `PLAYWRIGHT=`) | stdout |
 | **Finite groups** | `run-group-theory.mjs finite` (`group-theory-finite.ts`) | CE (self; table validation, subgroup structure, automorphisms) | [Group methodology](group-theory.md); local JSON under `build/group-theory-benchmarks/` |
@@ -620,3 +621,31 @@ change, not a comment cleanup. Existing timing tests primarily catch catastrophi
 slowdowns; exact work-count tests catch particular mechanisms, while this paired
 harness supplies a repeatable baseline for smaller drift. Automated trend tracking
 across quiet runs would be a separate task.
+
+## Scalar arithmetic (`scalar-arithmetic.mjs`)
+
+Separates preboxed evaluation, assignment and boxing for multiply-add, rational
+and transcendental arithmetic, plus a pure function wrapper. Each exact/numeric
+case runs with unchanged, relevant-write and unrelated-write inputs. Fresh-engine
+calls share a loaded runtime; they are not process startup. Validation is outside
+the timers. Relevant writes use unique values after warmup. Hold the box lock and
+monitor CPU use; reject overlapping heavy checks.
+
+```sh
+ENTRY=dist/esm-min/core.js RUNS=5 ITERATIONS=400 node --expose-gc benchmarks/scalar-arithmetic.mjs /tmp/wt
+MODE=counts ENTRY=dist/esm-min/core.js ITERATIONS=200 node --expose-gc benchmarks/scalar-arithmetic.mjs /tmp/wt
+MODE=profile ENTRY=dist/esm-min/core.js ONLY=muladd/exact/unchanged node --expose-gc benchmarks/scalar-arithmetic.mjs /tmp/wt
+```
+
+Build each comparator with `npm run build -- production` first. Source runs use
+`node --expose-gc --import tsx`, with default `ENTRY=src/core.ts`. The loader and
+assertions affect source profiles; keep them separate from production. Profile
+mode samples CPU for at least `PROFILE_MS=1500` milliseconds, requires 1000 CPU
+samples, and separately samples allocations over 1000 calls at a 32 KiB interval.
+Reactive profiles include assignment; uninstrumented timings separate it.
+`ONLY` accepts comma-separated full ids and refuses unknown selectors.
+
+The findings and recommendations are in
+[`evaluation-cache-architecture`, section 11](../docs/plans/2026-10-30-evaluation-cache-architecture.md#11-scalar-arithmetic-profile-2026-11-03).
+Accepted observations are in
+[`scalar-arithmetic-2026-11-03.json`](scalar-arithmetic-2026-11-03.json).

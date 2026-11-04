@@ -1,6 +1,6 @@
 # The caches of evaluated values: audit and proposed design
 
-Date: 2026-10-30, revision 2 (revision 1 had a dual review; its findings are
+Initial audit: 2026-10-30, revision 2 (revision 1 had a dual review; its findings are
 in `docs/scratch/EVALUATION-CACHE-ARCHITECTURE_SPEC_REVIEW.md`, and section 10
 says where each one is handled). Session `compute-engine-aa`. Task:
 `docs/plans/2026-10-28-evaluation-cache-audit-handoff.md`. Input: the census
@@ -19,7 +19,7 @@ start with `src/`, `test/`, `docs/` or `benchmarks/`.
 This document changes no source code. It found three defects, filed as
 ROADMAP CE-628, CE-647 and CE-648; step 1 fixes them.
 
-**Status of the steps (2026-10-30).** Steps 0 and 1 are committed
+**Historical status of the steps (2026-10-30).** Steps 0 and 1 are committed
 (`5029c5d77`). Step 5 is staged: the enclosure endpoint cache and both
 contour memos are removed, and CE-659 (a `Series` result depended on the zero
 tests made before it) is fixed by the user's option (a). On 2026-10-30 the
@@ -27,6 +27,10 @@ user reduced the plan: step 4 and a narrow fix of CE-645 remain; steps 2, 3b
 and 6 are postponed until a defect needs them; step 7 is not done (decision
 2). The current state and the next work are in
 `docs/plans/2026-10-30-evaluation-cache-status-handoff.md`.
+
+**Update 2026-11-03.** Section 11 records the scalar-arithmetic profile at
+`049107fb4` and revises the recovery priorities. Earlier measurements remain
+historical. No postponed implementation step is reopened by this update.
 
 ## 1. Summary
 
@@ -537,6 +541,10 @@ stamps (facts hidden, object-store epoch or object dependencies, definition
 version, semantic version, scope).
 
 ### 5.3 Each function call clears the generation caches
+
+The following describes the October 30 baseline. Function-body type caching
+was subsequently separated by `db796d62e`; see section 11. Sign and evaluated
+values still depend on runtime activation values.
 
 The `any` version moves at each call of a function literal, so each rule G
 entry is out of date after a call. The hit counts in section 3.3 show that
@@ -1091,3 +1099,153 @@ Findings of `docs/scratch/EVALUATION-CACHE-ARCHITECTURE_SPEC_REVIEW.md`:
 | 24 Evidence in the scratchpad | 9 |
 | 25 "With no imports" | 6.2 |
 | 26 Step order, paths, pass criteria | 7 |
+
+
+## 11. Scalar arithmetic profile (2026-11-03)
+
+This section updates the recommendations, not the approved implementation
+scope. Engine source was unchanged. The October 30 decision postponing steps
+2, 3b and 6 remains in force. The static type view added by `db796d62e` is now
+implemented; the proposed numeric-context and common dependency stamps are not.
+The dictionary memo conversion of `bce3cb989` is implemented. Earlier sections
+retain their original measurement dates and should not be read as current costs.
+
+### 11.1 Instrument and conditions
+
+The reproducible driver is `benchmarks/scalar-arithmetic.mjs`; accepted raw
+observations, profile summaries, cache counts, monitoring provenance and build
+hashes are in `benchmarks/scalar-arithmetic-2026-11-03.json`. Compare `17ba3b407`
+(immediately before the store-guard changes) and `049107fb4` (the committed
+November 3 lifetime review), using isolated checkouts and the same dependencies.
+
+Apple M5 Max, 18 cores; Node 26.13.0; machine precision; `jit = 'off'`.
+Both production builds used `npm run build -- production`. Build types and
+consumer checks passed; CLI HTTP smoke tests needed host loopback permission
+because the sandbox refused listening with EPERM. There was no engine source
+change and no compiler simplification in this profile.
+
+Each timing process runs five fresh-engine trials, 100 warmups and 400 samples
+per case. Three accepted processes per tree run in alternating order. Assignment,
+evaluation and boxing have separate timed regions. Every value is checked outside
+the timers, including complete exact symbolic structure and reduced rational
+values; numeric outputs use independent Math functions and a tolerance. The
+clock-read control is recorded. CPU and allocation sampling are separate runs,
+with cache counters disabled. Counts mode excludes validation from its counters.
+Timing and profile attempts with monitored CPU-bound typechecks, test workers,
+other Node jobs or browser/editor renderers were rejected and retried.
+
+There are two representations: TypeScript source via tsx, for continuity with
+the lifetime review, and the shipped `dist/esm-min/core.js`, run with plain Node.
+The source profile has generated `__name` helpers and assertion activity; it is
+not a proxy for shipped cost. The entry hash and Node loader flags are recorded
+by the driver. Source-map attribution was checked against equivalent generated
+code, correcting SDK-version stamping offsets. Accepted production profiles use
+JavaScript whose hashes exactly match the originally timed build. Changed chunk
+filenames in an intermediate map build were not accepted as byte-identical.
+
+### 11.2 Observations
+
+The table reports microseconds. Warm figures are medians of process medians;
+the last column is a fresh-engine evaluation in an already loaded process, not
+cold process startup. Setup and boxing are excluded from evaluation.
+
+| Case | Before warm µs | Current warm µs | Change | Current fresh-engine µs |
+| --- | ---: | ---: | ---: | ---: |
+| `muladd/exact/unchanged` | 14.28 | 13.61 | -5% | 130.7 |
+| `muladd/numeric/unchanged` | 14.43 | 15.41 | +7% | 133.6 |
+| `rational/exact/unchanged` | 11.86 | 12.56 | +6% | 106.4 |
+| `rational/numeric/unchanged` | 15.89 | 16.22 | +2% | 121.6 |
+| `transcend/exact/unchanged` | 13.90 | 15.53 | +12% | 19236.4 |
+| `transcend/numeric/unchanged` | 12.76 | 13.63 | +7% | 144.3 |
+| `call/exact/unchanged` | 6.63 | 7.03 | +6% | 370.4 |
+| `call/exact/relevant` | 31.03 | 33.98 | +10% | 259.5 |
+
+There is no uniform 11% arithmetic regression. Multiply-add without writes is
+slightly faster in the bundle comparison; several other routes are somewhat
+slower. Process-median ranges overlap on some cases: multiply-add exact is
+13.78–14.43 µs before and 13.15–13.90 µs now; rational exact is 11.42–13.33
+and 12.31–12.76 µs. These small differences are observations over representative
+programs, not causal attribution to one cache commit or universal speed claims.
+
+On current code, boxing multiply-add costs about 23.3 µs and boxing the rational
+expression about 31.1 µs. Reuse a preboxed expression when possible; these rows
+do not include parsing. A relevant assignment costs another 2.4 µs beside
+11.9 µs of multiply-add evaluation; an unrelated assignment costs 2.2 µs beside
+11.1 µs of evaluation. The write variants occur later in the process than the
+unchanged row, so their slightly lower absolute times are not evidence that a
+write accelerates arithmetic.
+
+The pure function wrapper is faster on repeated inputs (7.0 µs) than direct
+multiply-add evaluation (13.6 µs), but a new argument tuple costs 34.0 µs. Its
+application memo already survives unrelated assignments (6.6 µs evaluation plus
+1.8 µs assignment). This is evidence of useful existing dependency invalidation;
+it is not a recommendation to wrap every arithmetic expression in a function.
+
+For 200 warmed evaluations, multiply-add and rational routes record no counted
+type or sign cache events, even with relevant or unrelated writes. Each ordinary
+write advances `any`, `type` and evaluation versions, but finer type invalidation
+alone cannot avoid recomputations in caches these cases do not read. Exact
+symbolic `Sin(a)+Ln(b)` is different: 200 unchanged evaluations record 200 cold
+type misses; unrelated writes give 600, with zero generation misses in both.
+Its evaluation rises from 15.5 to 30.2 µs after unrelated writes. The baseline
+already has the same penalty (13.9 to 27.6 µs), so this is not introduced by
+the recent cache changes. Cold misses
+alone do not distinguish newly created entries from explicitly emptied entries;
+trace the entries before assigning a cause or changing the type-version rule.
+
+Production multiply-add samples attribute about 16% of exact CPU self samples to
+`boxed-function.ts`, 11% to type guards and 13% to scalar add/multiply files;
+rational normalization and numeric-value construction are also substantial.
+Allocation estimates are about 15.5 KiB/evaluation exact and 20.4 KiB numeric.
+Anonymous evaluation closures, `flatten`, arithmetic folding and numeric values
+appear in the allocation profile. A fresh function activation is about 47 KiB
+per call, including its assignment, versus 5.5 KiB for a memo-hit call. These are
+sampled allocation estimates, not exact object counts or retained-heap readings.
+
+Direct self time in cache-helper modules is about 0.3–0.5% for multiply-add and
+2.1% for the symbolic case. This is not an upper bound on cache costs: first-visit
+memo branches live in `boxed-function.ts`, and dependencies can invoke other code.
+A diagnostic `CE_CACHE_OFF=shared` comparison (two accepted processes) reduces
+exact multiply-add from 13.6 to 12.6 µs, numeric multiply-add from 15.4 to 14.9 µs,
+and fresh calls from 34.0 to 31.7 µs. Rational exact changes 12.6 to 12.3 µs and
+symbolic transcendental evaluation is slightly slower, 15.5 to 16.0 µs. This is
+a targeted signal of bookkeeping cost, not permission to disable shared-node
+memoization: shared expression DAGs still require it to avoid exponential work.
+
+### 11.3 Recommendations and acceptance checks
+
+1. **Prioritize scalar dispatch and allocation, plus first-visit shared-memo
+   bookkeeping.** Explore reducing evaluation thunks and temporary arrays, and
+   reaching the existing numeric folds earlier when every operand is an already
+   evaluated numeric literal. The profile supports investigating these paths;
+   it does not yet measure the gain from a proposed implementation. Use existing
+   exact numeric operations, not unconditional JavaScript-number arithmetic.
+   Preserve complex values, rationals, non-finite cases, error priority, units,
+   enclosures, collection broadcasting and single evaluation of effectful inputs.
+   Keep DAG and shared-node controls next to the ordinary-tree measurements.
+2. **Treat cache-stamp unification as maintenance work with a performance gate.**
+   A numeric-context stamp can remove duplicated setting comparisons, and shared
+   dependency validators can remove repeated implementations. The current simple
+   arithmetic cases do not justify implementing these as the first recovery step.
+   Compute context stamps on configuration changes, not by allocating or interning
+   a tuple on every hit. Keep different lifetimes and recursion protocols explicit;
+   description cells must not inherit every evaluated-value store guard.
+3. **Investigate the symbolic unrelated-write penalty before adding axes.** Track
+   entry identity, cleared cells, rebuilt nodes and stores declined by guards.
+   Separate declared-type stability from inferred types, shape changes and facts.
+   A narrower type axis needs evidence that it avoids real work and tests for
+   widening, shadowing, restored checkpoints and changed assumptions. Do not
+   replace a constant-time generation check with a dependency walk everywhere.
+4. **Consider cross-evaluation scalar result reuse only as a separate experiment.**
+   The function memo demonstrates a potential benefit for stable inputs, but a new
+   universal arithmetic memo adds retained state and invalidation obligations.
+   Prefer reusing an existing dependency-validation policy and a bounded entry,
+   measuring hit-heavy and write-heavy flows. Preserve scope/binding identity,
+   numeric settings, mutable-object dependencies, operator redefinition, host purity
+   and provisional-result rules. This profile does not authorize that design change.
+
+A recovery change should improve the production bundle on its claimed flow,
+retain its mathematical controls, and show allocation and first/warm results.
+Do not accept source-loader-only gains. Report context/dependency unification
+separately from reduced walks or allocation so a speedup can be attributed.
+No runtime recovery change is included in this profiling task.
