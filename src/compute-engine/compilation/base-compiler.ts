@@ -1,7 +1,5 @@
-// The compiler's former single file. It keeps the class name BaseCompiler as a
-// facade whose static members forward to the modules that now hold the code,
-// and re-exports the items it exported before, so importers keep working. New
-// code imports an item from the module that defines it.
+// Public compatibility facade. Topic modules own the implementations; new
+// internal callers import from those modules directly.
 
 // Loading this module installs the compiler core: compiler-core.ts fills the hub
 // record of compiler-core-hooks.ts when it loads, and nothing else imports it.
@@ -63,7 +61,6 @@ import {
   isUserDefinedFunction,
   joinShaderStatements,
   loopBodyTempTarget,
-  recordFoldedPromotions,
   shaderExpressionStatement,
   snapshotCseInstances,
   statementLines,
@@ -122,17 +119,14 @@ import {
   _pushComplexMemoLayer,
   _runtimeMatrixPowerBases,
   _withFoldedRealOverride,
-  hasPromotedDefinition,
   isRealOnlyLowering,
   isRealOnlyLoweringHead,
   liftPromotionSuppression,
   mentionsAnyName,
   mode,
   integerLane,
-  notePromoted,
   oracleFoldTarget,
   rebindsAnyName,
-  recordPromotion,
   restorePromotionSuppression,
   runtimeRealGuards,
   strictLanes,
@@ -898,12 +892,6 @@ export class BaseCompiler {
   static get runtimeRealGuards() {
     return runtimeRealGuards();
   }
-  static get _promoted() {
-    return CompilerState._promoted;
-  }
-  static set _promoted(v: (typeof CompilerState)['_promoted']) {
-    CompilerState._promoted = v;
-  }
   static get _realOnlyLowering() {
     return CompilerState._realOnlyLowering;
   }
@@ -913,16 +901,12 @@ export class BaseCompiler {
   static readonly isRealOnlyLoweringHead = isRealOnlyLoweringHead;
   static readonly isRealOnlyLowering = isRealOnlyLowering;
   static readonly stringHelperIsRealOnly = stringHelperIsRealOnly;
-  static readonly notePromoted = notePromoted;
-  static readonly recordPromotion = recordPromotion;
-  static readonly recordFoldedPromotions = recordFoldedPromotions;
   static get _lastReport() {
     return CompilerState._lastReport;
   }
   static set _lastReport(v: (typeof CompilerState)['_lastReport']) {
     CompilerState._lastReport = v;
   }
-  static readonly hasPromotedDefinition = hasPromotedDefinition;
   static get complexDiscipline() {
     return complexDiscipline();
   }

@@ -37,7 +37,6 @@ import {
   blockLocalFunction,
   userFunctionLiteral,
 } from './compile-assignment-checks.js';
-import { CompilerState } from './compiler-state.js';
 import { assertNoDeclaredTopOperands } from './compile-admission.js';
 import {
   compilationType,
@@ -889,14 +888,7 @@ export function compileExprTyped(
     // does every value under `strict` and on the shader targets, which
     // never promote.
     if (promotionActive() && isRealScalarAscription(typed)) {
-      // The analysis emits nothing, so it must not change the promotion
-      // record: the record is restored after it. The compilation that
-      // follows records the promotions of the code that it emits. A
-      // decline emits nothing either.
-      const promoted = CompilerState._promoted;
-      const complexWithPromotion = core.isComplexValued(value);
-      CompilerState._promoted = promoted;
-      if (complexWithPromotion) {
+      if (core.isComplexValued(value)) {
         // One suppressed region for the analysis and the compilation, so
         // the compilation reads the complexness answers that the analysis
         // put in the memo layer of the region.

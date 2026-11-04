@@ -10,7 +10,6 @@ import { parseType } from '../../common/type/parse.js';
 import type { Type } from '../../common/type/types.js';
 import {
   isSymbol,
-  isNumber,
   isString,
   isFunction,
 } from '../boxed-expression/type-guards.js';
@@ -27,8 +26,6 @@ import { core } from './compiler-core-hooks.js';
 import { writesBlocksAsIife } from './compile-conditions.js';
 import { collectUsedNames } from './compiler-names.js';
 import { newNamingContext, withBoundScope } from './compiler-naming.js';
-import { CompilerState } from './compiler-state.js';
-import { PROMOTABLE_RADICAL_HEADS } from './compiler-mode.js';
 
 /**
  * The STATEMENT head `expr` lowers to at a body position — `'Assign'` or
@@ -581,70 +578,6 @@ export function compileRoot(
   // every route crosses.)
   target.beginCompilation?.(target);
   return core.compile(expr, target, prec);
-}
-
-/**
- * Record, in the promotion record (`CompilerState._promoted`), the promotions of a subtree that the
- * constant fold replaces with a COMPLEX literal. The subtree is not
- * compiled, so no emitter records its promotable heads. But the literal is
- * complex because those heads promote: with promotion off, the fold
- * declines and the real kernel gives NaN (`√(Σ cos k)` for k = 1..5 is
- * `1.11…i` under `complex` and NaN under `strict`). So each promotable head
- * of the subtree is given to `promotesRadicalToComplex`, which records the
- * same promotions that the emitters record for the same heads.
- *
- * A call of a user function in the subtree is folded with its body, so
- * the body of the function is read too (once for each function, which
- * also stops a recursive function). With `g := k ↦ √(k − 5)`, `x + g(3)`
- * folds to `x + 1.41…i` under `complex`, and the promotion is in the body of
- * `g`.
- *
- * A descendant that folds on its own to a REAL number supplies no part of
- * the complex value, so its subtree is not read. With
- * `i + Sum(√(2 + sin k), k, 1, 16)`, the sum folds to `22.85…` and the
- * imaginary unit supplies the imaginary part: the radical in the sum is not
- * a promotion. A descendant that does not fold on its own (it mentions a
- * bound index or a parameter, for example) is read, and its promotable
- * heads are recorded. The root is not folded again: the caller folded it
- * to a complex literal.
- */
-export function recordFoldedPromotions(
-  expr: Expression,
-  target: CompileTarget<Expression>,
-  visited: Set<string> = new Set(),
-  root = true
-): void {
-  if (!isFunction(expr)) return;
-  if (!root) {
-    // The fold evaluates the subtree and can compile a callback, which can
-    // record a promotion. That code is not emitted, so the record is
-    // restored.
-    const recorded = CompilerState._promoted;
-    let folded: ReturnType<typeof core.constantFoldValue>;
-    try {
-      folded = core.constantFoldValue(expr, target);
-    } finally {
-      CompilerState._promoted = recorded;
-    }
-    if (
-      folded !== undefined &&
-      folded.elements === undefined &&
-      isNumber(folded.value) &&
-      !folded.value.isComplex
-    )
-      return;
-  }
-  const h = expr.operator;
-  if (h === 'Power' || h === 'Root' || PROMOTABLE_RADICAL_HEADS.has(h))
-    void core.promotesRadicalToComplex(h, expr.ops);
-  if (!visited.has(h)) {
-    const literal = userFunctionLiteral(expr.engine, h);
-    if (literal !== undefined) {
-      visited.add(h);
-      recordFoldedPromotions(literal.op1, target, visited, false);
-    }
-  }
-  for (const op of expr.ops) recordFoldedPromotions(op, target, visited, false);
 }
 
 /**

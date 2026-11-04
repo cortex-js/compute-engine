@@ -158,15 +158,9 @@ export function compile<
       // rewrite it is target independent, and a raw target gets it here
       // because it has no `compileOrThrow` of its own to apply it
       // (`fixed-width-unroll.ts`).
-      // A head the caller overrode through the `operators`/`functions`
-      // options is withheld from the unroll: the caller's implementation
-      // replaces the emission and receives the node's own operands, which an
-      // unroll would change, and from the rewrite of partial applications.
-      // A partial application of a function literal is rewritten as on a
-      // registered target (`rewritePartialApplications`): a call of one is
-      // merged into one call of the literal, and one whose value is a
-      // function becomes its residual `Function` literal, which this target
-      // compiles or declines as it does any `Function` literal.
+      // Caller-defined heads receive their original operands. Other
+      // applied literals infer bare parameter types from arguments they
+      // bind whole, before fixed-width collections are expanded.
       const skipHeads = overriddenCompilationHeads(
         options.operators,
         options.functions

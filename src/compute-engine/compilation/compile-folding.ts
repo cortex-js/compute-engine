@@ -39,7 +39,6 @@ import { isBeyondSafeInteger } from '../numerics/numeric.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
 import { CompilerState } from './compiler-state.js';
 import { core } from './compiler-core-hooks.js';
-import { recordFoldedPromotions } from './compile-statements.js';
 import { storedDefinitions } from './compile-integrals.js';
 import {
   blockLocalFunction,
@@ -301,19 +300,7 @@ export function tryConstantFold(
   // interpreter's value (see `closedExactJump`).
   const jump = closedExactJump(expr, target);
   if (target.constantFold === false && !jump) return undefined;
-  // The fold evaluates the subtree with `.N()`, and the evaluation can
-  // compile a lazy `Map` callback inside this compilation. The code
-  // generation of that callback can record a promotion in `_promoted`,
-  // but that code is not emitted, so the record is restored. A complex
-  // fold result records its own promotions below
-  // (`recordFoldedPromotions`), after the restore.
-  const recorded = CompilerState._promoted;
-  let folded: ReturnType<typeof core.constantFoldValue>;
-  try {
-    folded = core.constantFoldValue(expr, target);
-  } finally {
-    CompilerState._promoted = recorded;
-  }
+  const folded = core.constantFoldValue(expr, target);
   if (folded === undefined) return undefined;
   const { value, elements } = folded;
   const engine = expr.engine;
@@ -456,14 +443,6 @@ export function tryConstantFold(
     // runtime division produce — see the `~oo` arm of the number-literal
     // emission below.
     return emitFoldedValue(engine.PositiveInfinity, target, prec);
-
-  // A complex value that reaches this point is on a node that the analysis
-  // reads as complex (the gates above decline or project every other
-  // complex value), and it is emitted as a complex literal. When the node
-  // is complex because a promotable head promotes, the literal is a
-  // promotion: the analysis does not record it (see `isComplexValued`), and
-  // no emitter sees the subtree, so it is recorded here.
-  if (isNumber(value) && value.isComplex) recordFoldedPromotions(expr, target);
 
   // `~oo` on a node that IS complex-valued folds to the complex lane's
   // spelling of the pole, `{re: ∞, im: ∞}` (`complexPole()` in

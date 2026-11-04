@@ -51,7 +51,6 @@ import {
   _pushComplexMemoLayer,
   isRealOnlyLoweringHead,
   mode,
-  notePromoted,
   wideIsComplex,
 } from './compiler-mode.js';
 import { CompilerState } from './compiler-state.js';
@@ -126,7 +125,6 @@ export function continuesToComplex(
   }
   const lane = complexContinuation(head, args);
   if (lane === 'real') return false;
-  if (lane === 'unknown') notePromoted();
   return true;
 }
 
@@ -886,8 +884,8 @@ export function _isComplexValuedFunction(
   // part when the imaginary part is exactly zero, and the value is NaN
   // otherwise (the D2/D6 rule of `realOperandGuard`) — and in strict mode a complex operand fails closed — either way
   // the emitted value is never a `{re, im}` object, so a wide RESULT type
-  // (`Max(a, b)` over wide `a`, `b`) must not report complex. See
-  // `_realOnlyLowering` for the measured disagreement.
+  // (`Max(a, b)` over wide `a`, `b`) must not report complex, or enclosing
+  // arithmetic would read `.re` and `.im` from a plain number.
   // The exception is a head that the target also lowers for complex
   // operands (`complexLowering`): when an operand may be complex, that
   // lowering is emitted, and its value is complex when the lowering says so
@@ -1037,27 +1035,8 @@ export function _isComplexValuedFunction(
     if (isSymbol(op) && BUILTIN_FOLD_HEADS.has(op.symbol))
       return foldLaneIsComplex(coll, init);
   }
-  if (promotionActive()) {
-    // The predicate records a promotion in the promotion record (`CompilerState._promoted`)
-    // (`notePromoted`), but this analysis emits nothing: the node can be
-    // folded to a literal, or be part of a subtree that is never emitted.
-    // The emitter of the head calls the same predicate when it lowers the
-    // node, and that call records the promotion of the emitted code. So
-    // the record of the analysis is removed here. With `x` real,
-    // `x + Sum(√(2 + sin k), k, 1, 16)` folds the sum to `22.85…`, and
-    // nothing is recorded.
-    // The record is restored in a `finally`, so a throw from the predicate
-    // (a type read, a cancellation at the deadline) that a caller catches
-    // does not leave the promotion in the report.
-    const recorded = CompilerState._promoted;
-    let promotes: boolean;
-    try {
-      promotes = core.promotesRadicalToComplex(expr.operator, expr.ops);
-    } finally {
-      CompilerState._promoted = recorded;
-    }
-    if (promotes) return true;
-  }
+  if (promotionActive() && core.promotesRadicalToComplex(expr.operator, expr.ops))
+    return true;
   // `Apply(Derivative(f, n), …)` — the compiled `f''(x)` — takes the value
   // shape of the EXPRESSION THE EMITTER WILL PRODUCE, not the one this
   // node's type reports: `Derivative`'s type handler reports `number` for a

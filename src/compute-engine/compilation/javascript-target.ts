@@ -614,7 +614,7 @@ import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 import { isAccessorOfPossibleList } from '../boxed-expression/point-accessor-operand.js';
 import { colorSpaceOf, isColorValued } from './color-space-fact.js';
 import {
-  curriedApplication,
+  assertNoCurriedApplication,
   isPartialApplication,
   partialApplicationValueDecline,
   rewritePartialApplications,
@@ -4990,10 +4990,6 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Ln: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0])) {
-      // The operand may be complex only by WIDENESS (the complex discipline
-      // lifted it): that is a promotion for the promotion record (`CompilerState._promoted`), and the
-      // predicate below records it (its lowering is the same kernel).
-      BaseCompiler.recordPromotion('Ln', args);
       return complexUnary(target, '_SYS.cln', compile(args[0]));
     }
     // Real-emitted operand with a complex result — a PROVABLY negative operand
@@ -7162,15 +7158,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Apply: (args, compile, target) => {
     if (args[0] == null)
       throw new Error('Could not compile `Apply`: missing function');
-    // A partial application of a function literal applied to more arguments
-    // is one call of the literal (`curriedApplication`), when it compiles.
-    // A partial application on its own is a function value. Its residual is
-    // built at compile entry, at the positions where every call of it
-    // supplies all its arguments (`rewritePartialApplications`); one that
-    // reaches this handler declines (`partialApplicationValueDecline`).
-    args = curriedApplication(args) ?? args;
+    // Partial applications and calls of their results decline. Complete
+    // calls continue with their original operands.
+    assertNoCurriedApplication(args);
     if (isPartialApplication(args))
-      throw new Error(partialApplicationValueDecline(args));
+      throw new Error(partialApplicationValueDecline());
     // A collection at a parameter of the literal declared `expression` is
     // declined; otherwise the literal is compiled as a checked callee.
     if (isFunction(args[0], 'Function'))
@@ -7884,9 +7876,6 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       args.some((a) => BaseCompiler.isComplexValued(a)) ||
       promotesToComplexLane('Log', args)
     ) {
-      // Recorded in the promotion record (`CompilerState._promoted`) when the operand is complex only
-      // by wideness (a no-op otherwise; the lowering below is the same).
-      BaseCompiler.recordPromotion('Log', args);
       if (base !== undefined)
         return complexUnary(
           target,
@@ -8062,9 +8051,6 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.isComplexValued(base) ||
       BaseCompiler.isComplexValued(exp)
     ) {
-      // A base complex only by WIDENESS with a non-integer exponent is a
-      // promotion for the promotion record (`CompilerState._promoted`) (see `promotesRadicalToComplex`).
-      BaseCompiler.recordPromotion('Power', args);
       // Small literal integer power of a complex base: inline a
       // square-and-multiply chain instead of the polar-form `_SYS.cpow` — an
       // order of magnitude faster in iterated-map loops. The square is
@@ -8433,10 +8419,6 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.isComplexValued(arg) ||
       BaseCompiler.isComplexValued(exp)
     ) {
-      // A radicand complex only by WIDENESS under an even degree is a
-      // promotion for the promotion record (`CompilerState._promoted`), as in `Sqrt` below (a no-op
-      // otherwise; the lowering is the same).
-      BaseCompiler.recordPromotion('Root', [arg, exp]);
       return spliceJSValues(
         target,
         [compile(arg), compile(exp)],
@@ -8657,10 +8639,6 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Sqrt: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0])) {
-      // The operand may be complex only by WIDENESS (the complex discipline
-      // lifted it): that is a promotion for the promotion record (`CompilerState._promoted`), and the
-      // predicate below records it (its lowering is the same kernel).
-      BaseCompiler.recordPromotion('Sqrt', args);
       return complexUnary(target, '_SYS.csqrt', compile(args[0]));
     }
     const c = tryGetConstant(args[0]);
@@ -11233,12 +11211,8 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     // semantics (scaled trig args, scaled inverse-trig results) so compiled
     // output agrees with evaluate().
     expr = rewriteAngularUnit(expr);
-    // A partial application of a function literal has a function as its
-    // value, the residual literal over the remaining parameters
-    // (`rewritePartialApplications`). At the root, the result then has the
-    // `calling: 'lambda'` contract of a compiled `Function` literal, and a
-    // block local that holds one is a block-local function.
-    // A head the caller overrode is withheld, as from the unroll below.
+    // Infer the parameter types of applied literals from collection
+    // arguments they bind whole. Partial applications remain declines.
     expr = rewritePartialApplications(
       expr,
       overriddenCompilationHeads(options.operators, options.functions)

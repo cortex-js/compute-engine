@@ -1,5 +1,7 @@
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json/types';
+import type { Expression } from '../../src/compute-engine/global-types';
+import { isExpression } from '../../src/compute-engine/boxed-expression/type-guards';
 
 function sharedGraph(depth: number, locals = false, asymmetric = false) {
   const ce = new ComputeEngine();
@@ -26,10 +28,10 @@ function sharedGraph(depth: number, locals = false, asymmetric = false) {
  * definition lookups detects repeated analysis without a timing assertion. */
 function compileBounded(
   ce: ComputeEngine,
-  expr: MathJsonExpression,
+  expr: MathJsonExpression | Expression,
   limit = 50_000
 ) {
-  const boxed = ce.expr(expr);
+  const boxed = isExpression(expr) ? expr : ce.expr(expr);
   const lookup = ce.lookupDefinition.bind(ce);
   let count = 0;
   const spy = jest
@@ -54,6 +56,22 @@ function compileBounded(
 }
 
 describe('shared function shape analysis', () => {
+  test('a folded shared complex graph keeps compilation work bounded', () => {
+    const ce = new ComputeEngine();
+    ce.precision = 'machine';
+    ce.declare('x', 'real');
+    let value = ce.expr(['Complex', 1, 1]);
+    for (let i = 0; i < 10; i++)
+      value = ce._fn('Add', [
+        ce._fn('Multiply', [ce.number(0.5), value]),
+        ce._fn('Multiply', [ce.number(0.25), value]),
+      ]);
+    const r = compileBounded(ce, ce._fn('Add', [ce.symbol('x'), value]), 25_000);
+    const result = r.run!({ x: 2 }) as { re: number; im: number };
+    expect(result.re).toBeCloseTo(2 + 0.75 ** 10, 14);
+    expect(result.im).toBeCloseTo(0.75 ** 10, 14);
+  });
+
   test.each([9, 10, 12])(
     'depth %i keeps compilation and emission bounded',
     (depth) => {

@@ -164,8 +164,7 @@ export function trySpecializedUserCall(
  * is not provably non-negative. Under the `complex` mode, such
  * a node takes the complex lane, and so does every value computed from it.
  *
- * This is the test of `promotesRadicalToComplex`, without its side
- * effects (it does not record a promotion) and without the verdicts that
+ * This tests `promotesRadicalToComplex` without the verdicts that
  * a broadcast closure records. It is used only to compare two versions of
  * one body (see `unprovenRadicalCount`).
  */

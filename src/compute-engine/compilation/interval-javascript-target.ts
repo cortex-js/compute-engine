@@ -88,7 +88,7 @@ import { isOperatorDef } from '../boxed-expression/utils.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import type { LoopInvariantBinding } from './base-compiler.js';
 import {
-  curriedApplication,
+  assertNoCurriedApplication,
   isPartialApplication,
   partialApplicationValueDecline,
   rewritePartialApplications,
@@ -3869,15 +3869,11 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Apply: (args, compile, target) => {
     if (args[0] == null)
       throw new Error('Could not compile `Apply`: missing function');
-    // A partial application of a function literal applied to more arguments
-    // is one call of the literal (`curriedApplication`), when it compiles.
-    // A partial application on its own is a function value. Its residual is
-    // built at compile entry, at the positions where every call of it
-    // supplies all its arguments (`rewritePartialApplications`); one that
-    // reaches this handler declines (`partialApplicationValueDecline`).
-    args = curriedApplication(args) ?? args;
+    // Partial applications and calls of their results decline. Complete
+    // calls continue with their original operands.
+    assertNoCurriedApplication(args);
     if (isPartialApplication(args))
-      throw new Error(partialApplicationValueDecline(args));
+      throw new Error(partialApplicationValueDecline());
     // Only an exact-arity application of a FUNCTION LITERAL compiles. The
     // interpreter THROWS on an over-applied call and CURRIES an
     // under-applied one (`function-utils.ts`, `makeLambda`); a plain
@@ -6769,11 +6765,8 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     // with exact factors: this target lowers them to enclosures, so the
     // scaled angle contains the true angle (a float factor can exclude it).
     expr = rewriteAngularUnit(expr, { exactFactors: true });
-    // A partial application of a function literal has a function as its
-    // value, the residual literal over the remaining parameters, which this
-    // target compiles as an arrow over intervals
-    // (`rewritePartialApplications`).
-    // A head the caller overrode is withheld, as from the unroll below.
+    // Infer the parameter types of applied literals from collection
+    // arguments they bind whole. Partial applications remain declines.
     expr = rewritePartialApplications(
       expr,
       overriddenCompilationHeads(undefined, options.functions)

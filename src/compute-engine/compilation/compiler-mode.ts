@@ -1,8 +1,6 @@
-// The compile mode (strict, promoting), promotion records, real-only
-// lowerings, and the memos keyed by definition.
+// Compile modes, real-only operations, and memos keyed by definition.
 
 import type { Expression, FunctionInterface } from '../global-types.js';
-import type { MathJsonSymbol } from '../../math-json/types.js';
 import {
   isNonRealNumber,
   unfoldAliasOnDescent,
@@ -62,20 +60,9 @@ export const declaredLiteralMemos = new WeakMap<
 >();
 
 /**
- * The user-function definitions of a compilation whose body recorded a
- * promotion (a radical or logarithm lowered through a complex kernel) while
- * it compiled, by emitted name. See `BaseCompiler.hasPromotedDefinition`.
- */
-export const promotedDefinitions = new WeakMap<
-  UserFunctionRegistry,
-  Map<string, boolean>
->();
-
-/**
- * The latch above, for the target-side code that must ask the same question
- * this class asks: is a constant fold available in the compilation now
- * running, and against which target? `undefined` outside one, and for every
- * compilation that does not fold.
+ * The target whose constant folds can determine a numeric representation
+ * in the current compilation. Target code and analysis read the same
+ * CompilerState context. Undefined outside compilation or when folding is off.
  */
 export function oracleFoldTarget(): CompileTarget<Expression> | undefined {
   return CompilerState._oracleFoldTarget;
@@ -296,40 +283,6 @@ export function stringHelperIsRealOnly(
   lowering: CompiledFunction<Expression> | undefined
 ): boolean {
   return typeof lowering === 'string' && !COMPLEX_TRANSPARENT_HEADS.has(h);
-}
-
-/** Record that a promotable head was lowered through a complex kernel. */
-export function notePromoted(): void {
-  CompilerState._promoted = true;
-}
-
-/**
- * Record, in the promotion record (`CompilerState._promoted`), that `head` (a promotable head) is
- * being lowered through a complex kernel because its operand is already
- * complex-valued — a promotion when that operand is complex only by
- * wideness (the complex discipline lifted it), a no-op otherwise. The
- * emitters call this on their "operand is complex" branch, whose lowering
- * is the same kernel either way; the decision is
- * `promotesRadicalToComplex`, which does the recording.
- */
-export function recordPromotion(
-  head: MathJsonSymbol,
-  args: ReadonlyArray<Expression>
-): void {
-  void core.promotesRadicalToComplex(head, args);
-}
-
-/** True when a definition in `registry.defs` recorded a promotion while
- * its body compiled. */
-export function hasPromotedDefinition(
-  registry: UserFunctionRegistry | undefined
-): boolean {
-  if (registry === undefined) return false;
-  const promotedDefs = promotedDefinitions.get(registry);
-  if (promotedDefs === undefined) return false;
-  for (const name of promotedDefs.keys())
-    if (registry.defs.has(name)) return true;
-  return false;
 }
 
 /**

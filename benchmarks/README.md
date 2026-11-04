@@ -721,6 +721,114 @@ mutation controls and the review's measurements and limitations are recorded in
 `shared-traversal-2026-11-03.json` and
 `../docs/plans/2026-11-03-shared-traversal-review.md`.
 
+## Compilation cost (`compilation-cost.mjs`)
+
+Measures compilation through the public API, with setup, boxing and result
+validation outside the timers. First calls use fresh engines in a loaded
+process; they exclude module startup. Each trial then warms the same expression
+five times and compiles it repeatedly with a fresh target per call. The default
+is seven trials of twenty warm calls. Explicit `strict` and `complex` modes
+keep behavior comparable across releases whose default mode changed.
+
+Cases include an identity control, plotting, an assigned slider mapped through
+`vars`, real and complex radicals, a folded complex constant, a list callback,
+a point input, shared expression objects (open and closed complex graphs),
+shared function definitions, and WGSL emission. JavaScript values are checked
+against independent mathematical oracles at several inputs; shaders are checked for successful emission, not
+executed. Shared-node fixtures assert operand identity. `--check` records
+source digests; `MODE=counts` counts calls through the engine instance
+method `lookupDefinition`, with validation outside each count. Module-local
+lookup functions bypass it, so it is a work proxy rather than a total count
+of engine lookups. Counts mode never reports timings or allocations.
+
+```sh
+node --import tsx benchmarks/compilation-cost.mjs CHECKOUT --check
+MODE=counts node --import tsx benchmarks/compilation-cost.mjs CHECKOUT
+RUNS=7 ITERATIONS=20 node --expose-gc --import tsx benchmarks/compilation-cost.mjs CHECKOUT
+```
+
+`ONLY` accepts comma-separated case identifiers and refuses unknown names.
+Hold the box lock for timings and monitor competing CPU activity throughout.
+Run comparator processes sequentially in alternating order, using the same
+Node version, source loader and dependencies. Compare repeated process medians;
+a single process's first call is sensitive to JIT and GC history. Warm compilation
+timings are separate from the execution speed of the generated runner.
+
+### November 3 and 4 review measurements
+
+The observations, accepted process medians, excluded attempts, CPU-conflict
+summaries and exact measured cleanup patch are in
+[`compilation-cost-2026-11-03.json`](compilation-cost-2026-11-03.json).
+Apple M5 Max, 18 cores, Node 26.13.0, source loaded through tsx, common
+`node_modules`, machine precision. The published 0.178.0 comparator uses npm's
+`gitHead`, `ca6304756`; all cases request an explicit mode. No production-bundle,
+module-startup or generated-kernel execution timings are claimed.
+
+Accepted results use three processes per revision and workload. Each process
+uses five fresh-engine trials; each trial has five warmup compilations and
+five timed warm compilations. The table takes the median of the three process
+medians. Setup, GC and mathematical checks are untimed. Processes alternate
+revision order. CPU activity is sampled every 0.5 seconds; overlapping CLI
+checks or another observed process at 70% CPU or more exclude the process.
+Ordinary desktop activity remains. The initial monitor also matched idle
+language servers; those attempts are excluded. Broad-process reruns were
+contended, so the accepted comparison uses shorter, individual workloads.
+
+```sh
+RUNS=5 ITERATIONS=5 ONLY=plot node --expose-gc --import tsx benchmarks/compilation-cost.mjs CHECKOUT
+RUNS=5 ITERATIONS=5 ONLY=shared-functions-7 node --expose-gc --import tsx benchmarks/compilation-cost.mjs CHECKOUT
+```
+
+First means the first compilation on each fresh engine in an already loaded
+process. Warm means repeated compilation of that same boxed expression, with a
+new target on every call. The shared-function graph has eight definitions:
+`f_0(t) = t + 1`, `f_n(t) = f_(n-1)(t) + f_(n-1)(2t)`, compiled at `f_7(x)`.
+Both workloads have independent mathematical oracles and valid declared inputs.
+
+| Source checkpoint | Plot first / warm ms | Shared functions first / warm ms |
+| --- | ---: | ---: |
+| October 27, `f5d991902` | 0.963 / 0.364 | 3.379 / 2.382 |
+| Before both splits, `0c1adc21a` | 1.057 / 0.420 | 5.877 / 4.387 |
+| After both splits, `5404acb3f` | 0.964 / 0.391 | 5.910 / 4.436 |
+| 0.177.0, `b889aeb06` | 1.107 / 0.464 | 7.781 / 5.576 |
+| 0.178.0, `ca6304756` | 1.033 / 0.477 | 7.858 / 5.624 |
+| Same 0.178.0 source plus cleanup | 1.099 / 0.488 | 7.994 / 5.743 |
+
+The shared-function fixture is about 2.36 times slower warm across the whole
+interval. Most of the increase already exists before the module split; the
+split itself changes this fixture by about 1%, with overlapping process ranges.
+Another increase appears before 0.177.0. These checkpoints do not attribute
+cost to an individual commit or establish a corpus-wide regression. The plot
+warm median rises by about 31%, with wider relative variation. Small differences
+between 0.178.0 and the cleanup do not establish speed changes on these workloads.
+
+The cleanup has a separate, large effect on a folded shared complex graph.
+Starting with `z_0 = 1 + i`, each level is `z_n = z_(n-1)/2 + z_(n-1)/4`,
+sharing the previous expression object; the compiled expression is `x + z_10`.
+The source digest and checked values are identical before and after cleanup.
+
+| Workload | First ms, release → cleanup | Warm ms, release → cleanup |
+| --- | ---: | ---: |
+| Identity control | 0.361 → 0.379 | 0.083 → 0.085 |
+| Assigned slider | 0.910 → 0.877 | 0.348 → 0.347 |
+| Open shared graph, depth 10 | 2.126 → 1.945 | 0.924 → 0.891 |
+| Folded complex shared graph, depth 10 | 178.640 → 11.379 | 172.269 → 8.512 |
+
+The last row improves about 20 times warm. Its compile-only instance-method
+lookup proxy falls from 66,990 to 12,711 on first calls and from 66,947 to
+12,668 warm. An ordinary small folded-complex case falls from 187 to 160 warm.
+The deleted promotion-report walk visited shared complex descendants repeatedly
+after the public report field had been removed. Remaining work in the closed
+graph includes the deterministic fold-cost estimator; its conservative depth
+and visit bounds remain unchanged. The new bounded-work Jest case rejects the
+published implementation at 25,001 observed instance lookups and accepts the
+cleanup at 12,711, with an independent value check.
+
+Every control and emitted-source digest was rechecked after the review tightened
+the counter boundaries and removed the ignored `hideValues` option. Counts and
+source digests did not change. The archive retains the measured harness and its
+hash; timing statements are unchanged by those instrumentation fixes.
+
 ## Closed constant folding (`closed-folding.mjs`)
 
 Use `MODE=timing node --import tsx benchmarks/closed-folding.mjs /path/to/checkout`

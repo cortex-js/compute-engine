@@ -132,8 +132,6 @@ import {
   _withFoldedRealOverride,
   isRealOnlyLowering,
   liftPromotionSuppression,
-  notePromoted,
-  promotedDefinitions,
   radicalCountMemos,
   restorePromotionSuppression,
   runtimeRealGuards,
@@ -1330,9 +1328,6 @@ function compileExpression(
     // behaves as in `mode: 'strict'`, and `_integerLane` carries the lane.
     CompilerState._mode = nextMode === 'bigint' ? 'strict' : nextMode;
     CompilerState._integerLane = nextMode === 'bigint' ? 'bigint' : 'double';
-    // The per-compilation report (`modeReport`) starts fresh: no head
-    // promoted yet; the discipline is the one just latched.
-    CompilerState._promoted = false;
     // The outermost target's real-only lowerings, so the contextless
     // analysis can tell which heads this compilation lowers with a
     // real-only lowering (see `_realOnlyLowering`). Latched once per
@@ -1924,8 +1919,7 @@ export function promotesRadicalToComplex(
   // whose arguments are exactly that closure's element temps returns the
   // recorded verdict. This is also what keeps a broadcast `Power` honest:
   // its literal exponent is elementized into a temp, so `isNumber(exp)`
-  // below could never see it. `notePromoted` is not re-fired here — the
-  // node-level decision already ran it.
+  // below could never see it.
   for (let i = _broadcastRadicalVerdict.length - 1; i >= 0; i--) {
     const frame = _broadcastRadicalVerdict[i];
     if (
@@ -1962,8 +1956,6 @@ export function promotesRadicalToComplex(
     )
       return false;
     if (assumedRealNonNegative(base)) return false;
-    if (base.isNegative !== true && !isNonRealNumber(base.type.type))
-      notePromoted();
     return true;
   }
   if (head === 'Root') {
@@ -1985,8 +1977,6 @@ export function promotesRadicalToComplex(
     if (!Number.isInteger(degree.re) || degree.re === 0) return false;
     if (degree.re % 2 !== 0) return false;
     if (assumedRealNonNegative(radicand)) return false;
-    if (radicand.isNegative !== true && !isNonRealNumber(radicand.type.type))
-      notePromoted();
     return true;
   }
   if (!PROMOTABLE_RADICAL_HEADS.has(head)) return false;
@@ -1994,20 +1984,6 @@ export function promotesRadicalToComplex(
   // operand has to clear the bar. An omitted operand cannot be cleared.
   if (!args.some((a) => a === undefined || !assumedRealNonNegative(a)))
     return false;
-  // A promotion is a lane DIFFERENCE with the shader targets: a
-  // PROVABLY negative operand, or one TYPED complex, is complex-shaped on
-  // every target and in every mode (not a promotion); only a real-shaped
-  // operand of UNKNOWN sign is.
-  if (
-    args.some(
-      (a) =>
-        a !== undefined &&
-        a.isNonNegative !== true &&
-        a.isNegative !== true &&
-        !isNonRealNumber(a.type.type)
-    )
-  )
-    notePromoted();
   return true;
 }
 
@@ -4027,8 +4003,8 @@ export function compileExpr(
     // ternaries; interval/Python fail closed). Otherwise the default is the
     // JavaScript emission (chained `if`/`switch` in an arrow-IIFE).
     //
-    // `Match` is fully CSE-inert in Phase 1 (§2): its guards and bodies are
-    // compiled from plan-constructed closure trees, not from these operands,
+    // `Match` compiles guards and bodies from plan-constructed closure trees,
+    // so they stay outside common-subexpression sharing of these operands,
     // so emission runs under a blind instance — no candidate resolves inside,
     // and no enclosing region's candidate can leak in through a shared node.
     return withCseBlind(target, () => {
@@ -4093,64 +4069,19 @@ export function compileExpr(
   sub = compileExprCoalesce(h, args, target, node);
   if (sub !== undefined) return sub;
 
-  // `Typed(value, type)` is a transparent runtime ascription — it constrains
-  // the static type but has no runtime effect, so it compiles to its value
-  // operand on every target (the interpreter ignores it likewise, and
-  // returns the value even when it contradicts the ascribed type). Without
-  // this, a helper declared with a precise return type (e.g. `(number) ->
-  // vector<11>`) wraps its body in `Typed`, and every compiled call throws
-  // `Unknown operator \`Typed\`` at the dispatch below.
+  // A type ascription must produce the representation its consumers read.
+  // Most values pass through unchanged. A complex ascription lifts a real
+  // scalar; a nonnumeric value cannot use that representation and declines.
   //
-  // A target that keeps complex values apart from real ones (a `{re, im}`
-  // object in JavaScript, a `vec2` in a shader) needs more. A consumer of
-  // the ascription (the enclosing lowering, or the call sites of a user
-  // function whose body is the ascription) reads the lane of the `Typed`
-  // node, which follows the ascribed type. The value operand is emitted in
-  // its own lane. The two must agree, or the consumer reads the value in
-  // the wrong representation:
-  //
-  //  - A complex ascription over a real scalar value is lifted: a real
-  //    number is a complex number. With `s: (complex) -> complex` and
-  //    `s := z ↦ Re(z)`, the body is `Typed(Re(z), complex)`, and the
-  //    definition returns a complex value. The declared-signature
-  //    canonicalization also wraps an all-real function body in
-  //    `Typed(body, "complex")`, so that a function declared to return a
-  //    complex value returns a `{re, im}` object from every body, a real
-  //    base case included (Tycho item 60).
-  //  - A complex ascription over a value that is not a scalar (a point,
-  //    a color, a boolean) contradicts the value. Fail closed.
-  //  - A real ascription over a value that is complex only because of
-  //    promotion selects the real lane for the value. Under the mode that
-  //    promotes (`complex`), an unknown-sign `Sqrt`, `Ln`, `Log`,
-  //    even `Root` or non-integer `Power` lowers through a complex kernel,
-  //    and makes the value complex. The ascription says that the value is
-  //    real, so the value compiles with promotion off
-  //    (`withPromotionSuppressed`), as `mode: 'strict'` compiles it: such a
-  //    head gives NaN outside its real domain. NaN is the value that a
-  //    real-typed result has when it has no real value. With
-  //    `p: (real) -> real` and `p := k ↦ sin(2.4k)·√((k − 0.5)/16)`, the
-  //    definition is `Math.sin(2.4 * k) * Math.sqrt(0.0625 * (k + -0.5))`
-  //    in every mode, and no promotion is recorded. "Complex only because
-  //    of promotion" means: complex with promotion on, real with promotion
-  //    off. A value that is real with promotion on (`|√k|`) keeps its
-  //    promoted heads.
-  //  - A real ascription over a value that is complex also with promotion
-  //    off contradicts the value: the value has a complex-typed operand
-  //    (or, under `mode: 'complex'`, a node whose type admits a complex
-  //    value, which that mode reads as complex). With `q: (unknown) -> real` and `q := z ↦ z²`, the call `q(1+i)` is
-  //    `2i`. JavaScript read the `{re, im}` object that `_fn_q` returns as
-  //    a real number, and `q(w) + 1` returned the string
-  //    `"[object Object]1"`; a shader has no conversion from a `vec2` to a
-  //    `float` that keeps the value. Fail closed, and ask for a corrected
-  //    signature. A call in the value of a user function whose definition
-  //    is complex is such an operand: the definition is shared by every
-  //    call site, so it is compiled with the promotion of the mode
-  //    (`withPromotionUnsuppressed`), and its recorded lane is complex.
-  //
-  // With these rules, the lane of the `Typed` node is the lane of the value
-  // it emits, so the lane recorded for a user function whose body is the
-  // ascription (`recordUserFunctionLane`) is the lane of what its
-  // definition returns.
+  // A real ascription selects real arithmetic when complex mode alone made
+  // the value complex. For example, a real-returning sqrt(x) uses the real
+  // square root and returns NaN outside its real domain. A value that stays
+  // complex with that choice disabled contradicts the ascription and declines.
+  // Abs(sqrt(x)) already returns a real value and keeps its internal complex
+  // square root, so it still gives 2 at x = -4 in complex mode.
+  // Shared user-function definitions retain their own representations, so an
+  // ascription cannot recompile a callee differently for one call site.
+  // Analysis and code generation make these choices in compileExprTyped.
   sub = compileExprTyped(engine, h, args, target, node);
   if (sub !== undefined) return sub;
 
@@ -6502,46 +6433,13 @@ export function emitFunctionLiteralDefinition(
       // is not part of the root tree — but the same naming counter, so temp
       // names never collide across the artifact. Duplication inside a called
       // definition is therefore recovered once, in the emitted function.
-      // The body compiles under a frame binding each complex-lane parameter
-      // to `true`, so every operand analysis inside it — and so the emitted
-      // arithmetic — treats that parameter as the `{re, im}` object the
-      // call site actually passes. The frame is ISOLATED (it replaces the
-      // enclosing `_localComplex` frames instead of stacking on them): an
-      // emitted definition is a module-level function, so when this
-      // emission is triggered from inside a `Block` or another definition's
-      // body, the caller's local shapes must not reach this body — a
-      // global read here that happens to share a name with a caller's
-      // complex local would otherwise be lowered complex over its plain
-      // numeric value. This is the same discipline the GPU definition
-      // lowering applies to its own parameter frame.
-      // A parameter the signature DECLARES complex is complex in the body
-      // for every call site, so it is entered here whether or not this
-      // emission carries call-site lanes. Without it the body read the
-      // parameter in the real lane while the call site handed it a
-      // `{ re, im }` — `_fn_Q = (z) => ({ re: z + 0, im: 1 })` over an
-      // object, i.e. `re: '[object Object]0'` behind `success: true`.
-      //
-      // This is not radical PROMOTION and does not go through
-      // `promotesRadicalToComplex`: nothing is being inferred complex from an
-      // operand's sign. The author WROTE `(complex) -> complex`, and the
-      // call site is made to honour it (`coerceToComplex` /`_SYS.cplx`), so
-      // the lane here is that declaration being read back — which is why
-      // the Tycho-190 rule ("the lane comes from the operand, never the
-      // node type") is not in tension with it.
-      // Whether the emitted body returns a `{re, im}` object by
-      // construction, decided inside the same frames the body compiled
-      // under (`complexShapedEmission`), so a call site can skip the
-      // idempotent lift-at-use wrap (`liftWideResult`).
+      // A shared definition sees its own parameter types and global names,
+      // never the requesting call's locals. The isolated frames keep that
+      // ownership rule identical for analysis and code generation.
+      // Record whether the result is already a complex object so callers
+      // can avoid wrapping it again.
       let complexShaped = false;
       let body: TargetSource;
-      // A promotion recorded while this body compiles belongs to this
-      // definition, not to the code that asked for it: it is recorded on
-      // the definition (`promotedDefinitions`). No result field reads this
-      // record: the compile result reports only its `mode`.
-      const outerPromoted = CompilerState._promoted;
-      CompilerState._promoted = false;
-      const promotedDefs = memoFor(promotedDefinitions, registry);
-      promotedDefs.delete(name);
       try {
         body = emitWithRecursiveLaneRetry(registry, name, () => {
           const frames = {
@@ -6567,8 +6465,6 @@ export function emitFunctionLiteralDefinition(
         });
       } finally {
         for (const node of overridden) _codeOverrides.delete(node);
-        if (CompilerState._promoted) promotedDefs.set(name, true);
-        CompilerState._promoted = outerPromoted;
       }
       assertExtraParamsRead(h, body, extraParams, 0);
       if (complexShaped) (registry.complexShaped ??= new Set()).add(h);

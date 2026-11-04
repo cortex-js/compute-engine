@@ -1,5 +1,5 @@
 // The compiler state that one module assigns and other modules read: the
-// compile mode, promotion flags, memos, budgets, and the frames of the current
+// compile mode, memos, budgets, and the frames of the current
 // compilation. An imported `let` cannot be assigned, so these values are static
 // fields of a class.
 
@@ -85,9 +85,10 @@ export const ANTIDERIVATIVE_COMPILATION_HANG_MS = 30_000;
  */
 export const ANTIDERIVATIVE_COMPILATION_STEPS = 600_000;
 /**
- * The compiler state that more than one module assigns. A static field on
- * a class can be assigned from any module that imports the class, which an
- * imported `let` binding cannot.
+ * Context shared by the analysis and code generation modules. Temporary
+ * changes are restored in finally blocks: evaluation during compilation
+ * can itself compile a callback, so synchronous execution still re-enters
+ * these contexts.
  */
 export class CompilerState {
   /**
@@ -160,37 +161,16 @@ export class CompilerState {
    */
   static _promotionSuppressed = 0;
   /**
-   * Set when this compilation lowered a promotable head through a complex
-   * kernel (only `mode: 'complex'` promotes). Reset at the outermost
-   * compilation entry. No result field reads it: the compile result lost its
-   * `promoted` field when the `'auto'` mode was removed, and this record is
-   * left for the removal of the promotion machinery.
-   */
-  static _promoted = false;
-  /**
    * The OUTERMOST compilation's real-only predicate
    * (`isRealOnlyLowering(target, h)`), latched by `compile()` at depth 0
    * (only for a target with a `language` other than the interval family) and
    * restored on the way out. `undefined` outside any compilation.
    *
-   * It exists so that `isComplexValued` can answer for a head the target
-   * lowers with a real-only lowering (`Erf: '_SYS.erf'`, `Floor`, …). Such a
-   * head never yields a complex value: a maybe-complex operand takes the
-   * D2/D6 runtime rule (`realOperandGuard` — the lowering runs on the real
-   * part when the imaginary part is exactly zero, `NaN` otherwise) and a
-   * definitely non-real one is a compile-time decline. Yet several of these
-   * heads have a WIDE result type (`Erf`, `Gamma`, `Zeta`, `Digamma`,
-   * `Factorial`, `LambertW`, `Arsinh`, `ErfInv` all type `number`), so the
-   * type-based analysis fell through to the operand recursion and reported
-   * them complex whenever an operand was — a promoted unknown-sign radical,
-   * say. The enclosing arithmetic then read `.re`/`.im` off a plain number.
-   * Measured before this latch, in the removed `auto` mode, which promoted
-   * an unknown-sign radical as `complex` mode does: `2·Erf(√y)`
-   * compiled to `{re: 2 * _b.re, …}` around a bare `_SYS.erf(…)` and ran to
-   * `{re: NaN}` at every point, and `Limit` at +∞ — whose growth oracles
-   * probe through the compiler — declined `k·Erf(√y) + anything` for every
-   * `k ≠ 1` (test `limit.test.ts` › "sum mixing a scaled Erf(∞) addend with a
-   * decaying addend").
+   * Analysis and code generation consult the same predicate, so a numeric
+   * operation without a complex implementation is never read as a complex
+   * object. Complex-mode callers project a real-valued complex operand, or
+   * return NaN when its imaginary part is nonzero. Strict mode declines
+   * such an operand; a definitely non-real operand declines in every mode.
    */
   static _realOnlyLowering: ((h: string) => boolean) | undefined = undefined;
   /**
@@ -462,8 +442,8 @@ export class CompilerState {
    * under a mask can never leak outside it; and because a binder NODE's own
    * verdict is stored in its enclosing layer, sibling and repeat queries of
    * the binder hit the memo instead of re-entering the mask — without this,
-   * nested `Sum`/`Product` chains stayed O(d²) (review finding on the item-148
-   * fix). `isComplexValued` only consults the memo while a compilation is
+   * nested `Sum`/`Product` chains would be scanned quadratically.
+   * `isComplexValued` only consults the memo while a compilation is
    * running (`_compileDepth > 0`), where engine values are stable.
    */
   static _complexMemoStack: WeakMap<object, boolean>[] = [new WeakMap()];

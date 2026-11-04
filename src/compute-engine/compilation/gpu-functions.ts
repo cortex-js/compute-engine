@@ -57,7 +57,7 @@ import {
 import { isBroadcastableCollection } from '../collection-utils.js';
 import { literalParamsMap } from '../library/core.js';
 import {
-  curriedApplication,
+  assertNoCurriedApplication,
   isPartialApplication,
   partialApplicationDecline,
 } from './partial-application.js';
@@ -4262,11 +4262,8 @@ function gpuBroadcastScalars(
  *  - the literal takes exactly one argument per parameter, and each
  *    parameter is a plain name (not a rest parameter and not a
  *    destructuring pattern). The interpreter curries an under-applied call
- *    and rejects an over-applied one, and a shader can do neither. A callee
- *    that is itself a partial application of a literal is first merged
- *    with the call (`curriedApplication`): `Apply(Apply(f, 1), u)` is
- *    `Apply(f, 1, u)`, when the interpreter's value of `Apply(f, 1)` is its
- *    deferred residual (`partial-application.ts`); otherwise it declines;
+ *    and rejects an over-applied one. Partial applications and calls of
+ *    their results decline on every compile target;
  *  - the body is a single statement;
  *  - every argument is pure. The body can read a parameter more than once,
  *    and the substitution then repeats the argument, while the interpreter
@@ -4287,18 +4284,14 @@ function gpuAppliedBody(
   args: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>
 ): Expression | string {
-  // A partial application of a function literal applied to more arguments
-  // is one call of the literal (`curriedApplication`), when the partial
-  // application compiles at all; the merge otherwise throws the reason. A
-  // partial application on its own is a function value, which a shader
-  // cannot hold.
+  // Diagnose currying before inspecting the literal's parameters.
   try {
-    args = curriedApplication(args) ?? args;
+    assertNoCurriedApplication(args);
   } catch (e) {
     return (e as Error).message.replace(/^Could not compile `Apply`: /, '');
   }
   if (isPartialApplication(args))
-    return partialApplicationDecline(args, target.language ?? 'gpu');
+    return partialApplicationDecline();
   const [callee, ...written] = args;
   if (callee === undefined) return 'missing function';
   let actuals: ReadonlyArray<Expression> = written;

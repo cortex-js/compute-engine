@@ -41,7 +41,7 @@ import {
 } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import {
-  curriedApplication,
+  assertNoCurriedApplication,
   isPartialApplication,
   partialApplicationValueDecline,
   rewritePartialApplications,
@@ -5552,7 +5552,6 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Ln: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0])) {
-      BaseCompiler.recordPromotion('Ln', args);
       return `cmath.log(${compile(args[0])})`;
     }
     // Promotion (the `complex` mode): an operand of unknown sign
@@ -5627,9 +5626,6 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.isComplexValued(args[0]) ||
       BaseCompiler.isComplexValued(args[1])
     ) {
-      // Recorded in the promotion record (`CompilerState._promoted`) when the base is complex only by
-      // wideness (see `promotesRadicalToComplex`; a no-op otherwise).
-      BaseCompiler.recordPromotion('Power', args);
       return negativeBase !== undefined && withHelper
         ? `_ce_pow(${compile(args[0])}, ${compile(args[1])})`
         : `(${pyOperand(compile(args[0]))} ** ${pyOperand(compile(args[1]))})`;
@@ -5662,9 +5658,6 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Sqrt: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0])) {
-      // Recorded in the promotion record (`CompilerState._promoted`) when the operand is complex only
-      // by wideness (see `promotesRadicalToComplex`).
-      BaseCompiler.recordPromotion('Sqrt', args);
       return `cmath.sqrt(${compile(args[0])})`;
     }
     // Promotion of an unknown-sign operand — see `Ln` above. `np.emath.sqrt`
@@ -5689,9 +5682,6 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // `z ** (1 / n)`, as the interpreter does. The parity test runs when the
     // code runs because the value of the radicand is only known then.
     if (BaseCompiler.isComplexValued(x) || BaseCompiler.isComplexValued(n)) {
-      // Recorded in the promotion record (`CompilerState._promoted`) when the radicand is complex only
-      // by wideness (see `promotesRadicalToComplex`; a no-op otherwise).
-      BaseCompiler.recordPromotion('Root', args);
       return `(lambda _z, _n: complex(np.sign(_z.real) * np.power(abs(_z.real), 1.0 / _n.real)) if _z.imag == 0 and _n.imag == 0 and _n.real % 2 == 1 else _z ** (1.0 / _n))(complex(${compile(x)}), complex(${compile(n)}))`;
     }
     const nConst = tryGetConstant(n);
@@ -7128,16 +7118,11 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Apply: (args, compile, target) => {
     if (args[0] == null)
       throw new Error('Could not compile `Apply`: missing function');
-    // A partial application of a function literal applied to more arguments
-    // is one call of the literal (`curriedApplication`), when it compiles.
-    // A partial application on its own is a function value. Its residual is
-    // built at compile entry, at the positions where every call of it
-    // supplies all its arguments (`rewritePartialApplications`); one that
-    // reaches this handler declines (`partialApplicationValueDecline`). A Python call with too
-    // few arguments raises a `TypeError`.
-    args = curriedApplication(args) ?? args;
+    // Partial applications and calls of their results decline. Complete
+    // calls continue with their original operands.
+    assertNoCurriedApplication(args);
     if (isPartialApplication(args))
-      throw new Error(partialApplicationValueDecline(args));
+      throw new Error(partialApplicationValueDecline());
     // A call with too many arguments is an `unexpected-argument` error in the
     // interpreter and a `TypeError` in Python, and a literal with no
     // parameter ignores its arguments in the interpreter and raises in
@@ -7736,10 +7721,8 @@ export class PythonTarget implements LanguageTarget<Expression> {
     const source = expr;
     // Reproduce the engine's `angularUnit` semantics in radian-based code.
     expr = rewriteAngularUnit(expr);
-    // A partial application of a function literal has a function as its
-    // value, the residual literal over the remaining parameters, which this
-    // target compiles as a lambda; a block local that holds one is then a
-    // block-local function (`rewritePartialApplications`).
+    // Infer the parameter types of applied literals from collection
+    // arguments they bind whole. Partial applications remain declines.
     expr = rewritePartialApplications(expr);
     // Turn a collection whose WIDTH is known at compile time into straight-line
     // scalar code, so this target sees the shape the interpreter computes
@@ -7881,8 +7864,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // The engine's angular unit, in radian-based code, as `compile()` does
     // at its entry: in degree mode `sin(x)` is the sine of `x` degrees.
     expr = rewriteAngularUnit(expr);
-    // A partial application of a function literal, as `compile()` does at
-    // its entry (`rewritePartialApplications`).
+    // Infer applied-literal parameter types, as compile() does at its entry.
     expr = rewritePartialApplications(expr);
     const vars = options.vars as Record<string, string> | undefined;
     // Root compilation boundary (see `compile`). `varsKeys`/`constantFold`:
@@ -7970,8 +7952,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // The engine's angular unit, in radian-based code, as `compile()` does
     // at its entry.
     expr = rewriteAngularUnit(expr);
-    // A partial application of a function literal, as `compile()` does at
-    // its entry (`rewritePartialApplications`).
+    // Infer applied-literal parameter types, as compile() does at its entry.
     expr = rewritePartialApplications(expr);
     // Shadow the declared parameters so they stay bare identifiers (never
     // folded to an assigned engine value).
@@ -8192,8 +8173,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // The engine's angular unit, in radian-based code, as `compile()` does
     // at its entry.
     expr = rewriteAngularUnit(expr);
-    // A partial application of a function literal, as `compile()` does at
-    // its entry (`rewritePartialApplications`).
+    // Infer applied-literal parameter types, as compile() does at its entry.
     expr = rewritePartialApplications(expr);
     // Root compilation boundary (see `compile` and `compileFunction`).
     const target = this.createTarget({

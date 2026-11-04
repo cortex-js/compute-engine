@@ -30,7 +30,6 @@ import {
   FOLD_CHARS_PER_NODE,
   FOLD_OPERAND_PREC,
   MAX_FOLD_EXPANDED_NODES,
-  memoFor,
 } from './compiler-tables.js';
 import {
   cseAdmission,
@@ -38,7 +37,6 @@ import {
   withNestedCseHarvest,
 } from './compile-cse.js';
 import {
-  promotedDefinitions,
   withPromotionUnsuppressed,
 } from './compiler-mode.js';
 import { CompilerState } from './compiler-state.js';
@@ -289,18 +287,6 @@ export function ensureFoldedValueEmitted(
   // never emitted.
   const definedBefore = new Set(registry.defs.keys());
   registry.compiling.add(name);
-  // A promotion recorded while the value compiles belongs to the preamble
-  // local, not to the definition or the code that emits it first: the
-  // local is shared by every reference, and it stays in the emitted code
-  // when that first definition is removed as unreferenced
-  // (`pruneUnreferencedVariantBases`). So it is recorded under the name of
-  // the local (`promotedDefinitions`), and the report counts it while the
-  // local is in `defs`. The code that emits the local also reads its
-  // promoted value, so the promotion is added to the record of that code
-  // too.
-  const outerPromoted = CompilerState._promoted;
-  CompilerState._promoted = false;
-  let valuePromoted = false;
   try {
     const root = registry.valueRoot ?? registry.root ?? target;
     // The shared preamble local is read by every reference: it compiles
@@ -327,8 +313,6 @@ export function ensureFoldedValueEmitted(
       javascriptStatements(root)?.initialize(name, code) ??
         `const ${name} = ${code};`
     );
-    valuePromoted = CompilerState._promoted;
-    if (valuePromoted) memoFor(promotedDefinitions, registry).set(name, true);
     // A value emitted from the compiler's own lowerings only — no
     // caller-supplied source, no string-valued `vars` mapping, both of
     // which splice live source — is the same on every call unless it reads
@@ -345,7 +329,6 @@ export function ensureFoldedValueEmitted(
     throw e;
   } finally {
     registry.compiling.delete(name);
-    CompilerState._promoted = outerPromoted || valuePromoted;
   }
   return name;
 }
