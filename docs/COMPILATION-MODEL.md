@@ -74,6 +74,25 @@ when it compiles. A difference that this list does not name is a defect.
   gets the complex value with `mode: 'complex'` or by declaring the input
   `complex`. A complex value passed at an input or a parameter declared
   real is a value outside its declared type (next item).
+- **In `strict`, a value of type `number` must be real.** The type
+  `number` admits a complex value, but the `strict` mode compiles a binding
+  typed `number` (an input, a parameter, a `number` element of a
+  collection, a `number` component of a tuple) on the real lane. A complex
+  value given there gives an unspecified result, as a value outside its
+  type does. With `L: list<tuple<number, real>>` at `[(1 + i, 2)]` and
+  `hr = (p: tuple<real, real>) ↦ p[1] + p[2]`, `hr(L[1])` gives the string
+  `"[object Object]2"` on `javascript`, where the interpreter gives
+  `3 + i`. The host that passes complex values compiles with
+  `mode: 'complex'`, which gives `3 + i`, or declares the binding
+  `complex`. The compiler does not test the value at run time (rule R5 of
+  "Shapes are settled at compile time"), and it does not decline a
+  `number` binding: measured on the Tycho corpus, a decline of every
+  `number` binding adds 62 JavaScript declines, and the complex lane for
+  every `number` adds 70 and changes 103 values, most of them at a point
+  typed `tuple<number, number>` (user decision of 2026-11-04,
+  CE-751; the measure is in
+  `docs/plans/2026-11-02-compiler-contraction-plan.md`, "The result of
+  step 4, row 6").
 - A value for an input that holds a value outside its declared type, for an
   input left out, or for an error that the static type does not show.
   "Shapes are settled at compile time" (R5) and "Fail closed" below list
@@ -1345,7 +1364,8 @@ message that names `complex` as its replacement. The result fields
 `strict` is the only discipline that the default uses. The lane of a value
 is complex when its static type is complex (a declared `complex` input or
 parameter, a complex literal, an operation whose result type is complex),
-and real otherwise. An operation whose exact value is complex on a real lane
+and real otherwise. A binding typed `number` is real: the value given
+there must be real (see "Caveats of compiled code"). An operation whose exact value is complex on a real lane
 gives `NaN` (see "Caveats of compiled code"). A complex-shaped value that
 reaches a binding the compilation shaped real declines with
 `'lane-mismatch'`; the compilation is not redone in another mode.

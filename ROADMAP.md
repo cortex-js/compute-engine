@@ -2242,64 +2242,6 @@ every operand (`compileExpr`, `_compileInner` and the reference analysis of
 smaller again, as CE-320.2 did, or change the recursion of the deep cases to
 a loop. Then measure both limits again and update the comment of the test.
 
-### CE-751. A `number` value that holds a complex number reaches code compiled for `real`
-
-**Status:** decision needed; wrong value, M. User decision 2026-11-01: option (a); measured 2026-11-04 (step 4, row 6 of `docs/plans/2026-11-02-compiler-contraction-plan.md`): (a) and (b) both change the corpus, so the decision is open again.
-**Witness:** plausible; `hr(L[1])` with `hr = (p: tuple<real, real>) ↦ p[1] + p[2]` and `L: list<tuple<number, real>>` at `[(1+i, 2)]` gives the string `"[object Object]2"` in the default mode; the interpreter gives `3 + i`.
-
-In the default mode (`strict`), the lane of a binding follows its static
-type. `number` admits a complex value, but `strict` reads a binding typed
-`number` (and a `number` element or tuple component) on the real lane, so
-a complex value there is used as if it were real. Measured on `1e6b928fb`
-(JavaScript):
-
-- `Map(g, L)` with `g := x ↦ x^2` (engine-level or block-local) and
-  `L: list<number>` at `[1+i, 2]` gives `[null, 4]`; the interpreter gives
-  `[2i, 4]`.
-- `hr(L[1])` above gives `"[object Object]2"`.
-- With `mode: 'complex'` both give the interpreter's values.
-
-Question: what must `strict` do with a binding typed `number`?
-
-- (a) The complex lane for every binding declared `number`, and a decline
-  on the targets without a complex lane (GLSL, WGSL, interval-js). Cost,
-  measured on a prototype (Tycho `a34405ae0`, 757 documents, against the
-  same tree without the prototype): declines javascript 47 → 117, glsl 44
-  → 82, interval-js 61 → 78; 15 keys (103 values) change, for example
-  `asOklab(c_1)` of art/akrhs3cb8z, a list of colours that becomes one
-  colour of zero channels. In the CE tests: 715 failing tests in 89 files.
-  The prototype was not sound yet: a local declared `real` bound to an
-  element of a `list<number>` gave `NaN` where the interpreter gives `0`;
-  the annotation of a parameter (`(x: number) ↦ …`) cannot be told from no
-  annotation inside the body; and `Map(g, L)` still declines, because the
-  parameter of `g` is untyped.
-- (b) A decline in `strict` for every binding declared `number`, on every
-  target. Cost, measured the same way: no value changes; declines
-  javascript 47 → 109, glsl 44 → 86, interval-js 61 → 78, in 17 documents.
-  101 of the 112 decline messages name Tycho's point types
-  `tuple<number, number>` and `tuple<number, number, number>`.
-- (c) The (a) or (b) rule only for a `number` binding that is not a tuple
-  component (a scalar `number` or a `list<number>`). Not measured; in the
-  run of (b), 11 of the 112 messages name such a type (`vector<3>` 8,
-  `list<number>` 3). It does not fix the `hr` witness.
-- (d) No compiler change: state in `docs/COMPILATION-MODEL.md`, "Caveats of
-  compiled code", that in `strict` a value given for a `number` binding must
-  be real, as for an input value outside its type: a complex value there
-  gives an unspecified result. The host that passes complex values uses
-  `mode: 'complex'` or declares the binding `complex`. No corpus change.
-
-Recommendation: (d). The two witnesses already give the interpreter's
-values with `mode: 'complex'`, which is the mode that the complex-lane rule
-of 0.178.0 names for complex values; (a) and (b) add corpus declines and
-(a) adds a second complex discipline to `strict`. Saying no to (d) means
-choosing (a), (b) or (c) at the cost above. With no decision, both
-examples keep their wrong values in `strict`.
-
-The prototype of (a) and (b) is saved as a patch in the scratchpad of
-session compute-engine-77
-(`/private/tmp/claude-501/-Users-arno-dev-compute-engine/f5622a83-be95-4f23-91dd-5b90d1dc468b/scratchpad/ce751-prototype.patch`,
-it lasts as long as that folder).
-
 ### CE-715. The `bigint` compile mode: the shapes it declines
 
 **Status:** ready; capability. The mode `compile(expr, { mode: 'bigint' })`

@@ -2465,18 +2465,24 @@ staged, not committed; part 2 stopped for a user decision).
   of a parameter cannot be read inside the body, an inferred `number`
   (an undeclared input) had to stay real, and a local declared `real`
   bound to an element of a `list<number>` gave `NaN` (interpreter `0`).
-  The options and the recommendation, (d) a documented rule that a
-  `number` value in `strict` must be real, are in ROADMAP entry CE-751
-  (`decision needed`). The prototype patch is in the scratchpad of this
-  session (`ce751-prototype.patch`).
+  The options were (a), (b), (c) (the rule of (a) or (b) only for a
+  `number` outside a tuple, not measured) and (d) no compiler change and a
+  documented rule. **Decision (user, 2026-11-04): (d).** In `strict` a
+  value given for a binding typed `number` must be real; a complex value
+  there gives an unspecified result; the host uses `mode: 'complex'` or
+  declares the binding `complex`. Stated in `docs/COMPILATION-MODEL.md`,
+  "Caveats of compiled code" and "Compile modes", and in
+  `13-guide-compile.md` of the user guide. CE-751 is removed from
+  `ROADMAP.md`. The prototype patch is in the scratchpad of this session
+  (`ce751-prototype.patch`).
 - **What row 7 (the error model) can rely on.** Row 6 changes no lane code:
   the lane of a binding in `strict` follows its static type, `number` is
   real, and the recursive-call retry, the promotion suppression of
   `mode: 'complex'` and the `lane-mismatch` declines stay as on
   `1e6b928fb`. `javascript-value-facts.ts` and the absence module are not
-  changed by this row. If the user chooses (a), (b) or (c) for CE-751, the
-  lane of a `number` binding changes, and row 7 must measure again any
-  rule that reads a `NaN` from a real lane.
+  changed by this row. With decision (d) for CE-751, a `number` binding stays
+  real, so row 7 can treat a complex value at a `number` binding in
+  `strict` as outside the contract.
 
 ## 5. The growth guard (done 2026-11-02, commit 97c3d409a)
 

@@ -58,6 +58,16 @@
 
 ### Behavior Changes
 
+- **Compilation: in the default `strict` mode, a value of type `number`
+  must be real.** The compiled code reads a binding typed `number` (an
+  input, a parameter, a `number` element or tuple component) as a real
+  number, and a complex value there gives an unspecified result: with
+  `L: list<tuple<number, real>>` at `[(1 + i, 2)]` and
+  `hr = (p: tuple<real, real>) ↦ p[1] + p[2]`, `hr(L[1])` gives
+  `"[object Object]2"`. This is the behavior since 0.178.0, now stated as
+  a rule; no compiled value changes. To pass complex values, compile with
+  `mode: 'complex'` (which gives `3 + i` here) or declare the binding
+  `complex`.
 - **A compiled element-wise selection declines for a branch that can be a
   point or a list of points.** With a host function `W` declared
   `(real) -> tuple<real, real> | list<tuple<real, real>>` and `F` a list of
