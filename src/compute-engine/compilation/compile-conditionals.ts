@@ -14,7 +14,7 @@ import {
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
   typeContainsMissing,
 } from '../../common/type/utils.js';
-import { isSubtype, provablyAdmits } from '../../common/type/subtype.js';
+import { isSubtype, hasNothingArm } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
 import { isSymbol, isFunction } from '../boxed-expression/type-guards.js';
 import { mayHoldRestriction } from '../boxed-expression/conditional-value.js';
@@ -362,7 +362,7 @@ export function compileExprAssertPresent(
       );
     const operand = args[0];
     const t = compilationType(operand);
-    if (provablyAdmits('nothing', t))
+    if (hasNothingArm(t))
       throw possibleNothingDecline(
         '`AssertPresent`',
         'its operand can be `Nothing`, which is not an absent value'

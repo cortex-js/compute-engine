@@ -93,11 +93,16 @@ describe('a user-function result is a scalar by construction', () => {
     ).toBe('14');
   });
 
-  test('an unconstrained reducing body cannot prove omission-free input', () => {
+  test('a reducing body over a parameter with no declared type declines', () => {
+    // The type of `L` is inferred as `collection`: an element can be a
+    // number or a list, and the compiled `Sum` would test its shape at run
+    // time. The body declines, and so does the `Sum` of the number `u`,
+    // which has no indexing set.
     const ce = engineWithF();
     ce.assign('k', ce.box(['Function', ['Sum', 'L'], 'L']));
     const r = build(ce, ['f', ['k', 'u']]);
     expect(r.success).toBe(false);
+    expect(r.run({ u: 4 })).toBe(5);
     expect(
       ce
         .box(['f', ['k', 4]])

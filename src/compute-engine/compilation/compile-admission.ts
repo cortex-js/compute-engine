@@ -15,8 +15,10 @@ import {
 import { isSubtype } from '../../common/type/subtype.js';
 import { isOpenLocal } from '../boxed-expression/declared-local.js';
 import {
+  collectionElementType,
   resolveTypeAlias,
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
+  stripMissingFromType,
 } from '../../common/type/utils.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import type { CompileTarget } from './types.js';
@@ -302,6 +304,79 @@ export function assertNoDeclaredTopOperands(
       `shape of a value at run time. Declare the shape, for example ` +
       `\`real\` or \`list<real>\`.`,
     value: names[0],
+  });
+}
+
+/**
+ * Decline a fold of the elements of a collection when the element type is
+ * `any` (`collection<any>`, `list<any>`, a bare `collection`, the type
+ * inferred for a parameter that a `Sum` reads). The folds are a `Sum` or a
+ * `Product` of one collection, and a `Reduce` or a `Scan` whose combiner is
+ * the symbol `Add` or `Multiply`. An element of type `any` can be a number
+ * or a list, and the interpreter adds two lists element by element:
+ * `Sum(w)` is `[4, 6]` for `w = [[1, 2], [3, 4]]`. A compiled fold would
+ * have to test the shape of each element at run time, and compiled code
+ * tests no shape at run time.
+ *
+ * A source whose type is a union (`collection<any> | number`) declines when
+ * the element type of one of its collection members is `any`. A number
+ * member of the source is not an element.
+ *
+ * The element types `unknown` (`list<unknown>`, the elements of a call of a
+ * function declared `function`) and a union of a number and a collection
+ * (`list<real | list<real>>`), and a source typed `any`, are not declined
+ * here: the JavaScript fold over them still tests the shape of each element
+ * at run time (`elementwiseFoldCombiner()` in `javascript-target.ts`). R3
+ * does not allow that test. These cases compiled before this check was
+ * added, and a Tycho document depends on one of them (`Sum(Rest(g(x)))`
+ * with `g` declared `function`), so whether they decline is a decision of
+ * the user, open as ROADMAP CE-805.
+ *
+ * The decline has the code `'unsettled-shape'` and the kind
+ * `'capability'`. Its `value`, which the interpreter fallback puts in
+ * `unsupported`, is the source collection, as `toString()` writes it. When
+ * the source reads a symbol declared `any` or `value`, the decline of
+ * `assertNoDeclaredTopOperands()` comes first, so that `unsupported` names
+ * the symbol to declare. `Max` and `Min` have a decline of their own on the
+ * JavaScript target for an element that can be a collection
+ * (`refuseNestedData()` in `javascript-target.ts`).
+ */
+export function assertSettledFoldElements(
+  h: string,
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): void {
+  const fold =
+    ((h === 'Sum' || h === 'Product') && args.length === 1) ||
+    ((h === 'Reduce' || h === 'Scan') &&
+      (isSymbol(args[1], 'Add') || isSymbol(args[1], 'Multiply')));
+  if (!fold || args[0] === undefined) return;
+  const source = args[0];
+  const present = resolveTypeForCompilation(
+    stripMissingFromType(source.type.type)
+  );
+  const members =
+    typeof present === 'object' && present.kind === 'union'
+      ? present.types
+      : [present];
+  const unsettled = members.some((m) => {
+    const element = collectionElementType(m);
+    return (
+      element !== undefined && resolveTypeForCompilation(element) === 'any'
+    );
+  });
+  if (!unsettled) return;
+  assertNoDeclaredTopOperands(h, [source], target);
+  const value = source.toString();
+  throw new CompileDeclineError({
+    code: UNSETTLED_SHAPE_CODE,
+    kind: 'capability',
+    message:
+      `Could not compile \`${h}\` over "${value}": an element can be a ` +
+      `number or a list, and compiled code does not test the shape of a ` +
+      `value at run time. Declare the type of the elements, for example ` +
+      `\`list<real>\` or \`list<list<real>>\`.`,
+    value,
   });
 }
 

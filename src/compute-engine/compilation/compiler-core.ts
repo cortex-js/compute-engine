@@ -62,7 +62,7 @@ import {
 import { kindTypeNames } from '../boxed-expression/value-kinds.js';
 import { multiClauseState } from '../multi-clause.js';
 import { hasEnclosureArm } from '../library/enclosure-compile.js';
-import { isSubtype, provablyAdmits } from '../../common/type/subtype.js';
+import { isSubtype, hasNothingArm } from '../../common/type/subtype.js';
 import {
   typeToIdentityKey,
   typeToString,
@@ -426,6 +426,7 @@ import {
 import { identifierPattern } from './compile-folded-values.js';
 import {
   assertAdmitted,
+  assertSettledFoldElements,
   declaredUnionInputsOf,
   throwPendingUnsettledShape,
   unsettledShapeIn,
@@ -3163,7 +3164,7 @@ export function _compileInner(
         );
       // The interpreter keeps an entry whose value is `Nothing`, and the
       // compiled object has no form for that value.
-      if (provablyAdmits('nothing', t))
+      if (hasNothingArm(t))
         throw possibleNothingDecline(
           `the dictionary "${expr.toString()}"`,
           `the value of the key "${key}" can be \`Nothing\``
@@ -3253,6 +3254,7 @@ export function compileExpr(
   if (sub !== undefined) return sub;
 
   assertNoNothingElement(h, args, node);
+  assertSettledFoldElements(h, args, target);
   assertNoProvedAbsentObjectOperand(engine, h, args);
 
   // An operation with a value of a value kind, lowered by the kind's
@@ -4016,7 +4018,7 @@ export function compileExpr(
       throw new Error(
         'Could not compile `IsMissing`: expected exactly one argument'
       );
-    if (provablyAdmits('nothing', compilationType(args[0])))
+    if (hasNothingArm(compilationType(args[0])))
       throw possibleNothingDecline(
         '`IsMissing`',
         'its operand can be `Nothing`, which is not an absent value'

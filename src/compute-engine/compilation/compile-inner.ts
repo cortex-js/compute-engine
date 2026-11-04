@@ -11,10 +11,11 @@ import type {
 import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import {
   collectionElementType,
+  functionResult,
   isNonRealNumber,
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
 } from '../../common/type/utils.js';
-import { isSubtype, provablyAdmits } from '../../common/type/subtype.js';
+import { isSubtype, hasNothingArm } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { presentedValueType } from '../boxed-expression/effects-inference.js';
 import { isTestedAtRead } from '../boxed-expression/store-admission.js';
@@ -743,12 +744,18 @@ export function assertNoProvedAbsentObjectOperand(
  *   `Filter`, `Count` with a predicate, a `Reduce` by `Multiply`, and the
  *   paired statistics) declines when the element type of a source
  *   collection admits `nothing`, and `Map`, `Tabulate` and `Scan` also when
- *   the element type of their own result admits it. The result type of
- *   `Map` holds the result type of its callback, so a callback whose result
- *   type has a `nothing` arm declines.
+ *   the result type of their callback admits it (for `Tabulate`, also an
+ *   element of that result). The test reads the type of the callback, not
+ *   the result type of the operation: the type of `Map` adds a `nothing`
+ *   arm to its elements when the result type of the callback is `any`.
  *
- * A type admits `nothing` when it states so (`provablyAdmits()`): `any`
- * does, `unknown` does not. The decline has the code `'possible-nothing'`
+ * A type admits `nothing` only when it has an explicit `nothing` arm
+ * (`hasNothingArm()`): `nothing`, `nothing | real`. `any` and `unknown` do
+ * not: compiled code produces `Nothing` only from the symbol `Nothing` or
+ * from a statement read as a value, and both decline where they occur. A
+ * `Nothing` that the host supplies for a value typed `any` is outside the
+ * type, and the result is then unspecified. The decline has the code
+ * `'possible-nothing'`
  * (`possibleNothingDecline()`), and the interpreter evaluates the
  * expression.
  */
@@ -760,10 +767,10 @@ export function assertNoNothingElement(
   if (h === 'Tuple') {
     const tupleType = node ? compilationType(node) : undefined;
     if (
-      args.some((x) => provablyAdmits('nothing', compilationType(x))) ||
+      args.some((x) => hasNothingArm(compilationType(x))) ||
       (typeof tupleType === 'object' &&
         tupleType.kind === 'tuple' &&
-        tupleType.elements.some((x) => provablyAdmits('nothing', x.type)))
+        tupleType.elements.some((x) => hasNothingArm(x.type)))
     )
       throw possibleNothingDecline(
         '`Tuple`',
@@ -809,10 +816,10 @@ export function assertNoNothingElement(
   ): boolean => {
     const t = resolveTypeForCompilation(type);
     if (seen.has(t)) return false;
-    if (provablyAdmits('nothing', t)) return true;
+    if (hasNothingArm(t)) return true;
     if (typeof t !== 'object') return false;
     if (t.kind === 'tuple')
-      return t.elements.some((e) => provablyAdmits('nothing', e.type));
+      return t.elements.some((e) => hasNothingArm(e.type));
     if (t.kind === 'union') {
       const next = new Set(seen).add(t);
       return t.types.some((arm) => pairMayHoldNothing(arm, next));
@@ -835,25 +842,31 @@ export function assertNoNothingElement(
     if (
       typeof t === 'object' &&
       t.kind === 'tuple' &&
-      t.elements.some((slot) => provablyAdmits('nothing', slot.type))
+      t.elements.some((slot) => hasNothingArm(slot.type))
     )
       return true;
     const element = collectionElementType(t);
     return (
       element !== undefined &&
-      (provablyAdmits('nothing', element) ||
+      (hasNothingArm(element) ||
         (paired && pairMayHoldNothing(element)) ||
         (h === 'Tabulate' &&
           elementMayBeNothing(element, false, new Set(seen).add(t))))
     );
   };
+  // The callback of `Map` and `Tabulate` is the first operand, and the
+  // callback of `Scan` is the second.
+  const callbackResult =
+    h === 'Map' || rawProducer
+      ? functionResult(compilationType(args[h === 'Scan' ? 1 : 0]))
+      : undefined;
   if (
     sources.some((source) =>
       elementMayBeNothing(compilationType(source), paired && args.length === 1)
     ) ||
-    ((h === 'Map' || rawProducer) &&
-      node !== undefined &&
-      elementMayBeNothing(compilationType(node), false))
+    (callbackResult !== undefined &&
+      (hasNothingArm(callbackResult) ||
+        (h === 'Tabulate' && elementMayBeNothing(callbackResult, false))))
   )
     throw possibleNothingDecline(`\`${h}\``, 'an element can be `Nothing`');
 }

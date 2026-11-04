@@ -769,18 +769,6 @@ describe('A parameter with no declared type called with a list of points maps ov
       test(`${label}: ${route} respects the compiled omission contract`, () => {
         const interpreted = plain(build(untypedEngine(signature, true)).N());
         expect(interpreted).toEqual(expected);
-        // With the signature `(unknown) -> number`, the call of `k` on one
-        // point is typed `any`, which admits `Nothing`, so the map over
-        // the points declines (`assertNoNothingElement()`).
-        if (signature === '(unknown) -> number') {
-          expect(() =>
-            compile(build(untypedEngine(signature, false)), {
-              to: 'javascript',
-              fallback: false,
-            } as any)
-          ).toThrow(/an element can be .Nothing./);
-          return;
-        }
         const r = compile(build(untypedEngine(signature, false)), {
           to: 'javascript',
           fallback: false,

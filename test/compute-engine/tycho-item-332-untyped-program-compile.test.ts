@@ -63,10 +63,13 @@ function operandTypesOf(expr: Expression, head: string): string[] {
 }
 
 describe('Tycho 332: whole Epsil programs compile to JavaScript', () => {
-  test('a: an unconstrained predicate source refuses omission-capable compilation', () => {
-    expect(() => runCompiled(fixture('a-user-functions.epsil'))).toThrow(
-      /Count.*Nothing/
-    );
+  // The elements of the unannotated source are typed `any`, which has no
+  // explicit `nothing` arm.
+  test('a: an unconstrained predicate source compiles the user functions', () => {
+    expect(runCompiled(fixture('a-user-functions.epsil'))).toEqual([
+      224,
+      [4, 6, 18, 54, 86, 28, 8, 8, 4, 4, 4, 0],
+    ]);
   });
 
   test('a: a numeric circle source compiles the user functions', () => {
@@ -241,7 +244,7 @@ describe('list operators over a parameter of a user function', () => {
     const source =
       'function seen(acc, c) { count(acc, e => abs(e[1] - c[1]) < 1e-6) > 0 }\n' +
       'seen([(1, 2), (3, 4)], (3, 9))';
-    expect(() => runCompiled(source)).toThrow(/Count.*Nothing/);
+    expect(runCompiled(source)).toBe(true);
     expect(
       runCompiled(
         source.replace('seen(acc, c)', 'seen(acc: list<tuple<real, real>>, c)')

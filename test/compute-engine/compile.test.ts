@@ -6476,16 +6476,6 @@ describe('COMPILE Apply maps a tuple at a parameter declared as a scalar (a numb
             ce.assign('g', ce.box(untyped));
             ce.assign('h', ce.box(untyped));
             const expr = ce.box(call(arg));
-            // The compiler maps the literal over the points with
-            // `Map(_point ↦ Apply(u ↦ 7, _point), P)`, whose call over one
-            // point is typed `any`, which admits `Nothing`: it declines
-            // (`assertNoNothingElement()`), and the interpreter evaluates it.
-            if (body === 7 && arg === 'P' && (call(arg) as unknown[])[0] === 'Apply') {
-              expect(() => new JavaScriptTarget().compile(expr)).toThrow(
-                /an element can be .Nothing./
-              );
-              continue;
-            }
             const js = new JavaScriptTarget().compile(expr).run!(
               TUPLE_VALUES as never
             );

@@ -245,7 +245,7 @@ describe('successful fallback result types', () => {
 });
 
 describe('compiled numeric absence', () => {
-  test.each(['nothing', 'integer | nothing', 'any'])(
+  test.each(['nothing', 'integer | nothing'])(
     'a possible Nothing input (%s) is refused rather than tested as missing',
     (type) => {
       const ce = new ComputeEngine();
@@ -261,6 +261,22 @@ describe('compiled numeric absence', () => {
       }
     }
   );
+
+  // `any` has no explicit `nothing` arm, so the operand is not refused as
+  // a possible `Nothing`. An input typed `any` declines for its own reason:
+  // it has no shape in compiled code.
+  test('an input typed any declines as an untyped input', () => {
+    const ce = new ComputeEngine();
+    ce.declare('omission', 'any');
+    for (const expression of [
+      ce.box(['IsMissing', 'omission']),
+      ce.box(['Coalesce', 'omission', 5]),
+    ]) {
+      const compiled = compile(expression, { to: 'javascript' });
+      expect(compiled.success).toBe(false);
+      expect(compiled.diagnostic?.code).toBe('untyped-input');
+    }
+  });
 
   test('a numeric marker still triggers a nonnumeric fallback', () => {
     const ce = new ComputeEngine();

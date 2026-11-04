@@ -170,9 +170,14 @@ for gap in [(outer, A, C), (outer, B, C), (A, B, C), (outer, A, D), (outer, B, D
 let counts = listFrom(map(d => count(circles, c => c[4] == d), 1..12))
 (length(circles), counts)`;
 
-  test('an unannotated predicate source refuses omission-capable compilation', () => {
+  // The elements of the unannotated source are typed `any`, which has no
+  // explicit `nothing` arm.
+  test('an unannotated predicate source compiles the 224 circles', () => {
     const { expr } = box(PROGRAM);
-    expect(() => compiled(expr)).toThrow(/Count.*Nothing/);
+    expect(compiled(expr)).toEqual([
+      224,
+      [4, 6, 18, 54, 86, 28, 8, 8, 4, 4, 4, 0],
+    ]);
   });
 
   // The accumulator annotated: before 2026-09-30 one annotation made the

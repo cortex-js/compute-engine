@@ -647,6 +647,11 @@ describe('a lazy collection that leaves an Epsil block or function', () => {
       [2, 3],
     ],
     [
+      'a range source',
+      'let r = do { let h = (k) => k + 1; map(h, 1..3) }\nr',
+      [2, 3, 4],
+    ],
+    [
       'a filter',
       'let r = do { let p = (k) => k > 1; filter([1, 2, 3], p) }\nr',
       [2, 3],
@@ -669,15 +674,6 @@ describe('a lazy collection that leaves an Epsil block or function', () => {
   ])('%s', (_label, src, expected) => {
     expect(run(src)).toBe(JSON.stringify(expected));
     expect(compiled(src)).toEqual(expected);
-  });
-
-  // The `map` of a local function over a range is typed with a bare
-  // `list`, whose elements admit `Nothing`, so the compilation declines
-  // (`assertNoNothingElement()`), and the interpreter evaluates it.
-  test('a range source', () => {
-    const src = 'let r = do { let h = (k) => k + 1; map(h, 1..3) }\nr';
-    expect(run(src)).toBe('[2,3,4]');
-    expect(() => compiled(src)).toThrow(/an element can be .Nothing./);
   });
 
   // A function defined in a program is compiled once, as a value, for the

@@ -155,6 +155,7 @@ describe('A point at an untyped parameter of an engine-level function', () => {
     ['Reduce(P, gr, 0)', ['Reduce', 'P', 'gr', 0], 2],
     ['Reduce(P, gr2, 0)', ['Reduce', 'P', 'gr2', 0], Math.sqrt(5) + 5],
     ['Fold(gr, 0, P)', ['Fold', 'gr', 0, 'P'], 2],
+    ['Map(g3, P)', ['Map', 'g3', 'P'], [Math.sqrt(5), 5]],
     ['Map(gun0, P)', ['Map', 'gun0', 'P'], [1, 1]],
     [
       'Map((v) ↦ gun(v, 5), P)',
@@ -172,19 +173,6 @@ describe('A point at an untyped parameter of an engine-level function', () => {
     test(`${label} (complex)`, () => expectSameValue(json, 'complex'));
     test(`${label} (strict)`, () => expectSameValue(json, 'strict'));
   }
-});
-
-// The result type of `Map(g3, P)` is `list<any>`: `Norm` of a parameter
-// with no declared type is typed `any`, which admits `Nothing`. The map
-// declines (`assertNoNothingElement()`), and the interpreter evaluates it.
-test('Map(g3, P) declines in both modes', () => {
-  expect(interpret(['Map', 'g3', 'P'])).toEqual(
-    [Math.sqrt(5), 5].map((x) => expect.closeTo(x, 12))
-  );
-  for (const mode of ['complex', 'strict'] as const)
-    expect(() =>
-      compile(ce.box(['Map', 'g3', 'P'] as any), { fallback: false, mode })
-    ).toThrow(/an element can be .Nothing./);
 });
 
 describe('A complex point at an untyped parameter', () => {

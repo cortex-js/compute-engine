@@ -317,6 +317,7 @@ describe('A position with no type is read as real', () => {
     ['gl(P[1])', ['gl', ['At', 'P', 1]], undefined],
     ['Map(gl, P)', ['Map', 'gl', 'P'], /parameter `p` of `gl`/],
     ['gl2(P[1])', ['gl2', ['At', 'P', 1]], undefined],
+    ['Map(ha, P)', ['Map', 'ha', 'P'], /parameter `p` of `ha`/],
     ['gu(P[1])', ['gu', ['At', 'P', 1]], undefined],
     // A function literal as the combiner is compiled in its own lanes.
     [
@@ -407,31 +408,10 @@ describe('A block-local combiner that hides an engine-level function', () => {
   });
 });
 
-// The result types of `Map(ha, P)` and `Map(g3, P)` are `list<any>`
-// (`ha` reads a coordinate typed `any`, `g3` takes `Norm` of a parameter
-// with no declared type), and `any` admits `Nothing`, so both maps decline
-// in `complex` mode (`assertNoNothingElement()`). In `strict`, `Map(ha, P)`
-// declines with the same reason: that check runs before the lane check of
-// the callback.
-test('Map(ha, P) and Map(g3, P) decline for a possible Nothing', () => {
-  expect(() =>
-    compile(ce.box(fn(['Map', 'ha', 'P']) as any), {
-      fallback: false,
-      mode: 'complex',
-    })
-  ).toThrow(/an element can be .Nothing./);
-  expectStrictDecline(fn(['Map', 'ha', 'P']), /an element can be .Nothing./);
-  expect(() =>
-    compile(ce.box(fn(['Map', 'g3', 'P']) as any), {
-      fallback: false,
-      mode: 'complex',
-    })
-  ).toThrow(/an element can be .Nothing./);
-});
-
 describe('The decline message of an engine-level Map callback with no type', () => {
   // `Map(g3, P)` binds each point whole through a generated parameter. The
   // message names an element of `P`, not that parameter.
+  test('complex', () => expectSameValue(fn(['Map', 'g3', 'P'])));
   test('strict', () =>
     expectStrictDecline(
       fn(['Map', 'g3', 'P']),

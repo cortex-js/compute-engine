@@ -149,9 +149,15 @@
   from a statement read as a value, and both decline where they occur; a
   `Nothing` that the host supplies for a value typed `any` is outside its
   type. The compiler no longer analyzes the body of a callback, and some
-  expressions over values typed `any` that declined now compile: with
-  `w: collection<any>`, `Sum(w)` gives `6` for `[3, 1, 2]`. Before,
-  these declines had the generic code `compile-error`.
+  expressions over values typed `any` that declined now compile: with a
+  local function `h := k ↦ k + 1`, `Map(h, 1..3)` gives `[2, 3, 4]`.
+  Before, these declines had the generic code `compile-error`. A `Sum` or
+  a `Product` of a collection, or a `Reduce` or a `Scan` by `Add` or
+  `Multiply`, whose element type is `any` declines with the code
+  `unsettled-shape`: such an element can be a number or a list, and
+  compiled code does not test the shape of a value at run time. With
+  `w: collection<any>`, `Sum(w)` declines; declare `w: collection<real>`
+  to compile it.
 - **Compilation to JavaScript: a condition that can be a value other than a
   boolean declines.** Compiled code no longer tests at run time that the
   condition of `If`, `Which` or `Boole` is a boolean. When the static

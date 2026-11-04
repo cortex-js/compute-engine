@@ -276,7 +276,17 @@ the code `'unsettled-shape'`, and `unsupported` holds the node: with
 `["If(0 < x, [1,2], 3)"]`. This is the simple, sound version: it can decline
 where the interpreter has a value, but it never gives a different value. "A
 value with no settled shape declines", under "Fail closed", gives the
-details.
+details. A fold of the elements of a collection (a `Sum` or a `Product` of
+one collection, a `Reduce` or a `Scan` by `Add` or `Multiply`) declines in
+the same way when the element type is `any`: such an element can be a
+number or a list, and the interpreter adds two lists element by element.
+With `w: collection<any>`, `Sum(w)` declines, and `unsupported` is `["w"]`
+(`assertSettledFoldElements()`, `compilation/compile-admission.ts`). The
+same fold over elements typed `unknown` or a union of a number and a list,
+or over a source typed `any`, still compiles on JavaScript to a test of the
+shape of each element at run time, which this rule does not allow. A Tycho
+document depends on it, so the user decides whether it declines (ROADMAP
+CE-805).
 
 **R4. A declared union at an input follows R2.** With
 `y: real | tuple<real, real>` and `f := t ↦ 2t`, `f(y)` compiles to
@@ -449,6 +459,29 @@ Every other case is unspecified: the compiled code can give any value,
   target can assume a finite value (`a - a` is `0`, `a/a` is `1`). This is
   an observation, not a guarantee. `NaN` and `±Infinity` keep their meaning
   in an input declared `real | signed_infinity | nan`.
+
+  On the shader targets, a call of `sin`, `cos`, `max`, `min` or `clamp`
+  uses the built-in when its argument is proven finite in f32 from the
+  declared types and ranges of the inputs, the declared ranged result types
+  of the user functions, the literals and the operators of the expression.
+  Otherwise it calls a helper that gives `NaN` for an infinite argument, as
+  the interpreter does. The compiler does not read the body of another
+  function or the values at a call site to prove it: the host declares the
+  range of an input (`t: real<-5.5..5.5>`) or a result type with a range
+  for a function (`(real) -> real<-1..1>`) to get the built-in. That range
+  is read as the bound of the call: `sin(1000·f(x))` calls the built-in. A
+  result type with no range (`(real) -> real`) is not enough, since the
+  body is computed in f32 and can overflow (`f(u) := exp(u)`). A body whose
+  f32 value leaves its declared range gives a value outside its type, and
+  the compiled value is then unspecified. In the body of a user function, a
+  parameter is typed `number`, also with a declared signature, and an
+  operand that reads it calls the helper. With `t: real<-5.5..5.5>`,
+  Tycho's `sin(10000(51.1⌊t⌋ − 3.9))` compiles to
+  `sin(10000.0 * (51.1 * floor(t) + -0.000026879834))` on GLSL. With
+  `x: real` and `f(u) := cos(u)/2`, whose result type is `number`,
+  `sin(f(x))` compiles to `_gpu_sin(_fn_f(x))`; with `f` declared
+  `(real) -> real<-1..1>`, it compiles to `sin(_fn_f(x))`. The helper and
+  the built-in give the same value on a finite argument.
 - A value outside a declared range (`7` for `real<0..5>`): today the
   `javascript` target computes with the value; a GPU target can use the
   range (it can drop `|x|` for `x` in `real<0..5>`).
@@ -742,27 +775,33 @@ is used is checked in the same way. The loop check is `unsettledShapeIn()`
 as an element where it appears (`[1, Block()]` is `[1, Nothing]`), and
 compiled code has no representation of it. A compilation declines with the
 diagnostic code `'possible-nothing'` when the symbol `Nothing` is read as
-an operand (`[1, Nothing]`, `If(c, Nothing, 7)`), when the static type of a
-coordinate of a `Tuple` admits `nothing`, and when the element type of a
-source or of the result of a collection operation that reads elements one by
-one (`Map`, `Tabulate`, `Scan`, `Zip`, `Filter`, `Count` with a
-predicate, a `Reduce` by `Multiply`, the aggregates such as `Sum`, `Mean`
-and `Max`, and the paired statistics) admits it. `any` admits `nothing`;
-`unknown` does not. The test reads only static types:
-`Map(u ↦ If(c, Nothing, 7), [1, 2])` declines, and so does a map whose
-callback result type is `any`, such as `(u ↦ 7)(P)` over a list of points
+an operand (`[1, Nothing]`, `If(c, Nothing, 7)`), and when a static type has
+an explicit `nothing` arm: `nothing`, `real | nothing`,
+`list<real | nothing>`. The types that the compiler reads are the type of a
+coordinate of a `Tuple`, the element type of a source of a collection
+operation that reads elements one by one (`Map`, `Tabulate`, `Scan`,
+`Zip`, `Filter`, `Count` with a predicate, a `Reduce` by `Multiply`, the
+aggregates such as `Sum`, `Mean` and `Max`, and the paired statistics),
+the result type of the callback of `Map`, `Tabulate` and `Scan`, the type
+of the operand of `IsMissing`, `Coalesce` or `AssertPresent`, and the type
+of the value of a dictionary entry (`assertNoNothingElement()` and
+`hasNothingArm()`, `compilation/compile-inner.ts` and
+`common/type/subtype.ts`). `any` and `unknown` have no explicit
+`nothing` arm, and do not decline here. The reason: compiled code produces
+`Nothing` only from the symbol `Nothing` read as a value, or from a
+statement read as a value (a loop, a block that ends in a declaration), and
+both decline where they occur. A `Nothing` that the host supplies for a
+value typed `any` is a value outside its type, and the result is
+unspecified. A value typed `any` or `unknown` can still decline for another
+rule: an input typed `any` (R1) or a value with no settled shape
+(R3), such as `Sum(w)` with `w: collection<any>`. So
+`Map(u ↦ If(c, Nothing, 7), [1, 2])` declines at the symbol `Nothing`, and `(u ↦ 7)(P)` over a list of points
 `P: list<tuple<real, real>>`, which the compiler maps over the points with a
-call typed `any`. To compile such a map, give the callback a result type
-with no `nothing` arm. The operand of `IsMissing`, `Coalesce` or
-`AssertPresent`, and the value of a dictionary entry, decline with the same
-code when their type admits `nothing` (`assertNoNothingElement()` and
-`possibleNothingDecline()`, `compilation/compile-inner.ts` and
-`compilation/diagnostics.ts`). An inferred type can admit `nothing` in
-the same way: a local function mapped over a range (`h := k ↦ k + 1`,
-`Map(h, 1..3)`) has the bare type `list`, whose elements admit `Nothing`,
-and `Map(g, P)` with `g := p ↦ Norm(p)` and `P: list<tuple<real, real>>`
-has the type `list<any>`. Both decline. Over a list literal,
-`Map(h, [1, 2])` compiles.
+call typed `any`, compiles to `[7, 7, …]`. The test reads the result type
+of the callback, not the result type of the `Map`: the type of `Map` adds
+a `nothing` arm to its elements when the callback result is `any`, and
+`Map(h, 1..3)` with a local function `h := k ↦ k + 1` compiles to
+`[2, 3, 4]`.
 
 On the shader targets, a conditional whose value the code discards (with
 branches of different shapes) declines too, because its shader code is a
@@ -1366,22 +1405,14 @@ finite for certain (`gpuProvablyFinite()`,
 overflow, rounding, the flush of subnormal values to 0, and the error of the
 GPU functions. When the proof is not certain, the helper stays.
 
-The proof uses these facts, among others:
-
-- The index of a `Sum` or `Product` whose bounds are integer literals (in
-  the loop body: integers known at compile time) is finite, inside its bounds.
-- A call of a user function is finite when its body is finite for the
-  arguments of that call. This rule applies only under `angularUnit: 'rad'`,
-  because the emitted body is rewritten for the other units.
-- A divisor is not zero when a lower bound of its magnitude is a normal f32
-  value. For `cos(u)` with `|u| < π/2`, the lower bound is `cos(|u|)` minus
-  the GPU error of `cos`.
-
-The error of `cos` is the one exception to "certain": WGSL specifies an
-absolute error of at most 2⁻¹¹ on [-π, π], but GLSL ES 3.00 specifies none.
-On GLSL the proof assumes an absolute error of at most 2⁻⁶ on [-π/2, π/2]
-(user decision 2026-10-31). On a driver with a larger error, a quotient by
-`cos(u)²` that this rule proves finite can be `±∞` or NaN.
+The host provides the proof. It reads only the declared types and ranges
+of the inputs, the declared ranged result types of the user functions, the
+number literals and the operators of the operand. It does not read the body of a
+user function, the values that the calls of a function pass to its
+parameters, or the index of a `Sum`, `Product` or loop as finite. A call
+never declines for want of a proof: it calls the helper, which gives the
+same value as the built-in on a finite argument. The caveat on the shader
+targets in "Caveats of compiled code" gives the examples.
 
 ## Compile modes
 

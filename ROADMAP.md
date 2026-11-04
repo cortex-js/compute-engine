@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-805.
+Next free reference: CE-806.
 
 **Entry format.**
 
@@ -2101,6 +2101,37 @@ Also `Series(exp x).N()`; a one-line program. Found during the work of 2026-10-3
 reproduction above is the record.
 
 ## Compilation
+
+### CE-805. A JavaScript fold over elements typed `unknown` tests the shape of each element at run time
+
+**Status:** decision needed; design, S. Found by the review of step 4, row 9 (`docs/plans/2026-11-02-compiler-contraction-plan.md`).
+**Witness:** corpus; Tycho row 425: `Sum(Rest(g(x)))` with `g` declared
+`function` and `x: list<real>` compiles on JavaScript, and the source has
+the element type `unknown`.
+
+R3 of `docs/COMPILATION-MODEL.md` says that a value with no settled shape
+declines, and compiled code tests no type at run time. A `Sum` or a
+`Product` of one collection, and a `Reduce` or a `Scan` by `Add` or
+`Multiply`, whose element type is `unknown` or a union of a number and a
+collection (`list<real | list<real>>`), or whose source is typed `any`
+(`Sum(g(x))` with `g: (real) -> any`, `crafted`), compiles on JavaScript
+to a fold that tests each element with `Array.isArray`
+(`elementwiseFoldCombiner()` in `javascript-target.ts`). The values are
+the interpreter's: with `w = [[1, 2], [3, 4]]`, `Sum(w)` is `[4, 6]`. Step 4,
+row 9 declines the same fold when the element type is `any`
+(`assertSettledFoldElements()` in `compile-admission.ts`), because that
+case was declined before by the `Nothing` check; the cases above compiled
+before row 9 and still compile.
+
+Options: (a) decline them with `unsettled-shape`, as R3 says: Tycho row 425
+then declines until the host declares the result type of `g`; about 25
+test assertions change (`compile-fold-times-matrix`,
+`multiply-matrix-product`, `tycho-row-425-index-of-broadcastable-call`,
+`compile-extremum-collection-operand`); measure the corpus first. (b) keep
+the run-time test and state it in R3 as the one exception for a fold, with
+its reason. Recommended: (b) if the corpus measure of (a) shows more records
+than row 425 that decline, else (a). With no decision, the fold keeps its
+run-time test.
 
 ### CE-799. A call mapped over a list of points declines when a coordinate is a symbol with a bounded real type (Tycho row 486)
 

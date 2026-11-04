@@ -46,12 +46,11 @@
  *
  * A function whose calls stay calls is emitted once, as a shader function
  * of its own (`_fn_F`). In its body, `sin`, `cos`, `min` and the other
- * operations with a NaN-safe helper call the built-in for a parameter that
- * is finite for certain: every call of the function in the expression that
- * this pass returns passes an argument that is finite for certain at that
- * position (`gpuProvablyFinite` and `gpuRecordCallSiteFacts` in
- * `gpu-finite-proof.ts`). A declared parameter type is not enough here: an
- * argument such as `exp(x)` is a `real` that overflows in f32.
+ * operations with a NaN-safe helper call the built-in only for an operand
+ * that is finite for certain (`gpuProvablyFinite` in
+ * `gpu-finite-proof.ts`). That proof does not read the values that the
+ * calls of the function pass: an operand that reads a parameter is proven
+ * from the type of the parameter only.
  */
 
 import type {

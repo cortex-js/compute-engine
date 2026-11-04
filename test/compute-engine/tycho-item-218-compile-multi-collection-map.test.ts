@@ -267,9 +267,7 @@ describe('Tycho item 218: shapes the zip lowering must refuse (fail closed, the 
       expect(r.success).toBe(false);
       // The mapping is operand 1, so the second source is operand 3.
       expect(r.diagnostic?.message).toMatch(
-        type === 'list'
-          ? /Could not compile `Map`: an element can be .Nothing./
-          : /Could not compile `Map`: operand 3/
+        /Could not compile `Map`: operand 3/
       );
       const py = compile(ce.box(['Map', F2, ['Range', 1, 'N'], 'S']), {
         to: 'python',

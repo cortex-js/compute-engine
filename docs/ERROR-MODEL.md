@@ -2281,14 +2281,19 @@ maps its channels onto it:
   and a colour with `NaN` channels when they are colours
   (`unmatchedCellLiteral()` in `compile-absence.ts`). Compiled code has no
   representation of `Nothing` as a value. A compilation declines, with the
-  diagnostic code `possible-nothing`, when the static type of an element of
-  a collection or of a coordinate of a tuple admits `nothing` (`any`
-  does, `unknown` does not), when the operand of `IsMissing`, `Coalesce`
-  or `AssertPresent` or the value of a dictionary entry admits it, and
-  when the symbol `Nothing` is read as an operand (`[1, Nothing]`,
-  `If(c, Nothing, 7)`). The test reads only static types: `Map(u ↦ If(c,
-  Nothing, 7), xs)` declines, and no analysis of a callback body shows
-  that it cannot return `Nothing`.
+  diagnostic code `possible-nothing`, when the symbol `Nothing` is read as
+  an operand (`[1, Nothing]`, `If(c, Nothing, 7)`), and when a static type
+  has an explicit `nothing` arm (`nothing`, `real | nothing`): the type
+  of an element of a collection, of a coordinate of a tuple, of the result
+  of a callback of `Map`, `Tabulate` or `Scan`, of the operand of
+  `IsMissing`, `Coalesce` or `AssertPresent`, or of the value of a
+  dictionary entry. `any` and `unknown` have no such arm. Compiled code
+  produces `Nothing` only from the symbol `Nothing` read as a value or
+  from a statement read as a value, and both decline where they occur. A
+  `Nothing` that the host supplies for a value typed `any` is outside its
+  type, and the result is unspecified. The test reads only static types:
+  `Map(u ↦ If(c, Nothing, 7), xs)` declines at the symbol `Nothing`, and
+  no analysis of a callback body shows that it cannot return `Nothing`.
 - Compiled code does not test a value against its own static type at run
   time (rule R5 of `docs/COMPILATION-MODEL.md`). On JavaScript, a
   condition of `If`, `Which` or `Boole` whose static type admits a value

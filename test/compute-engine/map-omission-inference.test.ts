@@ -55,37 +55,34 @@ describe('Map result-type inference preserves the remaining data contract', () =
   );
 });
 
-describe('compiled Map declines a result type that admits Nothing', () => {
-  test('a tuple callback with a tuple result compiles', () => {
-    const ce = new ComputeEngine();
-    ce.declare('points', 'list<tuple<real, real>>');
-    const expr = ce.box(['Apply', ['Function', ['Multiply', 2, 'u'], 'u'], 'points']);
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    expect(
-      result.run!({
-        points: [
-          [1, 2],
-          [3, 4],
-        ],
-      })
-    ).toEqual([
-      [2, 4],
-      [6, 8],
-    ]);
-  });
-
-  test('a tuple callback whose call over a point is typed `any` declines', () => {
-    // The compiler maps the literal over the points with
-    // `Map(_point ↦ Apply(u ↦ 7, _point), points)`, and the call over one
-    // point has the type `any`, which admits `Nothing`. No analysis of
-    // the body of the callback removes the decline.
-    const ce = new ComputeEngine();
-    ce.declare('points', 'list<tuple<real, real>>');
-    const result = compile(ce.box(['Apply', ['Function', 7, 'u'], 'points']));
-    expect(result.success).toBe(false);
-    expect(result.diagnostic?.code).toBe('possible-nothing');
-  });
+describe('compiled Map declines a result type with a `nothing` arm', () => {
+  // The call of the callback over one point is typed `any`. `any` has no
+  // explicit `nothing` arm, so the map compiles (`hasNothingArm()`).
+  test.each([[7], [['Multiply', 2, 'u']]])(
+    'a tuple callback returning %j compiles',
+    (body) => {
+      const ce = new ComputeEngine();
+      ce.declare('points', 'list<tuple<real, real>>');
+      const expr = ce.box(['Apply', ['Function', body, 'u'], 'points']);
+      const result = compile(expr);
+      expect(result.success).toBe(true);
+      expect(
+        result.run!({
+          points: [
+            [1, 2],
+            [3, 4],
+          ],
+        })
+      ).toEqual(
+        body === 7
+          ? [7, 7]
+          : [
+              [2, 4],
+              [6, 8],
+            ]
+      );
+    }
+  );
 
   test.each(
     [
@@ -110,28 +107,41 @@ describe('compiled Map declines a result type that admits Nothing', () => {
       ce.box(['Function', ['Apply', 'h', 1], ['Typed', 'h', 'function']])
     );
     ce.declare('callbacks', 'list<function>');
+    // The `h` in the body of `Invoke` is its parameter, a function value
+    // that this call does not lower. The compilation declines, and does not
+    // call the global `h`.
     const result = compile(ce.box(['Map', 'Invoke', 'callbacks']));
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/Nothing/);
+    expect(result.error).toMatch(/Could not compile `h`/);
   });
 
-  test('an enclosing `(real) -> any` parameter does not read a global function of the same name', () => {
-    const ce = new ComputeEngine();
-    ce.assign('h', ce.box(['Function', 7, 'u']));
-    const expr = ce.box([
-      'Function',
-      ['Map', 'h', ['List', 1, 2]],
-      ['Typed', 'h', '(real) -> any'],
-    ]);
-    const result = compile(expr);
-    expect(result.success).toBe(false);
-    expect(result.diagnostic?.code).toBe('possible-nothing');
-    const safe = compile(ce.box(['Map', 'h', ['List', 1, 2]]));
-    expect(safe.success).toBe(true);
-    expect(safe.run!({})).toEqual([7, 7]);
-  });
+  test.each(['(real) -> any', '(real) -> unknown', 'function'])(
+    'an enclosing %s parameter does not read a global function of the same name',
+    (type) => {
+      const ce = new ComputeEngine();
+      ce.assign('h', ce.box(['Function', 7, 'u']));
+      const expr = ce.box([
+        'Function',
+        ['Map', 'h', ['List', 1, 2]],
+        ['Typed', 'h', type],
+      ]);
+      const result = compile(expr);
+      expect(result.success).toBe(true);
+      const run = result.run! as unknown as (h: unknown) => unknown;
+      expect(run((x: number) => x + 100)).toEqual([101, 102]);
+      expect(
+        ce
+          .box(['Apply', expr, ['Function', ['Add', 'x', 100], 'x']])
+          .evaluate()
+          .toString()
+      ).toBe('[101,102]');
+      const safe = compile(ce.box(['Map', 'h', ['List', 1, 2]]));
+      expect(safe.success).toBe(true);
+      expect(safe.run!({})).toEqual([7, 7]);
+    }
+  );
 
-  test('an inner parameter declared with a function type declines', () => {
+  test('an untyped inner parameter shadows an outer callable contract', () => {
     const ce = new ComputeEngine();
     const build = (inner: any) =>
       ce.box([
@@ -139,6 +149,13 @@ describe('compiled Map declines a result type that admits Nothing', () => {
         ['Function', ['Map', 'h', ['List', 1, 2]], inner],
         ['Typed', 'h', '(real) -> real'],
       ]);
+    // The inner `h` has no declared type: the map reads the inner
+    // parameter, not the outer one.
+    const untyped = compile(build('h'));
+    expect(untyped.success).toBe(true);
+    const outer = untyped.run! as unknown as (h: unknown) => unknown;
+    const inner = outer((x: number) => x + 1) as (h: unknown) => unknown;
+    expect(inner((x: number) => x * 10)).toEqual([10, 20]);
     // A parameter declared with a function type declines in compiled code
     // (`docs/COMPILATION-MODEL.md`, "Function values").
     const typed = compile(build(['Typed', 'h', '(real) -> real']));
@@ -168,7 +185,7 @@ describe('compiled Map declines a result type that admits Nothing', () => {
   });
 
   test.each([false, true])(
-    'a map over a block-local function (mutable: %s)',
+    'a loop variable shadows a block-local function (mutable: %s)',
     (mutable) => {
       const source =
         'function run(fs: list<function>) { let h = (k) => k + 1; ' +
@@ -180,6 +197,11 @@ describe('compiled Map declines a result type that admits Nothing', () => {
         expect(diagnostics).toEqual([]);
         return compile(ce.box(resolveLibraryNames(program, src, ce)));
       };
+      // Inside the loop, `h` is the loop variable, not the local function.
+      const shadowed = build(source);
+      expect(shadowed.success).toBe(true);
+      const runShadowed = shadowed.run!({}) as (fs: unknown[]) => unknown;
+      expect(runShadowed([(x: number) => x * 10])).toEqual([[10, 20]]);
       const captured = build(source.replace('for h in fs', 'for item in fs'));
       // A local function that is assigned twice is a function value stored
       // in a local, which compiled code does not compile

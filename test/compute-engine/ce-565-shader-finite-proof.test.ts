@@ -230,11 +230,9 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
 
     it('a parameter keeps the guard, also when a global of its name has a value', () => {
       // The parameter `c` of `p` is not the global `c := 2.5`. The argument
-      // `u` has no declared type, so the parameter is not finite for certain.
-      // With `p(x)`, `x` declared `real`, the parameter is finite but of no
-      // known size: at `x = 1.5e38`, `x + 1.9x` is +∞ in f32, so the guard
-      // stays there too (CE-619: the size of `1.9c` is not read from the
-      // value of the global `c`).
+      // `u` has no declared type. With `p(x)`, `x` declared `real`, the guard
+      // stays too: the proof does not read the values that the calls pass,
+      // and the size of `1.9c` is not read from the value of the global `c`.
       expect(shader(ce, 'p(u)', to).preamble).toMatch(/_gpu_cos\(/);
       expect(shader(ce, 'p(x)', to).preamble).toMatch(
         /_gpu_cos\(1\.9 \* c \+ x/

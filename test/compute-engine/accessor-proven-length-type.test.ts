@@ -489,24 +489,29 @@ describe('an element read over a base that declares any elements', () => {
   );
 });
 
-// A raw collection can retain Nothing, including one declared with a bare
-// family or explicit any content type. Such reads cannot prove tuple slots
-// omission-free. A concrete numeric contract remains compilable.
-describe('compiling tuple coordinates requires omission-free reads', () => {
+// A tuple coordinate declines only when its type has an explicit `nothing`
+// arm. A read typed `any` has no such arm: compiled code produces `Nothing`
+// only from the symbol `Nothing` or from a statement read as a value, and a
+// `Nothing` that the host supplies in a collection typed `list<any>` is a
+// value outside the type of the input.
+describe('compiling tuple coordinates reads the explicit nothing arm', () => {
   const POINT = ['Tuple', ['At', 'P', 1], ['At', 'P', 2]];
 
   test.each(['list', 'list<any>', 'collection<any> | tuple', 'list<any^2>'])(
-    'P: %s cannot exclude omitted coordinates',
+    'P: %s compiles, with the value of the interpreter',
     (type) => {
       const ce = new ComputeEngine();
       ce.declare('P', type);
       const result = compile(ce.box(POINT as any), { to: 'javascript' });
-      expect(result.success).toBe(false);
-      expect(result.diagnostic?.message ?? '').toMatch(/Nothing/);
+      expect(result.success).toBe(true);
+      expect(result.run!({ P: [3, 4] })).toEqual([3, 4]);
+      ce.assign('P', ce.box(['List', 3, 4]));
+      expect(ce.box(POINT as any).evaluate().toString()).toBe('(3, 4)');
     }
   );
 
-  test('a literal of unrestricted runtime operands is not an omission proof', () => {
+  // The inputs `a` and `b` are typed `any`, which compiled code refuses.
+  test('a literal of inputs typed any declines as an untyped input', () => {
     const ce = new ComputeEngine();
     ce.declare('a', 'any');
     ce.declare('b', 'any');
@@ -516,11 +521,12 @@ describe('compiling tuple coordinates requires omission-free reads', () => {
       { to: 'javascript' }
     );
     expect(result.success).toBe(false);
-    expect(result.diagnostic?.message ?? '').toMatch(/Nothing/);
+    expect(result.diagnostic?.code).toBe('untyped-input');
   });
 
+  // The JavaScript target does not compile `At` with a key.
   test.each(['dictionary<any>', 'record{a: any}'])(
-    'D: %s cannot prove a keyed read excludes Nothing',
+    'D: %s, a keyed read declines',
     (type) => {
       const ce = new ComputeEngine();
       ce.declare('D', type);
@@ -529,7 +535,9 @@ describe('compiling tuple coordinates requires omission-free reads', () => {
         { to: 'javascript' }
       );
       expect(result.success).toBe(false);
-      expect(result.diagnostic?.message ?? '').toMatch(/Nothing/);
+      expect(result.diagnostic?.message ?? '').toMatch(
+        /first operand is not an indexed collection/
+      );
     }
   );
 
@@ -541,17 +549,16 @@ describe('compiling tuple coordinates requires omission-free reads', () => {
     expect(result.code).toBe('vec2(P.x, P.y)');
   });
 
-  // A tuple slot may hold `Nothing`: a read of a slot typed `any` still
-  // refuses.
-  test('T: tuple<number, any>, the refusal stands', () => {
+  // A slot typed `any` has no explicit `nothing` arm.
+  test('T: tuple<number, any> compiles, with the value of the interpreter', () => {
     const ce = new ComputeEngine();
     ce.declare('T', 'tuple<number, any>');
-    const result = compile(
-      ce.box(['Tuple', ['At', 'T', 1], ['At', 'T', 2]] as any),
-      { to: 'javascript' }
-    );
-    expect(result.success).toBe(false);
-    expect(result.diagnostic?.message ?? '').toMatch(/Nothing/);
+    const expr = ce.box(['Tuple', ['At', 'T', 1], ['At', 'T', 2]] as any);
+    const result = compile(expr, { to: 'javascript' });
+    expect(result.success).toBe(true);
+    expect(result.run!({ T: [1, 2] })).toEqual([1, 2]);
+    ce.assign('T', ce.box(['Tuple', 1, 2]));
+    expect(expr.evaluate().toString()).toBe('(1, 2)');
   });
 });
 

@@ -14,7 +14,7 @@ import {
   isNumericTuple,
   isTupleShapedType,
 } from '../collection-utils.js';
-import { provablyAdmits } from '../../common/type/subtype.js';
+import { hasNothingArm } from '../../common/type/subtype.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import {
   isSymbol,
@@ -424,7 +424,7 @@ export function compileExprCoalesce(
     if (
       args
         .slice(0, -1)
-        .some((a) => provablyAdmits('nothing', compilationType(a)))
+        .some((a) => hasNothingArm(compilationType(a)))
     )
       throw possibleNothingDecline(
         '`Coalesce`',

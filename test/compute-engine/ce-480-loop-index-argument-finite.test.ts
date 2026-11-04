@@ -1,24 +1,17 @@
 /**
- * Tycho ledger row 480: on the shader targets, the index of a `Sum` or a
- * `Product` whose two bounds are integer literals is finite for certain, of
- * magnitude at most the larger bound (`gpuLoopIndexFacts` and
- * `gpuRecordCallSiteFacts` in `compilation/gpu-finite-proof.ts`). A call of a
- * user function is finite for certain when its body is, for the arguments of
- * that call, and an interval that holds its value is computed from the
- * intervals of the arguments (`userCall` and `range` of `gpuFiniteProof`).
- * A quotient by `cos(u)²` is finite for certain when the interval of `u` is
- * within `(-π/2, π/2)` (`lowerMagnitude`). The operations with a NaN-safe
- * helper (`_gpu_sin`, `_gpu_cos`, `_gpu_min`) then call the built-in.
+ * Tycho ledger row 480: the `kelvin-wake` showcase of Tycho, a sum of 300
+ * terms `w(j)·cos(k₀(x·cos θ(j) + y·sin θ(j)) / cos(θ(j))²)`, with
+ * `θ(j) = -1.35 + 2.7(j − 0.5)/300`, on the shader targets.
  *
- * The shape is the `kelvin-wake` showcase of Tycho: a sum of 300 terms
- * `w(j)·cos(k₀(x·cos θ(j) + y·sin θ(j)) / cos(θ(j))²)`, with
- * `θ(j) = -1.35 + 2.7(j − 0.5)/300`.
- *
- * The helpers stay when a call of the same function passes an argument
- * that is not finite for certain or has no known bound, when the bound of
- * the `Sum` is not a literal, when the angular unit is not the radian, when
- * the lower bound of a divisor would rest on the bound 1 of `sin`, and when
- * calls are nested more than 8 levels deep.
+ * The proof that an operand is finite (`gpuProvablyFinite` in
+ * `compilation/gpu-finite-proof.ts`) reads only the declarations of the
+ * host and the expression. It does not read the index of a `Sum` or a
+ * `Product` as finite, nor the body of a user function, nor the values that
+ * the calls of a function pass, and it gives `cos(u)` no lower bound of its
+ * magnitude. So the operations with a NaN-safe helper (`_gpu_sin`,
+ * `_gpu_cos`, `_gpu_min`) of this sum call the helper, which gives the same
+ * values as the built-in on finite inputs. A sum that the shader unrolls
+ * into terms with literal indices folds them, and calls the built-ins.
  *
  * Every test builds its OWN engine: these tests assign symbols.
  */
@@ -92,16 +85,15 @@ function guardedCalls(text: string): number {
   return [...text.matchAll(/_gpu_(min|sin|cos)\(/g)].length;
 }
 
-describe('CE-480: a loop index with literal bounds is finite', () => {
+describe('CE-480: the kelvin-wake sum on the shader targets', () => {
   test.each(TARGETS)(
-    'the kelvin-wake sum calls the built-in min, sin and cos (%s)',
+    'the kelvin-wake sum calls the helpers of min, sin and cos (%s)',
     (to) => {
       const ce = engineWith(eta('300'));
       const text = shader(ce, '\\operatorname{eta}(x, y)', to);
-      expect(guardedCalls(text)).toBe(0);
-      expect(text).toMatch(/\bmin\(1\.0/);
-      expect(text).toMatch(/\bsin\(/);
-      expect(text).toMatch(/\bcos\(/);
+      expect(text).toMatch(/_gpu_min\(1\.0/);
+      expect(text).toMatch(/_gpu_sin\(/);
+      expect(text).toMatch(/_gpu_cos\(/);
     }
   );
 
@@ -166,25 +158,24 @@ describe('CE-480: a loop index with literal bounds is finite', () => {
     }
   );
 
-  test('a quotient by cos(θ(j))² calls the built-in on GLSL', () => {
-    // This rests on an ASSUMPTION about the GLSL drivers, not on the GLSL
-    // specification, which gives no accuracy for `cos`: the absolute error
-    // of `cos` is at most 2⁻⁶ on [-π/2, π/2] (`GPU_TRIG_ERROR` in
-    // `gpu-finite-proof.ts`). Then `cos(θ(j))²` is at least about 0.04.
+  test.each(TARGETS)('a quotient by cos(θ(j))² keeps the helper (%s)', (to) => {
+    // The proof gives `cos(u)` no lower bound of its magnitude: the error
+    // of the GPU `cos` is not specified on GLSL.
     const ce = engineWith(eta('300'));
     const text = shader(
       ce,
       '\\sum_{j=1}^{300} \\sin\\left(\\frac{x}{\\cos(\\operatorname{theta}(j))^2}\\right)',
-      'glsl'
+      to
     );
-    expect(guardedCalls(text)).toBe(0);
-    expect(text).toMatch(/\bsin\(x \//);
+    expect(text).toMatch(/_gpu_sin\(x \//);
   });
 
   test.each(TARGETS)(
-    'a product by cos(θ(j))^{-2} calls the built-in, as the quotient does (%s)',
+    'a product by cos(u)^{-2} keeps the helper, as the quotient does (%s)',
     (to) => {
-      // The shader computes `cos(u)^{-2}` as `1.0 / _gpu_pow2(cos(u))`.
+      // The shader computes `cos(u)^{-2}` as `1.0 / _gpu_pow2(cos(u))`. A
+      // declared range of `u` within (-π/2, π/2) gives no lower bound of
+      // `|cos(u)|`.
       const ce = new ComputeEngine();
       ce.declare('x', 'real<-1e15..1e15>');
       ce.declare('u', 'real<-1.35..1.35>');
@@ -193,10 +184,7 @@ describe('CE-480: a loop index with literal bounds is finite', () => {
         '\\sin(x\\cos(u)^{-1})',
         '\\sin(\\frac{x}{\\cos(u)^2})',
       ])
-        expect(guardedCalls(shader(ce, latex, to))).toBe(0);
-      // `u` can reach π/2 here, and `cos(u)` can be 0.
-      ce.declare('v', 'real<-1.6..1.6>');
-      expect(shader(ce, '\\sin(x\\cos(v)^{-2})', to)).toMatch(/_gpu_sin\(/);
+        expect(shader(ce, latex, to)).toMatch(/_gpu_sin\(/);
     }
   );
 
@@ -218,47 +206,6 @@ describe('CE-480: a loop index with literal bounds is finite', () => {
     }
   );
 
-  test.each(TARGETS)(
-    'a call of a user function in degree mode keeps the helper (%s)',
-    (to) => {
-      // The stored body of `f` is `arctan(t)`, at most π/2, but the shader
-      // computes it in degrees, up to 90: `10³⁷·f(t)` can overflow.
-      const latex =
-        '\\min(0, 10^{37}\\operatorname{f}(t) - 9\\cdot 10^{36}\\operatorname{f}(t+1))';
-      const make = (unit: 'rad' | 'deg') => {
-        const ce = new ComputeEngine();
-        ce.angularUnit = unit;
-        ce.declare('t', 'real<-1..1>');
-        ce.declare('f', 'function');
-        ce.assign('f', ce.parse('t \\mapsto \\arctan(t)'));
-        return ce;
-      };
-      expect(shader(make('deg'), latex, to)).toMatch(/_gpu_min\(/);
-      // In radians the bound π/2 holds, and the built-in is called.
-      expect(shader(make('rad'), latex, to)).not.toMatch(/_gpu_min\(/);
-    }
-  );
-
-  test.each(TARGETS)(
-    'an inner sum that binds the index again keeps the helper (%s)',
-    (to) => {
-      // The inner `j` has the non-literal upper bound `n` and no fact; it
-      // does not read the fact of the outer `j`.
-      const ce = engineWith(eta('300'));
-      ce.declare('n', 'integer');
-      const min = ['Min', 1, ['Multiply', 'x', ['theta', 'j']]];
-      const nested = (inner: string) =>
-        shaderOf(
-          ce,
-          ['Sum', ['Sum', min, ['Limits', inner, 1, 'n']], ['Limits', 'j', 1, 300]],
-          to
-        );
-      expect(nested('j')).toMatch(/_gpu_min\(1\.0/);
-      // With another name for the inner index, `j` is the outer index.
-      expect(nested('k')).not.toMatch(/_gpu_min\(/);
-    }
-  );
-
   test.each(TARGETS)('a sum body that assigns the index declines (%s)', (to) => {
     // The interpreter binds the index to its next value at each iteration,
     // whatever the body wrote. A compiled loop does not, so every target
@@ -277,124 +224,6 @@ describe('CE-480: a loop index with literal bounds is finite', () => {
       'the body writes the index `j`'
     );
   });
-
-  test.each(TARGETS)(
-    'a callee that binds its parameter again keeps the helper (%s)',
-    (to) => {
-      // `userCall` refuses a callee whose body binds a parameter again. No
-      // head that the proof accepts binds a name, so the `Sum` of the body
-      // is not proven finite either: this pins the result, not which of
-      // the two rules gives it.
-      const ce = engineWith(eta('300'));
-      const min = ['Min', 1, ['Multiply', 'x', ['h', 'j']]];
-      const root = ['Sum', min, ['Limits', 'j', 1, 300]];
-      ce.declare('h', 'function');
-      ce.assign(
-        'h',
-        ce.box([
-          'Function',
-          [
-            'Add',
-            ['Multiply', 'x', ['theta', 't']],
-            ['Sum', 't', ['Limits', 't', 1, 3]],
-          ],
-          't',
-        ])
-      );
-      expect(shaderOf(ce, root, to)).toMatch(/_gpu_min\(1\.0/);
-      // The same callee without the inner binder calls the built-in.
-      ce.assign(
-        'h',
-        ce.box(['Function', ['Multiply', 'x', ['theta', 't']], 't'])
-      );
-      expect(shaderOf(ce, root, to)).not.toMatch(/_gpu_min\(/);
-    }
-  );
-
-  test.each(TARGETS)(
-    'a call nested deeper than 8 levels keeps the helper (%s)',
-    (to) => {
-      // `f1(t) = f2(t) + 1`, …, and the last function is `sin(t)`. The proof
-      // reads at most 8 nested bodies.
-      const chain = (levels: number) => {
-        const ce = new ComputeEngine();
-        ce.declare('t', 'real<-1..1>');
-        for (let i = levels; i >= 1; i--) {
-          ce.declare(`f${i}`, 'function');
-          ce.assign(
-            `f${i}`,
-            ce.parse(
-              i === levels
-                ? 't \\mapsto \\sin(t)'
-                : `t \\mapsto \\operatorname{f${i + 1}}(t) + 1`
-            )
-          );
-        }
-        return shader(ce, '\\min(0, \\operatorname{f1}(t))', to);
-      };
-      expect(chain(8)).not.toMatch(/_gpu_min\(/);
-      expect(chain(9)).toMatch(/_gpu_min\(/);
-      expect(chain(12)).toMatch(/_gpu_min\(/);
-    }
-  );
-
-  test.each(TARGETS)(
-    'nested calls with three calls in each body compile quickly (%s)',
-    (to) => {
-      // Eight levels, each body calling the next function three times with
-      // other arguments: without a shared result per compilation and a
-      // budget per proof, the proof would read 3⁷ bodies for each operand.
-      const ce = new ComputeEngine();
-      ce.declare('t', 'real<-1..1>');
-      for (let i = 8; i >= 1; i--) {
-        const g = `\\operatorname{g${i + 1}}`;
-        ce.declare(`g${i}`, 'function');
-        ce.assign(
-          `g${i}`,
-          ce.parse(
-            i === 8
-              ? 't \\mapsto \\sin(t)'
-              : `t \\mapsto ${g}(t) + ${g}(0.5t) + ${g}(\\frac{t}{3})`
-          )
-        );
-      }
-      const start = Date.now();
-      const text = shader(ce, '\\min(0, \\operatorname{g1}(t))', to);
-      // Every body is finite and bounded, and the proof reads fewer bodies
-      // than its budget.
-      expect(text).not.toMatch(/_gpu_min\(/);
-      if (process.env.CE_PERF === '1')
-        expect(Date.now() - start).toBeLessThan(20000);
-    }
-  );
-
-  test.each(TARGETS)(
-    'a divisor with a rational factor p/q keeps the helper (%s)',
-    (to) => {
-      // The shader computes `f(t)` as `t / 9e15 * 8999999999999999`. At
-      // `j = 1`, `t / 9e15` is about 1.1·10⁻⁴⁶, flushed or rounded to 0 in
-      // f32, and the quotient `x / f(10⁻³⁰·j)` can be `±∞` or NaN.
-      const ce = new ComputeEngine();
-      ce.declare('x', 'real<-1..1>');
-      ce.declare('f', 'function');
-      ce.assign(
-        'f',
-        ce.parse('t \\mapsto \\frac{8999999999999999}{9000000000000000} t')
-      );
-      const latex =
-        '\\sum_{j=1}^{300} \\sin\\left(\\frac{x}{\\operatorname{f}(10^{-30} j)}\\right)';
-      expect(shader(ce, latex, to)).toMatch(/_gpu_sin\(x \//);
-      // With the decimal factor 0.9 and `10⁻³j`, the built-in is called.
-      ce.assign('f', ce.parse('t \\mapsto 0.9 t'));
-      expect(
-        shader(
-          ce,
-          '\\sum_{j=1}^{300} \\sin\\left(\\frac{x}{\\operatorname{f}(10^{-3} j)}\\right)',
-          to
-        )
-      ).not.toMatch(/_gpu_sin\(/);
-    }
-  );
 
   test.each(TARGETS)(
     'a divisor with a rational factor written as one tiny literal keeps the helper (%s)',
@@ -425,7 +254,7 @@ describe('CE-480: a loop index with literal bounds is finite', () => {
   );
 
   test.each(TARGETS)(
-    'abs of a tuple in a callee is a norm that can overflow (%s)',
+    'abs of a tuple is a norm that can overflow (%s)',
     (to) => {
       // `Abs` of a tuple is emitted as `length(vec4(t, t, t, t))`, which is
       // `+∞` in f32 for `t = 2·10³⁸`.
@@ -452,32 +281,18 @@ describe('CE-480: a loop index with literal bounds is finite', () => {
       expect(
         shaderOf(make('real'), ['Sin', ['Abs', ['Tuple', 'x', 'x', 'x']]], to)
       ).toMatch(/_gpu_sin\(/);
-      // With `x` in [-1, 1] the norm is at most 2.
+      // With `x` in [-1, 1] the norm is at most 2. A call of `f` keeps the
+      // helper: the proof does not read the body of `f`.
       expect(
-        shaderOf(make('real<-1..1>'), ['Sin', ['f', 'x']], to)
+        shaderOf(
+          make('real<-1..1>'),
+          ['Sin', ['Abs', ['Tuple', 'x', 'x', 'x', 'x']]],
+          to
+        )
       ).not.toMatch(/_gpu_sin\(/);
-    }
-  );
-
-  test.each(TARGETS)(
-    'a call in a body whose argument reads a parameter has a bound (%s)',
-    (to) => {
-      // `g(s) := w(f(s))`: the parameter `u` of `w` has the bound of
-      // `f(s)`, read from the bound of `s` when the facts of the call sites
-      // are recorded (`gpuRecordCallSiteFacts`). Then `u / 0.35` is finite
-      // and `min` is the built-in.
-      const ce = new ComputeEngine();
-      ce.declare('t', 'real<-1..1>');
-      const define = (name: string, latex: string) => {
-        ce.declare(name, 'function');
-        ce.assign(name, ce.parse(latex));
-      };
-      define('f', 's \\mapsto 0.5 s');
-      define('w', 'u \\mapsto \\min(1, \\frac{u}{0.35})');
-      define('g', 's \\mapsto \\operatorname{w}(\\operatorname{f}(s))');
-      const text = shader(ce, '\\operatorname{g}(t)', to);
-      expect(text).not.toMatch(/_gpu_min\(/);
-      expect(text).toMatch(/\bmin\(1\.0, u \/ 0\.35\)/);
+      expect(shaderOf(make('real<-1..1>'), ['Sin', ['f', 'x']], to)).toMatch(
+        /_gpu_sin\(/
+      );
     }
   );
 

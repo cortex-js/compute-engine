@@ -14,8 +14,9 @@
  * accepts an array, a JavaScript `Set` or a numeric typed array at run time
  * and throws for any other value. `Sum`, `Product`, `Max` and `Min` read a
  * single number as a collection of one element where the interpreter accepts
- * one (a type with a number arm). An omission-capable `collection<any>`
- * needs a narrower numeric annotation before compilation. `Max` and
+ * one (a type with a number arm). Over a `collection<any>`, an element can
+ * be a number or a list, so these operators decline: the operand needs a
+ * narrower annotation, such as `collection<real>`. `Max` and
  * `Min` also throw for an element that is not a real number. Operators that
  * read positions or order (`At`, `Reverse`) still refuse a declared abstract
  * collection, and a dictionary is refused by all.
@@ -77,15 +78,12 @@ function expectUnsettledDecline(body: unknown, type: string, expected: unknown) 
 }
 
 describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', () => {
+  // An element typed `any` can be a number or a list, and the interpreter
+  // adds two lists element by element. The compiled sum would have to test
+  // the shape of each element at run time, so it declines.
   test.each(['collection', 'collection<any>'])(
-    '%s cannot prove omission-free numeric reduction',
-    (type) => {
-      expect(() =>
-        compile(lambda(new ComputeEngine(), ['Sum', 'w'], type), {
-          fallback: false,
-        })
-      ).toThrow(/Nothing/);
-    }
+    'Sum over a %s declines with the code unsettled-shape',
+    (type) => expectUnsettledDecline(['Sum', 'w'], type, 6)
   );
 
   test('the example of the issue', () => {
@@ -152,10 +150,17 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
     }
   });
 
-  test('an unconstrained reducing parameter requires an omission-free contract', () => {
+  test('a reducing parameter with no declared type declines', () => {
+    // The type of `w` is inferred as `collection`: an element can be a
+    // number or a list.
     const ce = new ComputeEngine();
     const expr = ce.box(['Function', ['Sum', 'w'], 'w']);
-    expect(() => compile(expr, { fallback: false })).toThrow(/Nothing/);
+    const c = compile(expr);
+    expect(c.success).toBe(false);
+    expect(c.diagnostic?.code).toBe('unsettled-shape');
+    const fn = c.run as unknown as (w: unknown) => unknown;
+    expect(fn([3, 1, 2])).toBe(6);
+    expect(ce.box(['Sum', ['List', 3, 1, 2]]).evaluate().re).toBe(6);
     expect(ce.box(['Sum', 4]).evaluate().re).toBe(4);
   });
 
@@ -348,14 +353,16 @@ describe('MAX/MIN OF AN INFERRED COLLECTION PARAMETER', () => {
     ['Count(a, p) + Max(a, 7)', ['Add', ['Count', 'a', P], ['Max', 'a', 7]], 9],
   ];
   for (const [label, body, expected] of CASES)
-    test(`h(a) := ${label} needs numeric annotation to exclude omission`, () => {
+    test(`h(a) := ${label} needs a numeric annotation`, () => {
       const ce = new ComputeEngine();
       ce.box(['Assign', 'h', ['Function', body, 'a']] as any).evaluate();
       expect(ce.box('h').type.toString()).toBe(
         '(a: collection<any>) -> number'
       );
+      // An element of `collection<any>` can be a collection, which
+      // `Max` and `Min` would read as a number.
       expect(() => compile(ce.box('h'), { fallback: false })).toThrow(
-        /Nothing/
+        /an element of the data is a collection/
       );
       const numeric = ce.box([
         'Function',
@@ -408,18 +415,34 @@ describe('A PARAMETER DECLARED `collection<real> | real`', () => {
     });
 });
 
-describe('omission-capable abstract numeric aggregate inputs', () => {
-  test.each(['Max', 'Min', 'Sum', 'Product'])(
-    '%s refuses a collection<any> alternative',
-    (op) => {
-      const ce = new ComputeEngine();
-      ce.declare('f', '(collection<any> | number) -> number');
-      ce.assign('f', ce.box(['Function', [op, 'xs'], 'xs']));
-      expect(() => compile(ce.box('f'), { fallback: false })).toThrow(
-        /Nothing/
-      );
-    }
-  );
+describe('numeric aggregate inputs with a collection<any> alternative', () => {
+  // An element of `collection<any>` can be a collection, which `Max` and
+  // `Min` would read as a number: they decline.
+  test.each(['Max', 'Min'])('%s declines', (op) => {
+    const ce = new ComputeEngine();
+    ce.declare('f', '(collection<any> | number) -> number');
+    ce.assign('f', ce.box(['Function', [op, 'xs'], 'xs']));
+    expect(() => compile(ce.box('f'), { fallback: false })).toThrow(
+      /an element of the data is a collection/
+    );
+  });
+
+  // An element of `collection<any>` can be a number or a list, and the
+  // interpreter adds two lists element by element. The compiled fold would
+  // have to test the shape of each element at run time, so it declines.
+  test.each([
+    ['Sum', 14],
+    ['Product', 54],
+  ] as const)('%s declines with the code unsettled-shape', (op, list) => {
+    const ce = new ComputeEngine();
+    ce.declare('f', '(collection<any> | number) -> number');
+    ce.assign('f', ce.box(['Function', [op, 'xs'], 'xs']));
+    const c = compile(ce.box('f'));
+    expect(c.success).toBe(false);
+    expect(c.diagnostic?.code).toBe('unsettled-shape');
+    expect(ce.box(['f', ['List', 3, 9, 2]]).evaluate().re).toBe(list);
+    expect(ce.box(['f', 4]).evaluate().re).toBe(4);
+  });
 });
 
 describe('MAX/MIN OF A DICTIONARY IN THE INTERPRETER', () => {

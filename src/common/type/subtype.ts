@@ -2761,6 +2761,47 @@ export function provablyAdmits(
   return isSubtype(marker, t);
 }
 
+/**
+ * Whether the type `t` has an explicit `nothing` arm: `t` is `nothing`, a
+ * union with a `nothing` member, or a transparent alias or a
+ * `broadcastable<T>` whose definition or element type has such an arm.
+ * `any` and `unknown` give false: they admit every value, but they do not
+ * state that the value can be `Nothing`. This is the difference with
+ * `provablyAdmits('nothing', t)`, which is true for `any`.
+ *
+ * The compiler reads this test. Compiled code produces `Nothing` only from
+ * the symbol `Nothing` read as a value or from a statement read as a value,
+ * and both decline where they occur. A `Nothing` that the host supplies for
+ * an input typed `any` is a value outside the type of the input, and the
+ * compiled result is then unspecified. So only an explicit arm makes the
+ * compiler decline.
+ *
+ * The test does not look inside a collection: the caller asks it of the
+ * element type or of each slot type. A recursive alias is opened once on
+ * each descent, as in `provablyAdmits()`.
+ */
+export function hasNothingArm(
+  t: Type | TypeString,
+  seen?: ReadonlySet<unknown>
+): boolean {
+  if (typeof t === 'string' && !PRIMITIVE_TYPES_SET.has(t as PrimitiveType))
+    t = parseType(t);
+  if (t === 'any' || t === 'unknown') return false;
+  if (typeof t === 'object') {
+    if (t.kind === 'union')
+      return t.types.some((arm) => hasNothingArm(arm, seen));
+    if (t.kind === 'broadcastable') return hasNothingArm(t.elements, seen);
+    if (isTransparentAliasReference(t)) {
+      const decl: unknown = declarationOf(t) ?? t;
+      if (seen?.has(decl)) return false;
+      const def = aliasDefinitionAt(t);
+      if (def !== undefined && def !== t)
+        return hasNothingArm(def, new Set(seen).add(decl));
+    }
+  }
+  return isSubtype('nothing', t);
+}
+
 /** Return true if lhs is a subtype of rhs */
 export function isSubtype(
   lhs: Type | TypeString,

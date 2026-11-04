@@ -42,7 +42,8 @@ export const UNION_DISPATCH_CODE = 'union-dispatch';
 /**
  * The `code` of the decline of a value that can be `Nothing` where compiled
  * code needs a value: an element of a collection or a coordinate of a tuple
- * whose static type admits `nothing` (`assertNoNothingElement()`,
+ * whose static type has an explicit `nothing` arm (`hasNothingArm()`; `any`
+ * has no such arm) (`assertNoNothingElement()`,
  * `compile-inner.ts`), the operand of `IsMissing`, `Coalesce` or
  * `AssertPresent`, the value of an entry of a dictionary literal, and the
  * symbol `Nothing` read as an operand. `Nothing` is the value of an empty

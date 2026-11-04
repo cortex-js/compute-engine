@@ -2692,6 +2692,224 @@ on the same commit; staged, not committed).
   (`assertBooleanOrAbsentCondition()`) applies only to a target that sets
   `assertBoolean`; Python and the shader targets do not.
 
+The result of step 4, row 9 (the GPU finite proofs, with part 2, the
+explicit `nothing` arm; 2026-11-04, session compute-engine-d0; worked on
+`2843a5a12896e61ddd4e5af3d7f154fa7922e1f1` in `/tmp/wt-compute-engine-d0` by
+two implementers, one after the other, then moved onto
+`85aa7d2ce71534ae61d8bad05d099336a2dfc2fe` (CE-610, CE-803, CE-802) in
+`/tmp/wt-compute-engine-d0b`, where the review fixes were made; applied to the
+main tree on that commit; staged, not committed).
+
+- **The survey of `gpu-finite-proof.ts`, by kind.** Kind (1), kept: the
+  constants `GPU_F32_MAX`, `GPU_F32_BOUNDED_HEADS`, `gpuFiniteRealCells`,
+  `gpuProvablyFinite` (without the budget wrapper), and the inner functions
+  of `gpuFiniteProof` (`gpuFoldedValue`, `isMapped`, `bakedValue`, `finite`,
+  `magnitude`, `productStaysFinite`, `sumStaysFinite`,
+  `quotientStaysFinite`, `modStaysFinite`, `smallPowerStaysFinite`,
+  `reciprocalPowerBound`, `powerBaseMagnitude`, `productBound`,
+  `atomBound`, `isExactRationalDivisor`, `range`), each without its read of
+  the parameter facts; `lowerMagnitude` without its `cos` branch. Kind (2),
+  removed: `userCall`, `GPUCallFact`, `withUserCallBudget`,
+  `GPU_USER_CALLS_IN_PROOF`, `GPU_USER_CALL_BUDGET`,
+  `GPU_USER_CALL_PROOFS_PER_ROOT`, `GPU_USER_CALL_FACTS`,
+  `gpuSameProofContext` (the proofs of the bodies of user functions);
+  `GPUParameterFact`, `GPU_CALL_SITE_FACTS`, `gpuDefinitionParameterFacts`,
+  `gpuReboundNames` and the parameter part of `gpuRecordCallSiteFacts` (the
+  call-site and definition-parameter facts); `gpuLoopIndexFacts`,
+  `gpuLoopIndexFact`, `gpuLiteralLoopIndexFact` (the loop-index facts); the
+  `cos` branch of `lowerMagnitude` and `GPU_TRIG_ERROR`. In each removed
+  case the guard site already calls the helper when `gpuProvablyFinite` is
+  false, so an argument that only a removed rule proved now gets the helper;
+  no call declines. `CompileTarget.gpuParameterFacts` lost every reader and
+  is removed, with its writers in `gpu-functions.ts` (two loop lowerings)
+  and `gpu-shader-target.ts` (CHANGELOG "Breaking changes"). Kept although
+  listed as kind (2): the written-names walk, renamed
+  `gpuRecordWrittenNames` (it collects the targets of `Assign` and
+  `Declare`): it is a restriction on reading a declared type, not a derived
+  fact; without it `w ≔ exp(x); sin(w)` would get the built-in from the
+  declared type of `w`. `isAmplifiedTrig` (`gpu-exact-trig.ts`) stays: the
+  proof reads it so that the `Fract` and `Mod` bound rules give no bound to a
+  sine hash, and the exact-trig lowering reads it too.
+- **The declaration that restores the built-in.** The host rule names "the
+  result type of a function with a range", which no rule implemented once
+  the body proofs were gone. Added: `declaredUserCallBound` (with
+  `rangeBound`): a call of a user function is finite when the host declared
+  its result type (not inferred), that result type is read from the declared
+  signature (a value definition's type, an operator definition's
+  signature), it has a range with two finite bounds inside f32, and the
+  arguments are proven finite; the range is read as the magnitude, so
+  `sin(1000·f(x))` with `f: (real) -> real<-1..1>` gives
+  `sin(1000.0 * _fn_f(x))`. A result type with no range (`(real) -> real`)
+  keeps the helper: the body is computed in f32 and `exp(u)` overflows. A
+  function declared with the bare type `function` keeps the helper, also
+  when the engine infers a ranged result type from its body (review
+  finding). The only helper-to-built-in change is a body whose f32 value
+  leaves its declared range, a value outside its type (unspecified by the
+  caveats).
+- **Part 2, the explicit `nothing` arm** (the decision recorded in the
+  choices of row 7, "Replaced later the same day"). One helper,
+  `hasNothingArm()` in `src/common/type/subtype.ts` beside
+  `provablyAdmits()` (unchanged): it walks union arms, `broadcastable<T>`
+  and aliases as `provablyAdmits` does, and gives false for `any` and
+  `unknown`. It replaces every `provablyAdmits('nothing', …)` of the
+  compiler: `assertNoNothingElement()` (`compile-inner.ts`), the dictionary
+  value and `IsMissing` (`compiler-core.ts`), `Coalesce`
+  (`compile-expr-handlers.ts`), `AssertPresent`
+  (`compile-conditionals.ts`). The two producer sites (the symbol `Nothing`
+  read as an operand, a statement read as a value) keep their declines.
+  For `Map`, `Tabulate` and `Scan` the check reads the result type of the
+  callback (`functionResult()`), not the result type of the operation:
+  the interpreter's type of `Map` adds a `nothing` arm itself when the
+  callback result is `any` (`withMapOmission()` in `collections.ts`), and
+  reading it kept the two `plausible` declines. Results:
+  `Map(g, P)` with `g := p ↦ Norm(p)` gives `[5, 2.236…]`; Epsil
+  `let h = (k) => k + 1; map(h, 1..3)` gives `[2, 3, 4]`; `(u ↦ 7)(P)`
+  gives `[7, 7]`; `Apply(u ↦ Norm(u), P)` and `Map((t: any) ↦ 2t, [1, 2])`
+  give the interpreter's values; `k(PointList(x, y))` with
+  `k: (unknown) -> number` compiles. Removing the `any` decline exposed a
+  fold whose shape is not settled (review finding, Codex): `Sum(w)` with
+  `w: collection<any>` compiled to a per-element `Array.isArray` test, which
+  R3 forbids. Added `assertSettledFoldElements()` (`compile-admission.ts`,
+  called from `compileExpr`): a `Sum` or `Product` of one collection, or a
+  `Reduce` or `Scan` by `Add` or `Multiply`, whose element type is `any`
+  declines with `unsettled-shape` on every target. The same fold over
+  `unknown` elements, a number-or-collection union, or a source typed `any`
+  compiled before this row and still compiles with that test; Tycho row 425
+  depends on it, so it is ROADMAP CE-805 (`decision needed`).
+- **Code lines** (`.ts`, not blank, `//`, `/*` or `*`): `compilation` 89,924
+  → 89,470 (−454) for part 1 on `2843a5a12`; 89,963 → 89,568 (−395) for the
+  whole row on `85aa7d2ce` (part 1 −454, part 2 +5, the review fixes +54:
+  the fold decline and the declared-range bound). Source: 12 files, 352
+  insertions, 933 deletions.
+- **Tests.** No test file deleted, no snapshot changed. Part 1:
+  `ce-565-4-gpu-parameter-finite` rewritten (a parameter keeps the helper;
+  new tests of a ranged result type, of the bound it gives a product, of
+  `(real) -> real` with `exp`, and of a bare `function` with a `Fract` body,
+  which keep the helper); `ce-480-loop-index-argument-finite` rewritten (the
+  kelvin-wake form, the quotient by `cos(θ(j))²`, the product by
+  `cos(u)^{-2}` and the call of `f` expect the helper; seven cases that
+  pinned a detail of a removed rule are deleted: degree mode, an inner sum
+  that binds the index again, a callee that binds its parameter again,
+  nesting deeper than 8, the fast compile of nested calls, a rational
+  divisor in a callee, a parameter bound read through a call site);
+  `ce-526-shader-finite-guard` and `compile-folded-value-angular-unit`
+  expect the helper; `ce-565-shader-finite-proof` comment only. The kind (1)
+  tests (`ce-565-6-small-power-finite`, `ce-619-gpu-finite-proof-overflow`,
+  `compile-gpu-extremum`, `compile-gpu-shape-gate-holes`) are unchanged.
+  Part 2: back to their form at `0c201d2e9` (value tests):
+  `compile-complex-point-argument`, `compile-point-untyped-parameter`,
+  `compile-python-collection-at-scalar-parameter`, `compile.test`,
+  `compile-block-local-function`, `tuple-of-lists-as-point-list`,
+  `ce-712-2-review-round2`, `block-scope-capture`;
+  `map-omission-inference` value tests for the `any` cases, decline tests
+  for the explicit arms. Not changed, since their row 7 change is a
+  condition decline: `ce-569-when-defects`, `compile-admission`,
+  `function-body-local-assignment`. Seven more files tested an `any` value
+  that declined and now compiles or declines by another rule (each checked
+  against the interpreter): `absence-discharge` (an `any` input declines
+  with `untyped-input`), `accessor-proven-length-type`,
+  `compile-extremum-collection-operand` (the `any` folds decline with
+  `unsettled-shape`), `compile-userfn-result-shape`,
+  `raw-view-producer-omission`, `recursive-list-builder-compile`,
+  `tycho-item-332-untyped-program-compile`,
+  `tycho-item-218-compile-multi-collection-map`.
+- **The corpus measure** (Tycho frozen at `a34405ae0`, the copy of rows 1
+  to 7, a plain `git archive`; tycho-desk confirmed the commit and had no
+  base run; records keyed by MathJSON). Base runs on `2843a5a12` and on
+  `85aa7d2ce` (identical helper counts), candidate on part 1 and 2 before
+  the review, final run on the final source: 17,825 compiles, 13,707 keys,
+  77,267 values in every run; 0 changed values, 0 new throws; declines
+  javascript 47, glsl 44, interval-js 61, none new, none gone, and no
+  record gains a compile. **The helper count** (successful GLSL records
+  whose code or preamble calls a guarded helper; `compare.mjs` counts only
+  `_gpu_sin(` and `_gpu_cos(`, so the count was extended to `_gpu_max(`,
+  `_gpu_min(`, `_gpu_clamp(` with a script of this session): 540 records in
+  102 documents → 713 records in 136 documents (`sin` 334 → 488, `cos`
+  345 → 497, `max` 121 → 140, `min` 69 → 76, `clamp` 0 → 0;
+  `compare.mjs`'s own count, sin or cos: 416 in 66 → 586 in 104). By key
+  (target, document, row): 100 keys gain a helper, none loses one, in 44
+  documents: `neyret/g91gh9zpcr` 11, `neyret/gwqx9ckx7h` 11,
+  `neyret/bpnkluuy7y` 7; 3 each in `neyret/7fz4ugr5wz`, `bi0xqfjz6i`,
+  `drvgednvrn`, `jsdx9qnaed`, `mh3zmxzi85`, `ouiqgatshs`, `pqflulcixs`,
+  `t3sr6vkzjh`, `wib5jiiddl`, `zjhaoqoufo`; 2 each in
+  `showcase/underwater-caustics` and `neyret/2lzec8zwrz`, `d2tqgiqgzv`,
+  `erwlgvbuno`, `m7oc1p6cys`, `navigpkypz`, `ouizn62uo8`, `rccfsvo93r`,
+  `rw6bgiznly`, `ybnaggvqb6`; 1 each in `showcase/kelvin-wake` and 20 more
+  `neyret` documents. These counts are for Tycho `a34405ae0`: later Tycho
+  commits (`2930172d1`, `f199c5a67`) change the declarations that Tycho
+  passes, so current Tycho can differ. Tycho row 488: its instrument
+  (`scripts/repros/2026-11-01-ce488-floor-operand-size-repro.mts`, run
+  against both builds) gives the same reading on the base and the final
+  tree: `floor` and `fract` call the built-in `sin`; the `mod` case prints
+  "guarded" because it matches `_gpu_fmod`, which is not a NaN guard, and
+  its `cos` is the built-in. No edit to Tycho's document.
+- **Review**: Claude and Codex, two rounds, then stopped. Round 1: Codex,
+  one medium (the `any` fold above, fixed); Claude, one medium (a bare
+  `function` declaration gave the inferred range, fixed), one low (a nested
+  `nothing` from a declared input in a `Map` callback: the interpreter keeps
+  the `Nothing`, compiled code gives `undefined` in its place, an allowed
+  difference with a `crafted` witness, not recorded), one nit (the
+  `isOverriddenOperator` test, fixed). Round 2 on the fix delta: Codex, one
+  medium (the `unknown` fold keeps its run-time test): answered with CE-805
+  and with the comment and `COMPILATION-MODEL.md` sentence that state it as
+  an open defect; Claude, one low (`Sum(g(x))` with `g: (real) -> any`,
+  `crafted`, the same older mechanism): folded into CE-805.
+- **Checks.** In the worktrees: typecheck, `oxlint` on the changed source
+  files, `check:deps`, the 239 GPU test files (part 1), 141 files (part 2),
+  69 files (review fixes), `test:core` after each part. In the main tree on
+  the final source (which adds a peer's hunks in `compile-inner.ts`):
+  typecheck, 50 test files (2,979 passed). Not run: the full suite (the
+  nightly run covers it), `npm run test:python` (the only Python-relevant
+  test file ran with `CE_PYTHON` set: 57 passed).
+- **Documents.** `docs/COMPILATION-MODEL.md`: the host rule for a guarded
+  call (beside the caveat on a non-finite value for an input declared
+  `real`), the section on the NaN-safe helpers (its list of derived facts
+  and the `cos` error paragraph replaced by the host rule), the explicit-arm
+  rule, the `any` fold decline and the CE-805 sentence under R3.
+  `docs/ERROR-MODEL.md` §6: the explicit-arm rule. CHANGELOG `[Unreleased]`:
+  one Breaking changes entry (`gpuParameterFacts`), one Behavior Changes
+  entry for the GPU proof, the `Nothing` entry rewritten.
+  `~/dev/cortexjs.io/docs/compute-engine/13-guide-compile.md`, "Non-Finite
+  Results": the host rule, with the row 488 example and the ranged result
+  type.
+- **Choices, each reversible.** (1) `declaredUserCallBound` added, so that
+  the documented declaration restores the built-in; the alternative is no
+  rule, and the documentation then says that no declaration restores it for
+  a call. (2) The written-names walk kept; the alternative removes it and
+  lets a written name use its declared type (values change). (3) A
+  function's parameter is not read as finite, also with a ranged signature
+  (the engine types a parameter of the body `number`); the documentation
+  says "inputs and declared result types". (4) The `Map`/`Tabulate`/`Scan`
+  check reads the callback's result type; the alternatives are to keep the
+  operation's type (the two `plausible` declines stay) or to change
+  `resultMayBeNothing()` in the interpreter (changes interpreter types).
+  (5) The fold decline covers only `any` elements, on every target; the
+  wider decline is CE-805. (6) The Python `Reduce`/`Scan` by `Add` over
+  `list<any>` declines as it did before part 2, although Python has no
+  run-time shape test there; the alternative is a decline in the
+  JavaScript lowering only.
+
+The record of step 4. `compilation` had 92,764 code lines on `1359a1279`
+(row 1's base) and 89,568 at the end of row 9 (−3,196). The rows removed
+60, 1,298, 151, 740, 151, 1, 201, 0 (row 8 is empty) and 395 lines, 2,997
+in all; the other commits of the same days account for the rest. Rows 1, 3,
+5, 6 and 9 removed much less than the table's module counts: the table named
+whole modules, and most of each serves a rule that stays — row 1, the
+rank-2 code that 3.3 left was small and `compile-match.ts` stays for
+`Match`; row 3, the admission check serves R1, R3 and the effect declines,
+and the static-shape modules choose a shape or are the binding dispatch;
+row 5, the function-value modules serve fully applied calls and literal
+callbacks, which stay; row 6, the lane modules serve `strict`, the only
+discipline, and `auto` had gone in step 3; row 9, the bound arithmetic of
+kind (1) is most of the proof module. What a later contraction could take,
+not done here: the run-time fold test of CE-805 (if the user takes option
+(a)); `predicateResult`'s non-boolean throw and the condition-cell throw
+of `_SYS.select` (kept by row 7); the exports of `compile-absence.ts` and
+`absent-tuple-read.ts` (each has a reader, row 7); the facade of
+`base-compiler.ts` (step 4 of `docs/plans/2026-10-30-split-base-compiler.md`);
+the lazy-view records of `lazy-view-context.ts` (an interpreter change that
+row 5 proposed).
+
 ## 5. The growth guard (done 2026-11-02, commit 97c3d409a)
 
 Two numbers per commit in the nightly run, kept with its result: the code
