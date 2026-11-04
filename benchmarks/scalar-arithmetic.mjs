@@ -48,6 +48,9 @@ assert(Number.isInteger(iterations) && iterations > 0);
 assert(global.gc, 'Use --expose-gc');
 
 const formulas = {
+  // Isolate addition after assigned symbols become number literals.
+  sum: ['Add', 'a', 'b', 'c'],
+  dag: ['Add', ['Multiply', 'a', 'b'], 'c'],
   muladd: ['Add', ['Multiply', 'a', 'b'], 'c'],
   rational: ['Divide', ['Add', 'a', 1], ['Add', 'b', 2]],
   transcend: ['Add', ['Sin', 'a'], ['Ln', 'b']],
@@ -70,8 +73,16 @@ function setup(name, method, mutation) {
   if (name === 'call') ce.assign('f', ce.box([
     'Function', ['Add', ['Multiply', 'x', 'y'], 'w'], 'x', 'y', 'w',
   ]));
-  const expr = ce.box(formulas[name]);
-  assert.equal(expr.operator, name === 'call' ? 'f' : name === 'rational' ? 'Divide' : 'Add');
+  const box = () => {
+    let result = ce.box(formulas[name]);
+    // Twenty shared Max levels give 2^20 paths to one multiply-add.
+    // Its boxing phase includes construction of those levels.
+    if (name === 'dag')
+      for (let i = 0; i < 20; i++) result = ce.function('Max', [result, result]);
+    return result;
+  };
+  const expr = box();
+  assert.equal(expr.operator, name === 'dag' ? 'Max' : name === 'call' ? 'f' : name === 'rational' ? 'Divide' : 'Add');
   const FunctionCtor = expr.constructor;
   const NumberCtor = ce.number(7).constructor;
   const rawOps = [ce.number(2), ce.number(3)];
@@ -89,7 +100,7 @@ function setup(name, method, mutation) {
         ce.assign('a', a);
       } else if (mutation === 'unrelated') ce.assign('z', i);
     },
-    box: () => ce.box(formulas[name]),
+    box,
     check: (result) => {
       assert(result.isValid);
       assert.equal(result.isCollection, false);
@@ -99,7 +110,7 @@ function setup(name, method, mutation) {
         const sorted = (terms) => terms.map((term) => JSON.stringify(term)).sort();
         assert.deepEqual(sorted(tree.slice(1)), sorted([['Sin', a], ['Ln', 3]]));
       } else {
-        const expected = name === 'rational' ? (a + 1) / 5 :
+        const expected = name === 'sum' ? a + 8 : name === 'rational' ? (a + 1) / 5 :
           name === 'transcend' ? Math.sin(a) + Math.log(3) : a * 3 + 5;
         assert(Math.abs(result.re - expected) <= 1e-12 * Math.max(1, Math.abs(expected)));
         if (method === 'exact') {

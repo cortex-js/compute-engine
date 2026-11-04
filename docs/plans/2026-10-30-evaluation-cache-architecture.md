@@ -1358,3 +1358,79 @@ A future recovery comparison should retain these constructor controls, separate
 input boxing from evaluation, compare first and warm calls, and measure shipped
 bundles. Include repeated moderate drift across representative flows alongside
 catastrophic-slowdown guards. No runtime optimization or cache redesign is made here.
+
+
+## 13. Scalar addition dispatch experiment (2026-11-03)
+
+### 13.1 Candidate and measurement
+
+The production baseline is `ca6304756` (the released engine plus the documentation
+fix). This rebaseline includes the intervening changes; it is not a comparison
+against §11's older engine. No compiler change is part of this experiment.
+
+An all-number sum still visits collection, tuple, absence and kind dispatch
+before the `Terms` fold. A six-line prototype returned directly to that same
+fold in `addArray()` and `addNEvaluated()` when every operand was a number
+literal. The numeric route's omitted `evaluate()` calls were identity operations
+on these literals; the fold and its rounding were unchanged. The candidate
+passed arithmetic, nested evaluation, shared-node and point-arithmetic checks,
+and seven focused checks for cancellation, complex/radical/rational values,
+non-finite values and single evaluation of effects. Independent reviews found
+no correctness defect. **The runtime shortcut was removed because it did not
+show a consistent performance benefit.**
+
+Both variants used `npm run build -- production`, including consumer smoke tests.
+The comparison used the shipped minified multi-entry bundle, Node v26.13.0 on
+Apple M5 Max (18 cores), macOS 27.2, machine precision and JIT off. Three accepted
+processes per variant ran before/after/after/before/before/after. Each case had
+five fresh-engine trials, 100 warmups and 600 warm calls per trial. Assignment,
+input boxing and correctness checks remained outside the evaluation timings.
+The first call uses a new engine in a loaded process, not process startup.
+
+A CPU monitor rejected attempts that overlapped heavy renderer, typechecking or
+other Node activity. Accepted runs and excluded attempts are recorded in
+[`scalar-add-dispatch-2026-11-03.json`](../../benchmarks/scalar-add-dispatch-2026-11-03.json),
+with the candidate patch, hashes and exact harness settings. New benchmark cases
+isolate a plain sum and wrap multiply-add in twenty shared `Max(r, r)` levels.
+The latter has 2^20 paths to the same leaf and exercises the shared-node memo.
+Its input-boxing phase includes building those wrappers.
+
+### 13.2 Observations
+
+All values below are medians of three process medians, in microseconds. Small
+movements are not claims of a statistically established gain or regression.
+
+| Flow | Warm before | Warm candidate | First before | First candidate |
+| --- | ---: | ---: | ---: | ---: |
+| Plain sum, exact | 7.19 | 7.34 | 77.13 | 74.42 |
+| Plain sum, numeric | 8.96 | 9.00 | 84.50 | 67.54 |
+| Multiply-add, exact | 9.57 | 9.46 | 108.04 | 99.67 |
+| Multiply-add, numeric | 13.08 | 13.28 | 113.92 | 126.96 |
+| Rational, exact | 10.83 | 10.58 | 97.75 | 126.08 |
+| Shared DAG, exact | 87.94 | 86.93 | 377.08 | 369.58 |
+| Fresh function activation, exact | 29.45 | 29.79 | 272.08 | 293.79 |
+
+The fresh-activation row uses a relevant write before each warm call; assignment
+is separately timed. First-call figures also move in both directions. There is
+no consistent first/warm improvement that justifies retaining extra dispatch
+branches. The archive covers all 36 cases, including relevant and unrelated
+writes, symbolic evaluation, ordinary calls and input boxing.
+
+Uninstrumented multiply-add allocation sampling gives 15.55 → 15.12 kB per exact
+evaluation and 21.56 → 22.22 kB per numeric evaluation (kB means 1000 bytes).
+These are one sampled profile per case/variant over 1000 calls, including
+collected objects. They do not establish an allocation improvement and do not
+measure retained memory. Neither the number-literal constructors nor the
+`Terms` intermediate structures were removed by this prototype; less dispatch
+code executed does not imply fewer physical allocations.
+
+### 13.3 Consequence
+
+Keep the plain-sum and shared-DAG controls, and retain the generic runtime
+implementation. Skipping these dispatch predicates alone is not a demonstrated
+recovery step. A later experiment should target work that is actually allocated
+or rebuilt: evaluation thunks or the intermediate structures of the numeric
+fold, with a fresh profile to choose one. Removing a `Terms` intermediate or an
+evaluation closure layer changes more of the implementation than the shortcut
+measured here and needs its own correctness and performance comparison. This
+result supplies no new reason to unify caches or introduce finer invalidation.

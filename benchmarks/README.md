@@ -624,8 +624,9 @@ across quiet runs would be a separate task.
 
 ## Scalar arithmetic (`scalar-arithmetic.mjs`)
 
-Separates preboxed evaluation, assignment and boxing for multiply-add, rational
-and transcendental arithmetic, plus a pure function wrapper. Each exact/numeric
+Separates preboxed evaluation, assignment and boxing for a plain sum,
+multiply-add, rational and transcendental arithmetic, plus a pure function
+wrapper and a shared expression DAG. Each exact/numeric
 case runs with unchanged, relevant-write and unrelated-write inputs. Fresh-engine
 calls share a loaded runtime; they are not process startup. Validation is outside
 the timers. Relevant writes use unique values after warmup. Hold the box lock and
@@ -677,3 +678,16 @@ input-boxing phase in ordinary timing mode. Boxing CPU profiles accept only exac
 unchanged selectors; they exclude assignment. Evaluation profiles include it for
 reactive cases. See evaluation-cache architecture §12 and
 `boxing-construction-2026-11-03.json` for the follow-up evidence and limits.
+
+
+The `sum` case isolates addition after assigned symbols become number literals.
+The `dag` case wraps the multiply-add in twenty `Max(r, r)` levels, sharing the
+same child object at each level. Its mathematical value is the multiply-add's;
+its 2^20 paths check that shared-node evaluation remains bounded. Its boxing
+phase includes building the twenty wrappers, so compare its timings only with
+the same case. Both cases use the existing first/warm, write and numeric modes.
+
+The rejected all-number dispatch experiment and its production measurements are
+in `scalar-add-dispatch-2026-11-03.json` and evaluation-cache architecture §13.
+The archive includes the experiment patch; it is not an optimization in the
+current engine.
