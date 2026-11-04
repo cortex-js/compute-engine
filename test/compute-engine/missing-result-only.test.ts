@@ -1011,15 +1011,10 @@ describe('A NAN POINT AT A PARAMETER WITH A DEFAULT REACHES THE BODY', () => {
 
   // A point default: the symbol `O`, declared constant. A left-out argument
   // receives `O`; a supplied `NaN` point reaches the body. Compiled code
-  // does not fill a default that names a constant that the host declares
-  // (it would read `O` by its name where the default is filled), so each
-  // compilation that fills it declines.
-  const declines = (body: unknown, params: unknown[]) => {
-    const r = compile(f.box(['Function', body, ...params] as any), {
-      to: 'javascript',
-    });
-    expect(r.success).toBe(false);
-  };
+  // fills a default that names a constant that the host declares with the
+  // constant's value, read where the function is declared (ROADMAP CE-803,
+  // user decision 2026-11-04), so each compilation gives the interpreter's
+  // value.
   f.declare('O', {
     type: 'tuple<real, real>',
     value: ['Tuple', 0, 0],
@@ -1031,13 +1026,14 @@ describe('A NAN POINT AT A PARAMETER WITH A DEFAULT REACHES THE BODY', () => {
   test('a point default: a named callback of Map', () => {
     const body = ['Map', 'g', ['At', 'qs', ['List', 1, 9]]];
     expect(f.box(body).evaluate().toString()).toBe('[1,NaN]');
-    declines(body, [QS]);
+    expect(run(body, [QS], [qs])).toEqual([1, NaN]);
   });
 
   test('a point default: an applied literal', () => {
     const body = ['Apply', G, ['At', 'qs', 'j']];
     expect(f.box(body).evaluate().json).toBe('NaN');
-    declines(body, [QS, J]);
+    expect(run(body, [QS, J], [qs, 9])).toBeNaN();
+    expect(run(body, [QS, J], [qs, 2])).toBe(3);
   });
 
   test('a point default: a named call that leaves out the argument', () => {
@@ -1052,7 +1048,11 @@ describe('A NAN POINT AT A PARAMETER WITH A DEFAULT REACHES THE BODY', () => {
     expect(
       f.box(['Apply', fn, ['Tuple', 'NaN', 'NaN']]).evaluate().json
     ).toBe('NaN');
-    expect(compile(fn, { to: 'javascript' }).success).toBe(false);
+    const r = compile(fn, { to: 'javascript' });
+    expect(r.success).toBe(true);
+    expect(r.run!([NaN, NaN])).toBeNaN();
+    expect(r.run!([3, 4])).toBe(3);
+    expect((r.run as () => unknown)()).toBe(0);
   });
 });
 
