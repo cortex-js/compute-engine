@@ -50,23 +50,22 @@ Four values mark that a value is absent. They do not behave the same way.
 
 | Value       | Meaning                                                                   |
 | :---------- | :------------------------------------------------------------------------ |
-| `nothing`   | The value of an empty block or of a statement with no value. It is kept where it is written. |
+| `nothing`   | No value at all. It is removed from argument lists and collection literals. |
 | `missing`   | A position exists, but its value is absent (R `NA`, Julia `missing`).      |
 | `Undefined` | The result is not defined.                                                 |
 | `NaN`       | A number that is not defined (Not a Number).                              |
 
-`nothing` is kept where it is written, and an arithmetic operation on it is a
-type error. `missing` keeps its position, and an arithmetic operation on it
-gives `missing`:
+`nothing` disappears where it is written. `missing` keeps its position, and an
+arithmetic operation on it gives `missing`:
 
 ```epsil
 [12, nothing, 34]
-// ➔ [12,"Nothing",34]
+// ➔ [12, 34]
 ```
 
 ```epsil
-[missing + 1, 2]
-// ➔ ["Missing",2]
+[nothing + 1, missing + 1]
+// ➔ [1, "Missing"]
 ```
 
 `isMissing` is true for `missing` and `NaN`. `Coalesce` returns
@@ -971,8 +970,7 @@ Reaching this definition therefore means the carrier was NOT consumed — the ca
 
 MathJSON `Nothing` · variable `nothing`
 
-The value of an empty block or of a statement with no value; the sole member
-of the unit type. A list keeps it as an element.
+The absence of a value; the sole member of the unit type.
 
 ```epsil
 [1, nothing, 2]

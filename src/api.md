@@ -265,21 +265,6 @@ readonly NaN: Expression;
 
 <MemberCard>
 
-##### ComputeEngine.Indeterminate {#indeterminate-1}
-
-```ts
-readonly Indeterminate: Expression;
-```
-
-The exact answer to an indeterminate form such as `0/0`: a number with
-no value. Its double value is `NaN`, but it is a different value from
-`NaN`, which is the result of a floating-point computation that failed.
-Its numeric approximation (`.N()`) is `NaN`.
-
-</MemberCard>
-
-<MemberCard>
-
 ##### ComputeEngine.PositiveInfinity {#positiveinfinity-2}
 
 ```ts
@@ -3989,7 +3974,7 @@ broadcast lowering, so it can override how a built-in operator compiles
 relational operator). It does NOT override the structural / control-flow
 heads (`Sequence`, `Sum`, `Product`, `Function`, `Declare`, `Assign`,
 `Return`, `Break`, `Continue`, `Loop`, `Comprehension`, `If`, `Which`,
-`When`, `Match`, `Block`), which have their own bespoke lowering; a handler
+`Match`, `Block`), which have their own bespoke lowering; a handler
 declared on one of those heads is ignored.
 
 ```ts
@@ -4713,7 +4698,7 @@ free?: true;
 ```
 
 Present (`true`) when the symbol is free: it has no value, it is
-not a constant, not `Undefined` and not a pattern wildcard (a name
+not a constant and not a pattern wildcard (a name
 that starts with `_`), and a scope of the current context other
 than the system scope binds it, but not as a parameter of a
 function literal, a local of a `Block` or the variable of a binder
@@ -5459,7 +5444,7 @@ isCollection?: (collection) => boolean;
 ```
 
 Optional predicate for operators whose collection-ness depends on their
-operands, e.g. `When(value, cond)`, which is a collection exactly when
+operands, e.g. `If(cond, value)`, which is a collection exactly when
 `value` is one.
 
 Returning `false` reports the expression as a scalar, as if it had no
@@ -6126,20 +6111,26 @@ of two enclosures is the enclosure of the larger ends
 
 <MemberCard>
 
-##### ArithmeticDefinition.isExact()? {#isexact-1}
+##### ArithmeticDefinition.~~isExact()?~~ {#isexact-1}
 
 ```ts
 isExact(value): boolean
 ```
 
-Whether the value `value` of this kind is exact, for the rule that an
-inexact operand turns an `Indeterminate` answer into `NaN`
-(`Max(x, Indeterminate)` is `NaN` when `x` is inexact). Absent: a value
+Whether the value `value` of this kind is exact. Absent: a value
 of the kind is exact. A measurement is never exact.
+
+The engine does not read this hook now. It is kept for compatibility
+with kind definitions that declare it.
 
 ####### value
 
 [`Expression`](#expression-5)
+
+###### Deprecated
+
+The engine does not read it: an exact form with no value
+gives `NaN`, whether its operands are exact or not.
 
 </MemberCard>
 
@@ -7121,7 +7112,7 @@ non-variadic signature.
 refusesAbsentOperandAt(i): boolean
 ```
 
-True when an absent scalar operand (`Missing`, `Undefined`) at position
+True when an absent scalar operand (`Missing`) at position
 `i` is refused at evaluation with an `incompatible-type` error naming the
 parameter's type: a declared `reject`, or the default for an operator
 with no absence behavior of its own whose parameter at `i` excludes
@@ -7146,7 +7137,7 @@ threadsConditionalsAt(i): boolean
 
 True if the `threadsConditionals` flag of
 [OperatorDefinitionFlags](#operatordefinitionflags) selects operand position `i`: a
-conditional value (`When`, `Which`) there moves out of the application at
+conditional value (a restriction, `Which`) there moves out of the application at
 evaluation. A broadcastable operator threads every position whatever this
 answers.
 
@@ -9352,7 +9343,11 @@ prettify: boolean;
 
 If true, prettify the LaTeX output.
 
-For example, render `\frac{a}{b}\frac{c}{d}` as `\frac{ac}{bd}`
+For example, render `x\cdot y^{-1}` as `\frac{x}{y}`, and
+`\frac{1}{a}\cdot\frac{1}{b}` as `\frac{1}{ab}`. A product whose only
+denominators are those of quotients with a numerator other than 1 keeps
+its factors, so that it reads back as the same expression:
+`90\frac{x}{y}` stays `90\times\frac{x}{y}`.
 
 #### SerializeLatexOptions.materialization
 
@@ -11815,7 +11810,7 @@ or a re-mapped `Add`/`Multiply`/`Power`/relational operator).
 It does NOT override the structural / control-flow heads, which have
 their own bespoke lowering: `Sequence`, `Sum`, `Product`, `Function`,
 `Declare`, `Assign`, `Return`, `Break`, `Continue`, `Loop`,
-`Comprehension`, `If`, `When`, `Match`, `Block`. A handler
+`Comprehension`, `If`, `Match`, `Block`. A handler
 declared on one of those heads is ignored.
 
 Exception: `Which` IS overridable (it has no binding structure — its
@@ -12775,21 +12770,6 @@ ImaginaryUnit
 ```ts
 readonly NaN: Expression;
 ```
-
-</MemberCard>
-
-<MemberCard>
-
-##### IComputeEngine.Indeterminate {#indeterminate}
-
-```ts
-readonly Indeterminate: Expression;
-```
-
-The exact answer to an indeterminate form such as `0/0`: a number with
-no value. Its double value is `NaN`, but it is a different value from
-`NaN`, which is the result of a floating-point computation that failed.
-Its numeric approximation (`.N()`) is `NaN`.
 
 </MemberCard>
 
@@ -15793,38 +15773,14 @@ readonly isNaN: boolean | undefined;
 ```
 
 If true, the value of this expression is a number with no value: either
-`NaN` or `Indeterminate`.
+`NaN`.
 
 `NaN` ("Not a Number", from the floating point format standard IEEE-754)
-is the result of a floating-point computation with no value, such as
-`0.0/0.0`, and the marker of an absent numeric operand. `Indeterminate`
-is the result of an exact form with no value, such as `0/0`. Both report
-`isNaN === true`; `isIndeterminate` tells them apart.
+is the result of a computation with no value, such as `0.0/0.0` or
+`0/0`, and the marker of an absent numeric operand.
 
 Note that if `isNaN` is true, `isNumber` is also true (yes, `NaN` is a
 number).
-
-</MemberCard>
-
-<MemberCard>
-
-##### Expression.isIndeterminate {#isindeterminate}
-
-```ts
-readonly isIndeterminate: boolean;
-```
-
-If true, this expression is the `Indeterminate` number literal
-(`ce.Indeterminate`): the exact answer to an indeterminate form such as
-`0/0`, a number with no value.
-
-Its double value is `NaN`, so `isNaN` is also true. It differs from the
-`NaN` literal, which is the result of a floating-point computation that
-failed: the two are different values (`isSame` is false between them).
-A numeric approximation (`.N()`) of `Indeterminate` is `NaN`.
-
-`false` for every other expression, including an unevaluated expression
-whose value would be `Indeterminate`.
 
 </MemberCard>
 
@@ -17372,7 +17328,7 @@ Notes:
 getInterval(symbol): IntervalBounds | undefined
 ```
 
-For an expression representing a domain restriction (a `When` whose
+For an expression representing a domain restriction (a restriction whose
 condition is a comparison or `And` of comparisons over `symbol`, or
 a bare comparison expression), return the lower/upper bounds for
 `symbol`. Returns `undefined` if no bounds can be extracted.
@@ -17381,9 +17337,9 @@ Supported shapes:
 - Bare comparisons: `a < x`, `x < b`, etc.
 - Chained comparisons: `a < x < b` (parsed as `Less(a, x, b)`)
 - `And(c1, c2, ...)` where each `ci` is a supported shape
-- `When(e, cond)` — operates on `cond`
-- `Multiply(f, When(...), ...)` — the Desmos parse shape for
-  `f(x)\{a < x < b\}`; bounds from each `When` factor are merged
+- `If(cond, e)` — operates on `cond`
+- `Multiply(f, If(...), ...)` — the Desmos parse shape for
+  `f(x)\{a < x < b\}`; bounds from each restriction factor are merged
 
 `lowerStrict`/`upperStrict` are `true` for strict (`<`, `>`) bounds
 and `false` for non-strict (`≤`, `≥`).
@@ -21728,30 +21684,6 @@ object identity is not a reliable test.
 
 </MemberCard>
 
-<MemberCard>
-
-### INDETERMINATE\_VALUE {#indeterminate_value}
-
-```ts
-const INDETERMINATE_VALUE: Readonly<{
-  indeterminate: true;
-}>;
-```
-
-The value carried by the type of the `Indeterminate` literal: the exact
-answer to an indeterminate form (such as `0/0`), a number with no value.
-Its double value is `NaN`, like the IEEE `NaN` literal, but the two are
-DIFFERENT values: `NaN` is the result of a floating-point failure and
-`Indeterminate` the result of an exact computation. A JavaScript `NaN`
-cannot tell them apart, so this frozen tagged object is the value of the
-`Indeterminate` value type. It widens to `nan`, like the `NaN` value
-type. Test for it with [`isIndeterminateValue`](#isindeterminatevalue), which reads the
-TAG, for the reason given for [`COMPLEX_INFINITY_VALUE`](#complex_infinity_value).
-
-Provenance: `docs/plans/2026-09-28-indeterminate-value.md`.
-
-</MemberCard>
-
 ----
 
 <MemberCard>
@@ -21764,24 +21696,6 @@ function isComplexInfinityValue(v): v is Readonly<{ complexInfinity: true }>
 
 True if `v` is the [`COMPLEX_INFINITY_VALUE`](#complex_infinity_value) sentinel, i.e. the
 value of the `~oo` value-literal type. Reads the tag, never the identity.
-
-##### v
-
-`unknown`
-
-</MemberCard>
-
-<MemberCard>
-
-### isIndeterminateValue() {#isindeterminatevalue}
-
-```ts
-function isIndeterminateValue(v): v is Readonly<{ indeterminate: true }>
-```
-
-True if `v` is the [`INDETERMINATE_VALUE`](#indeterminate_value) sentinel, i.e. the
-value of the `Indeterminate` value-literal type. Reads the tag, never the
-identity.
 
 ##### v
 

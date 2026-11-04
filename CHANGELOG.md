@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.178.0 _2026-11-03_
 
 This is the language release. It narrows the language that compiled code
 accepts, and it changes some results of the interpreter, so it has breaking
