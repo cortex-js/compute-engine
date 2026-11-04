@@ -2252,6 +2252,141 @@ committed).
   partial-application lowering, the function-typed variable references)
   was touched.
 
+The result of step 4, row 5 (function values; 2026-11-04, session
+compute-engine-40; base `882252b22554fa95ba2d2ce7c0b4b1479e4606fa`; worked
+in `/tmp/wt-compute-engine-40` by one implementer; applied to the main tree
+on `8e9c12ea5`, whose one new commit changes only the Epsil formatter and
+`CHANGELOG.md`; staged, not committed).
+
+- **The survey.** A counter at the entry of each candidate (removed after),
+  the 658 test files that call `compile` and name `Apply`, `Function`,
+  `Map`, `Filter`, `Sort`, `Fold`, `Reduce`, `Derivative` or a local
+  function, and 32 direct compilations on `javascript`, `glsl`, `wgsl`,
+  `interval-js` and `python`, compared with the same compilations on the
+  base. Removed, with the decline that comes first:
+  - The run-time call of a reassigned local function. In
+    `tryCompileLocalFunctionCall` (`compile-user-functions.ts`) the check of
+    a rebound name now comes first, before the lookup in `localFunctions`,
+    and it declines with "…its value is a function value known only at run
+    time, which compiled code does not call". The branches after it never
+    ran: the throw of the entry's `decline`, the guards of the default
+    completion, of the constant fold and of the body inlining, and two
+    `rebound` throws (a one-point call, a tuple bound whole). Example:
+    `Block(Declare(k, function, x ↦ x + 1), Assign(k, (x, y) ↦ x + y),
+    k(u))` declines on JavaScript, interval-js and Python; GLSL and WGSL
+    decline before it on the function literal. A rebound name with no
+    scope entry, which went on to the engine lookup before, now declines
+    there too (no test or corpus record reaches it).
+  - In `reboundLocalNames` (`compile-loops.ts`): the three specific
+    reasons (the values have different signatures; a value is not a
+    function literal; the call does not return a function literal on every
+    path), the `literal`, `literals` and `decline` fields of each entry, the
+    `writes` map and the `values` and `writers` records. The result is the
+    set of names (`ReadonlySet<string>`); `ReboundFunctionLocals`
+    (`compiler-types.ts`) is gone. `reboundFunctionScope` keeps only the
+    names, and `noteLocalFunction` no longer puts the literal of a rebound
+    name in `localFunctions`.
+  - The `callable` branch of `callbackExcludesNothing()`
+    (`compile-inner.ts`) that read the literals of a rebound name: it now
+    answers "cannot prove" (`false`), and any use of the name declines in
+    `assertNoFunctionValue()`.
+
+  Kept, with the compiled input that reaches it:
+  - `partial-application.ts`, all of it (109 code lines on this base; the
+    227 of the 3.4.5 record counted `partialApplicationValue` and
+    `curriedApplication`, which `2e3ac5fd4` had already removed). What is
+    left is the declines and the typing pass of applied literals:
+    `assertNoCurriedApplication` (`Apply(Apply(Function(x + y, x, y), 1),
+    u)`, `compile-partial-application.test.ts`), `isPartialApplication`
+    with `partialApplicationValueDecline` on JavaScript, Python and
+    interval-js (`Apply(Function(x + y, x, y), 1)`), the GPU
+    `partialApplicationDecline`, and `rewritePartialApplications`
+    (`issue-498-applied-literal-parameter-type.test.ts`). Its callers in
+    the targets are unchanged.
+  - The set of names of `reboundLocalNames`, with
+    `returnedFunctionLiterals` (`compile-conditions.ts`): in `const mk =
+    (n) => (x) => x + n; let a = mk(2); a(1)` the name `a` is in the set
+    only through the rule "bound from a call that returns a function"
+    (`compile-function-returned-by-call.test.ts`). The static type of a
+    call of a block-local function does not show a function, so
+    `assertNoFunctionValue()` alone does not decline it. The set is the
+    same as before.
+  - The rebound-operand decline of `assertNoFunctionValue()` (reached), the
+    Reduce-combiner test of a rebound name in `javascript-target.ts` (not
+    reached; kept because `callbackLiteral()` falls back to the engine
+    definition when the name is not bound) and the `has()` test of
+    `compile-inner.ts` (sound, one line).
+  - The five modules of the table (`compile-callbacks.ts`,
+    `compile-user-functions.ts`, `compile-user-calls.ts`,
+    `compile-function-literals.ts`, `compile-user-specialization.ts`):
+    outside the rebound branches, no code that only a function value, a
+    curried call or a partial application reaches. Their "function value"
+    code serves `Map(f, L)` with a defined `f`, which stays.
+  - `boxed-expression/lazy-view-context.ts`, unchanged. It is interpreter
+    code: `retainScope`, `isRetainedScope`, `noteNodeScope`, `isNodeScope`
+    and `retainCallFrameOfResult` keep a call frame alive for closures and
+    lazy views, which the interpreter keeps. Its records
+    (`recordLazyViewContext`, `contextsForRead`, …) were made for CE-728,
+    the symbol default read at the call site (`ec7c7ab1c`), and also serve
+    a lazy view that outlives its loop. With the two record entry points
+    off, the 244 lazy-view and closure test files passed (15,905 tests).
+    Their removal takes about 290 interleaved lines out of
+    `function-utils.ts` and `boxed-function.ts`: an interpreter change, not
+    a compiler removal, so it is not in this row (proposed to the user as
+    its own item, not recorded in `ROADMAP.md`).
+- **Code lines** (`.ts`, not blank, `//`, `/*` or `*`): `compilation`
+  90,277 → 90,126 (−151); `boxed-expression` 83,748 → 83,748. Source: 8
+  files; with the two test files, 143 insertions and 333 deletions.
+- **Tests.** No test file deleted and no test removed; no snapshot
+  changed. Three assertions now expect the one decline of a rebound name
+  in place of a removed specific reason (two in
+  `compile-function-returned-by-call.test.ts`, one in
+  `compile-block-local-function.test.ts`, whose title lost "with the
+  reason").
+- **The corpus measure** (Tycho frozen at `a34405ae0`, the copy of rows 1
+  to 4, records keyed by MathJSON; tycho-f9 had no session to ask; base
+  run: row 4's final run `cand1` on row 4's source, whose later fixes were
+  comments). One candidate on the final source before the review fix (a
+  comment): 17,825 compiles, 13,707 keys and 77,267 values in both runs;
+  0 changed values, 0 new throws; declines javascript 47, glsl 44,
+  interval-js 61 in both, none new and none gone.
+- **Review**: Claude and Codex, one round. Codex: no finding (its
+  context note was not passed: `codex-review.sh --files` read `--note` as
+  a file name). Claude: one nit (the comment of `reboundLocalNames` on
+  when the result is empty did not name the call whose type has a
+  function member), fixed. No round 2: round 1 had no `high` or `medium`
+  finding.
+- **Checks** in the worktree (the 10 source and test files are byte for
+  byte the files applied to the main tree): `npm run typecheck`, `oxlint`
+  on the changed files, `check:deps`, the 658 test files (33,692 passed),
+  `test:core` (5,501 passed), the full suite (1,821 suites, 77,814 tests,
+  0 failed, 4,295 snapshots), the corpus measure. In the main tree:
+  `npm run typecheck`, and `oxlint` on the file of the review fix. Not
+  run: `npm run test:python` (`python-target.ts` did not change; the
+  direct Python compilations gave the base's output).
+- **Documents.** CHANGELOG, "Breaking changes": `CompileTarget.reboundFunctions`
+  is a set of names, and the `BaseCompiler` statics `reboundLocalNames`,
+  `reboundFunctionScope` and `noteLocalFunction` change signature.
+  `docs/COMPILATION-MODEL.md`: the interval-js root paragraph no longer
+  names a partial application as a function-valued root (it declines). No
+  page under `~/dev/cortexjs.io/docs/compute-engine/` describes a removed
+  mechanism (`13-guide-compile.md` and `87-reference-functions.md` state
+  the rule and its declines).
+- **Choices, each reversible.** (1) One decline reason for every call of a
+  rebound name (the alternative: keep the signature and non-literal
+  reasons, about 35 lines that serve only a message). (2)
+  `CompileTarget.reboundFunctions` became a `Set` (the alternative: keep
+  the `Map` type with empty entries, with no breaking-change entry). (3)
+  `partial-application.ts` and `lazy-view-context.ts` stay, as above.
+- **What row 6 (the complex lane by static type, with CE-751) can rely
+  on.** No lane code changed: the `auto` discipline, the promotion, the
+  `LaneMismatch` redo and the lane recording in `compile-callbacks.ts`,
+  `compile-user-functions.ts` and `compile-user-calls.ts` are as on
+  `882252b22`. A call of a rebound local function declines before any lane
+  decision, so row 6 has no run-time callee whose lane is unknown.
+  `compile-user-specialization.ts` (one body per argument shape) is
+  unchanged.
+
 ## 5. The growth guard (done 2026-11-02, commit 97c3d409a)
 
 Two numbers per commit in the nightly run, kept with its result: the code

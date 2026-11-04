@@ -691,12 +691,10 @@ export function callbackExcludesNothing(
     const local = target ? blockLocalFunction(x.symbol, target) : undefined;
     if (local !== undefined) {
       if (local !== null) return body(local);
-      const rebound = target.reboundFunctions?.get(x.symbol);
-      if (rebound !== undefined)
-        return (
-          rebound.decline === undefined &&
-          rebound.literals?.every(body) === true
-        );
+      // The value of a rebound local is known only at run time, so no
+      // literal shows its return paths (its use declines in
+      // `assertNoFunctionValue()`).
+      if (target.reboundFunctions?.has(x.symbol)) return false;
       return declaredResultSafe(x.symbol);
     }
     // A known local literal is inspectable; other enclosing bindings must

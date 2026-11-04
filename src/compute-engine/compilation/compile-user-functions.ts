@@ -2173,16 +2173,25 @@ function localLaneMismatchAt(
  * interpreter reports an error.
  *
  * A local whose value can change while its block runs
- * (`target.reboundFunctions`) is called through its run-time binding and is
- * never folded: the literal in the scope only gives its signature.
+ * (`target.reboundFunctions`) is a function value stored in a local, known
+ * only at run time. Compiled code calls a function only when the callee is
+ * a defined function, a declared function with a value or a function
+ * literal, so a call of such a local declines on every target
+ * (`docs/COMPILATION-MODEL.md`, "Function values").
  */
 export function tryCompileLocalFunctionCall(
   h: string,
   args: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>
 ): TargetSource | undefined {
-  const rebound = target.reboundFunctions?.get(h);
-  if (rebound?.decline !== undefined) throw new Error(rebound.decline);
+  if (target.reboundFunctions?.has(h))
+    throw new Error(
+      `Could not compile a call of \`${h}\`: the block-local function ` +
+        `\`${h}\` is assigned more than once or inside a nested statement, ` +
+        `or from the result of a call, so its value is a function value ` +
+        `known only at run time, which compiled code does not call. Declare ` +
+        `the function once with its value, or evaluate instead.`
+    );
   // The types of the arguments, read before the constant fold below. The
   // fold builds `Apply(literal, …args)`, and that canonicalization narrows
   // a valueless block local used as an argument to the parameter's type:
@@ -2197,31 +2206,12 @@ export function tryCompileLocalFunctionCall(
   // A call that leaves out parameters with a default value is completed
   // here with the default operands, compiled as operands written at this
   // call site, as the interpreter completes the call
-  // (`completedLiteralArguments`). A rebound local is not completed: the
-  // literal in the scope is one of its values, and another value can have
-  // other defaults, so its call must supply every parameter (the arity
-  // check below).
-  if (rebound === undefined) {
-    const completed = completedLiteralArguments(literal, args);
-    if (completed !== undefined && completed.length > args.length) {
-      for (const a of completed.slice(args.length)) argTypes.push(a.type.type);
-      args = completed;
-    }
+  // (`completedLiteralArguments`).
+  const completed = completedLiteralArguments(literal, args);
+  if (completed !== undefined && completed.length > args.length) {
+    for (const a of completed.slice(args.length)) argTypes.push(a.type.type);
+    args = completed;
   }
-
-  // A rebound local is a function value stored in a local: its value is
-  // known only at run time. Compiled code calls a function only when the
-  // callee is a defined function, a declared function with a value or a
-  // function literal, so the call declines on every target
-  // (`docs/COMPILATION-MODEL.md`, "Function values").
-  if (rebound !== undefined)
-    throw new Error(
-      `Could not compile a call of \`${h}\`: the block-local function ` +
-        `\`${h}\` is assigned more than once or inside a nested statement, ` +
-        `or from the result of a call, so its value is a function value ` +
-        `known only at run time, which compiled code does not call. Declare ` +
-        `the function once with its value, or evaluate instead.`
-    );
 
   // `["Function", body, ...params]` — one operand per declared parameter
   // after the body.
@@ -2257,23 +2247,17 @@ export function tryCompileLocalFunctionCall(
   // `mentionsCompileBoundName`, since those names have no engine value the
   // fold could evaluate through.
   //
-  // A rebound local does not fold: the literal in the scope is one of its
-  // values, not necessarily the one it holds at this call.
-  //
   // An argument that can be outside a declared parameter type fails the
   // compilation here, before the fold: the fold applies the literal, which
   // does not carry a type declared by a `Declare` statement, so `g(√2)`
   // with `g` declared `(integer) -> integer` would fold to a value where
   // the interpreter gives an error.
   localParameterChecks(h, literal, args, target);
-  const folded =
-    rebound === undefined
-      ? tryConstantFold(
-          literal.engine.function('Apply', [literal, ...args]),
-          target,
-          FOLD_OPERAND_PREC
-        )
-      : undefined;
+  const folded = tryConstantFold(
+    literal.engine.function('Apply', [literal, ...args]),
+    target,
+    FOLD_OPERAND_PREC
+  );
   if (folded !== undefined) return folded;
 
   // An argument that can be a collection, at a parameter declared
@@ -2338,10 +2322,7 @@ export function tryCompileLocalFunctionCall(
     // arguments in place of the parameters: in the body of
     // `const g = (p) => h(p)`, `h(xs)` is then compiled for a list of
     // points. CE-238.
-    const inlined =
-      rebound === undefined
-        ? bodyWithArguments(h, literal, args, target)
-        : undefined;
+    const inlined = bodyWithArguments(h, literal, args, target);
     if (inlined !== undefined) return `(${core.compile(inlined, target)})`;
     throw new Error(
       `Could not compile \`${h}\`: argument ${bareListAt + 1} is a list of ` +
@@ -2509,13 +2490,6 @@ export function tryCompileLocalFunctionCall(
         `${reason}. The '${target.language ?? 'unknown'}' target does not ` +
           `compile the function for one point.`
       );
-    // The call applies the literal, not the run-time value of the local.
-    if (rebound !== undefined)
-      throw new Error(
-        `${reason}. The function is assigned more than once, and the ` +
-          `call of the function compiled for one point applies one of its ` +
-          `values.`
-      );
     // The literal is compiled at the call, not where the local is
     // defined. A binder that encloses the call can bind a name that the
     // body reads, and it would capture that name. A recursive call in the
@@ -2598,15 +2572,6 @@ export function tryCompileLocalFunctionCall(
         `Could not compile \`${h}\`: a tuple argument at a parameter of ` +
         `the block-local function with no declared type is bound whole, ` +
         `and the compiled function maps over any array at run time`;
-      // The value of a rebound local is known only at run time, so its
-      // body cannot be written at the call.
-      if (rebound !== undefined)
-        throw new Error(
-          `${reason}. The function is assigned more than once or inside ` +
-            `a nested statement, so its value is known only at run time, ` +
-            `and the call cannot be written with the body of that value. ` +
-            `Declare the type of the parameter.`
-        );
       // The body is written at the call, not where the local is defined.
       // A binder that encloses the call can bind a name that the body
       // reads, and it would capture that name. Each bound name that the

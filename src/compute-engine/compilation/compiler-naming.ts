@@ -40,7 +40,13 @@ export function withBoundScope(
     declaredVarTypes,
     localFunctions: without(target.localFunctions),
     lexicalFunctions: without(target.lexicalFunctions),
-    reboundFunctions: without(target.reboundFunctions),
+    reboundFunctions:
+      target.reboundFunctions === undefined ||
+      !names.some((name) => target.reboundFunctions!.has(name))
+        ? target.reboundFunctions
+        : new Set(
+            [...target.reboundFunctions].filter((n) => !names.includes(n))
+          ),
   };
 }
 

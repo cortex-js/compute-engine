@@ -1165,10 +1165,9 @@ gives the same shapes: a number is the `interval` result of a point, and an
 absent value is `empty`.
 
 A root whose value is a function (a `Function` literal, a block whose value
-is one, a symbol whose value is one, a partial application) is never given
-as a function value. The result has `calling: 'lambda'`, as a root
-`Function` literal has on the JavaScript target: `run` takes the arguments
-of the function, each converted as a variable of a vars object is (a number
+is one, a symbol whose value is one) is never given as a function value.
+The result has `calling: 'lambda'`, as a root `Function` literal has on
+the JavaScript target: `run` takes the arguments of the function, each converted as a variable of a vars object is (a number
 is a point interval), and gives one of the shapes above. `x ↦ 2x` with
 `run(3)` gives `{ kind: 'interval', value: { lo: 6, hi: 6 } }`, and with
 `run({ lo: 1, hi: 2 })` the enclosure `[2, 4]`. There is no vars object, so

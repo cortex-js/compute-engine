@@ -106,9 +106,7 @@ describe('COMPILE a call of a function returned by a call', () => {
         'function mk(n) { if n > 0 { (x) => x + n } else { (x, y) => x - n } }\n' +
           'let a = mk(2)\na(1)'
       )
-    ).toThrow(
-      /value of `a` is a function returned by a call.*different signatures/
-    );
+    ).toThrow(RETURNED);
   });
 
   it('declines when the callee does not return a function on every path', () => {
@@ -117,7 +115,7 @@ describe('COMPILE a call of a function returned by a call', () => {
         'function mk(n) { if n > 0 { (x) => x + n } else { 5 } }\n' +
           'let a = mk(2)\na(1)'
       )
-    ).toThrow(/does not return a function literal on every path/);
+    ).toThrow(RETURNED);
   });
 
   it('declines on interval-js', () => {

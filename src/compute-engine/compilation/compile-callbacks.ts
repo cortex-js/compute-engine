@@ -99,7 +99,6 @@ import { blockLocalOf } from './compile-locals.js';
 import { isIndexReadTuple } from '../boxed-expression/index-read-tuple.js';
 import type {
   DeclineNote,
-  ReboundFunctionLocals,
   UserFunctionRegistry,
 } from './compiler-types.js';
 import { foldValueImpure, parametersCanBeTyped } from './compile-folding.js';
@@ -3087,7 +3086,7 @@ export function untrustedCallbackSource(
 export function callOnlyLocalFunctionLiterals(
   stmts: ReadonlyArray<Expression>,
   locals: ReadonlyArray<string>,
-  rebound: ReboundFunctionLocals,
+  rebound: ReadonlySet<string>,
   checkedCallbacks = false
 ): Expression[] {
   const candidates = new Map<string, Expression>();
@@ -3101,7 +3100,7 @@ export function callOnlyLocalFunctionLiterals(
     if (
       isFunction(value, 'Function') &&
       locals.includes(name) &&
-      !rebound.rebound.has(name)
+      !rebound.has(name)
     )
       candidates.set(name, value);
   }

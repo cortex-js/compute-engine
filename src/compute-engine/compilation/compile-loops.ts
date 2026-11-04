@@ -1,6 +1,6 @@
 // Loops: For, comprehensions, counted ranges, element loops and the loop body.
 
-import type { Expression, FunctionInterface } from '../global-types.js';
+import type { Expression } from '../global-types.js';
 import {
   clearDecidedLoopIndices,
   clearIntegerRanges,
@@ -23,10 +23,7 @@ import {
   isNumber,
   isFunction,
 } from '../boxed-expression/type-guards.js';
-import {
-  functionLiteralParameterName,
-  functionLiteralParameterType,
-} from '../boxed-expression/function-literal.js';
+import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import { tuplePatternNames } from '../boxed-expression/tuple-pattern.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import { isCallerMapped } from './cse.js';
@@ -36,7 +33,7 @@ import { compileOp, hoistLoopInvariants, withCseScope } from './compile-cse.js';
 import { core } from './compiler-core-hooks.js';
 import { tempVar, withBoundScope } from './compiler-naming.js';
 import { assertBreakLeavesWholeLoop } from './compile-match.js';
-import type { ElementBinder, ReboundFunctionLocals } from './compiler-types.js';
+import type { ElementBinder } from './compiler-types.js';
 import {
   compilationType,
   isProvablyStringOperand,
@@ -1195,7 +1192,7 @@ export function newLocalFunctionScope(
 export function lexicalFunctionScope(
   stmts: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>,
-  rebound: ReboundFunctionLocals
+  rebound: ReadonlySet<string>
 ): ReadonlyMap<string, Expression> | undefined {
   if (!bindsLocalFunctions(target)) return undefined;
   const scope = new Map(target.lexicalFunctions ?? target.localFunctions ?? []);
@@ -1205,94 +1202,82 @@ export function lexicalFunctionScope(
 
 /**
  * The `reboundFunctions` scope for a statement list (see
- * `CompileTarget.reboundFunctions`): the enclosing scope, without the names
- * this list declares again (a `Declare` makes a new binding, which this
- * list's own analysis describes), and with the names this list rebinds.
- *
- * A name this list writes but does NOT declare is a binding of an enclosing
- * list. That list saw every write of this list as a nested write, so its
- * entry already accounts for all of the literals the name can hold. Keep
- * that complete entry: this list sees only some of those literals, and
- * their signatures and return paths prove nothing about the others.
+ * `CompileTarget.reboundFunctions`): the names of the enclosing scope,
+ * without the names this list declares again (a `Declare` makes a new
+ * binding, which this list's own analysis describes), and with the names
+ * this list rebinds (`reboundLocalNames()`).
  */
 export function reboundFunctionScope(
   stmts: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>,
-  rebound: ReboundFunctionLocals
+  rebound: ReadonlySet<string>
 ): CompileTarget<Expression>['reboundFunctions'] {
   if (!bindsLocalFunctions(target)) return undefined;
   const inherited = target.reboundFunctions;
-  if (rebound.rebound.size === 0 && (inherited?.size ?? 0) === 0)
-    return inherited;
-  const scope = new Map(inherited ?? []);
-  const declared = new Set<string>();
+  if (rebound.size === 0 && (inherited?.size ?? 0) === 0) return inherited;
+  const scope = new Set(inherited ?? []);
   for (const stmt of stmts)
-    if (isFunction(stmt, 'Declare') && isSymbol(stmt.ops[0])) {
-      declared.add(stmt.ops[0].symbol);
+    if (isFunction(stmt, 'Declare') && isSymbol(stmt.ops[0]))
       scope.delete(stmt.ops[0].symbol);
-    }
-  for (const [name, info] of rebound.rebound) {
-    if (!declared.has(name) && inherited?.has(name)) continue;
-    scope.set(
-      name,
-      info.decline === undefined
-        ? { literals: info.literals }
-        : { decline: info.decline }
-    );
-  }
+  for (const name of rebound) scope.add(name);
   return scope;
 }
 
 /**
  * The function-valued locals of statement list `stmts` whose value can
  * change while the list runs, so that no single function literal is their
- * value at every call. A name is such a local when an `Assign` writes it
- * INSIDE a statement (a loop body, a branch, an inner block, a
- * function-literal body), or when the list binds it more than once at the
- * top level (a `Declare` with a value, or an `Assign`).
+ * value at every call. A name is such a local when it is assigned a
+ * function literal and an `Assign` writes it INSIDE a statement (a loop
+ * body, a branch, an inner block, a function-literal body), or the list
+ * binds it more than once at the top level (a `Declare` with a value, or an
+ * `Assign`).
  *
- * In `k := f1; for … { k(1); k := f2 }` the call runs with `f1` in the first
- * iteration and with `f2` after it. Such a call is compiled as a call of the
- * run-time binding (`k(1)`), which reads the value the interpreter reads at
- * that point, and it never folds or inlines one literal. The call site needs
- * the signature of the callee (arity, broadcast, complex arguments), so the
- * name compiles only when every literal it is assigned has the same
- * signature. Otherwise, and when the name is also assigned a value that is
- * not a function literal, the entry holds the reason the call declines.
+ * A name is also such a local when the list binds it at the top level to
+ * the value of a call that returns a function: a call of a function literal
+ * that returns a function literal on every path (`returnedFunctionLiterals`),
+ * such as `mk(2)` for `const mk = (n) => (x) => x + n`, or a call whose type
+ * has a function member (`((unknown) -> number) | integer`). The static type
+ * of a call of a block-local function does not show that its value is a
+ * function, so `assertNoFunctionValue()` does not see it.
+ *
+ * The value of each such name is a function value known only at run time.
+ * Compiled code does not call it or pass it
+ * (`docs/COMPILATION-MODEL.md`, "Function values"): a call of the name
+ * declines in `tryCompileLocalFunctionCall()`, and an expression with the
+ * name as an operand declines in `assertNoFunctionValue()`.
  *
  * A write is not counted when it writes a different binding of the same
  * name: inside an inner block that declares the name again, or inside a
  * function literal that has a parameter of that name.
  *
- * The result is empty when the list has no function literal. Then the list
- * binds no function-valued local, and an entry it inherits is already
- * correct: a write to that name inside this list is a nested write in the
- * list that made the entry.
+ * The result is empty when the list has no function literal and no call
+ * that returns a function literal on every path. A name bound only to a
+ * call whose type has a function member is then not listed. Otherwise the
+ * list binds no function-valued local, and a name it inherits is already
+ * listed: a write to that name inside this list is a nested write in the
+ * list that listed it.
  */
 export function reboundLocalNames(
   stmts: ReadonlyArray<Expression>
-): ReboundFunctionLocals {
-  const result: ReboundFunctionLocals = {
-    rebound: new Map(),
-    writes: new Map(),
+): ReadonlySet<string> {
+  const result = new Set<string>();
+  const topLevelValue = (s: Expression): Expression | undefined => {
+    if (!isFunction(s, 'Declare') && !isFunction(s, 'Assign')) return undefined;
+    if (!isFunction(s) || !isSymbol(s.ops[0])) return undefined;
+    return s.operator === 'Declare' ? declareValueOperand(s.ops) : s.ops[1];
   };
-  // The literals a call returns, when the callee is one function literal
-  // that returns a function literal on every path (see
-  // `returnedFunctionLiterals`): `mk(2)` for `function mk(n) { (x) => x + n
-  // }`. The callee is the one literal that this list binds the name to at
-  // the top level, or else the engine's user function of that name.
-  const callResults = (
-    value: Expression | undefined
-  ): Array<Expression & FunctionInterface> | undefined => {
-    if (!isFunction(value) || value.operator === 'Function') return undefined;
+  // True when `value` is a call of one function literal that returns a
+  // function literal on every path (`returnedFunctionLiterals`). The callee
+  // is the one literal that this list binds the name to at the top level,
+  // or else the engine's user function of that name.
+  const returnsFunction = (value: Expression | undefined): boolean => {
+    if (!isFunction(value) || value.operator === 'Function') return false;
     const h = value.operator;
     const local: Expression[] = [];
     for (const s of stmts) {
-      if (!isFunction(s, 'Declare') && !isFunction(s, 'Assign')) continue;
       if (!isFunction(s) || !isSymbol(s.ops[0]) || s.ops[0].symbol !== h)
         continue;
-      const v =
-        s.operator === 'Declare' ? declareValueOperand(s.ops) : s.ops[1];
+      const v = topLevelValue(s);
       if (v !== undefined) local.push(v);
     }
     const callee =
@@ -1301,50 +1286,26 @@ export function reboundLocalNames(
         : local.length === 1 && isFunction(local[0], 'Function')
           ? local[0]
           : undefined;
-    if (callee === undefined || value.nops !== callee.nops - 1)
-      return undefined;
-    return returnedFunctionLiterals(callee.op1);
-  };
-  const topLevelValue = (s: Expression): Expression | undefined => {
-    if (!isFunction(s, 'Declare') && !isFunction(s, 'Assign')) return undefined;
-    if (!isFunction(s) || !isSymbol(s.ops[0])) return undefined;
-    return s.operator === 'Declare' ? declareValueOperand(s.ops) : s.ops[1];
+    if (callee === undefined || value.nops !== callee.nops - 1) return false;
+    return returnedFunctionLiterals(callee.op1) !== undefined;
   };
   if (
     !stmts.some((s) => s.has('Function')) &&
-    !stmts.some((s) => callResults(topLevelValue(s)) !== undefined)
+    !stmts.some((s) => returnsFunction(topLevelValue(s)))
   )
     return result;
-  // The names bound at the top level to the value of such a call. Their
-  // value is a function known only at run time, so a call of one is
-  // compiled as a call of the run-time binding, as for a name assigned
-  // more than once, with the returned literals as the values it can hold.
-  // Without this, `let a = mk(2)` then `a(1)` failed with "Unknown
-  // operator `a`". CE-225.
+  // The names bound at the top level to the value of a call that returns a
+  // function, or that can return one.
   const fromCall = new Set<string>();
-  // The names bound to the value of another call whose type has a
-  // function arm (`((unknown) -> number) | integer`): a call of such a
-  // name declines with that reason.
-  const maybeFunction = new Set<string>();
-  // Every value each name is bound to in the list (`undefined` for a leaf of
-  // a destructuring write, whose value is not read here), and the
-  // statements that bind it.
-  const values = new Map<string, Array<Expression | undefined>>();
-  const writers = new Map<string, Set<Expression>>();
+  // The names assigned a function literal anywhere in the list.
+  const assignedLiteral = new Set<string>();
+  // The names written inside a statement, and the number of top-level
+  // bindings of each name.
   const nested = new Set<string>();
   const topLevelCount = new Map<string, number>();
-  const record = (
-    name: string,
-    value: Expression | undefined,
-    stmt: Expression
-  ): void => {
-    values.set(name, [...(values.get(name) ?? []), value]);
-    writers.set(name, (writers.get(name) ?? new Set()).add(stmt));
-  };
   const walk = (
     node: Expression | undefined,
-    shadowed: ReadonlySet<string>,
-    stmt: Expression
+    shadowed: ReadonlySet<string>
   ): void => {
     if (!isFunction(node)) return;
     let inner = shadowed;
@@ -1366,106 +1327,36 @@ export function reboundLocalNames(
         if (isSymbol(t)) {
           if (inner.has(t.symbol)) return;
           nested.add(t.symbol);
-          record(t.symbol, value, stmt);
+          if (isFunction(value, 'Function')) assignedLiteral.add(t.symbol);
         } else if (isFunction(t, 'Tuple'))
           for (const leaf of t.ops) writeLeaf(leaf);
       };
       writeLeaf(node.ops[0], node.ops[1]);
     }
-    for (const op of node.ops) walk(op, inner, stmt);
+    for (const op of node.ops) walk(op, inner);
   };
   const none = new Set<string>();
   for (const stmt of stmts) {
-    if (
-      (isFunction(stmt, 'Declare') || isFunction(stmt, 'Assign')) &&
-      isSymbol(stmt.ops[0])
-    ) {
-      const name = stmt.ops[0].symbol;
-      const value =
-        stmt.operator === 'Declare'
-          ? declareValueOperand(stmt.ops)
-          : stmt.ops[1];
-      if (value !== undefined) {
-        topLevelCount.set(name, (topLevelCount.get(name) ?? 0) + 1);
-        const returned = callResults(value);
-        if (returned !== undefined) {
-          fromCall.add(name);
-          for (const literal of returned) record(name, literal, stmt);
-        } else {
-          if (
-            isFunction(value) &&
-            value.operator !== 'Function' &&
-            typeHasFunctionArm(value.type.type)
-          )
-            maybeFunction.add(name);
-          record(name, value, stmt);
-        }
-      }
-      for (const op of stmt.ops.slice(1)) walk(op, none, stmt);
-    } else walk(stmt, none, stmt);
-  }
-
-  const signature = (literal: Expression & FunctionInterface): string =>
-    [
-      String(literal.nops - 1),
-      typeToString(literal.type.type),
-      ...literal.ops.slice(1).map((p) => {
-        const t = functionLiteralParameterType(p);
-        return t === undefined ? '' : typeToString(t);
-      }),
-    ].join('|');
-  for (const [name, vals] of values) {
-    if (
-      !nested.has(name) &&
-      !fromCall.has(name) &&
-      !maybeFunction.has(name) &&
-      (topLevelCount.get(name) ?? 0) <= 1
-    )
-      continue;
-    const literals = vals.filter(
-      (v): v is Expression & FunctionInterface =>
-        v !== undefined && isFunction(v, 'Function')
-    );
-    // A name never assigned a function literal is not function-valued.
-    if (literals.length === 0) {
-      if (maybeFunction.has(name))
-        result.rebound.set(name, {
-          decline:
-            `Could not compile a call of \`${name}\`: the value of ` +
-            `\`${name}\` is the result of a call that can return a ` +
-            `function, but does not return a function literal on every ` +
-            `path, so the compiled call has no signature to follow.`,
-        });
+    const value = topLevelValue(stmt);
+    const bound = isFunction(stmt) ? stmt.ops[0] : undefined;
+    if (value === undefined || !isSymbol(bound)) {
+      walk(stmt, none);
       continue;
     }
-    const reason = fromCall.has(name)
-      ? `Could not compile a call of \`${name}\`: the value of ` +
-        `\`${name}\` is a function returned by a call, so the compiled ` +
-        `call reads it at run time and must know the signature of every ` +
-        `function it can be. `
-      : `Could not compile a call of \`${name}\`: the block-local function ` +
-        `\`${name}\` is assigned more than once or inside a nested statement, ` +
-        `so the compiled call reads its value at run time and must know the ` +
-        `signature of every value it can hold. `;
-    let decline: string | undefined;
-    if (literals.length < vals.length)
-      decline =
-        reason +
-        `It is also assigned a value that is not a function literal, ` +
-        `whose signature is not known.`;
-    else if (new Set(literals.map(signature)).size > 1)
-      decline =
-        reason +
-        `It is assigned functions with different signatures ` +
-        `(${[...new Set(literals.map((l) => typeToString(l.type.type)))].join(', ')}, ` +
-        `or a different number of parameters).`;
-    result.rebound.set(
-      name,
-      decline === undefined ? { literal: literals[0], literals } : { decline }
-    );
-    for (const stmt of writers.get(name) ?? [])
-      result.writes.set(stmt, (result.writes.get(stmt) ?? new Set()).add(name));
+    const name = bound.symbol;
+    topLevelCount.set(name, (topLevelCount.get(name) ?? 0) + 1);
+    if (isFunction(value, 'Function')) assignedLiteral.add(name);
+    else if (
+      returnsFunction(value) ||
+      (isFunction(value) && typeHasFunctionArm(value.type.type))
+    )
+      fromCall.add(name);
+    if (isFunction(stmt)) for (const op of stmt.ops.slice(1)) walk(op, none);
   }
+  for (const name of fromCall) result.add(name);
+  for (const name of assignedLiteral)
+    if (nested.has(name) || (topLevelCount.get(name) ?? 0) > 1)
+      result.add(name);
   return result;
 }
 
@@ -1478,36 +1369,22 @@ export function reboundLocalNames(
  *
  * A binding whose value is NOT a function literal REMOVES the entry it
  * shadows or replaces (`let g = 5` over an outer function-valued `g` must
- * not keep calling the outer one).
- *
- * A name that `rebound` lists (its value can change while the list runs —
- * see `reboundLocalNames`) enters the scope at the first statement that
- * assigns it, at the top level or inside the statement, with the literal
- * `rebound` chose for it; it has no entry when its call declines. A
- * `Declare` of it with no value removes the entry: the binding has no value
- * until an assignment runs.
+ * not keep calling the outer one). A name that `rebound` lists (its value
+ * can change while the list runs, `reboundLocalNames()`) gets no entry: a
+ * binding of it removes the entry.
  */
 export function noteLocalFunction(
   stmt: Expression,
   scope: Map<string, Expression> | undefined,
-  rebound: ReboundFunctionLocals
+  rebound: ReadonlySet<string>
 ): void {
   if (scope === undefined) return;
-  for (const name of rebound.writes.get(stmt) ?? []) {
-    const literal = rebound.rebound.get(name)?.literal;
-    if (literal !== undefined) scope.set(name, literal);
-    else scope.delete(name);
-  }
   if (!isFunction(stmt, 'Declare') && !isFunction(stmt, 'Assign')) return;
   if (!isSymbol(stmt.ops[0])) return;
   const name = stmt.ops[0].symbol;
   const value =
     stmt.operator === 'Declare' ? declareValueOperand(stmt.ops) : stmt.ops[1];
-  if (rebound.rebound.has(name)) {
-    if (value === undefined) scope.delete(name);
-    return;
-  }
-  if (value !== undefined && isFunction(value, 'Function'))
+  if (!rebound.has(name) && value !== undefined && isFunction(value, 'Function'))
     scope.set(name, value);
   else scope.delete(name);
 }

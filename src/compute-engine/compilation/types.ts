@@ -1747,9 +1747,8 @@ export interface CompileTarget<Expr = unknown> {
    * shadows an outer one's, and a local whose value is NOT a function literal
    * REMOVES the entry it shadows. A top-level `Assign` of a function literal
    * (`Declare(g, "function")` then `Assign(g, Function(…))`) adds the entry
-   * the same way. For a name whose value can change while the block runs, the
-   * entry is one of its literals, and {@link reboundFunctions} lists the
-   * name.
+   * the same way. A name whose value can change while the block runs has no
+   * entry, and {@link reboundFunctions} lists the name.
    *
    * Only set for targets that lower a `Declare` as a value binding — i.e.
    * those with no `declare` hook (the JavaScript family). Python and the GPU
@@ -1784,29 +1783,20 @@ export interface CompileTarget<Expr = unknown> {
    * {@link lexicalFunctions} whose value can CHANGE while the block runs: a
    * name assigned more than once at the top level of its statement list, or
    * assigned inside a nested statement (a loop body, a branch, a function
-   * body). In `k := f1; for … { k(1); k := f2 }` the call runs with `f1`
-   * first and with `f2` after, so no one literal is its value.
+   * body), or bound to the result of a call that returns a function. In
+   * `k := f1; for … { k(1); k := f2 }` the call runs with `f1` first and with
+   * `f2` after, so no one literal is its value.
    *
-   * A call of such a name is compiled as a call of the run-time binding,
-   * which reads the same value the interpreter reads at that point. It never
-   * folds or inlines the literal in the scope maps; that literal only gives
-   * the signature (arity, broadcast, complex arguments), which all the
-   * literals of the name share. When they do not share one, or the name is
-   * also assigned a value that is not a function literal, the entry holds
-   * the reason the call declines (`decline`).
+   * The value of such a name is a function value known only at run time,
+   * which compiled code does not call or pass: a call of the name, and an
+   * expression that has the name as an operand, decline
+   * (`tryCompileLocalFunctionCall()`, `assertNoFunctionValue()`).
    *
    * Set by `BaseCompiler.compileBlock` and the loop-body statement list
    * (`BaseCompiler.reboundLocalNames`), on the same targets as
    * {@link localFunctions}.
    */
-  reboundFunctions?: ReadonlyMap<
-    string,
-    {
-      readonly decline?: string;
-      /** Every literal this binding can hold, for return-path safety proofs. */
-      readonly literals?: ReadonlyArray<Expr>;
-    }
-  >;
+  reboundFunctions?: ReadonlySet<string>;
 
   /**
    * The identifier this target binds its VARS OBJECT to, when it reads free

@@ -33,6 +33,16 @@
   `localVarsObjectStatement` are removed too: the forms that they handled
   (a read of a local before it has a value, a chained assignment) are
   static errors since 0.178.0. No compiled value changes.
+- **Custom compile targets: `CompileTarget.reboundFunctions` is a set of
+  names.** A call of a block-local function whose value can change while
+  its block runs (assigned more than once, inside a nested statement, or
+  from the result of a call) already declines, so the field no longer holds
+  a function literal or a decline reason for each name: it is a
+  `ReadonlySet<string>`. The `BaseCompiler` static members change with it:
+  `reboundLocalNames` returns the set, and `reboundFunctionScope` and
+  `noteLocalFunction` take it. Such a call now declines with one reason,
+  also when the values of the local have different signatures or one of
+  them is not a function literal. No compiled value changes.
 
 ### Behavior Changes
 

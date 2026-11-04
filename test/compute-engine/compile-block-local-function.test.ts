@@ -762,10 +762,9 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     expect(r.interpreted).toBe('135');
   });
 
-  it('fails closed, with the reason, when the values do not share a signature', () => {
-    // The call site needs the arity and the parameter types of the callee,
-    // and these differ between the two values `k` can hold.
-    expect(() =>
+  it('fails closed when the values do not share a signature', () => {
+    // A rebound local declines whatever its values are.
+    expect(
       compareJson(
         [
           'Block',
@@ -778,9 +777,9 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
           ['k', 'x'],
         ],
         { x: 3 }
-      )
-    ).toThrow(/is assigned functions with different signatures/);
-    expect(() =>
+      ).compiled
+    ).toBe(DECLINED);
+    expect(
       compareJson(
         [
           'Block',
@@ -789,8 +788,8 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
           ['k', 'x'],
         ],
         { x: -3 }
-      )
-    ).toThrow(/also assigned a value that is not a function literal/);
+      ).compiled
+    ).toBe(DECLINED);
   });
 
   it('the interval target declines a rebound function with the reason', () => {

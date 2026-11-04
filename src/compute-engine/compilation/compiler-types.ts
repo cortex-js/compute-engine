@@ -339,29 +339,6 @@ export type LoopInvariantBinding = [
   node: Expression,
 ];
 
-/**
- * The function-valued locals of one statement list whose value can change
- * while the list runs (`BaseCompiler.reboundLocalNames`).
- *
- * - `rebound`: each such name, with the function literal a call of it is
- *   compiled against (`literal`, one of the literals the name is assigned —
- *   they all have the same signature), or the reason a call of it cannot
- *   compile (`decline`).
- * - `writes`: for each top-level statement, the names of `rebound` that the
- *   statement assigns, at its top level or inside it.
- */
-export type ReboundFunctionLocals = {
-  rebound: Map<
-    string,
-    {
-      literal?: Expression;
-      literals?: ReadonlyArray<Expression>;
-      decline?: string;
-    }
-  >;
-  writes: Map<Expression, Set<string>>;
-};
-
 /** See `BaseCompiler.blockLocalValueFrame`. */
 export type LocalEntry = {
   /** The values assigned to the local, anywhere in the block. */

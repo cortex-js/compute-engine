@@ -546,7 +546,8 @@ export function compileBlock(
     // makes their forward references resolve.
     const localFunctions = newLocalFunctionScope(target);
     // The function-valued locals whose value can change while the list
-    // runs, which a call reads at run time (see `reboundLocalNames`).
+    // runs: a call or an operand use of one declines (see
+    // `reboundLocalNames`).
     const reboundLocals = reboundLocalNames(args);
     // …and the whole-list scope a function-literal BODY resolves against,
     // which is what makes mutually recursive definitions compile.
