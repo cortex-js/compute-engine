@@ -1,0 +1,9 @@
+A follow-up for 0.178.0, the language release, which changes two points of the defaults described above (CHANGELOG, "Compiled code calls only a function it can see, and a parameter default fills only an argument that the call leaves out"):
+
+**A default fills only an argument that the call leaves out.** `Scaled(3)` is still `Scaled(3, 2)`, filled at canonicalization, and `((x, k = 2) => x * k)(3)` is still `6`. In 0.177.0 a default also replaced a supplied absent value; that is reversed: `Scaled(3, First([]))` passes `Missing` to the handler. To replace an absent argument, write it in the call: `Scaled(3, Coalesce(First(L), 2))`.
+
+**A symbol default is a constant.** Three kinds are accepted: a library constant (`over: set = Integers`, `k: real = Pi`), a symbol you declare with `isConstant: true` (`ce.declare("DefaultWeights", { isConstant: true, value: [1, 2, 3] })`, then `weights: list<number> = DefaultWeights`), and a symbol that the parameter type lists (`mode: symbol<Auto> | symbol<Manual> = Auto`). The default is bound where the function is declared, so a local of the same name at the call site does not change it. In 0.176.0 and 0.177.0 the symbol was read at the call site and did not need a declaration; now a default that names a variable makes `ce.declare()` throw, and is the static error `expected-a-literal-default` in a function literal. Declare the symbol constant, write the value, or pass the argument.
+
+**In compiled code**, a default that is a library constant or a symbol that the type lists is filled. A default that names a constant you declared declines the compilation, and the expression runs on the interpreter. Where the compiled form matters, write the value as the default or pass the argument.
+
+The rest is unchanged: a number, a string, `true`/`false`, `[]` and `{}` as defaults, the `=` spelling in a signature, `Optional` in a function literal, and named arguments that skip a defaulted parameter.
