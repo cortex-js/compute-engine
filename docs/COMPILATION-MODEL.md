@@ -134,6 +134,19 @@ once, or a `ROADMAP.md` entry.
 One line each: the target, the program, the compiled value, the
 interpreter's value. A line is removed when the case declines or is fixed.
 
+- A custom target whose own `var` hook resolves a symbol `C` declared with
+  the bare type `list` while `C` holds a list of numbers: an element read
+  `C[i]` is compiled as a number (`isHeldNumericListRead()` in
+  `compilation/provable-kind.ts` tests `vars` and bound names, not the
+  hook), so when the hook's value of `C` is a list of lists, an indexed
+  `Sum` over `C[i+1]x^i` adds arrays with `+` and gives a string; the
+  interpreter gives the sum of the lists.
+- `javascript`, a `Block` local declared with the bare type `list` and
+  holding a list of lists: `Block(Declare(C, 'list', [[1, 2], [3, 4]]),
+  Sum(C[i+1]·x^i, i, 0, Length(C) − 1))` compiles to a scalar loop over
+  `_SYS.at(C, i + 1) * _SYS.pow(_.x, i)` and gives `null` (also in
+  0.178.0); the interpreter gives the list `[3x + 1, 4x + 2]`.
+
 - `javascript`, `x: real | nan`: `Arcsec(x)` and `Arccsc(x)` at `x = 0.5`,
   and `InverseHaversine(x)` at `x = 4`, compile to the real lowering
   (`Math.acos(1 / x)`, `2 * Math.asin(Math.sqrt(x))`) and give `NaN`; the
@@ -337,8 +350,9 @@ list:
   exception when `C` is an input whose element type is declared, or a
   symbol that holds a list of numbers: the compiled code folds the held
   list into a constant, so `C[i+1]` is a number even when `C` is declared
-  with the bare type `list` (`heldListElementType()` in
-  `compilation/provable-kind.ts`).
+  with the bare type `list` (`isHeldListArithmetic()` in
+  `compilation/provable-kind.ts`). A `C` that the host supplies through
+  `vars` is not folded, and keeps the test.
 - A component of a `PointList` whose type is `broadcastable<T>`, or a
   component of a type that does not settle its shape. The component is
   one coordinate when it is a number and a list of coordinates when it

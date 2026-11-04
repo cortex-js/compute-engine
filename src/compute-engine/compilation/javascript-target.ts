@@ -93,7 +93,8 @@ import { ascribeDeclaredParameterTypes } from '../engine-declarations.js';
 import {
   provableApplicationKind,
   provableTopLevelKind,
-  provableStructuralKind,
+  isFoldableName,
+  isHeldListArithmetic,
   userFunctionLiteral,
 } from './provable-kind.js';
 import { Complex } from 'complex.js';
@@ -2658,15 +2659,10 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
     // here: a point is a JavaScript array at run time, so it IS a collection
     // for the paths this predicate guards.
     // Provenance: Tycho item 86.
-    // An application of a built-in operator is read by the same structural
-    // rules (`provableStructuralKind`): `At(C, i + 1) * x ^ i`, where `C` is
-    // declared with the bare type `list` and holds a list of scalars, is
-    // typed `any` and is a scalar.
     return (
       provableApplicationKind(e, new Set(), (a) =>
         provableTopLevelKind(a, topLevelArgIsScalar)
-      ) !== 'scalar' &&
-      provableStructuralKind(e, topLevelArgIsScalar) !== 'scalar'
+      ) !== 'scalar'
     );
   }
   // A scalar-or-collection union (`integer | vector<integer^2>`) is a scalar
@@ -17371,9 +17367,17 @@ function vectorBodyWidth(body: Expression): number | undefined {
  */
 function isElementwiseBigOpBody(
   body: Expression,
-  indices: ReadonlyArray<string>
+  indices: ReadonlyArray<string>,
+  target: CompileTarget<Expression>
 ): boolean {
   if (isFunction(body, 'Tuple')) return false;
+  // A body built by arithmetic from element reads of a held list of numbers
+  // is a number at run time, although its static type is open:
+  // `At(C, i + 1) * x^i` with `C` declared with the bare type `list` and
+  // holding `[c_1, …, c_10]` is typed `any`. The compiled code folds the held
+  // list into a constant, so the loop adds numbers (`isHeldListArithmetic()`).
+  if (isHeldListArithmetic(body, (name) => isFoldableName(name, target)))
+    return false;
   const tt = jsType(body);
   if (typeof tt !== 'string' && tt.kind === 'tuple') return false;
   if (BaseCompiler.isComplexValuedUnderIndices(body, indices)) return false;
@@ -17549,7 +17553,7 @@ function emitSumProduct(
   // mask is what `isComplexValued` applies to the whole `Sum`, so the
   // emitter and the enclosing expression agree on the accumulator's shape.
   const indices = clauses.map((c) => extractLimits(c).index);
-  const elementwiseBody = isElementwiseBigOpBody(body, indices);
+  const elementwiseBody = isElementwiseBigOpBody(body, indices, target);
   if (!elementwiseBody) BaseCompiler.assertScalarBigOpBody(kind, body);
 
   const { index, lowerExpr, upperExpr } = extractLimits(clauses[0]);

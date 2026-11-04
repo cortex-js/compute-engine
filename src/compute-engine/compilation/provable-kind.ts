@@ -6,11 +6,13 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import { isValueDef } from '../boxed-expression/definition-guards.js';
 import { isSubtype } from '../../common/type/subtype.js';
 // The compiled lanes read the open form of a broadcast over an operand of
 // type `unknown` as `broadcastable<R>` (`resolveTypeForCompiledLanes`).
 import { resolveTypeForCompiledLanes as resolveTypeForCompilation } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
+import type { CompileTarget } from './types.js';
 
 /**
  * What a compiled expression provably IS at run time: one number (`'scalar'`),
@@ -88,59 +90,124 @@ export function provableTopLevelKind(
 }
 
 /**
- * The element type of `x` when `x` is `At(C, i)` with `C` a symbol that holds
- * a `List` literal whose elements are all numbers, and `i` a scalar index
- * (`indexIsScalar`). Otherwise `undefined`.
+ * Whether `x` is `At(C, i)` where the compiled code reads `C` as its held
+ * value, that value is a non-empty `List` literal whose elements are all
+ * numbers, and the index `i` is typed as a number.
  *
- * The compiled code folds the held value into a preamble constant, so the
- * read sees that list whatever the declared type of `C` says. A symbol
- * declared with the bare type `list` has the static element type `any`, and
- * `At(C, i)` is typed `any`, yet the value `[c_1, c_2]` over symbols typed
- * `real` is a list of numbers. `isFree` says whether the name is the held
- * symbol: a parameter, an index or a local that spells the same name is not.
+ * The compiled code folds a held value into a preamble constant, so the read
+ * sees that list whatever the declared type of `C` says. A symbol declared
+ * with the bare type `list` has the static element type `any`, and `At(C, i)`
+ * is typed `any`, yet the value `[c_1, c_2]` over symbols typed `real` is a
+ * list of numbers. An out-of-range index gives `NaN`, also a number.
+ *
+ * The fold happens under the conditions of the symbol emission in
+ * `compile-inner.ts`, and this test asks for these of them:
+ * - `isFree(name)` is true: the name is not a `vars` key of the compile (the
+ *   host supplies that value at run time, and it can be a list of lists)
+ *   and not a name that the code binds (a parameter, an index or a local
+ *   that spells the same name reads its own value, not the held one);
+ * - the definition that the node is bound to is not marked `_rewound` by a
+ *   checkpoint restore (such a definition has no value, also when a later
+ *   definition of the same name has one).
+ *
+ * One condition is not tested: the emission first asks the target's own
+ * `var` hook, and a custom target whose hook resolves the name reads its own
+ * value instead of the folded one. The built-in targets resolve a name
+ * through `vars` only, which `isFoldableName()` tests. The case is listed
+ * in the known limitations of `docs/COMPILATION-MODEL.md`.
+ *
+ * The type of a symbol element is read from its current definition, not
+ * from the node in the held list: that node was bound when the list was
+ * assigned, and a later `declare` of the name does not change the type it
+ * reports. The read uses `lookupDefinition`, which declares nothing.
  */
-export function heldListElementType(
+export function isHeldNumericListRead(
   x: Expression,
-  isFree: (name: string) => boolean,
-  indexIsScalar: (index: Expression) => boolean
-): Type | undefined {
-  if (!isFunction(x, 'At') || x.nops !== 2) return undefined;
+  isFree: (name: string) => boolean
+): boolean {
+  if (!isFunction(x, 'At') || x.nops !== 2) return false;
   const [base, index] = x.ops;
-  if (!isSymbol(base) || !isFree(base.symbol)) return undefined;
+  if (!isSymbol(base) || !isFree(base.symbol)) return false;
+  if ((base.valueDefinition as { _rewound?: true } | undefined)?._rewound)
+    return false;
+  if (!index.type.matches('number')) return false;
   const held = x.engine._getSymbolValue(base.symbol);
-  if (!isFunction(held, 'List') || held.nops === 0) return undefined;
-  if (!indexIsScalar(index)) return undefined;
-  // A symbol element is read from the engine, not from the node: the held
-  // list keeps the symbol nodes that it was assigned with, and a node bound
-  // before a later `declare` of the same name still reports the old type
-  // (`unknown`).
-  return held.ops.every((el) =>
-    (isSymbol(el) ? x.engine.box(el.symbol).type : el.type).matches('number')
-  )
-    ? 'number'
-    : undefined;
+  if (!isFunction(held, 'List') || held.nops === 0) return false;
+  return held.ops.every((el) => {
+    if (!isSymbol(el)) return el.type.matches('number');
+    const def = x.engine.lookupDefinition(el.symbol);
+    return isValueDef(def) && def.value.type.matches('number');
+  });
 }
 
 /**
- * The kind of an application of a built-in operator, read by the structural
- * rules alone: `isScalar` is asked about the OPERANDS, never about `a` itself.
- *
- * A caller whose `isScalar` is the predicate that is deciding the kind of `a`
- * (`isPossiblyCollectionTypedJS`) cannot use {@link provableTopLevelKind}: its
- * first step asks `isScalar(a)` and the predicate calls itself on the same
- * expression without end.
+ * Whether the compiled code folds the held value of the symbol `name`: the
+ * name is not a `vars` key of the compile (a value the host supplies at run
+ * time) and not a name that the code binds (a parameter, an index or a
+ * local). The symbol emission in `compile-inner.ts` folds a held value only
+ * when these hold. It also skips a `_rewound` definition, which
+ * `isHeldNumericListRead()` tests on the node, and a name that a custom
+ * target's own `var` hook resolves, which is not tested here (see
+ * `isHeldNumericListRead()`).
  */
-export function provableStructuralKind(
-  a: Expression,
-  isScalar: (a: Expression) => boolean
-): ProvableKind | undefined {
-  const kind = (x: Expression): ProvableKind | undefined => {
-    if (isScalar(x)) return 'scalar';
-    const n = pointWidthOfType(x.type.type);
-    if (n !== undefined) return { point: n };
-    return structuralKind(x, kind, new Set());
-  };
-  return structuralKind(a, kind, new Set());
+export function isFoldableName(
+  name: string,
+  target: CompileTarget<Expression>
+): boolean {
+  return !target.boundVars?.has(name) && !target.varsKeys?.has(name);
+}
+
+/** The arithmetic heads that {@link isHeldListArithmetic} looks through. */
+const HELD_LIST_ARITHMETIC_HEADS: ReadonlySet<string> = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Divide',
+  'Power',
+]);
+
+/**
+ * Whether `x` is a number at run time because it is built by arithmetic from
+ * element reads of held lists of numbers (`isHeldNumericListRead()`) and
+ * from operands whose static type is a number. Example:
+ * `At(C, i + 1) * x^i`, with `C` declared with the bare type `list` and
+ * holding `[c_1, …, c_10]`, and `x: real`. The expression is typed `any`,
+ * because the element type of `C` is open.
+ *
+ * An operand that is neither proves nothing: a symbol of type `unknown`
+ * can hold a list at run time, so it makes the answer false. Each node is
+ * visited once, so the cost is linear in the size of `x`.
+ */
+export function isHeldListArithmetic(
+  x: Expression,
+  isFree: (name: string) => boolean
+): boolean {
+  if (isHeldNumericListRead(x, isFree)) return true;
+  if (
+    !isFunction(x) ||
+    typeof x.operator !== 'string' ||
+    !HELD_LIST_ARITHMETIC_HEADS.has(x.operator) ||
+    x.nops === 0
+  )
+    return false;
+  let reachesHeldRead = false;
+  for (const op of x.ops) {
+    if (isHeldListArithmetic(op, isFree)) {
+      reachesHeldRead = true;
+      continue;
+    }
+    if (!isNumberTyped(op)) return false;
+  }
+  return reachesHeldRead;
+}
+
+/** A static type that is a number and not a top type. */
+function isNumberTyped(x: Expression): boolean {
+  const t = x.type.type;
+  if (t === 'unknown' || t === 'any' || t === 'value' || t === 'never')
+    return false;
+  return x.type.matches('number');
 }
 
 /**
@@ -306,20 +373,6 @@ function structuralKind(
     )
       return first;
     return undefined;
-  }
-
-  // An element read of a symbol that holds a `List` of numbers
-  // (`heldListElementType()`). A name that the enclosing reading binds (a
-  // parameter or an index) is not the held symbol, so it declines: such a
-  // name has a kind of its own.
-  if (h === 'At') {
-    const base = ops[0];
-    if (base === undefined || !isSymbol(base) || kind(base) !== undefined)
-      return undefined;
-    return heldListElementType(x, () => true, (i) => kind(i) === 'scalar') !==
-      undefined
-      ? 'scalar'
-      : undefined;
   }
 
   if (h === 'Negate') return ops.length === 1 ? kind(ops[0]) : undefined;
