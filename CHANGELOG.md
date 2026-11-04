@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+This is the language release. It narrows the language that compiled code
+accepts, and it changes some results of the interpreter, so it has breaking
+changes: a restriction `e\{c\}` parses to `If(c, e)` and the `When` operator
+is gone; a comparison is `True` or `False`; `Missing` is a result only;
+`Indeterminate` is `NaN`; a local of a block is declared with a value, and an
+assignment is a statement; compiled code calls only a function it can see,
+and a parameter default fills only an argument the call leaves out; the
+compile mode `'auto'` is gone and `'strict'` is the default. Each entry under
+"Behavior Changes" gives the form that no longer works and what replaces it.
+A removed form in compiled code is a decline or a static error, not a
+different value; where the interpreter's result changed, the entry gives the
+old and the new value. Hosts that build expressions for `compile()` should
+read these entries before they update.
+
 ### New Features
 
 - **Finite-group maps, quotients, matrix groups and polycyclic coordinates.**
