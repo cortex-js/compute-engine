@@ -464,6 +464,19 @@
 
 ### Resolved Issues
 
+- **`serializeEpsil` takes linear time in the indentation of its output**
+  ([#508](https://github.com/cortex-js/compute-engine/issues/508), contributed
+  by [enumeratio](https://github.com/enumeratio)). The formatter trimmed the
+  padding at the end of each stacked fragment with a `/[…]+$/` regex, which is
+  quadratic in the length of each run of indentation inside the fragment. A
+  chain of 160 function literals applied to arguments, indented up to column
+  2242, took 4.2 s and now takes 0.56 s; the output is unchanged.
+- **A partial `cost` option of `serializeEpsil` overrides only the costs it
+  names** ([#508](https://github.com/cortex-js/compute-engine/issues/508),
+  contributed by [enumeratio](https://github.com/enumeratio)).
+  `{ cost: { linebreak: 3 } }` replaced every cost, left the others
+  `undefined`, and threw `TypeError: Cannot read properties of undefined
+  (reading 'cost')` on any output that needs a layout choice.
 - **A `Sum` or `Product` over an empty range of a vector body gives a vector.**
   With `x, y, z: real` and `n: integer<0..10>`, `Sum(i·[x, y, z], i, 1, n)`
   has the type `vector<real^3>`. At `n = 0`, `evaluate()` gave the scalar
