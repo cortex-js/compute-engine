@@ -1558,15 +1558,6 @@ export interface CompileTarget<Expr = unknown> {
   ) => TargetSource;
 
   /**
-   * Drop everything a failed compilation attempt wrote to this target
-   * (helper preamble, emitted user-function definitions, temporaries, bound
-   * frames). The compiler does not call it: no compilation is redone on the
-   * same target. It is accepted so that a target that provides it still
-   * type-checks.
-   */
-  reset?: () => void;
-
-  /**
    * The most elements a constant COLLECTION may inline to when it is
    * constant-folded — an INCLUSIVE maximum, so a collection of exactly this
    * size still inlines. Defaults to 49, matching the JavaScript `Range`

@@ -43,6 +43,18 @@
   `noteLocalFunction` take it. Such a call now declines with one reason,
   also when the values of the local have different signatures or one of
   them is not a function literal. No compiled value changes.
+- **Custom compile targets: `CompileTarget.reset` is removed.** The
+  compiler never called it: a compilation is not done again on the same
+  target. A target object that still has the field is accepted; the field
+  is no longer read or checked, and TypeScript reports it as an unknown
+  property in an object literal typed `CompileTarget`. No compiled value
+  changes.
+- **`BaseCompiler` static members of the promotion record are removed**:
+  `_promoted`, `notePromoted`, `recordPromotion`, `recordFoldedPromotions`
+  and `hasPromotedDefinition`. They recorded the values that the `auto`
+  mode promoted to complex. That mode and the `promoted` result field were
+  removed in 0.178.0, so nothing read the record. No compiled value
+  changes.
 
 ### Behavior Changes
 

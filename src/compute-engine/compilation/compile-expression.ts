@@ -240,8 +240,7 @@ export function compile<
       // restored when the call ends, because the caller can reuse the target
       // for a compilation with other `vars`. The target is not copied: a copy
       // made with object spread loses the methods of a class-instance target,
-      // and a hook that writes to `this` (such as `reset()`) writes to the
-      // copy.
+      // and a hook that writes to `this` writes to the copy.
       // The reachability memo of the constant folder (`foldReachMemo`) is
       // replaced by an empty one for this call and restored with `varsKeys`.
       // Its answers depend on the `vars` keys and on the engine's

@@ -2387,6 +2387,97 @@ on `8e9c12ea5`, whose one new commit changes only the Epsil formatter and
   `compile-user-specialization.ts` (one body per argument shape) is
   unchanged.
 
+The result of step 4, row 6 (the complex lane, with CE-751; 2026-11-04,
+session compute-engine-77; base `1e6b928fb3d649ba0cdb1b059745d96852c96100`; worked in
+`/tmp/wt-compute-engine-77` by one implementer; applied to the main tree on
+`6bc4d0f86464ed9dee816c4c3dd72c0f7c1e9c5f`, whose commit does not change the files of this row; part 1
+staged, not committed; part 2 stopped for a user decision).
+
+- **The survey.** A temporary probe at each candidate of the 3.4.6 list
+  (removed after), and the 301 test files that call `compile` and name
+  `mode:`, `complex`, `promot` or `lane`. Removed:
+  - `CompileTarget.reset` and its check in
+    `engine-extension-contracts.ts`: no code calls it.
+  - Already removed before this row, by commit `2e3ac5fd4` (2026-11-04):
+    `CompilerState._promoted`, `notePromoted`, `recordPromotion`,
+    `promotedDefinitions`, `hasPromotedDefinition` and their save and
+    restore sites. That commit had no CHANGELOG entry; this row adds it.
+  - No `LaneMismatch` redo and no restart remain: no code catches a
+    `LaneMismatchError` to compile again.
+
+  Kept, with the compile that reaches it:
+  - The recursive-call retry (`emitWithRecursiveLaneRetry`, the
+    `RecursiveLaneRetry` throws of `setUserFunctionLane` and
+    `recordUserFunctionLane`): it runs in `strict`, for a recursive
+    function whose base case is complex, for example
+    `compile-lane-fixes.test.ts`, "complex base case, (integer) -> number,
+    strict". Its removal changes values.
+  - The promotion suppression of `compiler-mode.ts` (`_promotionSuppressed`
+    and its wrappers): read in `mode: 'complex'` only, for example
+    `compile-typed-real-ascription.test.ts`.
+  - The `lane-mismatch` declines, all reached in `strict` (58 sites hit,
+    most at a user-function parameter).
+  - The `'auto'` entry of `COMPILE_MODES` (for the decline message), and
+    the lane records per definition (`recordUserFunctionLane`,
+    `_userFunctionLanes`, `recordUserFunctionParamLanes`), read by the GPU
+    target, the pruning and CE-751.1.
+- **Code lines** (`.ts`, not blank, `//`, `/*` or `*`): `compilation`
+  90,126 → 90,125 (−1). Source: 3 files. No test file deleted, no test
+  changed, no snapshot changed. The 3.4.6 list was mostly removed by
+  `2e3ac5fd4`; the rest is reached.
+- **The corpus measure** (Tycho frozen at `a34405ae0`, the copy of rows 1
+  to 5, records keyed by MathJSON; tycho-f9 had no session to ask, so the
+  commit of rows 1 to 5 was kept; base run: row 5's run `cand1`): 17,825
+  compiles, 13,707 keys and 77,267 values in both runs; 0 changed values,
+  0 new throws; declines javascript 47, glsl 44, interval-js 61 in both.
+- **Review** of part 1: Claude and Codex, one round. Codex: no finding.
+  Claude: one nit (the CHANGELOG wording on a target that keeps the
+  field), fixed. No second round.
+- **Checks** in the worktree (the 3 source files are byte for byte the
+  files in the main tree): `npm run typecheck`, `oxlint` on the changed
+  files, `check:deps`, the 301 test files, `test:core` (5,501 passed). In
+  the main tree: `npm run typecheck`. Not run: the full suite (the change
+  removes an optional member that no code calls), `test:python`, the GPU
+  tests (no Python or GPU module changed).
+- **Documents.** CHANGELOG, "Breaking changes": `CompileTarget.reset`, and
+  the `BaseCompiler` statics of the promotion record. No paragraph of
+  `docs/COMPILATION-MODEL.md` describes the promotion record, a redo or
+  `reset`. `13-guide-compile.md` under
+  `~/dev/cortexjs.io/docs/compute-engine/` names `auto` only in the
+  paragraph that says it is removed and declines; no page names
+  `CompileTarget.reset`. No page edited.
+- **Part 2, CE-751.** The witnesses on the base, JavaScript: `Map(g, L)`
+  with `L: list<number>` at `[1 + i, 2]` gives `[null, 4]` (not
+  `[null, null]`) in `strict`; `hr(L[1])` gives `"[object Object]2"` in
+  `strict` only. With `mode: 'complex'` both give the interpreter's
+  values. In `strict`, `wideIsComplex()` answers false for `number`, and
+  `typeHasComplexLeaf()` is false for a `number` element, so a `number`
+  binding is on the real lane. A prototype of option (a) (the complex lane
+  for a binding declared `number` in `strict`, a decline on GLSL, WGSL and
+  interval-js), measured against the part 1 run: declines javascript 47 →
+  117, glsl 44 → 82, interval-js 61 → 78; 15 keys (103 values) change;
+  715 CE tests fail in 89 files. The same prototype set to decline on every
+  target (option (b)): no value changes; declines javascript 47 → 109,
+  glsl 44 → 86, interval-js 61 → 78, in 17 documents; 101 of the 112
+  decline messages name `tuple<number, number>` or
+  `tuple<number, number, number>`. Both are corpus witnesses, so part 2
+  stopped. The prototype of (a) had three open problems: the annotation
+  of a parameter cannot be read inside the body, an inferred `number`
+  (an undeclared input) had to stay real, and a local declared `real`
+  bound to an element of a `list<number>` gave `NaN` (interpreter `0`).
+  The options and the recommendation, (d) a documented rule that a
+  `number` value in `strict` must be real, are in ROADMAP entry CE-751
+  (`decision needed`). The prototype patch is in the scratchpad of this
+  session (`ce751-prototype.patch`).
+- **What row 7 (the error model) can rely on.** Row 6 changes no lane code:
+  the lane of a binding in `strict` follows its static type, `number` is
+  real, and the recursive-call retry, the promotion suppression of
+  `mode: 'complex'` and the `lane-mismatch` declines stay as on
+  `1e6b928fb`. `javascript-value-facts.ts` and the absence module are not
+  changed by this row. If the user chooses (a), (b) or (c) for CE-751, the
+  lane of a `number` binding changes, and row 7 must measure again any
+  rule that reads a `NaN` from a real lane.
+
 ## 5. The growth guard (done 2026-11-02, commit 97c3d409a)
 
 Two numbers per commit in the nightly run, kept with its result: the code

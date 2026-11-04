@@ -202,7 +202,7 @@ const SUPPORTED_MODES: readonly string[] = COMPILE_MODES.filter(
 
 /**
  * The compile-mode declaration of a custom target (`CompileTarget.mode`,
- * `supportedModes`, `complexLift`, `complexIsReal`, `reset`): each is
+ * `supportedModes`, `complexLift`, `complexIsReal`): each is
  * well-formed when present, and a target that DECLARES `'complex'` provides
  * the two lowering hooks the complex discipline is emitted through — a
  * declaration without them is rejected here, at option validation, rather
@@ -236,7 +236,7 @@ function assertCompileTargetModesContract(
         'Invalid compile target: a target whose "supportedModes" includes "complex" must provide the "complexLift()" and "complexIsReal()" hooks'
       );
   }
-  for (const hook of ['complexLift', 'complexIsReal', 'reset'] as const)
+  for (const hook of ['complexLift', 'complexIsReal'] as const)
     if (target[hook] !== undefined && typeof target[hook] !== 'function')
       throw new Error(`Invalid compile target: "${hook}" must be a function`);
 }

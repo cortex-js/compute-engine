@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-798.
+Next free reference: CE-802.
 
 **Entry format.**
 
@@ -348,6 +348,129 @@ Type computed before `f` is assigned; a type that does not hold the value can gi
 reproduction above is the record.
 
 ## Collections, absence and broadcasting
+
+### CE-798. A selection over lists of different lengths is an error at boxing since 0.178.0; Tycho's alignment needs the uncut tree
+
+**Status:** decision needed; design, S. Tycho row 490
+(`~/dev/tycho/docs/COMPUTE_ENGINE.md`; Tycho ROADMAP row IY). Deferred by the
+user (2026-11-04, answered to Tycho): no option is chosen now, since 0 of the
+688 Desmos states of Tycho's round-trip audit of 0.178.0 reach the error;
+only hand-written rows do. The first version of the request, "cut to the
+shortest length again", was withdrawn by Tycho the same day: CE never cut
+these lists.
+**Witness:** corpus; `\left\{[1,5,20]<3:[1,2],[1,5,20]<10:[7,8,9]\right\}`.
+On 0.176.0, `ce.parse` gives the valid `Which([1,5,20] < 3, [1,2], [1,5,20]
+< 10, [7,8,9])` and only `.evaluate()` gives `Error("incompatible-dimensions",
+"3 vs 2")`; on 0.178.0 and on `477d875a0` the parse and the canonical box are
+already that error (`isValid` false). Tycho's pins, both `todo`:
+`tests/node/graph-paper/at-index-semantics.test.ts` ("D-293: the result is
+cut to the SHORTEST list") and
+`tests/node/graph-paper/parametric-3d-build-fan.test.ts`; instrument
+`scripts/repros/2026-11-04-ce490-literal-list-length-cut-repro.mts` in Tycho
+(NOT READY on 0.178.0 and on 0.176.0).
+
+Desmos cuts every list to the shortest length (`[1, 8]` for the example; the
+parametric `(t,[1,2,3]t,0)\{t>[0,1]\}` draws 2 curves). Tycho's own
+alignment (`at-index-semantics.ts`, D-293) reads the valid tree and cuts the
+lists before evaluation. Since 0.178.0 (CHANGELOG, "Element-wise selection
+takes a flat list of booleans"), `selectionArmError()` in
+`src/compute-engine/library/control-structures.ts` compares
+`staticListLength()` of each list condition and arm at canonicalization, so
+Tycho receives an `Error` expression and its alignment cannot run. A
+non-canonical parse or box (`ce.parse(latex, { canonical: false })`,
+`ce.box(json, { canonical: false })`) still gives the valid `Which` tree on
+`477d875a0` (measured 2026-11-04).
+
+The question, for the user to answer to Tycho:
+
+- **Tycho reads the non-canonical tree** when the canonical one is this
+  error, cuts the lists and boxes the result. No CE change; the 0.178.0 rule
+  stays. Cost: Tycho's alignment runs on a non-canonical tree, where the
+  operator and argument forms differ from the canonical ones.
+- **CE raises the error at evaluation again**, as 0.176.0 did: the static
+  check of `selectionArmError()` keeps the arm-kind checks and drops the
+  length comparison; `selectionArmCells()` keeps the error at evaluation. The
+  type of the selection then does not carry the length. Cost: a length mismatch
+  that the types show is reported later, and the 0.178.0 CHANGELOG rule is
+  reversed in the next release.
+- **CE cuts to the shortest length** (Desmos): a changed value for
+  `[1, 2] + [1, 2, 3]`-style mismatches in selections only; the first version
+  of Tycho's request. Not recommended by Tycho's session after its correction.
+
+Not part of the request: a number arm beside a point arm
+(`\{mod([1...4],2)>0:(1,2),-1\}`) stays `incompatible-type`; Tycho accepts
+that.
+
+### CE-800. An assignment refuses a symbolic point whose component type only overlaps the declared type, where a call accepts it (Tycho row 483)
+
+**Status:** decision needed; design, M. Tycho row 483
+(`~/dev/tycho/docs/COMPUTE_ENGINE.md`). Changes the documented contract of a
+declared type at assignment (`08-guide-types.md`: a declared symbol refuses a
+value whose type is not compatible).
+**Witness:** corpus; with `E = real | signed_infinity | nan`, `a` and `n`
+declared `real`, and `P` declared `tuple<E, E>`, `ce.assign("P",
+ce.parse("(-\\sqrt{1-a^2}, a)"))` throws `The value "(-sqrt(1 - a^2), a)" of
+type "tuple<complex, real>" is not compatible with the type "tuple<nan | real
+| signed_infinity, nan | real | signed_infinity>"`; so does `(\\frac{1}{n},
+a)`, typed `tuple<infinity | nan | real, real>`. The same values assign to a
+symbol declared `tuple<number, number>`, and the call `g((-\\sqrt{1-a^2},
+a))` with `g: (tuple<E, E>) -> unknown` is accepted, typed `nan | real |
+signed_infinity`. Reproduced on `477d875a0` with Tycho's instrument
+`scripts/repros/2026-11-04-ce483-symbolic-point-assign-repro.mts` (in Tycho;
+a copy that imports the CE source tree: the scratchpad of session 35022c78,
+`row483-repro.mts`). Tycho's document manager keeps its point values
+declared with `number` components until this is settled; three rows of
+`tests/node/ui/document-ce-manager-point-type.test.ts` stop binding with
+`E` components.
+
+The two checks use two rules. A call argument is admitted when its type
+OVERLAPS the parameter type (`liftedOperandCannotFit()` and the argument
+checks of `boxed-expression/validate.ts`, with `typesOverlap()`), and the
+value is checked when it is bound to the parameter (0.178.0, row 484). An
+assignment to a symbol with a DECLARED type requires the value's type to
+match the declared type (`assertAssignableValueDef()` in
+`engine-declarations.ts`, through `matchesOrAbsent()` and
+`matchesDeclaredTypeAxes()` in `boxed-expression/effects-inference.ts`): a
+symbolic value typed `tuple<complex, real>` does not match `tuple<E, E>`,
+although every real `a` in `[-1, 1]` gives a value in it.
+
+Tycho asks that an assignment accept a symbolic value whose type overlaps the
+declared type and check the value when it is evaluated, as a call does. The
+question is the rule, not the mechanism:
+
+- **Overlap at assignment, check at evaluation** (Tycho's request): the
+  assignment accepts a value whose static type overlaps the declared type; a
+  value that evaluates outside the type is an error at that read (as a bound
+  argument is). Cost: a declared type stops being a static contract on the
+  stored value; a wrong assignment is reported at a later read, with the
+  symbol's name; the documented example `ce.declare("t", "gf8"); ce.assign("t",
+  2)` must still throw (the types are disjoint, so it does); the compiled
+  code of a symbol declared `tuple<E, E>` can hold a complex component at run
+  time, which R5 ("compiled code assumes every value holds its static type")
+  makes an unspecified result.
+- **Overlap only for a symbolic (non-literal) value**: a value with free
+  symbols is accepted on overlap, a literal value still matches. Smaller
+  change, same cost for the symbolic case.
+- **Keep the match rule**: Tycho declares its points with `number` components
+  (today's state) and loses the extended-real arithmetic of 0.178.0 for them.
+
+### CE-801. A point list plus a point over extended-real components types the components `infinity | nan | real` (Tycho row 483, second part)
+
+**Status:** ready; defect, S. Tycho row 483.
+**Witness:** corpus; with `E = real | signed_infinity | nan`, `L` declared
+`list<tuple<E, E>>` and `P` declared `tuple<E, E>`: `L + (1, 1)` and `L + P`
+are typed `list<tuple<infinity | nan | real, infinity | nan | real>>` on
+`477d875a0`; `P + (1, 1)` is `tuple<E, E>`. Tycho's `q_3 = p_0 + (1,1)`.
+
+0.178.0 ("Arithmetic on points whose components may be infinite keeps the
+signed infinities in the component types") fixed the point-plus-point case;
+the list-plus-point case still takes the component type from the scalar rule
+for `infinity`. Start from the type handler of `Add` for a list of points and
+the helper the 0.178.0 fix added for `tuple` operands (`library/arithmetic.ts`,
+the entries near "incompatible-dimensions"), and apply the same component
+rule to the broadcast over a list of points. Expected: `L + (1, 1)` typed
+`list<tuple<E, E>>`; a symbol declared `list<tuple<E, E>>` accepts the
+result.
 
 ### CE-797. An implicitly compiled Map reuses a captured parameter from an earlier call
 
@@ -2069,6 +2192,37 @@ reproduction above is the record.
 
 ## Compilation
 
+### CE-799. A call mapped over a list of points declines when a coordinate is a symbol with a bounded real type (Tycho row 486)
+
+**Status:** ready; defect, M. Tycho row 486 (`~/dev/tycho/docs/COMPUTE_ENGINE.md`).
+**Witness:** corpus; the Graph Paper document manager declares a plot axis
+`real<-1e15..1e15>`. With `x` and `y` declared `real<-10..10>`, `C :=
+(D, d) ↦ ((D - d) / 2, 0)` declared `function`, and `n` declared
+`(tuple<number, number>, unknown, unknown) -> tuple<number, number>` with the
+value `(q: tuple<number, number>, D2, d2) ↦ q + C(D2, d2)`, the JavaScript
+compilation of `n([(1, 2), (x, y)], 4, 2)` declines with `unsettled-shape`:
+"Could not compile a call of `_fn_C`: the argument "D2" has the type
+`unknown`, which does not settle one shape". With `x` and `y` declared `real`
+the same call compiles and gives `[(2, 2), (4, 4)]` at `x = 3, y = 4`.
+Reproduced on `477d875a0` with Tycho's instrument
+`scripts/repros/2026-11-04-ce486-bounded-axes-mapped-point-call-repro.mts`
+(in Tycho; a copy that imports the CE source tree: the scratchpad of session
+35022c78, `row486-repro.mts`).
+
+The repro of 2026-11-01 (`2026-11-01-ce486-mapped-point-call-untyped-param-repro.mts`
+in Tycho) declares the axes `real` and reads READY; Tycho's case does not.
+The arguments at `D2` and `d2` are the literals `4` and `2` in both cases:
+only the element type of the point list changes, from `tuple<number, number>`
+to a tuple with a ranged coordinate. The cause is not traced. Start in
+`compile-user-calls.ts` (the mapped call of a user function over a list of
+points) and `compile-user-specialization.ts`: find why the specialization that
+settles `D2` from the literal argument runs for the unranged list and not for
+the ranged one. Expected after the fix: the call compiles and gives the
+interpreter's value `[(2, 2), (4, 4)]` for both declarations; Tycho's pin is
+`tests/node/graph-paper/signature-propagation.test.ts` ("a point-returning
+head with a bare point parameter is refined to return the point"), marked
+`todo`.
+
 ### CE-785. The compiler's stack limit for a nested expression fell from about 420 to about 370 levels
 
 **Status:** ready; defect, S. User decision 2026-11-03: the nightly fall of the measured limit (first compile in a warm Jest worker) from 347 at `585acfab5` to 346 at `b10958fda` is accepted; it is not a new defect.
@@ -2090,40 +2244,61 @@ a loop. Then measure both limits again and update the comment of the test.
 
 ### CE-751. A `number` value that holds a complex number reaches code compiled for `real`
 
-**Status:** ready; wrong value, M. User decision 2026-11-01: option (a).
-**Witness:** plausible; `Map(g, L)` with `L: list<number>` at `[1+i, 2]` gives `[null, null]`; user decision 2026-11-01 option (a).
+**Status:** decision needed; wrong value, M. User decision 2026-11-01: option (a); measured 2026-11-04 (step 4, row 6 of `docs/plans/2026-11-02-compiler-contraction-plan.md`): (a) and (b) both change the corpus, so the decision is open again.
+**Witness:** plausible; `hr(L[1])` with `hr = (p: tuple<real, real>) ↦ p[1] + p[2]` and `L: list<tuple<number, real>>` at `[(1+i, 2)]` gives the string `"[object Object]2"` in the default mode; the interpreter gives `3 + i`.
 
-- `Map(g, L)` with `L: list<number>` at `[1+i, 2]` gives `[null, null]` on
-  JavaScript (block-local and engine-level `g`).
-- `hr = (p: tuple<real, real>) ↦ p[1] + p[2]`, `hr(L[1])` with
-  `L: list<tuple<number, real>>` at `[(1+i, 2)]` gives the string
-  `"[object Object]2"` in every mode; the interpreter gives `3 + i`.
+In the default mode (`strict`), the lane of a binding follows its static
+type. `number` admits a complex value, but `strict` reads a binding typed
+`number` (and a `number` element or tuple component) on the real lane, so
+a complex value there is used as if it were real. Measured on `1e6b928fb`
+(JavaScript):
 
-`number` is a union of the real and the complex shapes. The compiler
-compiles the element or the parameter for `real`, and does not detect the
-complex value. The static-shape rule (`docs/plans/2026-10-31-static-shape-compilation.md`)
-says that a declared union of shapes compiles with one dispatch at its
-binding, but it does not say whether `number` counts as such a union.
+- `Map(g, L)` with `g := x ↦ x^2` (engine-level or block-local) and
+  `L: list<number>` at `[1+i, 2]` gives `[null, 4]`; the interpreter gives
+  `[2i, 4]`.
+- `hr(L[1])` above gives `"[object Object]2"`.
+- With `mode: 'complex'` both give the interpreter's values.
 
-Question: what must the compiled code do with a `number` that reaches code
-compiled for `real`?
+Question: what must `strict` do with a binding typed `number`?
 
-- (a) Compile the value in the complex lane, as commit `c4e0a3bdb` does for a
-  complex value at a real parameter. Correct values; every `number` element
-  pays for complex arithmetic, also when all values are real.
-- (b) Decline when a `number` reaches code compiled for `real`. The
-  interpreter computes the value; the host declares `real` to compile.
+- (a) The complex lane for every binding declared `number`, and a decline
+  on the targets without a complex lane (GLSL, WGSL, interval-js). Cost,
+  measured on a prototype (Tycho `a34405ae0`, 757 documents, against the
+  same tree without the prototype): declines javascript 47 → 117, glsl 44
+  → 82, interval-js 61 → 78; 15 keys (103 values) change, for example
+  `asOklab(c_1)` of art/akrhs3cb8z, a list of colours that becomes one
+  colour of zero channels. In the CE tests: 715 failing tests in 89 files.
+  The prototype was not sound yet: a local declared `real` bound to an
+  element of a `list<number>` gave `NaN` where the interpreter gives `0`;
+  the annotation of a parameter (`(x: number) ↦ …`) cannot be told from no
+  annotation inside the body; and `Map(g, L)` still declines, because the
+  parameter of `g` is untyped.
+- (b) A decline in `strict` for every binding declared `number`, on every
+  target. Cost, measured the same way: no value changes; declines
+  javascript 47 → 109, glsl 44 → 86, interval-js 61 → 78, in 17 documents.
+  101 of the 112 decline messages name Tycho's point types
+  `tuple<number, number>` and `tuple<number, number, number>`.
+- (c) The (a) or (b) rule only for a `number` binding that is not a tuple
+  component (a scalar `number` or a `list<number>`). Not measured; in the
+  run of (b), 11 of the 112 messages name such a type (`vector<3>` 8,
+  `list<number>` 3). It does not fix the `hr` witness.
+- (d) No compiler change: state in `docs/COMPILATION-MODEL.md`, "Caveats of
+  compiled code", that in `strict` a value given for a `number` binding must
+  be real, as for an input value outside its type: a complex value there
+  gives an unspecified result. The host that passes complex values uses
+  `mode: 'complex'` or declares the binding `complex`. No corpus change.
 
-Recommendation: (a). With no decision, both examples keep their wrong
-values.
+Recommendation: (d). The two witnesses already give the interpreter's
+values with `mode: 'complex'`, which is the mode that the complex-lane rule
+of 0.178.0 names for complex values; (a) and (b) add corpus declines and
+(a) adds a second complex discipline to `strict`. Saying no to (d) means
+choosing (a), (b) or (c) at the cost above. With no decision, both
+examples keep their wrong values in `strict`.
 
-Option (a) compiles the value again in the complex lane, as the restart of
-`c4e0a3bdb` did. The complex-lane decision of 2026-11-02
-(`docs/plans/2026-11-02-language-axes-options.md`, page 6) removes the
-restart and makes `strict` the default, whose real lane reads a `number`
-element as real. So option (a) needs a mechanism without a restart: the
-complex lane for a `number` binding at compile time, or the decline of
-option (b). Plan item 3.4.6 records this.
+The prototype of (a) and (b) is saved as a patch in the scratchpad of
+session compute-engine-77
+(`/private/tmp/claude-501/-Users-arno-dev-compute-engine/f5622a83-be95-4f23-91dd-5b90d1dc468b/scratchpad/ce751-prototype.patch`,
+it lasts as long as that folder).
 
 ### CE-715. The `bigint` compile mode: the shapes it declines
 
