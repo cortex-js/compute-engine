@@ -1140,40 +1140,40 @@ describe('Reshape', () => {
   });
 
   it('has a static type with the target shape', () => {
-    // The type handler builds the shaped type with the `tensor` head: the
-    // type parser refuses a `list` with two or more axes.
+    // Each cell of the result is a cell of the operand, so the result has
+    // the cell type of the operand (`integer` here).
     const six = ['List', 1, 2, 3, 4, 5, 6];
     expect(ce.expr(['Reshape', six, ['Tuple', 2, 3]]).type.toString()).toBe(
-      'matrix<2x3>'
+      'matrix<integer^(2x3)>'
     );
     expect(
       ce.expr(['Reshape', six, ['Tuple', 3, 1, 2]]).type.toString()
-    ).toBe('tensor<number^(3x1x2)>');
+    ).toBe('tensor<integer^(3x1x2)>');
     expect(ce.expr(['Reshape', six, ['Tuple', 6]]).type.toString()).toBe(
-      'vector<6>'
+      'vector<integer^6>'
     );
     expect(ce.expr(['Reshape', 42, ['Tuple', 2, 2]]).type.toString()).toBe(
-      'matrix<2x2>'
+      'matrix<integer^(2x2)>'
     );
 
     // Each static type must hold the evaluated value. The type handler reads
     // number literals only, so an extent that is a symbol makes the shape
-    // unreadable: the static type is then the bare `tensor` (number cells,
-    // rank unknown), which holds the 2×2 matrix the evaluation gives when
-    // `n` is 2. The empty shape `()` evaluates to a scalar (the first cell),
-    // so its static type is `number`, not a list. A fresh engine keeps the
+    // unreadable: the static type is then a tensor of unknown rank
+    // (`tensor<integer>`), which holds the 2×2 matrix the evaluation gives
+    // when `n` is 2. The empty shape `()` evaluates to a scalar (the first
+    // cell), so its static type is the cell type, `integer`, not a list. A fresh engine keeps the
     // assignment of `n` out of the shared engine.
     const ce2 = new ComputeEngine();
     ce2.assign('n', 2);
     ce2.declare('m', 'integer');
     const cases: [Expression, string][] = [
-      [['Reshape', six, ['Tuple', 'n', 2]], 'tensor'],
-      [['Reshape', six, ['Tuple', 'm', 2]], 'tensor'],
-      [['Reshape', 42, ['Tuple', 'n', 2]], 'tensor'],
-      [['Reshape', six, ['Tuple']], 'number'],
-      [['Reshape', 42, ['Tuple']], 'number'],
-      [['Reshape', six, ['Tuple', 6]], 'vector<6>'],
-      [['Reshape', six, ['Tuple', 2, 3]], 'matrix<2x3>'],
+      [['Reshape', six, ['Tuple', 'n', 2]], 'tensor<integer>'],
+      [['Reshape', six, ['Tuple', 'm', 2]], 'tensor<integer>'],
+      [['Reshape', 42, ['Tuple', 'n', 2]], 'tensor<integer>'],
+      [['Reshape', six, ['Tuple']], 'integer'],
+      [['Reshape', 42, ['Tuple']], 'integer'],
+      [['Reshape', six, ['Tuple', 6]], 'vector<integer^6>'],
+      [['Reshape', six, ['Tuple', 2, 3]], 'matrix<integer^(2x3)>'],
     ];
     for (const [json, staticType] of cases) {
       const expr = ce2.box(json);

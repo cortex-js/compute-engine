@@ -138,7 +138,12 @@ describe('ITERATE WITH AN ABSENT INITIAL VALUE OR RESULT', () => {
         'x',
       ])
     );
-    expect(engine.box(['Iterate', 'u', 1]).type.toString()).toBe('list<any>');
+    // The call of `u` typed on the accumulator gives `missing | number`, and
+    // a further call on that type gives the same type, so it is the element
+    // type, with its absent arm.
+    expect(engine.box(['Iterate', 'u', 1]).type.toString()).toBe(
+      'list<missing | number>'
+    );
   });
 
   test('no absent value: the type is unchanged', () => {

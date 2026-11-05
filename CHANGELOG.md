@@ -2,6 +2,29 @@
 
 ### Resolved Issues
 
+- **[#512](https://github.com/cortex-js/compute-engine/issues/512) Collection
+  operators that keep the elements of their operand give the element type of
+  the operand.** `Flatten` of a `list<list<integer>>` was typed `list`, so an
+  element of it was typed `any`, and `Max(At(Flatten(xs), i), At(Flatten(xs),
+  j))` did not compile. Now `Flatten(xs)` is a `list<integer>`, and the `Max`
+  compiles. With a depth, the type has the levels that stay:
+  `Flatten(xs, 1)` of a `list<list<list<integer>>>` is a
+  `list<list<integer>>`. A list with a tuple element stays typed `list`. These
+  operators also keep the element type now:
+  `Chunk` (`list<list<integer>>`, was `list<list>`), `GroupBy`
+  (`dictionary<list<integer>>`, was `dictionary<list>`), `Cycle`, `Union`,
+  `Intersection`, `SetMinus`, `Complement`, `SymmetricDifference`, `Join` of
+  sets (`set<integer>`, was `set`), `Iterate` with a user function or a symbol
+  declared with a function type (`list<integer>`, was `list`), `Reshape`
+  (`matrix<integer^(2x2)>`, was `matrix<2x2>`), and `Tabulate` and `Table`
+  with a function literal (`vector<integer^5>`, was `vector<5>`). The
+  compiled JavaScript `Flatten` declines when it would open a tuple:
+  `Length(Flatten(xs))` with `xs` a list of points gave the number of
+  coordinates, not the number of points. `Flatten` now stays unevaluated when
+  an element is an infinite list (`Flatten([[1], Cycle([2])])`) or an
+  unevaluated read of a list (`Flatten([[1], At(xs, 1)])` with `xs` a list of
+  lists with no value).
+
 - **A series keeps its remainder under `N()`.** `Series(sin x).N()` and
   `Series(exp x).N()` were `NaN`, because a `BigO` term was `NaN` under `N()`.
   Now the `BigO` term stays, its operand is approximated, and the other terms

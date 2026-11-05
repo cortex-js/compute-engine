@@ -2068,6 +2068,11 @@ function conditionOperand(ce: ComputeEngine, cond: Expression): Expression {
     // (`isNeverFlatMaskType()`).
     if (isSubtype(type, COLLECTION_SHAPE_TYPE) && isNeverFlatMaskType(type))
       return ce.typeError(FLAT_MASK_TYPE, t, cond);
+    // A flat list of booleans is finite. A type does not state that a list
+    // is infinite: `Cycle([True, False])` is a `list<boolean>`, but it has no
+    // end, so it is refused here too.
+    if (cond.isFiniteCollection === false)
+      return ce.typeError(FLAT_MASK_TYPE, t, cond);
     return cond;
   }
   if (isSubtype('missing', type)) return cond;

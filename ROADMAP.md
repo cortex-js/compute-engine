@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-811.
+Next free reference: CE-814.
 
 **Entry format.**
 
@@ -344,6 +344,34 @@ reproduction above is the record.
 
 ## Collections, absence and broadcasting
 
+### CE-812. `Flatten` opens a tuple element or keeps it, according to the form of the call
+
+**Status:** ready; wrong value, S.
+**Witness:** plausible; `Flatten([(1, 2), (3, 4)])` gives `[(1, 2), (3, 4)]`, but `Flatten([(1, 2), (3, 4)], 1)` gives `[1, 2, 3, 4]` and `Flatten([(1, 2), (3, 4, 5)])` gives `[1, 2, 3, 4, 5]`; each should keep the tuples.
+
+The reference page of `Flatten` says that only elements with the head of the
+collection are flattened, so a tuple in a list stays whole. The tensor branch
+of the evaluate handler of `Flatten` (`linear-algebra.ts`) does that for a list
+of tuples of one shape. `flattenToDepth()` does not: it descends into every
+finite indexed collection except a string, and a tuple is one. The fix is to
+make `flattenToDepth()` keep a tuple element. Then `FLATTEN_LEAF_TYPE` can name
+`tuple`, so that `Flatten` of a list of points is typed
+`list<tuple<integer, integer>>` and not `list`. The JavaScript `Flatten` still
+declines for a tuple element (`flattenMayOpenKeptValue()`), because
+`Array.prototype.flat()` opens it.
+
+### CE-813. `N` is typed as its operand, but the value of a rational is a float
+
+**Status:** ready; defect, S.
+**Witness:** plausible; `N(1/3)` is typed `rational<0.33..0.34>`, and its value `0.333…` is typed `real<0.33..0.34>`, which does not match it; `Map(k ↦ N(k / 3), [1, 2])` is typed `vector<rational^2>` and holds floats. Each type should be a real type.
+
+The `type` handler of `N` (`core.ts`) answers the type of its operand, and
+`bareMappingElementTypeD()` (`collections.ts`) looks through an `N` or
+`NumericApproximation` wrapper of a function body for the same reason. The fix
+is a rational member of the operand type that becomes `real`. Then the
+`Tabulate` type handler no longer needs its test for a rational that is not an
+integer.
+
 ### CE-797. An implicitly compiled Map reuses a captured parameter from an earlier call
 
 **Status:** ready; wrong value.
@@ -594,6 +622,25 @@ A running sum of matrix rows is a one-line program; file says "check intent" fir
 reproduction above is the record.
 
 ## Evaluation, canonical forms and scoping
+
+### CE-811. An assignment that is the body of a `MatchCase` is the error `assignment-in-operand`
+
+**Status:** ready; defect, S. Found 2026-11-05 while reviewing GitHub issue #513.
+**Witness:** plausible; `Block(Assign(a, 0), Match(x, MatchCase(1, Assign(a, 2))), a)` is `Error(assignment-in-operand, a)` in its canonical form; the same program with the body `Block(Assign(a, 2))` is valid and gives `2` when `x` is `1`.
+
+`docs/ERROR-MODEL.md` ("Block locals") says that a case of a `Match` is a
+branch, as a branch of an `If` is: an assignment there to a declared name
+writes that name, and only a first assignment is an error
+(`first-assignment-in-branch`, which the `Match` canonical handler checks with
+`firstAssignmentInCase()`). But the rule that replaces an `Assign` or a
+`Declare` operand by `assignment-in-operand` (`withoutStatementOperands()` in
+`boxed-function.ts`) knows the statement positions of `If`, `Which` and `Loop`
+only (`isStatementPosition()`), and the body of a `MatchCase` is built before
+the `Match` handler sees it. Epsil is not affected: a `do { … }` case body is
+a `Block`, and a `Block` operand is never replaced. Fix: the guard and the body
+of a `MatchCase` (operands 1 and 2) are statement positions. If issue #513
+replaces the closed lists by a field of the operator definition, `MatchCase`
+declares its positions there and this entry is closed by that change.
 
 ### CE-752. A lazy view returned from a `Block` reads a valueless local as the global of the same name
 

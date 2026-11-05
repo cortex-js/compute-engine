@@ -224,12 +224,17 @@ const CASES: Case[] = [
     'S \\triangle \\lbrace 2\\rbrace',
     'set<integer | missing>',
   ],
-  ['Flatten', ['Flatten', 'L'], '\\mathrm{Flatten}(L)', 'list<any>'],
+  [
+    'Flatten',
+    ['Flatten', 'L'],
+    '\\mathrm{Flatten}(L)',
+    'list<integer | missing>',
+  ],
   [
     'Flatten of a nested list',
     ['Flatten', ['List', 'L', ['List', 2]]],
     '\\mathrm{Flatten}(\\lbrack L, \\lbrack 2\\rbrack\\rbrack)',
-    'list<any>',
+    'list<integer | missing>',
   ],
 ];
 
@@ -424,16 +429,22 @@ describe('THE ELEMENT TYPE OF A SET RESULT WITH AN ABSENT ELEMENT', () => {
   });
 });
 
-describe('WITH NO ABSENT ELEMENT, THE DECLARED RESULT IS KEPT', () => {
+// With no absent element, the result has the element type of the operands:
+// these operators keep each element as it is, so the type of an element of
+// the result is the type of an element of an operand.
+describe('WITH NO ABSENT ELEMENT, THE RESULT HAS THE ELEMENT TYPE OF THE OPERANDS', () => {
   test.each([
-    [['Union', ['Set', 1], ['Set', 2]], 'set'],
-    [['SetMinus', ['Set', 1, 2], 1], 'set'],
-    [['Join', ['Set', 1], ['Set', 2]], 'set'],
-    [['Flatten', ['List', ['List', 1], ['List', 2]]], 'list'],
+    [['Union', ['Set', 1], ['Set', 2]], 'set<integer>'],
+    [['SetMinus', ['Set', 1, 2], 1], 'set<integer>'],
+    [['Join', ['Set', 1], ['Set', 2]], 'set<integer>'],
+    [['Flatten', ['List', ['List', 1], ['List', 2]]], 'list<integer>'],
     [['DictionaryFrom', ['List', ['Tuple', "'a'", 1]]], 'dictionary'],
-    [['Chunk', ['List', 1, 2, 3], 2], 'list<list>'],
-    [['Cycle', ['List', 1, 2]], 'list'],
-    [['GroupBy', ['List', 1, 2], ['Function', 'x', 'x']], 'dictionary<list>'],
+    [['Chunk', ['List', 1, 2, 3], 2], 'list<list<integer>>'],
+    [['Cycle', ['List', 1, 2]], 'list<integer>'],
+    [
+      ['GroupBy', ['List', 1, 2], ['Function', 'x', 'x']],
+      'dictionary<list<integer>>',
+    ],
     [['Zip', ['List', 1, 2], ['List', 3, 4]], 'list<tuple<integer, integer>>'],
     // A cell of one source only may be absent: the pair is a tuple.
     [
@@ -451,9 +462,11 @@ describe('WITH NO ABSENT ELEMENT, THE DECLARED RESULT IS KEPT', () => {
 // some position makes the result admit an absent element, as an operand
 // with a `missing` arm does (`typeCouldHoldMissing`). Before, `Flatten(M)`
 // with `M: list<list<any>>` holding `[[1, Missing], [2]]` was typed `list`,
-// which admits values only, and evaluated to `[1, Missing, 2]`. A type that
-// excludes absence (`list<integer>`, bare `list`, `list<unknown>`) keeps
-// the declared result.
+// which admits values only, and evaluated to `[1, Missing, 2]`. An operand
+// whose type excludes absence gives the element type of its value: `N`,
+// `Bare` and `I` hold `[1, 2]` or `[1, 2, 3]`, so their type is a
+// `list<integer>` whatever their declared type (`list<unknown>`, `list`,
+// `list<integer>`).
 //
 describe('AN OPERAND TYPED WITH `any` CAN HOLD AN ABSENT ELEMENT', () => {
   const ce4 = new ComputeEngine();
@@ -516,16 +529,16 @@ describe('AN OPERAND TYPED WITH `any` CAN HOLD AN ABSENT ELEMENT', () => {
   });
 
   test.each([
-    [['Flatten', 'N'], 'list'],
-    [['Flatten', 'I'], 'list'],
-    [['Flatten', 'Bare'], 'list'],
-    [['Chunk', 'I', 2], 'list<list>'],
-    [['Cycle', 'I'], 'list'],
+    [['Flatten', 'N'], 'list<integer>'],
+    [['Flatten', 'I'], 'list<integer>'],
+    [['Flatten', 'Bare'], 'list<integer>'],
+    [['Chunk', 'I', 2], 'list<list<integer>>'],
+    [['Cycle', 'I'], 'list<integer>'],
     [['Zip', 'I', 'I'], 'list<tuple<integer, integer>>'],
-    [['Join', 'N', ['Set', 2]], 'set'],
+    [['Join', 'N', ['Set', 2]], 'set<integer>'],
     // The `Sqrt` type handler types the elements (ROADMAP CE-45.2).
     [['Map', 'Sqrt', 'I'], 'list<complex>'],
-  ])('%j keeps the declared result', (json, type) => {
+  ])('%j has the element type of the operand', (json, type) => {
     expect(ce4.box(json as any).type.toString()).toBe(type);
   });
 });

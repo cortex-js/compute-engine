@@ -919,9 +919,10 @@ describe('chunking and combinatorics over a string yield INNER STRINGS', () => {
     const e = ce.box(['Chunk', str('abcdef'), 3]);
     expect(e.type.toString()).toBe('list<string>');
     expect(e.evaluate().toString()).toBe('["ab","cd","ef"]');
-    // A list source is untouched by the new arm.
+    // A list source is untouched by the new arm: its groups are lists of
+    // its elements.
     expect(ce.box(['Chunk', ['List', 1, 2, 3, 4], 2]).type.toString()).toBe(
-      'list<list>'
+      'list<list<integer>>'
     );
     expect(
       ce

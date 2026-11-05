@@ -1427,18 +1427,24 @@ function targetShapeDimensions(
 }
 
 /**
- * The result type of a `Reshape` with numeric cells, from the extents
- * `targetShapeDimensions()` reads. An empty shape gives a scalar cell,
- * `number`. An unreadable shape gives the bare `tensor` (number cells, rank
- * unknown), because the value can be a matrix or a tensor of any rank. A
- * known shape gives `tensor<number^AxB…>`, spelled with the `tensor` head
- * because the type parser refuses a `list` with two or more axes; the
- * parser reads one axis as a `vector` and two axes as a `matrix`.
+ * The result type of a `Reshape` whose cells have the numeric type `cell`,
+ * from the extents `targetShapeDimensions()` reads. Each cell of the result
+ * is a cell of the operand (the evaluate handler repeats the cells of the
+ * operand to fill the shape), so the result has the cell type of the
+ * operand: `Reshape(xs, (2, 2))` with `xs` a `list<integer>` is a
+ * `matrix<integer^2x2>`. An empty shape gives a scalar cell, `cell`. An
+ * unreadable shape gives a tensor of `cell` of unknown rank, because the
+ * value can be a matrix or a tensor of any rank. A known shape gives a list
+ * type with these dimensions (`tensor<cell^AxB…>`).
  */
-function reshapeResultType(dims: number[] | undefined): string {
-  if (dims === undefined) return 'tensor';
-  if (dims.length === 0) return 'number';
-  return `tensor<number^${dims.join('x')}>`;
+function reshapeResultType(
+  dims: number[] | undefined,
+  cell: Type
+): Type {
+  if (dims === undefined)
+    return { kind: 'list', elements: cell, dimensions: null };
+  if (dims.length === 0) return cell;
+  return { kind: 'list', elements: cell, dimensions: dims };
 }
 
 /**
@@ -2849,9 +2855,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       type: ([value, shape], context) => {
         const dims = targetShapeDimensions(shape);
         if (isSubtype(value.type, 'number')) {
-          // Scalar input
+          // Scalar input. A number literal gives its tier (`integer` for
+          // `3`), not its value-carrying type: the result holds copies of
+          // the value, and a composite type states the tier of its cells.
+          const s = value.structureOf?.();
           return BoxedType.forResult(
-            parseType(reshapeResultType(dims)),
+            reshapeResultType(dims, s?.kind === 'number' ? s.tier : value.type),
             context.engine._typeResolver
           );
         }
@@ -2867,10 +2876,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // are its rows (`collectionElementType`), and a `list<vector<integer>>`
         // reaches `integer` two levels down. Reading `elements` directly
         // would take a row type for a cell type.
-        if (!isSubtype(reshapeCellType(value.type), 'number'))
+        const cell = reshapeCellType(value.type);
+        if (!isSubtype(cell, 'number'))
           return BoxedType.forResult('value', context.engine._typeResolver);
         return BoxedType.forResult(
-          parseType(reshapeResultType(dims)),
+          reshapeResultType(dims, cell),
           context.engine._typeResolver
         );
       },
@@ -2958,21 +2968,41 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Flatten a tensor or collection into a list.',
       complexity: 8200,
       signature: '(value, integer?) -> list',
-      // The declared result, the bare `list`, also admits absent elements (it
-      // matches `list<any>`), but its element type is open and can be refined
-      // from a later assignment. Flatten does not compute from an element: an
-      // absent element of the operand, at any depth, is an element of the
-      // result (`Flatten([[1, Missing], [2]])` is `[1, Missing, 2]`). So when
-      // the operand can hold an absent element (a `missing` arm, or `any`,
-      // which admits the absence markers: `typeCouldHoldMissing`), the result
-      // is `list<any>`, a fixed type that states the absent element. The
-      // element type is not computed: the depth operand and the tensor and
-      // string rules of the evaluate handler decide which elements are
-      // leaves.
-      type: ([xs], context) =>
-        xs !== undefined && typeCouldHoldMissing(xs.type)
+      // When the type of the operand settles which elements are lists, the
+      // result is a list of the leaf type: `Flatten(xs)` with `xs` a
+      // `list<list<integer>>` is a `list<integer>`, and `Flatten(xs, 1)` with
+      // `xs` a `list<list<list<integer>>>` is a `list<list<integer>>`
+      // (`flattenResultElementType()`). The depth must then be absent or an
+      // integer literal. An absent element of the operand, at any depth, is
+      // an element of the result (`Flatten([[1, Missing], [2]])` is
+      // `[1, Missing, 2]`), and the leaf type keeps its `missing` arm.
+      //
+      // Otherwise the declared result, the bare `list`, applies. It also
+      // admits absent elements, but its element type is open and can be
+      // refined from a later assignment. So when the operand can hold an
+      // absent element (a `missing` arm, or `any`, which admits the absence
+      // markers: `typeCouldHoldMissing`), the result is `list<any>`, a fixed
+      // type that states the absent element.
+      type: ([xs, depthOperand], context) => {
+        if (xs === undefined) return undefined;
+        const depth =
+          depthOperand === undefined
+            ? Infinity
+            : operandLiteralValue(depthOperand);
+        const elements =
+          depth === Infinity ||
+          (depth !== undefined && Number.isInteger(depth) && depth >= 0)
+            ? flattenResultElementType(xs.type, depth)
+            : undefined;
+        if (elements !== undefined && elements !== 'never')
+          return BoxedType.forResult(
+            { kind: 'list', elements },
+            context.engine._typeResolver
+          );
+        return typeCouldHoldMissing(xs.type)
           ? BoxedType.forResult('list<any>', context.engine._typeResolver)
-          : undefined,
+          : undefined;
+      },
       // Provable declines only. The evaluate handler succeeds on three shapes:
       // a scalar (wrapped in a one-element list), a tensor value, and a finite
       // indexed collection — the last two imply a walkable operand, so an
@@ -9153,15 +9183,188 @@ function buildNestedList(
 }
 
 /**
+ * The types of the values that `Flatten` keeps as one element at every depth:
+ * a number, a boolean, a string, a set, a dictionary, a record, a function,
+ * and the absence markers `Missing` and `Nothing`.
+ *
+ * A tuple is not in it. A list of tuples with one shape keeps them
+ * (`Flatten([(1, 2), (3, 4)])`, the tensor branch of the evaluate handler),
+ * but `flattenToDepth()` opens a tuple (`Flatten([(1, 2), (3, 4)], 1)` is
+ * `[1, 2, 3, 4]`, and so is `Flatten([(1, 2), (3, 4, 5)])` for the elements
+ * of a list of different shapes). So a tuple element settles no element type.
+ */
+const FLATTEN_LEAF_TYPE = parseType(
+  'number | boolean | string | set | dictionary | record | function | missing | nothing'
+);
+
+/**
+ * The type of the leaves that `Flatten` gives for elements of type `type`,
+ * when it descends at most `depth` more levels into them (`Infinity`: the
+ * full flatten). `undefined` when the type does not settle which elements
+ * are opened, and so which elements are leaves.
+ *
+ * The type gives the leaves only when each of its union members is either a
+ * list type (`isSubtype(t, 'list')`: the leaves of its elements, one level
+ * deeper) or a member of `FLATTEN_LEAF_TYPE` (that member itself). Any other
+ * member gives `undefined`: a tuple, and a member that can be a list or
+ * something else, such as `any`, `unknown`, `value`, `expression` or
+ * `indexed_collection<integer>`.
+ *
+ * Examples: `list<integer>` with depth `Infinity` gives `integer`;
+ * `list<list<integer>>` with depth 1 gives `list<integer>`;
+ * `integer | list<real>` gives `integer | real`.
+ *
+ * `levels` limits the recursion: an element type of `tensor<T>` is
+ * `T | tensor<T>`, which would recurse without end at an infinite depth.
+ * Past the limit the answer is `undefined`.
+ */
+function flattenLeafType(
+  type: Readonly<Type>,
+  depth: number,
+  levels = 32
+): Type | undefined {
+  if (depth <= 0) return type as Type;
+  if (levels <= 0) return undefined;
+  type = resolveTypeAlias(type);
+  if (typeof type !== 'string' && type.kind === 'union') {
+    const arms: Type[] = [];
+    for (const arm of type.types) {
+      const leaf = flattenLeafType(arm, depth, levels - 1);
+      if (leaf === undefined) return undefined;
+      arms.push(leaf);
+    }
+    return reduceType({ kind: 'union', types: arms });
+  }
+  if (type !== 'never' && isSubtype(type, 'list')) {
+    const elements = collectionElementType(type);
+    if (elements === undefined) return undefined;
+    return flattenLeafType(elements, depth - 1, levels - 1);
+  }
+  if (isSubtype(type, FLATTEN_LEAF_TYPE)) return type as Type;
+  return undefined;
+}
+
+/**
+ * The element type of `Flatten(xs, depth)` for an operand `xs` of type
+ * `type`, or `undefined` when the type does not settle it. The evaluate
+ * handler of `Flatten` makes a one-element list of a number or a string
+ * operand, and walks the elements of a list or a tuple operand. Any other
+ * operand (a set, a dictionary) stays unevaluated, so no element type is
+ * given for it.
+ */
+function flattenResultElementType(
+  type: Readonly<Type>,
+  depth: number
+): Type | undefined {
+  type = resolveTypeAlias(type);
+  if (typeof type !== 'string' && type.kind === 'union') {
+    const arms: Type[] = [];
+    for (const arm of type.types) {
+      const leaf = flattenResultElementType(arm, depth);
+      if (leaf === undefined) return undefined;
+      arms.push(leaf);
+    }
+    return reduceType({ kind: 'union', types: arms });
+  }
+  if (type === 'never') return undefined;
+  if (isSubtype(type, 'number') || isSubtype(type, 'string'))
+    return type as Type;
+  if (isSubtype(type, 'list') || isSubtype(type, 'tuple')) {
+    const elements = collectionElementType(type);
+    if (elements === undefined) return undefined;
+    return flattenLeafType(elements, depth);
+  }
+  return undefined;
+}
+
+/**
+ * The types of the values that `Flatten` keeps as one element and that
+ * compiled JavaScript does not hold as an array: a compiled
+ * `Array.prototype.flat()` keeps them as one element too. A tuple is not in
+ * it: it is an array in compiled code, and the interpreter can keep it
+ * (`FLATTEN_LEAF_TYPE`). A set is not in it either: the `Set` operator has no
+ * JavaScript lowering, so no form of a set in compiled code is known to stay
+ * whole under `flat()`.
+ */
+const FLATTEN_NON_ARRAY_LEAF_TYPE = parseType(
+  'number | boolean | string | dictionary | record | function | missing | nothing'
+);
+
+/**
+ * True when a compiled JavaScript `Flatten(xs, depth)`, which is
+ * `xs.flat(depth)`, can open a value that the interpreter keeps as one
+ * element, for an operand `xs` of type `type`. `flat()` opens every nested
+ * array, and compiled code holds a tuple as an array. The interpreter keeps a
+ * set, and can keep a tuple: `Flatten([(1, 2), (3, 4)])` is
+ * `[(1, 2), (3, 4)]`, where `flat()` would give `[1, 2, 3, 4]`.
+ *
+ * The answer is `false` only when the type shows that every element reached
+ * at a level where `flat()` still descends is a list or a member of
+ * `FLATTEN_NON_ARRAY_LEAF_TYPE`. Pass `Infinity` for a depth that is not a
+ * literal: it is the most that `flat()` descends. At an infinite depth, a
+ * union member that is a list type already on the descent (the
+ * `T | tensor<T>` elements of `tensor<T>`) is skipped: its elements are
+ * checked where it was first met.
+ */
+export function flattenMayOpenKeptValue(
+  type: Readonly<Type>,
+  depth: number
+): boolean {
+  const seen = new Set<string>();
+  const check = (t: Readonly<Type>, depth: number, levels: number): boolean => {
+    if (depth <= 0) return false;
+    if (levels <= 0) return true;
+    t = resolveTypeAlias(t);
+    if (typeof t !== 'string' && t.kind === 'union')
+      return t.types.some((arm) => check(arm, depth, levels - 1));
+    if (t !== 'never' && isSubtype(t, 'list')) {
+      const key = JSON.stringify(t);
+      if (depth === Infinity) {
+        if (seen.has(key)) return false;
+        seen.add(key);
+      }
+      const elements = collectionElementType(t);
+      return elements === undefined || check(elements, depth - 1, levels - 1);
+    }
+    return !isSubtype(t, FLATTEN_NON_ARRAY_LEAF_TYPE);
+  };
+  // The operand itself is opened when it is a list or a tuple (a tuple
+  // operand is opened by both), and wrapped in a list when it is a number
+  // or a string.
+  const operand = (t: Readonly<Type>): boolean => {
+    t = resolveTypeAlias(t);
+    if (typeof t !== 'string' && t.kind === 'union') return t.types.some(operand);
+    if (t === 'never' || isSubtype(t, 'number') || isSubtype(t, 'string'))
+      return false;
+    if (isSubtype(t, 'list') || isSubtype(t, 'tuple')) {
+      const elements = collectionElementType(t);
+      return elements === undefined || check(elements, depth, 32);
+    }
+    return true;
+  };
+  return operand(type);
+}
+
+/** True when `type` is a list type, or a union with a list type as a member. */
+function typeHasListMember(type: Readonly<Type>): boolean {
+  const t = resolveTypeAlias(type);
+  if (typeof t !== 'string' && t.kind === 'union')
+    return t.types.some(typeHasListMember);
+  return t !== 'never' && isSubtype(t, 'list');
+}
+
+/**
  * Return the elements of the collection `xs` flattened up to `depth` nesting
  * levels (Wolfram `Flatten[list, n]`). At `depth` 0 the elements are returned
  * as-is; each level splices the contents of collection-valued elements.
  *
  * Return `undefined` when an element to splice is a finite indexed
  * collection whose elements cannot be computed (`Linspace(a, 1, 3)` with a
- * symbolic `a`). Such an element cannot be spliced, and keeping it as a leaf
- * gives a list with the wrong elements and the wrong count, so the caller
- * must leave the `Flatten` unevaluated.
+ * symbolic `a`), an indexed collection that is infinite or not known to be
+ * finite (`Cycle([2])`), or an unevaluated expression that can be a list.
+ * Such an element cannot be spliced, and keeping it as a leaf gives a list
+ * with the wrong elements and the wrong count, and a value that the result
+ * type does not hold, so the caller must leave the `Flatten` unevaluated.
  */
 function flattenToDepth(
   xs: Expression,
@@ -9177,14 +9380,16 @@ function flattenToDepth(
       const items = flattenToDepth(e, depth - 1);
       if (items === undefined) return undefined;
       result.push(...items);
-    } else if (
-      depth >= 1 &&
-      e.isFiniteCollection === true &&
-      e.isIndexedCollection &&
-      !isString(e)
-    ) {
-      // A finite indexed collection that `isFiniteIndexedCollection()`
-      // rejects: its elements cannot be computed.
+    } else if (depth >= 1 && e.isIndexedCollection && !isString(e)) {
+      // An indexed collection that `isFiniteIndexedCollection()` rejects:
+      // its elements cannot be computed, or it is infinite, or its finiteness
+      // is not known (`Filter(Cycle([2]), p)`).
+      return undefined;
+    } else if (depth >= 1 && !isString(e) && typeHasListMember(e.type.type)) {
+      // An expression that stays unevaluated and can be a list, such as
+      // `At(ll, 1)` with `ll` a `list<list<integer>>` with no value:
+      // `Flatten([[1], At(ll, 1)])` kept it as one element, so its count was
+      // 2, and the result type `list<integer>` did not hold it.
       return undefined;
     } else if (depth >= 1 && innerCollectionCannotBeWalked(e)) {
       // A collection that cannot be walked now, such as a symbol `v` of a

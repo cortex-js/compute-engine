@@ -5403,21 +5403,33 @@ function isUserFunctionName(engine: PureEngineView, name: string): boolean {
  * accumulator typed as the initial value (`unknown` when there is none),
  * and once more with the accumulator typed as the join of the initial value
  * and that first answer, so that a second step that can answer `Missing` is
- * seen too. The answer is the join of the two.
+ * seen too. `type` is the join of the two answers.
+ *
+ * `closed` is true when the second answer is a subtype of the join `J` of
+ * the initial value and the first answer. Then every element is in `J` (by
+ * induction: the first element is the first answer, and a call on a value
+ * of `J` answers in `J`), so every element after the first is in the second
+ * answer, and `type` is the type of every element. When it is false, the
+ * answers can grow at each step (`x ↦ [x]` gives `[1]`, `[[1]]`, …), and
+ * `type` only says whether an element can be absent.
+ *
+ * With `declaredValues`, `fn` can also be a symbol declared with a function
+ * type and no value (`g: (integer) -> integer`). A library operator is never
+ * accepted: the type handlers of some operators do not give the type of a
+ * call on a stand-in operand (`AbsArg`, `NotLess`).
  */
 function iterateCallResultTypeD(
   fn: OperandDescriptor,
   initial: OperandDescriptor | undefined,
   engine: PureEngineView,
-  derive: TypeHandlerContext['derive']
-): Type | undefined {
+  derive: TypeHandlerContext['derive'],
+  declaredValues = false
+): { type: Type; closed: boolean } | undefined {
   const s = fn.structureOf?.();
-  if (
-    s?.kind !== 'symbol' ||
-    s.lookupByName === false ||
-    !isUserFunctionName(engine, s.name)
-  )
-    return undefined;
+  if (s?.kind !== 'symbol' || s.lookupByName === false) return undefined;
+  const isDeclaredValue =
+    declaredValues && engine.lookupDefinition(s.name)?.operator === undefined;
+  if (!isDeclaredValue && !isUserFunctionName(engine, s.name)) return undefined;
   const unary = requiredArity(fn.type) === 1;
   const call = (acc: Type): Type | undefined => {
     const args = unary
@@ -5429,9 +5441,13 @@ function iterateCallResultTypeD(
   const seed = initial?.type ?? 'unknown';
   const first = call(seed);
   if (first === undefined) return undefined;
-  const second = call(widen(seed, first) as Type);
+  const joined = widen(seed, first) as Type;
+  const second = call(joined);
   if (second === undefined) return undefined;
-  return reduceType({ kind: 'union', types: [first, second] });
+  return {
+    type: reduceType({ kind: 'union', types: [first, second] }),
+    closed: seed !== 'unknown' && isSubtype(second, joined),
+  };
 }
 
 /**
@@ -6460,39 +6476,39 @@ function joinedElementTypeD(
 }
 
 /**
- * The result type of an operator whose declared result is a collection type
- * that leaves its element type open (`list`, `list<list>`, `dictionary<list>`;
- * these also admit absent cells, but do not state them), when
- * the cells of its collection operand `xs` can be absent (a `missing` arm,
- * or `any`, which admits the absence markers: `typeCouldHoldMissing`);
- * `undefined`
- * otherwise, and the declared result applies.
+ * The result type of an operator that keeps each cell of its collection
+ * operand `xs` as it is, absent ones included (`Cycle`, `Chunk`, `GroupBy`),
+ * and whose declared result is a collection type that leaves its element
+ * type open (`list`, `list<list>`, `dictionary<list>`). `wrap` builds the
+ * result type from the element type of `xs`.
  *
- * The operator keeps each cell of `xs` as it is, absent ones included
- * (`Cycle`, `Chunk`, `GroupBy`), so the result type must keep the `missing`
- * arm of the cells. `wrap` builds the result type from the element type of
- * `xs`, which is `any` when the type of `xs` does not say what its elements
- * are. The operand comes with the `missing` arm of its cells: these
+ * When `xs` is a list or a set whose type states its element type, the
+ * result has that element type, with its `missing` arm if it has one:
+ * `Chunk(xs, 2)` with `xs` a `list<integer>` is a `list<list<integer>>`.
+ * Only a list or a set: the string rule of `Chunk` makes groups that are
+ * strings, not lists of characters, and the signature states it.
+ *
+ * Otherwise the declared result applies (`undefined`). It also admits
+ * absent cells, but does not state them. So when the cells of `xs` can be
+ * absent (a `missing` arm, or `any`, which admits the absence markers:
+ * `typeCouldHoldMissing`), the result is built with the element type `any`
+ * instead. The operand comes with the `missing` arm of its cells: these
  * operators are in `ABSENT_CELLS_PASS_THROUGH` (`broadcast-lift-type.ts`).
- *
- * The result is computed only in that case. A precise element type in
- * every case was tried and broke a program: in `Chunk(Map(f, cs), 5)`,
- * with `cs` a list of characters and `f` a function with no declared
- * result that returns strings, `Map` is typed `list<character>`, so each
- * group was typed `list<character>`, and a function applied to the groups
- * refused them (`test/epsil/corpus/exercism/atbash-cipher.epsil`).
  */
-function absentCellsResultType(
+function cellsResultType(
   xs: OperandDescriptor | undefined,
   context: TypeHandlerContext,
   wrap: (elements: Type) => Type
 ): BoxedType | undefined {
-  if (xs === undefined || !typeCouldHoldMissing(xs.type)) return undefined;
-  const elements = collectionElementType(xs.type);
-  return BoxedType.forResult(
-    wrap(elements === undefined || elements === 'unknown' ? 'any' : elements),
-    context.engine._typeResolver
-  );
+  if (xs === undefined) return undefined;
+  const elements =
+    isSubtype(xs.type, 'list') || isSubtype(xs.type, 'set')
+      ? collectionElementType(xs.type)
+      : undefined;
+  if (elements !== undefined && elements !== 'unknown' && elements !== 'any')
+    return BoxedType.forResult(wrap(elements), context.engine._typeResolver);
+  if (!typeCouldHoldMissing(xs.type)) return undefined;
+  return BoxedType.forResult(wrap('any'), context.engine._typeResolver);
 }
 
 /**
@@ -6519,24 +6535,26 @@ function joinResultTypeD(ops: ReadonlyArray<OperandDescriptor>): Type {
   if (ops.some((op) => isSubtype(op.type, DICTIONARY_SHAPE_TYPE)))
     return 'dictionary';
   if (ops.some((op) => isSubtype(op.type, SET_SHAPE_TYPE))) {
-    // The bare `set` leaves the element type open. That is enough when no
-    // operand can hold an absent element (a `missing` arm, or `any`, which
-    // admits the absence markers: `typeCouldHoldMissing`). When one can, the
-    // joined set holds it as it is (`Join({1, Missing}, {2})` is
-    // `{1, 2, Missing}`), so the type states it: the set of the joined
-    // element types, or
-    // `set<any>` when an operand does not say what its elements are. An
-    // operand typed `unknown` (a call `q(1)` of a function declared
-    // `-> unknown`) contributes the placeholder `unknown`, which the widening
-    // drops, so such an operand gives `set<any>` too.
-    if (!ops.some((op) => typeCouldHoldMissing(op.type))) return 'set';
+    // The joined set holds each element of the operands as it is, absent
+    // ones included (`Join({1, Missing}, {2})` is `{1, 2, Missing}`), so its
+    // type is the set of the joined element types. When an operand does not
+    // say what its elements are, the bare `set` leaves the element type
+    // open; but when an operand can hold an absent element (a `missing` arm,
+    // or `any`, which admits the absence markers: `typeCouldHoldMissing`),
+    // the type must state it, so it is `set<any>`. An operand typed
+    // `unknown` (a call `q(1)` of a function declared `-> unknown`)
+    // contributes the placeholder `unknown`, which the widening drops, so
+    // such an operand gives an unstated element type too.
     const unstated = ops.some(
       (op) =>
         !isAtomicJoinOperandD(op) &&
         (collectionElementType(op.type) ?? 'unknown') === 'unknown'
     );
     const elements = unstated ? undefined : joinedElementTypeD(ops);
-    return { kind: 'set', elements: elements ?? 'any' };
+    if (elements !== undefined) return { kind: 'set', elements };
+    return ops.some((op) => typeCouldHoldMissing(op.type))
+      ? { kind: 'set', elements: 'any' }
+      : 'set';
   }
 
   const kind = ops.some(
@@ -20282,10 +20300,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             ),
             { engine, derive }
           );
+        // The generator is always called with integer indexes, so the type
+        // of that call is sound, and it is more precise than the result type
+        // of a function literal, which is typed with parameters of unknown
+        // type: `k ↦ 2k` is typed `(unknown) -> number`, but its call on an
+        // integer is an `integer`. It replaces the result type when that is
+        // not known, or when it is a subtype of it. Not for a rational that is
+        // not an integer: `N` is typed as its operand, so the call of
+        // `k ↦ N(k / 3)` is typed `rational`, but its values are floats.
         if (
-          (elements === 'unknown' || elements === 'any') &&
           inferred !== undefined &&
-          inferred !== 'unknown'
+          inferred !== 'unknown' &&
+          inferred !== 'error' &&
+          (elements === 'unknown' ||
+            elements === 'any' ||
+            (isSubtype(inferred, elements) &&
+              (isSubtype(inferred, 'integer') ||
+                !isSubtype(inferred, 'rational'))))
         )
           elements = inferred;
         if (resultMayBeNothing(ops[0], engine, true, elements))
@@ -20930,14 +20961,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // set held by a symbol of a wider declared type by `evaluate`.
     signature:
       '((S, integer) -> list<string> where S: string) & ((indexed_collection, integer) -> list<list>)',
-    // The declared result, `list<list>`, also admits absent cells, but leaves
-    // their type open. A group keeps the cells of the source as they are,
-    // absent ones included (`Chunk([1, Missing, 3], 2)` is
-    // `[[1, Missing], [3]]`), so when the cells of the source can be absent,
-    // the groups are typed with them
-    // (`absentCellsResultType`).
+    // A group keeps the cells of the source as they are, absent ones
+    // included (`Chunk([1, Missing, 3], 2)` is `[[1, Missing], [3]]`), so a
+    // group of a list source has the element type of the source:
+    // `Chunk(xs, 2)` with `xs` a `list<integer>` is a `list<list<integer>>`
+    // (`cellsResultType`).
     type: ([xs], context) =>
-      absentCellsResultType(xs, context, (elements) => ({
+      cellsResultType(xs, context, (elements) => ({
         kind: 'list',
         elements: { kind: 'list', elements },
       })),
@@ -21194,12 +21224,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '(collection<T>, key: (T) any -> unknown) -> dictionary<list> where T',
-    // The declared result, `dictionary<list>`, also admits absent elements,
-    // but leaves their type open. A group keeps the elements of the source as
-    // they are, absent ones included, so when the elements of the source can
-    // be absent, the groups are typed with them (`absentCellsResultType`).
+    // A group keeps the elements of the source as they are, absent ones
+    // included, so a group of a list or a set source is a list of the
+    // element type of the source: `GroupBy(xs, f)` with `xs` a
+    // `list<integer>` is a `dictionary<list<integer>>` (`cellsResultType`).
     type: ([xs], context) =>
-      absentCellsResultType(xs, context, (elements) => ({
+      cellsResultType(xs, context, (elements) => ({
         kind: 'dictionary',
         values: { kind: 'list', elements },
       })),
@@ -21359,12 +21389,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // uncallable). The primitive is shape-top and effect-top, which is the
     // honest statement of what is checkable here.
     signature: '(function, initial: any?) -> list',
-    // The bare `list` of the signature also admits absent elements, but leaves
-    // the element type open. An element can be absent when the initial value
-    // can be absent (`Iterate(x ↦ x, Missing)` is `[Missing, Missing, …]`) or
-    // when the function can answer `Missing` (`x ↦ If(x > 2, Missing, x +
-    // 1)`). The result type then states an absent element: `list<any>`,
-    // because no other element type is known.
+    // Every element is an answer of the function. So when a user function or
+    // a symbol declared with a function type names the function, and its call
+    // typed on the type of the initial value gives a type that a further call
+    // keeps (`iterateCallResultTypeD`, `closed`), that type is the element
+    // type: `Iterate(g, 1)` with `g` declared `(integer) -> integer` is a
+    // `list<integer>`. The result type of the signature does not give the
+    // elements: `f := x ↦ x + 1` is typed `(unknown) -> number`, but with the
+    // initial value `[1, 2]` its answers are lists. A function literal is typed
+    // that way too, and it gets no element type.
+    //
+    // Otherwise the bare `list` of the signature applies. It also admits
+    // absent elements, but leaves the element type open. An element can be
+    // absent when the initial value can be absent (`Iterate(x ↦ x, Missing)`
+    // is `[Missing, Missing, …]`) or when the function can answer `Missing`
+    // (`x ↦ If(x > 2, Missing, x + 1)`). The result type then states an
+    // absent element: `list<any>`, because no other element type is known.
     //
     // A function whose result type is `unknown` says nothing about absence:
     // `missing ⊔ unknown` is `unknown`, so `x ↦ If(x > 0, Missing, x)` and
@@ -21378,15 +21418,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         result =
           ops[0] === undefined
             ? undefined
-            : iterateCallResultTypeD(ops[0], ops[1], engine, derive);
+            : iterateCallResultTypeD(ops[0], ops[1], engine, derive)?.type;
+      const initialMayBeAbsent =
+        ops[1] !== undefined && typeCouldHoldMissing(ops[1].type);
       const mayBeAbsent =
-        (ops[1] !== undefined && typeCouldHoldMissing(ops[1].type)) ||
+        initialMayBeAbsent ||
         result === undefined ||
         result === 'unknown' ||
         typeCouldHoldMissing(result);
-      const type: Type = mayBeAbsent
-        ? { kind: 'list', elements: 'any' }
-        : 'list';
+      const elements =
+        ops[0] === undefined || initialMayBeAbsent
+          ? undefined
+          : iterateCallResultTypeD(ops[0], ops[1], engine, derive, true);
+      const type: Type = elements?.closed
+        ? { kind: 'list', elements: elements.type }
+        : mayBeAbsent
+          ? { kind: 'list', elements: 'any' }
+          : 'list';
       return BoxedType.forResult(
         ops[0] !== undefined && resultMayBeNothing(ops[0], engine, true, result)
           ? mapImmediateElements(type, withNothing)
@@ -21608,13 +21656,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `Set` of restricted cells.
     threadsConditionals: true,
     signature: '(list<any>) -> list',
-    // The declared result, the bare `list`, also admits absent cells, but
-    // leaves their type open. The cycle repeats the cells of the source as
-    // they are, absent ones included,
-    // so when the cells of the source can be absent, the result is typed
-    // with them (`absentCellsResultType`).
+    // The cycle repeats the cells of the source as they are, absent ones
+    // included, so it has the element type of the source: `Cycle(xs)` with
+    // `xs` a `list<integer>` is a `list<integer>` (`cellsResultType`).
     type: ([xs], context) =>
-      absentCellsResultType(xs, context, (elements) => ({
+      cellsResultType(xs, context, (elements) => ({
         kind: 'list',
         elements,
       })),

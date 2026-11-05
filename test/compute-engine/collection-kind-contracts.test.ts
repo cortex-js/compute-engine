@@ -276,7 +276,7 @@ describe('deduplication cannot wedge the iterator', () => {
     // the consumer's own deadline checks only run BETWEEN yields. Bounded by
     // `ce.iterationLimit`, exactly as `Dedup`'s iterator is.
     const j = ce.box(['Join', ['Set', 1], ['Repeat', 1]]).evaluate();
-    expect(j.type.toString()).toBe('set');
+    expect(j.type.toString()).toBe('set<integer>');
     const iter = j.each();
     expect(iter.next().value?.toString()).toBe('1');
     // The second pull is the one that used to never return.
@@ -293,7 +293,7 @@ describe('deduplication cannot wedge the iterator', () => {
     const j = ce
       .box(['Join', ['Set', 1, 2], ['Linspace', 'x', 'y']])
       .evaluate();
-    expect(j.type.toString()).toBe('set');
+    expect(j.type.toString()).toBe('set<number>');
     expect(j.count).toBeUndefined();
   });
 
@@ -304,7 +304,7 @@ describe('deduplication cannot wedge the iterator', () => {
     // count for no safety gained. 5000, not 5002 — `1` and `2` are already in
     // the range.
     const j = ce.box(['Join', ['Set', 1, 2], ['Range', 1, 5000]]).evaluate();
-    expect(j.type.toString()).toBe('set');
+    expect(j.type.toString()).toBe('set<integer>');
     expect(j.count).toBe(5000);
     // `isEmpty`/`isFinite` default to being derived from `count`; declaring
     // them explicitly keeps them (and the preview) alive even when a walk

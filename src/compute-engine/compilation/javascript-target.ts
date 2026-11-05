@@ -614,6 +614,7 @@ import {
   type BroadcastAsyncSpec,
 } from '../kernel-pool.js';
 import { literalParamsMap, pipeStageAsCall } from '../library/core.js';
+import { flattenMayOpenKeptValue } from '../library/linear-algebra.js';
 import { freeTypeVariables } from '../../common/type/instantiate.js';
 import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 import { isAccessorOfPossibleList } from '../boxed-expression/point-accessor-operand.js';
@@ -7833,6 +7834,22 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Flatten to a flat list (native `.flat`), or by an explicit number of
   // levels when a depth operand is given.
   Flatten: (args, compile) => {
+    // `flat()` opens every nested array, and compiled code holds a tuple as an
+    // array. The interpreter keeps a set, and can keep a tuple
+    // (`Flatten([(1, 2), (3, 4)])` is `[(1, 2), (3, 4)]`). So decline unless
+    // the operand type shows that `flat()` reaches no tuple or set. A depth
+    // that is not a literal is checked as the full depth, the most `flat()`
+    // can descend.
+    const depth = args[1] == null ? Infinity : tryGetConstant(args[1]);
+    if (
+      args[0] != null &&
+      flattenMayOpenKeptValue(args[0].type.type, depth ?? Infinity)
+    )
+      throw new Error(
+        'Could not compile `Flatten`: an element of the operand can be a tuple or a set, ' +
+          'which the interpreter can keep as one element and compiled code can open, ' +
+          'or the type of the operand does not show which elements are lists.'
+      );
     const coll = collArg('Flatten', args[0], compile);
     if (args[1] != null) return `(${coll}).flat(${compile(args[1])})`;
     return `(${coll}).flat(Infinity)`;

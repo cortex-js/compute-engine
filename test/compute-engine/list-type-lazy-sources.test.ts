@@ -80,12 +80,14 @@ describe('Range, Linspace, Comprehension and Tabulate are lists', () => {
 
   test('a tabulation is a list', () => {
     // The extent is a literal, so the length is known.
+    // The generator is called with integer indexes, so a square is a
+    // non-negative integer.
     expect(typeOf(['Tabulate', ['Function', ['Square', 'i'], 'i'], 3])).toBe(
-      'vector<3>'
+      'list<integer<0..>^3>'
     );
     expect(
       typeOf(['Tabulate', ['Function', ['Multiply', 'i', 'j'], 'i', 'j'], 2, 3])
-    ).toBe('matrix<2x3>');
+    ).toBe('matrix<integer^(2x3)>');
   });
 
   test('a generator with rows of unknown length gives no matrix', () => {
