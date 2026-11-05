@@ -319,12 +319,9 @@ function rebindEscapingBinderResult(
   // handler, when each value has no free variable.
   // A value with a free variable is not evaluated here, in the call frame:
   // its `x` would be read as the parameter `x`.
-  // A series keeps its `BigO` remainder, and a sum that holds a float and a
-  // `BigO` term folds to `NaN` (the remainder has no numeric value). The
-  // expansion is not folded here, so that `Normal` can strip the remainder
-  // first: `Normal(Series(sin x, x, 0, 3))` at `0.5` is `0.479…`; it was
-  // `NaN`, and the same under `.N()`.
-  return inlined !== rebound && closedValues && !inlined.has('BigO')
+  // A series keeps its `BigO` remainder through this fold:
+  // `Series(sin x, x, 0, 3)` at `0.5` is `0.479… + BigO(0.03125)`.
+  return inlined !== rebound && closedValues
     ? inlined.evaluate({ numericApproximation })
     : inlined;
 }
@@ -8909,18 +8906,21 @@ volumes
     //
     // **BigO**: the inert Landau remainder term.
     //
-    // Inert under `evaluate`/`simplify`. `.N()` of any expression containing
-    // `BigO` is `NaN` (the remainder is not a concrete value), and `compile()`
+    // Inert under `evaluate`, `simplify` and `.N()`: it has no evaluate
+    // handler, so only its operand is evaluated. Under `.N()` a series keeps
+    // its remainder and its other terms are approximated, as Mathematica's
+    // `N` does for a series: `Series(sin x).N()` is
+    // `x - 0.1666…x^3 + 0.008333…x^5 + BigO(x^7)`. The sum stays a sum,
+    // because `Add` does not fold a `BigO` term with a number. `compile()`
     // has no target for it (fails gracefully). Strip it with `Normal`.
     //
     BigO: {
       description:
-        'Landau big-O remainder term. Inert; any numeric approximation ' +
-        '(.N()) of an expression containing it is NaN.',
+        'Landau big-O remainder term. Inert; a numeric approximation ' +
+        '(.N()) keeps the term and approximates its operand. Strip it ' +
+        'with Normal.',
       broadcastable: false,
       signature: '(value) -> number',
-      evaluate: (_ops, { engine: ce, numericApproximation }) =>
-        numericApproximation ? ce.NaN : undefined,
     },
 
     //
@@ -8941,12 +8941,10 @@ volumes
       type: ([x], context) =>
         BoxedType.forResult(x?.type ?? 'value', context.engine._typeResolver),
       // Lazy: the operand is evaluated EXACTLY here, the remainder is
-      // stripped, and only then the numeric request is applied. When the
-      // operand arrived evaluated with the request, a numeric request made
-      // the series `NaN` before `Normal` saw it (`BigO` is `NaN` under
-      // `.N()`): `Normal(Series(sin x, x, 0, 3)).N()` was `NaN`, and so was
-      // the series at a float point. The held operand is unbound, so it is
-      // canonicalized first (see "lazy operators" in `ARCHITECTURE.md`).
+      // stripped, and only then the numeric request is applied, so the
+      // truncated polynomial is approximated from its exact coefficients.
+      // The held operand is unbound, so it is canonicalized first (see
+      // "lazy operators" in `ARCHITECTURE.md`).
       lazy: true,
       evaluate: ([x], { numericApproximation }) => {
         if (!x) return x;

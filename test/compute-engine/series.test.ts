@@ -306,17 +306,44 @@ describe('Series — numeric equivalence near the expansion point', () => {
 });
 
 //
-// N() poisoning
+// N() keeps the BigO remainder
 //
 
-describe('BigO poisons numeric evaluation', () => {
-  test('a series with a BigO term has NaN as its .N()', () => {
-    const s = series('\\sin x');
-    expect(s.N().isNaN).toBe(true);
+describe('BigO under numeric evaluation', () => {
+  test('a series keeps its BigO term under .N(); the other terms are approximated', () => {
+    const n = series('\\sin x').N();
+    expect(n.isNaN).not.toBe(true);
+    expect(n.operator).toBe('Add');
+    expect(n.toString()).toBe(
+      `x - 0.166666666666666666667 * x^3 + 0.00833333333333333333333 * x^5 + BigO(x^7)`
+    );
+    expect(series('e^x').N().toString()).toBe(
+      `1 + x + 0.5 * x^2 + 0.166666666666666666667 * x^3 + 0.0416666666666666666667 * x^4 + 0.00833333333333333333333 * x^5 + BigO(x^6)`
+    );
   });
 
-  test('a bare BigO term is NaN under .N()', () => {
-    expect(ce.function('BigO', [ce.parse('x^7')]).N().isNaN).toBe(true);
+  test('.N() of a series is idempotent', () => {
+    const n = series('\\sin x').N();
+    expect(n.N().isSame(n)).toBe(true);
+  });
+
+  test('a bare BigO term stays a BigO term under .N()', () => {
+    const n = ce.function('BigO', [ce.parse('x^7')]).N();
+    expect(n.json).toEqual(['BigO', ['Power', 'x', 7]]);
+  });
+
+  test('the sum of a float and a BigO term stays a sum', () => {
+    const n = ce.box(['Add', 1.5, ['BigO', ['Power', 'x', 7]]]).N();
+    expect(n.operator).toBe('Add');
+    expect(n.has('BigO')).toBe(true);
+  });
+
+  test('a series at a point keeps its remainder under .N()', () => {
+    const s = ce.box(['Series', ['Sin', 'x'], 'x', 0, 3]);
+    const n = s.subs({ x: ce.box(['Rational', 1, 2]) }).N();
+    expect(n.toString()).toBe(
+      `0.479166666666666666667 + BigO(0.03125)`
+    );
   });
 
   test('BigO is inert under evaluate', () => {
@@ -674,7 +701,7 @@ describe('Series — Residue consistency', () => {
   }
 });
 
-describe('Series — Laurent numeric equivalence and N() poisoning', () => {
+describe('Series — Laurent numeric equivalence and N()', () => {
   test('Normal(Series(1/sin x)) matches 1/sin near 0', () => {
     expectNumericNearPole(
       normal('\\frac{1}{\\sin x}'),
@@ -695,9 +722,12 @@ describe('Series — Laurent numeric equivalence and N() poisoning', () => {
     );
   });
 
-  test('a Laurent series with a BigO term has NaN as its .N()', () => {
-    expect(series('\\frac{1}{\\sin x}').N().isNaN).toBe(true);
-    expect(series('\\Gamma(x)').N().isNaN).toBe(true);
+  test('a Laurent series keeps its BigO term under .N()', () => {
+    for (const f of ['\\frac{1}{\\sin x}', '\\Gamma(x)']) {
+      const n = series(f).N();
+      expect(n.isNaN).not.toBe(true);
+      expect(n.has('BigO')).toBe(true);
+    }
   });
 
   test('after Normal, a Laurent series has a real .N()', () => {

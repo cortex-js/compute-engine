@@ -2034,11 +2034,12 @@ export interface Expression {
    * closed form (`Series(e^{1/x}, x, 0, 3)`), the `EvaluateAt` stays
    * unevaluated. The value of a `Series` at a point keeps its remainder:
    * `Series(sin x, x, 0, 3)` with `x` replaced by `1/2` evaluates to
-   * `23/48 + BigO(1/32)`, and with `x` replaced by `0` to `BigO(0)`. A
-   * value that keeps a `BigO` term is `NaN` under `.N()` (the remainder has
-   * no numeric value): wrap the series in `Normal` to drop the remainder,
-   * before or after the substitution. `Normal(Series(sin x, x, 0, 3))` with
-   * `x` replaced by `0.5` evaluates to `0.479…` under `.N()`.
+   * `23/48 + BigO(1/32)`, and with `x` replaced by `0` to `BigO(0)`. Under
+   * `.N()` the remainder stays a `BigO` term and the other terms are
+   * approximated: the first value is `0.479… + BigO(0.03125)`. Wrap the
+   * series in `Normal` to drop the remainder, before or after the
+   * substitution. `Normal(Series(sin x, x, 0, 3))` with `x` replaced by
+   * `0.5` evaluates to `0.479…` under `.N()`.
    *
    * The substitution does not avoid variable capture: a replacement that
    * contains a name that a binder binds is inserted as it is, and the

@@ -1965,51 +1965,6 @@ with another route for the points it then refuses.
 - **CE-206.3** One inexact `Multiply` case where the big-precision route is less
   accurate than the machine evaluation (`arithmetic.test.ts`, `@fixme`).
 
-### CE-782. `Series(sin x).N()` and `Series(exp x).N()` give `NaN`
-
-**Status:** ready; wrong value, S. User decision 2026-11-05: option (b),
-the value that Mathematica's `N` gives for a series. The fix changes a
-documented contract: the two pages, the `description` of `BigO` and the
-four test assertions named below change with it.
-**Witness:** plausible; `Series(sin x).N()` and `Series(exp x).N()` give
-`NaN`, a one-line program.
-
-`Series(sin x)` evaluates to `x − x³/6 + x⁵/120 + BigO(x⁷)`. Under `.N()`
-the `BigO` handler (`library/calculus.ts`) gives `NaN`, and a sum with a
-`NaN` term is `NaN`. This is the documented contract today:
-
-- The reference page of `BigO` (`81-reference-calculus.md` of cortexjs.io)
-  and its `description` say: "a numeric approximation (`expr.N()`) of any
-  expression that contains a `BigO` term is `NaN`".
-- `src/api.md` (`EvaluateAt`) says: "A value that keeps a `BigO` term is
-  `NaN` under `.N()`: wrap the series in `Normal` to drop the remainder".
-- `test/compute-engine/series.test.ts` asserts `NaN` for `Series(sin x)`,
-  for a bare `BigO(x^7)`, and for the Laurent series of `1/sin x` and
-  `Γ(x)`.
-- The remedy works today: `Normal(Series(sin x)).N()` is
-  `x − 0.1666…x³ + 0.008333…x⁵`.
-
-Options:
-
-- (a) Keep the contract. `Series(sin x).N()` stays `NaN`. Remove this entry.
-  No code change.
-- (b) Under `.N()`, a `BigO` term stays a `BigO` term (its operand is
-  approximated), and the other terms are approximated.
-  `Series(sin x).N()` gives `x − 0.1666…x³ + 0.008333…x⁵ + O(x⁷)` (the
-  value that Mathematica's `N` gives for a series); `BigO(x^7).N()` gives
-  `O(x^7)`; `Series(sin x, x, 0, 3)` at `x = 1/2` gives
-  `0.47916… + O(0.03125)` under `.N()`, not `NaN`. The `Add` of a float and
-  a `BigO` term must stay a sum. The two pages above, the `description` of
-  `BigO` and the four test assertions change. A host that tests
-  `.N().isNaN` to find a series no longer finds one.
-- (c) Change only `Series`: `Series(...).N()` gives the result of (b), and
-  a `BigO` term written by the user stays `NaN` under `.N()`. Then `.N()` is
-  not idempotent: `Series(sin x).N().N()` is `NaN`.
-
-Recommendation: (b). The approximated series keeps its coefficients and the
-order of its remainder, and `.N()` stays idempotent. If nothing is decided,
-(a) is what the engine does.
-
 ## Compilation
 
 ### CE-785. The compiler's stack limit for a nested expression fell from about 420 to about 370 levels

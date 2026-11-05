@@ -2,6 +2,16 @@
 
 ### Resolved Issues
 
+- **A series keeps its remainder under `N()`.** `Series(sin x).N()` and
+  `Series(exp x).N()` were `NaN`, because a `BigO` term was `NaN` under `N()`.
+  Now the `BigO` term stays, its operand is approximated, and the other terms
+  are approximated, as in Mathematica: `Series(sin x).N()` is
+  `x - 0.1666…x^3 + 0.008333…x^5 + O(x^7)`, and `BigO(x^7).N()` is
+  `BigO(x^7)`. The value of `Series(sin x, x, 0, 3)` at `x = 1/2` is
+  `0.479… + O(0.03125)` under `N()`. A host that tests `.N().isNaN` to find a
+  series no longer finds one: test for the `BigO` operator. Use `Normal` to
+  drop the remainder, as before.
+
 - **A power of `0` with a variable exponent is no longer folded with the value
   that the variable has when the expression is boxed.** After
   `ce.assign('x', 2)`, `ce.box(['Power', 0, 'x'])` was the number `0`, and it

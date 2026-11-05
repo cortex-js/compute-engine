@@ -931,7 +931,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Landau big-O remainder term. Inert; any numeric approximation (.N()) of an expression containing it is NaN."
+      "description": "Landau big-O remainder term. Inert; a numeric approximation (.N()) keeps the term and approximates its operand. Strip it with Normal."
     },
     {
       "name": "BinCounts",
