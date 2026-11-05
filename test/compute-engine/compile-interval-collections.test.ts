@@ -669,11 +669,27 @@ describe('Interval target — collection-valued roots', () => {
 });
 
 describe('Interval target — the 2026-08-22 decisions that stay', () => {
-  test('a contradicted scalar declaration declines in a scalar position', () => {
+  // A list body under a scalar declaration is refused when it is assigned.
+  test('a contradicted scalar declaration is refused when it is assigned', () => {
     const ce = engine();
     ce.declare('s', '(number) -> number');
+    expect(() =>
+      ce.assign(
+        's',
+        ce.box(['Function', ['List', 't', ['Multiply', 2, 't']], 't'])
+      )
+    ).toThrow(/is not compatible with the type/);
+  });
+
+  // The body of `s` calls a helper `k` that is assigned after `s`, so the
+  // assignment of `s` is accepted. The compiler sees that the body
+  // constructs a list, and declines in each scalar position.
+  test('a contradicted scalar declaration declines in a scalar position through a helper assigned later', () => {
+    const ce = engine();
+    ce.declare('s', '(number) -> number');
+    ce.assign('s', ce.box(['Function', ['k', 't'], 't']));
     ce.assign(
-      's',
+      'k',
       ce.box(['Function', ['List', 't', ['Multiply', 2, 't']], 't'])
     );
     declines(ce, ['Add', ['s', 'u'], 1], /contradicted/);
@@ -687,12 +703,24 @@ describe('Interval target — the 2026-08-22 decisions that stay', () => {
     ce.parse('b(t) := [t < 1, t < 2]').evaluate();
     declines(ce, ['Which', ['b', 'u'], 1, 'True', 2]);
     declines(ce, ['b', 'u'], /List/);
+    // Under the declaration `(number) -> boolean`, the list body is refused
+    // when it is assigned.
     ce.declare('c', '(number) -> boolean');
+    expect(() =>
+      ce.assign(
+        'c',
+        ce.box(['Function', ['List', ['Less', 't', 1], ['Less', 't', 2]], 't'])
+      )
+    ).toThrow(/is not compatible with the type/);
+    // Through a helper `ml` assigned after `cl`, the assignment of `cl` is
+    // accepted, and its condition declines.
+    ce.declare('cl', '(number) -> boolean');
+    ce.assign('cl', ce.box(['Function', ['ml', 't'], 't']));
     ce.assign(
-      'c',
+      'ml',
       ce.box(['Function', ['List', ['Less', 't', 1], ['Less', 't', 2]], 't'])
     );
-    declines(ce, ['Which', ['c', 'u'], 1, 'True', 2]);
+    declines(ce, ['Which', ['cl', 'u'], 1, 'True', 2]);
   });
 });
 
@@ -1589,14 +1617,24 @@ describe('Interval target — point arithmetic', () => {
       expect(r.success).toBe(true);
       expectEncloses(bands(r.run!({ x: pt(0.3), y: pt(0.2) })), want);
     }
-    // A CONTRADICTED scalar declaration is not read through: its list body
-    // keeps declining (the 2026-08-22 decision).
+    // A list body under a scalar declaration is refused when it is assigned.
     ce.declare('g', '(number) -> number');
+    expect(() =>
+      ce.assign(
+        'g',
+        ce.box(['Function', ['List', 't', ['Multiply', 2, 't']], 't'])
+      )
+    ).toThrow(/is not compatible with the type/);
+    // A CONTRADICTED scalar declaration is not read through: when the list
+    // comes from a helper assigned later, the call keeps declining (the
+    // 2026-08-22 decision).
+    ce.declare('gl', '(number) -> number');
+    ce.assign('gl', ce.box(['Function', ['kl', 't'], 't']));
     ce.assign(
-      'g',
+      'kl',
       ce.box(['Function', ['List', 't', ['Multiply', 2, 't']], 't'])
     );
-    declines(ce, ['g', 'u'], /says it returns a scalar/);
+    declines(ce, ['gl', 'u'], /says it returns a scalar/);
   });
 
   test('a helper chain that rotates, translates and measures a point', () => {

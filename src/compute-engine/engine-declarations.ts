@@ -43,7 +43,11 @@ import {
 } from '../common/type/utils.js';
 import { parseType, parseTypeParameterClause } from '../common/type/parse.js';
 import { clearClauseProvenance } from './clause-identity.js';
-import { defaultedSlotsAsRequired, isSubtype } from '../common/type/subtype.js';
+import {
+  defaultedSlotsAsRequired,
+  isSubtype,
+  provablyDisjoint,
+} from '../common/type/subtype.js';
 import { isEffectSubset } from '../common/type/effects.js';
 import {
   recordTypeProvenance,
@@ -112,7 +116,9 @@ import type {
   DeclareOptions,
   OperatorDefinitionPatch,
   CollectionHandlers,
+  FunctionInterface,
 } from './global-types.js';
+import { substituteDeclaredBounds } from './boxed-expression/generic-instantiation.js';
 
 import {
   _BoxedValueDefinition,
@@ -2941,7 +2947,8 @@ export function declareFn(
             ),
             typedResult === undefined
               ? declaredType
-              : withSignatureResult(declaredType, 'unknown')
+              : withSignatureResult(declaredType, 'unknown'),
+            id
           );
           if (checksScope)
             assertScopeCeiling(
@@ -3541,7 +3548,8 @@ export function assignFn(
         ),
         typedResult === undefined
           ? declaredType.type
-          : withSignatureResult(declaredType.type, 'unknown')
+          : withSignatureResult(declaredType.type, 'unknown'),
+        id
       );
       const reconciledType = withTypedResult(reconciled.type);
       // Second refinement pass (see the comment above): adopt the
@@ -3816,7 +3824,8 @@ export function assignFn(
           ),
           typedResult === undefined && !resultIsRecord
             ? declaredType.type
-            : withSignatureResult(declaredType.type, 'unknown')
+            : withSignatureResult(declaredType.type, 'unknown'),
+          id
         );
         // Second refinement pass — adopt the post-ascription result.
         const reconciledType = withTypedResult(reconciled.type);
@@ -5131,12 +5140,167 @@ function rawBodyForRebox(
   return body.isValid ? ce.rebind(body, { form: 'raw' }) : body.json;
 }
 
+/**
+ * Throws when the value that the body of the function literal `literal`
+ * computes has a type with no value in common with the declared result of
+ * `declaredType`, as an assignment of a value to a symbol declared with a
+ * type does: with `g: (x: number) -> number`, `g := t ↦ t > 0` is refused,
+ * as `v := True` is with `v: number`.
+ *
+ * The declared result is ascribed onto a literal whose inferred result is
+ * WIDER than the declaration (`x ↦ x + 1` under `(integer) -> integer` is
+ * inferred `number`), because inference is not precise
+ * (`reconcileFunctionLiteralReturn`). A DISJOINT inferred result is not a
+ * lack of precision: no value of the body can be of the declared type, so
+ * the literal is refused by the rule that refuses such a value for a
+ * declared symbol. The test is `provablyDisjoint()`, which answers `true`
+ * only when no value is in both types. A body type that holds `character`
+ * at any depth is not tested: a call accepts a character where a string is
+ * declared, at any depth (`(s: string) ↦ s[1]` under `(string) -> string`,
+ * a tuple of characters under `tuple<string, string>`), while the type
+ * lattice keeps the two types apart.
+ *
+ * A generic result is read at the declared bounds of its type variables
+ * (`(x: T) -> T where T: broadcastable<number>` reads the result
+ * `broadcastable<number>`), and is not tested when a variable of the result
+ * has no bound. A variable that occurs only in a parameter does not stop the
+ * test: `(x: T) -> boolean where T` tests the result `boolean`.
+ * Not tested either: a literal with its own return ascription (the
+ * signature check tests it), a body with a `Return` that leaves the
+ * function (its last statement is then not the only value it can return),
+ * and an inferred result that states nothing (`unknown`, `any`, `never`).
+ */
+function assertBodyResultNotDisjoint(
+  symbol: string,
+  literal: Expression & FunctionInterface,
+  declaredType: Type
+): void {
+  if (typeof declaredType !== 'object' || declaredType.kind !== 'signature')
+    return;
+  const read = isPolymorphicType(declaredType)
+    ? substituteDeclaredBounds(declaredType.typeParams, declaredType)
+    : declaredType;
+  // The result of the signature itself: `functionResult()` reads a
+  // signature that keeps a type variable as `unknown`.
+  const declared =
+    typeof read === 'object' && read.kind === 'signature'
+      ? read.result
+      : undefined;
+  if (declared === undefined || hasFreeTypeVariables(declared)) return;
+  if (isWideResultType(declared)) return;
+  if (functionLiteralReturnType(literal) !== undefined) return;
+  if (functionLiteralDeclaredSignature(literal) !== undefined) return;
+  const body = literal.ops[0];
+  if (body === undefined || leavesFunctionEarly(body)) return;
+  const inferred = functionResult(literal.type.type);
+  if (inferred === undefined || hasFreeTypeVariables(inferred)) return;
+  const own = withoutAcceptedResults(inferred);
+  if (own === undefined || isWideResultType(own) || own === 'never') return;
+  if (mentionsCharacter(own)) return;
+  // A collection under a parameter that can take a collection whole may be
+  // the broadcast of the result, which a call accepts: with
+  // `h: (list) -> number` and `h := t ↦ 2t`, `h([1, 2])` is `[2, 4]`
+  // (`conformsUnderBroadcast` in `library/core.ts`). With scalar
+  // parameters, each call applies the body to scalars, also a call that
+  // maps over a list, and refuses a collection.
+  if (!isScalarType(own) && someParameterTakesCollectionWhole(read)) return;
+  if (!provablyDisjoint(own, declared)) return;
+  const ce = literal.engine;
+  const reason =
+    `its body computes a value of type "${typeToString(own)}", ` +
+    `which has no value in common with the declared result "${typeToString(declared)}"`;
+  throw new TypeCompatibilityError(
+    symbol,
+    ce.type(declaredType),
+    literal.type,
+    'value',
+    [
+      `Symbol "${symbol}"`,
+      `The value "${literal.toString()}" of type "${literal.type}" is not compatible with the type "${ce.type(declaredType)}"`,
+      `The body of "${symbol}" computes a value of type "${typeToString(own)}", which has no value in common with the declared result "${typeToString(declared)}"`,
+    ].join('\n|   '),
+    reason
+  );
+}
+
+/**
+ * Whether a parameter of the signature `sig` can receive a collection whole.
+ * A parameter of a scalar type, of a `broadcastable<…>` type or of a
+ * function type does not: a collection argument there maps the function
+ * over its elements (a function argument is never a collection). A rest
+ * parameter collects its arguments into one tuple, and a parameter whose
+ * type keeps a type variable can be a collection.
+ */
+function someParameterTakesCollectionWhole(sig: Type): boolean {
+  if (typeof sig !== 'object' || sig.kind !== 'signature') return true;
+  if (sig.variadicArg !== undefined) return true;
+  return [...(sig.args ?? []), ...(sig.optArgs ?? [])].some(({ type: t }) => {
+    if (hasFreeTypeVariables(t)) return true;
+    if (isSubtype(t, 'function')) return false;
+    if (typeof t === 'object' && t.kind === 'broadcastable') return false;
+    return !isScalarType(t);
+  });
+}
+
+/**
+ * Whether the type `t` holds `character` at any depth: in an element, a
+ * union member, or the definition of a type alias (`type alias Glyph =
+ * character`). The walk reads every value of the type objects, so a field
+ * NAMED `character` also counts: the caller then skips its test, which
+ * never refuses a program. `seen` stops the walk at a recursive alias.
+ */
+function mentionsCharacter(t: unknown, seen: Set<object> = new Set()): boolean {
+  if (t === 'character') return true;
+  if (typeof t !== 'object' || t === null || seen.has(t)) return false;
+  seen.add(t);
+  return Object.values(t).some((v) => mentionsCharacter(v, seen));
+}
+
+/** A result type that states nothing about the value. */
+function isWideResultType(t: Type): boolean {
+  return t === 'unknown' || t === 'any' || t === 'expression';
+}
+
+/** `t` without the members whose values a call accepts under every declared
+ * result: `NaN`, and the absence values `Missing` and `Nothing`
+ * (`docs/ERROR-MODEL.md`). `undefined` when no other member is left. */
+function withoutAcceptedResults(t: Type): Type | undefined {
+  const accepted = (m: Type) =>
+    m === 'nan' || m === 'missing' || m === 'nothing';
+  if (accepted(t)) return undefined;
+  if (typeof t !== 'object' || t.kind !== 'union') return t;
+  const rest = t.types.filter((m) => !accepted(m));
+  if (rest.length === 0) return undefined;
+  return rest.length === 1 ? rest[0] : { kind: 'union', types: rest };
+}
+
+/** Whether `e` holds a `Return` of the enclosing function: a `Return`
+ * outside every nested `Function` literal. */
+function leavesFunctionEarly(
+  e: Expression,
+  /** The nodes already read. A body can share a node among several
+   * parents, and a walk of every path then reads it once per path: a chain
+   * of 30 shared levels has 2^30 paths. */
+  seen: Set<Expression> = new Set()
+): boolean {
+  if (!isFunction(e) || seen.has(e)) return false;
+  seen.add(e);
+  if (e.operator === 'Return') return true;
+  if (e.operator === 'Function') return false;
+  return e.ops.some((op) => leavesFunctionEarly(op, seen));
+}
+
 export function reconcileFunctionLiteralReturn(
   ce: IComputeEngine,
   literal: Expression,
-  declaredType: Type
+  declaredType: Type,
+  /** The symbol that receives the literal, named by the error when the body
+   * contradicts the declared result (`assertBodyResultNotDisjoint`). */
+  symbol?: string
 ): Expression {
   if (!isFunction(literal, 'Function')) return literal;
+  if (symbol !== undefined)
+    assertBodyResultNotDisjoint(symbol, literal, declaredType);
 
   // A POLYTYPE declaration ascribes its whole clause onto a marker-less literal
   // (R1): the stored value is then self-describing — `f`'s value types as the

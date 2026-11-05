@@ -10,10 +10,12 @@
   value. Before, the assignment was accepted and each call gave the error. A
   generic result is read at the bounds of its type variables: with
   `(x: T) -> T where T: broadcastable<number>`, the bodies `t > 0` and
-  `(t, t^2)` are refused. An inferred type that is only wider than the
+  `(t, t^2)` are refused, and with `(x: T) -> boolean where T` the body
+  `x ↦ 1` is refused. An inferred type that is only wider than the
   declared result is still accepted (`n ↦ n + 1` under
-  `(integer) -> integer`). Not tested: `NaN`, `Missing` and `Nothing` in the
-  type of the body, a collection body when a parameter can receive a
+  `(integer) -> integer`), and so is a character under a string result
+  (`(s: string) ↦ s[1]` under `(string) -> string`). Not tested: `NaN`,
+  `Missing` and `Nothing` in the type of the body, a collection body when a parameter can receive a
   collection whole (the result can then be a broadcast), and a body with a
   `Return` before its last statement.
 

@@ -146,23 +146,37 @@ describe('A CALL BETWEEN THE DECLARED SIGNATURE AND THE DEFINITION', () => {
   });
 
   test('a result outside the declared result type', () => {
-    // The clause is accepted (its result is not annotated), and the call
-    // reports the result, as a call after the definition does.
+    // The body gives a string for a positive argument and an integer
+    // otherwise. Its type overlaps the declared result, so the clause is
+    // accepted, and the call with `2` reports the result, as a call after
+    // the definition does.
     const expected =
       'Error(ErrorCode("incompatible-type", "integer", "string"), "s")';
-    const after = 'let g: (integer) -> integer\nfunction g(k) { "s" }\ng(2)';
+    const body = 'function g(k) { if k > 0 { "s" } else { 1 } }';
+    const after = `let g: (integer) -> integer\n${body}\ng(2)`;
     expect(block(after)).toBe(expected);
     expect(epsilWithDiagnostics(after)).toEqual({
       value: expected,
       diagnostics: [],
     });
-    const between = BETWEEN + 'function g(k) { "s" }\na';
+    const between = BETWEEN + body + '\na';
     expect(block(between)).toBe(expected);
     expect(epsil(between)).toBe(expected);
   });
 
+  test('a clause whose body only returns a string is refused', () => {
+    // A string has no value in common with the declared result `integer`,
+    // so the clause is refused when it is defined.
+    const src = 'let g: (integer) -> integer\nfunction g(k) { "s" }\ng(2)';
+    expect(block(src)).toMatch(
+      /^Error\(ErrorCode\("incompatible-type", "\(integer\) -> integer", "\(k: integer\) -> string"\), "g: its body computes a value of type \\"string\\", which has no value in common with the declared result \\"integer\\""\)$/
+    );
+  });
+
   test('a clause outside the declared signature is reported by its statement', () => {
-    const src = BETWEEN + 'function g(k: string) { k }\n[a, g(2)]';
+    // The body returns an integer, so only the parameter is outside the
+    // declared signature.
+    const src = BETWEEN + 'function g(k: string) { 1 }\n[a, g(2)]';
     const blockValue = block(src);
     expect(blockValue).toContain('invalid-clause-definition');
     expect(blockValue).toContain('is not an arm of the declared type');

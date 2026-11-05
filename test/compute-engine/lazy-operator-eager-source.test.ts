@@ -171,12 +171,24 @@ describe('A LAZY OPERATOR EVALUATES AN EAGER SOURCE ONCE', () => {
 describe('AN ERROR VALUE OF THE SOURCE IS THE VALUE OF THE NODE', () => {
   function errorEngine(): ComputeEngine {
     const ce = new ComputeEngine();
-    // Both functions return a string, which their declared result refuses:
-    // a call evaluates to an `incompatible-type` error.
+    // Both functions return a string for a positive argument, which their
+    // declared result refuses: the call with `1` evaluates to an
+    // `incompatible-type` error. The other branch conforms to the declared
+    // result, so the assignment is accepted.
     ce.declare('f', '(integer) -> integer');
-    ce.assign('f', ce.box(['Function', "'hello'", 'x']));
+    ce.assign(
+      'f',
+      ce.box(['Function', ['If', ['Greater', 'x', 0], "'hello'", 1], 'x'])
+    );
     ce.declare('h', '(integer) -> list<integer>');
-    ce.assign('h', ce.box(['Function', "'hello'", 'x']));
+    ce.assign(
+      'h',
+      ce.box([
+        'Function',
+        ['If', ['Greater', 'x', 0], "'hello'", ['List', 'x']],
+        'x',
+      ])
+    );
     return ce;
   }
 

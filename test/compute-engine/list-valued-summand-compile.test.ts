@@ -469,25 +469,47 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
 //   python      declined for an unrelated reason ("Unknown operator `a`")
 //   interval-js declined for an unrelated reason (no `List` lowering)
 //
-// RULED: when the compiler can PROVE the declared return type is contradicted
-// by the body, it declines (D6) on ALL targets INCLUDING JavaScript — "decline,
-// run interpreted" over "compile what the body does". Declarations stay
-// authoritative everywhere else; we only refuse to emit code we can prove wrong.
-// This is the one place JS emission deliberately CHANGES (garbage → decline);
-// the ruled item-121 exemptions are untouched, because `matches('number')` is
-// disjoint from every one of them.
-describe('a declaration contradicted by its body declines everywhere (2026-08-12 ruling)', () => {
+// The assignment of a list-constructing body to `a`, declared
+// `(number) -> number`, is refused when it is made: the type of the body's
+// value has no value in common with the declared result.
+//
+// The compiler still declines a call of `a` when the body reaches the list
+// through a call of a function that is assigned after `a`
+// (`a := t ↦ h(t)`, then `h := t ↦ [cos t, sin t]`). At the assignment of `a`
+// the type of `h(t)` is not known, so the assignment is accepted. The
+// compiler then proves that the body constructs a collection, and declines
+// on all targets, JavaScript included. The ruled item-121 exemptions are not
+// affected, because `matches('number')` is disjoint from every one of them.
+// Tycho ledger row 491.
+describe('a declaration contradicted by its body is refused, or declines everywhere through a helper assigned later (2026-08-12 ruling)', () => {
   const ALL = ['javascript', 'glsl', 'wgsl', 'python', 'interval-js'] as const;
   const CONTRADICTED =
     /says it returns a scalar .* but its body constructs a collection/;
 
-  /** `a` DECLARED scalar, ASSIGNED a list-constructing body. */
+  test('the assignment of a list-constructing body is refused', () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', { signature: '(number) -> number' });
+    expect(() =>
+      ce.assign(
+        'a',
+        ce.box([
+          'Function',
+          ['Block', ['List', ['Cos', 't'], ['Sin', 't']]],
+          't',
+        ])
+      )
+    ).toThrow(/is not compatible with the type/);
+  });
+
+  /** `a` DECLARED scalar, ASSIGNED a body that calls `h`, and `h` then
+   * ASSIGNED a list-constructing body. */
   const lying = () => {
     const ce = new ComputeEngine();
     ce.declare('a', { signature: '(number) -> number' });
+    ce.assign('a', ce.box(['Function', ['h', 't'], 't']));
     ce.assign(
-      'a',
-      ce.box(['Function', ['Block', ['List', ['Cos', 't'], ['Sin', 't']]], 't'])
+      'h',
+      ce.box(['Function', ['List', ['Cos', 't'], ['Sin', 't']], 't'])
     );
     return ce;
   };
@@ -496,18 +518,18 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
   // free variables, so compile-time constant folding would answer it from the
   // interpreter and report success with a literal, short-circuiting both the
   // decline being pinned and the `_SYS.bcast` emission of the controls.
-  test.each(ALL)('%s declines the lying-declaration Sum', (to) => {
-    const ce = lying();
-    const r = compile(ce.box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 2]]), {
-      to,
-      fallback: true,
-      constantFold: false,
-    } as any);
-    expect(r?.success ?? false).toBe(false);
-    // The message names both halves and suggests the fix.
-    expect((r as any).error).toMatch(CONTRADICTED);
-    expect((r as any).error).toMatch(/'a'/);
-    expect((r as any).error).toMatch(/-> list<number>/);
+  test('every target declines the Sum when the list comes from a function assigned later', () => {
+    for (const to of ALL) {
+      const r = compile(
+        lying().box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 2]]),
+        { to, fallback: true, constantFold: false } as any
+      );
+      expect([to, r?.success ?? false]).toEqual([to, false]);
+      // The message names both halves and suggests the fix.
+      expect((r as any).error).toMatch(CONTRADICTED);
+      expect((r as any).error).toMatch(/'a'/);
+      expect((r as any).error).toMatch(/-> list<number>/);
+    }
   });
 
   test('every JS lowering declines: unrolled, looped, Product', () => {
@@ -678,7 +700,10 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
 // attempt, so a shape that already had a value-safe `_SYS.bcast` route keeps it;
 // the contradicted shapes are never NEWLY routed through `bcast` (the option the
 // ruling rejected).
-describe('a contradicted scalar declaration declines in every scalar position (2026-08-12 ruling, wave 2)', () => {
+//
+// A direct assignment of such a body is refused when it is made. The compiler
+// declines are reached through a helper assigned later.
+describe('a contradicted scalar declaration is refused, or declines in every scalar position through a helper assigned later (2026-08-12 ruling, wave 2)', () => {
   const ALL_TARGETS = [
     'javascript',
     'glsl',
@@ -716,41 +741,67 @@ describe('a contradicted scalar declaration declines in every scalar position (2
     ['a(u) = 1', ['Equal', ['a', 'u'], 1]],
   ];
 
-  test.each(ADJACENCIES)('javascript declines `%s`', (_name, mathjson) => {
-    const ce = withDeclaration('(number) -> number');
-    const r = compile(ce.box(mathjson), { fallback: true });
-    expect(r?.success ?? false).toBe(false);
-    expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
-    expect((r as any).error).toMatch(/'a'/);
-    expect((r as any).error).toMatch(/-> list<number>/);
+  // The assignment of the list-constructing body under `(number) -> number`
+  // is refused when it is made, so no scalar position can consume its value.
+  test('the assignment of the list-constructing body is refused', () => {
+    expect(() => withDeclaration('(number) -> number')).toThrow(
+      /is not compatible with the type/
+    );
   });
 
-  test.each(ALL_TARGETS)('%s declines `a(u) + 1`', (to) => {
-    const ce = withDeclaration('(number) -> number');
-    const r = compile(ce.box(['Add', ['a', 'u'], 1]), {
-      to,
-      fallback: true,
-    } as any);
-    expect(r?.success ?? false).toBe(false);
-    expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
+  /** `a` DECLARED `(number) -> number` and ASSIGNED `t ↦ h(t)`, then `h`
+   * ASSIGNED a list-constructing body. The type of `h(t)` is not known when
+   * `a` is assigned, so the assignment is accepted. */
+  const withLaterList = () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', { signature: '(number) -> number' });
+    ce.assign('a', ce.box(['Function', ['h', 't'], 't']));
+    ce.assign(
+      'h',
+      ce.box(['Function', ['List', ['Cos', 't'], ['Sin', 't']], 't'])
+    );
+    ce.declare('u', 'number');
+    return ce;
+  };
+
+  test('javascript declines every scalar position when the list comes from a function assigned later', () => {
+    for (const [name, mathjson] of ADJACENCIES) {
+      const r = compile(withLaterList().box(mathjson), { fallback: true });
+      expect([name, r?.success ?? false]).toEqual([name, false]);
+      expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
+      expect((r as any).error).toMatch(/'a'/);
+      expect((r as any).error).toMatch(/-> list<number>/);
+    }
   });
 
-  // The declared result binds the body (CE-707): the interpreter refuses a
-  // call of `a` with an `incompatible-type` error, so the compiler declines
-  // every call of `a`, the bare application and the container positions
-  // included.
+  test('every target declines `a(u) + 1` when the list comes from a function assigned later', () => {
+    for (const to of ALL_TARGETS) {
+      const r = compile(withLaterList().box(['Add', ['a', 'u'], 1]), {
+        to,
+        fallback: true,
+      } as any);
+      expect([to, r?.success ?? false]).toEqual([to, false]);
+      expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
+    }
+  });
+
+  // The interpreter refuses a call of `a` with an `incompatible-type` error,
+  // so the compiler declines every call of `a`. This includes the bare
+  // application and the container positions.
   test.each([
     ['a(u)', ['a', 'u']],
     ['[a(u), 1]', ['List', ['a', 'u'], 1]],
     ['Block(a(u))', ['Block', ['a', 'u']]],
-  ] as [string, any][])('`%s` declines on JS', (_name, mathjson) => {
-    const ce = withDeclaration('(number) -> number');
-    const r = compile(ce.box(mathjson), { fallback: true });
-    expect(r?.success ?? false).toBe(false);
-    expect((r as any).error).toMatch(
-      /says it returns a scalar .* but its body constructs a collection/
-    );
-  });
+  ] as [string, any][])(
+    '`%s` declines on JS when the list comes from a function assigned later',
+    (_name, mathjson) => {
+      const r = compile(withLaterList().box(mathjson), { fallback: true });
+      expect(r?.success ?? false).toBe(false);
+      expect((r as any).error).toMatch(
+        /says it returns a scalar .* but its body constructs a collection/
+      );
+    }
+  );
 
   // CONTROL: the honest `(unknown) -> unknown` spelling of the SAME body keeps
   // its current behavior on JS — every shape compiles element-wise.
@@ -820,7 +871,10 @@ describe('a contradicted scalar declaration declines in every scalar position (2
 // `no static GLSL type` return check, the `At` aggregate-index decline, the
 // identifier checks) still wins; this speaks only for a definition that emitted
 // cleanly.
-describe('a contradicted scalar declaration declines at DEFINITION emission (2026-08-12 ruling, wave 3)', () => {
+//
+// A direct assignment of such a body is refused when it is made. The compiler
+// declines are reached through a helper assigned later.
+describe('a contradicted scalar declaration is refused, or declines at DEFINITION emission through a helper assigned later (2026-08-12 ruling, wave 3)', () => {
   /** The wave-3 message: same two halves, its own second sentence. */
   const CONTRADICTED_DEFINITION =
     /says it returns a scalar .* but its body constructs a collection.*the emitted definition would declare a scalar return type over a collection return value/s;
@@ -837,30 +891,45 @@ describe('a contradicted scalar declaration declines at DEFINITION emission (202
     return ce;
   };
 
+  // The assignment of the list-constructing body under `(number) -> number`
+  // is refused when it is made, so no definition is emitted for it.
+  test('the assignment of the list-constructing body is refused', () => {
+    expect(() => withDeclaration('(number) -> number')).toThrow(
+      /is not compatible with the type/
+    );
+  });
+
+  /** `a` DECLARED `(number) -> number` and ASSIGNED `t ↦ h(t)`, then `h`
+   * ASSIGNED a list-constructing body. The type of `h(t)` is not known when
+   * `a` is assigned, so the assignment is accepted. */
+  const withLaterList = () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', { signature: '(number) -> number' });
+    ce.assign('a', ce.box(['Function', ['h', 't'], 't']));
+    ce.assign(
+      'h',
+      ce.box(['Function', ['List', ['Cos', 't'], ['Sin', 't']], 't'])
+    );
+    ce.declare('u', 'number');
+    return ce;
+  };
+
   test.each(['glsl', 'wgsl'] as const)(
-    '%s declines the bare `a(u)` instead of emitting a scalar-declared vec2 return',
+    '%s declines the bare `a(u)` when the list comes from a function assigned later',
     (to) => {
-      const ce = withDeclaration('(number) -> number');
-      const r = compile(ce.box(['a', 'u']), { to, fallback: true } as any);
+      const r = compile(withLaterList().box(['a', 'u']), {
+        to,
+        fallback: true,
+      } as any);
       expect(r?.success ?? false).toBe(false);
       expect((r as any).error).toMatch(CONTRADICTED_DEFINITION);
       expect((r as any).error).toMatch(/'a'/);
       expect((r as any).error).toMatch(/-> list<number>/);
-      // The whole point: no broken preamble ships behind the decline.
+      // No preamble with a scalar return over a vector ships behind the
+      // decline.
       expect((r as any).preamble ?? '').not.toContain('_fn_a');
     }
   );
-
-  // The bare shape on JavaScript declines too (CE-707: the declared result
-  // binds the body).
-  test('bare `a(u)` declines on JavaScript', () => {
-    const ce = withDeclaration('(number) -> number');
-    const r = compile(ce.box(['a', 'u']), { fallback: true });
-    expect(r?.success ?? false).toBe(false);
-    expect((r as any).error).toMatch(
-      /says it returns a scalar .* but its body constructs a collection/
-    );
-  });
 
   // CONTROL: the HONEST `-> unknown` spelling of the SAME body. Its type is not
   // `matches('number')`, so the gate is structurally unable to fire. The body
@@ -931,20 +1000,6 @@ describe('a contradicted scalar declaration declines at DEFINITION emission (202
       );
     }
   );
-
-  // The decline is at EMISSION, so it also covers the consuming shapes wave 2
-  // gates — whichever gate speaks first, nothing wrong is emitted.
-  test.each(['glsl', 'wgsl'] as const)('%s still declines `a(u) + 1`', (to) => {
-    const ce = withDeclaration('(number) -> number');
-    const r = compile(ce.box(['Add', ['a', 'u'], 1]), {
-      to,
-      fallback: true,
-    } as any);
-    expect(r?.success ?? false).toBe(false);
-    expect((r as any).error).toMatch(
-      /says it returns a scalar .* but its body constructs a collection/s
-    );
-  });
 });
 
 // Tycho item 171, wave 4 — the MULTI-CLAUSE hole waves 1–3 could not reach.
@@ -976,7 +1031,11 @@ describe('a contradicted scalar declaration declines at DEFINITION emission (202
 // "no lowering" diagnostic and wave 3's `staticReturnType` route is
 // structurally unreachable for a clause set. The GPU declines below therefore
 // only pin that it STAYS closed, whichever diagnostic speaks first.
-describe('a contradicted scalar declaration declines for a MULTI-CLAUSE function (2026-08-12 ruling, wave 4)', () => {
+//
+// A clause whose body constructs a list under the declared scalar result is
+// refused when it is defined. The compiler declines are reached through clause
+// bodies that call a helper assigned after the clauses.
+describe('a contradicted scalar declaration of a MULTI-CLAUSE function is refused, or declines through a helper assigned later (2026-08-12 ruling, wave 4)', () => {
   const CONTRADICTED_SCALAR_POSITION =
     /says it returns a scalar .* but its body constructs a collection.*this scalar position would consume a run-time collection as a number/s;
 
@@ -1013,6 +1072,59 @@ describe('a contradicted scalar declaration declines for a MULTI-CLAUSE function
     return ce;
   };
 
+  // A clause whose body constructs a list under the declared
+  // `(number) -> number` is refused when it is defined: `DefineFunction`
+  // gives an `incompatible-type` error and does not add the clause. Thus a
+  // lying clause set defines no clause, and a mixed clause set keeps only its
+  // truthful `integer` clause. A call that no clause matches gives a
+  // `no-matching-clause` error.
+  test('a clause that constructs a list is refused when it is defined', () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', { signature: '(number) -> number' });
+    for (const [body, type] of [
+      [LIST_1, 'integer'],
+      [LIST_2, 'real'],
+    ] as const) {
+      const r = ce
+        .box(['DefineFunction', 'a', ['Function', body, p('t', type)]] as any)
+        .evaluate();
+      expect(r.toString()).toMatch(/incompatible-type/);
+    }
+
+    const mixed = withClauses('(number) -> number', 'mixed');
+    expect(mixed.box(['a', 3]).evaluate().re).toBe(7);
+    expect(mixed.box(['a', 0.3]).evaluate().toString()).toMatch(
+      /no-matching-clause/
+    );
+  });
+
+  /**
+   * `a` as a two-CLAUSE function under `(number) -> number`, whose list
+   * clauses call a helper (`h` or `k`) that is assigned after the clauses.
+   * The type of the helper call is not known when a clause is defined, so
+   * the clause is accepted. `kind` picks which clauses call a helper: both
+   * ('lying') or only the real one ('mixed').
+   */
+  const withLaterClauses = (kind: 'lying' | 'mixed') => {
+    const ce = new ComputeEngine();
+    ce.declare('a', { signature: '(number) -> number' });
+    const b1 = kind === 'lying' ? ['h', 't'] : SCALAR;
+    ce.box([
+      'DefineFunction',
+      'a',
+      ['Function', b1, p('t', 'integer')],
+    ] as any).evaluate();
+    ce.box([
+      'DefineFunction',
+      'a',
+      ['Function', ['k', 't'], p('t', 'real')],
+    ] as any).evaluate();
+    ce.assign('h', ce.box(['Function', LIST_1, 't'] as any));
+    ce.assign('k', ce.box(['Function', LIST_2, 't'] as any));
+    ce.declare('u', 'number');
+    return ce;
+  };
+
   const SCALAR_POSITIONS: [string, any][] = [
     ['a(u) + 1', ['Add', ['a', 'u'], 1]],
     ['2·a(u)', ['Multiply', 2, ['a', 'u']]],
@@ -1020,77 +1132,65 @@ describe('a contradicted scalar declaration declines for a MULTI-CLAUSE function
     ['a(u) < 1', ['Less', ['a', 'u'], 1]],
   ];
 
-  describe.each(['lying', 'mixed'] as const)('a %s clause set', (kind) => {
-    // MIXED is the design call: only the `real` clause contradicts, so the
-    // declaration holds on the integer branch. Declining anyway is the
-    // conservative, fail-closed direction AND what the measurement forces —
-    // the consuming position compiles ONCE, statically, for every branch.
-    // Measured before the gate, mixed `a(u) + 1` ran to `8` at `u = 3` and to
-    // the string `"0.29552…,0.955336…1"` at `u = 0.3`: there is no per-branch
-    // code to keep, so the branch that is wrong decides.
-    test.each(SCALAR_POSITIONS)(
-      'declines `%s` on JavaScript',
-      (_label, expr) => {
-        const ce = withClauses('(number) -> number', kind);
-        const r = compile(ce.box(expr), { fallback: true });
-        expect(r?.success ?? false).toBe(false);
-        expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
-        expect((r as any).error).toMatch(/'a'/);
-      }
-    );
-
-    test('declines the big-op body `Σ a(i)` on JavaScript (wave-1 message)', () => {
-      const ce = withClauses('(number) -> number', kind);
-      // `constantFold: false`: the sum has no free variables, so
-      // compile-time constant folding would answer it from the interpreter
-      // and report success, bypassing the static decline under test.
-      const r = compile(ce.box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 2]]), {
-        fallback: true,
-        constantFold: false,
-      });
-      expect(r?.success ?? false).toBe(false);
-      expect((r as any).error).toMatch(
-        /says it returns a scalar .* but its body constructs a collection.*the numeric accumulation would produce a wrong value/s
+  describe.each(['lying', 'mixed'] as const)(
+    'a %s clause set with a helper assigned later',
+    (kind) => {
+      // In the MIXED set only the `real` clause contradicts the declaration.
+      // The consuming position compiles once, for every clause, so the
+      // clause that contradicts the declaration decides, and the compiler
+      // declines.
+      test.each(SCALAR_POSITIONS)(
+        'declines `%s` on JavaScript',
+        (_label, expr) => {
+          const r = compile(withLaterClauses(kind).box(expr), {
+            fallback: true,
+          });
+          expect(r?.success ?? false).toBe(false);
+          expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
+          expect((r as any).error).toMatch(/'a'/);
+        }
       );
-    });
 
-    test.each(['glsl', 'wgsl'] as const)('stays closed on %s', (to) => {
-      const ce = withClauses('(number) -> number', kind);
-      const r = compile(ce.box(['Add', ['a', 'u'], 1]), {
-        to,
-        fallback: true,
-      } as any);
-      expect(r?.success ?? false).toBe(false);
-      // No preamble ships behind the decline, whichever gate spoke.
-      expect((r as any).preamble ?? '').not.toContain('_fn_a');
-    });
-  });
+      test('declines the big-op body `Σ a(i)` on JavaScript', () => {
+        // `constantFold: false`: the sum has no free variables, so
+        // compile-time constant folding would answer it from the
+        // interpreter and report success, so the static decline under test
+        // would not run.
+        const r = compile(
+          withLaterClauses(kind).box([
+            'Sum',
+            ['a', 'i'],
+            ['Limits', 'i', 0, 2],
+          ]),
+          { fallback: true, constantFold: false }
+        );
+        expect(r?.success ?? false).toBe(false);
+        expect((r as any).error).toMatch(
+          /says it returns a scalar .* but its body constructs a collection.*the numeric accumulation would produce a wrong value/s
+        );
+      });
 
-  // The declared result binds the body (CE-707): the bare application declines
-  // on JavaScript for a mixed clause set. The interpreter still answers the
-  // truthful `integer` clause and refuses the list-constructing clause.
-  test('bare `a(u)` declines on JavaScript', () => {
-    const ce = withClauses('(number) -> number', 'mixed');
-    const r = compile(ce.box(['a', 'u']), { fallback: true });
-    expect(r?.success ?? false).toBe(false);
-    expect((r as any).error).toMatch(
-      /says it returns a scalar .* but its body constructs a collection/
-    );
-    expect(ce.box(['a', 3]).evaluate().re).toBe(7);
-    expect(ce.box(['a', 0.3]).evaluate().toString()).toMatch(
-      /incompatible-type/
-    );
-  });
+      test.each(['glsl', 'wgsl'] as const)('stays closed on %s', (to) => {
+        const r = compile(withLaterClauses(kind).box(['Add', ['a', 'u'], 1]), {
+          to,
+          fallback: true,
+        } as any);
+        expect(r?.success ?? false).toBe(false);
+        // No preamble ships behind the decline.
+        expect((r as any).preamble ?? '').not.toContain('_fn_a');
+      });
 
-  // A container position declines for a clause set too.
-  test('a container position `[a(u), 1]` declines on JavaScript', () => {
-    const ce = withClauses('(number) -> number', 'lying');
-    const r = compile(ce.box(['List', ['a', 'u'], 1]), { fallback: true });
-    expect(r?.success ?? false).toBe(false);
-    expect((r as any).error).toMatch(
-      /says it returns a scalar .* but its body constructs a collection/
-    );
-  });
+      test('a container position `[a(u), 1]` declines on JavaScript', () => {
+        const r = compile(withLaterClauses(kind).box(['List', ['a', 'u'], 1]), {
+          fallback: true,
+        });
+        expect(r?.success ?? false).toBe(false);
+        expect((r as any).error).toMatch(
+          /says it returns a scalar .* but its body constructs a collection/
+        );
+      });
+    }
+  );
 
   // CONTROL: a TRUTHFUL `-> number` clause set — no contradiction, so every
   // scalar position compiles and runs exactly as before.
@@ -1150,7 +1250,11 @@ describe('a contradicted scalar declaration declines for a MULTI-CLAUSE function
 // never reach the last statement, so it is not provably the value. This predicate
 // is positive-evidence-only — its admission DECLINES a compile — so absence of
 // proof must answer `false`, never "probably".
-describe('a contradicted scalar declaration is seen through a MULTI-STATEMENT body (2026-08-12 ruling, wave 5)', () => {
+//
+// A direct assignment of such a body is refused when it is made. The compiler
+// declines are reached through a body whose last statement calls a helper
+// assigned later.
+describe('a contradicted scalar declaration is refused, or seen through a MULTI-STATEMENT body that calls a helper assigned later (2026-08-12 ruling, wave 5)', () => {
   const ALL_TARGETS = [
     'javascript',
     'glsl',
@@ -1188,21 +1292,48 @@ describe('a contradicted scalar declaration is seen through a MULTI-STATEMENT bo
     return ce;
   };
 
-  test('the stored body really is a two-statement block ending in the list', () => {
-    const ce = withDeclaration('(number) -> number');
-    const literal = (ce.lookupDefinition('a') as any)?.value?.value;
-    expect(literal.ops[0].operator).toEqual('Block');
-    expect(literal.ops[0].nops).toEqual(2);
-    // The declaration's ascription wraps the LAST statement, not the block.
-    expect(literal.ops[0].ops[1].operator).toEqual('Typed');
-    expect(literal.ops[0].ops[1].ops[0].operator).toEqual('List');
-    // The declared result binds the body: the interpreter refuses the call.
-    expect(ce.box(['a', 0.3]).evaluate().toString()).toMatch(
-      /incompatible-type/
+  // The assignment of a two-statement body whose last statement constructs a
+  // list, under `(number) -> number`, is refused when it is made. The value
+  // of the block is the value of its last statement.
+  test('the assignment of the multi-statement list body is refused', () => {
+    expect(() => withDeclaration('(number) -> number')).toThrow(
+      /is not compatible with the type/
     );
   });
 
-  // The wave-2 shape matrix, now over the multi-statement body.
+  /**
+   * `a` DECLARED `(number) -> number` and ASSIGNED a two-statement body
+   * whose last statement calls `h`, then `h` ASSIGNED a list-constructing
+   * body. The type of `h(w)` is not known when `a` is assigned, so the
+   * assignment is accepted.
+   */
+  const withLaterList = () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', { signature: '(number) -> number' });
+    ce.assign(
+      'a',
+      ce.box([
+        'Function',
+        ['Block', ['Assign', 'w', ['Cos', 't']], ['h', 'w']],
+        't',
+      ])
+    );
+    ce.assign(
+      'h',
+      ce.box(['Function', ['List', ['Cos', 't'], ['Sin', 't']], 't'])
+    );
+    ce.declare('u', 'number');
+    return ce;
+  };
+
+  test('the stored body is a two-statement block that ends in the helper call', () => {
+    const literal = (withLaterList().lookupDefinition('a') as any)?.value
+      ?.value;
+    expect(literal.ops[0].operator).toEqual('Block');
+    expect(literal.ops[0].nops).toEqual(2);
+  });
+
+  // The wave-2 shape matrix, over the multi-statement body.
   const ADJACENCIES: [string, any][] = [
     ['a(u) + 1', ['Add', ['a', 'u'], 1]],
     ['2·a(u)', ['Multiply', 2, ['a', 'u']]],
@@ -1214,8 +1345,7 @@ describe('a contradicted scalar declaration is seen through a MULTI-STATEMENT bo
   ];
 
   test.each(ADJACENCIES)('javascript declines `%s`', (_name, mathjson) => {
-    const ce = withDeclaration('(number) -> number');
-    const r = compile(ce.box(mathjson), { fallback: true });
+    const r = compile(withLaterList().box(mathjson), { fallback: true });
     expect(r?.success ?? false).toBe(false);
     expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
     expect((r as any).error).toMatch(/'a'/);
@@ -1223,8 +1353,7 @@ describe('a contradicted scalar declaration is seen through a MULTI-STATEMENT bo
   });
 
   test.each(ALL_TARGETS)('%s declines `a(u) + 1`', (to) => {
-    const ce = withDeclaration('(number) -> number');
-    const r = compile(ce.box(['Add', ['a', 'u'], 1]), {
+    const r = compile(withLaterList().box(['Add', ['a', 'u'], 1]), {
       to,
       fallback: true,
     } as any);
@@ -1232,37 +1361,37 @@ describe('a contradicted scalar declaration is seen through a MULTI-STATEMENT bo
     expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
   });
 
-  // Wave 1 (the big-op body clause) reads the same predicate, so it inherits it.
+  // The big-op body check reads the same predicate.
   test.each(ALL_TARGETS)('%s declines the big-op body `Σ a(i)`', (to) => {
-    const ce = withDeclaration('(number) -> number');
-    const r = compile(ce.box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 2]]), {
-      to,
-      fallback: true,
-    } as any);
+    const r = compile(
+      withLaterList().box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 2]]),
+      { to, fallback: true, constantFold: false } as any
+    );
     expect(r?.success ?? false).toBe(false);
     expect((r as any).error).toMatch(
       /says it returns a scalar .* but its body constructs a collection.*the numeric accumulation would produce a wrong value/s
     );
   });
 
-  // Wave 3 (the DEFINITION-emission backstop) reads it too, so the bare call no
-  // longer ships `float _fn_a(float t) { … return vec2(…); }`.
+  // The definition-emission check reads it too, so the bare call does not
+  // ship `float _fn_a(float t) { … return vec2(…); }`.
   test.each(['glsl', 'wgsl'] as const)(
     '%s declines the bare `a(u)` at definition emission',
     (to) => {
-      const ce = withDeclaration('(number) -> number');
-      const r = compile(ce.box(['a', 'u']), { to, fallback: true } as any);
+      const r = compile(withLaterList().box(['a', 'u']), {
+        to,
+        fallback: true,
+      } as any);
       expect(r?.success ?? false).toBe(false);
       expect((r as any).error).toMatch(CONTRADICTED_DEFINITION);
       expect((r as any).preamble ?? '').not.toContain('_fn_a');
     }
   );
 
-  // The declared result binds the body (CE-707): bare `a(u)` declines on
+  // The interpreter refuses a call of `a`, so bare `a(u)` declines on
   // JavaScript too.
   test('bare `a(u)` declines on JavaScript', () => {
-    const ce = withDeclaration('(number) -> number');
-    const r = compile(ce.box(['a', 'u']), { fallback: true });
+    const r = compile(withLaterList().box(['a', 'u']), { fallback: true });
     expect(r?.success ?? false).toBe(false);
     expect((r as any).error).toMatch(
       /says it returns a scalar .* but its body constructs a collection/
@@ -1355,7 +1484,11 @@ describe('a contradicted scalar declaration is seen through a MULTI-STATEMENT bo
 // boolean exemption, because the gate ADDITIONALLY requires the body
 // look-through to PROVE a collection constructor — which a genuine boolean body
 // (a comparison) never produces. Pinned by the controls below.
-describe('a contradicted BOOLEAN declaration declines in every scalar position (2026-08-12 ruling, wave 6)', () => {
+//
+// A direct assignment of a list body under a `boolean` result is refused when
+// it is made. The compiler declines are reached through a helper assigned
+// later.
+describe('a contradicted BOOLEAN declaration is refused, or declines in every scalar position through a helper assigned later (2026-08-12 ruling, wave 6)', () => {
   const ALL_TARGETS = [
     'javascript',
     'glsl',
@@ -1388,12 +1521,12 @@ describe('a contradicted BOOLEAN declaration declines in every scalar position (
     ['[cos t, sin t]', ['List', ['Cos', 't'], ['Sin', 't']]],
   ];
 
+  // The assignment of each lying body under `(number) -> boolean` is refused
+  // when it is made: a list has no value in common with `boolean`.
   test.each(LYING_BODIES)(
-    'the `%s` body really types `boolean` while answering a 2-list',
+    'the assignment of the `%s` body is refused',
     (_name, body) => {
-      const ce = withBody(body);
-      expect(ce.box(['b', 'u']).type.toString()).toEqual('boolean');
-      expect(ce.box(['b', 0.3]).evaluate().nops).toEqual(2);
+      expect(() => withBody(body)).toThrow(/is not compatible with the type/);
     }
   );
 
@@ -1421,82 +1554,96 @@ describe('a contradicted BOOLEAN declaration declines in every scalar position (
     [`${f}(u) = True`, ['Equal', [f, 'u'], 'True']],
   ];
 
-  describe.each(LYING_BODIES)('with the `%s` body', (_bodyName, body) => {
-    test.each(ALL_TARGETS)('%s declines the CONDITION shapes', (to) => {
-      for (const [label, mathjson] of CONDITIONS('b')) {
-        const r = compile(withBody(body).box(mathjson), {
-          to,
-          fallback: true,
-        } as any);
-        expect([label, r?.success ?? false]).toEqual([label, false]);
-        // On glsl/wgsl the single-branch `If` is closed by the definition
-        // backstop, which words the contradiction without the condition.
-        if (label.startsWith('If(b(u), 1)') && (to === 'glsl' || to === 'wgsl'))
-          expect((r as any).error).toMatch(
-            /says it returns a scalar .* but its body constructs a collection/s
-          );
-        else expect((r as any).error).toMatch(CONTRADICTED_CONDITION);
-        expect((r as any).error).toMatch(/'b'/);
-        expect((r as any).error).toMatch(/-> list<number>/);
-      }
-    });
+  /** `b` DECLARED `(number) -> boolean` and ASSIGNED `t ↦ h(t)`, then `h`
+   * ASSIGNED the list-constructing `body`. The type of `h(t)` is not known
+   * when `b` is assigned, so the assignment is accepted. */
+  const withLaterBody = (body: any) => {
+    const ce = new ComputeEngine();
+    ce.declare('b', { signature: '(number) -> boolean' });
+    ce.assign('b', ce.box(['Function', ['h', 't'], 't']));
+    ce.assign('h', ce.box(['Function', body, 't']));
+    ce.declare('u', 'number');
+    return ce;
+  };
 
-    // `Which`, per the measured table: the same contradiction closes it on every
-    // target, but on glsl/wgsl the DEFINITION backstop speaks first (their
-    // element-wise `Which` entry bypasses `assertScalarCondition`). The
-    // interval target checks each `Which` condition with
-    // `assertScalarCondition` too (its arms may be collection values, so the
-    // head is exempt from the scalar-operand gate), and so speaks the
-    // condition message like the JavaScript target.
-    test.each(ALL_TARGETS)('%s declines `Which(b(u), 1, True, 2)`', (to) => {
-      const r = compile(withBody(body).box(WHICH('b')), {
-        to,
-        fallback: true,
-      } as any);
-      expect(r?.success ?? false).toBe(false);
-      const error = (r as any).error as string;
-      if (to === 'glsl' || to === 'wgsl')
-        expect(error).toMatch(CONTRADICTED_DEFINITION);
-      else expect(error).toMatch(CONTRADICTED_CONDITION);
-    });
+  describe.each(LYING_BODIES)(
+    'with the `%s` body in a helper assigned later',
+    (_bodyName, body) => {
+      test.each(ALL_TARGETS)('%s declines the CONDITION shapes', (to) => {
+        for (const [label, mathjson] of CONDITIONS('b')) {
+          const r = compile(withLaterBody(body).box(mathjson), {
+            to,
+            fallback: true,
+          } as any);
+          expect([label, r?.success ?? false]).toEqual([label, false]);
+          // On glsl/wgsl the single-branch `If` is closed by the definition
+          // check, which words the contradiction without the condition.
+          if (
+            label.startsWith('If(b(u), 1)') &&
+            (to === 'glsl' || to === 'wgsl')
+          )
+            expect((r as any).error).toMatch(CONTRADICTED_DEFINITION);
+          else expect((r as any).error).toMatch(CONTRADICTED_CONDITION);
+          expect((r as any).error).toMatch(/'b'/);
+          expect((r as any).error).toMatch(/-> list<number>/);
+        }
+      });
 
-    test.each(ALL_TARGETS)('%s declines the scalar-OPERAND shapes', (to) => {
-      for (const [label, mathjson] of OPERANDS('b')) {
-        const r = compile(withBody(body).box(mathjson), {
-          to,
-          fallback: true,
-        } as any);
-        expect([label, r?.success ?? false]).toEqual([label, false]);
-        expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
-      }
-    });
-
-    // The wave-3 DEFINITION backstop, now reading the `boolean` arm: no
-    // `bool _fn_b(float t) { return vec2(…); }` ships behind a reported success.
-    test.each(['glsl', 'wgsl'] as const)(
-      '%s declines the bare `b(u)` at definition emission',
-      (to) => {
-        const r = compile(withBody(body).box(['b', 'u']), {
+      // On glsl/wgsl the definition check speaks first, because their
+      // element-wise `Which` does not call `assertScalarCondition`. The
+      // interval target checks each `Which` condition with
+      // `assertScalarCondition`, and gives the condition message like the
+      // JavaScript target.
+      test.each(ALL_TARGETS)('%s declines `Which(b(u), 1, True, 2)`', (to) => {
+        const r = compile(withLaterBody(body).box(WHICH('b')), {
           to,
           fallback: true,
         } as any);
         expect(r?.success ?? false).toBe(false);
-        expect((r as any).error).toMatch(CONTRADICTED_DEFINITION);
-        expect((r as any).preamble ?? '').not.toContain('_fn_b');
-      }
-    );
-  });
+        const error = (r as any).error as string;
+        if (to === 'glsl' || to === 'wgsl')
+          expect(error).toMatch(CONTRADICTED_DEFINITION);
+        else expect(error).toMatch(CONTRADICTED_CONDITION);
+      });
 
-  // The declared result binds the body (CE-707): bare `b(u)` declines on
-  // JavaScript too.
-  test('bare `b(u)` declines on JavaScript', () => {
-    const ce = withBody(['List', ['Cos', 't'], ['Sin', 't']]);
-    const r = compile(ce.box(['b', 'u']), { fallback: true });
-    expect(r?.success ?? false).toBe(false);
-    expect((r as any).error).toMatch(
-      /says it returns a scalar .* but its body constructs a collection/
-    );
-  });
+      test.each(ALL_TARGETS)('%s declines the scalar-OPERAND shapes', (to) => {
+        for (const [label, mathjson] of OPERANDS('b')) {
+          const r = compile(withLaterBody(body).box(mathjson), {
+            to,
+            fallback: true,
+          } as any);
+          expect([label, r?.success ?? false]).toEqual([label, false]);
+          expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
+        }
+      });
+
+      // On the shader targets, the definition of `b` would declare a
+      // `bool` return over a `vec2` value, so the compilation declines
+      // when it emits the definition.
+      test.each(['glsl', 'wgsl'] as const)(
+        '%s declines the bare `b(u)` at definition emission',
+        (to) => {
+          const r = compile(withLaterBody(body).box(['b', 'u']), {
+            to,
+            fallback: true,
+          } as any);
+          expect(r?.success ?? false).toBe(false);
+          expect((r as any).error).toMatch(CONTRADICTED_DEFINITION);
+          expect((r as any).preamble ?? '').not.toContain('_fn_b');
+        }
+      );
+
+      test('bare `b(u)` declines on JavaScript', () => {
+        const r = compile(withLaterBody(body).box(['b', 'u']), {
+          fallback: true,
+        });
+        expect(r?.success ?? false).toBe(false);
+        expect((r as any).error).toMatch(
+          /says it returns a scalar .* but its body constructs a collection/
+        );
+      });
+    }
+  );
 
   // EXEMPTION-SAFETY, the load-bearing control: a GENUINE boolean body produces
   // no collection evidence, so the widened gate is structurally unable to fire.

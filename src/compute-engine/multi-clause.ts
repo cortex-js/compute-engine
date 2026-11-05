@@ -790,7 +790,7 @@ export function defineFunctionClause(
     literal = ascribeDeclaredParameterTypes(ce, literal, declared, {
       includeScalar: true,
     });
-    literal = reconcileFunctionLiteralReturn(ce, literal, declared);
+    literal = reconcileFunctionLiteralReturn(ce, literal, declared, id);
   }
 
   const incoming: FunctionClause = {

@@ -368,7 +368,9 @@ fact(5)`);
       'let h: (x: integer) -> integer = (x: integer) => x\n',
       'let h: (x: integer) -> integer\n',
     ]) {
-      const source = head + 'function h(u: string) { u }\nh(u: "a")';
+      // The body returns an integer, so only the parameter is outside the
+      // declared signature.
+      const source = head + 'function h(u: string) { 1 }\nh(u: "a")';
       const { value, diagnostics } = executeEpsil(new ComputeEngine(), source);
       const runtime = diagnostics.filter((d) => d.message[0] === 'runtime-error');
       expect([source, runtime.map((d) => d.message.at(-1))]).toEqual([

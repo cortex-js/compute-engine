@@ -6,15 +6,16 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 // A declared result type is checked against the RETURNED VALUE when the
 // function is applied.
 //
-// The engine accepts a definition whose body cannot meet the declared result:
-// the declaration stays the type contract, and the compiler declines it
-// (see the header of `list-valued-summand-compile.test.ts`). The declared
-// result is ascribed onto the stored body, so `g` declared
-// `(integer) -> integer` and assigned `n ↦ "s"` stores
-// `Function(Typed("s", 'integer'), n)`. Before this check, `g(5)` was typed
-// `integer` and evaluated to `"s"` with no error. Now the `Typed` evaluate
-// handler compares a concrete returned value with the ascribed type, and a
-// value that does not conform evaluates to an `incompatible-type` error.
+// The engine refuses a definition whose body has a type with no value in
+// common with the declared result (`n ↦ "s"` under `(integer) -> integer`).
+// It accepts a body whose type overlaps the declared result, also when some
+// values of the body do not conform: `n ↦ If(n > 0, "s", 1)` under
+// `(integer) -> integer`. The declared result is ascribed onto the stored
+// body, so the stored literal is `Function(Typed(If(…), 'integer'), n)`. The
+// call is typed `integer`. The `Typed` evaluate handler compares a concrete
+// returned value with the ascribed type, and a value that does not conform
+// evaluates to an `incompatible-type` error: `g(5)` gives an error and
+// `g(-1)` gives `1`.
 //
 // A symbolic value, an absence marker (`Missing`, `Nothing`) and `NaN` pass
 // unchanged: a declared result constrains successful values only
@@ -32,27 +33,29 @@ function p(name: string, type: string): MathJsonExpression {
 type Route = [string, (ce: ComputeEngine) => void];
 
 /** Each route installs `g`, declared `(integer) -> integer`, with a body that
- * returns the string `"s"`. */
+ * returns the string `"s"` for a positive argument and `1` otherwise. */
+const IF_S: MathJsonExpression = ['If', ['Greater', 'n', 0], { str: 's' }, 1];
+
 const ROUTES: Route[] = [
   [
     'ce.declare + ce.assign of a parsed function literal',
     (ce) => {
       ce.declare('g', '(integer) -> integer');
-      ce.assign('g', ce.parse('n \\mapsto "s"'));
+      ce.assign('g', ce.parse('n \\mapsto \\operatorname{If}(n > 0, "s", 1)'));
     },
   ],
   [
     'ce.declare + ce.assign of a boxed function literal',
     (ce) => {
       ce.declare('g', '(integer) -> integer');
-      ce.assign('g', ce.box(['Function', "'s'", 'n']));
+      ce.assign('g', ce.box(['Function', IF_S, 'n']));
     },
   ],
   [
     'object-form declaration (operator slot) + ce.assign',
     (ce) => {
       ce.declare('g', { signature: '(integer) -> integer' });
-      ce.assign('g', ce.box(['Function', "'s'", 'n']));
+      ce.assign('g', ce.box(['Function', IF_S, 'n']));
     },
   ],
   [
@@ -60,7 +63,7 @@ const ROUTES: Route[] = [
     (ce) => {
       ce.declare('g', {
         type: '(integer) -> integer',
-        value: ce.box(['Function', "'s'", 'n']),
+        value: ce.box(['Function', IF_S, 'n']),
       });
     },
   ],
@@ -68,11 +71,7 @@ const ROUTES: Route[] = [
     'ce.declare + a DefineFunction clause',
     (ce) => {
       ce.declare('g', '(integer) -> integer');
-      ce.box([
-        'DefineFunction',
-        'g',
-        ['Function', { str: 's' }, 'n'],
-      ]).evaluate();
+      ce.box(['DefineFunction', 'g', ['Function', IF_S, 'n']]).evaluate();
     },
   ],
   [
@@ -80,7 +79,7 @@ const ROUTES: Route[] = [
     (ce) => {
       const { diagnostics } = executeEpsil(
         ce,
-        'let g: (integer) -> integer\ng(n) = "s"'
+        'let g: (integer) -> integer\ng(n) = if n > 0 { "s" } else { 1 }'
       );
       expect(diagnostics).toEqual([]);
     },
@@ -90,7 +89,7 @@ const ROUTES: Route[] = [
     (ce) => {
       const { diagnostics } = executeEpsil(
         ce,
-        'let g: (integer) -> integer\ng(0) = 1\ng(n) = "s"'
+        'let g: (integer) -> integer\ng(0) = 1\ng(n) = if n > 0 { "s" } else { 1 }'
       );
       expect(diagnostics).toEqual([]);
     },
@@ -104,6 +103,16 @@ describe('a declared result is checked against the returned value', () => {
     // The declaration stays the type contract.
     expect(ce.box('g').type.toString()).toBe('(integer) -> integer');
     expect(ce.box(['g', 5]).type.toString()).toBe('integer');
+  });
+
+  // A body whose only value is a string has no value in common with
+  // `integer`, so its assignment is refused when it is made.
+  test('a body that only returns a string is refused when it is assigned', () => {
+    const ce = new ComputeEngine();
+    ce.declare('g', '(integer) -> integer');
+    expect(() => ce.assign('g', ce.parse('n \\mapsto "s"'))).toThrow(
+      /is not compatible with the type/
+    );
   });
 
   test.each(ROUTES)('%s: evaluate', (_, define) => {
@@ -128,7 +137,7 @@ describe('a declared result is checked against the returned value', () => {
   test('an Epsil program that applies the function', () => {
     const { value, diagnostics } = executeEpsil(
       new ComputeEngine(),
-      'let g: (integer) -> integer\ng(n) = "s"\ng(5)'
+      'let g: (integer) -> integer\ng(n) = if n > 0 { "s" } else { 1 }\ng(5)'
     );
     expect(diagnostics).toEqual([]);
     expect(value.toString()).toBe(S_ERROR);
@@ -136,12 +145,20 @@ describe('a declared result is checked against the returned value', () => {
 
   test('the clause that conforms still answers its value', () => {
     const ce = new ComputeEngine();
-    executeEpsil(ce, 'let g: (integer) -> integer\ng(0) = 1\ng(n) = "s"');
+    executeEpsil(
+      ce,
+      'let g: (integer) -> integer\ng(0) = 1\ng(n) = if n > 0 { "s" } else { 1 }'
+    );
     expect(ce.box(['g', 0]).evaluate().toString()).toBe('1');
   });
 
   test.each<[string, MathJsonExpression, string, string]>([
-    ['a boolean', ['Greater', 'n', 0], '(integer) -> integer', '"boolean"'],
+    [
+      'a boolean',
+      ['If', ['Greater', 'n', 0], ['Greater', 'n', 1], 1],
+      '(integer) -> integer',
+      '"boolean"',
+    ],
     ['a rational', ['Divide', 'n', 2], '(integer) -> integer', '"rational'],
     [
       'a list with a string element',
@@ -205,13 +222,23 @@ describe('a declared result is checked against the returned value', () => {
 
   test('a scalar under a grouped function-valued result is an error', () => {
     // `((integer) -> integer)` is the type of a returned function, not the
-    // marker form of the literal's own signature, so it is checked.
+    // marker form of the literal's own signature, so it is checked. The body
+    // returns a function for a negative argument, which conforms.
     const ce = new ComputeEngine();
     ce.declare('g', '(integer) -> ((integer) -> integer)');
-    ce.assign('g', ce.parse('n \\mapsto "s"'));
+    ce.assign(
+      'g',
+      ce.parse('n \\mapsto \\operatorname{If}(n > 0, "s", x \\mapsto x + n)')
+    );
     expect(ce.box(['g', 5]).evaluate().toString()).toBe(
       'Error(ErrorCode("incompatible-type", "(integer) -> integer", "string"), "s")'
     );
+    expect(
+      ce
+        .box([['g', -1], 2] as MathJsonExpression)
+        .evaluate()
+        .toString()
+    ).toBe('1');
   });
 
   test('a list, tuple or character that broadcasts the declared result conforms', () => {
@@ -272,7 +299,7 @@ describe('a declared result is checked against the returned value', () => {
     ).toBe('[0.333333333333333333333]');
     // A string is refused under `.N()` too.
     ce.declare('q', '(integer) -> integer');
-    ce.assign('q', ce.parse('n \\mapsto "s"'));
+    ce.assign('q', ce.parse('n \\mapsto \\operatorname{If}(n > 0, "s", 1)'));
     expect(ce.box(['q', 1]).N().toString()).toBe(S_ERROR);
     // A complex float under a real result gets no allowance.
     ce.declare('c', '(number) -> real');
@@ -382,12 +409,16 @@ describe('a redefinition over a derived signature re-infers the result', () => {
     expect(ce.box(['h', 0]).evaluate().toString()).toBe(S_ERROR);
   });
 
+  // A declared signature is a contract on the name: a redefinition whose body
+  // returns a string is refused, and the previous definition stays.
   test('a declared signature keeps its result as a contract', () => {
     const ce = new ComputeEngine();
     ce.declare('h', { signature: '(a: integer) -> integer' });
     ce.assign('h', ce.parse('(a: integer) \\mapsto 1'));
-    ce.assign('h', ce.parse('(a: integer) \\mapsto "s"'));
+    expect(() => ce.assign('h', ce.parse('(a: integer) \\mapsto "s"'))).toThrow(
+      /is not compatible with the type/
+    );
     expect(ce.box('h').type.toString()).toBe('(a: integer) -> integer');
-    expect(ce.box(['h', 0]).evaluate().toString()).toBe(S_ERROR);
+    expect(ce.box(['h', 0]).evaluate().toString()).toBe('1');
   });
 });

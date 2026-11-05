@@ -548,25 +548,29 @@ describe('GPU: the declared result type and the value of the body', () => {
     for (const v of SAMPLES) expectGLSLValue(ce, 's(x+iy)', v);
   });
 
-  // The point body is declined where the definition is emitted. The boolean
-  // body is declined earlier, at the call: its value is a scalar of a type
-  // that has no value in common with `complex` (`contradictionDeclines()` in
-  // `compile-callbacks.ts`).
-  it('a value that is not a number under a complex result fails closed', () => {
-    for (const [body, message] of [
-      [
-        '(t, 2t)',
-        /Could not compile `Typed`: the ascribed type `complex` says the value is complex, but the value .* is not a number/,
-      ],
-      [
-        't > 0',
-        /Could not compile `s`: the declaration of 's' says it returns 'complex', but its body computes a value of type 'boolean'/,
-      ],
-    ] as const) {
-      const ce = engineWith(['s', '(real) -> complex', `t \\mapsto ${body}`]);
-      for (const run of [glsl, wgsl])
-        expect(() => run(ce, 's(x)')).toThrow(message);
-    }
+  // A point body and a boolean body have no value in common with `complex`,
+  // so their assignment is refused when it is made.
+  it('a value that is not a number under a complex result is refused', () => {
+    for (const body of ['(t, 2t)', 't > 0'])
+      expect(() =>
+        engineWith(['s', '(real) -> complex', `t \\mapsto ${body}`])
+      ).toThrow(/is not compatible with the type/);
+  });
+
+  // A body that gives a point for a positive argument and a real number
+  // otherwise overlaps `complex`, so its assignment is accepted. The shader
+  // has no value for the point, so the compilation declines where the
+  // definition is emitted.
+  it('a value that may not be a number under a complex result fails closed', () => {
+    const ce = engineWith([
+      's',
+      '(real) -> complex',
+      't \\mapsto \\operatorname{If}(t > 0, (t, 2t), t)',
+    ]);
+    for (const run of [glsl, wgsl])
+      expect(() => run(ce, 's(x)')).toThrow(
+        /Could not compile `Typed`: the ascribed type `complex` says the value is complex, but the value .* is not a number/
+      );
   });
 
   it('other ascriptions keep the shader type of the value', () => {
