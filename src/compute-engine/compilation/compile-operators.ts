@@ -653,28 +653,48 @@ export function compileExprOperator(
               }
               return code;
             });
-            // The conjunction of the pairs from pair `k` (comparing operands
-            // `k` and `k+1`) to the last, flat — except that the pairs from
+            // The operands of the conjunction of the pairs from pair `k`
+            // (comparing operands `k` and `k+1`) to the last, flat — except
+            // that the pairs from
             // the first one that reads a bound operand `i+1` (`i ≥ 1`) on
             // are wrapped in that operand's binding, so the temporary is
             // evaluated only once every earlier pair has held. A binding is
             // consumed when wrapped so the recursion does not see it again.
-            const chainFrom = (k: number): string => {
+            const chainParts = (k: number): string[] => {
               const parts: string[] = [];
               for (let i = k; i < codes.length - 1; i++) {
                 const binding = innerBindings.get(i + 1);
                 if (binding && target.bindExpr) {
                   innerBindings.delete(i + 1);
-                  parts.push(target.bindExpr([binding], chainFrom(i)));
+                  parts.push(
+                    target.bindExpr(
+                      [binding],
+                      chainParts(i).join(` ${chainOp} `)
+                    )
+                  );
                   break;
                 }
                 parts.push(`(${codes[i]} ${op[0]} ${codes[i + 1]})`);
               }
-              return parts.join(` ${chainOp} `);
+              return parts;
             };
-            const body = chainFrom(0);
+            const parts = chainParts(0);
+            const body = parts.join(` ${chainOp} `);
             if (outerBindings.length > 0 && target.bindExpr)
               return target.bindExpr(outerBindings, body);
+            // With two pairs or more, the operator at the root of `body` is
+            // the chain operator, not the relational operator. Its
+            // precedence is the one of `And` on the target. Without
+            // parentheses, a tighter parent takes only the first pair:
+            // `Not(Less(3, y, x))` emitted `!(3.0 < y) && (y < x)`, which
+            // negates `3 < y` alone. A target with no `And` operator gets
+            // the parentheses under every parent operator.
+            const chainPrec = target.operators?.('And')?.[1];
+            if (
+              parts.length > 1 &&
+              (chainPrec === undefined ? prec > 0 : chainPrec < prec)
+            )
+              return `(${body})`;
             return body;
           }
 

@@ -19,6 +19,12 @@
   and its value is `[2, 3]`. Now it is typed `vector<2>`, as
   `Apply(x ↦ x + 1, [1, 2])` is. A list of tuples, whose cells the body of
   the inner function decides, gives the type `any`.
+- **The negation of a chained comparison compiles to the negation of the
+  whole chain.** `Not(Less(3, y, x))` compiled to `!(3.0 < y) && (y < x)` in
+  GLSL and WGSL, and to the same form in JavaScript and Python
+  (`not (3 < y) and (y < x)`), which negates only the first
+  comparison: at `y = 4`, `x = 1` the compiled code gave `false` and the
+  interpreter gives `True`. Now the code is `!((3.0 < y) && (y < x))`.
 
 ## 0.180.0 _2026-11-04_
 
