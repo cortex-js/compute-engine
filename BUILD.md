@@ -97,6 +97,10 @@ Before returning a delegated implementation:
    `npm run test:python`, or a Prettier check or write (the release checks
    formatting). The after-edit hook type-checks each edit, so run
    the compiler by hand only when the hook is off or the task asks for it.
+   When the change alters the emitted code of a compilation target, the test
+   files of the change include those that contain a fragment of the emitted
+   code it changes (`grep -rlF '<fragment>' test/`): they compare the exact
+   string, and a search by operator name does not find them.
 2. Report changed files, exact commands and results, checks not run and why,
    recommended remaining validation, and unresolved issues. Returning unchecked
    work is acceptable when validation is delegated; identify it as unchecked.

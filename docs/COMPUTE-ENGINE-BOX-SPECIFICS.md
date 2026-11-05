@@ -8,13 +8,11 @@ written, and propose a change to a rule rather than skip it.
 
 ## §1 Worktrees and applying changes
 
-Choose the main tree or a worktree with the rules of the shared protocol §1: a
-worktree for a subagent, for work that keeps the tree broken for a while, and
-for files that another session is changing; the main tree for a small change
-done in one sitting. In this repo, many sessions change
-`src/compute-engine/compilation/base-compiler.ts` and
-`src/compute-engine/boxed-expression/`, so a change of more than a few lines
-there goes to a worktree. Link its dependencies to the main checkout:
+Choose the main tree or a worktree as the shared protocol §1 says: the main
+tree by default, a worktree when it helps (a subagent writes the change, the
+tree stays broken for a while, or a peer's unfinished edits keep the main tree
+from type-checking). When you make a worktree, link its dependencies to the
+main checkout:
 
 ```sh
 ln -s /Users/arno/dev/compute-engine/node_modules /tmp/wt-<session-name>/node_modules
@@ -100,8 +98,9 @@ Both reviewers use [REVIEW-CHECKLIST.md](REVIEW-CHECKLIST.md).
 
 - Test files are exempt from dual review, in addition to the shared protocol's
   documentation and comment-only exemptions.
-- Production code, dependency versions, Jest/build configuration, and CI
-  workflows require dual review.
+- Production code gets the review that the shared protocol §5.2 chooses for
+  its risk. Dependency versions, Jest/build configuration, and CI workflows
+  always get a dual review: their tests do not show their effect.
 - Never hand-edit generated documentation, including `src/api.md`; use the
   appropriate generator described in BUILD.md.
 - Never update a snapshot marked `@fixme`.
@@ -117,7 +116,12 @@ inputs are unchanged; sub-agent handoffs follow
 npm run test:core
 ```
 
-Use `npx tsx scripts/where.ts <Operator>` to find tests for an operator. After
+Use `npx tsx scripts/where.ts <Operator>` to find tests for an operator. When a
+change alters the emitted code of a compilation target, also run the test files
+that contain a fragment of the code it changes
+(`grep -rlF '<fragment>' test/`, for example `.reduce((_a, _b) => _a + _b`):
+these tests compare the exact emitted string, and the operator name does not
+find them. After
 import changes, also run `npm run check:deps`; no circular dependencies are
 allowed. Follow the shared protocol's staging queue and review requirements.
 
@@ -136,7 +140,10 @@ before staging when any of these applies:
 For affected code/configuration or broad snapshot changes, take the box lock and
 run `npm test` in the checkout containing the changes. For the five-commit
 limit, run `bash scripts/ci-nightly.sh run`; it checks committed HEAD and
-records its result. It takes the lock automatically.
+records its result. It takes the lock automatically. It does not test the
+change that you are about to stage, so its result is never a check of that
+change: when the change itself needs the full suite, run `npm test` in the
+tree that contains it.
 
 ### Formatting, hooks, and releases
 
@@ -158,8 +165,9 @@ and the file lists no next tasks. Delete it when the work is committed.
 
 ## §9 Context size, agent types and work areas
 
-Use `implementer` (Opus) for implementation and bug fixes, one ROADMAP item per
-agent, and `mechanic` (Sonnet) for recipe-driven edits, read-only audits,
+Delegate only when it helps (shared protocol §9); write a change of a few lines
+yourself. When you delegate, use `implementer` (Opus) for implementation and
+bug fixes, one ROADMAP item per agent, and `mechanic` (Sonnet) for recipe-driven edits, read-only audits,
 sweeps and censuses. Do not use `general-purpose` for implementation: only the
 two repo agents carry the stop rule of the shared protocol §9. Find code with
 the LSP tool or `scripts/where.ts`.
