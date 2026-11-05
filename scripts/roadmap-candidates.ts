@@ -47,7 +47,8 @@
  *                       with the reason.
  *   --decisions         List only the `decision needed` entries, newest
  *                       first, and the number of `design needed` and
- *                       `proposed` entries.
+ *                       `proposed` entries. The entries whose only witness
+ *                       is `crafted` are listed in a separate group.
  *
  * Example:
  *   npx tsx scripts/roadmap-candidates.ts --batch 20 --json /tmp/queue.json
@@ -222,13 +223,27 @@ function pickBatch(ranked: Candidate[], size: number, includeFlagged: boolean): 
   return batch;
 }
 
+// The entries that wait for a decision, in two groups. An entry whose only
+// witness is `crafted` is listed apart: AGENTS.md says that such a case is not
+// a question for the user (the agent gives it a decline or a known-limitations
+// line), so the roadmap-batch skill does not ask it by default and offers to
+// review the group at the end of its first step.
 function listDecisions(entries: Entry[]) {
   const waiting = entries
     .filter((e) => /^decision needed\b/.test(e.status))
     .sort((a, b) => refNumber(b.id) - refNumber(a.id));
+  const isCrafted = (e: Entry) => /^crafted\b/.test(e.witness ?? '');
+  const toAsk = waiting.filter((e) => !isCrafted(e));
+  const crafted = waiting.filter(isCrafted);
   const count = (state: string) => entries.filter((e) => e.status.startsWith(state)).length;
-  console.log(`${waiting.length} entries wait for a decision (newest first):\n`);
-  for (const e of waiting) console.log(`  ${e.id.padEnd(8)} [${e.area}] ${e.title}`);
+  console.log(`${toAsk.length} entries wait for a decision (newest first):\n`);
+  for (const e of toAsk) console.log(`  ${e.id.padEnd(8)} [${e.area}] ${e.title}`);
+  if (crafted.length > 0) {
+    console.log(
+      `\n${crafted.length} more wait for a decision but have only a crafted witness (not asked by default):\n`
+    );
+    for (const e of crafted) console.log(`  ${e.id.padEnd(8)} [${e.area}] ${e.title}`);
+  }
   console.log(`\nAlso: ${count('design needed')} design needed, ${count('proposed')} proposed.`);
 }
 

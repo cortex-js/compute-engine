@@ -23,8 +23,11 @@ own name (`node ~/.claude/scripts/staging-queue.mjs whoami`).
 ## 1. Decisions
 
 Run `npx tsx scripts/roadmap-candidates.ts --decisions`. It lists the
-`decision needed` entries, newest first. Take at most eight per run, newest
-first, and read each one in `ROADMAP.md`.
+`decision needed` entries, newest first, and then, in a separate group, the
+entries whose only witness is `crafted`. Do not ask the crafted group by
+default: AGENTS.md says that a case with only a `crafted` witness is not a
+question for the user. From the first group, take at most eight per run,
+newest first, and read each one in `ROADMAP.md`.
 
 Ask the user, at most four questions per message (in Claude Code, with the
 AskUserQuestion tool). Each question stands on its own for a reader who has
@@ -39,6 +42,11 @@ words. Keep the options in the text: the session that does the work reads
 them. Before the edit, read `ROADMAP.md` again (other sessions edit it).
 Commit these changes together, with a message that names each entry and its
 option.
+
+At the end of this step, when the crafted group is not empty, list it in one
+message (reference, title) and offer to review it; continue without waiting.
+When the user accepts, ask those entries in the same form as the others,
+at most eight per run.
 
 ## 2. The batch
 
