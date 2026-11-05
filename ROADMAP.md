@@ -135,23 +135,6 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
 
 ## Types and type inference
 
-### CE-765. `Apply` of a curried function to a list is typed as a scalar
-
-**Status:** ready; defect, S.
-**Witness:** plausible; with `mk := n ↦ (x ↦ x + n)`, `Apply(mk(1), [1, 2])` is typed `number`, and its value is `[2, 3]`.
-
-The type of the call does not hold its value, so compiled code can give a
-result of the wrong shape. `anonymousApplicationType` in
-`src/compute-engine/library/core.ts` maps the result type over a list
-argument only for a function-literal callee and for a `Derivative` callee
-(`appliedCalleeMapType`). For any other callee that is an application, such
-as `mk(1)`, it takes the scalar result of the signature. The rule cannot be
-given to every application callee:
-`Apply(Composition(Length, (x: real) ↦ [x, x]), [1, 2])` is the scalar `2`,
-because a composition applies its steps one after another. A sound fix types the call from the value of the callee
-when that value is a function literal (the result of `mk(1)` is
-`x ↦ x + 1`), and keeps the old type otherwise.
-
 ### CE-545. A call over an `unknown` operand and over the wide CE-502 form are typed by different rules
 
 **Status:** decision needed; types. Found 2026-10-27 while fixing Tycho row 468.
@@ -365,18 +348,49 @@ reuse of that cache rather than interpreter closure capture.
 
 ### CE-763. `Contains` of a list of valueless symbols gives `False` for a value that a symbol can hold
 
-**Status:** ready; wrong value, S.
-**Witness:** plausible; with `a` and `b` declared `integer` and no value,.
+**Status:** decision needed; wrong value, S. The fix changes a documented
+contract (found 2026-11-04 by session `cebatch-763` at `addb0d7fd`).
+**Witness:** plausible; with `a` and `b` declared `integer` and no value,
 `Contains([a, b], 3)` evaluates to `False`; it should stay unevaluated,
 because `a` can be 3.
 
 The `Contains` handler (`library/collections.ts`) compares each element with
-the value and answers `False` when no element is the same expression. For an
-element whose value is not known, the comparison is undecided, not false.
-The fix: answer `True` when an element is equal to the value, `False` only when
-every element is known to differ (for example, two distinct numbers), and stay
-unevaluated otherwise. The same answer is given over a listed `FlatMap` view,
-because the consumer reads the listed elements.
+the value by structural identity (`isSame`) and answers `False` when no
+element is the same expression. This is the documented contract today:
+
+- The reference page (`82-reference-collections.md` of cortexjs.io, and the
+  `description` of `Contains`) says that `Contains(xs, v)` is the same as
+  `Any(xs, (e) |-> e === v)`, with structural identity. `Same(a, 3)` is
+  `False` for a valueless `a`, so `Any([a, b], (e) |-> e === 3)` is `False`.
+- The comment of `searchMayStillMatch()` (`collection-utils.ts`) says that
+  `Contains`, `IndexOf` and `Count` compare structurally, "so an unknown there
+  is simply a different expression". Only `Element` and `NotElement` leave the
+  answer open: `Element(3, [a, b])` stays unevaluated today.
+- `IndexOf([a, b], 3)` is `0` and `Count([a, b], 3)` is `0` today.
+
+Options:
+
+- (a) Keep the contract. `Contains([a, b], 3)` stays `False`. Remove this
+  entry, and add an example to the reference page: an element with an unknown
+  is a different expression; use `Element(3, [a, b])` to leave the answer open
+  (it stays unevaluated). No code change.
+- (b) Change `Contains` only: when no element is the same expression and an
+  element or the value has an unknown, stay unevaluated (the test
+  `searchMayStillMatch()` that `Element` uses). `Contains([a, b], 3)` stays
+  unevaluated; `Contains([a, 3], 3)` is `True`; `Contains([1, 2], 3)` is
+  `False`. `IndexOf([a, b], 3)` stays `0`, so the two operators disagree, and
+  the equivalence with `Any(xs, (e) |-> e === v)` no longer holds. Reference
+  page and `description` change.
+- (c) Change all three search operators (`Contains`, `IndexOf`,
+  `Count(xs, v)`) as in (b): `IndexOf([a, b], 3)` and `Count([a, b], 3)` also
+  stay unevaluated. The equivalence with `Any` and `===` still fails unless
+  `Same` also changes, which is a larger change of its own. Reference pages of
+  the three operators change.
+
+Recommendation: (a). `Contains`, `IndexOf` and `Count` are documented as
+structural searches, like `===`, and `Element` already gives the
+mathematical membership that this entry asks for. If nothing is decided, (a)
+is what the engine does.
 
 ### CE-754. The chained `At` type handler gives wrong types for a tuple, record or gather step
 
@@ -619,21 +633,6 @@ Sorting an empty list is a one-line program; expected `[]`. Found during the wor
 reproduction above is the record.
 
 ## Evaluation, canonical forms and scoping
-
-### CE-766. `0^x` is folded with the value that `x` has when it is boxed
-
-**Status:** ready; wrong value, S.
-**Witness:** plausible; after `ce.assign('x', 2)`, `e = ce.box(['Power', 0, 'x'])` is `0`; after `ce.assign('x', -1)`, `e.evaluate()` still gives `0` and should give `~oo` (a new boxing gives `~oo`).
-
-The zero-base block of `canonicalPower`
-(`src/compute-engine/boxed-expression/arithmetic-power.ts`) reads
-`b.isGreater(0)` when the expression is boxed, and that comparison reads the
-value of the symbol at that moment. A host that boxes an expression once
-and then assigns new values (a slider) gets the old fold. The infinity
-branches of the same function fold only for a base whose value cannot
-change (`hasFixedValue()`); the zero-base block needs the same requirement
-for its exponent, and `evaluate()` folds with the current value. With
-`t: real` and no value, `0^t` already stays unfolded.
 
 ### CE-752. A lazy view returned from a `Block` reads a valueless local as the global of the same name
 
