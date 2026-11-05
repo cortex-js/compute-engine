@@ -1,3 +1,15 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A power of `0` with a variable exponent is no longer folded with the value
+  that the variable has when the expression is boxed.** After
+  `ce.assign('x', 2)`, `ce.box(['Power', 0, 'x'])` was the number `0`, and it
+  stayed `0` after `ce.assign('x', -1)`. Now the expression stays `0^x`, and
+  `evaluate()` and `N()` use the value of that moment: `0` for `x := 2`,
+  `ComplexInfinity` for `x := -1`, `NaN` for `x := 0`. An exponent made only of
+  numbers and constants still folds when it is boxed (`0^{2\pi}` is `0`).
+
 ## 0.180.0 _2026-11-04_
 
 ### Breaking changes

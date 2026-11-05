@@ -422,8 +422,17 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   }
 
   // Handle special base cases that only need sign/infinity info from the
-  // exponent, before the numeric-exponent guard below.
-  if (isNumber(a) && a.isSame(0) && !b.isSame(0) && !b.isInfinity) {
+  // exponent, before the numeric-exponent guard below. The sign of an
+  // exponent that contains a variable (`0^x` with `x := 2`) can change after
+  // the expression is boxed, so only an exponent made of numbers and
+  // constants folds here (see the zero-base block below).
+  if (
+    isNumber(a) &&
+    a.isSame(0) &&
+    b.isConstant &&
+    !b.isSame(0) &&
+    !b.isInfinity
+  ) {
     // 0^positive = 0, 0^negative = ComplexInfinity. A float base `0.0`
     // or a float exponent (`0^{2.0}`) gives a float `0`.
     if (b.isPositive === true)
@@ -497,6 +506,14 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     if (b.type.matches('imaginary' as NumericPrimitiveType)) return ce.NaN;
 
     if (b.isSame(0)) return ce.NaN;
+
+    // The folds below read the value of the exponent (its sign, or whether
+    // it is infinite). A canonical form must not depend on a value that can
+    // change, so an exponent that contains a variable (`0^x` with `x := 2`,
+    // or `0^{x+1}`) stays unfolded, and `evaluate()` folds it with the value
+    // of that moment. An exponent made only of numbers and constants
+    // (`0^{2\pi}`) folds here.
+    if (!b.isConstant) return unchanged();
 
     if (b.isInfinity) {
       // 0^∞ = 0 (because for all complex numbers z near 0, z^∞ -> 0).
@@ -1489,6 +1506,30 @@ export function pow(
   // no parity.
   const unit = unitBaseIntegerPower(x, exp, numericApproximation, rawExponent);
   if (unit !== undefined) return unit;
+
+  // `0^b` for an exponent with a known sign: `0` for a positive exponent and
+  // `~∞` for a negative one, the folds of `canonicalPower()`.
+  // `canonicalPower()` folds only an exponent made of numbers and constants,
+  // because the sign of a variable can change after the expression is boxed,
+  // so a power such as `0^x` (`x := -1`) or `0^w` (with the assumption
+  // `w > 0`) is folded here, when it is evaluated, with the value or the
+  // assumptions of that moment. This also applies under `.N()`, where the
+  // exponent arrives as a float literal (`-1.0`) and the numeric kernel below
+  // would give `+∞` for `0^{-1.0}`. A float base `0.0` or a float in the
+  // exponent gives a float `0`, as in `canonicalPower()`.
+  //
+  // `pow()` is also the builder of `.pow()`. Like the other folds of
+  // `pow()` (which read `exp.re`), this one reads the current value of a
+  // symbol in a builder call: `ce.Zero.pow(x)` with `x := 2` is `0`.
+  if (isNumber(x) && x.isSame(0) && typeof exp !== 'number') {
+    if (exp.isPositive === true)
+      return !x.isExact
+        ? x
+        : hasFloatOperand([exp])
+          ? asFloat(x)
+          : x.engine.Zero;
+    if (exp.isNegative === true) return x.engine.ComplexInfinity;
+  }
 
   //
   // If a numeric approximation is requested, we try to evaluate the expression.
