@@ -343,6 +343,7 @@ import { internType } from '../../common/type/intern.js';
 import {
   deriveApplicationOf,
   describeBoundSymbol,
+  describeType,
   describe as describeOperand,
   typeFact,
 } from '../boxed-expression/operand-descriptor.js';
@@ -9563,10 +9564,12 @@ function isCollectionIndex(idx: Expression | undefined): boolean {
  * for a numeric final domain, `Missing` otherwise.
  *
  * When the peeled type does not show the final domain (`collType` is the
- * type of a value that holds no element, `list<never>`), `readType` decides
- * when it is given: it is the type of the whole read as written, which comes
- * from the DECLARED type of the base (user decision 2026-10-20, see
- * `absenceMarker()`).
+ * type of a value that holds no element, `list<never>`, or a step goes through
+ * a record or a dictionary, whose peeled type is an iteration pair and not a
+ * value, or through a tuple, whose peeled type is the join of its slots),
+ * `readType` decides when it is given: it is the type of the whole
+ * read as written, which comes from the DECLARED type of the base (user
+ * decision 2026-10-20, see `absenceMarker()`).
  */
 function chainAbsorbMarker(
   ce: ComputeEngine,
@@ -9576,13 +9579,23 @@ function chainAbsorbMarker(
   readType?: Type
 ): Expression {
   let t: Type = collType;
+  let peelIsImprecise = false;
   for (let i = fromIndex; i < ops.length; i++) {
+    const r = resolveTypeAlias(t);
+    if (
+      r === 'dictionary' ||
+      r === 'record' ||
+      r === 'tuple' ||
+      (typeof r !== 'string' &&
+        (r.kind === 'dictionary' || r.kind === 'record' || r.kind === 'tuple'))
+    )
+      peelIsImprecise = true;
     const peeled = collectionElementType(t) ?? 'any';
     t = isCollectionIndex(ops[i])
       ? ({ kind: 'list', elements: peeled } as ListType)
       : peeled;
   }
-  if (t === 'unknown' || t === 'any' || t === 'never') {
+  if (t === 'unknown' || t === 'any' || t === 'never' || peelIsImprecise) {
     if (readType !== undefined)
       return absentMarkerIsNumeric(readType, undefined)
         ? ce.NaN
@@ -16922,8 +16935,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return context.engine.type('error');
 
       // The RAW type of the element(s) a single index selects (no absence
-      // marker). Used as the inner element type of a gather and as the peeled
-      // type of a chained step.
+      // marker). Used as the inner element type of a gather.
       const elementType = (t: Type = ops[0].type): Type => {
         const xs = ops[0];
         // A base inferred from its uses carries the two-arm shape `At`'s own
@@ -17031,11 +17043,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // negatives count from the end); otherwise `collectionElementType`
           // widens across all slot types.
           const key = ops[1];
-          if (
-            ops.length === 2 &&
-            key !== undefined &&
-            isSubtype(key.type, 'integer')
-          ) {
+          if (key !== undefined && isSubtype(key.type, 'integer')) {
             const n = t.elements.length;
             // The literal's handler-visible value. An exact integer no machine
             // number holds — a bigint past ±2⁵³ — carries only a rounded
@@ -17189,7 +17197,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // The operand is an access proved to find nothing: the marker of
           // the element that it would read (`provedAbsentReadType`).
           const absent =
-            ops.length === 2 && typeof raw === 'number' && Number.isInteger(raw)
+            typeof raw === 'number' && Number.isInteger(raw)
               ? provedAbsentReadType(ops[0], raw)
               : undefined;
           if (absent !== undefined) return absent;
@@ -17258,77 +17266,31 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         );
       }
 
-      // CHAINED form `At(M, i, j, …)`: `evaluate` walks the indices, and each
-      // step transforms the CURRENT value — a scalar index peels one collection
-      // level, while a gather REPLACES the value with a fresh `List` of the
-      // peeled element type. The next index then applies to that new value.
-      // Without this branch the handler fell back to `elementType()`, which
-      // only ever consulted `ops[1]`, so `At(M, 1, [1,2])` on a 2x3 matrix
-      // reported `vector<int^3>` (a whole row) for the 2-element list `[1,2]`.
-      //
-      // The step must be applied per index, NOT accumulated into a single
-      // "did any step gather" flag: a gather followed by a scalar index selects
-      // one entry OUT of the gathered list, so `At(M, [1,2], 1)` is a whole row
-      // (`[1,2,3]`), not a list of scalars. A global flag reported
-      // `list<integer>` for it — over-peeled and mis-shaped.
-      //
-      // Only walk an indexed-collection source, and not a TUPLE: a tuple IS an
-      // `indexed_collection`, but `elementType()` has slot-aware handling for
-      // it that a plain `collectionElementType` walk (which widens across all
-      // slots) would lose. Dictionaries/records likewise.
-      const sourceType = ops[0].type;
-      const isTupleSource =
-        typeof sourceType !== 'string' && sourceType.kind === 'tuple';
-      if (
-        !isSubtype(sourceType, INDEXED_COLLECTION_SHAPE_TYPE) ||
-        isTupleSource
-      )
-        return BoxedType.forResult(
-          scalarResultType(),
-          context.engine._typeResolver
-        );
-
-      // Peel RAW through the intermediate steps; the absence marker is applied
-      // only to the FINAL position's domain (chained value-level absorption,
-      // §3.C): `At(m, 9, 0)` on `list<list<number>>` reports `number` — the
-      // list-domain miss at step 1 absorbs into the numeric final domain.
-      //
-      // A step through a union with `missing` peels the collection arms and
-      // keeps the `missing` arm: an access into an absent row is absent.
-      // `[[1,2]\{0<t\}, [3,4]]` is `list<missing | vector<integer^2>>`, and
-      // `At(…, 1, 2)` peels `missing | vector<integer^2>` to
-      // `missing | integer`. `collectionElementType` has no answer for a
-      // union, so the step read `any` and the result was `unknown`.
-      const peel = (t: Type): Type | undefined => {
-        if (typeof t !== 'string' && t.kind === 'union') {
-          const arms = t.types.map((arm) =>
-            arm === 'missing' ? arm : collectionElementType(arm)
-          );
-          if (
-            t.types.some((arm) => arm !== 'missing') &&
-            arms.every((arm) => arm !== undefined)
-          )
-            return reduceType({ kind: 'union', types: arms as Type[] });
-        }
-        return collectionElementType(t);
-      };
-      let current: Type = sourceType;
+      // CHAINED form `At(x, i₁, i₂, …)`: `evaluate` walks the indices, and each
+      // index applies to the value that the index before it selected, so the
+      // read is the nested read `At(At(x, i₁), i₂, …)`, and it has the type of
+      // the nested read. Each step uses the rule of a single index above: a
+      // slot of a tuple, a field of a record, a value of a dictionary, an
+      // element of a list, or a list for a gather. `At(t, 1, 2)` with
+      // `t: tuple<list<real>, real>` is `real`, and `At(L, 1, "a")` with
+      // `L: list<record{a: real}>` is `real`. The compiler reads a chained
+      // access as this nested access (`compiler-core.ts`). When boxing the
+      // nested read writes a type on an inferred base, or refuses a marker as
+      // a base, the two types can differ; that nested read then declines.
+      let current: OperandDescriptor = ops[0];
       for (let i = 1; i < ops.length; i++) {
-        const peeled = peel(current) ?? 'any';
-        const last = i === ops.length - 1;
-        if (isGatherIndex(ops[i])) {
-          // A gather yields a dimensionless list; the final gather's elements
-          // carry the marker, a mask filters (no marker).
-          const inner =
-            last && !isMaskIndex(ops[i])
-              ? elementReadType(ops[0], peeled)
-              : peeled;
-          current = { kind: 'list', elements: inner } as ListType;
-        } else {
-          current = last ? elementReadType(ops[0], peeled) : peeled;
-        }
+        const type =
+          context.derive('At', [current, ops[i]]) ?? ('any' as Type);
+        // A step that is an error (an index into a scalar) ends the read: the
+        // next step would read a base of type `error` as an unknown value.
+        if (type === 'error') return context.engine.type('error');
+        const children = [current, ops[i]];
+        current = {
+          ...describeType(type, false),
+          structureOf: () => ({ kind: 'application', head: 'At', children }),
+        };
       }
-      return BoxedType.forResult(current, context.engine._typeResolver);
+      return BoxedType.forResult(current.type, context.engine._typeResolver);
     },
 
     // Custom canonical handler delegating operand validation to

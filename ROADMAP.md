@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-814.
+Next free reference: CE-815.
 
 **Entry format.**
 
@@ -342,6 +342,17 @@ Type computed before `f` is assigned; a type that does not hold the value can gi
 reproduction above is the record.
 
 ## Collections, absence and broadcasting
+
+### CE-814. A read through an aliased record or dictionary is typed from the iteration pair
+
+**Status:** ready; wrong value, S.
+**Witness:** plausible; with `Rec` an alias of `record{a: list<real>}` and `Rc: Rec` holding `{a: [1.5]}`, `At(Rc, "a")` is typed `tuple<string, any>` and its value is `[1.5]`; `At(Rc, "a", 1)` is typed `string` and its value is `1.5`; `Add(At(Rc, "a", 1), 1)` is an `incompatible-type` error for a valid read.
+
+In the `At` type handler (`library/collections.ts`), `elementType()` and
+`scalarResultType()` test `t.kind === 'dictionary'` and `'record'` on the
+unresolved type, so an alias falls through to `collectionElementType()`, which
+gives the iteration pair. The fix is to test the resolved type (`rt`) in these
+branches. A `dictionary<list<real>>` under an alias has the same defect.
 
 ### CE-682. A `Linspace` with an infinite endpoint: its reads disagree with each other
 

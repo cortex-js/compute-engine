@@ -107,17 +107,6 @@ describe('JavaScript: a chained At compiles as the nested access', () => {
         `${type}, ${mode}: %s`,
         (label, json) => {
           const ce = engine(type);
-          // A read proved out of range in a base of static shape declines:
-          // the chained access `R[1, 3]` is typed `real` (the absence marker
-          // is implicit in the type of a read), and the nested access
-          // `R[1][3]` is typed `nan`, which is not a subtype of `real`. The
-          // interpreter gives `NaN`.
-          if (label === '["At","R",1,3]' && type !== 'list<list<real>>') {
-            expect(() =>
-              compile(ce.box(json as never), { fallback: false, mode })
-            ).toThrow(/not a subtype/);
-            return;
-          }
           const r = compile(ce.box(json as never), {
             fallback: false,
             mode,
@@ -130,39 +119,106 @@ describe('JavaScript: a chained At compiles as the nested access', () => {
       );
 });
 
-describe('A chained read whose nested type is not a subtype of its type', () => {
-  // The `At` type handler gives some chained reads through a tuple, a record
-  // or a dictionary a type that is not the type of their value: with
-  // `t: tuple<list<real>, real>`, `At(t, 1, 2)` is typed `list<real>`, and
-  // its value is the real number `2`. The `Add` parent chooses its lowering
-  // from that type, so the compiler declines instead of compiling the
-  // nested read `At(At(t, 1), 2)`, whose type is `nan | real`.
-  test.each([
-    ['tuple<list<real>, real>', 't', ['At', 't', 1, 2]],
-    ['record{a: list<real>}', 'r', ['At', 'r', { str: 'a' }, 1]],
-    ['list<record{a: real}>', 'L', ['At', 'L', 1, { str: 'a' }]],
-  ] as const)('%s', (type, name, read) => {
+describe('A chained read has the type of the nested read', () => {
+  // The chained read `At(x, i, j)` is the nested read `At(At(x, i), j)`: each
+  // index applies to the value that the index before it selected. So a step
+  // through a tuple reads a slot, through a record a field, and through a
+  // dictionary a value. They were peeled with the element type of an
+  // iteration: with `t: tuple<list<real>, real>`, `At(t, 1, 2)` was typed
+  // `list<real>`, and its value is a real number.
+  const BASES_OF_READS = [
+    ['tuple<list<real>, real>', 't', ['At', 't', 1, 2], 'real'],
+    ['record{a: list<real>}', 'r', ['At', 'r', { str: 'a' }, 1], 'real'],
+    ['list<record{a: real}>', 'L', ['At', 'L', 1, { str: 'a' }], 'real'],
+    ['dictionary<list<real>>', 'd', ['At', 'd', { str: 'a' }, 1], 'real'],
+    [
+      'list<tuple<real, list<real>>>',
+      'tl',
+      ['At', 'tl', 1, 2, 1],
+      'real',
+    ],
+    ['list<list<real>>', 'm', ['At', 'm', 1, ['List', 1, 2]], 'list<real>'],
+    ['list<list<real>>', 'm', ['At', 'm', ['List', 1, 2], 1], 'list<real>'],
+  ] as const;
+  test.each(BASES_OF_READS)('%s: %s', (type, name, read, expected) => {
     const ce = new ComputeEngine();
     ce.declare(name, type);
-    for (const mode of ['complex', 'strict'] as const)
-      expect(() =>
-        compile(ce.box(['Add', read, 1] as never), { fallback: false, mode })
-      ).toThrow(/Could not compile/);
+    const chained = ce.box(read as never);
+    expect(chained.type.toString()).toBe(expected);
+    const [, base, ...indexes] = read as readonly unknown[];
+    let nested: unknown = base;
+    for (const i of indexes) nested = ['At', nested, i];
+    expect(ce.box(nested as never).type.toString()).toBe(expected);
   });
 
-  test('a chained type `unknown` is no evidence of a shape', () => {
-    // Every type matches `unknown`. `At(tl, i, 2, j)` is typed `unknown`,
-    // and its first nested step `At(At(tl, i), 2)` is typed
-    // `list<real> | missing`.
+  test('a chained read through a tuple compiles', () => {
     const ce = new ComputeEngine();
+    ce.declare('t', 'tuple<list<real>, real>');
     ce.declare('tl', 'list<tuple<real, list<real>>>');
     ce.declare('i', 'integer');
     ce.declare('j', 'integer');
-    const read = ce.box(['At', 'tl', 'i', 2, 'j'] as never);
-    expect(read.type.toString()).toBe('unknown');
-    expect(() => compile(read, { fallback: false })).toThrow(
-      /The first type gives no shape/
+    for (const mode of ['complex', 'strict'] as const) {
+      const r = compile(ce.box(['Add', ['At', 't', 1, 2], 1] as never), {
+        fallback: false,
+        mode,
+      })!;
+      expect(r.run!({ t: [[1.5, 2.5], 3.5] })).toBe(3.5);
+      const s = compile(ce.box(['At', 'tl', 'i', 2, 'j'] as never), {
+        fallback: false,
+        mode,
+      })!;
+      expect(s.run!({ tl: [[1, [5, 6]]], i: 1, j: 2 })).toBe(6);
+    }
+  });
+
+  test.each([[['At', 't', 2, 1]], [['At', 't', 2, 1, 1]]])(
+    'a read of a scalar with more indexes is an error, and declines: %j',
+    (json) => {
+      const ce = new ComputeEngine();
+      ce.declare('t', 'tuple<list<real>, real>');
+      const read = ce.box(json as never);
+      expect(read.type.toString()).toBe('error');
+      expect(() => compile(read, { fallback: false })).toThrow(
+        /Could not compile/
+      );
+    }
+  );
+
+  // JavaScript has no lowering of a read of a record or a dictionary.
+  test.each([
+    ['record{a: list<real>}', 'r', ['At', 'r', { str: 'a' }, 1]],
+    ['list<record{a: real}>', 'L', ['At', 'L', 1, { str: 'a' }]],
+    ['dictionary<list<real>>', 'd', ['At', 'd', { str: 'a' }, 1]],
+  ] as const)('a read through %s declines', (type, name, read) => {
+    const ce = new ComputeEngine();
+    ce.declare(name, type);
+    expect(() => compile(ce.box(read as never), { fallback: false })).toThrow(
+      /Could not compile/
     );
+  });
+
+  // A literal index outside a tuple: the read is absent, and the type `unknown`
+  // holds its value.
+  test('an absent step absorbs the remaining steps', () => {
+    const ce = new ComputeEngine();
+    ce.declare('t', 'tuple<list<real>, real>');
+    ce.assign('t', ce.box(['Tuple', ['List', 1.5, 2.5], 3.5] as never));
+    const read = ce.box(['At', 't', 9, 1] as never);
+    expect(read.type.toString()).toBe('unknown');
+    expect(read.evaluate().toString()).toBe('"Missing"');
+  });
+
+  // The marker has the domain of the read: a number gives `NaN`, as the nested
+  // read does, also when a step goes through a record, a dictionary or a tuple.
+  test.each([
+    ['list<tuple<real, string>>', 'X', ['List', ['Tuple', 1.5, "'a'"]], ['At', 'X', 9, 1]],
+    ['list<record{a: real}>', 'L', ['List', ['Dictionary', ['KeyValuePair', "'a'", 1.5]]], ['At', 'L', 9, { str: 'a' }]],
+    ['dictionary<list<real>>', 'd', ['Dictionary', ['KeyValuePair', "'a'", ['List', 1.5]]], ['At', 'd', { str: 'z' }, 1]],
+  ] as const)('%s: the marker is NaN', (type, name, value, read) => {
+    const ce = new ComputeEngine();
+    ce.declare(name, type);
+    ce.assign(name, ce.box(value as never));
+    expect(ce.box(read as never).evaluate().toString()).toBe('NaN');
   });
 });
 
@@ -251,24 +307,7 @@ describePython('Python: a chained At compiles as the nested access', () => {
   // arithmetic on a row, so only the reads are compiled here. The gather
   // `R[[2, 1], 1]` declines on Python (see the test below).
   test.each(BASES.map(([t, v]) => [t, v]))('%s', (type, value) => {
-    // A read proved out of range in a base of static shape declines, as on
-    // JavaScript: the chained access `R[1, 3]` has the static type of an
-    // element, and the nested access `R[1][3]` has the type of the absence
-    // marker (`nan` or `missing`), which is not a subtype of it.
-    let reads = READS.slice(0, 5);
-    if (type !== 'list<list<real>>') {
-      const outOfRange = ['At', 'R', 1, 3];
-      expect(() =>
-        new PythonTarget().compileFunction(
-          engine(type).box(outOfRange as never),
-          'g',
-          ['R', 'n']
-        )
-      ).toThrow(/not a subtype/);
-      reads = reads.filter(
-        (r) => JSON.stringify(r) !== JSON.stringify(outOfRange)
-      );
-    }
+    const reads = READS.slice(0, 5);
     const lines: string[] = ['import numpy as np', 'import math'];
     const expected: string[] = [];
     reads.forEach((json, i) => {
