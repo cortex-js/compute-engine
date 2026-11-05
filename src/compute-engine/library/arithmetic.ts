@@ -197,7 +197,11 @@ import {
   isOutOfDoubleRangeLiteral,
   cellProductOperandIsValue,
 } from '../boxed-expression/arithmetic-mul-div.js';
-import { indexingSetSites } from '../boxed-expression/binding-sites.js';
+import {
+  INTEGER_CLAUSE_ROLE,
+  RAW_ROLE,
+  operandRolesFrom,
+} from './operand-roles.js';
 import {
   evaluateBigOpTerm,
   evaluateBigOpTermAsync,
@@ -14088,12 +14092,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1000,
       broadcastable: false,
 
-      // The index of each indexing-set operand (from operand 1) is this
-      // operator's BOUND variable, declared in its own scope: `integer` for a
+      // The body is kept as written for the `canonical` handler. The index
+      // of each indexing-set operand (from operand 1) is this operator's
+      // BOUND variable, declared in its own scope: `integer` for a
       // range-shaped clause (`Limits`, a bounds tuple, a bare symbol), and
       // the collection's element type for an `Element` clause
       // (`canonicalIndexingSet`, `library/utils.ts`).
-      scoped: indexingSetSites(1, 'integer'),
+      operands: operandRolesFrom([RAW_ROLE], INTEGER_CLAUSE_ROLE),
       lazy: true,
       signature: '(any, tuple*) -> number',
       examples: ['Product(k, (k, 1, 5))', 'Product(1 - 1/k^2, (k, 2, 10))'],
@@ -14478,12 +14483,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1000,
       broadcastable: false,
 
-      // The index of each indexing-set operand (from operand 1) is this
-      // operator's BOUND variable, declared in its own scope: `integer` for a
+      // The body is kept as written for the `canonical` handler. The index
+      // of each indexing-set operand (from operand 1) is this operator's
+      // BOUND variable, declared in its own scope: `integer` for a
       // range-shaped clause (`Limits`, a bounds tuple, a bare symbol), and
       // the collection's element type for an `Element` clause
       // (`canonicalIndexingSet`, `library/utils.ts`).
-      scoped: indexingSetSites(1, 'integer'),
+      operands: operandRolesFrom([RAW_ROLE], INTEGER_CLAUSE_ROLE),
       lazy: true,
       signature: '(any, tuple*) -> number',
       examples: ['Sum(k^2, (k, 1, 10))', 'Sum(1/k^2, (k, 1, oo))'],

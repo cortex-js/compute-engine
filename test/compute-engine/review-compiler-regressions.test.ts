@@ -3,7 +3,6 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
-import { indexingSetSites } from '../../src/compute-engine/boxed-expression/binding-sites';
 import { TEST_PYTHON } from './test-python';
 
 const compiler = BaseCompiler as any;
@@ -31,7 +30,13 @@ describe('compiler review regressions', () => {
       ce.box(['Element', 'k', ['Range', 5, 7]]),
       ce.box(['Hold', ['Limits', 'k', 1, 3]]),
     ];
-    const sites = indexingSetSites(1, 'integer')(operands, 'pre');
+    // The binding sites that the `clause` roles of `Sum` declare.
+    const sum = ce.lookupDefinition('Sum');
+    const sites =
+      sum !== undefined && 'operator' in sum
+        ? sum.operator.bindingSites!(operands, 'pre')
+        : [];
+    expect(sites.length).toBeGreaterThan(0);
     expect(sites[0].type).toBeUndefined();
   });
 

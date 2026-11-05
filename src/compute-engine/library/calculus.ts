@@ -56,13 +56,13 @@ import {
   functionLiteralParameterNames,
 } from '../boxed-expression/function-literal.js';
 import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
+import { indefiniteIntegralVariables } from '../boxed-expression/binding-sites.js';
 import {
-  operandSites,
-  operandsFrom,
-  indexingSetSites,
-  limitsIndexSites,
-  indefiniteIntegralVariables,
-} from '../boxed-expression/binding-sites.js';
+  BOUND_ROLE,
+  CLAUSE_ROLE,
+  RAW_ROLE,
+  operandRolesFrom,
+} from './operand-roles.js';
 import { isFunctionSymbolName } from '../boxed-expression/implicit-variable-rule.js';
 import {
   conditionalValue,
@@ -5745,7 +5745,7 @@ volumes
       // never populated — so the parse route (raw) and the `ce.function` route
       // (the caller's binding) disagreed about the same derivative. The
       // `withValueShield` at evaluate is unaffected and stays (stage 14).
-      scoped: operandsFrom(1),
+      operands: operandRolesFrom([RAW_ROLE], BOUND_ROLE),
       lazy: true,
       signature: '(expression, variables:symbol*) -> expression',
       type: ([body], { engine }) => {
@@ -6058,7 +6058,8 @@ volumes
         if (result === expression) return result;
 
         // A derivative is an OPEN expression in the differentiation variable,
-        // which this node now binds in its own scope (`scoped: operandsFrom(1)`).
+        // which this node now binds in its own scope (the `bound` role of
+        // operands 1..n).
         // Without this, `d/dx sin(x)` leaves the frame still referencing the
         // dying binding and compares unequal to a separately parsed `-sin(x)` —
         // the repair `Series` (stage 1) and `Integrate` (stage 5) both needed.
@@ -6306,7 +6307,7 @@ volumes
       // The variable of the limits is bound by the integral, as in
       // `Integrate`: it is declared in the integral's own scope, not in the
       // scope of the caller.
-      scoped: indexingSetSites(1),
+      operands: operandRolesFrom([RAW_ROLE], CLAUSE_ROLE),
       signature: '(function, limits+) -> number',
 
       // The integrand is left as the bare application it was parsed as (not
@@ -6372,7 +6373,8 @@ volumes
       keywords: ['residue theorem', 'contour integral'],
       broadcastable: false,
       lazy: true,
-      scoped: operandSites(1),
+      // The variable (operand 1) is bound by the integral.
+      operands: operandRolesFrom([RAW_ROLE, BOUND_ROLE], RAW_ROLE),
       signature: '(expression, variable:symbol, contour:expression) -> number',
       canonical: (ops, { engine: ce }) => {
         if (ops.length !== 3 || !isSymbol(ops[1])) return null;
@@ -6418,7 +6420,7 @@ volumes
       // `ce.function` route (the `Series` defect, stage 5 of
       // `docs/SCOPING-MODEL.md`). The integrand's
       // own variable stays owned by its `Function` literal.
-      scoped: indexingSetSites(1),
+      operands: operandRolesFrom([RAW_ROLE], CLAUSE_ROLE),
       // A list integrand of any rank gives a tensor of the same shape
       // (`integralTypeOf`): `tensor` admits a vector and a matrix of
       // integrals alike, where `list<number>` admits a vector only.
@@ -8237,7 +8239,7 @@ volumes
 
         // An INDEFINITE integral's result is an OPEN expression in the
         // integration variable, which this node now binds in its own scope
-        // (`scoped: indexingSetSites(1)`). Without this the antiderivative
+        // (the `clause` role of operands 1..n). Without this the antiderivative
         // leaves the frame still referencing the dying binding and compares
         // unequal to the same expression written in the ambient scope — the
         // repair `Series` needed for exactly the same reason (stage 1).
@@ -8501,7 +8503,7 @@ volumes
       // it is carried by the `Limits` operand (operand 2) — a position the
       // evaluate path used to read out by hand, leaving the variable bound
       // wherever the caller happened to have it.
-      scoped: limitsIndexSites(2),
+      operands: operandRolesFrom([RAW_ROLE, RAW_ROLE, CLAUSE_ROLE], RAW_ROLE),
       signature:
         '(expression, symbol, limits:(tuple|symbol), number) -> function',
       canonical: (ops, { engine }) => {
@@ -8835,7 +8837,7 @@ volumes
       // parse route (which leaves a binding-site symbol raw) and the function
       // route (whose caller passes a symbol carrying the CALLER's binding)
       // agree about the same expression.
-      scoped: operandSites(1),
+      operands: operandRolesFrom([RAW_ROLE, BOUND_ROLE], RAW_ROLE),
       signature:
         '(expression, variable:symbol?, point:value?, order:number?) -> number',
       canonical: (ops, { engine: ce }) => {

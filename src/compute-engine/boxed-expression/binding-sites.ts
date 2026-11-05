@@ -1,10 +1,5 @@
 import type { TypeString } from '../../common/type/types.js';
-import type {
-  BindingSite,
-  BindingSiteSelector,
-  Expression,
-  Scope,
-} from '../global-types.js';
+import type { Expression, OperandRole, Scope } from '../global-types.js';
 
 import { isFunction, isNumber, isString, isSymbol } from './type-guards.js';
 import { isValueDef } from './definition-guards.js';
@@ -19,9 +14,11 @@ import {
 } from './function-literal.js';
 
 /**
- * The prebuilt binding-site selectors — the vocabulary an operator definition
- * uses to say **"this operand is my bound variable, bind it in my scope"**
- * (`docs/SCOPING-MODEL.md`).
+ * The binding sites of a binder: the places, among the operands of an
+ * application, of the variables that the operator binds in its own scope
+ * (`docs/SCOPING-MODEL.md`). An operator definition declares them with the
+ * `bound` and `clause` roles of its `operands` handler (`OperandRole`), and
+ * {@link operandRoleSites} finds the site that each such operand holds.
  *
  * Before this existed, every binder answered that question its own way — by
  * name (`rubi`), by string (`RubiDriver.int`), by position inside a `Limits`
@@ -41,6 +38,52 @@ import {
  * evaluates a selector.
  */
 
+/**
+ * A located binding site: where, inside an operator expression, one of that
+ * operator's **bound variables** sits, and how to declare it.
+ */
+export type BindingSite = {
+  /** The operand-index chain from the operator node to the symbol: `[1]` is
+   * the second operand, `[2, 0]` the first operand of the third. */
+  path: readonly number[];
+
+  /** The type to declare the bound variable with. Defaults to `'unknown'`. */
+  type?: TypeString;
+
+  /**
+   * The site belongs to an iterator **clause** (an indexing set), so its
+   * binding is visible only from its own operand onward: in
+   * `Comprehension(b, Element(i, [j, j+1]), Element(j, [10, 20]))` the first
+   * clause's collection resolves `j` in the ENCLOSING scope — "later clauses
+   * see earlier bindings", not the reverse. An operand *before* the first
+   * clause (the body) sees every binding.
+   *
+   * Without the flag a site is visible to the whole node, which is what a
+   * non-clause binder (`Series`' expansion variable, a function literal's
+   * parameters) wants.
+   */
+  clauseLocal?: boolean;
+};
+
+/**
+ * The binding sites of a binder among its operands `ops`. The boxed operator
+ * definition of a binder holds one, `bindingSites`, which applies
+ * {@link operandRoleSites} to the roles that its `operands` handler gives
+ * for `ops`.
+ *
+ * `phase: 'pre'` is a call on the RAW operands, before the `canonical`
+ * handler; `phase: 'post'` a call on the operands of the handler's RESULT.
+ * The selector calls the `operands` handler on the operands of each phase,
+ * so the roles of the library binders, which depend only on the positions of
+ * the operands, are the same in both phases; a site that the handler reveals
+ * (a higher-order specification of `D` expanded to symbols) is found in the
+ * `'post'` phase only.
+ */
+export type BindingSiteSelector = (
+  ops: ReadonlyArray<Expression>,
+  phase: 'pre' | 'post'
+) => readonly BindingSite[];
+
 const NO_SITES: readonly BindingSite[] = [];
 
 /** `Nothing` in an index position means "no index", not a bound variable. */
@@ -57,42 +100,86 @@ function siteFor(
 }
 
 /**
- * The operands at `indices` are this operator's bound variables.
+ * The binding sites that the operand roles `roles` declare among `ops`, the
+ * operands of an application of a binder: `roles[i]` is the role that the
+ * `operands` handler of the definition gives operand `i` (`OperandRole`),
+ * and only the `bound` and `clause` roles declare sites.
  *
- * `Series: { scoped: operandSites(1) }` — the expansion variable is operand 1.
+ * - A `bound` operand is a site when it is a symbol, also one that a `Hold`
+ *   wraps: `D(f, x, y)` binds `x` and `y`, and `Series(f, x)` binds `x`.
+ *   Any other operand (a higher-order specification `Set(x, 2)` of `D`,
+ *   which the canonical handler expands) gives no site: the `'post'` phase
+ *   reads the expanded form.
+ * - A run of consecutive `clause` operands is read as the indexing sets of
+ *   `Sum`: each operand is a clause (`Limits`, `Element`, `Tuple`, a
+ *   parenthesized tuple, a symbol, or one of these held), and its index is a
+ *   site (`indexingSetSite()`). In the flat spelling (`Sum(body, n, 1, 10)`,
+ *   `Integrate(f, x, 0, b)`) the operands after a symbol index are its
+ *   bounds, not indexes, so a symbol bound (`b`) stays free. A bound is read
+ *   only inside the run: an operand after the last `clause` operand is not a
+ *   bound of a flat clause. The `type` of the role is the type of the index
+ *   of a range-shaped clause; the index of an `Element` clause is typed from
+ *   its collection.
  */
-export function operandSites(...indices: number[]): BindingSiteSelector {
-  return (ops) => {
-    const sites: BindingSite[] = [];
-    for (const i of indices) {
-      const site = siteFor(ops[i], [i], undefined);
-      if (site) sites.push(site);
+export function operandRoleSites(
+  roles: ReadonlyArray<OperandRole | undefined>,
+  ops: ReadonlyArray<Expression>
+): readonly BindingSite[] {
+  let sites: BindingSite[] | undefined;
+  for (let i = 0; i < ops.length; i++) {
+    const role = roles[i];
+    if (role?.kind === 'bound') {
+      const site = siteFor(ops[i], [i], role.type);
+      if (site) (sites ??= []).push(site);
+    } else if (role?.kind === 'clause') {
+      let end = i + 1;
+      while (end < ops.length && roles[end]?.kind === 'clause') end += 1;
+      const found = clauseRunSites(roles, ops, i, end);
+      if (found.length > 0) (sites ??= []).push(...found);
+      i = end - 1;
     }
-    return sites.length === 0 ? NO_SITES : sites;
-  };
+  }
+  return sites ?? NO_SITES;
 }
 
 /**
- * Every operand from `first` onward is a bound variable — the VARIADIC
- * counterpart of {@link operandSites}, for an operator whose bound variables
- * are a trailing list of arbitrary length.
- *
- * `D: { scoped: operandsFrom(1) }` — `D(f, x, y)` binds both `x` and `y`.
- * Operands that are not bare symbols (a `Set` higher-order spec the handler
- * has yet to expand) yield no site: the 'post' phase sees the expanded form.
+ * The index of each indexing-set operand of `ops` from `start` to `end`
+ * (excluded), a run of operands whose role is `clause` (see
+ * {@link operandRoleSites}). The shapes are those that
+ * `canonicalIndexingSet` and `canonicalLimits` recognize
+ * (`Limits`/`Element`/`Tuple`/`Triple`/`Pair`/`Single`/`Set`, a symbol,
+ * or any of those held).
  */
-export function operandsFrom(
-  first: number,
-  type?: TypeString
-): BindingSiteSelector {
-  return (ops) => {
-    const sites: BindingSite[] = [];
-    for (let i = first; i < ops.length; i++) {
-      const site = siteFor(ops[i], [i], type);
-      if (site) sites.push(site);
-    }
-    return sites.length === 0 ? NO_SITES : sites;
-  };
+function clauseRunSites(
+  roles: ReadonlyArray<OperandRole | undefined>,
+  ops: ReadonlyArray<Expression>,
+  start: number,
+  end: number
+): BindingSite[] {
+  // The number of operands of the flat clause that starts with the symbol
+  // `ops[i]` (`flatLimitsSpan()`). It is read on the operands up to the end
+  // of the run only: `flatLimitsSpan()` looks at the operands after `ops[i]`
+  // to decide whether one is a bound or the next index, and an operand after
+  // the run (an option of the operator) must not change that decision.
+  const run = end === ops.length ? ops : ops.slice(0, end);
+  const span = (i: number): number => flatLimitsSpan(run, i);
+  // In the flat spelling the operands after an index are its bounds, not
+  // indexes: they are skipped.
+  const flatIndexes = new Set<number>();
+  for (let i = start; i < end; i++) {
+    if (!isSymbol(ops[i])) continue;
+    flatIndexes.add(i);
+    i += span(i) - 1;
+  }
+  const sites: BindingSite[] = [];
+  for (let i = start; i < end; i++) {
+    const role = roles[i];
+    const type = role?.kind === 'clause' ? role.type : undefined;
+    const flatSpan = isSymbol(ops[i]) ? span(i) : 1;
+    sites.push(...indexingSetSite(ops[i], i, type, ops, flatIndexes, flatSpan));
+    i += flatSpan - 1;
+  }
+  return sites;
 }
 
 /** The RANGE-shaped operand shapes `canonicalIndexingSet`/`canonicalLimits`
@@ -345,6 +432,9 @@ function patternNames(target: Expression | undefined, name: string): boolean {
 
 /**
  * The index of a single indexing-set operand at `[i]`, if it has one.
+ * `flatIndexes` are the positions of the symbol indexes of the flat
+ * spelling among `ops`, and `flatSpan` the number of operands of the flat
+ * clause that starts at `[i]` when `op` is a symbol (`clauseRunSites()`).
  *
  * Marked `clauseLocal`: an indexing set is a *clause*, and the contract
  * (`Comprehension`'s own description: "Later clauses see earlier bindings") is
@@ -356,7 +446,8 @@ function indexingSetSite(
   i: number,
   type: TypeString | undefined,
   ops: ReadonlyArray<Expression>,
-  flatIndexes: ReadonlySet<number> = NO_FLAT_INDEXES
+  flatIndexes: ReadonlySet<number>,
+  flatSpan: number
 ): BindingSite[] {
   // A DESTRUCTURING loop variable — `for (p, q) in pairs { … }`, lowered to
   // `Element(Tuple(p, q), pairs)` — binds one name per pattern leaf, so the
@@ -372,9 +463,8 @@ function indexingSetSite(
       }
       // `_` is the pipe placeholder (`xs |> Map(f, _)`), not a name: a
       // pattern slot spelled `_` discards its component. Binding it here
-      // would shadow the placeholder inside the loop body. The lambda-
-      // parameter walker (`lambdaParamSites`) and `tuplePatternNames`
-      // (`boxed-expression/tuple-pattern.ts`) drop it for the same reason.
+      // would shadow the placeholder inside the loop body. `tuplePatternNames`
+      // (`boxed-expression/tuple-pattern.ts`) drops it for the same reason.
       if (isSymbol(node) && node.symbol === '_') return;
       const site = siteFor(node, path, type);
       if (site) sites.push({ ...site, clauseLocal: true });
@@ -430,7 +520,7 @@ function indexingSetSite(
   // A bare symbol that is followed by its bounds (`Sum(body, n, 1, 10)`)
   // takes the ranged type its `Limits` spelling would take.
   const flatType =
-    isSymbol(op) && flatLimitsSpan(ops, i) === 3
+    isSymbol(op) && flatSpan === 3
       ? rangeIndexTypeOf(op, ops[i + 1], ops[i + 2], type, ops, flatIndexes)
       : type;
   const site =
@@ -440,41 +530,6 @@ function indexingSetSite(
         siteFor(op, [i], flatType);
   return site === undefined ? [] : [{ ...site, clauseLocal: true }];
 }
-
-/**
- * The index of each indexing-set operand from `first` onward — the shapes
- * `canonicalIndexingSet` and `canonicalLimits` already recognize
- * (`Limits`/`Element`/`Tuple`/`Triple`/`Pair`/`Single`/`Set`, a bare symbol,
- * or any of those held).
- *
- * `Sum`/`Product`: `{ scoped: indexingSetSites(1, 'integer') }` — the
- * `integer` applies to the range-shaped clauses; an `Element` clause's index
- * is typed from its collection (see `indexingSetSite`).
- */
-export function indexingSetSites(
-  first: number,
-  type?: TypeString
-): BindingSiteSelector {
-  return (ops) => {
-    // In the flat spelling (`Sum(body, n, 1, 10)`, `Integrate(f, x, 0, b)`)
-    // the operands after an index are its bounds, not indexes: they are
-    // skipped, so a symbol bound (`b`) stays free.
-    const flatIndexes = new Set<number>();
-    for (let i = first; i < ops.length; i++) {
-      if (!isSymbol(ops[i])) continue;
-      flatIndexes.add(i);
-      i += flatLimitsSpan(ops, i) - 1;
-    }
-    const sites: BindingSite[] = [];
-    for (let i = first; i < ops.length; i++) {
-      sites.push(...indexingSetSite(ops[i], i, type, ops, flatIndexes));
-      if (isSymbol(ops[i])) i += flatLimitsSpan(ops, i) - 1;
-    }
-    return sites.length === 0 ? NO_SITES : sites;
-  };
-}
-
-const NO_FLAT_INDEXES: ReadonlySet<number> = new Set();
 
 /**
  * Whether `op` is a symbol that can name an index or an integration variable
@@ -602,67 +657,6 @@ function computeIsNextIndex(
     j += flatLimitsSpan(ops, j);
   }
   return count < 2;
-}
-
-/**
- * The index of the indexing-set operand at `index` only — for an operator
- * whose remaining operands are not indexing sets (`NDSolveFunction`, whose
- * `Limits` operand carries the ODE's independent variable).
- */
-export function limitsIndexSites(
-  index: number,
-  type?: TypeString
-): BindingSiteSelector {
-  return (ops) => {
-    const sites = indexingSetSite(ops[index], index, type, ops);
-    return sites.length === 0 ? NO_SITES : sites;
-  };
-}
-
-/**
- * The parameter list of the `Function` literal at operand `op` (unwrapping a
- * `Typed` ascription on each parameter).
- */
-export function lambdaParamSites(op: number): BindingSiteSelector {
-  return (ops) => {
-    const literal = ops[op];
-    if (!isFunction(literal, 'Function')) return NO_SITES;
-    const sites: BindingSite[] = [];
-    for (let i = 1; i < literal.nops; i++) {
-      const param = literal.ops[i];
-      // A DESTRUCTURING parameter (`((p, q)) => …`) binds one name per pattern
-      // leaf, each at its own path inside the pattern.
-      if (isFunction(param, 'Tuple')) {
-        const walk = (node: Expression, path: number[]): void => {
-          if (isFunction(node, 'Tuple')) {
-            node.ops.forEach((el, k) => walk(el, [...path, k]));
-            return;
-          }
-          if (isSymbol(node) && node.symbol !== '_') sites.push({ path });
-        };
-        walk(param, [op, i]);
-        continue;
-      }
-      if (functionLiteralParameterName(param) === '') continue;
-      sites.push({
-        // A REST parameter (`(a, ...rest) => …`) is the node
-        // `["Spread", symbol]`, and the name it binds is the symbol INSIDE
-        // that wrapper — the same one-level unwrap a `Typed` annotation
-        // needs, so both report the path of the inner operand. A parameter
-        // with a default value adds one more level: the symbol of
-        // `["Optional", x, d]` is at `[op, i, 0]`, and that of
-        // `["Optional", ["Typed", x, T], d]` at `[op, i, 0, 0]`.
-        path: isFunction(param, 'Optional')
-          ? isFunction(param.op1, 'Typed')
-            ? [op, i, 0, 0]
-            : [op, i, 0]
-          : isFunction(param, 'Typed') || isFunction(param, 'Spread')
-            ? [op, i, 0]
-            : [op, i],
-      });
-    }
-    return sites.length === 0 ? NO_SITES : sites;
-  };
 }
 
 /**

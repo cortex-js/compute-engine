@@ -117,9 +117,9 @@ there.
   operator and on the head of the handler's result. Test it by parsing the
   same input twice in one engine: a wrong inference shows on the second
   parse (`a_{n+1}` became `At(a, n + 1)`).
-- **An operator that binds a variable** declares it with a `scoped` binding site
-  selector; binding symbols come from `ce._bindingSymbol`, never
-  `ce.symbol(name)`.
+- **An operator that binds a variable** declares it with the `bound` or
+  `clause` role of its `operands` handler; binding symbols come from
+  `ce._bindingSymbol`, never `ce.symbol(name)`.
 - **`BigDecimal.precision` is global**: code that changes it saves and restores
   it.
 - **Plugin bundles**: no `instanceof` or `constructor.name` check across the
@@ -186,10 +186,10 @@ there.
 
 ## Operator and regression checks
 
-- A binding operator uses a `scoped` binding-site selector and
-  `ce._bindingSymbol`; it does not construct binding symbols with
-  `ce.symbol(name)`. Integration-provider calls lift the integrand before
-  passing it to the rule engine.
+- A binding operator declares its variable with the `bound` or `clause`
+  operand role and uses `ce._bindingSymbol`; it does not construct binding
+  symbols with `ce.symbol(name)`. Integration-provider calls lift the
+  integrand before passing it to the rule engine.
 - A test of literal narrowing checks the type or expression kind; `.isSame()`
   intentionally equates some values of different kinds.
 - Declared result types are host promises. Compiler checks must reject a body

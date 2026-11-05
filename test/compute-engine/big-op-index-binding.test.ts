@@ -2,7 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 /**
  * `Sum`/`Product` declare their index with the sanctioned binder mechanism
- * (`scoped: indexingSetSites(1, 'integer')`,
+ * (the role `{ kind: 'clause', type: 'integer' }` of the operands after the body,
  * `docs/SCOPING-MODEL.md`). The index is bound in
  * the big op's OWN scope, which is what makes it shadow a same-named library
  * constant or global value, and what makes the parse, `ce.box()` and

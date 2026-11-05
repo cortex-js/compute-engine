@@ -12,7 +12,6 @@ import type {
   Scope,
   BoxedValueDefinition,
   BoxedOperatorDefinition,
-  BindingSiteSelector,
 } from '../global-types.js';
 import type { FormOption } from '../types-serialization.js';
 
@@ -170,6 +169,7 @@ import {
   ownIndexClause,
   symbolAtSite,
   replaceAtSite,
+  type BindingSiteSelector,
   type OwnIndexClause,
 } from './binding-sites.js';
 import { beginDormantPop, endDormantPop } from './binding-tombstone.js';
@@ -3816,8 +3816,9 @@ function makeCanonicalFunctionCore(
       }
     : undefined;
 
-  // A *binder* declares which of its operands are its bound variables, by
-  // giving its `scoped` flag a binding-site selector instead of `true`. The
+  // A *binder* declares which of its operands are its bound variables, with
+  // the `bound` and `clause` roles of its `operands` handler, which give
+  // its definition the binding sites `opDef.bindingSites`. The
   // framework then owns the two things every binder used to improvise: the
   // declaration of the variable in the operator's own scope (before the
   // canonical handler canonicalizes the body against it), and the rebinding of
@@ -4263,8 +4264,8 @@ function applyOperatorDefinition(
       );
     // An operator without a `canonical` handler keeps its operands as
     // written, except a `statement` operand, which is canonicalized here as
-    // a branch (`canonicalBranch()`). For a binder (a `scoped` flag with a
-    // binding-site selector), `canonicalizeBinder()` calls this function
+    // a branch (`canonicalBranch()`). For a binder (an operator with a
+    // `bound` or a `clause` operand), `canonicalizeBinder()` calls this function
     // after it has declared the bound variables in the scope of the
     // operator, so a statement operand sees them. A `canonical` handler
     // receives the statement operands as written and canonicalizes them
@@ -4911,11 +4912,11 @@ function keepsLibraryProduct(
 }
 
 /**
- * Canonicalize a **binder**: an operator whose `scoped` flag is a
- * binding-site selector (`docs/SCOPING-MODEL.md`
- * §1.3). Two phases, because a canonical handler both *needs* the bound
- * variable declared before it canonicalizes the body and *may reshape* the
- * operands.
+ * Canonicalize a **binder**: an operator whose `operands` handler gives a
+ * `bound` or a `clause` role, read as the binding sites `sites`
+ * (`docs/SCOPING-MODEL.md` §1.3). Two phases, because a canonical handler
+ * both *needs* the bound variable declared before it canonicalizes the body
+ * and *may reshape* the operands.
  *
  * Pre-phase: declare each site's symbol in the operator's own scope, with
  * `noAutoDeclare` set so the free variables of the body and the bounds are
@@ -4969,9 +4970,30 @@ function canonicalizeBinder(
       // A clause-local site is visible only from its own operand onward, and
       // the handler canonicalizes the operands in one call: all the pre-phase
       // can declare is the first clause's index.
+      //
+      // A lazy operator without a `canonical` handler canonicalizes none of
+      // its clauses: the engine canonicalizes only its `statement` operands
+      // (`applyOperatorDefinition()`), and a statement before the first
+      // clause is the body, which sees every index. When every statement
+      // operand is before the first clause, every index is declared here:
+      // an assignment of the index of a later clause in the body
+      // (`MyLoop(Assign(y, 5), Limits(k, 1, 3), Limits(y, 1, 3))`) writes
+      // that index, and is not a first assignment in a branch. A statement
+      // after a clause must not see the index of a later clause, so then
+      // only the first clause's index is declared, as for a handler.
+      let everyClause = false;
+      if (opDef.lazy && opDef.canonical === undefined) {
+        const clauseAt = Math.min(
+          ...preSites.filter((s) => s.clauseLocal).map((s) => s.path[0])
+        );
+        const roles = opDef.operandRoles(xs);
+        everyClause =
+          roles !== undefined &&
+          roles.every((role, i) => role !== 'statement' || i < clauseAt);
+      }
       let firstClause: number | undefined;
       for (const site of preSites) {
-        if (site.clauseLocal) {
+        if (site.clauseLocal && !everyClause) {
           firstClause ??= site.path[0];
           if (site.path[0] !== firstClause) continue;
         }

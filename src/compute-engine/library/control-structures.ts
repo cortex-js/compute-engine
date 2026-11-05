@@ -28,7 +28,9 @@ import {
 } from '../assignment-locals.js';
 import { canonicalBranch, canonicalStatement } from '../statement-position.js';
 import {
+  CLAUSE_ROLE,
   everyOperand,
+  operandRolesFrom,
   RAW_ROLE,
   STATEMENT_ROLE,
   VALUE_ROLE,
@@ -38,10 +40,7 @@ import {
   withEvaluationEffects,
 } from '../effects-registry.js';
 import { checkConditions } from '../boxed-expression/rules.js';
-import {
-  indexingSetSites,
-  rangeElementIndexType,
-} from '../boxed-expression/binding-sites.js';
+import { rangeElementIndexType } from '../boxed-expression/binding-sites.js';
 import {
   collectTuplePattern,
   tuplePatternNames,
@@ -615,14 +614,12 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         'value is `Nothing`, or the value carried by a `Break`/`Return`. For a ' +
         'value-producing comprehension use `Comprehension` or `Map`.',
       lazy: true,
-      // The body is a statement; the clauses are kept as written for the
-      // binder code and the `canonical` handler.
-      operands: (ops) =>
-        ops.map((_, i) => (i === 0 ? STATEMENT_ROLE : RAW_ROLE)),
-      // The index of each `Element` clause (from operand 1) is this operator's
-      // BOUND variable: the framework declares it in the loop's own scope
-      // before the clauses and body are canonicalized against it.
-      scoped: indexingSetSites(1),
+      // The body is a statement. The index of each `Element` clause (from
+      // operand 1) is this operator's BOUND variable: the framework declares
+      // it in the loop's own scope before the clauses and body are
+      // canonicalized against it, and the clauses are kept as written for
+      // the `canonical` handler.
+      operands: operandRolesFrom([STATEMENT_ROLE], CLAUSE_ROLE),
       signature: '(body:expression, iterators:expression*) -> any',
       // The handler reads the body's inert STRUCTURE (does it contain a
       // value-carrying `Return`/`Break`?), never the body expression, so it is
@@ -706,8 +703,8 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         'elements for which `cond` evaluates to `True` are visited.',
       lazy: true,
       // See `Loop`: each `Element` clause's index is a bound variable of this
-      // node.
-      scoped: indexingSetSites(1),
+      // node. The body is kept as written for the `canonical` handler.
+      operands: operandRolesFrom([RAW_ROLE], CLAUSE_ROLE),
       signature: '(body:expression, iterators:expression+) -> list',
       // The handler reads the body operand's type, and the type of the index
       // of each `Element` clause.
@@ -5524,8 +5521,9 @@ function bodyTypeWithoutIndexRanges(
  * `Pair`, `Single` or `Set` clause binds the symbol (or the symbols of the
  * tuple pattern) in its first operand, and a bare symbol operand
  * (`Sum(body, n, 1, 10)`, `D(f, x)`) binds that symbol. These are the
- * operators declared with `indexingSetSites(1)`, `operandSites(1)` or
- * `operandsFrom(1)` (`boxed-expression/binding-sites.ts`).
+ * operators whose `operands` handler gives the operands after the body the
+ * role `clause` or `bound` (`operandRoleSites()`,
+ * `boxed-expression/binding-sites.ts`).
  *
  * The names read here can include more than the operator binds: a symbol
  * bound of the flat spelling (`b` in `Integrate(f, x, 0, b)`), or the second
@@ -5647,8 +5645,8 @@ function canonicalLoopLike(
 
   // Variadic Element form: bound names must not leak. The scope, its
   // `noAutoDeclare` flag, the push/pop around this handler and the declaration
-  // of each Element index come from the binder hook in `box.ts` (`scoped:
-  // indexingSetSites(1)`) — this used to be an independent copy of
+  // of each Element index come from the binder hook in `box.ts` (the
+  // `clause` role of operands 1..n) — this used to be an independent copy of
   // `canonicalBigop`'s prologue. A defensive fallback for a caller that did
   // not come through the hook.
   const loopScope: Scope = scope ?? {

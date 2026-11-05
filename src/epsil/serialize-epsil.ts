@@ -3278,7 +3278,7 @@ type ExpressionNames = { written: Set<string>; bound: Set<string> };
  *
  * The quantifiers are in `QUANTIFIERS` instead: their variable is operand
  * 0 and operand 1 is the predicate (`ForAll(x, x > 0)`, the engine's
- * `limitsIndexSites(0)` in `library/logic.ts`).
+ * `clause` role of operand 0, `QUANTIFIER_OPERANDS` in `library/logic.ts`).
  */
 const QUANTIFIERS: ReadonlySet<string> = new Set([
   'ForAll',

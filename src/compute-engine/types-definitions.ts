@@ -2739,57 +2739,6 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
 }
 
 /**
- * A located binding site: where, inside an operator expression, one of that
- * operator's **bound variables** sits, and how to declare it.
- *
- * @category Definitions
- */
-export type BindingSite = {
-  /** The operand-index chain from the operator node to the symbol: `[1]` is
-   * the second operand, `[2, 0]` the first operand of the third. */
-  path: readonly number[];
-
-  /** The type to declare the bound variable with. Defaults to `'unknown'`. */
-  type?: TypeString;
-
-  /**
-   * The site belongs to an iterator **clause** (an indexing set), so its
-   * binding is visible only from its own operand onward: in
-   * `Comprehension(b, Element(i, [j, j+1]), Element(j, [10, 20]))` the first
-   * clause's collection resolves `j` in the ENCLOSING scope — "later clauses
-   * see earlier bindings", not the reverse. An operand *before* the first
-   * clause (the body) sees every binding.
-   *
-   * Without the flag a site is visible to the whole node, which is what a
-   * non-clause binder (`Series`' expansion variable, a function literal's
-   * parameters) wants.
-   */
-  clauseLocal?: boolean;
-};
-
-/**
- * Locate an operator's binding sites among its operands.
- *
- * Used as the value of the `scoped` flag of {@link OperatorDefinitionFlags} to
- * declare that an operator is a *binder*: the framework mints the operator's
- * scope, declares each site's symbol in it before the `canonical` handler
- * runs, and rebinds the sites (and same-named occurrences elsewhere in the
- * expression) to that scope afterwards. This is what makes the parse,
- * `ce.box()` and `ce.function()` routes agree about which binding a bound
- * variable denotes.
- *
- * `phase: 'pre'` runs on the RAW operands, before the `canonical` handler; it
- * may return fewer sites than `'post'` — return nothing rather than guess.
- * `phase: 'post'` runs on the handler's RESULT operands and is authoritative.
- *
- * @category Definitions
- */
-export type BindingSiteSelector = (
-  ops: ReadonlyArray<Expression>,
-  phase: 'pre' | 'post'
-) => readonly BindingSite[];
-
-/**
  * A shape of operand (or result) whose broadcast handling an operator's own
  * handlers provide, exempting it from the generic broadcast machinery. See
  * {@link OperatorDefinitionFlags | OperatorDefinitionFlags.broadcastExemptions} for the meaning of
@@ -2845,8 +2794,42 @@ export type BroadcastExemption =
  * - `opaque`: the operand is kept as written, and an `Assign` or a `Declare`
  *   in it is valid (the expression of `Hold` and of `Error`). Valid only on a
  *   `lazy` operator.
- * - `bound` and `clause` are reserved: an `operands` handler that returns
- *   one of them is refused with an error.
+ * - `bound`: the operand is a bound variable of the operator, a symbol
+ *   that the operator declares in its own scope (the variable of `D(f, x)`,
+ *   the expansion variable of `Series`), with the type `type` (`unknown`
+ *   when it is left out). A symbol held in a `Hold` is a bound variable
+ *   too; any other operand declares nothing. The variable remains a free
+ *   variable of the expression, as for `D`: the value of `D(x^2, x)` is a
+ *   function of `x`. The operand is not evaluated before the `evaluate`
+ *   handler runs; it is kept as written in a `lazy` operator, and
+ *   canonicalized in the scope of the operator otherwise.
+ * - `clause`: the operand is an indexing set whose index is a bound
+ *   variable of the operator: `Limits(k, 1, 10)`, `Element(k, S)` (a
+ *   tuple pattern `Element(Tuple(p, q), S)` binds each of its names), a
+ *   tuple `Tuple(k, 1, 10)` or `Triple(k, 1, 10)`, a set `Set(k, 1, 10)`,
+ *   a parenthesized tuple of the LaTeX parser, or a symbol, also held.
+ *   `type` is the type of the index of a range-shaped clause. When `type`
+ *   is `integer` and the bounds are integer literals, the index has the
+ *   ranged type (`integer<1..10>` for `Limits(k, 1, 10)`); any other
+ *   `type` is used as given. The index of an `Element` clause does not
+ *   take `type`: it is `integer<a..b>` for a range `Range(a, b)` with
+ *   integer literal bounds, and otherwise an inferred `unknown` that a
+ *   `canonical` handler can narrow from the collection. The index is not a
+ *   free variable of the expression. It is visible in its own clause, in
+ *   the later clauses and in the operands before the first clause (the
+ *   body), not in an earlier clause. Consecutive `clause` operands are read as the clauses of
+ *   `Sum`, with the flat spelling: in `Sum(body, k, 1, 10)` the operands
+ *   after the symbol `k` are its bounds, not indexes. An operand that holds
+ *   no index declares nothing. The operand is not evaluated before the
+ *   `evaluate` handler runs, and is canonicalized as a `bound` operand is.
+ *
+ * An operator whose `operands` handler gives a `bound` or a `clause` role
+ * is a **binder**: it has its own scope, as with `scoped: true`, and the
+ * engine declares each bound variable in that scope before it canonicalizes
+ * the other operands, so that the parse, `ce.box()` and `ce.function()`
+ * routes bind the same variable. The engine finds that the operator is a
+ * binder when it is declared (see the `operands` handler of
+ * {@link OperatorDefinitionFlags}).
  *
  * @category Definitions
  */
@@ -2910,6 +2893,18 @@ export type OperatorDefinitionFlags = {
    * statement, not a value. At a `statement` or an `opaque` position it is
    * valid.
    *
+   * A `bound` or a `clause` role makes the operator a binder (see
+   * {@link OperandRole}). The engine finds it from the calls with the
+   * placeholder operands, so the handler must give these roles for one of
+   * them, as a handler that gives one role per position does
+   * (`(ops) => ops.map((_, i) => …)` with two `Nothing` operands, or a
+   * fixed array). A `bound` or a `clause` role that the handler gives only
+   * for the operands of an application is refused with an error. The
+   * bound variables are declared before the other operands are
+   * canonicalized; a `statement` operand is then canonicalized in the scope
+   * of the operator, where an assignment of a bound variable writes that
+   * variable.
+   *
    * When the operator has no `canonical` handler, the engine canonicalizes
    * each `statement` operand as a branch (see {@link OperandRole}). When it
    * has one, a `lazy` operator's handler receives the statement operands as
@@ -2945,6 +2940,19 @@ export type OperatorDefinitionFlags = {
    *     return engine.function('Mod', [x.evaluate(), p]).evaluate();
    *   },
    * });
+   *
+   * ce.declare('MySum', {
+   *   lazy: true,
+   *   signature: '(any, any+) -> number',
+   *   // The body is kept as written; each later operand is an indexing set
+   *   // whose index is an integer bound in the scope of `MySum`.
+   *   operands: (ops) =>
+   *     ops.map((_, i) =>
+   *       i === 0 ? { kind: 'raw' } : { kind: 'clause', type: 'integer' }
+   *     ),
+   *   evaluate: ([body, ...clauses], { engine }) =>
+   *     engine.function('Sum', [body, ...clauses]).evaluate(),
+   * });
    * ```
    *
    * **Default**: `undefined`
@@ -2954,18 +2962,17 @@ export type OperatorDefinitionFlags = {
   /**
    * If `true`, the operator requires a new lexical scope when canonicalized.
    * This will allow it to declare variables that are not visible outside
-   * the function expression using the operator.
+   * the function expression using the operator (`Block`).
    *
-   * A **binding-site selector** may be given instead of `true`: the operator
-   * then also declares *which of its operands are its bound variables*, and
-   * the framework binds them in the operator's own scope (see
-   * {@link BindingSiteSelector}). A selector implies a scope, so the
-   * inconsistent state "binding sites without a scope" is unrepresentable and
-   * `scoped` remains the complete inventory of scope-creating operators.
+   * An operator that binds variables of its operands (the index of `Sum`,
+   * the variable of `D`) declares them with the `bound` and `clause` roles
+   * of the `operands` handler instead: these roles give the operator a
+   * scope, and `scoped` need not be given. A function (a binding-site
+   * selector of an earlier version) is refused with an error.
    *
    * **Default**: `false`
    */
-  scoped: boolean | BindingSiteSelector;
+  scoped: boolean;
 
   /**  If `true`, the operator is applied element by element to lists, matrices
    * (`["List"]` or `["Tuple"]` expressions) and equations (relational
@@ -3599,15 +3606,23 @@ export type LambdaDefinition = {
  */
 export interface BoxedOperatorDefinition
   extends BoxedBaseDefinition, OperatorDefinitionFlags {
-  /** Normalized from the declaration's `scoped` flag: `true` when the operator
-   * creates a lexical scope, whether it was declared `true` or as a
-   * binding-site selector. */
+  /** `true` when the operator creates a lexical scope: it was declared
+   * `scoped: true`, or it is a binder, whose `operands` handler gives a
+   * `bound` or a `clause` role. */
   scoped: boolean;
 
-  /** The binding-site selector of the declaration's `scoped` flag, when one
-   * was given. `undefined` for `scoped: true` (a scope with no syntactic
-   * bound variables) and for an unscoped operator. */
-  bindingSites?: BindingSiteSelector;
+  /** The binding sites of a binder among the operands `ops` of an
+   * application: the path to each bound variable, its type, and whether it
+   * belongs to a clause. `undefined` for an operator that is not a binder.
+   * @internal */
+  bindingSites?: (
+    ops: ReadonlyArray<Expression>,
+    phase: 'pre' | 'post'
+  ) => readonly {
+    path: readonly number[];
+    type?: TypeString;
+    clauseLocal?: boolean;
+  }[];
 
   complexity: number;
 

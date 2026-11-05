@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
-import { operandsFrom } from '../../src/compute-engine/boxed-expression/binding-sites';
 
 // The engine keeps a cache version, the `any` axis (`axisMaskOf`,
 // `engine-configuration-lifecycle.ts`). The cached types and signs of every
@@ -251,7 +250,9 @@ describe('CE-535: an operand boxed before the scope of a binder', () => {
     const seen: (string | undefined)[] = [];
     ce3.declare('MyBinder535', {
       signature: '(any, symbol) -> any',
-      scoped: operandsFrom(1),
+      // Every operand after the body is a bound variable.
+      operands: (ops) =>
+        ops.map((_, i) => (i === 0 ? { kind: 'value' } : { kind: 'bound' })),
       canonical: (ops, { engine }) => {
         const body = ops[0].canonical;
         seen.push(String(body.sgn));
@@ -354,7 +355,9 @@ describe('CE-535: an operand symbol whose value is an expression', () => {
     const seen: string[] = [];
     ce5.declare('MyBinder535b', {
       signature: '(any, symbol) -> any',
-      scoped: operandsFrom(1),
+      // Every operand after the body is a bound variable.
+      operands: (ops) =>
+        ops.map((_, i) => (i === 0 ? { kind: 'value' } : { kind: 'bound' })),
       canonical: (ops, { engine }) => {
         const body = ops[0].canonical;
         seen.push(String(body.sgn));

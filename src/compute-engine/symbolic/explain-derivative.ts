@@ -50,7 +50,7 @@ function explainD(expr: Expression, options?: ExplainOptions): Explanation {
     // Lifting the differentiand OUT of the `D` node makes it a free-standing
     // expression again, so its occurrences of the differentiation variable
     // must denote the AMBIENT variable rather than the binding `D` owns for
-    // it (`scoped: operandsFrom(1)`). Everything the explanation builds below
+    // it (the `bound` role of operands 1..n). Everything the explanation builds below
     // — `initial`, the per-stage states, the folded derivatives — is written
     // in the ambient scope, so without this the explanation is internally
     // inconsistent: an unscoped `D(f, x)` whose body references another

@@ -61,8 +61,6 @@ export type {
   OperatorDefinitionFlags,
   BroadcastExemption,
   OperandRole,
-  BindingSite,
-  BindingSiteSelector,
   BoxedOperatorDefinition,
   LambdaDefinition,
 } from './types-definitions.js';

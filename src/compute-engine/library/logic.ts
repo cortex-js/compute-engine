@@ -29,7 +29,7 @@ import {
   isFunction,
   sym,
 } from '../boxed-expression/type-guards.js';
-import { limitsIndexSites } from '../boxed-expression/binding-sites.js';
+import { CLAUSE_ROLE, RAW_ROLE, operandRolesFrom } from './operand-roles.js';
 import { validateArguments } from '../boxed-expression/validate.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
@@ -58,7 +58,7 @@ import {
  * The quantified variable is the first operand — either a bare symbol
  * (`ForAll(x, P)`) or the index of an `Element` domain spec
  * (`Exists(Element(x, {1,2,3}), P)`). Both shapes are what
- * `limitsIndexSites` already recognizes.
+ * the `clause` role recognizes.
  *
  * Before this, the quantifiers were `scoped: true` with a `localScope` that was
  * created and stayed EMPTY forever, so the quantified variable was bound
@@ -66,7 +66,7 @@ import {
  * `True`, the bound occurrence having resolved the global's value
  * (`docs/SCOPING-MODEL.md` stage 8).
  */
-const QUANTIFIER_SITES = limitsIndexSites(0);
+const QUANTIFIER_OPERANDS = operandRolesFrom([CLAUSE_ROLE], RAW_ROLE);
 
 /**
  * The quantifiers are `lazy`, so their operands arrive RAW — unbound and
@@ -708,7 +708,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
       'Existential quantifier (there exists): true when the predicate holds for at least one value.',
     signature: '(value, boolean) -> boolean',
     lazy: true,
-    scoped: QUANTIFIER_SITES,
+    operands: QUANTIFIER_OPERANDS,
     canonical: canonicalQuantifier('Exists'),
     evaluate: evaluateExists,
   },
@@ -717,7 +717,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
       'Negated existential quantifier (there does not exist): true when the predicate holds for no value.',
     signature: '(value, boolean) -> boolean',
     lazy: true,
-    scoped: QUANTIFIER_SITES,
+    operands: QUANTIFIER_OPERANDS,
     canonical: canonicalQuantifier('NotExists'),
     evaluate: (args, options) => {
       const result = evaluateExists(args, options);
@@ -733,7 +733,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
       'Unique existential quantifier (there exists exactly one value satisfying the predicate).',
     signature: '(value, boolean) -> boolean',
     lazy: true,
-    scoped: QUANTIFIER_SITES,
+    operands: QUANTIFIER_OPERANDS,
     canonical: canonicalQuantifier('ExistsUnique'),
     evaluate: evaluateExistsUnique,
   },
@@ -742,7 +742,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
       'Universal quantifier (for all): true when the predicate holds for every value.',
     signature: '(value, boolean) -> boolean',
     lazy: true,
-    scoped: QUANTIFIER_SITES,
+    operands: QUANTIFIER_OPERANDS,
     canonical: canonicalQuantifier('ForAll'),
     evaluate: evaluateForAll,
   },
@@ -751,7 +751,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
       'Negated universal quantifier (not for all): true when the predicate fails for at least one value.',
     signature: '(value, boolean) -> boolean',
     lazy: true,
-    scoped: QUANTIFIER_SITES,
+    operands: QUANTIFIER_OPERANDS,
     canonical: canonicalQuantifier('NotForAll'),
     evaluate: (args, options) => {
       const result = evaluateForAll(args, options);

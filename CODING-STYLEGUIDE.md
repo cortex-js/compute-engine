@@ -251,7 +251,7 @@ nothing for a link to land on:
 
 ```
 ### OperatorDefinitionFlags
-  scoped: boolean | BindingSiteSelector;
+  scoped: boolean;
 ```
 
 `{@link OperatorDefinitionFlags.scoped}` resolves — typedoc assigns it an anchor

@@ -26,3 +26,27 @@ export function everyOperand(
 ): (ops: ReadonlyArray<Expression>) => ReadonlyArray<OperandRole> {
   return (ops) => ops.map(() => role);
 }
+
+/** An operand that is a bound variable of the operator: a symbol that the
+ * operator declares in its own scope (the variable of `D`). */
+export const BOUND_ROLE: OperandRole = Object.freeze({ kind: 'bound' });
+
+/** An operand that is an indexing set (`Limits`, `Element`, a tuple, or a
+ * symbol) whose index is a bound variable of the operator. */
+export const CLAUSE_ROLE: OperandRole = Object.freeze({ kind: 'clause' });
+
+/** An indexing set whose index, in a range-shaped clause, is an integer (the
+ * clauses of `Sum` and `Product`). */
+export const INTEGER_CLAUSE_ROLE: OperandRole = Object.freeze({
+  kind: 'clause',
+  type: 'integer',
+});
+
+/** An `operands` handler that gives operand `i` the role `first[i]`, and
+ * each operand after them the role `rest`. */
+export function operandRolesFrom(
+  first: ReadonlyArray<OperandRole>,
+  rest: OperandRole
+): (ops: ReadonlyArray<Expression>) => ReadonlyArray<OperandRole> {
+  return (ops) => ops.map((_, i) => first[i] ?? rest);
+}

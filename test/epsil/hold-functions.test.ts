@@ -286,6 +286,15 @@ describe('bind: bound-variable parameters of a hold function', () => {
     expect(value('mySum(k * j, j, 3)')).toBe(30);
   });
 
+  test('a bind parameter after the third position binds its symbol', () => {
+    const { value } = fresh();
+    expect(
+      value(
+        'hold mySum4(body, lo, hi, bind i) = Sum(body, (i, lo, hi)); let k = 5; mySum4(k^2, 1, 3, k)'
+      )
+    ).toBe(14);
+  });
+
   test('a bind argument must be a symbol', () => {
     const { value } = fresh();
     const e = value(

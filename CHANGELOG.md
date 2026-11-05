@@ -1,5 +1,46 @@
 ## [Unreleased]
 
+### Breaking changes
+
+- **An operator declares its bound variables with operand roles, and the
+  `scoped` flag is a boolean.** The bound variables of an operator (the index
+  of a sum, the variable of a derivative) were declared with a binding-site
+  selector as the value of `scoped`, made with `operandSites`,
+  `operandsFrom`, `indexingSetSites`, `limitsIndexSites` or
+  `lambdaParamSites`. These functions and the types `BindingSite` and
+  `BindingSiteSelector` are no longer exported, and a function as the value
+  of `scoped` now throws an error that names `operands`. Give the bound
+  variables the `bound` role (a symbol, as `operandSites` and `operandsFrom`
+  declared) or the `clause` role (an indexing set such as `Limits(k, 1, 10)`
+  or `Element(k, S)`, as `indexingSetSites` and `limitsIndexSites` declared)
+  of the `operands` handler:
+
+  ```ts
+  // Before
+  ce.declare('MySum', {
+    lazy: true,
+    signature: '(any, any+) -> number',
+    scoped: indexingSetSites(1, 'integer'),
+  });
+  // Now
+  ce.declare('MySum', {
+    lazy: true,
+    signature: '(any, any+) -> number',
+    operands: (ops) =>
+      ops.map((_, i) =>
+        i === 0 ? { kind: 'raw' } : { kind: 'clause', type: 'integer' }
+      ),
+  });
+  ```
+
+  An operator with a `bound` or a `clause` role has its own scope, as with
+  `scoped: true`. The engine finds these roles when the operator is declared,
+  by calling the handler with zero to three `Nothing` operands, so the
+  handler must give them for those operands too; a handler that gives one
+  role per position, as above, does. A `bound` or `clause` operand of an
+  operator that is not `lazy` is no longer evaluated before the `evaluate`
+  handler. The library operators bind the same variables as before.
+
 ### Resolved Issues
 
 - **A `Map` that the engine compiles reads the current value of the symbols in
@@ -52,10 +93,11 @@
   `list<real>`, and its value is a real number; with
   `L: list<record{a: real}>`, `At(L, 1, "a")` was typed `tuple<string, any>`.
   Now each is typed `real`, as `At(At(t, 1), 2)` is, also for a step through a
-  dictionary. `At(t, 1, 2)` now compiles: it declined before. A read outside a
-  record or a dictionary now gives the marker of the final value: `At(L, 9, "a")`
-  is `NaN`, not `Missing`. A read with one index too many (`At(t, 2, 1)`) is typed
-  `error`, and its value is an error, as before.
+  dictionary. `At(t, 1, 2)` now compiles: it declined before. A read out of range
+  whose steps go through a record, a dictionary or a tuple now gives the marker
+  of the final value: `At(L, 9, "a")`, and `At(X, 9, 1)` with
+  `X: list<tuple<real, string>>`, are `NaN`, not `Missing`. A read with one index
+  too many (`At(t, 2, 1)`) is typed `error`, and its value is an error, as before.
 - **`Flatten` keeps a tuple element in every form of the call.** A list of
   tuples of one shape kept them, but other forms opened them:
   `Flatten([(1, 2), (3, 4)], 1)` was `[1, 2, 3, 4]`, and

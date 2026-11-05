@@ -39,7 +39,7 @@ import type {
 } from './global-types.js';
 
 import { isFunction, isSymbol } from './boxed-expression/type-guards.js';
-import { operandSites } from './boxed-expression/binding-sites.js';
+import { BOUND_ROLE, RAW_ROLE } from './library/operand-roles.js';
 import {
   armAdmission,
   isMoreSpecific,
@@ -140,9 +140,9 @@ export interface FunctionClause {
  *   mySum(body, bind i, n) = Sum(body, i, 1, n)`. Each such parameter must
  *   receive a symbol; at the call the parameter is SUBSTITUTED by that symbol
  *   in the body (so `Sum` re-canonicalizes with the caller's symbol as its
- *   index), and the installed definition is a BINDER (`scoped:
- *   operandSites(…)`), so the call node declares the symbol in its own scope
- *   exactly as `Sum` does. Requires `hold`.
+ *   index), and the installed definition is a BINDER (the `bound` role at
+ *   each such position), so the call node declares the symbol in its own
+ *   scope exactly as `Sum` does. Requires `hold`.
  * - `commutative` / `associative` / `idempotent` / `involution` — the
  *   algebraic flags of an operator definition, applied by the engine when a
  *   CALL is canonicalized (operand sorting, flattening, `f(f(x))` folds). An
@@ -1408,6 +1408,10 @@ function installClauseList(
   const documented = [...clauses]
     .reverse()
     .find((c) => c.attributes?.description !== undefined);
+  const bindRoles = Array.from(
+    { length: Math.max(-1, ...bindPositions) + 1 },
+    (_, i) => (bindPositions.includes(i) ? BOUND_ROLE : RAW_ROLE)
+  );
   const def: OperatorDefinition = {
     description:
       documented?.attributes?.description ??
@@ -1418,12 +1422,18 @@ function installClauseList(
       ? { effects: row }
       : { pure: true }),
     lazy: hold,
-    // A `bind` parameter makes the definition a BINDER: the call node
-    // declares the symbol passed at that position in its own scope (the
-    // same mechanism `Sum`/`D` use), so route parity and shadowing are the
-    // framework's, not improvised here.
+    // A `bind` parameter makes the definition a BINDER: its operand has
+    // the role `bound`, and the call node declares the symbol passed at
+    // that position in its own scope (the same mechanism `Sum`/`D` use), so
+    // route parity and shadowing are the framework's, not improvised here.
+    // The other operands of the hold (`lazy`) definition are `raw`, the
+    // default role of a lazy operator. The handler gives the same array for
+    // any operands, so that the declaration finds the `bound` roles when it
+    // calls it with zero operands, also at a position after the third.
     ...(bindPositions.length > 0
-      ? { scoped: operandSites(...bindPositions) }
+      ? {
+          operands: () => bindRoles,
+        }
       : {}),
     ...flags,
     signature,

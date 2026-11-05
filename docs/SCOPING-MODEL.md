@@ -208,10 +208,38 @@ scoped instance's dependencies through the same chain (`withAmbientChain`).
 
 ## Binders
 
-Binder operators declare their binding sites through the shared binding-site
-selector. The selector identifies operand positions, bundled variables, and
-shielded regions. `D`, `Integrate`, `Limit`, `Sum`, `Product`, `Solve`, lambda
-parameters, comprehensions, and `HoldValues` all use this mechanism.
+A binder operator declares its binding sites with the `bound` and `clause`
+roles of the `operands` handler of its definition (`OperandRole`,
+`types-definitions.ts`). A `bound` operand is a symbol that is a bound
+variable: the variables of `D`, the expansion variable of `Series`. A `clause`
+operand is an indexing set whose index is a bound variable (`Limits`,
+`Element`, a tuple, a symbol): the clauses of `Sum`, `Product`, `Integrate`,
+`Loop`, `Comprehension`, the quantifiers and `NDSolveFunction`. A run of
+consecutive `clause` operands is read with the flat spelling of `Sum`
+(`Sum(body, k, 1, n)` binds `k`, not `n`). `operandRoleSites()`
+(`binding-sites.ts`) finds the site of each such operand: its path, the leaves
+of a destructuring pattern (`Element(Tuple(p, q), pairs)`), its type, and
+whether it is clause-local. An operator with such a role has its own scope, as
+with `scoped: true`; `scoped: true` alone gives a scope with no syntactic bound
+variable (`Block`). The engine finds that an operator is a binder when the
+operator is declared: it calls the `operands` handler with zero to three
+placeholder operands. `D`, `Integrate`, `Limit`, `Sum`, `Product`, `Solve`,
+lambda parameters, comprehensions, and `HoldValues` all shield their variable
+by the rule below.
+
+The roles are consumed in a fixed order when an application of a binder is
+canonicalized (`canonicalizeBinder()`, `box.ts`). The roles are read on the
+operands as written. The engine creates the scope of the operator and
+declares in it the variable of each `bound` operand and the index of the first
+`clause` operand; the canonical handler declares the index of each later clause
+just before it canonicalizes that clause, so that an earlier clause does not
+see it. Then the engine canonicalizes each `statement` operand as a branch, in
+that scope (an assignment of a bound variable there writes the bound
+variable), and reads a bare `N` or `D` at a `value` operand of a lazy operator
+as a variable (`applyOperatorDefinition()`). Then the `canonical` handler runs.
+After the handler, the roles are read again on the operands of its result, and
+each site, and each occurrence of the same name in the scope of the site, is
+bound to the binding of the operator (`bindBindingSites()`).
 
 The governing value rule is:
 

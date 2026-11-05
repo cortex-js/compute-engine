@@ -499,9 +499,10 @@ is whether an operator **binds** a variable:
 - **Binder operators** — `D`/`Derivative`, `Integrate`, `Limit`, `Sum`,
   `Product`, `Solve`, `Function` (lambda parameters), comprehension/table
   indices, quantifiers — bind their own variable. (Most declare their binding
-  sites via a selector on the `scoped` definition flag — see
-  `docs/SCOPING-MODEL.md`. `Minimize`/`Maximize`, once listed here, have no
-  library definition and would be a new feature.) That variable is shielded from
+  sites with the `bound` and `clause` roles of the `operands` handler of
+  their definition — see `docs/SCOPING-MODEL.md`. `Minimize`/`Maximize`,
+  once listed here, have no library definition and would be a new feature.)
+  That variable is shielded from
   any same-named global assignment for the whole operation, **including in the
   result**: with `x := 5`, `D(x², x)` is `2x` and `Integrate(x², x)` is `x³/3`,
   both left in terms of the still-symbolic `x`. Any _other_ symbol in the
@@ -1427,7 +1428,8 @@ collection contracts. In particular:
 
 ### Binding and runtime boundaries
 
-- Binding operators declare a `scoped` binding-site selector. Obtain binding
+- Binding operators declare their bound variables with the `bound` and
+  `clause` operand roles (the `operands` handler). Obtain binding
   symbols through `ce._bindingSymbol`, so library constants such as `Pi`, `e`,
   and `i` do not replace lexical symbols. Lift integrands with `liftIntegrand()`
   before passing them to integration providers.

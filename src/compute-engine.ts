@@ -196,18 +196,6 @@ export {
 } from './compute-engine/boxed-expression/explain-labels.js';
 export type { StepLabel } from './compute-engine/boxed-expression/explain-labels.js';
 
-// ── Binder authoring (the `scoped` binding-site selectors) ──────────
-// The vocabulary an operator definition uses to declare which of its operands
-// are its bound variables. See `OperatorDefinitionFlags.scoped`; the
-// `BindingSite`/`BindingSiteSelector` types come from `./types.js` above.
-export {
-  operandSites,
-  operandsFrom,
-  indexingSetSites,
-  limitsIndexSites,
-  lambdaParamSites,
-} from './compute-engine/boxed-expression/binding-sites.js';
-
 // ── Value kinds (the `arithmetic` field of an operator definition) ──
 // A cache for the hooks of a value kind: the payload of a kind value (a call
 // of its head) is decoded once for each boxed expression.

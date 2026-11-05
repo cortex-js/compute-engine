@@ -1652,7 +1652,7 @@ export function rebindEscaping(expr: Expression, scope: Scope): Expression {
  * Re-bind a result escaping the scope that is currently on top of the eval
  * stack — the evaluate-time counterpart of {@link rebindEscaping}.
  *
- * A binder whose `scoped` flag names its binding sites owns a `localScope`,
+ * A binder (whose `operands` handler names its binding sites) owns a `localScope`,
  * which `BoxedFunction._computeValue` pushes as an eval frame while the
  * evaluate handler runs. Its bound variable is a DIFFERENT variable from the
  * ambient one of the same name, so a result that is an open expression in it —

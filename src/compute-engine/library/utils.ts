@@ -761,8 +761,8 @@ export const DEGENERATE_CAPTURE_UNSAFE = Symbol('degenerate-capture-unsafe');
  * `'symbolic'` path.
  *
  * The index is substituted rather than ASSIGNED (as the numeric iteration in
- * `reduceBigOp` does): the index is declared `integer` by
- * `indexingSetSites(1, 'integer')`, so `ce.assign(i, x)` for a bound of
+ * `reduceBigOp` does): the index is declared `integer` by the `clause`
+ * role of `Sum` and `Product`, so `ce.assign(i, x)` for a bound of
  * unknown type throws `TypeCompatibilityError` — a symbolic bound is exactly
  * the case that cannot go through the assign. The neighbouring symbolic
  * closed forms substitute for the same reason. `subs` is not binder-aware, so
@@ -4035,8 +4035,8 @@ export function canonicalBigop(
 
   // The scope, its `noAutoDeclare` flag, the push/pop around this handler and
   // the declaration of each index are all provided by the binder hook in
-  // `box.ts`: `Sum`/`Product` declare their index operands with
-  // `scoped: indexingSetSites(1, 'integer')`. What that buys, beyond deleting
+  // `box.ts`: `Sum`/`Product` declare their index operands with the role
+  // `{ kind: 'clause', type: 'integer' }`. What that buys, beyond deleting
   // this prologue, is that the index is bound in the operator's OWN scope on
   // every route — see `docs/SCOPING-MODEL.md`.
   //

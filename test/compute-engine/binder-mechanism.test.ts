@@ -99,7 +99,7 @@ describe('Integrate: the limits index is bound by the integral', () => {
  * `ce.parse('\\frac{d}{dx} x^2')` and
  * `ce.function('D', [ce.parse('x^2'), ce.symbol('x')])` were NOT `isSame`.
  *
- * Now `scoped: operandsFrom(1)` (the variadic selector) plus the pre-budgeted
+ * Now the `bound` role of operands 1..n (the `operands` handler of `D`) plus the pre-budgeted
  * `rebindEscapingCurrentScope` in the evaluate handler — a derivative, like a
  * `Series` expansion and an antiderivative, is an OPEN expression in the bound
  * variable and would otherwise leave the frame referencing a dying binding.
@@ -122,7 +122,7 @@ describe('D: the differentiation variables are bound by the derivative', () => {
     expect([
       ...(ce.parse('\\frac{d}{dx} x^2').localScope?.bindings.keys() ?? []),
     ]).toEqual(['x']);
-    // Variadic: `operandsFrom(1)` binds ALL the trailing variable operands.
+    // Variadic: the `bound` role binds ALL the trailing variable operands.
     expect(
       [
         ...(ce
@@ -148,7 +148,7 @@ describe('D: the differentiation variables are bound by the derivative', () => {
   });
 
   test('a constant-named variable is bound by the derivative, not the constant', () => {
-    // `scoped: operandsFrom(1)` accepts any bare symbol, so `D(f, Pi)` is
+    // The `bound` role accepts any bare symbol, so `D(f, Pi)` is
     // user-reachable. Step 5 used to resolve the site with `ce.symbol(id)`,
     // which short-circuits to the interned constant for `Pi` — the node
     // declared a binding for `Pi` that nothing referenced. The defect was in

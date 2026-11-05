@@ -63,11 +63,14 @@ import type {
   IComputeEngine as ComputeEngine,
   Scope,
   Sign,
-  BindingSiteSelector,
   BroadcastExemption,
   OperandRole,
   TypeProvenanceEntry,
 } from '../global-types.js';
+import {
+  operandRoleSites,
+  type BindingSiteSelector,
+} from './binding-sites.js';
 
 import {
   anonymousParameters,
@@ -564,37 +567,28 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   lazy = false;
 
   /** Normalized from the declaration's `scoped` flag: `true` for
-   * `scoped: true` AND for a binding-site selector, which implies a scope. */
+   * `scoped: true`, and for a binder, whose `operands` handler gives a
+   * `bound` or a `clause` role (see `bindingSites`). */
   scoped = false;
 
-  /** The binding-site selector, when the declaration's `scoped` flag was one.
-   * `undefined` for a plain `scoped: true` (a scope with no syntactic bound
-   * variables — `Block`, the quantifiers) and for an unscoped operator. */
+  /** The binding sites of a binder: the sites that the `bound` and
+   * `clause` roles of the `operands` handler declare among the operands of
+   * an application (`operandRoleSites()`). `undefined` for an operator that
+   * is not a binder: a plain `scoped: true` (a scope with no syntactic bound
+   * variables, `Block`) and an unscoped operator. The canonicalization hook
+   * (`canonicalizeBinder()`, `box.ts`) and the walks that read the bound
+   * names of a node call it. */
   bindingSites?: BindingSiteSelector;
 
-  /** Normalize the union-typed `scoped` declaration into the boolean the
-   * engine reads plus the selector the canonicalization hook consumes.
-   *
-   * `spread` is the already-normalized selector of a definition built by
-   * spreading a BOXED definition (`{ ...ce.lookupDefinition('Sum').operator,
-   * evaluate }`), whose `scoped` is the boolean rather than the selector.
-   * Honoring it keeps such an override a binder, the same reason
-   * `normalizeSignatureField` accepts an already-boxed `signature`. */
-  private setScoped(
-    scoped: boolean | BindingSiteSelector | undefined,
-    spread?: BindingSiteSelector
-  ): void {
-    if (scoped === undefined && spread === undefined) return;
-    if (typeof scoped === 'function') {
-      this.bindingSites = scoped;
-      this.scoped = true;
-    } else if (scoped === undefined || scoped) {
-      this.bindingSites = spread ?? this.bindingSites;
-      this.scoped = scoped ?? this.scoped;
-    } else {
-      this.bindingSites = undefined;
-      this.scoped = false;
-    }
+  /** Read the `scoped` flag of a declaration. A binding-site selector (a
+   * function) is refused: the bound variables of an operator are declared
+   * with the `bound` and `clause` roles of its `operands` handler. */
+  private setScoped(scoped: boolean | undefined): void {
+    if (typeof scoped === 'function')
+      throw new Error(
+        `Operator Definition "${this.name}": the 'scoped' flag is a boolean. Declare the bound variables with the operand roles "bound" and "clause" of the 'operands' handler`
+      );
+    if (scoped !== undefined) this.scoped = scoped;
   }
 
   /** Backing store for the {@link signature} accessor pair. Every read that
@@ -1434,7 +1428,12 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     return ops.map((_, i) => {
       const role = roles[i];
       if (role === undefined) return fallback;
-      checkOperandRole(this.name, role, this.lazy);
+      checkOperandRole(
+        this.name,
+        role,
+        this.lazy,
+        this.bindingSites !== undefined
+      );
       return role.kind;
     });
   }
@@ -2149,10 +2148,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       );
 
     this.lazy = def.lazy ?? this.lazy;
-    this.setScoped(
-      def.scoped,
-      (def as Partial<BoxedOperatorDefinition>).bindingSites
-    );
+    this.setScoped(def.scoped);
 
     const idempotent = def.idempotent ?? this.idempotent;
     const involution = def.involution ?? this.involution;
@@ -2454,10 +2450,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.elementCount = def.elementCount ?? this.elementCount;
     this.elementAt = def.elementAt ?? this.elementAt;
     this.inferOperandTypes = def.inferOperandTypes ?? this.inferOperandTypes;
-    this.setScoped(
-      def.scoped,
-      (def as Partial<BoxedOperatorDefinition>).bindingSites
-    );
+    this.setScoped(def.scoped);
     this.lazy = dropsLibraryLazy ? false : (def.lazy ?? this.lazy);
 
     // The `operands` handler is called here with zero to three placeholder
@@ -2467,14 +2460,27 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // A handler that throws on the placeholders, or gives roles that depend
     // on the operands themselves, is checked each time it gives roles
     // (`operandRoles()`). While the engine loads its libraries, `Nothing`
-    // does not exist yet, and the handler is called with no operands only.
+    // does not exist yet, and the placeholder operands are `undefined`: a
+    // handler that reads them throws, and that call is ignored.
+    //
+    // These calls also find whether the operator is a BINDER: an operator
+    // whose handler gives a `bound` or a `clause` role for one of them. A
+    // binder has its own scope, as with `scoped: true`, and its binding
+    // sites are the sites that these roles declare among the operands of an
+    // application (`operandRoleSites()`). The engine must know this when the
+    // operator is declared: the scope and the sites are read when an
+    // application is canonicalized, and by the walks that read the names a
+    // node binds.
+    let binder = false;
     if (this.operands !== undefined) {
       const placeholder = this.engine.Nothing as Expression | undefined;
-      const most = placeholder === undefined ? 0 : 3;
-      for (let n = 0; n <= most; n++) {
+      const probes: ReadonlyArray<OperandRole | undefined>[] = [];
+      for (let n = 0; n <= 3; n++) {
         let roles: unknown;
         try {
-          roles = this.operands(Array(n).fill(placeholder));
+          roles = this.operands(
+            Array<Expression | undefined>(n).fill(placeholder) as Expression[]
+          );
         } catch {
           continue;
         }
@@ -2482,10 +2488,29 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           throw new Error(
             `Operator Definition "${this.name}": the 'operands' handler must return an array of operand roles`
           );
-        for (const role of roles as ReadonlyArray<OperandRole | undefined>)
-          if (role !== undefined) checkOperandRole(this.name, role, this.lazy);
+        probes.push(roles as ReadonlyArray<OperandRole | undefined>);
+        binder ||= roles.some(
+          (role: OperandRole | undefined) =>
+            role?.kind === 'bound' || role?.kind === 'clause'
+        );
       }
+      for (const roles of probes)
+        for (const role of roles)
+          if (role !== undefined)
+            checkOperandRole(this.name, role, this.lazy, binder);
     }
+    if (binder) {
+      const handler = this.operands!;
+      this.scoped = true;
+      this.bindingSites = (ops) => {
+        const roles = handler(ops);
+        if (!Array.isArray(roles))
+          throw new Error(
+            `Operator Definition "${this.name}": the 'operands' handler must return an array of operand roles`
+          );
+        return operandRoleSites(roles, ops);
+      };
+    } else this.bindingSites = undefined;
 
     if (def.collection) {
       // The collection handlers of a host operator are host code: each call
@@ -3220,20 +3245,23 @@ function assertValidDerivativeKey(name: string, value: unknown): void {
 /**
  * Throw an error when `role`, a role that the `operands` handler of the
  * operator `name` returned, is not one that the engine implements, is `raw`
- * or `opaque` on an operator that is not lazy, or is `held` on a lazy
- * operator. The `bound` and `clause` roles are part of the `OperandRole`
- * type but are not implemented: an operand with one of them would be
- * canonicalized and evaluated as a `value`, which is not what the definition
- * asks for. A `raw` or an `opaque` operand is not canonicalized, and the
+ * or `opaque` on an operator that is not lazy, is `held` on a lazy
+ * operator, or is `bound` or `clause` on an operator that is not a
+ * `binder`. A `raw` or an `opaque` operand is not canonicalized, and the
  * operands of an operator that is not lazy are all canonicalized before its
  * handlers run. A `held` operand is canonical but not evaluated, and a lazy
  * operator canonicalizes none of its operands: there, an operand that the
- * handler reads as written is `raw`.
+ * handler reads as written is `raw`. An operator is a binder when its
+ * handler gives a `bound` or a `clause` role for one of the placeholder
+ * operand lists of the declaration (`_update()`): a role that only an
+ * application gives would declare a variable in a scope that the operator
+ * does not have.
  */
 function checkOperandRole(
   name: string,
   role: OperandRole,
-  lazy: boolean
+  lazy: boolean,
+  binder: boolean
 ): void {
   switch (role.kind) {
     case 'value':
@@ -3252,8 +3280,9 @@ function checkOperandRole(
       );
     case 'bound':
     case 'clause':
+      if (binder) return;
       throw new Error(
-        `Operator Definition "${name}": the operand role "${role.kind}" is not supported yet: declare the bound variables with a binding-site selector in 'scoped'`
+        `Operator Definition "${name}": the operand role "${role.kind}" is given for an application, but not for the operands that the engine gives the 'operands' handler when the operator is declared (zero to three \`Nothing\` operands). Give the roles of the bound variables for these operands too, so that the operator is declared as a binder`
       );
     default:
       throw new Error(
