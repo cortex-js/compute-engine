@@ -36,9 +36,7 @@ import {
   registryLocalName,
   withNestedCseHarvest,
 } from './compile-cse.js';
-import {
-  withPromotionUnsuppressed,
-} from './compiler-mode.js';
+import { withPromotionUnsuppressed } from './compiler-mode.js';
 import { CompilerState } from './compiler-state.js';
 import { hoistedListLiteralText } from './compile-linear-algebra.js';
 import { removeDefinitionsAddedSince } from './compile-definitions.js';

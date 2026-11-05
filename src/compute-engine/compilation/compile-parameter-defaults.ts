@@ -202,8 +202,7 @@ export function compiledDefaultOperand(
   type: Type | undefined,
   subject: string
 ): Expression {
-  if (!isSymbol(d) || !compiledSymbolDefaultDeclines(engine, d, type))
-    return d;
+  if (!isSymbol(d) || !compiledSymbolDefaultDeclines(engine, d, type)) return d;
   const value = foldedConstantDefault(d);
   if (value !== undefined) return value;
   throw new Error(

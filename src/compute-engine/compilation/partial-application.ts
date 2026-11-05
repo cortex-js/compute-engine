@@ -44,7 +44,9 @@ export function assertNoCurriedApplication(
 ): void {
   const callee = args[0];
   if (callee !== undefined && curriedLiteral(callee) !== undefined)
-    throw new Error(`Could not compile \`Apply\`: ${PARTIAL_APPLICATION_REFUSAL}`);
+    throw new Error(
+      `Could not compile \`Apply\`: ${PARTIAL_APPLICATION_REFUSAL}`
+    );
 }
 
 /**

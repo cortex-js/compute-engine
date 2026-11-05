@@ -23,11 +23,7 @@ import {
   assertNoStatementOperand,
   compileValueOperand,
 } from './compile-statements.js';
-import {
-  compileOp,
-  compileOpValue,
-  operandCompiler,
-} from './compile-cse.js';
+import { compileOp, compileOpValue, operandCompiler } from './compile-cse.js';
 import {
   assertScalarCondition,
   booleanClaim,
@@ -307,9 +303,7 @@ export function compileExprRestriction(
         cell.type.matches('boolean') &&
         !mayBeCollectionCondition(cell.type.type)
     )
-      ? `[${args[1].ops
-          .map((cell) => core.compile(cell, target))
-          .join(', ')}]`
+      ? `[${args[1].ops.map((cell) => core.compile(cell, target)).join(', ')}]`
       : core.compile(args[1], target);
   const val = compileOp(undefined, 0, target, 0, args[0]);
   // The absence at each position is decided from what one position

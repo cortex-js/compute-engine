@@ -1035,7 +1035,10 @@ export function _isComplexValuedFunction(
     if (isSymbol(op) && BUILTIN_FOLD_HEADS.has(op.symbol))
       return foldLaneIsComplex(coll, init);
   }
-  if (promotionActive() && core.promotesRadicalToComplex(expr.operator, expr.ops))
+  if (
+    promotionActive() &&
+    core.promotesRadicalToComplex(expr.operator, expr.ops)
+  )
     return true;
   // `Apply(Derivative(f, n), …)` — the compiled `f''(x)` — takes the value
   // shape of the EXPRESSION THE EMITTER WILL PRODUCE, not the one this

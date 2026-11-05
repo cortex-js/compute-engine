@@ -1362,7 +1362,11 @@ export function noteLocalFunction(
   const name = stmt.ops[0].symbol;
   const value =
     stmt.operator === 'Declare' ? declareValueOperand(stmt.ops) : stmt.ops[1];
-  if (!rebound.has(name) && value !== undefined && isFunction(value, 'Function'))
+  if (
+    !rebound.has(name) &&
+    value !== undefined &&
+    isFunction(value, 'Function')
+  )
     scope.set(name, value);
   else scope.delete(name);
 }

@@ -894,9 +894,7 @@ function unitValuesOf(
 ): Expression[] {
   return [
     ...new Set([
-      ...returnValuesIn(body, target).flatMap((v) =>
-        endValuesOf(v, target)
-      ),
+      ...returnValuesIn(body, target).flatMap((v) => endValuesOf(v, target)),
       ...endValuesOf(body, target),
     ]),
   ];

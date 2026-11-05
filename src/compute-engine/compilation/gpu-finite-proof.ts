@@ -688,8 +688,7 @@ function gpuFiniteProof(
     }
     // A call of a user function with a declared ranged result type
     // (`declaredUserCallBound`) has the bound of that range.
-    if (isFunction(e))
-      return declaredUserCallBound(e);
+    if (isFunction(e)) return declaredUserCallBound(e);
     // The range in the static type of a symbol that the shader reads as
     // the host's input, under the conditions of `atomBound`: a declared
     // range is a promise of the host, as a declared `real` is. The range

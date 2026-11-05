@@ -203,8 +203,7 @@ export function compileExprFunctionLiteral(
     // scalars only (`withScalarFedLiteral`).
     if (
       node === undefined ||
-      (!checkedLiteralApplications.has(node) &&
-        !scalarFedLiterals.has(node))
+      (!checkedLiteralApplications.has(node) && !scalarFedLiterals.has(node))
     ) {
       const at = expressionParameterReadAt(
         node ?? engine.function('Function', [...args])

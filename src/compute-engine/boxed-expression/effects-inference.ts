@@ -649,9 +649,7 @@ export function storeAdmission(
   /** The symbol being declared/assigned, for the diagnostic. */
   symbol?: string
 ): 'match' | 'overlap' | 'refuse' {
-  if (
-    matchesOrAbsent(ce, value.type, declared, effectsDeclared, value, symbol)
-  )
+  if (matchesOrAbsent(ce, value.type, declared, effectsDeclared, value, symbol))
     return 'match';
   return mayEvaluateIntoDeclaredType(ce, value, declared)
     ? 'overlap'

@@ -30,10 +30,7 @@ import {
 import { isEffectSubset } from '../../common/type/effects.js';
 import { declareValueOperand } from './compile-declarations.js';
 import { localShapeFrameOf } from './compile-shapes.js';
-import type {
-  LocalEntry,
-  LocalValueFrame,
-} from './compiler-types.js';
+import type { LocalEntry, LocalValueFrame } from './compiler-types.js';
 import { tempVar } from './compiler-naming.js';
 import { CompilerState } from './compiler-state.js';
 

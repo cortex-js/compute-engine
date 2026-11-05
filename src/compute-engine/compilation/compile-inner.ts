@@ -772,10 +772,7 @@ export function assertNoNothingElement(
         tupleType.kind === 'tuple' &&
         tupleType.elements.some((x) => hasNothingArm(x.type)))
     )
-      throw possibleNothingDecline(
-        '`Tuple`',
-        'a coordinate can be `Nothing`'
-      );
+      throw possibleNothingDecline('`Tuple`', 'a coordinate can be `Nothing`');
     return;
   }
   const selects =
@@ -787,17 +784,15 @@ export function assertNoNothingElement(
   const aggregate = OMITTING_NUMERIC_AGGREGATES.has(h);
   const paired =
     h === 'Covariance' || h === 'PopulationCovariance' || h === 'Correlation';
-  if (
-    !(
-      aggregate ||
-      numericFold ||
-      h === 'Map' ||
-      rawProducer ||
-      h === 'Zip' ||
-      selects ||
-      paired
-    )
-  )
+  if (!(
+    aggregate ||
+    numericFold ||
+    h === 'Map' ||
+    rawProducer ||
+    h === 'Zip' ||
+    selects ||
+    paired
+  ))
     return;
   // Limits/Element clauses are binding syntax, not collection operands.
   const iteratorFold = (h === 'Sum' || h === 'Product') && args.length > 1;

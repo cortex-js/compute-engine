@@ -101,10 +101,7 @@ import { Complex } from 'complex.js';
 import { realPowerReconstructionDigits } from '../numerics/real-power.js';
 import { logSpaceProduct } from '../symbolic/log-space-product.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
-import {
-  nanPointLiteral,
-  unmatchedCellLiteral,
-} from './compile-absence.js';
+import { nanPointLiteral, unmatchedCellLiteral } from './compile-absence.js';
 import { reachesCallerCodeOn } from './compile-folding.js';
 import { reservedNameSpelling } from './compile-loops.js';
 import { JAVASCRIPT_RESERVED_IDENTIFIERS } from './javascript-reserved.js';
@@ -6435,8 +6432,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       stripMissingFromType(args[0].type.type)
     );
     const absent =
-      (element === undefined ? undefined : nanPointLiteral([element])) ??
-      'NaN';
+      (element === undefined ? undefined : nanPointLiteral([element])) ?? 'NaN';
     return `((_f) => ((${coll}).find((_x) => _f(_x)) ?? ${absent}))(${fnArg('Find', args[1], args[0], compile, [], target)})`;
   },
   // 1-based index of the first element satisfying the predicate, or 0 if
@@ -7284,9 +7280,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         args.slice(1).map((a) => compile(a)),
         compile,
         () =>
-          BaseCompiler.withScalarFedLiteral(literal, () =>
-            compile(literal)
-          ),
+          BaseCompiler.withScalarFedLiteral(literal, () => compile(literal)),
         target
       );
       if (named !== undefined) return named;
@@ -7299,9 +7293,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         args.slice(1).map((a) => compile(a)),
         compile,
         () =>
-          BaseCompiler.withScalarFedLiteral(literal, () =>
-            compile(literal)
-          ),
+          BaseCompiler.withScalarFedLiteral(literal, () => compile(literal)),
         target
       );
       if (points !== undefined) return points;

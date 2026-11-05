@@ -4364,13 +4364,7 @@ function assertAssignableValueDef(
   // `incompatible-type` error. A value whose type does not overlap the
   // declared type is still refused here. The verdict `'overlap'` is returned,
   // not recorded: this check writes nothing, and the store records it.
-  const verdict = storeAdmission(
-    ce,
-    value,
-    contract,
-    def.effectsDeclared,
-    id
-  );
+  const verdict = storeAdmission(ce, value, contract, def.effectsDeclared, id);
   if (verdict === 'refuse') throw declaredTypeError(id, value, contract);
   return verdict;
 }

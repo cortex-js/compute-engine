@@ -2976,10 +2976,7 @@ function mulCollectionsWith(
  * not raw UTF-16, because the interpreter's strings are NFC and well-formed by
  * the time it compares them.
  */
-function eqTensor(
-  a: unknown,
-  b: unknown
-): boolean | (boolean | unknown[])[] {
+function eqTensor(a: unknown, b: unknown): boolean | (boolean | unknown[])[] {
   const aArr = Array.isArray(a);
   const bArr = Array.isArray(b);
   if (aArr && bArr) {
@@ -3029,19 +3026,14 @@ function eqTensor(
  * an array-vs-scalar pair, a single negated boolean for array-vs-array and
  * scalar-vs-scalar.
  */
-function neqTensor(
-  a: unknown,
-  b: unknown
-): boolean | (boolean | unknown[])[] {
+function neqTensor(a: unknown, b: unknown): boolean | (boolean | unknown[])[] {
   const aArr = Array.isArray(a);
   const bArr = Array.isArray(b);
   if (aArr && bArr) {
     return eqTensor(a, b) !== true;
   }
-  if (aArr)
-    return a.map((x) => neqTensor(x, b)) as (boolean | unknown[])[];
-  if (bArr)
-    return b.map((y) => neqTensor(a, y)) as (boolean | unknown[])[];
+  if (aArr) return a.map((x) => neqTensor(x, b)) as (boolean | unknown[])[];
+  if (bArr) return b.map((y) => neqTensor(a, y)) as (boolean | unknown[])[];
   return eqTensor(a, b) !== true;
 }
 

@@ -97,10 +97,7 @@ import {
 } from './compile-parameter-defaults.js';
 import { blockLocalOf } from './compile-locals.js';
 import { isIndexReadTuple } from '../boxed-expression/index-read-tuple.js';
-import type {
-  DeclineNote,
-  UserFunctionRegistry,
-} from './compiler-types.js';
+import type { DeclineNote, UserFunctionRegistry } from './compiler-types.js';
 import { foldValueImpure, parametersCanBeTyped } from './compile-folding.js';
 import { tempVar } from './compiler-naming.js';
 import { isEmissionSkippable } from './compile-cse.js';

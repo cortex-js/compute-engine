@@ -421,11 +421,7 @@ export function compileExprCoalesce(
       throw new Error(
         'Could not compile `Coalesce`: expected at least one argument'
       );
-    if (
-      args
-        .slice(0, -1)
-        .some((a) => hasNothingArm(compilationType(a)))
-    )
+    if (args.slice(0, -1).some((a) => hasNothingArm(compilationType(a))))
       throw possibleNothingDecline(
         '`Coalesce`',
         'an operand before the last can be `Nothing`, which is not an ' +

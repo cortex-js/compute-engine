@@ -4269,8 +4269,7 @@ function gpuAppliedBody(
   } catch (e) {
     return (e as Error).message.replace(/^Could not compile `Apply`: /, '');
   }
-  if (isPartialApplication(args))
-    return partialApplicationDecline();
+  if (isPartialApplication(args)) return partialApplicationDecline();
   const [callee, ...written] = args;
   if (callee === undefined) return 'missing function';
   let actuals: ReadonlyArray<Expression> = written;

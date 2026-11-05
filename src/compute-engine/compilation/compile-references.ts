@@ -57,10 +57,7 @@ import {
   isHostOperatorCallback,
   isRefusableBuiltinCallback,
 } from './builtin-callback.js';
-import {
-  OPERAND_READ,
-  UNREADABLE_OPERAND,
-} from './compile-locals.js';
+import { OPERAND_READ, UNREADABLE_OPERAND } from './compile-locals.js';
 import {
   appliedDerivativeLiteral,
   appliedDerivativeTooLarge,
