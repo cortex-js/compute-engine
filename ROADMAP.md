@@ -597,8 +597,8 @@ reproduction above is the record.
 
 ### CE-752. A lazy view returned from a `Block` reads a valueless local as the global of the same name
 
-**Status:** decision needed; defect, small. Found 2026-11-01 while fixing a
-caller-binding defect (a function called with a block-local valueless `y`
+**Status:** ready; defect, small. User decision 2026-11-05: option (a).
+Found 2026-11-01 while fixing a caller-binding defect (a function called with a block-local valueless `y`
 read the global `y`; that part is fixed).
 **Witness:** plausible; `Block(Declare(y,'real'), [y])` evaluated again gives `[5]`.
 
@@ -1259,7 +1259,7 @@ leaves it to the numeric one.
 
 ### CE-613. `Limit` of `e^{√x}/x^5` at infinity gives 0 instead of `+∞`
 
-**Status:** decision needed; defect, M.
+**Status:** ready; defect, M. User decision 2026-11-05: option (c).
 **Witness:** plausible; `lim e^{√x}/x^5` at ∞ gives 0, should be +∞.
 
 `lim_{x→∞} e^{√x}/x^5` is `+∞`, and `lim x^5/e^{√x}` is 0; today they give 0
@@ -2876,7 +2876,11 @@ shipped (contract in `docs/CHECKPOINT-MODEL.md`; tests include
 
 ### CE-312. Function declaration hoisting: run-time checks, cancellation and route differences
 
-**Status:** decision needed; defect. CE-312.1 and CE-312.2 need a user decision. Plan:
+**Status:** decision needed; defect. CE-312.2 needs a user decision. User
+decision 2026-11-05 for CE-312.1: a function with a declared signature checks
+each argument against the declared parameter type at run time when the static
+type of the argument did not decide (the example below then gives
+`incompatible-type`). Plan:
 docs/plans/2026-10-21-function-declaration-hoisting.md.
 **Witness:** plausible; CE-312.3 and .4 name a fix that needs no decision (fix).
 
@@ -2970,7 +2974,7 @@ make one canonical pass cheaper.
 
 ### CE-638. An untyped parameter followed by parentheses is read as a product: `g \mapsto \int_0^1 g(x)\,dx`
 
-**Status:** decision needed; defect, M.
+**Status:** ready; defect, M. User decision 2026-11-05: option (b).
 **Witness:** plausible; User owns the parse decision; `h(p, a) := p(a)` gives a silent product.
 
 In a function literal or a definition, the parser reads `p(a)` as a product
