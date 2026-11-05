@@ -1264,4 +1264,30 @@ describe('A LIST OF POINTS AT A POINT PARAMETER BESIDE unknown SLOTS THAT ANOTHE
       [5, 4],
     ]);
   });
+
+  // With `x` and `y` declared with a range, the element type of the list is
+  // a union of two tuples, `tuple<integer, integer> | tuple<real<-10..10>,
+  // real<-10..10>>`, since `integer` is not a subtype of the range. The map
+  // takes the definition for one point of the joined tuple `tuple<real,
+  // real>`. Before, it took the generic definition and declined. Tycho row
+  // 486 (a plot axis is declared `real<-1e15..1e15>`).
+  test.each(['real<-10..10>', 'real<-1e15..1e15>'])(
+    'a list whose points read inputs declared %s',
+    (axis) => {
+      const ce = engine();
+      ce.declare('x', axis);
+      ce.declare('y', axis);
+      const expr = ce.box([
+        'n',
+        ['List', ['Tuple', 1, 2], ['Tuple', 'x', 'y']],
+        4,
+        2,
+      ]);
+      const r = compile(expr, { to: 'javascript', fallback: false } as never)!;
+      expect(r.run!({ x: 3, y: 4 } as never)).toEqual([
+        [2, 2],
+        [4, 4],
+      ]);
+    }
+  );
 });

@@ -21,6 +21,19 @@
 
 ### Resolved Issues
 
+- **Compilation to JavaScript: a call mapped over a literal list of points
+  compiles when a point reads an input declared with a range.** With
+  `n: (tuple<number, number>, unknown, unknown) -> tuple<number, number>`,
+  `n := (q, D2, d2) ↦ q + C(D2, d2)` and `x`, `y` declared `real<-10..10>`,
+  `n([(1, 2), (x, y)], 4, 2)` now compiles and gives `[(2, 2), (4, 4)]` at
+  `x = 3`, `y = 4`. Before, it fell back to the interpreter, because the
+  element type of the list is a union of two tuples
+  (`tuple<integer, integer> | tuple<real<-10..10>, real<-10..10>>`), and the
+  map then used the definition of `n` with `D2` and `d2` typed `unknown`.
+  The map now uses the definition for one point whose coordinates join the
+  coordinates of the tuples (`tuple<real, real>`), as it did when `x` and `y`
+  were declared `real`.
+
 - **Compilation to GLSL and WGSL: the body of a user function calls the
   built-in `sin`, `cos`, `sign`, `min`, `max` or `clamp` of a parameter that
   every call bounds, or that the host declared with a range.** Since

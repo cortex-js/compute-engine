@@ -28,9 +28,10 @@ import {
 import {
   cannotHoldAList as typeCannotHoldAList,
   isSubtype,
+  widen,
 } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
-import type { Type } from '../../common/type/types.js';
+import type { TupleType, Type } from '../../common/type/types.js';
 import { isScalarType } from '../boxed-expression/function-literal.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import {
@@ -409,7 +410,7 @@ export function tryCompilePointListCall(
   const onePointDefinition = (element: Type) => {
     const onePoint = engine.function('Typed', [
       engine.function('At', [args[at], engine.number(1)]),
-      engine.box({ str: typeToString(element) }),
+      engine.box({ str: typeToString(onePointType(element)) }),
     ]);
     return literal === undefined || !isTupleShapedType(onePoint.type.type)
       ? undefined
@@ -891,6 +892,56 @@ export function scalarSlotElementType(
     return isScalarType(pt) ? pt : undefined;
   }
   return isScalarType(pt) ? pt : undefined;
+}
+
+/**
+ * One tuple type that holds every point of the element type `t` of a list
+ * of points, for the call-shape specialization of a map over the list
+ * (`onePointDefinition` in `tryCompilePointListCall()`).
+ *
+ * The element type of a literal list of points can be a union of tuples,
+ * because the type of a list joins its elements whole: with `x` and `y`
+ * declared `real<-10..10>`, `[(1, 2), (x, y)]` is typed
+ * `list<tuple<integer, integer> | tuple<real<-10..10>, real<-10..10>>>`
+ * (`integer` is not a subtype of `real<-10..10>`, so the two tuples stay
+ * separate arms). The specialization needs one tuple type: for a union it
+ * gave up, and the map used the generic definition, whose parameters
+ * declared `unknown` stay `unknown`, so a call in the body declined.
+ *
+ * When every arm is a tuple of the same arity, with the same slot names,
+ * the result is the tuple whose slot i is the `widen()` of the slots i of
+ * the arms: `tuple<real, real>` above. The specialization is then compiled
+ * for a type that admits each value the map passes. `widen()` drops some
+ * members (`unknown`, a bare `nothing`), so the joined tuple is kept only
+ * when every arm is a subtype of it: `tuple<nothing, integer> |
+ * tuple<real, real>` is returned unchanged, and the map keeps the generic
+ * definition. Any other type is returned unchanged.
+ */
+function onePointType(t: Type): Type {
+  const r = resolveTypeForCompilation(t);
+  if (typeof r === 'string' || r.kind !== 'union') return t;
+  const arms: TupleType[] = [];
+  for (const arm of r.types) {
+    const a = resolveTypeForCompilation(arm);
+    if (typeof a === 'string' || a.kind !== 'tuple') return t;
+    arms.push(a);
+  }
+  const first = arms[0]?.elements;
+  if (first === undefined || first.length === 0) return t;
+  const sameSlots = arms.every(
+    (a) =>
+      a.elements.length === first.length &&
+      a.elements.every((e, i) => e.name === first[i].name)
+  );
+  if (!sameSlots) return t;
+  const joined: TupleType = {
+    kind: 'tuple',
+    elements: first.map((e, i) => ({
+      ...(e.name === undefined ? {} : { name: e.name }),
+      type: widen(...arms.map((a) => a.elements[i].type)),
+    })),
+  };
+  return arms.every((a) => isSubtype(a, joined)) ? joined : t;
 }
 
 /**
