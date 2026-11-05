@@ -169,8 +169,9 @@ Delegate only when it helps (shared protocol §9); write a change of a few lines
 yourself. When you delegate, use `implementer` (Opus) for implementation and
 bug fixes, one ROADMAP item per agent, and `mechanic` (Sonnet) for recipe-driven edits, read-only audits,
 sweeps and censuses. Do not use `general-purpose` for implementation: only the
-two repo agents carry the stop rule of the shared protocol §9. Find code with
-the LSP tool or `scripts/where.ts`.
+two repo agents carry the stop rule, the test time limit and the git clause,
+so a brief to them carries only the task. Find code with the LSP tool or
+`scripts/where.ts`.
 
 Run at most three Compute Engine sessions at the same time, each in a different
 area. The areas, by the files they change most:

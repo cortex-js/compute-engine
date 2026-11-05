@@ -1,6 +1,6 @@
 ---
 name: roadmap-batch
-description: Work through ROADMAP.md in a batch. Ask the user the open `decision needed` questions and record the answers, pick a batch of ready items, run one headless session per item (each one commits its own item), then report the results. Use when the user asks to run a ROADMAP batch, to make progress on ROADMAP items, or to answer pending ROADMAP decisions.
+description: Work through ROADMAP.md in a batch. Ask the user the open `waits for user (decision)` questions and record the answers, pick a batch of ready items, run one headless session per item (each one commits its own item), then report the results. Use when the user asks to run a ROADMAP batch, to make progress on ROADMAP items, or to answer pending ROADMAP decisions.
 ---
 
 # Run a batch of ROADMAP items
@@ -23,7 +23,7 @@ own name (`node ~/.claude/scripts/staging-queue.mjs whoami`).
 ## 1. Decisions
 
 Run `npx tsx scripts/roadmap-candidates.ts --decisions`. It lists the
-`decision needed` entries, newest first, and then, in a separate group, the
+`waits for user (decision)` entries, newest first, and then, in a separate group, the
 entries whose only witness is `crafted`. Do not ask the crafted group by
 default: AGENTS.md says that a case with only a `crafted` witness is not a
 question for the user. From the first group, take at most eight per run,

@@ -89,7 +89,7 @@ Wrap every test run in `timeout -k 30 600 …`, for example
 A defect that you find in older code that your change does not touch goes to
 `ROADMAP.md` as a new entry with its witness, and you continue. When the fix
 needs a user decision (no option is clearly sound, or a documented contract
-changes), write the entry back as `decision needed` with the options, an
+changes), write the entry back as `waits for user (decision)` with the options, an
 example for each and your recommendation, commit nothing else, and stop.
 When you stop before the work is done, write the entry back with the same
 reference, saying only what remains, and leave the worktree in place.
@@ -100,7 +100,7 @@ Your last message is the report, in this form and in ASD-STE100 Simplified
 Technical English:
 
 ```
-Result: committed <full hash> | not reproduced | taken | decision needed | stopped
+Result: committed <full hash> | not reproduced | taken | waits for user | stopped
 Item: {{ID}}
 Summary: <two to four sentences: the cause and the fix, or why you stopped>
 Checks run: <each command and its result>

@@ -36,8 +36,8 @@ nightly run, tell the user; do not take over that investigation unless asked.
   with a `crafted` witness, as one line in the known-limitations list of
   `docs/COMPILATION-MODEL.md`. The user picks the next item from `ROADMAP.md`. A
   fix needs a user decision only when no option is clearly sound, or when the
-  fix changes a documented contract; the entry is then `decision needed` and
-  states the options with an example. Use permanent `CE-<n>` references,
+  fix changes a documented contract; the entry then `waits for user
+  (decision)` and states the options with an example. Use permanent `CE-<n>` references,
   allocated from the next-free-reference line.
 - Compiled code gives the interpreter's value within the caveats of
   `docs/COMPILATION-MODEL.md`, "Caveats of compiled code": the precision of the
@@ -82,23 +82,18 @@ nightly run, tell the user; do not take over that investigation unless asked.
   A more precise version is a separate task, done when the user asks for it by
   name.
 - A decline is not a defect: it falls back to the interpreter, and it is the
-  preferred fix for a case that would otherwise need a handler of its own. A
-  decline is removed, or a wrong value is fixed with a handler, only for a
-  `corpus` or `plausible` witness. A `crafted` witness is resolved with a
-  decline or a known-limitations line, and an allowed difference with no entry
-  at all.
-- A case with only a `crafted` witness is never a question for the user, in a
-  report, a ROADMAP entry or a review finding: each answer to such a question
-  adds a handler for a case that no real expression reaches. The agent gives the
-  case a decline, or leaves its value unspecified where the caveats allow,
-  writes the known-limitations line, and continues. A question to the user names
-  its `corpus` or `plausible` witness; a question without one is not asked, and
-  an unanswered question means "decline". A reviewer's finding with a `crafted`
-  witness is answered with the decline or the known-limitations line, not with a
-  handler. When the agent cannot tell `plausible` from `crafted` (the header of
-  `ROADMAP.md` defines both), it records the case as a known-limitations line
-  marked `plausible?`, with the one-or-two-line program; the user sweeps those
-  lines and promotes any of them to a ROADMAP entry.
+  preferred fix for a case that would otherwise need a handler of its own. The
+  witness strengths (`corpus`, `plausible`, `crafted`) and where each is
+  recorded are defined once, in the header of `ROADMAP.md`. A decline is
+  removed, or a wrong value is fixed with a handler, only for a `corpus` or
+  `plausible` witness. A `crafted` witness gets a decline or a
+  known-limitations line, and is never a question for the user, in a report,
+  an entry or a review finding: each answer to such a question adds a handler
+  for a case that no real expression reaches. A question to the user names its
+  `corpus` or `plausible` witness, and an unanswered question means "decline".
+  When the agent cannot tell `plausible` from `crafted`, it writes a
+  known-limitations line marked `plausible?` with the one-or-two-line program;
+  the user sweeps those lines.
 - Judge a design change first by correctness within the caveats (a wrong finite
   value or shape is never acceptable; an expression whose static type is `error`
   declines), then by the code it removes or adds: a change that gives the same
@@ -115,13 +110,13 @@ nightly run, tell the user; do not take over that investigation unless asked.
   apply to a defect found during the task that the task's own code could fix:
   report it to the user in the same turn you find it, with the option you
   recommend.
-- `ROADMAP.md` must get shorter over time. Take only `ready` entries without
-  asking; `proposed`, `decision needed` and `design needed` entries wait for the
-  user (the states are defined in the header of `ROADMAP.md`). Do not add an
-  entry for an idea (a capability, a performance change, a design or a task):
-  put it in the report to the user, and add it as `proposed` only when the user
-  says to record it. Every defect entry names its witness and the strength of
-  the witness.
+- `ROADMAP.md` must get shorter over time. Take `ready` entries without asking;
+  an entry that `waits for user` waits, and its status line says for what (a
+  decision, a design or an approval; the header of `ROADMAP.md` defines both
+  states). An idea (a capability, a performance change, a design or a task)
+  goes in the report to the user in one line, and becomes an entry only when
+  the user says to record it. Every defect entry names its witness and the
+  strength of the witness.
 - Do small follow-up work without asking, and report it: a review that the
   process still requires, a ROADMAP entry for a limitation the user decided, and
   removal of the worktrees, references and temporary files you created. Commits,

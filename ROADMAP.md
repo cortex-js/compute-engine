@@ -45,15 +45,13 @@ proposed fix.>
     An entry of any other kind is `ready` only when the user approved it, and
     its status line records that approval with its date ("approved
     2026-11-01").
-  - `proposed`: an idea that the user has not approved. An agent never starts
-    it. The user approves it (it becomes `ready`, with the date) or rejects it
-    (the entry is deleted).
-  - `decision needed`: the work waits for a user decision. The entry states
-    the question, the options with their costs, and the option the agent
-    recommends. An agent starts the work only after the decision is recorded.
-  - `design needed`: the next step is a design document. An agent writes it
-    only when the user asks for it; the work starts when the user approves the
-    design.
+  - `waits for user (<reason>)`: the user acts before an agent starts. The
+    reason is `decision` (the entry states the question, the options with
+    their costs, and the option the agent recommends), `design` (the next step
+    is a design document that the user approves; an agent that judges the
+    change worth it writes the document and says so in its report), or
+    `approval` (an idea the user has not approved yet; the user makes the
+    entry `ready`, with the date, or deletes it).
 
   There is no `in progress`: the session that starts an item removes the entry
   (see "Started and finished work").
@@ -80,9 +78,10 @@ proposed fix.>
 - An agent adds an entry for a defect in older code that its task found and
   did not fix (`AGENTS.md`, "Fix every defect"), with the witness line, and
   for an item that the user asked to record. A defect that the task's change
-  introduces is fixed, not recorded. An idea for a capability, a performance change, a design or a task goes in
-  the agent's report to the user, and becomes a `proposed` entry only when the
-  user says to record it.
+  introduces is fixed, not recorded. An idea for a capability, a performance
+  change, a design or a task goes in the agent's report to the user, and
+  becomes an entry (`waits for user (approval)`) only when the user says to
+  record it.
 - Record a user decision with its date. Link the plan document, the GitHub issue
   or PR, and the Tycho ledger row when there is one.
 - Write what a person needs to do the work: a reproduction, the cause, the files
@@ -152,7 +151,7 @@ body with the type of the argument, or with `unknown`.
 
 ### CE-545. A call over an `unknown` operand and over the wide CE-502 form are typed by different rules
 
-**Status:** decision needed; types. Found 2026-10-27 while fixing Tycho row 468.
+**Status:** waits for user (decision); types. Found 2026-10-27 while fixing Tycho row 468.
 **Witness:** crafted; Needs an operand declared with the wide CE-502 form.
 
 A call over an operand typed `unknown` is typed with the wide form
@@ -173,7 +172,7 @@ two rules for a body that is not component-wise is right.
 
 ### CE-27. An access over `any` or `unknown` elements has no `missing` arm
 
-**Status:** design needed; design. User decision 2026-10-20: a design item, not
+**Status:** waits for user (design); design. User decision 2026-10-20: a design item, not
 a small fix.
 **Witness:** plausible; `First(W)` with `W: list<any> := []` typed `unknown`, value `Missing`.
 
@@ -211,7 +210,7 @@ operand's type are now one module, `library/held-operand-type.ts`
 
 ### CE-51. Make built-in collections conform to `Iterable` and `Indexable` protocols
 
-**Status:** design needed; design. Decision P8 and §7 item 6(h) of
+**Status:** waits for user (design); design. Decision P8 and §7 item 6(h) of
 `docs/TYPE_SYSTEM_ROADMAP.md`.
 **Witness:** none; Protocol design (decision P8 of TYPE_SYSTEM_ROADMAP).
 
@@ -279,7 +278,7 @@ that the double checks disappear.
 
 ### CE-58. A `Declare` statement at the top level, and `ce.declare()` in a pushed scope, install a writer that does not state `scope`
 
-**Status:** decision needed; defect, M.
+**Status:** waits for user (decision); defect, M.
 **Witness:** plausible; Top-level Epsil `let f: () -> number = writer` installs a writer without `scope`.
 
 A named definition that states no effects must not write outside itself: the
@@ -317,7 +316,7 @@ an Epsil `let` is one. If nothing is decided, (b) stays.
 
 ### CE-443. A pure function literal with nine or more nested literals is typed with effects `any`
 
-**Status:** design needed; types. Found 2026-10-24 while fixing CE-347.
+**Status:** waits for user (design); types. Found 2026-10-24 while fixing CE-347.
 **Witness:** crafted; Needs a pure literal nested 9 deep; answer `any` is the safe direction.
 
 The effects walker stops at a depth of 8 nested function literals
@@ -412,7 +411,7 @@ the handler is fixed.
 
 ### CE-682. A `Linspace` with an infinite endpoint: its reads disagree with each other
 
-**Status:** decision needed; defect. Found 2026-10-30 in the review of the
+**Status:** waits for user (decision); defect. Found 2026-10-30 in the review of the
 interval-js `Linspace` lowering.
 **Witness:** crafted; `Linspace(0, +∞, 3)` reads disagree; an infinite endpoint is a value nobody writes.
 
@@ -498,7 +497,7 @@ section 9 has the record).
 
 ### CE-71. Decide record-field omission, optional fields and a key-removal operation
 
-**Status:** design needed; design.
+**Status:** waits for user (design); design.
 **Witness:** none; Record-field omission design (Q5, Q10 of a plan).
 
 Decide how a record field is omitted, how an optional field is represented, and
@@ -521,7 +520,7 @@ consistent.)
 
 ### CE-74. The type of a lazy view does not say that an element can be `Nothing`
 
-**Status:** design needed; design. User decision 2026-10-20: a lazy view (`Map`,
+**Status:** waits for user (design); design. User decision 2026-10-20: a lazy view (`Map`,
 `Tabulate`, `Table`, `Scan`, `Iterate`) keeps a `Nothing` result in its own
 display, count, `.at()` and `.each()`; turning it into a list erases it.
 **Witness:** plausible; `Map(x ↦ If(x > 1, Nothing, x), [1, 2, 3])` typed without `nothing`; `Zip` loses elements.
@@ -672,7 +671,7 @@ Question: what does a binding of a block that has ended read?
 
 ### CE-739. An assignment, `Return`, `Break` or `Continue` inside a conditional whose condition is a collection has no defined meaning
 
-**Status:** design needed; design, medium. Filed 2026-11-01 from CE-722 (user
+**Status:** waits for user (design); design, medium. Filed 2026-11-01 from CE-722 (user
 decision 2026-11-01: the compiler declines this shape; the meaning in the
 interpreter is this entry).
 **Witness:** crafted; Needs a list condition with an action branch (`If(M[1], p ≔ 5)`, `M: list<any>`); compiler already declines.
@@ -702,7 +701,7 @@ interpreter's current results stand.
 
 ### CE-709. `Solve` with a float over a real domain lists only exact roots, and can claim no solution
 
-**Status:** decision needed; wrong value.
+**Status:** waits for user (decision); wrong value.
 **Witness:** crafted; Witnesses are floats nobody writes (`x = 10.0000000000001`, `x² = -1e-20`).
 
 The interpreter compares numbers within `engine.tolerance` (1e-10). Over a
@@ -746,7 +745,7 @@ removed in its own step, with a test.
 
 ### CE-657. A cache keeps a random draw or the value of an impure operator when the node does not look impure
 
-**Status:** design needed; wrong values; needs a design. Found 2026-10-30 by the reviews
+**Status:** waits for user (design); wrong values; needs a design. Found 2026-10-30 by the reviews
 of the store-guard work (evaluation-cache plan, step 1); the same on HEAD
 `d1b7d0838`. Taken out of step 1 by user decision 2026-10-30, after four
 attempted designs each gave a new defect.
@@ -797,7 +796,7 @@ the store guard. The cost limit is the paired benchmark of
 
 ### CE-649. An async host handler that evaluates the node containing it waits on itself
 
-**Status:** decision needed; defect (a hang), needs a design decision. Found 2026-10-30 by
+**Status:** waits for user (decision); defect (a hang), needs a design decision. Found 2026-10-30 by
 the review of the store-guard work (evaluation-cache plan, step 1); the same on
 HEAD `00869b80a`.
 **Witness:** crafted; Hang needs an async host handler that evaluates its own containing node.
@@ -911,7 +910,7 @@ the declarations of the symbols it reads.
 
 ### CE-534. A recursive `replace()` replaces a bound variable, the binder included
 
-**Status:** design needed; defect. Found 2026-10-27 while fixing `subs()` for
+**Status:** waits for user (design); defect. Found 2026-10-27 while fixing `subs()` for
 Tycho row 464 (CE-530).
 **Witness:** plausible; `replace({match: 'j', replace: 10}, {recursive: true})` rewrites a `Sum` index.
 
@@ -925,7 +924,7 @@ rewrite inside the body of a binder (`Sum(2k, …)` to `2·Sum(k, …)`).
 
 ### CE-91. Define value capture on assignment, mutable-object boundaries and view reads
 
-**Status:** design needed; design.
+**Status:** waits for user (design); design.
 **Witness:** none; Design of value capture and view reads (plan Q11); no reproduction in the entry.
 
 Define the ordinary capture of a value on assignment, the boundaries of mutable
@@ -935,7 +934,7 @@ the probes are in `docs/plans/2026-10-20-lazy-view-read-capture-probes.md`).
 
 ### CE-103. A result built with the library π serializes as `Pi` in a scope that rebinds `Pi`
 
-**Status:** decision needed; defect, S.
+**Status:** waits for user (decision); defect, S.
 **Witness:** crafted; Needs `Pi` declared locally plus a `.json` round trip inside that scope.
 
 A declaration of `Pi` is refused in the global scope only, so that a function
@@ -992,7 +991,7 @@ affected. If nothing is decided, the behavior stays and is not documented.
 
 ### CE-107. `isSame` is false between a boxed and a parsed `D` of the same function literal
 
-**Status:** decision needed; defect, small. Tycho row 394.
+**Status:** waits for user (decision); defect, small. Tycho row 394.
 **Witness:** corpus; Tycho row 394; `isSame` false, values right.
 
 `isSame` is `false` between `D(x ↦ f, x)` boxed from MathJSON and the same
@@ -1130,7 +1129,7 @@ collection through `runAsync`) already yield and honour an abort signal.
 
 ### CE-123. A validation phase before canonicalization, so that a probe does not declare
 
-**Status:** design needed; design.
+**Status:** waits for user (design); design.
 **Witness:** none; Validation phase idea, "do it when a third instance appears".
 
 Two computations must VALIDATE an expression (decide what it is or what it would
@@ -1169,7 +1168,7 @@ parses as `Conjugate` (`definitions-complex.ts`). Instrument on the Tycho side:
 
 ### CE-127. A subscript index that is an expression is not canonicalized
 
-**Status:** decision needed; defect. Related: CE-135.
+**Status:** waits for user (decision); defect. Related: CE-135.
 **Witness:** plausible; `A_{i+1}` keeps a non-canonical index.
 
 The `Subscript` canonical handler (`library/core.ts`) canonicalizes a
@@ -1402,7 +1401,7 @@ vanishing infinite product of a rational body (`divergentInfiniteProduct()`,
 
 ### CE-143. The rounding margin of a float contour or integrand does not bound the pole position
 
-**Status:** design needed; design.
+**Status:** waits for user (design); design.
 **Witness:** none; Soundness of the float margin for poles; no reproduction.
 
 A float radius, center, vertex or integrand coefficient is read as the exact
@@ -1466,7 +1465,7 @@ changes sign, and each piece is integrated with `Abs(u)` replaced by `±u` and
 
 ### CE-168. Wester problems with no CE API: periodic decimals, real QE, matrix functions, tests
 
-**Status:** design needed; capability. Decision 2026-07-05: do not alias
+**Status:** waits for user (design); capability. Decision 2026-07-05: do not alias
 Mathematica spellings.
 **Witness:** none; Wester problems with no CE API.
 
@@ -1689,7 +1688,7 @@ reproduction above is the record.
 
 ### CE-600. An engine computes at the precision of the engine built last, not its own
 
-**Status:** design needed; defect (needs a design). Found 2026-10-28 while measuring why
+**Status:** waits for user (design); defect (needs a design). Found 2026-10-28 while measuring why
 `test/compute-engine/item-395-log-gamma-barnes-g.test.ts` took 38 s.
 **Witness:** plausible; Two engines with different precisions in one host.
 
@@ -1724,7 +1723,7 @@ like `1/r^p` with `p` less than the dimension.
 
 ### CE-690. Rounding noise next to a singular bound stops the extrapolation of the corner shells
 
-**Status:** design needed; defect (accuracy); numerics. User decision
+**Status:** waits for user (design); defect (accuracy); numerics. User decision
 2026-10-30: record it as a design item. GitHub issue #494 (closed by the fix of
 the infinite error, commit `fb5469f19`).
 **Witness:** corpus; GitHub issue #494.
@@ -1761,7 +1760,7 @@ change of `f` between neighboring doubles at the nodes of a shell, compared with
 the smooth change), or compare the accurate shells after the inaccurate ones
 with the shells that the model of the first shells predicts.
 
-- **CE-690.1** (decision needed) A quadrature result that did not converge and
+- **CE-690.1** (waits for a user decision) A quadrature result that did not converge and
   is next to a singular bound (`singularCorner`) reports at least
   `|estimate|/√mcSamples` (`integrateRealPart()`, `library/calculus.ts`): for
   the integral above, `± 7.0e-4` (`2.22/√10⁷`), although the error of the
@@ -1774,7 +1773,7 @@ with the shells that the model of the first shells predicts.
 
 ### CE-179. Under `.N()`, some uses of a parameter in a user-function body read the rounded argument
 
-**Status:** design needed; wrong value. User decision 2026-10-18: only the last
+**Status:** waits for user (design); wrong value. User decision 2026-10-18: only the last
 statement of a body gets the numeric request (option (a)).
 **Witness:** crafted; Arguments such as `(25! − 1)/48` chosen next to a jump of `Floor`.
 
@@ -2161,7 +2160,7 @@ variable after the loop.
 
 ### CE-646. Compiled `Contains`/`Unique` over lists of lists decline in any program that holds a lazy collection
 
-**Status:** design needed; enhancement (needs a design). Recorded 2026-10-30 when PR #500
+**Status:** waits for user (design); enhancement (needs a design). Recorded 2026-10-30 when PR #500
 (issue #499) landed in `f2c053f1e`. Not a regression: before that commit every
 list-of-lists element was refused.
 **Witness:** corpus; Names PR #500 and issue #499.
@@ -2227,7 +2226,7 @@ declared, or gives the index a fresh name when a bound names it.
 
 ### CE-592. `compileFieldFunction()`: a user function that reads a parameter with an inferred integer type declines
 
-**Status:** design needed; defect (needs a design). Found 2026-10-28 in the review of
+**Status:** waits for user (design); defect (needs a design). Found 2026-10-28 in the review of
 CE-591.
 **Witness:** plausible; `a := 5; h(t) := t + a` makes `compileFieldFunction` decline with a remedy (declare `a`).
 
@@ -2275,7 +2274,7 @@ representation of points that differs from a row.
 
 ### CE-218. Compiled absence checks need a representation of `Nothing` distinct from `Missing`
 
-**Status:** design needed; capability. User decision 2026-10-20: keep refusing
+**Status:** waits for user (design); capability. User decision 2026-10-20: keep refusing
 omission-capable sources. Plan:
 `docs/plans/2026-10-20-bare-tuple-record-any.md`.
 **Witness:** corpus; Lifts refusals of `Nothing`-capable sources (Tycho 332).
@@ -2449,7 +2448,7 @@ lowering.
 
 ### CE-264. Clause sets that dispatch on `infinity`, `nan` or `non_finite_number` do not compile
 
-**Status:** design needed; capability.
+**Status:** waits for user (design); capability.
 **Witness:** crafted; `g(1/w - 1/w)` with an `infinity` clause; the set declines today.
 
 Compiled float arithmetic does not keep a pole. The interpreter's `~oo - ~oo` is
@@ -2722,7 +2721,7 @@ reproduction above is the record.
 
 ### CE-441. The LaTeX of a rest parameter or a destructuring parameter does not read back as that parameter
 
-**Status:** design needed; defect.
+**Status:** waits for user (design); defect.
 **Witness:** plausible; `((x,y)\mapsto xy)((3,4))` changes value through a LaTeX round trip.
 
 The `Function` serializer (`definitions-core.ts`) writes the parameter as a
@@ -2923,7 +2922,7 @@ shipped (contract in `docs/CHECKPOINT-MODEL.md`; tests include
 
 ### CE-312. Function declaration hoisting: run-time checks, cancellation and route differences
 
-**Status:** decision needed; defect. CE-312.2 needs a user decision. User
+**Status:** waits for user (decision); defect. CE-312.2 needs a user decision. User
 decision 2026-11-05 for CE-312.1: a function with a declared signature checks
 each argument against the declared parameter type at run time when the static
 type of the argument did not decide (the example below then gives
@@ -3123,7 +3122,7 @@ through the compiled route; with `jit = 'off'` it stays unevaluated, and
 
 ### CE-535. Canonical `rebind` derives the result type of a user function again after each `D` binder
 
-**Status:** design needed; performance, needs a design. Found by the Tycho document-open
+**Status:** waits for user (design); performance, needs a design. Found by the Tycho document-open
 measurement, 2026-10-27. Same cause as CE-531.
 **Witness:** corpus; User owns the cache-key design; Tycho document-open benchmark.
 
@@ -3342,7 +3341,7 @@ fit or a 2000-column plot takes under 10 ms and cannot gain. Tycho caps fits at
 
 ### CE-321. Each user-function call retires the inert evaluation memo, so a chain of calls copies each level
 
-**Status:** design needed; performance.
+**Status:** waits for user (design); performance.
 **Witness:** corpus; User owns the type-cache key design; Tycho reproduction script; "no document is blocked".
 
 The memo of an inert evaluation (`_memoizedLazyCollectionValue`,

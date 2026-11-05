@@ -113,15 +113,8 @@ recorded with its witness in the known-limitations list below or in
 `ROADMAP.md`.
 
 **Witness.** A reported difference names the program that shows it and the
-strength of that witness:
-
-- `corpus`: a Tycho document or ledger row, a GitHub issue, a benchmark, or
-  a program a host sent;
-- `plausible`: a program of one or two lines that a user would write, with
-  the inputs declared as a host declares them;
-- `crafted`: a program built to reach the case, where a type union, a
-  target and a construct are chosen together.
-
+strength of that witness, `corpus`, `plausible` or `crafted`, as the header
+of `ROADMAP.md` defines them.
 A `crafted` witness of an allowed difference is not a defect and is not
 recorded. A `crafted` witness of a wrong finite value or shape is one line
 in the known-limitations list below, not a `ROADMAP.md` entry: it is fixed,

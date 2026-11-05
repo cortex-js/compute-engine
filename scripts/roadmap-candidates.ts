@@ -45,10 +45,10 @@
  *                       document or a linked issue.
  *   --rejected          Also list each `ready` entry that is not a candidate,
  *                       with the reason.
- *   --decisions         List only the `decision needed` entries, newest
- *                       first, and the number of `design needed` and
- *                       `proposed` entries. The entries whose only witness
- *                       is `crafted` are listed in a separate group.
+ *   --decisions         List only the `waits for user (decision)` entries,
+ *                       newest first, and the number of entries that wait
+ *                       for a design or an approval. The entries whose only
+ *                       witness is `crafted` are listed in a separate group.
  *
  * Example:
  *   npx tsx scripts/roadmap-candidates.ts --batch 20 --json /tmp/queue.json
@@ -230,7 +230,7 @@ function pickBatch(ranked: Candidate[], size: number, includeFlagged: boolean): 
 // review the group at the end of its first step.
 function listDecisions(entries: Entry[]) {
   const waiting = entries
-    .filter((e) => /^decision needed\b/.test(e.status))
+    .filter((e) => /^waits for user \(decision\)/.test(e.status))
     .sort((a, b) => refNumber(b.id) - refNumber(a.id));
   const isCrafted = (e: Entry) => /^crafted\b/.test(e.witness ?? '');
   const toAsk = waiting.filter((e) => !isCrafted(e));
@@ -244,7 +244,9 @@ function listDecisions(entries: Entry[]) {
     );
     for (const e of crafted) console.log(`  ${e.id.padEnd(8)} [${e.area}] ${e.title}`);
   }
-  console.log(`\nAlso: ${count('design needed')} design needed, ${count('proposed')} proposed.`);
+  console.log(
+    `\nAlso: ${count('waits for user (design)')} wait for a design, ${count('waits for user (approval)')} wait for an approval.`
+  );
 }
 
 function main() {
