@@ -343,34 +343,6 @@ reproduction above is the record.
 
 ## Collections, absence and broadcasting
 
-### CE-812. `Flatten` opens a tuple element or keeps it, according to the form of the call
-
-**Status:** ready; wrong value, S.
-**Witness:** plausible; `Flatten([(1, 2), (3, 4)])` gives `[(1, 2), (3, 4)]`, but `Flatten([(1, 2), (3, 4)], 1)` gives `[1, 2, 3, 4]` and `Flatten([(1, 2), (3, 4, 5)])` gives `[1, 2, 3, 4, 5]`; each should keep the tuples.
-
-The reference page of `Flatten` says that only elements with the head of the
-collection are flattened, so a tuple in a list stays whole. The tensor branch
-of the evaluate handler of `Flatten` (`linear-algebra.ts`) does that for a list
-of tuples of one shape. `flattenToDepth()` does not: it descends into every
-finite indexed collection except a string, and a tuple is one. The fix is to
-make `flattenToDepth()` keep a tuple element. Then `FLATTEN_LEAF_TYPE` can name
-`tuple`, so that `Flatten` of a list of points is typed
-`list<tuple<integer, integer>>` and not `list`. The JavaScript `Flatten` still
-declines for a tuple element (`flattenMayOpenKeptValue()`), because
-`Array.prototype.flat()` opens it.
-
-### CE-813. `N` is typed as its operand, but the value of a rational is a float
-
-**Status:** ready; defect, S.
-**Witness:** plausible; `N(1/3)` is typed `rational<0.33..0.34>`, and its value `0.333…` is typed `real<0.33..0.34>`, which does not match it; `Map(k ↦ N(k / 3), [1, 2])` is typed `vector<rational^2>` and holds floats. Each type should be a real type.
-
-The `type` handler of `N` (`core.ts`) answers the type of its operand, and
-`bareMappingElementTypeD()` (`collections.ts`) looks through an `N` or
-`NumericApproximation` wrapper of a function body for the same reason. The fix
-is a rational member of the operand type that becomes `real`. Then the
-`Tabulate` type handler no longer needs its test for a rational that is not an
-integer.
-
 ### CE-797. An implicitly compiled Map reuses a captured parameter from an earlier call
 
 **Status:** ready; wrong value.

@@ -1693,7 +1693,9 @@ function lnSign(x: Expression): Sign | undefined {
 
 /**
  * Whether the operand is a FLOAT number literal whose type claims the
- * `rational` tier: an integer-valued float such as `2.0` or `-1.0`. Such a
+ * `rational` tier, or a direct application of `N` whose type claims it
+ * (`1/3 - N(5)` applies `Negate` first and is not seen): an integer-valued
+ * float such as `2.0` or `-1.0`. Such a
  * literal is typed by its value (`2`), which is an `integer`, so the type
  * alone cannot tell it from the exact `2`. The structural view can: it holds
  * exact reduced terms only for an exact literal.
@@ -1706,6 +1708,13 @@ function lnSign(x: Expression): Sign | undefined {
  */
 function isInexactRationalLiteral(d: OperandDescriptor): boolean {
   const structure = d.structureOf?.();
+  // A numeric evaluation gives a float too: `N(5)` is typed `integer`, and
+  // `N(5) / 3` evaluates to the float `1.666…`.
+  if (
+    structure?.kind === 'application' &&
+    (structure.head === 'N' || structure.head === 'NumericApproximation')
+  )
+    return factsOf(d.type).rational;
   return (
     structure?.kind === 'number' &&
     structure.rational === undefined &&

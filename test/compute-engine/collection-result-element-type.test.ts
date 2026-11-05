@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
+import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 //
 // A collection operator that keeps the elements of its operand as they are
@@ -37,12 +38,13 @@ describe('FLATTEN', () => {
     [['Flatten', 'lll', 0], 'list<list<list<integer>>>'],
     // A depth that is not a literal does not settle the leaves.
     [['Flatten', 'lll', 'n'], 'list'],
-    // A tuple element settles no element type: a list of tuples of one shape
-    // keeps them, and a depth or a list of different shapes opens them.
-    [['Flatten', 'lt'], 'list'],
-    [['Flatten', 'lt', 1], 'list'],
-    [['Flatten', ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]], 'list'],
-    // At depth 0 a tuple element is not reached, so it stays with its type.
+    // A tuple element is kept whole at every depth, with its type.
+    [['Flatten', 'lt'], 'list<tuple<integer, integer>>'],
+    [['Flatten', 'lt', 1], 'list<tuple<integer, integer>>'],
+    [
+      ['Flatten', ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]],
+      'list<tuple<integer, integer>>',
+    ],
     [['Flatten', 'lt', 0], 'list<tuple<integer, integer>>'],
     [['Flatten', 'llt', 1], 'list<tuple<integer, integer>>'],
     // A number operand is wrapped in a list.
@@ -80,6 +82,37 @@ describe('FLATTEN', () => {
     const expr = ce.box(['Flatten', operand]);
     expect(expr.type.toString()).toBe('list<integer>');
     expect(expr.evaluate().operator).toBe('Flatten');
+  });
+
+  // A tuple element is kept whole, whatever the form of the call. The tensor
+  // branch of the evaluate handler and `flattenToDepth()` gave different
+  // results before.
+  test.each([
+    [['List', ['Tuple', 1, 2], ['Tuple', 3, 4]], undefined, '[(1, 2),(3, 4)]'],
+    [['List', ['Tuple', 1, 2], ['Tuple', 3, 4]], 1, '[(1, 2),(3, 4)]'],
+    [['List', ['Tuple', 1, 2], ['Tuple', 3, 4, 5]], undefined, '[(1, 2),(3, 4, 5)]'],
+    [['List', ['Tuple', 1, 2], ['List', 3]], undefined, '[(1, 2),3]'],
+    [['List', ['Pair', 1, 2], ['List', ['Tuple', 3, 4]]], undefined, '[(1, 2),(3, 4)]'],
+    // A tuple OPERAND is opened, but its elements follow the same rule.
+    [['Tuple', ['List', 1, 2], 3], undefined, '[1,2,3]'],
+    [['Tuple', ['Tuple', 1, 2], 3], undefined, '[(1, 2),3]'],
+  ])('Flatten(%j, %s) is %s', (operand, depth, value) => {
+    const json = depth === undefined ? ['Flatten', operand] : ['Flatten', operand, depth];
+    const expr = ce.box(json as any);
+    const result = expr.evaluate();
+    expect(result.toString()).toBe(value);
+    expect(result.type.matches(expr.type)).toBe(true);
+  });
+
+  // The Python `Zip` makes its rows with `list()`, and the Python `Flatten`
+  // opens every list, so it declines as the JavaScript `Flatten` does.
+  test('the Python `Flatten` declines when a tuple can be reached', () => {
+    expect(() =>
+      new PythonTarget().compile(ce.box(['Flatten', ['Zip', 'xs', 'xs']]))
+    ).toThrow(/Flatten/);
+    expect(new PythonTarget().compile(ce.box(['Flatten', 'll'])).success).toBe(
+      true
+    );
   });
 
   test('`Max` of two elements of a flattened list compiles (issue #512)', () => {
@@ -138,9 +171,10 @@ describe('OTHER OPERATORS KEEP THE ELEMENT TYPE', () => {
     [['Iterate', 'g', 1], 'list<integer>'],
     [['Reshape', 'xs', ['Tuple', 2, 2]], 'matrix<integer^(2x2)>'],
     [['Tabulate', ['Function', ['Multiply', 2, 'k'], 'k'], 5], 'vector<integer^5>'],
-    // `N` is typed as its operand, but its values are floats: the result type
-    // of the function literal stays.
-    [['Tabulate', ['Function', ['N', ['Divide', 'k', 3]], 'k'], 3], 'vector<3>'],
+    [
+      ['Tabulate', ['Function', ['N', ['Divide', 'k', 3]], 'k'], 3],
+      'vector<real^3>',
+    ],
     // A string source makes groups that are strings.
     [['Chunk', { str: 'abcd' }, 2], 'list<string>'],
   ])('%j is %s', (json, type) => {

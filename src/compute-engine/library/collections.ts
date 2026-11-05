@@ -334,6 +334,7 @@ import { RING_CONSTANTS } from '../latex-syntax/utils.js';
 import {
   adjoinType as adjoinTypeD,
   bigOpResultType,
+  numericApproximationType,
   operandLiteralValue as descriptorLiteralValue,
   storedComponentTypeD,
 } from './type-handlers.js';
@@ -4513,7 +4514,8 @@ function structureMentionsParameter(
  * descriptor — handed to `derive`. Only ONE operator application is handled,
  * looking through a one-statement `Block`, the `NumericApproximation(…)` wrap
  * the `.N()` route adds, and a user-written `N(…)` (the type of a numeric
- * evaluation is the type of its operand). Nothing is declared, canonicalized or evaluated, so no memo is
+ * evaluation comes from the type of its operand:
+ * `numericApproximationType()`). Nothing is declared, canonicalized or evaluated, so no memo is
  * needed: the whole derivation is type algebra over descriptors the call
  * site already built.
  *
@@ -4546,9 +4548,11 @@ function bareMappingElementTypeD(
   let bodyStructure: OperandStructure | undefined = literal.body;
   bodyStructure = lookThroughWrapper(bodyStructure, 'Block');
   if (bodyStructure === undefined) return undefined;
+  const unwrapped = bodyStructure;
   bodyStructure = lookThroughWrapper(bodyStructure, 'NumericApproximation');
   if (bodyStructure === undefined) return undefined;
   bodyStructure = lookThroughWrapper(bodyStructure, 'N');
+  const isNumericEvaluation = bodyStructure !== unwrapped;
   const body = applicationOfStructure(bodyStructure);
   if (body === undefined) return undefined;
 
@@ -4595,6 +4599,12 @@ function bareMappingElementTypeD(
     const def = engine.lookupDefinition(app.head)?.operator;
     if (app.callee === undefined && (def === undefined || def.scoped))
       return undefined;
+    // A numeric evaluation inside the body: its derived type stands for it
+    // below as a symbol, and the operator that reads it then does not see
+    // that it is a float (`rationalTierOf()`), so `k ↦ N(k) / 3` would be
+    // `rational`. The one around the whole body is handled by the caller.
+    if (app.head === 'N' || app.head === 'NumericApproximation')
+      return undefined;
     const args: OperandDescriptor[] = [];
     for (const [i, arg] of app.children.entries()) {
       const s = arg.structureOf?.();
@@ -4627,7 +4637,9 @@ function bareMappingElementTypeD(
   const t = deriveApplication(body);
   if (!referenced) return undefined;
   if (keepError && bodyRefused) return 'error';
-  return t;
+  return t !== undefined && isNumericEvaluation
+    ? numericApproximationType(t)
+    : t;
 }
 
 /**
@@ -20306,8 +20318,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // type: `k ↦ 2k` is typed `(unknown) -> number`, but its call on an
         // integer is an `integer`. It replaces the result type when that is
         // not known, or when it is a subtype of it. Not for a rational that is
-        // not an integer: `N` is typed as its operand, so the call of
-        // `k ↦ N(k / 3)` is typed `rational`, but its values are floats.
+        // not an integer: the derivation does not see a float inside the body,
+        // so `k ↦ (k + 2.0) / 3` and `k ↦ N(k) / 3` are typed `rational`, but
+        // their values are floats.
         if (
           inferred !== undefined &&
           inferred !== 'unknown' &&

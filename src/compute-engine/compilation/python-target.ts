@@ -1,3 +1,4 @@
+import { flattenMayOpenKeptValue } from '../library/linear-algebra.js';
 import type { Expression, RoundingTies } from '../global-types.js';
 import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 import { callArgumentMapRank } from './compile-user-calls.js';
@@ -7113,6 +7114,15 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args[1] != null)
       throw new Error(
         `Could not compile \`Flatten\`: an explicit depth is not supported on the Python target.`
+      );
+    // The lowering opens every Python list, and a tuple can be a Python list:
+    // `Zip` makes its rows with `list()`. The interpreter keeps a tuple, so
+    // decline unless the operand type shows that no tuple or set is reached.
+    if (args[0] != null && flattenMayOpenKeptValue(args[0].type.type, Infinity))
+      throw new Error(
+        'Could not compile `Flatten`: an element of the operand can be a tuple or a set, ' +
+          'which the interpreter keeps as one element and compiled code can open, ' +
+          'or the type of the operand does not show which elements are lists.'
       );
     // Recursive self-passing lambda: flattens ragged (non-rectangular)
     // nested lists, which np.asarray(...).ravel() rejects.

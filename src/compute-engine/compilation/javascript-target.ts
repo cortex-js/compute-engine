@@ -7835,7 +7835,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // levels when a depth operand is given.
   Flatten: (args, compile) => {
     // `flat()` opens every nested array, and compiled code holds a tuple as an
-    // array. The interpreter keeps a set, and can keep a tuple
+    // array. The interpreter keeps a set and a tuple
     // (`Flatten([(1, 2), (3, 4)])` is `[(1, 2), (3, 4)]`). So decline unless
     // the operand type shows that `flat()` reaches no tuple or set. A depth
     // that is not a literal is checked as the full depth, the most `flat()`
@@ -7847,7 +7847,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     )
       throw new Error(
         'Could not compile `Flatten`: an element of the operand can be a tuple or a set, ' +
-          'which the interpreter can keep as one element and compiled code can open, ' +
+          'which the interpreter keeps as one element and compiled code can open, ' +
           'or the type of the operand does not show which elements are lists.'
       );
     const coll = collArg('Flatten', args[0], compile);

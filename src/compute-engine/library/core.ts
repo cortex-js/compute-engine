@@ -117,6 +117,7 @@ import {
 import { isRingConstant } from './ring-constructions.js';
 import { RING_CONSTANTS } from '../latex-syntax/utils.js';
 import {
+  numericApproximationType,
   operandLiteralValue,
   quotientRingType,
   storedComponentTypeD,
@@ -160,6 +161,7 @@ import {
   containsSignatureArm,
   isGroupedTypeText,
   resolveTypeAlias,
+  stripNumericRanges,
   broadcastResultType,
   nestedBroadcastResultType,
   descendIntoConstructor,
@@ -10039,8 +10041,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature: '(any, (integer | list<number>)?) -> unknown',
       examples: ['N(Pi)', 'N(1/3, 4)', 'N(Exp(100), [PositiveInfinity, 20])'],
-      type: ([x], context) =>
-        BoxedType.forResult(x.type, context.engine._typeResolver),
+      // A precision goal rounds the value, so the value can leave the range of
+      // the operand: `N(1/3, 1)` is `0.3`, outside `0.33..0.34`.
+      type: ([x, goal], context) =>
+        BoxedType.forResult(
+          numericApproximationType(
+            goal === undefined ? x.type : stripNumericRanges(x.type)
+          ),
+          context.engine._typeResolver
+        ),
       canonical: (ops, { engine: ce }) => {
         // Accept one or two arguments: N(expr) or N(expr, precision).
         if (ops.length === 0) return ce._fn('N', checkArity(ce, ops, 1));
@@ -10118,7 +10127,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature: '(any) -> unknown',
       type: ([x], context) =>
-        BoxedType.forResult(x.type, context.engine._typeResolver),
+        BoxedType.forResult(
+          numericApproximationType(x.type),
+          context.engine._typeResolver
+        ),
       canonical: (ops, { engine: ce }) => {
         if (ops.length !== 1)
           return ce._fn('NumericApproximation', checkArity(ce, ops, 1));

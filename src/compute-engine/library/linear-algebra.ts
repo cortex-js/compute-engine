@@ -9184,17 +9184,11 @@ function buildNestedList(
 
 /**
  * The types of the values that `Flatten` keeps as one element at every depth:
- * a number, a boolean, a string, a set, a dictionary, a record, a function,
- * and the absence markers `Missing` and `Nothing`.
- *
- * A tuple is not in it. A list of tuples with one shape keeps them
- * (`Flatten([(1, 2), (3, 4)])`, the tensor branch of the evaluate handler),
- * but `flattenToDepth()` opens a tuple (`Flatten([(1, 2), (3, 4)], 1)` is
- * `[1, 2, 3, 4]`, and so is `Flatten([(1, 2), (3, 4, 5)])` for the elements
- * of a list of different shapes). So a tuple element settles no element type.
+ * a number, a boolean, a string, a tuple, a set, a dictionary, a record, a
+ * function, and the absence markers `Missing` and `Nothing`.
  */
 const FLATTEN_LEAF_TYPE = parseType(
-  'number | boolean | string | set | dictionary | record | function | missing | nothing'
+  'number | boolean | string | tuple | set | dictionary | record | function | missing | nothing'
 );
 
 /**
@@ -9206,12 +9200,13 @@ const FLATTEN_LEAF_TYPE = parseType(
  * The type gives the leaves only when each of its union members is either a
  * list type (`isSubtype(t, 'list')`: the leaves of its elements, one level
  * deeper) or a member of `FLATTEN_LEAF_TYPE` (that member itself). Any other
- * member gives `undefined`: a tuple, and a member that can be a list or
- * something else, such as `any`, `unknown`, `value`, `expression` or
+ * member gives `undefined`: a member that can be a list or something else,
+ * such as `any`, `unknown`, `value`, `expression` or
  * `indexed_collection<integer>`.
  *
  * Examples: `list<integer>` with depth `Infinity` gives `integer`;
  * `list<list<integer>>` with depth 1 gives `list<integer>`;
+ * `tuple<integer, integer>` gives itself;
  * `integer | list<real>` gives `integer | real`.
  *
  * `levels` limits the recursion: an element type of `tensor<T>` is
@@ -9248,9 +9243,9 @@ function flattenLeafType(
  * The element type of `Flatten(xs, depth)` for an operand `xs` of type
  * `type`, or `undefined` when the type does not settle it. The evaluate
  * handler of `Flatten` makes a one-element list of a number or a string
- * operand, and walks the elements of a list or a tuple operand. Any other
- * operand (a set, a dictionary) stays unevaluated, so no element type is
- * given for it.
+ * operand, and walks the elements of a list or a tuple operand (a tuple
+ * OPERAND is opened, and a tuple ELEMENT is kept). Any other operand (a set, a
+ * dictionary) stays unevaluated, so no element type is given for it.
  */
 function flattenResultElementType(
   type: Readonly<Type>,
@@ -9281,8 +9276,8 @@ function flattenResultElementType(
  * The types of the values that `Flatten` keeps as one element and that
  * compiled JavaScript does not hold as an array: a compiled
  * `Array.prototype.flat()` keeps them as one element too. A tuple is not in
- * it: it is an array in compiled code, and the interpreter can keep it
- * (`FLATTEN_LEAF_TYPE`). A set is not in it either: the `Set` operator has no
+ * it: it is an array in compiled code, and `flat()` opens it. A set is not in
+ * it either: the `Set` operator has no
  * JavaScript lowering, so no form of a set in compiled code is known to stay
  * whole under `flat()`.
  */
@@ -9291,12 +9286,12 @@ const FLATTEN_NON_ARRAY_LEAF_TYPE = parseType(
 );
 
 /**
- * True when a compiled JavaScript `Flatten(xs, depth)`, which is
- * `xs.flat(depth)`, can open a value that the interpreter keeps as one
- * element, for an operand `xs` of type `type`. `flat()` opens every nested
- * array, and compiled code holds a tuple as an array. The interpreter keeps a
- * set, and can keep a tuple: `Flatten([(1, 2), (3, 4)])` is
- * `[(1, 2), (3, 4)]`, where `flat()` would give `[1, 2, 3, 4]`.
+ * True when a compiled `Flatten(xs, depth)`, which opens every nested array in
+ * JavaScript (`xs.flat(depth)`) and every nested list in Python, can open a
+ * value that the interpreter keeps as one element, for an operand `xs` of type
+ * `type`. Compiled code can hold a tuple as an array or a list. The interpreter
+ * keeps a set and a tuple: `Flatten([(1, 2), (3, 4)])` is `[(1, 2), (3, 4)]`,
+ * where `flat()` would give `[1, 2, 3, 4]`.
  *
  * The answer is `false` only when the type shows that every element reached
  * at a level where `flat()` still descends is a list or a member of
@@ -9356,7 +9351,9 @@ function typeHasListMember(type: Readonly<Type>): boolean {
 /**
  * Return the elements of the collection `xs` flattened up to `depth` nesting
  * levels (Wolfram `Flatten[list, n]`). At `depth` 0 the elements are returned
- * as-is; each level splices the contents of collection-valued elements.
+ * as-is; each level splices the contents of collection-valued elements. A
+ * tuple element and a string element are kept whole at every depth. Every other
+ * finite indexed collection is spliced, whatever its head.
  *
  * Return `undefined` when an element to splice is a finite indexed
  * collection whose elements cannot be computed (`Linspace(a, 1, 3)` with a
@@ -9376,7 +9373,10 @@ function flattenToDepth(
     // indexed collection of its characters, but `Flatten(["ab", "cd"])` is
     // `["ab", "cd"]`, not `["a", "b", "c", "d"]` — the choice users expect
     // (`docs/STRING_ROADMAP.md`, design constraint 6).
-    if (depth >= 1 && isFiniteIndexedCollection(e) && !isString(e)) {
+    //
+    // A value of a tuple type is a leaf too: a point stays a point.
+    if (depth >= 1 && isSubtype(e.type.type, 'tuple')) result.push(e);
+    else if (depth >= 1 && isFiniteIndexedCollection(e) && !isString(e)) {
       const items = flattenToDepth(e, depth - 1);
       if (items === undefined) return undefined;
       result.push(...items);

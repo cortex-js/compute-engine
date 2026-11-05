@@ -249,6 +249,66 @@ function valueOfType(t: Type): number | undefined {
 }
 
 /**
+ * The type of `N(x)` and `.N()` for an operand `x` of type `type`: each
+ * rational member becomes a real, with its range, also inside a list, a set,
+ * a tuple, a dictionary or a record. A numeric evaluation gives a float for an exact rational, and a
+ * float is not a rational (`0.5 <: rational` is false, `docs/TYPE-SYSTEM.md`):
+ * `N(1/3)` is `real<0.33..0.34>`, and `N([1/3, 2])` is `vector<real^2>`.
+ *
+ * An integer member stays an integer: `N(5)` gives a float with the value 5,
+ * whose type is the value `5`. Any other member is kept. A symbol with no value
+ * stays a symbol under `N`, and a rational is a real, so the type holds it.
+ * A rational inside an intersection (`rational & !0`) is kept too.
+ */
+export function numericApproximationType(type: Type, depth = 0): Type {
+  // A transparent alias that refers to itself has no end: past this depth
+  // the type is kept, and a rational in it stays rational.
+  if (depth > 16) return type;
+  const t = resolveTypeAlias(type);
+  const recur = (x: Type): Type => numericApproximationType(x, depth + 1);
+  if (t === 'rational') return 'real';
+  if (typeof t === 'string') return type;
+  switch (t.kind) {
+    case 'numeric':
+      return t.type === 'rational' ? { ...t, type: 'real' } : type;
+    case 'union': {
+      const types = t.types.map(recur);
+      return types.every((x, i) => x === t.types[i])
+        ? type
+        : reduceType({ kind: 'union', types });
+    }
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable': {
+      const elements = recur(t.elements);
+      return elements === t.elements ? type : ({ ...t, elements } as Type);
+    }
+    case 'tuple': {
+      const elements = t.elements.map((e) => ({ ...e, type: recur(e.type) }));
+      return elements.every((e, i) => e.type === t.elements[i].type)
+        ? type
+        : { ...t, elements };
+    }
+    case 'dictionary': {
+      const values = recur(t.values);
+      return values === t.values ? type : { ...t, values };
+    }
+    case 'record': {
+      const elements = Object.fromEntries(
+        Object.entries(t.elements).map(([k, v]) => [k, recur(v)])
+      );
+      return Object.keys(elements).every((k) => elements[k] === t.elements[k])
+        ? type
+        : { ...t, elements };
+    }
+    default:
+      return type;
+  }
+}
+
+/**
  * The machine value carried by a number literal's handler-visible type: a
  * value type's value, or a singleton range's bound. `undefined` for
  * symbols, compound expressions, and literals whose exact value no machine

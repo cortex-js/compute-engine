@@ -2,6 +2,21 @@
 
 ### Resolved Issues
 
+- **`Flatten` keeps a tuple element in every form of the call.** A list of
+  tuples of one shape kept them, but other forms opened them:
+  `Flatten([(1, 2), (3, 4)], 1)` was `[1, 2, 3, 4]`, and
+  `Flatten([(1, 2), (3, 4, 5)])` was `[1, 2, 3, 4, 5]`. Now each keeps the
+  tuples, as the reference page says, so a point stays a point:
+  `Flatten([(1, 2), (3, 4)], 1)` is `[(1, 2), (3, 4)]`. A tuple as the operand
+  is still opened: `Flatten(([1, 2], 3))` is `[1, 2, 3]`.
+- **The numeric evaluation of a rational is typed as a real.** `N(1/3)` was
+  typed `rational<0.33..0.34>`, and its value is a float, which is not a
+  rational. Now it is typed `real<0.33..0.34>`. `N([1/3, 2])` is a
+  `vector<real^2>`, and `Map(k ↦ N(k / 3), [1, 2])` is a `vector<real^2>`. An
+  integer stays an integer: `N(5)` is typed `integer`, and `N(5) / 3` is typed
+  `real`. With a precision, the type has no range, because the value is
+  rounded: `N(1/3, 1)` is `0.3`, and it is typed `real`. `Typed(N(1/3),
+  'rational')` still passes.
 - **[#512](https://github.com/cortex-js/compute-engine/issues/512) Collection
   operators that keep the elements of their operand give the element type of
   the operand.** `Flatten` of a `list<list<integer>>` was typed `list`, so an
@@ -9,7 +24,8 @@
   j))` did not compile. Now `Flatten(xs)` is a `list<integer>`, and the `Max`
   compiles. With a depth, the type has the levels that stay:
   `Flatten(xs, 1)` of a `list<list<list<integer>>>` is a
-  `list<list<integer>>`. A list with a tuple element stays typed `list`. These
+  `list<list<integer>>`. A tuple element keeps its type:
+  `Flatten(xs)` of a list of points is a `list<tuple<integer, integer>>`. These
   operators also keep the element type now:
   `Chunk` (`list<list<integer>>`, was `list<list>`), `GroupBy`
   (`dictionary<list<integer>>`, was `dictionary<list>`), `Cycle`, `Union`,
