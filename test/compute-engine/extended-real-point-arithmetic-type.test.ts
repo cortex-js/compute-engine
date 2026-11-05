@@ -157,3 +157,89 @@ describe('EXTENDED REAL POINT LIST ARITHMETIC', () => {
     }
   });
 });
+
+/**
+ * A value declared as a point or a list of points
+ * (`list<tuple<E, E>> | tuple<E, E>`) is added and scaled arm by arm, and each
+ * arm has the types of the sections above: `2U`, `U + U`, `(6, 0) + U`, `-U`
+ * and `U/2` all have E components, never `infinity`, which admits the
+ * complex infinity. The 3-D union is the same.
+ */
+describe('EXTENDED REAL POINT-OR-POINT-LIST UNION ARITHMETIC', () => {
+  for (const dim of [2, 3]) {
+    const point = Array(dim).fill(E).join(', ');
+    const declared = `list<tuple<${point}>> | tuple<${point}>`;
+    const UNION = `list<tuple<${Array(dim).fill(ET).join(', ')}>> | tuple<${Array(dim).fill(ET).join(', ')}>`;
+    const literal = `(${[6, 0, 1].slice(0, dim).join(',')})`;
+    function unionEngine(): ComputeEngine {
+      const ce = new ComputeEngine();
+      ce.declare('a', E);
+      ce.declare('U', declared);
+      ce.declare('V', declared);
+      ce.declare('W', declared);
+      return ce;
+    }
+    const ce = unionEngine();
+    test.each<string>([
+      '2U',
+      'U\\cdot 2',
+      'aU',
+      '-U',
+      'U/2',
+      'U+U',
+      'U+V',
+      'U-V',
+      `${literal}+U`,
+      `U-${literal}`,
+    ])(`${dim}-D: %s`, (latex) => {
+      expect(ce.parse(latex).type.toString()).toBe(UNION);
+    });
+
+    test(`${dim}-D: the result can be assigned to a symbol of the union type`, () => {
+      const ce = unionEngine();
+      for (const latex of ['2U', 'U+V', `${literal}+U`, 'U/2'])
+        expect(() => ce.assign('W', ce.parse(latex))).not.toThrow();
+    });
+
+    test(`${dim}-D: the values have the static type`, () => {
+      const ce = unionEngine();
+      const p = ['PositiveInfinity', 'NaN', 'NegativeInfinity'].slice(0, dim);
+      const q = [1, 'NegativeInfinity', 0.5].slice(0, dim);
+      for (const [u, v] of [
+        [['Tuple', ...p], ['Tuple', ...q]],
+        [['List', ['Tuple', ...p], ['Tuple', ...q]], ['Tuple', ...q]],
+        [['Tuple', ...q], ['List', ['Tuple', ...p], ['Tuple', ...q]]],
+        [
+          ['List', ['Tuple', ...p]],
+          ['List', ['Tuple', ...q]],
+        ],
+      ]) {
+        ce.assign('U', ce.box(u as any));
+        ce.assign('V', ce.box(v as any));
+        for (const latex of ['2U', 'U+V', 'U-V', `${literal}+U`]) {
+          const e = ce.parse(latex);
+          const value = e.evaluate();
+          expect(value.type.matches(e.type)).toBe(true);
+        }
+      }
+    });
+  }
+});
+
+/**
+ * Two lists of points whose components are themselves points are added
+ * point by point, and every imaginary component is closed at each depth:
+ * `[((i, i), 1)] + [((-i, -i), 2)]` is `[((0, 0), 3)]`, which is real.
+ */
+describe('NESTED POINT LIST SUM', () => {
+  test('an imaginary component of a nested point is complex', () => {
+    const ce = new ComputeEngine();
+    ce.declare('A', 'list<tuple<tuple<imaginary, imaginary>, integer>>');
+    ce.declare('B', 'list<tuple<tuple<imaginary, imaginary>, integer>>');
+    const e = ce.parse('A+B');
+    expect(e.type.toString()).not.toContain('imaginary');
+    ce.assign('A', ce.box(['List', ['Tuple', ['Tuple', 'ImaginaryUnit', 'ImaginaryUnit'], 1]]));
+    ce.assign('B', ce.box(['List', ['Tuple', ['Tuple', ['Negate', 'ImaginaryUnit'], ['Negate', 'ImaginaryUnit']], 2]]));
+    expect(e.evaluate().type.matches(e.type)).toBe(true);
+  });
+});

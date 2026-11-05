@@ -3934,6 +3934,81 @@ function pointNestOf(t0: Type, seen?: AliasDescent): PointNest | undefined {
 }
 
 /**
+ * The arms of a type that is a union of points and lists of points
+ * (`list<tuple<E, E>> | tuple<E, E>`, the type a host gives a value that is a
+ * point or a list of points), or `undefined` for any other type. Every arm
+ * must be a tuple or a nest of points (`pointNestOf`).
+ */
+function pointOrPointListArms(t0: Type): Type[] | undefined {
+  const t = resolveTypeAlias(t0);
+  if (typeof t === 'string' || t.kind !== 'union') return undefined;
+  const arms = t.types.map((arm) => resolveTypeAlias(arm));
+  const ok = arms.every(
+    (arm) =>
+      (typeof arm === 'object' && arm.kind === 'tuple') ||
+      pointNestOf(arm) !== undefined
+  );
+  return ok ? arms : undefined;
+}
+
+/** The largest number of arm combinations that
+ * `armwisePointUnionType` types one by one. */
+const MAX_POINT_UNION_COMBINATIONS = 16;
+
+/**
+ * The type of a sum or a product with an operand that is a union of points
+ * and lists of points (`pointOrPointListArms`), typed arm by arm: `typeOf`
+ * is called for each combination of the arms of such operands, with every
+ * other operand as it is, and the answers are joined as a union.
+ *
+ * The rules for one point and for one list of points keep the components of
+ * the operands when they are on the extended real line
+ * (`real | signed_infinity | nan`). The join of the whole union widens such
+ * a component to `infinity | nan | real`, and `infinity` admits the complex
+ * infinity, which no sum or product of such components has: with
+ * `P: list<tuple<E, E>> | tuple<E, E>` for that `E`, the arm-by-arm typing
+ * makes `2P`, `P + P` and `(6, 0) + P` of the type of `P`, as `-P` and `P/2`
+ * are.
+ *
+ * `undefined` when no operand is such a union, when there are more than
+ * `MAX_POINT_UNION_COMBINATIONS` combinations, or when `typeOf` gives no
+ * type, `error` or `never` for a combination: the caller then types the
+ * operation as before, with the join of the whole union. That type is wider
+ * but still holds every value: with a union of two arms, a sum of five
+ * such terms (32 combinations) has `infinity | nan | real` components.
+ */
+function armwisePointUnionType(
+  ops: ReadonlyArray<OperandDescriptor>,
+  typeOf: (ops: ReadonlyArray<OperandDescriptor>) => Type | undefined
+): Type | undefined {
+  const armsPerOperand = ops.map((x) => pointOrPointListArms(x.type));
+  if (armsPerOperand.every((arms) => arms === undefined)) return undefined;
+  let combinations = 1;
+  for (const arms of armsPerOperand) combinations *= arms?.length ?? 1;
+  if (combinations > MAX_POINT_UNION_COMBINATIONS) return undefined;
+  const results: Type[] = [];
+  const chosen: OperandDescriptor[] = [...ops];
+  const visit = (i: number): boolean => {
+    if (i === ops.length) {
+      const r = typeOf(chosen);
+      if (r === undefined || r === 'error' || r === 'never') return false;
+      results.push(r);
+      return true;
+    }
+    const arms = armsPerOperand[i];
+    if (arms === undefined) return visit(i + 1);
+    for (const arm of arms) {
+      chosen[i] = describeType(arm, ops[i].facts.closed);
+      if (!visit(i + 1)) return false;
+    }
+    chosen[i] = ops[i];
+    return true;
+  };
+  if (!visit(0)) return undefined;
+  return reduceType({ kind: 'union', types: results });
+}
+
+/**
  * The component-wise sum type of operands that are ALL tuples of one arity,
  * or `undefined` when the operands are not that shape (a non-tuple operand,
  * or tuples of different arities).
@@ -4326,6 +4401,13 @@ function addTypeOnTypes(
       args.some((x) => isDeclaredNumberTensorOperand(x, engine))
     )
       return { kind: 'broadcastable', elements: 'error' };
+    // An operand that is a point or a list of points
+    // (`list<tuple<…>> | tuple<…>`): the sum is typed for each arm, by the
+    // branches below (`armwisePointUnionType`).
+    const armwise = armwisePointUnionType(args, (o) =>
+      addTypeOnTypes(o, engine)
+    );
+    if (armwise !== undefined) return armwise;
     // A point BROADCAST over a list of points: the sum is a list of points,
     // not the union `list<tuple<…>> | tuple<…>` the widen below reports. A
     // matrix of points (a list of points of rank 2 or more) gives a matrix
@@ -4464,8 +4546,15 @@ function addTypeOnTypes(
       // `list<tuple<integer, integer, real> | tuple<real, real, integer>>`,
       // and its value is a list of `tuple<real, real, real>`. The cell is the
       // component-wise sum of the point types instead. A point type that is
-      // a union of tuples is left to the join.
-      const nests = siblings.map((t) => pointNestOf(t));
+      // a union of tuples is left to the join. The point types are read as
+      // declared, before `stripNumericRanges`: the strip widens a component
+      // `real | signed_infinity | nan` to `infinity | nan | real`, and
+      // `infinity` admits the complex infinity, which no sum of such
+      // components has. `tupleComponentwiseAddType` strips the ranges
+      // itself after it has read the signed infinities.
+      const nests = shaped.map((x) =>
+        pointNestOf(broadcastSiblingType(x.type))
+      );
       const joined = pointNestOf(collected);
       if (
         shaped.length > 1 &&
@@ -4475,6 +4564,22 @@ function addTypeOnTypes(
         const cell = tupleComponentwiseAddType(
           nests.map((p) => describeType(p!.cell))
         );
+        // With no scalar term and a point whose components are all scalar
+        // numbers, the component-wise sum is the cell: it already closes
+        // each imaginary component, and `absorbScalarsIntoCells` would strip
+        // the components again, which widens the signed infinities to
+        // `infinity`. A component that is itself a point or a collection is
+        // left to `absorbScalarsIntoCells`, which closes the imaginary
+        // components at every depth (`tupleComponentwiseAddType` closes only
+        // the components of the outer point).
+        if (
+          cell !== undefined &&
+          typeof cell === 'object' &&
+          cell.kind === 'tuple' &&
+          cell.elements.every((e) => isSubtype(e.type, 'number')) &&
+          args.every((x) => isBroadcastShaped(x))
+        )
+          return withFloatRationalCellsAsReal(args, joined.withCell(cell));
         if (cell !== undefined) collected = joined.withCell(cell);
       }
       const scalars = args.filter((x) => !isBroadcastShaped(x));
@@ -9884,6 +9989,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const topFactor = unrefinedTopTypeOfOperands(ops);
         if (topFactor !== undefined)
           return BoxedType.forResult(topFactor, engine._typeResolver);
+        // A factor that is a point or a list of points
+        // (`list<tuple<…>> | tuple<…>`): the product is typed for each arm
+        // (`armwisePointUnionType`).
+        {
+          const armwise = armwisePointUnionType(ops, (o) =>
+            derive('Multiply', o)
+          );
+          if (armwise !== undefined)
+            return BoxedType.forResult(armwise, engine._typeResolver);
+        }
         // A point beside a factor whose type does not give the shape of its
         // value (`pointPartnerShape`): an element read `L[1]` of a
         // `list<unknown>`, a `broadcastable<number>`, a `list<unknown>`, a

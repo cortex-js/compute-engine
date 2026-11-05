@@ -21,6 +21,18 @@
 
 ### Resolved Issues
 
+- **Arithmetic on a value declared as a point or a list of points keeps the
+  signed infinities in the component types.** With
+  `E = real | signed_infinity | nan` and
+  `P: list<tuple<E, E>> | tuple<E, E>`, the expressions `2P`, `P + P` and
+  `(6, 0) + P` were typed `list<tuple<infinity | nan | real, …>> |
+  tuple<infinity | nan | real, …>`, while `-P` and `P/2` kept `E`. The type
+  `infinity` admits the complex infinity, which no such sum or product has,
+  so a symbol declared with the union refused the result. A sum and a
+  product are now typed for each arm of the union, and the result is the
+  union `list<tuple<E, E>> | tuple<E, E>`. The 3-D union is the same
+  (Tycho row 492).
+
 - **Compilation to JavaScript: a call mapped over a literal list of points
   compiles when a point reads an input declared with a range.** With
   `n: (tuple<number, number>, unknown, unknown) -> tuple<number, number>`,
