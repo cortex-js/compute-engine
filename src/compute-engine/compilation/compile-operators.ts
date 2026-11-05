@@ -653,13 +653,13 @@ export function compileExprOperator(
               }
               return code;
             });
-            // The operands of the conjunction of the pairs from pair `k`
-            // (comparing operands `k` and `k+1`) to the last, flat — except
-            // that the pairs from
-            // the first one that reads a bound operand `i+1` (`i ≥ 1`) on
-            // are wrapped in that operand's binding, so the temporary is
-            // evaluated only once every earlier pair has held. A binding is
-            // consumed when wrapped so the recursion does not see it again.
+            // The pairs from pair `k` (operands `k` and `k+1`) to the last,
+            // which the caller joins with the target's And operator. From the
+            // first pair that reads a bound operand `i+1` (`i ≥ 1`) on, the
+            // pairs are wrapped in that operand's binding, so the temporary
+            // is evaluated only after every earlier pair has held. A binding
+            // is consumed when it is wrapped, so the recursion does not see
+            // it again.
             const chainParts = (k: number): string[] => {
               const parts: string[] = [];
               for (let i = k; i < codes.length - 1; i++) {

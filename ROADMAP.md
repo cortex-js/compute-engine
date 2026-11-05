@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-810.
+Next free reference: CE-811.
 
 **Entry format.**
 
@@ -2724,6 +2724,26 @@ reproduction above is the record.
 
 Compilation changes the engine's scope; a two-line program. Found during the work of 2026-10-30 and 2026-10-31 (Compiling `Block(If(x < 1, b ≔ 1, b ≔ 2); b)` creates a global `b`); the
 reproduction above is the record.
+
+### CE-810. WGSL: an `And` under an `Or` is emitted without parentheses, which WGSL does not parse
+
+**Status:** ready; defect, S.
+**Witness:** plausible; with `x: real`, `y: real`, the plot condition
+`3 < y < x or x < 5` (`Or(Less(3, y, x), Less(x, 5))`) compiles to WGSL as
+`(3.0 < y) && (y < x) || x < 5.0`; WGSL needs `((3.0 < y) && (y < x)) || x < 5.0`.
+
+The WGSL grammar gives `&&` and `||` no precedence over each other: a
+`short_circuit_or_expression` cannot hold a `&&` operand without
+parentheses, so `a && b || c` is a syntax error. The emitted string has not
+been run through a WGSL compiler. The GPU targets share the precedence
+table of `src/compute-engine/compilation/gpu-emit.ts` (And 4, Or 3), which
+follows the C rule that `&&` binds more tightly than `||`; that rule is
+correct for GLSL. `Or(And(3 < y, y < x), x < 5)` gives the same string
+without the inner parentheses. The same applies to an `Or` under an `And`.
+
+Fix: on WGSL, put parentheses around an `And` operand of an `Or`, and an
+`Or` operand of an `And`, including the conjunction that a comparison chain
+lowers to (`compileExprOperator()` in `compile-operators.ts`).
 
 ### CE-779. GLSL: a `list<real>` input compiles to a bare name and reports success instead of declining
 
