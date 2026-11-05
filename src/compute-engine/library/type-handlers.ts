@@ -11,7 +11,7 @@ import type {
   Type,
 } from '../../common/type/types.js';
 import { isSubtype, tensorOf } from '../../common/type/subtype.js';
-import { factsOf } from '../../common/type/facts.js';
+import { factsOf, isStableType } from '../../common/type/facts.js';
 import {
   absRange,
   attachInterval,
@@ -1142,7 +1142,7 @@ export function absFunctionType(x: OperandDescriptor | undefined): Type {
         facts: x.facts,
         structureOf: x.structureOf,
       });
-      return reduceType({ kind: 'union', types: [magnitude, 'nan'] });
+      return magnitudeOrNaNType(magnitude);
     }
   }
   // |x| also preserves the numeric TIER of a real operand: the magnitude of
@@ -1180,6 +1180,55 @@ export function absFunctionType(x: OperandDescriptor | undefined): Type {
   // claim made here before the flip, `real<0..>`, did not admit NaN either
   // — so closing it is a separate decision from carrying the `+∞`.
   return NON_NEGATIVE_REAL_OR_SIGNED_INFINITY_TYPE;
+}
+
+/** The union `magnitude | nan` for each primitive or stable magnitude type
+ * that `magnitudeOrNaNType` has built. */
+const MAGNITUDE_OR_NAN_BY_NAME = new Map<string, Type>();
+const MAGNITUDE_OR_NAN_BY_OBJECT = new WeakMap<object, Type>();
+
+/**
+ * The type `magnitude | nan`: the type of `Abs` of an operand whose type
+ * admits NaN, where `magnitude` is the type of `Abs` of its other values.
+ *
+ * When `magnitude` is a primitive name or a deeply frozen type
+ * (`isStableType`), the union is built once, frozen, and returned again for
+ * the same magnitude. A frozen type keeps its facts in a cache (`factsOf`),
+ * and `BoxedType.forResult` keeps its normalized form, so each new `Abs`
+ * node does not compute them again. Without this, an evaluation that builds
+ * many `Abs` nodes over the extended real line built a new union
+ * `nan | real<0..> | signed_infinity` for each one, and each read of one of
+ * its facts called `isSubtype` again. Any other magnitude (a type that holds
+ * a reference to a declaration) gives a new union at each call.
+ */
+function magnitudeOrNaNType(magnitude: Type): Type {
+  const build = () => reduceType({ kind: 'union', types: [magnitude, 'nan'] });
+  if (typeof magnitude === 'string') {
+    let result = MAGNITUDE_OR_NAN_BY_NAME.get(magnitude);
+    if (result === undefined) {
+      result = deepFreezeType(build());
+      MAGNITUDE_OR_NAN_BY_NAME.set(magnitude, result);
+    }
+    return result;
+  }
+  if (!isStableType(magnitude)) return build();
+  let result = MAGNITUDE_OR_NAN_BY_OBJECT.get(magnitude);
+  if (result === undefined) {
+    result = deepFreezeType(build());
+    MAGNITUDE_OR_NAN_BY_OBJECT.set(magnitude, result);
+  }
+  return result;
+}
+
+/** Freeze `t` and every object in it. Used only for a type built from
+ * primitive names and deeply frozen types, so no object of a caller is
+ * frozen. */
+function deepFreezeType<T>(t: T): T {
+  if (t !== null && typeof t === 'object' && !Object.isFrozen(t)) {
+    Object.freeze(t);
+    for (const child of Object.values(t)) deepFreezeType(child);
+  }
+  return t;
 }
 
 /**

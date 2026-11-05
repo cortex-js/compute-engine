@@ -80,6 +80,20 @@ export function takeBackIncompleteWalks(mark: number): void {
 }
 
 /**
+ * True when an incomplete or a failed walk was recorded after `mark`, a value
+ * of `incompleteWalkCount()`: exactly when `takeBackIncompleteWalks(mark)`
+ * would change something. An evaluation reads it before it tests whether its
+ * result lets it take the walks back, because that test computes the type of
+ * the result, and most evaluations record no incomplete walk.
+ */
+export function walksRecordedSince(mark: number): boolean {
+  return (
+    failClosedCounts.incompleteWalk > mark ||
+    (failedWalk !== undefined && failedWalk.mark > mark)
+  );
+}
+
+/**
  * The last walk that FAILED: a walk that stopped because a collection it
  * must read evaluated to an error value, with the value of the count just
  * after the walk was recorded. Only a comprehension records such a walk

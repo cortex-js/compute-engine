@@ -205,6 +205,7 @@ import {
   failedWalkErrorSince,
   incompleteWalkCount,
   takeBackIncompleteWalks,
+  walksRecordedSince,
   unlessWalkMissedElements,
 } from './incomplete-walks.js';
 import { normalizeCount, smallCount } from './collection-count.js';
@@ -2841,6 +2842,12 @@ export class BoxedFunction
     //
     if (isFunction(expr, 'Abs')) {
       const [coef, rest] = expr.op1.toNumericValue();
+      // With no coefficient to extract, the rest is `Abs` of the same
+      // operand: return this node instead of boxing a new one. A new node
+      // computes its type again, and a sum or a product calls this function
+      // for each of its terms at each evaluation.
+      if (coef.isOne && rest === expr.op1 && expr.isCanonical)
+        return [coef, expr];
       return [coef.abs(), ce.function('Abs', [rest])];
     }
     console.assert(expr.operator !== 'Complex');
@@ -4433,8 +4440,13 @@ export class BoxedFunction
       // walks that it recorded: a read in it that met an inner collection
       // that it cannot walk stayed unevaluated, which is a correct result,
       // and an enclosing handler must not discard its own result because of
-      // it (see `resultHoldsNoIncompleteWalk()`).
-      if (resultHoldsNoIncompleteWalk(result))
+      // it (see `resultHoldsNoIncompleteWalk()`). The test of the result
+      // computes its type, so it runs only when the evaluation recorded a
+      // walk to take back.
+      if (
+        walksRecordedSince(walksBefore) &&
+        resultHoldsNoIncompleteWalk(result)
+      )
         takeBackIncompleteWalks(walksBefore);
       recordEvaluatedError(this, result);
       const value = result;

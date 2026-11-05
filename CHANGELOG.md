@@ -19,6 +19,20 @@
   collection whole (the result can then be a broadcast), and a body with a
   `Return` before its last statement.
 
+### Performance
+
+- **Reading the elements of an evaluated broadcast that holds `Abs` is
+  about twice as fast.** For
+  `\sum_{n=0}^{3}2^{-n}|\sin(2^nx+[0...999]/1000)|`, reading the 1,000
+  elements of the evaluated value took about 1,250 ms and now takes about
+  560 ms. Three changes: the coefficient of `Abs(u)` is read without
+  building a new `Abs` node when there is no coefficient to extract; an
+  evaluation no longer computes the type of its result to take back
+  incomplete walks when it recorded none; and the type of `Abs` of an
+  operand that may be NaN (`nan | real<0..> | signed_infinity`) is one
+  shared frozen type, so its facts are computed once. The values and the
+  types are the same (Tycho row 474).
+
 ### Resolved Issues
 
 - **Arithmetic on a value declared as a point or a list of points keeps the
