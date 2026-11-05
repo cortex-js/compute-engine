@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import type { Expression } from '../../src/compute-engine/global-types';
 
 /**
@@ -150,5 +151,84 @@ describe('At: two indices through a row that may be absent', () => {
     const at = engine.box(['At', rows, 2, 1]);
     expect(at.type.toString()).toBe('integer');
     expect(at.evaluate().toString()).toBe('3');
+  });
+});
+
+describe('A read through an alias has the type of the read of the named type', () => {
+  // `elementType()` and `scalarResultType()` in the `At` type handler read the
+  // fields of a record and the values of a dictionary. An alias of these types
+  // fell through to `collectionElementType()`, which gives the iteration pair
+  // `tuple<string, T>`.
+  function aliases(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declareType('Rec', 'record{a: list<real>}', { alias: true });
+    ce.declareType('Dic', 'dictionary<list<real>>', { alias: true });
+    ce.declareType('RecOf', 'Rec', { alias: true });
+    return ce;
+  }
+
+  test.each([
+    ['Rec', [{ str: 'a' }], 'list<real>'],
+    ['Rec', [{ str: 'a' }, 1], 'real'],
+    ['RecOf', [{ str: 'a' }, 1], 'real'],
+    ['Dic', [{ str: 'a' }], 'list<real>'],
+    ['Dic', [{ str: 'a' }, 1], 'real'],
+    ['list<Rec>', [1, { str: 'a' }, 1], 'real'],
+    ['dictionary<Rec>', [{ str: 'x' }, { str: 'a' }, 1], 'real'],
+  ] as const)('%s, %j is %s', (type, indexes, expected) => {
+    const ce = aliases();
+    ce.declare('x', type);
+    const read = ce.box(['At', 'x', ...indexes] as never);
+    expect(read.type.toString()).toBe(expected);
+  });
+
+  // A key that an open record type does not declare can hold any value.
+  test('a key that the record does not declare', () => {
+    const ce = aliases();
+    ce.declare('x', 'Rec');
+    expect(ce.box(['At', 'x', { str: 'z' }] as never).type.toString()).toBe(
+      'any'
+    );
+  });
+
+  // The union has no element type of its own, so `elementType()` reads each arm.
+  test('an alias as an arm of a union is not read as an iteration pair', () => {
+    const ce = aliases();
+    ce.declare('x', 'Rec | list<real>');
+    ce.declare('y', 'record{a: list<real>} | list<real>');
+    expect(ce.box(['At', 'x', 1] as never).type.toString()).toBe(
+      ce.box(['At', 'y', 1] as never).type.toString()
+    );
+  });
+
+  test('the value is computed: an arithmetic parent is not an error', () => {
+    const ce = aliases();
+    for (const [name, type] of [
+      ['r', 'Rec'],
+      ['d', 'Dic'],
+    ] as const) {
+      ce.declare(name, type);
+      ce.assign(
+        name,
+        ce.box([
+          'Dictionary',
+          ['KeyValuePair', { str: 'a' }, ['List', 1.5]],
+        ] as never)
+      );
+      const sum = ce.box(['Add', ['At', name, { str: 'a' }, 1], 1] as never);
+      expect(sum.type.toString()).toBe('real');
+      expect(sum.evaluate().toString()).toBe('2.5');
+    }
+  });
+
+  // JavaScript has no lowering of a read of a record or a dictionary.
+  test.each(['Rec', 'Dic'])('a read through %s declines', (type) => {
+    const ce = aliases();
+    ce.declare('x', type);
+    expect(() =>
+      compile(ce.box(['Add', ['At', 'x', { str: 'a' }, 1], 1] as never), {
+        fallback: false,
+      })
+    ).toThrow(/Could not compile/);
   });
 });

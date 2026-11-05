@@ -16979,8 +16979,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               ? indexable[0]
               : { kind: 'union', types: indexable };
         if (typeof t !== 'string' && t.kind === 'union') {
-          const arms = t.types.map((arm) =>
-            typeof arm === 'string'
+          const arms = t.types.map((armOrAlias) => {
+            const arm = resolveTypeAlias(armOrAlias);
+            return typeof arm === 'string'
               ? collectionElementType(arm)
               : arm.kind === 'dictionary'
                 ? arm.values
@@ -16991,8 +16992,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                     arm.closed === true
                     ? (widen(...Object.values(arm.elements)) as Type)
                     : 'any'
-                  : indexElementType(arm)
-          );
+                  : indexElementType(arm);
+          });
           if (arms.every((arm) => arm !== undefined)) {
             // `widen` reads `unknown` as "no type yet" and drops it, so
             // `list<unknown> | string` (the type of `Rest(P)` with `P`
@@ -17011,18 +17012,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // A dictionary/record is a keyed collection whose `At` returns the
         // VALUE, not the iteration pair `tuple<string, T>` that
         // `collectionElementType` reports (that is correct for iteration, but
-        // wrong here). Special-case it.
-        if (typeof t === 'string') {
-          if (t === 'dictionary' || t === 'record') return 'any';
-        } else if (t.kind === 'dictionary') {
-          return t.values;
-        } else if (t.kind === 'record') {
+        // wrong here). Special-case it. An alias is read as the type it names:
+        // with `Rec` an alias of `record{a: real}`, `At(x, "a")` is `real`.
+        const named = resolveTypeAlias(t);
+        if (typeof named === 'string') {
+          if (named === 'dictionary' || named === 'record') return 'any';
+        } else if (named.kind === 'dictionary') {
+          return named.values;
+        } else if (named.kind === 'record') {
           // A literal string index selecting a known field yields that field's
           // type; otherwise widen across all field value types.
           const key =
             ops[1] === undefined ? undefined : stringLiteralOf(ops[1]);
           if (key !== undefined) {
-            const fieldType = t.elements[key];
+            const fieldType = named.elements[key];
             if (fieldType) return fieldType;
           }
           // Another key: a dictionary value (a literal) has exactly its
@@ -17038,20 +17041,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           )
             return entry.elements[1].type;
           return 'any';
-        } else if (t.kind === 'tuple') {
+        } else if (named.kind === 'tuple') {
           // A literal integer index selects that slot's type (1-based,
           // negatives count from the end); otherwise `collectionElementType`
           // widens across all slot types.
           const key = ops[1];
           if (key !== undefined && isSubtype(key.type, 'integer')) {
-            const n = t.elements.length;
+            const n = named.elements.length;
             // The literal's handler-visible value. An exact integer no machine
             // number holds — a bigint past ±2⁵³ — carries only a rounded
             // range, so it selects no slot and the access widens across them.
             const raw = descriptorLiteralValue(key);
             if (typeof raw === 'number' && Number.isFinite(raw)) {
               const i = raw < 0 ? n + raw + 1 : raw;
-              if (i >= 1 && i <= n) return t.elements[i - 1].type;
+              if (i >= 1 && i <= n) return named.elements[i - 1].type;
             }
           }
         }
@@ -17153,15 +17156,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             );
           return reduceType({ kind: 'union', types: results }) ?? 'any';
         }
-        // An alias of a tuple type is read as the tuple it names, like a
-        // tuple arm of a union above.
+        // An alias of a tuple, a dictionary or a record type is read as the
+        // type it names, like a tuple arm of a union above. `rt` is the resolved
+        // type; the `collectionElementType()` fallback at the end would report
+        // the iteration pair `tuple<string, T>` of a keyed type.
         if (typeof rt !== 'string' && rt.kind === 'tuple')
           return tupleResult(rt);
-        if (typeof t === 'string') {
-          if (t === 'dictionary' || t === 'record') return withMarker('any');
-        } else if (t.kind === 'dictionary') {
-          return elementReadType(ops[0], t.values);
-        } else if (t.kind === 'record') {
+        if (typeof rt === 'string') {
+          if (rt === 'dictionary' || rt === 'record') return withMarker('any');
+        } else if (rt.kind === 'dictionary') {
+          return elementReadType(ops[0], rt.values);
+        } else if (rt.kind === 'record') {
           // A dictionary value (a literal) has exactly the fields of its
           // record type: a key it does not have is absent. A declared record
           // type is open: a key it does not declare can hold any value, or
@@ -17171,18 +17176,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             typeof entry === 'object' &&
             entry.kind === 'tuple' &&
             entry.elements.length === 2;
-          const fields = widen(...Object.values(t.elements)) as Type;
+          const fields = widen(...Object.values(rt.elements)) as Type;
           const name = key === undefined ? undefined : stringLiteralOf(key);
           if (name !== undefined) {
-            const fieldType = t.elements[name];
+            const fieldType = rt.elements[name];
             if (fieldType) return fieldType; // present literal → exact
             // absent literal → marker(⊔V)
             return isValue ? markerType(fields) : 'any';
           }
           // dynamic string → ⊔V | marker(⊔V)
           return elementReadType(ops[0], isValue ? fields : 'any');
-        } else if (t.kind === 'tuple') {
-          return tupleResult(t);
         }
         // A literal integer index into an operand PROVED to hold that
         // position: the element type, with no marker (`provenAccessType`).

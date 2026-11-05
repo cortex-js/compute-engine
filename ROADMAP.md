@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-815.
+Next free reference: CE-816.
 
 **Entry format.**
 
@@ -342,17 +342,6 @@ Type computed before `f` is assigned; a type that does not hold the value can gi
 reproduction above is the record.
 
 ## Collections, absence and broadcasting
-
-### CE-814. A read through an aliased record or dictionary is typed from the iteration pair
-
-**Status:** ready; wrong value, S.
-**Witness:** plausible; with `Rec` an alias of `record{a: list<real>}` and `Rc: Rec` holding `{a: [1.5]}`, `At(Rc, "a")` is typed `tuple<string, any>` and its value is `[1.5]`; `At(Rc, "a", 1)` is typed `string` and its value is `1.5`; `Add(At(Rc, "a", 1), 1)` is an `incompatible-type` error for a valid read.
-
-In the `At` type handler (`library/collections.ts`), `elementType()` and
-`scalarResultType()` test `t.kind === 'dictionary'` and `'record'` on the
-unresolved type, so an alias falls through to `collectionElementType()`, which
-gives the iteration pair. The fix is to test the resolved type (`rt`) in these
-branches. A `dictionary<list<real>>` under an alias has the same defect.
 
 ### CE-682. A `Linspace` with an infinite endpoint: its reads disagree with each other
 
@@ -2788,6 +2777,29 @@ file.
   `\frac{\partial^2}{\partial_{x,y}} f(x,y)` (2 skips, `operators.test.ts`).
 
 ## Epsil
+
+### CE-815. An `=` that is the whole body of a `match` case or of a lambda is an equation, and a program that meant an assignment runs with no diagnostic
+
+**Status:** ready; defect, S.
+**Witness:** plausible; `let a = 0; match 1 { 1 => a = 2 }; a` gives `0` with no diagnostic; the user meant `2`, which `1 => do { a = 2 }` gives.
+
+In expression position `=` is equality: `parseEpsil()` reads the case body
+`a = 2` as `Equal(a, 2)`, and `x => a = 2` as a lambda whose body is that
+equation (`src/epsil/parse-epsil.ts`). The grammar is right, and a lambda
+that returns an equation is a valid program (a predicate, a `Solve` input).
+But a case body or a lambda body that is only `name = value`, with the
+value of the case or the lambda unused as an equation, is almost always a
+forgotten `do { … }`, and the program runs with the wrong value and no
+message. Fix: a static diagnostic of `epsil check` and of the parser's
+diagnostics (`src/epsil/static-diagnostics.ts`) when the whole body of a
+`match` case, of an `if` expression branch, or of a lambda is `Equal(symbol,
+expr)` where `symbol` is a declared variable of the enclosing scope: "`a =
+2` here is an equation, not an assignment; write `do { a = 2 }` to assign".
+A body that is an equation of a symbol that no scope declares, or that is
+used as a value (`let p = x => a = 2` passed to `Solve`), gets no
+diagnostic. Alternative, not recommended: read `=` as an assignment in a
+case body, which changes the meaning of every lambda that returns an
+equation.
 
 ### CE-306. `list<list<string>>` and `list<list<integer>>` cannot both conform to a protocol
 

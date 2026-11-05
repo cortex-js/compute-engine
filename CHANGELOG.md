@@ -88,6 +88,12 @@
   A literal list at a held position is broadcast, and the handler receives
   each element unevaluated. The `held` role is refused on a `lazy`
   operator, whose operands are all `raw`.
+- **A read through an alias of a record or a dictionary has the type of the
+  read of the named type.** With `Rec` an alias of `record{a: list<real>}` and
+  `x: Rec`, `At(x, "a")` was typed `tuple<string, any>`, and `At(x, "a", 1)` was
+  typed `string`, so `At(x, "a", 1) + 1` was an error. They are now typed
+  `list<real>` and `real`, and the sum has a value. The same applies to an alias
+  of a dictionary, and to an alias that is an arm of a union.
 - **A read with several indexes has the type of the same read written one index
   at a time.** With `t: tuple<list<real>, real>`, `At(t, 1, 2)` was typed
   `list<real>`, and its value is a real number; with
