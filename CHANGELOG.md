@@ -21,6 +21,12 @@
 
 ### Performance
 
+- **Adding symbolic terms with rational coefficients reuses unchanged products.**
+  Evaluating and reading the 1,000 elements of
+  `\sum_{n=0}^{3}2^{-n}|\sin(2^nx+[0...999]/1000)|` took about 494 ms
+  and now takes about 377 ms in an alternating five-run comparison.
+  The values and their types are unchanged.
+
 - **Reading the elements of an evaluated broadcast that holds `Abs` is
   about twice as fast.** For
   `\sum_{n=0}^{3}2^{-n}|\sin(2^nx+[0...999]/1000)|`, reading the 1,000

@@ -1256,7 +1256,11 @@ function addTensors(
 // Represent a sum of terms
 export class Terms {
   private engine: ComputeEngine;
-  private terms: { coef: NumericValue[]; term: Expression }[] = [];
+  private terms: {
+    coef: NumericValue[];
+    term: Expression;
+    original?: Expression;
+  }[] = [];
   /** The indexes in `terms` of the entries whose `term` has a given hash, in
    * increasing order. `find` reads only the entries with the hash of its
    * argument, so finding a like term does not scan all the terms. This is
@@ -1337,7 +1341,7 @@ export class Terms {
 
       if (rest.isSame(1)) {
         if (!coef.isZero || !coef.isExact) numericValues.push(coef);
-      } else this._add(coef, rest);
+      } else this._add(coef, rest, term);
     }
 
     // `∞·c − ∞·c` with a `c` of unknown sign: both infinite coefficients
@@ -1384,7 +1388,11 @@ export class Terms {
     }
   }
 
-  private _add(coef: NumericValue, term: Expression): void {
+  private _add(
+    coef: NumericValue,
+    term: Expression,
+    original?: Expression
+  ): void {
     if (term.isSame(0)) return;
     // A float `0` coefficient (`0.0·x`, or `0.0` itself) is the float `0`:
     // it is kept as a numeric term, so the sum stays numeric.
@@ -1429,11 +1437,15 @@ export class Terms {
 
     // This is a new term: just add it
     console.assert(!isNumber(term) || term.isSame(1));
-    this.push({ coef: [coef], term });
+    this.push({ coef: [coef], term, original });
   }
 
   /** Add an entry at the end of `terms`, and record its index in `index`. */
-  private push(entry: { coef: NumericValue[]; term: Expression }): void {
+  private push(entry: {
+    coef: NumericValue[];
+    term: Expression;
+    original?: Expression;
+  }): void {
     const h = entry.term.hash;
     const bucket = this.index.get(h);
     if (bucket) bucket.push(this.terms.length);
@@ -1514,7 +1526,7 @@ export class Terms {
 
     return canonicalAdd(
       ce,
-      terms.map(({ coef, term }) => {
+      terms.map(({ coef, term, original }) => {
         // Add the coefficients
         if (coef.length === 0) return term;
 
@@ -1536,6 +1548,24 @@ export class Terms {
         if (sum.eq(1) && sum.isExact) return term;
         if (sum.eq(-1) && sum.isExact) return term.neg();
         if (term.isSame(1)) return ce.expr(sum);
+
+        // The original canonical product has this same exact coefficient
+        // and remainder, so keep it and its cached type. A collection still
+        // goes through multiplication, which broadcasts over its elements.
+        if (
+          coef.length === 1 &&
+          isFunction(original, 'Multiply') &&
+          original.isCanonical &&
+          original.isValid &&
+          original.ops.length === 2 &&
+          original.op2 === term &&
+          isNumber(original.op1) &&
+          original.op1.isExact &&
+          isSubtype(sum.type, 'rational') &&
+          original.op1.isSame(ce.number(sum)) &&
+          term.type.matches('number')
+        )
+          return original;
 
         return term.mul(ce.expr(sum));
       })
