@@ -74,7 +74,10 @@ Wrap every test run in `timeout -k 30 600 …`, for example
    in the main tree the targeted tests again and `npm run test:core`, and
    `npm run check:deps` when imports changed.
 8. Add a `CHANGELOG.md` item under `[Unreleased]` when users can see the
-   change (the rules are in `CODING-STYLEGUIDE.md`). Update the pages of
+   change (the rules are in `CODING-STYLEGUIDE.md`). Do not edit
+   `src/api.md` by hand: it is generated from the doc comments of the
+   source, so change the doc comment and leave `src/api.md` to
+   `npm run doc`, which the release runs. Update the pages of
    `~/dev/cortexjs.io/docs/compute-engine/` as `AGENTS.md` says when public
    behavior changes.
 9. Stage with `node ~/.claude/scripts/stage-helper.mjs prepare {{NAME}} …`
