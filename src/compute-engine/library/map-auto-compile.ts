@@ -2,8 +2,6 @@ import { cacheOff } from '../../common/cache-switches.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
-  BoxedDefinition,
-  BoxedValueDefinition,
   Scope,
 } from '../global-types.js';
 
@@ -13,7 +11,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { beginStoreGuard } from '../boxed-expression/store-guard.js';
-import { bignumPreferred, isValueDef } from '../boxed-expression/utils.js';
+import { bignumPreferred } from '../boxed-expression/utils.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import { lookup } from '../function-utils.js';
 import { implicitCompile } from '../implicit-compile.js';
@@ -22,16 +20,22 @@ import { _mapAutoCompileStats } from '../map-auto-compile-stats.js';
 import {
   calleesResolveLexically,
   declaredParametersAdmit,
+  depChanged,
   exactTierShape,
   MIN_EXACT_COMPILE_COUNT,
   namedCallbackLiteral,
+  resolveDep,
   userFnLiteral,
 } from './map-exact-proof.js';
 import { collectionElementType } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
 import { rangeCount } from '../numerics/range-count.js';
 import { appliesJumpFunction } from '../jump-functions.js';
-import type { ExactTierShape, Interval } from './map-exact-proof.js';
+import type {
+  ExactTierShape,
+  Interval,
+  MapCompileDep,
+} from './map-exact-proof.js';
 
 /**
  * Auto-compilation of lazy-`Map` element lambdas on numeric drains.
@@ -43,10 +47,11 @@ import type { ExactTierShape, Interval } from './map-exact-proof.js';
  * `numericApproximation`) — or a user-written `Block(N(body))` is drained at
  * machine precision, an
  * eligibility-gated compile attempt produces a per-logical-instance cached
- * compiled element function, validated per invocation against the same
- * two-axis keys that govern the comprehension cache
- * (`ce._semanticVersion` + per-definition `_writeVersion`), with silent
- * per-element interpreter fallback.
+ * compiled element function, with silent per-element interpreter fallback.
+ * The compiled code holds the values of the symbols it reads, so each drain
+ * checks the resolution of these symbols and the `_writeVersion` of their
+ * definitions, as the comprehension cache does, and compiles again when one
+ * changed (`validCompiled()`).
  *
  * Design: `docs/COMPILATION-MODEL.md` (ratified
  * 2026-07-19). The cache is keyed on the **rewrapped** `Map` instance, which
@@ -71,30 +76,6 @@ import type { ExactTierShape, Interval } from './map-exact-proof.js';
  * per-element decline-to-interpreter fallback — is shared (R1).
  */
 
-/** A dependency of a compiled element function: the resolution snapshot of a
- * symbol whose value or function-literal definition the compiler consulted
- * (mirrors `ElementMemoDep` in
- * `boxed-expression/collection-element-memo.ts`). */
-interface MapCompileDep {
-  name: string;
-  /** Binding wrapper resolved by name in the ambient engine scope at compile
-   * time. An identity change means the name now resolves elsewhere
-   * (shadowing declaration, redeclaration). */
-  binding: BoxedDefinition | undefined;
-  /** The inner value definition at compile time — `updateDef` swaps this on
-   * the same wrapper. `undefined` for operator definitions (user functions). */
-  valueDef: BoxedValueDefinition | undefined;
-  /** `valueDef._writeVersion` at compile time. */
-  version: number;
-  /** The inner OPERATOR definition at compile time — a user-function
-   * redefinition (`ce.assign('f', newLambda)`) keeps the binding wrapper but
-   * swaps this object, and the identity comparison catches it (without
-   * this, the global generation bump alone gets re-stamped away). The
-   * `_writeVersion` of an operator definition, which counts its changes in
-   * place, is not read here. */
-  operatorDef: unknown;
-}
-
 /** Which tier produced this record. Fixed per instance (the marker is a
  * structural property of the lambda), but carried on the record so the
  * result-handling path cannot drift from the compile path. */
@@ -108,25 +89,22 @@ interface MapCompileCache {
   /** The compiled code's capture set (from the compiler's `symbolDeps`
    * collector), resolved in the ambient scope at compile time. */
   deps?: MapCompileDep[];
-  /** `ce._semanticVersion` stamp for the cheap per-invocation check. */
-  generation: number;
   /** `ce._worldVersion` at compile time. An epoch event — assumptions
    * (`assume`/`forget`), operator/type redefinition, signature inference,
-   * engine-config changes, reset — invalidates unconditionally: unlike a value
-   * write, it cannot be re-stamped away by `validCompiled`'s dep walk, because
-   * compile-time canonicalization may have consulted global semantics no dep
-   * snapshot records. */
+   * engine-config changes, reset — invalidates unconditionally: the dep walk
+   * of `validCompiled` cannot see it, because compile-time canonicalization
+   * may have consulted global semantics no dep snapshot records. */
   epoch: number;
   /** `ce.tolerance` stamp — baked into the code by the equality codegen, so a
-   * change forces a recompile (never a re-stamp). */
+   * change forces a recompile. */
   tolerance: number;
   /** `ce.angularUnit` stamp — baked into the code by `rewriteAngularUnit`
    * (the second compiler-baked engine input, alongside tolerance); a change
-   * forces a recompile (never a re-stamp). */
+   * forces a recompile. */
   angularUnit: ComputeEngine['angularUnit'];
   /** `ce.roundingTies` stamp — baked into the code by the `Round` lowering,
    * which writes the tie rule in effect at compile time; a change forces a
-   * recompile (never a re-stamp). */
+   * recompile. */
   roundingTies: ComputeEngine['roundingTies'];
   /**
    * Why the instance is `no-compile`:
@@ -464,23 +442,6 @@ function fnLiteralEligible(
   return bodyEligible(ce, literal.ops[0], params, seenFns, outer);
 }
 
-/** Snapshot the ambient-scope resolution of a symbol. */
-function resolveDep(ce: ComputeEngine, name: string): MapCompileDep {
-  const binding = lookup(name, ce.context.lexicalScope);
-  const valueDef =
-    binding !== undefined && isValueDef(binding) ? binding.value : undefined;
-  return {
-    name,
-    binding,
-    valueDef,
-    version: valueDef?._writeVersion ?? 0,
-    operatorDef:
-      binding !== undefined && 'operator' in binding
-        ? binding.operator
-        : undefined,
-  };
-}
-
 /** True if the expression holds no float (inexact) number literal. */
 function hasNoFloatLiteral(e: Expression): boolean {
   if (isNumber(e)) return e.isExact;
@@ -545,59 +506,74 @@ function hasJumpFunction(
   return false;
 }
 
-/** Has `dep`'s resolution changed since it was snapshotted? */
-function depChanged(ce: ComputeEngine, dep: MapCompileDep): boolean {
-  const binding = lookup(dep.name, ce.context.lexicalScope);
-  if (binding !== dep.binding) return true;
-  const valueDef =
-    binding !== undefined && isValueDef(binding) ? binding.value : undefined;
-  if (valueDef !== dep.valueDef) return true;
-  if (valueDef && valueDef._writeVersion !== dep.version) return true;
-  const operatorDef =
-    binding !== undefined && 'operator' in binding
-      ? binding.operator
-      : undefined;
-  if (operatorDef !== dep.operatorDef) return true;
-  return false;
+/**
+ * The state of the engine when a runner last made the full check of a record
+ * (`validCompiled()`). The runner skips the full check for the next element
+ * only while this state holds: see `checkStillHolds()`.
+ */
+interface CompiledCheck {
+  cache: MapCompileCache;
+  context: ComputeEngine['context'];
+  any: number;
+  semantic: number;
 }
 
 /**
- * Per-invocation validation (D3). Cheap check first (`_semanticVersion` +
- * `ce.tolerance` stamps); on mismatch, the full dependency walk. If every
- * dep is unchanged (and the tolerance, angularUnit, roundingTies and
- * `_worldVersion` still
- * match — those are never re-stamped away), **re-stamp and keep** the
- * compiled function: an unrelated per-frame `ce.assign` bumping the global
- * axis must not thrash the cache (review 13). A genuine dep change returns
- * `false` → recompile.
+ * True if nothing that `validCompiled()` reads can have changed since `check`.
+ *
+ * The three parts are necessary. `_anyVersion` moves on a value write, also on
+ * the write of a loop index, and on a declaration. `_semanticVersion` moves on
+ * a redefinition, which can leave `_anyVersion` as it is. The evaluation
+ * context changes when a call starts or ends: the end of a call moves no
+ * version when its scope changed no state, and the parameter that the name
+ * denotes is then the one of the outer call.
  */
-function validCompiled(ce: ComputeEngine, cache: MapCompileCache): boolean {
-  if (
-    cache.generation === ce._semanticVersion &&
+function checkStillHolds(
+  ce: ComputeEngine,
+  check: CompiledCheck,
+  cache: MapCompileCache
+): boolean {
+  return (
+    check.cache === cache &&
+    check.context === ce.context &&
+    check.any === ce._anyVersion &&
+    check.semantic === ce._semanticVersion &&
     cache.tolerance === ce.tolerance &&
     cache.angularUnit === ce.angularUnit &&
     cache.roundingTies === ce.roundingTies
-  )
-    return true;
+  );
+}
+
+/**
+ * The full validation of a compiled record. If every dep is unchanged (and the
+ * tolerance, angularUnit, roundingTies and `_worldVersion` still match), the
+ * compiled function is kept: an unrelated per-frame `ce.assign` must not thrash
+ * the cache. A genuine dep change returns `false` → recompile.
+ *
+ * A version of the engine alone cannot accept a record from an earlier drain.
+ * The parameter of a new call and the index of a loop have a new value and the
+ * same `_semanticVersion`, so `f(1)` and `f(2)` would share the compiled code
+ * of `f(d) := Sum(Map(x => x + d, Range(1, 128)))`, which holds the value of
+ * `d`. Each runner (one per drain) therefore starts with this walk, and only
+ * `checkStillHolds()` skips it, for the later elements of the same drain.
+ */
+function validCompiled(ce: ComputeEngine, cache: MapCompileCache): boolean {
   _mapAutoCompileStats.revalidations++;
   // Compiler-baked engine inputs (tolerance via the equality codegen,
   // angularUnit via `rewriteAngularUnit`, roundingTies via the `Round`
-  // lowering): a change is compiled into the code, so it can never be
-  // re-stamped away — always recompile.
+  // lowering): a change is compiled into the code, so always recompile.
   if (cache.tolerance !== ce.tolerance) return false;
   if (cache.angularUnit !== ce.angularUnit) return false;
   if (cache.roundingTies !== ce.roundingTies) return false;
   // Global-semantics axis (2026-08-02 dependency-precise invalidation design,
   // §4): an `assume`/`forget`, an operator/type redefinition or a signature
-  // inference bumps `_semanticVersion` too, but the dep walk below sees no
-  // dep change and RE-STAMPS the bump away — while compile-time
-  // canonicalization may have consulted exactly those global semantics. The
-  // epoch is bumped only by those rare events (never by a value write), so
-  // ANDing it here forces a recompile in precisely that case and costs
+  // inference changes no dep, so the walk below does not see it, while
+  // compile-time canonicalization may have consulted exactly those global
+  // semantics. The epoch is bumped only by those rare events (never by a value
+  // write), so this forces a recompile in precisely that case and costs
   // nothing otherwise.
   if (cache.epoch !== ce._worldVersion) return false;
   for (const d of cache.deps ?? []) if (depChanged(ce, d)) return false;
-  cache.generation = ce._semanticVersion;
   return true;
 }
 
@@ -639,7 +615,6 @@ function attemptCompile(
     // A named user function can be redefined: its resolution is the reason,
     // so that a redefinition allows one new attempt.
     reason: named !== undefined ? resolveDep(ce, named) : 'structural',
-    generation: ce._semanticVersion,
     epoch: ce._worldVersion,
     tolerance: ce.tolerance,
     angularUnit: ce.angularUnit,
@@ -669,7 +644,6 @@ function attemptCompileOnce(
       reason === 'structural' && named !== undefined
         ? resolveDep(ce, named)
         : reason,
-    generation: ce._semanticVersion,
     epoch: ce._worldVersion,
     tolerance: ce.tolerance,
     angularUnit: ce.angularUnit,
@@ -778,7 +752,6 @@ function attemptCompileOnce(
     deps: resolvedDeps,
     exactBody: tier === 'marked' && isExactBody(ce, literal, resolvedDeps),
     jumpBody: tier === 'marked' && hasJumpFunction(ce, literal, resolvedDeps),
-    generation: ce._semanticVersion,
     epoch: ce._worldVersion,
     tolerance: ce.tolerance,
     angularUnit: ce.angularUnit,
@@ -796,8 +769,9 @@ function attemptCompileOnce(
  * instance does not auto-compile (no marker, wrong precision, `jit` off,
  * permanent `no-compile`).
  *
- * Every compiled invocation is preceded by the cheap validation (D3), so a
- * mid-drain mutation is honored: the element after an interleaved
+ * The first compiled invocation of a drain has the full check
+ * (`validCompiled()`), and a later one skips it only while `checkStillHolds()`
+ * is true, so a mid-drain mutation is honored: the element after an interleaved
  * reassignment sees the new value, matching the interpreter's per-element
  * re-read. Runtime throws from the compiled function propagate (D4).
  */
@@ -940,8 +914,8 @@ export function mapCompiledElementRunner(
   // before every recompile: a reassignment to a non-integer or unbounded
   // value revokes the proof, and the instance must fall back to the
   // interpreter rather than compile against the stale one. `exactTierShape`
-  // memoizes on `ce._semanticVersion`, so this is a pointer compare unless
-  // something actually changed.
+  // keeps its proof until a value it read or `ce._semanticVersion` changes,
+  // so this takes the proof again only when something actually changed.
   //
   // For a `Map` of a named user function, the function must still have the
   // literal that `fn` is: a redefinition during the drain leaves `fn`
@@ -953,6 +927,10 @@ export function mapCompiledElementRunner(
       : callee !== undefined && namedCallbackLiteral(ce, callee) === fn) &&
     (tier !== 'exact' || exactTierShape(ce, expr) !== undefined);
 
+  // The last full check of a record that this runner made. It starts empty, so
+  // the first element of each drain has the full check.
+  let check: CompiledCheck | undefined;
+
   // Resolve (or build) a usable compiled cache record; `undefined` → the
   // caller's interpreter path serves this element.
   const ensure = (): MapCompileCache | undefined => {
@@ -960,7 +938,17 @@ export function mapCompiledElementRunner(
     const cache = mapCompileCaches.get(expr);
 
     if (cache?.state === 'compiled') {
-      if (validCompiled(ce, cache)) return cache;
+      if (check !== undefined && checkStillHolds(ce, check, cache))
+        return cache;
+      if (validCompiled(ce, cache)) {
+        check = {
+          cache,
+          context: ce.context,
+          any: ce._anyVersion,
+          semantic: ce._semanticVersion,
+        };
+        return cache;
+      }
       if (!stillEligible()) {
         mapCompileCaches.delete(expr);
         return undefined;
@@ -1027,20 +1015,39 @@ export function mapCompiledElementRunner(
   // Any other exact input is computed by the interpreter.
   //
   // The proof is taken once per drain, when the first exact input needs it,
-  // and again only when the mutation generation or the visibility of the
-  // assumptions changes: the bounds it propagated come from symbol values
-  // and assumptions, which `exactTierShape()` keys its own memo on.
+  // and again only when a version of the engine, the evaluation context or the
+  // visibility of the assumptions changes: the bounds it propagated come from
+  // symbol values and assumptions, which `exactTierShape()` keys its own memo
+  // on. A loop index moves `_anyVersion` only.
   let jumpProof: ExactTierShape | undefined;
-  let jumpProofKey: { generation: number; factsHidden: boolean } | undefined;
+  let jumpProofKey:
+    | {
+        context: ComputeEngine['context'];
+        any: number;
+        semantic: number;
+        factsHidden: boolean;
+      }
+    | undefined;
   const exactJumpInputAllowed = (item: Expression, i: number): boolean => {
-    const generation = ce._semanticVersion;
+    const context = ce.context;
+    const any = ce._anyVersion;
+    const semantic = ce._semanticVersion;
     const factsHidden = ce._factsHidden();
     if (
-      jumpProofKey?.generation !== generation ||
+      jumpProofKey?.context !== context ||
+      jumpProofKey.any !== any ||
+      jumpProofKey.semantic !== semantic ||
       jumpProofKey.factsHidden !== factsHidden
     ) {
       jumpProof = exactTierShape(ce, expr, { numericMarker: true });
-      jumpProofKey = { generation, factsHidden };
+      // The proof can advance `_anyVersion` (its type probes declare symbols),
+      // so the key holds the version after the proof.
+      jumpProofKey = {
+        context,
+        any: ce._anyVersion,
+        semantic: ce._semanticVersion,
+        factsHidden,
+      };
     }
     const b = jumpProof?.sourceBounds[i];
     return (
@@ -1069,8 +1076,8 @@ export function mapCompiledElementRunner(
     // exactly, AND lies inside the interval the proof propagated bounds from.
     // The bounds half matters because the proof is taken at DRAIN START while
     // the compiled function is used per element: a symbol source's list (R6)
-    // is not in `symbolDeps`, so `validCompiled` re-stamps a reassignment
-    // rather than routing it through `stillEligible()`. A live iterator
+    // is not in `symbolDeps`, so `validCompiled` does not see a reassignment
+    // and does not route it through `stillEligible()`. A live iterator
     // captures its source today, so nothing reaches this check — it is what
     // makes the exactness contract independent of that, instead of resting on
     // it. Two comparisons per element, below the boxing noise floor.

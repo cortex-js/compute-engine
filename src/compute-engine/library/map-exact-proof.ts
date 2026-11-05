@@ -1,4 +1,6 @@
 import type {
+  BoxedDefinition,
+  BoxedValueDefinition,
   Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
@@ -19,6 +21,8 @@ import { functionLiteralParameterType } from '../boxed-expression/function-liter
 import { isSubtype } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
 import { callableBindingInContext } from '../boxed-expression/binders.js';
+import { isValueDef } from '../boxed-expression/utils.js';
+import { lookup } from '../function-utils.js';
 
 /**
  * The static proof behind the **exact-mode** auto-compilation tier for lazy
@@ -358,16 +362,73 @@ function listBounds(x: Expression): SourceBounds | undefined {
   return iv === undefined ? undefined : { interval: iv, count: x.nops };
 }
 
+/** A symbol that a compiled element function or its proof read: the resolution
+ * of the name when it was read (mirrors `ElementMemoDep` in
+ * `boxed-expression/collection-element-memo.ts`). */
+export interface MapCompileDep {
+  name: string;
+  /** Binding wrapper resolved by name in the ambient engine scope at compile
+   * time. An identity change means the name now resolves elsewhere
+   * (shadowing declaration, redeclaration, the parameter of another call). */
+  binding: BoxedDefinition | undefined;
+  /** The inner value definition at compile time — `updateDef` swaps this on
+   * the same wrapper. `undefined` for operator definitions (user functions). */
+  valueDef: BoxedValueDefinition | undefined;
+  /** `valueDef._writeVersion` at compile time. It moves on each value write,
+   * also on the write of a loop index, which does not move
+   * `ce._semanticVersion`. */
+  version: number;
+  /** The inner OPERATOR definition at compile time — a user-function
+   * redefinition (`ce.assign('f', newLambda)`) keeps the binding wrapper but
+   * swaps this object, and the identity comparison catches it. The
+   * `_writeVersion` of an operator definition, which counts its changes in
+   * place, is not read here. */
+  operatorDef: unknown;
+}
+
+/** Snapshot the ambient-scope resolution of a symbol. */
+export function resolveDep(ce: ComputeEngine, name: string): MapCompileDep {
+  const binding = lookup(name, ce.context.lexicalScope);
+  const valueDef =
+    binding !== undefined && isValueDef(binding) ? binding.value : undefined;
+  return {
+    name,
+    binding,
+    valueDef,
+    version: valueDef?._writeVersion ?? 0,
+    operatorDef:
+      binding !== undefined && 'operator' in binding
+        ? binding.operator
+        : undefined,
+  };
+}
+
+/** Has `dep`'s resolution changed since it was snapshotted? */
+export function depChanged(ce: ComputeEngine, dep: MapCompileDep): boolean {
+  const binding = lookup(dep.name, ce.context.lexicalScope);
+  if (binding !== dep.binding) return true;
+  const valueDef =
+    binding !== undefined && isValueDef(binding) ? binding.value : undefined;
+  if (valueDef !== dep.valueDef) return true;
+  if (valueDef && valueDef._writeVersion !== dep.version) return true;
+  const operatorDef =
+    binding !== undefined && 'operator' in binding
+      ? binding.operator
+      : undefined;
+  if (operatorDef !== dep.operatorDef) return true;
+  return false;
+}
+
 /** Mutable state threaded through the recursive proof. */
 interface ProofContext {
   ce: ComputeEngine;
-  /** The proof consulted a symbol's VALUE, so the outcome is not purely
-   * structural and must be re-derived when the engine mutates. */
-  dynamic: boolean;
+  /** The symbols whose VALUE or definition the proof read. When there is one,
+   * the outcome is not purely structural (see {@link ExactProofMemo}). */
+  reads: Set<string>;
   /** The `Map` instances the proof walked whose mapping function carries an
    * ANNOTATED parameter. Their source element TYPES are the only other
    * non-structural input, and — unlike a value — a type can be REVALIDATED
-   * cheaply, so these are recorded separately from `dynamic` (see
+   * cheaply, so these are recorded separately from `reads` (see
    * {@link ExactProofMemo}). */
   typeExprs: Expression[];
   depth: number;
@@ -405,19 +466,20 @@ function proveSource(
     // further symbol (a chain, bounded by the depth guard — a cycle simply
     // runs out of depth and declines).
     //
-    // REACTIVITY, and why `dynamic` is load-bearing here: the compiled body
-    // never references this symbol (it names the SOURCE, not an operand), so
-    // it never lands in the compiler's `symbolDeps` and the compiled-cache
-    // dependency validation cannot see it change. The proof memo's
-    // generation revalidation — armed by `ctx.dynamic` — plus the
-    // `stillEligible()` re-ask on every `attemptCompile` path are the ONLY
-    // guard against a reassignment that widens the source bounds. Any
-    // `assign` bumps `ce._semanticVersion`, so that guard is complete.
-    ctx.dynamic = true;
+    // REACTIVITY, and why `reads` is necessary here: the compiled body never
+    // references this symbol (it names the SOURCE, not an operand), so it
+    // never lands in the compiler's `symbolDeps` and the compiled-cache
+    // dependency validation cannot see it change. The check of `reads` in the
+    // proof memo, plus the `stillEligible()` re-ask on every `attemptCompile`
+    // path, are the ONLY guard against a new value that widens the source
+    // bounds. That value can come from an `assign`, which moves
+    // `ce._semanticVersion`, or from the parameter of another call or a loop
+    // index, which do not: `depChanged()` sees all of them.
+    ctx.reads.add(x.symbol);
     if (ctx.depth >= MAX_SPINE_DEPTH) return undefined;
     const value = ctx.ce._getSymbolValue(x.symbol);
-    // No value: decline — but the outcome stays `dynamic`, so assigning one
-    // re-proves on the next generation bump.
+    // No value: decline — but the symbol stays in `reads`, so assigning a
+    // value re-proves.
     if (value === undefined) return undefined;
     ctx.depth++;
     const r = proveSource(ctx, value);
@@ -441,7 +503,7 @@ function closedInteger(ctx: ProofContext, x: Expression): number | undefined {
   const lit = literalInteger(x);
   if (lit !== undefined) return lit;
   if (isSymbol(x)) {
-    ctx.dynamic = true;
+    ctx.reads.add(x.symbol);
     const v = ctx.ce._getSymbolValue(x.symbol);
     if (v === undefined) return undefined;
     return literalInteger(v);
@@ -800,7 +862,7 @@ function proveNestedMap(
   if (element === undefined) return undefined;
   // The definition of a named function is read here, so the proof is
   // re-taken when the engine changes (a redefinition of the function).
-  if (element.named !== undefined) ctx.dynamic = true;
+  if (element.named !== undefined) ctx.reads.add(element.named);
   const { fn, params } = element;
   if (!isFunction(fn) || !isFunction(expr)) return undefined;
   const sourceOps = expr.ops.slice(1);
@@ -922,15 +984,17 @@ function proveNestedMap(
 interface ExactProofMemo {
   /** Absent when the instance is not exact-tier eligible. */
   shape?: ExactTierShape;
-  /** The proof read a symbol's value: RE-PROVE when the engine mutates. */
-  dynamic: boolean;
+  /** The symbols whose value or definition the proof read, each with its
+   * resolution when it was read. RE-PROVE when one of them changes, or when
+   * the engine mutates. */
+  reads: MapCompileDep[];
   /** The annotated `Map` instances the proof walked, and the concatenated
    * source element-type keys they had at proof time. A mutation generation
    * that leaves the keys unchanged reuses the memo — only a source type that
    * actually MOVED re-proves. Empty when no annotation took part. */
   typeExprs: Expression[];
   typeKey: string;
-  /** `ce._semanticVersion` at proof time (only consulted when `dynamic` or
+  /** `ce._semanticVersion` at proof time (only consulted when `reads` or
    * `typeExprs` is non-empty). */
   generation: number;
   /** Whether the assumptions were hidden (`ce._factsHidden()`) when
@@ -954,9 +1018,10 @@ function typeKeyOf(typeExprs: ReadonlyArray<Expression>): string {
 /** Keyed on the drained `Map` instance — canonical expressions are
  * structurally immutable, so a purely structural outcome never needs
  * invalidating (the same argument as the `lowerMapSpine` memo). The two
- * non-structural axes are handled separately: a VALUE the proof read
- * (`dynamic`) re-proves on any mutation generation, a source element TYPE an
- * annotation was discharged against (`typeExprs`/`typeKey`) is revalidated. */
+ * non-structural axes are handled separately: a VALUE the proof read (`reads`)
+ * re-proves when its resolution changes or on any mutation generation, a source
+ * element TYPE an annotation was discharged against (`typeExprs`/`typeKey`) is
+ * revalidated. */
 const exactProofMemo = new WeakMap<Expression, ExactProofMemo>();
 
 /** The memo of the proofs over marked levels (`numericMarker`), kept apart
@@ -990,14 +1055,23 @@ export function exactTierShape(
   const recorded = memos.get(expr);
   const memo = recorded?.factsHidden === factsHidden ? recorded : undefined;
   if (memo !== undefined) {
-    if (!memo.dynamic && memo.typeExprs.length === 0) return memo.shape;
-    if (memo.generation === ce._semanticVersion) return memo.shape;
-    // A new generation. A VALUE-dependent proof has to be re-taken (the bounds
-    // it propagated came from the values). A purely TYPE-dependent one only
-    // has to have its types revalidated: recomputing the keys is a type read
-    // per source, against a full walk + type probe, and every unrelated
-    // `ce.assign` lands here (any assignment bumps the generation).
-    if (!memo.dynamic && typeKeyOf(memo.typeExprs) === memo.typeKey) {
+    if (memo.reads.length === 0 && memo.typeExprs.length === 0)
+      return memo.shape;
+    // The generation does not show every new value of a symbol the proof
+    // read. The parameter of a new call and a loop index have a new value and
+    // the same generation, so each symbol is checked (`depChanged()`).
+    if (
+      memo.generation === ce._semanticVersion &&
+      !memo.reads.some((read) => depChanged(ce, read))
+    )
+      return memo.shape;
+    // A new generation or a new value. A VALUE-dependent proof has to be
+    // re-taken (the bounds it propagated came from the values). A purely
+    // TYPE-dependent one only has to have its types revalidated: recomputing
+    // the keys is a type read per source, against a full walk + type probe,
+    // and every unrelated `ce.assign` lands here (any assignment bumps the
+    // generation).
+    if (memo.reads.length === 0 && typeKeyOf(memo.typeExprs) === memo.typeKey) {
       memo.generation = ce._semanticVersion;
       return memo.shape;
     }
@@ -1011,7 +1085,7 @@ export function exactTierShape(
   // revalidation too.
   const ctx: ProofContext = {
     ce,
-    dynamic: false,
+    reads: new Set(),
     typeExprs: hasAnnotatedParams(expr) ? [expr] : [],
     depth: 0,
     numericMarker,
@@ -1040,7 +1114,7 @@ export function exactTierShape(
         };
   memos.set(expr, {
     shape,
-    dynamic: ctx.dynamic,
+    reads: [...ctx.reads].map((name) => resolveDep(ce, name)),
     typeExprs: ctx.typeExprs,
     typeKey: typeKeyOf(ctx.typeExprs),
     generation: ce._semanticVersion,

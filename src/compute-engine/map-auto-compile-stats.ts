@@ -20,7 +20,9 @@ export interface MapAutoCompileStats {
   attempts: number;
   /** Elements served by a compiled function. */
   compiledHits: number;
-  /** Full dependency walks triggered by a cheap-check mismatch. */
+  /** Full dependency walks: one at the first element of each drain, and one
+   * at each later element after a version of the engine or the evaluation
+   * context changed. */
   revalidations: number;
   /** Recompiles triggered by a genuine dependency change. */
   recompiles: number;

@@ -2,6 +2,16 @@
 
 ### Resolved Issues
 
+- **A `Map` that the engine compiles reads the current value of the symbols in
+  its function.** The compiled code kept the value of the first drain when the
+  symbol got a new value with no assignment: a parameter of a new call, a local
+  of a new call, or a loop index. With
+  `f(d) := Sum(Map(x => x + d, Range(1, 128)))`, `f(1); f(2); f(3)` was
+  `8384; 8384; 8384`. Now it is `8384; 8512; 8640`, as with `ce.jit = 'off'`.
+  `Sum(Sum(Map(x => x + k, Range(1, 128))), k, 1, 3)` was `25152`, and now it is
+  `25536`. The defect was in both the integer compilation and the compilation
+  under `N`. The engine now compiles the function again when such a value
+  changes.
 - **[#513](https://github.com/cortex-js/compute-engine/issues/513) An
   operator definition can declare which of its operands are statements.**
   An assignment is valid only as a statement, and the statement operands

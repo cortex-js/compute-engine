@@ -162,12 +162,12 @@ describe('Map auto-compile', () => {
     _resetMapAutoCompileStats();
     // Defeat the element memo (the layer above, item 126): since it became
     // dependency-precise it too survives an unrelated assign and would serve
-    // this drain without consulting the compiled function. This test pins the
-    // COMPILE cache's re-stamp behavior.
+    // this drain without consulting the compiled function. This test pins that
+    // the COMPILE cache keeps its record when no dependency changed.
     _clearElementMemoForTest(m.N());
     drainRe(m.N());
-    expect(stats.revalidations).toBeGreaterThan(0); // cheap check missed…
-    expect(stats.recompiles).toBe(0); // …but deps unchanged: kept
+    expect(stats.revalidations).toBeGreaterThan(0); // the deps were checked…
+    expect(stats.recompiles).toBe(0); // …and they are unchanged: kept
     expect(stats.compiledHits).toBe(120);
   });
 
@@ -228,8 +228,8 @@ describe('Map auto-compile', () => {
     expect(stats.attempts).toBe(1);
 
     // A global-semantics event on a symbol NO dep of the compiled function
-    // mentions. The dep walk therefore sees nothing changed and would
-    // re-stamp the `_semanticVersion` bump away — but compile-time
+    // mentions. The dep walk therefore sees nothing changed and would keep
+    // the record — but compile-time
     // canonicalization may have consulted assumptions, so the compiled code
     // is potentially stale. `ce._worldVersion` is what forces the recompile
     // (2026-08-02 dependency-precise invalidation design, §4).
@@ -468,7 +468,7 @@ describe('Map auto-compile', () => {
     // The binding wrapper survives `ce.assign('h', newLambda)` — only the
     // inner operator def is swapped, and operator defs have no
     // `_writeVersion` — so the dep snapshot must compare operator-def
-    // identity or the stale compiled body gets re-stamped.
+    // identity or the outdated compiled body is kept.
     ce.assign('hr1', ce.box(['Function', ['Multiply', 2, 'x'], 'x']));
     ce.assign('gr1', ce.box(['Function', ['Add', ['hr1', 'x'], 1], 'x']));
     const m = broadcast('gr1', 120);
