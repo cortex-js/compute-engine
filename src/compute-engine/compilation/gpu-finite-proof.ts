@@ -1277,10 +1277,9 @@ const GPU_WRITTEN_NAMES = new WeakMap<object, ReadonlySet<string> | 'all'>();
  * shader targets: the value type of `CompileTarget.gpuParameterFacts`,
  * which declares the fields. */
 type GPUParameterFact =
-  NonNullable<CompileTarget<Expression>['gpuParameterFacts']> extends ReadonlyMap<
-    string,
-    infer V
-  >
+  NonNullable<
+    CompileTarget<Expression>['gpuParameterFacts']
+  > extends ReadonlyMap<string, infer V>
     ? V
     : never;
 
@@ -1653,11 +1652,7 @@ export function gpuRecordCallSiteFacts(
     result.set(
       h,
       names.map((_, i) =>
-        gpuCombinedFact(
-          stable[i],
-          finite[i] ? bounds[i] : null,
-          declared?.[i]
-        )
+        gpuCombinedFact(stable[i], finite[i] ? bounds[i] : null, declared?.[i])
       )
     );
   }
@@ -1739,9 +1734,7 @@ export function gpuDefinitionParameterFacts(
     // (`gpuRecordCallSiteFacts`).
     const site = callSites?.[i];
     const fact =
-      site?.finite === true
-        ? site
-        : gpuCombinedFact(true, null, declared?.[i]);
+      site?.finite === true ? site : gpuCombinedFact(true, null, declared?.[i]);
     if (fact.finite) facts.set(p, fact);
   });
   return facts.size === 0 ? undefined : facts;
