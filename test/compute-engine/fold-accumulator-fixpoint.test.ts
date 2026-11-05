@@ -255,4 +255,33 @@ describe('a list-building fold is typed to the fixpoint of seed and result', () 
     expect(r.run!({ p: [3, 1, 2] })).toBe(9);
     expect(r.code).not.toContain('_SYS.arr');
   });
+
+  it('keeps the rank of a matrix result', () => {
+    // A matrix result that lost its dimensions read as a list of its cells
+    // (`list<integer>`), and the fold was typed with a type that does not
+    // admit its value at the second step.
+    const ce = new ComputeEngine();
+    ce.declare('n', 'integer');
+    const fold = ce.box([
+      'Fold',
+      [
+        'Function',
+        ['List', ['List', ['At', 'a', 1], 2], ['List', 3, 4]],
+        'a',
+        'k',
+      ],
+      ['List', 1, 2, 3],
+      ['Range', 1, 'n', 1],
+    ] as any);
+    const value = fold.subs({ n: 2 }).evaluate();
+    expect(value.json).toEqual([
+      'List',
+      ['List', ['List', 1, 2], 2],
+      ['List', 3, 4],
+    ]);
+    expect(value.type.matches(fold.type)).toBe(true);
+    const r = compile(fold, { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.run!({ n: 2 })).toEqual([[[1, 2], 2], [3, 4]]);
+  });
 });

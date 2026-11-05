@@ -2363,6 +2363,13 @@ function fixpointLiteral(
  * then typed `list`, and the fold `list<any>`. Without the length, the
  * widening gives `list<integer>`, and the next step settles.
  *
+ * Only a one-dimensional list loses its length. A matrix without its
+ * dimensions is read as a list of its cells: for a seed `[1, 2, 3]` and the
+ * body `(a, k) ↦ [[a[1], 2], [3, 4]]`, the result `matrix<integer^(2x2)>`
+ * became `list<integer>`, the fixpoint settled on that type, and the fold
+ * was typed `matrix<integer^(2x2)> | vector<integer^3>`, which does not
+ * admit the value `[[[1, 2], 2], [3, 4]]` of the second step.
+ *
  * A union result loses the length of each one-dimensional list arm that is
  * not of the accumulator type `t` and is LONGER than every length of `t`
  * (or of any length, when `t` is not a union of one-dimensional lists of
@@ -2407,7 +2414,7 @@ function withoutLengthChange(t: Type, result: Type): Type {
     typeof b === 'string' ||
     a.kind !== 'list' ||
     b.kind !== 'list' ||
-    !b.dimensions ||
+    b.dimensions?.length !== 1 ||
     (a.dimensions &&
       a.dimensions.length === b.dimensions.length &&
       a.dimensions.every((d, i) => d === b.dimensions![i]))

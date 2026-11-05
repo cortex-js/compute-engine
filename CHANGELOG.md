@@ -41,6 +41,11 @@
   and `evaluate()` gives the value. This includes a call that maps the
   function over a list argument. A body with a `Return` before its last
   statement is not checked.
+- **A fold whose callback gives a matrix is typed with a type that admits its
+  value.** `Fold((a, k) ↦ [[a[1], 2], [3, 4]], [1, 2, 3], 1..n)` was typed
+  `matrix<integer^(2x2)> | vector<integer^3>`, but for `n = 2` its value is
+  `[[[1, 2], 2], [3, 4]]`, which that type does not admit. It is now typed
+  `list<list<unknown>> | vector<integer^3>`.
 
 ## 0.179.0 _2026-11-04_
 
