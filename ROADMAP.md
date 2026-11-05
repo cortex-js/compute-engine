@@ -89,18 +89,15 @@ proposed fix.>
   and functions, the options and their costs. Do not record who found the item,
   when, or how.
 
-**Requests from Tycho** (user decision 2026-10-30). Tycho files its requests as
+**Requests from Tycho** (user decision 2026-11-04). Tycho files its requests as
 numbered rows in its `docs/COMPUTE_ENGINE.md` ("Open Requests for CE
 Maintainers"). An open row there is work this project owes, even when its
-wording sounds settled. A row fixed in one step gets no entry here: the reply in
-the row is the record. A row whose fix needs a decision, a design or several
-steps gets an entry here, and each fact is written in one place only. The Tycho
-row keeps what Tycho sees: the symptom, its instrument, and Tycho's check of the
-fix. The entry here keeps the work: the cause, the files, the options and the
-decision. It names the row number and does not copy the symptom or the status of
-the row. Delete the entry when the fix is released; Tycho deletes the row when
-the fix verifies. How to answer a row is described in the "Instructions for the
-CE team" section of that file.
+wording sounds settled. The row is the one record of that work, and it gets no
+entry here, also when its fix needs a decision, a design or several steps. The
+CE replies in the row hold the cause, the files, the options, the decision and
+the release that ships the fix. Tycho deletes the row when the fix verifies.
+How to answer a row is described in the "Instructions for the CE team" section
+of that file.
 
 **Started and finished work.** An entry is removed when its work starts, not
 when it ends: the session that does the work keeps the entry's content where
@@ -348,58 +345,6 @@ Type computed before `f` is assigned; a type that does not hold the value can gi
 reproduction above is the record.
 
 ## Collections, absence and broadcasting
-
-### CE-798. A selection over lists of different lengths is an error at boxing since 0.178.0; Tycho's alignment needs the uncut tree
-
-**Status:** decision needed; design, S. Tycho row 490
-(`~/dev/tycho/docs/COMPUTE_ENGINE.md`; Tycho ROADMAP row IY). Deferred by the
-user (2026-11-04, answered to Tycho): no option is chosen now, since 0 of the
-688 Desmos states of Tycho's round-trip audit of 0.178.0 reach the error;
-only hand-written rows do. The first version of the request, "cut to the
-shortest length again", was withdrawn by Tycho the same day: CE never cut
-these lists.
-**Witness:** corpus; `\left\{[1,5,20]<3:[1,2],[1,5,20]<10:[7,8,9]\right\}`.
-On 0.176.0, `ce.parse` gives the valid `Which([1,5,20] < 3, [1,2], [1,5,20]
-< 10, [7,8,9])` and only `.evaluate()` gives `Error("incompatible-dimensions",
-"3 vs 2")`; on 0.178.0 and on `477d875a0` the parse and the canonical box are
-already that error (`isValid` false). Tycho's pins, both `todo`:
-`tests/node/graph-paper/at-index-semantics.test.ts` ("D-293: the result is
-cut to the SHORTEST list") and
-`tests/node/graph-paper/parametric-3d-build-fan.test.ts`; instrument
-`scripts/repros/2026-11-04-ce490-literal-list-length-cut-repro.mts` in Tycho
-(NOT READY on 0.178.0 and on 0.176.0).
-
-Desmos cuts every list to the shortest length (`[1, 8]` for the example; the
-parametric `(t,[1,2,3]t,0)\{t>[0,1]\}` draws 2 curves). Tycho's own
-alignment (`at-index-semantics.ts`, D-293) reads the valid tree and cuts the
-lists before evaluation. Since 0.178.0 (CHANGELOG, "Element-wise selection
-takes a flat list of booleans"), `selectionArmError()` in
-`src/compute-engine/library/control-structures.ts` compares
-`staticListLength()` of each list condition and arm at canonicalization, so
-Tycho receives an `Error` expression and its alignment cannot run. A
-non-canonical parse or box (`ce.parse(latex, { canonical: false })`,
-`ce.box(json, { canonical: false })`) still gives the valid `Which` tree on
-`477d875a0` (measured 2026-11-04).
-
-The question, for the user to answer to Tycho:
-
-- **Tycho reads the non-canonical tree** when the canonical one is this
-  error, cuts the lists and boxes the result. No CE change; the 0.178.0 rule
-  stays. Cost: Tycho's alignment runs on a non-canonical tree, where the
-  operator and argument forms differ from the canonical ones.
-- **CE raises the error at evaluation again**, as 0.176.0 did: the static
-  check of `selectionArmError()` keeps the arm-kind checks and drops the
-  length comparison; `selectionArmCells()` keeps the error at evaluation. The
-  type of the selection then does not carry the length. Cost: a length mismatch
-  that the types show is reported later, and the 0.178.0 CHANGELOG rule is
-  reversed in the next release.
-- **CE cuts to the shortest length** (Desmos): a changed value for
-  `[1, 2] + [1, 2, 3]`-style mismatches in selections only; the first version
-  of Tycho's request. Not recommended by Tycho's session after its correction.
-
-Not part of the request: a number arm beside a point arm
-(`\{mod([1...4],2)>0:(1,2),-1\}`) stays `incompatible-type`; Tycho accepts
-that.
 
 ### CE-797. An implicitly compiled Map reuses a captured parameter from an earlier call
 
@@ -2078,37 +2023,6 @@ reproduction above is the record.
 
 ## Compilation
 
-### CE-799. A call mapped over a list of points declines when a coordinate is a symbol with a bounded real type (Tycho row 486)
-
-**Status:** ready; defect, M. Tycho row 486 (`~/dev/tycho/docs/COMPUTE_ENGINE.md`).
-**Witness:** corpus; the Graph Paper document manager declares a plot axis
-`real<-1e15..1e15>`. With `x` and `y` declared `real<-10..10>`, `C :=
-(D, d) ↦ ((D - d) / 2, 0)` declared `function`, and `n` declared
-`(tuple<number, number>, unknown, unknown) -> tuple<number, number>` with the
-value `(q: tuple<number, number>, D2, d2) ↦ q + C(D2, d2)`, the JavaScript
-compilation of `n([(1, 2), (x, y)], 4, 2)` declines with `unsettled-shape`:
-"Could not compile a call of `_fn_C`: the argument "D2" has the type
-`unknown`, which does not settle one shape". With `x` and `y` declared `real`
-the same call compiles and gives `[(2, 2), (4, 4)]` at `x = 3, y = 4`.
-Reproduced on `477d875a0` with Tycho's instrument
-`scripts/repros/2026-11-04-ce486-bounded-axes-mapped-point-call-repro.mts`
-(in Tycho; a copy that imports the CE source tree: the scratchpad of session
-35022c78, `row486-repro.mts`).
-
-The repro of 2026-11-01 (`2026-11-01-ce486-mapped-point-call-untyped-param-repro.mts`
-in Tycho) declares the axes `real` and reads READY; Tycho's case does not.
-The arguments at `D2` and `d2` are the literals `4` and `2` in both cases:
-only the element type of the point list changes, from `tuple<number, number>`
-to a tuple with a ranged coordinate. The cause is not traced. Start in
-`compile-user-calls.ts` (the mapped call of a user function over a list of
-points) and `compile-user-specialization.ts`: find why the specialization that
-settles `D2` from the literal argument runs for the unranged list and not for
-the ranged one. Expected after the fix: the call compiles and gives the
-interpreter's value `[(2, 2), (4, 4)]` for both declarations; Tycho's pin is
-`tests/node/graph-paper/signature-propagation.test.ts` ("a point-returning
-head with a bare point parameter is refined to return the point"), marked
-`todo`.
-
 ### CE-785. The compiler's stack limit for a nested expression fell from about 420 to about 370 levels
 
 **Status:** ready; defect, S. User decision 2026-11-03: the nightly fall of the measured limit (first compile in a warm Jest worker) from 347 at `585acfab5` to 346 at `b10958fda` is accepted; it is not a new defect.
@@ -3137,31 +3051,6 @@ canonical passes in the first step of each enclosing fold
 (`FoldRefinementState`, `library/collections.ts`). Two possible fixes: keep the
 rejected result of an inner fold across the steps of the enclosing fold, or
 make one canonical pass cheaper.
-
-### CE-603. Reading the elements of a `Map` of 1,000 symbolic sums evaluates each sum with its free variable
-
-**Status:** ready; performance. Tycho ledger row 474, 2026-10-28; instrument
-`~/dev/tycho/scripts/repros/2026-10-28-ce474-literal-list-summand-evaluate-repro.mts`.
-**Witness:** corpus; Tycho ledger row 474 with instrument; Tycho request is ready by the header rule; user decision 2026-10-28 keeps it open.
-
-Reading the elements of `evaluate()` of
-`\sum_{n=0}^{3}2^{-n}|\sin(2^nx+[0...999]/1000)|` (a `Map` of 1,000) evaluates
-each member's symbolic `Sum` with `x` free: about 1,745 ms, against 96 ms to box
-the 1,000 members (Tycho's measure, median of 3). Target: at most 2× the boxing
-time.
-
-Partly done 2026-10-28: an evaluation whose result is the same call as the node
-(same operand objects, kinds and bindings, `isSameCall()`) gives the result the
-node's memo entry (`_primeUnchangedResult`, `boxed-function.ts`), so each level
-of the lazy `Map` chain (`makeSpineRunner`, `library/map-lowering.ts`) no longer
-evaluates every level below again. About 19× → 12–15× the boxing time (bundle
-measure); results identical. What remains: reading an element now costs about
-one evaluation of a member sum. Reaching 2× of the BOXING time means an element
-read must not evaluate symbolically: either the elements of the evaluated `Map`
-become canonical rather than evaluated forms, or a general speed-up of typing
-and symbolic arithmetic (types take about 40 % of the time). User decision
-2026-10-28: the elements stay evaluated forms; this entry stays open as a typing
-and arithmetic speed item.
 
 ### CE-638. An untyped parameter followed by parentheses is read as a product: `g \mapsto \int_0^1 g(x)\,dx`
 

@@ -46,7 +46,7 @@ describe('an inert result is not walked again at the same state', () => {
     // serving a lazy head. The `q(x)` of the result is written as the `q(x)`
     // of `e`, so it received the memo entry of that node when `e` was
     // evaluated (`_primeUnchangedResult`), and it answers from it: `q` is not
-    // called again (ROADMAP CE-603; it was called once more before).
+    // called again (Tycho row 474; it was called once more before).
     const r2 = r1.evaluate();
     expect(r2.isSame(r1)).toBe(true);
     expect(q.calls).toBe(1);

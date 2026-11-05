@@ -5283,7 +5283,7 @@ export class BoxedFunction
    * all of its operands. In a chain of `Map` levels (`Abs(Sin(2x + k/1000))`
    * read as one level per operator) each level evaluated again the whole
    * value of the levels below it, so a chain of `d` levels did about `d²/2`
-   * evaluations per element (ROADMAP CE-603).
+   * evaluations per element (Tycho row 474, `~/dev/tycho/docs/COMPUTE_ENGINE.md`).
    */
   private _primeUnchangedResult(result: Expression): void {
     if (

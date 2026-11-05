@@ -6,7 +6,7 @@ import {
   isSymbol,
 } from '../../src/compute-engine/boxed-expression/type-guards';
 
-// ROADMAP CE-603 (Tycho row 474): an operator applied to a large list is a
+// Tycho row 474 (`~/dev/tycho/docs/COMPUTE_ENGINE.md`): an operator applied to a large list is a
 // lazy `Map`, and a chain of operators gives a chain of `Map` levels. Each
 // element is computed one level at a time (`makeSpineRunner`,
 // `library/map-lowering.ts`): the application of a level evaluates its
