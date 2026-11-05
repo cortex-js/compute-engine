@@ -194,13 +194,28 @@ describe('A Range row is a row of its integers', () => {
     ).toEqual(['List', ['List', ['List', 1], ['List', 2]]]);
   });
 
+  // The time of the two queries over rows of 10,000 integers is compared with
+  // their time over rows of 10 integers, not with a fixed limit, because a CI
+  // machine can be several times slower than a local one. When the queries do
+  // not list the rows, the two times are almost the same. When they list each
+  // row, the long rows take several times longer: hashing each row, which
+  // reads its elements without boxing them (`BoxedFunction.hash`), is the
+  // fastest way to list it, and it makes the long rows 4 to 7 times slower.
+  // Each length runs twice and the shorter time is used, so that one garbage
+  // collection does not fail the test.
   test('Shape and Rank of many long range rows do not list the rows', () => {
-    const rows: unknown[] = ['List'];
-    for (let i = 0; i < 10_000; i++) rows.push(['Range', 1, 10_000]);
-    const start = performance.now();
-    expect(value(['Shape', rows]).json).toEqual(['Tuple', 10_000, 10_000]);
-    expect(value(['Rank', rows]).json).toBe(2);
-    expect(performance.now() - start).toBeLessThan(1000);
+    const queries = (n: number) => {
+      const rows: unknown[] = ['List'];
+      for (let i = 0; i < 2_000; i++) rows.push(['Range', 1, n]);
+      const start = performance.now();
+      expect(value(['Shape', rows]).json).toEqual(['Tuple', 2_000, n]);
+      expect(value(['Rank', rows]).json).toBe(2);
+      return performance.now() - start;
+    };
+    queries(10);
+    const short = Math.min(queries(10), queries(10));
+    const long = Math.min(queries(10_000), queries(10_000));
+    expect(long).toBeLessThan(2 * short);
   });
 
   test('range rows with too many elements in total are not listed', () => {
