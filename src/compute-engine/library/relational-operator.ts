@@ -26,6 +26,7 @@ import {
   isUnresolvedCollectionOperand,
 } from '../collection-utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
+import { everyOperand, VALUE_ROLE } from './operand-roles.js';
 import {
   eq,
   eqIdentical,
@@ -1354,6 +1355,10 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     signature: '(any, any) -> boolean',
 
     lazy: true,
+    // Every operand is a value, in a chain of any length (`Equal(2, 2, N)`)
+    // as in a pair: a bare `N` there is a variable. The other lazy
+    // comparisons declare the same roles.
+    operands: everyOperand(VALUE_ROLE),
 
     // A comparison is two-valued: `True` or `False`. A `NaN` operand makes it
     // `False` (IEEE: `NaN == NaN` is `false`), and so does an absent operand
@@ -1492,6 +1497,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     // `lazy` like `Equal`: the handlers evaluate the operands themselves.
     lazy: true,
+    operands: everyOperand(VALUE_ROLE),
     evaluatesOperands: true,
 
     // Same rule as `Equal`: a `NaN` or an absent operand makes the
@@ -1622,6 +1628,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // `a ≠ b ≠ c` the conjunction `And(a ≠ b, b ≠ c)` when `b` is pure, and
     // keeps it n-ary otherwise (see `canonicalComparisonChain`).
     lazy: true,
+    operands: everyOperand(VALUE_ROLE),
 
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'NotEqual', args),
@@ -1693,6 +1700,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       ),
 
     lazy: true,
+    operands: everyOperand(VALUE_ROLE),
     // Broadcast element-wise over a list operand so `L > 0` (canonicalizes to
     // `Less(0, L)`) yields a `list<boolean>` mask for Desmos `L[L>0]` filtering.
     broadcastable: true,
@@ -1726,6 +1734,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // into): the handler owns `NaN` — IEEE unordered → `False`.
     nanBehavior: 'handle',
     lazy: true,
+    operands: everyOperand(VALUE_ROLE),
     // Broadcast element-wise over a list operand (canonicalizes to `Less`; the
     // flag is kept here for a non-canonicalized `Greater`).
     broadcastable: true,
@@ -1763,6 +1772,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       ),
 
     lazy: true,
+    operands: everyOperand(VALUE_ROLE),
     // Broadcast element-wise over a list operand (see `Less`).
     broadcastable: true,
     canonical: (ops, { engine: ce }) =>
@@ -1798,6 +1808,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     nanBehavior: 'handle',
 
     lazy: true,
+    operands: everyOperand(VALUE_ROLE),
     // Broadcast element-wise over a list operand (canonicalizes to `LessEqual`).
     broadcastable: true,
     // Pass the operator through unchanged (see `Greater` above): the

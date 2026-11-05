@@ -86,6 +86,7 @@ export function isReplaceableOperatorShell(
     def.definedWhen === undefined &&
     def.requires === undefined &&
     def.commutativeOrder === undefined &&
+    def.operands === undefined &&
     isDefaultOperatorFlags(def)
   );
 }

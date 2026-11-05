@@ -1739,16 +1739,6 @@ export class BoxedFunction
     this._numericStore = store;
     this._numericStoreFloats =
       store !== undefined && !!options?.numericStoreFloats;
-    // An assignment or a declaration is a statement of a block, never an
-    // operand: `f(Assign(a, 2))` and `Assign(t, Assign(u, v))` are static
-    // errors. The operand is replaced by the error in place, so that the
-    // expression is invalid and a compilation declines it.
-    if (
-      ops !== undefined &&
-      options?.canonical === true &&
-      !STATEMENT_OPERATORS.has(operator)
-    )
-      ops = withoutStatementOperands(ce, operator, ops);
     this._opsStorage = ops;
     this._localScope = options?.scope;
     // A closure made in the node can keep the definitions of its scope
@@ -1758,6 +1748,16 @@ export class BoxedFunction
     this._isStructural = options?.structural ?? false;
     if (options?.canonical || this._isStructural) {
       this._bind();
+      // An assignment or a declaration is a statement, never a value:
+      // `f(Assign(a, 2))` and `Assign(t, Assign(u, v))` are static errors.
+      // It is valid only at an operand whose role, in the definition that
+      // the operator binds to, is `statement` or `opaque`. The operand is
+      // replaced by the error in place, so that the expression is invalid
+      // and a compilation declines it.
+      if (ops !== undefined && options?.canonical === true) {
+        const checked = withoutStatementOperands(ce, this._def, ops);
+        if (checked !== ops) this._opsStorage = checked;
+      }
       // A value of a head that declares a value kind opens the value gate of
       // its kind type for the engine (`noteKindHeadValue()`,
       // `value-kinds.ts`), which lets `holdsKindValue()` skip its walk in an
@@ -22772,52 +22772,36 @@ async function evaluateAsyncOverListedFlatMaps(
 }
 
 /**
- * The operators whose every operand is a statement position: the
- * statements of a `Block`, the return-type annotation of the last statement
- * of a function body (`Typed`), a held expression, and an error that wraps
- * its expression. An `If`, a `Which` and a `Loop` have statement
- * positions too, but not in every operand (`isStatementPosition()`). An
- * `Assign` or a `Declare` in another operand is a static error
- * (`withoutStatementOperands()`).
- */
-const STATEMENT_OPERATORS: ReadonlySet<string> = new Set([
-  'Block',
-  'Typed',
-  'Hold',
-  'Error',
-]);
-
-/**
- * Whether the operand at index `i` of an expression with the operator
- * `operator` (not one of `STATEMENT_OPERATORS`) is a statement position: a
- * branch of an `If` (not its condition), a value of a `Which` (not a
- * condition), and the body of a `Loop` (not its indexing set).
- */
-function isStatementPosition(operator: string, i: number): boolean {
-  if (operator === 'If') return i > 0;
-  if (operator === 'Which') return i % 2 === 1;
-  if (operator === 'Loop') return i === 0;
-  return false;
-}
-
-/**
- * `ops`, the operands of an expression with the operator `operator`,
- * where each operand that is an `Assign` or a `Declare` and that is not in
- * a statement position (`isStatementPosition()`) is replaced by the static
- * error `["Error", ["ErrorCode", "assignment-in-operand", name]]`, with
- * `name` the target of the assignment when it is a symbol. The same array
- * when no operand is replaced.
+ * `ops`, the operands of an expression whose operator binds to the
+ * definition `def`, where each operand that is an `Assign` or a `Declare`
+ * at a position whose role is not `statement` or `opaque` is replaced by the
+ * static error `["Error", ["ErrorCode", "assignment-in-operand", name]]`,
+ * with `name` the target of the assignment when it is a symbol. The roles
+ * come from the `operands` handler of the operator definition: a
+ * `statement` is an operand that the operator runs (a statement of a
+ * `Block`, a branch of an `If`, the body of a `Loop`), and an `opaque`
+ * operand is kept as written (the expression of `Hold` and of `Error`).
+ * Every operand of an operator without a definition, or without an
+ * `operands` handler, has the default role (`value`, or `raw` for a lazy
+ * operator), where an assignment is an error. The same array when no
+ * operand is replaced.
  */
 function withoutStatementOperands(
   ce: ComputeEngine,
-  operator: string,
+  def: BoxedDefinition | undefined | null,
   ops: ReadonlyArray<Expression>
 ): ReadonlyArray<Expression> {
   let result: Expression[] | undefined = undefined;
+  // The roles are read only when an operand is an assignment.
+  let roles: ReadonlyArray<string> | undefined | null = null;
   ops.forEach((op, i) => {
     const head = op.operator;
     if (head !== 'Assign' && head !== 'Declare') return;
-    if (isStatementPosition(operator, i)) return;
+    if (roles === null)
+      roles =
+        def && isOperatorDef(def) ? def.operator.operandRoles(ops) : undefined;
+    const role = roles?.[i];
+    if (role === 'statement' || role === 'opaque') return;
     const target = isFunction(op) ? op.ops[0] : undefined;
     const name = isSymbol(target) ? target.symbol : undefined;
     result ??= [...ops];

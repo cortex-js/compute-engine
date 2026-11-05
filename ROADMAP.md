@@ -343,44 +343,6 @@ reproduction above is the record.
 
 ## Collections, absence and broadcasting
 
-### CE-797. An implicitly compiled Map reuses a captured parameter from an earlier call
-
-**Status:** ready; wrong value.
-**Witness:** plausible; `f(d) := Sum(Map(x => x + d, Range(1, 128)))`;
-`f(1); f(2); f(3)` gives `8384; 8384; 8384`, expected
-`8384; 8512; 8640`.
-
-Reproduced with machine precision at `17ba3b407` and `ada1705cb` using
-`ce.assign('f', ce.box(['Function', ['Sum', ['Map', ['Function',
-['Add', 'x', 'd'], 'x'], ['Range', 1, 128]]], 'd']))` followed by
-`ce.box(['f', n]).evaluate()` for 1, 2, 3. Controls: the same calls with
-`ce.jit = 'off'`, or a new process with `CE_CACHE_OFF=mapcompile`, give
-`8384; 8512; 8640`. Inspect dependency validation of the compiled element
-cache in `library/map-auto-compile.ts`; the controls localize the issue to
-reuse of that cache rather than interpreter closure capture.
-
-
-### CE-754. The chained `At` type handler gives wrong types for a tuple, record or gather step
-
-**Status:** ready; defect, M.
-**Witness:** plausible; Chained `At` types wrong: `At(L, 1, "a")` with `L: list<record{a: real}>` typed `error` though the read is valid.
-
-The type handler of a multi-index `At` (`library/collections.ts`, the
-chained branch) peels each index with the element type of an iteration:
-
-- `At(t, 1, 2)` with `t: tuple<list<real>, real>` is typed `list<real>`; its
-  value is 2 (the nested `At(At(t, 1), 2)` is typed `nan | real`).
-- `At(r, "a", 1)` with `r: record{a: list<real>}` is typed `list<real>`.
-- `At(L, 1, "a")` with `L: list<record{a: real}>` is typed `error`
-  (`incompatible-type`), but the read is valid.
-- `At(m, i, I)` with `m: list<list<real>>`, `i: integer`,
-  `I: list<integer>` is typed `list<nan | real>`; it gives `Missing` for a row
-  out of range, so the type must have a `missing` arm.
-
-The compiler compiles a chained access as nested reads only when the nested
-type fits the chained type, so these four decline today; they compile when
-the handler is fixed.
-
 ### CE-682. A `Linspace` with an infinite endpoint: its reads disagree with each other
 
 **Status:** waits for user (decision); defect. Found 2026-10-30 in the review of the
@@ -593,25 +555,6 @@ A running sum of matrix rows is a one-line program; file says "check intent" fir
 reproduction above is the record.
 
 ## Evaluation, canonical forms and scoping
-
-### CE-811. An assignment that is the body of a `MatchCase` is the error `assignment-in-operand`
-
-**Status:** ready; defect, S. Found 2026-11-05 while reviewing GitHub issue #513.
-**Witness:** plausible; `Block(Assign(a, 0), Match(x, MatchCase(1, Assign(a, 2))), a)` is `Error(assignment-in-operand, a)` in its canonical form; the same program with the body `Block(Assign(a, 2))` is valid and gives `2` when `x` is `1`.
-
-`docs/ERROR-MODEL.md` ("Block locals") says that a case of a `Match` is a
-branch, as a branch of an `If` is: an assignment there to a declared name
-writes that name, and only a first assignment is an error
-(`first-assignment-in-branch`, which the `Match` canonical handler checks with
-`firstAssignmentInCase()`). But the rule that replaces an `Assign` or a
-`Declare` operand by `assignment-in-operand` (`withoutStatementOperands()` in
-`boxed-function.ts`) knows the statement positions of `If`, `Which` and `Loop`
-only (`isStatementPosition()`), and the body of a `MatchCase` is built before
-the `Match` handler sees it. Epsil is not affected: a `do { … }` case body is
-a `Block`, and a `Block` operand is never replaced. Fix: the guard and the body
-of a `MatchCase` (operands 1 and 2) are statement positions. If issue #513
-replaces the closed lists by a field of the operator definition, `MatchCase`
-declares its positions there and this entry is closed by that change.
 
 ### CE-752. A lazy view returned from a `Block` reads a valueless local as the global of the same name
 

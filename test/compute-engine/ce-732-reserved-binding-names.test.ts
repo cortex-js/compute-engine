@@ -418,9 +418,9 @@ describe('CE-732: a binding with a reserved name, javascript target', () => {
 
   // A write to a `Match` capture declines, whether the capture has a
   // reserved name or not. A write accepted for the reserved name threw
-  // "Assignment to constant variable" at run time. An `Assign` as the value
-  // of a `MatchCase` is an assignment in an operand, which is a static error,
-  // so the expression is invalid and the compilation declines.
+  // "Assignment to constant variable" at run time. The body of a `MatchCase`
+  // is a statement, so the `Assign` is valid; the compilation declines
+  // because a read of the capture is not a reference that can be assigned.
   test.each(['Math', 'm'])(
     'a write to a `Match` capture named `%s` declines',
     (n) => {
@@ -449,7 +449,7 @@ describe('CE-732: a binding with a reserved name, javascript target', () => {
         expect(result.success).toBe(false);
         expect(String(warn.mock.calls[0]?.[0])).toMatch(
           new RegExp(
-            `invalid expression.*assignment-in-operand", "${n}"`,
+            `compiles reads of "${n}" as .*not an assignable reference`,
             's'
           )
         );

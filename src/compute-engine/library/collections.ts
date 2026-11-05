@@ -329,6 +329,7 @@ import { isNumberThatMayBeAbsent } from '../boxed-expression/tensor-view.js';
 import { sortSetElements } from '../boxed-expression/order.js';
 import { exactOrder } from '../boxed-expression/compare.js';
 import { typeMembership } from './sets.js';
+import { everyOperand, VALUE_ROLE } from './operand-roles.js';
 import { isRingConstant } from './ring-constructions.js';
 import { RING_CONSTANTS } from '../latex-syntax/utils.js';
 import {
@@ -11526,6 +11527,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ),
     canonical: canonicalList,
     lazy: true,
+    // Every element is a value: a bare `N` there is a variable.
+    operands: everyOperand(VALUE_ROLE),
     evaluate: (ops, { engine, numericApproximation, materialization }) => {
       // Eager materialization: materialize each element. A lazy element (a
       // `Range`, a `Map`) stays one element and becomes a nested list.
@@ -11640,6 +11643,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // the condition `gcd(n,k) = 1` with a free `k` evaluates to `False`).
     // Literal elements are evaluated explicitly in the `evaluate` handler.
     lazy: true,
+    operands: everyOperand(VALUE_ROLE),
     evaluate: (ops, { engine: ce, numericApproximation, materialization }) => {
       const comp = parseSetComprehension(ops);
       if (comp !== null) {

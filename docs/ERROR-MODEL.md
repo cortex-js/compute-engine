@@ -336,8 +336,15 @@ before the program runs, and a compilation declines it.
   of a block. The three-operand `Declare(x, "unknown", v)` of the `where`
   clause and of the `;` parse is a declaration. `ce.declare()` and
   `ce.assign()` do not change.
-- A first assignment in a branch of an `If` or a `Which`, or in the body of a
-  `Loop`, or in a case of a `Match`, is an error, also in a block of the
+- An `Assign` or a `Declare` is valid only at a statement position: an
+  operand that the operator's definition declares as a statement (the
+  `operands` handler gives it the role `statement`), or the expression of
+  `Hold` and of `Error` (the role `opaque`). At any other operand it is
+  `assignment-in-operand`. The statements of a `Block` declare locals. Every
+  other statement position is a branch: a branch of an `If`, a value of a
+  `Which`, the body of a `Loop`, the body of a `MatchCase`, a statement
+  operand of a host operator (`Do(body, n)`).
+- A first assignment in a branch is an error, also in a block of the
   branch, and also at the top level, outside every block
   (`If(c, Assign(a, 1))` boxed alone). An assignment to a name that the
   engine declares (`ce.declare()`, an earlier top-level `Assign`) or to a

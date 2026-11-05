@@ -127,6 +127,15 @@ once, or a `ROADMAP.md` entry.
 One line each: the target, the program, the compiled value, the
 interpreter's value. A line is removed when the case declines or is fixed.
 
+- `wgsl`, a `Match` whose case bodies assign a local:
+  `Block(Assign(a, 0), Match(x, MatchCase(1, Block(Assign(a, 2))),
+  MatchCase(_, Block(Assign(a, 3)))), a)` compiles to
+  `_ = select(a = 3.0, a = 2.0, x == 1.0);`, which is not valid WGSL (an
+  assignment is not an expression there, and `select` runs both arms), so
+  the shader does not compile; the `If` form of the same program gives an
+  `if`/`else` statement. The interpreter and the JavaScript target give `2`
+  and `3`. The decline should come from the `Match` lowering of the WGSL
+  target when a case body assigns.
 - `javascript`, `L: list<real>`, `n: integer`: `Sum(Take(Sum(L·i, i, 1,
   n), 2))` and `Sum(TakeWhile(Sum(L·i, i, 1, n), x ↦ x > 0))` at `n = 0`
   throw (`.slice is not a function`, `findIndex is not a function`): the

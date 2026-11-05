@@ -2806,6 +2806,49 @@ export type BroadcastExemption =
   | 'surplus-operands';
 
 /**
+ * The role of one operand of an operator, as the `operands` handler of
+ * {@link OperatorDefinitionFlags} declares it. The role says how the operand
+ * is canonicalized and whether it is evaluated before the `evaluate` handler
+ * of the operator runs.
+ *
+ * - `value`: the operand is a value, and an `Assign` or a `Declare` there is
+ *   an error. In an operator that is not `lazy`, the operand is
+ *   canonicalized, checked against the signature, and evaluated before the
+ *   `evaluate` handler runs; this is the default role of such an operator.
+ *   In a `lazy` operator, the handlers receive the operand as written and
+ *   canonicalize and evaluate it themselves; only a bare `N` or `D` there is
+ *   read as a variable, not as the library operator.
+ * - `statement`: the operand is a statement that the operator runs, zero,
+ *   one or several times (the body of a loop, a branch of a conditional). An
+ *   `Assign` or a `Declare` there is valid. The operand is not evaluated
+ *   before the `evaluate` handler runs: the handler evaluates it when and as
+ *   often as it needs to. The engine canonicalizes the operand as a branch,
+ *   except in a `lazy` operator with a `canonical` handler, which receives
+ *   it as written and canonicalizes it itself. In a branch, a first
+ *   assignment of a name that no enclosing scope declares is the error
+ *   `first-assignment-in-branch`, an assignment of a declared name writes
+ *   that name, and a bare `Break` or `Continue` symbol is an error.
+ * - `raw`: the operand is kept as written, not canonicalized and not
+ *   evaluated. The default of a `lazy` operator. Valid only on a `lazy`
+ *   operator.
+ * - `opaque`: the operand is kept as written, and an `Assign` or a `Declare`
+ *   in it is valid (the expression of `Hold` and of `Error`). Valid only on a
+ *   `lazy` operator.
+ * - `held`, `bound` and `clause` are reserved: an `operands` handler that
+ *   returns one of them is refused with an error.
+ *
+ * @category Definitions
+ */
+export type OperandRole =
+  | { kind: 'value' }
+  | { kind: 'held' }
+  | { kind: 'statement' }
+  | { kind: 'raw' }
+  | { kind: 'opaque' }
+  | { kind: 'bound'; type?: TypeString }
+  | { kind: 'clause'; type?: TypeString };
+
+/**
  * An operator definition can have some flags to indicate specific
  * properties of the operator.
  * @category Definitions
@@ -2827,8 +2870,59 @@ export type OperatorDefinitionFlags = {
    *
    * This also applies to the `canonical()` handler.
    *
+   * To keep only a statement operand unevaluated (a body that the
+   * `evaluate` handler runs), give it the `statement` role with `operands`
+   * instead.
+   *
    */
   lazy: boolean;
+
+  /**
+   * The role of each operand of an application of this operator: one
+   * {@link OperandRole} per operand, in operand order. The handler receives
+   * the operands of the application: as written when the application is
+   * canonicalized, and canonical when it is evaluated. So the roles should
+   * depend only on the number of operands and on their positions. A role
+   * that the handler leaves out (a shorter array) is the default role. When
+   * the operator is declared, the handler is also called with zero to three
+   * `Nothing` operands, so that a role that is not valid is refused then:
+   * the handler must have no side effects, and an exception that it throws
+   * on these operands is ignored.
+   *
+   * Without this handler, every operand of an operator that is not `lazy`
+   * is a `value`, and every operand of a `lazy` operator is `raw`.
+   *
+   * An `Assign` or a `Declare` operand at a `value` or `raw` position is the
+   * error `assignment-in-operand`: an assignment is a statement, not a
+   * value. At a `statement` or an `opaque` position it is valid.
+   *
+   * When the operator has no `canonical` handler, the engine canonicalizes
+   * each `statement` operand as a branch (see {@link OperandRole}). When it
+   * has one, a `lazy` operator's handler receives the statement operands as
+   * written and canonicalizes them itself; the handler of an operator that
+   * is not `lazy` receives them already canonicalized as branches.
+   *
+   * The `evaluate` handler of an operator that is not `lazy` receives the
+   * `value` operands evaluated and the other operands canonical but not
+   * evaluated. The `evaluate` handler of a `lazy` operator receives no
+   * operand evaluated: a `value` operand is as written, and a `statement`
+   * operand is as its canonicalization left it.
+   *
+   * ```ts
+   * ce.declare('Do', {
+   *   signature: '(expression, integer) -> nothing',
+   *   // The body is a statement, the count is a value.
+   *   operands: () => [{ kind: 'statement' }, { kind: 'value' }],
+   *   evaluate: ([body, n], { engine }) => {
+   *     for (let i = 0; i < n.re; i++) body.evaluate();
+   *     return engine.Nothing;
+   *   },
+   * });
+   * ```
+   *
+   * **Default**: `undefined`
+   */
+  operands?: (ops: ReadonlyArray<Expression>) => ReadonlyArray<OperandRole>;
 
   /**
    * If `true`, the operator requires a new lexical scope when canonicalized.
@@ -3595,6 +3689,17 @@ export interface BoxedOperatorDefinition
    * evaluation. A broadcastable operator threads every position whatever this
    * answers. */
   threadsConditionalsAt(i: number): boolean;
+
+  /** The kind of the role of each operand of `ops`, the operands of an
+   * application of this operator, as the `operands` handler of
+   * {@link OperatorDefinitionFlags} declares them, with the default role
+   * (`value`, or `raw` for a `lazy` operator) for a position that the
+   * handler leaves out. One entry per operand. `undefined` when the
+   * definition has no `operands` handler: every operand then has the
+   * default role. */
+  operandRoles(
+    ops: ReadonlyArray<Expression>
+  ): ReadonlyArray<OperandRole['kind']> | undefined;
 
   /**
    * The *resolved* NaN policy for parameter position `i` (Contract B,

@@ -60,6 +60,7 @@ export type {
   BoxedValueDefinition,
   OperatorDefinitionFlags,
   BroadcastExemption,
+  OperandRole,
   BindingSite,
   BindingSiteSelector,
   BoxedOperatorDefinition,

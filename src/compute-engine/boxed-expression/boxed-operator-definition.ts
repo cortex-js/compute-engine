@@ -65,6 +65,7 @@ import type {
   Sign,
   BindingSiteSelector,
   BroadcastExemption,
+  OperandRole,
   TypeProvenanceEntry,
 } from '../global-types.js';
 
@@ -145,6 +146,7 @@ const OPERATOR_DEF_KEYS = new Set([
   'inspectsErrors',
   'selectsOperands',
   'evaluatesOperands',
+  'operands',
   'namedArgumentsRequired',
   'missingBehavior',
   'missingStrip',
@@ -387,6 +389,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   inspectsErrors = false;
   selectsOperands = false;
   evaluatesOperands = false;
+  operands?: (ops: ReadonlyArray<Expression>) => ReadonlyArray<OperandRole>;
   namedArgumentsRequired = false;
   missingBehavior?: 'reject' | 'propagate' | 'handle';
   missingStrip: 'all' | number[] = 'all';
@@ -1417,6 +1420,25 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     return t === true || (Array.isArray(t) && t.includes(i));
   }
 
+  operandRoles(
+    ops: ReadonlyArray<Expression>
+  ): ReadonlyArray<OperandRole['kind']> | undefined {
+    const handler = this.operands;
+    if (handler === undefined) return undefined;
+    const roles = handler(ops);
+    if (!Array.isArray(roles))
+      throw new Error(
+        `Operator Definition "${this.name}": the 'operands' handler must return an array of operand roles`
+      );
+    const fallback = this.lazy ? 'raw' : 'value';
+    return ops.map((_, i) => {
+      const role = roles[i];
+      if (role === undefined) return fallback;
+      checkOperandRole(this.name, role, this.lazy);
+      return role.kind;
+    });
+  }
+
   /**
    * The *resolved* Contract B NaN policy for parameter position `i`
    * (`docs/ERROR-MODEL.md` §4). For a USER-DEFINED callable the
@@ -1897,6 +1919,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       inspectsErrors: this.inspectsErrors,
       selectsOperands: this.selectsOperands,
       evaluatesOperands: this.evaluatesOperands,
+      operands: this.operands,
       namedArgumentsRequired: this.namedArgumentsRequired,
       missingBehavior: this.missingBehavior,
       missingStrip: this.missingStrip,
@@ -1975,6 +1998,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.inspectsErrors = s.inspectsErrors;
     this.selectsOperands = s.selectsOperands;
     this.evaluatesOperands = s.evaluatesOperands ?? false;
+    this.operands = s.operands;
     this.namedArgumentsRequired = s.namedArgumentsRequired;
     this.missingBehavior = s.missingBehavior;
     this.missingStrip = s.missingStrip;
@@ -2183,6 +2207,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       !this.evaluatesOperands || this.lazy,
       `Operator Definition "${this.name}": 'evaluatesOperands' requires 'lazy'`
     );
+    this.operands = def.operands ?? this.operands;
     this.namedArgumentsRequired =
       def.namedArgumentsRequired ?? this.namedArgumentsRequired;
     this.missingBehavior = def.missingBehavior ?? this.missingBehavior;
@@ -2434,6 +2459,33 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       (def as Partial<BoxedOperatorDefinition>).bindingSites
     );
     this.lazy = dropsLibraryLazy ? false : (def.lazy ?? this.lazy);
+
+    // The `operands` handler is called here with zero to three placeholder
+    // operands (`Nothing`), so that a role the engine does not implement, or
+    // a role that requires `lazy`, is refused when the operator is declared,
+    // also for a handler that gives one role per operand (`ops.map(...)`).
+    // A handler that throws on the placeholders, or gives roles that depend
+    // on the operands themselves, is checked each time it gives roles
+    // (`operandRoles()`). While the engine loads its libraries, `Nothing`
+    // does not exist yet, and the handler is called with no operands only.
+    if (this.operands !== undefined) {
+      const placeholder = this.engine.Nothing as Expression | undefined;
+      const most = placeholder === undefined ? 0 : 3;
+      for (let n = 0; n <= most; n++) {
+        let roles: unknown;
+        try {
+          roles = this.operands(Array(n).fill(placeholder));
+        } catch {
+          continue;
+        }
+        if (!Array.isArray(roles))
+          throw new Error(
+            `Operator Definition "${this.name}": the 'operands' handler must return an array of operand roles`
+          );
+        for (const role of roles as ReadonlyArray<OperandRole | undefined>)
+          if (role !== undefined) checkOperandRole(this.name, role, this.lazy);
+      }
+    }
 
     if (def.collection) {
       // The collection handlers of a host operator are host code: each call
@@ -3163,4 +3215,45 @@ function assertValidDerivativeKey(name: string, value: unknown): void {
   throw new Error(
     `Operator Definition "${name}": the "derivative" key must be a function, or an array with one function literal per argument`
   );
+}
+
+/**
+ * Throw an error when `role`, a role that the `operands` handler of the
+ * operator `name` returned, is not one that the engine implements, or is
+ * `raw` or `opaque` on an operator that is not lazy. The `held`, `bound` and
+ * `clause` roles are part of the `OperandRole` type but are not implemented:
+ * an operand with one of them would be canonicalized and evaluated as a
+ * `value`, which is not what the definition asks for. A `raw` or an `opaque`
+ * operand is not canonicalized, and the operands of an operator that is not
+ * lazy are all canonicalized before its handlers run.
+ */
+function checkOperandRole(
+  name: string,
+  role: OperandRole,
+  lazy: boolean
+): void {
+  switch (role.kind) {
+    case 'value':
+    case 'statement':
+      return;
+    case 'raw':
+    case 'opaque':
+      if (lazy) return;
+      throw new Error(
+        `Operator Definition "${name}": the operand role "${role.kind}" requires 'lazy'`
+      );
+    case 'held':
+      throw new Error(
+        `Operator Definition "${name}": the operand role "held" is not supported yet: declare the operator 'lazy' and evaluate the operands in the 'evaluate' handler`
+      );
+    case 'bound':
+    case 'clause':
+      throw new Error(
+        `Operator Definition "${name}": the operand role "${role.kind}" is not supported yet: declare the bound variables with a binding-site selector in 'scoped'`
+      );
+    default:
+      throw new Error(
+        `Operator Definition "${name}": unknown operand role "${(role as { kind: unknown }).kind}"`
+      );
+  }
 }

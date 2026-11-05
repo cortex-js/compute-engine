@@ -250,8 +250,25 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
   ) => Expression | undefined;
 }
 
+/** The kinds of `OperandRole` (types-definitions.ts), which imports this
+ * file, so the type cannot be named from here. */
+type OperandRoleKindMirror =
+  | 'value'
+  | 'held'
+  | 'statement'
+  | 'raw'
+  | 'opaque'
+  | 'bound'
+  | 'clause';
+
 type OperatorDefinitionFlags = {
   lazy: boolean;
+  /** The role of each operand of an application. See
+   * `types-definitions.ts`. */
+  operands?: (ops: ReadonlyArray<Expression>) => ReadonlyArray<
+    | { kind: Exclude<OperandRoleKindMirror, 'bound' | 'clause'> }
+    | { kind: 'bound' | 'clause'; type?: string }
+  >;
   scoped: boolean;
   broadcastable: boolean;
   /** Operand/result shapes whose broadcast handling the operator's own
@@ -518,6 +535,13 @@ interface BoxedOperatorDefinition
   /** True if a conditional value in operand position `i` moves out of the
    * application at evaluation. See `types-definitions.ts`. */
   threadsConditionalsAt(i: number): boolean;
+  /** The kind of the role of each operand of `ops`, with the default role
+   * for a position that the `operands` handler leaves out, or `undefined`
+   * when the definition has no `operands` handler. See
+   * `types-definitions.ts`. */
+  operandRoles(
+    ops: ReadonlyArray<Expression>
+  ): ReadonlyArray<OperandRoleKindMirror> | undefined;
   /** The resolved Contract B NaN policy for parameter position `i`. See
    * `types-definitions.ts`. */
   resolvedNanBehaviorAt(

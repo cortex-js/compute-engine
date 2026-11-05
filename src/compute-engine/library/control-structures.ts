@@ -18,9 +18,7 @@ import { canonicalCallbackOperand } from './collections.js';
 import { MACHINE_PRECISION } from '../numerics/numeric.js';
 import {
   assignmentLocalsOf,
-  enterBranch,
   enterFunctionBody,
-  exitBranch,
   exitFunctionBody,
   isInBranch,
   isFreeSymbolDeclarationInBody,
@@ -28,6 +26,13 @@ import {
   recordLaterDeclarationLocals,
   withPairedFunctionNames,
 } from '../assignment-locals.js';
+import { canonicalBranch, canonicalStatement } from '../statement-position.js';
+import {
+  everyOperand,
+  RAW_ROLE,
+  STATEMENT_ROLE,
+  VALUE_ROLE,
+} from './operand-roles.js';
 import {
   runWithEvaluationEffects,
   withEvaluationEffects,
@@ -309,6 +314,10 @@ export const BLOCK_DEFINITION: OperatorDefinition = {
     'https://cortexjs.io/compute-engine/reference/control-structures/ for the ' +
     'canonical recipe.',
   lazy: true,
+  // Every operand is a statement: an assignment there is valid. The
+  // statements are canonicalized by `canonicalBlock()`, where a first
+  // assignment declares a local of the block.
+  operands: everyOperand(STATEMENT_ROLE),
   scoped: true,
   signature: '(unknown*) -> unknown',
   // A SEQUENCER that RETURNS its last value: a statement is evaluated, a
@@ -422,6 +431,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         '`If(c, e1, e2)` evaluates to `e1` when `c` is `True` and to `e2` otherwise; without `e2` it is the absent value of the domain of `e1` when `c` is `False`: `NaN` for a number, `Missing` otherwise, as for a restriction `e1\\{c\\}`, which parses to `If(c, e1)`. Only the selected expression is evaluated.\n' +
         'When `c` is a flat list of booleans (`L < 3` with `L` a list), the selection is made at each position and the value is a list: `If([True, False, True], 1, 0)` is `[1, 0, 1]`, and with `L = [1, 3, 5]`, `If(L < 3, L, 0)` is `[1, 0, 0]`. `If(c, e1, e2)` is `Which(c, e1, True, e2)`: see `Which` for the rules of element-wise selection. A condition that is a scalar selects an arm whole, also when the arm is a list.',
       lazy: true,
+      // The condition is a value, the branches are statements.
+      operands: (ops) =>
+        ops.map((_, i) => (i === 0 ? VALUE_ROLE : STATEMENT_ROLE)),
       // Selects among its operands, so an error in an operand it does not
       // choose does not bubble (`docs/ERROR-MODEL.md` §3).
       selectsOperands: true,
@@ -560,7 +572,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         const xs = ops.map((op, i) =>
           i === 0
             ? conditionOperand(engine, op.canonical)
-            : canonicalBranch(engine, op)
+            : canonicalArm(engine, op)
         );
         // The condition and the then branch are required. A missing one is
         // an `Error("missing")` operand in its place, as `checkArity()` does
@@ -603,6 +615,10 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         'value is `Nothing`, or the value carried by a `Break`/`Return`. For a ' +
         'value-producing comprehension use `Comprehension` or `Map`.',
       lazy: true,
+      // The body is a statement; the clauses are kept as written for the
+      // binder code and the `canonical` handler.
+      operands: (ops) =>
+        ops.map((_, i) => (i === 0 ? STATEMENT_ROLE : RAW_ROLE)),
       // The index of each `Element` clause (from operand 1) is this operator's
       // BOUND variable: the framework declares it in the loop's own scope
       // before the clauses and body are canonicalized against it.
@@ -758,6 +774,10 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         '  - A position that no clause selects holds `NaN` for a number, a point whose coordinates are `NaN` for a point, and `Missing` for a boolean.',
       keywords: ['piecewise'],
       lazy: true,
+      // The conditions (even positions) are values, the values of the
+      // clauses (odd positions) are statements.
+      operands: (ops) =>
+        ops.map((_, i) => (i % 2 === 0 ? VALUE_ROLE : STATEMENT_ROLE)),
       // Selects among its operands, so an error in an operand it does not
       // choose does not bubble (`docs/ERROR-MODEL.md` §3).
       selectsOperands: true,
@@ -925,7 +945,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         const ops = args.map((x, i) =>
           i % 2 === 0
             ? conditionOperand(options.engine, x.canonical)
-            : canonicalBranch(options.engine, x, false)
+            : canonicalArm(options.engine, x, false)
         );
         if (ops.some((x, i) => i % 2 === 0 && isListCondition(x))) {
           const armError = selectionArmError(
@@ -1050,6 +1070,14 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         '`MatchCase(pattern, guard, body)`. The pattern holds engine ' +
         'wildcards; the body references the bound capture names.',
       lazy: true,
+      // The body, the last operand, is a statement: `Match` runs it. The
+      // pattern and the guard are kept as written.
+      operands: (ops) =>
+        ops.map((_, i) =>
+          (ops.length === 2 || ops.length === 3) && i === ops.length - 1
+            ? STATEMENT_ROLE
+            : RAW_ROLE
+        ),
       signature: '(expression, expression, expression?) -> nothing',
       // Keep the operands raw (do not canonicalize the pattern): return a
       // canonical-tagged node whose operands are preserved verbatim.
@@ -5217,41 +5245,20 @@ function isShadowedByEarlierDeclaration(
 }
 
 /**
- * Canonicalize an expression in **statement position** (a `Block` operand, an
- * `If` branch, or a `Loop` body). A bare *symbol* `Break`/`Continue` (as
- * opposed to the function forms `Break()`/`Continue()`) is almost certainly a
- * mistake: the control-flow dispatch in `evaluateStatements`/`runLoop` only
- * recognizes the function form, so a bare symbol would silently canonicalize
- * to an ordinary variable reference. Flag it as an error instead. Bare
- * `Return` is intentionally left alone.
+ * The canonical form of `op`, a branch of an `If` or a value of a `Which`,
+ * canonicalized as a branch (`canonicalBranch()`). The value of the branch
+ * is the value of the conditional, so a bare `N` or `D` that still names the
+ * library operator is a variable there, as in `x + N`
+ * (`canonicalValueOperand()`). With `statement` false, a bare `Break` is not
+ * refused, as for `canonicalBranch()`.
  */
-/**
- * The canonical form of `op`, a branch of an `If` or a `Which`, or the body
- * of a loop. A first assignment of a name in it is a static error
- * (`enterBranch()`, `assignment-locals.ts`). With `statement` false, `op`
- * is a value position (a value of a `Which`), where a bare `Break` is not
- * refused.
- */
-function canonicalBranch(
+function canonicalArm(
   ce: ComputeEngine,
   op: Expression,
   statement = true
 ): Expression {
-  enterBranch();
-  try {
-    return statement ? canonicalStatement(ce, op) : op.canonical;
-  } finally {
-    exitBranch();
-  }
-}
-
-function canonicalStatement(ce: ComputeEngine, op: Expression): Expression {
-  if (isSymbol(op) && (op.symbol === 'Break' || op.symbol === 'Continue'))
-    return ce.error(
-      `\`${op.symbol}\` must be written as a function: \`${op.symbol}()\``,
-      op.symbol
-    );
-  return op.canonical;
+  const arm = canonicalBranch(ce, op, statement);
+  return isSymbol(arm) ? canonicalValueOperand(ce, arm) : arm;
 }
 
 /**

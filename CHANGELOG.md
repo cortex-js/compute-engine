@@ -2,6 +2,32 @@
 
 ### Resolved Issues
 
+- **[#513](https://github.com/cortex-js/compute-engine/issues/513) An
+  operator definition can declare which of its operands are statements.**
+  An assignment is valid only as a statement, and the statement operands
+  were a fixed list of library operators, so a host operator such as
+  `Do(body, n)` could not take one: `Block(Assign(s, 0), Do(Assign(s, s + 1),
+  5), s)` was the error `assignment-in-operand`. The new `operands` handler
+  of an operator definition gives a role to each operand:
+  `operands: () => [{ kind: 'statement' }, { kind: 'value' }]`. Now the
+  block above evaluates to `5`. A statement operand is canonicalized as a
+  branch of an `If` is: a first assignment of a name that no enclosing scope
+  declares is the error `first-assignment-in-branch`, and a bare `Break` is
+  an error. An operator that is not `lazy` evaluates only its `value`
+  operands before its `evaluate` handler, so the handler receives the
+  statement as written and runs it when it needs to. The body of a
+  `MatchCase` is a statement too: `Block(Assign(a, 0), Match(x, MatchCase(1,
+  Assign(a, 2))), a)` was the error `assignment-in-operand`, and now gives
+  `2` when `x` is `1`.
+- **A read with several indexes has the type of the same read written one index
+  at a time.** With `t: tuple<list<real>, real>`, `At(t, 1, 2)` was typed
+  `list<real>`, and its value is a real number; with
+  `L: list<record{a: real}>`, `At(L, 1, "a")` was typed `tuple<string, any>`.
+  Now each is typed `real`, as `At(At(t, 1), 2)` is, also for a step through a
+  dictionary. `At(t, 1, 2)` now compiles: it declined before. A read outside a
+  record or a dictionary now gives the marker of the final value: `At(L, 9, "a")`
+  is `NaN`, not `Missing`. A read with one index too many (`At(t, 2, 1)`) is typed
+  `error`, and its value is an error, as before.
 - **`Flatten` keeps a tuple element in every form of the call.** A list of
   tuples of one shape kept them, but other forms opened them:
   `Flatten([(1, 2), (3, 4)], 1)` was `[1, 2, 3, 4]`, and

@@ -51,14 +51,19 @@ export function holdMap(
   //
   if (def.lazy) return xs;
 
+  // An operand whose role is not `value` (the `operands` handler of the
+  // definition: a `statement`) is handed over as it is, as a `Hold` operand
+  // is.
+  const roles = def.operandRoles(expr.ops);
   const result: Expression[] = [];
   for (const [k, x] of xs.entries()) {
     const h = x.operator;
-    if (h === 'Hold') result.push(x);
+    const position = positions?.[k] ?? k;
+    if (h === 'Hold' || !isValueRole(roles, position)) result.push(x);
     else {
       const op = h === 'ReleaseHold' && isFunction(x) ? x.op1 : x;
       if (op) {
-        const y = f(op, positions?.[k] ?? k);
+        const y = f(op, position);
         if (y !== null) result.push(y);
       }
     }
@@ -106,15 +111,19 @@ export async function holdMapAsync(
   //
   if (def.lazy) return xs;
 
+  // An operand whose role is not `value` is handed over as it is (see
+  // `holdMap`).
+  const roles = def.operandRoles(expr.ops);
   const result: Expression[] = [];
   const pacer = new EventLoopPacer();
   for (const [k, x] of xs.entries()) {
     const h = x.operator;
-    if (h === 'Hold') result.push(x);
+    const position = positions?.[k] ?? k;
+    if (h === 'Hold' || !isValueRole(roles, position)) result.push(x);
     else {
       const op = h === 'ReleaseHold' && isFunction(x) ? x.op1 : x;
       if (op) {
-        const y = await f(op, positions?.[k] ?? k);
+        const y = await f(op, position);
         if (y !== null) result.push(y);
       }
     }
@@ -127,6 +136,18 @@ export async function holdMapAsync(
   return def?.associative && !hasContinuation
     ? flattenOperands(result, expr.operator)
     : result;
+}
+
+/** Whether the operand at `position` of `expr.ops` is evaluated before the
+ * handler: its role in `roles` is `value`. Every operand is a value when the
+ * definition has no `operands` handler (`roles` is `undefined`), and an
+ * operand lifted out of a nested application (`position` is `-1`) is a
+ * value. */
+function isValueRole(
+  roles: ReadonlyArray<string> | undefined,
+  position: number
+): boolean {
+  return roles === undefined || position < 0 || roles[position] === 'value';
 }
 
 /**

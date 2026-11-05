@@ -1,6 +1,7 @@
 import { markForwardCallReference } from './forward-call-reference.js';
 import { Complex } from 'complex.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
+import { canonicalBranch } from '../statement-position.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import type {
   ExpressionInput,
@@ -873,6 +874,10 @@ function boxFunctionInternal(
  * below it non-canonical and unbound whatever form the construction is in.
  * `Error` and `ErrorCode` box their operands raw for the same reason. A node
  * with one of these heads is left to the recursion.
+ *
+ * The definitions of these operators give their operands the `opaque` role,
+ * but this set is read by name: a construction that is not fully canonical
+ * does not look up the definition of the operator.
  */
 const PREBOX_OPAQUE_HEADS: ReadonlySet<string> = new Set([
   'Hold',
@@ -4146,26 +4151,47 @@ function canonicalErrorDetail(e: unknown): unknown {
   return e.message;
 }
 
-/** The lazy operators whose operands are all values: the comparisons, the
- * collection constructors and the conditionals. `Same` and `IsSame` are not
- * listed: they compare their operands as written (canonical forms, never a
- * value), so an operand there is an expression, not a value. None of them opens a
- * scope, so an operand resolves here as it would in the handler. The
- * statements of a `Block` are repaired by its handler (`canonicalBlock`),
- * once its scope and its locals exist. */
-const LAZY_VALUE_OPERAND_HEADS: ReadonlySet<string> = new Set([
-  'Equal',
-  'NotEqual',
-  'Less',
-  'LessEqual',
-  'Greater',
-  'GreaterEqual',
-  'IdenticallyEqual',
-  'List',
-  'Set',
-  'If',
-  'Which',
-]);
+/** `xs`, the operands of a lazy operator as written, where each operand
+ * whose role in `roles` is `value` and that is a bare `N` or `D` naming the
+ * library operator is a variable (`devolveValueElements()`). The lazy
+ * operators that declare `value` operands (the comparisons, `List`, `Set`,
+ * the conditions of `If` and `Which`) open no scope, so an operand resolves
+ * here as it would in the handler. The statements of a `Block` and the
+ * branches of an `If` are repaired by the handler of the operator, once its
+ * scope and its locals exist. */
+function devolveValueOperands(
+  ce: ComputeEngine,
+  xs: ReadonlyArray<Expression>,
+  roles: ReadonlyArray<string>
+): ReadonlyArray<Expression> {
+  if (roles.every((role) => role === 'value'))
+    return devolveValueElements(ce, xs);
+  let result: Expression[] | undefined;
+  xs.forEach((x, i) => {
+    if (roles[i] !== 'value') return;
+    const [y] = devolveValueElements(ce, [x]);
+    if (y === x) return;
+    result ??= [...xs];
+    result[i] = y;
+  });
+  return result ?? xs;
+}
+
+/** `xs`, the operands of an operator without a `canonical` handler, where
+ * each operand whose role in `roles` is `statement` is canonicalized as a
+ * branch (`canonicalBranch()`): a first assignment of a name that no scope
+ * declares is the error `first-assignment-in-branch`, and a bare `Break` or
+ * `Continue` symbol is an error. */
+function canonicalStatementOperands(
+  ce: ComputeEngine,
+  xs: ReadonlyArray<Expression>,
+  roles: ReadonlyArray<string>
+): ReadonlyArray<Expression> {
+  if (!roles.includes('statement')) return xs;
+  return xs.map((x, i) =>
+    roles[i] === 'statement' ? canonicalBranch(ce, x) : x
+  );
+}
 
 function applyOperatorDefinition(
   ce: ComputeEngine,
@@ -4210,16 +4236,17 @@ function applyOperatorDefinition(
   if (opDef.lazy) {
     // If we have a lazy function, we don't canonicalize the arguments
     let xs = rawOps ?? boxOperands(ce, ops, RAW_OPERAND);
-    // A bare `N` or `D` held at a value operand of these operators is a
-    // variable (`devolveAtValuePositions`). The other lazy operators hold
-    // a name, a pattern, a type or an unevaluated form at their `any`
-    // parameters (`Assign`, `Hold`, `Head`, `Match`), and keep the operand
-    // as written.
-    // Every operand of these operators is a value, whatever its position: a
-    // comparison is a chain of any length (`Equal(2, 2, N)`), although its
-    // signature lists two parameters.
-    if (LAZY_VALUE_OPERAND_HEADS.has(name) && !opDef.inferredSignature)
-      xs = devolveValueElements(ce, xs);
+    // A bare `N` or `D` held at an operand whose role is `value` (the
+    // `operands` handler of the definition) is a variable
+    // (`devolveAtValuePositions`). The other operands of a lazy operator are
+    // `raw` by default: they hold a name, a pattern, a type or an
+    // unevaluated form (`Assign`, `Hold`, `Head`, `Match`), and keep the
+    // operand as written. The role, not the signature, says which operand is
+    // a value: a comparison is a chain of any length (`Equal(2, 2, N)`),
+    // although its signature lists two parameters.
+    const roles = opDef.operandRoles(xs);
+    if (roles !== undefined && !opDef.inferredSignature)
+      xs = devolveValueOperands(ce, xs, roles);
     // A parameter with a default value that the call leaves out receives its
     // default operand, here, before the `canonical` handler and the
     // signature check see the operands. The inserted operand is the
@@ -4234,6 +4261,19 @@ function applyOperatorDefinition(
         opDef.signature.type,
         parameterDefaultOperands(ce, opDef)
       );
+    // An operator without a `canonical` handler keeps its operands as
+    // written, except a `statement` operand, which is canonicalized here as
+    // a branch (`canonicalBranch()`). For a binder (a `scoped` flag with a
+    // binding-site selector), `canonicalizeBinder()` calls this function
+    // after it has declared the bound variables in the scope of the
+    // operator, so a statement operand sees them. A `canonical` handler
+    // receives the statement operands as written and canonicalizes them
+    // itself.
+    if (!opDef.canonical && roles !== undefined) {
+      const filledRoles =
+        roles.length === xs.length ? roles : opDef.operandRoles(xs)!;
+      xs = canonicalStatementOperands(ce, xs, filledRoles);
+    }
     if (opDef.canonical) {
       let failure: { error: unknown } | undefined;
       try {
@@ -4399,7 +4439,22 @@ function applyOperatorDefinition(
       ? boxInternal
       : box;
   const xs: Expression[] = [];
-  for (const x of ops) xs.push(boxOne(ce, x));
+  if (opDef.operands === undefined) for (const x of ops) xs.push(boxOne(ce, x));
+  else {
+    // An operand whose role is `statement` is canonicalized as a branch
+    // (`canonicalBranch()`), before the `canonical` handler, if any, runs:
+    // the handler of an operator that is not lazy receives canonical
+    // operands. The roles are read from the operands as written.
+    const written = boxOperands(ce, ops, RAW_OPERAND);
+    const roles = opDef.operandRoles(written)!;
+    ops.forEach((x, i) =>
+      xs.push(
+        roles[i] === 'statement'
+          ? canonicalBranch(ce, written[i])
+          : boxOne(ce, x)
+      )
+    );
+  }
 
   // A symbolic `Spread` operand (`f(...p)` where `p` is not a literal tuple
   // — a literal one already spliced to a `Sequence` when the operand

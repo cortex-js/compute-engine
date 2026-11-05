@@ -37,6 +37,12 @@ import {
   tuplePatternNames,
 } from '../boxed-expression/tuple-pattern.js';
 import { isInBranch, takePairedFunctionNames } from '../assignment-locals.js';
+import {
+  everyOperand,
+  OPAQUE_ROLE,
+  RAW_ROLE,
+  STATEMENT_ROLE,
+} from './operand-roles.js';
 import { instantiatedResultTypeOverActuals } from '../boxed-expression/generic-instantiation.js';
 import { actualOfDescriptor } from '../boxed-expression/derive-application-type.js';
 import {
@@ -5894,6 +5900,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
        * for example, the argument will be a `Latex` expression.
        */
       lazy: true,
+      // The operands are kept as written: an assignment there is valid.
+      operands: everyOperand(OPAQUE_ROLE),
       complexity: 500,
       signature: '((string|expression<ErrorCode>), expression?) -> nothing',
       examples: ['[1, RuntimeError("zero")]'],
@@ -5905,6 +5913,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Structured error code with optional arguments.',
       complexity: 500,
       lazy: true,
+      // The operands are kept as written: an assignment there is valid.
+      operands: everyOperand(OPAQUE_ROLE),
       signature: '(string, any*) -> error',
       examples: ['[1, RuntimeError(ErrorCode("out-of-range", 5))]'],
       canonical: (args, { engine: ce }) => {
@@ -6137,6 +6147,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'Hold an expression, preventing it from being canonicalized or evaluated until `ReleaseHold` is applied to it',
       lazy: true,
+      // The held expression is kept as written: an assignment there is valid.
+      operands: everyOperand(OPAQUE_ROLE),
       // QUOTE, not may-evaluate: `Hold` never evaluates its content, so the
       // content contributes NO effects — `effectsOf(Hold(Random()))` is the
       // empty set and `Hold(Random())` is pure (`docs/EFFECTS-MODEL.md`, the
@@ -6321,6 +6333,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `lazy` so the type operand stays raw (a type-name symbol such as `real`
       // is not auto-declared as a variable).
       lazy: true,
+      // The ascribed expression is a statement when `Typed` annotates the
+      // last statement of a function body: an assignment there is valid.
+      // The `canonical` handler canonicalizes it.
+      operands: (ops) =>
+        ops.map((_, i) => (i === 0 ? STATEMENT_ROLE : RAW_ROLE)),
       // An ascription never applies its operand: `Typed(x => Random(), T)`
       // only states a type for the literal. Without this flag both effect
       // channels read the first operand as an invoking position (the default

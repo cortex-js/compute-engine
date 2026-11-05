@@ -3364,7 +3364,7 @@ export class Parser {
    *
    * The FUNCTION form is what the engine dispatches on: a bare `Break` SYMBOL
    * canonicalizes to an error (`canonicalStatement` in
-   * `library/control-structures.ts`), precisely so this shape cannot be
+   * `compute-engine/statement-position.ts`), precisely so this shape cannot be
    * confused with a variable reference.
    *
    * Only the value-less forms are surface syntax. `Break(v)` exists in the

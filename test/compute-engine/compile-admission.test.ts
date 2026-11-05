@@ -1835,11 +1835,42 @@ describe('The paths of the code that meet after a node (R3)', () => {
     );
   });
 
-  // The guard and the body of a case are held raw; the check reads their
-  // canonical form, also with captures.
-  test('a Match body with captures that assigns', () => {
-    declinesInvalid(
+  // The body of a case is a statement: an assignment there to a local of the
+  // block is valid, and the compiled code gives the value of the interpreter.
+  test('a Match body that assigns a local of the block', () => {
+    const json: MathJsonExpression = [
+      'Block',
+      ['Assign', 'a', 0],
       [
+        'Match',
+        'x',
+        ['MatchCase', 1, ['Assign', 'a', 2]],
+        ['MatchCase', '_', ['Assign', 'a', 3]],
+      ],
+      'a',
+    ];
+    const r = compile(engine().box(json), {
+      to: 'javascript',
+      fallback: false,
+    });
+    expect(r.success).toBe(true);
+    expect(r.run!({ x: 1 })).toBe(2);
+    expect(r.run!({ x: 4 })).toBe(3);
+    for (const x of [1, 4]) {
+      const interpreter = engine();
+      interpreter.assign('x', x);
+      expect(interpreter.box(json).evaluate().re).toBe(x === 1 ? 2 : 3);
+    }
+  });
+
+  // The guard is held raw; the body is a statement, which the `canonical`
+  // handler of `MatchCase` keeps as written. With captures, the
+  // assignment of a list to the local `p`, first a number, is not a static
+  // error: the static type of `p` is widened to the union of the two. The
+  // compilation declines, because `p` has values of two shapes.
+  test('a Match body with captures that assigns', () => {
+    const r = compile(
+      engine().box([
         'Block',
         ['Assign', 'p', 0],
         [
@@ -1853,9 +1884,11 @@ describe('The paths of the code that meet after a node (R3)', () => {
           ['MatchCase', '_', 0],
         ],
         ['Multiply', 2, 'p'],
-      ],
-      'javascript'
+      ]),
+      { to: 'javascript' }
     );
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/different shapes/);
   });
 
   // A guard is an operand: a block with an assignment there declines.

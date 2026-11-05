@@ -1379,6 +1379,10 @@ collection contracts. In particular:
   unevaluated ones, so the handler's work is lost: `0 < D(x^2, x)` once stayed
   unevaluated instead of becoming `0 < 2x`. A non-lazy operator does not have
   this problem, because its operands are evaluated before the handler runs.
+  An operator that is not lazy can keep a statement operand (a body that its
+  handler runs) unevaluated with the `operands` handler
+  (`OperatorDefinitionFlags`): only a `value` operand is evaluated before the
+  handler.
 - `isFinite === false` means "not a finite number". It is also the answer for a
   value that is not a number at all (a tuple, a list, a string), so it does not
   prove that a value is infinite. Check `isNumber` before reading
