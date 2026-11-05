@@ -27,7 +27,11 @@ import {
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
   stripMissingFromType,
 } from '../../common/type/utils.js';
-import { couldMatch, isSubtype } from '../../common/type/subtype.js';
+import {
+  couldMatch,
+  isSubtype,
+  provablyDisjoint,
+} from '../../common/type/subtype.js';
 import {
   typeToIdentityKey,
   typeToString,
@@ -86,7 +90,10 @@ import {
   userFunctionLiteral,
   userFunctionParamsAreScalar,
 } from './compile-assignment-checks.js';
-import { isPolymorphicType } from '../../common/type/instantiate.js';
+import {
+  hasFreeTypeVariables,
+  isPolymorphicType,
+} from '../../common/type/instantiate.js';
 import { strictLanes, typeHasComplexLeaf } from './compiler-mode.js';
 import { compileValueOperand } from './compile-statements.js';
 import {
@@ -103,6 +110,7 @@ import { tempVar } from './compiler-naming.js';
 import { isEmissionSkippable } from './compile-cse.js';
 import { jsComplexObjectTest } from './compiler-type-facts.js';
 import {
+  containsEarlyReturn,
   isProvablyCollectionValuedBody,
   isProvablyCollectionValuedClauseSet,
 } from './compile-conditions.js';
@@ -1472,31 +1480,164 @@ function valueDefaultsRef(
 }
 
 /**
- * The declared result of the user function `h` when it is a scalar (a
- * number or a boolean) that the body contradicts by constructing a
- * collection (`isProvablyCollectionValuedBody`), or `undefined`. The
- * interpreter refuses with an `incompatible-type` error each application
- * of such a function that receives no collection argument (option (a) of
- * CE-707). The test reads the signature and the body, and builds no call:
- * the construction of a call can narrow the type of a free symbol among
- * its arguments.
+ * The declared result of the user function `h` when the body contradicts
+ * it, or `undefined`. The body contradicts the result in two cases. The
+ * type of the value it computes has no value in common with the declared
+ * result (the body `t > 0` under the result `number`); `own` is then that
+ * type. Or the result is a scalar (a number or a boolean) and the body
+ * constructs a collection (`isProvablyCollectionValuedBody`); `own` is then
+ * `undefined`. The interpreter refuses with an
+ * `incompatible-type` error each application of such a function that
+ * receives no collection argument (option (a) of CE-707). The compiled code
+ * would read the declared result instead and give a value: `g(3) + 1` gave
+ * `2` (`true + 1`) for `g: (x: number) -> number` and `g := t ↦ t > 0`.
+ *
+ * A generic result that is the type of a parameter
+ * (`(x: T) -> T where T: broadcastable<number>`) is read for one
+ * application to a scalar: the result is then a scalar of the bound's
+ * element type, so a body that constructs a collection contradicts it. The
+ * interpreter does not check the result of a generic function against its
+ * declaration (rule G10 of the generic function literals design, 2026-08-04:
+ * the result is a trusted ascription), so with `g := t ↦ (t, t^2)` and
+ * `x: list<real>`, the static type of `g(x)` is `list<real>` while its value
+ * is a list of points; the compiled `Sum(Rest(g(x)))` gave the string
+ * `"02,43,9"` where the interpreter gives `(5, 13)`.
+ *
+ * The test reads the signature and the body, and builds no call: the
+ * construction of a call can narrow the type of a free symbol among its
+ * arguments.
  */
-export function contradictedScalarResult(
+export function contradictedDeclaredResult(
   engine: ComputeEngine,
   h: string
-): Type | undefined {
-  const result = functionResult(userFunctionSignature(engine, h));
+): { result: Type; own?: Type } | undefined {
+  let result = functionResult(userFunctionSignature(engine, h));
   if (result === undefined) return undefined;
-  if (!isSubtype(result, 'number') && !isSubtype(result, 'boolean'))
-    return undefined;
+  if (
+    isCorrelatedGenericResult(engine, h) &&
+    typeof result === 'object' &&
+    result.kind === 'broadcastable'
+  )
+    result = result.elements;
   const literal = userFunctionLiteral(engine, h);
   const body = literal?.ops[0];
-  const contradicted =
-    literal === undefined
-      ? isProvablyCollectionValuedClauseSet(engine, h, new Set([h]))
-      : body !== undefined &&
-        isProvablyCollectionValuedBody(body, new Set([h]));
-  return contradicted ? result : undefined;
+  if (isSubtype(result, 'number') || isSubtype(result, 'boolean')) {
+    if (literal === undefined)
+      return isProvablyCollectionValuedClauseSet(engine, h, new Set([h]))
+        ? { result }
+        : undefined;
+    if (
+      body !== undefined &&
+      isProvablyCollectionValuedBody(body, new Set([h]))
+    )
+      return { result };
+  }
+  // A value type with no value in common with the result is refused by the
+  // interpreter whatever the result is.
+  const own = body === undefined ? undefined : bodyValueType(body);
+  if (
+    own !== undefined &&
+    !hasFreeTypeVariables(own) &&
+    !hasFreeTypeVariables(result) &&
+    provablyDisjoint(own, result)
+  )
+    return { result, own };
+  return undefined;
+}
+
+/**
+ * The type of the value that the function-literal body `body` returns, read
+ * under its return ascription, or `undefined` when it cannot be read. The
+ * stored literal wraps the value in `Typed(<value>, '<declared result>')`,
+ * whose own type is the declared result, so the ascription is removed
+ * first. A body with a `Return` that leaves the function is not read: the
+ * last statement is then not the only value it can return
+ * (`Block(Return(0), [cos(t), sin(t)])` returns `0`). The type `never` (a
+ * body that only fails, or whose type is not yet known) is not read either.
+ */
+function bodyValueType(body: Expression): Type | undefined {
+  if (containsEarlyReturn(body)) return undefined;
+  let e = body;
+  for (;;) {
+    if (isFunction(e, 'Block') && e.nops >= 1) e = e.ops[e.nops - 1];
+    else if (isFunction(e, 'Typed') && e.nops >= 1) e = e.ops[0];
+    else break;
+  }
+  const t = e.type.type;
+  return t === 'never' ? undefined : t;
+}
+
+/**
+ * Whether a call or a value of a function whose body contradicts its
+ * declared result (`contradictedDeclaredResult`) declines.
+ *
+ * A body whose value is a SCALAR of a type disjoint from the result
+ * declines on every target and for every call: the interpreter refuses
+ * that value whatever the arguments are, because a scalar is never the
+ * broadcast of the result (`conformsUnderBroadcast` in `library/core.ts`).
+ * With `g: (xs: list<real>) -> number` and `g := xs ↦ Length(xs) > 0`, the
+ * compiled `g(x) + 1` gave `2`.
+ *
+ * Any other contradiction (a body that constructs a collection) declines
+ * only when `collectionCase` is true. The caller sets it false when a
+ * collection argument can reach a parameter that takes it whole (the
+ * interpreter then accepts the broadcast of the result), and on a target
+ * with its own definition lowering (the shader targets), which declines
+ * such a body when it emits the definition. A collection value whose type
+ * is disjoint from the result, under a collection argument bound whole,
+ * therefore compiles (`g: (xs: list<real>) -> list<real>` and
+ * `g := xs ↦ (xs[1], xs[2])`): the interpreter refuses that value, an error
+ * that the static type of the call does not show, so the compiled value is
+ * unspecified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code").
+ */
+export function contradictionDeclines(
+  c: { result: Type; own?: Type } | undefined,
+  collectionCase: boolean
+): c is { result: Type; own?: Type } {
+  if (c === undefined) return false;
+  if (c.own !== undefined && isScalarShaped(c.own)) return true;
+  return collectionCase;
+}
+
+/** The sentence of a decline message that says how the body of `h`
+ * contradicts its declared result (`contradictedDeclaredResult`). */
+export function contradictedResultReason(
+  h: string,
+  c: { result: Type; own?: Type }
+): string {
+  if (c.own !== undefined)
+    return (
+      `the declaration of '${h}' says it returns '${typeToString(c.result)}', ` +
+      `but its body computes a value of type '${typeToString(c.own)}'.`
+    );
+  return (
+    `the declaration of '${h}' says it returns a scalar ` +
+    `('${typeToString(c.result)}'), but its body constructs a collection.`
+  );
+}
+
+/** True when the declared signature of `h` is generic and its result is a
+ * type variable that is also the type of a parameter (`(x: T) -> T where
+ * T: …`): the result of a call then has the type of that argument. */
+function isCorrelatedGenericResult(engine: ComputeEngine, h: string): boolean {
+  const def = engine.lookupDefinition(h);
+  if (!def) return false;
+  const t =
+    'value' in def && def.value !== undefined
+      ? def.value.type.type
+      : 'operator' in def
+        ? def.operator.signature.type
+        : undefined;
+  if (t === undefined || typeof t === 'string' || t.kind !== 'signature')
+    return false;
+  const r = t.result;
+  if (typeof r !== 'object' || r.kind !== 'variable') return false;
+  return (t.args ?? []).some(
+    (a) =>
+      typeof a.type === 'object' &&
+      a.type.kind === 'variable' &&
+      a.type.name === r.name
+  );
 }
 
 /** `userFunctionValueRef` without the wrapper that fills the parameters
@@ -1523,18 +1664,20 @@ function userFunctionValueRefWithoutDefaults(
   // error for each element. A target with its own definition lowering (the
   // shader targets) declines when it emits the definition.
   // A consumer applies a function value with scalar parameters to scalars
-  // only.
+  // only. A body whose value is a scalar of a type disjoint from the
+  // result declines on every target (`contradictionDeclines`).
+  const contradicted = contradictedDeclaredResult(engine, h);
   if (
-    !target.userFunctions?.lowering &&
-    userFunctionParamsAreScalar(engine, h) &&
-    contradictedScalarResult(engine, h) !== undefined
+    contradictionDeclines(
+      contradicted,
+      !target.userFunctions?.lowering && userFunctionParamsAreScalar(engine, h)
+    )
   )
     throw new Error(
-      `Could not compile the function value \`${h}\`: the declaration of ` +
-        `'${h}' says it returns a scalar, but its body constructs a ` +
-        `collection. The interpreter gives an \`incompatible-type\` error ` +
-        `for each application. Fix the declaration (e.g. ` +
-        `'-> list<number>') or evaluate instead.`
+      `Could not compile the function value \`${h}\`: ` +
+        contradictedResultReason(h, contradicted) +
+        ` The interpreter gives an \`incompatible-type\` error for each ` +
+        `application. Fix the declaration or evaluate instead.`
     );
   // A value of the complex lane at a parameter declared real: the lane
   // carries the value as a `{re, im}` object, also when it is real

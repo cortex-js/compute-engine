@@ -110,7 +110,9 @@ import { resetCompilationMemos, tryConstantFold } from './compile-folding.js';
 import {
   absentPointType,
   appliedArgumentTypeMismatch,
-  contradictedScalarResult,
+  contradictedDeclaredResult,
+  contradictedResultReason,
+  contradictionDeclines,
   appliedLiteralNamedPointCall,
   hasUniformComplexScalarElements,
   describedLaneMismatch,
@@ -1318,20 +1320,31 @@ export function tryCompileUserFunction(
   // `[t, t]`, `h(3)` is an error). (Option (a) of CE-707.) A target with
   // its own definition lowering (the shader targets) declines the same call
   // when it emits the definition.
-  // A call with a collection argument broadcasts, and is not refused.
-  const contradicted =
-    args.length > 0 &&
-    !target.userFunctions?.lowering &&
-    args.every((a) => isScalarShaped(a.type.type))
-      ? contradictedScalarResult(engine, h)
-      : undefined;
-  if (contradicted !== undefined)
+  // A collection argument at a parameter that takes it whole may give the
+  // broadcast of the declared result (`conformsUnderBroadcast` in the
+  // `Typed` handler of `library/core.ts`), and such a call is not refused.
+  // When every parameter is scalar, a collection argument maps the function
+  // over its elements instead, and each application receives a scalar:
+  // with `g: (x: number) -> number`, `g := t ↦ (t, t^2)` and
+  // `x: list<real>`, the interpreter refuses `g(x)` "while applying 'g'
+  // element-wise", so that call declines too. A body whose value is a
+  // scalar of a type disjoint from the result declines in every call, on
+  // every target, also with no argument (`contradictionDeclines`).
+  const contradicted = contradictedDeclaredResult(engine, h);
+  if (
+    contradictionDeclines(
+      contradicted,
+      args.length > 0 &&
+        !target.userFunctions?.lowering &&
+        (args.every((a) => isScalarShaped(a.type.type)) ||
+          userFunctionParamsAreScalar(engine, h))
+    )
+  )
     throw new Error(
-      `Could not compile \`${h}\`: the declaration of '${h}' says it ` +
-        `returns a scalar ('${typeToString(contradicted)}'), but its body ` +
-        `constructs a collection. The ` +
-        `interpreter gives an \`incompatible-type\` error for such a call. ` +
-        `Fix the declaration (e.g. '-> list<number>') or evaluate instead.`
+      `Could not compile \`${h}\`: ` +
+        contradictedResultReason(h, contradicted) +
+        ` The interpreter gives an \`incompatible-type\` error for such a ` +
+        `call. Fix the declaration or evaluate instead.`
     );
   // An argument that can be a collection, at a parameter declared
   // `expression` that the body reads, is bound whole by the interpreter,

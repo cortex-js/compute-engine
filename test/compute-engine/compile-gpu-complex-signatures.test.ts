@@ -548,13 +548,24 @@ describe('GPU: the declared result type and the value of the body', () => {
     for (const v of SAMPLES) expectGLSLValue(ce, 's(x+iy)', v);
   });
 
+  // The point body is declined where the definition is emitted. The boolean
+  // body is declined earlier, at the call: its value is a scalar of a type
+  // that has no value in common with `complex` (`contradictionDeclines()` in
+  // `compile-callbacks.ts`).
   it('a value that is not a number under a complex result fails closed', () => {
-    for (const body of ['(t, 2t)', 't > 0']) {
+    for (const [body, message] of [
+      [
+        '(t, 2t)',
+        /Could not compile `Typed`: the ascribed type `complex` says the value is complex, but the value .* is not a number/,
+      ],
+      [
+        't > 0',
+        /Could not compile `s`: the declaration of 's' says it returns 'complex', but its body computes a value of type 'boolean'/,
+      ],
+    ] as const) {
       const ce = engineWith(['s', '(real) -> complex', `t \\mapsto ${body}`]);
       for (const run of [glsl, wgsl])
-        expect(() => run(ce, 's(x)')).toThrow(
-          /Could not compile `Typed`: the ascribed type `complex` says the value is complex, but the value .* is not a number/
-        );
+        expect(() => run(ce, 's(x)')).toThrow(message);
     }
   });
 

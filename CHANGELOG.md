@@ -19,6 +19,17 @@
   shape" since 0.178.0. It is now typed `list<number>`, and it compiles: in
   the example of the issue, `n = 3` and `l = 4` give `[1, 1, 2, 4, 7]`, as
   the interpreter does.
+- **A compiled call of a user function whose body does not give its declared
+  result type declines, where it gave a wrong value.** The compiled code used
+  the declared result and did not check the body. With
+  `g: (x: number) -> number` and `g := t ↦ t > 0`, the compiled `g(b) + 1`
+  gave `2`, and the interpreter gives an `incompatible-type` error. With
+  `g: (x: T) -> T where T: broadcastable<number>`, `g := t ↦ (t, t^2)` and
+  `x: list<real>`, the compiled `Sum(Rest(g(x)))` gave the string
+  `"02,43,9"`, and the interpreter gives `(5, 13)`. Such a call now declines,
+  and `evaluate()` gives the value. This includes a call that maps the
+  function over a list argument. A body with a `Return` before its last
+  statement is not checked.
 
 ## 0.179.0 _2026-11-04_
 
