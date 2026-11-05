@@ -361,52 +361,6 @@ cache in `library/map-auto-compile.ts`; the controls localize the issue to
 reuse of that cache rather than interpreter closure capture.
 
 
-### CE-763. `Contains` of a list of valueless symbols gives `False` for a value that a symbol can hold
-
-**Status:** decision needed; wrong value, S. The fix changes a documented
-contract (found 2026-11-04 by session `cebatch-763` at `addb0d7fd`).
-**Witness:** plausible; with `a` and `b` declared `integer` and no value,
-`Contains([a, b], 3)` evaluates to `False`; it should stay unevaluated,
-because `a` can be 3.
-
-The `Contains` handler (`library/collections.ts`) compares each element with
-the value by structural identity (`isSame`) and answers `False` when no
-element is the same expression. This is the documented contract today:
-
-- The reference page (`82-reference-collections.md` of cortexjs.io, and the
-  `description` of `Contains`) says that `Contains(xs, v)` is the same as
-  `Any(xs, (e) |-> e === v)`, with structural identity. `Same(a, 3)` is
-  `False` for a valueless `a`, so `Any([a, b], (e) |-> e === 3)` is `False`.
-- The comment of `searchMayStillMatch()` (`collection-utils.ts`) says that
-  `Contains`, `IndexOf` and `Count` compare structurally, "so an unknown there
-  is simply a different expression". Only `Element` and `NotElement` leave the
-  answer open: `Element(3, [a, b])` stays unevaluated today.
-- `IndexOf([a, b], 3)` is `0` and `Count([a, b], 3)` is `0` today.
-
-Options:
-
-- (a) Keep the contract. `Contains([a, b], 3)` stays `False`. Remove this
-  entry, and add an example to the reference page: an element with an unknown
-  is a different expression; use `Element(3, [a, b])` to leave the answer open
-  (it stays unevaluated). No code change.
-- (b) Change `Contains` only: when no element is the same expression and an
-  element or the value has an unknown, stay unevaluated (the test
-  `searchMayStillMatch()` that `Element` uses). `Contains([a, b], 3)` stays
-  unevaluated; `Contains([a, 3], 3)` is `True`; `Contains([1, 2], 3)` is
-  `False`. `IndexOf([a, b], 3)` stays `0`, so the two operators disagree, and
-  the equivalence with `Any(xs, (e) |-> e === v)` no longer holds. Reference
-  page and `description` change.
-- (c) Change all three search operators (`Contains`, `IndexOf`,
-  `Count(xs, v)`) as in (b): `IndexOf([a, b], 3)` and `Count([a, b], 3)` also
-  stay unevaluated. The equivalence with `Any` and `===` still fails unless
-  `Same` also changes, which is a larger change of its own. Reference pages of
-  the three operators change.
-
-Recommendation: (a). `Contains`, `IndexOf` and `Count` are documented as
-structural searches, like `===`, and `Element` already gives the
-mathematical membership that this entry asks for. If nothing is decided, (a)
-is what the engine does.
-
 ### CE-754. The chained `At` type handler gives wrong types for a tuple, record or gather step
 
 **Status:** ready; defect, M.
@@ -2013,9 +1967,10 @@ with another route for the points it then refuses.
 
 ### CE-782. `Series(sin x).N()` and `Series(exp x).N()` give `NaN`
 
-**Status:** decision needed; wrong value, S. The fix changes a documented
-contract (found 2026-11-04 by session `cebatch-782` at
-`eb93a9f86650c54af8ce150e668dc16b62284959`).
+**Status:** ready; wrong value, S. User decision 2026-11-05: option (b),
+the value that Mathematica's `N` gives for a series. The fix changes a
+documented contract: the two pages, the `description` of `BigO` and the
+four test assertions named below change with it.
 **Witness:** plausible; `Series(sin x).N()` and `Series(exp x).N()` give
 `NaN`, a one-line program.
 
