@@ -27,7 +27,11 @@
  *
  * Options:
  *   --queue <file>        The queue file (required).
- *   --items CE-1,CE-2     Run only these items of the queue, in this order.
+ *   --items CE-1,CE-2     Run these items of the queue, in this order.
+ *                         Without it, run the field `batch` of the queue
+ *                         (`roadmap-candidates.ts --batch <n>`). With
+ *                         neither, the script refuses: the whole queue holds
+ *                         flagged and low-priority candidates.
  *   --out <dir>           The output directory (required).
  *   --concurrency <n>     At most this many sessions in this repo (default 3).
  *   --timeout-min <n>     Stop a session after this many minutes (default 180).
@@ -65,12 +69,18 @@ if (!values.queue || !values.out) {
 
 const concurrency = Number(values.concurrency);
 const timeoutMs = Number(values['timeout-min']) * 60_000;
-const queue = JSON.parse(readFileSync(values.queue, 'utf8')).candidates;
+const queueFile = JSON.parse(readFileSync(values.queue, 'utf8'));
+const queue = queueFile.candidates;
 const byId = new Map(queue.map((c) => [c.id, c]));
 
-let items = queue;
-if (values.items) {
-  items = values.items.split(',').map((id) => {
+const ids = values.items ? values.items.split(',') : (queueFile.batch ?? []);
+if (ids.length === 0) {
+  console.error('No items: pass --items, or make the queue with roadmap-candidates.ts --batch <n>.');
+  process.exit(2);
+}
+let items;
+{
+  items = ids.map((id) => {
     const item = byId.get(id.trim());
     if (!item) {
       console.error(`${id} is not in the queue file.`);

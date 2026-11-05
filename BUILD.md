@@ -38,6 +38,8 @@ files.
 - `add-operator`: implementation across evaluation, types, syntax, targets, and
   tests.
 - `benchmarks`: choosing a harness and interpreting reproducible measurements.
+- `roadmap-batch`: asking the pending ROADMAP decisions, then running a batch
+  of ready items, one headless session per item, and reporting the results.
 
 Skills refer to this guide and the architecture/style documents; they do not
 maintain copies of their rules. Keep shared skill instructions portable across

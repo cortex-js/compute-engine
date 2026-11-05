@@ -20,13 +20,37 @@
  * same time should take candidates of different areas, so that they do not
  * edit the same files.
  *
+ * The candidates are ranked by these keys, in this order:
+ * 1. a candidate with the flag "low priority" or "crafted witness" comes last;
+ * 2. the kind: `wrong value`, then `defect`, then the other kinds;
+ * 3. the strength of the witness: `corpus`, then `plausible`, then none;
+ * 4. a candidate with no flag comes before one with a flag;
+ * 5. the newest entry first (the higher reference number).
+ * A wrong value comes first because it gives a user a wrong result with no
+ * error. A performance or capability entry comes after the defects because
+ * its end is less clearly bounded. The newest entries come first among
+ * equals because their text describes the current code.
+ *
+ * `--batch <n>` picks the batch from the ranked list: it takes the first
+ * candidate of each ROADMAP section in turn, so that the sessions of a batch
+ * work in different parts of the engine and can run at the same time. It
+ * skips a candidate with the flag "low priority", "crafted witness" or "same
+ * cause as", and, without `--include-flagged`, every candidate with a flag.
+ *
  * Options:
- *   --json <file>   Also write the candidates as a JSON queue to <file>.
- *   --rejected      Also list each `ready` entry that is not a candidate,
- *                   with the reason.
+ *   --json <file>       Also write the candidates as a JSON queue to <file>,
+ *                       ranked, with the batch in the field `batch`.
+ *   --batch <n>         Pick a batch of <n> candidates (see above).
+ *   --include-flagged   Let `--batch` pick a candidate with sub-items, a plan
+ *                       document or a linked issue.
+ *   --rejected          Also list each `ready` entry that is not a candidate,
+ *                       with the reason.
+ *   --decisions         List only the `decision needed` entries, newest
+ *                       first, and the number of `design needed` and
+ *                       `proposed` entries.
  *
  * Example:
- *   npx tsx scripts/roadmap-candidates.ts --rejected
+ *   npx tsx scripts/roadmap-candidates.ts --batch 20 --json /tmp/queue.json
  */
 import { parseArgs } from 'node:util';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -161,16 +185,70 @@ function classify(entry: Entry, present: Set<string>): { candidate?: Candidate; 
   };
 }
 
+const refNumber = (id: string) => Number(id.slice(3));
+
+/** A flag that keeps a candidate out of every batch. */
+const excludedFlag = (flag: string) =>
+  flag === 'low priority' || flag === 'crafted witness' || flag.startsWith('same cause as');
+
+/** The sort keys of the ranking in the header, smaller first. */
+function rankKeys(c: Candidate): number[] {
+  const strength = { corpus: 0, plausible: 1 }[c.witness ?? ''] ?? 2;
+  const kind = { 'wrong value': 0, defect: 1 }[c.kind] ?? 2;
+  return [c.flags.some(excludedFlag) ? 1 : 0, kind, strength, c.flags.length > 0 ? 1 : 0, -refNumber(c.id)];
+}
+
+function compareRank(a: Candidate, b: Candidate): number {
+  const ka = rankKeys(a);
+  const kb = rankKeys(b);
+  for (let i = 0; i < ka.length; i++) if (ka[i] !== kb[i]) return ka[i] - kb[i];
+  return 0;
+}
+
+/** Take the best candidate of each section in turn until `size` are taken. */
+function pickBatch(ranked: Candidate[], size: number, includeFlagged: boolean): Candidate[] {
+  const eligible = ranked.filter((c) =>
+    includeFlagged ? !c.flags.some(excludedFlag) : c.flags.length === 0
+  );
+  const bySection = new Map<string, Candidate[]>();
+  for (const c of eligible) bySection.set(c.area, [...(bySection.get(c.area) ?? []), c]);
+  const batch: Candidate[] = [];
+  while (batch.length < size && [...bySection.values()].some((l) => l.length > 0)) {
+    for (const list of bySection.values()) {
+      const next = list.shift();
+      if (next && batch.length < size) batch.push(next);
+    }
+  }
+  return batch;
+}
+
+function listDecisions(entries: Entry[]) {
+  const waiting = entries
+    .filter((e) => /^decision needed\b/.test(e.status))
+    .sort((a, b) => refNumber(b.id) - refNumber(a.id));
+  const count = (state: string) => entries.filter((e) => e.status.startsWith(state)).length;
+  console.log(`${waiting.length} entries wait for a decision (newest first):\n`);
+  for (const e of waiting) console.log(`  ${e.id.padEnd(8)} [${e.area}] ${e.title}`);
+  console.log(`\nAlso: ${count('design needed')} design needed, ${count('proposed')} proposed.`);
+}
+
 function main() {
   const { values } = parseArgs({
     options: {
       json: { type: 'string' },
+      batch: { type: 'string' },
+      'include-flagged': { type: 'boolean', default: false },
       rejected: { type: 'boolean', default: false },
+      decisions: { type: 'boolean', default: false },
     },
   });
 
   const text = readFileSync(join(root, 'ROADMAP.md'), 'utf8');
   const entries = parseEntries(text);
+  if (values.decisions) {
+    listDecisions(entries);
+    return;
+  }
   const present = new Set(entries.map((e) => e.id));
   const ready = entries.filter((e) => /^ready\b/.test(e.status));
 
@@ -181,6 +259,11 @@ function main() {
     if (candidate) candidates.push(candidate);
     else rejected.push({ id: entry.id, title: entry.title, reason: reason! });
   }
+  candidates.sort(compareRank);
+
+  const batch = values.batch
+    ? pickBatch(candidates, Number(values.batch), values['include-flagged'])
+    : [];
 
   const byArea = new Map<string, Candidate[]>();
   for (const c of candidates) byArea.set(c.area, [...(byArea.get(c.area) ?? []), c]);
@@ -202,8 +285,18 @@ function main() {
     for (const r of rejected) console.log(`  ${r.id.padEnd(8)} ${r.reason.padEnd(40)} ${r.title.slice(0, 70)}`);
   }
 
+  if (batch.length > 0) {
+    console.log(`\n## Batch (${batch.length})`);
+    for (const c of batch) console.log(`  ${c.id.padEnd(8)} [${c.area}] ${c.title.slice(0, 80)}`);
+  }
+
   if (values.json) {
-    writeFileSync(values.json, JSON.stringify({ generated: new Date().toISOString(), candidates }, null, 2) + '\n');
+    const queue = {
+      generated: new Date().toISOString(),
+      batch: batch.map((c) => c.id),
+      candidates,
+    };
+    writeFileSync(values.json, JSON.stringify(queue, null, 2) + '\n');
     console.log(`\nQueue written to ${values.json}.`);
   }
 }
