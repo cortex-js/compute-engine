@@ -1669,14 +1669,6 @@ Open items, in priority order:
 enumerate it, the multi-set walk must resolve dependent bounds again at each
 iteration. This may be the same problem as CE-115.
 
-### CE-780. `\int_0^1 x` without a differential reports `x` as an unknown
-
-**Status:** ready; defect. Approved 2026-11-01.
-**Witness:** plausible; `\int_0^1 x\,dx` gives `[]`; an integral without `dx` is common input.
-
-`\int_0^1 x\,dx` gives `[]`; an integral without `dx` is common input. Found during the work of 2026-10-30 and 2026-10-31 (Item 13); the
-reproduction above is the record.
-
 ### CE-781. `D` of a definite integral in another variable stays unevaluated
 
 **Status:** ready; defect. Approved 2026-11-01.
