@@ -2110,17 +2110,6 @@ the user.
   clause. With `n: integer`, `Piecewise(…)` over integer branches runs on the
   interpreter in the mode today.
 
-### CE-743. Python: a block-local function called with a point repeats the tuple
-
-**Status:** ready; wrong value, S.
-**Witness:** plausible; Python `Block(q ≔ t ↦ 2t, q(p))` with `p = (3, 4)` gives `(3, 4, 3, 4)`; interpreter `(6, 8)`.
-
-`Block(q ≔ t ↦ 2t, q(p))` with `p: tuple<real, real>` and `p = (3, 4)`: the
-compiled Python gives `(3, 4, 3, 4)`, because Python's `*` repeats a tuple.
-The interpreter gives `(6, 8)`. The JavaScript target gives `(6, 8)`. The
-cause is the lowering of the block-local literal in `python-target.ts`: the
-product of a number and a tuple must be the product of each coordinate.
-
 ### CE-741. A complex argument to an untyped parameter that the body narrows to `real` gives `NaN` or a wrong value (JavaScript)
 
 **Status:** ready; wrong value, M. Starts after CE-712.2 is committed: it
