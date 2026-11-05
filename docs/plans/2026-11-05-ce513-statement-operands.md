@@ -1,9 +1,24 @@
 # Operand roles declared by the operator definition (issues #513 and #437, CE-811)
 
-Status: spec, revision 3. The user chose form A (the operand-role handler)
-on 2026-11-05 over a field for statement positions only; revision 3 adds the
-`held` role, which answers issue #437, and the three-commit plan. Waits for
-the user's approval of this revision; no code yet.
+Status: done. The user chose form A (the operand-role handler) on
+2026-11-05 over a field for statement positions only; revision 3 added the
+`held` role, which answers issue #437, and the three-commit plan, approved
+the same day. Implemented in `07b044c036f94054d78fd848c189fba8efb7dbba`
+(commit 1), `72bfcb782e1f30c8f3a1b1ae9e41b23a19b2b2fc` (commit 2) and
+`3ed3595e5cc9e948cebd400a17004cacd50a5b88` (commit 3). Points settled in
+the implementation that this text does not say: `opaque` and `raw` are
+valid only on a lazy operator, `held` only on a non-lazy one; a non-lazy
+operator with a `canonical` handler receives its statement operands already
+canonicalized as branches; `PREBOX_OPAQUE_HEADS` stays, because it is read
+before any definition lookup; a held literal list of more than 100 elements
+is zipped at once, not lazily, when every collection operand has a known
+finite count; a `List` of symbols at a `clause` position binds nothing (a
+host `Module` binds one name with `Set(k)`, or gives each name its own
+`bound` operand); a `bound` variable stays a free variable of the
+expression, as `D` and `Series` already had it; `OWN_INDEX_OUTSIDE_BINDERS`
+and `FLAT_CLAUSE_BINDERS` stay; the five selector helpers and
+`lambdaParamSites` are deleted, and `BindingSite` and `BindingSiteSelector`
+are no longer public.
 Records: GitHub issues cortex-js/compute-engine#513 (statement operands of
 `Do`, `While`, `Module`) and #437 (a `Mod` that reads its first operand
 before it is evaluated; Wolfram's `HoldFirst`), ROADMAP CE-811 (a defect of
