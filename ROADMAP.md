@@ -2103,35 +2103,6 @@ the user.
   clause. With `n: integer`, `Piecewise(…)` over integer branches runs on the
   interpreter in the mode today.
 
-### CE-749. The interpreter gives `Missing` for an absent element mapped by a literal
-
-**Status:** ready; wrong value, S.
-**Witness:** plausible; Interpreter: `Map(t ↦ 2t, PM)` gives `Missing` where the named form gives `NaN`, against the 2026-09-22 rule.
-
-With `PM: list<tuple<real, real> | missing>` and `PM = [(1, 2), Missing]`,
-and `f2 := t ↦ 2t`:
-
-- `Map(f2, PM)` evaluates to `[(2, 4), NaN]`: the named function binds
-  `Missing` to `t` and runs the body, and `2·Missing` is `NaN`.
-- `Map(t ↦ 2t, PM)`, with the same body as a literal, evaluates to
-  `[(2, 4), Missing]`.
-
-The rule for a parameter with no declared type is that it binds `Missing`
-and runs the body (user decision of 2026-09-22; the test "an absent element
-in a callback map" in `test/compute-engine/ce-712-2-call-site-variants.test.ts`).
-So the literal must give `[(2, 4), NaN]`. Find where the `Map` evaluation of
-a `Function` literal skips the body for an absent element, and make it run
-the body. This is an interpreter defect only. In compiled code the body of
-a callback over an absent element is unspecified since the decision of
-2026-11-01 (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code":
-`Map` binds the hole, and every operator of the body other than a discharge
-is unspecified on it), so the compiled literal route
-(`compileExprFunctionLiteral()` in
-`src/compute-engine/compilation/compile-function-literals.ts`) can stop
-declining a literal whose body reads its parameter over a list with absent
-points (`Map(t ↦ 2t, PM)`, `Map(t ↦ t[1], PM)`) without waiting for this
-fix.
-
 ### CE-743. Python: a block-local function called with a point repeats the tuple
 
 **Status:** ready; wrong value, S.
