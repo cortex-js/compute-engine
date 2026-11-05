@@ -151,6 +151,7 @@ import {
   isTupleShapedType,
   isTupleOrTupleUnionShapedType,
   isBroadcastableCollection,
+  isWalkableFiniteCollection,
   isBroadcastCollectionType,
   isDrawFreeBroadcast,
   isFiniteIndexedCollection,
@@ -427,7 +428,7 @@ import {
 import type { ErrorFrame } from './error-value.js';
 import { match } from './match.js';
 import { factor } from './factor.js';
-import { holdMap, holdMapAsync } from './hold.js';
+import { holdMap, holdMapAsync, isValueRole } from './hold.js';
 import {
   positiveSign,
   nonNegativeSign,
@@ -7761,12 +7762,16 @@ export class BoxedFunction
         // shortest source, so deferring them would make the SIZE of a
         // collection decide the semantics — a mismatch erroring under the eager
         // threshold and silently truncating above it.
+        // An operand that is not a `value` (a `held` operand) is not
+        // evaluated (`operandRoles()`).
+        const roles = def.operandRoles(this._ops!);
         const bops = this._evaluatesExponentExactly(options)
           ? [
               ...evaluateBroadcastLiftsOnce(
                 [this._ops![0]],
                 options,
-                this.operator
+                this.operator,
+                roles
               ),
               normalizeLiftedAbsence(
                 this._ops![1],
@@ -7774,7 +7779,12 @@ export class BoxedFunction
                 this.operator
               ),
             ]
-          : evaluateBroadcastLiftsOnce(this._ops!, options, this.operator);
+          : evaluateBroadcastLiftsOnce(
+              this._ops!,
+              options,
+              this.operator,
+              roles
+            );
         const liftError = this._liftedOperandError(bops);
         if (liftError !== undefined) return liftError;
         // An integer power of a square matrix is the matrix power, not the
@@ -7819,15 +7829,19 @@ export class BoxedFunction
               )
             : bops;
 
-        const lazy = withCallableBinding(this, () =>
-          lazyBroadcastMapIfNeeded(
-            this.engine,
-            this.operator,
-            cellOps,
-            isBroadcastableCollection,
-            numericApproximation
-          )
-        );
+        // A held literal list keeps its elements unevaluated in the cells
+        // only in the eager zip (`zipsHeldListCells()`).
+        const lazy = zipsHeldListCells(cellOps, roles)
+          ? undefined
+          : withCallableBinding(this, () =>
+              lazyBroadcastMapIfNeeded(
+                this.engine,
+                this.operator,
+                cellOps,
+                isBroadcastableCollection,
+                numericApproximation
+              )
+            );
         if (lazy) return lazy;
 
         const items =
@@ -7911,9 +7925,14 @@ export class BoxedFunction
         // elements against 3 — so it is reported instead of held.
         const mismatch = broadcastLengthMismatch(this.engine, this.ops!);
         if (mismatch) return mismatch;
+        // An operand that is not a `value` (a `held` operand) is held as it
+        // is (`operandRoles()`).
+        const roles = def.operandRoles(this.ops!);
         return this.engine.function(
           this.operator,
-          this.ops!.map((x) => x.evaluate(operandOptions(options)))
+          this.ops!.map((x, i) =>
+            isValueRole(roles, i) ? x.evaluate(operandOptions(options)) : x
+          )
         );
       }
       if (lambdaElementwise) {
@@ -7926,7 +7945,8 @@ export class BoxedFunction
         const bops = evaluateBroadcastLiftsOnce(
           this._ops!,
           options,
-          this.operator
+          this.operator,
+          def.operandRoles(this._ops!)
         );
         const liftError = this._liftedOperandError(bops);
         if (liftError !== undefined) return liftError;
@@ -8012,7 +8032,8 @@ export class BoxedFunction
         const declaredOps = evaluateBroadcastLiftsOnce(
           this._ops!,
           options,
-          this.operator
+          this.operator,
+          def.operandRoles(this._ops!)
         );
         const liftError = this._liftedOperandError(declaredOps);
         if (liftError !== undefined) return liftError;
@@ -9205,13 +9226,16 @@ export class BoxedFunction
         // Symbolic-length/infinite sources are deferred to the post-evaluation
         // broadcast (mirrors the sync path).
         // Broadcast rulings (2026-07-24) — mirrors the sync path in step 2,
-        // including running before the lazy form.
+        // including running before the lazy form, and leaving an operand
+        // that is not a `value` unevaluated.
+        const roles = def.operandRoles(this._ops!);
         const bops = this._evaluatesExponentExactly(options)
           ? [
               ...(await evaluateBroadcastLiftsOnceAsync(
                 [this._ops![0]],
                 options,
-                this.operator
+                this.operator,
+                roles
               )),
               normalizeLiftedAbsence(
                 this._ops![1],
@@ -9222,7 +9246,8 @@ export class BoxedFunction
           : await evaluateBroadcastLiftsOnceAsync(
               this._ops!,
               options,
-              this.operator
+              this.operator,
+              roles
             );
         // The rest of this step runs synchronously after the `await` above,
         // when the engine no longer has the context stack of this evaluation
@@ -9273,15 +9298,18 @@ export class BoxedFunction
                   )
                 : bops;
 
-            const lazy = withCallableBinding(this, () =>
-              lazyBroadcastMapIfNeeded(
-                this.engine,
-                this.operator,
-                cellOps,
-                isBroadcastableCollection,
-                numericApproximation
-              )
-            );
+            // A held literal list zips at once (mirrors the sync path).
+            const lazy = zipsHeldListCells(cellOps, roles)
+              ? undefined
+              : withCallableBinding(this, () =>
+                  lazyBroadcastMapIfNeeded(
+                    this.engine,
+                    this.operator,
+                    cellOps,
+                    isBroadcastableCollection,
+                    numericApproximation
+                  )
+                );
             if (lazy) return lazy;
 
             const items =
@@ -9352,8 +9380,13 @@ export class BoxedFunction
       ) {
         const mismatch = broadcastLengthMismatch(this.engine, this.ops!);
         if (mismatch) return mismatch;
+        // An operand that is not a `value` is held as it is, as on the sync
+        // route.
+        const roles = def.operandRoles(this.ops!);
         const held = await Promise.all(
-          this.ops!.map((x) => x.evaluateAsync(operandOptions(options)))
+          this.ops!.map((x, i) =>
+            isValueRole(roles, i) ? x.evaluateAsync(operandOptions(options)) : x
+          )
         );
         // The held application is built after the `await` above, when the
         // engine does not keep the registry and the context stack of this
@@ -9378,7 +9411,8 @@ export class BoxedFunction
         const bops = await evaluateBroadcastLiftsOnceAsync(
           this._ops!,
           options,
-          this.operator
+          this.operator,
+          def.operandRoles(this._ops!)
         );
         // The steps below run synchronously after the `await` above, when the
         // engine no longer has the context stack of this evaluation
@@ -9483,7 +9517,8 @@ export class BoxedFunction
         const declaredOps = await evaluateBroadcastLiftsOnceAsync(
           this._ops!,
           options,
-          this.operator
+          this.operator,
+          def.operandRoles(this._ops!)
         );
         const liftError = this._liftedOperandError(declaredOps);
         if (liftError !== undefined) return liftError;
@@ -11570,11 +11605,21 @@ export function isSquareMatrixPower(
  * being traversed, so `[Random(), Random()]` still draws per cell. Evaluation
  * can REVEAL a collection (a raw call returning a list), so participation is
  * re-derived from the returned operands by the caller, not from the originals.
+ *
+ * `roles` are the roles of `ops` that the `operands` handler of the
+ * definition gives (`operandRoles()`), or `undefined` when it has none. A
+ * lifted operand whose role is not `value` (a `held` operand) is not
+ * evaluated: the handler receives it unevaluated in each cell, as it does
+ * without a broadcast. A held operand that supplies cells is treated as any
+ * other: its elements are not evaluated, and the condition of a restriction
+ * is evaluated once, because it selects the cells and is not a part of an
+ * element (step 1c, `liftWholeRestrictions()`, evaluates it too).
  */
 function evaluateBroadcastLiftsOnce(
   ops: ReadonlyArray<Expression>,
   options: Partial<EvaluateOptions> | undefined,
-  operator: string
+  operator: string,
+  roles: ReadonlyArray<string> | undefined
 ): ReadonlyArray<Expression> {
   if (!ops.some((op) => !isBroadcastParticipant(op) || isRestriction(op)))
     return ops;
@@ -11582,17 +11627,19 @@ function evaluateBroadcastLiftsOnce(
   // (`operandOptions`), or a lift that reveals a lazy collection (a user
   // function returning `Range(1, n)`) would broadcast over its display
   // preview, placeholder included.
-  const lifted = ops.map((op) =>
+  const lifted = ops.map((op, i) =>
     isBroadcastParticipant(op)
       ? withEvaluatedRestriction(
           op,
           restrictionParts(op)?.condition.evaluate(operandOptions(options))
         )
-      : normalizeLiftedAbsence(
-          op,
-          op.evaluate(operandOptions(options)) ?? op,
-          operator
-        )
+      : !isValueRole(roles, i)
+        ? op
+        : normalizeLiftedAbsence(
+            op,
+            op.evaluate(operandOptions(options)) ?? op,
+            operator
+          )
   );
   // For a jump operator under `.N()`, a scalar lift that is an exact number
   // is put back exact as well (`withExactScalarOperands`): the cells are
@@ -11845,18 +11892,52 @@ function liftsRestrictionAt(def: BoxedOperatorDefinition, i: number): boolean {
   return t !== 'unknown' && isScalarType(t) && !typeCouldHoldMissing(t);
 }
 
-/** Async mirror of `evaluateBroadcastLiftsOnce`. */
+/**
+ * Whether the broadcast of an operator over `ops` must zip its cells at
+ * once, whatever the number of cells: an operand whose role in `roles` is
+ * not `value` (a `held` operand) is a literal list, and every collection
+ * operand has a known finite count and elements that can be walked. The
+ * lazy `Map` form evaluates each element of a source before it applies the
+ * operator, so the handler would receive the elements of the held list
+ * evaluated, and only past the size where the broadcast becomes lazy. The
+ * elements of a literal list are in memory already, so the eager zip keeps
+ * no more than the list does. A collection operand with no known count (a
+ * `Filter`), or whose elements cannot be walked (`Linspace(a, 1, 3)` with a
+ * symbolic `a`), keeps the lazy form, because the eager zip would cut it
+ * short or read it as a scalar.
+ */
+function zipsHeldListCells(
+  ops: ReadonlyArray<Expression>,
+  roles: ReadonlyArray<string> | undefined
+): boolean {
+  if (roles === undefined) return false;
+  if (!ops.some((op, i) => !isValueRole(roles, i) && isFunction(op, 'List')))
+    return false;
+  return ops.every((op) => {
+    if (!isBroadcastableCollection(op)) return true;
+    const count = op.count;
+    return (
+      isWalkableFiniteCollection(op) &&
+      typeof count === 'number' &&
+      Number.isFinite(count)
+    );
+  });
+}
+
+/** Async mirror of `evaluateBroadcastLiftsOnce`. A lifted operand whose role
+ * in `roles` is not `value` is not evaluated, as in the sync mirror. */
 async function evaluateBroadcastLiftsOnceAsync(
   ops: ReadonlyArray<Expression>,
   options: Partial<EvaluateOptions> | undefined,
-  operator: string
+  operator: string,
+  roles: ReadonlyArray<string> | undefined
 ): Promise<ReadonlyArray<Expression>> {
   if (!ops.some((op) => !isBroadcastParticipant(op) || isRestriction(op)))
     return ops;
   // Awaited together, not in sequence: the lifts are independent, and the sync
   // mirror evaluates them without ordering either.
   const lifted = await Promise.all(
-    ops.map(async (op) =>
+    ops.map(async (op, i) =>
       isBroadcastParticipant(op)
         ? withEvaluatedRestriction(
             op,
@@ -11864,11 +11945,13 @@ async function evaluateBroadcastLiftsOnceAsync(
               operandOptions(options)
             )
           )
-        : normalizeLiftedAbsence(
-            op,
-            (await op.evaluateAsync(operandOptions(options))) ?? op,
-            operator
-          )
+        : !isValueRole(roles, i)
+          ? op
+          : normalizeLiftedAbsence(
+              op,
+              (await op.evaluateAsync(operandOptions(options))) ?? op,
+              operator
+            )
     )
   );
   // The exact scalar lifts of a jump operator, as in the sync mirror.

@@ -29,6 +29,24 @@
   `MatchCase` is a statement too: `Block(Assign(a, 0), Match(x, MatchCase(1,
   Assign(a, 2))), a)` was the error `assignment-in-operand`, and now gives
   `2` when `x` is `1`.
+- **[#437](https://github.com/cortex-js/compute-engine/issues/437) An
+  operator can hold one operand and keep the checks of the others.** To
+  compute `Mod(Fibonacci(10^6), p)` in ℤ/p, a `Mod` handler must see
+  `Fibonacci(10^6)` before it is evaluated. An operator that is not `lazy`
+  evaluated every operand before its `evaluate` handler, and a `lazy`
+  operator lost its type, its broadcast over a list, the check of its
+  operands against the signature and its `NaN` result: a lazy copy of `Mod`
+  typed `Mod(3*4, 5)` as `real`, left `Mod('a', 3)` unevaluated, and threw
+  on `Mod(1)`. The new `held` operand role of the `operands` handler keeps
+  one operand unevaluated in an operator that is not `lazy`:
+  `operands: () => [{ kind: 'held' }, { kind: 'value' }]`. Now the handler
+  receives `Fibonacci(10^6)` as written, under `evaluate()`, `N()` and
+  `evaluateAsync()`, and the operator keeps the checks, the type and the
+  broadcast of `Mod`: `Mod(3*4, 5)` is `2` typed `integer`, `Mod('a', 3)`
+  is the error `incompatible-type`, and `Mod([1, 2, 3], 2)` is `[1, 0, 1]`.
+  A literal list at a held position is broadcast, and the handler receives
+  each element unevaluated. The `held` role is refused on a `lazy`
+  operator, whose operands are all `raw`.
 - **A read with several indexes has the type of the same read written one index
   at a time.** With `t: tuple<list<real>, real>`, `At(t, 1, 2)` was typed
   `list<real>`, and its value is a real number; with

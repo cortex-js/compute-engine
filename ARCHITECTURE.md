@@ -1382,7 +1382,13 @@ collection contracts. In particular:
   An operator that is not lazy can keep a statement operand (a body that its
   handler runs) unevaluated with the `operands` handler
   (`OperatorDefinitionFlags`): only a `value` operand is evaluated before the
-  handler.
+  handler. To hold one value operand (`Fibonacci(10^6)` in
+  `Mod(Fibonacci(10^6), p)`), give it the `held` role in an operator that is
+  not lazy, rather than making the operator lazy: a `held` operand is
+  canonicalized, checked against the signature, typed and broadcast as a
+  `value` is, and a lazy operator skips these checks. If such a handler
+  returns `undefined`, the engine rebuilds the expression with the held
+  operand unevaluated.
 - `isFinite === false` means "not a finite number". It is also the answer for a
   value that is not a number at all (a tuple, a list, a string), so it does not
   prove that a value is infinite. Check `isNumber` before reading

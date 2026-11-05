@@ -143,7 +143,7 @@ export async function holdMapAsync(
  * definition has no `operands` handler (`roles` is `undefined`), and an
  * operand lifted out of a nested application (`position` is `-1`) is a
  * value. */
-function isValueRole(
+export function isValueRole(
   roles: ReadonlyArray<string> | undefined,
   position: number
 ): boolean {

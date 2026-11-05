@@ -232,12 +232,6 @@ describe('THE ROLES OF A DEFINITION', () => {
   test('a role that is not implemented is refused at declaration', () => {
     const ce = new ComputeEngine();
     expect(() =>
-      ce.declare('HeldOp', {
-        signature: '(any) -> any',
-        operands: () => [{ kind: 'held' }],
-      })
-    ).toThrow(/"held" is not supported/);
-    expect(() =>
       ce.declare('BoundOp', {
         signature: '(any) -> any',
         operands: () => [{ kind: 'bound' }],
@@ -261,6 +255,17 @@ describe('THE ROLES OF A DEFINITION', () => {
         operands: (ops) => ops.map(() => ({ kind: 'raw' })),
       })
     ).toThrow(/requires 'lazy'/);
+  });
+
+  test('a `held` role on a lazy operator is refused', () => {
+    const ce = new ComputeEngine();
+    expect(() =>
+      ce.declare('HeldLazy', {
+        lazy: true,
+        signature: '(any) -> any',
+        operands: () => [{ kind: 'held' }],
+      })
+    ).toThrow(/"held" is not valid on a 'lazy' operator.*"raw"/);
   });
 
   test('a handler that does not return an array is refused', () => {
@@ -304,5 +309,232 @@ describe('THE ROLES OF A DEFINITION', () => {
     expect(
       doDef && 'operator' in doDef ? doDef.operator.operandRoles(ops) : null
     ).toEqual(['statement', 'value', 'value']);
+  });
+});
+
+/** An engine with `ModH`, a host copy of `Mod` that is not lazy and whose
+ * first operand is `held`: the signature, the `broadcastable` flag and the
+ * `type` handler are those of the library `Mod`. Its `evaluate` handler
+ * records the operands that it receives in `received`, then evaluates the
+ * held operand and gives the value of `Mod`. */
+function modEngine(): {
+  ce: ComputeEngine;
+  received: Array<{ x: string; head: string; p: string }>;
+} {
+  const ce = new ComputeEngine();
+  const received: Array<{ x: string; head: string; p: string }> = [];
+  const def = ce.lookupDefinition('Mod');
+  if (!def || !('operator' in def)) throw new Error('no definition of Mod');
+  const mod = def.operator;
+  ce.declare('ModH', {
+    signature: mod.signature.toString(),
+    broadcastable: mod.broadcastable,
+    type: mod.type,
+    operands: () => [{ kind: 'held' }, { kind: 'value' }],
+    evaluate: ([x, p], { engine, numericApproximation }) => {
+      received.push({ x: x.toString(), head: x.operator, p: p.toString() });
+      const value = engine.function('Mod', [x.evaluate(), p]);
+      return numericApproximation ? value.N() : value.evaluate();
+    },
+  });
+  return { ce, received };
+}
+
+describe('A HELD OPERAND OF A HOST OPERATOR', () => {
+  test('the handler receives the held operand unevaluated', () => {
+    const { ce, received } = modEngine();
+    const e = ce.box(['ModH', ['Factorial', 10], ['Fibonacci', 5]]);
+    expect(e.evaluate().toString()).toBe(
+      ce
+        .box(['Mod', ['Factorial', 10], 5])
+        .evaluate()
+        .toString()
+    );
+    // The held operand is an application; the value operand is evaluated.
+    expect(received).toEqual([{ x: '10!', head: 'Factorial', p: '5' }]);
+  });
+
+  test('the value and the type are those of `Mod`', () => {
+    const { ce } = modEngine();
+    const e = ce.box(['ModH', ['Multiply', 3, 4], 5]);
+    expect(e.type.toString()).toBe('integer');
+    const value = e.evaluate();
+    expect(value.toString()).toBe('2');
+    expect(value.type.matches('integer')).toBe(true);
+  });
+
+  test.each<[string, MathJsonExpression[]]>([
+    ['an operand of the wrong type', ["'a'", 3]],
+    ['a missing operand', [1]],
+    ['a modulus of 0', [5, 0]],
+  ])('%s gives what `Mod` gives', (_, ops) => {
+    const { ce } = modEngine();
+    expect(
+      ce
+        .box(['ModH', ...ops])
+        .evaluate()
+        .toString()
+    ).toBe(
+      ce
+        .box(['Mod', ...ops])
+        .evaluate()
+        .toString()
+    );
+  });
+
+  test('the errors of the wrong type and of a missing operand', () => {
+    const { ce } = modEngine();
+    expect(ce.box(['ModH', "'a'", 3]).evaluate().toString()).toContain(
+      'ErrorCode("incompatible-type"'
+    );
+    expect(ce.box(['ModH', 1]).evaluate().toString()).toContain('"missing"');
+  });
+
+  test('a literal list at the held position is broadcast, each element held', () => {
+    const { ce, received } = modEngine();
+    const value = ce.box(['ModH', ['List', 1, 2, 3], 2]).evaluate();
+    expect(value.toString()).toBe('[1,0,1]');
+    expect(value.type.toString()).toBe('vector<integer^3>');
+
+    received.length = 0;
+    expect(
+      ce
+        .box(['ModH', ['List', ['Fibonacci', 10], 2], 7])
+        .evaluate()
+        .toString()
+    ).toBe('[6,2]');
+    expect(received.map((r) => r.x)).toEqual(['Fibonacci(10)', '2']);
+  });
+
+  test('a long literal list at the held position keeps its elements held', () => {
+    // Past 100 elements, a broadcast takes the lazy `Map` form, which
+    // evaluates each element before it applies the operator.
+    const { ce, received } = modEngine();
+    const list: MathJsonExpression = [
+      'List',
+      ...Array<MathJsonExpression>(101).fill(['Fibonacci', 10]),
+    ];
+    const value = ce.box(['ModH', list, 7]).evaluate();
+    expect(value.at(1)?.toString()).toBe('6');
+    expect(value.count).toBe(101);
+    expect(received.length).toBe(101);
+    expect(received.every((r) => r.x === 'Fibonacci(10)')).toBe(true);
+  });
+
+  test('a held literal list beside a collection that cannot be walked stays lazy', () => {
+    // `Linspace(a, 1, 2)` with `a` undeclared has a count, but its elements
+    // cannot be walked: the eager zip would read it as a scalar, so the
+    // broadcast keeps the lazy `Map` form, as for `Mod`.
+    const { ce, received } = modEngine();
+    const ops: MathJsonExpression[] = [
+      ['List', ['Fibonacci', 10], ['Fibonacci', 10]],
+      ['Linspace', 'a', 1, 2],
+    ];
+    const value = ce.box(['ModH', ...ops]).evaluate();
+    expect(value.operator).toBe('Map');
+    expect(value.isLazyCollection).toBe(true);
+    expect(value.toString()).toBe(
+      'Map((_1, _2) => ModH(_1, _2), [Fibonacci(10),Fibonacci(10)], Linspace(a, 1, 2))'
+    );
+    expect(ce.box(['Mod', ...ops]).evaluate().operator).toBe('Map');
+    expect(received).toEqual([]);
+  });
+
+  test('a held operand lifted into the cells of a broadcast is not evaluated', () => {
+    const { ce, received } = modEngine();
+    expect(
+      ce
+        .box(['ModH', ['Fibonacci', 10], ['List', 2, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,1]');
+    expect(received.map((r) => r.x)).toEqual([
+      'Fibonacci(10)',
+      'Fibonacci(10)',
+    ]);
+  });
+
+  test('an operand that only its evaluation makes a list stays held', () => {
+    const { ce, received } = modEngine();
+    ce.declare('Neighbors', {
+      signature: '(integer) -> list<integer>',
+      evaluate: ([x], { engine }) => engine.box(['List', x, ['Add', x, 1]]),
+    });
+    expect(
+      ce
+        .box(['ModH', ['Neighbors', 4], 3])
+        .evaluate()
+        .toString()
+    ).toBe('[1,2]');
+    expect(received.map((r) => r.x)).toEqual(['Neighbors(4)']);
+  });
+
+  test('a range of unknown length is a lazy `Map`, as for `Mod`', () => {
+    const { ce } = modEngine();
+    const held = ce.box(['ModH', ['Range', 1, 'n'], 3]).evaluate();
+    const library = ce.box(['Mod', ['Range', 1, 'n'], 3]).evaluate();
+    expect(library.operator).toBe('Map');
+    expect(held.operator).toBe('Map');
+    expect(held.isLazyCollection).toBe(true);
+    expect(held.op2.toString()).toBe(library.op2.toString());
+  });
+
+  test('`simplify()` recurses into the held operand', () => {
+    const { ce } = modEngine();
+    const e = ce.box([
+      'ModH',
+      ['Add', ['Multiply', 'x', 'x'], ['Negate', ['Power', 'x', 2]], 5],
+      3,
+    ]);
+    expect(e.simplify().toString()).toBe('2');
+  });
+
+  test('the held operand is not evaluated before the handler under `N()`', () => {
+    const { ce, received } = modEngine();
+    expect(
+      ce
+        .box(['ModH', ['Fibonacci', 30], 7])
+        .N()
+        .toString()
+    ).toBe(
+      ce
+        .box(['Mod', ['Fibonacci', 30], 7])
+        .N()
+        .toString()
+    );
+    expect(received.map((r) => r.x)).toEqual(['Fibonacci(30)']);
+  });
+
+  test('the held operand is not evaluated before the handler under `evaluateAsync()`', async () => {
+    const { ce, received } = modEngine();
+    expect(
+      (await ce.box(['ModH', ['Fibonacci', 30], 7]).evaluateAsync()).toString()
+    ).toBe(
+      ce
+        .box(['Mod', ['Fibonacci', 30], 7])
+        .evaluate()
+        .toString()
+    );
+    expect(received.map((r) => r.x)).toEqual(['Fibonacci(30)']);
+
+    received.length = 0;
+    expect(
+      (
+        await ce
+          .box(['ModH', ['Fibonacci', 10], ['List', 2, 3]])
+          .evaluateAsync()
+      ).toString()
+    ).toBe('[1,1]');
+    expect(received.map((r) => r.x)).toEqual([
+      'Fibonacci(10)',
+      'Fibonacci(10)',
+    ]);
+  });
+
+  test('an assignment at a held operand is an error', () => {
+    const { ce } = modEngine();
+    expect(canonical(ce, ['ModH', ['Assign', 'a', 2], 3])).toContain(
+      `${ASSIGNMENT_IN_OPERAND}, "a")`
+    );
   });
 });

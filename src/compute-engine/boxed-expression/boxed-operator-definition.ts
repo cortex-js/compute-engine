@@ -3219,13 +3219,16 @@ function assertValidDerivativeKey(name: string, value: unknown): void {
 
 /**
  * Throw an error when `role`, a role that the `operands` handler of the
- * operator `name` returned, is not one that the engine implements, or is
- * `raw` or `opaque` on an operator that is not lazy. The `held`, `bound` and
- * `clause` roles are part of the `OperandRole` type but are not implemented:
- * an operand with one of them would be canonicalized and evaluated as a
- * `value`, which is not what the definition asks for. A `raw` or an `opaque`
- * operand is not canonicalized, and the operands of an operator that is not
- * lazy are all canonicalized before its handlers run.
+ * operator `name` returned, is not one that the engine implements, is `raw`
+ * or `opaque` on an operator that is not lazy, or is `held` on a lazy
+ * operator. The `bound` and `clause` roles are part of the `OperandRole`
+ * type but are not implemented: an operand with one of them would be
+ * canonicalized and evaluated as a `value`, which is not what the definition
+ * asks for. A `raw` or an `opaque` operand is not canonicalized, and the
+ * operands of an operator that is not lazy are all canonicalized before its
+ * handlers run. A `held` operand is canonical but not evaluated, and a lazy
+ * operator canonicalizes none of its operands: there, an operand that the
+ * handler reads as written is `raw`.
  */
 function checkOperandRole(
   name: string,
@@ -3243,8 +3246,9 @@ function checkOperandRole(
         `Operator Definition "${name}": the operand role "${role.kind}" requires 'lazy'`
       );
     case 'held':
+      if (!lazy) return;
       throw new Error(
-        `Operator Definition "${name}": the operand role "held" is not supported yet: declare the operator 'lazy' and evaluate the operands in the 'evaluate' handler`
+        `Operator Definition "${name}": the operand role "held" is not valid on a 'lazy' operator, which canonicalizes none of its operands: use the role "raw"`
       );
     case 'bound':
     case 'clause':

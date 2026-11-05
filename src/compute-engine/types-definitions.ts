@@ -2818,6 +2818,17 @@ export type BroadcastExemption =
  *   In a `lazy` operator, the handlers receive the operand as written and
  *   canonicalize and evaluate it themselves; only a bare `N` or `D` there is
  *   read as a variable, not as the library operator.
+ * - `held`: the operand is a value that the `evaluate` handler receives as
+ *   its canonicalization left it, not evaluated, so that the handler can
+ *   read it as written (`Fibonacci(10^6)` in `Mod(Fibonacci(10^6), p)`) and
+ *   evaluate it itself when it needs its value. Otherwise the operand is a
+ *   `value`: it is canonicalized and checked against the signature, the
+ *   type and the validity of the application read it, an `Assign` or a
+ *   `Declare` there is an error, and a literal list there is broadcast, each
+ *   element held. An operand that only its evaluation makes a list is held
+ *   whole. Valid only on an operator that is not `lazy`: a `lazy` operator
+ *   canonicalizes none of its operands, and its handlers receive every
+ *   operand unevaluated (`raw`).
  * - `statement`: the operand is a statement that the operator runs, zero,
  *   one or several times (the body of a loop, a branch of a conditional). An
  *   `Assign` or a `Declare` there is valid. The operand is not evaluated
@@ -2834,8 +2845,8 @@ export type BroadcastExemption =
  * - `opaque`: the operand is kept as written, and an `Assign` or a `Declare`
  *   in it is valid (the expression of `Hold` and of `Error`). Valid only on a
  *   `lazy` operator.
- * - `held`, `bound` and `clause` are reserved: an `operands` handler that
- *   returns one of them is refused with an error.
+ * - `bound` and `clause` are reserved: an `operands` handler that returns
+ *   one of them is refused with an error.
  *
  * @category Definitions
  */
@@ -2872,7 +2883,9 @@ export type OperatorDefinitionFlags = {
    *
    * To keep only a statement operand unevaluated (a body that the
    * `evaluate` handler runs), give it the `statement` role with `operands`
-   * instead.
+   * instead. To keep a value operand unevaluated and keep the checks of an
+   * operator that is not lazy (signature, type, broadcast), give it the
+   * `held` role.
    *
    */
   lazy: boolean;
@@ -2892,9 +2905,10 @@ export type OperatorDefinitionFlags = {
    * Without this handler, every operand of an operator that is not `lazy`
    * is a `value`, and every operand of a `lazy` operator is `raw`.
    *
-   * An `Assign` or a `Declare` operand at a `value` or `raw` position is the
-   * error `assignment-in-operand`: an assignment is a statement, not a
-   * value. At a `statement` or an `opaque` position it is valid.
+   * An `Assign` or a `Declare` operand at a `value`, `held` or `raw`
+   * position is the error `assignment-in-operand`: an assignment is a
+   * statement, not a value. At a `statement` or an `opaque` position it is
+   * valid.
    *
    * When the operator has no `canonical` handler, the engine canonicalizes
    * each `statement` operand as a branch (see {@link OperandRole}). When it
@@ -2906,7 +2920,9 @@ export type OperatorDefinitionFlags = {
    * `value` operands evaluated and the other operands canonical but not
    * evaluated. The `evaluate` handler of a `lazy` operator receives no
    * operand evaluated: a `value` operand is as written, and a `statement`
-   * operand is as its canonicalization left it.
+   * operand is as its canonicalization left it. This applies under
+   * `evaluate()`, `N()` and `evaluateAsync()`; under `evaluateAsync()` a
+   * handler that evaluates a `held` operand evaluates it synchronously.
    *
    * ```ts
    * ce.declare('Do', {
@@ -2916,6 +2932,17 @@ export type OperatorDefinitionFlags = {
    *   evaluate: ([body, n], { engine }) => {
    *     for (let i = 0; i < n.re; i++) body.evaluate();
    *     return engine.Nothing;
+   *   },
+   * });
+   *
+   * ce.declare('ModP', {
+   *   signature: '(integer, integer) -> integer',
+   *   // The handler reads `Fibonacci(n)` before it is evaluated, and
+   *   // computes it modulo `p`.
+   *   operands: () => [{ kind: 'held' }, { kind: 'value' }],
+   *   evaluate: ([x, p], { engine }) => {
+   *     if (x.operator === 'Fibonacci') return fibonacciMod(x.op1, p);
+   *     return engine.function('Mod', [x.evaluate(), p]).evaluate();
    *   },
    * });
    * ```
