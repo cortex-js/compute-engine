@@ -212,9 +212,9 @@ describe('the constant folder in degree mode reads a stored definition', () => {
     ).toBe('(57.29578 * _gpu_casin(vec2(0.5, 0.0)))');
     const r = compile(ce.parse('f(k)'), { to: 'glsl', fallback: false });
     expect(r.code).toBe('_fn_f(0.5)');
-    // The parameter `t` is not proven finite (the proof does not read the
-    // value `0.5` that the call passes), so `sin` is the NaN-safe helper.
-    expect(r.preamble).toContain('return _gpu_sin(0.017453292 * t);');
+    // Every call passes `0.5`, so the parameter `t` is finite for certain,
+    // of magnitude at most 0.5, and `sin` is the built-in.
+    expect(r.preamble).toContain('return sin(0.017453292 * t);');
   });
 
   const PYTHON: Array<[string, string]> = [

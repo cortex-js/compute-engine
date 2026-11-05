@@ -135,7 +135,10 @@ import {
   gpuWGSLArrayBytes,
 } from './gpu-at.js';
 import { gpuPointCallsOverBudget, gpuPointDeclaration } from './gpu-points.js';
-import { gpuRecordWrittenNames } from './gpu-finite-proof.js';
+import {
+  gpuDefinitionParameterFacts,
+  gpuRecordCallSiteFacts,
+} from './gpu-finite-proof.js';
 import { buildComplexPreamble } from './gpu-complex-functions.js';
 import {
   GPU_BESSELJ_PREAMBLE_GLSL,
@@ -1142,6 +1145,19 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           // caller's width). A shader function body is a STATEMENT position: a
           // loop-form `Sum`/`Product` inside it hoists its loop ahead of the
           // `return`.
+          // The scalar parameters that are finite for certain, because every
+          // call of the function passes a finite value there, or because the
+          // host declared them with a range: the body then calls the
+          // built-in `sin`, `min`, … of them, not the NaN-safe helper
+          // (`gpuProvablyFinite`).
+          const parameterFacts = gpuDefinitionParameterFacts(
+            id,
+            params,
+            paramTypes,
+            body,
+            target,
+            isWGSL
+          );
           const { ret, code } = BaseCompiler.withLocalShapeFrame(
             complexFrame,
             vectorFrame,
@@ -1182,6 +1198,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
               // `success: true`.
               const code = BaseCompiler.compileFunctionBody(body, {
                 ...target,
+                gpuParameterFacts: parameterFacts,
                 onReturn: (value) => {
                   const t =
                     value === undefined
@@ -1779,8 +1796,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       ...cseOptions,
     });
     // The names that the compiled code writes, which the NaN guard proof
-    // does not read by their declared type (`gpuRecordWrittenNames`).
-    gpuRecordWrittenNames(expr, target);
+    // does not read by their declared type, and the parameters of the
+    // emitted definitions that every call of the shader passes a finite
+    // value (`gpuRecordCallSiteFacts`).
+    gpuRecordCallSiteFacts(expr, target);
     const code = BaseCompiler.compileCseRoot(expr, target, 0, () =>
       BaseCompiler.compileFunctionBody(expr, target)
     );

@@ -48,9 +48,10 @@
  * of its own (`_fn_F`). In its body, `sin`, `cos`, `min` and the other
  * operations with a NaN-safe helper call the built-in only for an operand
  * that is finite for certain (`gpuProvablyFinite` in
- * `gpu-finite-proof.ts`). That proof does not read the values that the
- * calls of the function pass: an operand that reads a parameter is proven
- * from the type of the parameter only.
+ * `gpu-finite-proof.ts`). A parameter is finite for certain when every call
+ * of the function in the expression that this pass returns passes a value
+ * proven finite at its position (`gpuRecordCallSiteFacts`), or when the
+ * host declared the parameter with a range.
  */
 
 import type {

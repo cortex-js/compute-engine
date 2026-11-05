@@ -1,7 +1,41 @@
 ## [Unreleased]
 
+### Breaking changes
+
+- **A function literal whose body cannot give the declared result type is
+  refused when it is assigned.** With `g` declared `(x: number) -> number`,
+  `ce.assign("g", t ↦ t > 0)` now throws an `incompatible-type` error, as
+  `ce.assign("v", True)` does for `v` declared `number`. The same holds for
+  `ce.declare()` with a value, and the `Assign` operator gives the error
+  value. Before, the assignment was accepted and each call gave the error. A
+  generic result is read at the bounds of its type variables: with
+  `(x: T) -> T where T: broadcastable<number>`, the bodies `t > 0` and
+  `(t, t^2)` are refused. An inferred type that is only wider than the
+  declared result is still accepted (`n ↦ n + 1` under
+  `(integer) -> integer`). Not tested: `NaN`, `Missing` and `Nothing` in the
+  type of the body, a collection body when a parameter can receive a
+  collection whole (the result can then be a broadcast), and a body with a
+  `Return` before its last statement.
+
 ### Resolved Issues
 
+- **Compilation to GLSL and WGSL: the body of a user function calls the
+  built-in `sin`, `cos`, `sign`, `min`, `max` or `clamp` of a parameter that
+  every call bounds, or that the host declared with a range.** Since
+  0.179.0, such an operand called the NaN-safe helper (`_gpu_sin`, …). With
+  `x` declared `real<-1e15..1e15>` and `F(a) := sin(a)`, the GLSL of `F(x)`
+  now defines `_fn_F` as `sin(a)`, as in 0.178.0. A parameter is finite for
+  certain when every call of the function in the compiled expression passes
+  a value proven finite from the declarations, also through the body of
+  another function (`G(c) := F(c, 2c)` called as `G(k)` with
+  `k: real<0..10>` bounds both parameters of `F`). A declared range on a
+  parameter (`F: (real<-1..1>) -> real`) now also gives the built-in, for
+  any argument: before, the engine typed the parameter `number` and the
+  range was lost. One call with a value that can overflow in f32
+  (`F(exp(y))` with `y: real`) or be NaN (`y: real | signed_infinity | nan`)
+  keeps the helper. A call of a function whose declared result type has no
+  finite range keeps the helper: the body of a function is not read to prove
+  its result. No compiled value changes.
 - **A `Filter` predicate that reads a typed parameter of an enclosing
   function, and then reads it again in a nested function, no longer throws**
   ([#510](https://github.com/cortex-js/compute-engine/issues/510), reported by
@@ -40,7 +74,8 @@
   `"02,43,9"`, and the interpreter gives `(5, 13)`. Such a call now declines,
   and `evaluate()` gives the value. This includes a call that maps the
   function over a list argument. A body with a `Return` before its last
-  statement is not checked.
+  statement is not checked. Most such functions are now refused when they
+  are assigned (see "Breaking changes"); the decline covers the others.
 - **A fold whose callback gives a matrix is typed with a type that admits its
   value.** `Fold((a, k) ↦ [[a[1], 2], [3, 4]], [1, 2, 3], 1..n)` was typed
   `matrix<integer^(2x2)> | vector<integer^3>`, but for `n = 2` its value is

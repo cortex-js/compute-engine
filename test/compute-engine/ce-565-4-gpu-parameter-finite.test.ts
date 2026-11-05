@@ -1,15 +1,16 @@
 /**
  * CE-565.4 and CE-565.1: inside the body of a user function that the shader
  * targets emit as a function of its own (`_fn_F`), `sin`, `cos`, `min` and
- * the other operations with a NaN-safe helper call the helper for an
- * operand that reads a parameter. The proof that an operand is finite
- * (`gpuProvablyFinite` in `compilation/gpu-finite-proof.ts`) reads only the
- * declarations of the host and the expression: it does not read the values
- * that the calls of the function pass, and a declared signature
- * (`(real, real) -> real`) does not make a parameter finite either:
- * `F(exp(x), y)` passes a `real` that overflows to `+∞` in f32. A symbol
- * that the compiled code writes (`x ≔ exp(x)`) is not finite by its
- * declared type.
+ * the other operations with a NaN-safe helper call the built-in for an
+ * operand that reads a parameter when the parameter is finite for certain:
+ * every call of the function in the compiled expression passes a value that
+ * is finite for certain at its position, proven from the declarations of
+ * the host (`gpuRecordCallSiteFacts` in `compilation/gpu-finite-proof.ts`),
+ * or the host declared the parameter with a range
+ * (`F: (real<-1..1>) -> real`). A bare declared `real` parameter is not
+ * enough: `F(exp(x), y)` passes a `real` that overflows to `+∞` in f32. A
+ * symbol that the compiled code writes (`x ≔ exp(x)`) is not finite by its
+ * declared type. The body of a function is not read to prove its result.
  *
  * At a call site, a call of a user function whose result type the host
  * declared with a range (`F: (real, real) -> real<-2..2>`) is finite, of
@@ -141,9 +142,9 @@ const POINTS: [number, number][] = [
 ];
 
 describe.each(TARGETS)('CE-565.4 on %s', (to) => {
-  describe('a parameter keeps the helper', () => {
-    // Every call passes a finite value, but the proof does not read the
-    // values that the calls pass: the engine types a parameter `number`.
+  describe('a parameter that every call bounds calls the built-in', () => {
+    // Every call passes a value that is finite for certain from the
+    // declarations of `x` and `y`, whatever the declaration of `F`.
     for (const declaration of [
       undefined,
       'function',
@@ -158,7 +159,7 @@ describe.each(TARGETS)('CE-565.4 on %s', (to) => {
           to
         );
         expect(returned(preamble, '_fn_F')).toBe(
-          '_gpu_sin(a) + _gpu_cos(b) + _gpu_min(a, b)'
+          'sin(a) + cos(b) + min(a, b)'
         );
       });
 
@@ -175,7 +176,7 @@ describe.each(TARGETS)('CE-565.4 on %s', (to) => {
         ['Add', ['F', 'k', 's'], ['F', 2, 's'], ['F', 'k', 0.5]],
         to
       );
-      expect(returned(preamble, '_fn_F')).toBe('_gpu_cos(b) + _gpu_sin(a * b)');
+      expect(returned(preamble, '_fn_F')).toBe('cos(b) + sin(a * b)');
     });
 
     it('with a slider that `vars` maps to its own name', () => {
@@ -189,7 +190,7 @@ describe.each(TARGETS)('CE-565.4 on %s', (to) => {
         { vars: { k: 'k' } }
       );
       expect(code).toMatch(/_fn_F\(k, s\)/);
-      expect(returned(preamble, '_fn_F')).toBe('_gpu_cos(b) + _gpu_sin(a * b)');
+      expect(returned(preamble, '_fn_F')).toBe('cos(b) + sin(a * b)');
     });
 
     it("with a call from another body that passes that body's parameter", () => {
@@ -208,10 +209,95 @@ describe.each(TARGETS)('CE-565.4 on %s', (to) => {
         ['Add', ['G', 'x'], ['G', 'y'], ['F', 'x', 'y']],
         to
       );
+      // `c` is finite (every call of `G` passes `x` or `y`), so `a` is.
+      // `2c` can overflow in f32, since `c` has no bound: `b` is not
+      // finite for certain, and keeps the helpers.
       expect(returned(preamble, '_fn_F')).toBe(
-        '_gpu_sin(a) + _gpu_cos(b) + _gpu_min(a, b)'
+        'sin(a) + _gpu_cos(b) + _gpu_min(a, b)'
       );
-      expect(returned(preamble, '_fn_G')).toMatch(/^_gpu_sin\(c\) \+ /);
+      expect(returned(preamble, '_fn_G')).toMatch(/^sin\(c\) \+ /);
+    });
+
+    it('with a parameter that a call bounds through another body', () => {
+      // `c` is at most 10, so `2c` is at most 20, and `b` is finite.
+      const ce = engineWith('F', F_LITERAL, 'function');
+      ce.declare('k', 'real<0..10>');
+      ce.declare('G', 'function');
+      ce.assign(
+        'G',
+        ce.expr([
+          'Function',
+          ['Add', ['Sin', 'c'], ['F', 'c', ['Multiply', 2, 'c']]],
+          'c',
+        ])
+      );
+      const { preamble } = shader(ce, ['Add', ['G', 'k'], ['F', 'k', 1]], to);
+      expect(returned(preamble, '_fn_F')).toBe('sin(a) + cos(b) + min(a, b)');
+    });
+  });
+
+  describe('a parameter keeps the helper', () => {
+    it('when one call passes a value that can overflow in f32', () => {
+      // `exp(x)` with `x` declared `real` is `+∞` in f32 for `x > 88.7`.
+      const ce = engineWith('F', ['Function', ['Sin', 'a'], 'a'], 'function');
+      const { preamble } = shader(
+        ce,
+        ['Add', ['F', 'x'], ['F', ['Exp', 'y']]],
+        to
+      );
+      expect(returned(preamble, '_fn_F')).toBe('_gpu_sin(a)');
+    });
+
+    it('when a call passes a symbol with no declared type', () => {
+      // The host can pass NaN for the uniform `z`.
+      const ce = engineWith('F', ['Function', ['Sin', 'a'], 'a'], 'function');
+      const { preamble } = shader(ce, ['F', 'z'], to);
+      expect(returned(preamble, '_fn_F')).toBe('_gpu_sin(a)');
+    });
+
+    it('when a call passes a value that can be NaN or infinite', () => {
+      // `n` is declared `real | signed_infinity | nan`, as a host declares a
+      // value that a document can make NaN.
+      const ce = engineWith('F', ['Function', ['Sin', 'a'], 'a'], 'function');
+      const { preamble } = shader(ce, ['Add', ['F', 'x'], ['F', 'n']], to);
+      expect(returned(preamble, '_fn_F')).toBe('_gpu_sin(a)');
+    });
+
+    it('when a body passes a value that the angular unit makes large', () => {
+      // In degree mode the shader computes `arctan(c)` as
+      // `57.29578 * atan(c)`, up to 90, not π/2: `1e37·a·a` then overflows
+      // in f32. The call sites are read from the body that the shader
+      // compiles.
+      const ce = new ComputeEngine();
+      ce.angularUnit = 'deg';
+      ce.declare('x', 'real');
+      ce.declare('F', 'function');
+      ce.assign(
+        'F',
+        ce.expr([
+          'Function',
+          ['Sin', ['Multiply', 1e37, 'a', 'a']],
+          'a',
+        ] as never)
+      );
+      ce.declare('G', 'function');
+      ce.assign(
+        'G',
+        ce.expr(['Function', ['Add', ['F', ['Arctan', 'c']], 'c'], 'c'] as never)
+      );
+      const { preamble } = shader(ce, ['G', 'x'], to);
+      expect(returned(preamble, '_fn_F')).toMatch(/^_gpu_sin\(/);
+    });
+
+    it('when a call passes a point', () => {
+      // `G(q)` with a point `q` takes a copy of `G` where `Abs(p)` is the
+      // norm `length(p)`, which can overflow in f32.
+      const ce = engineWith('F', ['Function', ['Sin', 'a'], 'a'], 'function');
+      ce.declare('q', 'tuple<real, real>');
+      ce.declare('G', 'function');
+      ce.assign('G', ce.expr(['Function', ['F', ['Abs', 'p']], 'p'] as never));
+      const { preamble } = shader(ce, ['G', 'q'], to);
+      expect(returned(preamble, '_fn_F')).toBe('_gpu_sin(a)');
     });
 
     it('with a loop index as the argument', () => {
@@ -238,7 +324,8 @@ describe.each(TARGETS)('CE-565.4 on %s', (to) => {
   describe('a call with a declared result type', () => {
     // The host declares the result type of `F` with a range: the call is a
     // finite real of known magnitude, and the guarded call of it is the
-    // built-in. The body of `F` is not read, and keeps its helpers.
+    // built-in. The body of `F` is not read to prove the call; its own
+    // operands are proven from the calls (`F(x)` passes a finite `x`).
     it('(real) -> real<-1..1> calls the built-in', () => {
       const ce = engineWith(
         'F',
@@ -247,7 +334,7 @@ describe.each(TARGETS)('CE-565.4 on %s', (to) => {
       );
       const { code, preamble } = shader(ce, ['Sin', ['F', 'x']], to);
       expect(code).toBe('sin(_fn_F(x))');
-      expect(returned(preamble, '_fn_F')).toBe('0.5 * _gpu_cos(a)');
+      expect(returned(preamble, '_fn_F')).toBe('0.5 * cos(a)');
     });
 
     it('the range of the result type bounds a product', () => {
@@ -352,9 +439,63 @@ describe.each(TARGETS)('CE-565.4 on %s', (to) => {
     });
   });
 
+  describe('a declared parameter range', () => {
+    // The declared range of a parameter is a promise of the host, as the
+    // declared range of an input is: `a` is in [-1, 1], so `sin(1000·a)` is
+    // the built-in, whatever the argument. An argument outside the range is
+    // a value outside its declared type.
+    it('calls the built-in for an argument with no bound', () => {
+      const ce = engineWith(
+        'F',
+        ['Function', ['Sin', ['Multiply', 1000, 'a']], 'a'],
+        '(real<-1..1>) -> real'
+      );
+      const { preamble } = shader(ce, ['F', ['Exp', 'x']], to);
+      expect(returned(preamble, '_fn_F')).toBe('sin(1000.0 * a)');
+    });
+
+    it('bounds only the parameter that has a range', () => {
+      const ce = engineWith('F', P_LITERAL, '(real<0..10>, real) -> real');
+      const { preamble } = shader(
+        ce,
+        ['F', ['Exp', 'x'], ['Exp', 'y']],
+        to
+      );
+      expect(returned(preamble, '_fn_F')).toBe(
+        '_gpu_cos(b) + _gpu_sin(a * b)'
+      );
+    });
+
+    it('keeps the guard on the compileFunction route', () => {
+      // This route opens no session of the common-subexpression pass, and
+      // without one the proof proves no operand: a declared range does not
+      // change that.
+      const ce = engineWith(
+        'F',
+        ['Function', ['Sin', 'a'], 'a'],
+        '(real<-5..5>) -> real'
+      );
+      const src =
+        to === 'glsl'
+          ? new GLSLTarget().compileFunction(
+              ce.box(['F', 'x']) as never,
+              'f',
+              'float',
+              [['x', 'float']]
+            )
+          : new WGSLTarget().compileFunction(
+              ce.box(['F', 'x']) as never,
+              'f',
+              'f32',
+              [['x', 'f32']]
+            );
+      expect(returned(src, '_fn_F')).toBe('_gpu_sin(a)');
+    });
+  });
+
   describe('compileFunction', () => {
-    // A parameter of `F` is not proven finite by a declared signature, so
-    // `F` keeps the guard on this route too.
+    // This route records no call sites, and a bare `real` parameter is not
+    // a range, so `F` keeps the guard.
     it('keeps the guard in the body of a called function', () => {
       const ce = engineWith(
         'F',
@@ -381,8 +522,8 @@ describe.each(TARGETS)('CE-565.4 on %s', (to) => {
 
   describe('a per-call copy (CE-565.1)', () => {
     // `R(V, t)` binds a list `V` whole, so a list argument takes a copy of
-    // `R` with a `vec2` parameter. Its scalar parameter `t` keeps the
-    // helpers.
+    // `R` with a `vec2` parameter. Its scalar parameter `t` is finite for
+    // certain, since every call passes the declared `phi`.
     const R_LITERAL = [
       'Function',
       [
@@ -404,21 +545,22 @@ describe.each(TARGETS)('CE-565.4 on %s', (to) => {
       ['Power', ['R', ['Add', ['List', 'x', 'y'], ['List', -0.57, 2.8]], t], 2],
     ];
 
-    it('keeps the helpers when every call passes a finite scalar', () => {
+    it('calls the built-ins when every call passes a finite scalar', () => {
       const ce = engineWith('R', R_LITERAL, 'function');
       ce.declare('phi', 'real');
       const { preamble } = shader(ce, rowOf('phi'), to);
       const body = definition(preamble, '_fn_R_\\w+');
-      expect(body).toMatch(/_gpu_cos\(t\)/);
-      expect(body).toMatch(/_gpu_sin\(t\)/);
+      expect(body).toMatch(/\bcos\(t\)/);
+      expect(body).toMatch(/\bsin\(t\)/);
+      expect(body).not.toMatch(/_gpu_(cos|sin)\(t\)/);
     });
   });
 
   describe('the values', () => {
-    it('of F with the helpers match the JavaScript target', () => {
+    it('of F with the built-ins match the JavaScript target', () => {
       const ce = engineWith('F', F_LITERAL, 'function');
       expect(returned(shader(ce, F_ROW, to).preamble, '_fn_F')).toBe(
-        '_gpu_sin(a) + _gpu_cos(b) + _gpu_min(a, b)'
+        'sin(a) + cos(b) + min(a, b)'
       );
       expectSameValues(ce, F_ROW, to, POINTS);
     });

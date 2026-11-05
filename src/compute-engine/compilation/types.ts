@@ -1690,6 +1690,29 @@ export interface CompileTarget<Expr = unknown> {
   boundVars?: ReadonlySet<string>;
 
   /**
+   * Shader targets only. The scalar parameters of the user-function
+   * definition whose body this target compiles, by name: `finite` is true
+   * when the value of the parameter is finite for certain, and `magnitude`
+   * is a bound of its absolute value, when one is known. `range`, when
+   * present, is an interval `[lower, upper]` that holds the value. A
+   * parameter has a fact when every call of the function in the compiled
+   * expression passes a value that is finite for certain at its position
+   * (`gpuRecordCallSiteFacts`), or when the host declared the parameter
+   * with a range of finite bounds (`F: (real<-1..1>) -> real`,
+   * `gpuDefinitionParameterFacts`). Read by the NaN guard proof of the
+   * shader targets (`gpuProvablyFinite`, `gpu-finite-proof.ts`). Absent
+   * outside such a body.
+   */
+  gpuParameterFacts?: ReadonlyMap<
+    string,
+    {
+      readonly finite: boolean;
+      readonly magnitude: number | undefined;
+      readonly range?: readonly [number, number];
+    }
+  >;
+
+  /**
    * The bound names that hold a SEQUENCE rather than a single value, each
    * mapped to the accessor code it resolves to: the `...rest` a list or tuple
    * pattern binds, which the interpreter wraps as a `Sequence` that splices

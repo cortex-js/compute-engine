@@ -12,7 +12,11 @@ import {
 } from '../boxed-expression/type-guards.js';
 import type { CompileTarget } from './types.js';
 import { BaseCompiler } from './base-compiler.js';
-import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import { definitionBodyExpr } from './compile-cse.js';
+import {
+  functionLiteralParameterName,
+  isRestParameter,
+} from '../boxed-expression/function-literal.js';
 import { boundVariableNames } from '../boxed-expression/binders.js';
 import {
   isOperatorDef,
@@ -86,12 +90,13 @@ const GPU_F32_BOUNDED_HEADS = new Set([
  * (`gpuNaNSafeLibrary`) can be the built-in? The proof reads only what the
  * host declared and what the expression says: the declared types and
  * ranges of the inputs, the declared result types of the user functions,
- * the number literals and the operators of `x`. It does not read the body
- * of a user function that `x` calls, nor the values that the calls of a
- * function pass to its parameters. To get the built-in for such an operand,
- * the host declares the range of an input (`t: real<-5.5..5.5>`) or a
- * result type with a range for the function (`f: (real) -> real<-1..1>`). Four
- * conditions:
+ * the number literals and the operators of `x`, and, in the body of a user
+ * function, the facts of its parameters (`CompileTarget.gpuParameterFacts`:
+ * every call passes a value proven finite from these declarations, or the
+ * host declared the parameter with a range). It does not read the body of
+ * a user function that `x` calls. To get the built-in for such a call, the
+ * host declares a result type with a range for the function
+ * (`f: (real) -> real<-1..1>`). Four conditions:
  *
  * - its static type is a finite real, or it is a `vec2`–`vec4` whose cells
  *   are finite reals (`gpuFiniteRealCells`). The rules below then apply to
@@ -103,8 +108,9 @@ const GPU_F32_BOUNDED_HEADS = new Set([
  *   subtree must have a real value. This is how an operand that divides by
  *   an operand that is not a literal is proven (its type holds `±∞` and
  *   NaN). A parameter of the body of an emitted user-function definition is
- *   typed `number` by the engine, also with a declared signature, and is
- *   not proven. A call of a user function is finite when the host declared
+ *   typed `number` by the engine, also with a declared signature: it is
+ *   proven by its facts (`gpuDefinitionParameterFacts`), not by its type.
+ *   A call of a user function is finite when the host declared
  *   its result type with a range of finite bounds in the signature of the
  *   definition (`declaredUserCallBound` in `gpuFiniteProof`), and that
  *   range is the bound of its magnitude. A bare `real` result type is not
@@ -228,7 +234,12 @@ export function gpuProvablyFinite(
 function gpuFiniteProof(
   target: CompileTarget<Expression>,
   strict: boolean
-): { finite: (e: Expression, top?: boolean) => boolean } | undefined {
+):
+  | {
+      finite: (e: Expression, top?: boolean) => boolean;
+      magnitude: (e: Expression) => number | undefined;
+    }
+  | undefined {
   // The names the caller maps to its own source (`vars`, `functions`,
   // `operators`), recorded on the common-subexpression session; with no
   // record (a direct custom target) every name may be the caller's.
@@ -242,6 +253,11 @@ function gpuFiniteProof(
       : GPU_WRITTEN_NAMES.get(target.userFunctions);
   const isWritten = (s: string): boolean =>
     written === 'all' || written?.has(s) === true;
+  // The parameters of the user-function body being compiled
+  // (`CompileTarget.gpuParameterFacts`). A parameter that is finite for
+  // certain is accepted whatever its own type says: the engine types a
+  // parameter of an emitted definition `number`.
+  const facts = target.gpuParameterFacts;
   const seen = new Map<Expression, boolean>();
   const seenTop = new Map<Expression, boolean>();
   // The real value of the literal that the emitter writes in place of the
@@ -363,6 +379,8 @@ function gpuFiniteProof(
         e.type.matches('finite_real') &&
         e.im === 0 &&
         Math.abs(e.re) <= GPU_F32_MAX;
+    else if (isSymbol(e) && facts?.get(e.symbol)?.finite === true)
+      result = true;
     else if (isSymbol(e) && isWritten(e.symbol)) result = false;
     else if (isSymbol(e)) {
       const baked = bakedValue(e);
@@ -467,10 +485,12 @@ function gpuFiniteProof(
       }
       // Over finite operands, `Smoothstep` has no defined value when its two
       // edges are equal. The static type of the node excludes it for symbols
-      // of a declared type. When the proof is `strict` (the node is not
-      // typed a finite real) the edges must be two different literals.
+      // of a declared type, but a parameter of the body being compiled is
+      // typed `number`, and so is the node: then (and whenever the proof is
+      // `strict`, the node is not typed a finite real) the edges must be two
+      // different literals.
       else if (
-        strict &&
+        (facts !== undefined || strict) &&
         e.operator === 'Smoothstep' &&
         !e.type.matches('finite_real')
       )
@@ -517,6 +537,9 @@ function gpuFiniteProof(
       return m;
     }
     if (isSymbol(e)) {
+      // A parameter of the body being compiled: the bound of its facts.
+      const fact = facts?.get(e.symbol);
+      if (fact?.finite === true) return fact.magnitude;
       if (isWritten(e.symbol)) return undefined;
       // Past the depth limit a stored value gives no bound: the constant
       // rule below would read the interpreter's value, which the shader does
@@ -699,6 +722,7 @@ function gpuFiniteProof(
     // rounds to 100000008 and `B` to 10⁸ in f32, and `A − B` is 8 there.
     if (
       !isSymbol(e) ||
+      facts?.has(e.symbol) === true ||
       isWritten(e.symbol) ||
       bakedValue(e) !== undefined ||
       e.valueDefinition?.inferredType === true
@@ -833,6 +857,7 @@ function gpuFiniteProof(
     else if (
       !strict &&
       isSymbol(d) &&
+      facts?.has(d.symbol) !== true &&
       !isWritten(d.symbol) &&
       bakedValue(d) === undefined &&
       d.valueDefinition?.inferredType !== true
@@ -961,6 +986,7 @@ function gpuFiniteProof(
         : undefined;
     if (!isSymbol(t)) return undefined;
     if (
+      facts?.has(t.symbol) === true ||
       isWritten(t.symbol) ||
       bakedValue(t) !== undefined ||
       t.valueDefinition?.inferredType === true
@@ -1044,6 +1070,8 @@ function gpuFiniteProof(
         ? widen(e.re, e.re, Math.abs(e.re) * 2 ** -23)
         : undefined;
     if (isSymbol(e)) {
+      const fact = facts?.get(e.symbol);
+      if (fact?.finite === true) return fact.range;
       const baked = bakedValue(e);
       if (baked !== undefined) return range(baked, depth + 1);
     } else if (isFunction(e)) {
@@ -1230,25 +1258,80 @@ function gpuFiniteProof(
     if (r === undefined || (r[0] <= 0 && r[1] >= 0)) return undefined;
     return positive(Math.min(Math.abs(r[0]), Math.abs(r[1])));
   };
-  return { finite };
+  return { finite, magnitude: (e) => magnitude(e) };
 }
 
 /**
  * The names that the compiled code writes, by the user-function registry
- * of the compilation (`gpuRecordWrittenNames`): the target of each `Assign`
- * or `Declare` in the root, in the body of each function that it calls,
- * and in the value of each symbol that it reads. `'all'` when the walk
- * stopped before it saw every node. The declared type of such a name holds
- * for the value that the host passes, not for the value that the code
- * assigns: `x ≔ exp(x)` with `x` declared `real` is `+∞` in f32 for
+ * of the compilation (`gpuRecordCallSiteFacts`): the target of each
+ * `Assign` or `Declare` in the root, in the body of each function that it
+ * calls, and in the value of each symbol that it reads. `'all'` when the
+ * walk stopped before it saw every node. The declared type of such a name
+ * holds for the value that the host passes, not for the value that the
+ * code assigns: `x ≔ exp(x)` with `x` declared `real` is `+∞` in f32 for
  * `x > 88.7`. `gpuFiniteProof` therefore does not read it.
  */
 const GPU_WRITTEN_NAMES = new WeakMap<object, ReadonlySet<string> | 'all'>();
 
+/** What is known of the value of one parameter of a user function on the
+ * shader targets: the value type of `CompileTarget.gpuParameterFacts`,
+ * which declares the fields. */
+type GPUParameterFact =
+  NonNullable<CompileTarget<Expression>['gpuParameterFacts']> extends ReadonlyMap<
+    string,
+    infer V
+  >
+    ? V
+    : never;
+
+/**
+ * The facts of the call sites of each user function that the compiled
+ * expression calls, by the user-function registry of the compilation
+ * (`gpuRecordCallSiteFacts`): for each function, one fact for each
+ * parameter position. A registry with no entry (the shader route, the
+ * `compileFunction` route) has no call-site facts.
+ */
+const GPU_CALL_SITE_FACTS = new WeakMap<
+  object,
+  ReadonlyMap<string, readonly GPUParameterFact[]>
+>();
+
+/**
+ * The names that the body of a function literal binds again or writes, so
+ * that a parameter of that name does not keep the value of its argument in
+ * the whole body: a name bound by a binder inside the body (a lambda
+ * parameter, the index of a `Sum`, a local of a nested `Block`), and the
+ * target of an `Assign` or a `Declare` anywhere in the body. The bindings of
+ * the body node itself are not counted: the canonical body is a `Block`
+ * whose scope is the scope of the literal, which binds the parameters.
+ */
+function gpuReboundNames(body: Expression): Set<string> {
+  const names = new Set<string>();
+  // A body can be a graph that shares nodes; each node is read once, so the
+  // work is the number of distinct nodes, not the number of paths.
+  const seen = new Set<Expression>();
+  const visit = (e: Expression, top: boolean): void => {
+    if (!isFunction(e) || seen.has(e)) return;
+    seen.add(e);
+    if (!top) for (const n of boundVariableNames(e)) names.add(n);
+    if (
+      (e.operator === 'Assign' || e.operator === 'Declare') &&
+      isSymbol(e.op1)
+    )
+      names.add(e.op1.symbol);
+    for (const op of e.ops) visit(op, false);
+  };
+  visit(body, true);
+  return names;
+}
+
 /**
  * Record, on the user-function registry of `target`, the names that the
- * compiled code writes (`GPU_WRITTEN_NAMES`). `root` is the expression that
- * the root target compiles, after every rewrite of the root.
+ * compiled code writes (`GPU_WRITTEN_NAMES`), and which parameters of the
+ * user functions that `root` calls are finite for certain because of their
+ * call sites (`GPU_CALL_SITE_FACTS`, read by
+ * `gpuDefinitionParameterFacts`). `root` is the expression that the root
+ * target compiles, after every rewrite of the root.
  *
  * The walk reads the root, the body of each user function that it calls
  * (directly or through another body) or uses as a value, and the value of
@@ -1258,9 +1341,45 @@ const GPU_WRITTEN_NAMES = new WeakMap<object, ReadonlySet<string> | 'all'>();
  * maps a symbol, not a head, and a call of a name that `vars` maps still
  * calls the engine's definition. When the literal of a called function
  * cannot be read, or the walk passes 100,000 nodes, every name counts as
- * written (`'all'`).
+ * written (`'all'`) and no call-site fact is recorded.
+ *
+ * The shader holds every call of an emitted definition: the calls of the
+ * root, of the bodies of the functions that it calls, and of the values
+ * that the shader computes in place of a symbol. A parameter is finite for
+ * certain when, at every one of these call sites, the argument at its
+ * position is finite for certain (`gpuProvablyFinite`) in the context of
+ * the caller: in the root, the declared inputs; in the body of another
+ * function, also the parameters of that function that are themselves
+ * finite for certain. The argument is proven from the declarations of the
+ * host and the operators of the argument, as any guarded operand is: with
+ * `x` declared `real<-1e15..1e15>`, `F(x)` makes the parameter of `F`
+ * finite, of magnitude at most 10¹⁵, and `sin(a)` in the body of
+ * `F(a) := sin(a)` is the built-in `sin(a)`. A finite parameter also has a
+ * bound of its magnitude: the largest magnitude of its arguments
+ * (`magnitude` of `gpuFiniteProof`), or no bound when one argument has
+ * none. A parameter that the host declared with a range also has the facts
+ * of that range (`gpuCombinedFact`).
+ *
+ * The functions are taken in an order where each caller comes before the
+ * functions it calls, so the arguments of a call from a body are proven
+ * with the final facts of the parameters of that body. The shader targets
+ * refuse a recursive definition, so such an order exists; a function on a
+ * cycle of calls has no finite parameter. This is sound by induction along
+ * the order: the arguments of the root are proven from the declarations,
+ * and a call from a body passes values computed from parameters whose facts
+ * are already proven.
+ *
+ * A function has no finite parameter when its set of call sites is not
+ * fully known: it is used as a value (`Map(F, L)`, or passed to another
+ * function), a binder of the expression binds its name, or a call passes
+ * another number of arguments than it has parameters. A position is not
+ * finite when the body binds the name of the parameter again or assigns
+ * it, or when the parameter is a rest or destructuring parameter. An
+ * argument that reads a name bound by an enclosing binder of its call (a
+ * local of a `Block`, the parameter of a lambda, the index of a `Sum`) is
+ * not finite for certain here.
  */
-export function gpuRecordWrittenNames(
+export function gpuRecordCallSiteFacts(
   root: Expression,
   target: CompileTarget<Expression>
 ): void {
@@ -1291,38 +1410,86 @@ export function gpuRecordWrittenNames(
     literals.set(h, literal);
     return literal;
   };
-  // The parameter names of each function reached.
-  const functions = new Map<string, ReadonlyArray<string>>();
+  type Site = {
+    caller: string | undefined;
+    callee: string;
+    args: ReadonlyArray<Expression>;
+    bound: ReadonlySet<string>;
+  };
+  const sites: Site[] = [];
+  // The parameter names of each function reached (`''` for a parameter
+  // with no single name), and whether the parameter at each position keeps
+  // the value of its argument in the whole body.
+  const functions = new Map<
+    string,
+    { names: ReadonlyArray<string>; stable: ReadonlyArray<boolean> }
+  >();
+  // The functions whose calls are not all in sight.
+  const escaped = new Set<string>();
   const values = new Set<string>();
   const visited = new Map<string | undefined, Set<Expression>>();
   let visits = 0;
   const pending: Array<[Expression, string | undefined]> = [[root, undefined]];
   const reach = (h: string, literal: Expression): void => {
     if (functions.has(h) || !isFunction(literal, 'Function')) return;
-    functions.set(
-      h,
-      literal.ops.slice(1).map((p) => functionLiteralParameterName(p))
-    );
-    pending.push([literal.ops[0], h]);
+    // The walk reads the body that the emission compiles, not the stored
+    // one: the angular unit rewritten, the collection-valued calls inlined
+    // and the fixed-width collections unrolled (`definitionBodyExpr()`). In
+    // degree mode the stored `arctan(c)` is at most π/2, but the shader
+    // computes `57.29578 * atan(c)`, up to 90, and an argument bound read
+    // from the stored body would be wrong.
+    let body: Expression;
+    try {
+      body = definitionBodyExpr(literal, target, registry, h);
+    } catch (e) {
+      if (e instanceof Error && e.name === 'CancellationError') throw e;
+      unreadable = true;
+      return;
+    }
+    const rebound = gpuReboundNames(body);
+    const params = literal.ops.slice(1);
+    const names = params.map((p) => functionLiteralParameterName(p));
+    functions.set(h, {
+      names,
+      stable: params.map(
+        (p, i) =>
+          !isRestParameter(p) && names[i] !== '' && !rebound.has(names[i])
+      ),
+    });
+    pending.push([body, h]);
   };
   const walk = (
     node: Expression,
     callerName: string | undefined,
-    bound: ReadonlySet<string>
+    bound: ReadonlySet<string>,
+    top = false
   ): void => {
     if (isSymbol(node)) {
       const s = node.symbol;
       if (bound.has(s)) return;
-      if (callerName !== undefined && functions.get(callerName)!.includes(s))
+      if (
+        callerName !== undefined &&
+        functions.get(callerName)!.names.includes(s)
+      )
         return;
       const literal = literalOf(s);
-      // A function used as a value: the shader can call it.
-      if (literal !== undefined) reach(s, literal);
-      else if (!values.has(s)) {
-        // A value that the shader may compute in place of the symbol.
+      // A function used as a value: the shader can call it, and its calls
+      // are not all in sight.
+      if (literal !== undefined) {
+        escaped.add(s);
+        reach(s, literal);
+      } else if (!values.has(s)) {
+        // A value that the shader may compute in place of the symbol, read
+        // as the shader computes it: rewritten for the angular unit
+        // (`foldedValueInRadians`, as `bakedValue` in `gpuFiniteProof`
+        // reads it).
         values.add(s);
         const value = engine._getSymbolValue(s);
-        if (value !== undefined) pending.push([value, undefined]);
+        if (value !== undefined)
+          pending.push([
+            BaseCompiler.foldedValueInRadians(value, target),
+            undefined,
+          ]);
       }
       return;
     }
@@ -1346,19 +1513,282 @@ export function gpuRecordWrittenNames(
     if ((h === 'Assign' || h === 'Declare') && isSymbol(node.op1))
       written.add(node.op1.symbol);
     const literal = literalOf(h);
-    if (literal !== undefined) reach(h, literal);
-    // The parameters of the calling function are not bound names here: the
-    // scope of the body binds them.
-    const own = callerName === undefined ? [] : functions.get(callerName)!;
+    if (literal !== undefined) {
+      if (bound.has(h)) escaped.add(h);
+      else sites.push({ caller: callerName, callee: h, args: node.ops, bound });
+      reach(h, literal);
+    }
+    // The parameters of the calling function are not bound names at the
+    // top node of its body: the scope of that node (the canonical `Block`)
+    // binds them, and their facts describe them. A binder below it that
+    // binds a name of a parameter again (`Sum(F(c), (c, 1, 10))`) hides
+    // the parameter: an argument that reads that name is not finite here.
+    const own =
+      callerName === undefined || !top ? [] : functions.get(callerName)!.names;
     const binds = boundVariableNames(node).filter((n) => !own.includes(n));
+    // A binder that binds the name of a user function hides it: a call of
+    // that name below is not a call of the function.
+    for (const name of binds) {
+      const shadowed = literalOf(name);
+      if (shadowed !== undefined) {
+        escaped.add(name);
+        reach(name, shadowed);
+      }
+    }
     const inner = binds.length === 0 ? bound : new Set([...bound, ...binds]);
     for (const op of node.ops) walk(op, callerName, inner);
   };
   while (pending.length > 0) {
     const [node, callerName] = pending.pop()!;
-    walk(node, callerName, new Set());
+    walk(node, callerName, new Set(), callerName !== undefined);
   }
   // A walk that stopped early has not seen every write: every name may be
   // written then.
   GPU_WRITTEN_NAMES.set(registry, unreadable ? 'all' : written);
+  if (unreadable || functions.size === 0) return;
+
+  // The facts of each function are final before the facts of the functions
+  // it calls are computed: the shader targets refuse a recursive definition,
+  // so the calls between the functions reached form a graph with no cycle,
+  // and the functions are taken in an order where each caller comes before
+  // its callees (Kahn's algorithm). The argument of a call site is then
+  // proven with the final facts of its caller, bound of the magnitude
+  // included: with `G(c) := F(c, 2c)` and `G(k)` for `k: real<0..10>`, `2c`
+  // is at most 20. A function on a cycle has no finite parameter.
+  const callers = new Map<string, Set<string>>();
+  for (const h of functions.keys()) callers.set(h, new Set());
+  for (const site of sites)
+    if (site.caller !== undefined && site.caller !== site.callee)
+      callers.get(site.callee)!.add(site.caller);
+    else if (site.caller === site.callee) escaped.add(site.callee);
+  const order: string[] = [];
+  const waiting = new Map<string, number>();
+  for (const [h, set] of callers) waiting.set(h, set.size);
+  const ready = [...functions.keys()].filter((h) => waiting.get(h) === 0);
+  while (ready.length > 0) {
+    const h = ready.pop()!;
+    order.push(h);
+    for (const [callee, set] of callers)
+      if (set.has(h)) {
+        const n = waiting.get(callee)! - 1;
+        waiting.set(callee, n);
+        if (n === 0) ready.push(callee);
+      }
+  }
+  const result = new Map<string, GPUParameterFact[]>();
+  for (const [h, { names }] of functions)
+    result.set(
+      h,
+      names.map(() => ({ finite: false, magnitude: undefined }))
+    );
+  // The target that reads an argument of `site`: the root target, with the
+  // parameters of the calling function bound and described by their final
+  // facts (`result`), which include the ranges that the host declared for
+  // them (`gpuDeclaredParameterRanges`).
+  const contextOf = (site: Site): CompileTarget<Expression> => {
+    if (site.caller === undefined) return target;
+    const names = functions.get(site.caller)!.names;
+    const callerFacts = result.get(site.caller)!;
+    const facts = new Map<string, GPUParameterFact>();
+    names.forEach((p, i) => {
+      if (p !== '') facts.set(p, callerFacts[i]);
+    });
+    const boundVars = new Set(target.boundVars ?? []);
+    for (const p of names) if (p !== '') boundVars.add(p);
+    return { ...target, boundVars, gpuParameterFacts: facts };
+  };
+  // Does `e` read a name of `bound` (a name that an enclosing binder of the
+  // call binds)?
+  const readsBound = (e: Expression, bound: ReadonlySet<string>): boolean => {
+    if (bound.size === 0) return false;
+    if (isSymbol(e)) return bound.has(e.symbol);
+    if (!isFunction(e)) return false;
+    return bound.has(e.operator) || e.ops.some((op) => readsBound(op, bound));
+  };
+  for (const h of order) {
+    const { names, stable } = functions.get(h)!;
+    const own = sites.filter((site) => site.callee === h);
+    const finite = stable.map((s) => s && !escaped.has(h));
+    if (
+      own.length === 0 ||
+      own.some((site) => site.args.length !== names.length)
+    )
+      finite.fill(false);
+    const bounds: (number | undefined)[] = names.map(() => 0);
+    for (const site of own) {
+      if (!finite.some((f) => f)) break;
+      const context = contextOf(site);
+      const proof = gpuFiniteProof(context, true);
+      site.args.forEach((arg, i) => {
+        if (!finite[i]) return;
+        // A scalar argument only. A call that passes a point or a list takes
+        // a copy of the function whose parameter has that shape, and the
+        // copy compiles the body differently: `Abs(p)` of a point is the
+        // norm `length(p)`, which can overflow in f32 when each component is
+        // finite.
+        if (
+          gpuOperandShape(arg) !== 'scalar' ||
+          readsBound(arg, site.bound) ||
+          !gpuProvablyFinite(arg, context)
+        ) {
+          finite[i] = false;
+          return;
+        }
+        let m: number | undefined;
+        try {
+          m = proof?.magnitude(arg);
+        } catch (err) {
+          if (err instanceof Error && err.name === 'CancellationError')
+            throw err;
+          m = undefined;
+        }
+        const known = bounds[i];
+        bounds[i] =
+          m === undefined || known === undefined
+            ? undefined
+            : Math.max(known, m);
+      });
+    }
+    const declared = gpuDeclaredParameterRanges(root.engine, h, names.length);
+    result.set(
+      h,
+      names.map((_, i) =>
+        gpuCombinedFact(
+          stable[i],
+          finite[i] ? bounds[i] : null,
+          declared?.[i]
+        )
+      )
+    );
+  }
+  GPU_CALL_SITE_FACTS.set(registry, result);
+}
+
+/**
+ * The fact of one parameter from what its call sites show and from the
+ * range the host declared for it. `sites` is the bound of the magnitude of
+ * the arguments when every call passes a value that is finite for certain
+ * (`undefined` when one argument has no bound), or `null` when one call
+ * does not. `declared` is the declared range, or `undefined`. A parameter
+ * that the body binds again or assigns (`stable` false) has no fact: the
+ * body reads another value under its name. When both give a bound, the
+ * smaller one is kept.
+ */
+function gpuCombinedFact(
+  stable: boolean,
+  sites: number | undefined | null,
+  declared: readonly [number, number] | undefined
+): GPUParameterFact {
+  if (!stable) return { finite: false, magnitude: undefined };
+  if (declared === undefined)
+    return sites === null
+      ? { finite: false, magnitude: undefined }
+      : { finite: true, magnitude: sites };
+  const bound = Math.max(Math.abs(declared[0]), Math.abs(declared[1]));
+  return {
+    finite: true,
+    magnitude:
+      sites === null || sites === undefined ? bound : Math.min(sites, bound),
+    range: declared,
+  };
+}
+
+/**
+ * The facts of the scalar parameters of the user function `id`, for the
+ * body of its definition (`CompileTarget.gpuParameterFacts`). A parameter
+ * has a fact when one of these holds:
+ *
+ * - every call of `id` in the compiled expression passes a value that is
+ *   finite for certain at its position (`gpuRecordCallSiteFacts`); the
+ *   fact has the bound of the magnitude of those values;
+ * - the host declared the parameter with a numeric type of two finite
+ *   bounds, of magnitude at most the largest f32, in the signature of the
+ *   definition (`F: (real<-1..1>) -> real`); the fact has the bound and the
+ *   interval of that range. The declaration is a promise of the host, as
+ *   the declared range of an input is: an argument outside the range is a
+ *   value outside its declared type, for which the compiled value is
+ *   unspecified. A bare `real` parameter is not enough: the argument
+ *   `exp(x)` is a `real` that is `+∞` in f32 for `x > 88.7`.
+ *
+ * When both hold, the smaller bound is kept. Only a parameter whose shader
+ * type is a float has facts, and not one that the body binds again or
+ * assigns: the body then reads another value under its name. With no
+ * recorded call sites (the shader route, `compileFunction`), only the
+ * declared ranges give facts.
+ */
+export function gpuDefinitionParameterFacts(
+  id: string,
+  params: ReadonlyArray<string>,
+  shaderTypes: ReadonlyArray<string>,
+  body: Expression,
+  target: CompileTarget<Expression>,
+  isWGSL: boolean
+): ReadonlyMap<string, GPUParameterFact> | undefined {
+  const callSites =
+    target.userFunctions === undefined
+      ? undefined
+      : GPU_CALL_SITE_FACTS.get(target.userFunctions)?.get(id);
+  const declared = gpuDeclaredParameterRanges(body.engine, id, params.length);
+  if (callSites === undefined && declared === undefined) return undefined;
+  const rebound = gpuReboundNames(body);
+  const facts = new Map<string, GPUParameterFact>();
+  params.forEach((p, i) => {
+    if (shaderTypes[i] !== (isWGSL ? 'f32' : 'float')) return;
+    if (rebound.has(p)) return;
+    // A recorded fact already holds the declared range
+    // (`gpuRecordCallSiteFacts`).
+    const site = callSites?.[i];
+    const fact =
+      site?.finite === true
+        ? site
+        : gpuCombinedFact(true, null, declared?.[i]);
+    if (fact.finite) facts.set(p, fact);
+  });
+  return facts.size === 0 ? undefined : facts;
+}
+
+/**
+ * The declared range of each parameter of the user function `id`, from the
+ * signature that the host declared (`F: (real<-1..1>, real) -> real` gives
+ * `[[-1, 1], undefined]`), or `undefined` when no parameter has one. A
+ * range counts when the parameter type is a finite real numeric type with
+ * two finite bounds of magnitude at most the largest f32. A signature that
+ * the engine inferred from the body, and the bare type `function`, give no
+ * range: they are not a promise of the host.
+ */
+function gpuDeclaredParameterRanges(
+  engine: Expression['engine'],
+  id: string,
+  count: number
+): ReadonlyArray<readonly [number, number] | undefined> | undefined {
+  const def = engine.lookupDefinition(id);
+  let declared: Type | undefined;
+  if (isValueDef(def) && def.value.inferredType !== true)
+    declared = def.value.type.type;
+  else if (isOperatorDef(def) && def.operator.inferredSignature !== true)
+    declared = def.operator.signature.type;
+  if (typeof declared !== 'object' || declared.kind !== 'signature')
+    return undefined;
+  const args = declared.args;
+  if (
+    args === undefined ||
+    args.length !== count ||
+    declared.optArgs !== undefined ||
+    declared.variadicArg !== undefined
+  )
+    return undefined;
+  let any = false;
+  const ranges = args.map((a) => {
+    const t = a.type;
+    if (typeof t !== 'object' || t.kind !== 'numeric') return undefined;
+    if (!isSubtype(t, 'finite_real')) return undefined;
+    const { lower, upper } = t;
+    if (lower === undefined || upper === undefined) return undefined;
+    if (!Number.isFinite(lower) || !Number.isFinite(upper)) return undefined;
+    if (Math.max(Math.abs(lower), Math.abs(upper)) > GPU_F32_MAX)
+      return undefined;
+    any = true;
+    return [lower, upper] as const;
+  });
+  return any ? ranges : undefined;
 }

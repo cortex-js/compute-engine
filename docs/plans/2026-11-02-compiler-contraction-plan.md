@@ -1665,6 +1665,20 @@ The alternative readings, not chosen: remove the proof and the helpers and
 accept an undefined value on overflow (a wrong pixel where the interpreter
 has a hole); keep the full proof (the state before the row).
 
+User decision 2026-11-04, later the same day, which replaces part of the
+row 9 decision: the intent of "the host provides the finite proof" is that
+the compiler uses all the information that the host declares. Two changes
+follow. (1) The call-site facts come back: when every call of a user
+function is in the same compilation, a parameter has the union of the
+bounds of the arguments of its calls. These bounds come from the host's
+declarations of the inputs. (2) A declared range on a parameter
+(`(real<-1..1>) -> real`) gives the built-in. The 0.179.0 compiler types
+the parameter `number` and loses the range, a defect against the row 9
+text "inputs and parameters". The proofs of the bodies of user functions
+stay removed: a call of a function whose declared result type has no
+finite range keeps its helper. The request and the answer are in Tycho row
+493 (`~/dev/tycho/docs/COMPUTE_ENGINE.md`), which is the record of the work.
+
 The result of step 4, row 1 (selection; 2026-11-03, session
 compute-engine-57; base `1359a1279`; committed as `ea4f58fa8`).
 

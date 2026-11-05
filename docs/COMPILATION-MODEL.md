@@ -151,6 +151,12 @@ interpreter's value. A line is removed when the case declines or is fixed.
   Sum(C[i+1]·x^i, i, 0, Length(C) − 1))` compiles to a scalar loop over
   `_SYS.at(C, i + 1) * _SYS.pow(_.x, i)` and gives `null` (also in
   0.178.0); the interpreter gives the list `[3x + 1, 4x + 2]`.
+- `glsl` and `wgsl`, `s: (real) -> complex` with `s := t ↦ If(t > 0, t > 1,
+  t)`, `x: real`: `s(x)` compiles with success to
+  `vec2(((0.0 < t) ? (1.0 < t) : (t)), 0.0)` (GLSL) and
+  `vec2f(select(t, 1.0 < t, 0.0 < t), 0.0)` (WGSL). The two branches mix a
+  boolean and a float, which the shader compiler refuses. The interpreter
+  gives an `incompatible-type` error at `x = 2` and `-1` at `x = -1`.
 
 - `javascript`, `x: real | nan`: `Arcsec(x)` and `Arccsc(x)` at `x = 0.5`,
   and `InverseHaversine(x)` at `x = 4`, compile to the real lowering
@@ -583,19 +589,27 @@ Every other case is unspecified: the compiled code can give any value,
   On the shader targets, a call of `sin`, `cos`, `max`, `min` or `clamp`
   uses the built-in when its argument is proven finite in f32 from the
   declared types and ranges of the inputs, the declared ranged result types
-  of the user functions, the literals and the operators of the expression.
-  Otherwise it calls a helper that gives `NaN` for an infinite argument, as
-  the interpreter does. The compiler does not read the body of another
-  function or the values at a call site to prove it: the host declares the
-  range of an input (`t: real<-5.5..5.5>`) or a result type with a range
-  for a function (`(real) -> real<-1..1>`) to get the built-in. That range
-  is read as the bound of the call: `sin(1000·f(x))` calls the built-in. A
-  result type with no range (`(real) -> real`) is not enough, since the
-  body is computed in f32 and can overflow (`f(u) := exp(u)`). A body whose
-  f32 value leaves its declared range gives a value outside its type, and
-  the compiled value is then unspecified. In the body of a user function, a
-  parameter is typed `number`, also with a declared signature, and an
-  operand that reads it calls the helper. With `t: real<-5.5..5.5>`,
+  of the user functions, the declared ranges of their parameters, the
+  values that the calls of a user function pass, the literals and the
+  operators of the expression. Otherwise it calls a helper that gives `NaN`
+  for an infinite argument, as the interpreter does. The compiler does not
+  read the body of another function to prove a call of it: the host
+  declares the range of an input (`t: real<-5.5..5.5>`) or a result type
+  with a range for a function (`(real) -> real<-1..1>`) to get the
+  built-in. That range is read as the bound of the call: `sin(1000·f(x))`
+  calls the built-in. A result type with no range (`(real) -> real`) is not
+  enough, since the body is computed in f32 and can overflow
+  (`f(u) := exp(u)`). A body whose f32 value leaves its declared range
+  gives a value outside its type, and the compiled value is then
+  unspecified. In the body of a user function, a parameter is finite for
+  certain when every call of the function in the compiled expression passes
+  a value that is proven finite at its position, or when the host declared
+  the parameter with a range (`(real<-1..1>) -> real`); an argument outside
+  that range is a value outside its type. With `x: real<-1e15..1e15>` and
+  `F(a) := sin(a)`, `F(x)` emits `sin(a)` in `_fn_F`; a second call
+  `F(exp(y))` with `y: real` makes it `_gpu_sin(a)`, since `exp(y)` can
+  overflow in f32. A bare declared `real` parameter is not enough, for the
+  same reason. With `t: real<-5.5..5.5>`,
   Tycho's `sin(10000(51.1⌊t⌋ − 3.9))` compiles to
   `sin(10000.0 * (51.1 * floor(t) + -0.000026879834))` on GLSL. With
   `x: real` and `f(u) := cos(u)/2`, whose result type is `number`,
@@ -1525,11 +1539,18 @@ finite for certain (`gpuProvablyFinite()`,
 overflow, rounding, the flush of subnormal values to 0, and the error of the
 GPU functions. When the proof is not certain, the helper stays.
 
-The host provides the proof. It reads only the declared types and ranges
-of the inputs, the declared ranged result types of the user functions, the
-number literals and the operators of the operand. It does not read the body of a
-user function, the values that the calls of a function pass to its
-parameters, or the index of a `Sum`, `Product` or loop as finite. A call
+The host provides the proof, and the compiler uses all of it. It reads the
+declared types and ranges of the inputs, the declared ranged result types of
+the user functions, the declared ranges of their parameters, the number
+literals and the operators of the operand. In the body of a user function, a
+parameter is also finite when every call of the function in the compiled
+expression passes a value that is proven finite at its position from these
+declarations (`gpuRecordCallSiteFacts()`), with the bound of the largest
+argument; the functions are taken callers first, so a bound passes from
+one body to the next. The `compileFunction` route runs no
+common-subexpression pass, and proves no operand. The proof does not read
+the body of a user function to prove a call of it, and does not read the
+index of a `Sum`, `Product` or loop as finite. A call
 never declines for want of a proof: it calls the helper, which gives the
 same value as the built-in on a finite argument. The caveat on the shader
 targets in "Caveats of compiled code" gives the examples.

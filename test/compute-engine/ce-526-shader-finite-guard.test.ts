@@ -77,10 +77,11 @@ describe.each(['glsl', 'wgsl'] as const)('on %s', (to) => {
   it('a parameter whose type is inferred keeps the guard', () => {
     // `p(0/0)` is NaN in the interpreter, and so is `p(u)` for `u: number`.
     expect(code('p(u)', to).preamble).toContain('_gpu_cos(1.9 * k + x)');
-    // The proof does not read the values that the calls pass: a call with
-    // a value of known size (`s` is declared `real<-10..10>`) or of unknown
-    // size (`x` is declared `real`) keeps the guard.
-    expect(code('p(s)', to).preamble).toContain('_gpu_cos(1.9 * k + x)');
+    // When every call passes a finite value of known size (`s` is declared
+    // `real<-10..10>`), the parameter is finite for certain, and `1.9k`
+    // cannot overflow. A finite value of unknown size (`x` is declared
+    // `real`) makes `1.9k` `+∞` in f32 for `k ≥ 1.8·10³⁸`.
+    expect(code('p(s)', to).preamble).toContain(' cos(1.9 * k + x)');
     expect(code('p(x)', to).preamble).toContain('_gpu_cos(1.9 * k + x)');
   });
 
