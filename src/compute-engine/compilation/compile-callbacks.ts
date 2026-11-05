@@ -728,7 +728,18 @@ export function literalWithParameterTypes(
       'Function',
       bodyJson,
       ...params.map((p, i) => {
-        const t = types[i];
+        // A declared type cannot name `missing`, so the annotation is the
+        // type without its `missing` arms, at every depth. An inferred type
+        // can have them: the accumulator of `Fold((acc, c) ↦ Join(acc,
+        // [If(c = 1, 0, acc[c - 1]) + xs[c]]), [], 1..n)` is typed
+        // `list<integer | missing>`, because the read `acc[c - 1]` can be out
+        // of range. With that annotation the rebuilt literal was not valid,
+        // and the fold declined (issue #511). A compiled read of an absent
+        // element gives `NaN` where the interpreter gives `Missing`, which
+        // the caveats of compiled code allow. A type that is `missing` alone
+        // gives no annotation.
+        const declared = types[i] && stripMissingFromType(types[i]);
+        const t = declared === 'never' ? undefined : declared;
         if (t === undefined) return p.json;
         const typed = [
           'Typed',

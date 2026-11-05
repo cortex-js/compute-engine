@@ -86,6 +86,44 @@ describe('issue #511: a fold that appends on one branch of an If', () => {
     expect(result.run!({ n: 3 })).toEqual([2, 2, 3]);
   });
 
+  it('compiles an accumulator whose inferred element type has a missing arm', () => {
+    // The case of the issue body: the read `acc[c - 1]` can be out of range,
+    // so the accumulator is typed `list<integer | missing>`, a type that no
+    // annotation can name.
+    const ce2 = new ComputeEngine();
+    ce2.declare('xs', 'list<integer>');
+    const e = ce2.box([
+      'Fold',
+      [
+        'Function',
+        [
+          'Join',
+          'acc',
+          [
+            'List',
+            [
+              'Add',
+              ['If', ['Equal', 'c', 1], 0, ['At', 'acc', ['Subtract', 'c', 1]]],
+              ['At', 'xs', 'c'],
+            ],
+          ],
+        ],
+        'acc',
+        'c',
+      ],
+      ['List'],
+      ['Range', 1, ['Count', 'xs'], 1],
+    ] as any);
+    expect(e.type.toString()).toBe('list<integer | missing>');
+    const result = compile(e, { fallback: false });
+    expect(result.success).toBe(true);
+    for (const xs of [[3, 1, 4, 1, 5], [], [7]]) {
+      const expected = e.subs({ xs: ce2.box(['List', ...xs]) }).evaluate().json;
+      expect(['List', ...(result.run!({ xs }) as number[])]).toEqual(expected);
+    }
+    expect(result.run!({ xs: [3, 1, 4, 1, 5] })).toEqual([3, 4, 8, 9, 14]);
+  });
+
   it('compiles with a condition that is always false', () => {
     const e = ce.box(outer('False') as any);
     const result = compile(e, { fallback: false });

@@ -19,6 +19,17 @@
   shape" since 0.178.0. It is now typed `list<number>`, and it compiles: in
   the example of the issue, `n = 3` and `l = 4` give `[1, 1, 2, 4, 7]`, as
   the interpreter does.
+- **A fold whose accumulator is read past its end compiles again**
+  ([#511](https://github.com/cortex-js/compute-engine/issues/511), reported by
+  [enumeratio](https://github.com/enumeratio)). The cumulative sums
+  `Fold((acc, c) ↦ Join(acc, [If(c = 1, 0, acc[c - 1]) + xs[c]]), [],
+  1..Count(xs))`, with `xs: list<integer>`, declined since 0.178.0 with
+  "the accumulator can be a collection (type `list<integer | missing>`)". The
+  read `acc[c - 1]` can be out of range, so the accumulator is typed
+  `list<integer | missing>`, and a declared type cannot name `missing`. It
+  compiles now, and `xs = [3, 1, 4, 1, 5]` gives `[3, 4, 8, 9, 14]`, as the
+  interpreter does. As for every compiled read, an element that is absent
+  gives `NaN` where the interpreter gives `Missing`.
 - **A compiled call of a user function whose body does not give its declared
   result type declines, where it gave a wrong value.** The compiled code used
   the declared result and did not check the body. With
