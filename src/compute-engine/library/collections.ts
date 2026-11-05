@@ -25366,7 +25366,11 @@ function* sortedIndicesWalk(
   route: CallbackRoute
 ): Generator<PromiseLike<unknown>, number[] | undefined, unknown> {
   const l = smallCount(expr);
-  if (l === undefined || !Number.isFinite(l) || l < 1) return undefined;
+  if (l === undefined || !Number.isFinite(l)) return undefined;
+  // An empty source has one order, the empty permutation, so `Sort([])` is
+  // `[]` and `Ordering([])` is `[]`. A key function or a comparator is not
+  // applied, because there is no element to apply it to.
+  if (l === 0) return [];
 
   const indices = Array.from({ length: l }, (_, i) => i + 1);
 

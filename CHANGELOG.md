@@ -9,6 +9,11 @@
   `evaluate()` and `N()` use the value of that moment: `0` for `x := 2`,
   `ComplexInfinity` for `x := -1`, `NaN` for `x := 0`. An exponent made only of
   numbers and constants still folds when it is boxed (`0^{2\pi}` is `0`).
+- **`Sort` and `Ordering` of an empty list give the empty list.**
+  `Sort([])` and `Ordering([])` stayed unevaluated, also with a key function
+  or a comparator, and also for a source that evaluates to an empty list
+  (`Sort(Filter([1, 2], x ↦ x > 5))`). Now each gives `[]`. `Sort("")` gives
+  the empty string `""`.
 
 ## 0.180.0 _2026-11-04_
 

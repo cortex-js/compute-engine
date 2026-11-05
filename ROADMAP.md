@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-809.
+Next free reference: CE-810.
 
 **Entry format.**
 
@@ -134,6 +134,21 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
   (CE-354 to CE-359)
 
 ## Types and type inference
+
+### CE-809. The call of a curried function is typed with a global symbol that has the name of its parameter
+
+**Status:** ready; defect, S. Found 2026-11-04 while fixing CE-765.
+**Witness:** plausible; with `n := [1, 2]` and `mk := n ↦ (x ↦ x + n)`, `mk(1)` is typed `(x: unknown) -> list<number>`, and its value is `x ↦ x + 1`, of type `(x: unknown) -> number`.
+
+The signature of the value of `mk(1)` is derived from the body of the inner
+literal, and the symbol `n` in that body is typed with the definition of `n`
+in the current scope, not with the argument of the call. The type of the
+call does not hold its value. Since CE-765, `Apply(mk(1), [10, 20])` keeps
+the old type `list<number>` in this case (`curriedLiteralValue` in
+`src/compute-engine/library/core.ts` does not read the value when a
+parameter name has a definition), so this check can go when the signature
+is fixed. The fix types an occurrence of an outer parameter in the inner
+body with the type of the argument, or with `unknown`.
 
 ### CE-545. A call over an `unknown` operand and over the wide CE-502 form are typed by different rules
 
@@ -622,14 +637,6 @@ With `Q := [(1, 2), (3, 4)]` and `x := 5`:
 **Witness:** plausible; A running sum of matrix rows is a one-line program; file says "check intent" first.
 
 A running sum of matrix rows is a one-line program; file says "check intent" first. Found during the work of 2026-10-30 and 2026-10-31 (Item 30); the
-reproduction above is the record.
-
-### CE-776. `Sort([])` stays unevaluated
-
-**Status:** ready; defect. Approved 2026-11-01.
-**Witness:** plausible; Sorting an empty list is a one-line program; expected `[]`.
-
-Sorting an empty list is a one-line program; expected `[]`. Found during the work of 2026-10-30 and 2026-10-31 (Item 8a); the
 reproduction above is the record.
 
 ## Evaluation, canonical forms and scoping

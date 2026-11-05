@@ -1461,6 +1461,32 @@ describe('SORT/SHUFFLE REBUILD AS LIST (regression)', () => {
     expect(e.operator).toEqual('Sort');
   });
 
+  // An empty source has one order, the empty permutation. Before CE-776, the
+  // sort read a count of 0 as an undecided order and stayed unevaluated.
+  test.each<[string, Expression]>([
+    ['Sort([])', ['Sort', ['List']]],
+    ['Ordering([])', ['Ordering', ['List']]],
+    ['Sort([], x ↦ -x)', ['Sort', ['List'], ['Function', ['Negate', 'x'], 'x']]],
+    [
+      'Sort([], (x, y) ↦ x - y)',
+      ['Sort', ['List'], ['Function', ['Subtract', 'x', 'y'], 'x', 'y']],
+    ],
+    [
+      'Sort of an empty Filter',
+      [
+        'Sort',
+        ['Filter', ['List', 1, 2], ['Function', ['Greater', 'x', 5], 'x']],
+      ],
+    ],
+  ])('%s is the empty list', (_, expr) => {
+    expect(engine.box(expr).evaluate().json).toEqual(['List']);
+  });
+
+  test('Sort of an empty string is the empty string', () => {
+    expect(engine.box(['Sort', "''"]).evaluate().json).toEqual("''");
+    expect(engine.box(['Ordering', "''"]).evaluate().json).toEqual(['List']);
+  });
+
   // Regression: Sort/RandomShuffle always rebuild as `List`, but their `type`
   // handler returned the source's type — so `Sort(Range(1,5))` statically
   // claimed an indexed_collection/Range shape instead of a list.
