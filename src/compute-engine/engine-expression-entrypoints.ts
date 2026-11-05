@@ -152,7 +152,27 @@ export function createSymbolExpression(
       if (cached !== undefined)
         return new BoxedSymbol(engine, name, { metadata, def: cached });
 
+      // The binding goes in the outermost scope below the boundary of the
+      // frame on the current chain: the scope whose parent is the boundary.
+      // While the body of the literal is canonicalized, that scope is the
+      // body scope of the literal. The first reference can be in a nested function
+      // literal: with `v` the parameter of `(v: list<integer>) ↦ Count(
+      // Filter(xs, c ↦ v[3] = 1 && Min(Map(1..3, j ↦ v[j])) >= 0))`, the first
+      // reference is in the body of `c ↦ …`. A binding declared there has no
+      // value and an explicit type, so the application of the outer literal
+      // does not hide it (`hideBodyScopeParams()`, `function-utils.ts`), and a
+      // read of `v` by name in the body of `c ↦ …` (the callback `j ↦ v[j]`
+      // that `Map` applies) found it before the frame that holds the value.
+      // A scope marked `noAutoDeclare` is not used: the search falls back to
+      // the innermost scope that accepts a declaration, as before.
+      const boundary = engine._shadowedParameterBoundary(name);
       let autoScope = engine.context.lexicalScope;
+      for (let s: typeof autoScope | null = autoScope; s; s = s.parent) {
+        if (s.parent === boundary) {
+          if (!s.noAutoDeclare) autoScope = s;
+          break;
+        }
+      }
       while (autoScope.noAutoDeclare && autoScope.parent)
         autoScope = autoScope.parent;
       // Reuse an existing local in this exact scope (a prior reference here)

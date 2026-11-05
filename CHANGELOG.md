@@ -1,3 +1,25 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A `Filter` predicate that reads a typed parameter of an enclosing
+  function, and then reads it again in a nested function, no longer throws**
+  ([#510](https://github.com/cortex-js/compute-engine/issues/510), reported by
+  [enumeratio](https://github.com/enumeratio)). With `v: list<integer>` the
+  parameter of the outer function, `Count(Filter(1..1, c ↦ v[3] = v[1] ∧
+  Min(Map(1..3, j ↦ v[j])) ≥ 0))` applied to `[1, 0, 1]` threw "Filter
+  predicate must return "True" or "False"" since 0.178.0: the nested function
+  `j ↦ v[j]` read `v` without its value. It now gives `1`.
+- **A fold whose callback appends to the accumulator on one branch of an `If`
+  and returns it unchanged on the other is typed as a list of numbers**
+  ([#511](https://github.com/cortex-js/compute-engine/issues/511), reported by
+  [enumeratio](https://github.com/enumeratio)). `Fold((t, m) ↦ If(m > l, t,
+  Join(t, [x])), [1], 1..l)` was typed `list<any>`, so a second fold in `x`
+  that reads `t` by index declined to compile with "does not settle one
+  shape" since 0.178.0. It is now typed `list<number>`, and it compiles: in
+  the example of the issue, `n = 3` and `l = 4` give `[1, 1, 2, 4, 7]`, as
+  the interpreter does.
+
 ## 0.179.0 _2026-11-04_
 
 ### Breaking changes

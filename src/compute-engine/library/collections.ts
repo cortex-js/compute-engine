@@ -2362,10 +2362,46 @@ function fixpointLiteral(
  * settles: the accumulator of `Reduce([[1], [2]], (a, x) ↦ Join(a, x))` was
  * then typed `list`, and the fold `list<any>`. Without the length, the
  * widening gives `list<integer>`, and the next step settles.
+ *
+ * A union result loses the length of each one-dimensional list arm that is
+ * not of the accumulator type `t` and is LONGER than every length of `t`
+ * (or of any length, when `t` is not a union of one-dimensional lists of
+ * fixed length), and the arms are joined again.
+ * A body that appends on one branch and returns the accumulator on the
+ * other (`If(c, a, Join(a, [x]))`) gives the union of a list one element
+ * longer and the accumulator type, `vector<2> | vector<integer^1>` at the
+ * first step. Kept as a union, the accumulator was typed with that union at
+ * the next step, where `Join(a, [x])` is typed `list`, and the fold was
+ * typed `list<any>` (issue #511). The other arms keep their length: a body
+ * that does not make the accumulator longer settles on a union of lengths,
+ * `vector<integer^2> | vector<integer^3>` for a seed of length 3 and a body
+ * that gives a list of 2 or 3 elements (issue #454).
  */
 function withoutLengthChange(t: Type, result: Type): Type {
   const a = resolveTypeAlias(t);
   const b = resolveTypeAlias(result);
+  if (typeof b !== 'string' && b.kind === 'union') {
+    const longest = longestListLength(t);
+    const arms = b.types.map((arm) => {
+      const r = resolveTypeAlias(arm);
+      // Only a one-dimensional list arm loses its length: without its
+      // dimensions, a matrix arm would be read as a list of its cells. An
+      // arm that is already of the accumulator type cannot make it longer.
+      if (
+        typeof r === 'string' ||
+        r.kind !== 'list' ||
+        r.dimensions?.length !== 1 ||
+        isSubtype(arm, t) ||
+        (longest !== undefined &&
+          r.dimensions[0] >= 0 &&
+          r.dimensions[0] <= longest)
+      )
+        return arm;
+      return { kind: 'list', elements: r.elements } as Type;
+    });
+    if (arms.every((arm, i) => arm === b.types[i])) return result;
+    return widenAll(arms) as Type;
+  }
   if (
     typeof a === 'string' ||
     typeof b === 'string' ||
@@ -2378,6 +2414,33 @@ function withoutLengthChange(t: Type, result: Type): Type {
   )
     return result;
   return { kind: 'list', elements: b.elements };
+}
+
+/**
+ * The largest length of the one-dimensional lists of fixed length that the
+ * type `t` admits: `3` for `vector<integer^2> | vector<integer^3>`.
+ * `undefined` when `t`, or an arm of a union `t`, is not such a list
+ * (`list<integer>`, a matrix, a scalar).
+ */
+function longestListLength(t: Type): number | undefined {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string') return undefined;
+  if (r.kind === 'union') {
+    let longest = -1;
+    for (const arm of r.types) {
+      const n = longestListLength(arm);
+      if (n === undefined) return undefined;
+      longest = Math.max(longest, n);
+    }
+    return longest < 0 ? undefined : longest;
+  }
+  if (
+    r.kind !== 'list' ||
+    r.dimensions?.length !== 1 ||
+    !(r.dimensions[0] >= 0)
+  )
+    return undefined;
+  return r.dimensions[0];
 }
 
 /** The fixpoint iteration runs at most this many steps from the seed. */
