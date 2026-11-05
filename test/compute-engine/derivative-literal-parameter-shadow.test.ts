@@ -255,3 +255,104 @@ describe('STATIC TYPE OF THE APPLICATION OF AN APPLIED CALLEE', () => {
     ]);
   });
 });
+
+// A callee of `Apply` that is a call of a curried user function, such as
+// `mk(1)` with `mk := n ↦ (x ↦ x + n)`, is evaluated to the inner function
+// literal (`x ↦ x + 1`), and that literal maps over a list argument where
+// its parameters are scalar. The static type of the call is then a list of
+// the result of the signature of the callee. Before, it was the scalar
+// result (`number`) for the value `[2, 3]`.
+describe('STATIC TYPE OF THE APPLICATION OF A CURRIED FUNCTION', () => {
+  const typeAndValue = (ce: ComputeEngine, json: Json) => {
+    const expr = ce.box(json);
+    const value = expr.evaluate();
+    // The type of the call holds the value.
+    expect(value.type.matches(expr.type)).toBe(true);
+    return [expr.type.toString(), value.toString()];
+  };
+  const curried = (body: Json, param: Json = 'x'): ComputeEngine => {
+    const ce = new ComputeEngine();
+    ce.declare('mk', 'function');
+    ce.assign('mk', ce.box(['Function', ['Function', body, param], 'n']));
+    return ce;
+  };
+
+  test('a list argument', () =>
+    expect(
+      typeAndValue(curried(['Add', 'x', 'n']), [
+        'Apply',
+        ['mk', 1],
+        ['List', 1, 2],
+      ])
+    ).toEqual(['vector<2>', '[2,3]']));
+
+  test('a list of lists keeps the depth', () =>
+    expect(
+      typeAndValue(curried(['Add', 'x', 'n']), [
+        'Apply',
+        ['mk', 1],
+        ['List', ['List', 1, 2], ['List', 3]],
+      ])
+    ).toEqual(['list<list<number>>', '[[2,3],[4]]']));
+
+  test('an inner literal whose value is a list', () =>
+    expect(
+      typeAndValue(curried(['List', 'x', 'n']), [
+        'Apply',
+        ['mk', 1],
+        ['List', 1, 2],
+      ])
+    ).toEqual(['list<list<unknown>>', '[[1,1],[2,1]]']));
+
+  test('the body is not typed with the outer parameter unbound', () => {
+    // The inner body reads `n`, which is the argument of the outer call
+    // (`1.5`), not an integer. When a global `n` has a value, the signature
+    // of `mk(1)` is typed with that value, and the call keeps the type of
+    // that signature: the type holds the value, but is not a vector.
+    const ce = curried(['List', 'x', 'n']);
+    expect(
+      typeAndValue(ce, ['Apply', ['mk', 1.5], ['List', 1, 2]])[1]
+    ).toEqual('[[1,1.5],[2,1.5]]');
+    const ce2 = curried(['Add', 'x', 'n']);
+    ce2.declare('n', 'list<integer>');
+    ce2.assign('n', ce2.box(['List', 1, 2]));
+    expect(
+      typeAndValue(ce2, ['Apply', ['mk', 1], ['List', 10, 20]])[1]
+    ).toEqual('[11,21]');
+  });
+
+  test('a list of tuples binds each tuple whole', () =>
+    expect(
+      typeAndValue(curried(['Multiply', 'x', 'n']), [
+        'Apply',
+        ['mk', 2],
+        ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+      ])
+    ).toEqual(['any', '[(2, 4),(6, 8)]']));
+
+  test('a curried function defined in LaTeX', () => {
+    const ce = new ComputeEngine();
+    ce.parse('\\operatorname{mk}(n) := x \\mapsto x+n').evaluate();
+    expect(typeAndValue(ce, ['Apply', ['mk', 1], ['List', 1, 2]])).toEqual([
+      'vector<2>',
+      '[2,3]',
+    ]);
+  });
+
+  test('controls: a scalar argument, a list parameter', () => {
+    expect(
+      typeAndValue(curried(['Add', 'x', 'n']), ['Apply', ['mk', 1], 3])
+    ).toEqual(['number', '4']);
+    // An inner literal whose parameter is a list binds the list whole.
+    const [type, value] = typeAndValue(
+      curried(['Add', ['Length', 'x'], 'n'], [
+        'Typed',
+        'x',
+        { str: 'list<real>' },
+      ]),
+      ['Apply', ['mk', 1], ['List', 1, 2]]
+    );
+    expect(value).toBe('3');
+    expect(type.startsWith('list')).toBe(false);
+  });
+});

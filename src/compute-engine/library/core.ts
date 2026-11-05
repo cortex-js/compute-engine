@@ -45,6 +45,7 @@ import {
 } from '../boxed-expression/call-result-type.js';
 import {
   deriveApplicationOf,
+  describe,
   describeBoundSymbol,
   describedFunctionLiteral,
   describeType,
@@ -1357,23 +1358,129 @@ function appliedCalleeMapType(
 }
 
 /**
+ * Whether the leaves of the collection type `t` are numbers: the element
+ * type, read through nested indexed collections and through each member of
+ * a union, is a subtype of `number`. False for a leaf that is a tuple, a
+ * string, or a type that is not known. `depth` bounds the walk.
+ */
+function hasNumberLeaves(t: Type, depth = 8): boolean {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'object' && r.kind === 'union')
+    return r.types.every((m) => hasNumberLeaves(m, depth));
+  if (typeof r === 'object' && r.kind === 'tuple') return false;
+  if (isSubtype(r, 'string')) return false;
+  if (isSubtype(r, INDEXED_COLLECTION_SHAPE_TYPE)) {
+    const element = collectionElementType(r);
+    return (
+      depth > 0 && element !== undefined && hasNumberLeaves(element, depth - 1)
+    );
+  }
+  return isSubtype(r, 'number');
+}
+
+/**
+ * The descriptor of the value of the application callee `st` when that
+ * value is a function literal; `undefined` otherwise.
+ *
+ * The callee is a call of a user function whose body is a function
+ * literal, such as `mk(1)` with `mk := n ↦ (x ↦ x + n)`. The call gives
+ * the inner literal, `x ↦ x + 1`, so the answer has the structure of the
+ * inner literal and the type of the callee (`fn.type`, the signature of
+ * the inner literal). The user function is the callee that the structural
+ * view records, or, when there is none, the definition of the name in the
+ * current scope: a value that is a `Function` literal, or an operator made
+ * from one (`_lambdaLiteral`).
+ *
+ * The call must give a value to each required parameter of the user
+ * function and have no more arguments than it has parameters. A user
+ * function with a rest parameter is not read, and neither is one with a
+ * parameter whose name has a definition in the current scope. Other
+ * callees, for example a `Composition`, do not give a function literal,
+ * and the answer is `undefined` for them.
+ */
+function curriedLiteralValue(
+  st: OperandStructure & { kind: 'application' },
+  fn: OperandDescriptor,
+  context: TypeHandlerContext | undefined
+): OperandDescriptor | undefined {
+  let outer = st.callee?.structureOf?.();
+  if (st.callee === undefined && context !== undefined) {
+    const def = context.engine.lookupDefinition(st.head);
+    const literal =
+      def?.operator !== undefined
+        ? (def.operator as { _lambdaLiteral?: Expression })._lambdaLiteral
+        : def?.value?.value;
+    if (literal === undefined || !isFunction(literal, 'Function'))
+      return undefined;
+    outer = describe(literal).structureOf?.();
+  }
+  if (outer?.kind !== 'function-literal') return undefined;
+  // The body of a canonical literal is a `Block`: a block of one statement
+  // gives the value of that statement.
+  let inner: OperandStructure | undefined = outer.body;
+  if (
+    inner.kind === 'application' &&
+    inner.head === 'Block' &&
+    inner.children.length === 1
+  )
+    inner = inner.children[0].structureOf?.();
+  if (inner?.kind !== 'function-literal') return undefined;
+  const value = inner;
+  const params = outer.parameters;
+  if (params.some((p) => p.rest === true)) return undefined;
+  const required = params.filter((p) => p.optional !== true).length;
+  const count = st.children.length;
+  if (count < required || count > params.length) return undefined;
+  // The signature of the callee (`fn.type`) is wrong when the name of an
+  // outer parameter has a definition in the current scope: it is typed with
+  // that definition, not with the argument of the call. With `n := [1, 2]`,
+  // `mk(1)` is typed `(x) -> list<number>` for the value `x ↦ x + 1`. Its
+  // result would then be read as the cell of a list, and the call typed as
+  // a list of lists, so the value is not read.
+  if (
+    context === undefined ||
+    params.some((p) => context.engine.lookupDefinition(p.name) !== undefined)
+  )
+    return undefined;
+  return { type: fn.type, facts: fn.facts, structureOf: () => value };
+}
+
+/**
  * The static type of `Apply(fn, …args)` when it maps (`applyLiteralMaps`),
  * read from operand descriptors; `undefined` otherwise. The gate is the
  * evaluate-time one: a function-literal callee whose parameters are scalar
  * by its signature, and an argument typed as an indexed collection that is
  * neither a tuple nor a string.
+ *
+ * `readBody` is false when `fn` is the value of a call of a curried user
+ * function (`curriedLiteralValue`): the body of that literal reads the
+ * parameters of the outer function (`n` in `x ↦ [x, n]`), and their types
+ * are not known here, so the body is not typed. Each cell is then the
+ * result of the signature of `fn`, which is typed with the arguments of
+ * the outer call.
  */
 function applyLiteralMapType(
   fn: OperandDescriptor,
   args: ReadonlyArray<OperandDescriptor>,
-  context?: TypeHandlerContext
+  context?: TypeHandlerContext,
+  readBody = true
 ): Type | undefined {
   const st = fn.structureOf?.();
   const signature = fn.type;
   // A callee that is a `Derivative` application (`Derivative(x ↦ x^2)`) is
   // evaluated to a function before the call: `appliedCalleeMapType` types
-  // the call. Any other application keeps the type of its signature.
-  if (st?.kind === 'application') return appliedCalleeMapType(fn, args);
+  // the call. A call of a curried user function (`mk(1)` with
+  // `mk := n ↦ (x ↦ x + n)`) evaluates to the inner function literal, and
+  // the call is typed as a call of that literal. Any other application
+  // keeps the type of its signature.
+  if (st?.kind === 'application') {
+    const derivative = appliedCalleeMapType(fn, args);
+    if (derivative !== undefined) return derivative;
+    const value = curriedLiteralValue(st, fn, context);
+    return value === undefined
+      ? undefined
+      : applyLiteralMapType(value, args, context, false);
+  }
   if (st?.kind !== 'function-literal') {
     // A type-only signature can map a scalar tuple position even when a
     // different parameter consumes a list whole. Operator symbols keep their
@@ -1433,14 +1540,26 @@ function applyLiteralMapType(
     (perElement0 === 'unknown' || isSubtype(perElement0, 'number'))
   )
     return (
-      componentwiseTupleCallType(
-        describedFunctionLiteral(fn),
-        args.map((a) => a.type)
-      ) ?? 'any'
+      (readBody
+        ? componentwiseTupleCallType(
+            describedFunctionLiteral(fn),
+            args.map((a) => a.type)
+          )
+        : undefined) ?? 'any'
     );
   // A rest parameter takes its arguments whole (`mappedArgumentCount`).
   args = args.slice(0, mappedArgumentCount(fn.type));
   const collections = args.filter((a) => mapsOver(a.type));
+  // When the body is not read, the result of the signature describes a
+  // cell only when each cell binds a number. A list of tuples binds each
+  // tuple whole, and the body decides the shape of the cell
+  // (`x ↦ x·n` over `[(1, 2), (3, 4)]` gives `[(2, 4), (6, 8)]`), so the
+  // call is typed `any`. A call with no argument that is a collection by
+  // its type (`u: number | list<number>`) keeps the type of its signature.
+  if (!readBody) {
+    if (collections.length === 0) return undefined;
+    if (collections.some((a) => !hasNumberLeaves(a.type))) return 'any';
+  }
   if (collections.length === 0) {
     // A scalar-or-list argument (`u: number | list<number>`) maps when it
     // holds a list and binds when it holds a scalar: the call is either
@@ -1518,7 +1637,9 @@ function applyLiteralMapType(
   // one parameter and one collection (`x ↦ x^2` over integers gives
   // `integer<0..>` cells), and the literal's signature result otherwise.
   const perElement =
-    literalCellType(fn, collections, args, context) ??
+    (readBody
+      ? literalCellType(fn, collections, args, context)
+      : undefined) ??
     functionResult(fn.type) ??
     'unknown';
   if (isSubtype(perElement, COLLECTION_SHAPE_TYPE))

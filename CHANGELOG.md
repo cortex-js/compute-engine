@@ -14,6 +14,11 @@
   or a comparator, and also for a source that evaluates to an empty list
   (`Sort(Filter([1, 2], x ↦ x > 5))`). Now each gives `[]`. `Sort("")` gives
   the empty string `""`.
+- **The application of a curried function to a list is typed as a list.**
+  With `mk := n ↦ (x ↦ x + n)`, `Apply(mk(1), [1, 2])` was typed `number`,
+  and its value is `[2, 3]`. Now it is typed `vector<2>`, as
+  `Apply(x ↦ x + 1, [1, 2])` is. A list of tuples, whose cells the body of
+  the inner function decides, gives the type `any`.
 
 ## 0.180.0 _2026-11-04_
 

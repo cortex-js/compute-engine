@@ -2725,14 +2725,6 @@ reproduction above is the record.
 Compilation changes the engine's scope; a two-line program. Found during the work of 2026-10-30 and 2026-10-31 (Compiling `Block(If(x < 1, b ≔ 1, b ≔ 2); b)` creates a global `b`); the
 reproduction above is the record.
 
-### CE-778. GPU: a negated comparison chain loses its parentheses
-
-**Status:** ready; wrong value. Approved 2026-11-01.
-**Witness:** plausible; `Not(Less(3, y, x))` emits `!(3.0 < y) && (y < x)`; at y = 4, x = 1 shader false, interpreter True.
-
-`Not(Less(3, y, x))` emits `!(3.0 < y) && (y < x)`; at y = 4, x = 1 shader false, interpreter True. Found during the work of 2026-10-30 and 2026-10-31 (Item 1); the
-reproduction above is the record.
-
 ### CE-779. GLSL: a `list<real>` input compiles to a bare name and reports success instead of declining
 
 **Status:** ready; defect. Approved 2026-11-01.
@@ -3757,7 +3749,7 @@ decline.
 
 ## Tests, tools, documentation and release tasks
 
-### CE-540. The CI test job fails on `main` in four test files
+### CE-540. The CI test job fails on `main` in timing and GPU test files
 
 **Status:** ready; defect, small. Seen 2026-10-27 in the `main` run of commit
 `a23be5735` and in the run of pull request #482.
@@ -3765,23 +3757,20 @@ decline.
 
 The `test` job of CI fails on Node 22 and Node 26. The failing tests:
 
-- `test/compute-engine/ce-39-3-range-element-stays-range.test.ts`, "Shape and
-  Rank of many long range rows do not list the rows": the test requires the two
-  queries over 10,000 rows of `Range(1, 10000)` to finish in less than one
-  second, and the CI machine is slower. Do not replace the timing check with
-  spies on the `iterator` and `at` handlers of `Range` only: hashing and
-  `isSame` read the elements of a range through `integerRangeElements()`
-  (`boxed-expression/type-guards.ts`), not through those handlers, so a
-  regression that hashes every row would pass. Count the work (for example, spy
-  on the hash as well), or keep a timing check with a limit that CI meets.
 - `test/compute-engine/compile-gpu-statement-selection.test.ts`, "a selection
   with an effect keeps the ternary form and declines", and
   `test/compute-engine/ce-509-513-shader-fixes.test.ts`, "declines a plain draw
   in a branch too": the WGSL compilation of a branch that draws a random value
   does not throw. Check again after commit `f5d991902` (the order of random
-  draws in GPU statements), which is after `a23be5735`.
+  draws in GPU statements), which is after `a23be5735`. These two tests pass in
+  the `main` runs 41866511849 (2026-11-04) and 41941702301 (0.179.0).
 - `test/compute-engine/ce-430-findfit-async-data.test.ts`, the three "a timer
-  runs during …" tests, on Node 22 only.
+  runs during …" tests, on Node 22 only. The `main` runs of 2026-11-04 fail
+  instead in other timing tests of the asynchronous `FindFit`:
+  `ce-424-425-findfit-async.test.ts`, "box route: the search stops at the limit
+  with timedOut: True" (reason `setup-timeout`, expected `no-pool`), and
+  `assign-declare-evaluate-async.test.ts`, "Assign: the value runs the
+  asynchronous handler of FindFit".
 
 ### CE-775. The arithmetic guide page of cortexjs.io still owes the text of a public behavior change
 
