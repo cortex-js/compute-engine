@@ -6440,12 +6440,55 @@ const INFIX_ASSIGNS = new WeakSet<object>();
  */
 const CASES_ENVIRONMENTS = new Set(['cases', 'dcases', 'rcases']);
 
+/** The code of the error for `L[k] \coloneq v` (`parseAssignStatement()`). */
+const ASSIGNMENT_TO_LIST_ELEMENT = 'assignment-to-list-element';
+
 /**
- * True while `parseAssignStatement()` reads the top-level reading of a
- * `cases` row whose local reading it has already read: the binder branch
- * is skipped, so the same tokens are not read a third time.
+ * The error of an assignment to a list element, over the tokens from `start`
+ * to the current position. The detail of the error is the operator to use:
+ * `ReplaceAt` gives a new list with the element replaced. A string index has
+ * no such detail, because `ReplaceAt` refuses a string index.
  */
-let readingTopLevel = false;
+function assignmentToListElement(
+  parser: Parser,
+  index: MathJsonExpression | null,
+  start: number
+): MathJsonExpression {
+  return parser.error(
+    stringValue(index) !== null
+      ? [ASSIGNMENT_TO_LIST_ELEMENT]
+      : [ASSIGNMENT_TO_LIST_ELEMENT, { str: 'ReplaceAt' }],
+    start
+  );
+}
+
+/**
+ * Reads the right side of an assignment to a list element, so that it is part
+ * of the one error, and gives this error. With no right side, gives `null`.
+ */
+function parseAssignmentToListElement(
+  parser: Parser,
+  index: MathJsonExpression | null,
+  start: number,
+  until?: Readonly<Terminator>
+): MathJsonExpression | null {
+  const rhs = parser.parseExpression({ ...(until ?? {}), minPrec: 20 });
+  if (rhs === null) return null;
+  return assignmentToListElement(parser, index, start);
+}
+
+/**
+ * True for the error of an assignment to a list element. A `let` statement and
+ * an item of a `where` clause keep this error: they decline any other
+ * statement that is not a binding, and the operators read after such a decline
+ * give an error that names neither the cause nor the remedy.
+ */
+function isAssignmentToListElement(expr: MathJsonExpression): boolean {
+  return (
+    operator(expr) === 'Error' &&
+    stringValue(operand(operand(expr, 1), 1)) === ASSIGNMENT_TO_LIST_ELEMENT
+  );
+}
 
 function parseAssign(
   parser: Parser,
@@ -6486,6 +6529,9 @@ function parseAssignStatement(
   // `parseExpression` calls below re-point it — so the parameter references (in
   // both the LHS signature and the RHS body) can be pruned. See `\mapsto`.
   const paramDiagCp = parser.operandDiagnosticCheckpoint;
+  // The token where the target starts, for an error over the whole assignment.
+  // The parse of the right side moves `operandStartIndex` too.
+  const lhsStart = parser.operandStartIndex;
 
   // In local-binding contexts (`;` blocks and `where` bindings), keep
   // simple subscripted names as compound symbols (e.g. `r_1`).
@@ -6500,9 +6546,11 @@ function parseAssignStatement(
   // from the `Subscript(n, 0)` target that step 0 below gives.
   // Otherwise the target is not converted: at the top level,
   // `Assign(Subscript(n, 0), 3)` is a term of a sequence definition on the
-  // list `n`, which evaluates to `Nothing` and does not change `n`. The
-  // target `At(n, 0)` reads as the definition of a function `At`, with the
-  // error `expected-a-symbol` for its parameter `0`, which the user sees.
+  // list `n`, which evaluates to `Nothing` and does not change `n`. A target
+  // that is not a symbol has a binder name only when it is an `At`
+  // (`Parser.binderSymbol()`), so the top-level reading of such a target is
+  // always the error `assignment-to-list-element`, and the user sees that
+  // nothing was assigned. The local reading has already read the right side.
   //
   // A row of a `cases` environment (`dcases`, `rcases` too) is read before
   // the parser knows whether the environment is a block: two or more
@@ -6511,36 +6559,27 @@ function parseAssignStatement(
   // readings: the top-level one is returned, and the local one is recorded
   // beside it (`Parser.blockRowAlternative()`); the block branch swaps the
   // local reading in, for the first row, a middle row and the last row
-  // alike, and a `Which` keeps the top-level one. `readingTopLevel` keeps
-  // the second parse of the same tokens from recording a third.
+  // alike, and a `Which` keeps the top-level one.
   const binderTarget =
     symbol(lhs) === null ? (parser.binderSymbol(lhs) ?? null) : null;
-  if (binderTarget !== null && !readingTopLevel) {
+  if (binderTarget !== null) {
     if (isLocalBindingContext) lhs = binderTarget;
     else {
-      const start = parser.index;
       const local = parseAssignStatement(parser, binderTarget, until);
+      if (local === null) return null;
       const end = parser.index;
       parser.skipSpace();
       const firstOfBlock = parser.peek === ';';
       parser.index = end;
-      if (local !== null && firstOfBlock) return local;
-      parser.index = start;
-      if (
-        local !== null &&
-        CASES_ENVIRONMENTS.has(parser.environmentName?.() ?? '')
-      ) {
-        readingTopLevel = true;
-        let topLevel: MathJsonExpression | null;
-        try {
-          topLevel = parseAssignStatement(parser, lhs, until);
-        } finally {
-          readingTopLevel = false;
-        }
-        if (topLevel !== null)
-          parser._recordBlockRowAlternative?.(topLevel, local);
-        return topLevel;
-      }
+      if (firstOfBlock) return local;
+      const topLevel = assignmentToListElement(
+        parser,
+        operand(lhs, 2),
+        lhsStart
+      );
+      if (CASES_ENVIRONMENTS.has(parser.environmentName?.() ?? ''))
+        parser._recordBlockRowAlternative?.(topLevel, local);
+      return topLevel;
     }
   }
 
@@ -6592,6 +6631,15 @@ function parseAssignStatement(
     let args: MathJsonExpression[] = [];
     if (operator(delimBody) === 'Sequence') args = [...operands(delimBody)];
     else if (delimBody) args = [delimBody!];
+    // `\operatorname{At} (L, k)`, with a space or a group before the
+    // parenthesis, is the same target as the `At` of step 3 below.
+    if (fn === 'At')
+      return parseAssignmentToListElement(
+        parser,
+        args[1] ?? null,
+        lhsStart,
+        until
+      );
     // A parameter spelled as a subscript on an indexed collection (`n_{0}`
     // when `n` is a list) is the new name `n_0`: the body is read with it
     // declared.
@@ -6657,6 +6705,21 @@ function parseAssignStatement(
 
     return ['Assign', lhs, rhs];
   }
+
+  //
+  // 3/ L[k] := ... : a list element has no assignment
+  //
+  // A target that is `At` here is `L[k]`, `M[i, j]` or
+  // `\operatorname{At}(L, k)`. Read as `head(args) := value` below, it would
+  // define a function named `At`, which replaces the library function: `L[2]`
+  // would give `[5, 5, 5]`, with no error when the index is a symbol.
+  if (operator(lhs) === 'At')
+    return parseAssignmentToListElement(
+      parser,
+      operand(lhs, 2),
+      lhsStart,
+      until
+    );
 
   // If this is a previously defined function, the lhs might be a
   // function application, i.e. `f(x) := ...`
@@ -7594,6 +7657,7 @@ function whereItem(
   kind: 'binding' | 'condition' | 'error';
   expr: MathJsonExpression;
 } | null {
+  if (isAssignmentToListElement(item)) return { kind: 'error', expr: item };
   if (isLetStatement(item)) {
     // A `let` statement with a value is the block of one statement
     // `Declare(k, T, v)`, or `Declare(k, Dictionary(…))` when the value is a
@@ -7957,7 +8021,30 @@ function parseLetStatement(
   parser.index = start;
   const statement = parser.parseExpression(terminator);
   if (statement === null) return null;
+  if (isAssignmentToListElement(statement)) return statement;
   const normalized = normalizeLocalAssign(statement);
+  // After `let`, `=` is the assignment (see below), so a target that is `At`
+  // reads as with `\coloneq`, not as a comparison: a subscript on a list
+  // (`let n_{0} = 5`) declares the new local `n_0`, and any other element
+  // (`let L[k] = 5`) is the error of an assignment to a list element.
+  if (
+    operator(normalized) === 'Equal' &&
+    operator(operand(normalized, 1)) === 'At'
+  ) {
+    const local = parser.binderSymbol(operand(normalized, 1));
+    if (local === null)
+      return assignmentToListElement(
+        parser,
+        operand(operand(normalized, 1), 2),
+        start
+      );
+    const declaration: MathJsonExpression = [
+      'Block',
+      declareWithValue(local, operand(normalized, 2)!),
+    ];
+    LET_STATEMENTS.add(declaration as object);
+    return declaration;
+  }
   let result: MathJsonExpression;
   // `let k \coloneq v`, and `let k = v` as in Epsil (after `let`, `=` is
   // the assignment), declare the local with its value in one statement. A

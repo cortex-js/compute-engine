@@ -67,6 +67,12 @@
 
 ### Resolved Issues
 
+- **An assignment to a list element is now a parse error, and it no longer
+  replaces the function `At`.** With `L` a list, `L[k]\coloneq 5` replaced `At`
+  for the whole engine, so that `L[2]` gave `[5, 5, 5]`, and `L[2]\coloneq 5`
+  gave `expected-a-symbol`. All the forms now give the error
+  `assignment-to-list-element`, and `L[2]` keeps its value. To get a new list
+  with one element replaced, use `ReplaceAt`.
 - **`N()` of an integral now reports the error of `evaluate()` when a call head
   is defined later as a data symbol.** Parse `\int_0^1 g(x)\,dx`, then run
   `ce.declare('g', 'real')`. `evaluate()` gave the `expected-function` error

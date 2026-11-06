@@ -132,7 +132,7 @@ describe('Tycho row 410: a binder spelled as a subscript on a list', () => {
     // An environment that is not a block keeps the top-level reading of
     // the row: a single row, a trailing row break (one row), a row with a
     // condition (a `Which`), a matrix.
-    const topLevel = '["Assign","At",["Function",3,"n",0]]';
+    const topLevel = 'assignment-to-list-element';
     for (const latex of [
       '\\begin{cases} n_{0}\\coloneq 3\\end{cases}',
       '\\begin{cases} n_{0}\\coloneq 3\\\\ \\end{cases}',
@@ -361,8 +361,10 @@ describe('Tycho row 410: a subscript on a list outside a binder is an index', ()
     // changes nothing. The error makes the failed assignment visible.
     const ce = engine();
     const expr = ce.parse('n_{0}\\coloneq 3');
-    expect(JSON.stringify(expr.json)).toContain('expected-a-symbol');
-    expect(JSON.stringify(expr.evaluate().json)).toContain('expected-a-symbol');
+    expect(JSON.stringify(expr.json)).toContain('assignment-to-list-element');
+    expect(JSON.stringify(expr.evaluate().json)).toContain(
+      'assignment-to-list-element'
+    );
     expect(JSON.stringify(ce.parse('n_{0}', { form: 'raw' }).json)).toBe(
       '["At","n",0]'
     );
@@ -371,7 +373,7 @@ describe('Tycho row 410: a subscript on a list outside a binder is an index', ()
     ce2.assign('n', ce2.box(['List', 1, 2, 3]));
     const expr2 = ce2.parse('n_{1}\\coloneq 7');
     expect(JSON.stringify(expr2.evaluate().json)).toContain(
-      'expected-a-symbol'
+      'assignment-to-list-element'
     );
     expect(JSON.stringify(ce2.box('n').evaluate().json)).toBe('["List",1,2,3]');
   });

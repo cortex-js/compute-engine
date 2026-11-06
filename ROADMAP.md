@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-826.
+Next free reference: CE-827.
 
 **Entry format.**
 
@@ -992,22 +992,6 @@ validation. A probe that needs only "what type would this application have" then
 takes the cheap option and never declares, so no scratch-scope exemption is
 necessary. Not scoped or scheduled. Do it when a third instance of the pattern
 appears.
-
-### CE-124. A `Which` whose list condition holds an unknown function over the list stays symbolic
-
-**Status:** ready; defect. Tycho ask 296.
-**Witness:** corpus; Tycho ask 296 with a Tycho repro script; `Which` over `foo(L)` blows up to 52 MB.
-
-The evaluator selects element-wise over a list condition
-(`Which([1,5,2] < 3, 10, True, 20)` is `[10, 20, 10]`). But when the condition
-holds an unknown function applied to the whole list (measured with `foo(L)`),
-the function does not broadcast, so each element of the condition list holds a
-copy of `foo(L)`, no element can be decided, and the `Which` stays symbolic: N
-copies of an N-element list for each reference. At 500 elements the result was
-52 MB. At 10 000 elements under `withTimeLimit(5000)` the symbolic `Which`
-returns in about 0.2 s. Tycho's case (`conj`, Desmos's complex conjugate) now
-parses as `Conjugate` (`definitions-complex.ts`). Instrument on the Tycho side:
-`scripts/repros/2026-09-15-list-conditioned-piecewise-probe.mts` in `dev/tycho`.
 
 ### CE-131. Disjunctive (`Or`) guards in the assumptions system
 
@@ -2513,6 +2497,35 @@ Interpreter gives a value; "not compared with HEAD", and F41 (`c12544982`) chang
 reproduction above is the record.
 
 ## LaTeX parsing and serialization
+
+### CE-826. `a + b := 5` replaces the library function `Add` for the whole engine
+
+**Status:** waits for user (decision); wrong value. Found 2026-11-05 in the review
+of the fix for Tycho's report of `L[k] := 5`. Also at HEAD
+`985c6373491d3ce687e906443da19314916535f9`.
+**Witness:** plausible; after evaluating `a+b\coloneq 5`, `Add(1, 2)` gives 5; it gives 3 before.
+
+`parseAssignStatement()` in `latex-syntax/dictionary/definitions-core.ts` reads
+`head(args) := value` as a function definition, whatever the head is. So
+`a+b\coloneq 5` parses to `["Assign", "Add", ["Function", ["Block", 5], "a", "b"]]`
+with `isValid` true. The same applies to `\sin(x)\coloneq 5` (after it, `Sin(0)`
+gives 5), `\operatorname{First}(L)\coloneq 5` (`First([7, 8])` gives `[5, 5]`) and
+the symbol target `\operatorname{At}\coloneq x\mapsto 5`. The head `At` alone is
+refused, with the error `assignment-to-list-element`.
+
+Question: may a LaTeX assignment replace a function of the library?
+
+- (a) No, for a head from an operator notation or a library name: the parser gives
+  an error. `a+b\coloneq 5` and `\sin(x)\coloneq 5` stop working, and a program
+  that replaces `\sin` on purpose has to use `ce.declare()`. This is the option
+  the author recommends: the case that a user intends, a new definition, is not
+  lost, and the case that changes every later `1 + 2` gets an error.
+- (b) No for an operator notation (`a+b`), yes for a named function
+  (`\sin(x)`): the error covers only a target with no name in the source. A
+  replaced `\sin` still changes later values, on purpose or not.
+- (c) No change. It stays valid, and later values change with no error.
+
+An unanswered question means (c), the current behavior.
 
 ### CE-441. The LaTeX of a rest parameter or a destructuring parameter does not read back as that parameter
 

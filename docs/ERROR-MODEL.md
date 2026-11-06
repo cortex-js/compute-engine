@@ -368,7 +368,9 @@ before the program runs, and a compilation declines it.
 - The LaTeX parser reads `\operatorname{let} k \coloneq v` as `Declare(k,
   "unknown", v)`, and a chained `a \coloneq b \coloneq v` as the syntax error
   `chained-assignment`. The Epsil parser reports `a := b := v` with the same
-  code.
+  code. It reads `L[k] \coloneq v` as the syntax error
+  `assignment-to-list-element`: a list element has no assignment, and
+  `ReplaceAt` gives a new list with the element replaced.
 
 ### A comparison is two-valued — user decision of 2026-11-02
 
