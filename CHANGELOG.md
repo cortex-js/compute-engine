@@ -24,6 +24,14 @@
 
 ### Improvements
 
+- **A compiled loop that copies a list on each pass is reported.** When
+  `xs = ReplaceAt(xs, i, v)` in a `Loop` cannot write the list in place on the
+  JavaScript target, for example because the loop also has `ys = xs`,
+  `CompilationResult.warnings` now holds an entry with the code
+  `copying-list-update` and the name of the local in `binding`, one for each
+  such local of a block. An editor can show the author that the loop copies the
+  list. The emitted code does not change. An update that is not in a loop, and
+  the Python target, which always copies, are not reported.
 - **`checkEpsil(ce, source)` checks an Epsil program without running it.** It
   is exported from `@cortex-js/compute-engine/epsil` and gives the parse errors
   and static type errors that `executeEpsil` reports before it runs a

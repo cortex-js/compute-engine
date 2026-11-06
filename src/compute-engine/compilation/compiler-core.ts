@@ -110,6 +110,10 @@ import {
   typeHasPointArm,
 } from './compiler-type-facts.js';
 import { CompilerState } from './compiler-state.js';
+import {
+  copyingUpdateInLoop,
+  noteCopyingUpdateInLoop,
+} from './in-place-update.js';
 import { isEngineCompileHandler } from './engine-compile-handlers.js';
 import {
   absentCollectionOperandGuard,
@@ -4406,6 +4410,20 @@ export function compileLoopBody(
       isFunction(s, 'Declare') && isSymbol(s.ops[0]) ? [s.ops[0].symbol] : []
     );
     assertLocalsAssignedBeforeRead(withDecls, bodyLocals);
+    // A loop body does not write its locals in place
+    // (`ownedLocalUpdateChains` runs in `compileBlock` only), so every
+    // `xs = ReplaceAt(xs, …)` of a local of the body copies the list. The
+    // body gives the local a new value on each pass, so an update directly
+    // in the body copies the list once for each value. An update in a `Loop`
+    // nested in the body copies it on each pass of that inner loop, and the
+    // compilation reports it in `CompilationResult.warnings`
+    // (`copyingUpdateInLoop`).
+    if (target.language === 'javascript')
+      for (const local of bodyLocals) {
+        const update = copyingUpdateInLoop(withDecls, local);
+        if (update !== undefined)
+          noteCopyingUpdateInLoop(target, local, update);
+      }
     // A body-scoped `localFunctions`, filled in statement order below. Held
     // as its own binding because the field on `CompileTarget` is a
     // `ReadonlyMap`: the target exposes it for READS during compilation, and

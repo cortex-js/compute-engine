@@ -54,6 +54,18 @@ function interpreted(
 
 const list = (xs: number[]): Json => ['List', ...xs];
 
+// The locals that the `copying-list-update` warnings of the compilation name.
+function copiedLocals(ce: ComputeEngine, json: Json, to?: 'python'): string[] {
+  const r = compile(ce.box(json as never), {
+    fallback: false,
+    ...(to ? { to } : {}),
+  });
+  expect(r.success).toBe(true);
+  return (r.warnings ?? [])
+    .filter((w) => w.code === 'copying-list-update')
+    .map((w) => w.binding ?? '');
+}
+
 describe('Min and Max of a scalar and a list fold without a combined array (CE-337.3)', () => {
   const ce = new ComputeEngine();
   ce.declare('L', 'list<real>');
@@ -330,6 +342,7 @@ describe('a block local replaced element by element is written in place (CE-329)
     expect(run(ce, json, { L })).toEqual([2, 4, 6]);
     expect(L).toEqual([1, 2, 3]);
     expect(interpreted(ce, json, { L: list([1, 2, 3]) })).toEqual([2, 4, 6]);
+    expect(copiedLocals(ce, json)).toEqual([]);
   });
 
   test('a swap reads both old values', () => {
@@ -386,6 +399,22 @@ describe('a block local replaced element by element is written in place (CE-329)
     const code = codeOf(ce, json);
     expect(code).not.toContain('replaceAtInPlace');
     expect(run(ce, json, { L: [1, 2, 3] })).toBe(1212);
+    // The loop copies the list on each pass, and the compilation says so,
+    // once for the local.
+    const r = compile(ce.box(json as never), { fallback: false });
+    expect(r.warnings).toEqual([
+      {
+        code: 'copying-list-update',
+        kind: 'capability',
+        binding: 'xs',
+        value: expect.stringContaining('ReplaceAt'),
+        message:
+          'The list `xs` is copied on each pass of the loop that updates it ' +
+          'with `ReplaceAt`. The update cannot write the list in place: the ' +
+          'list has another name, is used in a way that could see a write, ' +
+          'or is declared in the body of an enclosing loop.',
+      },
+    ]);
   });
 
   test('a dictionary value that holds the list keeps the copying form', () => {
@@ -445,6 +474,7 @@ describe('a block local replaced element by element is written in place (CE-329)
     expect(run(ce, json, { L })).toBe(510);
     expect(L).toEqual([5, 2, 3]);
     expect(interpreted(ce, json, { L: list([5, 2, 3]) })).toBe(510);
+    expect(copiedLocals(ce, json)).toEqual([]);
   });
 
   test('a last line that writes without assigning does not stop the in-place write', () => {
@@ -461,6 +491,8 @@ describe('a block local replaced element by element is written in place (CE-329)
     expect(run(ce, json, { L })).toEqual([0, 4, 6]);
     expect(L).toEqual([1, 2, 3]);
     expect(interpreted(ce, json, { L: list([1, 2, 3]) })).toEqual([0, 4, 6]);
+    // The last line copies the list once, as it should, and is not reported.
+    expect(copiedLocals(ce, json)).toEqual([]);
   });
 
   test('a copy made with `ReplaceAt` before the loop keeps its values', () => {
@@ -562,6 +594,46 @@ describe('a block local replaced element by element is written in place (CE-329)
       ];
       expect(codeOf(ce, json)).not.toContain('InPlace');
       expect(run(ce, json, { M: [[1, 2], [3, 4]] })).toBe(3);
+      // Not in a loop: the list is copied once, and this is not reported.
+      expect(copiedLocals(ce, json)).toEqual([]);
+    });
+
+    test('a write of two positions in a loop after a read of a row is reported', () => {
+      const json = [
+        'Block',
+        declareRows,
+        [
+          'Declare',
+          'r',
+          "'list<real>'",
+          ['Dictionary', ['KeyValuePair', "'value'", ['At', 'ms', 2]]],
+        ],
+        [
+          'Loop',
+          ['Assign', 'ms', ['ReplaceAt', 'ms', 2, 'j', 9]],
+          ['Element', 'j', ['Range', 1, 2]],
+        ],
+        ['Add', ['At', 'r', 1], ['Multiply', 100, ['At', 'ms', 2, 1]]],
+      ];
+      expect(codeOf(ce, json)).not.toContain('InPlace');
+      expect(run(ce, json, { M: [[1, 2], [3, 4]] })).toBe(903);
+      expect(copiedLocals(ce, json)).toEqual(['ms']);
+    });
+
+    test('a write of two positions in place in a loop is not reported', () => {
+      const json = [
+        'Block',
+        declareRows,
+        [
+          'Loop',
+          ['Assign', 'ms', ['ReplaceAt', 'ms', 2, 'j', 9]],
+          ['Element', 'j', ['Range', 1, 2]],
+        ],
+        ['At', 'ms', 2, 1],
+      ];
+      expect(codeOf(ce, json)).toContain('InPlace');
+      expect(run(ce, json, { M: [[1, 2], [3, 4]] })).toBe(9);
+      expect(copiedLocals(ce, json)).toEqual([]);
     });
   });
 
@@ -614,6 +686,72 @@ describe('a block local replaced element by element is written in place (CE-329)
     ];
     expect(codeOf(ce, json)).not.toContain('replaceAtInPlace');
     expect(run(ce, json, { L: [1, 2, 3] })).toBe(12);
+    expect(copiedLocals(ce, json)).toEqual(['xs']);
+  });
+
+  test('an update that copies, but not in a loop, is not reported', () => {
+    // The function literal keeps the copying form, but the list is copied
+    // once.
+    const json = [
+      'Block',
+      declare,
+      ['Declare', 'f', "'function'", ['Function', ['Sum', 'xs']]],
+      ['Assign', 'xs', ['ReplaceAt', 'xs', 1, 0]],
+      ['f'],
+    ];
+    expect(codeOf(ce, json)).not.toContain('replaceAtInPlace');
+    expect(run(ce, json, { L: [1, 2, 3] })).toBe(5);
+    expect(copiedLocals(ce, json)).toEqual([]);
+  });
+
+  test('a local of a loop body updated in an inner loop is reported', () => {
+    // A loop body does not write its locals in place, so each pass of the
+    // inner loop copies `xs`.
+    const json = [
+      'Block',
+      ['Declare', 's', "'real'", 0],
+      [
+        'Loop',
+        [
+          'Block',
+          declare,
+          ['Declare', 'ys', "'list<real>'", 'xs'],
+          ['Loop', update, range],
+          ['Assign', 's', ['Add', 's', ['Sum', 'xs'], ['Sum', 'ys']]],
+        ],
+        ['Element', 'k', ['Range', 1, 2]],
+      ],
+      's',
+    ];
+    expect(run(ce, json, { L: [1, 2, 3] })).toBe(36);
+    expect(interpreted(ce, json, { L: list([1, 2, 3]) })).toBe(36);
+    expect(copiedLocals(ce, json)).toEqual(['xs']);
+  });
+
+  test('two blocks with the same copying update give two warnings', () => {
+    const inner = () => [
+      'Block',
+      declare,
+      ['Declare', 'f', "'function'", ['Function', ['Sum', 'xs']]],
+      ['Loop', update, range],
+      ['Assign', 'a', ['Add', 'a', ['f']]],
+    ];
+    const json = ['Block', ['Declare', 'a', "'real'", 0], inner(), inner(), 'a'];
+    expect(run(ce, json, { L: [1, 2, 3] })).toBe(24);
+    expect(copiedLocals(ce, json)).toEqual(['xs', 'xs']);
+  });
+
+  test('the Python target always copies, and does not report it', () => {
+    ce.declare('zs', 'list<real>');
+    const json = [
+      'Block',
+      declare,
+      ['Declare', 'zs', "'list<real>'", ['List']],
+      ['Loop', ['Block', update, ['Assign', 'zs', 'xs']], range],
+      'xs',
+    ];
+    expect(copiedLocals(ce, json)).toEqual(['xs']);
+    expect(copiedLocals(ce, json, 'python')).toEqual([]);
   });
 
   test('a statement shared by several branches is walked once', () => {

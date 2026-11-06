@@ -60,6 +60,7 @@ import {
 } from './absent-tuple-read.js';
 import {
   assertAccumulatorFitsStep,
+  copyingUpdateWarnings,
   elementsMayBeCollections,
   inPlaceUpdateChains,
   isDefinitelyCollectionType,
@@ -11187,6 +11188,11 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         ? (names) => this.compileBatchBody(expr, options, names)
         : undefined
     );
+    // A list update in a loop that copies the list on each pass
+    // (`noteCopyingUpdateInLoop`, recorded by `compileBlock`).
+    const warnings = copyingUpdateWarnings(prepared.target);
+    if (warnings.length > 0)
+      result.warnings = [...(result.warnings ?? []), ...warnings];
     return BaseCompiler.withReferences(
       result,
       prepared.expr,

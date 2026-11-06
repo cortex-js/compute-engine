@@ -1,5 +1,6 @@
 import type { Expression, FunctionInterface } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
+import type { CompileDiagnostic, CompileTarget } from './types.js';
 import {
   isDictionary,
   isFunction,
@@ -336,6 +337,118 @@ export const OWNED_LOCAL_UPDATE_OPS = new WeakMap<
   ReadonlyArray<Expression>,
   string
 >();
+
+/**
+ * For a local `name` of the statement list `stmts` of a block, the first
+ * statement `name = ReplaceAt(name, …)` (a chain of `ReplaceAt` whose
+ * innermost list operand is `name`) that is inside the body of a `Loop` of
+ * the list, or `undefined` when there is none.
+ *
+ * The block lowering (`compileBlock`) calls it for a local whose updates
+ * keep the copying form (`ownedLocalUpdateChains` gives `undefined`): each
+ * pass of such a loop then copies the whole list. A copy that is not in a
+ * loop is made once, and is not reported. The loop-body lowering
+ * (`compileLoopBody`) writes no local in place, and calls it for each local
+ * of the body.
+ *
+ * The walk does not enter a function literal, whose body runs when the
+ * function is called, not as part of the loop, nor a nested block that
+ * binds `name`, which is another local. Each node is visited once for each
+ * value of "inside a loop", as an expression can share subtrees.
+ */
+export function copyingUpdateInLoop(
+  stmts: ReadonlyArray<Expression>,
+  name: string
+): Expression | undefined {
+  const isName = (e: Expression): boolean => isSymbol(e, name);
+  const seen = [new Set<Expression>(), new Set<Expression>()];
+  const find = (e: Expression, inLoop: boolean): Expression | undefined => {
+    if (!isFunction(e)) return undefined;
+    const visited = seen[inLoop ? 1 : 0];
+    if (visited.has(e)) return undefined;
+    visited.add(e);
+    const h = e.operator;
+    if (h === 'Function') return undefined;
+    if (h === 'Block' && e.localScope?.bindings.has(name)) return undefined;
+    if (inLoop && h === 'Assign' && e.nops === 2 && isName(e.ops[0])) {
+      let node: Expression = e.ops[1];
+      while (isFunction(node, 'ReplaceAt') && node.nops >= 3) node = node.op1;
+      if (isName(node) && node !== e.ops[1]) return e;
+    }
+    const nested = inLoop || h === 'Loop';
+    for (const x of e.ops) {
+      const found = find(x, nested);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  };
+  for (const stmt of stmts) {
+    const found = find(stmt, false);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
+ * The warnings about list updates that copy the list on each pass of a loop
+ * (`copyingUpdateInLoop`), by compilation, with the update statements that
+ * they report. The key is the naming context of the compilation
+ * (`CompileTarget.naming`), which is one object for each root compilation
+ * and is kept by the copies of the target that the compiler makes while it
+ * recurses.
+ */
+const COPYING_UPDATE_WARNINGS = new WeakMap<
+  object,
+  { warnings: CompileDiagnostic[]; updates: WeakSet<Expression> }
+>();
+
+/**
+ * Record a warning for the compilation that `target` belongs to: the
+ * statement `update`, which assigns a `ReplaceAt` of the local `name` to
+ * `name` in a loop, copies the list on each pass. The warning is recorded
+ * once for each update node, as a block can be compiled more than once in
+ * one compilation. Two blocks with the same text are two nodes, and each
+ * gets its warning.
+ */
+export function noteCopyingUpdateInLoop(
+  target: CompileTarget<Expression>,
+  name: string,
+  update: Expression
+): void {
+  const key = target.naming;
+  if (key === undefined) return;
+  let record = COPYING_UPDATE_WARNINGS.get(key);
+  if (record === undefined) {
+    record = { warnings: [], updates: new WeakSet() };
+    COPYING_UPDATE_WARNINGS.set(key, record);
+  }
+  if (record.updates.has(update)) return;
+  record.updates.add(update);
+  const value = update.toString();
+  record.warnings.push({
+    code: 'copying-list-update',
+    kind: 'capability',
+    binding: name,
+    value,
+    message:
+      `The list \`${name}\` is copied on each pass of the loop that ` +
+      `updates it with \`ReplaceAt\`. The update cannot write the list in ` +
+      `place: the list has another name, is used in a way that could see ` +
+      `a write, or is declared in the body of an enclosing loop.`,
+  });
+}
+
+/** The warnings that `noteCopyingUpdateInLoop` recorded for the compilation
+ * that `target` belongs to. */
+export function copyingUpdateWarnings(
+  target: CompileTarget<Expression>
+): CompileDiagnostic[] {
+  const key = target.naming;
+  if (key === undefined) return [];
+  return (COPYING_UPDATE_WARNINGS.get(key)?.warnings ?? []).map((w) => ({
+    ...w,
+  }));
+}
 
 /**
  * Fail closed when the seed of a fold does not fit the type the step's first

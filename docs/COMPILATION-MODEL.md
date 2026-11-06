@@ -2569,6 +2569,34 @@ compilation requires an explicit proof that native-number execution preserves
 the requested exact result. Structural or ABI failures are cached at the
 appropriate expression-instance boundary.
 
+### List updates in place
+
+`xs = ReplaceAt(xs, i, v)` on a block local gives a new list. On the
+JavaScript target, the block copies the list once, at the first update, and
+then writes that copy in place, when no other value can hold a reference to
+it (`ownedLocalUpdateChains()` in `compilation/in-place-update.ts` states the
+conditions). Otherwise each update copies the list, and in a loop that visits
+each element once the copies cost O(n²). The Python target always copies a
+block local (ROADMAP CE-329); the step of a fold can update its accumulator in
+place on both targets (`inPlaceUpdateChains()`).
+
+When a JavaScript compilation keeps the copying form for an update
+`xs = ReplaceAt(xs, …)` (a chain of `ReplaceAt` included) in the body of a
+`Loop`, `CompilationResult.warnings` holds one entry for each such local of
+each block: `code: 'copying-list-update'`, `kind: 'capability'`, `binding`
+the name of the local, `value` the first such update as `toString()` writes
+it, and a message that says the list is copied on each pass because it has
+another name, is used in a way that could see a write, or is declared in the
+body of an enclosing loop. A host, such as an
+editor, can show it to the author: a statement `ys = xs` in the loop, a
+function literal that reads `xs`, or a read of a row before a write of two
+positions are typical causes. A local declared in the body of a `Loop` is
+never written in place, as the body gives it a new value on each pass; an
+update of it in a `Loop` nested in that body is reported. An update that is
+not in a loop copies the list once and is not reported, and neither are other
+targets. The warning does
+not change the emitted code (`copyingUpdateInLoop()`).
+
 ### Dictionary literals
 
 A dictionary literal compiles on the `javascript` and `python` targets, with

@@ -13,6 +13,8 @@ import { isSymbol, isFunction } from '../boxed-expression/type-guards.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import {
   OWNED_LOCAL_UPDATE_OPS,
+  copyingUpdateInLoop,
+  noteCopyingUpdateInLoop,
   ownedLocalUpdateChains,
 } from './in-place-update.js';
 import {
@@ -646,11 +648,19 @@ export function compileBlock(
     // (`xs = ReplaceAt(xs, i, v)`) and never hands out is copied once, at
     // its first update, and then written in place
     // (`ownedLocalUpdateChains`, CE-329). JavaScript only: the other
-    // targets keep the copying form.
+    // targets keep the copying form. A local whose updates keep the copying
+    // form, and which a loop of the list updates, copies the list on each
+    // pass: the compilation reports it in `CompilationResult.warnings`
+    // (`copyingUpdateInLoop`).
     if (target.language === 'javascript')
       for (const local of locals) {
         const chains = ownedLocalUpdateChains(args, local);
-        if (chains === undefined) continue;
+        if (chains === undefined) {
+          const update = copyingUpdateInLoop(args, local);
+          if (update !== undefined)
+            noteCopyingUpdateInLoop(target, local, update);
+          continue;
+        }
         const temp = tempVar(target);
         ownedTemps.push(temp);
         for (const ops of chains) {

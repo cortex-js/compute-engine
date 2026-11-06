@@ -3619,14 +3619,15 @@ export type CompilationResult<
   storageBuffers?: StorageBufferLayout[];
 
   /**
-   * Shader targets only. Facts about a SUCCESSFUL compilation that the caller
-   * may need to decide whether to use the code, with the same shape as
-   * `diagnostic` (which is set on a decline only). Nothing was withdrawn: the
-   * code is complete. `kind: 'correctness'` here means that a value the code
-   * computes can differ from the exact value.
+   * Facts about a SUCCESSFUL compilation that the caller may need to decide
+   * whether to use the code, with the same shape as `diagnostic` (which is
+   * set on a decline only). Nothing was withdrawn: the code is complete.
+   * `kind: 'correctness'` here means that a value the code computes can
+   * differ from the exact value.
    *
-   * Today one code: `'float32-unsafe-argument'`. The code has a `Mod` or
-   * `Fract` operand in which a constant of magnitude 1000 or more multiplies
+   * On the shader targets, one code: `'float32-unsafe-argument'`. The code
+   * has a `Mod` or `Fract` operand in which a constant of magnitude 1000 or
+   * more multiplies
    * a trigonometric call, with no exact form (see `float32Bounds`), so its
    * float32 value can have no relation to the exact value: a sine hash such
    * as `fract(43758.5453·sin(12.9898·x))` draws noise of a different pattern
@@ -3639,6 +3640,17 @@ export type CompilationResult<
    *
    * The `compileFunction` and `compileShader` routes return a string, so
    * they emit the same code with no warning and no `float32Bounds`.
+   *
+   * On the `javascript` target, one code: `'copying-list-update'`, with
+   * `kind: 'capability'`. A block local updated with
+   * `xs = ReplaceAt(xs, …)` in the body of a `Loop` keeps the copying form,
+   * so each pass of the loop copies the whole list: the list has another
+   * name, is used in a way that could see a write in place, or is a local of
+   * the body of an enclosing loop, which is never written in place. `binding` is
+   * the name of the local and `value` the first such update, as `toString()`
+   * writes it. One entry for each such local of each block. An update that is
+   * not in a loop copies once and is not reported. The emitted code is the
+   * same with or without the warning.
    *
    * Absent when there is nothing to report.
    */
