@@ -41,6 +41,9 @@ Wrap every test run in `timeout -k 30 600 …`, for example
 Run a check without a pipe and record its own exit code, because the exit
 status of a pipeline is that of its last command.
 
+Edit a TypeScript file with the Edit tool, not with a Python, sed or heredoc
+script, because a script replace can change every match or none with no error.
+
 Write a temporary file only in `/tmp`, never in another repo, because the rule
 that protects the uncommitted work of that repo allows only reads and test runs
 there.
