@@ -314,25 +314,6 @@ reproduction above is the record.
 
 ## Collections, absence and broadcasting
 
-### CE-825. `And` and `Or` of a computed list and a list symbol stay unevaluated
-
-**Status:** ready; defect, S.
-**Witness:** plausible; with `u: list<real>`, `c: list<boolean>`, `u = [1, 2, 3]`,
-`c = [True, False, True]`, `And(u > 0, c)` evaluates to the unevaluated
-`And([True, True, True], [True, False, True])`, with the static type
-`list<boolean>`; it should give `[True, False, True]`, which compiled JavaScript gives.
-
-`And(c, u > 0)` and `Or` in either order give the same unevaluated form.
-`And(c, d)` with two list symbols, `And(u > 0, u < 2)` with two computed lists,
-and `And(b, u > 0)` with a boolean `b` give a list.
-
-Probable cause, from reading the code and not traced: `finishShortCircuit()` in
-`library/logic.ts` rebuilds the call over the evaluated values only when no
-operand was a collection on entry. The symbol `c` is a collection on entry, so
-there is no rebuild, and the driver has already declined to map the call because
-its other operand was not yet a list. `Nand`, `Nor` and `Implies` use the same
-function and were not probed.
-
 ### CE-682. A `Linspace` with an infinite endpoint: its reads disagree with each other
 
 **Status:** waits for user (decision); defect. Found 2026-10-30 in the review of the

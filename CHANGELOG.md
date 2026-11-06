@@ -278,6 +278,13 @@
   `f(t) := t·w` defined on the engine, the program `function f(t) { t + 1 }` then
   `f(x)` calls its own `f`, and `freeSymbols` was `["w", "x"]`. It is now
   `["x"]`.
+- **`And`, `Or`, `Nand`, `Nor` and `Implies` of a computed list and a list
+  symbol now give a list.** With `u = [1, 2, 3]` and `c = [True, False, True]`,
+  `And(u > 0, c)` gave the unevaluated
+  `And([True, True, True], [True, False, True])`, and now gives
+  `[True, False, True]`. `And(False, c, u > 0)` gave the scalar `False`, and now
+  gives `[False, False, False]`. When the two lists have different lengths, the
+  result is now the error `incompatible-dimensions`.
 
 ## 0.181.1 _2026-11-05_
 

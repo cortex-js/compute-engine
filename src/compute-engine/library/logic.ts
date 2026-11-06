@@ -37,6 +37,7 @@ import { runWithEvaluationEffects } from '../effects-registry.js';
 import {
   isCollectionShaped,
   isFiniteBroadcastParticipant,
+  isUnresolvedCollectionOperand,
 } from '../collection-utils.js';
 import {
   extractFiniteDomainWithReason,
@@ -204,11 +205,13 @@ function canonicalShortCircuit(
  * broadcastable operator, and the driver's own pre-evaluation broadcast (step
  * 2 of `_computeValue`, which intercepts a LITERAL or symbol-bound collection
  * before this handler runs and evaluates each lifted operand once), already
- * do. Only when the collection is produced by evaluation (a call) does this
- * handler see it: it then rebuilds the call over the evaluated values so the
- * driver zips them. The rebuild is guarded against re-entry — it only fires
- * when NO operand was already a literal collection on entry, since in that
- * case the driver has already declined to broadcast and rebuilding would loop.
+ * do. Only when a collection is produced by evaluation (a call, as `u > 0`
+ * with `u` a list) does this handler see it: it then rebuilds the call over
+ * the evaluated values so the driver zips them. This also holds beside an
+ * operand that was a collection value on entry (`And(u > 0, c)` with `c` a
+ * list symbol): the driver did not map that call, because `u > 0` had no
+ * value yet. The rebuild is guarded against re-entry: see
+ * `finishShortCircuit`.
  */
 function evaluateShortCircuit(
   name: ShortCircuitOperator,
@@ -383,8 +386,30 @@ function finishShortCircuit(
   const error = values.find((v) => v.operator === 'Error');
   if (error && !values.some((v, i) => decide(ce, v, i) !== undefined))
     return error;
-  const isCollectionValue = (x: Expression) => isFiniteBroadcastParticipant(x);
-  if (!ops.some(isCollectionValue) && values.some(isCollectionValue)) {
+  // The driver maps a call when an operand is a list value and no operand is
+  // a list by type that has no value yet. It did not map this call (the
+  // handler would not run otherwise). Evaluation brings the call nearer to
+  // that state in two ways: an operand becomes a list value (`u > 0`), or an
+  // operand that held the driver back becomes a scalar (a read out of range
+  // that gives `Missing`). `listReadiness` counts both, and the call is
+  // rebuilt only when the values score higher than the operands did:
+  // `And(c, L)`, with `c` a list and `L` a list symbol that has no value, is
+  // not rebuilt and stays symbolic. The operands of the rebuilt call are
+  // the values, and evaluating a value again gives the same value, so the
+  // handler of the rebuilt call finds the same score and does not rebuild a
+  // second time.
+  const listReadiness = (xs: ReadonlyArray<Expression>) => {
+    let score = 0;
+    for (const x of xs) {
+      if (isFiniteBroadcastParticipant(x)) score += 1;
+      else if (isUnresolvedCollectionOperand(x)) score -= 1;
+    }
+    return score;
+  };
+  if (
+    values.some((x) => isFiniteBroadcastParticipant(x)) &&
+    listReadiness(values) > listReadiness(ops)
+  ) {
     // On the asynchronous path this runs after an `await`, so the
     // evaluation must be given the registry and the context stack of its
     // evaluation explicitly: the engine does not keep them installed.

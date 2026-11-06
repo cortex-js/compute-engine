@@ -1004,6 +1004,169 @@ describe('And/Or are SHORT-CIRCUIT forms (fixed 2026-08-15)', () => {
     ]);
   });
 
+  describe('a list that evaluation gives, beside a list that has a value on entry (CE-825)', () => {
+    // The driver maps a call over its list operands before the handler runs,
+    // but not when an operand is a list by type that has no value yet
+    // (`u > 0`). The handler then evaluates each operand, and it must give
+    // the call back to the driver. It did so only when no operand was a list
+    // value on entry, so `And(u > 0, c)` stayed `And([...], [...])`.
+    const ce = new ComputeEngine();
+    let ran: string[] = [];
+    ce.declare('u', 'list<real>');
+    ce.declare('c', 'list<boolean>');
+    ce.declare('short', 'list<boolean>');
+    ce.declare('noValue', 'list<boolean>');
+    ce.assign('u', ce.expr(['List', 1, 2, 3]));
+    ce.assign('c', ce.expr(['List', 'True', 'False', 'True']));
+    ce.assign('short', ce.expr(['List', 'True', 'False']));
+    ce.declare('listCall', {
+      signature: '() -> list<boolean>',
+      evaluate: () => {
+        ran.push('L');
+        return ce.expr(['List', 'True', 'True', 'False']);
+      },
+    });
+    ce.declare('trueCall', {
+      signature: '() -> boolean',
+      evaluate: () => {
+        ran.push('T');
+        return ce.True;
+      },
+    });
+    ce.declare('asyncListCall', {
+      signature: '() -> list<boolean>',
+      evaluateAsync: async () => {
+        ran.push('A');
+        return ce.expr(['List', 'True', 'True', 'False']);
+      },
+    });
+    // `[True, True, True]` when evaluated.
+    const positive = ['Greater', 'u', 0];
+    const list = (...xs: boolean[]) => [
+      'List',
+      ...xs.map((x) => (x ? 'True' : 'False')),
+    ];
+    const value = (json: any): any => {
+      ran = [];
+      return ce.expr(json).evaluate().json;
+    };
+
+    it('each connective gives a list, with the list symbol first or last', () => {
+      const cases: [string, any, any][] = [
+        // operator, (u > 0, c), (c, u > 0)
+        ['And', list(true, false, true), list(true, false, true)],
+        ['Or', list(true, true, true), list(true, true, true)],
+        ['Nand', list(false, true, false), list(false, true, false)],
+        ['Nor', list(false, false, false), list(false, false, false)],
+        ['Implies', list(true, false, true), list(true, true, true)],
+      ];
+      for (const [op, computedFirst, symbolFirst] of cases) {
+        expect(value([op, positive, 'c'])).toEqual(computedFirst);
+        expect(value([op, 'c', positive])).toEqual(symbolFirst);
+        // A literal list is a list value on entry, as the symbol is.
+        expect(value([op, positive, list(true, false, true)])).toEqual(
+          computedFirst
+        );
+      }
+    });
+
+    it('more than two operands', () => {
+      expect(value(['And', positive, 'c', ['Less', 'u', 3]])).toEqual(
+        list(true, false, false)
+      );
+      // A scalar that decides a scalar connective does not replace the list.
+      expect(value(['And', 'False', 'c', positive])).toEqual(
+        list(false, false, false)
+      );
+      expect(value(['Or', 'c', 'True', positive])).toEqual(
+        list(true, true, true)
+      );
+      // An unknown boolean stays in the cells that it decides.
+      expect(value(['And', 'p', positive, 'c'])).toEqual([
+        'List',
+        'p',
+        'False',
+        'p',
+      ]);
+    });
+
+    it('each operand is evaluated one time, left to right', () => {
+      expect(value(['And', ['listCall'], 'c'])).toEqual(
+        list(true, false, false)
+      );
+      expect(ran).toEqual(['L']);
+      expect(value(['Or', 'c', ['trueCall'], ['listCall']])).toEqual(
+        list(true, true, true)
+      );
+      expect(ran).toEqual(['T', 'L']);
+    });
+
+    it('the asynchronous evaluation gives the same list', async () => {
+      ran = [];
+      expect(
+        (await ce.expr(['And', ['asyncListCall'], 'c']).evaluateAsync()).json
+      ).toEqual(list(true, false, false));
+      expect(ran).toEqual(['A']);
+      expect(
+        (await ce.expr(['Implies', positive, 'c']).evaluateAsync()).json
+      ).toEqual(list(true, false, true));
+    });
+
+    it('lists of different lengths are an error', () => {
+      expect(ce.expr(['And', positive, 'short']).evaluate().toString()).toBe(
+        'Error("incompatible-dimensions", "3 vs 2")'
+      );
+      expect(ce.expr(['Or', 'short', positive]).evaluate().toString()).toBe(
+        'Error("incompatible-dimensions", "2 vs 3")'
+      );
+    });
+
+    it('an operand that is a list by type and evaluates to an absent value', () => {
+      // `At(rows, 5)` has the type `list<boolean>`, so the driver does not
+      // map the call, and it evaluates to `Missing`, which a connective reads
+      // as `False`. The result is still a list, as the type says.
+      ce.declare('rows', 'list<list<boolean>>');
+      ce.assign('rows', ce.expr(['List', list(true, false, true)]));
+      const absent = ['At', 'rows', 5];
+      expect(ce.expr(['And', absent, 'c']).type.toString()).toBe(
+        'list<boolean>'
+      );
+      expect(value(['And', absent, 'c'])).toEqual(list(false, false, false));
+      expect(value(['And', 'c', absent])).toEqual(list(false, false, false));
+      expect(value(['Or', absent, 'c'])).toEqual(list(true, false, true));
+      expect(value(['Nand', absent, 'c'])).toEqual(list(true, true, true));
+      expect(value(['And', absent, positive])).toEqual(
+        list(false, false, false)
+      );
+      // A row that exists is zipped with the other list.
+      expect(value(['And', ['At', 'rows', 1], 'c'])).toEqual(
+        list(true, false, true)
+      );
+    });
+
+    it('a list symbol that has no value keeps the call symbolic', () => {
+      // The driver does not map a call that has such an operand, so the
+      // handler must not give the call back to it without end.
+      expect(value(['And', 'c', 'noValue'])).toEqual([
+        'And',
+        list(true, false, true),
+        'noValue',
+      ]);
+      expect(value(['And', positive, 'c', 'noValue'])).toEqual([
+        'And',
+        list(true, true, true),
+        list(true, false, true),
+        'noValue',
+      ]);
+      expect(value(['Nor', 'noValue', positive, 'c'])).toEqual([
+        'Nor',
+        'noValue',
+        list(true, true, true),
+        list(true, false, true),
+      ]);
+    });
+  });
+
   it('an operand that evaluates to an error is the answer of an element-wise application', () => {
     // `Sin(P) < [1, 2]` fails with a length error (3 vs 2). Broadcast, the
     // one error was copied into each of the three cells of the other operand.
