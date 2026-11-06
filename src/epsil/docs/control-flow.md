@@ -137,7 +137,7 @@ A definition can state the effects that calling it may perform. The specifier
 sits after the parameter list and before the return arrow:
 
 ```epsil
-function roll(n) random -> integer { random(n) }
+function roll(n) random -> integer { random(1..n) }
 ```
 
 The ten effect labels are `console`, `entropy`, `environment`, `fs_read`,
@@ -155,7 +155,7 @@ in which case its declared result is `unknown`. In the math form, a written
 effect specifier must be followed by a return arrow:
 
 ```epsil
-roll(n) random -> integer = random(n)
+roll(n) random -> integer = random(1..n)
 ```
 
 See [Effect Specifiers](/compute-engine/guides/types/#effect-specifiers) for

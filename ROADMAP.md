@@ -2708,22 +2708,6 @@ shipped (contract in `docs/CHECKPOINT-MODEL.md`; tests include
   Restore"). So this stage can start. Until it lands, both mechanisms exist
   together.
 
-### CE-830. Epsil documents show `random(n)` with an integer, which `Random` refuses
-
-**Status:** ready; defect, S.
-**Witness:** plausible; the documented program
-`function roll(n: integer) random -> integer { random(n) }`, `roll(6)` gives
-`roll(6)` with a `static-type-error` diagnostic and should give an integer from 1
-to 6.
-
-The signature of `Random` is `((collection<any> | set<real>)?) random -> any`
-(`library/core.ts`), so `random(6)` is an `incompatible-type` error. The example
-is in `src/epsil/docs/control-flow.md` (the "Effect specifiers" section, two
-programs), `src/epsil/docs/types.md` and `src/epsil/docs/implementation.md`. The
-fix is to write `random(1..n)` in each example, as `src/epsil/docs/style.md` does.
-This form gives an integer from 1 to `n`. The JSON beside the example in
-`implementation.md` must show the same change.
-
 ### CE-312. Function declaration hoisting: run-time checks, cancellation and route differences
 
 **Status:** ready; defect. User decision 2026-11-05 for CE-312.2: keep the

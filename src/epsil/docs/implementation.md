@@ -513,13 +513,13 @@ An effect specifier is folded into a full function-type string carried by a
 `Typed` node around the body:
 
 ```epsil
-function roll(n) random -> integer { random(n) }
+function roll(n) random -> integer { random(1..n) }
 ```
 
 ```json
 ["DefineFunction", "roll",
   ["Function",
-    ["Typed", ["Block", ["Random", "n"]],
+    ["Typed", ["Block", ["Random", ["Range", 1, "n"]]],
       {"str": "(n: unknown) random -> integer"}],
     "n"]]
 ```

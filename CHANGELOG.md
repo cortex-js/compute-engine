@@ -173,6 +173,13 @@
   position of an element assignment, `xs[i] = 10 * i`, got the same false error.
   The check now reads `i`, `e` or `pi` declared by a `let` as the local, as the
   run does.
+- **The Epsil guide no longer shows `random(n)` with an integer.** The
+  examples of an effect specifier in the pages "Epsil Control Flow", "Epsil
+  Types" and "Inside Epsil" were
+  `function roll(n) random -> integer { random(n) }`.
+  `random` draws from a collection, so `roll(6)` gave an `incompatible-type`
+  error. The examples now use `random(1..n)`, and `roll(6)` gives an integer
+  from 1 to 6.
 - **The error of a numeric integral now includes an inner integral in the body
   of a function that the integrand calls.** With
   `F = y ↦ ∫₀¹ e^(−xy)/x^0.99 dx`, `∫₀¹ F(y) dy` gave

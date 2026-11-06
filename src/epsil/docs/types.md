@@ -253,7 +253,7 @@ Named functions may also declare their **effects**, between the parameter list
 and the return type:
 
 ```epsil
-function roll(n: integer) random -> integer { random(n) }
+function roll(n: integer) random -> integer { random(1..n) }
 ```
 
 Effect labels are part of the function type. See
