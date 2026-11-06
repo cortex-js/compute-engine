@@ -2350,10 +2350,7 @@ function measuredValueError(
         nestedErrorDepth = previousDepth;
         replay = previousReplay;
       }
-      if (
-        !state.reached ||
-        !(state.diverged || state.next === calls.length)
-      )
+      if (!state.reached || !(state.diverged || state.next === calls.length))
         return undefined;
       if (Number.isFinite(w)) {
         change = Math.abs(w - v);

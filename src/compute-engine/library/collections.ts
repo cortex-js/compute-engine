@@ -22316,8 +22316,7 @@ function readingValueOfPathWrite(
     count: (expr) => (hasShape(expr) ? view.count(expr) : undefined),
     isEmpty: (expr) => (hasShape(expr) ? view.isEmpty!(expr) : undefined),
     isFinite: (expr) => (hasShape(expr) ? view.isFinite!(expr) : undefined),
-    isEnumerable: (expr) =>
-      hasShape(expr) ? view.isEnumerable!(expr) : false,
+    isEnumerable: (expr) => (hasShape(expr) ? view.isEnumerable!(expr) : false),
     at: (expr, index) => {
       if (!hasShape(expr)) return undefined;
       return isPath(expr) && index === targetPosition(expr)

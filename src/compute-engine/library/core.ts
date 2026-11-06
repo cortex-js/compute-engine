@@ -3670,9 +3670,7 @@ function writtenSymbolName(
  * canonical literal `Complex(0, 1)`, not a symbol, and it names a family of
  * symbols as `e` does: `i_3` is a symbol.
  */
-function writtenBaseName(
-  expr: Parameters<typeof sym>[0]
-): string | undefined {
+function writtenBaseName(expr: Parameters<typeof sym>[0]): string | undefined {
   if (isNumber(expr) && expr.re === 0 && expr.im === 1) return 'i';
   return writtenSymbolName(expr);
 }

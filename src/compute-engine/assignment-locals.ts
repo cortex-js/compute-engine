@@ -208,8 +208,7 @@ export function assignmentLocalsOf(
  * {@link withKeptAssignmentLocals}. Canonicalization is synchronous, so one
  * value shared by all the engines is sufficient. */
 let keptAssignmentLocals:
-  | { names: ReadonlySet<string>; scope: object }
-  | undefined;
+  { names: ReadonlySet<string>; scope: object } | undefined;
 
 /**
  * Run `fn`, which builds a function literal again from its raw operands in

@@ -769,11 +769,7 @@ function applyAssignmentTypeEffect(
     if (
       isSymbol(target) &&
       !ce.context.lexicalScope.bindings.has(target.symbol) &&
-      isLibraryDefinition(
-        ce,
-        target.symbol,
-        ce.lookupDefinition(target.symbol)
-      )
+      isLibraryDefinition(ce, target.symbol, ce.lookupDefinition(target.symbol))
     ) {
       try {
         ce.declare(target.symbol, { type: 'unknown', inferred: true });

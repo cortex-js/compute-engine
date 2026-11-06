@@ -3638,9 +3638,7 @@ function evaluateWhich(
             evaluated,
             ...args
               .slice(i + 1)
-              .map((x, k) =>
-                k % 2 === 0 ? (evaluatedArms[k / 2] ?? x) : x
-              ),
+              .map((x, k) => (k % 2 === 0 ? (evaluatedArms[k / 2] ?? x) : x)),
           ]);
       }
       // Every other condition leaves the WHOLE `Which` unevaluated: an
@@ -5377,8 +5375,7 @@ function isShadowedByEarlierDeclaration(
   if (!ce._isShadowedParameter(name)) return false;
   const boundary = ce._shadowedParameterBoundary(name);
   const home = keptAssignmentLocalBoundary(name) as Scope | undefined;
-  for (let s = home?.parent; s; s = s.parent)
-    if (s === boundary) return false;
+  for (let s = home?.parent; s; s = s.parent) if (s === boundary) return false;
   for (let s: Scope | null = ce.context.lexicalScope; s; s = s.parent)
     if (s.parent === boundary && LATER_DECLARATIONS.get(s)?.has(name))
       return false;

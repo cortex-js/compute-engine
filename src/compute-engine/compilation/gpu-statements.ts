@@ -119,9 +119,7 @@ export function gpuAssertReturnPlacement(
  * the interpreter evaluates the operand before it leaves the loop, so an effect
  * of `Break(f(k))` would be lost.
  */
-export function gpuShaderLoopJumps(
-  body: Expression
-): ReadonlySet<Expression> {
+export function gpuShaderLoopJumps(body: Expression): ReadonlySet<Expression> {
   const found = new Set<Expression>();
   const visit = (stmt: Expression): void => {
     if (!isFunction(stmt)) return;

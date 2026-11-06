@@ -6319,9 +6319,7 @@ function indexReadsAsCompoundName(index: MathJsonExpression | null): boolean {
     op === 'Multiply' &&
     operands(index).every(
       (x) =>
-        symbol(x) !== null ||
-        isNumberExpression(x) ||
-        operator(x) === 'Complex'
+        symbol(x) !== null || isNumberExpression(x) || operator(x) === 'Complex'
     )
   );
 }
@@ -6684,10 +6682,13 @@ function isFunctionValue(
   parser: Parser,
   rhs: MathJsonExpression | null
 ): boolean {
-  if (operator(rhs) === 'Delimiter') return isFunctionValue(parser, operand(rhs, 1));
+  if (operator(rhs) === 'Delimiter')
+    return isFunctionValue(parser, operand(rhs, 1));
   if (operator(rhs) === 'Function') return true;
   const name = symbol(rhs);
-  return name !== null && !!parser.resolveSymbol(name)?.type.matches('function');
+  return (
+    name !== null && !!parser.resolveSymbol(name)?.type.matches('function')
+  );
 }
 
 /**

@@ -4162,9 +4162,7 @@ function blockIntegrandValue(
   block: Expression,
   limits: ReadonlyArray<Expression>
 ): Expression | undefined {
-  const variables = limits.map((l) =>
-    isFunction(l) ? sym(l.op1) : undefined
-  );
+  const variables = limits.map((l) => (isFunction(l) ? sym(l.op1) : undefined));
   const parameters = isFunction(f, 'Function')
     ? f.ops.slice(1).map((p) => functionLiteralParameterName(p))
     : variables;
@@ -9054,10 +9052,7 @@ volumes
         if (dir === undefined) return engine._fn('Limit', [fn, x.canonical]);
         return engine._fn('Limit', [fn, x.canonical, dir.canonical]);
       },
-      evaluate: (
-        [f, x, dir],
-        { engine, expression, numericApproximation }
-      ) => {
+      evaluate: ([f, x, dir], { engine, expression, numericApproximation }) => {
         // A call whose head was declared as a data symbol after the call was
         // boxed: the limit is the `expected-function` error that the same
         // expression boxed after the declaration gives, not `NaN`

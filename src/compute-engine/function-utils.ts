@@ -3740,7 +3740,8 @@ function declareParameterActivation(
         freshScope
       )
     );
-  else ce.declare(name, markLocalBinding({ value, inferred: true }), freshScope);
+  else
+    ce.declare(name, markLocalBinding({ value, inferred: true }), freshScope);
 
   const staticBinding = staticParameterBinding(param, name, bodyScope);
   if (staticBinding === undefined) return;
