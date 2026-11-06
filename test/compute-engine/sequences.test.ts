@@ -138,11 +138,14 @@ describe('DECLARATIVE SEQUENCE DEFINITIONS', () => {
       expect(ce.parse('V_{10}').evaluate().re).toBe(123);
     });
 
+    // The name is not `D` or `N`: a LaTeX assignment cannot define a sequence
+    // with the name of a library function
+    // (`assign-to-library-function.test.ts`).
     test('Factorial via LaTeX', () => {
       const ce = new ComputeEngine();
-      ce.parse('D_0 := 1').evaluate();
-      ce.parse('D_n := n \\cdot D_{n-1}').evaluate();
-      expect(ce.parse('D_{5}').evaluate().re).toBe(120);
+      ce.parse('T_0 := 1').evaluate();
+      ce.parse('T_n := n \\cdot T_{n-1}').evaluate();
+      expect(ce.parse('T_{5}').evaluate().re).toBe(120);
     });
 
     test('Braced subscript base case', () => {
@@ -2302,12 +2305,19 @@ describe('SEQUENCE SCOPE: a pending definition belongs to one binding', () => {
 
   // A name of the standard library (`N`) is declared in the system scope.
   // A sequence definition for it declares a new binding in the current
-  // scope, which shadows the library definition.
+  // scope, which shadows the library definition. The definition is written
+  // in MathJSON: the LaTeX `N_n := N_{n-1} + 1` is the parse error
+  // `assignment-to-library-function`
+  // (`assign-to-library-function.test.ts`).
   test('a sequence for a library name is declared in the current scope', () => {
     const ce = new ComputeEngine();
     ce.pushScope();
-    ce.parse('N_0 := 1').evaluate();
-    ce.parse('N_n := N_{n-1} + 1').evaluate();
+    ce.box(['Assign', ['Subscript', 'N', 0], 1]).evaluate();
+    ce.box([
+      'Assign',
+      ['Subscript', 'N', 'n'],
+      ['Add', ['Subscript', 'N', ['Subtract', 'n', 1]], 1],
+    ]).evaluate();
     expect(ce.parse('N_3').evaluate().json).toBe(4);
     ce.popScope();
     expect(ce.isSequence('N')).toBe(false);

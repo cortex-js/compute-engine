@@ -74,6 +74,28 @@ describe('an assignment to a library function is a parse error', () => {
     ['a second where item', 'x+y \\text{ where } y\\coloneq 1, \\sin(z)\\coloneq 5', 'Sin'],
     ['a let item of a where', 'x+1 \\text{ where } \\operatorname{let} a+b\\coloneq 5', 'Add'],
     ['the body of a function', 'x\\mapsto(\\sin(y)\\coloneq 5)', 'Sin'],
+    // A subscript on a library name: the definition of a function or of a
+    // sequence with that name.
+    ['a symbol subscript', 'N_n\\coloneq n+1', 'N'],
+    ['a symbol subscript, spelled :=', 'N_n:=n+1', 'N'],
+    ['a symbol subscript in braces', 'N_{n}\\coloneq n+1', 'N'],
+    ['a subscript on an operatorname', '\\operatorname{Add}_n\\coloneq n', 'Add'],
+    ['a subscript on a Greek letter', '\\Gamma_n\\coloneq n', 'Gamma'],
+    ['a recurrence', 'N_n\\coloneq N_{n-1}+1', 'N'],
+    ['a recurrence on another letter', 'D_n := n \\cdot D_{n-1}', 'D'],
+    ['a recurrence with an offset index', 'N_{n+1}\\coloneq N_{n}+1', 'N'],
+    ['a recurrence of two indices', 'N_{n,k}\\coloneq N_{n-1,k}+1', 'N'],
+    ['a term of two indices with a symbol', 'N_{n,0}\\coloneq 1', 'N'],
+    ['a function literal on a subscript', 'N_n\\coloneq x\\mapsto x', 'N'],
+    ['a subscript in parentheses', '(N_n\\coloneq n+1)', 'N'],
+    ['a subscript, the row of a cases', '\\begin{cases} N_n\\coloneq n+1\\end{cases}', 'N'],
+    [
+      'a subscript, a row with a condition',
+      '\\begin{cases} N_n\\coloneq n+1 & x>0 \\\\ 0 & \\text{otherwise}\\end{cases}',
+      'N',
+    ],
+    ['an offset index, first of a block', 'N_{n+1}\\coloneq 5; 2', 'N'],
+    ['an offset index, last of a block', 'y\\coloneq 1; N_{n+1}\\coloneq 5', 'N'],
   ])('%s', (_name, latex, head) => {
     const ce = new ComputeEngine();
     ce.parse('g(x)\\coloneq x+1').evaluate();
@@ -257,6 +279,201 @@ describe('the other assignments are unchanged', () => {
     expect(raw).toContain('["Declare","N"');
     expect(raw).not.toContain(CODE);
     expectLibraryUnchanged(ce);
+  });
+});
+
+describe('a subscript on a library name', () => {
+  test('the definition `N_n := n + 1` does not replace `N`', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('N(1/4)').evaluate().re).toBe(0.25);
+    ce.parse('N_n\\coloneq n+1').evaluate();
+    expect(ce.parse('N(1/4)').evaluate().re).toBe(0.25);
+    ce.parse('\\operatorname{Add}_n\\coloneq n').evaluate();
+    expect(ce.parse('\\operatorname{Add}(1,2)').evaluate().json).toBe(3);
+    ce.parse('\\Gamma_n\\coloneq n').evaluate();
+    expect(ce.parse('\\Gamma(3)').evaluate().json).toBe(2);
+  });
+
+  test('the error spans the whole assignment', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('N_n\\coloneq n+1', { form: 'raw' }).json).toEqual([
+      'Error',
+      ['ErrorCode', `'${CODE}'`, "'N'"],
+      ['LatexString', "'N_n\\coloneq n+1'"],
+    ]);
+  });
+
+  test.each([
+    ['an integer', 'N_0\\coloneq 1', ['Subscript', 'N', 0]],
+    ['an integer in braces', 'N_{0}\\coloneq 1', ['Subscript', 'N', 0]],
+    ['an integer of two digits', 'N_{10}\\coloneq 1', ['Subscript', 'N', 10]],
+    [
+      'two integers',
+      'N_{0,0}\\coloneq 1',
+      ['Subscript', 'N', ['Delimiter', ['Sequence', 0, 0], "','"]],
+    ],
+  ])('a term with %s as its index is valid', (_name, latex, target) => {
+    // A term alone gives `N` no definition, so the function stays.
+    const ce = new ComputeEngine();
+    const expr = ce.parse(latex);
+    expect(expr.isValid).toBe(true);
+    expect(expr.json).toEqual(['Assign', target, 1]);
+    expect(expr.evaluate().json).toBe('Nothing');
+    expectLibraryUnchanged(ce);
+  });
+
+  test('the recurrence after a term is the error, and `N` stays', () => {
+    const ce = new ComputeEngine();
+    ce.parse('N_0\\coloneq 1').evaluate();
+    const expr = ce.parse('N_n\\coloneq N_{n-1}+1');
+    expect(expr.isValid).toBe(false);
+    expect(JSON.stringify(expr.json)).toContain(CODE);
+    expr.evaluate();
+    expect(ce.isSequence('N')).toBe(false);
+    expectLibraryUnchanged(ce);
+  });
+
+  test.each([
+    ['the first statement of a block', 'N_n\\coloneq 5; N_n+1'],
+    ['the first statement, in braces', 'N_{n}\\coloneq 5; N_{n}+1'],
+    ['the first statement, a space before ;', 'N_n\\coloneq 5 ; N_n+1'],
+    ['a later statement of a block', 'x\\coloneq 1; N_n\\coloneq 5; N_n+x'],
+    ['the first row of a cases block', '\\begin{cases}N_n\\coloneq 5\\\\ N_n+1\\end{cases}'],
+    [
+      'a middle row of a cases block',
+      '\\begin{cases}x\\coloneq 1\\\\N_n\\coloneq 5\\\\ N_n+x\\end{cases}',
+    ],
+    ['a where item', 'N_n+1 \\text{ where } N_n\\coloneq 5'],
+    ['a let statement', '\\text{let } N_n\\coloneq 5; N_n+1'],
+    ['an operatorname', '\\operatorname{Add}_n\\coloneq 5; \\operatorname{Add}_n+1'],
+  ])('%s declares the local `N_n`', (_name, latex) => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse(latex);
+    expect(expr.isValid).toBe(true);
+    expect(JSON.stringify(expr.json)).not.toContain(CODE);
+    expect(expr.evaluate().json).toBe(6);
+    // The local is gone after the block, and no name was defined outside it.
+    expect(ce.lookupDefinition('N_n')).toBeUndefined();
+    expectLibraryUnchanged(ce);
+  });
+
+  test('the last row of a cases block declares the local `N_n`', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse(
+      '\\begin{cases}x\\coloneq 1\\\\N_n\\coloneq 5\\end{cases}',
+      { form: 'raw' }
+    );
+    expect(expr.json).toEqual([
+      'Block',
+      ['Declare', 'x', "'unknown'", 1],
+      ['Declare', 'N_n', "'unknown'", 5],
+    ]);
+  });
+
+  test('a local `N_n` in the body of a function', () => {
+    const ce = new ComputeEngine();
+    ce.parse('f(x)\\coloneq (N_n\\coloneq x; N_n+1)').evaluate();
+    expect(ce.parse('f(3)').evaluate().json).toBe(4);
+    expectLibraryUnchanged(ce);
+  });
+
+  test('a declared name `N_n` is assigned, and `N` stays', () => {
+    const ce = new ComputeEngine();
+    ce.declare('N_n', 'number');
+    const expr = ce.parse('N_n\\coloneq 5');
+    expect(expr.isValid).toBe(true);
+    expect(expr.evaluate().json).toBe(5);
+    expect(ce.parse('N_n').evaluate().json).toBe(5);
+    expectLibraryUnchanged(ce);
+  });
+
+  test('a declared name `N_n` is assigned in a parse that keeps the LaTeX', () => {
+    // With `preserveLatex`, the subscript after a space is the object
+    // `{ sym: 'n', latex: 'n' }`, not the string `n`.
+    const ce = new ComputeEngine();
+    ce.declare('N_n', 'number');
+    const expr = ce.parse('N _{n}\\coloneq 5', { preserveLatex: true });
+    expect(expr.isValid).toBe(true);
+    expect(expr.evaluate().json).toBe(5);
+    expect(ce.parse('N_n').evaluate().json).toBe(5);
+    expectLibraryUnchanged(ce);
+  });
+
+  test('a subscript is the error in a parse that keeps the LaTeX', () => {
+    const ce = new ComputeEngine();
+    for (const latex of ['N_n\\coloneq n+1', 'N _{n}\\coloneq n+1']) {
+      const expr = ce.parse(latex, { preserveLatex: true });
+      expect(expr.isValid).toBe(false);
+      expect(JSON.stringify(expr.json)).toContain(CODE);
+      expr.evaluate();
+    }
+    expect(
+      ce.parse('N _{n}\\coloneq 5; N_n+1', { preserveLatex: true }).evaluate()
+        .json
+    ).toBe(6);
+    expectLibraryUnchanged(ce);
+  });
+
+  test('a name of several letters in the subscript is a variable', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('N_{max}\\coloneq 5');
+    expect(expr.json).toEqual(['Assign', 'N_max', 5]);
+    expr.evaluate();
+    expect(ce.parse('N_{max}').evaluate().json).toBe(5);
+    expectLibraryUnchanged(ce);
+  });
+
+  test('a text subscript after a space is the variable `N_max`', () => {
+    // The space stops the parser from joining the subscript to the name, so
+    // the target is `Subscript(N, "max")`, which evaluates to the name.
+    const ce = new ComputeEngine();
+    const expr = ce.parse('N _{\\text{max}}\\coloneq 5');
+    expect(expr.json).toEqual(['Assign', ['Subscript', 'N', "'max'"], 5]);
+    expect(expr.evaluate().json).toBe(5);
+    expect(ce.parse('N_{\\text{max}}').evaluate().json).toBe(5);
+    expectLibraryUnchanged(ce);
+  });
+
+  test('a symbol subscript after a space is the error', () => {
+    const ce = new ComputeEngine();
+    for (const latex of ['N _n\\coloneq n+1', 'N _{\\mathrm{max}}\\coloneq 5']) {
+      const expr = ce.parse(latex);
+      expect(expr.isValid).toBe(false);
+      expect(JSON.stringify(expr.json)).toContain(CODE);
+      expr.evaluate();
+    }
+    expectLibraryUnchanged(ce);
+  });
+
+  test('a name that the host declared can be defined', () => {
+    const ce = new ComputeEngine();
+    ce.declare('N', 'unknown');
+    const expr = ce.parse('N_n\\coloneq n+1');
+    expect(expr.isValid).toBe(true);
+    expr.evaluate();
+    expect(ce.box(['N', 2]).evaluate().json).toBe(3);
+  });
+
+  test('a subscript on a name that is not in the library is a definition', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('f_n\\coloneq n+1');
+    expect(expr.json).toEqual([
+      'Assign',
+      ['Subscript', 'f', 'n'],
+      ['Add', 'n', 1],
+    ]);
+    expr.evaluate();
+    expect(ce.box(['f', 2]).evaluate().json).toBe(3);
+    ce.parse('a_0\\coloneq 1').evaluate();
+    ce.parse('a_n\\coloneq a_{n-1}+2').evaluate();
+    expect(ce.parse('a_3').evaluate().json).toBe(7);
+    expectLibraryUnchanged(ce);
+  });
+
+  test('the MathJSON form stays an explicit replacement', () => {
+    const ce = new ComputeEngine();
+    ce.box(['Assign', ['Subscript', 'N', 'n'], ['Add', 'n', 1]]).evaluate();
+    expect(ce.box(['N', 2]).evaluate().json).toBe(3);
   });
 });
 

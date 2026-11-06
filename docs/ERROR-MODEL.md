@@ -405,7 +405,15 @@ before the program runs, and a compilation declines it.
   (`N \coloneq 5`), and a host that replaces a library function declares the
   name first (`ce.declare('D', 'function')`). The explicit forms are not
   refused: the MathJSON `Assign("Add", Function(…))` and the LaTeX
-  `\mathrm{Assign}(\operatorname{Add}, x \mapsto 5)`.
+  `\mathrm{Assign}(\operatorname{Add}, x \mapsto 5)`. A subscript on a library
+  function is the same error when the evaluation of the assignment would
+  define the function or a sequence with its name: `N_n \coloneq n+1`, or a
+  recurrence (`N_n \coloneq N_{n-1}+1`, `N_{n+1} \coloneq N_{n}+1`,
+  `N_{n,k} \coloneq N_{n-1,k}+1`). These stay valid, because they do not
+  define `N`: a term of a sequence with integer indices (`N_0 \coloneq 1`,
+  `N_{0,0} \coloneq 1`), a text subscript (`N_{\text{max}} \coloneq 5` is the
+  variable `N_max`), a target whose joined name `N_n` is declared, and a
+  statement of a block, where `N_n \coloneq 5` declares the local `N_n`.
 
 ### A comparison is two-valued — user decision of 2026-11-02
 

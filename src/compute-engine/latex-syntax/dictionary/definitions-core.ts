@@ -6645,6 +6645,30 @@ function parseAssignmentToLibraryFunction(
 }
 
 /**
+ * True when `sub`, the subscript of an assignment target, is the index of one
+ * term of a sequence: an integer literal (`N_0 \coloneq 1`), or a list of
+ * integer literals (`N_{0,0} \coloneq 1`). The evaluation of such an
+ * assignment records the term, and the name `N` gets a definition only when a
+ * recurrence is recorded too (`tryFinalizeSequence()` in `sequence.ts`). So a
+ * term alone does not replace a library function `N`, and the recurrence is
+ * the assignment that `parseAssignStatement()` refuses.
+ *
+ * A negative index (`N_{-1}`) is read as `Negate(1)`, which is not a literal:
+ * the evaluation of `Assign` does not record it as a term either.
+ */
+function isSequenceTermIndex(sub: MathJsonExpression | null): boolean {
+  const isInteger = (x: MathJsonExpression | null): boolean => {
+    const value = machineValue(x);
+    return value !== null && Number.isInteger(value);
+  };
+  // The indices of `N_{0,0}` are a `Sequence`, in a `Delimiter` or not.
+  const indices = operator(sub) === 'Delimiter' ? operand(sub, 1) : sub;
+  if (operator(indices) === 'Sequence')
+    return nops(indices) > 0 && operands(indices).every(isInteger);
+  return isInteger(sub);
+}
+
+/**
  * True when the right side of an assignment to a symbol is a function: a
  * literal (`x \mapsto 5`), or a symbol whose type is a function, with or without
  * parentheses. A value that is not a function does not replace a library
@@ -6717,6 +6741,35 @@ function parseAssign(
   return result;
 }
 
+/**
+ * The reading of an assignment that is the declaration of a local (`local`)
+ * when it is a statement of a block, and an error (`topLevel()`) otherwise.
+ * The caller has read the right side, and is not in a local-binding context
+ * (a statement after a `;`, a `where` item).
+ *
+ * When a `;` follows, the assignment is the first statement of a `;` block,
+ * which is read before the `;`: the result is `local`. Otherwise the result
+ * is the error. A row of a `cases` environment is read before the parser
+ * knows that the environment is a block, so the error of such a row records
+ * `local` as its second reading (`Parser.blockRowAlternative()`), and
+ * `parseCasesEnvironment()` takes that reading when the rows make a block.
+ */
+function statementOrTopLevel(
+  parser: Parser,
+  local: MathJsonExpression,
+  topLevel: () => MathJsonExpression
+): MathJsonExpression {
+  const end = parser.index;
+  parser.skipSpace();
+  const firstOfBlock = parser.peek === ';';
+  parser.index = end;
+  if (firstOfBlock) return local;
+  const error = topLevel();
+  if (CASES_ENVIRONMENTS.has(parser.environmentName?.() ?? ''))
+    parser._recordBlockRowAlternative?.(error, local);
+  return error;
+}
+
 function parseAssignStatement(
   parser: Parser,
   lhs: MathJsonExpression,
@@ -6769,19 +6822,9 @@ function parseAssignStatement(
     else {
       const local = parseAssignStatement(parser, binderTarget, until);
       if (local === null) return null;
-      const end = parser.index;
-      parser.skipSpace();
-      const firstOfBlock = parser.peek === ';';
-      parser.index = end;
-      if (firstOfBlock) return local;
-      const topLevel = assignmentToListElement(
-        parser,
-        operand(lhs, 2),
-        lhsStart
+      return statementOrTopLevel(parser, local, () =>
+        assignmentToListElement(parser, operand(lhs, 2), lhsStart)
       );
-      if (CASES_ENVIRONMENTS.has(parser.environmentName?.() ?? ''))
-        parser._recordBlockRowAlternative?.(topLevel, local);
-      return topLevel;
     }
   }
 
@@ -6891,25 +6934,45 @@ function parseAssignStatement(
     const rhs = parser.parseExpression({ ...(until ?? {}), minPrec: 20 });
     if (rhs === null) return null;
 
+    // The `Subscript` target is kept for every subscript: a string
+    // (`f_\mathrm{max}`), a symbol (`f_n`), an integer (`f_0`) or an
+    // expression (`f_{n+1}`). The evaluate handler of `Assign` decides from the
+    // subscript and from the right side whether the assignment is a function
+    // definition, a term of a sequence or the recurrence of a sequence.
+    const definition: MathJsonExpression = ['Assign', lhs, rhs];
+
+    // The evaluation of a definition on a library function (`N_n \coloneq
+    // n+1`) would replace that function: a symbol subscript defines the
+    // function `N` or the recurrence of a sequence `N`, and a complete sequence
+    // gives `N` a new definition. Three targets do not replace it. The first
+    // is a term of a sequence (`isSequenceTermIndex()`). The second is a
+    // subscript that is a string (`N _{\text{max}}`, with a space before the
+    // `_`): the evaluation assigns the variable `N_max`. The third is a target
+    // whose joined name (`N_n`) is declared: the evaluation then assigns that
+    // name, not the base `N`.
     const sub = operand(lhs, 2);
-    //
-    // 2.1 // f_\mathrm{max} := ...
-    //
-    if (stringValue(sub) !== null) {
-      return ['Assign', lhs, rhs];
-    }
+    if (
+      !parser.isLibraryFunction(fn) ||
+      isSequenceTermIndex(sub) ||
+      stringValue(sub) !== null
+    )
+      return definition;
+    // The subscript of a parse that keeps the LaTeX of each node
+    // (`preserveLatex`) can be the object `{ sym: 'n', latex: 'n' }`.
+    const index = symbol(sub);
+    const joinedName = index !== null ? `${fn}_${index}` : null;
+    if (joinedName === null)
+      return assignmentToLibraryFunction(parser, fn, lhsStart);
+    if (parser.resolveSymbol(joinedName) !== undefined) return definition;
 
-    if (symbol(sub)) {
-      //
-      // 2.2 // f_n := ... OR a_n := a_{n-1} + 1 (sequence definition)
-      // Preserve Subscript form - the Assign evaluate handler will determine
-      // if this is a function definition or sequence definition based on
-      // whether the RHS contains self-references.
-      //
-      return ['Assign', lhs, rhs];
-    }
-
-    return ['Assign', lhs, rhs];
+    // A target that is a name (`N_n`) declares a local of this name when the
+    // assignment is a statement of a block. For a statement after a `;` and
+    // for a `where` item, the code above already returned the assignment to
+    // the joined name. The first statement of a `;` block and a row of a
+    // `cases` environment get the two readings (`statementOrTopLevel()`).
+    return statementOrTopLevel(parser, ['Assign', joinedName, rhs], () =>
+      assignmentToLibraryFunction(parser, fn, lhsStart)
+    );
   }
 
   //

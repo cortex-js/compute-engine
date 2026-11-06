@@ -20,7 +20,12 @@
   To define such a function, declare the name first:
   `ce.declare('D', 'function')`. A value that is not a function stays valid
   (`N\coloneq 5`), and so do the MathJSON form `["Assign", "Add", …]` and
-  `\mathrm{Assign}(\operatorname{Add}, x\mapsto 5)`.
+  `\mathrm{Assign}(\operatorname{Add}, x\mapsto 5)`. A subscript on a library
+  function gives the same error when the assignment would define the function
+  or a sequence with its name: after `N_n\coloneq n+1`, `N(1/4)` gave `5/4`,
+  and the recurrence `D_n := n \cdot D_{n-1}` replaced `D`. Use another letter
+  for the sequence, or declare the name first. A term alone (`N_0\coloneq 1`)
+  and a local of a block (`N_n\coloneq 5; N_n+1`) stay valid.
 
 ### Improvements
 

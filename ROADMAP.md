@@ -509,26 +509,6 @@ reproduction above is the record.
 
 ## Evaluation, canonical forms and scoping
 
-### CE-834. An asynchronous run of a block does not end when a global with the name of a local holds a list
-
-**Status:** ready; defect, S.
-**Witness:** plausible; with `n := [1, 2]`, `ce.box(['Block', ['Declare', 'n', "'real'", 2], ['Add', 'n', 1]]).evaluateAsync()` does not end: the heap grows until the process stops (measured with a limit of 1 GB). `evaluate()` gives `3`.
-
-Without the global `n`, or with `n := 5`, the asynchronous run gives `3`. A
-stack trace taken in the loop shows the asynchronous evaluation of `n + 1`
-(`boxed-expression/boxed-function.ts`, the test
-`hasUnresolvedCollectionOperand(this.ops, isBroadcastableCollection)` of the
-asynchronous broadcast step), which reads `.value` of the operand `n` through
-`bindingInContext()` (`boxed-expression/binders.ts`). The probable cause, not
-verified: this read does not find the binding that the run made for the local
-`n`, and reads the global by name, so the operand counts as the list `[1, 2]`,
-the sum is applied to each element, and each element evaluates `n + 1` again.
-A type computation no longer makes this read
-(`isOutsideBindingOfBlockLocal()`), but an evaluation keeps the read by name.
-The fix finds why the binding of the run is not in the chain of that read.
-Then add an asynchronous case to
-`test/compute-engine/ce-827-block-local-type-ignores-same-name-binding.test.ts`.
-
 ### CE-832. A call boxed before its head is declared as a data symbol does not evaluate to `expected-function`
 
 **Status:** ready; defect (consistency), M.
@@ -2472,23 +2452,6 @@ Interpreter gives a value; "not compared with HEAD", and F41 (`c12544982`) chang
 reproduction above is the record.
 
 ## LaTeX parsing and serialization
-
-### CE-829. `N_n := n + 1` replaces the library function `N` for the whole engine
-
-**Status:** ready; wrong value.
-**Witness:** plausible; after evaluating `N_n\coloneq n+1`, `N(1/4)` gives `5/4`; it gives `0.25` before.
-
-A sequence definition with a symbol index on a library function name is read by
-step 2 of `parseAssignStatement()` in `latex-syntax/dictionary/definitions-core.ts`,
-before the check for an assignment to a library function, and the evaluation of
-`Assign(Subscript("N", "n"), …)` defines `N`. `\operatorname{Add}_n\coloneq n` does
-the same (`Add(1, 2)` then gives `unexpected-argument`). `N_0\coloneq 1` alone does not
-change `N`, and `N_n\coloneq 5` as a statement of a block declares the local `N_n`:
-both must stay valid. The first statement of a block and a row of a `cases`
-environment are read before the parser knows that they are in a block, so the error
-needs the same two readings as `n_{k}\coloneq 5` on a list. The user decision of
-2026-11-06 for CE-826 (a library function cannot be replaced by a LaTeX assignment)
-applies, and the error code is `assignment-to-library-function`.
 
 ### CE-441. The LaTeX of a rest parameter or a destructuring parameter does not read back as that parameter
 
