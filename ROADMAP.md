@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-821.
+Next free reference: CE-823.
 
 **Entry format.**
 
@@ -1742,28 +1742,46 @@ A method that does not depend on the lobes is necessary. Possible methods:
 - when the integrand is a known product of sines and cosines, write the integral
   as the sum of the integrals of each frequency.
 
-### CE-187. A nested iterated integral on the parse route loses the error of the inner integral
+### CE-821. An outer integral does not add the error of an inner integral that is in the body of a called function
 
-**Status:** ready; wrong value, small.
-**Witness:** plausible; `.N()` of a nested `∫∫ e^{-xy}/x^{0.99}` reports an error 1e5 times smaller than the true error.
+**Status:** ready; wrong value, S.
+**Witness:** plausible; after `ce.assign('F', ce.parse('y \\mapsto \\int_0^1 \\frac{e^{-xy}}{x^{0.99}} dx'))`, `ce.parse('\\int_0^1 F(y) dy').N()` reports an error 14 times smaller than the true error.
 
-`.N()` of `\int_0^1\int_0^1 e^{-xy}/x^{0.99} dx dy` gives
-`99.575857194449625 ± 0.000000000000000011`; the integral is `99.5758571944484`,
-so the true error is `1.2e-12`, 1e5 times the reported error. The outer integral
-compiles its integrand, which holds the inner integral, to `_SYS.integrate`
-(`compilation/javascript-target.ts`). That call returns a plain number, so the
-error of the inner quadrature is not added to the error of the outer one, as
-`nIntegrateMultiple` (`library/calculus.ts`) does for
-`Integrate(f, Limits(x, …), Limits(y, …))`.
+The witness gives `99.575857194449625 ± 0.000000000000088`. The integral is
+`99.57585719444842` (the sum of the exponential series, term by term), so the
+true error is `1.2e-12` and the reported error is `8.8e-14`. The same integral
+with the inner integral written in the integrand reports `1.1e-10`, which is
+correct.
 
-A fix that reported the largest inner error to the enclosing quadrature (a
-module-level value in `numerics/gauss-kronrod.ts`, added as `|b − a|` times the
-largest inner error) was tried and withdrawn. It understates the error when the
-integrand scales or sums inner integrals (`1000·I(x)`, `I₁(x) + I₂(x)`), it
-gives no bound on an infinite interval, and the `converged` flag of the outer
-result must then be computed again. A correct fix propagates the inner error
-through the compiled arithmetic of the integrand, or applies the bound only when
-the compiler proves that the integrand IS one inner integral.
+Both calls of `integrateRealPart` (`library/calculus.ts`) set `nested` from
+`has(['Integrate', 'NIntegrate'])` on the integrand. For the integrand `F(y)`
+this is `false`, because the integral is in the body of `F`, so
+`adaptiveQuadrature` runs without `nestedErrors`. Proposed fix: always pass
+`nestedErrors: true`. `withNestedErrors` (`numerics/gauss-kronrod.ts`) returns
+the result unchanged when no inner quadrature reports. Keep `nested` for the
+choice not to use the Monte-Carlo fallback, or find another test for it.
+
+### CE-822. The error of an outer integral does not scale with a small factor of the inner integral
+
+**Status:** ready; defect, M.
+**Witness:** plausible; `\int_0^{\infty} e^{-y}\int_0^1 \frac{e^{-xy}}{x^{0.99}} dx dy` gives `99.315 ± 0.031`, and the true error is `1.2e-12`.
+
+The value of the witness is correct to `1.2e-12`, but the reported error is
+about `1e10` times larger, and the printed result has only five digits. A direct
+call of `adaptiveQuadrature` with this integrand gives an error of `8.5e-9`
+without `nestedErrors`. With `nestedErrors` it gives `3.4e-3`, and `converged`
+is `false`. On a finite interval, `\int_0^1 10^{-12}\int_0^1
+\frac{e^{-xy}}{x^{0.99}} dx dy` gives the error `1.1e-10` for the value
+`1e-10`; the true error is `1.2e-24`.
+
+`withNestedErrors` (`numerics/gauss-kronrod.ts`) does not know how a value `v` of
+the integrand changes with its inner integrals `I`. It takes the error of `v` as
+the larger of `Σ e` and `|v|·Σ e/|I|`, so `Σ e` applies with no factor to
+`v = w·I` with a small `w`. A correct fix propagates the inner error through the
+compiled arithmetic of the integrand, or finds the factor `w` when the compiler
+proves that the integrand is `w·I`. Do not replace the larger of the two terms
+with `|v|·Σ e/|I|` alone: this understates the error of `c − I` with values near
+0, which `test/compute-engine/quadrature-hidden-edge-jump.test.ts` checks.
 
 ### CE-192. `Hypergeometric2F1` at machine precision has up to 3.7e-11 relative error
 
