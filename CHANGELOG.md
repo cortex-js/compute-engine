@@ -24,6 +24,17 @@
 
 ### Improvements
 
+- **An assignment to a list element rebinds the list, in LaTeX and in Epsil.**
+  `L[k]\coloneq v` is `Assign(L, ReplaceAt(L, k, v))`, and the Epsil statement
+  `xs[i] = v` is `xs = ReplaceAt(xs, i, v)`. With `L = [10, 20, 30]`,
+  `L[2]\coloneq 5` gives `L = [10, 5, 30]`. A matrix element is
+  `M[j, i]\coloneq v` or `M[j][i]\coloneq v`, which is
+  `Assign(M, ReplaceAt(M, j, i, v))`. Lists keep value semantics: after
+  `A\coloneq L`, the assignment `L[1]\coloneq 5` does not change `A`. The target
+  must be a variable that the program can assign: in Epsil,
+  `const c = [1, 2]; c[1] = 5` is the error `constant-assignment`, and in LaTeX
+  `N[1]\coloneq 5` is the error `assignment-to-library-function`. In a compiled
+  loop, `xs[i] = v` on a block local is written in place on JavaScript.
 - **A compiled loop that copies a list on each pass is reported.** When
   `xs = ReplaceAt(xs, i, v)` in a `Loop` cannot write the list in place on the
   JavaScript target, for example because the loop also has `ys = xs`,
@@ -69,6 +80,13 @@
 
 ### Behavior Changes
 
+- **An assignment to a list element in Epsil rebinds the list.** `xs[2] = 9`
+  gave the error `incompatible-type`, and is now `xs = ReplaceAt(xs, 2, 9)`
+  (see Improvements). An assignment with a string index, `xs["a"] = 9`, gives
+  the error `assignment-to-list-element`, as it does in LaTeX. In LaTeX, the
+  same error is given for a list that is not a symbol and for an element target
+  in a `\operatorname{let}` statement or a `where` item, which declare a new
+  name.
 - **Epsil warns when a body that is only `name = value` compares and nothing
   reads the result.** `let a = 0; match 1 { 1 => a = 2 }; a` gave `0` with no
   message, and it still gives `0`, now with the warning
@@ -163,18 +181,25 @@
   it now stays `Length(Which([True, False, False], M, True, 0))` until `M` has a
   value. The same applies to a `Which` whose list condition is not decided:
   `Length(Which(L < k, L, True, 0))` was a `Which` with an error in an arm.
-- **An assignment to a list element is now a parse error, and it no longer
-  replaces the function `At`.** With `L` a list, `L[k]\coloneq 5` replaced `At`
-  for the whole engine, so that `L[2]` gave `[5, 5, 5]`, and `L[2]\coloneq 5`
-  gave `expected-a-symbol`. All the forms now give the error
-  `assignment-to-list-element`, and `L[2]` keeps its value. To get a new list
-  with one element replaced, use `ReplaceAt`.
+- **An assignment to a list element no longer replaces the function `At`.**
+  With `L` a list, `L[k]\coloneq 5` replaced `At` for the whole engine, so that
+  `L[2]` gave `[5, 5, 5]`, and `L[2]\coloneq 5` gave `expected-a-symbol`. Both
+  now rebind `L` with `ReplaceAt` (see Improvements), and `At` keeps its
+  meaning.
 - **`N()` of an integral now reports the error of `evaluate()` when a call head
   is defined later as a data symbol.** Parse `\int_0^1 g(x)\,dx`, then run
   `ce.declare('g', 'real')`. `evaluate()` gave the `expected-function` error
   and `N()` kept the integral unevaluated. `N()` now gives the same error. An
   integral whose call is in a branch that is not reached keeps its value:
   `If(x > 2, g(x), x^x)` over `[0, 1]` is still `0.783...` under `N()`.
+- **`D`, `Limit` and `NIntegrate` now report the `expected-function` error when
+  a call head is defined later as a data symbol.** Parse `\frac{d}{dx} g(x)`,
+  then run `ce.declare('g', 'real')` and `ce.assign('g', 5)`. `evaluate()` gave
+  `Apply(Derivative(g, 1), x)`. In the same way, `Limit(x ↦ g(x), 0)` stayed
+  unevaluated and `NIntegrate(x ↦ g(x), 0, 1)` gave `NaN`. All three now give
+  the `expected-function` error, which the same expression gives when it is
+  boxed after the declaration. A call in a branch that no sample reaches keeps
+  the value: `NIntegrate(x ↦ If(x > 2, g(x), x^x), 0, 1)` is still `0.783...`.
 - **The derivative of a function literal no longer takes a free name of a
   called function for its parameter.** With `a := 3` and `h := x ↦ a·x`,
   `Apply(Derivative(a ↦ a·h(a)), 2)` was `14`, and it is now `12`. The result
@@ -233,12 +258,11 @@
 - **`compile()` no longer lists `DefineFunction` and the name of a local
   function in `unsupported` for a program that compiled.** The Epsil program
   `function f(x) { x + 1 }` then `f(2)` compiled to JavaScript with
-  `success: true` and `unsupported: ["DefineFunction", "f"]`. The list is now
-  empty on the JavaScript, `interval-js` and Python targets, also for a local
-  bound to a function literal (`const g = (k) => k + 1`). When such a program
-  declines for another reason, the list has only the operators with no
-  lowering. GLSL and WGSL do not compile a function defined in a block, and
-  still list it.
+  `success: true` and `unsupported: ["DefineFunction", "f"]`, and so did a call
+  of a local bound to a function literal (`const g = (k) => k + 1`). The list of
+  a compilation with `success: true` is now always empty, as documented. When a
+  compilation declines, the list is unchanged: it can name `DefineFunction` and
+  the function beside the operator that caused the decline.
 
 ## 0.181.1 _2026-11-05_
 

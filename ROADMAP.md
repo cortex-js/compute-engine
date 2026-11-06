@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-831.
+Next free reference: CE-833.
 
 **Entry format.**
 
@@ -534,18 +534,36 @@ reproduction above is the record.
 
 ## Evaluation, canonical forms and scoping
 
-### CE-824. `D`, `Limit` and `NIntegrate` report no error for a call whose head is defined later as a data symbol
+### CE-832. A call boxed before its head is declared as a data symbol does not evaluate to `expected-function`
 
-**Status:** ready; defect (consistency), S. Found 2026-11-05 while fixing the same case for `Integrate`.
-**Witness:** plausible; Interpreter: parse `\frac{d}{dx} g(x)`, then `ce.declare('g', 'real'); ce.assign('g', 5)`: `D` gives `Apply(Derivative(g, 1), x)`, and should report `expected-function`.
+**Status:** ready; defect (consistency), M.
+**Witness:** plausible; Interpreter: box `g(x) + 1`, then `ce.declare('g', 'real')`: `evaluate()` gives `g(x) + 1`, and the same expression boxed after the declaration gives the `expected-function` error.
 
-Box the call, then run `ce.declare('g', 'real'); ce.assign('g', 5)`. `D` of
-`g(x)` gives `Apply(Derivative(g, 1), x)` under `evaluate()` and `N()`.
-`Limit(x ↦ g(x), 0)` stays unevaluated under `evaluate()` and is `NaN` under
-`N()`. `NIntegrate(x ↦ g(x), 0, 1)` is `NaN` under `evaluate()` and `N()`.
-`Integrate`, under `evaluate()` and `N()`, reports the error
-`expected-function`, and these three operators should report it too. `D` of a
-call that is boxed after the declaration reports the error already.
+Box the expression, then run `ce.declare('g', 'real')`. The call `g(x)`
+evaluates to itself. With `ce.assign('g', 5)` too, it evaluates to the error
+`incompatible-type` (`'function'`, `'5'`). The same call boxed after the
+declaration is the error `expected-function`. The operators that evaluate
+the call give its value: `Sum(g(k), Limits(k, 1, 3))` gives
+`g(1) + g(2) + g(3)`, `Product` gives the product, `ND(x ↦ g(x), 1)` and
+`Apply(Derivative(x ↦ g(x)), 1)` stay unevaluated, and `NLimit(x ↦ g(x), 0)`
+gives `NaN`. Boxed after the declaration, each one is the error.
+
+`Integrate`, `D`, `Limit` and `NIntegrate` report the error with a check of
+their own: `dataSymbolCallError()` in `library/calculus.ts`, which uses
+`errorValueWhere()` of `boxed-expression/error-value.ts`, and for `Integrate`
+the test `liftIntegrand(ops[0]).isValid` in its evaluate handler. That check
+does not reach a call below a selecting operator, so
+`D(If(x > 2, g(x), x^2), x)` keeps a derivative for each branch, where the
+expression boxed after the declaration is the error.
+
+Cause: `BoxedFunction._canonicalToEvaluate()` (`boxed-function.ts`) evaluates
+a call boxed again only for a call that recorded its callee
+(`_reboxedForCallee()`). A call boxed before its name had a definition is
+boxed again only to read its type (`_reboxedForForwardCallee()`), and that
+function refuses a new call that is an `Error`. Proposed fix: the evaluation
+of such a call gives the call boxed again when it is the `expected-function`
+error. The check of the four operators in `library/calculus.ts` can then be
+removed if the error reaches them through their operand.
 
 ### CE-752. A lazy view returned from a `Block` reads a valueless local as the global of the same name
 
@@ -1742,30 +1760,6 @@ A method that does not depend on the lobes is necessary. Possible methods:
 - when the integrand is a known product of sines and cosines, write the integral
   as the sum of the integrals of each frequency.
 
-### CE-822. The error of an outer integral does not scale with a small factor of the inner integral
-
-**Status:** ready; defect, M.
-**Witness:** plausible; `\int_0^{\infty} e^{-y}\int_0^1 \frac{e^{-xy}}{x^{0.99}} dx dy` gives `99.315 ± 0.031`, and the true error is `1.2e-12`.
-
-The value of the witness is correct to `1.2e-12`, but the reported error is
-about `1e10` times larger, and the printed result has only five digits. A direct
-call of `adaptiveQuadrature` with this integrand gives an error of `8.5e-9`
-without `nestedErrors`. With `nestedErrors` it gives `3.4e-3`, and `converged`
-is `false`. On a finite interval, `\int_0^1 10^{-12}\int_0^1
-\frac{e^{-xy}}{x^{0.99}} dx dy` gives the error `1.1e-10` for the value
-`1e-10`; the true error is `1.2e-24`. The inner integral in the body of a called
-function gives the same results: `\int_0^{\infty} e^{-y} F(y) dy` gives
-`99.315 ± 0.031`.
-
-`withNestedErrors` (`numerics/gauss-kronrod.ts`) does not know how a value `v` of
-the integrand changes with its inner integrals `I`. It takes the error of `v` as
-the larger of `Σ e` and `|v|·Σ e/|I|`, so `Σ e` applies with no factor to
-`v = w·I` with a small `w`. A correct fix propagates the inner error through the
-compiled arithmetic of the integrand, or finds the factor `w` when the compiler
-proves that the integrand is `w·I`. Do not replace the larger of the two terms
-with `|v|·Σ e/|I|` alone: this understates the error of `c − I` with values near
-0, which `test/compute-engine/quadrature-hidden-edge-jump.test.ts` checks.
-
 ### CE-192. `Hypergeometric2F1` at machine precision has up to 3.7e-11 relative error
 
 **Status:** ready; defect, small.
@@ -2640,6 +2634,21 @@ file.
   `\frac{\partial^2}{\partial_{x,y}} f(x,y)` (2 skips, `operators.test.ts`).
 
 ## Epsil
+
+### CE-831. The static check reads a `let` named `i` as the imaginary unit
+
+**Status:** ready; defect, S.
+**Witness:** plausible; `let i = 1\nlet y: integer = i\ny`.
+
+The program runs and gives `1`, but `checkEpsil()` and `executeEpsil()`
+report a `static-type-error`: "The value `i` of type `imaginary` is not
+compatible with the declared type `integer`". In the static pass
+(`staticDiagnostics()`, `src/epsil/static-diagnostics.ts`), `i` has the type of
+the library constant `ImaginaryUnit`; the cause is not traced. A loop that writes an
+element, `while i <= 3 { xs[i] = 10 * i\ni = i + 1 }` after `let i = 1`, gets
+the same false error, because the position of `ReplaceAt` must be an integer.
+`let e = 3\nlet y: integer = e` is not affected, so the fix starts with how
+the pass resolves `i`.
 
 ### CE-306. `list<list<string>>` and `list<list<integer>>` cannot both conform to a protocol
 

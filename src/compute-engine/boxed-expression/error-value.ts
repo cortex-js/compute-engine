@@ -468,6 +468,63 @@ function firstEmbeddedError(
   return undefined;
 }
 
+/**
+ * The error that `errorValue()` would give for `expr` if each node for which
+ * `errorOf` gives an error were replaced by that error, or `undefined`.
+ *
+ * `expr` is a valid tree. A node of it can stand for an error that the tree
+ * does not hold yet: a call that was valid when it was boxed and that the
+ * same boxing refuses now. The caller finds, with this function, whether
+ * such an error would be the value of `expr`, without building the tree
+ * that holds the error.
+ *
+ * The walk is the walk that `errorValue()` makes (`firstEmbeddedError()`
+ * with selecting subtrees skipped), and the two must follow the same rule:
+ * the first such node in operand order, not below a collection literal
+ * (`COLLECTION_OPERATORS`) and not below a selecting operator
+ * (`defersErrorAbsorption()`), where the error can be in an operand that is
+ * not demanded. The error gets the breadcrumb frames from the node up to
+ * `expr`, innermost first.
+ *
+ * This walk cannot prune on `isValid`, so it visits each node of `expr`
+ * once: it uses an explicit stack, because a valid tree can be as deep as
+ * its input is long, and a shared subtree is visited only on the first path
+ * that reaches it. The answer for a subtree does not depend on the path.
+ */
+export function errorValueWhere(
+  expr: Expression,
+  errorOf: (node: Expression) => Expression | undefined
+): Expression | undefined {
+  type Entry = {
+    node: Expression;
+    parent: Entry | undefined;
+    index: number;
+  };
+  const visited = new Set<Expression>();
+  const stack: Entry[] = [{ node: expr, parent: undefined, index: 0 }];
+  while (stack.length > 0) {
+    const entry = stack.pop()!;
+    const node = entry.node;
+    if (!isFunction(node) || visited.has(node)) continue;
+    visited.add(node);
+    const err = errorOf(node);
+    if (err !== undefined) {
+      const frames: ErrorFrame[] = [];
+      for (let e = entry; e.parent !== undefined; e = e.parent)
+        frames.push({ operator: e.parent.node.operator, index: e.index });
+      return withErrorFrames(err, frames);
+    }
+    if (COLLECTION_OPERATORS.has(node.operator)) continue;
+    if (defersErrorAbsorption(node)) continue;
+    // The operands are pushed last to first, so that they are popped, and
+    // visited, in operand order.
+    const ops = node.ops;
+    for (let i = ops.length - 1; i >= 0; i--)
+      stack.push({ node: ops[i], parent: entry, index: i + 1 });
+  }
+  return undefined;
+}
+
 //
 // ─── Breadcrumb (design §2a) ──────────────────────────────────────────────
 //

@@ -47,6 +47,7 @@ import {
   isExpression,
   isFunction,
   isNumber,
+  isString,
   isSymbol,
   sym,
 } from '../boxed-expression/type-guards.js';
@@ -56,6 +57,7 @@ import {
   functionLiteralParameterNames,
 } from '../boxed-expression/function-literal.js';
 import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
+import { errorValueWhere } from '../boxed-expression/error-value.js';
 import { indefiniteIntegralVariables } from '../boxed-expression/binding-sites.js';
 import {
   BOUND_ROLE,
@@ -2944,6 +2946,94 @@ function holdsHeldOperator(e: Expression): boolean {
   if (HELD_INTEGRAND_OPERATORS.has(e.operator)) return true;
   if (e.operator !== 'Block' && e.operatorDefinition?.scoped) return true;
   return e.ops.some((op) => holdsHeldOperator(op));
+}
+
+/**
+ * The `expected-function` error that boxing the call `e` gives now, when the
+ * head of `e` is a data symbol now and was not one when `e` was boxed.
+ * `undefined` for every other node.
+ *
+ * A call `g(x)` that is boxed while `g` has no definition is valid: the name
+ * can still become a function. After `ce.declare('g', 'real')`, the same call
+ * boxed again is the error `expected-function`, but the node that was boxed
+ * before the declaration does not change.
+ *
+ * The head is read through the binding of the call
+ * (`callableBindingInContext()`), as the evaluation of the call reads it,
+ * and the call is boxed again with that binding (`withCallableBinding()`): a
+ * declaration of the same name in another scope does not change the answer.
+ * A head with an inferred or unknown type, or with a type that a function
+ * can have, is skipped before the call is boxed again. The boxing of the
+ * call decides for the other heads (`S(B)` with `S` declared `set<number>`
+ * is a valid application), so the rule is stated once, where `box.ts` makes
+ * the error.
+ */
+function callOfDataSymbolError(
+  ce: ComputeEngine,
+  e: Expression
+): Expression | undefined {
+  if (!isFunction(e) || e.operatorDefinition !== undefined) return undefined;
+  const own = e.valueDefinition;
+  if (own === undefined) return undefined;
+  const binding = callableBindingInContext(ce, e.operator, { value: own });
+  if (binding === undefined || !isValueDef(binding)) return undefined;
+  const type = binding.value.type;
+  if (
+    binding.value.inferredType ||
+    type.isUnknown ||
+    type.couldMatch('function')
+  )
+    return undefined;
+  const boxedAgain = withCallableBinding(e, () =>
+    ce.function(e.operator, e.ops)
+  );
+  return isExpectedFunctionError(boxedAgain) ? boxedAgain : undefined;
+}
+
+/** True when `e` is an `Error` expression with the code `expected-function`. */
+function isExpectedFunctionError(e: Expression): boolean {
+  if (!isFunction(e, 'Error')) return false;
+  const code = e.op1;
+  return (
+    isFunction(code, 'ErrorCode') &&
+    isString(code.op1) &&
+    code.op1.string === 'expected-function'
+  );
+}
+
+/**
+ * The `expected-function` error that is the value of `expression` when it
+ * holds a call whose head became a data symbol after the call was boxed
+ * (`callOfDataSymbolError()`), or `undefined`. `expression` is the node of
+ * an operator that reads its first operand without evaluating it (`D`,
+ * `Limit`, `NIntegrate`), and the evaluate handler of that operator returns
+ * this error in place of its own value.
+ *
+ * Such an operator gives a value for the call: `D` differentiates `g(x)` to
+ * `Apply(Derivative(g, 1), x)`, and `Limit` and `NIntegrate` sample it and
+ * give `NaN`. The same expression boxed after the declaration holds the
+ * error in place of the call, and the error is its value before the handler
+ * runs. The error returned here is that value: the error of the first such
+ * call that an error walk reaches (`errorValueWhere()`), with the same
+ * breadcrumb frames.
+ *
+ * A call below a selecting operator is not reached, because the error is
+ * then not the value of the expression boxed after the declaration before
+ * its handler runs: the call in `If(x > 2, g(x), x^x)` is not demanded over
+ * `[0, 1]`, so `NIntegrate` of it has a value. A call below a collection
+ * literal is not reached either. When no call is reached, the handler works
+ * as it does for a head with no definition. Its value can then differ from
+ * the value of the expression boxed after the declaration:
+ * `D(If(x > 2, g(x), x^2), x)` keeps a derivative for each branch, where the
+ * expression boxed after the declaration is the error, because `D`
+ * differentiates the branch that holds it.
+ */
+function dataSymbolCallError(
+  ce: ComputeEngine,
+  expression: Expression | undefined
+): Expression | undefined {
+  if (expression === undefined) return undefined;
+  return errorValueWhere(expression, (e) => callOfDataSymbolError(ce, e));
 }
 
 /**
@@ -6112,6 +6202,13 @@ volumes
         // unevaluated rather than crashing on `ops[0].canonical`.
         if (!ops[0]) return undefined;
 
+        // A call whose head was declared as a data symbol after the call was
+        // boxed: the derivative is the `expected-function` error that the
+        // same expression boxed after the declaration gives, not
+        // `Apply(Derivative(g, 1), x)` (`dataSymbolCallError()`).
+        const refused = dataSymbolCallError(ce, expression);
+        if (refused !== undefined) return refused;
+
         // A function that holds a residue class is not differentiated: a
         // class is not a real number, and the rules of differentiation do
         // not apply to it. The derivative stays unevaluated.
@@ -8507,7 +8604,14 @@ volumes
           checkOperandType(engine, upper, 'number'),
         ]);
       },
-      evaluate: ([f, a, b], { engine }) => {
+      evaluate: ([f, a, b], { engine, expression }) => {
+        // A call whose head was declared as a data symbol after the call was
+        // boxed: the integral is the `expected-function` error that the same
+        // expression boxed after the declaration gives, not `NaN`
+        // (`dataSymbolCallError()`).
+        const refused = dataSymbolCallError(engine, expression);
+        if (refused !== undefined) return refused;
+
         // Uses compiled JS functions (machine arithmetic). The bounds are
         // evaluated once: their values are passed on to the exact route below
         // (`exactDivergenceValue`), so that a bound with an effect
@@ -8900,7 +9004,17 @@ volumes
         if (dir === undefined) return engine._fn('Limit', [fn, x.canonical]);
         return engine._fn('Limit', [fn, x.canonical, dir.canonical]);
       },
-      evaluate: ([f, x, dir], { engine, numericApproximation }) => {
+      evaluate: (
+        [f, x, dir],
+        { engine, expression, numericApproximation }
+      ) => {
+        // A call whose head was declared as a data symbol after the call was
+        // boxed: the limit is the `expected-function` error that the same
+        // expression boxed after the declaration gives, not `NaN`
+        // (`dataSymbolCallError()`).
+        const refused = dataSymbolCallError(engine, expression);
+        if (refused !== undefined) return refused;
+
         // A user function called in the body reads a symbol with the name of
         // the limit variable: `lim_{k→1} g(k)` with `g := a ↦ a·k·x`. The
         // limit of the body with this variable renamed is computed instead
