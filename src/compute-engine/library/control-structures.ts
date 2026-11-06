@@ -22,10 +22,12 @@ import {
   exitFunctionBody,
   isInBranch,
   isFreeSymbolDeclarationInBody,
+  keptAssignmentLocalBoundary,
   recordAssignmentLocals,
   recordLaterDeclarationLocals,
   withPairedFunctionNames,
 } from '../assignment-locals.js';
+import { noteAssignmentLocal } from '../boxed-expression/provisional-application.js';
 import { canonicalBranch, canonicalStatement } from '../statement-position.js';
 import {
   CLAUSE_ROLE,
@@ -4531,7 +4533,9 @@ function canonicalBlock(
     const assignmentLocals: string[] = [];
     // The assignment locals that a binding of an enclosing scope would have
     // taken, if a later statement of the top-level block of a program had
-    // not declared it (`recordLaterDeclarationLocals`).
+    // not declared it, or if the binding had existed when the function
+    // literal of this block was first written (`recordLaterDeclarationLocals`,
+    // `withKeptAssignmentLocals`).
     const laterDeclarationLocals: string[] = [];
     // A block in a branch of a conditional or in the body of a loop
     // (`isInBranch()`) declares no local by assignment: a first assignment
@@ -4572,6 +4576,7 @@ function canonicalBlock(
           continue;
         }
         assignmentLocals.push(name);
+        noteAssignmentLocal(name);
         if (
           ce.lookupDefinition(name) !== undefined ||
           ce._isShadowedParameter(name)
@@ -5235,10 +5240,18 @@ export function statementDeclaredNames(op: Expression): string[] {
  * (`LATER_DECLARATIONS`): the lookup continues in the enclosing scope.
  * In the body of a function literal, a binding that the engine made for a
  * free symbol of the body, with no value, does not count either
- * (`isFreeSymbolDeclarationInBody()`, `assignment-locals.ts`).
+ * (`isFreeSymbolDeclarationInBody()`, `assignment-locals.ts`). When a function
+ * literal is built again and its first canonicalization made `name` a local,
+ * the search stops at the scope that the literal is written in
+ * (`withKeptAssignmentLocals()`): a binding there was made later.
  */
 function isDeclaredInScopeChain(ce: ComputeEngine, name: string): boolean {
-  for (let s: Scope | null = ce.context.lexicalScope; s; s = s.parent) {
+  const boundary = keptAssignmentLocalBoundary(name);
+  for (
+    let s: Scope | null = ce.context.lexicalScope;
+    s && s !== boundary;
+    s = s.parent
+  ) {
     const binding = s.bindings.get(name);
     if (binding === undefined) continue;
     if (LATER_DECLARATIONS.get(s)?.has(name)) continue;
@@ -5270,6 +5283,14 @@ export function isUndeclaredFreeSymbol(def: BoxedDefinition): boolean {
  * of a program, and a later statement of that block declares `name`
  * (`LATER_DECLARATIONS`), the entry does not count. Nothing encloses such a
  * block, so no other entry can name a parameter.
+ *
+ * When a function literal is built again and its first canonicalization made
+ * `name` a local (`withKeptAssignmentLocals()`), an entry outside the literal
+ * does not count either: its boundary is above the scope that the literal is
+ * written in. A program block that is still canonicalized can start such a
+ * rebuild, when it installs a function that the literal calls. The entry of
+ * a parameter or a declaration of the literal has its boundary at that scope
+ * or inside it, and still counts.
  */
 function isShadowedByEarlierDeclaration(
   ce: ComputeEngine,
@@ -5277,6 +5298,9 @@ function isShadowedByEarlierDeclaration(
 ): boolean {
   if (!ce._isShadowedParameter(name)) return false;
   const boundary = ce._shadowedParameterBoundary(name);
+  const home = keptAssignmentLocalBoundary(name) as Scope | undefined;
+  for (let s = home?.parent; s; s = s.parent)
+    if (s === boundary) return false;
   for (let s: Scope | null = ce.context.lexicalScope; s; s = s.parent)
     if (s.parent === boundary && LATER_DECLARATIONS.get(s)?.has(name))
       return false;

@@ -246,6 +246,38 @@ describe('THE SCOPE OF A NAME IS DECIDED WHERE THE FUNCTION IS DEFINED', () => {
     expect(executeEpsil(ce, 't').value.json).toBe(10);
   });
 
+  test('a later function with the name of a local called by a closure', () => {
+    // The call of the local in the closure makes the function wait on the
+    // name, so the later definition builds the function again. The name stays
+    // a local of the function.
+    const source =
+      'function h(n) { g = (z) => 0; (z) => g(z) + n }\n' +
+      'function g(t) { 9 }\n' +
+      '[h(1)(0), g(0)]';
+    const { ce, value, diagnostics } = run(source);
+    expect(diagnostics).toEqual([]);
+    expect(value).toEqual(['List', 1, 9]);
+    expect(ce.box('h').type.toString()).not.toContain('scope');
+  });
+
+  test('a program read as one block, where a later function builds `h` again', () => {
+    // The program block installs `other` while it is canonicalized, and `h`
+    // is built again then, with the declaration of `t` on the declaration
+    // stack. `t` stays a local of `h`.
+    const ce = new ComputeEngine();
+    const program = ce.box(
+      parseEpsil(
+        'function h(n) { t = 1; t + other(n) }\n' +
+          'let t = 10\n' +
+          'function other(u) { 2u }\n' +
+          '[h(2), t]'
+      )[0] as never
+    );
+    expect(program.isValid).toBe(true);
+    expect(ce._inScope(program.localScope, () => ce.box('h').type.toString())).not.toContain('scope');
+    expect(program.evaluate().json).toEqual(['List', 5, 10]);
+  });
+
   test('a local of a nested block', () => {
     // A first assignment in a branch or in a loop body is a static error,
     // so the nested blocks here are `do` blocks.

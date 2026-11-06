@@ -114,6 +114,12 @@
 
 ### Resolved Issues
 
+- **A later global no longer changes a local of a function when the function is
+  built again.** After `h = n ↦ Block(g := z ↦ 0, z ↦ g(z) + n)`, `g := t ↦ 9`
+  and `Apply(h(1), 0)` each gave the error `incompatible-type` about the `scope`
+  effect. The assignment now succeeds, `Apply(h(1), 0)` gives `1`, and `g(0)`
+  gives `9`. A global that exists when the function is written stays an outer
+  variable of the function, and writing it still needs the `scope` effect.
 - **`Integrate` of a block of several statements no longer reads only the first
   statement.** `Integrate(Block(c := 2, c * x), Limits(x, 0, 1)).evaluate()` was
   the error `assignment-in-operand`, and it is now `1`, the value of `.N()`. A

@@ -6,9 +6,12 @@
  * a name at the block's own level.
  *
  * Whether such a name is a local of the block is decided at
- * canonicalization and never changes after. Each run of the block gives the
- * name a new binding (`declareAssignmentLocals()`, `function-utils.ts`), and
- * the effect inference counts a write to it as confined (`withBlockLocals()`,
+ * canonicalization and never changes after. The repair of a definition
+ * (`repairWave()`, `function-utils.ts`) builds a function literal again from
+ * its raw operands, and keeps the decision (`withKeptAssignmentLocals()`).
+ * Each run of the block gives the name a new binding
+ * (`declareAssignmentLocals()`, `function-utils.ts`), and the effect inference
+ * counts a write to it as confined (`withBlockLocals()`,
  * `boxed-expression/effects-inference.ts`).
  *
  * The record is kept here, apart from the scope bindings, because a run of
@@ -200,6 +203,56 @@ export function assignmentLocalsOf(
   return ASSIGNMENT_LOCALS.get(scope);
 }
 
+/** The assignment locals that the rebuild of a function literal keeps, and
+ * the scope that the literal is written in. See
+ * {@link withKeptAssignmentLocals}. Canonicalization is synchronous, so one
+ * value shared by all the engines is sufficient. */
+let keptAssignmentLocals:
+  | { names: ReadonlySet<string>; scope: object }
+  | undefined;
+
+/**
+ * Run `fn`, which builds a function literal again from its raw operands in
+ * `scope`, the scope that the literal is written in. `names` are the names
+ * that the blocks of the literal made assignment locals when it was first
+ * canonicalized.
+ *
+ * A binding of such a name that `scope` or an enclosing scope holds now was
+ * made after the literal was written, and does not make the name an outer
+ * variable of the literal. With `h = n ↦ { g := z ↦ 0; z ↦ g(z) + n }`
+ * followed by a global `g := t ↦ 9`, `g` stays a local of `h`, and `h` does
+ * not write the global.
+ *
+ * A binding in a scope inside the literal still counts: in
+ * `n ↦ { a := 1; m ↦ { a := 2 } }` the second assignment writes the local of
+ * the outer block, as it did the first time.
+ */
+export function withKeptAssignmentLocals<T>(
+  names: ReadonlySet<string> | undefined,
+  scope: object | undefined,
+  fn: () => T
+): T {
+  const saved = keptAssignmentLocals;
+  keptAssignmentLocals =
+    names !== undefined && scope !== undefined ? { names, scope } : undefined;
+  try {
+    return fn();
+  } finally {
+    keptAssignmentLocals = saved;
+  }
+}
+
+/**
+ * The scope where the search for a declaration of `name` stops, when
+ * {@link withKeptAssignmentLocals} keeps `name` as an assignment local, or
+ * `undefined` when the search goes through the whole scope chain.
+ */
+export function keptAssignmentLocalBoundary(name: string): object | undefined {
+  return keptAssignmentLocals?.names.has(name)
+    ? keptAssignmentLocals.scope
+    : undefined;
+}
+
 const LATER_DECLARATION_LOCALS = new WeakMap<object, readonly string[]>();
 
 /**
@@ -211,7 +264,9 @@ const LATER_DECLARATION_LOCALS = new WeakMap<object, readonly string[]>();
  * top-level statement declares (`canonicalBlock()` in
  * `library/control-structures.ts`). In
  * `function g(k) { t = k + 1; t }; let t = 0`, `t` is such a local of the
- * body of `g`.
+ * body of `g`. The record also holds a local of a function literal that is
+ * built again, when an enclosing scope made a binding of the name after the
+ * literal was written ({@link withKeptAssignmentLocals}).
  *
  * The compiler reads the record (`withImplicitLocalDeclares()` in
  * `compilation/base-compiler.ts`): it declares such a name as a local of the

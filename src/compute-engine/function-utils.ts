@@ -142,6 +142,7 @@ import {
   registerProvisionalDependents,
   setProvisionalLiteral,
   takeProvisionalDependents,
+  type ProvisionalCapture,
   type ProvisionalDependent,
 } from './boxed-expression/provisional-application.js';
 import { activeRollbackFrame } from './inference-rollback.js';
@@ -235,6 +236,7 @@ import {
   copyAssignmentLocals,
   enterFunctionBody,
   exitFunctionBody,
+  withKeptAssignmentLocals,
 } from './assignment-locals.js';
 
 // Lazy reference to `validateArguments` (from `boxed-expression/validate.ts`).
@@ -1225,7 +1227,7 @@ export function canonicalFunctionLiteralArguments(
   // their leading symbol has no function definition yet — see
   // `boxed-expression/provisional-application.ts`.
   beginProvisionalCapture();
-  let provisionalHeads: ReadonlySet<string> | undefined;
+  let captured: ProvisionalCapture | undefined;
   let block: Expression;
   let shadowedDefs: ReadonlyMap<string, BoxedDefinition> = new Map();
   // The body is not in a branch, also when the literal is written in one:
@@ -1271,7 +1273,7 @@ export function canonicalFunctionLiteralArguments(
     shadowedDefs = ce._currentShadowedParameterDefs();
   } finally {
     exitFunctionBody();
-    provisionalHeads = endProvisionalCapture();
+    captured = endProvisionalCapture();
     ce._popShadowedParameters();
   }
 
@@ -1453,11 +1455,12 @@ export function canonicalFunctionLiteralArguments(
   // first time round, and the raw operands to re-derive from are the ones
   // recorded with it.
   const provisional =
-    provisionalHeads !== undefined
+    captured?.heads !== undefined
       ? {
           ops,
-          heads: provisionalHeads,
+          heads: captured.heads,
           scope: ce.context.lexicalScope,
+          assignmentLocals: captured.assignmentLocals,
         }
       : provisionalLiteral(ops[0]);
 
@@ -1794,9 +1797,12 @@ function repairWave(
       try {
         // Re-canonicalized in the scope the literal was built in: its free
         // symbols must resolve exactly as they did then, except for the one that
-        // has since become a function.
+        // has since become a function. A name that a block of the literal made
+        // an assignment local stays a local, also when that scope now binds it.
         rebuilt = ce._inScope(info.scope, () =>
-          canonicalFunctionLiteralArguments(ce, info.ops)
+          withKeptAssignmentLocals(info.assignmentLocals, info.scope, () =>
+            canonicalFunctionLiteralArguments(ce, info.ops)
+          )
         );
         // A value definition gets the rebuilt literal even when it is
         // INVALID: a fresh parse made after `name` was defined produces

@@ -463,4 +463,188 @@ describe('definition order does not change semantics', () => {
       expect(ce.parse('g(3)').evaluate().toString()).toEqual('27');
     });
   });
+
+  //
+  // 9/ A rebuilt literal keeps its assignment locals. An assignment in a
+  //    function body to a name that no enclosing scope declares makes a local
+  //    of the block, and the decision does not change when a global of the
+  //    same name is made later.
+  //
+  describe('a rebuilt literal keeps its assignment locals', () => {
+    const fn = (body: unknown, ...params: string[]): unknown => [
+      'Function',
+      body,
+      ...params,
+    ];
+    /** `h = n ↦ { g := z ↦ 0; z ↦ g(z) + n }` */
+    const H = [
+      'Assign',
+      'h',
+      fn(
+        [
+          'Block',
+          ['Assign', 'g', fn(0, 'z')],
+          fn(['Add', ['g', 'z'], 'n'], 'z'),
+        ],
+        'n'
+      ),
+    ];
+    /** The value of each statement, in order, on a fresh engine. */
+    const values = (...statements: unknown[]): unknown[] => {
+      const ce = new ComputeEngine();
+      return statements.map((s) => ce.box(s as never).evaluate().json);
+    };
+
+    test('a global function of the same name is not an outer write', () => {
+      const [, assign, global, call] = values(
+        H,
+        ['Assign', 'g', fn(9, 't')],
+        ['g', 0],
+        ['Apply', ['h', 1], 0]
+      );
+      expect(assign).toEqual(['Function', ['Block', 9], 't']);
+      expect(global).toBe(9);
+      expect(call).toBe(1);
+    });
+
+    test('a global value of the same name is not an outer write', () => {
+      const [, assign, call, global] = values(
+        H,
+        ['Assign', 'g', 5],
+        ['Apply', ['h', 1], 0],
+        'g'
+      );
+      expect(assign).toBe(5);
+      expect(call).toBe(1);
+      expect(global).toBe(5);
+    });
+
+    test('a closure stored before the global keeps its local', () => {
+      const results = values(
+        H,
+        ['Assign', 'q', ['h', 1]],
+        ['Assign', 'g', fn(9, 't')],
+        ['q', 0]
+      );
+      expect(results[3]).toBe(1);
+    });
+
+    test('a rebuild for another name keeps the local', () => {
+      // `other` starts the rebuild. By then the global `g` exists, and the
+      // rebuild still reads the assignment to `g` as the declaration of a
+      // local.
+      const results = values(
+        [
+          'Assign',
+          'h',
+          fn(
+            [
+              'Block',
+              ['Assign', 'g', fn(0, 'z')],
+              ['Add', ['g', 'n'], ['other', 'n']],
+            ],
+            'n'
+          ),
+        ],
+        ['Assign', 'g', fn(9, 't')],
+        ['Assign', 'other', fn(['Multiply', 2, 'u'], 'u')],
+        ['h', 1],
+        ['g', 0]
+      );
+      expect(results[2]).toEqual([
+        'Function',
+        ['Block', ['Multiply', 2, 'u']],
+        'u',
+      ]);
+      expect(results[3]).toBe(2);
+      expect(results[4]).toBe(9);
+    });
+
+    test('a local of a nested literal stays a local', () => {
+      const results = values(
+        [
+          'Assign',
+          'h',
+          fn(
+            [
+              'Block',
+              [
+                'Assign',
+                'k',
+                fn(
+                  ['Block', ['Assign', 'g', fn('m', 'z')], ['g', 'm']],
+                  'm'
+                ),
+              ],
+              ['k', 'n'],
+            ],
+            'n'
+          ),
+        ],
+        ['Assign', 'g', fn(9, 't')],
+        ['h', 3],
+        ['g', 0]
+      );
+      expect(results[2]).toBe(3);
+      expect(results[3]).toBe(9);
+    });
+
+    test('a nested block still writes the local of the outer block', () => {
+      // `a` is a local of the outer block, so `a := 2` in the nested block
+      // writes that local on the first canonicalization, and also in the
+      // rebuild that `other` starts: `a + other(5)` is `2 + 10`. Only a
+      // binding outside the literal is ignored.
+      const results = values(
+        [
+          'Assign',
+          'h',
+          fn(
+            [
+              'Block',
+              ['Assign', 'a', 1],
+              ['Block', ['Assign', 'a', 2]],
+              ['Add', 'a', ['other', 'n']],
+            ],
+            'n'
+          ),
+        ],
+        ['Assign', 'a', 100],
+        ['Assign', 'other', fn(['Multiply', 2, 'u'], 'u')],
+        ['h', 5],
+        'a'
+      );
+      expect(results[3]).toBe(12);
+      expect(results[4]).toBe(100);
+    });
+
+    test('a global that exists when the function is written is an outer write', () => {
+      const [, assign] = values(['Assign', 'g', fn(9, 't')], H);
+      expect(JSON.stringify(assign)).toContain(
+        'writes outside a function require a declared `scope` effect'
+      );
+    });
+
+    test('the compiled function gives the value of the local', () => {
+      const ce = new ComputeEngine();
+      ce.box([
+        'Assign',
+        'h',
+        fn(['Block', ['Assign', 't', ['Add', 'n', 1]], ['Add', 't', ['other', 'n']]], 'n'),
+      ] as never).evaluate();
+      ce.assign('t', 10);
+      ce.box(['Assign', 'other', fn(['Multiply', 2, 'u'], 'u')] as never).evaluate();
+      expect(ce.box(['h', 2] as never).evaluate().json).toBe(7);
+      // The compiled function declares `t` as its own local, so it does not
+      // read the value 10 of the global `t`.
+      const result = compile(ce.box('h'), {
+        to: 'javascript',
+        fallback: false,
+      } as never)!;
+      expect(result.success).toBe(true);
+      expect(result.preamble).toMatch(/\blet t\b/);
+      const h = result.run!() as unknown as (n: number) => number;
+      expect(h(2)).toBe(7);
+      expect(ce.box('t').evaluate().json).toBe(10);
+    });
+  });
 });
