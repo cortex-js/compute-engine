@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-825.
+Next free reference: CE-826.
 
 **Entry format.**
 
@@ -289,6 +289,25 @@ Type computed before `f` is assigned; a type that does not hold the value can gi
 reproduction above is the record.
 
 ## Collections, absence and broadcasting
+
+### CE-825. `And` and `Or` of a computed list and a list symbol stay unevaluated
+
+**Status:** ready; defect, S.
+**Witness:** plausible; with `u: list<real>`, `c: list<boolean>`, `u = [1, 2, 3]`,
+`c = [True, False, True]`, `And(u > 0, c)` evaluates to the unevaluated
+`And([True, True, True], [True, False, True])`, with the static type
+`list<boolean>`; it should give `[True, False, True]`, which compiled JavaScript gives.
+
+`And(c, u > 0)` and `Or` in either order give the same unevaluated form.
+`And(c, d)` with two list symbols, `And(u > 0, u < 2)` with two computed lists,
+and `And(b, u > 0)` with a boolean `b` give a list.
+
+Probable cause, from reading the code and not traced: `finishShortCircuit()` in
+`library/logic.ts` rebuilds the call over the evaluated values only when no
+operand was a collection on entry. The symbol `c` is a collection on entry, so
+there is no rebuild, and the driver has already declined to map the call because
+its other operand was not yet a list. `Nand`, `Nor` and `Implies` use the same
+function and were not probed.
 
 ### CE-682. A `Linspace` with an infinite endpoint: its reads disagree with each other
 
@@ -2449,14 +2468,6 @@ reproduction above is the record.
 Interpreter gives 3, `Length(t)` alone compiles; file says it is well-typed and stays a defect. Found during the work of 2026-10-30 and 2026-10-31 (Item 12); the
 reproduction above is the record.
 
-### CE-774. JavaScript: `And` over a list input is not mapped and gives a scalar
-
-**Status:** ready; wrong value. Approved 2026-11-01.
-**Witness:** plausible; `Not(And(b, u > 0))`, `b = true`, `u = [1, 2, 3]` gives `true`; interpreter `[False, False, False]`.
-
-`Not(And(b, u > 0))`, `b = true`, `u = [1, 2, 3]` gives `true`; interpreter `[False, False, False]`. Found during the work of 2026-10-30 and 2026-10-31 (Item 38); the
-reproduction above is the record.
-
 ### CE-777. Compiling `Block(If(x < 1, b ≔ 1, b ≔ 2); b)` declares a global `b`
 
 **Status:** ready; defect. Approved 2026-11-01.
@@ -2502,33 +2513,6 @@ Interpreter gives a value; "not compared with HEAD", and F41 (`c12544982`) chang
 reproduction above is the record.
 
 ## LaTeX parsing and serialization
-
-### CE-823. `L[k] := 5` with a symbol index redefines the library function `At`
-
-**Status:** ready; wrong value, S. Found 2026-11-05 from a Tycho probe of a
-modifiable array (`~/dev/tycho/docs/scratch/2026-11-05-buddhabrot-array-gaps.md`,
-gap 13). Also at HEAD `008aaf93711c78fbf62b9a747aca9a9545a3beb1`.
-**Witness:** plausible; with `L = [10, 20, 30]`, evaluating `L[k]\coloneq 5` makes a later `L[2]` give `[5, 5, 5]` with no error; it should refuse the assignment, and `L[2]` should stay 20.
-
-`L[k]\coloneq 5` parses to
-`["Assign", "At", ["Function", ["Block", 5], "L", "k"]]`, and `isValid` is true.
-The left side is read as `At(L, k)`, and `parseAssignStatement()` in
-`latex-syntax/dictionary/definitions-core.ts` reads `head(args) := value` as a
-function definition. `M[i, j]\coloneq 5` gives the same form.
-
-- At the top level, the evaluation replaces `At` for the whole engine. After it,
-  `At(List(7, 8), 2)` gives `[5, 5]`, and `L` still holds `[10, 20, 30]`.
-- In a block, `At` is a local. `L ≔ [10, 20, 30]; k ≔ 2; L[k] ≔ 5; L[2]` gives
-  `[5, 5, 5]` from the interpreter and from compiled JavaScript. The interpreter
-  and the compiled code agree, so a comparison of the two does not find this.
-- A number or a sum as the index, `L[2]\coloneq 5` and `L[k+1]\coloneq 5`, gives
-  the error `expected-a-symbol`, which names neither the cause nor the remedy.
-
-Fix: when the target parsed as `At`, refuse the assignment with an error that
-says that a list element has no assignment and names `ReplaceAt`. This also
-refuses the explicit `\operatorname{At}(L, k)\coloneq 5`, which parses to the
-same form. Element assignment itself is a separate design: Epsil documents it as
-not supported, and `docs/TYPE_SYSTEM_ROADMAP.md` defers it to an `array` type.
 
 ### CE-441. The LaTeX of a rest parameter or a destructuring parameter does not read back as that parameter
 
