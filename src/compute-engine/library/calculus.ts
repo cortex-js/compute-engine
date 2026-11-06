@@ -129,8 +129,10 @@ import {
   derivative,
   differentiate,
   isDifferentiating,
+  literalBodyOverHoles,
   memoizedDerivativeResult,
   memoizedPartialDerivative,
+  substituteParameters,
 } from '../symbolic/derivative.js';
 import {
   MAX_SIZE_EAGER_COLLECTION,
@@ -2131,7 +2133,8 @@ const NINTEGRATE_VARIABLE = 'NIntegrateVariable';
 /**
  * The function literal `(p_1, …, p_n) ↦ body`, where the parameter named
  * `params[i]` replaces each occurrence of the symbol named `holes[i]` in
- * `body`. Returns `undefined` when a parameter cannot be made.
+ * `body`, typed `types[i]` when `types` has that entry. Returns `undefined`
+ * when a parameter cannot be made.
  *
  * The parameter symbols are declared in a scope that is discarded before the
  * literal is made. The literal then binds its parameters in the scope of its
@@ -2144,7 +2147,8 @@ function functionLiteralOverHoles(
   ce: ComputeEngine,
   body: Expression,
   holes: ReadonlyArray<string>,
-  params: ReadonlyArray<string>
+  params: ReadonlyArray<string>,
+  types?: ReadonlyArray<Expression | undefined>
 ): Expression | undefined {
   const symbols: Expression[] = [];
   let lifted: Expression;
@@ -2160,13 +2164,68 @@ function functionLiteralOverHoles(
     holes.forEach((hole, i) => {
       subs[hole] = symbols[i];
     });
-    lifted = body.subs(subs);
+    // A hole can be the operator of a call (`_2(_)` for the parameter `f` of
+    // `(a, f) ↦ f(a)·h(a)`), and `subs()` replaces symbols only.
+    lifted = substituteParameters(ce, body, subs);
   } finally {
     ce.popScope();
   }
   // `ce.function()` (not `_fn`): the canonical handler wraps the body in the
   // scoped Block that `makeLambda` requires.
-  return ce.function('Function', [lifted, ...symbols]);
+  return ce.function('Function', [
+    lifted,
+    ...symbols.map((symbol, i) =>
+      types?.[i] ? ce._fn('Typed', [symbol, types[i]]) : symbol
+    ),
+  ]);
+}
+
+/**
+ * The names of the holes that stand for `count` parameters of a function
+ * literal in `literalBodyOverHoles()`. The first one is `_`, the variable in
+ * which `derivative()` differentiates the body that it receives.
+ */
+function parameterHoles(count: number): string[] {
+  return Array.from({ length: Math.max(count, 1) }, (_, i) =>
+    i === 0 ? '_' : `_${i + 1}`
+  );
+}
+
+/**
+ * The derivative `body`, which is in terms of `holes`, as a function literal
+ * with the parameters `params`, the parameters of the function that was
+ * differentiated. A parameter keeps its name and its type, unless `body` holds
+ * its name: that name is a free name of a called function
+ * (`literalBodyOverHoles()`), which the parameter would bind, so the parameter
+ * gets a new name. With `a := 3` and `h := x ↦ a·x`, the derivative of
+ * `a ↦ h(a)` is `a_1 ↦ a`.
+ */
+function literalWithParameters(
+  ce: ComputeEngine,
+  body: Expression,
+  holes: ReadonlyArray<string>,
+  params: ReadonlyArray<Expression>
+): Expression | undefined {
+  const binders = collectBinderNames(body);
+  const names: string[] = [];
+  for (const param of params) {
+    const base = functionLiteralParameterName(param);
+    let name = base;
+    for (
+      let i = 1;
+      body.has(name) || binders.has(name) || names.includes(name);
+      i++
+    )
+      name = `${base}_${i}`;
+    names.push(name);
+  }
+  return functionLiteralOverHoles(
+    ce,
+    body,
+    holes,
+    names,
+    params.map((p) => (isFunction(p, 'Typed') ? p.op2 : undefined))
+  );
 }
 
 /**
@@ -5485,6 +5544,11 @@ volumes
         // derivative of `a ↦ a^2` was the constant function `a ↦ [2, 4]`.
         // The parameters are shielded from such a value while the body is
         // differentiated (`withValueShield`).
+        //
+        // A called function can read a free name equal to a parameter
+        // (`a ↦ h(a)` with `h := x ↦ a·x`). The shield cannot separate the
+        // two, because it works by name, so that body is differentiated in
+        // terms of holes (`literalBodyOverHoles()`).
         const boundParams = isFunction(literal, 'Function')
           ? literal.ops
               .slice(1)
@@ -5494,17 +5558,26 @@ volumes
         if (orders.length <= 1) {
           const order = orders[0] ?? 1;
           return memoizedDerivativeResult(op, order, () => {
+            const params = isFunction(op, 'Function') ? op.ops.slice(1) : [];
+            const holes = parameterHoles(params.length);
             ce.pushScope();
             let r: Expression | undefined;
+            let bodyOverHoles: Expression | undefined;
             try {
-              ce.declare('_', 'unknown');
-              r = withValueShield(ce, boundParams, () => derivative(op, order));
+              for (const hole of holes) ce.declare(hole, 'unknown');
+              r = withValueShield(ce, boundParams, () => {
+                const found = literalBodyOverHoles(op, holes);
+                if (found === 'decline') return undefined;
+                bodyOverHoles = found;
+                return derivative(op, order, bodyOverHoles);
+              });
             } finally {
               ce.popScope();
             }
             if (r === undefined) return undefined;
             // Order 0 (or an already-lifted result) is the function itself.
-            if (isFunction(r, 'Function')) return r;
+            // A function literal that holds a hole is not lifted yet.
+            if (isFunction(r, 'Function') && !bodyOverHoles) return r;
             // An INCOMPLETE closed form — a `D` the symbolic differentiator
             // could not resolve is left inside the body, such as the
             // derivative of the norm of a point-valued function inside the
@@ -5536,11 +5609,13 @@ volumes
             // Its body evaluates that other `Derivative` when the literal is
             // applied.
 
+            if (bodyOverHoles)
+              return literalWithParameters(ce, r, holes, params);
+
             // A named-parameter function literal: the derivative was taken with
             // respect to its own (first) parameter, so the body is already in
             // terms of the named parameters — preserve the signature.
             if (isFunction(op, 'Function')) {
-              const params = op.ops.slice(1);
               if (
                 params.length > 0 &&
                 params.every((p) => functionLiteralParameterName(p) !== '')
@@ -5598,11 +5673,27 @@ volumes
                 .map((p) => functionLiteralParameterName(p));
               if (params.length === orders.length && params.every((p) => !!p)) {
                 let body: Expression | undefined = canonical.op1;
-                withValueShield(ce, boundParams, () => {
-                  for (let i = 0; i < orders.length && body; i++)
-                    for (let d = 0; d < orders[i] && body; d++)
-                      body = differentiate(body, params[i]!);
-                });
+                const holes = parameterHoles(params.length);
+                let overHoles = false as boolean;
+                ce.pushScope();
+                try {
+                  for (const hole of holes) ce.declare(hole, 'unknown');
+                  withValueShield(ce, boundParams, () => {
+                    const found = literalBodyOverHoles(canonical, holes);
+                    if (found === 'decline') {
+                      body = undefined;
+                      return;
+                    }
+                    overHoles = found !== undefined;
+                    body = found ?? body;
+                    const variables = overHoles ? holes : params;
+                    for (let i = 0; i < orders.length && body; i++)
+                      for (let d = 0; d < orders[i] && body; d++)
+                        body = differentiate(body, variables[i]!);
+                  });
+                } finally {
+                  ce.popScope();
+                }
                 // A body that holds a `D` the symbolic differentiator could
                 // not resolve (the partial of `Round(x, y)` in `y`) is no
                 // closed form: the node stays inert, as in the univariate arm
@@ -5611,6 +5702,13 @@ volumes
                 // other arguments and lost the one of the differentiation
                 // variable (`D(Round(1.5, y), y)` for the arguments 1.5, 2).
                 if (body && holdsUnresolvedD(body)) return undefined;
+                if (body && overHoles)
+                  return literalWithParameters(
+                    ce,
+                    body,
+                    holes,
+                    canonical.ops.slice(1)
+                  );
                 // `ce.function()` (not `_fn`): the canonical handler wraps the
                 // body in the scoped Block that `makeLambda` requires — a bare
                 // `_fn` literal throws on application.

@@ -1,3 +1,4 @@
+import { compile } from '../../src/compile';
 import { ComputeEngine } from '../../src/compute-engine';
 
 // The parameters of the function literal of `Derivative(a ↦ …)` are bound
@@ -354,5 +355,251 @@ describe('STATIC TYPE OF THE APPLICATION OF A CURRIED FUNCTION', () => {
     );
     expect(value).toBe('3');
     expect(type.startsWith('list')).toBe(false);
+  });
+});
+
+// A parameter of the literal of `Derivative(a ↦ …)` is another variable than
+// a free name of a function that the body calls, also when the two have the
+// same name. With `a := 3` and `h := x ↦ a·x`, `a ↦ a·h(a)` is `a ↦ 3a²`, and
+// its derivative is `a ↦ 6a`. The `a` of `h` is the global, so it is not
+// differentiated as the variable, and a parameter of the result does not
+// bind it. `D(h(k), x)` is different: `D` follows the name `x` into the body
+// of `h` (derivative-user-function-body.test.ts).
+describe('DERIVATIVE OF A FUNCTION LITERAL THAT CALLS A FUNCTION WITH A FREE NAME EQUAL TO A PARAMETER', () => {
+  const engine = (value: number | null = 3): ComputeEngine => {
+    const ce = new ComputeEngine();
+    if (value !== null) ce.assign('a', value);
+    ce.declare('h', 'function');
+    ce.assign('h', ce.box(['Function', ['Multiply', 'a', 'x'], 'x']));
+    return ce;
+  };
+  const value = (ce: ComputeEngine, json: Json) =>
+    ce.box(json).evaluate().toString();
+  const product = (p: string): Json => [
+    'Function',
+    ['Multiply', p, ['h', p]],
+    p,
+  ];
+
+  test('the first derivative', () => {
+    const ce = engine();
+    expect(
+      value(ce, ['Apply', ['Derivative', ['Function', ['h', 'a'], 'a']], 2])
+    ).toBe('3');
+    expect(value(ce, ['Apply', ['Derivative', product('a')], 2])).toBe('12');
+    expect(ce.box(['Apply', ['Derivative', product('a')], 2]).N().re).toBe(12);
+  });
+
+  test('a higher order', () => {
+    const ce = engine();
+    expect(value(ce, ['Apply', ['Derivative', product('a'), 2], 2])).toBe('6');
+    expect(value(ce, ['Apply', ['Derivative', product('a'), 2], 't'])).toBe(
+      '6'
+    );
+  });
+
+  test('a global with no value stays in the result', () => {
+    const ce = engine(null);
+    const lambda = ['Derivative', ['Function', ['h', 'a'], 'a']] as Json;
+    expect(ce.box(lambda).evaluate().json).toEqual([
+      'Function',
+      ['Block', 'a'],
+      'a_1',
+    ]);
+    expect(value(ce, ['Apply', lambda, 2])).toBe('a');
+    expect(value(ce, ['Apply', ['Derivative', product('a')], 2])).toBe('4a');
+  });
+
+  test('a parameter keeps its name when the result does not hold it', () => {
+    const ce = engine();
+    expect(
+      ce
+        .box(['Derivative', ['Function', ['Multiply', 'a', ['h', 1]], 'a']])
+        .evaluate()
+        .json
+    ).toEqual(['Function', ['Block', ['h', 1]], 'a']);
+  });
+
+  test('a parameter keeps its type', () => {
+    const ce = engine();
+    const literal: Json = [
+      'Function',
+      ['h', 'a'],
+      ['Typed', 'a', { str: 'real' }],
+    ];
+    expect(ce.box(['Derivative', literal]).evaluate().json).toEqual([
+      'Function',
+      ['Block', 'a'],
+      ['Typed', 'a_1', "'real'"],
+    ]);
+    expect(value(ce, ['Apply', ['Derivative', literal], 2])).toBe('3');
+  });
+
+  test('the result follows a new value and a new definition', () => {
+    const ce = engine();
+    const expr = ce.box(['Apply', ['Derivative', product('a')], 2]);
+    expect(expr.evaluate().toString()).toBe('12');
+    ce.assign('a', 5);
+    expect(expr.evaluate().toString()).toBe('20');
+    ce.assign('h', ce.box(['Function', ['Multiply', 7, 'x'], 'x']));
+    expect(expr.evaluate().toString()).toBe('28');
+  });
+
+  test('a function called by a function that the body calls', () => {
+    const ce = engine();
+    ce.declare('g', 'function');
+    // The parameter of `g` has the name of the free name of `h` too.
+    ce.assign('g', ce.box(['Function', ['h', 'a'], 'a']));
+    expect(
+      value(ce, ['Apply', ['Derivative', ['Function', ['g', 'a'], 'a']], 2])
+    ).toBe('3');
+  });
+
+  test('a function given by its name', () => {
+    const ce = engine();
+    ce.declare('f', 'function');
+    ce.assign('f', ce.box(product('a')));
+    expect(value(ce, ['Apply', ['Derivative', 'f'], 2])).toBe('12');
+  });
+
+  test('a free name equal to the parameter that is not the variable', () => {
+    const ce = engine();
+    ce.assign('b', 7);
+    ce.declare('k', 'function');
+    ce.assign('k', ce.box(['Function', ['Multiply', 'b', 'x'], 'x']));
+    const literal: Json = ['Function', ['Multiply', ['k', 'a'], 'b'], 'a', 'b'];
+    // The derivative in `a` of `7·a·b` is `7·b`.
+    expect(ce.box(['Derivative', literal]).evaluate().json).toEqual([
+      'Function',
+      ['Block', ['Multiply', 'b', 'b_1']],
+      'a',
+      'b_1',
+    ]);
+    expect(value(ce, ['Apply', ['Derivative', literal], 2, 5])).toBe('35');
+    expect(value(ce, ['Apply', ['Derivative', literal, 1, 0], 2, 5])).toBe(
+      '35'
+    );
+  });
+
+  test('a partial derivative', () => {
+    const ce = engine();
+    const literal: Json = ['Function', ['Multiply', ['h', 'a'], 'b'], 'a', 'b'];
+    expect(value(ce, ['Apply', ['Derivative', literal, 1, 0], 2, 5])).toBe(
+      '15'
+    );
+    expect(value(ce, ['Apply', ['Derivative', literal, 0, 1], 2, 5])).toBe('6');
+    ce.declare('g', 'function');
+    ce.assign('g', ce.box(literal));
+    expect(value(ce, ['Apply', ['Derivative', 'g', 1, 0], 2, 5])).toBe('15');
+  });
+
+  test('a block body', () => {
+    const ce = engine();
+    expect(
+      value(ce, [
+        'Apply',
+        [
+          'Derivative',
+          [
+            'Function',
+            [
+              'Block',
+              ['Declare', 'c', { str: 'unknown' }, ['h', 'a']],
+              ['Multiply', 'c', 'a'],
+            ],
+            'a',
+          ],
+        ],
+        2,
+      ])
+    ).toBe('12');
+  });
+
+  test('a parameter used as the name of a called function', () => {
+    const ce = engine();
+    ce.declare('sq', 'function');
+    ce.assign('sq', ce.box(['Function', ['Power', 'y', 2], 'y']));
+    const body = (p: string): Json => ['Multiply', ['f', p], ['h', p]];
+    const literal = (p: string): Json => ['Function', body(p), p, 'f'];
+    const derivative = (p: string) =>
+      value(ce, ['Apply', ['Derivative', literal(p)], 2, 'sq']);
+    // The derivative in `a` of `f(a)·3a` is `3·f(a) + 3a·f′(a)`. No hole is
+    // left in the call `f(a)`, so the value is the one of another parameter
+    // name.
+    expect(derivative('a')).toBe(derivative('p'));
+    expect(derivative('a')).not.toContain('_2');
+  });
+
+  // The body writes the name `a` itself (an index, or the variable of a nested
+  // `D`), and `h` reads a free `a`. The derivative stays unevaluated, and `N()`
+  // finds the value numerically: `a ↦ 3a + 6` has the slope 3.
+  test('a body that also binds the name of the parameter', () => {
+    const ce = engine();
+    const sum: Json = [
+      'Function',
+      ['Add', ['h', 'a'], ['Sum', 'a', ['Limits', 'a', 1, 3]]],
+      'a',
+    ];
+    const nested: Json = [
+      'Function',
+      ['Add', ['D', ['Power', 'a', 2], 'a'], ['h', 'a']],
+      'a',
+    ];
+    for (const literal of [sum, nested]) {
+      expect(ce.box(['Derivative', literal]).evaluate().operator).toBe(
+        'Derivative'
+      );
+    }
+    const slope = ce.box(['Apply', ['Derivative', sum], 2]).N().re;
+    expect(slope).toBeCloseTo(3, 6);
+    const twoParameters = ce.box([
+      'Derivative',
+      [
+        'Function',
+        ['Multiply', 'b', ['Add', ['h', 'a'], ['Sum', 'a', ['Limits', 'a', 1, 3]]]],
+        'a',
+        'b',
+      ],
+      1,
+      0,
+    ]);
+    expect(twoParameters.evaluate().operator).toBe('Derivative');
+  });
+
+  test('a body that binds the name, and no called function reads it', () => {
+    const ce = engine();
+    expect(
+      value(ce, [
+        'Apply',
+        [
+          'Derivative',
+          [
+            'Function',
+            ['Multiply', 'a', ['Sum', 'a', ['Limits', 'a', 1, 3]]],
+            'a',
+          ],
+        ],
+        2,
+      ])
+    ).toBe('6');
+  });
+
+  test('a parameter is not the free name of a function with another argument', () => {
+    const ce = engine();
+    ce.declare('h2', 'function');
+    ce.assign('h2', ce.box(['Function', ['Multiply', 't', 'x'], 't']));
+    expect(
+      ce.box(['Derivative', ['Function', ['h2', 'k'], 'x']]).evaluate().json
+    ).toEqual(['Function', ['Block', 0], 'x']);
+  });
+
+  test('compiled code gives the same value', () => {
+    const ce = engine();
+    ce.declare('t', 'real');
+    const compiled = compile(
+      ce.box(['Apply', ['Derivative', product('a')], 't'])
+    );
+    expect(compiled.success).toBe(true);
+    expect(compiled.run!({ t: 2 })).toBe(12);
   });
 });

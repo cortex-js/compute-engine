@@ -1207,13 +1207,17 @@ function derivativeChainCache(
 /**
  *
  * @param fn The function to differentiate, a function literal.
+ * @param bodyOverHole When `fn` is a function literal, its body from
+ * `literalBodyOverHoles()`: this body is differentiated in the hole `_`, and
+ * the result is in terms of the holes.
  *
  * @returns a function expression representing the derivative of `fn` with
  * respect to the variables in `degrees`.
  */
 export function derivative(
   fn: Expression,
-  order: number
+  order: number,
+  bodyOverHole?: Expression
 ): Expression | undefined {
   if (order === 0) return fn;
   const ce = fn.engine;
@@ -1294,8 +1298,8 @@ export function derivative(
     // with respect to a placeholder the body never mentions.
     if (fn.ops[1] !== undefined && isDestructuringParameter(fn.ops[1]))
       return undefined;
-    v = functionLiteralParameterName(fn.ops[1]) || '_';
-    fn = fn.ops[0];
+    v = bodyOverHole ? '_' : functionLiteralParameterName(fn.ops[1]) || '_';
+    fn = bodyOverHole ?? fn.ops[0];
   }
   const originalOrder = order;
   const cache =
@@ -3589,8 +3593,15 @@ function reachesUserFunction(expr: Expression, name: string): boolean {
  * shared, and the body of each function (its definition and its number of
  * arguments) is followed once. The names written in the expression are
  * tested before any body is followed.
+ *
+ * With `calledOnly`, a name written in `expr` itself does not count, only a
+ * name written in the body of a function that `expr` calls.
  */
-function dependsOnVariable(expr: Expression, v: string): boolean {
+function dependsOnVariable(
+  expr: Expression,
+  v: string,
+  calledOnly = false
+): boolean {
   const ce = expr.engine;
   // The nodes already walked, in `expr` and in the bodies followed.
   const visited = new Set<Expression>();
@@ -3662,7 +3673,7 @@ function dependsOnVariable(expr: Expression, v: string): boolean {
     return result;
   };
 
-  const walk = (root: Expression): boolean => {
+  const walk = (root: Expression, writtenCounts = true): boolean => {
     // The functions to follow once the names written in `root` are tested.
     const calls: {
       name: string;
@@ -3673,6 +3684,12 @@ function dependsOnVariable(expr: Expression, v: string): boolean {
     const pending: Expression[] = [root];
     while (pending.length > 0) {
       const e = pending.pop()!;
+      // A symbol that does not count is not marked as visited: the body of a
+      // called function can hold the same node, and there it counts.
+      if (!writtenCounts && isSymbol(e)) {
+        calls.push({ name: e.symbol, nargs: 1, fn: e });
+        continue;
+      }
       if (visited.has(e)) continue;
       visited.add(e);
       if (isSymbol(e)) {
@@ -3688,10 +3705,10 @@ function dependsOnVariable(expr: Expression, v: string): boolean {
         continue;
       }
       if (!isFunction(e)) {
-        if (e.has(v)) return true;
+        if (writtenCounts && e.has(v)) return true;
         continue;
       }
-      if (e.operator === v) return true;
+      if (writtenCounts && e.operator === v) return true;
       calls.push({ name: e.operator, nargs: e.nops, call: e });
       // A store-backed list has only number operands, which never depend on
       // `v`, so it is not walked (and its elements are not boxed).
@@ -3711,7 +3728,7 @@ function dependsOnVariable(expr: Expression, v: string): boolean {
     );
   };
 
-  return walk(expr);
+  return walk(expr, !calledOnly);
 }
 
 /**
@@ -4338,6 +4355,61 @@ function partialFromFunctionLiteral(
 }
 
 /**
+ * The body of the function literal `literal`, with the symbol named `holes[i]`
+ * in place of its parameter `i`, when a function that the body calls reads a
+ * free name equal to the name of a parameter. Otherwise `undefined`. The holes
+ * must be declared in the current scope.
+ *
+ * `differentiate()` expands the body of a called function and finds the
+ * variable by its name. A parameter of a literal is another variable than a
+ * free name of a called function, also when the two have the same name: with
+ * `a := 3` and `h := x ↦ a·x`, the literal `a ↦ h(a)` is `a ↦ 3a` when it is
+ * applied, and its derivative is `3`. Differentiated in `a`, the expanded body
+ * is `a·a`, and the derivative is `2a`. In terms of a hole, the expanded body
+ * is `a·_`, and the derivative in `_` is `a`, the name of the global. All the
+ * parameters are replaced: the derivative is made a function literal again,
+ * and a parameter other than the variable would bind a free `a` of its result
+ * too.
+ *
+ * The variable of `D` is not replaced: `D(h(k), x)` follows the name `x` into
+ * the body of `h` (`userFunctionBody()`).
+ *
+ * Also `undefined`, so that the caller differentiates in the parameter names,
+ * when a parameter is not a symbol or a typed symbol, or when the body cannot
+ * be reduced to one expression (`partialFromFunctionLiteral()`).
+ *
+ * The name of a parameter can still be written in the body after the
+ * replacement, because the body binds that name itself: the index of a `Sum`,
+ * or the variable of a nested `D`, which `subs()` keeps in
+ * `EvaluateAt(Function(D(…, a), a), _)`. Such a body is not differentiated in
+ * terms of holes. The result is `undefined` when no called function reads the
+ * name, and otherwise `'decline'`: no name separates the three variables, and
+ * the caller leaves the derivative unevaluated.
+ */
+export function literalBodyOverHoles(
+  literal: Expression,
+  holes: ReadonlyArray<string>
+): Expression | 'decline' | undefined {
+  if (!isFunction(literal, 'Function')) return undefined;
+  const ce = literal.engine;
+  const params = literal.ops.slice(1);
+  if (params.some((p) => !isSymbol(p) && !isFunction(p, 'Typed')))
+    return undefined;
+  const body = partialFromFunctionLiteral(
+    ce,
+    literal,
+    holes.map((hole) => ce.symbol(hole))
+  );
+  if (body === undefined) return undefined;
+  const names = params.map((p) => functionLiteralParameterName(p));
+  if (names.some((name) => body.has(name)))
+    return names.some((name) => dependsOnVariable(body, name, true))
+      ? 'decline'
+      : undefined;
+  return names.some((name) => dependsOnVariable(body, name)) ? body : undefined;
+}
+
+/**
  * `body` with each parameter named in `map` replaced by its argument.
  *
  * When no call in `body` has a parameter as its operator, this is
@@ -4356,7 +4428,7 @@ function partialFromFunctionLiteral(
  *   to it. A node that is not canonical (a held operand, such as the index
  *   of `Limits`) is substituted by `subs()`.
  */
-function substituteParameters(
+export function substituteParameters(
   ce: Expression['engine'],
   body: Expression,
   map: Record<string, Expression>
