@@ -107,6 +107,7 @@ import type {
   OperatorDefinition,
   AssignValue,
   Expression,
+  ExpressionInput,
   BoxedDefinition,
   BoxedValueDefinition,
   BoxedOperatorDefinition,
@@ -156,6 +157,7 @@ import {
 } from './boxed-expression/utils.js';
 import {
   canonicalFunctionLiteral,
+  functionLiteralDefiningScope,
   kindTypedFunctionLiteral,
   lookup,
 } from './function-utils.js';
@@ -5163,6 +5165,40 @@ function rawBodyForRebox(
 }
 
 /**
+ * The function literal `literal` built again from the operands `ops` (its
+ * body, then its parameters), canonicalized in the scope where `literal` was
+ * defined, so that the new body reads the bindings that the old body reads.
+ *
+ * A literal that a call returned is a closure: its body `Block` holds the
+ * scope of that call (`captureClosures()`, `function-utils.ts`), and a symbol
+ * of the body that the call bound, a parameter or an assignment local of the
+ * call, is found through that scope. The MathJSON of the body has no scope,
+ * so a literal built from it in the current scope would read those symbols
+ * in the scope of the declaration that stores it. With
+ * `h = n ↦ Block(g := z ↦ 0, z ↦ g(z) + n)`, `Declare(q, "(real) -> real",
+ * h(1))` would store a `q` whose `g` is not bound, so that `q(0)` is
+ * `1 + g(0)`, not 1; and with `Declare(g, "(real) -> real", h(n))` in the
+ * body of another function, the `g` of the closure would be the `g` being
+ * declared, so that a call of it does not end. A literal with no body scope,
+ * or one that was defined in the current scope, is built in the current
+ * scope.
+ *
+ * The type annotations in `ops` are text. A type name in that text names the
+ * same type in both scopes, because the declared types of an engine are one
+ * table that does not depend on the scope (`_typeRegistry`, `index.ts`).
+ */
+function reboxFunctionLiteral(
+  ce: IComputeEngine,
+  literal: Expression,
+  ops: ReadonlyArray<ExpressionInput>
+): Expression {
+  const build = () => ce.box(['Function', ...ops]);
+  const scope = functionLiteralDefiningScope(literal);
+  if (scope === undefined || scope === ce.context.lexicalScope) return build();
+  return ce._inScope(scope, build);
+}
+
+/**
  * Throws when the value that the body of the function literal `literal`
  * computes has a type with no value in common with the declared result of
  * `declaredType`, as an assignment of a value to a symbol declared with a
@@ -5386,9 +5422,9 @@ export function reconcileFunctionLiteralReturn(
   // ascription and re-box so canonicalization normalizes it (§4.2 — the marker
   // moves inside the Block, wrapping the last statement). `returnTypeText`
   // keeps a signature RESULT grouped, so the marker cannot re-read as the
-  // literal's own contract (`functionLiteralDeclaredSignature`).
-  const rebuilt = ce.box([
-    'Function',
+  // literal's own contract (`functionLiteralDeclaredSignature`). The literal
+  // is built in the scope where it was defined (`reboxFunctionLiteral`).
+  const rebuilt = reboxFunctionLiteral(ce, literal, [
     [
       'Typed',
       rawBodyForRebox(ce, literal.ops[0]),
@@ -5513,9 +5549,9 @@ export function ascribeDeclaredParameterTypes(
   // parameter references have to pick up the declared type. Handing the
   // already-canonical body object through instead leaves them bound at
   // whatever the pre-ascription inference chose, and the emitted code stays
-  // scalar.
-  const rebuiltLiteral = ce.box([
-    'Function',
+  // scalar. The literal is built in the scope where it was defined
+  // (`reboxFunctionLiteral`).
+  const rebuiltLiteral = reboxFunctionLiteral(ce, literal, [
     rawBodyForRebox(ce, literal.ops[0]),
     ...rebuilt,
   ]);
@@ -5614,10 +5650,11 @@ function ascribeDeclaredPolytype(
 
   // As in `reconcileFunctionLiteralReturn` above, and under the same constraint
   // as `desugarSignatureString`: the serialized type goes straight back into
-  // `canonicalFunctionLiteralArguments` — in this same scope — which re-parses
-  // it with the resolver, so a scope-local type name stays resolved.
-  const rebuilt = ce.box([
-    'Function',
+  // `canonicalFunctionLiteralArguments`, which re-parses it with the resolver,
+  // so a declared type name stays resolved. The literal is built in the scope
+  // where it was defined (`reboxFunctionLiteral`), and the resolver gives the
+  // same type there as in this scope.
+  const rebuilt = reboxFunctionLiteral(ce, literal, [
     ['Typed', literal.ops[0].json, `'${typeToString(declaredType)}'`],
     ...literal.ops.slice(1).map((p) => p.json),
   ]);

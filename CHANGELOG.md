@@ -184,6 +184,15 @@
   effect. The assignment now succeeds, `Apply(h(1), 0)` gives `1`, and `g(0)`
   gives `9`. A global that exists when the function is written stays an outer
   variable of the function, and writing it still needs the `scope` effect.
+- **A closure stored under a declared signature keeps the variables of the call
+  that made it.** With `h = n ↦ Block(g := z ↦ 0, z ↦ g(z) + n)`,
+  `Declare(q, "(real) -> real", h(1))` and `q(0)` gave `1 + g(0)`, and
+  `ce.declare('q', { type: '(real) -> real', value: closure })` did the same;
+  both now give `1`. With `k = n ↦ Block(Declare(g, "(real) -> real", h(n)),
+  z ↦ g(z) + n)`, `k(1)(0)` gave the error `Recursion limit exceeded`, and it
+  now gives `2`. A signature with a `where` clause, such as
+  `(T) -> T where T`, had the same failures. The same programs with the type
+  `unknown` already gave these values.
 - **`Integrate` of a block of several statements no longer reads only the first
   statement.** `Integrate(Block(c := 2, c * x), Limits(x, 0, 1)).evaluate()` was
   the error `assignment-in-operand`, and it is now `1`, the value of `.N()`. A

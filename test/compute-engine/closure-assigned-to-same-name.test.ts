@@ -267,3 +267,153 @@ describe('a mention of the assigned binding stays a recursive call', () => {
     ).toEqual(7);
   });
 });
+
+// A declared signature on the name that stores a closure builds the literal
+// again, with the declared parameter types and result on it. The new literal
+// must read the bindings of the call that made the closure, not those of the
+// scope of the declaration. ROADMAP.md, CE-820.
+describe('a closure stored under a declared signature', () => {
+  const realToReal = { str: '(real) -> real' };
+
+  test('a global declared with a value reads the local of the call', () => {
+    expect(
+      run(h, ['Declare', 'q', realToReal, ['h', 1]], ['q', 0])
+    ).toEqual(1);
+  });
+
+  test('a global declared first, then assigned, reads the local of the call', () => {
+    // A `Declare` statement of a function type needs a value
+    // (`declaration-without-value`), so the type is declared with the API.
+    const ce = new ComputeEngine();
+    ce.box(h).evaluate();
+    ce.declare('q', '(real) -> real');
+    expect(ce.box(assign('q', ['h', 1])).evaluate().operator).toBe('Function');
+    expect(ce.box(['q', 0]).evaluate().json).toEqual(1);
+  });
+
+  test('a local of the same name as the local of the call is another binding', () => {
+    expect(
+      run(
+        h,
+        assign(
+          'k',
+          fn(
+            [
+              'Block',
+              ['Declare', 'g', realToReal, ['h', 'n']],
+              fn(['Add', ['g', 'z'], 'n'], 'z'),
+            ],
+            'n'
+          )
+        ),
+        ['Apply', ['k', 1], 0]
+      )
+    ).toEqual(2);
+  });
+
+  test('a declared list parameter is stamped on the literal, which keeps its bindings', () => {
+    const typedList = ['Typed', 'L', { str: 'list<real>' }] as SemiBoxedExpression;
+    expect(
+      run(
+        assign(
+          'h',
+          fn(
+            [
+              'Block',
+              assign('g', fn(['Length', 'L'], typedList)),
+              fn(['Add', ['g', 'L'], 'n'], 'L'),
+            ],
+            'n'
+          )
+        ),
+        ['Declare', 'q', { str: '(list<real>) -> real' }, ['h', 1]],
+        ['q', ['List', 5, 6]]
+      )
+    ).toEqual(3);
+  });
+
+  test('ce.declare() with a closure value reads the local of the call', () => {
+    const ce = new ComputeEngine();
+    ce.box(h).evaluate();
+    const closure = ce.box(['h', 1]).evaluate();
+    ce.declare('q', { type: '(real) -> real', value: closure });
+    expect(ce.box(['q', 0]).evaluate().json).toEqual(1);
+  });
+
+  test('evaluateAsync() gives the same value', async () => {
+    const ce = new ComputeEngine();
+    ce.box(h).evaluate();
+    ce.box(['Declare', 'q', realToReal, ['h', 1]]).evaluate();
+    const result = await ce.box(['q', 0]).evaluateAsync();
+    expect(result.json).toEqual(1);
+  });
+
+  // A signature with a `where` clause is written on the literal as one
+  // marker around its body, by another rebuild than a signature without one.
+  describe.each(['(T) -> T where T', '(T) -> real where T'])(
+    'under the polymorphic signature %s',
+    (signature) => {
+      test('a global reads the local of the call', () => {
+        expect(
+          run(h, ['Declare', 'q', { str: signature }, ['h', 1]], ['q', 0])
+        ).toEqual(1);
+      });
+
+      test('a local of the same name as the local of the call is another binding', () => {
+        expect(
+          run(
+            h,
+            assign(
+              'k',
+              fn(
+                [
+                  'Block',
+                  ['Declare', 'g', { str: signature }, ['h', 'n']],
+                  fn(['Add', ['g', 'z'], 'n'], 'z'),
+                ],
+                'n'
+              )
+            ),
+            ['Apply', ['k', 1], 0]
+          )
+        ).toEqual(2);
+      });
+    }
+  );
+
+  test('a type name declared after the closure was made is written on its parameter', () => {
+    // The literal is built again in the scope of the call that made the
+    // closure. A declared type is known in every scope of the engine, so
+    // `list<meter>` names the same type there as in the scope of the
+    // declaration.
+    const ce = new ComputeEngine();
+    ce.box(
+      assign(
+        'h',
+        fn(['Block', fn(['Add', ['Length', 'L'], 'n'], 'L')], 'n')
+      )
+    ).evaluate();
+    const closure = ce.box(['h', 1]).evaluate();
+    ce.pushScope();
+    ce.declareType('meter', 'real', { alias: true });
+    ce.declare('q', { type: '(list<meter>) -> real', value: closure });
+    const stored = ce.box('q').value!;
+    ce.popScope();
+    expect(stored.type.toString()).toBe('(L: list<meter>) -> real');
+    expect(
+      ce.box(['Apply', stored, ['List', 5, 6]]).evaluate().json
+    ).toEqual(3);
+  });
+
+  test('a type name declared after the closure was made is valid in a polymorphic signature', () => {
+    const ce = new ComputeEngine();
+    ce.box(h).evaluate();
+    const closure = ce.box(['h', 1]).evaluate();
+    ce.pushScope();
+    ce.declareType('meter', 'real', { alias: true });
+    ce.declare('q', { type: '(T) -> meter where T', value: closure });
+    expect(ce.box('q').value!.isValid).toBe(true);
+    expect(ce.box(['q', 0]).evaluate().json).toEqual(1);
+    ce.popScope();
+  });
+});
