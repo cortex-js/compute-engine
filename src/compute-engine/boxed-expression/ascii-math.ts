@@ -851,7 +851,9 @@ function bigOp(
   if (isFunction(fn, 'Function')) {
     args = fn.ops.slice(1);
     const b = fn.op1 ?? fn;
-    if (isFunction(b, 'Block')) body = serialize(b.op1 ?? b);
+    // A block of several statements is printed whole: its value is not the
+    // value of its first statement.
+    if (isFunction(b, 'Block') && b.nops === 1) body = serialize(b.op1);
     else body = serialize(b);
   } else if (fn) {
     // Handle symbols and general expressions (e.g., Multiply, Add)

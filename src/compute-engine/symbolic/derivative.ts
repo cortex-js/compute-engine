@@ -28,6 +28,7 @@ import {
 import {
   collectBinderNames,
   isOperatorDef,
+  rebindEscaping,
 } from '../boxed-expression/utils.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
 import { isFoldingConstant } from '../boxed-expression/simplify.js';
@@ -36,12 +37,15 @@ import type { Type } from '../../common/type/types.js';
 import {
   type AliasDescent,
   collectionElementType,
+  declaredTypeNamesMissing,
   isPointElementType,
   resolveTypeAlias,
   stripMissingFromType,
   typeContainsMissing,
   unfoldAliasOnDescent,
 } from '../../common/type/utils.js';
+import { parseType } from '../../common/type/parse.js';
+import { isValidType } from '../../common/type/primitive.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import {
   boundVariableBindings,
@@ -2345,8 +2349,14 @@ function differentiateNode(
   // derivative stays unevaluated when the block is not a plain sequence of
   // local declarations and assignments.
   if (expr.operator === 'Block') {
-    const value = blockValue(ce, expr, v);
-    if (value === undefined) return undefined;
+    const reduced = blockValue(ce, expr, v, [v]);
+    if (reduced === undefined) return undefined;
+    // The scope of the block binds its free symbols. The value leaves that
+    // scope, and its symbols must denote the symbols of the caller, or the
+    // result does not combine with them (`y + 2y`).
+    const value = expr.localScope
+      ? rebindEscaping(reduced, expr.localScope)
+      : reduced;
     recordD(trace, expr, v, 'derivative.rewrite', () => dPlaceholder(value, v));
     return differentiate(value, v, depth + 1, trace);
   }
@@ -4466,6 +4476,19 @@ const BLOCK_EFFECT_OPERATORS = [
   'Continue',
 ];
 
+/** The operators whose evaluation can skip an operand: the branches of a
+ * conditional, the operands after the first one that decides a logical
+ * connective, and an expression that is held. */
+const SKIPPABLE_OPERAND_OPERATORS = [
+  'If',
+  'Which',
+  'And',
+  'Or',
+  'Coalesce',
+  'Hold',
+  'Function',
+];
+
 /**
  * The value of `block` as one expression: its last statement, with each
  * local variable replaced by the value the statements before it assign.
@@ -4474,9 +4497,15 @@ const BLOCK_EFFECT_OPERATORS = [
  * Returns `undefined` when the block is not a plain sequence of local
  * declarations and assignments followed by an expression:
  * - a statement other than `Declare(k)` (with no type and no initial value),
- *   `Declare(k, "unknown", value)` or `Assign(k, value)` before the last
- *   one, or an assignment to a name
- *   the block does not declare (it changes a variable outside the block);
+ *   `Declare(k, type, value)` or `Assign(k, value)` before the last one;
+ * - an assignment to a name the block does not declare: it changes a variable
+ *   outside the block. When the caller gives `parameters`, a name that the
+ *   scope of the block binds and that is not a parameter is a local too: the
+ *   canonical form of a function literal declares a name with no other
+ *   binding in that scope, so `Block(c := 2, c·x)` changes no outer variable;
+ * - a value that does not have the written type of its declaration, or a new
+ *   value for a local declared with a written type: the substitution skips
+ *   the check that the evaluation of the block does;
  * - a declaration of the differentiation variable `v` (it would shadow it);
  * - a local name that is still in an expression after the substitution: a
  *   local read before it is assigned, a name read before it is declared,
@@ -4484,24 +4513,34 @@ const BLOCK_EFFECT_OPERATORS = [
  *   name of a called function);
  * - an assigned value that is not pure (`Random()`): substituting it into
  *   each use would evaluate it more than once;
+ * - an assigned value other than a literal or a symbol that no later statement
+ *   reads outside an operand that its evaluation can skip: the substitution
+ *   drops the value, or moves it into a branch of `If`, and its evaluation can
+ *   give an error that stops the block (`c := AssertPresent(Missing); x`);
  * - control flow or an assignment inside a value or the last statement;
  * - a binder (the index of a `Sum`, the parameter of a function literal)
  *   with the name of a local, which a substitution by name cannot handle.
  */
-function blockValue(
+export function blockValue(
   ce: Expression['engine'],
   block: Expression,
-  v?: string
+  v?: string,
+  parameters?: ReadonlyArray<string>
 ): Expression | undefined {
   if (!isFunction(block, 'Block') || block.nops === 0) return undefined;
   if (block.nops === 1) return block.op1;
   const locals = new Set<string>();
+  const typedLocals = new Set<string>();
+  // The locals whose current value can fail and no later statement read yet.
+  const unread = new Set<string>();
   // No prototype: a local named `toString` must not find an inherited value.
   const values: Record<string, Expression> = Object.create(null);
   const substitute = (e: Expression): Expression | undefined => {
     if (e.has(BLOCK_EFFECT_OPERATORS)) return undefined;
     for (const name of collectBinderNames(e))
       if (locals.has(name)) return undefined;
+    for (const name of unread)
+      if (readsOutsideSkippableOperand(e, name)) unread.delete(name);
     const assigned = Object.values(values);
     let result = e;
     if (assigned.length > 0) {
@@ -4521,36 +4560,86 @@ function blockValue(
       locals.add(name);
       continue;
     }
-    // A binding with no written type, `Declare(k, "unknown", value)` (the
-    // parse of `k \coloneq value;` at the start of a block, and of a `where`
-    // item), is a declaration followed by an assignment. A declaration with
-    // a written type is not reduced: the substitution would skip the check
+    // A binding `Declare(k, type, value)` is a declaration followed by an
+    // assignment. The type `unknown` is the parse of `k \coloneq value;` at the
+    // start of a block, and of a `where` item. A declaration with a written
+    // type is reduced only when the static type of the value proves the check
     // of the value against that type.
     if (
       isFunction(statement, 'Declare') &&
       statement.nops === 3 &&
-      isString(statement.op2) &&
-      statement.op2.string === 'unknown'
+      isString(statement.op2)
     ) {
       const name = sym(statement.op1);
       if (!name || name === v || locals.has(name)) return undefined;
       const value = substitute(statement.op3);
       if (value === undefined || value.isPure === false) return undefined;
+      if (statement.op2.string !== 'unknown') {
+        if (!valueHasDeclaredType(ce, value, statement.op2.string))
+          return undefined;
+        typedLocals.add(name);
+      }
       locals.add(name);
       values[name] = value;
+      if (isFunction(value)) unread.add(name);
       continue;
     }
     if (isFunction(statement, 'Assign') && statement.nops === 2) {
       const name = sym(statement.op1);
-      if (!name || !locals.has(name)) return undefined;
+      if (!name || typedLocals.has(name)) return undefined;
+      if (
+        !locals.has(name) &&
+        (parameters === undefined ||
+          parameters.includes(name) ||
+          !block.localScope?.bindings.has(name))
+      )
+        return undefined;
       const value = substitute(statement.op2);
       if (value === undefined || value.isPure === false) return undefined;
+      // The value that this assignment replaces was not read.
+      if (unread.has(name)) return undefined;
+      locals.add(name);
       values[name] = value;
+      if (isFunction(value)) unread.add(name);
       continue;
     }
     return undefined;
   }
-  return substitute(statements[statements.length - 1]);
+  const result = substitute(statements[statements.length - 1]);
+  return unread.size === 0 ? result : undefined;
+}
+
+/** Whether `e` reads the symbol `name` outside an operand that its evaluation
+ * can skip (`SKIPPABLE_OPERAND_OPERATORS`). */
+function readsOutsideSkippableOperand(e: Expression, name: string): boolean {
+  if (isSymbol(e)) return e.symbol === name;
+  if (!isFunction(e) || SKIPPABLE_OPERAND_OPERATORS.includes(e.operator))
+    return false;
+  return e.ops.some((op) => readsOutsideSkippableOperand(op, name));
+}
+
+/**
+ * Whether the static type of `value` proves the check of a declaration that
+ * has the written type `source`. A type that does not parse, or that names the
+ * marker `missing`, proves nothing: the evaluation of the declaration reports
+ * it as the error `invalid-type-declaration`.
+ */
+function valueHasDeclaredType(
+  ce: Expression['engine'],
+  value: Expression,
+  source: string
+): boolean {
+  let parsed: Type;
+  try {
+    parsed = parseType(source, ce._typeResolver);
+  } catch {
+    return false;
+  }
+  return (
+    isValidType(parsed) &&
+    !declaredTypeNamesMissing(parsed) &&
+    value.type.matches(parsed)
+  );
 }
 
 /**

@@ -121,11 +121,32 @@ describe('the derivative of a block with local variables', () => {
     expect(d(ce, ['D', ['Q', 't'], 't'])).toBe('5t');
   });
 
+  test('an assignment to a name that only the block binds', () => {
+    const ce = new ComputeEngine();
+    const block = ['Block', ['Assign', 'q', 2], ['Multiply', 'q', 'x']];
+    expect(d(ce, ['D', block, 'x'])).toBe('2');
+    expect(ce.box('q').evaluate().toString()).toBe('q');
+  });
+
+  test('a free symbol of the value is in the scope of the caller', () => {
+    const ce = new ComputeEngine();
+    const block = ['Block', ['Assign', 'q', 2], ['Multiply', 'q', 'x', 'y']];
+    const result = ce.box(['D', block, 'x'] as any).evaluate();
+    const written = ce.box(['D', ['Multiply', 2, 'x', 'y'], 'x'] as any);
+    expect(result.isSame(written.evaluate())).toBe(true);
+    expect(result.add(ce.box('y')).simplify().toString()).toBe('3y');
+  });
+
+  test('stays unevaluated for an assignment to an outer symbol', () => {
+    const ce = new ComputeEngine();
+    ce.assign('q', 5);
+    const block = ['Block', ['Assign', 'q', 2], ['Multiply', 'q', 'x']];
+    const result = ce.box(['D', block, 'x'] as any).evaluate();
+    expect(result.operator).toBe('D');
+    expect(ce.box('q').evaluate().toString()).toBe('5');
+  });
+
   test.each([
-    [
-      'an assignment to a symbol the block does not declare',
-      ['Block', ['Assign', 'q', 2], ['Multiply', 'q', 'x']],
-    ],
     [
       'a Sum index with the name of a local',
       [

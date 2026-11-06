@@ -1090,25 +1090,6 @@ captured.
 
 ## Symbolic computation
 
-### CE-738. `Integrate` of a block integrand: `evaluate()` integrates the first statement only
-
-**Status:** ready; wrong value, M.
-**Witness:** plausible; `Integrate(Block(c ≔ 2; c·x), Limits(x, 0, 1)).evaluate()` gives 2, `.N()` gives 1.
-
-`Integrate(Block(c ≔ 2; c·x), Limits(x, 0, 1))`: `.N()` gives `1`, and
-`.evaluate()` gives `2`, the integral of the value of the first statement
-`c ≔ 2`. With a `Declare` first,
-`Integrate(Block(Declare(c, "real"); c ≔ 2; c·x), Limits(x, 0, 1))`,
-`.evaluate()` gives `Error(ErrorCode("incompatible-type", "number",
-"nothing"), Declare(c, "real"))` and `.N()` gives the integral unevaluated.
-The canonical form is correct (the integrand is a `Function` whose body is the
-whole block), but `toString()` shows only the first statement
-(`int_(0)^(1)(Declare(c, "real") dx)`), and the symbolic integration reads
-the same first statement. Expected: `1` from both. Fix: the symbolic
-integration and the serializer take the value of the block (its last
-statement), or the symbolic integration declines for a block integrand and
-leaves it to the numeric one.
-
 ### CE-613. `Limit` of `e^{√x}/x^5` at infinity gives 0 instead of `+∞`
 
 **Status:** ready; defect, M. User decision 2026-11-05: option (c).

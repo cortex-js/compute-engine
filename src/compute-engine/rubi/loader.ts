@@ -110,8 +110,11 @@ export function loadIntegrationRules(
       f.operator === 'Function' ||
       f.operator === 'Block' ||
       f.operator === 'Delimiter'
-    )
+    ) {
+      // The value of a block of several statements is not its first operand.
+      if (f.operator === 'Block' && f.nops !== 1) return null;
       f = f.op1!; // Function/Block/Delimiter always have a first operand
+    }
     // Only accumulate a step trace when `explain('Integrate')` asked for one.
     const records: IntStepRecord[] | undefined = trace ? [] : undefined;
     const result = driver.int(f, variable, records);

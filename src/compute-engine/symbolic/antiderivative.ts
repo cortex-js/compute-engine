@@ -11,7 +11,7 @@ import { mul } from '../boxed-expression/arithmetic-mul-div.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
 import { matchAnyRules } from '../boxed-expression/rules.js';
 import { expandAll } from '../boxed-expression/expand.js';
-import { differentiate } from './derivative.js';
+import { blockValue, differentiate } from './derivative.js';
 import { withRadianConvention } from './angular-unit.js';
 import { specialAntiderivative } from './special-integrate.js';
 import { integrateComposition } from './integration-composition.js';
@@ -24,7 +24,10 @@ import {
   polynomialDivide,
 } from '../boxed-expression/polynomials.js';
 import { partialFraction } from '../boxed-expression/factor.js';
-import { reduceTransformerHead } from '../boxed-expression/utils.js';
+import {
+  rebindEscaping,
+  reduceTransformerHead,
+} from '../boxed-expression/utils.js';
 import {
   isFunction,
   isNumber,
@@ -3422,7 +3425,17 @@ function establishedAntiderivativeInRadians(
   checkDeadline(fn.engine._deadlineFrame);
 
   if (isFunction(fn, 'Function')) return antiderivative(fn.op1, index);
-  if (isFunction(fn, 'Block')) return antiderivative(fn.op1, index);
+  // The value of a block is its last statement, with the values that the
+  // statements before it assign. A block that is more than a sequence of
+  // local assignments stays unevaluated.
+  if (isFunction(fn, 'Block')) {
+    const value = blockValue(fn.engine, fn, index, [index]);
+    if (value === undefined) return integrate(fn, index);
+    return antiderivative(
+      fn.localScope ? rebindEscaping(value, fn.localScope) : value,
+      index
+    );
+  }
   if (isFunction(fn, 'Delimiter')) return antiderivative(fn.op1, index);
 
   const ce = fn.engine;

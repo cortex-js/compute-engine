@@ -89,6 +89,15 @@
 
 ### Resolved Issues
 
+- **`Integrate` of a block of several statements no longer reads only the first
+  statement.** `Integrate(Block(c := 2, c * x), Limits(x, 0, 1)).evaluate()` was
+  the error `assignment-in-operand`, and it is now `1`, the value of `.N()`. A
+  block that only assigns local variables before its value is integrated through
+  that value. Any other block, such as one with an `If` statement or one that
+  assigns a variable outside the block, stays unevaluated under `evaluate()`, and
+  `.N()` still gives its numeric value. `toString()` of an integral now shows
+  every statement of the block. `D` now reduces the same blocks:
+  `D(Block(c := 2, c * x), x)` was unevaluated and is now `2`.
 - **A `Which` or an `If` over a list of conditions no longer copies an arm that
   is a list with no elements to read.** With `L = [1, 3, 5]` and `foo`
   undeclared, `Which(L < 2, foo(L), True, 0)` was `[foo([1, 3, 5]), 0, 0]`, so a

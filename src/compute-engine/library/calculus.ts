@@ -132,6 +132,7 @@ import {
   derivative,
   differentiate,
   isDifferentiating,
+  blockValue,
   literalBodyOverHoles,
   memoizedDerivativeResult,
   memoizedPartialDerivative,
@@ -3996,6 +3997,47 @@ function renameCapturedVariables(
 }
 
 /**
+ * The block of several statements that is the body of the integrand `f`, or
+ * `undefined`. The value of such a block is not the value of its first
+ * statement, so `liftIntegrand()` does not lift it.
+ */
+function severalStatementsBody(f: Expression): Expression | undefined {
+  const body = isFunction(f, 'Function') ? f.op1 : f;
+  return isFunction(body, 'Block') && body.nops > 1 ? body : undefined;
+}
+
+/**
+ * The value of `block`, the body of the integrand `f`, as one expression bound
+ * in the scope of the caller, as `liftIntegrand()` gives for a block of one
+ * statement. The value of `Block(c := 2, c·x)` is `2x`.
+ *
+ * Return `undefined` when `block` is not a sequence of local assignments
+ * followed by a value (`blockValue()`), or when the parameters of `f` are not
+ * the variables of `limits`, in order: the value would no longer say which of
+ * its symbols the limit binds.
+ */
+function blockIntegrandValue(
+  f: Expression,
+  block: Expression,
+  limits: ReadonlyArray<Expression>
+): Expression | undefined {
+  const variables = limits.map((l) =>
+    isFunction(l) ? sym(l.op1) : undefined
+  );
+  const parameters = isFunction(f, 'Function')
+    ? f.ops.slice(1).map((p) => functionLiteralParameterName(p))
+    : variables;
+  if (
+    parameters.length !== variables.length ||
+    parameters.some((p, i) => !p || p === 'Nothing' || p !== variables[i])
+  )
+    return undefined;
+  const value = blockValue(f.engine, block, undefined, parameters as string[]);
+  if (value === undefined || !block.localScope) return value;
+  return rebindEscaping(value, block.localScope);
+}
+
+/**
  * Find the calls in `expr` of a user function that has the name of a library
  * function (`Sin`, `Exp`, `Ln`, …). `names` holds the library names that a
  * user definition in the current scope chain shadows
@@ -6748,6 +6790,24 @@ volumes
             return undefined;
         }
 
+        // A block of several statements that only assigns local variables
+        // before its value (`Block(c := 2, c·x)`) has the integral of that
+        // value, under `evaluate()` and `N()` alike. Any other block
+        // declines below.
+        const statements = severalStatementsBody(ops[0]);
+        if (statements !== undefined) {
+          const value = blockIntegrandValue(ops[0], statements, ops.slice(1));
+          if (value !== undefined)
+            return rebindIntegralResult(
+              ce,
+              ce
+                .function('Integrate', [value, ...ops.slice(1)])
+                .evaluate({ numericApproximation }),
+              expression,
+              numericApproximation
+            );
+        }
+
         // A bare-symbol integrand that is the variable of a limit that names
         // no variable (`x` in `\int_0^1 x`): the integral is the one with the
         // variable named, `\int_0^1 x\,dx`. That form binds `x` in the scope
@@ -7164,6 +7224,7 @@ volumes
         // the real-line driver has verified the closing arc and all poles.
         if (
           shadowedCalls === 'none' &&
+          statements === undefined &&
           ops.length === 2 &&
           isFunction(ops[1], 'Limits')
         ) {
@@ -7237,6 +7298,18 @@ volumes
                 sym(l.op2) === 'Nothing' &&
                 sym(l.op3) === 'Nothing'
             );
+        // A block that the reduction at the start of this handler did not
+        // reduce has no closed form here: its statements can branch, or change
+        // a variable outside the block. Only the quadrature, which runs the
+        // block at each sample, gives its integral. With no variable at all
+        // (`Integrate(Function(Block(1, 2)), Limits(Nothing, 0, 2))`), the
+        // integrand is a constant and the route below applies it.
+        if (
+          statements !== undefined &&
+          intVarNames.length > 0 &&
+          (!numericApproximation || indefinite)
+        )
+          return undefined;
         // A call whose head was defined as a data symbol after the call was
         // boxed (`g(x)`, then `ce.declare('g', 'real')`) is an error once the
         // integrand is boxed again, as `liftIntegrand` does. The samples of the
