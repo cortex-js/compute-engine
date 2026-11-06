@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-823.
+Next free reference: CE-824.
 
 **Entry format.**
 
@@ -133,21 +133,6 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
   (CE-354 to CE-359)
 
 ## Types and type inference
-
-### CE-809. The call of a curried function is typed with a global symbol that has the name of its parameter
-
-**Status:** ready; defect, S. Found 2026-11-04 while fixing CE-765.
-**Witness:** plausible; with `n := [1, 2]` and `mk := n ↦ (x ↦ x + n)`, `mk(1)` is typed `(x: unknown) -> list<number>`, and its value is `x ↦ x + 1`, of type `(x: unknown) -> number`.
-
-The signature of the value of `mk(1)` is derived from the body of the inner
-literal, and the symbol `n` in that body is typed with the definition of `n`
-in the current scope, not with the argument of the call. The type of the
-call does not hold its value. Since CE-765, `Apply(mk(1), [10, 20])` keeps
-the old type `list<number>` in this case (`curriedLiteralValue` in
-`src/compute-engine/library/core.ts` does not read the value when a
-parameter name has a definition), so this check can go when the signature
-is fixed. The fix types an occurrence of an outer parameter in the inner
-body with the type of the argument, or with `unknown`.
 
 ### CE-545. A call over an `unknown` operand and over the wide CE-502 form are typed by different rules
 
@@ -2505,6 +2490,33 @@ reproduction above is the record.
 
 ## LaTeX parsing and serialization
 
+### CE-823. `L[k] := 5` with a symbol index redefines the library function `At`
+
+**Status:** ready; wrong value, S. Found 2026-11-05 from a Tycho probe of a
+modifiable array (`~/dev/tycho/docs/scratch/2026-11-05-buddhabrot-array-gaps.md`,
+gap 13). Also at HEAD `008aaf93711c78fbf62b9a747aca9a9545a3beb1`.
+**Witness:** plausible; with `L = [10, 20, 30]`, evaluating `L[k]\coloneq 5` makes a later `L[2]` give `[5, 5, 5]` with no error; it should refuse the assignment, and `L[2]` should stay 20.
+
+`L[k]\coloneq 5` parses to
+`["Assign", "At", ["Function", ["Block", 5], "L", "k"]]`, and `isValid` is true.
+The left side is read as `At(L, k)`, and `parseAssignStatement()` in
+`latex-syntax/dictionary/definitions-core.ts` reads `head(args) := value` as a
+function definition. `M[i, j]\coloneq 5` gives the same form.
+
+- At the top level, the evaluation replaces `At` for the whole engine. After it,
+  `At(List(7, 8), 2)` gives `[5, 5]`, and `L` still holds `[10, 20, 30]`.
+- In a block, `At` is a local. `L ≔ [10, 20, 30]; k ≔ 2; L[k] ≔ 5; L[2]` gives
+  `[5, 5, 5]` from the interpreter and from compiled JavaScript. The interpreter
+  and the compiled code agree, so a comparison of the two does not find this.
+- A number or a sum as the index, `L[2]\coloneq 5` and `L[k+1]\coloneq 5`, gives
+  the error `expected-a-symbol`, which names neither the cause nor the remedy.
+
+Fix: when the target parsed as `At`, refuse the assignment with an error that
+says that a list element has no assignment and names `ReplaceAt`. This also
+refuses the explicit `\operatorname{At}(L, k)\coloneq 5`, which parses to the
+same form. Element assignment itself is a separate design: Epsil documents it as
+not supported, and `docs/TYPE_SYSTEM_ROADMAP.md` defers it to an `array` type.
+
 ### CE-441. The LaTeX of a rest parameter or a destructuring parameter does not read back as that parameter
 
 **Status:** waits for user (design); defect.
@@ -2648,29 +2660,6 @@ file.
   `\frac{\partial^2}{\partial_{x,y}} f(x,y)` (2 skips, `operators.test.ts`).
 
 ## Epsil
-
-### CE-815. An `=` that is the whole body of a `match` case or of a lambda is an equation, and a program that meant an assignment runs with no diagnostic
-
-**Status:** ready; defect, S.
-**Witness:** plausible; `let a = 0; match 1 { 1 => a = 2 }; a` gives `0` with no diagnostic; the user meant `2`, which `1 => do { a = 2 }` gives.
-
-In expression position `=` is equality: `parseEpsil()` reads the case body
-`a = 2` as `Equal(a, 2)`, and `x => a = 2` as a lambda whose body is that
-equation (`src/epsil/parse-epsil.ts`). The grammar is right, and a lambda
-that returns an equation is a valid program (a predicate, a `Solve` input).
-But a case body or a lambda body that is only `name = value`, with the
-value of the case or the lambda unused as an equation, is almost always a
-forgotten `do { … }`, and the program runs with the wrong value and no
-message. Fix: a static diagnostic of `epsil check` and of the parser's
-diagnostics (`src/epsil/static-diagnostics.ts`) when the whole body of a
-`match` case, of an `if` expression branch, or of a lambda is `Equal(symbol,
-expr)` where `symbol` is a declared variable of the enclosing scope: "`a =
-2` here is an equation, not an assignment; write `do { a = 2 }` to assign".
-A body that is an equation of a symbol that no scope declares, or that is
-used as a value (`let p = x => a = 2` passed to `Solve`), gets no
-diagnostic. Alternative, not recommended: read `=` as an assignment in a
-case body, which changes the meaning of every lambda that returns an
-equation.
 
 ### CE-306. `list<list<string>>` and `list<list<integer>>` cannot both conform to a protocol
 
