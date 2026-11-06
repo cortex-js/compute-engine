@@ -12,8 +12,26 @@
   in the global scope. A `let` in a block or in a function body is not refused,
   and neither is a value that a call returns (`let counter = makeCounter()`).
 
+### Improvements
+
+- **A `Loop` compiled to GLSL or WGSL can stop early with `Break` and skip a
+  pass with `Continue`.** `Loop(Block(If(a > 3, Break()), a := a + 1), k ∈ 1..8)`
+  declined with "wrong number of arguments", and it now compiles to
+  `if (3.0 < a) { break; }` in the `for` statement. So an escape-time formula
+  no longer has to run every pass on every pixel. The jump must be a statement
+  of the `Loop` body, alone or as the branch of an `If` with no else (or with
+  the else branch `Nothing`). `If(c, a := 1, Nothing)` in a statement position
+  also compiles now.
+
 ### Behavior Changes
 
+- **A tuple beside a list of another length is an `incompatible-dimensions`
+  error under an operator that reads the tuple by position.**
+  `Power((1, 2), [3, 4, 5])` was `[1, 16]`, and it now gives
+  `Error("incompatible-dimensions", "2 vs 3")`, as `Power([1, 2], [3, 4, 5])`
+  does. `Arctan2`, `Mod`, `Less`, `ElementMax` and the other element-wise
+  operators do the same. `Power((1, 2), [3, 4])` is still `[1, 16]`, and
+  `Multiply((1, 2), [3, 4, 5])` is still a list of three points.
 - **A function with a declared signature checks an argument when a later value
   decides it.** With `h` declared `(integer) -> integer` and the body `2k`, and
   `m` with no value, `h(m)` gave `2m`, so after `m := 1.5` its value was `3`.
@@ -40,6 +58,27 @@
 
 ### Resolved Issues
 
+- **The derivative of a function literal no longer takes a free name of a
+  called function for its parameter.** With `a := 3` and `h := x ↦ a·x`,
+  `Apply(Derivative(a ↦ a·h(a)), 2)` was `14`, and it is now `12`. The result
+  renames a parameter when it holds a free name equal to that parameter:
+  `Derivative(a ↦ h(a))` with no value for `a` was `a ↦ a + a`, and it is now
+  `a_1 ↦ a`. When the body also binds that name, as in
+  `a ↦ h(a) + Sum(a, Limits(a, 1, 3))`, the derivative stays unevaluated and
+  `N()` gives its value numerically.
+- **A `Break` or a `Continue` that a shader cannot run now declines on GLSL and
+  WGSL.** `Block(Break(), 1)`, with no loop, reported success with the code
+  `break; return 1.0;`, which the driver refuses. A `Break` in a `Match` case
+  in a `Loop` did the same with `(c ? (break) : (s = k))`. Both now decline, and
+  `run()` uses the interpreter. `Break(f(k))` in a shader `Loop` also declines:
+  the compiled `break` did not evaluate its operand.
+- **A closure assigned to a name keeps reading its own binding of that name.**
+  With `h = n ↦ Block(g := z ↦ 0, z ↦ g(z) + n)` and
+  `k = n ↦ Block(g := h(n), z ↦ g(z) + n)`, `k(1)(0)` gave the error "Recursion
+  limit exceeded", and it now gives `2`. The assignment made the `g` of the
+  closure read the variable being assigned. A function that calls the name it
+  is assigned to is still recursive when that name is the variable being
+  assigned.
 - **A compilation to Python or `interval-js` declines arithmetic over a symbol
   declared `any` or `value`, as a compilation to JavaScript does.** Such a symbol
   can hold a list, and compiled code does not test the shape of a value at run

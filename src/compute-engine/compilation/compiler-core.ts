@@ -3853,8 +3853,20 @@ export function compileExpr(
     target.onReturn?.(args[0]);
     return `return ${compileOp(node, 0, target, 0, args[0])}`;
   }
-  if (h === 'Break') return 'break';
-  if (h === 'Continue') return 'continue';
+  if (h === 'Break' || h === 'Continue') {
+    // JavaScript finds a jump with no loop when it parses the code. A shader is
+    // parsed later, by the driver, and the compilation would report success.
+    if (
+      (target.language === 'glsl' || target.language === 'wgsl') &&
+      (node === undefined || !target.shaderLoopJumps?.has(node))
+    )
+      throw new Error(
+        `Could not compile \`${h}\`: on this target it must have no value, ` +
+          `and be a statement of a \`Loop\` body or the branch of an \`If\` ` +
+          `with no else there.`
+      );
+    return h === 'Break' ? 'break' : 'continue';
+  }
 
   if (h === 'Loop') {
     const loopFn = target.functions?.(h);
@@ -4197,13 +4209,18 @@ export function compileExpr(
  * the clause before it, with a statement sink of its own, so a statement
  * it hoists runs only when that clause is reached.
  *
- * The form is taken only when a branch or a condition assigns a variable
- * (outside a function literal, whose body is not run here) and no operand
- * contains a `Return`, `Break` or `Continue`: those keep the gates of the
- * expression form. A condition must be a scalar boolean, because an `if`
- * statement takes a `bool`. A condition that is not `true` (a comparison
- * with a NaN operand gives `false`) runs the next clause, as the
- * expression form selects its `else` operand.
+ * The form is taken when a branch or a condition assigns a variable (outside
+ * a function literal, whose body is not run here) and no operand contains a
+ * `Return`, `Break` or `Continue`. It is also taken, on both languages, for a
+ * selection with one clause that is a statement of a `Loop` body and holds a
+ * `Break` or a `Continue` (`CompileTarget.shaderLoopJumps`): a ternary cannot
+ * hold a jump. Any other selection with a jump, and any selection with a
+ * `Return`, keeps the expression form, which declines it. An `If` whose else
+ * branch is `Nothing` has no else: that branch does nothing in statement
+ * position. A condition must be a scalar boolean, because an `if` statement
+ * takes a `bool`. A condition that is not `true` (a comparison with a NaN
+ * operand gives `false`) runs the next clause, as the expression form selects
+ * its `else` operand.
  */
 export function shaderSelectionStatement(
   stmt: Expression,
@@ -4217,23 +4234,37 @@ export function shaderSelectionStatement(
   // The clauses as (condition index, branch index) pairs of the operands of
   // `stmt`; a condition index of `-1` is the default clause.
   const clauses: Array<[number, number]> = [];
+  const elseless =
+    h === 'If' &&
+    (ops.length === 2 || (ops.length === 3 && isSymbol(ops[2], 'Nothing')));
   if (h === 'If' && (ops.length === 2 || ops.length === 3)) {
     clauses.push([0, 1]);
-    if (ops.length === 3) clauses.push([-1, 2]);
+    if (!elseless) clauses.push([-1, 2]);
   } else if (h === 'Which' && ops.length >= 2 && ops.length % 2 === 0) {
     for (let i = 0; i < ops.length; i += 2)
       clauses.push([isSymbol(ops[i], 'True') ? -1 : i, i + 1]);
   } else return undefined;
-  const elseless = h === 'If' && ops.length === 2;
-  if (target.language !== 'wgsl' && !elseless) return undefined;
-  const contains =
-    (heads: ReadonlyArray<string>) =>
-    (e: Expression): boolean =>
-      isFunction(e) &&
-      e.operator !== 'Function' &&
-      (heads.includes(e.operator) || e.ops.some(contains(heads)));
-  if (!ops.some(contains(['Assign']))) return undefined;
-  if (ops.some(contains(['Return', 'Break', 'Continue']))) return undefined;
+  // A selection that GLSL keeps as a ternary needs no search of its operands.
+  const admitsJumps = target.shaderLoopJumps?.has(stmt) === true;
+  const ternary = target.language !== 'wgsl' && !elseless;
+  if (ternary && !admitsJumps) return undefined;
+  // The operators in the operands, outside a function literal. An expression
+  // is a graph with shared nodes, so each node is visited once: a walk of the
+  // tree takes time exponential in the depth of a tower of shared operands.
+  const heads = new Set<string>();
+  const visited = new Set<Expression>();
+  const pending = [...ops];
+  while (pending.length > 0) {
+    const e = pending.pop()!;
+    if (!isFunction(e) || e.operator === 'Function' || visited.has(e)) continue;
+    visited.add(e);
+    heads.add(e.operator);
+    pending.push(...e.ops);
+  }
+  if (heads.has('Return')) return undefined;
+  if (heads.has('Break') || heads.has('Continue')) {
+    if (!admitsJumps) return undefined;
+  } else if (ternary || !heads.has('Assign')) return undefined;
   for (const [c] of clauses) {
     if (c < 0) continue;
     assertScalarCondition(ops[c]);

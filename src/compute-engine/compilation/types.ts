@@ -1049,6 +1049,21 @@ export interface CompileTarget<Expr = unknown> {
   bareStatementBlocks?: boolean;
 
   /**
+   * On a shader target, the nodes of the body of the innermost enclosing
+   * `Loop` that can emit a jump as a statement of that loop: each `Break` and
+   * `Continue` with no operand, and each `If` or `Which` with one clause, that
+   * is reached from the body through statement positions only
+   * (`gpuShaderLoopJumps()`).
+   *
+   * A `break` outside a loop is a shader compile error, and a jump in an
+   * operand has no statement to stand in. So a jump that is not in this set
+   * declines: in a value position, in the body of a user function, and when no
+   * `Loop` encloses it. Absent on every other target, and outside a shader
+   * `Loop`.
+   */
+  shaderLoopJumps?: ReadonlySet<Expr>;
+
+  /**
    * Statement-hoisting sink for a `bareStatementBlocks` target (GLSL/WGSL).
    *
    * A lowering that needs statements — the loop form of `Sum`/`Product` — can

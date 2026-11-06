@@ -101,6 +101,51 @@ export function gpuAssertReturnPlacement(
 }
 
 /**
+ * The nodes of `body`, the body of a shader `Loop`, that can emit a jump as a
+ * statement of that loop (`CompileTarget.shaderLoopJumps`).
+ *
+ * The search follows statement positions only: the statements of a `Block`,
+ * and the branch of an `If` or a `Which` with one clause (`If(c, t)`,
+ * `If(c, t, Nothing)`, `Which(c, t)`). It does not enter a nested `Loop`, which
+ * owns its jumps and makes this set for its own body.
+ *
+ * A selection with a second clause is left out, so `If(c, Break(), n ≔ 1)`
+ * declines and the interpreter runs it. When the first branch always leaves the
+ * loop, a program can write the else branch as the statement after the `If`.
+ * `Which(True, t)` is left out too: its branch always runs, so it is not a
+ * condition.
+ *
+ * A `Break` with an operand is left out. The compiled `break` has no value, and
+ * the interpreter evaluates the operand before it leaves the loop, so an effect
+ * of `Break(f(k))` would be lost.
+ */
+export function gpuShaderLoopJumps(
+  body: Expression
+): ReadonlySet<Expression> {
+  const found = new Set<Expression>();
+  const visit = (stmt: Expression): void => {
+    if (!isFunction(stmt)) return;
+    const h = stmt.operator;
+    const ops = stmt.ops;
+    if (h === 'Break' || h === 'Continue') {
+      if (ops.length === 0) found.add(stmt);
+    } else if (h === 'Block') {
+      ops.forEach(visit);
+    } else if (
+      (h === 'If' &&
+        (ops.length === 2 ||
+          (ops.length === 3 && isSymbol(ops[2], 'Nothing')))) ||
+      (h === 'Which' && ops.length === 2 && !isSymbol(ops[0], 'True'))
+    ) {
+      found.add(stmt);
+      visit(ops[1]);
+    }
+  };
+  visit(body);
+  return found;
+}
+
+/**
  * Fail closed when `code`, produced by an **expression-only** route, is
  * not a single expression of the target language.
  *

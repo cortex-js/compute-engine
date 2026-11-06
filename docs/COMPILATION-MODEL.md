@@ -135,6 +135,12 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `Arctan2(L - L, -1)`, at `L = [-1, 2]` give `[-π, π]`. The code computes
   `0 * -1` or `0 / -1`, which is `-0`, and `Math.atan2(-0, -1)` is `-π`. The
   interpreter gives `[π, π]`.
+- `plausible?` — `javascript`, `glsl`, `x: real`, `y: real`: `Arctan2(y, -x)` at
+  `x = 0`, `y = 0`. The interpreter gives `0`. JavaScript gives `π`, because
+  `-x` is `-0` and `Math.atan2(0, -0)` is `π`. The GLSL code is
+  `atan(y, -x)`, and `atan(0.0, -0.0)` with uniform operands gave `NaN` in WebGL2
+  on ANGLE Metal on an Apple M5 Max, where `atan(0.0, 0.0)` gave `0`. That GPU is
+  the only one measured.
 - `wgsl`, a `Match` whose case bodies assign a local:
   `Block(Assign(a, 0), Match(x, MatchCase(1, Block(Assign(a, 2))),
   MatchCase(_, Block(Assign(a, 3)))), a)` compiles to
@@ -1538,6 +1544,44 @@ The check is simple, not precise: a hoisted statement with caller code
 declines when anything else in its statement has an effect, also when that
 code comes after it. Binding caller code in order, as random draws are bound,
 is not implemented. A form with no caller code compiles as before.
+
+### `Break` and `Continue` on the shader targets
+
+A jump is a statement in GLSL and WGSL. So `Break` and `Continue` compile only
+as a statement of a `Loop` body, alone or as the branch of a selection with one
+clause: `If(c, Break())`, `If(c, Break(), Nothing)`, `Which(c, Break())`, or
+`If(c, Block(n ≔ k, Break()))`. With `a` a local of the block,
+`Block(a ≔ 0; Loop(Block(If(a > 3, Break()), a ≔ a + 1), k ∈ 1..8); a)`
+compiles to this code in the loop on GLSL:
+
+```glsl
+for (int k = 1; k <= 8; k++) {
+  if (3.0 < a) {
+    break;
+  }
+  a = a + 1.0;
+}
+```
+
+Each other position declines:
+
+- A selection with a second clause, `If(c, Break(), n ≔ 1)`. When the first
+  branch always leaves the loop, the else branch can be the statement after the
+  `If`.
+- A `Break` with a value, `Break(f(k))`. The compiled `break` has no value, and
+  the interpreter evaluates the operand before it leaves the loop.
+- A jump in a value: `s ≔ If(c, Break(), 1)`, or a `Block` used as an operand.
+- A jump in a `Match` case, or in a `Sum` or `Product` body.
+- A jump with no `Loop`, and a jump in the body of a user function. A `break`
+  outside a loop is an error that only the driver reports, after the
+  compilation has reported success.
+- A `Break` in a `Loop` over several `Element` clauses: it would leave only the
+  innermost `for` statement, where the interpreter stops the whole loop. A
+  `Continue` goes to the next turn of the innermost loop in both, so it compiles.
+
+On a NaN operand, the shader and the interpreter take the same action: a
+relation is `false`, so `If(v > 4, Break())` does not jump, and `≠` is `true`,
+so `If(v ≠ 4, Break())` jumps.
 
 ### NaN-safe helpers on the shader targets
 

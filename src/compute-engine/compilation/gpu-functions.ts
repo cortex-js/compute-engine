@@ -183,6 +183,7 @@ import {
   gpuNeedsStatements,
   gpuSelectionArm,
   gpuSelectionIsComplex,
+  gpuShaderLoopJumps,
 } from './gpu-statements.js';
 import {
   GPU_COLOR_HEADS,
@@ -3897,6 +3898,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // position where a destructuring assign (`(a, b) := (b, a + b)`) lowers.
     const bodyCode = BaseCompiler.compileStatementList(args[0], {
       ...target,
+      shaderLoopJumps: gpuShaderLoopJumps(args[0]),
       var: (id) => (indices.includes(id) ? indexAsFloat(id) : target.var(id)),
       // The counters shadow any same-named engine symbol (an index named `i`
       // must not resolve to the imaginary unit in the operand analysis).

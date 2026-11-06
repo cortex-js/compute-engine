@@ -299,8 +299,13 @@ export function compileBlock(
       return statementLines(
         target,
         compileListStatement(target, args[0], (t) => [
-          withCseScope(node, -1, t, () =>
-            compileOp(args[0], -1, t, prec, args[0])
+          withCseScope(
+            node,
+            -1,
+            t,
+            () =>
+              core.shaderSelectionStatement(args[0], t) ??
+              compileOp(args[0], -1, t, prec, args[0])
           ),
         ])
       );
