@@ -8693,6 +8693,25 @@ resolves (with `type.isUnknown` true).
 
 <MemberCard>
 
+##### Parser.isLibraryFunction() {#islibraryfunction}
+
+```ts
+isLibraryFunction(id): boolean
+```
+
+Whether `id` is a function of a library of the engine, so that a LaTeX
+assignment cannot define it. A parameter of a function that the parser is
+reading, and the name of that function, are not the library function. A
+parser with no engine gives `false`.
+
+####### id
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### Parser.isFunctionTriggerName() {#isfunctiontriggername}
 
 ```ts
