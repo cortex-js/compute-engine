@@ -2008,6 +2008,9 @@ type NestedErrors = {
   relativeTolerances: number;
   /** Whether an inner result was reported during the current evaluation. */
   reported: boolean;
+  /** Whether an inner quadrature ended during any evaluation, also with a
+   * result that is not finite, which is not counted in the sums. */
+  ran: boolean;
   /** The number of evaluations of the integrand with a finite value and an
    * inner result. */
   count: number;
@@ -2041,6 +2044,7 @@ function reportNestedResult(
 ): void {
   const sink = nestedErrorSink;
   if (sink === undefined || depth !== nestedErrorDepth) return;
+  sink.ran = true;
   if (!Number.isFinite(r.estimate) || !Number.isFinite(r.error)) return;
   sink.reported = true;
   sink.errors += r.error;
@@ -2103,6 +2107,7 @@ function withNestedErrors(
     relativeErrors: 0,
     relativeTolerances: 0,
     reported: false,
+    ran: false,
     count: 0,
     errorSum: 0,
     toleranceSum: 0,
@@ -2138,7 +2143,9 @@ function withNestedErrors(
     }
     return v;
   };
-  const r = run(g);
+  const quadratureResult = run(g);
+  if (!sink.ran) return quadratureResult;
+  const r = { ...quadratureResult, innerQuadrature: true as const };
   if (sink.count === 0 || !Number.isFinite(r.estimate)) return r;
   // The integral of the error of the integrand, from the sum `sum` of the
   // errors of its values.
@@ -2180,6 +2187,11 @@ type AdaptiveQuadratureResult = {
    * must not sample the integrand (Monte Carlo), whose mean is then also
    * `NaN`. See `GaussKronrodOutcome` in `endpoint-quadrature.ts`. */
   nanRegion?: true;
+  /** Set only with `nestedErrors`: the integrand computed an integral with
+   * this function during at least one evaluation. A caller must not sample
+   * such an integrand with Monte Carlo, because each sample would run a
+   * quadrature. */
+  innerQuadrature?: true;
 };
 
 /**
@@ -2419,11 +2431,12 @@ export function adaptiveQuadrature(
      * see `INTERIOR_SITE_DEPTH`). The recursive calls on the two halves
      * pass one less. */
     interiorSplits?: number;
-    /** When `true`, the integrand computes integrals of its own (with this
-     * function), and the reported error includes an estimate of the
-     * integral of their errors (see `withNestedErrors`). Without it, an
-     * error of the inner integrals that varies slowly with the variable is
-     * not in the reported error. The default is `false`. */
+    /** When `true`, the reported error includes an estimate of the integral
+     * of the errors of the integrals that the integrand computes with this
+     * function (see `withNestedErrors`). Without it, an error of the inner
+     * integrals that varies slowly with the variable is not in the reported
+     * error. An integrand that computes no integral gives the same result as
+     * with `false`. The default is `false`. */
     nestedErrors?: boolean;
   }
 ): AdaptiveQuadratureResult {

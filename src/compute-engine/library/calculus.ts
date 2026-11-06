@@ -2352,8 +2352,15 @@ function integrateRealPart(
     compiled: boolean;
     uncached: (part: (x: number) => number) => (x: number) => number;
     draw: () => number;
-    /** The integrand holds an integral: each evaluation runs a quadrature. */
-    nested?: boolean;
+    /** Whether the integrand computes an integral. The caller sets it when the
+     * expression of the integrand holds one. An integral in the body of a
+     * function that the integrand calls is not in this expression: this
+     * function sets it when the quadrature finds an inner one
+     * (`innerQuadrature`). The passes over the real and imaginary parts share
+     * this object, because the second pass can read every sample of the first
+     * from the cache of `numericIntegrandParts`, and then runs no inner
+     * quadrature. */
+    nested: { holdsIntegral: boolean };
   }
 ): {
   estimate: number;
@@ -2418,14 +2425,17 @@ function integrateRealPart(
   const gk = adaptiveQuadrature(jsf, lower, upper, {
     deadline: ce._deadlineFrame,
     singularEndpoints: true,
-    // An integrand that holds an integral: the reported error includes the
-    // errors of the inner integrals (see `withNestedErrors`,
-    // `numerics/gauss-kronrod.ts`).
-    nestedErrors: options.nested === true,
+    // The reported error includes the errors of the integrals that the
+    // integrand computes (see `withNestedErrors`,
+    // `numerics/gauss-kronrod.ts`). This quadrature asks for them for each
+    // integrand, because a test of the expression does not see an integral in
+    // the body of a function that the integrand calls.
+    nestedErrors: true,
     ...(options.compiled
       ? {}
       : { maxIntervals: INTERPRETED_QUADRATURE_PANELS }),
   });
+  if (gk.innerQuadrature === true) options.nested.holdsIntegral = true;
   // A diagnosed divergence has no finite value. Monte Carlo would
   // still return one — a mean of samples that never saw the
   // singularity — so the fallback is skipped, not just the report. An
@@ -2498,7 +2508,7 @@ function integrateRealPart(
   // integral can itself have no value at some points (`∫₀^10 ∫₃^4 (y − x)⁻²
   // dx dy`, for `y` in `[3, 4]`). A result with a finite error is kept, with
   // the same floor as above; otherwise the integral has no value.
-  if (options.nested === true)
+  if (options.nested.holdsIntegral)
     return Number.isFinite(gk.estimate) && Number.isFinite(gk.error)
       ? {
           estimate: gk.estimate,
@@ -7616,13 +7626,16 @@ volumes
           // shares its stream across levels for the same reason).
           const draw = ce._substream(mixTags(f.hash, firstLimit.hash));
 
+          const nested = {
+            holdsIntegral: fnExpr.has(['Integrate', 'NIntegrate']),
+          };
           // Integrate ONE real-valued part of the integrand over the interval.
           const integrateReal = (jsf: (x: number) => number) =>
             integrateRealPart(ce, jsf, lower, upper, {
               compiled: compiled?.success === true,
               uncached: integrand.uncached,
               draw,
-              nested: fnExpr.has(['Integrate', 'NIntegrate']),
+              nested,
             });
 
           const re = integrateReal(integrand.re);
@@ -8545,12 +8558,13 @@ volumes
         // Gauss–Kronrod, `NaN` for a divergent integral, and Monte Carlo only
         // when the quadrature does not converge. The result is a plain number:
         // the error estimate is dropped.
+        const nested = { holdsIntegral: fn.has(['Integrate', 'NIntegrate']) };
         const integrate = (jsf: (x: number) => number) =>
           integrateRealPart(engine, jsf, lower, upper, {
             compiled: compiled?.success === true,
             uncached: integrand.uncached,
             draw,
-            nested: fn.has(['Integrate', 'NIntegrate']),
+            nested,
           });
 
         const re = integrate(integrand.re);

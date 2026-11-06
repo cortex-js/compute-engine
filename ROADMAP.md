@@ -1065,18 +1065,6 @@ corpus uses it).
 `Max(FlatMap([1, 2], x ↦ [x, slowF(x)]))` under `evaluateAsync()` gives `Max(2, slowF(1), slowF(2))`, not 20. State: NOT STARTED. Found during the work of 2026-10-30 and 2026-10-31 (4b list); the
 reproduction above is the record.
 
-### CE-820. A closure stored under a declared signature reads the bindings of the scope that stores it
-
-**Status:** ready; wrong value, S.
-**Witness:** plausible; with `h = n ↦ Block(g := z ↦ 0, z ↦ g(z) + n)`, `Declare(q, "(real) -> real", h(1))` and `q(0)` gives `1 + g(0)`, and should give 1. `k = n ↦ Block(Declare(g, "(real) -> real", h(n)), z ↦ g(z) + n)` and `k(1)(0)` gives "Recursion limit exceeded", and should give 2.
-
-The same programs with the type `unknown` give the correct values, so the
-declared signature causes the failure. The cause is not traced. The likely
-cause is that the route for a declared signature in `engine-declarations.ts`
-(`ascribeDeclaredParameterTypes()`, `reconcileFunctionLiteralReturn()`) builds
-the literal again from its MathJSON, which drops the scopes that the closure
-captured.
-
 ## Symbolic computation
 
 ### CE-613. `Limit` of `e^{√x}/x^5` at infinity gives 0 instead of `+∞`
@@ -1737,25 +1725,6 @@ A method that does not depend on the lobes is necessary. Possible methods:
 - when the integrand is a known product of sines and cosines, write the integral
   as the sum of the integrals of each frequency.
 
-### CE-821. An outer integral does not add the error of an inner integral that is in the body of a called function
-
-**Status:** ready; wrong value, S.
-**Witness:** plausible; after `ce.assign('F', ce.parse('y \\mapsto \\int_0^1 \\frac{e^{-xy}}{x^{0.99}} dx'))`, `ce.parse('\\int_0^1 F(y) dy').N()` reports an error 14 times smaller than the true error.
-
-The witness gives `99.575857194449625 ± 0.000000000000088`. The integral is
-`99.57585719444842` (the sum of the exponential series, term by term), so the
-true error is `1.2e-12` and the reported error is `8.8e-14`. The same integral
-with the inner integral written in the integrand reports `1.1e-10`, which is
-correct.
-
-Both calls of `integrateRealPart` (`library/calculus.ts`) set `nested` from
-`has(['Integrate', 'NIntegrate'])` on the integrand. For the integrand `F(y)`
-this is `false`, because the integral is in the body of `F`, so
-`adaptiveQuadrature` runs without `nestedErrors`. Proposed fix: always pass
-`nestedErrors: true`. `withNestedErrors` (`numerics/gauss-kronrod.ts`) returns
-the result unchanged when no inner quadrature reports. Keep `nested` for the
-choice not to use the Monte-Carlo fallback, or find another test for it.
-
 ### CE-822. The error of an outer integral does not scale with a small factor of the inner integral
 
 **Status:** ready; defect, M.
@@ -1767,7 +1736,9 @@ call of `adaptiveQuadrature` with this integrand gives an error of `8.5e-9`
 without `nestedErrors`. With `nestedErrors` it gives `3.4e-3`, and `converged`
 is `false`. On a finite interval, `\int_0^1 10^{-12}\int_0^1
 \frac{e^{-xy}}{x^{0.99}} dx dy` gives the error `1.1e-10` for the value
-`1e-10`; the true error is `1.2e-24`.
+`1e-10`; the true error is `1.2e-24`. The inner integral in the body of a called
+function gives the same results: `\int_0^{\infty} e^{-y} F(y) dy` gives
+`99.315 ± 0.031`.
 
 `withNestedErrors` (`numerics/gauss-kronrod.ts`) does not know how a value `v` of
 the integrand changes with its inner integrals `I`. It takes the error of `v` as

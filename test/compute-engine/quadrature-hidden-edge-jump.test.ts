@@ -180,6 +180,87 @@ describe('THE ERRORS OF INNER INTEGRALS', () => {
     expect(r.error).toBeGreaterThanOrEqual(inner.error);
     expect(r.error).toBeLessThan(1.01 * inner.error);
   });
+
+  test('a result tells whether an inner quadrature ran', () => {
+    const smooth = (y: number) => Math.exp(-y);
+    expect(
+      adaptiveQuadrature((y) => inner(0, y), 0, 1, { nestedErrors: true })
+        .innerQuadrature
+    ).toBe(true);
+    // An inner integral with no value is not counted in the error, but it ran.
+    expect(
+      adaptiveQuadrature(
+        (y) => adaptiveQuadrature(() => NaN, 0, y).estimate,
+        0,
+        1,
+        { nestedErrors: true }
+      ).innerQuadrature
+    ).toBe(true);
+    // With no inner quadrature, the option changes nothing.
+    expect(adaptiveQuadrature(smooth, 0, 1, { nestedErrors: true })).toEqual(
+      adaptiveQuadrature(smooth, 0, 1)
+    );
+  });
+});
+
+/**
+ * An integral in the body of a function that the integrand calls is not in the
+ * expression of the integrand, so only the quadrature can see it, when it runs.
+ */
+describe('AN INNER INTEGRAL IN THE BODY OF A CALLED FUNCTION', () => {
+  test('its error is in the error of the outer integral', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'F',
+      ce.parse('y \\mapsto \\int_0^1 \\frac{e^{-xy}}{x^{0.99}} dx')
+    );
+    const result = ce.parse('\\int_0^1 F(y) dy').N().json as [
+      string,
+      number,
+      number,
+    ];
+    expect(result[0]).toBe('Measurement');
+    // The sum of `(−1)ᵏ/(k!·(k + 0.01)·(k + 1))` over `k`, term by term.
+    const truth = 99.57585719444842;
+    expect(Math.abs(result[1] - truth)).toBeLessThanOrEqual(result[2]);
+    // The error of the outer quadrature alone is about `9e-14`.
+    expect(result[2]).toBeGreaterThan(1e-11);
+  });
+
+  test.each([
+    ['a real integrand', 'real', 0],
+    // The real and imaginary parts refine the same panels, so the second pass
+    // reads every sample from the cache and runs no inner quadrature.
+    ['a complex integrand', 'number', 1],
+  ] as [string, string, number][])(
+    '%s that does not converge is not sampled',
+    (_, resultType, imaginaryFactor) => {
+      // The factor `sin(10⁵·y)` uses up the panels of the outer quadrature, so
+      // the outer result does not converge, and the Monte-Carlo fallback of an
+      // integrand that did not compile would take 10⁴ more samples, each with
+      // an inner quadrature.
+      const ce = new ComputeEngine();
+      let evaluations = 0;
+      ce.declare('G', {
+        signature: `(real) -> ${resultType}`,
+        evaluate: ([y]) => {
+          evaluations += 1;
+          const r = adaptiveQuadrature((x) => Math.exp(-x), 0, y.re);
+          const v = Math.sin(1e5 * y.re) * r.estimate;
+          return ce.number(ce.complex(v, imaginaryFactor * v));
+        },
+      });
+      ce.box([
+        'Integrate',
+        ['Function', ['G', 'y'], 'y'],
+        ['Limits', 'y', 0, 1],
+      ]).N();
+      // The quadrature takes about 10⁴ evaluations of its own, and the
+      // Monte-Carlo fallback 10⁴ more.
+      expect(evaluations).toBeGreaterThan(5_000);
+      expect(evaluations).toBeLessThan(15_000);
+    }
+  );
 });
 
 /**

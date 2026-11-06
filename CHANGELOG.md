@@ -114,6 +114,16 @@
 
 ### Resolved Issues
 
+- **The error of a numeric integral now includes an inner integral in the body
+  of a function that the integrand calls.** With
+  `F = y ↦ ∫₀¹ e^(−xy)/x^0.99 dx`, `∫₀¹ F(y) dy` gave
+  `99.575857194449625 ± 0.000000000000088`, for a true error of `1.2e-12`. It
+  now gives `99.57585719445 ± 0.00000000011`, as with the inner integral written
+  in the integrand. `∫₀^∞ e^(−y) F(y) dy` now gives `99.315 ± 0.031`, also as
+  with the inner integral written in the integrand: its error is larger than the
+  true error. A result of such an integrand that does not converge no longer
+  uses Monte Carlo, which ran a quadrature for each sample. It stays the
+  quadrature result, or `NaN` when this result has no finite error.
 - **A later global no longer changes a local of a function when the function is
   built again.** After `h = n ↦ Block(g := z ↦ 0, z ↦ g(z) + n)`, `g := t ↦ 9`
   and `Apply(h(1), 0)` each gave the error `incompatible-type` about the `scope`
