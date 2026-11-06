@@ -342,6 +342,12 @@
   defined as `x ↦ x / 2`, the value is `[1/2, 0, 0]`. The type is now
   `list<unknown^3>`. The same applies to a branch that is a symbol with no
   type, and to a branch declared `list<unknown>`.
+- **`evaluateAsync()` of a block now reads a local of the block, not a global
+  of the same name, when it tests whether an operand is a list.** With
+  `n := [1, 2]`, `Block(Declare(n, "real", 2), n + 1).evaluateAsync()` did not
+  end, and the process stopped when its memory was full. It now gives `3`, as
+  `evaluate()` does. In the same block, `n = 2` did not end either and now
+  gives `True`.
 
 ## 0.181.1 _2026-11-05_
 

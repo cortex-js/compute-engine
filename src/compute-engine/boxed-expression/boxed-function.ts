@@ -9126,7 +9126,10 @@ export class BoxedFunction
     options?: Partial<EvaluateOptions>,
     sourceValues?: EagerSourceValues
   ): () => Promise<Expression> {
-    return async () => {
+    // `afterLift` is true when step 1c already ran for this call and
+    // changed nothing: the steps start again, without step 1c, with the
+    // context stack of this evaluation in place (see step 1c).
+    const compute = async (afterLift: boolean): Promise<Expression> => {
       // Cooperative deadline checkpoint — see `_computeValue`.
       checkDeadlineEvery(this.engine._deadlineFrame, 0x3ff);
 
@@ -9169,10 +9172,35 @@ export class BoxedFunction
       }
 
       // 1c/ See the synchronous route.
-      if (def.broadcastable || isUserFunctionDef(def)) {
-        const lifted = await liftWholeRestrictionsAsync(this, def, (c) =>
-          c.evaluateAsync(options)
-        );
+      //
+      // The steps after this one test the operands with their values (is an
+      // operand a collection that the operator maps over?), and a symbol
+      // reads its value in the context stack that is in place. The engine
+      // has the context stack of this evaluation in place only until the
+      // first `await` of this function. So this step makes no `await` when
+      // the call has no restriction to lift or to select, which is the
+      // common case. When this step did `await` and changed nothing, the
+      // steps start again with the context stack in place (`afterLift`).
+      //
+      // If an `await` here came before step 2 in every call, the tests of
+      // step 2 would read a local of a block outside the block: with
+      // `n := [1, 2]` outside, the asynchronous evaluation of
+      // `Block(Declare(n, "real", 2), n + 1)` would find the list for the
+      // operand `n`, start a broadcast of `n + 1` over it, zip the operands
+      // in the block, where `n` is `2`, into the one cell `n + 1`, and
+      // evaluate that cell the same way, with no end.
+      const lifting =
+        !afterLift && (def.broadcastable || isUserFunctionDef(def))
+          ? liftWholeRestrictionsAsync(this, def, (c) =>
+              c.evaluateAsync(options)
+            )
+          : undefined;
+      if (lifting !== undefined) {
+        const lifted = await lifting;
+        if (lifted === undefined)
+          return this.engine.withEvaluationContext(options, () =>
+            compute(true)
+          );
         // When the guard is not decided, the `If` handler holds the
         // restriction over its arm, which it evaluates synchronously: an
         // operator with only an `evaluateAsync` handler would stay
@@ -9189,7 +9217,6 @@ export class BoxedFunction
         // the call is evaluated. Both give the same value once the guard is
         // decided; they differ in when an effect inside the call runs.
         if (
-          lifted !== undefined &&
           isFunction(lifted, 'If') &&
           lifted.nops === 2 &&
           PLANNED_RESTRICTION_CALLS.has(lifted.op2) &&
@@ -9201,7 +9228,7 @@ export class BoxedFunction
             ._fn('If', [lifted.op1, value])
             .evaluateAsync(options);
         }
-        if (lifted !== undefined) return lifted.evaluateAsync(options);
+        return lifted.evaluateAsync(options);
       }
 
       //
@@ -9977,158 +10004,176 @@ export class BoxedFunction
       const isPostEvalBroadcastOperand = (x: Expression): boolean =>
         isKnownFinitenessBroadcast(x) ||
         (def.lazy !== true && isUnknownLengthBroadcast(x));
-      // An operator with ONLY an `evaluateAsync` handler is broadcast here
-      // too, as in the pre-evaluation step 2a: each cell is evaluated with
-      // `evaluateAsync()`. Before, this step did not run for such an
-      // operator, and its handler received the whole list:
-      // `AsyncOnly([1, 2] {0<t})` with `t = 1` gave `NaN`, where
-      // `AsyncOnly([1, 2])` gave `[AsyncOnly(1), AsyncOnly(2)]` evaluated
-      // cell by cell. Past the eager threshold the value is the lazy `Map`
-      // that step 2a gives for the same collection: its mapping applies
-      // synchronously on `at`, and `materialization` evaluates each element
-      // with `evaluateAsync()` (`materializeAsync()`).
-      const postEvalBroadcast =
-        (lambdaBroadcast ||
-          // As on the sync path: an `'evaluated-operands'` exemption means
-          // the operator's own evaluate handler owns this case.
-          (def.broadcastable &&
-            !def.broadcastExemptions.includes('evaluated-operands') &&
-            // A surplus operand keeps the call whole (mirrors the sync path).
-            !hasSurplusOperands(def, tail) &&
-            // A set has no positions (mirrors the sync path).
-            unindexedOperandBroadcast(def, tail) !== 'veto')) &&
-        !skipBroadcastForVectorOps(def, false, tail) &&
-        !pointIsOneLegOf(this.operator, tail) &&
-        tail.some(isPostEvalBroadcastOperand);
-      // The veto and the definite-mismatch exception of the sync step 4b,
-      // unchanged: a collection-typed but still valueless operand must not be
-      // spliced into every cell as a scalar, while a length disagreement among
-      // the operands that DO have values is an error no later assignment can
-      // reconcile.
-      const unresolvedTailOperand =
-        postEvalBroadcast &&
-        hasUnresolvedCollectionOperand(tail, isBroadcastableCollection);
-      if (unresolvedTailOperand) {
-        const mismatch = tailLengthMismatch(this.engine, tail);
-        if (mismatch) return mismatch;
-      }
-      if (postEvalBroadcast && !unresolvedTailOperand) {
-        // The matrix power of a square matrix (mirrors the sync step 4b).
-        if (this.operator === 'Power' && this._isBoundToLibraryDefinition()) {
-          const matrixPower = squareMatrixPower(
-            this.engine,
-            tail,
-            options,
-            this._ops![1]
-          );
-          if (matrixPower !== undefined)
-            return matrixPower.evaluateAsync(options);
+      // The rest of this step runs after the `await` of the operands, when
+      // the engine no longer has the context stack of this evaluation in
+      // place. Its tests and its zip read the values of the operands, and an
+      // operand that is still a symbol (an operand of a lazy operator such as
+      // `Equal`) reads its value in the context stack that is in place. So
+      // the rest of the step runs with the registry and the context stack of
+      // this evaluation put in place again. Without this, with `n := [1, 2]`
+      // outside, the asynchronous evaluation of
+      // `Block(Declare(n, "real", 2), n = 2)` reads the list for the local
+      // `n` and gives `[False, True]`. The result is the answer of the step, or
+      // `undefined` when the step does not apply.
+      const postEvalAnswer = this.engine.withEvaluationContext(options, () => {
+        // An operator with ONLY an `evaluateAsync` handler is broadcast here
+        // too, as in the pre-evaluation step 2a: each cell is evaluated with
+        // `evaluateAsync()`. Before, this step did not run for such an
+        // operator, and its handler received the whole list:
+        // `AsyncOnly([1, 2] {0<t})` with `t = 1` gave `NaN`, where
+        // `AsyncOnly([1, 2])` gave `[AsyncOnly(1), AsyncOnly(2)]` evaluated
+        // cell by cell. Past the eager threshold the value is the lazy `Map`
+        // that step 2a gives for the same collection: its mapping applies
+        // synchronously on `at`, and `materialization` evaluates each element
+        // with `evaluateAsync()` (`materializeAsync()`).
+        const postEvalBroadcast =
+          (lambdaBroadcast ||
+            // As on the sync path: an `'evaluated-operands'` exemption means
+            // the operator's own evaluate handler owns this case.
+            (def.broadcastable &&
+              !def.broadcastExemptions.includes('evaluated-operands') &&
+              // A surplus operand keeps the call whole (mirrors the sync path).
+              !hasSurplusOperands(def, tail) &&
+              // A set has no positions (mirrors the sync path).
+              unindexedOperandBroadcast(def, tail) !== 'veto')) &&
+          !skipBroadcastForVectorOps(def, false, tail) &&
+          !pointIsOneLegOf(this.operator, tail) &&
+          tail.some(isPostEvalBroadcastOperand);
+        // The veto and the definite-mismatch exception of the sync step 4b,
+        // unchanged: a collection-typed but still valueless operand must not
+        // be spliced into every cell as a scalar, while a length disagreement
+        // among the operands that DO have values is an error no later
+        // assignment can reconcile.
+        const unresolvedTailOperand =
+          postEvalBroadcast &&
+          hasUnresolvedCollectionOperand(tail, isBroadcastableCollection);
+        if (unresolvedTailOperand) {
+          const mismatch = tailLengthMismatch(this.engine, tail);
+          if (mismatch) return mismatch;
         }
-        // Hybrid laziness: past the eager threshold — and always for an
-        // unknown/infinite-length source — return the lazy `Map` form over the
-        // already-evaluated `tail` (mirrors the sync path).
-        // Length-mismatch ruling (2026-07-24) — mirrors the sync step 4b,
-        // before the lazy form; `tail` is already evaluated, so the purity half
-        // does not apply.
-        const mismatch = tailLengthMismatch(this.engine, tail);
-        if (mismatch) return mismatch;
-
-        // Under `.N()`, a jump operator (`Floor`, `Sign`, ...) maps over the
-        // exact sources (`exactJumpLazyBroadcastOperands()`).
-        const lazy = withCallableBinding(this, () =>
-          lazyBroadcastMapIfNeeded(
-            this.engine,
-            this.operator,
-            exactJumpLazyBroadcastOperands(this, tail, numericApproximation) ??
-              tail,
-            isBroadcastableCollection,
-            numericApproximation
-          )
-        );
-        if (lazy) return lazy;
-
-        // For a user function a tuple (a point) is lifted whole into every
-        // cell, not zipped; a builtin operator zips it (a tuple zipped
-        // against a list supplies cells, pinned by its tests).
-        // The async twin of the exact cells of a jump operator in the sync
-        // step 4b (`exactJumpBroadcastOperands()`).
-        const items = lambdaBroadcast
-          ? zipBroadcast(tail, isBroadcastableCollection)
-          : // A set at a parameter that is not a number type is used whole in
-            // every cell (`unindexedOperandBroadcast`).
-            (unindexedOperandBroadcast(def, tail) === 'lift'
-              ? zipLiftingUnindexed
-              : zip)(
-              exactJumpBroadcastOperands(this, tail, numericApproximation) ??
-                tail
-            );
-        if (items) {
-          const results: Promise<Expression>[] = [];
-          while (true) {
-            const { done, value } = items.next();
-            if (done) break;
-            const p = this.engine
-              ._fn(this.operator, value)
-              .evaluateAsync(options);
-            // Per-element rejection context, for the LAMBDA broadcast only (a
-            // builtin `broadcastable` operator keeps its historical errors):
-            // `Promise.all` cannot attribute a rejection to a slot, but each
-            // promise is created in a KNOWN one. The outer handler below stays
-            // as a backstop and does not double-annotate.
-            const index = results.length + 1;
-            results.push(
-              lambdaBroadcast
-                ? p.catch((e) => {
-                    throw withBroadcastThrowContext(
-                      e,
-                      this.operator,
-                      tail,
-                      index
-                    );
-                  })
-                : p
-            );
-          }
-          // A lambda broadcast always yields a `List` (mirroring step 2b),
-          // and carries the element-wise context on its failures. The listing
-          // of the cells evaluates synchronously after the `await`, so it
-          // runs with the capability registry and the context stack of this
-          // evaluation put in place again.
-          if (lambdaBroadcast)
-            return Promise.all(results).then(
-              (resolved) =>
-                this.engine.withEvaluationContext(options, () =>
-                  this.engine._fn(
-                    'List',
-                    annotateBroadcastErrors(
-                      this.operator,
-                      listedBroadcastCells(
-                        this.engine,
-                        resolved,
-                        numericApproximation
-                      )
-                    )
-                  )
-                ),
-              (e) => {
-                throw withBroadcastThrowContext(e, this.operator, tail);
-              }
-            );
-          // An operand that became the EMPTY collection only at evaluation
-          // yields the empty list, the same answer a literal `[]` gets
-          // (rule of 2026-09-21, `docs/BROADCAST-MODEL.md`; mirrors the sync
-          // path's step 4b). An absent point cell answers `Missing`, not
-          // `NaN` (mirrors the sync path).
-          return Promise.all(results).then((resolved) =>
-            markAbsentPointCells(
+        if (postEvalBroadcast && !unresolvedTailOperand) {
+          // The matrix power of a square matrix (mirrors the sync step 4b).
+          if (this.operator === 'Power' && this._isBoundToLibraryDefinition()) {
+            const matrixPower = squareMatrixPower(
               this.engine,
-              this,
-              this.engine._fn('List', resolved),
-              tail
+              tail,
+              options,
+              this._ops![1]
+            );
+            if (matrixPower !== undefined)
+              return matrixPower.evaluateAsync(options);
+          }
+          // Hybrid laziness: past the eager threshold — and always for an
+          // unknown/infinite-length source — return the lazy `Map` form over
+          // the already-evaluated `tail` (mirrors the sync path).
+          // Length-mismatch ruling (2026-07-24) — mirrors the sync step 4b,
+          // before the lazy form; `tail` is already evaluated, so the purity
+          // half does not apply.
+          const mismatch = tailLengthMismatch(this.engine, tail);
+          if (mismatch) return mismatch;
+
+          // Under `.N()`, a jump operator (`Floor`, `Sign`, ...) maps over the
+          // exact sources (`exactJumpLazyBroadcastOperands()`).
+          const lazy = withCallableBinding(this, () =>
+            lazyBroadcastMapIfNeeded(
+              this.engine,
+              this.operator,
+              exactJumpLazyBroadcastOperands(
+                this,
+                tail,
+                numericApproximation
+              ) ?? tail,
+              isBroadcastableCollection,
+              numericApproximation
             )
           );
+          if (lazy) return lazy;
+
+          // For a user function a tuple (a point) is lifted whole into every
+          // cell, not zipped; a builtin operator zips it (a tuple zipped
+          // against a list supplies cells, pinned by its tests).
+          // The async twin of the exact cells of a jump operator in the sync
+          // step 4b (`exactJumpBroadcastOperands()`).
+          const items = lambdaBroadcast
+            ? zipBroadcast(tail, isBroadcastableCollection)
+            : // A set at a parameter that is not a number type is used whole in
+              // every cell (`unindexedOperandBroadcast`).
+              (unindexedOperandBroadcast(def, tail) === 'lift'
+                ? zipLiftingUnindexed
+                : zip)(
+                exactJumpBroadcastOperands(this, tail, numericApproximation) ??
+                  tail
+              );
+          if (items) {
+            const results: Promise<Expression>[] = [];
+            while (true) {
+              const { done, value } = items.next();
+              if (done) break;
+              const p = this.engine
+                ._fn(this.operator, value)
+                .evaluateAsync(options);
+              // Per-element rejection context, for the LAMBDA broadcast only
+              // (a builtin `broadcastable` operator keeps its historical
+              // errors): `Promise.all` cannot attribute a rejection to a slot,
+              // but each promise is created in a KNOWN one. The outer handler
+              // below stays as a backstop and does not double-annotate.
+              const index = results.length + 1;
+              results.push(
+                lambdaBroadcast
+                  ? p.catch((e) => {
+                      throw withBroadcastThrowContext(
+                        e,
+                        this.operator,
+                        tail,
+                        index
+                      );
+                    })
+                  : p
+              );
+            }
+            // A lambda broadcast always yields a `List` (mirroring step 2b),
+            // and carries the element-wise context on its failures. The listing
+            // of the cells evaluates synchronously after the `await`, so it
+            // runs with the capability registry and the context stack of this
+            // evaluation put in place again.
+            if (lambdaBroadcast)
+              return Promise.all(results).then(
+                (resolved) =>
+                  this.engine.withEvaluationContext(options, () =>
+                    this.engine._fn(
+                      'List',
+                      annotateBroadcastErrors(
+                        this.operator,
+                        listedBroadcastCells(
+                          this.engine,
+                          resolved,
+                          numericApproximation
+                        )
+                      )
+                    )
+                  ),
+                (e) => {
+                  throw withBroadcastThrowContext(e, this.operator, tail);
+                }
+              );
+            // An operand that became the EMPTY collection only at evaluation
+            // yields the empty list, the same answer a literal `[]` gets
+            // (rule of 2026-09-21, `docs/BROADCAST-MODEL.md`; mirrors the sync
+            // path's step 4b). An absent point cell answers `Missing`, not
+            // `NaN` (mirrors the sync path).
+            return Promise.all(results).then((resolved) =>
+              markAbsentPointCells(
+                this.engine,
+                this,
+                this.engine._fn('List', resolved),
+                tail
+              )
+            );
+          }
         }
-      }
+        return undefined;
+      });
+      if (postEvalAnswer !== undefined) return postEvalAnswer;
 
       //
       // 3t/ Component-wise broadcast over TUPLE operands — the async twin of
@@ -10692,6 +10737,7 @@ export class BoxedFunction
         );
       return result;
     };
+    return () => compute(false);
   }
 }
 
@@ -11770,18 +11816,29 @@ function liftWholeRestrictions(
   return applyWholeRestrictionPlan(expr, plan, values);
 }
 
-/** Async mirror of `liftWholeRestrictions`. */
-async function liftWholeRestrictionsAsync(
+/**
+ * Async mirror of `liftWholeRestrictions`.
+ *
+ * When the call has no restriction to lift or to select, the result is
+ * `undefined` and not a promise, so that the caller does not `await`. An
+ * `await` ends the synchronous part of the caller, and the engine keeps the
+ * context stack of an asynchronous evaluation in place only during a
+ * synchronous part. The steps of `_computeValueAsyncUnabsorbed()` after this
+ * one read the values of the operands, so they must run with that stack.
+ */
+function liftWholeRestrictionsAsync(
   expr: BoxedFunction,
   def: BoxedOperatorDefinition,
   evaluateCondition: (c: Expression) => Promise<Expression>
-): Promise<Expression | undefined> {
+): Promise<Expression | undefined> | undefined {
   if (PLANNED_RESTRICTION_CALLS.has(expr)) return undefined;
   const plan = wholeRestrictionPlan(expr, def);
   if (plan === undefined) return undefined;
-  const values: Expression[] = [];
-  for (const c of plan.conditions) values.push(await evaluateCondition(c));
-  return applyWholeRestrictionPlan(expr, plan, values);
+  return (async () => {
+    const values: Expression[] = [];
+    for (const c of plan.conditions) values.push(await evaluateCondition(c));
+    return applyWholeRestrictionPlan(expr, plan, values);
+  })();
 }
 
 /**
