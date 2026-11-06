@@ -182,6 +182,10 @@ export function analyzeReferences(
   let declaredTypes: Readonly<Record<string, Type>> | undefined =
     target.declaredVarTypes;
 
+  // The names bound where a function that the code calls by name is
+  // emitted: none (see `visitDefinitionBody`).
+  const noBoundNames: ReadonlySet<string> = new Set();
+
   // An expression is a DAG, not a tree: one sub-expression object can be an
   // operand of many parents. A caller that substitutes helper bodies into a
   // published value builds exactly that — Tycho's terrain document holds a
@@ -278,6 +282,32 @@ export function analyzeReferences(
     }
   };
 
+  /** Visit the body of a function that the code calls BY NAME: a user
+   * function of the engine, a clause of a multi-clause function, an
+   * implementation of a protocol member.
+   *
+   * Such a function is emitted once, in the preamble, outside every binder
+   * of the expression: `prepareUserFunctionBody()` compiles its body
+   * against the root target of the compilation (`userFunctions.root`), with
+   * only its own parameters bound. A name that a binder around the CALL
+   * binds (a `Block` local, a parameter of an enclosing function literal,
+   * the index of a `Sum`) is therefore not bound in the body. A free name
+   * of the body is an input of the code, also when a binder around the
+   * call has the same name.
+   *
+   * With `ok(c) := 1 / c ≥ minR`, the code of
+   * `Block(Declare(minR, {value: 0.008}), ok(4))` is the helper
+   * `_fn_ok = (c) => _.minR <= 1 / c` and the body
+   * `let minR = 0.008; return _fn_ok(4)`: the helper reads the input
+   * `minR`, not the local. When the body was visited with the names of the
+   * call site bound, `freeSymbols` did not have `minR`, and an undeclared
+   * `minR` was not declined as an untyped input, where the same call
+   * outside the `Block` reported it and declined. The first visit of a
+   * body is also the only one (`userFnSeen`), so a call inside such a
+   * binder hid the name for a later call outside it. */
+  const visitDefinitionBody = (literal: Expression & FunctionInterface): void =>
+    visitLiteralBody(literal, noBoundNames);
+
   /** The receiver type a dispatch probe should use — the expression's own
    * static type, falling back to the current body's declared parameter
    * type for a raw symbol (the same fallback `tryCompileProtocolDispatch`
@@ -303,8 +333,7 @@ export function analyzeReferences(
    * syntactic head, which `ProtocolMember`/`Field` share across members). */
   const visitProtocolPlan = (
     key: string,
-    plan: NonNullable<ReturnType<typeof planProtocolDispatch>>,
-    bound: ReadonlySet<string>
+    plan: NonNullable<ReturnType<typeof planProtocolDispatch>>
   ): void => {
     if (userFnSeen.has(`protocol:${key}`)) return;
     userFnSeen.add(`protocol:${key}`);
@@ -313,7 +342,7 @@ export function analyzeReferences(
       // raw one still carries `Typed` ascription nodes).
       const literal = c.literal.canonical;
       if (!isFunction(literal, 'Function')) continue;
-      visitLiteralBody(literal, bound);
+      visitDefinitionBody(literal);
     }
   };
 
@@ -385,7 +414,7 @@ export function analyzeReferences(
         if (symLiteral !== undefined) {
           if (!userFnSeen.has(s)) {
             userFnSeen.add(s);
-            visitLiteralBody(symLiteral, bound);
+            visitDefinitionBody(symLiteral);
           }
           return;
         }
@@ -579,7 +608,7 @@ export function analyzeReferences(
             })
           : undefined;
         if (plan !== undefined)
-          visitProtocolPlan(`${record.name}:${member}`, plan, bound);
+          visitProtocolPlan(`${record.name}:${member}`, plan);
         else unsupported.add(member);
         // The call arguments are ordinary expressions; the protocol-naming
         // `Field` callee is consumed by the intercept and never compiled.
@@ -620,8 +649,16 @@ export function analyzeReferences(
     // as a named local function — see `tryCompileUserFunction`), not
     // unsupported. Descend into its body (parameters bound) so free symbols it
     // references transitively are surfaced; guard against recursion.
+    //
+    // A head that the expression binds (a block local, a parameter, an
+    // index) hides an engine function of the same name: the compiler does
+    // not read the engine function for it (`target.boundVars` in
+    // `compileExpr()`), so the body of that function is not visited. With
+    // the engine function `f(t) := t·w`, the program `function f(t) { t + 1 }`
+    // then `f(x)` calls its own `f`, and `w` was reported in `freeSymbols`.
     const userLiteral =
       target.userFunctions !== undefined &&
+      !bound.has(h) &&
       !STRUCTURAL_HEADS.has(h) &&
       target.functions?.(h) === undefined &&
       target.operators?.(h) === undefined
@@ -633,6 +670,7 @@ export function analyzeReferences(
     const userClauses =
       userLiteral === undefined &&
       target.userFunctions !== undefined &&
+      !bound.has(h) &&
       !STRUCTURAL_HEADS.has(h) &&
       target.functions?.(h) === undefined &&
       target.operators?.(h) === undefined
@@ -775,9 +813,17 @@ export function analyzeReferences(
       }
     }
 
+    // A head that the expression binds (a block local, a parameter of a
+    // function literal, an index) is not an operator of the target, so it
+    // is not reported: a call of a local function is a call of the binding
+    // that its statement list emits (`tryCompileLocalFunctionCall()`), and
+    // a call of any other bound name declines with a message of its own.
+    // Reported, the local function `f` of a program that declined for
+    // another operator was read by a host as a name with no definition.
     if (
       h !== 'Error' &&
       !STRUCTURAL_HEADS.has(h) &&
+      !bound.has(h) &&
       target.functions?.(h) === undefined &&
       target.operators?.(h) === undefined &&
       userLiteral === undefined &&
@@ -793,12 +839,12 @@ export function analyzeReferences(
     // DISPATCH IDENTITY, not the head — `ProtocolMember`/`ProtocolProperty`
     // are shared wrappers across every member.
     if (protocolPlan !== undefined)
-      visitProtocolPlan(protocolPlanKey, protocolPlan, bound);
+      visitProtocolPlan(protocolPlanKey, protocolPlan);
 
     if (userLiteral !== undefined) {
       if (!userFnSeen.has(h)) {
         userFnSeen.add(h);
-        visitLiteralBody(userLiteral, bound);
+        visitDefinitionBody(userLiteral);
       }
       // The call arguments are evaluated in the surrounding scope.
       for (const op of ops) visit(op, bound);
@@ -808,8 +854,7 @@ export function analyzeReferences(
       if (!userFnSeen.has(h)) {
         userFnSeen.add(h);
         for (const c of userClauses)
-          if (isFunction(c.literal, 'Function'))
-            visitLiteralBody(c.literal, bound);
+          if (isFunction(c.literal, 'Function')) visitDefinitionBody(c.literal);
       }
       for (const op of ops) visit(op, bound);
       return;
@@ -1074,16 +1119,35 @@ export function isNamesTarget(t: Expression): boolean {
 }
 
 /**
- * Attach `freeSymbols` / `unsupported` (from `analyzeReferences`) and the
- * mode report (`mode`) to a compilation result, returning the
- * same object. Used by the built-in targets to make every result carry its
- * declarative reference analysis and the discipline it was compiled under.
+ * Attach `freeSymbols` and `freeSymbolTypes` (from `analyzeReferences`),
+ * `unsupported` and the mode report (`mode`) to a compilation result,
+ * returning the same object. Used by the built-in targets to make every
+ * result carry its declarative reference analysis and the discipline it
+ * was compiled under.
  *
  * The report is the one frozen when the outermost compilation ended
  * (`modeReport`): `mode` is the mode the code was compiled under.
+ *
+ * `unsupported` is empty for a compilation that produced code. The
+ * compiler throws for an operator that the target does not lower, so no
+ * such operator is in the expression. The list that `analyzeReferences()`
+ * gives is not used for such a result: it is a static walk that does not
+ * follow every rule of the compiler, and it named operators that were
+ * lowered. The program `function f(x) { x + 1 }` then `f(2)` compiles to
+ * `let f = ((x) => x + 1)` on JavaScript, and the walk gave
+ * `["DefineFunction", "f"]`: it reads the definition as an operator with
+ * no lowering, and it does not know that `f` is a local function.
+ *
+ * A declined result keeps the list of the walk. The interval target passes
+ * one here: `compileToIntervalTarget()` returns `success: false` for an
+ * operator with no interval kernel, and does not throw. Every other
+ * decline gets the list of the walk in `buildInterpreterFallback()`. On a
+ * decline the list can name `DefineFunction` beside the operator that
+ * caused the decline.
  */
 export function withReferences<
   R extends {
+    success?: boolean;
     freeSymbols?: string[];
     unsupported?: string[];
     mode?: 'strict' | 'complex' | 'bigint';
@@ -1099,8 +1163,9 @@ export function withReferences<
   const refs = analyzeReferences(expr, target, varsKeys, occurrences);
   return Object.assign(
     result,
-    refs,
     {
+      freeSymbols: refs.freeSymbols,
+      unsupported: result.success === false ? refs.unsupported : [],
       freeSymbolTypes: freeSymbolTypes(
         expr,
         target,

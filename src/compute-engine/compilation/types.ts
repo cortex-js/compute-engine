@@ -3563,6 +3563,12 @@ export type CompilationResult<
    * (including its `success: false` fallback) and on successful direct-target
    * compiles (where it is `[]`).
    *
+   * The list of a result with `success: true` is always empty. A name that
+   * the expression binds (a local function, a parameter of a function
+   * literal, an index) is never in the list: when a call of such a name
+   * declines (`(f) ↦ f(2)` calls a function value, which compiled code does
+   * not do), the `error` and the `diagnostic` name it.
+   *
    * On a decline, the interpreter fallback also adds to this list the names
    * of the inputs whose static type is `unknown` or `any` (diagnostic code
    * `'untyped-input'`), also when another reason declines first, so that the

@@ -10,6 +10,9 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { parseEpsil } from '../../src/epsil/parse-epsil';
+import { resolveLibraryNames } from '../../src/epsil/resolve-library-names';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
   describe('freeSymbols on a successful compile', () => {
@@ -232,6 +235,11 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       const js = compile(expr);
       expect(js.success).toBe(true);
       expect(js.unsupported).toEqual([]);
+      // The list of a compilation that produced code is always empty, so
+      // the probe is also checked on a decline for another operator.
+      const declined = compile(ce.box(['Add', expr.json, ['Foo', 'x']]));
+      expect(declined.success).toBe(false);
+      expect(declined.unsupported).toEqual(['Foo']);
 
       // GLSL: the handler declines (returns undefined) and there is no built-in
       // Quadrance lowering → the probe surfaces it as unsupported.
@@ -249,6 +257,10 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       const expr = ce.parse('\\mathrm{Quadrance2}(x, y)');
       expect(compile(expr).unsupported).toEqual([]);
       expect(compile(expr, { to: 'glsl' }).unsupported).toEqual([]);
+      // On a decline for another operator, neither target names the head.
+      const declined = ce.box(['Add', expr.json, ['Foo', 'x']]);
+      expect(compile(declined).unsupported).toEqual(['Foo']);
+      expect(compile(declined, { to: 'glsl' }).unsupported).toEqual(['Foo']);
     });
   });
   // A symbol the TARGET bakes into the emitted code is not an input the caller
@@ -595,5 +607,173 @@ describe('COMPILE reference analysis of a declaration', () => {
         ).freeSymbols
       ).toEqual(['w']);
     }
+  });
+});
+
+// A function that the code calls by name (a user function of the engine)
+// is emitted once, outside every binder of the expression, so its body
+// reads the engine's symbols and not a local, a parameter or an index that
+// has the same name at the call. `ok` reads the engine symbol `minR`
+// (Tycho row 507).
+describe('COMPILE reference analysis of a function called inside a binder of one of its free names', () => {
+  const engine = (declared: boolean): ComputeEngine => {
+    const ce = new ComputeEngine();
+    if (declared) ce.declare('minR', 'real');
+    executeEpsil(ce, 'function ok(c) { 1 / c >= minR }');
+    return ce;
+  };
+  const inBlock = [
+    'Block',
+    ['Declare', 'minR', { dict: { value: 0.008 } }],
+    ['ok', 4],
+  ];
+
+  it('lists the name as the bare call does, although a Block local has it', () => {
+    for (const to of ['javascript', 'interval-js', 'glsl'] as const) {
+      const ce = engine(true);
+      expect(compile(ce.box(['ok', 4]), { to }).freeSymbols).toEqual(['minR']);
+      const r = compile(ce.box(inBlock as never), { to });
+      expect(r.success).toBe(true);
+      expect(r.freeSymbols).toEqual(['minR']);
+    }
+  });
+
+  it('the compiled function reads the input, not the local', () => {
+    const r = compile(engine(true).box(inBlock as never), { to: 'javascript' });
+    // 1/4 >= 0.1, and not 1/4 >= 0.5: the local value 0.008 is not read.
+    expect(r.run!({ minR: 0.1 } as never)).toBe(true);
+    expect(r.run!({ minR: 0.5 } as never)).toBe(false);
+  });
+
+  it('declines an untyped name as the bare call does', () => {
+    const ce = engine(false);
+    const bare = compile(ce.box(['ok', 4]), { to: 'javascript' });
+    const block = compile(ce.box(inBlock as never), { to: 'javascript' });
+    for (const r of [bare, block]) {
+      expect(r.success).toBe(false);
+      expect(r.diagnostic?.code).toBe('untyped-input');
+      expect(r.unsupported).toContain('minR');
+    }
+  });
+
+  it('lists the name when the binder is the index of a Sum', () => {
+    const r = compile(
+      engine(true).box([
+        'Sum',
+        ['If', ['ok', 'minR'], 1, 0],
+        ['Limits', 'minR', 1, 3],
+      ]),
+      { to: 'javascript' }
+    );
+    expect(r.success).toBe(true);
+    expect(r.freeSymbols).toEqual(['minR']);
+  });
+
+  // The body of a function is visited once. Visited first at the call
+  // inside the Block, it hid the name for the bare call too.
+  it('lists the name when a call inside a binder comes before a bare call', () => {
+    const r = compile(engine(true).box(['List', inBlock, ['ok', 5]] as never), {
+      to: 'javascript',
+    });
+    expect(r.success).toBe(true);
+    expect(r.freeSymbols).toEqual(['minR']);
+  });
+});
+
+// A compilation that produced code lowered every operator, so its
+// `unsupported` list is empty. The static walk named the definition and the
+// name of a function that a statement list defines, which the JavaScript
+// targets and Python compile as a local function (Tycho row 508).
+describe('COMPILE: `unsupported` of a program that defines a function', () => {
+  const program = (
+    source: string,
+    to: 'javascript' | 'interval-js' | 'python' | 'glsl'
+  ) => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const [ast] = parseEpsil(source);
+    return compile(ce.box(resolveLibraryNames(ast as never, source, ce)), {
+      to,
+    });
+  };
+
+  it('reports no unsupported operator for a program that compiled', () => {
+    for (const to of ['javascript', 'interval-js', 'python'] as const) {
+      const r = program('function f(t) { t + 1 }\nf(x)', to);
+      expect(r.success).toBe(true);
+      expect(r.unsupported).toEqual([]);
+      expect(r.freeSymbols).toEqual(['x']);
+    }
+    const r = program('function f(t) { t + 1 }\nf(x)', 'javascript');
+    expect(r.code).toContain('let f = ((t) => t + 1)');
+    expect(r.run!({ x: 2 } as never)).toBe(3);
+  });
+
+  it('reports no unsupported operator for a call of a local bound to a function literal', () => {
+    const r = program('const g = (k) => k + 1\ng(x)', 'javascript');
+    expect(r.success).toBe(true);
+    expect(r.unsupported).toEqual([]);
+    expect(r.run!({ x: 2 } as never)).toBe(3);
+  });
+
+  // A name that the program binds is not an operator of the target. A host
+  // reads a name of the list that has no definition as an unknown symbol.
+  it('does not report the local function when the program declines for another operator', () => {
+    const r = program('function f(t) { t + 1 }\nf(x) + Foo(x)', 'javascript');
+    expect(r.success).toBe(false);
+    expect(r.unsupported).toContain('Foo');
+    expect(r.unsupported).not.toContain('f');
+  });
+
+  // A declined result of the interval target does not go through the
+  // interpreter fallback when `fallback` is false. It keeps the list.
+  it('keeps the list of a compilation that declined without a fallback', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const r = compile(ce.box(['GammaRegularized', 'x', 2]), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(r.success).toBe(false);
+    expect(r.unsupported).toEqual(['GammaRegularized']);
+  });
+
+  it('still reports a definition that the target declines', () => {
+    // A shader target does not bind a function as a value.
+    const shader = program('function f(t) { t + 1 }\nf(x)', 'glsl');
+    expect(shader.success).toBe(false);
+    expect(shader.unsupported).toEqual(['DefineFunction']);
+    // The last statement of a block gives the value of the block, and a
+    // definition has no value.
+    const last = program('let a = x\nfunction f(t) { t + 1 }', 'javascript');
+    expect(last.success).toBe(false);
+    expect(last.unsupported).toEqual(['DefineFunction']);
+  });
+
+  // The call is a call of the local, so the body of an engine function of
+  // the same name is not read: its free name `w` is not an input.
+  it('does not list the free names of an engine function that the local hides', () => {
+    const source = 'function f(t) { t + 1 }\nf(x)';
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('w', 'real');
+    executeEpsil(ce, 'function f(t) { t * w }');
+    const [ast] = parseEpsil(source);
+    const r = compile(ce.box(resolveLibraryNames(ast as never, source, ce)), {
+      to: 'javascript',
+    });
+    expect(r.success).toBe(true);
+    expect(r.freeSymbols).toEqual(['x']);
+    expect(r.run!({ x: 2 } as never)).toBe(3);
+  });
+
+  it('reports no unsupported operator for a definition inside a loop body', () => {
+    const r = program(
+      'let t = 0\nfor i in 1..3 { t = t + g(i)\nfunction g(k) { k + 1 } }\nt',
+      'javascript'
+    );
+    expect(r.success).toBe(true);
+    expect(r.unsupported).toEqual([]);
+    expect(r.run!({} as never)).toBe(9);
   });
 });

@@ -723,8 +723,6 @@ function attemptCompileOnce(
 
   if (result.calling !== 'lambda' || typeof result.run !== 'function')
     return noCompile('structural');
-  if (result.unsupported !== undefined && result.unsupported.length > 0)
-    return noCompile('structural');
 
   // Scope discipline (D3): every consulted capture must resolve identically
   // through the lambda's own scope chain and the ambient engine scope — the
