@@ -1,3 +1,20 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`\implies`, `\iff`, `\veebar` and `\barwedge` beside the colon of a brace
+  group stay in the condition, as `\land` and `\lor` do since 0.181.1.**
+  `\{x > 0 \veebar y > 0: 2, 3\}` was a set with `Xor` over a `Colon`, with no
+  diagnostic, and it is now a `Which`. `\{x: x > 0 \implies x > 1\}` is now a
+  set-builder with the condition `x > 0 \implies x > 1`. A brace group with no
+  colon, such as `\{a \implies b\}`, stays a set of one element.
+- **`simplify()` keeps a factor in a `Sum` or a `Product` when the factor reads a
+  library-named index in a nested scope.**
+  `\sum_{i=0}^{n}\sin(\sum_{k=1}^{i}\sin(0.3k))\exp(-i)` moved the sine out of the
+  outer sum, which left `i` free and changed the value at `n = 3` from 0.2594 to
+  1.5489. An index named `i` shadows the imaginary unit, and `simplify()` gave the
+  outer index and the inner bound two different opaque names.
+
 ## 0.181.1 _2026-11-05_
 
 ### Resolved Issues

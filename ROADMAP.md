@@ -2634,24 +2634,6 @@ reproduction above is the record.
 
 ## LaTeX parsing and serialization
 
-### CE-816. A `\implies`, a `\iff` or a `\veebar` beside the colon of a brace group takes the colon
-
-**Status:** ready; defect, S.
-**Witness:** plausible; `\{x: x > 0 \implies x > 1\}` gives
-`["Set", ["Implies", ["Colon", "x", ["Less", 0, "x"]], ["Less", 1, "x"]]]`, with
-no diagnostic, and it should be a set-builder with the condition
-`x > 0 \implies x > 1`. `\{x > 0 \veebar y > 0: 2, 3\}` gives a `Set` with `Xor`
-over a `Colon`, and it should be a `Which`.
-
-These connectives bind more loosely than the colon, as `\land` and `\lor` do.
-`colonOverConnectives()` in `latex-syntax/dictionary/definitions-core.ts` moves
-the colon out of `And` and `Or` only. The fix adds the other connectives to that
-function, and adds them as condition heads to `COMPARISON_HEADS` in
-`definitions-sets.ts` and `isBraceCondition()` in `definitions-core.ts`. Check
-that a brace group with one such item and no colon, `\{a \implies b\}`, keeps its
-meaning: today it is a set of one element, and a condition head would make it
-`If(a \implies b, 1)`.
-
 ### CE-441. The LaTeX of a rest parameter or a destructuring parameter does not read back as that parameter
 
 **Status:** waits for user (design); defect.

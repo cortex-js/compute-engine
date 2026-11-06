@@ -22,6 +22,7 @@ import {
   POSTFIX_PRECEDENCE,
 } from '../types.js';
 import {
+  BRACE_GROUP_CONNECTIVES,
   colonOverConnectives,
   tryInferRangeFromElements,
 } from './definitions-core.js';
@@ -505,22 +506,33 @@ function isPiecewiseCondition(expr: MathJsonExpression): boolean {
 
 /**
  * Is `lhs: rhs` a branch of a compact piecewise, rather than a set-builder with
- * the body `lhs` and the condition `rhs`? It is when `lhs` is a condition
- * (`isPiecewiseCondition()`), with one exception: a membership in a connective,
- * with a condition after the colon, is a set-builder. So
+ * the body `lhs` and the condition `rhs`? It is when `lhs` is a condition or a
+ * logical connective, with one exception: a membership in a connective, with a
+ * condition after the colon, is a set-builder. So
  * `\{x \in A \lor x \in B: x > 0\}` is a set-builder, and
  * `\{x \in A \lor x \in B: 2\}` is a branch with the value 2.
+ *
+ * `COMPARISON_HEADS` does not list all the connectives because a brace group
+ * with no colon follows it: `\{a \land b\}` is `If(a \land b, 1)`, and
+ * `\{a \implies b\}` is a set of one element.
  */
 function isPiecewiseBranch(
   lhs: MathJsonExpression,
   rhs: MathJsonExpression
 ): boolean {
-  if (!isPiecewiseCondition(lhs)) return false;
-  const op = operator(lhs);
+  // A condition can be under a restriction, as in `isPiecewiseCondition()`.
+  const isCondition = (x: MathJsonExpression): boolean => {
+    if (operator(x) === 'If' && nops(x) === 2) {
+      const body = operand(x, 2);
+      return body !== null && isCondition(body);
+    }
+    return isPiecewiseCondition(x) || BRACE_GROUP_CONNECTIVES.has(operator(x));
+  };
+  if (!isCondition(lhs)) return false;
   return !(
-    (op === 'And' || op === 'Or') &&
+    BRACE_GROUP_CONNECTIVES.has(operator(lhs)) &&
     operands(lhs).some((x) => operator(x) === 'Element') &&
-    isPiecewiseCondition(rhs)
+    isCondition(rhs)
   );
 }
 
@@ -1289,7 +1301,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
       }
 
       // The `:` of an item separates a whole condition from a whole value, so
-      // it moves out of the item's `\land` and `\lor`.
+      // it moves out of the item's logical connectives.
       body =
         operator(body) === 'Sequence'
           ? ['Sequence', ...operands(body).map(colonOverConnectives)]

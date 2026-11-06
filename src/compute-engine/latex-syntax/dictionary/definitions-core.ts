@@ -530,21 +530,37 @@ function braceGroupElements(
 }
 
 /**
- * An item of a brace group, with its `:` moved out of its `\land` and `\lor`.
+ * The logical connectives that bind more loosely than `:` and whose value is a
+ * boolean. `Proves`, `Entails` and `Satisfies` also bind more loosely, but they
+ * state a relation between formulas and do not give a condition.
+ */
+export const BRACE_GROUP_CONNECTIVES: ReadonlySet<string> = new Set([
+  'And',
+  'Or',
+  'Xor',
+  'Nand',
+  'Nor',
+  'Implies',
+  'Equivalent',
+]);
+
+/**
+ * An item of a brace group, with its `:` moved out of its logical connectives
+ * (`BRACE_GROUP_CONNECTIVES`).
  *
- * `:` binds tighter than `\land` and `\lor`, which is right outside a brace
+ * `:` binds tighter than these connectives, which is right outside a brace
  * group. Inside one, the `:` separates a whole condition from a whole value:
  * `\{m = 1 \land z < 1: 2\}` is the condition `m = 1 \land z < 1` with the value
  * 2, and it parses as `And(m = 1, Colon(z < 1, 2))`. In the same way,
- * `\{x \in S: x > 0 \land x < 1\}` has the condition `x > 0 \land x < 1`, and it
- * parses as `And(Colon(x \in S, x > 0), x < 1)`. An item with two `:` under one
- * connective has no such reading, and it stays as it is.
+ * `\{x \in S: x > 0 \implies x > 1\}` has the condition `x > 0 \implies x > 1`,
+ * and it parses as `Implies(Colon(x \in S, x > 0), x > 1)`. An item with two `:`
+ * under one connective has no such reading, and it stays as it is.
  */
 export function colonOverConnectives(
   expr: MathJsonExpression
 ): MathJsonExpression {
   const op = operator(expr);
-  if (op !== 'And' && op !== 'Or') return expr;
+  if (!BRACE_GROUP_CONNECTIVES.has(op)) return expr;
   const ops = operands(expr).map(colonOverConnectives);
   const isColon = (x: MathJsonExpression) =>
     operator(x) === 'Colon' && nops(x) === 2;

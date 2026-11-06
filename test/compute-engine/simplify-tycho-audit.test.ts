@@ -29,7 +29,11 @@ describe('A zero times or over a list with no value yet is a list', () => {
     ['(0·L)/L', ['Divide', ['Multiply', 0, 'L'], 'L'], [0, 0, 0]],
     ['L - L', ['Subtract', 'L', 'L'], [0, 0, 0]],
     ['L - L + 1', ['Add', ['Subtract', 'L', 'L'], 1], [1, 1, 1]],
-    ['2L - 2L', ['Subtract', ['Multiply', 2, 'L'], ['Multiply', 2, 'L']], [0, 0, 0]],
+    [
+      '2L - 2L',
+      ['Subtract', ['Multiply', 2, 'L'], ['Multiply', 2, 'L']],
+      [0, 0, 0],
+    ],
   ];
 
   test.each(cases)('%s, simplified', (_, json, expected) => {
@@ -97,15 +101,15 @@ describe('A zero times or over a list with no value yet is a list', () => {
 
     test('2sin(f(x)) - 2sin(f(x)) + 1', () => {
       const ce = new ComputeEngine();
-      expect(
-        ce.parse('2\\sin(f(x))-2\\sin(f(x))+1').simplify().json
-      ).toBe(1);
+      expect(ce.parse('2\\sin(f(x))-2\\sin(f(x))+1').simplify().json).toBe(1);
     });
 
     test('a derivative has no term with a zero factor', () => {
       const ce = new ComputeEngine();
       const value = ce.box(['D', ['Multiply', 2, ['Sin', ['h', 'x']]], 'x']);
-      expect(JSON.stringify(value.evaluate().json)).not.toContain('["Multiply",0');
+      expect(JSON.stringify(value.evaluate().json)).not.toContain(
+        '["Multiply",0'
+      );
     });
 
     test('0/q after an inference of q', () => {
@@ -120,7 +124,10 @@ describe('A zero times or over a list with no value yet is a list', () => {
   describe('a division by a zero times a list', () => {
     const cases: [string, MathJsonExpression][] = [
       ['1/(L - L)', ['Divide', 1, ['Subtract', 'L', 'L']]],
-      ['(L - L)/(L - L)', ['Divide', ['Subtract', 'L', 'L'], ['Subtract', 'L', 'L']]],
+      [
+        '(L - L)/(L - L)',
+        ['Divide', ['Subtract', 'L', 'L'], ['Subtract', 'L', 'L']],
+      ],
       ['(L - L)^-1', ['Power', ['Subtract', 'L', 'L'], -1]],
       ['1/(0·L)', ['Divide', 1, ['Multiply', 0, 'L']]],
       ['x/(L - L)', ['Divide', 'x', ['Subtract', 'L', 'L']]],
@@ -263,9 +270,9 @@ describe('simplify() under a time limit', () => {
       ['Power', 'M', 64],
     ]);
     const start = Date.now();
-    expect(() =>
-      ce.withTimeLimit({ ms: 300 }, () => expr.simplify())
-    ).toThrow('Timeout exceeded');
+    expect(() => ce.withTimeLimit({ ms: 300 }, () => expr.simplify())).toThrow(
+      'Timeout exceeded'
+    );
     expect(Date.now() - start).toBeLessThan(3000);
   });
 
@@ -305,5 +312,69 @@ describe('A field that is zero wherever it is defined', () => {
     const a = ce.box(quotient);
     const b = ce.box(['Add', product, 0.001]);
     for (let i = 0; i < 50; i++) expect(a.isIdenticallyEqual(b)).not.toBe(true);
+  });
+});
+
+describe('A factor that reads a shadowed index in a nested scope', () => {
+  // The index `i` shadows the imaginary unit, so simplify() replaces it with an
+  // opaque name. An inner bound `i` is the same binding as the outer index, so
+  // it gets the same name, and the factor stays in the sum.
+  function check(latex: string, declare: string[] = []): void {
+    const ce = new ComputeEngine();
+    for (const name of declare) ce.declare(name, 'real');
+    const original = ce.parse(latex);
+    const simplified = original.simplify();
+    expect(simplified.unknowns).toEqual(original.unknowns);
+    ce.assign(original.unknowns[0], 3);
+    expect(simplified.N().re).toBeCloseTo(original.N().re, 10);
+  }
+  const summand = '\\sin(\\sum_{k=1}^{i}\\sin(0.3k))\\exp(-i)';
+
+  test('an inner upper bound', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse(`\\sum_{i=0}^{n}${summand}`);
+    expect(expr.simplify().operator).toBe('Sum');
+    expect(expr.simplify().unknowns).toEqual(['n']);
+    check(`\\sum_{i=0}^{n}${summand}`);
+  });
+
+  test('an outer bound that holds a declared symbol', () => {
+    check(`\\sum_{i=0}^{\\lfloor t\\rfloor}${summand}`, ['t']);
+  });
+
+  test('an inner lower bound', () => {
+    check('\\sum_{i=0}^{n}\\sin(\\sum_{k=i}^{3}\\sin(0.3k))\\exp(-i)');
+  });
+
+  test('an inner Product', () => {
+    check('\\sum_{i=0}^{n}\\sin(\\prod_{k=1}^{i}\\sin(0.3k))\\exp(-i)');
+  });
+
+  test('an outer Product', () => {
+    check('\\prod_{i=1}^{n}\\sin(\\sum_{k=1}^{i}\\sin(0.3k))\\exp(-i)');
+  });
+
+  test('two inner sums', () => {
+    check(
+      '\\sum_{i=0}^{n}(\\sum_{k=1}^{i}\\sin(0.3k))(\\sum_{j=1}^{i}\\sin(0.2j))\\exp(-i)'
+    );
+  });
+
+  test('a factor with no index still moves out', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse(
+      '\\sum_{i=0}^{n}\\sin(\\sum_{k=1}^{4}\\sin(0.3k))\\exp(-i)'
+    );
+    expect(expr.simplify().operator).toBe('Multiply');
+    check('\\sum_{i=0}^{n}\\sin(\\sum_{k=1}^{4}\\sin(0.3k))\\exp(-i)');
+  });
+
+  test('an inner sum that binds the same name is a separate index', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse(
+      '\\sum_{i=0}^{n}\\sin(\\sum_{i=1}^{2}\\sin(0.3i))\\exp(-i)'
+    );
+    expect(expr.simplify().operator).toBe('Multiply');
+    check('\\sum_{i=0}^{n}\\sin(\\sum_{i=1}^{2}\\sin(0.3i))\\exp(-i)');
   });
 });

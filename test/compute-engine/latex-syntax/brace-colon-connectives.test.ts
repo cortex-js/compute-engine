@@ -116,7 +116,103 @@ describe('A membership in a connective before the colon', () => {
   });
 });
 
+describe('The other logical connectives beside the colon', () => {
+  const x = ['Less', 0, 'x'];
+  const y = ['Less', 0, 'y'];
+
+  test.each([
+    ['\\veebar', 'Xor'],
+    ['\\barwedge', 'Nand'],
+    ['\\implies', 'Implies'],
+    ['\\Rightarrow', 'Implies'],
+    ['\\iff', 'Equivalent'],
+    ['\\Leftrightarrow', 'Equivalent'],
+  ])('%s before the colon gives a branch', (latex, head) => {
+    expect(json(`\\{x > 0 ${latex} y > 0: 2, 3\\}`)).toEqual([
+      'Which',
+      [head, x, y],
+      2,
+      'True',
+      3,
+    ]);
+    expect(json(`\\{x > 0 ${latex} y > 0: 2\\}`)).toEqual([
+      'Which',
+      [head, x, y],
+      2,
+    ]);
+  });
+
+  test('a connective in the condition of a set-builder', () => {
+    expect(json('\\{x: x > 0 \\implies x > 1\\}')).toEqual([
+      'Set',
+      'x',
+      ['Condition', ['Implies', ['Greater', 'x', 0], ['Greater', 'x', 1]]],
+    ]);
+  });
+
+  test('a brace group after an expression', () => {
+    expect(json('e\\{x > 0 \\veebar y > 0: 2, 3\\}')).toEqual([
+      'Multiply',
+      'ExponentialE',
+      ['Which', ['Xor', x, y], 2, 'True', 3],
+    ]);
+  });
+
+  test('a connective under a restriction before the colon', () => {
+    expect(
+      new ComputeEngine().parse(
+        '\\{\\operatorname{Implies}(a,b)\\{c\\}: 2, 3\\}'
+      ).operator
+    ).toBe('Which');
+  });
+
+  test('a tighter connective stays inside the condition', () => {
+    expect(json('\\{a = 1 \\implies b = 1 \\land c = 1: 2\\}')).toEqual([
+      'Which',
+      [
+        'Implies',
+        ['Equal', 'a', 1],
+        ['And', ['Equal', 'b', 1], ['Equal', 'c', 1]],
+      ],
+      2,
+    ]);
+  });
+
+  test('a membership in a connective, with a condition after the colon', () => {
+    const value = new ComputeEngine().parse(
+      '\\{x \\in A \\veebar x \\in B: x > 0\\}'
+    );
+    expect(value.operator).toBe('Set');
+    expect(JSON.stringify(value.json)).toContain('Condition');
+  });
+
+  test('the value of the condition selects the branch', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('\\{x > 0 \\veebar y > 0: 2, 3\\}');
+    ce.assign('x', 1);
+    ce.assign('y', -1);
+    expect(expr.evaluate().json).toBe(2);
+    ce.assign('y', 1);
+    expect(expr.evaluate().json).toBe(3);
+  });
+});
+
 describe('Forms that the brace-group rule does not change', () => {
+  test.each([
+    ['\\implies', 'Implies'],
+    ['\\iff', 'Equivalent'],
+    ['\\veebar', 'Xor'],
+  ])('%s with no colon is a set of one element', (latex, head) => {
+    expect(json(`\\{a ${latex} b\\}`)).toEqual(['Set', [head, 'a', 'b']]);
+  });
+
+  test('a relation between formulas before the colon', () => {
+    expect(json('\\{a \\vdash b: c\\}')).toEqual([
+      'Set',
+      ['Proves', 'a', ['Colon', 'b', 'c']],
+    ]);
+  });
+
   test('a condition with no colon', () => {
     expect(json('\\{x > 0 \\land x < 1\\}')).toEqual([
       'If',

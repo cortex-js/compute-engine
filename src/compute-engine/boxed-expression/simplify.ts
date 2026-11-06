@@ -1664,7 +1664,7 @@ function withOperands(expr: Expression, ops: Expression[]): Expression {
  *
  * The operands of a call occurrence are searched for other occurrences
  * first, and `f` receives these operands, with their occurrences replaced,
- * as its third argument. When `f` returns `undefined` for a call, the call is
+ * as its last argument. When `f` returns `undefined` for a call, the call is
  * kept with its original operands: a caller that only searches returns
  * `undefined` for each occurrence.
  *
@@ -1677,16 +1677,27 @@ function withOperands(expr: Expression, ops: Expression[]): Expression {
  * scope chain while the expression is simplified, so
  * `shadowedLibraryNames()` does not find them.
  *
- * `f` also receives the innermost local scope that contains the
- * occurrence.
+ * `f` also receives the innermost local scope that contains the occurrence,
+ * and the local scope in `expr` that binds its name (`undefined` when no local
+ * scope in `expr` binds it). A nested scope that does not bind the name reads
+ * the same binding as the scope around it: in
+ * `Sum(Sin(Sum(k, Limits(k, 1, i))), Limits(i, 0, n))`, the `i` in the inner
+ * bound is the index of the outer sum.
+ *
+ * A limit of this binder test: a bound of a sum that binds the name itself is
+ * read as that binding, although the interpreter reads it from the enclosing
+ * binding. So in `Sum(Sin(Sum(i, Limits(i, 1, i))), Limits(i, 0, n))`, the
+ * simplification treats the inner bound as separate from the outer index.
  */
 function mapShadowedOccurrences(
   expr: Expression,
   names: ReadonlySet<string>,
   scope: Expression['localScope'],
+  binders: ReadonlyMap<string, Expression['localScope']>,
   f: (
     x: Expression,
     scope: Expression['localScope'],
+    binder: Expression['localScope'],
     ops?: Expression[]
   ) => Expression | undefined
 ): Expression {
@@ -1694,7 +1705,8 @@ function mapShadowedOccurrences(
   if (isSymbol(expr)) {
     if (!names.has(expr.symbol)) return expr;
     const def = libraryDefinition(ce, expr.symbol);
-    if (isValueDef(def) && def.value.isConstant) return f(expr, scope) ?? expr;
+    if (isValueDef(def) && def.value.isConstant)
+      return f(expr, scope, binders.get(expr.symbol)) ?? expr;
     return expr;
   }
   if (!isFunction(expr)) return expr;
@@ -1702,11 +1714,18 @@ function mapShadowedOccurrences(
     names.has(expr.operator) &&
     isOperatorDef(libraryDefinition(ce, expr.operator));
 
+  const local = expr.localScope;
   let inner = names;
+  let innerBinders = binders;
   const add = (name: string) => {
-    if (inner.has(name) || libraryDefinition(ce, name) === undefined) return;
-    if (inner === names) inner = new Set(names);
-    (inner as Set<string>).add(name);
+    if (libraryDefinition(ce, name) === undefined) return;
+    if (!inner.has(name)) {
+      if (inner === names) inner = new Set(names);
+      (inner as Set<string>).add(name);
+    }
+    if (local === undefined) return;
+    if (innerBinders === binders) innerBinders = new Map(binders);
+    (innerBinders as Map<string, Expression['localScope']>).set(name, local);
   };
   if (expr.operator === 'Function')
     for (const operand of expr.ops.slice(1)) {
@@ -1714,18 +1733,23 @@ function mapShadowedOccurrences(
       const p = optionalParameterTarget(operand);
       if (isSymbol(p)) add(p.symbol);
     }
-  const local = expr.localScope;
   if (local !== undefined)
     for (const name of libraryNamesShadowedIn(ce, local)) add(name);
 
   let changed = false;
   const ops = expr.ops.map((op, i) => {
     if (isBindingOperand(expr, i)) return op;
-    const r = mapShadowedOccurrences(op, inner, local ?? scope, f);
+    const r = mapShadowedOccurrences(
+      op,
+      inner,
+      local ?? scope,
+      innerBinders,
+      f
+    );
     if (r !== op) changed = true;
     return r;
   });
-  if (isCall) return f(expr, scope, ops) ?? expr;
+  if (isCall) return f(expr, scope, binders.get(expr.operator), ops) ?? expr;
   return changed ? withOperands(expr, ops) : expr;
 }
 
@@ -1736,7 +1760,7 @@ function hasShadowedOccurrence(
   names: ReadonlySet<string>
 ): boolean {
   let found = false;
-  mapShadowedOccurrences(expr, names, undefined, () => {
+  mapShadowedOccurrences(expr, names, undefined, new Map(), () => {
     found = true;
     return undefined;
   });
@@ -1779,15 +1803,15 @@ function hasScopedNode(expr: Expression): boolean {
  * of a constant. A shadowed constant (a user `Pi`) has no arguments, so it
  * is replaced by an opaque symbol.
  *
- * The calls of the same name in the same local scope get the same operator,
- * and the equal constants in the same local scope get the same symbol, so
- * the rules see that they are equal. An occurrence in another local scope
- * gets another name, because its name can have another definition there (a
- * parameter `Sin` and a global user function `Sin`). The result type of an
- * operator is the type of its calls (`unknown` when the calls have different
- * types), and each symbol has the type of its constant, so a rule that reads
- * the sign or the domain of a value still applies. The opaque names are
- * declared in a scope that is discarded after the simplification, and the
+ * The calls of a name with the same binding get the same operator, and the
+ * constants of a name with the same binding get the same symbol, so the rules
+ * see that they are equal, and that a factor depends on the index of a sum also
+ * when it reads the index in a nested scope. An occurrence with another binding
+ * gets another name (a parameter `Sin` and a global user function `Sin`). The
+ * result type of an operator is the type of its calls (`unknown` when the calls
+ * have different types), and each symbol has the type of its constant, so a rule
+ * that reads the sign or the domain of a value still applies. The opaque names
+ * are declared in a scope that is discarded after the simplification, and the
  * returned steps do not contain them.
  */
 function simplifyShadowedCallsMasked(
@@ -1802,10 +1826,13 @@ function simplifyShadowedCallsMasked(
   if (names.size === 0 && !hasScopedNode(expr)) return undefined;
 
   // An occurrence is identified by its name, by whether it is a call, and
-  // by its innermost local scope.
+  // by the local scope that binds its name.
   type Occurrence = {
     name: string;
     isCall: boolean;
+    binder: Expression['localScope'];
+    /** The innermost local scope of the first occurrence: the name has the
+     * same definition there as in each other occurrence. */
     scope: Expression['localScope'];
     /** The first occurrence: the constant symbol, or a call */
     value: Expression;
@@ -1817,26 +1844,33 @@ function simplifyShadowedCallsMasked(
     symbol?: Expression;
   };
   const found: Occurrence[] = [];
-  const indexOf = (x: Expression, scope: Expression['localScope']) => {
+  const indexOf = (x: Expression, binder: Expression['localScope']) => {
     const isCall = isFunction(x);
     const name = isCall ? x.operator : isSymbol(x) ? x.symbol : '';
     return found.findIndex(
-      (o) => o.scope === scope && o.isCall === isCall && o.name === name
+      (o) => o.binder === binder && o.isCall === isCall && o.name === name
     );
   };
-  mapShadowedOccurrences(expr, names, undefined, (x, scope) => {
-    const i = indexOf(x, scope);
-    if (i >= 0) found[i].types.add(x.type.toString());
-    else
-      found.push({
-        name: isFunction(x) ? x.operator : isSymbol(x) ? x.symbol : '',
-        isCall: isFunction(x),
-        scope,
-        value: x,
-        types: new Set([x.type.toString()]),
-      });
-    return undefined;
-  });
+  mapShadowedOccurrences(
+    expr,
+    names,
+    undefined,
+    new Map(),
+    (x, scope, binder) => {
+      const i = indexOf(x, binder);
+      if (i >= 0) found[i].types.add(x.type.toString());
+      else
+        found.push({
+          name: isFunction(x) ? x.operator : isSymbol(x) ? x.symbol : '',
+          isCall: isFunction(x),
+          binder,
+          scope,
+          value: x,
+          types: new Set([x.type.toString()]),
+        });
+      return undefined;
+    }
+  );
   if (found.length === 0) return undefined;
 
   // The name of each opaque operator or symbol is not used in `expr` and has
@@ -1888,8 +1922,9 @@ function simplifyShadowedCallsMasked(
         expr,
         names,
         undefined,
-        (x, scope, ops) => {
-          const o = found[indexOf(x, scope)];
+        new Map(),
+        (x, _scope, binder, ops) => {
+          const o = found[indexOf(x, binder)];
           return ops === undefined ? o.symbol : call(o.mask!, ops, x);
         }
       );
