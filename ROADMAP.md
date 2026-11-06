@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-833.
+Next free reference: CE-834.
 
 **Entry format.**
 
@@ -1759,6 +1759,27 @@ A method that does not depend on the lobes is necessary. Possible methods:
   transformation with a period of each frequency);
 - when the integrand is a known product of sines and cosines, write the integral
   as the sum of the integrals of each frequency.
+
+### CE-833. A numeric integral with a narrow peak at a bound gives 0
+
+**Status:** ready; wrong value, M.
+**Witness:** plausible; `\int_0^1 e^{-10^8 x} dx` gives `0` with `.N()`, and the value is `1e-8`.
+
+`\int_0^1 \frac{e^{-10^8 x}}{x^{0.99}} dx` also gives `0`; the value is
+`82.704`. Both results are exact zeros with no error. With the rate `10^6`,
+the second integral gives `86.52 ± 0.12` for the value `86.602`.
+
+`adaptiveQuadrature` (`numerics/gauss-kronrod.ts`) starts with 16 panels. The
+node nearest to the bound `0` is at about `2.7e-4`, where `e^{-10^8 x}`
+underflows to `0`, so every node gives `0`, the Gauss and Kronrod sums agree,
+and the result is `0` with an error of `0` and `converged`. The test for a
+feature hidden next to the end of a panel (`hiddenEdgeError`) does not sample a
+bound of the integral, because the integrand can be singular there. A possible
+fix: sample the integrand at a sequence of points that approach each bound
+(`a + (b − a)·2^(−k)`), and bisect the first panel toward the bound while these
+samples are not at the level of the nodes. `evaluate()` of the first witness
+gives the exact value, so `.N()` could also use the antiderivative when the
+quadrature result is `0`.
 
 ### CE-192. `Hypergeometric2F1` at machine precision has up to 3.7e-11 relative error
 
