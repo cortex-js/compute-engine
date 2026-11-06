@@ -1106,7 +1106,7 @@
   {
    "latex": "\\varangle Z Y X:= 180^{\\circ}-\\varangle X Y Z",
    "category": "geometry-notation",
-   "observed": "clean"
+   "observed": "'assignment-to-library-function'"
   },
   {
    "latex": "\\widehat{A B Y}=\\mu",
@@ -2364,5 +2364,5 @@
    "observed": "clean"
   }
  ],
- "lastChecked": "2026-09-21"
+ "lastChecked": "2026-11-06"
 }
