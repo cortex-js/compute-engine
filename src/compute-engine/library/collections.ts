@@ -17282,8 +17282,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // a base, the two types can differ; that nested read then declines.
       let current: OperandDescriptor = ops[0];
       for (let i = 1; i < ops.length; i++) {
-        const type =
-          context.derive('At', [current, ops[i]]) ?? ('any' as Type);
+        const type = context.derive('At', [current, ops[i]]) ?? ('any' as Type);
         // A step that is an error (an index into a scalar) ends the read: the
         // next step would read a base of type `error` as an unknown value.
         if (type === 'error') return context.engine.type('error');

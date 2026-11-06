@@ -253,19 +253,15 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
 /** The kinds of `OperandRole` (types-definitions.ts), which imports this
  * file, so the type cannot be named from here. */
 type OperandRoleKindMirror =
-  | 'value'
-  | 'held'
-  | 'statement'
-  | 'raw'
-  | 'opaque'
-  | 'bound'
-  | 'clause';
+  'value' | 'held' | 'statement' | 'raw' | 'opaque' | 'bound' | 'clause';
 
 type OperatorDefinitionFlags = {
   lazy: boolean;
   /** The role of each operand of an application. See
    * `types-definitions.ts`. */
-  operands?: (ops: ReadonlyArray<Expression>) => ReadonlyArray<
+  operands?: (
+    ops: ReadonlyArray<Expression>
+  ) => ReadonlyArray<
     | { kind: Exclude<OperandRoleKindMirror, 'bound' | 'clause'> }
     | { kind: 'bound' | 'clause'; type?: string }
   >;

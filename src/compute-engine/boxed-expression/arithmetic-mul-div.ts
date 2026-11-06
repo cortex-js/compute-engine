@@ -2655,9 +2655,7 @@ export function canonicalMultiply(
           !nonNumeric.some(
             (x) => isNumber(x) && (x.isInfinity === true || x.isNaN === true)
           ) &&
-          nonNumeric.some(
-            (x) => hasAssignedVariable(x) || isUnresolvedList(x)
-          )
+          nonNumeric.some((x) => hasAssignedVariable(x) || isUnresolvedList(x))
         )
           return ce._fn(
             'Multiply',

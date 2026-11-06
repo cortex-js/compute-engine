@@ -67,10 +67,7 @@ import type {
   OperandRole,
   TypeProvenanceEntry,
 } from '../global-types.js';
-import {
-  operandRoleSites,
-  type BindingSiteSelector,
-} from './binding-sites.js';
+import { operandRoleSites, type BindingSiteSelector } from './binding-sites.js';
 
 import {
   anonymousParameters,

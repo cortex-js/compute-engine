@@ -1437,10 +1437,7 @@ function targetShapeDimensions(
  * value can be a matrix or a tensor of any rank. A known shape gives a list
  * type with these dimensions (`tensor<cell^AxB…>`).
  */
-function reshapeResultType(
-  dims: number[] | undefined,
-  cell: Type
-): Type {
+function reshapeResultType(dims: number[] | undefined, cell: Type): Type {
   if (dims === undefined)
     return { kind: 'list', elements: cell, dimensions: null };
   if (dims.length === 0) return cell;
@@ -9328,7 +9325,8 @@ export function flattenMayOpenKeptValue(
   // or a string.
   const operand = (t: Readonly<Type>): boolean => {
     t = resolveTypeAlias(t);
-    if (typeof t !== 'string' && t.kind === 'union') return t.types.some(operand);
+    if (typeof t !== 'string' && t.kind === 'union')
+      return t.types.some(operand);
     if (t === 'never' || isSubtype(t, 'number') || isSubtype(t, 'string'))
       return false;
     if (isSubtype(t, 'list') || isSubtype(t, 'tuple')) {

@@ -38,14 +38,7 @@ const ODD_TRIG = new Set(['Arctan']);
 // Odd hyperbolic functions: f(-x) = -f(x), so |f(x)| = f(|x|). Artanh and Arcoth
 // are not in this list, for the reason given for Arcsin above: |Artanh(2)| is
 // 1.66, and Artanh(|2|) is 0.55 - 1.57i.
-const ODD_HYPER = new Set([
-  'Sinh',
-  'Tanh',
-  'Coth',
-  'Csch',
-  'Arsinh',
-  'Arcsch',
-]);
+const ODD_HYPER = new Set(['Sinh', 'Tanh', 'Coth', 'Csch', 'Arsinh', 'Arcsch']);
 
 // Even functions: f(-x) = f(x), so f(|x|) = f(x)
 const EVEN_FUNCS = new Set(['Cos', 'Sec', 'Cosh', 'Sech']);

@@ -1645,9 +1645,7 @@ function applyLiteralMapType(
   // one parameter and one collection (`x ↦ x^2` over integers gives
   // `integer<0..>` cells), and the literal's signature result otherwise.
   const perElement =
-    (readBody
-      ? literalCellType(fn, collections, args, context)
-      : undefined) ??
+    (readBody ? literalCellType(fn, collections, args, context) : undefined) ??
     functionResult(fn.type) ??
     'unknown';
   if (isSubtype(perElement, COLLECTION_SHAPE_TYPE))
