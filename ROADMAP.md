@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-835.
+Next free reference: CE-836.
 
 **Entry format.**
 
@@ -2643,6 +2643,60 @@ file.
   `\frac{\partial^2}{\partial_{x,y}} f(x,y)` (2 skips, `operators.test.ts`).
 
 ## Epsil
+
+### CE-835. An Epsil definition with a library name as its head replaces the library function for the engine
+
+**Status:** waits for user (decision); design, S. Recorded by user request
+2026-11-06.
+**Witness:** crafted; `let xs = [7, 8]\nAt(xs, k) := 5`, then `[7, 8][2]`.
+
+An Epsil function definition whose head is the MathJSON name of a library
+function (`Sin`, `At`, `Gamma`) defines that name in the scope of the program,
+and the scope of a top-level statement is the engine. So the definition
+replaces the library function for everything on the engine:
+
+- `At(xs, k) := 5` (also `At(xs, 1) = 5`) is `DefineFunction(At, …)`. After
+  it, `[7, 8][2]` gives `[5, 5]`, and so do `ce.box(['At', ['List', 7, 8], 2])`
+  and any LaTeX `L[2]` on the same engine.
+- `Sin(x) := 5` makes `sin(0)`, `Sin(0)` and LaTeX `\sin(0)` give `5`.
+  `function Gamma(x) { x + 100 }` and `Gamma(x) := x + 100` do the same for
+  `\Gamma(1)`.
+- A lowercase name only shadows: after `sin(x) := 5`, `sin(0)` is `5`, while
+  `Sin(0)` and LaTeX `\sin(0)` are `0`.
+
+This is the documented rule, not an accident: `src/epsil/docs/naming.md`
+says that a user binding shadows a library name in its scope, and that "a
+user `Add` is what `+` calls in its scope", with `function Gamma(x)` as an
+example. Two places differ from it:
+
+- The backtick spelling `` `At`(xs, 1) := 5 `` and LaTeX
+  `\operatorname{At}(L, k)\coloneq v` already rebind the list
+  (`xs = ReplaceAt(xs, 1, 5)`), while the plain spelling `At(xs, 1) := 5`
+  defines a function.
+- In LaTeX, `\sin(x)\coloneq 5` is the error `assignment-to-library-function`
+  (CE-826, user decision 2026-11-06, option (a)). The Epsil spelling has no such
+  check.
+
+Options:
+
+- **(a) An `At` head rebinds the list, as the backtick spelling does.**
+  `At(xs, k) := 5` becomes `xs = ReplaceAt(xs, k, 5)`, with the checks of an
+  element assignment. Other library heads keep the documented shadowing.
+  Recommended: `At` is the operator of indexing, and no program defines it on
+  purpose.
+- **(b) Refuse a library head in the short forms `f(x) := …` and `f(x) = …`**
+  with the error `assignment-to-library-function`, as CE-826 does in LaTeX, and
+  keep the `function` statement as the documented way to shadow. Can be done
+  with (a).
+- **(c) Keep a top-level definition of a library name local to the program**,
+  so that it does not change the engine for later LaTeX and MathJSON. This
+  changes the scope rule of every top-level Epsil statement, and needs a design.
+- **(d) Nothing:** the behavior stays as `naming.md` documents it.
+
+Files: `src/epsil/parser.ts` (the short definition forms and
+`elementAssignment()`), `src/compute-engine/library/core.ts`
+(`DefineFunction`), and `src/compute-engine/latex-syntax/dictionary/definitions-core.ts`
+(the LaTeX check of CE-826, `ASSIGNMENT_TO_LIBRARY_FUNCTION`).
 
 ### CE-831. The static check reads a `let` named `i` as the imaginary unit
 
