@@ -234,6 +234,7 @@ import {
   isString,
   isCharacter,
   isSymbol,
+  operandsForCanonicalRebuild,
   isContinuationOperand,
   isFoldBarrierProduct,
   isNotationalProduct,
@@ -2516,7 +2517,7 @@ export class BoxedFunction
       const result = this._withParseScope(() =>
         this.engine.function(
           this._operator,
-          this._ops,
+          operandsForCanonicalRebuild(this, this._ops),
           this.sourceOffsets !== undefined
             ? { metadata: { sourceOffsets: this.sourceOffsets } }
             : undefined
@@ -3122,15 +3123,19 @@ export class BoxedFunction
     // caller gave it. `isSame()` and the hash still compare a call by its
     // name (`docs/SCOPING-MODEL.md`, "Callable resolution").
     return withCallableBinding(this, () =>
-      this.engine.function(this._operator, ops, {
-        form,
-        scope: scopeForRebuild(
-          this._localScope,
-          this.engine,
-          this._operator,
-          ops
-        ),
-      })
+      this.engine.function(
+        this._operator,
+        form === 'canonical' ? operandsForCanonicalRebuild(this, ops) : ops,
+        {
+          form,
+          scope: scopeForRebuild(
+            this._localScope,
+            this.engine,
+            this._operator,
+            ops
+          ),
+        }
+      )
     );
   }
 

@@ -190,6 +190,30 @@ export function isInexactOperand(x: Expression): boolean {
   return x.isFinite === true && !x.isExact;
 }
 
+/**
+ * The operands to give to the canonical handler of `node`, built from `ops`.
+ *
+ * The `Subscript` handler reads a canonical symbol index as a value, and a
+ * written symbol index as the spelling of a name (`A_n`). A `Subscript` that is
+ * not canonical yet has a written index, although a structural or a partial form
+ * can have bound the symbol to its definition. So that index is passed as a raw
+ * symbol. Every other node keeps `ops`.
+ */
+export function operandsForCanonicalRebuild(
+  node: Expression,
+  ops: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  if (node.isCanonical || node.operator !== 'Subscript') return ops;
+  const index = ops[1];
+  if (!isSymbol(index) || !index.isCanonical) return ops;
+  const { sourceOffsets } = index;
+  const written = node.engine.symbol(index.symbol, {
+    canonical: false,
+    ...(sourceOffsets !== undefined ? { metadata: { sourceOffsets } } : {}),
+  });
+  return [ops[0], written, ...ops.slice(2)];
+}
+
 export function isFunction(
   expr: Expression | null | undefined,
   operator?: string

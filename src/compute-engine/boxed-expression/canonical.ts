@@ -166,8 +166,14 @@ function flattenForm(expr: Expression): Expression {
     );
 
   // For non-associative functions, still recurse into operands to
-  // unwrap any nested Delimiters
-  const newOps = expr.ops.map(flattenForm);
+  // unwrap any nested Delimiters. The parentheses of a subscript index are not
+  // only grouping: `A_{(n)}` reads the value of `n`, and `A_n` is a compound
+  // symbol (the `Subscript` handler in `library/core.ts`).
+  const newOps = expr.ops.map((op, i) =>
+    i === 1 && expr.operator === 'Subscript' && isFunction(op, 'Delimiter')
+      ? ce._fn('Delimiter', op.ops.map(flattenForm), { canonical: false })
+      : flattenForm(op)
+  );
   if (newOps.every((op, i) => op === expr.ops[i])) return expr;
   return ce._fn(expr.operator, newOps, { canonical: false });
 }

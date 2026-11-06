@@ -41,6 +41,7 @@ import {
   isSymbol,
   isFunction,
   isTensor,
+  operandsForCanonicalRebuild,
 } from './type-guards.js';
 import { getRuleIndex, candidateRules } from './rule-index.js';
 import { scopeForRebuild } from './binding-sites.js';
@@ -1164,10 +1165,16 @@ export function applyRule(
       // binding that the rule gave it.
       const node = expr;
       expr = withCallableBinding(node, () =>
-        ce.function(node.operator, newOps, {
-          form,
-          scope: scopeForRebuild(node.localScope, ce, node.operator, newOps),
-        })
+        ce.function(
+          node.operator,
+          form === 'canonical'
+            ? operandsForCanonicalRebuild(node, newOps)
+            : newOps,
+          {
+            form,
+            scope: scopeForRebuild(node.localScope, ce, node.operator, newOps),
+          }
+        )
       );
     }
   }

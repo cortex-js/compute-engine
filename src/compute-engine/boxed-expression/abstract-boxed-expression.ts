@@ -55,6 +55,7 @@ import {
   isFunction,
   isDictionary,
   isObject,
+  operandsForCanonicalRebuild,
 } from './type-guards.js';
 import {
   functionLiteralParameterNames,
@@ -1329,17 +1330,26 @@ export abstract class _BoxedExpression implements Expression {
     // function that its name has in the current scope, as `subs()` does
     // (`withCallableBinding()`). A node that `fn` returns keeps the binding
     // that `fn` gave it.
+    const form = structuralForm
+      ? 'structural'
+      : canonical
+        ? 'canonical'
+        : 'raw';
     return fn(
       withCallableBinding(this, () =>
-        this.engine.function(this.operator, ops, {
-          form: structuralForm ? 'structural' : canonical ? 'canonical' : 'raw',
-          scope: scopeForRebuild(
-            this.localScope,
-            this.engine,
-            this.operator,
-            ops
-          ),
-        })
+        this.engine.function(
+          this.operator,
+          form === 'canonical' ? operandsForCanonicalRebuild(this, ops) : ops,
+          {
+            form,
+            scope: scopeForRebuild(
+              this.localScope,
+              this.engine,
+              this.operator,
+              ops
+            ),
+          }
+        )
       )
     );
   }

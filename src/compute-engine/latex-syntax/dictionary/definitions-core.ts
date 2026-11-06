@@ -3938,12 +3938,13 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           operator(sub) === 'Sequence' && nops(sub) > 1
             ? flatIndices(operands(sub))
             : null;
+        const index = indices
+          ? indices.map((x) => serializer.serialize(x)).join(', ')
+          : serializer.serialize(sub);
         return (
           (braced ? `{${lhs}}` : lhs) +
           '_{' +
-          (indices
-            ? indices.map((x) => serializer.serialize(x)).join(', ')
-            : serializer.serialize(sub)) +
+          (indexReadsAsCompoundName(sub) ? `(${index})` : index) +
           '}'
         );
       }
@@ -6301,6 +6302,28 @@ export function latexToDelimiterShorthand(s: string): string | undefined {
       return key;
 
   return undefined;
+}
+
+/**
+ * True when a subscript index is an expression, but its LaTeX reads back as a
+ * part of a compound symbol. A product of names and numbers is written with
+ * adjacent tokens, so `Subscript(A, Multiply(m, n))` written `A_{mn}` reads back
+ * as the symbol `A_mn`. A multiple of the imaginary unit is written with a
+ * command, so `A_{\imaginaryI}` reads back as the symbol `A_ImaginaryUnit`. In
+ * parentheses, each one reads back as written: `A_{(mn)}`.
+ */
+function indexReadsAsCompoundName(index: MathJsonExpression | null): boolean {
+  const op = operator(index);
+  if (op === 'Complex') return machineValue(operand(index, 1)) === 0;
+  return (
+    op === 'Multiply' &&
+    operands(index).every(
+      (x) =>
+        symbol(x) !== null ||
+        isNumberExpression(x) ||
+        operator(x) === 'Complex'
+    )
+  );
 }
 
 /** Invert the index-binding call form for serialization: `["a_", sub]` →

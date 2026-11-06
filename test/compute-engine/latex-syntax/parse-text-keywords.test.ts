@@ -187,7 +187,7 @@ describe('TRAILING QUALIFIER CLAUSES', () => {
       [
         'Equal',
         'u_n',
-        ['Multiply', 3, ['Subscript', 'u', ['Subtract', 'n', 1]]],
+        ['Multiply', 3, ['Subscript', 'u', ['Add', 'n', -1]]],
       ],
     ]);
   });
@@ -202,7 +202,7 @@ describe('TRAILING QUALIFIER CLAUSES', () => {
       [
         'Equal',
         'u_n',
-        ['Multiply', 3, ['Subscript', 'u', ['Subtract', 'n', 1]]],
+        ['Multiply', 3, ['Subscript', 'u', ['Add', 'n', -1]]],
       ],
     ]);
   });

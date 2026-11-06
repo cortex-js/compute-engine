@@ -12,6 +12,32 @@
   in the global scope. A `let` in a block or in a function body is not refused,
   and neither is a value that a call returns (`let counter = makeCounter()`).
 
+### Behavior Changes
+
+- **A function with a declared signature checks an argument when a later value
+  decides it.** With `h` declared `(integer) -> integer` and the body `2k`, and
+  `m` with no value, `h(m)` gave `2m`, so after `m := 1.5` its value was `3`.
+  `h(m)` now stays `h(m)`, and after `m := 1.5` it gives an `incompatible-type`
+  error. With `m` declared `integer`, `h(m)` still gives `2m`. At a `real` or
+  `number` parameter, the body is still applied to a symbol with no declared
+  type: `f(x)` gives `x^2` for `f` declared `(real) -> real`. But `f(x + 1)`
+  stays while `x` has no type. Declare `x` as `real` to apply the body.
+- **The index of a `Subscript` is canonical, and an index read by value keeps its
+  parentheses.** `A_{n-1}` was `["Subscript", "A", ["Subtract", "n", 1]]` and is
+  now `["Subscript", "A", ["Add", "n", -1]]`. A free `i` in an index is now the
+  imaginary unit, as it already was in `A_{i,j}`: `A_{i+1}` holds
+  `["Complex", 1, 1]`. Declare `i` to use it as a variable. `A_{(n)}` and
+  `A_{n+0}` are now `["Subscript", "A", ["Delimiter", "n"]]`, written `A_{(n)}`.
+  The form `["Subscript", "A", "n"]` read back as the symbol `A_n`, so that
+  `\sum_{n=1}^{3} A_{(n)}` gave `3A_n` after `simplify()`. It now stays a sum,
+  whose value is `A_1+A_2+A_3`. A product index is now written in
+  parentheses, `A_{(mn)}`, because `A_{mn}` reads back as the symbol `A_mn`.
+  `A_{(3)}` is now the symbol `A_3`. `ce.function('Subscript',
+  [ce.symbol('A'), ce.symbol('n')])` now reads the value of `n`: use
+  `ce.symbol('A_n')` for the compound symbol. `["Subscript", "ExponentialE", "n"]`
+  is now the symbol `e_n`, and `i_{k+1}` with `k := 3` is now the symbol `i_4`,
+  as `e_{k+1}` is `e_4`.
+
 ### Resolved Issues
 
 - **A `let` or `const` that is refused keeps the value of the name from an

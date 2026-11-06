@@ -3672,6 +3672,18 @@ function writtenSymbolName(
   return name;
 }
 
+/**
+ * The name of the base of a subscript, as it is written. The base `i` is the
+ * canonical literal `Complex(0, 1)`, not a symbol, and it names a family of
+ * symbols as `e` does: `i_3` is a symbol.
+ */
+function writtenBaseName(
+  expr: Parameters<typeof sym>[0]
+): string | undefined {
+  if (isNumber(expr) && expr.re === 0 && expr.im === 1) return 'i';
+  return writtenSymbolName(expr);
+}
+
 /** The text a subscript operand contributes to a compound symbol name: a
  * string literal's text (which may be empty), a symbol's name, or a small
  * integer's spelling. */
@@ -10422,8 +10434,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
        * - `x_0` -> Symbol "x_0"
        * - `x_n` -> Symbol "x_n"
        * - `x_{\text{max}}` -> Symbol `x_max`
-       * - `x_{(n+1)}` -> `At(x, n+1)`
-       * - `x_{n+1}` ->  `Subscript(x, n+1)`
+       * - `x_{n+1}` -> `Subscript(x, n+1)`, and so does `x_{(n+1)}`
+       * - `x_{(n)}` -> `Subscript(x, Delimiter(n))`, and so does `x_{n+0}`: the
+       *   index is the value of `n`, not the name `n`
+       * - `x_{(0)}` -> Symbol "x_0", and so does `x_{0+0}`
        */
 
       // The last (subscript) argument can include a delimiter that
@@ -10524,15 +10538,24 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             )
           );
         let [op1] = ops;
-        const op2 = ops[1];
+        // A rebuild gives back the marker of an index read by value (see
+        // below) when it rewrites only the base. The branches that follow read
+        // the index that it marks.
+        const op2 =
+          isFunction(ops[1], 'Delimiter') &&
+          ops[1].isCanonical &&
+          ops[1].nops === 1
+            ? ops[1].op1
+            : ops[1];
         // Save the raw symbol name BEFORE canonicalization, so that
         // `i` stays `i` (not `ImaginaryUnit`) and `e` stays `e`
         // (not `ExponentialE`) when creating compound symbols. A symbol in
-        // parentheses is the symbol: `(x)_0` is `x_0`, as `x_0` is.
+        // parentheses is the symbol: `(x)_0` is `x_0`, as `x_0` is. A rebuild
+        // gets the canonical base, which has the same written name.
         const rawName =
-          sym(op1) ??
+          writtenBaseName(op1) ??
           (isFunction(op1, 'Delimiter') && op1.nops === 1
-            ? sym(op1.op1)
+            ? writtenBaseName(op1.op1)
             : undefined);
 
         op1 = op1.canonical;
@@ -10596,11 +10619,22 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // reads the canonical base, and gives the type `symbol` for each of
         // these. A `Subscript` kept with that type was not a number, so
         // `(x)_0·y` became a `Tuple` and `x2_1 + y` a type error.
-        const baseName = rawName ?? op1Name;
+        const baseName = rawName ?? writtenBaseName(op1);
+        // A symbol operand that is written, in a raw or a structural form, is
+        // the spelling of a name: `["Subscript", "A", "n"]` is the symbol
+        // `A_n`. A symbol that is already canonical is a value. It comes from
+        // an operation that rewrites operands (`subs()`, `map()`, `replace()`,
+        // `simplify()`) and rebuilds this node from the results: `A_{n+m}` with
+        // `m` replaced by 0 is the index `n`, read by value. It can also come
+        // from a host that passes `ce.symbol('n')`. A node that is not canonical
+        // passes a written index as a raw symbol
+        // (`operandsForCanonicalRebuild()`).
+        const isWrittenName =
+          sym(op2) !== undefined && !(op2.isCanonical && op2.canonical === op2);
         if (baseName) {
           const subStr =
             (isString(op2) ? op2.string : undefined) ??
-            sym(op2) ??
+            (isWrittenName ? sym(op2) : undefined) ??
             compoundIndexDigits(asSmallInteger(op2));
 
           if (subStr) return ce.symbol(baseName + '_' + subStr);
@@ -10619,16 +10653,43 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           }
         }
 
-        // Unwrap Delimiter (parentheses) from the subscript expression
-        // e.g., `A_{(n+1)}` -> `["Subscript", "A", ["Add", "n", 1]]`
-        let sub = op2;
-        if (isFunction(op2, 'Delimiter')) sub = op2.op1.canonical;
+        // The index is an expression. Parentheses only say so, and are not
+        // part of its value: `A_{(n+1)}` and `A_{n+1}` are both
+        // `["Subscript", "A", ["Add", "n", 1]]`. The index is canonicalized
+        // here, in the scope of the enclosing binder, like any other operand.
+        const index = (isFunction(op2, 'Delimiter') ? op2.op1 : op2).canonical;
 
-        return ce._fn('Subscript', [op1, sub]);
+        if (baseName) {
+          // `["Subscript", "A", "n"]` is the spelling of the compound symbol
+          // `A_n` (above). An expression index whose canonical form is a bare
+          // symbol, `A_{(n)}` or `A_{n+0}`, is read by value: in
+          // `\sum_{n=1}^{3} A_{n+0}` it gives `A_1 + A_2 + A_3`, not `3 A_n`.
+          // It keeps its parentheses as a marker,
+          // `Subscript(A, Delimiter(n))`, written `A_{(n)}`, so that the
+          // MathJSON and the LaTeX read back with the same meaning. This is
+          // the one place that makes a canonical `Delimiter` with a single
+          // operand. A rewrite rebuilds it as a bare canonical symbol, and this
+          // branch makes it again. A host that reads the index gets the marker
+          // too, and its value is the value of the symbol. A base that is not a
+          // name has no compound symbol to be confused with, and needs no
+          // marker.
+          if (sym(index) !== undefined)
+            return ce._fn('Subscript', [op1, ce._fn('Delimiter', [index])]);
+
+          // An index whose canonical form is a literal has one meaning, the
+          // name that the literal gives: `A_{(3)}` and `A_{3+0}` are `A_3`.
+          const part =
+            (isString(index) ? index.string : undefined) ??
+            compoundIndexDigits(asSmallInteger(index));
+          if (part) return ce.symbol(baseName + '_' + part);
+        }
+
+        return ce._fn('Subscript', [op1, index]);
       },
 
       evaluate: (ops, { engine: ce, numericApproximation }) => {
         const [base, subscript] = ops;
+        const baseName = writtenBaseName(base);
 
         // Check if base is a symbol with a subscriptEvaluate handler
         if (isSymbol(base)) {
@@ -10655,7 +10716,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             // handler's to define, so none of them is a compound symbol.
             return result;
           }
+        }
 
+        if (baseName !== undefined) {
           // A compound subscript on a plain symbol — `x_{k+1}`, kept as a
           // `Subscript` at canonicalization because its index is an
           // expression — names the same family of symbols the simple form
@@ -10666,8 +10729,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // (the three spellings the canonical handler folds into a compound
           // name) resolves to that compound symbol, which then evaluates to
           // its value if one is assigned. The base and a symbol index use
-          // their WRITTEN names (`writtenSymbolName`). Any other index keeps
-          // the expression symbolic, with the evaluated index:
+          // their WRITTEN names (`writtenBaseName`, `writtenSymbolName`). Any
+          // other index keeps the expression symbolic, with the evaluated index:
           // `Subscript(x, 3.5)` for `k := 2.5`, `Subscript(x, -2)` for
           // `k := -3`.
           const evaluated = subscript.evaluate({ numericApproximation });
@@ -10677,7 +10740,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             compoundIndexDigits(asSmallInteger(evaluated));
           if (part !== undefined && part !== '')
             return ce
-              .symbol(`${writtenSymbolName(base)}_${part}`)
+              .symbol(`${baseName}_${part}`)
               .evaluate({ numericApproximation });
           if (!evaluated.isSame(subscript))
             return ce._fn('Subscript', [base, evaluated]);
