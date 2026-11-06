@@ -2505,8 +2505,8 @@ reproduction above is the record.
 
 ### CE-826. `a + b := 5` replaces the library function `Add` for the whole engine
 
-**Status:** waits for user (decision); wrong value. Found 2026-11-05 in the review
-of the fix for Tycho's report of `L[k] := 5`. Also at HEAD
+**Status:** ready; wrong value. User decision 2026-11-06: option (a), "error".
+Found 2026-11-05 in the review of the fix for Tycho's report of `L[k] := 5`. Also at HEAD
 `985c6373491d3ce687e906443da19314916535f9`.
 **Witness:** plausible; after evaluating `a+b\coloneq 5`, `Add(1, 2)` gives 5; it gives 3 before.
 
