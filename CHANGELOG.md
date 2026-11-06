@@ -300,6 +300,12 @@
   `[True, False, True]`. `And(False, c, u > 0)` gave the scalar `False`, and now
   gives `[False, False, False]`. When the two lists have different lengths, the
   result is now the error `incompatible-dimensions`.
+- **The type of a block no longer reads a variable outside the block that has
+  the name of a local of the block.** With `n = [1, 2]`, the type of
+  `Block(Declare(n, "real", 2), n + 1)` was `list<real>`, and its value is `3`.
+  The type is now `real`. In Epsil, with the same `n`, the type of
+  `function f() { let n: real = 2; n + 1 }` was `() -> list<real>` and is now
+  `() -> real`. The values did not change.
 
 ## 0.181.1 _2026-11-05_
 

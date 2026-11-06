@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-834.
+Next free reference: CE-835.
 
 **Entry format.**
 
@@ -144,19 +144,6 @@ The arm `foo(L)` has the type `list<unknown^3>`. `elementwiseResultType()` in
 result claims integer cells that a later value of `foo` does not have. The
 result element type must admit the values of an `unknown` arm, for example
 `list<unknown^3>`.
-
-### CE-827. The type of a block local reads a global of the same name
-
-**Status:** ready; defect, S.
-**Witness:** plausible; with `n := [1, 2]`, `Block(Declare(n, "real", 2), n + 1)` (in Epsil, `let n: real = 2; n + 1`) is typed `list<real>`, and its value is `3`, of type `3`.
-
-The type is read after the scope of the block was left, so the operand view of
-the broadcast lift reads `.value` of the local `n`. Its binding cannot be
-reached, and `bindingInContext()` (`boxed-expression/binders.ts`) answers with
-the global `n` by name. A parameter of a function literal has the same read,
-and a type computation refuses it (`readsNoOtherBinding()`). The fix extends
-that test to a block local. A run of the block replaces the definition of a
-local (`sweptHomeBinding()`), and that read must keep its value in the run.
 
 ### CE-545. A call over an `unknown` operand and over the wide CE-502 form are typed by different rules
 
@@ -514,6 +501,26 @@ A running sum of matrix rows is a one-line program; file says "check intent" fir
 reproduction above is the record.
 
 ## Evaluation, canonical forms and scoping
+
+### CE-834. An asynchronous run of a block does not end when a global with the name of a local holds a list
+
+**Status:** ready; defect, S.
+**Witness:** plausible; with `n := [1, 2]`, `ce.box(['Block', ['Declare', 'n', "'real'", 2], ['Add', 'n', 1]]).evaluateAsync()` does not end: the heap grows until the process stops (measured with a limit of 1 GB). `evaluate()` gives `3`.
+
+Without the global `n`, or with `n := 5`, the asynchronous run gives `3`. A
+stack trace taken in the loop shows the asynchronous evaluation of `n + 1`
+(`boxed-expression/boxed-function.ts`, the test
+`hasUnresolvedCollectionOperand(this.ops, isBroadcastableCollection)` of the
+asynchronous broadcast step), which reads `.value` of the operand `n` through
+`bindingInContext()` (`boxed-expression/binders.ts`). The probable cause, not
+verified: this read does not find the binding that the run made for the local
+`n`, and reads the global by name, so the operand counts as the list `[1, 2]`,
+the sum is applied to each element, and each element evaluates `n + 1` again.
+A type computation no longer makes this read
+(`isOutsideBindingOfBlockLocal()`), but an evaluation keeps the read by name.
+The fix finds why the binding of the run is not in the chain of that read.
+Then add an asynchronous case to
+`test/compute-engine/ce-827-block-local-type-ignores-same-name-binding.test.ts`.
 
 ### CE-832. A call boxed before its head is declared as a data symbol does not evaluate to `expected-function`
 

@@ -1550,6 +1550,15 @@ that frame. During type computation, `withStaticTypingView` changes lookup:
   reads no binding, not another binding of the same name. A read outside a type
   computation still reads the name. The first such read of an engine gives its
   type computations cache keys of their own (`staticViewDiverges()`).
+- An occurrence of a block local (a `Declare` statement or a first assignment)
+  follows the same rule when the only binding of its name that the lookup
+  reaches is not a local of that block. With `n := [1, 2]`,
+  `Block(Declare(n, "real", 2), n + 1)` is typed `real`, not `list<real>`. The
+  binding that a run of the block makes for the local, in the scope of the
+  block, is the same variable, and a type computation in the run reads it.
+  When the block is the body of a function literal, the run makes that binding
+  in the call frame, and a type computation in the call reads the hidden
+  binding of the body scope, as the first item says.
 
 A captured frame reached through a different scope chain, or no longer on the
 current stack, remains visible. Such a frame belongs to the closure made by the

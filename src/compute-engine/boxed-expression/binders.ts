@@ -461,6 +461,18 @@ function creationParentOf(scope: Scope): Scope | undefined {
  * in a call. A binding of the same name is another variable: with
  * `n := [1, 2]`, the operand `n` of `n ↦ n + 1` does not hold a list, so the
  * literal is typed `(n) -> number`, not `(n) -> list<number>`.
+ *
+ * A local of a block (a `Declare` statement or a first assignment) has the
+ * same exception: the type of a block is read after the scope of the block
+ * was left, and the local has a value only in a run of the block. With
+ * `n := [1, 2]`, the operand `n` of `Block(Declare(n, "real", 2), n + 1)`
+ * does not hold a list, so the block is typed `real`, not `list<real>`. The
+ * binding that a run of the block made for the local is the same variable,
+ * and a type computation in the run reads it
+ * (`isOutsideBindingOfBlockLocal()`). In a call of a function literal whose
+ * body is the block, a type computation reads the binding that the
+ * canonicalization made, which has no value (`staticBindingIn()`,
+ * `static-typing-view.ts`).
  */
 export function valueDefinitionInContext(
   ce: ComputeEngine,
@@ -530,7 +542,9 @@ export function bindingInContext(
         );
         if (caller !== undefined) return caller;
         const other = sweptHomeBinding(name, own, scope, found);
-        return readsNoOtherBinding(ce, own, other) ? undefined : other;
+        return readsNoOtherBinding(ce, name, own, other, start)
+          ? undefined
+          : other;
       }
     }
     scope = staticParentOf(scope);
@@ -539,7 +553,7 @@ export function bindingInContext(
     const caller = callerBinding(ce, name, own, start, null);
     if (caller !== undefined) return caller;
     return skippedBinder !== undefined &&
-      readsNoOtherBinding(ce, own, skippedBinder)
+      readsNoOtherBinding(ce, name, own, skippedBinder, start)
       ? undefined
       : skippedBinder;
   }
@@ -547,28 +561,96 @@ export function bindingInContext(
 }
 
 /**
- * True when an occurrence bound to `own`, about to read `other`, a binding of
- * the same name that is not its own, reads no binding: a type computation
- * reads a parameter of a function literal. See the exception in the comment
- * of `valueDefinitionInContext()`.
+ * True when an occurrence of `name` bound to `own`, about to read `other`, a
+ * binding of the same name that is not its own, reads no binding: a type
+ * computation reads a parameter of a function literal, or a local of a block
+ * in a binding that is not a local of that block. See the exceptions in the
+ * comment of `valueDefinitionInContext()`. `start` is the scope where the
+ * walk of `bindingInContext()` started.
  *
- * Any other read of such a parameter keeps the read by name. When `other`
- * holds a value, it gives another answer than the type computation, so it is
- * recorded, and the caches keep the two answers under different keys from now
- * on (`noteParameterReadByName()`). A binding with no value answers as the
- * type computation does, and a later assignment to it moves the keys of the
- * caches, so the next read comes back here.
+ * Any other read of such a parameter or local keeps the read by name. When
+ * `other` holds a value, it gives another answer than the type computation,
+ * so it is recorded, and the caches keep the two answers under different keys
+ * from now on (`noteParameterReadByName()`). A binding with no value answers
+ * as the type computation does, and a later assignment to it moves the keys
+ * of the caches, so the next read comes back here.
+ *
+ * The record is for the life of the engine, and it costs cache hits in every
+ * later type computation. A program reaches it when a function literal that
+ * reads a local of its block is called after the run of the block ended, and
+ * a binding of the same name outside the block holds a value: with `x := 5`,
+ * a call of the result of `Block(Declare(x, "real", 2), y ↦ x + y)`.
  */
 function readsNoOtherBinding(
   ce: ComputeEngine,
+  name: string,
   own: BoxedBaseDefinition,
-  other: BoxedDefinition
+  other: BoxedDefinition,
+  start: Scope | null
 ): boolean {
-  if (!isFunctionLiteralParameter(own)) return false;
-  if (inStaticTypingView(ce)) return true;
-  if ('value' in other && other.value.value !== undefined)
-    noteParameterReadByName(ce);
+  const inView = inStaticTypingView(ce);
+  // Outside a type computation, only a binding with a value is recorded:
+  // answer before the walk of the chain in `isOutsideBindingOfBlockLocal()`.
+  if (!inView && !('value' in other && other.value.value !== undefined))
+    return false;
+  if (
+    !isFunctionLiteralParameter(own) &&
+    !isOutsideBindingOfBlockLocal(name, own, other, start)
+  )
+    return false;
+  if (inView) return true;
+  noteParameterReadByName(ce);
   return false;
+}
+
+/**
+ * True when `own` is a local of a block (`_blockLocal`: the binding that the
+ * canonicalization of the block made for a `Declare` statement or for a
+ * first assignment), and `other`, a binding of the name `name`, is not a
+ * local of that block: it is another variable with the same name, for
+ * example a global.
+ *
+ * A run of the block removes `own` from the scope of the block and makes a
+ * new binding for the local (`sweepCanonicalizationBindings()`,
+ * `library/control-structures.ts`; `createBlockLocals()` and
+ * `declareAssignmentLocals()`, `function-utils.ts`): in the scope of the
+ * block, or, when the block is the body of a function literal, in the call
+ * frame, which is a runtime copy of that scope. That binding is the same
+ * variable. So `other` is a local of the block when a scope of the chain
+ * that starts at `start` is the scope of the block, or a runtime copy of it
+ * (`scopeStandsFor()`), and holds `other` for `name`.
+ *
+ * The scope of the block is the scope where the canonicalization declared
+ * the local (`markCallableHome()`), and the scope that a run removed it from
+ * (`markSweptBinding()`); a scope of the chain that stands for one of the
+ * two counts. A local for which neither is recorded gives `false`: it keeps
+ * the read by name.
+ *
+ * `other` can also be the record of `own` that the run kept
+ * (`_sweptRecord`, which `sweptHomeBinding()` answers when no binding of the
+ * name is left): it is the local itself, with no value, not another variable.
+ */
+function isOutsideBindingOfBlockLocal(
+  name: string,
+  own: BoxedBaseDefinition,
+  other: BoxedDefinition,
+  start: Scope | null
+): boolean {
+  const local = staticBindingOf(own);
+  if ((local as { _blockLocal?: boolean })._blockLocal !== true) return false;
+  if ('value' in other && sameBindingDef(other.value, own)) return false;
+  const declaredIn = callableHomes.get(local);
+  const sweptFrom = (local as Swept)._sweptHome;
+  if (declaredIn === undefined && sweptFrom === undefined) return false;
+  for (let scope = start; scope; scope = staticParentOf(scope)) {
+    if (
+      !(declaredIn !== undefined && scopeStandsFor(scope, declaredIn)) &&
+      !(sweptFrom !== undefined && scopeStandsFor(scope, sweptFrom))
+    )
+      continue;
+    if (staticBindingIn(scope, name, scope === start) === other) return false;
+  }
+  return true;
 }
 
 /**
