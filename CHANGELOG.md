@@ -24,6 +24,12 @@
 
 ### Improvements
 
+- **Two more forms keep the in-place write of a compiled block local.** With
+  `xs = ReplaceAt(xs, i, v)` in a loop, `const r = xs[1]` before the loop, or a
+  `ReplaceAt(xs, 1, 0)` that is not assigned to `xs`, made the loop copy the list
+  on each pass. Now only the unassigned `ReplaceAt` makes a copy. A write with
+  more than one position keeps the copying form in these cases, because a row
+  would be shared.
 - **The compile option `iterationBudget` also limits `Loop` on the JavaScript
   and `interval-js` targets.** `compile(expr, { iterationBudget: 1e6 })` with
   `Block(k := 0, Loop(k := k + 1))` did not return, and `run({})` now throws a
@@ -81,6 +87,15 @@
   `number` parameter, the body is still applied to a symbol with no declared
   type: `f(x)` gives `x^2` for `f` declared `(real) -> real`. But `f(x + 1)`
   stays while `x` has no type. Declare `x` as `real` to apply the body.
+- **A parameter annotated on a function checks an argument when a later value
+  decides it.** With `function h(k: integer) { 2*k }` and `m` with no value,
+  `h(m)` gave `2m`, so after `m = 1.5` its value was `3`. `h(m)` now stays `h(m)`,
+  and after `m = 1.5` it gives an `incompatible-type` error. A function literal
+  applied directly or given as a callback stays as an `Apply` of the literal:
+  `((k: integer) => 2*k)(m)`. The cases where the body is still applied are those
+  of a declared signature above. A symbol at a parameter whose type admits it is
+  also applied, on a declared signature too: with `f` declared
+  `(symbol) -> symbol`, `f(q)` gives `q`.
 - **The index of a `Subscript` is canonical, and an index read by value keeps its
   parentheses.** `A_{n-1}` was `["Subscript", "A", ["Subtract", "n", 1]]` and is
   now `["Subscript", "A", ["Add", "n", -1]]`. A free `i` in an index is now the

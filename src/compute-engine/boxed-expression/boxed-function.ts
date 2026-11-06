@@ -487,6 +487,7 @@ import {
   callableApplication,
   capturedValueMismatchNow,
   exactArgumentSources,
+  isUndecidedLiteralApplication,
   lookupApplicable,
   withCallerCapturedCheck,
 } from '../function-utils.js';
@@ -16052,8 +16053,17 @@ function declaredScalarConformance(
  * `boolean` parameter applies the body. An expression over an inferred symbol
  * with a numeric type stays at a narrower parameter, also when its value
  * always fits: `h(Floor(q))` stays `h(Floor(q))`.
+ *
+ * A symbol with no value is itself a value of the type `symbol`, so at a
+ * parameter that admits it the body is applied: with
+ * `function f(s: symbol) { s }`, `f(q)` gives `q`, and the same holds for
+ * `Auto` at a parameter typed `symbol<Auto> | symbol<Manual>`.
+ *
+ * The same test applies to the parameter types that the author wrote on a
+ * function literal (`function h(k: integer) { 2*k }`), with `declared` the
+ * signature of the literal: `makeLambda`, `function-utils.ts`.
  */
-function declaredArgumentUndecided(
+export function declaredArgumentUndecided(
   declared: Type,
   ops: ReadonlyArray<Expression>
 ): boolean {
@@ -16071,6 +16081,8 @@ function declaredArgumentUndecided(
           ? opt[i - args.length].type
           : declared.variadicArg?.type;
     if (p === undefined || runtimeCheckExemptParam(p)) return false;
+    if (isSymbol(op) && isSubtype({ kind: 'symbol', name: op.symbol }, p))
+      return false;
     const type = op.type.type;
     // A collection (`Range(1, 2)`) has its value already: no later assignment
     // decides it, and the call must not stay for it. A string counts as a
@@ -16730,7 +16742,10 @@ function applyFunctionLiteralWith(
         result: Expression,
         cell: ReadonlyArray<Expression>
       ) =>
-        refusedLiteralArgumentError(result, cell, expr.operator, 0) ?? result;
+        isUndecidedLiteralApplication(result, value)
+          ? expr._withSameBinding(cell)
+          : (refusedLiteralArgumentError(result, cell, expr.operator, 0) ??
+            result);
       if (awaitBody) {
         return (async () => {
           const inContext = <T>(fn: () => T): T =>

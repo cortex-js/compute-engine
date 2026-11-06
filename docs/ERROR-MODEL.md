@@ -2000,10 +2000,24 @@ argument with no concrete value does:
   This reads the type and not how it was derived, so `h(Floor(q))` stays, although
   its value always fits.
 
-Not in this rule:
+A symbol is a value of the type `symbol`, so at a parameter that admits `symbol`
+the body is applied to it: with `f` declared `(symbol) -> symbol` and assigned
+`s ↦ s`, `f(q)` gives `q`.
 
-- An annotation on the parameter of the literal itself (`(k: integer) ↦ 2k`):
-  its application still accepts a symbolic argument.
+The same rule applies to a parameter that the author annotated on the literal
+(`makeLambda`, `function-utils.ts`). With `function h(k: integer) { 2*k }`, `h(m)`
+stays `h(m)`, and after `m = 1.5` it is an `incompatible-type` error. A literal
+applied directly stays as an inert `Apply` of the literal:
+`((k: integer) => 2*k)(m)`. So does a callback: `Map` over `[m, 1]` with
+`(k: integer) ↦ 2k` gives `[Apply(…, m), 2]`. A bare parameter beside an annotated
+one holds nothing, and neither does a type that element-type inference wrote on a
+callback parameter: `Map` over `[m, 1]` with `k ↦ 2k` gives `[2m, 2]`. An inner
+application that stays is a value of the function that holds it, and that
+function has its own rule: `w = x ↦ ((k: integer) ↦ 2k)(x)` gives
+`w(m) = Apply(…, m)`.
+
+Not in this rule, for a declared parameter and for an annotated one:
+
 - An element of a declared `broadcastable<T>` map or of a point-list map: with
   `h` declared `(broadcastable<integer>) -> integer`, `h([m, 1])` applies the
   body to `m`. An element of a list at a plain scalar parameter stays

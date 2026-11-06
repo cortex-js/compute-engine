@@ -7169,13 +7169,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           engine._typeResolver
         ),
       evaluate: (ops, { numericApproximation }) => {
-        const result = apply(ops[0], ops.slice(1));
+        const result = apply(ops[0], ops.slice(1), { mapElement: true });
         return numericApproximation ? result.N() : result;
       },
       evaluateAsync: async (ops, options) => {
         const result = await apply(ops[0], ops.slice(1), {
           ...awaitedOperandOptions(options),
           awaitStatements: true,
+          mapElement: true,
         });
         return options.engine.withEvaluationContext(options, () =>
           options.numericApproximation ? result.N() : result

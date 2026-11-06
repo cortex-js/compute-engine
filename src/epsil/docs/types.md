@@ -102,6 +102,19 @@ That call evaluates to `Error(ErrorCode("incompatible-type", "real",
 at the call site. Without the annotation the string would have flowed into the
 division and come back as something symbolic and mystifying.
 
+An argument with no value yet is checked when it gets one. While its type does
+not show that it fits, the call stays unevaluated:
+
+```epsil
+function twice(k: integer) { 2*k }
+let r = twice(m)   // twice(m)
+m = 1.5
+r                  // Error(ErrorCode("incompatible-type", "integer", "1.5"), …)
+```
+
+At a parameter typed `real` or `number`, the body is applied to a name with no
+type and no value: with `function f(x: real) { x^2 }`, `f(x)` gives `x^2`.
+
 A **return** annotation (`-> real`) is a different kind of thing: it is
 recorded in the function's signature and shown by `about`, but the current
 runtime does not reject a returned value for disagreeing with it. Write it for

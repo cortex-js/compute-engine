@@ -3,6 +3,7 @@ import {
   functionLiteralParameters,
   functionLiteralReturnType,
 } from '../../src/compute-engine/boxed-expression/function-literal';
+import { isFunction } from '../../src/compute-engine/boxed-expression/type-guards';
 import { typeToString } from '../../src/common/type/serialize';
 
 /**
@@ -243,19 +244,25 @@ describe('Phase 2 — apply-time enforcement (§6.4, §6.5)', () => {
     expect(ce.box(['Apply', typedInc, 5]).evaluate().json).toBe(6);
   });
 
-  test('an unknown-typed argument passes through and beta-reduces symbolically', () => {
+  test('an unknown-typed argument waits until a value decides the annotation', () => {
     const ce = new ComputeEngine();
-    // `q` is an undeclared symbol (type unknown) — not provably wrong, so it
-    // passes validation and the body beta-reduces.
+    // `q` is an undeclared symbol (type unknown). Its type does not show that
+    // it fits `integer`, so it is not an error yet, and the application stays.
     const r = ce.box(['Apply', typedInc, 'q']).evaluate();
-    expect(r.json).toEqual(['Add', 'q', 1]);
+    expect(isFunction(r, 'Apply')).toBe(true);
+    expect(r.isValid).toBe(true);
+    ce.assign('q', 2);
+    expect(r.evaluate().json).toBe(3);
   });
 
-  test('an argument typed `any` passes', () => {
+  test('an argument typed `any` waits until a value decides the annotation', () => {
     const ce = new ComputeEngine();
     ce.declare('h', 'any');
     const r = ce.box(['Apply', typedInc, 'h']).evaluate();
-    expect(r.json).toEqual(['Add', 'h', 1]);
+    expect(isFunction(r, 'Apply')).toBe(true);
+    expect(r.isValid).toBe(true);
+    ce.assign('h', 2);
+    expect(r.evaluate().json).toBe(3);
   });
 
   test('Map over a typed lambda error-marks only the mismatched element', () => {

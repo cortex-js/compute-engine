@@ -1065,17 +1065,6 @@ corpus uses it).
 `Max(FlatMap([1, 2], x ↦ [x, slowF(x)]))` under `evaluateAsync()` gives `Max(2, slowF(1), slowF(2))`, not 20. State: NOT STARTED. Found during the work of 2026-10-30 and 2026-10-31 (4b list); the
 reproduction above is the record.
 
-### CE-819. A global assigned after a function with a local of the same name gives an effect error, and calls of the function then fail
-
-**Status:** ready; defect, S.
-**Witness:** plausible; with `h = n ↦ Block(g := z ↦ 0, z ↦ g(z) + n)`, `g := t ↦ 9` gives the error `incompatible-type` "non-scope effects (writes outside a function require a declared `scope` effect)", and `Apply(h(1), 0)` gives the same error. Both should succeed, and `Apply(h(1), 0)` should give 1.
-
-`g` is an assignment local of `h`, so a later global `g` should not change a
-call of `h`. The assignment gives the error and still stores its value, so
-`g(0)` gives 9. The cause is not traced. The likely cause is that the effect
-inference of the body of `h` reads the write to `g` by name after the global
-exists, and counts it as a write outside the function.
-
 ### CE-820. A closure stored under a declared signature reads the bindings of the scope that stores it
 
 **Status:** ready; wrong value, S.

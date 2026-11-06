@@ -74,6 +74,7 @@ import {
   applicable,
   capturedValueMismatchNow,
   exactArgumentSources,
+  isUndecidedLiteralApplication,
   kindTypedFunctionLiteral,
   withCallerCapturedCheck,
   type ApplyOptions,
@@ -82,6 +83,7 @@ import { runWithEvaluationEffects } from '../effects-registry.js';
 import { copyContextStack } from './evaluation-epoch.js';
 
 import { DEFAULT_COMPLEXITY } from './constants.js';
+import { isThenable } from '../../common/interruptible.js';
 import { isExpression, isFunction } from './type-guards.js';
 import {
   functionLiteralBody,
@@ -2842,7 +2844,21 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           this.readsRandomFrame = inferred.readsRandomFrame;
       }
 
-      const fn = applicable(boxedFn);
+      const applyLiteral = applicable(boxedFn);
+      // When the type of an argument does not decide an annotation of the
+      // literal, the handler declines: the call keeps its name and its binding
+      // over the evaluated arguments, and a later evaluation checks the value.
+      const fn: typeof applyLiteral = (xs, options) => {
+        const result = applyLiteral(xs, options);
+        if (isThenable(result))
+          return (result as unknown as Promise<Expression | undefined>).then(
+            (value) =>
+              isUndecidedLiteralApplication(value, boxedFn) ? undefined : value
+          ) as unknown as Expression;
+        return isUndecidedLiteralApplication(result, boxedFn)
+          ? undefined
+          : result;
+      };
       // Thread the caller's options (esp. `numericApproximation` from
       // `.N()`) into the lambda: the approximation is applied INSIDE the
       // function's scope frame (see makeLambda), never by re-evaluating

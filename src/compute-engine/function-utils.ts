@@ -172,7 +172,10 @@ import {
   beginTopLevelEvaluation,
   copyContextStack,
 } from './boxed-expression/evaluation-epoch.js';
-import { markInferredTypeOperand } from './boxed-expression/inferred-annotations.js';
+import {
+  isInferredTypedParameter,
+  markInferredTypeOperand,
+} from './boxed-expression/inferred-annotations.js';
 import {
   memoDepsStillValid,
   snapshotMemoDeps,
@@ -251,6 +254,44 @@ type ValidateArgumentsFn = (
 let _validateArguments: ValidateArgumentsFn | undefined;
 export function _setValidateArguments(fn: ValidateArgumentsFn): void {
   _validateArguments = fn;
+}
+
+// Lazy reference to `declaredArgumentUndecided` (from
+// `boxed-expression/boxed-function.ts`, which imports this module). Injected
+// once by `boxed-expression/init-lazy-refs.ts` at engine load.
+type ArgumentUndecidedFn = (
+  declared: Type,
+  ops: ReadonlyArray<Expression>
+) => boolean;
+
+let _declaredArgumentUndecided: ArgumentUndecidedFn | undefined;
+export function _setDeclaredArgumentUndecided(fn: ArgumentUndecidedFn): void {
+  _declaredArgumentUndecided = fn;
+}
+
+/**
+ * The inert `Apply` nodes that a function literal answers when the type of an
+ * argument does not decide an annotation of the author, so the application
+ * waits for a later evaluation to check the value. A route that calls the
+ * literal by name replaces such a node with the call by that name
+ * (`apply()`, `applyFunctionLiteral`, `boxed-expression/boxed-function.ts`).
+ */
+const UNDECIDED_APPLICATIONS = new WeakSet<Expression>();
+
+/** True when `result` is the inert application that `literal` itself answers
+ * for an argument whose type does not decide an annotation. An inner literal
+ * can answer such a node as the value of the body of `literal`: that is a
+ * value of `literal`, and the call of `literal` does not wait. */
+export function isUndecidedLiteralApplication(
+  result: Expression | undefined,
+  literal: Expression
+): boolean {
+  return (
+    result !== undefined &&
+    UNDECIDED_APPLICATIONS.has(result) &&
+    isFunction(result, 'Apply') &&
+    result.op1 === literal
+  );
 }
 
 /***
@@ -2763,6 +2804,13 @@ function isRawFunctionValuedApplication(e: Expression): boolean {
 export type ApplyOptions = Partial<EvaluateOptions> & {
   holdArguments?: boolean;
   /**
+   * The application is one element of the map of a `broadcastable<T>` or a
+   * point-list parameter (`ApplyWhole`). An argument with no value does not
+   * make it wait (`docs/ERROR-MODEL.md`, "A symbolic argument whose type does
+   * not decide"): a length error of the mapped arguments needs the map to run.
+   */
+  mapElement?: boolean;
+  /**
    * Under `.N()`, the written arguments behind the (approximated) `args`,
    * one per argument position, `undefined` where there is none to record
    * (`exactArgumentSources`). The activation of a plain parameter records
@@ -3081,6 +3129,10 @@ function awaitedApplication(
  * wrote it, `R(3, x, y)`, for a symbol bound to a literal), and otherwise an
  * inert `Apply` of the literal. A body that evaluates to an error value does
  * NOT decline: that error is the answer (`bodyResultValue`).
+ *
+ * An application that waits because the type of an argument does not decide an
+ * annotation of the literal (`isUndecidedLiteralApplication`) has the same
+ * answer: `declined` when the caller supplies one, otherwise the inert `Apply`.
  */
 export function apply(
   fn: Expression,
@@ -3149,13 +3201,17 @@ export function apply(
   if (isThenable(result))
     return (result as unknown as Promise<Expression | undefined>).then(
       (value) =>
+        (isUndecidedLiteralApplication(value, fn) ? declined : undefined) ??
         value ??
         declined ??
         fn.engine.withEvaluationContext(options, () =>
           fn.engine.function('Apply', [fn, ...args])
         )
     ) as unknown as Expression;
-  if (result) return result;
+  if (result)
+    return isUndecidedLiteralApplication(result, fn)
+      ? (declined ?? result)
+      : result;
   return declined ?? fn.engine.function('Apply', [fn, ...args]);
 }
 
@@ -9112,9 +9168,10 @@ function makeLambda(
         }, [])
       : [];
 
-  /** `t` with each bare parameter's argument slot widened to `any`. */
-  const relaxBareParams = (t: Type): Type => {
-    if (bareParamIndexes.length === 0) return t;
+  /** `t` with the argument slot of each parameter in `indexes` widened to
+   * `any`. */
+  const relaxParamSlots = (t: Type, indexes: ReadonlyArray<number>): Type => {
+    if (indexes.length === 0) return t;
     if (typeof t === 'string' || t.kind !== 'signature') return t;
     // The slots of the parameters with a default value are in `optArgs`,
     // after the required ones: slot `i` of `optArgs` is the parameter at
@@ -9124,7 +9181,7 @@ function makeLambda(
     if (args.length + optArgs.length === 0) return t;
     let changed = false;
     const relax = (arg: NamedElement, i: number): NamedElement => {
-      if (!bareParamIndexes.includes(i)) return arg;
+      if (!indexes.includes(i)) return arg;
       changed = true;
       return { ...arg, type: 'any' as Type };
     };
@@ -9140,6 +9197,32 @@ function makeLambda(
         }
       : t;
   };
+  const relaxBareParams = (t: Type): Type =>
+    relaxParamSlots(t, bareParamIndexes);
+
+  // The parameters with no annotation that the author wrote: a bare parameter,
+  // and a parameter annotated by element-type inference (`Filter(C, z ↦ …)`).
+  // Only an annotation of the author makes a call wait for a later value
+  // (step 4b below). The type that inference wrote is only a reading of the
+  // current collection, and a function literal without an annotation applies
+  // its body to a symbolic argument.
+  //
+  // The signature of a generic literal is a contract for every position: a
+  // parameter that mentions a type variable has no annotation left to read, and
+  // its slot in the signature is exempt from the check. The argument list of a
+  // non-generic whole-signature marker is not a contract for a bare parameter.
+  const unannotatedParamIndexes = isGenericLiteral
+    ? []
+    : params.reduce<number[]>((acc, p, i) => {
+        if (
+          functionLiteralParameterType(p) === undefined ||
+          isInferredTypedParameter(optionalParameterTarget(p))
+        )
+          acc.push(i);
+        return acc;
+      }, []);
+  const hasAuthorAnnotation =
+    validateApplication && unannotatedParamIndexes.length < params.length;
 
   // The parameters annotated with a NUMERIC type (`x: number`, `n: integer`,
   // `t: real`). Two values that are not members of such a type are accepted
@@ -10036,6 +10119,7 @@ function makeLambda(
     // The rest collapse announced in step 2b: the evaluated trailing
     // arguments become ONE `Tuple` argument, so the binding below is an
     // ordinary `params.length`-ary one.
+    const uncollapsedArgs = evaluatedArgs;
     if (restIndex >= 0)
       evaluatedArgs = [
         ...evaluatedArgs.slice(0, restIndex),
@@ -10071,6 +10155,31 @@ function makeLambda(
         // the substituted arguments.
         evaluatedArgs = [...validated];
       }
+    }
+
+    // An argument with no concrete value whose type does not show that it fits
+    // the annotation of the author: the application waits, and a later
+    // evaluation checks the value. With `h = (k: integer) ↦ 2k` and `m` with
+    // no value, the result `2m` would hold no trace of the annotation, and
+    // after `m := 1.5` it would give `3`, where `h(1.5)` is an
+    // `incompatible-type` error. The inert form holds the arguments as the
+    // call gave them, because a later application collects a rest parameter
+    // again. Held arguments are expressions and not values, so they are not
+    // checked here. (`docs/ERROR-MODEL.md`, "A symbolic argument whose type
+    // does not decide".)
+    if (
+      ce.strict &&
+      hasAuthorAnnotation &&
+      options?.holdArguments !== true &&
+      options?.mapElement !== true &&
+      _declaredArgumentUndecided?.(
+        relaxParamSlots(fnExpr.type.type, unannotatedParamIndexes),
+        evaluatedArgs
+      )
+    ) {
+      const undecided = ce._fn('Apply', [fnExpr, ...uncollapsedArgs]);
+      UNDECIDED_APPLICATIONS.add(undecided);
+      return undecided;
     }
 
     // A pure literal over number-literal arguments: answer a memoized result

@@ -23,7 +23,9 @@ import { implicitCompile } from '../implicit-compile.js';
 import { _setCompile } from './stochastic-equal.js';
 
 import { validateArguments } from './validate.js';
+import { declaredArgumentUndecided } from './boxed-function.js';
 import {
+  _setDeclaredArgumentUndecided,
   _setValidateArguments,
   repairProvisionalDependents,
 } from '../function-utils.js';
@@ -47,5 +49,6 @@ _setGetPolynomialCoefficients(getPolynomialCoefficients);
 _setGetPolynomialDegree(polynomialDegree);
 _setFindUnivariateRoots(findUnivariateRoots);
 _setValidateArguments(validateArguments);
+_setDeclaredArgumentUndecided(declaredArgumentUndecided);
 _setFieldAddN(add);
 _setProvisionalRepair(repairProvisionalDependents);

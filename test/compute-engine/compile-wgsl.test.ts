@@ -1108,7 +1108,15 @@ describe('WGSL APPLIED DERIVATIVE AND MAP', () => {
 
   it('applies a constant body to each element of a list argument', () => {
     const expr = ce.box(['Apply', CONSTANT, ['List', 'a', 'b']]);
-    expect(expr.evaluate().toString()).toBe('[7,7]');
+    // The interpreter on an engine where `a` and `b` have no declared type. The
+    // declared type of this engine admits values outside `real`, so there the
+    // application waits for a value.
+    expect(
+      new ComputeEngine()
+        .box(['Apply', CONSTANT, ['List', 'a', 'b']])
+        .evaluate()
+        .toString()
+    ).toBe('[7,7]');
     expect(wgsl.compile(expr, NO_FOLD).code).toBe('vec2f(7.0, 7.0)');
   });
 
@@ -1152,7 +1160,15 @@ describe('WGSL APPLIED DERIVATIVE AND MAP', () => {
     ce.declare('P', 'tuple<real, real>');
     ce.declare('V', 'list<real^2>');
     const tuple = ce.box(['Apply', DOUBLE, ['Tuple', 'a', 'b']]);
-    expect(tuple.evaluate().toString()).toBe('(2a, 2b)');
+    // The interpreter on an engine where `a` and `b` have no declared type. The
+    // declared type of this engine admits values outside `real`, so there the
+    // application waits for a value.
+    expect(
+      new ComputeEngine()
+        .box(['Apply', DOUBLE, ['Tuple', 'a', 'b']])
+        .evaluate()
+        .toString()
+    ).toBe('(2a, 2b)');
     expect(wgsl.compile(tuple, NO_FOLD).code).toBe(
       'vec2f((2.0 * a), (2.0 * b))'
     );
