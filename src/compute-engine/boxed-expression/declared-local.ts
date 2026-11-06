@@ -26,6 +26,34 @@ export function isDeclaredLocal(def: object): boolean {
   return DECLARED_LOCALS.has(def);
 }
 
+/**
+ * The value definitions with which the engine binds a local: a function
+ * argument, a captured index of a closure, or the value of a `Declare`
+ * statement that is not subject to the default-`!scope` ceiling.
+ *
+ * `ce.declare(id, { value: literal })` refuses a function literal that writes
+ * outside itself and states no effects (`docs/EFFECTS-MODEL.md`, "Scope is
+ * opt-in"), because a host or a program names that definition. A local is not
+ * such a definition: an argument can be a writer closure, and a closure can
+ * change a local of its enclosing block. The scope of the declaration does not
+ * show which case applies, because a host can also declare in a nested scope.
+ * So the engine marks the definition object that it passes to `ce.declare()`.
+ * A weak set keeps no definition alive.
+ */
+const LOCAL_BINDING_DEFINITIONS = new WeakSet<object>();
+
+/** Record that `def` binds a local, and return it: the declaration of `def`
+ * does not enforce the default-`!scope` ceiling. */
+export function markLocalBinding<T extends object>(def: T): T {
+  LOCAL_BINDING_DEFINITIONS.add(def);
+  return def;
+}
+
+/** Whether `def` was given to `markLocalBinding()`. */
+export function isLocalBinding(def: object): boolean {
+  return LOCAL_BINDING_DEFINITIONS.has(def);
+}
+
 /** The bindings for which `isFirstValue()` was called. */
 const FIRST_VALUE_SEEN = new WeakSet<object>();
 /** The bindings whose first value had the type `unknown` when

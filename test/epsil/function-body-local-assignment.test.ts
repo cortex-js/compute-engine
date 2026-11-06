@@ -711,7 +711,7 @@ describe('THE COMPILED ROUTES CHECK THE EFFECTS OF A DEFINITION', () => {
     ],
     [
       'a `let` of a function literal',
-      'let t = 0\nlet g = (k) => do { t = k + 1; t }\n[g(1), t]',
+      'let t = 0\nlet g: (integer) scope -> integer = (k) => do { t = k + 1; t }\n[g(1), t]',
     ],
   ])('%s: the outer variable is written', (_name, source) => {
     expect(run(source)).toMatchObject({

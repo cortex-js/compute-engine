@@ -2391,15 +2391,64 @@ describe('CE-58: the default-`!scope` ceiling on `ce.declare()` with a value', (
     expect(ce.box(['dv_f']).evaluate().re).toBe(2);
   });
 
-  it('a declaration in a nested host scope is not refused', () => {
+  it('a declaration in a scope that the host pushed is refused too', () => {
+    const ce = engineWithCounter();
+    ce.pushScope();
+    const e = thrownBy(() =>
+      ce.declare('dv_f', {
+        type: '() -> number',
+        value: ce.box(writer('dv_ctr')),
+      })
+    );
+    expect(isEffectContractError(e)).toBe(true);
+    expect(ce.lookupDefinition('dv_f')).toBeUndefined();
+    ce.popScope();
+  });
+
+  it('a declaration with an explicit nested scope is refused too', () => {
+    const ce = engineWithCounter();
+    const scope = { parent: ce.context.lexicalScope, bindings: new Map() };
+    const e = thrownBy(() =>
+      ce.declare('dv_f', { value: ce.box(writer('dv_ctr')) }, scope)
+    );
+    expect(isEffectContractError(e)).toBe(true);
+    expect(scope.bindings.has('dv_f')).toBe(false);
+  });
+
+  it('a stated `scope` opts in, in a scope that the host pushed', () => {
     const ce = engineWithCounter();
     ce.pushScope();
     ce.declare('dv_f', {
-      type: '() -> number',
+      type: '() scope -> number',
       value: ce.box(writer('dv_ctr')),
     });
     expect(ce.box(['dv_f']).evaluate().re).toBe(1);
     ce.popScope();
+  });
+
+  it('a body that writes only its own local installs in a scope that the host pushed', () => {
+    const ce = engineWithCounter();
+    ce.pushScope();
+    ce.declare('dv_f', {
+      value: ce.box([
+        'Function',
+        [
+          'Block',
+          ['Declare', 'k', 'integer', 1],
+          ['Assign', 'k', ['Add', 'k', 1]],
+          'k',
+        ],
+      ]),
+    });
+    expect(ce.box(['dv_f']).evaluate().re).toBe(2);
+    ce.popScope();
+  });
+
+  it('a writer closure can be the argument of a function application', () => {
+    const ce = engineWithCounter();
+    const apply = ['Function', ['g'], 'g'];
+    expect(ce.box([apply, writer('dv_ctr')]).evaluate().re).toBe(1);
+    expect(ce.box('dv_ctr').evaluate().re).toBe(1);
   });
 
   it('a MathJSON, LaTeX or function value is checked too', () => {
@@ -2544,13 +2593,13 @@ describe('CE-58: the default-`!scope` ceiling on `ce.declare()` with a value', (
     expect(def.value.value?.json).toBe('dv_q');
   });
 
-  it('a `Declare` statement still installs a writer closure', () => {
+  it('a `Declare` statement in the global scope refuses a writer, and a block-local one installs it', () => {
     const ce = engineWithCounter();
     const r = ce
       .box(['Declare', 'dv_g', { str: '() -> number' }, writer('dv_ctr')])
       .evaluate();
-    expect(r.operator).not.toBe('Error');
-    expect(ce.box(['dv_g']).evaluate().re).toBe(1);
+    expect(r.operator).toBe('Error');
+    expect(ce.lookupDefinition('dv_g')).toBeUndefined();
     // A block-local `let` of a closure that changes a local of the block.
     const local = ce
       .box([

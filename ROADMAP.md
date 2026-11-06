@@ -276,44 +276,6 @@ that the double checks disappear.
   for. The member table above is its input.
 - **CE-51.2** Point the 69 capability checks at conformance.
 
-### CE-58. A `Declare` statement at the top level, and `ce.declare()` in a pushed scope, install a writer that does not state `scope`
-
-**Status:** ready; defect, M. User decision 2026-11-05: option (a).
-**Witness:** plausible; Top-level Epsil `let f: () -> number = writer` installs a writer without `scope`.
-
-A named definition that states no effects must not write outside itself: the
-`scope` effect is opt-in (`docs/EFFECTS-MODEL.md`). A direct host call
-`ce.declare('f', { value: writer })` in the global scope is now refused. Two
-routes still install the writer:
-
-- a `Declare` statement evaluated in the global scope, for example
-  `ce.box(['Declare', 'f', {str: '() -> number'}, writer]).evaluate()`, or a
-  top-level Epsil `let f: () -> number = writer`;
-- `ce.declare()` after a host `ce.pushScope()`.
-
-Here `writer` is `() ↦ Block(c ≔ c + 1, c)` with `c` a global. The same code
-installs block-local `let` bindings, whose writer closures (a closure that
-changes a local of its enclosing literal) must stay installable. The Epsil
-static pass evaluates top-level declarations under pushed scopes, so the depth
-of the scope does not tell a top-level declaration from a block-local one; the
-engine also binds function arguments and closure captures in nested scopes
-(`function-utils.ts`).
-
-Options:
-
-- (a) Refuse a writer that does not state `scope` at the top level too. This
-  needs a mark on a declaration that the Epsil front end makes at the top level
-  (or on the binding it creates), and the engine's own nested-scope calls must
-  be marked as exempt. Cost: an Epsil program whose top-level `let` closure
-  writes a top-level variable must write `scope` in its type
-  (`let f: () scope -> number = …`).
-- (b) Keep these two routes as documented exceptions. No code change; the rule
-  of `docs/EFFECTS-MODEL.md` holds only for the host calls `ce.declare()` and
-  `ce.assign()` in the global scope.
-
-Recommended: (a), because the rule is stated for every named definition, and
-an Epsil `let` is one. If nothing is decided, (b) stays.
-
 ### CE-443. A pure function literal with nine or more nested literals is typed with effects `any`
 
 **Status:** waits for user (design); types. Found 2026-10-24 while fixing CE-347.
@@ -1041,51 +1003,6 @@ copies of an N-element list for each reference. At 500 elements the result was
 returns in about 0.2 s. Tycho's case (`conj`, Desmos's complex conjugate) now
 parses as `Conjugate` (`definitions-complex.ts`). Instrument on the Tycho side:
 `scripts/repros/2026-09-15-list-conditioned-piecewise-probe.mts` in `dev/tycho`.
-
-### CE-127. A subscript index that is an expression is not canonicalized
-
-**Status:** ready; defect. User decision 2026-11-05: option (a). Related: CE-135.
-**Witness:** plausible; `A_{i+1}` keeps a non-canonical index.
-
-The `Subscript` canonical handler (`library/core.ts`) canonicalizes a
-parenthesized or comma index, but passes any other index expression through
-uncanonicalized: `A_{i+1}` is `Subscript(A, Add(i, 1))` with `i` a plain
-symbol, while `A_{i,j}` reads `i` as the imaginary unit. A canonical
-expression then holds a non-canonical operand: also
-`ce.box(['Subscript', 'A', ['Sequence', 'n', 'm']])` keeps a non-canonical
-`Sequence`, so it is not `isSame` to `ce.parse('A_{n,m}')` although both have
-the same JSON. Workaround for a consumer:
-`ce.declare('i', 'integer')` before the parse.
-
-A fix that canonicalizes the index (worktree `/tmp/wt-compute-engine-fb-ce127`,
-four review rounds) fails on one case: an index expression whose canonical form
-is a bare symbol, such as `A_{n+0}` → `Subscript(A, n)`. That form must stay a
-`Subscript`, because `\sum_{n=1}^{3} A_{n+0}` must give `A_1+A_2+A_3`. But the
-same form written by hand, in LaTeX `A_{n}` or in MathJSON
-`["Subscript", "A", "n"]`, means the compound symbol `A_n` (gives `3·A_n` in
-that sum). So the two meanings have one spelling:
-
-- `e.json` and `e.latex` of `Subscript(A, n)` read back as `A_n`: saving and
-  restoring the expression changes its value once `n` has a value.
-- A test "the index operand is already canonical, so this is a rebuild" fails
-  after a partial canonical form (`canonical: ['Flatten']` then `.canonical`
-  gives `Subscript(A, n)`, the direct route gives `A_n`).
-- `e_{n+0}` rebuilt by `subs({n: 3})` gives `ExponentialE_3`, not `e_3`.
-
-Question: how is a subscript whose index is the symbol `n` but must be read by
-value spelled?
-
-- (a) Recommended: a marker in the canonical form,
-  `Subscript(A, Delimiter(n))`, serialized as `A_{(n)}` and
-  `["Subscript", "A", ["Delimiter", "n"]]`. Both round trips keep the meaning,
-  and `A_{(n)}` already means "an expression index" in the reference page
-  (`85-reference-core.md`, "Parentheses indicate expression"). Cost: a new
-  canonical MathJSON form; `IndexedSequence` must keep serializing its plain
-  `a_n`.
-- (b) Keep the index as written (`Add(n, 0)`) when it canonicalizes to a bare
-  symbol, as today. The canonical expression keeps a non-canonical operand in
-  that case only.
-- (c) Do nothing: the defect stays as described above.
 
 ### CE-131. Disjunctive (`Or`) guards in the assumptions system
 

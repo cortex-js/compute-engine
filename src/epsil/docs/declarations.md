@@ -291,6 +291,21 @@ function bump() scope { n = n + 1; n }
 // ➔ [1, 2, 2]
 ```
 
+The same rule holds for an anonymous function that a top-level `let` or
+`const` names: the type states the effect. Without `scope` in the type, the
+statement gives an `incompatible-type` error and declares nothing:
+
+```epsil
+let n = 0
+let bump: () scope -> number = () => do { n = n + 1; n }
+[bump(), bump(), n]
+// ➔ [1, 2, 2]
+```
+
+A `let` in a block does not need the specifier, and neither does a `let` whose
+value is computed, such as the closure that a call returns
+(`let c1 = counter()`).
+
 Reassigning a symbol that was declared `const` produces an
 [error value](/epsil/evaluation/#errors-are-values), not a parse error or a
 thrown exception:

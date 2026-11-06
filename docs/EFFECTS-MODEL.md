@@ -420,14 +420,31 @@ zero in the real-program corpus. Mechanics:
   freely for every other label (the arc's tests are retold with
   `random`), but an escaping writer is refused. The declare-WITH-value
   route (`ce.declare(f, { type, value: literal })`, or `{ value: literal }`
-  with no type) runs the same refusal for a declaration in the global
-  scope. **Known residual**: a `Declare` statement is not gated. It
-  serves block-local `let` bindings, whose writer closures must remain
-  installable, and also top-level Epsil `let` declarations, which the
-  static pass evaluates under pushed scopes, so neither the statement nor
-  the scope depth tells the two apart. A declaration in a nested scope is
-  not gated either: the engine binds function arguments and closure
-  captures there. Tracked in `ROADMAP.md`, CE-58.
+  with no type) runs the same refusal in every scope, including a scope
+  that the host pushed or passes as an argument. The engine's own bindings
+  of a function argument and of a captured index are exempt
+  (`markLocalBinding()`, `boxed-expression/declared-local.ts`).
+- **A `Declare` statement is gated too** *(user decision 2026-11-05)*,
+  when the value is a function literal written in the statement and the
+  binding goes in the global scope or in a scope that the host pushed.
+  This covers a top-level Epsil `let` or `const`, which the program runner
+  evaluates in the current scope of the engine; the static pass does not
+  evaluate the statement. The fix is a `scope` in the type:
+  `let f: () scope -> number = () => do { c = c + 1; c }`. The statement
+  is not gated in these cases (`bindsLocal()`, `library/core.ts`):
+  - The binding is a local: it goes in the local scope of an expression
+    node, or in a call frame. A closure in a block can change a local of
+    the block. A block-local closure can also write an outer variable
+    (`do { let inc = () => do { c = c + 1 }; inc() }`), and it is not
+    refused, because the block-local binding ends with the block.
+  - The value is computed, not written in the statement:
+    `let counter = makeCounter()` writes the local of the call that made
+    the closure, and the program has no literal to annotate. The same
+    holds for the leaves of a destructuring `let`, and for a branch of an
+    `if`. `ce.declare('counter', { value: closure })` stays refused: a
+    host call does not distinguish a literal from a computed value, and
+    the host states `scope` in the `type` field
+    (`{ type: '() scope -> number', value: closure }`).
 
 **Reads of non-local scope are not an effect.** Every expression with a
 free symbol reads the ambient scope; a label would infect essentially

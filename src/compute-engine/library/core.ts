@@ -93,7 +93,11 @@ import {
   type ApplyOptions,
 } from '../function-utils.js';
 import { scopeActivationTemplate } from '../boxed-expression/ambient-chain.js';
-import { canonicalLocalOf } from '../boxed-expression/declared-local.js';
+import {
+  canonicalLocalOf,
+  markLocalBinding,
+} from '../boxed-expression/declared-local.js';
+import { isNodeScope } from '../boxed-expression/lazy-view-context.js';
 import {
   freeAnonymousSlots,
   functionLiteralArity,
@@ -284,7 +288,6 @@ import {
   // stamp is a STATEMENT-route concern and is deliberately absent from the
   // host API's options, which is what keeps host declarations unstamped.
   declareType,
-  markStatementDeclaration,
   retireBindingRecord,
 } from '../engine-declarations.js';
 import type { SumTypeVariant } from '../engine-declarations.js';
@@ -817,6 +820,21 @@ function declaresFunctionType(
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether a `Declare` statement that runs now binds a local: its binding goes
+ * in the local scope of an expression node (a block, a loop, a big operator),
+ * in a run-time copy of such a scope, or in the frame of a call. Any other
+ * scope is the global scope or a scope that the host pushed, and a binding
+ * there can be read after the statement ends. The depth of the scope does not
+ * tell the two cases apart, since a host scope is nested too.
+ */
+function bindsLocal(ce: ComputeEngine): boolean {
+  const { lexicalScope, name } = ce.context;
+  if (name === 'call' || isNodeScope(lexicalScope)) return true;
+  const template = scopeActivationTemplate(lexicalScope);
+  return template !== undefined && isNodeScope(template);
 }
 
 function narrowDeclaredCharacter(
@@ -14635,6 +14653,9 @@ function* declareSteps(
     // The installs of clauses that the `DefineFunction` canonical
     // handler made ahead onto the binding dropped below, if any.
     let installsAhead: ReadonlyArray<ClauseInstalledAhead> | undefined;
+    // The binding of a previous run that this declaration replaces, when
+    // nothing else changed it. A refused declaration puts it back.
+    let previousRun: typeof existing;
     if (
       existing &&
       (existing as { _declaredByStatement?: boolean })._declaredByStatement ===
@@ -14673,6 +14694,7 @@ function* declareSteps(
       // against the signature that the previous run declared.
       if (uninitialized === undefined && aheadOnExisting)
         retireBindingRecord(ce, currentScope, symbolName, existing);
+      else if (uninitialized === undefined) previousRun = existing;
       existing = undefined;
     } else if (
       existing &&
@@ -14857,10 +14879,55 @@ function* declareSteps(
       if (boundHasValue) def.value = boundValue;
       if (holdUntil) def.holdUntil = holdUntil;
       if (isConstant) (def as { isConstant?: boolean }).isConstant = true;
-      // The statement also declares block-local bindings, whose writer
-      // closures must stay installable, so it does not enforce the
-      // default-`!scope` ceiling of `ce.declare()` (`markStatementDeclaration`).
-      ce.declare(symbolName, markStatementDeclaration(def));
+      // A function literal written in this statement, in a scope that outlives
+      // the statement (`bindsLocal()`), is a named definition: `ce.declare()`
+      // refuses it when it writes outside itself and states no effects. Any
+      // other value is bound without this check. A local can hold a writer
+      // closure, and a value computed by a call, such as the closure that a
+      // factory returns (`let counter = makeCounter()`), writes the locals of
+      // that call, and the program has no literal here to annotate.
+      try {
+        ce.declare(
+          symbolName,
+          valueSource?.operator === 'Function' && !bindsLocal(ce)
+            ? def
+            : markLocalBinding(def)
+        );
+      } catch (e) {
+        // `ce.declare()` removes the name when it refuses the declaration. It
+        // keeps the new binding when it throws after the install, because the
+        // rebuild of a dependent definition failed: that binding comes from
+        // this statement. It does not touch an explicit binding that it
+        // refuses to replace (`existing`), and that binding stays protected
+        // from a later run of the statement. A refused statement leaves the
+        // binding of a previous run in place: `let f = 5` in one run, then
+        // `let f: string = 1` in the next, keeps `f` at 5. A binding that was
+        // retired above, because it holds a clause installed ahead, is not put
+        // back: the `DefineFunction` statement of that clause installs it
+        // again.
+        const committed = currentScope.bindings.get(symbolName);
+        if (committed !== undefined) {
+          if (committed !== existing)
+            (
+              committed as { _declaredByStatement?: boolean }
+            )._declaredByStatement = true;
+        } else if (previousRun !== undefined) {
+          journalCheckpointMapEntry(
+            ce,
+            currentScope.bindings,
+            symbolName,
+            symbolName,
+            'declare'
+          );
+          currentScope.bindings.set(symbolName, previousRun);
+        }
+        // As after a declaration that succeeds, the binding in the scope, if
+        // any, decides whether the name is a constant, and not the mark that
+        // the canonicalization of the statement wrote
+        // (`forgetConstantDeclaration()`).
+        forgetConstantDeclaration(ce, symbolName, currentScope);
+        throw e;
+      }
       const created = ce.context.lexicalScope.bindings.get(symbolName);
       if (created)
         (created as { _declaredByStatement?: boolean })._declaredByStatement =

@@ -73,6 +73,7 @@ import {
   resultUnderDeclaredParameters,
   withSignatureResult,
 } from './boxed-expression/declared-parameter-result.js';
+import { isLocalBinding } from './boxed-expression/declared-local.js';
 import {
   assertSingleArmPolytype,
   EffectContractError,
@@ -2865,15 +2866,11 @@ export function declareFn(
       ? { ...def, effectsDeclared }
       : def;
     // The default-`!scope` ceiling (`docs/EFFECTS-MODEL.md`, "Scope is
-    // opt-in"): a function literal declared with no stated effects in the
-    // global scope must not write outside itself, as on the
-    // declare-then-assign routes. It is not enforced for a `Declare`
-    // statement (`STATEMENT_DECLARATIONS`), nor in a nested scope, where the
-    // engine binds the arguments of a function application and the captured
-    // values of a closure.
-    const checksScope =
-      scope === ce.contextStack[1]?.lexicalScope &&
-      !STATEMENT_DECLARATIONS.has(def);
+    // opt-in"): a function literal declared with no stated effects must not
+    // write outside itself, in any scope, as on the declare-then-assign
+    // routes. It is not enforced when the engine binds a local, such as the
+    // argument of a function application (`markLocalBinding()`).
+    const checksScope = !isLocalBinding(def);
     // The declared-signature reconciliation and the effect checks of a
     // function literal `value`. They give the definition to install:
     // `prepared` with the reconciled literal and, when it is refined, the
@@ -4944,29 +4941,6 @@ function assertFunctionLiteralArity(
 }
 
 /**
- * The value definitions that the `Declare` operator passes to `ce.declare()`.
- *
- * `ce.declare(id, { value })` enforces the default-`!scope` ceiling
- * (`docs/EFFECTS-MODEL.md`, "Scope is opt-in") only for a declaration in the
- * global scope that does not come from a `Declare` statement. A `Declare`
- * statement also declares block-local `let` bindings, and their writer
- * closures (a closure that changes a local of its enclosing literal) must stay
- * installable. The scope of the declaration cannot tell the two apart: the
- * Epsil static pass evaluates top-level declarations under pushed scopes. So
- * the statement marks its definition object here, and `declareFn()` reads the
- * mark. A weak set keeps no definition alive.
- */
-const STATEMENT_DECLARATIONS = new WeakSet<object>();
-
-/** Mark `def` as a definition that a `Declare` statement passes to
- * `ce.declare()`: the declaration does not enforce the default-`!scope`
- * ceiling. See `STATEMENT_DECLARATIONS`. */
-export function markStatementDeclaration<T extends object>(def: T): T {
-  STATEMENT_DECLARATIONS.add(def);
-  return def;
-}
-
-/**
  * The default-`!scope` ceiling of `ce.declare(id, { value: literal })`.
  *
  * A literal that states its own effects (a full-signature return marker,
@@ -5053,11 +5027,10 @@ function assertDeclaredEffects(
    * the walk PROVES to write outside itself is refused instead of being
    * accepted-and-restamped. Passed by the declare-then-assign routes —
    * which install a GLOBAL named definition, so the ruling applies — and
-   * by the declare-WITH-value route for a declaration in the global scope
-   * that does not come from a `Declare` statement. That statement also
-   * serves block-local `let` bindings whose writer closures (a closure
-   * mutating its enclosing literal's local) must stay installable
-   * (`STATEMENT_DECLARATIONS`). The trigger is
+   * by the declare-WITH-value route, except when the engine binds a local,
+   * such as a block-local `let` whose writer closure (a closure mutating its
+   * enclosing literal's local) must stay installable
+   * (`markLocalBinding()`). The trigger is
    * the walk's proven-mutation bit, never the arrow's `scope` label, so
    * `{any}` conservatism from unresolved forward references stays
    * optimistic. Requires `ce`. */

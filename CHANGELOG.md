@@ -1,7 +1,23 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **A named function that writes outside itself must state the `scope` effect
+  in a top-level `let` or `const`, in a `Declare` statement, and in a scope from
+  `ce.pushScope()`.** With `c` a top-level variable,
+  `let f = () => do { c = c + 1; c }` installed `f`, and it now gives an
+  `incompatible-type` error and declares nothing. Write
+  `let f: () scope -> number = () => do { c = c + 1; c }`. After
+  `ce.pushScope()`, `ce.declare('f', { value: writer })` now throws, as it does
+  in the global scope. A `let` in a block or in a function body is not refused,
+  and neither is a value that a call returns (`let counter = makeCounter()`).
+
 ### Resolved Issues
 
+- **A `let` or `const` that is refused keeps the value of the name from an
+  earlier run on the same engine.** `let f = 5` in one run, then
+  `let f: string = 1` in the next, gave an error and left `f` with no value. `f`
+  is now still 5.
 - **`\implies`, `\iff`, `\veebar` and `\barwedge` beside the colon of a brace
   group stay in the condition, as `\land` and `\lor` do since 0.181.1.**
   `\{x > 0 \veebar y > 0: 2, 3\}` was a set with `Xor` over a `Colon`, with no

@@ -167,7 +167,7 @@ b(3)([1, 2])`
       epsil(
         debug,
         `let g = (xs => xs)
-let o = (d) => do { g = (xs => ListFrom(Map(x => x * d, xs))); 0 }
+let o: (number) scope -> number = (d) => do { g = (xs => ListFrom(Map(x => x * d, xs))); 0 }
 o(7)
 g([1, 2])`
       )
@@ -179,7 +179,7 @@ g([1, 2])`
       epsil(
         debug,
         `let g = (xs => xs)
-let o = (d) => do { g = (xs => ListFrom(Map(x => x * d, xs))); 0 }
+let o: (number) scope -> number = (d) => do { g = (xs => ListFrom(Map(x => x * d, xs))); 0 }
 o(7)
 o(9)
 g([1, 2])`
@@ -192,7 +192,7 @@ g([1, 2])`
       epsil(
         debug,
         `let g = [(xs => xs)]
-let o = (d) => do { g = [(xs => ListFrom(Map(x => x * d, xs)))]; 0 }
+let o: (number) scope -> number = (d) => do { g = [(xs => ListFrom(Map(x => x * d, xs)))]; 0 }
 o(7)
 g[1]([1, 2])`
       )
@@ -204,7 +204,7 @@ g[1]([1, 2])`
       epsil(
         debug,
         `let g = (x => x)
-let o = (d) => do { g = (x => x + d); 0 }
+let o: (number) scope -> number = (d) => do { g = (x => x + d); 0 }
 o(7)
 g(1)`
       )
@@ -333,7 +333,7 @@ f(1)`
 
   test('a closure assigned in a comprehension element gives the same value with the flag on and off', () => {
     const src = `let h = (x) => x
-let b = (n) => do { let c = [do { h = (x => x + d); 0 } for d in [3 * n]]; ListFrom(c); 0 }
+let b: (number) scope -> number = (n) => do { let c = [do { h = (x => x + d); 0 } for d in [3 * n]]; ListFrom(c); 0 }
 b(1)
 h(1)`;
     expect(epsil(debug, src)).toEqual(epsil(!debug, src));
@@ -348,7 +348,7 @@ h(1)`;
       epsil(
         debug,
         `let h = (x) => x
-let b = (n) => do { let c = [do { h = (x => x + d); 0 } for d in [3 * n]]; ListFrom(c); 0 }
+let b: (number) scope -> number = (n) => do { let c = [do { h = (x => x + d); 0 } for d in [3 * n]]; ListFrom(c); 0 }
 b(1)
 h(1)`
       )
@@ -371,7 +371,7 @@ h(1)`
       epsil(
         debug,
         `let h = (x) => x
-let b = (n) => do { let c = [do { h = (x => x + d * n); 0 } for d in [3]]; ListFrom(c); 0 }
+let b: (number) scope -> number = (n) => do { let c = [do { h = (x => x + d * n); 0 } for d in [3]]; ListFrom(c); 0 }
 b(2)
 h(1)`
       )
@@ -383,7 +383,7 @@ h(1)`
       epsil(
         debug,
         `let hs = []
-let b = (n) => do { let c = [do { hs = [...hs, (x => x + d)]; 0 } for d in [n, 2 * n]]; ListFrom(c); 0 }
+let b: (number) scope -> number = (n) => do { let c = [do { hs = [...hs, (x => x + d)]; 0 } for d in [n, 2 * n]]; ListFrom(c); 0 }
 b(1)
 ListFrom(Map((g) => g(100), hs))`
       )
@@ -426,7 +426,7 @@ ListFrom(Map((g) => g(100), hs))`
       epsil(
         debug,
         `let h = (x) => x
-let b = (n) => do { let c = [[do { h = (x => x + d + e); 0 } for e in [10 * n]] for d in [3 * n]]; ListFrom(c); 0 }
+let b: (number) scope -> number = (n) => do { let c = [[do { h = (x => x + d + e); 0 } for e in [10 * n]] for d in [3 * n]]; ListFrom(c); 0 }
 b(1)
 h(1)`
       )
@@ -438,7 +438,7 @@ h(1)`
       epsil(
         debug,
         `let h = (x) => x
-let b = (n) => do { let c = [do { h = (x => x + d); 0 } for d in [1, 2, 3 * n] if d > 2]; ListFrom(c); 0 }
+let b: (number) scope -> number = (n) => do { let c = [do { h = (x => x + d); 0 } for d in [1, 2, 3 * n] if d > 2]; ListFrom(c); 0 }
 b(1)
 h(1)`
       )
@@ -451,7 +451,7 @@ h(1)`
       epsil(
         debug,
         `let h = (x) => x
-let b = (n) => [do { h = (x => x + d * n); 0 } for d in [3, 4, 5]]
+let b: (number) scope -> list = (n) => [do { h = (x => x + d * n); 0 } for d in [3, 4, 5]]
 let c = b(2)
 First(c)
 h(1)`
@@ -465,7 +465,7 @@ h(1)`
     const r = await executeEpsilAsync(
       ce,
       `let h = (x) => x
-let b = (n) => do { let c = [do { h = (x => x + d * n); 0 } for d in [3]]; ListFrom(c); 0 }
+let b: (number) scope -> number = (n) => do { let c = [do { h = (x => x + d * n); 0 } for d in [3]]; ListFrom(c); 0 }
 b(2)
 h(1)`
     );

@@ -3677,6 +3677,11 @@ export class ComputeEngine implements IComputeEngine {
    * (`ce.pushScope()`, a function parameter, a `Block` local) is allowed, and
    * so are the input spellings `e` and `i`, which no result carries by name.
    *
+   * A function value that writes outside itself must state the `scope` effect,
+   * in every scope: `ce.declare('f', { value: writer })` throws, also after
+   * `ce.pushScope()`, and `{ type: '() scope -> number', value: writer }` is
+   * accepted.
+   *
    * The third argument is the scope to declare in, or an options object
    * `{ scope?, extend? }` (see {@link DeclareOptions}).
    *

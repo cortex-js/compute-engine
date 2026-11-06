@@ -78,6 +78,7 @@ import {
   wasCanonicalizedIn,
   type LazyViewScopeEntry,
 } from './boxed-expression/lazy-view-context.js';
+import { markLocalBinding } from './boxed-expression/declared-local.js';
 import {
   functionLiteralBoundNames,
   functionLiteralDeclaredSignature,
@@ -3664,12 +3665,17 @@ function declareParameterActivation(
   // A parameter binding does not refuse an argument that holds a failed
   // element (`[1, Error(…)]` at a parameter declared `list<number>`): the
   // body reads the failed element as a value. Only a declared variable
-  // refuses it (`withoutFailedElementCheck`).
+  // refuses it (`withoutFailedElementCheck`). An argument can be a closure
+  // that writes outside itself, so the binding is marked as a local.
   if (pType !== undefined)
     withoutFailedElementCheck(() =>
-      ce.declare(name, { value, type: pType, inferred: false }, freshScope)
+      ce.declare(
+        name,
+        markLocalBinding({ value, type: pType, inferred: false }),
+        freshScope
+      )
     );
-  else ce.declare(name, { value, inferred: true }, freshScope);
+  else ce.declare(name, markLocalBinding({ value, inferred: true }), freshScope);
 
   const staticBinding = staticParameterBinding(param, name, bodyScope);
   if (staticBinding === undefined) return;
@@ -8281,7 +8287,7 @@ function snapshotNestedScope(
         name,
         value === undefined
           ? { inferred: true, type: 'unknown' }
-          : { value, inferred: true },
+          : markLocalBinding({ value, inferred: true }),
         captured
       );
       continue;
