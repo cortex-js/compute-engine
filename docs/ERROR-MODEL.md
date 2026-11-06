@@ -368,9 +368,34 @@ before the program runs, and a compilation declines it.
 - The LaTeX parser reads `\operatorname{let} k \coloneq v` as `Declare(k,
   "unknown", v)`, and a chained `a \coloneq b \coloneq v` as the syntax error
   `chained-assignment`. The Epsil parser reports `a := b := v` with the same
-  code. It reads `L[k] \coloneq v` as the syntax error
-  `assignment-to-list-element`: a list element has no assignment, and
-  `ReplaceAt` gives a new list with the element replaced. It reads an
+  code. It reads `L[k] \coloneq v` as the rebinding `Assign(L, ReplaceAt(L,
+  k, v))`, and `M[j, i] \coloneq v` (or `M[j][i] \coloneq v`) as `Assign(M,
+  ReplaceAt(M, j, i, v))`; the Epsil parser reads `xs[i] = v` in the same way
+  (user decision 2026-11-06). Lists keep value semantics: another variable
+  that holds the old list keeps it. The syntax error
+  `assignment-to-list-element` remains for a string index (`d["x"] \coloneq
+  v`: `ReplaceAt` refuses a string index), for a target whose list is not a
+  symbol, for an element target in a `\operatorname{let}` statement or a
+  `where` item, which declare a new name, and for the subscript spelling at
+  the top level (`n_{1} \coloneq v` with `n` a list): in a block, `n_{1}` is
+  the name of the local `n_1` (Tycho row 410), and `n_{1}[1] \coloneq v`
+  changes that local. A write that does not give a list is an error, and the
+  variable keeps its value (user decision 2026-11-06): a numeric position
+  that is zero, not an integer or past the end is `out-of-range` (the length
+  of a string is its number of characters), a target with no value is
+  `assignment-to-list-element`, and an error that `ReplaceAt` gives (a number
+  as the target or at an inner level: `incompatible-type`) is the value of
+  the assignment. A string or a tuple is written as `ReplaceAt` writes it,
+  and gives a list. A position with no numeric value, or a level whose count
+  is not known, keeps the unevaluated `ReplaceAt`, as `ReplaceAt` documents.
+  The value is evaluated once, and the check reads the result: the operands
+  of a `ReplaceAt` that stays unevaluated (in a chain, the value of the inner
+  write). The evaluation of `Assign` makes this check for
+  every assignment whose value is a `ReplaceAt` chain rooted at the target
+  symbol, parsed or written in MathJSON: `Assign(L, ReplaceAt(L, 99, 1))` is
+  `out-of-range`, and `L` keeps its value. A `ReplaceAt` that is not such a
+  rebinding keeps its documented result: `ReplaceAt([1, 2], 5, 1)` alone, or
+  `y \coloneq \operatorname{ReplaceAt}(L, 5, 1)`, stays unevaluated. It reads an
   assignment whose target is a function of a library (`a+b \coloneq 5`,
   `\sin(x) \coloneq 5`, `N(x) \coloneq x+1`, `\operatorname{First} \coloneq x
   \mapsto 5`), in a block too, as the syntax error

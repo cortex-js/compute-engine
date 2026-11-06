@@ -358,7 +358,9 @@ describe('Tycho row 410: a subscript on a list outside a binder is an index', ()
     // At the top level, the target of `\coloneq` is not a binder. Read as the
     // name `n_0`, the target would be the term `Subscript(n, 0)` of a
     // sequence definition on the list `n`, which evaluates to `Nothing` and
-    // changes nothing. The error makes the failed assignment visible.
+    // changes nothing. The error makes the failed assignment visible. The
+    // subscript spelling does not change the list `n`: only `n[1] \coloneq 7`
+    // does.
     const ce = engine();
     const expr = ce.parse('n_{0}\\coloneq 3');
     expect(JSON.stringify(expr.json)).toContain('assignment-to-list-element');

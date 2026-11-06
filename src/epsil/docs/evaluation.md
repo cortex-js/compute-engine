@@ -56,23 +56,37 @@ Epsil keeps apart two things many languages blur together:
 
 Everything below follows from those two sentences.
 
-**There is no in-place modification.** A collection cannot be updated
-element by element:
+**There is no in-place modification.** An assignment to an element,
+`xs[2] = 9`, does not change the list: it builds a new list and rebinds the
+name, as `xs = replaceAt(xs, 2, 9)` does. Another name that holds the old
+list keeps it:
 
 ```epsil
 let xs = [1, 2, 3]
+let ys = xs
 xs[2] = 9
-// ➔ Error(ErrorCode("incompatible-type", "symbol", "integer | nan"), At("xs", 2))
+[xs, ys]
+// ➔ [[1, 9, 3], [1, 2, 3]]
 ```
 
-Build the value you want and rebind the name:
+So the target must be a name that the program can assign: with
+`const xs = [1, 2, 3]`, `xs[2] = 9` is the error `constant-assignment`. An
+element of a nested list has the same form, `m[2][1] = 9` or `m[2, 1] = 9`,
+which rebinds `m`.
 
-```epsil
-let xs = [1, 2, 3]
-xs = join([xs[1]], [9], [xs[3]])
-xs
-// ➔ [1, 9, 3]
-```
+A write that cannot give a list is an error, and the name keeps its value. A
+position past the end, zero or not an integer is the error `out-of-range`
+(`xs[5] = 9` when `xs` has three elements); the length of a string is its
+number of characters. A target with no value is the error
+`assignment-to-list-element`, and a target that is a number is the error
+`incompatible-type` that `replaceAt` gives. A string and
+a tuple are written as `replaceAt` writes them, and give a list: with
+`s = "abc"`, `s[1] = "z"` gives the list of characters `["z", "b", "c"]`. A
+string position (`xs["a"] = 9`) is the error `assignment-to-list-element`,
+reported before the program runs, because `replaceAt` takes only an integer
+position. A
+position that is a name with no value (`xs[k] = 9` with `k` unknown) leaves
+the write unevaluated, and `xs` holds it.
 
 Operators never modify what you hand them — `append`, `sort`, `join`,
 `map`, `filter` all return a **new** collection:
@@ -314,9 +328,10 @@ really about the source, not the computation — a gated host pragma, or an
 Because only the **last** statement's value is the program's result, an error
 value produced by an earlier statement would otherwise vanish silently. Each
 *non-final* statement that evaluates to an error value therefore also emits
-a `runtime-error` diagnostic — for example an indexed assignment
-(`xs[2] = 9`, which is rejected: element assignment is not supported), or
-reassigning a library constant such as `Pi`. A problem that the static check
+a `runtime-error` diagnostic — for example an assignment to an element past
+the end of a list (`xs[5] = 9` when `xs` has three elements), or reassigning
+a library constant such as
+`Pi`. A problem that the static check
 already reported before the program ran, such as reassigning a `const` of the
 same program, is not reported a second time.
 

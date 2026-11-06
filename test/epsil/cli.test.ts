@@ -559,7 +559,7 @@ describe('Epsil CLI JSON diagnostics for evaluation', () => {
     const { io, stderr } = makeIo();
     expect(
       await main(
-        ['-e', 'let xs = [1, 2, 3]\nxs[2] = 9\nxs', '--diagnostics', 'json'],
+        ['-e', 'let xs = [1, 2, 3]\nxs + "a"\nxs', '--diagnostics', 'json'],
         io
       )
     ).toBe(1);

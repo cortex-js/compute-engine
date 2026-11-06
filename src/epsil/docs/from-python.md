@@ -80,7 +80,7 @@ let double = x => 2x
 | `enumerate(xs)` | `zip(1..length(xs), xs)` |
 | `xs.index(v)` | `indexOf(xs, v)` |
 | `xs + ys`, `xs.append(v)` | `join(xs, ys)`, `append(xs, v)` — both return a **new** collection |
-| `xs[2] = 9` | *(no element assignment)* — rebuild with `map`/`join` |
+| `xs[2] = 9` | `xs[2] = 9` — a rebinding, `xs = replaceAt(xs, 2, 9)`: another name that holds the old list keeps it |
 | `d.keys()`, `d.values()` | `keys(d)`, `values(d)` |
 | `dict(zip(ks, vs))` | `dictionaryFrom(zip(ks, vs))` |
 | `collections.Counter(xs)` | `tally(xs)` → a `(values, counts)` pair |

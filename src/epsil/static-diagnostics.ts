@@ -1285,7 +1285,12 @@ function canonicalizationDiagnostics(
         message: [
           'static-type-error',
           description,
-          located.call === undefined ? snippet : epsilSnippet(located.call),
+          located.call === undefined
+            ? snippet
+            : epsilSnippet(
+                elementRebindingWithValue(statement, located.call) ??
+                  located.call
+              ),
           code,
         ],
         range: [from, to, from],
@@ -4199,13 +4204,77 @@ function epsilSnippet(expr: MathJsonExpression): string {
     return epsilSnippet(operand(expr, 1)!);
   let snippet: string;
   try {
-    snippet = serializeEpsil(expr).replaceAll(/\s+/g, ' ').trim();
+    snippet = serializeEpsil(elementAssignmentsAsWritten(expr))
+      .replaceAll(/\s+/g, ' ')
+      .trim();
   } catch {
     return '';
   }
   return snippet.length > SNIPPET_LENGTH
     ? `${snippet.slice(0, SNIPPET_LENGTH - 1)}…`
     : snippet;
+}
+
+/**
+ * True when `expr` is an assignment to a list element: `Assign(xs,
+ * ReplaceAt(xs, i, v))`, which the parser reads from `xs[i] = v`.
+ */
+function isElementRebinding(expr: MathJsonExpression): boolean {
+  if (operator(expr) !== 'Assign' || nops(expr) !== 2) return false;
+  const target = symbol(operand(expr, 1));
+  const value = operand(expr, 2);
+  return (
+    target !== null &&
+    operator(value) === 'ReplaceAt' &&
+    nops(value) >= 3 &&
+    symbol(operand(value, 1)) === target
+  );
+}
+
+/**
+ * `expr` with each assignment to a list element in the form that the program
+ * wrote: a snippet of `Assign(xs, ReplaceAt(xs, i, v))` is `xs[i] := v`, not
+ * `xs := replaceAt(xs, i, v)`. A nested target `m[j][i]` is written
+ * `m[j, i]`, the same element. Gives `expr` itself when it holds no such
+ * assignment.
+ */
+function elementAssignmentsAsWritten(
+  expr: MathJsonExpression
+): MathJsonExpression {
+  const head = operator(expr);
+  if (head === '') return expr;
+  const ops = operands(expr);
+  const rewritten = ops.map(elementAssignmentsAsWritten);
+  const node = [head, ...rewritten] as MathJsonExpression;
+  if (isElementRebinding(node)) {
+    const parts = operands(operand(node, 2));
+    return [
+      'Assign',
+      ['At', parts[0], ...parts.slice(1, -1)],
+      parts[parts.length - 1],
+    ];
+  }
+  if (rewritten.every((op, i) => op === ops[i])) return expr;
+  return node;
+}
+
+/**
+ * The assignment to a list element in `statement` whose value is the node
+ * `call` (`isElementRebinding()`), or `undefined`. An error located in the
+ * `ReplaceAt` of `xs[1] = 3` is quoted as the assignment `xs[1] := 3`: the
+ * program does not write the `ReplaceAt`.
+ */
+function elementRebindingWithValue(
+  statement: MathJsonExpression,
+  call: MathJsonExpression
+): MathJsonExpression | undefined {
+  if (isElementRebinding(statement) && operand(statement, 2) === call)
+    return statement;
+  for (const op of operands(statement)) {
+    const found = elementRebindingWithValue(op, call);
+    if (found !== undefined) return found;
+  }
+  return undefined;
 }
 
 /** The source range of a statement, falling back to the whole program when

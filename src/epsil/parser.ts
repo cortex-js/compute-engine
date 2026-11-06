@@ -7619,7 +7619,11 @@ export class Parser {
       );
     }
 
-    if (def.name === 'Assign') this.checkAssignTarget(left);
+    if (def.name === 'Assign') {
+      this.checkAssignTarget(left);
+      const element = this.elementAssignment(left, right, start, end);
+      if (element !== null) return element;
+    }
 
     // A parenthesized comparison is an operand, never a link of a chain:
     // `(a < b) <= c` compares the truth value of `a < b` with `c`.
@@ -7664,6 +7668,58 @@ export class Parser {
     if (def.relational && typeof node === 'object' && node !== null)
       this.infixRelations.add(node);
     return node;
+  }
+
+  /**
+   * An assignment to a list element, `xs[i] = v`, is a rebinding of the list:
+   * `Assign(xs, ReplaceAt(xs, i, v))`. Lists have value semantics, so the
+   * assignment gives `xs` a new list, and another variable that holds the old
+   * list (`let a = xs` before) keeps it. A nested target, `m[j][i] = v`, and a
+   * target with several positions, `m[j, i] = v`, are the same rebinding with
+   * the positions in order: `Assign(m, ReplaceAt(m, j, i, v))`. As for any
+   * assignment, the target must be a variable that the program can assign: a
+   * `const` gives `constant-assignment`.
+   *
+   * A string position (`d["x"] = v`) is the parse diagnostic
+   * `assignment-to-list-element`, and the statement is `Nothing`, which
+   * changes no variable: `ReplaceAt` refuses a string position.
+   *
+   * Gives `null` for any other target: a symbol, and a `Field` path, which is
+   * a property store.
+   *
+   * The `xs` read by `ReplaceAt` has no source offsets: the source has one
+   * `xs`, and it is the target of the assignment.
+   */
+  private elementAssignment(
+    target: MathJsonExpression,
+    value: MathJsonExpression,
+    start: number,
+    end: number
+  ): MathJsonExpression | null {
+    const element = elementTargetParts(target);
+    if (element === null) return null;
+    if (element.positions.some(isStringNode)) {
+      this.error(['assignment-to-list-element'], start, end);
+      return this.wrap({ sym: 'Nothing' }, start, end);
+    }
+    const list = symbolNameOf(element.list)!;
+    // The evaluate handler of `Assign` refuses a rebinding that cannot give a
+    // list (an out-of-range position, a target that is not a list), and the
+    // variable keeps its value (`elementRebindingRefusal()` in
+    // `library/core.ts`).
+    return this.wrap(
+      [
+        'Assign',
+        element.list,
+        this.wrap(
+          ['ReplaceAt', { sym: list }, ...element.positions, value],
+          this.outerStart(target) ?? start,
+          end
+        ),
+      ],
+      start,
+      end
+    );
   }
 
   /**
@@ -9796,6 +9852,39 @@ function symbolNameOf(expr: MathJsonExpression): string | null {
   )
     return (expr as { sym: string }).sym;
   return null;
+}
+
+/**
+ * The list and the positions of an element target: the symbol node `xs` and
+ * `[i]` for `xs[i]`, `m` and `[j, i]` for `m[j, i]` and for the nested
+ * `m[j][i]`. Gives `null` when the target is not an `At` chain rooted at a
+ * bare symbol.
+ */
+function elementTargetParts(
+  expr: MathJsonExpression
+): { list: MathJsonExpression; positions: MathJsonExpression[] } | null {
+  const ops = fnOps(expr);
+  if (ops === null || ops[0] !== 'At' || ops.length < 3) return null;
+  const base = ops[1];
+  const inner =
+    symbolNameOf(base) !== null
+      ? { list: base, positions: [] }
+      : elementTargetParts(base);
+  if (inner === null) return null;
+  return {
+    list: inner.list,
+    positions: [...inner.positions, ...ops.slice(2)],
+  };
+}
+
+/** Whether a node is a string literal (`{str: …}`). */
+function isStringNode(expr: MathJsonExpression): boolean {
+  return (
+    typeof expr === 'object' &&
+    expr !== null &&
+    !Array.isArray(expr) &&
+    'str' in expr
+  );
 }
 
 /** Whether a token ends a math-style definition head: `f(x) = body` and

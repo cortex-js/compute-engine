@@ -14436,6 +14436,10 @@ function* assignSteps(
   const symbol = isSymbol(op1) ? op1 : op1.evaluate();
   const symbolName = sym(symbol);
   if (!symbolName) return undefined;
+  // A rebinding of a list element, `xs := ReplaceAt(xs, i, v)`: its value is
+  // evaluated once, as any other value, and a write that failed is not
+  // stored (`elementRebindingFailure()`).
+  const rebinding = isElementRebinding(op2, symbolName);
   // `c = "a"` where `c` was declared `character` — see
   // `narrowDeclaredCharacter`. The narrowed character IS the assigned
   // value, so it replaces the evaluation of the operand. The `isString`
@@ -14453,6 +14457,10 @@ function* assignSteps(
   // implementation) must not be stored under `x`: the error is the value
   // of the statement, exactly as on the field-target route above.
   if (!val.isValid && isFunction(op2, 'ProtocolProperty')) return val;
+  if (rebinding) {
+    const failed = elementRebindingFailure(ce, symbolName, val);
+    if (failed !== undefined) return failed;
+  }
   // A violated definition-annotation contract (an explicit effect
   // annotation the body's inferred effects do not fit) is not installed
   // and surfaces as an `incompatible-type` error VALUE — the same shape
@@ -14473,6 +14481,99 @@ function* assignSteps(
     throw e;
   }
   return val;
+}
+
+/**
+ * True when `value` rebinds an element of the variable `name`: a `ReplaceAt`
+ * whose collection operand is the symbol `name`, or another such `ReplaceAt`
+ * (`ReplaceAt(ReplaceAt(xs, 1, a), 2, b)`). The LaTeX parser reads
+ * `L[k] \coloneq v`, and the Epsil parser reads `xs[i] = v`, as
+ * `Assign(L, ReplaceAt(L, k, v))`; the same assignment written in MathJSON
+ * is the same rebinding (user decision 2026-11-06). Any other `ReplaceAt`
+ * keeps the result that `ReplaceAt` documents: `ReplaceAt([1, 2], 5, 1)`
+ * alone, `y := ReplaceAt(L, 5, 1)`, an argument.
+ */
+function isElementRebinding(value: Expression, name: string): boolean {
+  let node: Expression = value;
+  while (isFunction(node, 'ReplaceAt') && node.nops >= 3) {
+    if (sym(node.op1) === name) return true;
+    node = node.op1;
+  }
+  return false;
+}
+
+/**
+ * True when `value` is a collection that a rebinding can write into: an
+ * indexed collection (a `List`, a `Range`, the lazy view that `ReplaceAt`
+ * gives for a long list, a string, a tuple). The rebinding follows the result
+ * that `ReplaceAt` documents: `s[1] := "z"` with `s = "abc"` gives the list of
+ * characters `["z", "b", "c"]`, and a tuple gives a list. A number, a
+ * dictionary and a symbol with no value are not.
+ */
+function isIndexedValue(value: Expression): boolean {
+  return value.isIndexedCollection;
+}
+
+/**
+ * The error of the rebinding `name := ReplaceAt(name, …)`
+ * (`isElementRebinding()`) whose evaluated value is `value`, or `undefined`
+ * when the value is stored. The value is read after the evaluation, so each
+ * position and each operand of the write is evaluated once, by `ReplaceAt`.
+ *
+ * - An error is returned, and the variable keeps its value.
+ * - A collection is stored.
+ * - A `ReplaceAt` that is still unevaluated has evaluated operands. In a
+ *   chain, its collection operand is the value of the inner `ReplaceAt`.
+ *   - A collection operand with no positions (a number, a symbol with no
+ *     value) is the error `assignment-to-list-element`.
+ *   - With positions that are all numbers, the positions are followed in the
+ *     collection, while the count of each level is known: a position that is
+ *     zero, not an integer, or past the end is the error `out-of-range` (the
+ *     length of a string is its number of characters), and a level that is
+ *     not an indexed collection (a number in `xs[1, 1] := 9`, with `xs` a
+ *     flat list) is the error `assignment-to-list-element`. When every
+ *     position is valid, the value is the lazy view that `ReplaceAt` gives
+ *     for a long list, and it is stored.
+ *   - Otherwise (a position that is not a number, as in `xs[k] := 1` with
+ *     `k` unknown, or a level whose count is not known), the unevaluated
+ *     `ReplaceAt` is stored, as `ReplaceAt` documents.
+ *
+ * In both error cases the variable keeps its value.
+ */
+function elementRebindingFailure(
+  ce: ComputeEngine,
+  name: string,
+  value: Expression
+): Expression | undefined {
+  if (!value.isValid) return value;
+  if (!isFunction(value, 'ReplaceAt') || value.nops < 3) return undefined;
+  const notIndexed = (what: string): Expression =>
+    ce.error([
+      'assignment-to-list-element',
+      `${what} "${name}" is not an indexed collection`,
+    ]);
+  let level: Expression | undefined = value.op1;
+  if (!isIndexedValue(level)) return notIndexed('the value of');
+  const positions = value.ops.slice(1, -1);
+  if (!positions.every((p) => isNumber(p))) return undefined;
+  for (const [i, position] of positions.entries()) {
+    if (level === undefined || !isIndexedValue(level))
+      return notIndexed('an element of');
+    const count = level.count;
+    if (count === undefined) return undefined;
+    const n = Number(count);
+    const k = position.re;
+    if (!Number.isInteger(k) || k === 0 || Math.abs(k) > n)
+      return ce.error([
+        'out-of-range',
+        n === 0
+          ? 'an index of a non-empty list'
+          : `an index in 1..${n} or -${n}..-1`,
+        position.toString(),
+      ]);
+    if (i < positions.length - 1) level = level.at(k > 0 ? k : n + k + 1);
+  }
+  return undefined;
 }
 
 /**

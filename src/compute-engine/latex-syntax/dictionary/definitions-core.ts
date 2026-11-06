@@ -6440,8 +6440,113 @@ const INFIX_ASSIGNS = new WeakSet<object>();
  */
 const CASES_ENVIRONMENTS = new Set(['cases', 'dcases', 'rcases']);
 
-/** The code of the error for `L[k] \coloneq v` (`parseAssignStatement()`). */
+/**
+ * The code of the error for an assignment to a list element that is not a
+ * rebinding of a variable: a string index (`d["x"] \coloneq v`), a target
+ * whose list is not a symbol, the subscript spelling outside a block
+ * (`n_{1} \coloneq v`, `elementTarget()`), and an element target in a `let`
+ * statement or in a `where` item, which declare a new name
+ * (`parseAssignStatement()`).
+ */
 const ASSIGNMENT_TO_LIST_ELEMENT = 'assignment-to-list-element';
+
+/**
+ * The assignments to a list element that `parseAssignStatement()` reads as a
+ * rebinding, `L[k] \coloneq v` as `Assign(L, ReplaceAt(L, k, v))`, each with
+ * the error `assignment-to-list-element` over the same tokens. A `let`
+ * statement and a `where` item give this error instead of the assignment:
+ * they declare a new local `L`, and `ReplaceAt(L, k, v)` would then read
+ * that local before it has a value. These assignments are not in
+ * `INFIX_ASSIGNS`, so a block does not declare `L` as a new local: the
+ * assignment changes the `L` that is in scope.
+ */
+const ELEMENT_ASSIGNS = new WeakMap<object, MathJsonExpression>();
+
+/**
+ * The error that a `let` statement or a `where` item gives for an assignment
+ * to a list element (`ELEMENT_ASSIGNS`), or `null` for any other expression.
+ */
+function elementAssignError(
+  expr: MathJsonExpression
+): MathJsonExpression | null {
+  const node = undecorated(expr);
+  if (typeof node !== 'object' || node === null) return null;
+  return ELEMENT_ASSIGNS.get(node) ?? null;
+}
+
+/**
+ * The list and the positions of an element target: `L` and `[k]` for
+ * `At(L, k)`, `M` and `[j, i]` for `At(M, j, i)` and for the nested
+ * `At(At(M, j), i)`. Gives `null` when the target is not an `At`, when the
+ * list is not a symbol, or when a position is a string: `ReplaceAt` refuses
+ * a string position.
+ *
+ * A subscript on a list (`n_{1}`, which reads as `At(n, 1)` when `n` is a
+ * list) is the name `n_1` of a local in a block (Tycho row 410,
+ * `Parser.binderSymbol()`). So a subscript is never flattened into the
+ * positions of its list. When `local` is true (a statement of a block), the
+ * subscript is the list `n_1`: `n_{1}[1] \coloneq 9` is
+ * `Assign(n_1, ReplaceAt(n_1, 1, 9))`. Otherwise the target is `null`: at the
+ * top level, `n_{1}` is not a variable that the program can assign, and the
+ * whole target `n_{1} \coloneq v` (or `a_n \coloneq n^2`, the spelling of a
+ * sequence definition) must not change the list `n`.
+ */
+function elementTarget(
+  parser: Parser,
+  lhs: MathJsonExpression | null,
+  local: boolean
+): { list: string; positions: MathJsonExpression[] } | null {
+  if (operator(lhs) !== 'At' || nops(lhs) < 2) return null;
+  if (symbol(lhs) === null && parser.binderSymbol(lhs) !== null) return null;
+  const base = operand(lhs, 1);
+  const positions = operands(lhs).slice(1);
+  if (positions.some((x) => stringValue(x) !== null)) return null;
+  const list =
+    symbol(base) ?? (local && base !== null ? parser.binderSymbol(base) : null);
+  if (list !== null) return { list, positions: [...positions] };
+  const inner = elementTarget(parser, base, local);
+  if (inner === null) return null;
+  return { list: inner.list, positions: [...inner.positions, ...positions] };
+}
+
+/**
+ * The rebinding `Assign(L, ReplaceAt(L, …positions, rhs))` for the element
+ * target `target`, recorded in `ELEMENT_ASSIGNS` with the error over the
+ * tokens from `start` to the current position. Lists have value semantics:
+ * the assignment gives `L` a new list, and another variable that holds the
+ * old list (`A \coloneq L` before) keeps it.
+ *
+ * The evaluate handler of `Assign` refuses a rebinding that cannot give a
+ * list (an out-of-range position, a target that is not a list), and the
+ * variable keeps its value (`elementRebindingRefusal()` in
+ * `library/core.ts`).
+ *
+ * A list that is a function of the library (`N[1] \coloneq 5`) gives the error
+ * `assignment-to-library-function`: the rebinding would replace the function.
+ * A value of the right side that is an assignment (`L[k] \coloneq a \coloneq
+ * 5`) is the error `chained-assignment`, as for a symbol target
+ * (`parseAssign()`).
+ */
+function elementAssignment(
+  parser: Parser,
+  target: { list: string; positions: MathJsonExpression[] },
+  rhs: MathJsonExpression,
+  start: number
+): MathJsonExpression {
+  if (parser.isLibraryFunction(target.list))
+    return assignmentToLibraryFunction(parser, target.list, start);
+  if (operator(rhs) === 'Assign') rhs = ['Error', "'chained-assignment'"];
+  const result: MathJsonExpression = [
+    'Assign',
+    target.list,
+    ['ReplaceAt', target.list, ...target.positions, rhs],
+  ];
+  ELEMENT_ASSIGNS.set(
+    result as object,
+    assignmentToListElement(parser, target.positions[0] ?? null, start)
+  );
+  return result;
+}
 
 /**
  * The error of an assignment to a list element, over the tokens from `start`
@@ -6463,18 +6568,42 @@ function assignmentToListElement(
 }
 
 /**
- * Reads the right side of an assignment to a list element, so that it is part
- * of the one error, and gives this error. With no right side, gives `null`.
+ * Reads the right side of an assignment to the list element `target` (an
+ * `At`), and gives the rebinding of the list (`elementAssignment()`). A target
+ * that `elementTarget()` does not accept gives the error of an assignment to a
+ * list element, over the right side too. With no right side, gives `null`.
  */
 function parseAssignmentToListElement(
   parser: Parser,
-  index: MathJsonExpression | null,
+  target: MathJsonExpression,
   start: number,
   until?: Readonly<Terminator>
 ): MathJsonExpression | null {
   const rhs = parser.parseExpression({ ...(until ?? {}), minPrec: 20 });
   if (rhs === null) return null;
-  return assignmentToListElement(parser, index, start);
+  // A statement of a block: in a local-binding context (a statement after a
+  // `;`, a `where` item), or the first statement of a `;` block, which a `;`
+  // follows. A subscript in the target is then the name of a local
+  // (`elementTarget()`). A row of a `cases` environment gets both readings,
+  // as for the target `n_{0}` (`parseAssignStatement()`).
+  const end = parser.index;
+  parser.skipSpace();
+  const local = (until?.minPrec ?? 0) >= 19 || parser.peek === ';';
+  parser.index = end;
+  const element = elementTarget(parser, target, local);
+  const result =
+    element !== null
+      ? elementAssignment(parser, element, rhs, start)
+      : assignmentToListElement(parser, operand(target, 2), start);
+  if (!local && CASES_ENVIRONMENTS.has(parser.environmentName?.() ?? '')) {
+    const blockElement = elementTarget(parser, target, true);
+    if (blockElement !== null)
+      parser._recordBlockRowAlternative?.(
+        result,
+        elementAssignment(parser, blockElement, rhs, start)
+      );
+  }
+  return result;
 }
 
 /**
@@ -6572,11 +6701,18 @@ function parseAssign(
       ['Error', "'chained-assignment'"],
     ] as MathJsonExpression;
   if (result !== null && typeof result === 'object') {
-    INFIX_ASSIGNS.add(result);
+    // An assignment to a list element changes the list in scope, and does not
+    // declare a local (`ELEMENT_ASSIGNS`).
+    if (!ELEMENT_ASSIGNS.has(result)) INFIX_ASSIGNS.add(result);
     // The recorded local reading of a `cases` row is the same `\coloneq`
     // statement: marked too, so that the block declares its local.
     const local = parser.blockRowAlternative?.(result);
-    if (local !== null && typeof local === 'object') INFIX_ASSIGNS.add(local);
+    if (
+      local !== null &&
+      typeof local === 'object' &&
+      !ELEMENT_ASSIGNS.has(local)
+    )
+      INFIX_ASSIGNS.add(local);
   }
   return result;
 }
@@ -6613,7 +6749,10 @@ function parseAssignStatement(
   // that is not a symbol has a binder name only when it is an `At`
   // (`Parser.binderSymbol()`), so the top-level reading of such a target is
   // always the error `assignment-to-list-element`, and the user sees that
-  // nothing was assigned. The local reading has already read the right side.
+  // nothing was assigned: the subscript spelling is the name of a local, and
+  // it does not change the list `n` (`elementTarget()`). The bracket spelling
+  // `n[1] \coloneq 3` changes it. The local reading has already read the
+  // right side.
   //
   // A row of a `cases` environment (`dcases`, `rcases` too) is read before
   // the parser knows whether the environment is a block: two or more
@@ -6699,7 +6838,7 @@ function parseAssignStatement(
     if (fn === 'At')
       return parseAssignmentToListElement(
         parser,
-        args[1] ?? null,
+        ['At', ...args],
         lhsStart,
         until
       );
@@ -6774,19 +6913,14 @@ function parseAssignStatement(
   }
 
   //
-  // 3/ L[k] := ... : a list element has no assignment
+  // 3/ L[k] := ... : the rebinding `L := ReplaceAt(L, k, ...)`
   //
   // A target that is `At` here is `L[k]`, `M[i, j]` or
   // `\operatorname{At}(L, k)`. Read as `head(args) := value` below, it would
   // define a function named `At`, which replaces the library function: `L[2]`
   // would give `[5, 5, 5]`, with no error when the index is a symbol.
   if (operator(lhs) === 'At')
-    return parseAssignmentToListElement(
-      parser,
-      operand(lhs, 2),
-      lhsStart,
-      until
-    );
+    return parseAssignmentToListElement(parser, lhs, lhsStart, until);
 
   // If this is a previously defined function, the lhs might be a
   // function application, i.e. `f(x) := ...`
@@ -7734,6 +7868,8 @@ function whereItem(
   expr: MathJsonExpression;
 } | null {
   if (isAssignmentTargetError(item)) return { kind: 'error', expr: item };
+  const elementError = elementAssignError(item);
+  if (elementError !== null) return { kind: 'error', expr: elementError };
   if (isLetStatement(item)) {
     // A `let` statement with a value is the block of one statement
     // `Declare(k, T, v)`, or `Declare(k, Dictionary(…))` when the value is a
@@ -8098,6 +8234,8 @@ function parseLetStatement(
   const statement = parser.parseExpression(terminator);
   if (statement === null) return null;
   if (isAssignmentTargetError(statement)) return statement;
+  const elementError = elementAssignError(statement);
+  if (elementError !== null) return elementError;
   const normalized = normalizeLocalAssign(statement);
   // After `let`, `=` is the assignment (see below), so a target that is `At`
   // reads as with `\coloneq`, not as a comparison: a subscript on a list

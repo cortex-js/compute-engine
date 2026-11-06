@@ -33,8 +33,9 @@
   `A\coloneq L`, the assignment `L[1]\coloneq 5` does not change `A`. The target
   must be a variable that the program can assign: in Epsil,
   `const c = [1, 2]; c[1] = 5` is the error `constant-assignment`, and in LaTeX
-  `N[1]\coloneq 5` is the error `assignment-to-library-function`. In a compiled
-  loop, `xs[i] = v` on a block local is written in place on JavaScript.
+  `N[1]\coloneq 5` is the error `assignment-to-library-function`. A string or a
+  tuple target gives the list that `ReplaceAt` gives. In a compiled loop,
+  `xs[i] = v` on a block local is written in place on JavaScript.
 - **A compiled loop that copies a list on each pass is reported.** When
   `xs = ReplaceAt(xs, i, v)` in a `Loop` cannot write the list in place on the
   JavaScript target, for example because the loop also has `ys = xs`,
@@ -82,11 +83,25 @@
 
 - **An assignment to a list element in Epsil rebinds the list.** `xs[2] = 9`
   gave the error `incompatible-type`, and is now `xs = ReplaceAt(xs, 2, 9)`
-  (see Improvements). An assignment with a string index, `xs["a"] = 9`, gives
-  the error `assignment-to-list-element`, as it does in LaTeX. In LaTeX, the
-  same error is given for a list that is not a symbol and for an element target
-  in a `\operatorname{let}` statement or a `where` item, which declare a new
-  name.
+  (see Improvements). An assignment with a string index, `xs["a"] = 9`, is the
+  parse error `assignment-to-list-element`, and the statement changes nothing.
+  In LaTeX, the same error is given for a string index, for a list that is not
+  a symbol, for an element target in a `\operatorname{let}` statement or a
+  `where` item, which declare a new name, and for the subscript spelling
+  `n_{1}\coloneq 7` outside a block: only `n[1]\coloneq 7` rebinds the list. In
+  a block, `n_{1}\coloneq 7` still declares the local `n_1`.
+- **An assignment that rebinds a list to a `ReplaceAt` of itself checks the
+  write, and keeps the old value when it fails.** This applies to
+  `Assign(L, ReplaceAt(L, …, v))` however it is written: `L[k]\coloneq v`, the
+  Epsil `xs[k] = v`, or MathJSON. With `L = [1, 2]`, `L[5]\coloneq 1` gave the
+  unevaluated `ReplaceAt([1, 2], 5, 1)` as the new value of `L`, and it is now
+  the error `out-of-range`, as is a position of zero or one that is not an
+  integer. A name with no value as the target is the error
+  `assignment-to-list-element`, and an error that `ReplaceAt` gives, such as
+  `incompatible-type` for a number as the target, is returned. In each case `L`
+  keeps its value. A symbolic position, `L[k]\coloneq 1` with `k` unknown, still
+  gives the unevaluated `ReplaceAt`. Any other `ReplaceAt`, such as `y\coloneq
+  \operatorname{ReplaceAt}(L, 5, 1)`, keeps its documented behavior.
 - **Epsil warns when a body that is only `name = value` compares and nothing
   reads the result.** `let a = 0; match 1 { 1 => a = 2 }; a` gave `0` with no
   message, and it still gives `0`, now with the warning

@@ -199,6 +199,12 @@ The error is found before the program runs. Move the declaration before the firs
 
   'first-assignment-in-branch': `The first assignment of a name is in a branch of an \`if\`, in a branch of a \`match\` or in the body of a loop. In \`if c { t = 1 }; t\`, the name \`t\` has no value when \`c\` is false. A first assignment declares a local only at the own level of a block that is not in a branch or a loop body. Declare the name with a value before the branch, \`let t = 0; if c { t = 1 }; t\`, or with a \`let\` in the branch when the name is a local of the branch only.`,
 
+  'assignment-to-list-element': `An assignment to a list element, \`xs[i] = v\`, gives \`xs\` a new list with the element replaced, as \`xs = replaceAt(xs, i, v)\` does. This error is a write that cannot give a list, and the variable keeps its value.
+
+The target is a name with no value (\`ys[1] = 9\` with \`ys\` not declared). The position is a string (\`xs["a"] = 1\`): \`replaceAt\` takes only an integer position, and \`epsil check\` reports this before anything runs.
+
+A string and a tuple are written as \`replaceAt\` writes them, and give a list: with \`s = "abc"\`, \`s[1] = "z"\` gives the list of characters \`["z", "b", "c"]\`. A position past the end, zero or not an integer is the error \`out-of-range\`; the length of a string is its number of characters. A target that is a number, or a position that selects a number (\`xs[1, 1] = 5\` when \`xs\` is a flat list), is the error \`incompatible-type\` of \`replaceAt\`.`,
+
   'assignment-in-operand': `An assignment is a statement, not a value. In \`f(a := 2)\` and in \`x = (a := 2) + 1\` the assignment is an operand of another expression. Write the assignment as a statement of its own, then use the name: \`a := 2; f(a)\`.`,
 
   'assignment-type-mismatch': `An assignment gives a local a value whose type cannot be the type of the local. The type of a local is its declared type (\`let n: integer = 0\`), or else the type of its first value, widened: a number gives \`number\`, a string gives \`string\`, a boolean gives \`boolean\`, and the elements of a list, a set or a tuple widen the same way. So \`s = 0\` then \`s = s + 0.5\` is valid, and \`s = 0\` then \`s = "x"\` is this error. Use another name for a value of another type.`,
@@ -207,7 +213,7 @@ The error is found before the program runs. Move the declaration before the firs
 
 \`epsil check\` reports an assignment to a \`const\` of the same program (at any depth, and each name of a destructuring \`const\`) before anything runs, wherever the assignment is: at the top level, in a block, a loop body or a function body. The run does not report it a second time. A function defined before a \`const\` of the same block is included, because the \`const\` of a block is declared when the block starts: an assignment in the function writes the constant when the call comes after the \`const\`. A function defined before a top-level \`const\` does not write it: an assignment in a function body to a name that no enclosing scope declares when the function is defined makes a local of the body. A constant that the check cannot see — one declared by an earlier program on the same engine, or a library constant — is reported when the assignment runs, as a \`runtime-error\` with this code.
 
-To change the value, declare the name with \`let\` instead of \`const\`. To hold a second value, choose another name, or declare a local that shadows the constant: \`let c = 2\` in a function body or a block makes a new binding, and an assignment to it is valid. An indexed assignment such as \`c[1] = 2\` is not an assignment to \`c\`, and is reported with another error.
+To change the value, declare the name with \`let\` instead of \`const\`. To hold a second value, choose another name, or declare a local that shadows the constant: \`let c = 2\` in a function body or a block makes a new binding, and an assignment to it is valid. An indexed assignment such as \`c[1] = 2\` is the rebinding \`c = replaceAt(c, 1, 2)\`, so it is an assignment to \`c\` too, and gives this error.
 
 A host that calls \`ce.assign()\` on a constant gets a thrown error with the same message, whose \`code\` property is \`constant-assignment\`.`,
 

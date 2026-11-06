@@ -129,7 +129,7 @@ actually happens → write instead:**
 | `len(xs)` | Inert + did-you-mean | `length(xs)` |
 | `s[0]` / `len(s)` on a string | Works — a string is a collection of its characters (grapheme clusters), 1-based | `s[1]`, `length(s)` |
 | `"a" + "b"` | Error values inside an `Add` | `"\(a) and \(b)"` interpolation, or `join(a, b)` |
-| `xs[2] = 9` | Runtime error value — no element assignment; collections are immutable values | Rebuild: `map`; in a loop, `listFrom(join(xs, [v]))` |
+| `xs[2] = 9` | Works, as a rebinding: `xs = replaceAt(xs, 2, 9)`. Collections are immutable values, so another name that holds the old list keeps it | *(nothing to change)* |
 | `and` / `or` / `not` | Parse diagnostics (reserved words) | `&&`, `\|\|`, `!` |
 | `x**0.5` habits: `x^1/2` | Parses as `(x^1)/2` — precedence, not a root | `sqrt(x)` or `x^(1/2)` |
 | `math.floor`, `np.mean` | No modules/namespaces | Everything is global: `floor`, `mean`, `sin`, … |

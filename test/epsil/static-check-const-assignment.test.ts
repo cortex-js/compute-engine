@@ -159,6 +159,20 @@ describe('EPSIL CHECK: AN ASSIGNMENT TO A CONST BINDING', () => {
     const d = check('const c = 1\nc = 2\nc = 3\nc');
     expect(d.map((x) => x.at)).toEqual(['c = 2', 'c = 3']);
   });
+
+  test('an indexed assignment is an assignment to the constant', () => {
+    // `c[1] = 5` is the rebinding `c = replaceAt(c, 1, 5)`, so a `const` list
+    // gives the error of a plain assignment to the constant, and keeps its
+    // value. The message quotes the assignment as it is written.
+    const source = 'const c = [1, 2]\nc[1] = 5\nc';
+    const d = check(source);
+    expect(d.map((x) => [x.message[3], x.at])).toEqual([
+      ['constant-assignment', 'c[1] = 5'],
+    ]);
+    expect(d[0].message[1]).toBe(DESCRIPTION('c'));
+    expect(d[0].message[2]).toBe('c[1] := 5');
+    expect(run(source).value.toString()).toBe('[1,2]');
+  });
 });
 
 describe('EPSIL CHECK: NO REPORT', () => {
@@ -203,13 +217,6 @@ describe('EPSIL CHECK: NO REPORT', () => {
     expect(JSON.stringify(run(source).value.json)).toContain(
       'read-before-declaration'
     );
-  });
-
-  test('an indexed assignment does not replace the binding', () => {
-    // The engine refuses an indexed assignment to any binding, with another
-    // error; it is not an assignment to the constant.
-    const d = check('const c = [1, 2]\nc[1] = 5\nc');
-    expect(d.some((x) => x.message[3] === 'constant-assignment')).toBe(false);
   });
 
   test('a `const` that re-declares a `let` does not make a constant', () => {

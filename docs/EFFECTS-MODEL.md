@@ -1814,7 +1814,10 @@ disposition so the question is not re-litigated:**
   standing in for is efficient functional update — `xs = Append(xs, x)`,
   `xs[i] = v`, `ds.key = v` — every one of which is a **rebinding** form
   needing no parameter mode, no new value semantics, and no effect label.
-  See the naming and uniqueness material below only if the mode is ever
+  `xs[i] = v` is implemented in this form (user decision 2026-11-06): the
+  Epsil parser reads `xs[i] = v`, and the LaTeX parser reads
+  `L[k] \coloneq v`, as `Assign(xs, ReplaceAt(xs, i, v))`, and a compiled
+  block local is updated in place on JavaScript. See the naming and uniqueness material below only if the mode is ever
   revived.
 
   **Open naming question — `inout` vs `mutable`, no ruling.** Both spell

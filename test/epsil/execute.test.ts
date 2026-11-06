@@ -373,9 +373,9 @@ describe('EPSIL EXECUTE — runtime problems in non-final statements', () => {
   // by an earlier statement would vanish silently. Each non-final statement
   // that evaluates to an error value emits a `runtime-error` diagnostic.
 
-  test('an indexed assignment (unsupported) surfaces as a diagnostic', () => {
-    const { value, diagnostics } = run('let xs = [1, 2, 3]\nxs[2] = 9\nxs');
-    // The engine rejects the assignment at canonicalization time, so the
+  test('a mid-program type error surfaces as a diagnostic', () => {
+    const { value, diagnostics } = run('let xs = [1, 2, 3]\n"a" + 1\nxs');
+    // The engine rejects the statement at canonicalization time, so the
     // statement is reported twice: once by the static pass (before anything
     // runs) and once by the run of the statement itself. The duplication is
     // accepted — a static diagnostic never suppresses evaluation.
@@ -383,12 +383,11 @@ describe('EPSIL EXECUTE — runtime problems in non-final statements', () => {
       'static-type-error',
       'runtime-error',
     ]);
-    // Both narrow to `xs[2]` rather than underlining the whole statement —
+    // Both narrow to `"a"` rather than underlining the whole statement —
     // the static pass from the error's position in the canonical tree, the
     // run from the error's breadcrumb, through the same matcher.
-    expect(diagnostics[0].range.slice(0, 2)).toEqual([19, 24]);
-    expect(diagnostics[1].range).toEqual([19, 24]);
-    // The list is unchanged
+    expect(diagnostics[0].range.slice(0, 2)).toEqual([19, 22]);
+    expect(diagnostics[1].range).toEqual([19, 22]);
     expect(value.toString()).toBe('[1,2,3]');
   });
 
