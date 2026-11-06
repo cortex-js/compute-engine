@@ -55,8 +55,9 @@
  *   nested evaluation, and an unseeded Monte Carlo estimate, pure for the
  *   effects model, draws through its `entropy` handler.
  *
- * The memo is neither read nor written inside a type computation while a
- * call of a function literal is in progress (`staticViewDiverges()`,
+ * The memo is neither read nor written inside a type computation that can
+ * answer otherwise than a read outside it, for example while a call of a
+ * function literal is in progress (`staticViewDiverges()`,
  * `static-typing-view.ts`). A type handler can evaluate a node there (the
  * `isFinite` handler of `Take` evaluates its count), and it reads the static
  * view of the bindings, where a parameter of the call has no value. The frame

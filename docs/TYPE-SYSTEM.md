@@ -1546,6 +1546,10 @@ that frame. During type computation, `withStaticTypingView` changes lookup:
 - Its activation frame is skipped when reached as that body's parent.
 - A lookup starting in an activation frame on the current stack reads the
   body's static bindings instead.
+- An occurrence of a function-literal parameter whose binding is not reachable
+  reads no binding, not another binding of the same name. A read outside a type
+  computation still reads the name. The first such read of an engine gives its
+  type computations cache keys of their own (`staticViewDiverges()`).
 
 A captured frame reached through a different scope chain, or no longer on the
 current stack, remains visible. Such a frame belongs to the closure made by the

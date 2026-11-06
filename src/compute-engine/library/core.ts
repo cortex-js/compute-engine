@@ -1419,10 +1419,11 @@ function hasNumberLeaves(t: Type, depth = 8): boolean {
  *
  * The call must give a value to each required parameter of the user
  * function and have no more arguments than it has parameters. A user
- * function with a rest parameter is not read, and neither is one with a
- * parameter whose name has a definition in the current scope. Other
- * callees, for example a `Composition`, do not give a function literal,
- * and the answer is `undefined` for them.
+ * function with a rest parameter is not read. An inline call,
+ * `(n ↦ (x ↦ x + n))(1)`, is `Apply(literal, 1)`: the user function is the
+ * first operand, and the other operands are the arguments. Other callees,
+ * for example a `Composition`, do not give a function literal, and the
+ * answer is `undefined` for them.
  */
 function curriedLiteralValue(
   st: OperandStructure & { kind: 'application' },
@@ -1430,7 +1431,11 @@ function curriedLiteralValue(
   context: TypeHandlerContext | undefined
 ): OperandDescriptor | undefined {
   let outer = st.callee?.structureOf?.();
-  if (st.callee === undefined && context !== undefined) {
+  let count = st.children.length;
+  if (st.callee === undefined && st.head === 'Apply') {
+    outer = st.children[0]?.structureOf?.();
+    count -= 1;
+  } else if (st.callee === undefined && context !== undefined) {
     const def = context.engine.lookupDefinition(st.head);
     const literal =
       def?.operator !== undefined
@@ -1455,19 +1460,7 @@ function curriedLiteralValue(
   const params = outer.parameters;
   if (params.some((p) => p.rest === true)) return undefined;
   const required = params.filter((p) => p.optional !== true).length;
-  const count = st.children.length;
   if (count < required || count > params.length) return undefined;
-  // The signature of the callee (`fn.type`) is wrong when the name of an
-  // outer parameter has a definition in the current scope: it is typed with
-  // that definition, not with the argument of the call. With `n := [1, 2]`,
-  // `mk(1)` is typed `(x) -> list<number>` for the value `x ↦ x + 1`. Its
-  // result would then be read as the cell of a list, and the call typed as
-  // a list of lists, so the value is not read.
-  if (
-    context === undefined ||
-    params.some((p) => context.engine.lookupDefinition(p.name) !== undefined)
-  )
-    return undefined;
   return { type: fn.type, facts: fn.facts, structureOf: () => value };
 }
 

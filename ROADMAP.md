@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-827.
+Next free reference: CE-828.
 
 **Entry format.**
 
@@ -133,6 +133,19 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
   (CE-354 to CE-359)
 
 ## Types and type inference
+
+### CE-827. The type of a block local reads a global of the same name
+
+**Status:** ready; defect, S.
+**Witness:** plausible; with `n := [1, 2]`, `Block(Declare(n, "real", 2), n + 1)` (in Epsil, `let n: real = 2; n + 1`) is typed `list<real>`, and its value is `3`, of type `3`.
+
+The type is read after the scope of the block was left, so the operand view of
+the broadcast lift reads `.value` of the local `n`. Its binding cannot be
+reached, and `bindingInContext()` (`boxed-expression/binders.ts`) answers with
+the global `n` by name. A parameter of a function literal has the same read,
+and a type computation refuses it (`readsNoOtherBinding()`). The fix extends
+that test to a block local. A run of the block replaces the definition of a
+local (`sweptHomeBinding()`), and that read must keep its value in the run.
 
 ### CE-545. A call over an `unknown` operand and over the wide CE-502 form are typed by different rules
 

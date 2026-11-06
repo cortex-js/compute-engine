@@ -4369,7 +4369,8 @@ export class BoxedFunction
           }
         }
         // The memo is neither read nor written inside a type computation
-        // while a call of a function literal is in progress
+        // that can answer otherwise than a read outside it, for example while
+        // a call of a function literal is in progress
         // (`staticViewDiverges()`, `static-typing-view.ts`). There a
         // parameter of the call has no value, and the frame (`engine.context`)
         // that keys the memo is the frame of the call. An entry stored there
@@ -4792,7 +4793,8 @@ export class BoxedFunction
     // do (`_atTransientConfiguration`): in a degree-mode engine `Sin(30)` is
     // `1/2`, and inside a radian window it stays `sin(30)`.
     if (this.engine._atTransientConfiguration) return false;
-    // Not inside a type computation while a call of a function literal is in
+    // Not inside a type computation that can answer otherwise than a read
+    // outside it, for example while a call of a function literal is in
     // progress (`staticViewDiverges()`, `static-typing-view.ts`). There a
     // parameter of the call has no value, and the key of the memo (the
     // generation and the lexical scope) is the same as in the evaluation of

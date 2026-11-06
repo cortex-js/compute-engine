@@ -53,9 +53,9 @@ const hiddenBodyBindings = new WeakMap<
 
 /** For each engine, the number of body scopes that have an entry in
  * `hiddenBodyBindings`: the static view of the engine can differ from the
- * bindings only while it is not 0 (`staticViewDiverges()`). An exception
- * thrown by an application after it hid the parameters and before its `try`
- * (`pushScope()`, the declaration of its assignment locals) leaves the count
+ * bindings while it is not 0 (`staticViewDiverges()` has the other case). An
+ * exception thrown by an application after it hid the parameters and before
+ * its `try` (`pushScope()`, the declaration of its assignment locals) leaves the count
  * above 0, as it leaves the body scope re-parented. The view is then counted
  * as different for every later type computation of the engine: the caches
  * keyed on `_cacheGeneration()` use keys of their own inside type
@@ -172,19 +172,53 @@ export function innermostCallFrameBody(ce: ViewEngine): object | undefined {
   return frame === undefined ? undefined : frameBodyScopes.get(frame);
 }
 
+/** True while a type computation of `ce` runs. */
+export function inStaticTypingView(ce: ViewEngine): boolean {
+  return viewEngine === ce;
+}
+
+/** The engines that have read a parameter of a function literal by name, in
+ * another binding of that name, outside a type computation
+ * (`noteParameterReadByName()`). */
+const parameterReadsByName = new WeakSet<ViewEngine>();
+
+/**
+ * Record that a read outside a type computation of `ce` found a value in
+ * another binding with the name of a parameter whose own binding is not
+ * reachable. A type computation reads no binding there (`bindingInContext()`,
+ * `binders.ts`), so the two can answer differently from now on. The record
+ * stays for the life of the engine: an answer of that read can stay in a cache
+ * of a node, whatever happens to the binding. This costs cache hits, not
+ * correctness: each later type computation of `ce` also skips the memos that
+ * test `staticViewDiverges()`. An engine that makes no such read does not pay.
+ */
+export function noteParameterReadByName(ce: ViewEngine): void {
+  parameterReadsByName.add(ce);
+}
+
 /**
  * Can a read in the static view answer something else than the same read
- * outside it? Only while a type computation of `ce` runs and an application
- * of a function literal by `ce` is in progress: the static view differs
- * only at the body scope of a literal that is being applied and at its
- * frame. An application suspended at an `await` counts too: its body scope
- * keeps the frame as parent and its bindings taken out, and a read of a
- * node of its body from any stack goes through them. A frame on the current
- * stack also counts. A cache that is not keyed on the type version keeps an
- * answer computed then under a key of its own.
+ * outside it? Only while a type computation of `ce` runs, and in one of two
+ * cases.
+ *
+ * - An application of a function literal by `ce` is in progress: the static
+ *   view differs at the body scope of a literal that is being applied and at
+ *   its frame. An application suspended at an `await` counts too: its body
+ *   scope keeps the frame as parent and its bindings taken out, and a read of
+ *   a node of its body from any stack goes through them. A frame on the
+ *   current stack also counts.
+ * - `ce` has read a parameter of a function literal by name
+ *   (`noteParameterReadByName()`). With `n := 2`, the sign of the body node
+ *   `n + 1` of `(n: real) ↦ Sqrt(n + 1)` is positive outside the view, and is
+ *   not known inside it. Read from the cache, that sign would type the literal
+ *   `(n: real) -> real`, where the result can be complex.
+ *
+ * A cache that is not keyed on the type version keeps an answer computed then
+ * under a key of its own.
  */
 export function staticViewDiverges(ce: ViewEngine): boolean {
   if (viewEngine !== ce) return false;
+  if (parameterReadsByName.has(ce)) return true;
   if ((appliedBodyScopeCount.get(ce) ?? 0) > 0) return true;
   return innermostFrame(ce._evalContextStack) !== undefined;
 }

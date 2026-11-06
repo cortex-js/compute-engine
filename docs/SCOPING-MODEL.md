@@ -9,6 +9,15 @@ substitution, free-symbol analysis, closure capture, and dereference must use
 the binding selected by the scope chain. Raw-name fallback is a compatibility
 escape hatch, not the identity model.
 
+A type computation does not use this fallback for a parameter of a function
+literal, which has a value only in a call: with `n := [1, 2]`, the type of
+`n ↦ n + 1` is `(n: unknown) -> number` (`bindingInContext()`,
+`boxed-expression/binders.ts`). An evaluation of a body node taken out of the
+literal, outside a call, still reads the name, except for an answer that an
+earlier type computation of that node cached: a node that a type handler
+evaluated (`Take(L, n + 1)` when its finiteness is read) can keep the symbolic
+answer.
+
 ## Callable resolution
 
 A callable name denotes the binding selected where the call or callback was

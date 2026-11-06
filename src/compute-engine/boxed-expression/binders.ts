@@ -16,7 +16,10 @@ import type {
   TaggedValueDefinition,
 } from '../global-types.js';
 import { isFunction, isSymbol, isDictionary, isNumber } from './type-guards.js';
-import { functionLiteralParameterNames } from './function-literal.js';
+import {
+  functionLiteralParameterNames,
+  isFunctionLiteralParameter,
+} from './function-literal.js';
 import { assertLiveBinding, isTombstoned } from './binding-tombstone.js';
 import {
   binderBoundAt,
@@ -30,7 +33,9 @@ import { copyContextStack } from './evaluation-epoch.js';
 import { chainedScopeOf } from '../scope-chaining.js';
 import { isPendingCallScope } from '../pending-call-scopes.js';
 import {
+  inStaticTypingView,
   noteCallFrame,
+  noteParameterReadByName,
   staticBindingIn,
   staticParentOf,
 } from '../static-typing-view.js';
@@ -449,6 +454,13 @@ function creationParentOf(scope: Scope): Scope | undefined {
  * scope that has since been popped, or an unbound one), the innermost binding
  * by name answers, foreign activation included — what the name lookup
  * answered before.
+ *
+ * One exception: inside a type computation, a parameter of a function literal
+ * that is reachable from nowhere has no binding. The type of a literal is read
+ * after the scope of its body was left, and the parameter has a value only
+ * in a call. A binding of the same name is another variable: with
+ * `n := [1, 2]`, the operand `n` of `n ↦ n + 1` does not hold a list, so the
+ * literal is typed `(n) -> number`, not `(n) -> list<number>`.
  */
 export function valueDefinitionInContext(
   ce: ComputeEngine,
@@ -509,17 +521,54 @@ export function bindingInContext(
         // that the occurrence was written in: no caller reads it in its place.
         const home = sweptHomeOf(own);
         if (home !== undefined && scopeStandsFor(scope, home)) return found;
-        return (
-          callerBinding(ce, name, own, start, staticParentOf(scope)) ??
-          sweptHomeBinding(name, own, scope, found)
+        const caller = callerBinding(
+          ce,
+          name,
+          own,
+          start,
+          staticParentOf(scope)
         );
+        if (caller !== undefined) return caller;
+        const other = sweptHomeBinding(name, own, scope, found);
+        return readsNoOtherBinding(ce, own, other) ? undefined : other;
       }
     }
     scope = staticParentOf(scope);
   }
-  if (own !== undefined)
-    return callerBinding(ce, name, own, start, null) ?? skippedBinder;
+  if (own !== undefined) {
+    const caller = callerBinding(ce, name, own, start, null);
+    if (caller !== undefined) return caller;
+    return skippedBinder !== undefined &&
+      readsNoOtherBinding(ce, own, skippedBinder)
+      ? undefined
+      : skippedBinder;
+  }
   return skippedBinder;
+}
+
+/**
+ * True when an occurrence bound to `own`, about to read `other`, a binding of
+ * the same name that is not its own, reads no binding: a type computation
+ * reads a parameter of a function literal. See the exception in the comment
+ * of `valueDefinitionInContext()`.
+ *
+ * Any other read of such a parameter keeps the read by name. When `other`
+ * holds a value, it gives another answer than the type computation, so it is
+ * recorded, and the caches keep the two answers under different keys from now
+ * on (`noteParameterReadByName()`). A binding with no value answers as the
+ * type computation does, and a later assignment to it moves the keys of the
+ * caches, so the next read comes back here.
+ */
+function readsNoOtherBinding(
+  ce: ComputeEngine,
+  own: BoxedBaseDefinition,
+  other: BoxedDefinition
+): boolean {
+  if (!isFunctionLiteralParameter(own)) return false;
+  if (inStaticTypingView(ce)) return true;
+  if ('value' in other && other.value.value !== undefined)
+    noteParameterReadByName(ce);
+  return false;
 }
 
 /**

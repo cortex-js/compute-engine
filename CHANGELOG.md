@@ -34,6 +34,13 @@
   read is a call with a discarded value. A body whose value is read, and an
   equation of a free name, a constant, a parameter or a pattern variable, get no
   warning.
+- **The type of a function literal no longer reads a variable that has the name
+  of its parameter.** With `n := [1, 2]`, `n ↦ n + 1` was typed
+  `(n: unknown) -> list<number>`, and it is now `(n: unknown) -> number`, as with
+  a parameter of another name. With `mk := n ↦ (x ↦ x + n)`, `mk(1)` is now typed
+  `(x: unknown) -> number`, and `Apply(mk(1), [10, 20])` is typed `vector<2>`, not
+  `list<number>`. Its value is still `[11, 21]`. A body taken out of the literal
+  and evaluated outside a call still reads the variable.
 - **A tuple beside a list of another length is an `incompatible-dimensions`
   error under an operator that reads the tuple by position.**
   `Power((1, 2), [3, 4, 5])` was `[1, 16]`, and it now gives

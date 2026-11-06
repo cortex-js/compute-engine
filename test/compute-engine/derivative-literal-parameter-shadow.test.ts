@@ -1,5 +1,6 @@
 import { compile } from '../../src/compile';
 import { ComputeEngine } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine';
 
 // The parameters of the function literal of `Derivative(a ↦ …)` are bound
 // by the literal. A variable of the same name that has a value where the
@@ -307,19 +308,49 @@ describe('STATIC TYPE OF THE APPLICATION OF A CURRIED FUNCTION', () => {
 
   test('the body is not typed with the outer parameter unbound', () => {
     // The inner body reads `n`, which is the argument of the outer call
-    // (`1.5`), not an integer. When a global `n` has a value, the signature
-    // of `mk(1)` is typed with that value, and the call keeps the type of
-    // that signature: the type holds the value, but is not a vector.
+    // (`1.5`), not an integer.
     const ce = curried(['List', 'x', 'n']);
     expect(
       typeAndValue(ce, ['Apply', ['mk', 1.5], ['List', 1, 2]])[1]
     ).toEqual('[[1,1.5],[2,1.5]]');
-    const ce2 = curried(['Add', 'x', 'n']);
-    ce2.declare('n', 'list<integer>');
-    ce2.assign('n', ce2.box(['List', 1, 2]));
+  });
+
+  test('a global with the name of the outer parameter says nothing', () => {
+    const ce = curried(['Add', 'x', 'n']);
+    ce.declare('n', 'list<integer>');
+    ce.assign('n', ce.box(['List', 1, 2]));
     expect(
-      typeAndValue(ce2, ['Apply', ['mk', 1], ['List', 10, 20]])[1]
-    ).toEqual('[11,21]');
+      typeAndValue(ce, ['Apply', ['mk', 1], ['List', 10, 20]])
+    ).toEqual(['vector<2>', '[11,21]']);
+  });
+
+  test('an inline call of a curried literal', () => {
+    const inline: Json = [
+      'Apply',
+      ['Apply', ['Function', ['Function', ['Add', 'x', 'n'], 'x'], 'n'], 1],
+      ['List', 10, 20],
+    ];
+    expect(typeAndValue(new ComputeEngine(), inline)).toEqual([
+      'vector<2>',
+      '[11,21]',
+    ]);
+    const ce = new ComputeEngine();
+    ce.assign('n', ce.box(['List', 1, 2]));
+    expect(typeAndValue(ce, inline)).toEqual(['vector<2>', '[11,21]']);
+  });
+
+  test('an inline call that is not a call of a curried literal', () => {
+    // The inner `Apply` gives the number 2, not a function literal, so the
+    // list is not mapped: the outer call is an application of a number.
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Apply',
+      ['Apply', ['Function', ['Add', 'n', 1], 'n'], 1],
+      ['List', 10, 20],
+    ]);
+    const value = expr.evaluate();
+    expect(value.toString().includes('[11')).toBe(false);
+    expect(expr.type.toString().startsWith('vector')).toBe(false);
   });
 
   test('a list of tuples binds each tuple whole', () =>
@@ -355,6 +386,177 @@ describe('STATIC TYPE OF THE APPLICATION OF A CURRIED FUNCTION', () => {
     );
     expect(value).toBe('3');
     expect(type.startsWith('list')).toBe(false);
+  });
+});
+
+// A parameter of a function literal has a value only in a call. The type of a
+// literal is read after the scope of its body was left, where the walk of the
+// scope chain finds a variable of the same name: that is another variable, and
+// it says nothing about the parameter. The signature is the signature of the
+// same literal with a parameter of another name.
+describe('THE TYPE OF A LITERAL WITH A PARAMETER NAMED LIKE A GLOBAL', () => {
+  const withGlobal = (value: Json): ComputeEngine => {
+    const ce = new ComputeEngine();
+    ce.assign('n', ce.box(value));
+    return ce;
+  };
+  const list: Json = ['List', 1, 2];
+
+  // The parameter names are part of the printed signature: the spelling with
+  // the other name `q` is compared with `n` in its place.
+  const sameAsAnotherName = (ce: ComputeEngine, make: (v: string) => Json) =>
+    expect(ce.box(make('n')).type.toString()).toBe(
+      ce.box(make('q')).type.toString().replaceAll('q', 'n')
+    );
+
+  test.each<[string, Json]>([
+    ['a list', list],
+    ['a matrix', ['List', ['List', 1, 2], ['List', 3, 4]]],
+    ['a tuple', ['Tuple', 1, 2]],
+    ['a set', ['Set', 1, 2]],
+    ['a string', { str: 'ab' }],
+    ['a number', 3],
+    ['a function', ['Function', ['Add', 'z', 1], 'z']],
+  ])('a global that holds %s', (_label, value) => {
+    const ce = withGlobal(value);
+    for (const body of [
+      (v: string): Json => ['Add', v, 1],
+      (v: string): Json => ['Multiply', v, 2],
+      (v: string): Json => ['Sin', v],
+      (v: string): Json => ['List', v, 1],
+      (v: string): Json => ['Function', ['Add', 'x', v], 'x'],
+    ]) {
+      sameAsAnotherName(ce, (v) => ['Function', body(v), v]);
+      sameAsAnotherName(ce, (v) => [
+        'Function',
+        body(v),
+        ['Typed', v, { str: 'real' }],
+      ]);
+    }
+  });
+
+  test('the value of the literal has the type of the literal', () => {
+    const ce = withGlobal(list);
+    const literal = ce.box(['Function', ['Add', 'n', 1], 'n']);
+    expect(literal.type.toString()).toBe('(n: unknown) -> number');
+    expect(literal.evaluate().type.toString()).toBe('(n: unknown) -> number');
+  });
+
+  test('a literal parsed from LaTeX', () =>
+    expect(withGlobal(list).parse('n \\mapsto n+1').type.toString()).toBe(
+      '(n: unknown) -> number'
+    ));
+
+  test('a global assigned after the type of the literal is read', () => {
+    const ce = new ComputeEngine();
+    const literal = ce.box(['Function', ['Add', 'n', 1], 'n']);
+    expect(literal.type.toString()).toBe('(n: unknown) -> number');
+    ce.assign('n', ce.box(list));
+    expect(literal.type.toString()).toBe('(n: unknown) -> number');
+  });
+
+  // `n + 1` has no sign for every real `n`, so `Sqrt(n + 1)` can be complex. A
+  // read of the global `n := 2` makes the sum positive, and the sign is cached
+  // on the node: the type of the literal must not read that answer.
+  const sqrtOfSum = (ce: ComputeEngine) => {
+    const literal = ce.box([
+      'Function',
+      ['Sqrt', ['Add', 'n', 1]],
+      ['Typed', 'n', { str: 'real' }],
+    ]);
+    const sum = (literal.ops![0].ops![0] as { op1: Expression }).op1;
+    return { literal, sum };
+  };
+
+  test('a read of the sign of a body node before the type', () => {
+    const { literal, sum } = sqrtOfSum(withGlobal(2));
+    expect(sum.sgn).toBe('positive');
+    expect(literal.type.toString()).toBe('(n: real) -> complex');
+  });
+
+  test('a read of the sign of a body node after the type', () => {
+    const { literal, sum } = sqrtOfSum(withGlobal(2));
+    expect(literal.type.toString()).toBe('(n: real) -> complex');
+    // The type computation found no sign, and that is a sound answer here.
+    expect(sum.sgn).toBeUndefined();
+  });
+
+  test('a read of the sign of another literal after a read by name', () => {
+    const ce = withGlobal(2);
+    expect(sqrtOfSum(ce).sum.sgn).toBe('positive');
+    const { literal, sum } = sqrtOfSum(ce);
+    expect(literal.type.toString()).toBe('(n: real) -> complex');
+    expect(sum.sgn).toBe('positive');
+    expect(literal.type.toString()).toBe('(n: real) -> complex');
+  });
+
+  test('a body node evaluated outside a call reads the name', () => {
+    const ce = withGlobal(2);
+    const body = ce.box(['Function', ['Add', 'n', 1], 'n']).ops![0];
+    expect(body.evaluate().toString()).toBe('3');
+    ce.pushScope();
+    ce.declare('n', 'number');
+    ce.assign('n', 5);
+    expect(body.evaluate().toString()).toBe('6');
+    ce.popScope();
+  });
+
+  test('a body node evaluated after the type of the literal', () => {
+    const ce = withGlobal(2);
+    const literal = ce.box(['Function', ['Add', 'n', 1], 'n']);
+    expect(literal.type.toString()).toBe('(n: unknown) -> number');
+    expect(literal.ops![0].evaluate().toString()).toBe('3');
+    expect(literal.type.toString()).toBe('(n: unknown) -> number');
+  });
+
+  test('a global with no value leaves the literal typed as before', () => {
+    const ce = new ComputeEngine();
+    ce.parse('n^2');
+    const { literal, sum } = sqrtOfSum(ce);
+    expect(sum.sgn).toBeUndefined();
+    expect(literal.type.toString()).toBe('(n: real) -> complex');
+    // The assignment comes after the read of the sign: the next read of the
+    // sign finds the value by name, and the type still does not read it.
+    ce.assign('n', 2);
+    expect(sum.sgn).toBe('positive');
+    expect(literal.type.toString()).toBe('(n: real) -> complex');
+  });
+
+  test('control: a body node with no binding of the name stays symbolic', () => {
+    const ce = new ComputeEngine();
+    const body = ce.box(['Function', ['Add', 'n', 1], 'n']).ops![0];
+    expect(body.evaluate().toString()).toBe('n + 1');
+  });
+
+  test('the call of a curried function has the type of its value', () => {
+    const ce = withGlobal(list);
+    ce.assign(
+      'mk',
+      ce.box(['Function', ['Function', ['Add', 'x', 'n'], 'x'], 'n'])
+    );
+    const call = ce.box(['mk', 1]);
+    expect(call.type.toString()).toBe('(x: unknown) -> number');
+    expect(call.evaluate().type.toString()).toBe('(x: unknown) -> number');
+  });
+
+  test('a call binds the parameter, not the global', () => {
+    const ce = withGlobal(3);
+    const call = ce.box([
+      'Apply',
+      ['Function', ['Add', 'n', 1], ['Typed', 'n', { str: 'list<real>' }]],
+      list,
+    ]);
+    const value = call.evaluate();
+    expect(value.toString()).toBe('[2,3]');
+    expect(value.type.matches(call.type)).toBe(true);
+  });
+
+  test('control: a free name of a literal reads the global', () => {
+    const ce = new ComputeEngine();
+    ce.assign('y', ce.box(['List', 3, 4]));
+    const literal = ce.box(['Function', ['Add', 'y', 'q'], 'q']);
+    expect(literal.type.toString()).toBe('(q: unknown) -> vector<2>');
+    expect(ce.box(['Apply', literal, 1]).evaluate().toString()).toBe('[4,5]');
   });
 });
 

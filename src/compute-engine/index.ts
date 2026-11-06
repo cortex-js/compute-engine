@@ -1350,26 +1350,32 @@ export class ComputeEngine implements IComputeEngine {
   _cacheGeneration(): number {
     const generation = this._baseCacheGeneration();
     if (!staticViewDiverges(this)) return generation;
-    // Inside a type computation, while a call frame of a function literal is
-    // on the stack, the bindings are read in the static view
-    // (`static-typing-view.ts`): a parameter has no value. A sign, a value
-    // or an evaluation computed then is not the one an evaluation in the
-    // call reads, so it is kept under a key of its own: one key for each
+    // Inside a type computation, the bindings are read in the static view
+    // (`static-typing-view.ts`): a parameter has no value. While the view
+    // can answer something else than a read outside it, a sign, a value or
+    // an evaluation computed in the view is not the one that read gets, so
+    // it is kept under a key of its own: one key for each
     // value of the key outside the view, minted as a shield key is, so that
-    // it never equals another key. The facts bit is kept.
+    // it never equals another key. The facts bit is kept. The key outside the
+    // view comes back when a value shield ends, and the same key comes back
+    // with it: a new key would retire every sign that the type computation
+    // cached before the shield, and a derivation through a deep body then
+    // computes them again, once for each shield.
     const axis = Math.floor(generation / 2);
-    if (this._staticViewAxis !== axis) {
-      this._staticViewAxis = axis;
-      this._staticViewKey = this._nextValueShieldKey();
+    let key = this._staticViewKeys.get(axis);
+    if (key === undefined) {
+      // A key of an older `any` version is not used again. The limit only
+      // bounds the map: a key minted again costs cache hits.
+      if (this._staticViewKeys.size >= 64) this._staticViewKeys.clear();
+      key = this._nextValueShieldKey();
+      this._staticViewKeys.set(axis, key);
     }
-    return this._staticViewKey * 2 + (generation & 1);
+    return key * 2 + (generation & 1);
   }
 
-  /** The key of `_cacheGeneration()` outside the static view of a type
-   * computation, and the key outside it that `_staticViewKey` was minted
-   * for. */
-  private _staticViewAxis = Number.NaN;
-  private _staticViewKey = 0;
+  /** The key of `_cacheGeneration()` inside the static view of a type
+   * computation, for each key outside it. */
+  private readonly _staticViewKeys = new Map<number, number>();
 
   /** `_cacheGeneration()` outside the static view of a type computation. */
   private _baseCacheGeneration(): number {
