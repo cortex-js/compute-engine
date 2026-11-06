@@ -38,6 +38,12 @@ tool (the commit-msg hook refuses one).
 
 Wrap every test run in `timeout -k 30 600 …`, for example
 `timeout -k 30 600 npx jest -w 2 -- test/compute-engine/<file>.test.ts`.
+Run a check without a pipe and record its own exit code, because the exit
+status of a pipeline is that of its last command.
+
+Write a temporary file only in `/tmp`, never in another repo, because the rule
+that protects the uncommitted work of that repo allows only reads and test runs
+there.
 
 ## Steps
 
@@ -45,7 +51,8 @@ Wrap every test run in `timeout -k 30 600 …`, for example
    `ready`, another session took it: stop, and report `taken`.
 2. Reproduce the witness with `npx tsx scripts/probe.ts` (its header lists
    the options). If it no longer reproduces at the current HEAD, remove the
-   entry, commit only that `ROADMAP.md` change with the message
+   entry, commit only that `ROADMAP.md` change, and a known-limitations line in
+   `docs/COMPILATION-MODEL.md` if the probes gave one, with the message
    `{{ID}}: no longer reproduces at <full HEAD hash>`, and report
    `not reproduced`, with the probe output.
 3. Remove the entry from `ROADMAP.md` in the main tree (read the file again
