@@ -150,11 +150,19 @@
   `F = y ↦ ∫₀¹ e^(−xy)/x^0.99 dx`, `∫₀¹ F(y) dy` gave
   `99.575857194449625 ± 0.000000000000088`, for a true error of `1.2e-12`. It
   now gives `99.57585719445 ± 0.00000000011`, as with the inner integral written
-  in the integrand. `∫₀^∞ e^(−y) F(y) dy` now gives `99.315 ± 0.031`, also as
-  with the inner integral written in the integrand: its error is larger than the
-  true error. A result of such an integrand that does not converge no longer
-  uses Monte Carlo, which ran a quadrature for each sample. It stays the
+  in the integrand. A result of such an integrand that does not converge no
+  longer uses Monte Carlo, which ran a quadrature for each sample. It stays the
   quadrature result, or `NaN` when this result has no finite error.
+- **The error of a numeric integral now follows a factor of an inner integral.**
+  The error of the inner integral was added with no factor, so a small factor
+  gave an error much larger than the true one.
+  `∫₀^∞ e^(−y) ∫₀¹ e^(−xy)/x^0.99 dx dy` gave `99.315 ± 0.031` and now gives
+  `99.3149882729 ± 0.0000000086`. `∫₀¹ 10⁻¹² ∫₀¹ e^(−xy)/x^0.99 dx dy` gave an
+  error of `1.1e-10` for the value `9.96e-11`, and now gives an error of
+  `1.1e-22`. An integrand that changes faster than its inner integral, such as
+  its square, now gets a larger error. The error is not changed for an
+  integrand with an effect (`Random()`, an assignment), or with more than four
+  inner integrals.
 - **A later global no longer changes a local of a function when the function is
   built again.** After `h = n ↦ Block(g := z ↦ 0, z ↦ g(z) + n)`, `g := t ↦ 9`
   and `Apply(h(1), 0)` each gave the error `incompatible-type` about the `scope`
@@ -261,8 +269,15 @@
   `success: true` and `unsupported: ["DefineFunction", "f"]`, and so did a call
   of a local bound to a function literal (`const g = (k) => k + 1`). The list of
   a compilation with `success: true` is now always empty, as documented. When a
-  compilation declines, the list is unchanged: it can name `DefineFunction` and
-  the function beside the operator that caused the decline.
+  compilation declines, the list no longer has a name that the expression binds
+  (a local function, a parameter, an index): `(f) ↦ f(2)` gave `["f"]`, and now
+  gives `[]`. It can still name `DefineFunction` beside the operator that caused
+  the decline.
+- **`compile()` no longer lists in `freeSymbols` the names that an engine
+  function reads when a local function of the program has its name.** With
+  `f(t) := t·w` defined on the engine, the program `function f(t) { t + 1 }` then
+  `f(x)` calls its own `f`, and `freeSymbols` was `["w", "x"]`. It is now
+  `["x"]`.
 
 ## 0.181.1 _2026-11-05_
 

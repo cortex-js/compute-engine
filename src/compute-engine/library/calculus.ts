@@ -121,6 +121,7 @@ import { mixTags } from '../numerics/random.js';
 import {
   adaptiveQuadrature,
   initialPanelsForDimensions,
+  insideReplay,
   quadratureBeatsMonteCarlo,
 } from '../numerics/gauss-kronrod.js';
 import { integrateSemiInfiniteOscillatory } from '../numerics/oscillatory-quadrature.js';
@@ -1326,6 +1327,17 @@ type IntegrandParts = {
   uncached: (
     part: (...args: number[]) => number
   ) => (...args: number[]) => number;
+  /** The same part (`re` or `im`) for a caller that computes a value a second
+   * time at a point, only to measure how the value changes with the result of
+   * an inner integral (`replayIntegrand` of `adaptiveQuadrature`). The value
+   * is computed without the sample cache, so the inner integrals are called
+   * again, and it does not change what `sawImaginary`, `sawNumeric` and
+   * `sawOnlyUndefinedValues` report: it is not a sample of the integrand.
+   * An effect of the integrand (`Random()`, an assignment) runs again, so
+   * the caller uses it only for an integrand that is transitively pure. */
+  replayed: (
+    part: (...args: number[]) => number
+  ) => (...args: number[]) => number;
 };
 
 /** The panel budget of the adaptive Gauss–Kronrod quadrature of a ONE-limit
@@ -1419,6 +1431,18 @@ function numericIntegrandParts(
   const im = (...args: number[]) => at(args)[1];
   const reUncached = (...args: number[]) => parts(raw(...args))[0];
   const imUncached = (...args: number[]) => parts(raw(...args))[1];
+  const replayedPart =
+    (index: 0 | 1) =>
+    (...args: number[]) => {
+      const flags = [imaginary, numeric, undefinedValue, symbolic];
+      try {
+        return parts(raw(...args))[index];
+      } finally {
+        [imaginary, numeric, undefinedValue, symbolic] = flags;
+      }
+    };
+  const reReplayed = replayedPart(0);
+  const imReplayed = replayedPart(1);
   return {
     re,
     im,
@@ -1427,6 +1451,8 @@ function numericIntegrandParts(
     sawOnlyUndefinedValues: () => undefinedValue && !numeric && !symbolic,
     uncached: (part) =>
       part === re ? reUncached : part === im ? imUncached : part,
+    replayed: (part) =>
+      part === re ? reReplayed : part === im ? imReplayed : part,
   };
 }
 
@@ -2337,8 +2363,12 @@ function nIntegratePoleVerdict(
  * `options.compiled` tells whether the integrand compiled: it selects the
  * quadrature panel budget and the Monte-Carlo sample count. `options.uncached`
  * maps `jsf` to the same function without the sample cache of
- * `numericIntegrandParts()`. `options.draw` is the random stream of the
- * Monte-Carlo fallback.
+ * `numericIntegrandParts()`. `options.replayed` maps `jsf` to the function
+ * that the quadrature calls to measure how a value changes with the result
+ * of an inner integral (`IntegrandParts.replayed`). The caller leaves it out
+ * when the integrand must not be evaluated a second time at a point (it is
+ * not transitively pure).
+ * `options.draw` is the random stream of the Monte-Carlo fallback.
  *
  * `divergent` is `true` when the estimate is `NaN` because the quadrature
  * found that the integral diverges (step 3). The caller can then look for a
@@ -2353,6 +2383,7 @@ function integrateRealPart(
   options: {
     compiled: boolean;
     uncached: (part: (x: number) => number) => (x: number) => number;
+    replayed?: (part: (x: number) => number) => (x: number) => number;
     draw: () => number;
     /** Whether the integrand computes an integral. The caller sets it when the
      * expression of the integrand holds one. An integral in the body of a
@@ -2433,6 +2464,9 @@ function integrateRealPart(
     // integrand, because a test of the expression does not see an integral in
     // the body of a function that the integrand calls.
     nestedErrors: true,
+    // `jsf` reads a value that it computed before from the sample cache, and
+    // then calls no inner integral.
+    replayIntegrand: options.replayed?.(jsf),
     ...(options.compiled
       ? {}
       : { maxIntervals: INTERPRETED_QUADRATURE_PANELS }),
@@ -2520,6 +2554,13 @@ function integrateRealPart(
           ),
         }
       : { estimate: NaN, error: NaN };
+
+  // This integral is an inner integral of an integrand that is evaluated
+  // again only to measure how its value changes with an inner result
+  // (`insideReplay`, `numerics/gauss-kronrod.ts`). The samples would cost
+  // `mcSamples` evaluations, and their mean does not follow the changed
+  // result of the quadrature above.
+  if (insideReplay()) return { estimate: NaN, error: NaN };
 
   const mce = monteCarloEstimate(
     options.uncached(jsf),
@@ -7731,6 +7772,11 @@ volumes
             integrateRealPart(ce, jsf, lower, upper, {
               compiled: compiled?.success === true,
               uncached: integrand.uncached,
+              // An effect of the integrand must not run a second time at a
+              // point (see `withLogSpaceFallback`).
+              replayed: isTransitivelyPure(fnExpr)
+                ? integrand.replayed
+                : undefined,
               draw,
               nested,
             });
@@ -8667,6 +8713,10 @@ volumes
           integrateRealPart(engine, jsf, lower, upper, {
             compiled: compiled?.success === true,
             uncached: integrand.uncached,
+            // The result of `NIntegrate` has no error, but an enclosing
+            // quadrature collects the error of this one when this integral
+            // is in its integrand.
+            replayed: isTransitivelyPure(fn) ? integrand.replayed : undefined,
             draw,
             nested,
           });

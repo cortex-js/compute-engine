@@ -1994,10 +1994,198 @@ export function insideQuadrature(): boolean {
 }
 
 /**
+ * One call of a routine that computes an inner integral, made during an
+ * evaluation of the integrand of a quadrature that collects the errors of
+ * its inner integrals (`withNestedErrors`). The routine is
+ * `adaptiveQuadrature`, or a routine that runs under
+ * `replayableQuadratures`.
+ */
+type InnerCall = {
+  /** True for a routine that runs under `replayableQuadratures`. */
+  routine: boolean;
+  /** The bounds of the integral. */
+  a: number;
+  b: number;
+  /** What the call returned. */
+  result: { estimate: number; error: number } | null;
+  /** The error of `result`, and the tolerance that it was asked to meet.
+   * For a routine under `replayableQuadratures`, they are the sums of the
+   * errors and of the tolerances of the quadratures that it ran. A
+   * quadrature with a result that is not finite adds 0. */
+  error: number;
+  tolerance: number;
+};
+
+/**
+ * A second evaluation of the integrand at the same point, where one inner
+ * call returns an estimate with a change (see `measuredValueError`). The
+ * calls before it are not computed again: each returns what it returned in
+ * the first evaluation. The calls after it run, because the integrand or a
+ * bound of a later inner integral can use the changed result
+ * (`j = ∫…; ∫ j·g(x) dx`), and the integrand of a call cannot be compared
+ * with the one of the first evaluation: it is a new function at each
+ * evaluation.
+ */
+type Replay = {
+  /** The value of `activeQuadratures` during the first evaluation. A call
+   * made at another count is not a call of the integrand: it runs. */
+  depth: number;
+  /** The calls of the first evaluation. */
+  calls: InnerCall[];
+  /** The index in `calls` of the next call that is expected. */
+  next: number;
+  /** The index in `calls` of the call that returns a changed estimate, and
+   * the amount that is added to its estimate. */
+  shifted: number;
+  shift: number;
+  /** Whether call `shifted` was made. */
+  reached: boolean;
+  /** Whether a call was made that is not the call of the first evaluation
+   * at the same position. The positions of the calls after it are not
+   * known. */
+  diverged: boolean;
+  /** True while a routine under `replayableQuadratures` runs during the
+   * replay. The quadratures that it runs are not calls of the integrand, and
+   * the first evaluation did not record them, so they have no position:
+   * they run. */
+  inRoutine: boolean;
+};
+
+/** The replay that is running now, or `undefined`. */
+let replay: Replay | undefined;
+
+/**
+ * The result of a call during a replay, or `undefined` when the call must
+ * run:
+ * - no replay is running;
+ * - the call comes after the changed one;
+ * - the call is not the one that the first evaluation made at this position
+ *   (the changed estimate changed a bound or a branch of the integrand), or
+ *   it comes after such a call.
+ *
+ * A call is recognized by its position, its kind and its bounds, not by its
+ * integrand: the integrand of an inner integral is a new function at each
+ * evaluation. The position of a call that runs is still counted, so that
+ * `measuredValueError` can tell whether the replay made the calls of the
+ * first evaluation.
+ */
+function replayedCall(
+  routine: boolean,
+  a: number,
+  b: number
+): { result: InnerCall['result'] } | undefined {
+  const r = replay;
+  if (
+    r === undefined ||
+    activeQuadratures !== r.depth ||
+    r.diverged ||
+    r.inRoutine
+  )
+    return undefined;
+  const call = r.calls[r.next];
+  if (
+    call === undefined ||
+    call.routine !== routine ||
+    !Object.is(call.a, a) ||
+    !Object.is(call.b, b)
+  ) {
+    r.diverged = true;
+    return undefined;
+  }
+  const index = r.next++;
+  if (r.reached) return undefined;
+  if (index !== r.shifted || call.result === null) return call;
+  r.reached = true;
+  return {
+    result: { ...call.result, estimate: call.result.estimate + r.shift },
+  };
+}
+
+/**
+ * Whether the integrand of a quadrature is evaluated now only to measure how
+ * its value changes with the result of an inner integral
+ * (`measuredValueError`). The value is not a value of the integrand. A
+ * routine that would replace the result of its quadrature by another
+ * estimate that costs many evaluations (a Monte-Carlo estimate) must not do
+ * it then: that estimate does not follow the changed result, so it cannot
+ * give the change. It returns `NaN`, and the measure is then not used.
+ */
+export function insideReplay(): boolean {
+  return replay !== undefined;
+}
+
+/**
+ * Run `run`, a routine that computes the integral over `[a, b]` with other
+ * work than a call of `adaptiveQuadrature` (a scan of the integrand, panels
+ * that it integrates itself), and that can call `adaptiveQuadrature`.
+ *
+ * Inside the integrand of a quadrature that collects the errors of its inner
+ * integrals, the result of the routine is recorded, with the sums of the
+ * errors and of the tolerances of the quadratures that it ran. During a
+ * replay of that evaluation of the integrand (`measuredValueError`), a
+ * routine that was called before the changed call does not run again: the
+ * recorded result is returned. Without this, each replay would repeat the
+ * work of the routine: the scan of `integrateSemiInfiniteOscillatory` for
+ * the changes of sign of an integrand that has none takes about 200 000
+ * evaluations.
+ *
+ * In any other place, the function only calls `run`.
+ */
+export function replayableQuadratures<
+  T extends { estimate: number; error: number } | null,
+>(a: number, b: number, run: () => T): T {
+  const replayed = replayedCall(true, a, b);
+  if (replayed !== undefined) return replayed.result as T;
+  const running = replay;
+  if (
+    running !== undefined &&
+    activeQuadratures === running.depth &&
+    !running.inRoutine
+  ) {
+    running.inRoutine = true;
+    try {
+      return run();
+    } finally {
+      running.inRoutine = false;
+    }
+  }
+  const sink = nestedErrorSink;
+  if (
+    sink === undefined ||
+    activeQuadratures !== nestedErrorDepth ||
+    sink.routine !== undefined
+  )
+    return run();
+  const call: InnerCall = {
+    routine: true,
+    a,
+    b,
+    result: null,
+    error: 0,
+    tolerance: 0,
+  };
+  sink.routine = call;
+  try {
+    call.result = run();
+  } finally {
+    sink.routine = undefined;
+  }
+  sink.calls.push(call);
+  return call.result as T;
+}
+
+/**
  * The errors of the integrals computed inside the integrand of a quadrature
  * called with `nestedErrors` (see `adaptiveQuadrature`).
  */
 type NestedErrors = {
+  /** The calls of the routines that computed an inner integral during the
+   * current evaluation of the integrand, in their order (see `InnerCall`). */
+  calls: InnerCall[];
+  /** The call of the routine that runs now under `replayableQuadratures`.
+   * A quadrature that this routine runs is counted in this call, and is not
+   * in `calls`. */
+  routine: InnerCall | undefined;
   /** The sums of the errors, and of the tolerances, of the inner results
    * reported during the current evaluation of the integrand. */
   errors: number;
@@ -2034,18 +2222,34 @@ let nestedErrorSink: NestedErrors | undefined;
  * the result of that inner one. */
 let nestedErrorDepth = -1;
 
-/** Report the result of an inner quadrature that started when
- * `activeQuadratures` was `depth` (see `nestedErrorDepth`), with the
+/** Report the result of an inner quadrature over `[a, b]` that started
+ * when `activeQuadratures` was `depth` (see `nestedErrorDepth`), with the
  * tolerance that it was asked to meet. */
 function reportNestedResult(
   depth: number,
+  a: number,
+  b: number,
   r: { estimate: number; error: number },
   tolerance: number
 ): void {
   const sink = nestedErrorSink;
   if (sink === undefined || depth !== nestedErrorDepth) return;
   sink.ran = true;
-  if (!Number.isFinite(r.estimate) || !Number.isFinite(r.error)) return;
+  const finite = Number.isFinite(r.estimate) && Number.isFinite(r.error);
+  if (sink.routine === undefined)
+    sink.calls.push({
+      routine: false,
+      a,
+      b,
+      result: r,
+      error: finite ? r.error : 0,
+      tolerance: finite ? tolerance : 0,
+    });
+  else if (finite) {
+    sink.routine.error += r.error;
+    sink.routine.tolerance += tolerance;
+  }
+  if (!finite) return;
   sink.reported = true;
   sink.errors += r.error;
   sink.tolerances += tolerance;
@@ -2053,6 +2257,115 @@ function reportNestedResult(
     sink.relativeErrors += r.error / Math.abs(r.estimate);
     sink.relativeTolerances += tolerance / Math.abs(r.estimate);
   }
+}
+
+/** The largest number of inner calls at one point of the integrand for which
+ * `measuredValueError` measures the error of the value. The measure of call
+ * `k` runs again the calls after it, so `n` calls cost `n·(n − 1)/2` more
+ * inner integrals: 6 for 4 calls, where the first evaluation ran 4. An
+ * integrand with more calls at a point (a sum of many inner integrals, or an
+ * inner integral that samples its integrand, where each sample is a call)
+ * gets the assumed error of `withNestedErrors`. */
+const MAX_MEASURED_INNER_CALLS = 4;
+
+/**
+ * The error that the errors of the inner integrals give to the value `v` of
+ * the integrand at `x`, and the same error when each inner integral has an
+ * error equal to the tolerance that it was asked to meet.
+ *
+ * `calls` holds the calls that computed the inner integrals of `v`, made
+ * when `activeQuadratures` was `depth`. For each call with a finite estimate
+ * and an error `e > 0`, `again(x)` computes the value once more in a replay
+ * (`Replay`): the calls before this one return their results of the first
+ * evaluation, this call returns its estimate plus `e`, and the calls after
+ * it run. The change of the value is the error that this inner integral
+ * gives to `v`, also through a later inner integral that uses it. The
+ * result is the sum of these changes: the errors of two inner integrals can
+ * have opposite signs, so the changes do not cancel. The change for the
+ * tolerance is the change for `e` times `tolerance/e`.
+ *
+ * With one inner integral, the usual case, no quadrature runs again. With
+ * `n` inner integrals at one point, `n·(n − 1)/2` of them run again, where
+ * the first evaluation ran `n`. A point with more than
+ * `MAX_MEASURED_INNER_CALLS` calls is not measured, so the measure costs at
+ * most 1.5 times the inner integrals of the first evaluation.
+ *
+ * When the value with `+e` is not finite (`√(1 − I)` with `I` next to 1),
+ * the value with `−e` is used.
+ *
+ * The result is `undefined` when a change cannot be measured:
+ * - the point has more than `MAX_MEASURED_INNER_CALLS` calls;
+ * - the replay did not make the call (`again` read its value from a cache);
+ * - the replay made other calls before the changed one, or it made fewer
+ *   calls than the first evaluation and all were the same (the first
+ *   evaluation computed a value that is kept, and the replay did not call
+ *   for it): the calls of the replay are then not known to be those of the
+ *   first evaluation. Other calls after the changed one are a result of the
+ *   change (a bound or a branch that depends on the inner integral);
+ * - neither changed value is finite.
+ */
+function measuredValueError(
+  again: (x: number) => number,
+  x: number,
+  v: number,
+  depth: number,
+  calls: InnerCall[]
+): { error: number; tolerance: number } | undefined {
+  if (calls.length > MAX_MEASURED_INNER_CALLS) return undefined;
+  let error = 0;
+  let tolerance = 0;
+  for (let k = 0; k < calls.length; k++) {
+    const call = calls[k];
+    if (
+      call.result === null ||
+      !Number.isFinite(call.result.estimate) ||
+      !(call.error > 0 && Number.isFinite(call.error))
+    )
+      continue;
+    let change: number | undefined;
+    for (const shift of [call.error, -call.error]) {
+      const state: Replay = {
+        depth,
+        calls,
+        next: 0,
+        shifted: k,
+        shift,
+        reached: false,
+        diverged: false,
+        inRoutine: false,
+      };
+      // A call that runs during the replay (see `replayedCall`) is not a
+      // call of the first evaluation: no collector must count it.
+      const previousSink = nestedErrorSink;
+      const previousDepth = nestedErrorDepth;
+      const previousReplay = replay;
+      nestedErrorSink = undefined;
+      nestedErrorDepth = -1;
+      replay = state;
+      let w: number;
+      try {
+        w = again(x);
+      } finally {
+        nestedErrorSink = previousSink;
+        nestedErrorDepth = previousDepth;
+        replay = previousReplay;
+      }
+      if (
+        !state.reached ||
+        !(state.diverged || state.next === calls.length)
+      )
+        return undefined;
+      if (Number.isFinite(w)) {
+        change = Math.abs(w - v);
+        break;
+      }
+    }
+    if (change === undefined) return undefined;
+    error += change;
+    // `tolerance/e` can be infinite, and `0·∞` is `NaN`.
+    if (change > 0) tolerance += change * (call.tolerance / call.error);
+  }
+  return { error, tolerance };
 }
 
 /**
@@ -2069,11 +2382,20 @@ function reportNestedResult(
  * each level of an iterated integral.
  *
  * The error of a value `v` of the integrand is not known from the errors
- * `e` of its inner integrals `I`: it depends on how `v` changes with `I`. It
- * is taken as the larger of `Σ e` (`v = c ± I`, a change of 1 per unit of
- * `I`) and `|v|·Σ e/|I|` (`v = c·I`, a value proportional to `I`). An
- * integrand that changes faster than these with its inner integrals
- * (`(∫…)²` with `|∫…| > 1/2`) has a larger error.
+ * `e` of its inner integrals `I`: it depends on how `v` changes with `I`
+ * (`e` for `c ± I`, `|w|·e` for `w·I`, `2·|I|·e` for `I²`). With `again`
+ * (`replayIntegrand` in `adaptiveQuadrature`), it is measured
+ * (`measuredValueError`): `again` computes the value at the same point with
+ * one inner result changed by its error, and the change of the value is the
+ * error that this inner integral gives to `v`.
+ *
+ * Without `again`, or when the error cannot be measured (`again` reads the
+ * value from a cache and calls no inner integral, or the changed value is
+ * not finite), it is
+ * taken as the larger of `Σ e` (`v = c ± I`) and `|v|·Σ e/|I|` (`v = c·I`).
+ * This is too large for `w·I` with `|w| < 1`, where `Σ e` applies with no
+ * factor, and too small for an integrand that changes faster with its inner
+ * integrals (`(∫…)²` with `|∫…| > 1/2`).
  *
  * The added term estimates the integral of this error. When the values keep
  * one sign, it is the ratio of the summed errors to the summed magnitudes of
@@ -2095,6 +2417,7 @@ function reportNestedResult(
  */
 function withNestedErrors(
   f: (x: number) => number,
+  again: ((x: number) => number) | undefined,
   a: number,
   b: number,
   rtol: number,
@@ -2102,6 +2425,8 @@ function withNestedErrors(
   run: (g: (x: number) => number) => AdaptiveQuadratureResult
 ): AdaptiveQuadratureResult {
   const sink: NestedErrors = {
+    calls: [],
+    routine: undefined,
     errors: 0,
     tolerances: 0,
     relativeErrors: 0,
@@ -2118,8 +2443,12 @@ function withNestedErrors(
   const g = (x: number): number => {
     const previousSink = nestedErrorSink;
     const previousDepth = nestedErrorDepth;
+    const depth = activeQuadratures;
     nestedErrorSink = sink;
-    nestedErrorDepth = activeQuadratures;
+    nestedErrorDepth = depth;
+    const calls: InnerCall[] = [];
+    sink.calls = calls;
+    sink.routine = undefined;
     sink.errors = sink.tolerances = 0;
     sink.relativeErrors = sink.relativeTolerances = 0;
     sink.reported = false;
@@ -2132,11 +2461,23 @@ function withNestedErrors(
     }
     if (sink.reported && Number.isFinite(v)) {
       sink.count += 1;
-      sink.errorSum += Math.max(sink.errors, Math.abs(v) * sink.relativeErrors);
-      sink.toleranceSum += Math.max(
-        sink.tolerances,
-        Math.abs(v) * sink.relativeTolerances
-      );
+      const measured =
+        again === undefined
+          ? undefined
+          : measuredValueError(again, x, v, depth, calls);
+      if (measured !== undefined) {
+        sink.errorSum += measured.error;
+        sink.toleranceSum += measured.tolerance;
+      } else {
+        sink.errorSum += Math.max(
+          sink.errors,
+          Math.abs(v) * sink.relativeErrors
+        );
+        sink.toleranceSum += Math.max(
+          sink.tolerances,
+          Math.abs(v) * sink.relativeTolerances
+        );
+      }
       sink.magnitudeSum += Math.abs(v);
       if (v > 0) sink.positive = true;
       if (v < 0) sink.negative = true;
@@ -2438,8 +2779,28 @@ export function adaptiveQuadrature(
      * error. An integrand that computes no integral gives the same result as
      * with `false`. The default is `false`. */
     nestedErrors?: boolean;
+    /** With `nestedErrors`, a function that computes the value of `f` again
+     * at a point where `f` was evaluated, with the same calls of the inner
+     * integrals. The quadrature calls it, one or two times for each inner
+     * integral of a point, to measure how the value changes with each inner
+     * result (see `measuredValueError`). Without it, the error of a value is
+     * the larger of two assumed ones (see `withNestedErrors`), which is too
+     * large for an integrand that is a small factor times an inner integral.
+     *
+     * Give it only when a second evaluation has no effect that the caller
+     * can observe: an integrand that draws a random number or assigns a
+     * variable must not be evaluated again. It is `f` itself for such an
+     * integrand, unless `f` keeps its values in a cache (a second call of
+     * `f` would then call no inner integral) or records what its values
+     * were: the values of this function are not values of the integrand. */
+    replayIntegrand?: (x: number) => number;
   }
 ): AdaptiveQuadratureResult {
+  // During a replay of the integrand of an enclosing quadrature, this call
+  // returns the result of the same call of the first evaluation.
+  const replayed = replayedCall(false, a, b);
+  if (replayed !== undefined)
+    return replayed.result as AdaptiveQuadratureResult;
   // An integral computed inside the integrand of a quadrature that collects
   // the errors of its inner integrals reports its result (see
   // `nestedErrorDepth`). It reports once, here: after the parts of a split
@@ -2450,6 +2811,7 @@ export function adaptiveQuadrature(
     options?.nestedErrors === true
       ? withNestedErrors(
           f,
+          options.replayIntegrand,
           a,
           b,
           options.rtol ?? 1e-10,
@@ -2459,6 +2821,8 @@ export function adaptiveQuadrature(
       : quadrature(f, a, b, options);
   reportNestedResult(
     entryDepth,
+    a,
+    b,
     result,
     Math.max(
       options?.atol ?? 1e-12,

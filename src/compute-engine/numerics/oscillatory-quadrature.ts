@@ -3,7 +3,11 @@ import {
   getAmbientDeadline,
   type DeadlineFrame,
 } from '../../common/interruptible.js';
-import { adaptiveQuadrature, gk15 } from './gauss-kronrod.js';
+import {
+  adaptiveQuadrature,
+  gk15,
+  replayableQuadratures,
+} from './gauss-kronrod.js';
 import { levinU, wynnEpsilon } from './endpoint-quadrature.js';
 
 /**
@@ -60,6 +64,22 @@ export function integrateSemiInfiniteOscillatory(
      * integrand that did not compile) gives a smaller budget. */
     maxIntervals?: number;
   }
+): { estimate: number; error: number } | null {
+  // Inside the integrand of a quadrature that measures how its values change
+  // with their inner integrals, the scan and the lobes are not computed
+  // again when the integrand is evaluated a second time at the same point
+  // (`replayableQuadratures`, `gauss-kronrod.ts`).
+  return replayableQuadratures(a, Number.POSITIVE_INFINITY, () =>
+    lobeIntegral(f, a, deadline, options)
+  );
+}
+
+/** The computation of `integrateSemiInfiniteOscillatory`. */
+function lobeIntegral(
+  f: (x: number) => number,
+  a: number,
+  deadline: number | DeadlineFrame | undefined,
+  options: { maxIntervals?: number } | undefined
 ): { estimate: number; error: number } | null {
   deadline ??= getAmbientDeadline();
   const MAX_LOBES = 2000;
