@@ -115,13 +115,48 @@ describe('CE-424: a withTimeLimit span around FindFit.evaluateAsync()', () => {
       expect(r.get('timedOut')?.symbol).toBe('True');
       expect(r.get('converged')?.symbol).toBe('False');
       // The full search takes seconds; the limit stops it soon after 150 ms
-      // (a step of the interpreted search can take a few tens of ms).
-      expect(elapsed).toBeLessThan(1500);
+      // (a step of the interpreted search can take a few tens of ms). The load
+      // of the machine changes the time, so it is checked only in a
+      // `CE_PERF=1` run.
+      if (process.env.CE_PERF === '1') expect(elapsed).toBeLessThan(1500);
       expect(r.get('route')?.string).toBe('calling-thread');
-      expect(r.get('reason')?.string).toBe('no-pool');
+      // The reason depends on the speed of the machine, and both are correct:
+      // `no-pool` when the search started before the limit, `setup-timeout`
+      // when the limit expired during the setup. On the development machine
+      // the setup takes between 5 ms and 20 ms; a loaded CI runner can take
+      // more than the 150 ms of this limit. The next two tests check each
+      // reason with no dependency on the speed of the machine.
+      expect(['no-pool', 'setup-timeout']).toContain(r.get('reason')?.string);
     },
     30_000
   );
+
+  test('a limit that has already expired gives the reason setup-timeout', async () => {
+    // A limit of 0 ms expires when it starts, and the setup checks the limit
+    // at its end, before the search starts.
+    const ce = new ComputeEngine();
+    const r = await evaluateWithin(ce, ce.box(slowCall() as any), 0);
+    expect(r.get('timedOut')?.symbol).toBe('True');
+    expect(r.get('route')?.string).toBe('calling-thread');
+    expect(r.get('reason')?.string).toBe('setup-timeout');
+  }, 30_000);
+
+  test('a step budget that ends during the search gives the reason no-pool', async () => {
+    // A step budget counts checks, not time, so it ends at the same point of
+    // the search on every machine. The whole search makes many more than
+    // 1,000 checks, and the setup makes fewer.
+    const ce = new ComputeEngine();
+    const expr = ce.box(slowCall() as any);
+    let p: Promise<Expression> | undefined;
+    ce.withStepBudget({ steps: 1000, label: 'test:async-fit' }, () => {
+      p = expr.evaluateAsync();
+      return 0;
+    });
+    const r = await p!;
+    expect(r.get('timedOut')?.symbol).toBe('True');
+    expect(r.get('route')?.string).toBe('calling-thread');
+    expect(r.get('reason')?.string).toBe('no-pool');
+  }, 30_000);
 
   test('a 20 ms span on the 1,000-row search answers close to 20 ms', async () => {
     const ce = new ComputeEngine();
@@ -136,7 +171,9 @@ describe('CE-424: a withTimeLimit span around FindFit.evaluateAsync()', () => {
     const r = await evaluateWithin(ce, expr, 20);
     const elapsed = Date.now() - t0;
     expect(r.get('timedOut')?.symbol).toBe('True');
-    expect(elapsed).toBeLessThan(150);
+    // The load of the machine changes the time, so it is checked only in a
+    // `CE_PERF=1` run.
+    if (process.env.CE_PERF === '1') expect(elapsed).toBeLessThan(150);
   }, 30_000);
 
   test('the limit also reaches an operator with only an evaluateAsync handler', async () => {
@@ -197,7 +234,9 @@ describe('CE-425.1: the calling-thread search gives the event loop a turn', () =
     await expect(
       ce.box(slowCall() as any).evaluateAsync({ signal: controller.signal })
     ).rejects.toMatchObject({ name: 'CancellationError', cause: 'stop' });
-    expect(Date.now() - t0).toBeLessThan(1500);
+    // The load of the machine changes the time, so it is checked only in a
+    // `CE_PERF=1` run.
+    if (process.env.CE_PERF === '1') expect(Date.now() - t0).toBeLessThan(1500);
   }, 30_000);
 
   test('a fit with no global option is paced too', async () => {
@@ -431,13 +470,18 @@ describe('review (deadline frames)', () => {
     await evaluateWithin(ce, ce.box(['OuterWork']), 10_000);
     expect(inner.stopped).toBe(true);
     expect(innerError).toMatchObject({ name: 'CancellationError' });
-    // Stopped after at least one `await`, near its 50 ms limit (80 checks
-    // of 5 ms would take 400 ms or more). The limit counts from the entry
-    // into `withTimeLimit`, not from the start of the handler, which a
-    // loaded machine can delay: measure from the entry.
-    expect(inner.checks).toBeGreaterThan(0);
+    // Stopped near its 50 ms limit (80 checks of 5 ms would take 400 ms or
+    // more). The limit counts from the entry into `withTimeLimit`, not from the
+    // start of the handler, which a loaded machine can delay: measure from the
+    // entry.
     expect(inner.end - limitStart).toBeGreaterThanOrEqual(45);
-    expect(inner.elapsed).toBeLessThan(300);
+    // The load of the machine changes the time: it can delay the first check
+    // past the limit, and it can delay the end of the work. So the count of
+    // checks and the upper limit are checked only in a `CE_PERF=1` run.
+    if (process.env.CE_PERF === '1') {
+      expect(inner.checks).toBeGreaterThan(0);
+      expect(inner.elapsed).toBeLessThan(300);
+    }
     // The sibling of the same evaluation ran all its checks.
     expect(sibling.stopped).toBe(false);
     expect(sibling.checks).toBe(30);

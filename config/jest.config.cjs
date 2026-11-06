@@ -17,6 +17,16 @@ module.exports = {
   // tests with a time limit run about eight times slower than alone and
   // fail. `CI` is set by GitHub Actions; `'100%'` is one worker per core.
   maxWorkers: process.env.CI ? '100%' : 12,
+  // The time limit of an asynchronous test that does not name its own. Jest's
+  // default is 5 s. The full suite takes 88 s on the development machine and
+  // 1,700 to 2,600 s on a CI runner, so an asynchronous test that takes a
+  // fraction of a second here, such as the first test of a file, which makes a
+  // new engine, can pass 5 s there and fail with no defect. Local runs keep the
+  // default, so that an asynchronous test that becomes slow still fails during
+  // development. A test that names its own limit keeps it on CI, also when that
+  // limit is shorter than this one. A synchronous test never fails on this
+  // limit: Jest cannot interrupt it, and counts it as passed when it returns.
+  testTimeout: process.env.CI ? 60_000 : 5_000,
   collectCoverageFrom: ['src/**/*.ts', '!<rootDir>/node_modules/'],
   coverageReporters: ['lcov'],
   coverageDirectory: '../coverage',

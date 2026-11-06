@@ -3551,29 +3551,6 @@ decline.
 
 ## Tests, tools, documentation and release tasks
 
-### CE-540. The CI test job fails on `main` in timing and GPU test files
-
-**Status:** ready; defect, small. Seen 2026-10-27 in the `main` run of commit
-`a23be5735` and in the run of pull request #482.
-**Witness:** corpus; CI failures on `main` run of `a23be5735` and PR #482.
-
-The `test` job of CI fails on Node 22 and Node 26. The failing tests:
-
-- `test/compute-engine/compile-gpu-statement-selection.test.ts`, "a selection
-  with an effect keeps the ternary form and declines", and
-  `test/compute-engine/ce-509-513-shader-fixes.test.ts`, "declines a plain draw
-  in a branch too": the WGSL compilation of a branch that draws a random value
-  does not throw. Check again after commit `f5d991902` (the order of random
-  draws in GPU statements), which is after `a23be5735`. These two tests pass in
-  the `main` runs 41866511849 (2026-11-04) and 41941702301 (0.179.0).
-- `test/compute-engine/ce-430-findfit-async-data.test.ts`, the three "a timer
-  runs during …" tests, on Node 22 only. The `main` runs of 2026-11-04 fail
-  instead in other timing tests of the asynchronous `FindFit`:
-  `ce-424-425-findfit-async.test.ts`, "box route: the search stops at the limit
-  with timedOut: True" (reason `setup-timeout`, expected `no-pool`), and
-  `assign-declare-evaluate-async.test.ts`, "Assign: the value runs the
-  asynchronous handler of FindFit".
-
 ### CE-775. The arithmetic guide page of cortexjs.io still owes the text of a public behavior change
 
 **Status:** ready; documentation. Approved 2026-11-01.
