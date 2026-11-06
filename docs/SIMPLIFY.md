@@ -126,6 +126,31 @@ The solver still combines the logarithms of an equation for any argument
 each root against the original equation, which rejects a root that the
 combination adds.
 
+### Closed forms of a sum or a product with a symbolic bound
+
+`simplify()` gives the closed form of a `Sum` or a `Product` with a symbolic
+upper bound without a proof that the range is not reversed. `Σ_{k=1}^{n} 3` is
+`3n`, `Π_{k=1}^{n} 3` is `3^n`, and `Σ_{k=1}^{n} k` is `(n² + n)/2`. This is the
+generic answer, as in Mathematica (decision of 2026-10-19, confirmed on
+2026-11-05).
+
+The closed form is the value of the sum when `n` is an integer and `n ≥ 0`. For
+another `n` it can differ from `evaluate()`, which gives the empty sum for a
+reversed range and rounds a non-integer bound down:
+
+| `n`  | `evaluate()` of the sum | `evaluate()` of `3n` |
+| ---  | ---                     | ---                  |
+| `4`  | `12`                    | `12`                 |
+| `0`  | `0`                     | `0`                  |
+| `-4` | `0`                     | `-12`                |
+| `2.5` | `6`                    | `7.5`                |
+
+The closed form also applies when `n` is declared `integer`. A bound that is a
+number literal is decided: `Σ_{k=1}^{-4} 3` is `0`. A bound declared `real` keeps
+the `Sum`, because it may not be an integer. A host that can reach a reversed
+range or a non-integer bound does not simplify the sum, or it declares the bound
+as a type that excludes such a value.
+
 ### Undefined points and collections
 
 `simplify()` can remove the points where an expression has no value, as
