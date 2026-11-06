@@ -6478,15 +6478,78 @@ function parseAssignmentToListElement(
 }
 
 /**
- * True for the error of an assignment to a list element. A `let` statement and
- * an item of a `where` clause keep this error: they decline any other
- * statement that is not a binding, and the operators read after such a decline
- * give an error that names neither the cause nor the remedy.
+ * The code of the error for an assignment whose target is a function of the
+ * library: `a+b \coloneq v`, `\sin(x) \coloneq v`,
+ * `\operatorname{First} \coloneq x \mapsto v` (`parseAssignStatement()`).
+ * Such an assignment would replace the library function, so that a later
+ * `1+2` calls the new definition. The detail of the error is the name of the
+ * function. A program that replaces a library function on purpose declares the
+ * name first, with `ce.declare()`.
  */
-function isAssignmentToListElement(expr: MathJsonExpression): boolean {
+const ASSIGNMENT_TO_LIBRARY_FUNCTION = 'assignment-to-library-function';
+
+/**
+ * The error of an assignment to the library function `fn`, over the tokens from
+ * `start` to the current position.
+ */
+function assignmentToLibraryFunction(
+  parser: Parser,
+  fn: string,
+  start: number
+): MathJsonExpression {
+  return parser.error([ASSIGNMENT_TO_LIBRARY_FUNCTION, { str: fn }], start);
+}
+
+/**
+ * Reads the right side of an assignment to a library function, so that it is
+ * part of the one error, and gives this error. With no right side, gives `null`.
+ */
+function parseAssignmentToLibraryFunction(
+  parser: Parser,
+  fn: string,
+  start: number,
+  until?: Readonly<Terminator>
+): MathJsonExpression | null {
+  const rhs = parser.parseExpression({ ...(until ?? {}), minPrec: 20 });
+  if (rhs === null) return null;
+  return assignmentToLibraryFunction(parser, fn, start);
+}
+
+/**
+ * True when the right side of an assignment to a symbol is a function: a
+ * literal (`x \mapsto 5`), or a symbol whose type is a function, with or without
+ * parentheses. A value that is not a function does not replace a library
+ * function of the same name: after `N \coloneq 5`, `N(1/3)` still calls the
+ * library function.
+ *
+ * The parser does not know the value of any other expression, so an expression
+ * that gives a function when it is evaluated (`\mathrm{If}(c, x \mapsto 5,
+ * x \mapsto 6)`, or a call of a function that returns a function) is not
+ * recognized, and the assignment replaces the library function.
+ */
+function isFunctionValue(
+  parser: Parser,
+  rhs: MathJsonExpression | null
+): boolean {
+  if (operator(rhs) === 'Delimiter') return isFunctionValue(parser, operand(rhs, 1));
+  if (operator(rhs) === 'Function') return true;
+  const name = symbol(rhs);
+  return name !== null && !!parser.resolveSymbol(name)?.type.matches('function');
+}
+
+/**
+ * True for the error of an assignment to a list element or to a library
+ * function. A `let` statement and an item of a `where` clause keep this error:
+ * they decline any other statement that is not a binding, and the operators
+ * read after such a decline give an error that names neither the cause nor the
+ * remedy.
+ */
+function isAssignmentTargetError(expr: MathJsonExpression): boolean {
+  if (operator(expr) !== 'Error') return false;
+  const code = stringValue(operand(operand(expr, 1), 1));
   return (
-    operator(expr) === 'Error' &&
-    stringValue(operand(operand(expr, 1), 1)) === ASSIGNMENT_TO_LIST_ELEMENT
+    code === ASSIGNMENT_TO_LIST_ELEMENT ||
+    code === ASSIGNMENT_TO_LIBRARY_FUNCTION
   );
 }
 
@@ -6640,6 +6703,10 @@ function parseAssignStatement(
         lhsStart,
         until
       );
+    // `\operatorname{First} (L)` and `N(x)`: a library function, read as a
+    // juxtaposition of its name and a parenthesis.
+    if (parser.isLibraryFunction(fn))
+      return parseAssignmentToLibraryFunction(parser, fn, lhsStart, until);
     // A parameter spelled as a subscript on an indexed collection (`n_{0}`
     // when `n` is a list) is the new name `n_0`: the body is read with it
     // declared.
@@ -6725,6 +6792,12 @@ function parseAssignStatement(
   // function application, i.e. `f(x) := ...`
   const fn = operator(lhs);
   if (fn) {
+    // A target from an operator notation (`a+b`, `x^2`, `\frac{a}{b}`) or a
+    // call of a library function (`\sin(x)`) would define the library function,
+    // for every later use of the notation. The head `Error` is a target that
+    // did not parse: it keeps its own error.
+    if (fn !== 'Error' && parser.isLibraryFunction(fn))
+      return parseAssignmentToLibraryFunction(parser, fn, lhsStart, until);
     if (fn === 'Subscript' || fn === 'Superscript') {
       // We have f_n := or f^n := ...
     }
@@ -6749,6 +6822,9 @@ function parseAssignStatement(
 
   const rhs = parser.parseExpression({ ...(until ?? {}), minPrec: 20 });
   if (rhs === null) return null;
+
+  if (isFunctionValue(parser, rhs) && parser.isLibraryFunction(symbol(lhs)!))
+    return assignmentToLibraryFunction(parser, symbol(lhs)!, lhsStart);
 
   return ['Assign', lhs, rhs];
 }
@@ -7657,7 +7733,7 @@ function whereItem(
   kind: 'binding' | 'condition' | 'error';
   expr: MathJsonExpression;
 } | null {
-  if (isAssignmentToListElement(item)) return { kind: 'error', expr: item };
+  if (isAssignmentTargetError(item)) return { kind: 'error', expr: item };
   if (isLetStatement(item)) {
     // A `let` statement with a value is the block of one statement
     // `Declare(k, T, v)`, or `Declare(k, Dictionary(…))` when the value is a
@@ -8021,7 +8097,7 @@ function parseLetStatement(
   parser.index = start;
   const statement = parser.parseExpression(terminator);
   if (statement === null) return null;
-  if (isAssignmentToListElement(statement)) return statement;
+  if (isAssignmentTargetError(statement)) return statement;
   const normalized = normalizeLocalAssign(statement);
   // After `let`, `=` is the assignment (see below), so a target that is `At`
   // reads as with `\coloneq`, not as a comparison: a subscript on a list

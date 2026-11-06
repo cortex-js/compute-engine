@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-829.
+Next free reference: CE-830.
 
 **Entry format.**
 
@@ -2503,34 +2503,22 @@ reproduction above is the record.
 
 ## LaTeX parsing and serialization
 
-### CE-826. `a + b := 5` replaces the library function `Add` for the whole engine
+### CE-829. `N_n := n + 1` replaces the library function `N` for the whole engine
 
-**Status:** ready; wrong value. User decision 2026-11-06: option (a), "error".
-Found 2026-11-05 in the review of the fix for Tycho's report of `L[k] := 5`. Also at HEAD
-`985c6373491d3ce687e906443da19314916535f9`.
-**Witness:** plausible; after evaluating `a+b\coloneq 5`, `Add(1, 2)` gives 5; it gives 3 before.
+**Status:** ready; wrong value.
+**Witness:** plausible; after evaluating `N_n\coloneq n+1`, `N(1/4)` gives `5/4`; it gives `0.25` before.
 
-`parseAssignStatement()` in `latex-syntax/dictionary/definitions-core.ts` reads
-`head(args) := value` as a function definition, whatever the head is. So
-`a+b\coloneq 5` parses to `["Assign", "Add", ["Function", ["Block", 5], "a", "b"]]`
-with `isValid` true. The same applies to `\sin(x)\coloneq 5` (after it, `Sin(0)`
-gives 5), `\operatorname{First}(L)\coloneq 5` (`First([7, 8])` gives `[5, 5]`) and
-the symbol target `\operatorname{At}\coloneq x\mapsto 5`. The head `At` alone is
-refused, with the error `assignment-to-list-element`.
-
-Question: may a LaTeX assignment replace a function of the library?
-
-- (a) No, for a head from an operator notation or a library name: the parser gives
-  an error. `a+b\coloneq 5` and `\sin(x)\coloneq 5` stop working, and a program
-  that replaces `\sin` on purpose has to use `ce.declare()`. This is the option
-  the author recommends: the case that a user intends, a new definition, is not
-  lost, and the case that changes every later `1 + 2` gets an error.
-- (b) No for an operator notation (`a+b`), yes for a named function
-  (`\sin(x)`): the error covers only a target with no name in the source. A
-  replaced `\sin` still changes later values, on purpose or not.
-- (c) No change. It stays valid, and later values change with no error.
-
-An unanswered question means (c), the current behavior.
+A sequence definition with a symbol index on a library function name is read by
+step 2 of `parseAssignStatement()` in `latex-syntax/dictionary/definitions-core.ts`,
+before the check for an assignment to a library function, and the evaluation of
+`Assign(Subscript("N", "n"), …)` defines `N`. `\operatorname{Add}_n\coloneq n` does
+the same (`Add(1, 2)` then gives `unexpected-argument`). `N_0\coloneq 1` alone does not
+change `N`, and `N_n\coloneq 5` as a statement of a block declares the local `N_n`:
+both must stay valid. The first statement of a block and a row of a `cases`
+environment are read before the parser knows that they are in a block, so the error
+needs the same two readings as `n_{k}\coloneq 5` on a list. The user decision of
+2026-11-06 for CE-826 (a library function cannot be replaced by a LaTeX assignment)
+applies, and the error code is `assignment-to-library-function`.
 
 ### CE-441. The LaTeX of a rest parameter or a destructuring parameter does not read back as that parameter
 
@@ -2732,22 +2720,6 @@ shipped (contract in `docs/CHECKPOINT-MODEL.md`; tests include
   since 2026-10-16 (Tycho `docs/COMPUTE_ENGINE.md`, section "Checkpoint /
   Restore"). So this stage can start. Until it lands, both mechanisms exist
   together.
-
-### CE-817. A parameter annotated in the function is not checked when a later value decides it
-
-**Status:** ready; defect, M.
-**Witness:** plausible; `function h(k: integer) { 2*k }`, `let m`,
-`let r = g(h(m))`, `m = 1.5`, `r` gives `g(3)` and should give
-`incompatible-type`.
-
-The same program with `let h: (integer) -> integer` and `function h(k)` gives
-`incompatible-type`, because a declared signature keeps the call while the type
-of the argument does not decide (`declaredArgumentUndecided`,
-`boxed-expression/boxed-function.ts`; rule in `docs/ERROR-MODEL.md`, "A symbolic
-argument whose type does not decide"). The annotated form is applied by
-`makeLambda` (`function-utils.ts`, step 4b), which accepts a symbolic argument.
-`function-utils.ts` cannot import `validate.ts`, so the test must move to a
-module that both can import, or be injected as `_validateArguments` is.
 
 ### CE-818. A function with an annotated parameter and result gives an unevaluated call for a refused argument
 

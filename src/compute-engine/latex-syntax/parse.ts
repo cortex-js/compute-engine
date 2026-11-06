@@ -1518,6 +1518,19 @@ export class _Parser implements Parser {
   }
 
   /**
+   * See {@link Parser.isLibraryFunction}: a parser-local binding shadows the
+   * library, as in `resolveSymbol()`.
+   */
+  isLibraryFunction(id: MathJsonSymbol): boolean {
+    let table: SymbolTable | null = this.symbolTable;
+    while (table) {
+      if (id in table.ids) return false;
+      table = table.parent;
+    }
+    return this.options.isLibraryFunction?.(id) === true;
+  }
+
+  /**
    * Whether `name` is claimed by a `kind: 'function'` dictionary entry's
    * `symbolTrigger` (`log`, `lcm`, `var`, …). Such a name owns its call
    * syntax — including any subscript, which its parser may bind as an

@@ -997,6 +997,16 @@ export type ParseLatexOptions = NumberFormat & {
   onBoundVariable?: (name: string) => void;
 
   /**
+   * Internal hook that says whether a name is a function of a library of the
+   * engine. `ce.parse()` wires it. A parser with no engine has no library, and
+   * reads every assignment target as a definition. Not part of the public
+   * parsing surface.
+   *
+   * @internal
+   */
+  isLibraryFunction?: (symbol: MathJsonSymbol) => boolean;
+
+  /**
    * Controls how quantifier scope is determined when parsing expressions
    * like `\forall x. P(x) \rightarrow Q(x)`.
    *
@@ -1230,6 +1240,14 @@ export interface Parser {
   ):
     | { type: BoxedType; subscriptEvaluate?: boolean; inferred?: boolean }
     | undefined;
+
+  /**
+   * Whether `id` is a function of a library of the engine, so that a LaTeX
+   * assignment cannot define it. A parameter of a function that the parser is
+   * reading, and the name of that function, are not the library function. A
+   * parser with no engine gives `false`.
+   */
+  isLibraryFunction(id: MathJsonSymbol): boolean;
 
   /**
    * Whether `name` is claimed by a `kind: 'function'` dictionary entry's

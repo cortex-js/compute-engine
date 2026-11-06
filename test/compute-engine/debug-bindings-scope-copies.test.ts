@@ -130,6 +130,7 @@ describe('Integrate of a function parameter', () => {
 
   test('an integrand that calls a user function named like a library function', () => {
     const ce = engine();
+    ce.declare('Sin', 'function');
     ce.parse('\\operatorname{Sin}(t) := t^2').evaluate();
     const r = ce.parse('\\int \\operatorname{Sin}(x)\\,dx').evaluate();
     expect(r.toString()).toBe('1/3 * x^3');

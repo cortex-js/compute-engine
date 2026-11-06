@@ -11,6 +11,16 @@
   `ce.pushScope()`, `ce.declare('f', { value: writer })` now throws, as it does
   in the global scope. A `let` in a block or in a function body is not refused,
   and neither is a value that a call returns (`let counter = makeCounter()`).
+- **A LaTeX assignment can no longer replace a function of a library.** After
+  `ce.parse('a+b\\coloneq 5').evaluate()`, `Add(1, 2)` gave `5` for the whole
+  engine, and `\sin(x)\coloneq 5` made `Sin(0)` give `5`. These now give the
+  error `assignment-to-library-function`, in a block too, and `Add(1, 2)` keeps
+  its value. The error also applies to a function name that is one letter:
+  `N(x)\coloneq x+1` and `D(x, k)\coloneq x+k` were valid and now give the error.
+  To define such a function, declare the name first:
+  `ce.declare('D', 'function')`. A value that is not a function stays valid
+  (`N\coloneq 5`), and so do the MathJSON form `["Assign", "Add", …]` and
+  `\mathrm{Assign}(\operatorname{Add}, x\mapsto 5)`.
 
 ### Improvements
 

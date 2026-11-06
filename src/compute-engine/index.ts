@@ -92,6 +92,7 @@ import type {
 import { validateStyleOptions } from './latex-syntax/style-options.js';
 import { validateDisplayDigits } from './numerics/strings.js';
 import { isOperatorDef, isValueDef } from './boxed-expression/utils.js';
+import { isLibraryDefinition } from './boxed-expression/implicit-variable-rule.js';
 import {
   markEngineSubscriptHandler,
   withStandardLibraryInstall,
@@ -4461,6 +4462,7 @@ export class ComputeEngine implements IComputeEngine {
         diagnostics: wantDiagnostics,
         onDiagnostic,
         onBoundVariable,
+        isLibraryFunction: (id) => this._isLibraryFunction(id),
       });
 
       if (result === null) return null;
@@ -4619,6 +4621,37 @@ export class ComputeEngine implements IComputeEngine {
       };
     // A definition of neither kind is still a declaration.
     return { type: BoxedType.unknown };
+  }
+
+  /**
+   * Whether a LaTeX assignment to `id` would replace a function of a library:
+   * `a + b := 5` would change the value of every later `1 + 2`.
+   *
+   * A definition that the host made in place of the library function
+   * (`ce.declare('D', 'function')`, `ce.declare('N', 'unknown')`, or
+   * `ce.declare('Sin', { … })`) is not the library function, so a LaTeX
+   * assignment can define it.
+   *
+   * A value whose type is not a function does not make the name the host's own.
+   * After `N := 5` or `N := y`, a later `N(x) := x + 1` would replace the library
+   * `N`, which `N(1/3)` calls after `N := 5`. Reading `[N, 1]` binds `N` to a
+   * shadow with no value and no type, and calls of `N` still reach the library:
+   * a parse must not change what a later assignment can do.
+   */
+  private _isLibraryFunction(id: MathJsonSymbol): boolean {
+    const def = this.lookupDefinition(id);
+    if (def === undefined) return false;
+    if (isOperatorDef(def)) return isLibraryDefinition(this, id, def);
+    const library = this.contextStack[0]?.lexicalScope.bindings.get(id);
+    if (library === undefined || !isOperatorDef(library)) return false;
+    if (!isValueDef(def)) return true;
+    const { value } = def;
+    if (value.type.matches('function')) return false;
+    const hostDeclaration =
+      value.value === undefined &&
+      !value.inferredType &&
+      !value._isDevolvedShadow;
+    return !hostDeclaration;
   }
 
   /**

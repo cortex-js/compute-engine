@@ -137,6 +137,7 @@ describe('a radical over a constant radicand in an unrolled Sum', () => {
   test('a radicand that folds NEGATIVE still takes the complex kernel', () => {
     const ce = new ComputeEngine();
     ce.declare('s', 'number');
+    ce.declare('N', 'function');
     ce.parse('N(s) := \\sum_{i=1}^{6} \\sqrt{-1-(i-0.5)^2}\\cdot s').evaluate();
     const source = compiledSource(ce, 'N(s)');
     // Every radicand folds to a NEGATIVE constant, so each radical takes the

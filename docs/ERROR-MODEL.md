@@ -370,7 +370,17 @@ before the program runs, and a compilation declines it.
   `chained-assignment`. The Epsil parser reports `a := b := v` with the same
   code. It reads `L[k] \coloneq v` as the syntax error
   `assignment-to-list-element`: a list element has no assignment, and
-  `ReplaceAt` gives a new list with the element replaced.
+  `ReplaceAt` gives a new list with the element replaced. It reads an
+  assignment whose target is a function of a library (`a+b \coloneq 5`,
+  `\sin(x) \coloneq 5`, `N(x) \coloneq x+1`, `\operatorname{First} \coloneq x
+  \mapsto 5`), in a block too, as the syntax error
+  `assignment-to-library-function`: the assignment would change every later
+  use of the function, for the whole engine (user decision 2026-11-06). A new
+  name is a definition, a value that is not a function is a variable
+  (`N \coloneq 5`), and a host that replaces a library function declares the
+  name first (`ce.declare('D', 'function')`). The explicit forms are not
+  refused: the MathJSON `Assign("Add", Function(…))` and the LaTeX
+  `\mathrm{Assign}(\operatorname{Add}, x \mapsto 5)`.
 
 ### A comparison is two-valued — user decision of 2026-11-02
 

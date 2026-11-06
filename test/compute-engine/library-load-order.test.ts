@@ -307,6 +307,7 @@ describe('the derivative of a lazy caller-library operator', () => {
 describe('the derivative of a user function that shadows a library name', () => {
   test('uses the user definition', () => {
     const ce = new ComputeEngine();
+    ce.declare('Sinh', 'function');
     ce.parse('\\operatorname{Sinh}(x) := 3x').evaluate();
     expect(ce.box(['Sinh', 2]).evaluate().toString()).toBe('6');
     expect(

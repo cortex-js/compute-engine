@@ -2835,9 +2835,13 @@ export function declareFn(
     // handler but no `signature` also has an inferred signature, and so does
     // a function literal given to `ce.assign()`. Only an operator that holds
     // nothing the author gave is upgradable (`isReplaceableOperatorShell()`).
+    //
+    // The shadow that a read of a library function as a value makes (`[N, 1]`,
+    // `devolveUnappliedOperator()`) is declared explicitly with the type
+    // `unknown`, but it also comes from a use, so it is upgradable.
     const inferred =
       (isValueDef(existing) &&
-        existing.value.inferredType &&
+        (existing.value.inferredType || existing.value._isDevolvedShadow) &&
         existing.value.value === undefined) ||
       (isOperatorDef(existing) &&
         isReplaceableOperatorShell(existing.operator));

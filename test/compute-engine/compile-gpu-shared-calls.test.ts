@@ -49,6 +49,10 @@ const VORONOI_ROW =
 function voronoiEngine(): ComputeEngine {
   const ce = new ComputeEngine();
   ce.declare('T', 'real');
+  // `D` is also the name of a library function, and a LaTeX assignment cannot
+  // replace a library function unless the name is declared first. Tycho declares
+  // every head of a document before it reads the definitions.
+  ce.declare('D', 'function');
   for (const d of VORONOI) ce.parse(d).evaluate();
   return ce;
 }

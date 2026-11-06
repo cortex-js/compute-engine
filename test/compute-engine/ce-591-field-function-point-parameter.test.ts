@@ -678,6 +678,7 @@ describe('CE-591 review: outdated types derived from a hidden parameter', () => 
   test('a user `Gamma` that reads an integer point declines with the remedy', () => {
     const ce = engine();
     ce.assign('A', ce.box(['Tuple', 1, 2]));
+    ce.declare('Gamma', 'function');
     ce.parse('\\Gamma(t) := A.x').evaluate();
     const r = field(ce.box(['Floor', ['Gamma', 'x']]));
     expect(r.success).toBe(false);
@@ -693,6 +694,7 @@ describe('CE-591 review: outdated types derived from a hidden parameter', () => 
     const ce = engine();
     ce.declare('A', 'tuple<real, real>');
     ce.assign('A', ce.box(['Tuple', 1, 2]));
+    ce.declare('Gamma', 'function');
     ce.parse('\\Gamma(t) := A.x').evaluate();
     const r = field(ce.box(['Floor', ['Gamma', 'x']]));
     expect(r.success).toBe(true);

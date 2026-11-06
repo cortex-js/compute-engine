@@ -124,6 +124,7 @@ f(1)`)
 
   test('an impure body is never memoized', () => {
     const ce = new ComputeEngine();
+    ce.declare('D', 'function');
     ce.parse(String.raw`D(k) := k + \operatorname{Random}()`).evaluate();
     const a = ce.parse('D(1)').N().re;
     const b = ce.parse('D(1)').N().re;
