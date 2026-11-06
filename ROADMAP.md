@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-824.
+Next free reference: CE-825.
 
 **Entry format.**
 
@@ -490,6 +490,19 @@ A running sum of matrix rows is a one-line program; file says "check intent" fir
 reproduction above is the record.
 
 ## Evaluation, canonical forms and scoping
+
+### CE-824. `D`, `Limit` and `NIntegrate` report no error for a call whose head is defined later as a data symbol
+
+**Status:** ready; defect (consistency), S. Found 2026-11-05 while fixing the same case for `Integrate`.
+**Witness:** plausible; Interpreter: parse `\frac{d}{dx} g(x)`, then `ce.declare('g', 'real'); ce.assign('g', 5)`: `D` gives `Apply(Derivative(g, 1), x)`, and should report `expected-function`.
+
+Box the call, then run `ce.declare('g', 'real'); ce.assign('g', 5)`. `D` of
+`g(x)` gives `Apply(Derivative(g, 1), x)` under `evaluate()` and `N()`.
+`Limit(x ↦ g(x), 0)` stays unevaluated under `evaluate()` and is `NaN` under
+`N()`. `NIntegrate(x ↦ g(x), 0, 1)` is `NaN` under `evaluate()` and `N()`.
+`Integrate`, under `evaluate()` and `N()`, reports the error
+`expected-function`, and these three operators should report it too. `D` of a
+call that is boxed after the declaration reports the error already.
 
 ### CE-752. A lazy view returned from a `Block` reads a valueless local as the global of the same name
 
@@ -2897,17 +2910,6 @@ reading of a `\mapsto` parameter keeps depending on an outer declaration.
 
 `\int_0^1 (g \coloneq t\mapsto t^2; g(x))\,dx` evaluates to an
 `incompatible-type` error; it should give 1/3.
-
-### CE-640. A call head defined later as a data symbol: `evaluate()` reports an error, `.N()` stays unevaluated
-
-**Status:** ready; defect (consistency). Found 2026-10-30 while reviewing CE-626.
-**Witness:** plausible; Interpreter: `.N()` stays unevaluated where `evaluate()` reports `expected-function`; short program, no decision needed.
-
-Parse `\int_0^1 g(x)\,dx`, then `ce.declare('g', 'real'); ce.assign('g', 5)`:
-`evaluate()` gives `Error(expected-function, g, real)`, `.N()` returns the
-`Integrate` unevaluated, and `D` of `g(x)` gives `Apply(Derivative(g, 1), x)`.
-The box route behaved this way before CE-626, and `Sum` also gives the error.
-`.N()` should report the same error as `evaluate()`.
 
 ### CE-625. A limit of a call that passes a function as an argument leaves a parameter name in the result
 

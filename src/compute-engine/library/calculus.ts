@@ -7219,6 +7219,24 @@ volumes
                 sym(l.op2) === 'Nothing' &&
                 sym(l.op3) === 'Nothing'
             );
+        // A call whose head was defined as a data symbol after the call was
+        // boxed (`g(x)`, then `ce.declare('g', 'real')`) is an error once the
+        // integrand is boxed again, as `liftIntegrand` does. The samples of the
+        // numeric route below are errors, which are not numbers, so it would
+        // keep the integral unevaluated, while `evaluate()` reports the error.
+        // `N()` reports that error too. The exact value decides, because an
+        // invalid integrand can still have a value: the call in
+        // `If(x > 2, g(x), x^x)` is not reached over `[0, 1]`, and the numeric
+        // route below integrates the other branch.
+        if (
+          numericApproximation &&
+          !indefinite &&
+          !liftIntegrand(ops[0]).isValid
+        ) {
+          const exact = expression?.evaluate();
+          if (isFunction(exact, 'Error')) return exact;
+        }
+
         if (numericApproximation && !indefinite) {
           // If a numeric approximation is requested, equivalent to NIntegrate
           let f = ops[0];

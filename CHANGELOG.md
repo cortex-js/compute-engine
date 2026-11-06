@@ -67,6 +67,12 @@
 
 ### Resolved Issues
 
+- **`N()` of an integral now reports the error of `evaluate()` when a call head
+  is defined later as a data symbol.** Parse `\int_0^1 g(x)\,dx`, then run
+  `ce.declare('g', 'real')`. `evaluate()` gave the `expected-function` error
+  and `N()` kept the integral unevaluated. `N()` now gives the same error. An
+  integral whose call is in a branch that is not reached keeps its value:
+  `If(x > 2, g(x), x^x)` over `[0, 1]` is still `0.783...` under `N()`.
 - **The derivative of a function literal no longer takes a free name of a
   called function for its parameter.** With `a := 3` and `h := x ↦ a·x`,
   `Apply(Derivative(a ↦ a·h(a)), 2)` was `14`, and it is now `12`. The result
