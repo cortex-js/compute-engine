@@ -407,6 +407,164 @@ describe('a block local replaced element by element is written in place (CE-329)
     expect(run(ce, json, { L: [1, 2, 3] })).toBe(612);
   });
 
+  test('a list in a dictionary value keeps the copying form', () => {
+    // `ys` holds a list whose element is the array of `xs`, so a read of the
+    // dictionary value by position is not enough to allow it.
+    const json = [
+      'Block',
+      declare,
+      [
+        'Declare',
+        'ys',
+        "'list<list<real>>'",
+        ['Dictionary', ['KeyValuePair', "'value'", ['List', 'xs']]],
+      ],
+      ['Loop', update, range],
+      ['Add', ['Sum', 'xs'], ['Multiply', 100, ['Sum', ['At', 'ys', 1]]]],
+    ];
+    expect(codeOf(ce, json)).not.toContain('replaceAtInPlace');
+    expect(run(ce, json, { L: [1, 2, 3] })).toBe(612);
+  });
+
+  test('`const r = xs[1]` before the loop does not stop the in-place write', () => {
+    // `r` keeps the element that it read, also after the loop writes it.
+    const json = [
+      'Block',
+      declare,
+      [
+        'Declare',
+        'r',
+        "'real'",
+        ['Dictionary', ['KeyValuePair', "'value'", ['At', 'xs', 1]]],
+      ],
+      ['Loop', update, range],
+      ['Add', ['Multiply', 100, 'r'], ['At', 'xs', 1]],
+    ];
+    expect(codeOf(ce, json)).toContain('_SYS.replaceAtInPlace');
+    const L = [5, 2, 3];
+    expect(run(ce, json, { L })).toBe(510);
+    expect(L).toEqual([5, 2, 3]);
+    expect(interpreted(ce, json, { L: list([5, 2, 3]) })).toBe(510);
+  });
+
+  test('a last line that writes without assigning does not stop the in-place write', () => {
+    const json = [
+      'Block',
+      declare,
+      ['Loop', update, range],
+      ['ReplaceAt', 'xs', 1, 0],
+    ];
+    const code = codeOf(ce, json);
+    expect(code).toContain('_SYS.replaceAtInPlace');
+    expect(code).toContain('_SYS.replaceAt(xs, 1, 0)');
+    const L = [1, 2, 3];
+    expect(run(ce, json, { L })).toEqual([0, 4, 6]);
+    expect(L).toEqual([1, 2, 3]);
+    expect(interpreted(ce, json, { L: list([1, 2, 3]) })).toEqual([0, 4, 6]);
+  });
+
+  test('a copy made with `ReplaceAt` before the loop keeps its values', () => {
+    // `ys` holds its own array, so the writes to `xs` do not reach it.
+    const json = [
+      'Block',
+      declare,
+      ['Declare', 'ys', "'list<real>'", ['ReplaceAt', 'xs', 1, 0]],
+      ['Loop', update, range],
+      ['Add', ['Sum', 'xs'], ['Multiply', 100, ['Sum', 'ys']]],
+    ];
+    expect(codeOf(ce, json)).toContain('_SYS.replaceAtInPlace');
+    const L = [1, 2, 3];
+    expect(run(ce, json, { L })).toBe(512);
+    expect(L).toEqual([1, 2, 3]);
+    expect(interpreted(ce, json, { L: list([1, 2, 3]) })).toBe(512);
+  });
+
+  test('one node that is both an update and a copy keeps the copying form', () => {
+    // A host can build a block with one `ReplaceAt` node in two statements. The
+    // in-place write is marked on the operands of the node, so the read `ys = R`
+    // would also compile in place, and `ys` would see the later write of `xs`.
+    const xs = ce.symbol('xs');
+    const ys = ce.symbol('ys');
+    const R = ce._fn('ReplaceAt', [xs, ce.number(1), ce.number(0)]);
+    const later = ce._fn('ReplaceAt', [xs, ce.number(2), ce.number(9)]);
+    const statements = [
+      ce._fn('Assign', [xs, R]),
+      ce._fn('Assign', [ys, R]),
+      ce._fn('Assign', [xs, later]),
+      ce._fn('At', [ys, ce.number(2)]),
+    ];
+    expect(ownedLocalUpdateChains(statements, 'xs')).toBeUndefined();
+    // Two nodes with the same operands are not shared, so the update is in
+    // place and the read keeps the copying form.
+    const other = ce._fn('ReplaceAt', [xs, ce.number(1), ce.number(0)]);
+    statements[1] = ce._fn('Assign', [ys, other]);
+    expect(ownedLocalUpdateChains(statements, 'xs')?.length).toBe(2);
+  });
+
+  describe('a list of lists', () => {
+    ce.declare('M', 'list<list<real>>');
+    const declareRows = ['Declare', 'ms', "'list<list<real>>'", 'M'];
+
+    test('a write of a row in place does not change a row that a read holds', () => {
+      const json = [
+        'Block',
+        declareRows,
+        [
+          'Declare',
+          'r',
+          "'list<real>'",
+          ['Dictionary', ['KeyValuePair', "'value'", ['At', 'ms', 1]]],
+        ],
+        [
+          'Assign',
+          'ms',
+          ['ReplaceAt', 'ms', 1, ['List', 7, 8]],
+        ],
+        ['Add', ['Sum', 'r'], ['Multiply', 100, ['Sum', ['At', 'ms', 1]]]],
+      ];
+      expect(codeOf(ce, json)).toContain('_SYS.replaceAtInPlace');
+      expect(run(ce, json, { M: [[1, 2], [3, 4]] })).toBe(1503);
+    });
+
+    test('a copy with `ReplaceAt` shares rows, so a write of two positions stays a copy', () => {
+      // `ys` shares the second row with `ms`. A write in place of that row
+      // would change `ys`.
+      const json = [
+        'Block',
+        declareRows,
+        [
+          'Declare',
+          'ys',
+          "'list<list<real>>'",
+          ['ReplaceAt', 'ms', 1, ['List', 0, 0]],
+        ],
+        ['Assign', 'ms', ['ReplaceAt', 'ms', 2, 1, 9]],
+        ['At', 'ys', 2, 1],
+      ];
+      expect(codeOf(ce, json)).not.toContain('InPlace');
+      const M = [[1, 2], [3, 4]];
+      expect(run(ce, json, { M })).toBe(3);
+      expect(M).toEqual([[1, 2], [3, 4]]);
+    });
+
+    test('a read of a row stops a write of two positions in place', () => {
+      const json = [
+        'Block',
+        declareRows,
+        [
+          'Declare',
+          'r',
+          "'list<real>'",
+          ['Dictionary', ['KeyValuePair', "'value'", ['At', 'ms', 2]]],
+        ],
+        ['Assign', 'ms', ['ReplaceAt', 'ms', 2, 1, 9]],
+        ['At', 'r', 1],
+      ];
+      expect(codeOf(ce, json)).not.toContain('InPlace');
+      expect(run(ce, json, { M: [[1, 2], [3, 4]] })).toBe(3);
+    });
+  });
+
   test('a local that is not provably an indexed list keeps the copying form and its check', () => {
     ce.declare('LS', 'list<real> | set<real>');
     const json = [

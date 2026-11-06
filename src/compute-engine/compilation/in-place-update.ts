@@ -150,12 +150,15 @@ export function inPlaceUpdateChains(
  *   in the list must be one of these: the target of an `Assign` or a
  *   `Declare` that is a statement, the innermost list operand of a chain
  *   assigned to `name`, the first operand of a read in
- *   `NON_RETAINING_READS`, or a statement by itself. A statement of the list
- *   gives its value to nothing but the block, and nothing in the block runs
- *   after its last statement. A mention anywhere else, in particular in a
- *   function literal, which can be called after an update, keeps the copying
- *   form for every update of the local. A nested scope that binds the same
- *   name is counted as such a mention, which can only keep a copy that is
+ *   `NON_RETAINING_READS`, the first operand of a `ReplaceAt` with one position
+ *   that is not such a chain, or a statement by itself. That `ReplaceAt` keeps
+ *   the copying form and gives a new outer array, which shares only rows with
+ *   the local, and a write with one position does not change a row. A statement
+ *   of the list gives its value to nothing but the block, and nothing in the
+ *   block runs after its last statement. A mention anywhere else, in particular
+ *   in a function literal, which can be called after an update, keeps the
+ *   copying form for every update of the local. A nested scope that binds the
+ *   same name is counted as such a mention, which can only keep a copy that is
  *   not needed.
  *
  * The emitted code is in `OWNED_LOCAL_UPDATE_OPS`.
@@ -171,7 +174,8 @@ export function inPlaceUpdateChains(
  * update, and a write with fewer positions could store a row that the block
  * does not own, which a later write would change. And a read may not hand out
  * a row: `NON_RETAINING_READS` holds `At(m, j)` and `First(m)`, which give a
- * row to whatever reads them. The only reads allowed are the first operand of
+ * row to whatever reads them, and the array that a copying `ReplaceAt` gives
+ * shares rows with `m`. The only reads allowed are the first operand of
  * `Length`, `Count` or `IsEmpty` with no other operand, and of an `At` with
  * one numeric position for each level written, which reads an element below
  * every array the block writes. Any other mention keeps the copying form.
@@ -202,7 +206,8 @@ function ownedLocalChains(
   // one of the arrays that a write changes.
   const readKeepsNothing = (e: Expression & FunctionInterface): boolean =>
     levels === undefined
-      ? NON_RETAINING_READS.has(e.operator)
+      ? NON_RETAINING_READS.has(e.operator) ||
+        (e.operator === 'ReplaceAt' && e.nops === 3)
       : e.nops === 1
         ? ['Length', 'Count', 'IsEmpty'].includes(e.operator)
         : e.operator === 'At' &&
@@ -227,6 +232,8 @@ function ownedLocalChains(
     return result;
   };
   const chains: ReadonlyArray<Expression>[] = [];
+  // The operands of each `ReplaceAt` of `name` that the walk accepts as a copy.
+  const copyingOps = new Set<ReadonlyArray<Expression>>();
   // A call with `statement` false never adds to `chains` (an assignment whose
   // value is used is refused before that), so its answer can be kept.
   // A call with `statement` true has its own memo. Its answer also depends
@@ -255,8 +262,10 @@ function ownedLocalChains(
     if (isName(e)) return statement;
     // A dictionary keeps a reference to each of its values, for example the
     // attributes of `Declare(ys, Dictionary(value: xs))`, which give the
-    // list to `ys`. So a mention of `name` in a dictionary is not allowed.
-    if (isDictionary(e)) return !mentions(e);
+    // list to `ys`. So a value follows the rule for a value that is used: a
+    // bare mention is refused, and `const r = xs[1]`, which is
+    // `Declare(r, Dictionary(value: At(xs, 1)))`, is a read like `r = xs[1]`.
+    if (isDictionary(e)) return e.values.every((x) => allowed(x));
     if (!isFunction(e)) return true;
     const h = e.operator;
     if (h === 'Function') return !mentions(e);
@@ -290,11 +299,18 @@ function ownedLocalChains(
       }
       return e.ops.slice(1).every((x) => allowed(x));
     }
+    if (h === 'ReplaceAt' && isName(e.ops[0]) && readKeepsNothing(e))
+      copyingOps.add(e.ops);
     return e.ops.every((x, k) =>
       k === 0 && isName(x) && readKeepsNothing(e) ? true : allowed(x)
     );
   };
   const ok = stmts.every((stmt) => allowed(stmt, true));
+  // The in-place write is marked on the operands of a node. So a node that is
+  // both an update of the local and a copy, such as `R` in `xs = R; ys = R`,
+  // would also write in place where it is the copy, and `ys` would hold the
+  // array of `xs`.
+  if (chains.some((ops) => copyingOps.has(ops))) return undefined;
   return ok && chains.length > 0 ? chains : undefined;
 }
 
