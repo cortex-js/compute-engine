@@ -81,10 +81,16 @@ describe('per-function preamble inclusion', () => {
   it('a Mandelbrot row does not carry the Julia iteration, and the reverse', () => {
     const m = glsl(['Mandelbrot', ['Complex', 'x', 'y'], 50]);
     expect(m.code).toBe('_fractal_mandelbrot(vec2(x, y), 50)');
-    expect(declaredIn(m.preamble)).toEqual(['_fractal_mandelbrot']);
+    expect(declaredIn(m.preamble)).toEqual([
+      '_fractal_smooth',
+      '_fractal_mandelbrot',
+    ]);
 
     const j = wgsl(['Julia', ['Complex', 'x', 'y'], ['Complex', 0.3, 0.5], 50]);
-    expect(declaredIn(j.preamble)).toEqual(['_fractal_julia']);
+    expect(declaredIn(j.preamble)).toEqual([
+      '_fractal_smooth',
+      '_fractal_julia',
+    ]);
   });
 
   it('a three-element Median carries one median network', () => {

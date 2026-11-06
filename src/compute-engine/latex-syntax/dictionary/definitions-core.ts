@@ -529,6 +529,38 @@ function braceGroupElements(
   return [expr];
 }
 
+/**
+ * An item of a brace group, with its `:` moved out of its `\land` and `\lor`.
+ *
+ * `:` binds tighter than `\land` and `\lor`, which is right outside a brace
+ * group. Inside one, the `:` separates a whole condition from a whole value:
+ * `\{m = 1 \land z < 1: 2\}` is the condition `m = 1 \land z < 1` with the value
+ * 2, and it parses as `And(m = 1, Colon(z < 1, 2))`. In the same way,
+ * `\{x \in S: x > 0 \land x < 1\}` has the condition `x > 0 \land x < 1`, and it
+ * parses as `And(Colon(x \in S, x > 0), x < 1)`. An item with two `:` under one
+ * connective has no such reading, and it stays as it is.
+ */
+export function colonOverConnectives(
+  expr: MathJsonExpression
+): MathJsonExpression {
+  const op = operator(expr);
+  if (op !== 'And' && op !== 'Or') return expr;
+  const ops = operands(expr).map(colonOverConnectives);
+  const isColon = (x: MathJsonExpression) =>
+    operator(x) === 'Colon' && nops(x) === 2;
+  const i = ops.findIndex(isColon);
+  if (i < 0 || ops.some((x, k) => k !== i && isColon(x))) return expr;
+  const before = ops.slice(0, i);
+  const after = ops.slice(i + 1);
+  const left = operand(ops[i], 1)!;
+  const right = operand(ops[i], 2)!;
+  return [
+    'Colon',
+    before.length > 0 ? [op, ...before, left] : left,
+    after.length > 0 ? [op, right, ...after] : right,
+  ];
+}
+
 /** Is this a condition on its own (relational/logical), i.e. the Desmos
  * piecewise shorthand for `cond: 1`? */
 function isBraceCondition(expr: MathJsonExpression): boolean {
@@ -614,7 +646,7 @@ function parseRestriction(
   //   `cond: 1`, evaluated first-match — the expression is defined where ANY
   //   condition holds. Comma combines as a union (`Or`), unlike *stacked*
   //   braces which AND-combine.
-  const elements = braceGroupElements(cond);
+  const elements = braceGroupElements(cond).map(colonOverConnectives);
   if (elements.length > 1 || operator(elements[0]) === 'Colon') {
     if (elements.some((el) => operator(el) === 'Colon')) {
       const clauses = whichClausesFromBraceGroup(elements);

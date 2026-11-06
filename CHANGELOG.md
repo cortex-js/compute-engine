@@ -1,3 +1,24 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`Mandelbrot` and `Julia` give a smooth value that is continuous across
+  iteration boundaries.** The escape test `|z|² > 4` stopped too early for the
+  smoothing formula, so the count jumped by a median of 0.15 at each boundary,
+  which a cyclic color formula shows as arcs. The test still decides inside or
+  outside. The smoothing then iterates further, at most 16 times, until
+  `|z|² > 65536`. This costs about 3 iterations per escaping point, and the
+  values change by a small amount. This applies to `evaluate`, `javascript`,
+  `glsl` and `wgsl`. A jump remains in one case: a slow orbit that does not reach
+  the larger radius in 16 iterations takes the value of its first iterate, which
+  a deep zoom near `c = -2` can show.
+- **A `\land` or a `\lor` beside the colon of a brace group stays in the
+  condition.** `\{m = 1 \land z < 1: 2, 3\}` was the set of
+  `And(m = 1, Colon(z < 1, 2))` and `3`, with no diagnostic, and it is now a
+  `Which` with the condition `m = 1 \land z < 1`. In the same way,
+  `\{x : x > 0 \land x < 1\}` is now a set-builder with the condition
+  `x > 0 \land x < 1`. Outside a brace group, the colon still binds tighter.
+
 ## 0.181.0 _2026-11-05_
 
 ### Breaking changes

@@ -21,7 +21,10 @@ import {
   DIVISION_PRECEDENCE,
   POSTFIX_PRECEDENCE,
 } from '../types.js';
-import { tryInferRangeFromElements } from './definitions-core.js';
+import {
+  colonOverConnectives,
+  tryInferRangeFromElements,
+} from './definitions-core.js';
 import { OPEN_DELIMITER_PREFIX } from '../parse.js';
 import { matchingBracket, operandEnd } from '../lenient-ambiguity.js';
 
@@ -498,6 +501,27 @@ function isPiecewiseCondition(expr: MathJsonExpression): boolean {
     return body !== null && isPiecewiseCondition(body);
   }
   return op !== null && COMPARISON_HEADS.has(op);
+}
+
+/**
+ * Is `lhs: rhs` a branch of a compact piecewise, rather than a set-builder with
+ * the body `lhs` and the condition `rhs`? It is when `lhs` is a condition
+ * (`isPiecewiseCondition()`), with one exception: a membership in a connective,
+ * with a condition after the colon, is a set-builder. So
+ * `\{x \in A \lor x \in B: x > 0\}` is a set-builder, and
+ * `\{x \in A \lor x \in B: 2\}` is a branch with the value 2.
+ */
+function isPiecewiseBranch(
+  lhs: MathJsonExpression,
+  rhs: MathJsonExpression
+): boolean {
+  if (!isPiecewiseCondition(lhs)) return false;
+  const op = operator(lhs);
+  return !(
+    (op === 'And' || op === 'Or') &&
+    operands(lhs).some((x) => operator(x) === 'Element') &&
+    isPiecewiseCondition(rhs)
+  );
 }
 
 /**
@@ -1264,6 +1288,13 @@ export const DEFINITIONS_SETS: LatexDictionary = [
         body = operand(body, 1)!;
       }
 
+      // The `:` of an item separates a whole condition from a whole value, so
+      // it moves out of the item's `\land` and `\lor`.
+      body =
+        operator(body) === 'Sequence'
+          ? ['Sequence', ...operands(body).map(colonOverConnectives)]
+          : colonOverConnectives(body);
+
       const h = operator(body);
 
       // A single condition alone, `\{c\}`, is the value 1 where `c` holds
@@ -1288,7 +1319,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
         const lhs = operand(body, 1);
         const rhs = operand(body, 2);
         if (lhs !== null && rhs !== null) {
-          if (isPiecewiseCondition(lhs)) {
+          if (isPiecewiseBranch(lhs, rhs)) {
             // Compact piecewise with a single branch and no default.
             return ['Which', lhs, rhs];
           }
@@ -1311,7 +1342,8 @@ export const DEFINITIONS_SETS: LatexDictionary = [
           colonElements.length > 0 &&
           colonElements.every((el) => {
             const lhs = operand(el, 1);
-            return lhs !== null && isPiecewiseCondition(lhs);
+            const rhs = operand(el, 2);
+            return lhs !== null && rhs !== null && isPiecewiseBranch(lhs, rhs);
           });
         if (allPiecewise) {
           const whichOps: MathJsonExpression[] = [];
@@ -1356,7 +1388,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
           if (
             builderBody !== null &&
             cond !== null &&
-            !isPiecewiseCondition(builderBody)
+            !isPiecewiseBranch(builderBody, cond)
           ) {
             const conditions = [cond, ...elements.slice(1)];
             return setBuilder(

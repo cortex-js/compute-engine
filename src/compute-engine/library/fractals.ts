@@ -1,5 +1,6 @@
 import type { SymbolDefinitions, Expression } from '../global-types.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
+import { smoothEscape } from '../numerics/fractal-smooth.js';
 
 /** Smooth escape-time value for any z0 → z^2 + c iteration in [0, 1]. */
 function juliaEscape(
@@ -14,10 +15,7 @@ function juliaEscape(
     zy = 2 * zx * zy + cy;
     zx = newZx;
     const mag2 = zx * zx + zy * zy;
-    if (mag2 > 4) {
-      const smooth = (i - Math.log2(Math.log2(mag2)) + 4.0) / maxN;
-      return Math.max(0, Math.min(1, smooth));
-    }
+    if (mag2 > 4) return smoothEscape(zx, zy, cx, cy, i, maxN);
   }
   return 1.0;
 }

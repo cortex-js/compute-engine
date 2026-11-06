@@ -18,6 +18,7 @@ import {
   roundToInteger,
 } from '../numerics/numeric.js';
 import { isPrime as isPrimeNumber } from '../numerics/primes.js';
+import { smoothEscape } from '../numerics/fractal-smooth.js';
 import {
   parseColor,
   rgbToOklch,
@@ -6146,10 +6147,7 @@ export const SYS_HELPERS = {
       zy = 2 * zx * zy + cy;
       zx = newZx;
       const mag2 = zx * zx + zy * zy;
-      if (mag2 > 4) {
-        const smooth = (i - Math.log2(Math.log2(mag2)) + 4.0) / n;
-        return Math.max(0, Math.min(1, smooth));
-      }
+      if (mag2 > 4) return smoothEscape(zx, zy, cx, cy, i, n);
     }
     return 1.0;
   },
@@ -6169,10 +6167,7 @@ export const SYS_HELPERS = {
       zy = 2 * zx * zy + cy;
       zx = newZx;
       const mag2 = zx * zx + zy * zy;
-      if (mag2 > 4) {
-        const smooth = (i - Math.log2(Math.log2(mag2)) + 4.0) / n;
-        return Math.max(0, Math.min(1, smooth));
-      }
+      if (mag2 > 4) return smoothEscape(zx, zy, cx, cy, i, n);
     }
     return 1.0;
   },
