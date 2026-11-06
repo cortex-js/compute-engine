@@ -21,6 +21,7 @@ import {
   INTERVAL_RUNTIME_VERSION,
 } from '../interval/index.js';
 import {
+  isCancellationError,
   processInput,
   freshIntervalValue,
   runIntervalLambda,
@@ -69,8 +70,10 @@ export interface IntervalRuntime {
    * gives the `IntervalValue` that the result's own `run()` gives: inputs are
    * converted the same way, the answer is copied so that it shares nothing
    * with the hoisted constants, and an error inside the code answers
-   * `{ kind: 'entire' }`. For a result with `calling: 'lambda'` (a
-   * function-valued expression), it takes the arguments of the function
+   * `{ kind: 'entire' }`, but for the `CancellationError` of the
+   * `iterationBudget` limit, which is thrown. For a result with
+   * `calling: 'lambda'` (a function-valued expression), it takes the arguments
+   * of the function
    * instead, each converted as a variable of a vars object is.
    */
   load: (
@@ -183,9 +186,10 @@ export function createIntervalRuntime(): IntervalRuntime {
           // (`ComputeEngineIntervalFunction`): a `ReferenceError` (the code
           // names something that is not defined, for example a helper that
           // reads a variable from outside its own body) is a defect of the
-          // code and is thrown; any other error answers "cannot bound this"
+          // code and is thrown, and so is a cancellation (the `iterationBudget`
+          // limit of a `Loop`); any other error answers "cannot bound this"
           // rather than an exception.
-          if (e instanceof ReferenceError) throw e;
+          if (e instanceof ReferenceError || isCancellationError(e)) throw e;
           return { kind: 'entire' };
         }
       };

@@ -1188,12 +1188,17 @@ export interface CompileTarget<Expr = unknown> {
    * loop whose iteration count would exceed the budget (including infinite
    * or `NaN` bounds) evaluates to `NaN` instead of running. Internal numeric
    * probes (the Richardson limit ladder) set this so a single compiled call
-   * stays cheap enough for the engine deadline to be honored between calls;
-   * it is never set on user-facing `compile()` paths, whose loops remain
-   * unguarded (zero overhead).
+   * stays cheap enough for the engine deadline to be honored between calls.
+   * The `compile()` option of the same name sets it for a host. A compilation
+   * with no budget has no check at all (zero overhead).
    *
    * It also caps (floors, then truncates to) the `PointList` zip length on the
    * JavaScript target — a capped point list is truncated, not `NaN`-poisoned.
+   *
+   * On the JavaScript and `interval-js` targets it also limits the passes of a
+   * `Loop` in one call of the compiled code (`loopPassCount()`,
+   * `docs/COMPILATION-MODEL.md`, "A limit on `Loop` passes"). The Python target
+   * declines a `Loop` when it is set.
    */
   iterationBudget?: number;
 
@@ -2676,6 +2681,30 @@ export interface CompilationOptions<Expr = unknown> {
    * truncates to) the `PointList` zip length on the JavaScript target — a
    * capped point list is truncated, not `NaN`-poisoned. See
    * `CompileTarget.iterationBudget`.
+   *
+   * It also limits a `Loop` on the JavaScript and `interval-js` targets. Each
+   * iteration of a `Loop` adds one to one total for a call of the compiled
+   * code, including nested loops and the loops in the bodies of user functions.
+   * Over the budget, the code throws a `CancellationError` with the cause
+   * `'iteration-limit-exceeded'`: a `Loop` has no value to replace with `NaN`.
+   * The limit is a count, not a time.
+   *
+   * `broadcast()` gives `NaN` for such a cell, as for any error of a cell, and
+   * only the slice form counts the failures: a synchronous `broadcast()` gives
+   * the `NaN` with no report. The budget applies to each cell, so a batch costs
+   * up to the number of cells times the budget.
+   *
+   * Code that counts passes and whose value is a function, other than a
+   * `Function` literal at the root, declines. Its calls would share one total.
+   *
+   * The Python target declines a program with a `Loop` when this option is set.
+   * The GLSL and WGSL targets do not change: a `Loop` there has bounds that are
+   * known at compile time. Without the option, the code of a `Loop` has no
+   * check.
+   *
+   * ```ts
+   * const { run } = compile(expr, { iterationBudget: 1e6 });
+   * ```
    */
   iterationBudget?: number;
 

@@ -2042,6 +2042,13 @@ function compilePythonLoop(
   node?: Expression
 ): string {
   if (!args[0]) throw new Error('Could not compile `Loop`: no body');
+  // The `iterationBudget` option limits the passes of a `Loop` in a call, and
+  // Python code has no helper that keeps that count. A loop that ignores the
+  // limit could run forever, so the compilation declines.
+  if (target.iterationBudget !== undefined)
+    throw new Error(
+      'Could not compile `Loop` on target python: Python code cannot honor the `iterationBudget` option. The interpreter evaluates it instead.'
+    );
   const body = args[0];
   const elements = args.slice(1);
 
@@ -7700,6 +7707,9 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // reuse (see `NamingContext`).
     const target = this.createTarget({
       var: resolveVar,
+      // A `Loop` declines when the option is set (`compilePythonLoop`). The
+      // `Sum` and `Product` of this target do not read it.
+      iterationBudget: options.iterationBudget,
       // A `vars`-mapped symbol is a live runtime input: the constant folder
       // must never fold a subtree that mentions one, even when the symbol
       // has an engine value (`CompileTarget.varsKeys`).

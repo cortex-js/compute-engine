@@ -30,6 +30,7 @@ import {
 import {
   checkDeadline,
   CancellationError,
+  isIterationLimitCancellation,
 } from '../../common/interruptible.js';
 import {
   isFunction,
@@ -2249,6 +2250,10 @@ function numericAt(
       const v = fn(xv);
       return typeof v === 'number' ? v : NaN;
     } catch (err) {
+      // A compiled `Loop` throws over the budget of the probe, where a `Sum`
+      // gives `NaN`. Both read as `NaN`: the host did not set this budget, so
+      // the throw does not reach it. Any other cancellation is the caller's.
+      if (isIterationLimitCancellation(err)) return NaN;
       if (err instanceof CancellationError) throw err;
       return NaN;
     }

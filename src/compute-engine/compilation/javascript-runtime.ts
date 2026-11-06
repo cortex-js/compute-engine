@@ -180,6 +180,7 @@ import {
 import {
   checkDeadline,
   DEFAULT_ITERATION_LIMIT,
+  makeLoopPassCounter,
   type DeadlineFrame,
 } from '../../common/interruptible.js';
 import { CapabilityDeniedError } from '../effects-registry.js';
@@ -6545,7 +6546,8 @@ export type LazyStreamSysHelpers = {
 
 export type SysHelpers = typeof SYS_HELPERS &
   RandomSysHelpers &
-  LazyStreamSysHelpers;
+  LazyStreamSysHelpers &
+  ReturnType<typeof makeLoopPassCounter>;
 
 /**
  * The state the engine-bound helpers of `_SYS` read each time they run, never
@@ -6929,7 +6931,12 @@ export function makeLazyStreamHelpers(
  */
 export function makeSysHelpers(source: RuntimeSource): SysHelpers {
   const sys = Object.create(SYS_HELPERS) as SysHelpers;
-  Object.assign(sys, makeRandomHelpers(source), makeLazyStreamHelpers(source));
+  Object.assign(
+    sys,
+    makeRandomHelpers(source),
+    makeLazyStreamHelpers(source),
+    makeLoopPassCounter()
+  );
   // The integrals' Monte-Carlo samples come from the live source, never from
   // `Math.random` directly: a host that mocks or denies it must see compiled
   // code follow. The draw is live inside a `WithRandomSeed` frame too —

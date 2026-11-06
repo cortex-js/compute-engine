@@ -176,7 +176,17 @@ export function runIntervalLambda(
     if (typeof value === 'function') return { kind: 'entire' };
     return freshIntervalValue(value);
   } catch (e) {
-    if (e instanceof ReferenceError) throw e;
+    if (e instanceof ReferenceError || isCancellationError(e)) throw e;
     return { kind: 'entire' };
   }
+}
+
+/**
+ * Whether the error of a compiled call is a `CancellationError`: the limit of
+ * the `iterationBudget` option on a `Loop`. The answer "cannot bound this" does
+ * not apply to it, because the call stopped before it had an answer. The test
+ * reads the name of the error, because each bundle has its own class.
+ */
+export function isCancellationError(e: unknown): boolean {
+  return e instanceof Error && e.name === 'CancellationError';
 }

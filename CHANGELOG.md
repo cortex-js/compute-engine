@@ -14,6 +14,16 @@
 
 ### Improvements
 
+- **The compile option `iterationBudget` also limits `Loop` on the JavaScript
+  and `interval-js` targets.** `compile(expr, { iterationBudget: 1e6 })` with
+  `Block(k := 0, Loop(k := k + 1))` did not return, and `run({})` now throws a
+  `CancellationError` with the cause `iteration-limit-exceeded`. Each iteration
+  of a `Loop` adds to one total for a call, including nested loops and loops in
+  user functions, and the next call starts at 0. `broadcast()` gives `NaN` for a
+  cell over the limit, and a batch costs up to cells × budget. On Python, a
+  program with a `Loop` declines when the option is set. A compiled value that
+  is a function declines when it counts passes, unless it is a function literal.
+  Without the option, the code of a `Loop` is unchanged.
 - **`ReplaceAt` takes more than one position, and a write keeps a known
   length.** `ReplaceAt([[1, 2], [3, 4]], 2, 1, 9)` gives `[[1, 2], [9, 4]]`, and
   `ReplaceAt` over a `vector<3>` now has the type `vector<3>`. The form with

@@ -135,6 +135,13 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `Arctan2(L - L, -1)`, at `L = [-1, 2]` give `[-π, π]`. The code computes
   `0 * -1` or `0 / -1`, which is `-0`, and `Math.atan2(-0, -1)` is `-π`. The
   interpreter gives `[π, π]`.
+- `plausible?` — `javascript`, `b: boolean`, `u: list<real>`, a non-canonical
+  box: `ce.box(['Not', ['And', 'b', ['Greater', 'u', 0]]], { form: 'raw' })` at
+  `b = true`, `u = [1, 2, 3]` gives `true`, and the same box of
+  `['Add', 'u', 1]` gives the string `"1,2,31"`. A non-canonical box has no
+  static types, so the code uses the scalar JavaScript operators. The
+  interpreter, and the compiled `.canonical` form of the box, give
+  `[False, False, False]` for the first box.
 - `plausible?` — `javascript`, `glsl`, `x: real`, `y: real`: `Arctan2(y, -x)` at
   `x = 0`, `y = 0`. The interpreter gives `0`. JavaScript gives `π`, because
   `-x` is `-0` and `Math.atan2(0, -0)` is `π`. The GLSL code is
@@ -1608,6 +1615,110 @@ index of a `Sum`, `Product` or loop as finite. A call
 never declines for want of a proof: it calls the helper, which gives the
 same value as the built-in on a finite argument. The caveat on the shader
 targets in "Caveats of compiled code" gives the examples.
+
+## A limit on `Loop` passes
+
+A compiled `Loop` has no check of its own. `Block(k := 0, Loop(k := k + 1))`
+compiles to `while (true) { k = k + 1 }`, which does not return, also under
+`ce.withTimeLimit({ ms: 500 })`: the time limit belongs to the engine, and the
+emitted code does not read it. The interpreter stops the same loop at
+`ce.iterationLimit`. A host that runs an imported document sets a limit when it
+compiles the code:
+
+```js
+const { run } = compile(expr, { iterationBudget: 1e6 });
+run({}); // throws a CancellationError with the cause `iteration-limit-exceeded`
+```
+
+**What counts.** Each iteration of a `Loop` adds one to one total for a call of
+the compiled code. The three shapes of the loop count the same way: no indexing
+set, a counted range and a for-each over a collection. The total covers nested
+loops and the loops in the bodies of user functions, because a limit for each
+loop would allow the budget squared for two nested loops. `Loop(body,
+Element(i, I), Element(j, J))` counts as the two nested loops that it is equal
+to: one for each element of `I`, and one for each element of `J` under it. A
+guard counts its element also when it refuses it, and an outer clause counts
+when its inner source is empty. Otherwise `Element(i, 1..4e9, i < m)` with `m` at
+0 would run for all of its elements with no check. A budget that is not an
+integer is floored.
+
+**Over the limit.** The code throws a `CancellationError`, with the cause
+`iteration-limit-exceeded`. A `Loop` has no value to replace, and the statements
+after it would read partial state, so the `NaN` of an over-budget `Sum` does not
+apply. No compiled `catch` takes the error, and it does not start the
+interpreter fallback (see "Fail closed"). On `interval-js`, `run()` and `load()`
+throw it too, and they do not answer `{ kind: 'entire' }`: the call stopped, and
+that says nothing about the inputs.
+
+**A batch.** `broadcast()` keeps its rule that a cell catches its own error: the
+cell over the limit gives `NaN` (on `interval-js`, an `error` cell), and the next
+cell starts at 0. The budget applies to each cell, so a batch costs up to the
+number of cells times the budget. Only the slice form counts the failures
+(`BroadcastSlice.failures`): a synchronous `broadcast()` gives the `NaN` with no
+report.
+
+**A function value.** The total is for one call, so the code needs a place to
+start it in each call of a function. A `Function` literal at the root has one,
+and so has a function-valued root on `interval-js`. Any other code whose value is
+a function declines when it counts passes, with an error that names
+`iterationBudget`: with `countTo` a user function, `compile(ce.symbol('countTo'),
+{ iterationBudget: 5 })` and `Block(f := Function(…), f)` decline. Without this
+rule the reset would run once, when the value is made, and later calls would
+share one total, so a valid call would throw. A `Function` literal whose body
+gives a function declines for the same reason.
+
+**A count, not a time.** The limit is deterministic: a test and two machines
+stop at the same pass, and the check reads no clock. A host that wants a time
+limit measures the cost of a pass.
+
+**With no limit, no check.** Without the option, the emitted code has no count.
+With the option and no `Loop`, the code of a `Sum` or a `Product` keeps its
+own rule and the code has no reset.
+
+**The mechanism.** Each iteration starts with `_SYS.countLoopPass(n)`, or
+`_IA.countLoopPass(n)` on `interval-js`, and the code resets the total first
+with `resetLoopPasses()`: as the first statement of the preamble that runs on
+each call, or of each call of a compiled `Function` literal. On a direct target
+the reset is in `code`, before the expression or in each call of a `Function`
+literal at the root. The total is on the runtime and not in a local of the
+code, because the definition of a user function can live outside the function
+that the host calls, and stored code reads only `_SYS` and `_` (see "Running
+stored JavaScript"). `createJavaScriptRuntime()` and `createIntervalRuntime()`
+keep the limit.
+
+**Targets.** Python declines a program with a `Loop` when the option is set,
+because its code has no count. A `Sum` or a `Product` still compiles there, with
+no limit. GLSL and WGSL are unchanged: a shader cannot throw, its loop bounds are
+known at compile time, and a `Loop` with no indexing set already declines.
+
+**Not covered.**
+
+- A `Sum` or a `Product` keeps its own rule: the loop gives `NaN`.
+- A `Comprehension` has no count, and a guard that keeps few elements can run
+  over a long range: `Comprehension(1, Element(i, 1..m, i < 0))` with `m` at 3e7
+  runs all of its elements.
+- A helper of the runtime over a list that exists is finite, and one long call
+  inside a pass is not interrupted.
+- On the JavaScript target, a for-each over a `Range` of more than 2^32 elements
+  throws a `RangeError` before its first pass, with or without the option. A
+  counted loop over a literal range of that size has no such test, and the limit
+  stops it.
+- A call that the compiler folds at compile time runs no pass: with
+  `g(n) := Block(s := 0, Loop(s := s + 1, Element(i, 1..n)), s)`, the code of
+  `g(3)` is `3`, whatever the budget.
+- The expression of a decline runs in the interpreter, which applies
+  `ce.iterationLimit` and not this option.
+- The fill of a parameter default in the `run()` of a `Function` literal has a
+  total of its own, before the total of the body.
+- A host function that calls compiled code on the same runtime from inside a
+  pass resets the total of the outer call.
+
+The numeric ladder of `Limit` compiles its samples with this option
+(`LIMIT_PROBE_ITERATION_BUDGET`), and the host has not set it. So a compiled
+sample over that budget reads as `NaN`, the signal at which the ladder stops, as
+for a `Sum`: the limit of `n ↦ Block(s := 0, Loop(s := s + k^(-3), Element(k,
+1..n)), s)` at infinity gives about 1.2020569, and does not throw. A host that
+compiles the same function with the option itself gets the throw.
 
 ## Compile modes
 

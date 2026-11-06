@@ -74,6 +74,9 @@ import { CompilerState } from './compiler-state.js';
  *
  * Value-producing comprehensions are compiled by `compileComprehension`
  * (head `Comprehension`), not here.
+ *
+ * With the `iterationBudget` option, each pass of each of these loops first
+ * adds one to the total of the call (`loopPassCount`).
  */
 export function compileForLoop(
   args: ReadonlyArray<Expression>,
@@ -113,6 +116,7 @@ export function compileForLoop(
   // statement's own value expressions are bindable child regions.
   const inBody = <T>(bodyTarget: CompileTarget<Expression>, fn: () => T): T =>
     withCseScope(node, 0, bodyTarget, fn);
+  const passCount = loopPassCount(target);
 
   // ── Bare infinite loop ────────────────────────────────────────────────
   if (elements.length === 0) {
@@ -123,7 +127,7 @@ export function compileForLoop(
     const bodyStmts = inBody(target, () => core.compileLoopBody(body, target));
     return `(() => {${target.ws('\n')}while (true) {${target.ws(
       '\n'
-    )}${bodyStmts}${target.ws('\n')}}${target.ws('\n')}})()`;
+    )}${passCount}${bodyStmts}${target.ws('\n')}}${target.ws('\n')}})()`;
   }
 
   // ── Counted loop: single integer-ascending step-1 Range ───────────────
@@ -185,7 +189,7 @@ export function compileForLoop(
       '\n'
     )}for (let ${indexCode} = ${lower}; ${indexCode} <= ${upper}; ${indexCode}++) {${target.ws(
       '\n'
-    )}${bodyStmts}${target.ws('\n')}}${target.ws('\n')}})()`;
+    )}${passCount}${bodyStmts}${target.ws('\n')}}${target.ws('\n')}})()`;
   }
 
   // ── General for-each (for effect) ─────────────────────────────────────
@@ -200,10 +204,123 @@ export function compileForLoop(
     );
 
   assertBreakLeavesWholeLoop(elements, body);
-  const inner = compileElementLoops(elements, target, (bodyTarget) =>
-    inBody(bodyTarget, () => core.compileLoopBody(body, bodyTarget))
+  const inner = compileElementLoops(
+    elements,
+    target,
+    (bodyTarget) =>
+      inBody(bodyTarget, () => core.compileLoopBody(body, bodyTarget)),
+    '',
+    undefined,
+    passCount
   );
   return `(() => {${target.ws('\n')}${inner}${target.ws('\n')}})()`;
+}
+
+/**
+ * The name of the object that holds the helpers of the pass count in the code
+ * of `target`, or `undefined` when the code of the target cannot keep the count:
+ * a shader cannot throw, Python declines the loop (`compilePythonLoop`), and a
+ * custom target has no such helpers.
+ */
+function loopPassHelpers(
+  target: CompileTarget<Expression>
+): string | undefined {
+  if (target.iterationBudget === undefined) return undefined;
+  if (target.language === 'javascript') return '_SYS';
+  if (target.language === 'interval-javascript') return '_IA';
+  return undefined;
+}
+
+/**
+ * The statement at the start of each pass of a compiled `Loop`, or `''` when
+ * there is no `iterationBudget`: such code then has no check at all. The helper
+ * throws a `CancellationError` when the total of the call goes over the budget
+ * (`makeLoopPassCounter()`). The total is in the runtime, and not in a local
+ * variable of the code, because a loop can be in the definition of a user
+ * function, which can be outside the function that the host calls.
+ *
+ * The budget is floored, as for the `Sum` and `Product` loops.
+ */
+function loopPassCount(target: CompileTarget<Expression>): string {
+  const helpers = loopPassHelpers(target);
+  if (helpers === undefined) return '';
+  return `${helpers}.countLoopPass(${Math.floor(target.iterationBudget!)}); `;
+}
+
+/**
+ * The expression that starts the total of a call again, or `''` when none of
+ * `sources`, the emitted code that runs in the call, counts a pass. So a
+ * compilation with an `iterationBudget` and with no `Loop` keeps the code that
+ * it had.
+ */
+export function loopPassResetCall(
+  target: CompileTarget<Expression>,
+  ...sources: ReadonlyArray<string>
+): string {
+  const helpers = loopPassHelpers(target);
+  if (helpers === undefined) return '';
+  const count = `${helpers}.countLoopPass(`;
+  return sources.some((source) => source.includes(count))
+    ? `${helpers}.resetLoopPasses()`
+    : '';
+}
+
+/** `loopPassResetCall()` as a statement, for the start of a list of
+ * definitions. */
+export function loopPassReset(
+  target: CompileTarget<Expression>,
+  ...sources: ReadonlyArray<string>
+): string {
+  const call = loopPassResetCall(target, ...sources);
+  return call ? `${call}; ` : '';
+}
+
+/**
+ * The function that `code` gives, with `reset`, a `loopPassResetCall()`, as the
+ * first statement of each of its calls. The code of the function is not parsed:
+ * it can have a static map or a default fill around its body, so the reset goes
+ * in a function that calls it.
+ */
+export function resettingLoopPasses(reset: string, code: string): string {
+  return `((_f) => (...args) => { ${reset}; return _f(...args); })(${code})`;
+}
+
+/**
+ * Decline a value that is a function, in code that counts `Loop` passes. Where
+ * such a function is not the `Function` literal at the root, the code has no
+ * place for a reset in each of its calls: the reset runs once, when the value
+ * is made. The calls would then share one total, and a valid call would throw.
+ */
+export function assertCountedValueIsNoFunction(value: Expression): void {
+  if (typeHasFunctionArm(value.type.type))
+    throw new Error(
+      `Could not compile \`${value.toString()}\`: its value is a function, and ` +
+        `the \`iterationBudget\` option counts the passes of a \`Loop\` in one ` +
+        `call of the compiled code, which has no place to start the count of ` +
+        `a call of that function. Compile the \`Function\` literal itself, or ` +
+        `compile with no \`iterationBudget\`.`
+    );
+}
+
+/**
+ * The code of a direct target (`compile(expr, { target })`) with the reset of
+ * the pass count, when it counts passes. A direct result has no preamble of its
+ * own, so the reset is in `code`: before the expression, or in each call of a
+ * `Function` literal at the root.
+ */
+export function withDirectLoopPassReset(
+  root: Expression,
+  target: CompileTarget<Expression>,
+  code: string
+): string {
+  const reset = loopPassResetCall(target, code);
+  if (!reset) return code;
+  if (isFunction(root, 'Function')) {
+    assertCountedValueIsNoFunction(root.ops[0]);
+    return resettingLoopPasses(reset, code);
+  }
+  assertCountedValueIsNoFunction(root);
+  return `(${reset}, ${code})`;
 }
 
 /**
@@ -614,7 +731,10 @@ export function compileElementLoops(
   prelude = '',
   /** The clauses' binders when the caller has validated them already
    * (`compileComprehension` needs their names before it emits). */
-  validated?: ReadonlyArray<ElementBinder>
+  validated?: ReadonlyArray<ElementBinder>,
+  /** The statement at the start of each iteration of each clause, before the
+   * guard of the clause (`loopPassCount`). */
+  passCount = ''
 ): string {
   const binders = validated ?? elementClauseBinders(elements, target);
   const narrowedElements = binders.map((b) => b.clause);
@@ -739,7 +859,8 @@ export function compileElementLoops(
       bodyTarget,
       makeInner,
       prelude,
-      needsWrap
+      needsWrap,
+      passCount
     );
   } finally {
     if (complexFrame.size > 0) _popLocalComplex();
@@ -757,7 +878,8 @@ export function emitElementLoops(
   bodyTarget: CompileTarget<Expression>,
   makeInner: (bodyTarget: CompileTarget<Expression>) => string,
   prelude: string,
-  needsWrap: boolean
+  needsWrap: boolean,
+  passCount = ''
 ): string {
   // Build nested for-of loops from innermost to outermost. Inner collections
   // are compiled with `bodyTarget` so that references to outer loop variables
@@ -819,6 +941,11 @@ export function emitElementLoops(
         : `(${test}) === true`;
       inner = `if (${guardTest}) { ${inner} }`;
     }
+    // Each iteration of each clause counts, not only a pass of the body: a
+    // guard that keeps no element, or an inner source that is empty, would
+    // otherwise run the clause over its whole range with no check. Two clauses
+    // then count as two nested loops count.
+    inner = passCount + inner;
     let collection: string;
     if (
       target.language === 'javascript' &&

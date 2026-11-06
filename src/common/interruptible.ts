@@ -171,6 +171,51 @@ export class CancellationError<T = unknown> extends Error {
 }
 
 /**
+ * The count of `Loop` passes that compiled code keeps when it is compiled with
+ * the `iterationBudget` option. The JavaScript runtime (`_SYS`) and the interval
+ * library (`_IA`) each hold one, so that every loop of a call adds to one total,
+ * including a loop in the body of a user function, whose definition can live
+ * outside the function that the host calls. The compiled code resets the total
+ * when a call starts, and calls `countLoopPass` at the start of each pass.
+ *
+ * The check is a count, not a time, so the same call stops at the same pass on
+ * every machine, and it reads no clock.
+ */
+export function makeLoopPassCounter(): {
+  countLoopPass: (budget: number) => void;
+  resetLoopPasses: () => void;
+} {
+  let passes = 0;
+  return {
+    countLoopPass: (budget: number): void => {
+      passes += 1;
+      if (passes > budget)
+        throw new CancellationError({
+          cause: 'iteration-limit-exceeded',
+          message: `Compiled code ran more than ${budget} \`Loop\` passes in one call, the limit that the \`iterationBudget\` option sets`,
+        });
+    },
+    resetLoopPasses: (): void => {
+      passes = 0;
+    },
+  };
+}
+
+/**
+ * Whether `e` is a `CancellationError` with the cause
+ * `iteration-limit-exceeded`, which a compiled call throws over its
+ * `iterationBudget`. The test reads the name of the error, because each bundle
+ * has its own class. Another cancellation (a deadline, an abort) answers `false`.
+ */
+export function isIterationLimitCancellation(e: unknown): boolean {
+  return (
+    e instanceof Error &&
+    e.name === 'CancellationError' &&
+    (e as CancellationError).cause === 'iteration-limit-exceeded'
+  );
+}
+
+/**
  * Throw a `CancellationError` if `deadline` (an absolute timestamp in
  * milliseconds, or a `DeadlineFrame`, i.e. `engine._deadline` /
  * `engine._deadlineFrame`) has passed.

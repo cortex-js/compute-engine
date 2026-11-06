@@ -125,7 +125,12 @@ import {
 } from './fixed-width-unroll.js';
 import { reachesCallerCodeOn } from './compile-folding.js';
 import { cseSharingOff } from './compile-cse.js';
-import { reservedNameSpelling } from './compile-loops.js';
+import {
+  loopPassReset,
+  loopPassResetCall,
+  reservedNameSpelling,
+  resettingLoopPasses,
+} from './compile-loops.js';
 import { JAVASCRIPT_RESERVED_IDENTIFIERS } from './javascript-reserved.js';
 import { inlinePointValuesAtRoot } from './point-value-inlining.js';
 import { isLibraryFoldCombiner } from './builtin-callback.js';
@@ -161,6 +166,7 @@ import {
   hasIntervalBounds,
   processInput,
   runIntervalLambda,
+  isCancellationError,
 } from '../interval/run-support.js';
 import {
   broadcastIntervals,
@@ -6236,8 +6242,10 @@ export class ComputeEngineIntervalFunction extends Function {
           // code, not an answer about the inputs, so it is thrown, as the
           // runner of the `javascript` target throws it. Any other run-time
           // error (e.g., a missing `_IA` method) returns "entire" to signal
-          // "cannot bound this" rather than crashing.
-          if (e instanceof ReferenceError) throw e;
+          // "cannot bound this" rather than crashing. A cancellation (the
+          // `iterationBudget` limit of a `Loop`) stops the call, as it does on
+          // the `javascript` target: it says nothing about the inputs either.
+          if (e instanceof ReferenceError || isCancellationError(e)) throw e;
           return { kind: 'entire' };
         }
       },
@@ -6894,6 +6902,9 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // The caller's requested compile mode; validated against
       // `supportedModes` (strict only here) by `BaseCompiler.compile`.
       mode: options.mode,
+      // The limit on the passes of a `Loop` in one call (`loopPassCount`).
+      // The `Sum` and `Product` of this target do not read it.
+      iterationBudget: options.iterationBudget,
       // Constant folding is UNSOUND on this target, unconditionally: it bakes
       // a subtree's `.N()` value as a zero-width point, discarding the
       // outward-rounded enclosure the structural interval code computes. A
@@ -7439,6 +7450,17 @@ function compileToIntervalTarget(
   // `expr` (a symbol with a `Function`-literal definition used as an operator)
   // to the preamble so their named local functions are in scope.
   const userDefs = BaseCompiler.userFunctionsPreamble(target);
+  // With the `iterationBudget` option, code that counts `Loop` passes starts
+  // each call with a count of 0. The caller's preamble and the definitions of
+  // the user functions run on every call, and this reset comes before them. A
+  // function-valued root has the reset in each of its calls too, because a host
+  // that puts `preamble` and `code` together runs the preamble only once.
+  const passReset = loopPassReset(target, js, userDefs);
+  if (passReset) {
+    target.preamble = passReset + (target.preamble ?? '');
+    if (lambda)
+      js = resettingLoopPasses(loopPassResetCall(target, js, userDefs), js);
+  }
   // Bind every constant interval to a name, so the expression reads that name
   // instead of building the same object at each occurrence and on every call.
   // The declarations are evaluated once per artifact, in a scope that encloses

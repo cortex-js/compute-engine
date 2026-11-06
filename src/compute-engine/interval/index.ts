@@ -9,6 +9,8 @@
  * @module interval
  */
 
+import { makeLoopPassCounter } from '../../common/interruptible.js';
+
 // Import functions for the library object
 import {
   ok as _ok,
@@ -317,6 +319,10 @@ export { INTERVAL_RUNTIME_VERSION } from '../../common/runtime-versions.js';
  * interval arithmetic functions.
  */
 export const IntervalArithmetic = {
+  // The count of `Loop` passes of a call, for code compiled with the
+  // `iterationBudget` option. This object is shared by all compiled interval
+  // code, and a call is synchronous, so the code resets the count at its entry.
+  ...makeLoopPassCounter(),
   // Utilities
   ok: _ok,
   point: _point,

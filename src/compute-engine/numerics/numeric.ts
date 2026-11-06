@@ -1019,6 +1019,12 @@ function reliableLimitSamples(
  * "horizon" signal: `reliableLimitSamples` caps the rungs to the clean prefix
  * and Richardson extrapolation converges from those (γ still comes out
  * correct to ~1e-10 from the ≤ 8⁶-term rungs).
+ *
+ * A compiled `Sum` or `Product` gives that NaN itself. A compiled `Loop` has no
+ * value to replace, and throws a `CancellationError`, so the two callers of this
+ * budget (`numericLimitValue()` and `numericAt()`) read that error as NaN for a
+ * compiled sample. A host that sets the `iterationBudget` compile option itself
+ * gets the throw.
  */
 export const LIMIT_PROBE_ITERATION_BUDGET = 1e6;
 

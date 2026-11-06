@@ -103,7 +103,11 @@ import { logSpaceProduct } from '../symbolic/log-space-product.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import { nanPointLiteral, unmatchedCellLiteral } from './compile-absence.js';
 import { reachesCallerCodeOn } from './compile-folding.js';
-import { reservedNameSpelling } from './compile-loops.js';
+import {
+  assertCountedValueIsNoFunction,
+  loopPassReset,
+  reservedNameSpelling,
+} from './compile-loops.js';
 import { JAVASCRIPT_RESERVED_IDENTIFIERS } from './javascript-reserved.js';
 import {
   tryGetConstant,
@@ -11228,6 +11232,12 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     if (target.userFunctions)
       BaseCompiler.pruneUnreferencedVariantBases(target.userFunctions, js);
     const locals = [...state.locals.values(), ...state.direct.values()];
+    const passReset = loopPassReset(
+      target,
+      js,
+      BaseCompiler.userFunctionsPreamble(target)
+    );
+    if (passReset) target.preamble = passReset + (target.preamble ?? '');
     const split = target.userFunctions
       ? splitPreambleDefs(target.userFunctions, locals, true)
       : { hoisted: '', perCall: '' };
@@ -12238,7 +12248,13 @@ function compileToTarget(
         javascriptStatements(target)
       );
     }
-    const userDefs = BaseCompiler.userFunctionsPreamble(target);
+    const definitions = BaseCompiler.userFunctionsPreamble(target);
+    // With the `iterationBudget` option, code that counts `Loop` passes starts
+    // each call of the lambda with a count of 0. The reset comes before the
+    // definitions, which can run a loop when they hold a value.
+    const passReset = loopPassReset(target, referencing, definitions);
+    if (passReset) assertCountedValueIsNoFunction(args[0]);
+    const userDefs = passReset + definitions;
     // A compiled lambda is called with its declared parameters only — there is
     // no vars object in scope — so a free symbol emitted as `_.<id>` (here or
     // in the user-function preamble, which shares this target) would throw
@@ -12257,28 +12273,32 @@ function compileToTarget(
     // The definitions that read no lambda parameter are evaluated once per
     // artifact; the rest stay inside the per-call body (see
     // `splitPreambleDefs`). `toString()` and `code` keep the single-body form.
-    const split = target.userFunctions
+    const definitionSplit = target.userFunctions
       ? splitPreambleDefs(target.userFunctions, params, false)
       : { hoisted: '', perCall: '', perCallNames: [] };
+    const split = {
+      ...definitionSplit,
+      perCall: passReset + definitionSplit.perCall,
+    };
     // The fill of an omitted parameter runs after the definitions that the
     // defaults reference and before the others (`splitAroundDefaultFill`),
     // in `code` (all the definitions), in `callCode` and in `run()` (the
     // per-call definitions).
+    const aroundDefaultFill = (names: string[]) => {
+      const around = splitAroundDefaultFill(
+        target.userFunctions!,
+        names,
+        defaults!.defaults
+      );
+      return { ...around, before: passReset + around.before };
+    };
     const allAround =
       defaults !== undefined && target.userFunctions
-        ? splitAroundDefaultFill(
-            target.userFunctions,
-            [...target.userFunctions.defs.keys()],
-            defaults.defaults
-          )
+        ? aroundDefaultFill([...target.userFunctions.defs.keys()])
         : { before: userDefs, after: '' };
     const perCallAround =
       defaults !== undefined && target.userFunctions
-        ? splitAroundDefaultFill(
-            target.userFunctions,
-            split.perCallNames,
-            defaults.defaults
-          )
+        ? aroundDefaultFill(split.perCallNames)
         : { before: split.perCall, after: '' };
     const statements = javascriptStatements(target);
     const statementBody = statements?.has(body)
@@ -12407,6 +12427,16 @@ function compileToTarget(
     );
   }
   const userDefs = BaseCompiler.userFunctionsPreamble(target);
+  // With the `iterationBudget` option, code that counts `Loop` passes starts
+  // each call with a count of 0. The reset comes first in the preamble, which
+  // runs on every call, because a definition can run a loop when it holds a
+  // value. The preamble is in every form of the code: `preamble`,
+  // `preamblePerCall` and `run()`.
+  const passReset = loopPassReset(target, js, userDefs);
+  if (passReset) {
+    assertCountedValueIsNoFunction(expr);
+    target.preamble = passReset + (target.preamble ?? '');
+  }
   const preamble = userDefs
     ? target.preamble
       ? `${target.preamble}\n${userDefs}`

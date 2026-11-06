@@ -111,7 +111,10 @@ import {
   tailReachesInfinity,
 } from '../numerics/divergent-tail.js';
 import { logSpaceProduct } from '../symbolic/log-space-product.js';
-import { throwIfCallerCancellation } from '../../common/interruptible.js';
+import {
+  isIterationLimitCancellation,
+  throwIfCallerCancellation,
+} from '../../common/interruptible.js';
 import { mixTags } from '../numerics/random.js';
 import {
   adaptiveQuadrature,
@@ -5196,7 +5199,22 @@ function numericLimitValue(
     const compiled = implicitCompile(engine, f, {
       iterationBudget: LIMIT_PROBE_ITERATION_BUDGET,
     });
-    const fn = (compiled?.run as (x: number) => number) ?? applicableN1(f);
+    const run = compiled?.run as ((x: number) => number) | undefined;
+    // A compiled `Loop` throws over the budget, where a `Sum` gives `NaN`. Both
+    // read as `NaN` here, the signal the ladder stops at. The host did not set
+    // this budget, so the throw does not reach it. An interpreted sample
+    // (`applicableN1`) keeps its own limit and its own error.
+    const fn =
+      run === undefined
+        ? applicableN1(f)
+        : (x: number): number => {
+            try {
+              return run(x);
+            } catch (e) {
+              if (isIterationLimitCancellation(e)) return NaN;
+              throw e;
+            }
+          };
     // A numeric limit is a float, even when its value is an integer
     return engine.number(
       engine._inexactNumericValue(

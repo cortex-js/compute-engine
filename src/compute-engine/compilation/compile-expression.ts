@@ -9,6 +9,7 @@ import type {
   StorageHint,
 } from './types.js';
 import { BaseCompiler } from './base-compiler.js';
+import { withDirectLoopPassReset } from './compile-loops.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import { resolveStorageHints } from './storage-hints.js';
 import { compileDiagnosticOf, isKindDeclineError } from './diagnostics.js';
@@ -260,7 +261,11 @@ export function compile<
       let direct: CompilationResult<T, R>;
       try {
         direct = withVarsValuesHidden(expr, vars, () => {
-          const code = BaseCompiler.compileRoot(rewritten, target);
+          const code = withDirectLoopPassReset(
+            rewritten,
+            target,
+            BaseCompiler.compileRoot(rewritten, target)
+          );
           return BaseCompiler.withReferences(
             {
               target: (target.language ?? 'custom') as T,
