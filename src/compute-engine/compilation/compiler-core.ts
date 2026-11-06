@@ -5426,8 +5426,23 @@ export function ensureSpecializedUserCallEmitted(
   // On interval-js, only a call with a list bound whole takes a copy (see
   // the comment on `interval` above).
   if (interval && !wholeListArgument) return undefined;
-  const hasPointProof = pointWidths.some((w) => w !== undefined);
-  if (!narrower && !hasPointProof) return undefined;
+  // A copy is made when it gives a parameter a narrower type than the
+  // definition does, or when it gives a proven point a type the definition
+  // has only by inference. A parameter with an inferred tuple type can receive
+  // a list of any shape, so the definition tests each read (`_SYS.atNumeric`)
+  // and the copy does not: with no declaration, `Q := p ↦ p[1] + p[2]` called
+  // with `(x + 1, 2y)` takes the copy. A parameter with a declared type has the
+  // annotation that the copy would add, and the declared tuple states what the
+  // proof states (a width and scalar coordinates), so the copy would have the
+  // text of the definition: with `P: (tuple<real, real>) -> number`, the call
+  // `P((n, n + 1))` takes the definition of `P`.
+  if (
+    !narrower &&
+    pointWidths.every(
+      (width, i) => width === undefined || isFunction(params[i], 'Typed')
+    )
+  )
+    return undefined;
   if (isContradictedScalarDeclaration(engine.function(h, args)))
     return undefined;
   // A complex copy is never the scalar definition: it has its own name and
@@ -5441,7 +5456,7 @@ export function ensureSpecializedUserCallEmitted(
     types.every((t) => isSubtype(t, 'number'));
   // A declared tuple and a constructed point can have the same type.
   // Only the constructed variant may omit runtime shape checks.
-  const proofKey = hasPointProof
+  const proofKey = pointWidths.some((w) => w !== undefined)
     ? `#points:${pointWidths.map((w) => w ?? '').join(',')}`
     : '';
   // The key tells a closed record (a dictionary literal) from the open

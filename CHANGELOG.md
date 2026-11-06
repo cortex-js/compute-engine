@@ -43,6 +43,32 @@
 
 ### Resolved Issues
 
+- **Compiled JavaScript no longer defines a function twice with the same body.**
+  With `P: (tuple<real, real>) -> number`, a call `P((n, n + 1))` inside a `Sum`
+  and a call of `P` with another point gave two definitions in `preamble`, with
+  the same text. These calls now share one definition, `_fn_P`. The values do
+  not change.
+- **A zero times a list or over a list keeps the list.** With `L: list<real>`
+  and no value yet, `0·L` simplified to the scalar `0`, the canonical form of
+  `0/L` was `0`, and `0·L + 1` simplified to `1`. A broadcast that held such a
+  term changed length. These forms now stay as they are, and with
+  `L = [1, 2, 3]` they evaluate to `[0, 0, 0]`, `[0, 0, 0]` and `[1, 1, 1]`.
+- **`simplify()` keeps `|arcsin(x)|`, `|arccsc(x)|`, `|artanh(x)|` and
+  `|arcoth(x)|`.** It rewrote `|f(x)|` as `f(|x|)`, which is complex where `f`
+  is not real: `|arcsin(2)|` is `2.05`, and `arcsin(|2|)` is `1.57 - 1.32i`. The
+  result was also typed complex, so that a compiled comparison of it declined.
+  The rewrite stays for the functions that are real on the whole real axis, such
+  as `arctan` and `arsinh`.
+- **`evaluate()` and `simplify()` no longer overflow the stack on a lazy operator
+  over an operand that evaluates to itself.** A `Map` over
+  `Range(0, Length(At(u, i)) - 1)` with a length that is not known replaced the
+  operand with the same expression and evaluated the `Map` again, until the
+  stack overflowed.
+- **`simplify()` of a large sum respects `withTimeLimit()`.** The rule for
+  `g·sin²(u) + g·cos²(u)` examined each pair of terms with no check of the limit
+  and built the factors of a term again for each pair. A limit of 300 ms on
+  `(sin(3x) + cos(xπ²) + 2)^64 / M^64` ended after about 5,600 ms, and now ends
+  after about 500 ms.
 - **A `Map` that the engine compiles reads the current value of the symbols in
   its function.** The compiled code kept the value of the first drain when the
   symbol got a new value with no assignment: a parameter of a new call, a local
@@ -1025,7 +1051,7 @@ read these entries before they update.
     declared type, as an assignment does. With `cd: list<color>` at
     `[Missing, Rgb(0, 1, 0)]` (a selection with no match in the first cell),
     `AsOklab(cd)` failed to compile ("its value has the type
-    'list<color | missing>', which is not the type 'list<color>'") and now
+    `list<color | missing>`, which is not the type `list<color>`") and now
     compiles to JavaScript: the second cell is the interpreter's Oklab
     color, and the first cell is the `NaN` color (where the interpreter
     gives an `incompatible-type` error). With `ss: list<string>` at

@@ -80,6 +80,96 @@ test('proven point parameters propagate through retained helper calls and loop s
   expect(r.run!({ x: 4 })).toBe(34);
 });
 
+// The proof that an argument is a constructed point states what the declared
+// tuple already states, so a copy with the declared parameter types would have
+// the text of the definition. `g` calls `P` with a coordinate of a wide type,
+// and the sum calls it with a proven point: both calls take one definition.
+describe('a proven point at a parameter declared as a tuple of numbers', () => {
+  const inSum: MathJsonExpression = [
+    'Sum',
+    ['P', ['Tuple', ['Add', 'n', 's'], 'n', 'n']],
+    ['Limits', 'n', 0, 'N'],
+  ];
+  const engine = (parameter: string) => {
+    const ce = new ComputeEngine();
+    const wide = 'real|signed_infinity|nan';
+    ce.declare('s', 'real<-10..10>');
+    ce.declare('N', 'integer<0..10>');
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
+    ce.declare('P', `(${parameter}) -> number`);
+    ce.declare('g', `(${wide}, ${wide}) -> ${wide}`);
+    const at = (k: number): MathJsonExpression => [
+      'Multiply',
+      k + 2,
+      ['At', 'p', k],
+    ];
+    ce.assign(
+      'P',
+      ce.box(['Function', ['Sin', ['Add', at(1), at(2), at(3)]], 'p'])
+    );
+    ce.assign(
+      'g',
+      ce.box([
+        'Function',
+        ['P', ['Tuple', ['Floor', 'a'], ['Floor', 'b'], 's']],
+        'a',
+        'b',
+      ])
+    );
+    return ce;
+  };
+  const definitionsOfP = (r: { preamble?: string }) =>
+    (r.preamble ?? '').split('\n').filter((l) => l.startsWith('const _fn_P'));
+
+  const wideCoordinate = 'real|signed_infinity|nan';
+  test.each([
+    ['tuple<real, real, real>'],
+    ['tuple<number, number, number>'],
+    [`tuple<${wideCoordinate}, ${wideCoordinate}, ${wideCoordinate}>`],
+  ])(
+    'a call in a sum and a call out of it share one definition: %s',
+    (type) => {
+      const ce = engine(type);
+      const expr = ce.box(['Add', ['g', 'x', 'y'], inSum]);
+      const r = compile(expr, { fallback: false });
+      expect(definitionsOfP(r)).toEqual([
+        'const _fn_P = (p) => Math.sin(3 * _SYS.at(p, 1) + 4 * _SYS.at(p, 2) + 5 * _SYS.at(p, 3));',
+      ]);
+      const vars = { x: 2.5, y: -1.5, s: 0.25, N: 3 };
+      const value = r.run!(vars);
+      for (const [name, v] of Object.entries(vars)) ce.assign(name, v);
+      expect(value).toBeCloseTo(expr.evaluate().re, 12);
+    }
+  );
+
+  test('the only call, a proven point, takes the definition', () => {
+    const r = compile(engine('tuple<real, real, real>').box(inSum), {
+      fallback: false,
+    });
+    expect(definitionsOfP(r)).toHaveLength(1);
+    expect(definitionsOfP(r)[0]).toMatch(/^const _fn_P = /);
+  });
+});
+
+// A parameter with an inferred tuple type can receive a list of any shape, so
+// the definition tests each read. The copy for a proven point needs no test.
+test('a proven point at a parameter with an inferred type keeps its copy', () => {
+  const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  ce.declare('y', 'real');
+  ce.assign(
+    'Q',
+    ce.box(['Function', ['Add', ['At', 'p', 1], ['At', 'p', 2]], 'p'])
+  );
+  const r = compile(
+    ce.box(['Q', ['Tuple', ['Add', 'x', 1], ['Multiply', 2, 'y']]]),
+    { fallback: false }
+  );
+  expect(source(r)).not.toContain('_SYS.atNumeric');
+  expect(r.run!({ x: 2, y: 3 })).toBe(9);
+});
+
 test('parameter writes do not inherit entry-point shape evidence', () => {
   const ce = fixture([
     'Block',
