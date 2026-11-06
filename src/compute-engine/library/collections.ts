@@ -19068,10 +19068,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // `index` replaced by `value`. Eager on finite indexed collections; inert
   // otherwise.
   ReplaceAt: {
-    examples: ['ReplaceAt([1, 2, 3], 2, 20)'],
+    examples: [
+      'ReplaceAt([1, 2, 3], 2, 20)',
+      'ReplaceAt([[1, 2], [3, 4]], 2, 1, 9)',
+    ],
     description: [
       'Return a copy of the indexed collection with the element at the 1-based `index` replaced by `value`.',
       'A negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.',
+      'With more than one position, as `At` takes them, the last operand is the value, and each position selects one level of a nested collection (e.g., a matrix).',
     ],
     complexity: 8200,
     // The repeated variable widens the element type to include the replacement
@@ -19088,6 +19092,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `ReplaceAt([1], 1, 2{c})` is `[2{c}]`, which is `[NaN]` once `c`
     // fails, as when `2{c}` is evaluated first. Threaded, the whole result
     // was absent (`Missing`) and the other elements were lost.
+    // With more than one position, operand 2 is a position. It is not
+    // threaded at this level: the write on the element threads it there, so
+    // its restriction stays in that element. `ReplaceAt(M, If(c, 1), 1, 9)`
+    // restricts the whole list, and `ReplaceAt(M, 1, If(c, 1), 9)` restricts
+    // only the first row.
     threadsConditionals: [0, 1],
     // An absent collection answers `Missing` (user decision 2026-09-26), as
     // the other collection operators do for an absent collection. Declared
@@ -19097,10 +19106,37 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // the result.
     missingBehavior: 'propagate',
     missingStrip: [0],
-    signature: '(indexed_collection<T>, integer, T) -> list<T> where T: any',
-    evaluate: ([xs, idx, value], { engine: ce }) => {
+    // The second arm is the form with more than one position:
+    // `ReplaceAt(M, 2, 1, 9)`. A variadic parameter must be the last one in a
+    // signature, so `any+` holds the positions after the second and then the
+    // value. A position that is not an integer in that part is not refused at
+    // boxing, unless its type is provably not an integer (the `type` handler
+    // then gives `error`): the evaluation gives the `incompatible-type` error
+    // when it reaches that level, and the compiled code throws. The `type`
+    // handler below gives the result type of this arm.
+    signature:
+      '((indexed_collection<T>, integer, T) -> list<T> where T: any) & ((indexed_collection<any>, integer, integer, any+) -> list<any>)',
+    type: (ops, { engine: ce }) => {
+      if (ops.length < 3) return undefined;
+      const source = ops[0].type;
+      const value = ops[ops.length - 1].type;
+      if (
+        ops
+          .slice(1, -1)
+          .some((position) => provablyDisjoint(position.type, 'integer'))
+      )
+        return BoxedType.forResult('error', ce._typeResolver);
+      const result =
+        ops.length === 3
+          ? listTypeKeptByWrite(source, value)
+          : replaceAtPathType(source, ops.length - 2, value);
+      return result && BoxedType.forResult(result, ce._typeResolver);
+    },
+    evaluate: (ops, { engine: ce }) => {
+      const [xs, idx, value] = ops;
       const refused = unindexedCollectionOperandError(ce, 'ReplaceAt', xs);
       if (refused) return refused;
+      if (ops.length > 3) return evaluateReplaceAtPath(ce, ops);
       if (!isWalkableFiniteCollection(xs)) return undefined;
       // Small finite sources materialize eagerly; larger — or unknown-length —
       // sources stay symbolic and are served lazily by the `collection`
@@ -19123,7 +19159,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       out[i0] = value;
       return ce.function('List', out);
     },
-    collection: refusingUnindexedSource({
+    // The handlers read a view with one position. A form with more than one
+    // position is not a view: its evaluation is the form with one position
+    // over the source, with the rewritten element as the value
+    // (`evaluateReplaceAtPath()`), and that form has these handlers.
+    collection: readingValueOfPathWrite({
       // The walk inserts or skips at the position the index names. When
       // there is no position (an index outside the source, a negative index
       // over a source whose length is not known, infinite or not a safe
@@ -22186,7 +22226,17 @@ function targetPositionOf(
   n: number | bigint | undefined
 ): number | undefined {
   if (n === undefined || !isFunction(expr)) return undefined;
-  const index = toIntegerOperand(expr.op2);
+  return positionOfIndex(toIntegerOperand(expr.op2), n);
+}
+
+/**
+ * The 1-based position that the 1-based `index` names in a source of length
+ * `n`, or `undefined` when it names none: {@link targetPositionOf}.
+ */
+function positionOfIndex(
+  index: number | null,
+  n: number | bigint
+): number | undefined {
   if (index === null || index === 0) return undefined;
   if (index > 0) {
     if (typeof n === 'number' && Number.isFinite(n) && index > n)
@@ -22197,6 +22247,201 @@ function targetPositionOf(
   if (typeof n === 'bigint' || !Number.isFinite(n)) return undefined;
   if (index < -n) return undefined;
   return n + index + 1; // g = (n + index) + 1
+}
+
+/**
+ * True when `x` is a `ReplaceAt` that stayed unevaluated with no position to
+ * write. A large source also stays unevaluated, as a view that has a count.
+ */
+function isInertReplaceAt(x: Expression): boolean {
+  return isFunction(x, 'ReplaceAt') && (x.nops > 3 || x.count === undefined);
+}
+
+/**
+ * True when each position of `positions` names an element of `xs`, level by
+ * level, by the rules of `evaluateReplaceAtPath()`. The test reads the source
+ * and the positions, and not the value of the write. A row that is absent has
+ * no further level to check. A row with no count (a restricted row, a finite
+ * source with no count) answers false: the evaluation of the form still gives
+ * its value.
+ */
+function writePositionsHold(
+  xs: Expression,
+  positions: ReadonlyArray<Expression>
+): boolean {
+  const n = xs.count;
+  if (n === undefined) return false;
+  const g = positionOfIndex(toIntegerOperand(positions[0]), n);
+  if (g === undefined) return false;
+  if (positions.length === 1) return true;
+  const row = xs.at(g);
+  if (row === undefined || row.type.isUnknown) return false;
+  if (row.type.type === 'missing') return true;
+  return writePositionsHold(row, positions.slice(1));
+}
+
+/**
+ * The `collection` handlers of `ReplaceAt`: `handlers` read a view with one
+ * position, guarded by `refusingUnindexedSource()`. A form with more than one
+ * position is read by a consumer before it is evaluated (`Map`, `Sum`). The
+ * value of the write is not evaluated to read the shape of the form: the count
+ * and the emptiness come from the source and the positions, and an element
+ * other than the written one comes from the source. Reading the written element
+ * and starting a walk each evaluate the form once, for a value that is not pure
+ * too. So a consumer that reads `at(1)` and also walks the form
+ * `ReplaceAt(M, 1, 1, tick())` runs `tick()` twice. `Map`, `Sum` and `Reverse`
+ * run it once. When a position names no element, the handlers answer "unknown".
+ */
+function readingValueOfPathWrite(
+  handlers: CollectionHandlers
+): CollectionHandlers {
+  const view = refusingUnindexedSource(handlers);
+  const isPath = (expr: Expression): boolean =>
+    isFunction(expr) && expr.nops > 3;
+  // A form with one position, and a form whose positions name an element,
+  // read the shape as the view does: the view reads only the source and the
+  // first position.
+  const hasShape = (expr: Expression): boolean =>
+    !isPath(expr) ||
+    (isFunction(expr) &&
+      writePositionsHold(expr.op1, expr.ops.slice(1, expr.nops - 1)));
+  const valueOf = (expr: Expression): Expression | undefined => {
+    const value = expr.evaluate();
+    return value.isValid && !isInertReplaceAt(value) ? value : undefined;
+  };
+  return {
+    ...view,
+    iterator: (expr) =>
+      isPath(expr) ? valueOf(expr)?.each() : view.iterator(expr),
+    count: (expr) => (hasShape(expr) ? view.count(expr) : undefined),
+    isEmpty: (expr) => (hasShape(expr) ? view.isEmpty!(expr) : undefined),
+    isFinite: (expr) => (hasShape(expr) ? view.isFinite!(expr) : undefined),
+    isEnumerable: (expr) =>
+      hasShape(expr) ? view.isEnumerable!(expr) : false,
+    at: (expr, index) => {
+      if (!hasShape(expr)) return undefined;
+      return isPath(expr) && index === targetPosition(expr)
+        ? valueOf(expr)?.at(index as number)
+        : view.at!(expr, index);
+    },
+  };
+}
+
+/**
+ * The value of `ReplaceAt(xs, i, j, ..., value)`: the form with one position,
+ * `ReplaceAt(xs, i, e)`, where `e` is the value of the same write on the
+ * element of `xs` at `i` with the first position removed. Only that element of
+ * `xs` is read, so a large source stays a view with one position, and each
+ * further position selects a level by the rules of the form with one position.
+ * An absent element stays absent. An element that is not a collection gives
+ * the error of the form with one position, which answers for the whole call.
+ * An element of unknown type leaves the call unevaluated: the write would give
+ * a free symbol the type of a collection.
+ */
+function evaluateReplaceAtPath(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  let xs = ops[0];
+  // A source that is itself a form with more than one position, after the
+  // evaluation of the operands, has no value to read. Its handlers would
+  // evaluate it again at each level of a chain.
+  if (isFunction(xs, 'ReplaceAt') && xs.nops > 3) return undefined;
+  let n = xs.count;
+  if (n === undefined) {
+    const all = eagerElementsOf(xs);
+    if (all === undefined) return undefined;
+    xs = ce.function('List', all);
+    n = all.length;
+  }
+  const g = positionOfIndex(toInteger(ops[1]), n);
+  if (g === undefined) return undefined;
+  const element = xs.at(g);
+  if (element === undefined || element.type.isUnknown) return undefined;
+  const stored = ce
+    .function('ReplaceAt', [element, ...ops.slice(2)])
+    .evaluate();
+  if (!stored.isValid) return stored;
+  if (isInertReplaceAt(stored)) return undefined;
+  return ce.function('ReplaceAt', [xs, ops[1], stored]).evaluate();
+}
+
+/**
+ * The type of a list that a position write with a value of type `stored`
+ * leaves unchanged: `source` itself, when it is a list with a known length
+ * and `stored` fits its elements. A write never changes the length of a list.
+ * A tensor of unknown rank does not qualify, as a scalar written over a row
+ * would make it not rectangular. A `matrix` or a `matrix<2x?>` does not qualify
+ * either: a row of another length also fits its elements, and the rows would
+ * then differ in length. `rowLengthKept` states that `stored` has the length of
+ * the row it replaces, so `ReplaceAt(mm, 1, 2, 9)` keeps `matrix`. In any other
+ * case the answer is `undefined`.
+ */
+function listTypeKeptByWrite(
+  source: Type,
+  stored: Type,
+  rowLengthKept = false
+): Type | undefined {
+  const list = resolveTypeAlias(source);
+  if (typeof list === 'string' || list.kind !== 'list' || !list.dimensions)
+    return undefined;
+  if (!rowLengthKept && list.dimensions.slice(1).some((d) => d < 0))
+    return undefined;
+  const element = collectionElementType(list);
+  return element !== undefined && isSubtype(stored, element)
+    ? source
+    : undefined;
+}
+
+/**
+ * `t` without its `missing` arm: `never` for `missing`, and `t` itself, the same
+ * object, when it has no such arm. The cells of a row are not read:
+ * `list<integer | missing>` has no `missing` arm.
+ */
+function withoutMissingArm(t: Type): Type {
+  if (t === 'missing') return 'never';
+  if (typeof t === 'string' || t.kind !== 'union') return t;
+  const arms = t.types.filter((arm) => arm !== 'missing');
+  if (arms.length === t.types.length) return t;
+  return arms.length === 1 ? arms[0] : { kind: 'union', types: arms };
+}
+
+/**
+ * The result type of `ReplaceAt` with `levels` positions on a list of type
+ * `source`. At each level, the type of the rewritten element is computed from
+ * the row below it. The list keeps its type when that element fits
+ * (`listTypeKeptByWrite`), and otherwise the element type widens to include
+ * it, as `T` does in the form with one position. Positions past the shape of
+ * the type (`ReplaceAt([1, 2], 1, 1, 9)`) make the type `error`.
+ */
+function replaceAtPathType(source: Type, levels: number, value: Type): Type {
+  const element = collectionElementType(source);
+  if (element === undefined) return parseType('list<any>');
+  if (levels === 1)
+    return (
+      listTypeKeptByWrite(source, value) ?? {
+        kind: 'list',
+        elements: widen(element, value),
+      }
+    );
+  // An absent row stays absent, so `missing` is read before the requirement
+  // that a row is a collection.
+  const row = withoutMissingArm(element);
+  let stored: Type = 'missing';
+  if (row !== 'never') {
+    if (provablyDisjoint(row, INDEXED_COLLECTION_SHAPE_TYPE)) return 'error';
+    const written = replaceAtPathType(row, levels - 1, value);
+    if (written === 'error') return 'error';
+    stored = row === element ? written : widen(written, 'missing');
+  }
+  // A row type that the write keeps is returned as the same object, which is
+  // how this level knows that the row keeps its length.
+  return (
+    listTypeKeptByWrite(source, stored, stored === element) ?? {
+      kind: 'list',
+      elements: widen(element, stored),
+    }
+  );
 }
 
 /**

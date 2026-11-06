@@ -6598,6 +6598,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   ReplaceAt: (args, compile) => {
     if (args[1] == null || args[2] == null)
       throw new Error('Could not compile `ReplaceAt`: missing argument');
+    if (args.length > 3)
+      throw new Error(
+        'Could not compile `ReplaceAt`: this target writes at one position'
+      );
     if (PY_IN_PLACE_UPDATE_OPS.has(args)) {
       // A chain accepted by `inPlaceUpdateChains`: one call, with the index
       // and the value of each level listed innermost first.

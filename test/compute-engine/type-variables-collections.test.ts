@@ -101,7 +101,7 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
       '(indexed_collection<T>, integer, T) -> list<T> where T: any'
     );
     expect(sig(ce, 'ReplaceAt')).toBe(
-      '(indexed_collection<T>, integer, T) -> list<T> where T: any'
+      '((indexed_collection<T>, integer, T) -> list<T> where T: any) & ((indexed_collection<any>, integer, integer, any+) -> list<any>)'
     );
     // The `order`/`key` slots stay the PRIMITIVE `function`, not an arrow: a
     // function-typed SYMBOL operand must still be admitted there. `Sort` and

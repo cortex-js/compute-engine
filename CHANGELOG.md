@@ -14,6 +14,11 @@
 
 ### Improvements
 
+- **`ReplaceAt` takes more than one position, and a write keeps a known
+  length.** `ReplaceAt([[1, 2], [3, 4]], 2, 1, 9)` gives `[[1, 2], [9, 4]]`, and
+  `ReplaceAt` over a `vector<3>` now has the type `vector<3>`. The form with
+  more than one position compiles to JavaScript when the type of the collection
+  shows a list at each level it writes.
 - **A `Loop` compiled to GLSL or WGSL can stop early with `Break` and skip a
   pass with `Continue`.** `Loop(Block(If(a > 3, Break()), a := a + 1), k ∈ 1..8)`
   declined with "wrong number of arguments", and it now compiles to

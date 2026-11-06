@@ -5642,6 +5642,24 @@ export const SYS_HELPERS = {
     out[listPosition('ReplaceAt', out.length, i)] = v;
     return out;
   },
+  // `ReplaceAt` with more than one position: `rest` holds the positions,
+  // outermost first, and then the value. The array of each level on the way
+  // to the element is copied, and the other rows stay shared with `arr`.
+  // `replaceAt` checks each position by the same rule. The lowering compiles
+  // this form only when the static type shows a list at each level
+  // (`assertWrittenLevelsAreLists()` in `javascript-target.ts`), so no level
+  // is tested here.
+  replaceAtPath: (arr: unknown, ...rest: unknown[]): unknown[] => {
+    const out = (arr as unknown[]).slice();
+    let level = out;
+    const last = rest.length - 2;
+    for (let k = 0; k < last; k++) {
+      const p = listPosition('ReplaceAt', level.length, rest[k]);
+      level = level[p] = (level[p] as unknown[]).slice();
+    }
+    level[listPosition('ReplaceAt', level.length, rest[last])] = rest[last + 1];
+    return out;
+  },
   deleteAt: (arr: unknown, i: unknown): unknown => {
     const out = listCopy(arr);
     out.splice(listPosition('DeleteAt', out.length, i), 1);
@@ -5670,6 +5688,28 @@ export const SYS_HELPERS = {
       arr[listPosition('ReplaceAt', arr.length, updates[k])] = updates[k + 1];
     return arr;
   },
+  // The in-place form of a chain of `ReplaceAt` with `levels` positions on a
+  // block local that owns its array down to that level
+  // (`ownedLocalUpdateChains` in `in-place-update.ts`, `ownedCopyLevels`).
+  // `updates` holds, for each write, the positions and the value, innermost
+  // write first. All of them were computed before this call.
+  replaceAtPathInPlace: (
+    x: unknown,
+    levels: number,
+    ...updates: unknown[]
+  ): unknown[] => {
+    const root = x as unknown[];
+    for (let k = 0; k < updates.length; k += levels + 1) {
+      let level = root;
+      for (let l = 0; l < levels - 1; l++) {
+        const p = listPosition('ReplaceAt', level.length, updates[k + l]);
+        level = level[p] as unknown[];
+      }
+      const i = updates[k + levels - 1];
+      level[listPosition('ReplaceAt', level.length, i)] = updates[k + levels];
+    }
+    return root;
+  },
   // The seed of a fold that updates its accumulator in place: a copy, so
   // that the caller's array (a `run()` argument, a variable, a constant
   // list) is never changed. A string seed is returned as it is: a string
@@ -5683,6 +5723,18 @@ export const SYS_HELPERS = {
       : ArrayBuffer.isView(x)
         ? Array.from(x as unknown as ArrayLike<unknown>)
         : x,
+  // The copy of a block local that `replaceAtPathInPlace` then writes:
+  // `ownedCopy` copies one level, so a row would stay shared with the
+  // caller's list. This copy holds a new array at each of the `levels` levels
+  // of `x`, which the static type shows as lists, as for `replaceAtPath`. The
+  // elements below them stay shared, and are never written.
+  ownedCopyLevels: (x: unknown, levels: number): unknown => {
+    const out = (x as unknown[]).slice();
+    if (levels > 1)
+      for (let k = 0; k < out.length; k++)
+        out[k] = SYS_HELPERS.ownedCopyLevels(out[k], levels - 1);
+    return out;
+  },
   // `at` for a base whose STATIC element type is numeric and whose value
   // comes from outside the kernel (a `run()` argument, a function
   // parameter). Every consumer of the read was compiled for a number, so a

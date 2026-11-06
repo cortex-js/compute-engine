@@ -199,15 +199,21 @@ describe('Insert, ReplaceAt and Append over an absent collection', () => {
   });
 
   test.each([
-    ['Insert', ['Insert', RL, 1, 5], 'If(0 < t, [5,1,2])'],
-    ['ReplaceAt', ['ReplaceAt', RL, 1, 5], 'If(0 < t, [5,2])'],
-    ['Append', ['Append', RL, 5], 'If(0 < t, [1,2,5])'],
-  ])('%s over a restricted collection', (_op, json, free) => {
+    ['Insert', ['Insert', RL, 1, 5], 'If(0 < t, [5,1,2])', 'list<integer>'],
+    // A position write keeps the length of the list.
+    [
+      'ReplaceAt',
+      ['ReplaceAt', RL, 1, 5],
+      'If(0 < t, [5,2])',
+      'vector<integer^2>',
+    ],
+    ['Append', ['Append', RL, 5], 'If(0 < t, [1,2,5])', 'list<integer>'],
+  ])('%s over a restricted collection', (_op, json, free, type) => {
     const ce = engine();
     const e = ce.box(json as never);
     // The type of `If(c, L)` is the type of `L`: the run-time `Missing` sits
     // outside the declared type, as `NaN` sits outside `real`.
-    expect(e.type.toString()).toBe('list<integer>');
+    expect(e.type.toString()).toBe(type);
     const held = e.evaluate();
     expect(held.toString()).toBe(free);
     ce.assign('t', -1);
@@ -320,7 +326,7 @@ describe('a search finds an absent value where the same marker sits', () => {
     ],
     [
       ['ReplaceAt', ['List', 1, 'Missing'], 1, 2],
-      'list<integer | missing>',
+      'list<integer | missing^2>',
       '[2,"Missing"]',
     ],
     [

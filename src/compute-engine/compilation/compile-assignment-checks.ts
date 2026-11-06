@@ -12,6 +12,7 @@ import {
   collectBinderNames,
 } from '../boxed-expression/utils.js';
 import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
+import { overloadArms } from '../boxed-expression/overload.js';
 import { capturedValueMismatchNowEntry } from '../function-utils.js';
 import { isTupleShapedType } from '../collection-utils.js';
 import { resolveTypeAlias } from '../../common/type/utils.js';
@@ -569,7 +570,10 @@ export function userFunctionParamsAreScalar(
  * The type signature `t` gives positional parameter `i`: the required
  * parameters first, then the optional ones, then the variadic tail.
  * `undefined` when `t` is not a signature, or states no type at that
- * position.
+ * position. An overload set gives the type on which every option that has
+ * this parameter agrees, and `undefined` when they differ: position 1 of
+ * `ReplaceAt` is `integer` in both options, and its operand 2 is a value in
+ * one option and a position in the other.
  *
  * Shared by the ENGINE-defined route, which reads `t` from a definition
  * (`userFunctionParamType`), and the BLOCK-LOCAL route, which reads it from
@@ -580,6 +584,15 @@ export function signatureParamType(
   t: Type | undefined,
   i: number
 ): Type | undefined {
+  const options = overloadArms(t);
+  if (options !== undefined) {
+    const types = options
+      .map((option) => signatureParamType(option, i))
+      .filter((type) => type !== undefined);
+    return types.every((type) => typeToString(type) === typeToString(types[0]))
+      ? types[0]
+      : undefined;
+  }
   if (t === undefined || typeof t === 'string' || t.kind !== 'signature')
     return undefined;
   const nArgs = t.args?.length ?? 0;

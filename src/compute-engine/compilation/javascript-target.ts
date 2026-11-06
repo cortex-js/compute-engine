@@ -6607,6 +6607,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   ReplaceAt: (args, compile) => {
     if (args[1] == null || args[2] == null)
       throw new Error('Could not compile `ReplaceAt`: missing argument');
+    if (args.length > 3) assertWrittenLevelsAreLists(args);
     if (IN_PLACE_UPDATE_OPS.has(args))
       return compileInPlaceUpdateChain(args, compile);
     const owned = OWNED_LOCAL_UPDATE_OPS.get(args);
@@ -6615,6 +6616,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       if (chain !== undefined) return chain;
     }
     const coll = elementsArg('ReplaceAt', args[0], compile);
+    // More than one position: the last operand is the value, and each level
+    // on the way to the element is copied.
+    if (args.length > 3)
+      return `_SYS.replaceAtPath(${coll}, ${args
+        .slice(1)
+        .map((x) => compile(x))
+        .join(', ')})`;
     return `_SYS.replaceAt(${coll}, ${compile(args[1])}, ${compile(args[2])})`;
   },
   DeleteAt: (args, compile) => {
@@ -10120,6 +10128,30 @@ function compileRealOperand(
 const IN_PLACE_UPDATE_OPS = new WeakSet<ReadonlyArray<Expression>>();
 
 /**
+ * Decline a `ReplaceAt` with more than one position unless the static type of
+ * its first operand shows a list at each level that the write copies: one
+ * level per position. Compiled code settles every shape at compile time and
+ * tests no type at run time (`docs/COMPILATION-MODEL.md`, "Shapes are settled
+ * at compile time"), so a level whose shape the type leaves open (`list<any>`,
+ * a row that may be absent, a row that is a string) has no compiled form. The
+ * shape of the stored value does not matter: the write never reads it.
+ */
+function assertWrittenLevelsAreLists(args: ReadonlyArray<Expression>): void {
+  let t: Type | undefined = args[0].type.type;
+  for (let level = 1; level <= args.length - 2; level++) {
+    t = t === undefined ? undefined : resolveTypeForCompilation(t);
+    if (t === undefined || typeof t === 'string' || t.kind !== 'list')
+      throw new Error(
+        `Could not compile \`ReplaceAt\`: level ${level} of the operand of ` +
+          `type \`${typeToString(args[0].type.type)}\` is not settled as a ` +
+          `list, and a write with more than one position needs a list at ` +
+          `each level.`
+      );
+    t = collectionElementType(t);
+  }
+}
+
+/**
  * Compile a chain of `ReplaceAt` accepted by `inPlaceUpdateChains`, given the
  * operands of its outermost node, to one `_SYS.replaceAtInPlace` call. The
  * indexes and values are listed innermost first, which is the order the
@@ -10131,7 +10163,8 @@ const IN_PLACE_UPDATE_OPS = new WeakSet<ReadonlyArray<Expression>>();
  * array, and is copied first otherwise (`OWNED_LOCAL_UPDATE_OPS`). The local
  * is read three times, so this form is used only when it compiles to a
  * name; otherwise the result is `undefined` and the caller keeps the
- * copying form.
+ * copying form. With more than one position, the first update copies that
+ * many levels, and `_SYS.replaceAtPathInPlace` writes each of them in place.
  */
 function compileInPlaceUpdateChain(
   args: ReadonlyArray<Expression>,
@@ -10147,6 +10180,10 @@ function compileInPlaceUpdateChain(
   compile: (expr: Expression) => string,
   owned?: string
 ): string | undefined {
+  // The number of positions of each `ReplaceAt`, the same at every node of a
+  // chain (`ownedLocalUpdateChains`). A fold accepts one position only
+  // (`inPlaceUpdateChains`).
+  const levels = args.length - 2;
   let node: ReadonlyArray<Expression> = args;
   while (isFunction(node[0], 'ReplaceAt')) node = node[0].ops;
   let root = compile(node[0]);
@@ -10158,17 +10195,24 @@ function compileInPlaceUpdateChain(
     // indexed collection. The owned form is used only when `elementsArg`
     // gives the plain name, so it skips no check.
     if (elementsArg('ReplaceAt', node[0], compile) !== root) return undefined;
-    root = `${root} === ${owned} ? ${root} : (${owned} = _SYS.ownedCopy(${root}))`;
+    const copy =
+      levels === 1
+        ? `_SYS.ownedCopy(${root})`
+        : `_SYS.ownedCopyLevels(${root}, ${levels})`;
+    root = `${root} === ${owned} ? ${root} : (${owned} = ${copy})`;
   }
   const updates: string[] = [];
   node = args;
   for (;;) {
-    updates.unshift(compile(node[1]), compile(node[2]));
+    updates.unshift(...node.slice(1).map((x) => compile(x)));
     const inner = node[0];
     if (!isFunction(inner, 'ReplaceAt')) break;
     node = inner.ops;
   }
-  const call = `_SYS.replaceAtInPlace(${root}, ${updates.join(', ')})`;
+  const call =
+    levels === 1
+      ? `_SYS.replaceAtInPlace(${root}, ${updates.join(', ')})`
+      : `_SYS.replaceAtPathInPlace(${root}, ${levels}, ${updates.join(', ')})`;
   // The temporary also receives the result of the update. For an array
   // this is the array the temporary already holds. For a string, which
   // `_SYS.ownedCopy` returns unchanged, it is the new array of characters

@@ -1,4 +1,4 @@
-import type { Expression } from '../global-types.js';
+import type { Expression, FunctionInterface } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import {
   isDictionary,
@@ -163,12 +163,51 @@ export function inPlaceUpdateChains(
  * The indexes and values of a chain may read `name`: the emitted code
  * computes them before the first write, as for a fold
  * (`inPlaceUpdateChains`). Requested in issue #386 (CE-329).
+ *
+ * A write with more than one position (`m = ReplaceAt(m, j, i, v)`) also
+ * writes the rows in place, so a row must not be visible to anything else.
+ * Two further conditions apply. Every chain of the local has the same number
+ * of positions: the emitted code copies that number of levels at the first
+ * update, and a write with fewer positions could store a row that the block
+ * does not own, which a later write would change. And a read may not hand out
+ * a row: `NON_RETAINING_READS` holds `At(m, j)` and `First(m)`, which give a
+ * row to whatever reads them. The only reads allowed are the first operand of
+ * `Length`, `Count` or `IsEmpty` with no other operand, and of an `At` with
+ * one numeric position for each level written, which reads an element below
+ * every array the block writes. Any other mention keeps the copying form.
  */
 export function ownedLocalUpdateChains(
   stmts: ReadonlyArray<Expression>,
   name: string
 ): ReadonlyArray<Expression>[] | undefined {
+  const chains = ownedLocalChains(stmts, name);
+  if (chains === undefined) return undefined;
+  const levels = chains[0].length - 2;
+  if (chains.some((ops) => ops.length - 2 !== levels)) return undefined;
+  return levels === 1 ? chains : ownedLocalChains(stmts, name, levels);
+}
+
+/**
+ * The walk of `ownedLocalUpdateChains`. With `levels`, a read of `name` must
+ * also not hand out a row of the list, as a write with `levels` positions
+ * writes the rows in place.
+ */
+function ownedLocalChains(
+  stmts: ReadonlyArray<Expression>,
+  name: string,
+  levels?: number
+): ReadonlyArray<Expression>[] | undefined {
   const isName = (e: Expression): boolean => isSymbol(e, name);
+  // True when `e`, whose first operand is `name`, does not keep the list or
+  // one of the arrays that a write changes.
+  const readKeepsNothing = (e: Expression & FunctionInterface): boolean =>
+    levels === undefined
+      ? NON_RETAINING_READS.has(e.operator)
+      : e.nops === 1
+        ? ['Length', 'Count', 'IsEmpty'].includes(e.operator)
+        : e.operator === 'At' &&
+          e.nops === levels + 1 &&
+          e.ops.slice(1).every((p) => isSubtype(p.type.type, 'number'));
   // The values of a dictionary are walked too: a dictionary is not a
   // function expression, but a value in it can hold the list.
   // An expression can share subtrees (a node that is an operand of several
@@ -234,11 +273,13 @@ export function ownedLocalUpdateChains(
         h === 'Assign' &&
         e.nops === 2 &&
         isFunction(value, 'ReplaceAt') &&
-        value.nops === 3
+        value.nops >= 3
       ) {
         let node: Expression = value;
-        while (isFunction(node, 'ReplaceAt') && node.nops === 3) {
-          if (!allowed(node.op2) || !allowed(node.op3)) return false;
+        while (isFunction(node, 'ReplaceAt') && node.nops >= 3) {
+          // The operands of a chain are read as one uniform list of updates.
+          if (node.nops !== value.nops) return false;
+          if (!node.ops.slice(1).every((x) => allowed(x))) return false;
           node = node.op1;
         }
         if (isName(node)) {
@@ -250,7 +291,7 @@ export function ownedLocalUpdateChains(
       return e.ops.slice(1).every((x) => allowed(x));
     }
     return e.ops.every((x, k) =>
-      k === 0 && isName(x) && NON_RETAINING_READS.has(h) ? true : allowed(x)
+      k === 0 && isName(x) && readKeepsNothing(e) ? true : allowed(x)
     );
   };
   const ok = stmts.every((stmt) => allowed(stmt, true));
@@ -267,6 +308,10 @@ export function ownedLocalUpdateChains(
  * writes a copy of `xs` and keeps the copy in the temporary:
  *
  *     (_tv1 = _SYS.replaceAtInPlace(xs === _tv1 ? xs : (_tv1 = _SYS.ownedCopy(xs)), i, v))
+ *
+ * A chain with two positions copies two levels and writes both of them:
+ *
+ *     (_tv1 = _SYS.replaceAtPathInPlace(m === _tv1 ? m : (_tv1 = _SYS.ownedCopyLevels(m, 2)), 2, j, i, v))
  *
  * If the compiler passes a different array, the update keeps the copying
  * form, which is slower but correct.

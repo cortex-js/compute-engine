@@ -403,7 +403,7 @@
       "name": "Arccot",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(complex | quantity | signed_infinity) -> number",
+      "signature": "(complex | signed_infinity | quantity) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -435,7 +435,7 @@
       "name": "Arcosh",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(complex | quantity | signed_infinity) -> number",
+      "signature": "(complex | signed_infinity | quantity) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -513,7 +513,7 @@
       "name": "Arctan",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(complex | quantity | signed_infinity) -> number",
+      "signature": "(complex | signed_infinity | quantity) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -607,7 +607,7 @@
       "name": "Arsech",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(complex | quantity | signed_infinity) -> number",
+      "signature": "(complex | signed_infinity | quantity) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -623,7 +623,7 @@
       "name": "Arsinh",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(complex | quantity | signed_infinity) -> number",
+      "signature": "(complex | signed_infinity | quantity) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -639,7 +639,7 @@
       "name": "Artanh",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(complex | quantity | signed_infinity) -> number",
+      "signature": "(complex | signed_infinity | quantity) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -937,7 +937,7 @@
       "name": "BinCounts",
       "category": "Statistics",
       "arity": "2",
-      "signature": "(collection<number | nothing>, number | list<number>) -> list<number>",
+      "signature": "(collection<number>, number | list<number>) -> list<number>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -983,7 +983,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Evaluate a sequence of expressions in a local scope, **sequentially**. Each operand is evaluated in order; later operands observe side effects (`Assign`, `Declare`) of earlier operands. The block's value is the value of the last expression. Short-circuiting heads (`Return`, `Break`, `Continue`) terminate the sequence early.\n\nIMPORTANT — consumers translating *simultaneous* action tuples (e.g. Desmos `(a → 1, b → a + 1)` where `b` reads the *pre-action* `a`) must rewrite to a snapshot-then-commit Block: bind each RHS to a fresh temp first, then assign the temps to the LHS symbols. See `doc/84-reference-control-structures.md` for the canonical recipe."
+      "description": "Evaluate a sequence of expressions in a local scope, **sequentially**. Each operand is evaluated in order; later operands observe side effects (`Assign`, `Declare`) of earlier operands. The block's value is the value of the last expression. Short-circuiting heads (`Return`, `Break`, `Continue`) terminate the sequence early.\n\nIMPORTANT — consumers translating *simultaneous* action tuples (e.g. Desmos `(a → 1, b → a + 1)` where `b` reads the *pre-action* `a`) must rewrite to a snapshot-then-commit Block: bind each RHS to a fresh temp first, then assign the temps to the LHS symbols. See https://cortexjs.io/compute-engine/reference/control-structures/ for the canonical recipe."
     },
     {
       "name": "Boole",
@@ -1716,7 +1716,7 @@
       "name": "Correlation",
       "category": "Statistics",
       "arity": "optional",
-      "signature": "(collection<number | tuple | nothing>, (collection<number | nothing>)?) -> real<-1..1> | nan",
+      "signature": "(collection<number | tuple>, (collection<number>)?) -> real<-1..1> | nan",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1744,7 +1744,7 @@
       "name": "Cosh",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(complex | quantity | signed_infinity) -> number",
+      "signature": "(complex | signed_infinity | quantity) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1806,7 +1806,7 @@
       "name": "Coth",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(complex | quantity | signed_infinity) -> number",
+      "signature": "(complex | signed_infinity | quantity) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1851,7 +1851,7 @@
       "name": "Covariance",
       "category": "Statistics",
       "arity": "optional",
-      "signature": "(collection<number | tuple | nothing>, (collection<number | nothing>)?) -> real | nan",
+      "signature": "(collection<number | tuple>, (collection<number>)?) -> real | nan",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1894,7 +1894,7 @@
       "name": "Csch",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(complex | quantity | signed_infinity) -> number",
+      "signature": "(complex | signed_infinity | quantity) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -3018,7 +3018,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Factor a polynomial expression into a product of irreducible factors. Uses exact modular factorization for univariate rational polynomials within its work limits, with structural methods for other expressions. An optional third argument selects the generator of an exact number field. Example: Factor(x² + 5x + 6) → (x+2)(x+3), Factor(x² + 2x + 1) → (x+1)²"
+      "description": "Factor a polynomial expression into a product of irreducible factors. Uses exact modular factorization for univariate rational polynomials within its work limits, with structural methods for other expressions. Without a variable, a factor common to every term of a sum is taken out, a term that is not a polynomial (such as sin(t)) is treated as a variable, and like terms are collected. An optional third argument selects the generator of an exact number field. Example: Factor(x² + 5x + 6) → (x+2)(x+3), Factor(x² + 2x + 1) → (x+1)²"
     },
     {
       "name": "Factorial",
@@ -3134,7 +3134,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the first element of the collection satisfying the predicate, or Nothing if none found.",
+      "description": "Return the first element of the collection satisfying the predicate. When no element satisfies it, return the absent value of the domain of the elements: `NaN` for numbers, a point whose coordinates are all `NaN` for points, and `Missing` otherwise.",
       "examples": [
         "Find([1, 4, 9, 16], x => x > 5)"
       ]
@@ -3357,9 +3357,10 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "A function literal",
+      "description": "Function(body, param1, param2, …): a function literal.\n\nA parameter is a symbol, `Typed(symbol, type)`, a rest parameter\n\n`Spread(symbol)` (last), a destructuring pattern `Tuple(…)`, or a\n\nparameter with a default value `Optional(param, default)`, where\n\n`param` is a symbol or `Typed(symbol, type)` and `default` is a\n\nnumber, a string, `True`, `False`, a symbol, `List()` or\n\n`Dictionary()`. The parameters with a default come after the\n\nrequired ones. A call that supplies the required parameters is a\n\nfull call: each parameter it leaves out receives its default.",
       "examples": [
-        "(x => x^2 + 1)(3)"
+        "(x => x^2 + 1)(3)",
+        "((x, k = 2) => x * k)(3)"
       ]
     },
     {
@@ -3568,7 +3569,7 @@
       "name": "Histogram",
       "category": "Statistics",
       "arity": "2",
-      "signature": "(collection<number | nothing>, number | list<number>) -> list<tuple<number, integer>>",
+      "signature": "(collection<number>, number | list<number>) -> list<tuple<number, integer>>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -3770,7 +3771,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "`If(c, e1, e2)` evaluates to `e1` when `c` is `True` and to `e2` otherwise; without `e2` it is the absent value of the domain of `e1` when `c` is `False`: `NaN` for a number, `Missing` otherwise, as for a restriction `e1\\{c\\}`, which parses to `If(c, e1)`. Only the selected expression is evaluated.\nWhen `c` is a list of booleans (`L < 3` with `L` a list), the selection is made at each position and the value is a list: `If([True, False, True], 1, 0)` is `[1, 0, 1]`, and with `L = [1, 3, 5]`, `If(L < 3, L, 0)` is `[1, 0, 0]`. `If(c, e1, e2)` is then `Which(c, e1, True, e2)`: see `Which` for the rules of element-wise selection."
+      "description": "`If(c, e1, e2)` evaluates to `e1` when `c` is `True` and to `e2` otherwise; without `e2` it is the absent value of the domain of `e1` when `c` is `False`: `NaN` for a number, `Missing` otherwise, as for a restriction `e1\\{c\\}`, which parses to `If(c, e1)`. Only the selected expression is evaluated.\nWhen `c` is a flat list of booleans (`L < 3` with `L` a list), the selection is made at each position and the value is a list: `If([True, False, True], 1, 0)` is `[1, 0, 1]`, and with `L = [1, 3, 5]`, `If(L < 3, L, 0)` is `[1, 0, 0]`. `If(c, e1, e2)` is `Which(c, e1, True, e2)`: see `Which` for the rules of element-wise selection. A condition that is a scalar selects an arm whole, also when the arm is a list."
     },
     {
       "name": "Im",
@@ -3992,7 +3993,7 @@
       "name": "InterquartileRange",
       "category": "Statistics",
       "arity": "variadic",
-      "signature": "((collection<number | nothing> | number)+) -> real<0..> | +oo | nan",
+      "signature": "((collection<number> | number)+) -> real<0..> | +oo | nan",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -4565,7 +4566,7 @@
       "name": "Kurtosis",
       "category": "Statistics",
       "arity": "variadic",
-      "signature": "((collection<number | nothing> | number)+) -> real | nan",
+      "signature": "((collection<number> | number)+) -> real | nan",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -4759,7 +4760,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Limit of a function"
+      "description": "Limit of a function.\n\nLimit(f, x, a) is the limit of f as x approaches a.\n\nLimit(f, a) does not write the variable: it is the first, in sorted\n\norder (an uppercase letter before a lowercase one), of the symbols\n\nthat the expression f reads from outside: not a constant, a library\n\nname, a function, or a symbol bound inside f such as the index of a\n\nSum. A symbol with an assigned value is a candidate too, so an\n\nassignment does not change the variable. A bare symbol f names a\n\nfunction: Limit(Sin, a) is the limit of sin(t) as t approaches a.\n\nThe variable is bound: it never takes the value assigned to a\n\nsymbol of the same name.\n\nExample: Limit(Sqrt(x), 3) is sqrt(3), also after x := 4."
     },
     {
       "name": "Limits",
@@ -5107,7 +5108,7 @@
       "name": "MatrixMultiply",
       "category": "Linear Algebra",
       "arity": "2",
-      "signature": "(matrix|vector, matrix|vector) -> matrix|vector",
+      "signature": "(matrix|vector, matrix|vector) -> matrix|vector|number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5182,7 +5183,7 @@
       "name": "Mean",
       "category": "Statistics",
       "arity": "variadic",
-      "signature": "((collection<number | nothing> | number | distribution)+) -> number",
+      "signature": "((collection<number> | number | distribution)+) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5210,7 +5211,7 @@
       "name": "Median",
       "category": "Statistics",
       "arity": "variadic",
-      "signature": "((collection<number | nothing> | number)+) -> real | signed_infinity | nan",
+      "signature": "((collection<number> | number)+) -> real | signed_infinity | nan",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5307,7 +5308,7 @@
       "name": "Mode",
       "category": "Statistics",
       "arity": "variadic",
-      "signature": "((collection<number | nothing> | number)+) -> real | signed_infinity | nan",
+      "signature": "((collection<number> | number)+) -> real | signed_infinity | nan",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5544,7 +5545,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Numerical approximation of the limit of a function"
+      "description": "Numerical approximation of the limit of a function.\n\nNLimit(f, a) finds its variable with the same rule as Limit(f, a):\n\nthe first of the symbols written in the expression f, in sorted\n\norder, also when it has an assigned value. A bare symbol f names a\n\nfunction."
     },
     {
       "name": "Nor",
@@ -5583,7 +5584,7 @@
       "associative": false,
       "commutative": false,
       "idempotent": false,
-      "lazy": false,
+      "lazy": true,
       "broadcastable": false,
       "description": "Strip Big-O remainder terms from a series, yielding the truncated polynomial. Example: Normal(Series(\\sin x, x)) → x - x^3/6 + x^5/120"
     },
@@ -5678,8 +5679,8 @@
     {
       "name": "NotEqual",
       "category": "Relational Operators",
-      "arity": "2",
-      "signature": "(any, any) -> boolean",
+      "arity": "variadic",
+      "signature": "(any, any*) -> boolean",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -6029,6 +6030,21 @@
       "description": "Open(x): the endpoint x of an Interval, marked as excluded. A marker with no value of its own.",
       "examples": [
         "0 in Interval(Open(0), 1)"
+      ]
+    },
+    {
+      "name": "Optional",
+      "category": "Core",
+      "arity": "2",
+      "signature": "(any, any) -> nothing",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Optional(param, default): a parameter of a function literal with a\n\ndefault value (Epsil surface syntax: `(x, k = 2) => x * k`).\n\nA call that leaves out the argument of the parameter receives the\n\ndefault. `param` is a symbol or `Typed(symbol, type)`; `default` is a\n\nnumber, a string, `True`, `False`, a symbol, `[]` or `{}`.\n\nA parse-level carrier, like `Spread`: only the parameter list of a\n\n`Function` literal reads it. Anywhere else it is the\n\n`unexpected-argument` error.",
+      "examples": [
+        "((x, k = 2) => x * k)(3)"
       ]
     },
     {
@@ -6506,7 +6522,7 @@
       "name": "PopulationCovariance",
       "category": "Statistics",
       "arity": "optional",
-      "signature": "(collection<number | tuple | nothing>, (collection<number | nothing>)?) -> real | nan",
+      "signature": "(collection<number | tuple>, (collection<number>)?) -> real | nan",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -6518,7 +6534,7 @@
       "name": "PopulationStandardDeviation",
       "category": "Statistics",
       "arity": "variadic",
-      "signature": "((collection<number | nothing> | number)+) -> real<0..> | nan",
+      "signature": "((collection<number> | number)+) -> real<0..> | nan",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -6530,7 +6546,7 @@
       "name": "PopulationVariance",
       "category": "Statistics",
       "arity": "variadic",
-      "signature": "((collection<number | nothing> | number)+) -> real<0..> | nan",
+      "signature": "((collection<number> | number)+) -> real<0..> | nan",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -6970,7 +6986,7 @@
       "name": "Quartiles",
       "category": "Statistics",
       "arity": "variadic",
-      "signature": "((collection<number | nothing> | number)+) -> tuple<lower: real | signed_infinity | nan, mid: real | signed_infinity | nan, upper: real | signed_infinity | nan>",
+      "signature": "((collection<number> | number)+) -> tuple<lower: real | signed_infinity | nan, mid: real | signed_infinity | nan, upper: real | signed_infinity | nan>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -7119,13 +7135,13 @@
       "name": "RangeOf",
       "category": "Collections",
       "arity": "optional",
-      "signature": "(indexed_collection<T>, indexed_collection<T>, from: integer?) -> range | nothing where T",
+      "signature": "(indexed_collection<T>, indexed_collection<T>, from: integer?) -> range | missing where T",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the 1-based inclusive index span of the first occurrence of `needle` as a contiguous subsequence of the indexed collection, or `Nothing` when it does not occur.\n\nThe search starts at index `from` (1 by default) and the span is always expressed in the original collection's indices, so `RangeOf(xs, needle, Last(r) + 1)` finds the next non-overlapping occurrence and the loop ends at `Nothing`.\n\nOn a string the needle is matched character by character, so a match never begins or ends inside a grapheme cluster.",
+      "description": "Return the 1-based inclusive index span of the first occurrence of `needle` as a contiguous subsequence of the indexed collection, or `Missing` when it does not occur.\n\nThe search starts at index `from` (1 by default) and the span is always expressed in the original collection's indices, so `RangeOf(xs, needle, Last(r) + 1)` finds the next non-overlapping occurrence and the loop ends at `Missing`.\n\nOn a string the needle is matched character by character, so a match never begins or ends inside a grapheme cluster.",
       "examples": [
         "RangeOf([10, 20, 30, 40], [30, 40])"
       ]
@@ -7335,16 +7351,17 @@
     {
       "name": "ReplaceAt",
       "category": "Collections",
-      "arity": "3",
-      "signature": "(indexed_collection<T>, integer, T) -> list<T> where T: any",
+      "arity": "variadic",
+      "signature": "((indexed_collection<T>, integer, T) -> list<T> where T: any) & ((indexed_collection<any>, integer, integer, any+) -> list<any>)",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return a copy of the indexed collection with the element at the 1-based `index` replaced by `value`.\n\nA negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.",
+      "description": "Return a copy of the indexed collection with the element at the 1-based `index` replaced by `value`.\n\nA negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.\n\nWith more than one position, as `At` takes them, the last operand is the value, and each position selects one level of a nested collection (e.g., a matrix).",
       "examples": [
-        "ReplaceAt([1, 2, 3], 2, 20)"
+        "ReplaceAt([1, 2, 3], 2, 20)",
+        "ReplaceAt([[1, 2], [3, 4]], 2, 1, 9)"
       ]
     },
     {
@@ -7609,7 +7626,7 @@
       "name": "Sech",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(complex | quantity | signed_infinity) -> number",
+      "signature": "(complex | signed_infinity | quantity) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -7888,7 +7905,7 @@
       "name": "Sinh",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(complex | quantity | signed_infinity) -> number",
+      "signature": "(complex | signed_infinity | quantity) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -7936,7 +7953,7 @@
       "name": "Skewness",
       "category": "Statistics",
       "arity": "variadic",
-      "signature": "((collection<number | nothing> | number)+) -> real | nan",
+      "signature": "((collection<number> | number)+) -> real | nan",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -7948,7 +7965,7 @@
       "name": "Slice",
       "category": "Collections",
       "arity": "1",
-      "signature": "((value: T, span: range) -> T where T: string) & ((value: T, span: range | nothing) -> T | nothing where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T: any) & ((value: indexed_collection<T>, span: range | nothing) -> list<T> | nothing where T: any) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T: any)",
+      "signature": "((value: T, span: range) -> T where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T: any) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T: any)",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -7973,6 +7990,21 @@
       "examples": [
         "SlidingWindow([1, 2, 3, 4], 2)  // Returns [[1,2], [2,3], [3,4]]",
         "SlidingWindow(\"abcd\", 2)  // Returns [\"ab\", \"bc\", \"cd\"]"
+      ]
+    },
+    {
+      "name": "Smoothstep",
+      "category": "Arithmetic",
+      "arity": "3",
+      "signature": "(real | signed_infinity, real | signed_infinity, real | signed_infinity) -> real | nan",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Smooth Hermite interpolation between 0 and 1 as x goes from e0 to e1: t²(3 − 2t) with t = Clamp((x − e0)/(e1 − e0), 0, 1). Broadcasts over collection arguments.",
+      "examples": [
+        "[Smoothstep(0, 1, -1), Smoothstep(0, 1, 1/2), Smoothstep(0, 1, 2)]"
       ]
     },
     {
@@ -8073,7 +8105,7 @@
       "name": "StandardDeviation",
       "category": "Statistics",
       "arity": "variadic",
-      "signature": "((collection<number | nothing> | number | distribution)+) -> real<0..> | nan",
+      "signature": "((collection<number> | number | distribution)+) -> real<0..> | nan",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -8607,7 +8639,7 @@
       "name": "Tanh",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(complex | quantity | signed_infinity) -> number",
+      "signature": "(complex | signed_infinity | quantity) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -9221,7 +9253,7 @@
       "name": "Variance",
       "category": "Statistics",
       "arity": "variadic",
-      "signature": "((collection<number | nothing> | number | distribution)+) -> real<0..> | nan",
+      "signature": "((collection<number> | number | distribution)+) -> real<0..> | nan",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -9254,7 +9286,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "`Which(c1, e1, c2, e2, …)` evaluates to the value of the first `e` whose condition `c` is `True`, and to `Missing` when no condition is `True`. A last clause with the condition `True` is the default. Only the selected expression is evaluated.\nElement-wise selection: when a condition is a list of booleans (`L < 3` with `L` a list), the selection is made at each position, as `numpy.select` does, and the value is a list. At each position, the first clause whose condition is `True` there gives the value: an expression that is a list gives its element at that position, any other expression gives its own value. With `L = [1, 3, 5]`, `Which(L < 2, 10, L < 4, L, True, 0)` is `[10, 3, 0]`.\n  - A condition that is not a list applies to every position.\n  - Every list must have the length of the condition, else the value is an `incompatible-dimensions` error.\n  - A position that no clause selects holds `NaN` when every expression is a number, `Missing` otherwise.\n  - A condition that is a list of lists (a comparison of a matrix) selects at every level; an expression with fewer levels than the condition is an `incompatible-dimensions` error, one with more levels is taken whole at each position."
+      "description": "`Which(c1, e1, c2, e2, …)` evaluates to the value of the first `e` whose condition `c` is `True`, and to `Missing` when no condition is `True`. A last clause with the condition `True` is the default. Only the selected expression is evaluated.\nElement-wise selection: when a condition is a flat list of booleans (`L < 3` with `L` a list), the selection is made at each position, as `numpy.select` does, and the value is a list. At each position, the first clause whose condition is `True` there gives the value: an expression that is a list gives its element at that position, any other expression gives its own value. With `L = [1, 3, 5]`, `Which(L < 2, 10, L < 4, L, True, 0)` is `[10, 3, 0]`.\n  - A condition that is not a list applies to every position.\n  - Every expression is a number, a point, or a flat list of numbers or of points with the length of the condition, and all have one kind. A nested list, a list of another length, a string and a list of strings are static errors, as is a condition that is a nested list or holds a `Missing` cell. A relation (a boolean) is accepted.\n  - A position that no clause selects holds `NaN` for a number, a point whose coordinates are `NaN` for a point, and `Missing` for a boolean."
     },
     {
       "name": "Wildcard",

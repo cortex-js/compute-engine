@@ -1439,15 +1439,22 @@ repeat(0, 3)
 
 ### replaceAt
 
-MathJSON `ReplaceAt` · `(indexed_collection<T>, integer, T) -> list<T> where T: any`
+MathJSON `ReplaceAt` · `((indexed_collection<T>, integer, T) -> list<T> where T: any) & ((indexed_collection<any>, integer, integer, any+) -> list<any>)`
 
 Return a copy of the indexed collection with the element at the 1-based `index` replaced by `value`.
 
 A negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.
 
+With more than one position, as `At` takes them, the last operand is the value, and each position selects one level of a nested collection (e.g., a matrix).
+
 ```epsil
 replaceAt([1, 2, 3], 2, 20)
 // ➔ [1,20,3]
+```
+
+```epsil
+replaceAt([[1, 2], [3, 4]], 2, 1, 9)
+// ➔ [[1,2],[9,4]]
 ```
 
 ### residueClass
