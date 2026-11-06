@@ -1303,10 +1303,12 @@ export function isUnknownLengthBroadcast(x: Expression): boolean {
  * truncation. Zipping to the shortest operand silently dropped the tail of the
  * longer one (`Less([1,2,3],[2,2])` → `[True, False]`), which is the same data
  * loss whether it happens in the eager zip, in `broadcastOverIndexedCollections`,
- * or lazily inside the variadic `Map`. This is the single check all three
- * consult, so a shape cannot answer differently depending on which path it
+ * or lazily inside the variadic `Map`. All three use this comparison of
+ * counts, so a shape cannot answer differently depending on which path it
  * takes — the bug the first implementation shipped, where `Add(Filter(…), L)`
- * truncated while `Less` on the same shape errored.
+ * truncated while `Less` on the same shape errored. This check treats a tuple
+ * as a lift. A broadcast that gets its cells from `zip`, which reads a tuple by
+ * position, uses {@link zipLengthMismatch} instead.
  *
  * Participation is `isBroadcastableCollection`, so an INFINITE operand counts
  * too: `count` is `Infinity` there, which mismatches any finite length (the
@@ -1322,12 +1324,48 @@ export function broadcastLengthMismatch(
   ce: Expression['engine'],
   ops: ReadonlyArray<Expression>
 ): Expression | undefined {
+  return lengthMismatch(ce, ops, isBroadcastableCollection);
+}
+
+/**
+ * The length check of a broadcast that gets its cells from {@link zip}, as a
+ * built-in operator does. {@link zip} reads a tuple by position, so a tuple
+ * beside a list supplies cells and its length counts: `Power((1, 2), [3, 4])`
+ * is `[1, 16]`, and `Power((1, 2), [3, 4, 5])` is `incompatible-dimensions`.
+ * {@link broadcastLengthMismatch} skips a tuple, which is correct only for a
+ * broadcast that repeats the tuple whole in each cell ({@link zipBroadcast}).
+ *
+ * A symbol with no value and a tuple type is not compared. {@link zip} does not
+ * read it by position, and its count can come from an inferred type, which the
+ * next assignment can replace.
+ */
+export function zipLengthMismatch(
+  ce: Expression['engine'],
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  return lengthMismatch(
+    ce,
+    ops,
+    (x) => isBroadcastableCollection(x) || (isTuple(x) && zipParticipates(x))
+  );
+}
+
+/**
+ * The `incompatible-dimensions` error for the first operand for which
+ * `participates` is true and whose count differs from the count of the
+ * operands before it, or `undefined` when the counts agree.
+ */
+function lengthMismatch(
+  ce: Expression['engine'],
+  ops: ReadonlyArray<Expression>,
+  participates: (x: Expression) => boolean
+): Expression | undefined {
   // A count can be a `bigint` (a finite count that is not a safe integer).
   // `!==` and the message template give the correct result for a `bigint`,
   // so such an operand takes part in the check like any other.
   let first: number | bigint | undefined;
   for (const op of ops) {
-    if (!isBroadcastableCollection(op)) continue;
+    if (!participates(op)) continue;
     const n = op.count;
     if (n === undefined || n < 0) continue;
     if (first === undefined) first = n;

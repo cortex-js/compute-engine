@@ -121,6 +121,14 @@ wrote**, not by the operand shapes:
 Corollary rules for the strict regime:
 
 - A **scalar** operand is a LIFT, not a participant — it never mismatches.
+- A **tuple** beside a list is a participant under a built-in operator that
+  reads it by position: `Power((1, 2), [3, 4])` is `[1, 16]`, and
+  `Power((1, 2), [3, 4, 5])` and `Arctan2([3, 4, 5], (1, 2))` are
+  `incompatible-dimensions`. The check is `zipLengthMismatch`
+  (`collection-utils.ts`). A tuple is a lift, with no length to compare, for
+  the heads that combine points (`Multiply((1, 2), [3, 4, 5])` is a list of
+  three points), for the heads that read its norm (`Hypot`, `Abs`), and for a
+  user function with scalar parameters.
 - A **broadcast operand is evaluated ONCE** (broadcasting is an operation on
   values): `L < Random()` draws once; a per-element draw is written
   explicitly as `Map(l ↦ l < Random(), L)`.
@@ -129,7 +137,10 @@ Corollary rules for the strict regime:
 - An operand whose length is **not yet known** is not compared — there is
   nothing to compare until it resolves. (Residue: the lazy variadic `Map`
   that then zips those uses shortest-input semantics, so a late-resolving
-  mismatch can still truncate; see ROADMAP "Broadcast semantics residue".)
+  mismatch can still truncate; see ROADMAP "Broadcast semantics residue". The
+  lazy `Map` also repeats a tuple whole in each cell: with `n` having no value,
+  `Power((1, 2), Range(1, n))` is a `Map` that gives `[(1, 2), (1, 4)]` for
+  `n = 2`, where a new evaluation with `n = 2` gives `[1, 4]`.)
 - A lone **empty** operand broadcasts to the EMPTY LIST: `Not([])`, `Sin([])`,
   `-[]`, `|[]|`, `[] < 3`, `2·[]` and `[] + 1` all evaluate to `[]`, under
   `evaluate()` and under `.N()` alike (ruled 2026-09-21; the answer used to be
@@ -183,7 +194,9 @@ Corollary rules for the strict regime:
 
 - The single mismatch check: `broadcastLengthMismatch`, applied in
   `broadcastOverIndexedCollections`, in the `lazyBroadcastMap` funnel (both
-  `collection-utils.ts`), and at the `BoxedFunction` broadcast steps.
+  `collection-utils.ts`), and at the `BoxedFunction` broadcast steps, where a
+  built-in operator uses `zipLengthMismatch`, the same check with a tuple as a
+  participant.
   `strictLengths = true` is the default parameter; `PointList`
   (`library/collections.ts`) is the only opt-out.
 - Compiled lowering: `_SYS.bcast` on the JavaScript target mirrors the

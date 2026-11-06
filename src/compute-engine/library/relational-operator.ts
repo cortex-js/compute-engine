@@ -20,7 +20,7 @@ import {
   isBroadcastableCollection,
   hasUnresolvedCollectionOperand,
   isPossiblyCollectionTyped,
-  broadcastLengthMismatch,
+  zipLengthMismatch,
   isTextAtom,
   isUnindexedCollectionOperand,
   isUnresolvedCollectionOperand,
@@ -2593,7 +2593,7 @@ function broadcastComparison(
     // veto: no assignment to the unresolved operand can reconcile 2 elements
     // against 3, so the comparison is the same error it would be without that
     // operand, rather than an inert form waiting on a value.
-    const mismatch = broadcastLengthMismatch(ce, ops);
+    const mismatch = zipLengthMismatch(ce, ops);
     if (mismatch) return mismatch;
     return undefined;
   }

@@ -193,6 +193,159 @@ describe('tuple broadcast — a list operand still supplies the cells', () => {
     expect(v.toString()).toBe('[1,16]');
   });
 
+  describe('a tuple beside a list of another length is an error', () => {
+    // A built-in operator reads the tuple by position, so the tuple supplies
+    // cells and its length counts, as for two lists.
+    const mismatch = (detail: string) =>
+      `Error("incompatible-dimensions", "${detail}")`;
+
+    test.each([
+      ['Power', ['Tuple', 1, 2], ['List', 3, 4, 5], '2 vs 3'],
+      ['Power', ['List', 3, 4, 5], ['Tuple', 1, 2], '3 vs 2'],
+      ['Power', ['Tuple', 1, 2, 3], ['List', 4, 5], '3 vs 2'],
+      ['Arctan2', ['List', 3, 4, 5], ['Tuple', 1, 2], '3 vs 2'],
+      ['Mod', ['Tuple', 1, 2], ['List', 3, 4, 5], '2 vs 3'],
+      ['Less', ['Tuple', 1, 2], ['List', 3, 4, 5], '2 vs 3'],
+      ['ElementMax', ['Tuple', 1, 2], ['List', 3, 4, 5], '2 vs 3'],
+    ] as const)('%s(%j, %j)', (head, a, b, detail) => {
+      const expr = ce.box([head, a, b] as any);
+      expect(expr.evaluate().toString()).toBe(mismatch(detail));
+      expect(expr.N().toString()).toBe(mismatch(detail));
+    });
+
+    test('with evaluateAsync()', async () => {
+      const expr = ce.box(['Power', ['Tuple', 1, 2], ['List', 3, 4, 5]]);
+      expect((await expr.evaluateAsync()).toString()).toBe(mismatch('2 vs 3'));
+    });
+
+    test('a symbol that holds the tuple', () => {
+      const engine = new ComputeEngine();
+      engine.assign('P', engine.box(['Tuple', 1, 2]));
+      const expr = engine.box(['Power', 'P', ['List', 3, 4, 5]]);
+      expect(expr.evaluate().toString()).toBe(mismatch('2 vs 3'));
+    });
+
+    test.each(['tuple<real, real>', 'tuple'])(
+      'a symbol declared %s with no value is not compared',
+      (type) => {
+        const engine = new ComputeEngine();
+        engine.declare('V', type);
+        const expr = engine.box(['Power', 'V', ['List', 3, 4, 5]]);
+        expect(expr.evaluate().toString()).toBe('[V^3,V^4,V^5]');
+      }
+    );
+
+    test('a tuple type that an assignment can replace is not compared', () => {
+      // The call infers the type of `x`, and that type does not limit the
+      // value that the assignment gives.
+      const inferred = new ComputeEngine();
+      inferred.declare('h', '(tuple<real, real>) -> real');
+      inferred.box(['h', 'x']);
+      const power = () => inferred.box(['Power', 'x', ['List', 3, 4, 5]]);
+      expect(power().evaluate().toString()).toBe('[x^3,x^4,x^5]');
+      inferred.assign('x', inferred.box(['List', 1, 2, 3]));
+      expect(power().evaluate().toString()).toBe('[1,16,243]');
+
+      // `forget()` keeps the type of the old value as an inferred type.
+      const forgotten = new ComputeEngine();
+      forgotten.assign('P', forgotten.box(['Tuple', 1, 2]));
+      forgotten.forget('P');
+      const sine = forgotten.box(['Power', ['Sin', 'P'], ['List', 3, 4, 5]]);
+      expect(sine.evaluate().toString()).toBe(
+        '[sin(P)^3,sin(P)^4,sin(P)^5]'
+      );
+      forgotten.assign('P', 2);
+      expect(
+        forgotten.box(['Power', 'P', ['List', 3, 4, 5]]).evaluate().toString()
+      ).toBe('[8,16,32]');
+    });
+
+    test('an application that gives a tuple', () => {
+      const engine = new ComputeEngine();
+      engine.assign('Q', engine.box(['Tuple', 1, 2]));
+      const expr = engine.box(['Power', ['Sin', 'Q'], ['List', 3, 4, 5]]);
+      expect(expr.evaluate().toString()).toBe(mismatch('2 vs 3'));
+    });
+
+    test('a comparison with a computed list and a list with no value', () => {
+      const engine = new ComputeEngine();
+      engine.declare('s', 'list<real>');
+      engine.assign('g', engine.box(['Function', ['List', 3, 4, 5]]));
+      const expr = engine.box(['Less', ['Tuple', 1, 2], ['g'], 's']);
+      expect(expr.evaluate().toString()).toBe(mismatch('2 vs 3'));
+    });
+
+    test('an operand that becomes a list only at evaluation', async () => {
+      const engine = new ComputeEngine();
+      engine.assign('g', engine.box(['Function', ['List', 3, 4, 5]]));
+      const expr = engine.box(['Power', ['Tuple', 1, 2], ['g']]);
+      expect(expr.evaluate().toString()).toBe(mismatch('2 vs 3'));
+      expect((await expr.evaluateAsync()).toString()).toBe(mismatch('2 vs 3'));
+    });
+
+    test('an empty list', () => {
+      const expr = ce.box(['Power', ['Tuple', 1, 2], ['List']]);
+      expect(expr.evaluate().toString()).toBe(mismatch('2 vs 0'));
+    });
+
+    test('a list too long for an eager broadcast', () => {
+      const expr = ce.box(['Power', ['Tuple', 1, 2], ['Range', 1, 1000000]]);
+      expect(expr.evaluate().toString()).toBe(mismatch('2 vs 1000000'));
+    });
+
+    test('an unbounded list', () => {
+      const expr = ce.box(['Power', ['Tuple', 1, 2], ['Cycle', ['List', 1, 2]]]);
+      expect(expr.evaluate().toString()).toBe(mismatch('2 vs Infinity'));
+    });
+
+    test('a list with no value beside the two that disagree', () => {
+      const engine = new ComputeEngine();
+      engine.declare('s', 'list<real>');
+      const expr = engine.box([
+        'ElementMax',
+        ['Tuple', 1, 2],
+        ['List', 3, 4, 5],
+        's',
+      ]);
+      expect(expr.evaluate().toString()).toBe(mismatch('2 vs 3'));
+    });
+
+    test('a list with no value is not compared', () => {
+      const engine = new ComputeEngine();
+      engine.declare('s', 'list<real>');
+      const expr = engine.box(['Power', ['Tuple', 1, 2], 's']);
+      expect(expr.evaluate().operator).not.toBe('Error');
+    });
+  });
+
+  describe('a tuple that is not read by position has no length to agree', () => {
+    test('a head that combines points repeats the point in each cell', () => {
+      const v = ce.box(['Multiply', ['Tuple', 1, 2], ['List', 3, 4, 5]]);
+      expect(v.evaluate().toString()).toBe('[(3, 6),(4, 8),(5, 10)]');
+    });
+
+    test('a head that reads the norm of the point', () => {
+      const v = ce.box(['Hypot', ['Tuple', 3, 4], ['List', 1, 2, 3]]);
+      expect(v.evaluate().operator).toBe('List');
+      expect(v.evaluate().nops).toBe(3);
+    });
+
+    test('a user function repeats the tuple in each cell', async () => {
+      const engine = new ComputeEngine();
+      engine.assign('f', engine.box(['Function', ['Power', 'a', 'b'], 'a', 'b']));
+      const expr = engine.box(['f', ['Tuple', 1, 2], ['List', 3, 4, 5]]);
+      expect(expr.evaluate().toString()).toBe('[(1, 8),(1, 16),(1, 32)]');
+      expect((await expr.evaluateAsync()).toString()).toBe(
+        '[(1, 8),(1, 16),(1, 32)]'
+      );
+    });
+
+    test('a pairing constructor stops at the shorter operand', () => {
+      const v = ce.box(['Zip', ['Tuple', 1, 2], ['List', 3, 4, 5]]);
+      expect(v.count).toBe(2);
+    });
+  });
+
   test('a SET sibling is not a source of cells', () => {
     // A set is a collection but not an INDEXED one, so it has no component
     // order to pair with the tuple's components. The tuple broadcast declines

@@ -146,6 +146,7 @@ import {
 import {
   MAX_SIZE_EAGER_COLLECTION,
   broadcastLengthMismatch,
+  zipLengthMismatch,
   hasUnresolvedCollectionOperand,
   isUnresolvedCollectionOperand,
   isUnresolvedList,
@@ -7758,7 +7759,7 @@ export class BoxedFunction
       // elements against 3, so the application is the same error it would be
       // without that operand rather than an inert form waiting on a value.
       if (unresolvedBroadcastOperand) {
-        const mismatch = broadcastLengthMismatch(this.engine, this.ops!);
+        const mismatch = zipLengthMismatch(this.engine, this.ops!);
         if (mismatch) return mismatch;
       }
       if (operatorBroadcast && !unresolvedBroadcastOperand) {
@@ -7812,7 +7813,7 @@ export class BoxedFunction
           );
           if (matrixPower !== undefined) return matrixPower.evaluate(options);
         }
-        const mismatch = broadcastLengthMismatch(this.engine, bops);
+        const mismatch = zipLengthMismatch(this.engine, bops);
         if (mismatch) return mismatch;
         // A lift can be a set only when it is evaluated: `At([Set(1, 2), 3],
         // 1)` has the type `integer | set<integer>`. Decide again on the
@@ -8519,6 +8520,11 @@ export class BoxedFunction
       // argument binds whole.
       //
       const lambdaBroadcast = isUserFunctionDef(def) && paramsAreScalar(def);
+      // A user function repeats a tuple whole in each cell, so the length of
+      // the tuple does not count. A built-in operator reads it by position.
+      const tailLengthMismatch = lambdaBroadcast
+        ? broadcastLengthMismatch
+        : zipLengthMismatch;
       // For a LAZY operator the `tail` may still hold RAW operands whose
       // finiteness is unresolved (`Equal(Characters(s), Reverse(Characters(s)))`):
       // those must fold whole-collection, so the gate stays on the strict
@@ -8563,7 +8569,7 @@ export class BoxedFunction
         postEvalBroadcast &&
         hasUnresolvedCollectionOperand(tail, isBroadcastableCollection);
       if (unresolvedTailOperand) {
-        const mismatch = broadcastLengthMismatch(this.engine, tail);
+        const mismatch = tailLengthMismatch(this.engine, tail);
         if (mismatch) return mismatch;
       }
       if (postEvalBroadcast && !unresolvedTailOperand) {
@@ -8587,7 +8593,7 @@ export class BoxedFunction
         // Length-mismatch ruling (2026-07-24), before the lazy form so size
         // does not decide the semantics. `tail` is already evaluated, so the
         // purity half (evaluate lifted operands once) does not apply here.
-        const mismatch = broadcastLengthMismatch(this.engine, tail);
+        const mismatch = tailLengthMismatch(this.engine, tail);
         if (mismatch) return mismatch;
 
         // Under `.N()`, a jump operator (`Floor`, `Sign`, ...) maps over the
@@ -8669,8 +8675,9 @@ export class BoxedFunction
       // `(sin 1, sin 2)`, the rule the arithmetic operators already apply to
       // `(1, 2) · 3` and the one the JavaScript compile target applies when it
       // maps a scalar kernel over a tuple's array. Placed AFTER step 4b so a
-      // mixed tuple-and-list application keeps its existing meaning (the list
-      // supplies the cells, the tuple is lifted whole into each of them), and
+      // mixed tuple-and-list application is settled by that step (a built-in
+      // operator reads the tuple by position and requires the lengths to
+      // agree; a user function lifts the tuple whole into each cell), and
       // decided on the evaluated `tail` so an operand that only becomes a
       // tuple at evaluation broadcasts like a literal one.
       //
@@ -9235,7 +9242,7 @@ export class BoxedFunction
         operatorBroadcast === true &&
         hasUnresolvedCollectionOperand(this.ops!, isBroadcastableCollection);
       if (unresolvedBroadcastOperand) {
-        const mismatch = broadcastLengthMismatch(this.engine, this.ops!);
+        const mismatch = zipLengthMismatch(this.engine, this.ops!);
         if (mismatch) return mismatch;
       }
       if (operatorBroadcast && !unresolvedBroadcastOperand) {
@@ -9294,7 +9301,7 @@ export class BoxedFunction
               if (matrixPower !== undefined)
                 return matrixPower.evaluateAsync(options);
             }
-            const mismatch = broadcastLengthMismatch(this.engine, bops);
+            const mismatch = zipLengthMismatch(this.engine, bops);
             if (mismatch) return mismatch;
             // A lift can be a set only when it is evaluated (mirrors the
             // sync path).
@@ -9955,6 +9962,11 @@ export class BoxedFunction
       // literals whose argument only becomes a collection after evaluation).
       //
       const lambdaBroadcast = isUserFunctionDef(def) && paramsAreScalar(def);
+      // A user function repeats a tuple whole in each cell, so the length of
+      // the tuple does not count. A built-in operator reads it by position.
+      const tailLengthMismatch = lambdaBroadcast
+        ? broadcastLengthMismatch
+        : zipLengthMismatch;
       // Same post-eval finiteness refinement as the sync path (finding 3):
       // a lazy operator keeps the strict gate; a non-lazy one also admits an
       // unresolved-finiteness source (symbolic-length `Range`).
@@ -9993,7 +10005,7 @@ export class BoxedFunction
         postEvalBroadcast &&
         hasUnresolvedCollectionOperand(tail, isBroadcastableCollection);
       if (unresolvedTailOperand) {
-        const mismatch = broadcastLengthMismatch(this.engine, tail);
+        const mismatch = tailLengthMismatch(this.engine, tail);
         if (mismatch) return mismatch;
       }
       if (postEvalBroadcast && !unresolvedTailOperand) {
@@ -10014,7 +10026,7 @@ export class BoxedFunction
         // Length-mismatch ruling (2026-07-24) — mirrors the sync step 4b,
         // before the lazy form; `tail` is already evaluated, so the purity half
         // does not apply.
-        const mismatch = broadcastLengthMismatch(this.engine, tail);
+        const mismatch = tailLengthMismatch(this.engine, tail);
         if (mismatch) return mismatch;
 
         // Under `.N()`, a jump operator (`Floor`, `Sign`, ...) maps over the
@@ -10961,8 +10973,8 @@ export function typesTupleArmsAsCells(
  * Consulted on EVALUATED operands, so an operand that only becomes a tuple at
  * evaluation (`Sin(3 · (1, 2))`) broadcasts like a literal one. Every operand
  * that supplies cells must be a tuple: a mixed tuple-and-list application
- * keeps its existing meaning, where the list supplies the cells and the tuple
- * is lifted whole into each of them.
+ * is settled by the list broadcast, which runs first and reads the tuple by
+ * position (`zipLengthMismatch`).
  */
 function tupleBroadcastCells(
   expr: Expression,
