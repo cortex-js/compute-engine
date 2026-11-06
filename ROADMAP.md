@@ -278,7 +278,7 @@ that the double checks disappear.
 
 ### CE-58. A `Declare` statement at the top level, and `ce.declare()` in a pushed scope, install a writer that does not state `scope`
 
-**Status:** waits for user (decision); defect, M.
+**Status:** ready; defect, M. User decision 2026-11-05: option (a).
 **Witness:** plausible; Top-level Epsil `let f: () -> number = writer` installs a writer without `scope`.
 
 A named definition that states no effects must not write outside itself: the
@@ -906,7 +906,7 @@ affected. If nothing is decided, the behavior stays and is not documented.
 
 ### CE-107. `isSame` is false between a boxed and a parsed `D` of the same function literal
 
-**Status:** waits for user (decision); defect, small. Tycho row 394.
+**Status:** ready; defect, S. User decision 2026-11-05: option (a). Tycho row 394.
 **Witness:** corpus; Tycho row 394; `isSame` false, values right.
 
 `isSame` is `false` between `D(x ↦ f, x)` boxed from MathJSON and the same
@@ -1083,7 +1083,7 @@ parses as `Conjugate` (`definitions-complex.ts`). Instrument on the Tycho side:
 
 ### CE-127. A subscript index that is an expression is not canonicalized
 
-**Status:** waits for user (decision); defect. Related: CE-135.
+**Status:** ready; defect. User decision 2026-11-05: option (a). Related: CE-135.
 **Witness:** plausible; `A_{i+1}` keeps a non-canonical index.
 
 The `Subscript` canonical handler (`library/core.ts`) canonicalizes a
@@ -2860,12 +2860,12 @@ shipped (contract in `docs/CHECKPOINT-MODEL.md`; tests include
 
 ### CE-312. Function declaration hoisting: run-time checks, cancellation and route differences
 
-**Status:** waits for user (decision); defect. CE-312.2 needs a user decision. User
-decision 2026-11-05 for CE-312.1: a function with a declared signature checks
-each argument against the declared parameter type at run time when the static
-type of the argument did not decide (the example below then gives
-`incompatible-type`). Plan:
-docs/plans/2026-10-21-function-declaration-hoisting.md.
+**Status:** ready; defect. User decision 2026-11-05 for CE-312.1: a function with
+a declared signature checks each argument against the declared parameter type at
+run time when the static type of the argument did not decide (the example below
+then gives `incompatible-type`). User decision 2026-11-05 for CE-312.2: keep the
+behavior, with no code change; add it to the Epsil documentation and close
+CE-312.2. Plan: docs/plans/2026-10-21-function-declaration-hoisting.md.
 **Witness:** plausible; CE-312.3 and .4 name a fix that needs no decision (fix).
 
 The rules: a call evaluated while its head had no value stays symbolic for the
@@ -2896,7 +2896,9 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
   accumulated onto a function of an earlier program. A later program that
   declares the same name does not re-install the clause that the stopped program
   prepared (the early-clause re-install keeps only the installs of the current
-  batch). Documented in the plan; decision wanted.
+  batch). Documented in the plan. The options were: keep this behavior and
+  document it, or record what each prepared name held and restore it when the
+  program stops before the statement runs. The user chose the first option.
 - **CE-312.3** The declared signature of a function is not checked inside a
   function body. With
   `function h(x) { let g: (integer) -> integer; function g(k) { 2k }; g(x) }`,
