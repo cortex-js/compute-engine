@@ -904,45 +904,6 @@ affected. If nothing is decided, the behavior stays and is not documented.
   `Negate argument 1, Add argument 1`, with no `Ln` frame, while `Ln(w) * 2` has
   one. Find why the `Ln` call adds no frame there.
 
-### CE-107. `isSame` is false between a boxed and a parsed `D` of the same function literal
-
-**Status:** ready; defect, S. User decision 2026-11-05: option (a). Tycho row 394.
-**Witness:** corpus; Tycho row 394; `isSame` false, values right.
-
-`isSame` is `false` between `D(x ↦ f, x)` boxed from MathJSON and the same
-derivative parsed from `\frac{\mathrm{d}f}{\mathrm{d}x}`, although their `.json`
-is the same (`["D", ["Function", ["Block", "f"], "x"], "x"]`). Values do not
-differ. Cause: canonicalization wraps a function body in a `Block`, and a free
-`f` that no statement types gets a placeholder declaration in that `Block`'s
-scope, while the parse route and a later `ce.box('f')` bind the global `f`
-(`docs/SCOPING-MODEL.md`, end of the scoping section).
-
-Two fixes were tried (worktree `/tmp/wt-compute-engine-fb-ce107`, patch
-`CE-107-v2.patch`, three review rounds):
-
-- Declaring the free name outside the literal broke 12 tests in 9 files
-  (effects provenance, rollback frames, re-derivation of `g(t) := 2a(t)`
-  when `a` is defined later, `CountIf` callbacks that must not declare `q`).
-- Keeping the placeholder and making `isSame` compare it as the outer binding
-  works, but a host-built literal (`ce.function('Function', [block, x])`)
-  whose `Block` holds such a placeholder must then be boxed again from its
-  MathJSON, so that marking it does not change other expressions that share
-  the `Block`. That rebox reads every name in the current scope: with `y := 7`
-  declared in a pushed scope, `['Block', ['Tuple', 'f', 'y', 'x']]` boxed
-  there, the scope popped, and the literal built and applied to 3, HEAD gives
-  `(f, 7, 3)` and the fix gives `(f, y, 3)`.
-
-Question: is the `isSame` fix worth that value change for a host-built
-literal, or more work?
-
-- (a) Recommended: no change; the behavior is documented in
-  `docs/SCOPING-MODEL.md`. `isSame` stays `false`; values are right.
-- (b) Take the v2 fix with the documented value change for the host-built
-  case (the existing nested-assignment rebox route already has the same
-  limit).
-- (c) v2 with a copy of the body that keeps its existing bindings in new
-  scopes instead of a rebox from MathJSON (a new copy function; more work).
-
 ### CE-111. Some lazy operators still run synchronously under `evaluateAsync`
 
 **Status:** ready; capability. Issue #392. Approved 2026-11-01.
@@ -2860,10 +2821,7 @@ shipped (contract in `docs/CHECKPOINT-MODEL.md`; tests include
 
 ### CE-312. Function declaration hoisting: run-time checks, cancellation and route differences
 
-**Status:** ready; defect. User decision 2026-11-05 for CE-312.1: a function with
-a declared signature checks each argument against the declared parameter type at
-run time when the static type of the argument did not decide (the example below
-then gives `incompatible-type`). User decision 2026-11-05 for CE-312.2: keep the
+**Status:** ready; defect. User decision 2026-11-05 for CE-312.2: keep the
 behavior, with no code change; add it to the Epsil documentation and close
 CE-312.2. Plan: docs/plans/2026-10-21-function-declaration-hoisting.md.
 **Witness:** plausible; CE-312.3 and .4 name a fix that needs no decision (fix).
@@ -2876,17 +2834,6 @@ statement before the first statement when a statement before it can call it and
 the installation is safe (four conditions in `prepareFunctionDeclarations`,
 `src/epsil/execute-epsil.ts`).
 
-- **CE-312.1** A declared parameter type is not checked at run time when the
-  static type of the argument was unknown. With `h` declared
-  `(integer) -> integer` and defined `h(k) = 2k`, the host block
-  `Block(r := g(h(m)), m := 1.5, r)` nested in a tuple gives `g(3)`: `h(m)` was
-  canonicalized while `m` had type `unknown`, so no static check ran, and the
-  application of `1.5` to the integer parameter is not checked at run time
-  either. `h(1.5)` written directly, and `h(x)` with `x` known to be `real`,
-  give `incompatible-type`. Same at `8fc104df4`. Question for the user: should a
-  value-definition function with a declared signature check its arguments at run
-  time when their static type did not decide (a check per call), or is the
-  static check the contract?
 - **CE-312.2** A prepared `function` statement stays defined when the program is
   cancelled (time or step budget) before its statement runs. The clause is
   installed in the program scope at preparation; the loop breaks, and a later

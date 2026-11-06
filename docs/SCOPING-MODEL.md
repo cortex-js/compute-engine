@@ -351,8 +351,35 @@ of a parameter of the same name. A function literal behaves the same way:
 canonicalization wraps its body in a `Block`, and a free symbol that no
 statement types (a bare `f`, a tuple, an equation) is declared in the scope
 of that `Block`. So `ce.box(['Function', ['Block', 'f'], 'x'])` and a later
-`ce.box('f')` are not `isSame`, although evaluation reads the same value
-(ROADMAP CE-107).
+`ce.box('f')` are not `isSame`, although evaluation reads the same value.
+
+A derivative of such a literal shows the same difference. On an engine where
+`f` is not declared, `ce.box(['D', ['Function', ['Block', 'f'], 'x'], 'x'])`
+and a later `ce.parse('\\frac{\\mathrm{d}f}{\\mathrm{d}x}')` have the same
+`.json` but are not `isSame`, because the parse binds a global `f`. Their values
+are the same: both are `0`, also after `f := 5`. They are `isSame` when `f` is
+declared before the literal is boxed (by `ce.declare()`, by `ce.box('f')`, or by
+a parse that runs first). A host that compares expressions from the two routes
+compares their `.json`.
+
+This limit stays by a user decision (2026-11-05), because each fix that was
+tried costs more than the `isSame` result is worth:
+
+- Declaring the free name outside the literal changes what other code
+  relies on: effect records, rollback frames, the new derivation of
+  `g(t) := 2a(t)` when `a` is defined later, and `CountIf` callbacks that must
+  not declare `q`.
+- Keeping the declaration and making `isSame` compare it as the outer binding
+  requires boxing a literal that a host builds
+  (`ce.function('Function', [block, x])`) again from its MathJSON, so that the
+  change does not reach other expressions that share the `Block`. That reads
+  every name in the current scope, which can change a value: with `y := 7`
+  declared in a pushed scope, `['Block', ['Tuple', 'f', 'y', 'x']]` boxed there,
+  the scope popped, and the literal then built and applied to `3`, the result
+  is `(f, 7, 3)` today and was `(f, y, 3)` with that fix.
+
+`test/compute-engine/ce-107-function-literal-free-name-is-same.test.ts` holds
+this behavior.
 
 ## Simplification
 
