@@ -2688,21 +2688,6 @@ Files: `src/epsil/parser.ts` (the short definition forms and
 (`DefineFunction`), and `src/compute-engine/latex-syntax/dictionary/definitions-core.ts`
 (the LaTeX check of CE-826, `ASSIGNMENT_TO_LIBRARY_FUNCTION`).
 
-### CE-831. The static check reads a `let` named `i` as the imaginary unit
-
-**Status:** ready; defect, S.
-**Witness:** plausible; `let i = 1\nlet y: integer = i\ny`.
-
-The program runs and gives `1`, but `checkEpsil()` and `executeEpsil()`
-report a `static-type-error`: "The value `i` of type `imaginary` is not
-compatible with the declared type `integer`". In the static pass
-(`staticDiagnostics()`, `src/epsil/static-diagnostics.ts`), `i` has the type of
-the library constant `ImaginaryUnit`; the cause is not traced. A loop that writes an
-element, `while i <= 3 { xs[i] = 10 * i\ni = i + 1 }` after `let i = 1`, gets
-the same false error, because the position of `ReplaceAt` must be an integer.
-`let e = 3\nlet y: integer = e` is not affected, so the fix starts with how
-the pass resolves `i`.
-
 ### CE-306. `list<list<string>>` and `list<list<integer>>` cannot both conform to a protocol
 
 **Status:** ready; design. User decision 2026-10-23: a value whose only shared

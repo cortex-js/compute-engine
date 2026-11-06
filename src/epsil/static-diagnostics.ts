@@ -52,6 +52,7 @@ import { unboundSignatureHint } from '../compute-engine/boxed-expression/type-co
 import { expectsCharacterNotString } from '../compute-engine/boxed-expression/validate.js';
 import { isSingleGraphemeCluster } from '../compute-engine/boxed-expression/boxed-character.js';
 import { withPairedFunctionNames } from '../compute-engine/assignment-locals.js';
+import { isLibraryDefinition } from '../compute-engine/boxed-expression/implicit-variable-rule.js';
 import {
   functionLiteralDeclaredSignature,
   functionLiteralReturnType,
@@ -755,6 +756,32 @@ function applyAssignmentTypeEffect(
       return;
     }
     rhs = positional.find((op) => !isString(op)) ?? attrs?.get('value');
+    // An untyped `let` creates a binding in the current scope when it runs,
+    // and that binding shadows a library name of the same spelling: after
+    // `let i = 1`, `i` is the local, not the imaginary unit. Boxing the
+    // statement does not create the binding for a name that the library
+    // defines, so the pass declares it here, in its own scope, before it
+    // infers the type. Without this, `let i = 1\nlet y: integer = i` read `i`
+    // as `ImaginaryUnit` and reported a type error that the run does not have.
+    // Only a library name is declared: the binding of a name of the program or
+    // of an earlier run, such as a `const` that a later parameter default
+    // reads as a constant, is left to the rules that already handle it.
+    if (
+      isSymbol(target) &&
+      !ce.context.lexicalScope.bindings.has(target.symbol) &&
+      isLibraryDefinition(
+        ce,
+        target.symbol,
+        ce.lookupDefinition(target.symbol)
+      )
+    ) {
+      try {
+        ce.declare(target.symbol, { type: 'unknown', inferred: true });
+      } catch {
+        // A name that cannot be declared here has its own diagnostic; the
+        // effect is best-effort.
+      }
+    }
   } else return;
 
   if (target === undefined) return;

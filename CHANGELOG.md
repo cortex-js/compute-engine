@@ -160,6 +160,14 @@
 
 ### Resolved Issues
 
+- **An Epsil `let` whose name is a library name is a local in the static
+  check too.** `let i = 1` followed by `let y: integer = i` ran and gave `1`,
+  but `executeEpsil` and `checkEpsil` reported the `static-type-error` "The
+  value `i` of type `imaginary` is not compatible with the declared type
+  `integer`": the check read `i` as the imaginary unit. A loop with `i` as the
+  position of an element assignment, `xs[i] = 10 * i`, got the same false error.
+  The check now reads `i`, `e` or `pi` declared by a `let` as the local, as the
+  run does.
 - **The error of a numeric integral now includes an inner integral in the body
   of a function that the integrand calls.** With
   `F = y ↦ ∫₀¹ e^(−xy)/x^0.99 dx`, `∫₀¹ F(y) dy` gave
