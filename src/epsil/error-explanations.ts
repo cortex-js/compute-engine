@@ -153,6 +153,12 @@ The check reads the subject's type from its annotation — a parameter (\`functi
 
 No warning does not make the \`match\` total. A \`boolean\` subject that stays symbolic (an undecided comparison) is neither \`true\` nor \`false\`, and a declared name with no value (\`let u: light\` without an initializer) is not one of its constructors; both reach no case even when every alternative is covered. A final \`_\` case handles them.`,
 
+  'equation-not-assignment': `In expression position \`=\` is an equation, and only a statement assigns. So in \`let a = 0; match 1 { 1 => a = 2 }; a\` the case body compares \`a\` with \`2\`, nothing reads the result, and \`a\` stays \`0\`.
+
+Write \`1 => do { a = 2 }\` to assign, or \`1 => a == 2\` if the comparison was meant. The same applies to \`{ a = 2 }\` as a body, which is a set that holds an equation. In a function, a body that writes a variable also needs the \`scope\` effect when the function has a name: \`let f: (number) scope -> nothing = x => do { a = 2 }\`.
+
+The warning applies to the whole body of a \`match\` case, of a branch of a conditional expression and of a function, when the left side is a variable that the program declares, other than a constant, and nothing reads the value of the body. The body of a function counts as unread when each read of the function's name is a call whose value is discarded. A body whose value is read (\`let r = match k { 1 => a = 2 }\`, a lambda passed to \`map\` or \`solve\`, the last statement of the program) and an equation of a free name, of a constant, of a parameter or of a pattern variable get no warning. It is a warning: the program still runs.`,
+
   'symbol-expected': `A name was required at this position — after \`let\` or \`const\`, as a \`for\` loop's variable, as a function's or parameter's name — but something else was found there (\`let = 42\`).
 
 A subtler cause: the word written there is one the grammar itself consumes. \`for = 3\` is not an assignment to a variable named \`for\` — the \`for\` starts a for-loop, and the loop machinery then finds no variable name. To use such a word as a name anyway, spell it verbatim, wrapped in backquote characters: "let \`for\` = 3" (see \`epsil doc reserved-word\`).`,

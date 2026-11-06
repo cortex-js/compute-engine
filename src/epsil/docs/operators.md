@@ -878,6 +878,22 @@ the left side is shaped exactly like a destructuring pattern (bare names, `_`,
 nested tuples), so a genuine tuple equation with computed components —
 `(x + 1, y) = t` — stays silent.
 
+**A body that is only `name = value` is a warning when nothing reads its value.**
+The body of a `match` case, of a conditional branch or of a lambda is not a
+statement, so its `=` compares, and the variable keeps its value:
+
+```epsil
+let a = 0
+match 1 { 1 => a = 2 }
+a
+```
+
+Write `1 => do { a = 2 }` to assign, or `1 => a == 2` if the comparison was
+meant. A body whose value is read (`let r = match k { 1 => a = 2 }`, a lambda
+passed to `map`), and an equation of a free name, of a constant, of a parameter
+or of a pattern variable stay silent. See
+[`equation-not-assignment`](/epsil/errors/#equation-not-assignment).
+
 **An assignment in a condition is a warning.** `:=` is unconditional, so it
 reaches a condition where a bare `=` no longer can — and Epsil has no
 `if init; cond` form, so the assigned value *is* the test:

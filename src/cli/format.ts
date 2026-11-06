@@ -541,6 +541,8 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `A stepped range is not a pattern; write "lo..hi" (two numeric bounds), or use a guard`;
     case 'match-not-exhaustive':
       return `The "match" on a "${args[0]}" value has no case for ${args[1]}; add a case for each, or a final "_" case`;
+    case 'equation-not-assignment':
+      return `"${args[0]}" here is an equation, not an assignment, and nothing reads its value; write "do { ${args[0]} }" to assign (a function that writes a variable outside itself also declares the "scope" effect), or "==" to compare`;
     case 'range-pattern-empty':
       return `Range pattern "${args[0]}..${args[1]}" is empty (the lower bound is greater than the upper bound); this case can never match`;
     case 'floor-division-comment':

@@ -6,6 +6,7 @@ import {
 import {
   isDictionaryObject,
   machineValue,
+  nops,
   operand,
   operands,
   operator,
@@ -76,6 +77,7 @@ import {
 import type { ParsingDiagnostic } from './diagnostics.js';
 import {
   documentBindings,
+  occurrenceAt,
   protocolFunctionMembers,
   type BindingGroup,
 } from './occurrences.js';
@@ -932,7 +934,16 @@ function canonicalizationDiagnostics(
   // for the statements that follow (see `match-exhaustiveness.ts`).
   const annotations: AnnotationScope = new Map();
 
-  diagnostics.push(...absenceMarkerBindingDiagnostics(ce, ast, source));
+  // The protocol function members of the program: a call of a member that
+  // shadows a library binder (`solve`) binds no variable, the same rule
+  // `resolveLibraryNames()` applies, so the two passes read one program the
+  // same way.
+  const members = protocolFunctionMembers(ast);
+  const bindings = documentBindings(ast, source, {
+    binderSites: (node) => binderSitesOf(ce, node, source, members),
+  });
+  diagnostics.push(...absenceMarkerBindingDiagnostics(bindings));
+  diagnostics.push(...equationBodyDiagnostics(ast, source, bindings));
 
   let statementIndex = -1;
   for (const statement of statements) {
@@ -1573,19 +1584,9 @@ const ABSENCE_MARKER_NAMES: ReadonlySet<string> = new Set([
  * time, by their handlers.
  */
 function absenceMarkerBindingDiagnostics(
-  ce: ComputeEngine,
-  ast: MathJsonExpression,
-  source: string
+  groups: readonly BindingGroup[]
 ): ParsingDiagnostic[] {
   const found: ParsingDiagnostic[] = [];
-  // The protocol function members of the program: a call of a member that
-  // shadows a library binder (`solve`) binds no variable, the same rule
-  // `resolveLibraryNames()` applies, so the two passes read one program the
-  // same way.
-  const members = protocolFunctionMembers(ast);
-  const groups = documentBindings(ast, source, {
-    binderSites: (node) => binderSitesOf(ce, node, source, members),
-  });
   for (const group of groups) {
     if (group.kind === 'free' || !ABSENCE_MARKER_NAMES.has(group.name))
       continue;
@@ -1606,6 +1607,224 @@ function absenceMarkerBindingDiagnostics(
         message: ['absence-marker-binding', group.name],
         range: [occurrence.start, occurrence.end, occurrence.start],
       });
+  }
+  return found;
+}
+
+/**
+ * Where the value of an expression goes, as far as the walk of
+ * `equationBodyDiagnostics()` can tell:
+ *
+ * - `'discarded'`: nothing reads it. It is a statement that is not the last of
+ *   its block, or the last one of a block whose own value is discarded, or a
+ *   statement of a loop body (a loop has no value).
+ * - `'used'`: something can read it. The last statement of the program is
+ *   here, because its value is the result that the host receives.
+ * - a number: a call of a named function returns it. The number is the source
+ *   offset of a name that binds the function, and the uses of that name tell
+ *   where the value goes.
+ */
+type ValueUse = 'discarded' | 'used' | number;
+
+/**
+ * The equation that is the whole body in `body`, if it is one: `a = 2`, or the
+ * one-element set that `{ a = 2 }` is in expression position, the form that a
+ * reader of JavaScript or Rust writes for a block body. The parser wraps the
+ * body of a function that states a result type or an effect in `Typed`.
+ */
+function equationOfBody(body: MathJsonExpression): MathJsonExpression | null {
+  if (operator(body) === 'Typed') return equationOfBody(operand(body, 1)!);
+  if (operator(body) === 'Set' && nops(body) === 1)
+    return equationOfBody(operand(body, 1)!);
+  return operator(body) === 'Equal' && nops(body) === 2 ? body : null;
+}
+
+/**
+ * A `match` case, a branch of a conditional expression or a function whose
+ * whole body is `name = value`, where `name` is a variable that the program
+ * declares and nothing reads the value of the body. In expression position `=`
+ * is an equation, so the program compares and discards the result, and the
+ * variable keeps its value: this is almost always a forgotten `do { … }`
+ * (`match 1 { 1 => a = 2 }`). It is a warning, because the program is valid. It
+ * has no fixit: a fixit of a warning must be safe to apply, and the two repairs
+ * (`do { a = 2 }` and `a == 2`) each give the program a new meaning.
+ *
+ * Three kinds of body are not reported, and each one is a valid program:
+ *
+ * - a body whose value something can read (`let r = match k { 1 => a = 2 }`, a
+ *   lambda passed to `map` or to `solve`);
+ * - an equation written with `==`, which is how a program says that it means
+ *   the comparison;
+ * - an equation of a name that this program does not declare as a variable: a
+ *   free name is an unknown of the equation, a parameter or a pattern variable
+ *   of the body itself is what a predicate compares (`x => x = 2`), and a
+ *   constant cannot be assigned, so a comparison is all that the body can mean.
+ *
+ * The value of a function body goes where the calls of the function send it.
+ * The body is reported only when the function is bound to a name that has at
+ * least one read, and each read is a call in a discarded position: a function
+ * with no read in this program can still be read by the host or by a later
+ * program unit. Any other read counts as a use, also a recursive call in the
+ * last position of the function, so a body can stay unreported, but a body that
+ * something reads is never reported.
+ */
+function equationBodyDiagnostics(
+  ast: MathJsonExpression,
+  source: string,
+  bindings: readonly BindingGroup[]
+): ParsingDiagnostic[] {
+  const bodies: {
+    body: MathJsonExpression;
+    equation: MathJsonExpression;
+    use: ValueUse;
+  }[] = [];
+  // The source offset of each call whose value nothing reads. The read of a
+  // called name is recorded at the same offset (`documentBindings()`).
+  const discardedCalls = new Set<number>();
+
+  const visitBody = (body: MathJsonExpression | null, use: ValueUse): void => {
+    if (body === null) return;
+    const equation = use === 'used' ? null : equationOfBody(body);
+    if (equation !== null) bodies.push({ body, equation, use });
+    visit(body, use);
+  };
+
+  const visitFunction = (fn: MathJsonExpression, use: ValueUse): void => {
+    const [body, ...parameters] = operands(fn);
+    visitBody(body ?? null, use);
+    for (const parameter of parameters) visit(parameter, 'used');
+  };
+
+  /** The value that a declaration or an assignment binds to `target`. */
+  const visitBoundValue = (
+    target: MathJsonExpression | null,
+    value: MathJsonExpression | null
+  ): void => {
+    if (value === null) return;
+    const offset =
+      target !== null && symbol(target) !== null
+        ? sourceRangeOf(target)?.[0]
+        : undefined;
+    if (offset !== undefined && operator(value) === 'Function')
+      visitFunction(value, offset);
+    else visit(value, 'used');
+  };
+
+  const visit = (node: MathJsonExpression, use: ValueUse): void => {
+    const op = operator(node);
+    if (op === '') return;
+    switch (op) {
+      case 'Block': {
+        const statements = operands(node);
+        statements.forEach((statement, i) =>
+          visit(statement, i < statements.length - 1 ? 'discarded' : use)
+        );
+        return;
+      }
+      case 'Loop': {
+        const [body, ...iterators] = operands(node);
+        if (body !== undefined) visit(body, 'discarded');
+        for (const iterator of iterators) visit(iterator, 'used');
+        return;
+      }
+      case 'If': {
+        const [condition, ...branches] = operands(node);
+        if (condition !== undefined) visit(condition, 'used');
+        for (const branch of branches) visitBody(branch, use);
+        return;
+      }
+      case 'Match': {
+        const [subject, ...cases] = operands(node);
+        if (subject !== undefined) visit(subject, 'used');
+        for (const matchCase of cases) {
+          if (operator(matchCase) !== 'MatchCase') continue;
+          // A case is (pattern, body) or (pattern, guard, body).
+          const parts = operands(matchCase);
+          if (parts.length === 3) visit(parts[1], 'used');
+          visitBody(parts[parts.length - 1] ?? null, use);
+        }
+        return;
+      }
+      case 'Typed':
+        visit(operand(node, 1)!, use);
+        return;
+      case 'Function':
+        visitFunction(node, 'used');
+        return;
+      case 'Declare':
+        visitBoundValue(operand(node, 1), declaredValue(node));
+        return;
+      case 'Assign':
+      case 'DefineFunction':
+        visitBoundValue(operand(node, 1), operand(node, 2));
+        return;
+      default: {
+        // A statement `f(1)`. The source of a call starts with the name of its
+        // operator, and the source of `f + 1` (operator `Add`) does not, so a
+        // read of `f` in that statement does not count as a discarded call.
+        const start = sourceRangeOf(node)?.[0];
+        if (use === 'discarded' && start !== undefined)
+          if (source.startsWith(op, start)) discardedCalls.add(start);
+        for (const child of operands(node)) visit(child, 'used');
+      }
+    }
+  };
+
+  visit(ast, 'used');
+  if (bodies.length === 0) return [];
+
+  // The source offset of each name that a `const` declares.
+  const constants = new Set(
+    constantDeclarations(ast)
+      .flatMap((declaration) => declarationLeaves(operand(declaration, 1)))
+      .map((leaf) => leaf.start)
+  );
+
+  const found: ParsingDiagnostic[] = [];
+  for (const { body, equation, use } of bodies) {
+    const target = operand(equation, 1)!;
+    const targetRange = sourceRangeOf(target);
+    const bodyRange = sourceRangeOf(body);
+    const equationRange = sourceRangeOf(equation);
+    const name = symbol(target);
+    if (
+      name === null ||
+      targetRange === undefined ||
+      bodyRange === undefined ||
+      equationRange === undefined
+    )
+      continue;
+    // The parser gives `=` and `==` the same node, so only the source tells
+    // them apart.
+    if (!/^\s*=(?!=)/.test(source.slice(targetRange[1]))) continue;
+    const variable = occurrenceAt(bindings, targetRange[0])?.group;
+    if (variable?.kind !== 'variable' || variable.name !== name) continue;
+    if (
+      variable.occurrences.some(
+        (occurrence) =>
+          occurrence.role === 'definition' && constants.has(occurrence.start)
+      )
+    )
+      continue;
+    if (typeof use === 'number') {
+      const reads = occurrenceAt(bindings, use)?.group.occurrences.filter(
+        (occurrence) => occurrence.role === 'read'
+      );
+      if (
+        reads === undefined ||
+        reads.length === 0 ||
+        !reads.every((read) => discardedCalls.has(read.start))
+      )
+        continue;
+    }
+    found.push({
+      severity: 'warning',
+      message: [
+        'equation-not-assignment',
+        source.slice(equationRange[0], equationRange[1]),
+      ],
+      range: [bodyRange[0], bodyRange[1], bodyRange[0]],
+    });
   }
   return found;
 }
@@ -2374,7 +2593,7 @@ function constantWritesOf(
   statements: MathJsonExpression[]
 ): ConstantWrites {
   const byName = new Map<string, BindingGroup[]>();
-  // Same rule as in `absenceMarkerBindingDiagnostics()`: a protocol member
+  // Same rule as in `canonicalizationDiagnostics()`: a protocol member
   // that shadows a library binder binds nothing.
   const members = protocolFunctionMembers(ast);
   for (const group of documentBindings(ast, source, {

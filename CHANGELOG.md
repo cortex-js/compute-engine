@@ -25,6 +25,15 @@
 
 ### Behavior Changes
 
+- **Epsil warns when a body that is only `name = value` compares and nothing
+  reads the result.** `let a = 0; match 1 { 1 => a = 2 }; a` gave `0` with no
+  message, and it still gives `0`, now with the warning
+  `equation-not-assignment` from `epsil check` and from a program run. Write
+  `1 => do { a = 2 }` to assign, or `1 => a == 2` to compare. The warning also
+  applies to a branch of a conditional expression and to a function whose every
+  read is a call with a discarded value. A body whose value is read, and an
+  equation of a free name, a constant, a parameter or a pattern variable, get no
+  warning.
 - **A tuple beside a list of another length is an `incompatible-dimensions`
   error under an operator that reads the tuple by position.**
   `Power((1, 2), [3, 4, 5])` was `[1, 16]`, and it now gives
