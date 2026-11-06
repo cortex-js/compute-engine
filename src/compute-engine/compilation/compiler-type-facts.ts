@@ -1025,9 +1025,9 @@ export function exactRationalDivisor(
  * for a consumer that declares every parameter `any`. A call of a user
  * function typed `any` and a `broadcastable<T>` type keep their reading.
  *
- * The JavaScript target declines an arithmetic site over such a symbol
- * (`assertNoDeclaredTopOperands()`, `compile-admission.ts`), because its
- * value can be a list.
+ * The JavaScript, Python and `interval-js` targets decline an arithmetic site
+ * over such a symbol (`assertNoDeclaredTopOperands()`, `compile-admission.ts`),
+ * because its value can be a list.
  *
  * `_target` is the target that compiles `e`, when it is not the target of
  * the call site in progress. The answer does not depend on it: the shape of

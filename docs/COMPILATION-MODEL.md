@@ -2313,15 +2313,18 @@ arithmetic broadcast (`Add`, `Multiply`, … through `tryCompileBroadcast`) asks
 the static type of the operand. A change to one does not change the other.
 
 A symbol declared `any` or `value` can hold a number or a list, and compiled
-code does not test the shape of a value at run time. The JavaScript target
-declines an element-wise site, `Max`, `Min`, `Sum` and `Product` over such a
-symbol (a parameter declared `any` or `value`, an input declared `value`, or
-a symbol declared `any` or `value` that has a value), with the code
-`unsettled-shape` and the symbol in `unsupported`, and the interpreter
+code does not test the shape of a value at run time. The JavaScript, Python
+and `interval-js` targets decline an element-wise site, `Max`, `Min`, `Sum` and
+`Product` over such a symbol (a parameter declared `any` or `value`, an input
+declared `value`, or a symbol declared `any` or `value` that has a value), with
+the code `unsettled-shape` and the symbol in `unsupported`, and the interpreter
 computes the value: `Function(p + q, p: any, q: any)` declines, and
-`run([1, 2], [3, 4])` gives `[4, 6]`. An input declared `any` with no value
+`run([1, 2], [3, 4])` gives `[4, 6]`. The argument of a call does not change
+this: the function has one body for every call, so `((t: any) ↦ 2t)(x)` with
+`x: real` declines too. An input declared `any` with no value
 is refused before, with `untyped-input`. The host declares the shape
-(`real`, `list<real>`) to compile such a program. An input
+(`real`, `list<real>`) to compile such a program. A shader gives each input one
+fixed shape, so the GLSL and WGSL targets do not use this decline. An input
 declared `expression` (or with an alias of it) can hold a list too, so the
 JavaScript target declines a read of it as an input, and the interpreter computes the value: with
 `ce.declare("x", "expression")`, `2x` declines, and `run({ x: [1, 2] })`

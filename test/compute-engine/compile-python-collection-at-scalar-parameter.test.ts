@@ -19,7 +19,9 @@
  * is still declined (`assertPyAppliedLiteralBindsScalars` in
  * `python-target.ts`), and the interpreter evaluates it. A callback (`Map`, `Reduce`, …) with a
  * parameter declared `any` or `value` that receives a collection is declined
- * for the same reason (`assertPyCallbackWideParams`).
+ * for the same reason (`assertPyCallbackWideParams`). Arithmetic in the body
+ * over a parameter declared `any` or `value` declines for every argument, as
+ * on the JavaScript target: the lambda is one body for every call.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -144,12 +146,6 @@ describe('PYTHON: A FUNCTION LITERAL APPLIED TO A COLLECTION', () => {
       ['Apply', ['Function', 1, param('any')], ['List', 1, 2]],
       '((lambda t: 1))([1, 2])',
       '1',
-    ],
-    [
-      'a scalar argument at a parameter declared any',
-      ['Apply', ['Function', ['Multiply', 2, 't'], param('any')], 3],
-      '((lambda t: 2 * t))(3)',
-      '6',
     ],
     [
       'a scalar argument at a parameter with no declaration',
@@ -320,18 +316,41 @@ describe('PYTHON: A CALLBACK PARAMETER DECLARED ANY OR VALUE', () => {
     expect(result.success).toBe(false);
   });
 
-  test('Map over a list of numbers at a parameter declared any compiles', () => {
+  // The arithmetic of the body declines over a parameter declared `any` or
+  // `value`, whatever the call passes, as on the JavaScript target: the
+  // lambda is one body for every call, and compiled code does not test the
+  // shape of a value at run time.
+  test.each([
+    [
+      'Map over a list of numbers',
+      ['Map', ['Function', ['Multiply', 2, 't'], param('any')], ['List', 1, 2]],
+      '[2,4]',
+    ],
+    [
+      'Apply of a number',
+      ['Apply', ['Function', ['Multiply', 2, 't'], param('any')], 3],
+      '6',
+    ],
+  ])('%s at a parameter declared any is declined', (_, json, value) => {
+    const { expr, result } = compilePython(json);
+    expect(expr.evaluate().toString()).toBe(value);
+    expect(result.success).toBe(false);
+    expect(result.diagnostic?.code).toBe('unsettled-shape');
+    expect(result.unsupported).toEqual(['t']);
+  });
+
+  test('A callback declared any that does not read its parameter compiles', () => {
     const { result } = compilePython([
       'Map',
-      ['Function', ['Multiply', 2, 't'], param('any')],
+      ['Function', 1, param('any')],
       ['List', 1, 2],
     ]);
     expect(result.success).toBe(true);
     expect(result.code).toBe(
-      '(lambda _f: [_f(_x) for _x in [1, 2]])((lambda t: 2 * t))'
+      '(lambda _f: [_f(_x) for _x in [1, 2]])((lambda t: 1))'
     );
     if (TEST_PYTHON === undefined) return;
-    expect(runPython(result.code)).toBe('[2, 4]');
+    expect(runPython(result.code)).toBe('[1, 1]');
   });
 });
 

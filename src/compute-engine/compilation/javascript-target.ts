@@ -15767,12 +15767,13 @@ function compileExtremum(
   compile: (expr: Expression) => string,
   target: CompileTarget<Expression>
 ): string {
-  // A symbol declared `any` or `value`, and a library application over one
-  // (`isDeclaredTopOperand`), can hold a number or a list, and the
-  // interpreter flattens and reduces a list: `Max(p)` with `p = [1, 5]` is 5.
-  // Compiled code does not test the shape of a value at run time, so the
-  // compilation declines.
-  assertNoDeclaredTopOperands(kind, args, target);
+  // An operand declared `any` or `value` does not reach this function: the
+  // compilation declined it (`DECLARED_TOP_DECLINE_HEADS` in
+  // `compiler-tables.ts`), because the interpreter flattens and reduces a list
+  // and compiled code does not test the shape of a value at run time. The one
+  // exception is an input declared `any` with no value: it reaches this
+  // function, and the admission of the root refuses it with `untyped-input`.
+  //
   // An operand whose static type settles a list of rank 2 or more with
   // real leaves (`list<list<real>>`, `list<vector<real^2>> | missing`) is
   // flattened at every level, as the interpreter flattens it:

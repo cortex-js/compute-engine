@@ -2429,19 +2429,6 @@ array-uniform loop codegen, and it needs witnesses first.
   `Random()` draw in the shader. The other option (an `if`/`else` lowering with
   a temporary) needs a second witness; the count is one.
 
-### CE-784. Python: a parameter declared `any` that receives a list is read as a scalar
-
-**Status:** ready; wrong value.
-**Witness:** plausible; `Function(2t, t: any)` compiles to `(lambda t: 2 * t)`, which gives `[1, 2, 1, 2]` for the list `[1, 2]`; the interpreter gives `[2, 4]`. `Function(p + q, p: any, q: any)` gives `[1, 2, 3, 4]` for `[1, 2]` and `[3, 4]`; the interpreter gives `[4, 6]`.
-
-A parameter of a function literal declared `any` or `value` can hold a number
-or a list. The Python target emits scalar arithmetic for it, which repeats or
-concatenates a Python list (a NumPy array gives the right values). The
-JavaScript target declines these programs with the code `unsettled-shape`
-(step 3 of `docs/plans/2026-11-01-compiler-simplification.md`). The fix is the
-same decline on the Python target. Check `interval-js` too: it compiles
-`(t) => _IA.scale(_k1, t)` for the same program.
-
 ### CE-770. Python: `Apply((x, y) ↦ x + y, L, 3)` with a list `L` raises `TypeError` instead of mapping
 
 **Status:** ready; defect. Approved 2026-11-01.

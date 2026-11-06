@@ -1099,7 +1099,7 @@ describe('Interval target — a coordinate accessor over a list of points', () =
 
   test('a union that the broadcast does not admit fails closed at the kernel', () => {
     const ce = pointEngine();
-    ce.declare('w', 'value');
+    ce.declare('w', 'any');
     // The other operand is not provably a number, so the element-wise
     // lowering does not apply, and the kernel must not read a possible array.
     // `U` is declared with a union: the body of its member `list<number>`
@@ -1107,6 +1107,10 @@ describe('Interval target — a coordinate accessor over a list of points', () =
     declines(ce, ['Add', 'U', 'w'], /is a collection/);
     ce.declare('v', 'collection<any> | tuple');
     declines(ce, ['Add', ['PointY', 'v'], 'w'], /may be a collection at run time/);
+    // An operand declared `value` can be a number or a list, and declines
+    // before the kernel, with the name of the symbol.
+    ce.declare('z', 'value');
+    declines(ce, ['Add', 'U', 'z'], /"z": it is declared `any` or `value`/);
     // A union with an indexed-collection arm that is not a list of numbers
     // (`list<list<number>> | number`) declines: the body of its member
     // `list<list<number>>` declines, and the compilation with it.

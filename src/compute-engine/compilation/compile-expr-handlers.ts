@@ -156,12 +156,20 @@ export function compileExprCapturedBody(
  * literal or of a user function declared `any` or `value`, an input
  * declared `value`, or a symbol declared `any` or `value` with a value
  * (`assertNoDeclaredTopOperands()`, `compile-admission.ts`). Its value can be a number or a list, and the
- * interpreter maps an element-wise head over a list. The JavaScript
- * operators give a wrong value for a list (`p + q` gives the string
- * `"1,23,4"` for `[1, 2]` and `[3, 4]`, where the interpreter gives
- * `[4, 6]`), and compiled code does not test the shape of a value at run
+ * interpreter maps an element-wise head over a list, where it gives `[4, 6]`
+ * for `p + q` with `[1, 2]` and `[3, 4]`. The scalar code of `p + q` gives a
+ * wrong result for a list: the string `"1,23,4"` on JavaScript, the
+ * concatenated list `[1, 2, 3, 4]` on Python, and an `empty` interval on
+ * `interval-js`. Compiled code does not test the shape of a value at run
  * time. So the compilation declines, and the message tells the host to
  * declare the shape of the symbol (`real`, `list<real>`).
+ *
+ * The decline also applies to a head whose code a caller supplies in the
+ * `functions` option, and the interpreter fallback computes the library
+ * operator, not the caller's function.
+ *
+ * The shader targets do not use this decline: a shader input has one fixed
+ * shape, so its value cannot be a number at one call and a list at another.
  */
 function declineElementwiseOverDeclaredTop(
   engine: ComputeEngine,
@@ -179,7 +187,9 @@ function declineElementwiseOverDeclaredTop(
 /**
  * The element-wise JavaScript broadcast of a `broadcastable` head over list
  * operands. A case of `compileExpr`: it returns the code, or `undefined` when
- * `compileExpr` continues with its next case.
+ * `compileExpr` continues with its next case. On the JavaScript, Python and
+ * `interval-js` targets, it first declines an operand declared `any` or
+ * `value` (`declineElementwiseOverDeclaredTop()`).
  */
 export function compileExprElementwiseBroadcast(
   engine: ComputeEngine,
@@ -189,8 +199,13 @@ export function compileExprElementwiseBroadcast(
   target: CompileTarget<Expression>,
   node: Expression | undefined
 ): TargetSource | undefined {
-  if (target.language === 'javascript') {
+  if (
+    target.language === 'javascript' ||
+    target.language === 'python' ||
+    target.language === 'interval-javascript'
+  )
     declineElementwiseOverDeclaredTop(engine, h, args, target);
+  if (target.language === 'javascript') {
     const broadcast = tryCompileBroadcast(engine, h, args, target);
     if (broadcast !== null) return broadcast;
     // The broadcast closure declines a REAL-ONLY head (`Floor`, `Mod`,

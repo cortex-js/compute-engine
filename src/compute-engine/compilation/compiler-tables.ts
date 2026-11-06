@@ -254,15 +254,22 @@ export const BINARY_INFIX_VALUE_OPERATORS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The heads whose JavaScript code is an infix operator, or a scalar kernel,
- * that gives a wrong value for an array operand: `[1, 2] + [3, 4]` is the
- * string `"1,23,4"`, `[1, 2] * [3, 4]` is `NaN`, `[1, 2] < 3` is `false`
- * where the interpreter gives `[True, True]`, and `[1, 2] = [1, 2]` is
- * `false`. The JavaScript target declines these heads, and every other
- * head whose definition is `broadcastable` (`Sin`, `Sqrt`, `Abs`, …), over
- * an operand declared `any` or `value`, whose value can be a list
- * (`assertNoDeclaredTopOperands()`, `compile-admission.ts`): the scalar
- * kernel of such a head gives `NaN` for an array (`Math.sin([1, 2])`).
+ * The heads whose scalar code gives a wrong value for a list operand. In
+ * JavaScript, `[1, 2] + [3, 4]` is the string `"1,23,4"`, `[1, 2] * [3, 4]` is
+ * `NaN`, `[1, 2] < 3` is `false` where the interpreter gives `[True, True]`,
+ * and `[1, 2] = [1, 2]` is `false`. In Python, `[1, 2] + [3, 4]` is
+ * `[1, 2, 3, 4]`, and `2 * [1, 2]` is `[1, 2, 1, 2]`. `Max` and `Min` with one
+ * scalar operand are that operand, where the interpreter reduces a list:
+ * `Max(p)` with `p = [1, 5]` is 5.
+ *
+ * The JavaScript, Python and `interval-js` targets decline these heads, and
+ * every other head whose definition is `broadcastable` (`Sin`, `Sqrt`, `Abs`,
+ * …), over an operand declared `any` or `value`, whose value can be a list
+ * (`assertNoDeclaredTopOperands()`, `compile-admission.ts`). On JavaScript, the
+ * scalar kernel of such a head gives `NaN` for an array (`Math.sin([1, 2])`).
+ * On Python, `np.sin` accepts a list and gives the correct values as an array;
+ * it declines too, because compiled code settles the shape of each value at
+ * compile time.
  */
 export const DECLARED_TOP_DECLINE_HEADS: ReadonlySet<string> = new Set([
   'Add',
@@ -278,6 +285,8 @@ export const DECLARED_TOP_DECLINE_HEADS: ReadonlySet<string> = new Set([
   'GreaterEqual',
   'Equal',
   'NotEqual',
+  'Max',
+  'Min',
 ]);
 
 /**

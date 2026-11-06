@@ -40,6 +40,16 @@
 
 ### Resolved Issues
 
+- **A compilation to Python or `interval-js` declines arithmetic over a symbol
+  declared `any` or `value`, as a compilation to JavaScript does.** Such a symbol
+  can hold a list, and compiled code does not test the shape of a value at run
+  time. `Function(2t, t: any)` compiled to `lambda t: 2 * t` on Python, which gives
+  `[1, 2, 1, 2]` for `[1, 2]`, and on `interval-js` it gave an `empty` interval.
+  The compilation now declines with the code `unsettled-shape`, with `t` in
+  `unsupported`, and the interpreter gives `[2, 4]`. This includes programs that
+  gave the correct value, such as `Function(Sin(t), t: any)` on Python and a call
+  with a number. Declare the shape, such as `real` or `list<real>`, to compile
+  them.
 - **A `let` or `const` that is refused keeps the value of the name from an
   earlier run on the same engine.** `let f = 5` in one run, then
   `let f: string = 1` in the next, gave an error and left `f` with no value. `f`

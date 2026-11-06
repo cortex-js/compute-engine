@@ -3623,7 +3623,9 @@ export function compileExpr(
   // math) over one or more list-valued operands, for the JavaScript target.
   // Emits a `_SYS.bcast` call wrapping the head's own scalar codegen — see
   // `tryCompileBroadcast`. Other targets have native vector types (GLSL/WGSL
-  // `vec3 + vec3`) or their own broadcasting, so this is JavaScript-only.
+  // `vec3 + vec3`) or their own broadcasting, so this is JavaScript-only. The
+  // decline of an operand declared `any` or `value` here also applies to the
+  // Python and `interval-js` targets.
   sub = compileExprElementwiseBroadcast(engine, h, args, prec, target, node);
   if (sub !== undefined) return sub;
 
