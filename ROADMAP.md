@@ -1065,6 +1065,23 @@ corpus uses it).
 `Max(FlatMap([1, 2], x ↦ [x, slowF(x)]))` under `evaluateAsync()` gives `Max(2, slowF(1), slowF(2))`, not 20. State: NOT STARTED. Found during the work of 2026-10-30 and 2026-10-31 (4b list); the
 reproduction above is the record.
 
+### CE-820. A closure stored under a declared signature reads the bindings of the scope that stores it
+
+**Status:** ready; wrong value, S. A session that started the fix stopped on a
+usage limit on 2026-11-06. Its partial fix (3 files, +125 −6:
+`engine-declarations.ts`, a test file, a `CHANGELOG.md` item; not reviewed) is
+in the worktree `/tmp/wt-cebatch-820` and in the patch
+`~/.local/state/compute-engine-batches/2026-11-06T153903Z/CE-820-partial.patch`.
+Read and verify it before writing a new fix.
+**Witness:** plausible; with `h = n ↦ Block(g := z ↦ 0, z ↦ g(z) + n)`, `Declare(q, "(real) -> real", h(1))` and `q(0)` gives `1 + g(0)`, and should give 1. `k = n ↦ Block(Declare(g, "(real) -> real", h(n)), z ↦ g(z) + n)` and `k(1)(0)` gives "Recursion limit exceeded", and should give 2.
+
+The same programs with the type `unknown` give the correct values, so the
+declared signature causes the failure. The cause is not traced. The likely
+cause is that the route for a declared signature in `engine-declarations.ts`
+(`ascribeDeclaredParameterTypes()`, `reconcileFunctionLiteralReturn()`) builds
+the literal again from its MathJSON, which drops the scopes that the closure
+captured.
+
 ## Symbolic computation
 
 ### CE-613. `Limit` of `e^{√x}/x^5` at infinity gives 0 instead of `+∞`
