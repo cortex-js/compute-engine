@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-830.
+Next free reference: CE-831.
 
 **Entry format.**
 
@@ -2710,14 +2710,21 @@ shipped (contract in `docs/CHECKPOINT-MODEL.md`; tests include
   Restore"). So this stage can start. Until it lands, both mechanisms exist
   together.
 
-### CE-818. A function with an annotated parameter and result gives an unevaluated call for a refused argument
+### CE-830. Epsil documents show `random(n)` with an integer, which `Random` refuses
 
 **Status:** ready; defect, S.
-**Witness:** plausible; `function h(k: integer): integer { 2*k }`, `h(1.5)` gives
-`h(1.5)` and should give `incompatible-type`.
+**Witness:** plausible; the documented program
+`function roll(n: integer) random -> integer { random(n) }`, `roll(6)` gives
+`roll(6)` with a `static-type-error` diagnostic and should give an integer from 1
+to 6.
 
-Without the result annotation, `function h(k: integer) { 2*k }`, `h(1.5)` gives
-`incompatible-type`.
+The signature of `Random` is `((collection<any> | set<real>)?) random -> any`
+(`library/core.ts`), so `random(6)` is an `incompatible-type` error. The example
+is in `src/epsil/docs/control-flow.md` (the "Effect specifiers" section, two
+programs), `src/epsil/docs/types.md` and `src/epsil/docs/implementation.md`. The
+fix is to write `random(1..n)` in each example, as `src/epsil/docs/style.md` does.
+This form gives an integer from 1 to `n`. The JSON beside the example in
+`implementation.md` must show the same change.
 
 ### CE-312. Function declaration hoisting: run-time checks, cancellation and route differences
 
