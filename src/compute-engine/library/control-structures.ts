@@ -468,9 +468,8 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // values) selects element-wise (see `evaluateElementwiseSelection`):
         // the result is a list of the types of the elements of the branches.
         const shape = elementwiseConditionShape([cond?.type]);
-        const armList = [ifTrue, ifFalse]
-          .filter((x) => x !== undefined)
-          .map((x) => x.type);
+        const armOperands = [ifTrue, ifFalse].filter((x) => x !== undefined);
+        const armList = armOperands.map((x) => x.type);
         // Without an else branch, `If(c, e)` is the restriction `e\{c\}`
         // (`evaluateRestriction()`): a list value is zipped with the mask,
         // to the shorter of the two lengths. So a mask condition over a
@@ -488,11 +487,12 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         if (shape)
           return BoxedType.forResult(
             elementwiseResultType(
-              armList,
+              armOperands,
               shape,
               // The else branch IS the default clause: without one, unselected
               // positions are the no-match cell (`noMatchCell`).
-              ifFalse !== undefined
+              ifFalse !== undefined,
+              context.engine
             ),
             context.engine._typeResolver
           );
@@ -542,7 +542,12 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
               kind: 'union',
               types: [
                 scalar,
-                elementwiseResultType(armList, mixed, ifFalse !== undefined),
+                elementwiseResultType(
+                  armOperands,
+                  mixed,
+                  ifFalse !== undefined,
+                  context.engine
+                ),
               ],
             }),
             context.engine._typeResolver
@@ -558,7 +563,12 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
               kind: 'union',
               types: [
                 scalar,
-                elementwiseResultType(armList, {}, ifFalse !== undefined),
+                elementwiseResultType(
+                  armOperands,
+                  {},
+                  ifFalse !== undefined,
+                  context.engine
+                ),
               ],
             }),
             context.engine._typeResolver
@@ -822,11 +832,12 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         const shape = elementwiseConditionShape(conds.map((c) => c?.type));
         if (shape) {
           const elementwise = elementwiseResultType(
-            arms.map((x) => x.type),
+            arms,
             shape,
             // A literal `True` condition is the default clause: it matches
             // every position, so the `NaN` no-match cell is unreachable.
-            dflt >= 0
+            dflt >= 0,
+            context.engine
           );
           // A clause before the first mask whose condition is a scalar
           // `True` at run time selects its arm WHOLE (`evaluateWhich`), so
@@ -907,9 +918,10 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
               types: [
                 scalar,
                 elementwiseResultType(
-                  arms.map((x) => x.type),
+                  arms,
                   shapeOfMasks,
-                  dflt >= 0
+                  dflt >= 0,
+                  context.engine
                 ),
               ],
             }),
@@ -1242,7 +1254,7 @@ function restrictionType(
     cond === undefined ? undefined : elementwiseConditionShape([cond.type]);
   if (shape !== undefined && shape.rank !== 1)
     return BoxedType.forResult(
-      elementwiseResultType([expr.type], shape, false),
+      elementwiseResultType([expr], shape, false, context.engine),
       context.engine._typeResolver
     );
   if (cond !== undefined && isSubtype(cond.type, BOOLEAN_MASK_TYPE)) {
@@ -2800,6 +2812,58 @@ function armElementType(t: Readonly<Type>): Type {
 }
 
 /**
+ * True when an arm of an element-wise selection can put a value of any type
+ * at a position, so that the cell of the selection is `unknown`
+ * (`elementwiseResultType`):
+ *
+ * - an arm of type `unknown` that gives a value in place (`untypedArm`): a
+ *   symbol that is not declared, or a library operator applied to one. An
+ *   application of a function that is not a library operator is not read
+ *   this way, as in the scalar typing of `If` and `Which`: a recursive call
+ *   is typed `unknown` while the result type of its function is derived
+ *   from this selection, and that derivation needs the other arms. So a
+ *   call `g(1)` of a function that is not declared adds nothing to the cell
+ *   either.
+ * - an arm whose type says that its elements are `unknown`
+ *   (`typeHasUnknownCells`): `foo(L)` with `foo` not declared and `L` a
+ *   list of three numbers is a `list<unknown^3>`. A recursive call over a
+ *   list is typed this way too while the result type of its function is
+ *   derived, so `r := n ↦ Which(L < 2, r(L), True, 0)` gives a
+ *   `list<unknown^3>`: the type is less precise than the base case, and it
+ *   holds every value.
+ */
+function armGivesUnknownCells(
+  arm: OperandDescriptor,
+  engine: TypeHandlerContext['engine']
+): boolean {
+  return arm.type === 'unknown'
+    ? untypedArm(arm, engine)
+    : typeHasUnknownCells(arm.type);
+}
+
+/**
+ * True when a value of type `t`, used as an arm of an element-wise
+ * selection, can put a value of any type at a position: `t` is a list or an
+ * indexed collection whose element type (`armElementType`) is `unknown` or a
+ * union with an `unknown` option (`missing | unknown`), or `t` is a union
+ * with such an option or with the option `unknown` itself (`missing |
+ * unknown`, the type of an index into a `list<unknown>`). The type
+ * `unknown` alone is not decided here: `armGivesUnknownCells` reads the
+ * structure of such an arm.
+ */
+function typeHasUnknownCells(t: Readonly<Type>, depth = 0): boolean {
+  if (typeof t === 'string' || depth > 8) return false;
+  if (t.kind === 'union')
+    return t.types.some(
+      (x) => x === 'unknown' || typeHasUnknownCells(x, depth + 1)
+    );
+  if (t.kind !== 'list' && t.kind !== 'indexed_collection') return false;
+  const element = armElementType(t);
+  if (typeof element === 'string') return element === 'unknown';
+  return element.kind === 'union' && element.types.includes('unknown');
+}
+
+/**
  * The CELL type of an arm, for a selection whose condition is only possibly
  * a mask (`possiblyElementwiseResultType`): the rank of such a mask is not
  * known statically, so the result is a `broadcastable` of the cells of the
@@ -3050,24 +3114,38 @@ function scalarOrMaskConditionShape(
  *   depth, with `C` the cell type. This is the type
  *   `broadcastShapedResultType` (`common/type/utils.ts`) gives a broadcast
  *   of unknown depth.
+ *
+ * An arm that can put a value of any type at a position
+ * (`armGivesUnknownCells`) adds the option `unknown` to the cell.
+ * `elementwiseCellType` alone leaves such an arm out, because `widen` reads
+ * an `unknown` operand as "no information". With `L = [1, 3, 5]` and `foo`
+ * not declared, `Which(L < 2, foo(L), True, 0)` is a `list<unknown^3>`, not
+ * the `vector<integer^3>` of its other arm: it is `[1/2, 0, 0]` when `foo`
+ * is later defined as `x ↦ x / 2`. The reduced union keeps an absence that
+ * the other arms or the no-match cell put in the cell, and nothing else:
+ * `Which(L < 2, foo(L), True, Missing)` is a `list<missing | unknown>`.
  */
 function elementwiseResultType(
-  arms: ReadonlyArray<Type>,
+  arms: ReadonlyArray<OperandDescriptor>,
   shape: { rank?: 1; dimensions?: number[] },
-  hasDefault: boolean
+  hasDefault: boolean,
+  engine: TypeHandlerContext['engine']
 ): Type {
+  const known = elementwiseCellType(
+    arms.map((x) => x.type),
+    hasDefault
+  );
+  const elements: Type = arms.some((x) => armGivesUnknownCells(x, engine))
+    ? reduceType({ kind: 'union', types: [known, 'unknown'] })
+    : known;
   if (shape.rank === undefined)
     return {
       kind: 'list',
       elements: reduceType({
         kind: 'union',
-        types: [
-          elementwiseCellType(arms, hasDefault),
-          { kind: 'list', elements: 'any' },
-        ],
+        types: [elements, { kind: 'list', elements: 'any' }],
       }),
     };
-  const elements = elementwiseCellType(arms, hasDefault);
   // The union-free clause (tensor-unification design §D3 rule 2): a
   // dimensioned `list` type IS the tensor claim (`isTensor` is exactly
   // `dimensions !== undefined`), and a heterogeneous cell population never

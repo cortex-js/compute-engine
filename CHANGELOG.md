@@ -306,6 +306,13 @@
   The type is now `real`. In Epsil, with the same `n`, the type of
   `function f() { let n: real = 2; n + 1 }` was `() -> list<real>` and is now
   `() -> real`. The values did not change.
+- **The type of an element-wise `If` or `Which` now holds the values of a
+  branch whose elements have an unknown type.** With `L = [1, 3, 5]` and `f`
+  not defined yet, the type of `Which(L < 2, f(L), True, 0)` was
+  `vector<integer^3>`, the type of the other branch alone. When `f` is later
+  defined as `x ↦ x / 2`, the value is `[1/2, 0, 0]`. The type is now
+  `list<unknown^3>`. The same applies to a branch that is a symbol with no
+  type, and to a branch declared `list<unknown>`.
 
 ## 0.181.1 _2026-11-05_
 

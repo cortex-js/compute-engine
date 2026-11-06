@@ -1748,3 +1748,162 @@ describe('the selection rule of 2026-11-02: values', () => {
     expect(ce.parse('\\{t>0: 1\\}').evaluate().toString()).toBe('"Missing"');
   });
 });
+
+describe('an arm whose cells have an unknown type (CE-828)', () => {
+  function withList(): ComputeEngine {
+    const ce = engine();
+    ce.assign('L', ce.box(['List', 1, 3, 5]));
+    return ce;
+  }
+
+  test('a call of a function that is not declared keeps the cell unknown', () => {
+    const ce = withList();
+    expect(ce.box(['foo', 'L']).type.toString()).toBe('list<unknown^3>');
+    const json = ['Which', ['Less', 'L', 2], ['foo', 'L'], 'True', 0] as const;
+    const before = ce.box(json as any).type;
+    expect(before.toString()).toBe('list<unknown^3>');
+    // The type given before `foo` has a definition holds the value given
+    // after: a `vector<integer^3>`, the type of the other arm alone, does
+    // not hold `1/2`.
+    ce.box([
+      'Assign',
+      'foo',
+      ['Function', ['Divide', 'x', 2], 'x'],
+    ]).evaluate();
+    const value = ce.box(json as any).evaluate();
+    expect(value.toString()).toBe('[1/2,0,0]');
+    expect(value.type.matches(before)).toBe(true);
+    expect(value.type.matches('vector<integer^3>')).toBe(false);
+  });
+
+  test('If and the cases environment follow the same rule', () => {
+    const ce = withList();
+    expect(
+      ce.box(['If', ['Less', 'L', 2], ['foo', 'L'], 0]).type.toString()
+    ).toBe('list<unknown^3>');
+    expect(
+      ce
+        .parse('\\begin{cases} g(L) & L<2 \\\\ 0 & \\text{otherwise}\\end{cases}')
+        .type.toString()
+    ).toBe('list<unknown^3>');
+  });
+
+  test('a symbol that is not declared, or a library operator over one', () => {
+    const ce = withList();
+    ce.declare('v', 'list<unknown>');
+    for (const arm of ['bar', 'v', ['At', 'v', 1], ['Add', ['foo', 'L'], 1]])
+      expect(
+        ce.box(['Which', ['Less', 'L', 2], arm, 'True', 0] as any).type.toString()
+      ).toBe('list<unknown^3>');
+  });
+
+  test('a collection type whose elements are unknown', () => {
+    const ce = withList();
+    ce.declare('ic', 'indexed_collection<unknown>');
+    ce.declare('tu', 'tensor<unknown>');
+    ce.declare('un', 'integer | list<unknown>');
+    for (const arm of ['ic', 'tu', 'un'])
+      expect(
+        ce.box(['Which', ['Less', 'L', 2], arm, 'True', 0]).type.toString()
+      ).toBe('list<unknown^3>');
+  });
+
+  test('an absent arm stays in the cell beside unknown', () => {
+    const ce = withList();
+    for (const arm of ['bar', ['foo', 'L']])
+      expect(
+        ce
+          .box(['Which', ['Less', 'L', 2], arm, 'True', 'Missing'] as any)
+          .type.toString()
+      ).toBe('list<missing | unknown>');
+  });
+
+  test('without a default clause the cell holds the no-match cell', () => {
+    const ce = withList();
+    // The only arm is not provably numeric, so a position that no clause
+    // selects is `Missing`.
+    expect(
+      ce.box(['Which', ['Less', 'L', 2], ['foo', 'L']]).type.toString()
+    ).toBe('list<missing | unknown>');
+    // The other arm is a number, so that position is `NaN`, which `unknown`
+    // holds with no absence option.
+    const json = [
+      'Which',
+      ['Less', 'L', 2],
+      ['foo', 'L'],
+      ['Greater', 'L', 4],
+      7,
+    ] as const;
+    const before = ce.box(json as any).type;
+    expect(before.toString()).toBe('list<unknown^3>');
+    ce.box([
+      'Assign',
+      'foo',
+      ['Function', ['Divide', 'x', 2], 'x'],
+    ]).evaluate();
+    const value = ce.box(json as any).evaluate();
+    expect(value.toString()).toBe('[1/2,NaN,7]');
+    expect(value.type.matches(before)).toBe(true);
+  });
+
+  test('a restriction by a mask of unknown depth', () => {
+    const ce = withList();
+    ce.declare('T', 'tensor<boolean>');
+    for (const arm of ['bar', ['foo', 'L']])
+      expect(ce.box(['If', 'T', arm] as any).type.toString()).toBe(
+        'list<missing | unknown>'
+      );
+  });
+
+  test('a mask of unknown length or depth gives a list of unknown cells', () => {
+    const ce = withList();
+    ce.declare('M', 'list<boolean>');
+    ce.declare('T', 'tensor<boolean>');
+    for (const mask of ['M', 'T'])
+      expect(
+        ce.box(['Which', mask, ['foo', 'L'], 'True', 0]).type.toString()
+      ).toBe('list<unknown>');
+  });
+
+  test('a condition that is a scalar or a mask keeps the unknown cells', () => {
+    const ce = withList();
+    ce.declare('m', 'boolean | list<boolean>');
+    expect(
+      ce.box(['Which', 'm', ['foo', 'L'], 'True', 0]).type.toString()
+    ).toBe('integer | list<unknown>');
+  });
+
+  test('an arm of a known type is typed as before', () => {
+    const ce = withList();
+    // `Sin(bar)` is a number whatever `bar` is, and `u: list<integer>` has
+    // integer elements, so neither arm makes the cell unknown.
+    ce.declare('u', 'list<integer>');
+    expect(
+      ce
+        .box(['Which', ['Less', 'L', 2], ['Sin', 'bar'], 'True', 0])
+        .type.toString()
+    ).toBe('vector<3>');
+    expect(
+      ce.box(['Which', ['Less', 'L', 2], 'u', 'True', 0]).type.toString()
+    ).toBe('vector<integer^3>');
+  });
+
+  test('a recursive call typed unknown leaves the type to the other arm', () => {
+    // While the result type of `r` is derived, the call `r(n - 1)` is typed
+    // `unknown`. That arm adds nothing, as in a scalar conditional, so the
+    // function is typed by its base case.
+    const ce = withList();
+    ce.box([
+      'Assign',
+      'r',
+      [
+        'Function',
+        ['If', ['Less', 'L', 'n'], ['r', ['Subtract', 'n', 1]], 0],
+        'n',
+      ],
+    ]).evaluate();
+    expect(ce.box('r').type.toString()).toBe(
+      '(n: unknown) -> vector<integer^3>'
+    );
+  });
+});

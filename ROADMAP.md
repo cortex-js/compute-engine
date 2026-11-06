@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-836.
+Next free reference: CE-837.
 
 **Entry format.**
 
@@ -134,16 +134,23 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
 
 ## Types and type inference
 
-### CE-828. The type of an element-wise `Which` drops an arm whose element type is `unknown`
+### CE-836. A call of a function that is not declared, as an arm of `If` or `Which`, adds nothing to the type
 
-**Status:** ready; defect, S.
-**Witness:** plausible; with `L = [1, 3, 5]` and `foo` undeclared, `Which(L < 2, foo(L), True, 0)` has the type `vector<integer^3>`; when `foo` is defined later and gives `[0.5, 30, 50]`, the same expression is `[0.5, 0, 0]`.
+**Status:** ready; defect, M.
+**Witness:** plausible; with `q: real` and `g` not declared, `If(q < 2, g(1), 0)` has the type `integer`; when `g` is defined later as `x ↦ x / 2` and `q = 1`, the same expression is `1/2`. With `L = [1, 3, 5]`, `Which(L < 2, g(1), True, 0)` has the type `vector<integer^3>` and is `[1/2, 0, 0]`.
 
-The arm `foo(L)` has the type `list<unknown^3>`. `elementwiseResultType()` in
-`library/control-structures.ts` keeps only the integer of the other arm, so the
-result claims integer cells that a later value of `foo` does not have. The
-result element type must admit the values of an `unknown` arm, for example
-`list<unknown^3>`.
+The arm `g(1)` has the type `unknown`, and the join of the arm types leaves
+an `unknown` arm out. `untypedArm()` in `library/control-structures.ts` makes
+the result `unknown` for a symbol that is not declared and for a library
+operator over one, but not for a call of a function that is not a library
+operator: a recursive call is typed `unknown` while the result type of its
+function is derived, and a recursive function must keep the type of its base
+case (`test/compute-engine/ce-447-conditional-unknown-branch.test.ts`). The
+scalar typing of `If` and `Which` and the element-wise typing
+(`armGivesUnknownCells()`) both use this rule. The fix must tell a function
+whose result type is being derived from a name that has no definition, and
+read a call of the second as `unknown`. A call over a list (`g(L)`, a
+`list<unknown^3>`) is already kept.
 
 ### CE-545. A call over an `unknown` operand and over the wide CE-502 form are typed by different rules
 
