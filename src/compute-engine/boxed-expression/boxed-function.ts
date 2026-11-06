@@ -513,6 +513,7 @@ import {
   isCollectionSourceOperator,
   isOptimumFunctionOperand,
 } from './validate.js';
+import { concreteValueOf } from './value-membership.js';
 import {
   functionLiteralSignatureType,
   inferFunctionLiteralEffects,
@@ -8823,7 +8824,9 @@ export class BoxedFunction
       // `strict: false` opts out of argument checking as such). A function
       // literal under a signature DECLARED on its name has the scalar
       // parameters of the declaration checked here
-      // (`declaredScalarConformance`).
+      // (`declaredScalarConformance`), and its call stays unevaluated when the
+      // type of a symbolic argument does not decide the check
+      // (`declaredLiteralCallUndecided`).
       //
       // A set at a numeric parameter of a built-in broadcastable operator is
       // an error. The broadcast steps above decline for such a set, and this
@@ -8846,6 +8849,8 @@ export class BoxedFunction
       ) {
         const nonconforming = genericRuntimeConformance(this.engine, def, tail);
         if (nonconforming !== undefined) return nonconforming;
+        if (declaredLiteralCallUndecided(def, tail))
+          return this._withSameBinding(tail);
       }
 
       //
@@ -10266,6 +10271,8 @@ export class BoxedFunction
       ) {
         const nonconforming = genericRuntimeConformance(this.engine, def, tail);
         if (nonconforming !== undefined) return nonconforming;
+        if (declaredLiteralCallUndecided(def, tail))
+          return this._withSameBinding(tail);
       }
 
       // 4/ Create a scope if needed
@@ -15928,7 +15935,8 @@ function absentAtNumericParameter(
  *   application, the last two promise nothing. `declared` must therefore
  *   spell a placeholder slot `unknown` or `any`, not the type inferred for
  *   it.
- * - Only a concrete value. A symbolic argument is left alone.
+ * - Only a concrete value. A symbolic argument is left alone here, and
+ *   `declaredArgumentUndecided` says whether its call stays unevaluated.
  * - A collection (a list, a tuple) at a scalar parameter of a function that
  *   broadcasts is not an error: the function is applied to its elements.
  * - `NaN` at a numeric parameter is accepted, and an absent value
@@ -15987,6 +15995,105 @@ function declaredScalarConformance(
     ops,
     // `NaN` is accepted at a numeric parameter and checked anywhere else.
     (i) => (isNumericParam(i) ? 'handle' : 'reject')
+  );
+}
+
+/**
+ * True when an EVALUATED argument of a user function has no concrete value
+ * and its type does not show that it fits the SCALAR parameter type that the
+ * author declared. The call then stays over its evaluated arguments, and a
+ * later evaluation checks the value (`declaredScalarConformance`).
+ *
+ * With `h` declared `(integer) -> integer` and assigned `k ↦ 2k`, and `m` a
+ * symbol with no value, `h(m)` stays `h(m)`. If the body was applied, the
+ * result `2m` would hold no trace of the parameter type, and after
+ * `m := 1.5` it would give `3`, where `h(1.5)` is an `incompatible-type`
+ * error.
+ *
+ * A type that the engine only inferred does not decide: `h(m)` itself infers
+ * `m: integer`, and an assignment widens that type. The argument `m` declared
+ * `integer` does decide, and the body is applied: `h(m)` gives `2m`.
+ *
+ * A symbol with no declared type stands for a real number, so at a parameter
+ * that admits every real number the body is applied to such a symbol, and to
+ * an expression whose type fits: with `f` declared `(real) -> real` and
+ * assigned `x ↦ x^2`, `f(x)` gives `x^2`, and `D(f(x), x)` gives `2x`. A later
+ * value outside the parameter type (`x := i`) is not checked in the result.
+ * An expression whose type does not fit stays: `f(x + i)` and `f(Sqrt(x))`.
+ *
+ * The test reads the type of the argument and not how the type was derived.
+ * A predicate is a boolean for every value of its symbols, so `p(x > 0)` at a
+ * `boolean` parameter applies the body. An expression over an inferred symbol
+ * with a numeric type stays at a narrower parameter, also when its value
+ * always fits: `h(Floor(q))` stays `h(Floor(q))`.
+ */
+function declaredArgumentUndecided(
+  declared: Type,
+  ops: ReadonlyArray<Expression>
+): boolean {
+  if (typeof declared === 'string' || declared.kind !== 'signature')
+    return false;
+  const args = declared.args ?? [];
+  const opt = declared.optArgs ?? [];
+  return ops.some((op, i) => {
+    if (!op.isValid || concreteValueOf(op) !== undefined) return false;
+    if (isFunction(op, 'List') || isFunction(op, 'Tuple')) return false;
+    const p =
+      i < args.length
+        ? args[i].type
+        : i < args.length + opt.length
+          ? opt[i - args.length].type
+          : declared.variadicArg?.type;
+    if (p === undefined || runtimeCheckExemptParam(p)) return false;
+    const type = op.type.type;
+    // A collection (`Range(1, 2)`) has its value already: no later assignment
+    // decides it, and the call must not stay for it. A string counts as a
+    // collection of characters, but a symbol typed `string` can have no value.
+    if (isSubtype(type, 'collection') && !isSubtype(type, 'string'))
+      return false;
+    const fits = isSubtype(type, p);
+    const inferred = hasInferredUnknown(op);
+    if (isSubtype('real', p)) return !fits && !(isSymbol(op) && inferred);
+    if (!fits) return true;
+    return inferred && (isSymbol(op) || isSubtype(type, 'number'));
+  });
+}
+
+/**
+ * True when a free symbol of `expr` has a type that the engine only inferred.
+ * Each occurrence is read through its own binding. During the call of a user
+ * function, a lookup by name finds a parameter of that function with the same
+ * name, which is not the symbol of the caller that the argument holds.
+ */
+function hasInferredUnknown(expr: Expression): boolean {
+  const unknowns = new Set(expr.unknowns);
+  if (unknowns.size === 0) return false;
+  const visit = (x: Expression): boolean => {
+    if (isSymbol(x)) {
+      if (!unknowns.has(x.symbol)) return false;
+      if (x.valueDefinition !== undefined)
+        return x.valueDefinition.inferredType === true;
+      const binding = x.engine.lookupDefinition(x.symbol);
+      return isValueDef(binding) && binding.value.inferredType === true;
+    }
+    return isFunction(x) && x.ops.some(visit);
+  };
+  return visit(expr);
+}
+
+/** {@link declaredArgumentUndecided} on the operator-definition route: `def`
+ * is a function literal under a signature DECLARED on its name, the case
+ * `genericRuntimeConformance()` checks. */
+function declaredLiteralCallUndecided(
+  def: BoxedOperatorDefinition | undefined,
+  ops: ReadonlyArray<Expression>
+): boolean {
+  if (!(def instanceof _BoxedOperatorDefinition)) return false;
+  if (def.inferredSignature || !isUserFunctionDef(def)) return false;
+  if (!def._isLambda || def._derivedSignature) return false;
+  return declaredArgumentUndecided(
+    def._validationSignature ?? def.signature.type,
+    ops
   );
 }
 
@@ -16490,6 +16597,18 @@ function applyFunctionLiteralWith(
       args
     );
   };
+  // The call over `args` when the type of an argument does not decide the
+  // check of the declared parameter type (`declaredArgumentUndecided`). A later
+  // evaluation checks the value.
+  const undecidedCall = (
+    args: ReadonlyArray<Expression>
+  ): Expression | undefined =>
+    expr.engine.strict &&
+    !def.inferredType &&
+    declaredType !== undefined &&
+    declaredArgumentUndecided(def._signatureSkeleton ?? declaredType, args)
+      ? expr._withSameBinding(args)
+      : undefined;
   // The arguments are evaluated, so an infinite source (`Range(1, +∞)`,
   // `Cycle`) or one of unknown length maps too (`isUnknownLengthBroadcast`),
   // lazily, as at the operator-definition post-evaluation broadcast (step 4b).
@@ -16606,6 +16725,7 @@ function applyFunctionLiteralWith(
                       ._fn(expr.operator, zipped)
                       .evaluateAsync(options)
                   : (scalarConformance(zipped) ??
+                    undecidedCall(zipped) ??
                     apply(value, zipped, {
                       ...options,
                       awaitStatements: true,
@@ -16660,6 +16780,7 @@ function applyFunctionLiteralWith(
             )
               ? expr.engine._fn(expr.operator, zipped).evaluate(options)
               : (scalarConformance(zipped) ??
+                  undecidedCall(zipped) ??
                   appliedOrRefused(
                     apply(value, zipped, {
                       ...options,
@@ -16780,6 +16901,8 @@ function applyFunctionLiteralWith(
     // `Apply` of the literal.
     const nonconforming = scalarConformance(ops);
     if (nonconforming !== undefined) return nonconforming;
+    const undecided = undecidedCall(ops);
+    if (undecided !== undefined) return undecided;
     // Under `.N()`, the written operands are recorded behind the
     // activations (`exactArgumentSources`), so that a jump in the body
     // (`Floor(x)`) reads the exact value of `x` where the float is near the

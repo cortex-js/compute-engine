@@ -117,11 +117,16 @@ describe.each([1, 2])(
       );
     });
 
+    // The type of a symbol with no declared type does not decide the check,
+    // so the call stays until a value decides it. An argument declared with
+    // the type of the parameter does decide.
     test('a symbolic argument', () => {
       const ce = new ComputeEngine();
       ce.declare('f', { signature: '(integer) -> unknown' });
       for (let i = 0; i < assignments; i++) ce.assign('f', ce.box(INC as any));
-      expect(ce.box(['f', 'n']).evaluate().toString()).toBe('n + 1');
+      expect(ce.box(['f', 'n']).evaluate().toString()).toBe('f(n)');
+      ce.declare('j', 'integer');
+      expect(ce.box(['f', 'j']).evaluate().toString()).toBe('j + 1');
     });
 
     test('NaN and an absent value at a numeric parameter', () => {

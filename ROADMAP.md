@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-817.
+Next free reference: CE-819.
 
 **Entry format.**
 
@@ -2735,6 +2735,31 @@ shipped (contract in `docs/CHECKPOINT-MODEL.md`; tests include
   since 2026-10-16 (Tycho `docs/COMPUTE_ENGINE.md`, section "Checkpoint /
   Restore"). So this stage can start. Until it lands, both mechanisms exist
   together.
+
+### CE-817. A parameter annotated in the function is not checked when a later value decides it
+
+**Status:** ready; defect, M.
+**Witness:** plausible; `function h(k: integer) { 2*k }`, `let m`,
+`let r = g(h(m))`, `m = 1.5`, `r` gives `g(3)` and should give
+`incompatible-type`.
+
+The same program with `let h: (integer) -> integer` and `function h(k)` gives
+`incompatible-type`, because a declared signature keeps the call while the type
+of the argument does not decide (`declaredArgumentUndecided`,
+`boxed-expression/boxed-function.ts`; rule in `docs/ERROR-MODEL.md`, "A symbolic
+argument whose type does not decide"). The annotated form is applied by
+`makeLambda` (`function-utils.ts`, step 4b), which accepts a symbolic argument.
+`function-utils.ts` cannot import `validate.ts`, so the test must move to a
+module that both can import, or be injected as `_validateArguments` is.
+
+### CE-818. A function with an annotated parameter and result gives an unevaluated call for a refused argument
+
+**Status:** ready; defect, S.
+**Witness:** plausible; `function h(k: integer): integer { 2*k }`, `h(1.5)` gives
+`h(1.5)` and should give `incompatible-type`.
+
+Without the result annotation, `function h(k: integer) { 2*k }`, `h(1.5)` gives
+`incompatible-type`.
 
 ### CE-312. Function declaration hoisting: run-time checks, cancellation and route differences
 

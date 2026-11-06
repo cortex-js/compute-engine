@@ -1954,11 +1954,57 @@ arguments are now checked against the scalar parameter types of the
 declaration before the function is applied (`declaredScalarConformance`,
 `boxed-expression/boxed-function.ts`), and a value that does not fit is the
 `incompatible-type` error an Epsil `function` with the same annotation
-answers. Not checked: a symbolic argument; a collection or a point at a
-scalar parameter of a function that broadcasts (the function is applied to
-the elements); a slot declared `unknown` or `any`; `NaN`, and an absent
-value, at a numeric parameter. An absent value at another scalar parameter
-is refused unless the declared type has a `missing` member.
+answers. Not checked: a collection or a point at a scalar parameter of a
+function that broadcasts (the function is applied to the elements); a slot
+declared `unknown` or `any`; `NaN`, and an absent value, at a numeric
+parameter. An absent value at another scalar parameter is refused unless the
+declared type has a `missing` member.
+
+**A symbolic argument whose type does not decide — RULED 2026-11-05.** This
+replaces the sentence "Not checked: a symbolic argument" of the 2026-09-30
+decision above. With `h` declared `(integer) -> integer` and assigned `k ↦ 2k`,
+and `m` with no value, `h(m)` gave `2m`. The result held no trace of the
+parameter type, so after `m := 1.5` its value was `3`, where `h(1.5)` is an
+`incompatible-type` error. The call now stays `h(m)` over its evaluated
+arguments, and a later evaluation checks the value
+(`declaredArgumentUndecided`, `boxed-expression/boxed-function.ts`). What each
+argument with no concrete value does:
+
+- Its type fits the parameter and rests on no inferred type: the body is
+  applied. `h(n)` with `n` declared `integer` gives `2n`.
+- The parameter admits every real number (`real`, `number`), and the argument
+  is a symbol with no declared type, or its type fits the parameter: the body
+  is applied, because a symbol with no declared type stands for a real number.
+  `f(x)` with `f` declared `(real) -> real` gives `x^2`, and `D(f(x), x)` gives
+  `2x`. A later value outside the parameter type (`x := i`) is not checked in
+  that result. `f(x + i)` and `f(Sqrt(x))` stay, because their types do not fit.
+  `f(x + 1)` stays too while `x` has neither a declared nor an inferred type,
+  because the type of `x + 1` is then `number`. With `x` declared `real`, or
+  after an earlier `f(x)` has inferred `x: real`, the type of `x + 1` is `real`,
+  and the body is applied.
+- It has a boolean type, or another type that is not numeric, and it is not a
+  bare symbol: the body is applied. `p(x > 0)` at a `boolean` parameter does.
+- Otherwise the call stays: `h(m)`, `h(m + 1)`, `h(z)` with `z` declared `real`.
+  This reads the type and not how it was derived, so `h(Floor(q))` stays, although
+  its value always fits.
+
+Not in this rule:
+
+- An annotation on the parameter of the literal itself (`(k: integer) ↦ 2k`):
+  its application still accepts a symbolic argument.
+- An element of a declared `broadcastable<T>` map or of a point-list map: with
+  `h` declared `(broadcastable<integer>) -> integer`, `h([m, 1])` applies the
+  body to `m`. An element of a list at a plain scalar parameter stays
+  (`[h(m), 2]`).
+- A symbolic scalar beside a mapped argument of a declared `broadcastable<T>` or
+  point-list map: with `h` declared `(integer, broadcastable<real>) -> real`,
+  `h(m, [1, 2])` is the list `[m, 2m]`, and the map does not stay for `m`. A
+  length error of the mapped arguments and a lazy collection beside them need
+  the map to run, so the check does not come first. A function declared with
+  `evaluate` also applies the body at evaluation when a call boxed while `m` had
+  no value is evaluated after `m := 1.5`.
+- An argument with a collection type: no later assignment decides it. The
+  broadcast and the maps handle it.
 
 **An accessor states the absent case only when it can happen — RULED
 2026-09-30.** `First`, `Second`, `Third`, `Last` and `At` with a literal
