@@ -3066,6 +3066,10 @@ export type OperatorDefinitionFlags = {
    *   an absent operand is an `incompatible-type` error.
    * - A `Which` distributes over at most 16 combinations of branches;
    *   past that the application is given to the handler unchanged.
+   * - A `Which` that has a list of conditions selects at each position, so
+   *   its value is a list, and it does not distribute: when it cannot be
+   *   evaluated to a list, the handler receives it unchanged. With `foo`
+   *   undeclared, `Length(Which([True, False], foo(L), True, 0))` stays held.
    *
    * For example, with `t` free, `PointX(If(0 < t, (1, 2)))` is
    * `If(0 < t, 1)`, which is `1` when `t = 2` and `NaN` (the marker of the

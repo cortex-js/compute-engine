@@ -74,6 +74,17 @@
 
 ### Resolved Issues
 
+- **A `Which` or an `If` over a list of conditions no longer copies an arm that
+  is a list with no elements to read.** With `L = [1, 3, 5]` and `foo`
+  undeclared, `Which(L < 2, foo(L), True, 0)` was `[foo([1, 3, 5]), 0, 0]`, so a
+  list of 500 elements gave 500 copies of the list at each read. It now stays
+  `Which([True, False, False], foo([1, 3, 5]), True, 0)`, and it selects when
+  `foo` has a definition. An operator that reads the whole list stays around
+  such a selection: with `M` declared `list<number>` and no value,
+  `Length(Which(L < 2, M, True, 0))` was `3` from the wrong list `[M, 0, 0]`, and
+  it now stays `Length(Which([True, False, False], M, True, 0))` until `M` has a
+  value. The same applies to a `Which` whose list condition is not decided:
+  `Length(Which(L < k, L, True, 0))` was a `Which` with an error in an arm.
 - **An assignment to a list element is now a parse error, and it no longer
   replaces the function `At`.** With `L` a list, `L[k]\coloneq 5` replaced `At`
   for the whole engine, so that `L[2]` gave `[5, 5, 5]`, and `L[2]\coloneq 5`

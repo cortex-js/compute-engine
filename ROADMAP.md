@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-828.
+Next free reference: CE-829.
 
 **Entry format.**
 
@@ -133,6 +133,17 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
   (CE-354 to CE-359)
 
 ## Types and type inference
+
+### CE-828. The type of an element-wise `Which` drops an arm whose element type is `unknown`
+
+**Status:** ready; defect, S.
+**Witness:** plausible; with `L = [1, 3, 5]` and `foo` undeclared, `Which(L < 2, foo(L), True, 0)` has the type `vector<integer^3>`; when `foo` is defined later and gives `[0.5, 30, 50]`, the same expression is `[0.5, 0, 0]`.
+
+The arm `foo(L)` has the type `list<unknown^3>`. `elementwiseResultType()` in
+`library/control-structures.ts` keeps only the integer of the other arm, so the
+result claims integer cells that a later value of `foo` does not have. The
+result element type must admit the values of an `unknown` arm, for example
+`list<unknown^3>`.
 
 ### CE-827. The type of a block local reads a global of the same name
 

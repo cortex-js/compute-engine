@@ -765,7 +765,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     Which: {
       description:
         '`Which(c1, e1, c2, e2, …)` evaluates to the value of the first `e` whose condition `c` is `True`, and to `Missing` when no condition is `True`. A last clause with the condition `True` is the default. Only the selected expression is evaluated.\n' +
-        'Element-wise selection: when a condition is a flat list of booleans (`L < 3` with `L` a list), the selection is made at each position, as `numpy.select` does, and the value is a list. At each position, the first clause whose condition is `True` there gives the value: an expression that is a list gives its element at that position, any other expression gives its own value. With `L = [1, 3, 5]`, `Which(L < 2, 10, L < 4, L, True, 0)` is `[10, 3, 0]`.\n' +
+        'Element-wise selection: when a condition is a flat list of booleans (`L < 3` with `L` a list), the selection is made at each position, as `numpy.select` does, and the value is a list. At each position, the first clause whose condition is `True` there gives the value: an expression that is a list gives its element at that position, any other expression gives its own value. With `L = [1, 3, 5]`, `Which(L < 2, 10, L < 4, L, True, 0)` is `[10, 3, 0]`. A selected expression whose type is a list and whose elements cannot be read yet (`foo(L)` with `foo` undeclared) keeps the `Which` symbolic.\n' +
         '  - A condition that is not a list applies to every position.\n' +
         '  - Every expression is a number, a point, or a flat list of numbers or of points with the length of the condition, and all have one kind. A nested list, a list of another length, a string and a list of strings are static errors, as is a condition that is a nested list or holds a `Missing` cell. A relation (a boolean) is accepted.\n' +
         '  - A position that no clause selects holds `NaN` for a number, a point whose coordinates are `NaN` for a point, and `Missing` for a boolean.',
@@ -2388,14 +2388,18 @@ function conditionCells(c: Expression): MaskList | undefined {
  * the selection is computed in a JS loop — never a stack of lazy broadcast
  * `Map`s, which costs ~8 µs per element per condition.
  *
- * Returns `undefined` when the expression must stay inert.
+ * Returns `undefined` when the expression must stay inert. `evaluatedArms`,
+ * when given, then holds the value of each arm that was evaluated, at the index
+ * of its clause in `clauses`: a caller puts these values in the held node, so
+ * that an effect of an arm does not run again when the held node is evaluated.
  */
 function evaluateElementwiseSelection(
   ce: ComputeEngine,
   clauses: ReadonlyArray<{ cond: Expression; arm: Expression }>,
   first: { cond: Expression; mask: MaskList },
   options: Partial<EvaluateOptions> & { engine: ComputeEngine },
-  noMatchArmTypes?: ReadonlyArray<Type>
+  noMatchArmTypes?: ReadonlyArray<Type>,
+  evaluatedArms?: Expression[]
 ): Expression | undefined {
   // 1/ Evaluate the conditions in clause order and materialize the
   // list-valued ones. Clauses after a lifted `True` are unreachable: their
@@ -2406,6 +2410,8 @@ function evaluateElementwiseSelection(
   // scalar `True`.
   const selectors: MaskCell[] = [];
   const arms: Expression[] = [];
+  // The index in `clauses` of each retained clause.
+  const clauseOfArm: number[] = [];
   for (let k = 0; k < clauses.length; k++) {
     const { cond, arm } = clauses[k];
     if (arm === undefined) return undefined;
@@ -2428,6 +2434,7 @@ function evaluateElementwiseSelection(
     if (s === 'True') {
       selectors.push('True');
       arms.push(arm);
+      clauseOfArm.push(k);
       break;
     }
     const mask = k === 0 ? first.mask : conditionCells(c);
@@ -2451,6 +2458,7 @@ function evaluateElementwiseSelection(
     participants.push(c);
     selectors.push(mask);
     arms.push(arm);
+    clauseOfArm.push(k);
   }
 
   const mismatch = broadcastLengthMismatch(ce, participants);
@@ -2482,6 +2490,7 @@ function evaluateElementwiseSelection(
   for (let k = 0; k < arms.length; k++) {
     if (!reached.has(k)) continue;
     const value = arms[k].canonical.evaluate(options);
+    if (evaluatedArms !== undefined) evaluatedArms[clauseOfArm[k]] = value;
     // An arm whose static type does not settle its shape can have a value
     // that the canonical form refuses (`selectionArmError()`): a list whose
     // elements are lists, a string. That value is refused with the same
@@ -2489,6 +2498,13 @@ function evaluateElementwiseSelection(
     const refused = runtimeArmError(ce, arms[k], value);
     if (refused !== undefined) return refused;
     if (!isBroadcastableCollection(value)) {
+      // A value that the static type gives as a list and that has no elements
+      // to read (`foo(L)` with `foo` undeclared has the type of a list of the
+      // length of `L`) is not a scalar: a copy at each position would give a
+      // list in a cell, and N copies of a list of N elements. The selection
+      // stays held, as for a list arm whose elements cannot be read
+      // (`selectionArmCells()`).
+      if (isOrderedCarrierType(value.type.type)) return undefined;
       values[k] = value;
       continue;
     }
@@ -3146,12 +3162,23 @@ function evaluateIf(
     const clauses = [{ cond, arm: ifTrue }];
     if (ifFalse !== undefined)
       clauses.push({ cond: engine.True, arm: ifFalse });
-    return evaluateElementwiseSelection(
+    const evaluatedArms: Expression[] = [];
+    const selected = evaluateElementwiseSelection(
       engine,
       clauses,
       { cond: evaluated, mask },
-      options
+      options,
+      undefined,
+      evaluatedArms
     );
+    if (selected !== undefined) return selected;
+    // A selection that cannot be made now (an arm whose elements cannot be
+    // read) is held around the evaluated condition and the evaluated arms.
+    if (evaluatedArms.length > 0)
+      return engine._fn('If', [
+        evaluated,
+        ...ops.slice(1).map((x, k) => evaluatedArms[k] ?? x),
+      ]);
   }
   // Every other condition leaves the `If` UNEVALUATED. That covers an
   // undecided boolean — a relation with free variables (`x = 4` stays
@@ -3512,14 +3539,29 @@ function evaluateWhich(
           reachableArmTypes.push(args[k + 1].type.type);
           if (sym(args[k]) === 'True') break;
         }
+        const evaluatedArms: Expression[] = [];
         const result = evaluateElementwiseSelection(
           options.engine,
           clauses,
           { cond: evaluated, mask },
           options,
-          reachableArmTypes
+          reachableArmTypes,
+          evaluatedArms
         );
         if (result) return result;
+        // A selection that cannot be made now (an arm whose elements cannot
+        // be read) is held around the evaluated condition and the evaluated
+        // arms.
+        if (evaluatedArms.length > 0)
+          return options.engine._fn('Which', [
+            ...args.slice(0, i),
+            evaluated,
+            ...args
+              .slice(i + 1)
+              .map((x, k) =>
+                k % 2 === 0 ? (evaluatedArms[k / 2] ?? x) : x
+              ),
+          ]);
       }
       // Every other condition leaves the WHOLE `Which` unevaluated: an
       // undecided boolean (`x = 4` with a free `x`, which stays symbolic under

@@ -245,6 +245,7 @@ import {
   isNaNPointValue,
 } from './type-guards.js';
 import {
+  isElementwiseWhich,
   isRestriction,
   mayHoldRestriction,
   restrictionParts,
@@ -12215,7 +12216,8 @@ const CONDITIONAL_THREADING_SKIP = new Set([
  * broadcastable lifts it at the positions that its `threadsConditionals`
  * flag selects; at those positions a `List` whose every cell has the same
  * condition is first read back as that restricted list
- * (`regroupRestrictedCells`).
+ * (`regroupRestrictedCells`). Such an operator does not lift a `Which` with a
+ * list of conditions (`threadConditional`).
  *
  * The lift is written once for the two routes, as steps
  * (`ConditionalThreadingSteps`): it yields each application of the operator
@@ -12495,9 +12497,13 @@ function* threadConditional(
   const tail = lazy
     ? rawTail.map((x) => x.evaluate(operandOptions(options)))
     : rawTail;
+  // A `Which` with a list of conditions selects at each position, so its value
+  // is a list, and no condition applies to the whole value. An operator with
+  // `threadsAt` reads that list whole, and stays around it: applied to each
+  // arm, `Length(Which([True, False], foo(L), True, 0))` would read `Length(0)`.
   const isThreaded = (x: Expression, i: number, head: 'If' | 'Which') =>
     (head === 'If' ? isRestriction(x) : isFunction(x, head)) &&
-    (threadsAt === undefined || threadsAt(i));
+    (threadsAt === undefined || (threadsAt(i) && !isElementwiseWhich(x)));
 
   // --- Restriction lift (guard-outermost) ---
   if (tail.some((x, i) => isThreaded(x, i, 'If'))) {
@@ -12724,6 +12730,12 @@ function* threadConditional(
   // (and re-running any effectful selected branch). For a non-`lazy` operator
   // `tail === rawTail` was already evaluated by the caller, so there is nothing
   // to reuse — fall through.
+  //
+  // A `Which` with a list of conditions that an operator with `threadsAt` does
+  // not lift is still in the tail, so the application of that tail would come
+  // back here without end. The handler of the operator receives it instead.
+  if (threadsAt !== undefined && tail.some((x) => isElementwiseWhich(x)))
+    return undefined;
   if (lazy) {
     // A conditional operand that evaluated to `Missing` (a restriction whose
     // condition is false) leaves an absent scalar in the tail. The folded

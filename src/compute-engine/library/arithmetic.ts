@@ -484,6 +484,7 @@ import {
   kindValueIsNaN,
 } from '../boxed-expression/type-guards.js';
 import {
+  isElementwiseWhich,
   isRestriction,
   restrictionParts,
 } from '../boxed-expression/conditional-value.js';
@@ -14022,6 +14023,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `isAbsentScalarSymbol` (`boxed-expression/validate.ts`).
         if (isAbsentSymbol(a) || isAbsentSymbol(b))
           return absentScalarMarker(ce, expression);
+        // A selection at each position whose elements cannot be read yet has
+        // no value to reject: the application stays held.
+        if (isElementwiseWhich(a) || isElementwiseWhich(b)) return undefined;
         const pa = pointOperand(a);
         const pb = pointOperand(b);
         // Point-to-point: the scalar distance.

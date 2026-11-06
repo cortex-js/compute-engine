@@ -255,8 +255,17 @@ Corollary rules for the strict regime:
     arm of another length (`If([True, False], [1, 2, 3], 0)` is
     `incompatible-dimensions`, `2 vs 3`, as `[1, 2] + [1, 2, 3]` is). An
     arm whose static type does not settle this is checked on its value when
-    the selection is evaluated. The result type is `list<T>` from the static
-    types of the arms.
+    the selection is evaluated. An arm that is selected at some position, whose
+    value has a list type and has no elements to read, keeps the selection
+    held around the value of its first list condition and its evaluated arms: with
+    `L = [1, 3, 5]` and `foo` undeclared, `foo(L)` has the type
+    `list<unknown^3>`, and `Which(L < 2, foo(L), True, 0)` is
+    `Which([True, False, False], foo([1, 3, 5]), True, 0)`. A copy of that value
+    at each position would put a list in a cell, and N copies of a list of N
+    elements. A broadcastable operator moves into the arms of the held
+    selection (`1 + Which(c, foo(L), True, 0)`). An operator that reads the
+    whole list stays around it: `Length(Which([True, False, False], foo(L),
+    True, 0))` is held, and `Distance` holds in the same way. The result type is `list<T>` from the static types of the arms.
   - A relation (a boolean arm) and a statement (an `Assign`, a definition,
     a drawing head) are accepted under a list condition, as before:
     `1 > 0 \text{ where } (x+2)^2 + y^2 \le (0..0.2..1.6)^2` is

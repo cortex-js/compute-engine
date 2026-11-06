@@ -1483,6 +1483,258 @@ describe('the selection rule of 2026-11-02: values', () => {
     expect(e.evaluate().toString()).toBe('[(NaN, NaN),(1, 2),(1, 2)]');
   });
 
+  test('a selected arm typed as a list with no elements to read stays held', () => {
+    const ce = engine();
+    ce.assign('L', ce.box(['List', 1, 3, 5]));
+    const mask = ['Less', 'L', 2];
+    const heldMask = ['List', 'True', 'False', 'False'];
+    const fooOfL = ['foo', ['List', 1, 3, 5]];
+    expect(
+      ce
+        .box(['Which', mask, ['foo', 'L'], 'True', 0] as any)
+        .evaluate().json
+    ).toEqual(['Which', heldMask, fooOfL, 'True', 0]);
+    expect(
+      ce.box(['If', mask, ['foo', 'L'], 0] as any).evaluate().json
+    ).toEqual(['If', heldMask, fooOfL, 0]);
+    expect(
+      ce
+        .box(['Which', mask, ['Add', 1, ['foo', 'L']], 'True', 0] as any)
+        .evaluate()
+        .json
+    ).toEqual(['Which', heldMask, ['Add', 1, fooOfL], 'True', 0]);
+    // A valueless list is the same case: its sum has no cells either.
+    ce.declare('M', 'list<number>');
+    expect(
+      ce
+        .box(['Which', mask, ['Add', 'M', 'M'], 'True', 0] as any)
+        .evaluate().json
+    ).toEqual(['Which', heldMask, ['Multiply', 2, 'M'], 'True', 0]);
+  });
+
+  test('a held selection gives the same form on the asynchronous route', async () => {
+    const ce = engine();
+    ce.assign('L', ce.box(['List', 1, 3, 5]));
+    const mask = ['Less', 'L', 2];
+    const heldMask = ['List', 'True', 'False', 'False'];
+    const fooOfL = ['foo', ['List', 1, 3, 5]];
+    const which = ce.box(['Which', mask, ['foo', 'L'], 'True', 0] as any);
+    expect((await which.evaluateAsync()).json).toEqual([
+      'Which',
+      heldMask,
+      fooOfL,
+      'True',
+      0,
+    ]);
+    const ifElse = ce.box(['If', mask, ['foo', 'L'], 0] as any);
+    expect((await ifElse.evaluateAsync()).json).toEqual([
+      'If',
+      heldMask,
+      fooOfL,
+      0,
+    ]);
+  });
+
+  test('an arm evaluated before a selection is held does not run again', () => {
+    const ce = engine();
+    ce.assign('L', ce.box(['List', 1, 3, 5]));
+    ce.assign('count', 0);
+    const held = ce
+      .box([
+        'Which',
+        ['Less', 'L', 2],
+        ['Block', ['Assign', 'count', ['Add', 'count', 1]], 42],
+        'True',
+        ['foo', 'L'],
+      ] as any)
+      .evaluate();
+    expect(ce.box('count').evaluate().json).toBe(1);
+    expect(held.evaluate().json).toEqual(held.json);
+    expect(ce.box('count').evaluate().json).toBe(1);
+  });
+
+  test('each arm of a held selection keeps its own value', () => {
+    const ce = engine();
+    ce.assign('L', ce.box(['List', 1, 2, 3]));
+    ce.assign('count', 0);
+    // One expression object in two clauses: each clause keeps its own draw.
+    const next = ce.box(['Block', ['Assign', 'count', ['Add', 'count', 1]], 'count']);
+    const held = ce._fn('Which', [
+      ce.box(['Less', 'L', 2]),
+      next,
+      ce.box(['Less', 'L', 3]),
+      next,
+      ce.True,
+      ce.box(['foo', 'L']),
+    ]).evaluate();
+    expect(held.operator).toBe('Which');
+    expect(held.ops?.[1].json).toBe(1);
+    expect(held.ops?.[3].json).toBe(2);
+  });
+
+  test('an operator that reads the whole list stays around a held selection', () => {
+    const ce = engine();
+    ce.assign('L', ce.box(['List', 1, 3, 5]));
+    ce.declare('M', 'list<number>');
+    const mask = ['Less', 'L', 2];
+    const heldMask = ['List', 'True', 'False', 'False'];
+    const selection = ['Which', mask, ['foo', 'L'], 'True', 0];
+    const held = ['Which', heldMask, ['foo', ['List', 1, 3, 5]], 'True', 0];
+    expect(ce.box(['Length', selection] as any).evaluate().json).toEqual([
+      'Length',
+      held,
+    ]);
+    expect(ce.box(['At', selection, 2] as any).evaluate().json).toEqual([
+      'At',
+      held,
+      2,
+    ]);
+    expect(ce.box(['Reverse', selection] as any).evaluate().json).toEqual([
+      'Reverse',
+      held,
+    ]);
+    expect(
+      ce
+        .box(['Length', ['Which', mask, 'M', 'True', 0]] as any)
+        .evaluate().json
+    ).toEqual(['Length', ['Which', heldMask, 'M', 'True', 0]]);
+    // A condition with no value yet: `Distance` has no point to reject.
+    const distance = ce.box([
+      'Distance',
+      [
+        'Which',
+        ['Less', 'M', 2],
+        ['Tuple', 1, 2],
+        'True',
+        ['Tuple', 3, 4],
+      ],
+      ['Tuple', 0, 0],
+    ] as any);
+    expect(distance.evaluate().operator).toBe('Distance');
+    // A lazy operator reads the list condition of the evaluated operand.
+    ce.declare('c', 'any');
+    ce.assign('c', ce.box(['List', 'True', 'False', 'False']));
+    expect(
+      ce
+        .box([
+          'ArgMax',
+          ['Which', 'c', ['foo', 'L'], 'True', ['List', 7, 8, 9]],
+        ] as any)
+        .evaluate().operator
+    ).toBe('ArgMax');
+    // The value of the operator is read when the selection can be made.
+    ce.assign('M', ce.box(['List', 1, 3, 5]));
+    expect(distance.evaluate().toString()).toBe('[sqrt(5),5,5]');
+    ce.declare('foo', {
+      signature: '(list<number>) -> list<number>',
+      evaluate: () => ce.box(['List', 10, 30, 50]),
+    });
+    expect(ce.box(['Length', selection] as any).evaluate().json).toBe(3);
+    expect(ce.box(['At', selection, 2] as any).evaluate().json).toBe(0);
+  });
+
+  test('an operator that maps over a list moves into a held selection', () => {
+    const ce = engine();
+    ce.assign('L', ce.box(['List', 1, 3, 5]));
+    expect(
+      ce
+        .box(['Sin', ['Which', ['Less', 'L', 2], ['foo', 'L'], 'True', 'x']] as any)
+        .evaluate().json
+    ).toEqual([
+      'Which',
+      ['List', 'True', 'False', 'False'],
+      ['Sin', ['foo', ['List', 1, 3, 5]]],
+      'True',
+      ['Sin', 'x'],
+    ]);
+  });
+
+  test('a held selection is a fixed point and selects when the arm has a value', () => {
+    const ce = engine();
+    ce.assign('L', ce.box(['List', 1, 3, 5]));
+    const held = ce
+      .box(['Which', ['Less', 'L', 2], ['foo', 'L'], 'True', 0] as any)
+      .evaluate();
+    expect(held.evaluate().json).toEqual(held.json);
+    ce.declare('foo', {
+      signature: '(list<number>) -> list<number>',
+      evaluate: () => ce.box(['List', 10, 30, 50]),
+    });
+    expect(held.evaluate().toString()).toBe('[10,0,0]');
+  });
+
+  test('a held If keeps the evaluated condition, so an index does not leak', () => {
+    const ce = engine();
+    ce.assign('L', ce.box(['List', 1, 3, 5]));
+    // The bound variable `k` has a value only during the iteration: a held
+    // node that kept the condition as written would give a term in `k`.
+    const value = ce
+      .box([
+        'Sum',
+        ['If', ['Less', 'L', 'k'], ['foo', 'L'], 0],
+        ['Limits', 'k', 2, 2],
+      ] as any)
+      .evaluate();
+    expect(value.unknowns).not.toContain('k');
+    expect(JSON.stringify(value.json)).toContain('"True","False","False"');
+  });
+
+  test('an arm that is not reached does not hold the selection', () => {
+    const ce = engine();
+    ce.assign('L', ce.box(['List', 1, 3, 5]));
+    expect(
+      ce
+        .box(['Which', ['Less', 'L', 9], 'L', 'True', ['foo', 'L']] as any)
+        .evaluate()
+        .toString()
+    ).toBe('[1,3,5]');
+  });
+
+  test('an arm typed as a scalar is copied to each selected position', () => {
+    const ce = engine();
+    ce.assign('L', ce.box(['List', 1, 3, 5]));
+    const mask = ['Less', 'L', 2];
+    expect(
+      ce
+        .box(['Which', mask, ['foo', 'x'], 'True', 0] as any)
+        .evaluate().json
+    ).toEqual(['List', ['foo', 'x'], 0, 0]);
+    expect(
+      ce
+        .box(['Which', mask, ['Length', ['foo', 'L']], 'True', 0] as any)
+        .evaluate().json
+    ).toEqual(['List', ['Length', ['foo', ['List', 1, 3, 5]]], 0, 0]);
+    expect(
+      ce.box(['Which', mask, 'x', 'True', 0] as any).evaluate().json
+    ).toEqual(['List', 'x', 0, 0]);
+  });
+
+  test('a piecewise over an unknown function of a list has a value of linear size', () => {
+    // Four reads of an inner selection whose arm applies an undeclared
+    // function to the whole list, in the condition and in the arm of an outer
+    // selection. A copy of the list at each position would give about
+    // 4 × 400 × 400 cells.
+    const size = (n: number): number => {
+      const ce = engine();
+      ce.assign(
+        'L',
+        ce.box(['List', ...Array.from({ length: n }, (_, i) => i - 1)])
+      );
+      const inner = ['Which', ['Greater', 'L', 0], ['foo', 'L'], 'True', 1];
+      const value = ce
+        .box([
+          'Which',
+          ['Greater', ['Abs', ['Divide', 1, inner]], 0],
+          ['Add', ['Divide', inner, 2], inner, ['Negate', inner]],
+          'True',
+          0,
+        ] as any)
+        .evaluate();
+      return JSON.stringify(value.json).length;
+    };
+    expect(size(400)).toBeLessThan(5 * size(100));
+  });
+
   test('the scalar no-match value of Which is unchanged', () => {
     const ce = engine();
     ce.declare('t', 'real');

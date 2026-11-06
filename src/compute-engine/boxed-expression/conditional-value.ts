@@ -30,6 +30,16 @@ export function isListCondition(cond: Expression | undefined): boolean {
   );
 }
 
+/** True when `x` is a `Which` that has a list of conditions
+ * (`isListCondition()`), so that it selects at each position and its value is
+ * a list. */
+export function isElementwiseWhich(x: Expression): boolean {
+  return (
+    isFunction(x, 'Which') &&
+    x.ops.some((c, i) => i % 2 === 0 && isListCondition(c))
+  );
+}
+
 /**
  * The comparison operators and the connectives. Each one is two-valued: it
  * answers `True` or `False`, also when an operand or a cell is absent (an
