@@ -22,6 +22,14 @@ lazy view. Declaring another binding with the same name does not redirect them.
 Parameters, block locals and iterator variables read the activation belonging
 to their invocation; an unrelated invocation cannot intercept the call.
 
+Assigning a closure to a name that its body reads as another binding does not
+redirect that read. With `h = n ↦ Block(g := z ↦ 0, z ↦ g(z) + n)` and
+`k = n ↦ Block(g := h(n), z ↦ g(z) + n)`, the closure that `h(1)` returns reads
+the `g` of its own call of `h`, also when `k` stores it in its own `g`, so
+`k(1)(0)` is 2. A mention is a recursive call only when it denotes the binding
+being assigned, or when the literal has no definition of the name outside it
+(`readsOtherBinding()`, `engine-declarations.ts`).
+
 A lazy view that is assigned to a variable outside a loop or a block reads
 the locals of that loop or block with their values at the assignment, not
 their bindings (`bindOutlivedLocalsOfLazyValue`, `function-utils.ts`). A view

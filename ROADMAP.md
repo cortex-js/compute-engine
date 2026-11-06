@@ -23,7 +23,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-819.
+Next free reference: CE-821.
 
 **Entry format.**
 
@@ -346,18 +346,6 @@ Decide which reading is the value of `L`:
 
 With no decision, the reads stay in disagreement, and `interval-js` keeps
 giving no value for such a `Linspace`.
-
-### CE-665. A point beside a longer list is zipped to the shorter length, with no error, under heads that read it by position
-
-**Status:** ready; wrong value. Found 2026-10-30 while fixing CE-661.
-**Witness:** plausible; Interpreter: `Power((1, 2), [3, 4, 5])` evaluates to `[1, 16]`, typed `vector<3>`; should be `incompatible-dimensions`.
-
-`Power((1, 2), [3, 4, 5])` is typed `vector<3>` but evaluates to `[1, 16]`, and
-`Arctan2([3, 4, 5], (1, 2))` evaluates to `[arctan(3), arctan(2)]`. These heads
-read the point by position (the point is a participant, not a lifted value), so
-the lengths 2 and 3 disagree; the agreement rule of `docs/BROADCAST-MODEL.md`
-gives `incompatible-dimensions` for that, and the type and the value disagree
-today.
 
 ### CE-666. The count of a list can be larger than the number of elements of its value
 
@@ -1052,30 +1040,30 @@ corpus uses it).
 `Max(FlatMap([1, 2], x ↦ [x, slowF(x)]))` under `evaluateAsync()` gives `Max(2, slowF(1), slowF(2))`, not 20. State: NOT STARTED. Found during the work of 2026-10-30 and 2026-10-31 (4b list); the
 reproduction above is the record.
 
-### CE-768. Two functions with the same block-local `g` read each other's binding
+### CE-819. A global assigned after a function with a local of the same name gives an effect error, and calls of the function then fail
 
-**Status:** ready; wrong value. Approved 2026-11-01.
-**Witness:** plausible; `k(1)(0)` with `h = n ↦ Block(g := (z ↦ 0), z ↦ g(z) + n)`, `k = n ↦ Block(g := h(n), z ↦ g(z) + n)` gives "Recursion limit exceeded", expected 2.
+**Status:** ready; defect, S.
+**Witness:** plausible; with `h = n ↦ Block(g := z ↦ 0, z ↦ g(z) + n)`, `g := t ↦ 9` gives the error `incompatible-type` "non-scope effects (writes outside a function require a declared `scope` effect)", and `Apply(h(1), 0)` gives the same error. Both should succeed, and `Apply(h(1), 0)` should give 1.
 
-`k(1)(0)` with `h = n ↦ Block(g := (z ↦ 0), z ↦ g(z) + n)`, `k = n ↦ Block(g := h(n), z ↦ g(z) + n)` gives "Recursion limit exceeded", expected 2. Found during the work of 2026-10-30 and 2026-10-31 (Items 2 and 9); the
-reproduction above is the record.
+`g` is an assignment local of `h`, so a later global `g` should not change a
+call of `h`. The assignment gives the error and still stores its value, so
+`g(0)` gives 9. The cause is not traced. The likely cause is that the effect
+inference of the body of `h` reads the write to `g` by name after the global
+exists, and counts it as a write outside the function.
+
+### CE-820. A closure stored under a declared signature reads the bindings of the scope that stores it
+
+**Status:** ready; wrong value, S.
+**Witness:** plausible; with `h = n ↦ Block(g := z ↦ 0, z ↦ g(z) + n)`, `Declare(q, "(real) -> real", h(1))` and `q(0)` gives `1 + g(0)`, and should give 1. `k = n ↦ Block(Declare(g, "(real) -> real", h(n)), z ↦ g(z) + n)` and `k(1)(0)` gives "Recursion limit exceeded", and should give 2.
+
+The same programs with the type `unknown` give the correct values, so the
+declared signature causes the failure. The cause is not traced. The likely
+cause is that the route for a declared signature in `engine-declarations.ts`
+(`ascribeDeclaredParameterTypes()`, `reconcileFunctionLiteralReturn()`) builds
+the literal again from its MathJSON, which drops the scopes that the closure
+captured.
 
 ## Symbolic computation
-
-### CE-764. The derivative of `a ↦ h(a)` reads a global `a` of `h` as the parameter
-
-**Status:** ready; wrong value, M.
-**Witness:** plausible; with `a := 3` and `h := x ↦ a·x`, `Apply(Derivative(a ↦ h(a)), 2)` gives `4` and should give `3`; `Apply(Derivative(a ↦ a·h(a)), 2)` gives `14` and should give `12`.
-
-When the `Derivative` handler (`src/compute-engine/library/calculus.ts`)
-differentiates the body of the literal, it inlines the body of `h`. The free
-`a` of that body names the global, but after the inlining it has the same
-name as the parameter `a`, so it is differentiated as the variable. The
-shield of the parameter names (`withValueShield`) cannot separate the two,
-because it works by name. A fix keeps the global of `h` bound to its own
-definition when the body is inlined (for example, rename the parameter of
-the literal before the inlining, or substitute the value of a free name of
-`h` first).
 
 ### CE-738. `Integrate` of a block integrand: `evaluate()` integrates the first statement only
 

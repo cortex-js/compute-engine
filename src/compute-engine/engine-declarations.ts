@@ -132,7 +132,11 @@ import {
 } from './inference-rollback.js';
 import { tombstoneBinding } from './boxed-expression/binding-tombstone.js';
 import { countDeclaredHolder, uncountRemovedHolder } from './engine-scope.js';
-import { binderBindingOf } from './boxed-expression/binders.js';
+import {
+  binderBindingOf,
+  callableBindingInContext,
+  isParameterActivation,
+} from './boxed-expression/binders.js';
 import {
   assertNoParameterDefault,
   forgetConstantDeclaration,
@@ -3256,6 +3260,45 @@ function mentionsName(
   return expr.ops.some((op) => mentionsName(op, id, read));
 }
 
+/**
+ * True when the name `id`, read in the body of the function literal `literal`,
+ * denotes a binding outside the literal that is not the binding `id` denotes
+ * here. Such a mention is not a call of the function being assigned: with
+ * `h = n ↦ Block(g := z ↦ 0, z ↦ g(z) + n)`, the closure `h(1)` reads the `g`
+ * of its own call of `h`, also after `g := h(1)` in another function.
+ *
+ * A binding that has no value and is not a local or a parameter does not count
+ * (a forward reference, or a symbol that was declared when it was first read):
+ * it does not define the name, so the assignment gives the mention its meaning.
+ * A binding in the scope of the body of the literal does not count either: it
+ * is a parameter, or a declaration that canonicalizing the body made for a name
+ * that was unknown then.
+ */
+function readsOtherBinding(
+  ce: IComputeEngine,
+  literal: Expression,
+  id: string
+): boolean {
+  if (!isFunction(literal) || !isFunction(literal.op1)) return false;
+  const bodyScope = literal.op1.localScope;
+  if (bodyScope === undefined || bodyScope.bindings.has(id)) return false;
+  for (let scope = bodyScope.parent; scope; scope = scope.parent) {
+    const found = scope.bindings.get(id);
+    if (found === undefined) continue;
+    if (
+      isValueDef(found) &&
+      found.value.value === undefined &&
+      !found.value._blockLocal &&
+      !isParameterActivation(found.value)
+    )
+      return false;
+    // An outdated binding of a block that runs now stands for the binding of
+    // this run (`callableBindingInContext()`): it is the same variable.
+    return callableBindingInContext(ce, id, found) !== ce.lookupDefinition(id);
+  }
+  return false;
+}
+
 export function assignFn(
   ce: IComputeEngine,
   arg1: string | { [id: string]: AssignValue },
@@ -3352,7 +3395,9 @@ export function assignFn(
   // consumer of the body's types misfires (e.g. the compile targets'
   // collection guard fail-closes on the top-typed self-call). Pre-declare
   // `id` as function-typed, then re-canonicalize the literal from its JSON so
-  // the self-reference binds and types against the real definition.
+  // the self-reference binds and types against the real definition. A mention
+  // that denotes another binding (`readsOtherBinding()`) is not a self-call,
+  // and boxing the literal again in this scope would make it one.
   const ctorScope = ce.context.lexicalScope;
   const ctorType = ce._typeRegistry[id];
   let ctorLiteral: Expression | undefined = undefined;
@@ -3365,7 +3410,7 @@ export function assignFn(
         boxedFn === undefined && Array.isArray(arg2) && arg2[0] === 'Function';
       if (
         boxedFn
-          ? mentionsName(boxedFn, id)
+          ? mentionsName(boxedFn, id) && !readsOtherBinding(ce, boxedFn, id)
           : rawFn && JSON.stringify(arg2).includes(`"${id}"`)
       ) {
         if (!ce.lookupDefinition(id)) ce.symbol(id);
