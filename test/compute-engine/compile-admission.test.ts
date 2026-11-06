@@ -2283,14 +2283,19 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
     expect(r.run!({})).toBe(6);
   });
 
-  // The interpreter changes `p` for an assignment in the integrand or in a
-  // bound of an `Integrate` (7 and 4); the compiled code, which evaluates
-  // the integrand in a function of its own, gave 0.
+  // The interpreter changes `p` for an assignment in a bound of an `Integrate`
+  // (4). The compiled code, which evaluates the integrand in a function of its
+  // own, gave 0 for that form, so it declines.
   test('an assignment in the integrand or in a bound of an Integrate', () => {
+    const integral: MathJsonExpression = [
+      'Integrate',
+      ['Block', ['Assign', 'p', 7], 't'],
+      ['Limits', 't', 0, 1],
+    ];
     const body: MathJsonExpression = [
       'Block',
       ['Assign', 'p', 0],
-      ['Integrate', ['Block', ['Assign', 'p', 7], 't'], ['Limits', 't', 0, 1]],
+      integral,
       'p',
     ];
     const bound: MathJsonExpression = [
@@ -2299,13 +2304,15 @@ describe('Assignments in a Comprehension, a Sum, a Product, an Integrate and in 
       ['Integrate', 't', ['Limits', 't', 0, ['Block', ['Assign', 'p', 4], 1]]],
       'p',
     ];
-    // The interpreter does not give 7 for the integrand form: the
-    // integration puts the `Assign` of the integrand into a product, which
-    // is the static error `assignment-in-operand`. The compiled code
-    // declines both forms.
-    expect(JSON.stringify(engine().box(body).evaluate().json)).toContain(
-      'assignment-in-operand'
-    );
+    // `evaluate()` has no closed form for a block that assigns a variable
+    // outside it: the integral stays unevaluated, the assignment does not run,
+    // and `p` keeps 0. The compiled code declines both forms.
+    expect(
+      engine()
+        .box(['Block', ['Assign', 'p', 0], integral])
+        .evaluate().operator
+    ).toBe('Integrate');
+    expect(interpret(engine(), body, {})).toBe(0);
     expect(interpret(engine(), bound, {})).toBe(4);
     expectDecline(engine(), body, /inside the `Integrate`/);
     expectDecline(engine(), bound, /inside the `Integrate`/);
