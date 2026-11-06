@@ -2456,11 +2456,14 @@ function sameParameterDefault(
  * operator-definition signature had (`boxed-operator-definition.ts`,
  * "assembled as a Type OBJECT, never as a string that is re-parsed"). It is
  * safe HERE only because the text goes straight back into
- * `canonicalFunctionLiteralArguments`, in this same scope, which re-parses it
- * with the resolver and records the resolution against the operand node
- * (`RESOLVED_TYPE_OPERANDS`, `function-literal.ts`) before the literal can
- * escape. Do not move this serialization anywhere the declaring scope may
- * already have popped. */
+ * `canonicalFunctionLiteralArguments`, which parses it again with the
+ * resolver and records the resolution against the operand node
+ * (`RESOLVED_TYPE_OPERANDS`, `function-literal.ts`) while the name is still in
+ * the type registry. Type names are not lexically scoped: the registry belongs
+ * to the engine, and only a rollback of the registry removes a name (the Epsil
+ * static pre-pass, a failed sum-type declaration, the restore of a
+ * checkpoint). Do not move this serialization to a place that can run after
+ * such a rollback. */
 function desugarSignatureString(
   ce: ComputeEngine,
   body: Expression,

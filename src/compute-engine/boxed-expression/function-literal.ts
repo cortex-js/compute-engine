@@ -45,14 +45,19 @@ import { literalParameterDefault } from './parameter-defaults.js';
 /**
  * The resolution of a `Typed` type operand, keyed by the operand NODE.
  *
- * A type operand is stored as TEXT (`["Typed", "x", "'pt'"]`), but a name
- * declared by a `type` statement only resolves while its declaring scope is
- * current: `ce._typeResolver` walks the CURRENT lexical scope. A literal
- * outlives that scope whenever it escapes the block that declared the type —
- * assigned to an outer symbol, returned, stored in a collection — and every
- * later read of its parameter types re-parses the text from wherever the
- * reader happens to stand. That re-parse throws `Unknown type`, the annotation
- * silently reads as absent, and argument-type validation stops firing.
+ * A type operand is stored as TEXT (`["Typed", "x", "'pt'"]`), and every read
+ * of the parameter types of a literal parses that text again. Type names are
+ * not lexically scoped: `ce._typeResolver` reads the type registry of the
+ * engine (`ce._typeRegistry`), and the end of the scope that declared a type
+ * does not remove its name. A name leaves the registry only when a rollback
+ * of the registry (`ce._typeRegistryRollbackPoint()`) undoes its
+ * registration: the Epsil static pre-pass (`static-diagnostics.ts`), which
+ * registers the `type` statements of a program and then discards them; a
+ * sum-type declaration that fails after some of its variants registered
+ * (`engine-declarations.ts`); and the restore of a checkpoint. A literal that
+ * was boxed while the name was registered can be read after such a rollback.
+ * The parse then throws `Unknown type`, the annotation reads as absent with no
+ * message, and the check of the argument types stops.
  *
  * Same hazard, same fix as the operator-definition signature
  * (`boxed-operator-definition.ts`, "assembled as a Type OBJECT, never as a
@@ -61,9 +66,9 @@ import { literalParameterDefault } from './parameter-defaults.js';
  * usable wherever it escapes to. Here the text is what the expression stores,
  * so the resolution is remembered against the operand node instead, recorded
  * the first time the name resolves. `canonicalFunctionLiteralArguments` forces
- * that first resolution (`resolveFunctionLiteralTypes`) while the declaring
- * scope is still current, rather than leaving it to whichever consumer reads
- * the literal first.
+ * that first resolution (`resolveFunctionLiteralTypes`) when the literal is
+ * boxed, while the name is registered, rather than leaving it to whichever
+ * consumer reads the literal first.
  */
 const RESOLVED_TYPE_OPERANDS = new WeakMap<Expression, Type>();
 
@@ -94,8 +99,9 @@ function parseTypeOperand(t: Expression | undefined): Type | undefined {
       RESOLVED_TYPE_OPERANDS.set(t, resolved);
       return resolved;
     } catch {
-      // Out of scope now: fall back to the resolution recorded while the
-      // declaring scope was current (see `RESOLVED_TYPE_OPERANDS`).
+      // A rollback of the type registry removed the name: use the
+      // resolution recorded while the name was registered (see
+      // `RESOLVED_TYPE_OPERANDS`).
       return RESOLVED_TYPE_OPERANDS.get(t);
     }
   }
