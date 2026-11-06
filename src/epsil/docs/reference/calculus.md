@@ -25,7 +25,7 @@ category.
 
 MathJSON `BigO` · `(value) -> number`
 
-Landau big-O remainder term. Inert; any numeric approximation (.N()) of an expression containing it is NaN.
+Landau big-O remainder term. Inert; a numeric approximation (.N()) keeps the term and approximates its operand. Strip it with Normal.
 
 ### circleContour
 

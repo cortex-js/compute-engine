@@ -834,7 +834,7 @@ Inheritance included: a conformance registered for a supertype answers
 for its subtypes. A CONDITIONAL conformance (`list<T> is P where T is
 P`) recurses, deciding itself against `type`'s own arguments.
 
-`type` may be a `TypeString`, parsed the way [IComputeEngine.type](#type-11)
+`type` may be a `TypeString`, parsed the way [IComputeEngine.type](#type-10)
 parses one.
 
 ####### type
@@ -1666,7 +1666,7 @@ back with `expr.array`.
 
 <MemberCard>
 
-##### ComputeEngine.type() {#type-12}
+##### ComputeEngine.type() {#type-11}
 
 ```ts
 type(type): BoxedType
@@ -6540,47 +6540,6 @@ Release resources owned by this definition when its scope is disposed.
 
 <MemberCard>
 
-### BindingSite {#bindingsite}
-
-```ts
-type BindingSite = {
-  path: readonly number[];
-  type: TypeString;
-  clauseLocal: boolean;
-};
-```
-
-A located binding site: where, inside an operator expression, one of that
-operator's **bound variables** sits, and how to declare it.
-
-</MemberCard>
-
-<MemberCard>
-
-### BindingSiteSelector {#bindingsiteselector}
-
-```ts
-type BindingSiteSelector = (ops, phase) => readonly BindingSite[];
-```
-
-Locate an operator's binding sites among its operands.
-
-Used as the value of the `scoped` flag of [OperatorDefinitionFlags](#operatordefinitionflags) to
-declare that an operator is a *binder*: the framework mints the operator's
-scope, declares each site's symbol in it before the `canonical` handler
-runs, and rebinds the sites (and same-named occurrences elsewhere in the
-expression) to that scope afterwards. This is what makes the parse,
-`ce.box()` and `ce.function()` routes agree about which binding a bound
-variable denotes.
-
-`phase: 'pre'` runs on the RAW operands, before the `canonical` handler; it
-may return fewer sites than `'post'` — return nothing rather than guess.
-`phase: 'post'` runs on the handler's RESULT operands and is authoritative.
-
-</MemberCard>
-
-<MemberCard>
-
 ### BroadcastExemption {#broadcastexemption}
 
 ```ts
@@ -6603,12 +6562,122 @@ each label.
 
 <MemberCard>
 
+### OperandRole {#operandrole}
+
+```ts
+type OperandRole = 
+  | {
+  kind: "value";
+ }
+  | {
+  kind: "held";
+ }
+  | {
+  kind: "statement";
+ }
+  | {
+  kind: "raw";
+ }
+  | {
+  kind: "opaque";
+ }
+  | {
+  kind: "bound";
+  type: TypeString;
+ }
+  | {
+  kind: "clause";
+  type: TypeString;
+};
+```
+
+The role of one operand of an operator, as the `operands` handler of
+[OperatorDefinitionFlags](#operatordefinitionflags) declares it. The role says how the operand
+is canonicalized and whether it is evaluated before the `evaluate` handler
+of the operator runs.
+
+- `value`: the operand is a value, and an `Assign` or a `Declare` there is
+  an error. In an operator that is not `lazy`, the operand is
+  canonicalized, checked against the signature, and evaluated before the
+  `evaluate` handler runs; this is the default role of such an operator.
+  In a `lazy` operator, the handlers receive the operand as written and
+  canonicalize and evaluate it themselves; only a bare `N` or `D` there is
+  read as a variable, not as the library operator.
+- `held`: the operand is a value that the `evaluate` handler receives as
+  its canonicalization left it, not evaluated, so that the handler can
+  read it as written (`Fibonacci(10^6)` in `Mod(Fibonacci(10^6), p)`) and
+  evaluate it itself when it needs its value. Otherwise the operand is a
+  `value`: it is canonicalized and checked against the signature, the
+  type and the validity of the application read it, an `Assign` or a
+  `Declare` there is an error, and a literal list there is broadcast, each
+  element held. An operand that only its evaluation makes a list is held
+  whole. Valid only on an operator that is not `lazy`: a `lazy` operator
+  canonicalizes none of its operands, and its handlers receive every
+  operand unevaluated (`raw`).
+- `statement`: the operand is a statement that the operator runs, zero,
+  one or several times (the body of a loop, a branch of a conditional). An
+  `Assign` or a `Declare` there is valid. The operand is not evaluated
+  before the `evaluate` handler runs: the handler evaluates it when and as
+  often as it needs to. The engine canonicalizes the operand as a branch,
+  except in a `lazy` operator with a `canonical` handler, which receives
+  it as written and canonicalizes it itself. In a branch, a first
+  assignment of a name that no enclosing scope declares is the error
+  `first-assignment-in-branch`, an assignment of a declared name writes
+  that name, and a bare `Break` or `Continue` symbol is an error.
+- `raw`: the operand is kept as written, not canonicalized and not
+  evaluated. The default of a `lazy` operator. Valid only on a `lazy`
+  operator.
+- `opaque`: the operand is kept as written, and an `Assign` or a `Declare`
+  in it is valid (the expression of `Hold` and of `Error`). Valid only on a
+  `lazy` operator.
+- `bound`: the operand is a bound variable of the operator, a symbol
+  that the operator declares in its own scope (the variable of `D(f, x)`,
+  the expansion variable of `Series`), with the type `type` (`unknown`
+  when it is left out). A symbol held in a `Hold` is a bound variable
+  too; any other operand declares nothing. The variable remains a free
+  variable of the expression, as for `D`: the value of `D(x^2, x)` is a
+  function of `x`. The operand is not evaluated before the `evaluate`
+  handler runs; it is kept as written in a `lazy` operator, and
+  canonicalized in the scope of the operator otherwise.
+- `clause`: the operand is an indexing set whose index is a bound
+  variable of the operator: `Limits(k, 1, 10)`, `Element(k, S)` (a
+  tuple pattern `Element(Tuple(p, q), S)` binds each of its names), a
+  tuple `Tuple(k, 1, 10)` or `Triple(k, 1, 10)`, a set `Set(k, 1, 10)`,
+  a parenthesized tuple of the LaTeX parser, or a symbol, also held.
+  `type` is the type of the index of a range-shaped clause. When `type`
+  is `integer` and the bounds are integer literals, the index has the
+  ranged type (`integer<1..10>` for `Limits(k, 1, 10)`); any other
+  `type` is used as given. The index of an `Element` clause does not
+  take `type`: it is `integer<a..b>` for a range `Range(a, b)` with
+  integer literal bounds, and otherwise an inferred `unknown` that a
+  `canonical` handler can narrow from the collection. The index is not a
+  free variable of the expression. It is visible in its own clause, in
+  the later clauses and in the operands before the first clause (the
+  body), not in an earlier clause. Consecutive `clause` operands are read as the clauses of
+  `Sum`, with the flat spelling: in `Sum(body, k, 1, 10)` the operands
+  after the symbol `k` are its bounds, not indexes. An operand that holds
+  no index declares nothing. The operand is not evaluated before the
+  `evaluate` handler runs, and is canonicalized as a `bound` operand is.
+
+An operator whose `operands` handler gives a `bound` or a `clause` role
+is a **binder**: it has its own scope, as with `scoped: true`, and the
+engine declares each bound variable in that scope before it canonicalizes
+the other operands, so that the parse, `ce.box()` and `ce.function()`
+routes bind the same variable. The engine finds that the operator is a
+binder when it is declared (see the `operands` handler of
+[OperatorDefinitionFlags](#operatordefinitionflags)).
+
+</MemberCard>
+
+<MemberCard>
+
 ### OperatorDefinitionFlags {#operatordefinitionflags}
 
 ```ts
 type OperatorDefinitionFlags = {
   lazy: boolean;
-  scoped: boolean | BindingSiteSelector;
+  operands: (ops) => ReadonlyArray<OperandRole>;
+  scoped: boolean;
   broadcastable: boolean;
   broadcastExemptions: ReadonlyArray<BroadcastExemption>;
   threadsConditionals: boolean | number[];
@@ -6690,23 +6759,9 @@ operator.
 scoped: boolean;
 ```
 
-Normalized from the declaration's `scoped` flag: `true` when the operator
-creates a lexical scope, whether it was declared `true` or as a
-binding-site selector.
-
-</MemberCard>
-
-<MemberCard>
-
-##### BoxedOperatorDefinition.bindingSites? {#bindingsites}
-
-```ts
-bindingSites?: BindingSiteSelector;
-```
-
-The binding-site selector of the declaration's `scoped` flag, when one
-was given. `undefined` for `scoped: true` (a scope with no syntactic
-bound variables) and for an unscoped operator.
+`true` when the operator creates a lexical scope: it was declared
+`scoped: true`, or it is a binder, whose `operands` handler gives a
+`bound` or a `clause` role.
 
 </MemberCard>
 
@@ -6844,7 +6899,7 @@ re-parsing or textually inlining its source.
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.type? {#type-9}
+##### BoxedOperatorDefinition.type? {#type-8}
 
 ```ts
 type?: OperatorTypeHandlerOnTypes;
@@ -7144,6 +7199,30 @@ answers.
 ####### i
 
 `number`
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.operandRoles() {#operandroles}
+
+```ts
+operandRoles(ops): 
+  | readonly ("value" | "raw" | "opaque" | "held" | "statement" | "bound" | "clause")[]
+  | undefined
+```
+
+The kind of the role of each operand of `ops`, the operands of an
+application of this operator, as the `operands` handler of
+[OperatorDefinitionFlags](#operatordefinitionflags) declares them, with the default role
+(`value`, or `raw` for a `lazy` operator) for a position that the
+handler leaves out. One entry per operand. `undefined` when the
+definition has no `operands` handler: every operand then has the
+default role.
+
+####### ops
+
+readonly [`Expression`](#expression-5)[]
 
 </MemberCard>
 
@@ -13344,7 +13423,7 @@ Inheritance included: a conformance registered for a supertype answers
 for its subtypes. A CONDITIONAL conformance (`list<T> is P where T is
 P`) recurses, deciding itself against `type`'s own arguments.
 
-`type` may be a `TypeString`, parsed the way [IComputeEngine.type](#type-11)
+`type` may be a `TypeString`, parsed the way [IComputeEngine.type](#type-10)
 parses one.
 
 ####### type
@@ -14176,7 +14255,7 @@ back with `expr.array`.
 
 <MemberCard>
 
-##### IComputeEngine.type() {#type-11}
+##### IComputeEngine.type() {#type-10}
 
 ```ts
 type(type): BoxedType
@@ -18415,7 +18494,7 @@ singular values of a matrix.
 
 <MemberCard>
 
-##### Expression.type {#type-13}
+##### Expression.type {#type-12}
 
 ```ts
 get type(): BoxedType
