@@ -126,6 +126,38 @@ The solver still combines the logarithms of an equation for any argument
 each root against the original equation, which rejects a root that the
 combination adds.
 
+### Undefined points and collections
+
+`simplify()` can remove the points where an expression has no value, as
+canonicalization does (`x/x → 1`). `(x² − 1)/(x − 1)` is `x + 1`, and `0·u` is
+`0` for a scalar `u`, so `y + 0·(1/t)` is `y`, and it has the value `y` at
+`t = 0`, where the original is `NaN`. This also applies to a function with a
+wide undefined region: `y + 0·f(t)` is `y` for every `t`. A host that needs the
+`NaN` of the original expression does not simplify the expression.
+
+An operand that is a collection by its type is not a scalar: `0·L`, `0/L` and
+`L − L` with `L: list<real>` are lists of zeros of the length of `L`, and
+`0·L + 1` is a list of ones. They stay as a product or a quotient until `L` has
+a value. A type that only may hold a collection still folds to `0`:
+`sin(f(x)) − sin(f(x))` with `f` undeclared is `0`, and so is `0·S` with `S`
+declared `list<real> | real`.
+
+### Testing an identity
+
+`simplify()` does not decide every identity. In a sum, it fully simplifies only
+some kinds of operand, so `x²/x` is `x`, and `x²/x − x` stays as it is. A
+relation whose two sides are the same stays as it is: `x = x` is not replaced by
+`True`. `evaluate()` gives `True`.
+
+To find that `A = B` holds wherever both sides are defined, use
+`A.isIdenticallyEqual(B)`. It compares the two sides at random points. `true` is
+a very strong indication, not a proof, and two sides that differ by less than
+`ce.tolerance` are equal. `undefined` means that the identity is not
+established. Compare the two sides, and not `A − B` with `0`: the rounding error
+of the difference scales with its terms, and the tolerance scales with the
+result, so the answer for a true identity can be `true` or `undefined` from one
+call to the next.
+
 ### When a real-only rewrite must decline
 
 A real-only rewrite is skipped when the operand's declared type admits

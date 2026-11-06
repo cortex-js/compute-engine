@@ -56,7 +56,10 @@ import type {
 
 import { activeRollbackFrame } from '../inference-rollback.js';
 import { contractTupleOfNarrow } from './index-read-tuple.js';
-import { typeCouldBeNumericCollection } from '../collection-utils.js';
+import {
+  isUnresolvedList,
+  typeCouldBeNumericCollection,
+} from '../collection-utils.js';
 
 import { mul, div } from './arithmetic-mul-div.js';
 
@@ -593,7 +596,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // rule.
     const isZeroRhs = rhs === 0 || (rhs instanceof NumericValue && rhs.isZero);
     if (isZeroRhs) {
-      if (hasAssignedVariable(this))
+      // A list with no value yet (`L: list<real>`) keeps the product too: it
+      // is a list of zeros of the length of `L`.
+      if (hasAssignedVariable(this) || isUnresolvedList(this))
         return this.engine.function('Multiply', [this.engine.Zero, this]);
       if (this.isNaN || this.isInfinity === true) return this.engine.NaN;
       return this.engine.Zero;

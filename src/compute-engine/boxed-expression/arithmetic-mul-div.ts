@@ -55,6 +55,7 @@ import {
   isUnknownLengthBroadcast,
   hasUnresolvedCollectionOperand,
   isUnresolvedCollectionOperand,
+  isUnresolvedList,
   lazyBroadcastMap,
   isBroadcastCollectionType,
   broadcastLengthMismatch,
@@ -1236,6 +1237,8 @@ export class Product {
       );
       if (nonNumeric !== undefined)
         return ce.typeError('number', nonNumeric.term.type, nonNumeric.term);
+      const zeroList = this.zeroTimesLists();
+      if (zeroList !== undefined) return zeroList;
       // A float `0` coefficient gives a float `0` (`0.0·x`)
       return coef.isExact ? ce.Zero : ce.number(coef);
     }
@@ -1290,6 +1293,23 @@ export class Product {
     return termsAsExpression(ce, this._matrixContext, groupedTerms);
   }
 
+  /**
+   * The product with a zero coefficient, when a term is a list with no value
+   * yet (`L: list<real>`); `undefined` otherwise. `0·L` and `0·(L + 1)` are
+   * lists of zeros of the length of `L`, not the scalar `0`, and the length is
+   * known only when `L` has a value.
+   */
+  private zeroTimesLists(): Expression | undefined {
+    const lists = this.terms.map((t) => t.term).filter(isUnresolvedList);
+    if (lists.length === 0) return undefined;
+    const ce = this.engine;
+    const coef = this.coefficient;
+    return ce._fn(
+      'Multiply',
+      sortProductOperands([coef.isExact ? ce.Zero : ce.number(coef), ...lists])
+    );
+  }
+
   /** The product, expressed as a numerator and denominator */
   asNumeratorDenominator(): [Expression, Expression] {
     const ce = this.engine;
@@ -1300,7 +1320,11 @@ export class Product {
     // as `(x + 1) · NaN` came back as an inert `NaN * (x + 1)` — which does
     // not even report `isNaN`, since an unevaluated function node cannot.
     if (coef.isNaN) return [ce.NaN, ce.One];
-    if (coef.isZero) return [coef.isExact ? ce.Zero : ce.number(coef), ce.One];
+    if (coef.isZero)
+      return [
+        this.zeroTimesLists() ?? (coef.isExact ? ce.Zero : ce.number(coef)),
+        ce.One,
+      ];
     if (coef.isPositiveInfinity || coef.isNegativeInfinity) {
       const infinity = coef.isPositiveInfinity
         ? ce.PositiveInfinity
@@ -1783,6 +1807,11 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
 
   // 0/a = 0 (a≠0, a is finite)
   if (isLiteral(op1, 0) && op2.isFinite !== false) {
+    // A divisor that is a collection by its type gives a collection: `0/L`
+    // with `L: list<real>` is a list of zeros of the length of `L`, not the
+    // scalar `0`. The quotient stays, and evaluation broadcasts it over the
+    // value of `L`.
+    if (isCollectionShaped(op2)) return ce._fn('Divide', [op1, op2]);
     // Be conservative with constant (no-unknown) denominators that aren't
     // already a literal number. Avoid 0/(1-1) -> 0 during canonicalization.
     // Use structural mode so the expression is bound and can evaluate later.
@@ -2271,11 +2300,25 @@ export function div(num: Expression, denom: number | Expression): Expression {
   } else {
     // As for a `NaN` numerator above.
     if (isNumber(denom) && denom.isNaN) return ce.NaN;
+    // A divisor that is a zero times a list (`L - L` simplifies to `0·L`) has
+    // the cells `0`, so each cell of the quotient is `~oo` or `NaN`. The
+    // quotient stays, and evaluation broadcasts it. The `Product` below would
+    // read the zero as a coefficient, and give a list of zeros.
+    if (
+      isFunction(denom, 'Multiply') &&
+      denom.ops.some((op) => isLiteral(op, 0)) &&
+      isCollectionShaped(denom)
+    )
+      return ce._fn('Divide', [num, denom]);
     if (isLiteral(num, 0)) {
       // 0/0 is the indeterminate form. 0/∞ and 0/~oo are 0, as
       // `canonicalDivide` answers (not an indeterminate form; this answered
       // `NaN` before). A `NaN` divisor was handled above.
       if (isLiteral(denom, 0)) return ce.NaN;
+      // A divisor that is a collection by its type gives a list of zeros of its
+      // length, as in `canonicalDivide`: the quotient stays, and evaluation
+      // broadcasts it.
+      if (isCollectionShaped(denom)) return ce._fn('Divide', [num, denom]);
       // A float `0` numerator is kept (`0.0/∞` is the float `0`), as in the
       // JavaScript-number branch above. A float divisor gives a float `0`
       // (`0/2.5` is `0.0`).
@@ -2605,12 +2648,16 @@ export function canonicalMultiply(
         // With `w := 4`, `Multiply(0, 2, w)` is `0w`, which evaluates to
         // `NaN` after `w := NaN`. This is the rule of `Multiply(0, w)`, where
         // there is only one exact factor and nothing to fold, and of `mul()`.
+        // A list with no value yet keeps the product too: `0·2·L` is a list of
+        // zeros of the length of `L`, as `0·L` is.
         // A NaN or infinite literal factor is the indeterminate form below.
         if (
           !nonNumeric.some(
             (x) => isNumber(x) && (x.isInfinity === true || x.isNaN === true)
           ) &&
-          nonNumeric.some((x) => hasAssignedVariable(x))
+          nonNumeric.some(
+            (x) => hasAssignedVariable(x) || isUnresolvedList(x)
+          )
         )
           return ce._fn(
             'Multiply',

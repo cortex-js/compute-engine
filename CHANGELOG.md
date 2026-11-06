@@ -49,16 +49,19 @@
   the same text. These calls now share one definition, `_fn_P`. The values do
   not change.
 - **A zero times a list or over a list keeps the list.** With `L: list<real>`
-  and no value yet, `0·L` simplified to the scalar `0`, the canonical form of
-  `0/L` was `0`, and `0·L + 1` simplified to `1`. A broadcast that held such a
-  term changed length. These forms now stay as they are, and with
-  `L = [1, 2, 3]` they evaluate to `[0, 0, 0]`, `[0, 0, 0]` and `[1, 1, 1]`.
+  and no value yet, `0·L` and `L - L` simplified to the scalar `0`, the
+  canonical form of `0/L` was `0`, and `0·L + 1` simplified to `1`. A broadcast
+  that held such a term changed length. These forms now stay as a product or a
+  quotient, and with `L = [1, 2, 3]` they evaluate to `[0, 0, 0]`, `[0, 0, 0]`,
+  `[0, 0, 0]` and `[1, 1, 1]`. A type that only may hold a list still folds to
+  `0`: `sin(f(x)) - sin(f(x))` with `f` undeclared is `0`.
 - **`simplify()` keeps `|arcsin(x)|`, `|arccsc(x)|`, `|artanh(x)|` and
   `|arcoth(x)|`.** It rewrote `|f(x)|` as `f(|x|)`, which is complex where `f`
   is not real: `|arcsin(2)|` is `2.05`, and `arcsin(|2|)` is `1.57 - 1.32i`. The
   result was also typed complex, so that a compiled comparison of it declined.
   The rewrite stays for the functions that are real on the whole real axis, such
-  as `arctan` and `arsinh`.
+  as `arctan` and `arsinh`, and it no longer applies to a symbol declared
+  complex: `|sinh(i)|` is `0.84`, and `sinh(|i|)` is `1.18`.
 - **`evaluate()` and `simplify()` no longer overflow the stack on a lazy operator
   over an operand that evaluates to itself.** A `Map` over
   `Range(0, Length(At(u, i)) - 1)` with a length that is not known replaced the

@@ -298,7 +298,12 @@ export const SIMPLIFY_RULES: Rule[] = [
   // an infinite loop). See polynomials.ts for implementation details.
   //
   (x): RuleStep | undefined => {
-    if (x.operator !== 'Divide') return undefined;
+    if (!isFunction(x, 'Divide')) return undefined;
+
+    // Polynomial arithmetic reads each operand as a scalar. A quotient with an
+    // operand that is a list by its type is a list: `0/L` with `L: list<real>`
+    // is a list of zeros of the length of `L`, not the scalar `0`.
+    if (x.ops.some(isCollectionShaped)) return undefined;
 
     // Get unknowns from the expression - only handle univariate case
     const unknowns = x.unknowns;

@@ -41,10 +41,13 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
   // Note: be conservative with constant (no-unknown) denominators, since they
   // may simplify/evaluate to 0 (e.g. 1-1) and we want to avoid 0/(1-1) -> 0.
   // Those cases can be handled by an explicit preliminary evaluation.
+  // A divisor that is a collection by its type (`L: list<real>`) gives a list
+  // of zeros of its length, not the scalar `0`.
   if (
     num.isSame(0) &&
     denom.isSame(0) === false &&
-    (isNumber(denom) || denom.symbols.length !== 0)
+    (isNumber(denom) || denom.symbols.length !== 0) &&
+    !isCollectionShaped(denom)
   ) {
     return { value: ce.Zero, because: '0/a -> 0' };
   }

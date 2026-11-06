@@ -682,8 +682,10 @@ describe('Rules: Odd Functions and Absolute Value', () => {
     expect(lhs.re).toBeCloseTo(rhs.re, 10);
     expect(lhs.re).toBeCloseTo(0.7568024953, 8);
   });
-  test('|arcsin(x)| = arcsin(|x|)', () =>
-    checkSimplify('|\\arcsin(x)|', '\\arcsin(|x|)'));
+  // Arcsin is not real for |x| > 1, and there the two sides differ:
+  // |Arcsin(2)| is 2.05, and Arcsin(|2|) is 1.57 - 1.32i.
+  test('|arcsin(x)| stays |arcsin(x)|', () =>
+    checkSimplify('|\\arcsin(x)|', '|\\arcsin(x)|'));
   test('|arctan(x)| = arctan(|x|)', () =>
     checkSimplify('|\\arctan(x)|', '\\arctan(|x|)'));
   // Arccot is odd, but under this engine's (0, pi) range convention it is
@@ -695,8 +697,9 @@ describe('Rules: Odd Functions and Absolute Value', () => {
     const lhs = ce.parse('|\\arcctg(-2)|').simplify().N();
     expect(lhs.re).toBeCloseTo(2.6779450446, 8);
   });
-  test('|arccsc(x)| = arccsc(|x|)', () =>
-    checkSimplify('|\\arccsc(x)|', '\\arccsc(|x|)'));
+  // Arccsc is not real for |x| < 1, as for Arcsin above.
+  test('|arccsc(x)| stays |arccsc(x)|', () =>
+    checkSimplify('|\\arccsc(x)|', '|\\arccsc(x)|'));
   test('|sinh(x)| = sinh(|x|)', () =>
     checkSimplify('|\\sinh(x)|', '\\sinh(|x|)'));
   test('|tanh(x)| = tanh(|x|)', () =>
@@ -707,12 +710,14 @@ describe('Rules: Odd Functions and Absolute Value', () => {
     checkSimplify('|\\csch(x)|', '\\csch(|x|)'));
   test('|arsinh(x)| = arsinh(|x|)', () =>
     checkSimplify('|\\arsinh(x)|', '\\arsinh(|x|)'));
-  test('|artanh(x)| = artanh(|x|)', () =>
-    checkSimplify('|\\artanh(x)|', '\\artanh(|x|)'));
-  test('|arccoth(x)| = arccoth(|x|)', () =>
+  // Artanh is not real for |x| > 1 and Arcoth is not real for |x| < 1, as for
+  // Arcsin above: |Artanh(2)| is 1.66, and Artanh(|2|) is 0.55 - 1.57i.
+  test('|artanh(x)| stays |artanh(x)|', () =>
+    checkSimplify('|\\artanh(x)|', '|\\artanh(x)|'));
+  test('|arccoth(x)| stays |arccoth(x)|', () =>
     checkSimplify(
       '|\\operatorname{arccoth}(x)|',
-      '\\operatorname{arccoth}(|x|)'
+      '|\\operatorname{arccoth}(x)|'
     ));
   test('|arcsch(x)| = arcsch(|x|)', () =>
     checkSimplify('|\\arcsch(x)|', '\\arcsch(|x|)'));
@@ -892,10 +897,10 @@ describe('Rules: Inverse Hyperbolic Trig and Infinity', () => {
 });
 
 describe('Rules: Hyperbolic Trig (arccoth repeat)', () => {
-  test('|arccoth(x)| = arccoth(|x|)', () =>
+  test('|arccoth(x)| stays |arccoth(x)|', () =>
     checkSimplify(
       '|\\operatorname{arccoth}(x)|',
-      '\\operatorname{arccoth}(|x|)'
+      '|\\operatorname{arccoth}(x)|'
     ));
 });
 

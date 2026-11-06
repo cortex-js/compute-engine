@@ -148,6 +148,7 @@ import {
   broadcastLengthMismatch,
   hasUnresolvedCollectionOperand,
   isUnresolvedCollectionOperand,
+  isUnresolvedList,
   isTupleShapedType,
   isTupleOrTupleUnionShapedType,
   isBroadcastableCollection,
@@ -3612,6 +3613,13 @@ export class BoxedFunction
           ? this.engine.number(rhs)
           : this.engine.expr(rhs)
       );
+    // A list with no value yet (`L + 1` with `L: list<real>`) gives a list of
+    // zeros of its length: `mul()` keeps the product.
+    if (
+      (rhs === 0 || (rhs instanceof NumericValue && rhs.isZero)) &&
+      isUnresolvedList(this)
+    )
+      return mul(this, this.engine.Zero);
     if (rhs === 0) return this.engine.Zero;
     if (rhs === 1) return this;
     if (rhs === -1) return this.neg();
@@ -20300,6 +20308,12 @@ function settleAbsentableLazyOperands(
   positions.forEach((i, k) => {
     const value = settledAbsentableValue(values[k]);
     if (value === undefined) return;
+    // An operand that evaluates to itself (`Range(0, Length(At(u, i)) - 1)`
+    // with a length that is not known) has nothing to replace. The caller
+    // evaluates the operator again over the replaced operands, so a
+    // replacement with the same expression would repeat this step until the
+    // stack overflows.
+    if (value === ops[i] || value.isSame(ops[i])) return;
     if (isAbsentScalarSymbol(value)) absent = true;
     resolved ??= [...ops];
     resolved[i] = value;

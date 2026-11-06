@@ -127,6 +127,14 @@ once, or a `ROADMAP.md` entry.
 One line each: the target, the program, the compiled value, the
 interpreter's value. A line is removed when the case declines or is fixed.
 
+- `javascript`, `L: list<real>`: the simplified form of `Sqrt(L - L) + 1` at
+  `L = [-1, 0, 2]` gives `[NaN, 1, 1]`. `simplify()` takes the zero out of the
+  root and gives `0·Sqrt(L) + 1`, so the code computes `0 * Math.sqrt(-1)`. The
+  interpreter, and the compiled form that is not simplified, give `[1, 1, 1]`.
+- `javascript`, `L: list<real>`: `Arctan2(0/L, -1)`, and the simplified form of
+  `Arctan2(L - L, -1)`, at `L = [-1, 2]` give `[-π, π]`. The code computes
+  `0 * -1` or `0 / -1`, which is `-0`, and `Math.atan2(-0, -1)` is `-π`. The
+  interpreter gives `[π, π]`.
 - `wgsl`, a `Match` whose case bodies assign a local:
   `Block(Assign(a, 0), Match(x, MatchCase(1, Block(Assign(a, 2))),
   MatchCase(_, Block(Assign(a, 3)))), a)` compiles to

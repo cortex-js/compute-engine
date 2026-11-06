@@ -3847,6 +3847,22 @@ export function isCollectionShaped(x: Expression): boolean {
 }
 
 /**
+ * True when `x` is a collection by its type and has no collection value yet
+ * (`L` or `L + 1` with `L: list<real>`). A zero times such an operand keeps the
+ * operand: `0·L` is a list of zeros of the length of `L`, and the length is
+ * known only when `L` has a value.
+ *
+ * `isUnresolvedCollectionOperand()` alone is too wide for this decision. It also
+ * accepts a type that only may hold a collection: `Sin(f(x))` with `f` undeclared
+ * has a union type with a list member, and is a scalar in almost every program.
+ * There a false positive of that test only holds a broadcast. Here it would stop
+ * `sin(f(x)) - sin(f(x))` from folding to `0`.
+ */
+export function isUnresolvedList(x: Expression): boolean {
+  return isCollectionShaped(x) && isUnresolvedCollectionOperand(x);
+}
+
+/**
  * Is this type a TUPLE, structurally — the bare `tuple` primitive or any
  * composite tuple, regardless of its slot types?
  *

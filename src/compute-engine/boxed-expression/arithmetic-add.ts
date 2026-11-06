@@ -61,6 +61,7 @@ import {
   isUnknownLengthBroadcast,
   hasUnresolvedCollectionOperand,
   isUnresolvedCollectionOperand,
+  isUnresolvedList,
   broadcastLengthMismatch,
   lazyBroadcastMap,
   broadcastOverIndexedCollections,
@@ -1396,7 +1397,9 @@ export class Terms {
     if (term.isSame(0)) return;
     // A float `0` coefficient (`0.0·x`, or `0.0` itself) is the float `0`:
     // it is kept as a numeric term, so the sum stays numeric.
-    if (coef.isZero) {
+    // A list with no value yet goes on with its zero coefficient, so that it
+    // merges with a like term: see `zeroTimesList()`.
+    if (coef.isZero && !isUnresolvedList(term)) {
       if (!coef.isExact && !term.isSame(1)) this._add(coef, this.engine.One);
       else if (!coef.isExact)
         this.push({ coef: [], term: this.engine.number(coef) });
@@ -1498,7 +1501,9 @@ export class Terms {
         const exactCoef = coef.every((x) => x.isExact);
 
         if (sum.isZero) {
-          if (!exactCoef) numericValues.push(sum);
+          const list = zeroTimesList(ce, sum, term);
+          if (list !== undefined) rest.push(list);
+          else if (!exactCoef) numericValues.push(sum);
           continue;
         }
 
@@ -1544,7 +1549,11 @@ export class Terms {
         if (sum.isNaN) return ce.NaN;
         // A float sum of coefficients stays a float coefficient: `0.5x + 0.5x`
         // is `1.0·x`, and `0.5x - 0.5x` is the float `0`
-        if (sum.isZero) return sum.isExact ? ce.Zero : ce.expr(sum);
+        if (sum.isZero)
+          return (
+            zeroTimesList(ce, sum, term) ??
+            (sum.isExact ? ce.Zero : ce.expr(sum))
+          );
         if (sum.eq(1) && sum.isExact) return term;
         if (sum.eq(-1) && sum.isExact) return term.neg();
         if (term.isSame(1)) return ce.expr(sum);
@@ -1571,6 +1580,21 @@ export class Terms {
       })
     );
   }
+}
+
+/**
+ * The term of a sum with a zero coefficient, when `term` is a list with no
+ * value yet; `undefined` otherwise. With `L: list<real>`, `0·L` and `L - L` are
+ * lists of zeros of the length of `L`, so they stay in the sum: `L - L + 1` is
+ * a list of ones, not the scalar `1`.
+ */
+function zeroTimesList(
+  ce: ComputeEngine,
+  coef: NumericValue,
+  term: Expression
+): Expression | undefined {
+  if (!isUnresolvedList(term)) return undefined;
+  return ce._fn('Multiply', [coef.isExact ? ce.Zero : ce.number(coef), term]);
 }
 
 function nvSum(

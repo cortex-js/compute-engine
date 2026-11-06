@@ -25,20 +25,25 @@ import { isEligibleRealRewrite } from '../function-properties/index.js';
 // sign-fixed on the positive axis for negative inputs reflected through
 // Abs (e.g. |Arccot(-2)| = 2.678 but Arccot(|-2|) = 0.464).
 //
-// Arcsin, Arctan, and Arccsc remain valid: they are odd AND non-negative for
-// non-negative arguments (within their principal branches), so |f(x)| = f(|x|)
-// holds.
-const ODD_TRIG = new Set(['Arcsin', 'Arctan', 'Arccsc']);
+// Arctan is odd AND non-negative for non-negative arguments, so |f(x)| = f(|x|)
+// holds for every real x.
+//
+// Arcsin and Arccsc are not in this list. Each has a value that is not real for
+// part of the real axis, and there the two sides differ: |Arcsin(2)| is the
+// real number 2.05, and Arcsin(|2|) is the complex number 1.57 - 1.32i. The
+// result is also typed complex where the original is real, so a compiled
+// comparison of it declines.
+const ODD_TRIG = new Set(['Arctan']);
 
-// Odd hyperbolic functions: f(-x) = -f(x), so |f(x)| = f(|x|)
+// Odd hyperbolic functions: f(-x) = -f(x), so |f(x)| = f(|x|). Artanh and Arcoth
+// are not in this list, for the reason given for Arcsin above: |Artanh(2)| is
+// 1.66, and Artanh(|2|) is 0.55 - 1.57i.
 const ODD_HYPER = new Set([
   'Sinh',
   'Tanh',
   'Coth',
   'Csch',
   'Arsinh',
-  'Artanh',
-  'Arcoth',
   'Arcsch',
 ]);
 
@@ -251,7 +256,9 @@ function simplifyAbsCore(x: Expression): RuleStep | undefined {
     isFunction(op)
   ) {
     const innerArg = op.op1;
-    if (innerArg) {
+    // The identity holds on the real axis only: with `z: complex`, `|sinh(i)|`
+    // is 0.84, and `sinh(|i|)` is 1.18.
+    if (innerArg && isEligibleRealRewrite(innerArg)) {
       return {
         value: ce._fn(opOperator, [ce._fn('Abs', [innerArg])]),
         because: `|${opOperator}(x)| -> ${opOperator}(|x|) (odd function)`,

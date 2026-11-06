@@ -3,6 +3,7 @@ import type {
   IComputeEngine as ComputeEngine,
   RuleStep,
 } from '../global-types.js';
+import { checkDeadline } from '../../common/interruptible.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
 import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
 import { halfTurnAngle } from '../boxed-expression/trigonometry.js';
@@ -826,12 +827,20 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
       return views;
     };
 
+    // The views of each term are built once. The pairs are quadratic in the
+    // number of terms: the expansion of `(sin(3x) + cos(x) + 2)^64` has 2,145
+    // terms, so building the views per pair took seconds. The deadline check is
+    // needed for the same reason: this loop does not return to the per-node
+    // check of `simplifyExpression()`, so a `withTimeLimit()` span would
+    // overrun until the loop ends.
+    const views = ops.map(squareViews);
     for (let i = 0; i < ops.length; i++) {
-      const vis = squareViews(ops[i]);
+      const vis = views[i];
       if (vis.length === 0) continue;
+      checkDeadline(ce._deadlineFrame);
       for (let j = 0; j < ops.length; j++) {
         if (j === i) continue;
-        const vjs = squareViews(ops[j]);
+        const vjs = views[j];
         if (vjs.length === 0) continue;
         for (const vi of vis) {
           const wantFn = vi.fn === 'Sin' ? 'Cos' : 'Sin';
