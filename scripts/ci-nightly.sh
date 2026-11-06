@@ -48,8 +48,9 @@
 #        `metrics`, the two growth numbers of this run, and
 #        `previousMetrics`, the same numbers of the earlier run, on the
 #        nearest ancestor commit (or the same commit), that measured them,
-#        with its commit. `suite-status.mjs` reports a rise
-#        of the code lines or a fall of the depth limit between the two.
+#        with its commit. `suite-status.mjs` reports a fall of the depth
+#        limit between the two. It does not report the code lines, which
+#        this job only records.
 #      - `metrics.jsonl`: the growth numbers of every complete run, one
 #        JSON line per run.
 #      - `attempt.json`: the last attempt of any kind. Its result can also
