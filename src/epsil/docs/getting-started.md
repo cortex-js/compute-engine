@@ -109,6 +109,23 @@ Calls made with the same `ComputeEngine` share its top-level declarations,
 which is useful for notebook cells and other stateful sessions. Create a fresh
 engine when you want an isolated program.
 
+To check a program without running it, for example after each edit in an
+editor, use `checkEpsil`. It gives the parse errors and the static type errors
+that `executeEpsil` reports before it runs a statement. It assigns no value,
+defines no function and declares no type on the engine, so it is safe on a
+shared engine, and a type that the engine already knows is not an error:
+
+```js
+import { ComputeEngine, checkEpsil } from "@cortex-js/compute-engine/epsil";
+
+const ce = new ComputeEngine();
+const { diagnostics } = checkEpsil(ce, 'let b = "x" + 1');
+console.log(diagnostics[0].message[0]); // static-type-error
+```
+
+An error that only a run finds, such as a division by zero in a loop, is not in
+these diagnostics.
+
 ## Where to Go Next
 
 <ReadMore path="/epsil/tour/">

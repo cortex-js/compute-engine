@@ -24,6 +24,11 @@
 
 ### Improvements
 
+- **`checkEpsil(ce, source)` checks an Epsil program without running it.** It
+  is exported from `@cortex-js/compute-engine/epsil` and gives the parse errors
+  and static type errors that `executeEpsil` reports before it runs a
+  statement. It assigns no value, defines no function and declares no type on
+  `ce`, and a type that `ce` already knows is not an error.
 - **Two more forms keep the in-place write of a compiled block local.** With
   `xs = ReplaceAt(xs, i, v)` in a loop, `const r = xs[1]` before the loop, or a
   `ReplaceAt(xs, 1, 0)` that is not assigned to `xs`, made the loop copy the list
@@ -209,6 +214,23 @@
   outer sum, which left `i` free and changed the value at `n = 3` from 0.2594 to
   1.5489. An index named `i` shadows the imaginary unit, and `simplify()` gave the
   outer index and the inner bound two different opaque names.
+- **`compile()` lists in `freeSymbols` a name that a called function reads when
+  a local at the call has the same name.** With `ok(c) := 1 / c ≥ minR` defined
+  on the engine and `minR` declared `real`, `Block(let minR = 0.008, ok(4))`
+  compiled with `freeSymbols: []`, although the compiled `ok` reads the input
+  `minR` and not the local. The list is now `["minR"]`, as for `ok(4)` alone.
+  With `minR` not declared, the block compiled, and it now declines with the
+  code `untyped-input`. The same applies when the name is the index of a `Sum`,
+  a `Product` or a `Loop` around the call.
+- **`compile()` no longer lists `DefineFunction` and the name of a local
+  function in `unsupported` for a program that compiled.** The Epsil program
+  `function f(x) { x + 1 }` then `f(2)` compiled to JavaScript with
+  `success: true` and `unsupported: ["DefineFunction", "f"]`. The list is now
+  empty on the JavaScript, `interval-js` and Python targets, also for a local
+  bound to a function literal (`const g = (k) => k + 1`). When such a program
+  declines for another reason, the list has only the operators with no
+  lowering. GLSL and WGSL do not compile a function defined in a block, and
+  still list it.
 
 ## 0.181.1 _2026-11-05_
 

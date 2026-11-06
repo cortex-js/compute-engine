@@ -144,7 +144,7 @@ export interface ExecuteEpsilResult {
 /** Every sum VARIANT the engine knows, mapped to the sum that declared it
  * (`_sumOf`, recorded by `declareSumType`). Read through the resolver, which
  * is the public window onto the engine-global type registry. */
-function sumVariantNames(ce: ComputeEngine): Record<string, string> {
+export function sumVariantNames(ce: ComputeEngine): Record<string, string> {
   const variants: Record<string, string> = {};
   for (const name of ce._typeResolver.names) {
     const sum = ce._typeResolver.resolve(name)?._sumOf;
@@ -157,6 +157,11 @@ function sumVariantNames(ce: ComputeEngine): Record<string, string> {
  * ids are only ever compared for equality with the stamp an earlier install of
  * the same run left on the protocol registry (ruling P47). */
 let epsilBatchCounter = 0;
+
+/** A new batch id, for a run of `executeEpsil` or a check by `checkEpsil`. */
+export function nextEpsilBatchId(): number {
+  return ++epsilBatchCounter;
+}
 
 export function executeEpsil(
   ce: ComputeEngine,
@@ -290,7 +295,7 @@ function* executeEpsilRun(
   // later batch replaces. Restored rather than cleared, so a nested run (a
   // host re-entering the interpreter) leaves the outer batch intact.
   const enclosingBatch = ce._epsilBatchId;
-  ce._epsilBatchId = ++epsilBatchCounter;
+  ce._epsilBatchId = nextEpsilBatchId();
   // The nested-statement hook the evaluation loop installs (see
   // `nestedStatementReporter`). The loop restores it when it ends; this
   // restores it too when the run ends with an exception. Restored rather
