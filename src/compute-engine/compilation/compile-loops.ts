@@ -48,7 +48,10 @@ import {
 } from './compile-declarations.js';
 import { laneMismatch, wideEntriesType } from './compile-lanes.js';
 import { userFunctionLiteral } from './compile-assignment-checks.js';
-import { returnedFunctionLiterals } from './compile-conditions.js';
+import {
+  containsEarlyReturn,
+  returnedFunctionLiterals,
+} from './compile-conditions.js';
 import { assertScalarBigOpBody } from './compile-shapes.js';
 import { CompilerState } from './compiler-state.js';
 
@@ -125,9 +128,11 @@ export function compileForLoop(
         `Could not compile \`${lang.toUpperCase()}\`: an unbounded Loop(body) is not supported.`
       );
     const bodyStmts = inBody(target, () => core.compileLoopBody(body, target));
-    return `(() => {${target.ws('\n')}while (true) {${target.ws(
-      '\n'
-    )}${passCount}${bodyStmts}${target.ws('\n')}}${target.ws('\n')}})()`;
+    return loopSource(
+      target,
+      body,
+      `while (true) {${target.ws('\n')}${passCount}${bodyStmts}${target.ws('\n')}}`
+    );
   }
 
   // ── Counted loop: single integer-ascending step-1 Range ───────────────
@@ -185,11 +190,13 @@ export function compileForLoop(
       core.compileLoopBody(body, bodyTarget)
     );
 
-    return `(() => {${target.ws(
-      '\n'
-    )}for (let ${indexCode} = ${lower}; ${indexCode} <= ${upper}; ${indexCode}++) {${target.ws(
-      '\n'
-    )}${passCount}${bodyStmts}${target.ws('\n')}}${target.ws('\n')}})()`;
+    return loopSource(
+      target,
+      body,
+      `for (let ${indexCode} = ${lower}; ${indexCode} <= ${upper}; ${indexCode}++) {${target.ws(
+        '\n'
+      )}${passCount}${bodyStmts}${target.ws('\n')}}`
+    );
   }
 
   // ── General for-each (for effect) ─────────────────────────────────────
@@ -213,7 +220,30 @@ export function compileForLoop(
     undefined,
     passCount
   );
-  return `(() => {${target.ws('\n')}${inner}${target.ws('\n')}})()`;
+  return loopSource(target, body, inner);
+}
+
+/**
+ * The code of a compiled `Loop` whose statement is `loop`: an arrow function
+ * that is called at once, because a `Loop` can be an operand. On plain
+ * JavaScript the arrow function also has a statement form, `{ loop }`, which a
+ * block or a loop body emits where the loop is a statement
+ * (`discardedValueStatement()`). A body with a `Return` keeps the arrow
+ * function only: the `return` ends the arrow function, and in a block it would
+ * end the function around the block. (The admission refuses a `Return` in a
+ * loop that is not the last statement of its function, `returnInLoopIn()`, so
+ * such a loop is not a statement.)
+ */
+function loopSource(
+  target: CompileTarget<Expression>,
+  body: Expression,
+  loop: string
+): string {
+  const nl = target.ws('\n');
+  const source = `(() => {${nl}${loop}${nl}})()`;
+  const statements = javascriptStatements(target);
+  if (statements === undefined || containsEarlyReturn(body)) return source;
+  return statements.registerStatement(source, `{${nl}${loop}${nl}}`);
 }
 
 /**

@@ -20,7 +20,10 @@ import {
   recordConstructedPointParams,
   provenScalarPointWidth,
 } from './javascript-value-facts.js';
-import { javascriptStatements } from './javascript-statements.js';
+import {
+  discardedValueStatement,
+  javascriptStatements,
+} from './javascript-statements.js';
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
 import {
@@ -4597,7 +4600,13 @@ export function compileLoopBody(
     }
   }
 
-  return compileOp(expr, -1, target, 0, expr);
+  // Every statement here is in statement position, so a nested loop is a
+  // block statement, not an arrow function that is called at once
+  // (`discardedValueStatement()`).
+  return discardedValueStatement(
+    target,
+    compileOp(expr, -1, target, 0, expr)
+  );
 }
 
 /**

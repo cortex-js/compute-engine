@@ -693,6 +693,18 @@
   than 0.1 ms (one run from source). An assignment to a symbol that an
   element reads still gives the new value. A list of numbers and strings was
   already its own value and is not changed. The values do not change. (CE-313)
+- **Compiled JavaScript loops that are statements run up to two times
+  faster.** The code of a `Loop` was an arrow function that is called at once,
+  `(() => { for (…) { … } })()`, also where the loop is a statement of a block
+  or of a loop body. A loop that writes a local of the code around it then
+  kept that local in a slower kind of storage. Such a loop is now the block
+  `{ for (…) { … } }`, and so is a loop in a branch of an `if … else`
+  statement. The Buddhabrot step of Tycho (three nested loops, 5,000 samples)
+  took about 2.1 ms per call and now takes about 1.1 ms; the loops of
+  `for k in 1..n { let a = 0; for m in 1..20 { … } }` with `n = 200000` went
+  from about 0.9 ms to 0.7 ms (medians of 50 calls, from source). A loop that
+  is an operand, or that has a `Return` in its body, keeps the arrow function.
+  The values do not change. (CE-1073)
 
 ## 0.182.0 _2026-11-06_
 

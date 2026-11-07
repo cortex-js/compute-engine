@@ -6,6 +6,7 @@ import {
   recordBlockScalarLocals,
   recordVariableLocals,
 } from './javascript-value-facts.js';
+import { discardedValueStatement } from './javascript-statements.js';
 import { resolveTypeForCompiledLanes as resolveTypeForCompilation } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
@@ -28,8 +29,10 @@ import {
   spellReservedLocals,
   withDefineFunctionDeclares,
   withFreshBlockLocals,
+  nestedAssignmentsTo,
   withImplicitLocalDeclares,
 } from './compile-locals.js';
+import { tuplePatternNames } from '../boxed-expression/tuple-pattern.js';
 import {
   LOCAL_SCALAR,
   declareValueOperand,
@@ -730,9 +733,33 @@ export function compileBlock(
             const isStatement = !(valueUsed && i === stmts.length - 1);
             const returnsEarly =
               isFunction(arg, 'If') && isStatement && containsEarlyReturn(arg);
+            // An `If` with an else and a `Loop` in a branch, in statement
+            // position, also takes the statement form. As a conditional
+            // expression, each branch with several statements is an arrow
+            // function that is called at once, and a loop in it that writes
+            // a local of the block runs up to two times slower (V8 keeps
+            // such a local in a heap context). A condition that is not a
+            // boolean keeps the conditional expression: it can select a
+            // branch for each element of a collection, which an `if`
+            // statement cannot do. The statement form is for plain JavaScript
+            // with no `If` function of the target: such a function compiles
+            // the conditional, and on another target the loops stay arrow
+            // functions in both forms. A branch whose block has a list local
+            // that a loop writes in place also keeps the conditional
+            // expression: the statement form compiles the branch as a loop
+            // body, which copies such a list on each write
+            // (`branchWritesListInPlace()`).
+            const loopInBranch =
+              isFunction(arg, 'If') &&
+              isStatement &&
+              target.language === 'javascript' &&
+              target.functions?.('If') === undefined &&
+              isSubtype(arg.ops[0].type.type, 'boolean') &&
+              arg.ops.slice(1).some(containsLoop) &&
+              !arg.ops.slice(1).some(branchWritesListInPlace);
             if (
               isFunction(arg, 'If') &&
-              (arg.nops === 2 || returnsEarly) &&
+              (arg.nops === 2 || returnsEarly || loopInBranch) &&
               isStatement &&
               (target.language === undefined ||
                 target.language === 'javascript')
@@ -870,11 +897,14 @@ export function compileBlock(
               ];
             const code = compileOp(arg, -1, stmtTarget, 0, value);
             // A discarded value is a WGSL phony assignment
-            // (`shaderExpressionStatement`).
+            // (`shaderExpressionStatement`). On JavaScript, a loop whose
+            // value is discarded is a block statement, not an arrow function
+            // that is called at once (`discardedValueStatement()`).
+            if (!isStatement) return [code];
             return [
-              isStatement && target.bareStatementBlocks
+              target.bareStatementBlocks
                 ? shaderExpressionStatement(arg, code, stmtTarget)
-                : code,
+                : discardedValueStatement(stmtTarget, code),
             ];
           })
         )
@@ -1059,4 +1089,48 @@ function isListOfTuplesType(t: Type): boolean {
     resolved.elements.length > 0 &&
     resolved.elements.every((e) => isTuple(e.type))
   );
+}
+
+/**
+ * True when `e` has a `Loop` that is not inside a nested function literal (a
+ * loop inside a function literal belongs to the code of that function).
+ */
+function containsLoop(e: Expression): boolean {
+  if (!isFunction(e)) return false;
+  if (e.operator === 'Loop') return true;
+  if (e.operator === 'Function') return false;
+  return e.ops.some(containsLoop);
+}
+
+/**
+ * True when `e`, a branch of an `If` statement, has a `Block` with a local
+ * that `compileBlock` can write in place (`ownedLocalUpdateChains()`). The
+ * statement form compiles such a block as a loop body, which does not write
+ * its locals in place, so the branch keeps the conditional expression.
+ *
+ * The search does not go into a `Loop` or a function literal: their bodies
+ * are compiled the same way in both forms. A destructuring declaration
+ * (`let (xs, t) = …`) is split into one declaration for each name only when
+ * `compileBlock` compiles the block, so the test cannot read its chains here:
+ * a block that assigns again a name of such a declaration counts as a block
+ * with an in-place write.
+ */
+function branchWritesListInPlace(e: Expression): boolean {
+  if (!isFunction(e) || e.operator === 'Function' || e.operator === 'Loop')
+    return false;
+  if (
+    e.operator === 'Block' &&
+    e.ops.some((s) => {
+      if (!isFunction(s, 'Declare')) return false;
+      if (isSymbol(s.ops[0]))
+        return ownedLocalUpdateChains(e.ops, s.ops[0].symbol) !== undefined;
+      return (
+        isFunction(s.ops[0], 'Tuple') &&
+        nestedAssignmentsTo(e, new Set(tuplePatternNames(s.ops[0]))).length >
+          0
+      );
+    })
+  )
+    return true;
+  return e.ops.some(branchWritesListInPlace);
 }

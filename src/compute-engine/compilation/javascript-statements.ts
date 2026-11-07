@@ -13,6 +13,7 @@ type StatementBody = (exit: Exit) => string;
  */
 class JavaScriptStatements {
   private readonly bodies = new Map<string, StatementBody>();
+  private readonly statementForms = new Map<string, string>();
   private counter = 0;
 
   constructor(private readonly naming: NamingContext) {}
@@ -31,6 +32,31 @@ class JavaScriptStatements {
   register(source: string, body: StatementBody): string {
     this.bodies.set(source, body);
     return source;
+  }
+
+  /**
+   * Record that `source`, an arrow function that is called at once, has the
+   * same effect as `statement`, a block statement, and that its value is
+   * `undefined`, which nothing reads. A compiled `Loop` is such a source.
+   * Where the value of `source` is discarded (a statement of a block or of a
+   * loop body), `statement()` gives the block instead. V8 keeps a local that
+   * the inner function writes in a heap context, so the arrow function around
+   * a loop made each pass of a loop over such locals up to two times slower.
+   *
+   * The caller must make sure that `statement` has no `return`: in the arrow
+   * function it ends only the arrow function, and in the block it would end
+   * the function that contains the block. A `break` or a `continue` in
+   * `statement` is inside its own loop, so it goes to the same loop in both
+   * forms.
+   */
+  registerStatement(source: string, statement: string): string {
+    this.statementForms.set(source, statement);
+    return source;
+  }
+
+  /** The block statement recorded for `source` by `registerStatement()`. */
+  statement(source: string): string | undefined {
+    return this.statementForms.get(source);
   }
 
   expression(body: StatementBody): string {
@@ -116,4 +142,16 @@ export function javascriptStatements(
     contexts.set(target.naming, context);
   }
   return context;
+}
+
+/**
+ * `code`, the code of a statement whose value is discarded, in the form to
+ * emit: the block statement that a compiled `Loop` recorded for it
+ * (`registerStatement()`), or `code` itself.
+ */
+export function discardedValueStatement(
+  target: CompileTarget<Expression>,
+  code: string
+): string {
+  return javascriptStatements(target)?.statement(code) ?? code;
 }

@@ -338,7 +338,7 @@ describe('COMPILE Loop - with no iterationBudget', () => {
   test('the emitted text holds no check', () => {
     const result = js(bareLoop());
     expect(result.code).toBe(
-      '(() => {\nlet s;\ns = 0;\n(() => {\nwhile (true) {\ns = s + 1\n}\n})();\nreturn s\n})()'
+      '(() => {\nlet s;\ns = 0;\n{\nwhile (true) {\ns = s + 1\n}\n};\nreturn s\n})()'
     );
     expect(result.preamble).toBeUndefined();
   });
