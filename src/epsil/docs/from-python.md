@@ -149,9 +149,10 @@ sum(m)
 // ➔ 6
 ```
 
-A generator that is not assigned (an argument, an operand) reads variables
-at *materialization* time, and so does an assigned generator with no last
-element (`filter(1..oo, k => k > n)`).
+An assigned generator with no last element (`filter(1..oo, k => k > n)`)
+stays a generator, and stores the value that `n` has at the assignment. A
+generator that is not assigned (an argument, an operand) reads variables at
+*materialization* time.
 
 ## Control Flow
 

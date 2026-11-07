@@ -164,7 +164,10 @@ import {
   presentedValueType,
 } from './boxed-expression/effects-inference.js';
 import { isTestedAtRead } from './boxed-expression/store-admission.js';
-import { effectsOf } from './boxed-expression/effects-of.js';
+import {
+  effectsOf,
+  shallowApplicationEffects,
+} from './boxed-expression/effects-of.js';
 import { readsOtherBindings } from './boxed-expression/names-read.js';
 import { isOperatorDef } from './boxed-expression/definition-guards.js';
 import { releaseKeptEagerSourceValues } from './boxed-expression/eager-source-values.js';
@@ -192,6 +195,8 @@ import {
   staticViewDiverges,
 } from './static-typing-view.js';
 import {
+  hasDeclaredEffectLabel,
+  isCoFiniteEffects,
   isEffectSubset,
   isPureComputedEffects,
 } from '../common/type/effects.js';
@@ -4770,6 +4775,261 @@ export function bindOutlivedLocalsOfLazyValue(
     if (result !== e) carryLazyViewContexts(e, result);
     return withRecords(result);
   }
+}
+
+/**
+ * The lazy collection `e`, which an assignment statement stores as a lazy
+ * value, with each occurrence of a VARIABLE replaced with the value that the
+ * variable holds now. The collection stays lazy.
+ *
+ * An assignment stores the list (or the set) of the elements of a finite
+ * lazy collection that reads a variable (`assignedValue`, `library/core.ts`).
+ * It cannot do this for a collection that is not known to be finite
+ * (`filter(1..oo, c => c > k)`), for a `Filter` over a dictionary, or for a
+ * collection whose kind (list or set) is not known. Such a collection reads
+ * its operands, and the body of its callback, when its elements are read.
+ * Without this function, a variable that it reads by name and that changes
+ * after the assignment changed the stored value: with `k = 3`,
+ * `let big = filter(1..oo, c => c > k)`, `k = 10`, `first(big)` gave `11`,
+ * not `4`.
+ *
+ * A variable is a name whose binding in the current context is a value
+ * definition that is not a constant and that holds a value (a `let`, a loop
+ * variable, a parameter of the call being evaluated, a local of a block
+ * being run). The replacement reaches inside the function literals of the
+ * collection. It does not replace:
+ *
+ * - A name that a binder inside `e` binds, where the binder is in scope: the
+ *   `c` of `c => c > k`, the index of a nested `Sum`.
+ * - A variable with no value, or whose value names the variable itself
+ *   freely (`t := t + 1` with `t` given no value first), as
+ *   `snapshotRunVariables`. A parameter of the same name in the value is
+ *   bound, so `f` with the value `(f) => f + 1` is replaced (`namesFreely`).
+ * - An occurrence bound to a constant: the library `Pi` under a local `Pi`
+ *   reads its own constant.
+ * - A user function defined with `function`: it has an operator definition,
+ *   not a value definition, and a program cannot define it again.
+ * - The variables of the value of a variable that holds a function literal:
+ *   `filter(1..oo, f)` with `f = c => c > k` stores the literal of `f`, and
+ *   the literal is a closure that reads the last value of `k`, as every
+ *   closure does.
+ *
+ * A call whose head is a variable that holds a function value
+ * (`c => g(c)`) becomes an application of that value (`Apply`), as in
+ * `snapshotRunVariables`.
+ *
+ * A variable that the collection writes (a callback that assigns it) is not
+ * replaced: the write must reach the variable, so the collection stays a
+ * live view of that variable. The other variables that it reads are
+ * replaced. When the collection calls a function that can write a variable
+ * (`mayWriteThroughCall`), or when the substitution cannot avoid the capture
+ * of a free name of a value by a binder of the collection
+ * (`UnavoidableCapture`), `e` is returned as it is.
+ *
+ * The substitution is the one that a call does for its parameters
+ * (`bindingKeyedSubs`): an occurrence is replaced when it carries the
+ * definition of the variable, or, when it has no definition (a held
+ * operand), when it has the name of the variable.
+ */
+export function bindReadVariablesOfLazyCollection(
+  ce: ComputeEngine,
+  e: Expression
+): Expression {
+  if (!isFunction(e) || !e.isLazyCollection) return e;
+  if (mayWriteThroughCall(e)) return e;
+  const subs: ParameterSub[] = [];
+  // One substitution per definition that an occurrence carries, and one per
+  // name for the occurrences that carry no definition.
+  const added = new Set<BoxedValueDefinition | string>();
+  // The value that the variable `name` bound to `binding` holds now, or
+  // `undefined` when `binding` is not a variable with a value.
+  const valueOf = (
+    name: string,
+    binding: BoxedDefinition | undefined
+  ): Expression | undefined => {
+    if (binding === undefined || !('value' in binding)) return undefined;
+    const def = binding.value;
+    if (def.isConstant) return undefined;
+    const held = def.storedValue;
+    if (held === undefined || namesFreely(held, name)) return undefined;
+    return held;
+  };
+  const add = (
+    own: BoxedValueDefinition | undefined,
+    name: string,
+    held: Expression
+  ): void => {
+    const key = own ?? name;
+    if (added.has(key)) return;
+    added.add(key);
+    subs.push([own, name, held, false]);
+  };
+  // The names that a node of `e` binds, as they shadow the walk. The scope
+  // of a `Block` (the body of a function literal) can hold the binding of a
+  // variable of an enclosing scope, a parameter of the function being run
+  // that its body writes: an occurrence below the block still denotes that
+  // variable, so the name does not shadow it. The locals that the block
+  // makes for its statements do, and so do the names that a held node
+  // binds by its syntax (`heldBoundNames`). This is the hook that
+  // `bindingKeyedSubs` uses (`parameterSubBinds`), with a test by the
+  // binding in context in place of a test against the substitutions.
+  function outerVariableBinds(
+    node: Expression,
+    names: readonly string[]
+  ): readonly string[] {
+    if (isFunction(node, 'Function')) return names;
+    const held = !node.isCanonical && node.localScope === undefined;
+    const locals = held ? heldBoundNames(node) : wholeBlockLocalNames(node);
+    const isOuterVariable = (name: string): boolean => {
+      const entry = node.localScope?.bindings.get(name);
+      if (entry === undefined || !('value' in entry)) return false;
+      const bound = bindingInContext(ce, name, entry.value);
+      return (
+        bound !== undefined &&
+        'value' in bound &&
+        sameBindingDef(bound.value, entry.value)
+      );
+    };
+    const kept = names.filter(
+      (name) => locals.includes(name) || !isOuterVariable(name)
+    );
+    const newLocals = locals.filter((name) => !names.includes(name));
+    return kept.length === names.length && newLocals.length === 0
+      ? names
+      : [...kept, ...newLocals];
+  }
+  // The walk only collects the substitutions: each visitor returns the
+  // node as it is.
+  rewriteWithBinders(
+    e,
+    (sym, shadowed) => {
+      if (shadowed?.has(sym.symbol) === true) return sym;
+      const own = sym.valueDefinition;
+      if (own?.isConstant === true) return sym;
+      // An occurrence that carries an operator definition and no value
+      // definition names a function: it is not a variable.
+      if (own === undefined && sym.operatorDefinition !== undefined)
+        return sym;
+      const held = valueOf(sym.symbol, bindingInContext(ce, sym.symbol, own));
+      if (held !== undefined) add(own, sym.symbol, held);
+      return sym;
+    },
+    undefined,
+    false,
+    undefined,
+    (app, _ops, shadowed) => {
+      const name = app.operator;
+      if (shadowed?.has(name) === true) return undefined;
+      const own = app.valueDefinition;
+      // A head with an operator definition and no value definition is a
+      // library operator or a user function: `bindingKeyedSubs` replaces
+      // only a head that carries the value definition or no definition.
+      if (own === undefined && app.operatorDefinition !== undefined)
+        return undefined;
+      const held = valueOf(
+        name,
+        callableBindingInContext(
+          ce,
+          name,
+          own !== undefined ? { value: own } : undefined
+        )
+      );
+      if (held !== undefined && held.type.matches('function'))
+        add(own, name, held);
+      return undefined;
+    },
+    undefined,
+    outerVariableBinds
+  );
+  // A variable that the collection writes is not replaced: the write must
+  // reach the variable. The other variables are replaced.
+  const read = subs.filter(
+    (sub) =>
+      (parameterWrites(e, sub) & (WRITE_OUTSIDE_LITERAL | WRITE_IN_LITERAL)) ===
+      0
+  );
+  if (read.length === 0) return e;
+  let result: Expression;
+  try {
+    result = bindingKeyedSubs(e, read);
+  } catch (error) {
+    if (error instanceof UnavoidableCapture) return e;
+    throw error;
+  }
+  if (result !== e) carryLazyViewContexts(e, result);
+  return result;
+}
+
+/**
+ * Whether `e` calls a function that can write a variable: a call whose
+ * effects include `scope` (an Epsil function declared with the `scope`
+ * effect, which assigns a variable outside its body) or are not known (a
+ * function that the engine knows nothing about). `parameterWrites` sees only
+ * the `Assign` and `Declare` nodes of `e`, not the writes in the body of a
+ * function that `e` calls: with `function bump() scope -> integer { n = n +
+ * 1; n }`, the callback `c => do { bump(); n }` writes `n` through `bump`.
+ * `bindReadVariablesOfLazyCollection` then replaces no variable.
+ *
+ * A node whose effects come only from the bodies of its `Function` literal
+ * operands (a `Map` with an inline callback) is not counted: the walk reads
+ * those bodies, where a direct write is an `Assign` that `parameterWrites`
+ * sees. A node with another operand of a function type (`map(bump, 1..oo)`)
+ * is counted. The `Assign` and `Declare` nodes themselves are not counted.
+ */
+function mayWriteThroughCall(e: Expression): boolean {
+  const visited = new Set<Expression>();
+  const visit = (x: Expression): boolean => {
+    if (visited.has(x)) return false;
+    visited.add(x);
+    if (isDictionary(x)) return x.values.some(visit);
+    if (!isFunction(x) || x._numericStore !== undefined) return false;
+    if (
+      x.operator !== 'Assign' &&
+      x.operator !== 'Declare' &&
+      x.operator !== 'Function'
+    ) {
+      const effects = shallowApplicationEffects(x);
+      const writes =
+        effects === 'any' ||
+        (effects !== undefined &&
+          (isCoFiniteEffects(effects) ||
+            hasDeclaredEffectLabel(effects, 'scope')));
+      if (writes) {
+        const throughLiterals =
+          x.ops.some((op) => isFunction(op, 'Function')) &&
+          x.ops.every(
+            (op) => isFunction(op, 'Function') || !op.type.matches('function')
+          );
+        if (!throughLiterals) return true;
+      }
+    }
+    return x.ops.some(visit);
+  };
+  return visit(e);
+}
+
+/** Whether `value` has a FREE occurrence of `name`: a symbol, or the head of
+ * a call, that no binder of `value` binds. The parameter `f` of the value of
+ * `let f = (f) => f + 1` is bound, so that value does not name `f` freely,
+ * where `value.has("f")` is `true`. */
+function namesFreely(value: Expression, name: string): boolean {
+  if (!value.has(name)) return false;
+  let found = false;
+  rewriteWithBinders(
+    value,
+    (sym, shadowed) => {
+      if (sym.symbol === name && shadowed?.has(name) !== true) found = true;
+      return sym;
+    },
+    undefined,
+    false,
+    undefined,
+    (app, _ops, shadowed) => {
+      if (app.operator === name && shadowed?.has(name) !== true) found = true;
+      return undefined;
+    }
+  );
+  return found;
 }
 
 /** Whether `value` holds a lazy collection: at its root, or in the operands

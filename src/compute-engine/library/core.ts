@@ -80,6 +80,7 @@ import {
 import {
   apply,
   bindOutlivedLocalsOfLazyValue,
+  bindReadVariablesOfLazyCollection,
   canonicalFunctionLiteral,
   canonicalFunctionLiteralOperands,
   canonicalWithFreshPlaceholders,
@@ -3766,21 +3767,28 @@ function randomListType(
  * where a filter is an array. A callback with an effect therefore runs for
  * every element at the assignment, once, and not at each later read.
  *
- * Left as they are:
+ * A lazy collection that reads no variable (a range, a `Map` over a range)
+ * is left as it is: nothing can change under it, and listing a range of a
+ * million elements would cost memory for no gain.
  *
- * - a collection that is not known to be finite (`filter(1..oo, p)` cannot
- *   be listed, and stays a live view of the variables it reads);
- * - a lazy collection that reads no variable (a range, a `Map` over a range:
- *   nothing can change under it, and listing a range of a million elements
- *   would cost memory for no gain);
+ * A lazy collection that reads a variable but cannot be listed stays lazy,
+ * and each variable that it reads, also in the body of its callback, is
+ * replaced with the value that the variable holds now
+ * (`bindReadVariablesOfLazyCollection`). So a later assignment of the
+ * variable does not change the stored value. These are:
+ *
+ * - a collection that is not known to be finite: with `k = 3`,
+ *   `let big = filter(1..oo, c => c > k)` stores
+ *   `filter(1..oo, c => c > 3)`, and `first(big)` stays `4` after `k = 10`;
  * - a lazy collection that is neither indexed (a list) nor typed as a set:
  *   a `Filter` over a dictionary is a dictionary, and listing it would
- *   store a list of key-value pairs, which no keyed read understands. It
- *   stays a live view;
+ *   store a list of key-value pairs, which no keyed read understands;
  * - a collection whose elements could not be listed: the enumeration threw
  *   (a predicate that does not answer a boolean) or did not answer a list or
- *   a set. The lazy value is stored, and the failure is reported when the
- *   collection is read, as before.
+ *   a set. The failure is reported when the collection is read, as before.
+ *
+ * A collection that writes a variable that it reads (a callback that
+ * assigns it) stays a live view of that variable.
  *
  * A lazy collection that is an element of a list or tuple literal
  * (`let r = [Map(h, xs)]`) is replaced in the same way, at every depth of
@@ -3882,25 +3890,27 @@ function listedAssignedValueUncached(
     return ce.function(value.operator, next);
   }
   if (!value.isValid || !value.isLazyCollection) return value;
-  if (!isWalkableFiniteCollection(value)) return value;
+  if (!readsVariable(ce, value)) return value;
+  // A collection that stays lazy reads the values its variables hold now.
+  const kept = () => bindReadVariablesOfLazyCollection(ce, value);
+  if (!isWalkableFiniteCollection(value)) return kept();
   // The kind of the stored value: a list for an indexed collection, read
   // from the VALUE (the type of a `Filter` over a local whose type was
   // inferred `collection<any>` does not say `list`), and a set for a value
   // typed as a set. Anything else is left lazy.
   const isSet = !value.isIndexedCollection && value.type.matches('set<any>');
-  if (!isSet && !value.isIndexedCollection) return value;
-  if (!readsVariable(ce, value)) return value;
+  if (!isSet && !value.isIndexedCollection) return kept();
   try {
     const listed = ce
       .function(isSet ? 'SetFrom' : 'ListFrom', [value])
       .evaluate();
-    return isFunction(listed, isSet ? 'Set' : 'List') ? listed : value;
+    return isFunction(listed, isSet ? 'Set' : 'List') ? listed : kept();
   } catch (e) {
     // A cancellation (an abort, an iteration limit, the deadline of a
     // caller) is not an enumeration failure: it propagates, and the
     // assignment does not happen.
     throwIfCallerCancellation(e, ce._deadlineFrame);
-    return value;
+    return kept();
   }
 }
 

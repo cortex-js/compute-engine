@@ -305,7 +305,8 @@ sort([3, 1, 4, 1, 5], (a, b) => a > b)
   immediately, and so does an **assignment**: `let ys = filter(xs, p)` and
   `xs = filter(xs, p)` store the list of the elements when the generator is
   finite and reads a variable. A generator with no last element
-  (`filter(1..oo, p)`) stays lazy when it is assigned.
+  (`filter(1..oo, p)`) stays lazy when it is assigned, and stores the values
+  that the variables it reads have at the assignment.
 - **Output is the engine's textual form**: strings and booleans print
   *quoted* (`"True"`, `"florb"`) — that quoted `"True"` is a boolean, not a
   string. Derived collections (`Range`, `map`/`filter` results, loop-built

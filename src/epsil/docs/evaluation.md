@@ -268,20 +268,42 @@ xs = filter(xs, c => c > 2)
 
 Two lazy collections stay lazy when they are assigned: one with no last
 element (`filter(1..oo, p)`), which cannot be listed, and one that reads no
-variable (`map(f, 1..1000000)`), which nothing can change. A lazy collection
-that is not assigned (an argument, an operand) still reads program state
-**at materialization time**, like a generator in Python. An unbounded one
-that captures a variable reflects the later value of that variable.
+variable (`map(f, 1..1000000)`), which nothing can change. A `filter` over a
+dictionary also stays lazy. When such a collection reads a variable, also
+in an inline function, the statement stores it with the value that the
+variable has at that statement, so a later assignment of the variable does
+not change it:
+
+```epsil
+let k = 3
+let big = filter(1..oo, c => c > k)
+k = 10
+first(big)
+// ➔ 4
+```
+
+A variable that the collection assigns, in its callback or through a
+function with the `scope` effect that it calls, is not replaced: the
+collection reads and writes that variable when its elements are read. A
+variable that holds a function is replaced with that function, and the
+function is a closure: it reads the later values of its own variables. With
+`let p = c => c > k` and `let big = filter(1..oo, p)`, `first(big)` gives
+`11` after `k = 10`. A finite collection made from such a stored collection
+(`take(big, 2)`) reads no variable, so it also stays lazy when it is
+assigned, and its callback runs each time its elements are read.
+
+A lazy collection that is not assigned (an argument, an operand) still reads
+program state **at materialization time**, like a generator in Python.
 
 ```mermaid
 flowchart TD
   rhs["let xs = … or xs = …"] --> lit{"right-hand side<br/>is a literal?"}
   lit -- yes --> snap["stored as its elements: a snapshot"]
-  lit -- "no: a lazy collection" --> fin{"has a last element?"}
-  fin -- "no, as filter(1..oo, p)" --> lazy["stays lazy: enumerated when materialized,<br/>reading variables as they are then"]
-  fin -- yes --> reads{"reads a variable, as written?<br/>(an inline function counts;<br/>a named function is not inspected)"}
-  reads -- "no, as map(f, 1..1000000)" --> lazy
-  reads -- yes --> snap2["stored as the list of its elements,<br/>computed with the values at this statement"]
+  lit -- "no: a lazy collection" --> reads{"reads a variable, as written?<br/>(an inline function counts;<br/>a named function is not inspected)"}
+  reads -- "no, as map(f, 1..1000000)" --> lazy["stays lazy: enumerated when materialized"]
+  reads -- yes --> fin{"has a last element?"}
+  fin -- "no, as filter(1..oo, c => c > k)" --> bound["stays lazy, with the values<br/>of its variables at this statement"]
+  fin -- yes --> snap2["stored as the list of its elements,<br/>computed with the values at this statement"]
 ```
 
 The test "reads a variable" looks at the expression as written, and does not

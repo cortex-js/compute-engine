@@ -177,6 +177,9 @@ describe('what stays lazy', () => {
     const held = ce.box('evens').evaluate();
     expect(held.operator).toBe('Filter');
     expect(ce.box(['First', 'evens']).evaluate().toString()).toBe('4');
+    // The stored filter holds the value of `k` at the assignment.
+    ce.assign('k', 10);
+    expect(ce.box(['First', 'evens']).evaluate().toString()).toBe('4');
   });
 
   test('a lazy collection that reads no variable', () => {
@@ -210,6 +213,9 @@ describe('what stays lazy', () => {
     const held = ce.box('z').evaluate();
     expect(held.operator).toBe(before.operator);
     expect(held.operator).not.toBe('List');
+    // The stored filter holds the value of `k` at the assignment.
+    ce.assign('k', 10);
+    expect(ce.box(['Length', 'z']).evaluate().toString()).toBe('1');
   });
 
   test('a very large collection is listed, not left as a live view', () => {
@@ -236,6 +242,124 @@ describe('what stays lazy', () => {
     );
     ce.assign('xs', ce.box(['List', 7, 8]));
     expect(ce.box(['ListFrom', 'ys']).evaluate().toString()).toBe('[7,8]');
+  });
+});
+
+// A lazy collection that an assignment cannot list stays lazy, and each
+// variable that it reads, also in the body of its callback, is replaced with
+// the value that the variable holds at the assignment
+// (`bindReadVariablesOfLazyCollection`, `function-utils.ts`). Before, the
+// collection read the variables by name, and a later assignment of one of
+// them changed the stored value: in the first test, `first(big)` gave `11`
+// after `k = 10`.
+describe('a lazy collection that stays lazy reads its variables at the assignment', () => {
+  test.each([
+    [
+      'a filter over an infinite range',
+      'k = 3\nlet big = filter(1..oo, c => c > k)\nlet a = first(big)\nk = 10\n[a, first(big)]',
+      '[4,4]',
+    ],
+    [
+      'a filter over a set held by a local typed collection<any>',
+      'let k = 1\nlet s: collection<any> = {1, 2, 3}\nlet z = filter(s, c => c > k)\nlet a = length(z)\nk = 2\n[a, length(z)]',
+      '[2,2]',
+    ],
+    [
+      'a local of a block',
+      'do { let k = 3; let big = filter(1..oo, c => c > k); k = 10; first(big) }',
+      '4',
+    ],
+    [
+      'a parameter that the function body assigns later',
+      'function h(k) { let big = filter(1..oo, c => c > k)\n k = 10\n first(big) }\nh(3)',
+      '4',
+    ],
+    [
+      'a variable assigned a filter over itself',
+      'k = 3\nlet xs = 1..oo\nxs = filter(xs, c => c > k)\nk = 10\nfirst(xs)',
+      '4',
+    ],
+    [
+      'a variable that holds the source view',
+      'k = 3\nlet v = filter(1..oo, c => c > k)\nlet w = map(c => c * k, v)\nk = 10\nfirst(w)',
+      '12',
+    ],
+    // The call `g(c)` becomes an application of the function that `g` holds
+    // at the assignment.
+    [
+      'a variable called in the callback',
+      'k = 3\nlet g = (c) => c > k\nlet big = filter(1..oo, c => g(c))\ng = (c) => c > 100\nfirst(big)',
+      '4',
+    ],
+  ])('%s', (_label, src, expected) => {
+    expect(run(src)).toBe(expected);
+  });
+
+  // The parameter `c` of the callback and the index `j` of a comprehension
+  // are bound in the collection: a variable with the same name does not
+  // replace them.
+  test('a name bound in the collection is not replaced', () => {
+    expect(
+      run(
+        'c = 50\nk = 3\nlet big = filter(1..oo, c => c > k)\nk = 10\nc = 0\nfirst(big)'
+      )
+    ).toBe('4');
+    expect(
+      run(
+        'k = 3\nlet j = 100\nlet big = filter(1..oo, c => c > sum([j for j in 1..k]))\nk = 10\nj = 0\nfirst(big)'
+      )
+    ).toBe('7');
+  });
+
+  // A callback that assigns a variable must write the variable itself, so
+  // the collection keeps it by name.
+  test('a collection that writes a variable keeps it', () => {
+    const ce = new ComputeEngine();
+    ce.assign('n', 0);
+    ce.box([
+      'Assign',
+      'big',
+      [
+        'Map',
+        [
+          'Function',
+          ['Block', ['Assign', 'n', ['Add', 'n', 1]], ['Add', 'c', 'n']],
+          'c',
+        ],
+        ['Range', 1, 'PositiveInfinity'],
+      ],
+    ]).evaluate();
+    expect(ce.box('big').evaluate().has('n')).toBe(true);
+  });
+
+  // Only the written variable stays live: `k` is still replaced.
+  test('a collection that writes one variable replaces the others', () => {
+    expect(
+      run(
+        'n = 0\nk = 3\nlet big = map(c => do { n = n + 1; c + k }, 1..oo)\nk = 100\nfirst(big)'
+      )
+    ).toBe('4');
+  });
+
+  // `bump` writes `n`, and the callback reads `n` after the call: the
+  // collection keeps `n` by name. With `n` replaced by `0`, the element
+  // was `0`.
+  test('a collection that writes a variable through a call keeps it', () => {
+    expect(
+      run(
+        'let n = 0\nfunction bump() scope -> integer { n = n + 1; n }\nlet big = map(c => do { bump(); n }, 1..oo)\nfirst(big)'
+      )
+    ).toBe('1');
+  });
+
+  // The parameter `f` of the value of `f` is bound in that value, so the
+  // value does not name the variable `f`, and `f` is replaced.
+  test('a function value whose parameter has the name of the variable', () => {
+    expect(
+      run(
+        'let f = (f) => f + 1\nlet big = map(f, 1..oo)\nf = (x) => 100\nfirst(big)'
+      )
+    ).toBe('2');
   });
 });
 

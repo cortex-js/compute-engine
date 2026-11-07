@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- **An assigned lazy collection that stays lazy no longer changes when a
+  variable that it reads changes later.** In Epsil, after `k = 3` and
+  `let big = filter(1..oo, c => c > k)`, the assignment `k = 10` changed
+  `first(big)` from `4` to `11`; it now stays `4`. An `Assign` or a `Declare`
+  stores such a collection with the values that its variables have at the
+  statement, also the variables read by an inline function. The same applies
+  to a `Filter` over a dictionary, and to a `Filter` over a set held by a
+  variable typed `collection<any>`. A variable that the collection writes, and
+  the variables read by a function that a variable holds
+  (`let p = c => c > k`, then `filter(1..oo, p)`), are still read when the
+  elements are read. A finite collection that reads a variable is still stored
+  as the list of its elements. A finite collection made from a stored lazy one
+  (`let t = take(big, 2)`) reads no variable, so it now stays lazy, and its
+  callback runs each time its elements are read. `ce.assign()` is not changed:
+  it stores the value it is given.
+
 ### Resolved Issues
 
 - **The `unknowns` of a block no longer list the names that a destructuring

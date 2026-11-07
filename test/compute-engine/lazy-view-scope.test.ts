@@ -922,10 +922,13 @@ describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION', () => {
       'let h = []; let r = [do { if i == 2 { h = Map(x => x + i, Range(1, Infinity)) }; i } for i in 1..3]; ListFrom(Take(h, 2))',
       ['List', 3, 4],
     ],
+    // The assignment also replaces a variable of the scope of the stored
+    // variable with its value (`bindReadVariablesOfLazyCollection`), so the
+    // later `m = 50` does not change `h`.
     [
-      'a variable of the scope of the stored variable is read at the read',
+      'a variable of the scope of the stored variable is read at the assignment',
       'let h = []; let m = 1; for d in [3] { h = Map(x => x + m, Range(1, Infinity)) }; m = 50; ListFrom(Take(h, 2))',
-      ['List', 51, 52],
+      ['List', 2, 3],
     ],
   ];
 
@@ -969,9 +972,12 @@ describe('A LAZY VIEW ASSIGNED OUT OF A LOOP ITERATION: MORE SHAPES', () => {
       'let h = []; for d in [3, 6] { if d == 3 { let v = Map(x => x + d, Range(1, Infinity)); h = Map(y => y, v) } }; ListFrom(Take(h, 2))',
       ['List', 4, 5],
     ],
+    // The `let v` stores the view with the value `3` of `d`, so `Take(v, 3)`
+    // reads no variable, and the assignment keeps it lazy: the elements are
+    // read with `ListFrom`.
     [
       'a Take of a local that holds a view of the iteration',
-      'let h = []; for d in [3, 6] { if d == 3 { let v = Map(x => x + d, Range(1, Infinity)); h = Take(v, 3) } }; h',
+      'let h = []; for d in [3, 6] { if d == 3 { let v = Map(x => x + d, Range(1, Infinity)); h = Take(v, 3) } }; ListFrom(h)',
       ['List', 4, 5, 6],
     ],
     [
