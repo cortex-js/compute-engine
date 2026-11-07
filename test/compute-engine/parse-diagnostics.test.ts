@@ -230,13 +230,57 @@ describe('bound variables do not fire undeclared-symbol (A1)', () => {
   test('integral differential inside a term of a sum is bound in the integrand only', () => {
     // `dx` is in the first term, so `+ 1` and `+ x` are added to the
     // integral. The `x` of the integrand is bound; the `x` of the term after
-    // it is free and fires. (`d` fires for every differential inside a
-    // fraction, `\int\frac{dx}{x}` too.)
-    const bound = (latex: string) =>
-      undeclaredNames(latex).filter((name) => name !== 'd');
-    expect(bound('\\int\\frac{dx}{x}+1')).toEqual([]);
-    expect(bound('\\int\\frac{dx}{x}+x')).toEqual(['x']);
-    expect(bound('\\int x - \\frac{x\\,dx}{2} - x')).toEqual(['x']);
+    // it is free and fires. The `d` of the differential does not fire.
+    expect(undeclaredNames('\\int\\frac{dx}{x}+1')).toEqual([]);
+    expect(undeclaredNames('\\int\\frac{dx}{x}+x')).toEqual(['x']);
+    expect(undeclaredNames('\\int x - \\frac{x\\,dx}{2} - x')).toEqual(['x']);
+  });
+
+  test('the d of a differential inside a fraction does not fire (CE-291)', () => {
+    // The parser reads `dx` inside a fraction as the product of a symbol `d`
+    // and `x`, then takes the differential out of the product. That `d` is
+    // part of the differential, not a free symbol.
+    expect(undeclaredNames('\\int \\frac{dx}{x}')).toEqual([]);
+    expect(undeclaredNames('\\int_0^1 \\frac{2\\,dx}{x+1}')).toEqual([]);
+    expect(undeclaredNames('\\int \\frac{x\\,dx}{2}')).toEqual([]);
+    expect(undeclaredNames('\\int \\frac{\\mathrm{d}x}{x}')).toEqual([]);
+    expect(undeclaredNames('\\int \\frac{\\operatorname{d}x}{x}')).toEqual([]);
+    expect(undeclaredNames('\\int \\frac{d\\theta}{\\theta}')).toEqual([]);
+    expect(undeclaredNames('\\int (3x+2dx)')).toEqual([]);
+    // The bounds stay free.
+    expect(undeclaredNames('\\int_a^b \\frac{dx}{x}').sort()).toEqual([
+      'a',
+      'b',
+    ]);
+  });
+
+  test('a free d in the parse result keeps every d diagnostic (CE-291)', () => {
+    // When the parse result holds a symbol `d`, the parser cannot tell which
+    // `d` token is the free one, so the `d` of the differential fires too.
+    // A free `d` is never hidden.
+    const dCount = (latex: string) =>
+      undeclaredNames(latex).filter((name) => name === 'd').length;
+    // The free `d` is the denominator: `Divide(1, d)`.
+    expect(dCount('\\int \\frac{dx}{d}')).toBe(2);
+    // The free `d` is a factor of the integrand: `Divide(d, x)`.
+    expect(dCount('\\int \\frac{d\\,dx}{x}')).toBe(2);
+    // The parse keeps the `d` of the first fraction: `Divide(d·x, x)`.
+    expect(dCount('\\int \\frac{dx}{x} + \\frac{dx}{x}')).toBe(2);
+    // The variable is `x_upright`, so the first `d x` is a free product.
+    expect(dCount('\\int \\frac{d x\\,d\\mathrm{x}}{2}')).toBe(2);
+    // The differential is at the top level and the denominator `d x\,y` is
+    // a free product.
+    expect(dCount('\\int \\frac{1}{dx\\,y}\\,d\\hspace{2pt}x')).toBe(1);
+    // The free product `d x` is in a term before the differential.
+    expect(dCount('\\int \\frac{1}{dx} + \\frac{x\\,dx}{2} + 1')).toBe(2);
+    // The free `d` is a term after the integral: it fires, and the `d` of
+    // the differential does not.
+    const afterIntegral = '\\int \\frac{x\\,dx}{2} + d';
+    const ds = byCode(diags(afterIntegral), 'undeclared-symbol').filter(
+      (d) => d.detail?.name === 'd'
+    );
+    expect(ds).toHaveLength(1);
+    expect(ds[0].start).toBeGreaterThan(afterIntegral.indexOf('dx'));
   });
 
   test('mapsto parameter is bound in both operands', () => {

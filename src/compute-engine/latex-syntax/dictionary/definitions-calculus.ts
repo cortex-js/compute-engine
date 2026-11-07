@@ -1,6 +1,7 @@
 import type { MathJsonExpression } from '../../../math-json/types.js';
 import {
   operator,
+  isDictionaryObject,
   isEmptySequence,
   nops,
   operand,
@@ -120,6 +121,12 @@ function parseIntegral(command: string, nIntegrals = 1) {
               integrandEndToken(parser, bodyStartToken, parser.index),
             ],
           ]);
+          // The `d` of the differential: the terms after the integrand are
+          // in the tokens too, so they are checked for a free `d` as well.
+          pruneDifferentialOperators(parser, diagCp, bodyStartToken, [
+            body,
+            ...rest.map(([term]) => term),
+          ]);
           // A body that is only the differential (`\int (dx) + 1`) is the
           // integral of 1, as `\frac{dx}{x}` is the integral of `1/x`.
           let result: MathJsonExpression =
@@ -151,8 +158,10 @@ function parseIntegral(command: string, nIntegrals = 1) {
 
     // Retroactively un-flag references to the differential (dummy) variables
     // within the integrand/differential span only (leaving same-named limits).
-    if (indexes.length > 0)
+    if (indexes.length > 0) {
       parser._pruneUndeclared(indexes, diagCp, bodyStartToken);
+      pruneDifferentialOperators(parser, diagCp, bodyStartToken, [fn]);
+    }
 
     if (fn !== null && indexes.length > 0) fn = rebind(fn);
 
@@ -532,6 +541,58 @@ function integrandEndToken(parser: Parser, start: number, end: number): number {
       return i;
   }
   return afterDifferential ? end : start;
+}
+
+/**
+ * Remove the `undeclared-symbol` diagnostics of the symbols `d` and
+ * `d_upright` (`\mathrm{d}`) in the tokens from `start` to the current
+ * position, when none of the expressions `parsed` holds one of these
+ * symbols. The tokens are the integrand and its differentials (and, for a
+ * sum, the terms after the integrand), and `parsed` is the MathJSON that the
+ * parser made of these tokens after it took out the differentials.
+ *
+ * A differential at the top level of the integrand (`\int x\,dx`) is read by
+ * `matchDifferentialOperator()`: its `d` is not a symbol and has no
+ * diagnostic. A differential inside a sub-expression (`\int \frac{dx}{x}`) is
+ * first read as the product of the symbol `d` and the variable, which records
+ * a diagnostic for `d`, and `parseSubintegrand()` then takes it out of the
+ * product. When `parsed` holds no `d`, every `d` read in these tokens was a
+ * differential, and its diagnostic is removed.
+ *
+ * When `parsed` holds a `d`, the MathJSON does not show which `d` token
+ * is the free symbol, so every diagnostic stays: in `\int \frac{d\,dx}{x}`
+ * both `d` fire, also the `d` of the differential. A false report is
+ * accepted, and a free `d` is never hidden. Diagnostics only: the parse
+ * result does not change.
+ */
+function pruneDifferentialOperators(
+  parser: Parser,
+  checkpoint: number,
+  start: number,
+  parsed: ReadonlyArray<MathJsonExpression | null>
+): void {
+  if (parsed.some((expr) => holdsSymbol(expr, DIFFERENTIAL_SYMBOLS))) return;
+  parser._pruneUndeclared(DIFFERENTIAL_SYMBOLS, checkpoint, start);
+}
+
+/** The symbols that a differential operator read inside a sub-expression of
+ * an integrand becomes: `d` for `d` and `\operatorname{d}`, `d_upright` for
+ * `\mathrm{d}`. */
+const DIFFERENTIAL_SYMBOLS: ReadonlySet<string> = new Set(['d', 'd_upright']);
+
+/** True when `expr` holds one of the symbols `names`, as a symbol or as the
+ * name of a function, at any depth. A dictionary counts as holding them,
+ * because its values are not walked. */
+function holdsSymbol(
+  expr: MathJsonExpression | null,
+  names: ReadonlySet<string>
+): boolean {
+  if (expr === null) return false;
+  const name = symbol(expr);
+  if (name !== null) return names.has(name);
+  if (isDictionaryObject(expr)) return true;
+  if (names.has(operator(expr))) return true;
+  return operands(expr).some((arg) => holdsSymbol(arg, names));
 }
 
 function serializeIntegral(command: string) {

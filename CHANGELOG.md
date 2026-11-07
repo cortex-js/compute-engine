@@ -20,6 +20,12 @@
 
 ### Resolved Issues
 
+- **With `diagnostics: true`, the `d` of a differential inside a fraction or
+  parentheses no longer reports `undeclared-symbol`.** `\int \frac{dx}{x}`,
+  `\int \frac{\mathrm{d}x}{x}` and `\int (3x + 2\,dx)` reported the symbol `d`
+  (or `d_upright`), and now report nothing. When the result also holds a
+  free `d`, as in `\int \frac{d\,dx}{x}` (`Divide(d, x)`), each `d` is still
+  reported.
 - **`subs()` no longer replaces the variable of a set-builder or of a
   quantifier, and `unknowns` no longer lists it.** The variable of
   `\{x^2 \mid x \in S\}` was in `unknowns` (`["S", "x"]`), and `subs({x: 3})`
