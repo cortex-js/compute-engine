@@ -15989,6 +15989,22 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
     const recursive = wildcardRecursiveSignature(expr.valueDefinition);
     const declaredType = recursive ?? expr.valueDefinition.type.type;
     const heldValue = expr.valueDefinition.value;
+    // A local of a block gets its value only when the block runs. When the
+    // block is boxed, an `Assign` of a function literal gives the local the
+    // type `function`, and a `let` with a function literal leaves it
+    // `unknown`. With no value, neither type gives a signature, so the call
+    // is typed `unknown`, not as the broadcast that the paragraph above
+    // describes: `Block(Assign(f, t ↦ Count(t)), f([[0, 0], 5]))` was typed
+    // `list<list<unknown^2> | unknown>`, but its value is `2`.
+    // A free name that is not declared is not a block local, and keeps the
+    // broadcast type: with `L = [1, 3, 5]`, `foo(L)` is typed
+    // `list<unknown^3>` (`docs/BROADCAST-MODEL.md`).
+    if (
+      heldValue === undefined &&
+      expr.valueDefinition._blockLocal &&
+      (declaredType === 'unknown' || isWildcardFunctionType(declaredType))
+    )
+      return 'unknown';
     const sigSource =
       heldValue === undefined
         ? declaredType

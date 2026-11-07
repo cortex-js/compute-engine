@@ -87,6 +87,16 @@
 
 ### Resolved Issues
 
+- **The type of a call of a function that a block defines with an assignment
+  or a `let` no longer claims a list for a list argument.** The type of
+  `["Block", ["Assign", "f", ["Function", ["Count", "t"], "t"]], ["f", ["List", ["List", 0, 0], 5]]]`
+  was `list<list<unknown^2> | unknown>`, but its value is `2`. The type is now
+  `unknown`: the block is typed before it runs, when `f` has no value yet. A
+  function defined with `DefineFunction` keeps the result type of its
+  definition (`integer | signed_infinity` here), and a call of a function
+  that is not declared keeps its type: `foo([1, 3, 5])` is
+  `list<unknown^3>`.
+
 - **A numeric double integral whose integrand grows like `1/r` near one point
   of the box now gives its value.**
   `\int_0^1\int_0^1 ((x-1/64)^2+(y-1/64)^2)^{-1/2} dy\,dx` gave `NaN` under
