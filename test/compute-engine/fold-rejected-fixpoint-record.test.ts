@@ -67,25 +67,27 @@ describe('issue #487: nested folds whose fixpoint is rejected', () => {
     return out;
   };
 
+  // The accumulator types of the expression of the issue, which the
+  // refinement gave without the record (commit 5404acb3f) and still gives.
+  const ISSUE_ACCUMULATORS = [
+    'a: collection<any>',
+    'st: tuple<indexed_collection<collection<any>>>',
+    'tacc: list<unknown>',
+    'tacc: list<collection<any>>',
+    'bumped: unknown',
+    'nacc: list<unknown>',
+    'nacc: list<unknown>',
+    'larger: collection<any>',
+    'bacc: list<unknown>',
+    'larger: collection<any>',
+    'bacc: list<unknown>',
+  ];
+
   test('the expression of the issue is typed and evaluates as before', () => {
-    // The types are those the refinement gave without the record (commit
-    // 5404acb3f).
     const ce = new ComputeEngine();
     const expr = ce.box(issue());
     expect(expr.type.toString()).toBe('collection<any> | number');
-    expect(accumulators(expr)).toEqual([
-      'a: collection<any>',
-      'st: tuple<indexed_collection<collection<any>>>',
-      'tacc: list<unknown>',
-      'tacc: list<collection<any>>',
-      'bumped: unknown',
-      'nacc: list<unknown>',
-      'nacc: list<unknown>',
-      'larger: collection<any>',
-      'bacc: list<unknown>',
-      'larger: collection<any>',
-      'bacc: list<unknown>',
-    ]);
+    expect(accumulators(expr)).toEqual(ISSUE_ACCUMULATORS);
     expect(expr.evaluate().toString()).toBe('[[1],[2],[3],[4]]');
   });
 
@@ -128,6 +130,52 @@ describe('issue #487: nested folds whose fixpoint is rejected', () => {
       'b: list<unknown>',
     ]);
     expect(expr.evaluate().toString()).toBe('[[3,1,4,3,4,3,4,3,4],2]');
+  });
+
+  // The outer fold of the issue and the fold nested in it (accumulator
+  // `st`) are both rejected at their first step. The admission pass of the
+  // outer fold reads the rejection that its step recorded for the nested
+  // fold, and does not refine that fold again from its seed
+  // (`FoldRefinementState`, `library/collections.ts`). The types are those
+  // of the refinement from scratch (`ISSUE_ACCUMULATORS`, also at commit
+  // 83a2ea70e).
+
+  test('boxing the expression of the issue computes each type fewer times', () => {
+    // 2,272 types were computed for the first time before the admission pass
+    // read the rejection, 1,677 after. The count does not depend on the
+    // load of the machine.
+    const ce = new ComputeEngine();
+    const wasEnabled = ce._cacheStats.enabled;
+    ce._cacheStats.reset();
+    ce._cacheStats.enabled = true;
+    try {
+      ce.box(['Function', RSK_ROW_INSERTION as any, '_raw']);
+    } finally {
+      ce._cacheStats.enabled = wasEnabled;
+    }
+    expect(ce._cacheStats.snapshot().caches.type.missCold).toBeLessThan(1800);
+  });
+
+  test('the rejection read by the admission pass gives the types of the refinement from scratch', () => {
+    // The outer seed `[[1]]` instead of `[]`.
+    const outerSeed: any = [...(RSK_ROW_INSERTION as any[])];
+    outerSeed[2] = ['List', ['List', 1]];
+    // The seed `[a, 0]` instead of `[a, b]` for the fold nested in the outer
+    // fold: `st[2] = 0`, so the nested fold returns its seed.
+    const innerSeed: any = JSON.parse(JSON.stringify(RSK_ROW_INSERTION));
+    innerSeed[1][1][1][2] = ['List', 'a', 0];
+    expect(innerSeed[1][1][1][0]).toBe('Fold');
+    const cases: [any, string][] = [
+      [outerSeed, '[[1,1,2],[3]]'],
+      [innerSeed, '[]'],
+    ];
+    for (const [json, value] of cases) {
+      const ce = new ComputeEngine();
+      const expr = ce.box(fill(json, ['List', 3, 1, 2]));
+      expect(expr.type.toString()).toBe('collection<any> | number');
+      expect(accumulators(expr)).toEqual(ISSUE_ACCUMULATORS);
+      expect(expr.evaluate().toString()).toBe(value);
+    }
   });
 
   (PERF ? test : test.skip)('boxing the expression of the issue', () => {

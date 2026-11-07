@@ -2316,6 +2316,12 @@ function bareAccumulatorName(raw: Expression | undefined): string | undefined {
  * Each step is a pass over the body (`beginFoldPass`), and a nested fold
  * refined in a step records its fixpoint for the next step
  * (`FoldRefinementState`).
+ *
+ * `lastStep`, when given, receives the binding type of the accumulator in
+ * the literal of the last step that ran (`accumulatorBindingType`), or
+ * `undefined` when that step gave no literal or the binding has no type.
+ * The records that the nested folds wrote in that step were made under that
+ * binding (see `refinedFoldCombiner`, which reads it after a failure).
  */
 function fixpointLiteral(
   state: FoldRefinementState,
@@ -2324,16 +2330,20 @@ function fixpointLiteral(
   start: Type,
   arity: FoldCallbackArity,
   firstOrdinal: number,
-  maxSteps: number
+  maxSteps: number,
+  lastStep?: { binding: Type | undefined }
 ): { literal: Expression; type: Type } | 'rejected' | undefined {
   let t: Type = start;
   for (let step = 0; step < maxSteps; step++) {
     beginFoldPass(state, firstOrdinal);
+    if (lastStep !== undefined) lastStep.binding = undefined;
     const literal = canonicalFunctionLiteral(raw, {
       inferredParamTypes: new Map([[accName, t]]),
     });
     if (literal === undefined || !isFunction(literal, 'Function'))
       return undefined;
+    if (lastStep !== undefined)
+      lastStep.binding = accumulatorBindingType(literal);
     const result = functionResult(literal.type.type);
     if (result === undefined) return undefined;
     if (isKindOpenOperandType(result)) return 'rejected';
@@ -2515,7 +2525,8 @@ const FIXPOINT_STEPS = 3;
  * the same literal. A record is written in a fixpoint step and read in a
  * later step of the same enclosing fold, never in or from an admission pass,
  * whose enclosing accumulator has its inferred type, which is not comparable
- * with the seed-derived types of the steps. From one step to the next the
+ * with the seed-derived types of the steps. (One exception, for a rejection
+ * only, is described below.) From one step to the next the
  * enclosing accumulator's type only widens, so the recorded type is at or
  * below the fixpoint the next step would reach from the seed, and ONE pass at
  * the recorded type (widened by the seed's) settles on that fixpoint when the
@@ -2570,6 +2581,46 @@ const FIXPOINT_STEPS = 3;
  * branch of an `If` whose condition may be undecided (a comparison with a
  * collection) settles on a type with a `missing` arm, which the binding that
  * `Join` narrows does not admit (issue #487).
+ *
+ * A rejection record that is still present after the LAST step of a fold
+ * whose own fixpoint fails is also read by the admission pass that follows
+ * (`admitted` in `refinedFoldCombiner`: the callback admitted again with its
+ * nested folds refined, which is the literal the fold keeps). Such a record
+ * was written in that step, or in an earlier one and read again in each
+ * later step, under a binding that is at or below the binding of the last
+ * step by the widening assumption above. The record is kept only when the
+ * binding of the fold's accumulator at the end of the last step is a subtype of
+ * its binding at the end of the admission pass that held the nested folds
+ * back, and also of its binding at the end of the pass that reads the
+ * records. When the second test fails (the accumulator's inferred type
+ * depends on the refined type of a nested fold), that literal is dropped and
+ * the callback is admitted again with no record of the steps. The nested
+ * fold then meets a seed and an enclosing accumulator that are the same or
+ * wider, as in a further step, and the assumption above applies. Both tests
+ * read the binding at the END of each pass, while a nested fold reads it
+ * when it is canonicalized, before the uses that come after it in the body
+ * narrow it: this is not checked either. Every other record of the steps is
+ * dropped for that pass, as before.
+ *
+ * A settled record is not kept, because a
+ * fixpoint that it starts can settle on a type wider than the one that the
+ * iteration from the seed reaches in the admission pass, even when the
+ * bindings are ordered as above: the types of a body are not always monotone
+ * in the enclosing accumulator. In
+ * `Fold((a, x) ↦ At(Fold((b, y) ↦ If(y > Count(a), Join(b, [y]),
+ * Join(b, [a[y]])), [], 1..Count(a) + 1), 1), [], [4, 5])`, the binding of
+ * `a` in the step is a subtype of its binding in the admission pass, and the
+ * inner accumulator `b` is `list<unknown>` from the seed and `list` from the
+ * record. So the monotonicity that the records between the steps assume can
+ * fail too; no expression is known where a record between two steps gives a
+ * type that differs from the iteration from the seed.
+ *
+ * In the expression of issue #487 (8 folds, 4 deep), the outer fold and the
+ * fold nested in it are both rejected at their first step. Without this
+ * exception, the admission pass of the outer fold refined the nested fold
+ * again from its seed, so each fold one level further down was refined four
+ * times instead of three, and boxing the expression computed 2,272 types for
+ * the first time instead of 1,677.
  *
  * The key is the fold's position in the enclosing passes (`foldSiteKey`), so
  * two folds that spell the same literal at different sites of one body never
@@ -2952,13 +3003,24 @@ function refinedFoldCombiner(
   // The literal the handler keeps when the refinement does not apply or
   // does not settle: the admission pass, or, when that pass held the nested
   // folds back, the callback admitted again with them refined.
-  const admitted = (): Expression => {
+  //
+  // The nested folds are refined from scratch, with a record of their own
+  // for their own steps. With `keepRejections`, the rejections that the last
+  // fixpoint step of this fold recorded for them stay, as in a further step;
+  // the caller passes it only when the accumulator binding of that step is a
+  // subtype of the binding of the admission pass, and checks the binding of
+  // the literal it returns. No other record of the steps of this fold is read
+  // (see `FoldRefinementState`).
+  const admitted = (keepRejections = false): Expression => {
     if (complete) return accepted!;
-    // An admission pass: the nested folds are refined from scratch, with a
-    // record of their own for their own steps, and never from the records
-    // the steps of this fold wrote (see `FoldRefinementState`).
     const outerRecords = state.records;
     state.records = new Map();
+    if (keepRejections) {
+      const prefix = `${state.site.join('.')}.`;
+      for (const [k, record] of outerRecords)
+        if (record.type === undefined && k.startsWith(prefix))
+          state.records.set(k, record);
+    }
     try {
       beginFoldPass(state, firstOrdinal);
       return canonicalCallbackOperand(raw, arity) ?? accepted!;
@@ -2986,6 +3048,7 @@ function refinedFoldCombiner(
   // `list<string^1>` and its value is `[1, 2]`. Such a body keeps the type
   // of the admission pass.
   if (isFunction(raw) && rawBodyAssigns(raw.ops[0], accName)) return admitted();
+  const lastStep: { binding: Type | undefined } = { binding: undefined };
   const settled = fixpointLiteral(
     state,
     raw!,
@@ -2993,10 +3056,28 @@ function refinedFoldCombiner(
     seed,
     arity,
     firstOrdinal,
-    FIXPOINT_STEPS
+    FIXPOINT_STEPS,
+    lastStep
   );
   if (typeof settled !== 'object') {
-    const literal = admitted();
+    // The rejections of the last step are kept when the binding of the
+    // accumulator in that step is a subtype of its binding in the admission
+    // pass that held the nested folds back, and in the pass that read them;
+    // otherwise the pass runs again with no record of the steps (see
+    // `FoldRefinementState`).
+    const stepBinding = lastStep.binding;
+    const keepRejections =
+      current !== undefined &&
+      stepBinding !== undefined &&
+      isSubtype(stepBinding, current);
+    let literal = admitted(keepRejections);
+    if (keepRejections) {
+      const read = isFunction(literal, 'Function')
+        ? accumulatorBindingType(literal)
+        : undefined;
+      if (read === undefined || !isSubtype(stepBinding, read))
+        literal = admitted();
+    }
     // A rejection is recorded, with the seed's type, for the next step of
     // the enclosing fold; a fixpoint that does not settle in its steps may
     // settle at a wider type, so it is not.

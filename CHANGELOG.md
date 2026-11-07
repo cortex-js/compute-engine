@@ -97,6 +97,16 @@
   random points with z from −1 to 0.5, the largest relative error fell from
   6.9e-11 to 2.4e-14. Compiled JavaScript uses the same kernel. (CE-192)
 
+### Performance
+
+- **Boxing nested folds whose accumulator types cannot be refined takes
+  about 20% less time.** When the accumulator of a `Fold`, `Reduce` or `Scan`
+  cannot be given a more precise type, the folds in its callback are no longer
+  typed a second time from the start. Boxing the RSK row insertion of issue
+  #487 (8 nested folds, 4 deep) took about 92 ms and now takes about 71 ms
+  (fastest of 12 runs from source). The types and values do not change.
+  (CE-689)
+
 ## 0.182.0 _2026-11-06_
 
 ### Breaking Changes
