@@ -92,7 +92,7 @@ opened: 2026-11-06
 updated:                    # the last edit; the script writes it, a hand edit sets it too
 reviewed:                   # the date the board last looked at it
 confirmed:                  # a P0 only: the date the board confirmed it
-fixed-in:                   # `fixed` only: the commit or the release
+fixed-in:                   # `fixed` only: a commit hash or a release x.y.z, never free text
 close-reason:               # `close` only: why the board did not fix it
 ask:                        # needs-review, needs-decision, needs-design: one sentence, what the board must do
 ---

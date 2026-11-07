@@ -416,6 +416,15 @@ export function checkFile(name) {
     errors.push('`in-progress` needs `owner` and `started`');
   if (f.state === 'fixed' && !f['fixed-in'])
     errors.push('`fixed` needs `fixed-in` (the commit or the release)');
+  // The Progress tab of the web app (`inRelease()` in issues-ui.mjs) tells
+  // whether a fix is in a release only from a version or a commit hash, so
+  // free text such as "the next release" would show the fix as unreleased.
+  if (
+    f['fixed-in'] &&
+    !VERSION_RE.test(String(f['fixed-in']).replace(/^v(?=\d)/, '')) &&
+    !/^[0-9a-f]{7,40}$/i.test(String(f['fixed-in']))
+  )
+    errors.push('`fixed-in` is a version x.y.z or a commit hash');
   if (f.state === 'fixed' && f.source !== 'tycho')
     errors.push(
       '`fixed` is only for `source: tycho`; a fixed issue of another source is deleted with its fix'

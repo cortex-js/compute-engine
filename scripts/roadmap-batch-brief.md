@@ -75,8 +75,9 @@ there.
    `not reproduced`, with the probe output.
 3. The fix commit removes the issue: delete `issues/{{ID}}.md` in the main
    tree, or, for `source: tycho`, run `issues.mjs set {{ID}} state fixed` and
-   `set {{ID}} fixed-in <version or commit>` (Tycho deletes the file when
-   the fix verifies). Stage that change with the fix.
+   `set {{ID}} fixed-in <full HEAD hash>` (Tycho deletes the file when the
+   fix verifies), because the web app tells whether a fix is released only
+   from a hash or a version. Stage that change with the fix.
 4. Make a worktree: `git worktree add --detach /tmp/wt-{{NAME}} HEAD`, then
    `ln -s /Users/arno/dev/compute-engine/node_modules /tmp/wt-{{NAME}}/node_modules`.
    Write every later command for it with an absolute path or
