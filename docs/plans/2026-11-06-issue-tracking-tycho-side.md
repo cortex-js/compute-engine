@@ -12,8 +12,8 @@ A request to CE (a defect, a wrong value, a hang, a performance problem, a
 documentation error, a design question) is a file in the Compute Engine
 repository, `compute-engine/issues/CE-<n>.md`, written as
 `compute-engine/docs/ISSUE_TRACKING.md` says. Tycho sessions may edit that
-directory directly, and run no git command in that repository; the CE sessions
-stage and commit it. This file no longer holds open requests; the sections
+directory directly, and run no git command in that repository; the CE side
+stages and commits them. This file no longer holds open requests; the sections
 below are our integration reference.
 
 How a Tycho session files a request:
@@ -35,14 +35,14 @@ How a Tycho session files a request:
    flags `blocker` (it stops a Tycho ROADMAP item or an adoption) and
    `workaround` (Tycho has a way around it) as they apply. The first body line
    says what the Tycho user sees. A design ask is `state: needs-design`.
-4. Set `priority` to the table value. Set `needs-review` only for a proposed P0
-   or P1.
+4. Set `priority` to the table value. Set `needs-review` for a proposed P0,
+   for a priority that differs from the table, or when two impacts both fit.
 
 What CE does: within one day, a CE session writes in the body the priority it
 confirms or proposes, the disposition (this release, next release, close,
 needs-decision) and the workaround when one exists, as
 `CE (<date>): …` in a `## CE answer` section, which the 150-word cap of the body leaves out. The fix follows the priority, not the source. When the
-fix is committed, CE sets `state: fixed` and `release: <version>`; the file
+fix is committed, CE sets `state: fixed` and `fixed-in: <commit or version>`; the file
 stays until Tycho verifies.
 
 What Tycho does at adoption: for every `state: fixed` file with the adopted
