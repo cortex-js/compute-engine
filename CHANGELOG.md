@@ -118,6 +118,13 @@
   #487 (8 nested folds, 4 deep) took about 92 ms and now takes about 71 ms
   (fastest of 12 runs from source). The types and values do not change.
   (CE-689)
+- **The type of a product of scalar factors is found faster, so boxing,
+  simplifying and integrating take up to 18% less time.** A product whose
+  factors are plain numbers no longer goes through the tests for points,
+  lists, tensors and NaN arms first. Boxing `√6·x + √2·x` took about 20 µs
+  and now takes about 16.5 µs; its simplification takes 9% less time and
+  `∫1/(x³+1) dx` 8% less (medians of seven rounds, one warm process). The
+  types do not change. (CE-351)
 
 ## 0.182.0 _2026-11-06_
 

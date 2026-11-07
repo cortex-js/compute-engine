@@ -1742,6 +1742,70 @@ function rationalTierOf(
 }
 
 /**
+ * The type of a product of two or more factors that are all scalars, or
+ * `undefined` when a factor can be something else. The caller has already
+ * handled a factor that is a value of a kind (a residue class).
+ *
+ * The `Multiply` type handler tests each factor for points, lists, tensors,
+ * broadcastable types, `any` and `value` types and NaN arms before it reaches
+ * its scalar tiers. Each of these tests reads every factor, so a product of
+ * plain numbers paid for all of them. This function gives the type that the
+ * full handler gives in the two common cases:
+ *
+ * - One factor is typed `number` (an undeclared symbol `x`), and every
+ *   factor is a number: the product is `number`. `number` is the widest
+ *   scalar type and includes the infinities and NaN, so no tier of the full
+ *   handler is narrower.
+ * - Every factor is a finite real number, and none holds a value that is
+ *   not finite: the product takes the tier of the full handler, `integer`,
+ *   `rational` (or `real` for a float factor, `rationalTierOf()`) or `real`,
+ *   with the interval product of the factors' ranges (`√6·x` with
+ *   `x: real<1..2>` types `real<2.4..5>`).
+ *
+ * In every other case (a complex, imaginary or possibly infinite factor, a
+ * factor with a NaN arm, a collection, a factor of the empty type `never`)
+ * the full handler decides.
+ *
+ * Both cases give the type of the full handler because a factor of these
+ * types fails each test before the scalar tiers of the handler. Such a
+ * factor is not typed `any` or `value`, and it is not a point, a list, a
+ * tensor or a `broadcastable` value. A type below `real` has no `nan` arm,
+ * and `provablyNaNOperand()` and the possibly-infinite test are false for a
+ * type below `complex`. The test of `facts.finite` excludes a factor whose
+ * held value is not finite. With a factor typed `number`, each branch that
+ * the full handler can take gives `number`. The empty type `never` is below
+ * every type, so its facts claim every tier, but `provablyNaNOperand()` is
+ * true for it and the full handler gives `number`: it is excluded here. A
+ * change to the tests of the full handler before its scalar tiers must
+ * also change this function.
+ */
+function scalarProductType(
+  ops: ReadonlyArray<OperandDescriptor>
+): Type | undefined {
+  if (ops.length < 2) return undefined;
+  if (ops.some((x) => isEmptyType(x.type))) return undefined;
+  if (
+    ops.some((x) => x.type === 'number') &&
+    ops.every((x) => factsOf(x.type).belowNumber)
+  )
+    return 'number';
+  if (!ops.every((x) => factsOf(x.type).real && x.facts.finite !== false))
+    return undefined;
+  const tier = ops.every((x) => factsOf(x.type).integer)
+    ? 'integer'
+    : ops.every((x) => factsOf(x.type).rational)
+      ? rationalTierOf(ops)
+      : 'real';
+  return attachInterval(
+    tier,
+    foldIntervalsOfTypes(
+      ops.map((x) => x.type),
+      mulIntervals
+    )
+  );
+}
+
+/**
  * The numeric type of one cell of a collection or tuple type: the element
  * type with every collection rank unwrapped, and the join of the components
  * for a tuple. A scalar type is its own cell.
@@ -9994,6 +10058,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           );
         if (ops.length === 1)
           return BoxedType.forResult(ops[0].type, engine._typeResolver);
+        // Most products have scalar factors only. Their type is known
+        // without the branches below for points, collections, tensors and
+        // NaN arms (see `scalarProductType()`).
+        const scalar = scalarProductType(ops);
+        if (scalar !== undefined)
+          return BoxedType.forResult(scalar, engine._typeResolver);
         // A factor typed `any` or `value` (a declared symbol, a call typed
         // so): it may be a number, a tuple, a list or a matrix, and so may
         // the product, which takes that type (see
