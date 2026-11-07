@@ -156,9 +156,14 @@ export function documentBindings(
      * binding-site selectors (see `resolve-library-names.ts`); without it, a
      * binder's variable reads as an ordinary use of the enclosing scope,
      * which is the language server's default.
+     *
+     * `isBound(name)` is true when a binding of the document is visible at
+     * the call for `name` (a `let` above the call, a parameter of an
+     * enclosing function).
      */
     binderSites?: (
-      node: MathJsonExpression
+      node: MathJsonExpression,
+      isBound: (name: string) => boolean
     ) => readonly BinderSite[] | undefined;
   }
 ): BindingGroup[] {
@@ -887,7 +892,12 @@ export function documentBindings(
           typeof head === 'string' &&
           options?.binderSites !== undefined &&
           visibleBinding(scope, head, span?.[0] ?? scope.span[0]) === undefined
-            ? options.binderSites(node)
+            ? options.binderSites(
+                node,
+                (name) =>
+                  visibleBinding(scope, name, span?.[0] ?? scope.span[0]) !==
+                  undefined
+              )
             : undefined;
         if (bound !== undefined && bound.length > 0) {
           // One group per variable, shared by every operand scope it is

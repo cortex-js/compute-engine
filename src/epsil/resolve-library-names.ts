@@ -6,6 +6,12 @@ import type { BoxedDefinition } from '../compute-engine/global-types.js';
 import type { Type } from '../common/type/types.js';
 import { typeToString } from '../common/type/serialize.js';
 
+import { implicitVariableCandidates } from '../compute-engine/boxed-expression/implicit-variable-rule.js';
+import {
+  ANONYMOUS_SLOT_NAMES,
+  freeAnonymousSlots,
+} from '../compute-engine/boxed-expression/function-literal.js';
+
 import { canonicalLibraryName } from './library-names.js';
 import {
   documentBindings,
@@ -191,6 +197,174 @@ const VARIABLE_GROUP_HEADS = new Set([
 ]);
 
 /**
+ * The operators that choose an implicit variable for their first operand
+ * when the call does not write one, with the rule of
+ * `canonicalImplicitLimitFunction()` (`library/calculus.ts`): `Limit(f, a)`
+ * and `Limit(f, a, direction)`, `NLimit(f, a)`, `ND(f, x)` and
+ * `NIntegrate(f, lower, upper)`. The variable is visible in the first
+ * operand only: the other operands (the point, the bounds) read their names
+ * from outside the call. A `Limit` whose second operand is its variable
+ * (`Limit(f, x, a)`) gets its site from `VARIABLE_OPERAND_POSITIONS`, and
+ * the implicit rule is then not used.
+ */
+const IMPLICIT_VARIABLE_OPERATORS: ReadonlySet<string> = new Set([
+  'Limit',
+  'NLimit',
+  'ND',
+  'NIntegrate',
+]);
+
+/**
+ * The implicit variable that the engine chooses for `f`, the first operand
+ * of a call to an operator of `IMPLICIT_VARIABLE_OPERATORS`, written as in
+ * the program, or `undefined` when the engine binds no name there.
+ *
+ * The rule is the one of `canonicalImplicitLimitFunction()`, applied to the
+ * raw tree: the first, in sorted order, of the names that `f` reads from
+ * outside and that `implicitVariableCandidates()` accepts. The names that
+ * `f` reads from outside are the `free` groups of `documentBindings()` on
+ * `f`, so a name that a nested call (`sum(k*h, k, 1, 3)`) or a construct of
+ * the program (a function literal) binds inside `f` is not a candidate. A
+ * name that is a call head anywhere in `f` names a function and is not a
+ * candidate. A spelling of the library (`pi`) is tested under the library
+ * name it stands for (`Pi`, a constant, is not a candidate), unless the
+ * engine defines the written name or the occurrence is verbatim
+ * (`` `pi` ``, the raw symbol `pi`).
+ *
+ * As in the engine, a bare symbol (`limit(sin, 0)`, which names a
+ * function), a function literal (`limit((x) => sin(x)/x, 0)`, which names
+ * its own parameter) and an operand with an anonymous slot (`_`) bind no
+ * name.
+ *
+ * `isBound(name)` says whether the program binds `name` at the call. When
+ * the first candidate is such a name and other candidates follow, the
+ * result is `undefined`, because the choice of the engine depends on the
+ * value of that name. A host that leaves out `isBound` gets the first
+ * candidate in every case.
+ */
+function implicitVariableOf(
+  ce: ComputeEngine,
+  f: MathJsonExpression | undefined,
+  source: string,
+  members: ReadonlyMap<string, ProtocolFunctionMember> | undefined,
+  isBound: (name: string) => boolean,
+  memo: BinderSitesMemo
+): string | undefined {
+  if (f === undefined || symbol(f) !== null) return undefined;
+  if (operator(f) === 'Function') return undefined;
+  if (hasFreeAnonymousSlot(ce, f)) return undefined;
+
+  // A nested call sees the bindings of `f` and those of the program around
+  // the call.
+  const groups = documentBindings(f, source, {
+    binderSites: (node, isBoundInF) =>
+      memoizedBinderSites(
+        ce,
+        node,
+        source,
+        members,
+        (name) => isBoundInF(name) || isBound(name),
+        memo
+      ),
+  });
+  // The written name of each candidate, by the name the engine reads. Each
+  // occurrence is read on its own: in `pi + `pi`*x`, the plain `pi` is the
+  // constant `Pi` and the verbatim `pi` is the raw symbol `pi`. A name that
+  // the program binds (`let pi = 5`) is not a spelling of the library.
+  const writtenName = new Map<string, string>();
+  // The written names whose occurrences the engine reads as two names.
+  const mixed = new Set<string>();
+  for (const group of groups) {
+    if (group.kind !== 'free' || occursAsHead(f, group.name)) continue;
+    const engineNames = new Set<string>();
+    for (const occurrence of group.occurrences) {
+      const engineName =
+        source[occurrence.start] !== '`' &&
+        !isBound(group.name) &&
+        ce.lookupDefinition(group.name) === undefined
+          ? (canonicalLibraryName(group.name) ?? group.name)
+          : group.name;
+      engineNames.add(engineName);
+      if (!writtenName.has(engineName)) writtenName.set(engineName, group.name);
+    }
+    if (engineNames.size > 1) mixed.add(group.name);
+  }
+  if (writtenName.size === 0) return undefined;
+
+  // The candidates are those of the canonical names, as in the canonical
+  // body of the limit: a raw symbol has no definition yet, so the operator
+  // names that the engine reads as unknowns (`N` in `limit(N + h, 1)`) were
+  // not candidates. Boxing an unknown name declares it in the current scope,
+  // so the names are boxed in a scope of their own, which is then removed.
+  let candidates: string[];
+  ce.pushScope();
+  try {
+    candidates = implicitVariableCandidates(
+      ce.box(['List', ...writtenName.keys()])
+    );
+  } catch {
+    candidates = [];
+  } finally {
+    ce.popScope();
+  }
+  const [first] = candidates;
+  if (first === undefined) return undefined;
+  const variable = writtenName.get(first);
+  if (variable === undefined) return undefined;
+  // A site binds every occurrence of its written name. In `pi + `pi`*x`, the
+  // engine binds the verbatim `pi` only, and the plain `pi` must stay free
+  // to become `Pi`: no site.
+  if (mixed.has(variable)) return undefined;
+  // The engine reads the value of a name that the program binds, and that
+  // value is not known here. When such a name comes first and other
+  // candidates follow, the engine chooses it only if its value can be a
+  // number: in `let L = [1, 2]` followed by `limit(total(L)*t, 0)` the
+  // variable is `t`, and in `let a = 5` followed by `limit(a*h, 0)` it is
+  // `a`. The choice is left open: no site.
+  if (candidates.length > 1 && isBound(variable)) return undefined;
+  return variable;
+}
+
+/**
+ * Whether `f` holds an anonymous slot (`_`, `_1`) that no function literal
+ * or pipe stage inside `f` binds, the test of `freeAnonymousSlots()`: the
+ * engine then makes the slots the parameters, and the call binds no name. In
+ * `limit(h + (1 |> _^2), 0)` the pipe binds the `_`, and the call binds `h`.
+ * When the engine cannot box `f` (a recovered parse), any slot counts.
+ */
+function hasFreeAnonymousSlot(
+  ce: ComputeEngine,
+  f: MathJsonExpression
+): boolean {
+  try {
+    return freeAnonymousSlots(ce.box(f, { form: 'raw' })).size > 0;
+  } catch {
+    return [...ANONYMOUS_SLOT_NAMES].some((slot) => occursAsValue(f, slot));
+  }
+}
+
+/**
+ * The results of `binderSitesOf()` for the nodes of one tree, so that the
+ * walk of a nested call (`nd(nd(h^3, 1), 1)`) is made once, not once for
+ * each enclosing call that has an implicit variable.
+ */
+type BinderSitesMemo = Map<MathJsonExpression, readonly BinderSite[] | undefined>;
+
+function memoizedBinderSites(
+  ce: ComputeEngine,
+  node: MathJsonExpression,
+  source: string,
+  members: ReadonlyMap<string, ProtocolFunctionMember> | undefined,
+  isBound: (name: string) => boolean,
+  memo: BinderSitesMemo
+): readonly BinderSite[] | undefined {
+  if (memo.has(node)) return memo.get(node);
+  const sites = binderSitesWithMemo(ce, node, source, members, isBound, memo);
+  memo.set(node, sites);
+  return sites;
+}
+
+/**
  * The variables a raw call to a library operator binds, and where each one
  * is visible.
  *
@@ -224,7 +398,7 @@ const VARIABLE_GROUP_HEADS = new Set([
  * gives the sites of the library `Sum`. The language server's scope model
  * (`documentBindings()`) makes this test before it asks for the sites.
  *
- * Two sources, combined:
+ * Three sources, combined:
  *
  * 1. The engine's binding-site selector of the callee (`Sum`, `Integrate`,
  *    `D`, the quantifiers, `Comprehension`, `Loop`), run in its `'pre'`
@@ -243,6 +417,12 @@ const VARIABLE_GROUP_HEADS = new Set([
  *    variable is visible in the whole call. An operator that takes no
  *    variable (`Max`, `List`) binds nothing this way: `max(pi, pi)` is two
  *    constants.
+ * 3. When the first two sources give no site, the implicit variable of
+ *    `Limit`, `NLimit`, `ND` and `NIntegrate`, which the engine chooses
+ *    when the call does not write one (`implicitVariableOf`): the first, in
+ *    sorted order, of the names that the first operand reads from outside.
+ *    In `limit(sin(h)/h, 0)`, the result is `[{ name: 'h', operands: [0]
+ *    }]`. Such a variable is visible in the first operand only.
  *
  * The callee is looked up under its written name first (an engine binding
  * wins), then under the library name its spelling stands for — unless it
@@ -263,22 +443,44 @@ const VARIABLE_GROUP_HEADS = new Set([
  * `solve(Money(round(pi)), pi)` gives the sites of the library `Solve`, so
  * `pi` is read as bound.
  *
- * A limit that does not write its variable gives no site, although the
- * engine binds an implicit variable there: in `limit(sin(h)/h, 0)` the
- * engine reads `h` as the limit variable, but the result is `[]`. The same
- * is true for `Limit(f, a, direction)` and for `NLimit(f, a)` (`nLimit`).
- * Write the variable of a `Limit` (`limit(sin(h)/h, h, 0)`) to get it as a
- * site; `NLimit` has no form that writes the variable. (Issue
- * `issues/CE-1038.md`.)
+ * `isBound(name)`, when given, says whether the program binds `name` at the
+ * call; `documentBindings()` gives it as the second argument of its
+ * `binderSites` callback. Only the third source reads it. The engine reads
+ * the value of such a name, which is not known before the program runs: an
+ * implicit variable that is such a name gives no site when other candidates
+ * follow it. In `let L = [1, 2]` followed by `limit(total(L)*t, 0)`, the
+ * engine binds `t` because `L` is a list, and in `let a = 5` followed by
+ * `limit(a*h, 0)` it binds `a`; with `isBound`, both calls give `[]`.
+ * Without `isBound`, no name is bound by the program, and the two calls
+ * give `L` and `a`.
  */
 export function binderSitesOf(
   ce: ComputeEngine,
   node: MathJsonExpression,
   source: string,
-  members?: ReadonlyMap<string, ProtocolFunctionMember>
+  members?: ReadonlyMap<string, ProtocolFunctionMember>,
+  isBound: (name: string) => boolean = () => false
+): readonly BinderSite[] | undefined {
+  return binderSitesWithMemo(ce, node, source, members, isBound, new Map());
+}
+
+/** `binderSitesOf()`, with the results already computed for the nodes of
+ * the same tree. */
+function binderSitesWithMemo(
+  ce: ComputeEngine,
+  node: MathJsonExpression,
+  source: string,
+  members: ReadonlyMap<string, ProtocolFunctionMember> | undefined,
+  isBound: (name: string) => boolean,
+  memo: BinderSitesMemo
 ): readonly BinderSite[] | undefined {
   const head = operator(node);
   if (head === '') return undefined;
+  // A callee that the program binds (`function sum(…)` above the call) is
+  // not the library operator. `documentBindings()` makes this test itself
+  // before it asks; the walk of the operand of an implicit-variable call
+  // starts inside that operand, so it does not see the bindings around it.
+  if (isBound(head)) return undefined;
   const offsets = (node as { sourceOffsets?: [number, number] }).sourceOffsets;
   const verbatim = offsets !== undefined && source[offsets[0]] === '`';
   const defined = ce.lookupDefinition(head) !== undefined;
@@ -331,8 +533,6 @@ export function binderSitesOf(
   }
 
   const variablePositions = variableOperandPositions(name, def, ops);
-  if (variablePositions.length === 0) return sites;
-
   ops.forEach((op, i) => {
     if (!variablePositions.includes(i)) return;
     const candidates: string[] = [];
@@ -355,6 +555,20 @@ export function binderSitesOf(
     }
   });
 
+  // An operator that chooses an implicit variable, in a call that does not
+  // write the variable (no site was found above).
+  if (sites.length === 0 && IMPLICIT_VARIABLE_OPERATORS.has(name)) {
+    const variable = implicitVariableOf(
+      ce,
+      ops[0],
+      source,
+      members,
+      isBound,
+      memo
+    );
+    if (variable !== undefined) sites.push({ name: variable, operands: [0] });
+  }
+
   return sites;
 }
 
@@ -371,7 +585,8 @@ export function resolveLibraryNames(
 ): MathJsonExpression {
   const members = protocolFunctionMembers(ast);
   const groups = documentBindings(ast, source, {
-    binderSites: (node) => binderSitesOf(ce, node, source, members),
+    binderSites: (node, isBound) =>
+      binderSitesOf(ce, node, source, members, isBound),
   });
 
   // The occurrences to rewrite, keyed by the start offset AND the name of the

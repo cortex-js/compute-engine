@@ -145,6 +145,16 @@
 
 ### Resolved Issues
 
+- **In the Epsil editor, a rename or a highlight of a variable no longer
+  changes the variable of a `limit` that does not name its variable.** After
+  `let h = 5`, the `h` of `limit(sin(h)/h, 0)` is the variable of the limit,
+  and the program gives `1`; a rename of `let h` changed it too. The same
+  applies to `nLimit`, `nd` and `nIntegrate`. `binderSitesOf()` now gives
+  `[{ name: "h", operands: [0] }]` for this call, where it gave `[]`. It takes
+  an optional fifth argument, a function that tells whether the program binds
+  a name at the call: the engine reads the value of such a name, so when that
+  name comes first in sorted order and other names follow, the result is `[]`.
+
 - **A convergent integral from a large number to infinity now has a numeric
   value.** `\int_{10^{10}}^{\infty} \frac{dx}{x^{1.5}}` gave `NaN` with `.N()`
   and `NIntegrate`; it now gives `0.00002 ± 3·10⁻¹⁶`.

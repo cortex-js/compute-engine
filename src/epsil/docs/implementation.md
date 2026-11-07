@@ -106,9 +106,16 @@ Here `k` is bound and `n` is read. The result is `[]` for a library operator
 that binds nothing in the call (`max(pi, pi)`), and `undefined` for a call of
 a name that is not a library operator. The function does not see the
 bindings of the program: call it only for a call whose callee the program
-does not define. A `limit` that does not write its variable
-(`limit(sin(h)/h, 0)`) gives no site, although the engine binds `h`; write
-`limit(sin(h)/h, h, 0)` to get it.
+does not define. A `limit`, `nLimit`, `nd` or `nIntegrate` that does not
+write its variable binds the variable that the engine chooses, in its first
+operand only: `limit(sin(h)/h, 0)` gives `[{ name: "h", operands: [0] }]`.
+The engine reads the value of a name that the program binds, so its choice
+can depend on that value: after `let L = [1, 2]`, the variable of
+`limit(total(L)*t, 0)` is `t`, because `L` is a list. A host that knows the
+names the program binds at the call gives them as a fifth argument,
+`binderSitesOf(ce, call, source, undefined, (name) => …)`: when such a name
+comes first and other names follow, the result is `[]`. Without it, the
+result for this call is `[{ name: "L", operands: [0] }]`.
 
 ### Execution
 
