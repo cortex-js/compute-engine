@@ -1806,8 +1806,13 @@ function powerRuleParameterGuard(
  * rounding error: larger than 10⁻⁹ times the magnitude of the real part, or
  * than 10⁻⁹ when the real part is smaller than 1. An expression with no
  * numeric value gives `false`.
+ *
+ * The type `real` holds finite real numbers only, so an expression of that
+ * type has no imaginary part. Its type is read first because it costs less
+ * than its numeric approximation.
  */
 function hasImaginaryPart(e: Expression): boolean {
+  if (!isNumber(e) && isSubtype(e.type.type, 'real')) return false;
   const n = isNumber(e) ? e : e.N();
   if (!isNumber(n)) return false;
   const { re, im } = n;
@@ -7679,6 +7684,17 @@ volumes
             return undefined;
         }
 
+        // The integrand lifted out of its function literal
+        // (`liftIntegrand()`), computed once. The lift rebuilds the body in
+        // canonical form, and several tests below read it. Each of them runs
+        // in the scope of this call, where the lift gives the same
+        // expression every time. Inside the value shield (`withValueShield`)
+        // the names bind to other definitions, so the code there lifts the
+        // integrand again and does not read this value.
+        let liftedIntegrand: Expression | undefined;
+        const liftedHere = (): Expression =>
+          (liftedIntegrand ??= liftIntegrand(ops[0]));
+
         // A block of several statements that only assigns local variables
         // before its value (`Block(c := 2, c·x)`) has the integral of that
         // value, under `evaluate()` and `N()` alike. Any other block
@@ -7734,7 +7750,7 @@ volumes
             const v = isFunction(l) ? sym(l.op1) : undefined;
             return v !== undefined && v !== 'Nothing' ? [v] : [];
           });
-          const lifted = liftIntegrand(ops[0]);
+          const lifted = liftedHere();
           // The integrand that a substitution produced and that is being
           // integrated now takes no second substitution: a value can mention
           // a symbol with the name of a parameter (`g(f + x)` gives `f` the
@@ -7845,7 +7861,7 @@ volumes
               params.every((p, i) => p === variables[i]))
               ? renameCapturedVariables(
                   ce,
-                  liftIntegrand(ops[0]),
+                  liftedHere(),
                   variables,
                   ops.slice(1),
                   bindings,
@@ -8126,7 +8142,7 @@ volumes
             ((lo.sgn === 'negative' && hi.sgn === 'positive') ||
               (lo.sgn === 'positive' && hi.sgn === 'negative'))
           ) {
-            const r = ce.contourIntegrate(liftIntegrand(ops[0]), variable, {
+            const r = ce.contourIntegrate(liftedHere(), variable, {
               kind: 'real-line',
             });
             // A pole on the real axis: the integral is +∞ or −∞ when the
@@ -8160,7 +8176,7 @@ volumes
             sym(hi) !== 'Nothing'
           ) {
             const value = definiteIntegralByResidues(
-              liftIntegrand(ops[0]),
+              liftedHere(),
               variable,
               lo,
               hi
@@ -8211,7 +8227,7 @@ volumes
         if (
           numericApproximation &&
           !indefinite &&
-          !liftIntegrand(ops[0]).isValid
+          !liftedHere().isValid
         ) {
           const exact = expression?.evaluate();
           if (isFunction(exact, 'Error')) return exact;
@@ -8282,7 +8298,7 @@ volumes
             const params = isFunction(f, 'Function')
               ? f.ops.slice(1).map((p) => functionLiteralParameterName(p))
               : limitVars;
-            const lifted = liftIntegrand(f);
+            const lifted = liftedHere();
             if (
               (isFunction(f, 'Function') && lifted === f) ||
               params.length !== limitVars.length ||
@@ -8633,7 +8649,7 @@ volumes
         // (`independentParameterNames`).
         const shielded = [
           ...intVarNames,
-          ...independentParameterNames(ce, liftIntegrand(ops[0]), intVarNames),
+          ...independentParameterNames(ce, liftedHere(), intVarNames),
         ];
         const result = withValueShield(ce, shielded, () => {
           let expr = ops[0];

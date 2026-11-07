@@ -62,3 +62,24 @@ pool, a memo of `broadcastsOverTuples` per definition. Keep literal-tier types
 (decision 2026-09-06). Plan: `docs/plans/2026-09-06-type-facts-per-type.md`.
 
 Full text: ROADMAP.md at commit 5784d4aec.
+
+## Measures of 2026-11-07 (session cebatch-351)
+
+Profiles of an unminified bundle of the source (`esbuild`, one warm process)
+for `∫₁² 1/x dx`, in percent of its time: boxing the input 19 %; the
+`Integrate` evaluate handler 71 %. In the handler: the value of `EvaluateAt`
+18 %, boxing the function literal and the `EvaluateAt` 12 %, the
+antiderivative 10 %, the effects of the literal (`isPure` reads its signature
+type) 4.5 %, `hasImaginaryPart()` 4 %, and five lifts of the integrand out of
+its literal (`liftIntegrand()`) about 9 %.
+
+The change of that day lifts the integrand once in the handler scope (one
+lift inside the value shield is still necessary, because there the names bind
+to other definitions) and reads the type of a value before its numeric
+approximation in `hasImaginaryPart()`. Medians of five alternated runs of each
+bundle, in separate processes: `∫₁² 1/x dx` 187 → 173 µs, `∫₀^π x sin x dx`
+449 → 397 µs.
+
+Boxing `√6x + √2x`: its operands are typed `number`, and the `Add` type
+handler takes about 2 % of the time. Most of the time is in
+`checkNumericArgs()` (28 %), which reads the type of each operand.

@@ -609,6 +609,12 @@
   and now takes about 16.5 µs; its simplification takes 9% less time and
   `∫1/(x³+1) dx` 8% less (medians of seven rounds, one warm process). The
   types do not change. (CE-351)
+- **Definite integrals are evaluated up to 11% faster.** The evaluation lifts
+  the integrand out of its function literal once, not once for each test, and
+  it reads the type of the result before it computes a numeric value to find
+  an imaginary part. `∫₁² 1/x dx` took about 187 µs and now takes about
+  173 µs, and `∫₀^π x·sin x dx` about 449 µs and now 397 µs (medians of five
+  runs, from source). The values do not change. (CE-351)
 - **Evaluating the same derivative again no longer differentiates again.**
   A `D` expression keeps its closed form while nothing that it reads changes:
   the value of a symbol, the definition of a function that it calls, an
