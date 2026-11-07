@@ -44,6 +44,10 @@ status of a pipeline is that of its last command.
 Edit a TypeScript file with the Edit tool, not with a Python, sed or heredoc
 script, because a script replace can change every match or none with no error.
 
+Do not run Prettier (`prettier --write`, `npm run format`) on the files you
+edit, because it can reformat lines that your change does not touch, and the
+diff must hold only your change.
+
 Write a temporary file only in `/tmp`, never in another repo, because the rule
 that protects the uncommitted work of that repo allows only reads and test runs
 there.
