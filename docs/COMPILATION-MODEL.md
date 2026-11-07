@@ -109,18 +109,18 @@ these caveats declines, and the host gets the interpreter (with fallback) or
 the diagnostic. A decline is the preferred fix for a case that would need a
 handler of its own: it costs the host speed on that expression and nothing
 else. "The decline stays" is a valid resolution of a reported difference,
-recorded with its witness in the known-limitations list below or in
-`ROADMAP.md`.
+recorded with its witness in the known-limitations list below or as an issue
+file in `issues/`.
 
 **Witness.** A reported difference names the program that shows it and the
-strength of that witness, `corpus`, `plausible` or `crafted`, as the header
-of `ROADMAP.md` defines them.
+strength of that witness, `corpus`, `plausible` or `crafted`, as
+`docs/ISSUE_TRACKING.md` defines them.
 A `crafted` witness of an allowed difference is not a defect and is not
 recorded. A `crafted` witness of a wrong finite value or shape is one line
-in the known-limitations list below, not a `ROADMAP.md` entry: it is fixed,
+in the known-limitations list below, not an issue: it is fixed,
 by a decline or a handler, when a stronger witness appears. A `corpus` or
 `plausible` witness of a wrong finite value or shape is a defect: fixed at
-once, or a `ROADMAP.md` entry.
+once, or an issue file.
 
 ### Known limitations
 

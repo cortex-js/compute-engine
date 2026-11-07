@@ -136,6 +136,29 @@ echo "✓ Authenticated with $REGISTRY as $NPM_USER"
 # CHECKED_SHA is the commit that they checked: the release commit must have
 # it as its parent (step 4).
 CHECKED_SHA=$(git rev-parse HEAD)
+# The issue ledger (docs/ISSUE_TRACKING.md, "Releases"): every issue the
+# board assigned to this version is fixed or closed, and no confirmed P0 is
+# open. The version is computed from $BUMP here, before anything changes, so
+# that a refusal costs nothing. The command prints the open items.
+if [ -d issues ]; then
+  NEXT_VERSION=$(node -e '
+    const [cur, bump] = process.argv.slice(1);
+    const m = /^(\d+)\.(\d+)\.(\d+)/.exec(cur);
+    let [major, minor, patch] = m.slice(1).map(Number);
+    if (bump === "major") { major++; minor = 0; patch = 0; }
+    else if (bump === "minor") { minor++; patch = 0; }
+    else if (bump === "patch") patch++;
+    else { console.log(bump); process.exit(0); }
+    console.log(`${major}.${minor}.${patch}`);
+  ' "$(node -pe "require('./package.json').version")" "$BUMP")
+  ISSUES_STATUS=0
+  node scripts/issues.mjs release "$NEXT_VERSION" || ISSUES_STATUS=$?
+  case $ISSUES_STATUS in
+    0) ;;
+    1) fail "An issue assigned to $NEXT_VERSION is still open, is carried over from an earlier version, or a confirmed P0 is open (above). Nothing was changed. Fix, close or reassign the issues, then run the release again." ;;
+    *) fail "scripts/issues.mjs failed with exit status $ISSUES_STATUS (above). Nothing was changed." ;;
+  esac
+fi
 if [ "${GITHUB_ACTIONS:-}" != "true" ] && [ "${CE_FULL_SUITE_PASSED:-}" != "1" ]; then
   bash scripts/release-checks.sh ||
     fail "A release check failed (above). Nothing was changed. Fix the cause, commit, then run the release again."

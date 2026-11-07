@@ -12,6 +12,7 @@ rule as written, and propose a change to a rule rather than skip it.
 | Understand engine behavior            | [ARCHITECTURE.md](ARCHITECTURE.md) and the focused models it links                                                  |
 | Build, validate, or prepare a release | [BUILD.md](BUILD.md)                                                                                                |
 | Review code                           | [docs/REVIEW-CHECKLIST.md](docs/REVIEW-CHECKLIST.md)                                                                |
+| File, answer or pick an issue         | [docs/ISSUE_TRACKING.md](docs/ISSUE_TRACKING.md)                                                                    |
 | Coordinate work on the shared machine | [docs/COMPUTE-ENGINE-BOX-SPECIFICS.md](docs/COMPUTE-ENGINE-BOX-SPECIFICS.md) and `~/.claude/SHARED-BOX-PROTOCOL.md` |
 
 Read the shared-machine rules before editing shared files, running tests,
@@ -25,20 +26,27 @@ nightly run, tell the user; do not take over that investigation unless asked.
   instructions.
 - Keep changes focused. Check documented contracts before treating surprising
   behavior as a bug. Do not change a snapshot to hide a failure.
-- Fix every defect that the change introduces, that is in code the change
-  rewrites, or that blocks the task, in the same change. These are not reasons
-  to defer such a fix: the diff grows, snapshots or pinned emissions change
-  (measure and report them instead), or a sub-agent reported it as "not fixed".
-  A defect in older code that the change does not touch is not fixed in this
-  task, and is not queued in a handoff file or in a report: record it in
-  `ROADMAP.md` as one entry with its witness and the strength of the witness
-  (the header of `ROADMAP.md` defines both), or, for a compiled-code difference
-  with a `crafted` witness, as one line in the known-limitations list of
-  `docs/COMPILATION-MODEL.md`. The user picks the next item from `ROADMAP.md`. A
+- Fix every defect that the change introduces, or that blocks the task, in the
+  same change. These are not reasons to defer such a fix: the diff grows,
+  snapshots or pinned emissions change (measure and report them instead), or a
+  sub-agent reported it as "not fixed". A defect in older code is fixed in the
+  same change only when it is in code the change rewrites (lines the diff
+  replaces or changes) and its priority is P1: the table value of
+  `docs/ISSUE_TRACKING.md` for a new issue, the recorded priority once the
+  board has reviewed it; a proposed P0 waits for the board. Every other defect the task
+  finds is an issue file in `issues/`, with its impact, probability and
+  witness, written as that document says (search `issues/` and
+  `issues/CLOSED.md` first: a match is a decided item). In this repository
+  this rule replaces the sorting rule of `~/.claude/SHARED-BOX-PROTOCOL.md`
+  §5.2, which fixes every defect in rewritten code and records the others in
+  the roadmap.
+  A compiled-code difference with a `crafted` witness is one line in the
+  known-limitations list of `docs/COMPILATION-MODEL.md` instead. A defect is
+  not queued in a handoff file or in a report. The Bug Review Board picks the
+  work; an agent takes the next item from `node scripts/issues.mjs backlog`. A
   fix needs a user decision only when no option is clearly sound, or when the
-  fix changes a documented contract; the entry then `waits for user
-  (decision)` and states the options with an example. Use permanent `CE-<n>` references,
-  allocated from the next-free-reference line.
+  fix changes a documented contract; the issue is then `needs-decision` and
+  states the options with an example.
 - Compiled code gives the interpreter's value within the caveats of
   `docs/COMPILATION-MODEL.md`, "Caveats of compiled code": the precision of the
   target, and `NaN`, `0`, `±Infinity`, `undefined`, a throw or a decline where
@@ -84,7 +92,7 @@ nightly run, tell the user; do not take over that investigation unless asked.
 - A decline is not a defect: it falls back to the interpreter, and it is the
   preferred fix for a case that would otherwise need a handler of its own. The
   witness strengths (`corpus`, `plausible`, `crafted`) and where each is
-  recorded are defined once, in the header of `ROADMAP.md`. A decline is
+  recorded are defined once, in `docs/ISSUE_TRACKING.md`. A decline is
   removed, or a wrong value is fixed with a handler, only for a `corpus` or
   `plausible` witness. A `crafted` witness gets a decline or a
   known-limitations line, and is never a question for the user, in a report,
@@ -110,15 +118,16 @@ nightly run, tell the user; do not take over that investigation unless asked.
   apply to a defect found during the task that the task's own code could fix:
   report it to the user in the same turn you find it, with the option you
   recommend.
-- `ROADMAP.md` must get shorter over time. Take `ready` entries without asking;
-  an entry that `waits for user` waits, and its status line says for what (a
-  decision, a design or an approval; the header of `ROADMAP.md` defines both
-  states). An idea (a capability, a performance change, a design or a task)
-  goes in the report to the user in one line, and becomes an entry only when
-  the user says to record it. Every defect entry names its witness and the
-  strength of the witness.
+- `issues/` holds the open issues and `ROADMAP.md` holds the features and
+  workstreams. Both must get shorter over time. Take an issue from the backlog
+  list without asking; an issue in `needs-decision` or `needs-design` waits for
+  the board. A `ready` ROADMAP entry may be started; one that `waits for user`
+  waits. An idea (a capability, a performance change, a design or a task) goes
+  in the report to the user in one line, and becomes a ROADMAP entry only when
+  the user says to record it. A defect never goes in `ROADMAP.md`.
 - Do small follow-up work without asking, and report it: a review that the
-  process still requires, a ROADMAP entry for a limitation the user decided, and
+  process still requires, a `CLOSED.md` line (`issues.mjs close`) or a
+  known-limitations line for a limitation the user decided, and
   removal of the worktrees, references and temporary files you created. Commits,
   git commands that are not on the allowed list, and actions outside the repo
   still need the user's approval, except the documentation edits in the next
@@ -133,13 +142,15 @@ nightly run, tell the user; do not take over that investigation unless asked.
   `~/dev/cortexjs.io/docs/epsil/`: the site build copies it from
   `src/epsil/docs/`, so edit the page in this repo instead. Run each example
   that a page shows against the current source before you write its result.
-- `~/dev/tycho/docs/COMPUTE_ENGINE.md` is how CE answers the Tycho team. Edit
-  it directly, without asking first, to answer a row (the fix, its cause, the
-  instrument reading, and the release or commit that ships it). Run no git
-  command in that repo, and say in the report that you edited it. That file is
-  the one record of a Tycho issue: an issue that has a row there gets no
-  `ROADMAP.md` entry, also when its fix needs a decision, a design or several
-  steps. Write the cause, the options and the decision in the row.
+- Tycho files its requests to CE as issue files in `issues/` with
+  `source: tycho`. CE answers such an issue within one day, in the body: the
+  priority, the disposition and the workaround when one exists
+  (`docs/ISSUE_TRACKING.md`, "Who does what"). An open row that is still in
+  `~/dev/tycho/docs/COMPUTE_ENGINE.md` ("Open Requests for CE Maintainers") is
+  answered in the row, as that file's "Instructions for the CE team" say: edit
+  it directly, without asking first, run no git command in that repo, and say
+  in the report that you edited it. A Tycho request has one record, the issue
+  file or the row, never both and never a `ROADMAP.md` entry.
 - Follow BUILD.md and the shared-box specifics for completion checks; after-edit
   hooks do not replace them. Capture test exit codes
   directly rather than relying on the exit status of an output-filtering pipe.

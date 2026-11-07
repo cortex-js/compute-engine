@@ -96,8 +96,9 @@ there.
 10. Remove the worktree with `git worktree remove --force /tmp/wt-{{NAME}}`
     only after the commit contains your change.
 
-A defect that you find in older code that your change does not touch goes to
-`ROADMAP.md` as a new entry with its witness, and you continue. When the fix
+A defect that you find in older code that your change does not touch is an
+issue file in `issues/` of the MAIN tree, not of your worktree, written as
+`docs/ISSUE_TRACKING.md` ("Who does what") says, and you continue. When the fix
 needs a user decision (no option is clearly sound, or a documented contract
 changes), write the entry back as `waits for user (decision)` with the options, an
 example for each and your recommendation, commit nothing else, and stop.

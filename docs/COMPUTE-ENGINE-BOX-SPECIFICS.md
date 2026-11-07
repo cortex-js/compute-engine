@@ -160,14 +160,15 @@ Follow [BUILD.md](../BUILD.md#releasing-to-npm) for releases.
 Before a long run, write `docs/scratch/<date>-<topic>-handoff.md` as required by
 the shared protocol. Record the command, log path, and actual exit status when
 it finishes; keep the handoff current. The file is not a work queue: a defect
-found during the work goes to `ROADMAP.md` with its witness (protocol §5.2),
+found during the work goes to `issues/` with its witness (`AGENTS.md`, "Fix
+every defect"),
 and the file lists no next tasks. Delete it when the work is committed.
 
 ## §9 Context size, agent types and work areas
 
 Delegate only when it helps (shared protocol §9); write a change of a few lines
 yourself. When you delegate, use `implementer` (Opus) for implementation and
-bug fixes, one ROADMAP item per agent, and `mechanic` (Sonnet) for recipe-driven edits, read-only audits,
+bug fixes, one issue or ROADMAP item per agent, and `mechanic` (Sonnet) for recipe-driven edits, read-only audits,
 sweeps and censuses. Do not use `general-purpose` for implementation: only the
 two repo agents carry the stop rule, the test time limit and the git clause,
 so a brief to them carries only the task. Find code with the LSP tool or

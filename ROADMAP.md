@@ -1,5 +1,18 @@
 # Compute Engine — Roadmap
 
+**Issues have moved.** Since 2026-11-06 a defect, a wrong value, a reported
+performance problem, a design question or a documentation error is a file in
+`issues/`, as `docs/ISSUE_TRACKING.md` describes, and no new entry of those
+kinds is added here. The existing entries of those kinds are converted to
+issue files in a batch (migration step 2 of that document); until then an
+agent may still take a `ready` entry from this file. After the conversion,
+this file holds features and workstreams only, and this header is rewritten.
+Until then, these parts of the header below no longer apply: "Requests from
+Tycho" (a Tycho request is an issue file), the sentence that makes a `defect`
+or `wrong value` entry `ready`, the rule that an agent adds an entry for a
+defect it found (it files an issue instead), and the witness definitions,
+which `docs/ISSUE_TRACKING.md` now holds.
+
 This file lists the work that remains: open defects, performance problems,
 missing capabilities, design questions and tasks. It records FUTURE work only.
 Work in progress has no entry: the session that does it holds the state, in
@@ -17,13 +30,13 @@ code comments, plans and replies, for example "fixes CE-42.3".
 
 - A reference does not change. Do not renumber entries, and do not give the
   number of a removed entry to a new entry.
-- A new entry takes the number on the line "Next free reference" below. Read the
-  file again just before you add an entry, and increase that line in the same
-  edit.
+- A new entry takes the number in `issues/NEXT.md`, which issue files and this
+  file share, and increases that file in the same edit. The line "Next free
+  reference" below is no longer maintained.
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-837.
+Next free reference: see `issues/NEXT.md`.
 
 **Entry format.**
 

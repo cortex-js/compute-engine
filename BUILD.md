@@ -82,7 +82,7 @@ the emitted text that changed, or run the full suite.
 The orchestrator owns the validation plan. The task prompt can adapt these
 defaults to the scope, risk, available checks, and work being done in parallel.
 
-Give each agent one ROADMAP item. Use the `implementer` agent (Opus) for
+Give each agent one issue or one ROADMAP item. Use the `implementer` agent (Opus) for
 implementation and the `mechanic` agent (Sonnet) for recipe-driven edits and
 read-only audits; both carry a stop rule that ends a run after about 150 tool
 calls or a third repeat of the same failure, with a report. The rule is in
@@ -111,32 +111,35 @@ Before returning a delegated implementation:
    satisfy a generic completion checklist.
 4. For each defect found and not fixed, say which of these applies: a user
    decision blocks the fix (name it, with an example), or the defect is in
-   older code that the task does not change (record it in `ROADMAP.md` with
-   its witness and strength, or in the known-limitations list of
-   `docs/COMPILATION-MODEL.md` for a compiled-code difference with a `crafted`
-   witness, and name the entry in the report). "Out of scope" alone is not a reason; a defect that
-   the change introduces, or in code it rewrites, is fixed in the change.
+   older code that the task does not change (record it as an issue file in
+   `issues/` with its impact, probability and witness, or in the
+   known-limitations list of `docs/COMPILATION-MODEL.md` for a compiled-code
+   difference with a `crafted` witness, and name the file in the report).
+   "Out of scope" alone is not a reason; a defect that the change introduces is
+   fixed in the change, and so is one in code the change rewrites when its
+   priority is P1 (`docs/ISSUE_TRACKING.md`).
 5. Before you ask the orchestrator or the user to decide, check the facts the
    question rests on: run the probe, and read the documented contract in
    `docs/` with its context.
 
 The orchestrator sorts every unfixed defect of a sub-agent report before writing
 its own summary: fix it (or send it back) when the change introduced it, record
-it in `ROADMAP.md` with its witness when it is in older code that the change
+it as an issue file with its witness when it is in older code that the change
 does not touch, ask the user for the blocking decision, or state why it is not
 a defect (an allowed difference of compiled code is not one). No defect is
 queued for the session or carried in a handoff file.
 
-Before staging, the orchestrator lists each `ROADMAP.md` entry that the task
-created, and for each one states in one line why the current change does not
-fix it: the defect is in older code that the change does not touch (name the
-file and the function), or a user decision blocks the fix (name the decision, and say why
-no option is clearly sound). An entry without one of these reasons blocks
-staging: fix the defect in the change first. The list goes in the report.
+Before staging, the orchestrator lists each issue file that the task created,
+and for each one states in one line why the current change does not fix it:
+the defect is in older code that the change does not touch (name the file and
+the function), it is in code the change rewrites and its priority is P2 or
+lower, or a user decision blocks the fix (name the decision, and say why no
+option is clearly sound). An issue without one of these reasons blocks staging: fix the
+defect in the change first. The list goes in the report.
 
-The final report of a session also states how many `ROADMAP.md` entries the
-session added and how many it removed, and the number of `### CE-` headings
-in the file before and after the session.
+The final report of a session also states how many issue files the session
+added and how many it removed (a fixed issue is deleted in the commit that
+fixes it), and runs `node scripts/issues.mjs lint` on the result.
 
 The orchestrator combines the results and runs, once on that combined tree,
 only the checks that no sub-agent ran on the same content: for example the
@@ -225,7 +228,9 @@ npm run release # a minor release; or: npm run release -- patch (major, or an ex
 
 1. It refuses when files are staged, when a file that the release writes (the
    version files, `CHANGELOG.md`, the generated documentation) has uncommitted
-   changes, when the publish check would refuse the tree (an uncommitted change
+   changes, when `node scripts/issues.mjs release <version>` says that an
+   item assigned to the version is still open or that a confirmed P0 is open
+   (`docs/ISSUE_TRACKING.md`, "Releases"), when the publish check would refuse the tree (an uncommitted change
    or an untracked file that a test can see; markdown outside `src/` and `test/`
    is allowed), or when npm does not accept the login. It warns when
    `CHANGELOG.md` has no `## [Unreleased]` heading, and when the latest full

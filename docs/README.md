@@ -24,6 +24,7 @@ For agent workflow use [AGENTS.md](../AGENTS.md); for writing code use
 | Review internal architecture history                                             | [`STATUS_REPORT.md`](./STATUS_REPORT.md)               |
 | Understand simplification invariants                                             | [`SIMPLIFY.md`](./SIMPLIFY.md)                         |
 | Review a change (the checklist the code reviewers use)                           | [`REVIEW-CHECKLIST.md`](./REVIEW-CHECKLIST.md)         |
+| File, answer, prioritize or pick an issue                                        | [`ISSUE_TRACKING.md`](./ISSUE_TRACKING.md)             |
 | Understand seeding, `Random` draws, and cross-target parity                      | [`RANDOMNESS-MODEL.md`](./RANDOMNESS-MODEL.md)         |
 | Understand time budgets and cancellation                                         | [`TIMEOUT-MODEL.md`](./TIMEOUT-MODEL.md)               |
 | Understand checkpoint/restore and notebook replay                                | [`CHECKPOINT-MODEL.md`](./CHECKPOINT-MODEL.md)         |
