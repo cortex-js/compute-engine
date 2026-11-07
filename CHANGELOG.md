@@ -20,6 +20,15 @@
 
 ### Resolved Issues
 
+- **The error of an operand of a sum or a product names that operand.** With
+  `s = "a"`, the error of `["Multiply", ["Sin", "s"], ["Cos", "x"]]` had the
+  frame `Multiply` argument 2, which is `Cos(x)`; it now has the frame
+  `Multiply` argument 1, which is `Sin(s)`. The same applies to `Add`, to a
+  variable that holds an error, and to a variable that holds an expression
+  whose value is an error. In Epsil, `let v = Sin(s) * Cos(x)` now underlines
+  `Sin(s)`, not the whole product, and `Ln(w) + Ln(w)` underlines the first
+  `Ln(w)`.
+
 - **A subscript on the index of a sum or a product reads the index.**
   `\sum_{k=1}^{3} a_k` evaluated to `3a_k`, as if `a_k` were one symbol; it
   now evaluates to `a_1 + a_2 + a_3`. The same applies to `\prod`, to the

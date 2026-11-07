@@ -549,6 +549,101 @@ describe('ERROR PROPAGATION — a symbol that holds an error is the callee', () 
   });
 });
 
+describe('ERROR PROPAGATION — the frame of a sum or a product names the operand that failed', () => {
+  // `Add` and `Multiply` evaluate their operands in their handler, and the
+  // handler result can have its operands in another order: the handler of
+  // `Sin(s)·Cos(x)` returns `Cos(x)·Error(…)`. The frame of the error counts
+  // the operands of the canonical call, not those of the handler result.
+  const engine = () => {
+    const ce = new ComputeEngine();
+    ce.declare('s', 'any');
+    ce.assign('s', ce.string('a'));
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
+    return ce;
+  };
+
+  /** The frames of the error of `json`, and the operand of the canonical
+   * call that the outermost frame names. */
+  const failed = (ce: ComputeEngine, json: MathJsonExpression) => {
+    const expr = ce.box(json);
+    const value = expr.evaluate();
+    expect(value.operator).toBe('Error');
+    const frames = errorFrames(value);
+    const last = frames[frames.length - 1];
+    expect(last.operator).toBe(expr.operator);
+    return {
+      frames: frames.map((f) => f.operator),
+      operand: expr.ops![last.index - 1].toString(),
+    };
+  };
+
+  test.each([
+    [['Multiply', ['Sin', 's'], ['Cos', 'x']]],
+    [['Multiply', ['Cos', 'x'], ['Sin', 's']]],
+    [['Multiply', 'x', 'y', ['Sin', 's']]],
+    [['Add', ['Cos', 'x'], ['Sin', 's']]],
+  ] as [MathJsonExpression][])('%j names sin(s)', (json) => {
+    expect(failed(engine(), json)).toEqual({
+      frames: [json[0]],
+      operand: 'sin(s)',
+    });
+  });
+
+  test('the frames that the operand made are kept', () => {
+    expect(
+      failed(engine(), ['Multiply', ['Cos', 'x'], ['Sin', ['Ln', 's']]])
+    ).toEqual({ frames: ['Sin', 'Multiply'], operand: 'sin(ln(s))' });
+  });
+
+  test('a symbol that holds an error from an earlier evaluation', () => {
+    const ce = engine();
+    ce.declare('w', 'any');
+    ce.assign('w', ce.box(['Ln', { str: 'a' }]).evaluate());
+    expect(failed(ce, ['Multiply', ['Ln', 3], 'w'])).toEqual({
+      frames: ['Ln', 'Multiply'],
+      operand: 'w',
+    });
+  });
+
+  test('a symbol that holds an expression that fails when it is read', () => {
+    // The evaluation of `w` evaluates the stored `Sin(q)`, which makes the
+    // error after `q` changed.
+    const ce = engine();
+    ce.declare('q', 'any');
+    ce.declare('w', 'any');
+    ce.assign('w', ce.box(['Sin', 'q']));
+    ce.assign('q', ce.string('a'));
+    for (const json of [
+      ['Multiply', 'w', ['Cos', 'x']],
+      ['Multiply', ['Cos', 'x'], 'w'],
+    ] as MathJsonExpression[])
+      expect(failed(ce, json)).toEqual({ frames: ['Multiply'], operand: 'w' });
+  });
+
+  test('two operands that return the same error node name the first', () => {
+    // The record of the error names the operand evaluated last. When the
+    // error node is in the result more than once, the frame comes from the
+    // first position of the result, as before.
+    const ce = new ComputeEngine();
+    const shared = ce.error('incompatible-type');
+    ce.declare('F', { signature: '() -> number', evaluate: () => shared });
+    ce.declare('G', { signature: '() -> number', evaluate: () => shared });
+    const expr = ce.box(['Add', ['F'], ['G']]);
+    expect(errorFrames(expr.evaluate())).toEqual([
+      { operator: 'Add', index: 1 },
+    ]);
+  });
+
+  test('the asynchronous evaluation gives the same frame', async () => {
+    const ce = engine();
+    const expr = ce.box(['Multiply', ['Sin', 's'], ['Cos', 'x']]);
+    const value = await expr.evaluateAsync();
+    expect(errorFrames(value)).toEqual(errorFrames(expr.evaluate()));
+    expect(errorFrames(value)).toEqual([{ operator: 'Multiply', index: 1 }]);
+  });
+});
+
 describe('ERROR PROPAGATION — IsError arity and purity', () => {
   test('`IsError()` is an arity error, not a boolean', () => {
     const ce = new ComputeEngine();

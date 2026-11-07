@@ -1838,21 +1838,6 @@ function canonicalOrderOf(
         ) {
           const op: Expression | undefined = node.ops[index - 1];
           if (op === undefined) return undefined;
-          // A lazy operator such as `Add` or `Multiply` evaluates its
-          // operands in its own handler. An error that the evaluation of an
-          // operand makes reaches the frame through the RESULT of the
-          // handler, whose operands can be in another order: the error of
-          // `Sin(s)` in `Sin(s) * Cos(x)` has the frame `Multiply argument 2`.
-          // Only an operand that is already an error in the canonical form
-          // (`1 + "a"`) is then known.
-          const def = ce.lookupDefinition(operatorName);
-          if (
-            def !== undefined &&
-            'operator' in def &&
-            def.operator.lazy &&
-            op.isValid
-          )
-            return undefined;
           if (op.sourceOffsets !== undefined) return op.sourceOffsets;
           // A subtracted term `a - t` is `Negate(t)` in the canonical sum,
           // and an operand refused at canonicalization (`1 + "a"`) is

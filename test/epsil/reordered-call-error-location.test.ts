@@ -50,16 +50,53 @@ describe('an error in an operand of a sum or product', () => {
     expect(underlines('let v = "a" + 1\n0')).toEqual(['"a"']);
   });
 
-  test('two equal operands underline the whole call', () => {
-    expect(underlines(`${prefix}let v = Ln(w) + Ln(w)\n0`)).toEqual([
-      'Ln(w) + Ln(w)',
-    ]);
+  test('of two equal operands, the first is underlined', () => {
+    // The sum evaluates its operands in order, and the frame names the
+    // first one, whose evaluation returned the error.
+    const src = `${prefix}let v = Ln(w) + Ln(w)\n0`;
+    const result = executeEpsil(new ComputeEngine(), src);
+    const ranges = result.diagnostics
+      .filter(
+        (d) => Array.isArray(d.message) && d.message[0] === 'runtime-error'
+      )
+      .map((d) => d.range);
+    const first = src.indexOf('Ln(w)');
+    expect(ranges).toEqual([[first, first + 'Ln(w)'.length]]);
   });
 
-  test('two operands that can fail underline the whole call', () => {
+  // The error of an operand that the product evaluates names that operand of
+  // the canonical call, so it is underlined when other operands can also
+  // fail. Before, the frame counted the operands of the result of the
+  // evaluation (`Cos(x)·Error(…)`), so the whole call was underlined.
+  test.each([
+    ['let v = Sin(w) * Cos(x)', 'Sin(w)'],
+    ['let v = Cos(x) * Sin(w)', 'Sin(w)'],
+    ['let v = Sin(w) + Ln(x)', 'Sin(w)'],
+    ['let v = Cos(x) - Sin(w)', 'Sin(w)'],
+    ['let v = x * y * Sin(w)', 'Sin(w)'],
+  ])('%s underlines %s', (stmt, expected) => {
+    expect(underlines(`${prefix}${stmt}\n0`)).toEqual([expected]);
+  });
+
+  test('two operands that can fail underline the first that fails', () => {
     expect(
       underlines(`${prefix}let u: any = "t"\nlet v = Sin(u) * Ln(w)\n0`)
-    ).toEqual(['Sin(u) * Ln(w)']);
+    ).toEqual(['Sin(u)']);
+  });
+
+  test('a variable that holds an expression that fails when it is read', () => {
+    // `w2` holds `Sin(q)`, which fails after `q` changed. The frame names
+    // `w2`, not `Cos(x)`, the operand at the same position of the result of
+    // the evaluation.
+    const src = 'let w2: any = Sin(q)\nq = "a"\n';
+    expect(underlines(`${src}let v = w2 * Cos(x)\n0`)).toEqual(['w2']);
+    expect(underlines(`${src}let v = Cos(x) * w2\n0`)).toEqual(['w2']);
+  });
+
+  test('a second product inside an operand underlines the whole call', () => {
+    expect(underlines(`${prefix}let v = Ln(x * y) * Sin(w)\n0`)).toEqual([
+      'Ln(x * y) * Sin(w)',
+    ]);
   });
 
   test('in a nested statement', () => {

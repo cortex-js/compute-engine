@@ -39,11 +39,17 @@ export type CanonicalOrder = {
   reorders(operatorName: string): boolean;
   /** The source range of operand `index` (1-based) of the canonical call of
    * `operatorName` whose source range is `callRange`. `undefined` when there
-   * is no such canonical call, when its operand has no source range (a
-   * number made by folding `2 * x * 3`), or when the index does not count
-   * the operands of the canonical call (an error that the evaluation of an
-   * operand of `Add` or `Multiply` made, whose frame counts the operands of
-   * the result of the evaluation). */
+   * is no such canonical call, or when its operand has no source range (a
+   * number made by folding `2 * x * 3`). The index of an error that the
+   * evaluation of an operand of `Add` or `Multiply` made also counts the
+   * operands of the canonical call when the engine finds the operand whose
+   * evaluation returned the error: a call, or a symbol that holds the error
+   * or the expression that made it (`_evaluatedOperandResultError()` in
+   * `boxed-expression/boxed-function.ts`). When it finds no such operand,
+   * the index counts the operands of the result of the evaluation. No such
+   * case is known: an error that the handler of `Add` or `Multiply` makes
+   * itself (`s * Cos(x)` with `s = "a"`) is the value of the call, with no
+   * frame of the call. */
   argumentOffsets(
     operatorName: string,
     callRange: [number, number],
@@ -336,13 +342,25 @@ function walkToFrame(
       // Without an argument the result is the whole call, which contains
       // every call inside it.
       if (!narrowed && arg !== null) {
-        for (const op of operands(call)) {
+        // For `Add` and `Multiply`, the operands are read through the nested
+        // calls that canonicalization merges with `call`: in
+        // `x * y * Sin(s)`, the written `x * y` is not a second product, so
+        // it does not make the argument `Sin(s)` unsure. Other reordered
+        // operators do not always merge their nested calls (`Set` keeps a
+        // nested set), so their operands are read as written.
+        const merges = name === 'Add' || name === 'Multiply';
+        const parts = merges ? clusterLeaves(call, name) : operands(call);
+        for (const op of parts) {
           // The operand that holds the argument (the argument itself, or a
           // nested call that canonicalization merges with `call`).
           if (pathTo(op, arg, [])) continue;
           const other: MathJsonExpression[] = [];
           findByOperator(op, name, other);
-          if (other.length > 0) return undefined;
+          // Another call of `name` inside an operand can be the call of the
+          // frame, so the argument is not sure. For a sum or a product, the
+          // call contains that other call, and its range is the result:
+          // `Ln(x * y) * Sin(s)` underlines the whole product.
+          if (other.length > 0) return merges ? { call, arg: null } : undefined;
         }
       }
       return { call, arg };

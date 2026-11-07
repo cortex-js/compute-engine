@@ -417,6 +417,20 @@ export function errorValue(
 }
 
 /**
+ * The `Error` node that `errorValue(expr)` reads, as it is in the tree of
+ * `expr`, with no breadcrumb frame added, or `undefined` when `errorValue()`
+ * gives `undefined`. A caller uses it to find the record of the evaluation
+ * that returned this node (`errorEvaluatedFrom` in `boxed-function.ts`): the
+ * error that `errorValue()` returns is a new node when it adds a frame.
+ */
+export function embeddedErrorNode(
+  expr: Expression | undefined | null
+): Expression | undefined {
+  if (!expr || expr.isValid) return undefined;
+  return firstEmbeddedError(expr, [], true);
+}
+
+/**
  * The error `expr` MIGHT answer with once every selecting operator inside it
  * has decided — the answer `errorValue()` would give if the
  * demanded-operands rule did not exist.

@@ -418,6 +418,7 @@ import {
   answersWithoutFailedCells,
   broadcastContextMessage,
   defersErrorAbsorption,
+  embeddedErrorNode,
   errorOpsWithoutTrace,
   errorValue,
   failedCellsAreIterable,
@@ -912,6 +913,20 @@ let errorRecordCount = 0;
 function recordEvaluatedError(node: Expression, result: Expression): void {
   if (result !== node && result.operator === 'Error')
     errorEvaluatedFrom.set(result, { node, stamp: ++errorRecordCount });
+}
+
+/** The number of times the node `target` (compared by identity) is in the
+ * tree of `expr`, counted up to `limit`. The walk stops at an `Error` node
+ * and at a valid node, since only an invalid tree holds an `Error`. */
+function countNode(expr: Expression, target: Expression, limit: number): number {
+  if (expr === target) return 1;
+  if (expr.isValid || !isFunction(expr) || expr.operator === 'Error') return 0;
+  let count = 0;
+  for (const op of expr.ops) {
+    count += countNode(op, target, limit - count);
+    if (count >= limit) break;
+  }
+  return count;
 }
 
 /** The `Tuple` and `List` nodes that `_keepsCollectionLiteralResult` found
@@ -4290,7 +4305,14 @@ export class BoxedFunction
       (options?.materialization ?? false) === false
     ) {
       const kept = keptEagerSourceValue(this);
-      if (kept !== undefined) return kept;
+      if (kept !== undefined) {
+        // The value takes the place of an evaluation, so the record of an
+        // evaluation that gave an error is made again, as for a memo hit
+        // (`_deferredErrorFrame()` and `_evaluatedOperandResultError()`
+        // compare the stamp).
+        recordEvaluatedError(this, kept);
+        return kept;
+      }
     }
     // The pure-application memo (`IComputeEngine._applicationMemo`) is NOT
     // emptied here: it outlives a top-level evaluation, because the
@@ -5570,8 +5592,10 @@ export class BoxedFunction
       (options?.materialization ?? false) === false
     ) {
       const kept = keptEagerSourceValue(this);
-      if (kept !== undefined && !hasAsyncOnlyApplication(this, true))
+      if (kept !== undefined && !hasAsyncOnlyApplication(this, true)) {
+        recordEvaluatedError(this, kept);
         return Promise.resolve(kept);
+      }
     }
     // The finiteness read of a view over an eager operand evaluates the
     // operand, as in `evaluate()`. Its values are taken out of the shared
@@ -7055,6 +7079,73 @@ export class BoxedFunction
   }
 
   /**
+   * The error that the RESULT of the handler of this node holds, with a
+   * breadcrumb frame that names the operand of this node whose evaluation
+   * returned that error, or `undefined` when no operand is known.
+   *
+   * A lazy operator that demands every operand (`Add`, `Multiply`) evaluates
+   * the operands in its handler, and the error of an operand is then in the
+   * result tree, whose operands can be in another order: the handler of
+   * `Sin(s)·Cos(x)` (with `s = "a"`) returns `Cos(x)·Error(…)`. The frames
+   * that `errorValue(result)` reads count the operands of that result, so
+   * the error named `Multiply` argument 2, which is `Cos(x)`. The record of
+   * the evaluation that returned the error (`errorEvaluatedFrom`) names the
+   * operand `Sin(s)`, and the frame is then `Multiply` argument 1. The frames
+   * of the result tree between the result and the error are dropped: they
+   * describe the internal form of the handler result, not what was written.
+   * The frames that the error already has, from the evaluation of the
+   * operand, are kept.
+   *
+   * A record that names an operand is used only when its stamp is larger
+   * than `since`, the value of `errorRecordCount` when the evaluation of
+   * this node began: an older record was made by an earlier evaluation. When
+   * no operand is found, the caller uses `errorValue(result)`, whose frame
+   * can count the operands of the result. No such case is known: an error
+   * that the handler makes itself for an operand whose value is valid
+   * (`s·Cos(x)`) is the value of the node, with no frame from the result.
+   */
+  private _evaluatedOperandResultError(
+    result: Expression,
+    since: number
+  ): Expression | undefined {
+    const err = embeddedErrorNode(result);
+    // A bare error is already the value of this node, and it has no frames
+    // from the result tree.
+    if (err === undefined || err === result) return undefined;
+    // Two operands can return the same error node (two host operators that
+    // return one prebuilt error). The record then names the operand that
+    // was evaluated last, which is not always the one that `err` is.
+    if (countNode(result, err, 2) > 1) return undefined;
+    const origin = errorEvaluatedFrom.get(err);
+    let index =
+      origin === undefined || origin.stamp <= since
+        ? -1
+        : this._ops.indexOf(origin.node);
+    // A symbol operand. The evaluation of a symbol makes no record of its
+    // own, and it returns one of two things. (1) The error node that the
+    // symbol holds, an error from an earlier evaluation: `x + Ln(2)` with
+    // `x = Ln("a")`. (2) The value of the expression that the symbol holds:
+    // `w * Cos(x)` with `w = Sin(q)` and then `q = "a"`. The record of the
+    // error names the stored `Sin(q)`. Its stamp is not compared: a second
+    // read of `w` can give a memoized value, which makes no new record. The
+    // stored node belongs to the binding of the symbol, so an error that the
+    // evaluation of that node made and that is in this result came from the
+    // read of the symbol. `value` reads the stored node and evaluates
+    // nothing.
+    if (index < 0)
+      index = this._ops.findIndex(
+        (op) =>
+          isSymbol(op) &&
+          (op.value === err ||
+            (origin !== undefined && op.value === origin.node))
+      );
+    if (index < 0) return undefined;
+    return withErrorFrames(err, [
+      { operator: this._operator, index: index + 1 },
+    ]);
+  }
+
+  /**
    * True when this node is a collection view that can refuse its source for
    * having no positions: a collection head (`Reverse`, `Take`, `Rest`,
    * `Zip`, …) that is not a collection literal (`List`, `Set`, `Tuple`) and
@@ -7580,7 +7671,10 @@ export class BoxedFunction
         if (result.isValid) return result;
         if (selecting) return this._resultError(result, since) ?? result;
         return (
-          this._refusedArgumentError(result) ?? errorValue(result) ?? result
+          this._refusedArgumentError(result) ??
+          this._evaluatedOperandResultError(result, since) ??
+          errorValue(result) ??
+          result
         );
       };
     }
@@ -9104,7 +9198,10 @@ export class BoxedFunction
         if (result.isValid) return result;
         if (selecting) return this._resultError(result, since) ?? result;
         return (
-          this._refusedArgumentError(result) ?? errorValue(result) ?? result
+          this._refusedArgumentError(result) ??
+          this._evaluatedOperandResultError(result, since) ??
+          errorValue(result) ??
+          result
         );
       };
     }
