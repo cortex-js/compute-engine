@@ -418,6 +418,9 @@ later extension, not asked.
   protocols") is removed, because a conformance to `Indexable` alone can
   then not exist; `indexed_collection is Indexable` is enough. CE-51's
   design document records that change; this spec only makes it possible.
+  CE-51 was closed on 2026-11-06 (user decision): the engine declares no
+  `Iterable` or `Indexable` protocol, so this change does not happen. The
+  reason is at the end of §4 of `docs/TYPE_SYSTEM_ROADMAP.md`.
 
 ## 5. Cost
 

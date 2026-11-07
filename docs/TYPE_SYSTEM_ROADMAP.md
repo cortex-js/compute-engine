@@ -391,8 +391,9 @@ conformance, implementations, dispatch, `is`-slot constraints, properties,
 conditional conformance). Surface spec = Appendix A below; implementation
 architecture and ruling record (P1–P46) =
 `docs/TYPE-SYSTEM.md`. The `Iterable`/`Indexable`
-bridge below is the remaining unshipped piece of this section (needs its
-own requirement-table design doc, §7 item 6(h)).
+bridge below is not built, and it will not be built as a cleanup (user
+decision 2026-11-06, CE-51 in `issues/CLOSED.md`): see "Decision
+2026-11-06" at the end of this section.
 
 Two distinct gaps stand between today and a user-facing `mappable`:
 
@@ -431,6 +432,29 @@ would express declaratively — the compiler written because the type
 language couldn't say it. First deliverable on this track: user
 conformance (a nominal type conforming to `Iterable` and supplying its
 implementations from Epsil).
+
+**Decision 2026-11-06 (user, CE-51 closed): the bridge is not built.**
+CE-51 proposed to make the `CollectionHandlers` the implementation of
+`Iterable` and `Indexable` and to move the engine's capability checks
+(`x.isCollection`, and the `x.isCollection ||
+x.type.matches('collection<any>')` test at about 43 sites) to a
+conformance query. That move is not sound. A conformance query answers
+from the TYPE only, but `isCollection` asks whether the elements can be
+walked NOW. For `L` declared `list<number>` and not assigned,
+`isCollection` is `false` and `L.type.matches('collection<any>')` is
+`true`; `ce.conformsTo(L.type, P)` for a protocol `P` implemented on
+`collection` is also `true`. A check moved to conformance would walk an
+`L` that has no elements, and `Sum(L)`, which now stays unevaluated,
+could give `0`. The two halves of the test answer two different
+questions (the doc comment of `isCollection` in
+`src/compute-engine/types-expression.ts`), so neither is redundant.
+What the bridge would still give is a feature, collection types defined
+in Epsil that `Map`, `Count` and the other collection operators accept.
+No program needs it today, and it is not recorded as a ROADMAP entry.
+If it is asked for, its design must also make `isSubtype` in
+`src/common/type/` consult the conformance oracle, which that layer
+cannot import today. The text above and the sketch in Appendix A stay as
+the description of that feature.
 
 ## 5. F-bounded and variable-referencing bounds (mid term, unblocked)
 
@@ -593,7 +617,7 @@ with three rulings needed in order (see §7).
    operators are user-visible type syntax or declarations-only at first.
 6. Protocol rulings introduced by the 2026-08-12 revision of Appendix A —
    **ratified 2026-08-12 and shipped the same day** (record: P1–P46 in
-   `docs/TYPE-SYSTEM.md`); only (h) remains open:
+   `docs/TYPE-SYSTEM.md`); (h) is decided by the end of §4 (not built):
    (a) dispatch on the first `Self` argument, with `Self` bound
    statically from that argument (the join-across-arguments rule is
    withdrawn); (b) property assignment as rebinding sugar, non-variable
@@ -610,7 +634,10 @@ with three rulings needed in order (see §7).
    `Iterable`/`Indexable` protocols (§4, ruled 2026-08-12: `collection`
    stays a pure type, no dual-role names) — confirm the two-protocol
    split and names, and the membership-granting conformance rule,
-   when the requirement tables get their design doc.
+   when the requirement tables get their design doc. **Decided
+   2026-11-06 (user): not built** — a conformance query answers from the
+   type and cannot replace the "can the elements be walked now" check;
+   the reasons and the example are at the end of §4.
 7. Mutable objects (Appendix B): **ratified 2026-08-13** (revised and
    spec-reviewed the same day; decisions B1–B13 indexed in the
    appendix's decision record, B4 a recorded deferral). Unimplemented;
@@ -1982,10 +2009,15 @@ function sort(xs: list<Comparable>) -> list<Comparable> { ... }
 ```
 
 This rule is **unconditional** — there are no dual-role names. `collection` and `indexed_collection` remain types only;
-the protocol role for that family belongs to the engine-declared
-`Iterable` and `Indexable` protocols (§4, and the sketch below).
+the protocol role for that family would belong to engine-declared
+`Iterable` and `Indexable` protocols (§4, and the sketch below), which
+are not built (user decision 2026-11-06, end of §4).
 
 ### Built-in protocols: `Iterable` and `Indexable` — §4 bridge (sketch)
+
+> **Not built (user decision 2026-11-06).** This sketch describes a
+> feature that is not planned: see "Decision 2026-11-06" at the end of
+> §4. The engine declares no `Iterable` or `Indexable` protocol.
 
 §4's first deliverable — a nominal type declaring itself a collection and
 supplying handlers from Epsil — lands on this appendix as two
