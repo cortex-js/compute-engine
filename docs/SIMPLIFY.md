@@ -40,7 +40,9 @@ symbol bound by an enclosing `Integrate` or function literal is not an
 unknown. So `3!`, `ln(e)`, `sin(π)`, `∫_0^1 t² dt` and the determinant of a
 numeric matrix fold, at the top level as well as inside a sum. `ln 2`, `√2`
 and `2^(3/5)` stay, because `evaluate()` keeps them symbolic (the exactness
-contract). `Random() + 1` stays, because `Random` is not pure. `w²` with
+contract). For the same reason `∫_{-∞}^{∞} (x+1)/(x⁴+1) dx` stays an integral
+(the method can reduce its integrand): its value `π·√2/2` is exact but not a
+number literal. `Random() + 1` stays, because `Random` is not pure. `w²` with
 `w := 5` stays, because the method is value-blind. An iterated `Sum` or
 `Product`, and a node that holds one, a `Hold` or an `Annotated` wrapper, are
 never folded: folding does not enumerate terms, and the value of a sum comes
