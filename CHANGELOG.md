@@ -145,6 +145,23 @@
 
 ### Resolved Issues
 
+- **A function with a point parameter maps over a list of points of different
+  tuple types.** With `X = nan | real | signed_infinity`,
+  `W: (tuple<X, X, X>, unknown) -> tuple<number, X, X>` assigned
+  `(p, s) ↦ (s p.x, p.y, p.z)`, and `a`, `b` not declared,
+  `W([(a, b, 0), (1, a, b)], 2)` was an `incompatible-type` error, and with
+  `K` declared to return
+  `list<tuple<integer, unknown, unknown> | tuple<unknown, unknown, integer>>`,
+  `W(K(a, b), 2)` had the type `error | list<tuple<…>>`, while `W((a, b, 0), 2)`
+  was accepted. Both calls are now valid and have the type `list<tuple<…>>`: a
+  list is accepted when each of its point types is accepted alone. The
+  evaluation of such a call gave an `incompatible-type` error for each point
+  whose type only shares values with the parameter, such as `(a, b, 0)`. It now
+  binds such a point, as a direct call does, and
+  `W([(a, b, 0), (1, a, b)], 2)` evaluates to `[(2a, b, 0), (2, a, b)]`. A
+  point with a component whose value is outside its type, such as `(1.5, a)`
+  at `tuple<integer, integer>`, is still an error in its cell.
+
 - **In the Epsil editor, a rename or a highlight of a variable no longer
   changes the variable of a `limit` that does not name its variable.** After
   `let h = 5`, the `h` of `limit(sin(h)/h, 0)` is the variable of the limit,

@@ -19,6 +19,12 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  *   point, as one such point is accepted as the whole argument. Before,
  *   `k(T)` was accepted for `T: tuple<number, number>`, and `k(L)` was an
  *   `incompatible-type` error for `L: list<tuple<number, number>>`.
+ * - CE-1069: the same rule for a list whose points have different tuple
+ *   types, such as `[(a, b, 0), (1, a, b)]` with `a` and `b` not declared.
+ *   Before, the literal list was an `incompatible-type` error, a call that
+ *   returns such a list was typed with an `error` member, and the evaluation
+ *   gave an `incompatible-type` error for each point, while one such point
+ *   was accepted.
  */
 
 const POINT = 'tuple<real, real>';
@@ -216,5 +222,143 @@ describe('a list of points accepted by the rule for one point', () => {
     const r = compile(ce.box(['k', 'L']));
     expect(r.success).toBe(true);
     expect(r.run!({ L: [[1, 2], [3, Infinity]] })).toEqual([3, Infinity]);
+  });
+});
+
+describe('CE-1069: a list of points with different tuple types', () => {
+  const X = 'nan | real | signed_infinity';
+  const RESULT = `tuple<number, ${X}, ${X}>`;
+  const LITERAL = 'W(\\left[(a,b,0),(1,a,b)\\right],2)';
+
+  /** `W(p, s) = (s p.x, p.y, p.z)` with a point parameter, and `K(a, b)`,
+   * declared to return a list whose points have one of two tuple types.
+   * `a` and `b` are not declared. */
+  function engineW(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('W', {
+      signature: `(tuple<${X}, ${X}, ${X}>, unknown) -> ${RESULT}`,
+    });
+    ce.parse('W(p,s):=(s p.x, p.y, p.z)').evaluate();
+    ce.declare('K', {
+      signature:
+        '(unknown, unknown) -> list<tuple<integer, unknown, unknown> | tuple<unknown, unknown, integer>>',
+    });
+    ce.parse('K(a,b):=\\left[(a,b,0),(1,a,b)\\right]').evaluate();
+    return ce;
+  }
+
+  test('one point with undeclared components is accepted', () => {
+    const e = engineW().parse('W((a,b,0),2)');
+    expect(e.isValid).toBe(true);
+    expect(e.type.toString()).toBe(RESULT);
+  });
+
+  test('the literal list is a call per point', () => {
+    const e = engineW().parse(LITERAL);
+    expect(e.isValid).toBe(true);
+    expect(e.type.toString()).toBe(`list<${RESULT}>`);
+  });
+
+  test('a call that returns such a list has no error member', () => {
+    const e = engineW().parse('W(K(a,b),2)');
+    expect(e.isValid).toBe(true);
+    expect(e.type.toString()).toBe(`list<${RESULT}>`);
+  });
+
+  test('the evaluation binds each point as a direct call does', () => {
+    const ce = engineW();
+    expect(ce.parse('W((a,b,0),2)').evaluate().toString()).toBe('(2a, b, 0)');
+    expect(ce.parse(LITERAL).evaluate().toString()).toBe(
+      '[(2a, b, 0),(2, a, b)]'
+    );
+  });
+
+  test('the evaluation with values gives the mapped points', () => {
+    const ce = engineW();
+    ce.assign('a', 1);
+    ce.assign('b', 2);
+    expect(JSON.stringify(ce.parse('W(K(a,b),2)').evaluate().json)).toBe(
+      JSON.stringify(['List', ['Tuple', 2, 2, 0], ['Tuple', 2, 1, 2]])
+    );
+  });
+
+  test('a list with one refused point type is refused', () => {
+    const ce = engineW();
+    ce.declare(
+      'S',
+      'list<tuple<integer, unknown, unknown> | tuple<integer, string, integer>>'
+    );
+    const e = ce.box(['W', 'S', 2]);
+    expect(e.isValid).toBe(false);
+    expect(e.type.toString()).toBe('error');
+  });
+
+  test('a mapped point whose value is refused is an error in its cell', () => {
+    const ce = engineW();
+    const e = ce.box([
+      'W',
+      ['List', ['Tuple', 'a', 'b', 0], ['Tuple', 1, { str: 'x' }, 2]],
+      2,
+    ]);
+    const v = e.evaluate();
+    expect(v.ops![0].toString()).toBe('(2a, b, 0)');
+    expect(v.ops![1].operator).toBe('Error');
+  });
+
+  test('a symbolic point with no value is bound as in a direct call', () => {
+    const ce = engineW();
+    ce.declare('q', 'tuple<unknown, unknown, integer>');
+    expect(ce.box(['W', 'q', 2]).evaluate().operator).toBe('Tuple');
+    const e = ce.box(['W', ['List', 'q'], 2]);
+    expect(e.type.toString()).toBe(`list<${RESULT}>`);
+    expect(e.evaluate().ops![0].operator).toBe('Tuple');
+  });
+
+  test('an alias of a union of points is read arm by arm', () => {
+    const ce = engineW();
+    ce.declareType(
+      'PP',
+      'tuple<integer, unknown, unknown> | tuple<unknown, unknown, integer>',
+      { alias: true }
+    );
+    ce.declare('S1', 'list<PP | tuple<unknown, integer, unknown>>');
+    const e = ce.box(['W', 'S1', 2]);
+    expect(e.isValid).toBe(true);
+    expect(e.type.toString()).toBe(`list<${RESULT}>`);
+  });
+});
+
+describe('CE-1069: each component of a mapped point is checked', () => {
+  /** `U(p) = p.x` with a point parameter, `B(p) = p.x` with a
+   * `broadcastable` point parameter, and `V(p) = p.x` with a ranged first
+   * component. */
+  function engineUBV(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('U', '(tuple<integer, integer>) -> integer');
+    ce.parse('U(p) := p.x').evaluate();
+    ce.declare('B', '(broadcastable<tuple<integer, integer>>) -> integer');
+    ce.parse('B(p) := p.x').evaluate();
+    ce.declare('V', '(tuple<real<0..1>, real, real>) -> real');
+    ce.parse('V(p) := p.x').evaluate();
+    return ce;
+  }
+  const cell = (ce: ComputeEngine, f: string, point: unknown[]) =>
+    ce.box([f, ['List', point]]).evaluate().ops![0];
+
+  test('a symbolic component that can fit is bound', () => {
+    const ce = engineUBV();
+    expect(cell(ce, 'U', ['Tuple', 1, 'a']).toString()).toBe('1');
+    expect(cell(ce, 'V', ['Tuple', 0.5, 'a', 0]).toString()).toBe('0.5');
+  });
+
+  test('a concrete component outside its type is an error', () => {
+    const ce = engineUBV();
+    expect(cell(ce, 'U', ['Tuple', 1.5, 'a']).operator).toBe('Error');
+    expect(cell(ce, 'B', ['Tuple', 1.5, 'a']).operator).toBe('Error');
+    expect(cell(ce, 'V', ['Tuple', 5, 'a', 0]).operator).toBe('Error');
+    ce.assign('q', ce.box(['Tuple', 5, 0, 0]));
+    expect(ce.box(['V', ['List', 'q']]).evaluate().ops![0].operator).toBe(
+      'Error'
+    );
   });
 });

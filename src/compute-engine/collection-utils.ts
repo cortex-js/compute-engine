@@ -6634,8 +6634,14 @@ export function isPointParameterType(param: Type): boolean {
  * subtype, and with `g: (tuple<E, E>) -> unknown`, `g(T)` was accepted for
  * `T: tuple<number, number>` while `g(L)` was an `incompatible-type` error
  * for `L: list<tuple<number, number>>`.
+ *
+ * A union of tuple types is accepted when each of its arms is accepted
+ * alone. The evaluation of a call that maps over a list of points uses the
+ * same rule for each point it binds (`fitsPointSlot()` in
+ * `boxed-expression/boxed-function.ts`), so that a point accepted by the
+ * argument check is not refused when it is bound.
  */
-function pointFitsParameter(t: Type, param: Type): boolean {
+export function pointFitsParameter(t: Type, param: Type): boolean {
   // `never` is a subtype of every type, but it is not a point. A union of
   // tuple types that is a subtype of `param` is accepted.
   if (t === 'never') return false;
@@ -6670,11 +6676,36 @@ function pointFitsParameter(t: Type, param: Type): boolean {
       }
     }
   }
-  return (
-    (r === 'tuple' || (typeof r !== 'string' && r.kind === 'tuple')) &&
-    typesOverlap(r, param)
-  );
+  // A union of point types is accepted when each of its arms is a point
+  // that is accepted alone. The literal list `[(a, b, 0), (1, a, b)]`, with
+  // `a` and `b` not declared, has the element type
+  // `tuple<unknown, unknown, integer> | tuple<integer, unknown, unknown>`.
+  // The union as a whole is not a tuple type, so the overlap test refused
+  // it, while each of its points was accepted as the whole argument.
+  //
+  // An arm that is an alias of a union is entered too. A NaN point can be
+  // an arm of such an inner union, so the walk accepts it at each level.
+  // The walk stops at `MAX_POINT_UNION_DEPTH` levels and then refuses the
+  // arm: a self-referential alias such as `type A = A | tuple<…>` cannot
+  // make it recurse without end.
+  const fits = (x: Type, depth: number): boolean => {
+    const a = resolveTypeAlias(x);
+    if (typeof a !== 'string' && a.kind === 'union')
+      return (
+        depth < MAX_POINT_UNION_DEPTH &&
+        a.types.every((y) => fits(y, depth + 1))
+      );
+    if (arity !== undefined && isNaNPointArm(a)) return true;
+    return (
+      (a === 'tuple' || (typeof a !== 'string' && a.kind === 'tuple')) &&
+      typesOverlap(a, param)
+    );
+  };
+  return fits(r, 0);
 }
+
+/** The number of nested unions that `pointFitsParameter()` enters. */
+const MAX_POINT_UNION_DEPTH = 8;
 
 /**
  * Whether an argument of type `arg` is a LIST OF POINTS that a user function

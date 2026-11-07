@@ -530,7 +530,7 @@ import {
   isCollectionSourceOperator,
   isOptimumFunctionOperand,
 } from './validate.js';
-import { concreteValueOf } from './value-membership.js';
+import { admissionOf, concreteValueOf } from './value-membership.js';
 import {
   functionLiteralSignatureType,
   inferFunctionLiteralEffects,
@@ -20449,9 +20449,49 @@ function declaredElementError(
     if (isBroadcastOperand(el, i)) continue;
     if (el.type.isUnknown || el.type.matches(t)) continue;
     if (acceptsNaNPointElement(el, t)) continue;
+    if (fitsPointSlot(el, t)) continue;
     return ce.typeError(declaredSlotType(plan, i, t, mask), el.type, el);
   }
   return undefined;
+}
+
+/**
+ * Whether the element `el` of a mapped list is a point literal that the
+ * point slot type `t` accepts, component by component: `el` is a `Tuple` of
+ * the arity of `t`, and no component is refuted by the type of its
+ * position (`admissionOf()` in `value-membership.ts`). A concrete
+ * component is decided by its value. A symbolic component is refuted only
+ * when its type is provably disjoint from the type of its position.
+ *
+ * With `a` and `b` not declared, the point `(a, b, 0)` has the type
+ * `tuple<unknown, unknown, integer>`. That type is not a subtype of
+ * `tuple<real, real, real>`, but no component is provably outside it. The
+ * argument check accepts a list of such points (`pointFitsParameter()` in
+ * `collection-utils.ts`), and a direct call binds one such point, so the
+ * mapped call binds it too. Before, each cell of the map was an
+ * `incompatible-type` error while the type of the call had no `error`
+ * member.
+ *
+ * A point with a refuted component is still an error: `(1.5, a)` at
+ * `tuple<integer, integer>`, and `(1, "x", 2)` at `tuple<real, real, real>`.
+ *
+ * The elements of a row are evaluated, so a concrete point arrives as a
+ * `Tuple` literal. An element that is not a `Tuple` literal and has no
+ * concrete value (a symbol with no value declared as a point, or a call
+ * that stays unevaluated) is decided by its type, as a direct call decides
+ * a symbolic operand (`runtimeConformanceError()` in `validate.ts`): it is
+ * refused only when its type is provably disjoint from `t`.
+ */
+function fitsPointSlot(el: Expression, t: Type): boolean {
+  if (!isPointParameterType(t)) return false;
+  if (!isFunction(el, 'Tuple'))
+    return concreteValueOf(el) === undefined && admissionOf(el, t) !== 'refute';
+  const slot = resolveTypeReference(t) ?? t;
+  if (typeof slot === 'string' || slot.kind !== 'tuple') return false;
+  if (el.nops !== slot.elements.length) return false;
+  return el.ops.every(
+    (c, k) => admissionOf(c, slot.elements[k].type) !== 'refute'
+  );
 }
 
 /** Whether the element `el` of a mapped list is a `NaN` point (a tuple whose
@@ -20515,6 +20555,7 @@ function declaredBroadcastElement(
     const el = row[i];
     if (el.type.isUnknown || el.type.matches(t)) continue;
     if (acceptsNaNPointElement(el, t)) continue;
+    if (fitsPointSlot(el, t)) continue;
     // The boxed element, not its rendering: a diagnostic raised while a
     // broadcast cell is being computed reads a deliberately widened type,
     // and `typeError` recovers the precise one by re-reading the operand it
