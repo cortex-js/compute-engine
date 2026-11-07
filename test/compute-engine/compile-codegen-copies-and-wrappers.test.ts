@@ -477,6 +477,57 @@ describe('a block local replaced element by element is written in place (CE-329)
     expect(copiedLocals(ce, json)).toEqual([]);
   });
 
+  test('a last line with a result type does not stop the in-place write (CE-1009)', () => {
+    // The canonical body of a function with a result type ends with
+    // `Typed(xs, type)` where the source ends with `xs`. The ascription
+    // compiles to `xs` and keeps no other reference to the list.
+    const json = [
+      'Block',
+      declare,
+      ['Loop', update, range],
+      ['Typed', 'xs', "'list<real>'"],
+    ];
+    expect(codeOf(ce, json)).toContain('_SYS.replaceAtInPlace');
+    const L = [1, 2, 3];
+    expect(run(ce, json, { L })).toEqual([2, 4, 6]);
+    expect(L).toEqual([1, 2, 3]);
+    expect(interpreted(ce, json, { L: list([1, 2, 3]) })).toEqual([2, 4, 6]);
+    expect(copiedLocals(ce, json)).toEqual([]);
+  });
+
+  test('a list with a result type in a value that is used keeps the copying form', () => {
+    // `ys` holds the array of `xs` through the ascription, so an in-place
+    // write to `xs` would change `ys`.
+    const json = [
+      'Block',
+      declare,
+      ['Declare', 'ys', "'list<real>'", ['Typed', 'xs', "'list<real>'"]],
+      ['Loop', update, range],
+      ['Add', ['Sum', 'xs'], ['Multiply', 100, ['Sum', 'ys']]],
+    ];
+    expect(codeOf(ce, json)).not.toContain('replaceAtInPlace');
+    expect(run(ce, json, { L: [1, 2, 3] })).toBe(612);
+    expect(copiedLocals(ce, json)).toEqual(['xs']);
+  });
+
+  test('a Python fold whose step has a result type updates in place (CE-1009)', () => {
+    const e = new ComputeEngine();
+    e.declare('s', 'list<integer>');
+    const step = [
+      'Function',
+      [
+        'Typed',
+        ['ReplaceAt', 'acc', 'i', ['Add', ['At', 'acc', 'i'], 'i']],
+        "'list<integer>'",
+      ],
+      'acc',
+      'i',
+    ];
+    const code = codeOf(e, ['Fold', step, 's', ['Range', 1, 4]], 'python');
+    expect(code).toContain('lambda acc, i: _ce_replaceat_inplace(acc, i,');
+    expect(code).toContain('_ce_owned_copy(s)');
+  });
+
   test('a last line that writes without assigning does not stop the in-place write', () => {
     const json = [
       'Block',

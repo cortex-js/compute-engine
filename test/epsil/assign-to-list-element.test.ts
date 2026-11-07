@@ -281,4 +281,33 @@ describe('a compiled loop that assigns list elements', () => {
     expect(result.run({ L })).toEqual([2, 4, 6]);
     expect(L).toEqual([1, 2, 3]);
   });
+
+  test('writes the local in place in a function with a result type (CE-1009)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<real>');
+    const source = [
+      'do {',
+      '  function g(H: list<real>) -> list<real> {',
+      '    let xs = H',
+      '    for i in 1..3 { xs[i] = 2 * xs[i] }',
+      '    xs',
+      '  }',
+      '  g(L)',
+      '}',
+    ].join('\n');
+    const result = compile(ce.box(parseEpsil(source)[0] as never), {
+      fallback: false,
+    } as never) as unknown as {
+      success: boolean;
+      code: string;
+      warnings?: unknown[];
+      run: (vars: Record<string, unknown>) => unknown;
+    };
+    expect(result.success).toBe(true);
+    expect(result.code).toContain('_SYS.replaceAtInPlace');
+    expect(result.warnings).toBeUndefined();
+    const L = [1, 2, 3];
+    expect(result.run({ L })).toEqual([2, 4, 6]);
+    expect(L).toEqual([1, 2, 3]);
+  });
 });

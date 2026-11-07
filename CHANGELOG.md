@@ -22,6 +22,14 @@
   The accumulator is now typed `vector<integer^2>`, the fold
   `list<integer | missing^2>`, and the fold compiles: `n = 3` gives
   `[Missing, 3]` on the interpreter and `[NaN, 3]` in compiled code.
+- **A result type on a function no longer makes a compiled list update copy
+  the list.** In
+  `function g(H: list<number>, n: integer) -> list<number> { let L = H; for k in 1..n { L = replaceAt(L, k, L[k] + 1) }; L }`,
+  the compiled JavaScript copied the whole list on each pass of the loop and
+  warned `copying-list-update`; without `-> list<number>` it wrote the list
+  in place. Both forms now write in place, with no warning. A `Fold` step
+  with a result type is written in place on the Python target too. The
+  values do not change. (CE-1009, Tycho row FG)
 
 ## 0.182.0 _2026-11-06_
 

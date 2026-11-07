@@ -120,6 +120,11 @@ export function inPlaceUpdateChains(
       return true;
     }
     if (isFunction(e, 'Return') && e.nops === 1) return returnsOwned(e.op1);
+    // A step with a result type, `(acc, x) -> list<real> => …`, returns
+    // `Typed(value, type)`. An ascription of a list compiles to the code of
+    // its operand (`compileExprTyped`), so it returns the same array.
+    if (isFunction(e, 'Typed') && e.nops >= 1)
+      return returnsOwned(e.op1) && e.ops.slice(1).every(readsOnly);
     if (isFunction(e, 'If') && e.nops === 3)
       return readsOnly(e.op1) && returnsOwned(e.op2) && returnsOwned(e.op3);
     if (isFunction(e, 'Block') && e.nops > 0)
@@ -152,7 +157,9 @@ export function inPlaceUpdateChains(
  *   `Declare` that is a statement, the innermost list operand of a chain
  *   assigned to `name`, the first operand of a read in
  *   `NON_RETAINING_READS`, the first operand of a `ReplaceAt` with one position
- *   that is not such a chain, or a statement by itself. That `ReplaceAt` keeps
+ *   that is not such a chain, or a statement by itself, also with a type
+ *   ascription (`Typed(name, type)`, the last statement of a function with a
+ *   result type). That `ReplaceAt` keeps
  *   the copying form and gives a new outer array, which shares only rows with
  *   the local, and a write with one position does not change a row. A statement
  *   of the list gives its value to nothing but the block, and nothing in the
@@ -276,6 +283,15 @@ function ownedLocalChains(
       return allowed(e.ops[0], true) && e.ops.slice(1).every((x) => allowed(x));
     if (statement && h === 'If')
       return e.ops.every((x, k) => allowed(x, k > 0));
+    // The canonical body of a function with a result type ends with
+    // `Typed(xs, type)` where the source ends with `xs`. An ascription of a
+    // list compiles to the code of its operand (`compileExprTyped`), so it
+    // keeps no other reference to the list, and its operand is in the same
+    // position as the ascription.
+    if (statement && h === 'Typed')
+      return (
+        allowed(e.ops[0], true) && e.ops.slice(1).every((x) => allowed(x))
+      );
     if ((h === 'Assign' || h === 'Declare') && isName(e.ops[0])) {
       if (!statement) return false;
       const value = e.ops[1];
