@@ -2760,6 +2760,41 @@ describe('HYPERGEOMETRIC 2F1 CANCELLATION IN THE CONNECTION FORMULAS', () => {
   });
 });
 
+describe('HYPERGEOMETRIC 2F1 Γ FACTORS OUT OF RANGE OF A DOUBLE', () => {
+  // References: mpmath 1.4.1 hyp2f1 (mp.dps = 50) at the same double
+  // arguments. The Γ quotient of the Gauss summation at z = 1 and of the
+  // connection formula at 1 − z has a numerator or a denominator that
+  // overflows: Γ(145.156)·Γ(49.036) is about 1e311. The quotient was 0,
+  // and the result was a wrong finite number (shown after each case).
+  test.each([
+    // Pfaff map to the case below (−8.2e-23)
+    [[-75.504, 49.036, 69.652, -1.33], 9.2983728979155207896504e22, 1e-14],
+    // connection formula at 1 − z (−1.5e-50)
+    [[-75.504, 20.616, 69.652, 0.5708], 1.704802043558483444925595e-5, 1e-14],
+    // Gauss summation at z = 1 (0)
+    [[-75.504, 20.616, 69.652, 1], 3.725952279179264031949354e-8, 1e-14],
+    // Γ(276.603) is itself out of range and comes from its log (NaN)
+    [[117.59, -138.902, 137.701, 1], 4.496862817815133626825799e-58, 1e-11],
+  ])('machine ₂F₁(%j)', (args, ref, tolerance) => {
+    const [a, b, c, z] = args;
+    const v = hypergeometric2F1(a, b, c, z);
+    expect(Math.abs(v - ref) / Math.abs(ref)).toBeLessThan(tolerance);
+  });
+
+  // The log of Γ(1e10) is about 2.2e11 and the log of Γ(1e15) is about
+  // 3.4e16. An error of a few units in the last place of such a log is a
+  // relative error of about 1e-5 in Γ(1e10), and of more than 1 in
+  // Γ(1e15). The values stay symbolic. Taken from the logs of the Γ
+  // values, they were 0.99996 (mpmath: 1.000000000025) and a number that
+  // was not near 2 (mpmath: (1e15 − 1)/(5e14 − 1)).
+  test.each([
+    [0.5, 0.5, 1e10, 1],
+    [1, 5e14, 1e15, 1],
+  ])('machine ₂F₁(%d, %d; %d; %d) is NaN when a Γ factor from its log is too inexact', (a, b, c, z) => {
+    expect(hypergeometric2F1(a, b, c, z)).toBeNaN();
+  });
+});
+
 describe('HYPERGEOMETRIC 2F1 CANCELLATION IN THE GAUSS SERIES', () => {
   // References: mpmath 1.4.1 hyp2f1 (mp.dps = 50) at the same double
   // arguments. The largest term of the Gauss series is 1e3 to 1e6 times its

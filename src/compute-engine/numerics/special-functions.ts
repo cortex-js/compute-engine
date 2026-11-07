@@ -6806,6 +6806,127 @@ function oneMinusZPow(z: number, p: number): number {
   return Math.pow(s, p) * Math.exp(p * Math.log1p(e / s));
 }
 
+// The relative error of a Γ quotient of `gammaQuotient` in its direct
+// form: Γ of large arguments has relative errors of up to about 100ε.
+const GAMMA_QUOTIENT_ERROR = 100 * Number.EPSILON;
+
+// The largest relative error that the machine ₂F₁ kernel accepts for a
+// result from a Γ quotient: the error of a direct quotient multiplied by
+// the largest cancellation of the connection formula at 1 − z.
+const GAMMA_2F1_MAX_ERROR = CONNECTION_2F1_MAX_LOSS * GAMMA_QUOTIENT_ERROR;
+
+/**
+ * The quotient Γ(p)·Γ(q)/(Γ(r)·Γ(t))·base^exponent. `times(x)` multiplies
+ * x by it, and `error` is an estimate of its relative error. It gives the
+ * factors of the Gauss summation at z = 1 and of the connection formula at
+ * 1 − z in `hypergeometric2F1Real`.
+ *
+ * The quotient is taken directly when each Γ value, each partial product
+ * and the quotient are normal doubles (finite and at least 2⁻¹⁰²² in
+ * size). Otherwise each factor and the argument are kept as a mantissa
+ * and a separate power of 2, so that no partial product overflows or
+ * underflows. Then the result is correct when the quotient is out of
+ * range of a double but its product with the argument is not. For
+ * ₂F₁(−75.504, 20.616; 69.652; 0.5708) the product Γ(145.156)·Γ(49.036)
+ * is about 1e311 and overflows: the direct factor was 0, and the value was
+ * −1.5e-50 instead of 1.7e-5.
+ *
+ * A factor that is a normal double is split exactly, so the error is about
+ * that of the direct form, GAMMA_QUOTIENT_ERROR. A Γ value or a power that
+ * is itself out of range (Γ(x) for x > 171.6) comes from its log. The log
+ * has an absolute error of a few units in its last place, so the factor
+ * has a relative error of about |ln|·ε, and this error has no upper bound:
+ * Γ(1e10) has ln ≈ 2.2e11, and ₂F₁(0.5, 0.5; 1e10; 1) came out as
+ * 0.99996 instead of 1.000000000025. `error` adds 4ε·|ln| for each such
+ * factor. The measured error was 2ε·|ln| or less (5.2e-13 for
+ * ₂F₁(117.59, −138.902; 137.701; 1), where ln Γ(276.603) ≈ 1275). The
+ * caller compares `error` with GAMMA_2F1_MAX_ERROR.
+ *
+ * `times` returns NaN when p, q, r or t is a pole of Γ, as `gamma()`
+ * does. `base` must be positive.
+ */
+function gammaQuotient(
+  p: number,
+  q: number,
+  r: number,
+  t: number,
+  base = 1,
+  exponent = 0
+): { times: (x: number) => number; error: number } {
+  const gp = gamma(p);
+  const gq = gamma(q);
+  const gr = gamma(r);
+  const gt = gamma(t);
+  if ([gp, gq, gr, gt].some(Number.isNaN))
+    return { times: () => NaN, error: GAMMA_QUOTIENT_ERROR };
+  const num = gp * gq;
+  const den = gr * gt;
+  const pow = Math.pow(base, exponent);
+  const direct = (num / den) * pow;
+  if ([gp, gq, gr, gt, num, den, pow, direct].every(isNormalDouble))
+    return { times: (x) => direct * x, error: GAMMA_QUOTIENT_ERROR };
+  // The quotient is mant·2^exp2. A factor that is a normal double is split
+  // exactly into a mantissa and a power of 2. A factor that is not (a Γ
+  // value or a power that overflowed or underflowed) is split from its
+  // log in base 2.
+  let mant = 1;
+  let exp2 = 0;
+  let error = GAMMA_QUOTIENT_ERROR;
+  const factors: [value: number, log2: () => number, sign: number][] = [
+    [gp, () => lnGammaSigned(p)[0] / Math.LN2, gammaSign(p)],
+    [gq, () => lnGammaSigned(q)[0] / Math.LN2, gammaSign(q)],
+    [1 / gr, () => -lnGammaSigned(r)[0] / Math.LN2, gammaSign(r)],
+    [1 / gt, () => -lnGammaSigned(t)[0] / Math.LN2, gammaSign(t)],
+    [pow, () => exponent * Math.log2(base), 1],
+  ];
+  for (const [value, log2, sign] of factors) {
+    let m: number;
+    let e: number;
+    if (isNormalDouble(value)) [m, e] = splitPow2(value);
+    else {
+      const l = log2();
+      e = Math.floor(l);
+      m = sign * 2 ** (l - e);
+      error += 4 * Number.EPSILON * Math.abs(l) * Math.LN2;
+    }
+    mant *= m;
+    exp2 += e;
+  }
+  const times = (x: number): number => {
+    if (x === 0) return 0;
+    if (!Number.isFinite(x)) return Math.sign(mant) * x;
+    const [m, e] = splitPow2(x);
+    return scalePow2(mant * m, exp2 + e);
+  };
+  return { times, error };
+}
+
+/** True when `v` is finite and at least 2⁻¹⁰²² in size. */
+function isNormalDouble(v: number): boolean {
+  return Number.isFinite(v) && Math.abs(v) >= MIN_NORMAL_DOUBLE;
+}
+
+/**
+ * A finite nonzero `v` as `[m, e]` with v = m·2^e exactly and |m| near 1
+ * (0.5 ≤ |m| < 4, because `Math.log2` can round across an integer).
+ * The scaling is in two steps, because 2^−e alone overflows for a
+ * subnormal v (e < −1023).
+ */
+function splitPow2(v: number): [number, number] {
+  const e = Math.floor(Math.log2(Math.abs(v)));
+  const h = Math.trunc(e / 2);
+  return [v * 2 ** -h * 2 ** -(e - h), e];
+}
+
+/**
+ * m·2^e for a mantissa m of moderate size. The scaling is in two steps, so
+ * that a result in range is not lost when 2^e alone is out of range.
+ */
+function scalePow2(m: number, e: number): number {
+  const h = Math.trunc(e / 2);
+  return m * 2 ** h * 2 ** (e - h);
+}
+
 /** The Gauss series, or NaN when it did not converge or cancels too much. */
 function gauss2F1Series(
   a: number,
@@ -6923,7 +7044,8 @@ function hypergeometric2F1Real(
     // Gauss summation: Γ(c)Γ(c−a−b)/(Γ(c−a)Γ(c−b)), requires c−a−b > 0
     const s = c - a - b;
     if (s <= 0) return s === 0 ? Infinity : NaN;
-    return (gamma(c) * gamma(s)) / (gamma(c - a) * gamma(c - b));
+    const g = gammaQuotient(c, s, c - a, c - b);
+    return g.error <= GAMMA_2F1_MAX_ERROR ? g.times(1) : NaN;
   }
   if (z > 1) return NaN; // complex value (branch cut [1, ∞))
 
@@ -6995,17 +7117,21 @@ function hypergeometric2F1Real(
   // sum: when the terms have one sign, the sum is many times the largest
   // term, and the cancellation is between the two sums. The bound is
   // smaller than GAUSS_2F1_MAX_LOSS because the prefactors (Γ of large
-  // arguments, (1−z)^s) have relative errors of up to about 100ε, and
-  // the cancellation multiplies those errors too.
-  const g1 = (gamma(c) * gamma(s)) / (gamma(c - a) * gamma(c - b));
-  const g2 =
-    ((gamma(c) * gamma(-s)) / (gamma(a) * gamma(b))) * Math.pow(1 - z, s);
+  // arguments, (1−z)^s) have relative errors of up to about 100ε
+  // (GAMMA_QUOTIENT_ERROR), and the cancellation multiplies those errors
+  // too. A prefactor with a larger error (`gammaQuotient` from logs)
+  // counts its part as larger in the same ratio, so the estimated error of
+  // the result stays within GAMMA_2F1_MAX_ERROR.
+  const g1 = gammaQuotient(c, s, c - a, c - b);
+  const g2 = gammaQuotient(c, -s, a, b, 1 - z, s);
   const s1 = gauss2F1SeriesBig(a, b, 1 - s, 1 - z);
   const s2 = gauss2F1SeriesBig(c - a, c - b, 1 + s, 1 - z);
-  const value = g1 * s1.sum + g2 * s2.sum;
+  const value = g1.times(s1.sum) + g2.times(s2.sum);
   const big = Math.max(
-    Math.abs(g1) * Math.max(s1.big, Math.abs(s1.sum)),
-    Math.abs(g2) * Math.max(s2.big, Math.abs(s2.sum))
+    (g1.error / GAMMA_QUOTIENT_ERROR) *
+      Math.abs(g1.times(Math.max(s1.big, Math.abs(s1.sum)))),
+    (g2.error / GAMMA_QUOTIENT_ERROR) *
+      Math.abs(g2.times(Math.max(s2.big, Math.abs(s2.sum))))
   );
   return big <= CONNECTION_2F1_MAX_LOSS * Math.abs(value) ? value : NaN;
 }

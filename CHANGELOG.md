@@ -71,6 +71,16 @@
 
 ### Resolved Issues
 
+- **`Hypergeometric2F1` at machine precision no longer gives a wrong number
+  for parameters near 100.** A product of two values of the Gamma function
+  in its formulas went past the largest double, and the result had the wrong
+  sign and size: with `ce.precision = 'machine'`,
+  `["Hypergeometric2F1", -75.504, 20.616, 69.652, 0.5708]` gave `-1.5e-50`
+  and is now `1.7048020435584845e-5`, and
+  `["Hypergeometric2F1", -75.504, 20.616, 69.652, 1]` gave `0` and is now
+  `3.725952279179266e-8`. When the Gamma values are too large to give an
+  accurate result (`["Hypergeometric2F1", 0.5, 0.5, 1e10, 1]`), the
+  expression stays unevaluated.
 - **The WGSL code of an `Or` with an `And` operand is now valid.** WGSL does
   not let `&&` and `||` appear together without parentheses, so the code that
   `compile(expr, { to: 'wgsl' })` gave for `Or(Less(3, y, x), Less(x, 5))`,
