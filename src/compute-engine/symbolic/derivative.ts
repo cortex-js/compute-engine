@@ -28,6 +28,7 @@ import {
 import {
   collectBinderNames,
   isOperatorDef,
+  liftIntegrand,
   rebindEscaping,
 } from '../boxed-expression/utils.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
@@ -2837,8 +2838,9 @@ function differentiateNode(
   if (expr.operator === 'Sum' || expr.operator === 'Product')
     return differentiateBigOp(expr, v, depth, trace);
 
-  // A definite integral: through its closed form, or under the integral
-  // sign. See `differentiateIntegral()`.
+  // An integral: through its closed form, or under the integral sign; an
+  // indefinite integral in its own variable gives its integrand. See
+  // `differentiateIntegral()`.
   if (expr.operator === 'Integrate')
     return differentiateIntegral(expr, v, depth, trace);
 
@@ -4325,12 +4327,19 @@ function renameCapturedIndexes(
 const RENAMED_INDEXES = new WeakMap<Scope, ReadonlySet<string>>();
 
 /**
- * The derivative of a definite `Integrate` with respect to `v`.
+ * The derivative of an `Integrate` with respect to `v`.
  *
- * The integral is `Integrate(Function(body, x₁, …), Limits(x₁, a₁, b₁), …)`,
- * with a lower and an upper bound in each `Limits` clause. Any other form (an
- * indefinite integral, an integrand that is not a function literal) stays
- * unevaluated (`undefined`).
+ * The integral is `Integrate(Function(body, x₁, …), Limits(x₁, a₁, b₁), …)`.
+ * It is definite, with a lower and an upper bound in each `Limits` clause, or
+ * indefinite, with the bounds `Nothing` in each clause. Any other form (a
+ * clause with one bound only, a mix of definite and indefinite clauses, an
+ * integrand that is not a function literal) stays unevaluated (`undefined`).
+ *
+ * The derivative of an indefinite integral `∫ f(x) dx` with respect to its
+ * variable `x` is `f(x)` (the fundamental theorem of calculus). With respect
+ * to another variable, the rules below apply, with no bounds: the closed
+ * form, then the derivative under the integral sign. The result is correct
+ * up to a constant of integration, which an antiderivative leaves open.
  *
  * When neither the body nor a bound depends on `v`, the derivative is 0, with
  * the shape of the value of the integral. Each `v` written in the body is an
@@ -4389,10 +4398,23 @@ function differentiateIntegral(
 
   const variables: string[] = [];
   const bounds: Expression[] = [];
+  // A `Limits` clause with two bounds that are `Nothing` is indefinite. An
+  // integral is either indefinite in every clause or definite in every
+  // clause; a mix stays unevaluated.
+  const isIndefinite = (set: Expression) =>
+    isFunction(set, 'Limits') &&
+    isSymbol(set.op2, 'Nothing') &&
+    isSymbol(set.op3, 'Nothing');
+  const indefinite = isIndefinite(sets[0]);
   for (const set of sets) {
     if (!isFunction(set, 'Limits') || set.nops !== 3 || !isSymbol(set.op1))
       return undefined;
-    // A bound that is `Nothing` is absent: the integral is indefinite.
+    if (isIndefinite(set) !== indefinite) return undefined;
+    if (indefinite) {
+      variables.push(set.op1.symbol);
+      continue;
+    }
+    // A bound that is `Nothing` is absent, and the other is not.
     if (isSymbol(set.op2, 'Nothing') || isSymbol(set.op3, 'Nothing'))
       return undefined;
     // A bound that is a list gives a list of integrals, whose shape the
@@ -4422,6 +4444,31 @@ function differentiateIntegral(
   // integral sign (in the Leibniz rule).
   const nestedLiteral = containsOperator(body, 'Function');
   if (nestedLiteral && variables.includes(v)) return undefined;
+
+  // The fundamental theorem of calculus: the derivative of `∫ f(x) dx` with
+  // respect to `x` is `f(x)`. The integrand is lifted out of its function
+  // literal and bound in the scope of the caller (`liftIntegrand()`), as the
+  // antiderivative is, so that its `x` is the variable of the derivative.
+  // The derivative of an iterated indefinite integral with respect to one of
+  // its variables stays unevaluated.
+  //
+  // No rule is used for an indefinite integral when a user function called
+  // in the body reads a name of an integration variable. In `∫ g(x) dx` with
+  // `g := a ↦ a·x`, the `x` of `g` is the outer `x`, which a derivative in
+  // `x` also varies. A derivative in another variable `y` has the same
+  // problem: the antiderivative of `∫ g(y) dx` is computed with the
+  // integration variable renamed to a fresh name (`x·x_1`), and its
+  // derivative would be written in that fresh name.
+  if (indefinite && variables.some((x) => dependsOnVariable(body, x, true)))
+    return undefined;
+  if (indefinite && variables.includes(v)) {
+    if (sets.length !== 1) return undefined;
+    const integrand = liftIntegrand(fn);
+    if (integrand === fn) return undefined;
+    recordD(trace, expr, v, 'derivative.fundamental-theorem', () => integrand);
+    return integrand;
+  }
+
   const boundsVary = bounds.some((b) => dependsOnVariable(b, v));
   const bodyVaries = dependsOnVariable(body, v, variables.includes(v));
   if (!boundsVary && !bodyVaries) {
@@ -4506,8 +4553,12 @@ function differentiateIntegral(
   // `explainD()` finds the nodes of the later steps in it with `isSame()`,
   // which compares bindings. The function literal gets that scope too:
   // `explainD()` rebuilds a node with no scope with `ce.function()`, which
-  // binds the parameter of a function literal again.
-  recordD(trace, expr, v, 'derivative.leibniz-rule', () => {
+  // binds the parameter of a function literal again. An indefinite integral
+  // has no bounds, and its step has a label with no terms for the bounds.
+  const ruleId = indefinite
+    ? 'derivative.under-integral-sign'
+    : 'derivative.leibniz-rule';
+  recordD(trace, expr, v, ruleId, () => {
     const terms: Expression[] = [];
     const scope = expr.localScope;
     if (bodyVaries)

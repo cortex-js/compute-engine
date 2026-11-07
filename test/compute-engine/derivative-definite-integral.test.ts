@@ -343,9 +343,4 @@ describe('THE DERIVATIVE OF A DEFINITE INTEGRAL THAT STAYS UNEVALUATED', () => {
     expect(derivative('\\frac{d}{dy}\\int_0^\\infty \\cos(xy)\\,dx')).toBe(
       'D(int_(0)^(+oo)(cos(x * y) dx), y)'
     ));
-
-  test('an indefinite integral', () =>
-    expect(derivative('\\frac{d}{dx}\\int x^2\\,dx')).toBe(
-      'D(int(x^2 dx), x)'
-    ));
 });

@@ -407,6 +407,10 @@ registerStepLabels({
     'Differentiate the sum term by term: (Σₖ uₖ)′ = Σₖ uₖ′',
   'derivative.leibniz-rule':
     'Differentiate under the integral sign (Leibniz rule): (∫ₐᵇ f dx)′ = ∫ₐᵇ f′ dx + f(b)·b′ − f(a)·a′',
+  'derivative.under-integral-sign':
+    'Differentiate under the integral sign: ∂/∂y ∫ f dx = ∫ ∂f/∂y dx',
+  'derivative.fundamental-theorem':
+    'Apply the Fundamental Theorem of Calculus: d/dx ∫ f(x) dx = f(x)',
   'derivative.product-rule': 'Apply the product rule: (u·v)′ = u′·v + u·v′',
   'derivative.quotient-rule':
     'Apply the quotient rule: (u⁄v)′ = (u′·v − u·v′)⁄v²',

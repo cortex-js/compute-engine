@@ -103,6 +103,15 @@
 
 ### Resolved Issues
 
+- **The derivative of an indefinite integral is now evaluated.**
+  `\frac{d}{dx}\int x^2\,dx` stayed unevaluated; it is now `x^2`, also for an
+  integrand with no antiderivative in closed form (`\frac{d}{dx}\int
+  e^{x^3}\,dx` is `e^{x^3}`). The derivative with respect to another variable
+  is the derivative of the antiderivative, or the integral of the derivative
+  of the integrand when there is no antiderivative in closed form:
+  `\frac{d}{dy}\int x^2 y^3\,dx` is `x^3 y^2`. The derivative of an iterated
+  indefinite integral with respect to one of its variables stays unevaluated.
+
 - **A `d` with no variable after it, at the end of the body of an integral,
   is no longer lost.** The parser read it as the start of a differential and
   dropped it when no variable followed: `\int_0^1 \frac{x\,dx}{2} + 1 \cdot d`
