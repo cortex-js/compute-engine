@@ -87,6 +87,10 @@
 
 ### Resolved Issues
 
+- **In a product of a list of more than 100 numbers, an element that is an
+  exact `0` now gives the exact `0`, also beside a float.** With `A` a list
+  of 300 numbers that holds the exact `0`, the element of `2.5·A` was the
+  float `0.0`; it is now `0`, as `2.5·0` is.
 - **Under `evaluateAsync()`, `FlatMap` awaits its callback, and `Max`, `Min`,
   `Supremum`, `Infimum` and `Sum` of a `FlatMap` read the awaited
   elements.** With `slowF` an operator that has only an `evaluateAsync`
@@ -433,6 +437,14 @@
 
 ### Performance
 
+- **At machine precision, a sum, a difference or a product of two lists of
+  more than 100 numbers, and a quotient with such a list as an operand, are
+  now computed at once.** With `L` a list of 2,000 points,
+  `PointX(L) + PointY(L)` took about 2 µs per element and now takes about
+  0.6 µs; `PointZ(L) / PointX(L)` was a lazy list whose elements cost about
+  4 µs each, and is now a list computed in about 0.4 µs per element. The
+  values do not change. A quotient of two integers that is not an integer
+  is still the exact rational (`7/2`), computed element by element.
 - **An expression that holds several copies of the same sub-expression now
   computes it at most twice in one `evaluate()`.** A copy is a separate
   expression with the same operators, numbers and symbols, as a host makes

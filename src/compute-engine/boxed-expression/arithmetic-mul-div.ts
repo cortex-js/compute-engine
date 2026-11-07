@@ -22,7 +22,11 @@ import {
 } from './tensor-view.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
 import { sgn } from './sgn.js';
-import { bigFloatBroadcast, isStoredAsDouble } from './machine-broadcast.js';
+import {
+  bigFloatBroadcast,
+  isStoredAsDouble,
+  machinePairBroadcast,
+} from './machine-broadcast.js';
 import { bignumPreferred, hasAssignedVariable } from './utils.js';
 import {
   isNumber,
@@ -64,6 +68,7 @@ import {
   isTupleWithListCoordinate,
   isAbsentScalarTerm,
   isCollectionShaped,
+  MAX_SIZE_EAGER_COLLECTION,
 } from '../collection-utils.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -4294,6 +4299,18 @@ function mulTensors(
   // No tensors survived evaluation: let the caller fall through to the generic
   // (broadcast / tuple / Product) path.
   if (tensors.length === 0) return undefined;
+
+  // Two long lists of machine numbers are multiplied element by element on
+  // their doubles. A matrix is not a list of machine numbers, so a matrix
+  // product never takes this route.
+  const pair = machinePairBroadcast(
+    ce,
+    'Multiply',
+    values,
+    MAX_SIZE_EAGER_COLLECTION,
+    numericApproximation
+  );
+  if (pair !== undefined) return pair;
 
   // A collection that is not a tensor value is broadcast by the caller. The
   // vectors and matrices beside it are first multiplied together, in order,

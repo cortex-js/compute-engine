@@ -66,7 +66,9 @@ import {
   lazyBroadcastMap,
   broadcastOverIndexedCollections,
   isAbsentScalarTerm,
+  MAX_SIZE_EAGER_COLLECTION,
 } from '../collection-utils.js';
+import { machinePairBroadcast } from './machine-broadcast.js';
 
 import type { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -1100,6 +1102,16 @@ function addTensors(
   let tensorCount = 0;
   for (const value of values) if (isTensorValue(value)) tensorCount += 1;
   if (tensorCount < 2) return undefined;
+
+  // Two long lists of machine numbers are added on their doubles.
+  const pair = machinePairBroadcast(
+    ce,
+    'Add',
+    values,
+    MAX_SIZE_EAGER_COLLECTION,
+    numericApproximation
+  );
+  if (pair !== undefined) return pair;
 
   for (const evaluated of values) {
     if (isTensorValue(evaluated)) {

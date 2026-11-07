@@ -90,16 +90,21 @@ function rationalScalarOf(op: Expression): [number, number] | undefined {
  * - **Integers stay exact.** When every operand of a cell is an exact
  *   integer, the interpreter answers an exact integer. The double is that
  *   integer when the operands and the result are safe integers; otherwise the
- *   function declines.
+ *   function declines. A quotient of two integers is computed here only when
+ *   the divisor divides the dividend; otherwise the interpreter answers an
+ *   exact rational (`7/2`), and the function declines.
  * - **A float operand gives a float.** When an operand of a cell is a float
  *   (a value with a fraction part, a float scalar, or an integer-valued
  *   element of a list of floats), the result is a float, even when its value
- *   is an integer (`2 · 0.5` is the float `1`; user decision 2026-09-27). The
- *   answer records it (`_numericStoreFloats`). One flag covers all the
+ *   is an integer (`2 · 0.5` is the float `1`; user decision 2026-09-27).
+ *   The answer records this (`_numericStoreFloats`). One flag covers all the
  *   integer-valued elements, so when some are exact and some are floats the
- *   function declines.
- * - **Heads.** `Add` and `Multiply` of two or more operands, `Negate`, and
- *   the functions of one machine number that {@link FUNCTION_KERNELS} and
+ *   function declines. One exception: a product with an exact `0` factor is
+ *   the exact `0`, also beside a float (`0 · 2.5` is `0`), and it counts as
+ *   an exact integer for that flag.
+ * - **Heads.** `Add` and `Multiply` of two or more operands, `Negate`,
+ *   `Divide` of two operands (see {@link KERNELS}), and the functions of one
+ *   machine number that {@link FUNCTION_KERNELS} and
  *   {@link powerKernel} list, each with the inputs it must decline. A sum or
  *   a product of two doubles is one correctly rounded operation, in any
  *   order. With three or more operands the interpreter combines the exact
@@ -128,7 +133,10 @@ export function machineBroadcast(
     if (!isLibraryOperator(ce, operator)) return undefined;
     return machineFunctionBroadcast(ce, operator, ops, numericApproximation);
   }
-  if (kernel.arity === 1 ? ops.length !== 1 : ops.length < 2) return undefined;
+  if (
+    kernel.arity === 'n' ? ops.length < 2 : ops.length !== kernel.arity
+  )
+    return undefined;
 
   // The operator must be the library's own: a redefined `Add` has its own
   // element function.
@@ -195,6 +203,7 @@ export function machineBroadcast(
     if ((i & DEADLINE_STRIDE) === DEADLINE_STRIDE)
       checkDeadline(ce._deadlineFrame);
     let cellFloat = false;
+    let exactZero = false;
     for (let c = 0; c < columns.length; c++) {
       const column = columns[c];
       const x = typeof column === 'number' ? column : column[i];
@@ -207,15 +216,27 @@ export function machineBroadcast(
       // An exact integer with an exact rational: an exact rational result.
       if (rationalScalar && typeof column !== 'number' && !float)
         return undefined;
+      if (!float && x === 0) exactZero = true;
       if (float) cellFloat = true;
       cell[c] = x;
     }
+    // A product with an exact `0` factor is the exact `0` in the
+    // interpreter, also beside a float (`0 · 2.5` is `0`, not the float
+    // `0`). The cell is recorded as that exact integer.
+    if (exactZero && operator === 'Multiply') cellFloat = false;
+    // A quotient of two exact integers is exact: an integer when the
+    // divisor divides the dividend, else an exact rational, which a double
+    // does not hold.
+    if (kernel.arity === 2 && !cellFloat && cell[0] % cell[1] !== 0)
+      return undefined;
     const r =
       kernel.arity === 1
         ? kernel.apply(cell[0], 0)
-        : rationalProduct !== undefined
-          ? (cell[listColumn] * rationalProduct[0]) / rationalProduct[1]
-          : foldExactFirst(kernel, cell);
+        : kernel.arity === 2
+          ? kernel.apply(cell[0], cell[1])
+          : rationalProduct !== undefined
+            ? (cell[listColumn] * rationalProduct[0]) / rationalProduct[1]
+            : foldExactFirst(kernel, cell);
     // A `NaN` or an infinite result, and an integer result past the safe
     // range (an exact big integer in the interpreter when every operand is
     // an integer, where the double boxes as a float), are decided by the
@@ -845,16 +866,27 @@ function foldExactFirst(
 }
 
 interface MachineKernel {
-  /** One operand, or two or more: the integers first, then the floats. */
-  arity: 1 | 'n';
+  /** One operand; exactly two; or two or more, folded with the integers
+   * first, then the floats. */
+  arity: 1 | 2 | 'n';
   /** The second argument is `0` for a kernel of arity 1. */
   apply: (x: number, y: number) => number;
 }
 
+/**
+ * The kernels of arithmetic. `Divide` is the quotient of two doubles, one
+ * correctly rounded operation, which is the float that the interpreter
+ * gives for a cell with a float operand (compared on 19,895 random pairs of
+ * doubles at machine precision, 2026-11-07). A cell of two exact integers
+ * is exact in the interpreter: the kernel gives it only when the divisor
+ * divides the dividend, and otherwise the broadcast declines, because the
+ * interpreter answers an exact rational (`7/2`).
+ */
 const KERNELS: Record<string, MachineKernel> = {
   Add: { arity: 'n', apply: (x, y) => x + y },
   Multiply: { arity: 'n', apply: (x, y) => x * y },
   Negate: { arity: 1, apply: (x) => -x },
+  Divide: { arity: 2, apply: (x, y) => x / y },
 };
 
 /** Is the definition of `operator` that evaluation uses the one the standard
@@ -890,6 +922,45 @@ export function machineListOf(x: Expression): Expression | undefined {
   const list = listValueOf(x);
   if (!isFunction(list) || list._machineFloats === undefined) return undefined;
   return list;
+}
+
+/**
+ * The element-wise sum or product of the two evaluated operands `values`,
+ * computed on doubles by {@link machineBroadcast}, when each operand is a
+ * list of machine numbers with more than `eagerLimit` elements, the engine
+ * is at machine precision, and the evaluation is not a numeric
+ * approximation (`N()`). `undefined` otherwise, and when
+ * `machineBroadcast()` declines (for example for lists of two lengths): the
+ * caller then computes the cells one by one, as before.
+ *
+ * The callers are the tensor kernels of `Add` and `Multiply`
+ * (`addTensors()` in `arithmetic-add.ts`, `mulTensors()` in
+ * `arithmetic-mul-div.ts`), which take a sum or a product of two lists
+ * before the broadcast that calls `machineBroadcast()` sees it. Those
+ * kernels compute each cell as a sum or a product of two boxed numbers,
+ * several microseconds per cell; this function computes all the cells on
+ * doubles. A cell of two operands is one correctly rounded operation, so the
+ * double is the value that the tensor kernel computes for the cell, and a
+ * cell of exact integers, or a product with an exact `0` factor, stays
+ * exact. With three or more operands, the tensor kernel and
+ * `machineBroadcast()` combine the operands in different orders, so such a
+ * sum or product declines. Lists of at most `eagerLimit` elements keep the
+ * cells as boxed numbers, as their broadcast does.
+ */
+export function machinePairBroadcast(
+  ce: Expression['engine'],
+  operator: 'Add' | 'Multiply',
+  values: ReadonlyArray<Expression>,
+  eagerLimit: number,
+  numericApproximation: boolean
+): Expression | undefined {
+  if (numericApproximation || values.length !== 2) return undefined;
+  if (!atMachinePrecision(ce)) return undefined;
+  for (const x of values) {
+    const length = machineListOf(x)?.array?.length;
+    if (length === undefined || length <= eagerLimit) return undefined;
+  }
+  return machineBroadcast(ce, operator, values);
 }
 
 /**
