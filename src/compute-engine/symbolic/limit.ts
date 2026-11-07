@@ -1361,9 +1361,68 @@ function limitAtPosInf(
     return expOfLimit(inner, ce);
   }
 
-  if (op === 'Ln' || op === 'Log') {
+  if (op === 'Ln') {
     const inner = limitAtPosInf(o1(e), x, ce, depth + 1);
     return lnOfLimit(inner, ce);
+  }
+
+  // `Log(u)` is the logarithm in base 10 and `Log(u, b)` the logarithm in
+  // base `b`. Both are `ln u / ln b`: `log₁₀((2x + 1)/x)` tends to
+  // `ln 2 / ln 10`, not to `ln 2`.
+  // When `ln b` tends to a constant `L` whose sign is known (a constant base
+  // other than 1, or a base such as `2 + 1/x`), the limit is the limit of
+  // `ln u` divided by `L`, and an infinite limit of `ln u` changes its sign
+  // when `L < 0`. In each other case (`ln b` tends to 0 or to infinity, or
+  // `L` has no known sign, as for a symbol `a`), the quotient rule finds the
+  // limit of `ln u / ln b`: for `log_{x/(x+1)}(x)`, the denominator tends to
+  // 0 from below, and the limit is −∞.
+  if (op === 'Log') {
+    const lnU = ce.function('Ln', [o1(e)]);
+    const lnB = ce.function('Ln', [
+      oo(e).length > 1 ? o2(e) : ce.number(10),
+    ]);
+    const lb = limitAtPosInf(lnB, x, ce, depth + 1);
+    const sb = lb !== undefined && isDefiniteValue(lb) ? constantSign(lb) : 0;
+    if (lb !== undefined && sb !== 0) {
+      const lu = limitAtPosInf(lnU, x, ce, depth + 1);
+      if (lu === undefined) return undefined;
+      if (lu.isInfinity === true) {
+        if (lu.isPositive === true)
+          return sb > 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
+        if (lu.isNegative === true)
+          return sb > 0 ? ce.NegativeInfinity : ce.PositiveInfinity;
+        return undefined;
+      }
+      if (isDefiniteValue(lu)) return ce.function('Divide', [lu, lb]).evaluate();
+      return undefined;
+    }
+    // The quotient rule compares the growth of its two parts, and it reads
+    // a constant part as bounded. A constant `ln u` or `ln b` with no finite
+    // value (the argument or the base is 0) is not bounded: `log_x(0)` is
+    // `−∞` for each `x > 1`, and the quotient rule gave 0. With a constant
+    // base of 0 the quotient is not defined. So an infinite constant `ln u`
+    // gives a result only when `ln b` tends to a signed infinity, and each
+    // other such case declines.
+    if (!lnB.has(x) && (lb === undefined || !isDefiniteValue(lb)))
+      return undefined;
+    if (!lnU.has(x)) {
+      const lu = lnU.evaluate();
+      if (!isDefiniteValue(lu)) {
+        const signOfInfinity = (v: Expression | undefined): number =>
+          v?.isInfinity !== true
+            ? 0
+            : v.isPositive === true
+              ? 1
+              : v.isNegative === true
+                ? -1
+                : 0;
+        const su = signOfInfinity(lu);
+        const sbInf = signOfInfinity(lb);
+        if (su === 0 || sbInf === 0) return undefined;
+        return su * sbInf > 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
+      }
+    }
+    return limitRatioAtPosInf(lnU, lnB, x, ce, depth + 1);
   }
 
   if (op === 'Multiply') return limitProductAtPosInf(oo(e), x, ce, depth);

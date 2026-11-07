@@ -71,6 +71,11 @@
 
 ### Resolved Issues
 
+- **The limit at infinity of a logarithm in base 10, or in another base, now
+  reads the base.** The limit was computed as if the logarithm were natural:
+  `\lim_{x\to\infty} \log(\frac{2x+1}{x})` gave `\ln 2`, and
+  `\lim_{x\to\infty} \log_{\frac{x}{x+1}}(x)` gave `+\infty`. They now give
+  `\frac{\ln 2}{\ln 10}` and `-\infty` (the base tends to 1 from below).
 - **A multiple integral with its differentials in the numerator of a fraction
   now has the correct value.** In `\iint \frac{dx\,dy}{xy}` the space between
   the differentials stopped the search, so the integral was over `y` only and
