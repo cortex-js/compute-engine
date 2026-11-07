@@ -1,6 +1,7 @@
 # `parallel for`: a parallel loop and comprehension for Epsil, compiled to a WGSL compute shader
 
-**Status:** draft, waits for user approval (2026-11-07). No code yet.
+**Status:** approved by the user on 2026-11-07, with every recommendation of
+§7. No code yet; step 1 of §8 is next.
 **Issues:** CE-1093 (the Epsil construct) and CE-1075 (the WGSL compute
 shader). Witness strength: `corpus` (Tycho showcase entry `buddhabrot`).
 
@@ -147,7 +148,7 @@ every other compilation.
 
 | Question | Recommendation | Alternative, and what it costs |
 |---|---|---|
-| `parallel map`, `parallelSum`, … | **No.** A `map` whose callback has no effect already has an order-free meaning, so an engine can parallelize it with no new syntax. When a program must request parallel evaluation, `[f(x) parallel for x in xs]` says it. | Parallel copies of library functions (Mathematica `ParallelMap`, Maple `Threads:-Map`): each function needs a second name and a second set of tests. `parallel map(f, xs)` as a prefix: a keyword in front of a call, which has no meaning for most functions (`parallel sort(xs)`). Both can be added later without breaking a program. |
+| `parallel map`, `parallelSum`, … | **No.** A `map` whose callback has no effect already has an order-free meaning, so an engine can parallelize it with no new syntax. When a program must request parallel evaluation, `[f(x) parallel for x in xs]` says it. | Parallel copies of library functions (Mathematica `ParallelMap`, Maple `Threads:-Map`): each function needs a second name and a second set of tests. `parallel map(f, xs)` as a prefix: a keyword in front of a call, which has no meaning for most functions (`parallel sort(xs)`). Both can be added later without breaking a program. This spec does not run a plain `map` in parallel: that needs a rule that decides when it is worth it (the domain is finite and materialized, the callback has no effect, a worker pool exists, and the work is large enough), which is a separate item. |
 | Comprehensions | **Yes**, as the clause `parallel for` inside the brackets. | The prefix `parallel [f(x) for x in xs]`: the phrase is then different from the statement, and a comprehension with two clauses cannot say which clause is parallel. |
 | A parallel pipe `\|\|>` | **No.** A pipe stage is any function; a parallel meaning exists only for the element-wise map of a lambda stage, so `xs \|\|> sort` has none. `\|\|>` and `\|>` differ by one character, and `\|\|` is the logical OR (`a \|\| b \|> f` is documented in `control-flow.md`). | A pipeline with a heavy element-wise stage is written as a parallel comprehension. `\|\|>` can be added later, when a witness needs it. |
 | `+=` outside a parallel loop | **Yes**, as `s = s + e`. | `+=` only inside `parallel for`: an operator that exists in one place only. |
