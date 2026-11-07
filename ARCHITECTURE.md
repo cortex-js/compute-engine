@@ -1443,8 +1443,16 @@ collection contracts. In particular:
   `ce.box(7) === ce.box(7)`. A mechanism or a test that needs two distinct
   instances of equal values must use function expressions, which are always new
   instances.
-- `BigDecimal.precision` is module-global, and engine construction writes it.
-  Save and restore it when later tests in the same file reuse an earlier engine.
+- `BigDecimal.precision` is module-global. The construction of an engine and
+  each assignment to `ce.precision` write it, so every engine in the program
+  computes at the precision of the last write, not at its own: after
+  `a = new ComputeEngine(); a.precision = 60; b = new ComputeEngine();
+  b.precision = 21`, `a.parse('\\sqrt{2}').N()` gives 20 digits. A program
+  uses one engine; the user guide (numerical evaluation, "Numeric
+  Precision") says so. A slow case: a 3000-digit engine created after a
+  21-digit one makes `LogBarnesG(0.7).N()` on the 21-digit engine take
+  seconds instead of milliseconds. Save and restore `BigDecimal.precision`
+  when later tests in the same file reuse an earlier engine.
   Boolean use also infers a symbol's type for the engine's lifetime.
 - Shared ESM chunks preserve class identity among package entries. Custom or
   separately bundled plugins may still contain duplicate classes; test package

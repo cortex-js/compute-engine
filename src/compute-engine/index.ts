@@ -2031,6 +2031,12 @@ export class ComputeEngine implements IComputeEngine {
    *
    * If the precision is set to `auto`, the precision is set to a default value.
    *
+   * The precision of the arbitrary-precision arithmetic is shared by every
+   * engine in the program: creating an engine, or setting the precision of
+   * any engine, sets it for all of them. A program that sets different
+   * precisions on two engines computes in both at the precision set last,
+   * so use one engine per program.
+   *
    */
   set precision(p: number | 'machine' | 'auto') {
     if (!this._numericConfiguration.setPrecision(p)) return;
