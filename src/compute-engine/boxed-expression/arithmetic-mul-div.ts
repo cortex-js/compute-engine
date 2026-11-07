@@ -4529,8 +4529,15 @@ function mulTensors(
  *   holds. A scalar made at a higher precision keeps its decimal digits when
  *   the engine is later set to machine precision, and the cell product
  *   multiplies those digits: `0.1 · [3]` is `[0.3]` for such a `0.1`, where
- *   the doubles give `0.30000000000000004`. The ELEMENTS need no such test:
- *   the cell products read them from the packed tensor, which holds doubles.
+ *   the doubles give `0.30000000000000004`. The ELEMENTS are not tested
+ *   this way: `array` is defined when each element has the same value as
+ *   its double, so an element with more digits than a double holds is not
+ *   read here. An element such as `0.3` made at a higher precision has the
+ *   value of its double but is stored as a decimal, and at machine
+ *   precision it is multiplied here as a double, where the scalar product
+ *   multiplies its decimal (`3 · 0.3` is `0.9`, and the doubles give
+ *   `0.8999999999999999`). That difference is a known defect, recorded
+ *   in `issues/CE-1097.md`.
  *
  * The answer is a list that holds its numbers unboxed (`ce._list`).
  *
@@ -4591,6 +4598,33 @@ function scaleMachineVector(
 }
 
 /**
+ * Does the list `x`, at any depth, hold a big-number float with a part (the
+ * real part, or the imaginary part of a complex value) that a double does
+ * not hold: a decimal with more digits than a double holds, such as
+ * `0.123456789012345678901234567`, or one outside the range of a double?
+ * A list that holds its numbers unboxed (`ce.list()`) holds doubles only.
+ */
+function holdsWideBigFloat(x: Expression): boolean {
+  if (isFunction(x, 'List'))
+    return x._numericStore === undefined && x.ops.some(holdsWideBigFloat);
+  if (!isNumber(x)) return false;
+  const nv = x.numericValue;
+  if (typeof nv === 'number' || nv.isExact) return false;
+  const { decimal, imDecimal } = nv as {
+    decimal?: unknown;
+    imDecimal?: unknown;
+  };
+  return isWideDecimal(decimal) || isWideDecimal(imDecimal);
+}
+
+/** Is `d` a finite `BigDecimal` that is not the decimal of a double? */
+function isWideDecimal(d: unknown): boolean {
+  if (!(d instanceof BigDecimal) || !d.isFinite()) return false;
+  const double = d.toNumber();
+  return !Number.isFinite(double) || !d.eq(new BigDecimal(double));
+}
+
+/**
  * Scale every element of a vector or matrix `tensor` by the scalar `scalar`,
  * multiplying each cell with `multiply` — the route's own product helper
  * (`mul`, `mulFactored` or `mulN`), so the cells follow the same
@@ -4610,6 +4644,24 @@ function scaleTensor(
   if (shape.length === 1) {
     const scaled = scaleMachineVector(ce, tensor, scalar);
     if (scaled !== undefined) return scaled;
+  }
+
+  // A cell of a packed tensor of numbers is a double (or a complex of two
+  // doubles). An element can be a big-number float with more digits than a
+  // double holds, and its packed cell keeps only about 16 of them: at
+  // precision 30, the cells would make `2·[0.123456789012345678901234567]`
+  // equal to `[0.24691357802469136]`. So each element of such a tensor is
+  // multiplied as it is, which is the scalar product of the interpreter:
+  // `[0.246913578024691357802469134]`. The test does not depend on the
+  // precision of the engine: a big-number float made at a higher precision
+  // keeps its digits when the engine is later set to machine precision, and
+  // the interpreter multiplies those digits.
+  if (shape.length <= 2 && holdsWideBigFloat(tensor)) {
+    const scaleElements = (x: Expression): Expression =>
+      isFunction(x, 'List')
+        ? ce.function('List', x.ops.map(scaleElements))
+        : multiply(scalar, x);
+    return scaleElements(tensor);
   }
 
   // Pack once for the whole scaling. A pack failure leaves the scaling inert.

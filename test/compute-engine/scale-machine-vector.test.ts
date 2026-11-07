@@ -115,19 +115,22 @@ describe('The general route is kept where the doubles would differ', () => {
     }
   });
 
-  test('an element made at a higher precision is read as its double, as before', () => {
-    // The cell products read a numeric vector from the packed tensor, which
-    // holds doubles, so the digits of such an element never reached the
-    // product: `3 · [N(1/3), 1]` was `[1, 3]` before the doubles were
-    // multiplied directly, and it still is. The first element is the float
-    // `1.0`, the second the exact `3`.
+  test('an element made at a higher precision keeps its digits', () => {
+    // A big-number float made at a higher precision keeps its digits when
+    // the engine is set to machine precision. Its product with a scalar is
+    // the scalar product of the interpreter, which multiplies those digits:
+    // `3 · N(1/3)` is `0.9999999999999999999999999`, where the doubles of a
+    // packed tensor would give the float `1.0`. The second element is the
+    // exact `3`.
     const ce = new ComputeEngine();
     ce.precision = 25;
     const third = ce.box(['Divide', 1, 3]).N();
     ce.precision = 'machine';
     const vector = ce.function('List', [third, ce.number(1)]);
     const r = ce.function('Multiply', [ce.number(3), vector]).evaluate();
-    expect(r.json).toEqual(['List', { num: '1.0' }, 3]);
+    const scalar = ce.function('Multiply', [ce.number(3), third]).evaluate();
+    expect(scalar.json).toEqual({ num: '0.9999999999999999999999999' });
+    expect(r.json).toEqual(['List', scalar.json, 3]);
   });
 
   test('an integer product past the safe range is not rounded', () => {
