@@ -8,6 +8,7 @@
  *   node scripts/issues.mjs board                 the board's list
  *   node scripts/issues.mjs backlog               the agents' list
  *   node scripts/issues.mjs in-progress           owner, start date and days
+ *   node scripts/issues.mjs show <id>             prints one issue file
  *   node scripts/issues.mjs release <version>     the items of a release (exit 1 while one is open)
  *   node scripts/issues.mjs set <id> <field> <v>  changes one header field (`today` is a date value)
  *   node scripts/issues.mjs flag <id> +f | -f     adds or removes one flag
@@ -100,6 +101,7 @@ const KNOWN = [
   'reviewed',
   'fixed-in',
   'close-reason',
+  'ask',
 ];
 const ENUMS = {
   state: STATES,
@@ -171,7 +173,7 @@ function compareVersions(a, b) {
 function usage(msg) {
   if (msg) console.error(`issues: ${msg}`);
   console.log(
-    'usage: node scripts/issues.mjs lint | board | backlog | in-progress | release <version> | set <id> <field> <value> | flag <id> +f|-f | start <id> <owner> | new | close <id> <reason…> | close --all   [--dir <path>] [--today <date>] [--json]'
+    'usage: node scripts/issues.mjs lint | board | backlog | in-progress | show <id> | release <version> | set <id> <field> <value> | flag <id> +f|-f | start <id> <owner> | new | close <id> <reason…> | close --all   [--dir <path>] [--today <date>] [--json]'
   );
   process.exit(msg ? 1 : 0);
 }
@@ -347,6 +349,14 @@ function loadAll() {
       );
     if (f.state === 'close' && !f['close-reason'])
       errors.push('`close` needs `close-reason`');
+    if (
+      (flags.includes('needs-review') ||
+        ['needs-decision', 'needs-design'].includes(f.state)) &&
+      !f.ask
+    )
+      errors.push(
+        '`ask` is required on a needs-review, needs-decision or needs-design item: one sentence that says what the board must do'
+      );
     if (f.priority === 'P0' && !flags.includes('needs-review') && !f.confirmed)
       errors.push(
         'a P0 needs `needs-review` (proposed) or `confirmed` (set by the board)'
@@ -465,20 +475,25 @@ function roadmapMax() {
 const HEADER =
   '| id | P | state | size | source | flags | opened | what the user sees |\n| --- | --- | --- | --- | --- | --- | --- | --- |';
 
-function row(i, extra = '') {
+function row(i, extra = '', withAsk = false) {
   const f = i.fields;
   const flags = (f.flags ?? []).join(',');
-  return `| ${f.id} | ${f.priority} | ${f.state} | ${f.size} | ${f.source}${f['source-ref'] ? ` (${f['source-ref']})` : ''} | ${flags} | ${f.opened} | ${i.title}${extra ? ` **${extra}**` : ''} |`;
+  const ask = withAsk ? ` ${f.ask ?? '(no ask line)'} |` : '';
+  return `| ${f.id} | ${f.priority} | ${f.state} | ${f.size} | ${f.source}${f['source-ref'] ? ` (${f['source-ref']})` : ''} | ${flags} | ${f.opened} | ${i.title}${extra ? ` **${extra}**` : ''} |${ask}`;
 }
 
-function printList(title, items) {
+function printList(title, items, withAsk = false) {
   console.log(`\n## ${title} (${items.length})\n`);
   if (items.length === 0) {
     console.log('none');
     return;
   }
-  console.log(HEADER);
-  for (const [i, extra] of items) console.log(row(i, extra));
+  console.log(
+    withAsk
+      ? `${HEADER.split('\n')[0]} what the board must do |\n${HEADER.split('\n')[1]} --- |`
+      : HEADER
+  );
+  for (const [i, extra] of items) console.log(row(i, extra, withAsk));
 }
 
 function asJson(sections) {
@@ -612,15 +627,15 @@ function board(all) {
     return;
   }
   console.log(`# Board list, ${TODAY}`);
-  printList('1. P0, proposed or confirmed', p0);
-  printList('2. Needs review', review);
+  printList('1. P0, proposed or confirmed', p0, true);
+  printList('2. Needs review', review, true);
   printList('3. New since the last review (no `reviewed` date)', fresh);
   printList(
     `4. Tycho issues with no CE answer after ${ANSWER_DAYS} day`,
     unanswered
   );
-  printList('5a. Needs a decision', decision);
-  printList('5b. Needs a design', design);
+  printList('5a. Needs a decision', decision, true);
+  printList('5b. Needs a design', design, true);
   printList(
     `6. In progress for ${IN_PROGRESS_DAYS} days or more with no commit and no update`,
     stalled
@@ -983,6 +998,11 @@ switch (command) {
   case 'backlog':
     backlog(loadAll());
     break;
+  case 'show': {
+    if (args.length !== 1) usage('show <id>');
+    process.stdout.write(fs.readFileSync(fileOf(args[0]), 'utf8'));
+    break;
+  }
   case 'in-progress':
     inProgress(loadAll());
     break;

@@ -94,6 +94,7 @@ reviewed:                   # the date the board last looked at it
 confirmed:                  # a P0 only: the date the board confirmed it
 fixed-in:                   # `fixed` only: the commit or the release
 close-reason:               # `close` only: why the board did not fix it
+ask:                        # needs-review, needs-decision, needs-design: one sentence, what the board must do
 ---
 A plot row with a sum to 10^12 freezes the page on the interval target.
 
@@ -126,6 +127,13 @@ Rules for the body:
   route. The `## CE answer` section holds CE's replies, newest last, each as
   `CE (<date>): …`.
 - A change by hand to the header or the body also sets `updated` to the date.
+- An item that asks something of the board (`needs-review`, `needs-decision`,
+  `needs-design`) has an `ask` line: one sentence, at most about 30 words, that
+  says what the board must do and names the recommended answer, for example
+  "Confirm P2, or lower to P3 because a workaround exists" or "Choose (a) keep
+  the documented rule (recommended) or (b) fold the integral". The board list
+  prints it next to the item, so the review needs no reading of the body. The
+  session that sets the flag or the state writes the line.
 
 `node scripts/issues.mjs lint` fails on a missing field, an unknown value, a
 date that does not exist, a body over the cap, an id that does not match the
@@ -335,6 +343,7 @@ has no dependency.
 | `board`                      | the board's list, in the order above                                                                                           |
 | `backlog`                    | the agents' list; only the P0 while a confirmed P0 is open                                                                     |
 | `in-progress`                | owner, start date and days for each item in progress                                                                           |
+| `show <id>`                  | prints one issue file                                                                                                          |
 | `release <version>`          | the items of the release, the items carried over from earlier versions, and whether it can ship                                |
 | `set <id> <field> <value>`   | changes one header field (a date field takes `today`) and writes `updated`; it refuses an unknown value, an empty required field, `state: close` without `close-reason`, and `in-progress` |
 | `flag <id> +name` / `-name`  | adds or removes one flag                                                                                                       |
