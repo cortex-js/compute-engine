@@ -2,6 +2,13 @@
 
 ### Resolved Issues
 
+- **The type of a `Scan` over a list with absent elements includes
+  `missing`.** With `xs = Map(x ↦ If(x > 1, Missing, x), [1, 2, 3])`,
+  `Scan(xs, Add)` gives `[1, Missing, Missing]`, but it was typed
+  `vector<integer^3>`. It is now typed `list<integer | missing^3>`, with or
+  without an initial value and with a callback. Types computed from the
+  result change with it: `At(Scan(xs, Add), 2) + 1` is typed
+  `integer | missing`, not `integer`.
 - **The compile option `iterationBudget` limits a `Sum` and a `Product` on the
   `interval-js` target.** With `iterationBudget: 1e6`,
   `Sum(i, Limits(i, 1, 1e12))` compiled to `interval-js` ran every pass, where

@@ -390,6 +390,57 @@ describe('an all-numeric absence gives `Missing`', () => {
     ).toBe('number');
   });
 
+  test('a running fold keeps the absent cells in its element type', () => {
+    // `xs` is `[1, Missing, Missing]`, typed `list<integer | missing>`. The
+    // `missing` arm of its cells was removed before the type handler of
+    // `Scan` read the source, so `Scan(xs, Add)` was typed
+    // `vector<integer^3>` while its value is `[1, Missing, Missing]`.
+    const ce = new ComputeEngine();
+    const xs = [
+      'Map',
+      ['Function', ['If', ['Greater', 'x', 1], 'Missing', 'x'], 'x'],
+      ['List', 1, 2, 3],
+    ];
+    expect(ce.box(xs as any).type.toString()).toBe(
+      'list<integer | missing^3>'
+    );
+    for (const [json, value] of [
+      [['Scan', xs, 'Add'], '[1,"Missing","Missing"]'],
+      [['Scan', xs, 'Add', 0], '[1,"Missing","Missing"]'],
+      [['Scan', xs, 'Max'], '[1,"Missing","Missing"]'],
+      [
+        ['Scan', xs, ['Function', ['Add', 'a', 'b'], 'a', 'b'], 0],
+        '[1,"Missing","Missing"]',
+      ],
+      // A callback that returns the cell itself returns the absent cell.
+      [
+        [
+          'Scan',
+          ['List', 'Missing', 2, 3],
+          ['Function', 'b', 'a', 'b'],
+          0,
+        ],
+        '["Missing",2,3]',
+      ],
+    ] as const) {
+      const e = ce.box(json as any);
+      const v = e.evaluate();
+      expect(v.toString()).toBe(value);
+      expect(e.type.toString()).toMatch(/missing/);
+      // `Scan` is lazy: its value is a `Scan` view typed by the same handler
+      // as `e`. A list literal of its elements is typed from the elements.
+      const literal = ce.function('List', [...v.each()]);
+      expect(literal.type.matches(e.type)).toBe(true);
+    }
+    expect(ce.box(['Scan', xs, 'Add'] as any).type.toString()).toBe(
+      'list<integer | missing^3>'
+    );
+    // A source with no absent cell keeps its element type.
+    expect(
+      ce.box(['Scan', ['List', 1, 2, 3], 'Add']).type.toString()
+    ).toBe('vector<integer^3>');
+  });
+
   test('a numeric piecewise with no default arm', () => {
     // `g(t) = 0.5` when `t < 1`, absent otherwise: `g(3)` is `Missing`, and
     // an operator over it gives `Missing`.

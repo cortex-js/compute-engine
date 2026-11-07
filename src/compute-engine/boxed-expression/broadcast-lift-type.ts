@@ -764,13 +764,20 @@ const ABSENT_CELLS_PASS_THROUGH: ReadonlySet<string> = new Set([
  * (`Reduce([Missing], Max)` is `Missing`), so its handler must see the
  * `missing` arm of the cells to put it in the result type. The handler also
  * does the numeric widening that the absorption of `absorbOperandAbsence`
- * does for the other operands. `Any` and `All` apply a predicate to each
+ * does for the other operands. `Scan` keeps each running value as an
+ * element of its result, and a running value computed with an absent cell
+ * is `Missing`, so its handler reads the `missing` arm of the cells to put
+ * it in the element type: `Scan([1, Missing, 3], Add)` is
+ * `[1, Missing, Missing]`, typed `list<integer | missing>`; with the arm
+ * removed, the result was typed `vector<integer^3>`, a type that does not
+ * hold that value. `Any` and `All` apply a predicate to each
  * cell and answer `Missing` when an absent cell (or an absent answer of the
  * predicate) leaves the result undecided, so their handler reads the
  * `missing` arm of the cells and types the result `boolean | missing`.
  */
 const ABSENT_CELLS_READ_BY_HANDLER: ReadonlySet<string> = new Set([
   'Reduce',
+  'Scan',
   'Any',
   'All',
 ]);

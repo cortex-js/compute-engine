@@ -7214,10 +7214,30 @@ function foldResultTypeD(
   const rawElt = coll ? collectionElementType(coll.type) : undefined;
   const elt = rawElt === undefined ? undefined : stripMissingFromType(rawElt);
   const cellAbsent = rawElt !== undefined && typeContainsMissing(rawElt);
-  // A fold that computes with an absent cell gives `NaN`, so a numeric
-  // result widens to `number`, as for any operator that propagates absence.
-  const absorb = (t: Type | undefined): Type | undefined =>
-    t !== undefined && cellAbsent && isSubtype(t, 'number') ? 'number' : t;
+  // A fold that computes with an absent cell gives `Missing`, as any
+  // operator over `Missing` does (`docs/ERROR-MODEL.md`, "`Missing` is a
+  // result only"): `Reduce([1, Missing], Add, 0)` is `Missing`.
+  // - The result of `Reduce` is one value, and the marker is implicit in
+  //   its type (item 5 of that rule), so a seeded fold gets no `missing`
+  //   arm. A numeric result still widens to `number`, the type of the rule
+  //   before it, when an absent cell gave `NaN`;
+  //   `tuple-argument-binding.test.ts` holds this type. A fold with no
+  //   initial value gets the arm from its first element (`withFirst`
+  //   below).
+  // - `Scan` (`scan`) keeps each running value as an element of the list
+  //   it makes, and a constructed value that holds the marker is inferred
+  //   with a `missing` arm, as `Map` gives one. So each element type gains
+  //   the arm, with no widening: `Scan([1, Missing, 3], Add)` is
+  //   `[1, Missing, Missing]`, typed `list<integer | missing>`. A callback
+  //   typed from its parameters does not see the absent cell, so its result
+  //   gains the arm too: `(a, b) ↦ b` returns the absent cell itself. A
+  //   result of unknown type (`unknown`, `any`) already admits it.
+  const absorb = (t: Type | undefined): Type | undefined => {
+    if (t === undefined || !cellAbsent) return t;
+    if (!scan) return isSubtype(t, 'number') ? 'number' : t;
+    if (t === 'unknown' || t === 'any') return t;
+    return reduceType({ kind: 'union', types: [t, 'missing'] });
+  };
   // With no initial value, the result can be the first element itself,
   // unchanged: the result type admits the element type too. When the
   // element type is already a subtype of the result type, this adds

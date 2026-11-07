@@ -122,12 +122,13 @@ const ROWS: Row[] = [
     name: 'Scan',
     json: (s) => ['Scan', s, SUM, 0],
     latex: '\\operatorname{Scan}(%, (a, x) \\mapsto a + x, 0)',
-    // Over the tuple, the result type has a `missing` arm, as a non-tuple
-    // result over a tuple with an absent slot has. The list control has a
+    // The running value computed with the absent slot is `Missing`, and it
+    // is an element of the result, so the element type has a `missing` arm,
+    // over the tuple and over the list control. The list control has a
     // value of two elements, so its type has a length.
-    absentSlot: ['list<number> | missing', '[1,"Missing"]'],
+    absentSlot: ['list<missing | number>', '[1,"Missing"]'],
     values: 'list<number>',
-    list: 'vector<2>',
+    list: 'list<missing | number^2>',
   },
   {
     name: 'TakeWhile',
