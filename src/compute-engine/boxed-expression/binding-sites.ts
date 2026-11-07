@@ -767,28 +767,70 @@ export function binderBoundAt(
 }
 
 /**
- * Whether the symbol of a `Limits` or `Element` operand of `expr` is bound by
- * `expr` when the clause ordering of its binding sites is not available (a
- * raw node, which has no operator definition, or a node whose sites select
- * no clause). This is the case only when the operator definition found by
- * the NAME of the operator declares binding sites: `Sum`, `Product`,
- * `Integrate`, the quantifiers. A set-builder `Set(Element(n, S),
- * Condition(n > 1))`, `{n ∈ S | n > 1}`, binds the symbol of its `Element`
- * operand too. A node of any other operator does not bind the symbol of
- * such an operand: in `x ∈ ℤ ∧ x > 0`, `If(x ∈ ℤ, x + 1, 0)`,
- * `Boole(x ∈ ℤ)` or the tuple `(m, n ∈ S)`, the `x` (`n`) is the name of
- * the enclosing scope.
+ * The names that the set-builder `expr` binds (`names`), and the paths of
+ * the domains of their memberships (`domains`), or `undefined` when `expr`
+ * is not a set-builder. A set-builder is a `Set` of two operands, a body and
+ * a specification. The names are bound in both operands, except in the
+ * domains: the evaluator reads the domain `S` of `Element(v, S)` in the
+ * enclosing scope, before it gives `v` the values of `S`, so in
+ * `{x² | x ∈ 1..x}` the `x` of the upper bound `x` is free. A path is
+ * relative to the operands of `expr` (`[1, 1]` is the domain of the
+ * specification `Element(v, S)`), as a `BindingSite` path is.
+ *
+ * - `Set(body, Element(v, S, …))` binds `v` when the body reads `v`:
+ *   `{x² | x ∈ ℤ}` in the spelling of the big operators. When the body does
+ *   not read `v`, the node is the literal set of two elements (`{y, x ∈ S}`)
+ *   and binds nothing. This is the rule of the evaluator
+ *   (`parseSetComprehension()`, `library/collections.ts`).
+ * - `Set(body, Condition(c))` uses the rule of the LaTeX parser
+ *   (`setBuilder()`, `latex-syntax/dictionary/definitions-sets.ts`). The
+ *   variable is the body when the body is a symbol (`{x | x > 0}`), or the
+ *   symbol `v` of a body `Element(v, S)` (`{x ∈ ℤ | x > 0}`). Otherwise the
+ *   variables are the symbols `v` of the memberships `Element(v, S)` of `c`,
+ *   at its top level or in a conjunction, that the body reads:
+ *   `{x + y | x ∈ ℤ, y ∈ ℤ}` binds `x` and `y`, and in `{2k | k ∈ ℤ,
+ *   a ∈ S}` the `a` stays free.
  *
  * The free-variable walk (`getReferences()`, `abstract-boxed-expression.ts`)
  * and `subs()` (`subsBinderView()`, `boxed-function.ts`) both read the bound
  * names with this function, so that `subs()` replaces exactly the
- * occurrences the walk reports as free.
+ * occurrences that the walk reports as free.
  */
-export function bindsClauseSymbols(expr: Expression): boolean {
-  if (!isFunction(expr)) return false;
-  if (expr.operator === 'Set')
-    return expr.ops.some((op) => isFunction(op, 'Condition'));
-  return bindingSiteSelectorOf(expr) !== undefined;
+export function setBuilderVariables(
+  expr: Expression
+): { names: string[]; domains: number[][] } | undefined {
+  if (!isFunction(expr, 'Set') || expr.nops !== 2) return undefined;
+  const [body, spec] = expr.ops;
+  const name = (x: Expression | undefined): string | undefined =>
+    isSymbol(x) && x.symbol !== 'Nothing' ? x.symbol : undefined;
+  if (isFunction(spec, 'Element')) {
+    const v = name(spec.op1);
+    return v !== undefined && body.has(v)
+      ? { names: [v], domains: [[1, 1]] }
+      : undefined;
+  }
+  if (!isFunction(spec, 'Condition')) return undefined;
+  // With a body `Element(v, S)`, the condition is a filter that reads each
+  // element: a membership in it is not a domain.
+  if (isFunction(body, 'Element') && name(body.op1) !== undefined)
+    return { names: [name(body.op1)!], domains: [[0, 1]] };
+  // A symbol body is the variable, and the domain of its memberships in the
+  // condition reads the enclosing scope (`{x | x ∈ 1..x}`), as for another
+  // body. A symbol body reads no other name, so no other membership adds a
+  // variable.
+  const names: string[] = name(body) === undefined ? [] : [name(body)!];
+  const domains: number[][] = [];
+  const memberships = (c: Expression | undefined, path: number[]): void => {
+    if (isFunction(c, 'Element')) {
+      const v = name(c.op1);
+      if (v === undefined || !body.has(v)) return;
+      if (!names.includes(v)) names.push(v);
+      domains.push([...path, 1]);
+    } else if (isFunction(c, 'And'))
+      c.ops.forEach((op, k) => memberships(op, [...path, k]));
+  };
+  memberships(spec.op1, [1, 0]);
+  return { names, domains };
 }
 
 /**
@@ -1184,13 +1226,13 @@ export function ownIndexClause(
 }
 
 /**
- * The binding sites of a node of an operator of `OWN_INDEX_OUTSIDE_BINDERS`
- * that has no operator definition (a raw `Sum`, `Product`, `Integrate` or
- * `NDSolveFunction`), read by the selector of the definition that the NAME of
- * the operator has, in the `'pre'` phase (`declaredBinders()`). `undefined`
- * for a node that has an operator definition (a canonical or structural
- * node: its own sites apply), for a node of any other operator, and when the
- * sites name no clause-local index.
+ * The binding sites of a node that has no operator definition (a raw `Sum`,
+ * `Product`, `Integrate`, `NDSolveFunction`, `Loop`, quantifier, …), read by
+ * the selector of the definition that the NAME of the operator has, in the
+ * `'pre'` phase (`declaredBinders()`). `undefined` for a node that has an
+ * operator definition (a canonical or structural node: its own sites
+ * apply), for a node of an operator whose definition declares no binding
+ * sites, and when the sites name no clause-local index.
  *
  * The `'pre'` selector reads every spelling of a clause of the raw tree
  * (`Limits`, `Element`, `Tuple`, a bare symbol, `Hold`) at the operand
@@ -1199,19 +1241,20 @@ export function ownIndexClause(
  * read as a clause, and the bare variable of `NDSolveFunction` is not a
  * clause. The free-variable walk and `subs()` then read the raw node with
  * the scopes of the canonical form: an index is bound from its own clause
- * onward and in the body, and the bounds of a `Limits` clause (the
+ * onward and in the body, and for an operator of
+ * `OWN_INDEX_OUTSIDE_BINDERS`, the bounds of a `Limits` clause (the
  * collection of an `Element` clause) read the enclosing binding of the index
  * (`ownIndexClause()`). In the raw `Sum(x + 1, Limits(x, 1, x + 1))`, the
- * `x` of the upper bound is free, as in the canonical form.
+ * `x` of the upper bound is free, as in the canonical form. The quantified
+ * variable of a quantifier is its first operand, a bare symbol or the
+ * symbol of an `Element` clause: the raw `ForAll(x, x > y)` binds `x`, and
+ * the raw `Exists(y < x, Element(x, S))` binds nothing, because its first
+ * operand is not a clause.
  */
 export function rawClauseOrdering(
   expr: Expression
 ): DeclaredBinders | undefined {
-  if (
-    !isFunction(expr) ||
-    expr.operatorDefinition !== undefined ||
-    !OWN_INDEX_OUTSIDE_BINDERS.has(expr.operator)
-  )
+  if (!isFunction(expr) || expr.operatorDefinition !== undefined)
     return undefined;
   const binders = declaredBinders(expr, 'pre');
   return binders === undefined || binders.clauseLocal.size === 0
@@ -1478,12 +1521,24 @@ export function symbolAtSite(
   ops: ReadonlyArray<Expression>,
   path: readonly number[]
 ): (Expression & { symbol: string }) | undefined {
+  const node = nodeAtPath(ops, path);
+  return isSymbol(node) ? node : undefined;
+}
+
+/**
+ * The node that `path` points at, or `undefined` if the path does not lead
+ * to one. `path` is relative to an operand ARRAY, as in `symbolAtSite()`.
+ */
+export function nodeAtPath(
+  ops: ReadonlyArray<Expression>,
+  path: readonly number[]
+): Expression | undefined {
   let node: Expression | undefined = ops[path[0]];
   for (let i = 1; i < path.length; i++) {
     if (!isFunction(node)) return undefined;
     node = node.ops[path[i]];
   }
-  return isSymbol(node) ? node : undefined;
+  return node;
 }
 
 /**

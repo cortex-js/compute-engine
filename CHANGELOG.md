@@ -20,6 +20,30 @@
 
 ### Resolved Issues
 
+- **`subs()` no longer replaces the variable of a set-builder or of a
+  quantifier, and `unknowns` no longer lists it.** The variable of
+  `\{x^2 \mid x \in S\}` was in `unknowns` (`["S", "x"]`), and `subs({x: 3})`
+  gave `["Set", 9, ["Condition", ["Element", 3, "S"]]]`. Now `unknowns` is
+  `["S"]` and `subs({x: 3})` keeps the set as it is. The same applies to
+  `\{x \mid x > 0\}`, to `\{x + y \mid x \in S, y \in S\}`, and to
+  `["Set", ["Square", "x"], ["Element", "x", "S"]]`. The domain of the
+  variable still reads the enclosing `x`: in
+  `["Set", ["Square", "x"], ["Element", "x", ["Range", 1, "x"]]]`, `x` is in
+  `unknowns`, and `subs({x: 3})` gives the set of the squares of `1..3`. A
+  non-canonical `["ForAll", "x", ["Greater", "x", "y"]]` (`{form: "raw"}`)
+  now binds `x`, as the canonical form does. In
+  `["Exists", ["Less", "y", "x"], ["Element", "x", "S"]]`, the first operand
+  is not a variable, so `x` is now in `unknowns`, as `evaluate()` reads it.
+
+- **`subs()` no longer replaces a local of a `Block` that a destructuring
+  assignment declares.** In
+  `["Block", ["Assign", ["Tuple", "a", "b"], ["Tuple", 1, 2]], ["Add", "a", "b"]]`,
+  `unknowns` was already `[]`, but `subs({a: 5})` replaced each `a`, and the
+  result evaluated to an `incompatible-type` error. It now keeps the block as
+  it is, which evaluates to `3`. The same applies to a statement wrapped in
+  `Typed`: `["Block", ["Typed", ["Assign", "z", 3], "'integer'"], "z"]` with
+  `z` replaced by `9` is now unchanged.
+
 - **`simplify()` cancels the Gauss hypergeometric terms of a definite integral
   of a rational function.** The definite integral
   `∫_{1/2}^{2} (1+x²)/(x²+x⁹) dx` with the Rubi rules gives

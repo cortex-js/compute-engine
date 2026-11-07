@@ -260,14 +260,15 @@ import {
   ownIndexClauseAt,
   mapOwnIndexClause,
   binderBoundAt,
-  bindsClauseSymbols,
   bindsStatementTargets,
   implicitIntegralVariables,
   flatBoundIndexAt,
   integralPointVariables,
   rawClauseOrdering,
+  setBuilderVariables,
   type DeclaredBinders,
 } from './binding-sites.js';
+import { statementDeclaredNames } from './tuple-pattern.js';
 import {
   armHasValueParam,
   exceedsSurplusArity,
@@ -3071,12 +3072,54 @@ export class BoxedFunction
         scope: scopeForRebuild(x._localScope, this.engine, 'Function', fnOps),
       });
     };
+    // The nodes at `paths` (relative to the operands of `x`) take the
+    // replacements `outer`, every other part of `x` takes `inner`: the
+    // domains of the memberships of a set-builder read the enclosing scope
+    // (`setBuilderVariables()`, `binding-sites.ts`), so in
+    // `{x² | x ∈ 1..x}` with `x` replaced by `3`, only the upper bound
+    // becomes `3`. A node on a path is rebuilt in its own form, raw when the
+    // caller asks for a raw result.
+    const subsWithOuterPaths = (
+      x: Expression,
+      paths: readonly (readonly number[])[],
+      inner: Substitution,
+      outer: Substitution
+    ): Expression => {
+      if (paths.some((p) => p.length === 0)) return subsOperand(x, outer);
+      if (!isFunction(x)) return subsOperand(x, inner);
+      const xs = x.ops.map((o, j) => {
+        const below = paths.filter((p) => p[0] === j).map((p) => p.slice(1));
+        return below.length === 0
+          ? subsOperand(o, inner)
+          : subsWithOuterPaths(o, below, inner, outer);
+      });
+      if (xs.every((o, j) => o === x.ops[j])) return x;
+      // As `mapOwnIndexClause()` rebuilds a clause: a canonical node is not
+      // canonicalized again outside the scope of the `Set`.
+      if (!structuralForm && options!.canonical === false)
+        return this.engine.function(x.operator, xs, { form: 'raw' });
+      return x.isCanonical
+        ? this.engine._fn(x.operator, xs)
+        : this.engine.function(x.operator, xs, {
+            form: x.isStructural ? 'structural' : 'raw',
+          });
+    };
     const ops =
       binderView === undefined ||
       !binderView.names.some((n) => Object.hasOwn(sub, n))
         ? this._ops.map((x) => subsAt(x, sub))
         : this._ops.map((x, i) => {
             const here = binderView.namesIn(i);
+            const outer = binderView.outerPaths
+              .filter((p) => p[0] === i)
+              .map((p) => p.slice(1));
+            if (outer.length > 0)
+              return subsWithOuterPaths(
+                x,
+                outer,
+                withoutNames(sub, here),
+                sub
+              );
             const own = ownIndexClauseAt(this, i, binderView.binders);
             if (own === undefined) return subsAt(x, withoutNames(sub, here));
             // The clause's index stays bound in the clause, except in the
@@ -22754,15 +22797,15 @@ function withProvedAbsentDomains(
  *   `clauseLocal` sites of `declaredBinders(expr, 'post')`, `binding-sites.ts`:
  *   the index of a `Sum`, `Product`, `Comprehension` or `Loop`, the variable of
  *   a definite `Integrate`) binds each index from its own clause onward and
- *   in the body. A raw `Sum`, `Product`, `Integrate` or `NDSolveFunction`
- *   has no operator definition: its sites are read by the selector of the
+ *   in the body. A raw node (a raw `Sum`, `Loop` or quantifier) has no
+ *   operator definition: its sites are read by the selector of the
  *   definition that its name has (`rawClauseOrdering()`, `binding-sites.ts`),
- *   with the same rule;
- * - any other node of an operator whose definition, found by name, declares
- *   binding sites (`bindsClauseSymbols()`, `binding-sites.ts`: a raw
- *   quantifier `ForAll(p, Element(x, S))`) binds the symbol of each
- *   `Limits` or `Element` operand, in every operand. The `x` of
- *   `x ∈ ℤ ∧ x > 0`, of `If(x ∈ ℤ, x + 1, 0)` or of `Boole(x ∈ ℤ)` is free;
+ *   with the same rule. A `Limits` or `Element` operand at a position that
+ *   is not a clause binds nothing: the raw `ForAll(p, Element(x, S))` binds
+ *   `p`, and its `x` is free, as the `x` of `x ∈ ℤ ∧ x > 0`, of
+ *   `If(x ∈ ℤ, x + 1, 0)` or of `Boole(x ∈ ℤ)` is;
+ * - a set-builder binds its variables in both operands
+ *   (`setBuilderVariables()`, `binding-sites.ts`): `{x² | x ∈ ℤ}` binds `x`;
  * - a `Block` binds the target of each `Assign`, `Declare` and
  *   `DefineFunction` operand, in every operand (`bindsStatementTargets()`).
  *   The `z` of `If(z > 0, Assign(z, 5), 0)` is free.
@@ -22771,8 +22814,9 @@ function withProvedAbsentDomains(
  * (`integralPointVariables()`): the value of the integral is a function
  * of it, `a·x²/2`, as for `D` below.
  *
- * When the node has index variables, a `Function` literal operand (the
- * integrand of an `Integrate`) is read by its BODY, with the index variables
+ * When the node has index variables, or is an indefinite `Integrate`, a
+ * `Function` literal operand (the integrand of an `Integrate`) is read by its
+ * BODY, with the index variables
  * of the node as the bound names: the parameter list of such an integrand is
  * not reliable, so `Integrate(Function(a·x, x, a), Limits(x, 0, 1))` has the
  * free variable `a`, and `subs({a: 2})` replaces it.
@@ -22795,6 +22839,7 @@ function subsBinderView(expr: Expression):
       binders: DeclaredBinders | undefined;
       namesIn: (i: number) => readonly string[];
       readsFunctionBody: boolean;
+      outerPaths: readonly (readonly number[])[];
     }
   | undefined {
   if (!isFunction(expr)) return undefined;
@@ -22812,6 +22857,7 @@ function subsBinderView(expr: Expression):
           binders: undefined,
           namesIn: () => names,
           readsFunctionBody: false,
+          outerPaths: [],
         };
   }
 
@@ -22819,33 +22865,26 @@ function subsBinderView(expr: Expression):
     expr.operatorDefinition === undefined
       ? undefined
       : declaredBinders(expr, 'post');
-  // A raw `Sum`, `Product` or `Integrate` has no operator definition: its
-  // sites are read by the selector of the definition that its name has, so
-  // that the bounds of a clause read the enclosing binding of the index, as
-  // in the canonical form (`rawClauseOrdering()`).
+  // A raw node (a raw `Sum`, `Loop` or quantifier) has no operator
+  // definition: its sites are read by the selector of the definition that
+  // its name has, so that its indexes are those of the canonical form and
+  // the bounds of a clause read the enclosing binding of the index
+  // (`rawClauseOrdering()`).
   const sites =
     declared !== undefined && declared.clauseLocal.size > 0
       ? declared
       : rawClauseOrdering(expr);
   const indexVars = new Set<string>(sites?.clauseLocal);
-  const localVars = new Set<string>();
-  const clauseSymbols = sites === undefined && bindsClauseSymbols(expr);
-  const statementTargets = bindsStatementTargets(expr);
-  for (const op of expr.ops) {
-    if (!isFunction(op) || !isSymbol(op.op1)) continue;
-    if (
-      clauseSymbols &&
-      (op.operator === 'Limits' || op.operator === 'Element')
-    )
-      indexVars.add(op.op1.symbol);
-    if (
-      statementTargets &&
-      (op.operator === 'Assign' ||
-        op.operator === 'Declare' ||
-        op.operator === 'DefineFunction')
-    )
-      localVars.add(op.op1.symbol);
-  }
+  const builder = setBuilderVariables(expr);
+  const localVars = new Set<string>(builder?.names);
+  // The locals of a `Block` are the names that its statements declare, read
+  // as the free-variable walk reads them: each leaf of a destructuring
+  // target, and the target of a statement wrapped in `Typed`
+  // (`statementDeclaredNames()`). `Block(Assign(Tuple(a, b), …), a + b)`
+  // with `a` replaced keeps its `a`.
+  if (bindsStatementTargets(expr))
+    for (const op of expr.ops)
+      for (const n of statementDeclaredNames(op)) localVars.add(n);
   const indefinite = integralPointVariables(expr);
   // The variables of the definite limits of an `Integrate` that name no
   // variable are bound in the integrand (operand 0) only, as the
@@ -22854,7 +22893,9 @@ function subsBinderView(expr: Expression):
   const implicit = new Set(
     [...(implicitIntegralVariables(expr) ?? [])].filter(notWildcard)
   );
-  const readsFunctionBody = indexVars.size > 0;
+  // The integrand of an indefinite `Integrate` is read by its body too, as
+  // the free-variable walk reads it.
+  const readsFunctionBody = indexVars.size > 0 || indefinite !== undefined;
   const names = [...new Set([...indexVars, ...localVars, ...implicit])].filter(
     (n) =>
       notWildcard(n) &&
@@ -22875,6 +22916,9 @@ function subsBinderView(expr: Expression):
                 flatBoundIndexAt(expr, i, sites) !== n)))
       ),
     readsFunctionBody,
+    // The domains of the memberships of a set-builder read the enclosing
+    // scope, as the free-variable walk reads them (`setBuilderVariables()`).
+    outerPaths: builder?.domains ?? [],
   };
 }
 

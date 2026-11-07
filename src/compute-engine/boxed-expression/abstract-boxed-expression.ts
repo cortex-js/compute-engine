@@ -64,15 +64,16 @@ import {
 import { bindingInContext, withCallableBinding } from './binders.js';
 import {
   binderBoundAt,
-  bindsClauseSymbols,
   bindsStatementTargets,
   declaredBinders,
   implicitIntegralVariables,
   flatBoundIndexAt,
   integralPointVariables,
+  nodeAtPath,
   ownIndexClauseAt,
   rawClauseOrdering,
   scopeForRebuild,
+  setBuilderVariables,
   type DeclaredBinders,
 } from './binding-sites.js';
 import { extractIntervalBounds } from './inequality-bounds.js';
@@ -1903,35 +1904,28 @@ function isReferencedFunctionHead(expr: Expression): boolean {
 /**
  * The **index variables** this node binds, according to its operator
  * definition's binding-site selectors — the one place binder knowledge lives
- * (`binding-sites.ts`). `undefined` when this node declares none, and the
- * caller then falls back to the structural recognition below.
+ * (`binding-sites.ts`). `undefined` when this node declares none.
  *
  * The selectors read the RAW operand shapes — a bare symbol, `Tuple`,
  * `Element`, `Limits`, held or not — so a STRUCTURAL tree answers the same as
- * a canonical one. Before this, the hand-rolled recognition below knew only
- * the canonical `Limits`/`Element` spellings, and a structural
- * `["Sum", ["Power","n",2], ["Tuple","n",1,10]]` leaked its index `n` as a
- * free variable.
+ * a canonical one: a structural
+ * `["Sum", ["Power","n",2], ["Tuple","n",1,10]]` binds its index `n`.
  *
  * Only `clauseLocal` sites count — the *indexing-set* clauses (`Sum`,
- * `Product`, `Integrate`, the quantifiers, `Comprehension`, …), which is
- * exactly the class the structural recognition below covers. A binder whose
- * variable is a plain operand (`D`'s differentiation variable, `Series`'
- * expansion variable) is NOT an index: the variable survives into the result,
- * so it is deliberately reported as free (pinned by
+ * `Product`, `Integrate`, the quantifiers, `Comprehension`, …). A binder
+ * whose variable is a plain operand (`D`'s differentiation variable,
+ * `Series`' expansion variable) is NOT an index: the variable survives into
+ * the result, so it is deliberately reported as free (pinned by
  * `expression-properties.test.ts`, "D: differentiation variable remains
- * free"). This function is a spelling upgrade of the recognition below, not a
- * reclassification of which operators eliminate their variable.
+ * free").
  */
 function bindingSiteNames(
   expr: Expression & { ops: ReadonlyArray<Expression> }
 ): DeclaredBinders | undefined {
   // This function returns the sites of a BOUND node only. For a node with
   // no operator definition (`canonical: false`), the caller reads the sites
-  // of a `Sum`, `Product`, `Integrate` or `NDSolveFunction` with
-  // `rawClauseOrdering()`, which finds the selector by the operator name;
-  // only a node of another operator with no definition (a quantifier) falls
-  // back to recognizing an inner `Limits`/`Element` spelling.
+  // with `rawClauseOrdering()`, which finds the selector by the operator
+  // name. No other spelling of a clause is recognized.
   if (expr.operatorDefinition === undefined) return undefined;
   const binders = declaredBinders(expr, 'post');
   return binders === undefined || binders.clauseLocal.size === 0
@@ -2168,17 +2162,18 @@ function collectReferences(
   // Otherwise, collect the variables bound by this expression's structure.
   // This must NOT be gated on `isScoped`: `Integrate` is not scoped yet binds
   // its integration variable.
-  //   - index variables — Sum/Product/Integrate: the operator definition's
-  //     binding-site selectors answer this, on a canonical tree AND on a raw
-  //     or structural one (they read the raw operand spellings: a bare symbol,
-  //     `Tuple`, `Element`, `Limits`, held or not). A raw node of these
-  //     operators, which has no definition, reads the same selectors through
-  //     `rawClauseOrdering()`. Only a node of another operator that declares
-  //     no indexing-set site (a quantifier with no definition, or a
-  //     non-index binder) falls back to recognizing an inner
-  //     `Limits`/`Element` here, and only for an operator whose definition,
-  //     found by name, declares binding sites (`bindsClauseSymbols`):
-  //     `x ∈ ℤ ∧ x > 0` binds nothing.
+  //   - index variables — Sum/Product/Integrate, the quantifiers, `Loop`:
+  //     the operator definition's binding-site selectors answer this, on a
+  //     canonical tree AND on a raw or structural one (they read the raw
+  //     operand spellings: a bare symbol, `Tuple`, `Element`, `Limits`, held
+  //     or not). A raw node, which has no definition, reads the selectors of
+  //     the definition of its name through `rawClauseOrdering()`. An
+  //     `Element` or `Limits` operand at a position that is not a clause
+  //     binds nothing: the first operand of `Exists(y < x, Element(x, S))`
+  //     is not a clause, and the evaluator reads `Element(x, S)` as the
+  //     body, with `x` free. `x ∈ ℤ ∧ x > 0` binds nothing either.
+  //   - the variables of a set-builder (`setBuilderVariables()`): bound in
+  //     both operands of the `Set`, as a local of a `Block` is.
   //   - local variables — Block: inner `Assign`/`Declare` introduce locals.
   //     `Block` is `scoped: true` with no binding sites, so this stays a
   //     structural recognition, and it applies to a `Block` only
@@ -2186,11 +2181,11 @@ function collectReferences(
   //     free.
   // The variable of an INDEFINITE integral is not bound: the value of the
   // integral is a function of it (`integralPointVariables`).
-  // A raw `Sum`, `Product` or `Integrate` has no operator definition: its
-  // sites are read by the selector of the definition that its name has
-  // (`rawClauseOrdering()`, `binding-sites.ts`), so that the raw form has the
-  // same free variables as the canonical form: the `x` of the upper bound of
-  // `Sum(x + 1, Limits(x, 1, x + 1))` is free.
+  // A raw node (a raw `Sum`, `Loop` or quantifier) has no operator
+  // definition: its sites are read by the selector of the definition that
+  // its name has (`rawClauseOrdering()`, `binding-sites.ts`), so that the raw
+  // form has the same free variables as the canonical form: the `x` of the
+  // upper bound of `Sum(x + 1, Limits(x, 1, x + 1))` is free.
   const sites = bindingSiteNames(expr) ?? rawClauseOrdering(expr);
   const siteVars = sites?.clauseLocal;
   const indexVars = new Set<string>(siteVars);
@@ -2216,17 +2211,11 @@ function collectReferences(
     !indefinite?.has(name) &&
     (sites === undefined ||
       (binderBoundAt(sites, name, i) && flatOwner?.[i] !== name));
-  const clauseSymbols = siteVars === undefined && bindsClauseSymbols(expr);
   const statementTargets = bindsStatementTargets(expr);
-  const localVars = new Set<string>();
+  const builder = setBuilderVariables(expr);
+  const localVars = new Set<string>(builder?.names);
   for (const op of expr.ops) {
     if (!isFunction(op)) continue;
-    if (
-      clauseSymbols &&
-      (op.operator === 'Limits' || op.operator === 'Element') &&
-      isSymbol(op.op1)
-    )
-      indexVars.add(op.op1.symbol);
     // A `DefineFunction` statement (`f(x) = x + 1` in Epsil) introduces a
     // local too: the name it defines is bound by the block, not read from
     // the enclosing scope, so a program that defines `f` and then applies
@@ -2269,9 +2258,13 @@ function collectReferences(
     // referenced symbol as an integrand parameter (not just the integration
     // variable), so its parameter list is unreliable: recurse into the body
     // and rely on the index variables for binding. This keeps a free
-    // coefficient (e.g. `a` in `∫ a·sin(x) dx`) reported as free.
+    // coefficient (e.g. `a` in `∫ a·sin(x) dx`) reported as free. An
+    // indefinite `Integrate` (`Limits(Nothing, Nothing, Nothing)`) has no
+    // index variable, but its integrand is read the same way, so that its
+    // variable, which the literal lists as a parameter, stays free
+    // (`integralPointVariables()`).
     if (
-      indexVars.size > 0 &&
+      (indexVars.size > 0 || indefinite !== undefined) &&
       isFunction(op) &&
       op.operator === 'Function' &&
       op.ops.length > 0
@@ -2295,6 +2288,15 @@ function collectReferences(
         if (!(indexVars.has(s) && boundIn(s, i)) && !localVars.has(s))
           refFns.add(s);
     }
+  }
+
+  // The domain `S` of a membership `Element(v, S)` of a set-builder is read
+  // in the enclosing scope: the walk above left out its `v`, which this walk
+  // of the domain alone adds back. In `{x² | x ∈ 1..x}`, `x` is free.
+  for (const path of builder?.domains ?? []) {
+    const domain = nodeAtPath(ops, path);
+    if (domain !== undefined)
+      getReferences(domain, freeVars, refFns, memo, mode);
   }
 }
 
