@@ -20,6 +20,18 @@
 
 ### Resolved Issues
 
+- **The LaTeX of a function with a pair, a rest or a default parameter reads
+  back as the same function.** The LaTeX of
+  `["Function", ["Multiply", "x", "y"], ["Tuple", "x", "y"]]`, a function of
+  one pair, was `(x,y)\mapsto xy`, which parses as a function of two
+  parameters. It is now `\mathrm{Function}(xy, \mathrm{Tuple}(x, y))`. A rest
+  parameter was written `\mathrm{Spread}(x)\mapsto 2x` and a default value
+  `(x, k=2)\mapsto kx`, which did not parse as functions; they are now
+  `\mathrm{Function}(2x, \mathrm{Spread}(x))` and
+  `\mathrm{Function}(kx, x, \mathrm{Optional}(k, 2))`. `ce.parse()` reads
+  each of these texts back as the same function. A function with plain or
+  typed parameters keeps the `\mapsto` notation.
+
 - **The error of an operand of a sum or a product names that operand.** With
   `s = "a"`, the error of `["Multiply", ["Sin", "s"], ["Cos", "x"]]` had the
   frame `Multiply` argument 2, which is `Cos(x)`; it now has the frame

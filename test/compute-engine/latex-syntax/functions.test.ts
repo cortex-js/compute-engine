@@ -178,6 +178,91 @@ describe('Anonymous functions, multiple args', () => {
     ));
 });
 
+// A literal with a tuple pattern, a rest parameter or a default value has no
+// `\mapsto` notation that reads back as the same literal (`(x, y)\mapsto xy`
+// is a function of two parameters). It is written `\mathrm{Function}(…)` with
+// its MathJSON operands, and the parse of that text is the same literal.
+describe('Anonymous functions, parameters with no \\mapsto notation', () => {
+  const cases: [unknown, string][] = [
+    [
+      ['Function', ['Multiply', 'x', 'y'], ['Tuple', 'x', 'y']],
+      '\\mathrm{Function}(xy, \\mathrm{Tuple}(x, y))',
+    ],
+    [
+      ['Function', ['Add', 'a', 'b', 'c'], ['Tuple', ['Tuple', 'a', 'b'], 'c']],
+      '\\mathrm{Function}(a+b+c, \\mathrm{Tuple}(\\mathrm{Tuple}(a, b), c))',
+    ],
+    [
+      ['Function', 'b', ['Tuple', '_', 'b']],
+      '\\mathrm{Function}(b, \\mathrm{Tuple}(\\operatorname{\\_}, b))',
+    ],
+    [
+      ['Function', ['Multiply', 2, 'x'], ['Spread', 'x']],
+      '\\mathrm{Function}(2x, \\mathrm{Spread}(x))',
+    ],
+    [
+      ['Function', ['Multiply', 'k', 'x'], 'x', ['Optional', 'k', 2]],
+      '\\mathrm{Function}(kx, x, \\mathrm{Optional}(k, 2))',
+    ],
+    [
+      ['Function', ['Length', 's'], ['Optional', 's', "'abc'"]],
+      '\\mathrm{Function}(\\mathrm{Length}(s), \\mathrm{Optional}(s, \\text{abc}))',
+    ],
+    // A typed parameter keeps its type, also a type with no `\colon`
+    // notation.
+    [
+      [
+        'Function',
+        ['Add', 'a', ['Length', 'r']],
+        ['Typed', 'a', "'list<integer>'"],
+        ['Spread', 'r'],
+      ],
+      '\\mathrm{Function}(a+\\mathrm{Length}(r), \\mathrm{Typed}(a, \\text{list<integer>}), \\mathrm{Spread}(r))',
+    ],
+    // A body of several statements is a `Block` with its operands: the fenced
+    // form `\left(…; …\right)` would read back as a `Block` in a `Block`.
+    [
+      [
+        'Function',
+        ['Block', ['Assign', 'a', 'x'], ['Multiply', 'a', 'y']],
+        ['Tuple', 'x', 'y'],
+      ],
+      '\\mathrm{Function}(\\mathrm{Block}(\\mathrm{Assign}(a, x), ay), \\mathrm{Tuple}(x, y))',
+    ],
+    // An assigned function value keeps the type of its parameter: the
+    // shorthand `g(t)\coloneq t` would drop it.
+    [
+      [
+        'Function',
+        [
+          'Block',
+          ['Assign', 'g', ['Function', 't', ['Typed', 't', "'integer'"]]],
+          ['g', 'r'],
+        ],
+        ['Spread', 'r'],
+      ],
+      '\\mathrm{Function}(\\mathrm{Block}(\\mathrm{Assign}(g, (t\\colon integer)\\mapsto t), g(r)), \\mathrm{Spread}(r))',
+    ],
+  ];
+  test.each(cases)('%j', (json, latex) => {
+    const f = ce.box(json as Parameters<typeof ce.box>[0]);
+    expect(f.latex).toBe(latex);
+    expect(ce.parse(latex).isSame(f)).toBe(true);
+  });
+
+  test('the parsed pair literal applies to a pair', () => {
+    const f = ce.box(['Function', ['Multiply', 'x', 'y'], ['Tuple', 'x', 'y']]);
+    const g = ce.parse(f.latex);
+    expect(ce.box(['Apply', g, ['Tuple', 3, 4]]).evaluate().json).toBe(12);
+  });
+
+  test('a literal with plain parameters keeps the \\mapsto notation', () => {
+    expect(ce.box(['Function', ['Multiply', 'k', 'x'], 'x', 'k']).latex).toBe(
+      '(x, k)\\mapsto kx'
+    );
+  });
+});
+
 describe('Invalid', () => {
   test('Parens around arguments required', () =>
     expect(parse('x, y\\mapsto x + y')).toMatchInlineSnapshot(

@@ -2066,20 +2066,47 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       };
       const isTyped = (x: MathJsonExpression): boolean => typeText(x) !== null;
       const serializeParam = (x: MathJsonExpression): string => {
-        // A parameter with a default value (`["Optional", k, 2]`) is written
-        // `k = 2`, with the default as its own LaTeX. The parser does not
-        // read this notation back as a default yet: `(x, k = 2) \mapsto …`
-        // parses to an `Equal` in the parameter list.
-        if (operator(x) === 'Optional')
-          return joinLatex([
-            serializeParam(operand(x, 1) ?? 'Nothing'),
-            '=',
-            serializer.serialize(operand(x, 2) ?? 'Nothing'),
-          ]);
         if (operator(x) !== 'Typed') return serializer.serialize(x);
         const name = serializer.serialize(operand(x, 1) ?? 'Nothing');
         const type = typeText(x);
         return type === null ? name : joinLatex([name, '\\colon', type]);
+      };
+      // A tuple pattern parameter is a `Tuple`. The pretty MathJSON names a
+      // tuple of one, two or three elements `Single`, `Pair` or `Triple`
+      // (`serializeJsonFunction()`, `boxed-expression/serialize.ts`), and
+      // the serializer can receive that form.
+      const isTuplePattern = (x: MathJsonExpression): boolean =>
+        ['Tuple', 'Single', 'Pair', 'Triple'].includes(operator(x));
+      // A parameter operand written with its MathJSON operator name, which
+      // the parser reads back as the same operand: `\mathrm{Tuple}(x, y)`,
+      // `\mathrm{Spread}(r)`, `\mathrm{Optional}(k, 2)` and
+      // `\mathrm{Typed}(k, \text{integer})`. A tuple pattern needs the
+      // name: `(x, y)` reads back as a `Delimiter`, which is not a
+      // parameter, and `\mathrm{Pair}(x, y)` reads back as a `Pair`, which
+      // is not a pattern.
+      const serializeMathJsonParam = (x: MathJsonExpression): string => {
+        const h = operator(x);
+        const ops = operands(x);
+        let name: string;
+        let list: string[];
+        if (isTuplePattern(x) || h === 'Spread') {
+          // Each element of a pattern is a parameter form again (a nested
+          // pattern).
+          name = h === 'Spread' ? 'Spread' : 'Tuple';
+          list = ops.map(serializeMathJsonParam);
+        } else if (h === 'Optional' || h === 'Typed') {
+          // The first operand names the parameter (the `Typed` of a default
+          // value with a type); the second one is a value or a type, written
+          // as such.
+          name = h;
+          list = [
+            serializeMathJsonParam(ops[0] ?? 'Nothing'),
+            ...ops.slice(1).map((y) => serializer.serialize(y)),
+          ];
+        } else return serializer.serialize(x);
+        return (
+          `\\mathrm{${name}}` + serializer.wrapString(list.join(', '), 'normal')
+        );
       };
       if (args.length < 1) return '()\\mapsto()';
       // The canonical body of a function literal is a `Block`. A block of
@@ -2114,13 +2141,54 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         ]);
       }
 
-      // A single parameter is written without parentheses, unless it is
-      // annotated or has a default value.
+      // A literal with a tuple pattern, a rest parameter or a parameter with
+      // a default value has no `\mapsto` notation that the parser reads
+      // back: `(x, y)\mapsto xy` is a function of two parameters, not of one
+      // pair, and `\mathrm{Spread}(r)\mapsto…` and `(x, k = 2)\mapsto…` do
+      // not parse as functions. Such a literal is written with its MathJSON
+      // operands, `\mathrm{Function}(xy, \mathrm{Tuple}(x, y))`, which reads
+      // back as the same literal. Every parameter is then written in this
+      // form, so a `Typed` keeps its type also when that type has no
+      // `\colon` notation. A body of several statements is written
+      // `\mathrm{Block}(s_1, s_2)`: the fenced form `\left(s_1; s_2\right)`
+      // reads back as a `Delimiter`, and the `Function` canonical form
+      // puts that body in a second `Block`. An `Assign` statement is
+      // written `\mathrm{Assign}(k, v)`, as the `Block` serializer writes
+      // it: the shorthand of the `Assign` serializer, `g(t)\coloneq t` for
+      // a function value, drops the type of a typed parameter `t`.
+      const params = args.slice(1);
       if (
-        args.length === 2 &&
-        !isTyped(operand(expr, 2)!) &&
-        operator(operand(expr, 2)!) !== 'Optional'
+        params.some(
+          (p) =>
+            isTuplePattern(p) || ['Spread', 'Optional'].includes(operator(p))
+        )
       ) {
+        const bodyLatex =
+          operator(body) === 'Block'
+            ? '\\mathrm{Block}' +
+              serializer.wrapString(
+                operands(body)
+                  .map((x) =>
+                    operator(x) === 'Assign'
+                      ? serializer.serializeFunction(x)
+                      : serializer.serialize(x)
+                  )
+                  .join(', '),
+                'normal'
+              )
+            : serializer.serialize(body);
+        return (
+          '\\mathrm{Function}' +
+          serializer.wrapString(
+            [bodyLatex, ...params.map(serializeMathJsonParam)].join(', '),
+            'normal'
+          )
+        );
+      }
+
+      // A single parameter is written without parentheses, unless it is
+      // annotated.
+      if (args.length === 2 && !isTyped(operand(expr, 2)!)) {
         return joinLatex([
           serializer.serialize(operand(expr, 2)!),
           '\\mapsto',

@@ -1705,24 +1705,26 @@ describe('PARAMETER DEFAULT VALUES: LITERALS HELD BY VARIABLES', () => {
 describe('PARAMETER DEFAULT VALUES: LATEX OF A LITERAL', () => {
   const ce = new ComputeEngine();
 
-  test('a parameter with a default is written `k = 2`', () => {
+  test('a literal with a default is written with its MathJSON operands', () => {
+    // There is no `\mapsto` notation for a default value: the parser reads
+    // `(x, k=2)\mapsto kx` as a list that holds an equation. The literal is
+    // written `\mathrm{Function}(…)`, which reads back as the same literal.
     const f = ce.box(defaultedLiteral(2));
-    expect(f.latex).toBe('(x, k=2)\\mapsto kx');
-    expect(
-      ce.box([
-        'Function',
-        'k',
-        ['Optional', ['Typed', 'k', "'number'"], 2],
-      ]).latex
-    ).toBe('(k\\colon number=2)\\mapsto k');
+    expect(f.latex).toBe('\\mathrm{Function}(kx, x, \\mathrm{Optional}(k, 2))');
+    expect(ce.parse(f.latex).isSame(f)).toBe(true);
+    const typed = ce.box([
+      'Function',
+      'k',
+      ['Optional', ['Typed', 'k', "'number'"], 2],
+    ]);
+    expect(typed.latex).toBe(
+      '\\mathrm{Function}(k, \\mathrm{Optional}(\\mathrm{Typed}(k, \\text{number}), 2))'
+    );
+    expect(ce.parse(typed.latex).isSame(typed)).toBe(true);
     expect(f.toString()).toBe('(x, k = 2) => k * x');
   });
 
-  test('parsing the LaTeX back does not give the literal (not supported yet)', () => {
-    // The parser reads `k = 2` in a parameter list as an equation, and the
-    // `\mapsto` after a list that holds one is not a function literal. The
-    // LaTeX parse of a default is recorded for later in the design
-    // (`docs/plans/2026-10-31-parameter-default-values.md`, section 9).
+  test('the `\\mapsto` notation with `k = 2` is not a function literal', () => {
     expect(ce.parse('(x, k=2)\\mapsto kx').json).toEqual([
       'Sequence',
       ['Tuple', 'x', ['Equal', 'k', 2]],
