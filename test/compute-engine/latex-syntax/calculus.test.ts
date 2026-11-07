@@ -219,16 +219,12 @@ describe('INDEFINITE INTEGRAL', () => {
       '\\int (x dx) - 1',
       [
         'Subtract',
-        ['Integrate', ['Delimiter', ['InvisibleOperator', 'x']], 'x'],
+        ['Integrate', ['Delimiter', 'x'], 'x'],
         1,
       ],
       [
         'Add',
-        [
-          'Integrate',
-          ['Function', ['Block', 'x'], 'x'],
-          ['Limits', 'x', 'Nothing', 'Nothing'],
-        ],
+        ['Integrate', 'x', ['Limits', 'x', 'Nothing', 'Nothing']],
         -1,
       ],
     ],

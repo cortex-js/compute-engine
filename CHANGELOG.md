@@ -71,6 +71,11 @@
 
 ### Resolved Issues
 
+- **An integral whose differential is in the last factor of a product now has
+  the correct value.** `\int_1^2 2\frac{dx}{x}` gave `3`, because the `d` of
+  `dx` was read as the integration variable; it is now `2\ln(2)`, as
+  `\int_1^2 \frac{2\,dx}{x}` is. `\int 2\frac{dx}{x}` gave `d^2` and is now
+  `2\ln|x|`, and `\int_0^1 3(x\,dx)` is now `\frac{3}{2}`.
 - **Epsil: an error in one of two calls of the same function is underlined on
   the argument of the call that failed.** In `let v = Ln("a") + Ln(2)`, the
   run-time error underlined the whole sum and the static type error

@@ -356,6 +356,43 @@ function parseSubintegrand(
 
     if (args) {
       const [rest, indexes] = parseFinalDiffOperators(args, binderName);
+      if (indexes.length === 0 && args.length > 0) {
+        // The differential can be at the end of the last factor:
+        // `2\frac{dx}{x}` is `InvisibleOperator(2, Divide(...))` and
+        // `3(x\,dx)` is `InvisibleOperator(3, Delimiter(...))`. The last
+        // factor is searched as if it were the whole body, and the factors
+        // before it stay in the product.
+        const init = args.slice(0, -1);
+        const lastFactor = args[args.length - 1];
+        const [last, lastIndexes] = parseSubintegrand(lastFactor, binderName);
+        if (lastIndexes.length === 0) return [expr, []];
+        // Parentheses that hold only the differential after a symbol
+        // (`2f(dx)`) are not taken out: the symbol can be a function, and
+        // `f(dx)` its call. Taking them out would leave `2f`.
+        if (
+          last === null &&
+          operator(lastFactor) === 'Delimiter' &&
+          init.length > 0 &&
+          symbol(init[init.length - 1]) !== null
+        )
+          return [expr, []];
+        const factors = last === null ? init : [...init, last];
+        if (factors.length === 0) return [null, lastIndexes];
+        if (factors.length === 1) return [factors[0], lastIndexes];
+        // An integer and a fraction side by side are a mixed number
+        // (`2\frac{1}{3}` is 7/3), but `2\frac{dx}{3}` is the product 2/3:
+        // with the differential taken out, the fraction must stay a factor.
+        if (
+          h === 'InvisibleOperator' &&
+          factors.length === 2 &&
+          operator(factors[1]) === 'Divide'
+        )
+          return [['Multiply', ...factors], lastIndexes];
+        return [[h, ...factors], lastIndexes];
+      }
+      // A single factor before the differentials is not wrapped in a product:
+      // `f(x\,dx)` must keep the argument `x`, not `InvisibleOperator(x)`.
+      if (rest.length === 1) return [rest[0], indexes];
       if (rest.length > 0) return [[h, ...rest], indexes];
       return [null, indexes];
     }
@@ -382,14 +419,18 @@ function parseSubintegrand(
         binderName
       );
       if (indexes.length > 0) {
-        if (fn2) return [['Add', ...args.slice(0, -1), fn2], indexes];
+        // `null`, not falsiness: a literal `0` term is kept.
+        if (fn2 !== null)
+          return [['Add', ...args.slice(0, -1), fn2], indexes];
         if (args.length > 2) return [['Add', ...args.slice(0, -1)], indexes];
         if (args.length === 2) return [args[0], indexes];
       }
     }
   } else if (h === 'Negate') {
     const [fn2, indexes] = parseSubintegrand(op1, binderName);
-    if (indexes.length > 0) return [fn2 ? ['Negate', fn2] : null, indexes];
+    // `null`, not falsiness: `-(0\,dx)` is the integral of 0, not of 1.
+    if (indexes.length > 0)
+      return [fn2 !== null ? ['Negate', fn2] : null, indexes];
   } else if (h === 'Divide') {
     const [fn2, indexes] = parseSubintegrand(op1, binderName);
     if (indexes.length > 0)
@@ -408,8 +449,10 @@ function parseSubintegrand(
     if (args.length === 1) {
       //If it has a single argument, we'll check if it includes an index
       // e.g. \sin 2xdx
+      // An argument that is only the differential (`2\sin(dx)`) is not
+      // taken out: the function would be left with no argument.
       const [arg2, indexes] = parseSubintegrand(args[0], binderName);
-      if (indexes.length > 0)
+      if (indexes.length > 0 && arg2 !== null)
         return [[operator(expr), arg2] as MathJsonExpression, indexes];
     }
   }
