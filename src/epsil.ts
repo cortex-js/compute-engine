@@ -16,7 +16,11 @@ export { ComputeEngine } from './compute-engine.js';
 export { parseEpsil } from './epsil/parse-epsil.js';
 export { serializeEpsil } from './epsil/serialize-epsil.js';
 export { executeEpsil, executeEpsilAsync } from './epsil/execute-epsil.js';
-export { resolveLibraryNames } from './epsil/resolve-library-names.js';
+export {
+  binderSitesOf,
+  resolveLibraryNames,
+} from './epsil/resolve-library-names.js';
+export type { BinderSite } from './epsil/occurrences.js';
 export { checkEpsil } from './epsil/check-epsil.js';
 export type { CheckEpsilResult } from './epsil/check-epsil.js';
 export {

@@ -28,7 +28,16 @@ import { tokenize } from './lexer.js';
 // backtick-quoted verbatim form). Synthesized names never spell their span.
 //
 
-/** A variable a call binds, and the operands (by index) it is visible in. */
+/**
+ * A variable a call binds, and the operands it is visible in. `name` is the
+ * variable as written. `operands` is `'all'` when every operand of the call
+ * sees the variable, or the zero-based indices of the operands that see it.
+ * The head is not counted: index 0 is the first argument of the call, which
+ * is `node[1]` in the array form `["Sum", body, "k", 1, "n"]`. An
+ * occurrence of `name` in one of these operands is the call's variable, and
+ * an occurrence in another operand reads the name from outside the call.
+ * `binderSitesOf()` returns these sites.
+ */
 export type BinderSite = { name: string; operands: 'all' | readonly number[] };
 
 /** How one occurrence uses its symbol. */

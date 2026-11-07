@@ -194,6 +194,36 @@ const VARIABLE_GROUP_HEADS = new Set([
  * The variables a raw call to a library operator binds, and where each one
  * is visible.
  *
+ * `node` is a call node of the tree that `parseEpsil()` returns for
+ * `source`, before or after `resolveLibraryNames()`: the function reads the
+ * source offsets of the node to find a verbatim callee. The result is one
+ * `BinderSite` per bound variable, an empty array for a library operator
+ * that binds nothing in this call, and `undefined` for a node that is not a
+ * call of a library operator. A host uses it to tell which names in a call
+ * are the call's own variables and which ones the call reads from outside:
+ *
+ * ```ts
+ * import {
+ *   ComputeEngine,
+ *   binderSitesOf,
+ *   parseEpsil,
+ * } from '@cortex-js/compute-engine/epsil';
+ *
+ * const ce = new ComputeEngine();
+ * const source = 'sum(k^2, k, 1, n)';
+ * // A program of one statement parses to that statement, here the call.
+ * const [call] = parseEpsil(source);
+ * binderSitesOf(ce, call, source);
+ * // ➔ [{ name: 'k', operands: [0, 1, 2, 3] }]: `k` is bound, `n` is read.
+ * ```
+ *
+ * The function does not see the bindings of the program, only those of the
+ * engine. Call it only for a call whose callee the program does not bind:
+ * after `function sum(a, b, c, d) { a }` in a program that has not run yet,
+ * the call `sum(k^2, k, 1, n)` is a call of that function, but the result
+ * gives the sites of the library `Sum`. The language server's scope model
+ * (`documentBindings()`) makes this test before it asks for the sites.
+ *
  * Two sources, combined:
  *
  * 1. The engine's binding-site selector of the callee (`Sum`, `Integrate`,
@@ -218,13 +248,28 @@ const VARIABLE_GROUP_HEADS = new Set([
  * wins), then under the library name its spelling stands for — unless it
  * was written verbatim (`` `integrate`(…) ``), which names the raw symbol
  * and borrows nothing from the library. A callee that is not a library
- * operator binds nothing; so does a recovered parse the engine cannot box.
- * When `members` (the result of `protocolFunctionMembers()` for the
- * program) is given, a callee that the engine does not define and that is a
- * protocol function member declared by a statement that ends at or before
- * the call is the member's dispatcher, not the library operator: it binds
- * nothing (`solve(Money(1), pi)` after `protocol S { function solve(…) }`
- * keeps `pi` free). This is the offset rule `resolveLibraryNames()` uses.
+ * operator binds nothing. When the engine cannot box an operand of a
+ * recovered parse, the binding-site selector is skipped, and only the second
+ * rule gives sites. When `members` (the result of
+ * `protocolFunctionMembers()` for the program) is given, a callee that the
+ * engine does not define and that is a protocol function member declared by
+ * a statement that ends at or before the call is the member's dispatcher,
+ * not the library operator: it binds nothing (`solve(Money(1), pi)` after
+ * `protocol S { function solve(…) }` keeps `pi` free). This is the offset
+ * rule `resolveLibraryNames()` uses. The Epsil entry does not export
+ * `protocolFunctionMembers()`, so a host leaves `members` out. Then a
+ * callee is never read as a protocol member:
+ * after `protocol S { function solve(…) }`, the call
+ * `solve(Money(round(pi)), pi)` gives the sites of the library `Solve`, so
+ * `pi` is read as bound.
+ *
+ * A limit that does not write its variable gives no site, although the
+ * engine binds an implicit variable there: in `limit(sin(h)/h, 0)` the
+ * engine reads `h` as the limit variable, but the result is `[]`. The same
+ * is true for `Limit(f, a, direction)` and for `NLimit(f, a)` (`nLimit`).
+ * Write the variable of a `Limit` (`limit(sin(h)/h, h, 0)`) to get it as a
+ * site; `NLimit` has no form that writes the variable. (Issue
+ * `issues/CE-1038.md`.)
  */
 export function binderSitesOf(
   ce: ComputeEngine,

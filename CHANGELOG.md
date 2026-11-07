@@ -15,6 +15,16 @@
   the list, as `xs[k] := 5` does: it replaced the function `At`, so that
   `[7, 8][2]` gave `5`.
 
+### New Features
+
+- **`binderSitesOf()` and its `BinderSite` type are now exported from
+  `@cortex-js/compute-engine/epsil`.** For a call of a library operator in a
+  parsed Epsil program, the function gives the variables that the call binds
+  and the operands that see each one, with the rules the engine uses. A host
+  can then tell the names that a call reads from outside it:
+  `binderSitesOf(ce, call, 'sum(k^2, k, 1, n)')` gives
+  `[{ name: 'k', operands: [0, 1, 2, 3] }]`, so `k` is bound and `n` is read.
+
 ### Behavior Changes
 
 - **A sum or a product with no index and a free variable now stays
