@@ -239,11 +239,39 @@ function containsIntegrate(e: Expression): boolean {
   return e.ops?.some(containsIntegrate) ?? false;
 }
 
-/** True if the expression tree contains an `Error` node — a rule RHS that
- * failed to build a well-formed call (see the reject site in intUncached). */
-function containsError(e: Expression): boolean {
-  if (e.operator === 'Error') return true;
-  return e.ops?.some(containsError) ?? false;
+/** Why the expression tree is not a valid antiderivative, or null when no
+ * such reason is found. Two kinds of node make a result invalid:
+ * - an `Error` node: a rule RHS failed to build a well-formed call (for
+ *   example a Chapter-1 `Apart` whose variable argument was lost on a trig
+ *   subexpression);
+ * - a division by an exact 0: `Divide(u, 0)` (u not a number), `0^n` with
+ *   a symbolic n < 0, or the non-finite number (`ComplexInfinity`, `NaN`,
+ *   `±∞`) that canonical boxing folds a numeric division by 0 to. A rule
+ *   whose condition admits a parameter value that makes one of its divisors
+ *   0 builds such a term: rule 1.2.1.3 #48 requires m + 2p + 3 = 0 and
+ *   divides by 2(p + 1), so for ∫(−b − c·x)/(x·(a + b·x + c·x²)) dx
+ *   (m = p = −1) it builds `b/0`. No rule RHS of the corpus contains an
+ *   infinity, so a non-finite number is always such a fold.
+ * The driver rejects a rule result for which this returns a reason (see the
+ * reject site in intUncached), and the loader's integration provider
+ * rejects a final result. */
+export function invalidResultReason(e: Expression): string | null {
+  if (e.isNumberLiteral)
+    return e.isNaN === true || e.isFinite === false
+      ? 'result divides by 0'
+      : null;
+  if (e.operator === 'Error') return 'result contains Error';
+  const ops = e.ops;
+  if (!ops) return null;
+  if (e.operator === 'Divide' && ops[1].isSame(0))
+    return 'result divides by 0';
+  if (e.operator === 'Power' && ops[0].isSame(0) && ops[1].isNegative === true)
+    return 'result divides by 0';
+  for (const op of ops) {
+    const reason = invalidResultReason(op);
+    if (reason !== null) return reason;
+  }
+  return null;
 }
 
 /** All operator heads appearing in the (function nodes of the) expression
@@ -1059,14 +1087,14 @@ export class RubiDriver {
               this.truncate(stepMark);
               continue;
             }
-            // A result carrying an `Error` node is not a valid antiderivative:
-            // it means the RHS built a malformed call (e.g. a Chapter-1 `Apart`
-            // whose variable argument was lost on a trig subexpression). Reject
-            // the rule so lower-priority rules get their chance and the
-            // integrand stays cleanly inert rather than surfacing a broken,
+            // A result that carries an `Error` node or divides by 0 is not a
+            // valid antiderivative (see invalidResultReason). Reject the rule
+            // so lower-priority rules get their chance and the integrand
+            // stays cleanly inert rather than surfacing a broken,
             // non-evaluable result to the caller.
-            if (containsError(result)) {
-              trace(rule.id, 'rule-fail: result contains Error');
+            const invalid = invalidResultReason(result);
+            if (invalid !== null) {
+              trace(rule.id, `rule-fail: ${invalid}`);
               this.truncate(stepMark);
               continue;
             }

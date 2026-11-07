@@ -378,6 +378,40 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
       verify('\\frac{x^6}{(a+c x^4)^3}', { a: 2, c: 3 }));
     test('∫1/((a+b·x⁴)(c+d·x⁴)) dx', () =>
       verify('\\frac{1}{(a+b x^4)(c+d x^4)}', { a: 2, b: 3, c: 5, d: 0.7 }));
+    // Rule 1.2.1.3 #48 requires m + 2p + 3 = 0 and divides by 2(p + 1),
+    // which is 0 for m = p = −1. The driver rejects a rule result that
+    // divides by 0, and a later rule closes the integral.
+    test('∫(−b−c·x)/(x(a+b·x+c·x²)) dx', () =>
+      verify('\\frac{-b-c x}{x(a+b x+c x^2)}', { a: 2, b: 3, c: 0.5 }));
+    // Rubi test problem 1.2.2.6 #53: its reduction by 1.2.2.6 #7 (which
+    // needs the degree in x² of the numerator) reaches the integral above.
+    test('∫(d+g·x²+h·x⁴)/(x⁵(a+b·x²+c·x⁴)) dx', () =>
+      verify('\\frac{d+g x^2+h x^4}{x^5(a+b x^2+c x^4)}', {
+        a: 2,
+        b: 3,
+        c: 0.5,
+        d: 1.3,
+        g: 0.7,
+        h: 1.1,
+      }));
+  });
+
+  // Rubi test problem 1.2.2.4 #214. Rubi needs 6 steps and gives two AppellF1
+  // terms. When `Expon[Px, x²]` gave the degree in x, rule 1.2.2.6 #7 fired
+  // on d + g·x² and each recursive call doubled the degree of the
+  // polynomial, so the integral stayed inert after about 70,000 steps. It
+  // now closes in about 6,400 steps; the budget of 20,000 steps fails the
+  // test if the loop comes back.
+  test('∫(d+g·x²)/(√(f·x)·√(a+b·x²+c·x⁴)) dx closes in a small step budget', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce, { timeLimitMs: HANG_GUARD_MS, stepBudget: 20_000 });
+    const F = ce
+      .parse(
+        '\\int \\frac{d+g x^2}{\\sqrt{f x}\\sqrt{a+b x^2+c x^4}} \\, dx'
+      )
+      .evaluate();
+    expect(F.has('Integrate')).toBe(false);
+    expect(F.has('AppellF1')).toBe(true);
   });
 
   describe('integrates the (a+b cos+c sin) trig family (Chapter-4 pilot)', () => {

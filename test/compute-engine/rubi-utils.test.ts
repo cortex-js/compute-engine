@@ -46,7 +46,10 @@ import {
   RuleFail,
 } from '../../src/compute-engine/rubi/rubi-utils';
 import { toTimesPower } from '../../src/compute-engine/rubi/normal-form';
-import { isRubiOwnedCancellation } from '../../src/compute-engine/rubi/driver';
+import {
+  invalidResultReason,
+  isRubiOwnedCancellation,
+} from '../../src/compute-engine/rubi/driver';
 import { loadIntegrationRules } from '../../src/integration-rules';
 import type { Ctx } from '../../src/compute-engine/rubi/rubi-utils';
 import type { Json } from '../../scripts/rubi/wl-parser';
@@ -141,6 +144,138 @@ describe('PolyQ second-argument semantics', () => {
     // degree in x^k units
     expect(cond(['PolyQ', 'pq1', ['Power', 'x', 2], 2])).toBe(true);
     expect(cond(['PolyQ', 'pq1', ['Power', 'x', 2], 1])).toBe(false);
+  });
+});
+
+describe('invalidResultReason (rule results the driver rejects)', () => {
+  // A rule whose condition admits a parameter value that makes a divisor 0
+  // builds `u/0`, or, with a numeric numerator, the non-finite number that
+  // canonical boxing folds it to.
+  test('a division by 0 in any spelling is invalid', () => {
+    const div0 = ce.function('Divide', [ce.symbol('b'), ce.Zero]);
+    expect(div0.operator).toBe('Divide');
+    expect(invalidResultReason(ce.function('Add', [ce.symbol('x'), div0]))).toBe(
+      'result divides by 0'
+    );
+    for (const json of [
+      ['Divide', 1, 0],
+      ['Multiply', 'b', ['Power', 0, -1]],
+      ['Divide', 0, 0],
+    ] as Json[])
+      expect(invalidResultReason(ce.expr(json as any))).toBe(
+        'result divides by 0'
+      );
+  });
+  test('an Error node is invalid', () => {
+    expect(
+      invalidResultReason(ce.function('Add', [ce.symbol('x'), ce.error('x')]))
+    ).toBe('result contains Error');
+  });
+  test('an ordinary antiderivative is valid', () => {
+    expect(
+      invalidResultReason(
+        ce.expr(['Add', ['Divide', 'b', 'x'], ['Ln', 'x'], ['Power', 0, 2]])
+      )
+    ).toBeNull();
+  });
+});
+
+describe('Expon and Coeff with a variable form x^k', () => {
+  // Expon[u, x^k] and Coeff[u, x^k, n] count in units of x^k. When they
+  // counted in units of x, rule 1.2.2.6 #7 fired on d + e·x² (q = 2 instead
+  // of 1) and each recursive call doubled the degree of the polynomial, so
+  // Rubi test problem 1.2.2.4 #214 ran until the time limit.
+  const num = (json: Json): number | undefined => build(json, ctx).re;
+  beforeAll(() => {
+    bind('lin2', ['Add', 'd', ['Multiply', 'g', ['Power', 'x', 2]]]);
+    bind('quad2', [
+      'Add',
+      ['Multiply', 3, ['Power', 'x', 2]],
+      ['Multiply', 5, ['Power', 'x', 4]],
+    ]);
+    bind('mixed', ['Add', 1, 'x', ['Power', 'x', 2]]);
+  });
+
+  test('Expon[u, x^k] is the degree in x^k', () => {
+    expect(num(['Expon', 'lin2', ['Power', 'x', 2]])).toBe(1);
+    expect(num(['Expon', 'quad2', ['Power', 'x', 2]])).toBe(2);
+    expect(num(['Expon', 'quad2', ['Power', 'x', 2], 'Min'])).toBe(1);
+    // the plain variable keeps the degree in x
+    expect(num(['Expon', 'lin2', 'x'])).toBe(2);
+    expect(num(['Expon', 'quad2', 'x', 'Min'])).toBe(2);
+  });
+
+  test('Coeff[u, x^k, n] is the coefficient of x^(k·n)', () => {
+    expect(build(['Coeff', 'lin2', ['Power', 'x', 2], 0], ctx).symbol).toBe(
+      'd'
+    );
+    expect(build(['Coeff', 'lin2', ['Power', 'x', 2], 1], ctx).symbol).toBe(
+      'g'
+    );
+    expect(num(['Coeff', 'lin2', ['Power', 'x', 2], 2])).toBe(0);
+    expect(num(['Coeff', 'quad2', ['Power', 'x', 2], 2])).toBe(5);
+    expect(num(['Coeff', 'quad2', 'x', 2])).toBe(3);
+  });
+
+  test('a term whose exponent k does not divide fails the rule', () => {
+    expect(() => build(['Expon', 'mixed', ['Power', 'x', 2]], ctx)).toThrow(
+      RuleFail
+    );
+    expect(() =>
+      build(['Coeff', 'mixed', ['Power', 'x', 2], 0], ctx)
+    ).toThrow(RuleFail);
+  });
+
+  test('a small exact coefficient is not zero', () => {
+    bind('tiny', [
+      'Add',
+      ['Power', 'x', 2],
+      ['Multiply', ['Rational', 1, 10_000_000_000_000], ['Power', 'x', 4]],
+    ]);
+    bind('tinyMin', [
+      'Add',
+      ['Rational', 1, 10_000_000_000_000],
+      ['Power', 'x', 2],
+    ]);
+    expect(num(['Expon', 'tiny', ['Power', 'x', 2]])).toBe(2);
+    expect(num(['Expon', 'tinyMin', ['Power', 'x', 2], 'Min'])).toBe(0);
+  });
+
+  test('an exponent that the rule binds is substituted first', () => {
+    // 1.2.3.6 #11 calls Expon[Px, x^n] and Coeff[Px, x^n, q]; 1.1.3.7 #44
+    // calls Coeff[P3, x^(n/2), j], which is the plain variable when n = 2.
+    bind('cub4', [
+      'Add',
+      7,
+      ['Multiply', 2, ['Power', 'x', 4]],
+      ['Multiply', 3, ['Power', 'x', 8]],
+    ]);
+    bind('n', 4);
+    expect(num(['Expon', 'cub4', ['Power', 'x', 'n']])).toBe(2);
+    expect(num(['Coeff', 'cub4', ['Power', 'x', 'n'], 1])).toBe(2);
+    expect(num(['Coeff', 'cub4', ['Power', 'x', ['Divide', 'n', 2]], 2])).toBe(
+      2
+    );
+    bind('n', 2);
+    expect(num(['Coeff', 'quad2', ['Power', 'x', ['Divide', 'n', 2]], 2])).toBe(
+      3
+    );
+    bind('n', ['Rational', 3, 2]);
+    expect(() => build(['Expon', 'cub4', ['Power', 'x', 'n']], ctx)).toThrow(
+      RuleFail
+    );
+    bind('n', 'm');
+    expect(() => build(['Coeff', 'cub4', ['Power', 'x', 'n'], 1], ctx)).toThrow(
+      RuleFail
+    );
+    ctx.env.delete('n');
+  });
+
+  test('a variable form other than x or x^k fails the rule', () => {
+    expect(() =>
+      build(['Expon', 'lin2', ['Power', 'x', ['Rational', 1, 2]]], ctx)
+    ).toThrow(RuleFail);
+    expect(() => build(['Coeff', 'lin2', 'y', 1], ctx)).toThrow(RuleFail);
   });
 });
 

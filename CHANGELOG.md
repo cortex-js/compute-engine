@@ -71,6 +71,18 @@
 
 ### Resolved Issues
 
+- **With the integration rules of `loadIntegrationRules()`, an integral of a
+  polynomial in `x^2` times a power of `a+bx^2+cx^4` no longer runs until the
+  time limit.** `\int \frac{d+gx^2}{\sqrt{fx}\sqrt{a+bx^2+cx^4}}\,dx` ran for
+  30 seconds and stayed unevaluated; it now gives a sum of two `AppellF1`
+  terms in a fraction of a second. The rules for a polynomial in `x^2` read
+  its degree in `x` (2 instead of 1), applied a reduction that does not apply,
+  and doubled the degree of the polynomial at each step.
+- **With the integration rules of `loadIntegrationRules()`, an antiderivative
+  no longer contains a division by 0.** `\int \frac{-b-cx}{x(a+bx+cx^2)}\,dx`
+  gave a result with the term `b/0`; it now gives a sum of `artanh` and `ln`
+  terms. A rule whose result divides by 0 is now skipped, and the next rule
+  is tried.
 - **An integral whose differential is in the last factor of a product now has
   the correct value.** `\int_1^2 2\frac{dx}{x}` gave `3`, because the `d` of
   `dx` was read as the integration variable; it is now `2\ln(2)`, as

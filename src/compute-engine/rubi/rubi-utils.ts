@@ -5155,9 +5155,29 @@ const VALUE_FNS: Record<string, ValueFn> = {
 
   Coefficient: (args, ctx) => coeff(args, ctx),
   Coeff: (args, ctx) => coeff(args, ctx),
-  // Expon[u, x] = degree; Expon[u, x, Min] = minimum exponent
+  // Expon[u, x] = degree; Expon[u, x, Min] = minimum exponent.
+  // Expon[u, x^k] counts in units of x^k: Expon[d + e·x², x²] = 1. A rule
+  // such as 1.2.2.6 #7 tests `GtQ[Expon[Px, x²], 1]` and then removes the
+  // term `Coeff[Px, x², q]·x^(2q)`; the degree in x (2) made it fire on
+  // d + e·x² and add a term of degree 4 that it did not remove, so each
+  // recursive call doubled the degree until the time limit stopped it.
   Expon: (args, ctx) => {
     const u = build(args[0], ctx);
+    const k = powerFormDegree(build(args[1], ctx), ctx.x);
+    if (k === null) return fail('Expon: unsupported variable form');
+    if (k > 1) {
+      const coeffs = coeffsInPowerForm(u, ctx.x, k);
+      if (coeffs === null) return fail('Expon: not a polynomial in x^k');
+      // Exact zero tests: `zeroQ` also takes a number below 1e-12 as zero,
+      // which would give the wrong degree for x² + x⁴/10¹³.
+      if (args.length >= 3 && args[2] === 'Min') {
+        const min = coeffs.findIndex((c) => !c.isSame(0));
+        return ctx.ce.number(min < 0 ? 0 : min);
+      }
+      let deg = coeffs.length - 1;
+      while (deg > 0 && coeffs[deg].isSame(0)) deg--;
+      return ctx.ce.number(deg);
+    }
     const d = polyDegreeX(u, ctx.x);
     if (d < 0) return fail('Expon: not a polynomial');
     if (args.length >= 3 && args[2] === 'Min') {
@@ -7620,11 +7640,48 @@ export function factoredRationalPresentation(
   return coeffsToPolyX(ce, fac.num, x).div(fac.den);
 }
 
+/** The power k of the variable form `v` of `Expon[u, v]` or
+ *  `Coeff[u, v, n]`: 1 for `x`, k for `x^k` with k a positive integer, and
+ *  null for every other form, which the caller refuses. */
+function powerFormDegree(v: Expression, x: string): number | null {
+  if (v.symbol === x) return 1;
+  if (v.operator !== 'Power' || !v.ops || v.ops[0].symbol !== x) return null;
+  const k = realNum(v.ops[1]);
+  return k !== null && Number.isInteger(k) && k >= 1 ? k : null;
+}
+
+/** The ascending coefficients of `u` as a polynomial in `x^k`: element j is
+ *  the coefficient of x^(k·j). Null when `u` is not a polynomial in x, or
+ *  when it has a term whose exponent k does not divide and whose
+ *  coefficient is not exactly 0 (the coefficients are evaluated, so a
+ *  symbolic cancellation such as b − b is 0 here). Rubi calls
+ *  `Expon[u, x^k]` and `Coeff[u, x^k, n]` only after `PolyQ[u, x^k]`, so a
+ *  refusal there costs no rule that Rubi fires. */
+function coeffsInPowerForm(
+  u: Expression,
+  x: string,
+  k: number
+): Expression[] | null {
+  const coeffs = polyCoeffsX(u, x);
+  if (coeffs === null) return null;
+  const out: Expression[] = [];
+  for (let i = 0; i < coeffs.length; i++) {
+    if (i % k === 0) out.push(coeffs[i]);
+    else if (!coeffs[i].isSame(0)) return null;
+  }
+  return out;
+}
+
 function coeff(args: Json[], ctx: Ctx): Expression {
   const u = build(args[0], ctx);
   const n = args.length >= 3 ? (realNum(build(args[2], ctx)) ?? NaN) : 1;
   if (!Number.isInteger(n)) return fail('Coefficient: non-integer degree');
-  const coeffs = polyCoeffsX(u, ctx.x);
+  // Coeff[u, x^k, n] is the coefficient of x^(k·n), not of x^n (see
+  // `Expon`).
+  const k = powerFormDegree(build(args[1], ctx), ctx.x);
+  if (k === null) return fail('Coefficient: unsupported variable form');
+  const coeffs =
+    k === 1 ? polyCoeffsX(u, ctx.x) : coeffsInPowerForm(u, ctx.x, k);
   if (coeffs === null) return fail('Coefficient: not a polynomial');
   return (coeffs[n] ?? ctx.ce.Zero).evaluate();
 }

@@ -25,6 +25,7 @@ import { compileRuleDocs, type CompileResult } from './compile.js';
 import {
   DEFAULT_TIME_LIMIT_MS,
   RubiDriver,
+  invalidResultReason,
   type IntStepRecord,
 } from './driver.js';
 
@@ -120,8 +121,16 @@ export function loadIntegrationRules(
     const result = driver.int(f, variable, records);
     // Only a fully-closed antiderivative is usable; a residual inert
     // `Integrate` means the rules couldn't finish — defer to the built-in
-    // antiderivative instead of returning a partial result.
-    if (result === null || containsIntegrate(result)) return null;
+    // antiderivative instead of returning a partial result. A result that
+    // divides by 0 or carries an `Error` node is also deferred: the driver
+    // rejects such a rule result, but a fallback of the driver (a
+    // back-substitution, the native rational fallback) can still build one.
+    if (
+      result === null ||
+      containsIntegrate(result) ||
+      invalidResultReason(result) !== null
+    )
+      return null;
     if (trace && records) {
       // Replay the recorded steps into whole-state steps. No closing step is
       // pushed here: the caller (`explainIntegrate`) appends a final
