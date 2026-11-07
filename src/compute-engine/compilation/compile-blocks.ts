@@ -1180,8 +1180,7 @@ function branchWritesListInPlace(e: Expression): boolean {
         return ownedLocalUpdateChains(e.ops, s.ops[0].symbol) !== undefined;
       return (
         isFunction(s.ops[0], 'Tuple') &&
-        nestedAssignmentsTo(e, new Set(tuplePatternNames(s.ops[0]))).length >
-          0
+        nestedAssignmentsTo(e, new Set(tuplePatternNames(s.ops[0]))).length > 0
       );
     })
   )

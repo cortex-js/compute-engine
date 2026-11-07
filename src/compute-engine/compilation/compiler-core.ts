@@ -4603,10 +4603,7 @@ export function compileLoopBody(
   // Every statement here is in statement position, so a nested loop is a
   // block statement, not an arrow function that is called at once
   // (`discardedValueStatement()`).
-  return discardedValueStatement(
-    target,
-    compileOp(expr, -1, target, 0, expr)
-  );
+  return discardedValueStatement(target, compileOp(expr, -1, target, 0, expr));
 }
 
 /**

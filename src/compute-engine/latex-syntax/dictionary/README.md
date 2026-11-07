@@ -155,8 +155,8 @@ quadrature, with a Monte-Carlo fallback). See the project `ARCHITECTURE.md`
   serialize one limit per level and never hit the compact path.
 - An integral with no limit takes one bare limit for each parameter of its
   integrand `Function`, so `Integrate(Function(x y, x, y))` serializes to
-  `\iint\!xy\, \mathrm{d}y \mathrm{d}x` and a parse gets the variables back.
-  An integrand with no parameter (`Integrate(Sin)`) gets one sign and no
+  `\iint\!xy\, \mathrm{d}y \mathrm{d}x` and a parse gets the variables back. An
+  integrand with no parameter (`Integrate(Sin)`) gets one sign and no
   differential: `\int\!\sin`.
 
 ## Tests

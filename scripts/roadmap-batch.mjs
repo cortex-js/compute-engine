@@ -19,8 +19,19 @@
  * area. A session starts only when (a) the number of running batch sessions
  * plus the number of other live Claude sessions whose directory is this repo
  * is less than `--concurrency` (default 3), and (b) no running batch session
- * has an item of the same kind (`area`). The session that runs
- * this script, and its parents, do not count: they only wait.
+ * has an item in one of the areas of the new item. The session that runs this
+ * script, and its parents, do not count: they only wait. A runner does not
+ * count the sessions of another runner, so run one batch at a time.
+ *
+ * The areas of an item are the work areas of §9 (compilation, evaluation,
+ * library, latex, epsil, types) of every source file that the issue body
+ * names: a path such as `latex-syntax/dictionary/foo.ts`, or a bare file name
+ * such as `arithmetic-mul-div.ts`, looked up in `src/` (it gives the area of
+ * every file with that name). An issue that names no source file of an area
+ * is `unassigned`: its session can change any file, so it starts only when no
+ * batch session runs, and no other session starts while it runs. The queue
+ * order still decides, but an `unassigned` item can wait until the items
+ * after it that can start have run.
  *
  * Output, in `--out <dir>`: for each item, `<id>.jsonl` (the session's
  * stream-json output), `<id>.err`, and `<id>.report.md` (the session's last
@@ -65,7 +76,7 @@ import {
   createWriteStream,
   renameSync,
 } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
@@ -93,17 +104,100 @@ if (!values.queue || !values.out) {
 const concurrency = Number(values.concurrency);
 const timeoutMs = Number(values['timeout-min']) * 60_000;
 const queueFile = JSON.parse(readFileSync(values.queue, 'utf8'));
+/**
+ * The work area of a source path (relative to the repo), from the table of
+ * docs/COMPUTE-ENGINE-BOX-SPECIFICS.md §9, or undefined for a path outside
+ * the six areas.
+ */
+function areaOfPath(path) {
+  if (/^src\/compute-engine\/compilation\/|^src\/(compile|runtime)\.ts$/.test(path))
+    return 'compilation';
+  if (
+    /^src\/compute-engine\/(boxed-expression|numerics)\/|^src\/compute-engine\/engine-[^/]*\.ts$/.test(
+      path
+    )
+  )
+    return 'evaluation';
+  if (/^src\/compute-engine\/(library|symbolic|rubi)\//.test(path))
+    return 'library';
+  if (/^src\/compute-engine\/latex-syntax\/|^src\/latex-syntax\.ts$/.test(path))
+    return 'latex';
+  if (/^src\/epsil\/|^src\/epsil\.ts$/.test(path)) return 'epsil';
+  if (/^src\/common\/type\/|^src\/compute-engine\/types-[^/]*\.ts$/.test(path))
+    return 'types';
+  return undefined;
+}
+
+// The areas of each bare file name of `src/`: the area of every file with that
+// name, so that a name shared by files in two areas counts for both.
+const areasOfBasename = new Map();
+for (const file of execFileSync('git', ['ls-files', 'src'], {
+  cwd: repo,
+  encoding: 'utf8',
+})
+  .trim()
+  .split('\n')) {
+  const area = areaOfPath(file);
+  if (!area) continue;
+  const name = basename(file);
+  if (!areasOfBasename.has(name)) areasOfBasename.set(name, new Set());
+  areasOfBasename.get(name).add(area);
+}
+
+/**
+ * The work areas of one `.ts` reference in an issue body (empty when it is in
+ * no area). A reference with directories is decided by its directories alone:
+ * from its first `src/` when it has one, else as a path below
+ * `src/compute-engine/` or below `src/`. A test path (`test/...`) is in no
+ * area. A bare file name gives the area of every file of `src/` with that
+ * name.
+ */
+function areasOfReference(reference, name) {
+  if (!reference.includes('/')) return [...(areasOfBasename.get(name) ?? [])];
+  const path = reference.replace(/^(\.{1,2}\/)+/, '');
+  const src = path.indexOf('src/');
+  const area =
+    src >= 0
+      ? areaOfPath(path.slice(src))
+      : /^test\//.test(path)
+        ? undefined
+        : (areaOfPath(`src/compute-engine/${path}`) ??
+          areaOfPath(`src/${path}`));
+  return area ? [area] : [];
+}
+
+/**
+ * The work areas of an issue: every area of the source files that its body
+ * names, or `['unassigned']` when it names none (see the header).
+ */
+function areasOfIssue(id) {
+  let body;
+  try {
+    body = readFileSync(join(repo, 'issues', `${id}.md`), 'utf8');
+  } catch {
+    return ['unassigned'];
+  }
+  const areas = new Set();
+  for (const m of body.matchAll(/[\w./-]*?([\w-]+\.ts)\b/g))
+    for (const area of areasOfReference(m[0], m[1])) areas.add(area);
+  return areas.size > 0 ? [...areas].sort() : ['unassigned'];
+}
+
 // The backlog JSON of issues.mjs: `release` and `pool` are lists of issues with
-// their header fields. The `area` keeps two sessions from working on the same
-// kind of code at once; the issue's `kind` is the nearest thing to a section.
+// their header fields. `area` is the areas joined with '+', for the log and the
+// status file.
 const fromBacklog = (list) =>
-  (list ?? []).map((x) => ({
-    id: x.id,
-    title: x.title,
-    priority: x.priority,
-    area: x.kind ?? 'issue',
-  }));
-const queue = queueFile.candidates ?? [
+  (list ?? []).map((x) => {
+    const areas = areasOfIssue(x.id);
+    return {
+      id: x.id,
+      title: x.title,
+      priority: x.priority,
+      areas,
+      area: areas.join('+'),
+    };
+  });
+const queue = [
   ...fromBacklog(queueFile.release),
   ...fromBacklog(queueFile.pool),
 ];
@@ -113,7 +207,7 @@ const ids = values.items
   ? values.items.split(',')
   : values.count
     ? queue.slice(0, Number(values.count)).map((c) => c.id)
-    : (queueFile.batch ?? []);
+    : [];
 if (ids.length === 0) {
   console.error(
     'No items: pass --items CE-1,CE-2 or --count <n> (the queue is `node scripts/issues.mjs backlog --json`).'
@@ -362,9 +456,29 @@ function schedule() {
       }
       return;
     }
-    const busy = new Set([...running.values()].map((r) => r.item.area));
-    const index = pending.findIndex((item) => !busy.has(item.area));
-    if (index < 0) return;
+    // An item starts only when none of its areas is busy. An `unassigned`
+    // item starts only when no session runs, and nothing starts while it
+    // runs (see the header).
+    const runningAreas = [...running.values()].flatMap((r) => r.item.areas);
+    const busy = new Set(runningAreas);
+    const index = busy.has('unassigned')
+      ? -1
+      : pending.findIndex((item) =>
+          item.areas.includes('unassigned')
+            ? running.size === 0
+            : !item.areas.some((area) => busy.has(area))
+        );
+    if (index < 0) {
+      const note = busy.has('unassigned')
+        ? 'waiting: an unassigned item runs alone'
+        : `waiting: areas busy: ${[...busy].sort().join(', ')}`;
+      if (note !== waitingNoted) log((waitingNoted = note));
+      if (note !== waitingNote) {
+        waitingNote = note;
+        writeStatus();
+      }
+      return;
+    }
     const [item] = pending.splice(index, 1);
     waitingNote = '';
     launch(item);

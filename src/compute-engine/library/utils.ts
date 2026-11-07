@@ -4708,8 +4708,7 @@ export function saveLoopIndexes(
   for (const name of names) {
     if (name === undefined || name === 'Nothing') continue;
     const def = ce.lookupDefinition(name);
-    if (def === undefined || !isValueDef(def) || def.value.isConstant)
-      continue;
+    if (def === undefined || !isValueDef(def) || def.value.isConstant) continue;
     saved.push([def.value, def.value.storedValue]);
   }
   return () => {

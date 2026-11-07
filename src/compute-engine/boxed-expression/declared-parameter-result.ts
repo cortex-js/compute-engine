@@ -583,8 +583,9 @@ function callIsInComputation(
       ? (def.operator as { _lambdaLiteral?: unknown })._lambdaLiteral
       : (def.value as { _presentValue?: unknown } | undefined)?._presentValue;
   return (
-    (literal as { _isTypeInFlight?: () => boolean } | undefined)
-      ?._isTypeInFlight?.() === true
+    (
+      literal as { _isTypeInFlight?: () => boolean } | undefined
+    )?._isTypeInFlight?.() === true
   );
 }
 

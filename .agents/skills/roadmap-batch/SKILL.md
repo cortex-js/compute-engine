@@ -48,9 +48,12 @@ Run, in the background:
 node scripts/roadmap-batch.mjs --queue <out>/queue.json --count <n> --out <out>
 ```
 
-(or `--items <list>`). The script starts at most three sessions at once, each on
-a different kind of issue, and counts the other Compute Engine sessions that
-run. It ends when every item has ended. Wait for its end notice; do not poll.
+(or `--items <list>`). The script starts at most three sessions at once, each in
+different work areas of `docs/COMPUTE-ENGINE-BOX-SPECIFICS.md` §9 (found from
+the source files that the issue names; the header of the script says how), and
+counts the other Compute Engine sessions that run. Run one batch at a time: a
+runner counts neither the sessions nor the areas of another runner. The script
+ends when every item has ended. Wait for its end notice; do not poll.
 Each session marks its item `in-progress` with `issues.mjs start` and removes it
 (or sets `fixed` for a Tycho issue) in its commit.
 

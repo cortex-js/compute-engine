@@ -348,7 +348,10 @@ function hasFreeAnonymousSlot(
  * walk of a nested call (`nd(nd(h^3, 1), 1)`) is made once, not once for
  * each enclosing call that has an implicit variable.
  */
-type BinderSitesMemo = Map<MathJsonExpression, readonly BinderSite[] | undefined>;
+type BinderSitesMemo = Map<
+  MathJsonExpression,
+  readonly BinderSite[] | undefined
+>;
 
 function memoizedBinderSites(
   ce: ComputeEngine,
