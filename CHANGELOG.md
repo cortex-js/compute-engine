@@ -37,6 +37,15 @@
   in place. Both forms now write in place, with no warning. A `Fold` step
   with a result type is written in place on the Python target too. The
   values do not change. (CE-1009, Tycho row FG)
+- **`Hypergeometric2F1` at machine precision is correct to about 15 digits
+  when its series cancels.** With `ce.precision = 'machine'`,
+  `Hypergeometric2F1(-6.937, -4.123, 4.354, -0.662)` gave
+  `0.0011253975813495531`, with a relative error of 3.7e-11; it now gives
+  `0.0011253975813080236`. For z between −1 and 0 the kernel uses the form
+  of the series that cancels least, and a series whose largest term is more
+  than 100 times its sum is summed again with about 32 digits. Over 4548
+  random points with z from −1 to 0.5, the largest relative error fell from
+  6.9e-11 to 2.4e-14. Compiled JavaScript uses the same kernel. (CE-192)
 
 ## 0.182.0 _2026-11-06_
 

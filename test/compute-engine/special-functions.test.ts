@@ -5,6 +5,7 @@ import {
   digamma,
   erfInv,
   gamma,
+  hypergeometric2F1,
   trigamma,
 } from '../../src/compute-engine/numerics/special-functions';
 import {
@@ -2756,6 +2757,56 @@ describe('HYPERGEOMETRIC 2F1 CANCELLATION IN THE CONNECTION FORMULAS', () => {
     expect(v.replace('.', '').substring(0, 29)).toBe(
       ref.replace('.', '').substring(0, 29)
     );
+  });
+});
+
+describe('HYPERGEOMETRIC 2F1 CANCELLATION IN THE GAUSS SERIES', () => {
+  // References: mpmath 1.4.1 hyp2f1 (mp.dps = 50) at the same double
+  // arguments. The largest term of the Gauss series is 1e3 to 1e6 times its
+  // sum at these points. Summed in doubles, they had relative errors of
+  // 1.3e-12 to 7e-11 (shown after each case).
+  let savedGlobal: number;
+  let mCe: InstanceType<typeof ComputeEngine>;
+  beforeAll(() => {
+    savedGlobal = BigDecimal.precision;
+    mCe = new ComputeEngine();
+    mCe.precision = 'machine';
+  });
+  afterAll(() => {
+    // BigDecimal.precision is process-global, and setting the precision of
+    // the shared engine to its current value does not write it: restore
+    // the global itself.
+    BigDecimal.precision = savedGlobal;
+  });
+
+  test.each([
+    // z < 0, the series at z cancels least (3.7e-11)
+    [[-6.937, -4.123, 4.354, -0.662], 0.001125397581308023615060469],
+    // z < 0, every form cancels by more than 1e5 (6.9e-11)
+    [[11.897, 10.412, -6.143, -0.779], -18.84124799604871375683191],
+    // 0 < z ≤ 0.5 (1.3e-12)
+    [[10.492, -7.352, 3.976, 0.484], -0.003230637778790095099008605],
+    // terminating polynomials (7.0e-11 and 4.7e-11)
+    [[-10, 10.783, 7.174, 0.513], 0.000169403548327646056195719],
+    [[-16, 1.453, 5.776, 2.228], 0.04061029352164443587142247],
+  ])('machine ₂F₁(%j)', (args, ref) => {
+    const v = mCe.expr(['Hypergeometric2F1', ...args] as any).N().re;
+    expect(Math.abs(v - ref) / Math.abs(ref)).toBeLessThan(1e-14);
+  });
+
+  test('machine ₂F₁ Pfaff factor with 1 − z that rounds to 1', () => {
+    // ₂F₁(1, b; 1; z) = (1 − z)^{−b}. With b = 2⁵⁶ and z = −2⁻⁵⁴, 1 − z
+    // rounds to 1, and the factor (1 − z)^{−b} is about e⁻⁴.
+    const v = hypergeometric2F1(1, 2 ** 56, 1, -(2 ** -54));
+    expect(Math.abs(v - Math.exp(-4)) / Math.exp(-4)).toBeLessThan(1e-14);
+  });
+
+  test('machine ₂F₁ skips a Pfaff form whose factor underflows', () => {
+    // The factor 2⁻¹¹⁰⁰ of the b-form is 0 in doubles, and the b-form gave
+    // 0. The value is 4.1127316886348191892e-60 (mpmath). No other form or
+    // kernel computes it, so the result is NaN: the expression stays
+    // symbolic.
+    expect(hypergeometric2F1(50, 1100, 100, -1)).toBeNaN();
   });
 });
 

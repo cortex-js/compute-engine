@@ -22,11 +22,13 @@ export {
 import {
   type DD,
   ddAdd,
+  ddDiv,
   ddDivD,
   ddMul,
   ddMulD,
   quickTwoSum,
   twoProd,
+  twoSum,
 } from './double-double.js';
 import {
   HURWITZ_MAX_PASSED_TERMS,
@@ -6710,14 +6712,99 @@ function gauss2F1SeriesBig(
 }
 
 // The largest ratio of the largest term to the result that the machine
-// ₂F₁ kernel accepts: about 10 correct digits. A result with more
-// cancellation is evaluated by `hypergeometric2F1Complex` instead, which
-// tries other transformations and returns NaN when none is accurate.
+// ₂F₁ kernel accepts. A result with more cancellation is evaluated by
+// `hypergeometric2F1Complex` instead, which tries other transformations
+// and returns NaN when none is accurate.
 const GAUSS_2F1_MAX_LOSS = 1e6;
+
+// The largest ratio of the largest term to the result for which the sum
+// in doubles is kept. The rounding errors of the terms are multiplied by
+// this ratio: a ratio of 3.7e5 gave a relative error of 3.7e-11. Above
+// this ratio the series is summed again in double-double (about 32
+// digits), which keeps the error near one unit in the last place up to
+// GAUSS_2F1_MAX_LOSS.
+const GAUSS_2F1_DD_LOSS = 1e2;
 
 // The largest ratio of a part of the connection formula at 1−z to the
 // result that the machine ₂F₁ kernel accepts (see `hypergeometric2F1Real`).
 const CONNECTION_2F1_MAX_LOSS = 1e3;
+
+/**
+ * The Gauss series Σ (a)ₙ(b)ₙ/((c)ₙ n!)·zⁿ summed in double-double, with
+ * parameters given in double-double, rounded to a double. It ends as
+ * `gauss2F1SeriesBig` does, with a 16 times smaller relative size of the
+ * last term. NaN when the series has not converged within `maxTerms`
+ * terms, unless `polynomial`.
+ */
+function gauss2F1SeriesDD(
+  a: DD,
+  b: DD,
+  c: DD,
+  z: DD,
+  maxTerms: number,
+  polynomial: boolean
+): number {
+  const start = gauss2F1SeriesStart(a[0], b[0], c[0], z[0]);
+  let term: DD = [1, 0];
+  let sum: DD = [1, 0];
+  for (let n = 0; n < maxTerms; n++) {
+    const an = ddAdd(a, [n, 0]);
+    const bn = ddAdd(b, [n, 0]);
+    const ratio = ddDiv(
+      ddMul(ddMul(an, bn), z),
+      ddMulD(ddAdd(c, [n, 0]), n + 1)
+    );
+    term = ddMul(term, ratio);
+    if (term[0] === 0) {
+      const ends = an[0] === 0 || bn[0] === 0 || n >= start;
+      return ends ? sum[0] + sum[1] : NaN;
+    }
+    sum = ddAdd(sum, term);
+    if (
+      n >= start &&
+      Math.abs(ratio[0]) < 1 &&
+      Math.abs(term[0]) <= (Number.EPSILON / 16) * Math.abs(sum[0])
+    )
+      return sum[0] + sum[1];
+  }
+  return polynomial ? sum[0] + sum[1] : NaN;
+}
+
+/**
+ * The value of a Gauss series from its sum in doubles and its largest
+ * term `big`, both from `gauss2F1SeriesBig` on the high parts of
+ * `params` (a, b, c and z in double-double). NaN when the sum is NaN or
+ * when `big` is more than GAUSS_2F1_MAX_LOSS times the sum. When `big` is
+ * more than GAUSS_2F1_DD_LOSS times the sum, the series is summed again
+ * in double-double, so that the cancellation does not reach the result.
+ */
+function gauss2F1Value(
+  sum: number,
+  big: number,
+  params: [a: DD, b: DD, c: DD, z: DD],
+  maxTerms: number,
+  polynomial: boolean
+): number {
+  if (Number.isNaN(sum)) return NaN;
+  const scale = sum === 0 ? 1 : Math.abs(sum);
+  if (big > GAUSS_2F1_MAX_LOSS * scale) return NaN;
+  if (big <= GAUSS_2F1_DD_LOSS * scale) return sum;
+  const accurate = gauss2F1SeriesDD(...params, maxTerms, polynomial);
+  return Number.isFinite(accurate) ? accurate : sum;
+}
+
+// The smallest positive normal double, 2⁻¹⁰²².
+const MIN_NORMAL_DOUBLE = 2.2250738585072014e-308;
+
+/**
+ * (1 − z)^p with 1 − z formed exactly as s + e (`twoSum`), so that a large
+ * p does not multiply the rounding error of 1 − z: with p = −2⁵⁶ and
+ * z = −2⁻⁵⁴, 1 − z rounds to 1, but (1 − z)^p is about e⁻⁴.
+ */
+function oneMinusZPow(z: number, p: number): number {
+  const [s, e] = twoSum(1, -z);
+  return Math.pow(s, p) * Math.exp(p * Math.log1p(e / s));
+}
 
 /** The Gauss series, or NaN when it did not converge or cancels too much. */
 function gauss2F1Series(
@@ -6729,8 +6816,56 @@ function gauss2F1Series(
   polynomial = false
 ): number {
   const { sum, big } = gauss2F1SeriesBig(a, b, c, z, maxTerms, polynomial);
-  const scale = sum === 0 ? 1 : Math.abs(sum);
-  return big <= GAUSS_2F1_MAX_LOSS * scale ? sum : NaN;
+  return gauss2F1Value(
+    sum,
+    big,
+    [
+      [a, 0],
+      [b, 0],
+      [c, 0],
+      [z, 0],
+    ],
+    maxTerms,
+    polynomial
+  );
+}
+
+/**
+ * The value of the form `factor`·₂F₁(a, b; c; z) whose Gauss series has
+ * the smallest ratio of its largest term to its sum, among the forms
+ * `[factor, a, b, c, z]` of one value (a, b, c and z in double-double).
+ * The forms are tried in order, and a form with a ratio of at most
+ * GAUSS_2F1_DD_LOSS ends the search. The value of the chosen form comes
+ * from `gauss2F1Value`. NaN when no series converged within its terms, or
+ * when the smallest ratio is more than GAUSS_2F1_MAX_LOSS.
+ */
+function leastLossGauss2F1(
+  forms: [factor: number, a: DD, b: DD, c: DD, z: DD][]
+): number {
+  let best: { factor: number; params: [DD, DD, DD, DD] } | undefined;
+  let bestSum = NaN;
+  let bestBig = NaN;
+  let bestLoss = Infinity;
+  for (const [factor, a, b, c, z] of forms) {
+    // A factor that overflowed, or that underflowed to 0 or to a
+    // subnormal number, would give a wrong value: for ₂F₁(50, 1100; 100;
+    // −1) the factor 2⁻¹¹⁰⁰ of the b-form is 0, and the value is 4.1e-60.
+    if (!(Math.abs(factor) >= MIN_NORMAL_DOUBLE) || !Number.isFinite(factor))
+      continue;
+    const { sum, big } = gauss2F1SeriesBig(a[0], b[0], c[0], z[0]);
+    if (Number.isNaN(sum)) continue;
+    const loss = big / (sum === 0 ? 1 : Math.abs(sum));
+    if (!(loss < bestLoss)) continue;
+    best = { factor, params: [a, b, c, z] };
+    bestSum = sum;
+    bestBig = big;
+    bestLoss = loss;
+    if (loss <= GAUSS_2F1_DD_LOSS) break;
+  }
+  if (best === undefined) return NaN;
+  return (
+    best.factor * gauss2F1Value(bestSum, bestBig, best.params, 10_000, false)
+  );
 }
 
 /**
@@ -6793,9 +6928,36 @@ function hypergeometric2F1Real(
   if (z > 1) return NaN; // complex value (branch cut [1, ∞))
 
   if (z < 0) {
-    // Pfaff: ₂F₁(a,b;c;z) = (1−z)^{−a}·₂F₁(a, c−b; c; z/(z−1)), maps z<0 → (0,1)
+    // Pfaff: ₂F₁(a,b;c;z) = (1−z)^{−a}·₂F₁(a, c−b; c; z/(z−1))
+    //                     = (1−z)^{−b}·₂F₁(c−a, b; c; z/(z−1)),
+    // which map z < 0 to w = z/(z−1) in (0, 1).
+    if (z >= -1) {
+      // w ≤ 0.5: the two Pfaff series and the direct series are three
+      // forms of the same value, and their cancellation can differ by
+      // orders of magnitude. For ₂F₁(−6.937, −4.123; 4.354; −0.662) the
+      // largest term is 3.7e5 times the sum with the a-form, 4.4e4 times
+      // with the b-form and 4.4e3 times with the direct series. Use the
+      // form with the least cancellation. The parameters c−a, c−b and w
+      // are in double-double, because a rounding error in them is
+      // multiplied by the cancellation as well when the series is summed
+      // in double-double.
+      const exact = (x: number): DD => [x, 0];
+      const w = ddDiv(exact(z), twoSum(z, -1));
+      const forms: [number, DD, DD, DD, DD][] = [
+        [oneMinusZPow(z, -a), exact(a), twoSum(c, -b), exact(c), w],
+        [oneMinusZPow(z, -b), twoSum(c, -a), exact(b), exact(c), w],
+      ];
+      // The direct series is tried last, and only when it can converge
+      // within the 10,000 terms of `gauss2F1SeriesBig`: after the index
+      // `gauss2F1SeriesStart` its terms decrease about as |z|ⁿ, so about
+      // 37/−ln|z| more terms reach a relative size of 1e-16. Near z = −1
+      // it would run every term and give NaN.
+      if (gauss2F1SeriesStart(a, b, c, z) + 37 / -Math.log(-z) < 10_000)
+        forms.push([1, exact(a), exact(b), exact(c), exact(z)]);
+      return leastLossGauss2F1(forms);
+    }
     return (
-      Math.pow(1 - z, -a) * hypergeometric2F1Real(a, c - b, c, z / (z - 1))
+      oneMinusZPow(z, -a) * hypergeometric2F1Real(a, c - b, c, z / (z - 1))
     );
   }
 
