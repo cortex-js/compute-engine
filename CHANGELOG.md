@@ -36,6 +36,15 @@
 
 ### Resolved Issues
 
+- **The compiled JavaScript of a function literal applied to a string now
+  reads the string as text.** With `t` declared `string`,
+  `["Apply", ["Function", ["Length", "s"], "s"], "t"]` compiled, and at
+  `t = "abc"` its code threw a `RangeError` ("the operand is not a list or a
+  set"); it now gives `3`, as `evaluate()` does. The same applies to `Count`,
+  `IsEmpty`, `Reverse` and `Join` of the parameter. `Last` gave `null`, and
+  `Take(s, 2)` of `"a😀b"` gave half of the emoji; they now give `"b"` and
+  `"a😀"`. `Max` of a string now falls back to the interpreter instead of
+  giving `NaN`.
 - **With `diagnostics: true`, the `d` of a differential inside a fraction or
   parentheses no longer reports `undeclared-symbol`.** `\int \frac{dx}{x}`,
   `\int \frac{\mathrm{d}x}{x}` and `\int (3x + 2\,dx)` reported the symbol `d`

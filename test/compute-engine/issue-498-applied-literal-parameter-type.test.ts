@@ -201,6 +201,82 @@ describe('a parameter of an applied function literal', () => {
     expect(interpreted(json, 6)).toEqual(['List', 3, 5, 7]);
   });
 
+  // A string is a collection of its characters, so `s ↦ Length(s)` infers
+  // `s: collection`. The compiled `Length` of a `collection` reads the value
+  // with `_SYS.elts`, which throws a `RangeError` for a string. With `s`
+  // typed `string`, `Length` and `Count` count the characters as the
+  // interpreter does: a grapheme cluster (`😀`) is one character.
+  describe('a string argument', () => {
+    const engine = new ComputeEngine();
+    engine.declare('t', 'string');
+    test.each([
+      ['Length', ['Apply', ['Function', ['Length', 's'], 's'], 't']],
+      ['Count', ['Apply', ['Function', ['Count', 's'], 's'], 't']],
+      [
+        'beside a number',
+        [
+          'Apply',
+          ['Function', ['Add', ['Length', 's'], 'x'], 's', 'x'],
+          't',
+          2,
+        ],
+      ],
+    ])('types the parameter as a string: %s', (_, json) => {
+      const expr = engine.box(json as never);
+      const r = compile(expr, { to: 'javascript', fallback: false });
+      expect(r.success).toBe(true);
+      expect(r.code).toContain('_SYS.chars(s)');
+      expect(r.code).not.toContain('_SYS.elts');
+      for (const t of ['abc', '', '😀a']) {
+        const value = expr.subs({ t: engine.string(t) }).evaluate();
+        expect(r.run!({ t })).toBe(value.re);
+      }
+    });
+
+    test.each([
+      // Before the parameter was typed, `Take` cut the emoji in half
+      // (`"a\ud83d"`), `Last` gave `null` and `Reverse` threw.
+      ['Take', ['Take', 's', 2], 'a😀'],
+      ['Last', ['Last', 's'], 'b'],
+      ['Reverse', ['Reverse', 's'], 'b😀a'],
+      ['IsEmpty', ['IsEmpty', 's'], false],
+    ])('reads the characters of the string: %s', (_, body, expected) => {
+      const r = compile(
+        engine.box(['Apply', ['Function', body, 's'], 't'] as never),
+        { to: 'javascript', fallback: false }
+      );
+      expect(r.success).toBe(true);
+      expect(r.run!({ t: 'a😀b' })).toBe(expected);
+    });
+
+    test('Max of a string declines', () => {
+      // The interpreter leaves `Max("abc")` unevaluated. Before the
+      // parameter was typed, the compiled code was `Math.max(s)`.
+      const r = compile(
+        engine.box(['Apply', ['Function', ['Max', 's'], 's'], 't'] as never),
+        { to: 'javascript' }
+      );
+      expect(r.success).toBe(false);
+    });
+  });
+
+  test('a range argument does not type the parameter', () => {
+    // `isScalarType()` counts `range` as a scalar type, as it counts
+    // `string`. Only a string is written on the parameter.
+    const engine = new ComputeEngine();
+    engine.declare('r', 'range');
+    const expr = engine.box([
+      'Apply',
+      ['Function', ['Length', 'd'], 'd'],
+      'r',
+    ] as never);
+    expect(isFunction(expr)).toBe(true);
+    if (!isFunction(expr)) return;
+    expect(
+      appliedLiteralTypedFromArguments(expr.ops, { whole: false })
+    ).toBeUndefined();
+  });
+
   test('the expression is not changed', () => {
     const json = ['Apply', ['Function', ['Sum', 'd'], 'd'], evens];
     const expr = ce.box(json as never);

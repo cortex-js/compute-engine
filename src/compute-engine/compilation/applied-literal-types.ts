@@ -2,7 +2,10 @@ import type { Expression } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
-import { functionLiteralDeclaredSignature } from '../boxed-expression/function-literal.js';
+import {
+  functionLiteralDeclaredSignature,
+  isScalarType,
+} from '../boxed-expression/function-literal.js';
 import { provisionalLiteral } from '../boxed-expression/provisional-application.js';
 import { ascribeDeclaredParameterTypes } from '../engine-declarations.js';
 import { literalParamsMap } from '../library/core.js';
@@ -67,6 +70,17 @@ import { compilationType } from './compiler-type-facts.js';
  * map over a collection at run time, and typing it does not remove a
  * decline of the compiled code.
  *
+ * A `string` argument is used, although `isScalarType()` counts a string as
+ * a scalar. A string is a collection of its characters, so the body can
+ * infer a collection type for the parameter: in `s ↦ Length(s)`, `s` is a
+ * `collection`. The compiled `Length` of a `collection` reads the value
+ * with `_SYS.elts`, which accepts an array or a set and throws a
+ * `RangeError` for a string, while the interpreter gives the number of
+ * characters. With `s` typed `string`, `Length` counts the characters
+ * (`_SYS.chars`). The other collection types that `isScalarType()` counts as
+ * scalars (`range`) are not used, so their parameters keep the type that the
+ * body infers.
+ *
  * The body is canonicalized again with the typed parameters, in the scope
  * that encloses the literal, so that a name of an enclosing block keeps its
  * binding (`ascribeDeclaredParameterTypes()` builds the literal). A literal
@@ -109,6 +123,7 @@ export function appliedLiteralTypedFromArguments(
     if (t === 'unknown' || t === 'any' || t === 'nothing' || t === 'never')
       return 'unknown';
     if (!isSubtype(t, 'collection')) return 'unknown';
+    if (isScalarType(t) && !isSubtype(t, 'string')) return 'unknown';
     const resolved = compilationType(args[i]);
     if (typeof resolved === 'object' && resolved.kind === 'union')
       return 'unknown';
@@ -123,12 +138,23 @@ export function appliedLiteralTypedFromArguments(
 
   const ce = literal.engine;
   const scope = literal.ops[0].localScope?.parent ?? undefined;
+  // `includeScalar`: `ascribeDeclaredParameterTypes()` counts a `string` as
+  // a scalar type, and without this option it does not write a scalar type
+  // on a parameter, because that can change how a parameter that maps over
+  // a collection broadcasts. The conditions above make sure that no
+  // parameter here maps. The only scalar types left in `types` are strings:
+  // the loop above gives `unknown` for the other scalar types.
   const typed = ce._inScope(scope, () =>
-    ascribeDeclaredParameterTypes(ce, literal, {
-      kind: 'signature',
-      args: types.map((type) => ({ type })),
-      result: 'unknown',
-    })
+    ascribeDeclaredParameterTypes(
+      ce,
+      literal,
+      {
+        kind: 'signature',
+        args: types.map((type) => ({ type })),
+        result: 'unknown',
+      },
+      { includeScalar: true }
+    )
   );
   if (typed === literal || !isFunction(typed, 'Function') || !typed.isValid)
     return undefined;
