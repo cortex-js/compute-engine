@@ -2344,9 +2344,22 @@ function fixpointLiteral(
       // accumulator still admits every value the fixpoint proved it
       // receives, or its signature would claim a narrower type than the
       // fold delivers.
+      //
+      // The test strips the `missing` arms of the fixpoint first, as the
+      // validation of an argument does (`stripMissingFromType()`): absence
+      // is carried by the value at run time, not by the type of the binding.
+      // A use of the accumulator at a slot that propagates absence removes
+      // `missing` from its binding: with the seed `[1, 2]` and the body
+      // `If(x > 1, [p[1] + q, x], p)`, where `q` can be `Missing`, the
+      // fixpoint is `list<integer | missing^2>` and `p[1] + q` binds `p` as
+      // `vector<integer^2>`. Without the strip that fold was rejected, and
+      // the accumulator kept the type that the index reads alone gave it,
+      // `tuple<number>`. The branches of the `If` then had a list type and
+      // a tuple type, and the JavaScript target refused the fold (issue
+      // #514).
       const bound = accumulatorBindingType(literal);
       if (bound === undefined) return undefined;
-      if (!isSubtype(t, bound)) return 'rejected';
+      if (!isSubtype(stripMissingFromType(t), bound)) return 'rejected';
       const admitted = canonicalCallbackOperand(literal, arity);
       if (admitted === undefined) return undefined;
       return { literal: admitted, type: t };

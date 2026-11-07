@@ -13,6 +13,15 @@
   no such value, and `freeSymbols` held `"Nothing"`, so a host that checks each
   free symbol against its inputs read it as an input with no value.
   `expr.symbols` still lists it. (Tycho row 506)
+- **A fold whose pair accumulator takes a value that can be `Missing` compiles
+  again** ([#514](https://github.com/cortex-js/compute-engine/issues/514),
+  reported by [enumeratio](https://github.com/enumeratio)).
+  `Fold((p, x) ↦ If(x > 1, [p[1] + At([], x), x], p), [1, 2], 1..n)` typed
+  the accumulator `p` as `tuple<number>`, so the two branches of the `If` had
+  different shapes, and the JavaScript target refused the fold since 0.178.0.
+  The accumulator is now typed `vector<integer^2>`, the fold
+  `list<integer | missing^2>`, and the fold compiles: `n = 3` gives
+  `[Missing, 3]` on the interpreter and `[NaN, 3]` in compiled code.
 
 ## 0.182.0 _2026-11-06_
 
