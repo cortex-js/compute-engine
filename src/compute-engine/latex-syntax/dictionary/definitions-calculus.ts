@@ -811,7 +811,13 @@ function serializeIntegral(command: string) {
       args = [];
     }
 
-    const limits = operands(expr).slice(1);
+    // An integral with no limit (the canonical form drops a limit with four
+    // elements) takes its variables from the parameters of the integrand: one
+    // integral sign and one differential for each parameter, so that a parse
+    // of the LaTeX gets the variables back. An integrand with no parameter
+    // (a function name such as `\sin`) gets one sign and no differential.
+    let limits: ReadonlyArray<MathJsonExpression> = operands(expr).slice(1);
+    if (limits.length === 0) limits = args.length > 0 ? args : ['Nothing'];
 
     // We're going to build the prefix: the '\int' commands with limits, and the suffix, the dx, then put it all together
     const indexes: string[] = [];
@@ -891,9 +897,6 @@ function serializeIntegral(command: string) {
       .filter((x) => symbol(x) !== 'Nothing')
       .map((arg) => `\\mathrm{d}${serializer.serialize(symbol(arg) ?? 'x')}`);
     if (suffix.length > 0) suffix = ['\\,', ...suffix];
-
-    if (prefix.length === 0)
-      return `${command}\\,${serializer.serialize(body)}\\!${suffix.join(' ')}`;
 
     // A flat, single-level multiple integral (`["Integrate", f, limitsX,
     // limitsY]`, as produced by `\iint` / `\iiint`) serializes back to the

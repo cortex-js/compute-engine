@@ -467,6 +467,34 @@ describe('ORDER OF THE LIMITS OF A MULTIPLE INTEGRAL', () => {
     ).toBe('int(x * y dy  dx)');
   });
 
+  test('the LaTeX of an integral with no limit names the parameters of its integrand', () => {
+    // One integral sign and one differential for each parameter, innermost
+    // (the last parameter) first, so that a parse of the LaTeX gets the
+    // variables back.
+    const single = ce.box(['Integrate', ['Square', 'x'], ['Tuple', 'x', 0, 1, 5]]);
+    expect(single.latex).toMatchInlineSnapshot(`\\int\\!x^2\\, \\mathrm{d}x`);
+    expect(JSON.stringify(ce.parse(single.latex).json)).toBe(
+      '["Integrate",["Function",["Block",["Power","x",2]],"x"],["Limits","x","Nothing","Nothing"]]'
+    );
+
+    const double = ce.box([
+      'Integrate',
+      ['Function', ['Multiply', 'x', 'y'], 'x', 'y'],
+    ]);
+    expect(double.latex).toMatchInlineSnapshot(
+      `\\iint\\!xy\\, \\mathrm{d}y \\mathrm{d}x`
+    );
+    expect(JSON.stringify(ce.parse(double.latex).json)).toBe(
+      '["Integrate",["Function",["Block",["Multiply","x","y"]],"x","y"],["Limits","x","Nothing","Nothing"],["Limits","y","Nothing","Nothing"]]'
+    );
+
+    // A function name as integrand has no parameter: one sign and no
+    // differential.
+    expect(ce.box(['Integrate', 'Sin']).latex).toMatchInlineSnapshot(
+      `\\int\\!\\sin`
+    );
+  });
+
   test('a flat integral with an outer bound that uses the inner variable', () => {
     const expr = ce.box([
       'Integrate',

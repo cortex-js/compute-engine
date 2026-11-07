@@ -741,6 +741,13 @@
   branch is no longer compiled: it gave a wrong value for the same reason, and
   the interpreter evaluates it. (CE-1073)
 
+- **The LaTeX of an integral with no limit writes a differential for each
+  variable of its integrand**, so that a parse of the LaTeX gives the same
+  variables. The LaTeX of `["Integrate", ["Function", ["Multiply", "x", "y"],
+  "x", "y"]]` was `\int\,xy\!`, which reads back as an integral over `x` only.
+  It is now `\iint\!xy\, \mathrm{d}y \mathrm{d}x`. The LaTeX of
+  `["Integrate", ["Square", "x"]]` is now `\int\!x^2\, \mathrm{d}x`. (CE-1049)
+
 ### Performance
 
 - **The compilation of an expression that reads a symbol whose value is a
