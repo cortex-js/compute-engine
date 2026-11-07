@@ -683,19 +683,20 @@ describe('SUBS ON A RAW OR STRUCTURAL BINDER', () => {
   });
 });
 
-describe('SUBS DOES NOT AVOID VARIABLE CAPTURE', () => {
-  // A replacement that holds a name the binder binds is inserted as it is: the
-  // index is not renamed. This is the documented behavior of `subs()`.
+describe('SUBS AVOIDS VARIABLE CAPTURE', () => {
+  // A replacement that holds a name the binder binds does not get captured:
+  // the index is renamed first. More cases are in
+  // `subs-capture-avoiding.test.ts`.
   test('Sum(j + k, k) with j replaced by k', () => {
     const result = subs(['Sum', ['Add', 'j', 'k'], ['Limits', 'k', 1, 3]], {
       j: 'k',
     });
     expect(result.json).toEqual([
       'Sum',
-      ['Add', 'k', 'k'],
-      ['Limits', 'k', 1, 3],
+      ['Add', 'k', 'k_1'],
+      ['Limits', 'k_1', 1, 3],
     ]);
-    expect(result.evaluate().json).toEqual(12);
+    expect(result.evaluate().toString()).toBe('3k + 6');
   });
 
   test('renaming the index first with a recursive replace() avoids it', () => {

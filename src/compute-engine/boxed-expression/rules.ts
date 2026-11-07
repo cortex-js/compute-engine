@@ -46,6 +46,7 @@ import {
 import { getRuleIndex, candidateRules } from './rule-index.js';
 import { scopeForRebuild } from './binding-sites.js';
 import { withCallableBinding } from './binders.js';
+import { subsWithCapture } from './subs-capture-mode.js';
 
 /** Condition functions that already triggered the one-time "non-boolean
  * condition result" warning (see `applyRule`). */
@@ -773,7 +774,7 @@ function parseRule(
       // Evaluate the condition as a predicate, under verification semantics so
       // an unprovable guard (e.g. `; w ≠ 0`) does not discharge vacuously.
       condFn = (sub: BoxedSubstitution): boolean =>
-        conditionHolds(ce, condition.subs(sub).canonical);
+        conditionHolds(ce, subsWithCapture(condition, sub).canonical);
     }
 
     return boxRule(
@@ -846,7 +847,7 @@ function boxRule(
     // the condition under verification semantics (see `conditionHolds`) so an
     // unprovable predicate guard does not discharge vacuously.
     condFn = (x: BoxedSubstitution, _ce: ComputeEngine): boolean =>
-      conditionHolds(ce, condPattern.subs(x));
+      conditionHolds(ce, subsWithCapture(condPattern, x));
   } else {
     if (condition !== undefined && typeof condition !== 'function')
       throw new Error(
@@ -1325,7 +1326,9 @@ export function applyRule(
         ? replace(expr, sub)
         : // @todo: 'expr.subs()' to eventually also assume a 'form' option
           // : replace.subs(sub, { form: dynamicForm ? undefined : formValue });
-          replace.subs(sub, { canonical: getFormType() === 'canonical' });
+          subsWithCapture(replace, sub, {
+            canonical: getFormType() === 'canonical',
+          });
   } catch (e) {
     if (e instanceof CancellationError) throw e;
     console.error(

@@ -54,6 +54,7 @@ import type { BoxedSubstitution } from '../types-serialization.js';
 import type { Rule, RuleStep } from '../types-evaluation.js';
 import type { RulePurpose } from '../types-kernel-evaluation.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import { subsWithCapture } from '../boxed-expression/subs-capture-mode.js';
 import {
   DIRECT_TRIG_OPERATORS,
   INVERSE_TRIG_OPERATORS,
@@ -208,7 +209,7 @@ function buildGuardClosures(
             // special-case `type.matches('real')` because `real ⊄ complex`.
             if (v.isFinite !== false && v.type.matches('complex')) return true;
             try {
-              const r = pred.subs(sub).evaluate().json;
+              const r = subsWithCapture(pred, sub).evaluate().json;
               if (r === 'True') return true;
               if (r === 'False') return false;
               return undefined; // symbolic residue: undecided
@@ -248,7 +249,7 @@ function buildGuardClosures(
           const v = sub[g.wc];
           if (v === undefined) return false;
           try {
-            const inst = pred.subs(sub);
+            const inst = subsWithCapture(pred, sub);
             const r = inst.evaluate().json;
             if (r === 'True') return true;
             if (r === 'False') return false;
@@ -275,7 +276,7 @@ function buildGuardClosures(
           const v = sub[g.wc];
           if (v === undefined) return false;
           try {
-            const r = pred.subs(sub).evaluate().json;
+            const r = subsWithCapture(pred, sub).evaluate().json;
             if (r === 'True') return true;
             if (r === 'False') return false;
             return undefined; // symbolic residue: undecided
@@ -298,7 +299,7 @@ function buildGuardClosures(
           const v = sub[g.wc];
           if (v === undefined) return false;
           try {
-            let b = bound.subs(sub);
+            let b = subsWithCapture(bound, sub);
             if (!b.isCanonical) b = b.canonical;
             let r = compare(v, b);
             // Composite constant bounds (-π, π/2, 1/e, …) are not directly
@@ -321,7 +322,9 @@ function buildGuardClosures(
             // that is the undecided case the onGuardUndecided hook makes
             // observable. Corpus identity validation is the prover's job, so
             // this stays on the prover tier rather than cheap `isEqual()`.
-            const eq = lhs.subs(sub).isIdenticallyEqual(rhs.subs(sub));
+            const eq = subsWithCapture(lhs, sub).isIdenticallyEqual(
+              subsWithCapture(rhs, sub)
+            );
             if (eq === undefined) return undefined;
             return eq === false;
           } catch {
@@ -333,7 +336,7 @@ function buildGuardClosures(
         const pred = boxGuardExpr(g.pred);
         return (sub) => {
           try {
-            const r = pred.subs(sub).evaluate().json;
+            const r = subsWithCapture(pred, sub).evaluate().json;
             if (r === 'True') return true;
             if (r === 'False') return false;
             return undefined; // symbolic residue: undecided
@@ -406,7 +409,7 @@ function realBranchRootFilter(
   replace: Expression
 ): (sub: BoxedSubstitution) => boolean {
   return (sub) => {
-    const root = replace.subs(sub).N();
+    const root = subsWithCapture(replace, sub).N();
     if (!isNumber(root)) return true;
     return !root.isComplex;
   };
@@ -737,7 +740,7 @@ function wrapHotHeadRule(parts: BoxedRuleParts): Rule {
 
     // 4. Replacement (canonical, as on the engine's simplification channels)
     return {
-      value: replace.subs(sub, { canonical: true }),
+      value: subsWithCapture(replace, sub, { canonical: true }),
       because: id,
       purpose,
     };

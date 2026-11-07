@@ -6868,7 +6868,10 @@ const SUBSTITUTES = { substitutes: true };
  * its name is then counted as free too. That can only cause a rename that is
  * not necessary, never a capture.
  */
-function freeNamesOf(expr: Expression): ReadonlySet<string> {
+function freeNamesOf(
+  expr: Expression,
+  operators = true
+): ReadonlySet<string> {
   const names = new Set<string>();
   const placeholders = placeholderBindings(expr);
   const isFree = (
@@ -6890,7 +6893,7 @@ function freeNamesOf(expr: Expression): ReadonlySet<string> {
     false,
     undefined,
     (app, _ops, shadowed) => {
-      if (isFree(app.operator, app.valueDefinition, shadowed))
+      if (operators && isFree(app.operator, app.valueDefinition, shadowed))
         names.add(app.operator);
       return undefined;
     }
@@ -6968,6 +6971,120 @@ function namesIn(exprs: ReadonlyArray<Expression>): Set<string> {
 
 /**
  * The binder `node` with each of its bound names `names` renamed to a fresh
+ * name, so that a substitution below the binder does not capture a free name
+ * of a replacement. `Expression.subs()` calls it (`capturedNames()` in
+ * `boxed-expression/boxed-function.ts` finds the names). The fresh name of
+ * `k` is `k_1`, or `k_2` when `k_1` is used in `node` or in one of the
+ * replacements `values`. The rename itself is the one that function
+ * application uses (`renameBoundVariables`).
+ *
+ * `undefined` when a correct rename cannot be decided before the node runs:
+ *
+ * - the name is the target of an `Assign` of a `Block` that is not canonical
+ *   (a held block), and not of a `Declare`: the `Assign` makes a local only
+ *   when the name is not declared in the scope where the block is released
+ *   (`heldBlockAssignTargets`). With `s` declared, `Hold(Block(s := 3, y +
+ *   s))` with `y` replaced by `s` must keep `s := 3` as a write of the
+ *   declared `s`;
+ * - the name is declared only by a `Declare` or an `Assign` in an operand
+ *   with no scope of its own (a branch of an `If`): the later reads denote
+ *   the local only when that branch runs (`blockLocals`);
+ * - one of the other cases where `renameBoundVariables` throws
+ *   `UnavoidableCapture`.
+ */
+export function renameCapturingBinder(
+  node: Expression,
+  names: ReadonlyArray<string>,
+  values: ReadonlyArray<Expression>,
+  readsFunctionBody: boolean
+): Expression | undefined {
+  const held = !(
+    node.isCanonical ||
+    node.localScope !== undefined ||
+    isFunction(node, 'Function')
+  );
+  if (held) {
+    const assigned = heldBlockAssignTargets(node);
+    if (names.some((name) => assigned.has(name))) return undefined;
+  }
+  try {
+    const used = namesIn([node, ...values]);
+    const chosen = new Map<string, string>();
+    const renamed = renameBoundVariables(node, names, used, chosen);
+    if (!readsFunctionBody || !isFunction(renamed)) return renamed;
+    // `subs()` reads a `Function` literal operand of a node with index
+    // variables (the integrand of a definite `Integrate`) by its body, with
+    // the index variables of the node as the bound names
+    // (`subsBinderView()`, `boxed-function.ts`), and so does the evaluation
+    // of the node: the parameters of the literal and the index variables are
+    // the same variables. The rename above does not enter the literal, which
+    // binds the name again, so each parameter of the literal that is a
+    // renamed name gets the same fresh name too. Without it,
+    // `Integrate(j·x, Limits(x, 0, 1))` with `j` replaced by `x` gave
+    // `Integrate(Function(x·x, x), Limits(x_1, 0, 1))`, whose value is `x²`,
+    // not `x/2`.
+    let changed = false;
+    const ops = renamed.ops.map((op) => {
+      if (!isFunction(op, 'Function')) return op;
+      const params = boundVariableNames(op).filter((name) =>
+        names.includes(name)
+      );
+      if (params.length === 0) return op;
+      const literal = renameBoundVariables(op, params, used, chosen);
+      if (literal === undefined || literal === op) return op;
+      changed = true;
+      return literal;
+    });
+    if (!changed) return renamed;
+    const ce = node.engine;
+    if (renamed.isCanonical)
+      return ce._fn(renamed.operator, ops, { scope: renamed.localScope });
+    return ce.function(renamed.operator, ops, {
+      form: renamed.isStructural ? 'structural' : 'raw',
+    });
+  } catch (e) {
+    if (e instanceof UnavoidableCapture) return undefined;
+    throw e;
+  }
+}
+
+/**
+ * The names that a `Block` that is not canonical (a held block) may or may
+ * not bind when it is released (`heldBlockAssignTargets`): the target of an
+ * `Assign` statement that no `Declare` statement declares, and the target of
+ * an `Assign` or a `Declare` in an operand of a statement (a branch of an
+ * `If`). An empty set for every other node. `subsIfCaptureFree()`
+ * (`boxed-expression/subs-capture-mode.ts`) declines when a replacement
+ * below the block holds one of these names free.
+ */
+export function heldBlockUndecidedLocals(
+  node: Expression
+): ReadonlySet<string> {
+  if (
+    !isFunction(node, 'Block') ||
+    node.isCanonical ||
+    node.localScope !== undefined
+  )
+    return new Set();
+  return heldBlockAssignTargets(node);
+}
+
+/**
+ * The names that occur free in `expr`, as the capture-avoiding substitution
+ * of function application reads them (`freeNamesOf`): the symbols and the
+ * operators of the calls that no binder of `expr` binds. With `operators`
+ * set to `false`, the operators of the calls are left out: `subs()`
+ * replaces a symbol operand, not the name of a call.
+ */
+export function freeNamesForSubs(
+  expr: Expression,
+  operators = true
+): ReadonlySet<string> {
+  return freeNamesOf(expr, operators);
+}
+
+/**
+ * The binder `node` with each of its bound names `names` renamed to a fresh
  * name that is not in `used` (`x` becomes `x_1`, or `x_2` when `x_1` is
  * used). The fresh names are added to `used`.
  *
@@ -7023,11 +7140,16 @@ function namesIn(exprs: ReadonlyArray<Expression>): Set<string> {
  * for a fresh name with no binding, and for the body scope of a nested
  * literal that is being applied or that chains to the locals a closure
  * captured (`rerootScopes`).
+ *
+ * `chosen` maps a name to the fresh name that an earlier rename gave it: a
+ * name in `chosen` gets that fresh name again, and a new fresh name is added
+ * to `chosen`.
  */
 function renameBoundVariables(
   node: Expression,
   names: ReadonlyArray<string>,
-  used: Set<string>
+  used: Set<string>,
+  chosen: Map<string, string> = new Map()
 ): Expression | undefined {
   const ce = node.engine;
   if (!isFunction(node)) return undefined;
@@ -7055,11 +7177,18 @@ function renameBoundVariables(
   )
     throw new UnavoidableCapture();
 
+  // A name that `chosen` already maps keeps that fresh name, so that two
+  // binders renamed one after the other give the same name the same fresh
+  // name (`renameCapturingBinder`). A new fresh name is added to `chosen`.
   const fresh = new Map<string, string>();
   for (const name of names) {
-    let i = 1;
-    while (used.has(`${name}_${i}`)) i += 1;
-    const id = `${name}_${i}`;
+    let id = chosen.get(name);
+    if (id === undefined) {
+      let i = 1;
+      while (used.has(`${name}_${i}`)) i += 1;
+      id = `${name}_${i}`;
+      chosen.set(name, id);
+    }
     used.add(id);
     fresh.set(name, id);
   }
@@ -7240,7 +7369,7 @@ function renameBoundVariables(
     }
   };
   const reroot = (e: Expression) =>
-    rerootScopes(e, newScope, rerootMemo, rebind);
+    rerootScopes(e, newScope, rerootMemo, rebind, scope);
 
   return ce._inScope(newScope, () => {
     if (isLiteral) {
@@ -7501,12 +7630,22 @@ function renameHeldBinder(
  * `rebind`, when given, is called with the bindings of each copy before the
  * walk descends into it: the rename replaces there the entry of a renamed
  * binding by the entry of its fresh name.
+ *
+ * `from`, when given, is the original scope that `parent` copies. A scoped
+ * node whose scope does not have `from` as its parent is not below the
+ * renamed binder in the chain of scopes, and is kept with its scope: a
+ * closure value that a `Sum` holds (the result of evaluating
+ * `Block(a := 2, x ↦ a·x)`) chains to the scope of the block that made it,
+ * where `a` is `2`, and a copy onto the scope of the `Sum` lost `a`. No
+ * occurrence in such a node resolves to the renamed binding, so it needs no
+ * fresh name.
  */
 function rerootScopes(
   expr: Expression,
   parent: Scope,
   memo: Map<Scope, Map<Expression, Expression>>,
-  rebind?: (bindings: Map<string, BoxedDefinition>) => void
+  rebind?: (bindings: Map<string, BoxedDefinition>) => void,
+  from?: Scope
 ): Expression {
   if (!isFunction(expr) && !isDictionary(expr)) return expr;
   if (!expr.isCanonical) return expr;
@@ -7526,28 +7665,39 @@ function rerootScopes(
   if (isDictionary(expr)) {
     let changed = false;
     const entries = expr.entries.map(([key, value]) => {
-      const next = rerootScopes(value, parent, memo, rebind);
+      const next = rerootScopes(value, parent, memo, rebind, from);
       changed ||= next !== value;
       return ce._fn('KeyValuePair', [ce.string(key), next]);
     });
     if (changed) result = ce.function('Dictionary', entries);
-  } else if (isFunction(expr) && expr.localScope !== undefined) {
+  } else if (
+    isFunction(expr) &&
+    expr.localScope !== undefined &&
+    (from === undefined || expr.localScope.parent === from)
+  ) {
+    const own = expr.localScope;
     const scope: Scope = {
       parent,
-      bindings: new Map(expr.localScope.bindings),
+      bindings: new Map(own.bindings),
     };
     rebind?.(scope.bindings);
-    copyAssignmentLocals(expr.localScope, scope);
+    copyAssignmentLocals(own, scope);
     result = ce._fn(
       expr.operator,
-      expr.ops.map((op) => rerootScopes(op, scope, memo, rebind)),
+      expr.ops.map((op) => rerootScopes(op, scope, memo, rebind, own)),
       { scope, metadata: { sourceOffsets: expr.sourceOffsets } }
     );
-  } else if (isFunction(expr) && expr.ops.length > 0) {
+  } else if (
+    isFunction(expr) &&
+    expr.localScope === undefined &&
+    expr.ops.length > 0
+  ) {
     // A store-backed list holds numbers only, and reading its `ops` would
     // box every element.
     if ((expr as { _numericStore?: unknown })._numericStore === undefined) {
-      const ops = expr.ops.map((op) => rerootScopes(op, parent, memo, rebind));
+      const ops = expr.ops.map((op) =>
+        rerootScopes(op, parent, memo, rebind, from)
+      );
       if (ops.some((op, i) => op !== expr.ops[i]))
         result = ce._fn(expr.operator, ops, {
           metadata: { sourceOffsets: expr.sourceOffsets },

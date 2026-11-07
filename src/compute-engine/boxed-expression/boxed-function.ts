@@ -489,10 +489,19 @@ import {
   callableApplication,
   capturedValueMismatchNow,
   exactArgumentSources,
+  freeNamesForSubs,
+  heldBlockUndecidedLocals,
   isUndecidedLiteralApplication,
   lookupApplicable,
+  renameCapturingBinder,
   withCallerCapturedCheck,
 } from '../function-utils.js';
+import {
+  SUBS_CAPTURE,
+  inDefaultSubsCaptureMode,
+  subsCaptureMode,
+  type SubsCaptureMode,
+} from './subs-capture-mode.js';
 import {
   eachInLazyViewContext,
   inLazyViewContext,
@@ -767,6 +776,7 @@ let _transientSubs:
         sub: Substitution;
         canonical: CanonicalOptions | undefined;
         scope: Scope;
+        capture: SubsCaptureMode;
         result: Expression;
       }[]
     >
@@ -2905,13 +2915,21 @@ export class BoxedFunction
     // result it got the first time (see `_transientSubs`).
     const canonical = options?.canonical;
     const scope = this.engine.context.lexicalScope;
+    const capture = subsCaptureMode();
     const owner = _transientSubs === undefined;
-    if (owner) _transientSubs = new Map();
+    if (owner) {
+      _transientSubs = new Map();
+      _transientReplacementNames = new Map();
+    }
     else {
       const hit = _transientSubs!
         .get(this)
         ?.find(
-          (x) => x.sub === sub && x.canonical === canonical && x.scope === scope
+          (x) =>
+            x.sub === sub &&
+            x.canonical === canonical &&
+            x.scope === scope &&
+            x.capture === capture
         );
       if (hit !== undefined) return hit.result;
     }
@@ -2920,12 +2938,15 @@ export class BoxedFunction
         this._subsInParseScope(sub, options)
       );
       const entries = _transientSubs!.get(this);
-      const entry = { sub, canonical, scope, result };
+      const entry = { sub, canonical, scope, capture, result };
       if (entries === undefined) _transientSubs!.set(this, [entry]);
       else entries.push(entry);
       return result;
     } finally {
-      if (owner) _transientSubs = undefined;
+      if (owner) {
+        _transientSubs = undefined;
+        _transientReplacementNames = undefined;
+      }
     }
   }
 
@@ -2933,6 +2954,65 @@ export class BoxedFunction
     sub: Substitution,
     options?: { canonical?: CanonicalOptions }
   ): Expression {
+    // The substitution avoids variable capture. When a replacement holds a
+    // free name that this node binds, and an occurrence that the
+    // substitution replaces is in the scope of that name, the node renames
+    // the bound name to a fresh name first, and the substitution is done
+    // into the renamed node: `Sum(j + k, Limits(k, 1, 3))` with `j`
+    // replaced by `k` is `Sum(k + k_1, Limits(k_1, 1, 3))`, whose value is
+    // `3k + 6`. A node with no such name is not renamed, and keeps its
+    // identity. When the rename cannot be decided before the node runs
+    // (`renameCapturingBinder()`, `function-utils.ts`), the replacement is
+    // inserted as it is, or the call declines in the `'decline'` mode
+    // (`SubsCaptureMode`, `subs-capture-mode.ts`).
+    const binderView = subsBinderView(this);
+    const capture = subsCaptureMode();
+    // In the `'decline'` mode, a held `Block` that may or may not bind a
+    // name when it is released (`heldBlockUndecidedLocals()`,
+    // `function-utils.ts`) declines when a replacement of a name that
+    // occurs free in the block holds that name free: `Hold(Block(If(c,
+    // Declare(w, …), 0), y + w))` with `y` replaced by `w`. Whether the
+    // read of `w` denotes the local is known only when the block runs.
+    if (capture === 'decline' && !this.isCanonical) {
+      const undecided = heldBlockUndecidedLocals(this);
+      if (undecided.size > 0) {
+        const replacements = replacementFreeNames(this.engine, sub);
+        const free = freeNamesForSubs(this, false);
+        if (
+          replacements.some(
+            (r) =>
+              free.has(r.key) &&
+              [...undecided].some((name) => name !== r.key && r.free.has(name))
+          )
+        )
+          throw SUBS_CAPTURE;
+      }
+    }
+    if (binderView !== undefined && capture !== 'insert') {
+      const captured = capturedNames(this, sub, binderView);
+      if (captured !== undefined) {
+        const renamed = renameCapturingBinder(
+          this,
+          captured.names,
+          captured.values,
+          binderView.readsFunctionBody
+        );
+        // A rename that leaves a capturing name (a name that the rename
+        // does not see as bound) is not used: the substitution into it
+        // would capture the name again.
+        const renamedView =
+          renamed === undefined ? undefined : subsBinderView(renamed);
+        if (
+          renamed !== undefined &&
+          renamed !== this &&
+          (renamedView === undefined ||
+            capturedNames(renamed, sub, renamedView) === undefined)
+        )
+          return renamed.subs(sub, options);
+        if (capture === 'decline') throw SUBS_CAPTURE;
+      }
+    }
+
     options ??= { canonical: undefined };
 
     // When the caller does not request a form, the receiver's form is
@@ -3033,10 +3113,9 @@ export class BoxedFunction
     // `Integrate` read the enclosing binding of the index
     // (`ownIndexClauseAt`, `binding-sites.ts`).
     //
-    // Variable capture is NOT avoided: a replacement that contains a free
-    // name the binder binds (`Sum(j + k, Limits(k, 1, 3)).subs({j: 'k'})`)
-    // is inserted as it is, and the binder index is not renamed.
-    const binderView = subsBinderView(this);
+    // A binder that would capture a free name of a replacement was renamed
+    // at the start of this method.
+    //
     // A `Function` literal operand of a node with index variables (the
     // integrand of an `Integrate`) is read by its body, as the free-variable
     // walk reads it: its own parameters are not bound names here, the index
@@ -3184,19 +3263,25 @@ export class BoxedFunction
     // the substitution itself puts in the result keeps the binding that its
     // caller gave it. `isSame()` and the hash still compare a call by its
     // name (`docs/SCOPING-MODEL.md`, "Callable resolution").
-    return withCallableBinding(this, () =>
-      this.engine.function(
-        this._operator,
-        form === 'canonical' ? operandsForCanonicalRebuild(this, ops) : ops,
-        {
-          form,
-          scope: scopeForRebuild(
-            this._localScope,
-            this.engine,
-            this._operator,
-            ops
-          ),
-        }
+    //
+    // The rebuild runs in the default capture mode: a `subs()` call that a
+    // canonical handler makes is not a part of this substitution
+    // (`inDefaultSubsCaptureMode()`, `subs-capture-mode.ts`).
+    return inDefaultSubsCaptureMode(() =>
+      withCallableBinding(this, () =>
+        this.engine.function(
+          this._operator,
+          form === 'canonical' ? operandsForCanonicalRebuild(this, ops) : ops,
+          {
+            form,
+            scope: scopeForRebuild(
+              this._localScope,
+              this.engine,
+              this._operator,
+              ops
+            ),
+          }
+        )
       )
     );
   }
@@ -22934,6 +23019,134 @@ function subsBinderView(expr: Expression):
     outerPaths: builder?.domains ?? [],
   };
 }
+
+/**
+ * The bound names of the binder `node` that capture a free name of a
+ * replacement of `sub`, with the boxed replacements, or `undefined` when
+ * there is none. `view` is `subsBinderView(node)`.
+ *
+ * A bound name `k` captures when a replacement of another name `j` has `k`
+ * free, and an occurrence of `j` that the substitution replaces is in an
+ * operand where `k` is in scope and `j` is not bound (`view.namesIn()`):
+ * `Sum(j + k, Limits(k, 1, 3))` with `j` replaced by `k`. An occurrence of
+ * `j` in the bounds of the own `Limits` clause of `k` is outside the scope
+ * of `k`, so `Sum(k, Limits(k, 1, j))` with `j` replaced by `k` gives no
+ * name. The occurrences are read by operand, with the free-name walk of
+ * function application (`freeNamesForSubs()`, `function-utils.ts`), with no
+ * operator of a call: `subs()` does not replace the name of a call, so
+ * `Function(g(x), x)` with `g` replaced by `x` keeps its parameter `x`. The
+ * free names of a replacement include the operators of its calls, which a
+ * binder can capture. That
+ * walk can count a name free where the substitution does not replace it
+ * (the domain of a membership of a set-builder, which reads the enclosing
+ * scope): the binder is then renamed with no need, which changes the
+ * printed names and never the value.
+ */
+function capturedNames(
+  node: Expression,
+  sub: Substitution,
+  view: NonNullable<ReturnType<typeof subsBinderView>>
+): { names: string[]; values: Expression[] } | undefined {
+  if (!isFunction(node) || view.names.length === 0) return undefined;
+  const replacements = replacementFreeNames(node.engine, sub);
+  const capturing = (name: string) =>
+    replacements.filter((r) => r.key !== name && r.free.has(name));
+  if (!view.names.some((name) => capturing(name).length > 0)) return undefined;
+  const ops = node.ops;
+  const opFree: (ReadonlySet<string> | undefined)[] = [];
+  // A `Function` literal operand of a node that reads it by its body (the
+  // integrand of an `Integrate`, `view.readsFunctionBody`) does not bind its
+  // parameters for `subs()`, which replaces the `a` of
+  // `Integrate(Function(a·x, x, a), Limits(x, 0, 1))`. The free-name walk
+  // counts them as bound, so they are added to the free names of the
+  // operand.
+  const freeIn = (i: number): ReadonlySet<string> => {
+    const cached = opFree[i];
+    if (cached !== undefined) return cached;
+    const op = ops[i];
+    let free = freeNamesForSubs(op, false);
+    if (view.readsFunctionBody && isFunction(op, 'Function')) {
+      const all = new Set(free);
+      for (const param of op.ops.slice(1))
+        for (const name of functionLiteralParameterNames(param)) all.add(name);
+      free = all;
+    }
+    opFree[i] = free;
+    return free;
+  };
+  // True when a free occurrence of `key` in operand `i` is in the scope of
+  // the bound name `name`. In the own clause of `name`, only the operands
+  // that are not outside the scope of the index count (`ownIndexClauseAt()`,
+  // `binding-sites.ts`): the index itself, and the condition of an
+  // `Element` clause.
+  const occursInScope = (name: string, key: string, i: number): boolean => {
+    const here = view.namesIn(i);
+    if (!here.includes(name) || here.includes(key)) return false;
+    const own = ownIndexClauseAt(node, i, view.binders);
+    const op = ops[i];
+    if (own === undefined || own.name !== name || !isFunction(op))
+      return freeIn(i).has(key);
+    return op.ops.some(
+      (o, j) => !own.outside(j) && freeNamesForSubs(o, false).has(key)
+    );
+  };
+  const names = view.names.filter((name) =>
+    capturing(name).some((r) =>
+      ops.some((_, i) => occursInScope(name, r.key, i))
+    )
+  );
+  if (names.length === 0) return undefined;
+  return { names, values: replacements.map((r) => r.value) };
+}
+
+/**
+ * The replacements of `sub`, boxed raw, each with its key and its free
+ * names (`freeNamesForSubs()`). A raw box keeps the names as they are
+ * written. Computed once per substitution object in the current top-level
+ * `subs()` call (`_transientReplacementNames`): `subs()` passes the same
+ * object to every node it visits. A host can change the object between two
+ * calls, so the entries are not kept after the call.
+ */
+function replacementFreeNames(
+  ce: ComputeEngine,
+  sub: Substitution
+): ReadonlyArray<{
+  key: string;
+  value: Expression;
+  free: ReadonlySet<string>;
+}> {
+  const cached = _transientReplacementNames?.get(sub);
+  if (cached !== undefined && cached.ce === ce) return cached.entries;
+  const entries: { key: string; value: Expression; free: ReadonlySet<string> }[] =
+    [];
+  for (const key of Object.keys(sub)) {
+    const input = sub[key];
+    if (input === undefined) continue;
+    const value = ce.expr(input, { form: 'raw' });
+    entries.push({ key, value, free: freeNamesForSubs(value) });
+  }
+  _transientReplacementNames?.set(sub, { ce, entries });
+  return entries;
+}
+
+/**
+ * The entries of `replacementFreeNames()` by substitution object, for the
+ * current top-level `subs()` call, or `undefined` when no `subs()` call
+ * is in progress. Created and dropped with `_transientSubs`.
+ */
+let _transientReplacementNames:
+  | Map<
+      Substitution,
+      {
+        ce: ComputeEngine;
+        entries: ReadonlyArray<{
+          key: string;
+          value: Expression;
+          free: ReadonlySet<string>;
+        }>;
+      }
+    >
+  | undefined = undefined;
 
 /**
  * The entries of `sub` that are replaced at a point, after the value of

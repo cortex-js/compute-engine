@@ -2062,19 +2062,43 @@ export interface Expression {
    * substitution. `Normal(Series(sin x, x, 0, 3))` with `x` replaced by
    * `0.5` evaluates to `0.479…` under `.N()`.
    *
-   * The substitution does not avoid variable capture: a replacement that
-   * contains a name that a binder binds is inserted as it is, and the
-   * binder is not renamed. `["Sum", ["Add", "j", "k"], ["Limits", "k", 1, 3]]`
-   * with `j` replaced by `k` is `["Sum", ["Add", "k", "k"], ["Limits", "k",
-   * 1, 3]]`, which evaluates to `12`. When the replacement can contain the
-   * index, rename the index first with a recursive `replace()` of the rule
-   * `k -> m`: the result is `["Sum", ["Add", "k", "m"], ["Limits", "m", 1,
-   * 3]]`, which evaluates to `3k + 6`.
+   * The substitution avoids variable capture. When a replacement contains a
+   * free name that a binder binds, and the substitution replaces an
+   * occurrence in the scope of that name, the binder renames the name to a
+   * fresh name first: `k` becomes `k_1`, or `k_2` when `k_1` is used in the
+   * binder or in a replacement.
+   * `["Sum", ["Add", "j", "k"], ["Limits", "k", 1, 3]]` with `j` replaced by
+   * `k` is `["Sum", ["Add", "k", "k_1"], ["Limits", "k_1", 1, 3]]`, which
+   * evaluates to `3k + 6`, and `["Function", ["Power", "y", "x"], "x"]` with
+   * `y` replaced by `x` is the function `x_1 ↦ x^(x_1)`. A named argument of a
+   * call of such a renamed function uses the new name of the parameter. A
+   * binder with no such name is not renamed and keeps its identity.
    *
-   * Note a similar effect can be achieved with `this.replace()`, but
-   * using `this.subs()` is more efficient and simpler, but limited
-   * to replacing symbols. A recursive `replace()` does not skip bound
-   * variables.
+   * In two cases a bound name cannot be renamed before the block runs, and
+   * the replacement is inserted as it is, so the held block captures the
+   * name:
+   * - the target of an `Assign` in a `Block` that is not canonical (a held
+   *   block), when no `Declare` of the block declares it. The `Assign` makes
+   *   a local only when the name is not declared where the block is released.
+   *   With `s` declared, `["Hold", ["Block", ["Assign", "s", 3], ["Add", "y",
+   *   "s"]]]` with `y` replaced by `s` is `["Hold", ["Block", ["Assign", "s",
+   *   3], ["Add", "s", "s"]]]`, and its released value is `6`;
+   * - a `Declare` or an `Assign` in an operand of a statement of a held
+   *   block (a branch of an `If`): the later reads denote the local only when
+   *   that branch runs.
+   *
+   * The replacement is also inserted as it is in a few other rare cases
+   * where a correct rename cannot be decided before the expression runs.
+   *
+   * `this.replace()` can give a similar result, and it can replace more
+   * than symbols, but `this.subs()` is more efficient and simpler. A
+   * recursive `replace()` does not skip bound variables and does not rename
+   * a binder: it rewrites the structure of the expression. A rule whose
+   * match is the symbol `j` replaces the `j` of
+   * `["Sum", ["Add", "j", "k"], ["Limits", "k", 1, 3]]` by `k` with no
+   * rename, and its result evaluates to `12`. The values of the wildcards of
+   * a rule are inserted in its replacement the same way: a binder that the
+   * replacement writes binds the names in them.
    *
    * The free symbols of the result are bound in the CURRENT scope, not in the
    * scope the receiver was built in. A node that owns a local scope keeps

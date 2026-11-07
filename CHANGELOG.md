@@ -14,6 +14,19 @@
   `function` statement defined. `At(xs, k) := 5` now assigns to an element of
   the list, as `xs[k] := 5` does: it replaced the function `At`, so that
   `[7, 8][2]` gave `5`.
+- **`expr.subs()` now avoids variable capture.** When a replacement contains
+  a name that a binder of the expression binds, the binder renames that name
+  first: `["Sum", ["Add", "j", "k"], ["Limits", "k", 1, 3]]` with `j`
+  replaced by `k` is now `["Sum", ["Add", "k", "k_1"], ["Limits", "k_1", 1,
+  3]]`, which evaluates to `3k + 6`. Before, the result was `["Sum", ["Add",
+  "k", "k"], ["Limits", "k", 1, 3]]`, which evaluates to `12`. The same
+  applies to `Product`, a definite `Integrate`, `Comprehension`, a `Function`
+  literal and a local of a `Block`. A substitution where no name collides
+  gives the same result as before. In two cases a bound name cannot be renamed
+  before the block runs, and the result is the same as before: the target of
+  an `Assign` in a held `Block`, and a `Declare` or an `Assign` in a branch of
+  an `If` of a held `Block`. `replace()` is not changed: it rewrites the
+  structure and renames no binder.
 
 ### New Features
 
