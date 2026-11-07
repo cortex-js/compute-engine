@@ -4,18 +4,20 @@ import type {
   Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
+import type { Type } from '../../common/type/types.js';
 import { recordScalarParams } from './javascript-value-facts.js';
 import { javascriptStatements } from './javascript-statements.js';
 import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 import { isNonRealNumber } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
-import { isFunction } from '../boxed-expression/type-guards.js';
+import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
 import {
   functionLiteralDeclaredSignature,
   functionLiteralParameterName,
   functionLiteralParameterType,
   optionalParameterDefault,
+  optionalParameterTarget,
 } from '../boxed-expression/function-literal.js';
 import { compiledDefaultOperand } from './compile-parameter-defaults.js';
 import type { CompileTarget, TargetSource } from './types.js';
@@ -36,7 +38,7 @@ import {
   compileDefinitionBody,
   lambdaParamBinding,
 } from './compile-definitions.js';
-import { strictLanes } from './compiler-mode.js';
+import { strictLanes, wideNumericType } from './compiler-mode.js';
 import { laneMismatch } from './compile-lanes.js';
 import {
   appliedLiteralLaneMismatchAt,
@@ -121,6 +123,85 @@ const appliedLiteralArguments = new WeakMap<
   Expression,
   ReadonlyArray<Expression>
 >();
+
+/**
+ * The conversion of each argument of a call of the JavaScript `Function`
+ * literal `literal`: `coercions`, with `'real-operand'` for each argument
+ * that `coercions` leaves unconverted (`false`), that is complex-valued, and
+ * whose parameter the compiled literal reads on the real lane
+ * (`readsParameterOnRealLane`). The call then passes `_SYS.crealElements`
+ * of the argument: its real part when the value is real, `NaN` otherwise.
+ * This is the real-operand rule of the complex lane, and the rule that a
+ * call of a function defined on the engine follows (`realLaneArguments` in
+ * `compile-user-calls.ts`).
+ *
+ * In `mode: 'complex'` a use in the body can narrow a parameter with no
+ * declared type to a real type: in `x ↦ Mod(x, 3)` the parameter `x` is
+ * typed `real`, and the body is `_SYS.floorMod(x, 3)`. Without the
+ * conversion, with `y: real`, `Apply(x ↦ Mod(x, 3), √y)` passed the
+ * `{ re, im }` object of `√y` to that body, and gave `NaN` at `y = 16`,
+ * where the interpreter gives `1`.
+ *
+ * The lane is read from the literal alone, not from a record of its
+ * compilation: a call can compile before the literal that it calls (a
+ * local called from the body of a sibling local defined before it), and a
+ * record of an earlier compilation can be in another mode.
+ */
+export function literalRealLaneArguments(
+  literal: Expression,
+  args: ReadonlyArray<Expression>,
+  coercions: ReadonlyArray<boolean | 'real'>
+): ReadonlyArray<boolean | 'real' | 'real-operand'> {
+  if (!isFunction(literal, 'Function')) return coercions;
+  const ground = groundSignature(functionLiteralDeclaredSignature(literal));
+  return coercions.map((c, i) =>
+    c === false &&
+    args[i] !== undefined &&
+    readsParameterOnRealLane(literal.ops[i + 1], ground, i) &&
+    core.isComplexValued(args[i])
+      ? 'real-operand'
+      : c
+  );
+}
+
+/**
+ * Whether the JavaScript lowering of a `Function` literal reads its
+ * parameter `param`, at position `i`, on the real lane, in every compile
+ * mode. `ground` is the declared signature of the literal at its ground
+ * bounds (`groundSignature()`), or `undefined`.
+ *
+ * The rule follows the lowering (`compileExprFunctionLiteral`):
+ *
+ * - A parameter declared with a non-real number type, by its annotation or
+ *   else by `ground`, is on the complex lane (the lowering's
+ *   `complexParam`): the answer is `false`.
+ * - Otherwise the body reads the parameter through its annotation, or else
+ *   through the type of the parameter symbol, which a use in the body can
+ *   narrow (`Mod(x, 3)` types `x` as `real`). A declared signature does not
+ *   narrow the symbol: with the signature `(x: real) -> real` and the body
+ *   `x + 1`, the symbol `x` keeps a wide type and the body reads it on the
+ *   complex lane. The answer is `true` when that type is a number type that
+ *   admits no complex value (`wideNumericType()` is false).
+ *
+ * A `true` answer is always correct: the lowering puts such a parameter on
+ * the real lane, also in a shape frame that it pushes for its parameters.
+ * A `false` answer can miss a parameter that the lowering reads on the real
+ * lane; its argument is then not converted. A parameter that is not a
+ * number type (a collection, a type variable) gives `false`.
+ */
+function readsParameterOnRealLane(
+  param: Expression | undefined,
+  ground: Type | undefined,
+  i: number
+): boolean {
+  if (param === undefined) return false;
+  const annotation = functionLiteralParameterType(param);
+  const declared = annotation ?? signatureParamType(ground, i);
+  if (declared !== undefined && isNonRealNumber(declared)) return false;
+  const symbol = optionalParameterTarget(param);
+  const t = annotation ?? (isSymbol(symbol) ? symbol.type.type : undefined);
+  return t !== undefined && isSubtype(t, 'number') && !wideNumericType(t);
+}
 
 /**
  * A `Function` literal. A case of `compileExpr`: it returns the code, or

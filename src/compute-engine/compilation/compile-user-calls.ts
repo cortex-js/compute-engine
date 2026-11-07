@@ -173,16 +173,19 @@ export function complexWrapCode(
  *
  * `declaredCoercions[i]` is `true` for an argument to wrap in the
  * `{ re, im }` convention, and `'real'` for an argument whose real
- * projection the callee receives (`realProjection()`); `paramsAreScalar`
- * says no parameter binds a collection whole. A complex argument whose
- * entry is `false` is converted with `_SYS.crealElements` when the
- * definition reads the parameter on the real lane (`realLaneArguments`).
+ * projection the callee receives (`realProjection()`), and
+ * `'real-operand'` for an argument that the callee receives through
+ * `_SYS.crealElements` (`literalRealLaneArguments()` for a `Function`
+ * literal); `paramsAreScalar` says no parameter binds a collection whole.
+ * A complex argument whose entry is `false` is converted with
+ * `_SYS.crealElements` when the definition reads the parameter on the
+ * real lane (`realLaneArguments`).
  */
 export function emitUserFunctionCall(
   name: string,
   args: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>,
-  declaredCoercions: ReadonlyArray<boolean | 'real'>,
+  declaredCoercions: ReadonlyArray<boolean | 'real' | 'real-operand'>,
   paramsAreScalar: boolean,
   /**
    * Compiled arguments appended after `args` in EVERY call form, and
@@ -317,7 +320,7 @@ function realLaneArguments(
   name: string,
   args: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>,
-  coerceToComplex: ReadonlyArray<boolean | 'real'>
+  coerceToComplex: ReadonlyArray<boolean | 'real' | 'real-operand'>
 ): ReadonlyArray<boolean | 'real' | 'real-operand'> {
   const registry = target.userFunctions;
   if (target.language !== 'javascript' || registry === undefined)

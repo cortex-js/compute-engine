@@ -124,6 +124,7 @@ import {
   namedPointArgumentAtUntypedParameter,
 } from './compile-callbacks.js';
 import { laneMismatch, userParamBinding } from './compile-lanes.js';
+import { literalRealLaneArguments } from './compile-function-literals.js';
 import { localLaneMismatch } from './diagnostics.js';
 import {
   checkListCoordinateTupleArgs,
@@ -2771,11 +2772,15 @@ export function tryCompileLocalFunctionCall(
         .map((a) => compileValueOperand(a, target))
         .join(', ')})`;
   }
+  // A complex argument at a parameter that the compiled literal reads on
+  // the real lane is passed as its real projection
+  // (`literalRealLaneArguments()`): with `y: real` and `f := x ↦ Mod(x, 3)`
+  // local to the block, `f(√y)` at `y = 16` is `1`, as in the interpreter.
   return emitUserFunctionCall(
     local,
     args,
     target,
-    coerceToComplex,
+    literalRealLaneArguments(literal, args, coerceToComplex),
     signature === undefined ? true : paramsAreScalar(signature)
   );
 }

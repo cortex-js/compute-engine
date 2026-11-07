@@ -87,6 +87,15 @@
 
 ### Resolved Issues
 
+- **In `mode: 'complex'` on the `javascript` target, a function literal that
+  receives a square root as its argument now gives the correct value when its
+  body uses the parameter as a real number.** With `y: real`,
+  `Block(Assign(f, x ↦ Mod(x, 3)), f(Sqrt(y)))` and
+  `Apply(x ↦ Mod(x, 3), Sqrt(y))` gave `NaN` at `y = 16`, and
+  `x ↦ If(x > 0, Mod(x, 3), x)` gave `4`; they now give `1`, as the
+  interpreter does. `Floor`, `Ceil`, `Round` and `Remainder` had the same
+  defect. The argument is passed as its real part, and as `NaN` when it is not
+  real, as for a call of a function defined with `ce.assign()`.
 - **A numeric integral with a slow logarithmic singularity at a bound that is
   not 0 now gives its value.** `\int_{1/2}^{1} \frac{dt}{(1-t)(-\ln(1-t))^{1.1}}`
   gave `3 ± 36` under `.N()`, and it now gives `10.373294 ± 0.000066` (the

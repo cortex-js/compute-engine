@@ -215,6 +215,22 @@ interpreter's value. A line is removed when the case declines or is fixed.
   object, and the list element keeps that object while `L[1] + 1` reads a
   number. The scalar case is converted at the binding of a real local
   (`realLaneLocalBinding` in `compile-complexness.ts`); a list local is not.
+- `plausible?` — `javascript`, `mode: 'complex'`, `y: real`, with
+  `g := x ↦ If(x > 0, Mod(x, 3), x)` (a function defined on the engine, a
+  `Block` local or an `Apply` of the literal): `g(Sqrt(y))` at `y = -16`
+  gives `NaN`; the interpreter gives `4i`. The use in `Mod` types the
+  parameter `x` as `real`, so the body reads it on the real lane, and the
+  call passes the real projection of the argument (`_SYS.crealElements`),
+  which is `NaN` for a non-real value. At `y = 16` both give `1`.
+- `plausible?` — `javascript`, `mode: 'complex'`, `y: real`: in
+  `Block(Assign(x, Sqrt(y)), Assign(f, x ↦ x + 1), f(Sqrt(y)) + x)` the
+  parameter `x` of `f` has the name of a local of the block, and the literal
+  compiles to `(x) => x + 1`, on the real lane, so at `y = 16` the result is
+  `{re: NaN, im: NaN}`; the interpreter gives `9`. An `Apply` of the literal
+  gives the same. The lowering puts each parameter in a shape frame of its
+  own when an enclosing frame names it, and that frame holds `false` for a
+  parameter that is not declared with a non-real type, also when the type
+  of the parameter is wide.
 - `javascript`: in a loop with an outer `a = 100`, `function f() { a }` and
   `let (a, b) = (k, f())`, the compiled `b` is `k`; the interpreter gives
   `b = 100` (was CE-756).

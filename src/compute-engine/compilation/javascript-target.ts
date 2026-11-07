@@ -44,6 +44,7 @@ import {
   literalHasParameterDefaults,
   literalTakesArgumentCount,
 } from './compile-parameter-defaults.js';
+import { literalRealLaneArguments } from './compile-function-literals.js';
 import { compileNumericSelection } from './javascript-selection-fusion.js';
 import {
   provenPointWidth,
@@ -7326,11 +7327,18 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       const arrow = BaseCompiler.withScalarFedLiteral(literal, () =>
         compile(literal)
       );
+      // A complex argument at a parameter that the arrow reads on the
+      // real lane is passed as its real projection
+      // (`literalRealLaneArguments()`).
       return BaseCompiler.emitUserFunctionCall(
         `(${arrow})`,
         args.slice(1),
         target,
-        args.slice(1).map(() => false),
+        literalRealLaneArguments(
+          literal,
+          args.slice(1),
+          args.slice(1).map(() => false)
+        ),
         true
       );
     }
