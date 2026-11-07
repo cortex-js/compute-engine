@@ -472,7 +472,33 @@ function betaReduceLambda(call: Expression): Expression | undefined {
     }
   }
 
+  // `subs` replaces a symbol operand, never the operator name of a call. A
+  // parameter that the body calls (`h := (p, a) ↦ p(a)`) is not replaced:
+  // `h(g, x)` inlined to `p(x)`, so `lim_{x→2} h(g, x)` was `p(2)`, not
+  // `g(2)`. Decline: the call stays opaque, and the algorithm that holds it
+  // evaluates it.
+  if (callsAnyOf(body, new Set(Object.keys(substitution)))) return undefined;
+
   return body.subs(substitution);
+}
+
+/**
+ * Whether `expr`, at any depth, holds a call whose operator is one of
+ * `names`. A node that occurs more than once in the tree is walked once.
+ */
+function callsAnyOf(expr: Expression, names: ReadonlySet<string>): boolean {
+  const seen = new Set<Expression>();
+  const pending: Expression[] = [expr];
+  while (pending.length > 0) {
+    const e = pending.pop()!;
+    if (!isFunction(e) || seen.has(e)) continue;
+    seen.add(e);
+    if (names.has(e.operator)) return true;
+    // A store-backed list holds numbers only, and reading its `ops` would box
+    // every element.
+    if (e._numericStore === undefined) pending.push(...e.ops);
+  }
+  return false;
 }
 
 /**

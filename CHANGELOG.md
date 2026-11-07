@@ -104,6 +104,14 @@
 
 ### Resolved Issues
 
+- **A limit of a function that calls one of its parameters now gives the value
+  of the call.** With `g := t ↦ t²` and `h := (p, a) ↦ p(a)`,
+  `["Limit", ["Function", ["h", "g", "x"], "x"], 2]` gave `["p", 2]`, with
+  the name of the parameter in place of `g`. It now gives `4`, the value of
+  `h(g, 2)`. `["Expand", ["h", "g", "x"]]` gave `["p", "x"]`; it now keeps
+  the call `["h", "g", "x"]`, and the indefinite integral of `h(g, x)` keeps
+  the call where it held `p(x)`.
+
 - **An integral over an infinite range of a function that oscillates with a
   symbolic frequency now stays unevaluated.** `\int_0^\infty \cos(xy)\,dx`
   gave `\frac{\sin(\infty y)}{y}`, a formula with an infinity in it, although
