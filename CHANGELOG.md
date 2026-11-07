@@ -118,6 +118,14 @@
 
 ### Resolved Issues
 
+- **A convergent integral from a large number to infinity now has a numeric
+  value.** `\int_{10^{10}}^{\infty} \frac{dx}{x^{1.5}}` gave `NaN` with `.N()`
+  and `NIntegrate`; it now gives `0.00002 ± 3·10⁻¹⁶`.
+  `\int_{10^{6}}^{\infty} \frac{dx}{x(\ln x)^2}` now gives
+  `0.072382410 ± 2·10⁻⁸` (exact `1/(6 ln 10)`). The numeric value was found
+  divergent when the area is very far from the lower bound. A lower bound
+  larger than about `10^{13}` still gives `NaN`.
+
 - **`simplify()` of a sum or a product gives the same result before and after
   `evaluate()`.** The evaluation of a `Sum` or a `Product` kept the last value
   of its index in the scope of the expression: after

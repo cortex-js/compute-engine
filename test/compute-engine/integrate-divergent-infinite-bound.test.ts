@@ -260,3 +260,65 @@ describe('an integrand that decreases slowly at an infinite bound', () => {
     expect(Math.abs(v - exact(1.1))).toBeLessThan(2e-4);
   });
 });
+
+describe('a convergent integral from a large bound to infinity', () => {
+  // For a large `c`, the area of `∫_c^∞` is where 1 − t < 1/c, next to the
+  // infinite bound t = 1 of the one interval, and its shells look
+  // divergent there. A divergent result is computed again with the infinite
+  // bound at 0 (`quadrature`, `numerics/gauss-kronrod.ts`). Issue CE-1041.
+
+  test.each([
+    ['x^{1.5}', 1e10, 2e-5],
+    ['x(\\ln x)^2', 1e6, 1 / Math.log(1e6)],
+    ['x^{1.1}', 1e10, 1],
+  ])('∫ dx/%s from %s to ∞ is a number', (den, lo, exact) => {
+    // Before, `.N()` and `NIntegrate` gave `NaN`.
+    const r = routes(`\\frac{1}{${den}}`, lo, 'PositiveInfinity');
+    expect(r.NIntegrate as number).toBeCloseTo(exact, 7);
+    const n = r.N as unknown as [string, number, number];
+    expect(n[0]).toEqual('Measurement');
+    expect(Math.abs(n[1] - exact)).toBeLessThanOrEqual(n[2]);
+  });
+
+  test('the quadrature of each side is within its error', () => {
+    const f = (x: number) => Math.abs(x) ** -1.5;
+    for (const [a, b] of [
+      [1e10, Infinity],
+      [-Infinity, -1e10],
+    ]) {
+      const r = adaptiveQuadrature(f, a, b, { singularEndpoints: true });
+      expect(r.divergent).toBe(false);
+      expect(r.converged).toBe(true);
+      expect(Math.abs(r.estimate - 2e-5)).toBeLessThanOrEqual(r.error);
+    }
+  });
+
+  test.each([
+    ['1/x', (x: number) => 1 / x],
+    ['1/(x ln x)', (x: number) => 1 / (x * Math.log(x))],
+    [
+      '1/(x ln x ln ln x)',
+      (x: number) => 1 / (x * Math.log(x) * Math.log(Math.log(x))),
+    ],
+    ['x^(−0.99)', (x: number) => x ** -0.99],
+    ['1/(x − 10⁶)', (x: number) => 1 / (x - 1e6)],
+  ])('the divergent integral of %s from 10⁶ stays divergent', (_, f) => {
+    const r = adaptiveQuadrature(f, 1e6, Infinity, { singularEndpoints: true });
+    expect(r.divergent).toBe(true);
+  });
+
+  test('without singularEndpoints, a divergent result is not computed again', () => {
+    let evaluations = 0;
+    const r = adaptiveQuadrature(
+      (x) => {
+        evaluations += 1;
+        return x ** -1.5;
+      },
+      1e10,
+      Infinity
+    );
+    // The one interval uses 1,750 evaluations; with the split, 6,067.
+    expect(r.divergent).toBe(true);
+    expect(evaluations).toBeLessThan(2500);
+  });
+});

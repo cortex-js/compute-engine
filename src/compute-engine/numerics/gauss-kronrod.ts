@@ -3017,13 +3017,15 @@ const SINGULAR_POINT_STEPS = 64;
  * which would launder the divergence into a plausible-looking number).
  * A semi-infinite interval `[c, ∞)` or `(−∞, c]` is mapped to `[0, 1)` by a
  * change of variable. With `singularEndpoints`, when that result has
- * `singularCorner`, the interval is integrated again in two parts, split at
+ * `singularCorner` or is `divergent`, the interval is integrated again in
+ * two parts, split at
  * `c ± 1`: a change of variable puts each part on `[0, 1/2]` with its
  * singular bound at 0 (the finite bound `c` for the first part, the
  * infinite bound for the second), where the refinement can go deep enough
  * to detect a divergence; each part receives half of the panel budget that
  * the first computation did not use, and half the starting panels. The
- * split result is kept when it diverges, converged or was extrapolated, does
+ * split result is kept when it diverges (when the first result was not
+ * `divergent`), converged or was extrapolated, does
  * not oscillate, no part has `nanRegion`, and the samples of the integrand
  * at large `|x|` are smooth (see `smoothTail`); otherwise the first result
  * is kept. The doubly-infinite case `(-∞, ∞)` is split at 0 into two
@@ -3383,16 +3385,39 @@ function quadrature(
     // s = 1 − t, with x = c ± (1 − s)/s computed from `s` and dx = ds/s².
     // At s = 0 the corner is bisected until its shells show a divergence
     // or fit a model. The near part keeps the finite bound at t = 0.
+    // A `divergent` result is also computed again. For a large `|c|`, the
+    // area is where 1 − t < 1/|c|, in the last shells of the corner at
+    // t = 1, and a convergent integral looks divergent there:
+    // `∫ dx/x^1.5` from 10¹⁰ (exact `2·10⁻⁵`) and `∫ dx/(x ln² x)` from
+    // 10⁶ (exact `0.0723824`) were divergent, and the parts converged to
+    // the exact values. The far part has the same problem when |c| is
+    // more than about 10¹³: its shells decrease as 1/s² down to s = 1/|c|,
+    // and the divergence test sees a divergence before that.
     // The one interval stays the first computation, and only a
-    // `singularCorner` result is computed again. A split at c ± 1 changes
-    // the results that the one interval gets right: for `e^x`, the samples
-    // overflow at x > 710, and the one interval gives an infinite estimate,
-    // from which the caller reads the sign of the divergence, where the far
-    // part gave a finite estimate. A `singularCorner` result has shells of
-    // one sign, so an integrand that oscillates at infinity (`sin x/x`),
-    // whose far part costs up to 30 times the evaluations of the one
-    // interval and gives no better result, is not computed again.
-    if (whole.singularCorner !== true) return whole;
+    // `singularCorner` or `divergent` result is computed again. A split at
+    // c ± 1 changes the results that the one interval gets right: for
+    // `e^x`, the samples overflow at x > 710, and the one interval gives an
+    // infinite estimate that is not `divergent`, from which the caller
+    // reads the sign of the divergence, where the far part gave a finite
+    // estimate. A `singularCorner` result has shells of one sign, so an
+    // integrand that oscillates at infinity (`sin x/x`), whose far part
+    // costs up to 30 times the evaluations of the one interval and gives no
+    // better result, is not computed again. Every `divergent` result pays
+    // for the split, also when the split cannot change it: `1/x` from 1
+    // used 3,054 evaluations in place of 1,540. A `divergent` result can
+    // have an integrand that oscillates, and then the split costs about 15
+    // times the evaluations of the one interval: `(2 + sin x)/x^1.5` from
+    // 10¹⁰, which converges, stays divergent, and used 71,104 evaluations
+    // in place of 4,584.
+    // Only a quadrature with `singularEndpoints` computes the interval
+    // again. A `singularCorner` result occurs only with
+    // `singularEndpoints`, so this requirement applies only to a
+    // `divergent` result.
+    if (
+      options?.singularEndpoints !== true ||
+      (whole.singularCorner !== true && !whole.divergent)
+    )
+      return whole;
     // The split uses the panels of the budget that the one interval did
     // not use, so that the whole computation stays within `maxIntervals`.
     // A panel has 15 nodes; the other samples of the one interval (the
@@ -3429,11 +3454,16 @@ function quadrature(
     if (farPart.nanRegion === true) return whole;
     const split = combineHalves(nearPart, farPart, rtol, atol);
     // The split result is kept when it shows what the one interval could
-    // not, a divergence or a value that converged or was extrapolated, and
-    // the samples of the far part can be trusted (`smoothTail`). Otherwise
-    // the one interval is kept, with its error.
+    // not, a divergence (of a `singularCorner` result) or a value that
+    // converged or was extrapolated, and the samples of the far part can be
+    // trusted (`smoothTail`). Otherwise the one interval is kept, with its
+    // error: a divergent split of a divergent result adds nothing.
     if (
-      !(split.divergent || split.converged || split.extrapolated === true) ||
+      !(
+        (split.divergent && !whole.divergent) ||
+        split.converged ||
+        split.extrapolated === true
+      ) ||
       split.oscillates === true
     )
       return whole;
