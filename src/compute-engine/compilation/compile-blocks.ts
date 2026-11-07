@@ -43,6 +43,7 @@ import {
 import {
   assertExpressionValue,
   canHoist,
+  _compileParents,
   compileListStatement,
   joinShaderStatements,
   loopBodyTempTarget,
@@ -264,7 +265,15 @@ export function compileBlock(
   )
     return '';
 
-  if (args.length === 1 && locals.length === 0) {
+  // A nested block that is a statement on the JavaScript targets (the
+  // nested-block statement below) compiles its lone statement as a statement
+  // of a longer list does: a loop becomes a block statement and an else-less
+  // `If` an `if` statement. The unwrap below compiles it as a value.
+  const jsStatementList =
+    !valueUsed &&
+    (target.language === 'javascript' ||
+      target.language === 'interval-javascript');
+  if (args.length === 1 && locals.length === 0 && !jsStatementList) {
     // The single-statement block is UNWRAPPED here, but harvest still saw
     // the `Block` — so both its statement-list region and the statement's
     // own value region are pushed, or the statement's candidates would find
@@ -772,9 +781,21 @@ export function compileBlock(
               const statement = core.shaderSelectionStatement(arg, stmtTarget);
               if (statement !== undefined) return [statement];
             }
-            if (returnsEarly && writesBlocksAsIife(target))
+            // A `Which` has no statement form: as a conditional expression,
+            // a `Return` in a block branch would end only the arrow function
+            // of that branch, and the statements after the `Which` would
+            // still run. Such a `Which` declines, as such an `If` does on a
+            // target with no statement form for it.
+            const whichReturnsEarly =
+              isFunction(arg, 'Which') &&
+              isStatement &&
+              containsEarlyReturn(arg);
+            if (
+              (returnsEarly || whichReturnsEarly) &&
+              writesBlocksAsIife(target)
+            )
               throw new Error(
-                `Could not compile \`If\`: a branch returns early ` +
+                `Could not compile \`${arg.operator}\`: a branch returns early ` +
                   `(\`Return\`) from a statement that is not the last ` +
                   `one of the block, and target '${target.language}' ` +
                   `has no statement form for a conditional with a ` +
@@ -866,6 +887,39 @@ export function compileBlock(
                 .map((line) => `  ${line}`)
                 .join('\n');
               return [`{\n${body}\n}`];
+            }
+            // A nested block in statement position on the JavaScript targets
+            // (`do { let u = 2; t = t + u }` in Epsil) has no value that
+            // anything reads either. It compiles for effect, as one block
+            // statement, so its locals stay in its own scope. It is not an
+            // arrow function that is called at once: V8 keeps a local of the
+            // enclosing code that such a function writes (in a loop of the
+            // block, for example) in a heap context, which is slower to read
+            // and write. A `Return` in the block ends the code of the
+            // enclosing block, as a `Return` in an `If` statement of that
+            // block does. In an arrow function it would end only that
+            // function, and the statements after the nested block would run.
+            if (
+              isStatement &&
+              isFunction(arg, 'Block') &&
+              (target.language === 'javascript' ||
+                target.language === 'interval-javascript')
+            ) {
+              // The block is on the stack of the nodes being compiled while
+              // its statements compile, as `core.compile` puts it there: a
+              // raw `Match` case body is canonicalized in the scope of the
+              // innermost node of that stack (`inCompiledScope()`), so that
+              // it sees the locals of this block.
+              _compileParents.push(arg);
+              let inner: string;
+              try {
+                inner = compileBlock(arg.ops, stmtTarget, arg, false);
+              } finally {
+                _compileParents.pop();
+              }
+              if (inner === '') return [];
+              const nl = target.ws('\n');
+              return [`{${nl}${inner}${nl}}`];
             }
             // A bare expression statement is its own bindable region, keyed
             // `(statement, -1)`; every other statement head reaches its own

@@ -5,7 +5,10 @@ import {
   clearIntegerRanges,
   recordIntegerRange,
 } from './javascript-value-facts.js';
-import { javascriptStatements } from './javascript-statements.js';
+import {
+  javascriptStatements,
+  registerStatement,
+} from './javascript-statements.js';
 import {
   collectionElementType,
   isNonRealNumber,
@@ -225,8 +228,9 @@ export function compileForLoop(
 
 /**
  * The code of a compiled `Loop` whose statement is `loop`: an arrow function
- * that is called at once, because a `Loop` can be an operand. On plain
- * JavaScript the arrow function also has a statement form, `{ loop }`, which a
+ * that is called at once, because a `Loop` can be an operand. On the
+ * JavaScript and interval JavaScript targets the arrow function also has a
+ * statement form, `{ loop }`, which a
  * block or a loop body emits where the loop is a statement
  * (`discardedValueStatement()`). A body with a `Return` keeps the arrow
  * function only: the `return` ends the arrow function, and in a block it would
@@ -241,9 +245,8 @@ function loopSource(
 ): string {
   const nl = target.ws('\n');
   const source = `(() => {${nl}${loop}${nl}})()`;
-  const statements = javascriptStatements(target);
-  if (statements === undefined || containsEarlyReturn(body)) return source;
-  return statements.registerStatement(source, `{${nl}${loop}${nl}}`);
+  if (containsEarlyReturn(body)) return source;
+  return registerStatement(target, source, `{${nl}${loop}${nl}}`);
 }
 
 /**

@@ -520,9 +520,15 @@ describe('TYPE VARIABLES / collections — the per-kind result rule', () => {
     expect(t(ce, 'Filter', 'pkT', p)).toBe('list<integer | string>');
     expect(t(ce, 'Filter', 'pkR', p)).toBe('list<integer>');
     expect(t(ce, 'Filter', 'pkI', p)).toBe('list<boolean>');
-    // A matrix filters ROWS: the element type is the row type.
+    // A matrix filters ROWS: the element type is the row type. The predicate
+    // reads a row, so it must give a boolean for a row: `_ > 1` gives a list
+    // of booleans for a row, and that call has the type `error`.
+    const rowTest = ce.box(['Function', ['Greater', ['First', '_'], 1], '_']);
+    expect(
+      t(ce, 'Filter', ['List', ['List', 1, 2], ['List', 3, 4]], rowTest)
+    ).toBe('list<vector<integer^2>>');
     expect(t(ce, 'Filter', ['List', ['List', 1, 2], ['List', 3, 4]], p)).toBe(
-      'list<vector<integer^2>>'
+      'error'
     );
     // A non-indexed source keeps its type: no arity or shape to lie about.
     ce.declare('pkS', 'set<integer>');

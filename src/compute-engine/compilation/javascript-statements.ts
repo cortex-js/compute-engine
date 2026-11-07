@@ -13,7 +13,6 @@ type StatementBody = (exit: Exit) => string;
  */
 class JavaScriptStatements {
   private readonly bodies = new Map<string, StatementBody>();
-  private readonly statementForms = new Map<string, string>();
   private counter = 0;
 
   constructor(private readonly naming: NamingContext) {}
@@ -32,31 +31,6 @@ class JavaScriptStatements {
   register(source: string, body: StatementBody): string {
     this.bodies.set(source, body);
     return source;
-  }
-
-  /**
-   * Record that `source`, an arrow function that is called at once, has the
-   * same effect as `statement`, a block statement, and that its value is
-   * `undefined`, which nothing reads. A compiled `Loop` is such a source.
-   * Where the value of `source` is discarded (a statement of a block or of a
-   * loop body), `statement()` gives the block instead. V8 keeps a local that
-   * the inner function writes in a heap context, so the arrow function around
-   * a loop made each pass of a loop over such locals up to two times slower.
-   *
-   * The caller must make sure that `statement` has no `return`: in the arrow
-   * function it ends only the arrow function, and in the block it would end
-   * the function that contains the block. A `break` or a `continue` in
-   * `statement` is inside its own loop, so it goes to the same loop in both
-   * forms.
-   */
-  registerStatement(source: string, statement: string): string {
-    this.statementForms.set(source, statement);
-    return source;
-  }
-
-  /** The block statement recorded for `source` by `registerStatement()`. */
-  statement(source: string): string | undefined {
-    return this.statementForms.get(source);
   }
 
   expression(body: StatementBody): string {
@@ -128,7 +102,10 @@ const contexts = new WeakMap<NamingContext, JavaScriptStatements>();
 export function resetJavaScriptStatements(
   target: CompileTarget<Expression>
 ): void {
-  if (target.naming) contexts.delete(target.naming);
+  if (target.naming) {
+    contexts.delete(target.naming);
+    statementForms.delete(target.naming);
+  }
 }
 
 /** Naming state is shared by target copies and belongs to one compilation. */
@@ -145,13 +122,60 @@ export function javascriptStatements(
 }
 
 /**
+ * The block statements recorded by `registerStatement()`, for each
+ * compilation (naming context): the source of an arrow function that is
+ * called at once, and the block statement with the same effect.
+ */
+const statementForms = new WeakMap<NamingContext, Map<string, string>>();
+
+/**
+ * Record that `source`, an arrow function that is called at once, has the
+ * same effect as `statement`, a block statement, and that its value is
+ * `undefined`, which nothing reads. A compiled `Loop` is such a source.
+ * Where the value of `source` is discarded (a statement of a block or of a
+ * loop body), `discardedValueStatement()` gives the block instead. V8 keeps a
+ * local that the inner function writes in a heap context, so the arrow
+ * function around a loop made each pass of a loop over such locals up to two
+ * times slower.
+ *
+ * Only the JavaScript and interval JavaScript targets record a statement form,
+ * and only when the target has a naming context: elsewhere `source` stays as
+ * it is.
+ *
+ * The caller must make sure that `statement` has no `return`: in the arrow
+ * function it ends only the arrow function, and in the block it would end
+ * the function that contains the block. A `break` or a `continue` in
+ * `statement` is inside its own loop, so it goes to the same loop in both
+ * forms.
+ */
+export function registerStatement(
+  target: CompileTarget<Expression>,
+  source: string,
+  statement: string
+): string {
+  const naming = target.naming;
+  if (
+    naming === undefined ||
+    (target.language !== 'javascript' &&
+      target.language !== 'interval-javascript')
+  )
+    return source;
+  let forms = statementForms.get(naming);
+  if (forms === undefined) statementForms.set(naming, (forms = new Map()));
+  forms.set(source, statement);
+  return source;
+}
+
+/**
  * `code`, the code of a statement whose value is discarded, in the form to
- * emit: the block statement that a compiled `Loop` recorded for it
- * (`registerStatement()`), or `code` itself.
+ * emit: the block statement recorded for it by `registerStatement()`, or
+ * `code` itself.
  */
 export function discardedValueStatement(
   target: CompileTarget<Expression>,
   code: string
 ): string {
-  return javascriptStatements(target)?.statement(code) ?? code;
+  const naming = target.naming;
+  if (naming === undefined) return code;
+  return statementForms.get(naming)?.get(code) ?? code;
 }

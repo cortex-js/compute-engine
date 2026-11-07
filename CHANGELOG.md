@@ -597,6 +597,16 @@
   than 100 times its sum is summed again with about 32 digits. Over 4548
   random points with z from −1 to 0.5, the largest relative error fell from
   6.9e-11 to 2.4e-14. Compiled JavaScript uses the same kernel. (CE-192)
+- **In compiled JavaScript and interval JavaScript, a `Return` inside a nested
+  `Block` that is a statement ends the function.** It ended only the nested
+  block, and the statements after the block still ran. The function
+  `["Function", ["Block", ["Declare", "s", {"dict": {"value": 0}}], ["Block",
+  ["Assign", "s", ["Add", "s", "m"]], ["If", ["Greater", "s", 5], ["Return",
+  ["Multiply", 2, "s"]]]], "s"], ["Typed", "m", "'integer'"]]` gave `8` for
+  `m = 8` in compiled code, and the interpreter gives `16`. The compiled code
+  now gives `16`. A `Which` that is a statement and has a `Return` in a
+  branch is no longer compiled: it gave a wrong value for the same reason, and
+  the interpreter evaluates it. (CE-1073)
 
 ### Performance
 
@@ -722,7 +732,11 @@
   or of a loop body. A loop that writes a local of the code around it then
   kept that local in a slower kind of storage. Such a loop is now the block
   `{ for (…) { … } }`, and so is a loop in a branch of an `if … else`
-  statement. The Buddhabrot step of Tycho (three nested loops, 5,000 samples)
+  statement. A `do { … }` block that is a statement is a block statement too,
+  not an arrow function: in `do { let u = 3; for k in 1..n { s = s + k % u } }`
+  with `n = 2000000`, the loop took about 6 ms and now takes 3 to 5.5 ms. On
+  the `interval-js` target a loop that is a statement is a block as well. The
+  Buddhabrot step of Tycho (three nested loops, 5,000 samples)
   took about 2.1 ms per call and now takes about 1.1 ms; the loops of
   `for k in 1..n { let a = 0; for m in 1..20 { … } }` with `n = 200000` went
   from about 0.9 ms to 0.7 ms (medians of 50 calls, from source). A loop that
