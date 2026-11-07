@@ -42,6 +42,7 @@ import {
 } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import {
+  assertCalleeIsFunction,
   assertNoCurriedApplication,
   isPartialApplication,
   partialApplicationValueDecline,
@@ -5287,7 +5288,15 @@ function pyApply(
       );
     assertPyAppliedLiteralBindsScalars(args[0], args.slice(1), whole);
   }
-  return `(${compile(args[0])})(${args
+  // A callee that is not a function value (a number, `D(sin(n·x), x)`)
+  // declines: the emitted call would raise a `TypeError` when it runs.
+  // Compiling the callee before the check changes only the reason of the
+  // decline: a callee that declines for its own reason (a curried call inside
+  // it, `Apply(Apply(Apply(W, 0), 1), x)`) gives that reason. The reason
+  // names `head`, `Apply` or `ApplyWhole`.
+  const callee = compile(args[0]);
+  assertCalleeIsFunction(args, head);
+  return `(${callee})(${args
     .slice(1)
     .map((a) => compile(a))
     .join(', ')})`;

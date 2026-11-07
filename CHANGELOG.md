@@ -88,6 +88,15 @@
   give `+∞`. `\int_2^\infty \frac{dx}{x(\ln x)^{1.1}} = 10.3733` gave
   `3.4 ± 36` under `.N()`; it now gives `10.37326 ± 0.00017`. The same applies
   to a bound at `-\infty` and to compiled code.
+- **An `Apply` whose callee is not a function now falls back to the
+  interpreter in compiled code.** The canonical form of
+  `Apply(D(x ↦ sin(n·x), x), 1)` applies the derivative of the body, a number,
+  not a function. Its JavaScript compilation gave `success: true`, and the
+  compiled function threw "is not a function" when it ran; the Python
+  compilation emitted the same call of a number. Both compilations now
+  decline, and the result comes from the interpreter. Write
+  `Apply(Derivative(x ↦ sin(n·x)), 1)` to apply the derivative as a function:
+  that form compiles.
 
 - **A GLSL or WGSL compilation that reads a list input of unknown length now
   falls back to the interpreter.** With `L` declared `list<real>`, compiling

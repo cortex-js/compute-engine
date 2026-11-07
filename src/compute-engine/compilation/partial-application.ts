@@ -3,6 +3,7 @@ import { isFunction } from '../boxed-expression/type-guards.js';
 import { scopeForRebuild } from '../boxed-expression/binding-sites.js';
 import { requiredParameterCount } from '../boxed-expression/function-literal.js';
 import { appliedLiteralTypedFromArguments } from './applied-literal-types.js';
+import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 
 /** Whether a call supplies fewer arguments than the literal requires. */
 function isUnderApplied(literal: Expression, count: number): boolean {
@@ -57,6 +58,39 @@ export function assertNoCurriedApplication(
 export function isPartialApplication(args: ReadonlyArray<Expression>): boolean {
   const [literal, ...actuals] = args;
   return literal !== undefined && isUnderApplied(literal, actuals.length);
+}
+
+/**
+ * Decline an `Apply` whose callee is not a function value. The canonical
+ * form of `D(x ↦ sin(n·x), x)` is `D(sin(n·x), x)`, a number, and the
+ * compiled call `(n * Math.cos(n * x))(1)` throws "is not a function" when
+ * it runs. The interpreter reads such a callee as a function of its free
+ * variables, which compiled code does not do. The callee is a function value
+ * when its static type is a function type; a callee of type `unknown` or
+ * `any` also declines, because its shape is not settled at compile time.
+ * `head` is the operator named in the reason (`Apply` or `ApplyWhole`).
+ */
+export function assertCalleeIsFunction(
+  args: ReadonlyArray<Expression>,
+  head = 'Apply'
+): void {
+  const callee = args[0];
+  if (callee === undefined) return;
+  const t = callee.type.type;
+  if (t !== 'never' && isSubtype(t, 'function')) return;
+  // A type that can hold a function value (`unknown`, `any`, a union with a
+  // function member) leaves the shape of the callee to the run time. A
+  // callee whose type has no function value (`number`) is a value that the
+  // interpreter reads as a function of its free variables.
+  const why = couldMatch(t, 'function')
+    ? `The callee can be a value that is not a function, and compiled code ` +
+      `settles the shape of a value at compile time.`
+    : `The interpreter reads such a callee as a function of its free ` +
+      `variables, and compiled code does not.`;
+  throw new Error(
+    `Could not compile \`${head}\`: the callee has the type ` +
+      `\`${callee.type.toString()}\`, which is not a function type. ${why}`
+  );
 }
 
 /** The refusal is shared by every target, including targets with closures. */

@@ -625,6 +625,7 @@ import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 import { isAccessorOfPossibleList } from '../boxed-expression/point-accessor-operand.js';
 import { colorSpaceOf, isColorValued } from './color-space-fact.js';
 import {
+  assertCalleeIsFunction,
   assertNoCurriedApplication,
   isPartialApplication,
   partialApplicationValueDecline,
@@ -7333,7 +7334,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         true
       );
     }
+    // A callee that is not a function value (a number, `D(sin(n·x), x)`)
+    // declines: the emitted call would throw when it runs. Compiling the
+    // callee before the check changes only the reason of the decline: a
+    // callee that declines for its own reason (a curried call inside it,
+    // `Apply(Apply(Apply(W, 0), 1), x)`) gives that reason.
     const callee = compile(args[0]);
+    assertCalleeIsFunction(args);
     return `(${callee})(${args
       .slice(1)
       .map((a) => compile(a))
