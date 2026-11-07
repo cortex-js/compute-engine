@@ -986,8 +986,8 @@ function snapshotDepsUnderChain(
  * Many memos call this function: the collection-facet memo, the sequence
  * term memo (`sequence.ts`), the application memo (`function-utils.ts`), the
  * stored-value memo of a symbol (`boxed-symbol.ts`), the type memo of a
- * value definition (`boxed-value-definition.ts`), the declined-derivative
- * memo (`library/calculus.ts`), the `Slice` bounds memo
+ * value definition (`boxed-value-definition.ts`), the derivative memo of a
+ * `D` node (`library/calculus.ts`), the `Slice` bounds memo
  * (`library/collections.ts`) and the probe cache of `symbolic/limit.ts`. A
  * change to the eligibility rules here changes all of them: to let one memo
  * store more instances, widen the eligibility in that caller, not here.

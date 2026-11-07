@@ -174,6 +174,42 @@ export function isDifferentiating(): boolean {
   return differentiationNesting > 0;
 }
 
+let derivativeKeyUses = 0;
+
+/**
+ * The number of times a differentiation used the `derivative` key of an
+ * operator definition that the engine does not author
+ * (`differentiateWithDerivativeKey()`), for the process. A cache of
+ * derivatives compares the count before and after a differentiation: such a
+ * key reads state that the dependencies of the differentiated expression do
+ * not record. A function literal of the key reads its free symbols (with
+ * `derivative: [t ↦ a]` the partial is `a`, and a value write to `a` moves
+ * no version that the cache compares), and a handler is host code that can
+ * read any state. The key of a library operator (`Arctan2`) is not counted:
+ * it reads only its arguments and the configuration of the engine, whose
+ * changes move the `world` version.
+ */
+export function derivativeKeyUseCount(): number {
+  return derivativeKeyUses;
+}
+
+/**
+ * Is the operator definition of `opSym` the one of the standard library of
+ * the engine: the binding of the system scope, by identity, and not one of a
+ * library that the caller gave to the constructor
+ * (`engine._customLibraryOperators`), which is installed in the system scope
+ * too?
+ */
+function isEngineAuthoredDefinition(opSym: Expression): boolean {
+  if (!isSymbol(opSym)) return false;
+  const ce = opSym.engine;
+  if (ce._customLibraryOperators.has(opSym.symbol)) return false;
+  const systemDef = ce.contextStack[0]?.lexicalScope.bindings.get(opSym.symbol);
+  return (
+    isOperatorDef(systemDef) && systemDef.operator === opSym.operatorDefinition
+  );
+}
+
 //
 // ── Derivative trace ────────────────────────────────────────────────
 //
@@ -4251,6 +4287,7 @@ function differentiateWithDerivativeKey(
   if (key === undefined) return undefined;
   const args = expr.ops;
   if (args.length === 0) return undefined;
+  if (!isEngineAuthoredDefinition(opSym)) derivativeKeyUses += 1;
   // An array is used only for an application with as many arguments as the
   // array has entries. For any other application, each partial derivative
   // stays symbolic.

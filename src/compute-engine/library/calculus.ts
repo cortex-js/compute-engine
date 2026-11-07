@@ -134,6 +134,7 @@ import {
 import {
   derivative,
   differentiate,
+  derivativeKeyUseCount,
   isDifferentiating,
   blockValue,
   literalBodyOverHoles,
@@ -4559,8 +4560,12 @@ function foldDerivativeResult(f: Expression): Expression {
 }
 
 /**
- * The record that a `D` node has no closed form (its evaluate handler
- * declined), in the state of the engine that the stamps describe:
+ * The record of the differentiation of a `D` node, in the state of the
+ * engine that the stamps describe:
+ * - `value`: the closed form that the differentiation gave, before it is
+ *   re-bound to the scope of the evaluation
+ *   (`rebindEscapingBinderResult()`), or `undefined` when the node has no
+ *   closed form (the evaluate handler declined);
  * - `worldVersion`: the `world` axis (`ce._worldVersion`), which advances
  *   for an assumption, a redefinition, an inference and a configuration
  *   change;
@@ -4581,7 +4586,8 @@ function foldDerivativeResult(f: Expression): Expression {
  * - `objectDeps`: the versions of the mutable objects whose fields the
  *   attempt read.
  */
-type DeclinedDerivative = {
+type DerivativeRecord = {
+  value: Expression | undefined;
   worldVersion: number;
   factsHidden: boolean;
   deps: MemoDeps;
@@ -4611,26 +4617,28 @@ function variableStampsValid(stamps: VariableStamp[]): boolean {
   );
 }
 
-/** The declines of `D` nodes, one slot for `evaluate()` and one for a
- * numeric approximation. Weakly held: the record goes with the node. */
-const DECLINED_DERIVATIVES = new WeakMap<
+/** The records of the differentiations of `D` nodes, one slot for
+ * `evaluate()` and one for a numeric approximation. Weakly held: the record
+ * goes with the node. */
+const DERIVATIVE_RECORDS = new WeakMap<
   Expression,
-  [DeclinedDerivative | undefined, DeclinedDerivative | undefined]
+  [DerivativeRecord | undefined, DerivativeRecord | undefined]
 >();
 
 /**
- * `expression` when an earlier evaluation of this same `D` node declined
- * (found no closed form) and nothing it depends on changed since then (see
- * {@link DeclinedDerivative}), otherwise `undefined`. A hit hands the object
- * dependencies of the record to the enclosing cache-backed computations, as
- * the other value memos do.
+ * The result of an earlier differentiation of this same `D` node, when
+ * nothing it depends on changed since then (see {@link DerivativeRecord}):
+ * the closed form, before it is re-bound to the scope of the evaluation, or
+ * `expression` itself when the differentiation declined. Otherwise
+ * `undefined`. A hit hands the object dependencies of the record to the
+ * enclosing cache-backed computations, as the other value memos do.
  */
-function declinedDerivativeHit(
+function recordedDerivative(
   expression: Expression | undefined,
   numeric: boolean
 ): Expression | undefined {
   if (expression === undefined) return undefined;
-  const entry = DECLINED_DERIVATIVES.get(expression)?.[numeric ? 1 : 0];
+  const entry = DERIVATIVE_RECORDS.get(expression)?.[numeric ? 1 : 0];
   if (entry === undefined) return undefined;
   const ce = expression.engine;
   if (
@@ -4643,27 +4651,29 @@ function declinedDerivativeHit(
   )
     return undefined;
   mergeObjectDeps(entry.objectDeps);
-  return expression;
+  return entry.value ?? expression;
 }
 
 /**
  * Run `attempt`, the differentiation of the `D` node `expression`, and
- * record a decline (`attempt` returns `undefined`) so that the next
- * evaluation of the same node does not work it out again
- * ({@link declinedDerivativeHit}). A recorded decline returns `expression`
- * itself, not `undefined`: the evaluation driver then gives the node as its
- * value, and does not box a new `D` node with an empty record. That is what
- * makes the record reach a later evaluation of the value, such as the read
- * of a function parameter that holds the derivative.
+ * record its result, a closed form or a decline (`attempt` returns
+ * `undefined`), so that the next evaluation of the same node does not work
+ * it out again ({@link recordedDerivative}). A recorded decline returns
+ * `expression` itself, not `undefined`: the evaluation driver then gives the
+ * node as its value, and does not box a new `D` node with an empty record.
+ * That is what makes the record reach a later evaluation of the value, such
+ * as the read of a function parameter that holds the derivative.
  *
- * A derivative with no closed form costs a full attempt: a `D` of a call of
- * a user function expands its body, and the size limit of the differentiator
+ * A differentiation costs a full attempt each time: a `D` of a call of a
+ * user function expands its body, and the size limit of the differentiator
  * can be reached only after a large result was built. Without the record, a
  * value that holds such a `D` paid that cost again at each evaluation, and a
  * function that reads its parameter `n` times paid it about `n + 2` times
- * (Tycho ledger row 424: 0.6 s for each attempt, 5 s for nine reads).
+ * (Tycho ledger row 424: 0.6 s for each attempt, 5 s for nine reads). The
+ * closed form of the derivative of a path of 29 pieces cost about 0.1 s to
+ * 0.5 s at each evaluation of the same node.
  *
- * A decline is not recorded when it may be provisional or when the record
+ * A result is not recorded when it may be provisional or when the record
  * could not be validated later, the same rules as the memo of a stored value
  * (`BoxedSymbol._memoizedStoredValue()`):
  * - inside a transient precision or angular-unit window;
@@ -4672,17 +4682,27 @@ function declinedDerivativeHit(
  *   (a reference cycle, a stopped sequence read, a walk that missed
  *   elements);
  * - when the attempt re-pointed a binding;
+ * - when the attempt used the `derivative` key of an operator definition
+ *   (`derivativeKeyUseCount()`): a function literal of the key reads its
+ *   free symbols, and a handler can read any state, which the dependencies
+ *   of the node do not record;
  * - when the node is not transitively pure (it can read a random number),
  *   holds a mutable object, or has a dependency that cannot be recorded
  *   (an unbound name);
- * - when the node holds an error;
+ * - when the node or the closed form holds an error;
  * - when the attempt runs inside another differentiation (a `D` nested in
  *   the operand of a `D`): it shares the size budget of the enclosing
  *   differentiation (`isDifferentiating()`), so it can decline because of
  *   the nodes that the enclosing one built.
- * A decline that is not recorded returns `undefined`, as before.
+ * A result that is not recorded is returned as it is: a closed form, or
+ * `undefined` for a decline.
+ *
+ * The recorded closed form is the value before the re-binding to the scope
+ * of the evaluation (`rebindEscapingBinderResult()`), which the caller does
+ * at each evaluation: in `x ↦ D(x^2, x)`, the record holds `2x`, and each
+ * call puts the value of its own parameter `x` in it.
  */
-function withDeclinedDerivativeMemo(
+function withDerivativeMemo(
   expression: Expression | undefined,
   numeric: boolean,
   attempt: () => Expression | undefined
@@ -4701,6 +4721,7 @@ function withDeclinedDerivativeMemo(
   const ce = expression.engine;
   const guard = beginStoreGuard();
   const rewritesBefore = ownBindingRewriteCount();
+  const keyUsesBefore = derivativeKeyUseCount();
   beginObjectDeps();
   let objectDeps: ObjectDeps | undefined;
   let result: Expression | undefined;
@@ -4709,29 +4730,31 @@ function withDeclinedDerivativeMemo(
   } finally {
     objectDeps = endObjectDeps();
   }
-  if (result !== undefined) return result;
   if (
+    (result !== undefined && !result.isValid) ||
     !guard.allowsStore() ||
     ownBindingRewriteCount() !== rewritesBefore ||
+    derivativeKeyUseCount() !== keyUsesBefore ||
     !isTransitivelyPure(expression) ||
     containsObject(expression)
   )
-    return undefined;
+    return result;
   // The dependencies are read AFTER the attempt: an inference that the
   // attempt made (a symbol narrowed by a use) is then part of the state the
   // record describes.
   const deps = snapshotMemoDeps(expression);
-  if (deps === undefined) return undefined;
-  const slots = DECLINED_DERIVATIVES.get(expression) ?? [undefined, undefined];
+  if (deps === undefined) return result;
+  const slots = DERIVATIVE_RECORDS.get(expression) ?? [undefined, undefined];
   slots[numeric ? 1 : 0] = {
+    value: result,
     worldVersion: ce._worldVersion,
     factsHidden: ce._factsHidden(),
     deps,
     variables: variableStamps(expression),
     objectDeps,
   };
-  DECLINED_DERIVATIVES.set(expression, slots);
-  return expression;
+  DERIVATIVE_RECORDS.set(expression, slots);
+  return result ?? expression;
 }
 
 /**
@@ -6265,32 +6288,33 @@ volumes
           if (n) diffVars.push(n);
         }
 
-        // A derivative with no closed form is not worked out again while
-        // nothing it depends on changed: the node is its own value (see
-        // `withDeclinedDerivativeMemo`).
-        const declined = declinedDerivativeHit(
+        // A derivative is not worked out again while nothing it depends on
+        // changed (see `withDerivativeMemo`): a derivative with no closed
+        // form is its own node, and a closed form is the recorded one,
+        // re-bound below as a new result is.
+        const recorded = recordedDerivative(
           expression,
           numericApproximation === true
         );
-        if (declined !== undefined) return declined;
+        // A handler called with no `expression` has no record: `recorded`
+        // is then `undefined`, and so is `expression`.
+        if (recorded !== undefined && recorded === expression) return recorded;
 
-        // A parameter of the running call whose value does not vary with a
-        // differentiation variable but holds a symbol with its name is
-        // shielded too: its value is put in by the call, after the
-        // derivative (`independentParameterNames`).
-        const independent = independentParameterNames(
-          ce,
-          isFunction(ops[0].canonical, 'Function')
-            ? ops[0].canonical.op1
-            : ops[0].canonical,
-          diffVars
-        );
-
-        const result = withDeclinedDerivativeMemo(
-          expression,
-          numericApproximation === true,
-          () =>
-            withValueShield(ce, [...diffVars, ...independent], () => {
+        const result =
+          recorded ??
+          withDerivativeMemo(expression, numericApproximation === true, () => {
+            // A parameter of the running call whose value does not vary
+            // with a differentiation variable but holds a symbol with its
+            // name is shielded too: its value is put in by the call, after
+            // the derivative (`independentParameterNames`).
+            const independent = independentParameterNames(
+              ce,
+              isFunction(ops[0].canonical, 'Function')
+                ? ops[0].canonical.op1
+                : ops[0].canonical,
+              diffVars
+            );
+            return withValueShield(ce, [...diffVars, ...independent], () => {
               let f: Expression | undefined = ops[0].canonical;
 
               // Unwrap Function literals to get the body for differentiation.
@@ -6356,8 +6380,8 @@ volumes
                 // piecewise result is folded arm by arm.
                 return f === undefined ? undefined : foldDerivativeResult(f);
               });
-            })
-        );
+            });
+          });
         // The memo recorded the decline: the node is its value.
         if (result === expression) return result;
 

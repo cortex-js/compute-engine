@@ -161,6 +161,17 @@
   and now takes about 16.5 µs; its simplification takes 9% less time and
   `∫1/(x³+1) dx` 8% less (medians of seven rounds, one warm process). The
   types do not change. (CE-351)
+- **Evaluating the same derivative again no longer differentiates again.**
+  A `D` expression keeps its closed form while nothing that it reads changes:
+  the value of a symbol, the definition of a function that it calls, an
+  assumption, the type of its variable or the configuration of the engine.
+  For `h(t)`, a path of 29 linear pieces read from a list of points, a second
+  `evaluate()` of the same `["D", ["PointY", ["h", "u"]], "u"]` took about
+  80 ms and now takes about 18 ms (the first evaluation still takes about
+  190 ms; one run from source). In `x ↦ D(x^2, x)`, each call still puts its
+  own argument in `2x`. A derivative that uses the `derivative` handler of an
+  operator declared by the caller is still worked out at each evaluation,
+  because that handler can read any state. The values do not change. (CE-442)
 
 ## 0.182.0 _2026-11-06_
 

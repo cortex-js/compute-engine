@@ -35,7 +35,9 @@
  *   reads, through the bodies of the functions it calls), the `world` version
  *   and the fact-suppression side, and gives the node itself as its value. A
  *   later evaluation of the same node does not differentiate again while the
- *   record is valid (`withDeclinedDerivativeMemo`, `library/calculus.ts`).
+ *   record is valid (`withDerivativeMemo`, `library/calculus.ts`). The same
+ *   record also keeps a closed form, with the same dependencies
+ *   (`test/compute-engine/d-node-derivative-memo.test.ts`).
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
