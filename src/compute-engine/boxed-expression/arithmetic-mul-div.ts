@@ -2903,13 +2903,18 @@ function expandProduct(
   if (lhsDivide) return expandProduct(lhs.op1, rhs, matrixContext).div(lhs.op2);
   if (rhsDivide) return expandProduct(lhs, rhs.op1, matrixContext).div(rhs.op2);
 
-  if (isFunction(lhs, 'Add')) {
+  // The distribution gives each term of the sum a copy of the other factor.
+  // A factor that draws (`r(t)`, with `r` a function with the `random`
+  // effect, see `isMergeable()`) is one value, and its copies would be
+  // independent values, so it is not distributed: `r(t)·(x + 1)` stays as
+  // it is, and `(r(t) + 1)·(x + 1)` is `r(t)·(x + 1) + x + 1`.
+  if (isFunction(lhs, 'Add') && isMergeable(rhs)) {
     const terms: Expression[] = lhs.ops.map((x) =>
       expandProduct(x, rhs, matrixContext)
     );
     return addArray(terms);
   }
-  if (isFunction(rhs, 'Add')) {
+  if (isFunction(rhs, 'Add') && isMergeable(lhs)) {
     const terms: Expression[] = rhs.ops.map((x) =>
       expandProduct(lhs, x, matrixContext)
     );
@@ -3097,9 +3102,29 @@ export function expandProducts(
   // `expandMatrixProduct()`: the matrix product is not commutative, and the
   // sum of a matrix and a scalar is element-wise, so not every sum can be
   // distributed.
+  //
+  // `expandMatrixProduct()` copies its non-scalar factors without the test
+  // of `expandProduct()` for a factor that draws (see `isMergeable()`), so a
+  // product with a matrix and a non-scalar factor that draws is not
+  // expanded. Its scalar factors are distributed by `expandProduct()`,
+  // which makes the test.
   const matrixContext = ops.some(hasMatrixPart);
-  if (matrixContext && ops.some(hasDistributableSum))
+  if (matrixContext && ops.some(hasDistributableSum)) {
+    if (!ops.every((x) => isScalarFactor(x) || isMergeable(x)))
+      return new Product(ce, ops, { matrixContext }).asExpression();
     return expandMatrixProduct(ce, ops);
+  }
+  // `expandProduct()` does not distribute a sum over a factor that draws,
+  // and a product that holds a draw is such a factor. So, without a matrix
+  // (the factors commute), the factors that draw go first: the fold from
+  // the right then expands the product of the other factors before it
+  // meets a draw. `r(t)·(x + 1)·(y + 1)` is `(xy + x + y + 1)·r(t)`, not
+  // `(x + 1)·(y + 1)·r(t)`.
+  if (!matrixContext && ops.length > 2 && !ops.every((x) => isMergeable(x)))
+    ops = [
+      ...ops.filter((x) => !isMergeable(x)),
+      ...ops.filter((x) => isMergeable(x)),
+    ];
   let rhs = expandProduct(
     ops[ops.length - 2],
     ops[ops.length - 1],

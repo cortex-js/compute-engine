@@ -191,10 +191,18 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
       }
     }
 
-    // Symbolic case: check if a and b differ by a small integer constant
+    // Symbolic case: check if a and b differ by a small integer constant.
+    // Not for a base that draws: the two occurrences of `r(t)` in
+    // `r(t)!/(r(t) − 1)!` (with `r` a function with the `random` effect) are
+    // two independent values.
     const aBO = baseOffset(a);
     const bBO = baseOffset(b);
-    if (aBO && bBO && aBO.base.isSame(bBO.base)) {
+    if (
+      aBO &&
+      bBO &&
+      aBO.base.isSame(bBO.base) &&
+      isMergeable(aBO.base)
+    ) {
       const d = aBO.offset - bBO.offset;
       if (Number.isInteger(d) && d >= 1 && d <= 8) {
         // a!/b! = (b+1)(b+2)...a
@@ -247,9 +255,13 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
         };
       }
 
-      // Symbolic: check if k + m structurally equals n
+      // Symbolic: check if k + m structurally equals n. Not when a draw
+      // occurs in `n`, `k` or `m`: the test reads the occurrences of
+      // `r(t)` in `r(t)!/(k!·(r(t) − k)!)` (with `r` a function with the
+      // `random` effect) as one value, where they are two independent
+      // values.
       const sum = k.add(m);
-      if (sum.isSame(n)) {
+      if (sum.isSame(n) && isMergeable(num) && isMergeable(denom)) {
         return {
           value: ce._fn('Binomial', [n, k]),
           because: 'n!/(k!(n-k)!) -> Binomial',

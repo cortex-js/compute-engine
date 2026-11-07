@@ -103,6 +103,17 @@
 
 ### Resolved Issues
 
+- **An expansion no longer turns one random draw into several.** With `r`
+  declared with the `random` effect, `Expand((r(t) + 1)^2)` gave
+  `r(t)^2 + 2r(t) + 1`, three independent draws where the input has one; it
+  now stays `(r(t) + 1)^2`. A factor that draws is not distributed over a sum
+  (`Expand(r(t)·(x + 1))` and `r(t).mul(x + 1)` give `(x + 1)·r(t)`, not
+  `x·r(t) + r(t)`), a denominator that draws is not distributed over the
+  terms of the numerator, and `Binomial(r(t), 2)` stays as it is. The same
+  applies to `Random()`. In the same way, `simplify()` no longer reads two
+  draws as one value in `r(t)!/(r(t) − 1)!`, `r(t)!/(k!·(r(t) − k)!)`,
+  `\log_{r(t)}(r(t)^x y)` and `r(t)^{\log_{r(t)}(x)}`: each one now stays as
+  it is.
 - **`simplify()` no longer adds a base of 10 to a common logarithm.**
   `\log(x^2)` simplified to `2\log_{10}(|x|)`, which is not the same
   expression as the simplified form of `2\log(|x|)`; it now simplifies to

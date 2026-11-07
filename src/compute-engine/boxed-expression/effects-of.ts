@@ -624,6 +624,16 @@ export function shallowApplicationEffects(expr: Expression): ComputedEffects {
  * application of `simplify()` for a repeated wildcard) asks this predicate.
  * The sites ask only after the two terms are found to be the same, so the
  * cost is paid only for a merge that would happen.
+ *
+ * The opposite rewrite asks it too: a rewrite that makes several copies of
+ * a subexpression (the distribution of a product over a sum in `mul()` and
+ * `Expand`, the expansion of a power of a sum, the distribution of a
+ * denominator over the terms of a numerator, the falling-factorial form of
+ * `Binomial(n, k)`) does not copy one that draws, since each copy would be
+ * an independent value. These sites ask before each copy, with no equality
+ * test first. The cost is small for a pure expression, because the effects that
+ * `isPure` reads are cached on each node; for a subexpression with unknown effects, each
+ * call walks it again.
  */
 export function isMergeable(
   expr: Expression,

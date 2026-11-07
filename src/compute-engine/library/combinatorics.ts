@@ -47,6 +47,7 @@ import {
 } from '../numerics/special-functions.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { kleeneEvery } from '../../common/kleene.js';
+import { isMergeable } from '../boxed-expression/effects-of.js';
 import {
   collectionContains,
   enumerableFromAllSources,
@@ -428,6 +429,10 @@ function evaluateBinomial(
       const kn = Number(k);
       if (kn === 0) return ce.One;
       if (kn === 1) return nExpr;
+      // The form has `k` copies of `n`. When `n` draws (`r(t)`, with `r` a
+      // function with the `random` effect), each copy would be an
+      // independent value, so `Binomial(r(t), 2)` stays as it is.
+      if (!isMergeable(nExpr)) return undefined;
       const factors: Expression[] = [nExpr];
       for (let i = 1; i < kn; i++)
         factors.push(

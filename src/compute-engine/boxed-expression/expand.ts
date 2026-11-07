@@ -12,6 +12,7 @@ import { mul, expandProducts } from './arithmetic-mul-div.js';
 import { add } from './arithmetic-add.js';
 import { mayBeMatrixValued, typeMayHoldNumber } from './matrix-operand.js';
 import { holdsKindValue, residueFoldOrKeep } from './residue-class.js';
+import { isMergeable } from './effects-of.js';
 
 const binomials = [
   [1],
@@ -132,6 +133,13 @@ function expandPower(base: Expression, exp: number): Expression | null {
   // We can expand only if the expression is a power of a sum.
   if (!isFunction(base, 'Add')) return null;
 
+  // The expansion has several copies of each term of the sum. A term that
+  // draws (`r(t)`, with `r` a function with the `random` effect, see
+  // `isMergeable()`) is one value, and its copies would be independent
+  // values: `(r(t) + 1)^2` is not `r(t)^2 + 2r(t) + 1`. Such a power is
+  // not expanded.
+  if (!isMergeable(base)) return null;
+
   // Terms that may be matrices do not commute: the product of two matrices
   // is the matrix product. The multinomial theorem below assumes that they
   // do (`(p + q)^2` is not `p^2 + 2p·q + q^2`), so the power is expanded as
@@ -212,7 +220,10 @@ export function expandFunction(
   //
   if (h === 'Divide') {
     const num = expand(ops[0]);
-    if (isFunction(num, 'Add'))
+    // Each term of the numerator gets a copy of the denominator, so a
+    // denominator that draws (see `isMergeable()`) is not distributed:
+    // `(x + 1)/r(t)` is not `x/r(t) + 1/r(t)`.
+    if (isFunction(num, 'Add') && isMergeable(ops[1]))
       return add(...num.ops.map((x) => x.div(ops[1])));
     return ce._fn('Divide', [num, ops[1]]);
   }

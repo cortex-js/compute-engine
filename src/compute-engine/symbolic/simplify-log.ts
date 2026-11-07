@@ -749,11 +749,19 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
       }
     }
 
-    // log_c(c^x * y) -> x + log_c(y)
+    // log_c(c^x * y) -> x + log_c(y). This rule and the two that follow
+    // read the base `c` and the base of the power `c^x` as one value, so
+    // they do not apply to a base that draws: the two occurrences of `r(t)`
+    // in `log_{r(t)}(r(t)^x · y)` (with `r` a function with the `random`
+    // effect) are two independent values.
     if (isFunction(arg, 'Multiply')) {
       for (let i = 0; i < arg.ops.length; i++) {
         const factor = arg.ops[i];
-        if (isFunction(factor, 'Power') && factor.op1?.isSame(logBase)) {
+        if (
+          isFunction(factor, 'Power') &&
+          factor.op1?.isSame(logBase) &&
+          isMergeable(logBase)
+        ) {
           const exp = factor.op2;
           const otherFactors = arg.ops.filter((_, idx) => idx !== i);
           const remaining =
@@ -773,7 +781,8 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
       if (
         arg.op1?.operator === 'Power' &&
         isFunction(arg.op1) &&
-        arg.op1.op1?.isSame(logBase)
+        arg.op1.op1?.isSame(logBase) &&
+        isMergeable(logBase)
       ) {
         return {
           value: arg.op1.op2.sub(logInBase(ce, arg.op2, logBase)),
@@ -787,7 +796,8 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
       if (
         arg.op2?.operator === 'Power' &&
         isFunction(arg.op2) &&
-        arg.op2.op1?.isSame(logBase)
+        arg.op2.op1?.isSame(logBase) &&
+        isMergeable(logBase)
       ) {
         return {
           value: logInBase(ce, arg.op1, logBase).sub(arg.op2.op2),
@@ -961,8 +971,16 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
       };
     }
 
-    // c^log_c(x) -> x
-    if (isFunction(exp, 'Log') && exp.op2?.isSame(base)) {
+    // c^log_c(x) -> x. This rule and the three that follow read the base
+    // `c` of the power and the base of the logarithm as one value, so they
+    // do not apply to a base that draws: the two occurrences of `r(t)` in
+    // `r(t)^{log_{r(t)}(x)}` (with `r` a function with the `random` effect)
+    // are two independent values.
+    if (
+      isFunction(exp, 'Log') &&
+      exp.op2?.isSame(base) &&
+      isMergeable(base)
+    ) {
       return { value: exp.op1, because: 'c^log_c(x) -> x' };
     }
 
@@ -972,7 +990,10 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
       const taken = takeOutLogTerms(
         ce,
         exp.ops,
-        (t) => isFunction(t, 'Log') && t.op2?.isSame(base) === true
+        (t) =>
+          isFunction(t, 'Log') &&
+          t.op2?.isSame(base) === true &&
+          isMergeable(base)
       );
       if (taken !== undefined) {
         const [factor, rest] = taken;
@@ -987,7 +1008,11 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
     if (isFunction(exp, 'Multiply')) {
       for (let i = 0; i < exp.ops.length; i++) {
         const factor = exp.ops[i];
-        if (isFunction(factor, 'Log') && factor.op2?.isSame(base)) {
+        if (
+          isFunction(factor, 'Log') &&
+          factor.op2?.isSame(base) &&
+          isMergeable(base)
+        ) {
           const otherFactors = exp.ops.filter((_, idx) => idx !== i);
           const y =
             otherFactors.length === 1
@@ -1006,7 +1031,8 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
       isFunction(exp, 'Divide') &&
       exp.op1?.operator === 'Log' &&
       isFunction(exp.op1) &&
-      exp.op1.op2?.isSame(base)
+      exp.op1.op2?.isSame(base) &&
+      isMergeable(base)
     ) {
       return {
         value: exp.op1.op1.pow(ce.One.div(exp.op2)),
