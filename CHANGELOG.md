@@ -74,6 +74,12 @@
 
 ### Resolved Issues
 
+- **Epsil: a program run again on the same engine with another signature for
+  a function now uses the new signature.** After a first program
+  `let f: (integer) -> integer` and `function f(n) { 2*n }`, a second program
+  `let f: (real) -> real`, `function f(n) { 2*n }` and `f(2.5)` on the same
+  engine gave the error `no-matching-clause`: the function kept the parameter
+  type `integer`. It now gives `5`, as on a new engine.
 - **The limit at infinity of a logarithm in base 10, or in another base, now
   reads the base.** The limit was computed as if the logarithm were natural:
   `\lim_{x\to\infty} \log(\frac{2x+1}{x})` gave `\ln 2`, and

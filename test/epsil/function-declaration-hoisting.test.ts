@@ -1,5 +1,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { executeEpsil } from '../../src/epsil/execute-epsil';
+import {
+  executeEpsil,
+  executeEpsilAsync,
+} from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { isString } from '../../src/compute-engine/boxed-expression/type-guards';
@@ -614,6 +617,145 @@ describe('STATEMENTS THAT ARE NOT HOISTED', () => {
     // In one block, the assignment declares the local `g`, and the call
     // before it is a use before the declaration.
     expect(JSON.stringify(block(src))).toContain("'read-before-declaration'");
+  });
+});
+
+describe('A PROGRAM RUN AGAIN ON THE SAME ENGINE WITH ANOTHER SIGNATURE', () => {
+  // The program scope keeps the binding of `f` that the first program made.
+  // In order, the `let` of the second program declares `f` again, and the
+  // `function` statement is boxed against the new binding. The preparation
+  // declares `f` again too, so the clause gets the parameter types of the
+  // new declaration, and each second program gives the value that it gives
+  // on a new engine. A clause boxed against the binding of the first program
+  // would keep the parameter type `integer`.
+
+  /** The value of `second` after `first` on one engine, and on a new
+   * engine. */
+  const reRun = (first: string, second: string) => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, first);
+    const again = executeEpsil(ce, second);
+    const fresh = executeEpsil(new ComputeEngine(), second);
+    return {
+      again: plain(again.value),
+      againDiagnostics: again.diagnostics,
+      fresh: plain(fresh.value),
+    };
+  };
+
+  test('the parameter type of the new declaration', () => {
+    const { again, againDiagnostics, fresh } = reRun(
+      'let f: (integer) -> integer\nfunction f(n) { 2*n }\nf(3)',
+      'let f: (real) -> real\nfunction f(n) { 2*n }\nf(2.5)'
+    );
+    expect(again).toEqual({ num: '5.0' });
+    expect(fresh).toEqual(again);
+    expect(againDiagnostics).toEqual([]);
+  });
+
+  test('a call between the declaration and the definition', () => {
+    const { again, fresh } = reRun(
+      'let f: (integer) -> integer\nlet a = f(2)\nfunction f(n) { 2*n }\na',
+      'let f: (real) -> real\nlet a = f(2.5)\nfunction f(n) { 2*n }\na'
+    );
+    expect(again).toEqual({ num: '5.0' });
+    expect(fresh).toEqual(again);
+  });
+
+  test('two functions that a later function calls', () => {
+    const { again, fresh } = reRun(
+      'let g: (integer) -> integer\nlet f: (integer) -> integer\nlet a = f(2)\nfunction f(n) { g(n) + 1 }\nfunction g(n) { 2*n }\na',
+      'let g: (real) -> real\nlet f: (real) -> real\nlet a = f(2.5)\nfunction f(n) { g(n) + 1 }\nfunction g(n) { 2*n }\na'
+    );
+    expect(again).toEqual({ num: '6.0' });
+    expect(fresh).toEqual(again);
+  });
+
+  test('the same signature and a new body', () => {
+    const { again, fresh } = reRun(
+      'let f: (real) -> real\nlet a = f(2)\nfunction f(n) { 2*n }\na',
+      'let f: (real) -> real\nlet a = f(2)\nfunction f(n) { 3*n }\na'
+    );
+    expect(again).toEqual(6);
+    expect(fresh).toEqual(again);
+  });
+
+  test('a later program with no `let` keeps the declaration', () => {
+    // The `let` of the second program declared `f` again; a third program
+    // that only calls `f` uses that declaration.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let f: (integer) -> integer\nfunction f(n) { 2*n }');
+    executeEpsil(ce, 'let f: (real) -> real\nfunction f(n) { 3*n }');
+    expect(plain(executeEpsil(ce, 'f(2.5)').value)).toEqual(7.5);
+  });
+
+  test('a host binding of the same name around the program scope', () => {
+    // The binding of the first program hides the host binding of `f`. The
+    // preparation declares `f` again in the program scope and keeps that
+    // binding with its clause: it does not remove it as it removes a new
+    // binding of a name that an enclosing scope defines.
+    const ce = new ComputeEngine();
+    ce.declare('f', 'function');
+    ce.pushScope();
+    executeEpsil(ce, 'let f: (integer) -> integer\nfunction f(n) { 2*n }');
+    expect(
+      plain(
+        executeEpsil(
+          ce,
+          'let f: (integer) -> integer\nlet a = String(f(2))\nfunction f(n) { 3*n }\na'
+        ).value
+      )
+    ).toBe('6');
+    expect(
+      plain(
+        executeEpsil(
+          ce,
+          'let f: (real) -> real\nlet a = String(f(2.5))\nfunction f(n) { 3*n }\na'
+        ).value
+      )
+    ).toBe('7.5');
+  });
+
+  test('a preparation that cannot box the statement keeps the earlier binding', () => {
+    // The preparation boxes each statement with `{ form: 'raw' }` first, and
+    // then boxes the `function` statement to install its clause. That second
+    // boxing throws here once, so the statement runs in order: the call
+    // before the `let` reads the function of the first program (`2*n`), and
+    // the call after the definition reads the new one (`3*n`).
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let f: (integer) -> integer\nfunction f(n) { 2*n }');
+    const box = ce.box.bind(ce);
+    let rawSeen = false;
+    let thrown = false;
+    ce.box = ((expr: unknown, options?: { form?: string }) => {
+      if (JSON.stringify(expr).startsWith('{"fn":["DefineFunction"')) {
+        if (options?.form === 'raw') rawSeen = true;
+        else if (rawSeen && !thrown) {
+          thrown = true;
+          throw new Error('the boxing fails');
+        }
+      }
+      return box(expr as never, options as never);
+    }) as typeof ce.box;
+    const { value } = executeEpsil(
+      ce,
+      'let a = String(f(2))\nlet f: (integer) -> integer\nfunction f(n) { 3*n }\n[a, f(2)]'
+    );
+    expect(thrown).toBe(true);
+    expect(plain(value)).toEqual(['4', 6]);
+  });
+
+  test('the asynchronous runner', async () => {
+    const ce = new ComputeEngine();
+    await executeEpsilAsync(
+      ce,
+      'let f: (integer) -> integer\nfunction f(n) { 2*n }\nf(3)'
+    );
+    const { value } = await executeEpsilAsync(
+      ce,
+      'let f: (real) -> real\nfunction f(n) { 2*n }\nf(2.5)'
+    );
+    expect(plain(value)).toEqual({ num: '5.0' });
   });
 });
 

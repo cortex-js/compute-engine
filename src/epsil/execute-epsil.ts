@@ -1145,6 +1145,21 @@ function topLevelRedeclaration(
  *    scope declares is not declared: the assignment writes that binding. A
  *    later `let` upgrades the valueless binding in place, as it upgrades an
  *    auto-declared one.
+ *
+ *    One binding that the program scope holds is declared again: the
+ *    binding that a statement of an earlier program on the same engine made
+ *    for the name of a prepared function, when a `let`/`const` of this
+ *    program declares that name before the `function` statement. In order,
+ *    that `let` replaces the binding, and the `function` statement is then
+ *    boxed against the new binding. The preparation does the same, so the
+ *    clause gets the parameter types of the new declaration: after a first
+ *    program `let f: (integer) -> integer`, `function f(n) { 2*n }`, a
+ *    second program `let f: (real) -> real`, `function f(n) { 2*n }`,
+ *    `f(2.5)` gives `5`, as on a new engine. A clause boxed against the old
+ *    binding would get the parameter type `integer` of the old declaration
+ *    (`ascribeDeclaredParameterTypes()`, `library/core.ts`), and the call
+ *    would find no matching clause. A binding of this kind that an enclosing
+ *    scope also defines is not removed by step 3.
  * 2. The statement is boxed, with the declaration-route marker raised as the
  *    statement loop raises it, which installs the clause. The loop evaluates
  *    the boxed statement at its turn and does not box it again. A boxing that
@@ -1159,7 +1174,13 @@ function topLevelRedeclaration(
  *    the program although its statement did not run. The binding is not
  *    removed: the clause can have been added to a function that an earlier
  *    program defined, and removing the binding would remove that function
- *    too.
+ *    too. A binding of an earlier program that step 1 declared again (a
+ *    `let` of the name comes before the `function` statement) is replaced
+ *    at the start of the program, also when the program stops before that
+ *    `let` runs: the function of the earlier program is then gone, and the
+ *    name holds the prepared clause. When the preparation does not box the
+ *    statement (its time budget ran out, or the boxing threw), it puts that
+ *    binding back.
  * 3. The bindings that step 1 made for a name that an enclosing scope
  *    defines (a library constant such as `i`, `e` or `Pi`, another library
  *    definition, a binding of a host scope around the program scope) are
@@ -1377,6 +1398,29 @@ function prepareFunctionDeclarations(
   // The bindings that step 1 made and step 3 did not remove, each with the
   // index of the first statement that declares or writes the name.
   const kept = new Map<string, number>();
+  // The names of the prepared functions whose binding in the program scope
+  // a statement of an earlier program on the same engine made. Step 1
+  // declares such a name again at the first prepared statement that comes
+  // after a `let`/`const` of the name, as that `let` does when the program
+  // runs in order, and removes it from this set: the binding that step 1
+  // made is the one that the later statements see. Such a name is in
+  // `replaced` from then on. An enclosing scope can also define it (a host
+  // binding of the same name), but the binding of the earlier program
+  // already hides that definition from this program: a statement before
+  // the `let` reads the binding of the program scope, not the outer
+  // definition. So step 1 gives it no union with the outer type, and step 3
+  // does not remove it, which would remove the prepared clause too.
+  const previousRun = new Set<string>();
+  const replaced = new Set<string>();
+  for (const name of prepared) {
+    const existing = scope.bindings.get(name);
+    if (
+      existing !== undefined &&
+      (existing as { _declaredByStatement?: boolean })._declaredByStatement ===
+        true
+    )
+      previousRun.add(name);
+  }
 
   for (let j = 0; j < statements.length; j++) {
     const name = symbol(operand(statements[j], 1));
@@ -1389,13 +1433,29 @@ function prepareFunctionDeclarations(
     // of the first assignment, which declares it when it runs.
     const made: string[] = [];
     const bound = new Set<string>();
+    // The bindings of an earlier program that this step replaces, by name.
+    // When the statement is not boxed below (the time budget ran out, or the
+    // boxing threw), no clause is installed on the new bindings, and each
+    // one is put back: the statement then runs in order, and its `let`
+    // replaces the binding at its turn. Without this, a program stopped by
+    // its budget at this point removed the function of the earlier program.
+    const replacedHere = new Map<
+      string,
+      NonNullable<ReturnType<typeof scope.bindings.get>>
+    >();
     for (const [n, all] of writes) {
       const before = all.filter((w) => w.index < j && w.kind !== 'other');
       if (before.length === 0) continue;
       bound.add(n);
       const lets = before.filter((w) => w.kind === 'let');
       if (lets.length > 0) {
-        if (n === 'Nothing' || scope.bindings.has(n)) continue;
+        if (n === 'Nothing') continue;
+        const existing = scope.bindings.get(n);
+        if (existing !== undefined) {
+          if (!previousRun.delete(n)) continue;
+          replaced.add(n);
+          replacedHere.set(n, existing);
+        }
         let type: Type | undefined = undefined;
         for (const w of lets) type = w.type ?? type;
         // A name that an enclosing scope defines (the constant `i`, a host
@@ -1417,6 +1477,7 @@ function prepareFunctionDeclarations(
         if (
           type !== undefined &&
           type !== 'unknown' &&
+          !replaced.has(n) &&
           hasOuterDefinition(scope, n) &&
           canCallBefore(name, lets[0].index)
         ) {
@@ -1470,11 +1531,19 @@ function prepareFunctionDeclarations(
       expired = isTimeoutCancellation(e);
     } finally {
       ce._epsilDeclarationRoute = enclosingRoute;
+      if (!preboxed.has(j))
+        for (const [n, previous] of replacedHere) {
+          scope.bindings.set(n, previous);
+          replaced.delete(n);
+          previousRun.add(n);
+        }
       // Step 3: a statement before the `let` of a name that an enclosing
       // scope defines (a library constant, a library definition, a host
       // binding) reads that definition.
       for (const n of made)
-        if (hasOuterDefinition(scope, n)) ce.undeclare(n);
+        if (replacedHere.has(n) && !preboxed.has(j)) continue;
+        else if (!replaced.has(n) && hasOuterDefinition(scope, n))
+          ce.undeclare(n);
         else kept.set(n, writes.get(n)![0].index);
     }
     if (expired) break;
