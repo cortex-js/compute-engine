@@ -737,6 +737,14 @@ type DerivativeChainCache = {
   lastFinishedAny?: number;
   /** The `deps` of that same finished result. */
   lastFinishedDeps?: SymbolDependency[];
+  /** When that same finished result is a decline: an order at or below the
+   * order of the request that also declines in the state the result
+   * describes. It is the order of the step that found no derivative when
+   * that step came before the last one (`f'''` stops at the step of `f'`),
+   * or the order of the recorded decline the request started from;
+   * otherwise the order of the request. It is `undefined` when the result is
+   * a derivative. `memoizedDerivativeResult` reads it. */
+  lastFinishedDeclinedAt?: number;
 };
 
 /**
@@ -757,6 +765,12 @@ type FinishedDerivative = {
   any: number;
   value: Expression | undefined;
   deps?: SymbolDependency[];
+  /** In an entry of `memoizedDerivativeResult`: the value is `undefined`
+   * because {@link derivative} found no derivative of this order. Every
+   * higher order then declines too, in the same state. A decline for
+   * another reason (the closed form still holds a `D`, say) does not carry
+   * this mark: such a reason can go away at a higher order. */
+  differentiationDeclined?: true;
 };
 
 /** A symbol node, the definition it is bound to (the inner value or operator
@@ -933,6 +947,25 @@ function noteStateReads(deps: SymbolDependency[] | undefined): void {
 }
 
 /**
+ * Add to the reads of the request that runs now the symbols of `input`, the
+ * expression that a differentiation step found no derivative of.
+ *
+ * A closed form records the symbols of its raw iterate, and a decline must
+ * record those of the input of the step that failed: whether the step goes
+ * past the size limit can depend on their values. The body `p·g(x)`, with
+ * `g` a deeply nested formula, declines for `p = 1` and is `0` for `p = 0`.
+ * A recorded decline answers the later requests of this order and of every
+ * higher order, so without these reads a decline at the first step (whose
+ * input is the body, which no step simplified) would have no dependency. A
+ * symbol that cannot be validated by its definition (a parameter of the
+ * call that runs now) makes the reads incomplete, and the decline is then
+ * served only at its exact generation.
+ */
+function declineReads(input: Expression): void {
+  noteStateReads(symbolDependencies(input));
+}
+
+/**
  * Memoize the result of `compute`, the univariate arm of the `Derivative`
  * evaluate handler, per function literal, route and order.
  *
@@ -950,9 +983,11 @@ function noteStateReads(deps: SymbolDependency[] | undefined): void {
  * returned a finished result of this entry at a generation equal to or
  * newer than the generation before `compute`: `derivative()` recorded that
  * result AFTER its own writes, and after it `compute` only lifts the
- * closed form into a function literal, which runs no user code. When
- * `derivative()` did not return such a result (it declined, or the order is
- * 0), or the semantic version moved during `compute`, a write of other code
+ * closed form into a function literal, which runs no user code. A decline
+ * that `derivative()` recorded or served is such a finished result too. When
+ * `derivative()` did not return a finished result (it returned before its
+ * record, did not store it, or the order is 0), or the semantic version
+ * moved during `compute`, a write of other code
  * (an impure function body, an inference that retypes a free symbol) can be
  * in the gap, and the entry is recorded only when the generation did not
  * move at all.
@@ -980,11 +1015,30 @@ export function memoizedDerivativeResult(
     noteStateReads(finished.deps);
     return finished.value;
   }
+  // When the highest lower order with a valid entry is a decline of
+  // `derivative()` (`differentiationDeclined`), this order declines too:
+  // `derivative()` repeats the steps of that order in the same state, and
+  // stops at the same step. Without this, each new order of a deeply nested
+  // body past the size limit (`MAX_DERIVATIVE_NODES`) cost about one second
+  // before the numeric fallback took over. The search is here, and not only
+  // in `derivative()`: the entries of `derivative()` depend on the hole `_`,
+  // which each request declares again, so they do not validate in the
+  // scope of the next request.
+  for (let k = order - 1; k >= 1; k--) {
+    const lower = finishedDerivative(ce, cache, subKey, k);
+    if (lower === undefined) continue;
+    if (lower.differentiationDeclined === true) {
+      noteStateReads(lower.deps);
+      return undefined;
+    }
+    break;
+  }
   const before = ce._cacheGeneration();
   const anyBefore = ce._anyVersion;
   cache.lastFinishedGeneration = undefined;
   cache.lastFinishedAny = undefined;
   cache.lastFinishedDeps = undefined;
+  cache.lastFinishedDeclinedAt = undefined;
   const guard = beginStoreGuard();
   const value = compute();
   // A result computed while host code ran, or with a provisional answer, is
@@ -1011,12 +1065,40 @@ export function memoizedDerivativeResult(
   // form are the dependencies of the lifted result. Without a closed form
   // (not `accounted`), there are none to validate by, and only an exact
   // generation match serves the entry.
+  const deps = accounted ? restampDisposed(cache.lastFinishedDeps) : undefined;
+  // The order at which `derivative()` found no derivative, when this request
+  // declined for that reason (`compute` returns `undefined` when
+  // `derivative()` does). The assertion reads the field as `compute` left
+  // it: without it, the type checker keeps the `undefined` written above.
+  // Inside another differentiation, the decline can come from the size
+  // budget of the enclosing one (see `nestedRequest` in `derivative()`), so
+  // it does not get the mark that answers the higher orders.
+  const declinedAt = (cache as DerivativeChainCache).lastFinishedDeclinedAt;
+  const declined =
+    accounted &&
+    value === undefined &&
+    declinedAt !== undefined &&
+    !isDifferentiating();
   byOrder.set(order, {
     generation: after,
     any: ce._anyVersion,
     value,
-    deps: accounted ? restampDisposed(cache.lastFinishedDeps) : undefined,
+    deps,
+    ...(declined ? { differentiationDeclined: true } : {}),
   });
+  // A request that stopped at a lower step (`f'''` that stops at the step
+  // of `f'`) records that order as declined too, with the same state: the
+  // steps after it did not run. A later request of an order between the two
+  // then finds it in the search above. The derivatives of the sum
+  // `f'(a) + f''(a) + f'''(a)` are requested in the order 3, 2, 1.
+  if (declined && declinedAt < order)
+    byOrder.set(declinedAt, {
+      generation: after,
+      any: ce._anyVersion,
+      value: undefined,
+      deps,
+      differentiationDeclined: true,
+    });
   return value;
 }
 
@@ -1265,6 +1347,13 @@ export function derivative(
   // evaluation can run host code (a constant call `h(2)` in the body of
   // `f`), and a result that depends on it is not kept (`store-guard.ts`).
   const guard = beginStoreGuard();
+  // A request that starts inside another differentiation (the evaluation of
+  // a nested `Derivative`) shares the size budget of the enclosing one
+  // (`isDifferentiating()`). Its decline can then come from the nodes that
+  // the enclosing differentiation built, and the same request made alone
+  // could close. Such a decline is not recorded: a recorded decline answers
+  // later requests of this order and of every higher order.
+  const nestedRequest = isDifferentiating();
   // Read the cache key from the ORIGINAL operand: the normalization below
   // rewrites a function symbol into an application of it, which is a fresh
   // expression on every call and so has no identity to key on.
@@ -1321,6 +1410,8 @@ export function derivative(
         earlyCache.lastFinishedGeneration = early.generation;
         earlyCache.lastFinishedAny = early.any;
         earlyCache.lastFinishedDeps = early.deps;
+        earlyCache.lastFinishedDeclinedAt =
+          early.value === undefined ? order : undefined;
         noteStateReads(early.deps);
         return early.value;
       }
@@ -1367,6 +1458,8 @@ export function derivative(
     cache!.lastFinishedGeneration = finished.generation;
     cache!.lastFinishedAny = finished.any;
     cache!.lastFinishedDeps = finished.deps;
+    cache!.lastFinishedDeclinedAt =
+      finished.value === undefined ? originalOrder : undefined;
     noteStateReads(finished.deps);
     return finished.value;
   }
@@ -1380,6 +1473,9 @@ export function derivative(
   const outerReads = activeStateReads;
   activeStateReads = reads;
   let result: Expression | undefined;
+  // The order of the step that found no derivative, when it is lower than
+  // the order of this request (see the loop of the second branch below).
+  let declinedAt: number | undefined;
   try {
     if (foldMode) {
       // The chain of raw iterates, extended in place: an order already
@@ -1403,9 +1499,13 @@ export function derivative(
       }
       while (step < order && result) {
         const stepReads: StateReads = { deps: [], complete: true };
+        const input: Expression = result;
         activeStateReads = stepReads;
         try {
-          result = differentiate(result, v);
+          result = differentiate(input, v);
+          // A step that finds no derivative depends on the symbols of its
+          // input, as a closed form does (see `declineReads()`).
+          if (result === undefined) declineReads(input);
         } finally {
           activeStateReads = reads;
         }
@@ -1414,7 +1514,13 @@ export function derivative(
         chain[step] = result;
         chainReads[step] = stepReads;
       }
-      if (guard.allowsStore()) {
+      // The step of order `step` found no derivative: see the same test in
+      // the second branch below.
+      if (result === undefined && step < originalOrder) declinedAt = step;
+      // A chain that ends in a decline ends with `undefined`, and a later
+      // request of a higher order stops there at once. A nested request does
+      // not store such a chain (see `nestedRequest`).
+      if (guard.allowsStore() && !(nestedRequest && result === undefined)) {
         cache?.iterates.set(subKey, chain);
         cache?.iterateReads.set(subKey, chainReads);
       }
@@ -1438,6 +1544,19 @@ export function derivative(
       // is not served after a write to one of them, even when the
       // simplification removed the symbol.
       //
+      // When that highest valid lower order is a recorded DECLINE, this
+      // order declines too, at once. Order n repeats the steps of order k
+      // (k < n) in the same engine state, and the step where order k found
+      // no derivative stops order n at the same place. Without this, each
+      // new order differentiated the body again from order 0: for a deeply
+      // nested body past the size limit (`MAX_DERIVATIVE_NODES`), each
+      // order then cost about one second before the numeric fallback took
+      // over (`Apply(Derivative(f, k), 0.5)` folded for k = 1, 2, 3).
+      // A decline found inside another differentiation is not recorded
+      // (see `nestedRequest` at the start of this function), so a recorded
+      // decline is not one that the size budget of an enclosing
+      // differentiation caused.
+      //
       // This `simplify()` cannot recurse without end: it runs on a
       // derivative of the body, which does not contain the `Derivative`
       // expression whose evaluation started this differentiation. When that
@@ -1455,11 +1574,13 @@ export function derivative(
       let simplified = false;
       for (let k = order - 1; k >= 1; k--) {
         const lower = finishedDerivative(ce, cache, subKey, k);
-        if (lower?.value === undefined) continue;
+        if (lower === undefined) continue;
+        noteStateReads(lower.deps);
+        // A recorded decline of order k: this order declines too (see
+        // above). The loop below then does not run.
         result = lower.value;
         step = k;
         simplified = k >= 2;
-        noteStateReads(lower.deps);
         break;
       }
       while (step < order && result) {
@@ -1470,8 +1591,17 @@ export function derivative(
         }
         simplified = false;
         result = differentiate(next, v);
+        if (result === undefined) declineReads(next);
         step += 1;
       }
+      // The step of order `step` found no derivative, so every order from
+      // `step` up declines in this engine state. That decline is recorded
+      // for order `step` too, below: a later request of an order between
+      // `step` and this order then finds it in the search above. The
+      // derivatives of the sum `f'(a) + f''(a) + f'''(a)` are requested in
+      // the order 3, 2, 1, and without this record orders 2 and 1 each
+      // repeated the step of order 1 that failed.
+      if (result === undefined && step < originalOrder) declinedAt = step;
     }
   } finally {
     activeStateReads = outerReads;
@@ -1496,8 +1626,13 @@ export function derivative(
   noteStateReads(deps);
   // A result computed while host code ran (the evaluation of `f(_)` above,
   // or a constant call that a simplification evaluates), or with a
-  // provisional answer, is not kept (`store-guard.ts`).
-  if (cache !== undefined && guard.allowsStore()) {
+  // provisional answer, is not kept (`store-guard.ts`). Nor is a decline of a
+  // nested request (see `nestedRequest`).
+  if (
+    cache !== undefined &&
+    guard.allowsStore() &&
+    !(nestedRequest && result === undefined)
+  ) {
     let byOrder = cache.results.get(subKey);
     if (byOrder === undefined) {
       byOrder = new Map();
@@ -1509,6 +1644,13 @@ export function derivative(
     const generation = ce._cacheGeneration();
     const any = ce._anyVersion;
     byOrder.set(originalOrder, { generation, any, value: result, deps });
+    // The steps after `declinedAt` did not run, so the state that this
+    // request read is the state that the decline of order `declinedAt`
+    // depends on.
+    if (declinedAt !== undefined)
+      byOrder.set(declinedAt, { generation, any, value: undefined, deps });
+    cache.lastFinishedDeclinedAt =
+      result === undefined ? (declinedAt ?? originalOrder) : undefined;
     cache.lastFinishedGeneration = generation;
     cache.lastFinishedAny = any;
     cache.lastFinishedDeps = deps;

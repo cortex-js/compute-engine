@@ -365,6 +365,15 @@
 
 ### Performance
 
+- **When a derivative of a function is too large to compute symbolically,
+  the higher derivatives of the same function no longer try again.** For
+  `f(x) = \sqrt{x+\sqrt{x+\cdots+\sqrt{x+1}}}` nested 37 times, each of
+  `f'(0.5)`, `f''(0.5)` and `f'''(0.5)` spent about one second before it used
+  the numeric approximation, and compiling their sum took about 3 s. Now
+  only the first derivative that is too large takes that time: compiling the
+  sum takes about 1.2 s, and each of the other orders takes a few
+  milliseconds. The values do not change. (CE-346)
+
 - **Above machine precision, a sum, a product or a negation over a list of
   more than a hundred floats is computed at once, about 3 times faster.**
   `Add(L, 2)`, `Multiply(-2, L)` and `Negate(L)`, where `L` is a list of
