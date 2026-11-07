@@ -5160,6 +5160,9 @@ function parseBigOp(name: string, minPrec: number) {
     // covers the body, and its condition can read the index.
     if (fn !== null) fn = parser._liftRestrictions(fn);
     if (fn !== null) fn = parser.rebindSubscripts(fn, indexNames) ?? fn;
+    // A symbol that the symbol parser joined with an index as its subscript
+    // (`a_k` in `\sum_{k=1}^{3} a_k`) is the base indexed by the index.
+    if (fn !== null) fn = parser._subscriptBoundIndexes(fn, indexNames);
 
     parser.popSymbolTable();
 

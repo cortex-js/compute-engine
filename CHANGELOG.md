@@ -20,6 +20,20 @@
 
 ### Resolved Issues
 
+- **A subscript on the index of a sum or a product reads the index.**
+  `\sum_{k=1}^{3} a_k` evaluated to `3a_k`, as if `a_k` were one symbol; it
+  now evaluates to `a_1 + a_2 + a_3`. The same applies to `\prod`, to the
+  MathJSON form `["Sum", ["Subscript", "a", "k"], ["Limits", "k", 1, 3]]`,
+  and to a comprehension over integers. The canonical term is
+  `["Subscript", "a", ["Delimiter", "k"]]`, and its LaTeX is `a_{(k)}`. The
+  parse with `canonical: false` changes too: the body is
+  `["Subscript", "a", "k"]`, not the symbol `"a_k"`. These are still a part
+  of the name: a subscript outside a binder (`a_k` alone is the symbol
+  `a_k`), a subscript on a variable that is not an integer index (the
+  variable of `D` or `Integrate`), a joined name that the host declared or
+  assigned (after `ce.assign("a_k", 5)`, the sum is `15`), and the name of a
+  function in a call (`\sum_{k=1}^{2} f_k(x)` is still `2f_k(x)`).
+
 - **The `unknowns` of a block no longer list the names that a destructuring
   assignment of the block defines.**
   `Block(Assign(Tuple(a, b), Tuple(1, 2)), Add(a, b))` evaluates to `3`, but

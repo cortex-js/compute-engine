@@ -1184,9 +1184,28 @@ export interface Parser {
    * The other parts of `expr` are not changed. The parse of a body that
    * precedes the clause (`n_{0} + 1 \operatorname{with} n_{0} = 2`, an infix
    * entry) is rewritten the same way, so a custom clause can bind a name
-   * after its body was read.
+   * after its body was read. A `Subscript` that the parser made from a
+   * joined name in the body of an inner sum or product
+   * (`\sum_{m_{n_0}=1}^{3}\sum_{n_0=1}^{2} m_{n_0}`, where the inner sum
+   * reads `m_{n_0}` as `m` indexed by `n_0`) is replaced the same way: here
+   * it is the name `m_n_0`, the index of the outer sum.
    */
   rebindSubscripts(
+    expr: MathJsonExpression,
+    names: ReadonlySet<string>
+  ): MathJsonExpression;
+
+  /** @internal Replace, in `expr`, each symbol whose name the symbol parser
+   * joined from a base and a subscript that is one of the index names
+   * `names` with `["Subscript", base, index]`: in the body of
+   * `\sum_{k=1}^{3} a_k`, the `a_k` is the base `a` indexed by `k`, not one
+   * name. These stay names: a symbol that is one of `names`, a name that an
+   * inner binder binds, a name that the host declared or assigned, and a
+   * name in the position of the head of a call (`f_k(x)`). The canonical
+   * form of the
+   * `Subscript` reads the index by value when the index is the variable of
+   * an enclosing binder. */
+  _subscriptBoundIndexes(
     expr: MathJsonExpression,
     names: ReadonlySet<string>
   ): MathJsonExpression;

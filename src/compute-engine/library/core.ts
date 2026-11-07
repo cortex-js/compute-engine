@@ -838,6 +838,54 @@ function bindsLocal(ce: ComputeEngine): boolean {
   return template !== undefined && isNodeScope(template);
 }
 
+/**
+ * Whether the symbol `name`, read now, is an integer variable of an enclosing
+ * binder: the index of a `Sum` or a `Product`, the variable of a loop or a
+ * comprehension over integers. A binder records the names it binds on its
+ * scope (`binderNames`) before it canonicalizes its operands, so the nearest
+ * scope that binds `name` tells: a binder scope gives `true` when the type of
+ * the variable is an integer type, any other scope (a block local, a host
+ * scope, the global scope) gives `false`. A variable that is not an integer
+ * (the variable of `D`, `Integrate` or `Limit`) is not an index: `c_x` in
+ * `D(c_x, x)` stays the name `c_x`.
+ *
+ * A function literal parameter that has the same name shadows the binder. The
+ * parameter is not in a scope while the body of the literal is canonicalized:
+ * it is on the shadowed-parameter stack of the engine, which gives the scope
+ * where the literal is written. The walk stops at that scope, so a binder
+ * outside the literal does not count.
+ */
+function isEnclosingBinderVariable(ce: ComputeEngine, name: string): boolean {
+  const boundary = ce._isShadowedParameter(name)
+    ? ce._shadowedParameterBoundary(name)
+    : undefined;
+  for (
+    let scope: Scope | null = ce.context.lexicalScope;
+    scope && scope !== boundary;
+    scope = scope.parent
+  ) {
+    const binding = scope.bindings.get(name);
+    if (scope.binderNames?.has(name) === true)
+      return isValueDef(binding) && binding.value.type.matches('integer');
+    if (binding !== undefined) return false;
+  }
+  return false;
+}
+
+/**
+ * Whether the symbol `name` has a definition that the host made: an operator
+ * definition, or a value definition with a value or with a declared type. A
+ * definition that the engine made when it first read the name (no value, an
+ * inferred type) does not count, so the answer does not depend on the
+ * expressions that were read before.
+ */
+function isHostDefinedName(ce: ComputeEngine, name: string): boolean {
+  const def = ce.lookupDefinition(name);
+  if (def === undefined) return false;
+  if (!isValueDef(def)) return true;
+  return def.value.value !== undefined || !def.value.inferredType;
+}
+
 function narrowDeclaredCharacter(
   ce: ComputeEngine,
   declared: Type | undefined,
@@ -10434,7 +10482,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
        *
        * Otherwise:
        * - `x_0` -> Symbol "x_0"
-       * - `x_n` -> Symbol "x_n"
+       * - `x_n` -> Symbol "x_n", except when `n` is an integer variable of an
+       *   enclosing binder (the index of a `Sum` or a `Product`, the variable
+       *   of a loop or a comprehension over integers) and the host did not
+       *   declare or assign `x_n`: in `\sum_{n=1}^{3} x_n` it is
+       *   `Subscript(x, Delimiter(n))`, the index read by value
        * - `x_{\text{max}}` -> Symbol `x_max`
        * - `x_{n+1}` -> `Subscript(x, n+1)`, and so does `x_{(n+1)}`
        * - `x_{(n)}` -> `Subscript(x, Delimiter(n))`, and so does `x_{n+0}`: the
@@ -10633,6 +10685,24 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // (`operandsForCanonicalRebuild()`).
         const isWrittenName =
           sym(op2) !== undefined && !(op2.isCanonical && op2.canonical === op2);
+        // A written index that is the variable of an enclosing binder is that
+        // variable, read by value, not a part of a name: in
+        // `\sum_{k=1}^{3} a_k` the term is `a_1`, `a_2`, `a_3`, not the one
+        // symbol `a_k` three times. It gets the marker of an index read by
+        // value, `Subscript(a, Delimiter(k))` (see below), so that the node
+        // keeps its meaning when it is read without the binder. A joined name
+        // that the host declared or assigned (`ce.assign("a_k", 3)`) stays
+        // that name, as the LaTeX parser reads it.
+        if (
+          baseName &&
+          isWrittenName &&
+          isEnclosingBinderVariable(ce, sym(op2)!) &&
+          !isHostDefinedName(ce, `${baseName}_${sym(op2)!}`)
+        )
+          return ce._fn('Subscript', [
+            op1,
+            ce._fn('Delimiter', [op2.canonical]),
+          ]);
         if (baseName) {
           const subStr =
             (isString(op2) ? op2.string : undefined) ??

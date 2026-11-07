@@ -132,6 +132,49 @@ function mentionsIndex(
   return false;
 }
 
+/** The binders that the parser makes, and that bind the names after their
+ * first operand: the index of `Sum` and `Product`, the variable of
+ * `Integrate` and `D`, the parameters of `Function` (which also holds the
+ * variable of `Limit`). */
+const PARSED_BINDERS = new Set([
+  'Sum',
+  'Product',
+  'Integrate',
+  'D',
+  'Function',
+]);
+
+/** The heads of an operand of a binder whose first operand is the bound
+ * name: a clause (`Tuple`, `Limits`, `Element`), a typed parameter, a held
+ * name. */
+const BOUND_NAME_WRAPPERS = new Set([
+  'Tuple',
+  'Limits',
+  'Element',
+  'Typed',
+  'Hold',
+]);
+
+/** The names that a binder node with the elements `fn` binds: each operand
+ * after the first that is a symbol, or that wraps a symbol as its first
+ * operand (`Tuple(k, 1, 3)`, `Typed(x, "real")`). A node that is not a
+ * binder gives no name. A bound of an integral (`b` in
+ * `Integrate(f, x, 0, b)`) is read as a name too, which only keeps that name
+ * as it is. */
+function innerBoundNames(fn: ReadonlyArray<MathJsonExpression>): string[] {
+  if (typeof fn[0] !== 'string' || !PARSED_BINDERS.has(fn[0])) return [];
+  const result: string[] = [];
+  for (const op of fn.slice(2)) {
+    const head = operator(op);
+    const name =
+      head !== null && BOUND_NAME_WRAPPERS.has(head)
+        ? symbol(operand(op, 1))
+        : symbol(op);
+    if (name !== null) result.push(name);
+  }
+  return result;
+}
+
 /** Rewrite subscripted symbols that reference the sequence index into the
  * operator-call form (`a_n` → `["a_", "n"]`, `["Subscript","b",i+s]` →
  * `["b_", i+s]`) so the index binding survives symbol fusion. Subexpressions
@@ -4229,7 +4272,10 @@ export class _Parser implements Parser {
   // with the name that the subscript would have joined
   // into (`At(n, 0)` from `n_{0}` has the name `n_0`). In a binder position,
   // the parser reads such an `At` as this name: `\sum_{n_{0}=1}^{3}n_{0}` is
-  // a sum over the new index `n_0`, also when `n` is a list.
+  // a sum over the new index `n_0`, also when `n` is a list. The
+  // `Subscript` expressions that `_subscriptBoundIndexes()` makes from a
+  // joined name are here too, so that an outer binder whose index is that
+  // name reads it as the name again.
   private _subscriptAtNames = new WeakMap<object, string>();
 
   // The names of the environments whose bodies are being read, innermost
@@ -4325,38 +4371,126 @@ export class _Parser implements Parser {
         return decorated?.latex !== undefined
           ? { latex: decorated.latex, sym: name }
           : name;
-      let changed = false;
-      const ops = fn.map((x) => {
-        const y = visit(x);
-        if (y !== x) changed = true;
-        return y;
-      });
-      if (!changed) return e;
-      // The bookkeeping of the parser is keyed by the identity of the
-      // expressions: copy it to the new expression. An application
-      // candidate (`a(x)` with a `resolveApplication` hook) is keyed by the
-      // object `{ fn: [...] }`, not by its array: copy it from `e` to `out`,
-      // or the hook is not called for the copy. A rebuilt element access
-      // keeps its joined name, so that an outer binder can still rebind it
-      // (`m_{n_{0}}` is `At(m, n_0)` once the inner index `n_0` is rebound,
-      // and it is still the name `m_n_0`).
-      const copy = ops as [MathJsonSymbol, ...MathJsonExpression[]];
-      const out: MathJsonExpression =
-        decorated === null ? copy : { ...decorated, fn: copy };
-      this._applicationCopied(e as object, out);
-      const atName = this._subscriptAtNames.get(fn);
-      if (atName !== undefined) this._subscriptAtNames.set(copy, atName);
-      // A restriction node `If(c, e)` stays a restriction in its copy, so
-      // that the lift of its group still moves `c` to the root.
-      if (this._restrictions.has(fn)) this._restrictions.add(copy);
-      if (continuationRanges.has(fn)) continuationRanges.add(copy);
-      if (continuationRanges.has(e as object))
-        continuationRanges.add(out as object);
-      const span = this._exprSpans?.get(fn);
-      if (span !== undefined) this._exprSpans!.set(copy, span);
-      return out;
+      return this._rebuiltWithOperands(e, fn, visit);
     };
     return visit(expr);
+  }
+
+  _subscriptBoundIndexes(
+    expr: MathJsonExpression,
+    names: ReadonlySet<string>
+  ): MathJsonExpression {
+    if (names.size === 0) return expr;
+    // `kept` holds the names that stay names: the indexes themselves
+    // (`\sum_{a_k=1}^{3} a_k`), and the names that an inner binder binds
+    // (`\sum_{k=1}^{2}\sum_{a_k=1}^{3} a_k`, where `a_k` is the index of the
+    // inner sum, or `\sum_{k=1}^{2}\int_0^1 x_k\,dx_k`, where `x_k` is the
+    // variable of the integral).
+    const visitIn =
+      (kept: ReadonlySet<string>) =>
+      (e: MathJsonExpression): MathJsonExpression => {
+        const fn = functionElements(e);
+        if (fn !== null) {
+          const inner = innerBoundNames(fn);
+          const visit =
+            inner.length === 0
+              ? visitIn(kept)
+              : visitIn(new Set([...kept, ...inner]));
+          // The operator is a name, not a term. So is a symbol in a
+          // juxtaposition that a parenthesized group follows: `f_k(x)` is
+          // `InvisibleOperator(f_k, Delimiter(x))`, and `c_k\phi_k(x)` is
+          // `InvisibleOperator(c_k, phi_k, Delimiter(x))`. The canonical form
+          // reads such a symbol as the head of a call, and a `Subscript`
+          // there would make the product `f_1·x`. Only a symbol can be the
+          // head of a call: any other operand (`(x_i-1)` in
+          // `(x_i-1)(y_i-2)`) is visited. The head of an application
+          // candidate (`a_k(x)`, decided later by the `resolveApplication`
+          // hook) stays too: the hook reads the written name.
+          const isCandidate = this._isApplicationCandidate(e);
+          const isJuxtaposition = fn[0] === 'InvisibleOperator';
+          const keepsOperand = (i: number): boolean =>
+            i === 0 ||
+            (symbol(fn[i]) !== null &&
+              ((i === 1 && isCandidate) ||
+                (isJuxtaposition &&
+                  operator(fn[i + 1] ?? null) === 'Delimiter')));
+          return this._rebuiltWithOperands(e, fn, (x, i) =>
+            keepsOperand(i) ? x : visit(x)
+          );
+        }
+        const name = symbol(e);
+        if (name === null || kept.has(name)) return e;
+        return subscriptOfJoinedName(name) ?? e;
+      };
+    // A joined name that the host declared or assigned is that name, as
+    // the symbol parser reads it (`absorbSubscripts()`, "declared-name
+    // precedence"). A declaration that the engine inferred from an earlier
+    // use does not count.
+    const isDeclaredName = (name: string): boolean => {
+      const resolved = this.resolveSymbol(name);
+      return resolved !== undefined && resolved.inferred !== true;
+    };
+    const subscriptOfJoinedName = (name: string): MathJsonExpression | null => {
+      if (isDeclaredName(name)) return null;
+      for (const index of names) {
+        const base: string = name.slice(0, -(index.length + 1));
+        if (base !== '' && name === `${base}_${index}`) {
+          // The joined name is kept with the node: in
+          // `\sum_{m_{n_0}=1}^{3}\sum_{n_0=1}^{2} m_{n_0}` the inner sum
+          // makes `Subscript(m, n_0)`, and the outer sum, whose index is
+          // `m_n_0`, makes it the name `m_n_0` again (`rebindSubscripts()`).
+          const node: MathJsonExpression = ['Subscript', base, index];
+          this._subscriptAtNames.set(node, name);
+          return node;
+        }
+      }
+      return null;
+    };
+    return visitIn(names)(expr);
+  }
+
+  /**
+   * The expression `e`, an application with the elements `fn`, with each
+   * operand replaced by `visit(operand)`. It is `e` itself when no operand
+   * changes.
+   *
+   * The bookkeeping of the parser is keyed by the identity of the
+   * expressions, so it is copied to the new expression. An application
+   * candidate (`a(x)` with a `resolveApplication` hook) is keyed by the
+   * object `{ fn: [...] }`, not by its array: it is copied from `e` to the
+   * result, or the hook is not called for the copy. A rebuilt element access
+   * keeps its joined name, so that an outer binder can still rebind it
+   * (`m_{n_{0}}` is `At(m, n_0)` once the inner index `n_0` is rebound, and
+   * it is still the name `m_n_0`). A restriction node `If(c, e)` stays a
+   * restriction in its copy, so that the lift of its group still moves `c` to
+   * the root.
+   */
+  private _rebuiltWithOperands(
+    e: MathJsonExpression,
+    fn: MathJsonExpression[],
+    visit: (x: MathJsonExpression, i: number) => MathJsonExpression
+  ): MathJsonExpression {
+    let changed = false;
+    const ops = fn.map((x, i) => {
+      const y = visit(x, i);
+      if (y !== x) changed = true;
+      return y;
+    });
+    if (!changed) return e;
+    const decorated = Array.isArray(e) ? null : (e as MathJsonFunctionObject);
+    const copy = ops as [MathJsonSymbol, ...MathJsonExpression[]];
+    const out: MathJsonExpression =
+      decorated === null ? copy : { ...decorated, fn: copy };
+    this._applicationCopied(e as object, out);
+    const atName = this._subscriptAtNames.get(fn);
+    if (atName !== undefined) this._subscriptAtNames.set(copy, atName);
+    if (this._restrictions.has(fn)) this._restrictions.add(copy);
+    if (continuationRanges.has(fn)) continuationRanges.add(copy);
+    if (continuationRanges.has(e as object))
+      continuationRanges.add(out as object);
+    const span = this._exprSpans?.get(fn);
+    if (span !== undefined) this._exprSpans!.set(copy, span);
+    return out;
   }
 
   /**

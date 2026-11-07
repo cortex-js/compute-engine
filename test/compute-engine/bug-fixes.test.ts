@@ -109,11 +109,13 @@ describe('Playground regressions', () => {
 
   test('subscript of a list parses as element access (At) inside a sum', () => {
     // When the subscripted base is a collection, `e_p` is At, not a product.
+    // The `x_p` of a base that is not a collection is `x` indexed by the
+    // index `p`, read by value, not the one symbol `x_p`.
     const ce = new ComputeEngine();
     ce.declare('e', 'list');
     expect(ce.parse('\\sum_{p=0}^3x_{p}e_{p}').json).toEqual([
       'Sum',
-      ['Multiply', 'x_p', ['At', 'e', 'p']],
+      ['Multiply', ['Subscript', 'x', ['Delimiter', 'p']], ['At', 'e', 'p']],
       ['Limits', 'p', 0, 3],
     ]);
   });
