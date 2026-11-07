@@ -12,6 +12,7 @@ import {
   roundToInteger,
 } from '../numerics/numeric.js';
 import { checkDeadline } from '../../common/interruptible.js';
+import { BigDecimal } from '../../big-decimal/index.js';
 
 /**
  * A loop over doubles checks the evaluation deadline once every
@@ -77,9 +78,11 @@ function rationalScalarOf(op: Expression): [number, number] | undefined {
  * - **Machine precision only.** A cell with a float operand is computed by
  *   the interpreter in the arithmetic of the engine's precision, and only at
  *   machine precision is that the arithmetic of doubles. Above machine
- *   precision the function declines for integers too: there a broadcast of
- *   integers over a symbol keeps the lazy `Map` that the exact compiled tier
- *   reads (`library/map-auto-compile.ts`). Each float must also be STORED as
+ *   precision, `Add` and `Multiply` of two operands and `Negate` are computed
+ *   on big decimals instead ({@link bigFloatBroadcast}), and every other head
+ *   declines. A broadcast of integers declines there too: it keeps the lazy
+ *   `Map` that the exact compiled tier reads (`library/map-auto-compile.ts`).
+ *   Each float must also be STORED as
  *   a double: a float made at a higher precision keeps its decimal digits
  *   when the engine is later set to machine precision, and the interpreter
  *   multiplies those digits (`0.1 · 3` is `0.3` for such a `0.1`, where the
@@ -114,9 +117,13 @@ export function machineBroadcast(
   ops: ReadonlyArray<Expression>,
   numericApproximation = false
 ): Expression | undefined {
-  if (!atMachinePrecision(ce)) return undefined;
-
   const kernel = KERNELS[operator];
+  if (!atMachinePrecision(ce)) {
+    if (kernel === undefined || !isLibraryOperator(ce, operator))
+      return undefined;
+    return bigFloatBroadcast(ce, operator, ops, 'elements');
+  }
+
   if (kernel === undefined) {
     if (!isLibraryOperator(ce, operator)) return undefined;
     return machineFunctionBroadcast(ce, operator, ops, numericApproximation);
@@ -243,6 +250,243 @@ class IntegerResultExactness {
     else this.exact = true;
     return !(this.floats && this.exact);
   }
+}
+
+/**
+ * The interpreter checks the evaluation deadline every 256 elements. A cell
+ * of {@link bigFloatBroadcast} is an operation on big decimals and the boxing
+ * of its result, which costs about as much as a cell of the interpreter, so it
+ * checks the deadline as often.
+ */
+const BIG_DEADLINE_STRIDE = 0xff;
+
+/**
+ * Element-wise `Add` and `Multiply` of two operands, and `Negate`, computed
+ * on big decimals when the precision of the engine is above machine
+ * precision. The answer is an ordinary `List` of big-number floats, computed
+ * at once.
+ *
+ * Without this function, a broadcast over more than a hundred elements
+ * answers a lazy `Map`, and a consumer such as `Min` evaluates a function
+ * application for each element, about 8 µs each. A cell here is one
+ * operation on big decimals and the boxing of its result.
+ *
+ * Each cell is the value that the interpreter computes for that cell, digit
+ * for digit:
+ *
+ * - The interpreter computes a cell with a float operand with
+ *   `BigDecimal.addBounded()`, `BigDecimal.mulBounded()` or
+ *   `BigDecimal.neg()` on the decimals of the two operands, and these
+ *   operations do not depend on the order of the operands. A cell is that one
+ *   operation on the same decimals ({@link bigCellValueOf} gives the decimal
+ *   of an operand), and a product with a factor `±1` keeps the digits of the
+ *   other factor, as in the interpreter ({@link bigProduct}). The test file
+ *   `test/compute-engine/big-float-broadcast.test.ts` compares the cells with
+ *   the element-by-element values.
+ * - Every cell must have a float operand. A cell of exact integers is exact
+ *   in the interpreter, and a broadcast of integers keeps the lazy `Map`
+ *   that the exact compiled tier reads (`library/map-auto-compile.ts`).
+ * - A product with an exact `0` operand declines: the interpreter answers the
+ *   exact `0`, not a float.
+ * - Every value is finite, and no operand is an exact rational, a radical or
+ *   a complex value.
+ *
+ * `lists` says how the caller's route reads the elements of a list, and so
+ * which decimals the cells must use:
+ *
+ * - `'elements'`: the boxed elements, as a lazy `Map` evaluates them (the
+ *   broadcasts of `collection-utils.ts`). A list that holds its numbers
+ *   unboxed boxes each double with `ce.number()`.
+ * - `'doubles'`: the doubles of `array`, as the product of a scalar and a
+ *   vector reads them from a packed tensor (`scaleTensor()` in
+ *   `arithmetic-mul-div.ts`). The list must be a list of machine numbers
+ *   (`_machineFloats` is defined).
+ *
+ * The answer is `undefined` when a condition above fails: the caller then
+ * takes the route it took before.
+ */
+export function bigFloatBroadcast(
+  ce: Expression['engine'],
+  operator: string,
+  ops: ReadonlyArray<Expression>,
+  lists: 'elements' | 'doubles'
+): Expression | undefined {
+  if (operator === 'Negate' ? ops.length !== 1 : ops.length !== 2)
+    return undefined;
+  if (operator !== 'Add' && operator !== 'Multiply' && operator !== 'Negate')
+    return undefined;
+
+  let length: number | undefined = undefined;
+  const columns: (BigCellColumn | BigCellValue)[] = [];
+  for (const op of ops) {
+    const list = listValueOf(op);
+    if (list !== undefined) {
+      const column = bigCellColumnOf(ce, list, lists);
+      if (column === undefined) return undefined;
+      if (length !== undefined && column.decimals.length !== length)
+        return undefined;
+      length = column.decimals.length;
+      columns.push(column);
+      continue;
+    }
+    const value = bigCellValueOf(op);
+    if (value === undefined) return undefined;
+    columns.push(value);
+  }
+  if (length === undefined || length === 0) return undefined;
+
+  const cellOf = (column: BigCellColumn | BigCellValue, i: number) =>
+    'decimals' in column
+      ? { decimal: column.decimals[i], float: column.floats[i] }
+      : column;
+
+  const out = new Array<Expression>(length);
+  for (let i = 0; i < length; i++) {
+    if ((i & BIG_DEADLINE_STRIDE) === BIG_DEADLINE_STRIDE)
+      checkDeadline(ce._deadlineFrame);
+    const a = cellOf(columns[0], i);
+    let r: BigDecimal;
+    if (operator === 'Negate') {
+      if (!a.float) return undefined;
+      r = a.decimal.neg();
+    } else {
+      const b = cellOf(columns[1], i);
+      if (!a.float && !b.float) return undefined;
+      if (operator === 'Add') r = a.decimal.addBounded(b.decimal);
+      else {
+        if (
+          (!a.float && a.decimal.isZero()) ||
+          (!b.float && b.decimal.isZero())
+        )
+          return undefined;
+        r = bigProduct(a.decimal, b.decimal);
+      }
+    }
+    out[i] = ce.number(ce._inexactNumericValue(r));
+  }
+  return ce.function('List', out);
+}
+
+/**
+ * The product of two decimals as the interpreter computes it. A factor equal
+ * to `1` or `-1`, exact or a float, gives the other factor, or its negation,
+ * with all its digits (`BigNumericValue.mul()` and `ExactNumericValue.mul()`
+ * do not multiply then). Every other product is `mulBounded()`, which rounds
+ * past twice the working precision: an operand can hold more digits than
+ * that, because `addBounded()` keeps them.
+ */
+function bigProduct(a: BigDecimal, b: BigDecimal): BigDecimal {
+  if (a.eq(1)) return b;
+  if (a.eq(-1)) return b.neg();
+  if (b.eq(1)) return a;
+  if (b.eq(-1)) return a.neg();
+  return a.mulBounded(b);
+}
+
+/** An operand of a cell of {@link bigFloatBroadcast}: the decimal that the
+ * interpreter computes with, and whether the operand is a float. */
+interface BigCellValue {
+  decimal: BigDecimal;
+  float: boolean;
+}
+
+/** The operands of the cells of {@link bigFloatBroadcast} that one list
+ * gives, one entry per element. */
+interface BigCellColumn {
+  decimals: BigDecimal[];
+  floats: boolean[];
+}
+
+/**
+ * The decimal that the interpreter computes with above machine precision for
+ * the boxed number `x`, or `undefined` when this module does not know it:
+ *
+ * - a number whose value is a JavaScript number: the interpreter makes its
+ *   big-number value with `new BigDecimal(x)`. It is a float, or an exact
+ *   integer when the boxed number is exact;
+ * - a big-number float: its own decimal;
+ * - an exact integer: its decimal, when it is a safe integer.
+ *
+ * `undefined` for every other value: an exact rational, a radical, a complex
+ * value, `NaN`, an infinity, and a machine float (a float made at machine
+ * precision, whose stored value is a double). The interpreter does not
+ * compute a machine float as a big decimal.
+ */
+function bigCellValueOf(x: Expression): BigCellValue | undefined {
+  if (!isNumber(x)) return undefined;
+  const nv = x.numericValue;
+  if (typeof nv === 'number') {
+    if (!Number.isFinite(nv)) return undefined;
+    if (x.isExact && !Number.isSafeInteger(nv)) return undefined;
+    return { decimal: new BigDecimal(nv), float: !x.isExact };
+  }
+  if (nv.isComplex || nv.isNaN) return undefined;
+  if (nv.isExact) {
+    const exact = nv as {
+      radical?: number;
+      rational?: [number | bigint, number | bigint];
+    };
+    if (exact.radical !== 1 || exact.rational === undefined) return undefined;
+    const [n, d] = exact.rational;
+    if (Number(d) !== 1 || !Number.isSafeInteger(Number(n))) return undefined;
+    return { decimal: new BigDecimal(Number(n)), float: false };
+  }
+  const decimal = (nv as { decimal?: unknown }).decimal;
+  if (!(decimal instanceof BigDecimal) || !decimal.isFinite()) return undefined;
+  return { decimal, float: true };
+}
+
+/**
+ * The operands that the elements of `list` give to the cells of
+ * {@link bigFloatBroadcast}, read as `lists` says, or `undefined` when an
+ * element is not a number that the function computes with.
+ *
+ * A double is converted with `new BigDecimal()`, as `ce.number()` of the
+ * double does above machine precision. An integer-valued double is a float
+ * when the list records that its integer-valued elements are floats
+ * (`_machineFloats`); otherwise it is an exact integer. An integer-valued
+ * double past the safe integers declines: `ce.number()` makes it a float,
+ * whatever the flag says.
+ *
+ * The loops check the evaluation deadline as the loop of the cells does.
+ */
+function bigCellColumnOf(
+  ce: Expression['engine'],
+  list: Expression,
+  lists: 'elements' | 'doubles'
+): BigCellColumn | undefined {
+  if (!isFunction(list)) return undefined;
+  if (lists === 'doubles' || list._numericStore !== undefined) {
+    const floatIntegers = list._machineFloats;
+    if (floatIntegers === undefined) return undefined;
+    const values = list.array;
+    if (values === undefined) return undefined;
+    const decimals = new Array<BigDecimal>(values.length);
+    const floats = new Array<boolean>(values.length);
+    for (let i = 0; i < values.length; i++) {
+      if ((i & BIG_DEADLINE_STRIDE) === BIG_DEADLINE_STRIDE)
+        checkDeadline(ce._deadlineFrame);
+      const v = values[i];
+      if (!Number.isFinite(v)) return undefined;
+      const integer = Number.isInteger(v);
+      if (integer && !Number.isSafeInteger(v)) return undefined;
+      decimals[i] = new BigDecimal(v);
+      floats[i] = floatIntegers || !integer;
+    }
+    return { decimals, floats };
+  }
+  const elements = list.ops;
+  const decimals = new Array<BigDecimal>(elements.length);
+  const floats = new Array<boolean>(elements.length);
+  for (let i = 0; i < elements.length; i++) {
+    if ((i & BIG_DEADLINE_STRIDE) === BIG_DEADLINE_STRIDE)
+      checkDeadline(ce._deadlineFrame);
+    const value = bigCellValueOf(elements[i]);
+    if (value === undefined) return undefined;
+    decimals[i] = value.decimal;
+    floats[i] = value.float;
+  }
+  return { decimals, floats };
 }
 
 /** Are the integer-valued elements of this list of machine numbers floats
@@ -642,14 +886,24 @@ function isLibraryOperator(
  * another symbol is followed, a few steps at most, so that a cycle ends.
  */
 export function machineListOf(x: Expression): Expression | undefined {
+  const list = listValueOf(x);
+  if (!isFunction(list) || list._machineFloats === undefined) return undefined;
+  return list;
+}
+
+/**
+ * The `List` that `x` is, or that the symbol `x` holds, or `undefined`. The
+ * value of a symbol is read, never evaluated, for the reason that
+ * {@link machineListOf} gives; a symbol that holds another symbol is
+ * followed, a few steps at most, so that a cycle ends.
+ */
+function listValueOf(x: Expression): Expression | undefined {
   let list: Expression | undefined = x;
   for (let hops = 0; list !== undefined && isSymbol(list); hops++) {
     if (hops === 4) return undefined;
     list = list.value;
   }
-  if (list === undefined) return undefined;
-  if (!isFunction(list, 'List') || list._machineFloats === undefined)
-    return undefined;
+  if (list === undefined || !isFunction(list, 'List')) return undefined;
   return list;
 }
 

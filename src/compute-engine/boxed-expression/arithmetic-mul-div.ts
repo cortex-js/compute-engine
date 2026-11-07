@@ -22,7 +22,7 @@ import {
 } from './tensor-view.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
 import { sgn } from './sgn.js';
-import { isStoredAsDouble } from './machine-broadcast.js';
+import { bigFloatBroadcast, isStoredAsDouble } from './machine-broadcast.js';
 import { bignumPreferred, hasAssignedVariable } from './utils.js';
 import {
   isNumber,
@@ -4491,6 +4491,11 @@ function mulTensors(
  *   the cell products read them from the packed tensor, which holds doubles.
  *
  * The answer is a list that holds its numbers unboxed (`ce._list`).
+ *
+ * Above machine precision, a product with a float factor in every cell is
+ * computed on big decimals by `bigFloatBroadcast()`, which reads the
+ * elements as doubles, as the packed tensor holds them. Its answer is an
+ * ordinary list of big-number floats.
  */
 function scaleMachineVector(
   ce: ComputeEngine,
@@ -4498,6 +4503,10 @@ function scaleMachineVector(
   scalar: Expression
 ): Expression | undefined {
   if (!isFunction(vector, 'List')) return undefined;
+  if (bignumPreferred(ce)) {
+    const big = bigFloatBroadcast(ce, 'Multiply', [scalar, vector], 'doubles');
+    if (big !== undefined) return big;
+  }
   // `true` when the integer-valued elements are floats (`[0.5, 2.0]`)
   const vectorFloats = vector._machineFloats;
   if (vectorFloats === undefined) return undefined;

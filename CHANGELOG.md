@@ -338,6 +338,15 @@
 
 ### Performance
 
+- **Above machine precision, a sum, a product or a negation over a list of
+  more than a hundred floats is computed at once, about 3 times faster.**
+  `Add(L, 2)`, `Multiply(-2, L)` and `Negate(L)`, where `L` is a list of
+  floats, now evaluate to a `List` of floats. Before, the sum and the
+  negation gave a lazy `Map`, whose elements were computed each time they
+  were read. Each element has the digits that the same operation on the
+  element gives. At the default precision, `Min(1, 2 - 2·PointZ(C))` over ten
+  thousand points took about 175 ms and now takes about 51 ms. A list of
+  exact integers keeps the lazy `Map`. (CE-337)
 - **Boxing nested folds whose accumulator types cannot be refined takes
   about 20% less time.** When the accumulator of a `Fold`, `Reduce` or `Scan`
   cannot be given a more precise type, the folds in its callback are no longer
