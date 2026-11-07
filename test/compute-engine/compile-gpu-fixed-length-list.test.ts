@@ -497,10 +497,12 @@ describe('GPU FIXED-LENGTH LIST — Sum/Product collection form', () => {
       );
     });
 
+    // The input `xs` declines before the reduction reads it: no shader
+    // can declare a list of unknown length.
     test('an unknown-length list', () => {
       const ce = engineWith({ xs: 'list<number>' });
       expect(() => glsl.compile(ce.box(['Sum', 'xs']), NO_FOLD)).toThrow(
-        /no compile-time component list/
+        /"xs" has the type `list<number>`, which has no static length/
       );
     });
 

@@ -65,7 +65,7 @@ import type { GPUShapeRules, GPUShapeRulesTarget } from './gpu-shapes.js';
 import {
   GPU_RANDOM_COUNTER_PREFIX,
   gpuPlainUniformRead,
-  gpuPointOrPointListSymbols,
+  gpuInputShapeRefusals,
   gpuRandomState,
   gpuRefuseShadowedVarsSources,
   gpuTextSymbols,
@@ -786,7 +786,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // type is a tuple that no shader type holds: `T` of type
     // `tuple<tuple<real, real>, tuple<real, real>>` was emitted as a bare
     // `T`, `First(T)` as `T.x`, and a local copy as `vec2 Q; Q = T;`.
-    const pointOrList = gpuPointOrPointListSymbols(expr);
+    const { pointOrList, unsizedLists } = gpuInputShapeRefusals(expr);
     if (pointOrList.size > 0) {
       const innerVar = target.var;
       const innerMangle = target.mangleId;
@@ -804,6 +804,38 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       target.mangleId = (id) => {
         const refusal = pointOrList.get(id);
         if (refusal !== undefined) throw new Error(refusal);
+        return innerMangle ? innerMangle(id) : id;
+      };
+    }
+    // A symbol whose type is a collection with no static length
+    // (`list<real>`, `matrix`, `set<real>`) or a list with no element has no
+    // shader declaration, so a read of it as an input fails closed, through
+    // the same two hooks as the gate above. The read is allowed when the
+    // shape of the name has another source: a storage hint
+    // (the positional read of a sampler or a storage buffer, which the
+    // storage gate above restricts), or a local shape frame (a parameter, a
+    // `Block` local, or a name that the caller declared with a shader type,
+    // whose declaration decides its shape).
+    if (unsizedLists.size > 0) {
+      const innerVar = target.var;
+      const innerMangle = target.mangleId;
+      const refuse = (id: string): void => {
+        const refusal = unsizedLists.get(id);
+        if (
+          refusal !== undefined &&
+          target.storage?.has(id) !== true &&
+          BaseCompiler.localShapeFrameOf(id) === undefined
+        )
+          throw new Error(refusal);
+      };
+      target.var = (id) => {
+        const resolved = innerVar(id);
+        if (resolved !== undefined && target.varsKeys?.has(id) === true)
+          refuse(id);
+        return resolved;
+      };
+      target.mangleId = (id) => {
+        refuse(id);
         return innerMangle ? innerMangle(id) : id;
       };
     }

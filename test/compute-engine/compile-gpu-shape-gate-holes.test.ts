@@ -444,12 +444,18 @@ describe('GPU SHAPE GATE — collection-typed operands with no static count', ()
     'vector<real^7>',
   ];
 
+  // A collection with no static length declines at the read of the input
+  // `L`, before the builtin sees it: no shader can declare such an input.
+  // A collection with a static count that no `vecN` holds (7) declines at
+  // the builtin.
   it('a componentwise builtin declines for every collection spelling with no vec2–vec4 count', () => {
     for (const type of NO_STATIC_COUNT) {
       const e = withL(type);
       for (const emit of [g, w])
         expect(() => emit(['Sin', 'L'], e)).toThrow(
-          /^Could not compile `Sin`: the shader builtin `sin` .* the operand shapes \(array\) have no lowering\.$/s
+          type === 'vector<real^7>'
+            ? /^Could not compile `Sin`: the shader builtin `sin` .* the operand shapes \(array\) have no lowering\.$/s
+            : /^Could not compile `L`: "L" has the type `.*`, which has no static length\./
         );
     }
   });

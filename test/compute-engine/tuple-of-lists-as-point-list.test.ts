@@ -338,13 +338,17 @@ describe('A tuple with a list coordinate is a list of points — compiled interv
 describe('A tuple with a list coordinate is a list of points — shader targets', () => {
   // A shader point is a single `vecN`: a list of points is not an
   // expression-level value there, so the compile fails closed with the
-  // `PointList` shape diagnostic, as it did for the tuple before.
+  // `PointList` shape diagnostic, as it did for the tuple before. The input
+  // `P` is a list of unknown length, which no shader can declare, so in
+  // `P + (A, B)` the read of `P` declines first.
   test.each([['glsl'], ['wgsl']])('%s fails closed', (to) => {
     for (const latex of ['(A, B)', 'P + (A, B)', '2\\cdot(A, B)'])
       expect(() =>
         compile(declaredEngine().parse(latex), { to, fallback: false } as any)
       ).toThrow(
-        /Could not compile `PointList`: component 1 is collection-valued/
+        latex.startsWith('P')
+          ? /Could not compile `P`: "P" has the type `list<.*>`, which has no static length/
+          : /Could not compile `PointList`: component 1 is collection-valued/
       );
   });
 });

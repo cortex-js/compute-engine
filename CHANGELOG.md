@@ -61,6 +61,14 @@
 
 ### Resolved Issues
 
+- **A GLSL or WGSL compilation that reads a list input of unknown length now
+  falls back to the interpreter.** With `L` declared `list<real>`, compiling
+  `L` to GLSL gave the code `L` with `success: true`, but no shader can
+  declare an input of unknown length. The same applies to an input typed
+  `list`, `set<real>`, `collection<real>`, `dictionary<real>` or `matrix`,
+  and to a list of no element (`list<real^0>`). Declare the length in
+  the type (`list<real^8>`), or, on WGSL, give the input a `'storage-buffer'`
+  hint.
 - **The compiled JavaScript of a function literal applied to a string now
   reads the string as text.** With `t` declared `string`,
   `["Apply", ["Function", ["Length", "s"], "s"], "t"]` compiled, and at

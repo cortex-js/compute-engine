@@ -425,7 +425,9 @@ describe('A value with no settled shape declines (R3)', () => {
   // The admission checks decline after the code was generated, so a target
   // whose code generation declines for a more specific reason reports that
   // reason: a shader array in an arithmetic operation or in a selection, a
-  // list operand on the interval target, arithmetic over a list in Python.
+  // list operand on the interval target, arithmetic over a list in Python,
+  // and on the shader targets a read of the input `L`, whose type
+  // `list<real>` has no static length, so no shader can declare it.
   const OWN_REASON = new Set([
     'If(x > 0, [1, 2], 3) + 1 glsl',
     'If(x > 0, [1, 2], 3) + 1 wgsl',
@@ -433,6 +435,8 @@ describe('A value with no settled shape declines (R3)', () => {
     'If(x > 0, (1, 2), [(1, 2), (3, 4)]) glsl',
     'If(x > 0, (1, 2), [(1, 2), (3, 4)]) wgsl',
     'If(x > 0, L, x) interval-js',
+    'If(x > 0, L, x) glsl',
+    'If(x > 0, L, x) wgsl',
   ]);
 
   describe.each(UNSETTLED)('%s', (label, json) => {
@@ -442,7 +446,7 @@ describe('A value with no settled shape declines (R3)', () => {
       expect(r.success).toBe(false);
       if (OWN_REASON.has(`${label} ${to}`)) {
         expect(r.diagnostic?.code).toBe('compile-error');
-        expect(r.error).toMatch(/^Could not compile `(Add|If)`/);
+        expect(r.error).toMatch(/^Could not compile `(Add|If|L)`/);
         return;
       }
       expect(r.diagnostic?.code).toBe('unsettled-shape');

@@ -465,9 +465,13 @@ describe('GPU OPERAND SHAPE GATE — the infix operator route', () => {
       expect(() => emit(['Multiply', M2, 'P'])).toThrow(/type 'error'/);
   });
 
+  // The input `Mu` declines before the operator reads it: no shader can
+  // declare a matrix of unknown dimensions.
   it('a matrix of unknown dimensions declines', () => {
     for (const emit of [gi, wi])
-      expect(() => emit(['Add', 'Mu', 'Mu'])).toThrow(/not statically known/);
+      expect(() => emit(['Add', 'Mu', 'Mu'])).toThrow(
+        /"Mu" has the type `matrix`, which has no static length/
+      );
   });
 
   it('WGSL has no scalar±matrix overload; GLSL applies it componentwise', () => {

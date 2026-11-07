@@ -28,6 +28,8 @@ import { gpuPointOrPointListUnion } from './gpu-declared-types.js';
 import { gpuTupleWithoutShaderType } from './gpu-shapes.js';
 import { gpuPointOrPointListRefusal } from './gpu-points.js';
 import { formatGPUNumber } from './gpu-emit.js';
+import type { Type } from '../../common/type/types.js';
+import { resolveTypeForCompiledLanes as resolveTypeForCompilation } from '../../common/type/utils.js';
 
 //
 // ─── Counter-based random draws (PCG3D) ─────────────────────────────────────
@@ -421,21 +423,134 @@ export function gpuTextSymbols(
 }
 
 /**
- * The symbols in `expr` whose type admits a point and a list of points
- * (`gpuPointOrPointListUnion`), by name, with the refusal for a read of each
- * one as a shader input. The map also holds the symbols whose type is a
+ * The refusals for a read of a symbol of `expr` as a shader input, by name,
+ * in two maps that one walk builds.
+ *
+ * `pointOrList` holds the symbols whose type admits a point and a list of
+ * points (`gpuPointOrPointListUnion`), and the symbols whose type is a
  * tuple that no shader type holds (`gpuTupleWithoutShaderType`: a nested
  * or mixed tuple, a tuple with a `complex` element, a tuple with a
- * `boolean` element that is not a boolean vector of 2 to 4 elements), with
- * their refusal. The walk also enters the body of each user function
- * that `expr` calls, and the value of each symbol, because the shader
- * targets write such a value in place. A body or a value is entered at most
- * once, so a recursive definition cannot loop here.
+ * `boolean` element that is not a boolean vector of 2 to 4 elements).
+ *
+ * `unsizedLists` holds the other symbols whose type admits a collection
+ * that no shader declaration holds (`gpuUnsizedCollectionReason`). A
+ * shader declares an input with a type whose size is fixed at compile
+ * time: a scalar, a vector, a matrix or an array of a stated length. A read
+ * of an input of unknown length as a value gave code that no shader could
+ * declare: with `L: list<real>`, `L` compiled to the GLSL code `L` with
+ * `success: true`. The caller refuses such a read, except where the shape
+ * of the name has another source (a storage hint, a parameter, a caller
+ * declaration).
+ *
+ * The walk also enters the body of each user function that `expr` calls,
+ * and the value of each symbol, because the shader targets write such a
+ * value in place. A body or a value is entered at most once, so a
+ * recursive definition cannot loop here.
  */
-export function gpuPointOrPointListSymbols(
-  expr: Expression | undefined
-): ReadonlyMap<string, string> {
-  const out = new Map<string, string>();
+export function gpuInputShapeRefusals(expr: Expression | undefined): {
+  pointOrList: ReadonlyMap<string, string>;
+  unsizedLists: ReadonlyMap<string, string>;
+} {
+  const pointOrList = new Map<string, string>();
+  const unsizedLists = new Map<string, string>();
+  forEachReachableSymbol(expr, (e) => {
+    const name = e.symbol;
+    if (pointOrList.has(name) || unsizedLists.has(name)) return;
+    const type = e.type.type;
+    const union = gpuPointOrPointListUnion(type);
+    if (union !== undefined) {
+      pointOrList.set(name, gpuPointOrPointListRefusal(name, name, e, union));
+      return;
+    }
+    const tupleReason = gpuTupleWithoutShaderType(type);
+    if (tupleReason !== undefined) {
+      pointOrList.set(
+        name,
+        `Could not compile \`${name}\`: "${name}" has the type ` +
+          `\`${e.type.toString()}\`, and ${tupleReason}. A shader can ` +
+          `read a tuple of 2 to 4 real numbers (a point) as a vector, ` +
+          `and a longer tuple of real numbers as an array.`
+      );
+      return;
+    }
+    const reason = gpuUnsizedCollectionReason(type);
+    if (reason !== undefined)
+      unsizedLists.set(
+        name,
+        `Could not compile \`${name}\`: "${name}" has the type ` +
+          `\`${e.type.toString()}\`, ${reason}. A shader declares an input ` +
+          `with a size fixed at compile time (a scalar, a vector, a matrix ` +
+          `or an array of a stated length, of at least one element), so no ` +
+          `shader can declare "${name}". Declare its length in its type ` +
+          `(\`list<real^8>\`, \`matrix<real^3x3>\`). On the wgsl target, a ` +
+          `'storage-buffer' hint also holds a list of unknown length.`
+      );
+  });
+  return { pointOrList, unsizedLists };
+}
+
+/**
+ * Why no shader declaration holds a value of type `t`, as a clause that
+ * starts with "which", or `undefined` when this test does not refuse `t`.
+ *
+ * The type is refused when it is a collection whose length is not known at
+ * compile time: a list with no dimensions or with an open dimension
+ * (`list<real>`, `matrix`, which is `matrix<number^(?x?)>`), a bare `list`,
+ * a set, a range, a dictionary or an abstract collection. It is also
+ * refused when it is a list with a dimension of 0, because GLSL and WGSL
+ * have no array of zero elements. A list type whose dimensions are all
+ * stated and positive (`list<real^3>`, `matrix<real^(2x2)>`) is not
+ * refused. Tuples and strings are not collections of this kind: the tuple
+ * gate of `gpuInputShapeRefusals()` and the text gate of
+ * `createTargetFor()` refuse them.
+ *
+ * A union is not refused, even when a member is a list of unknown length
+ * (`real | list<real>`): the engine gives such wide unions to symbols that
+ * the shader reads as scalars (an `unknown`-typed index is read with the
+ * type `boolean | character | indexed_collection<any> | number | string`),
+ * and refusing them declines valid programs. A record is not refused
+ * either. Both are known limitations in `docs/COMPILATION-MODEL.md`.
+ */
+function gpuUnsizedCollectionReason(t: Type): string | undefined {
+  const NO_LENGTH = 'which has no static length';
+  t = resolveTypeForCompilation(t);
+  if (typeof t === 'string')
+    return t === 'list' ||
+      t === 'range' ||
+      t === 'set' ||
+      t === 'dictionary' ||
+      t === 'collection' ||
+      t === 'indexed_collection'
+      ? NO_LENGTH
+      : undefined;
+  if (t.kind === 'list') {
+    const dims = t.dimensions;
+    if (!Array.isArray(dims) || dims.length === 0 || dims.some((d) => d < 0))
+      return NO_LENGTH;
+    return dims.some((d) => d === 0)
+      ? 'which holds no element, and a shader array holds at least one'
+      : undefined;
+  }
+  return t.kind === 'set' ||
+    t.kind === 'dictionary' ||
+    t.kind === 'collection' ||
+    t.kind === 'indexed_collection'
+    ? NO_LENGTH
+    : undefined;
+}
+
+/**
+ * Call `visit` once for each symbol name node reachable from `expr`: the
+ * nodes of `expr`, of the body of each user function that a node names (in
+ * operator position or as a value), and of the value of each symbol, because
+ * the shader targets write such a body or value in place. A body or a value
+ * is entered at most once, so a recursive definition cannot loop here, and a
+ * node that several parents share is visited once.
+ */
+function forEachReachableSymbol(
+  expr: Expression | undefined,
+  visit: (e: Expression & { symbol: string }) => void
+): void {
   const expanded = new Set<string>();
   const expandedValues = new Set<string>();
   const walkUserFunctionBody = (e: Expression, name: string): void => {
@@ -451,24 +566,7 @@ export function gpuPointOrPointListSymbols(
     if (visited.has(e)) return;
     visited.add(e);
     if (isSymbol(e)) {
-      const union = gpuPointOrPointListUnion(e.type.type);
-      if (union !== undefined && !out.has(e.symbol))
-        out.set(
-          e.symbol,
-          gpuPointOrPointListRefusal(e.symbol, e.symbol, e, union)
-        );
-      const tupleReason =
-        union === undefined && !out.has(e.symbol)
-          ? gpuTupleWithoutShaderType(e.type.type)
-          : undefined;
-      if (tupleReason !== undefined)
-        out.set(
-          e.symbol,
-          `Could not compile \`${e.symbol}\`: "${e.symbol}" has the type ` +
-            `\`${e.type.toString()}\`, and ${tupleReason}. A shader can ` +
-            `read a tuple of 2 to 4 real numbers (a point) as a vector, ` +
-            `and a longer tuple of real numbers as an array.`
-        );
+      visit(e);
       walkUserFunctionBody(e, e.symbol);
       if (!expandedValues.has(e.symbol)) {
         expandedValues.add(e.symbol);
@@ -484,7 +582,6 @@ export function gpuPointOrPointListSymbols(
     }
   };
   if (expr !== undefined) walk(expr);
-  return out;
 }
 
 /**

@@ -244,8 +244,10 @@ describe('GPU Max/Min — operands with no component list fail closed', () => {
   it('a runtime-length collection declines', () => {
     const cel = new ComputeEngine();
     cel.declare('L', 'list<number>');
+    // The input `L` declines before `Max` reads it: no shader can
+    // declare a list of unknown length.
     expect(() => glsl.compile(cel.box(['Max', 'L'])).code).toThrow(
-      /no compile-time component list/
+      /"L" has the type `list<number>`, which has no static length/
     );
   });
 });

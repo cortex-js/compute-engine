@@ -157,6 +157,13 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `if`/`else` statement. The interpreter and the JavaScript target give `2`
   and `3`. The decline should come from the `Match` lowering of the WGSL
   target when a case body assigns.
+- `glsl`, `wgsl`, `L: real | list<real>`: `L + 1` compiles to `L + 1.0`, a
+  shader code for a scalar `L`, so a host that gives a list has no
+  declaration of `L` that the code accepts. The interpreter at `L = [1, 2]`
+  gives `[2, 3]`. A list input of unknown length declines (`list<real>`),
+  but a union with such a member does not: the engine gives wide unions to
+  symbols that the shader reads as scalars. The same applies to an input
+  of type `record`, which compiles to its bare name.
 - `javascript`, `L: list<real>`, `n: integer`: `Sum(Take(Sum(L·i, i, 1,
   n), 2))` and `Sum(TakeWhile(Sum(L·i, i, 1, n), x ↦ x > 0))` at `n = 0`
   throw (`.slice is not a function`, `findIndex is not a function`): the
