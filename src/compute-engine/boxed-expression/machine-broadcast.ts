@@ -268,7 +268,8 @@ const BIG_DEADLINE_STRIDE = 0xff;
  *
  * Without this function, a broadcast over more than a hundred elements
  * answers a lazy `Map`, and a consumer such as `Min` evaluates a function
- * application for each element, about 8 µs each. A cell here is one
+ * application for each element, about 1 to 3 µs each on a minified
+ * production bundle (measured 2026-11-07 on 900 elements). A cell here is one
  * operation on big decimals and the boxing of its result.
  *
  * Each cell is the value that the interpreter computes for that cell, digit

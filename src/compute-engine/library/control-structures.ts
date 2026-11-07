@@ -2402,7 +2402,13 @@ function conditionCells(c: Expression): MaskList | undefined {
  *
  * The zip is EAGER — conditions are materialized once into plain arrays and
  * the selection is computed in a JS loop — never a stack of lazy broadcast
- * `Map`s, which costs ~8 µs per element per condition.
+ * `Map`s. Each cell of a lazy broadcast `Map` is a function application: on a
+ * minified production bundle, draining `n = 3` over 900 elements costs about
+ * 3 µs per element, and the whole selection `Which(n = 3, 1, n = 2, S, True,
+ * 0)` about 5.4 µs per element, which is close to the cost of draining its
+ * two conditions. The loop itself adds little; most of the cost is the
+ * computation of the cells of each condition, once.
+ * (Measured 2026-11-07 at commit 3105a22eac761583374d0006b2bf9031f7ba9ba7.)
  *
  * Returns `undefined` when the expression must stay inert. `evaluatedArms`,
  * when given, then holds the value of each arm that was evaluated, at the index
