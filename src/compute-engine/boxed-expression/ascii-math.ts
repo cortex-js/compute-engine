@@ -333,7 +333,11 @@ const OPERATORS: Record<
       return (
         ops.reduce((acc: string, x) => {
           if (isFunction(x, 'Negate')) {
-            const rhs = serialize(x.op1, 10);
+            // The negated operand is serialized above the precedence of a
+            // sum (11), so a negated sum or difference keeps its
+            // parentheses: `1 - (1 - t)`, not `1 - 1 - t`, which reads as
+            // `-t`. A product (12) is not wrapped: `a - b * c`.
+            const rhs = serialize(x.op1, 12);
             if (acc === '') return `-${rhs}`;
             if (rhs.startsWith('+')) return `${acc} - ${rhs.substring(1)}`;
             if (rhs.startsWith('-')) return `${acc} + ${rhs.substring(1)}`;

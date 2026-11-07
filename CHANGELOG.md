@@ -145,6 +145,12 @@
 
 ### Resolved Issues
 
+- **The plain-text form of a negated sum in a sum keeps its parentheses.**
+  `ce.parse('1-t').subs({ t: ce.parse('1-t') }).toString()` was
+  `1 - 1 - t`, which reads as `-t`; it is now `1 - (1 - t)`. In the same way,
+  `["Add", "c", ["Negate", ["Add", "a", "b"]]]` printed `-a + b + c` and now
+  prints `-(a + b) + c`. The value and the LaTeX form were already correct.
+
 - **A function with a point parameter maps over a list of points of different
   tuple types.** With `X = nan | real | signed_infinity`,
   `W: (tuple<X, X, X>, unknown) -> tuple<number, X, X>` assigned

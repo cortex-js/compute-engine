@@ -303,6 +303,25 @@ describe('PRECEDENCE', () => {
     ).toMatchInlineSnapshot(`(a <= 0) != b`);
     expect(check(['Less', 'a', 'b', 'c'])).toMatchInlineSnapshot(`a < b < c`);
   });
+
+  it('should parenthesize a negated sum inside a sum', () => {
+    // Without the parentheses, `1 - (1 - t)` prints `1 - 1 - t`, which
+    // reads as `-t`.
+    expect(ce.parse('1-t').subs({ t: ce.parse('1-t') }).toString()).toBe(
+      '1 - (1 - t)'
+    );
+    expect(check(['Add', 1, ['Negate', ['Add', 1, ['Negate', 't']]]])).toBe(
+      '1 - (1 - t)'
+    );
+    // The canonical order puts the negated sum first.
+    expect(check(['Add', 'c', ['Negate', ['Add', 'a', 'b']]])).toBe(
+      '-(a + b) + c'
+    );
+    // A negated product needs no parentheses.
+    expect(check(['Add', 1, ['Negate', ['Multiply', 'b', 'c']]])).toBe(
+      '1 - b * c'
+    );
+  });
 });
 
 describe('FUNCTIONS', () => {
