@@ -36,15 +36,14 @@ import {
   typeToIdentityKey,
   typeToString,
 } from '../../common/type/serialize.js';
-import { parseType } from '../../common/type/parse.js';
 import type { Type } from '../../common/type/types.js';
 import {
   isSymbol,
-  isString,
   isFunction,
   isNumber,
 } from '../boxed-expression/type-guards.js';
 import {
+  declaredParamType,
   functionLiteralDeclaredSignature,
   functionLiteralParameterName,
   functionLiteralParameterType,
@@ -3519,35 +3518,12 @@ export function literalDeclaredParamTypes(
 }
 
 /**
- * The DECLARED type carried by the function-literal parameter operand `p`
- * (`Typed(x, "complex")` — the E1 annotation spelling), or `undefined` when
- * `p` carries no annotation or the annotation does not parse. An
- * unannotated or unparseable parameter therefore reads as undeclared, the
- * safe direction.
- *
- * Positional, so the callers that need the parameters BY POSITION — the
- * value-position coercion of an inline literal — and the one that needs
- * them by name agree on what a parameter is declared as.
+ * The declared type of a parameter operand of a function literal. It is
+ * defined in `boxed-expression/function-literal.ts`, so that the library
+ * reads a parameter as the compiler does without importing the compiler;
+ * the callers in `compilation/` import it from this module.
  */
-export function declaredParamType(p: Expression): Type | undefined {
-  // A parameter with a default value, `["Optional", param, default]`, has
-  // the declared type of the parameter it wraps.
-  p = optionalParameterTarget(p);
-  if (!isFunction(p, 'Typed') || !isSymbol(p.ops[0])) return undefined;
-  const src = p.ops[1];
-  const text = isString(src)
-    ? src.string
-    : isSymbol(src)
-      ? src.symbol
-      : undefined;
-  if (text === undefined) return undefined;
-  try {
-    return parseType(text, p.engine._typeResolver);
-  } catch {
-    // Unparseable annotation: read as undeclared.
-    return undefined;
-  }
-}
+export { declaredParamType };
 
 /**
  * The JavaScript guard testing that `a` satisfies parameter type `t`:

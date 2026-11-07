@@ -493,6 +493,46 @@ export function functionLiteralParameterType(
   return undefined;
 }
 
+/**
+ * The DECLARED type carried by the function-literal parameter operand `p`
+ * (`Typed(x, "complex")`, the MathJSON form of a type annotation on a
+ * parameter), or `undefined` when `p` carries no annotation or the
+ * annotation does not parse. An unannotated or unparseable parameter
+ * therefore reads as undeclared, the safe direction.
+ *
+ * It reads one parameter, so that the callers that read the parameters by
+ * position (the value-position coercion of an inline literal, in
+ * `compilation/compile-callbacks.ts`) and `literalDeclaredParamTypes()` in
+ * the same module, which reads them by name, agree on the declared type of
+ * a parameter.
+ *
+ * This is the reading the compiler uses to put a parameter of a literal in
+ * the `{ re, im }` complex lane (`compilation/compile-function-literals.ts`),
+ * so a caller that must agree with that decision reads the parameter with
+ * this function (`complexLaneParameters()` in `library/map-auto-compile.ts`).
+ * Unlike {@link functionLiteralParameterType}, it keeps no memo of a
+ * resolved type operand.
+ */
+export function declaredParamType(p: Expression): Type | undefined {
+  // A parameter with a default value, `["Optional", param, default]`, has
+  // the declared type of the parameter it wraps.
+  p = optionalParameterTarget(p);
+  if (!isFunction(p, 'Typed') || !isSymbol(p.ops[0])) return undefined;
+  const src = p.ops[1];
+  const text = isString(src)
+    ? src.string
+    : isSymbol(src)
+      ? src.symbol
+      : undefined;
+  if (text === undefined) return undefined;
+  try {
+    return parseType(text, p.engine._typeResolver);
+  } catch {
+    // Unparseable annotation: read as undeclared.
+    return undefined;
+  }
+}
+
 /** True for the wide types `any`, `expression` and `value`. Each of them
  * admits a collection, and a parameter DECLARED with one of them receives
  * a collection argument whole (see {@link isScalarType}). `unknown` is not

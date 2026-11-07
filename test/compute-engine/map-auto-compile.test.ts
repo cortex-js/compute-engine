@@ -337,6 +337,119 @@ describe('Map auto-compile', () => {
     expect(stats.attempts).toBe(0); // 'abi' is permanent
   });
 
+  describe('a complex element', () => {
+    // A list of `n` complex floats. Past 100 elements, a broadcast over it
+    // is a lazy `Map`.
+    const complexList = (n: number) =>
+      Array.from({ length: n }, (_, k) => ['Complex', 0.5 + k, 1.25]);
+
+    /** The first two elements of a drain of `expr`, compiled and with the
+     * interpreter (`ce.jit = 'off'`). */
+    function bothRoutes(expr: () => any): [string[], string[]] {
+      const first2 = (m: any) => [...m.each()].slice(0, 2).map(String);
+      const compiled = first2(expr());
+      ce.jit = 'off';
+      try {
+        return [compiled, first2(expr())];
+      } finally {
+        ce.jit = 'auto';
+      }
+    }
+
+    test('the conjugate of a long list of complex numbers under N()', () => {
+      ce.assign('cz1', ce.box(['List', ...complexList(101)]));
+      const [compiled, interpreted] = bothRoutes(() =>
+        ce.box(['Conjugate', 'cz1']).N()
+      );
+      expect(compiled).toEqual(['(0.5 - 1.25i)', '(1.5 - 1.25i)']);
+      expect(compiled).toEqual(interpreted);
+    });
+
+    test('a parameter with no annotation: the interpreter computes the element', () => {
+      ce.assign('cz2', ce.box(['List', ...complexList(120)]));
+      // The compiled code reads `z` as a real number: `Real(z)` is `z`, and
+      // `Imaginary(z)` is `0`.
+      for (const body of [
+        ['Real', 'z'],
+        ['Add', ['Imaginary', 'z'], 0.5],
+      ]) {
+        _resetMapAutoCompileStats();
+        const [compiled, interpreted] = bothRoutes(() =>
+          ce.box(['Map', ['Function', ['N', body], 'z'], 'cz2']).evaluate()
+        );
+        expect(compiled).toEqual(interpreted);
+        expect(stats.compiledHits).toBe(0);
+        expect(stats.elementFallbacks).toBe(120);
+      }
+      expect(
+        ce
+          .box(['Map', ['Function', ['N', ['Real', 'z']], 'z'], 'cz2'])
+          .evaluate()
+          .at(2)!
+          .toString()
+      ).toBe('1.5');
+    });
+
+    test('a parameter annotated complex: the compiled code computes the element', () => {
+      ce.assign('cz3', ce.box(['List', ...complexList(120)]));
+      const [compiled, interpreted] = bothRoutes(() =>
+        ce
+          .box([
+            'Map',
+            ['Function', ['N', ['Conjugate', 'z']], ['Typed', 'z', "'complex'"]],
+            'cz3',
+          ])
+          .evaluate()
+      );
+      expect(compiled).toEqual(['(0.5 - 1.25i)', '(1.5 - 1.25i)']);
+      expect(compiled).toEqual(interpreted);
+      expect(stats.compiledHits).toBe(120);
+      expect(stats.elementFallbacks).toBe(0);
+    });
+
+    test('two sources: the annotation of each parameter decides for its own source', () => {
+      ce.assign('cz4', ce.box(['List', ...complexList(120)]));
+      ce.assign(
+        'cr4',
+        ce.box(['List', ...Array.from({ length: 120 }, (_, k) => k + 0.25)])
+      );
+      const body = ['N', ['Add', ['Conjugate', 'z'], 'w']];
+      // The complex source is the second one, and its parameter is annotated.
+      let [compiled, interpreted] = bothRoutes(() =>
+        ce
+          .box([
+            'Map',
+            ['Function', body, 'w', ['Typed', 'z', "'complex'"]],
+            'cr4',
+            'cz4',
+          ])
+          .evaluate()
+      );
+      expect(compiled).toEqual(['(0.75 - 1.25i)', '(2.75 - 1.25i)']);
+      expect(compiled).toEqual(interpreted);
+      expect(stats.compiledHits).toBe(120);
+      expect(stats.elementFallbacks).toBe(0);
+
+      // The annotation is on the parameter of the real source: each complex
+      // element is computed by the interpreter.
+      _resetMapAutoCompileStats();
+      [compiled, interpreted] = bothRoutes(() =>
+        ce
+          .box([
+            'Map',
+            ['Function', body, ['Typed', 'w', "'complex'"], 'z'],
+            'cr4',
+            'cz4',
+          ])
+          .evaluate()
+      );
+      expect(compiled).toEqual(['(0.75 - 1.25i)', '(2.75 - 1.25i)']);
+      expect(compiled).toEqual(interpreted);
+      expect(stats.compiledHits).toBe(0);
+      expect(stats.elementFallbacks).toBe(120);
+    });
+  });
+
   // ── 10. NaN double-check ───────────────────────────────────────────────
   test('√x over [4, −4]: domain-crossing element gets the interpreter value', () => {
     // User-authored marked Map (shape-identical to the rewrap marker —

@@ -12,7 +12,10 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { beginStoreGuard } from '../boxed-expression/store-guard.js';
 import { bignumPreferred } from '../boxed-expression/utils.js';
-import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import {
+  declaredParamType,
+  functionLiteralParameterName,
+} from '../boxed-expression/function-literal.js';
 import { lookup } from '../function-utils.js';
 import { implicitCompile } from '../implicit-compile.js';
 import { checkDeadline } from '../../common/interruptible.js';
@@ -28,7 +31,10 @@ import {
   resolveDep,
   userFnLiteral,
 } from './map-exact-proof.js';
-import { collectionElementType } from '../../common/type/utils.js';
+import {
+  collectionElementType,
+  isNonRealNumber,
+} from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
 import { rangeCount } from '../numerics/range-count.js';
 import { appliesJumpFunction } from '../jump-functions.js';
@@ -135,6 +141,11 @@ interface MapCompileCache {
    * Then an element with an exact input is computed by the interpreter (see
    * the runner). */
   jumpBody?: boolean;
+  /** Marked tier only: for each parameter of the compiled literal, true if
+   * the compiled code reads it as a `{ re, im }` complex value
+   * (`complexLaneParameters()`). A complex element for any other parameter
+   * is computed by the interpreter (see the runner). */
+  complexParams?: ReadonlyArray<boolean>;
 }
 
 /**
@@ -627,6 +638,33 @@ function attemptCompile(
   };
 }
 
+/**
+ * For each parameter of the `Function` literal `literal`, true if its own
+ * annotation declares a non-real number type (`(z: complex) ↦ …`). Only such
+ * a parameter makes the compiled code read its argument as a `{ re, im }`
+ * complex value. A parameter with no annotation, or with a real or wide type,
+ * is read as a real number: `Conjugate(z)` and `Real(z)` compile to `z`, and
+ * `Imaginary(z)` to `0`. The marked tier rebuilds its literal from MathJSON,
+ * so the element type that the source gave an unannotated parameter is not in
+ * it.
+ *
+ * A parameter of a generic literal whose declared bound is a non-real type
+ * (`(x: T) -> T where T: complex`) is also compiled as complex, but it is
+ * false here: an element for it is then computed by the interpreter, which
+ * gives the same value, only slower.
+ *
+ * The annotation is read with `declaredParamType()`, the function that the
+ * compiler uses to choose the lane of a parameter
+ * (`compilation/compile-function-literals.ts`), so that the two agree.
+ */
+function complexLaneParameters(literal: Expression): boolean[] {
+  if (!isFunction(literal, 'Function')) return [];
+  return literal.ops.slice(1).map((param) => {
+    const t = declaredParamType(param);
+    return t !== undefined && isNonRealNumber(t);
+  });
+}
+
 /** One compile attempt, with no check of host code: see `attemptCompile()`. */
 function attemptCompileOnce(
   ce: ComputeEngine,
@@ -755,6 +793,8 @@ function attemptCompileOnce(
     deps: resolvedDeps,
     exactBody: tier === 'marked' && isExactBody(ce, literal, resolvedDeps),
     jumpBody: tier === 'marked' && hasJumpFunction(ce, literal, resolvedDeps),
+    complexParams:
+      tier === 'marked' ? complexLaneParameters(literal) : undefined,
     epoch: ce._worldVersion,
     tolerance: ce.tolerance,
     angularUnit: ce.angularUnit,
@@ -1191,6 +1231,20 @@ function compiledRunner(
         // `9007199254740993` is `27021597764222979`, but the compiled code
         // multiplies the float `9007199254740992`. The interpreter computes
         // this element.
+        _mapAutoCompileStats.elementFallbacks++;
+        return undefined;
+      }
+      // The marked tier: a complex element is passed as `{ re, im }`, which
+      // only a parameter that the compiled code reads as complex accepts
+      // (`complexParams`). Code compiled for a real parameter takes the
+      // object as its value: `z ↦ N(Conjugate(z))` compiles to `z ↦ z` and
+      // gave `0.5 + 1.25i` for `0.5 + 1.25i`, and `z ↦ N(Imaginary(z) + 1)`
+      // gave `1`. The interpreter computes this element.
+      if (
+        tier === 'marked' &&
+        item.isComplex &&
+        cache.complexParams?.[i] !== true
+      ) {
         _mapAutoCompileStats.elementFallbacks++;
         return undefined;
       }

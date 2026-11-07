@@ -159,6 +159,18 @@
 
 ### Resolved Issues
 
+- **At machine precision, the numeric value of a function of a long list of
+  complex numbers is correct when the function reads the real or the
+  imaginary part.** With `B` a list of 101 complex numbers `0.5 + 1.25i`,
+  `["Conjugate", "B"]` with `.N()` gave the list itself: each element was
+  `0.5 + 1.25i`, and it is now `0.5 - 1.25i`, as `.evaluate()` gives. The
+  same applies to `["Map", ["Function", ["N", ["Real", "z"]], "z"], "B"]`,
+  which gave `0.5 + 1.25i` and now gives `0.5`, and to
+  `["Map", ["Function", ["N", ["Add", ["Imaginary", "z"], 0.5]], "z"], "B"]`,
+  which gave `0.5` and now gives `1.75`, for a list of any length.
+  `["Conjugate", "B"]` of a list of 100 elements or fewer, and every value at
+  the default precision, were already correct.
+
 - **`simplify()` now cancels the like logarithm terms of a sum for every
   base, when each term is a logarithm alone, negated, or with a number
   coefficient.** `\log(x^3) - 3\log(x)` stayed unchanged, while
