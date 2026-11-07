@@ -24,6 +24,12 @@
  * The header is a subset of YAML: `key: value`, a list as `[a, b]`, a comment
  * after two or more spaces and `#` (so that `GitHub #12` stays a value).
  * Nothing else is parsed. The script has no dependency.
+ *
+ * The module also exports its reading and editing functions, so that
+ * `scripts/issues-ui.mjs` (the board's web page) writes the files through the
+ * same checks. The command line runs only when this file is executed. An
+ * importer calls `configure()` to set the directory and the date; a refused
+ * edit throws an `IssueError` instead of ending the process.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -131,24 +137,52 @@ const NEXT_FILE = 'NEXT.md';
 const TYCHO_ROOT = path.resolve(ROOT, '..', 'tycho');
 
 // ---------------------------------------------------------------------------
-// Arguments
+// Options and errors
 
-const argv = process.argv.slice(2);
-const opts = { dir: path.join(ROOT, 'issues'), today: null, json: false };
-const positional = [];
-for (let i = 0; i < argv.length; i++) {
-  const a = argv[i];
-  if (a === '--dir' || a === '--today') {
-    const v = argv[++i];
-    if (v === undefined || v.startsWith('--')) usage(`${a} needs a value`);
-    if (a === '--dir') opts.dir = path.resolve(v);
-    else opts.today = v;
-  } else if (a === '--json') opts.json = true;
-  else positional.push(a);
+/**
+ * The directory of the issue files, the date that `today` means, and whether
+ * the lists print as JSON. The command line sets them from its arguments; an
+ * importer sets them with `configure()`.
+ */
+const opts = { dir: path.join(ROOT, 'issues'), json: false };
+let TODAY = localDate();
+
+/**
+ * Sets the directory and the date for the next calls. Without `today`, the
+ * date is the local date at the time of the call, so that a server that runs
+ * past midnight writes the new date.
+ */
+export function configure({ dir, today } = {}) {
+  opts.dir = dir ? path.resolve(dir) : path.join(ROOT, 'issues');
+  TODAY = today ?? localDate();
+  if (!validDate(TODAY))
+    throw new IssueError(`today must be yyyy-mm-dd, not ${TODAY}`);
 }
-const [command, ...args] = positional;
-const TODAY = opts.today ?? localDate();
-if (!DATE_RE.test(TODAY)) usage(`--today must be yyyy-mm-dd, not ${TODAY}`);
+
+/** The date that `today` means for the current calls. */
+export function today() {
+  return TODAY;
+}
+
+/** The directory of the issue files for the current calls. */
+export function issuesDir() {
+  return opts.dir;
+}
+
+/**
+ * `ROOT` is the main worktree, where `issues/`, `ROADMAP.md` and the git
+ * index are. The lists are the values that the header fields admit.
+ */
+export { ROOT, STATES, PRIORITIES, FLAGS };
+
+/** A refused command or edit. The command line prints `issues: <message>` and exits with 1. */
+export class IssueError extends Error {}
+
+/**
+ * A command line that is not valid. The command line prints the message and
+ * the usage line; an importer catches it as an `IssueError`.
+ */
+class UsageError extends IssueError {}
 
 function localDate() {
   // 'sv' formats a date as yyyy-mm-dd, in the local time zone.
@@ -170,17 +204,15 @@ function compareVersions(a, b) {
   return 0;
 }
 
+const USAGE =
+  'usage: node scripts/issues.mjs lint | board | backlog | in-progress | show <id> | release <version> | set <id> <field> <value> | flag <id> +f|-f | start <id> <owner> | new | close <id> <reason…> | close --all   [--dir <path>] [--today <date>] [--json]';
+
 function usage(msg) {
-  if (msg) console.error(`issues: ${msg}`);
-  console.log(
-    'usage: node scripts/issues.mjs lint | board | backlog | in-progress | show <id> | release <version> | set <id> <field> <value> | flag <id> +f|-f | start <id> <owner> | new | close <id> <reason…> | close --all   [--dir <path>] [--today <date>] [--json]'
-  );
-  process.exit(msg ? 1 : 0);
+  throw new UsageError(msg ?? '');
 }
 
 function fail(msg) {
-  console.error(`issues: ${msg}`);
-  process.exit(1);
+  throw new IssueError(msg);
 }
 
 // ---------------------------------------------------------------------------
@@ -303,7 +335,7 @@ function idNumber(id) {
 }
 
 /** Every issue file of the directory, with its lint errors and warnings. */
-function loadAll() {
+export function loadAll() {
   if (!fs.existsSync(opts.dir)) fail(`no directory ${opts.dir}`);
   const names = fs.readdirSync(opts.dir);
   const files = names
@@ -314,112 +346,123 @@ function loadAll() {
       !/^CE-\d+\.md$/.test(n) &&
       !['README.md', 'CLOSED.md', NEXT_FILE, '.DS_Store'].includes(n)
   );
-  const issues = files.map((name) => {
-    const file = path.join(opts.dir, name);
-    const parsed = parseFile(file);
-    const f = parsed.fields;
-    const errors = [...parsed.errors];
-    const warnings = [];
-    for (const k of REQUIRED)
-      if (!(k in f) || f[k] === '') errors.push(`missing field \`${k}\``);
-    for (const k of Object.keys(f))
-      if (!KNOWN.includes(k)) errors.push(`unknown field \`${k}\``);
-    if (f.id && f.id !== name.slice(0, -3))
-      errors.push(`id \`${f.id}\` does not match the file name`);
-    for (const k of Object.keys(ENUMS)) check(errors, f, k);
-    for (const fl of f.flags ?? [])
-      if (!FLAGS.includes(fl)) errors.push(`unknown flag \`${fl}\``);
-    for (const k of DATE_FIELDS)
-      if (f[k] && !validDate(f[k]))
-        errors.push(`\`${k}\` is not a date yyyy-mm-dd`);
-    if (f.release && !VERSION_RE.test(f.release))
-      errors.push('`release` is a version x.y.z');
-    const flags = f.flags ?? [];
-    if (f.state === 'in-progress' && !(f.owner && f.started))
-      errors.push('`in-progress` needs `owner` and `started`');
-    if (f.state === 'fixed' && !f['fixed-in'])
-      errors.push('`fixed` needs `fixed-in` (the commit or the release)');
-    if (f.state === 'fixed' && f.source !== 'tycho')
-      errors.push(
-        '`fixed` is only for `source: tycho`; a fixed issue of another source is deleted with its fix'
-      );
-    if (f.state !== 'fixed' && f['fixed-in'])
-      errors.push(
-        '`fixed-in` is set only with `state: fixed`; a reopened issue clears it'
-      );
-    if (f.state === 'close' && !f['close-reason'])
-      errors.push('`close` needs `close-reason`');
-    if (
-      (flags.includes('needs-review') ||
-        ['needs-decision', 'needs-design'].includes(f.state)) &&
-      !f.ask
-    )
-      errors.push(
-        '`ask` is required on a needs-review, needs-decision or needs-design item: one sentence that says what the board must do'
-      );
-    if (f.priority === 'P0' && !flags.includes('needs-review') && !f.confirmed)
-      errors.push(
-        'a P0 needs `needs-review` (proposed) or `confirmed` (set by the board)'
-      );
-    if (f.priority === 'P0' && flags.includes('needs-review') && f.confirmed)
-      errors.push('a confirmed P0 has no `needs-review`');
-    if (f.source === 'tycho') {
-      if (!f.instrument) errors.push('a Tycho issue names its instrument');
-      else if (!fs.existsSync(path.join(TYCHO_ROOT, f.instrument)))
-        warnings.push(
-          `instrument not found at ${path.join(TYCHO_ROOT, f.instrument)}`
-        );
-    } else if (f.source && !f.witness)
-      errors.push('a Compute Engine issue names its witness');
-    const first = firstBodyLine(parsed.body);
-    if (!first)
-      errors.push(
-        'the body is empty: the first line is one sentence of user impact'
-      );
-    else if (/^#/.test(first))
-      errors.push('the first body line must be a sentence, not a heading');
-    const words = bodyWords(parsed.body);
-    if (words > BODY_WORD_CAP)
-      errors.push(
-        `body has ${words} words outside code blocks and the CE answer; the cap is ${BODY_WORD_CAP}`
-      );
-    const table = tablePriority(f);
-    if (
-      table &&
-      f.priority &&
-      f.priority !== 'P0' &&
-      f.priority !== table &&
-      !f.reviewed
-    ) {
-      warnings.push(
-        `priority ${f.priority} differs from the table value ${table} (the board records its decision with \`reviewed\`)`
-      );
-    }
-    return {
-      name,
-      file,
-      fields: f,
-      body: parsed.body,
-      title: first,
-      words,
-      table,
-      errors,
-      warnings,
-    };
-  });
-  return { issues, strays };
+  return { issues: files.map(checkFile), strays };
 }
 
-/** The issues without lint errors; prints (or, in JSON, records) the ones left out. */
-let leftOut = [];
-function clean(all) {
-  const bad = all.issues.filter((i) => i.errors.length);
-  leftOut = bad.map((i) => i.name);
-  if (bad.length && !opts.json)
-    console.log(
-      `${bad.length} file(s) with errors left out (run lint): ${leftOut.join(', ')}`
+/**
+ * Reads one issue file (`CE-<n>.md` in the directory) and checks it: the
+ * fields, the body, and the errors and warnings that `lint` prints for it.
+ * The checks of the whole directory (`NEXT.md`, a repeated id, a stray file)
+ * are in `lint()`.
+ */
+export function checkFile(name) {
+  const file = path.join(opts.dir, name);
+  const parsed = parseFile(file);
+  const f = parsed.fields;
+  const errors = [...parsed.errors];
+  const warnings = [];
+  for (const k of REQUIRED)
+    if (!(k in f) || f[k] === '') errors.push(`missing field \`${k}\``);
+  for (const k of Object.keys(f))
+    if (!KNOWN.includes(k)) errors.push(`unknown field \`${k}\``);
+  if (f.id && f.id !== name.slice(0, -3))
+    errors.push(`id \`${f.id}\` does not match the file name`);
+  for (const k of Object.keys(ENUMS)) check(errors, f, k);
+  for (const fl of f.flags ?? [])
+    if (!FLAGS.includes(fl)) errors.push(`unknown flag \`${fl}\``);
+  for (const k of DATE_FIELDS)
+    if (f[k] && !validDate(f[k]))
+      errors.push(`\`${k}\` is not a date yyyy-mm-dd`);
+  if (f.release && !VERSION_RE.test(f.release))
+    errors.push('`release` is a version x.y.z');
+  const flags = f.flags ?? [];
+  if (f.state === 'in-progress' && !(f.owner && f.started))
+    errors.push('`in-progress` needs `owner` and `started`');
+  if (f.state === 'fixed' && !f['fixed-in'])
+    errors.push('`fixed` needs `fixed-in` (the commit or the release)');
+  if (f.state === 'fixed' && f.source !== 'tycho')
+    errors.push(
+      '`fixed` is only for `source: tycho`; a fixed issue of another source is deleted with its fix'
     );
-  return all.issues.filter((i) => !i.errors.length);
+  if (f.state !== 'fixed' && f['fixed-in'])
+    errors.push(
+      '`fixed-in` is set only with `state: fixed`; a reopened issue clears it'
+    );
+  if (f.state === 'close' && !f['close-reason'])
+    errors.push('`close` needs `close-reason`');
+  if (
+    (flags.includes('needs-review') ||
+      ['needs-decision', 'needs-design'].includes(f.state)) &&
+    !f.ask
+  )
+    errors.push(
+      '`ask` is required on a needs-review, needs-decision or needs-design item: one sentence that says what the board must do'
+    );
+  if (f.priority === 'P0' && !flags.includes('needs-review') && !f.confirmed)
+    errors.push(
+      'a P0 needs `needs-review` (proposed) or `confirmed` (set by the board)'
+    );
+  if (f.priority === 'P0' && flags.includes('needs-review') && f.confirmed)
+    errors.push('a confirmed P0 has no `needs-review`');
+  if (f.source === 'tycho') {
+    if (!f.instrument) errors.push('a Tycho issue names its instrument');
+    else if (!fs.existsSync(path.join(TYCHO_ROOT, f.instrument)))
+      warnings.push(
+        `instrument not found at ${path.join(TYCHO_ROOT, f.instrument)}`
+      );
+  } else if (f.source && !f.witness)
+    errors.push('a Compute Engine issue names its witness');
+  const first = firstBodyLine(parsed.body);
+  if (!first)
+    errors.push(
+      'the body is empty: the first line is one sentence of user impact'
+    );
+  else if (/^#/.test(first))
+    errors.push('the first body line must be a sentence, not a heading');
+  const words = bodyWords(parsed.body);
+  if (words > BODY_WORD_CAP)
+    errors.push(
+      `body has ${words} words outside code blocks and the CE answer; the cap is ${BODY_WORD_CAP}`
+    );
+  const table = tablePriority(f);
+  if (
+    table &&
+    f.priority &&
+    f.priority !== 'P0' &&
+    f.priority !== table &&
+    !f.reviewed
+  ) {
+    warnings.push(
+      `priority ${f.priority} differs from the table value ${table} (the board records its decision with \`reviewed\`)`
+    );
+  }
+  return {
+    name,
+    file,
+    fields: f,
+    body: parsed.body,
+    title: first,
+    words,
+    table,
+    errors,
+    warnings,
+  };
+}
+
+/** The issues without lint errors, and the names of the files left out. */
+export function clean(all) {
+  return {
+    issues: all.issues.filter((i) => !i.errors.length),
+    leftOut: all.issues.filter((i) => i.errors.length).map((i) => i.name),
+  };
+}
+
+/** Prints the line that names the files a list leaves out (not in JSON). */
+function printLeftOut(leftOut) {
+  if (leftOut.length && !opts.json)
+    console.log(
+      `${leftOut.length} file(s) with errors left out (run lint): ${leftOut.join(', ')}`
+    );
 }
 
 /** Whether a commit since `since` names exactly this issue. */
@@ -496,7 +539,7 @@ function printList(title, items, withAsk = false) {
   for (const [i, extra] of items) console.log(row(i, extra, withAsk));
 }
 
-function asJson(sections) {
+function asJson(sections, leftOut = []) {
   const plain = (i) => ({ ...i.fields, title: i.title, table: i.table });
   const out = { leftOut };
   for (const [k, v] of Object.entries(sections)) {
@@ -531,8 +574,13 @@ const confirmedP0s = (issues) =>
     (i) => i.fields.priority === 'P0' && i.fields.confirmed && !isDone(i)
   );
 
-function board(all) {
-  const issues = clean(all);
+/**
+ * The sections of the board's list, in the order of `docs/ISSUE_TRACKING.md`
+ * ("Who does what"). Each section is a list of `[issue, note]` pairs; the
+ * files with lint errors are left out and named in `leftOut`.
+ */
+export function boardSections(all) {
+  const { issues, leftOut } = clean(all);
   const p0 = issues
     .filter((i) => i.fields.priority === 'P0' && !isDone(i))
     .sort(byPriority)
@@ -611,8 +659,9 @@ function board(all) {
   const closing = issues
     .filter((i) => i.fields.state === 'close')
     .map((i) => [i, i.fields['close-reason']]);
-  if (opts.json) {
-    asJson({
+  return {
+    leftOut,
+    sections: {
       p0,
       review,
       fresh,
@@ -623,7 +672,27 @@ function board(all) {
       aged,
       fixed,
       closing,
-    });
+    },
+  };
+}
+
+function board(all) {
+  const { leftOut, sections } = boardSections(all);
+  const {
+    p0,
+    review,
+    fresh,
+    unanswered,
+    decision,
+    design,
+    stalled,
+    aged,
+    fixed,
+    closing,
+  } = sections;
+  printLeftOut(leftOut);
+  if (opts.json) {
+    asJson(sections, leftOut);
     return;
   }
   console.log(`# Board list, ${TODAY}`);
@@ -645,8 +714,14 @@ function board(all) {
   printList('To close at the end of the review (`close --all`)', closing);
 }
 
-function backlog(all) {
-  const issues = clean(all);
+/**
+ * The agents' list: the confirmed P0 items, the workable items of a release
+ * and of the pool (each a list of `[issue, note]` pairs, by priority, size and
+ * age), and the number of P4 items in the pool, which the list leaves out.
+ * While a confirmed P0 is open, the command line prints only the P0.
+ */
+export function backlogSections(all) {
+  const { issues, leftOut } = clean(all);
   const p0 = confirmedP0s(issues);
   const workable = issues.filter(isWorkable);
   const note = (i) => (i.fields.state === 'investigate' ? 'investigate' : '');
@@ -661,13 +736,22 @@ function backlog(all) {
   const p4Count = workable.filter(
     (i) => !i.fields.release && i.fields.priority === 'P4'
   ).length;
+  return { leftOut, p0, release, pool, p4Count };
+}
+
+function backlog(all) {
+  const { leftOut, p0, release, pool, p4Count } = backlogSections(all);
+  printLeftOut(leftOut);
   if (opts.json) {
-    asJson({
-      confirmedP0: p0,
-      release: p0.length ? [] : release,
-      pool: p0.length ? [] : pool,
-      p4Count,
-    });
+    asJson(
+      {
+        confirmedP0: p0,
+        release: p0.length ? [] : release,
+        pool: p0.length ? [] : pool,
+        p4Count,
+      },
+      leftOut
+    );
     return;
   }
   console.log(`# Agents' list, ${TODAY}`);
@@ -688,9 +772,11 @@ function backlog(all) {
 }
 
 function inProgress(all) {
-  const items = clean(all).filter((i) => i.fields.state === 'in-progress');
+  const { issues, leftOut } = clean(all);
+  const items = issues.filter((i) => i.fields.state === 'in-progress');
+  printLeftOut(leftOut);
   if (opts.json) {
-    asJson({ inProgress: items });
+    asJson({ inProgress: items }, leftOut);
     return;
   }
   console.log(`# In progress, ${TODAY} (${items.length})\n`);
@@ -822,7 +908,11 @@ function fileOf(id) {
   return file;
 }
 
-/** Writes header fields and `updated`; an empty value keeps the line without a value. */
+/**
+ * Writes header fields and `updated`; an empty value keeps the line without a
+ * value. A comment after the value (two spaces and `#`) stays. Returns one
+ * line per field written, which the command line prints.
+ */
 function writeFields(id, pairs) {
   const file = fileOf(id);
   const lines = fs.readFileSync(file, 'utf8').replace(/\r/g, '').split('\n');
@@ -840,15 +930,18 @@ function writeFields(id, pairs) {
   for (const [k, v] of pairs) put(k, v);
   if (!pairs.some(([k]) => k === 'updated')) put('updated', TODAY);
   fs.writeFileSync(file, lines.join('\n'));
-  for (const [k, v] of pairs)
-    console.log(`${id}: ${k} = ${v === '' ? '(empty)' : v}`);
+  return pairs.map(([k, v]) => `${id}: ${k} = ${v === '' ? '(empty)' : v}`);
 }
 
 function currentFields(id) {
   return parseFile(fileOf(id)).fields;
 }
 
-function setField(id, key, value) {
+/**
+ * Changes one header field, with the checks of the `set` command, and writes
+ * `updated`. Returns the lines that the command prints.
+ */
+export function setField(id, key, value) {
   if (!KNOWN.includes(key)) fail(`unknown field \`${key}\``);
   if (key === 'id') fail('the id does not change');
   if (key === 'flags') fail('use `flag <id> +name` or `flag <id> -name`');
@@ -858,6 +951,8 @@ function setField(id, key, value) {
     fail(
       'a value cannot contain two spaces followed by `#`: that is read as a comment'
     );
+  if (/[\r\n]/.test(value))
+    fail('a value is one line: a line break would end the header field');
   if (DATE_FIELDS.includes(key) && value === 'today') value = TODAY;
   if (DATE_FIELDS.includes(key) && value !== '' && !validDate(value))
     fail(`\`${key}\` takes a date yyyy-mm-dd or \`today\``);
@@ -883,20 +978,22 @@ function setField(id, key, value) {
       `[${(current.flags ?? []).filter((x) => x !== 'needs-review').join(', ')}]`,
     ]);
   }
+  const notes = [];
   if (
     key === 'priority' &&
     value === 'P0' &&
     !(current.flags ?? []).includes('needs-review') &&
     !current.confirmed
   ) {
-    console.log(
+    notes.push(
       `${id}: a P0 needs \`needs-review\` (proposed) or \`confirmed\` (the board: \`set ${id} confirmed today\`)`
     );
   }
-  writeFields(id, pairs);
+  return [...notes, ...writeFields(id, pairs)];
 }
 
-function flag(id, spec) {
+/** Adds (`+name`) or removes (`-name`) one flag. Returns the lines that the command prints. */
+export function flag(id, spec) {
   const m = /^([+-])([a-z-]+)$/.exec(spec ?? '');
   if (!m) usage('flag takes +name or -name');
   const [, op, name] = m;
@@ -904,7 +1001,84 @@ function flag(id, spec) {
   const set = new Set(currentFields(id).flags ?? []);
   if (op === '+') set.add(name);
   else set.delete(name);
-  writeFields(id, [['flags', `[${[...set].join(', ')}]`]]);
+  return writeFields(id, [['flags', `[${[...set].join(', ')}]`]]);
+}
+
+/**
+ * Records a decision of the board in the body: a paragraph
+ * `User decision <today>: <text>` at the end of the `## Decision` section, or
+ * a new `## Decision` section at the end of the body. Then it sets `reviewed`
+ * to today and removes `needs-review`, except on a P0 that is not confirmed:
+ * lint requires the flag there until the board confirms the P0 or changes the
+ * priority. The header, its comments and the other sections stay as they are.
+ * The text may have several lines and code blocks, but no Markdown heading
+ * outside a code block (it would end the section) and no code block left open
+ * (the readers of the body would take the sections after it for code).
+ */
+export function recordDecision(id, text) {
+  const file = fileOf(id);
+  const decision = (text ?? '').replace(/\r/g, '').trim();
+  if (!decision) fail('the decision is empty');
+  let fenced = false;
+  for (const l of decision.split('\n')) {
+    if (/^\s*```/.test(l)) fenced = !fenced;
+    else if (!fenced && /^#{1,6}(\s|$)/.test(l))
+      fail(
+        'a line of the decision is a Markdown heading: it would end the section'
+      );
+  }
+  if (fenced)
+    fail('the decision opens a code block (```) and does not close it');
+  const raw = fs.readFileSync(file, 'utf8').replace(/\r/g, '');
+  const lines = raw.split('\n');
+  const end = lines.indexOf('---', 1);
+  if (lines[0] !== '---' || end < 0) fail(`${id}: no header`);
+  const body = lines.slice(end + 1);
+  // The line numbers of the `## ` headings of the body, outside code blocks.
+  const headings = [];
+  let inCode = false;
+  body.forEach((l, n) => {
+    if (/^\s*```/.test(l)) inCode = !inCode;
+    else if (!inCode && /^## /.test(l)) headings.push(n);
+  });
+  // The label goes before the first line, except when that line opens a code
+  // block: the fence must start its own line, so the label is a line of its own.
+  const paragraph = /^\s*```/.test(decision)
+    ? [`User decision ${TODAY}:`, '', ...decision.split('\n')]
+    : `User decision ${TODAY}: ${decision}`.split('\n');
+  const start = headings.find((n) => /^## Decision\s*$/.test(body[n]));
+  let out;
+  if (start === undefined) {
+    while (body.length && body.at(-1).trim() === '') body.pop();
+    out = [...body, '', '## Decision', '', ...paragraph, ''];
+  } else {
+    let stop = headings.find((n) => n > start) ?? body.length;
+    while (stop > start + 1 && body[stop - 1].trim() === '') stop--;
+    const after = body.slice(stop);
+    while (after.length && after[0].trim() === '') after.shift();
+    out = [
+      ...body.slice(0, stop),
+      '',
+      ...paragraph,
+      ...(after.length ? ['', ...after] : ['']),
+    ];
+  }
+  fs.writeFileSync(file, [...lines.slice(0, end + 1), ...out].join('\n'));
+  const messages = [`${id}: decision recorded`];
+  const f = currentFields(id);
+  const flags = f.flags ?? [];
+  const pairs = [['reviewed', TODAY]];
+  const proposedP0 = f.priority === 'P0' && !f.confirmed;
+  if (proposedP0 && flags.includes('needs-review'))
+    messages.push(
+      `${id}: needs-review stays on a P0 that is not confirmed: confirm the P0 or change the priority`
+    );
+  else if (flags.includes('needs-review'))
+    pairs.push([
+      'flags',
+      `[${flags.filter((x) => x !== 'needs-review').join(', ')}]`,
+    ]);
+  return [...messages, ...writeFields(id, pairs)];
 }
 
 function startIssue(id, owner) {
@@ -923,7 +1097,7 @@ function startIssue(id, owner) {
     fail(
       `a confirmed P0 is open (${p0.map((i) => i.fields.id).join(', ')}): no other work starts`
     );
-  writeFields(id, [
+  return writeFields(id, [
     ['state', 'in-progress'],
     ['owner', owner],
     ['started', TODAY],
@@ -973,7 +1147,11 @@ One sentence of what the user sees, with no engine terms.
 `;
 }
 
-function closeIssue(issue, reason) {
+/**
+ * Removes one issue file and appends its line to `CLOSED.md`. `issue` is an
+ * item of `loadAll()`. Returns the line that the command prints.
+ */
+export function closeIssue(issue, reason) {
   if (!reason) fail(`${issue.fields.id}: a reason is required`);
   const f = issue.fields;
   const code = witnessCode(issue.body);
@@ -983,68 +1161,135 @@ function closeIssue(issue, reason) {
   const line = `- ${f.id} (${TODAY}, was ${f.priority}; ${facts}${f['source-ref'] ? `; ${f['source-ref']}` : ''}): ${issue.title}${code ? ` Witness: \`${code}\`.` : ''} Closed: ${reason}\n`;
   fs.appendFileSync(path.join(opts.dir, 'CLOSED.md'), line);
   fs.unlinkSync(issue.file);
-  console.log(`closed ${f.id}: ${reason}`);
+  return `closed ${f.id}: ${reason}`;
+}
+
+/**
+ * Closes every file with `state: close`, with its `close-reason`. Refuses, and
+ * closes nothing, when one of them has no reason. Calls `report` with each
+ * line as soon as its file is closed (so that the lines printed before a
+ * failed write name the files already closed), and returns the lines.
+ */
+export function closeAll(issues, report = () => {}) {
+  const closing = issues.filter((x) => x.fields.state === 'close');
+  const noReason = closing.filter((x) => !x.fields['close-reason']);
+  if (noReason.length)
+    fail(
+      `no close-reason on ${noReason.map((x) => x.fields.id).join(', ')}; nothing was closed`
+    );
+  return closing.map((i) => {
+    const line = closeIssue(i, i.fields['close-reason']);
+    report(line);
+    return line;
+  });
 }
 
 // ---------------------------------------------------------------------------
+// Command line
 
-switch (command) {
-  case 'lint':
-    lint(loadAll());
-    break;
-  case 'board':
-    board(loadAll());
-    break;
-  case 'backlog':
-    backlog(loadAll());
-    break;
-  case 'show': {
-    if (args.length !== 1) usage('show <id>');
-    process.stdout.write(fs.readFileSync(fileOf(args[0]), 'utf8'));
-    break;
+const print = (lines) => {
+  for (const l of [lines].flat()) console.log(l);
+};
+
+function main(argv) {
+  const positional = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--dir' || a === '--today') {
+      const v = argv[++i];
+      if (v === undefined || v.startsWith('--')) usage(`${a} needs a value`);
+      if (a === '--dir') opts.dir = path.resolve(v);
+      else TODAY = v;
+    } else if (a === '--json') opts.json = true;
+    else positional.push(a);
   }
-  case 'in-progress':
-    inProgress(loadAll());
-    break;
-  case 'release':
-    release(loadAll(), args[0]);
-    break;
-  case 'set': {
-    if (args.length < 2) usage('set <id> <field> <value>');
-    setField(args[0], args[1], args.slice(2).join(' '));
-    break;
-  }
-  case 'flag': {
-    if (args.length !== 2) usage('flag <id> +name|-name');
-    flag(args[0], args[1]);
-    break;
-  }
-  case 'start': {
-    if (args.length !== 2) usage('start <id> <owner>');
-    startIssue(args[0], args[1]);
-    break;
-  }
-  case 'new':
-    newIssue();
-    break;
-  case 'close': {
-    const { issues } = loadAll();
-    if (args.length === 0) usage('close <id> <reason…> | close --all');
-    if (args[0] === '--all') {
-      const closing = issues.filter((x) => x.fields.state === 'close');
-      const noReason = closing.filter((x) => !x.fields['close-reason']);
-      if (noReason.length)
-        fail(
-          `no close-reason on ${noReason.map((x) => x.fields.id).join(', ')}; nothing was closed`
-        );
-      for (const i of closing) closeIssue(i, i.fields['close-reason']);
-    } else {
-      const i = issues.find((x) => x.fields.id === args[0]);
-      if (!i) fail(`no issue ${args[0]}`);
-      closeIssue(i, args.slice(1).join(' '));
+  if (!DATE_RE.test(TODAY)) usage(`--today must be yyyy-mm-dd, not ${TODAY}`);
+  const [command, ...args] = positional;
+  run(command, args);
+}
+
+function run(command, args) {
+  switch (command) {
+    case 'lint':
+      lint(loadAll());
+      break;
+    case 'board':
+      board(loadAll());
+      break;
+    case 'backlog':
+      backlog(loadAll());
+      break;
+    case 'show': {
+      if (args.length !== 1) usage('show <id>');
+      process.stdout.write(fs.readFileSync(fileOf(args[0]), 'utf8'));
+      break;
     }
-    break;
+    case 'in-progress':
+      inProgress(loadAll());
+      break;
+    case 'release':
+      release(loadAll(), args[0]);
+      break;
+    case 'set': {
+      if (args.length < 2) usage('set <id> <field> <value>');
+      print(setField(args[0], args[1], args.slice(2).join(' ')));
+      break;
+    }
+    case 'flag': {
+      if (args.length !== 2) usage('flag <id> +name|-name');
+      print(flag(args[0], args[1]));
+      break;
+    }
+    case 'start': {
+      if (args.length !== 2) usage('start <id> <owner>');
+      print(startIssue(args[0], args[1]));
+      break;
+    }
+    case 'new':
+      newIssue();
+      break;
+    case 'close': {
+      const { issues } = loadAll();
+      if (args.length === 0) usage('close <id> <reason…> | close --all');
+      if (args[0] === '--all') closeAll(issues, print);
+      else {
+        const i = issues.find((x) => x.fields.id === args[0]);
+        if (!i) fail(`no issue ${args[0]}`);
+        print(closeIssue(i, args.slice(1).join(' ')));
+      }
+      break;
+    }
+    default:
+      usage(command ? `unknown command ${command}` : undefined);
   }
-  default:
-    usage(command ? `unknown command ${command}` : undefined);
+}
+
+/** Whether this file is the script that Node runs, not a module that another script imports. */
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    return (
+      fs.realpathSync(process.argv[1]) ===
+      fs.realpathSync(fileURLToPath(import.meta.url))
+    );
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
+  try {
+    main(process.argv.slice(2));
+  } catch (e) {
+    if (e instanceof UsageError) {
+      if (e.message) console.error(`issues: ${e.message}`);
+      console.log(USAGE);
+      process.exit(e.message ? 1 : 0);
+    }
+    if (e instanceof IssueError) {
+      console.error(`issues: ${e.message}`);
+      process.exit(1);
+    }
+    throw e;
+  }
 }

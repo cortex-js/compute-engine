@@ -286,7 +286,8 @@ release, pool, proposed close, needs-decision) and the workaround when one
 exists. The answer unblocks Tycho in most cases; the fix follows the priority.
 The board list shows a Tycho issue that has no answer after one day.
 
-**The Bug Review Board** (the user) reviews on a schedule, with
+**The Bug Review Board** (the user) reviews on a schedule, in the web app
+(`node scripts/issues-ui.mjs --open`, see "The web app") or with
 `node scripts/issues.mjs board`. The list, in order:
 
 1. P0, proposed or confirmed.
@@ -356,8 +357,40 @@ has no dependency.
 | `close --all`                | the same for every file with `state: close`; the reason is the `close-reason` field                                            |
 
 The lists leave out a file with lint errors and say so (`leftOut` in the JSON
-output); `release` counts such a file as not ready. A web view can read the
-same directory later; the script is enough to start.
+output); `release` counts such a file as not ready.
+
+## The web app
+
+The board reviews in a browser. `node scripts/issues-ui.mjs --open` starts a
+local server on `http://127.0.0.1:4719/` and opens the page; `--port <n>`
+chooses another port, and `--dir` and `--today` work as for the script. The
+server reads `issues/` of the main worktree on every request, so an edit by an
+agent shows at the next refresh.
+
+The page has three tabs: **Board** (the sections of `board`, in the same
+order, and the files that have lint errors), **Backlog** (the lists of
+`backlog`, with a text filter) and **All** (every file, then `CLOSED.md`). Each
+item is a card with the first body line, the `ask` line and controls that
+write at once:
+
+| Control           | Writes                                                                                                                  |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Priority          | `priority` and `reviewed: today`; a P0 that is not confirmed also gets `needs-review`                                    |
+| State             | `state`; `close` asks for `close-reason`, `fixed` asks for `fixed-in`; a state away from `fixed` clears `fixed-in`       |
+| Flags             | adds or removes the flag; removing `needs-review` also writes `reviewed: today`                                         |
+| Confirm P0        | `confirmed: today`, which removes `needs-review` (shown on a proposed P0)                                                |
+| Mark reviewed     | `reviewed: today` (shown when the item has no `reviewed` date or has `needs-review`)                                    |
+| Release, Ask      | the field, when the text field loses the focus or on Enter                                                               |
+| Record decision   | appends `User decision <today>: <text>` to the `## Decision` section (or adds the section), writes `reviewed: today` and removes `needs-review` |
+| Close all (Board) | `close --all`, after a confirmation that lists the ids                                                                   |
+
+Each control runs the checks of `set` and `flag`, so the page refuses what the
+script refuses; `in-progress` is not in the menu (`start` is an agent's
+action). After each write the page shows the lint errors of the file. A card
+keeps its place after an edit; Refresh sorts the lists again. The page shows
+how many files of `issues/` changed since HEAD; the user stages and commits,
+and the server runs no git command that changes anything. It listens on
+127.0.0.1 only and has no authentication.
 
 ## Migration
 
