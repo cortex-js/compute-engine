@@ -225,6 +225,7 @@ import {
   degenerateBigOpTerm,
   symbolicSumClosedForm,
   symbolicProductClosedForm,
+  finiteTelescopingProduct,
   bigOpClosedForm,
   infiniteSumClosedForm,
   divergentInfiniteSum,
@@ -14270,6 +14271,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           }
           return undefined;
         }
+        if (mode === 'finite' && bounds.length === 1) {
+          // A finite product of rational functions of a free variable that
+          // telescopes: the closed form instead of a fold of all its terms,
+          // whose quotient is not reduced (`finiteTelescopingProduct`).
+          const closed = finiteTelescopingProduct(ops[0], bounds[0], ce);
+          if (closed !== undefined) return numeric ? closed.N() : closed;
+        }
         if (mode === 'numeric' && !numeric) {
           // A product whose partial products tend to 0 or to an infinity
           // has that limit as its value (`divergentInfiniteProduct`).
@@ -14443,6 +14451,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               return symbolicProductClosedForm(ops[0], bounds[0], ce);
             }
             return undefined;
+          }
+          // As in the synchronous handler. The closed form reads the body
+          // synchronously, so a body that holds an asynchronous-only
+          // application is left to the fold, which awaits each term.
+          if (mode === 'finite' && bounds.length === 1 && !asyncTerms) {
+            const closed = finiteTelescopingProduct(ops[0], bounds[0], ce);
+            if (closed !== undefined) return numeric ? closed.N() : closed;
           }
           if (mode === 'numeric' && asyncTerms) return undefined;
           if (mode === 'numeric' && !numeric) {

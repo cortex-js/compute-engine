@@ -1302,6 +1302,91 @@ export function symbolicProductClosedForm(
 }
 
 /**
+ * The telescoping closed form of `Product(body, [index, lower, upper])`,
+ * evaluated, when the bounds have exact integer values with `lower < upper`
+ * and the body has a free variable other than the index:
+ * `Π_{n=1}^{1000} (x + n + 1)/(x + n) = (x + 1001)/(x + 1)`.
+ *
+ * Such a product has a finite domain, so `evaluate()` multiplies its terms
+ * one by one. The fold does not cancel a factor of one term against a factor
+ * of the next, so the product above became a quotient of two polynomials of
+ * degree 1000 and took minutes. The closed form gives the same rational
+ * function, reduced. It comes from `symbolicProductClosedForm()`, which
+ * compares the body with a copy shifted by `index → index + 1`, and which
+ * returns undefined when the body does not telescope.
+ *
+ * Returns undefined, and the terms are multiplied, when:
+ *   - the body has no free variable other than the index: the terms are
+ *     numbers, and their exact product is cheap;
+ *   - the range has one term or none: the empty product is 1, which the
+ *     closed form does not give;
+ *   - the body is not pure (a random draw), or calls a function that has a
+ *     body: the terms are not the values of one function of the index, or
+ *     the function can read an assigned value, so they need not cancel;
+ *   - the body is not a rational function of the index, or the denominator
+ *     of a term can be zero for every value of the free variables (see
+ *     the test below).
+ */
+export function finiteTelescopingProduct(
+  body: Expression | undefined,
+  limits: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!body || !isFunction(limits, 'Limits') || limits.nops !== 3)
+    return undefined;
+  const index = isSymbol(limits.op1) ? limits.op1.symbol : undefined;
+  if (!index) return undefined;
+  // A bound that is not a number literal (a symbol with a value, `2 + 3`)
+  // is read through its exact value, as the fold reads it.
+  const integer = (bound: Expression): number | undefined => {
+    const b = isNumber(bound) || !bound.isPure ? bound : bound.evaluate();
+    return isNumber(b) &&
+      b.isExact &&
+      b.isInteger &&
+      Number.isSafeInteger(b.re)
+      ? b.re
+      : undefined;
+  };
+  const lower = integer(limits.op2);
+  const upper = integer(limits.op3);
+  if (lower === undefined || upper === undefined || lower >= upper)
+    return undefined;
+  const free = body.unknowns.filter((name) => name !== index);
+  if (free.length === 0) return undefined;
+  if (!isTransitivelyPure(body) || callsFunctionWithBody(body))
+    return undefined;
+  // A term whose denominator is zero for every value of the free variables
+  // has no value, and neither has the product, but the closed form can have
+  // one: `Π_{n=-1}^{2} x(n+1)/(x·n)` is undefined at `n = 0`, and
+  // `h(3)/h(-1)` with `h(n) = x·n` is `-3`. The denominator is read with a
+  // sample number in place of each free variable. When it has no integer
+  // root at or above the lower bound for this sample, no denominator of a
+  // term is zero for every value of the free variables. Otherwise (a root,
+  // or a root that is not known), or when the body is not a rational
+  // function of the index with such coefficients, the terms are multiplied.
+  const parts = rationalPartsAsWritten(body);
+  if (!parts) return undefined;
+  const sample = parts[1].subs(
+    Object.fromEntries(
+      free.map((name, i) => [name, ce.number(0.5772156649 + i / 7)])
+    )
+  );
+  const coefficients = machineCoefficients(sample, index);
+  if (!coefficients || hasIntegerRootFrom(coefficients, lower) !== false)
+    return undefined;
+  // The closed form gets the bounds as integer literals, since it puts them
+  // into the body. It is built by substitution and is not evaluated, so it
+  // is evaluated here: the fold evaluates each term, which reads the value of
+  // an assigned symbol of the body (`a` in `(x + a + n + 1)/(x + a + n)`).
+  const literalLimits = ce._fn('Limits', [
+    limits.op1,
+    ce.number(lower),
+    ce.number(upper),
+  ]);
+  return symbolicProductClosedForm(body, literalLimits, ce)?.evaluate();
+}
+
+/**
  * Reformat an evaluated closed form so a rational multiple of a symbolic factor
  * reads as a fraction: `Multiply(Rational(p, q), R)` → `Divide(p·R, q)` (and
  * `Divide(R, q)` when `p = 1`). Mirrors the readability intent of the

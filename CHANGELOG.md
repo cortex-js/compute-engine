@@ -520,6 +520,13 @@
 
 ### Performance
 
+- **A finite product that telescopes and has a free variable evaluates to its
+  closed form.** `["Product", ["Divide", ["Add", "x", "n", 1], ["Add", "x",
+  "n"]], ["Limits", "n", 1, 1000]]` took about four minutes and gave a
+  quotient of two polynomials of degree 1000. It now gives `(x + 1001)/(x +
+  1)` at once, and its integral over `[0, 1]`, which timed out, is `1 +
+  1000 ln(2)`. Small products are reduced too: the product from 1 to 2 was
+  `(x^2 + 5x + 6)/(x^2 + 3x + 2)` and is now `(x + 3)/(x + 1)`.
 - **A call of a user function does fewer type computations.** Each call
   declares the parameters of the function, so the types of the expressions in
   its body are computed again at each call. Four tests that read such a type
