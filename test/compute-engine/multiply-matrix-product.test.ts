@@ -385,19 +385,58 @@ describe('compiled code', () => {
     ).toThrow(/type 'error'/);
   });
 
-  it('a type that may hold points keeps the element-wise code', () => {
-    for (const type of ['list', 'list<unknown>']) {
+  it('a type that may hold points and matrices declines', () => {
+    // A list of two points and a 2×2 matrix are the same array at run time.
+    // The interpreter gives the matrix product for `[[1, 2], [3, -4]]`
+    // squared, `[[7, -6], [-9, 22]]`; the element-wise code gave
+    // `[[1, 4], [9, 16]]`.
+    for (const type of ['list', 'list<unknown>', 'list<any>']) {
+      for (const [q, other] of [
+        ['q', type],
+        ['q', 'list<number>'],
+        [['List', 1, 2], undefined],
+      ] as const) {
+        const ce = new ComputeEngine();
+        ce.declare('p', type);
+        if (other !== undefined) ce.declare('q', other);
+        let code = 'compiled';
+        try {
+          compile(ce.box(['Multiply', 'p', q] as MathJsonExpression), {
+            to: 'javascript',
+            fallback: false,
+          });
+        } catch (err) {
+          code = (err as { diagnostic?: { code: string } }).diagnostic!.code;
+        }
+        expect(code).toBe('unsettled-shape');
+      }
+      // A number scales each entry of a matrix and each coordinate of a
+      // point: the product keeps its code.
       const ce = new ComputeEngine();
       ce.declare('p', type);
-      ce.declare('q', type);
-      const r = compile(ce.box(['Multiply', 'p', 'q']), {
+      const r = compile(ce.box(['Multiply', 'p', 3]), {
         to: 'javascript',
         fallback: false,
       });
-      expect(r.code).toBe(
-        '_SYS.bcast((_tv1, _tv2) => (_tv1 * _tv2), _.p, _.q)'
-      );
+      expect(r.code).toBe('_SYS.bcast((_tv1, _tv2) => (_tv1 * _tv2), 3, _.p)');
     }
+    // With the fallback on, the interpreter gives the matrix product.
+    const ce = new ComputeEngine();
+    ce.declare('p', 'list');
+    ce.declare('q', 'list');
+    const P = [
+      [1, 2],
+      [3, -4],
+    ];
+    const r = compile(ce.box(['Multiply', 'p', 'q']), { to: 'javascript' });
+    expect(r.success).toBe(false);
+    expect(r.run!({ p: P, q: P } as never)).toEqual([
+      [7, -6],
+      [-9, 22],
+    ]);
+  });
+
+  it('a list of points keeps the element-wise code', () => {
     // A list of points times a list of numbers scales each point.
     const ce = new ComputeEngine();
     ce.declare('p', 'list<tuple<number, number>>');

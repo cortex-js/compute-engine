@@ -144,7 +144,15 @@ const ELEMENTWISE: [string, MathJsonExpression][] = [
 describe('complex mode: element-wise heads over a list input with wide cells', () => {
   for (const type of ['list<number>', 'list<unknown>', 'tensor<number>']) {
     describe(type, () => {
-      for (const [name, expr] of ELEMENTWISE) {
+      // A `list<unknown>` may hold a matrix and also a list of points, which
+      // are the same array at run time: its integer power and its product
+      // by a list decline (see "a base that may hold points and matrices
+      // declines" below).
+      for (const [name, expr] of ELEMENTWISE.filter(
+        ([n]) =>
+          type !== 'list<unknown>' ||
+          (n !== 'Power' && n !== 'Multiply (list by list)')
+      )) {
         it(`${name}: a complex cell gives the interpreter's value`, () => {
           check(type, expr, { p: LIST });
         });
@@ -1041,50 +1049,101 @@ describe('Power of a base whose rank is not known', () => {
     checkPower('broadcastable<number>', ['Power', 'p', 2], { p: 3 }, undefined);
   });
 
-  it('a base that may hold points keeps the element-wise power', () => {
-    // Compiled code holds a point as an array, so `[(1, 2), (3, 4)]` and
-    // `[[1, 2], [3, 4]]` are the same value, and hosts pass lists of points:
-    // such a base keeps the power of each coordinate, and its code.
-    for (const type of [
-      'list',
-      'list<unknown>',
-      'list<any>',
-      'list<tuple<number, number>>',
-    ]) {
+  it('a base that may hold points but not matrices keeps the element-wise power', () => {
+    // A `list<tuple<…>>` cannot hold a matrix: its power is the power of
+    // each coordinate, with no shape test.
+    for (const mode of ['strict', undefined, 'complex'] as const) {
+      const ce = new ComputeEngine();
+      ce.declare('p', 'list<tuple<number, number>>');
+      const r = compile(ce.box(['Power', 'p', 2]), {
+        to: 'javascript',
+        fallback: false,
+        ...(mode === undefined ? {} : { mode }),
+      });
+      expect(r.code).not.toContain('matrixPowerShape');
+      expect(
+        r.run!({
+          p: [
+            [1, 2],
+            [3, 4],
+            [5, 6],
+          ],
+        } as never)
+      ).toEqual([
+        [1, 4],
+        [9, 16],
+        [25, 36],
+      ]);
+    }
+  });
+
+  it('a base that may hold points and matrices declines', () => {
+    // Compiled code holds a point as an array, so the list of points
+    // `[(1, 2), (3, -4)]` and the matrix `[[1, 2], [3, -4]]` are the same
+    // value at run time. The interpreter gives the matrix power of the
+    // matrix, `[[7, -6], [-9, 22]]`, and the power of each coordinate of
+    // the points. The element-wise code gave `[[1, 4], [9, 16]]` for the
+    // matrix, so an integer power of such a base declines.
+    const declines = (type: string, expr: MathJsonExpression): string => {
+      const ce = new ComputeEngine();
+      ce.declare('p', type);
+      ce.declare('n', 'integer');
+      try {
+        compile(ce.box(expr), { to: 'javascript', fallback: false });
+      } catch (err) {
+        return (err as { diagnostic?: { code: string } }).diagnostic!.code;
+      }
+      return 'compiled';
+    };
+    for (const type of ['list', 'list<unknown>', 'list<any>']) {
       for (const mode of ['strict', undefined, 'complex'] as const) {
         const ce = new ComputeEngine();
         ce.declare('p', type);
-        const r = compile(ce.box(['Power', 'p', 2]), {
-          to: 'javascript',
-          fallback: false,
-          ...(mode === undefined ? {} : { mode }),
-        });
-        expect(r.code).not.toContain('matrixPowerShape');
-        expect(
-          r.run!({
-            p: [
-              [1, 2],
-              [3, 4],
-              [5, 6],
-            ],
-          } as never)
-        ).toEqual([
-          [1, 4],
-          [9, 16],
-          [25, 36],
-        ]);
+        expect(() =>
+          compile(ce.box(['Power', 'p', 2]), {
+            to: 'javascript',
+            fallback: false,
+            ...(mode === undefined ? {} : { mode }),
+          })
+        ).toThrow(/matrix power of a matrix/);
       }
-      // A point plus a number is an error, so `p + 1` is not a computed
-      // base for a list of points.
-      if (type.includes('tuple')) continue;
-      const ce = new ComputeEngine();
-      ce.declare('p', type);
-      const computed = compile(ce.box(['Power', ['Add', 'p', 1], 2]), {
-        to: 'javascript',
-        fallback: false,
-      });
-      expect(computed.code).not.toContain('matrixPowerShape');
+      expect(declines(type, ['Power', 'p', 'n'])).toBe('unsettled-shape');
+      expect(declines(type, ['Power', 'p', -1])).toBe('unsettled-shape');
+      expect(declines(type, ['Power', ['Add', 'p', 1], 2])).toBe(
+        'unsettled-shape'
+      );
+      // A power that is not an integer is the power of each entry for a
+      // matrix too, so it keeps its code.
+      expect(declines(type, ['Power', 'p', 0.5])).toBe('compiled');
+      // An element of such a list has a top type, and may be a matrix too:
+      // the interpreter gives the matrix power of `p[1]` for
+      // `p = [[[1, 2], [3, -4]]]`.
+      expect(declines(type, ['Power', ['At', 'p', 1], 2])).toBe(
+        'unsettled-shape'
+      );
+      expect(declines(type, ['Power', ['First', 'p'], 2])).toBe(
+        'unsettled-shape'
+      );
     }
+    expect(
+      declines('list<list<number> | tuple<number, number>>', ['Power', 'p', 2])
+    ).toBe('unsettled-shape');
+    // With the fallback on, the interpreter gives the matrix power.
+    const ce = new ComputeEngine();
+    ce.declare('p', 'list');
+    const r = compile(ce.box(['Power', 'p', 2]), { to: 'javascript' });
+    expect(r.success).toBe(false);
+    expect(
+      r.run!({
+        p: [
+          [1, 2],
+          [3, -4],
+        ],
+      } as never)
+    ).toEqual([
+      [7, -6],
+      [-9, 22],
+    ]);
   });
 
   it('a base whose rank is known keeps its code', () => {

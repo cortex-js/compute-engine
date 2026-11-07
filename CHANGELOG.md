@@ -40,6 +40,22 @@
 
 ### Behavior Changes
 
+- **A compiled integer power or product of a list declared with a type that
+  admits both a matrix and a list of points (the bare `list`,
+  `list<unknown>`, `list<any>`, `indexed_collection`) now fails to compile
+  on the JavaScript target, where it gave the power of each entry.** With `p`
+  declared `list` and the value `[[1, 2], [3, -4]]`, compiled `p^2` gave
+  `[[1, 4], [9, 16]]`, where `evaluate()` gives the matrix power
+  `[[7, -6], [-9, 22]]`. Compiled code holds a point as an array, so the same
+  value can be a matrix or two points, whose square is the square of each
+  coordinate. The compilation now fails with the diagnostic
+  `unsettled-shape`, also for a list of points, and with the fallback on the
+  result is the value of `evaluate()`. The same holds for `p·q` with `q` a
+  list, and for an integer power of a value of type `any`, which can also be
+  a matrix: an element `p[1]^2` of such a list (also in a sum such as
+  `\sum_k p_k^2`), and `g(t)^2` for `g` declared `(real) -> any`. Declare `p` as `list<list<real>>` (a matrix) or
+  `list<tuple<real, real>>` (points) to compile it. A non-integer power
+  (`p^{0.5}`) and a product by a number (`3p`) still compile.
 - **A sum or a product with no index and a free variable now stays
   unevaluated.** `\sum x^k` evaluated to the single term `x^k`, which looks
   like a correct value; it now stays `["Sum", ["Power", "x", "k"]]`, because

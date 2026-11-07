@@ -1833,10 +1833,19 @@ non-square `matrix<…>` throw the same error. A caller's own `Power` lowering
 (`functions`, `operators`) is used as it is, with no dispatch. A list exponent is paired with
 the base level by level, as in the interpreter; when that pairing meets a
 matrix with an integer entry (`p^[1, 2]` for `p` of rank 3), the code throws,
-since it does not compute that matrix power. A base whose type may hold a
-point (`list<unknown>`, a bare `list`, `list<tuple<…>>`) keeps the
-element-wise power: a point is an array at run time, so a list of points and
-a matrix have the same value there, and hosts pass lists of points.
+since it does not compute that matrix power. A point is an array at run time,
+so a list of points and a matrix have the same value there. A base whose type
+can hold a point but not a matrix (`list<tuple<…>>`) keeps the element-wise
+power. A base whose type can hold both (a bare `list`, `list<unknown>`,
+`list<any>`, `indexed_collection`, and a value of type `any`: an element
+`p[1]` of such a list, also in `\sum_k p_k^2`, or a call of a function
+declared `(real) -> any`) declines with `unsettled-shape` (rule R3) for an exponent that
+can be an exact integer: with `p: list` holding `[[1, 2], [3, -4]]`, the
+interpreter gives the matrix power `[[7, -6], [-9, 22]]` for `p^2`, and the
+element-wise code gave `[[1, 4], [9, 16]]`. A product of such an operand with
+another array (`p·q`, `p·[1, 2]`) declines in the same way; its product with a
+number keeps its code. Declare the element type (`list<list<real>>`, or
+`list<tuple<real, real>>` for points) to compile it.
 
 A declared real result is real on every mode. A function declared with a real
 result type (`p: (real) -> real`, also `-> finite_real` and `-> nan | real`)

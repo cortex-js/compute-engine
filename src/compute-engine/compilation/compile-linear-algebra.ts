@@ -31,6 +31,8 @@ import { isTensorValue } from '../boxed-expression/tensor-view.js';
 import { isPointListOperand } from '../boxed-expression/matrix-operand.js';
 import { MIN_UNROLLED_WIDTH } from './fixed-width-unroll.js';
 import type { CompileTarget } from './types.js';
+import { unsettledShapeDecline } from './diagnostics.js';
+import { typeToString } from '../../common/type/serialize.js';
 import { EXACT_EXPONENT_HEADS, REPEATABLE_SOURCE } from './compiler-tables.js';
 import {
   compilationType,
@@ -124,13 +126,15 @@ export function exponentExactness(
  * base whose rank is known (a vector, `list<number>`, and a `matrix`, which
  * `isSquareMatrixPower()` decides), and for a scalar base.
  *
- * Nothing changes either for a base whose type may hold a tuple (a point):
- * `list<unknown>`, a bare `list`, `any`, `list<tuple<…>>`. Compiled code
- * holds a point as an array, so a list of two points `[(1, 2), (3, 4)]`,
- * whose power is the power of each coordinate, and the matrix
- * `[[1, 2], [3, 4]]`, whose power is the matrix power, are the same value
- * at run time, and the hosts pass lists of points to compiled code. Such a
- * base keeps the element-wise power.
+ * A base whose type may hold a tuple (a point) and also a matrix
+ * (`list<unknown>`, a bare `list`, `list<any>`, and a base of type `any`
+ * such as an element `p[1]` of a bare list) declines with
+ * `unsettled-shape` for an exponent that may be an exact integer. Compiled
+ * code holds a point as an array, so a list of two points
+ * `[(1, 2), (3, 4)]`, whose power is the power of each coordinate, and the
+ * matrix `[[1, 2], [3, 4]]`, whose power is the matrix power, are the same
+ * value at run time. A `list<tuple<…>>` cannot hold a matrix, and keeps the
+ * element-wise power.
  */
 export function compileRuntimeMatrixPower(
   engine: ComputeEngine,
@@ -150,17 +154,27 @@ export function compileRuntimeMatrixPower(
     !isBoundPossiblyCollectionTyped(base)
   )
     return undefined;
-  const r = resolveTypeAlias(t);
-  if (typeof r === 'string' || !mayHoldNumericArrayOfRank(r, 2))
-    return undefined;
-  // A base that may hold points keeps the element-wise power: compiled
-  // code holds a point as an array, so it cannot tell a list of points
-  // from a matrix by the shape of the value.
-  if (typeMayHoldTuple(t)) return undefined;
+  if (!mayHoldNumericArrayOfRank(resolveTypeAlias(t), 2)) return undefined;
   if (isNumber(exponent) && (!exponent.isExact || exponent.isInteger !== true))
     return undefined;
   const exactness = exponentExactness(exponent);
   if (exactness === 'inexact') return undefined;
+  // A base whose type may hold a point and also a matrix (a bare `list`,
+  // `list<any>`, `list<list<number> | tuple<number, number>>`, and a top
+  // type such as the `any` of an element `p[1]` of a bare list) declines.
+  // Compiled code holds a point as an array, so a list of two points and a
+  // 2×2 matrix are the same value at run time, but the interpreter takes
+  // the power of each coordinate of the points and the matrix power of the
+  // matrix. A `list<tuple<…>>` cannot hold a matrix, and the test above
+  // (`mayHoldNumericArrayOfRank`) already sent it to the element-wise
+  // power.
+  if (typeMayHoldTuple(t))
+    throw unsettledShapeDecline(
+      base,
+      `an integer power of it is the matrix power of a matrix and the ` +
+        `power of each coordinate of a list of points, and its type ` +
+        `\`${typeToString(t)}\` admits both`
+    );
   const params: string[] = [];
   const values: string[] = [];
   const reads: string[] = [];
@@ -327,11 +341,12 @@ export function mayHoldPoint(
  *   and `compileExpr` refuses the product, as for any arithmetic over a
  *   list on that target.
  *
- * Nothing changes for an operand whose type may hold a tuple (a point):
- * a bare `list`, `list<unknown>`, `any`, `list<tuple<…>>`. Compiled code
- * holds a point as an array, so a list of two points and a 2×2 matrix are
- * the same value at run time, and the hosts pass lists of points to
- * compiled code: such a product keeps its element-wise code. Nothing
+ * A product with an array operand whose type may hold a tuple (a point)
+ * and also a matrix (a bare `list`, `list<unknown>`, `list<any>`) declines
+ * with `unsettled-shape`: compiled code holds a point as an array, so a
+ * list of two points and a 2×2 matrix are the same value at run time. An
+ * operand that may hold a point but not a matrix (`list<tuple<…>>`) keeps
+ * the element-wise code. Nothing
  * changes either for an operand whose shape is not known at all (a
  * `broadcastable<number>`, a call typed `unknown`): `tryCompileBroadcast`
  * already emits `_SYS.mul` for it, which dispatches on the rank of the
@@ -372,11 +387,28 @@ export function compileMatrixProduct(
     )
   )
     return undefined;
-  if (arrays.some((a) => mayHoldPoint(engine, a))) return undefined;
   const mayBeMatrix = (a: Expression): boolean =>
     isTensorValue(a)
       ? a.shape.length === 2
       : mayHoldNumericArrayOfRank(a.type.type, 2);
+  // An array operand whose type may hold a point and also a matrix (a bare
+  // `list`, `list<any>`) declines: a list of two points and a 2×2 matrix
+  // are the same value at run time, but the interpreter multiplies the
+  // matrix as a matrix and the points coordinate by coordinate. On the
+  // Python target such an operand is refused later by `compileExpr`, as any
+  // arithmetic over a list of unknown shape is there.
+  const pointOrMatrix = arrays.find(
+    (a) => mayHoldPoint(engine, a) && mayBeMatrix(a)
+  );
+  if (pointOrMatrix !== undefined && target.language === 'javascript')
+    throw unsettledShapeDecline(
+      pointOrMatrix,
+      `a product of it with another array is the matrix product when it is ` +
+        `a matrix and the product of each coordinate when it is a list of ` +
+        `points, and its type \`${typeToString(pointOrMatrix.type.type)}\` ` +
+        `admits both`
+    );
+  if (arrays.some((a) => mayHoldPoint(engine, a))) return undefined;
   if (!arrays.some(mayBeMatrix)) return undefined;
   // Every other operand must be a number: it scales the product.
   if (args.some((a) => !arrays.includes(a) && !a.type.matches('number')))
