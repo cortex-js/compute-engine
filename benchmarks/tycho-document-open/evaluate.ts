@@ -12,8 +12,12 @@
  * a local `Block` variable), so this script replays them on a fresh engine.
  *
  * The inputs are in `2ki2hjsouf.fixture.json.gz` (written by a capture run of
- * the Tycho pipeline in Node with CE 0.170.0; field `evaluate`). The engine
- * settings are the ones Tycho uses: machine precision, degrees.
+ * the Tycho pipeline in Node with CE 0.170.0; field `evaluate`). Since CE
+ * language release 3.4.4, a `Declare` with no value is an error, so each
+ * pair `Declare(x), Assign(x, v)` of a `Block` was rewritten as
+ * `Declare(x, "unknown", v)` on 2026-11-06; without that rewrite inputs 3
+ * to 7 are errors and take no time. The engine settings are the ones Tycho
+ * uses: machine precision, degrees.
  *
  * Protocol: each input is boxed (not timed), then `evaluate()` is timed.
  * Every run boxes the input again. One warm-up run, then RUNS runs; the

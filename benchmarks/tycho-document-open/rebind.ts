@@ -11,8 +11,12 @@
  * classified twice (registration, then series inference), so most trees are
  * rebound once per classification, each time in a different scope object.
  *
- * The fixture `2ki2hjsouf.fixture.json.gz` holds (written by a capture run
- * of the Tycho pipeline in Node with CE 0.170.0):
+ * The fixture `2ki2hjsouf.fixture.json.gz` was written by a capture run of
+ * the Tycho pipeline in Node with CE 0.170.0. Since CE language release
+ * 3.4.4, a `Declare` with no value is an error, so each pair
+ * `Declare(x), Assign(x, v)` of a `Block` in the fixture was rewritten as
+ * `Declare(x, "unknown", v)` on 2026-11-06. Without that rewrite the
+ * function `S_orry` is invalid and 13 trees have the type `error`. It holds:
  * - `docDefs`: the document scope after registration (name, declared type,
  *   value as MathJSON). This script declares them in a scope of a fresh
  *   engine, so that `S_orry(u)`, `R_3(...)` and the other document functions
