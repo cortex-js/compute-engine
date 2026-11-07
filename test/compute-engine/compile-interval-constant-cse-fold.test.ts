@@ -27,8 +27,10 @@ type IntervalRun = {
 
 const S_DEF =
   '(a, c) \\mapsto 2\\arccos(\\max(-1, \\min(1, \\frac{a^2 r^2 - c^2}{2 a r c})))';
+// The product `k \cdot (…)` is explicit: `k(…)` calls the untyped parameter
+// `k`.
 const B_DEF =
-  '(c, k) \\mapsto \\sum_{n=1}^{3} \\frac{n-0.5}{40}\\left(1 - k\\left(1-\\sqrt{1-\\left(\\frac{n-0.5}{40}\\right)^2}\\right)\\right) S\\left(\\frac{n-0.5}{40}, c\\right)';
+  '(c, k) \\mapsto \\sum_{n=1}^{3} \\frac{n-0.5}{40}\\left(1 - k\\cdot\\left(1-\\sqrt{1-\\left(\\frac{n-0.5}{40}\\right)^2}\\right)\\right) S\\left(\\frac{n-0.5}{40}, c\\right)';
 
 function makeEngine(): ComputeEngine {
   const ce = new ComputeEngine();

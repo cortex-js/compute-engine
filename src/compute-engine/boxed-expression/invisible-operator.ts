@@ -1333,21 +1333,59 @@ function isWideValueType(x: Expression): boolean {
  * value arrives. Only an INFERRED unknown — the engine's own placeholder for
  * a free symbol — carries no information.
  *
- * A PARAMETER of the function literal being canonicalized is declared by the
- * literal, whatever its type: `(x, N) \mapsto x(N+1)` is a product, as every
- * untyped parameter is a value (a function-valued parameter is annotated,
- * `(f: function, x) \mapsto f(x)`). The literal registers its parameter names
- * on the engine before its body is canonicalized (`_pushShadowedParameters`,
- * `function-utils.ts`), which is what is consulted here: the parameter's own
- * binding is auto-declared by its first use, so at that use it looks exactly
- * like an undeclared name.
+ * A PARAMETER of the function literal being canonicalized that has no type
+ * annotation, and no type that the caller of the literal supplies, carries
+ * no type information either: `p \mapsto p(a)` applies `p` to `a`, so
+ * `(g \mapsto \int_0^1 g(x)\,dx)(t \mapsto t^2)` is `1/3`, and
+ * `(x, N) \mapsto x(N+1)` applies `x`. The exception for an argument that
+ * refers to the head applies to a parameter as well: `q \mapsto q(2q)` is a
+ * product. A parameter with a type (`(x\colon \mathrm{real}) \mapsto x(2)`),
+ * or one whose earlier uses in the body gave it a type, is settled by that
+ * type. The literal registers its parameter names on the engine before its
+ * body is canonicalized (`_pushShadowedParameters`, `function-utils.ts`).
+ * The parameter's own binding is declared by its first use in the body
+ * (`_shadowedParameterDef`). Until then, `def` can be a binding of the same
+ * name in an enclosing scope, which the parameter shadows, so it is not read.
+ *
+ * A name that a `Block` declares as a local also shadows the enclosing
+ * scopes, but it is not a parameter: the block gives it its value, so it
+ * keeps the product reading. The same holds for a parameter of a literal that
+ * the engine made from a bare body (`_isLiftedBodyParameter`): the variable of
+ * `\int_0^{\pi} t(a+b)\,dt` or of `\lim_{x\to 0}` is a bound variable, as the
+ * index of a `Sum` is, so `t(a+b)` is a product.
  */
 function headHasNoTypeInformation(
   ce: ComputeEngine,
   name: string,
   def: ReturnType<ComputeEngine['lookupDefinition']>
 ): boolean {
-  if (ce._isShadowedParameter(name)) return false;
+  if (ce._isShadowedParameter(name)) {
+    if (
+      !ce._isFunctionLiteralParameter(name) ||
+      ce._isLiftedBodyParameter(name)
+    )
+      return false;
+    if (
+      ce._shadowedParameterType(name) !== undefined ||
+      ce._shadowedParameterInferredType(name) !== undefined
+    )
+      return false;
+    // A binder inside the literal that binds the same name (a `Sum` index, a
+    // comprehension index) shadows the parameter in its own scope, and its
+    // index is a value: `q \mapsto \sum_{q=1}^{3} q(2)` is the sum of `2q`.
+    // The same walk as `lookupApplicable()` (`function-utils.ts`).
+    const boundary = ce._shadowedParameterBoundary(name);
+    for (
+      let s: Scope | null | undefined = ce.context?.lexicalScope;
+      s && s !== boundary;
+      s = s.parent
+    )
+      if (s.binderNames?.has(name) === true) return false;
+    const own = ce._shadowedParameterDef(name);
+    if (own === undefined) return true;
+    if (isOperatorDef(own)) return false;
+    return own.value.type.isUnknown;
+  }
   // The `resolveSymbol` handler of the parse in progress supplements the
   // scope: a host that knows `s` is a value before the scope does (a name a
   // later pass will declare) answers with a type, and that answer settles the

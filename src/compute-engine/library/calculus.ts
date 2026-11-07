@@ -6056,7 +6056,10 @@ function canonicalImplicitLimitFunction(
     if (inner === undefined) break;
     f = inner;
   }
-  const fn = canonicalFunctionLiteral(f);
+  // The variable of the limit is a bound variable, also when the operand is
+  // the literal `Function(body, x)` that the parser makes from
+  // `\lim_{x \to a}`: `x(1+a)` in the body is a product.
+  const fn = canonicalFunctionLiteral(f, { liftedBody: true });
   if (
     f === undefined ||
     isSymbol(f) ||
@@ -6079,10 +6082,11 @@ function canonicalImplicitLimitFunction(
   // (NaN) where the interpreter reads the free symbol `z`.
   if (params.length === 1 && params[0] === v) return fn;
   return (
-    canonicalFunctionLiteralArguments(ce, [
-      f,
-      ce.symbol(v, { canonical: false }),
-    ]) ?? fn
+    canonicalFunctionLiteralArguments(
+      ce,
+      [f, ce.symbol(v, { canonical: false })],
+      { liftedBody: true }
+    ) ?? fn
   );
 }
 
@@ -9871,7 +9875,9 @@ volumes
           // is the bound expansion variable, so it counts even when it also
           // carries a global value (`x := 5`), which drops it from `.unknowns`.
           if (f.canonical.has(x.symbol)) {
-            const fn = canonicalFunctionLiteralArguments(engine, [f, x]);
+            const fn = canonicalFunctionLiteralArguments(engine, [f, x], {
+              liftedBody: true,
+            });
             if (!fn) return null;
             return engine._fn('Limit', [
               fn,

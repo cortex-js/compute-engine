@@ -3487,6 +3487,13 @@ export class ComputeEngine implements IComputeEngine {
      * recorded as a parameter binding when it is cached
      * (`markFunctionLiteralParameter()`). */
     functionLiteral: boolean;
+    /** True when the function literal stands for a body with bound
+     * variables, not for a literal the user wrote: the integrand of
+     * `Integrate`, the body of a `Limit`. Its parameters are bound variables,
+     * as the index of a `Sum` is, and keep the product reading of `x(2)`
+     * (`headHasNoTypeInformation()`, `boxed-expression/invisible-operator.ts`).
+     */
+    liftedBody: boolean;
   }[] = [];
 
   /** @internal */
@@ -3495,7 +3502,8 @@ export class ComputeEngine implements IComputeEngine {
     types?: ReadonlyMap<string, Type>,
     inferredTypes?: ReadonlyMap<string, Type>,
     boundary?: Scope,
-    functionLiteral = false
+    functionLiteral = false,
+    liftedBody = false
   ): void {
     this._shadowedParameterStack.push({
       names: new Set(names),
@@ -3504,6 +3512,7 @@ export class ComputeEngine implements IComputeEngine {
       defs: new Map(),
       boundary: boundary ?? this.context.lexicalScope,
       functionLiteral,
+      liftedBody,
     });
   }
 
@@ -3576,6 +3585,11 @@ export class ComputeEngine implements IComputeEngine {
   /** See `IComputeEngine._isFunctionLiteralParameter`. @internal */
   _isFunctionLiteralParameter(name: string): boolean {
     return this._shadowFrame(name)?.functionLiteral === true;
+  }
+
+  /** See `IComputeEngine._isLiftedBodyParameter`. @internal */
+  _isLiftedBodyParameter(name: string): boolean {
+    return this._shadowFrame(name)?.liftedBody === true;
   }
 
   /** See `IComputeEngine._hasShadowedParameterFrame`. @internal */

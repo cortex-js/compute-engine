@@ -622,6 +622,48 @@ function takesXAmongSeveral(fn: Expression): boolean {
 }
 
 /**
+ * The types that the declared signature of `name` gives to the untyped
+ * parameters of the function literal `literal` assigned to it, by parameter
+ * name, or `undefined` when there are none. The signature must be declared,
+ * not inferred, and not generic. A parameter typed `unknown` in the
+ * signature gets no type. The parameters are matched by position over the
+ * required and then the optional arguments, as `parseFunctionDefinitionBody()`
+ * (`latex-syntax/dictionary/definitions-core.ts`) does.
+ */
+function declaredSignatureParameterTypes(
+  ce: ComputeEngine,
+  name: string,
+  literal: Expression
+): ReadonlyMap<string, Type> | undefined {
+  if (!isFunction(literal, 'Function')) return undefined;
+  // The signature is on a value definition (`ce.declare('b', '(real) ->
+  // real')`) or on an operator definition (`ce.declare('b', { signature:
+  // '(real) -> real' })`).
+  const def = ce.lookupDefinition(name);
+  let sig: Type | undefined;
+  if (isOperatorDef(def)) {
+    if (!def.operator.inferredSignature) sig = def.operator.signature.type;
+  } else if (isValueDef(def) && !def.value.inferredType)
+    sig = def.value.type.type;
+  // A generic signature (`(T) -> T where T`) gives a type variable, not a
+  // type, to its parameters.
+  if (
+    typeof sig !== 'object' ||
+    sig.kind !== 'signature' ||
+    (sig.typeParams?.length ?? 0) > 0
+  )
+    return undefined;
+  const sigArgs = [...(sig.args ?? []), ...(sig.optArgs ?? [])];
+  const result = new Map<string, Type>();
+  literal.ops.slice(1).forEach((param, i) => {
+    const type = sigArgs[i]?.type;
+    if (!isSymbol(param) || type === undefined || type === 'unknown') return;
+    result.set(param.symbol, type);
+  });
+  return result.size > 0 ? result : undefined;
+}
+
+/**
  * Whether the canonical form of `EvaluateAt(expr, point)` waits for the
  * value of `point` to choose the parameters of the function made from the
  * expression `expr` (see `evaluateAtCallee()`). The number of coordinates
@@ -8077,9 +8119,25 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             restoreCtor = loosenMintedConstructor(ce, scope, symbolName);
         }
 
+        // A target declared with a signature gives its parameter types to the
+        // untyped parameters of the literal, as inferred types: after
+        // `ce.declare('b', '(real, real, real) -> real')`, the `t` of
+        // `b(x, y, t) \coloneq x + t(y - x)` is a number, so `t(y - x)` is a
+        // product, not a call (`headHasNoTypeInformation()`,
+        // `boxed-expression/invisible-operator.ts`).
+        const inferredParamTypes =
+          symbolName !== undefined && isFunction(args[1], 'Function')
+            ? declaredSignatureParameterTypes(ce, symbolName, args[1])
+            : undefined;
         let canonRhs: Expression;
         try {
-          canonRhs = args[1].canonical;
+          // A literal that is already canonical is kept as it is
+          // (`canonicalFunctionLiteral()` returns it unchanged).
+          canonRhs =
+            inferredParamTypes !== undefined && !args[1].isCanonical
+              ? (canonicalFunctionLiteral(args[1], { inferredParamTypes }) ??
+                args[1].canonical)
+              : args[1].canonical;
         } finally {
           restoreCtor?.();
         }

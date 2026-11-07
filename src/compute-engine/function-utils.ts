@@ -441,6 +441,15 @@ export function canonicalFunctionLiteral(
      * when the body is canonicalized (see `canonicalFunctionLiteralArguments`).
      * Read only for a raw `["Function", …]` literal. */
     inferredParamTypes?: ReadonlyMap<string, Type>;
+    /** True when a raw `["Function", …]` literal stands for a bare body
+     * with a bound variable, as the LaTeX parser writes the body of
+     * `\lim_{x \to 0}`. Its parameters are then bound variables
+     * (`canonicalFunctionLiteralArguments()`). A body that is not a literal
+     * is read so when the caller names its variables (`params`, the
+     * integrand of `Integrate`). Without `params`, the body is canonicalized
+     * in the scope of the caller before its variables are known, so the
+     * reading of `x(2)` is already made there. */
+    liftedBody?: boolean;
   }
 ): Expression | undefined {
   if (!expr) return undefined;
@@ -511,6 +520,7 @@ export function canonicalFunctionLiteral(
   if (isFunction(expr, 'Function'))
     return canonicalFunctionLiteralOperands(expr.engine, expr.ops, {
       inferredParamTypes: options?.inferredParamTypes,
+      liftedBody: options?.liftedBody,
     });
 
   //
@@ -562,7 +572,9 @@ export function canonicalFunctionLiteral(
     // the engine's). Wildcard parameters win over caller-supplied ones: a
     // body using `_` names its own parameters.
     if (options?.params !== undefined && options.params.length > 0)
-      return canonicalFunctionLiteralArguments(ce, [body, ...options.params]);
+      return canonicalFunctionLiteralArguments(ce, [body, ...options.params], {
+        liftedBody: true,
+      });
 
     // Check if we have some unknowns
     // We'll need the canonical form of the expression, so we'll create a block if necessary
@@ -603,7 +615,9 @@ export function canonicalFunctionLiteral(
     }
   }
 
-  return canonicalFunctionLiteralArguments(ce, [body, ...params]);
+  return canonicalFunctionLiteralArguments(ce, [body, ...params], {
+    liftedBody: true,
+  });
 }
 
 /**
@@ -786,7 +800,11 @@ export function kindTypedFunctionLiteral(
 export function canonicalFunctionLiteralOperands(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
-  options?: { inferredParamTypes?: ReadonlyMap<string, Type> }
+  options?: {
+    inferredParamTypes?: ReadonlyMap<string, Type>;
+    /** See `canonicalFunctionLiteralArguments()`. */
+    liftedBody?: boolean;
+  }
 ): Expression | undefined {
   // A parameter annotated `unknown` is a bare parameter: remove the
   // annotation first, so that the written form recorded below is the one of
@@ -929,6 +947,12 @@ export function canonicalFunctionLiteralArguments(
      * to the fixpoint of its seed and its combiner's result
      * (`canonicalFoldCombiner`, `library/collections.ts`). */
     inferredParamTypes?: ReadonlyMap<string, Type>;
+    /** True when the literal stands for a body with bound variables (the
+     * integrand of `Integrate`, the body of a `Limit`), not for a literal the
+     * user wrote. Its parameters are bound variables: `x(2)` in the body
+     * stays the product `2x`, as it does for the index of a `Sum`
+     * (`_isLiftedBodyParameter`). */
+    liftedBody?: boolean;
   }
 ): Expression | undefined {
   if (ops.length === 0) return undefined;
@@ -1231,7 +1255,8 @@ export function canonicalFunctionLiteralArguments(
       ? inferredHints
       : undefined,
     undefined,
-    true
+    true,
+    options?.liftedBody === true
   );
   // Collect the juxtapositions the body reads as multiplication only because
   // their leading symbol has no function definition yet — see

@@ -29,10 +29,12 @@ ce.assign('N_m', 100);
 ce.declare('r', 'function');
 ce.assign('r', ce.parse(String.raw`n \mapsto \sin(n)`));
 ce.declare('f_mx', 'function');
+// The product `x \cdot (…)` is explicit: `x(…)` calls the untyped parameter
+// `x`.
 ce.assign(
   'f_mx',
   ce.parse(
-    String.raw`(x, N) \mapsto \begin{cases}\sum_{n=1}^{\lfloor N\rfloor}\cos(2\pi(x((10n)/N_{m}+10)+r(n)))/\sqrt{N_{m}}&1\le N\\0&\top\end{cases}`
+    String.raw`(x, N) \mapsto \begin{cases}\sum_{n=1}^{\lfloor N\rfloor}\cos(2\pi(x\cdot((10n)/N_{m}+10)+r(n)))/\sqrt{N_{m}}&1\le N\\0&\top\end{cases}`
   )
 );
 

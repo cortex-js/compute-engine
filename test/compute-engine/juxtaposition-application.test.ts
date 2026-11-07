@@ -11,8 +11,9 @@ import { OPENING_PARENTHESIS } from '../../src/compute-engine/latex-syntax/delim
  *
  * The product reading remains for a head that IS a value: declared with a
  * concrete type, declared `unknown` by the host (a value whose type is not
- * known yet), assigned a value, a parameter of the literal being read, or a
- * head its own argument refers to (`q(2q)`).
+ * known yet), assigned a value, a parameter with a type, or a head its own
+ * argument refers to (`q(2q)`). An untyped parameter of the literal being
+ * read has no type information: `p \mapsto p(a)` calls `p`.
  */
 
 describe('JUXTAPOSITION ON A HEAD WITH NO TYPE INFORMATION', () => {
@@ -199,20 +200,113 @@ describe('JUXTAPOSITION ON A HEAD WITH NO TYPE INFORMATION', () => {
       ]);
     });
 
-    test('when the head is a parameter of the function literal', () => {
-      // An untyped parameter is a value: `x(N+1)` is a product, and the
-      // literal applies to two numbers.
+    test('when the head is a parameter that its own argument refers to', () => {
       const ce = new ComputeEngine();
+      expect(ce.parse('q \\mapsto q(2q)').json).toEqual([
+        'Function',
+        ['Block', ['Multiply', 2, 'q', 'q']],
+        'q',
+      ]);
+    });
+
+    test('when the head is a parameter with a type annotation', () => {
+      const ce = new ComputeEngine();
+      expect(ce.parse('(x\\colon \\mathrm{real}) \\mapsto x(2)').json).toEqual([
+        'Function',
+        ['Block', ['Multiply', 2, 'x']],
+        ['Typed', 'x', "'real'"],
+      ]);
+    });
+
+    test('when the head is a sum index that has the name of a parameter', () => {
+      // The index `q` shadows the parameter `q`, and the index is a value.
+      const ce = new ComputeEngine();
+      expect(
+        ce.parse('(q \\mapsto \\sum_{q=1}^{3} q(2))(5)').evaluate().toString()
+      ).toBe('12');
+    });
+
+    test('when the head is the variable of an integral or a limit', () => {
+      // The engine makes a function literal from the integrand or the body
+      // of the limit, and its parameter is a bound variable.
+      const ce = new ComputeEngine();
+      expect(ce.parse('\\int_0^1 x(2)\\,dx').evaluate().toString()).toBe('1');
+      expect(
+        ce.parse('\\int_0^{\\pi} t(a+b)\\,dt').evaluate().toString()
+      ).toBe('1/2 * a * pi^2 + 1/2 * b * pi^2');
+      expect(
+        ce.parse('\\lim_{x\\to 0} \\frac{x(1+a)}{x}').evaluate().toString()
+      ).toBe('a + 1');
+    });
+
+    test('when the target of a definition declares the parameter a number', () => {
+      const ce = new ComputeEngine();
+      ce.declare('b', '(real, real, real) -> real');
+      ce.parse('b(x, y, t) \\coloneq x + t(y - x)').evaluate();
+      expect(ce.parse('b(1, 3, 0.5)').evaluate().toString()).toBe('2');
+
+      // The same signature declared as an operator definition.
+      const ce2 = new ComputeEngine();
+      ce2.declare('c', { signature: '(real, real) -> real' });
+      ce2.parse('c(x, t) \\coloneq t(x+1)').evaluate();
+      expect(ce2.parse('c(2, 3)').evaluate().toString()).toBe('9');
+    });
+  });
+
+  describe('is an application when the head is an untyped parameter', () => {
+    // An untyped parameter of the function literal being read carries no
+    // type information, as an undeclared head does.
+    test('a function passed as an argument is called', () => {
+      const ce = new ComputeEngine();
+      const expr = ce.parse('(g \\mapsto \\int_0^1 g(x)\\,dx)(t \\mapsto t^2)');
+      expect(expr.evaluate().toString()).toBe('1/3');
+    });
+
+    test('a function definition calls its parameter', () => {
+      const ce = new ComputeEngine();
+      ce.parse('h(p, a) \\coloneq p(a)').evaluate();
+      expect(ce.parse('h(t \\mapsto t^2, 0.5)').evaluate().toString()).toBe(
+        '0.25'
+      );
+    });
+
+    test('a parameter with a library name', () => {
+      const ce = new ComputeEngine();
+      const literal = ce.parse('(N, a) \\mapsto N(a)');
+      expect(literal.json).toEqual(['Function', ['Block', ['N', 'a']], 'N', 'a']);
+      expect(
+        ce
+          .box(['Apply', literal.json, ['Function', ['Multiply', 2, 't'], 't'], 3])
+          .evaluate()
+          .toString()
+      ).toBe('6');
+    });
+
+    test('a parameter with the name of an outer value', () => {
+      const ce = new ComputeEngine();
+      ce.assign('x', 5);
       const literal = ce.parse('(x, N) \\mapsto x(N+1)');
       expect(literal.json).toEqual([
         'Function',
-        ['Block', ['Multiply', 'x', ['Add', 'N', 1]]],
+        ['Block', ['x', ['Add', 'N', 1]]],
         'x',
         'N',
       ]);
-      expect(ce.box(['Apply', literal.json, 2, 3]).evaluate().toString()).toBe(
-        '8'
-      );
+      expect(
+        ce
+          .box(['Apply', literal.json, ['Function', ['Multiply', 2, 't'], 't'], 3])
+          .evaluate()
+          .toString()
+      ).toBe('8');
+    });
+
+    test('a parameter of an enclosing literal', () => {
+      const ce = new ComputeEngine();
+      expect(ce.parse('p \\mapsto (q \\mapsto p(q))').json).toEqual([
+        'Function',
+        ['Block', ['Function', ['Block', ['p', 'q']], 'q']],
+        'p',
+      ]);
     });
   });
 

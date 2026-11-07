@@ -198,13 +198,14 @@ describe('an application typed `any`', () => {
 
   test('a colour mix over an `any`-typed call is summed with a point without an error', () => {
     // The shape of Tycho's `art/ifnnzttcqg`: a mix `b(E(q), col, t)` whose
-    // first argument is a call typed `any`.
+    // first argument is a call typed `any`. The product `t \cdot (y - x)` is
+    // explicit: `t(y - x)` calls the untyped parameter `t`.
     const ce2 = new ComputeEngine();
     ce2.declare('E', '(number) -> any');
     ce2.declare('col', 'tuple<number, number, number>');
     ce2.declare('q', 'number');
     ce2.declare('b', '(unknown, unknown, unknown) -> unknown');
-    ce2.assign('b', ce2.parse('(x, y, t) \\mapsto x + t(y - x)'));
+    ce2.assign('b', ce2.parse('(x, y, t) \\mapsto x + t \\cdot (y - x)'));
     const call = ce2.parse('b(E(q), col, 5)');
     expect(call.isValid).toBe(true);
     expect(call.type.toString()).toBe('any');

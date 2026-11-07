@@ -27,6 +27,20 @@
   an `Assign` in a held `Block`, and a `Declare` or an `Assign` in a branch of
   an `If` of a held `Block`. `replace()` is not changed: it rewrites the
   structure and renames no binder.
+- **A parameter with no type followed by a parenthesized argument is a call of
+  the parameter.** A function can now take another function as an argument:
+  `(g \mapsto \int_0^1 g(x)\,dx)(t \mapsto t^2)` is `1/3`; it was an
+  `incompatible-type` error, because `g(x)` was the product `g \cdot x`. After
+  `h(p, a) \coloneq p(a)`, `h(t \mapsto t^2, 0.5)` is `0.25`; it was the
+  product `0.5 \cdot (t \mapsto t^2)`. This reverses an earlier rule:
+  `(x, N) \mapsto x(N+1)` now calls `x`, and a product needs an explicit
+  multiplication (`x \cdot (N+1)`), a number type on the parameter
+  (`(x\colon \mathrm{real}, N) \mapsto x(N+1)`), or a declared signature for
+  the function that `\coloneq` defines (`ce.declare('b', '(real, real) ->
+  real')`, then `b(x, t) \coloneq t(x+1)`). An argument that contains the
+  parameter stays a product: `q \mapsto q(2q)` is `q \mapsto 2q^2`. The
+  variable of an integral, of a limit and of a sum is not a parameter:
+  `\int_0^1 x(2)\,dx` is still `1`.
 
 ### New Features
 

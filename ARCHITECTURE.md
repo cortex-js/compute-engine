@@ -635,9 +635,12 @@ A known function — an operator or a value with a function type — is applied 
 **call**. For a head not already recognized as a function, `f(x)` parses to
 `InvisibleOperator(f, Delimiter(x))`, and canonicalization decides whether it is
 a call or a product. It is a **call** when the head has no type information: the
-head is undeclared, or the engine declared it itself from a bare use and its
-type is still an inferred `unknown`. So `s(x+1)`, `f(3)^2` and `2f(x)` all
-contain the call of an undeclared head. In this fallback, a value name stays a
+head is undeclared, the engine declared it itself from a bare use and its
+type is still an inferred `unknown`, or it is a parameter of the function
+literal being canonicalized that has no type annotation and no type from the
+caller (user decision 2026-11-05). So `s(x+1)`, `f(3)^2` and `2f(x)` all
+contain the call of an undeclared head, and `(g \mapsto \int_0^1 g(x)\,dx)(t
+\mapsto t^2)` is `1/3`. In this fallback, a value name stays a
 **product** factor when:
 
 - it has a declared non-function type (including `value` and `any`) or holds a
@@ -646,8 +649,18 @@ contain the call of an undeclared head. In this fallback, a value name stays a
   before it assigns it: after `ce.declare('k', 'unknown')`, `k(1-w)` is a
   product);
 - the argument refers to the head (`x(x+1)`, `q(2q)`);
-- it is a parameter of the function literal being canonicalized
-  (`(x, N) \mapsto x(N+1)` is a product);
+- it is a parameter of the function literal being canonicalized with a type
+  that is not a function type: an annotation (`(x\colon \mathrm{real})
+  \mapsto x(2)` is `2x`), a type from the caller, or the declared signature
+  of the function that the literal defines (`b(x, t) \coloneq t(x+1)` after
+  `ce.declare('b', '(real, real) -> real')`). The declared signature is read
+  by the `Assign` operator (`\coloneq`), not by `ce.assign()`, which receives
+  a literal that is already canonical. An untyped parameter is applied:
+  `(x, N) \mapsto x(N+1)` calls `x`;
+- it is the variable of an integral or a limit, which the engine makes the
+  parameter of a function literal built from the integrand
+  (`\int_0^1 x(2)\,dx` is `1`), as the index of a `Sum` is a bound variable;
+- it is a name that a `Block` declares as a local;
 - the `resolveSymbol` handler of the parse answers a non-function type for it.
 
 The serializer writes an explicit multiplication sign between a symbol and a

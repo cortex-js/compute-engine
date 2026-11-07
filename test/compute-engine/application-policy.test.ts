@@ -396,9 +396,11 @@ describe('host policy for ambiguous parenthesized application', () => {
     }
   });
 
-  test('untyped value parameters keep multiplication while callable parameters stay local', () => {
+  test('typed value parameters keep multiplication while callable parameters stay local', () => {
+    // An untyped parameter has no type information: `x \mapsto x(2)` calls
+    // `x`. A parameter typed as a number is a value, and `x(2)` is `2x`.
     const ce = new ComputeEngine();
-    const value = ce.parse(String.raw`x\mapsto x(2)`);
+    const value = ce.parse(String.raw`(x\colon\mathrm{real})\mapsto x(2)`);
     expect(ce.box(['Apply', value.json, 3]).evaluate().json).toBe(6);
     ce.assign('f', ce.parse(String.raw`t\mapsto t+100`));
     const callable = ce.parse(String.raw`(f,x)\mapsto f(x)`);

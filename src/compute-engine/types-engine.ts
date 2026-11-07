@@ -2503,13 +2503,17 @@ export interface IComputeEngine {
    * function literal (false for the locals of a `Block`): the binding of each
    * one is then recorded as a parameter binding when it is cached
    * (`markFunctionLiteralParameter()`, `boxed-expression/function-literal.ts`).
+   * Optional `liftedBody` is true when the function literal stands for a body
+   * with bound variables (the integrand of `Integrate`, the body of a
+   * `Limit`), not for a literal the user wrote (`_isLiftedBodyParameter`).
    * @internal */
   _pushShadowedParameters(
     names: ReadonlyArray<string>,
     types?: ReadonlyMap<string, Type>,
     inferredTypes?: ReadonlyMap<string, Type>,
     boundary?: Scope,
-    functionLiteral?: boolean
+    functionLiteral?: boolean,
+    liftedBody?: boolean
   ): void;
   /** The inferred type a caller supplied for an active bare shadowed
    * parameter, if any. @internal */
@@ -2536,6 +2540,11 @@ export interface IComputeEngine {
    * scope is a function literal whose parameter is `name`, not a `Block`
    * that declares `name` as a local. @internal */
   _isFunctionLiteralParameter(name: string): boolean;
+  /** True when the innermost construct that shadows `name` in the current
+   * scope is a function literal that stands for a body with bound variables
+   * (the integrand of `Integrate`, the body of a `Limit`), not a literal
+   * written with `Function` or `\mapsto`. @internal */
+  _isLiftedBodyParameter(name: string): boolean;
   /** True while any construct has pushed names with
    * `_pushShadowedParameters`, even no name: a function literal or a `Block`
    * is being canonicalized. False at the top level of a canonicalization.
