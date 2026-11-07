@@ -3994,8 +3994,10 @@ export class BoxedFunction
     // log_base(x) for any base — keep the base instead of dropping it (a
     // non-integer base previously fell through to a base-less `Ln`).
     if (base !== undefined) {
-      // ln_10(x) -> log(x)
-      if (base.re === 10) return this.engine._fn('Log', [this]);
+      // ln_10(x) -> log(x). Only for an exact 10: a float base such as
+      // `10.0` stays, because it asks for a numeric value at evaluation.
+      if (isNumber(base) && base.isExact && base.isSame(10))
+        return this.engine._fn('Log', [this]);
       // ln_n(x) -> log_n(x)
       return this.engine._fn('Log', [this, base]);
     }

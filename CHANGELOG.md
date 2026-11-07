@@ -159,6 +159,15 @@
 
 ### Resolved Issues
 
+- **`simplify()` now cancels the like logarithm terms of a sum for every
+  base, when each term is a logarithm alone, negated, or with a number
+  coefficient.** `\log(x^3) - 3\log(x)` stayed unchanged, while
+  `\ln(x^3) - 3\ln(x)` simplified to `0`. It now simplifies to `0`, and so do
+  `\log_2(x^3) - 3\log_2(x)`, `3\ln(x) - \ln(x^3)` and
+  `2\ln(x^3) - 6\ln(x)`. The terms still stay when `x` is declared complex or
+  is negative. In the same way, `simplify()` of `\log_{10.0}(x)` now keeps
+  the float base `10.0`, as the other rules of `Log` do: it gave `\log(x)`.
+
 - **A `Sum`, a `Product`, a quantifier or a set-builder whose condition reads
   a symbol with no value stays unevaluated.** With `x` not assigned,
   `["Sum", "k", ["Element", "k", ["Set", 1, 2, 3], ["Greater", "x", 0]]]`

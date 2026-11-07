@@ -151,6 +151,27 @@ function containsNegatedOddEvenCall(expr: Expression): boolean {
 }
 
 /**
+ * True when `expr` is a logarithm term of a sum or a product: an `Ln` or a
+ * `Log` of any base, alone, negated (`-ln(x^3)`) or with a number-literal
+ * coefficient (`3ln(x^3)`). Such an operand must be simplified before the
+ * like terms are collected: then `ln(x^3)` becomes `3ln(x)`, and
+ * `ln(x^3) - 3ln(x)`, `3ln(x) - ln(x^3)` and `log(x^3) - 3log(x)` become
+ * `0`. The rules of `Log` keep its base (`log_2(x^3)` becomes `3log_2(x)`),
+ * so a `Log` operand is selected for every base, not only for the base `e`.
+ */
+function isLogarithmTerm(expr: Expression): boolean {
+  if (isFunction(expr, 'Negate')) return isLogarithmTerm(expr.op1);
+  if (
+    isFunction(expr, 'Multiply') &&
+    expr.nops === 2 &&
+    isNumber(expr.op1) &&
+    !isFunction(expr.op2, 'Multiply')
+  )
+    return isLogarithmTerm(expr.op2);
+  return expr.operator === 'Ln' || expr.operator === 'Log';
+}
+
+/**
  * The value that a constant function expression folds to, or `undefined`
  * when `expr` is not a foldable constant.
  *
@@ -1104,14 +1125,9 @@ function simplifyOperands(
         containsNegatedOddEvenCall(x)
       )
         simplifiedOps.push(full(x, i));
-      // Simplify Ln/Log operands within Add/Multiply to enable term cancellation
-      // (e.g., ln(x^3) -> 3*ln(x) so that ln(x^3) - 3*ln(x) = 0)
-      // Log with base e is safe to simplify: log_e(x) -> ln(x)
-      else if (
-        x.operator === 'Ln' ||
-        (isFunction(x, 'Log') && x.op2 && isSymbol(x.op2, 'ExponentialE'))
-      )
-        simplifiedOps.push(full(x, i));
+      // A logarithm term is simplified so that like terms cancel: ln(x^3)
+      // becomes 3ln(x), so ln(x^3) - 3ln(x) is 0 (`isLogarithmTerm()`).
+      else if (isLogarithmTerm(x)) simplifiedOps.push(full(x, i));
       // Simplify Abs operands to enable cancellation
       // (e.g., |xy| -> |x||y| so that |xy| - |x||y| = 0)
       // Also handle Negate(Abs(...)) which appears in subtraction expressions

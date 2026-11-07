@@ -674,7 +674,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     }
 
     if (base) {
-      if (base.re === 10) return this.engine._fn('Log', [this]);
+      // Only an exact 10 is left out: a float base such as `10.0` stays,
+      // because it asks for a numeric value at evaluation.
+      if (isNumber(base) && base.isExact && base.isSame(10))
+        return this.engine._fn('Log', [this]);
       return this.engine._fn('Log', [this, base]);
     }
 
