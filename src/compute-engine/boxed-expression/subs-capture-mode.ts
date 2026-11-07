@@ -64,8 +64,10 @@ export const SUBS_CAPTURE = { subsCapture: true };
  * capture a free name of a replacement and cannot be renamed before `expr`
  * runs (`renameCapturingBinder()`, `function-utils.ts`): the target of an
  * `Assign` of a held `Block`, or a local that only a `Declare` in a branch
- * of an `If` declares. An internal caller that must not give a captured
- * result uses this function, and declines on `undefined`.
+ * of an `If` declares; or a variable of an enclosing scope that a `Block`
+ * writes, and that a replacement inserted in the block reads. An internal
+ * caller that must not give a captured result uses this function, and
+ * declines on `undefined`.
  */
 export function subsIfCaptureFree(
   expr: Expression,

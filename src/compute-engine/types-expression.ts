@@ -2062,6 +2062,22 @@ export interface Expression {
    * substitution. `Normal(Series(sin x, x, 0, 3))` with `x` replaced by
    * `0.5` evaluates to `0.479…` under `.N()`.
    *
+   * A `Block` that assigns a variable of an enclosing scope, and can read it
+   * before the first assignment, reads its value from outside the block, so
+   * the variable is free. A replacement of each occurrence would give an
+   * invalid assignment, so the block keeps its occurrences and gets a first
+   * statement that assigns the replacement: with `a` declared outside the
+   * block, `["Block", ["Assign", "a", ["Add", "a", 1]], "a"]` with `a`
+   * replaced by `2` is `["Block", ["Assign", "a", 2], ["Assign", "a", ["Add",
+   * "a", 1]], "a"]`, which evaluates to `3`. When it is evaluated, the block
+   * writes the variable of the enclosing scope, as the block it replaces
+   * does. With several such variables, the first statement assigns them all
+   * at the same time: `["Assign", ["Tuple", "a", "b"], ["Tuple", "b",
+   * "a"]]` for `a` replaced by `b` and `b` replaced by `a`. A replacement of
+   * another name that reads such a variable (`x` replaced by `a` with `a`
+   * replaced by `3`) is inserted as it is, and reads the value that the
+   * first statement assigns.
+   *
    * The substitution avoids variable capture. When a replacement contains a
    * free name that a binder binds, and the substitution replaces an
    * occurrence in the scope of that name, the binder renames the name to a

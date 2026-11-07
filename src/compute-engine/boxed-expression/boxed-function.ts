@@ -383,6 +383,7 @@ import { gcd } from '../numerics/numeric.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
 import {
   _BoxedExpression,
+  blockOuterAssignTargets,
   DISPLAY_MATERIALIZATION,
   hasSymbolOrOperator,
 } from './abstract-boxed-expression.js';
@@ -3193,7 +3194,7 @@ export class BoxedFunction
             form: x.isStructural ? 'structural' : 'raw',
           });
     };
-    const ops =
+    let ops =
       binderView === undefined ||
       !binderView.names.some((n) => Object.hasOwn(sub, n))
         ? this._ops.map((x) => subsAt(x, sub))
@@ -3226,6 +3227,68 @@ export class BoxedFunction
         : options.canonical === false
           ? 'raw'
           : options.canonical;
+
+    // A name that the block assigns and can read from outside the block
+    // before it writes it (`outerAssigned` of `subsBinderView()`) is kept in
+    // the statements, and the block gets a first statement
+    // `Assign(name, replacement)`: `Block(Assign(a, a + 1), a)` with `a`
+    // replaced by `2` is `Block(Assign(a, 2), Assign(a, a + 1), a)`, whose
+    // value is `3`. Each read of the value from outside the block reads the
+    // replacement, also a read in a branch of an `If` or in a function
+    // literal. The statement is raw (or structural), and a canonical rebuild
+    // canonicalizes it in the scope of the block.
+    //
+    // The substitution replaces all names at the same time, so a replacement
+    // reads the values from outside the block. With several such names, one
+    // destructuring statement reads all the replacements before it writes a
+    // name: with `{a: b, b: a}` the first statement is
+    // `Assign(Tuple(a, b), Tuple(b, a))`. Two statements `Assign(a, b)` and
+    // `Assign(b, a)` would give `b` the new value of `a`. A `Sequence`
+    // replacement is spliced into the `Tuple` of the values, as a `Sequence`
+    // is spliced into any list of operands, so the target and the value can
+    // then have different lengths.
+    //
+    // A replacement that the substitution puts in the statements (the
+    // replacement `a` of `x` in `Block(Assign(a, a + x), a)` with
+    // `{x: a, a: 3}`) reads `a` after the first statement wrote `3` to it, so
+    // it reads `3`, not the value of `a` from outside the block. This is the
+    // capture of a replacement by any block that writes a variable of an
+    // enclosing scope: `capturedNames()` finds it, the rename at the start
+    // of this method cannot move the variable outside the block, so the
+    // `'decline'` mode declines there, and the other modes insert the
+    // replacement as it is.
+    if (
+      binderView !== undefined &&
+      binderView.names.some((n) => Object.hasOwn(sub, n))
+    ) {
+      const prepended = binderView
+        .outerAssigned()
+        .filter((n) => Object.hasOwn(sub, n) && sub[n] !== undefined);
+      if (prepended.length > 0) {
+        const statementForm = form === 'structural' ? 'structural' : 'raw';
+        const box = (x: Parameters<ComputeEngine['expr']>[0]) =>
+          this.engine.expr(x, { form: statementForm });
+        const [target, value] =
+          prepended.length === 1
+            ? [box(prepended[0]), box(sub[prepended[0]]!)]
+            : [
+                this.engine.function('Tuple', prepended.map(box), {
+                  form: statementForm,
+                }),
+                this.engine.function(
+                  'Tuple',
+                  prepended.map((n) => box(sub[n]!)),
+                  { form: statementForm }
+                ),
+              ];
+        ops = [
+          this.engine.function('Assign', [target, value], {
+            form: statementForm,
+          }),
+          ...ops,
+        ];
+      }
+    }
 
     // An operand whose only errors are failed cells of a `List` or `Set`
     // literal (`isInvalidNonCollection()` is `false` for it) is a collection
@@ -23480,7 +23543,15 @@ function withProvedAbsentDomains(
  *   (`setBuilderVariables()`, `binding-sites.ts`): `{x² | x ∈ ℤ}` binds `x`;
  * - a `Block` binds the target of each `Assign`, `Declare` and
  *   `DefineFunction` operand, in every operand (`bindsStatementTargets()`).
- *   The `z` of `If(z > 0, Assign(z, 5), 0)` is free.
+ *   The `z` of `If(z > 0, Assign(z, 5), 0)` is free. An `Assign` target that
+ *   the block can read from outside the block before it writes it
+ *   (`blockOuterAssignTargets()`, `abstract-boxed-expression.ts`) is in
+ *   `outerAssigned` too. The free-variable walk reports such a name as free,
+ *   but `subs()` cannot replace its occurrences: `Block(Assign(a, a + 1), a)`
+ *   with each `a` replaced by `2` is `Block(Assign(2, 3), 2)`, which is not
+ *   valid. `subs()` adds the first statement `Assign(a, 2)` to the block
+ *   instead, and keeps the other occurrences of `a`. The block then reads the
+ *   replacement where it read the value from outside the block.
  *
  * The variable of an INDEFINITE integral (`Integrate(a·x, x)`) is not bound
  * (`integralPointVariables()`): the value of the integral is a function
@@ -23512,6 +23583,7 @@ function subsBinderView(expr: Expression):
       namesIn: (i: number) => readonly string[];
       readsFunctionBody: boolean;
       outerPaths: readonly (readonly number[])[];
+      outerAssigned: () => readonly string[];
     }
   | undefined {
   if (!isFunction(expr)) return undefined;
@@ -23530,6 +23602,7 @@ function subsBinderView(expr: Expression):
           namesIn: () => names,
           readsFunctionBody: false,
           outerPaths: [],
+          outerAssigned: () => [],
         };
   }
 
@@ -23574,6 +23647,9 @@ function subsBinderView(expr: Expression):
       (localVars.has(n) || implicit.has(n) || !indefinite?.has(n))
   );
   if (names.length === 0 && !readsFunctionBody) return undefined;
+  // Read only when a substitution names a local of the block, because the
+  // read walks the statements of the block.
+  let outerAssigned: readonly string[] | undefined;
   return {
     names,
     binders: sites,
@@ -23591,6 +23667,10 @@ function subsBinderView(expr: Expression):
     // The domains of the memberships of a set-builder read the enclosing
     // scope, as the free-variable walk reads them (`setBuilderVariables()`).
     outerPaths: builder?.domains ?? [],
+    outerAssigned: () =>
+      (outerAssigned ??= blockOuterAssignTargets(expr).filter((n) =>
+        names.includes(n)
+      )),
   };
 }
 
@@ -23664,9 +23744,22 @@ function capturedNames(
       (o, j) => !own.outside(j) && freeNamesForSubs(o, false).has(key)
     );
   };
+  // The replacement of a name of `view.outerAssigned()` goes in a first
+  // statement `Assign(key, value)` of the block, where every local of the
+  // block is in scope. A local of the block captures a free name of that
+  // replacement: `Block(Assign(b, 1), Assign(a, a + b), a)` with `a`
+  // replaced by `b` reads the outer `b` in `Assign(a, b)` only when the
+  // local `b` is renamed. A name of `view.outerAssigned()` is the variable
+  // outside the block, not a local, so it does not capture.
+  const prepended = (name: string, key: string): boolean =>
+    Object.hasOwn(sub, key) &&
+    view.outerAssigned().includes(key) &&
+    !view.outerAssigned().includes(name);
   const names = view.names.filter((name) =>
-    capturing(name).some((r) =>
-      ops.some((_, i) => occursInScope(name, r.key, i))
+    capturing(name).some(
+      (r) =>
+        prepended(name, r.key) ||
+        ops.some((_, i) => occursInScope(name, r.key, i))
     )
   );
   if (names.length === 0) return undefined;

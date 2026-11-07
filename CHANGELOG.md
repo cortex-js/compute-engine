@@ -355,6 +355,15 @@
   the value of `a` before the block. A variable that the block assigns before
   it reads it is still not listed: `["Block", ["Assign", "y", 5], ["Add", "x",
   "y"]]` gives `["x"]`.
+- **`subs()` now replaces a variable of an enclosing scope that a `Block`
+  reads before it assigns it.** With `a` declared outside the block,
+  `["Block", ["Assign", "a", ["Add", "a", 1]], "a"]` with `a` replaced by `2`
+  stayed unchanged and evaluated to `a + 1`. It now gives `["Block",
+  ["Assign", "a", 2], ["Assign", "a", ["Add", "a", 1]], "a"]`, which
+  evaluates to `3`: the block gets a first statement that assigns the
+  replacement, because a replacement of each `a` would give the invalid
+  `["Assign", 2, 3]`. As before, the block writes the variable `a` of the
+  enclosing scope when it is evaluated.
 - **`Hypergeometric2F1` at machine precision is now accurate to about the
   last digit for z < −1 and 0.5 < z < 1.** For these arguments some values
   were wrong from the 12th digit:

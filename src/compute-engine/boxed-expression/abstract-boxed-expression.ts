@@ -2290,6 +2290,41 @@ function collectReferences(
 }
 
 /**
+ * The targets of the `Assign` statements of the `Block` `expr` that are not
+ * locals of the block on the rules of `addBlockLocals()`: a statement can
+ * read the value of the variable outside the block before the first `Assign`
+ * writes it, so the free-variable walk reports the name as free. In
+ * `Block(Assign(a, a + 1), a)` with `a` declared outside the block, the
+ * result is `['a']`. An empty list for a node that is not a `Block`.
+ *
+ * The reads are collected in the `'references'` mode, so a name that has a
+ * value counts as read too: `subs()` replaces a name that has a value, as it
+ * replaces a name with no value. The name of a call is not a read, because
+ * `subs()` does not replace it. `subs()` uses this list to replace such a
+ * name with a first statement `Assign(name, value)` in the block
+ * (`subsBinderView()`, `boxed-function.ts`).
+ */
+export function blockOuterAssignTargets(expr: Expression): string[] {
+  if (!isFunction(expr) || !bindsStatementTargets(expr)) return [];
+  const locals = new Set<string>();
+  addBlockLocals(
+    expr.ops,
+    expr.localScope,
+    locals,
+    new Map(),
+    'references',
+    false
+  );
+  const result: string[] = [];
+  for (const op of expr.ops) {
+    if (!isFunction(typedStatement(op), 'Assign')) continue;
+    for (const name of statementDeclaredNames(op))
+      if (!locals.has(name) && !result.includes(name)) result.push(name);
+  }
+  return result;
+}
+
+/**
  * Add to `locals` the names that the statements `ops` of a `Block` bind, for
  * the walk of {@link getReferences} in mode `mode` with the memo `memo`.
  * `scope` is the scope of the block when it is canonical, and `undefined`
@@ -2340,13 +2375,19 @@ function collectReferences(
  * statement wrapped in `Typed` (the last statement of the body of a function
  * literal with a return type) binds the names of the statement it holds
  * (`statementDeclaredNames()`, `typedStatement()`).
+ *
+ * With `callsRead` set to `false`, the name of a call (the `f` of `f(1)`) is
+ * not a read in the second rule: `subs()` does not replace the name of a
+ * call, so `Block(Assign(y, f(1)), Assign(f, g), y)` keeps `f` as a local
+ * for `subs()` (`blockOuterAssignTargets()`).
  */
 function addBlockLocals(
   ops: ReadonlyArray<Expression>,
   scope: Scope | undefined,
   locals: Set<string>,
   memo: ReferencesMemo,
-  mode: ReferenceMode
+  mode: ReferenceMode,
+  callsRead = true
 ): void {
   const assigned = new Set<string>();
   for (const op of ops) {
@@ -2392,13 +2433,15 @@ function addBlockLocals(
           if (!written.includes(name)) readFns.add(name);
       }
       for (const name of pending)
-        if (reads.has(name) || readFns.has(name)) pending.delete(name);
+        if (reads.has(name) || (callsRead && readFns.has(name)))
+          pending.delete(name);
       for (const name of written) if (pending.delete(name)) locals.add(name);
       continue;
     }
     getReferences(op, reads, readFns, memo, mode);
     for (const name of pending)
-      if (reads.has(name) || readFns.has(name)) pending.delete(name);
+      if (reads.has(name) || (callsRead && readFns.has(name)))
+        pending.delete(name);
   }
 }
 
