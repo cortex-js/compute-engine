@@ -654,6 +654,64 @@ describe('Limitations of the rule, as they behave today', () => {
     ).toBe('2');
   });
 
+  test('a call to a lifted function that the same block assigns is a whole use', () => {
+    // The body of `q` is boxed while `h` has no definition: the call `h(a)`
+    // is bound to the block-local placeholder of `h`. The signature of `q`
+    // reads the definition that `Assign(h, …)` installed when it ran.
+    const ce = new ComputeEngine();
+    const fn = (body: MathJsonExpression, p: string): MathJsonExpression => [
+      'Function',
+      body,
+      p,
+    ];
+    const block = (...stmts: MathJsonExpression[]): string =>
+      ce
+        .box(['Block', ...stmts])
+        .evaluate()
+        .toString();
+    const count = ['Assign', 'h', fn(['Count', 't'], 't')] as const;
+    const caller = ['Assign', 'q', fn(['h', 'a'], 'a')] as const;
+    expect(block(count, caller, ['q', ['List', 1, 2]])).toBe('2');
+    expect(block(count, caller, ['Apply', 'q', ['List', 1, 2]])).toBe('2');
+    // A chain of three functions.
+    expect(
+      block(count, caller, ['Assign', 'k', fn(['q', 'b'], 'b')], [
+        'k',
+        ['List', 1, 2, 3],
+      ])
+    ).toBe('3');
+    // The caller `r` puts the value of `h` in a list, so the two bindings
+    // give different values: applied to each element, `r([-1, 2])` is
+    // `[[h(-1)], [h(2)]]`; bound whole, it is `[h([-1, 2])]`.
+    const wrapper = ['Assign', 'r', fn(['List', ['h', 'a']], 'a')] as const;
+    const callR = ['r', ['List', -1, 2]] as const;
+    expect(block(count, wrapper, callR)).toBe('[2]');
+    // A callee that reads its parameter element-wise keeps the map.
+    expect(
+      block(['Assign', 'h', fn(['Add', 't', 1], 't')], wrapper, callR)
+    ).toBe('[[0],[3]]');
+    // A use with more than one operand is not a whole use.
+    expect(
+      block(['Assign', 'h', fn(['Max', 't', 0], 't')], wrapper, callR)
+    ).toBe('[[0],[2]]');
+  });
+
+  test('a callee that the block assigns AFTER the caller is not read', () => {
+    // The signature of `q` is derived when `Assign(q, …)` runs, before `h`
+    // has a definition, so `q` stays element-wise.
+    const ce = new ComputeEngine();
+    const value = ce
+      .box([
+        'Block',
+        ['Assign', 'q', ['Function', ['h', 'a'], 'a']],
+        ['Assign', 'h', ['Function', ['Count', 't'], 't']],
+        ['q', ['List', 1, 2]],
+      ])
+      .evaluate();
+    expect(value.operator).toBe('List');
+    expect(value.ops!.every((x) => x.operator === 'Error')).toBe(true);
+  });
+
   test('a recursive function that reads its parameter whole terminates', () => {
     const ce = new ComputeEngine();
     expect(

@@ -36,6 +36,7 @@ import {
 } from '../collection-utils.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
 import { declaredBinders } from './binding-sites.js';
+import { callableBindingInContext } from './binders.js';
 import { reduceType, typesOverlap } from '../../common/type/reduce.js';
 import { parseType } from '../../common/type/parse.js';
 import {
@@ -1106,9 +1107,14 @@ function excludesEveryScalar(t: Type): boolean {
  *   use like any other: `k(xs) = h(xs)` is lifted when the slot of `h` is lifted, because
  *   that slot then has a collection arm. It is the only way the lift reaches
  *   through a function, and it reads the signature of `h` as it is when the
- *   signature of `k` is derived (the tests in
- *   `test/compute-engine/whole-collection-parameter.test.ts` pin that both
- *   definition orders give the same result today).
+ *   signature of `k` is derived. With `ce.assign()`, both definition orders
+ *   give the same result: the definition of `h` derives the signature of
+ *   `k` again (`repairProvisionalDependents()`, `function-utils.ts`). In a
+ *   `Block`, `h` is read through the definition that the call dispatches to
+ *   when `Assign(k, …)` runs ({@link calledOperatorDefinition}), and nothing
+ *   derives the signature of `k` again, so `h` must be assigned before `k`.
+ *   The tests in `test/compute-engine/whole-collection-parameter.test.ts`
+ *   pin both behaviors.
  * - An operator whose signature is an overload set (an intersection of
  *   arms, such as `Take` and `Drop`) is not read. Those two check their
  *   operands with their own validation.
@@ -1190,9 +1196,12 @@ export function wholeCollectionParameterType(
         aliasNames.delete(local.symbol);
       }
     }
-    const def = expr.operatorDefinition;
-    if (def !== undefined && expr.nops === 1 && reaches(expr.op1)) {
-      const arm = wholeCollectionSlotArm(expr.operator, def);
+    if (expr.nops === 1 && reaches(expr.op1)) {
+      const def = expr.operatorDefinition ?? calledOperatorDefinition(expr);
+      const arm =
+        def === undefined
+          ? undefined
+          : wholeCollectionSlotArm(expr.operator, def);
       if (arm !== undefined) arms.push(arm);
     }
     if (expr.operator === 'Function') {
@@ -1300,6 +1309,43 @@ function declaredValueOf(spec: Expression): Expression | undefined {
     if (isString(key) && key.string === 'value') return entry.op2;
   }
   return undefined;
+}
+
+/**
+ * The operator definition that the application `expr` dispatches to now,
+ * when its operator name is bound to a VALUE definition, or `undefined`.
+ *
+ * A function that a `Block` assigns (`Assign(h, t ↦ Count(t))`) has no
+ * definition when the block is boxed: the call `h(a)` in the body of a
+ * second function of the same block is bound to the block-local value
+ * placeholder of `h`, which has no value and no type. When the `Assign`
+ * runs, it gives `h` an OPERATOR definition, and the evaluation of `h(a)`
+ * dispatches through that definition (`applyFunctionLiteralWith()`,
+ * `boxed-function.ts`). The same lookup here lets the signature of the
+ * second function read the slot of `h`: with
+ * `Block(Assign(h, t ↦ Count(t)), Assign(q, a ↦ h(a)), q([1, 2]))`, the slot
+ * of `a` takes the collection arm of the slot of `t`, and the list is bound
+ * whole (`2`), as it is when `ce.assign()` defines both functions. Without
+ * it, `q` is applied to each element, and each element gives an
+ * `incompatible-type` error.
+ *
+ * The lookup reads the definitions in the current scope chain, so the
+ * result depends on the time the signature is derived: when the `Assign`
+ * of the second function runs. When the callee has no operator definition
+ * at that time (`h` is assigned AFTER `q` in the block), the call gives no
+ * evidence, and the slot stays element-wise.
+ */
+function calledOperatorDefinition(
+  expr: Expression
+): BoxedOperatorDefinition | undefined {
+  const own = expr.valueDefinition;
+  if (own === undefined) return undefined;
+  const binding = callableBindingInContext(expr.engine, expr.operator, {
+    value: own,
+  });
+  return binding !== undefined && 'operator' in binding
+    ? binding.operator
+    : undefined;
 }
 
 /**

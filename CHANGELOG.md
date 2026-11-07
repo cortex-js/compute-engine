@@ -145,6 +145,15 @@
 
 ### Resolved Issues
 
+- **A function that calls a function that the same block assigned before it
+  takes a list argument whole when the called function does.** The value of
+  `Block(Assign(h, t ↦ Count(t)), Assign(q, a ↦ h(a)), q([1, 2]))` was a
+  list of two `incompatible-type` errors, because `q` was applied to each
+  element of the list; it is now `2`, as it is when `ce.assign()` defines the
+  two functions. The called function must be assigned before the function
+  that calls it: with `Assign(q, …)` first, `q` is still applied to each
+  element.
+
 - **The plain-text form of a negated sum in a sum keeps its parentheses.**
   `ce.parse('1-t').subs({ t: ce.parse('1-t') }).toString()` was
   `1 - 1 - t`, which reads as `-t`; it is now `1 - (1 - t)`. In the same way,
