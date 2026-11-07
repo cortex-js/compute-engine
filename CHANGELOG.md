@@ -159,14 +159,6 @@
 
 ### Resolved Issues
 
-- **Above machine precision, a number times a list or a matrix keeps all the
-  digits of each element.** With `ce.precision = 30`,
-  `2\cdot\lbrack 0.123456789012345678901234567, 1.5\rbrack` gave
-  `[0.24691357802469136, 3]`, and it now gives
-  `[0.246913578024691357802469134, 3]`, the same digits as
-  `2\cdot 0.123456789012345678901234567`. The same applies to a matrix, to a
-  complex element, and to a list divided by a number.
-
 - **At machine precision, the numeric value of a function of a long list of
   complex numbers is correct when the function reads the real or the
   imaginary part.** With `B` a list of 101 complex numbers `0.5 + 1.25i`,
