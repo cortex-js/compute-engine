@@ -103,6 +103,14 @@
 
 ### Resolved Issues
 
+- **A `d` with no variable after it, at the end of the body of an integral,
+  is no longer lost.** The parser read it as the start of a differential and
+  dropped it when no variable followed: `\int_0^1 \frac{x\,dx}{2} + 1 \cdot d`
+  evaluated to `5/4`, and `\int_0^1 x\,d` to the integral of `x`. Such a `d` is
+  now the symbol `d`: the first gives `1/4 + d`, and the second is the
+  integral of `x\,d`. A `d` followed by a variable (`dx`, `\cdot dx`,
+  `d\theta`) is a differential, as before.
+
 - **The error of a variable that holds a value of the wrong type, as a term
   of a sum or a factor of a product, now names that operand.** With
   `s = "a"`, the value of `["Multiply", "s", ["Cos", "x"]]` was the

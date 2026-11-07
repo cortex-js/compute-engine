@@ -159,9 +159,26 @@ function parseIntegral(command: string, nIntegrals = 1) {
               integrandEndToken(parser, bodyStartToken, parser.index),
             ],
           ]);
-          // The `d` of the differential: the terms after the integrand are
-          // in the tokens too, so they are checked for a free `d` as well.
-          pruneDifferentialOperators(parser, diagCp, bodyStartToken, [
+          // The `d` of the differential. The tokens up to `signEnd` are
+          // checked against the integrand only, so that a free `d` in a term
+          // after the integrand (`\int \frac{x\,dx}{2} + d`) does not keep
+          // the diagnostic of the `d` of the differential. `signEnd` is never
+          // after the true end of the integrand, so the tokens after it are
+          // checked against the integrand and the terms after it: a free `d`
+          // is never hidden.
+          const signEnd = firstSignAfterDifferential(
+            parser,
+            bodyStartToken,
+            parser.index
+          );
+          pruneDifferentialOperators(
+            parser,
+            diagCp,
+            bodyStartToken,
+            [body],
+            signEnd
+          );
+          pruneDifferentialOperators(parser, diagCp, signEnd, [
             body,
             ...rest.map(([term]) => term),
           ]);
@@ -348,9 +365,7 @@ function parseIntegralBody(
   let fn = parser.parseExpression({
     minPrec: 266,
     condition: () => {
-      const start = parser.index;
-      found = matchDifferentialOperator(parser);
-      parser.index = start;
+      found = atDifferential(parser);
       return found || endsTabularCell(parser.peek);
     },
   });
@@ -385,10 +400,11 @@ function binderNameFor(
  */
 function parseIndexes(parser: Parser, maxIndexes: number): string[] {
   const indexes: string[] = [];
-  while (indexes.length < maxIndexes && matchDifferentialOperator(parser)) {
-    parser.skipVisualSpace();
-    const index = symbol(parser.parseSymbol());
-    if (index === null) return indexes;
+  while (indexes.length < maxIndexes) {
+    // A `d` with no variable after it (`\iint f\,dx\,d`) is not a
+    // differential: it is left in the stream, to be read as a symbol.
+    const index = readDifferential(parser);
+    if (index === null) break;
     // A variable spelled as a subscript on an indexed collection (`dn_{0}`
     // when `n` is a list) is the new name `n_0`
     indexes.push(parser._takeDeclinedSubscriptJoin?.(index) ?? index);
@@ -668,12 +684,45 @@ function integrandEndToken(parser: Parser, start: number, end: number): number {
 }
 
 /**
+ * The token index of the first `+` or `-` at any depth after the first
+ * differential operator token (`d` or `\differentialD`) in the tokens from
+ * `start` to `end`, when the body of an integral is a sum whose integrand is
+ * the terms up to the one that holds the differential. Return `start` when
+ * there is no such sign.
+ *
+ * The result is never after the true end of the integrand: the integrand
+ * ends at a `+` or `-` token (the only triggers of `Add` and `Subtract`)
+ * that comes after the `d` of its differential, and so after the first `d`
+ * token. It can be before it: in `\int \frac{dx}{1+x} + d` it is the `+` of
+ * `1+x`. Unlike `integrandEndToken()`, it does not count brackets, which
+ * give a wrong depth for a group that the parser does not keep
+ * (`\int {\frac{x\,dx}{2} + d}`) or a null delimiter (`\right.`).
+ *
+ * The tokens are read with `parser.latex()`, and `parser.index` does not
+ * change. The result is used only for diagnostics.
+ */
+function firstSignAfterDifferential(
+  parser: Parser,
+  start: number,
+  end: number
+): number {
+  let afterDifferential = false;
+  for (let i = start; i < end; i++) {
+    const token = parser.latex(i, i + 1).trim();
+    if (token === 'd' || token === '\\differentialD') afterDifferential = true;
+    else if (afterDifferential && (token === '+' || token === '-')) return i;
+  }
+  return start;
+}
+
+/**
  * Remove the `undeclared-symbol` diagnostics of the symbols `d` and
- * `d_upright` (`\mathrm{d}`) in the tokens from `start` to the current
- * position, when none of the expressions `parsed` holds one of these
- * symbols. The tokens are the integrand and its differentials (and, for a
- * sum, the terms after the integrand), and `parsed` is the MathJSON that the
- * parser made of these tokens after it took out the differentials.
+ * `d_upright` (`\mathrm{d}`) in the tokens from `start` to `end` (the
+ * current position when `end` is not given), when none of the expressions
+ * `parsed` holds one of these symbols. The tokens are the integrand and its
+ * differentials, or, for a sum, the terms after the integrand, and `parsed`
+ * is the MathJSON that the parser made of these tokens after it took out the
+ * differentials.
  *
  * A differential at the top level of the integrand (`\int x\,dx`) is read by
  * `matchDifferentialOperator()`: its `d` is not a symbol and has no
@@ -693,10 +742,19 @@ function pruneDifferentialOperators(
   parser: Parser,
   checkpoint: number,
   start: number,
-  parsed: ReadonlyArray<MathJsonExpression | null>
+  parsed: ReadonlyArray<MathJsonExpression | null>,
+  end?: number
 ): void {
   if (parsed.some((expr) => holdsSymbol(expr, DIFFERENTIAL_SYMBOLS))) return;
-  parser._pruneUndeclared(DIFFERENTIAL_SYMBOLS, checkpoint, start);
+  if (end === undefined)
+    parser._pruneUndeclared(DIFFERENTIAL_SYMBOLS, checkpoint, start);
+  // The body start given is the current index: no diagnostic collected so
+  // far starts at or after it, so only the span from `start` to `end` is
+  // pruned.
+  else
+    parser._pruneUndeclared(DIFFERENTIAL_SYMBOLS, checkpoint, parser.index, [
+      [start, end],
+    ]);
 }
 
 /** The symbols that a differential operator read inside a sub-expression of
@@ -1029,6 +1087,52 @@ function parseUprightD(
   // operator `D`.
   if (args === null || args.length === 0) return bareForm;
   return ['D', ...args];
+}
+
+/**
+ * Read a differential at the index: a differential operator (`d`,
+ * `\mathrm{d}`, `\differentialD`, after an optional `\cdot` or space)
+ * followed by a variable. Return the name of the variable, with the index
+ * after it. When the tokens are not a differential, return `null`, and the
+ * index does not move.
+ *
+ * A `d` with no variable after it (`1 \cdot d`, `x\,d`) is not a
+ * differential, and neither is a `d` with a subscript or a superscript
+ * (`d_1`, `d^2`): the symbol parser would read the `_` or the `^` as a
+ * variable named `_` or `^`.
+ */
+function readDifferential(parser: Parser): string | null {
+  const start = parser.index;
+  if (matchDifferentialOperator(parser)) {
+    parser.skipVisualSpace();
+    if (parser.peek !== '_' && parser.peek !== '^') {
+      const index = symbol(parser.parseSymbol());
+      if (index !== null) return index;
+    }
+  }
+  parser.index = start;
+  return null;
+}
+
+/**
+ * True when the tokens at the index are a differential (see
+ * `readDifferential()`). The index does not move, and the diagnostics that
+ * reading the variable records are removed: `parseIndexes()` reads the
+ * variable again.
+ *
+ * The body of an integral stops at a differential. A `d` that is not a
+ * differential is a symbol, and the body continues past it: in
+ * `\int_0^1 \frac{x\,dx}{2} + 1 \cdot d` the body is
+ * `\frac{x\,dx}{2} + 1 \cdot d`, whose last term `1 \cdot d` is added to the
+ * integral.
+ */
+function atDifferential(parser: Parser): boolean {
+  const start = parser.index;
+  const checkpoint = parser._diagnosticsCheckpoint();
+  const result = readDifferential(parser) !== null;
+  parser._rollbackDiagnostics(checkpoint);
+  parser.index = start;
+  return result;
 }
 
 function matchDifferentialOperator(parser: Parser): boolean {
