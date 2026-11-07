@@ -166,15 +166,15 @@ describe('Exponential series Σ rᵏ/k!', () => {
 });
 
 describe('simplify() of a geometric series with an infinite upper bound', () => {
-  test('a free ratio: the sum stays as it is, with no x^(+∞) term', () => {
+  test('a free ratio: the closed form with its condition, with no x^(+∞) term', () => {
     // The finite closed form `(x − x^(b+1))/(1 − x)` with b = +∞ gave
     // `(x − x^(+∞))/(1 − x)`. `x^(+∞)` is a limit, not a value: 0 for
-    // |x| < 1 and no value otherwise. `evaluate()` gives the closed form
-    // with its condition.
+    // |x| < 1 and no value otherwise. `simplify()` gives the closed form
+    // with its condition, as `evaluate()` does.
     const sum = ce.parse('\\sum_{k=1}^{\\infty} x^k');
-    expect(sum.simplify().json).toEqual(sum.json);
+    expect(sum.simplify().toString()).toBe('If(|x| < 1, x / (1 - x))');
     const sum0 = ce.parse('\\sum_{k=0}^{\\infty} x^k');
-    expect(sum0.simplify().json).toEqual(sum0.json);
+    expect(sum0.simplify().toString()).toBe('If(|x| < 1, 1 / (1 - x))');
     expect(sum.evaluate().toString()).toBe('If(|x| < 1, x / (1 - x))');
   });
 

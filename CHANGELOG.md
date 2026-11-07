@@ -243,13 +243,20 @@
   `1.137211485608755e-6` and now gives `1.1372114856110883e-6`. Some
   arguments that gave no numeric value now have one.
 
-- **`simplify()` now gives the closed form of a telescoping sum and of a known
-  infinite product, as `evaluate()` does.** `\sum_{k=2}^n (\sin(k+1)-\sin k)`
-  stayed a sum under `simplify()`; it is now `sin(n+1) - sin(2)`.
+- **`simplify()` now gives the closed form of a telescoping sum, of a known
+  infinite series and of a known infinite product, as `evaluate()` does.**
+  `\sum_{k=2}^n (\sin(k+1)-\sin k)` stayed a sum under `simplify()`; it is now
+  `sin(n+1) - sin(2)`. `\sum_{k=1}^\infty \frac{1}{k^2}` is now `1/6 * pi^2`,
+  `\sum_{k=0}^\infty x^k` is now `If(|x| < 1, 1 / (1 - x))`, and
+  `\sum_{k=1}^\infty \frac{x^k}{k}` is now `If(|x| < 1, -ln(1 - x))`.
   `\prod_{k=1}^\infty (1+1/k^2)` is now `sinh(pi)/pi`, and
   `\prod_{k=1}^\infty \frac{k}{k+1}` is now `0`. A sum or a product that holds
   a symbol with an assigned value, or a function whose purity is not known,
-  keeps its form.
+  keeps its form. An infinite series whose body holds another sum or an
+  integral also keeps its form, unless it telescopes. A divergent series whose
+  divergence `evaluate()` proves with a limit, such as
+  `\sum_{k=1}^\infty \frac1k`, keeps its form under `simplify()`; `evaluate()`
+  gives `+oo`.
 - **The error of a numeric integral with a power singularity close to `1/x`
   now covers its true error.** `.N()` of `\int_0^1 x^{-0.9999}\,dx` gave
   `10000.00000106 ± 0.00000035`, whose true error is `0.00000106`; the error

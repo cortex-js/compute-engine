@@ -929,6 +929,33 @@ function rationalLimitAtInfinity(
 }
 
 /**
+ * The method that asks for the closed form of a series.
+ *   - `'evaluate'`: the closed forms of the geometric series and of the
+ *     first-moment and logarithmic series are simplified, so that a radical
+ *     ratio gives its simplest exact form (`Σ_{k≥0} (1/√2)ᵏ` is `2 + √2`,
+ *     not `1/(1 − √2/2)`).
+ *   - `'simplify'`: the closed form is a step of a simplification rule
+ *     (`bigOpClosedForm()`), and a simplification rule must not call
+ *     `simplify()`: a nested call starts a new recursion context that the
+ *     guards of the outer call do not see. The closed form is evaluated
+ *     instead. The outer `simplify()` then reduces a closed form with no
+ *     condition (`1/(1 − √2/2)` to `2 + √2`), but it does not reduce the
+ *     value inside the `If` that holds the condition `|r| < 1`: without the
+ *     evaluation, `Σ_k x^(k−1)` gave `If(|x| < 1, (x·(1/x))/(1 − x))`.
+ */
+type SeriesClosedFormCaller = 'evaluate' | 'simplify';
+
+/** The closed form `value` of a series, simplified when the caller is
+ * `'evaluate'`, and evaluated when it is `'simplify'`
+ * (`SeriesClosedFormCaller`). */
+function simplifiedClosedForm(
+  value: Expression,
+  caller: SeriesClosedFormCaller
+): Expression {
+  return caller === 'evaluate' ? value.simplify() : value.evaluate();
+}
+
+/**
  * Attempt a symbolic closed form for `Sum(body, [index, lower, upper])` when the
  * domain is symbolic (free bounds or a body with free variables beyond the
  * index). Handles:
@@ -937,17 +964,15 @@ function rationalLimitAtInfinity(
  *   - the geometric series `Σ_{k=n₀}^∞ c·rᵏ` in a free ratio `r` (infinite upper
  *     bound), emitting `If(|r| < 1, c·r^{n₀}/(1 − r))`, and the named series
  *     in a free variable (`Σ xᵏ/k`).
- * With `families` set to `'telescoping'`, only the telescoping sums are
- * tried: the closed forms of the geometric and named series call
- * `simplify()`, which a simplification rule must not call (see
- * `bigOpClosedForm()`).
+ * `caller` tells which method asks for the closed form
+ * (`SeriesClosedFormCaller`).
  * Returns undefined when no closed form applies (caller keeps it symbolic).
  */
 export function symbolicSumClosedForm(
   body: Expression | undefined,
   limits: Expression,
   ce: ComputeEngine,
-  families: 'all' | 'telescoping' = 'all'
+  caller: SeriesClosedFormCaller = 'evaluate'
 ): Expression | undefined {
   if (!body || !isFunction(limits, 'Limits')) return undefined;
   const index = isSymbol(limits.op1) ? limits.op1.symbol : undefined;
@@ -973,14 +998,18 @@ export function symbolicSumClosedForm(
   // Geometric series `Σ_{k=n₀}^∞ c·rᵏ` in a free ratio (infinite upper
   // bound), and the named families that admit a free variable (exponential
   // `Σ xᵏ/k!`, first-moment `Σ k·xᵏ`, logarithmic `Σ xᵏ/k`).
+  // Under the caller `'simplify'`, a body that holds an operator with a scope
+  // of its own gets no geometric or named closed form: these closed forms
+  // evaluate the factors of the body that do not depend on the index, which
+  // computes such an operator (see `bigOpClosedForm()`).
   if (
-    families === 'all' &&
     upper.isInfinity === true &&
-    upper.isPositive === true
+    upper.isPositive === true &&
+    !(caller === 'simplify' && holdsScopedOperator(body))
   ) {
     const geo =
-      geometricSumClosedForm(body, index, lower, ce) ??
-      namedSeriesClosedForm(body, index, lower, ce);
+      geometricSumClosedForm(body, index, lower, ce, caller) ??
+      namedSeriesClosedForm(body, index, lower, ce, caller);
     if (geo) return geo;
   }
 
@@ -1015,13 +1044,26 @@ function callsFunctionWithBody(e: Expression): boolean {
   return e.ops.some(callsFunctionWithBody);
 }
 
+/** Whether `e` holds, at any depth, an operator with a scope of its own
+ * (`Sum`, `Product`, `Integrate`, a function literal). */
+function holdsScopedOperator(e: Expression): boolean {
+  if (!isFunction(e)) return false;
+  return e.isScoped || e.ops.some(holdsScopedOperator);
+}
+
 /**
  * The closed form of a `Sum` or a `Product` with one `Limits` clause, for
  * `simplify()`. It uses the closed forms that the exact `evaluate()` uses, so
  * that the two methods agree:
  *   - a sum over a symbolic domain (a free bound, or a body with a free
- *     variable other than the index): the telescoping sums,
- *     `Σ_{k=1}^{n} (1/(k+x) − 1/(k+x+1)) = 1/(x+1) − 1/(n+x+1)`;
+ *     variable other than the index): the closed forms of
+ *     `symbolicSumClosedForm()`, the telescoping sums
+ *     (`Σ_{k=1}^{n} (1/(k+x) − 1/(k+x+1)) = 1/(x+1) − 1/(n+x+1)`) and the
+ *     geometric and named series in a free variable
+ *     (`Σ_{k≥0} xᵏ = If(|x| < 1, 1/(1 − x))`);
+ *   - a sum over an infinite domain with a body that has no free variable:
+ *     the closed forms of `infiniteSumClosedForm()`
+ *     (`Σ_{k≥1} 1/k² = π²/6`);
  *   - a product over a symbolic domain: the closed forms of
  *     `symbolicProductClosedForm()` (`Π_{k=1}^{n} k = n!`, the telescoping
  *     products);
@@ -1030,11 +1072,13 @@ function callsFunctionWithBody(e: Expression): boolean {
  *     the limit 0 or ±∞ of a product that does not converge to a finite
  *     nonzero value (`Π_{k≥1} k/(k+1) = 0`).
  *
- * The closed forms of the geometric series, of the named series and of an
- * infinite sum with no free variable (`Σ_{k≥1} 1/k² = π²/6`) are not used:
- * they call `simplify()`, and a simplification rule must not call it, since
- * a nested call starts a new recursion context that the guards of the outer
- * call do not see. `simplify()` keeps such a sum as written.
+ * The sum closed forms are asked for with the caller `'simplify'`
+ * (`SeriesClosedFormCaller`): they do not call `simplify()`, which a
+ * simplification rule must not call, and give a canonical form that the
+ * outer `simplify()` reduces. The value `±∞` of a divergent sum
+ * (`divergentInfiniteSum()`, `Σ_{k≥1} 1/k = +∞` under `evaluate()`) is not
+ * used: its proof computes a symbolic limit, which calls `simplify()`.
+ * `simplify()` keeps such a sum as written.
  *
  * Returns undefined, and `simplify()` keeps the operator as written, when:
  *   - the operator has more than one indexing clause, or a clause with one
@@ -1060,7 +1104,16 @@ function callsFunctionWithBody(e: Expression): boolean {
  *     gives two independent draws. A call of a function whose purity is not
  *     known (an undeclared `f`) is not pure either, so
  *     `Σ_{k=a}^{b} (f(k+1) − f(k))` keeps its form, while `evaluate()` gives
- *     `f(b+1) − f(a)`.
+ *     `f(b+1) − f(a)`;
+ *   - the body of a sum holds an operator with a scope of its own (a `Sum`
+ *     or an `Integrate`), and the closed form is a geometric or named
+ *     series, or an infinite sum with no free variable. These closed forms
+ *     evaluate the factors of the body that do not depend on the index, and
+ *     the evaluation computes such an operator, which `evaluate()` of the
+ *     outer sum keeps: `Σ_{k≥0} xᵏ · Σ_{j≥1} 1/j` gave
+ *     `If(|x| < 1, +∞/(1 − x))`. The computation can also call `simplify()`
+ *     (the proof that `Σ 1/j` diverges computes a symbolic limit). The
+ *     telescoping sums are still used for such a body.
  *
  * A clause with no bounds runs over `1..+∞`, as under `evaluate()`
  * (`withDefaultBigOpBounds()`). The `Sum` and `Product` simplification rules
@@ -1093,10 +1146,13 @@ export function bigOpClosedForm(x: Expression): Expression | undefined {
   // whose index is boxed in the current scope. Outside the scope of the
   // operator, the two `k` are different symbols and the test fails.
   return ce._inScope(x.localScope, () => {
-    if (kind === 'Sum')
-      return mode === 'symbolic'
-        ? symbolicSumClosedForm(body, limits, ce, 'telescoping')
-        : undefined;
+    if (kind === 'Sum') {
+      if (mode === 'symbolic')
+        return symbolicSumClosedForm(body, limits, ce, 'simplify');
+      if (mode === 'numeric' && !holdsScopedOperator(body))
+        return infiniteSumClosedForm(body, limits, ce, 'simplify');
+      return undefined;
+    }
     if (mode === 'symbolic') return symbolicProductClosedForm(body, limits, ce);
     if (mode === 'numeric')
       return (
@@ -1470,7 +1526,8 @@ function geometricSumClosedForm(
   body: Expression,
   index: string,
   lower: Expression,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  caller: SeriesClosedFormCaller
 ): Expression | undefined {
   if (!lower.isInteger) return undefined;
   const n0 = lower.re;
@@ -1507,7 +1564,7 @@ function geometricSumClosedForm(
   const r = negatedIndex
     ? ce.function('Divide', [ce.One, base]).evaluate()
     : base;
-  return geometricValue(coeff, r, n0, ce);
+  return geometricValue(coeff, r, n0, ce, caller);
 }
 
 /**
@@ -1521,7 +1578,8 @@ function geometricValue(
   coeff: Expression,
   r: Expression,
   n0: number,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  caller: SeriesClosedFormCaller
 ): Expression | undefined {
   const rPow = n0 === 0 ? ce.One : ce.function('Power', [r, ce.number(n0)]);
   const numerator = coeff.isSame(1)
@@ -1529,13 +1587,13 @@ function geometricValue(
     : rPow.isSame(1)
       ? coeff
       : ce.function('Multiply', [coeff, rPow]);
-  // `simplify` (not just `evaluate`) so a radical ratio rationalizes to its
-  // simplest exact form (`Σ(1/√2)ᵏ → 2 + √2`, not `1/(1 − √2/2)`); a symbolic
-  // ratio keeps the readable `1/(1 − r)`. Safe here — the closed form no longer
-  // contains a `Sum`, so simplifying it cannot re-enter this handler.
-  const value = ce
-    .function('Divide', [numerator, ce.function('Subtract', [ce.One, r])])
-    .simplify();
+  // Under `evaluate()`, the quotient is simplified, so that a radical ratio
+  // gives its simplest exact form (`Σ(1/√2)ᵏ → 2 + √2`, not
+  // `1/(1 − √2/2)`); a symbolic ratio keeps the readable `1/(1 − r)`.
+  const value = simplifiedClosedForm(
+    ce.function('Divide', [numerator, ce.function('Subtract', [ce.One, r])]),
+    caller
+  );
 
   const guard = ce.function('Less', [ce.function('Abs', [r]), ce.One]);
   return conditionalValue(ce, value, guard) ?? undefined;
@@ -1757,13 +1815,16 @@ function isNegativeOne(expr: Expression | undefined): boolean {
  *     geometric entry);
  *   - logarithmic series `Σ_{k=1}^∞ c·rᵏ/k = −c·ln(1−r)` for `|r| < 1`.
  *
+ * `caller` tells which method asks for the closed form
+ * (`SeriesClosedFormCaller`).
  * Returns undefined when no family matches (caller keeps the sum symbolic).
  */
 function namedSeriesClosedForm(
   body: Expression,
   index: string,
   lower: Expression,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  caller: SeriesClosedFormCaller
 ): Expression | undefined {
   if (!lower.isInteger) return undefined;
   const a = lower.re;
@@ -1873,17 +1934,18 @@ function namedSeriesClosedForm(
   // Geometric: c·rᵏ with the ratio assembled from several factors
   // (`3ᵏ/6ᵏ`, `2^(−k−1)`); the single-power spelling is recognized earlier
   // by `geometricSumClosedForm`.
-  if (kPower === 0) return geometricValue(coeff, ratio, a, ce);
+  if (kPower === 0) return geometricValue(coeff, ratio, a, ce, caller);
 
   // First-moment geometric: c·k·rᵏ → c·r/(1−r)², valid for |r| < 1.
   if (kPower === 1 && (a === 0 || a === 1)) {
     const value = times(
-      ce
-        .function('Divide', [
+      simplifiedClosedForm(
+        ce.function('Divide', [
           ratio,
           ce.function('Power', [ce.function('Subtract', [ce.One, ratio]), 2]),
-        ])
-        .simplify()
+        ]),
+        caller
+      )
     );
     const guard = ce.function('Less', [ce.function('Abs', [ratio]), ce.One]);
     return conditionalValue(ce, value, guard) ?? undefined;
@@ -1892,11 +1954,12 @@ function namedSeriesClosedForm(
   // Logarithmic series: c·rᵏ/k → −c·ln(1−r), valid for |r| < 1.
   if (kPower === -1 && a === 1) {
     const value = times(
-      ce
-        .function('Negate', [
+      simplifiedClosedForm(
+        ce.function('Negate', [
           ce.function('Ln', [ce.function('Subtract', [ce.One, ratio])]),
-        ])
-        .simplify()
+        ]),
+        caller
+      )
     );
     const guard = ce.function('Less', [ce.function('Abs', [ratio]), ce.One]);
     return conditionalValue(ce, value, guard) ?? undefined;
@@ -1916,12 +1979,15 @@ function namedSeriesClosedForm(
  *     summand individually has a known closed form (each piece's convergence is
  *     then established by that closed form's own validity — absolute
  *     convergence for the p-series pieces).
+ * `caller` tells which method asks for the closed form
+ * (`SeriesClosedFormCaller`).
  * Returns undefined when no closed form applies (caller keeps it symbolic).
  */
 export function infiniteSumClosedForm(
   body: Expression | undefined,
   limits: Expression,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  caller: SeriesClosedFormCaller = 'evaluate'
 ): Expression | undefined {
   if (!body || !isFunction(limits, 'Limits')) return undefined;
   const index = isSymbol(limits.op1) ? limits.op1.symbol : undefined;
@@ -1948,8 +2014,8 @@ export function infiniteSumClosedForm(
 
   const attempt = (b: Expression, from: Expression): Expression | undefined =>
     pSeriesClosedForm(b, index, from, ce) ??
-    geometricSumClosedForm(b, index, from, ce) ??
-    namedSeriesClosedForm(b, index, from, ce) ??
+    geometricSumClosedForm(b, index, from, ce, caller) ??
+    namedSeriesClosedForm(b, index, from, ce, caller) ??
     rationalSumClosedForm(b, index, from, ce);
 
   const direct = attempt(body, lower);

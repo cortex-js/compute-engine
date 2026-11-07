@@ -155,13 +155,19 @@ as a type that excludes such a value.
 
 When no simplification rule of `Sum` or `Product` applies, `simplify()` gives
 the closed form that `evaluate()` gives, if there is one: a telescoping sum
-(`Σ_{k=2}^{n} (sin(k+1) − sin(k))` is `sin(n+1) − sin(2)`), the closed form of
-a product over a symbolic range, and a known infinite product or its limit 0 or
-±∞ (`Π_{k≥1} (1 + 1/k²)` is `sinh(π)/π`, `Π_{k≥1} k/(k+1)` is `0`). The closed
-forms of the geometric and named series in a free variable (`Σ_{k≥0} x^k`) and
-of an infinite sum with no free variable (`Σ_{k≥1} 1/k²`) are not used: they call
-`simplify()`, which a simplification rule must not call. `simplify()` keeps
-such a sum as written, and `evaluate()` gives its closed form. These operators
+(`Σ_{k=2}^{n} (sin(k+1) − sin(k))` is `sin(n+1) − sin(2)`), a geometric or
+named series in a free variable (`Σ_{k≥0} x^k` is `If(|x| < 1, 1/(1 − x))`), a
+known infinite sum with no free variable (`Σ_{k≥1} 1/k²` is `π²/6`), the closed
+form of a product over a symbolic range, and a known infinite product or its
+limit 0 or ±∞ (`Π_{k≥1} (1 + 1/k²)` is `sinh(π)/π`, `Π_{k≥1} k/(k+1)` is `0`).
+The value ±∞ of a divergent sum is not used (`Σ_{k≥1} 1/k` is `+∞` under
+`evaluate()`): its proof computes a symbolic limit, which calls `simplify()`,
+and a simplification rule must not call `simplify()`. `simplify()` keeps such a
+sum as written. A geometric, named or infinite series whose body holds another
+sum or an integral (`Σ_{k≥0} x^k · Σ_{j≥1} 1/j`) also keeps its form: the
+closed form would compute the inner operator, which `evaluate()` of the outer
+sum keeps. A telescoping sum with such a body still gets its closed form. These
+operators
 also keep their form: an operator that holds a symbol with an assigned value,
 because the closed forms read values, and an operator whose body or bounds are
 not pure (a random draw, or a call of a function whose purity is not known, such

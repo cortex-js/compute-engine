@@ -130,20 +130,25 @@ describe('A sum or a product with no bounds: parse route', () => {
   test.each([
     // [LaTeX, evaluate(), N(), simplify()], as strings. `same` is the
     // expression itself.
-    ['\\sum_k \\frac{1}{k^2}', 'pi^2 / 6', '1.64493406684822643647', 'same'],
+    [
+      '\\sum_k \\frac{1}{k^2}',
+      'pi^2 / 6',
+      '1.64493406684822643647',
+      '1/6 * pi^2',
+    ],
     [
       '\\sum_k x^{k-1}',
       'If(|x| < 1, 1 / (1 - x))',
       'If(|x| < 1, 1 / (1 - x))',
-      'same',
+      'If(|x| < 1, 1 / (1 - x))',
     ],
     [
       '\\sum_k x^k',
       'If(|x| < 1, x / (1 - x))',
       'If(|x| < 1, x / (1 - x))',
-      'same',
+      'If(|x| < 1, x / (1 - x))',
     ],
-    ['\\sum_k \\frac{x^k}{k!}', 'e^x - 1', 'e^x - 1', 'same'],
+    ['\\sum_k \\frac{x^k}{k!}', 'e^x - 1', 'e^x - 1', 'e^x - 1'],
     [
       '\\prod_k (1+\\frac{1}{k^2})',
       'sinh(pi) / pi',

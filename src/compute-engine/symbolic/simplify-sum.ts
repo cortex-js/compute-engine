@@ -272,7 +272,9 @@ function constantSumOverInfiniteRange(body: Expression): RuleStep | undefined {
  * checked by `keepInfiniteRangeStep()`. When no rule gives a step, the sum
  * gets the closed form that `evaluate()` gives, when there is one
  * (`bigOpClosedFormStep()`): a telescoping sum
- * `Σ_{k=2}^{n} (sin(k+1) − sin(k))` is `sin(n+1) − sin(2)`.
+ * `Σ_{k=2}^{n} (sin(k+1) − sin(k))` is `sin(n+1) − sin(2)`, a geometric
+ * series in a free ratio `Σ_{k≥0} x^k` is `If(|x| < 1, 1/(1 − x))`, and
+ * `Σ_{k≥1} 1/k²` is `π²/6`.
  */
 export function simplifySum(x: Expression): RuleStep | undefined {
   if (!isFunction(x, 'Sum')) return undefined;
@@ -568,9 +570,9 @@ function simplifySumRules(x: Expression): RuleStep | undefined {
   // Also handles: Sum(r^n, [n, 1, b]) → r * (1 - r^b) / (1 - r)
   // With an infinite upper bound, the term `r^(b+1)` of the closed forms is
   // the limit of `r^n`. For a free ratio (`x`) it stays `x^(+∞)`, which is
-  // not a value, so the rule does not apply and the sum stays as it is.
-  // `evaluate()` gives the closed form with its condition
-  // (`x/(1 − x)` when `|x| < 1`). For a number ratio the limit has a value
+  // not a value, so the rule does not apply. The sum then gets the closed
+  // form of `evaluate()` with its condition (`x/(1 − x)` when `|x| < 1`),
+  // from `bigOpClosedFormStep()`. For a number ratio the limit has a value
   // (`(1/2)^(+∞)` is 0), and the rule applies.
   //
   // The closed forms are built with `ce.function()`, not with the `.sub()`,
