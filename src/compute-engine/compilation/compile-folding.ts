@@ -236,6 +236,81 @@ const EXACT_FOLD_DIGITS_PER_WORD = 19;
 export const CONSTANT_FOLD_MAX_INLINE_ELEMENTS = 49;
 
 /**
+ * Whether `expr` is a `Tuple` or a `List` whose operands are number literals
+ * that the evaluation of the fold gives back with the same value.
+ *
+ * An operand qualifies when it is a real, finite number that is a machine
+ * number (a JavaScript number: a safe integer or a number that is not an
+ * integer) or a value that is not exact. An exact value that is not a
+ * machine number (a rational such as `1/3`, a radical, an integer above
+ * 2^53) does not: the fold evaluates it, and the code then holds its
+ * numeric value, written in another form. An empty node does not qualify
+ * either, so that the fold still decides the code of an empty collection.
+ */
+function isLiteralNumberAggregate(
+  expr: Expression
+): expr is Expression & FunctionInterface {
+  if (!isFunction(expr)) return false;
+  if (expr.operator !== 'Tuple' && expr.operator !== 'List') return false;
+  if (expr.nops === 0) return false;
+  return expr.ops.every((op) => {
+    if (!isNumber(op)) return false;
+    const value = op.numericValue;
+    if (typeof value === 'number')
+      return (
+        Number.isFinite(value) &&
+        (Number.isSafeInteger(value) || !Number.isInteger(value))
+      );
+    return !value.isExact && value.im === 0 && Number.isFinite(value.re);
+  });
+}
+
+/**
+ * The code of the constant fold of a `Tuple` or a `List` of number literals
+ * (`isLiteralNumberAggregate`), without the evaluation and the gates of the
+ * fold, or `undefined` where the fold declines it.
+ *
+ * The fold of such a node gives back its own operands, then emits a NEW
+ * node of the same head (`emitFoldedValue`). That this node is new matters:
+ * the common subexpression pass finds a candidate by the identity of its
+ * node, so a literal emitted from the original node can become a shared
+ * temporary (`[_lit_1, _lit_1, x]` became
+ * `(() => { const _cse1 = _lit_1; return [_cse1, _cse1, x]; })()`). So this
+ * function emits a new node too, and declines exactly where the fold
+ * declines such a node: while a folded value is emitted, under
+ * `constantFold: false`, when the caller records the symbols that the code
+ * reads (`symbolDeps`), when the caller overrides the head (`List` or
+ * `Tuple` in `foldExcludedOps`), above the inline element cap, and above
+ * the work ceiling. The other gates of the fold (free variables, effects,
+ * type, bound names, colors, complex and `NaN` values) cannot decline a
+ * node of finite real number literals.
+ *
+ * The fold of a list of 224 tuples of four numbers, the value of a symbol
+ * that the compile writes into the code, spent most of its time in the
+ * evaluation and the gates of the fold of each tuple (CE-1065, the
+ * `apollonian-gasket` prelude of Tycho).
+ */
+function emitLiteralNumberAggregate(
+  expr: Expression & FunctionInterface,
+  target: CompileTarget<Expression>,
+  prec: number
+): TargetSource | undefined {
+  if (CompilerState._emittingFoldedValue) return undefined;
+  if (target.constantFold === false) return undefined;
+  if (target.symbolDeps !== undefined) return undefined;
+  if (target.foldExcludedOps?.has(expr.operator) === true) return undefined;
+  const cap = target.maxInlineElements ?? CONSTANT_FOLD_MAX_INLINE_ELEMENTS;
+  if (expr.nops > cap) return undefined;
+  if (!(core.foldCostEstimate(expr) <= CONSTANT_FOLD_MAX_COST))
+    return undefined;
+  return emitFoldedValue(
+    expr.engine.function(expr.operator, [...expr.ops]),
+    target,
+    prec
+  );
+}
+
+/**
  * Compile-time constant folding: when `expr` is a pure subtree with no free
  * variables, evaluate it now and emit the value as a target literal,
  * instead of lowering the computation structurally. Returns `undefined`
@@ -280,12 +355,21 @@ export const CONSTANT_FOLD_MAX_INLINE_ELEMENTS = 49;
  * quadrature's own interval budget. An AMBIENT deadline armed by the CALLER
  * around the whole compilation still cancels it, through the ordinary
  * `_shouldContinueExecution` check sites.
+ *
+ * A `Tuple` or a `List` of number literals (`isLiteralNumberAggregate`)
+ * does not go through these gates or the evaluation: its fold gives back
+ * its own operands, so `emitLiteralNumberAggregate` emits the code of that
+ * fold directly.
  */
 export function tryConstantFold(
   expr: Expression,
   target: CompileTarget<Expression>,
   prec: number
 ): TargetSource | undefined {
+  // A `Tuple` or a `List` of number literals: the fold has nothing to
+  // compute (see `emitLiteralNumberAggregate`).
+  if (isLiteralNumberAggregate(expr))
+    return emitLiteralNumberAggregate(expr, target, prec);
   // The `constantFold` opt-out governs what CODE is emitted, so it gates
   // only this emission entry — `constantFoldValue` stays available to the
   // shape analyses (`isProvablyRealValued`), whose answers describe the

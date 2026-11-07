@@ -600,6 +600,12 @@
 
 ### Performance
 
+- **The compilation of an expression that reads a symbol whose value is a
+  list of tuples of numbers is about twice as fast.** `compile()` writes
+  such a value into the code, and it spent about 60 µs on each tuple. For a
+  symbol whose value is a list of 224 tuples of four numbers, `compile()` of
+  the symbol took about 14 ms and now takes about 6 ms. The emitted code
+  does not change.
 - **A finite product that telescopes and has a free variable evaluates to its
   closed form.** `["Product", ["Divide", ["Add", "x", "n", 1], ["Add", "x",
   "n"]], ["Limits", "n", 1, 1000]]` took about four minutes and gave a

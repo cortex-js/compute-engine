@@ -184,7 +184,60 @@ function colorValuePositions(expr: Expression): ReadonlyArray<Expression> {
  * that may be a list is a color.
  */
 export function isColorValued(expr: Expression): boolean {
-  return isSubtypeOfBroadcastOrIndexed(expr.type.type, NESTED_COLOR_ELEMENT);
+  const t = expr.type.type;
+  if (cannotBeColorValued(t)) return false;
+  return isSubtypeOfBroadcastOrIndexed(t, NESTED_COLOR_ELEMENT);
+}
+
+/** The answer of the full color test for each primitive type, computed once.
+ * A primitive type does not depend on the engine (it names no alias), so
+ * its answer never changes. */
+const PRIMITIVE_COLOR_ANSWER = new Map<string, boolean>();
+
+/**
+ * A pre-test for `isColorValued`: true only when the full test must answer
+ * false, so that a caller can skip the full test.
+ *
+ * The full test, `isSubtypeOfBroadcastOrIndexed`, expands each of its four
+ * `broadcastable` levels again on every call. For a tuple of numbers it
+ * costs about 30 µs, and the constant fold of a list of 224 such tuples
+ * called it once for each tuple: about half of the compile time of that
+ * fold.
+ *
+ * A primitive type answers what the full test answers for it. A tuple, a
+ * list, a broadcastable, a collection and a union cannot be a color, or a
+ * collection of colors, when none of the types inside it can be one: the
+ * full test admits them only through their elements (a union through every
+ * arm). Every other kind (a reference to an alias, a type variable, a
+ * negation, an intersection, a ranged number, a literal value, an
+ * expression type, a record, a set, a function signature) answers false
+ * here and goes to the full test, which reads aliases and can find a type
+ * that holds no value (`never`), which is a subtype of every type.
+ *
+ * (CE-1065, the `apollonian-gasket` prelude of Tycho.)
+ */
+function cannotBeColorValued(t: Type): boolean {
+  if (typeof t === 'string') {
+    let answer = PRIMITIVE_COLOR_ANSWER.get(t);
+    if (answer === undefined) {
+      answer = isSubtypeOfBroadcastOrIndexed(t, NESTED_COLOR_ELEMENT);
+      PRIMITIVE_COLOR_ANSWER.set(t, answer);
+    }
+    return !answer;
+  }
+  switch (t.kind) {
+    case 'tuple':
+      return t.elements.every((e) => cannotBeColorValued(e.type));
+    case 'list':
+    case 'broadcastable':
+    case 'collection':
+    case 'indexed_collection':
+      return cannotBeColorValued(t.elements);
+    case 'union':
+      return t.types.every(cannotBeColorValued);
+    default:
+      return false;
+  }
 }
 
 /** The element of the four-level color test of `isColorValued`: three more
