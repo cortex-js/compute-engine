@@ -1051,6 +1051,12 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * If the expression cannot be evaluated, due to the values, types, or
      * assumptions about its arguments, return `undefined` or
      * an `["Error"]` expression.
+     *
+     * The handler must not evaluate an expression that contains the call
+     * that it evaluates, for example an expression that the host code keeps
+     * in a variable. The engine does not detect this, and the result is not
+     * specified. Under `evaluateAsync()` the promise of the outer evaluation
+     * can never settle (see `evaluateAsync`).
      */
     evaluate?:
       | ((
@@ -1070,6 +1076,17 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * evaluation started with options of the handler's own inherits the
      * window in force when it starts, but a handler that awaits BEFORE it
      * evaluates its operand starts that evaluation outside the window.
+     *
+     * The handler must not evaluate an expression that contains the call
+     * that it evaluates. If it does, the promise of the outer evaluation can
+     * never settle. For example, with `g` a host operator whose handler is
+     * `async () => { await node.evaluateAsync(); return ce.number(5); }`
+     * and `node` the expression `Reverse(List(1, g()))`, the call
+     * `node.evaluateAsync()` never settles. When `g` is declared `pure`, the
+     * nested call waits for the evaluation of `node` that is in progress,
+     * and that evaluation waits for the handler. Otherwise, each nested call
+     * starts a new evaluation of `node`, which calls the handler again,
+     * without end. The engine does not detect either case.
      */
     evaluateAsync?: (
       ops: ReadonlyArray<Expression>,

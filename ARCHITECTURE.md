@@ -1400,6 +1400,18 @@ collection contracts. In particular:
   `R(3, y)`. The evaluated arguments are kept (`R(3, Sin(0), y)` becomes
   `R(3, 0, y)`). Numeric arguments are not affected and use the application
   memo. (`guardSymbolicRecursion` in `function-utils.ts`.)
+- A host `evaluate` or `evaluateAsync` handler must not evaluate an expression
+  that contains the call it evaluates. The engine does not detect this, and the
+  result is not specified. Under `evaluateAsync()` the outer promise never
+  settles. With `node = Reverse(List(1, g()))` and a handler of `g` that awaits
+  `node.evaluateAsync()`: when `g` is pure, the nested call joins the walk of
+  the lazy node that is in progress (`_lazyValuePending` in
+  `boxed-function.ts`), and that walk waits for the handler; when `g` is not
+  pure, each nested call starts a new walk, which calls the handler again,
+  without end. The synchronous route gives `[5, 1]` for this example. This is
+  a documented rule, not a check: a check needs to know that a nested call
+  belongs to the walk that it would wait on, and an asynchronous evaluation
+  does not carry that information across an `await`.
 - Do not advance an invalidation counter (`ce._anyVersion` or another version)
   to make a temporary cache epoch around a computation. A scope pop compares the
   counters with their values at the push, so any advance inside the scope makes
