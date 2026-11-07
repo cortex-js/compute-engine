@@ -71,6 +71,19 @@
 
 ### Resolved Issues
 
+- **The limit at infinity of a quotient of an exponential and a power is now
+  correct when the exponent grows slowly.** `\lim_{x\to\infty} e^{\sqrt{x}}/x^5`
+  gave `0` and is now `+∞`; `\lim_{x\to\infty} x^5/e^{\sqrt{x}}` gave `+∞` and
+  is now `0`. The same applies to `e^{\sqrt[3]{x}}/x^{20}`, `2^{\sqrt{x}}/x^5`
+  and `e^{\ln(x)\ln(x+1)}/x^9` (`+∞`, was `0`). The order of growth of two
+  terms is now decided from their form, never from sample values. When it
+  cannot be decided, the limit stays unevaluated: for example
+  `\Gamma(x+1)/(x\Gamma(x))` and `x(\frac{\pi}{2}-\arctan x)`, which gave `1`,
+  now stay unevaluated.
+- **The limit at infinity of a product with a difference of logarithms is now
+  correct.** `\lim_{x\to\infty} x(\ln(x-1)-\ln(x+1))` gave `0` and is now
+  `-2`.
+
 - **The derivative of a definite integral is now evaluated.** `D` of an
   `Integrate` with bounds stayed unevaluated: `\frac{d}{dy}\int_0^1 xy\,dx`
   gave `D(int_(0)^(1)(x * y dx), y)`, and now gives `1/2`. When the integral

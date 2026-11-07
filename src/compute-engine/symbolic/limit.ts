@@ -87,6 +87,30 @@ export function symbolicLimit(
   dir: number | undefined,
   ce: ComputeEngine
 ): Expression | undefined {
+  // Each call has its own cache of growth comparisons: a nested call (the
+  // limit at a symbolic point, a bound of an integral) can run in another
+  // scope, where the same names have other declarations. The budget of
+  // comparisons is shared with the outermost call, so that nested calls do
+  // not multiply the cost.
+  const savedCache = growthCache;
+  const ownsBudget = growthBudget === undefined;
+  growthCache = new Map();
+  if (ownsBudget) growthBudget = { left: MAX_GROWTH_COMPARISONS };
+  try {
+    return symbolicLimitUncached(body, x, point, dir, ce);
+  } finally {
+    growthCache = savedCache;
+    if (ownsBudget) growthBudget = undefined;
+  }
+}
+
+function symbolicLimitUncached(
+  body: Expression,
+  x: string,
+  point: Expression,
+  dir: number | undefined,
+  ce: ComputeEngine
+): Expression | undefined {
   try {
     // A `Function` literal wraps its body in a `Block` (`(x) ↦ {body}`); unwrap
     // it so the structural strategies see the actual operator (Divide, Power…).
@@ -255,48 +279,71 @@ function limitDispatch(
 ): Expression | undefined {
   if (depth > MAX_DEPTH) return undefined;
   // The symbolic recursion (leading-order rewrites, L'Hôpital differentiation of
-  // exp/log towers, numeric growth probes) can grind for many minutes on hard
-  // Gruntz-class limits. Bound it by the engine evaluation deadline: the throw
-  // unwinds to the public boundary, which returns the inert `Limit` form.
+  // exp/log towers) can grind for many minutes on hard Gruntz-class limits.
+  // When the host sets a time limit, the evaluation deadline bounds it, and
+  // the throw unwinds to the public boundary; with no time limit,
+  // `checkDeadline()` does nothing. The nested limits of the growth
+  // comparisons have a bound of their own (`MAX_GROWTH_COMPARISONS`).
   checkDeadline(ce._deadlineFrame);
   if (!e.has(x)) return e.evaluate();
 
   if (point.isInfinity === true) {
     // Map x → −∞ onto x → +∞ via the substitution x ↦ −x.
-    let g = point.isNegative === true ? e.subs({ [x]: ce.symbol(x).neg() }) : e;
-    // Combine cancellation-prone `ln`/`√` differences BEFORE any leading-order
-    // or growth ranking: co-dominant pairs like `ln(x+1) − ln x` (~1/x) defeat
-    // the asymptotic pass, which ranked them by their (cancelling) leading
-    // terms and produced wrong finite limits — `x·(ln(x+1) − ln x)` → 0
-    // instead of 1 (CORRECTNESS_FINDINGS P0-3). The combined forms
-    // (`ln((x+1)/x)`, conjugate quotients) are handled exactly by the
-    // existing strategies.
-    g = combineCancellingPairs(g, x, ce);
-    // The strategies at infinity read the SIGN of a term to choose between
-    // `+∞` and `−∞`, which has no meaning for a complex value: `i·x` was
-    // read as `+∞`, so `e^{ix}` gave `+∞` and `Erf(ix)` gave `1`. An
-    // expression with a non-real constant is resolved through its real and
-    // imaginary parts instead, or declined. This test comes before the
-    // numeric stability test below, whose probes read a complex value as
-    // `NaN`.
-    if (hasNonRealConstant(g)) return complexLimitAtPosInf(g, x, ce, depth);
-    // Bail *before* simplify (which can distribute and mangle the structure) if
-    // any subexpression cancels catastrophically or overflows at the probes —
-    // the symbolic pass can't rank such a form, so defer to the numeric limit.
-    if (numericallyUnstable(g, x, ce, 0)) return undefined;
-    // `simplify` is otherwise helpful at infinity (the leading-order rewrite
-    // handles sums); at a finite point it can distribute a quotient into a sum
-    // and defeat L'Hôpital, so the finite path keeps the structure instead.
-    const r = limitAtPosInf(g.simplify(), x, ce, depth);
-    if (r !== undefined) return r;
-    // The strategies at infinity read the growth of the terms, and they do
-    // not see a product such as `x·(e^{1/x} − 1)`, whose factors go to `+∞`
-    // and to 0. The series of the function with `x = 1/u` at `u = 0` gives
-    // its exact limit (1) when that series has no negative power.
-    return constantTermAtInfinity(g, x, ce);
+    const g =
+      point.isNegative === true ? e.subs({ [x]: ce.symbol(x).neg() }) : e;
+    return limitAtPosInfPrepared(g, x, ce, depth);
   }
 
   return limitAtFinite(e, x, point, dir, ce, depth);
+}
+
+/**
+ * The limit of `g` as x → +∞, after the rewrites and checks that every
+ * limit at infinity needs before `limitAtPosInf()`. Both a limit of the
+ * caller and the nested limit of a growth comparison
+ * (`logMagnitudeCompare()`) start here: without these steps, the nested
+ * limit of `√(x + x^{0.9}) − √x` went to the leading-order rewrite, which
+ * replaces both terms by `√x`, and gave 0, not `+∞`.
+ */
+function limitAtPosInfPrepared(
+  g0: Expression,
+  x: string,
+  ce: ComputeEngine,
+  depth: number
+): Expression | undefined {
+  checkDeadline(ce._deadlineFrame);
+  if (!g0.has(x)) return g0.evaluate();
+  let g = g0;
+  // Combine cancellation-prone `ln`/`√` differences BEFORE any leading-order
+  // or growth ranking: co-dominant pairs like `ln(x+1) − ln x` (~1/x) defeat
+  // the asymptotic pass, which ranked them by their (cancelling) leading
+  // terms and produced wrong finite limits — `x·(ln(x+1) − ln x)` → 0
+  // instead of 1 (CORRECTNESS_FINDINGS P0-3). The combined forms
+  // (`ln((x+1)/x)`, conjugate quotients) are handled exactly by the
+  // existing strategies.
+  g = combineCancellingPairs(g, x, ce);
+  // The strategies at infinity read the SIGN of a term to choose between
+  // `+∞` and `−∞`, which has no meaning for a complex value: `i·x` was
+  // read as `+∞`, so `e^{ix}` gave `+∞` and `Erf(ix)` gave `1`. An
+  // expression with a non-real constant is resolved through its real and
+  // imaginary parts instead, or declined. This test comes before the
+  // numeric stability test below, whose probes read a complex value as
+  // `NaN`.
+  if (hasNonRealConstant(g)) return complexLimitAtPosInf(g, x, ce, depth);
+  // Bail *before* simplify (which can distribute and mangle the structure) if
+  // any subexpression cancels catastrophically or overflows at the probes —
+  // the symbolic pass can't rank such a form, so defer to the numeric limit.
+  if (numericallyUnstable(g, x, ce, 0)) return undefined;
+  // `simplify` is otherwise helpful at infinity (the leading-order rewrite
+  // handles sums); at a finite point it can distribute a quotient into a sum
+  // and defeat L'Hôpital, so the finite path keeps the structure instead.
+  const r = limitAtPosInf(g.simplify(), x, ce, depth);
+  if (r !== undefined) return r;
+  // The strategies at infinity read the growth of the terms, and they do
+  // not see a product such as `x·(e^{1/x} − 1)`, whose factors go to `+∞`
+  // and to 0. The series of the function with `x = 1/u` at `u = 0` gives
+  // its exact limit (1) when that series has no negative power.
+  return constantTermAtInfinity(g, x, ce);
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1192,10 +1239,14 @@ function limitAtPosInf(
     const lead = coeffs?.[deg];
     // A leading coefficient with no decided sign (a symbol `a` with no
     // assumption) has no decided limit: `a·x` goes to `+∞`, to `−∞` or stays
-    // at `0`, depending on `a`.
-    if (lead?.isNegative === true) return ce.NegativeInfinity;
-    if (lead?.isPositive === true) return ce.PositiveInfinity;
-    if (lead) return undefined;
+    // at `0`, depending on `a`. A constant such as `ln 6 − ln 3` has the
+    // sign of its numeric value (`constantSign()`).
+    if (lead) {
+      const s = constantSign(lead);
+      if (s < 0) return ce.NegativeInfinity;
+      if (s > 0) return ce.PositiveInfinity;
+      return undefined;
+    }
   }
 
   const op = e.operator;
@@ -1232,16 +1283,43 @@ function limitAtPosInf(
     const finite: Expression[] = [];
     let posInf = 0;
     let negInf = 0;
+    let firstInfinite: { term: Expression; sign: number } | undefined;
     for (const t of oo(e)) {
       const l = limitAtPosInf(t, x, ce, depth + 1);
       if (!l) return undefined;
       if (l.isInfinity === true) {
         if (l.isNegative === true) negInf++;
         else posInf++;
+        firstInfinite ??= { term: t, sign: l.isNegative === true ? -1 : 1 };
       } else if (isDefiniteValue(l)) finite.push(l);
       else return undefined;
     }
-    if (posInf > 0 && negInf > 0) return undefined; // ∞ − ∞ (needs cancellation)
+    // ∞ − ∞: the terms that tend to infinity have the same order (the
+    // leading-order rewrite dropped the others), as in `(ln(x + 1))^{11/10}
+    // − 2·(ln x)^{11/10}`. With `t` the first such term, the sum is
+    // `t·Σ(sᵢ/t)`, and each `sᵢ/t` has a finite limit `cᵢ` (0 for a term
+    // with a finite limit). When `Σcᵢ` has a proved sign, the sum tends to
+    // the infinity of `t` with that sign. When `Σcᵢ` is 0 or its sign is not
+    // proved, the terms cancel to a lower order: decline.
+    if (posInf > 0 && negInf > 0) {
+      if (depth >= MAX_DEPTH || firstInfinite === undefined) return undefined;
+      const ratios: Expression[] = [];
+      for (const s of oo(e)) {
+        if (s === firstInfinite.term) {
+          ratios.push(ce.One);
+          continue;
+        }
+        const c = limitRatioAtPosInf(s, firstInfinite.term, x, ce, depth + 1);
+        if (c === undefined || !isDefiniteValue(c, x)) return undefined;
+        ratios.push(c);
+      }
+      const total = ce.function('Add', ratios).evaluate();
+      const sign = constantSign(total);
+      if (sign === 0) return undefined;
+      return sign * firstInfinite.sign > 0
+        ? ce.PositiveInfinity
+        : ce.NegativeInfinity;
+    }
     if (posInf > 0) return ce.PositiveInfinity;
     if (negInf > 0) return ce.NegativeInfinity;
     if (finite.length === 0) return ce.Zero;
@@ -1373,9 +1451,9 @@ function limitRatioAtPosInf(
     ce
   );
 
-  // A quotient in a part has no growth level, and the numeric comparison
-  // does not see a slow rate: `1/(ln(x)/√x)` gave no limit, but `√x/ln(x)`
-  // gives `+∞` (a polynomial grows faster than a logarithm). The rewrite
+  // A quotient in a part has no growth level: `√x/ln(x)` gives `+∞` from
+  // the levels (a polynomial grows faster than a logarithm), and
+  // `1/(ln(x)/√x)` gets the same result from this rewrite. The rewrite
   // `(a/b)/(c/d) = (a·d)/(b·c)` is exact where the four parts are defined
   // and `b`, `c` and `d` are not 0, which is where the quotient is defined.
   // The rewritten ratio replaces the original one: the rules below would
@@ -1417,11 +1495,10 @@ function limitRatioAtPosInf(
     // Same growth order → ratio of leading coefficients.
     const r = n.div(d).simplify();
     if (!r.has(x)) return r.evaluate();
-    // The numeric growth comparison does not see a very small power:
-    // `x^(1 + 10^-30)` and `x` have almost the same value at each probe
-    // point, so they were taken to grow at the same rate, and the numeric
-    // ratio gave 1. When the exact quotient is `k·x^c` with constants `k`
-    // and `c`, the signs of `k` and `c` give the limit.
+    // A same-order result can come from a comparison that does not see a
+    // very small power (`x^(1 + 10^-30)` and `x`). When the exact quotient
+    // is `k·x^c` with constants `k` and `c`, the signs of `k` and `c` give
+    // the limit.
     const [k, p] =
       r.operator === 'Multiply' && oo(r).length === 2 && !o1(r).has(x)
         ? [o1(r), o2(r)]
@@ -1457,7 +1534,19 @@ function limitRatioAtPosInf(
 
   // Growth comparison inconclusive: a genuine 0/0 or ∞/∞ that the asymptotic
   // pass couldn't rank → L'Hôpital (differentiate top and bottom, recurse).
-  if (depth < MAX_DEPTH) {
+  // L'Hôpital's rule holds when `|d| → ∞`, or when both parts tend to 0;
+  // the same-order branch above has proved one of these. Otherwise it is
+  // checked here: for `(2 + sin t)/(3 + sin t)`, which has no limit, the
+  // quotient of the derivatives is `cos t/cos t = 1`.
+  // The nested limit of a growth comparison (`logMagnitudeCompare()`) does
+  // not use L'Hôpital's rule: each derivative is a larger expression whose
+  // terms are compared again, and the cost grows with each step. The
+  // comparison is then not known, and the caller declines.
+  if (
+    depth < MAX_DEPTH &&
+    growthNesting === 0 &&
+    (cmp !== undefined || lHopitalApplies(n, d, x, ce, depth))
+  ) {
     const dn = differentiate(n, x);
     const dd = differentiate(d, x);
     if (dn && dd && !dd.is(0)) {
@@ -1466,6 +1555,45 @@ function limitRatioAtPosInf(
     }
   }
   return undefined;
+}
+
+/**
+ * The sign of a constant `c` (an expression with no variable): `1`, `−1`,
+ * or `0` when it is not known or `c` may be 0. The sign that the engine
+ * proves comes first. Else a real numeric value with a magnitude above
+ * `10⁻⁹` gives the sign: `1 − ln 3/ln 6` is `0.386…`. The numeric value of
+ * a constant has an error near the working precision, so a value closer
+ * to 0 is not read: such a constant may be exactly 0.
+ */
+function constantSign(c: Expression): number {
+  if (c.isPositive === true) return 1;
+  if (c.isNegative === true) return -1;
+  if (c.isNaN === true || c.isFinite !== true) return 0;
+  const v = c.N();
+  if (!isNumber(v) || v.im !== 0) return 0;
+  const re = v.re;
+  if (!Number.isFinite(re) || Math.abs(re) <= 1e-9) return 0;
+  return re > 0 ? 1 : -1;
+}
+
+/**
+ * Whether L'Hôpital's rule applies to `n/d` as x → +∞: `|d| → ∞`, or both
+ * `n` and `d` tend to 0. A limit is 0 only when it is exactly the number 0:
+ * `.is(0)` accepts a value within the engine tolerance, and the limit of
+ * `10^{-30} + e^{-100x}` is not 0.
+ */
+function lHopitalApplies(
+  n: Expression,
+  d: Expression,
+  x: string,
+  ce: ComputeEngine,
+  depth: number
+): boolean {
+  if (tendsToInfinity(d, x, ce) === true) return true;
+  const isExactZero = (l: Expression | undefined): boolean =>
+    l !== undefined && isNumber(l) && l.isSame(0);
+  if (!isExactZero(limitAtPosInf(d, x, ce, depth + 1))) return false;
+  return isExactZero(limitAtPosInf(n, x, ce, depth + 1));
 }
 
 function limitPowerAtPosInf(
@@ -1831,6 +1959,25 @@ function leadingOrder(
   if (op === 'Add') {
     const terms = oo(e).map((t) => leadingOrder(t, x, ce, depth + 1));
     const dom = dominantTerms(terms, x, ce);
+    // Each rewritten term is the original term times `1 + o(1)`. A sum of
+    // such terms keeps the leading order of the original sum only when the
+    // dominant terms do not cancel. `√(x + x^{0.9}) − √x` tends to `+∞`,
+    // but its rewritten terms are `√x − √x = 0`. When the sum of the
+    // dominant terms is not proved to have their order, the terms may
+    // cancel, and a dominated term may then decide the limit: the sum keeps
+    // its original terms. A rewrite that changes each term by an amount that
+    // tends to 0 is not enough either: `ln(x − 1) − ln x` and `ln x − ln x`
+    // both tend to 0, but under a product `x·(ln(x − 1) − ln x)` tends to
+    // −1, and `x·0` to 0. A difference of logarithms is combined before
+    // this rewrite (`combineCancellingPairs()`).
+    if (dom.length > 1) {
+      const s = ce.function('Add', dom).simplify();
+      // Each dominant term is compared, not only the first: when
+      // `dominantTerms()` cannot order the terms, it returns all of them,
+      // and they need not have the same order.
+      if (!s.has(x) || dom.some((t) => compareGrowth(s, t, x, ce) !== 0))
+        return e;
+    }
     // Only drop dominated terms when the dominant one is *unbounded*. If the sum
     // tends to a finite constant (1 + 1/x → 1), the vanishing terms are
     // essential to any function applied to it — ln(1+1/x) ~ 1/x, not ln(1) = 0.
@@ -1858,6 +2005,19 @@ function leadingOrder(
   }
   if (LEADING_ORDER_TRANSPARENT_HEADS.has(op) && oo(e) && oo(e).length > 0) {
     const newOps = oo(e).map((o) => leadingOrder(o, x, ce, depth + 1));
+    // `ln u = ln u' + ln(u/u')`, where `u'` is the rewritten argument and
+    // `u/u' → 1`. So `ln u'` has the leading order of `ln u` only when
+    // `ln u'` grows without bound, that is when `u'` tends to `∞` or to 0.
+    // When `u'` tends to a constant, the rewrite loses the value:
+    // `(x − 1)/(x + 1)` becomes `x/x = 1`, and `x·ln((x − 1)/(x + 1))`,
+    // which tends to −2, became `x·ln 1 = 0`. The argument is then kept.
+    // A logarithm with a base keeps its operands: the base can depend on
+    // `x`, and its leading order can tend to 1 (`(x + 1)/x` becomes 1).
+    if (op === 'Log' && oo(e).length > 1) return e;
+    if ((op === 'Ln' || op === 'Log') && !newOps[0].isSame(o1(e))) {
+      const c = compareGrowth(newOps[0], ce.One, x, ce);
+      if (c !== 1 && c !== -1) return e;
+    }
     return ce.function(op, newOps);
   }
   return e;
@@ -1894,14 +2054,16 @@ function dominantTerms(
 }
 
 /**
- * Compare the growth of `a` and `b` as x → +∞.
- * Returns 1 (a faster), −1 (a slower), 0 (same order), or undefined (unknown).
+ * Compare the magnitudes of `a` and `b` as x → +∞.
+ * Returns 1 when `|a/b| → +∞`, −1 when `|a/b| → 0`, 0 when `|a/b|` tends to
+ * a finite value that is not 0, and `undefined` when this is not proved.
  *
- * Uses a coarse *symbolic* growth level (bounded < log < poly < exp < …) to
- * settle cross-class comparisons — moderate-x numeric probing cannot see, for
- * instance, that eˣ overtakes x¹⁰⁰ (their crossover is near x ≈ 700) and would
- * wrongly rank x¹⁰⁰ higher. Within the same level (3ˣ vs 5ˣ, x² vs x³) numeric
- * probing is reliable, so it decides those.
+ * First a coarse symbolic growth level (bounded < log < poly < exp < …)
+ * settles a comparison between two classes. When the levels are equal or not
+ * known, the limit of `ln|a| − ln|b|` decides (`logMagnitudeCompare()`).
+ * Numeric samples never decide: the samples at `x = 8, 30, 120` ranked
+ * `x⁵` above `e^{√x}` (the crossover is near `x ≈ 2·10⁴`), and the limit of
+ * `e^{√x}/x⁵` was 0, not `+∞`.
  */
 function compareGrowth(
   a: Expression,
@@ -1913,14 +2075,264 @@ function compareGrowth(
   const lb = growthLevel(b, x, ce, 0);
   if (la !== undefined && lb !== undefined && la !== lb)
     return la < lb ? -1 : 1;
-  return numericGrowthCompare(a, b, x, ce);
+  return logMagnitudeCompare(a, b, x, ce);
+}
+
+/**
+ * The number of `logMagnitudeCompare()` calls that are active. Each call
+ * computes a limit, and that limit can compare the growth of its own terms,
+ * so the calls nest. The count limits the nesting, and thus the cost: past
+ * `MAX_GROWTH_NESTING`, the comparison is not known.
+ */
+let growthNesting = 0;
+const MAX_GROWTH_NESTING = 4;
+
+/**
+ * The depth at which the limit of a log difference starts. It leaves
+ * `MAX_DEPTH − GROWTH_LIMIT_DEPTH` levels of recursion to each nested
+ * limit, so that a comparison stays cheap; a deeper limit is not known, and
+ * the comparison declines.
+ */
+const GROWTH_LIMIT_DEPTH = 7;
+
+/**
+ * The results of `logMagnitudeCompare()` during one `symbolicLimit()` call,
+ * keyed by the variable and the MathJSON of the two terms. The same pair is
+ * compared many times: by each sum of the leading-order rewrite, by
+ * `tendsToInfinity()` and by each nested limit. The assumptions and
+ * definitions do not change during the call, so a result stays valid until
+ * the call returns. A nested `symbolicLimit()` call has a cache of its own.
+ */
+let growthCache: Map<string, number | undefined> | undefined;
+
+/**
+ * The number of comparisons from the logarithms (`logMagnitudeCompare()`)
+ * that the outermost `symbolicLimit()` call can still compute. Each one
+ * computes a nested limit, whose sums compare their own terms. Without a
+ * budget, a form whose comparisons all decline (`6^x/(3^x·2^x)`, where the
+ * exponent `x·(ln 6 − ln 2 − ln 3)` is not proved to be 0) took minutes, as
+ * the engine sets no time limit by default. When the budget is spent, a
+ * comparison is not known, and the limit declines.
+ */
+let growthBudget: { left: number } | undefined;
+const MAX_GROWTH_COMPARISONS = 48;
+
+/**
+ * Compare the magnitudes of `a` and `b` as x → +∞ from the limit `L` of
+ * `ln|a| − ln|b|`: `L = +∞` gives 1, `L = −∞` gives −1, and a finite `L`
+ * gives 0 (then `|a/b|` tends to `e^L`). Any other result, or no limit,
+ * gives `undefined`.
+ *
+ * The logarithm lowers the growth level by one, so the terms of the
+ * difference are often in different levels: for `e^{√x}` and `x⁵` the
+ * difference is `√x − 5·ln x`, and `√x` (a power) dominates `ln x`. The
+ * logarithms are expanded from the form of each part (`logAbs()`), so a
+ * degree such as `(((ln x)^{11/10})^{11/10})^{100/121}` is the exact
+ * rational product of its exponents.
+ */
+function logMagnitudeCompare(
+  a: Expression,
+  b: Expression,
+  x: string,
+  ce: ComputeEngine
+): number | undefined {
+  if (growthNesting >= MAX_GROWTH_NESTING) return undefined;
+  const key =
+    growthCache === undefined
+      ? undefined
+      : `${x}\u0000${JSON.stringify(a.json)}\u0000${JSON.stringify(b.json)}`;
+  if (key !== undefined && growthCache!.has(key)) return growthCache!.get(key);
+  if (growthBudget !== undefined) {
+    if (growthBudget.left <= 0) return undefined;
+    growthBudget.left -= 1;
+  }
+  const result = logMagnitudeCompareUncached(a, b, x, ce);
+  // A result found past the nesting limit, or after the budget ran out, can
+  // be `undefined` only because of that limit; it is not kept, so that a
+  // call with less nesting tries again.
+  if (
+    key !== undefined &&
+    (result !== undefined ||
+      (growthNesting === 0 && (growthBudget?.left ?? 1) > 0))
+  )
+    growthCache!.set(key, result);
+  return result;
+}
+
+function logMagnitudeCompareUncached(
+  a: Expression,
+  b: Expression,
+  x: string,
+  ce: ComputeEngine
+): number | undefined {
+  const bySeries = seriesGrowthCompare(a, b, x, ce);
+  if (bySeries !== undefined) return bySeries;
+  const la = logAbs(a, x, ce);
+  if (la === undefined) return undefined;
+  const lb = logAbs(b, x, ce);
+  if (lb === undefined) return undefined;
+  growthNesting += 1;
+  try {
+    // Simplify first, so that equal logarithms cancel before the
+    // leading-order rewrite compares the terms of the difference.
+    const diff = ce.function('Add', [la, lb.neg()]).simplify();
+    if (!diff.has(x)) {
+      const v = diff.evaluate();
+      return isDefiniteValue(v) && v.isFinite === true ? 0 : undefined;
+    }
+    const l = limitAtPosInfPrepared(diff, x, ce, GROWTH_LIMIT_DEPTH);
+    if (l === undefined) return undefined;
+    if (l.isInfinity === true) {
+      if (l.isPositive === true) return 1;
+      if (l.isNegative === true) return -1;
+      return undefined;
+    }
+    return isDefiniteValue(l, x) && l.isFinite === true ? 0 : undefined;
+  } finally {
+    growthNesting -= 1;
+  }
+}
+
+/**
+ * Compare the magnitudes of `a` and `b` as x → +∞ from the Laurent series
+ * of `a/b` with `x = 1/u` at `u = 0`: a series that starts at a negative
+ * power of `u` gives 1, one that starts at a positive power gives −1, and
+ * one that starts at the power 0 gives 0. `undefined` when there is no
+ * such series (an essential singularity such as `e^{1/u}`, a branch
+ * point).
+ *
+ * The series is exact, and it is cheaper than the limit of a log
+ * difference for a factor that tends to a constant: the log difference of
+ * `x·ln(1 + 1/x)` and 1 holds `ln(ln(1 + 1/x))`.
+ *
+ * A quotient that simplifies to a constant that is not 0 gives 0 at once,
+ * with no nested limit: `e^{x+1}/eˣ` simplifies to `e`.
+ */
+function seriesGrowthCompare(
+  a: Expression,
+  b: Expression,
+  x: string,
+  ce: ComputeEngine
+): number | undefined {
+  const ratio = a.div(b).simplify();
+  if (!ratio.has(x)) return constantSign(ratio) !== 0 ? 0 : undefined;
+  const u = ['u', 'w', 's', 't', 'q', 'tau', 'xi', 'eta'].find(
+    (name) => name !== x && !ratio.has(name)
+  );
+  if (u === undefined) return undefined;
+  ce.pushScope();
+  try {
+    ce.declare(u, 'real');
+    const f = ratio.subs({
+      [x]: ce.function('Divide', [ce.One, ce.symbol(u)]),
+    });
+    const L = laurentData(f, u, ce.Zero, ce, 3);
+    if (!L) return undefined;
+    if (L.v !== 0) return L.v < 0 ? 1 : -1;
+    const c = L.coeff(0).evaluate();
+    if (!c.isValid || c.isNaN === true || c.has(u) || c.has(x))
+      return undefined;
+    return c.isFinite === true && c.is(0) === false ? 0 : undefined;
+  } finally {
+    ce.popScope();
+  }
+}
+
+/**
+ * An expression whose difference with `ln|e|` tends to 0 as x → +∞ (it is
+ * equal to `ln|e|` for large real `x` in every case below), or `undefined`
+ * when `e` is a constant that may be 0.
+ *
+ * - `ln|c·d| = ln|c| + ln|d|` and `ln|c/d| = ln|c| − ln|d|`.
+ * - `ln|b^k| = k·ln|b|` for a real constant `k`, and `ln|√b| = ln|b|/2`.
+ * - `ln|e^g| = g` and `ln|c^g| = g·ln c` for a constant `c > 0`, when `g`
+ *   is real. A non-real constant in `g` gives `undefined`.
+ * - `ln|b^g| = g·ln b` when `b` is proved positive for large `x`.
+ * - `ln|x| = ln x`, because `x > 0`.
+ * - For any other form, `ln|e|` as it is.
+ */
+function logAbs(
+  e: Expression,
+  x: string,
+  ce: ComputeEngine
+): Expression | undefined {
+  checkDeadline(ce._deadlineFrame);
+  if (!e.has(x)) {
+    if (e.is(0) === true || e.isFinite === false) return undefined;
+    return ce.function('Ln', [ce.function('Abs', [e])]);
+  }
+  if (isSymbol(e) && e.symbol === x) return ce.function('Ln', [e]);
+  const op = e.operator;
+  if (op === 'Negate' || op === 'Abs') return logAbs(o1(e), x, ce);
+  if (op === 'Multiply') {
+    const parts: Expression[] = [];
+    for (const f of oo(e)) {
+      const l = logAbs(f, x, ce);
+      if (l === undefined) return undefined;
+      parts.push(l);
+    }
+    return ce.function('Add', parts);
+  }
+  if (op === 'Divide') {
+    const n = logAbs(o1(e), x, ce);
+    const d = n === undefined ? undefined : logAbs(o2(e), x, ce);
+    if (n === undefined || d === undefined) return undefined;
+    return ce.function('Add', [n, d.neg()]);
+  }
+  if (op === 'Sqrt') {
+    const l = logAbs(o1(e), x, ce);
+    return l === undefined ? undefined : l.div(2);
+  }
+  if (op === 'Root') {
+    const k = o2(e);
+    if (
+      !k.has(x) &&
+      k.type.matches('finite_real') &&
+      (k.isPositive === true || k.isNegative === true)
+    ) {
+      const l = logAbs(o1(e), x, ce);
+      return l === undefined ? undefined : l.div(k);
+    }
+  }
+  if (op === 'Exp') {
+    const g = o1(e);
+    return hasNonRealConstant(g) ? undefined : g;
+  }
+  if (op === 'Power') {
+    const b = o1(e);
+    const k = o2(e);
+    if (!k.has(x) && k.type.matches('finite_real')) {
+      const l = logAbs(b, x, ce);
+      return l === undefined ? undefined : l.mul(k);
+    }
+    if (!hasNonRealConstant(k)) {
+      if (!b.has(x) && b.isPositive === true)
+        return k.mul(ce.function('Ln', [b]));
+      if (eventuallyPositive(b, x, ce)) {
+        const l = logAbs(b, x, ce);
+        return l === undefined ? undefined : ce.function('Multiply', [k, l]);
+      }
+    }
+  }
+  // When the sign of `e` is proved, `ln e` or `ln(−e)` has no `Abs`, whose
+  // derivative (a `Sign` factor) makes each L'Hôpital step of the nested
+  // limit larger.
+  const sign = eventualSignAtInf(e, x, ce);
+  if (sign > 0) return ce.function('Ln', [e]);
+  if (sign < 0) return ce.function('Ln', [e.neg()]);
+  return ce.function('Ln', [ce.function('Abs', [e])]);
 }
 
 /**
  * Coarse order-of-growth level of `e` as x → +∞:
  * 0 bounded/decaying · 1 logarithmic · 2 polynomial · 3 exponential ·
  * 4+ iterated exponential. `undefined` when the form can't be classified
- * symbolically (the caller then falls back to numeric probing).
+ * (the caller then compares from the logarithms, `logMagnitudeCompare()`).
+ *
+ * Two terms of different levels compare as their levels: each term of level
+ * 1 is between `ln x` and a power `(ln x)^K`, each term of level 2 is
+ * between `x^ε` and `x^K` for constants `ε, K > 0`, and each term of level
+ * 3 or more is at least `e^{x^ε}`.
  */
 function growthLevel(
   e: Expression,
@@ -1950,16 +2362,15 @@ function growthLevel(
     return growthLevel(o1(e), x, ce, depth + 1);
 
   // A root keeps the growth class of its radicand: `√x` is polynomial,
-  // `√(eˣ) = e^{x/2}` is exponential, `√(ln x)` is logarithmic. Without this
-  // level, `√x − 50` was ranked by numeric probes at small `x`, where the
-  // constant dominates, and `(√x − 50)/ln x` gave `0` instead of `+∞`.
-  // This is true only for a degree that is a constant known to be positive
+  // `√(eˣ) = e^{x/2}` is exponential, `√(ln x)` is logarithmic. With this
+  // level, `√x` dominates the constant in `√x − 50`, and `(√x − 50)/ln x`
+  // gives `+∞`. This is true only for a degree that is a constant known to be positive
   // (`Sqrt` has degree 2). A constant negative degree gives a root that
   // decays (level 0) only when the radicand tends to infinity. When the
   // radicand decays, the root grows: `Root(1/x, -2) = (1/x)^{-1/2} = √x`.
   // Level 0 then ranked it below `ln x`, and a dominant term was dropped. So
-  // in every other case the level is not known, and the numeric fallback
-  // decides. This includes a radicand with a non-zero finite limit
+  // in every other case the level is not known, and the comparison from the
+  // logarithms decides. This includes a radicand with a non-zero finite limit
   // (`Root(2 + 1/x, -2)` tends to `2^{-1/2}`): its level is 0, but this
   // code does not show that the limit is not 0. Any other degree has no
   // level here: `Root(x, x)` is `x^{1/x}`, which tends to 1, and is not
@@ -1974,6 +2385,9 @@ function growthLevel(
     return undefined;
   }
 
+  // The level of a logarithm is read from its argument only: a base that
+  // depends on `x` has no level here (`log_{x+1}(x)` tends to 1).
+  if (op === 'Log' && oo(e).length > 1 && o2(e).has(x)) return undefined;
   if (op === 'Ln' || op === 'Log') {
     const gl = growthLevel(o1(e), x, ce, depth + 1);
     if (gl === undefined || gl <= 0) return undefined;
@@ -1986,23 +2400,14 @@ function growthLevel(
   // `e^{√x}`, which `tendsToInfinity` does not classify), the level is not
   // known: reading it as 0 ranked `e^{√x}` below `x`, and `x/e^{√x}` gave
   // `+∞` instead of `0`.
-  if (op === 'Exp') {
-    const t = exponentialTendsToInfinity(o1(e), x, ce);
-    if (t !== true) return t === false ? 0 : undefined;
-    const gl = growthLevel(o1(e), x, ce, depth + 1);
-    return gl === undefined ? undefined : Math.max(3, gl + 1);
-  }
+  if (op === 'Exp') return exponentialLevel(o1(e), x, ce, depth);
 
   if (op === 'Power') {
     const base = o1(e);
     const expo = o2(e);
     if (!base.has(x) && expo.has(x)) {
-      if (base.isGreater?.(ce.One) === true) {
-        const t = exponentialTendsToInfinity(expo, x, ce);
-        if (t !== true) return t === false ? 0 : undefined;
-        const gl = growthLevel(expo, x, ce, depth + 1);
-        return gl === undefined ? undefined : Math.max(3, gl + 1);
-      }
+      if (base.isGreater?.(ce.One) === true)
+        return exponentialLevel(expo, x, ce, depth);
       if (base.isPositive === true && base.isLess?.(ce.One) === true) return 0;
       return undefined;
     }
@@ -2015,7 +2420,7 @@ function growthLevel(
 
   if (op === 'Multiply') {
     // Dominated by the fastest-growing factor — but a decaying factor (→0) can
-    // pull the product down, so bail to numeric if one is present.
+    // pull the product down, so the level is not known if one is present.
     let lvl = 0;
     for (const f of oo(e)) {
       const g = growthLevel(f, x, ce, depth + 1);
@@ -2035,22 +2440,68 @@ function growthLevel(
     }
     const maxL = Math.max(...levels);
     // Two or more terms at the top level may cancel (e^stuff − eˣ → −e²x), so
-    // the net growth is indeterminate — defer to numeric rather than claiming a
-    // (possibly spurious) exponential order.
+    // the net growth is not known, rather than a (possibly spurious)
+    // exponential order.
     if (levels.filter((l) => l === maxL).length > 1) return undefined;
     return maxL;
   }
 
-  return undefined; // Divide and anything else → numeric
+  return undefined; // Divide and anything else → logMagnitudeCompare()
 }
 
-/** Does |e| → ∞ as x → +∞?  true / false / undefined (unknown). */
+/**
+ * The growth level of `b^g` for a constant `b > 1` (`e^g` included), or
+ * `undefined` when it is not known.
+ *
+ * - `g` bounded, or `g → −∞`: level 0.
+ * - `g → +∞` with the level of a power of `x` or higher (`√x`, `x·ln x`,
+ *   `eˣ`): `g ≥ x^ε` for some `ε > 0` and every large `x`, so `b^g` grows
+ *   faster than every power of `x`: level 3, or one more than the level of
+ *   `g`.
+ * - `g → +∞` with the level of a logarithm: not known. `e^{2·ln x} = x²` is
+ *   a power, and `e^{(ln x)²}` grows faster than every power of `x`.
+ *   `logMagnitudeCompare()` compares such a term from its exponent.
+ */
+function exponentialLevel(
+  g: Expression,
+  x: string,
+  ce: ComputeEngine,
+  depth: number
+): number | undefined {
+  const t = exponentialTendsToInfinity(g, x, ce);
+  if (t !== true) return t === false ? 0 : undefined;
+  const gl = growthLevel(g, x, ce, depth + 1);
+  if (gl === undefined || gl < 2) return undefined;
+  return Math.max(3, gl + 1);
+}
+
+/**
+ * Whether `|e| → ∞` as x → +∞, from `compareGrowth(e, 1)`: `true` when
+ * `|e| → +∞`, `false` when `|e|` tends to a finite value, and `undefined`
+ * when this is not proved.
+ */
+function tendsToInfinityByGrowth(
+  e: Expression,
+  x: string,
+  ce: ComputeEngine
+): boolean | undefined {
+  const c = compareGrowth(e, ce.One, x, ce);
+  if (c === undefined) return undefined;
+  return c > 0;
+}
+
+/**
+ * Does |e| → ∞ as x → +∞?  `true`, `false` (`|e|` is bounded for large `x`)
+ * or `undefined` (not proved). The answer comes from the form of `e`, never
+ * from numeric samples.
+ */
 function tendsToInfinity(
   e: Expression,
   x: string,
   ce: ComputeEngine
 ): boolean | undefined {
   if (!e.has(x)) return false;
+  checkDeadline(ce._deadlineFrame);
   const op = e.operator;
 
   // Bounded functions, regardless of argument.
@@ -2068,7 +2519,24 @@ function tendsToInfinity(
   if (deg === 0) return false;
 
   if (op === 'Exp') return exponentialTendsToInfinity(o1(e), x, ce);
-  if (op === 'Ln' || op === 'Log') return tendsToInfinity(o1(e), x, ce);
+  // A base that depends on `x` can tend to 1: `log_{x+1}(x)` tends to 1.
+  if (op === 'Log' && oo(e).length > 1 && o2(e).has(x)) return undefined;
+  if (op === 'Ln' || op === 'Log') {
+    if (tendsToInfinity(o1(e), x, ce) === true) return true;
+    return tendsToInfinityByGrowth(e, x, ce);
+  }
+
+  // `ⁿ√u` with a constant degree `n > 0` grows without bound exactly when
+  // `u` does (`√x`, `∛(x² + 1)`). With a constant degree `n < 0`, it tends
+  // to 0 when `u` grows without bound.
+  if (op === 'Sqrt') return tendsToInfinity(o1(e), x, ce);
+  if (op === 'Root' && !o2(e).has(x)) {
+    const n = o2(e);
+    if (n.isPositive === true) return tendsToInfinity(o1(e), x, ce);
+    if (n.isNegative === true && tendsToInfinity(o1(e), x, ce) === true)
+      return false;
+    return tendsToInfinityByGrowth(e, x, ce);
+  }
 
   if (op === 'Power') {
     const base = o1(e);
@@ -2084,8 +2552,7 @@ function tendsToInfinity(
       if (base.isPositive === true && base.isLess?.(ce.One) === true)
         return false;
     }
-    // fᵍ via numeric fallback
-    return numericTendsToInfinity(e, x, ce);
+    return tendsToInfinityByGrowth(e, x, ce);
   }
 
   if (op === 'Add') {
@@ -2093,22 +2560,21 @@ function tendsToInfinity(
     const dom = dominantTerms(oo(e), x, ce);
     const domInf = dom.map((t) => tendsToInfinity(t, x, ce));
     if (domInf.some((t) => t === true)) {
-      const reduced = (
-        dom.length === 1 ? dom[0] : ce.function('Add', dom)
-      ).simplify();
-      if (reduced.has(x)) return numericTendsToInfinity(reduced, x, ce);
-      return false;
+      if (dom.length === 1) return true;
+      // The dominant terms decide only when their sum keeps their order.
+      // When they cancel (`e^{2·ln x} − x² + √x`), a dominated term can
+      // still grow without bound: the answer is not known.
+      const reduced = ce.function('Add', dom).simplify();
+      if (reduced.has(x) && compareGrowth(reduced, dom[0], x, ce) === 0)
+        return tendsToInfinityByGrowth(reduced, x, ce);
+      return undefined;
     }
     // The sum is bounded only when each dominant term is bounded. A dominant
-    // term that is not classified (`√x` in `√x − 50`) leaves the answer
-    // unknown.
+    // term that is not classified leaves the answer unknown.
     return domInf.every((t) => t === false) ? false : undefined;
   }
 
-  if (op === 'Multiply' || op === 'Divide')
-    return numericTendsToInfinity(e, x, ce);
-
-  return numericTendsToInfinity(e, x, ce);
+  return tendsToInfinityByGrowth(e, x, ce);
 }
 
 /**
@@ -2117,11 +2583,13 @@ function tendsToInfinity(
  * (then `b^g` is bounded) or negative (then `b^g` is in `(0, 1)`), and
  * `undefined` otherwise.
  *
- * The sign of `g` is read from numeric probes. When a probe has no value (a
- * symbolic parameter, as in `e^{a·x}`) or the probes disagree, a polynomial
- * `g` takes the sign of its leading coefficient, when that sign is known
- * (`a > 0` assumed). Otherwise the sign is not known: `a·x` goes to `+∞` or
- * to `−∞` depending on `a`, so the answer is `undefined`, not `true`.
+ * The sign of `g` is proved from its form (`eventualSignAtInf()`), then from
+ * the form of its leading order (`√x − 50` has the leading order `√x`).
+ * Numeric probes do not decide it: `x^{1/10} − 10` is negative at
+ * `x = 10⁸` and positive for `x > 10¹⁰`. A polynomial `g` takes the sign of
+ * its leading coefficient, when that sign is known (`a > 0` assumed).
+ * Otherwise the sign is not known: `a·x` goes to `+∞` or to `−∞` depending
+ * on `a`, so the answer is `undefined`, not `true`.
  */
 function exponentialTendsToInfinity(
   g: Expression,
@@ -2130,7 +2598,9 @@ function exponentialTendsToInfinity(
 ): boolean | undefined {
   const t = tendsToInfinity(g, x, ce);
   if (t === false) return false;
-  let sign = stableSignAtInf(g, x, ce);
+  let sign = eventualSignAtInf(g, x, ce);
+  if (sign === 0 && t === true)
+    sign = eventualSignAtInf(leadingOrder(g, x, ce, 0), x, ce);
   if (sign === 0) {
     const deg = polynomialDegree(g, x);
     const lead = deg > 0 ? getPolynomialCoefficients(g, x)?.[deg] : undefined;
@@ -2143,15 +2613,15 @@ function exponentialTendsToInfinity(
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Numeric oracles (used only to decide ordering / divergence, never for the
-// returned value, which stays symbolic)
+// Numeric probes. They decline a form whose terms cancel at the probe points
+// (`hasCancellation()`), read a sign (`stableSignAtInf()`) and recover a
+// finite ratio (`leadingCoefficientRatio()`). They do not rank the growth of
+// two terms: `compareGrowth()` and `tendsToInfinity()` are symbolic.
 // ──────────────────────────────────────────────────────────────────────────
 
-const PROBES = [8, 30, 120];
-
 // Compiled machine-float probe functions, keyed by the probed expression.
-// These oracles decide only order-of-growth / divergence (never the returned
-// limit value), so machine precision suffices — and, crucially, a compiled
+// The probes read a sign, a cancellation or an approximate ratio (the
+// returned value is exact, or no value), so machine precision suffices — and, crucially, a compiled
 // tower overflows cleanly to ±Infinity instead of grinding. `null` marks an
 // expression that could not be compiled (fall back to interpreted `.N()`).
 // An entry is for one expression and one variable: the variable is part of
@@ -2206,7 +2676,7 @@ function compiledProbe(
     const lit = ce.function('Function', [e, ce.symbol(x)]);
     // Budgeted so a probe of a Sum/Product with a variable-dependent (or
     // infinite) bound stays cheap — over-budget calls read as NaN, which the
-    // growth oracles already treat as "unreliable, bail".
+    // callers of the probes treat as "unreliable, bail".
     const compiled = implicitCompile(ce, lit, {
       iterationBudget: LIMIT_PROBE_ITERATION_BUDGET,
     }) as { run?: (x: number) => number } | undefined;
@@ -2267,51 +2737,6 @@ function numericAt(
     if (err instanceof CancellationError) throw err;
     return NaN;
   }
-}
-
-function numericTendsToInfinity(
-  e: Expression,
-  x: string,
-  ce: ComputeEngine
-): boolean | undefined {
-  const v = PROBES.map((xv) => Math.abs(numericAt(e, x, xv, ce)));
-  if (v.some((y) => Number.isNaN(y))) return undefined;
-  if (v[2] === Infinity) return true;
-  // Growing strongly and unbounded.
-  if (v[2] > v[1] && v[1] > v[0] && v[2] > 1e3 && v[2] > 100 * v[0])
-    return true;
-  // Clearly settling to a finite value.
-  if (v[2] < 1e3 && Math.abs(v[2] - v[1]) <= 0.01 * Math.max(1, v[2]))
-    return false;
-  return undefined;
-}
-
-function numericGrowthCompare(
-  a: Expression,
-  b: Expression,
-  x: string,
-  ce: ComputeEngine
-): number | undefined {
-  // Compare growth via the trend of D(x) = ln|a(x)| − ln|b(x)| = ln|a/b|.
-  // D → +∞ ⟹ a grows faster; D → −∞ ⟹ slower; D → const ⟹ same order. Using
-  // log-magnitudes keeps moderate-x probes overflow-free and resolves even very
-  // slow rate differences (ln x vs x) that a raw ratio misses.
-  const lnMag = (e: Expression, xv: number): number => {
-    const v = Math.abs(numericAt(e, x, xv, ce));
-    // A probe that hits 0 (often catastrophic cancellation) or a non-finite
-    // value (overflow) is unreliable for a growth comparison — bail rather than
-    // read a spurious order from it (e.g. eˣ-terms cancelling to 0).
-    if (!Number.isFinite(v) || v === 0) return NaN;
-    return Math.log(v);
-  };
-  const d = PROBES.map((xv) => lnMag(a, xv) - lnMag(b, xv));
-  if (d.some((v) => !Number.isFinite(v))) return undefined;
-  const span = d[2] - d[0];
-  // Monotone and meaningfully separating across the probe range.
-  if (d[2] > d[1] && d[1] >= d[0] && span > 1) return 1;
-  if (d[2] < d[1] && d[1] <= d[0] && span < -1) return -1;
-  if (Math.abs(span) < 0.5) return 0; // settled → same order
-  return undefined;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -2915,12 +3340,6 @@ function combineCancellingPairs(
     return ce.function(e.operator, ops);
   }
 
-  // Decompose each term into (sign, core), pairing `Ln` terms of opposite
-  // sign.
-  const sign = (t: Expression): 1 | -1 => (t.operator === 'Negate' ? -1 : 1);
-  const core = (t: Expression): Expression =>
-    t.operator === 'Negate' ? o1(t) : t;
-
   // `k·ⁿ√u` → `{ k, root: ⁿ√u, u, n }`, where `k` is a non-zero real number
   // literal (1 when the term has no coefficient). `undefined` when the term
   // is not a radical of an integer degree from 2 to `MAX_CONJUGATE_DEGREE`.
@@ -3000,24 +3419,57 @@ function combineCancellingPairs(
   // radical and another term). The terms of a sum can be in any order.
   const combinedAt: (Expression | undefined)[] = ops.map(() => undefined);
 
+  // `k·ln u` → `{ k, u }` and `k·ln|u|` → `{ k, u, abs: true }`, where `k`
+  // is a non-zero real number literal (`±1` for `ln u` and `−ln u`).
+  // `undefined` for any other term.
+  const logTerm = (
+    t: Expression
+  ): { k: Expression; u: Expression; abs: boolean } | undefined => {
+    let k: Expression = ce.One;
+    let r = t;
+    if (r.operator === 'Negate') {
+      k = ce.NegativeOne;
+      r = o1(r);
+    }
+    if (r.operator === 'Multiply' && oo(r).length === 2) {
+      const c = o1(r);
+      if (
+        !isNumber(c) ||
+        c.im !== 0 ||
+        (c.isPositive !== true && c.isNegative !== true)
+      )
+        return undefined;
+      k = k.mul(c);
+      r = o2(r);
+    }
+    if (r.operator !== 'Ln' || oo(r).length !== 1) return undefined;
+    const u = o1(r);
+    if (u.operator === 'Abs') return { k, u: o1(u), abs: true };
+    return { k, u, abs: false };
+  };
+
   // Pairs of logarithms, and pairs of radicals of the same degree.
   for (let i = 0; i < ops.length; i++) {
     if (used[i]) continue;
-    const si = sign(ops[i]);
-    const ci = core(ops[i]);
+    const li = logTerm(ops[i]);
     const ri = radicalTerm(ops[i]);
-    if (ci.operator !== 'Ln' && ri === undefined) continue;
+    if (li === undefined && ri === undefined) continue;
     for (let j = i + 1; j < ops.length; j++) {
       if (used[j]) continue;
       let combined: Expression | undefined = undefined;
-      if (ci.operator === 'Ln') {
-        const sj = sign(ops[j]);
-        const cj = core(ops[j]);
-        if (si === sj || cj.operator !== 'Ln') continue;
-        // (u, v) so that the pair is `ln(u) − ln(v)`.
-        const [u, v] = si === 1 ? [o1(ci), o1(cj)] : [o1(cj), o1(ci)];
-        if (!positive(u) || !positive(v)) continue;
-        combined = ce.function('Ln', [ce.function('Divide', [u, v])]);
+      if (li !== undefined) {
+        // `k·ln u − k·ln v = k·ln(u/v)` when `u` and `v` are positive, and
+        // `k·ln|u| − k·ln|v| = k·ln|u/v|` when they are not 0.
+        const lj = logTerm(ops[j]);
+        if (lj === undefined || lj.abs !== li.abs || !lj.k.isSame(li.k.neg()))
+          continue;
+        // (u, v) so that the pair is `k·(ln u − ln v)` with `k > 0`.
+        const [a, b] = li.k.isPositive === true ? [li, lj] : [lj, li];
+        let q: Expression = ce.function('Divide', [a.u, b.u]);
+        if (a.abs) q = ce.function('Abs', [q]);
+        else if (!positive(a.u) || !positive(b.u)) continue;
+        const lnq = ce.function('Ln', [q]);
+        combined = a.k.isSame(1) ? lnq : ce.function('Multiply', [a.k, lnq]);
       } else if (ri !== undefined) {
         const rj = radicalTerm(ops[j]);
         if (rj === undefined || rj.n !== ri.n || !rj.k.isSame(ri.k.neg()))
