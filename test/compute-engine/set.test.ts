@@ -45,11 +45,13 @@ describe('ELEMENT', () => {
     expect(ce.expr(['Element', 2]).evaluate()).toMatchInlineSnapshot(
       `["Error", "'missing'", ["ErrorTrace", ["ErrorFrame", "'Element'", 2]]]`
     );
+    // The third operand is the condition: the error names the type of that
+    // operand (`Numbers`), not the type of the collection (`Integers`).
     expect(ce.expr(['Element', 2, 'Integers', 'Numbers']).evaluate())
       .toMatchInlineSnapshot(`
       [
         "Error",
-        ["ErrorCode", "incompatible-type", "'boolean'", "set<integer>"],
+        ["ErrorCode", "incompatible-type", "'boolean'", "set<number>"],
         ["ErrorTrace", ["ErrorFrame", "'Element'", 3]]
       ]
     `);

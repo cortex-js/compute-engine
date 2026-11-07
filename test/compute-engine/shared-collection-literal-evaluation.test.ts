@@ -81,9 +81,32 @@ describe('a shared operand of a collection literal is evaluated once', () => {
 });
 
 describe('the entry of a tuple does not serve a read after a write', () => {
-  // A view read in the scope that made it reads the current value of `d`
-  // (`docs/SCOPING-MODEL.md`), so the second read gives the new elements.
+  // The assignment of `t` stores the variables that the collection reads
+  // with their values at that statement, but a variable that holds a
+  // function is stored as that function, a closure that reads the later
+  // values of its own variables (`src/epsil/docs/evaluation.md`). So the
+  // view `map(f, …)` reads the current value of `d`, and the second read
+  // must give the new elements, not the entry of the first read.
   test('the same stored tuple read before and after a write of its input', () => {
+    const ce = new ComputeEngine();
+    expect(
+      run(
+        ce,
+        [
+          'let d = 3',
+          'let f = x => x + d',
+          'let t = Tuple(map(f, Range(1, Infinity)), d)',
+          'let before = take(t[1], 2)',
+          'd = 5',
+          '[before, take(t[1], 2), t[2]]',
+        ].join('\n')
+      )
+    ).toBe('[[4,5],[6,7],3]');
+  });
+
+  // With an inline function, the assignment stores `d` with its value at
+  // the statement, so a later write of `d` does not change `t`.
+  test('a stored tuple whose inline function reads a variable keeps its value', () => {
     const ce = new ComputeEngine();
     expect(
       run(
@@ -96,7 +119,7 @@ describe('the entry of a tuple does not serve a read after a write', () => {
           '[before, take(t[1], 2), t[2]]',
         ].join('\n')
       )
-    ).toBe('[[4,5],[6,7],3]');
+    ).toBe('[[4,5],[4,5],3]');
   });
 
   test('the same tuple node evaluated before and after a write', () => {

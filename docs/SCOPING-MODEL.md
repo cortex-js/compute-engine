@@ -63,7 +63,14 @@ differs from a closure, which shares the binding: with
 `if true { let m = 1; h = Map(x => x + m, R); f = (x) => x + m; m = 5 }`,
 the elements of `h` read `m = 1` and `f(0)` gives `5`. A view that is read
 in its own scope, or that is stored in a variable of the same scope, reads
-the current values. A view stored in a field of an object reads the locals
+the current values. One exception: an Epsil assignment (`Assign` or
+`Declare`) of a lazy collection that stays lazy stores the variables that
+the collection reads, also in an inline function, with their values at that
+statement. With `let d = 3`, `let t = map(x => x + d, 1..oo)` and `d = 5`,
+`take(t, 2)` gives `4, 5`. A variable that holds a function is stored as
+that function, which reads the later values of its own variables: with
+`let f = x => x + d` and `let t = map(f, 1..oo)`, `take(t, 2)` gives
+`6, 7` after `d = 5` (`src/epsil/docs/evaluation.md`). A view stored in a field of an object reads the locals
 of every loop and block of the chain with their values at the store: with
 `let o = {v: R}` and `for i in [1, 2] { o.v = Map(x => x + i, R) }`, `o.v`
 reads `i = 2`. The name of the receiver does not tell how long the object

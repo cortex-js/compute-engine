@@ -9,24 +9,37 @@ import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascrip
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /** Count operand-array reads, including repeated visits, without timing or a
- * production diagnostic. Stop a regressed walk before it unfolds a large tree. */
-function countReads(nodes: Expression[], run: () => void, budget: number): number {
+ * production diagnostic. Stop a regressed walk before it unfolds a large tree.
+ * `fields` names the accessors that are counted: the public `ops` getter, and
+ * also the private `_ops` getter of `BoxedFunction` for a walk inside the
+ * class (`subs()` reads `this._ops`). Each counting getter returns the array
+ * that it captured, so a read through `ops` is not counted again as a read of
+ * `_ops`. */
+function countReads(
+  nodes: Expression[],
+  run: () => void,
+  budget: number,
+  fields: readonly ('ops' | '_ops')[] = ['ops']
+): number {
   let reads = 0;
   for (const node of nodes) {
     const ops = node.ops;
-    Object.defineProperty(node, 'ops', {
-      configurable: true,
-      get: () => {
-        if (++reads > budget) throw new Error('shared traversal work budget');
-        return ops;
-      },
-    });
+    for (const field of fields)
+      Object.defineProperty(node, field, {
+        configurable: true,
+        get: () => {
+          if (++reads > budget) throw new Error('shared traversal work budget');
+          return ops;
+        },
+      });
   }
   try {
     run();
     return reads;
   } finally {
-    for (const node of nodes) delete (node as { ops?: unknown }).ops;
+    for (const node of nodes)
+      for (const field of fields)
+        delete (node as { ops?: unknown; _ops?: unknown })[field];
   }
 }
 
@@ -47,7 +60,7 @@ for (const depth of [4, 8, 16, 24]) {
     let result: Expression;
     expect(countReads(nodes, () => {
       result = root.subs({ x: 3 }, { canonical: false });
-    }, depth)).toBe(depth);
+    }, depth, ['ops', '_ops'])).toBe(depth);
     for (let i = 0; i < depth; i++) {
       expect(result!.ops![0]).toBe(result!.ops![1]);
       result = result!.ops![0];

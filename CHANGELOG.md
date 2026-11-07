@@ -64,8 +64,9 @@
   index and its bounds to sum over it: `\sum_{k=1}^{n} x^k` (`\sum_{k} x^k`
   sums from `k = 1` to infinity). An operand with no free variable is
   still its own value: `["Sum", 5]` is `5`, and `\sum x^k` is `8` when `x` is
-  `2` and `k` is `3`. A sum over a collection, `\sum [1, 2, 3]`, is not
-  changed.
+  `2` and `k` is `3`. The absent value `Missing` is not a free variable:
+  `["Sum", "Missing"]` and `["Product", "Missing"]` are still `Missing`. A sum
+  over a collection, `\sum [1, 2, 3]`, is not changed.
 - **An assigned lazy collection that stays lazy no longer changes when a
   variable that it reads changes later.** In Epsil, after `k = 3` and
   `let big = filter(1..oo, c => c > k)`, the assignment `k = 10` changed

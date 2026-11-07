@@ -5027,13 +5027,20 @@ export function* reduceBigOp<T>(
     // same applies to `Product`. The evaluated body is returned in an
     // `UnindexedBody`, so that the caller keeps it (see that class). (User
     // decision 2026-11-06, CE-961.)
+    //
+    // The library symbol `Missing` has no value, so `unknowns` lists it, but
+    // it is the absent value, not a variable that can be an index. It does
+    // not count as a free variable: the fold below gives `Missing` for
+    // `Sum(Missing)` and `Product(Missing)`, as an aggregate over an absent
+    // value is absent (`docs/ERROR-MODEL.md`, "`Missing` is a result only").
     if (
       isValuelessCollectionTyped(value) ||
       isPossiblyCollectionTyped(value) ||
       unionMayHoldACollection(value.type.type)
     )
       return NON_ENUMERABLE_DOMAIN;
-    if (value.unknowns.length > 0) return new UnindexedBody(value);
+    if (value.unknowns.some((name) => name !== 'Missing'))
+      return new UnindexedBody(value);
     let folded = fn(initial, value);
     if (isThenable(folded)) folded = yield folded;
     return folded ?? undefined;

@@ -93,13 +93,16 @@ export function symbolicLimit(
   // comparisons is shared with the outermost call, so that nested calls do
   // not multiply the cost.
   const savedCache = growthCache;
+  const savedDiffs = growthDiffs;
   const ownsBudget = growthBudget === undefined;
   growthCache = new Map();
+  growthDiffs = new Map();
   if (ownsBudget) growthBudget = { left: MAX_GROWTH_COMPARISONS };
   try {
     return symbolicLimitUncached(body, x, point, dir, ce);
   } finally {
     growthCache = savedCache;
+    growthDiffs = savedDiffs;
     if (ownsBudget) growthBudget = undefined;
   }
 }
@@ -2164,6 +2167,19 @@ const GROWTH_LIMIT_DEPTH = 7;
 let growthCache: Map<string, number | undefined> | undefined;
 
 /**
+ * The log differences `ln|a| − ln|b|` that `logMagnitudeCompareUncached()`
+ * built during one `symbolicLimit()` call, with the keys of `growthCache`.
+ * A comparison that gives no result in a nested limit is not kept in
+ * `growthCache`, so the same pair is compared again. The difference is
+ * then the same expression object, and the compiled probes of the
+ * difference and of its terms are read from the probe cache, which is keyed
+ * by the object (`compiledProbe()`). A new difference for each comparison
+ * compiled the same probes again (51 compilations for the limit of
+ * `ln(ln x)/ln x`).
+ */
+let growthDiffs: Map<string, Expression> | undefined;
+
+/**
  * The number of comparisons from the logarithms (`logMagnitudeCompare()`)
  * that the outermost `symbolicLimit()` call can still compute. Each one
  * computes a nested limit, whose sums compare their own terms. Without a
@@ -2204,7 +2220,7 @@ function logMagnitudeCompare(
     if (growthBudget.left <= 0) return undefined;
     growthBudget.left -= 1;
   }
-  const result = logMagnitudeCompareUncached(a, b, x, ce);
+  const result = logMagnitudeCompareUncached(a, b, x, ce, key);
   // A result found past the nesting limit, or after the budget ran out, can
   // be `undefined` only because of that limit; it is not kept, so that a
   // call with less nesting tries again.
@@ -2221,19 +2237,33 @@ function logMagnitudeCompareUncached(
   a: Expression,
   b: Expression,
   x: string,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  key: string | undefined
 ): number | undefined {
   const bySeries = seriesGrowthCompare(a, b, x, ce);
   if (bySeries !== undefined) return bySeries;
-  const la = logAbs(a, x, ce);
-  if (la === undefined) return undefined;
-  const lb = logAbs(b, x, ce);
-  if (lb === undefined) return undefined;
+  const cachedDiff = key === undefined ? undefined : growthDiffs?.get(key);
+  // The logarithms are built before the nesting count goes up; the
+  // difference is simplified after it, inside the `try` block.
+  let terms: [Expression, Expression] | undefined;
+  if (cachedDiff === undefined) {
+    const la = logAbs(a, x, ce);
+    if (la === undefined) return undefined;
+    const lb = logAbs(b, x, ce);
+    if (lb === undefined) return undefined;
+    terms = [la, lb];
+  }
   growthNesting += 1;
   try {
     // Simplify first, so that equal logarithms cancel before the
     // leading-order rewrite compares the terms of the difference.
-    const diff = ce.function('Add', [la, lb.neg()]).simplify();
+    let diff = cachedDiff;
+    if (diff === undefined) {
+      if (terms === undefined) return undefined;
+      const [la, lb] = terms;
+      diff = ce.function('Add', [la, lb.neg()]).simplify();
+      if (key !== undefined) growthDiffs?.set(key, diff);
+    }
     if (!diff.has(x)) {
       const v = diff.evaluate();
       return isDefiniteValue(v) && v.isFinite === true ? 0 : undefined;
