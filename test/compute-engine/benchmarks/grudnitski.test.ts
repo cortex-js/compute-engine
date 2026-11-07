@@ -272,6 +272,12 @@ describe(`Log functions and identities`, () => {
   // `simplify()` gives `2log(|x|)`.
   test.failing(`isEquivalent('log(x**2)','2*log(x)',logIdentities=True,forceAssumptions=True)`, () =>
     expect(isEquivalent('\\log(x^2)', '2\\log(x)')).toBeTruthy());
+
+  // For a real `x`, the simplified form of `\log(x^2)` is the simplified form
+  // of `2\log(|x|)`: the simplifier writes no base 10 that the input did not
+  // have (CE-1060).
+  test(`isEquivalentSimplify('log(x**2)','2*log(Abs(x))')`, () =>
+    expect(isEquivalentSimplify('\\log(x^2)', '2\\log(|x|)')).toBeTruthy());
 });
 
 describe(`Solve system of equations/inequalities`, () => {

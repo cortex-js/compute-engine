@@ -103,6 +103,11 @@
 
 ### Resolved Issues
 
+- **`simplify()` no longer adds a base of 10 to a common logarithm.**
+  `\log(x^2)` simplified to `2\log_{10}(|x|)`, which is not the same
+  expression as the simplified form of `2\log(|x|)`; it now simplifies to
+  `2\log(|x|)`. In the same way, `\log(10^x y)` now simplifies to
+  `x + \log(y)`, not `x + \log_{10}(y)`. A base of `10.0`, a float, stays.
 - **The `unknowns` and `freeVariables` of a `Block` now include a variable of
   an enclosing scope that the block reads before it assigns it.** With `a`
   declared outside the block, `["Block", ["Assign", "a", ["Add", "a", 1]],

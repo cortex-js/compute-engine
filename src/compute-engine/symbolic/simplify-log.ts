@@ -16,6 +16,25 @@ function isNaturalLogBase(base: Expression): boolean {
 }
 
 /**
+ * The logarithm of `arg` in the base `base`. A base of 10 is left out, as the
+ * parser does for `\log_{10}` and as `ln()` does for a base of 10
+ * (`BoxedFunction.ln()` in `boxed-function.ts`). If a rule kept the base 10,
+ * `\log(x^2)` simplified to `2 log_10(|x|)` and `2\log(|x|)` to
+ * `2 log(|x|)`: two forms of one value that look different.
+ * Only an exact 10 is left out: a float base such as `10.0` stays, because
+ * it asks for a numeric value when the expression is evaluated.
+ */
+function logInBase(
+  ce: Expression['engine'],
+  arg: Expression,
+  base: Expression
+): Expression {
+  return isNumber(base) && base.isExact && base.isSame(10)
+    ? ce._fn('Log', [arg])
+    : ce._fn('Log', [arg, base]);
+}
+
+/**
  * Logarithm simplification rules consolidated from simplify-rules.ts.
  * Handles ~30 patterns for simplifying Ln and Log expressions.
  *
@@ -686,7 +705,7 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
             onBranchCut(ce, 'Ln', powerBase) !== true)
         ) {
           return {
-            value: exp.mul(ce._fn('Log', [powerBase, logBase])),
+            value: exp.mul(logInBase(ce, powerBase, logBase)),
             because: 'log_c(x^n) -> n*log_c(x)',
           };
         }
@@ -695,7 +714,7 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
         if (exp.isEven === true && isEligibleRealRewrite(powerBase)) {
           return {
             value: exp.mul(
-              ce._fn('Log', [ce._fn('Abs', [powerBase]), logBase])
+              logInBase(ce, ce._fn('Abs', [powerBase]), logBase)
             ),
             because: 'log_c(x^n) -> n*log_c(|x|) when n even',
           };
@@ -715,13 +734,13 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
             // q odd, p even: x^{p/q} is non-negative, need |x|
             if (q % 2 === 0 || p % 2 !== 0) {
               return {
-                value: exp.mul(ce._fn('Log', [powerBase, logBase])),
+                value: exp.mul(logInBase(ce, powerBase, logBase)),
                 because: 'log_c(x^{p/q}) -> (p/q)*log_c(x)',
               };
             }
             return {
               value: exp.mul(
-                ce._fn('Log', [ce._fn('Abs', [powerBase]), logBase])
+                logInBase(ce, ce._fn('Abs', [powerBase]), logBase)
               ),
               because: 'log_c(x^{p/q}) -> (p/q)*log_c(|x|) when p even',
             };
@@ -742,7 +761,7 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
               ? otherFactors[0]
               : ce._fn('Multiply', [...otherFactors]);
           return {
-            value: exp.add(ce._fn('Log', [remaining, logBase])),
+            value: exp.add(logInBase(ce, remaining, logBase)),
             because: 'log_c(c^x * y) -> x + log_c(y)',
           };
         }
@@ -757,7 +776,7 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
         arg.op1.op1?.isSame(logBase)
       ) {
         return {
-          value: arg.op1.op2.sub(ce._fn('Log', [arg.op2, logBase])),
+          value: arg.op1.op2.sub(logInBase(ce, arg.op2, logBase)),
           because: 'log_c(c^x / y) -> x - log_c(y)',
         };
       }
@@ -771,7 +790,7 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
         arg.op2.op1?.isSame(logBase)
       ) {
         return {
-          value: ce._fn('Log', [arg.op1, logBase]).sub(arg.op2.op2),
+          value: logInBase(ce, arg.op1, logBase).sub(arg.op2.op2),
           because: 'log_c(y / c^x) -> log_c(y) - x',
         };
       }
@@ -783,16 +802,10 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
       const num = arg.op1;
       const denom = arg.op2;
       if (num.isPositive === true && denom.isPositive === true) {
-        // Don't include 'Nothing' as explicit base
-        const isDefaultBase = sym(logBase) === 'Nothing';
-        const logNum = isDefaultBase
-          ? ce._fn('Log', [num])
-          : ce._fn('Log', [num, logBase]);
-        const logDenom = isDefaultBase
-          ? ce._fn('Log', [denom])
-          : ce._fn('Log', [denom, logBase]);
         return {
-          value: logNum.sub(logDenom),
+          value: logInBase(ce, num, logBase).sub(
+            logInBase(ce, denom, logBase)
+          ),
           because: 'log_c(x/y) -> log_c(x) - log_c(y)',
         };
       }
@@ -801,7 +814,7 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
     // Change of base: log_{1/c}(a) -> -log_c(a)
     if (isFunction(logBase, 'Divide') && logBase.op1?.isSame(1)) {
       return {
-        value: ce._fn('Log', [arg, logBase.op2]).neg(),
+        value: logInBase(ce, arg, logBase.op2).neg(),
         because: 'log_{1/c}(a) -> -log_c(a)',
       };
     }
@@ -810,7 +823,7 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
       const bj = logBase.json;
       if (Array.isArray(bj) && bj[0] === 'Rational' && bj[1] === 1) {
         return {
-          value: ce._fn('Log', [arg, ce.number(bj[2] as number)]).neg(),
+          value: logInBase(ce, arg, ce.number(bj[2] as number)).neg(),
           because: 'log_{1/c}(a) -> -log_c(a)',
         };
       }
