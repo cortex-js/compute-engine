@@ -198,3 +198,141 @@ describe('a subscript on a variable that is not the index of a binder', () => {
     expect([...list.each()].map((x) => x.json)).toEqual(['q_1', 'q_2', 'q_3']);
   });
 });
+
+// The condition of a membership clause (`a_{k+1} > 0` in
+// `k \in \{1,2,3\}, a_{k+1} > 0`) is read in the scope of the index, as the
+// body is. A comparison over a subscript of an unknown base is typed
+// `boolean | list<boolean | list<any>>`, because the subscript may be a
+// list, and the clause accepts it as a condition.
+describe('a subscript on the index in the condition of a sum', () => {
+  const withValues = () => {
+    const ce = new ComputeEngine();
+    ce.assign('a_1', 1);
+    ce.assign('a_2', -1);
+    ce.assign('a_3', 2);
+    ce.assign('a_4', 3);
+    return ce;
+  };
+
+  test('a condition that reads the next term gives the sum of the kept terms', () => {
+    // k = 2 and k = 3 are kept (a_3 = 2 and a_4 = 3 are positive): a_2 + a_3.
+    expect(
+      evaluated('\\sum_{k\\in\\{1,2,3\\}, a_{k+1}>0} a_k', withValues())
+    ).toEqual(1);
+    expect(
+      evaluated('\\prod_{k\\in\\{1,2,3\\}, a_{k+1}>0} a_k', withValues())
+    ).toEqual(-2);
+    expect(
+      boxed(
+        [
+          'Sum',
+          ['Subscript', 'a', 'k'],
+          [
+            'Element',
+            'k',
+            ['Set', 1, 2, 3],
+            ['Greater', ['Subscript', 'a', ['Add', 'k', 1]], 0],
+          ],
+        ],
+        withValues()
+      )
+    ).toEqual(1);
+  });
+
+  test('the condition reads a subscript on the index by value, as the body does', () => {
+    const ce = new ComputeEngine();
+    const sum = ce.parse('\\sum_{k\\in\\{1,2,3\\}, a_k>0} a_k');
+    expect(sum.json).toEqual([
+      'Sum',
+      ['Subscript', 'a', ['Delimiter', 'k']],
+      [
+        'Element',
+        'k',
+        ['Set', 1, 2, 3],
+        ['Less', 0, ['Subscript', 'a', ['Delimiter', 'k']]],
+      ],
+    ]);
+    // a_1 and a_3 are positive.
+    expect(
+      evaluated('\\sum_{k\\in\\{1,2,3\\}, a_k>0} a_k', withValues())
+    ).toEqual(3);
+  });
+
+  test('a condition that may be a string is refused', () => {
+    // The error names the type of the condition.
+    expect(
+      new ComputeEngine().box([
+        'Sum',
+        'k',
+        [
+          'Element',
+          'k',
+          ['Set', 1, 2, 3],
+          ['If', ['Greater', 'k', 1], 'True', "'ab'"],
+        ],
+      ]).json
+    ).toEqual([
+      'Sum',
+      'k',
+      [
+        'Element',
+        'k',
+        ['Set', 1, 2, 3],
+        [
+          'Error',
+          ['ErrorCode', "'incompatible-type'", "''boolean''", "'boolean | string'"],
+        ],
+      ],
+    ]);
+  });
+});
+
+describe('the type of a condition that may be a boolean', () => {
+  // The condition of `Element` is checked with
+  // `isBooleanOrBroadcastableBooleanType()` (`src/common/type/utils.ts`).
+  const condition = (
+    declare: (ce: ComputeEngine) => void,
+    json: MathJsonExpression
+  ) => {
+    const ce = new ComputeEngine();
+    ce.declare('c', 'boolean');
+    declare(ce);
+    const sum = ce.box(['Sum', 'k', ['Element', 'k', ['Set', 1, 2, 3], json]]);
+    return sum.op2.op3.operator;
+  };
+
+  test('a list of any type is no evidence of booleans', () => {
+    expect(
+      condition((ce) => ce.declare('L', 'list<any>'), ['If', 'c', 'True', 'L'])
+    ).toBe('Error');
+  });
+
+  test('a transparent alias of a list of booleans is unfolded', () => {
+    expect(
+      condition((ce) => {
+        ce.declareType('flags', 'list<boolean>', { alias: true });
+        ce.declare('F', 'flags');
+      }, ['If', 'c', 'True', 'F'])
+    ).toBe('If');
+  });
+
+  test('a transparent alias of a union of lists of booleans is unfolded', () => {
+    expect(
+      condition((ce) => {
+        ce.declareType('masks', 'list<boolean> | matrix<boolean>', {
+          alias: true,
+        });
+        ce.declare('M', 'masks');
+      }, ['If', 'c', 'True', 'M'])
+    ).toBe('If');
+  });
+
+  test('a nominal type stays opaque', () => {
+    expect(
+      condition((ce) => {
+        ce.declareType('flags', 'list<boolean>');
+        ce.declare('F', 'flags');
+      }, ['If', 'c', 'True', 'F'])
+    ).toBe('Error');
+  });
+});

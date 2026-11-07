@@ -989,7 +989,9 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       if (condition && sym(condition) !== 'Nothing') {
         // A condition typed `broadcastable<boolean>` (`Sin(P) > x`, with `P`
         // declared `collection<number>`) may be a boolean, so it is accepted
-        // (`isBooleanOrBroadcastableBooleanType`).
+        // (`isBooleanOrBroadcastableBooleanType`). So is a condition typed
+        // `boolean | list<boolean | list<any>>` (`a_{k+1} > 0` with `a` of
+        // type `unknown`, whose subscript may be a list of any depth).
         if (!isBooleanOrBroadcastableBooleanType(condition.type.type)) {
           return ce._fn('Element', [
             value.canonical,
@@ -997,7 +999,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
             ce.error([
               'incompatible-type',
               `'boolean'`,
-              collection.type.toString(),
+              condition.type.toString(),
             ]),
           ]);
         }

@@ -5142,12 +5142,28 @@ function parseBigOp(name: string, minPrec: number) {
     );
     const indexNames = boundVariableNames(indexes);
     for (const indexingSet of indexes)
-      if (indexingSet.element)
+      if (indexingSet.element) {
         indexingSet.element =
           parser.rebindSubscripts(
             indexingSet.element,
             new Set([indexingSet.index])
           ) ?? indexingSet.element;
+        // The condition of the clause (`a_k > 0` in `k \in S, a_k > 0`) is
+        // read in the scope of the indexes, as the body is: a name that the
+        // symbol parser joined with an index as its subscript is the base
+        // indexed by the index. Without this, `\sum_{k\in S, a_k>0} a_k`
+        // read `a_k` as one name in the condition and as `a` indexed by `k`
+        // in the body. The collection is outside that scope and stays as it
+        // is.
+        const element = indexingSet.element;
+        if (Array.isArray(element) && element.length === 4)
+          indexingSet.element = [
+            element[0],
+            element[1],
+            element[2],
+            parser._subscriptBoundIndexes(element[3], indexNames),
+          ] as MathJsonExpression;
+      }
 
     //
     // Parse the body of the function

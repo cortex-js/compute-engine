@@ -74,6 +74,14 @@
 
 ### Resolved Issues
 
+- **A sum or a product over a set whose condition reads a subscript of the
+  index now gives a value.** `\sum_{k\in\{1,2,3\}, a_{k+1}>0} a_k` gave an
+  `incompatible-type` error; with `a_1 = 1`, `a_2 = -1`, `a_3 = 2` and
+  `a_4 = 3`, it now gives `1`. A subscript on the index in the condition is
+  read by value, as in the body: `\sum_{k\in\{1,2,3\}, a_k>0} a_k` gave `0`,
+  because `a_k` was one name in the condition, and it now gives `3`. The
+  `incompatible-type` error of a condition that is not a boolean now names the
+  type of the condition, not the type of the set.
 - **Epsil: a program run again on the same engine with another signature for
   a function now uses the new signature.** After a first program
   `let f: (integer) -> integer` and `function f(n) { 2*n }`, a second program

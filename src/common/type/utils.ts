@@ -3850,20 +3850,102 @@ export function broadcastableBaseMatches(
 /**
  * Whether an expression of type `t` is accepted where a BOOLEAN is expected
  * (a condition, a predicate, a `boolean` rule wildcard): `t` is a boolean
- * type, or it is `broadcastable<R>` (alone or as an arm of a union) with a
- * boolean `R`.
+ * type, it is `broadcastable<R>` (alone or as an arm of a union) with a
+ * boolean `R`, or it is a union of a boolean and lists of booleans.
  *
  * `broadcastable<boolean>` is the type of a comparison whose operand may be
  * a collection or a scalar until it is evaluated: `Sin(P) > x` with `P`
  * declared `collection<number>` and no value. Its scalar arm may be the
  * value, so it is admitted, as a typed parameter admits it
  * (`broadcastableBaseMatches`).
+ *
+ * The union of a boolean and lists of booleans is admitted for the same
+ * reason. A comparison over an operand that may be a list of any depth has
+ * this type: `a_{k+1} > 0`, with `a` of type `unknown`, is typed
+ * `boolean | list<boolean | list<any>>`, because the subscript may be a
+ * list. Its `boolean` arm may be the value, as in the condition of
+ * `Sum(a_k, Element(k, {1, 2, 3}, a_{k+1} > 0))`. A union with an arm that
+ * is not a boolean or a list of booleans (`boolean | string`,
+ * `boolean | list<any>`) is not admitted.
+ *
+ * A transparent alias is unfolded, at the union, at its arms (an alias of a
+ * union adds the arms of that union) and at the cells of a list, through
+ * `unfoldAliasOnDescent()`: a self-referential alias reaches itself through
+ * an arm, and the descent cuts it there, so `type cyc = boolean | list<cyc>`
+ * is not admitted. A nominal reference stays opaque.
  */
 export function isBooleanOrBroadcastableBooleanType(
   t: Readonly<Type>
 ): boolean {
+  if (isBooleanLeafType(t)) return true;
+  const arms = flatUnionArms(t, undefined);
+  if (arms === undefined) return false;
+  return (
+    arms.some((arm) => isBooleanLeafType(arm.type)) &&
+    arms.every(
+      (arm) =>
+        isBooleanLeafType(arm.type) ||
+        isListOfBooleans(arm.type, arm.seen, false)
+    )
+  );
+}
+
+/**
+ * The arms of `t` with every transparent alias unfolded and every union
+ * flattened: `boolean | masks`, with `masks` an alias of
+ * `list<boolean> | matrix<boolean>`, has the three arms `boolean`,
+ * `list<boolean>` and `matrix<boolean>`. A type that is not a union is its
+ * one arm. `undefined` when the descent cuts a self-referential alias.
+ */
+function flatUnionArms(
+  t: Readonly<Type>,
+  seen: AliasDescent
+): { type: Type; seen: AliasDescent }[] | undefined {
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return undefined;
+  const u = unfolded.type;
+  if (typeof u === 'string' || u.kind !== 'union') return [unfolded];
+  const result: { type: Type; seen: AliasDescent }[] = [];
+  for (const arm of u.types) {
+    const armArms = flatUnionArms(arm, unfolded.seen);
+    if (armArms === undefined) return undefined;
+    result.push(...armArms);
+  }
+  return result;
+}
+
+/** `t` is a boolean type, or `broadcastable<R>` with a boolean `R`. */
+function isBooleanLeafType(t: Readonly<Type>): boolean {
   return (
     isSubtype(t as Type, 'boolean') || broadcastableBaseMatches(t, 'boolean')
+  );
+}
+
+/**
+ * `t` is a list whose cells are booleans, lists of the same kind, or unions
+ * of these. A list of any depth is spelled `list<boolean | list<any>>`, so a
+ * cell `any` is accepted in a list that is a cell of another list
+ * (`nested`), and not in the outer list: `list<any>` alone is no evidence of
+ * booleans.
+ */
+function isListOfBooleans(
+  t: Readonly<Type>,
+  seen: AliasDescent,
+  nested: boolean
+): boolean {
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return false;
+  const list = unfolded.type;
+  if (typeof list === 'string' || list.kind !== 'list') return false;
+  if (isBooleanLeafType(list.elements)) return true;
+  const cells = flatUnionArms(list.elements, unfolded.seen);
+  if (cells === undefined) return false;
+  return cells.every(
+    (cell) =>
+      isBooleanLeafType(cell.type) ||
+      (cell.type === 'any'
+        ? nested
+        : isListOfBooleans(cell.type, cell.seen, true))
   );
 }
 
