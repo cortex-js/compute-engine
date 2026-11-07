@@ -1,6 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { divergentTailSign } from '../../src/compute-engine/numerics/divergent-tail';
+import { adaptiveQuadrature } from '../../src/compute-engine/numerics/gauss-kronrod';
 
 // ROADMAP CE-391. An integral that diverges on an infinite tail, with an
 // integrand of one sign, is `+∞` or `−∞` under `.N()` and `NIntegrate`, as
@@ -129,5 +130,133 @@ describe('a divergent integral over an infinite bound', () => {
     const b = routes('x \\sin(x) e^x', 0, 'PositiveInfinity').N;
     expect(a).toEqual('NaN');
     expect(b).toEqual('NaN');
+  });
+});
+
+describe('an integrand that decreases slowly at an infinite bound', () => {
+  // The quadrature maps `[c, ∞)` to `[0, 1)`, and the doubles near 1 allow
+  // only about 48 bisections of the corner panel: too few shells to tell
+  // `1/(x ln x)` (divergent) from `1/(x ln^1.1 x)` (convergent). The
+  // integral is then computed again with the infinite bound at 0
+  // (`quadrature`, `numerics/gauss-kronrod.ts`). Issue CE-182.
+  const lnPower = (p: number) => (x: number) => 1 / (x * Math.log(x) ** p);
+  // ∫₂^∞ dx/(x lnᵖ x) = (ln 2)^(1 − p)/(p − 1) for p > 1.
+  const exact = (p: number) => Math.log(2) ** (1 - p) / (p - 1);
+
+  test('the quadrature finds the divergence of 1/(x ln x)', () => {
+    const r = adaptiveQuadrature(lnPower(1), 2, Infinity, {
+      singularEndpoints: true,
+    });
+    expect(r.divergent).toBe(true);
+    const left = adaptiveQuadrature(
+      (x) => 1 / (x * Math.log(-x)),
+      -Infinity,
+      -2,
+      { singularEndpoints: true }
+    );
+    expect(left.divergent).toBe(true);
+  });
+
+  test('the computation again stays within the panel budget', () => {
+    // At most `maxIntervals` panels of 15 nodes, plus the tanh-sinh rule of
+    // the one interval (`2·maxIntervals` evaluations) and of each part, and
+    // one sample for each octave of `x` that the far part reached.
+    let evaluations = 0;
+    adaptiveQuadrature(
+      (x) => {
+        evaluations += 1;
+        return lnPower(1.1)(x);
+      },
+      2,
+      Infinity,
+      { singularEndpoints: true }
+    );
+    expect(evaluations).toBeLessThan(1500 * 15 + 3 * 2 * 1500 + 1100);
+  });
+
+  test('a tail that decreases to the end of the doubles is trusted', () => {
+    // The samples of `x^(−1.5)` are below the normal doubles for
+    // x > 2⁶⁸¹: they are not read as an overflow. The one interval gave
+    // `0.0063 ± 0.0025`.
+    const r = adaptiveQuadrature((x) => x ** -1.5, 1e5, Infinity, {
+      singularEndpoints: true,
+    });
+    expect(r.converged).toBe(true);
+    expect(r.estimate).toBeCloseTo(2 / Math.sqrt(1e5), 12);
+  });
+
+  test.each([
+    // `x⁴` overflows for x > 1.3·10⁷⁷, and the samples there are 0: the
+    // far part converged, to `3.94 ± 3·10⁻¹¹` for a true value of about
+    // 10.3.
+    [
+      'x³/((x⁴ + 1) ln^1.1 x)',
+      (x: number) => x ** 3 / ((x ** 4 + 1) * Math.log(x) ** 1.1),
+    ],
+    // `sin x` sampled at nodes much farther apart than its period is noise:
+    // the far part of this convergent integral was divergent.
+    [
+      '(2 + sin x)/(x ln^1.1 x)',
+      (x: number) => (2 + Math.sin(x)) / (x * Math.log(x) ** 1.1),
+    ],
+  ])(
+    'the far part of %s is not trusted, and the result keeps its wide error',
+    (_, f) => {
+      const r = adaptiveQuadrature(f, 2, Infinity, { singularEndpoints: true });
+      expect(r.divergent).toBe(false);
+      expect(r.converged).toBe(false);
+      expect(r.extrapolated).not.toBe(true);
+      expect(r.singularCorner).toBe(true);
+    }
+  );
+
+  test.each([[1.1], [2]])(
+    'the quadrature of 1/(x ln^%p x) is within its error of the exact value',
+    (p) => {
+      const r = adaptiveQuadrature(lnPower(p), 2, Infinity, {
+        singularEndpoints: true,
+      });
+      expect(r.divergent).toBe(false);
+      expect(r.extrapolated).toBe(true);
+      expect(Math.abs(r.estimate - exact(p))).toBeLessThanOrEqual(r.error);
+      // Before, `p = 1.1` gave `3.4 ± 36`.
+      expect(r.error).toBeLessThan(1e-3 * exact(p));
+    }
+  );
+
+  test.each([
+    ['\\frac{1}{x\\ln x}', 2, 'PositiveInfinity', 'PositiveInfinity'],
+    ['\\frac{1}{x\\ln(-x)}', 'NegativeInfinity', -2, 'NegativeInfinity'],
+    ['\\frac{-1}{x\\ln x}', 2, 'PositiveInfinity', 'NegativeInfinity'],
+  ])('∫ %s from %s to %s is %s on every route', (latex, lo, hi, expected) => {
+    // Before, `.N()` gave `3.97 ± 71060` and `NIntegrate` gave `3.97`.
+    const r = routes(latex as string, lo, hi);
+    expect(r.evaluate).toEqual(expected);
+    expect(r.N).toEqual(expected);
+    expect(r.NIntegrate).toEqual(expected);
+  });
+
+  test('a divergent half of (−∞, ∞) is found', () => {
+    expect(
+      routes(
+        '\\frac{1}{(|x|+2)\\ln(|x|+2)}',
+        'NegativeInfinity',
+        'PositiveInfinity'
+      ).N
+    ).toEqual('PositiveInfinity');
+  });
+
+  test('the compiled integral of 1/(x ln^1.1 x) is within its error', () => {
+    // The bound `a` is an input, so the integral is computed when the code
+    // runs, not folded when it compiles.
+    const engine = new ComputeEngine();
+    engine.declare('a', 'real');
+    const r = compile(
+      engine.parse('\\int_a^{\\infty} \\frac{dx}{x(\\ln x)^{1.1}}')
+    );
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.integrate(');
+    const v = (r.run as (vars: { a: number }) => number)({ a: 2 });
+    expect(Math.abs(v - exact(1.1))).toBeLessThan(2e-4);
   });
 });

@@ -2712,8 +2712,18 @@ const SINGULAR_POINT_STEPS = 64;
  * `estimate` is whatever the panel budget happened to accumulate before it ran
  * out, and callers must not report it (nor hand the integrand to a sampler,
  * which would launder the divergence into a plausible-looking number).
- * Semi-infinite bounds are handled by a
- * variable transform; the doubly-infinite case `(-∞, ∞)` is split at 0 into two
+ * A semi-infinite interval `[c, ∞)` or `(−∞, c]` is mapped to `[0, 1)` by a
+ * change of variable. With `singularEndpoints`, when that result has
+ * `singularCorner`, the interval is integrated again in two parts, split at
+ * `c ± 1`: a change of variable puts each part on `[0, 1/2]` with its
+ * singular bound at 0 (the finite bound `c` for the first part, the
+ * infinite bound for the second), where the refinement can go deep enough
+ * to detect a divergence; each part receives half of the panel budget that
+ * the first computation did not use, and half the starting panels. The
+ * split result is kept when it diverges, converged or was extrapolated, does
+ * not oscillate, no part has `nanRegion`, and the samples of the integrand
+ * at large `|x|` are smooth (see `smoothTail`); otherwise the first result
+ * is kept. The doubly-infinite case `(-∞, ∞)` is split at 0 into two
  * semi-infinite integrals (so a divergent half is detected instead of masked by
  * symmetric cancellation of an odd integrand), each half receiving half the
  * panel budget and the combined result re-checked against the tolerance;
@@ -2905,6 +2915,78 @@ export function splitPointIsJump(
   return false;
 }
 
+/** The largest change of slope that `smoothTail` accepts between two
+ * consecutive octaves of `x`. The smooth tails `1/(x ln x)`,
+ * `1/(x ln^1.1 x)` and `1/(x ln x ln ln x)` have at most 0.03 (at the
+ * first octaves, where `ln ln x` bends most); `(2 + sin x)/(x ln^1.1 x)`,
+ * whose samples at large `x` are noise, has 1.9. */
+const TAIL_SMOOTHNESS = 0.1;
+
+/** `smoothTail` accepts a sample `f(x)` that is below the normal doubles
+ * (2⁻¹⁰²², or 0) when the sample of the octave before it is below this
+ * value: the integrand decreases to the end of the doubles. A factor that
+ * overflows makes `f(x)` drop to 0 from a much larger value: `1/x` at
+ * x = 2²⁵⁶ is 2⁻²⁵⁶. */
+const TAIL_UNDERFLOW = 2 ** -900;
+
+/**
+ * True when the samples of the far part `h(s) = f(x(s))/s²` of a
+ * semi-infinite interval (see `quadrature`), with `x ≈ ±1/s` for small
+ * `s`, can be trusted down to `deepest`, the smallest `s` that the
+ * quadrature of that part sampled. The area of an octave of `x` is about
+ * `v(s) = h(s)·s`, and `|f(x)| = |v(s)|·s`. The test reads `v` at
+ * s = 2⁻ᵏ, for each `k` from 4 octaves above `|c|` (the finite bound) to
+ * the octave of `deepest`. The samples can be trusted when each `v` is
+ * finite, nonzero and of one sign, and `ln |v|` is smooth in `k`: its
+ * second difference is at most `TAIL_SMOOTHNESS`. The test stops, and the
+ * samples are trusted, at the first octave where `|f(x)|` is below the
+ * normal doubles after a sample below `TAIL_UNDERFLOW`: there `f` is
+ * rounded to few digits, or to 0, because it is near the end of the
+ * doubles (`x^(−1.5)` at x = 2⁷¹⁶ is 2⁻¹⁰⁷⁴).
+ *
+ * The far part samples `x` up to the largest double, about 1.8·10³⁰⁸
+ * (and `x = ±∞` for s < 2⁻¹⁰²⁴), where a factor of the integrand can
+ * overflow: `x⁴` is `+∞` for x > 1.3·10⁷⁷, so the samples of
+ * `x³/((x⁴ + 1) ln^1.1 x)` are 0 there, the far part converged, and the
+ * result was `3.94 ± 3·10⁻¹¹` for a true value of about 10.3. A factor
+ * that oscillates is noise when the nodes are much farther apart than
+ * its period: the far part of `(2 + sin x)/(x ln^1.1 x)`, which converges,
+ * was divergent.
+ */
+function smoothTail(
+  h: (s: number) => number,
+  c: number,
+  deepest: number
+): boolean {
+  const first = Math.max(1, Math.ceil(Math.log2(c + 1))) + 4;
+  const last = Math.floor(-Math.log2(deepest));
+  let sign = 0;
+  let previous: number | undefined;
+  let beforePrevious: number | undefined;
+  let previousSample: number | undefined;
+  for (let k = first; k <= last; k++) {
+    const s = 2 ** -k;
+    const v = h(s) * s;
+    if (!Number.isFinite(v)) return false;
+    const sample = Math.abs(v) * s;
+    if (sample < 2 ** -1022)
+      return previousSample !== undefined && previousSample < TAIL_UNDERFLOW;
+    previousSample = sample;
+    if (sign === 0) sign = Math.sign(v);
+    else if (Math.sign(v) !== sign) return false;
+    const y = Math.log(Math.abs(v));
+    if (
+      previous !== undefined &&
+      beforePrevious !== undefined &&
+      Math.abs(y - 2 * previous + beforePrevious) > TAIL_SMOOTHNESS
+    )
+      return false;
+    beforePrevious = previous;
+    previous = y;
+  }
+  return true;
+}
+
 /** The quadrature of `adaptiveQuadrature`, without the errors of the inner
  * integrals (`nestedErrors`). */
 function quadrature(
@@ -2966,22 +3048,105 @@ function quadrature(
     const right = quadrature(f, 0, b, halfOptions);
     if (right.nanRegion === true) return right;
     return combineHalves(left, right, rtol, atol);
-  } else if (bInf) {
-    // [a, ∞): x = a + t/(1 - t), t ∈ [0, 1). dx = 1/(1 - t)² dt.
-    g = (t) => {
+  } else if (aInf || bInf) {
+    // [c, ∞) or (−∞, c], with c the finite bound: x = c ± t/(1 − t) for
+    // t ∈ [0, 1), dx = dt/(1 − t)², integrated as one finite interval.
+    const c = bInf ? a : b;
+    const side = bInf ? 1 : -1;
+    const near = (t: number) => {
       const om = 1 - t;
-      return f(a + t / om) / (om * om);
+      return f(c + side * (t / om)) / (om * om);
     };
-    lo = 0;
-    hi = 1;
-  } else if (aInf) {
-    // (-∞, b]: x = b - t/(1 - t), t ∈ [0, 1). dx = 1/(1 - t)² dt.
-    g = (t) => {
-      const om = 1 - t;
-      return f(b - t / om) / (om * om);
+    let evaluations = 0;
+    const whole = quadrature(
+      (t) => {
+        evaluations += 1;
+        return near(t);
+      },
+      0,
+      1,
+      { ...options, deadline }
+    );
+    // The doubles near 1 are 2⁻⁵³ apart, so the corner panel at t = 1 (the
+    // infinite bound) is bisected only about 48 times. When the integrand
+    // decreases slowly at infinity, these shells are too few for the
+    // divergence test (`shellsDiverge`) and for the model of the part that
+    // is not sampled (`shellTail`, `endpoint-quadrature.ts`), and the
+    // result is a `singularCorner` with a wide error: `∫₂^∞ dx/(x ln x) =
+    // +∞` gave `3.97 ± 71060`, and `∫₂^∞ dx/(x ln^1.1 x) = 10.3733` gave
+    // `3.4 ± 36`. Such a result is computed again with the infinite bound
+    // at 0, where the doubles go down to 2⁻¹⁰⁷⁴: the interval of `t` is
+    // split at 1/2 (x = c ± 1), and the far part is integrated over
+    // s = 1 − t, with x = c ± (1 − s)/s computed from `s` and dx = ds/s².
+    // At s = 0 the corner is bisected until its shells show a divergence
+    // or fit a model. The near part keeps the finite bound at t = 0.
+    // The one interval stays the first computation, and only a
+    // `singularCorner` result is computed again. A split at c ± 1 changes
+    // the results that the one interval gets right: for `e^x`, the samples
+    // overflow at x > 710, and the one interval gives an infinite estimate,
+    // from which the caller reads the sign of the divergence, where the far
+    // part gave a finite estimate. A `singularCorner` result has shells of
+    // one sign, so an integrand that oscillates at infinity (`sin x/x`),
+    // whose far part costs up to 30 times the evaluations of the one
+    // interval and gives no better result, is not computed again.
+    if (whole.singularCorner !== true) return whole;
+    // The split uses the panels of the budget that the one interval did
+    // not use, so that the whole computation stays within `maxIntervals`.
+    // A panel has 15 nodes; the other samples of the one interval (the
+    // tanh-sinh rule, the probes of an endpoint) are counted as panels too.
+    // The tanh-sinh rule of each part and the samples of `smoothTail` (one
+    // for each octave of `x`, at most about 1070) are outside the panel
+    // budget, as the tanh-sinh rule of a finite interval is (it has its own
+    // limit of `2·maxIntervals` evaluations).
+    const unused = maxIntervals - Math.ceil(evaluations / 15);
+    if (unused < 2) return whole;
+    let deepest = 0.5;
+    // Each division by `s` is separate: `s·s` loses precision for
+    // s < 2⁻⁵¹¹ and is 0 for s below about 2⁻⁵³⁸, where `f(x)/s/s` is
+    // still accurate.
+    const far = (s: number) => {
+      if (s > 0 && s < deepest) deepest = s;
+      return f(c + side * ((1 - s) / s)) / s / s;
     };
-    lo = 0;
-    hi = 1;
+    // Each part gets half of the unused panels and half the starting
+    // panels (at least one), so that the two parts together start from the
+    // same panels as the one interval did.
+    const partOptions = {
+      rtol,
+      atol,
+      maxIntervals: Math.floor(unused / 2),
+      initialPanels: Math.max(1, Math.ceil(initialPanels / 2)),
+      deadline,
+      singularEndpoints: options?.singularEndpoints,
+      interiorSplits: options?.interiorSplits,
+    };
+    const nearPart = quadrature(near, 0, 0.5, partOptions);
+    if (nearPart.nanRegion === true) return whole;
+    const farPart = quadrature(far, 0, 0.5, partOptions);
+    if (farPart.nanRegion === true) return whole;
+    const split = combineHalves(nearPart, farPart, rtol, atol);
+    // The split result is kept when it shows what the one interval could
+    // not, a divergence or a value that converged or was extrapolated, and
+    // the samples of the far part can be trusted (`smoothTail`). Otherwise
+    // the one interval is kept, with its error.
+    if (
+      !(split.divergent || split.converged || split.extrapolated === true) ||
+      split.oscillates === true
+    )
+      return whole;
+    // The samples of `smoothTail` are samples of the integrand of this
+    // quadrature, as those of its parts: the integrand sees that it runs
+    // inside a quadrature (`insideQuadrature`), and the deadline is the
+    // ambient one.
+    activeQuadratures++;
+    try {
+      const trusted = withAmbientDeadline(deadline, () =>
+        smoothTail(far, Math.abs(c), deepest)
+      );
+      return trusted ? split : whole;
+    } finally {
+      activeQuadratures--;
+    }
   } else {
     g = f;
     lo = a;

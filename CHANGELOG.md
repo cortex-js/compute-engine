@@ -71,6 +71,13 @@
 
 ### Resolved Issues
 
+- **A numeric integral over an infinite bound whose integrand decreases
+  slowly finds its divergence or its value.** `\int_2^\infty \frac{dx}{x\ln x}`
+  diverges: `.N()` gave `3.97 ± 71060` and `NIntegrate` gave `3.97`; both now
+  give `+∞`. `\int_2^\infty \frac{dx}{x(\ln x)^{1.1}} = 10.3733` gave
+  `3.4 ± 36` under `.N()`; it now gives `10.37326 ± 0.00017`. The same applies
+  to a bound at `-\infty` and to compiled code.
+
 - **A GLSL or WGSL compilation that reads a list input of unknown length now
   falls back to the interpreter.** With `L` declared `list<real>`, compiling
   `L` to GLSL gave the code `L` with `success: true`, but no shader can
