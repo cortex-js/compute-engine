@@ -737,6 +737,7 @@ pre code { background: none; padding: 0; }
 table.batch { border-collapse: collapse; width: 100%; font-size: 13px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
 table.batch th, table.batch td { text-align: left; vertical-align: top; padding: 5px 8px; border-bottom: 1px solid var(--line); }
 table.batch td.id { font-family: ui-monospace, monospace; font-weight: 700; white-space: nowrap; }
+table.batch td.id .badge { font-family: system-ui, -apple-system, sans-serif; margin-left: 4px; }
 table.batch tr.running td:nth-child(2) { color: var(--accent); font-weight: 700; }
 table.batch tr.stopped td:nth-child(2) { color: var(--error); font-weight: 700; }
 table.batch tr.waiting { color: var(--muted); }
@@ -987,6 +988,17 @@ function fixedRow(x, where) {
 const clock = (iso) => iso ? new Date(iso).toLocaleString('sv').slice(0, 16) : '';
 const minutesSince = (a, b) => Math.round(((b ? new Date(b) : new Date()) - new Date(a)) / 60000);
 
+/**
+ * The priority of a batch item: from its issue file when the file exists
+ * (the board can change it after the batch started), else from the file
+ * that its fix deleted, else from the status file of the batch.
+ */
+function batchPriority(x) {
+  const f = data.progress.fixed;
+  const gone = f && [...f.committed, ...f.uncommitted].find((y) => y.id === x.id);
+  return byId().get(x.id)?.fields.priority ?? gone?.fields.priority ?? x.priority ?? '';
+}
+
 /** One batch of scripts/roadmap-batch.mjs: its state, then one row per item. */
 function batchTable(b) {
   const ended = b.items.filter((x) => x.state === 'ended').length;
@@ -999,7 +1011,8 @@ function batchTable(b) {
       : x.state === 'ended' ? minutesSince(x.started, x.ended) + ' min' : '';
     const result = x.state === 'ended' ? esc(x.result) + ' <span class="none">(' + esc(x.turns) + ' turns, ' + esc(x.cost) + ')</span>' : '';
     const state = x.state === 'running' && !b.alive ? 'stopped' : x.state;
-    return '<tr class="' + esc(state) + '"><td class="id">' + esc(x.id) + '</td><td>' + esc(state) + '</td><td>' + esc(time) + '</td><td>' + inline(x.title) + (result ? '<div>' + result + '</div>' : '') + '</td></tr>';
+    const p = batchPriority(x);
+    return '<tr class="' + esc(state) + '"><td class="id">' + esc(x.id) + (p ? ' <span class="badge ' + esc(p) + '">' + esc(p) + '</span>' : '') + '</td><td>' + esc(state) + '</td><td>' + esc(time) + '</td><td>' + inline(x.title) + (result ? '<div>' + result + '</div>' : '') + '</td></tr>';
   }).join('');
   return '<h2>' + (b.alive ? 'Batch in progress' : 'Last batch') + ', started ' + esc(clock(b.started)) + ' <span class="count">(' + esc(how) + ')</span></h2>' +
     '<p class="none">Output and reports: <code>' + esc(b.out) + '</code>' + (b.waiting ? ' · ' + esc(b.waiting) : '') + '</p>' +

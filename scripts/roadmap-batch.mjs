@@ -30,7 +30,8 @@
  * one JSON file per batch in `~/.local/state/compute-engine-batch/`, named by
  * the start time and the process id, and written again each time an item
  * starts or ends. It holds the process id, the output directory, the time the
- * batch ended (null while it runs) and, for each item, its state (`waiting`,
+ * batch ended (null while it runs) and, for each item, its priority from the
+ * queue file, its state (`waiting`,
  * `running` or `ended`), its start and end times and the `Result:` line of its
  * report. The web app shows a batch whose end time is null and whose process
  * is gone as stopped before the end. The files are not removed.
@@ -99,6 +100,7 @@ const fromBacklog = (list) =>
   (list ?? []).map((x) => ({
     id: x.id,
     title: x.title,
+    priority: x.priority,
     area: x.kind ?? 'issue',
   }));
 const queue = queueFile.candidates ?? [
@@ -210,6 +212,7 @@ const itemStatus = new Map(
     {
       id: item.id,
       title: item.title,
+      priority: item.priority,
       area: item.area,
       session: nameOf(item),
       state: 'waiting',
