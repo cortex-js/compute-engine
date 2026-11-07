@@ -291,8 +291,21 @@ function hasAnswer(body) {
   );
 }
 
-/** The first code (fenced or inline) of the `## Witness` section, on one line. */
-function witnessCode(body) {
+/** The longest witness text that a line of `CLOSED.md` holds, in characters. */
+const WITNESS_MAX = 300;
+
+/**
+ * The witness of an issue for its line in `CLOSED.md`, on one line, as
+ * Markdown. The first fenced code block of the `## Witness` section is the
+ * program, and it is given as inline code. A section with no fenced block
+ * describes its witness in prose (`Chain of Tycho row 453 at depth 3: the
+ * \`any\` version went from 17 to 7 129`), so its first paragraph is given as
+ * it is written: an inline code span of that prose is often one word, and
+ * alone it is not a witness. A text longer than `WITNESS_MAX` is cut at a
+ * space and ends with "…". When the cut leaves a code span of the prose
+ * open (an odd number of backticks), the text ends before that span.
+ */
+function witnessSummary(body) {
   const start = body.search(/^## Witness/m);
   let section = body;
   if (start >= 0) {
@@ -300,10 +313,23 @@ function witnessCode(body) {
     const next = rest.search(/^## /m);
     section = next >= 0 ? rest.slice(0, next) : rest;
   }
-  const code = /```[^\n]*\n([\s\S]*?)```/.exec(section);
-  const inline = /`([^`\n]+)`/.exec(section);
-  const text = code ? code[1] : inline ? inline[1] : '';
-  return text.trim().replace(/\s+/g, ' ');
+  const oneLine = (s) => s.trim().replace(/\s+/g, ' ');
+  const cut = (s) => {
+    if (s.length <= WITNESS_MAX) return s;
+    const head = s.slice(0, WITNESS_MAX);
+    const space = head.lastIndexOf(' ');
+    let kept = space > 0 ? head.slice(0, space) : head;
+    if ((kept.match(/`/g) ?? []).length % 2 === 1)
+      kept = kept.slice(0, kept.lastIndexOf('`')).trimEnd();
+    return `${kept}…`;
+  };
+  const fenced = /```[^\n]*\n([\s\S]*?)```/.exec(section);
+  if (fenced) {
+    const code = cut(oneLine(fenced[1]));
+    return code ? `\`${code}\`` : '';
+  }
+  const paragraph = section.trim().split(/\n\s*\n/)[0] ?? '';
+  return cut(oneLine(paragraph));
 }
 
 /** The priority the table gives, with the flag adjustments. Never P0. */
@@ -1154,11 +1180,17 @@ One sentence of what the user sees, with no engine terms.
 export function closeIssue(issue, reason) {
   if (!reason) fail(`${issue.fields.id}: a reason is required`);
   const f = issue.fields;
-  const code = witnessCode(issue.body);
+  const witness = witnessSummary(issue.body);
   const facts = [f.kind, f.impact, f.probability, f.witness]
     .filter(Boolean)
     .join(', ');
-  const line = `- ${f.id} (${TODAY}, was ${f.priority}; ${facts}${f['source-ref'] ? `; ${f['source-ref']}` : ''}): ${issue.title}${code ? ` Witness: \`${code}\`.` : ''} Closed: ${reason}\n`;
+  // The instrument of a Tycho issue is the script that reproduces it, so the
+  // line keeps it with the source reference.
+  const refs = [f['source-ref'], f.instrument && `instrument ${f.instrument}`]
+    .filter(Boolean)
+    .map((r) => `; ${r}`)
+    .join('');
+  const line = `- ${f.id} (${TODAY}, was ${f.priority}; ${facts}${refs}): ${issue.title}${witness ? ` Witness: ${witness.endsWith('…') ? witness : `${witness.replace(/[.:]$/, '')}.`}` : ''} Closed: ${reason}\n`;
   fs.appendFileSync(path.join(opts.dir, 'CLOSED.md'), line);
   fs.unlinkSync(issue.file);
   return `closed ${f.id}: ${reason}`;
