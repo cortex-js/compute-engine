@@ -1,6 +1,6 @@
 # Memos keyed on the bindings they read (CE-535, CE-531, CE-321)
 
-Status: proposed, 2026-11-06. Waits for the approval of the user before code.
+Status: approved by the user on 2026-11-06.
 
 The user chose, on 2026-11-06 in `issues/CE-535.md`, to write one design for
 CE-535 and CE-531. For the memos named in this document, this design replaces
