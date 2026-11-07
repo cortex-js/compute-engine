@@ -2465,6 +2465,28 @@ describe('SOLVE AN EQUATION WITH A FLOAT OVER A DOMAIN', () => {
     ]);
   });
 
+  test('over the real numbers, a root that the domain removes is not replaced', () => {
+    // Over a domain of real numbers, the solutions are the exact roots of
+    // the equation with its floats. A value at which the equation is only
+    // `True` within the tolerance is not a solution, so the answer is `[]`
+    // when the domain or the real type removes every exact root. This is
+    // the documented contract of `Solve` (reference page of `Solve`,
+    // "An equation with a decimal number").
+    expect(ce.box(['Equal', 10, 10.0000000000001]).evaluate().json).toBe(
+      'True'
+    );
+    expect(
+      solve(['Equal', 'x', 10.0000000000001], ['Interval', -10, 10]).evaluate()
+        .json
+    ).toEqual(['List']);
+    // The roots are ±1e-10·i, and the equation is `True` at x = 0.
+    const square: MathJsonExpression = ['Equal', ['Power', 'x', 2], -1e-20];
+    expect(ce.box(['Equal', ['Power', 0, 2], -1e-20]).evaluate().json).toBe(
+      'True'
+    );
+    expect(solve(square, 'RealNumbers').evaluate().json).toEqual(['List']);
+  });
+
   test('an exact equation over the integers still has no solution', () => {
     expect(
       solve(['Equal', 'x', ['Rational', 5, 2]], 'Integers').evaluate().json
