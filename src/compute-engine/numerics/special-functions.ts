@@ -6714,8 +6714,16 @@ function gauss2F1SeriesBig(
 // The largest ratio of the largest term to the result that the machine
 // ₂F₁ kernel accepts. A result with more cancellation is evaluated by
 // `hypergeometric2F1Complex` instead, which tries other transformations
-// and returns NaN when none is accurate.
-const GAUSS_2F1_MAX_LOSS = 1e6;
+// and returns NaN when none is accurate. A series with more cancellation
+// than GAUSS_2F1_DD_LOSS is summed in double-double, with relative
+// rounding errors of about 1e-32 per term, which this ratio multiplies.
+// The ratio is measured with the sum in doubles, whose own error is
+// about 1e-16 times the largest term: at a ratio of 1e10 that sum still
+// has about 6 correct digits, so the measured ratio is close to the true
+// one. For ₂F₁(−10.48, −10.24; 11.27; −1.215) every real form has a ratio
+// of at least 5e7; with a bound of 1e6 the relative error of the result
+// was 2.1e-13.
+const GAUSS_2F1_MAX_LOSS = 1e10;
 
 // The largest ratio of the largest term to the result for which the sum
 // in doubles is kept. The rounding errors of the terms are multiplied by
@@ -6726,15 +6734,19 @@ const GAUSS_2F1_MAX_LOSS = 1e6;
 const GAUSS_2F1_DD_LOSS = 1e2;
 
 // The largest ratio of a part of the connection formula at 1−z to the
-// result that the machine ₂F₁ kernel accepts (see `hypergeometric2F1Real`).
+// result (made larger by the errors of its arguments, `connection2F1`)
+// that `connectionOrSeries2F1` accepts when the series in z give no value
+// (no series ends within its terms, or each one cancels more than
+// GAUSS_2F1_MAX_LOSS). GAMMA_2F1_MAX_ERROR is derived from it.
 const CONNECTION_2F1_MAX_LOSS = 1e3;
 
 /**
  * The Gauss series Σ (a)ₙ(b)ₙ/((c)ₙ n!)·zⁿ summed in double-double, with
  * parameters given in double-double, rounded to a double. It ends as
  * `gauss2F1SeriesBig` does, with a 16 times smaller relative size of the
- * last term. NaN when the series has not converged within `maxTerms`
- * terms, unless `polynomial`.
+ * last term. For z > 0 the size that ends it is the bound of the terms
+ * that follow, as said below. NaN when the series has not converged
+ * within `maxTerms` terms, unless `polynomial`.
  */
 function gauss2F1SeriesDD(
   a: DD,
@@ -6760,10 +6772,19 @@ function gauss2F1SeriesDD(
       return ends ? sum[0] + sum[1] : NaN;
     }
     sum = ddAdd(sum, term);
+    // For z > 0 the terms after `start` have one sign, and the ratio of
+    // two terms tends to z, so the terms that follow add up to at most
+    // about |term|·q/(1 − q), with q the larger of the ratio and z. Near
+    // z = 1 this is many times |term|: for ₂F₁(10.155, −1.982; 1.149;
+    // 0.995), a sum that ended at the first small term had a relative
+    // error of 4.9e-14. For z < 0 the terms alternate, and the terms that
+    // follow add up to less than |term|.
+    const q = Math.max(Math.abs(ratio[0]), z[0]);
+    const tail = z[0] > 0 ? q / (1 - q) : 1;
     if (
       n >= start &&
-      Math.abs(ratio[0]) < 1 &&
-      Math.abs(term[0]) <= (Number.EPSILON / 16) * Math.abs(sum[0])
+      q < 1 &&
+      Math.abs(term[0]) * tail <= (Number.EPSILON / 16) * Math.abs(sum[0])
     )
       return sum[0] + sum[1];
   }
@@ -6775,22 +6796,36 @@ function gauss2F1SeriesDD(
  * term `big`, both from `gauss2F1SeriesBig` on the high parts of
  * `params` (a, b, c and z in double-double). NaN when the sum is NaN or
  * when `big` is more than GAUSS_2F1_MAX_LOSS times the sum. When `big` is
- * more than GAUSS_2F1_DD_LOSS times the sum, the series is summed again
- * in double-double, so that the cancellation does not reach the result.
+ * more than `ddLoss` times the sum, the series is summed again in
+ * double-double, so that the cancellation does not reach the result.
  */
 function gauss2F1Value(
   sum: number,
   big: number,
   params: [a: DD, b: DD, c: DD, z: DD],
   maxTerms: number,
-  polynomial: boolean
+  polynomial: boolean,
+  ddLoss = GAUSS_2F1_DD_LOSS
 ): number {
   if (Number.isNaN(sum)) return NaN;
   const scale = sum === 0 ? 1 : Math.abs(sum);
   if (big > GAUSS_2F1_MAX_LOSS * scale) return NaN;
-  if (big <= GAUSS_2F1_DD_LOSS * scale) return sum;
-  const accurate = gauss2F1SeriesDD(...params, maxTerms, polynomial);
-  return Number.isFinite(accurate) ? accurate : sum;
+  if (big <= ddLoss * scale) return sum;
+  // The sum in double-double ends at a smaller term than the sum in
+  // doubles, and for z near 1 the terms decrease slowly, so it gets twice
+  // the terms of a series that does not end by itself: ₂F₁ with an
+  // integer c − a − b gives `maxTerms` for the sum in doubles only.
+  const accurate = gauss2F1SeriesDD(
+    ...params,
+    polynomial ? maxTerms : 2 * maxTerms,
+    polynomial
+  );
+  if (Number.isFinite(accurate)) return accurate;
+  // The sum in double-double did not end within `maxTerms` terms (it ends
+  // at a smaller term than the sum in doubles) or overflowed. The sum in
+  // doubles is kept only when it cancels little: with a largest term
+  // 1e10 times the sum, its relative error can be 1e-6.
+  return big <= GAUSS_2F1_DD_LOSS * scale ? sum : NaN;
 }
 
 // The smallest positive normal double, 2⁻¹⁰²².
@@ -6956,12 +6991,14 @@ function gauss2F1Series(
  * the smallest ratio of its largest term to its sum, among the forms
  * `[factor, a, b, c, z]` of one value (a, b, c and z in double-double).
  * The forms are tried in order, and a form with a ratio of at most
- * GAUSS_2F1_DD_LOSS ends the search. The value of the chosen form comes
- * from `gauss2F1Value`. NaN when no series converged within its terms, or
- * when the smallest ratio is more than GAUSS_2F1_MAX_LOSS.
+ * `ddLoss` ends the search. The value of the chosen form comes from
+ * `gauss2F1Value`, which sums it in double-double when its ratio is more
+ * than `ddLoss`. NaN when no series converged within its terms, or when
+ * the smallest ratio is more than GAUSS_2F1_MAX_LOSS.
  */
 function leastLossGauss2F1(
-  forms: [factor: number, a: DD, b: DD, c: DD, z: DD][]
+  forms: [factor: number, a: DD, b: DD, c: DD, z: DD][],
+  ddLoss = GAUSS_2F1_DD_LOSS
 ): number {
   let best: { factor: number; params: [DD, DD, DD, DD] } | undefined;
   let bestSum = NaN;
@@ -6981,11 +7018,12 @@ function leastLossGauss2F1(
     bestSum = sum;
     bestBig = big;
     bestLoss = loss;
-    if (loss <= GAUSS_2F1_DD_LOSS) break;
+    if (loss <= ddLoss) break;
   }
   if (best === undefined) return NaN;
   return (
-    best.factor * gauss2F1Value(bestSum, bestBig, best.params, 10_000, false)
+    best.factor *
+    gauss2F1Value(bestSum, bestBig, best.params, 10_000, false, ddLoss)
   );
 }
 
@@ -6995,8 +7033,10 @@ function leastLossGauss2F1(
  *
  * - a or b a non-positive integer: terminating polynomial, any z.
  * - z < 0: Pfaff transformation z → z/(z−1).
- * - 0.5 < z < 1: linear connection at 1−z (generic case; for integer
- *   c−a−b falls back to the direct series, which converges for z < 1).
+ * - 0.5 < z < 1 (and z < −1 after the Pfaff transformation): linear
+ *   connection at 1−z when its two parts cancel little, else the series
+ *   in z in double-double (generic case; for integer c−a−b falls back to
+ *   the direct series, which converges for z < 1).
  * - z > 1: on/over the branch cut — complex value, returns NaN (the
  *   complex kernel handles it when applicable).
  */
@@ -7050,37 +7090,90 @@ function hypergeometric2F1Real(
   if (z > 1) return NaN; // complex value (branch cut [1, ∞))
 
   if (z < 0) {
-    // Pfaff: ₂F₁(a,b;c;z) = (1−z)^{−a}·₂F₁(a, c−b; c; z/(z−1))
+    // For z < −1 the a-form below takes the smaller of a and b as a, so
+    // that its factor (1 − z)^(−a) does not underflow while the result is
+    // a normal double: ₂F₁(4.886, 0.926; −2.7; −1.271e67) ≈ −7.78e-63, and
+    // (1 − z)^(−4.886) is 0 in doubles, so the result was −0.
+    if (z < -1 && a > b) return hypergeometric2F1Real(b, a, c, z);
+    // Pfaff:₂F₁(a,b;c;z) = (1−z)^{−a}·₂F₁(a, c−b; c; z/(z−1))
     //                     = (1−z)^{−b}·₂F₁(c−a, b; c; z/(z−1)),
     // which map z < 0 to w = z/(z−1) in (0, 1).
+    //
+    // The two Pfaff series and the direct series are three forms of the
+    // same value, and their cancellation can differ by orders of
+    // magnitude. For ₂F₁(−6.937, −4.123; 4.354; −0.662) the largest term
+    // is 3.7e5 times the sum with the a-form, 4.4e4 times with the b-form
+    // and 4.4e3 times with the direct series. `leastLossGauss2F1` uses the
+    // form with the least cancellation. The parameters c−a, c−b and w are
+    // in double-double, because a rounding error in them is multiplied by
+    // the cancellation as well when the series is summed in double-double.
+    const exact = (x: number): DD => [x, 0];
+    const w = ddDiv(exact(z), twoSum(z, -1));
+    const pfaffA = oneMinusZPow(z, -a);
+    const cMinusB = twoSum(c, -b);
+    const forms: [number, DD, DD, DD, DD][] = [
+      [pfaffA, exact(a), cMinusB, exact(c), w],
+      [oneMinusZPow(z, -b), twoSum(c, -a), exact(b), exact(c), w],
+    ];
     if (z >= -1) {
-      // w ≤ 0.5: the two Pfaff series and the direct series are three
-      // forms of the same value, and their cancellation can differ by
-      // orders of magnitude. For ₂F₁(−6.937, −4.123; 4.354; −0.662) the
-      // largest term is 3.7e5 times the sum with the a-form, 4.4e4 times
-      // with the b-form and 4.4e3 times with the direct series. Use the
-      // form with the least cancellation. The parameters c−a, c−b and w
-      // are in double-double, because a rounding error in them is
-      // multiplied by the cancellation as well when the series is summed
-      // in double-double.
-      const exact = (x: number): DD => [x, 0];
-      const w = ddDiv(exact(z), twoSum(z, -1));
-      const forms: [number, DD, DD, DD, DD][] = [
-        [oneMinusZPow(z, -a), exact(a), twoSum(c, -b), exact(c), w],
-        [oneMinusZPow(z, -b), twoSum(c, -a), exact(b), exact(c), w],
-      ];
-      // The direct series is tried last, and only when it can converge
-      // within the 10,000 terms of `gauss2F1SeriesBig`: after the index
-      // `gauss2F1SeriesStart` its terms decrease about as |z|ⁿ, so about
-      // 37/−ln|z| more terms reach a relative size of 1e-16. Near z = −1
-      // it would run every term and give NaN.
-      if (gauss2F1SeriesStart(a, b, c, z) + 37 / -Math.log(-z) < 10_000)
-        forms.push([1, exact(a), exact(b), exact(c), exact(z)]);
-      return leastLossGauss2F1(forms);
+      // w ≤ 0.5. The direct series is tried last, and only when it can
+      // converge within its terms (`convergingForms`): near z = −1 it
+      // would run every term and give NaN.
+      return leastLossGauss2F1([
+        ...forms,
+        ...convergingForms([[1, exact(a), exact(b), exact(c), exact(z)]]),
+      ]);
     }
-    return (
-      oneMinusZPow(z, -a) * hypergeometric2F1Real(a, c - b, c, z / (z - 1))
-    );
+    // z < −1, so w is in (0.5, 1) and the direct series diverges. The
+    // Pfaff a-form is evaluated as for 0.5 < z < 1: the connection formula
+    // at 1 − w when its parts cancel little, else the two Pfaff series
+    // (the Euler form of the a-form is the b-form). The connection formula
+    // takes c − b and 1 − w = 1/(1 − z) in double-double, because 1 − w
+    // rounded from w has a relative error of up to about |z|·ε.
+    //
+    // ₂F₁ is symmetric in a and b, and a ≤ b here (see the start of this
+    // branch), so the factor (1 − z)^(−a) is about the size of the result
+    // for a large |z|, and s = c − a − (c − b) = b − a ≥ 0.
+    const cb = cMinusB[0];
+    const wd = z / (z - 1);
+    const integerS = Number.isInteger(c - a - cb);
+    if (!integerS && Number.isFinite(w[0])) {
+      const oneMinusW = ddDiv(exact(1), twoSum(1, -z));
+      const v = connectionOrSeries2F1(a, cMinusB, c, oneMinusW, pfaffA, forms);
+      if (!Number.isNaN(v) || wd < 1) return v;
+    }
+    if (wd === 1) {
+      // The double-double forms gave no value for a very large |z|: below
+      // about −1e108 a term of the series in 1 − w underflows to 0 before
+      // the index where the series may end, and below about −1.3e300 the
+      // double-double quotient w overflows.
+      //
+      // z < −2⁵³ or so: w rounds to 1. The Gauss summation at w = 1 gives
+      // the first term (1 − z)^(−a)·Γ(c)Γ(b − a)/(Γ(c − a)Γ(b)) of the
+      // expansion of ₂F₁ at z = −∞ (DLMF 15.8.2). The expansion has two
+      // parts. The first part is (−z)^(−a)·₂F₁(a, a − c + 1; a − b + 1;
+      // 1/z), whose next term is about a(a − c + 1)/((b − a − 1)·z) times
+      // the first term. The second part is about |z|^(−(b−a)) times the
+      // first term (times ln|z| for an integer b − a). The first term is
+      // the value when both are less than ε. Otherwise the result is NaN:
+      // ₂F₁(0.25, 0.26; 1.3; −1e150) has a first term 3% too large,
+      // ₂F₁(10, 12; −200.3; −2e16) one with a relative error of 3.7e-13,
+      // and for a = b the Gauss summation is a pole.
+      // ₂F₁(0.25, 0.75; 1.3; −1e150) ≈ 4.2167e-38 is the first term.
+      const firstPart = Math.abs((a * (a - c + 1)) / ((b - a - 1) * z));
+      return (b - a) * Math.log(-z) >= 40 && firstPart < Number.EPSILON
+        ? pfaffA * hypergeometric2F1Real(a, cb, c, 1)
+        : NaN;
+    }
+    // An integer b − a: a Pfaff form at w, whose connection formula needs
+    // a logarithmic limit (see the case of an integer c − a − b below).
+    // The two forms cancel by different amounts, and each one can give
+    // NaN where the other gives the value: ₂F₁(−3.792, −13.792; 6.225;
+    // −77.343) ≈ 2.7669e17 comes from the b-form only. So the b-form is
+    // tried when the a-form gives NaN.
+    const viaA = pfaffA * hypergeometric2F1Real(a, cb, c, wd);
+    if (!Number.isNaN(viaA)) return viaA;
+    return oneMinusZPow(z, -b) * hypergeometric2F1Real(b, c - a, c, wd);
   }
 
   if (z <= 0.5) return gauss2F1Series(a, b, c, z);
@@ -7111,21 +7204,166 @@ function hypergeometric2F1Real(
     }
     return NaN;
   }
-  // The two parts can cancel: the result is NaN (and the complex kernel
-  // is tried) when a part is more than CONNECTION_2F1_MAX_LOSS times the
-  // result. A part is measured by the larger of its largest term and its
-  // sum: when the terms have one sign, the sum is many times the largest
-  // term, and the cancellation is between the two sums. The bound is
-  // smaller than GAUSS_2F1_MAX_LOSS because the prefactors (Γ of large
-  // arguments, (1−z)^s) have relative errors of up to about 100ε
+  // The series in z: the direct series and its Euler form
+  // (1−z)^(c−a−b)·₂F₁(c−a, c−b; c; z). The factor of the Euler form takes
+  // c − a − b in double-double. 1 − z is exact for 0.5 ≤ z ≤ 2.
+  const exact = (x: number): DD => [x, 0];
+  const cMinusA = twoSum(c, -a);
+  const sDD = ddAdd(cMinusA, exact(-b));
+  const euler = oneMinusZPow(z, sDD[0]) * Math.exp(sDD[1] * Math.log1p(-z));
+  return connectionOrSeries2F1(a, exact(b), c, exact(1 - z), 1, [
+    [1, exact(a), exact(b), exact(c), exact(z)],
+    [euler, cMinusA, twoSum(c, -b), exact(c), exact(z)],
+  ]);
+}
+
+/**
+ * factor·₂F₁(a, b; c; z) for 0.5 < z < 1 and a c − a − b that is not an
+ * integer, where b and y = 1 − z are given in double-double, and `forms`
+ * are Gauss series in z of the same value (each `[factor, a, b, c, z]`,
+ * with its own factor).
+ *
+ * The connection formula at 1 − z (`connection2F1`) is used when its two
+ * parts are at most CONNECTION_2F1_SERIES_LOSS times its value. When they
+ * cancel more, the series of `forms` that end within their terms are
+ * used: `leastLossGauss2F1` sums the series with the least cancellation,
+ * always in double-double. A z near 1 needs several hundred terms, and
+ * the rounding errors of the term recurrence in doubles add up even when
+ * the terms do not cancel: summed in doubles, ₂F₁(6.874, 4.243; −9.907;
+ * 0.834) had a relative error of 1.0e-14, where the connection formula
+ * had 4.4e-15. For ₂F₁(2.461, 6.281; 8.033; 0.718) the parts are about
+ * 750 times the result: the connection formula gave a relative error of
+ * 3.5e-12, and the series gives 3e-17. When no series ends, the
+ * connection formula is used up to CONNECTION_2F1_MAX_LOSS; above, the
+ * result is NaN (and the complex kernel is tried).
+ */
+function connectionOrSeries2F1(
+  a: number,
+  b: DD,
+  c: number,
+  y: DD,
+  factor: number,
+  forms: [factor: number, a: DD, b: DD, c: DD, z: DD][]
+): number {
+  // A factor that underflowed or overflowed would make the product 0 or
+  // infinite while the result is a normal double: the connection formula
+  // is then not used (`leastLossGauss2F1` skips such a form as well).
+  const connection = isNormalDouble(factor)
+    ? connection2F1(a, b, c, y)
+    : { value: NaN, loss: NaN };
+  if (connection.loss <= CONNECTION_2F1_SERIES_LOSS)
+    return factor * connection.value;
+  const series = leastLossGauss2F1(convergingForms(forms), 0);
+  if (!Number.isNaN(series)) return series;
+  return connection.loss <= CONNECTION_2F1_MAX_LOSS
+    ? factor * connection.value
+    : NaN;
+}
+
+// The largest ratio of a part of the connection formula at 1 − z to the
+// result (made larger by the errors of its arguments, `connection2F1`)
+// for which `connectionOrSeries2F1` keeps the connection formula without
+// a try of the series in z. A Γ value usually has an error of a few ε
+// (up to about 100ε for large arguments, GAMMA_QUOTIENT_ERROR), so the
+// prefactors have about 10ε, and the cancellation multiplies this error;
+// the series in double-double has an error of a few ε, but costs more
+// time. Over 12,000 random points with −10 < z < 1 and parameters up to
+// 40 in size, a bound of 4 gave 150 relative errors above 1e-14, a bound
+// of 2 gave 41 and a bound of 1 gave 20. In one run, the bound 4 took
+// about 0.7 times the time of the bound 2, and the bound 1 about 1.5
+// times.
+const CONNECTION_2F1_SERIES_LOSS = 2;
+
+/**
+ * The forms `[factor, a, b, c, z]` of `forms` whose Gauss series ends
+ * within the 10,000 terms of `gauss2F1SeriesBig` and `gauss2F1SeriesDD`.
+ * A form with |z| ≥ 1 (a w = z/(z − 1) that rounds to 1) is not kept.
+ *
+ * The ratio of two terms is about z·(1 + k/n) with k = a + b − c − 1.
+ * For k ≤ 0, after the index `gauss2F1SeriesStart` the terms decrease at
+ * least as |z|ⁿ. For k > 0 they grow up to about that index, and from
+ * twice that index on, the ratio is at most (1 + |z|)/2 in size. The
+ * count is the number of terms after that index at that rate that reach
+ * the relative size ε/16 at which `gauss2F1SeriesDD` ends (a log of
+ * about 39), and for z > 0 also the size of the terms that follow, about
+ * 1/(1 − z) times the last term. For the Euler form ₂F₁(17.278, 11.834;
+ * 5.445; 0.991) of ₂F₁(−11.833, −6.389; 5.445; 0.991), a count at the
+ * rate |z| from the index (about 2500) admitted a series that had not
+ * ended after 10,000 terms. A series that does not end
+ * would run every term before `leastLossGauss2F1` skips it.
+ */
+function convergingForms(
+  forms: [factor: number, a: DD, b: DD, c: DD, z: DD][]
+): [factor: number, a: DD, b: DD, c: DD, z: DD][] {
+  return forms.filter(([, a, b, c, z]) => {
+    const zAbs = Math.abs(z[0]);
+    if (!(zAbs < 1)) return false;
+    const logSize = 39 + (z[0] > 0 ? -Math.log1p(-zAbs) : 0);
+    const start = gauss2F1SeriesStart(a[0], b[0], c[0], z[0]);
+    const grows = a[0] + b[0] - c[0] - 1 > 0;
+    const rate = grows ? (1 + zAbs) / 2 : zAbs;
+    return (grows ? 2 * start : start) + logSize / -Math.log(rate) < 10_000;
+  });
+}
+
+/**
+ * The connection formula at 1 − z (DLMF 15.8.4) for 0.5 < z < 1 and a
+ * c − a − b that is not an integer, and `loss`, the ratio of its larger
+ * part to its value (NaN or Infinity when the value is 0 or NaN), made
+ * larger by the errors of its prefactors as said below.
+ */
+function connection2F1(
+  a: number,
+  [b, bError]: DD,
+  c: number,
+  [y, yError]: DD
+): { value: number; loss: number } {
+  const s = c - a - b;
+  // The formula is evaluated with doubles: b, y = 1 − z, and the rounded
+  // Γ arguments c − a, c − b and s = c − a − b. The rounding error δ of
+  // an argument x of Γ changes Γ(x) by a relative error of about ψ(x)·δ.
+  // Near a pole this is much more than the error of Γ itself: the Pfaff
+  // form of ₂F₁(1.603, 10.27; −6.402; −6.998) has c − a ≈ −8.005, and the
+  // relative error of the result was 2.3e-13, with parts only 2.3 times
+  // the result. The relative error δ of y changes (1 − z)^s by about s·δ:
+  // for the Pfaff form of ₂F₁(−39.57, −8.011; 10.13; −8.463), 1 − w
+  // rounded from w = z/(z − 1) had a relative error of up to about 8ε,
+  // s ≈ 31.6, and the relative error of the result was 1.6e-13. With
+  // `rounding`, both are evaluated by the series. `rounding` is the sum
+  // of the relative errors that the errors of the arguments give; b and y
+  // are given in double-double, and the other errors come from `twoSum`.
+  // For s, only the part of ψ(±s) without a pole, about ln(1 + |s|), is
+  // counted: near an integer s the poles of Γ(s) and Γ(−s) are in both
+  // parts and cancel in their sum. With ψ(±s) in full, the result of
+  // ₂F₁(7.714, 15.714; −2.349; −591717.618), whose Pfaff form has
+  // s = 8.000000000000002, was NaN, and the connection formula gives it
+  // with a relative error of 7e-16.
+  const cMinusA = twoSum(c, -a);
+  const cMinusB = ddAdd(twoSum(c, -b), [-bError, 0]);
+  const sDD = ddAdd(ddAdd(cMinusA, [-b, 0]), [-bError, 0]);
+  const sError = sDD[0] - s + sDD[1];
+  const argumentError = (x: number, error: number): number =>
+    error === 0 ? 0 : Math.abs(error * digamma(x));
+  const rounding =
+    argumentError(c - a, cMinusA[1]) +
+    argumentError(c - b, cMinusB[0] - (c - b) + cMinusB[1]) +
+    argumentError(b, bError) +
+    2 * Math.abs(sError) * (1 + Math.log1p(Math.abs(s))) +
+    Math.abs(sError * Math.log(y)) +
+    Math.abs((s * yError) / y);
+  // A part is measured by the larger of its largest term and its sum:
+  // when the terms have one sign, the sum is many times the largest term,
+  // and the cancellation is between the two sums. The prefactors (Γ of
+  // large arguments, (1−z)^s) have relative errors of up to about 100ε
   // (GAMMA_QUOTIENT_ERROR), and the cancellation multiplies those errors
   // too. A prefactor with a larger error (`gammaQuotient` from logs)
-  // counts its part as larger in the same ratio, so the estimated error of
-  // the result stays within GAMMA_2F1_MAX_ERROR.
+  // counts its part as larger in the same ratio, and so does `rounding`,
+  // so that the caller's bound CONNECTION_2F1_MAX_LOSS keeps the estimated
+  // error of the result within GAMMA_2F1_MAX_ERROR.
   const g1 = gammaQuotient(c, s, c - a, c - b);
-  const g2 = gammaQuotient(c, -s, a, b, 1 - z, s);
-  const s1 = gauss2F1SeriesBig(a, b, 1 - s, 1 - z);
-  const s2 = gauss2F1SeriesBig(c - a, c - b, 1 + s, 1 - z);
+  const g2 = gammaQuotient(c, -s, a, b, y, s);
+  const s1 = gauss2F1SeriesBig(a, b, 1 - s, y);
+  const s2 = gauss2F1SeriesBig(c - a, c - b, 1 + s, y);
   const value = g1.times(s1.sum) + g2.times(s2.sum);
   const big = Math.max(
     (g1.error / GAMMA_QUOTIENT_ERROR) *
@@ -7133,7 +7371,10 @@ function hypergeometric2F1Real(
     (g2.error / GAMMA_QUOTIENT_ERROR) *
       Math.abs(g2.times(Math.max(s2.big, Math.abs(s2.sum))))
   );
-  return big <= CONNECTION_2F1_MAX_LOSS * Math.abs(value) ? value : NaN;
+  return {
+    value,
+    loss: (big / Math.abs(value)) * (1 + rounding / GAMMA_QUOTIENT_ERROR),
+  };
 }
 
 /** Direct Kummer series Σ (a)ₙ/((b)ₙ n!) zⁿ — converges for all z. */

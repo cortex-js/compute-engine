@@ -2845,6 +2845,71 @@ describe('HYPERGEOMETRIC 2F1 CANCELLATION IN THE GAUSS SERIES', () => {
   });
 });
 
+describe('HYPERGEOMETRIC 2F1 FOR z < −1 AND 0.5 < z < 1', () => {
+  // References: mpmath 1.4.1 hyp2f1 (mp.dps = 50) at the same double
+  // arguments. These points use the connection formula at 1 − z, or at
+  // 1 − w after the Pfaff map w = z/(z − 1) for z < −1. Its two parts
+  // cancel, or a Γ argument is near a pole, or 1 − w is rounded: the
+  // relative error was 1.6e-13 to 3.5e-12 (shown after each case). The
+  // series in z (or in w) summed in double-double gives the result to
+  // about one unit in the last place.
+  test.each([
+    // z < −1, parts of the connection formula about 1e3 times the result
+    // (2.1e-12)
+    [[10.214, 8.842, 11.991, -4.788], 0.000001137211485611088314556441],
+    // 0.5 < z < 1, parts about 750 times the result (3.5e-12, 1.8e-12)
+    [[2.461, 6.281, 8.033, 0.718], 9.193355757939432758822321],
+    [[3.619, 1.788, 6.69, 0.653], 2.37748084344756919693396],
+    // z < −1, the Γ argument c − a of the Pfaff form is −8.005 (2.3e-13)
+    [[1.603, 10.27, -6.402, -6.998], 0.0004659878986233081825262409],
+    // z < −1, 1 − w rounded from w, with s = 31.6 (1.6e-13)
+    [[-39.57, -8.011, 10.13, -8.463], -13207648089455139296.00211],
+    // z < −1, every real form cancels by more than 5e7 (2.1e-13)
+    [[-10.48, -10.24, 11.27, -1.215], 0.01903579027690915081442574],
+    // 0.5 < z < 1: an Euler form whose terms grow up to n ≈ 2500, and a
+    // series of many terms that does not cancel (1.2e-15 and 4.4e-15;
+    // 9.7e-14 and 1.0e-14 with too few terms or a sum in doubles)
+    [[-11.833, -6.389, 5.445, 0.991], 345.6916744857329309885765],
+    [[6.874, 4.243, -9.907, 0.834], 6116221145186413711486728.0],
+  ])('machine ₂F₁(%j)', (args, ref) => {
+    const [a, b, c, z] = args;
+    const v = hypergeometric2F1(a, b, c, z);
+    expect(Math.abs(v - ref) / Math.abs(ref)).toBeLessThan(1e-15);
+  });
+
+  // z < −1 where the double-double forms give no value. For a very large
+  // |z| the series in 1 − w underflows (z below about −1e108) or the
+  // double-double w overflows (below about −1.3e300). Then w rounds to 1
+  // and the Gauss summation at w = 1 gives the value. The other cases are
+  // shown before each one.
+  test.each([
+    [[0.25, 0.75, 1.3, -1e150], 4.2167083042604103459e-38],
+    [[0.25, 0.75, 1.3, -1.7e308], 1.1677807955175349041e-77],
+    // a > b: the factor (1 − z)^(−a) is 0 in doubles, and the result was
+    // −0 before a and b were swapped
+    [[4.886, 0.926, -2.7, -1.271e67], -7.7820886486929883847e-63],
+    // an integer b − a: only the b-form of Pfaff gives the value, in both
+    // orders of a and b (NaN when only the a-form was tried)
+    [[-3.792, -13.792, 6.225, -77.343], 276687166671952284.03],
+    [[-13.792, -3.792, 6.225, -77.343], 276687166671952284.03],
+    // s = 8.000000000000002 in the Pfaff form: near an integer s the
+    // poles of Γ(s) and Γ(−s) cancel in the connection formula (NaN when
+    // the error estimate counted them)
+    [[7.714, 15.714, -2.349, -591717.6182353095], 8.2587560943978417163e-48],
+  ])('machine ₂F₁(%j) for z < −1 with a large |z| or an integer b − a', (args, ref) => {
+    const [a, b, c, z] = args;
+    const v = hypergeometric2F1(a, b, c, z);
+    expect(Math.abs(v - ref) / Math.abs(ref)).toBeLessThan(1e-14);
+  });
+
+  test('machine ₂F₁ at w = 1 does not give only the first term of the expansion at −∞ when the next term is not small', () => {
+    // w = z/(z − 1) rounds to 1, and the first term of the expansion was
+    // 8.3335e-37, 3% more than the value 8.0790e-37 (mpmath), because
+    // |z|^(−(b − a)) = 1e-1.5 is not small. The value stays symbolic.
+    expect(hypergeometric2F1(0.25, 0.26, 1.3, -1e150)).toBeNaN();
+  });
+});
+
 describe('APPELL F₁', () => {
   // Reference values from mpmath 1.4.1 appellf1 (mp.dps = 25)
   test('F₁(a; b₁, b₂; c; 0, 0) = 1 exactly', () => {

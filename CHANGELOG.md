@@ -87,6 +87,15 @@
 
 ### Resolved Issues
 
+- **`Hypergeometric2F1` at machine precision is now accurate to about the
+  last digit for z < −1 and 0.5 < z < 1.** For these arguments some values
+  were wrong from the 12th digit:
+  `["Hypergeometric2F1", 2.461, 6.281, 8.033, 0.718]` gave
+  `9.193355757971403` and now gives `9.193355757939432`, and
+  `["Hypergeometric2F1", 10.214, 8.842, 11.991, -4.788]` gave
+  `1.137211485608755e-6` and now gives `1.1372114856110883e-6`. Some
+  arguments that gave no numeric value now have one.
+
 - **`simplify()` now gives the closed form of a telescoping sum and of a known
   infinite product, as `evaluate()` does.** `\sum_{k=2}^n (\sin(k+1)-\sin k)`
   stayed a sum under `simplify()`; it is now `sin(n+1) - sin(2)`.
