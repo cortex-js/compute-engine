@@ -387,6 +387,16 @@
 
 ### Performance
 
+- **The condition of `Filter`, `Any` and `All` is now compiled when it
+  compares integers, as the function of `Map` already was.** With
+  `isEven(n) := n % 2 == 0`, `Sum(Filter(1..20000, isEven))` took about
+  480 ms and now takes about 50 ms; `Any(1..20000, k ↦ k % 2 == 7)` went from
+  about 360 ms to about 10 ms. The condition must be a comparison of integer
+  arithmetic (`+`, `-`, `×`, small powers, `Mod`, `Floor`, `Abs`, `Min`,
+  `Max`), or `And`, `Or` and `Not` of such comparisons, and the collection a
+  range or a list of integers of 64 elements or more. Other conditions are
+  evaluated as before. The values do not change. (CE-880)
+
 - **When a derivative of a function is too large to compute symbolically,
   the higher derivatives of the same function no longer try again.** For
   `f(x) = \sqrt{x+\sqrt{x+\cdots+\sqrt{x+1}}}` nested 37 times, each of

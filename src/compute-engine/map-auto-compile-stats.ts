@@ -1,6 +1,8 @@
 /**
  * Instrumentation counters for the auto-compilation of lazy-`Map` element
  * lambdas on numeric drains (implemented in `library/map-auto-compile.ts`).
+ * The compiled condition of a `Filter`, `Any` or `All`
+ * (`predicateCompiledRunner()` in the same file) bumps the same counters.
  *
  * The counters live in this dependency-free module, rather than next to the
  * implementation, because `types-engine.ts` declares the engine accessor that

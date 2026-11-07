@@ -251,6 +251,7 @@ import { splitGraphemeClusters } from '../../common/grapheme-splitter.js';
 import {
   mapAutoCompileRunner,
   mapCompiledElementRunner,
+  predicateCompiledRunner,
 } from './map-auto-compile.js';
 import { lowerMapSpine, makeSpineRunner } from './map-lowering.js';
 import { implicitCompile } from '../implicit-compile.js';
@@ -14148,8 +14149,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!fn) return null;
       return engine._fn('Any', [collection, fn]);
     },
-    evaluate: ([collection, fn], { engine: ce }) =>
-      runWalk(quantifierWalk('Any', collection, fn, ce), ce),
+    evaluate: ([collection, fn], { engine: ce, expression }) =>
+      runWalk(
+        quantifierWalk('Any', collection, fn, ce, undefined, expression),
+        ce
+      ),
     // The same walk, suspended between time slices; the abort signal is
     // honored between two elements. The predicate is awaited
     // (`asyncCallbackRoute`), so an operator in it that has only an
@@ -14161,7 +14165,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           collection,
           fn,
           options.engine,
-          asyncCallbackRoute(options)
+          asyncCallbackRoute(options),
+          options.expression
         ),
         options
       ),
@@ -14199,8 +14204,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!fn) return null;
       return engine._fn('All', [collection, fn]);
     },
-    evaluate: ([collection, fn], { engine: ce }) =>
-      runWalk(quantifierWalk('All', collection, fn, ce), ce),
+    evaluate: ([collection, fn], { engine: ce, expression }) =>
+      runWalk(
+        quantifierWalk('All', collection, fn, ce, undefined, expression),
+        ce
+      ),
     evaluateAsync: ([collection, fn], options) =>
       runWalkAsync(
         quantifierWalk(
@@ -14208,7 +14216,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           collection,
           fn,
           options.engine,
-          asyncCallbackRoute(options)
+          asyncCallbackRoute(options),
+          options.expression
         ),
         options
       ),
@@ -14917,6 +14926,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               message: `Iteration limit of ${limit} exceeded while evaluating Filter()`,
             });
         };
+        // A condition with an exact-tier proof (an integer comparison over
+        // a source with proved integer bounds, `exactPredicateShape()`) is
+        // computed by compiled code. The runner gives `undefined` for an
+        // element that the interpreter must judge. A new iterator is a new
+        // walk.
+        const compiled = predicateCompiledRunner(expr, { drainStart: true });
         return {
           next: () => {
             while (true) {
@@ -14924,6 +14939,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               if (next.done) return { value: undefined, done: true };
               // The value the predicate judges is the value emitted.
               const value = selectedElementValue(next.value);
+              const fast = compiled?.([value]);
+              if (fast === true) return emit(value);
+              if (fast === false) {
+                reject();
+                continue;
+              }
               const pred = f([value]);
               if (!pred) {
                 throw invalidPredicateError(expr.op2);
@@ -22692,11 +22713,24 @@ function quantifierWalk(
   fn: Expression | undefined,
   ce: ComputeEngine,
   // How the predicate is applied (see `CallbackRoute`).
-  route: CallbackRoute = undefined
+  route: CallbackRoute = undefined,
+  // The `Any` or `All` expression that is evaluated, when the handler has it
+  // (`EvaluateHandlerOptions.expression`). It is the key of the cache of the
+  // compiled predicate, and is used only when its operands are `collection`
+  // and `fn`.
+  expression?: Expression
 ):
   | Generator<PromiseLike<unknown> | undefined, Expression | undefined>
   | undefined {
   const f = fn ? applicable(fn) : undefined;
+  const instance =
+    fn !== undefined &&
+    isFunction(expression, kind) &&
+    expression.nops === 2 &&
+    expression.op1 === collection &&
+    expression.op2 === fn
+      ? expression
+      : undefined;
   // A source that cannot be enumerated decides nothing: the walk below would
   // see no elements and fall to `defaultValue` — `Any(xs, p) → False`,
   // `All(xs, p) → True` for a valueless `xs`. Stay inert instead.
@@ -22734,16 +22768,31 @@ function quantifierWalk(
     // `Any`, `True` for `All`) is not: `All(FlatMap([1, 2], x ↦ Join([x],
     // v)), x ↦ x < 5)` was `True` for a valueless `v`.
     const walk = new MeasuredWalk(() => collection.each());
+    // A predicate with an exact-tier proof (an integer comparison over a
+    // source with proved integer bounds, `exactPredicateShape()`) is
+    // computed by compiled code. The runner gives `undefined` for an element
+    // that the interpreter must judge. The runner is made when the walk
+    // starts: each walk is a new drain.
+    const compiled =
+      instance !== undefined
+        ? predicateCompiledRunner(instance, { drainStart: true })
+        : undefined;
     for (const item of walk) {
       read += 1;
+      const fast = compiled?.([item]);
       // Without a predicate, the element itself is the answer. On the
       // asynchronous route it is evaluated with `evaluateAsync()` and
       // awaited, as the predicate is.
-      const result = f
-        ? yield* applyCallback(f, [item], route)
-        : route === undefined
-          ? item.evaluate()
-          : ((yield item.evaluateAsync(route)) as Expression);
+      const result =
+        fast !== undefined
+          ? fast
+            ? ce.True
+            : ce.False
+          : f
+            ? yield* applyCallback(f, [item], route)
+            : route === undefined
+              ? item.evaluate()
+              : ((yield item.evaluateAsync(route)) as Expression);
       // An absent answer (`Missing`) reads as `False`, as in
       // `Or` and `And`: the logic is two-valued (user decision 2026-11-02).
       const s =

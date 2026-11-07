@@ -794,7 +794,21 @@ export function mapElementFunction(
   expr: Expression
 ): { fn: Expression; params: string[]; named?: string } | undefined {
   if (!isFunction(expr, 'Map') || expr.nops < 2) return undefined;
-  let fn = expr.op1;
+  return callbackElementFunction(ce, expr.op1);
+}
+
+/**
+ * The `Function` literal of the callback `callee` (a `Function` literal, or
+ * a symbol that names a user function), with the names of its parameters,
+ * read as `mapElementFunction()` reads the element function of a `Map`.
+ * `undefined` when the callback is neither, when a parameter is not a
+ * symbol, or when a parameter does not accept every integer.
+ */
+function callbackElementFunction(
+  ce: ComputeEngine,
+  callee: Expression
+): { fn: Expression; params: string[]; named?: string } | undefined {
+  let fn = callee;
   let named: string | undefined;
   if (isSymbol(fn)) {
     named = fn.symbol;
@@ -893,6 +907,37 @@ function proveNestedMap(
     sources.push(b);
   }
 
+  const out = proveIntegerOperands(ctx, params, sources, [body]);
+  if (out === undefined) return undefined;
+  if (sourcesOut !== undefined) sourcesOut.push(...sources);
+  return {
+    interval: out[0],
+    count: Math.min(...sources.map((s) => s.count)),
+  };
+}
+
+/**
+ * The proof of `proveNestedMap()` for each expression of `operands`: each one
+ * is a parameter of the element function, a closed integer operand
+ * (`closedInteger()`), or a tree of integer operations, and it must be
+ * integer-closed and bounded over the bounds `sources` of the parameters
+ * `params`. Returns the bounds of each operand, in the order of `operands`, or
+ * `undefined` when one of them is not proved.
+ *
+ * Each application in a tree propagates the bounds of its operands with
+ * `applyOpInterval()`, which also bounds the values that the generated code
+ * computes on the way. Each application must also be integer-closed: it is
+ * rebuilt over `integer` stand-in symbols, from the rebuilt operands, and its
+ * type must be `integer`. Any other node (a call of a user function, an
+ * operation with no bounds rule) declines.
+ */
+function proveIntegerOperands(
+  ctx: ProofContext,
+  params: ReadonlyArray<string>,
+  sources: ReadonlyArray<SourceBounds>,
+  operands: ReadonlyArray<Expression>
+): Interval[] | undefined {
+  const ce = ctx.ce;
   // The exponent of a `Power` must be a literal (`literalPowerExponent()`):
   // only its base is an operand to prove.
   const operandsOf = (
@@ -931,8 +976,12 @@ function proveNestedMap(
     return applyOpInterval(x.operator, bounds);
   };
 
-  const out = boundsOf(body, 0);
-  if (out === undefined) return undefined;
+  const out: Interval[] = [];
+  for (const x of operands) {
+    const b = boundsOf(x, 0);
+    if (b === undefined) return undefined;
+    out.push(b);
+  }
 
   // Second pass: each application, rebuilt over the stand-ins, must be
   // integer-closed (see `probesIntegerClosed()`).
@@ -968,12 +1017,8 @@ function proveNestedMap(
       return probe;
     };
 
-    if (probeOf(body) === undefined) return undefined;
-    if (sourcesOut !== undefined) sourcesOut.push(...sources);
-    return {
-      interval: out,
-      count: Math.min(...sources.map((s) => s.count)),
-    };
+    for (const x of operands) if (probeOf(x) === undefined) return undefined;
+    return out;
   } catch {
     return undefined;
   } finally {
@@ -1050,7 +1095,164 @@ export function exactTierShape(
   options?: { numericMarker?: boolean }
 ): ExactTierShape | undefined {
   const numericMarker = options?.numericMarker === true;
-  const memos = numericMarker ? markedProofMemo : exactProofMemo;
+  return memoizedShape(
+    numericMarker ? markedProofMemo : exactProofMemo,
+    ce,
+    expr,
+    // A parameter ANNOTATION makes the lowering read a source's TYPE, which
+    // an inferred collection type can retract (or acquire): the proof memo
+    // records the types it read so the next mutation generation revalidates
+    // them. Collected syntactically, before the lowering is asked, so a
+    // DECLINED annotation — at this level or at any nested one
+    // (`proveSource`) — arms the revalidation too.
+    hasAnnotatedParams(expr) ? [expr] : [],
+    numericMarker,
+    (ctx) => {
+      const level = isFunction(expr, 'Map') ? lowerLevel(expr) : undefined;
+      const sources: SourceBounds[] = [];
+      // A body that is not one application (`x ↦ x^2 + 1`), or a named
+      // element function, is proved node by node (`proveNestedMap()`).
+      const element =
+        level === undefined ? mapElementFunction(ce, expr) : undefined;
+      const proof =
+        level !== undefined
+          ? proveLevel(ctx, level, sources)
+          : element !== undefined
+            ? proveNestedMap(ctx, expr, sources)
+            : undefined;
+      return proof === undefined || !isFunction(expr, 'Map')
+        ? undefined
+        : {
+            level,
+            fn: element?.fn ?? expr.op1,
+            named: element?.named,
+            sourceBounds: sources.map((s) => s.interval),
+            count: proof.count,
+          };
+    }
+  );
+}
+
+/** The comparisons that a condition proved by `exactPredicateShape()` can
+ * apply to integer operands. */
+const INTEGER_COMPARISONS = new Set([
+  'Equal',
+  'NotEqual',
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+]);
+
+/**
+ * True if `x` is a comparison of two operands (`INTEGER_COMPARISONS`), or an
+ * `And`, `Or` or `Not` of such expressions. The operands of the comparisons
+ * are pushed into `operands`, for the integer proof of the caller.
+ */
+function comparisonOperands(
+  x: Expression,
+  depth: number,
+  operands: Expression[]
+): boolean {
+  if (depth > MAX_BODY_DEPTH || !isFunction(x)) return false;
+  const op = x.operator;
+  if (op === 'Not')
+    return x.nops === 1 && comparisonOperands(x.op1, depth + 1, operands);
+  if (op === 'And' || op === 'Or')
+    return (
+      x.nops > 0 &&
+      x.ops.every((o) => comparisonOperands(o, depth + 1, operands))
+    );
+  if (!INTEGER_COMPARISONS.has(op) || x.nops !== 2) return false;
+  operands.push(x.op1, x.op2);
+  return true;
+}
+
+/** The memo of `exactPredicateShape()`, keyed on the `Filter`, `Any` or `All`
+ * instance. */
+const predicateProofMemo = new WeakMap<Expression, ExactProofMemo>();
+
+/**
+ * The proof of the exact tier for the condition of a selection:
+ * `Filter(xs, p)`, `Any(xs, p)` or `All(xs, p)`, where the condition `p` is a
+ * `Function` literal of one parameter, or a named user function of one
+ * parameter (`isEven(n) = n % 2 == 0`), and the source `xs` has proved
+ * integer bounds (`proveSource()`: a literal `Range`, a `List` of integer
+ * literals, a proved `Map`, or a symbol whose value is one of those).
+ * `undefined` when the instance is not of that kind.
+ *
+ * The body of the condition must be a comparison of two operands
+ * (`Equal`, `NotEqual`, `Less`, `LessEqual`, `Greater`, `GreaterEqual`), or
+ * an `And`, `Or` or `Not` of such comparisons. Each operand of a comparison
+ * must be integer-closed and bounded over the bounds of the source, as the
+ * body of a `Map` of the exact tier (`proveIntegerOperands()`). Then the
+ * compiled code compares the same integers as the interpreter, and its
+ * boolean is the interpreter's `True` or `False`.
+ *
+ * The proof is memoized as the proof of `exactTierShape()` is
+ * (`memoizedShape()`), in a memo of its own: it is taken again when a symbol
+ * that it read changes (a value of the source or of a closed operand, the
+ * definition of the named condition).
+ */
+export function exactPredicateShape(
+  ce: ComputeEngine,
+  expr: Expression
+): ExactTierShape | undefined {
+  return memoizedShape(predicateProofMemo, ce, expr, [], false, (ctx) => {
+    if (
+      !(
+        isFunction(expr, 'Filter') ||
+        isFunction(expr, 'Any') ||
+        isFunction(expr, 'All')
+      ) ||
+      expr.nops !== 2
+    )
+      return undefined;
+    // The definition of a named condition is read here, so the proof is
+    // taken again when the function is defined or redefined. The name is
+    // recorded before the definition is read: a decline because the function
+    // has no definition yet is taken again when it gets one.
+    if (isSymbol(expr.op2)) ctx.reads.add(expr.op2.symbol);
+    const element = callbackElementFunction(ce, expr.op2);
+    if (element === undefined || element.params.length !== 1) return undefined;
+    if (!isFunction(element.fn)) return undefined;
+    let body: Expression = element.fn.op1;
+    if (isFunction(body, 'Block')) {
+      if (body.nops !== 1) return undefined;
+      body = body.op1;
+    }
+    const operands: Expression[] = [];
+    if (!comparisonOperands(body, 0, operands)) return undefined;
+    const source = proveSource(ctx, expr.op1);
+    if (source === undefined) return undefined;
+    if (
+      proveIntegerOperands(ctx, element.params, [source], operands) ===
+      undefined
+    )
+      return undefined;
+    return {
+      fn: element.fn,
+      named: element.named,
+      sourceBounds: [source.interval],
+      count: source.count,
+    };
+  });
+}
+
+/**
+ * The memoized proof of `expr`: the shape that `prove` gives, kept in `memos`
+ * until a symbol that the proof read changes, or, for a proof that read the
+ * types of annotated `Map` instances (`typeExprs`), until one of these types
+ * changes. `prove` adds the symbols it reads to `ctx.reads`.
+ */
+function memoizedShape(
+  memos: WeakMap<Expression, ExactProofMemo>,
+  ce: ComputeEngine,
+  expr: Expression,
+  typeExprs: Expression[],
+  numericMarker: boolean,
+  prove: (ctx: ProofContext) => ExactTierShape | undefined
+): ExactTierShape | undefined {
   const factsHidden = ce._factsHidden();
   const recorded = memos.get(expr);
   const memo = recorded?.factsHidden === factsHidden ? recorded : undefined;
@@ -1077,41 +1279,14 @@ export function exactTierShape(
     }
   }
 
-  // A parameter ANNOTATION makes the lowering read a source's TYPE, which an
-  // inferred collection type can retract (or acquire): the proof memo records
-  // the types it read so the next mutation generation revalidates them.
-  // Collected syntactically, before the lowering is asked, so a DECLINED
-  // annotation — at this level or at any nested one (`proveSource`) — arms the
-  // revalidation too.
   const ctx: ProofContext = {
     ce,
     reads: new Set(),
-    typeExprs: hasAnnotatedParams(expr) ? [expr] : [],
+    typeExprs,
     depth: 0,
     numericMarker,
   };
-  const level = isFunction(expr, 'Map') ? lowerLevel(expr) : undefined;
-  const sources: SourceBounds[] = [];
-  // A body that is not one application (`x ↦ x^2 + 1`), or a named element
-  // function, is proved node by node (`proveNestedMap()`).
-  const element =
-    level === undefined ? mapElementFunction(ce, expr) : undefined;
-  const proof =
-    level !== undefined
-      ? proveLevel(ctx, level, sources)
-      : element !== undefined
-        ? proveNestedMap(ctx, expr, sources)
-        : undefined;
-  const shape: ExactTierShape | undefined =
-    proof === undefined || !isFunction(expr, 'Map')
-      ? undefined
-      : {
-          level,
-          fn: element?.fn ?? expr.op1,
-          named: element?.named,
-          sourceBounds: sources.map((s) => s.interval),
-          count: proof.count,
-        };
+  const shape = prove(ctx);
   memos.set(expr, {
     shape,
     reads: [...ctx.reads].map((name) => resolveDep(ce, name)),

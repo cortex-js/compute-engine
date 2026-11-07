@@ -21,6 +21,7 @@ import {
   calleesResolveLexically,
   declaredParametersAdmit,
   depChanged,
+  exactPredicateShape,
   exactTierShape,
   MIN_EXACT_COMPILE_COUNT,
   namedCallbackLiteral,
@@ -78,8 +79,10 @@ import type {
 
 /** Which tier produced this record. Fixed per instance (the marker is a
  * structural property of the lambda), but carried on the record so the
- * result-handling path cannot drift from the compile path. */
-type MapCompileTier = 'marked' | 'exact';
+ * result-handling path cannot drift from the compile path. The `predicate`
+ * tier is the exact tier for the condition of a `Filter`, `Any` or `All`
+ * (`exactPredicateShape()`): its compiled code gives a boolean. */
+type MapCompileTier = 'marked' | 'exact' | 'predicate';
 
 interface MapCompileCache {
   state: 'compiled' | 'no-compile';
@@ -135,7 +138,9 @@ interface MapCompileCache {
 }
 
 /**
- * Keyed on the (rewrapped, memo-stable) `Map` instance.
+ * Keyed on the (rewrapped, memo-stable) `Map` instance, or on the `Filter`,
+ * `Any` or `All` instance whose condition is compiled
+ * (`predicateCompiledRunner()`).
  *
  * MUTABLE-OBJECT DISPOSITION (ruling B3's cache inventory): this cache holds a
  * COMPILED CLOSURE, which is exactly the payload the object rules forbid — a
@@ -822,6 +827,49 @@ export function mapCompiledElementRunner(
 ):
   | ((items: ReadonlyArray<Expression>) => CompiledElement | undefined)
   | undefined {
+  return compiledRunner(expr, drainStart, 'map');
+}
+
+/**
+ * The runner of the compiled condition of a selection: `expr` is
+ * `Filter(xs, p)`, `Any(xs, p)` or `All(xs, p)` whose condition `p` has an
+ * exact-tier proof (`exactPredicateShape()`: a comparison of integer
+ * operations over a source with proved integer bounds). The runner gives the
+ * boolean of the condition at an element, or `undefined` to have the caller
+ * apply the condition through the interpreter. `undefined` when the instance
+ * does not auto-compile.
+ *
+ * The checks, the cache and the counters are those of the exact tier of
+ * `mapCompiledElementRunner()`: an element is computed by the compiled code
+ * only when it is an exact integer inside the proved bounds of the source.
+ * The caller makes one runner per walk (`drainStart: true`).
+ */
+export function predicateCompiledRunner(
+  expr: Expression,
+  { drainStart = false }: { drainStart?: boolean } = {}
+): ((items: ReadonlyArray<Expression>) => boolean | undefined) | undefined {
+  return compiledRunner(expr, drainStart, 'predicate');
+}
+
+/** The shared runner of `mapCompiledElementRunner()` (`mode` is `'map'`) and
+ * `predicateCompiledRunner()` (`mode` is `'predicate'`). */
+function compiledRunner(
+  expr: Expression,
+  drainStart: boolean,
+  mode: 'map'
+): ((items: ReadonlyArray<Expression>) => CompiledElement | undefined) | undefined;
+function compiledRunner(
+  expr: Expression,
+  drainStart: boolean,
+  mode: 'predicate'
+): ((items: ReadonlyArray<Expression>) => boolean | undefined) | undefined;
+function compiledRunner(
+  expr: Expression,
+  drainStart: boolean,
+  mode: 'map' | 'predicate'
+):
+  | ((items: ReadonlyArray<Expression>) => CompiledElement | boolean | undefined)
+  | undefined {
   const ce = expr.engine;
   if (ce.jit === 'off') return undefined;
 
@@ -841,13 +889,25 @@ export function mapCompiledElementRunner(
   // gated on machine precision: at bignum precision the interpreter produces
   // digits float64 cannot match. (The default engine precision is bignum-preferred;
   // the plot/analyze consumers run machine.)
-  const marked = markedMapLambda(expr);
+  // The condition of a selection has only the `predicate` tier, which is the
+  // exact tier with a boolean result: see `exactPredicateShape()`.
+  const marked = mode === 'map' ? markedMapLambda(expr) : undefined;
   let tier: MapCompileTier;
   let fn: Expression;
   let inner: Expression | undefined;
   let named: string | undefined;
   let sourceBounds: ReadonlyArray<Interval> = [];
-  if (marked !== undefined) {
+  if (mode === 'predicate') {
+    const shape = exactPredicateShape(ce, expr);
+    if (shape === undefined) return undefined;
+    // Size floor: see `MIN_EXACT_COMPILE_COUNT`.
+    if (shape.count < MIN_EXACT_COMPILE_COUNT) return undefined;
+    tier = 'predicate';
+    fn = shape.fn;
+    inner = undefined;
+    named = shape.named;
+    sourceBounds = shape.sourceBounds;
+  } else if (marked !== undefined) {
     if (bignumPreferred(ce)) return undefined;
     tier = 'marked';
     fn = marked.fn;
@@ -880,8 +940,13 @@ export function mapCompiledElementRunner(
   // the literal is read again in the scope of this drain
   // (`namedCallbackLiteral()`): when the callback symbol has a lexical
   // binding that is not the binding of its name here, or a different
-  // literal, the interpreter computes the elements.
-  const callee = isFunction(expr) ? expr.op1 : undefined;
+  // literal, the interpreter computes the elements. The condition of a
+  // selection is its second operand (`Filter(xs, p)`).
+  const callee = isFunction(expr)
+    ? mode === 'predicate'
+      ? expr.op2
+      : expr.op1
+    : undefined;
   if (
     named !== undefined &&
     (callee === undefined || namedCallbackLiteral(ce, callee) !== fn)
@@ -923,7 +988,8 @@ export function mapCompiledElementRunner(
     (named === undefined
       ? calleesResolveLexically(ce, fn, new Set())
       : callee !== undefined && namedCallbackLiteral(ce, callee) === fn) &&
-    (tier !== 'exact' || exactTierShape(ce, expr) !== undefined);
+    (tier !== 'exact' || exactTierShape(ce, expr) !== undefined) &&
+    (tier !== 'predicate' || exactPredicateShape(ce, expr) !== undefined);
 
   // The last full check of a record that this runner made. It starts empty, so
   // the first element of each drain has the full check.
@@ -1058,7 +1124,7 @@ export function mapCompiledElementRunner(
     );
   };
 
-  return (items): CompiledElement | undefined => {
+  return (items): CompiledElement | boolean | undefined => {
     if ((++ticks & 0xff) === 0) checkDeadline(ce._deadlineFrame);
 
     const cache = ensure();
@@ -1081,6 +1147,7 @@ export function mapCompiledElementRunner(
     // it. Two comparisons per element, below the boxing noise floor.
     // The marked tier checks an exact input of a body that applies a
     // function whose result jumps at a point (`exactJumpInputAllowed`).
+    // The `predicate` tier has the checks of the exact tier.
     const args: unknown[] = [];
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -1088,7 +1155,7 @@ export function mapCompiledElementRunner(
         _mapAutoCompileStats.elementFallbacks++;
         return undefined;
       }
-      if (tier === 'exact') {
+      if (tier === 'exact' || tier === 'predicate') {
         const b = sourceBounds[i];
         if (
           b === undefined ||
@@ -1189,7 +1256,17 @@ export function mapCompiledElementRunner(
     // double cannot tell `+oo` from the unsigned pole `~oo`, which is the
     // interpreter's value of `1/0` and of `Tan` at `π/2` (the compiled code
     // answers `Infinity` for both).
-    if (typeof r === 'number') {
+    //
+    // The `predicate` tier gives the boolean of the condition. Under its
+    // proof, the compiled code compares the integers that the interpreter
+    // compares, so the boolean is the interpreter's `True` or `False`. Any
+    // other value is an ABI failure (below).
+    if (tier === 'predicate') {
+      if (typeof r === 'boolean') {
+        _mapAutoCompileStats.compiledHits++;
+        return r;
+      }
+    } else if (typeof r === 'number') {
       if (!Number.isFinite(r)) {
         _mapAutoCompileStats.nanDoubleChecks++;
         return fallback();
@@ -1221,7 +1298,7 @@ export function mapCompiledElementRunner(
       }
     }
     if (
-      tier !== 'exact' &&
+      tier === 'marked' &&
       typeof r === 'object' &&
       r !== null &&
       're' in r &&
@@ -1245,9 +1322,11 @@ export function mapCompiledElementRunner(
       }
     }
 
-    // Anything else (boolean, undefined, array, malformed object) is an ABI
-    // failure: deterministic → permanent `no-compile` (D5), interpreter
-    // serves this and every subsequent element.
+    // Anything else is an ABI failure: for the tiers of `Map`, a boolean,
+    // `undefined`, an array or a malformed object; for the `predicate` tier,
+    // any value that is not a boolean. It is deterministic → permanent
+    // `no-compile` (D5), and the interpreter serves this and every
+    // subsequent element.
     cache.state = 'no-compile';
     cache.reason = 'abi';
     cache.fn = undefined;
