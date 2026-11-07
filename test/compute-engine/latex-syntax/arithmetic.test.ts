@@ -486,6 +486,60 @@ describe('EL-3: Condition/Filter Support in Element Expressions', () => {
     // Should sum only 1+2+3 = 6
     expect(expr.evaluate().json).toBe(6);
   });
+
+  // A condition that reads a symbol with no value is neither True nor False
+  // at a value of the domain: the filtered domain is not known, and the sum
+  // stays unevaluated. Before, such a value was dropped as if the condition
+  // were False, and the sum gave 0 for every x.
+  test('condition independent of the index that reads an unknown stays unevaluated', () => {
+    const ce2 = new ComputeEngine();
+    const expr = ce2.expr([
+      'Sum',
+      'k',
+      ['Element', 'k', ['Set', 1, 2, 3], ['Greater', 'x', 0]],
+    ]);
+    expect(expr.evaluate().json).toEqual(expr.json);
+    ce2.assign('x', 1);
+    expect(expr.evaluate().json).toBe(6);
+    ce2.assign('x', -1);
+    expect(expr.evaluate().json).toBe(0);
+  });
+
+  test('condition on the index that reads an unknown stays unevaluated', () => {
+    const ce2 = new ComputeEngine();
+    const sum = ce2.expr([
+      'Sum',
+      'k',
+      ['Element', 'k', ['Set', 1, 2, 3], ['Greater', 'k', 'x']],
+    ]);
+    expect(sum.evaluate().operator).toBe('Sum');
+    const product = ce2.expr([
+      'Product',
+      'k',
+      ['Element', 'k', ['Range', 1, 4], ['Greater', 'k', 'x']],
+    ]);
+    expect(product.evaluate().operator).toBe('Product');
+    ce2.assign('x', 1);
+    expect(sum.evaluate().json).toBe(5);
+    expect(product.evaluate().json).toBe(24);
+  });
+
+  // An absent verdict reads as False, as the condition of an `If` does: the
+  // mask list is shorter than the domain, so `At` gives Missing at k = 3.
+  test('an absent condition drops the value', () => {
+    const ce2 = new ComputeEngine();
+    const expr = ce2.expr([
+      'Sum',
+      'k',
+      [
+        'Element',
+        'k',
+        ['Range', 1, 3],
+        ['At', ['List', 'True', 'False'], 'k'],
+      ],
+    ]);
+    expect(expr.evaluate().json).toBe(1);
+  });
 });
 
 describe('EL-5: Non-enumerable domains stay symbolic', () => {

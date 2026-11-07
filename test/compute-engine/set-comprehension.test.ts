@@ -247,6 +247,37 @@ describe('LaTeX-parsed set-builder forms', () => {
     expect(s.evaluate().operator).toBe('Set');
     expect(s.evaluate().nops).toBe(2);
   });
+
+  // The condition reads `x`, which has no value: at each element it is
+  // neither True nor False, so the elements are not known. Before, each
+  // such element was dropped as if the condition were False, and the set
+  // was empty.
+  test('\\{ k \\mid k \\in \\{1,2,3\\}, k > x \\} (undecided condition) stays symbolic', () => {
+    const ce2 = freshEngine();
+    const s = ce2.parse('\\{ k \\mid k \\in \\{1, 2, 3\\}, k > x \\}');
+    expect(s.count).toBeUndefined();
+    expect(s.evaluate().nops).toBe(2);
+    ce2.assign('x', 1);
+    expect(s.evaluate().json).toEqual(['Set', 2, 3]);
+  });
+
+  // An absent verdict reads as False on both routes: the mask list is
+  // shorter than the domain, so `At` gives Missing at k = 3.
+  test('an absent condition drops the element, sync and async', async () => {
+    const ce2 = freshEngine();
+    const s = ce2.expr([
+      'Set',
+      'k',
+      [
+        'Element',
+        'k',
+        ['Range', 1, 3],
+        ['At', ['List', 'True', 'False'], 'k'],
+      ],
+    ]);
+    expect(s.evaluate().json).toEqual(['Set', 1]);
+    expect((await s.evaluateAsync()).json).toEqual(['Set', 1]);
+  });
 });
 
 // A comma-separated condition list after the `:` or `\mid` — `{k : k ∈ S, k > 1}`

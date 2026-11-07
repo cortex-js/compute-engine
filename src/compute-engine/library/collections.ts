@@ -24119,7 +24119,9 @@ async function enumerateSetComprehensionAsync(
       const verdict = await condition
         .subs({ [variable]: value })
         .evaluateAsync(options);
-      if (isSymbol(verdict, 'False')) continue;
+      // An absent verdict (`Missing`) reads as `False`, as on the
+      // synchronous route (`filterValuesWithCondition()`).
+      if (isSymbol(verdict, 'False') || isAbsentSymbol(verdict)) continue;
       if (!isSymbol(verdict, 'True')) return undefined;
     }
     const x = isIdentity

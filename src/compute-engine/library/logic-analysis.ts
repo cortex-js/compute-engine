@@ -19,7 +19,8 @@ import { isSymbol, isFunction, sym } from '../boxed-expression/type-guards.js';
 /**
  * Result of extracting a finite domain from an Element expression.
  * - `status: 'success'` - Domain was successfully extracted
- * - `status: 'non-enumerable'` - Domain exists but cannot be enumerated (e.g., infinite set, unknown symbol)
+ * - `status: 'non-enumerable'` - Domain exists but cannot be enumerated (e.g., infinite set, unknown symbol,
+ *   or a condition that is neither `True` nor `False` at a value: reason `'undecided-condition'`)
  * - `status: 'error'` - Invalid Element expression (missing variable, malformed domain)
  */
 export type ExtractDomainResult =
@@ -33,23 +34,32 @@ export type ExtractDomainResult =
   | { status: 'error'; reason: string };
 
 /**
- * EL-3: Filter domain values using a condition expression.
- * Evaluates the condition for each value and returns only those where the condition is true.
+ * Filter domain values using a condition expression.
+ *
+ * The condition is evaluated at each value. A value is kept when the
+ * condition is `True` and dropped when it is `False`. An absent verdict
+ * (`Missing`) also drops the value, because a condition reads an absent value
+ * as `False`, as the condition of an `If` does (`docs/ERROR-MODEL.md`, "A
+ * comparison is two-valued"). When the condition at
+ * a value is neither `True` nor `False` (it reads a symbol with no value, as
+ * in `k > x`, or it is not valid), the filtered domain is not known: the
+ * function returns `undefined`, and the operator that iterates the domain
+ * (`Sum`, `Product`, a quantifier, a set comprehension) stays unevaluated.
+ * To drop such a value would treat an undecided condition as `False`:
+ * `Sum(k, Element(k, Set(1, 2, 3), x > 0))` would give `0` for every `x`.
  */
 function filterValuesWithCondition(
   values: Expression[],
   variable: string,
-  conditionExpr: Expression,
-  _ce: ComputeEngine
-): Expression[] {
-  return values.filter((value) => {
-    // Substitute the variable with the value in the condition
-    const substituted = conditionExpr.subs({ [variable]: value });
-    // Evaluate the condition
-    const result = substituted.evaluate();
-    // Keep the value if the condition evaluates to True
-    return sym(result) === 'True';
-  });
+  conditionExpr: Expression
+): Expression[] | undefined {
+  const kept: Expression[] = [];
+  for (const value of values) {
+    const verdict = sym(conditionExpr.subs({ [variable]: value }).evaluate());
+    if (verdict === 'True') kept.push(value);
+    else if (verdict !== 'False' && verdict !== 'Missing') return undefined;
+  }
+  return kept;
 }
 
 /**
@@ -99,9 +109,15 @@ export function extractFiniteDomainWithReason(
       const filteredValues = filterValuesWithCondition(
         values,
         variable,
-        filterCondition,
-        ce
+        filterCondition
       );
+      if (filteredValues === undefined)
+        return {
+          status: 'non-enumerable',
+          variable,
+          domain,
+          reason: 'undecided-condition',
+        };
       return { status: 'success', variable, values: filteredValues };
     }
     return { status: 'success', variable, values };

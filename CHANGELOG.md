@@ -159,6 +159,15 @@
 
 ### Resolved Issues
 
+- **A `Sum`, a `Product`, a quantifier or a set-builder whose condition reads
+  a symbol with no value stays unevaluated.** With `x` not assigned,
+  `["Sum", "k", ["Element", "k", ["Set", 1, 2, 3], ["Greater", "x", 0]]]`
+  gave `0`, and `\{k \mid k \in \{1, 2, 3\}, k > x\}` gave the empty set,
+  because a value whose condition was neither `True` nor `False` was dropped
+  as if the condition were `False`. Both now stay unevaluated; with `x := 1`
+  they give `6` and `\{2, 3\}`. A condition whose value is `Missing` still
+  drops the value, as the condition of an `If` does.
+
 - **A function made in the body of a `Sum` or a `Product` keeps the value
   that the index has in the iteration where the function is made**, as a
   function made in a `Loop` does. After
