@@ -584,7 +584,86 @@ function setBuilder(
   }
   const rebind = (e: MathJsonExpression) =>
     parser.rebindSubscripts(e, names) ?? e;
-  return ['Set', rebind(body), ['Condition', rebind(condition)]];
+  const result: MathJsonExpression = [
+    'Set',
+    rebind(body),
+    ['Condition', rebind(condition)],
+  ];
+  pruneSetBuilderVariables(parser, result);
+  return result;
+}
+
+/**
+ * With diagnostics on, remove the `undeclared-symbol` diagnostics of the
+ * variables of the set-builder `["Set", body, ["Condition", c]]` that the
+ * enclosure just read. The variables are those that the boxed `Set` binds,
+ * so that a name that `freeVariables` does not report is not reported as
+ * undeclared either: the body when it is a symbol (`\{x \mid x > 0\}`), the
+ * symbol `v` of a body `v \in S`, and the symbol `v` of each membership
+ * `v \in S` of `c`, at its top level or in a conjunction, that the body
+ * reads (`\{2k \mid k \in \Z\}`).
+ *
+ * A variable is bound in the whole enclosure except in the domains `S` of
+ * these memberships, which read the enclosing scope: the last `x` of
+ * `\{x \mid x \in [0, x]\}` is free. The diagnostics have no span that
+ * tells such a use from a bound one, so a variable that a domain reads
+ * keeps all its diagnostics. A use of the name outside the braces, as the
+ * first `x` of `x + \{x \mid x > 0\}`, is not in the enclosure and stays
+ * reported.
+ *
+ * The rule of the boxed `Set` is `setBuilderVariables()` in
+ * `boxed-expression/binding-sites.ts`.
+ */
+function pruneSetBuilderVariables(
+  parser: Parser,
+  setBuilder: MathJsonExpression
+): void {
+  // Canonicalization removes the parentheses of a body, at every depth
+  // (`\{((x)) \mid x > 0\}` is the set-builder of `x`), but keeps those of a
+  // condition.
+  let body = operand(setBuilder, 1);
+  while (operator(body) === 'Delimiter' && nops(body) === 1)
+    body = operand(body, 1);
+  const condition = operand(operand(setBuilder, 2), 1);
+  if (body === null || condition === null) return;
+  const variable = (e: MathJsonExpression | null): string | null => {
+    const name = symbol(e);
+    return name === 'Nothing' ? null : name;
+  };
+  // Whether `e` reads `name`, as a symbol or as the head of a function
+  // (the free `S` of the domain of `\{S \mid S \in S(t)\}`).
+  const reads = (e: MathJsonExpression | null, name: string): boolean =>
+    e !== null &&
+    (symbol(e) === name ||
+      operator(e) === name ||
+      operands(e).some((op) => reads(op, name)));
+
+  const names = new Set<string>();
+  const domains: MathJsonExpression[] = [];
+  const bodyVariable =
+    operator(body) === 'Element' ? variable(operand(body, 1)) : null;
+  if (bodyVariable !== null) {
+    names.add(bodyVariable);
+    const domain = operand(body, 2);
+    if (domain !== null) domains.push(domain);
+  } else {
+    const name = variable(body);
+    if (name !== null) names.add(name);
+    const memberships = (c: MathJsonExpression): void => {
+      if (operator(c) === 'Element') {
+        const v = variable(operand(c, 1));
+        if (v === null || !reads(body, v)) return;
+        names.add(v);
+        const domain = operand(c, 2);
+        if (domain !== null) domains.push(domain);
+      } else if (operator(c) === 'And')
+        for (const op of operands(c)) memberships(op);
+    };
+    memberships(condition);
+  }
+  for (const name of names)
+    if (domains.some((domain) => reads(domain, name))) names.delete(name);
+  parser._pruneUndeclared(names, parser.matchfixBodyDiagnosticCheckpoint);
 }
 
 /**

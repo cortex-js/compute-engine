@@ -388,6 +388,14 @@
   (or `d_upright`), and now report nothing. When the result also holds a
   free `d`, as in `\int \frac{d\,dx}{x}` (`Divide(d, x)`), each `d` is still
   reported.
+- **With `diagnostics: true`, the variable of a set-builder no longer reports
+  `undeclared-symbol` inside the braces.** `B = \{x \mid -x \in A\}` reported
+  `B`, `x` twice and `A`, and now reports `B` and `A`, the names that
+  `freeVariables` lists. The variable is the body (`x`), the symbol of a body
+  `x \in S`, or the symbol of a membership `k \in S` of the condition that
+  the body reads (`k` in `\{2k \mid k \in \Z\}`). A use of the name outside
+  the braces is still reported. When the domain of a membership uses the
+  name, as in `\{x \mid x \in [0, x]\}`, each `x` is still reported.
 - **`subs()` no longer replaces the variable of a set-builder or of a
   quantifier, and `unknowns` no longer lists it.** The variable of
   `\{x^2 \mid x \in S\}` was in `unknowns` (`["S", "x"]`), and `subs({x: 3})`

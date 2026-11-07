@@ -300,6 +300,52 @@ describe('bound variables do not fire undeclared-symbol (A1)', () => {
     expect(undeclaredNames('\\lim_{x \\to 0} x')).toEqual([]);
   });
 
+  test('the variable of a set-builder is bound in the braces (CE-1034)', () => {
+    // The variable is the body, the symbol of a body membership, or the
+    // symbol of a membership of the condition that the body reads. These are
+    // the names that `freeVariables` does not report.
+    expect(undeclaredNames('B = \\{x \\mid -x \\in A, 2 - x^2 \\notin A\\}'))
+      .toEqual(['B', 'A', 'A']);
+    expect(undeclaredNames('\\{x : x > y\\}')).toEqual(['y']);
+    expect(undeclaredNames('\\{x \\in \\R \\mid x > 0\\}')).toEqual([]);
+    expect(undeclaredNames('\\{2k \\mid k \\in \\Z, k > m\\}')).toEqual(['m']);
+    expect(undeclaredNames('\\{x + y \\mid x \\in \\Z, y \\in \\Z\\}')).toEqual(
+      []
+    );
+    expect(undeclaredNames('\\{2 n_{0} \\mid n_{0} \\in \\Z\\}')).toEqual([]);
+    // Canonicalization removes the parentheses of the body.
+    expect(undeclaredNames('\\{(x) \\mid x > 0\\}')).toEqual([]);
+    expect(undeclaredNames('\\{((x)) \\mid x > 0\\}')).toEqual([]);
+    // A membership that the body does not read binds nothing.
+    expect(undeclaredNames('\\{2k \\mid k \\in \\Z, a \\in S\\}')).toEqual([
+      'a',
+      'S',
+    ]);
+  });
+
+  test('a free use of the name of a set-builder variable still fires (CE-1034)', () => {
+    // Outside the braces, the name is free.
+    const outside = 'x + \\{x \\mid x > 0\\}';
+    const ds = byCode(diags(outside), 'undeclared-symbol');
+    expect(ds.map((d) => [d.detail?.name, d.start])).toEqual([['x', 0]]);
+    expect(undeclaredNames('\\{(x, \\{x \\mid x > 0\\})\\}')).toEqual(['x']);
+    // A domain reads the enclosing scope: the last `x` is free, and the
+    // diagnostics have no span that tells it from the bound uses, so the
+    // name keeps all its diagnostics.
+    expect(undeclaredNames('\\{x \\mid x \\in [0, x]\\}')).toEqual([
+      'x',
+      'x',
+      'x',
+    ]);
+    // A domain that reads the name as the head of a function also counts.
+    expect(undeclaredNames('\\{S \\mid S \\in S(t)\\}')).toEqual([
+      'S',
+      'S',
+      'S',
+      't',
+    ]);
+  });
+
   test('a free variable sharing the construct still fires (not over-pruned)', () => {
     // `n` is free in the sum; the pruning is by bound-name, so `n` survives.
     expect(undeclaredNames('\\sum_{j=1}^{n} j')).toContain('n');

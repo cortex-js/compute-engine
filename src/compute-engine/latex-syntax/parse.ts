@@ -1429,6 +1429,20 @@ export class _Parser implements Parser {
   private _operandDiagnosticCheckpoint = 0;
 
   /**
+   * While the `parse` handler of a matchfix entry runs, the diagnostics
+   * checkpoint captured before the parser read the body of that enclosure
+   * (see `parseEnclosure()`). Each diagnostic collected since then is inside
+   * the enclosure, also after a re-parse of the body, because a re-parse
+   * rewinds to the body start (which removes the diagnostics of the first
+   * read) and sequence ids only increase. A nested enclosure sets its own
+   * value for its handler and restores this one.
+   */
+  get matchfixBodyDiagnosticCheckpoint(): number {
+    return this._matchfixBodyDiagnosticCheckpoint;
+  }
+  private _matchfixBodyDiagnosticCheckpoint = 0;
+
+  /**
    * The token index at which the left operand of the innermost in-progress
    * {@link parseExpression} began. Infix parselets receive their left operand
    * already parsed, so this is the only way for them to inspect how it was
@@ -3735,6 +3749,7 @@ export class _Parser implements Parser {
 
       // 2. Collect the expression in between the delimiters
       const bodyStart = this.index;
+      const bodyDiagnosticCheckpoint = this._diagnosticsCheckpoint();
       this.skipSpace();
       // Visual spacing just inside the fences is decoration, not a body. It
       // is written exactly to separate two adjacent bars, as in
@@ -3838,14 +3853,18 @@ export class _Parser implements Parser {
       }
       // `_isEmptyMatchfixBody()` reads this flag. A handler can parse more,
       // and so read a nested enclosure, which sets the flag for its own
-      // handler: each enclosure restores the flag of the enclosing one.
+      // handler: each enclosure restores the flag of the enclosing one. The
+      // same applies to `matchfixBodyDiagnosticCheckpoint`.
       const outerAuthoredBody = this._matchfixBodyIsAuthoredNothing;
+      const outerBodyCheckpoint = this._matchfixBodyDiagnosticCheckpoint;
       this._matchfixBodyIsAuthoredNothing = authoredBody;
+      this._matchfixBodyDiagnosticCheckpoint = bodyDiagnosticCheckpoint;
       let result: MathJsonExpression | null;
       try {
         result = def.parse(this, body ?? 'Nothing');
       } finally {
         this._matchfixBodyIsAuthoredNothing = outerAuthoredBody;
+        this._matchfixBodyDiagnosticCheckpoint = outerBodyCheckpoint;
       }
       if (result !== null) {
         this.emitAbsoluteValueAmbiguity(start);

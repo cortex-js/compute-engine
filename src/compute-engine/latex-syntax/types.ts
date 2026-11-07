@@ -1368,6 +1368,16 @@ export interface Parser {
 
   /**
    * @internal
+   * Diagnostics: while the `parse` handler of a matchfix entry runs, the
+   * checkpoint captured before the parser read the body of that enclosure.
+   * Every diagnostic collected since this checkpoint is inside the
+   * enclosure. A handler that reads the body as a binder (the set-builder
+   * `\{x \mid x > 0\}`) gives it to {@link _pruneUndeclared}.
+   */
+  readonly matchfixBodyDiagnosticCheckpoint: number;
+
+  /**
+   * @internal
    * The token index at which the left operand of the innermost in-progress
    * `parseExpression` began. Lets an infix parselet inspect how its
    * already-parsed left operand was SPELLED (the set operators use it to tell
