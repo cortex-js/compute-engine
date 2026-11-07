@@ -1378,9 +1378,7 @@ function limitAtPosInf(
   // 0 from below, and the limit is −∞.
   if (op === 'Log') {
     const lnU = ce.function('Ln', [o1(e)]);
-    const lnB = ce.function('Ln', [
-      oo(e).length > 1 ? o2(e) : ce.number(10),
-    ]);
+    const lnB = ce.function('Ln', [oo(e).length > 1 ? o2(e) : ce.number(10)]);
     const lb = limitAtPosInf(lnB, x, ce, depth + 1);
     const sb = lb !== undefined && isDefiniteValue(lb) ? constantSign(lb) : 0;
     if (lb !== undefined && sb !== 0) {
@@ -1393,7 +1391,8 @@ function limitAtPosInf(
           return sb > 0 ? ce.NegativeInfinity : ce.PositiveInfinity;
         return undefined;
       }
-      if (isDefiniteValue(lu)) return ce.function('Divide', [lu, lb]).evaluate();
+      if (isDefiniteValue(lu))
+        return ce.function('Divide', [lu, lb]).evaluate();
       return undefined;
     }
     // The quotient rule compares the growth of its two parts, and it reads

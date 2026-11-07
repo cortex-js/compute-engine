@@ -133,9 +133,7 @@ export function machineBroadcast(
     if (!isLibraryOperator(ce, operator)) return undefined;
     return machineFunctionBroadcast(ce, operator, ops, numericApproximation);
   }
-  if (
-    kernel.arity === 'n' ? ops.length < 2 : ops.length !== kernel.arity
-  )
+  if (kernel.arity === 'n' ? ops.length < 2 : ops.length !== kernel.arity)
     return undefined;
 
   // The operator must be the library's own: a redefined `Add` has its own

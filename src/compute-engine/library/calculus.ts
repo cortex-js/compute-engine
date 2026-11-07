@@ -8224,11 +8224,7 @@ volumes
         // invalid integrand can still have a value: the call in
         // `If(x > 2, g(x), x^x)` is not reached over `[0, 1]`, and the numeric
         // route below integrates the other branch.
-        if (
-          numericApproximation &&
-          !indefinite &&
-          !liftedHere().isValid
-        ) {
+        if (numericApproximation && !indefinite && !liftedHere().isValid) {
           const exact = expression?.evaluate();
           if (isFunction(exact, 'Error')) return exact;
         }
@@ -9525,9 +9521,7 @@ volumes
         // A numeric estimate is a float, even when its value is an integer
         // (`NIntegrate(1, 0, 2)` is `2.0`). `+ 0` turns a -0 into 0.
         if (!integrand.sawImaginary())
-          return engine.number(
-            engine._inexactNumericValue(value.estimate + 0)
-          );
+          return engine.number(engine._inexactNumericValue(value.estimate + 0));
         const im = integrate('im');
         return engine.number(
           engine._inexactNumericValue({

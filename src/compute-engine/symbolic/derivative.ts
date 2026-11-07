@@ -4525,7 +4525,9 @@ function differentiateIntegral(
       );
     if (boundsVary) {
       if (dependsOnVariable(upper, v))
-        terms.push(ce._fn('Multiply', [valueAt(upper), dPlaceholder(upper, v)]));
+        terms.push(
+          ce._fn('Multiply', [valueAt(upper), dPlaceholder(upper, v)])
+        );
       if (dependsOnVariable(lower, v))
         terms.push(
           ce._fn('Negate', [

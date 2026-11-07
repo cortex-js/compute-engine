@@ -1074,8 +1074,7 @@ export function bigOpClosedForm(x: Expression): Expression | undefined {
   if (kind !== 'Sum' && kind !== 'Product') return undefined;
   const ce = x.engine;
   const body = x.op1;
-  if (!isTransitivelyPure(body) || !isTransitivelyPure(x.op2))
-    return undefined;
+  if (!isTransitivelyPure(body) || !isTransitivelyPure(x.op2)) return undefined;
   if (callsFunctionWithBody(x)) return undefined;
   const clause = x.op2;
   const index =
@@ -1098,8 +1097,7 @@ export function bigOpClosedForm(x: Expression): Expression | undefined {
       return mode === 'symbolic'
         ? symbolicSumClosedForm(body, limits, ce, 'telescoping')
         : undefined;
-    if (mode === 'symbolic')
-      return symbolicProductClosedForm(body, limits, ce);
+    if (mode === 'symbolic') return symbolicProductClosedForm(body, limits, ce);
     if (mode === 'numeric')
       return (
         infiniteProductClosedForm(body, limits, ce) ??
@@ -1340,10 +1338,7 @@ export function finiteTelescopingProduct(
   // is read through its exact value, as the fold reads it.
   const integer = (bound: Expression): number | undefined => {
     const b = isNumber(bound) || !bound.isPure ? bound : bound.evaluate();
-    return isNumber(b) &&
-      b.isExact &&
-      b.isInteger &&
-      Number.isSafeInteger(b.re)
+    return isNumber(b) && b.isExact && b.isInteger && Number.isSafeInteger(b.re)
       ? b.re
       : undefined;
   };

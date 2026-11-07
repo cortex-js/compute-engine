@@ -2712,8 +2712,7 @@ export function runtimeConformanceError(
   }
   for (let i = 0; i < ops.length; i++) {
     const param = armParamAt(arms[0], i);
-    if (param !== null && refutes(ops[i], param, i))
-      return refusal(param.t, i);
+    if (param !== null && refutes(ops[i], param, i)) return refusal(param.t, i);
   }
   return undefined;
 }

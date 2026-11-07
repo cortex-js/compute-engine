@@ -197,12 +197,7 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
     // two independent values.
     const aBO = baseOffset(a);
     const bBO = baseOffset(b);
-    if (
-      aBO &&
-      bBO &&
-      aBO.base.isSame(bBO.base) &&
-      isMergeable(aBO.base)
-    ) {
+    if (aBO && bBO && aBO.base.isSame(bBO.base) && isMergeable(aBO.base)) {
       const d = aBO.offset - bBO.offset;
       if (Number.isInteger(d) && d >= 1 && d <= 8) {
         // a!/b! = (b+1)(b+2)...a

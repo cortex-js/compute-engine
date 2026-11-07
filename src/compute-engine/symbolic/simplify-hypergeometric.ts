@@ -160,9 +160,7 @@ function termFactor(
   const index = t.ops.findIndex((f) => isFunction(f, 'Hypergeometric2F1'));
   if (index < 0) return undefined;
   // A product with two such factors is not a linear term in either of them.
-  if (
-    t.ops.some((f, i) => i !== index && isFunction(f, 'Hypergeometric2F1'))
-  )
+  if (t.ops.some((f, i) => i !== index && isFunction(f, 'Hypergeometric2F1')))
     return undefined;
   const p = hypergeometricParameters(t.ops[index]);
   if (!p) return undefined;

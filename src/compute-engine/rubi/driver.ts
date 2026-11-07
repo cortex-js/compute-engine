@@ -263,8 +263,7 @@ export function invalidResultReason(e: Expression): string | null {
   if (e.operator === 'Error') return 'result contains Error';
   const ops = e.ops;
   if (!ops) return null;
-  if (e.operator === 'Divide' && ops[1].isSame(0))
-    return 'result divides by 0';
+  if (e.operator === 'Divide' && ops[1].isSame(0)) return 'result divides by 0';
   if (e.operator === 'Power' && ops[0].isSame(0) && ops[1].isNegative === true)
     return 'result divides by 0';
   for (const op of ops) {

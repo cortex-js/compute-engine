@@ -713,9 +713,7 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
         // bail on a declared-complex base (D4).
         if (exp.isEven === true && isEligibleRealRewrite(powerBase)) {
           return {
-            value: exp.mul(
-              logInBase(ce, ce._fn('Abs', [powerBase]), logBase)
-            ),
+            value: exp.mul(logInBase(ce, ce._fn('Abs', [powerBase]), logBase)),
             because: 'log_c(x^n) -> n*log_c(|x|) when n even',
           };
         }
@@ -813,9 +811,7 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
       const denom = arg.op2;
       if (num.isPositive === true && denom.isPositive === true) {
         return {
-          value: logInBase(ce, num, logBase).sub(
-            logInBase(ce, denom, logBase)
-          ),
+          value: logInBase(ce, num, logBase).sub(logInBase(ce, denom, logBase)),
           because: 'log_c(x/y) -> log_c(x) - log_c(y)',
         };
       }
@@ -976,11 +972,7 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
     // do not apply to a base that draws: the two occurrences of `r(t)` in
     // `r(t)^{log_{r(t)}(x)}` (with `r` a function with the `random` effect)
     // are two independent values.
-    if (
-      isFunction(exp, 'Log') &&
-      exp.op2?.isSame(base) &&
-      isMergeable(base)
-    ) {
+    if (isFunction(exp, 'Log') && exp.op2?.isSame(base) && isMergeable(base)) {
       return { value: exp.op1, because: 'c^log_c(x) -> x' };
     }
 

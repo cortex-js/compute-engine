@@ -502,8 +502,7 @@ function parseSubintegrand(
       );
       if (indexes.length > 0) {
         // `null`, not falsiness: a literal `0` term is kept.
-        if (fn2 !== null)
-          return [['Add', ...args.slice(0, -1), fn2], indexes];
+        if (fn2 !== null) return [['Add', ...args.slice(0, -1), fn2], indexes];
         if (args.length > 2) return [['Add', ...args.slice(0, -1)], indexes];
         if (args.length === 2) return [args[0], indexes];
       }
@@ -910,9 +909,7 @@ function serializeIntegral(command: string) {
     // first: `Integrate(f, Limits(y, a, b), Limits(x, c, d))` is
     // `\int_a^b\int_c^d f\,dx\,dy`
     return (
-      prefix
-        .map((x) => `${command}${x}`)
-        .join('') +
+      prefix.map((x) => `${command}${x}`).join('') +
       '\\!' +
       serializer.serialize(body) +
       suffix.join(' ')

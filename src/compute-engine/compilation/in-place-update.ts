@@ -289,9 +289,7 @@ function ownedLocalChains(
     // keeps no other reference to the list, and its operand is in the same
     // position as the ascription.
     if (statement && h === 'Typed')
-      return (
-        allowed(e.ops[0], true) && e.ops.slice(1).every((x) => allowed(x))
-      );
+      return allowed(e.ops[0], true) && e.ops.slice(1).every((x) => allowed(x));
     if ((h === 'Assign' || h === 'Declare') && isName(e.ops[0])) {
       if (!statement) return false;
       const value = e.ops[1];

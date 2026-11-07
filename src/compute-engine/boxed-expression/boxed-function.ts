@@ -932,7 +932,11 @@ function recordEvaluatedError(node: Expression, result: Expression): void {
 /** The number of times the node `target` (compared by identity) is in the
  * tree of `expr`, counted up to `limit`. The walk stops at an `Error` node
  * and at a valid node, since only an invalid tree holds an `Error`. */
-function countNode(expr: Expression, target: Expression, limit: number): number {
+function countNode(
+  expr: Expression,
+  target: Expression,
+  limit: number
+): number {
   if (expr === target) return 1;
   if (expr.isValid || !isFunction(expr) || expr.operator === 'Error') return 0;
   let count = 0;
@@ -2927,8 +2931,7 @@ export class BoxedFunction
     if (owner) {
       _transientSubs = new Map();
       _transientReplacementNames = new Map();
-    }
-    else {
+    } else {
       const hit = _transientSubs!
         .get(this)
         ?.find(
@@ -3200,12 +3203,7 @@ export class BoxedFunction
               .filter((p) => p[0] === i)
               .map((p) => p.slice(1));
             if (outer.length > 0)
-              return subsWithOuterPaths(
-                x,
-                outer,
-                withoutNames(sub, here),
-                sub
-              );
+              return subsWithOuterPaths(x, outer, withoutNames(sub, here), sub);
             const own = ownIndexClauseAt(this, i, binderView.binders);
             if (own === undefined) return subsAt(x, withoutNames(sub, here));
             // The clause's index stays bound in the clause, except in the
@@ -7573,7 +7571,9 @@ export class BoxedFunction
       return undefined;
     if (!isFunction(result, 'Error') || errorTrace(result) !== undefined)
       return undefined;
-    if (this.engine._evalContextStack.some((context) => context.name === 'call'))
+    if (
+      this.engine._evalContextStack.some((context) => context.name === 'call')
+    )
       return undefined;
     if (!this.isPure) return undefined;
     const code = result.op1;
@@ -23507,8 +23507,11 @@ function replacementFreeNames(
 }> {
   const cached = _transientReplacementNames?.get(sub);
   if (cached !== undefined && cached.ce === ce) return cached.entries;
-  const entries: { key: string; value: Expression; free: ReadonlySet<string> }[] =
-    [];
+  const entries: {
+    key: string;
+    value: Expression;
+    free: ReadonlySet<string>;
+  }[] = [];
   for (const key of Object.keys(sub)) {
     const input = sub[key];
     if (input === undefined) continue;

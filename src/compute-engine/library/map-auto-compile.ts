@@ -857,7 +857,9 @@ function compiledRunner(
   expr: Expression,
   drainStart: boolean,
   mode: 'map'
-): ((items: ReadonlyArray<Expression>) => CompiledElement | undefined) | undefined;
+):
+  | ((items: ReadonlyArray<Expression>) => CompiledElement | undefined)
+  | undefined;
 function compiledRunner(
   expr: Expression,
   drainStart: boolean,
@@ -868,7 +870,9 @@ function compiledRunner(
   drainStart: boolean,
   mode: 'map' | 'predicate'
 ):
-  | ((items: ReadonlyArray<Expression>) => CompiledElement | boolean | undefined)
+  | ((
+      items: ReadonlyArray<Expression>
+    ) => CompiledElement | boolean | undefined)
   | undefined {
   const ce = expr.engine;
   if (ce.jit === 'off') return undefined;

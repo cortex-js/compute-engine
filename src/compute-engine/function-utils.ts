@@ -4908,8 +4908,7 @@ export function bindReadVariablesOfLazyCollection(
       if (own?.isConstant === true) return sym;
       // An occurrence that carries an operator definition and no value
       // definition names a function: it is not a variable.
-      if (own === undefined && sym.operatorDefinition !== undefined)
-        return sym;
+      if (own === undefined && sym.operatorDefinition !== undefined) return sym;
       const held = valueOf(sym.symbol, bindingInContext(ce, sym.symbol, own));
       if (held !== undefined) add(own, sym.symbol, held);
       return sym;
@@ -6868,10 +6867,7 @@ const SUBSTITUTES = { substitutes: true };
  * its name is then counted as free too. That can only cause a rename that is
  * not necessary, never a capture.
  */
-function freeNamesOf(
-  expr: Expression,
-  operators = true
-): ReadonlySet<string> {
+function freeNamesOf(expr: Expression, operators = true): ReadonlySet<string> {
   const names = new Set<string>();
   const placeholders = placeholderBindings(expr);
   const isFree = (
