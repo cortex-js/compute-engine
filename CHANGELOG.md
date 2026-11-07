@@ -17,6 +17,16 @@
 
 ### Behavior Changes
 
+- **A sum or a product with no index and a free variable now stays
+  unevaluated.** `\sum x^k` evaluated to the single term `x^k`, which looks
+  like a correct value; it now stays `["Sum", ["Power", "x", "k"]]`, because
+  no index is given and the index can be `x` or `k`. The same applies to
+  `\prod x^k` and to `["Sum", "r"]` for a symbol `r` declared `real`. Write the
+  index and its bounds to sum over it: `\sum_{k=1}^{n} x^k` (`\sum_{k} x^k`
+  sums from `k = 1` to infinity). An operand with no free variable is
+  still its own value: `["Sum", 5]` is `5`, and `\sum x^k` is `8` when `x` is
+  `2` and `k` is `3`. A sum over a collection, `\sum [1, 2, 3]`, is not
+  changed.
 - **An assigned lazy collection that stays lazy no longer changes when a
   variable that it reads changes later.** In Epsil, after `k = 3` and
   `let big = filter(1..oo, c => c > k)`, the assignment `k = 10` changed

@@ -4301,6 +4301,19 @@ function isVacuousIndexingSet(
 export const NON_ENUMERABLE_DOMAIN = Symbol('non-enumerable-domain');
 
 /**
+ * The result of `reduceBigOp()` for a body with no indexing set whose value
+ * is not a collection and has a free variable (`\sum x^k`). No index is
+ * given, so the operator stays unevaluated. It holds the evaluated body,
+ * and the caller returns the operator over that value: the lazy `Sum` and
+ * `Product` hold their operands, so a handler that returns `undefined`
+ * makes the engine rebuild the node from the held operand, and the
+ * evaluation of the body is lost (`Sum(a + x)` with `a := 2` kept `a`).
+ */
+export class UnindexedBody {
+  constructor(readonly value: Expression) {}
+}
+
+/**
  * A special symbol used to signal that a BigOp has bounds that cannot be
  * enumerated at `number` precision (see `nonEnumerableIndexingSet`). Unlike
  * `NON_ENUMERABLE_DOMAIN` this is NOT a "stay symbolic" outcome: the bounds
@@ -4726,6 +4739,7 @@ export function* reduceBigOp<T>(
   | T
   | typeof NON_ENUMERABLE_DOMAIN
   | typeof NON_ENUMERABLE_BOUNDS
+  | UnindexedBody
   | undefined
   | PromiseLike<T | null>,
   any,
@@ -4749,8 +4763,8 @@ export function* reduceBigOp<T>(
     return yield* reduceCollectionOrDecline(collection, fn, initial);
   }
 
-  // If there are no indexes, the summation is a constant
-  // i.e. Sum(3) = 3
+  // With no indexing set, a body with no free variable is one term:
+  // `Sum(3)` is `3`. A body with a free variable is declined below.
   if (indexes.length === 0) {
     // A body that is not *structurally* a collection may still evaluate to
     // one — e.g. a broadcast chain over a list literal,
@@ -4806,18 +4820,26 @@ export function* reduceBigOp<T>(
     // or a symbol declared `broadcastable<number>`) and an application whose
     // head is undeclared (top-typed) both fold to a scalar term today, yet
     // `Sum(2 + h(x))` evaluated to `h(x) + 2` re-evaluates to `[5, 8]` once
-    // `h := x ↦ [x, 2x]` and `x := 3`, where the sum is `13`. An UNDECLARED
-    // symbol is deliberately NOT declined — `isPossiblyCollectionTyped` reads
-    // it as a scalar, since its `unknown` type is refined by use — so `Sum(x)`
-    // for an undeclared `x` keeps folding to `x`. A symbol DECLARED `any` or
-    // `value` is declined: it may hold a list, so `Sum(a)` stays unevaluated
-    // until `a` has a value (user decision 2026-10-17, Tycho ledger row 379).
+    // `h := x ↦ [x, 2x]` and `x := 3`, where the sum is `13`. A symbol
+    // DECLARED `any` or `value` is declined: it may hold a list, so `Sum(a)`
+    // stays unevaluated until `a` has a value (user decision 2026-10-17,
+    // Tycho ledger row 379).
+    //
+    // A scalar body with a free variable is declined too. `\sum x^k` is a
+    // sum with no index: no rule tells which of `x` and `k` is the index, so
+    // the single term `x^k` is not its value, and an unevaluated `Sum(x^k)`
+    // shows that the index is missing. A body with no free variable is one
+    // term and is its own sum: `Sum(5)` is `5` and `Sum(Pi)` is `Pi`. The
+    // same applies to `Product`. The evaluated body is returned in an
+    // `UnindexedBody`, so that the caller keeps it (see that class). (User
+    // decision 2026-11-06, CE-961.)
     if (
       isValuelessCollectionTyped(value) ||
       isPossiblyCollectionTyped(value) ||
       unionMayHoldACollection(value.type.type)
     )
       return NON_ENUMERABLE_DOMAIN;
+    if (value.unknowns.length > 0) return new UnindexedBody(value);
     let folded = fn(initial, value);
     if (isThenable(folded)) folded = yield folded;
     return folded ?? undefined;

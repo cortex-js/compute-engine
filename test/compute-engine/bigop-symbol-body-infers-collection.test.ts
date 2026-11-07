@@ -18,9 +18,12 @@ describe('a big op over an untyped symbol infers a collection', () => {
   test('a symbol with evidence, or a declared type, is not touched', () => {
     const ce = new ComputeEngine();
     ce.declare('r', 'real');
-    expect(ce.box(['Sum', 'r']).evaluate().toString()).toBe('r');
+    // `r` is a free variable, so the sum with no index stays unevaluated
+    // (CE-961); the declared type is not changed to `collection`.
+    expect(ce.box(['Sum', 'r']).evaluate().toString()).toBe('sum(r)');
     expect(ce.symbol('r').type.toString()).toBe('real');
-    // `y` is a number by its first use; `Sum(y)` keeps the identity spelling.
+    // `y` is a number by its first use, so `Sum(y)` does not change its type
+    // to `collection`.
     ce.parse('y + 1');
     ce.box(['Sum', 'y']);
     expect(ce.symbol('y').type.matches('collection')).toBe(false);

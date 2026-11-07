@@ -210,6 +210,7 @@ import {
   reduceBigOp,
   NON_ENUMERABLE_DOMAIN,
   NON_ENUMERABLE_BOUNDS,
+  UnindexedBody,
   bigOpBoundsError,
   classifyBigopDomain,
   hasOneSidedLimits,
@@ -14316,6 +14317,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (result === NON_ENUMERABLE_DOMAIN) {
           return undefined; // Return undefined to keep expression symbolic
         }
+        // No index and a free variable: the product over the evaluated body.
+        if (result instanceof UnindexedBody)
+          return ce._fn('Product', [result.value]);
         // Bounds we cannot walk: surface an error rather than truncate.
         if (result === NON_ENUMERABLE_BOUNDS)
           return bigOpBoundsError(ce, bounds);
@@ -14520,6 +14524,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (result === NON_ENUMERABLE_DOMAIN) {
           return undefined; // Return undefined to keep expression symbolic
         }
+        // No index and a free variable: the product over the evaluated body.
+        if (result instanceof UnindexedBody)
+          return ce._fn('Product', [result.value]);
         if (result === NON_ENUMERABLE_BOUNDS)
           return bigOpBoundsError(ce, bounds);
         // An indexing set that is not valid gives no result, and `NaN`. It folds
@@ -14832,6 +14839,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (captureUnsafe) return undefined;
         // Non-enumerable domain: keep the expression symbolic.
         if (result === NON_ENUMERABLE_DOMAIN) return undefined;
+        // No index and a free variable: the sum over the evaluated body.
+        if (result instanceof UnindexedBody)
+          return engine._fn('Sum', [result.value]);
         // Bounds we cannot walk: surface an error rather than truncate.
         if (result === NON_ENUMERABLE_BOUNDS)
           return bigOpBoundsError(engine, rest);
@@ -15173,6 +15183,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         );
         if (captureUnsafe) return undefined;
         if (result === NON_ENUMERABLE_DOMAIN) return undefined;
+        // No index and a free variable: the sum over the evaluated body.
+        if (result instanceof UnindexedBody)
+          return engine._fn('Sum', [result.value]);
         if (result === NON_ENUMERABLE_BOUNDS)
           return bigOpBoundsError(engine, rest);
         // An indexing set that is not valid gives no result, and `NaN`. It folds

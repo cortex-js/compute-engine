@@ -1196,9 +1196,11 @@ describe('a big op over a body that MIGHT be a collection stays inert', () => {
     ).toBe('9');
   });
 
-  it('still folds a scalar body; a bare undeclared symbol is read as a collection', () => {
+  it('still folds a scalar body with no free variable; a bare undeclared symbol is read as a collection', () => {
     const ce = new ComputeEngine();
     expect(ce.box(['Sum', 5]).evaluate().toString()).toBe('5');
+    ce.assign('m', 4);
+    expect(ce.box(['Sum', ['Add', 'm', 1]]).evaluate().toString()).toBe('5');
     // A no-index `Sum(y)` over a symbol with no type evidence yet infers
     // `y: collection` (use-site evidence, ruled 2026-09-08), so the sum is a
     // valueless collection reduction and stays inert, exactly as the cases
@@ -1206,13 +1208,15 @@ describe('a big op over a body that MIGHT be a collection stays inert', () => {
     // folded to the scalar identity `y`.
     expect(ce.box(['Sum', 'y']).evaluate().toString()).toBe('sum(y)');
     expect(ce.symbol('y').type.toString()).toBe('collection');
+    // A scalar body with a free variable is a sum with no index: it stays
+    // unevaluated, it is not the single term `k + 1` (CE-961).
     ce.declare('k', 'number');
     expect(
       ce
         .box(['Sum', ['Add', 'k', 1]])
         .evaluate()
         .toString()
-    ).toBe('k + 1');
+    ).toBe('sum(k + 1)');
   });
 });
 
