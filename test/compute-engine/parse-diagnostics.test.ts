@@ -266,8 +266,12 @@ describe('bound variables do not fire undeclared-symbol (A1)', () => {
     expect(dCount('\\int \\frac{d\\,dx}{x}')).toBe(2);
     // The parse keeps the `d` of the first fraction: `Divide(d·x, x)`.
     expect(dCount('\\int \\frac{dx}{x} + \\frac{dx}{x}')).toBe(2);
-    // The variable is `x_upright`, so the first `d x` is a free product.
-    expect(dCount('\\int \\frac{d x\\,d\\mathrm{x}}{2}')).toBe(2);
+    // The factor `2` between the two products stops the search for
+    // differentials, so the first `d x` is a free product.
+    expect(dCount('\\int \\frac{d x\\,2\\,d\\mathrm{x}}{2}')).toBe(2);
+    // Two differentials in the numerator, with a space between them, are
+    // both taken: no `d` is free.
+    expect(dCount('\\int \\frac{d x\\,d\\mathrm{x}}{2}')).toBe(0);
     // The differential is at the top level and the denominator `d x\,y` is
     // a free product.
     expect(dCount('\\int \\frac{1}{dx\\,y}\\,d\\hspace{2pt}x')).toBe(1);

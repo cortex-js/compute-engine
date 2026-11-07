@@ -476,6 +476,93 @@ describe('ORDER OF THE LIMITS OF A MULTIPLE INTEGRAL', () => {
   });
 });
 
+// The differentials can be in the numerator of a fraction, with a space
+// between them (`\frac{dx\,dy}{xy}`). With one sign per integral, the inner
+// integral takes the first differential and the enclosing integrals take the
+// others, as for differentials after the integrand.
+describe('DIFFERENTIALS IN THE NUMERATOR OF A MULTIPLE INTEGRAL', () => {
+  const raw = (latex: string) => ce.parse(latex, { canonical: false }).json;
+
+  test('a space between the differentials does not stop the search', () => {
+    expect(raw('\\iint \\frac{dx\\,dy}{xy}')).toEqual([
+      'Integrate',
+      ['Divide', 1, ['InvisibleOperator', 'x', 'y']],
+      'y',
+      'x',
+    ]);
+    expect(
+      ce.parse('\\iint \\frac{dx\\,dy}{xy}').evaluate().toString()
+    ).toBe('ln(|x|) * ln(|y|)');
+    // A space after the last differential, or before the first one
+    expect(raw('\\int_1^2 \\frac{dx\\,}{x}')).toEqual([
+      'Integrate',
+      ['Divide', 1, 'x'],
+      ['Tuple', 'x', 1, 2],
+    ]);
+    // A space after the fraction that holds the differential
+    expect(raw('\\int_1^2 \\frac{dx}{x}\\,')).toEqual(
+      raw('\\int_1^2 \\frac{dx\\,}{x}')
+    );
+    expect(raw('\\iint (x\\,dx\\,dy)')).toEqual([
+      'Integrate',
+      ['Delimiter', ['InvisibleOperator', 'x', ['HorizontalSpacing', 3]]],
+      'y',
+      'x',
+    ]);
+    expect(
+      ce.parse('\\iint (x\\,dx\\,dy)').evaluate().toString()
+    ).toBe('1/2 * y * x^2');
+  });
+
+  test('consecutive signs: each sign takes one differential', () => {
+    expect(raw('\\int_1^2\\int_3^4 \\frac{dx\\,dy}{xy}')).toEqual([
+      'Integrate',
+      [
+        'Integrate',
+        ['Divide', 1, ['InvisibleOperator', 'x', 'y']],
+        ['Tuple', 'x', 3, 4],
+      ],
+      ['Tuple', 'y', 1, 2],
+    ]);
+    // The same without a space between the differentials
+    expect(raw('\\int_1^2\\int_3^4 \\frac{dxdy}{xy}')).toEqual(
+      raw('\\int_1^2\\int_3^4 \\frac{dx\\,dy}{xy}')
+    );
+    expect(
+      ce.parse('\\int_1^2\\int_1^2 \\frac{dx\\,dy}{xy}').evaluate().toString()
+    ).toBe('ln(2)^2');
+    // The bounds of each sign go with its own variable: x from 3 to 4, y
+    // from 1 to 2
+    expect(
+      ce
+        .parse('\\int_1^2\\int_3^4 \\frac{dx\\,dy}{x^2y}')
+        .evaluate()
+        .toString()
+    ).toBe('1/12 * ln(2)');
+  });
+
+  test('three signs and a factor before the fraction', () => {
+    expect(
+      ce
+        .parse('\\int_0^1\\int_0^2\\int_0^3 x\\frac{dx\\,dy\\,dz}{1}')
+        .evaluate()
+        .toString()
+    ).toBe('9');
+    expect(
+      ce
+        .parse('\\int_0^1\\int_0^2 2\\frac{dx\\,dy}{x+1}')
+        .evaluate()
+        .toString()
+    ).toBe('2ln(3)');
+  });
+
+  test('a single sign keeps all the differentials of its integrand', () => {
+    expect(raw('\\int \\frac{dx\\,dy}{xy}')).toEqual(
+      raw('\\iint \\frac{dx\\,dy}{xy}')
+    );
+  });
+});
+
 describe('EXOTIC INTEGRALS', () => {
   test('\\oint - contour integral', () => {
     expect(parse('\\oint_V f(s) ds')).toMatchSnapshot();

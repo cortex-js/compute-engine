@@ -11,6 +11,32 @@ import {
 import { LatexDictionary, Parser, Serializer } from '../types.js';
 import { endsTabularCell } from '../tokenizer.js';
 
+/**
+ * The parts of an integral that took more differentials than it has signs,
+ * keyed by the expression that `parseIntegral()` returned for it.
+ *
+ * A differential that follows the integrand is read from the token stream,
+ * and an integral reads at most one differential per sign: the others stay in
+ * the stream for the enclosing integrals (`parseIndexes()`). A differential
+ * inside the integrand (`\frac{dx\,dy}{xy}`) is found only after the
+ * integrand is parsed, so the innermost integral finds all of them. That
+ * integral keeps all of them, and records its parts here. When it is the
+ * whole body of an enclosing integral that has no differential of its own
+ * (`\int_1^2\int_3^4 \frac{dx\,dy}{xy}`), the enclosing integral makes the
+ * inner integral again with one differential per sign and takes the others
+ * (`claimExcessDifferentials()`).
+ */
+type IntegralParts = {
+  command: string;
+  fn: MathJsonExpression;
+  /** The differentials in the written order, innermost first. */
+  indexes: string[];
+  subs: MathJsonExpression[];
+  sups: MathJsonExpression[];
+  nIntegrals: number;
+};
+const excessDifferentials = new WeakMap<object, IntegralParts>();
+
 // See https://de.wikipedia.org/wiki/Formelsatz
 // for a discussion of typographical notation in Germany, Russia and France
 // Also DIN 1304 (symbols in formulas) and DIN 1338 (typesetting of formulas)
@@ -94,6 +120,13 @@ function parseIntegral(command: string, nIntegrals = 1) {
 
     // eslint-disable-next-line prefer-const
     let [fn, indexes] = parseIntegralBody(parser, nIntegrals);
+    // With no differential of its own, this integral takes the differentials
+    // that an inner integral, its whole body, found in its integrand and has
+    // no sign for (`\int_1^2\int_3^4 \frac{dx\,dy}{xy}`).
+    if (fn !== null && indexes.length === 0) {
+      const claimed = claimExcessDifferentials(fn);
+      if (claimed !== null) [fn, indexes] = claimed;
+    }
     // An integration variable spelled as a subscript on an indexed
     // collection (`dn_{0}` when `n` is a list) is the new name `n_0`, and so
     // are its occurrences in the integrand (see `parseIndexes()`)
@@ -183,8 +216,39 @@ function parseIntegral(command: string, nIntegrals = 1) {
     //
     // 3/ Put together the limits, the function and the indexes
     //
-    return makeIntegral(command, fn, { indexes, subs, sups });
+    // `makeIntegral()` adds entries to `subs` and `sups`: the recorded parts
+    // keep copies.
+    const parts: IntegralParts | null =
+      fn !== null && indexes.length > nIntegrals
+        ? { command, fn, indexes, subs: [...subs], sups: [...sups], nIntegrals }
+        : null;
+    const result = makeIntegral(command, fn, { indexes, subs, sups });
+    if (parts !== null && Array.isArray(result))
+      excessDifferentials.set(result, parts);
+    return result;
   };
+}
+
+/**
+ * When `body` is an integral that took more differentials than it has signs
+ * (see `excessDifferentials`), make it again with one differential per sign,
+ * the first ones in the written order, and return it with the other
+ * differentials, which belong to the enclosing integral. Return `null`
+ * otherwise.
+ */
+function claimExcessDifferentials(
+  body: MathJsonExpression
+): [inner: MathJsonExpression, indexes: string[]] | null {
+  if (!Array.isArray(body)) return null;
+  const parts = excessDifferentials.get(body);
+  if (parts === undefined) return null;
+  const inner = makeIntegral(parts.command, parts.fn, {
+    indexes: parts.indexes.slice(0, parts.nIntegrals),
+    subs: [...parts.subs],
+    sups: [...parts.sups],
+  });
+  if (inner === null) return null;
+  return [inner, parts.indexes.slice(parts.nIntegrals)];
 }
 
 function makeIntegral(
@@ -352,7 +416,9 @@ function parseSubintegrand(
     // multiplication (in a subexpression, i.e. `\sin 3xdx`)
     // There could be consecutive `dx` terms, e.g. `3xdxdy`, we
     // want to extract all of them.
-    const args = operands(expr);
+    // A space after the last factor (`\frac{dx}{x}\,`) does not stop the
+    // search for the differential in that factor.
+    const args = withoutFinalSpacing(operands(expr));
 
     if (args) {
       const [rest, indexes] = parseFinalDiffOperators(args, binderName);
@@ -995,14 +1061,33 @@ function parseFinalDiffOperators(
   // start of `indexes`, so that `indexes` has the written order (`3xdxdy`
   // gives `['x', 'y']`), as the differentials that follow the integrand do.
   // `makeIntegral()` then makes the last differential the first limit.
+  // A space command between the differentials, or after the last one, is
+  // skipped (`\frac{dx\,dy}{xy}` parses its numerator as
+  // `InvisibleOperator(d, x, HorizontalSpacing(3), d, y)`), as
+  // `matchDifferentialOperator()` skips it before a differential that follows
+  // the integrand. A space before the first differential stays in the
+  // integrand (`x\,dx` gives the integrand `InvisibleOperator(x,
+  // HorizontalSpacing(3))`), which the canonical form removes.
   while (rest.length > 0) {
-    let index: string;
-    [rest, index] = parseFinalDiffOperator(rest, binderName);
+    const [before, index] = parseFinalDiffOperator(
+      withoutFinalSpacing(rest),
+      binderName
+    );
     if (!index) break;
     indexes.unshift(index);
+    rest = before;
   }
 
   return [rest, indexes];
+}
+
+/** `xs` without the `HorizontalSpacing` operands at its end. */
+function withoutFinalSpacing(
+  xs: ReadonlyArray<MathJsonExpression>
+): ReadonlyArray<MathJsonExpression> {
+  let end = xs.length;
+  while (end > 0 && operator(xs[end - 1]) === 'HorizontalSpacing') end -= 1;
+  return end === xs.length ? xs : xs.slice(0, end);
 }
 
 function parseFinalDiffOperator(

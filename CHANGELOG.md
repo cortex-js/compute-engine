@@ -71,6 +71,15 @@
 
 ### Resolved Issues
 
+- **A multiple integral with its differentials in the numerator of a fraction
+  now has the correct value.** In `\iint \frac{dx\,dy}{xy}` the space between
+  the differentials stopped the search, so the integral was over `y` only and
+  gave `d\ln|y|`; it is now `\ln|x|\ln|y|`. With one sign per integral, each
+  sign now takes one differential, as it does for differentials after the
+  integrand: `\int_1^2\int_1^2 \frac{dx\,dy}{xy}` gave `\frac{3}{2}\ln 2`, and
+  `\int_1^2\int_3^4 \frac{dxdy}{xy}` put the bounds `3` and `4` on `y`. The
+  first is now `(\ln 2)^2`, and the bounds of each sign go with its own
+  variable.
 - **With the integration rules of `loadIntegrationRules()`, an integral of a
   polynomial in `x^2` times a power of `a+bx^2+cx^4` no longer runs until the
   time limit.** `\int \frac{d+gx^2}{\sqrt{fx}\sqrt{a+bx^2+cx^4}}\,dx` ran for
