@@ -2011,11 +2011,24 @@ function literalBodyResultType(
       // `f(n, s) = s if n == 0 else f(n - 1, [1, 2])`, `f(1, [0])` was typed
       // `vector<integer^1>`, and it evaluates to `[1, 2]`. So the derivation
       // stops there, and the call keeps its declared result.
+      //
+      // A branch typed `unknown` that has no structure stops the derivation
+      // too. The `If` and `Which` handlers cannot tell such a branch from a
+      // recursive call, so they leave it out of the join. But the call can
+      // be a call of a function whose result type is settled as `unknown`,
+      // or a call that reached a recursion in an earlier pass of this walk,
+      // whose type a cache answers with no new decline. With
+      // `f := n ↦ If(n = 0, 1/2, g(n − 1))` assigned before
+      // `g := n ↦ If(n = 0, 2, f(n − 1))`, both are typed `-> unknown`, and
+      // `g(1)` was typed `integer` by its other branch, for the value `1/2`
+      // (CE-836).
+      const stops = (x: OperandDescriptor): boolean =>
+        recursive.has(x) ||
+        (x.type === 'unknown' && x.structureOf === undefined);
       if (
-        (expr.operator === 'If' &&
-          operands.slice(1).some((x) => recursive.has(x))) ||
+        (expr.operator === 'If' && operands.slice(1).some(stops)) ||
         (expr.operator === 'Which' &&
-          operands.some((x, i) => i % 2 === 1 && recursive.has(x)))
+          operands.some((x, i) => i % 2 === 1 && stops(x)))
       )
         return undefined;
       // A branch typed `error` is an error only when it is selected. A type

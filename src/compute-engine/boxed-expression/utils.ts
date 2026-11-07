@@ -48,6 +48,7 @@ import {
   repairProvisionalDependents,
   unregisterProvisionalDependent,
 } from './provisional-application.js';
+import { outsideDefinitions } from './declared-parameter-result.js';
 import {
   binderBindingOf,
   boundVariableNames,
@@ -2103,12 +2104,16 @@ export function updateDef(
     });
     // The definition installed just now is passed as `justInstalled` so a
     // recursive body — which noted its OWN name while canonicalizing — is not
-    // re-derived against itself.
-    repairProvisionalDependents(
-      ce,
-      name,
-      mutableDef.operator ?? (callableValue ? installedValue : undefined),
-      scope
+    // re-derived against itself. The dependents are other functions, so a
+    // call of `name` in their bodies is not a recursive call of `name`
+    // (`outsideDefinitions()`).
+    outsideDefinitions(() =>
+      repairProvisionalDependents(
+        ce,
+        name,
+        mutableDef.operator ?? (callableValue ? installedValue : undefined),
+        scope
+      )
     );
   }
 }

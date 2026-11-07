@@ -776,6 +776,15 @@ export class _BoxedValueDefinition
     return this._isSelfReferential;
   }
 
+  /** The stored value when one is present now, or `undefined`. Unlike
+   * {@link storedValue}, this does not compute a value again from the
+   * declaration, so a type handler can read it: that computation can call a
+   * host function or parse LaTeX, and it writes the definition.
+   * @internal */
+  get _presentValue(): Expression | undefined {
+    return this._value ?? undefined;
+  }
+
   /** The value STORED on this definition — what `assign()`, a
    * `declare(name, { value })` or a library constant put here — with no
    * assumed value overlaid on it.

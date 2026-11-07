@@ -73,6 +73,20 @@
 
 ### Behavior Changes
 
+- **A conditional whose branch calls a function that is not defined yet has
+  the type `unknown`.** With `q` declared `real`, `If(q < 2, g(1), 0)` was
+  typed `integer` before `g` was defined; after `g := x ↦ x / 2` and `q = 1`,
+  its value is `1/2`. It is now typed `unknown`, and the element-wise
+  `Which(L < 2, g(1), True, 0)` with `L = [1, 3, 5]` is a `list<unknown^3>`
+  (it was a `vector<integer^3>`). The same applies to a call of a function
+  whose result type is `unknown`, and to the signature of a function whose
+  body holds such a conditional. A recursive function is still typed by its
+  base case: `r := n ↦ If(n = 0, 1, r(n − 1))` is `(n: unknown) -> integer`.
+  Two functions that call each other can get a wider type than before, when
+  one of them is assigned before the other exists: with `F` and `G` declared
+  `function`, `F := n ↦ If(n = 0, x > 0, G(n − 1))` and then `G := n ↦ F(n)`,
+  `F(m)` is now typed `unknown`; it was `boolean`.
+
 - **A `Linspace` with an endpoint that is an infinity or `NaN` has no value.**
   Its samples cannot be computed, and its reads disagreed: for
   `Linspace(0, +∞, 3)`, `Sum` gave `0`, `Count` gave `3`, `Max` gave `+∞` and

@@ -71,6 +71,7 @@ import type { VarianceResult } from '../common/type/variance.js';
 import { BoxedType } from '../common/type/boxed-type.js';
 import {
   resultUnderDeclaredParameters,
+  whileDefining,
   withSignatureResult,
 } from './boxed-expression/declared-parameter-result.js';
 import { isLocalBinding } from './boxed-expression/declared-local.js';
@@ -3322,8 +3323,23 @@ export function assignFn(
     return ce;
   }
 
-  const id = arg1;
+  // While the assignment runs, the types of the value are computed when the
+  // name has no value yet, and the result type of a function literal is
+  // read from the type of its body. A call of the name in that body is a
+  // recursive call, not a call of a function with no body
+  // (`unknownCallMayBeRecursive()`, `declared-parameter-result.ts`).
+  return whileDefining(ce, arg1, () =>
+    assignNamedValue(ce, arg1, arg2, options)
+  );
+}
 
+/** `assignFn()` for one name `id`. */
+function assignNamedValue(
+  ce: IComputeEngine,
+  id: string,
+  arg2?: AssignValue,
+  options?: AssignFnOptions
+): IComputeEngine {
   // D6 — assignment FULL-REPLACES, so everything `clause-identity.ts` remembers
   // about the binding's current definition record stops being true here. The
   // clause LIST needs no such call: it hangs off the inner operator object and

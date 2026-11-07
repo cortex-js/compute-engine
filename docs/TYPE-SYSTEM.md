@@ -918,6 +918,33 @@ of a recursive call, read while the result of the same function is being
 derived, is the declared `unknown`) is kept only until the next call
 (`stackDependentAnswerCount`, `static-typing-view.ts`).
 
+A branch of an `If` or a `Which` that calls a user function and is typed
+`unknown` makes the conditional `unknown`, unless the call can be a recursive
+call: the result type of its function is being computed at that time (the
+name has no body yet and an assignment or a declaration that gives it one is
+in progress, the signature of its definition is being derived, or the type of
+its function literal is being computed; `unknownCallMayBeRecursive()`,
+`declared-parameter-result.ts`). A type that leaves such a call out holds only
+while that computation runs, and the type cache does not keep it after it. A
+recursive call is left out of the join of the branches, so
+`r := n ↦ If(n = 0, 1, r(n − 1))` is typed `(n: unknown) -> integer` by its
+base case. A call of a function that is not defined yet is not left out: with
+`q: real`, `If(q < 2, g(1), 0)` is `unknown`, because `g := x ↦ x / 2` can
+later make its value `1/2` (CE-836).
+
+This rule is simple and sound, and it loses precision in a mutual recursion
+where the call of the branch reaches the function in computation only through
+another function. With `F` and `G` declared `function`,
+`F := n ↦ If(n = 0, x > 0, G(n − 1))`, then `G := n ↦ F(n)`, the type of
+`F(m)` is `unknown`, although every value is a boolean: `G(n − 1)` is
+`unknown` only because it reads `F`, but the result type of `G` is not being
+computed. Two functions that call each other, where the first is assigned
+before the second exists, can also get wider types: the result of `ha` or
+`hb` of `test/compute-engine/ce-479-recursive-map-result-type.test.ts` is a
+subtype of `list<integer | list>`, and it can be wider than that type, for
+example `list<integer | list<unknown>>`. Each of these types holds every
+value.
+
 A use of a call at a typed parameter may refine a result that the body leaves
 `unknown`: `k := x ↦ x` used in `k(1) + 2` gets the result `real`
 (`_inferWithoutFacts`, `boxed-expression/boxed-function.ts`). A result that

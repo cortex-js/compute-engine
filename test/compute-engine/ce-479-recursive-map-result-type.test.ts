@@ -12,6 +12,7 @@
  */
 import type { Expression } from '../../src/compute-engine';
 import { ComputeEngine } from '../../src/compute-engine';
+import { expectTypeBetween } from '../utils';
 
 const BODY = [
   'Function',
@@ -101,6 +102,16 @@ function mapCalling(other: string) {
   ];
 }
 
+/** The result of the signature of `f` is a subtype of `bound`, and not a
+ * type that holds no value (`expectTypeBetween`). */
+function expectResultAtMost(ce: ComputeEngine, f: string, bound: string) {
+  const result = ce
+    .box(f)
+    .type.toString()
+    .replace(/^.*-> /, '');
+  expectTypeBetween(ce.type(result), { atMost: bound });
+}
+
 /** Each call of `f` at depths 0 to 2 gives a value that matches the call
  * type and the result of the signature of `f`. */
 function expectValuesMatch(ce: ComputeEngine, f: string) {
@@ -123,6 +134,12 @@ describe('CE-479: TWO FUNCTIONS THAT CALL EACH OTHER FROM A MAP CALLBACK', () =>
   // A call of the other function of the cycle is typed by its candidate
   // result while the result of one function is verified. Before, `ha` was
   // typed `-> list<number>` and `ha(1)` `list<number>` for `[[0]]`.
+  //
+  // The function assigned first calls the second before it is defined, so
+  // the call is a value of any type, not a recursive call (CE-836): the
+  // result is at most `list<integer | list>`, and can be wider
+  // (`list<integer | list<unknown>>`), as `docs/TYPE-SYSTEM.md` says of a
+  // mutual recursion. The bound and the values are what this test guards.
   test.each(['ab', 'ba'])('declared, assigned in the order %s', (order) => {
     const ce = new ComputeEngine();
     ce.declare('ha', '(unknown) -> unknown');
@@ -130,9 +147,8 @@ describe('CE-479: TWO FUNCTIONS THAT CALL EACH OTHER FROM A MAP CALLBACK', () =>
     for (const c of order)
       ce.assign(`h${c}`, ce.box(mapCalling(c === 'a' ? 'hb' : 'ha') as any));
     for (const f of ['ha', 'hb']) {
-      expect(ce.box(f).type.toString()).toBe(
-        '(unknown) -> list<integer | list>'
-      );
+      expect(ce.box(f).type.toString()).toMatch(/^\(unknown\) -> /);
+      expectResultAtMost(ce, f, 'list<integer | list>');
       expectValuesMatch(ce, f);
     }
   });
@@ -140,13 +156,14 @@ describe('CE-479: TWO FUNCTIONS THAT CALL EACH OTHER FROM A MAP CALLBACK', () =>
   // The function assigned first was not recursive when it was assigned:
   // its inferred signature is refined when the second one completes the
   // cycle (`_refineRecursiveCycleMembers`). Before, it kept
-  // `-> list<number>`.
+  // `-> list<number>`. Its result can be wider than `list<integer | list>`,
+  // as in the test above.
   test.each(['ab', 'ba'])('undeclared, assigned in the order %s', (order) => {
     const ce = new ComputeEngine();
     for (const c of order)
       ce.assign(`h${c}`, ce.box(mapCalling(c === 'a' ? 'hb' : 'ha') as any));
     for (const f of ['ha', 'hb']) {
-      expect(ce.box(f).type.toString()).toMatch(/-> list<integer \| list>$/);
+      expectResultAtMost(ce, f, 'list<integer | list>');
       expectValuesMatch(ce, f);
     }
   });

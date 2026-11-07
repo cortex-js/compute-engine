@@ -210,6 +210,7 @@ import { getFunctionProperties } from './function-properties/index.js';
 import { contourIntegrate as contourIntegrateImpl } from './symbolic/contour-integrate.js';
 import type { ContourInput, ContourIntegralResult } from './types-contour.js';
 import type { FunctionProperties } from './function-properties/index.js';
+import { whileDefining } from './boxed-expression/declared-parameter-result.js';
 
 import {
   lookupDefinition as lookupDefinitionImpl,
@@ -3323,7 +3324,14 @@ export class ComputeEngine implements IComputeEngine {
     def: Partial<ValueDefinition>,
     scope?: Scope
   ): BoxedDefinition {
-    return declareSymbolValueImpl(this, name, def, scope);
+    // A declaration with a value: a call of `name` in the body of a function
+    // literal value is a recursive call while the declaration types the
+    // value (`whileDefining()`).
+    if (def.value === undefined)
+      return declareSymbolValueImpl(this, name, def, scope);
+    return whileDefining(this, name, () =>
+      declareSymbolValueImpl(this, name, def, scope)
+    );
   }
 
   /**
@@ -3338,7 +3346,12 @@ export class ComputeEngine implements IComputeEngine {
     def: OperatorDefinition,
     scope?: Scope
   ): BoxedDefinition {
-    return declareSymbolOperatorImpl(this, name, def, scope);
+    // A call of `name` in the body of a function literal of the definition
+    // is a recursive call while the declaration types the body
+    // (`whileDefining()`).
+    return whileDefining(this, name, () =>
+      declareSymbolOperatorImpl(this, name, def, scope)
+    );
   }
 
   /**

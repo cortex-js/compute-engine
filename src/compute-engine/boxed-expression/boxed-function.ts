@@ -4079,6 +4079,18 @@ export class BoxedFunction
     return true;
   }
 
+  /** True while a computation of the type of this expression runs, with the
+   * assumptions in force or hidden. A read of `type` made then is a
+   * re-entrant read, which a recursive function makes when its body calls
+   * it: the read gets a provisional answer (`cachedValue()`, `cache.ts`).
+   * @internal */
+  _isTypeInFlight(): boolean {
+    return (
+      (this._type.inFlight ?? 0) > 0 ||
+      (this._type.suppressed?.inFlight ?? 0) > 0
+    );
+  }
+
   /** The type of the value of the function */
   get type(): BoxedType {
     // Keyed on `_typeCacheGeneration()`, which the declarations of a call of

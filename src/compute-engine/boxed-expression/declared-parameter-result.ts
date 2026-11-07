@@ -466,6 +466,128 @@ export function endSignatureDerivation(frame: SignatureDerivationFrame): void {
   if (i >= 0) derivationStack.splice(i, 1);
 }
 
+/** The assignments and declarations in flight that give a name a value or
+ * a body, in this process, innermost last ({@link whileDefining}). Such a
+ * definition is a dynamic extent of the host call stack. */
+const definitionStack: { engine: object; name: string }[] = [];
+
+/**
+ * Run `thunk`, an assignment or a declaration in `engine` that gives `name`
+ * a value or a body (`assignFn()` of `engine-declarations.ts`, and the
+ * methods `_declareSymbolValue()` and `_declareSymbolOperator()` of the
+ * engine). While it runs, the types of the value are computed when `name`
+ * has no value yet, and a call of `name` in the body of a function literal
+ * is read as a recursive call ({@link unknownCallMayBeRecursive}).
+ */
+export function whileDefining<T>(
+  engine: object,
+  name: string,
+  thunk: () => T
+): T {
+  const entry = { engine, name };
+  definitionStack.push(entry);
+  try {
+    return thunk();
+  } finally {
+    const i = definitionStack.lastIndexOf(entry);
+    if (i >= 0) definitionStack.splice(i, 1);
+  }
+}
+
+/**
+ * Run `thunk` with no assignment or declaration in flight for
+ * {@link unknownCallMayBeRecursive}, and restore them after it.
+ *
+ * The declaration of `g` rebuilds the functions whose body called `g`
+ * before `g` was defined (`repairProvisionalDependents()`), and it stores
+ * their signatures. The body of such a function is not the body of `g`,
+ * so a call of `g` in it is not a recursive call of `g`: with
+ * `h := x ↦ If(x < 2, g(x), 0)` assigned before
+ * `g := n ↦ If(n = 0, 1/2, h(n − 1))`, `h` was stored with the signature
+ * `-> integer`, and `h(0)` is `1/2`.
+ */
+export function outsideDefinitions<T>(thunk: () => T): T {
+  const saved = definitionStack.splice(0);
+  try {
+    return thunk();
+  } finally {
+    definitionStack.unshift(...saved);
+  }
+}
+
+/**
+ * True when a call of the function `name` that is typed `unknown` can be a
+ * recursive call, typed `unknown` only because the result type of its
+ * function is being computed, and false when its value can be of any type.
+ *
+ * It is true when the result type of `name` is being computed now:
+ *
+ * - an assignment or a declaration of `engine` that gives `name` a value or
+ *   a body is in flight ({@link whileDefining}), outside the rebuild of the
+ *   functions that called `name` before it was defined
+ *   ({@link outsideDefinitions}): the body of the function literal assigned
+ *   to `r` in `r := n ↦ If(n = 0, 1, r(n − 1))` is typed while `r` has no
+ *   value, and the result type of `r` is read from that type;
+ * - the signature derivation of the definition of `name` is in flight
+ *   ({@link beginSignatureDerivation});
+ * - the type of the function literal of `name` (the body of its operator
+ *   definition, or the value of its value definition) is being computed: a
+ *   call `F(m)` of a function literal assigned to a name declared
+ *   `function` reads the type of that literal, and the call `F(n − 1)` in
+ *   its body reads it again.
+ *
+ * It is false otherwise. Then the call has a value of any type: `g` in
+ * `If(q < 2, g(1), 0)` before `g` is assigned (the call stays unevaluated,
+ * and an assignment of `g` can give it a value of any type), or a function
+ * whose result type is settled as `unknown` (`f := n ↦ g(n)` with `g` not
+ * defined).
+ */
+export function unknownCallMayBeRecursive(
+  engine: {
+    lookupDefinition(
+      id: string
+    ): { readonly operator?: object; readonly value?: object } | undefined;
+  },
+  name: string
+): boolean {
+  const recursive = callIsInComputation(engine, name);
+  // A type that leaves such a call out of a join holds only while the
+  // computation runs, so it is counted as an answer that depends on the
+  // computations in progress, and the type cache does not keep it after
+  // them (`noteStackDependentAnswer()`). Without this, with
+  // `h := x ↦ If(x < 2, g(x), 0)` assigned before
+  // `g := n ↦ If(n = 0, 1/2, h(n − 1))`, the type of the body of `h` was
+  // computed while `g` was assigned, with `g(x)` left out, and `h` kept the
+  // type `-> integer` for the value `h(0) = 1/2`.
+  if (recursive) noteStackDependentAnswer();
+  return recursive;
+}
+
+/** The test of {@link unknownCallMayBeRecursive}. */
+function callIsInComputation(
+  engine: {
+    lookupDefinition(
+      id: string
+    ): { readonly operator?: object; readonly value?: object } | undefined;
+  },
+  name: string
+): boolean {
+  if (definitionStack.some((x) => x.engine === engine && x.name === name))
+    return true;
+  const def = engine.lookupDefinition(name);
+  if (def === undefined) return false;
+  const owner = def.operator ?? def.value;
+  if (derivationStack.some((frame) => frame.owner === owner)) return true;
+  const literal =
+    def.operator !== undefined
+      ? (def.operator as { _lambdaLiteral?: unknown })._lambdaLiteral
+      : (def.value as { _presentValue?: unknown } | undefined)?._presentValue;
+  return (
+    (literal as { _isTypeInFlight?: () => boolean } | undefined)
+      ?._isTypeInFlight?.() === true
+  );
+}
+
 /**
  * The number of re-entrant signature reads so far
  * ({@link noteReentrantSignatureRead}). A memo that is not a signature

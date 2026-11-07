@@ -126,6 +126,7 @@ import {
   isErrorTypedWithoutErrorValue,
 } from '../boxed-expression/error-typed-operand.js';
 import { noteFailedWalk } from '../boxed-expression/incomplete-walks.js';
+import { unknownCallMayBeRecursive } from '../boxed-expression/declared-parameter-result.js';
 import {
   resolvesToSystemBinding,
   deriveApplicationOf,
@@ -362,21 +363,38 @@ export const BLOCK_DEFINITION: OperatorDefinition = {
 };
 
 /**
- * True when the branch of a conditional is typed `unknown` because of the
- * types of its operands, not because it reaches a function whose result is
- * still being derived: an untyped symbol (`untypedSymbolArm`), or an
- * application of a library operator whose `unknown` operands are such
- * branches too, or that has none (`At(s, 1)` with `s` a parameter typed
- * `indexed_collection<any>`). Such a branch makes the result of the
- * conditional `unknown`. With `f := (n, s) ↦ If(n = 0, s[1], [1, 2])`,
- * `f(0, [7])` is `7`, and the conditional was typed `vector<integer^2>`, by
- * its other branch alone (CE-447).
+ * True when the branch of a conditional is typed `unknown` because its value
+ * can be of any type, not because it reaches a function whose result is
+ * still being derived. Such a branch is:
  *
- * The exclusions of `untypedSymbolArm` stay: an application of a function
- * that is not a library operator (a recursive call, typed `unknown` while
- * the signature it reads is derived), and a `Return`, `Break` or `Continue`,
- * which gives no value in place. A `Block` and a nested conditional are
- * excluded too, since their last statement or branch can be such a call.
+ * - an untyped symbol;
+ * - a call of a function that is not a library operator and whose result
+ *   type is not being computed now: a call `g(1)` of a function `g` that is
+ *   not defined yet, or of a function whose result type is settled as
+ *   `unknown`. With `q: real`, `If(q < 2, g(1), 0)` was typed `integer`,
+ *   and after `g := x ↦ x / 2` and `q = 1` its value is `1/2` (CE-836);
+ * - an application of a library operator whose `unknown` operands are such
+ *   branches too, or that has none (`At(s, 1)` with `s` a parameter typed
+ *   `indexed_collection<any>`). With `f := (n, s) ↦ If(n = 0, s[1], [1,
+ *   2])`, `f(0, [7])` is `7`, and the conditional was typed
+ *   `vector<integer^2>`, by its other branch alone (CE-447).
+ *
+ * Such a branch makes the result of the conditional `unknown`.
+ *
+ * These branches are excluded:
+ *
+ * - a call that can be a recursive call: a call of a function whose result
+ *   type is being computed now (`unknownCallMayBeRecursive()`). A recursive
+ *   call is typed `unknown` while the result type of its function is
+ *   derived from the type of the body, and that derivation needs the join
+ *   of the other branches, so that `r := n ↦ If(n = 0, 1, r(n − 1))` is
+ *   typed `(n: unknown) -> integer` by its base case.
+ * - a call through a callee descriptor (`callee` of the structure), whose
+ *   own contract is not read here;
+ * - a `Return`, `Break` or `Continue`, which gives no value in place;
+ * - a `Block` and a nested conditional, since their last statement or
+ *   branch can be a recursive call.
+ *
  * The walk stops at a depth of 8.
  */
 function untypedArm(
@@ -390,7 +408,10 @@ function untypedArm(
   if (s?.kind !== 'application' || s.callee !== undefined || depth >= 8)
     return false;
   if (NOT_A_VALUE_IN_PLACE.has(s.head)) return false;
-  if (!resolvesToSystemBinding(engine, s.head)) return false;
+  // A function that is not a library operator: its `unknown` result is a
+  // value of any type, unless the call can be a recursive one.
+  if (!resolvesToSystemBinding(engine, s.head))
+    return !unknownCallMayBeRecursive(engine, s.head);
   return s.children.every(
     (c) => c.type !== 'unknown' || untypedArm(c, engine, depth + 1)
   );
@@ -2825,13 +2846,13 @@ function armElementType(t: Readonly<Type>): Type {
  * (`elementwiseResultType`):
  *
  * - an arm of type `unknown` that gives a value in place (`untypedArm`): a
- *   symbol that is not declared, or a library operator applied to one. An
- *   application of a function that is not a library operator is not read
- *   this way, as in the scalar typing of `If` and `Which`: a recursive call
- *   is typed `unknown` while the result type of its function is derived
- *   from this selection, and that derivation needs the other arms. So a
- *   call `g(1)` of a function that is not declared adds nothing to the cell
- *   either.
+ *   symbol that is not declared, a call of a function that is not defined
+ *   yet (`g(1)`: with `L = [1, 3, 5]`, `Which(L < 2, g(1), True, 0)` is a
+ *   `list<unknown^3>`, and after `g := x ↦ x / 2` its value is
+ *   `[1/2, 0, 0]`), or a library operator applied to one. A recursive call
+ *   is not read this way, as in the scalar typing of `If` and `Which`: it is
+ *   typed `unknown` while the result type of its function is derived from
+ *   this selection, and that derivation needs the other arms.
  * - an arm whose type says that its elements are `unknown`
  *   (`typeHasUnknownCells`): `foo(L)` with `foo` not declared and `L` a
  *   list of three numbers is a `list<unknown^3>`. A recursive call over a
