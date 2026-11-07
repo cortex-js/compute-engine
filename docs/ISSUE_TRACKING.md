@@ -119,7 +119,9 @@ Rules for the body:
 - The first line is one sentence that says what the user sees, with no engine
   terms. This is the line the board reads.
 - The body is at most 150 words outside code blocks and outside the
-  `## CE answer` section. It gives the program, what it gives today, what it
+  `## CE answer` and `## Decision` sections. A `## Decision` section records
+  the board's answer to a question, as `User decision <date>: …`, and the
+  session that fixes the issue reads it there. It gives the program, what it gives today, what it
   must give, the cause when known, and the options with their cost. A longer
   analysis goes in a plan document in `docs/plans/`, and the body links it.
 - A Tycho issue names its instrument: a script in Tycho's `scripts/repros/`
@@ -207,7 +209,8 @@ adjustments; `lint` prints it when the recorded priority differs. "The
 priority of an issue" means the table value for a new issue, and the recorded
 priority once the board has set `reviewed`.
 
-- `regression`: the previous release did not have the issue.
+- `regression`: an earlier release did not have the issue, also when the
+  measurement is against a release older than the previous one.
 - `blocker` without `workaround`: the issue stops a Tycho roadmap item or a
   Tycho adoption, and Tycho has no way around it. A `blocker` with a
   `workaround` stays at the table value.

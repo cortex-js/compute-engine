@@ -227,7 +227,7 @@ function parseFile(file) {
   return { fields, body: lines.slice(end + 1).join('\n'), errors };
 }
 
-/** Counts the words of a body outside fenced code blocks and outside the `## CE answer` section. */
+/** Counts the words of a body outside fenced code blocks and outside the `## CE answer` and `## Decision` sections. */
 function bodyWords(body) {
   let inCode = false;
   let inAnswer = false;
@@ -238,7 +238,7 @@ function bodyWords(body) {
       continue;
     }
     if (inCode) continue;
-    if (/^## /.test(line)) inAnswer = /^## CE answer/i.test(line);
+    if (/^## /.test(line)) inAnswer = /^## (CE answer|Decision)/i.test(line);
     if (!inAnswer) n += line.split(/\s+/).filter(Boolean).length;
   }
   return n;
