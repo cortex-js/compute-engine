@@ -477,6 +477,7 @@ import {
   memoizableEvaluateOptions,
   rememberedEvaluation,
   sharedEvaluationMemo,
+  type SharedEvaluationMemo,
 } from './shared-evaluation-memo.js';
 import { containsObject } from './object-walk.js';
 import {
@@ -1608,6 +1609,10 @@ export class BoxedFunction
    * shared evaluations keeps the result of a node from its second
    * evaluation in the same top-level evaluation on. */
   private _sharedEvaluationMark = 0;
+
+  /** The memo of `_sharedStructureHash()`. The operator and the operands of
+   * a node do not change, so the hash is computed once. */
+  private _structureHash: number | undefined = undefined;
 
   /** `ce._worldVersion` when the lazy-collection evaluate memo was filled,
    * checked on EVERY entry (including the generation-independent one): the
@@ -4497,14 +4502,24 @@ export class BoxedFunction
     // never kept, and no node that holds it is kept
     // (`_isUncachedHostOperator`): it is counted below, before it runs.
     const uncachedHost = this._isUncachedHostOperator();
+    // The node under which the memo keeps the result of this node: this
+    // node, or an earlier node of which it is a copy (`_sharedEvaluationKey()`).
+    // Only a canonical node has copies. It is computed inside the `try`
+    // block, whose `finally` block restores the state of the engine if the
+    // comparison throws (a stack overflow on a very deep expression).
+    let key: BoxedFunction | undefined;
     try {
       if (memo !== undefined) {
-        const evaluatedBefore = this._sharedEvaluationMark === memo.mark;
+        if (this.isCanonical) key = this._sharedEvaluationKey(memo);
+        const evaluatedBefore =
+          (key !== undefined && key !== this) ||
+          this._sharedEvaluationMark === memo.mark;
         if (!evaluatedBefore) {
-          // The first evaluation of this node in this top-level evaluation:
-          // it is only marked, and its impurity counted when it can matter.
-          // Most nodes are evaluated once, and for them the memo costs this
-          // write (`shared-evaluation-memo.ts`).
+          // The first evaluation of this node in this top-level evaluation,
+          // and no earlier node is a copy of it: it is only marked, and its
+          // impurity counted when it can matter. Most nodes are evaluated
+          // once, and for them the memo costs this write and the look-up
+          // of its hash (`shared-evaluation-memo.ts`).
           this._sharedEvaluationMark = memo.mark;
           if (memo.frames !== undefined || memo.pending > 0) {
             purityRead = true;
@@ -4541,7 +4556,7 @@ export class BoxedFunction
           memoizableEvaluateOptions(options) &&
           !staticViewDiverges(engine)
         ) {
-          const hit = rememberedEvaluation(memo, engine, this, numeric);
+          const hit = rememberedEvaluation(memo, engine, key ?? this, numeric);
           if (hit !== undefined) {
             // A hit takes the place of an evaluation, so it passes the same
             // deadline checkpoint (`_computeValueUnabsorbed`): an
@@ -4653,7 +4668,7 @@ export class BoxedFunction
         engine._persistentEvaluationVersion === persistentBefore &&
         !engineHasObjects(engine)
       )
-        rememberEvaluation(memo!, engine, this, numeric, value);
+        rememberEvaluation(memo!, engine, key ?? this, numeric, value);
       return value;
     } finally {
       if (memo !== undefined) {
@@ -4774,6 +4789,233 @@ export class BoxedFunction
         def.collection !== undefined) &&
       !isUserFunctionDef(def)
     );
+  }
+
+  /**
+   * The node under which the memo of shared evaluations keeps the result of
+   * this node in the top-level evaluation of `memo`
+   * (`shared-evaluation-memo.ts`): this node, or an earlier node of which
+   * this node is a copy.
+   *
+   * At the first call in a top-level evaluation, the node is compared with
+   * the first node of the same structure hash (`memo.copies`,
+   * `_sharedStructureHash()`); when there is none, it becomes the first node
+   * of its hash. The key is then recorded in `memo.copyKeys`, also for the
+   * nodes that the comparison of two parents found to be copies
+   * (`_sameForSharedEvaluation()`). A recorded key has itself as its key, so
+   * the keys make no chain and no cycle.
+   */
+  _sharedEvaluationKey(memo: SharedEvaluationMemo<unknown>): BoxedFunction {
+    const keys = (memo.copyKeys ??= new WeakMap());
+    const known = keys.get(this) as BoxedFunction | undefined;
+    if (known !== undefined) return known;
+    let copyOf: BoxedFunction | undefined;
+    const copies = (memo.copies ??= new Map());
+    const hash = this._sharedStructureHash();
+    const first = copies.get(hash) as BoxedFunction | undefined;
+    if (first === undefined) {
+      if (copies.size < MAX_SHARED_COPY_HASHES) copies.set(hash, this);
+    } else if (BoxedFunction._sameForSharedEvaluation(first, this, memo))
+      copyOf = (keys.get(first) as BoxedFunction | undefined) ?? first;
+    keys.set(this, copyOf ?? this);
+    return copyOf ?? this;
+  }
+
+  /**
+   * A hash of the written structure of this node, for the look-up of its
+   * copies (`_sharedEvaluationKey()`): two nodes that
+   * `_sameForSharedEvaluation()` accepts have the same hash. It is not
+   * `hash`, which is the hash of the value for `isSame` and lists the
+   * integers of a `Range` (a `Range` of 10,000 integers read 10,000 numbers).
+   * Here a `Range` is hashed by its operands, and an operand that is not a
+   * function, a symbol, a number or a string counts as `0`, because it is the
+   * same only as itself. Memoized, so a shared node is hashed once.
+   *
+   * The walk uses a stack of nodes, not recursion: the hash is read at the
+   * start of the evaluation of each canonical node, also of a node that does
+   * not evaluate its operands (`Hold`), and a held expression can be deeper
+   * than the call stack.
+   */
+  private _sharedStructureHash(): number {
+    if (this._structureHash !== undefined) return this._structureHash;
+    const stack: BoxedFunction[] = [this];
+    while (stack.length > 0) {
+      const node = stack[stack.length - 1];
+      if (node._structureHash !== undefined) {
+        stack.pop();
+        continue;
+      }
+      // Hash the function operands first; the node comes back to the top
+      // of the stack when they are done.
+      let ready = true;
+      if (node._numericStore === undefined)
+        for (const op of node._ops)
+          if (op instanceof BoxedFunction && op._structureHash === undefined) {
+            stack.push(op);
+            ready = false;
+          }
+      if (!ready) continue;
+      stack.pop();
+      let h = hashCode(node._operator);
+      const store = node._numericStore;
+      if (store !== undefined) {
+        for (const v of store)
+          h = mixOperandHash(h, (v | 0) ^ Math.trunc((v % 1) * 0x10000));
+      } else {
+        for (const op of node._ops) {
+          const x =
+            op instanceof BoxedFunction
+              ? op._structureHash!
+              : isSymbol(op) || isNumber(op) || isString(op)
+                ? op.hash
+                : 0;
+          h = mixOperandHash(h, x);
+        }
+      }
+      node._structureHash = h;
+    }
+    return this._structureHash!;
+  }
+
+  /**
+   * Does the evaluation of `b` give the value of the evaluation of `a`, in
+   * the same frame and the same state? This is true when both have the same
+   * structure and nothing else that the evaluation reads differs:
+   *
+   * - a function node: the same operator name and binding record, the same
+   *   overload arm, the same numeric store, and operands that are the same
+   *   in turn. A node that the evaluation reads more of than its structure
+   *   is the same only as itself: a node with a local scope (each copy of a
+   *   `Block`, `Function` or `Sum` binds its own locals), a call that
+   *   records its callee (`_calleeStamp`: a call of a user function, boxed
+   *   again in the scope where it was written), a call that its handler
+   *   declined or whose operands its callee refused, an `Error`, a lazy
+   *   callback view (it records the context of the call that made it,
+   *   `lazy-view-context.ts`), a non-canonical node and a result of an
+   *   unresolved call made in this evaluation (`isStickyUnresolvedCall`);
+   * - a symbol: the same name, the same value and operator definitions
+   *   (a symbol reads the binding that its own definition selects in the
+   *   frame, `bindingInContext()`), and the same structural flag;
+   * - a number or a string: the same digest, which is lossless (`1/2` and
+   *   `0.5` differ);
+   * - any other node: the same object.
+   *
+   * Each pair of function nodes that the comparison accepts is recorded in
+   * `memo.copyKeys`: the node of `b` gets the key of the node of `a`. Each
+   * pair that it refuses is recorded in `memo.refusedCopies`. A pair is
+   * compared once in a top-level evaluation, so the comparison of two copies
+   * of a graph that shares nodes (`Max(t, t)` nested 30 deep, built twice)
+   * takes a time linear in the distinct nodes, not in the paths, and an
+   * operand of a copy that is evaluated later is not compared again.
+   *
+   * The comparison is recursive. Two nodes deeper than
+   * `MAX_SHARED_COPY_DEPTH` levels below the first pair are not copies: the
+   * answer is then a missed share, not a stack overflow on a deep held
+   * expression.
+   */
+  private static _sameForSharedEvaluation(
+    a: Expression,
+    b: Expression,
+    memo: SharedEvaluationMemo<unknown>,
+    depth = 0
+  ): boolean {
+    if (a === b) return true;
+    if (!(a instanceof BoxedFunction) || !(b instanceof BoxedFunction)) {
+      if (isSymbol(a) && isSymbol(b))
+        return (
+          a.symbol === b.symbol &&
+          a.isCanonical &&
+          b.isCanonical &&
+          a.valueDefinition === b.valueDefinition &&
+          a.operatorDefinition === b.operatorDefinition &&
+          (a as { _structuralForm?: boolean })._structuralForm ===
+            (b as { _structuralForm?: boolean })._structuralForm
+        );
+      if ((isNumber(a) && isNumber(b)) || (isString(a) && isString(b)))
+        return a.digest === b.digest;
+      return false;
+    }
+    const keys = (memo.copyKeys ??= new WeakMap());
+    const keyA = (keys.get(a) as BoxedFunction | undefined) ?? a;
+    const keyB = keys.get(b) as BoxedFunction | undefined;
+    if (keyB === keyA) return true;
+    const refused = (memo.refusedCopies ??= new WeakMap());
+    if (refused.get(b) === a) return false;
+    if (
+      depth >= MAX_SHARED_COPY_DEPTH ||
+      !BoxedFunction._sameFunctionNodes(a, b, memo, depth)
+    ) {
+      refused.set(b, a);
+      return false;
+    }
+    // The pair is the same: each node takes the key that the other one has,
+    // or the node of `a` when neither has one. When both have a key, they
+    // are copies with two keys (the first node of their hash was another
+    // structure), and they keep them.
+    if (keyB === undefined) {
+      if (!keys.has(a)) keys.set(a, a);
+      keys.set(b, keyA);
+    } else if (!keys.has(a)) keys.set(a, keyB);
+    return true;
+  }
+
+  /** `_sameForSharedEvaluation()` for two function nodes, without the look-up
+   * of the pair in the records of the memo. */
+  private static _sameFunctionNodes(
+    a: BoxedFunction,
+    b: BoxedFunction,
+    memo: SharedEvaluationMemo<unknown>,
+    depth: number
+  ): boolean {
+    if (
+      a._operator !== b._operator ||
+      a._def !== b._def ||
+      a._operator === 'Error' ||
+      !a.isCanonical ||
+      !b.isCanonical ||
+      a._isStructural !== b._isStructural ||
+      a._localScope !== undefined ||
+      b._localScope !== undefined ||
+      a._calleeStamp !== undefined ||
+      b._calleeStamp !== undefined ||
+      a._declinedByHandler ||
+      b._declinedByHandler ||
+      a._refusedOps !== undefined ||
+      b._refusedOps !== undefined ||
+      a.operatorDefinition?.collection?.callsCallbackOnRead === true ||
+      !sameOverloadArm(a._resolvedOverload, b._resolvedOverload) ||
+      isStickyUnresolvedCall(a) ||
+      isStickyUnresolvedCall(b)
+    )
+      return false;
+    const storeA = a._numericStore;
+    const storeB = b._numericStore;
+    if (storeA !== undefined || storeB !== undefined) {
+      if (
+        storeA === undefined ||
+        storeB === undefined ||
+        a._numericStoreFloats !== b._numericStoreFloats ||
+        storeA.length !== storeB.length
+      )
+        return false;
+      for (let i = 0; i < storeA.length; i++)
+        if (!Object.is(storeA[i], storeB[i])) return false;
+    } else {
+      const opsA = a._ops;
+      const opsB = b._ops;
+      if (opsA.length !== opsB.length) return false;
+      for (let i = 0; i < opsA.length; i++)
+        if (
+          !BoxedFunction._sameForSharedEvaluation(
+            opsA[i],
+            opsB[i],
+            memo,
+            depth + 1
+          )
+        )
+          return false;
+    }
+    return true;
   }
 
   /**
@@ -16590,6 +16832,41 @@ const UNRESOLVED_CALL_RESULTS = new WeakMap<
   Expression,
   { epoch: number; ops: ReadonlyArray<Expression>; result: Expression }
 >();
+
+/** The largest number of structure hashes that the memo of shared
+ * evaluations records in one top-level evaluation (`SharedEvaluationMemo
+ * .copies`). The table holds its nodes until the evaluation ends, so a long
+ * evaluation that makes many distinct temporary nodes keeps at most this
+ * many of them alive; a node whose hash comes after the limit is a copy of
+ * no node. */
+const MAX_SHARED_COPY_HASHES = 65_536;
+
+/** The largest depth, below the first pair, at which the memo of shared
+ * evaluations compares two nodes for copies
+ * (`BoxedFunction._sameForSharedEvaluation()`). The comparison is
+ * recursive, and a deeper pair counts as not the same. An expression that a
+ * host writes is rarely deeper than a few hundred levels; a deep stack frame
+ * of the comparison is small, so this depth stays far from the stack limit. */
+const MAX_SHARED_COPY_DEPTH = 1_000;
+
+/** Did the validation of two calls select the same overload arms? Each call
+ * has its own resolution object, so the arms are compared: the declared arm
+ * that was selected and the declared arms that stayed viable. Two calls
+ * that were not resolved against an overload set are the same too. */
+function sameOverloadArm(
+  a: OverloadResolution | undefined,
+  b: OverloadResolution | undefined
+): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  if (a.selected !== b.selected) return false;
+  const viableA = a.viableDeclared;
+  const viableB = b.viableDeclared;
+  if (viableA.length !== viableB.length) return false;
+  for (let i = 0; i < viableA.length; i++)
+    if (viableA[i] !== viableB[i]) return false;
+  return true;
+}
 
 /** True when `expr` is a result of evaluating a call whose head had no
  * value, made in the current top-level evaluation of its engine

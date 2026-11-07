@@ -98,6 +98,24 @@
  * is evaluated again is evaluated a second time, then kept: over `Max(t, t)`
  * nested d deep, each level is computed twice, which stays linear in d.
  *
+ * A COPY of a node is a node with the same structure: the same operators,
+ * numbers and strings, and symbols bound to the same definitions. A host
+ * that expands its functions in place makes copies: `S(f(N(C)))` with `N`
+ * a piecewise expression and `S` and `f` reading their parameter more than
+ * once holds the body of `N` six times, as six distinct nodes. A copy uses
+ * the entries of the first node of its structure in this top-level
+ * evaluation, as if it were that node (`BoxedFunction._sharedEvaluationKey()`):
+ * `copies` holds the first node of each structure hash, `copyKeys` the node
+ * that each node is read as, and the second copy is evaluated and kept, so
+ * six copies cost two evaluations. Two nodes are copies only when nothing
+ * that the evaluation reads differs between them
+ * (`BoxedFunction._sameForSharedEvaluation()`): a node with a local scope
+ * (`Block`, `Function`, `Sum`), a call of a user function, an error and a
+ * lazy callback view are copies of no other node. Each pair of nodes is
+ * compared at most once in a top-level evaluation, so the comparison of
+ * two copies of a graph that shares nodes stays linear in its distinct
+ * nodes.
+ *
  * The memo is made when a synchronous top-level evaluation starts and is
  * dropped when it ends, so nothing is kept from one evaluation to the next.
  * An asynchronous evaluation does not use it. It is not made while a
@@ -173,6 +191,20 @@ export type SharedEvaluationMemo<T> = {
    * maps: a frame that was popped, or a node made during the evaluation and
    * no longer used, does not keep its entries alive. */
   frames: WeakMap<object, FrameMemo<T>> | undefined;
+  /** For each structure hash (`BoxedFunction._sharedStructureHash()`), the
+   * first node with that hash whose evaluation started in this top-level
+   * evaluation; made at the first such node. A later node with the same hash
+   * that is a copy of it (`BoxedFunction._sharedEvaluationKey()`) uses its
+   * entries. A strong map, with a limit on its size: its nodes stay alive
+   * until the evaluation ends. */
+  copies: Map<number, object> | undefined;
+  /** For each node whose key is known in this top-level evaluation, the
+   * node under which its entries are kept: the node itself, or the node of
+   * which it is a copy. Weak, as `frames`. */
+  copyKeys: WeakMap<object, object> | undefined;
+  /** For each node that a comparison found not to be a copy of a node, that
+   * node, so that the pair is not compared again in this evaluation. */
+  refusedCopies: WeakMap<object, object> | undefined;
 };
 
 const memos = new WeakMap<object, SharedEvaluationMemo<unknown>>();
@@ -191,6 +223,14 @@ let lastMark = 0;
 function memoOf(engine: object): SharedEvaluationMemo<unknown> | undefined {
   if (engine === lastEngine) return lastMemo;
   return memos.get(engine);
+}
+
+/** Drop the records of the copies of nodes (`copies`, `copyKeys`,
+ * `refusedCopies`): they are valid for one top-level evaluation. */
+function clearCopyRecords(memo: SharedEvaluationMemo<unknown>): void {
+  memo.copies = undefined;
+  memo.copyKeys = undefined;
+  memo.refusedCopies = undefined;
 }
 
 /**
@@ -212,11 +252,21 @@ export function beginSharedEvaluationMemo(
     if (memo !== undefined) {
       memo.owner = undefined;
       memo.frames = undefined;
+      clearCopyRecords(memo);
     }
     return;
   }
   if (memo === undefined) {
-    memo = { owner, mark: 0, impure: 0, pending: 0, frames: undefined };
+    memo = {
+      owner,
+      mark: 0,
+      impure: 0,
+      pending: 0,
+      frames: undefined,
+      copies: undefined,
+      copyKeys: undefined,
+      refusedCopies: undefined,
+    };
     memos.set(engine, memo);
   }
   lastEngine = engine;
@@ -226,6 +276,7 @@ export function beginSharedEvaluationMemo(
   memo.impure = 0;
   memo.pending = 0;
   memo.frames = undefined;
+  clearCopyRecords(memo);
 }
 
 /** End the memo of `engine` when `owner` started it. */
@@ -234,6 +285,7 @@ export function endSharedEvaluationMemo(engine: object, owner: object): void {
   if (memo !== undefined && memo.owner === owner) {
     memo.owner = undefined;
     memo.frames = undefined;
+    clearCopyRecords(memo);
   }
   // The cache of the last engine does not keep the engine alive after its
   // evaluation ends, also when the evaluation did not use the memo.

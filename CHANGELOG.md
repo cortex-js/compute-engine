@@ -417,6 +417,15 @@
 
 ### Performance
 
+- **An expression that holds several copies of the same sub-expression now
+  computes it at most twice in one `evaluate()`.** A copy is a separate
+  expression with the same operators, numbers and symbols, as a host makes
+  when it writes a function body in place of each call. For example, a
+  `Which` over a list of 500 numbers that appears nine times in one formula
+  was computed nine times (about 170 ms) and is now computed twice (about
+  80 ms); the value does not change. A copy that holds a local scope
+  (`Block`, `Function`, `Sum`), a call of a user function or an impure
+  operator (`Random`) is still computed at each place.
 - **The condition of `Filter`, `Any` and `All` is now compiled when it
   compares integers, as the function of `Map` already was.** With
   `isEven(n) := n % 2 == 0`, `Sum(Filter(1..20000, isEven))` took about
