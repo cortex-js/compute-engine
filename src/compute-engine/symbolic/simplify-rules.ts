@@ -45,6 +45,7 @@ import { simplifyLog } from './simplify-log.js';
 import { simplifyPower, canCombineSameBase } from './simplify-power.js';
 import { negatedArgument, oddEvenStep, simplifyTrig } from './simplify-trig.js';
 import { simplifyHyperbolic } from './simplify-hyperbolic.js';
+import { simplifyHypergeometricSum } from './simplify-hypergeometric.js';
 import { simplifyDivide } from './simplify-divide.js';
 import {
   simplifyBinomial,
@@ -1087,6 +1088,9 @@ export const SIMPLIFY_RULES: Rule[] = [
 
   // Hyperbolic trig simplifications
   simplifyHyperbolic,
+
+  // The inversion identity of ₂F₁(1, a; a + 1; w) between the terms of a sum
+  simplifyHypergeometricSum,
 
   // Odd special functions: f(-x) = -f(x), for `Negate(x)` and for a finite
   // negative constant (`negatedArgument()`). Each function is entire and odd,

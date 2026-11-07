@@ -20,6 +20,18 @@
 
 ### Resolved Issues
 
+- **`simplify()` cancels the Gauss hypergeometric terms of a definite integral
+  of a rational function.** The definite integral
+  `∫_{1/2}^{2} (1+x²)/(x²+x⁹) dx` with the Rubi rules gives
+  `3/2 + 2·₂F₁(1, 1/7; 8/7; −128) − 32/3·₂F₁(1, 6/7; 13/7; −128) −
+  1/2·₂F₁(1, 1/7; 8/7; −1/128) + 1/384·₂F₁(1, 6/7; 13/7; −1/128)`, which
+  `simplify()` left unchanged. `simplify()` now gives `3/2`. In a sum that
+  holds `₂F₁(1, a; a + 1; w)` with exact rational numbers `a` (not an integer)
+  and `w < −1`, and also `₂F₁(1, 1 − a; 2 − a; 1/w)`, it writes the first
+  function with the argument `1/w`:
+  `₂F₁(1, a; a + 1; −z) = πa·z^(−a)/sin(πa) − a/(1 − a)·z^(−1)·₂F₁(1, 1 − a; 2 − a; −1/z)`
+  for `z > 0`. The result is kept when it is simpler than the sum.
+
 - **The LaTeX of a function with a pair, a rest or a default parameter reads
   back as the same function.** The LaTeX of
   `["Function", ["Multiply", "x", "y"], ["Tuple", "x", "y"]]`, a function of
