@@ -636,6 +636,12 @@ function declaredSignatureParameterTypes(
   literal: Expression
 ): ReadonlyMap<string, Type> | undefined {
   if (!isFunction(literal, 'Function')) return undefined;
+  // The signature of a library function is not a declaration for the
+  // literal: the assignment replaces that function (`Gamma := t ↦ t + c`).
+  // Its parameter types would type the parameters of the literal, and the
+  // call `Gamma(2)` would have the type of the library `Gamma`
+  // (`complex | infinity`), not the type of the literal's body.
+  if (ce._isLibraryFunction(name)) return undefined;
   // The signature is on a value definition (`ce.declare('b', '(real) ->
   // real')`) or on an operator definition (`ce.declare('b', { signature:
   // '(real) -> real' })`).

@@ -15,7 +15,9 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * NEGATIVE still takes the complex kernel.
  */
 
-const BODY = '\\sum_{i=1}^{6} (1 - j(1-\\sqrt{1-0.025^2(i-0.5)^2}))\\cdot s';
+// `j\cdot(…)`: a parameter with no type followed by a parenthesized argument
+// is a call of the parameter, so the product is written explicitly.
+const BODY = '\\sum_{i=1}^{6} (1 - j\\cdot(1-\\sqrt{1-0.025^2(i-0.5)^2}))\\cdot s';
 
 function compiledSource(ce: ComputeEngine, call: string): string {
   const r = compile(ce.parse(call), { to: 'javascript' });
