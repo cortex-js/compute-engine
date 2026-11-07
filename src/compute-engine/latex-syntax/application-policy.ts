@@ -6,6 +6,14 @@ import { continuationRanges } from './range-provenance.js';
 type Candidate = Omit<ApplicationContext, 'arguments' | 'ancestors'> & {
   group: MathJsonExpression;
   fallback: 'apply' | 'predicate' | 'juxtapose';
+  /** The head that the result holds, when it is not the written name `head`:
+   * `Subscript(a, k)` for `a_k(x)` in the body of `\sum_{k=1}^{2}`
+   * (`_subscriptBoundIndexes()` in `parse.ts`). The hook still reads the
+   * written name. `isFactor` is true when the one argument of the group
+   * holds the written name (`x_i(x_i - 1)`): with no decision of the hook,
+   * the juxtaposition is then a product. It is a product also when a power
+   * or a factorial follows the group, and a call otherwise. */
+  subscriptHead?: { head: MathJsonExpression; isFactor: boolean };
 };
 type Ancestors = ApplicationContext['ancestors'];
 
@@ -77,6 +85,35 @@ export class ApplicationPolicy {
     if (this.suffixes.has(before)) this.suffixes.add(after);
   }
 
+  /** Record that the candidate `expr` has the head `head` in its result (see
+   * `Candidate.subscriptHead`). */
+  setSubscriptHead(
+    expr: MathJsonExpression,
+    head: MathJsonExpression,
+    isFactor: boolean
+  ): void {
+    if (typeof expr !== 'object' || expr === null) return;
+    const candidate = this.candidates.get(expr);
+    if (candidate)
+      this.candidates.set(expr, {
+        ...candidate,
+        subscriptHead: { head, isFactor },
+      });
+  }
+
+  /** Remove the subscripted head of the candidate `expr` when `drop(head)`
+   * is true: an outer binder whose index is the written name binds that name
+   * (`rebindSubscripts()` in `parse.ts`). */
+  dropSubscriptHead(
+    expr: MathJsonExpression,
+    drop: (head: MathJsonExpression) => boolean
+  ): void {
+    if (typeof expr !== 'object' || expr === null) return;
+    const candidate = this.candidates.get(expr);
+    if (candidate?.subscriptHead && drop(candidate.subscriptHead.head))
+      this.candidates.set(expr, { ...candidate, subscriptHead: undefined });
+  }
+
   finish(expr: MathJsonExpression): MathJsonExpression {
     if (!this.resolve) return expr;
     return this.visit(expr, []);
@@ -121,13 +158,25 @@ export class ApplicationPolicy {
           'ce.parse(): resolveApplication() must return apply, multiply, or undefined'
         );
 
+      // A subscripted head is not a name, so the canonical form cannot read
+      // a juxtaposition with it as a call: with no decision, the reading
+      // of `_subscriptBoundIndexes()` in `parse.ts` is made here (see
+      // `Candidate.subscriptHead`). A power or a factorial after the group
+      // keeps the product: `a_k(x-1)^k` is a term of a power series. The
+      // `predicate` fallback is only for a head of one uppercase letter,
+      // which is never a joined name.
+      const sub = candidate.subscriptHead;
       const apply =
         decision === 'apply' ||
-        (decision === undefined && candidate.fallback !== 'juxtapose');
+        (decision === undefined &&
+          (candidate.fallback !== 'juxtapose' ||
+            (sub !== undefined && !sub.isFactor && wrappers.length === 0)));
       let result: MathJsonExpression = apply
         ? candidate.fallback === 'predicate' && decision === undefined
           ? ['Predicate', candidate.head, ...args]
-          : [candidate.head, ...args]
+          : sub !== undefined
+            ? ['Apply', sub.head, ...args]
+            : [candidate.head, ...args]
         : group;
       for (let i = wrappers.length - 1; i >= 0; i--) {
         const wrapper = wrappers[i];
@@ -149,7 +198,7 @@ export class ApplicationPolicy {
       if (!apply)
         result = [
           decision === 'multiply' ? 'Multiply' : 'InvisibleOperator',
-          candidate.head,
+          sub?.head ?? candidate.head,
           result,
         ];
       // Keep source metadata on the whole occurrence, never its moved factor.

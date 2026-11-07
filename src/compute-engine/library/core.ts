@@ -7,6 +7,7 @@ import {
   type OperandSteps,
 } from './operand-steps.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
+import type { MathJsonExpression } from '../../math-json/types.js';
 import { coalesceResultType, presentType } from '../../common/type/coalesce.js';
 import type { PrecisionWindow } from '../types-kernel-evaluation.js';
 import { joinLatex } from '../latex-syntax/tokenizer.js';
@@ -1850,6 +1851,53 @@ function applyLiteralOverTuples(
       return cell === undefined ? undefined : ce._fn('Apply', [fn, ...cell]);
     },
   };
+}
+
+/**
+ * The product that `expression`, `Apply(Subscript(f, k), …args)`, stands for
+ * once the index `k` has an integer value, when the term `f_1(…args)` is a
+ * product; `undefined` when the term is a call, and for any other `Apply`.
+ * `args` are the evaluated arguments.
+ *
+ * The parser writes the call `f_k(x)` in the body of `\sum_{k=1}^{2}` as
+ * `Apply(Subscript(f, k), x)`, so that each term calls its own function
+ * (`_subscriptBoundIndexes()` in `latex-syntax/parse.ts`). It decides on
+ * the call before the names of the terms are known. The term is read here as
+ * the juxtaposition of the name of the term with its arguments, with the rule
+ * of `canonicalInvisibleOperator()`: a call when `f_1` is undeclared or a
+ * function, a product when `f_1` has a value or a type that is not a
+ * function (`w_1(4)` is `8` when `w_1` is `2`, not the value `2` of a
+ * constant callee). A call is left to the application of `Apply`, which
+ * keeps the exact form of each argument for a numeric evaluation. Only a
+ * subscript whose index a binder binds stays a `Subscript` in the canonical
+ * form: `Subscript(f, 1)` is the symbol `f_1`, and `Apply(f_1, x)` is the
+ * call `f_1(x)`. The index must be a symbol, the form that the parser
+ * writes: its value is read again here, and reading a symbol has no
+ * effect.
+ */
+function subscriptedTerm(
+  engine: ComputeEngine,
+  expression: Expression | undefined,
+  args: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (expression === undefined || !isFunction(expression, 'Apply'))
+    return undefined;
+  const head = expression.op1;
+  if (!isFunction(head, 'Subscript') || !isSymbol(head.op1)) return undefined;
+  const indexName = isFunction(head.op2, 'Delimiter') ? head.op2.op1 : head.op2;
+  if (!isSymbol(indexName)) return undefined;
+  const index = indexName.evaluate();
+  if (!isNumber(index) || index.isInteger !== true) return undefined;
+  const name = engine.box(['Subscript', head.op1.symbol, index.json]);
+  if (!isSymbol(name)) return undefined;
+  const list: MathJsonExpression =
+    args.length === 0
+      ? ['Delimiter']
+      : args.length === 1
+        ? ['Delimiter', args[0].json]
+        : ['Delimiter', ['Sequence', ...args.map((x) => x.json)], "'(,)'"];
+  const term = engine.box(['InvisibleOperator', name.symbol, list]);
+  return term.operator === name.symbol ? undefined : term;
 }
 
 /**
@@ -7050,7 +7098,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // declared parameter says so, because the boxing validation seam
       // checks a canonical-handler head against its declaration. The
       // arguments are `any` as well: a `Nothing` argument is bound like any
-      // other.
+      // other. One callee is read as the name of a term, not as a value: a
+      // subscript on the index of a sum (`Apply(Subscript(w, k), 4)` in the
+      // body of `Sum(…, Limits(k, 1, 2))`, the form of `w_k(4)`) is, in each
+      // term, the juxtaposition `w_1(4)`: a call when `w_1` is a function or
+      // has no definition, a product when it has a value (`subscriptedTerm()`).
       signature: '(name:any, arguments:any*) -> unknown',
       examples: ['Apply(Sqrt, 16)'],
       // An ANONYMOUS application instantiates its callee's `where` clause here
@@ -7135,6 +7187,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // asynchronous handler awaits them, so that an operator in the body
       // that has only an `evaluateAsync` handler is evaluated.
       evaluate: (ops, { numericApproximation, engine, expression }) => {
+        const term = subscriptedTerm(engine, expression, ops.slice(1));
+        if (term !== undefined) return term.evaluate({ numericApproximation });
         const before = applyBeforeApplication(
           engine,
           ops,
@@ -7165,6 +7219,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const { numericApproximation, engine, expression } = options;
         const inContext = <T>(fn: () => T): T =>
           engine.withEvaluationContext(options, fn);
+        const term = subscriptedTerm(engine, expression, ops.slice(1));
+        if (term !== undefined)
+          return term.evaluateAsync(awaitedOperandOptions(options));
         const before = applyBeforeApplication(
           engine,
           ops,

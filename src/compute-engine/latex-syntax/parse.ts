@@ -132,6 +132,47 @@ function mentionsIndex(
   return false;
 }
 
+/** Does the symbol `name` occur in `expr` as a value, not as the head of a
+ * call? A call head is not a value: `f_1(f_1(x))` is a call of a call, as
+ * the canonical form reads it, not the product `f_1·f_1(x)`. The head is
+ * the operator (`["f_1", "x"]`), or a symbol that an argument list follows
+ * in a juxtaposition, unless that group holds the name as a value: then the
+ * juxtaposition is a product, and the symbol a factor (`x_1(x_1+1)`). */
+function mentionsName(expr: MathJsonExpression, name: string): boolean {
+  if (symbol(expr) === name) return true;
+  const fn = functionElements(expr);
+  if (fn === null) return false;
+  if (fn[0] !== 'InvisibleOperator')
+    return fn.slice(1).some((x) => mentionsName(x, name));
+  for (let i = 1; i < fn.length; i++) {
+    const next = fn[i + 1];
+    if (symbol(fn[i]) === name && next !== undefined && isArgumentList(next))
+      continue;
+    if (mentionsName(fn[i], name)) return true;
+  }
+  return false;
+}
+
+/** Is `expr` the argument list of a call, a group in parentheses? A group
+ * in square brackets (`v[1, 2]`) is an index, not an argument list. A power
+ * or a factorial of a group (`(x-1)^k`) is not an argument list either: in
+ * the body of a sum, `a_k(x-1)^k` is the term `a_k·(x-1)^k` of a power
+ * series. */
+function isArgumentList(expr: MathJsonExpression): boolean {
+  if (operator(expr) !== 'Delimiter') return false;
+  const fence = stringValue(operand(expr, 2));
+  return fence === null || !fence.startsWith('[');
+}
+
+/** Is the symbol `name`, followed by the argument list `list`, a factor of
+ * a product and not the head of a call? It is when the one argument holds
+ * the name as a value (`x_1(x_1-1)`), the rule of
+ * `canonicalInvisibleOperator()` for a head with no definition. No argument
+ * and several arguments make a call (`f_1()`, `f_1(f_1, x)`). */
+function isFactorHead(list: MathJsonExpression, name: string): boolean {
+  return getSequence(list)?.length === 1 && mentionsName(list, name);
+}
+
 /** The binders that the parser makes, and that bind the names after their
  * first operand: the index of `Sum` and `Product`, the variable of
  * `Integrate` and `D`, the parameters of `Function` (which also holds the
@@ -4371,9 +4412,60 @@ export class _Parser implements Parser {
         return decorated?.latex !== undefined
           ? { latex: decorated.latex, sym: name }
           : name;
+      // A call that `_subscriptBoundIndexes()` made from a joined name that
+      // is this name is written again as it was parsed: in
+      // `\sum_{a_k=1}^{2}\sum_{k=1}^{2} a_k(3)`, `a_k(3)` is the product of
+      // the index `a_k` with `3`, not a call of the index.
+      const call = this._subscriptCalls.get(fn);
+      if (call !== undefined && names.has(call.name)) {
+        const args = fn.slice(2);
+        return visit(
+          call.form === 'call'
+            ? [call.name, ...args]
+            : [
+                'InvisibleOperator',
+                call.name,
+                args.length === 0
+                  ? ['Delimiter']
+                  : args.length === 1
+                    ? ['Delimiter', args[0]]
+                    : ['Delimiter', ['Sequence', ...args], "'(,)'"],
+              ]
+        );
+      }
+      // The candidate of a `resolveApplication` hook keeps the name too.
+      if (this._isApplicationCandidate(e))
+        this._applicationPolicy?.dropSubscriptHead(e, (head) => {
+          const headFn = functionElements(head);
+          const headName =
+            headFn === null ? undefined : this._subscriptAtNames.get(headFn);
+          return headName !== undefined && names.has(headName);
+        });
       return this._rebuiltWithOperands(e, fn, visit);
     };
     return visit(expr);
+  }
+
+  // The calls that `_subscriptBoundIndexes()` made from a joined name
+  // (`Apply(Subscript(f, k), x)` from `f_k(x)`), keyed by the elements of the
+  // call, with the joined name and the form that the parser wrote: a
+  // juxtaposition with an argument list (`f_k(x)`), or a call with the name
+  // as its operator (`["f_k", "x"]`). An outer binder whose index is the
+  // joined name writes that form again, with the current arguments of the
+  // call (`rebindSubscripts()`).
+  private _subscriptCalls = new WeakMap<
+    object,
+    { name: string; form: 'juxtaposition' | 'call' }
+  >();
+
+  private _recordSubscriptCall(
+    call: MathJsonExpression,
+    name: string,
+    form: 'juxtaposition' | 'call'
+  ): MathJsonExpression {
+    const fn = functionElements(call);
+    if (fn !== null) this._subscriptCalls.set(fn, { name, form });
+    return call;
   }
 
   _subscriptBoundIndexes(
@@ -4396,26 +4488,51 @@ export class _Parser implements Parser {
             inner.length === 0
               ? visitIn(kept)
               : visitIn(new Set([...kept, ...inner]));
-          // The operator is a name, not a term. So is a symbol in a
-          // juxtaposition that a parenthesized group follows: `f_k(x)` is
-          // `InvisibleOperator(f_k, Delimiter(x))`, and `c_k\phi_k(x)` is
-          // `InvisibleOperator(c_k, phi_k, Delimiter(x))`. The canonical form
-          // reads such a symbol as the head of a call, and a `Subscript`
-          // there would make the product `f_1·x`. Only a symbol can be the
-          // head of a call: any other operand (`(x_i-1)` in
-          // `(x_i-1)(y_i-2)`) is visited. The head of an application
-          // candidate (`a_k(x)`, decided later by the `resolveApplication`
-          // hook) stays too: the hook reads the written name.
-          const isCandidate = this._isApplicationCandidate(e);
-          const isJuxtaposition = fn[0] === 'InvisibleOperator';
-          const keepsOperand = (i: number): boolean =>
-            i === 0 ||
-            (symbol(fn[i]) !== null &&
-              ((i === 1 && isCandidate) ||
-                (isJuxtaposition &&
-                  operator(fn[i + 1] ?? null) === 'Delimiter')));
+          // The head of an application candidate (`a_k(x)` with a
+          // `resolveApplication` hook) stays the written name, because the
+          // hook reads that name. The candidate records the subscripted
+          // head, and `ApplicationPolicy.finish()` writes it in the call or
+          // in the product that the hook decides.
+          if (this._isApplicationCandidate(e)) {
+            const out = this._rebuiltWithOperands(e, fn, (x, i) =>
+              i <= 1 ? x : visit(x)
+            );
+            const name = symbol(fn[1]);
+            const head =
+              name === null || kept.has(name)
+                ? null
+                : subscriptOfJoinedName(name);
+            if (head !== null && fn[2] !== undefined)
+              this._applicationPolicy?.setSubscriptHead(
+                out,
+                head,
+                isFactorHead(fn[2], name!)
+              );
+            return out;
+          }
+          if (fn[0] === 'InvisibleOperator')
+            return this._rebuilt(e, fn, juxtapositionOperands(fn, kept, visit));
+          // The operator is a name, not a term. A joined name over an index
+          // is the head of a call: the parser writes the call `f_k(x)` as
+          // `["f_k", "x"]` when the engine inferred earlier that `f_k` is a
+          // function, and each term calls its own function there too.
+          const name = symbol(fn[0]);
+          const head =
+            name === null || kept.has(name)
+              ? null
+              : subscriptOfJoinedName(name);
+          if (head !== null)
+            return this._recordSubscriptCall(
+              this._rebuilt(e, fn, [
+                'Apply',
+                head,
+                ...fn.slice(1).map((x) => visit(x)),
+              ]),
+              name!,
+              'call'
+            );
           return this._rebuiltWithOperands(e, fn, (x, i) =>
-            keepsOperand(i) ? x : visit(x)
+            i === 0 ? x : visit(x)
           );
         }
         const name = symbol(e);
@@ -4446,6 +4563,51 @@ export class _Parser implements Parser {
       }
       return null;
     };
+    // The elements of a juxtaposition `fn`, with its operands visited. A
+    // symbol that an argument list follows is the head of a call, not a
+    // term: `f_k(x)` is `InvisibleOperator(f_k, Delimiter(x))`, and
+    // `c_k\phi_k(x)` is `InvisibleOperator(c_k, phi_k, Delimiter(x))`. A
+    // `Subscript` head there would make the product `f_1·x`, so a joined
+    // name over an index gives the call `Apply(Subscript(f, k), x)`, and
+    // each term of the sum calls its own function (`f_1(x) + f_2(x)`). The
+    // reading is the one that the canonical form gives to the joined name
+    // of one term (`f_1(x)`, an undeclared head): a call. When the one
+    // argument holds the head, the juxtaposition is a product, as
+    // `x_1(x_1-1)` is: the head is then `Subscript(x, i)`, a factor. Several
+    // arguments are always a call (`f_1(f_1, x)`). The evaluation of the
+    // call reads each term again with the definition of its name
+    // (`subscriptedTerm()` in `library/core.ts`): `w_1(4)` is a product
+    // when `w_1` has a value. A name that stays a name (an index, a name of
+    // an inner binder, a declared name) stays the head.
+    const juxtapositionOperands = (
+      fn: MathJsonExpression[],
+      kept: ReadonlySet<string>,
+      visit: (x: MathJsonExpression) => MathJsonExpression
+    ): MathJsonExpression[] => {
+      const ops: MathJsonExpression[] = [fn[0]];
+      for (let i = 1; i < fn.length; i++) {
+        const name = symbol(fn[i]);
+        const next = fn[i + 1];
+        if (name === null || next === undefined || !isArgumentList(next)) {
+          ops.push(visit(fn[i]));
+          continue;
+        }
+        const head = kept.has(name) ? null : subscriptOfJoinedName(name);
+        if (head === null) ops.push(fn[i]);
+        else if (isFactorHead(next, name)) ops.push(head);
+        else {
+          ops.push(
+            this._recordSubscriptCall(
+              ['Apply', head, ...(getSequence(visit(next)) ?? [])],
+              name,
+              'juxtaposition'
+            )
+          );
+          i += 1;
+        }
+      }
+      return ops;
+    };
     return visitIn(names)(expr);
   }
 
@@ -4470,13 +4632,24 @@ export class _Parser implements Parser {
     fn: MathJsonExpression[],
     visit: (x: MathJsonExpression, i: number) => MathJsonExpression
   ): MathJsonExpression {
-    let changed = false;
-    const ops = fn.map((x, i) => {
-      const y = visit(x, i);
-      if (y !== x) changed = true;
-      return y;
-    });
-    if (!changed) return e;
+    return this._rebuilt(
+      e,
+      fn,
+      fn.map((x, i) => visit(x, i))
+    );
+  }
+
+  /**
+   * The expression `e`, an application with the elements `fn`, with the
+   * elements `ops` instead, and the bookkeeping of `_rebuiltWithOperands()`.
+   * It is `e` itself when `ops` holds the same elements as `fn`.
+   */
+  private _rebuilt(
+    e: MathJsonExpression,
+    fn: MathJsonExpression[],
+    ops: MathJsonExpression[]
+  ): MathJsonExpression {
+    if (ops.length === fn.length && ops.every((x, i) => x === fn[i])) return e;
     const decorated = Array.isArray(e) ? null : (e as MathJsonFunctionObject);
     const copy = ops as [MathJsonSymbol, ...MathJsonExpression[]];
     const out: MathJsonExpression =
@@ -4484,6 +4657,8 @@ export class _Parser implements Parser {
     this._applicationCopied(e as object, out);
     const atName = this._subscriptAtNames.get(fn);
     if (atName !== undefined) this._subscriptAtNames.set(copy, atName);
+    const call = this._subscriptCalls.get(fn);
+    if (call !== undefined) this._subscriptCalls.set(copy, call);
     if (this._restrictions.has(fn)) this._restrictions.add(copy);
     if (continuationRanges.has(fn)) continuationRanges.add(copy);
     if (continuationRanges.has(e as object))
@@ -4544,6 +4719,8 @@ export class _Parser implements Parser {
       this._applicationCopied(e as object, out);
       const atName = this._subscriptAtNames.get(fn);
       if (atName !== undefined) this._subscriptAtNames.set(copy, atName);
+      const call = this._subscriptCalls.get(fn);
+      if (call !== undefined) this._subscriptCalls.set(copy, call);
       if (continuationRanges.has(fn)) continuationRanges.add(copy);
       if (continuationRanges.has(e as object))
         continuationRanges.add(out as object);

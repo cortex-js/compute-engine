@@ -2273,16 +2273,16 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         ]);
       }
 
-      // If no argument, or the body is a single symbol, display as a regular function
+      // A symbol head is displayed as a regular function
       const rhs = operand(expr, 2); // The first argument
-      if (typeof lhs === 'string' || !rhs) {
+      if (typeof lhs === 'string') {
         // e.g. "Apply(f, x)" -> "f(x)": the operands of `Apply` — head
         // followed by its arguments — are exactly the application expression
         const fn = operands(expr) as unknown as MathJsonExpression;
         return serializer.serializeAtDepth(fn, serializer.depth);
       }
 
-      if (nops(expr) === 2) {
+      if (rhs !== null && nops(expr) === 2) {
         // If there's a single argument, we can use the pipeline operator
         // (i.e. `\rhd` `|>`). `\lhd` has precedence 20, below every other
         // operator, so an `Apply` nested in another expression is written in
@@ -2303,6 +2303,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           : latex;
       }
 
+      // Another head with no argument or with several arguments:
+      // `\operatorname{apply}(f_{(k)}, x, y)` for
+      // `Apply(Subscript(f, k), x, y)`, which the parser reads back as the
+      // same `Apply`.
       const style = serializer.options.applyFunctionStyle(
         expr,
         serializer.level
@@ -2310,9 +2314,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       return joinLatex([
         '\\operatorname{apply}',
         serializer.wrapString(
-          serializer.serialize(h) +
-            ', ' +
-            serializer.serialize(['List', ...operands(expr)]),
+          operands(expr)
+            .map((x) => serializer.serialize(x))
+            .join(', '),
           style
         ),
       ]);

@@ -410,8 +410,27 @@
   of the name: a subscript outside a binder (`a_k` alone is the symbol
   `a_k`), a subscript on a variable that is not an integer index (the
   variable of `D` or `Integrate`), a joined name that the host declared or
-  assigned (after `ce.assign("a_k", 5)`, the sum is `15`), and the name of a
-  function in a call (`\sum_{k=1}^{2} f_k(x)` is still `2f_k(x)`).
+  assigned (after `ce.assign("a_k", 5)`, the sum is `15`).
+
+- **A function subscripted by the index of a sum or a product is a function
+  for each term.** `\sum_{k=1}^{2} f_k(x)` evaluated to `2f_k(x)`; it now
+  evaluates to `f_1(x) + f_2(x)`, and `\sum_{k=1}^{3} c_k\phi_k(x)` to
+  `c_1\phi_1(x) + c_2\phi_2(x) + c_3\phi_3(x)`. The canonical term is
+  `["Apply", ["Subscript", "f", ["Delimiter", "k"]], "x"]`. Each term reads
+  as the term written alone: `\sum_{i=1}^{2} x_i(x_i-1)` is
+  `x_1(x_1-1) + x_2(x_2-1)`, a sum of products, and after
+  `ce.assign("w_1", 2)` the term `w_1(4)` is the product `8`. A power after
+  the group is a power series: `\sum_{k=0}^{3} a_k(x-1)^k` is
+  `a_0 + a_1(x-1) + a_2(x-1)^2 + a_3(x-1)^3`, as before. The MathJSON form
+  follows the same rule: with `w_1 = 2` and `w_2 = 3`,
+  `["Sum", ["Apply", ["Subscript", "w", "i"], 4], ["Limits", "i", 1, 2]]` is
+  `20`; it was `5`, because `Apply` read the number `2` as a constant
+  function. With a `resolveApplication` hook, the hook still receives the
+  written name (`a_k`). The LaTeX of an `Apply` whose function is not a name, with no
+  argument or with several arguments, is now `\operatorname{apply}(f_{(k)},
+  x, y)`, which parses back to the same `Apply`; it was
+  `\operatorname{apply}(\mathrm{Subscript}, [f_{(k)}, x, y])`, and an empty
+  string with no argument.
 
 - **The `unknowns` of a block no longer list the names that a destructuring
   assignment of the block defines.**

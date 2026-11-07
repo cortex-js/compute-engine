@@ -149,17 +149,211 @@ describe('a joined name that stays a name in a sum', () => {
     expect(evaluated('\\sum_{k=1}^{2} (a_k \\mapsto a_k^2)(3)')).toEqual(18);
   });
 
-  test('the head of a call', () => {
-    // `f_k(x)` stays a call of `f_k`, not the product `f_k·x`.
+  test('the head of a call that the host declared', () => {
     const ce = new ComputeEngine();
-    const sum = ce.parse('\\sum_{k=1}^{2} f_k(x)');
-    expect(sum.op1.operator).toBe('f_k');
-    // Also after another factor of a juxtaposition.
-    const basis = ce.parse('\\sum_{k=1}^{2} c_k \\phi_k(x)').evaluate();
-    expect(basis.json).toEqual([
+    ce.declare('f_k', 'function');
+    expect(evaluated('\\sum_{k=1}^{2} f_k(x)', ce)).toEqual([
+      'Multiply',
+      2,
+      ['f_k', 'x'],
+    ]);
+  });
+});
+
+// A subscripted function in the body of a sum (`f_k(x)`) is one function for
+// each value of the index, as the call `f_1(x)` of one term is.
+describe('a call of a function subscripted by the index of a sum', () => {
+  test('each term calls its own function', () => {
+    expect(evaluated('\\sum_{k=1}^{2} f_k(x)')).toEqual([
       'Add',
-      ['Multiply', 'c_1', ['phi_k', 'x']],
-      ['Multiply', 'c_2', ['phi_k', 'x']],
+      ['f_2', 'x'],
+      ['f_1', 'x'],
+    ]);
+    expect(evaluated('\\prod_{k=1}^{2} f_k(x)')).toEqual([
+      'Multiply',
+      ['f_2', 'x'],
+      ['f_1', 'x'],
+    ]);
+    expect(evaluated('\\sum_{k=1}^{3} c_k \\phi_k(x)')).toEqual([
+      'Add',
+      ['Multiply', 'c_1', ['phi_1', 'x']],
+      ['Multiply', 'c_2', ['phi_2', 'x']],
+      ['Multiply', 'c_3', ['phi_3', 'x']],
+    ]);
+    expect(evaluated('\\sum_{k=1}^{2} 3f_k(x)g(x)')).toEqual([
+      'Add',
+      ['Multiply', 3, ['g', 'x'], ['f_2', 'x']],
+      ['Multiply', 3, ['g', 'x'], ['f_1', 'x']],
+    ]);
+  });
+
+  test('a call with no argument or with several arguments', () => {
+    expect(evaluated('\\sum_{k=1}^{2} f_k()')).toEqual([
+      'Add',
+      ['f_2'],
+      ['f_1'],
+    ]);
+    expect(evaluated('\\sum_{k=1}^{2} f_k(x, y)')).toEqual([
+      'Add',
+      ['f_2', 'x', 'y'],
+      ['f_1', 'x', 'y'],
+    ]);
+  });
+
+  test('a power of a group after the coefficient is a term of a power series', () => {
+    expect(evaluated('\\sum_{k=0}^{2} a_k(x-1)^k')).toEqual([
+      'Add',
+      ['Multiply', 'a_2', ['Power', ['Add', 'x', -1], 2]],
+      ['Multiply', 'a_1', ['Add', 'x', -1]],
+      'a_0',
+    ]);
+    const ce = new ComputeEngine();
+    [1, 2, 3, 4].forEach((v, k) => ce.assign(`a_${k}`, v));
+    // 1 + 2·2 + 3·4 + 4·8
+    expect(
+      ce.parse('\\sum_{k=0}^{3} a_k(x-1)^k').subs({ x: 3 }).evaluate().json
+    ).toEqual(49);
+    // With a hook that does not decide, as without a hook.
+    expect(
+      new ComputeEngine()
+        .parse('\\sum_{k=0}^{2} a_k(x-1)^k', {
+          resolveApplication: () => undefined,
+        })
+        .evaluate().json
+    ).toEqual(evaluated('\\sum_{k=0}^{2} a_k(x-1)^k'));
+  });
+
+  test('a group that holds the head is a product', () => {
+    // As `x_1(x_1-1)` is the product `x_1·(x_1-1)`.
+    expect(evaluated('\\sum_{i=1}^{2} x_i(x_i-1)')).toEqual([
+      'Add',
+      ['Multiply', 'x_1', ['Add', 'x_1', -1]],
+      ['Multiply', 'x_2', ['Add', 'x_2', -1]],
+    ]);
+    // Several arguments are a call, as `f_1(f_1, x)` is.
+    expect(evaluated('\\sum_{k=1}^{2} f_k(f_k, x)')).toEqual([
+      'Add',
+      ['f_1', 'f_1', 'x'],
+      ['f_2', 'f_2', 'x'],
+    ]);
+  });
+
+  test('the MathJSON form reads each term as the LaTeX form does', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w_1', 2);
+    ce.assign('w_2', 3);
+    // 2·4 + 3·4
+    expect(
+      boxed(
+        ['Sum', ['Apply', ['Subscript', 'w', 'i'], 4], ['Limits', 'i', 1, 2]],
+        ce
+      )
+    ).toEqual(20);
+  });
+
+  test('a term whose name has a value or a type is a product, as the term alone is', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w_1', 2);
+    ce.assign('w_2', 3);
+    ce.assign('x_1', 5);
+    ce.assign('x_2', 7);
+    // 2·4 + 3·6, as `w_1(x_1-1) + w_2(x_2-1)` gives.
+    expect(evaluated('\\sum_{i=1}^{2} w_i(x_i-1)', ce)).toEqual(26);
+    expect(evaluated('w_1(x_1-1)+w_2(x_2-1)', ce)).toEqual(26);
+    const typed = new ComputeEngine();
+    typed.declare('v_1', 'real');
+    expect(evaluated('\\sum_{i=1}^{2} v_i(x-1)', typed)).toEqual([
+      'Add',
+      ['Multiply', 'v_1', ['Add', 'x', -1]],
+      ['v_2', ['Add', 'x', -1]],
+    ]);
+  });
+
+  test('a call in the arguments is not a reference to the head', () => {
+    // As `f_1(f_1(x))` is a call of a call.
+    expect(evaluated('\\sum_{k=1}^{2} f_k(f_k(x))')).toEqual([
+      'Add',
+      ['f_2', ['f_2', 'x']],
+      ['f_1', ['f_1', 'x']],
+    ]);
+  });
+
+  test('an outer index that is the joined name is a factor', () => {
+    // `a_k` is the index of the outer sum: `a_k(3)` is `3a_k`.
+    expect(evaluated('\\sum_{a_k=1}^{2}\\sum_{k=1}^{2} a_k(3)')).toEqual(18);
+    // A binder between the two keeps its own reading of the arguments.
+    expect(
+      evaluated('\\sum_{a_k=1}^{2}\\sum_{j=1}^{2}\\sum_{k=1}^{2} a_k(b_j)')
+    ).toEqual([
+      'Add',
+      ['Multiply', 6, 'b_1'],
+      ['Multiply', 6, 'b_2'],
+    ]);
+    // With a hook that does not decide, as without a hook.
+    expect(
+      new ComputeEngine()
+        .parse('\\sum_{a_k=1}^{2}\\sum_{k=1}^{2} a_k(3)', {
+          resolveApplication: () => undefined,
+        })
+        .evaluate().json
+    ).toEqual(18);
+  });
+
+  test('a name that the engine inferred as a function is not a declaration', () => {
+    const ce = new ComputeEngine();
+    ce.parse('f_k(x)').evaluate();
+    expect(evaluated('\\sum_{k=1}^{2} f_k(x)', ce)).toEqual([
+      'Add',
+      ['f_2', 'x'],
+      ['f_1', 'x'],
+    ]);
+  });
+
+  test('the LaTeX of the sum reads back with the same value', () => {
+    expect(new ComputeEngine().parse('\\sum_{k=1}^{2} f_k(x, y)').latex).toBe(
+      '\\sum_{k=1}^2\\operatorname{apply}(f_{(k)}, x, y)'
+    );
+    for (const latex of [
+      '\\sum_{k=1}^{2} f_k(x)',
+      '\\sum_{k=1}^{2} f_k()',
+      '\\sum_{k=1}^{2} f_k(x, y)',
+    ]) {
+      const ce = new ComputeEngine();
+      const sum = ce.parse(latex);
+      expect(ce.parse(sum.latex).evaluate().json).toEqual(
+        sum.evaluate().json
+      );
+    }
+  });
+
+  test('a resolveApplication hook reads the written name', () => {
+    const heads: string[] = [];
+    const parse = (decision: 'apply' | 'multiply' | undefined) =>
+      new ComputeEngine()
+        .parse('\\sum_{k=1}^{2} a_k(x)', {
+          resolveApplication: ({ head }) => {
+            heads.push(head);
+            return decision;
+          },
+        })
+        .evaluate().json;
+    expect(parse('multiply')).toEqual([
+      'Add',
+      ['Multiply', 'a_1', 'x'],
+      ['Multiply', 'a_2', 'x'],
+    ]);
+    expect(parse('apply')).toEqual(['Add', ['a_2', 'x'], ['a_1', 'x']]);
+    // With no decision, the reading is the one without a hook.
+    expect(parse(undefined)).toEqual(['Add', ['a_2', 'x'], ['a_1', 'x']]);
+    expect(heads).toEqual(['a_k', 'a_k', 'a_k']);
+  });
+
+  test('the index of an inner sum before a group stays one name', () => {
+    // `f_k` is the index of the inner sum: `f_k(x)` is the product `f_k·x`.
+    expect(evaluated('\\sum_{k=1}^{2}\\sum_{f_k=1}^{2} f_k(x)')).toEqual([
+      'Multiply',
+      6,
+      'x',
     ]);
   });
 });
