@@ -67,7 +67,10 @@
   `\int_{0}^{2y}\int_{0}^{1}\!xy\,dy\,dx`. The plain-text form
   (`toString()`) writes the differentials in the same order, with the
   variables of the limits: that integral is now
-  `int_(0)^(2y)_(0)^(1)(x * y dy  dx)`.
+  `int_(0)^(2y)_(0)^(1)(x * y dy  dx)`. An integral with no limit still
+  writes one differential for each parameter of its integrand:
+  `["Integrate", ["Square", "x"], ["Tuple", "x", 0, 1, 5]]`, whose limit with
+  four elements is not recognized, is `int(x^2 dx)`.
 
 ### Resolved Issues
 

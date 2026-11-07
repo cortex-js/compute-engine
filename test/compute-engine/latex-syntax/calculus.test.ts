@@ -452,6 +452,21 @@ describe('ORDER OF THE LIMITS OF A MULTIPLE INTEGRAL', () => {
     expect(ce.parse(expr.latex).evaluate().toString()).toBe('1/2');
   });
 
+  test('the plain-text form of an integral with no limit names the parameters of its integrand', () => {
+    // A limit that the canonical form does not recognize (four elements) is
+    // dropped. The plain-text form still writes a differential for each
+    // parameter, innermost (the last parameter) first, as it does for limits
+    // without a variable.
+    expect(
+      ce.box(['Integrate', ['Square', 'x'], ['Tuple', 'x', 0, 1, 5]]).toString()
+    ).toBe('int(x^2 dx)');
+    expect(
+      ce
+        .box(['Integrate', ['Function', ['Multiply', 'x', 'y'], 'x', 'y']])
+        .toString()
+    ).toBe('int(x * y dy  dx)');
+  });
+
   test('a flat integral with an outer bound that uses the inner variable', () => {
     const expr = ce.box([
       'Integrate',

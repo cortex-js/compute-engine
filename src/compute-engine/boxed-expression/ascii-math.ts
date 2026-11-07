@@ -918,22 +918,27 @@ function bigOp(
     // A limit can also be a bare variable, in a non-canonical integral
     // (`Integrate(f, y, x)`). A limit without a variable
     // (`Limits(Nothing, 0, 1)`, `Tuple(0, 1)`) uses the parameter at its
-    // position, as the LaTeX serializer does. An integrand that is not a
-    // `Function` gets no differentials.
+    // position, as the LaTeX serializer does. An integral with no limit (the
+    // canonical form drops a limit that it does not recognize, such as the
+    // four elements of `Tuple(x, 0, 1, 5)`) gets one differential for each
+    // parameter of its integrand, so `int(x^2 dx)` still names its
+    // variable. An integrand that is not a `Function` gets no differentials.
     const variables =
       args.length === 0
         ? []
-        : limits.map((limit, i) => {
-            if (isSymbol(limit) && limit.symbol !== 'Nothing') return limit;
-            if (
-              isFunction(limit) &&
-              limit.nops >= 2 &&
-              isSymbol(limit.op1) &&
-              limit.op1.symbol !== 'Nothing'
-            )
-              return limit.op1;
-            return args[i];
-          });
+        : limits.length === 0
+          ? [...args]
+          : limits.map((limit, i) => {
+              if (isSymbol(limit) && limit.symbol !== 'Nothing') return limit;
+              if (
+                isFunction(limit) &&
+                limit.nops >= 2 &&
+                isSymbol(limit.op1) &&
+                limit.op1.symbol !== 'Nothing'
+              )
+                return limit.op1;
+              return args[i];
+            });
     result += wrap(
       body +
         variables
