@@ -456,6 +456,13 @@ export class Parser {
    * `#filename`/`#date`/`#time`) are always available. */
   private readonly allowHostPragmas: boolean;
 
+  /** Whether a name is a function of a library of the engine, so that a math
+   * style definition `name(x) := …` would replace it for every later
+   * computation on the engine (`parseMathFunctionDef()`). The caller that
+   * runs the program on an engine gives it. Absent, no name is a library
+   * function. */
+  private readonly isLibraryFunction?: (name: string) => boolean;
+
   private tokens: Token[];
   private pos = 0;
   /** Current recursive `parseExpression` depth, bounded by
@@ -562,6 +569,17 @@ export class Parser {
    * Depth 0 permits redeclaration silently: a top-level redeclaration is the
    * legitimate statement-replace flow (re-running a notebook cell). */
   private blockDepth = 0;
+
+  /** The names that a `function` statement defined earlier in each enclosing
+   * block, the program first and the innermost block last (`parseBlock()`
+   * pushes and pops a set). A math-style definition of such a name defines a
+   * function of the program, not the library function of the same name, so
+   * `function Sin(x) { 5 }` followed by `Sin(0) := 7` adds a clause, and the
+   * same definition in a nested block defines a local function
+   * (`parseMathFunctionDef()`). A `\(…)` interpolation starts with a copy of
+   * the names of the blocks around it. A `function` statement later in the block does
+   * not count: the refusal is then reported, and no value is wrong. */
+  private functionNameScopes: Set<string>[];
 
   /**
    * Lexically enclosing loop bodies (`while`/`for`) — the `break`/`continue`
@@ -709,6 +727,10 @@ export class Parser {
       protocolNames?: readonly string[];
       sumVariants?: Readonly<Record<string, string>>;
       deadline?: DeadlineFrame;
+      isLibraryFunction?: (name: string) => boolean;
+      /** The names that `function` statements of the enclosing parser defined
+       * in the blocks around a `\(…)` interpolation (`functionNameScopes`). */
+      functionNames?: ReadonlySet<string>;
       /** Expression-nesting depth already consumed by an enclosing parser
        * whose stack this one runs on (see `expressionNesting`). */
       nestingDepth?: number;
@@ -720,6 +742,8 @@ export class Parser {
     this.parseLatex = options?.parseLatex;
     this.allowHostPragmas = options?.allowHostPragmas ?? false;
     this.deadline = options?.deadline;
+    this.isLibraryFunction = options?.isLibraryFunction;
+    this.functionNameScopes = [new Set(options?.functionNames)];
     this.expressionNesting = options?.nestingDepth ?? 0;
     this.knownTypeNames = new Set(options?.typeNames ?? []);
     this.protocolNames = new Set(options?.protocolNames ?? []);
@@ -1040,6 +1064,7 @@ export class Parser {
     // No type-name snapshot here: `type` statements are top-level only (a
     // block-local one is a hard error), so `knownTypeNames` only ever grows.
     this.blockDepth += 1;
+    this.functionNameScopes.push(new Set());
 
     const stmts: MathJsonExpression[] = [];
     for (;;) {
@@ -1096,6 +1121,7 @@ export class Parser {
     }
 
     this.blockDepth -= 1;
+    this.functionNameScopes.pop();
 
     return this.wrap(
       ['Block', ...stmts] as MathJsonExpression[],
@@ -4737,6 +4763,10 @@ export class Parser {
     // A function body is a `break`/`continue` BOUNDARY, not just a new block.
     const body = this.inLoopContext(0, () => this.parseBlock());
     const end = this.localEnd(body) ?? this.previousEnd();
+    // Recorded only now, when the statement gives a definition: a statement
+    // that does not parse (`function Sin x { 5 }`) defines nothing, so a later
+    // `Sin(x) := 5` is still the library function (`functionNameScopes`).
+    this.functionNameScopes.at(-1)?.add(name);
 
     const ascribedBody =
       ascription !== null
@@ -5393,9 +5423,15 @@ export class Parser {
    * is accepted everywhere `=` is, with the same meaning). An
    * effect specifier may precede the arrow (`f(x) random -> integer = …`) but
    * only WITH it: `f(x) random = 5` stays an expression. A lookahead only — it
-   * consumes nothing. */
+   * consumes nothing.
+   *
+   * The head `At` is not a definition: `At(xs, k) := 5` is an assignment to a
+   * list element, as `xs[k] := 5` is, and rebinds the list
+   * (`elementAssignment()`). As a definition it would replace the library
+   * function `At`, so that a later `[7, 8][2]` gives `5`. */
   private isMathFunctionDef(): boolean {
     if (this.current.type !== 'SYMBOL') return false;
+    if (this.current.text === 'At') return false;
     const paren = this.peek(1);
     if (paren.type !== 'OPEN_PAREN' || paren.precededByWhitespace) return false;
 
@@ -5615,6 +5651,24 @@ export class Parser {
       return null;
     }
     const end = this.outerEnd(rhs) ?? this.previousEnd();
+
+    // A definition whose name is a function of a library, `Sin(x) := 5`, would
+    // replace that function for every later computation on the engine: a later
+    // LaTeX `\sin(0)` would give `5`. It is the error
+    // `assignment-to-library-function`, as for the LaTeX `\sin(x) \coloneq 5`,
+    // and the statement is `Nothing`, which defines no function. The statement
+    // `function Sin(x) { … }` defines a function of that name on purpose, and
+    // a math-style definition after it is accepted (`functionNameScopes`): in
+    // its block it adds to that function, and in a nested block it defines a
+    // local function that hides it.
+    if (
+      this.isLibraryFunction?.(nameTok.text) === true &&
+      !this.functionNameScopes.some((names) => names.has(nameTok.text))
+    ) {
+      const start = holdTok?.start ?? nameTok.start;
+      this.error(['assignment-to-library-function', nameTok.text], start, end);
+      return this.wrap({ sym: 'Nothing' }, start, end);
+    }
 
     const ascribedBody =
       ascription !== null
@@ -8842,6 +8896,12 @@ export class Parser {
       parseLatex: this.parseLatex,
       allowHostPragmas: this.allowHostPragmas,
       deadline: this.deadline,
+      isLibraryFunction: this.isLibraryFunction,
+      // A copy: a `function` statement in the interpolation does not count
+      // after it.
+      functionNames: new Set(
+        this.functionNameScopes.flatMap((names) => [...names])
+      ),
       // The sub-parser recurses on THIS parser's JavaScript stack, so it
       // continues the enclosing expression descent rather than starting a
       // fresh one: seeding it with the current depth makes nested `\(…)`
@@ -8870,6 +8930,7 @@ export class Parser {
       parseLatex: this.parseLatex,
       allowHostPragmas: this.allowHostPragmas,
       deadline: this.deadline,
+      isLibraryFunction: this.isLibraryFunction,
       nestingDepth: this.expressionNesting,
     });
     const value = sub.parseProgram();

@@ -75,6 +75,13 @@ export function analyzeErrors(
  * re-runs: `type X = red | green` is the sugar the first time (no arm names a
  * type), and the second time only because `red` and `green` are recognized as
  * X's own variants rather than as two unrelated known types.
+ *
+ * `options.isLibraryFunction` says whether a name is a function of a library
+ * of the engine. A definition in math style with such a name (`Sin(x) := 5`)
+ * is then the error `assignment-to-library-function`, because it would
+ * replace the function for every later computation on the engine.
+ * `executeEpsil` passes the test of the engine. Without it, no name is a
+ * library function.
  */
 export function parseEpsil(
   source: string,
@@ -86,6 +93,7 @@ export function parseEpsil(
     protocolNames?: readonly string[];
     sumVariants?: Readonly<Record<string, string>>;
     deadline?: DeadlineFrame;
+    isLibraryFunction?: (name: string) => boolean;
   }
 ): [MathJsonExpression, ParsingDiagnostic[]] {
   const parser = new Parser(source, {
@@ -96,6 +104,7 @@ export function parseEpsil(
     protocolNames: options?.protocolNames,
     sumVariants: options?.sumVariants,
     deadline: options?.deadline,
+    isLibraryFunction: options?.isLibraryFunction,
   });
 
   const value: MathJsonExpression | null = parser.parseProgram({

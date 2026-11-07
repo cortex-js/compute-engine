@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **An Epsil definition in math style can no longer replace a function of the
+  library.** `Sin(x) := 5` or `Sin(x) = 5` replaced `Sin` for every later
+  computation on the engine, so that LaTeX `\sin(0)` gave `5`. It is now the
+  error `assignment-to-library-function`, as the LaTeX `\sin(x)\coloneq 5` is,
+  and it defines no function. One-letter names of the library are included:
+  `N(x) := x + 1` and `D(x) := 2x` now give the error. Use another name, or
+  write `function Sin(x) { 5 }` to replace the function on purpose. A
+  lowercase name (`sin(x) := 5`) is a name of the program and stays valid, and
+  so does a definition of a function that the host declared or that an earlier
+  `function` statement defined. `At(xs, k) := 5` now assigns to an element of
+  the list, as `xs[k] := 5` does: it replaced the function `At`, so that
+  `[7, 8][2]` gave `5`.
+
 ### Behavior Changes
 
 - **An assigned lazy collection that stays lazy no longer changes when a

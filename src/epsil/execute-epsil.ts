@@ -393,6 +393,9 @@ function* executeEpsilSteps(
       sumVariants: sumVariantNames(ce),
       // Parsing and lexing consume the same host budget as execution.
       deadline: ce._deadlineFrame,
+      // A definition `Sin(x) := 5` would replace the library function `Sin`
+      // on this engine, so the parse refuses it.
+      isLibraryFunction: (name) => ce._isLibraryFunction(name),
     });
     // The Epsil spellings of the library (`sin`, `pi`) become the library
     // names (`Sin`, `Pi`) here, before anything reads the tree — the static

@@ -4630,21 +4630,25 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
-   * Whether a LaTeX assignment to `id` would replace a function of a library:
-   * `a + b := 5` would change the value of every later `1 + 2`.
+   * Whether a LaTeX assignment to `id`, or an Epsil definition `id(x) := …`,
+   * would replace a function of a library: `a + b := 5` would change the value
+   * of every later `1 + 2`.
    *
    * A definition that the host made in place of the library function
    * (`ce.declare('D', 'function')`, `ce.declare('N', 'unknown')`, or
    * `ce.declare('Sin', { … })`) is not the library function, so a LaTeX
-   * assignment can define it.
+   * assignment can define it. So is a function that an earlier Epsil program
+   * defined with `function Sin(x) { … }`.
    *
    * A value whose type is not a function does not make the name the host's own.
    * After `N := 5` or `N := y`, a later `N(x) := x + 1` would replace the library
    * `N`, which `N(1/3)` calls after `N := 5`. Reading `[N, 1]` binds `N` to a
    * shadow with no value and no type, and calls of `N` still reach the library:
    * a parse must not change what a later assignment can do.
+   *
+   * @internal
    */
-  private _isLibraryFunction(id: MathJsonSymbol): boolean {
+  _isLibraryFunction(id: MathJsonSymbol): boolean {
     const def = this.lookupDefinition(id);
     if (def === undefined) return false;
     if (isOperatorDef(def)) return isLibraryDefinition(this, id, def);

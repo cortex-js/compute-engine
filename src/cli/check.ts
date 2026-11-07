@@ -42,6 +42,7 @@ export function parseSource(
     const [ast, diagnostics] = parseEpsil(source, url, {
       parseLatex,
       deadline: engine._deadlineFrame,
+      isLibraryFunction: (name) => engine._isLibraryFunction(name),
     });
     return { ast, diagnostics };
   } catch (error) {

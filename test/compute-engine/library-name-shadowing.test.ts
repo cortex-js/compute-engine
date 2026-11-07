@@ -87,7 +87,6 @@ describe('a top-level binding of a library constant is refused', () => {
 describe('a user function shadows a head that canonicalization folds', () => {
   test.each([
     ['function Square(x) { x + 100 }\nSquare(3)', '103'],
-    ['Square(x) = x + 100\nSquare(3)', '103'],
     ['function Sqrt(x) { x + 100 }\nSqrt(4)', '104'],
     ['function Negate(x) { x + 100 }\nNegate(3)', '103'],
     ['function Exp(x) { x + 100 }\nExp(1)', '101'],
@@ -96,6 +95,20 @@ describe('a user function shadows a head that canonicalization folds', () => {
     ['function Power(x, y) { 100 }\nPower(3, 4)', '100'],
   ])('%j', (source, value) => {
     expect(run(source)).toBe(value);
+  });
+
+  test('a math-style definition of a library head is refused', () => {
+    // `Square(x) = …` would replace `Square` for every later computation on
+    // the engine, so it is the parse error `assignment-to-library-function`;
+    // the `function` statement above is the way to shadow it.
+    const r = executeEpsil(
+      new ComputeEngine(),
+      'Square(x) = x + 100\nSquare(3)'
+    );
+    expect(r.value.toString()).toBe('9');
+    expect(r.diagnostics.map((d) => d.message)).toEqual([
+      ['assignment-to-library-function', 'Square'],
+    ]);
   });
 
   test('the library operator folds where nothing shadows it', () => {

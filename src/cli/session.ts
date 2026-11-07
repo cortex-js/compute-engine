@@ -124,7 +124,10 @@ export function makeEpsilSession(
 
     parse(source: string, url?: string): ParsingDiagnostic[] {
       try {
-        return parseEpsil(source, url, { parseLatex })[1];
+        return parseEpsil(source, url, {
+          parseLatex,
+          isLibraryFunction: (name) => engine._isLibraryFunction(name),
+        })[1];
       } catch {
         return [];
       }

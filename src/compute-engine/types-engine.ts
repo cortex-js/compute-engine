@@ -1192,6 +1192,14 @@ export interface IComputeEngine {
    */
   _deadlineFrame?: DeadlineFrame | undefined;
 
+  /** Whether a definition of `id` (a LaTeX assignment `\sin(x) \coloneq 5`, an
+   * Epsil definition `Sin(x) := 5`) would replace a function of a library of
+   * the engine for every later computation. A function that the host or an
+   * earlier program defined in its place is not a library function.
+   * @internal
+   */
+  _isLibraryFunction(id: MathJsonSymbol): boolean;
+
   /** The innermost active `WithRandomSeed` frame (see
    * `withRandomSeedFrame`), or `undefined` when random draws are live.
    * @internal

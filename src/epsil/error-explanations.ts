@@ -199,6 +199,12 @@ The error is found before the program runs. Move the declaration before the firs
 
   'first-assignment-in-branch': `The first assignment of a name is in a branch of an \`if\`, in a branch of a \`match\` or in the body of a loop. In \`if c { t = 1 }; t\`, the name \`t\` has no value when \`c\` is false. A first assignment declares a local only at the own level of a block that is not in a branch or a loop body. Declare the name with a value before the branch, \`let t = 0; if c { t = 1 }; t\`, or with a \`let\` in the branch when the name is a local of the branch only.`,
 
+  'assignment-to-library-function': `A definition in math style, \`Sin(x) := 5\` or \`Sin(x) = 5\`, has the name of a function of the library. At the top level of a program it would replace that function for every later computation on the engine: a later LaTeX \`\\sin(0)\` would give \`5\`. The statement is refused there and in a block or a function body too, and it defines no function.
+
+To define a function of your own, give it another name: \`mySin(x) := 5\`. A name with an initial lowercase letter, \`sin(x) := 5\`, is a name of the program: it hides the library function \`Sin\` only where the program writes \`sin\`. To replace the library function on purpose, write a \`function\` statement: \`function Sin(x) { 5 }\`. A math-style definition after that statement in the same block adds to that function: \`function Sin(x) { 5 }\` then \`Sin(0) := 7\`. In a block inside it, the definition is accepted too, and defines a local function that hides it.
+
+\`At(xs, k) := v\` is not a definition: it assigns to the element \`k\` of the list \`xs\`, as \`xs[k] := v\` does.`,
+
   'assignment-to-list-element': `An assignment to a list element, \`xs[i] = v\`, gives \`xs\` a new list with the element replaced, as \`xs = replaceAt(xs, i, v)\` does. This error is a write that cannot give a list, and the variable keeps its value.
 
 The target is a name with no value (\`ys[1] = 9\` with \`ys\` not declared). The position is a string (\`xs["a"] = 1\`): \`replaceAt\` takes only an integer position, and \`epsil check\` reports this before anything runs.

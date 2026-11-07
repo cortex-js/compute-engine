@@ -48,6 +48,7 @@ export function checkEpsil(
       protocolNames: Object.keys(ce._protocolRegistry),
       sumVariants: sumVariantNames(ce),
       deadline: ce._deadlineFrame,
+      isLibraryFunction: (name) => ce._isLibraryFunction(name),
     });
     ast = resolveLibraryNames(parsed, source, ce);
     diagnostics.push(...parseDiagnostics);

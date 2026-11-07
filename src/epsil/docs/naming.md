@@ -118,6 +118,15 @@ function body, `let Pi = 3` makes `Pi` the number `3` for the rest of the
 body, and `function Square(x) { x + 100 }` makes `Square(3)` call that
 function.
 
+A definition in math style with the capitalized name of a library function,
+`Sin(x) := 5` or `Sin(x) = 5`, is the error `assignment-to-library-function`,
+and it defines no function. At the top level it would replace `Sin` for every
+later computation on the engine, LaTeX `\sin(0)` included. Use another name,
+or write `function Sin(x) { 5 }` to replace the function on purpose. A
+lowercase name, `sin(x) := 5`, is a name of the program: it shadows `sin`
+only. `At(xs, k) := 5` is not a definition: it assigns to an element of the
+list, as `xs[k] := 5` does.
+
 At the top level of a program, a `let` or a `const` of a library constant
 that results carry by name (`Pi`, `ExponentialE`, `GoldenRatio`, `True`) is
 an error, as an assignment to it is. The engine writes a result built with
