@@ -438,12 +438,16 @@ describe('MULTIPLY', () => {
       )
     ).toMatchSnapshot());
 
+  // The decimal 1.1 is exact, so the product is 55/9·√2·π =
+  // 27.15095128874557150954… The value at the default precision has all of
+  // its 21 digits correct. At machine precision, `evaluate()` gives the
+  // nearest double and `N()` gives the next double up (1 ulp away).
   test(`Multiply: One inexact`, () =>
     expect(
       check(
         '1.1\\times 2\\times 5\\times\\frac{5}{7}\\times\\frac{7}{9}\\times\\sqrt{2}\\times\\pi'
       )
-    ).toMatchSnapshot()); // @fixme eval-big should be same or better than evaluate
+    ).toMatchSnapshot());
 
   // Regression: `x · ∞` used to collapse to `∞` regardless of the sign of `x`.
   // The sign of `∞ · (symbolic factor)` follows the factor's sign; an

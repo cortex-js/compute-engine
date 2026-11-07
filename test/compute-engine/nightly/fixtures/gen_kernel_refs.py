@@ -28,7 +28,12 @@ from mpmath import (
     lambertw, erf, erfc, erfinv, hyp2f1, hyp1f1, acos, cos, tan, power,
 )
 
-mp.dps = 60  # guard digits; store 55 significant
+# Work with many more digits than the 55 that are stored. Some cases lose
+# digits to cancellation. For Arccos(0.99999999999999999999), mpf(x) at 60
+# working digits has an absolute error near 1e-60, which is a relative error
+# near 1e-40 in 1 - x ≈ 1e-20, so the reference keeps only about 40 correct
+# digits. At 120 working digits every stored digit is correct.
+mp.dps = 120
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SIGDIGITS = 55

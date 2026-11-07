@@ -6,7 +6,7 @@ import * as path from 'path';
  * NIGHTLY — mpmath special-function kernel harness.
  *
  * Compares CE's numeric special-function values against high-precision mpmath
- * references (55 significant digits, generated once with mp.dps=60). The
+ * references (55 significant digits, generated once with mp.dps=120). The
  * references are a STATIC fixture (`fixtures/kernel-refs.json`); this suite does
  * NOT invoke python — regenerate the fixture with
  *   ./venv/bin/python3 test/compute-engine/nightly/fixtures/gen_kernel_refs.py
@@ -64,14 +64,6 @@ const OVERRIDES: Record<string, { ulp?: number; skip?: boolean; note: string }> 
     // Known open finding: ζ(−0.5) lands ~4.11 ulp from mpmath — explicitly
     // outside the acceptance set (FINDINGS-TRACKER "Known open findings").
     'zeta_m_-0.5': { ulp: 6, note: 'ζ(−0.5) ~4.11 ulp — known open finding' },
-    // NEW finding (reported, not silently passed): bignum Arccos(1−1e−20) loses
-    // ~8 significant digits to endpoint cancellation (~42 of 50 digits correct).
-    // Round-6 only guaranteed *machine*-precision cancellation-freedom for
-    // acos near 1; the bignum path is unclaimed. Skipped so it never greens.
-    acos_near1_b_p50: {
-      skip: true,
-      note: 'NEW: bignum Arccos near 1 loses ~8 digits (endpoint cancellation)',
-    },
   };
 
 // Exact ulp of the IEEE-754 double grid at x (spacing to the next double).

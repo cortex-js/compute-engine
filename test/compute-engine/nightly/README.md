@@ -60,7 +60,7 @@ it (only when adding/changing kernel cases) with the repo venv:
 ```
 
 Each fixture case is `{ id, head, args, kind, precision?, ref }`; `ref` is 55
-significant mpmath digits computed at `mp.dps = 60`. For `kind: "machine"` the
+significant mpmath digits computed at `mp.dps = 120`. For `kind: "machine"` the
 reference is evaluated at `mpf(double)` (so it lands on the same double the
 interpreter sees); for `kind: "bignum"` every non-integer argument is encoded
 `{ "num": "<decimal>" }` and the reference uses `mpf("<decimal>")`.
@@ -77,8 +77,7 @@ Each allowlist entry in the suites names the finding it tracks. Notably:
   finiteness-over-claim tail (Hypot/Real/LCM/Gamma-pole/…) of the SYM P0-12/P0-15
   class is recorded rather than asserted (only *finite*-result soundness is
   enforced).
-- **mpmath-kernels** — `zeta(−0.5)` ~4.11 ulp (known open); bignum `Arccos` near
-  1 loses ~8 digits to endpoint cancellation (**new finding**, `test.skip`).
+- **mpmath-kernels** — `zeta(−0.5)` ~4.11 ulp (known open).
 - **js-parity** — `pow-2-3` (rational power of a negative base, real branch,
   CO-P0-2 residual); `sum-negate-i` (negative-index `Negate` summand emits
   invalid JS, P2-1).
