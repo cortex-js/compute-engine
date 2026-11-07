@@ -71,6 +71,17 @@
 
 ### Resolved Issues
 
+- **The derivative of a definite integral is now evaluated.** `D` of an
+  `Integrate` with bounds stayed unevaluated: `\frac{d}{dy}\int_0^1 xy\,dx`
+  gave `D(int_(0)^(1)(x * y dx), y)`, and now gives `1/2`. When the integral
+  has a closed form, its closed form is differentiated. Otherwise the
+  derivative is taken under the integral sign, with a term for each bound
+  that depends on the variable: `\frac{d}{dx}\int_0^x e^{t^3}\,dt` gives
+  `e^(x^3)`, and `\frac{d}{dy}\int_0^1 e^{x^3 y}\,dx` gives
+  `int_(0)^(1)(x^3 * e^(y * x^3) dx)`. The derivative stays unevaluated when
+  the integrand has a step, a condition or a singularity that depends on the
+  variable (`\lfloor x + y \rfloor`, `\ln|x - y|`), and for an integral over
+  an infinite range with no closed form.
 - **A numeric integral over an infinite bound whose integrand decreases
   slowly finds its divergence or its value.** `\int_2^\infty \frac{dx}{x\ln x}`
   diverges: `.N()` gave `3.97 ± 71060` and `NIntegrate` gave `3.97`; both now

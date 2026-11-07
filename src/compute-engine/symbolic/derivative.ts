@@ -2695,6 +2695,11 @@ function differentiateNode(
   if (expr.operator === 'Sum' || expr.operator === 'Product')
     return differentiateBigOp(expr, v, depth, trace);
 
+  // A definite integral: through its closed form, or under the integral
+  // sign. See `differentiateIntegral()`.
+  if (expr.operator === 'Integrate')
+    return differentiateIntegral(expr, v, depth, trace);
+
   // D - evaluate the derivative first, then differentiate the result
   if (expr.operator === 'D') {
     const evaluated = expr.evaluate();
@@ -4176,6 +4181,371 @@ function renameCapturedIndexes(
  * second time.
  */
 const RENAMED_INDEXES = new WeakMap<Scope, ReadonlySet<string>>();
+
+/**
+ * The derivative of a definite `Integrate` with respect to `v`.
+ *
+ * The integral is `Integrate(Function(body, x₁, …), Limits(x₁, a₁, b₁), …)`,
+ * with a lower and an upper bound in each `Limits` clause. Any other form (an
+ * indefinite integral, an integrand that is not a function literal) stays
+ * unevaluated (`undefined`).
+ *
+ * When neither the body nor a bound depends on `v`, the derivative is 0, with
+ * the shape of the value of the integral. Each `v` written in the body is an
+ * integration variable when `v` is one of them, but the body of a called user
+ * function can read the outer `v`: with `g := a ↦ a·x`, `∫_0^1 g(x) dx` is
+ * `x/2`, so its derivative in `x` is not 0.
+ *
+ * Otherwise, two methods are tried, in this order:
+ *
+ * 1. The closed form. When the integral evaluates to an expression with no
+ *    `Integrate` and no infinite or `NaN` number, that expression is
+ *    differentiated: `∫_0^1 x^y dx` is `1/(y + 1)`, whose derivative is
+ *    `−1/(y + 1)²`. A closed form that holds on a set only, kept as the
+ *    condition of a restriction `If(c, …)`, keeps that condition.
+ *
+ * 2. The Leibniz rule, when every bound is finite:
+ *
+ *        d/dv ∫_a^b f(x, v) dx
+ *          = ∫_a^b ∂f/∂v dx + f(b, v)·b′ − f(a, v)·a′
+ *
+ *    The terms of the bounds are used for one `Limits` clause only. An
+ *    integral over several variables is differentiated under the integral
+ *    sign only when no bound depends on `v`. The rule is not used when a
+ *    user function called in the body reads a name of an integration
+ *    variable: the derivative of the call is the derivative of the body of
+ *    the function, and in the new integral the integration variable would
+ *    capture that outer name.
+ *
+ * The derivative under the integral sign is correct when the body and its
+ * derivative in `v` are continuous on the whole range. Two kinds of body do
+ * not have that derivative:
+ * - A step. The derivative rules give a step the derivative it has between
+ *   its jumps (`D(⌊x⌋)` is `0`): for 0 < y < 1, `∫_0^2 ⌊x + y⌋ dx` is
+ *   `∫_y^{2+y} ⌊t⌋ dt`, whose derivative in `y` is `⌊2 + y⌋ − ⌊y⌋ = 2`, and
+ *   not `∫_0^2 0 dx = 0`.
+ * - A singularity that moves with `v` inside the range: `∫_0^2 ln|x − y| dx`
+ *   has the derivative `ln|y| − ln|2 − y|`, but `∫_0^2 −sign(x − y)/|x − y| dx`
+ *   diverges.
+ * So the rule is used only when each part of the body that depends on `v`
+ * or on an integration variable is accepted by `isContinuousInVariable()`.
+ *
+ * Over an infinite range, the integral of the derivative can diverge where
+ * the integral converges (`∫_0^∞ sin(xy)/x dx` is `π/2` for `y > 0`, but
+ * `∫_0^∞ cos(xy) dx` has no value), and the engine cannot check the
+ * convergence. Such an integral with no closed form stays unevaluated.
+ */
+function differentiateIntegral(
+  expr: Expression & FunctionInterface,
+  v: string,
+  depth: number,
+  trace: DerivativeTrace | undefined
+): Expression | undefined {
+  const ce = expr.engine;
+  const [fn, ...sets] = expr.ops;
+  if (!isFunction(fn, 'Function') || sets.length === 0) return undefined;
+
+  const variables: string[] = [];
+  const bounds: Expression[] = [];
+  for (const set of sets) {
+    if (!isFunction(set, 'Limits') || set.nops !== 3 || !isSymbol(set.op1))
+      return undefined;
+    // A bound that is `Nothing` is absent: the integral is indefinite.
+    if (isSymbol(set.op2, 'Nothing') || isSymbol(set.op3, 'Nothing'))
+      return undefined;
+    // A bound that is a list gives a list of integrals, whose shape the
+    // rules below do not keep. A bound whose type is not known yet (the
+    // variable of the enclosing `D`) is a number.
+    const scalar = (b: Expression) =>
+      b.type.isUnknown || isSubtype(b.type.type, 'number');
+    if (!scalar(set.op2) || !scalar(set.op3)) return undefined;
+    variables.push(set.op1.symbol);
+    bounds.push(set.op2, set.op3);
+  }
+  // Each parameter of the integrand is the variable of one `Limits` clause.
+  const params = fn.ops.slice(1).map((p) => functionLiteralParameterName(p));
+  if (
+    params.length !== variables.length ||
+    new Set(variables).size !== variables.length ||
+    variables.some((x) => !params.includes(x))
+  )
+    return undefined;
+
+  const body = fn.op1;
+  // `dependsOnVariable()` does not walk into a function literal with a
+  // parameter named like the variable, so it does not see a call in that
+  // literal of a user function that reads the outer variable. An integrand
+  // with a nested function literal is not differentiated when this can
+  // matter: when `v` is an integration variable (below), and under the
+  // integral sign (in the Leibniz rule).
+  const nestedLiteral = containsOperator(body, 'Function');
+  if (nestedLiteral && variables.includes(v)) return undefined;
+  const boundsVary = bounds.some((b) => dependsOnVariable(b, v));
+  const bodyVaries = dependsOnVariable(body, v, variables.includes(v));
+  if (!boundsVary && !bodyVaries) {
+    // The integral of a list is a list: its derivative is a list of zeros.
+    // When the length of the list is not known, the shape of the zero is
+    // not known, and the derivative stays unevaluated.
+    const zero = withZeroOfShape(expr, ce.Zero, v);
+    if (zero.isSame(0) && !isSubtype(expr.type.type, 'number'))
+      return undefined;
+    recordD(trace, expr, v, 'derivative.zero', () => zero);
+    return zero;
+  }
+
+  // 1. The closed form. The rewrite is recorded as a step, so
+  // `explain('D')` shows it before the steps of its derivative. If the
+  // closed form cannot be differentiated, the steps recorded for it are
+  // removed and the Leibniz rule is tried.
+  // The closed form depends on the state of the engine (an assigned
+  // coefficient is replaced by its value), so the symbols it read are added
+  // to the dependencies of the request of `derivative()` that runs now, if
+  // any (`noteStateReads()`).
+  const closed = expr.evaluate();
+  noteStateReads(symbolDependencies(expr, closed));
+  if (
+    closed.isValid &&
+    !containsOperator(closed, 'Integrate') &&
+    !hasNonFiniteNumber(closed)
+  ) {
+    const mark = trace?.length ?? 0;
+    const restriction = restrictionParts(closed);
+    if (restriction !== undefined) {
+      const { value, condition } = restriction;
+      recordD(trace, expr, v, 'derivative.rewrite', () =>
+        ce._fn('If', [condition, dPlaceholder(value, v)])
+      );
+      const d = differentiate(value, v, depth + 1, trace);
+      if (d !== undefined && d.isValid)
+        return ce.function('If', [condition, d]);
+    } else {
+      recordD(trace, expr, v, 'derivative.rewrite', () =>
+        dPlaceholder(closed, v)
+      );
+      const d = differentiate(closed, v, depth + 1, trace);
+      if (d !== undefined && d.isValid) return d;
+    }
+    if (trace) trace.length = mark;
+  }
+
+  // 2. The Leibniz rule.
+  if (bounds.some((b) => b.isInfinity === true)) return undefined;
+  if (boundsVary && sets.length !== 1) return undefined;
+  if (nestedLiteral) return undefined;
+  if (variables.some((x) => dependsOnVariable(body, x, true))) return undefined;
+  if (bodyVaries && !isContinuousInVariable(body, v, variables))
+    return undefined;
+
+  // The value of the body at a bound replaces the integration variable by
+  // the bound, by name. A binder in the body with the name of the variable,
+  // or with a name that the bound reads, would capture the replacement.
+  const x = variables[0];
+  let value: Expression | undefined;
+  if (boundsVary) {
+    value = isFunction(body, 'Block') ? blockValue(ce, body) : body;
+    if (value === undefined) return undefined;
+    const binders = collectBinderNames(value);
+    if (
+      binders.has(x) ||
+      bounds.some((b) => b.symbols.some((s) => binders.has(s)))
+    )
+      return undefined;
+  }
+  const valueAt = (bound: Expression): Expression => {
+    const map: Record<string, Expression> = Object.create(null);
+    map[x] = bound;
+    return substituteParameters(ce, value!, map);
+  };
+
+  const mark = trace?.length ?? 0;
+  const [lower, upper] = [bounds[0], bounds[1]];
+  // The template keeps the scope of the original integral, so the
+  // integration variable in `D(body, v)` is the same binding as in `body`:
+  // `explainD()` finds the nodes of the later steps in it with `isSame()`,
+  // which compares bindings. The function literal gets that scope too:
+  // `explainD()` rebuilds a node with no scope with `ce.function()`, which
+  // binds the parameter of a function literal again.
+  recordD(trace, expr, v, 'derivative.leibniz-rule', () => {
+    const terms: Expression[] = [];
+    const scope = expr.localScope;
+    if (bodyVaries)
+      terms.push(
+        ce._fn(
+          'Integrate',
+          [
+            ce._fn('Function', [dPlaceholder(body, v), ...fn.ops.slice(1)], {
+              scope,
+            }),
+            ...sets,
+          ],
+          { scope }
+        )
+      );
+    if (boundsVary) {
+      if (dependsOnVariable(upper, v))
+        terms.push(ce._fn('Multiply', [valueAt(upper), dPlaceholder(upper, v)]));
+      if (dependsOnVariable(lower, v))
+        terms.push(
+          ce._fn('Negate', [
+            ce._fn('Multiply', [valueAt(lower), dPlaceholder(lower, v)]),
+          ])
+        );
+    }
+    return terms.length === 1 ? terms[0] : ce._fn('Add', terms);
+  });
+
+  const fail = (): undefined => {
+    if (trace) trace.length = mark;
+    return undefined;
+  };
+  const terms: Expression[] = [];
+  if (bodyVaries) {
+    const dBody = differentiate(body, v, depth + 1, trace);
+    if (dBody === undefined || !dBody.isValid) return fail();
+    // The integration variables in `dBody` and in `sets` are bound in the
+    // scope of the original integral, so the new integral is built on that
+    // scope, as the term-by-term derivative of a `Sum` is.
+    terms.push(
+      ce.function(
+        'Integrate',
+        [ce.function('Function', [dBody, ...fn.ops.slice(1)]), ...sets],
+        { scope: expr.localScope }
+      )
+    );
+  }
+  if (boundsVary) {
+    for (const [bound, sign] of [
+      [upper, 1],
+      [lower, -1],
+    ] as const) {
+      if (!dependsOnVariable(bound, v)) continue;
+      const dBound = differentiate(bound, v, depth + 1, trace);
+      if (dBound === undefined || !dBound.isValid) return fail();
+      const term = ce.function('Multiply', [valueAt(bound), dBound]);
+      terms.push(sign > 0 ? term : ce.function('Negate', [term]));
+    }
+  }
+  if (terms.length === 0) return ce.Zero;
+  return terms.length === 1 ? terms[0] : ce.function('Add', terms);
+}
+
+/** Whether `expr` has a number literal that is infinite or `NaN`. */
+function hasNonFiniteNumber(expr: Expression): boolean {
+  if (isNumber(expr)) return expr.isNaN === true || expr.isInfinity === true;
+  if (!isFunction(expr)) return false;
+  return expr.ops.some((x) => hasNonFiniteNumber(x));
+}
+
+/**
+ * The operators that are defined and continuous for every real or complex
+ * operand (entire functions), with a derivative that is continuous too.
+ * `Abs` is included: it is continuous, and its derivative `Sign` jumps but
+ * is bounded, so the integral of `|x − y|` has the derivative that the rule
+ * gives. `Arctan` and `Arsinh` are not included: they are continuous for a
+ * real operand, but they have singularities at the complex operands `±i`.
+ */
+const EVERYWHERE_CONTINUOUS_OPERATORS: ReadonlySet<string> = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Square',
+  'Exp',
+  'Sin',
+  'Cos',
+  'Sinh',
+  'Cosh',
+  'Erf',
+  'Erfc',
+  'Erfi',
+  'Abs',
+]);
+
+/**
+ * The operators that are continuous where they are defined, and whose
+ * derivative the derivative rules give exactly: arithmetic and the entries
+ * of `DERIVATIVES_TABLE` that are not steps. They can have a pole or a
+ * singularity (`1/u`, `ln(u)`, `tan(u)`).
+ */
+const CONTINUOUS_OPERATORS: ReadonlySet<string> = new Set([
+  'Divide',
+  'Power',
+  'Sqrt',
+  'Root',
+  ...Object.keys(DERIVATIVES_TABLE).filter(
+    (op) => !['Floor', 'Ceil', 'Round', 'Truncate', 'Sign'].includes(op)
+  ),
+]);
+
+/**
+ * Whether the integrand `body` can be differentiated with respect to `v`
+ * under the integral sign. Each part of `body` that depends on `v` or on an
+ * integration variable (one of `variables`) must be one of these:
+ * - a `Block` of one expression;
+ * - an operator of `EVERYWHERE_CONTINUOUS_OPERATORS`, or a power whose
+ *   exponent is a nonnegative integer or whose base is a positive number
+ *   (`e^u`);
+ * - an operator of `CONTINUOUS_OPERATORS` whose operands do not depend on an
+ *   integration variable. Its singularities are then at values of `v`, not
+ *   at points inside the range: `ln|x − y|` is refused, `ln(y)·x` is
+ *   accepted;
+ * - an application of a function with no definition (`f(x, v)`), whose
+ *   partial derivatives stay symbolic.
+ *
+ * A part that depends on an integration variable only is tested too: a pole
+ * in the integration variable next to a factor in `v` can make the
+ * derivative under the integral sign wrong. With
+ * `f = y³·e^(−y²/x)/x²` on `0 ≤ x ≤ 1`, the integral is `y·e^(−y²)`, whose
+ * derivative at `y = 0` is 1, but the integral of `∂f/∂y` at `y = 0` is 0.
+ *
+ * Any other operator is refused, also when it is continuous: a step
+ * (`Floor`, `Heaviside`, `Mod`), a choice by a condition (`If`, `Which`),
+ * a user function, whose body can hold a step, a user definition with the
+ * name of a library operator (`Sinh(t) := ⌊t⌋`), and any library operator
+ * not in the lists. The lists are short so that a refusal is the result for
+ * an operator that is not known to be continuous.
+ */
+function isContinuousInVariable(
+  body: Expression,
+  v: string,
+  variables: ReadonlyArray<string>
+): boolean {
+  if (!isFunction(body)) return true;
+  if (
+    !dependsOnVariable(body, v) &&
+    !variables.some((x) => dependsOnVariable(body, x))
+  )
+    return true;
+  const ok = (): boolean =>
+    body.ops.every((x) => isContinuousInVariable(x, v, variables));
+  if (body.operator === 'Block') return body.nops === 1 && ok();
+  const ce = body.engine;
+  const opSym = withCallableBinding(body, () => ce.symbol(body.operator));
+  if (isEngineAuthoredDefinition(opSym)) {
+    if (EVERYWHERE_CONTINUOUS_OPERATORS.has(body.operator)) return ok();
+    if (body.operator === 'Power') {
+      const [base, exponent] = [body.op1, body.op2];
+      if (
+        (isNumber(exponent) &&
+          exponent.isInteger === true &&
+          exponent.isNonNegative === true) ||
+        isSymbol(base, 'ExponentialE') ||
+        (isNumber(base) && base.isPositive === true)
+      )
+        return ok();
+    }
+    if (CONTINUOUS_OPERATORS.has(body.operator))
+      return !variables.some((x) => dependsOnVariable(body, x)) && ok();
+    return false;
+  }
+  if (
+    !isEngineAuthoredDefinition(opSym) &&
+    opSym.operatorDefinition === undefined &&
+    opSym.valueDefinition?.value === undefined
+  )
+    return ok();
+  return false;
+}
 
 /**
  * The derivative of an application of an operator with no entry in the

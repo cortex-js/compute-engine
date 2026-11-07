@@ -405,6 +405,8 @@ registerStepLabels({
   'derivative.sum-rule': 'Apply the sum rule: (u + v)′ = u′ + v′',
   'derivative.term-by-term':
     'Differentiate the sum term by term: (Σₖ uₖ)′ = Σₖ uₖ′',
+  'derivative.leibniz-rule':
+    'Differentiate under the integral sign (Leibniz rule): (∫ₐᵇ f dx)′ = ∫ₐᵇ f′ dx + f(b)·b′ − f(a)·a′',
   'derivative.product-rule': 'Apply the product rule: (u·v)′ = u′·v + u·v′',
   'derivative.quotient-rule':
     'Apply the quotient rule: (u⁄v)′ = (u′·v − u·v′)⁄v²',
