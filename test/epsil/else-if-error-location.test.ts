@@ -212,10 +212,12 @@ describe('A FRAME OF AN OPERATOR THAT REORDERS ITS OPERANDS', () => {
   // `Add` and `Multiply` sort their operands in canonical form, so the frame
   // `Add argument 2` counts the CANONICAL operands and can name the first
   // written operand. When both written operands hold an `if`, the locator
-  // cannot know which one has the error. It must then underline a range that
-  // contains the error (the whole sum), never a branch of the other `if`.
-  // (The range of a sum of parenthesized operands does not include the first
-  // and the last parenthesis, so the test checks what the range contains.)
+  // selects the written operand by the source range that the canonical
+  // operand keeps, and then the branch of its `if`. It must never underline a
+  // branch of the other `if`. When the range does not select one operand,
+  // it underlines a range that contains the error (the whole sum). (The
+  // range of a sum of parenthesized operands does not include the first and
+  // the last parenthesis, so the test checks what the range contains.)
   const ERROR_CALL = 'g("a")';
 
   /** The text under the runtime diagnostic, and whether it holds the call
@@ -239,7 +241,7 @@ describe('A FRAME OF AN OPERATOR THAT REORDERS ITS OPERANDS', () => {
       'let n = 1\nlet v = (if n == 1 { g("a") } else { 0 }) + (if n == 2 { 2 } else { 3 })\nv'
     );
     expect(u.holdsError).toBe(true);
-    expect(u.at).toContain(' + ');
+    expect(u.at).toBe('{ g("a") }');
   });
 
   test('a sum, error in the second written operand', () => {
@@ -247,7 +249,7 @@ describe('A FRAME OF AN OPERATOR THAT REORDERS ITS OPERANDS', () => {
       'let n = 1\nlet v = (if n == 5 { 2 } else { 3 }) + (if n == 1 { g("a") } else { 0 })\nv'
     );
     expect(u.holdsError).toBe(true);
-    expect(u.at).toContain(' + ');
+    expect(u.at).toBe('{ g("a") }');
   });
 
   test('a product, error in the first written operand', () => {
@@ -255,7 +257,7 @@ describe('A FRAME OF AN OPERATOR THAT REORDERS ITS OPERANDS', () => {
       'let n = 1\nlet v = (if n == 1 { g("a") } else { 0 }) * (if n == 2 { 2 } else { 3 })\nv'
     );
     expect(u.holdsError).toBe(true);
-    expect(u.at).toContain(' * ');
+    expect(u.at).toBe('{ g("a") }');
   });
 
   test('a product, error in the second written operand', () => {
@@ -263,7 +265,7 @@ describe('A FRAME OF AN OPERATOR THAT REORDERS ITS OPERANDS', () => {
       'let n = 1\nlet v = (if n == 5 { 2 } else { 3 }) * (if n == 1 { g("a") } else { 0 })\nv'
     );
     expect(u.holdsError).toBe(true);
-    expect(u.at).toContain(' * ');
+    expect(u.at).toBe('{ g("a") }');
   });
 
   test('a sum with an else if', () => {

@@ -16169,13 +16169,18 @@ function absentAtNumericParameter(
  *   declared `(integer) -> unknown` and assigned `x ↦ 0 · x`, `f(Missing)`
  *   is `Missing`. An absent value at any other scalar
  *   parameter is refused, unless the declared type has a `missing` member.
+ *
+ * The error carries the breadcrumb frame of `operator`, the name of the
+ * function, at the position of the refused argument, as the error of an
+ * argument that an annotated parameter of the literal refuses does.
  */
 function declaredScalarConformance(
   ce: ComputeEngine,
   cacheKey: object,
   declared: Type,
   broadcastable: boolean,
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<Expression>,
+  operator: string
 ): Expression | undefined {
   if (typeof declared === 'string' || declared.kind !== 'signature')
     return undefined;
@@ -16204,7 +16209,9 @@ function declaredScalarConformance(
       provablyAdmits('missing', p)
     )
       continue;
-    return ce.typeError(p, ops[i].type, ops[i]);
+    return withErrorFrames(ce.typeError(p, ops[i].type, ops[i]), [
+      { operator, index: i + 1 },
+    ]);
   }
   let entry = declaredConformanceSignatures.get(cacheKey);
   if (entry === undefined || entry.source !== declared) {
@@ -16218,7 +16225,8 @@ function declaredScalarConformance(
     broadcastable,
     ops,
     // `NaN` is accepted at a numeric parameter and checked anywhere else.
-    (i) => (isNumericParam(i) ? 'handle' : 'reject')
+    (i) => (isNumericParam(i) ? 'handle' : 'reject'),
+    operator
   );
 }
 
@@ -16829,7 +16837,8 @@ function applyFunctionLiteralWith(
       def,
       def._signatureSkeleton ?? declaredType,
       mapsCollections,
-      args
+      args,
+      expr.operator
     );
   };
   // The call over `args` when the type of an argument does not decide the
@@ -20281,7 +20290,8 @@ function genericRuntimeConformance(
       def,
       declared,
       def.broadcastable === true,
-      ops
+      ops,
+      def.name
     );
   }
   return runtimeConformanceError(
@@ -20292,7 +20302,10 @@ function genericRuntimeConformance(
     ops,
     // Contract B NaN policy: an operand the boxing admission carved in must
     // not be re-refuted at dispatch (`docs/ERROR-MODEL.md` §4).
-    (i) => def.resolvedNanBehaviorAt(i)
+    (i) => def.resolvedNanBehaviorAt(i),
+    // The error names the call that refused the value: `Ln(w)` with
+    // `w = "s"` gives the frame `Ln` argument 1, as `Ln("s")` does.
+    def.name
   );
 }
 

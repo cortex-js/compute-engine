@@ -526,8 +526,29 @@ function frameArgument(
       findByOperator(leaf, inner, found);
       return found.length > 0;
     });
-    if (holders.length !== 1) return undefined;
-    result = { call: top, arg: holders[0] };
+    // When more than one operand holds a call of the inner operator, the
+    // canonical operand that the index names keeps the source range of its
+    // written operand, as in the branch above. In `Ln(w) + Ln(2)`, with
+    // `w = "s"`, the frames are `Ln argument 1, Add argument 1`, and both
+    // operands hold an `Ln`: the range selects `Ln(w)`. The operand must
+    // also hold a call of the inner operator. This relies on the index of
+    // the frame counting the operands of the canonical call, as the frame
+    // that the evaluation of a sum or a product adds for the operand whose
+    // evaluation returned the error does (`_evaluatedOperandResultError()`,
+    // `boxed-expression/boxed-function.ts`).
+    let arg: MathJsonExpression | null =
+      holders.length === 1 ? holders[0] : null;
+    if (
+      holders.length > 1 &&
+      canonicalOrder !== undefined &&
+      frameIndexOrder === 'declaration' &&
+      !operands(call).some((op) => operator(op) === 'NamedArgument')
+    ) {
+      const written = writtenOperandAt(top, name, index, canonicalOrder);
+      if (written !== null && holders.includes(written)) arg = written;
+    }
+    if (arg === null) return undefined;
+    result = { call: top, arg };
   } else {
     result = {
       call,

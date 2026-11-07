@@ -103,10 +103,26 @@
   underlined the whole statement; both now underline `"a"`. The value that a
   type error names selects the call: the `2` of `Ln(2)` is not the value
   `"a"`. When the argument of more than one call can be the value, as in
-  `Ln("a") + Ln(x)`, the run-time error still underlines the whole sum and the
-  static error the whole statement. The run-time error of an extra argument,
+  `Ln("a") + Ln(x)`, the static error still underlines the whole statement;
+  the run-time error underlines `"a"`, because its breadcrumb names the
+  operand of the sum that failed. The run-time error of an extra argument,
   `let v = Sqrt(2, 3)`, now underlines the `3`, as the static error does, not
   the whole statement.
+
+- **The error of an argument whose value an operator refuses now names the
+  call of that operator.** With `w` declared `any` and assigned the string
+  `"s"`, the breadcrumb of the error of `3 - Ln(w)` was `Negate` argument 1,
+  `Add` argument 1, with no call of `Ln`. It now starts with `Ln` argument 1,
+  as the error of `Ln("s")` does. The same applies to `Sqrt`, `Log`, `Not` and
+  the other operators that check the value of an argument against their
+  signature when they are evaluated, and to a function declared with a
+  signature. In Epsil, the run-time error of `let v = 3 - ln(w)` now
+  underlines `w`, not `ln(w)`. When more than one operand of a sum or a
+  product holds a call of the function that failed, the run-time error now
+  underlines the operand whose evaluation failed, not the whole sum:
+  `let v = Sqrt(2, 3) + Sqrt(2, 4)` underlines `3`, and
+  `(if n == 1 { g("a") } else { 0 }) + (if n == 2 { 2 } else { 3 })`
+  underlines `{ g("a") }`.
 
 - **`Hypergeometric2F1` at machine precision no longer gives a wrong number
   for parameters near 100.** A product of two values of the Gamma function

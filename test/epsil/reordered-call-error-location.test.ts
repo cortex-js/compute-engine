@@ -13,6 +13,10 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 // or the whole call, which contains the error. It never underlines an operand
 // that cannot have made the error.
 //
+// The error of `Ln(w)`, with `w` a variable that holds the string `"s"`, has
+// the frame `Ln argument 1`, as the error of `Ln("s")` has. The underline is
+// then the argument `w` inside the operand `Ln(w)`.
+//
 
 /** The text underlined by each diagnostic of kind `kind` of the statement
  * that starts with `marker`. */
@@ -35,14 +39,16 @@ describe('an error in an operand of a sum or product', () => {
   const prefix = 'let w: any = "s"\n';
 
   test.each([
-    ['let v = Ln(w) * 2', 'Ln(w)'],
+    ['let v = Ln(w) * 2', 'w'],
+    // The error that the handler of `Sin` makes has no `Sin` frame, so the
+    // operand is underlined (issue CE-1047).
     ['let v = Sin(w) * 2', 'Sin(w)'],
-    ['let v = 2 * Ln(w)', 'Ln(w)'],
+    ['let v = 2 * Ln(w)', 'w'],
     // `Max` keeps the written order of its operands.
-    ['let v = Max(z, Ln(w))', 'Ln(w)'],
+    ['let v = Max(z, Ln(w))', 'w'],
     // `Xor(Not(w), B)` is `Xor(B, Not(w))` in canonical form, and its error
-    // has the frame `Xor argument 2`.
-    ['let v = Xor(Not(w), B)', 'Not(w)'],
+    // has the frames `Not argument 1, Xor argument 2`.
+    ['let v = Xor(Not(w), B)', 'w'],
   ])('%s underlines %s', (stmt, expected) => {
     expect(underlines(`${prefix}${stmt}\n0`)).toEqual([expected]);
   });
@@ -54,7 +60,8 @@ describe('an error in an operand of a sum or product', () => {
 
   test('of two equal operands, the first is underlined', () => {
     // The sum evaluates its operands in order, and the frame names the
-    // first one, whose evaluation returned the error.
+    // first one, whose evaluation returned the error. The underline is the
+    // argument `w` of that operand.
     const src = `${prefix}let v = Ln(w) + Ln(w)\n0`;
     const result = executeEpsil(new ComputeEngine(), src);
     const ranges = result.diagnostics
@@ -62,8 +69,8 @@ describe('an error in an operand of a sum or product', () => {
         (d) => Array.isArray(d.message) && d.message[0] === 'runtime-error'
       )
       .map((d) => d.range);
-    const first = src.indexOf('Ln(w)');
-    expect(ranges).toEqual([[first, first + 'Ln(w)'.length]]);
+    const first = src.indexOf('Ln(w)') + 'Ln('.length;
+    expect(ranges).toEqual([[first, first + 1]]);
   });
 
   // The error of an operand that the product evaluates names that operand of
@@ -104,7 +111,7 @@ describe('an error in an operand of a sum or product', () => {
   test('in a nested statement', () => {
     expect(
       underlines(`${prefix}for i in [1] { let q = Ln(w) * 2 }\n0`, 'for')
-    ).toEqual(['Ln(w)']);
+    ).toEqual(['w']);
   });
 });
 
@@ -174,9 +181,13 @@ describe('an error in one of two calls of the same function', () => {
     expect(underlines(src, 'let v', 'static-type-error')).toEqual([expected]);
   });
 
-  test('two arguments that can be the value underline the whole call', () => {
-    const src = 'let v = Ln("a") + Ln(x)\n0';
-    expect(underlines(src)).toEqual(['Ln("a") + Ln(x)']);
+  test('two arguments that can be the value: the frame of the sum selects the call', () => {
+    // `x` can be the value `"a"`, so the value does not select a call. The
+    // frame `Add argument 1` names the canonical operand, which keeps the
+    // source range of `Ln("a")`.
+    expect(underlines('let v = Ln("a") + Ln(x)\n0')).toEqual(['"a"']);
+    expect(underlines('let v = Ln(x) + Ln("a")\n0')).toEqual(['"a"']);
+    expect(underlines('let v = Ln(x) - Ln("a")\n0')).toEqual(['"a"']);
   });
 
   test('an argument that is not a literal does not select its call', () => {
@@ -229,10 +240,10 @@ describe('an error in one of two calls of the same function', () => {
     expect(underlines(src, 'let v', 'static-type-error')).toEqual([expected]);
   });
 
-  test('two extra arguments underline the whole call', () => {
-    expect(underlines('let v = Sqrt(2, 3) + Sqrt(2, 4)\n0')).toEqual([
-      'Sqrt(2, 3) + Sqrt(2, 4)',
-    ]);
+  test('two extra arguments: the frame of the sum selects the call', () => {
+    // Both calls have an extra argument. The frame `Add argument 1` names
+    // the canonical operand whose evaluation returned the error.
+    expect(underlines('let v = Sqrt(2, 3) + Sqrt(2, 4)\n0')).toEqual(['3']);
   });
 });
 
@@ -242,10 +253,49 @@ describe('an error in an operand of a subtraction', () => {
   const prefix = 'let w: any = "s"\n';
 
   test.each([
-    ['let v = 3 - Ln(w)', 'Ln(w)'],
-    ['let v = (3 - Ln(w)) - 1', 'Ln(w)'],
+    ['let v = 3 - Ln(w)', 'w'],
+    ['let v = (3 - Ln(w)) - 1', 'w'],
   ])('%s underlines %s', (stmt, expected) => {
     expect(underlines(`${prefix}${stmt}\n0`)).toEqual([expected]);
+  });
+});
+
+describe('an argument whose value the logarithm refuses', () => {
+  // `Ln(w)`, with `w` a variable that holds `"s"`, is valid when it is
+  // boxed, and the evaluation refuses the value. The error has the frame
+  // `Ln argument 1`, as the error of `Ln("s")` has, and the underline is the
+  // argument `w`.
+  const prefix = 'let w: any = "s"\n';
+
+  function runtime(stmt: string): { frames: string; at: string } {
+    const src = `${prefix}${stmt}\n0`;
+    const result = executeEpsil(new ComputeEngine(), src);
+    const d = result.diagnostics.find(
+      (x) => Array.isArray(x.message) && x.message[0] === 'runtime-error'
+    );
+    expect(d).toBeDefined();
+    return {
+      frames: String(d!.message[2]),
+      at: src.slice(d!.range[0], d!.range[1]),
+    };
+  }
+
+  test.each([
+    ['let v = 3 - ln(w)', 'in Ln argument 1, in Negate argument 1, in Add argument 1'],
+    ['let v = ln(w) * 2', 'in Ln argument 1, in Multiply argument 2'],
+    ['let v = -ln(w)', 'in Ln argument 1, in Negate argument 1'],
+    ['let v = sqrt(w) + 1', 'in Sqrt argument 1, in Add argument 1'],
+  ])('%s', (stmt, frames) => {
+    expect(runtime(stmt)).toEqual({ frames, at: 'w' });
+  });
+
+  test('another call of ln in the sum', () => {
+    // Both operands of the sum hold a call of `ln`. The frame
+    // `Add argument 1` selects `ln(w)` by the source range of the canonical
+    // operand.
+    expect(runtime('let v = ln(w) + ln(2)').at).toBe('w');
+    expect(runtime('let v = ln(2) + ln(w)').at).toBe('w');
+    expect(runtime('let v = ln(x) * ln(w)').at).toBe('w');
   });
 });
 

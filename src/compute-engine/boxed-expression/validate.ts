@@ -91,6 +91,7 @@ import {
   isErrorTypedOperand,
   isErrorTypedWithoutErrorValue,
 } from './error-typed-operand.js';
+import { withErrorFrames } from './error-value.js';
 import { parseType } from '../../common/type/parse.js';
 import { withoutNothing } from '../../common/type/omission.js';
 import { typeToString } from '../../common/type/serialize.js';
@@ -2609,6 +2610,15 @@ function armParamAt(
  * the full static validation on the spliced operands. When no arm's bounds
  * fit the operand count, this check stands down rather than minting an
  * arity error of its own.
+ *
+ * When `operator` is given, the error carries the breadcrumb frame of that
+ * operator at the 1-based position of the refused operand. A literal
+ * argument of the wrong type (`Ln("s")`) makes the node invalid when it is
+ * boxed, and the error of that node gets the frame `Ln` argument 1. An
+ * argument whose VALUE has the wrong type (`Ln(w)` with `w = "s"`) is
+ * refused only here, at evaluation. Without the frame, the error of
+ * `3 - Ln(w)` would have only the frames of `Negate` and `Add`, and would
+ * name no call of `Ln`.
  */
 export function runtimeConformanceError(
   ce: ComputeEngine,
@@ -2621,7 +2631,10 @@ export function runtimeConformanceError(
    * the carrier at boxing, so re-testing it here must not refute what the
    * policy admitted — the policy gate (dispatch step 4a-0) and the handler
    * own it. Mirrors `nanPolicyAdmitsParam` on the static route. */
-  nanPolicyAt?: (index: number) => 'reject' | 'propagate' | 'handle' | 'inert'
+  nanPolicyAt?: (index: number) => 'reject' | 'propagate' | 'handle' | 'inert',
+  /** The name of the operator whose call is checked, for the breadcrumb
+   * frame of the error. */
+  operator?: string
 ): Expression | undefined {
   if (ops.length === 0) return undefined;
   const allArms = runtimeConformanceArms(cacheKey, signature);
@@ -2683,6 +2696,11 @@ export function runtimeConformanceError(
   // expected type is the union of the arms' parameters there. (With mixed
   // refutations across arms — no universally-refuted position — fall back
   // to the first arm's first refuted position.)
+  const refusal = (expected: Type, i: number): Expression => {
+    const err = ce.typeError(expected, ops[i].type, ops[i]);
+    if (operator === undefined) return err;
+    return withErrorFrames(err, [{ operator, index: i + 1 }]);
+  };
   for (let i = 0; i < ops.length; i++) {
     const params = arms.map((a) => armParamAt(a, i));
     if (params.some((p) => p === null || !refutes(ops[i], p, i))) continue;
@@ -2690,12 +2708,12 @@ export function runtimeConformanceError(
       params.length === 1
         ? params[0]!.t
         : reduceType({ kind: 'union', types: params.map((p) => p!.t) });
-    return ce.typeError(expected, ops[i].type, ops[i]);
+    return refusal(expected, i);
   }
   for (let i = 0; i < ops.length; i++) {
     const param = armParamAt(arms[0], i);
     if (param !== null && refutes(ops[i], param, i))
-      return ce.typeError(param.t, ops[i].type, ops[i]);
+      return refusal(param.t, i);
   }
   return undefined;
 }

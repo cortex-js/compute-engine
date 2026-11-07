@@ -593,7 +593,7 @@ describe('ERROR PROPAGATION — the frame of a sum or a product names the operan
   test('the frames that the operand made are kept', () => {
     expect(
       failed(engine(), ['Multiply', ['Cos', 'x'], ['Sin', ['Ln', 's']]])
-    ).toEqual({ frames: ['Sin', 'Multiply'], operand: 'sin(ln(s))' });
+    ).toEqual({ frames: ['Ln', 'Sin', 'Multiply'], operand: 'sin(ln(s))' });
   });
 
   test('a symbol that holds an error from an earlier evaluation', () => {
@@ -848,5 +848,55 @@ describe('ERROR PROPAGATION — Nothing: a written or a computed argument is bou
     expect(ce.box(['Apply', lit, 'Nothing', 5]).evaluate().toString()).toBe(
       'Error(ErrorCode("incompatible-type", "number", "nothing"), "Nothing")'
     );
+  });
+});
+
+describe('ERROR PROPAGATION — an argument whose value the signature refuses', () => {
+  // `Ln(w)`, with `w` declared `any` and assigned `"s"`, is valid when it is
+  // boxed. The evaluation checks the value of `w` against the signature of
+  // `Ln` and refuses it. The error has the frame `Ln argument 1`, as the
+  // error of the literal `Ln("s")` has, so that the breadcrumb of
+  // `3 - Ln(w)` names the call of `Ln`, and not only `Negate` and `Add`.
+  const engine = () => {
+    const ce = new ComputeEngine();
+    ce.declare('w', 'any');
+    ce.assign('w', ce.string('s'));
+    return ce;
+  };
+  const frames = (ce: ComputeEngine, json: MathJsonExpression) => {
+    const value = ce.box(json).evaluate();
+    expect(value.operator).toBe('Error');
+    return errorFrames(value).map((f) => `${f.operator} ${f.index}`);
+  };
+
+  test.each([
+    [['Ln', 'w'], ['Ln 1']],
+    [['Sqrt', 'w'], ['Sqrt 1']],
+    [['Subtract', 3, ['Ln', 'w']], ['Ln 1', 'Negate 1', 'Add 1']],
+    [['Multiply', ['Ln', 'w'], 2], ['Ln 1', 'Multiply 2']],
+  ] as [MathJsonExpression, string[]][])('%j', (json, expected) => {
+    expect(frames(engine(), json)).toEqual(expected);
+  });
+
+  test('the async evaluation gives the same frame', async () => {
+    const value = await engine()
+      .box(['Subtract', 3, ['Ln', 'w']])
+      .evaluateAsync();
+    expect(errorFrames(value).map((f) => f.operator)).toEqual([
+      'Ln',
+      'Negate',
+      'Add',
+    ]);
+  });
+
+  test('a function declared with a signature names its call', () => {
+    // The body of `g` is assigned after the declaration, so the call keeps
+    // the declared signature, and the evaluation checks the value of `w`
+    // against the parameter type `real`.
+    const ce = engine();
+    ce.declare('g', '(real) -> real');
+    ce.assign('g', ce.box(['Function', ['Multiply', 'x', 2], 'x']));
+    expect(frames(ce, ['g', 'w'])).toEqual(['g 1']);
+    expect(frames(ce, ['Add', 1, ['g', 'w']])).toEqual(['g 1', 'Add 1']);
   });
 });
