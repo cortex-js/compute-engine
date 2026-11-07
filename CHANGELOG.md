@@ -142,6 +142,12 @@
   `\prod_{k=1}^\infty \frac{k}{k+1}` is now `0`. A sum or a product that holds
   a symbol with an assigned value, or a function whose purity is not known,
   keeps its form.
+- **The error of a numeric integral with a power singularity close to `1/x`
+  now covers its true error.** `.N()` of `\int_0^1 x^{-0.9999}\,dx` gave
+  `10000.00000106 ± 0.00000035`, whose true error is `0.00000106`; the error
+  is now `0.000015`. For `\int_0^1 x^{-0.9998}\,dx`, the error was
+  `0.000000015` for a true error of `0.00000034`; it is now `0.00000087`.
+  For such exponents, the reported error is larger than before.
 - **A numeric integral of a narrow peak at a bound of the interval no longer
   gives 0.** `.N()` of `\int_0^1 e^{-10^8 x}\,dx` gave `0` with an error of
   `0`, because the integrand was 0 at every point that the quadrature

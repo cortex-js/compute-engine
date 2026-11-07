@@ -573,10 +573,11 @@ export function extrapolateCorner(
   // Two orders of each method. The ε-algorithm uses the last `EPSILON_SUMS`
   // sums, and the same number of sums one shell earlier.
   const m = Math.min(EPSILON_SUMS, n - 1);
-  const epsilon = [
-    wynnEpsilon(sums.slice(n - m)),
-    wynnEpsilon(sums.slice(n - 1 - m, n - 1)),
-  ];
+  const epsilonUpTo = (end: number): Extrapolation =>
+    extrapolation(sums, end - m, end, (s) =>
+      wynnEpsilon(s.slice(end - m, end))
+    );
+  const epsilon = [epsilonUpTo(n), epsilonUpTo(n - 1)];
 
   // The Levin u-transform uses the term index of a shell from a distance of
   // 1 to the endpoint (`beta`): the k-th term of `1/(x·ln²x)` is
@@ -584,13 +585,20 @@ export function extrapolateCorner(
   // `LEVIN_START` and `2·LEVIN_START`: from a later shell, the differences
   // of the transform cancel and lose the digits (from the shell 1000, two
   // orders differ by 1e-2).
-  const levin: (number | undefined)[] = [];
+  // The transform of order `k` from the shell `start` reads the sums
+  // `start − 1` to `start + k`.
+  const levin: Extrapolation[] = [];
   if (shellDecayExponent(shells, beta) >= LEVIN_MIN_DECAY)
     for (const start of [LEVIN_START, 2 * LEVIN_START])
-      for (const order of [3, 4]) levin.push(levinU(sums, start, order, beta));
+      for (const order of [3, 4])
+        levin.push(
+          extrapolation(sums, start - 1, start + order + 1, (s) =>
+            levinU(s, start, order, beta)
+          )
+        );
 
   let spread = 0;
-  for (const v of [...epsilon, ...levin])
+  for (const { value: v } of [...epsilon, ...levin])
     if (v !== undefined) spread = Math.max(spread, Math.abs(v - corner.value));
 
   // The pair that agrees best: the two orders of one method, or one order
@@ -603,7 +611,8 @@ export function extrapolateCorner(
   // `1.7e-7`, and the result was `1.040684324 ± 0.000000012` (the integral
   // is `1/(2·ln²2) = 1.0406844905…`). The Levin values were within `5e-9`.
   const powerDecay = levin.length > 0 && shellsDecayAsPower(shells, beta);
-  const pairs: [number | undefined, number | undefined][] = powerDecay
+  type Candidate = Extrapolation | undefined;
+  const pairs: [Candidate, Candidate][] = powerDecay
     ? [
         [levin[0], levin[1]],
         [levin[2], levin[3]],
@@ -616,14 +625,20 @@ export function extrapolateCorner(
         [levin[0], levin[2]],
         [epsilon[0], levin[2]],
       ];
-  let best: { value: number; difference: number } | undefined;
-  for (const [u, v] of pairs) {
-    if (u === undefined || v === undefined) continue;
-    const difference = Math.abs(u - v);
-    const scale = Math.max(Math.abs(u), Math.abs(v));
+  // A pair whose value is not stable under the rounding of the sums (an
+  // infinite `roundingSensitivity`) is not used: the next pair, or the model
+  // of the shells when no pair is left, gives the value.
+  let best:
+    { value: number; difference: number; sensitivity: number } | undefined;
+  for (const [x, y] of pairs) {
+    if (x?.value === undefined || y?.value === undefined) continue;
+    const difference = Math.abs(x.value - y.value);
+    const scale = Math.max(Math.abs(x.value), Math.abs(y.value));
     if (!(difference <= EXTRAPOLATION_AGREEMENT * scale)) continue;
-    if (best === undefined || difference < best.difference)
-      best = { value: u, difference };
+    if (best !== undefined && !(difference < best.difference)) continue;
+    const sensitivity = roundingSensitivity(x, sums);
+    if (Number.isFinite(sensitivity))
+      best = { value: x.value, difference, sensitivity };
   }
   if (best === undefined) {
     const m = modelled();
@@ -632,13 +647,78 @@ export function extrapolateCorner(
 
   // The error is the difference of the two extrapolations, enlarged, plus
   // the errors of the shells, and at least the rounding error of the sum of
-  // the shells.
+  // the shells and the change of the extrapolation that the rounding of the
+  // sums gives (see `roundingSensitivity`).
   const error =
     Math.max(
       EXTRAPOLATION_SAFETY * best.difference,
+      best.sensitivity,
       4 * Number.EPSILON * magnitude
     ) + shellError;
   return { ok: true, value: best.value, error };
+}
+
+/**
+ * An extrapolation of the partial sums of the shells: its `value` (or
+ * `undefined` when the method gives no value), the function `of` that
+ * computes it from the sums, and the range of the sums that it reads, from
+ * `from` (included) to `to` (excluded).
+ */
+type Extrapolation = {
+  value: number | undefined;
+  from: number;
+  to: number;
+  of: (sums: number[]) => number | undefined;
+};
+
+function extrapolation(
+  sums: number[],
+  from: number,
+  to: number,
+  of: (sums: number[]) => number | undefined
+): Extrapolation {
+  return { value: of(sums), from, to, of };
+}
+
+/**
+ * The change of an extrapolation when the partial sums that it reads change
+ * by their rounding error: the sum, over each sum `s` that it reads, of the
+ * change of the extrapolated value when `s` alone becomes `s·(1 + ε)`.
+ *
+ * The rounding of a partial sum is up to half an ulp of the sum. When the
+ * shells decrease slowly, the extrapolation amplifies that rounding. Two
+ * orders of the ε-algorithm that read almost the same sums change in the
+ * same way, so their difference does not show it. The shells of
+ * `∫₀¹ x^(−p) dx` next to 0 have the ratio `2^(p − 1)`. For `p = 0.9998`, the
+ * two orders differ by `1.5e-9`, the true error of the result is `3.4e-7`,
+ * and this sum of changes is `8.6e-7`. For `p = 0.9999`, the two orders
+ * differ by `3.5e-8`, the true error is `1.06e-6`, and this sum of changes is
+ * `1.5e-5`.
+ *
+ * The amplification of the estimated errors of the shells is not counted:
+ * the estimates are much larger than the true errors. For `p = 0.9999`, each
+ * of the 1019 shells is within one ulp of its exact value (about `1e-16`
+ * relative), and the sum of their estimated errors is `7.2e-10`, about
+ * `1e-12` relative to each shell. A change of each of the last 20 shells by
+ * its mean estimated error (`7e-13`) changes the extrapolation by a total of
+ * `4.2e-5`, 40 times the true error.
+ *
+ * An extrapolation that gives no value after the change of one sum is not
+ * stable, and the result is `+∞`.
+ */
+function roundingSensitivity(x: Extrapolation, sums: number[]): number {
+  if (x.value === undefined) return Infinity;
+  const s = sums.slice();
+  let total = 0;
+  for (let i = x.from; i < x.to; i++) {
+    const original = s[i];
+    s[i] = original + Number.EPSILON * Math.abs(original);
+    const v = x.of(s);
+    s[i] = original;
+    if (v === undefined) return Infinity;
+    total += Math.abs(v - x.value);
+  }
+  return total;
 }
 
 /**
