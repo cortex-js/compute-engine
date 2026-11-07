@@ -202,6 +202,15 @@
   frame `Multiply argument 1`, and Epsil underlines `s`. The same applies to
   `Add`. In the body of a called function, the error keeps no frame, as
   before.
+- **The error of `Sin`, `Cos`, `Exp`, `Power` and the other numeric functions
+  for an argument that is not a number now names that function.** With
+  `w = "s"`, the error of `["Subtract", 3, ["Sin", "w"]]` had the frames
+  `Negate argument 1, Add argument 1`, and an Epsil program
+  `let v = Sin(w) * 2` underlined `Sin(w)`. The error now has the frame
+  `Sin argument 1` first, as the error of `Ln` already had, and Epsil
+  underlines `w`. `Exp(w)` gives the frame `Power argument 2`, because its
+  canonical form is `Power(ExponentialE, w)`. In the body of a called
+  function, the error keeps no frame of its own, as before.
 - **An expansion no longer turns one random draw into several.** With `r`
   declared with the `random` effect, `Expand((r(t) + 1)^2)` gave
   `r(t)^2 + 2r(t) + 1`, three independent draws where the input has one; it

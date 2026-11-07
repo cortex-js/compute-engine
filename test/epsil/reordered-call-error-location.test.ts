@@ -40,9 +40,9 @@ describe('an error in an operand of a sum or product', () => {
 
   test.each([
     ['let v = Ln(w) * 2', 'w'],
-    // The error that the handler of `Sin` makes has no `Sin` frame, so the
-    // operand is underlined (issue CE-1047).
-    ['let v = Sin(w) * 2', 'Sin(w)'],
+    // The error that the handler of `Sin` makes has the frame
+    // `Sin argument 1`, as the error of `Ln(w)` has.
+    ['let v = Sin(w) * 2', 'w'],
     ['let v = 2 * Ln(w)', 'w'],
     // `Max` keeps the written order of its operands.
     ['let v = Max(z, Ln(w))', 'w'],
@@ -74,15 +74,15 @@ describe('an error in an operand of a sum or product', () => {
   });
 
   // The error of an operand that the product evaluates names that operand of
-  // the canonical call, so it is underlined when other operands can also
-  // fail. Before, the frame counted the operands of the result of the
-  // evaluation (`Cos(x)·Error(…)`), so the whole call was underlined.
+  // the canonical call, and the frame `Sin argument 1` then names the
+  // argument `w`, when other operands can also fail. The frames do not count
+  // the operands of the result of the evaluation (`Cos(x)·Error(…)`).
   test.each([
-    ['let v = Sin(w) * Cos(x)', 'Sin(w)'],
-    ['let v = Cos(x) * Sin(w)', 'Sin(w)'],
-    ['let v = Sin(w) + Ln(x)', 'Sin(w)'],
-    ['let v = Cos(x) - Sin(w)', 'Sin(w)'],
-    ['let v = x * y * Sin(w)', 'Sin(w)'],
+    ['let v = Sin(w) * Cos(x)', 'w'],
+    ['let v = Cos(x) * Sin(w)', 'w'],
+    ['let v = Sin(w) + Ln(x)', 'w'],
+    ['let v = Cos(x) - Sin(w)', 'w'],
+    ['let v = x * y * Sin(w)', 'w'],
   ])('%s underlines %s', (stmt, expected) => {
     expect(underlines(`${prefix}${stmt}\n0`)).toEqual([expected]);
   });
@@ -90,7 +90,7 @@ describe('an error in an operand of a sum or product', () => {
   test('two operands that can fail underline the first that fails', () => {
     expect(
       underlines(`${prefix}let u: any = "t"\nlet v = Sin(u) * Ln(w)\n0`)
-    ).toEqual(['Sin(u)']);
+    ).toEqual(['u']);
   });
 
   test('a variable that holds an expression that fails when it is read', () => {
@@ -102,9 +102,11 @@ describe('an error in an operand of a sum or product', () => {
     expect(underlines(`${src}let v = Cos(x) * w2\n0`)).toEqual(['w2']);
   });
 
-  test('a second product inside an operand underlines the whole call', () => {
+  test('a second product inside an operand does not hide the argument', () => {
+    // The frames `Sin argument 1, Multiply argument 2` select the `w` of
+    // `Sin(w)`, not an operand of the product `x * y`.
     expect(underlines(`${prefix}let v = Ln(x * y) * Sin(w)\n0`)).toEqual([
-      'Ln(x * y) * Sin(w)',
+      'w',
     ]);
   });
 

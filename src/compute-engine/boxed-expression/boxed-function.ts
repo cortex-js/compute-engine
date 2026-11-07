@@ -7539,10 +7539,10 @@ export class BoxedFunction
    * Only an error with no breadcrumb is read: an error with a breadcrumb was
    * made by the evaluation of an operand, not by this handler.
    *
-   * Only `Add` and `Multiply` are read. The same error of another operator
-   * (`Sin(s)`) keeps no frame of its own: the frame of the operator that
-   * encloses the call names the call, and Epsil underlines the call
-   * `Sin(s)`, not `s`.
+   * Only `Add` and `Multiply` are read. The same error of an operator that
+   * is not lazy (`Sin(s)`) gets its frame from
+   * `_handlerOperandTypeError()`, which finds the evaluated operand that the
+   * handler received.
    *
    * The binding is read after the handler evaluated every operand. When an
    * operand can assign a variable (`s·F()` with a function `F` that assigns
@@ -7589,6 +7589,83 @@ export class BoxedFunction
       (op) => isSymbol(op) && op.value?.isSame(value) === true
     );
     if (index < 0) return undefined;
+    return withErrorFrames(result, [
+      { operator: this._operator, index: index + 1 },
+    ]);
+  }
+
+  /**
+   * The `incompatible-type` error that the `evaluate` handler of this node
+   * returned for one of the operands it received, with a breadcrumb frame
+   * that names that operand, or `undefined`.
+   *
+   * The handlers of `Sin`, `Cos`, `Exp`, `Power` and the other numeric
+   * operators with a `canonical` handler refuse an operand that cannot be a
+   * number (`nonNumericOperandError()`, `validate.ts`). The error holds the
+   * refused operand itself, but not its position: `Sin(w)` with `w = "s"`
+   * gives `Error(ErrorCode("incompatible-type", "number", "string"), "s")`.
+   * The generic check of the evaluated operands
+   * (`genericRuntimeConformance()`) does not run for these operators, and it
+   * is the check that gives `Ln(w)` the frame `Ln` argument 1. This function
+   * gives the same frame to the error of `Sin(w)`, so that the breadcrumb
+   * names the function and the Epsil error location underlines `w`.
+   *
+   * `ops` are the operands that the handler received, aligned with the
+   * operands of this node. The operand is found by identity: the error must
+   * hold the very operand object, and exactly one operand must be that
+   * object. When two positions hold the same object (`Power(w, w)`), or when
+   * the operands do not align with those of this node (a spread argument
+   * changed their count), no frame is added and the enclosing call keeps its
+   * frame.
+   *
+   * Only an error with no breadcrumb is read: an error with a breadcrumb was
+   * made by the evaluation of an operand, or was framed by the handler.
+   *
+   * The call of a user function adds no frame: its "handler" is the
+   * evaluation of its body, and an error of the body is located by the
+   * frames of the body, not by a frame of the call.
+   *
+   * A lazy operator adds no frame either. Its handler receives the operands
+   * as written and evaluates them itself, and the nodes that it evaluates
+   * can be nodes that it built: the product of a scalar and a list evaluates
+   * one `Multiply` for each cell, whose operands are not those of the
+   * written call. `Add` and `Multiply` name their operand with
+   * `_operandValueTypeError()`.
+   *
+   * No frame is added in the body of a called function (a `'call'` context
+   * on the evaluation-context stack), for the reason that
+   * `_operandValueTypeError()` gives: the Epsil error location matches the
+   * frames to the statement by operator name, and a frame `Sin` argument 1
+   * of the body would select an operand of a `Sin` call of the statement.
+   */
+  private _handlerOperandTypeError(
+    def: BoxedOperatorDefinition,
+    result: Expression | undefined,
+    ops: ReadonlyArray<Expression>
+  ): Expression | undefined {
+    if (!isFunction(result, 'Error') || errorTrace(result) !== undefined)
+      return undefined;
+    if (
+      ops.length !== this._ops.length ||
+      def.lazy === true ||
+      isUserFunctionDef(def)
+    )
+      return undefined;
+    const code = result.op1;
+    if (
+      !isFunction(code, 'ErrorCode') ||
+      !isString(code.op1) ||
+      code.op1.string !== 'incompatible-type'
+    )
+      return undefined;
+    const value = errorWhere(result);
+    if (value === undefined) return undefined;
+    const index = ops.indexOf(value);
+    if (index < 0 || ops.indexOf(value, index + 1) >= 0) return undefined;
+    if (
+      this.engine._evalContextStack.some((context) => context.name === 'call')
+    )
+      return undefined;
     return withErrorFrames(result, [
       { operator: this._operator, index: index + 1 },
     ]);
@@ -9519,6 +9596,10 @@ export class BoxedFunction
             evalResult,
             () => tail
           );
+          // A type error for an operand that the handler received names
+          // the position of that operand (`_handlerOperandTypeError()`).
+          evalResult =
+            this._handlerOperandTypeError(def, evalResult, ops) ?? evalResult;
         }
       } catch (e) {
         // An assignment to a constant keeps the source range of the
@@ -10963,6 +11044,8 @@ export class BoxedFunction
       // Whether the handler was called (an apply-site hook can answer in its
       // place).
       let handlerCalled = false;
+      // The operands that the handler received, when it was called.
+      let handlerOperands: ReadonlyArray<Expression> = tail;
       try {
         const opts: Partial<EvaluateOptions> & {
           engine: ComputeEngine;
@@ -11104,6 +11187,12 @@ export class BoxedFunction
                 return kindAnswer.value;
               if (kindAnswer !== undefined) handlerOps = kindAnswer.operands;
               handlerCalled = true;
+              // An `evaluateAsync` handler receives `tail` unless an
+              // apply-site hook gave other operands; see its call below.
+              handlerOperands =
+                def.evaluateAsync !== undefined && kindAnswer === undefined
+                  ? tail
+                  : handlerOps;
               if (def.evaluateAsync !== undefined) {
                 // A walk that failed in the synchronous part of the call
                 // (before its first `await`), where no other evaluation can
@@ -11189,6 +11278,24 @@ export class BoxedFunction
           contextStack,
           options?._precisionWindow
         );
+        // As on the synchronous route, a type error that the handler returned
+        // for an operand it received names the position of that operand
+        // (`_handlerOperandTypeError()`). Only the answer of the handler is
+        // read, not the answer of an apply-site hook or the error of a walk.
+        // The function reads the context stack of this evaluation, so it
+        // runs with that stack in place.
+        const framedByOperand = (
+          answer: Expression | undefined,
+          received: ReadonlyArray<Expression>
+        ): Expression | undefined =>
+          runWithEvaluationEffects(
+            engine,
+            effects,
+            () => this._handlerOperandTypeError(def, answer, received),
+            contextStack,
+            options?._precisionWindow
+          ) ?? answer;
+        if (handlerCalled) value = framedByOperand(value, handlerOperands);
         if (handlerMissedElements) value = handlerFailure;
         else value ??= asyncSliceFailure;
         // Only a handler that was called and declined is called again: an
@@ -11200,13 +11307,16 @@ export class BoxedFunction
         // as on the synchronous route (`declinedOverListedFlatMaps()`). The
         // call is made here, in this step, as the first call.
         if (value === undefined && handlerCalled && !handlerMissedElements)
-          value = await evaluateAsyncOverListedFlatMaps(
-            this,
-            def,
-            handlerOps,
-            listingMemo,
-            { ...options, _effects: effects, _contextStack: contextStack },
-            opts
+          value = framedByOperand(
+            await evaluateAsyncOverListedFlatMaps(
+              this,
+              def,
+              handlerOps,
+              listingMemo,
+              { ...options, _effects: effects, _contextStack: contextStack },
+              opts
+            ),
+            handlerOps
           );
         // A handler that answers `undefined` leaves the operator as it is;
         // over evaluated operands that is the operator over the values, as

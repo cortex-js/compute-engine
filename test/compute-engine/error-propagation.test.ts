@@ -584,8 +584,10 @@ describe('ERROR PROPAGATION — the frame of a sum or a product names the operan
     [['Multiply', 'x', 'y', ['Sin', 's']]],
     [['Add', ['Cos', 'x'], ['Sin', 's']]],
   ] as [MathJsonExpression][])('%j names sin(s)', (json) => {
+    // The handler of `Sin` names its operand: the first frame is `Sin`
+    // argument 1.
     expect(failed(engine(), json)).toEqual({
-      frames: [json[0]],
+      frames: ['Sin', json[0]],
       operand: 'sin(s)',
     });
   });
@@ -618,7 +620,10 @@ describe('ERROR PROPAGATION — the frame of a sum or a product names the operan
       ['Multiply', 'w', ['Cos', 'x']],
       ['Multiply', ['Cos', 'x'], 'w'],
     ] as MathJsonExpression[])
-      expect(failed(ce, json)).toEqual({ frames: ['Multiply'], operand: 'w' });
+      expect(failed(ce, json)).toEqual({
+        frames: ['Sin', 'Multiply'],
+        operand: 'w',
+      });
   });
 
   test('two operands that return the same error node name the first', () => {
@@ -640,7 +645,10 @@ describe('ERROR PROPAGATION — the frame of a sum or a product names the operan
     const expr = ce.box(['Multiply', ['Sin', 's'], ['Cos', 'x']]);
     const value = await expr.evaluateAsync();
     expect(errorFrames(value)).toEqual(errorFrames(expr.evaluate()));
-    expect(errorFrames(value)).toEqual([{ operator: 'Multiply', index: 1 }]);
+    expect(errorFrames(value)).toEqual([
+      { operator: 'Sin', index: 1 },
+      { operator: 'Multiply', index: 1 },
+    ]);
   });
 
   // The operand `s` evaluates to the valid string "a", and the handler makes
@@ -709,11 +717,13 @@ describe('ERROR PROPAGATION — the frame of a sum or a product names the operan
     expect(errorFrames(value)).toEqual([]);
   });
 
-  test('another operator adds no frame for its symbol operand', () => {
-    // Only `Add` and `Multiply` look for the operand. The type error of
-    // `Sin(s)` keeps no frame of its own.
+  test('another operator names the operand that its handler refused', () => {
+    // The handler of `Sin` receives the value "a" of `s` and refuses it.
+    // The frame names the position of that value.
     const ce = engine();
-    expect(errorFrames(ce.box(['Sin', 's']).evaluate())).toEqual([]);
+    expect(errorFrames(ce.box(['Sin', 's']).evaluate())).toEqual([
+      { operator: 'Sin', index: 1 },
+    ]);
   });
 });
 
