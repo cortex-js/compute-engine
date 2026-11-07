@@ -101,10 +101,10 @@ exports[`EXOTIC INTEGRALS \\iiint 1`] = `
 int_(V)(f(x, y, z) dx  dy  dz)
 [
   "Integrate",
-  ["Function", ["f", "x", "y", "z"], "x", "y", "z"],
-  ["Limits", "x", "V", "Nothing"],
+  ["Function", ["f", "x", "y", "z"], "z", "y", "x"],
+  ["Limits", "z", "V", "Nothing"],
   ["Limits", "y", "Nothing", "Nothing"],
-  ["Limits", "z", "Nothing", "Nothing"]
+  ["Limits", "x", "Nothing", "Nothing"]
 ]
 `;
 
@@ -113,9 +113,9 @@ exports[`EXOTIC INTEGRALS \\iint 1`] = `
 int_(D)(f(x, y) dx  dy)
 [
   "Integrate",
-  ["Function", ["f", "x", "y"], "x", "y"],
-  ["Limits", "x", "D", "Nothing"],
-  ["Limits", "y", "Nothing", "Nothing"]
+  ["Function", ["f", "x", "y"], "y", "x"],
+  ["Limits", "y", "D", "Nothing"],
+  ["Limits", "x", "Nothing", "Nothing"]
 ]
 `;
 

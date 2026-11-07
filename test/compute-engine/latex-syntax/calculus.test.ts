@@ -371,6 +371,115 @@ describe('MULTIPLE INTEGRALS', () => {
   });
 });
 
+// The first limit of `Integrate` is the outermost integral (the evaluation
+// uses this order). In LaTeX the differentials are written innermost first,
+// so the variable of the last differential is the first limit.
+describe('ORDER OF THE LIMITS OF A MULTIPLE INTEGRAL', () => {
+  const limitVariables = (latex: string) =>
+    ce
+      .parse(latex)
+      .ops!.slice(1)
+      .map((limit) => limit.op1.symbol);
+
+  test('\\iint: the last differential is the first limit', () => {
+    expect(limitVariables('\\iint xy\\,dx\\,dy')).toEqual(['y', 'x']);
+  });
+
+  test('\\iiint: the last differential is the first limit', () => {
+    expect(limitVariables('\\iiint xyz\\,dx\\,dy\\,dz')).toEqual([
+      'z',
+      'y',
+      'x',
+    ]);
+  });
+
+  test('\\oiint: the last differential is the first limit', () => {
+    expect(limitVariables('\\oiint f\\,dx\\,dy')).toEqual(['y', 'x']);
+  });
+
+  test('differentials inside a group give the same order', () => {
+    expect(limitVariables('\\iint_0^1 (xydxdy)')).toEqual(['y', 'x']);
+    expect(limitVariables('\\iint \\sin(xydxdy)')).toEqual(['y', 'x']);
+    expect(limitVariables('\\iint \\frac{dxdy}{x}')).toEqual(['y', 'x']);
+    expect(ce.parse('\\iint_0^1 (xydxdy)').evaluate().toString()).toBe(
+      '1/4 * x^2'
+    );
+  });
+
+  test('the plain-text form names the variables of the limits', () => {
+    // The parameters of the integrand are in another order than the limits
+    const expr = ce.box([
+      'Integrate',
+      ['Function', ['Multiply', 'x', 'y'], 'x', 'y'],
+      ['Limits', 'y', 0, 1],
+      ['Limits', 'x', 0, 3],
+    ]);
+    expect(expr.toString()).toBe('int_(0)^(1)_(0)^(3)(x * y dx  dy)');
+    // A non-canonical integral whose limits are bare variables
+    const raw = ce.box(
+      ['Integrate', ['Function', ['Multiply', 'x', 'y'], 'x', 'y'], 'y', 'x'],
+      { form: 'raw' }
+    );
+    expect(raw.toString()).toBe('int(x * y dx  dy)');
+  });
+
+  test('the bounds of the sign go with the first limit', () => {
+    const expr = ce.parse('\\iint_0^1 xy\\,dx\\,dy');
+    expect(expr.op2.json).toEqual(['Limits', 'y', 0, 1]);
+    expect(expr.op3.json).toEqual(['Limits', 'x', 'Nothing', 'Nothing']);
+    expect(ce.parse(expr.latex).isSame(expr)).toBe(true);
+  });
+
+  test('\\iint round-trips with the same order', () => {
+    const expr = ce.parse('\\iint xy\\,dx\\,dy');
+    expect(expr.latex).toMatchInlineSnapshot(
+      `\\iint\\!xy\\, \\mathrm{d}x \\mathrm{d}y`
+    );
+    expect(ce.parse(expr.latex).isSame(expr)).toBe(true);
+  });
+
+  // With a bound of the inner integral that uses the variable of the outer
+  // integral, a change of order changes the value.
+  test('a flat integral serializes with its first limit as the first sign', () => {
+    const expr = ce.box([
+      'Integrate',
+      ['Multiply', 'x', 'y'],
+      ['Limits', 'y', 0, 1],
+      ['Limits', 'x', 0, ['Multiply', 2, 'y']],
+    ]);
+    expect(expr.latex).toMatchInlineSnapshot(
+      `\\int_{0}^{1}\\int_{0}^{2y}\\!xy\\, \\mathrm{d}x \\mathrm{d}y`
+    );
+    // The plain-text form also writes the differentials innermost first
+    expect(expr.toString()).toBe('int_(0)^(1)_(0)^(2y)(x * y dx  dy)');
+    expect(expr.evaluate().toString()).toBe('1/2');
+    expect(ce.parse(expr.latex).evaluate().toString()).toBe('1/2');
+  });
+
+  test('a flat integral with an outer bound that uses the inner variable', () => {
+    const expr = ce.box([
+      'Integrate',
+      ['Multiply', 'x', 'y'],
+      ['Limits', 'x', 0, ['Multiply', 2, 'y']],
+      ['Limits', 'y', 0, 1],
+    ]);
+    expect(expr.latex).toMatchInlineSnapshot(
+      `\\int_{0}^{2y}\\int_{0}^{1}\\!xy\\, \\mathrm{d}y \\mathrm{d}x`
+    );
+    expect(expr.evaluate().toString()).toBe('y^2');
+    expect(ce.parse(expr.latex).evaluate().toString()).toBe('y^2');
+  });
+
+  test('\\iint_0^1: the bounds are those of the outer integral', () => {
+    // `\iint` carries one set of bounds, which go with the outer integral
+    // over `y`; the inner integral over `x` has no bounds. With the other
+    // order the value would be `1/4 * y^2`.
+    expect(
+      ce.parse('\\iint_0^1 xy\\,dx\\,dy').evaluate().toString()
+    ).toBe('1/4 * x^2');
+  });
+});
+
 describe('EXOTIC INTEGRALS', () => {
   test('\\oint - contour integral', () => {
     expect(parse('\\oint_V f(s) ds')).toMatchSnapshot();

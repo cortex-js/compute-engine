@@ -16,10 +16,15 @@ import { endsTabularCell } from '../tokenizer.js';
 // Also DIN 1304 (symbols in formulas) and DIN 1338 (typesetting of formulas)
 
 /**
- * Parse an expression of the form:
- *    `/int_a^b\int_c^d f(x, y) dx dy`
+ * Parse an integral, for example:
+ *    `\iint_D f(x, y)\,dx\,dy`
  * to
- *    `["Integrate", f(x, y), [x, a, b], [y, c, d]]`
+ *    `["Integrate", f(x, y), ["Tuple", "y", "D", "Nothing"], "x"]`
+ *
+ * The first limit of `Integrate` is the outermost integral, and the
+ * differentials are written innermost first, so their order is reversed
+ * (see `makeIntegral()`). Consecutive `\int` signs parse as nested
+ * `Integrate` expressions, one for each sign.
  *
  * The number of \int doesn't necessarily match the number of indexes
  * (for examples, `\iint f dxdy`
@@ -193,6 +198,16 @@ function makeIntegral(
 ): MathJsonExpression | null {
   if (!fn) return null;
 
+  // The differentials of a multiple integral are written innermost first:
+  // in `\iint f\,dx\,dy` the integral over `x` is inside the integral over
+  // `y`. The first limit of `Integrate` is the outermost integral (the
+  // evaluation and `nIntegrateMultiple()` in `library/calculus.ts` use this
+  // order, as `Sum` and `Product` do), so the indexes are reversed:
+  // `Integrate(f, y, x)`. The bounds written on the sign (`\iint_D`) stay
+  // with the first limit, the outermost integral, as the bounds of the first
+  // sign of `\int_a^b\int_c^d f\,dx\,dy` are those of the integral over `y`.
+  const outerFirst = [...limits.indexes].reverse();
+
   //
   // Make the tuples
   //
@@ -200,16 +215,16 @@ function makeIntegral(
   if (limits.sups.length === 0 && limits.subs.length === 0) {
     // No limits, just the function
     // if (args.length === 0) return [command, fn];
-    return [command, fn, ...limits.indexes];
+    return [command, fn, ...outerFirst];
   }
 
   // Use the provided indexes, or if none, use the arguments of the function
   const indexes =
-    limits.indexes.length === 0
+    outerFirst.length === 0
       ? operator(fn) === 'Function'
         ? operands(fn).slice(1)
         : []
-      : limits.indexes;
+      : outerFirst;
 
   const count = Math.max(
     limits.sups.length,
@@ -703,7 +718,10 @@ function serializeIntegral(command: string) {
       }
     });
 
+    // The first limit is the outermost integral, and the differentials are
+    // written innermost first: `Integrate(f, y, x)` is `\iint f\,dx\,dy`.
     let suffix = indexes
+      .reverse()
       .filter((x) => symbol(x) !== 'Nothing')
       .map((arg) => `\\mathrm{d}${serializer.serialize(symbol(arg) ?? 'x')}`);
     if (suffix.length > 0) suffix = ['\\,', ...suffix];
@@ -721,10 +739,11 @@ function serializeIntegral(command: string) {
         compactSign + '\\!' + serializer.serialize(body) + suffix.join(' ')
       );
 
-    // The order of the limits is reversed
+    // The first limit is the outermost integral, so its sign is written
+    // first: `Integrate(f, Limits(y, a, b), Limits(x, c, d))` is
+    // `\int_a^b\int_c^d f\,dx\,dy`
     return (
       prefix
-        .reverse()
         .map((x) => `${command}${x}`)
         .join('') +
       '\\!' +
@@ -929,11 +948,15 @@ function parseFinalDiffOperators(
   let rest: ReadonlyArray<MathJsonExpression> = [...xs];
   const indexes: string[] = [];
 
+  // The differentials are read from the last one, and each one is put at the
+  // start of `indexes`, so that `indexes` has the written order (`3xdxdy`
+  // gives `['x', 'y']`), as the differentials that follow the integrand do.
+  // `makeIntegral()` then makes the last differential the first limit.
   while (rest.length > 0) {
     let index: string;
     [rest, index] = parseFinalDiffOperator(rest, binderName);
     if (!index) break;
-    indexes.push(index);
+    indexes.unshift(index);
   }
 
   return [rest, indexes];

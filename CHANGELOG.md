@@ -17,6 +17,22 @@
   (`let t = take(big, 2)`) reads no variable, so it now stays lazy, and its
   callback runs each time its elements are read. `ce.assign()` is not changed:
   it stores the value it is given.
+- **`\iint` and `\iiint` now give the limits in the order that the evaluation
+  uses: the first limit is the outermost integral.** `\iint xy\,dx\,dy`
+  parsed to `["Integrate", …, ["Limits", "x", …], ["Limits", "y", …]]`, which
+  makes `x` the outer variable, and now parses to
+  `["Integrate", …, ["Limits", "y", …], ["Limits", "x", …]]`. The bounds of
+  the sign go with the first limit: `\iint_0^1 xy\,dx\,dy` was `1/4 * y^2`
+  and is now `1/4 * x^2`. The same applies to `\oiint` and `\oiiint`. The
+  LaTeX of an `Integrate` with several limits now writes the integral sign
+  of the first limit first, and the differentials innermost first:
+  `["Integrate", ["Multiply", "x", "y"], ["Limits", "x", 0, ["Multiply", 2, "y"]], ["Limits", "y", 0, 1]]`
+  (value `y^2`) serialized to `\int_{0}^{1}\int_{0}^{2y}\!xy\,dx\,dy`, which
+  parses back with the value `1/2`. It now serializes to
+  `\int_{0}^{2y}\int_{0}^{1}\!xy\,dy\,dx`. The plain-text form
+  (`toString()`) writes the differentials in the same order, with the
+  variables of the limits: that integral is now
+  `int_(0)^(2y)_(0)^(1)(x * y dy  dx)`.
 
 ### Resolved Issues
 
