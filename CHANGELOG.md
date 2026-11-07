@@ -872,6 +872,15 @@
   an imaginary part. `∫₁² 1/x dx` took about 187 µs and now takes about
   173 µs, and `∫₀^π x·sin x dx` about 449 µs and now 397 µs (medians of five
   runs, from source). The values do not change. (CE-351)
+- **Boxing an arithmetic expression is up to 10% faster.** The type of an
+  exact literal such as `√6` is kept for each value, so a second boxing of
+  the same value does not compute it again; a number literal is not tested
+  for an inferred type, which it never takes; and the type of a product of
+  fewer than two operands that can be lists skips the test for a matrix
+  product. Boxing `√6x + √2x` took about 11.8 µs and now takes about
+  10.6 µs, the simplification of `√(3+2√2)` 5% less time, and
+  `∫1/(x³+1) dx` 4% less (medians of five runs, from source). The types and
+  values do not change. (CE-351)
 - **Evaluating the same derivative again no longer differentiates again.**
   A `D` expression keeps its closed form while nothing that it reads changes:
   the value of a symbol, the definition of a function that it calls, an

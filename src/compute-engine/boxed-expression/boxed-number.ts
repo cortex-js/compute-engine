@@ -168,8 +168,50 @@ const COMPLEX_INFINITY_TYPE: Type = Object.freeze({
  * or a subnormal underflow — see `MIN_NORMAL_DOUBLE`), or a bound lands on
  * the wrong side of zero and would lose the literal's sign fact. Callers
  * fall back to the sign-only range there.
+ *
+ * When the machine projection `re` of the value is a finite, normal,
+ * nonzero double, the enclosure is a function of `re`, `tier` and `sign`
+ * only (see the double route of `computeLiteralEnclosureType()`), and it is
+ * kept in `ENCLOSURE_MEMOS`. A literal is boxed again at each construction
+ * of an expression (`√6` each time `√6x + √2x` is built), and the two
+ * directed roundings and the key of the shared range type cost about 3 % of
+ * that boxing (measured 2026-11-07).
  */
 function literalEnclosureType(
+  v: NumericValue,
+  tier: 'integer' | 'rational' | 'real',
+  sign: 'positive' | 'negative'
+): Type | undefined {
+  const re = v.re;
+  if (!Number.isFinite(re) || re === 0 || Math.abs(re) < MIN_NORMAL_DOUBLE)
+    return computeLiteralEnclosureType(v, tier, sign);
+  const memo = ENCLOSURE_MEMOS[tier][sign];
+  const known = memo.get(re);
+  if (known !== undefined) return known ?? undefined;
+  const result = computeLiteralEnclosureType(v, tier, sign);
+  if (memo.size >= ENCLOSURE_MEMO_MAX_SIZE) memo.clear();
+  memo.set(re, result ?? null);
+  return result;
+}
+
+/** The most entries of each map of `ENCLOSURE_MEMOS`. A full map is
+ * emptied, as the table of shared range types is (`immutableNumericType()`). */
+const ENCLOSURE_MEMO_MAX_SIZE = 4096;
+
+/** The enclosures that the double route of `computeLiteralEnclosureType()`
+ * gave, by tier, by sign, and by the double `re` of the value. `null` is an
+ * enclosure that does not exist. Each type is a shared frozen type
+ * (`immutableNumericType()`), so it can be given to more than one literal. */
+const ENCLOSURE_MEMOS: Record<
+  'integer' | 'rational' | 'real',
+  Record<'positive' | 'negative', Map<number, Type | null>>
+> = {
+  integer: { positive: new Map(), negative: new Map() },
+  rational: { positive: new Map(), negative: new Map() },
+  real: { positive: new Map(), negative: new Map() },
+};
+
+function computeLiteralEnclosureType(
   v: NumericValue,
   tier: 'integer' | 'rational' | 'real',
   sign: 'positive' | 'negative'

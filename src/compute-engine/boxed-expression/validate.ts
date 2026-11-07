@@ -192,6 +192,14 @@ const INDEXED_COLLECTION_OF_NUMBER = parseType('indexed_collection<number>');
  * by broadcast.
  */
 function excludedFromScalarInference(op: Expression): boolean {
+  // A number literal takes no inferred type: its `_infer()` is the one of
+  // the base class, which writes nothing and returns `false`. Every caller
+  // uses this test only to decide whether to call `_infer()`, so excluding
+  // the literal has the same effect as the tests below (which return
+  // `false` for it), and does not compute the type of the literal (an
+  // enclosure for `√6`). The `couldBeNonReal` scan of the callers still
+  // reads its type.
+  if (isNumber(op)) return true;
   // A kind value (a residue class) is admitted in a numeric position
   // (`hasKindArm`) but it is not a number: no numeric type is inferred onto
   // it.

@@ -21202,6 +21202,25 @@ function withAbsentPointCellResults(expr: Expression, t: Type): Type {
  */
 function withMatrixProductNaNCells(expr: Expression, t: Type): Type {
   if (expr.operator !== 'Multiply' || !isFunction(expr)) return t;
+  // An operand whose type is a subtype of `number` and is a primitive type,
+  // a numeric range or a value type has no `missing` arm and is not a list,
+  // so it does not count among the two collection operands below. Other
+  // kinds of type are counted: an intersection such as `real & matrix` is a
+  // subtype of `number` (one arm is enough) and also of `list`. Most
+  // products have at most one other operand: the type facts are kept on
+  // each type, and this test does not strip and compare the type of each
+  // operand.
+  let others = 0;
+  for (const x of expr.ops) {
+    const xt = x.type;
+    const scalar =
+      xt.facts.belowNumber &&
+      (typeof xt.type === 'string' ||
+        xt.type.kind === 'numeric' ||
+        xt.type.kind === 'value');
+    if (!scalar) others += 1;
+  }
+  if (others < 2) return t;
   // An operand that is always absent strips to `never`, a subtype of every
   // type: it is not a collection operand.
   const present = expr.ops
