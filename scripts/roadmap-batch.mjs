@@ -26,6 +26,15 @@
  * stream-json output), `<id>.err`, and `<id>.report.md` (the session's last
  * message); and `summary.md`, one line per item, written as items end.
  *
+ * Status, for the Progress tab of the issue web app (`scripts/issues-ui.mjs`):
+ * one JSON file per batch in `~/.local/state/compute-engine-batch/`, named by
+ * the start time and the process id, and written again each time an item
+ * starts or ends. It holds the process id, the output directory, the time the
+ * batch ended (null while it runs) and, for each item, its state (`waiting`,
+ * `running` or `ended`), its start and end times and the `Result:` line of its
+ * report. The web app shows a batch whose end time is null and whose process
+ * is gone as stopped before the end. The files are not removed.
+ *
  * Options:
  *   --queue <file>        The queue file (required).
  *   --items CE-1,CE-2     Run these items of the queue, in this order.
@@ -53,6 +62,7 @@ import {
   mkdirSync,
   readdirSync,
   createWriteStream,
+  renameSync,
 } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
@@ -188,6 +198,52 @@ function log(line) {
   appendFileSync(join(values.out, 'batch.log'), stamped + '\n');
 }
 
+const statusDir = join(homedir(), '.local', 'state', 'compute-engine-batch');
+const batchStarted = new Date().toISOString();
+const statusFile = join(
+  statusDir,
+  `${batchStarted.replace(/[:.]/g, '-')}-${process.pid}.json`
+);
+const itemStatus = new Map(
+  items.map((item) => [
+    item.id,
+    {
+      id: item.id,
+      title: item.title,
+      area: item.area,
+      session: nameOf(item),
+      state: 'waiting',
+    },
+  ])
+);
+let waitingNote = '';
+
+/**
+ * Writes the status file of the batch (see the header). The file is written
+ * under another name and renamed, so that a reader never gets half a file. A
+ * failure to write it does not stop the batch.
+ */
+function writeStatus(finished = null) {
+  try {
+    mkdirSync(statusDir, { recursive: true });
+    const status = {
+      pid: process.pid,
+      repo,
+      out: values.out,
+      started: batchStarted,
+      updated: new Date().toISOString(),
+      finished,
+      concurrency,
+      waiting: waitingNote,
+      items: [...itemStatus.values()],
+    };
+    writeFileSync(`${statusFile}.tmp`, JSON.stringify(status, null, 2) + '\n');
+    renameSync(`${statusFile}.tmp`, statusFile);
+  } catch (e) {
+    console.error(`could not write ${statusFile}: ${e.message}`);
+  }
+}
+
 /** The session's last message and its cost, from the stream-json output. */
 function finalResult(jsonlFile) {
   let result;
@@ -240,6 +296,11 @@ function launch(item) {
     child.kill('SIGTERM');
   }, timeoutMs);
   running.set(item.id, { item, child, started: Date.now() });
+  Object.assign(itemStatus.get(item.id), {
+    state: 'running',
+    started: new Date().toISOString(),
+  });
+  writeStatus();
   log(`${item.id} started as ${name} [${item.area}]`);
 
   child.on('exit', (code, signal) => {
@@ -272,6 +333,15 @@ function launch(item) {
     log(
       `${item.id} ended: ${status} (${minutes} min, ${turns} turns, ${cost})`
     );
+    Object.assign(itemStatus.get(item.id), {
+      state: 'ended',
+      ended: new Date().toISOString(),
+      result: status,
+      turns,
+      cost,
+      report: join(values.out, `${item.id}.report.md`),
+    });
+    writeStatus();
     schedule();
   });
 }
@@ -283,16 +353,22 @@ function schedule() {
     if (running.size + others.length >= concurrency) {
       const note = `waiting: ${running.size} batch sessions, other sessions in this repo: ${others.join(', ') || 'none'}`;
       if (note !== waitingNoted) log((waitingNoted = note));
+      if (note !== waitingNote) {
+        waitingNote = note;
+        writeStatus();
+      }
       return;
     }
     const busy = new Set([...running.values()].map((r) => r.item.area));
     const index = pending.findIndex((item) => !busy.has(item.area));
     if (index < 0) return;
     const [item] = pending.splice(index, 1);
+    waitingNote = '';
     launch(item);
   }
   if (running.size === 0) {
     log('batch finished');
+    writeStatus(new Date().toISOString());
     process.exit(0);
   }
 }
@@ -304,4 +380,5 @@ writeFileSync(
   `# Batch of ${new Date().toISOString()}\n\n`
 );
 log(`batch of ${items.length} items: ${items.map((i) => i.id).join(', ')}`);
+writeStatus();
 schedule();

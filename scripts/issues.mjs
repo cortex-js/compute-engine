@@ -173,7 +173,7 @@ export function issuesDir() {
  * `ROOT` is the main worktree, where `issues/`, `ROADMAP.md` and the git
  * index are. The lists are the values that the header fields admit.
  */
-export { ROOT, STATES, PRIORITIES, FLAGS };
+export { ROOT, STATES, PRIORITIES, FLAGS, VERSION_RE };
 
 /** A refused command or edit. The command line prints `issues: <message>` and exits with 1. */
 export class IssueError extends Error {}
@@ -197,7 +197,7 @@ function validDate(v) {
 }
 
 /** Compares two versions x.y.z numerically. */
-function compareVersions(a, b) {
+export function compareVersions(a, b) {
   const pa = a.split('.').map(Number);
   const pb = b.split('.').map(Number);
   for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] - pb[i];
@@ -220,7 +220,16 @@ function fail(msg) {
 
 /** Splits a file into the header fields and the body. */
 function parseFile(file) {
-  const text = fs.readFileSync(file, 'utf8').replace(/\r/g, '');
+  return parseText(fs.readFileSync(file, 'utf8'));
+}
+
+/**
+ * Splits the text of an issue file into the header fields and the body. The
+ * web app uses it for the text of a file that a commit deleted, which
+ * `git show` gives.
+ */
+export function parseText(source) {
+  const text = source.replace(/\r/g, '');
   const lines = text.split('\n');
   const errors = [];
   if (lines[0] !== '---')
@@ -276,7 +285,8 @@ function bodyWords(body) {
   return n;
 }
 
-function firstBodyLine(body) {
+/** The first line of the body that is not empty: what the user sees. */
+export function firstBodyLine(body) {
   return body.split('\n').find((l) => l.trim()) ?? '';
 }
 

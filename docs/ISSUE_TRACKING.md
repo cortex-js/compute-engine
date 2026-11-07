@@ -367,10 +367,30 @@ chooses another port, and `--dir` and `--today` work as for the script. The
 server reads `issues/` of the main worktree on every request, so an edit by an
 agent shows at the next refresh.
 
-The page has three tabs: **Board** (the sections of `board`, in the same
+The page has four tabs: **Board** (the sections of `board`, in the same
 order, and the files that have lint errors), **Backlog** (the lists of
-`backlog`, with a text filter) and **All** (every file, then `CLOSED.md`). Each
-item is a card with the first body line, the `ask` line and controls that
+`backlog`, with a text filter), **Progress** and **All** (every file, then
+`CLOSED.md`).
+
+**Progress** shows, in this order:
+
+- The batch of `scripts/roadmap-batch.mjs` that runs: one row per item, with
+  its state (waiting, running, ended), its time and the `Result:` line of its
+  report. The batch writes a status file in `~/.local/state/compute-engine-batch/`
+  each time an item starts or ends; the header of the script describes it.
+- The items with `state: in-progress`, with their owner and start date.
+- The issues fixed since the last release, that is the newest tag `v<x.y.z>`
+  that HEAD contains. A fix deletes the issue file, so this list comes from
+  git: each `CE-<n>.md` that a commit after the tag deleted, with the commit
+  and the text of the file before the deletion. An id in `CLOSED.md` is left
+  out, because `close` also deletes the file. A second list has the files
+  deleted in the working tree and not committed.
+- The Tycho issues with `state: fixed` whose `fixed-in` is not in the tag: a
+  commit that the tag does not contain, a later version, or a text such as
+  "unreleased".
+- The last batch that ended, with its results.
+
+Each item is a card with the first body line, the `ask` line and controls that
 write at once:
 
 | Control           | Writes                                                                                                                  |
@@ -389,7 +409,8 @@ script refuses; `in-progress` is not in the menu (`start` is an agent's
 action). After each write the page shows the lint errors of the file. A card
 keeps its place after an edit; Refresh sorts the lists again. The page shows
 how many files of `issues/` changed since HEAD; the user stages and commits,
-and the server runs no git command that changes anything. It listens on
+and the server runs no git command that changes anything. A fixed issue whose
+file is deleted shows without controls: there is no file to edit. It listens on
 127.0.0.1 only and has no authentication.
 
 ## Migration

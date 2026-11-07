@@ -2,7 +2,10 @@
 /**
  * The Bug Review Board's web page for the `issues/` directory. It shows the
  * lists of `scripts/issues.mjs` (board, backlog, every file) as cards, and
- * each card has controls that edit the file at once. The process is
+ * each card has controls that edit the file at once. The Progress tab shows
+ * the issues fixed since the last release tag (from the files that commits
+ * deleted, see `fixedSince()`), the items in progress, and the batch of
+ * `scripts/roadmap-batch.mjs` that runs (from its status file). The process is
  * described in `docs/ISSUE_TRACKING.md`; the design is in
  * `docs/plans/2026-11-06-issues-webapp-spec.md`.
  *
@@ -17,8 +20,9 @@
  * appends to the body.
  *
  * The server runs no git command that changes anything: it reads
- * `git status` to show how many issue files changed since HEAD, and the user
- * stages and commits. It has no authentication, so it listens on 127.0.0.1
+ * `git status` to show how many issue files changed since HEAD, and
+ * `git describe`, `git log`, `git show` and `git merge-base --is-ancestor`
+ * for the Progress tab; the user stages and commits. It has no authentication, so it listens on 127.0.0.1
  * only, and it refuses a request whose `Host` or `Origin` is not that address
  * (another web page in the browser cannot send it an edit).
  */
@@ -26,8 +30,13 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
+import os from 'node:os';
 import {
   configure,
+  parseText,
+  firstBodyLine,
+  compareVersions,
+  VERSION_RE,
   issuesDir,
   today,
   loadAll,
@@ -140,6 +149,218 @@ function gitChanges(dir) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Progress: the fixes since the last release and the work in progress
+
+/** Runs a git command that reads only, in the main worktree. */
+function git(args) {
+  return execFileSync('git', ['--no-optional-locks', ...args], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    maxBuffer: 64 * 1024 * 1024,
+  });
+}
+
+/** `CE-<n>` for a path `<dir>/CE-<n>.md` of the issue directory, else null. */
+function idOfPath(rel, p) {
+  if (!p.startsWith(rel + '/')) return null;
+  const m = /^(CE-\d+)\.md$/.exec(p.slice(rel.length + 1));
+  return m ? m[1] : null;
+}
+
+/**
+ * The fields, the first body line and the body of an issue file as it was at
+ * a revision (`<commit>^` for the file a commit deleted, `HEAD` for a file
+ * deleted in the working tree).
+ */
+function issueAt(rev, p) {
+  try {
+    const { fields, body } = parseText(git(['show', `${rev}:${p}`]));
+    return { fields, title: firstBodyLine(body), body };
+  } catch {
+    return { fields: {}, title: '', body: '' };
+  }
+}
+
+/** The issue files that commits deleted, read once for each HEAD. */
+let deletedCache = { key: '', items: [] };
+
+/** Whether the fix that `fixed-in` names is in the release `tag`. */
+const releasedCache = new Map();
+function inRelease(fixedIn, tag) {
+  const v = String(fixedIn ?? '')
+    .trim()
+    .replace(/^v(?=\d)/, '');
+  if (VERSION_RE.test(v))
+    return compareVersions(v, tag.replace(/^v/, '')) <= 0;
+  if (!/^[0-9a-f]{7,40}$/i.test(v)) return false;
+  const key = `${v} ${tag}`;
+  if (!releasedCache.has(key)) {
+    let yes = false;
+    try {
+      git(['merge-base', '--is-ancestor', v, tag]);
+      yes = true;
+    } catch {}
+    releasedCache.set(key, yes);
+  }
+  return releasedCache.get(key);
+}
+
+/**
+ * The issues fixed since the last release, for the Progress tab. The last
+ * release is the newest tag `v<x.y.z>` that HEAD contains.
+ *
+ * A fixed issue that is not Tycho's has no file: the commit that fixes it
+ * deletes the file (`docs/ISSUE_TRACKING.md`). So the list comes from git:
+ * each `CE-<n>.md` that a commit after the tag deleted (`committed`, with the
+ * commit and the text of the file before the deletion) and each one that is
+ * deleted in the working tree and not committed (`uncommitted`). A board
+ * close also deletes the file, and it writes the id to `CLOSED.md`: an id in
+ * `CLOSED.md` is not a fix and is left out. So is an id whose file exists
+ * again. A Tycho issue keeps its file with `state: fixed` until Tycho checks
+ * the release; `tycho` lists the ones whose `fixed-in` is not in the tag (a
+ * commit the tag does not contain, a later version, or a text such as
+ * "unreleased").
+ *
+ * Null outside a git repository, with no release tag, or when the issue
+ * directory is not in the main worktree (`--dir` elsewhere).
+ */
+function fixedSince(all, closedText) {
+  let head, tag;
+  try {
+    head = git(['rev-parse', 'HEAD']).trim();
+    tag = git([
+      'describe',
+      '--tags',
+      '--abbrev=0',
+      '--match',
+      'v[0-9]*',
+      'HEAD',
+    ]).trim();
+  } catch {
+    return null;
+  }
+  const rel = path.relative(ROOT, issuesDir()).split(path.sep).join('/');
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  const closed = new Set(
+    [...closedText.matchAll(/^- (CE-\d+) \(/gm)].map((m) => m[1])
+  );
+  const present = new Set(all.issues.map((i) => i.name.slice(0, -3)));
+
+  const key = `${head} ${tag} ${rel}`;
+  if (deletedCache.key !== key) {
+    // Newest commit first: the first deletion seen of an id is its latest.
+    const out = git([
+      'log',
+      `${tag}..HEAD`,
+      '--diff-filter=D',
+      '--name-only',
+      '--format=@@%H%x09%as%x09%s',
+      '--',
+      rel,
+    ]);
+    const seen = new Map();
+    let commit = null;
+    for (const line of out.split('\n')) {
+      if (line.startsWith('@@')) {
+        const [hash, date, ...subject] = line.slice(2).split('\t');
+        commit = { hash, date, subject: subject.join('\t') };
+        continue;
+      }
+      const id = idOfPath(rel, line);
+      if (!id || !commit || seen.has(id)) continue;
+      seen.set(id, { id, commit, ...issueAt(`${commit.hash}^`, line) });
+    }
+    deletedCache = { key, items: [...seen.values()] };
+  }
+  const committed = deletedCache.items.filter(
+    (x) => !closed.has(x.id) && !present.has(x.id)
+  );
+
+  const uncommitted = [];
+  for (const line of git(['status', '--porcelain', '--', rel]).split('\n')) {
+    if (line[0] !== 'D' && line[1] !== 'D') continue;
+    const p = line.slice(3);
+    const id = idOfPath(rel, p);
+    if (id && !closed.has(id) && !present.has(id))
+      uncommitted.push({ id, ...issueAt('HEAD', p) });
+  }
+
+  const tycho = all.issues
+    .filter(
+      (i) =>
+        i.fields.state === 'fixed' && !inRelease(i.fields['fixed-in'], tag)
+    )
+    .map((i) => ({ id: i.name.slice(0, -3), note: '' }));
+
+  return { tag, committed, uncommitted, tycho };
+}
+
+/**
+ * The status files that `scripts/roadmap-batch.mjs` writes, one per batch
+ * (see its header): every batch whose process is alive and that has not
+ * ended, then the last one that ended or stopped. `alive` is false for a
+ * batch that ended, and for one whose process is gone without an end time
+ * (it stopped before the end).
+ */
+const BATCH_DIR = path.join(
+  os.homedir(),
+  '.local',
+  'state',
+  'compute-engine-batch'
+);
+function batches() {
+  let names;
+  try {
+    names = fs
+      .readdirSync(BATCH_DIR)
+      .filter((n) => n.endsWith('.json'))
+      .sort(); // The names start with the start time.
+  } catch {
+    return [];
+  }
+  const list = [];
+  for (const n of names) {
+    try {
+      const b = JSON.parse(fs.readFileSync(path.join(BATCH_DIR, n), 'utf8'));
+      b.alive = !b.finished && processAlive(b.pid);
+      list.push(b);
+    } catch {}
+  }
+  return [
+    ...list.filter((b) => b.alive),
+    ...list.filter((b) => !b.alive).slice(-1),
+  ];
+}
+
+function processAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 1) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === 'EPERM'; // the process exists, under another user
+  }
+}
+
+function progress(all, closedText) {
+  let fixed = null;
+  try {
+    fixed = fixedSince(all, closedText);
+  } catch {}
+  return {
+    fixed,
+    inProgress: all.issues
+      .filter((i) => i.fields.state === 'in-progress')
+      .map((i) => ({
+        id: i.name.slice(0, -3),
+        note: `${i.fields.owner || 'no owner'} since ${i.fields.started || '?'}`,
+      })),
+    batches: batches(),
+  };
+}
+
 function data() {
   setup();
   const all = loadAll();
@@ -147,6 +368,9 @@ function data() {
   const backlog = backlogSections(all);
   const dir = issuesDir();
   const closedFile = path.join(dir, 'CLOSED.md');
+  const closed = fs.existsSync(closedFile)
+    ? fs.readFileSync(closedFile, 'utf8')
+    : '';
   const releases = [
     ...new Set(all.issues.map((i) => i.fields.release).filter(Boolean)),
   ].sort((a, b) => b.localeCompare(a, 'en', { numeric: true }));
@@ -171,9 +395,8 @@ function data() {
       pool: backlog.pool.map(ref),
       p4Count: backlog.p4Count,
     },
-    closed: fs.existsSync(closedFile)
-      ? fs.readFileSync(closedFile, 'utf8')
-      : '',
+    closed,
+    progress: progress(all, closed),
     releases,
     changed: gitChanges(dir),
     github: GITHUB,
@@ -483,7 +706,8 @@ a.origin:hover { text-decoration: underline; }
 .controls label { display: inline-flex; gap: 5px; align-items: center; color: var(--muted); }
 select, input, textarea, button { font: inherit; font-size: 13px; color: var(--text); }
 select, input[type=text], textarea { background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 3px 6px; }
-input.ask-field { width: 30em; max-width: 100%; }
+input.ask-field { width: 30em; max-width: 100%; min-width: 0; }
+.controls label:has(.ask-field) { max-width: 100%; }
 input.release-field { width: 7em; }
 button.act { border: 1px solid var(--line); background: var(--bg); border-radius: 5px; padding: 3px 10px; cursor: pointer; }
 button.act.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
@@ -509,6 +733,14 @@ pre code { background: none; padding: 0; }
 .tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 14px 0 0; font-size: 13px; }
 .tools input[type=search] { width: 24em; max-width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 5px; padding: 4px 8px; }
 .closed { font-size: 13px; }
+.card.done .where { color: var(--text); }
+table.batch { border-collapse: collapse; width: 100%; font-size: 13px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+table.batch th, table.batch td { text-align: left; vertical-align: top; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+table.batch td.id { font-family: ui-monospace, monospace; font-weight: 700; white-space: nowrap; }
+table.batch tr.running td:nth-child(2) { color: var(--accent); font-weight: 700; }
+table.batch tr.stopped td:nth-child(2) { color: var(--error); font-weight: 700; }
+table.batch tr.waiting { color: var(--muted); }
+@media (max-width: 600px) { table.batch th:nth-child(3), table.batch td:nth-child(3) { display: none; } }
 .banner { background: var(--card); border: 1px solid var(--error); color: var(--error); border-radius: 8px; padding: 8px 12px; margin: 14px 0; }
 </style>
 </head>
@@ -690,7 +922,7 @@ function boardCount() {
 
 function renderHeader() {
   const backlogCount = data.backlog.p0.length || data.backlog.release.length + data.backlog.pool.length;
-  const tabs = [['board', 'Board', boardCount()], ['backlog', 'Backlog', backlogCount], ['all', 'All', data.issues.length]];
+  const tabs = [['board', 'Board', boardCount()], ['backlog', 'Backlog', backlogCount], ['progress', 'Progress', progressCount()], ['all', 'All', data.issues.length]];
   $('#tabs').innerHTML = tabs.map(([k, label, n]) => '<button type="button" data-view="' + k + '"' + (view === k ? ' aria-current="page"' : '') + '>' + label + ' (' + n + ')</button>').join('');
   $('#git').textContent = data.changed === null ? 'not in a git repository' : data.changed + ' file(s) in issues/ changed since HEAD';
   $('#today').textContent = data.today;
@@ -718,6 +950,8 @@ function renderMain() {
       html += '<p class="none">P4 items not listed: ' + data.backlog.p4Count + '</p>';
     }
     if (data.backlog.leftOut.length) html += '<p class="none">Left out, with lint errors: ' + data.backlog.leftOut.map(esc).join(', ') + '</p>';
+  } else if (view === 'progress') {
+    html += renderProgress(map);
   } else {
     html += '<div class="tools"><input type="search" id="filter" placeholder="Filter on id, title or source" value="' + esc(filter) + '"></div>';
     const items = data.issues.filter(matches).map((i) => ({ id: i.id, note: '' }));
@@ -725,6 +959,73 @@ function renderMain() {
     html += '<h2>Closed (issues/CLOSED.md)</h2><div class="body closed">' + md(data.closed) + '</div>';
   }
   $('#main').innerHTML = html;
+}
+
+/** The number on the Progress tab: the fixes since the last release and the items in progress. */
+function progressCount() {
+  const f = data.progress.fixed;
+  return (f ? f.committed.length + f.uncommitted.length + f.tycho.length : 0) + data.progress.inProgress.length;
+}
+
+/**
+ * A fixed issue whose file is deleted: no controls, since there is no file
+ * to edit. The details show the text of the file before the deletion.
+ */
+function fixedRow(x, where) {
+  const f = x.fields;
+  return '<article class="card done">' +
+    '<div class="meta"><span class="id">' + esc(x.id) + '</span>' +
+      (f.priority ? '<span class="badge ' + esc(f.priority) + '">' + esc(f.priority) + '</span>' : '') +
+      (f.kind ? '<span>' + esc(f.kind) + '</span>' : '') + (f.size ? '<span>size ' + esc(f.size) + '</span>' : '') +
+      (f.source ? '<span>' + esc(f.source) + (f['source-ref'] ? ' (' + esc(f['source-ref']) + ')' : '') + '</span>' : '') +
+      '<span class="where">' + where + '</span></div>' +
+    '<div class="title">' + inline(x.title || '(the deleted file has no body line)') + '</div>' +
+    (x.body ? '<details><summary>the file before the deletion</summary><div class="body">' + md(x.body) + '</div></details>' : '') +
+  '</article>';
+}
+
+const clock = (iso) => iso ? new Date(iso).toLocaleString('sv').slice(0, 16) : '';
+const minutesSince = (a, b) => Math.round(((b ? new Date(b) : new Date()) - new Date(a)) / 60000);
+
+/** One batch of scripts/roadmap-batch.mjs: its state, then one row per item. */
+function batchTable(b) {
+  const ended = b.items.filter((x) => x.state === 'ended').length;
+  const running = b.items.filter((x) => x.state === 'running').length;
+  const how = b.alive ? 'running: ' + running + ' running, ' + ended + ' of ' + b.items.length + ' ended'
+    : b.finished ? 'ended ' + clock(b.finished) + ', ' + ended + ' of ' + b.items.length + ' items'
+    : 'stopped before the end (the process is gone; last update ' + clock(b.updated) + '), ' + ended + ' of ' + b.items.length + ' ended';
+  const rows = b.items.map((x) => {
+    const time = x.state === 'running' ? minutesSince(x.started) + ' min so far'
+      : x.state === 'ended' ? minutesSince(x.started, x.ended) + ' min' : '';
+    const result = x.state === 'ended' ? esc(x.result) + ' <span class="none">(' + esc(x.turns) + ' turns, ' + esc(x.cost) + ')</span>' : '';
+    const state = x.state === 'running' && !b.alive ? 'stopped' : x.state;
+    return '<tr class="' + esc(state) + '"><td class="id">' + esc(x.id) + '</td><td>' + esc(state) + '</td><td>' + esc(time) + '</td><td>' + inline(x.title) + (result ? '<div>' + result + '</div>' : '') + '</td></tr>';
+  }).join('');
+  return '<h2>' + (b.alive ? 'Batch in progress' : 'Last batch') + ', started ' + esc(clock(b.started)) + ' <span class="count">(' + esc(how) + ')</span></h2>' +
+    '<p class="none">Output and reports: <code>' + esc(b.out) + '</code>' + (b.waiting ? ' · ' + esc(b.waiting) : '') + '</p>' +
+    '<table class="batch"><thead><tr><th>Item</th><th>State</th><th>Time</th><th>What the user sees, and the result</th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+function renderProgress(map) {
+  const p = data.progress;
+  let html = '';
+  const live = p.batches.filter((b) => b.alive);
+  for (const b of live) html += batchTable(b);
+  html += list('In progress (state in-progress)', p.inProgress, map);
+  const f = p.fixed;
+  if (!f) {
+    html += '<h2>Fixed since the last release</h2><p class="none">Not known: no git repository, no release tag v&lt;x.y.z&gt;, or the issue directory is not in the main worktree.</p>';
+  } else {
+    const v = esc(f.tag);
+    html += '<h2>Fixed since ' + v + ', in the next release <span class="count">(' + f.committed.length + ')</span></h2>' +
+      '<p class="none">The issue files that commits after ' + v + ' deleted, newest first; closed issues (CLOSED.md) are left out.</p>' +
+      (f.committed.length ? f.committed.map((x) => fixedRow(x, 'fixed in <code title="' + esc(x.commit.hash) + '">' + esc(x.commit.hash.slice(0, 9)) + '</code> ' + esc(x.commit.date) + (x.commit.subject.startsWith(x.id + ':') ? '' : ' · ' + inline(x.commit.subject)))).join('') : '<p class="none">none</p>');
+    html += '<h2>Deleted in the working tree, not committed <span class="count">(' + f.uncommitted.length + ')</span></h2>' +
+      (f.uncommitted.length ? f.uncommitted.map((x) => fixedRow(x, 'not committed')).join('') : '<p class="none">none</p>');
+    html += list('Tycho issues fixed after ' + f.tag + " (Tycho checks each one on the release)", f.tycho, map);
+  }
+  for (const b of p.batches.filter((b) => !b.alive)) html += batchTable(b);
+  return html;
 }
 
 /**
