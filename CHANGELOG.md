@@ -103,6 +103,20 @@
 
 ### Resolved Issues
 
+- **A function boxed before a call of `Scan`, `Reduce`, `Map` or another
+  operator with a function argument now gets the type of the elements when
+  they are not numbers.** With `f = ce.box(["Function", ["Add", "a", "t"],
+  "a", "t"])` and `m = [[1, 2], [3, 4]]`, `ce.function("Scan", [m, f, 0])` was
+  typed `vector<2>`, a list of numbers, and `ce.function("Reduce", [m, f, 0])`
+  was typed `number`, although their values are rows. They are now typed
+  `matrix<2x2>` and `vector<2>`, as when the function is written in the call.
+  The same applies to a body that the reading as a number simplified:
+  `ce.function("Map", [ce.box(["Function", ["Divide", "x", "x"], "x"]), m])`
+  gave `[1, 1]` and now gives `[[1, 1], [1, 1]]`. A function boxed in a scope
+  and called in a scope that declares again a name the function reads, or a
+  function with a local variable or a function inside it, is used as it was
+  boxed, as before.
+
 - **The derivative of an indefinite integral is now evaluated.**
   `\frac{d}{dx}\int x^2\,dx` stayed unevaluated; it is now `x^2`, also for an
   integrand with no antiderivative in closed form (`\frac{d}{dx}\int

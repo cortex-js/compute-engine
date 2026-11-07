@@ -180,6 +180,7 @@ import {
 } from './binders.js';
 import { namedLiteralSignatureType } from './effects-inference.js';
 import { isIndexReadTuple } from './index-read-tuple.js';
+import { isLibraryDefinition } from './implicit-variable-rule.js';
 import {
   isProvisionalCaptureOpen,
   noteProvisionalCall,
@@ -2240,8 +2241,8 @@ function annotateCallbacksFromContextualSolve(
     if (raw !== undefined) stampable.push({ slot, raw, preboxed: false });
     else {
       // A function literal boxed before the call, with no annotated
-      // parameter, is stamped too, from its written form, but only with the
-      // type of a value kind (see below).
+      // parameter, is stamped too, from its written form, but only with a
+      // type that is not a number type (see below).
       const written =
         op instanceof _BoxedExpression
           ? writtenUntypedFunctionLiteral(op)
@@ -2316,21 +2317,60 @@ function annotateCallbacksFromContextualSolve(
     if (!paramTypes.some((x) => x !== undefined)) continue;
     // A literal boxed before the call already has a canonical body, which
     // reads each parameter as a possible number. It is canonicalized again
-    // from its written form only when a parameter takes the type of a value
-    // kind: the canonical body may have folded `x/x` to `1`, which is wrong
-    // for a kind value (`Map(f, [ResidueClass(2, 4), ResidueClass(3, 4)])`
-    // gave `[1, 1]`; `docs/plans/2026-10-26-value-kinds.md`, section 4.2).
-    // For any other element type the boxed literal is kept as it is.
-    if (
-      preboxed &&
-      !paramTypes.some((x) => x !== undefined && isKindElementType(x))
-    )
-      continue;
+    // from its written form when a parameter takes a type that is not a
+    // number type, as an inline literal is:
+    // - a value kind: the canonical body may have folded `x/x` to `1`, which
+    //   is wrong for a kind value (`Map(f, [ResidueClass(2, 4),
+    //   ResidueClass(3, 4)])` gave `[1, 1]`;
+    //   `docs/plans/2026-10-26-value-kinds.md`, section 4.2);
+    // - any other type, such as a row: the canonical body types its result
+    //   as a number. `Scan(m, f, 0)` with `f = (a, t) ↦ a + t` boxed before
+    //   the call and `m = [[1, 2], [3, 4]]` was typed `vector<2>`, a list of
+    //   numbers, although its values are rows, and the inline literal gives
+    //   `matrix<2x2>`.
+    // For a number type the boxed literal is kept as it is: its canonical
+    // body already reads the parameter as a number.
+    //
+    // The written form is bound again in the scope of the call, not in the
+    // scope where the literal was boxed. For a type that is not a kind, the
+    // literal is canonicalized again only when each name it reads has the
+    // same binding in both scopes (`bindsAsInCurrentScope()`): a literal
+    // that reads `offset` of an outer scope, applied in a scope that
+    // declares another `offset`, must keep the outer value. Such a literal
+    // keeps its boxed form, which reads the parameter as a number: its type
+    // is less precise, and a body that this reading simplified (`row/row`
+    // to `1`) gives a value of the wrong shape, as before this rule. The
+    // test also fails for a body with a `Block` local or a nested literal.
+    // A kind value keeps the rule above without this test, because the
+    // boxed body can give a wrong value.
+    if (preboxed) {
+      const kind = paramTypes.some(
+        (x) => x !== undefined && isKindElementType(x)
+      );
+      if (
+        !kind &&
+        !(
+          paramTypes.some(
+            (x) => x !== undefined && !isSubtype(resolveType(x), 'number')
+          ) && bindsAsInCurrentScope(ce, ops[slot.index] as Expression, raw)
+        )
+      )
+        continue;
+    }
     const literal = annotateFunctionLiteralParams(ce, raw, paramTypes);
     if (literal === undefined) continue;
     result ??= [...ops];
     result[slot.index] = literal;
-    if (out !== undefined) (literals ??= new Map()).set(slot.index, raw);
+    // The record keeps the literal that the call received. For a literal
+    // boxed before the call, that is the boxed literal, not its written
+    // form: the call boxed again for a new source type then takes this
+    // branch again, and `bindsAsInCurrentScope()` reads the scope as it is
+    // at that time, which can declare a name of the body after this call.
+    if (out !== undefined)
+      (literals ??= new Map()).set(
+        slot.index,
+        preboxed ? (ops[slot.index] as Expression) : raw
+      );
   }
 
   // A parameter type solved from the type of a source operand that holds a
@@ -2470,6 +2510,74 @@ function inlineLiteral(
   if (raw.isCanonical || !isFunction(raw, 'Function') || raw.nops < 2)
     return undefined;
   return raw;
+}
+
+/**
+ * True when canonicalizing `written`, the written form of the canonical
+ * function literal `fn`, in the current scope binds each name as `fn` binds
+ * it.
+ *
+ * The written form of a literal boxed before a call is canonicalized again
+ * in the scope of the call (`annotateCallbacksFromContextualSolve()`), not
+ * in the scope where it was boxed. Two tests, with the parameters of `fn`
+ * left out:
+ * - each symbol of the body of `fn`, and the operator of each application,
+ *   is bound in `fn` to the definition that a lookup of its name in the
+ *   current scope returns;
+ * - each name of `written` that the body of `fn` does not hold, because
+ *   canonicalization removed it (`Subtract` becomes `Add`), is a name of
+ *   the library in the current scope. A library name that the first scope
+ *   declared again is not removed by canonicalization, so the first test
+ *   reads it.
+ *
+ * A name bound inside the body (the parameter of a nested literal, a local
+ * of a `Block`) is not visible in the current scope, and an application
+ * whose operator has no operator definition (a function held by a variable)
+ * cannot be compared: both give `false`, so the literal is kept as it was
+ * boxed.
+ */
+function bindsAsInCurrentScope(
+  ce: ComputeEngine,
+  fn: Expression,
+  written: Expression
+): boolean {
+  if (!isFunction(fn, 'Function') || fn.nops < 2) return false;
+  if (!isFunction(written, 'Function') || written.nops !== fn.nops)
+    return false;
+  const params = new Set<string>();
+  for (const p of fn.ops.slice(1)) {
+    if (!isSymbol(p)) return false;
+    params.add(p.symbol);
+  }
+  const current = (name: string): object | undefined => {
+    const def = ce.lookupDefinition(name);
+    if (def === undefined) return undefined;
+    return 'value' in def ? def.value : def.operator;
+  };
+  // The names of the canonical body whose binding is the current one.
+  const checked = new Set<string>();
+  for (const x of fn.ops[0].subexpressions) {
+    if (isSymbol(x)) {
+      if (params.has(x.symbol)) continue;
+      const own = x.valueDefinition ?? x.operatorDefinition;
+      if (own === undefined || own !== current(x.symbol)) return false;
+      checked.add(x.symbol);
+    } else if (isFunction(x)) {
+      const own = x.operatorDefinition;
+      if (own === undefined || own !== current(x.operator)) return false;
+      checked.add(x.operator);
+    }
+  }
+  for (const x of written.ops[0].subexpressions) {
+    const name = isSymbol(x)
+      ? x.symbol
+      : isFunction(x)
+        ? x.operator
+        : undefined;
+    if (name === undefined || params.has(name) || checked.has(name)) continue;
+    if (!isLibraryDefinition(ce, name, current(name))) return false;
+  }
+  return true;
 }
 
 /** An instantiated contextual arrow parameter type this trigger will stamp, or

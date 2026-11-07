@@ -405,19 +405,24 @@ export function order(
  * whose parameters are all unannotated, and `undefined` otherwise.
  *
  * The canonical body of such a literal reads each parameter as a possible
- * number, so it may have folded `x/x` to `1`. A binder over the values of a
- * VALUE KIND (`Map(f, [ResidueClass(2, 4), ResidueClass(3, 4)])`, with `f`
- * boxed before the call) must not apply that body: the parameter takes the
- * element type, a kind type, and the body is canonicalized again from this
- * written form with that type, as an inline literal is
- * (`docs/plans/2026-10-26-value-kinds.md`, section 4.2, decision B).
+ * number, so it may have folded `x/x` to `1`, and it types its result from
+ * that reading. A binder over elements that are not numbers must not apply
+ * that body: the parameter takes the element type, and the body is
+ * canonicalized again from this written form with that type, as an inline
+ * literal is. For the values of a VALUE KIND
+ * (`Map(f, [ResidueClass(2, 4), ResidueClass(3, 4)])`, with `f` boxed before
+ * the call) the folded body gave a wrong value
+ * (`docs/plans/2026-10-26-value-kinds.md`, section 4.2, decision B). For rows
+ * (`Scan([[1, 2], [3, 4]], f, 0)` with `f = (a, t) ↦ a + t`) the body typed
+ * the running sum as a number, so the scan was typed as a list of numbers.
  */
 export function writtenUntypedFunctionLiteral(
   x: Expression
 ): Expression | undefined {
   // The map keeps only the written operands. The non-canonical `Function`
   // expression is built here, when a caller asks for it, because few
-  // literals are ever given values of a kind.
+  // literals boxed before a call are applied to elements that are not
+  // numbers.
   const ops = WRITTEN_UNTYPED_LITERALS.get(x);
   if (ops === undefined) return undefined;
   return x.engine._fn('Function', [...ops], { canonical: false });
