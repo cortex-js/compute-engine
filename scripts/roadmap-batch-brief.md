@@ -1,13 +1,13 @@
 You are a headless Claude Code session, `{{NAME}}`. No person reads your
 messages until you finish: never ask a question and never wait for an answer.
-Your task is one ROADMAP item of the Compute Engine: **{{ID}}. {{TITLE}}**
+Your task is one issue of the Compute Engine: **{{ID}}. {{TITLE}}**
 
 Ignore every session-start notice (a nightly run, a line count). Another
 session handles it. Do not mention it.
 
 ## The approval to commit
 
-The user approved on 2026-11-04 that each session of a ROADMAP batch commits
+The user approved on 2026-11-04 that each session of a batch commits
 its own item: "I would be OK if each session did its own commit." This
 approval covers the commit of {{ID}} and its review-fix commits, after every
 check and review below passes. It does not cover any other item, a push, a
@@ -18,7 +18,7 @@ tag or a release.
 Read `AGENTS.md`, then the documents it names for your work:
 `CODING-STYLEGUIDE.md`, `BUILD.md` ("Completing delegated tasks"),
 `docs/COMPUTE-ENGINE-BOX-SPECIFICS.md`, `~/.claude/SHARED-BOX-PROTOCOL.md`
-(sections 1, 2, 5) and the header of `ROADMAP.md`. They apply in full.
+(sections 1, 2, 5) and `docs/ISSUE_TRACKING.md`. They apply in full.
 
 Stop and report when you have made about 150 tool calls, when the same
 failure comes back a third time, or when the planned approach does not work.
@@ -50,18 +50,24 @@ there.
 
 ## Steps
 
-1. Read the entry {{ID}} in `ROADMAP.md`. If it is gone, or its state is not
-   `ready`, another session took it: stop, and report `taken`.
+1. Run `node scripts/issues.mjs start {{ID}} {{NAME}}` in the main tree. If
+   it refuses (the file is gone, the state is not `open` or `investigate`,
+   the item has `needs-review`, or a confirmed P0 is open), stop and report
+   `taken` with its message. Then read `issues/{{ID}}.md`: the witness, the
+   cause, the options, and the `## Decision` section when the board decided
+   one; follow that decision.
 2. Reproduce the witness with `npx tsx scripts/probe.ts` (its header lists
-   the options). If it no longer reproduces at the current HEAD, remove the
-   entry, commit only that `ROADMAP.md` change, and a known-limitations line in
-   `docs/COMPILATION-MODEL.md` if the probes gave one, with the message
+   the options). If it no longer reproduces at the current HEAD, delete
+   `issues/{{ID}}.md` (or, for `source: tycho`, set `state: fixed` and
+   `fixed-in: <full HEAD hash>` with `issues.mjs set`), commit only that
+   change and a known-limitations line in `docs/COMPILATION-MODEL.md` if the
+   probes gave one, with the message
    `{{ID}}: no longer reproduces at <full HEAD hash>`, and report
    `not reproduced`, with the probe output.
-3. Remove the entry from `ROADMAP.md` in the main tree (read the file again
-   just before the edit; other sessions edit it too). When the entry has
-   sub-items, take the first sub-item that needs no user decision, and remove
-   only its bullet.
+3. The fix commit removes the issue: delete `issues/{{ID}}.md` in the main
+   tree, or, for `source: tycho`, run `issues.mjs set {{ID}} state fixed` and
+   `set {{ID}} fixed-in <version or commit>` (Tycho deletes the file when
+   the fix verifies). Stage that change with the fix.
 4. Make a worktree: `git worktree add --detach /tmp/wt-{{NAME}} HEAD`, then
    `ln -s /Users/arno/dev/compute-engine/node_modules /tmp/wt-{{NAME}}/node_modules`.
    Write every later command for it with an absolute path or
@@ -100,10 +106,13 @@ A defect that you find in older code that your change does not touch is an
 issue file in `issues/` of the MAIN tree, not of your worktree, written as
 `docs/ISSUE_TRACKING.md` ("Who does what") says, and you continue. When the fix
 needs a user decision (no option is clearly sound, or a documented contract
-changes), write the entry back as `waits for user (decision)` with the options, an
-example for each and your recommendation, commit nothing else, and stop.
-When you stop before the work is done, write the entry back with the same
-reference, saying only what remains, and leave the worktree in place.
+changes), write the options with an example for each and your recommendation
+in the body of `issues/{{ID}}.md`, run `issues.mjs set {{ID}} state
+needs-decision` and `set {{ID}} ask "<one sentence: what the board must
+choose>"`, commit nothing else, and stop. When you stop before the work is
+done, run `issues.mjs set {{ID}} state open`, add one paragraph to the body
+that says what remains and where the worktree is, and leave the worktree in
+place.
 
 ## The report
 
@@ -117,7 +126,7 @@ Summary: <two to four sentences: the cause and the fix, or why you stopped>
 Checks run: <each command and its result>
 Checks not run: <each one and why>
 Review: <dual | one reviewer | own reading>, <rounds>, <findings fixed>
-ROADMAP: <### CE- headings before> -> <after>; added: <references or none>
+Issues: {{ID}} <deleted | fixed | reopened | needs-decision>; added: <new issue files or none>
 Open: <what remains, or none>
 Worktree: <removed | path left in place>
 git status --short: <its output in the main tree>
