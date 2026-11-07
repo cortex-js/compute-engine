@@ -104,6 +104,15 @@
 
 ### Resolved Issues
 
+- **An integral over an infinite range of a function that oscillates with a
+  symbolic frequency now stays unevaluated.** `\int_0^\infty \cos(xy)\,dx`
+  gave `\frac{\sin(\infty y)}{y}`, a formula with an infinity in it, although
+  the integral has no value. It now stays unevaluated, as
+  `\int_0^\infty \cos(2x)\,dx` already did. A value at the infinite bound
+  that is arithmetic on an infinity (`\int_0^\infty y\,dx` is `\infty y`), or
+  a function with a limit at infinity (`\int_0^\infty \frac{\sin(ax)}{x}\,dx`
+  is `\mathrm{SinIntegral}(\infty a)`), is kept, as before.
+
 - **A function boxed before a call of `Scan`, `Reduce`, `Map` or another
   operator with a function argument now gets the type of the elements when
   they are not numbers.** With `f = ce.box(["Function", ["Add", "a", "t"],

@@ -744,6 +744,64 @@ function guardsContradict(guards: ReadonlyArray<Expression>): boolean {
 }
 
 /**
+ * The functions of one real argument that have a limit, finite or infinite,
+ * at `+∞` and at `−∞`: each one is monotone on the real line, or on each
+ * side of `0`, or has a limit at both ends (`SinIntegral`). Such a function
+ * of `(±∞)·a` has a value for each real `a ≠ 0`: `SinIntegral((+∞)·a)`, the
+ * value of `∫₀^∞ sin(ax)/x dx`, is `π/2` for `a > 0` and `−π/2` for `a < 0`.
+ * For `Root`, only the radicand is the argument.
+ */
+const LIMIT_AT_INFINITY_FUNCTIONS = new Set([
+  'Abs',
+  'Arctan',
+  'Arsinh',
+  'Cosh',
+  'Exp',
+  'Ln',
+  'Root',
+  'Sign',
+  'SinIntegral',
+  'Sinh',
+  'Sqrt',
+  'Tanh',
+]);
+
+/**
+ * Whether an infinity in the operands `ops` of a node with the operator
+ * `operator` gives a value that the walk of `resolveEndpointLeaks` can keep.
+ *
+ * Arithmetic keeps the infinity in the value, where its sign stays visible:
+ * `(+∞)·y`, the value of `∫₀^∞ y dx`, is `+∞` for `y > 0` and `−∞` for
+ * `y < 0`. A `Power` keeps an infinity in its base for the same reason, and
+ * a function of `LIMIT_AT_INFINITY_FUNCTIONS` keeps one in its first
+ * operand. Any other function, or another operand, that holds an infinity
+ * returns `false`, and the integral stays unevaluated: the walk cannot tell
+ * whether such a term has a limit. Most of them have none. The
+ * antiderivative `sin(xy)/y` of `cos(xy)` gives `sin((+∞)·y)/y` at
+ * `x = +∞`, but `sin(xy)` oscillates, so `∫₀^∞ cos(xy) dx` diverges. An
+ * infinity in an exponent (`a^{(+∞)·y}`) depends on the base and on the sign
+ * of `y`. The leaks that have a known limit and a convergence condition
+ * (`e^{c·(±∞)}`, `Erf(c·(±∞))`) are replaced by `classifyEndpointLeak`
+ * before this test.
+ */
+function passesInfinityThrough(
+  operator: string,
+  ops: ReadonlyArray<Expression>
+): boolean {
+  if (
+    operator === 'Add' ||
+    operator === 'Subtract' ||
+    operator === 'Multiply' ||
+    operator === 'Negate' ||
+    operator === 'Divide'
+  )
+    return true;
+  if (operator === 'Power' || LIMIT_AT_INFINITY_FUNCTIONS.has(operator))
+    return !ops.slice(1).some(holdsInfinity);
+  return !ops.some(holdsInfinity);
+}
+
+/**
  * Walk an FTC result, replacing endpoint-limit leaks (`classifyEndpointLeak`)
  * by their resolved values and conjoining their convergence guards. Returns
  * `{ value, guard }` (guard `True` when leak-free — the value is then the
@@ -769,6 +827,7 @@ function resolveEndpointLeaks(
     if (!isSymbol(r.guard, 'True')) guards.push(r.guard);
   }
   if (guardsContradict(guards)) return null;
+  if (!passesInfinityThrough(expr.operator, newOps)) return null;
   const value = changed ? ce.function(expr.operator, newOps) : expr;
   const guard =
     guards.length === 0
