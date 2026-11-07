@@ -5284,6 +5284,11 @@ export function ensureSpecializedUserCallEmitted(
       declared === 'any' ||
       declared === 'value';
     let t = a.type.type;
+    // True when the argument is a string and the literal's own type for
+    // this parameter is wider than `string`: the generic definition then
+    // compiles the body against that wider type, so the call needs the
+    // copy typed `string`, also when the declared type is `string`.
+    let stringWiderInBody = false;
     if (isSinglePointArg(a)) {
       if (interval) return undefined;
       pointArgument = true;
@@ -5345,11 +5350,44 @@ export function ensureSpecializedUserCallEmitted(
         complexArgument = true;
       } else if (isSubtype(t, 'boolean')) t = 'boolean';
       else if (isSubtype(t, 'number')) t = 'number';
-      // A string is a scalar too (`isScalarShaped()`), but a copy of the
+      // A STRING at a parameter whose type is a collection that admits a
+      // string. A string is a collection of its characters, so the body
+      // can infer a collection type for the parameter: in
+      // `f := s ↦ Length(s)`, `s` is a `collection`, and a declaration
+      // `f: (collection) -> integer` gives the same type. The generic
+      // definition compiles `Length` of a `collection` with `_SYS.elts`,
+      // which accepts an array or a set and throws a `RangeError` for a
+      // string, while the interpreter gives the number of characters. The
+      // interpreter binds a string whole, so the copy with the parameter
+      // typed `string` compiles the body as it runs: `Length` counts the
+      // characters (`_SYS.chars`). A parameter that is open (`unknown`,
+      // `any`, `value`) or not a collection type keeps the generic
+      // definition. `appliedLiteralTypedFromArguments()` in
+      // `applied-literal-types.ts` types the parameter of an applied
+      // function literal the same way.
+      //
+      // A declaration `f: (string) -> integer` does not type the body of
+      // the generic definition: that body keeps the type that the literal
+      // infers for `s` (`collection`), so the generic definition throws
+      // too. The copy is made whenever the literal's own type for the
+      // parameter is wider than `string` (`stringWiderInBody`), also when
+      // the declared type is `string` itself.
+      else if (
+        target.language === 'javascript' &&
+        isSubtype(t, 'string') &&
+        isSubtype(declared, 'collection') &&
+        isSubtype('string', declared)
+      ) {
+        t = 'string';
+        const own = isSymbol(params[i])
+          ? signatureParamType(literal.type.type, i)
+          : params[i].type.type;
+        stringWiderInBody = own === undefined || !isSubtype(own, 'string');
+      }
+      // Any other string keeps the generic definition: a copy of the
       // definition with the parameter typed `number` compiles the body
-      // wrongly (`c == " "` over a `number` declines), so the call keeps
-      // the generic definition. A read `cs[i]` of a `list<string>` is
-      // typed `string` and comes here.
+      // wrongly (`c == " "` over a `number` declines). A read `cs[i]` of a
+      // `list<string>` is typed `string` and comes here.
       else return undefined;
     } else if (
       target.language === 'javascript' &&
@@ -5496,7 +5534,8 @@ export function ensureSpecializedUserCallEmitted(
       if (isSubtype(a.type.type, declared)) t = declared;
       else return undefined;
     }
-    if (declaredIsOpen || !isSubtype(declared, t)) narrower = true;
+    if (declaredIsOpen || !isSubtype(declared, t) || stringWiderInBody)
+      narrower = true;
     types.push(t);
     let pointWidth: number | undefined;
     if (

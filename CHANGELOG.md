@@ -390,6 +390,15 @@
   `Take(s, 2)` of `"a😀b"` gave half of the emoji; they now give `"b"` and
   `"a😀"`. `Max` of a string now falls back to the interpreter instead of
   giving `NaN`.
+- **The compiled JavaScript of a user function called with a string now
+  reads the string as text.** With `t` declared `string` and
+  `f := s ↦ Length(s)`, the call `["f", "t"]` compiled, and at `t = "abc"`
+  its code threw a `RangeError` ("the operand is not a list or a set"); it
+  now gives `3`, as `evaluate()` does. The same applies when `f` is declared
+  `(collection) -> integer` or `(string) -> integer`. `Last(s)` gave `NaN`,
+  `Take(s, 2)` of `"a😀b"`
+  gave half of the emoji and `Reverse(s)` threw; they now give `"b"`,
+  `"a😀"` and `"b😀a"`.
 - **With `diagnostics: true`, the `d` of a differential inside a fraction or
   parentheses no longer reports `undeclared-symbol`.** `\int \frac{dx}{x}`,
   `\int \frac{\mathrm{d}x}{x}` and `\int (3x + 2\,dx)` reported the symbol `d`
