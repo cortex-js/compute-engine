@@ -138,8 +138,9 @@ if [ "${1:-}" != "--after-pack" ]; then
     echo "· Full test suite: no passing run at HEAD yet; it runs after the build."
   fi
   # The checks of `npm run ci` that the full suite does not run (lint,
-  # documentation references, circular imports, script tests, corpus), and
-  # the Prettier check, which `npm run ci` does not run.
+  # documentation references, circular imports, script tests, corpus). They
+  # first format the source with Prettier and commit the files that changed,
+  # so HEAD is recorded after them.
   # scripts/release.sh runs them before the version change and sets
   # CE_RELEASE_CHECKS_DONE=1.
   if [ "${CE_RELEASE_CHECKS_DONE:-}" != "1" ]; then

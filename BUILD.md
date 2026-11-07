@@ -17,9 +17,11 @@ is documented in the shared-box specifics.
 
 All source files use Prettier, but no commit hook and no CI job formats or
 checks them. Commits between releases can hold unformatted code. The release
-checks (`scripts/release-checks.sh`) run `npm run format:check` and stop the
-release when a file is not formatted: run `npm run format` and commit the result
-as a commit of its own. Agents do not run Prettier on the files they edit, so
+checks (`scripts/release-checks.sh`) run `scripts/release-format.sh` first: it
+runs `npm run format` and commits the files that changed as a commit of its own,
+"Format the source with Prettier". When `src/` or `vscode-epsil/` has an
+uncommitted change, it only checks the formatting and stops the release when a
+file is not formatted. Agents do not run Prettier on the files they edit, so
 that their diffs hold only their changes.
 
 - `npm run format`: format all source files explicitly.
@@ -235,11 +237,10 @@ npm run release # a minor release; or: npm run release -- patch (major, or an ex
    or an untracked file that a test can see; markdown outside `src/` and `test/`
    is allowed), or when npm does not accept the login. It warns when
    `CHANGELOG.md` has no `## [Unreleased]` heading, and when the latest full
-   test run failed. Then it runs `scripts/release-checks.sh`: lint,
+   test run failed. Then it runs `scripts/release-checks.sh`: it formats the
+   source with Prettier and commits the files that changed, then runs lint,
    `check:docs`, `check:deps`, `test:tools` and the corpus pipeline, the checks
-   of `npm run ci` that the full test suite does not run, and
-   `npm run format:check`. When the formatting check fails, run
-   `npm run format`, commit the result, and run the release again.
+   of `npm run ci` that the full test suite does not run.
 2. `npm version <bump> --no-git-tag-version`. The version hook
    (`scripts/version.sh`) writes the version and date in the changelog and the
    version of the VS Code extension.

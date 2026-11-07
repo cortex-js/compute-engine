@@ -147,8 +147,8 @@ tree that contains it.
 
 ### Formatting, hooks, and releases
 
-No commit hook formats the source; the release checks formatting, and
-`npm run format` fixes it (BUILD.md). Do not run Prettier on a shared file: it
+No commit hook formats the source; the release formats it and commits the
+result (`scripts/release-format.sh`, BUILD.md). Do not run Prettier on a shared file: it
 rewraps lines of other sessions, which then show in your diff. Husky owns `core.hooksPath` (`.husky/_`);
 `.husky/post-commit` forwards to the common Git directory's local post-commit
 hook for queue cleanup. Integrate additional hooks without replacing that path.

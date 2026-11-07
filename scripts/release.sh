@@ -128,14 +128,12 @@ REGISTRY=$(npm config get registry)
 NPM_USER=$(npm whoami --registry "$REGISTRY" 2>/dev/null) ||
   fail "Not authenticated with the npm registry ($REGISTRY). Run 'npm login', then run the release again."
 echo "✓ Authenticated with $REGISTRY as $NPM_USER"
-# The checks of `npm run ci` that the full suite does not run, and the
-# Prettier check. They are skipped when the caller says that
+# The checks of `npm run ci` that the full suite does not run, after a
+# Prettier step that formats the source and commits the files that changed
+# (scripts/release-checks.sh). They are skipped when the caller says that
 # `npm run ci:extended` passed, as the publish check does (GITHUB_ACTIONS=true
-# or CE_FULL_SUITE_PASSED=1): `ci:extended` runs all of them, the Prettier
-# check included.
-# CHECKED_SHA is the commit that they checked: the release commit must have
-# it as its parent (step 4).
-CHECKED_SHA=$(git rev-parse HEAD)
+# or CE_FULL_SUITE_PASSED=1): `ci:extended` runs all of them and checks the
+# formatting.
 # The issue ledger (docs/ISSUE_TRACKING.md, "Releases"): every issue the
 # board assigned to this version is fixed or closed, and no confirmed P0 is
 # open. The version is computed from $BUMP here, before anything changes, so
@@ -161,8 +159,12 @@ if [ -d issues ]; then
 fi
 if [ "${GITHUB_ACTIONS:-}" != "true" ] && [ "${CE_FULL_SUITE_PASSED:-}" != "1" ]; then
   bash scripts/release-checks.sh ||
-    fail "A release check failed (above). Nothing was changed. Fix the cause, commit, then run the release again."
+    fail "A release check failed (above). Nothing was changed, except the formatting commit when the 'Formatting' line names one. Fix the cause, commit, then run the release again."
 fi
+# CHECKED_SHA is the commit that the release checks checked. It is read
+# after them, because their formatting step can commit. The release commit
+# must have it as its parent (step 4).
+CHECKED_SHA=$(git rev-parse HEAD)
 # scripts/version.sh replaces the "[Unreleased]" heading with the version
 # and date. Without that heading the release has no changelog entry.
 if ! grep -q '\[Unreleased\]' CHANGELOG.md; then
