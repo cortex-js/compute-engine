@@ -50,7 +50,7 @@ diff must hold only your change.
 
 After you write or change an issue file, run `node scripts/issues.mjs lint`
 and fix each error before you commit, because the backlog and the board leave
-out a file with an error. An issue body is at most 150 words; a longer
+out a file with an error. An issue body is at most 500 words; a longer
 analysis goes in a plan document in `docs/plans/`, which the body links.
 
 Write a temporary file only in `/tmp`, never in another repo, because the rule
