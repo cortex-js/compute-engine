@@ -6,12 +6,12 @@ export const ce = new ComputeEngine();
 
 ce.assume(ce.expr(['Equal', 'one', 1]));
 ce.assume(ce.expr(['Greater', 'x', 4]));
-// ce.assume(['Element', 'm', ['Range', -Infinity, Infinity]]);   @fixme
-// ce.assume(['Element', 'n', ['Range', 0, Infinity]]);   @fixme
+ce.assume(ce.expr(['Element', 'm', ['Range', -Infinity, Infinity]]));
+ce.assume(ce.expr(['Element', 'n', ['Range', 0, Infinity]]));
 ce.assume(ce.expr(['Equal', 'o', 1]));
 ce.assume(ce.expr(['Equal', 'p', 11]));
-// ce.assume(['Element', 'q', ['Range', -Infinity, 0]]);  @fixme
-// ce.assume(['Element', 'r', ['Interval', ['Open', 0], +Infinity]]); @fixme
+ce.assume(ce.expr(['Element', 'q', ['Range', -Infinity, 0]]));
+ce.assume(ce.expr(['Element', 'r', ['Interval', ['Open', 0], Infinity]]));
 
 ce.assume(ce.expr(['Greater', 's', 5]));
 ce.assume(ce.expr(['Greater', 't', 0]));
@@ -133,6 +133,61 @@ describe('TYPE INFERENCE FROM ASSUMPTIONS', () => {
 
   test(`p should have type integer (p = 11 assumed)`, () => {
     expect(ce.expr('p').type.toString()).toBe('integer');
+  });
+
+  // A `Range` holds integers only, so membership in a range gives an integer
+  // type with the bounds of the range. An unbounded range gives `integer`.
+  test(`m should have type integer (m ∈ Range(-∞, ∞) assumed)`, () => {
+    expect(ce.expr('m').type.toString()).toBe('integer');
+    expect(ce.expr('m').isInteger).toBe(true);
+  });
+
+  test(`n should have type integer<0..> (n ∈ Range(0, ∞) assumed)`, () => {
+    expect(ce.expr('n').type.toString()).toBe('integer<0..>');
+  });
+
+  test(`q should have type integer<..0> (q ∈ Range(-∞, 0) assumed)`, () => {
+    expect(ce.expr('q').type.toString()).toBe('integer<..0>');
+  });
+
+  // An `Interval` holds reals. The open lower bound 0 is exact: the range
+  // plus the zero exclusion.
+  test(`r should have type real<0<..> (r ∈ Interval(Open(0), ∞) assumed)`, () => {
+    expect(ce.expr('r').type.toString()).toBe('real<0<..>');
+  });
+});
+
+describe('SIGN FROM RANGE AND INTERVAL ASSUMPTIONS', () => {
+  test(`m ∈ Range(-∞, ∞) gives no sign`, () => {
+    expect(ce.expr(['GreaterEqual', 'm', 0]).evaluate().json).toEqual([
+      'LessEqual',
+      0,
+      'm',
+    ]);
+  });
+
+  test(`n ∈ Range(0, ∞): n ≥ 0 is True and n < 0 is False`, () => {
+    expect(ce.expr('n').isNonNegative).toBe(true);
+    expect(ce.expr(['GreaterEqual', 'n', 0]).evaluate().json).toEqual('True');
+    expect(ce.expr(['Less', 'n', 0]).evaluate().json).toEqual('False');
+  });
+
+  test(`q ∈ Range(-∞, 0): q ≤ 0 is True and q > 0 is False`, () => {
+    expect(ce.expr('q').isNonPositive).toBe(true);
+    expect(ce.expr(['LessEqual', 'q', 0]).evaluate().json).toEqual('True');
+    expect(ce.expr(['Greater', 'q', 0]).evaluate().json).toEqual('False');
+  });
+
+  test(`r ∈ Interval(Open(0), ∞): r > 0 is True and r ≤ 0 is False`, () => {
+    expect(ce.expr('r').isPositive).toBe(true);
+    expect(ce.expr(['Greater', 'r', 0]).evaluate().json).toEqual('True');
+    expect(ce.expr(['LessEqual', 'r', 0]).evaluate().json).toEqual('False');
+  });
+
+  test(`the sign simplifies Sqrt(n^2), |q| and |r|`, () => {
+    expect(ce.expr(['Sqrt', ['Power', 'n', 2]]).simplify().json).toEqual('n');
+    expect(ce.expr(['Abs', 'q']).simplify().json).toEqual(['Negate', 'q']);
+    expect(ce.expr(['Abs', 'r']).simplify().json).toEqual('r');
   });
 });
 
