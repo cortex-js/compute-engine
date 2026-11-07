@@ -203,13 +203,15 @@ describe('a single parenthesized expression keeps the range of its content', () 
 
 describe('an error reported on a statement underlines all of it', () => {
   test('the underline ends at the last parenthesis', () => {
-    const src = 'let w: any = "s"\nlet v = (w) * (2)\n0';
+    // The factor `w[1]` is a call whose value is the string "s". The error
+    // names the value, not the call, so it is reported on the statement.
+    const src = 'let w: any = ["s"]\nlet v = (w[1]) * (2)\n0';
     const result = executeEpsil(new ComputeEngine(), src);
     expect(
       result.diagnostics.map((d) =>
         d.range ? src.slice(d.range[0], d.range[1]) : undefined
       )
-    ).toEqual(['let v = (w) * (2)']);
+    ).toEqual(['let v = (w[1]) * (2)']);
   });
 });
 

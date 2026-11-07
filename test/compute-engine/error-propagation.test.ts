@@ -642,6 +642,79 @@ describe('ERROR PROPAGATION — the frame of a sum or a product names the operan
     expect(errorFrames(value)).toEqual(errorFrames(expr.evaluate()));
     expect(errorFrames(value)).toEqual([{ operator: 'Multiply', index: 1 }]);
   });
+
+  // The operand `s` evaluates to the valid string "a", and the handler makes
+  // the type error that names "a". The frame names the symbol operand whose
+  // value is "a".
+  test.each([
+    [['Multiply', 's', ['Cos', 'x']]],
+    [['Multiply', ['Cos', 'x'], 's']],
+    [['Multiply', 'x', 's', 'y']],
+    [['Add', 's', ['Cos', 'x']]],
+    [['Add', ['Cos', 'x'], 's']],
+  ] as [MathJsonExpression][])('%j names the symbol s', (json) => {
+    expect(failed(engine(), json)).toEqual({
+      frames: [json[0]],
+      operand: 's',
+    });
+  });
+
+  test('the symbol whose value the error names', () => {
+    const ce = engine();
+    ce.declare('t', 'any');
+    ce.assign('t', ce.string('b'));
+    const expr = ce.box(['Multiply', 't', 's']);
+    const value = expr.evaluate();
+    const named = errorWhere(value)?.toString();
+    const [frame] = errorFrames(value);
+    expect(frame.operator).toBe('Multiply');
+    expect(expr.ops![frame.index - 1].value?.toString()).toBe(named);
+  });
+
+  test('the asynchronous evaluation names the symbol too', async () => {
+    const ce = engine();
+    const expr = ce.box(['Multiply', 's', ['Cos', 'x']]);
+    const value = await expr.evaluateAsync();
+    expect(errorFrames(value)).toEqual(errorFrames(expr.evaluate()));
+    expect(errorFrames(value)).toHaveLength(1);
+  });
+
+  test('a product with an operand that is not pure adds no frame', () => {
+    // `F` assigns `s = "a"` and returns "a": the value that the handler read
+    // for `s` was 1, so `s` did not make the error.
+    const ce = new ComputeEngine();
+    ce.declare('s', 'any');
+    ce.assign('s', 1);
+    ce.declare('F', {
+      signature: '() -> any',
+      pure: false,
+      evaluate: () => {
+        ce.assign('s', ce.string('a'));
+        return ce.string('a');
+      },
+    });
+    const value = ce.box(['Multiply', 's', ['F']]).evaluate();
+    expect(value.operator).toBe('Error');
+    expect(errorFrames(value)).toEqual([]);
+  });
+
+  test('a sum in the body of a called function adds no frame', () => {
+    // The application of `h` pushes a 'call' frame on the evaluation-context
+    // stack. A frame for the `q` of the body would be matched by name to a
+    // call of the statement by the Epsil error location.
+    const ce = engine();
+    ce.box(['Assign', 'h', ['Function', ['Block', ['Add', 'q', 1]], 'q']]).evaluate();
+    const value = ce.box(['h', 's']).evaluate();
+    expect(value.operator).toBe('Error');
+    expect(errorFrames(value)).toEqual([]);
+  });
+
+  test('another operator adds no frame for its symbol operand', () => {
+    // Only `Add` and `Multiply` look for the operand. The type error of
+    // `Sin(s)` keeps no frame of its own.
+    const ce = engine();
+    expect(errorFrames(ce.box(['Sin', 's']).evaluate())).toEqual([]);
+  });
 });
 
 describe('ERROR PROPAGATION — IsError arity and purity', () => {

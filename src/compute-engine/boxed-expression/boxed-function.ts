@@ -421,7 +421,9 @@ import {
   defersErrorAbsorption,
   embeddedErrorNode,
   errorOpsWithoutTrace,
+  errorTrace,
   errorValue,
+  errorWhere,
   failedCellsAreIterable,
   isCollectionHead,
   isErrorFramedByNode,
@@ -7472,7 +7474,8 @@ export class BoxedFunction
    * no operand is found, the caller uses `errorValue(result)`, whose frame
    * can count the operands of the result. No such case is known: an error
    * that the handler makes itself for an operand whose value is valid
-   * (`s·Cos(x)`) is the value of the node, with no frame from the result.
+   * (`s·Cos(x)`) is the value of the node, with no frame from the result,
+   * and `_operandValueTypeError()` names its operand.
    */
   private _evaluatedOperandResultError(
     result: Expression,
@@ -7511,6 +7514,82 @@ export class BoxedFunction
       );
     if (index < 0) return undefined;
     return withErrorFrames(err, [
+      { operator: this._operator, index: index + 1 },
+    ]);
+  }
+
+  /**
+   * The `incompatible-type` error that the handler of this node made for the
+   * value of one of its symbol operands, with a breadcrumb frame that names
+   * that operand, or `undefined`.
+   *
+   * The handler of `Add` or `Multiply` evaluates its operands. When an
+   * operand evaluates to a valid value of the wrong type, the handler returns
+   * a type error that names the value, and this error is the value of the
+   * node: `s·Cos(x)` with `s = "a"` gives the error "expected `number`, got
+   * `string`" with the value `"a"`. No evaluation returned an error, so no
+   * record names the operand, and the error has no frame. Without a frame,
+   * the Epsil error location underlines the whole statement.
+   *
+   * The operand is the first symbol operand whose value is the same as the
+   * value that the error names. The value of a symbol is read from its
+   * binding: nothing is evaluated again. When two operands hold the same
+   * value (`s·s`), the first one is named. An operand that is not a symbol,
+   * such as a call that returns a string, is not found, and the error keeps
+   * no frame.
+   *
+   * Only an error with no breadcrumb is read: an error with a breadcrumb was
+   * made by the evaluation of an operand, not by this handler.
+   *
+   * Only `Add` and `Multiply` are read. The same error of another operator
+   * (`Sin(s)`) keeps no frame of its own: the frame of the operator that
+   * encloses the call names the call, and Epsil underlines the call
+   * `Sin(s)`, not `s`.
+   *
+   * The binding is read after the handler evaluated every operand. When an
+   * operand can assign a variable (`s·F()` with a function `F` that assigns
+   * `s = "a"` and returns `"a"`), the value of `s` that is read is not the
+   * value that the handler used. So no frame is added when the node is not
+   * pure (`isPure`).
+   *
+   * The caller runs this function in the evaluation context of the node
+   * (`withEvaluationContext()`): after the `await` of an asynchronous
+   * evaluation, the engine has another context, and a binding would be read
+   * in the wrong scope.
+   *
+   * No frame is added when the node is evaluated in the body of a called
+   * function: the evaluation-context stack holds a `'call'` frame, which the
+   * application of a function literal pushes (`function-utils.ts`). The
+   * breadcrumb has
+   * no frame for the call itself, so the Epsil error location cannot tell a
+   * frame of the body from a frame of the statement, and it matches frames
+   * to the statement by operator name. With `function g(x) { x + 1 }`, a
+   * frame `Add argument 1` for the `x` of the body would select the `y` of
+   * `let v = y + g("a")`. Without it, the error has the frame
+   * `Add argument 2` of the statement, which selects `g("a")`.
+   */
+  private _operandValueTypeError(result: Expression): Expression | undefined {
+    if (this._operator !== 'Add' && this._operator !== 'Multiply')
+      return undefined;
+    if (!isFunction(result, 'Error') || errorTrace(result) !== undefined)
+      return undefined;
+    if (this.engine._evalContextStack.some((context) => context.name === 'call'))
+      return undefined;
+    if (!this.isPure) return undefined;
+    const code = result.op1;
+    if (
+      !isFunction(code, 'ErrorCode') ||
+      !isString(code.op1) ||
+      code.op1.string !== 'incompatible-type'
+    )
+      return undefined;
+    const value = errorWhere(result);
+    if (value === undefined) return undefined;
+    const index = this._ops.findIndex(
+      (op) => isSymbol(op) && op.value?.isSame(value) === true
+    );
+    if (index < 0) return undefined;
+    return withErrorFrames(result, [
       { operator: this._operator, index: index + 1 },
     ]);
   }
@@ -8043,6 +8122,9 @@ export class BoxedFunction
         return (
           this._refusedArgumentError(result) ??
           this._evaluatedOperandResultError(result, since) ??
+          this.engine.withEvaluationContext(options, () =>
+            this._operandValueTypeError(result)
+          ) ??
           errorValue(result) ??
           result
         );
@@ -9580,6 +9662,9 @@ export class BoxedFunction
         return (
           this._refusedArgumentError(result) ??
           this._evaluatedOperandResultError(result, since) ??
+          this.engine.withEvaluationContext(options, () =>
+            this._operandValueTypeError(result)
+          ) ??
           errorValue(result) ??
           result
         );

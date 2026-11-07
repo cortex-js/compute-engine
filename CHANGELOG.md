@@ -103,6 +103,14 @@
 
 ### Resolved Issues
 
+- **The error of a variable that holds a value of the wrong type, as a term
+  of a sum or a factor of a product, now names that operand.** With
+  `s = "a"`, the value of `["Multiply", "s", ["Cos", "x"]]` was the
+  `incompatible-type` error with no `ErrorFrame`, so an Epsil program
+  `let v = s * Cos(x)` underlined the whole statement. The error now has the
+  frame `Multiply argument 1`, and Epsil underlines `s`. The same applies to
+  `Add`. In the body of a called function, the error keeps no frame, as
+  before.
 - **An expansion no longer turns one random draw into several.** With `r`
   declared with the `random` effect, `Expand((r(t) + 1)^2)` gave
   `r(t)^2 + 2r(t) + 1`, three independent draws where the input has one; it

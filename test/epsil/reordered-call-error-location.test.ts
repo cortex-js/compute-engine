@@ -115,6 +115,67 @@ describe('an error in an operand of a sum or product', () => {
   });
 });
 
+describe('a variable that holds a string, as an operand of a sum or product', () => {
+  // The variable evaluates to a valid string, and the handler of `Add` or
+  // `Multiply` makes the type error, which names the string. The evaluation
+  // of the sum or product adds a frame for the variable whose value is that
+  // string (`_operandValueTypeError()` in
+  // `src/compute-engine/boxed-expression/boxed-function.ts`). Before, the
+  // error had no frame, and the whole statement was underlined.
+  const prefix = 'let s: any = "a"\n';
+
+  test.each([
+    ['let v = s * Cos(x)', 's'],
+    ['let v = Cos(x) * s', 's'],
+    ['let v = s + Cos(x)', 's'],
+    ['let v = Cos(x) + s', 's'],
+    ['let v = x * s * y', 's'],
+    ['let v = 2 * s', 's'],
+    ['let v = s - 3', 's'],
+    ['let v = Sin(x) + 2 * s', 's'],
+  ])('%s underlines %s', (stmt, expected) => {
+    expect(underlines(`${prefix}${stmt}\n0`)).toEqual([expected]);
+  });
+
+  test('of two variables, the one whose value the error names', () => {
+    const src = `${prefix}let t: any = "b"\nlet v = t * s\n0`;
+    const result = executeEpsil(new ComputeEngine(), src);
+    const errors = result.diagnostics.filter(
+      (d) => Array.isArray(d.message) && d.message[0] === 'runtime-error'
+    );
+    expect(errors).toHaveLength(1);
+    const named = String(errors[0].message[1]).endsWith('at `a`') ? 's' : 't';
+    expect(src.slice(errors[0].range[0], errors[0].range[1])).toBe(named);
+  });
+
+  test('a call that returns a string is not found: the statement is underlined', () => {
+    // The error names the value "a", and the call `w[1]` is not evaluated
+    // again to compare its value.
+    expect(
+      underlines('let w: any = ["a"]\nlet v = w[1] * Cos(x)\n0')
+    ).toEqual(['let v = w[1] * Cos(x)']);
+  });
+});
+
+describe('a sum or product in the body of a called function', () => {
+  // The variable `x` of the body holds the string, but the sum or product of
+  // the body adds no frame for it: the breadcrumb has no frame for the call
+  // of `g`, so a frame of the body would be matched by name to a call of the
+  // statement, and `Add argument 1` would select the `y` of `y + g("a")`.
+  test.each([
+    ['function g(x) { x + 1 }', 'let v = y + g("a")', 'g("a")'],
+    ['function g(x) { 1 + x }', 'let v = g("a") + y', 'g("a")'],
+    ['function g(x) { x * 2 }', 'let v = 3 * y + g("a")', 'g("a")'],
+    ['function g(x) { x + 1 }', 'let v = Sin(y + 1) * g("a")', 'g("a")'],
+    // No frame of the statement selects the call: the whole statement.
+    ['function g(x) { x * 2 }', 'let v = [3 * y, g("a")]', 'let v = [3 * y, g("a")]'],
+  ])('%s, %s underlines %s', (definition, stmt, expected) => {
+    expect(underlines(`${definition}\nlet y = 5\n${stmt}\n0`)).toEqual([
+      expected,
+    ]);
+  });
+});
+
 describe('an error in an operand of a commutative or associative function', () => {
   const failing = 'let w = Ln("a")\n';
 
