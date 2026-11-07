@@ -419,45 +419,53 @@ export async function runAsync<T>(
   // settled value of a thenable it yielded (see below), `undefined` otherwise.
   let sent: unknown = undefined;
 
-  while (true) {
-    // eslint-disable-next-line no-restricted-globals
-    const chunkStart = performance.now();
-    const chunkDurationMs = 16; // Maximum chunk duration in milliseconds
-
-    // Process a chunk of iterations
-    // eslint-disable-next-line no-restricted-globals
-    while (performance.now() - chunkStart < chunkDurationMs) {
-      const { done, value } = gen.next(sent);
-      sent = undefined;
-
-      if (done) return value; // Exit successfully
-
-      // A generator that must AWAIT in the middle of its work — a fold whose
-      // per-term callback is asynchronous — yields the promise and receives
-      // its settled value from the next `gen.next(...)`; the synchronous
-      // `run` driver never sees one, because a synchronous callback never
-      // returns a promise. The abort signal and the time limit are checked
-      // after the await as after any other step.
-      if (isThenable(value)) sent = await value;
-
-      // Check for abort signal within the chunk
-      if (signal?.aborted)
-        throw new CancellationError({ value, cause: (signal as any).reason });
-
-      // Check overall time limit
+  // A throw between two steps closes the generator (`closeGenerator()`).
+  try {
+    while (true) {
       // eslint-disable-next-line no-restricted-globals
-      if (performance.now() - startTime >= timeLimitMs)
-        throw new CancellationError({
-          value,
-          cause: 'timeout',
-          message: `Timeout exceeded (${timeLimitMs}ms)`,
-          attribution: attribution?.owner,
-          spans: attribution?.spans,
-        });
-    }
+      const chunkStart = performance.now();
+      const chunkDurationMs = 16; // Maximum chunk duration in milliseconds
 
-    // Allow event loop to process other tasks
-    await new Promise((resolve) => setTimeout(resolve, 0));
+      // Process a chunk of iterations
+      // eslint-disable-next-line no-restricted-globals
+      while (performance.now() - chunkStart < chunkDurationMs) {
+        const { done, value } = gen.next(sent);
+        sent = undefined;
+
+        if (done) return value; // Exit successfully
+
+        // A generator that must AWAIT in the middle of its work — a fold
+        // whose per-term callback is asynchronous — yields the promise and
+        // receives its settled value from the next `gen.next(...)`; the
+        // synchronous `run` driver never sees one, because a synchronous
+        // callback never returns a promise. The abort signal and the time
+        // limit are checked after the await as after any other step.
+        if (isThenable(value)) sent = await value;
+
+        // Check for abort signal within the chunk
+        if (signal?.aborted)
+          throw new CancellationError({
+            value,
+            cause: (signal as any).reason,
+          });
+
+        // Check overall time limit
+        // eslint-disable-next-line no-restricted-globals
+        if (performance.now() - startTime >= timeLimitMs)
+          throw new CancellationError({
+            value,
+            cause: 'timeout',
+            message: `Timeout exceeded (${timeLimitMs}ms)`,
+            attribution: attribution?.owner,
+            spans: attribution?.spans,
+          });
+      }
+
+      // Allow event loop to process other tasks
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  } finally {
+    closeGenerator(gen);
   }
 }
 
@@ -482,22 +490,47 @@ export function run<T>(
 ): Exclude<T, PromiseLike<unknown>> {
   const startTime = Date.now();
 
-  while (true) {
-    const { done, value } = gen.next();
+  // A throw between two steps closes the generator (`closeGenerator()`).
+  try {
+    while (true) {
+      const { done, value } = gen.next();
 
-    if (done) return value; // Return the result if generator is done
+      if (done) return value; // Return the result if generator is done
 
-    // Check for timeout
-    const elapsedTime = Date.now() - startTime;
-    if (elapsedTime >= timeLimitMs) {
-      throw new CancellationError({
-        value,
-        cause: 'timeout',
-        message: `Timeout exceeded (${timeLimitMs}ms)`,
-        attribution: attribution?.owner,
-        spans: attribution?.spans,
-      });
+      // Check for timeout
+      const elapsedTime = Date.now() - startTime;
+      if (elapsedTime >= timeLimitMs) {
+        throw new CancellationError({
+          value,
+          cause: 'timeout',
+          message: `Timeout exceeded (${timeLimitMs}ms)`,
+          attribution: attribution?.owner,
+          spans: attribution?.spans,
+        });
+      }
     }
+  } finally {
+    closeGenerator(gen);
+  }
+}
+
+/**
+ * Close a generator when a driver stops, so that the `finally` blocks of the
+ * generator run also when the driver throws between two steps (a timeout, an
+ * abort, a rejected promise). The iteration of a `Sum` puts back the value
+ * of its index in such a block (`saveLoopIndexes()`,
+ * `compute-engine/library/utils.ts`); without the close, the index kept the
+ * last value of a cancelled iteration.
+ *
+ * A generator that is done ignores the close. An error that a `finally`
+ * block of the generator throws during the close is ignored, so that the
+ * error of the driver, or its result, is not replaced.
+ */
+function closeGenerator(gen: Generator<unknown, unknown, unknown>): void {
+  try {
+    gen.return(undefined);
+  } catch {
+    // The error or the result of the driver is kept.
   }
 }
 

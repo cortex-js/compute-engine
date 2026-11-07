@@ -3119,16 +3119,33 @@ export function acceleratedInfiniteSum(
   if (!body) return undefined;
   const walk = infiniteSeriesWalk(limits);
   if (walk === undefined) return undefined;
+  // The interpreter walk assigns the index: it gets back the value it had
+  // before the walk when the walk stops (`saveLoopIndexes()`).
+  const restoreIndex = saveLoopIndexes(ce, [walk.index]);
+  try {
+    return acceleratedInfiniteSumWalk(body, limits, ce, walk.index);
+  } finally {
+    restoreIndex();
+  }
+}
+
+/** The walks of `acceleratedInfiniteSum()`, which restores the index. */
+function acceleratedInfiniteSumWalk(
+  body: Expression,
+  limits: Expression,
+  ce: ComputeEngine,
+  index: string
+): Expression | undefined {
   // A body that applies a function whose result jumps at a point (`Floor`,
   // a comparison, ...) is not compiled. Its compiled term rounds the operand
   // of that function to a double first, and a value near a jump can then
   // be on the wrong side of it: the interpreter gives 0 for
   // `Floor(1 − 10^−30/k)`, the compiled term gives 1.
   const compiled =
-    body.unknowns.every((u) => u === walk.index) &&
+    body.unknowns.every((u) => u === index) &&
     isTransitivelyPure(body) &&
     !appliesJumpFunction(ce, body)
-      ? compiledSeriesTerm(ce, body, walk.index)
+      ? compiledSeriesTerm(ce, body, index)
       : undefined;
   if (compiled === undefined)
     return extrapolatedInfiniteSum(body, limits, ce, undefined);
@@ -3416,6 +3433,22 @@ export function acceleratedInfiniteProduct(
   // its per-step PAIRING has no log-domain analog worth the branch risk.
   const walk = infiniteSeriesWalk(limits);
   if (walk === undefined || walk.doubly) return undefined;
+  // The walk assigns the index: it gets back the value it had before the
+  // walk when the walk stops (`saveLoopIndexes()`).
+  const restoreIndex = saveLoopIndexes(ce, [walk.index]);
+  try {
+    return acceleratedInfiniteProductWalk(body, walk, ce);
+  } finally {
+    restoreIndex();
+  }
+}
+
+/** The walk of `acceleratedInfiniteProduct()`, which restores the index. */
+function acceleratedInfiniteProductWalk(
+  body: Expression,
+  walk: { index: string; termIndexAt: (j: number) => number },
+  ce: ComputeEngine
+): Expression | undefined {
   const { index, termIndexAt } = walk;
 
   let invalid = false;
@@ -4581,6 +4614,51 @@ export function assignLoopIndex(
 }
 
 /**
+ * Record the stored values of the loop indexes `names` before an iteration
+ * assigns them with `assignLoopIndex()`, and return a function that puts
+ * these values back. Call the function when the iteration stops, also when
+ * it stops on an exception.
+ *
+ * The binding of the index of a `Sum` or `Product` is in the scope of the
+ * operator, and that scope stays with the expression. Without the restore,
+ * the binding keeps the last value of the iteration: after
+ * `Sum(j, Limits(j, 1, 3)).evaluate()`, `j` has the value 3, and a later
+ * `simplify()` of the same expression reads `j` as an assigned variable.
+ * The closed form of an inner sum is then not found, and `simplify()` gives
+ * a different result before and after the evaluation.
+ *
+ * The definitions are found when this function is called, so the restore
+ * writes the bindings that the iteration writes even when another scope is
+ * in force at the end of the iteration. A name with no value definition,
+ * or with a constant one, is not recorded: `assignLoopIndex()` then
+ * replaces the binding or throws, and there is no value to put back. Like
+ * the assignments, the restore is an ephemeral write.
+ */
+export function saveLoopIndexes(
+  ce: ComputeEngine,
+  names: Iterable<string | undefined>
+): () => void {
+  const saved: Array<[BoxedValueDefinition, Expression | undefined]> = [];
+  for (const name of names) {
+    if (name === undefined || name === 'Nothing') continue;
+    const def = ce.lookupDefinition(name);
+    if (def === undefined || !isValueDef(def) || def.value.isConstant)
+      continue;
+    saved.push([def.value, def.value.storedValue]);
+  }
+  return () => {
+    if (saved.length === 0) return;
+    ce._ephemeralWriteDepth += 1;
+    try {
+      for (const [def, value] of saved)
+        if (def.storedValue !== value) def.value = value;
+    } finally {
+      ce._ephemeralWriteDepth -= 1;
+    }
+  };
+}
+
+/**
  * Fold `collection` with `fn`, reporting `NON_ENUMERABLE_DOMAIN` when the
  * collection's iterator DECLINED — it claims to have elements but produced
  * none, so the fold would silently answer the bare initial value (`Sum → 0`).
@@ -5055,26 +5133,15 @@ export function* reduceBigOp<T>(
     // Use the internal generator that returns detailed results
     const gen = reduceElementIndexingSets(body, indexes, fn, initial, true);
 
-    // Properly iterate the generator to capture both yielded values and the
-    // return value. Re-yield each intermediate accumulator so a wrapping
+    // `yield*` re-yields each intermediate accumulator, so a wrapping
     // `run()` / `runAsync()` can enforce the engine deadline *between*
-    // iterations. The accumulators are `Expression` objects; an earlier
-    // `typeof result !== 'object'` guard here silently swallowed every one of
-    // them, so nothing was ever yielded, a single `gen.next()` ran the whole
-    // (possibly 10⁴-term) reduction to completion, and an infinite or
-    // expensive domain would hang past the timeout instead of being cancelled.
-    // The value the driver hands back for a re-yielded promise (the settled
-    // value of an asynchronous callback) is forwarded to the inner
-    // generator, which is waiting for it; for any other yield it is
-    // `undefined`, as before.
-    let iterResult = gen.next();
-    while (!iterResult.done) {
-      const sent = yield iterResult.value;
-      iterResult = gen.next(sent);
-    }
-
-    // The final return value is in iterResult.value when done is true
-    const finalResult = iterResult.value;
+    // iterations, and gives the return value of the inner generator. The
+    // value the driver hands back for a re-yielded promise (the settled
+    // value of an asynchronous callback) goes to the inner generator, which
+    // is waiting for it. When the driver closes this generator before the
+    // end (a timeout), `yield*` closes the inner one too, and its `finally`
+    // block puts back the values of the indexes (`saveLoopIndexes()`).
+    const finalResult = yield* gen;
 
     // Check the final result type
     if (
@@ -5122,26 +5189,36 @@ export function* reduceBigOp<T>(
   //
   let result: T | undefined = initial;
   let count = 0;
-  for (const element of cartesianArray) {
-    // `run()`/`runAsync()` enforce the deadline between yields, but
-    // `reduceBigOp` is also driven directly (and a single body evaluation can
-    // be slow), so check the engine deadline here too. Amortize `Date.now()`
-    // with a stride.
-    if ((++count & 0xff) === 0) checkDeadline(ce._deadlineFrame);
-    // An index-less bounds pair (`Limits(Nothing, 1, 9)`) iterates a constant
-    // body: there is no index variable to assign.
-    const bindings: Array<readonly [string, number]> = [];
-    indexingSets.forEach((x, i) => {
-      if (x.index && x.index !== 'Nothing') {
-        assignLoopIndex(ce, x.index, element[i]);
-        bindings.push([x.index, element[i]]);
-      }
-    });
-    let next = fn(result, body, bindings);
-    if (isThenable(next)) next = yield next;
-    result = next ?? undefined;
-    yield result;
-    if (result === undefined) break;
+  // The indexes get back the values they had before the iteration when it
+  // stops (`saveLoopIndexes()`).
+  const restoreIndexes = saveLoopIndexes(
+    ce,
+    indexingSets.map((x) => x.index)
+  );
+  try {
+    for (const element of cartesianArray) {
+      // `run()`/`runAsync()` enforce the deadline between yields, but
+      // `reduceBigOp` is also driven directly (and a single body evaluation
+      // can be slow), so check the engine deadline here too. Amortize
+      // `Date.now()` with a stride.
+      if ((++count & 0xff) === 0) checkDeadline(ce._deadlineFrame);
+      // An index-less bounds pair (`Limits(Nothing, 1, 9)`) iterates a
+      // constant body: there is no index variable to assign.
+      const bindings: Array<readonly [string, number]> = [];
+      indexingSets.forEach((x, i) => {
+        if (x.index && x.index !== 'Nothing') {
+          assignLoopIndex(ce, x.index, element[i]);
+          bindings.push([x.index, element[i]]);
+        }
+      });
+      let next = fn(result, body, bindings);
+      if (isThenable(next)) next = yield next;
+      result = next ?? undefined;
+      yield result;
+      if (result === undefined) break;
+    }
+  } finally {
+    restoreIndexes();
   }
 
   return result ?? undefined;
@@ -5270,32 +5347,42 @@ function* reduceElementIndexingSets<T>(
 
   let result: T | undefined = initial;
 
-  while (true) {
-    // Apply current combination of assignments
-    const bindings: Array<readonly [string, Expression]> = [];
-    for (let i = 0; i < elementDomains.length; i++) {
-      const value = elementDomains[i].values[indices[i]];
-      assignLoopIndex(ce, elementDomains[i].variable, value);
-      bindings.push([elementDomains[i].variable, value]);
-    }
+  // The indexes get back the values they had before the iteration when it
+  // stops (`saveLoopIndexes()`).
+  const restoreIndexes = saveLoopIndexes(
+    ce,
+    elementDomains.map((d) => d.variable)
+  );
+  try {
+    while (true) {
+      // Apply current combination of assignments
+      const bindings: Array<readonly [string, Expression]> = [];
+      for (let i = 0; i < elementDomains.length; i++) {
+        const value = elementDomains[i].values[indices[i]];
+        assignLoopIndex(ce, elementDomains[i].variable, value);
+        bindings.push([elementDomains[i].variable, value]);
+      }
 
-    // Evaluate and accumulate. An asynchronous callback's promise is
-    // yielded to the driver, which awaits it and hands the value back.
-    let next = fn(result, body, bindings);
-    if (isThenable(next)) next = yield next;
-    result = next ?? undefined;
-    yield result;
-    if (result === undefined) break;
+      // Evaluate and accumulate. An asynchronous callback's promise is
+      // yielded to the driver, which awaits it and hands the value back.
+      let next = fn(result, body, bindings);
+      if (isThenable(next)) next = yield next;
+      result = next ?? undefined;
+      yield result;
+      if (result === undefined) break;
 
-    // Move to next combination
-    let dim = elementDomains.length - 1;
-    while (dim >= 0) {
-      indices[dim]++;
-      if (indices[dim] < lengths[dim]) break;
-      indices[dim] = 0;
-      dim--;
+      // Move to next combination
+      let dim = elementDomains.length - 1;
+      while (dim >= 0) {
+        indices[dim]++;
+        if (indices[dim] < lengths[dim]) break;
+        indices[dim] = 0;
+        dim--;
+      }
+      if (dim < 0) break; // Exhausted all combinations
     }
-    if (dim < 0) break; // Exhausted all combinations
+  } finally {
+    restoreIndexes();
   }
 
   if (returnReason) {

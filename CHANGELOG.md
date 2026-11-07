@@ -118,6 +118,18 @@
 
 ### Resolved Issues
 
+- **`simplify()` of a sum or a product gives the same result before and after
+  `evaluate()`.** The evaluation of a `Sum` or a `Product` kept the last value
+  of its index in the scope of the expression: after
+  `["Sum", "j", ["Limits", "j", 1, 3]]` was evaluated, `j` had the value 3. A
+  later `simplify()` of the same expression then read the index as an
+  assigned variable. With
+  `nest = ["Sum", ["Sum", ["Subtract", ["Sin", ["Add", "k", "j", 1]], ["Sin", ["Add", "k", "j"]]], ["Limits", "k", 1, "n"]], ["Limits", "j", 1, 3]]`,
+  `nest.simplify()` gave `\sum_{j=1}^{3}(\sin(j+n+1)-\sin(j+1))` before
+  `nest.evaluate()` and kept the inner sum after it. The index now gets back
+  its value from before the evaluation when the iteration stops, also when a
+  time limit or an abort signal stops it.
+
 - **A limit of a function that calls one of its parameters now gives the value
   of the call.** With `g := t ↦ t²` and `h := (p, a) ↦ p(a)`,
   `["Limit", ["Function", ["h", "g", "x"], "x"], 2]` gave `["p", 2]`, with
