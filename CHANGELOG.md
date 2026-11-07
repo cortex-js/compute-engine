@@ -87,6 +87,15 @@
 
 ### Resolved Issues
 
+- **A numeric integral of a narrow peak at a bound of the interval no longer
+  gives 0.** `.N()` of `\int_0^1 e^{-10^8 x}\,dx` gave `0` with an error of
+  `0`, because the integrand was 0 at every point that the quadrature
+  sampled. It now gives `1e-8`. `.N()` of
+  `\int_0^1 \frac{e^{-10^8 x}}{x^{0.99}}\,dx` gave `0`, and now gives
+  `82.63 ± 0.12` (the value is `82.704`). The peak is found when the
+  integrand is 0 or constant at the sample points nearest to the bound: a
+  narrow peak on an integrand that varies there (`e^x + e^{-10^8 x}`) is still
+  not found.
 - **In a product of a list of more than 100 numbers, an element that is an
   exact `0` now gives the exact `0`, also beside a float.** With `A` a list
   of 300 numbers that holds the exact `0`, the element of `2.5·A` was the

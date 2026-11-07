@@ -390,15 +390,18 @@ describe('THE ERRORS OF INNER INTEGRALS', () => {
         });
         return { error: r.error, evaluations };
       };
-      // 4 inner integrals: the point is evaluated once more for each.
+      // 4 inner integrals: the point is evaluated once more for each. The
+      // integrand is a constant, so its nodes next to each bound are flat,
+      // and the deepest probe next to each bound is computed
+      // (`boundGapError`): it is evaluated once, and is not measured.
       const four = sum(4);
       expectError(four.error, 4e-6 * e);
-      expect(four.evaluations).toBe(5 * 255);
+      expect(four.evaluations).toBe(5 * 255 + 2);
       // 5 inner integrals: the error is the larger of `Σ e` and
       // `|v|·Σ e/|J|`.
       const five = sum(5);
       expectError(five.error, 5 * e);
-      expect(five.evaluations).toBe(255);
+      expect(five.evaluations).toBe(255 + 2);
     });
 
     test('the inner integrals that are computed again', () => {

@@ -308,6 +308,12 @@ interface Panel {
    * has it (see `hiddenEdgeError`). */
   edgeA?: number;
   edgeB?: number;
+  /** True when the panel touches a bound of the integral, and its nodes do
+   * not see the area next to the bound that the probes of `boundGapError`
+   * see: the error that the nodes give is less than `1/BOUND_GAP_UNSEEN`
+   * times this area and times the magnitude of the value of the panel. Set
+   * by the adaptive loop. */
+  boundGapUnseen?: boolean;
 }
 
 /**
@@ -464,6 +470,209 @@ function hiddenEdgeError(p: Panel, f: (x: number) => number): number {
     atEdge(p.a, 1, p.edgeA, p.nodesNearA, distancesA) +
     atEdge(p.b, -1, p.edgeB, p.nodesNearB, distancesB)
   );
+}
+
+/** The probes of `boundGapError` are at the distances `(b − a)·2^(−k)` from
+ * a bound of the integral, for `k` a multiple of `BOUND_PROBE_STEP` from
+ * `BOUND_PROBE_STEP` to `BOUND_PROBE_DEEPEST`. With a step of 4 levels, a
+ * peak `e^(−x/δ)` has a probe at a distance between `δ` and `16·δ`, where its
+ * value is at least `e^(−16) ≈ 1e-7` times its height. */
+const BOUND_PROBE_STEP = 4;
+const BOUND_PROBE_DEEPEST = 72;
+
+/**
+ * Whether the four nodes of a panel nearest to a bound of the integral have
+ * the same value, to the rounding of the samples (`64·ε` times their
+ * magnitude), or are all 0. The adaptive loop computes the probes of
+ * `boundGapError` next to a bound only for such a panel, and for each later
+ * panel at a bound where the probes found an area.
+ *
+ * Next to a bound, a removable singularity computed as written loses its
+ * digits to cancellation, and the computed integrand there is not the
+ * function: `(1 − cos x)/x²` is 0 for `x` below about `2^(−26.5)`, and
+ * `(eˣ − 1 − x)/x²` and `(x − ln(1 + x))/x²` are `−1/x` and `1/x` when
+ * `eˣ` and `1 + x` round to 1. No test on the samples tells this from a peak
+ * of the function. When every panel at a bound was probed, the quadrature
+ * bisected the panel at 0 into this part of the computed integrand:
+ * `∫₀¹ (1 − cos x)/x² dx` took 45,172 evaluations instead of 255, with a
+ * true error `4.5e-9` 29 times its reported error, and
+ * `∫₀¹ (eˣ − 1 − x)/x² dx` was `−34.55`, divergent, for `0.5996`. The nodes
+ * of such an integrand are not all equal: they see its variation over the
+ * panel. The nodes of a peak that no node reaches see the level of the
+ * integrand around it: 0 where the peak underflows (`e^(−10⁸·x)`), or a
+ * constant (`1 + 10³·e^(−10⁸·x)`).
+ *
+ * A peak on an integrand that varies next to the bound (`eˣ + e^(−10⁸·x)`) is
+ * not found.
+ */
+function nodesAreFlat(
+  nodes: readonly [number, number, number, number] | undefined
+): boolean {
+  if (nodes === undefined || !nodes.every((v) => Number.isFinite(v)))
+    return false;
+  const largest = Math.max(...nodes);
+  const smallest = Math.min(...nodes);
+  const magnitude = Math.max(Math.abs(largest), Math.abs(smallest));
+  return largest - smallest <= 64 * Number.EPSILON * magnitude;
+}
+
+/** The nodes of a panel do not see the area of `boundGapError`
+ * (`Panel.boundGapUnseen`) when the error that the nodes give is less than
+ * `1/BOUND_GAP_UNSEEN` times this area and times the magnitude of the value
+ * of the panel. Next to a peak that no node reaches, the nodes see a
+ * resolved integrand: their error is the rounding of the samples, or 0 when
+ * all the samples are 0. After a peak was found, the panels at the bound are
+ * probed also when the nodes vary, and next to a singular endpoint (the
+ * `x^(−0.99)` of `e^(−10⁸·x)/x^0.99`) the nodes see the growth of the
+ * integrand: one of the two ratios is small. Measured on panels at a
+ * singular endpoint: for `x^(−0.9)` at 0, the area is about 5 times the
+ * error of the nodes at each depth; for `t/(1 − t)³` at 1 (`∫₀^∞ x dx` after
+ * the change of variable of an infinite bound), the area is much larger,
+ * because the deepest probe is very large, but the error of the nodes is a
+ * large part of the value of the panel. */
+const BOUND_GAP_UNSEEN = 2 ** 20;
+
+/** The position of the probe `k` of `boundGapError` next to the bound
+ * `bound` of an integral of width `span` (`direction` points into the
+ * interval). */
+function boundProbePosition(
+  bound: number,
+  direction: 1 | -1,
+  span: number,
+  k: number
+): number {
+  return bound + direction * span * 2 ** -k;
+}
+
+/**
+ * An estimate of the area of the integrand between a bound of the integral
+ * and the node nearest to it that the nodes of the panel `p`, which touches
+ * the bound, do not see, or 0 when the probes show no such area.
+ *
+ * The integrand is not sampled at a bound of the integral, where it can be
+ * singular, so `hiddenEdgeError` has no edge sample there and gives no test.
+ * The nearest node is at `0.0043` times the width of the panel from the
+ * bound, and a peak narrower than this gap is not seen by the 15 nodes. For
+ * `e^(−10⁸·x)` on `[0, 1]`, the node nearest to 0 of the starting panels is
+ * at `2.7e-4`, where the integrand is 0 in double precision: every node gave
+ * 0, the Gauss and the Kronrod sums agreed, and the quadrature gave `0`,
+ * converged, with an error of 0, for an integral of `1e-8`.
+ *
+ * The integrand is sampled inside the gap, at the positions of
+ * `boundProbePosition`. These positions depend on the width of the whole
+ * integral, not on the width of the panel, so that the panels that touch the
+ * bound after each bisection use the same positions, and `probe` computes
+ * each sample once (at most `BOUND_PROBE_DEEPEST / BOUND_PROBE_STEP` samples
+ * for each bound). The parabola through the three nodes nearest to the bound
+ * predicts each sample. The prediction of the nearest node by the next three
+ * nodes misses by `inward`, which is the size of the error of such a
+ * prediction on a smooth integrand (as in `hiddenEdgeError`). When a sample
+ * misses its prediction by more than `inward` plus the rounding, the
+ * integrand changes in the gap in a way that the nodes do not see. The
+ * result is then the sum, for each part of the gap between two consecutive
+ * probes, of the width of the part times the larger miss at its two ends
+ * (the miss of the deepest probe for the part between it and the bound, and
+ * the miss of the outermost probe for the part between it and the nearest
+ * node). The caller makes the error of the panel at least this area, and the
+ * panel is bisected toward the bound until its nodes see the peak.
+ *
+ * The caller computes the probes only next to the flat nodes of
+ * `nodesAreFlat`, and at a bound where the probes found an area. The deepest
+ * probe is computed first, and the other probes only when it misses its
+ * prediction or is not finite. A peak whose largest value is at the bound
+ * makes the deepest probe miss, and a flat integrand that has no peak costs
+ * one sample for each bound of the integral. When every panel at a bound
+ * computed all its probes, the test cost 27 samples for each integral, and a
+ * double integral with 4 starting panels at each level cost 8,190 samples
+ * instead of 4,032.
+ *
+ * Not found: a peak narrower than the deepest probe, which is at the smaller
+ * of `(b − a)·2^(−BOUND_PROBE_DEEPEST)` and the spacing of the doubles at the
+ * bound (`2⁻⁵²` at 1, about `2⁻³²` at `10⁶`); and a peak inside the gap whose
+ * largest value is not at the bound, when the deepest probe does not miss. A
+ * sample that is not finite gives no test.
+ */
+function boundGapError(
+  p: Panel,
+  bound: number,
+  direction: 1 | -1,
+  span: number,
+  probe: (k: number) => number
+): number {
+  const nodes = direction === 1 ? p.nodesNearA : p.nodesNearB;
+  if (nodes === undefined || !nodes.every((v) => Number.isFinite(v))) return 0;
+  const halfWidth = 0.5 * Math.abs(p.b - p.a);
+  // The distances from the bound to the four nodes nearest to it, in half
+  // widths, at the positions of the nodes as `gk15` computes them. When
+  // rounded nodes coincide, no parabola can be fitted and there is no test.
+  const [d0, d1, d2, d3] = [0, 1, 2, 3].map(
+    (k) =>
+      Math.abs(nodeAt(p.a, p.b, direction === 1 ? k : 14 - k) - bound) /
+      halfWidth
+  );
+  if (!(0 < d0 && d0 < d1 && d1 < d2 && d2 < d3)) return 0;
+  const [v0, v1, v2, v3] = nodes;
+  const gap = d0 * halfWidth;
+  const inward = Math.abs(v0 - parabolaAt([d1, d2, d3], [v1, v2, v3], d0));
+  const nodeMagnitude = Math.max(
+    Math.abs(v0),
+    Math.abs(v1),
+    Math.abs(v2),
+    Math.abs(v3)
+  );
+
+  // The levels of the probes inside the gap, from the outermost to the
+  // deepest.
+  const levels: number[] = [];
+  for (
+    let k = BOUND_PROBE_STEP;
+    k <= BOUND_PROBE_DEEPEST;
+    k += BOUND_PROBE_STEP
+  ) {
+    const distance = Math.abs(
+      boundProbePosition(bound, direction, span, k) - bound
+    );
+    if (distance === 0) break;
+    if (distance < gap) levels.push(k);
+  }
+  if (levels.length === 0) return 0;
+  // The distance and the miss of the probe of level `k`, and whether the
+  // miss is larger than the error of the prediction on a smooth integrand.
+  const measure = (k: number) => {
+    const distance = Math.abs(
+      boundProbePosition(bound, direction, span, k) - bound
+    );
+    const sample = probe(k);
+    const miss = Math.abs(
+      sample - parabolaAt([d0, d1, d2], [v0, v1, v2], distance / halfWidth)
+    );
+    const rounding =
+      64 * Number.EPSILON * Math.max(nodeMagnitude, Math.abs(sample));
+    return { distance, miss, large: miss > inward + rounding };
+  };
+  // The deepest probe first: a peak whose largest value is at the bound
+  // makes it miss, and on a smooth integrand it is the only probe that is
+  // computed (one sample for each bound of the integral).
+  const deepest = measure(levels[levels.length - 1]);
+  if (Number.isFinite(deepest.miss) && !deepest.large) return 0;
+
+  const distances: number[] = [];
+  const misses: number[] = [];
+  let found = false;
+  for (const k of levels) {
+    const { distance, miss, large } = measure(k);
+    if (!Number.isFinite(miss)) continue;
+    if (large) found = true;
+    distances.push(distance);
+    misses.push(miss);
+  }
+  if (!found) return 0;
+  const last = distances.length - 1;
+  let area = (gap - distances[0]) * misses[0] + distances[last] * misses[last];
+  for (let j = 0; j < last; j++)
+    area +=
+      (distances[j] - distances[j + 1]) * Math.max(misses[j], misses[j + 1]);
+  return area;
 }
 
 /** The spacing of the doubles at `x`, or twice it when `x` is just below a
@@ -1477,8 +1686,44 @@ function adaptiveFinite(
   // (see the test after each bisection below).
   let nanBorderTests = 0;
 
+  // The samples of the probes next to each bound of the integral
+  // (`boundGapError`), by the level `k` of the probe: the panels that touch
+  // a bound after each bisection read the same probes.
+  const probesNearA = new Map<number, number>();
+  const probesNearB = new Map<number, number>();
+  const boundProbe =
+    (bound: number, direction: 1 | -1, cache: Map<number, number>) =>
+    (k: number): number => {
+      let sample = cache.get(k);
+      if (sample === undefined) {
+        const previous = boundProbeDepth;
+        boundProbeDepth = activeQuadratures;
+        try {
+          sample = f(boundProbePosition(bound, direction, b - a, k));
+        } finally {
+          boundProbeDepth = previous;
+        }
+        cache.set(k, sample);
+      }
+      return sample;
+    };
+  const probeNearA = boundProbe(a, 1, probesNearA);
+  const probeNearB = boundProbe(b, -1, probesNearB);
+  // True when the probes found an area next to the bound `a` (or `b`). The
+  // panels at this bound are then probed even when their nodes are not flat
+  // (`nodesAreFlat`): when the bisection brings the nearest node to the
+  // tail of the peak, the nodes vary, and most of the peak can still be in
+  // the gap.
+  let peakNearA = false;
+  let peakNearB = false;
+
   // Add to the error of a panel the bound of the area that a jump next to
-  // one of its endpoints can hide from the nodes (`hiddenEdgeError`).
+  // one of its endpoints can hide from the nodes (`hiddenEdgeError`). The
+  // error of a panel that touches a bound of the integral is also at least
+  // the area that the probes next to the bound see and the nodes do not
+  // (`boundGapError`). It is the larger of the two errors, not their sum,
+  // so that the error of a panel whose nodes already see a large change
+  // toward the bound (a singular endpoint) does not change.
   const addHiddenEdgeError = (p: Panel) => {
     // The rounding of the nodes to the doubles (`positionShift`).
     if (Number.isFinite(p.error)) p.error += p.positionError ?? 0;
@@ -1486,6 +1731,25 @@ function adaptiveFinite(
       const hidden = hiddenEdgeError(p, f);
       p.error += hidden;
       if (p.quadpackError !== undefined) p.quadpackError += hidden;
+      let gapArea = 0;
+      if (p.a === a && (peakNearA || nodesAreFlat(p.nodesNearA))) {
+        const area = boundGapError(p, a, 1, b - a, probeNearA);
+        if (area > 0) peakNearA = true;
+        gapArea += area;
+      }
+      if (p.b === b && (peakNearB || nodesAreFlat(p.nodesNearB))) {
+        const area = boundGapError(p, b, -1, b - a, probeNearB);
+        if (area > 0) peakNearB = true;
+        gapArea += area;
+      }
+      if (
+        gapArea > BOUND_GAP_UNSEEN * p.error &&
+        Math.abs(p.value) >= BOUND_GAP_UNSEEN * p.error
+      )
+        p.boundGapUnseen = true;
+      if (gapArea > p.error) p.error = gapArea;
+      if (p.quadpackError !== undefined && gapArea > p.quadpackError)
+        p.quadpackError = gapArea;
     }
   };
 
@@ -1792,7 +2056,24 @@ function adaptiveFinite(
       regionLo = mid;
       regionHi = mid;
     } else {
-      if (iv === cornerLo) {
+      // A corner whose nodes do not see the area next to the bound that the
+      // probes see (`boundGapUnseen`) is bisected toward a peak, not toward
+      // a singularity, and the shells it sheds are not a series of the
+      // integrand next to the bound. The series then starts again from the
+      // child, as from a starting corner, and the shed shell is an ordinary
+      // panel. Otherwise the shells of `e^(−10⁸·x)/x^0.99` on `[0, 1]` were
+      // 18 shells of about 0 and then the peak, the block of the peak was
+      // `10¹¹` times the block before it, and the divergence test
+      // (`shellsDiverge`) reported the integral as divergent.
+      if (iv === cornerLo && iv.boundGapUnseen === true) {
+        cornerLo = left;
+        shellsLo.length = 0;
+        shellErrorsLo.length = 0;
+        shellQuadpackErrorsLo.length = 0;
+        depthLo = depthOf(left);
+        widthLo = mid - iv.a;
+        regionLo = mid;
+      } else if (iv === cornerLo) {
         cornerLo = left;
         shellsLo.push(right.value);
         // An error of `+∞` (a node position that is not finite, `gk15`)
@@ -1805,7 +2086,15 @@ function adaptiveFinite(
         );
         shellQuadpackErrorsLo.push(right.quadpackError ?? right.error);
       }
-      if (iv === cornerHi) {
+      if (iv === cornerHi && iv.boundGapUnseen === true) {
+        cornerHi = right;
+        shellsHi.length = 0;
+        shellErrorsHi.length = 0;
+        shellQuadpackErrorsHi.length = 0;
+        depthHi = depthOf(right);
+        widthHi = iv.b - mid;
+        regionHi = mid;
+      } else if (iv === cornerHi) {
         cornerHi = right;
         shellsHi.push(left.value);
         shellErrorsHi.push(
@@ -2221,6 +2510,18 @@ let nestedErrorSink: NestedErrors | undefined;
  * deeper is computed inside the integrand of an inner one, and is counted in
  * the result of that inner one. */
 let nestedErrorDepth = -1;
+/** The value of `activeQuadratures` while the quadrature at that depth
+ * computes a probe of `boundGapError`, or `-1`. A probe is not a node of the
+ * quadrature, and the collector of that quadrature (`withNestedErrors`) does
+ * not count it: the probes are next to the bounds, and the errors of the
+ * inner integrals there are not a sample of the errors over the interval.
+ * For example, when the inner integral is over `[0, y]`, its value at a
+ * probe next to `y = 0` is very small, and the ratio of its absolute
+ * tolerance to its value is very large. When every panel at a bound was
+ * probed, this ratio made the result of `∫₀¹ (4/15 − I(y)) dy` converged,
+ * with `I(y) = ∫₀^y √x dx` computed on two panels and an error of `3.6e-3`.
+ * The same ratio at a node is the issue file `issues/CE-1059.md`. */
+let boundProbeDepth = -1;
 
 /** Report the result of an inner quadrature over `[a, b]` that started
  * when `activeQuadratures` was `depth` (see `nestedErrorDepth`), with the
@@ -2441,6 +2742,8 @@ function withNestedErrors(
     const previousSink = nestedErrorSink;
     const previousDepth = nestedErrorDepth;
     const depth = activeQuadratures;
+    // A probe of `boundGapError` is not counted (see `boundProbeDepth`).
+    const counted = boundProbeDepth !== depth;
     nestedErrorSink = sink;
     nestedErrorDepth = depth;
     const calls: InnerCall[] = [];
@@ -2456,7 +2759,7 @@ function withNestedErrors(
       nestedErrorSink = previousSink;
       nestedErrorDepth = previousDepth;
     }
-    if (sink.reported && Number.isFinite(v)) {
+    if (counted && sink.reported && Number.isFinite(v)) {
       sink.count += 1;
       const measured =
         again === undefined
