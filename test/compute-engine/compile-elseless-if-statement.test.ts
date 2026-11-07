@@ -395,13 +395,11 @@ describe('the admission is plain-JavaScript only', () => {
     expect(r.code).toMatch(/if 2 < i:/);
   });
 
-  test('INTERVAL JavaScript still declines — the emission would be WRONG', () => {
-    // `compileLoopBody` would emit syntactically valid code here, but its
-    // `scalarConditionTarget` only unwraps a literal `_IA.point(…)` spelling
-    // (the plain-number loop counter it was written for). A condition over a
-    // free variable compiles to `0 < _.x` against an `{lo, hi}` OBJECT, which
-    // is always `false`. Admitting the shape would be a silent wrong answer,
-    // which is worse than declining.
+  test('INTERVAL JavaScript still declines', () => {
+    // `compileLoopBody` emits the condition as `_IA.decided(<verdict>)`,
+    // which throws for an undecided verdict, so an input interval on which
+    // the condition is not decided would give `entire`. Outside a loop the
+    // interpreter gives the exact value, so the shape declines.
     const r = compile(elselessBlock(ce), { to: 'interval-js' });
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/Could not compile `If`: wrong number of arguments/);

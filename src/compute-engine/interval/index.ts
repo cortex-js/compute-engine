@@ -125,6 +125,7 @@ import {
   and as _and,
   or as _or,
   not as _not,
+  decided as _decided,
   piecewise as _piecewise,
   hull as _hull,
   asResult as _asResult,
@@ -267,6 +268,7 @@ export {
   and,
   or,
   not,
+  decided,
   piecewise,
   hull,
   hullValues,
@@ -451,6 +453,9 @@ export const IntervalArithmetic = {
   and: _and,
   or: _or,
   not: _not,
+  // The JavaScript boolean of a decided verdict, for the condition of an
+  // `if` statement; an undecided verdict throws.
+  decided: _decided,
   piecewise: _piecewise,
   hull: _hull,
   // `res` wraps an enclosure and passes an array or a verdict through: the

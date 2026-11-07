@@ -1476,7 +1476,16 @@ function broadcastIntervalsRange(
     const o = 3 * (i - from);
     try {
       encodeIntervalResult(call(vars), out, o);
-    } catch {
+    } catch (e) {
+      // The condition of an `if` statement in a loop that the input
+      // intervals of the cell do not decide (`decided()` in
+      // `interval/comparison.ts` throws an error with this name) is not a
+      // failure: no bound is known, and the cell is `entire`, as `run()`
+      // answers for the same input.
+      if (e instanceof Error && e.name === 'UndecidedConditionError') {
+        encodeIntervalResult({ kind: 'entire' }, out, o);
+        continue;
+      }
       out[o] = NaN;
       out[o + 1] = NaN;
       out[o + 2] = INTERVAL_KIND.error;

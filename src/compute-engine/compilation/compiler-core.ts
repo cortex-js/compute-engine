@@ -250,6 +250,7 @@ import {
   copyCallerLoweredToCseOccurrence,
   recordCseDefiningOccurrence,
   compileOp,
+  compileOpValue,
   cseTempVar,
   foldEmitted,
   isEmissionSkippable,
@@ -349,6 +350,7 @@ import {
   isStatementArm,
   liveSelectionArms,
   mayBeCollectionCondition,
+  withCseOperand,
   withCseRegion,
 } from './compile-conditions.js';
 import { elementwiseMaskRank } from '../library/control-structures.js';
@@ -4314,6 +4316,86 @@ export function shaderSelectionStatement(
 }
 
 /**
+ * The JavaScript condition of the `If` statement `ifNode` (its condition is
+ * operand 0) on the interval target.
+ *
+ * On the interval target a condition is a verdict, the string `'true'`,
+ * `'false'` or `'maybe'`, and every non-empty string is truthy in
+ * JavaScript. The interval comparison is necessary: an input and a constant
+ * such as `Pi` are enclosures (`{ lo, hi }` objects), and a JavaScript
+ * comparison with such an object is always false, so a `Break` under
+ * `i > x` never ran. `_IA.decided()` converts the verdict, and throws for
+ * `'maybe'`, because one pass of a loop cannot run both branches; the runner
+ * then gives `{ kind: 'entire' }`. A condition that folds to a constant is
+ * emitted as the JavaScript literal.
+ */
+function intervalStatementCondition(
+  ifNode: Expression,
+  target: CompileTarget<Expression>
+): string {
+  if (!isFunction(ifNode)) throw new Error('Internal: expected an `If`');
+  const cond = intervalLazyVerdict(ifNode, 0, ifNode.ops[0], target);
+  if (cond === "'true'") return 'true';
+  if (cond === "'false'") return 'false';
+  return `_IA.decided(${cond})`;
+}
+
+/**
+ * The verdict code of operand `opIndex` of `parent`, on the interval target,
+ * with the evaluation order of the interpreter for `And` and `Or`.
+ *
+ * The interval lowering of `And` and `Or` (`_IA.and`, `_IA.or`) evaluates
+ * every operand. The interpreter stops at the first operand that decides
+ * the result (`False` for `And`, `True` for `Or`), so an operand after it,
+ * for example a call of a host function, does not run. Here each later
+ * operand is evaluated only when the verdict so far does not decide the
+ * result: `And(a, b)` is `((v) => v === 'false' ? v : _IA.and(v, b))(a)`.
+ * A verdict `'maybe'` does not decide the result, so `And(maybe, false)` is
+ * still `'false'`. A `Not` passes the same order to its operand.
+ *
+ * This lowering is taken only when each operand has the static type
+ * `boolean`. Any other connective (an operand typed `list<boolean>`, for
+ * example) compiles through the handler of the interval target, whose
+ * operand checks make the compilation decline.
+ */
+function intervalLazyVerdict(
+  parent: Expression,
+  opIndex: number,
+  cond: Expression,
+  target: CompileTarget<Expression>
+): string {
+  const head = isFunction(cond) ? cond.operator : '';
+  const isAnd = head === 'And';
+  const isNot = head === 'Not';
+  if (
+    !isFunction(cond) ||
+    !(isNot ? cond.nops === 1 : (isAnd || head === 'Or') && cond.nops >= 2) ||
+    !cond.ops.every((op) => op.type.matches('boolean'))
+  )
+    return parent.operator === 'If'
+      ? compileOp(parent, opIndex, target, 0, cond)
+      : compileOpValue(parent, opIndex, target, 0, cond);
+  if (isNot)
+    return withCseOperand(
+      parent,
+      opIndex,
+      target,
+      () => `_IA.not(${intervalLazyVerdict(cond, 0, cond.ops[0], target)})`
+    );
+  return withCseOperand(parent, opIndex, target, () => {
+    const stop = isAnd ? "'false'" : "'true'";
+    const op = isAnd ? '_IA.and' : '_IA.or';
+    let code = intervalLazyVerdict(cond, 0, cond.ops[0], target);
+    for (let i = 1; i < cond.nops; i++) {
+      const v = tempVar(target);
+      const next = intervalLazyVerdict(cond, i, cond.ops[i], target);
+      code = `((${v}) => ${v} === ${stop} ? ${v} : ${op}(${v}, ${next}))(${code})`;
+    }
+    return code;
+  });
+}
+
+/**
  * Compile a loop body expression as statements (not wrapped in IIFE).
  * Handles Break, Continue, Return as statements, and If as if-else when
  * branches contain control flow.
@@ -4335,17 +4417,16 @@ export function compileLoopBody(
 
   if (h === 'If') {
     // For the imperative `if` statement, the condition must produce a
-    // boolean.  Interval targets compile comparisons to interval results
-    // (e.g. `_IA.greater(...)` returns an object, not a boolean), which
-    // would always be truthy.  Use scalar operators for the condition.
-    // The condition is a value expression (its own bindable region); each
-    // branch is a statement list again (§5.1(c)).
-    const condTarget = scalarConditionTarget(target);
+    // JavaScript boolean. The condition is a value expression (its own
+    // bindable region); each branch is a statement list again (§5.1(c)).
     const branch = (i: number): string =>
       withCseScope(expr, i, target, () =>
         core.compileLoopBody(expr.ops[i], target)
       );
-    const cond = compileOp(expr, 0, condTarget, 0, expr.ops[0]);
+    const cond =
+      target.language === 'interval-javascript'
+        ? intervalStatementCondition(expr, target)
+        : compileOp(expr, 0, scalarConditionTarget(target), 0, expr.ops[0]);
     const thenBranch = branch(1);
     const elseBranch = expr.ops.length > 2 ? branch(2) : undefined;
     // A block is a statement, so it splices in where the `if` did, and

@@ -74,6 +74,19 @@
 
 ### Resolved Issues
 
+- **On the `interval-js` target, a `Loop` that stops or skips a pass when its
+  index passes an input or a constant now gives the correct value.** The
+  condition of an `If` statement in the body of the loop was always false when
+  it compared the index with an input or with a constant such as `Pi`: with
+  `x = 2`, `n ≔ 0; Loop(Block(n ≔ i; If(i > x, Break)), i ∈ 1..5); n + 1` gave
+  the interval `[6, 6]`, and it now gives `[4, 4]`, as the interpreter does. A
+  boolean input in such a condition is also read correctly. When the input
+  interval makes the condition true at some of its points and false at others
+  (`x` in `[1.5, 2.5]`), the result is `{ kind: 'entire' }`, because the pass
+  where the loop stops is not known; `broadcast()` gives the kind `entire` for
+  such a cell. A condition that the `interval-js` target cannot compute, such
+  as a comparison of two strings, now makes the compilation decline, and the
+  interpreter evaluates the loop.
 - **A sum or a product over a set whose condition reads a subscript of the
   index now gives a value.** `\sum_{k\in\{1,2,3\}, a_{k+1}>0} a_k` gave an
   `incompatible-type` error; with `a_1 = 1`, `a_2 = -1`, `a_3 = 2` and

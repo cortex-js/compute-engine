@@ -708,17 +708,15 @@ export function compileBlock(
             //    `block` hook receives already-COMPILED statements), which is a
             //    separate change. Until then the shape declines with `If: wrong
             //    number of arguments` and falls back to the interpreter.
-            //  - INTERVAL JavaScript. `compileLoopBody` DOES emit syntactically
-            //    valid code here, but not correct code: its
-            //    `scalarConditionTarget` unwraps only a `_IA.point(…)` spelling
-            //    (the plain-number loop counter it was written for), so a
-            //    condition over a free variable or an interval-valued local
-            //    emits `0 < _.x` against an `{lo, hi}` OBJECT — always `false`.
-            //    Verified: the else-LESS shape answers `[1,1]` for `x = [3,3]`
-            //    where the else-ful `_IA.piecewise` lowering answers the
-            //    correct `[-1,-1]`. (The same defect already affects an
-            //    else-less `If` inside an interval LOOP body — pre-existing,
-            //    separate, and not to be widened here.)
+            //  - INTERVAL JavaScript. `compileLoopBody` emits the condition as
+            //    `_IA.decided(<verdict>)`, which throws for an undecided
+            //    verdict, so a call whose input interval makes the condition
+            //    true at some points and false at others gives `entire`. In a
+            //    loop body that is the only sound answer, since one pass
+            //    cannot run both branches. Outside a loop the else-ful
+            //    lowering joins the two branches (`_IA.hull`) and keeps a
+            //    bound, so this shape declines and the interpreter evaluates
+            //    it.
             //  - The GPU targets: their own statement model, plus the above.
             //    An else-less `If` whose branch assigns takes the shader
             //    statement form below (`shaderSelectionStatement`).

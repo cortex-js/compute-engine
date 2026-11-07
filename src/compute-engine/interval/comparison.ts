@@ -302,6 +302,35 @@ export function not(a: BoolInterval): BoolInterval {
 }
 
 /**
+ * The JavaScript boolean of a verdict, for the condition of an `if`
+ * statement in compiled code (an `If` in the body of a `Loop`, for example
+ * the condition of a `Break`).
+ *
+ * A pass of a loop runs one branch only, so it cannot run both branches and
+ * join their values, as `piecewise` does for a conditional value. A verdict
+ * other than `'true'` or `'false'` (`'maybe'`: the condition holds at some
+ * points of the input enclosures and not at others) throws an error whose
+ * `name` is `'UndecidedConditionError'`. The runner of the compiled code (`run()`)
+ * and the batch evaluator (`broadcast()`) catch it and give
+ * `{ kind: 'entire' }`: no bound is known for the value.
+ */
+export function decided(cond: BoolInterval): boolean {
+  if (cond === 'true') return true;
+  if (cond === 'false') return false;
+  const error = new Error(
+    'The condition of an `if` statement is true at some points of the input intervals and false at others'
+  );
+  error.name = UNDECIDED_CONDITION;
+  throw error;
+}
+
+/** The `name` of the error that `decided()` throws for an undecided
+ * verdict. The batch evaluator (`broadcastIntervalsRange()` in
+ * `compilation/broadcast.ts`, a module that imports types only) tests the
+ * same string, so a change here must also change it there. */
+const UNDECIDED_CONDITION = 'UndecidedConditionError';
+
+/**
  * Piecewise (conditional) evaluation for intervals.
  *
  * When the condition is indeterminate ('maybe'), both branches

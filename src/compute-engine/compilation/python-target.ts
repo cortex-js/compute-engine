@@ -1612,9 +1612,9 @@ function compilePythonStatements(
     return `return ${BaseCompiler.compileOp(expr, 0, target, 0, expr.ops[0])}`;
 
   // The Python target's comparisons already emit real Python booleans, so —
-  // unlike the JS `compileLoopBody`, whose interval-JS targets need a
-  // `scalarConditionTarget` to avoid comparison *objects* — the condition is
-  // compiled directly. The condition is a value expression (its own bindable
+  // unlike the JS `compileLoopBody`, which converts the verdict of the
+  // interval target to a JavaScript boolean — the condition is compiled
+  // directly. The condition is a value expression (its own bindable
   // region); each branch is a statement list again (design §5.1(c)).
   if (h === 'If') return compilePythonIfStatement(expr.ops, target, expr);
 

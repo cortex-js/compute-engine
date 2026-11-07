@@ -181,6 +181,14 @@ interpreter's value. A line is removed when the case declines or is fixed.
   Sum(C[i+1]·x^i, i, 0, Length(C) − 1))` compiles to a scalar loop over
   `_SYS.at(C, i + 1) * _SYS.pow(_.x, i)` and gives `null` (also in
   0.178.0); the interpreter gives the list `[3x + 1, 4x + 2]`.
+- `interval-js`, `x: real`, `f: (real) -> real` given with the `functions`
+  option as a host function that counts its calls in a global:
+  `If(And(x < 0, f(x) > 0), 1, 2)` at `x = 1` calls `f` once and gives
+  `[2, 2]`. The interval lowering of `And` and `Or` in a value
+  (`_IA.and`, `_IA.or`) evaluates every operand. The interpreter stops at
+  the first operand that decides the result, gives `2`, and does not call
+  `f`. The condition of an `If` statement in a `Loop` body keeps the order
+  of the interpreter.
 - `glsl` and `wgsl`, `s: (real) -> complex` with `s := t ↦ If(t > 0, t > 1,
   t)`, `x: real`: `s(x)` compiles with success to
   `vec2(((0.0 < t) ? (1.0 < t) : (t)), 0.0)` (GLSL) and

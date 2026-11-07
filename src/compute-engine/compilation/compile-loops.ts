@@ -1500,12 +1500,18 @@ export function noteLocalFunction(
 
 /**
  * Create a target that compiles conditions as plain JS booleans.
- * Used inside `compileLoopBody` so that `if (cond)` gets a real boolean,
- * not an interval result object (which would always be truthy).
+ * Used inside `compileLoopBody` so that `if (cond)` gets a real boolean
+ * on a custom target that wraps its numbers (`target.number(0)` is not
+ * `'0'`). No built-in target that reaches `compileLoopBody` wraps its
+ * numbers: the GPU targets compile `Loop` with their own lowering.
  *
  * Overrides comparison and logical operators to use plain JS, and
- * numeric values/variables to use raw numbers (the loop counter is
- * already a plain number).
+ * numeric literals to use raw numbers.
+ *
+ * The interval target does not use this target: its inputs and constants
+ * are enclosures, which a plain JS comparison cannot compare, so its
+ * condition is the interval verdict (`intervalStatementCondition()` in
+ * `compiler-core.ts`).
  */
 export function scalarConditionTarget(
   target: CompileTarget<Expression>
@@ -1525,38 +1531,9 @@ export function scalarConditionTarget(
   // If the target doesn't wrap numbers, no override needed
   if (target.number(0) === '0') return target;
 
-  // The interval target spells the boolean constants as the strings
-  // `'true'` and `'false'` (its `BoolInterval` domain). A non-empty string is
-  // truthy in JavaScript, so `if ('false') { break }` ran the branch: a loop
-  // whose `Break` condition folds to `False` stopped at its first step. In
-  // this target the condition is a JavaScript boolean, so the constants are
-  // the JavaScript literals. The name is resolved through the original
-  // target first, and the code is converted only when the name is `True` or
-  // `False` and the code is the interval spelling of that constant. Any other
-  // code is kept: a `vars` mapping of `False` to `'4'`, or a string input
-  // that the host maps to the code `'false'`.
-  const scalarBoolean = (
-    id: string,
-    code: string | undefined
-  ): string | undefined =>
-    id === 'True' && code === "'true'"
-      ? 'true'
-      : id === 'False' && code === "'false'"
-        ? 'false'
-        : code;
-
   return {
     ...target,
     number: (n: number) => String(n),
-    constant: (id: string) => scalarBoolean(id, target.constant?.(id)),
-    var: (id: string) => {
-      // Resolve through original target, then strip interval wrapping
-      // e.g. '_IA.point(i)' → 'i', plain 'x' stays 'x'
-      const resolved = scalarBoolean(id, target.var(id));
-      if (!resolved) return undefined as any;
-      const match = resolved.match(/^_IA\.point\((.+)\)$/);
-      return match ? match[1] : resolved;
-    },
     operators: (op: string) => SCALAR_OPS[op] ?? target.operators?.(op),
     functions: (id: string) => {
       // Comparison functions should not be used — operators handle them
