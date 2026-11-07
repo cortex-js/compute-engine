@@ -607,6 +607,15 @@
   4 µs each, and is now a list computed in about 0.4 µs per element. The
   values do not change. A quotient of two integers that is not an integer
   is still the exact rational (`7/2`), computed element by element.
+- **At machine precision, arithmetic on lists of more than 100 numbers that
+  hold complex numbers is now computed at once.** With `L` a list of 2,000
+  points, `Conjugate(PointZ(L) / (PointX(L) + i·PointY(L)))` took about
+  15 µs per element and now takes about 4 µs, and `i·PointY(L)` took about
+  6 µs and now takes about 1.7 µs. A quotient, a negation and a conjugate
+  of such lists were lazy lists, and are now lists. This applies to `Add` and
+  `Multiply` of two operands, `Divide`, `Negate` and `Conjugate`; the values
+  do not change. Under `N()`, and for a list that holds an exact rational or
+  a big-number float, the computation stays element by element.
 - **An expression that holds several copies of the same sub-expression now
   computes it at most twice in one `evaluate()`.** A copy is a separate
   expression with the same operators, numbers and symbols, as a host makes

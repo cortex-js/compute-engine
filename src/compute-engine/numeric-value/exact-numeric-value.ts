@@ -2289,6 +2289,20 @@ export function hasExactPartOutsideDoubleRange(v: NumericValue): boolean {
     v.isComplexInfinity
   )
     return false;
+  // A part that is an integer with a safe-integer numerator is 0 or a normal
+  // double (its magnitude is at least 1), and needs no big decimal. Without
+  // this test, each product of a float with the exact `i` made two big
+  // decimals.
+  const smallInteger = (r: Rational, radical: number) =>
+    radical === 1 &&
+    r[1] === 1 &&
+    typeof r[0] === 'number' &&
+    Number.isSafeInteger(r[0]);
+  if (
+    smallInteger(v.rational, v.radical) &&
+    smallInteger(v.imRational, v.imRadical)
+  )
+    return false;
   const outside = (big: BigDecimal) =>
     !big.isZero() && isOutsideNormalDoubleRange(big.toNumber());
   return outside(v.bignumRe) || (v.isComplex && outside(v.bignumIm));

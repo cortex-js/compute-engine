@@ -1,5 +1,6 @@
 import type { Expression } from '../types-expression.js';
 import type { RoundingTies } from '../types-definitions.js';
+import type { NumericValue } from '../numeric-value/types.js';
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
 import {
   integerExactnessClass,
@@ -115,12 +116,30 @@ function rationalScalarOf(op: Expression): [number, number] | undefined {
  *   element-by-element value. A change in the last digit of a float is
  *   accepted for the performance (user decision, 2026-09-21); an exact value
  *   is never changed.
+ * - **Complex numbers.** A list that holds a complex number has no store of
+ *   doubles. When an operand holds a complex number, `Add`, `Multiply` and
+ *   `Divide` of two operands, `Negate` and `Conjugate` are computed by
+ *   {@link complexBroadcast}, one numeric value per cell, except under a
+ *   numeric approximation (`N()`).
  */
 export function machineBroadcast(
   ce: Expression['engine'],
   operator: string,
   ops: ReadonlyArray<Expression>,
   numericApproximation = false
+): Expression | undefined {
+  const real = realMachineBroadcast(ce, operator, ops, numericApproximation);
+  if (real !== undefined || numericApproximation) return real;
+  return complexBroadcast(ce, operator, ops, true);
+}
+
+/** The computation on doubles of {@link machineBroadcast}, for operands
+ * that hold no complex number. */
+function realMachineBroadcast(
+  ce: Expression['engine'],
+  operator: string,
+  ops: ReadonlyArray<Expression>,
+  numericApproximation: boolean
 ): Expression | undefined {
   const kernel = KERNELS[operator];
   if (!atMachinePrecision(ce)) {
@@ -927,9 +946,11 @@ export function machineListOf(x: Expression): Expression | undefined {
  * computed on doubles by {@link machineBroadcast}, when each operand is a
  * list of machine numbers with more than `eagerLimit` elements, the engine
  * is at machine precision, and the evaluation is not a numeric
- * approximation (`N()`). `undefined` otherwise, and when
- * `machineBroadcast()` declines (for example for lists of two lengths): the
- * caller then computes the cells one by one, as before.
+ * approximation (`N()`). When an operand holds a complex number, the sum or
+ * the product is computed by {@link complexBroadcast}, and one operand can
+ * then be a number (`i · L`). `undefined` otherwise, and when both functions
+ * decline (for example for lists of two lengths): the caller then computes
+ * the cells one by one, as before.
  *
  * The callers are the tensor kernels of `Add` and `Multiply`
  * (`addTensors()` in `arithmetic-add.ts`, `mulTensors()` in
@@ -954,11 +975,320 @@ export function machinePairBroadcast(
 ): Expression | undefined {
   if (numericApproximation || values.length !== 2) return undefined;
   if (!atMachinePrecision(ce)) return undefined;
+  let machineLists = 0;
+  let lists = 0;
   for (const x of values) {
-    const length = machineListOf(x)?.array?.length;
-    if (length === undefined || length <= eagerLimit) return undefined;
+    const list = listValueOf(x);
+    if (!isFunction(list)) continue;
+    if (list.nops <= eagerLimit) return undefined;
+    lists += 1;
+    if (machineListOf(list)?.array !== undefined) machineLists += 1;
   }
-  return machineBroadcast(ce, operator, values);
+  if (lists === 0) return undefined;
+  // A list of real machine numbers beside a number is scaled by the tensor
+  // kernel of `Multiply` (`scaleMachineVector()` in `arithmetic-mul-div.ts`),
+  // so the real computation is tried only for two lists.
+  if (machineLists === 2) {
+    const real = realMachineBroadcast(ce, operator, values, false);
+    if (real !== undefined) return real;
+  }
+  return complexBroadcast(ce, operator, values, false);
+}
+
+/**
+ * The operators of {@link complexBroadcast}, with their number of operands,
+ * and the operation on the numeric values of one cell. Each operation is the
+ * one that the library calls for the cells that {@link kernelComputes}
+ * admits: `NumericValue.add()`, `mul()`, `div()` and `neg()`, and for
+ * `Conjugate` the
+ * float with the opposite imaginary part (the `evaluate` handler of
+ * `Conjugate` in `library/complex.ts`; a real float is its own conjugate).
+ */
+const COMPLEX_KERNELS: Record<
+  string,
+  {
+    arity: 1 | 2;
+    apply: (
+      ce: Expression['engine'],
+      a: NumericValue,
+      b: NumericValue
+    ) => NumericValue;
+  }
+> = {
+  Add: { arity: 2, apply: (_ce, a, b) => a.add(b) },
+  Multiply: { arity: 2, apply: (_ce, a, b) => a.mul(b) },
+  Divide: { arity: 2, apply: (_ce, a, b) => a.div(b) },
+  Negate: { arity: 1, apply: (_ce, a) => a.neg() },
+  Conjugate: {
+    arity: 1,
+    apply: (ce, a) =>
+      a.im === 0 ? a : ce._inexactNumericValue({ re: a.re, im: -a.im }),
+  },
+};
+
+/**
+ * Element-wise `Add`, `Multiply` and `Divide` of two operands, `Negate` and
+ * `Conjugate`, at machine precision, over operands of which at least one
+ * holds a complex number (`Z / (X + i·Y)` with `X`, `Y` and `Z` lists of
+ * real numbers). The answer is an ordinary `List` of boxed numbers, computed
+ * at once.
+ *
+ * Without this function, a broadcast over more than a hundred elements
+ * answers a lazy `Map`, whose elements cost about 4 µs each, paid again by
+ * each consumer; the tensor kernels of `Add` and `Multiply` compute a cell
+ * at about the same cost. A cell here is one operation on numeric values
+ * and the boxing of its result.
+ *
+ * Each cell is the value that the route of the caller computes for that
+ * cell:
+ *
+ * - For the cells that {@link kernelComputes} admits, the interpreter
+ *   computes the operation of {@link COMPLEX_KERNELS} on the numeric values
+ *   of the operands, in the order of the operands. A cell here is that
+ *   operation on the same numeric values ({@link complexCellValueOf} gives
+ *   the numeric value of an operand), when its result is a finite float, or,
+ *   for a cell of exact operands, an exact Gaussian integer whose parts are
+ *   safe integers. A float result equal to zero is not kept: its sign can
+ *   differ. The test file `test/compute-engine/complex-broadcast.test.ts`
+ *   compares the cells with the values of the route of the caller.
+ * - Any other cell (`Conjugate(2 - i)`, `0.5 / (2 - i)`, a quotient by `0`)
+ *   is computed as `ce._fn(operator, args).evaluate()`, when `applications`
+ *   is `true`: the caller is the broadcast of `collection-utils.ts`, which
+ *   computes each cell that way, as each element of its lazy `Map` is. When
+ *   such cells are more than an eighth of the cells, the function declines,
+ *   and the caller keeps its lazy `Map`. When `applications` is `false` (the
+ *   tensor kernels of `Add` and `Multiply`, which compute a cell in another
+ *   way), such a cell declines.
+ * - An operand is a finite number stored as a double
+ *   ({@link isStoredAsDouble}): a machine float, real or complex, or an
+ *   exact integer or Gaussian integer (`3`, `i`, `2 - i`). An exact
+ *   rational, a radical, a big-number float, `NaN` and an infinity decline.
+ * - The evaluation is not a numeric approximation (`N()`): the callers do
+ *   not call this function then.
+ * - At least one operand holds a complex number. Lists of real numbers are
+ *   computed on doubles ({@link machineBroadcast}), or declined by it.
+ *
+ * The answer is `undefined` when a condition above fails: the caller then
+ * takes the route it took before.
+ */
+function complexBroadcast(
+  ce: Expression['engine'],
+  operator: string,
+  ops: ReadonlyArray<Expression>,
+  applications: boolean
+): Expression | undefined {
+  const kernel = COMPLEX_KERNELS[operator];
+  if (kernel === undefined || ops.length !== kernel.arity) return undefined;
+  if (!atMachinePrecision(ce) || !isLibraryOperator(ce, operator))
+    return undefined;
+
+  // A list of real machine numbers (its `array` is defined), and an operand
+  // that is not a number with an imaginary part, hold no complex number.
+  // When every operand is one of them, no cell can be complex, and the
+  // function declines before it reads the elements. The `array` of a list is
+  // cached, and the real computation has usually read it already.
+  const mayHoldComplex = (op: Expression) => {
+    const list = listValueOf(op);
+    if (isFunction(list)) return list.array === undefined;
+    if (!isNumber(op)) return false;
+    const nv = op.numericValue;
+    return typeof nv !== 'number' && nv.im !== 0;
+  };
+  if (!ops.some(mayHoldComplex)) return undefined;
+
+  let length: number | undefined = undefined;
+  let complex = false;
+  const columns: (ComplexCellValue[] | ComplexCellValue)[] = [];
+  for (const op of ops) {
+    const list = listValueOf(op);
+    if (!isFunction(list)) {
+      const value = complexCellValueOf(ce, op);
+      if (value === undefined) return undefined;
+      if (value.value.im !== 0) complex = true;
+      columns.push(value);
+      continue;
+    }
+    if (length !== undefined && list.nops !== length) return undefined;
+    length = list.nops;
+    // A list that holds its numbers unboxed holds real numbers only.
+    if (list._numericStore !== undefined) {
+      const column = storeColumnOf(ce, list);
+      if (column === undefined) return undefined;
+      columns.push(column);
+      continue;
+    }
+    const elements = list.ops;
+    const column = new Array<ComplexCellValue>(elements.length);
+    for (let i = 0; i < elements.length; i++) {
+      if ((i & BIG_DEADLINE_STRIDE) === BIG_DEADLINE_STRIDE)
+        checkDeadline(ce._deadlineFrame);
+      const value = complexCellValueOf(ce, elements[i]);
+      if (value === undefined) return undefined;
+      if (value.value.im !== 0) complex = true;
+      column[i] = value;
+    }
+    columns.push(column);
+  }
+  if (!complex || length === undefined || length === 0) return undefined;
+
+  const cellOf = (column: ComplexCellValue[] | ComplexCellValue, i: number) =>
+    Array.isArray(column) ? column[i] : column;
+
+  const out = new Array<Expression>(length);
+  // The cells that the operation of `COMPLEX_KERNELS` does not give.
+  const others: number[] = [];
+  for (let i = 0; i < length; i++) {
+    if ((i & BIG_DEADLINE_STRIDE) === BIG_DEADLINE_STRIDE)
+      checkDeadline(ce._deadlineFrame);
+    const a = cellOf(columns[0], i);
+    const b = kernel.arity === 2 ? cellOf(columns[1], i) : a;
+    const r = kernelComputes(operator, a, b)
+      ? kernel.apply(ce, a.value, b.value)
+      : undefined;
+    // A cell of exact operands gives an exact Gaussian integer; any other
+    // cell gives a finite float that is not zero. The sign of a zero result
+    // can differ from the interpreter's: `mul()` answers `+0` for a factor
+    // `-0.0`, and `0.0 / (-1.25 - 0.75i)` is `+0` in the interpreter, where
+    // `div()` gives `-0`.
+    const exactCell = !a.float && !b.float;
+    if (
+      r !== undefined &&
+      !r.isNaN &&
+      Number.isFinite(r.re) &&
+      Number.isFinite(r.im) &&
+      (exactCell
+        ? r.isExact && Number.isSafeInteger(r.re) && Number.isSafeInteger(r.im)
+        : !r.isExact && (r.re !== 0 || r.im !== 0))
+    ) {
+      out[i] = ce.number(r);
+      continue;
+    }
+    if (!applications) return undefined;
+    others.push(i);
+    // A cell computed by the interpreter costs about as much as reading one
+    // element of the lazy `Map` of the caller. Above one cell in eight, the
+    // answer computed at once would cost a large part of what reading every
+    // element costs, and a consumer that reads only some elements of the
+    // `Map` would pay for all of them: the function declines.
+    if (others.length * 8 > length) return undefined;
+  }
+  // The other cells are computed as the route of the caller computes them.
+  for (const i of others) {
+    const args = ops.map((op) => {
+      const list = listValueOf(op);
+      return isFunction(list) ? list.ops[i] : op;
+    });
+    out[i] = ce._fn(operator, args).evaluate();
+  }
+  return ce.function('List', out);
+}
+
+/**
+ * Is the cell `a`, `b` of `operator` computed by the operation of
+ * {@link COMPLEX_KERNELS}, as the interpreter computes it? For a unary
+ * operator, `b` is `a`. Each case below was compared with the
+ * interpreter's value of the cell; the other cells are not:
+ *
+ * - `Add`, `Multiply` and `Negate`: every cell. The operands are floats or
+ *   exact Gaussian integers ({@link complexCellValueOf}); a cell of two
+ *   exact operands is kept only when its result is an exact Gaussian
+ *   integer (`i · 3` is `3i`). One exception: a product of a float and an
+ *   exact `0` is not admitted. The interpreter gives the exact `0` beside a
+ *   real float (`2.5 · 0`), where `mul()` gives the float `0`.
+ * - `Divide`: the divisor is a float. The interpreter divides by an exact
+ *   divisor in another way: `0.0123 / (2 - i)` is `0.004920000000000001 +
+ *   0.0024600000000000004i`, where `div()` gives `0.00492 + 0.00246i`.
+ * - `Conjugate`: the operand is a float. The conjugate of an exact value is
+ *   exact (`Conjugate(2 - i)` is `2 + i`), which the operation of
+ *   {@link COMPLEX_KERNELS} does not give.
+ */
+function kernelComputes(
+  operator: string,
+  a: ComplexCellValue,
+  b: ComplexCellValue
+): boolean {
+  if (operator === 'Divide') return b.float;
+  if (operator === 'Conjugate') return a.float;
+  if (operator === 'Multiply' && a.float !== b.float)
+    return !(!a.float && a.value.isZero) && !(!b.float && b.value.isZero);
+  return true;
+}
+
+/** An operand of a cell of {@link complexBroadcast}: the numeric value that
+ * the interpreter computes with, and whether the operand is a float. */
+interface ComplexCellValue {
+  value: NumericValue;
+  float: boolean;
+}
+
+/**
+ * The numeric value with which the interpreter computes the boxed number
+ * `x` at machine precision, as {@link complexBroadcast} admits it, or
+ * `undefined`:
+ *
+ * - a number whose value is a JavaScript number: its numeric value is
+ *   `ce._numericValue()` of that number, an exact integer for a safe
+ *   integer, else a float;
+ * - a float whose value is a double, real or complex (a machine numeric
+ *   value): itself;
+ * - an exact integer or Gaussian integer whose parts are safe integers:
+ *   itself.
+ *
+ * `undefined` for a value that is not finite, an exact rational, a radical
+ * and a big-number float.
+ */
+function complexCellValueOf(
+  ce: Expression['engine'],
+  x: Expression
+): ComplexCellValue | undefined {
+  if (!isNumber(x)) return undefined;
+  const nv = x.numericValue;
+  if (typeof nv === 'number') {
+    if (!Number.isFinite(nv)) return undefined;
+    const value = ce._numericValue(nv);
+    return { value, float: !value.isExact };
+  }
+  if (nv.isNaN || !Number.isFinite(nv.re) || !Number.isFinite(nv.im))
+    return undefined;
+  if (nv.isExact) {
+    if (!Number.isSafeInteger(nv.re) || !Number.isSafeInteger(nv.im))
+      return undefined;
+    return { value: nv, float: false };
+  }
+  if (!isStoredAsDouble(x)) return undefined;
+  return { value: nv, float: true };
+}
+
+/**
+ * The operands that the elements of a list that holds its numbers unboxed
+ * (`_numericStore`) give to the cells of {@link complexBroadcast}. An element
+ * is boxed as `boxStoreElement()` in `machine-number.ts` boxes it: a safe
+ * integer is a float when the list records that its integer-valued elements
+ * are floats, else an exact integer; any other double is a float. Its
+ * numeric value is then the one {@link complexCellValueOf} gives.
+ * `undefined` when an element is not finite.
+ */
+function storeColumnOf(
+  ce: Expression['engine'],
+  list: Expression
+): ComplexCellValue[] | undefined {
+  if (!isFunction(list)) return undefined;
+  const values = list.array;
+  if (values === undefined) return undefined;
+  const floats = list._machineFloats === true;
+  const column = new Array<ComplexCellValue>(values.length);
+  for (let i = 0; i < values.length; i++) {
+    if ((i & BIG_DEADLINE_STRIDE) === BIG_DEADLINE_STRIDE)
+      checkDeadline(ce._deadlineFrame);
+    const v = values[i];
+    if (!Number.isFinite(v)) return undefined;
+    const value =
+      floats && Number.isSafeInteger(v)
+        ? ce._inexactNumericValue(v)
+        : ce._numericValue(v);
+    column[i] = { value, float: !value.isExact };
+  }
+  return column;
 }
 
 /**
