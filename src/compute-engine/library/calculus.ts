@@ -73,6 +73,7 @@ import {
 } from '../boxed-expression/conditional-value.js';
 import {
   boundVariableBindings,
+  boundVariableNames,
   boundVariableNamesInOperand,
   calledParameterValue,
   callableBindingInContext,
@@ -2346,6 +2347,253 @@ function nIntegratePoleVerdict(
 }
 
 /**
+ * The integrand `fn` as the two parts (real, imaginary) that the quadrature
+ * integrates (`numericIntegrandParts`), and whether it compiled. An integrand
+ * that does not compile is evaluated by the interpreter. `shield` runs the
+ * compilation and the construction of the log-space fallback
+ * (`withLogSpaceFallback`): the `Integrate` route hides there the values of
+ * the symbols that have the name of an integration variable
+ * (`withValueShield`).
+ */
+function integrandPartsOf(
+  ce: ComputeEngine,
+  fn: Expression,
+  shield: <T>(run: () => T) => T
+): { integrand: IntegrandParts; compiled: boolean } {
+  const compiled = shield(() => implicitCompile(ce, fn));
+  const raw: (x: number) => unknown = compiled?.success
+    ? shield(() =>
+        withLogSpaceFallback(ce, fn, compiled.run as (x: number) => unknown)
+      )
+    : (
+        (app) => (x: number) =>
+          app([ce.number(x)])
+      )(applicable(fn));
+  return {
+    integrand: numericIntegrandParts(raw),
+    compiled: compiled?.success === true,
+  };
+}
+
+/** One part (real or imaginary) of the integrand on the two halves of the
+ * interval (see `endpointHalves`). */
+type EndpointHalvesPart = {
+  /** Half the length of the interval, `|U − L|/2`. */
+  width: number;
+  /** The sign of `U − L`. */
+  sign: 1 | -1;
+  /** `u ↦ f(L + sign·u)` and `u ↦ f(U − sign·u)`, for `u` in `[0, width]`. */
+  lower: (u: number) => number;
+  upper: (u: number) => number;
+  /** Whether both halves compiled. */
+  compiled: boolean;
+};
+
+/**
+ * Rewrite the sums of `expr` so that the constant terms of a sum are added
+ * together: a sum that is an operand of a sum, the negation of a sum and the
+ * product of a number literal and a sum are expanded into the terms of the
+ * sum that holds them. After the substitution `t = 1 − u`, the factor
+ * `1 − t` of an integrand is `1 − (1 − u)`, which the canonical form keeps
+ * (it does not distribute a `Negate` over a sum), and which is computed in
+ * doubles as `1 − fl(1 − u)`: `0` for `u < 2⁻⁵⁴`. Rewritten, it is `u`.
+ * Only sums are changed: the power `(1 − u)²` stays a power, so that no
+ * polynomial is expanded. The caller passes an expression without a binder
+ * (see `endpointHalves`), so that every operator can be built again with
+ * its new operands.
+ */
+function distributeSums(ce: ComputeEngine, expr: Expression): Expression {
+  if (!isFunction(expr)) return expr;
+  const ops = expr.ops.map((x) => distributeSums(ce, x));
+  const changed = ops.some((x, i) => x !== expr.ops[i]);
+  const op = expr.operator;
+  if (op === 'Negate' && ops.length === 1 && isFunction(ops[0], 'Add'))
+    return ce.function(
+      'Add',
+      ops[0].ops.map((x) => x.neg())
+    );
+  if (op === 'Add') {
+    let expanded = false;
+    const terms = ops.flatMap((x): ReadonlyArray<Expression> => {
+      if (isFunction(x, 'Add')) {
+        expanded = true;
+        return x.ops;
+      }
+      if (
+        isFunction(x, 'Multiply') &&
+        x.nops === 2 &&
+        isNumber(x.op1) &&
+        isFunction(x.op2, 'Add')
+      ) {
+        expanded = true;
+        // `ce.function('Multiply', …)`, not `.mul()`, which can expand a
+        // term that is itself a product of sums.
+        const c = x.op1;
+        return x.op2.ops.map((y) => ce.function('Multiply', [c, y]));
+      }
+      return [x];
+    });
+    if (expanded) return ce.function('Add', terms);
+  }
+  if (!changed) return expr;
+  // A call keeps the binding of its callee: in a scope that declares
+  // another `g`, the call `g(1 − t)` of the integrand still calls its own `g`
+  // (`withCallableBinding`).
+  return withCallableBinding(expr, () => ce.function(op, ops));
+}
+
+/** True when `expr` or one of its subexpressions binds a variable (a sum, an
+ * integral, a function literal, a block). */
+function holdsBinder(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  return boundVariableNames(expr).length > 0 || expr.ops.some(holdsBinder);
+}
+
+/**
+ * The integrand on the two halves of a finite interval `[L, U]`, each
+ * written in the distance `u` to its bound: `f(L + s·u)` and `f(U − s·u)`
+ * for `u` in `[0, |U − L|/2]`, with `s` the sign of `U − L`, so that
+ * `∫_L^U f = s·(∫_0^w f(L + s·u) du + ∫_0^w f(U − s·u) du)`.
+ *
+ * A bound that is not `0` is a double, and the doubles next to it are about
+ * `2⁻⁵²·|bound|` apart, so the adaptive quadrature can bisect the panel at
+ * that bound only about 50 times. For a slowly integrable singularity at the
+ * bound, a large part of the integral is closer to the bound than that, and
+ * the model of the part that is not sampled (`shellTail`,
+ * `numerics/endpoint-quadrature.ts`) needs more shells: the result has an
+ * error wider than its value (`∫_{1/2}^1 dt/((1 − t)(−ln(1 − t))^1.1)` gave
+ * `3 ± 36`, for 10.3733). Next to `u = 0` the doubles go down to `2⁻¹⁰⁷⁴`.
+ * A change of variable inside the quadrature does not help: the integrand
+ * computes `1 − t` from a double `t`. The substitution is made in the
+ * expression, before it is compiled, and the sums are rewritten
+ * (`distributeSums`) so that `1 − t` is computed as `u`.
+ *
+ * The integrand is built and compiled only when `halves` is called, which
+ * `integrateRealPart` does only for a singular corner that it could not
+ * resolve. It is `undefined` when the interval is not finite, when `fn` is
+ * not a function literal of one parameter, when it is not transitively pure
+ * (an effect would run again for each new sample) or when its body binds a
+ * variable (the substitution would have to follow the scopes), and when a
+ * half does not compile while `fn` did (an interpreted half would be slower
+ * than the integrand it replaces).
+ *
+ * The bounds `lowerBound` and `upperBound` are used as they are when they
+ * are number literals, so that `1 − (1 − u)` is `u` exactly; otherwise the
+ * double values `lower` and `upper` are used.
+ */
+function endpointHalves(
+  ce: ComputeEngine,
+  fn: Expression,
+  bounds: {
+    lowerBound: Expression;
+    upperBound: Expression;
+    lower: number;
+    upper: number;
+  },
+  original: { compiled: boolean },
+  shield: <T>(run: () => T) => T
+): (part: 're' | 'im') => EndpointHalvesPart | undefined {
+  let built:
+    | { lower: IntegrandParts; upper: IntegrandParts; compiled: boolean }
+    | null
+    | undefined;
+  const build = () => {
+    const { lower, upper } = bounds;
+    if (!isFinite(lower) || !isFinite(upper) || lower === upper) return null;
+    if (!isFunction(fn, 'Function') || fn.nops !== 2) return null;
+    const variable = functionLiteralParameterName(fn.ops[1]);
+    if (variable === undefined || variable === 'Nothing') return null;
+    // The canonical body of a function literal is a `Block`, the scope of
+    // the parameter, which binds its name: the binder test reads the
+    // statement of a block of one statement.
+    const body =
+      isFunction(fn.op1, 'Block') && fn.op1.nops === 1 ? fn.op1.op1 : fn.op1;
+    if (!isTransitivelyPure(fn) || holdsBinder(body)) return null;
+    // The quadrature integrates over the real parts of the bounds, so a
+    // complex literal is replaced by its real part, as any other bound.
+    const exact = (b: Expression, x: number) =>
+      isNumber(b) && b.im === 0 ? b : ce.number(x);
+    const lo = exact(bounds.lowerBound, lower);
+    const hi = exact(bounds.upperBound, upper);
+    // The new variable is the parameter of the literal, with its binding.
+    // `ce.symbol(variable)` would declare the name in the scope of the
+    // caller (`NIntegrate` evaluates in that scope), or give another
+    // expression (`i` is the imaginary unit).
+    const u = fn.ops[1];
+    if (!isSymbol(u) || u.symbol !== variable) return null;
+    const s = upper > lower ? u : u.neg();
+    const half = (at: Expression) => {
+      const shifted = distributeSums(ce, body.subs({ [variable]: at }));
+      return integrandPartsOf(
+        ce,
+        ce.expr(['Function', shifted, variable]),
+        shield
+      );
+    };
+    const near = half(ce.function('Add', [lo, s]));
+    const far = half(ce.function('Add', [hi, s.neg()]));
+    const compiled = near.compiled && far.compiled;
+    if (original.compiled && !compiled) return null;
+    return { lower: near.integrand, upper: far.integrand, compiled };
+  };
+  return (part) => {
+    if (built === undefined) built = build();
+    if (built === null) return undefined;
+    return {
+      width: Math.abs(bounds.upper - bounds.lower) / 2,
+      sign: bounds.upper > bounds.lower ? 1 : -1,
+      lower: built.lower[part],
+      upper: built.upper[part],
+      compiled: built.compiled,
+    };
+  };
+}
+
+/**
+ * The integral of one part of the integrand over the two halves of the
+ * interval (`endpointHalves`), when it is better than a result with a
+ * singular corner that was not resolved: `divergent` when a half diverges
+ * (with shells of one sign), or the sum of the halves when each half
+ * converged or was extrapolated. Otherwise `undefined`, and the caller keeps
+ * its result. Each half has the panel budget of the first quadrature, so
+ * that the half with the singular bound can bisect its corner deep enough
+ * for the model of the part that is not sampled (`shellTail`,
+ * `numerics/endpoint-quadrature.ts`): with half the budget, the error of
+ * `∫_0^{1/4} du/(u·(−ln u)^1.1)` is two times larger. The half without a
+ * singularity converges on few panels.
+ */
+function integrateEndpointHalves(
+  ce: ComputeEngine,
+  halves: EndpointHalvesPart
+): { estimate: number; error: number; divergent?: true } | undefined {
+  const options = {
+    deadline: ce._deadlineFrame,
+    singularEndpoints: true,
+    ...(halves.compiled ? {} : { maxIntervals: INTERPRETED_QUADRATURE_PANELS }),
+  };
+  const parts = [halves.lower, halves.upper].map((g) =>
+    adaptiveQuadrature(g, 0, halves.width, options)
+  );
+  if (parts.some((p) => p.nanRegion === true || p.oscillates === true))
+    return undefined;
+  if (parts.some((p) => p.divergent))
+    return { estimate: NaN, error: NaN, divergent: true };
+  if (
+    parts.every(
+      (p) =>
+        (p.converged || p.extrapolated === true) &&
+        Number.isFinite(p.estimate) &&
+        Number.isFinite(p.error)
+    )
+  )
+    return {
+      estimate: halves.sign * (parts[0].estimate + parts[1].estimate),
+      error: parts[0].error + parts[1].error,
+    };
+  return undefined;
+}
+
+/**
  * Integrate ONE real-valued part (`re` or `im`) of a one-limit integrand over
  * `[lower, upper]`. `Integrate(…).N()` and `NIntegrate` both call this
  * function, so the two operators use the same methods in the same order:
@@ -2354,7 +2602,10 @@ function nIntegratePoleVerdict(
  * 2. the adaptive Gauss–Kronrod quadrature, corrected next to a singular
  *    endpoint by the extrapolation of the shells of the corner panel and
  *    checked against the tanh-sinh rule (`singularEndpoints`,
- *    `numerics/endpoint-quadrature.ts`);
+ *    `numerics/endpoint-quadrature.ts`); on a finite interval, a singular
+ *    corner that it could not resolve is computed again on the two halves
+ *    of the interval, each written in the distance to its bound
+ *    (`options.halves`, see `endpointHalves`);
  * 3. `NaN` when the quadrature finds that the integral diverges;
  * 4. Monte Carlo, only when the quadrature does not converge, did not find
  *    a singular corner it could not resolve (`singularCorner`), and sampling
@@ -2395,6 +2646,12 @@ function integrateRealPart(
      * from the cache of `numericIntegrandParts`, and then runs no inner
      * quadrature. */
     nested: { holdsIntegral: boolean };
+    /** The same part of the integrand on the two halves of the interval,
+     * each written in the distance to its bound (see `endpointHalves`). The
+     * quadrature integrates them when it finds a singular corner that it
+     * could not resolve (`singularCorner`). It returns `undefined` when the
+     * integrand cannot be written in this form. */
+    halves?: () => EndpointHalvesPart | undefined;
   }
 ): {
   estimate: number;
@@ -2402,6 +2659,10 @@ function integrateRealPart(
   divergent?: true;
   infinite?: 1 | -1;
   overflow?: true;
+  /** Set with `divergent` when only the halves of the interval found the
+   * divergence (`options.halves`): the result without them, which the
+   * caller keeps when nothing confirms the divergence. */
+  unconfirmed?: { estimate: number; error: number };
 } {
   // Semi-infinite interval: a conditionally-convergent oscillatory
   // integrand (∫₀^∞ sin x/x, ∫₀^∞ sin(x²)) defeats Monte-Carlo
@@ -2519,6 +2780,42 @@ function integrateRealPart(
     Number.isFinite(gk.estimate)
   )
     return { estimate: gk.estimate, error: gk.error };
+  // A singular corner that the quadrature could not resolve, on a finite
+  // interval: the integral is computed again on the two halves of the
+  // interval, each written in the distance `u` to its bound
+  // (`endpointHalves`), and the result of the halves replaces this one when
+  // it is better (`integrateEndpointHalves`). An integrand that holds an
+  // integral is not computed again: each sample runs an inner quadrature.
+  if (
+    gk.singularCorner === true &&
+    options.halves !== undefined &&
+    !options.nested.holdsIntegral &&
+    isFinite(lower) &&
+    isFinite(upper)
+  ) {
+    const halves = options.halves();
+    const split =
+      halves !== undefined ? integrateEndpointHalves(ce, halves) : undefined;
+    // The divergence test of the adaptive quadrature can find a divergence
+    // where a slow singularity converges: `∫_{1/2}^1 dt/((1 − t)(−ln(1 −
+    // t))^1.001) = 1000.37` gave a divergent half. A divergence of the
+    // halves carries the result that this function gives without them
+    // (`unconfirmed`, the `singularCorner` result below), and the caller
+    // keeps that result when nothing confirms the divergence (the sign of a
+    // pole at a bound, the exact route).
+    if (split?.divergent === true && Number.isFinite(gk.estimate))
+      return {
+        ...split,
+        unconfirmed: {
+          estimate: gk.estimate,
+          error: Math.max(
+            gk.error,
+            Math.abs(gk.estimate) / Math.sqrt(mcSamples)
+          ),
+        },
+      };
+    if (split !== undefined && split.divergent !== true) return split;
+  }
   // A result that did not converge: its error estimate can be far too small
   // (the adaptive quadrature gave `508.24896298688 ± 0.00000000053` for
   // `∫₀¹ x^(−0.999) dx = 1000` before the extrapolation of the endpoint
@@ -7762,22 +8059,21 @@ volumes
           );
           if (infinite !== undefined) return infinite;
 
-          const compiled = withValueShield(ce, intVarNames, () =>
-            implicitCompile(ce, fnExpr)
+          const shield = <T>(run: () => T): T =>
+            withValueShield(ce, intVarNames, run);
+          const { integrand, compiled } = integrandPartsOf(ce, fnExpr, shield);
+          const halves = endpointHalves(
+            ce,
+            fnExpr,
+            {
+              lowerBound: firstLimit.op2,
+              upperBound: firstLimit.op3,
+              lower,
+              upper,
+            },
+            { compiled },
+            shield
           );
-          const raw: (x: number) => unknown = compiled?.success
-            ? withValueShield(ce, intVarNames, () =>
-                withLogSpaceFallback(
-                  ce,
-                  fnExpr,
-                  compiled.run as (x: number) => unknown
-                )
-              )
-            : (
-                (app) => (x: number) =>
-                  app([ce.number(x)])
-              )(applicable(fnExpr));
-          const integrand = numericIntegrandParts(raw);
 
           // ONE sub-stream for both passes: the imaginary pass continues where
           // the real pass stopped. Re-deriving the stream per pass would give
@@ -7790,9 +8086,9 @@ volumes
             holdsIntegral: fnExpr.has(['Integrate', 'NIntegrate']),
           };
           // Integrate ONE real-valued part of the integrand over the interval.
-          const integrateReal = (jsf: (x: number) => number) =>
-            integrateRealPart(ce, jsf, lower, upper, {
-              compiled: compiled?.success === true,
+          const integrateReal = (part: 're' | 'im') =>
+            integrateRealPart(ce, integrand[part], lower, upper, {
+              compiled,
               uncached: integrand.uncached,
               // An effect of the integrand must not run a second time at a
               // point (see `withLogSpaceFallback`).
@@ -7801,9 +8097,10 @@ volumes
                 : undefined,
               draw,
               nested,
+              halves: () => halves(part),
             });
 
-          const re = integrateReal(integrand.re);
+          const re = integrateReal('re');
           // A real integrand that diverges on an infinite tail with one sign
           // (`∫₀^∞ x dx`, `∫₀^∞ eˣ dx`) is `+∞` or `−∞`, as on the exact route.
           if (re.infinite !== undefined && !integrand.sawImaginary())
@@ -7841,14 +8138,19 @@ volumes
             );
             if (exact !== undefined) return exact;
           }
+          // A divergence that only the halves of the interval found, and
+          // that nothing above confirmed: the result without the halves
+          // (`unconfirmed`, see `integrateRealPart`).
+          const value = re.unconfirmed ?? re;
           // No sample was a number: nothing was integrated. Stay symbolic
           // (the closed form, when there is one, is then still reachable),
           // unless every sample was the undefined value: the integral is
           // then `NaN` (`sawOnlyUndefinedValues`).
-          if (Number.isNaN(re.estimate) && !integrand.sawNumeric())
+          if (Number.isNaN(value.estimate) && !integrand.sawNumeric())
             return integrand.sawOnlyUndefinedValues() ? ce.NaN : undefined;
-          if (!integrand.sawImaginary()) return measurementFromParts(ce, re);
-          return measurementFromParts(ce, re, integrateReal(integrand.im));
+          if (!integrand.sawImaginary()) return measurementFromParts(ce, value);
+          const im = integrateReal('im');
+          return measurementFromParts(ce, value, im.unconfirmed ?? im);
         }
 
         // A bound can read a symbol that has the name of an integration
@@ -8707,21 +9009,18 @@ volumes
               NINTEGRATE_VARIABLE,
             ])
           : f;
-        const compiled = implicitCompile(engine, fn);
         // The integrand may be complex-valued: integrate its real part, and
         // its imaginary part too when a sample carried one (see
         // `numericIntegrandParts` and the `Integrate` numeric path).
-        const raw: (x: number) => unknown = compiled?.success
-          ? withLogSpaceFallback(
-              engine,
-              fn,
-              compiled.run as (x: number) => unknown
-            )
-          : (
-              (app) => (x: number) =>
-                app([engine.number(x)])
-            )(applicable(fn));
-        const integrand = numericIntegrandParts(raw);
+        const shield = <T>(run: () => T): T => run();
+        const { integrand, compiled } = integrandPartsOf(engine, fn, shield);
+        const halves = endpointHalves(
+          engine,
+          fn,
+          { lowerBound: a, upperBound: b, lower, upper },
+          { compiled },
+          shield
+        );
         // One stream for both passes (see the `Integrate` numeric path).
         const draw = engine._substream(mixTags(f.hash, a.hash, b.hash));
 
@@ -8731,9 +9030,9 @@ volumes
         // when the quadrature does not converge. The result is a plain number:
         // the error estimate is dropped.
         const nested = { holdsIntegral: fn.has(['Integrate', 'NIntegrate']) };
-        const integrate = (jsf: (x: number) => number) =>
-          integrateRealPart(engine, jsf, lower, upper, {
-            compiled: compiled?.success === true,
+        const integrate = (part: 're' | 'im') =>
+          integrateRealPart(engine, integrand[part], lower, upper, {
+            compiled,
             uncached: integrand.uncached,
             // The result of `NIntegrate` has no error, but an enclosing
             // quadrature collects the error of this one when this integral
@@ -8741,9 +9040,10 @@ volumes
             replayed: isTransitivelyPure(fn) ? integrand.replayed : undefined,
             draw,
             nested,
+            halves: () => halves(part),
           });
 
-        const re = integrate(integrand.re);
+        const re = integrate('re');
         // A real integrand that diverges on an infinite tail with one sign
         // is `+∞` or `−∞` (see the `Integrate` numeric path).
         if (re.infinite !== undefined && !integrand.sawImaginary())
@@ -8769,14 +9069,21 @@ volumes
           const exact = exactDivergenceValue(engine, fn, aValue, bValue);
           if (exact !== undefined) return exact;
         }
+        // A divergence that only the halves of the interval found, and that
+        // nothing above confirmed: the result without the halves (see the
+        // `Integrate` numeric path).
+        const value = re.unconfirmed ?? re;
         // A numeric estimate is a float, even when its value is an integer
         // (`NIntegrate(1, 0, 2)` is `2.0`). `+ 0` turns a -0 into 0.
         if (!integrand.sawImaginary())
-          return engine.number(engine._inexactNumericValue(re.estimate + 0));
+          return engine.number(
+            engine._inexactNumericValue(value.estimate + 0)
+          );
+        const im = integrate('im');
         return engine.number(
           engine._inexactNumericValue({
-            re: re.estimate + 0,
-            im: integrate(integrand.im).estimate + 0,
+            re: value.estimate + 0,
+            im: (im.unconfirmed ?? im).estimate + 0,
           })
         );
       },

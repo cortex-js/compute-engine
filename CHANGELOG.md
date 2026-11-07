@@ -74,6 +74,15 @@
 
 ### Resolved Issues
 
+- **A numeric integral with a slow logarithmic singularity at a bound that is
+  not 0 now gives its value.** `\int_{1/2}^{1} \frac{dt}{(1-t)(-\ln(1-t))^{1.1}}`
+  gave `3 ± 36` under `.N()`, and it now gives `10.373294 ± 0.000066` (the
+  exact value is `10·(ln 2)^(−0.1) = 10.37331…`). `NIntegrate` gives the same
+  value. The divergent `\int_{1/2}^{1} \frac{-1}{(1-t)\ln(1-t)}dt` gave
+  `0 ± 72000`, and it now gives `+∞`. When the quadrature cannot resolve the
+  singularity at the bound, the integral is computed again on the two halves
+  of the interval, each written in the distance to its bound, so that the
+  factor `1 − t` is computed without rounding next to the bound.
 - **On the `interval-js` target, a `Loop` that stops or skips a pass when its
   index passes an input or a constant now gives the correct value.** The
   condition of an `If` statement in the body of the loop was always false when
