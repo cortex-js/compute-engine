@@ -222,7 +222,16 @@ function launch(item) {
       '--verbose',
       briefOf(item),
     ],
-    { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'] }
+    {
+      cwd: repo,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      // `claude -p` waits only 10 minutes after the last turn for the
+      // background tasks of the session (a review subagent, a test run),
+      // then stops them and exits without the session's report. A value of
+      // 0 makes it wait for them; the time limit of this script still stops
+      // a session that does not end.
+      env: { ...process.env, CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: '0' },
+    }
   );
   child.stdout.pipe(out);
   child.stderr.pipe(err);
