@@ -222,6 +222,7 @@ import {
   declareType as declareTypeImpl,
   declareFn as declareFnImpl,
   assignFn as assignFnImpl,
+  withValuesFn as withValuesFnImpl,
   undeclare as undeclareImpl,
 } from './engine-declarations.js';
 import type { KindRegistryState } from './types-definitions.js';
@@ -4045,6 +4046,50 @@ export class ComputeEngine implements IComputeEngine {
     arg2?: AssignValue
   ): IComputeEngine {
     return assignFnImpl(this, arg1, arg2);
+  }
+
+  /**
+   * Run `fn` with each symbol of `values` bound to the given value, and put
+   * back the earlier value and type of each symbol when `fn` returns or
+   * throws.
+   *
+   * Every expression reads the values while `fn` runs: an expression created
+   * before the call, an expression created inside `fn`, and the body of a
+   * function or the value of another symbol that reads the symbol.
+   *
+   * ```js
+   * ce.declare('a', 'real');
+   * const expr = ce.parse('a + 1');
+   * ce.withValues({ a: 3 }, () => expr.evaluate()); // -> 4
+   * expr.evaluate(); // -> a + 1
+   *
+   * ce.parse('f(x) := x + a').evaluate();
+   * ce.withValues({ a: 1 }, () => ce.parse('f(2)').evaluate()); // -> 3
+   * ```
+   *
+   * Unlike `ce.checkpoint()` and `ce.restore()`, this method can be called
+   * during an evaluation, for example in the `evaluate` handler of an
+   * operator.
+   *
+   * A value is checked as `ce.assign()` checks it: a value that the declared
+   * type of the symbol does not admit throws. The value `undefined` gives the
+   * symbol no value while `fn` runs, but a value that an assumption gives
+   * (`ce.assume(ce.parse('a = 3'))`) still applies. A symbol that is not
+   * declared is declared when the method is called, and has no value after
+   * the call.
+   *
+   * These throw before any symbol gets a value: a constant, a symbol bound to
+   * a function definition, a value that is a function, and a value that
+   * `ce.assign()` refuses for the symbol.
+   *
+   * `fn` must be synchronous. The earlier values are put back when `fn`
+   * returns, before a promise that it returns settles.
+   */
+  withValues<T>(
+    values: { readonly [id: string]: AssignValue },
+    fn: () => T
+  ): T {
+    return withValuesFnImpl(this, values, fn);
   }
 
   /**

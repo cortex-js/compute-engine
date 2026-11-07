@@ -51,6 +51,25 @@
   can then tell the names that a call reads from outside it:
   `binderSitesOf(ce, call, 'sum(k^2, k, 1, n)')` gives
   `[{ name: 'k', operands: [0, 1, 2, 3] }]`, so `k` is bound and `n` is read.
+- **New `ce.withValues(values, fn)` gives symbols a value only while `fn`
+  runs.** When `fn` returns or throws, each symbol gets back its earlier value
+  and type. Every expression reads the values while `fn` runs, also one
+  created before the call and the body of a stored function. Before, this
+  needed `ce.checkpoint()`, `ce.assign()` and `ce.restore()`, and a checkpoint
+  is refused during an evaluation:
+
+  ```js
+  ce.declare('a', 'real');
+  ce.parse('f(x) := x + a').evaluate();
+  const expr = ce.parse('f(2)');
+  ce.withValues({ a: 1 }, () => expr.evaluate()); // -> 3
+  expr.evaluate(); // -> a + 2
+  ```
+
+  These throw before any symbol gets a value: a constant, a symbol bound to a
+  function definition, a value that is a function, a value that `ce.assign()`
+  refuses, and a symbol that the body of a stored function applies while the
+  symbol has no definition (`a` in `f(t) := a(t+1)`: declare `a` first).
 
 ### Behavior Changes
 

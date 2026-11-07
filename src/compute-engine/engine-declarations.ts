@@ -124,6 +124,7 @@ import { substituteDeclaredBounds } from './boxed-expression/generic-instantiati
 
 import {
   _BoxedValueDefinition,
+  journalDefinitionRecord,
   prepareValueWhenBoxed,
   refineConstructorPlaceholder,
 } from './boxed-expression/boxed-value-definition.js';
@@ -167,6 +168,7 @@ import {
 } from './library-shadowing.js';
 import { isInferredTypedParameter } from './boxed-expression/inferred-annotations.js';
 import {
+  hasProvisionalDependents,
   provisionalLiteral,
   registerProvisionalDependents,
   repairProvisionalDependents,
@@ -4159,6 +4161,249 @@ export function assignFn(
   }
 
   return ce;
+}
+
+/**
+ * Run `fn` with each name of `values` bound to the given value, and put back
+ * the earlier state of each binding when `fn` returns or throws. The
+ * implementation of `ce.withValues()`.
+ *
+ * The value is written with `ce.assign()` into the binding that is visible
+ * when the function is called. Before the write, the function copies all the
+ * fields of the value definition of the binding (`_checkpointSnapshot()`),
+ * and after `fn` it writes the copy back (`_restoreCheckpointSnapshot()`). So
+ * every read of the name while `fn` runs gets the value: an expression boxed
+ * before the call, an expression boxed inside `fn`, and also the body of a
+ * function or a held value stored in another binding. Example: with
+ * `f := x ↦ x + a`, `f(2)` gives `3` inside `withValues({ a: 1 }, …)`. A
+ * declaration of `a` in a new scope does not reach that body, because a call
+ * resolves the names of a body in the scope where the function was defined,
+ * not in the scope of the caller (`bindingInContext()`,
+ * `boxed-expression/binders.ts`). A checkpoint gives the same result, but
+ * `ce.checkpoint()` is refused during an evaluation, and this function is
+ * not.
+ *
+ * The definition objects are kept, because a boxed symbol holds its
+ * definition by identity. When `fn` assigns a function to the name, the
+ * binding record gets an operator definition in place of the value
+ * definition (`updateDef()`), and a later assignment of a value gives it a
+ * new value definition. The restore then writes the copy into the saved
+ * value definition and puts that definition back on the record.
+ *
+ * The assignment advances the cache versions, so a cache filled before the
+ * call (the unknown sign of `a + 1` with `a` valueless) is not used inside
+ * `fn`. The restore advances them again, as a value write does, so a cache
+ * filled inside `fn` (the positive sign of `a + 1` with `a = 3`) is not used
+ * after the call. A restore that adds or removes a function arm of the type
+ * also reports a type write, as `ce.assign()` does.
+ *
+ * The copies are made first, before a value is boxed: boxing a value such as
+ * `a + 1` can narrow the inferred type of `a`, and the restore puts back the
+ * type from before. Then every name and every value is checked before any
+ * binding is written:
+ *
+ * - A name with no binding is boxed first (`ce.symbol()`), which declares it
+ *   in the current scope as any use of the name does. The declaration stays
+ *   after the call, with no value, as if `fn` had used the name with no
+ *   value.
+ * - A name bound to an operator definition, a constant, a value that is a
+ *   function (a function literal or a JavaScript function), and a value that
+ *   `ce.assign()` refuses for the name (`assertAssignableValueDef()`: a value
+ *   outside the declared type, a value that an assumption refutes) throw.
+ *   Assigning a function would replace the value definition by an operator
+ *   definition (`assignFn()`), which is not a temporary value.
+ * - A value that holds an object of another engine throws, as in
+ *   `ce.assign()`. The test runs before the value is boxed, because boxing
+ *   replaces such an object by an error expression.
+ * - A name that the body of a stored function applies while the name has no
+ *   definition of a function (`a` in `f(t) := a(t+1)`, with `a` not
+ *   declared) throws. A value of a type that is not a function rewrites that
+ *   body, which then reads `a·(t+1)` (`repairProvisionalDependents()`,
+ *   called by `_setSymbolValue()`), and the restore of the name does not
+ *   undo that rewrite. Declare the name first (`ce.declare('a', 'real')`).
+ * - The value `undefined` gives the name no stored value while `fn` runs. A
+ *   value that an assumption gives (`ce.assume(a = 3)`) still applies.
+ *
+ * Not undone: the effects of `ce.assign()` outside the definitions of the
+ * names. A value that is a symbol with no value and no type takes the
+ * declared type of the name (`assignFn()`), and keeps it after the call. A
+ * value definition that `fn` disposes (`ce.undeclare()`) is not restored.
+ *
+ * A failure of the restore of one binding does not stop the restore of the
+ * others. The first failure is thrown after all of them, unless `fn` threw:
+ * the error of `fn` is then kept.
+ *
+ * `fn` must be synchronous: the bindings are restored when `fn` returns,
+ * before a promise that it returns settles.
+ */
+export function withValuesFn<T>(
+  ce: IComputeEngine,
+  values: { readonly [id: string]: AssignValue },
+  fn: () => T
+): T {
+  const names = Object.keys(values);
+  if (names.length === 0) return fn();
+
+  const saved: WithValuesBinding[] = [];
+  for (const name of names) {
+    let record = ce.lookupDefinition(name);
+    if (record === undefined) {
+      ce.symbol(name);
+      record = ce.lookupDefinition(name);
+    }
+    if (record === undefined || !isValueDef(record))
+      throw new Error(
+        `withValues(): "${name}" is bound to a function definition. withValues() gives a value to a variable only`
+      );
+    if (record.value.isConstant) throw new ConstantAssignmentError(name);
+    if (hasProvisionalDependents(ce, name))
+      throw new Error(
+        `withValues(): the body of a function applies "${name}" as a function, and a value would change that body for good. Declare "${name}" first`
+      );
+    const input = values[name];
+    if (
+      input !== undefined &&
+      adoptsForeignEngineObject([input as Expression], ce)
+    )
+      throw new Error(
+        `object-foreign-engine: cannot assign an object that belongs to a different engine to "${name}"`
+      );
+    saved.push({
+      name,
+      record,
+      def: record.value,
+      snapshot: record.value._checkpointSnapshot(),
+    });
+  }
+
+  let threw = false;
+  try {
+    const writes: {
+      name: string;
+      def: BoxedValueDefinition;
+      value: Expression | undefined;
+    }[] = [];
+    for (const { name, def } of saved) {
+      const input = values[name];
+      if (input === undefined) {
+        writes.push({ name, def, value: undefined });
+        continue;
+      }
+      const value = assignValueAsValue(ce, input);
+      if (value === undefined)
+        throw new Error(
+          `withValues(): the value of "${name}" is a function. withValues() gives a value to a variable only`
+        );
+      assertAssignableValueDef(ce, name, def, value);
+      writes.push({ name, def, value });
+    }
+    for (const { name, def, value } of writes) {
+      if (value === undefined) def.value = undefined;
+      else ce.assign(name, value);
+    }
+    return fn();
+  } catch (error) {
+    threw = true;
+    throw error;
+  } finally {
+    const failure = restoreWithValuesBindings(ce, saved);
+    // eslint-disable-next-line no-unsafe-finally
+    if (failure !== undefined && !threw) throw failure.error;
+  }
+}
+
+/** A binding that `withValuesFn()` writes: the binding record, the value
+ * definition that the record held at the call, and a copy of all the fields
+ * of that value definition. */
+type WithValuesBinding = {
+  readonly name: string;
+  readonly record: BoxedDefinition;
+  readonly def: BoxedValueDefinition;
+  readonly snapshot: unknown;
+};
+
+/** Write back the copies of the value definitions that `withValuesFn()`
+ * made, in the reverse order of the copies, and advance the cache versions
+ * as `ce.assign()` does. Return the first error that the restore of a
+ * binding threw, after the restore of every other binding. */
+function restoreWithValuesBindings(
+  ce: IComputeEngine,
+  saved: ReadonlyArray<WithValuesBinding>
+): { error: unknown } | undefined {
+  let failure: { error: unknown } | undefined;
+  // The same test as the `value` setter of a value definition: a write is
+  // `callable` when the value before or after it is, or holds as an operand,
+  // a function literal, or when the type has a function arm. A type that
+  // cannot be read counts as one with a function arm: the restore then
+  // advances more versions than it must, which costs only a computation
+  // again.
+  const holdsFunctionLiteral = (v: Expression | undefined): boolean => {
+    if (v === undefined) return false;
+    if (isFunction(v, 'Function')) return true;
+    // A store-backed list (`ce.list()`) holds numbers only, and reading its
+    // operands would box every element.
+    if ((v as { _numericStore?: unknown })._numericStore !== undefined)
+      return false;
+    return isFunction(v) && v.ops.some((op) => isFunction(op, 'Function'));
+  };
+  const hasFunctionArm = (def: BoxedValueDefinition): boolean => {
+    try {
+      return containsSignatureArm(def.type.type);
+    } catch {
+      return true;
+    }
+  };
+  for (let i = saved.length - 1; i >= 0; i--) {
+    const { name, record, def, snapshot } = saved[i];
+    try {
+      const installed = (record as { value?: BoxedValueDefinition }).value;
+      // `ce.undeclare()` removed the binding.
+      if (installed === def && def.disposed) continue;
+      const valueBefore = def.storedValue;
+      const armBefore = hasFunctionArm(def);
+      // A checkpoint taken while `fn` ran must be able to rewind this write
+      // too: the journal records the state of the definition before it.
+      journalDefinitionRecord(ce, def, 'value-write');
+      def._restoreCheckpointSnapshot(snapshot);
+      const armAfter = hasFunctionArm(def);
+      if (installed !== def) {
+        // `fn` assigned a function to the name, and maybe a value after it:
+        // the record holds an operator definition or another value
+        // definition. Put the value definition back, after its copy is
+        // written, so that the repair of the bodies that read the name
+        // (`updateDef()`) sees the restored type. `updateDef()` journals the
+        // swap for a checkpoint. The value definition needs no new
+        // subscription to configuration changes: only a constant has one,
+        // and a constant is refused above.
+        const callableBefore =
+          installed === undefined ? true : hasFunctionArm(installed);
+        updateDef(ce, name, record, def);
+        ce._noteStateEvent({
+          kind: 'redefine',
+          callableBefore,
+          callableAfter: armAfter,
+        });
+      }
+      if (armBefore !== armAfter)
+        ce._noteStateEvent({
+          kind: 'type-write',
+          callableBefore: armBefore,
+          callableAfter: armAfter,
+        });
+      ce._noteStateEvent({
+        kind: 'value-write',
+        ephemeral: false,
+        callable:
+          armBefore ||
+          armAfter ||
+          holdsFunctionLiteral(valueBefore) ||
+          holdsFunctionLiteral(def.storedValue),
+      });
+    } catch (error) {
+      failure ??= { error };
+    }
+  }
+  return failure;
 }
 
 /**

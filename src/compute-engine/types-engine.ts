@@ -2635,6 +2635,14 @@ export interface IComputeEngine {
     arg2?: AssignValue
   ): IComputeEngine;
 
+  /** Run `fn` with each symbol of `values` bound to the given value, and
+   * put back the earlier value and type of each symbol when `fn` returns or
+   * throws. `fn` must be synchronous. */
+  withValues<T>(
+    values: { readonly [id: MathJsonSymbol]: AssignValue },
+    fn: () => T
+  ): T;
+
   declareType(
     name: string,
     type: Type | TypeString | BoxedType,
