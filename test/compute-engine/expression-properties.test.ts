@@ -416,6 +416,84 @@ describe('SCOPED_UNKNOWNS', () => {
     expect(block.unknowns).toEqual(['u']);
   });
 
+  it('Block: an assigned name that a statement reads before the first write is free', () => {
+    // `a` is declared outside the block, so the block makes no local for it:
+    // `Assign(a, a + 1)` reads the outer `a`, and the value of the block
+    // depends on it.
+    const ce = new ComputeEngine();
+    ce.declare('a', 'real');
+    const cases = [
+      ['Block', ['Assign', 'a', ['Add', 'a', 1]], 'a'],
+      ['Block', ['Assign', ['Tuple', 'a', 'b'], ['Tuple', ['Add', 'a', 1], 2]], 'a'],
+      ['Block', ['Typed', ['Assign', 'a', ['Add', 'a', 1]], "'real'"]],
+      // A read in an earlier statement.
+      ['Block', ['Assign', 'q', ['Multiply', 2, 'a']], ['Assign', 'a', 1], ['Add', 'a', 'q']],
+    ] as const;
+    for (const json of cases) {
+      expect(ce.box(json).unknowns).toEqual(['a']);
+      expect(ce.box(json, { form: 'raw' }).unknowns).toEqual(['a']);
+    }
+    // No read before the first write: `a` is not free, and a read after
+    // the first write does not make it free.
+    expect(
+      ce.box([
+        'Block',
+        ['Assign', 'a', 1],
+        ['Assign', 'a', ['Add', 'a', 1]],
+        ['Add', 'a', 'x'],
+      ]).unknowns
+    ).toEqual(['x']);
+    // A name that a `Declare` introduces is a local in every statement.
+    expect(
+      ce.box([
+        'Block',
+        ['Declare', 'c', "'integer'", 0],
+        ['Assign', 'c', ['Add', 'c', 1]],
+        'c',
+      ]).unknowns
+    ).toEqual([]);
+  });
+
+  it('Block: a local that a function literal reads before its first write is not free', () => {
+    // No scope declares `c`, so the block makes a local for it, and the
+    // function `g` reads that local when it is called, after `c = 2`.
+    const ce = new ComputeEngine();
+    const block = ce.box([
+      'Block',
+      ['Assign', 'g', ['Function', ['Add', 'x', 'c'], 'x']],
+      ['Assign', 'c', 2],
+      ['g', 1],
+    ]);
+    expect(block.unknowns).toEqual([]);
+    expect(block.evaluate().json).toEqual(3);
+  });
+
+  it('Block: a recursive function literal does not reference its own name', () => {
+    const ce = new ComputeEngine();
+    const json = [
+      'Block',
+      [
+        'Assign',
+        'fact',
+        [
+          'Function',
+          [
+            'If',
+            ['LessEqual', 'n', 1],
+            1,
+            ['Multiply', 'n', ['fact', ['Subtract', 'n', 1]]],
+          ],
+          'n',
+        ],
+      ],
+      ['fact', 5],
+    ] as const;
+    for (const block of [ce.box(json), ce.box(json, { form: 'raw' })]) {
+      expect(block.unknowns).toEqual([]);
+      expect(block.referencedFunctions).toEqual([]);
+    }
+  });
+
   it('D: differentiation variable remains free', () => {
     // In D(x^2 + a, x), both x and a are free — x is still in the result
     const d = engine.expr(['D', ['Add', ['Power', 'x', 2], 'a'], 'x']);

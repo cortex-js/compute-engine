@@ -82,7 +82,7 @@ import { latexSerializeOptions } from './latex-serialize-options.js';
 import { isFiniteCount } from './collection-count.js';
 import { recordObjectRead } from './object-deps.js';
 import { containsObject } from './object-walk.js';
-import { statementDeclaredNames } from './tuple-pattern.js';
+import { statementDeclaredNames, typedStatement } from './tuple-pattern.js';
 import {
   implicitVariableCandidatesFrom,
   isLibraryDefinition,
@@ -2174,11 +2174,12 @@ function collectReferences(
   //     body, with `x` free. `x ∈ ℤ ∧ x > 0` binds nothing either.
   //   - the variables of a set-builder (`setBuilderVariables()`): bound in
   //     both operands of the `Set`, as a local of a `Block` is.
-  //   - local variables — Block: inner `Assign`/`Declare` introduce locals.
-  //     `Block` is `scoped: true` with no binding sites, so this stays a
-  //     structural recognition, and it applies to a `Block` only
-  //     (`bindsStatementTargets`): the `z` of `If(z > 0, Assign(z, 5), 0)` is
-  //     free.
+  //   - local variables — Block: its `Declare`, `DefineFunction` and
+  //     `Assign` statements introduce locals, on the rules of
+  //     `addBlockLocals()`. `Block` is `scoped: true` with no binding sites,
+  //     so this stays a structural recognition, and it applies to a `Block`
+  //     only (`bindsStatementTargets`): the `z` of
+  //     `If(z > 0, Assign(z, 5), 0)` is free.
   // The variable of an INDEFINITE integral is not bound: the value of the
   // integral is a function of it (`integralPointVariables`).
   // A raw node (a raw `Sum`, `Loop` or quantifier) has no operator
@@ -2211,22 +2212,10 @@ function collectReferences(
     !indefinite?.has(name) &&
     (sites === undefined ||
       (binderBoundAt(sites, name, i) && flatOwner?.[i] !== name));
-  const statementTargets = bindsStatementTargets(expr);
   const builder = setBuilderVariables(expr);
   const localVars = new Set<string>(builder?.names);
-  for (const op of expr.ops) {
-    if (!isFunction(op)) continue;
-    // A `DefineFunction` statement (`f(x) = x + 1` in Epsil) introduces a
-    // local too: the name it defines is bound by the block, not read from
-    // the enclosing scope, so a program that defines `f` and then applies
-    // it has no free `f`. A destructuring target binds each leaf of its
-    // pattern: `Block(Assign(Tuple(a, b), Tuple(1, 2)), a + b)` has no
-    // free variable. A statement wrapped in `Typed` (the last statement of
-    // the body of a function literal with a return type) binds the names of
-    // the statement it holds (`statementDeclaredNames()`).
-    if (statementTargets)
-      for (const name of statementDeclaredNames(op)) localVars.add(name);
-  }
+  if (bindsStatementTargets(expr))
+    addBlockLocals(expr.ops, expr.localScope, localVars, memo, mode);
 
   const ops = expr.ops;
   for (let i = 0; i < ops.length; i++) {
@@ -2297,6 +2286,119 @@ function collectReferences(
     const domain = nodeAtPath(ops, path);
     if (domain !== undefined)
       getReferences(domain, freeVars, refFns, memo, mode);
+  }
+}
+
+/**
+ * Add to `locals` the names that the statements `ops` of a `Block` bind, for
+ * the walk of {@link getReferences} in mode `mode` with the memo `memo`.
+ * `scope` is the scope of the block when it is canonical, and `undefined`
+ * for a block that is not canonical.
+ *
+ * - The name that a `Declare` or a `DefineFunction` statement (`f(x) = x + 1`
+ *   in Epsil) introduces is a local of the block in every statement:
+ *   `canonicalBlock()` (`library/control-structures.ts`) makes a local of
+ *   the block scope for it before it canonicalizes the statements, so a
+ *   program that defines `f` and then applies it has no free `f`.
+ * - The target of an `Assign` statement is a local of a canonical block
+ *   when the scope of the block binds it. `canonicalBlock()` makes such a
+ *   local for a name that no enclosing scope declares, so every read of the
+ *   name in the block reads the local, also a read in the body of a
+ *   function literal written before the `Assign`:
+ *   `Block(Assign(g, Function(x + c, x)), Assign(c, 2), g(1))` has no free
+ *   variable.
+ * - Another target of an `Assign` statement is a local only when no
+ *   statement reads it before the first `Assign` to it. The value of that
+ *   `Assign` is read before the write. When an enclosing scope declares the
+ *   name, the block makes no local for it, and the `Assign` writes the
+ *   outer variable. A read before the first write then reads the value of
+ *   the outer variable, so the name is free: `Block(Assign(a, a + 1), a)`
+ *   has the free variable `a`. When no statement reads the name before the
+ *   first write, the value of the block does not depend on the outer
+ *   variable: `Block(Assign(y, 5), x + y)` has the free variable `x` only.
+ *   A block that is not canonical has no scope, so this rule applies to all
+ *   its `Assign` targets.
+ *
+ * In the second rule, a read in the body of a function literal of an
+ * earlier statement counts as a read, because the walk cannot tell when the
+ * function is called. A write in a statement that is not an `Assign` (an
+ * `Assign` in a branch of an `If`) counts as a read too, because the walk
+ * of the statement does not separate the names it reads from the names it
+ * writes. So in these cases the name can be free when its value does not
+ * come from outside the block: `Block(If(c, Assign(a, 1)), Assign(a, 2), a)`
+ * has the free variable `a`. The walk never leaves out a name that the
+ * value of the block reads from outside.
+ *
+ * A read of the target of an `Assign` in the body of the function literal
+ * that the same `Assign` stores is not a read before the write, because the
+ * function cannot be called before it is stored: the recursive
+ * `Block(Assign(f, Function(If(n > 1, n·f(n − 1), 1), n)), f(5))` has no
+ * free variable and no referenced function.
+ *
+ * A destructuring target binds each leaf of its pattern:
+ * `Block(Assign(Tuple(a, b), Tuple(1, 2)), a + b)` has no free variable. A
+ * statement wrapped in `Typed` (the last statement of the body of a function
+ * literal with a return type) binds the names of the statement it holds
+ * (`statementDeclaredNames()`, `typedStatement()`).
+ */
+function addBlockLocals(
+  ops: ReadonlyArray<Expression>,
+  scope: Scope | undefined,
+  locals: Set<string>,
+  memo: ReferencesMemo,
+  mode: ReferenceMode
+): void {
+  const assigned = new Set<string>();
+  for (const op of ops) {
+    const names = statementDeclaredNames(op);
+    if (isFunction(typedStatement(op), 'Assign'))
+      for (const name of names) assigned.add(name);
+    else for (const name of names) locals.add(name);
+  }
+  // The `Assign` targets that no `Declare` or `DefineFunction` binds and that
+  // the scope of the block does not bind, and that no statement has read or
+  // written yet in the walk below.
+  const pending = new Set<string>();
+  for (const name of assigned) {
+    if (locals.has(name)) continue;
+    if (scope?.bindings.has(name) === true) locals.add(name);
+    else pending.add(name);
+  }
+  for (const op of ops) {
+    if (pending.size === 0) return;
+    const statement = typedStatement(op);
+    const reads = new Set<string>();
+    const readFns = new Set<string>();
+    if (isFunction(statement, 'Assign')) {
+      const written = statementDeclaredNames(op);
+      // A symbol or destructuring target is written, not read. Another
+      // target (`Assign(At(a, 1), v)`) reads the names it holds.
+      const target = statement.ops[0];
+      if (!isSymbol(target) && !isFunction(target, 'Tuple'))
+        getReferences(target, reads, readFns, memo, mode);
+      for (const value of statement.ops.slice(1)) {
+        if (!isFunction(value, 'Function')) {
+          getReferences(value, reads, readFns, memo, mode);
+          continue;
+        }
+        // A function literal that this statement stores: its reads of the
+        // names that this statement writes happen after the write.
+        const valueReads = new Set<string>();
+        const valueFns = new Set<string>();
+        getReferences(value, valueReads, valueFns, memo, mode);
+        for (const name of valueReads)
+          if (!written.includes(name)) reads.add(name);
+        for (const name of valueFns)
+          if (!written.includes(name)) readFns.add(name);
+      }
+      for (const name of pending)
+        if (reads.has(name) || readFns.has(name)) pending.delete(name);
+      for (const name of written) if (pending.delete(name)) locals.add(name);
+      continue;
+    }
+    getReferences(op, reads, readFns, memo, mode);
+    for (const name of pending)
+      if (reads.has(name) || readFns.has(name)) pending.delete(name);
   }
 }
 

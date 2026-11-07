@@ -87,6 +87,13 @@
 
 ### Resolved Issues
 
+- **The `unknowns` and `freeVariables` of a `Block` now include a variable of
+  an enclosing scope that the block reads before it assigns it.** With `a`
+  declared outside the block, `["Block", ["Assign", "a", ["Add", "a", 1]],
+  "a"]` gave `[]`, and now gives `["a"]`: the value of the block depends on
+  the value of `a` before the block. A variable that the block assigns before
+  it reads it is still not listed: `["Block", ["Assign", "y", 5], ["Add", "x",
+  "y"]]` gives `["x"]`.
 - **`Hypergeometric2F1` at machine precision is now accurate to about the
   last digit for z < −1 and 0.5 < z < 1.** For these arguments some values
   were wrong from the 12th digit:
