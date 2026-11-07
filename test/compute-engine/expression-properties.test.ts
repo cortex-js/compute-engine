@@ -356,6 +356,66 @@ describe('SCOPED_UNKNOWNS', () => {
     expect(block.defines).toContain('f');
   });
 
+  it('Block: should exclude the names of a destructuring assignment', () => {
+    // `a` and `b` are block locals; `x`, read in the value, is free.
+    const block = engine.expr([
+      'Block',
+      ['Assign', ['Tuple', 'a', 'b'], ['Tuple', 'x', 2]],
+      ['Add', 'a', 'b'],
+    ]);
+    expect(block.unknowns).toEqual(['x']);
+    expect(
+      engine.expr([
+        'Block',
+        ['Assign', ['Tuple', 'a', 'b'], ['Tuple', 1, 2]],
+        ['Add', 'a', 'b'],
+      ]).unknowns
+    ).toEqual([]);
+  });
+
+  it('Block: should exclude every leaf of a nested destructuring pattern', () => {
+    const json = [
+      'Block',
+      ['Assign', ['Tuple', 'a', ['Tuple', 'b', 'c']], ['Tuple', 1, ['Tuple', 2, 3]]],
+      ['Add', 'a', 'b', 'c', 'y'],
+    ] as const;
+    expect(engine.expr(json).unknowns).toEqual(['y']);
+    expect(engine.box(json, { form: 'raw' }).unknowns).toEqual(['y']);
+  });
+
+  it('Block: the `_` position of a destructuring pattern is not a free variable', () => {
+    const block = engine.expr([
+      'Block',
+      ['Assign', ['Tuple', 'q', '_'], ['Tuple', 'v', 2]],
+      ['Add', 'q', 1],
+    ]);
+    expect(block.unknowns).toEqual(['v']);
+    expect(block.references).toEqual(['v']);
+  });
+
+  it('Block: should exclude the names of a destructuring declaration', () => {
+    const block = engine.expr([
+      'Block',
+      [
+        'Declare',
+        ['Tuple', 'p', 'q'],
+        ['Dictionary', ['KeyValuePair', { sym: 'value' }, ['Tuple', 3, 'w']]],
+      ],
+      ['Add', 'p', 'q'],
+    ]);
+    expect(block.unknowns).toEqual(['w']);
+  });
+
+  it('Block: should exclude the names of a statement wrapped in Typed', () => {
+    // The last statement of the body of a function literal with a return
+    // type is `Typed(statement, type)`; its targets are still locals.
+    const block = engine.expr([
+      'Block',
+      ['Typed', ['Assign', ['Tuple', 'm', 'n'], ['Tuple', 'u', 2]], "'tuple'"],
+    ]);
+    expect(block.unknowns).toEqual(['u']);
+  });
+
   it('D: differentiation variable remains free', () => {
     // In D(x^2 + a, x), both x and a are free — x is still in the result
     const d = engine.expr(['D', ['Add', ['Power', 'x', 2], 'a'], 'x']);
@@ -516,6 +576,20 @@ describe('DEFINES', () => {
       ['Add', 'a', 'b'],
     ]);
     expect(block.defines).toEqual(['a', 'b']);
+  });
+
+  it('destructuring assignment defines each name of its pattern', () => {
+    // The `_` position binds nothing.
+    const assign = engine.box(['Assign', ['Tuple', 'a', '_', 'b'], 'v']);
+    expect(assign.defines).toEqual(['a', 'b']);
+    expect(assign.references).toEqual(['v']);
+    const block = engine.box([
+      'Block',
+      ['Assign', ['Tuple', 'a', ['Tuple', 'b', 'c']], ['Tuple', 1, ['Tuple', 2, 3]]],
+      ['Add', 'a', 'b', 'c'],
+    ]);
+    expect(block.defines).toEqual(['a', 'b', 'c']);
+    expect(block.references).toEqual([]);
   });
 
   it('references = freeVariables minus defines (notebook composition)', () => {

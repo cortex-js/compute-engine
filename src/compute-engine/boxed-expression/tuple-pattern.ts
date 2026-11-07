@@ -3,6 +3,41 @@ import { parseType } from '../../common/type/parse.js';
 import { isAbsentSymbol, isFunction, sym } from './type-guards.js';
 
 /**
+ * The statement that the block operand `op` holds. A return-type annotation
+ * of a function literal moves onto the last statement of its body, so that
+ * statement is `Typed(statement, type)`
+ * (`canonicalFunctionLiteralArguments()`, `function-utils.ts`). The type does
+ * not change which names the statement declares or assigns, so the loops of
+ * `canonicalBlock()` (`control-structures.ts`) that find the block locals,
+ * and the free-variable walk of a block, read through the wrapper.
+ * Without this, `function f() -> integer { x = 2 }` did not make `x` a local
+ * of the body, and its write was a `scope` write.
+ */
+export function typedStatement(op: Expression): Expression {
+  return isFunction(op, 'Typed') ? op.op1 : op;
+}
+
+/** The names that the block statement `op` declares: the target of a
+ * `Declare` or an `Assign` (each leaf of a destructuring pattern, without
+ * the `_` positions, which bind nothing), or the name of a
+ * `DefineFunction`. A statement wrapped in `Typed` declares the names of
+ * the statement it holds (`typedStatement()`). Another statement, or another
+ * target (a `Subscript` or a property store), declares no name. */
+export function statementDeclaredNames(op: Expression): string[] {
+  const statement = typedStatement(op);
+  if (isFunction(statement, 'DefineFunction')) {
+    const name = sym(statement.ops[0]);
+    return name === undefined ? [] : [name];
+  }
+  if (!isFunction(statement, 'Declare') && !isFunction(statement, 'Assign'))
+    return [];
+  const target = statement.ops[0];
+  if (isFunction(target, 'Tuple')) return tuplePatternNames(target);
+  const name = sym(target);
+  return name === undefined ? [] : [name];
+}
+
+/**
  * Every name a destructuring `Tuple` pattern binds, in pattern order: the
  * pattern's leaf symbols, nested patterns included, with the `_` positions —
  * which bind nothing — dropped.

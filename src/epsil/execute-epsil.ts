@@ -46,9 +46,9 @@ import {
   isHoistedFunctionDefinition,
   laterDeclarationReached,
   markLaterDeclarations,
-  statementDeclaredNames,
   staticDeclarations,
 } from '../compute-engine/library/control-structures.js';
+import { statementDeclaredNames } from '../compute-engine/boxed-expression/tuple-pattern.js';
 import { parseEpsil } from './parse-epsil.js';
 import { resolveLibraryNames } from './resolve-library-names.js';
 import { epsilNameOf } from './library-names.js';

@@ -2,6 +2,15 @@
 
 ### Resolved Issues
 
+- **The `unknowns` of a block no longer list the names that a destructuring
+  assignment of the block defines.**
+  `Block(Assign(Tuple(a, b), Tuple(1, 2)), Add(a, b))` evaluates to `3`, but
+  its `unknowns` and `freeVariables` were `["a", "b"]`; they are now `[]`. The
+  same applies to a nested pattern and to a `Declare` with a `Tuple` target.
+  The `_` position of a pattern binds nothing and is no longer listed. The
+  `defines` of `(a, _, b) := v` is now `["a", "b"]` (it was `[]`), and its
+  `references` is `["v"]` (it was `["_", "a", "b", "v"]`).
+
 - **The type of a `Scan` over a list with absent elements includes
   `missing`.** With `xs = Map(x ↦ If(x > 1, Missing, x), [1, 2, 3])`,
   `Scan(xs, Add)` gives `[1, Missing, Missing]`, but it was typed

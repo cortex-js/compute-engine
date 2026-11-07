@@ -81,6 +81,7 @@ import { latexSerializeOptions } from './latex-serialize-options.js';
 import { isFiniteCount } from './collection-count.js';
 import { recordObjectRead } from './object-deps.js';
 import { containsObject } from './object-walk.js';
+import { statementDeclaredNames } from './tuple-pattern.js';
 import {
   implicitVariableCandidatesFrom,
   isLibraryDefinition,
@@ -2144,6 +2145,26 @@ function collectReferences(
     return;
   }
 
+  // A destructuring target (`(q, _) := v`) is a pattern, not a value: its
+  // `_` positions bind nothing and read nothing, so they are not symbols of
+  // the walk. Each other leaf is walked as a plain symbol target is, and the
+  // enclosing `Block` drops it when it is a local of the block
+  // (`statementDeclaredNames()`).
+  if (
+    (expr.operator === 'Assign' || expr.operator === 'Declare') &&
+    isFunction(expr.op1, 'Tuple')
+  ) {
+    const walkPattern = (p: Expression): void => {
+      if (isFunction(p, 'Tuple')) for (const el of p.ops) walkPattern(el);
+      else if (!isSymbol(p, '_'))
+        getReferences(p, freeVars, refFns, memo, mode);
+    };
+    walkPattern(expr.op1);
+    for (const op of expr.ops.slice(1))
+      getReferences(op, freeVars, refFns, memo, mode);
+    return;
+  }
+
   // Otherwise, collect the variables bound by this expression's structure.
   // This must NOT be gated on `isScoped`: `Integrate` is not scoped yet binds
   // its integration variable.
@@ -2209,15 +2230,13 @@ function collectReferences(
     // A `DefineFunction` statement (`f(x) = x + 1` in Epsil) introduces a
     // local too: the name it defines is bound by the block, not read from
     // the enclosing scope, so a program that defines `f` and then applies
-    // it has no free `f`.
-    if (
-      statementTargets &&
-      (op.operator === 'Assign' ||
-        op.operator === 'Declare' ||
-        op.operator === 'DefineFunction') &&
-      isSymbol(op.op1)
-    )
-      localVars.add(op.op1.symbol);
+    // it has no free `f`. A destructuring target binds each leaf of its
+    // pattern: `Block(Assign(Tuple(a, b), Tuple(1, 2)), a + b)` has no
+    // free variable. A statement wrapped in `Typed` (the last statement of
+    // the body of a function literal with a return type) binds the names of
+    // the statement it holds (`statementDeclaredNames()`).
+    if (statementTargets)
+      for (const name of statementDeclaredNames(op)) localVars.add(name);
   }
 
   const ops = expr.ops;
@@ -2345,14 +2364,11 @@ function implicitCandidatesInWalk(
  */
 function getDefines(expr: Expression, result: Set<string>): void {
   if (!isFunction(expr)) return;
-  const operator = expr.operator;
-  if (
-    operator === 'Assign' ||
-    operator === 'Declare' ||
-    operator === 'DefineFunction'
-  ) {
-    if (isSymbol(expr.op1)) result.add(expr.op1.symbol);
+  if (expr.operator === 'Block') {
+    for (const op of expr.ops) getDefines(op, result);
     return;
   }
-  if (operator === 'Block') for (const op of expr.ops) getDefines(op, result);
+  // A destructuring target defines each leaf of its pattern
+  // (`statementDeclaredNames()`): `(a, b) := (1, 2)` defines `a` and `b`.
+  for (const name of statementDeclaredNames(expr)) result.add(name);
 }

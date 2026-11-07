@@ -45,7 +45,9 @@ import { checkConditions } from '../boxed-expression/rules.js';
 import { rangeElementIndexType } from '../boxed-expression/binding-sites.js';
 import {
   collectTuplePattern,
+  statementDeclaredNames,
   tuplePatternNames,
+  typedStatement,
 } from '../boxed-expression/tuple-pattern.js';
 import {
   broadcastCellType,
@@ -4829,20 +4831,6 @@ export function functionDefinitionNames(
 }
 
 /**
- * The statement that the block operand `op` holds. A return-type annotation
- * of a function literal moves onto the last statement of its body, so that
- * statement is `Typed(statement, type)`
- * (`canonicalFunctionLiteralArguments()`, `function-utils.ts`). The type does
- * not change which names the statement declares or assigns, so the loops of
- * `canonicalBlock()` that find the block locals read through the wrapper.
- * Without this, `function f() -> integer { x = 2 }` did not make `x` a local
- * of the body, and its write was a `scope` write.
- */
-function typedStatement(op: Expression): Expression {
-  return isFunction(op, 'Typed') ? op.op1 : op;
-}
-
-/**
  * The canonical statements `statements` of the block with the scope
  * `scope`, where each statement that uses a local of the block before the
  * statement that declares it is replaced by the static error
@@ -5290,23 +5278,6 @@ function isGenericDefinition(
   if (declared !== undefined && isPolymorphicType(declared)) return true;
   const target = ce.lookupDefinition(name);
   return isGenericTarget(target) || canonInstallSkipped(target);
-}
-
-/** The names that the block statement `op` declares: the target of a
- * `Declare` or an `Assign` (each leaf of a destructuring pattern), or the
- * name of a `DefineFunction`. */
-export function statementDeclaredNames(op: Expression): string[] {
-  const statement = typedStatement(op);
-  if (isFunction(statement, 'DefineFunction')) {
-    const name = sym(statement.ops[0]);
-    return name === undefined ? [] : [name];
-  }
-  if (!isFunction(statement, 'Declare') && !isFunction(statement, 'Assign'))
-    return [];
-  const target = statement.ops[0];
-  if (isFunction(target, 'Tuple')) return tuplePatternNames(target);
-  const name = sym(target);
-  return name === undefined ? [] : [name];
 }
 
 /**

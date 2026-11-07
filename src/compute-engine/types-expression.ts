@@ -1660,8 +1660,9 @@ export interface Expression {
   /**
    * The symbols **defined** by this expression: the target of a top-level
    * `["Assign", …]` or `["Declare", …]` (e.g. `a` in `a := 3`, `f` in
-   * `f(x) := …`), recursing through `["Block", …]` sequences. Empty for
-   * expressions that define nothing.
+   * `f(x) := …`), recursing through `["Block", …]` sequences. A
+   * destructuring target defines each name of its pattern: `a` and `b` in
+   * `(a, b) := (1, 2)`. Empty for expressions that define nothing.
    *
    * Complements {@link freeVariables} (the symbols an expression
    * *references*). A tool that builds a dependency graph keyed on cells —
