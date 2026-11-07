@@ -7,6 +7,7 @@ import {
 } from './simplify-sum.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import { emptyBigOpValue } from './big-op-identity.js';
+import { bigOpClosedFormStep } from './big-op-closed-form.js';
 
 /**
  * The value of `Product(c, …)` over a range with infinitely many terms, for
@@ -61,7 +62,10 @@ export function constantProductOverInfiniteRange(
  * Simplify a `Product`. A range with infinitely many terms is read through
  * `infiniteRange()`: a body that does not depend on the index is handled by
  * `constantProductOverInfiniteRange()`, and the steps of the other rules are
- * checked by `keepInfiniteRangeStep()`.
+ * checked by `keepInfiniteRangeStep()`. When no rule gives a step, the
+ * product gets the closed form that `evaluate()` gives, when there is one
+ * (`bigOpClosedFormStep()`): `Π_{k≥1} k/(k+1)` is 0, and
+ * `Π_{k≥1} (1 + 1/k²)` is `sinh(π)/π`.
  */
 export function simplifyProduct(x: Expression): RuleStep | undefined {
   if (!isFunction(x, 'Product')) return undefined;
@@ -76,8 +80,9 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
     };
   }
   const step = simplifyProductRules(x);
-  if (step === undefined || range === undefined) return step;
-  return keepInfiniteRangeStep(range, step) ? step : undefined;
+  if (step !== undefined && (!range || keepInfiniteRangeStep(range, step)))
+    return step;
+  return bigOpClosedFormStep(x);
 }
 
 /**

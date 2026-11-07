@@ -225,6 +225,7 @@ import {
   degenerateBigOpTerm,
   symbolicSumClosedForm,
   symbolicProductClosedForm,
+  bigOpClosedForm,
   infiniteSumClosedForm,
   divergentInfiniteSum,
   infiniteProductClosedForm,
@@ -534,6 +535,12 @@ import {
   failedWalkErrorSince,
   incompleteWalkCount,
 } from '../boxed-expression/incomplete-walks.js';
+import { registerBigOpClosedForm } from '../symbolic/big-op-closed-form.js';
+
+// The `Sum` and `Product` simplification rules give the closed forms that
+// `evaluate()` gives. Those closed forms are in this library, which the rules
+// of `symbolic/` cannot import, so they are registered here.
+registerBigOpClosedForm(bigOpClosedForm);
 
 // When processing an arithmetic expression, the following are the core
 // canonical arithmetic operations to account for:

@@ -87,6 +87,13 @@
 
 ### Resolved Issues
 
+- **`simplify()` now gives the closed form of a telescoping sum and of a known
+  infinite product, as `evaluate()` does.** `\sum_{k=2}^n (\sin(k+1)-\sin k)`
+  stayed a sum under `simplify()`; it is now `sin(n+1) - sin(2)`.
+  `\prod_{k=1}^\infty (1+1/k^2)` is now `sinh(pi)/pi`, and
+  `\prod_{k=1}^\infty \frac{k}{k+1}` is now `0`. A sum or a product that holds
+  a symbol with an assigned value, or a function whose purity is not known,
+  keeps its form.
 - **A numeric integral of a narrow peak at a bound of the interval no longer
   gives 0.** `.N()` of `\int_0^1 e^{-10^8 x}\,dx` gave `0` with an error of
   `0`, because the integrand was 0 at every point that the quadrature

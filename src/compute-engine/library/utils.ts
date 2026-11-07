@@ -48,6 +48,7 @@ import {
 import { implicitCompileNumeric } from '../implicit-compile.js';
 import {
   bignumPreferred,
+  assignedVariableNames,
   collectBinderNames,
 } from '../boxed-expression/utils.js';
 import { scaledPNorm } from '../numerics/linear-algebra.js';
@@ -934,13 +935,19 @@ function rationalLimitAtInfinity(
  *   - telescoping sums `Σ_{k=a}^{b} (g(k+1) − g(k)) = g(b+1) − g(a)` (and the
  *     mirror orientation);
  *   - the geometric series `Σ_{k=n₀}^∞ c·rᵏ` in a free ratio `r` (infinite upper
- *     bound), emitting `If(|r| < 1, c·r^{n₀}/(1 − r))`.
+ *     bound), emitting `If(|r| < 1, c·r^{n₀}/(1 − r))`, and the named series
+ *     in a free variable (`Σ xᵏ/k`).
+ * With `families` set to `'telescoping'`, only the telescoping sums are
+ * tried: the closed forms of the geometric and named series call
+ * `simplify()`, which a simplification rule must not call (see
+ * `bigOpClosedForm()`).
  * Returns undefined when no closed form applies (caller keeps it symbolic).
  */
 export function symbolicSumClosedForm(
   body: Expression | undefined,
   limits: Expression,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  families: 'all' | 'telescoping' = 'all'
 ): Expression | undefined {
   if (!body || !isFunction(limits, 'Limits')) return undefined;
   const index = isSymbol(limits.op1) ? limits.op1.symbol : undefined;
@@ -966,7 +973,11 @@ export function symbolicSumClosedForm(
   // Geometric series `Σ_{k=n₀}^∞ c·rᵏ` in a free ratio (infinite upper
   // bound), and the named families that admit a free variable (exponential
   // `Σ xᵏ/k!`, first-moment `Σ k·xᵏ`, logarithmic `Σ xᵏ/k`).
-  if (upper.isInfinity === true && upper.isPositive === true) {
+  if (
+    families === 'all' &&
+    upper.isInfinity === true &&
+    upper.isPositive === true
+  ) {
     const geo =
       geometricSumClosedForm(body, index, lower, ce) ??
       namedSeriesClosedForm(body, index, lower, ce);
@@ -993,6 +1004,109 @@ export function symbolicSumClosedForm(
   }
 
   return undefined;
+}
+
+/** Whether `e` holds, at any depth, a call of a function defined with a
+ * body (`f(t) := a^t`), whose evaluation reads the expressions of that
+ * body. */
+function callsFunctionWithBody(e: Expression): boolean {
+  if (!isFunction(e)) return false;
+  if (e.operatorDefinition?.lambda !== undefined) return true;
+  return e.ops.some(callsFunctionWithBody);
+}
+
+/**
+ * The closed form of a `Sum` or a `Product` with one `Limits` clause, for
+ * `simplify()`. It uses the closed forms that the exact `evaluate()` uses, so
+ * that the two methods agree:
+ *   - a sum over a symbolic domain (a free bound, or a body with a free
+ *     variable other than the index): the telescoping sums,
+ *     `Σ_{k=1}^{n} (1/(k+x) − 1/(k+x+1)) = 1/(x+1) − 1/(n+x+1)`;
+ *   - a product over a symbolic domain: the closed forms of
+ *     `symbolicProductClosedForm()` (`Π_{k=1}^{n} k = n!`, the telescoping
+ *     products);
+ *   - a product over an infinite domain with a body that has no free
+ *     variable: the known products (`Π_{k≥1} (1 + 1/k²) = sinh(π)/π`), and
+ *     the limit 0 or ±∞ of a product that does not converge to a finite
+ *     nonzero value (`Π_{k≥1} k/(k+1) = 0`).
+ *
+ * The closed forms of the geometric series, of the named series and of an
+ * infinite sum with no free variable (`Σ_{k≥1} 1/k² = π²/6`) are not used:
+ * they call `simplify()`, and a simplification rule must not call it, since
+ * a nested call starts a new recursion context that the guards of the outer
+ * call do not see. `simplify()` keeps such a sum as written.
+ *
+ * Returns undefined, and `simplify()` keeps the operator as written, when:
+ *   - the operator has more than one indexing clause, or a clause with one
+ *     bound only (which has no value);
+ *   - the two bounds are the same point: `evaluate()` substitutes the bound
+ *     into the body only when no binder in the body can capture a symbol of
+ *     the bound, and the closed forms do not check this;
+ *   - the operator holds a symbol with an assigned value, other than its
+ *     index: `simplify()` does not read values (`assignedVariableNames()`),
+ *     and the closed forms evaluate the term at an infinite bound, which
+ *     reads them. The test runs in the parent scope of the operator, where
+ *     the closed forms read the values: public `simplify()` hides each
+ *     assigned value in a scope of its own, but the scope of the operator
+ *     has the original scope as its parent, not that one. The index is left
+ *     out of the test: in the scope of the operator it is the operator's own
+ *     variable, and a value of the same name outside is not read;
+ *   - the operator calls a function that has a body (`f(t) := a^t`): the
+ *     body can read an assigned value that the test above does not see,
+ *     since it reads only the symbols of the operator;
+ *   - the body or a bound is not pure. A body with a random draw has terms
+ *     that are not the values of one function of the index, so they do not
+ *     cancel, and a random bound put into the closed form in two places
+ *     gives two independent draws. A call of a function whose purity is not
+ *     known (an undeclared `f`) is not pure either, so
+ *     `Σ_{k=a}^{b} (f(k+1) − f(k))` keeps its form, while `evaluate()` gives
+ *     `f(b+1) − f(a)`.
+ *
+ * A clause with no bounds runs over `1..+∞`, as under `evaluate()`
+ * (`withDefaultBigOpBounds()`). The `Sum` and `Product` simplification rules
+ * (`symbolic/simplify-sum.ts`, `symbolic/simplify-product.ts`) call this
+ * function through `registerBigOpClosedForm()`, since `symbolic/` does not
+ * import from `library/`.
+ */
+export function bigOpClosedForm(x: Expression): Expression | undefined {
+  if (!isFunction(x) || x.nops !== 2) return undefined;
+  const kind = x.operator;
+  if (kind !== 'Sum' && kind !== 'Product') return undefined;
+  const ce = x.engine;
+  const body = x.op1;
+  if (!isTransitivelyPure(body) || !isTransitivelyPure(x.op2))
+    return undefined;
+  if (callsFunctionWithBody(x)) return undefined;
+  const clause = x.op2;
+  const index =
+    isFunction(clause) && isSymbol(clause.op1) ? clause.op1.symbol : undefined;
+  const outer = x.localScope?.parent ?? undefined;
+  const assigned = ce._inScope(outer, () => assignedVariableNames(x));
+  if (assigned.some((name) => name !== index)) return undefined;
+  const [limits] = withDefaultBigOpBounds(ce, [x.op2]);
+  if (!isFunction(limits, 'Limits') || hasOneSidedLimits([limits]))
+    return undefined;
+  if (isDegenerateBounds(limits.op2, limits.op3, false)) return undefined;
+  const mode = classifyBigopDomain(body, [limits], ce);
+  // The closed forms run in the scope of the operator, as under
+  // `evaluate()`: the index of the body is bound in that scope, and the
+  // telescoping test compares the body with a copy shifted by `k → k + 1`
+  // whose index is boxed in the current scope. Outside the scope of the
+  // operator, the two `k` are different symbols and the test fails.
+  return ce._inScope(x.localScope, () => {
+    if (kind === 'Sum')
+      return mode === 'symbolic'
+        ? symbolicSumClosedForm(body, limits, ce, 'telescoping')
+        : undefined;
+    if (mode === 'symbolic')
+      return symbolicProductClosedForm(body, limits, ce);
+    if (mode === 'numeric')
+      return (
+        infiniteProductClosedForm(body, limits, ce) ??
+        divergentInfiniteProduct(body, limits, ce)
+      );
+    return undefined;
+  });
 }
 
 /**

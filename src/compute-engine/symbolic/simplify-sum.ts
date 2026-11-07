@@ -12,6 +12,7 @@ import {
 import { asFloat } from '../boxed-expression/float-result.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import { emptyBigOpValue } from './big-op-identity.js';
+import { bigOpClosedFormStep } from './big-op-closed-form.js';
 
 /**
  * Whether a bound of a `Sum` or `Product` is proved not to be an integer, so
@@ -268,7 +269,10 @@ function constantSumOverInfiniteRange(body: Expression): RuleStep | undefined {
  * Simplify a `Sum`. A range with infinitely many terms is read through
  * `infiniteRange()`: a body that does not depend on the index is handled by
  * `constantSumOverInfiniteRange()`, and the steps of the other rules are
- * checked by `keepInfiniteRangeStep()`.
+ * checked by `keepInfiniteRangeStep()`. When no rule gives a step, the sum
+ * gets the closed form that `evaluate()` gives, when there is one
+ * (`bigOpClosedFormStep()`): a telescoping sum
+ * `Σ_{k=2}^{n} (sin(k+1) − sin(k))` is `sin(n+1) − sin(2)`.
  */
 export function simplifySum(x: Expression): RuleStep | undefined {
   if (!isFunction(x, 'Sum')) return undefined;
@@ -276,8 +280,9 @@ export function simplifySum(x: Expression): RuleStep | undefined {
   if (range && !range.body.symbols.includes(range.index))
     return constantSumOverInfiniteRange(range.body);
   const step = simplifySumRules(x);
-  if (step === undefined || range === undefined) return step;
-  return keepInfiniteRangeStep(range, step) ? step : undefined;
+  if (step !== undefined && (!range || keepInfiniteRangeStep(range, step)))
+    return step;
+  return bigOpClosedFormStep(x);
 }
 
 /**

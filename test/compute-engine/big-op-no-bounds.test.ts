@@ -148,7 +148,7 @@ describe('A sum or a product with no bounds: parse route', () => {
       '\\prod_k (1+\\frac{1}{k^2})',
       'sinh(pi) / pi',
       '3.676077910374995',
-      'same',
+      'sinh(pi) / pi',
     ],
     ['\\prod_k x^k', 'same', 'same', 'same'],
     // The value depends on the sign of `y` (0 for y = 0), so it stays.

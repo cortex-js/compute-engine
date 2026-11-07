@@ -153,6 +153,20 @@ the `Sum`, because it may not be an integer. A host that can reach a reversed
 range or a non-integer bound does not simplify the sum, or it declares the bound
 as a type that excludes such a value.
 
+When no simplification rule of `Sum` or `Product` applies, `simplify()` gives
+the closed form that `evaluate()` gives, if there is one: a telescoping sum
+(`Σ_{k=2}^{n} (sin(k+1) − sin(k))` is `sin(n+1) − sin(2)`), the closed form of
+a product over a symbolic range, and a known infinite product or its limit 0 or
+±∞ (`Π_{k≥1} (1 + 1/k²)` is `sinh(π)/π`, `Π_{k≥1} k/(k+1)` is `0`). The closed
+forms of the geometric and named series in a free variable (`Σ_{k≥0} x^k`) and
+of an infinite sum with no free variable (`Σ_{k≥1} 1/k²`) are not used: they call
+`simplify()`, which a simplification rule must not call. `simplify()` keeps
+such a sum as written, and `evaluate()` gives its closed form. These operators
+also keep their form: an operator that holds a symbol with an assigned value,
+because the closed forms read values, and an operator whose body or bounds are
+not pure (a random draw, or a call of a function whose purity is not known, such
+as an undeclared `f` in `Σ_{k=a}^{b} (f(k+1) − f(k))`).
+
 ### Undefined points and collections
 
 `simplify()` can remove the points where an expression has no value, as
