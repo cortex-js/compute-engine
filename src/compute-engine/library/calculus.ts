@@ -108,6 +108,7 @@ import {
   lookupApplicable,
 } from '../function-utils.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
+import { rationalize } from '../numerics/rationals.js';
 import {
   divergentTailSign,
   tailIsFinite,
@@ -3738,11 +3739,408 @@ function finiteScanRange(lo: number, hi: number): [number, number] {
   return loInf ? [cut, hi] : [lo, cut];
 }
 
+/**
+ * The expressions in `e` that can be zero where `e` is unbounded: the
+ * divisor of a `Divide` and the base of a `Power` with a negative numeric
+ * exponent, with a `Negate`, `Sqrt`, `Abs` or a positive numeric power
+ * removed, and each factor of a product taken separately. For
+ * `1/√((x − a)² + (y − b)²)` the result is `[(x − a)² + (y − b)²]`.
+ * `budget` limits the number of nodes that are visited; the result is
+ * `undefined` when the walk uses all of it.
+ */
+function singularBases(
+  e: Expression,
+  budget = { nodes: 400 }
+): Expression[] | undefined {
+  const bases: Expression[] = [];
+  const addBase = (d: Expression): void => {
+    if (!isFunction(d)) return;
+    if (d.operator === 'Multiply') {
+      for (const factor of d.ops) addBase(factor);
+      return;
+    }
+    if (
+      d.operator === 'Negate' ||
+      d.operator === 'Sqrt' ||
+      d.operator === 'Abs'
+    ) {
+      addBase(d.op1);
+      return;
+    }
+    if (d.operator === 'Power') {
+      const exponent = d.op2;
+      if (isNumber(exponent) && exponent.isNumberLiteral && exponent.re > 0)
+        addBase(d.op1);
+      return;
+    }
+    bases.push(d);
+  };
+  const walk = (x: Expression): boolean => {
+    if (budget.nodes-- <= 0) return false;
+    if (!isFunction(x)) return true;
+    if (x.operator === 'Divide') addBase(x.op2);
+    else if (x.operator === 'Power') {
+      const exponent = x.op2;
+      if (isNumber(exponent) && exponent.isNumberLiteral && exponent.re < 0)
+        addBase(x.op1);
+    }
+    return x.ops.every(walk);
+  };
+  return walk(e) ? bases : undefined;
+}
+
+/**
+ * The point where `base` is zero, when `base` is a positive definite
+ * quadratic polynomial in the two variables `vars` and that point is in the
+ * closed box `box` (the bounds of each variable, in either order). An
+ * example is `(x − 1/64)² + (y − 1/64)²`, which is zero only at
+ * `(1/64, 1/64)`.
+ *
+ * The point is found with floating-point numbers: the values of `base` at
+ * six points of the box give the coefficients of the quadratic, and two
+ * more points check that `base` is near that quadratic. The coordinates are
+ * then approximated by rational numbers. The point is kept only when the
+ * exact evaluation of `base` there is exactly zero, and when the exact
+ * values of `base` on a grid around the point prove that `base` is the
+ * quadratic form below. Thus the result is exact, and the variables can be
+ * shifted to the point without a rounding error (see
+ * `integrateAroundSingularPoint`). A divisor with floating-point
+ * coefficients passes only when its exact evaluation gives these values with
+ * no rounding error, as `(x − 0.3)² + (y − 0.3)²` does.
+ *
+ * The result has the exact coordinates and `quadratic`, the form
+ * `½·uᵀ·H·u` that is equal to `base` at the point plus `u`, with the exact
+ * Hessian `H` of `base`. The result is `undefined` in every other case.
+ */
+function quadraticZeroPoint(
+  ce: ComputeEngine,
+  base: Expression,
+  vars: readonly [string, string],
+  box: readonly [readonly [number, number], readonly [number, number]]
+): { point: [Expression, Expression]; quadratic: Expression } | undefined {
+  const [x, y] = vars;
+  if (polynomialDegree(base, x) !== 2 || polynomialDegree(base, y) !== 2)
+    return undefined;
+  if (base.symbols.some((s) => s !== x && s !== y)) return undefined;
+  // The samples below evaluate `base`, so an effect in it (`Random()`) would
+  // run more times than the quadrature runs it.
+  if (!isTransitivelyPure(base)) return undefined;
+
+  // The value of `base` at the point `(s, t)` of the box, in coordinates
+  // that are 0 at the center of the box and ±1 at its edges.
+  const center = box.map(([lo, hi]) => (lo + hi) / 2);
+  const half = box.map(([lo, hi]) => Math.abs(hi - lo) / 2);
+  const at = (s: number, t: number): number =>
+    base
+      .subs({
+        [x]: ce.number(center[0] + half[0] * s),
+        [y]: ce.number(center[1] + half[1] * t),
+      })
+      .N().re;
+  const f00 = at(0, 0);
+  const f10 = at(1, 0);
+  const fm10 = at(-1, 0);
+  const f01 = at(0, 1);
+  const f0m1 = at(0, -1);
+  const f11 = at(1, 1);
+  const b0 = (f10 - fm10) / 2;
+  const b1 = (f01 - f0m1) / 2;
+  const h00 = f10 + fm10 - 2 * f00;
+  const h11 = f01 + f0m1 - 2 * f00;
+  const h01 = f11 - f10 - f01 + f00;
+  const quadraticAt = (s: number, t: number) =>
+    f00 + b0 * s + b1 * t + (h00 * s * s + 2 * h01 * s * t + h11 * t * t) / 2;
+  const samples = [f00, f10, fm10, f01, f0m1, f11];
+  if (!samples.every(Number.isFinite)) return undefined;
+  const scale = Math.max(...samples.map(Math.abs));
+  if (!(scale > 0)) return undefined;
+  for (const [s, t] of [
+    [0.3711, -0.6143],
+    [-0.8292, 0.2875],
+  ]) {
+    const value = at(s, t);
+    if (!(Math.abs(value - quadraticAt(s, t)) <= 1e-9 * scale))
+      return undefined;
+  }
+  // Positive definite: the quadratic has one minimum, at `−H⁻¹·b`.
+  const det = h00 * h11 - h01 * h01;
+  if (!(h00 > 0 && det > 1e-12 * h00 * h11)) return undefined;
+  const s = -(h11 * b0 - h01 * b1) / det;
+  const t = -(h00 * b1 - h01 * b0) / det;
+  if (!(Math.abs(quadraticAt(s, t)) <= 1e-9 * scale)) return undefined;
+
+  // The exact point, and a check that it is in the box.
+  const point: Expression[] = [];
+  for (const [i, value] of [
+    center[0] + half[0] * s,
+    center[1] + half[1] * t,
+  ].entries()) {
+    const r = rationalize(value, 1e-10 * Math.max(1, Math.abs(value), half[i]));
+    const exact = ce.number(r);
+    const [lo, hi] = box[i];
+    const v = exact.re;
+    if (!(v >= Math.min(lo, hi) && v <= Math.max(lo, hi))) return undefined;
+    point.push(exact);
+  }
+  const exactAt = (dx: number, dy: number): Expression =>
+    base
+      .subs({
+        [x]: ce.function('Add', [point[0], ce.number(dx)]),
+        [y]: ce.function('Add', [point[1], ce.number(dy)]),
+      })
+      .evaluate();
+  // `isSame`, not `is`: `is(0)` accepts a value within the tolerance of the
+  // engine, such as `10⁻¹²`, and a divisor `r² + 10⁻¹²` must not be replaced
+  // by `r²`.
+  if (!exactAt(0, 0).isSame(ce.Zero)) return undefined;
+
+  // The second derivatives of `base`, from its values at the point moved by
+  // 1 in each variable, if `base` is the quadratic form (checked below).
+  const vx = exactAt(1, 0);
+  const vy = exactAt(0, 1);
+  const hxx = ce.function('Add', [vx, exactAt(-1, 0)]).evaluate();
+  const hyy = ce.function('Add', [vy, exactAt(0, -1)]).evaluate();
+  const hxy = ce
+    .function('Subtract', [exactAt(1, 1), ce.function('Add', [vx, vy])])
+    .evaluate();
+  if (![hxx, hyy, hxy].every((h) => isNumber(h) && Number.isFinite(h.re)))
+    return undefined;
+  const quadratic = ce.function('Add', [
+    ce.function('Multiply', [
+      ce.Half,
+      hxx,
+      ce.function('Power', [ce.symbol(x), ce.number(2)]),
+    ]),
+    ce.function('Multiply', [hxy, ce.symbol(x), ce.symbol(y)]),
+    ce.function('Multiply', [
+      ce.Half,
+      hyy,
+      ce.function('Power', [ce.symbol(y), ce.number(2)]),
+    ]),
+  ]);
+  // A proof that `base` at the point plus `u` is the quadratic form, for
+  // every `u`. The difference of the two is a polynomial of degree 2 or less
+  // in each variable, since `base` is one (checked at the start). Such a
+  // polynomial is zero when it is zero at the nine points of the grid
+  // `{−1, 0, 1}²`. The floating-point checks above do not prove this: in a
+  // box of width 10⁻⁵, the term `(x − a)²·(y − a)²` of
+  // `(x − a)² + (y − a)² + (x − a)²·(y − a)²` is below their tolerance, but
+  // it changes `hxy` from 0 to 1.
+  for (const dx of [-1, 0, 1]) {
+    for (const dy of [-1, 0, 1]) {
+      const difference = ce
+        .function('Subtract', [
+          exactAt(dx, dy),
+          quadratic.subs({ [x]: ce.number(dx), [y]: ce.number(dy) }),
+        ])
+        .evaluate();
+      if (!difference.isSame(ce.Zero)) return undefined;
+    }
+  }
+  return { point: [point[0], point[1]], quadratic };
+}
+
+/**
+ * The double integral of `body` over the box `box` (the bounds of the two
+ * variables `vars`, in either order), computed as the sum of the integrals
+ * over the parts of the box around a singular point, or `undefined` when
+ * the integrand has no such point in the box or a part has no result.
+ *
+ * The singular point is the zero of a positive definite quadratic divisor,
+ * such as `1/√((x − a)² + (y − b)²)` at `(a, b)` (see `quadraticZeroPoint`).
+ * The integral of `r^(−p)` near such a point is finite when `p < 2`, but the
+ * nested quadrature of `nIntegrateMultiple` fails on it: the inner integral
+ * on the line through the point diverges, and next to the point the inner
+ * integrand has a peak that is too narrow to resolve. Thus the box is cut at
+ * the point into up to four parts, so that the point is a corner of each
+ * part, and the variables are shifted so that the point is at the origin.
+ * The shift is made on the expression, with exact coordinates, and the
+ * divisor is replaced by its exact quadratic form in the shifted variables:
+ * with the shift made on floating-point numbers, `x − 0.3` is exactly zero
+ * for each `x` nearer to `0.3` than about `5·10⁻¹⁷`, and the integrand is
+ * infinite at the quadrature nodes next to the corner.
+ *
+ * Each part is integrated by `nIntegrateMultiple`. The result is the sum of
+ * the estimates and of the errors of the parts; an infinite part gives its
+ * infinity, two infinities of different signs or a `NaN` part give `NaN`. A
+ * part that has no result, or that has a complex value, gives `undefined`,
+ * and the caller then integrates the whole box as before.
+ */
+function integrateAroundSingularPoint(
+  ce: ComputeEngine,
+  body: Expression,
+  vars: readonly [string, string],
+  box: readonly [readonly [number, number], readonly [number, number]]
+): Expression | undefined {
+  if (!box.every(([lo, hi]) => Number.isFinite(lo) && Number.isFinite(hi)))
+    return undefined;
+  const bases = singularBases(body);
+  if (bases === undefined) return undefined;
+  let found: ReturnType<typeof quadraticZeroPoint>;
+  let base: Expression | undefined;
+  for (const candidate of bases) {
+    if (!candidate.has(vars[0]) || !candidate.has(vars[1])) continue;
+    if (base !== undefined && candidate.isSame(base)) continue;
+    const zero = quadraticZeroPoint(ce, candidate, vars, box);
+    if (zero === undefined) continue;
+    // A second divisor with a singular point. At another point, a part
+    // would still have a singular point inside it. At the same point, the
+    // second divisor would keep the rounding error of the shift, since only
+    // `base` is replaced by its exact form.
+    if (found !== undefined) return undefined;
+    found = zero;
+    base = candidate;
+  }
+  if (found === undefined || base === undefined) return undefined;
+  const { point, quadratic } = found;
+
+  // The pieces of each dimension, in the shifted variable: the bounds minus
+  // the coordinate of the point. A piece of zero length is left out.
+  const pieces = box.map(([lo, hi], i): [number, number][] => {
+    const p = point[i].re;
+    return [
+      [lo - p, 0],
+      [0, hi - p],
+    ].filter(([a, b]) => a !== b) as [number, number][];
+  });
+  // The point is already at the origin and at a corner of the box: the
+  // quadrature of the whole box resolves it.
+  if (
+    point.every((p) => p.isSame(ce.Zero)) &&
+    pieces.every((dimension) => dimension.length === 1)
+  )
+    return undefined;
+
+  const shift = Object.fromEntries(
+    vars.map((v, i) => [v, ce.function('Add', [ce.symbol(v), point[i]])])
+  );
+  const shiftedBase = base.subs(shift);
+  const shiftedBody = body.subs(shift);
+  // The shifted divisor is already the quadratic form when the point is the
+  // origin (`x² + y²`): there is nothing to replace, and `replace()` gives
+  // `null`. Otherwise the divisor must be gone from the shifted integrand,
+  // or the rounding error of the shift stays.
+  let replaced: Expression | null = shiftedBody;
+  if (!shiftedBase.isSame(quadratic)) {
+    replaced = shiftedBody.replace(
+      { match: shiftedBase, replace: quadratic },
+      { recursive: true }
+    );
+    if (replaced === null) return undefined;
+    let left = false;
+    const visit = (e: Expression): void => {
+      if (left) return;
+      if (e.isSame(shiftedBase)) left = true;
+      else if (isFunction(e)) e.ops.forEach(visit);
+    };
+    visit(replaced);
+    if (left) return undefined;
+  }
+  const fn = ce.expr(['Function', replaced, ...vars]);
+
+  let estimate = 0;
+  let error = 0;
+  let infinity = 0;
+  let noValue = false;
+  for (const [a, b] of pieces[0]) {
+    for (const [c, d] of pieces[1]) {
+      const r = nIntegrateMultiple(
+        ce,
+        fn,
+        [
+          ce.function('Limits', [
+            ce.symbol(vars[0]),
+            ce.number(a),
+            ce.number(b),
+          ]),
+          ce.function('Limits', [
+            ce.symbol(vars[1]),
+            ce.number(c),
+            ce.number(d),
+          ]),
+        ],
+        undefined,
+        false
+      );
+      if (r === undefined) return undefined;
+      const value = isFunction(r, 'Measurement') ? r.op1 : r;
+      if (!isNumber(value) || value.im !== 0) return undefined;
+      if (Number.isNaN(value.re)) noValue = true;
+      else if (!Number.isFinite(value.re)) {
+        const sign = Math.sign(value.re);
+        if (infinity !== 0 && infinity !== sign) noValue = true;
+        infinity = sign;
+      } else {
+        estimate += value.re;
+        if (isFunction(r, 'Measurement')) error += r.op2.re;
+      }
+    }
+  }
+  if (noValue) return ce.NaN;
+  if (infinity !== 0)
+    return infinity > 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
+  return measurementFromParts(ce, { estimate, error });
+}
+
+/**
+ * The numeric value of a nested double integral, `∫_a^b (∫_c^d f dy) dx`,
+ * when its integrand is singular at one point of the box (see
+ * `integrateAroundSingularPoint`), or `undefined` in every other case.
+ *
+ * `fnExpr` is the integrand of the outer integral, a `Function` literal of
+ * `variable`, and `lower` and `upper` are the bounds of the outer integral.
+ * The body of `fnExpr` must be one `Integrate` with one limit, whose bounds
+ * are pure and do not depend on either variable. LaTeX gives this form for
+ * `\int_0^1\int_0^1 f\,dy\,dx`. The one-limit quadrature of the outer
+ * integral evaluates the inner integral at each of its nodes, and it gives
+ * `NaN` when the integrand is singular at a point: the inner integral is
+ * infinite on the line through the point.
+ */
+function nestedSingularPointIntegral(
+  ce: ComputeEngine,
+  fnExpr: Expression,
+  variable: string,
+  lower: number,
+  upper: number
+): Expression | undefined {
+  if (!isFunction(fnExpr, 'Function')) return undefined;
+  const inner = liftIntegrand(fnExpr);
+  if (!isFunction(inner, 'Integrate') || inner.nops !== 2) return undefined;
+  const limit = inner.op2;
+  if (!isFunction(limit, 'Limits')) return undefined;
+  const innerVar = sym(limit.op1);
+  if (!innerVar || innerVar === 'Nothing' || innerVar === variable)
+    return undefined;
+  const g = inner.op1;
+  if (!isFunction(g, 'Function')) return undefined;
+  const params = g.ops.slice(1).map((p) => functionLiteralParameterName(p));
+  if (params.length !== 1 || params[0] !== innerVar) return undefined;
+  // A bound that is not pure (`Random()`) must be evaluated only once, by
+  // the route that integrates.
+  const bounds = [limit.op2, limit.op3];
+  if (bounds.some((b) => b.has([variable, innerVar]) || !isTransitivelyPure(b)))
+    return undefined;
+  const [c, d] = bounds.map((b) => b.N().re);
+  const names = [variable, innerVar];
+  return withValueShield(ce, names, () =>
+    integrateAroundSingularPoint(
+      ce,
+      withAssignedValues(ce, liftIntegrand(g), names),
+      [variable, innerVar],
+      [
+        [lower, upper],
+        [c, d],
+      ]
+    )
+  );
+}
+
 function nIntegrateMultiple(
   ce: ComputeEngine,
   f: Expression,
   limits: ReadonlyArray<Expression>,
-  evaluatedBounds?: ReadonlyArray<ReadonlyArray<Expression>>
+  evaluatedBounds?: ReadonlyArray<ReadonlyArray<Expression>>,
+  splitAtSingularPoint = true
 ): Expression | undefined {
   const vars: string[] = [];
   // The variables of the limits that name no variable and that the integrand
@@ -3912,6 +4310,30 @@ function nIntegrateMultiple(
   };
   const interior = poleValue(interiorPoleVerdict);
   if (interior !== undefined) return interior;
+
+  // A double integral over a box whose integrand is singular at one point,
+  // `((x − a)² + (y − b)²)^(−1/2)`: the box is cut at the point and each
+  // part is integrated with the point at a corner (see
+  // `integrateAroundSingularPoint`). The parts are integrated with this
+  // function, with `splitAtSingularPoint` false, so that they are not cut
+  // again.
+  if (
+    splitAtSingularPoint &&
+    vars.length === 2 &&
+    constantVars.size === 0 &&
+    orientations.every((o) => o === 1 || o === -1)
+  ) {
+    const box = boundFns.map(
+      ([lower, upper]) => [lower([]), upper([])] as const
+    );
+    const split = integrateAroundSingularPoint(
+      ce,
+      body,
+      [vars[0], vars[1]],
+      [box[0], box[1]]
+    );
+    if (split !== undefined) return split;
+  }
 
   // A pole whose location depends on another integration variable:
   // `∫₀¹⁰ ∫₃⁴ (y − x)⁻² dx dy` has, for each `y` in `(3, 4)`, a pole at
@@ -8058,6 +8480,17 @@ volumes
             Math.sign(upper - lower)
           );
           if (infinite !== undefined) return infinite;
+
+          // A nested double integral whose integrand is singular at one
+          // point of the box, `∫₀¹ ∫₀¹ ((x − a)² + (y − b)²)^(−1/2) dy dx`.
+          const aroundPoint = nestedSingularPointIntegral(
+            ce,
+            fnExpr,
+            variable,
+            lower,
+            upper
+          );
+          if (aroundPoint !== undefined) return aroundPoint;
 
           const shield = <T>(run: () => T): T =>
             withValueShield(ce, intVarNames, run);

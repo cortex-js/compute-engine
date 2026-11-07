@@ -172,9 +172,7 @@ describe('AN INTEGRAL WITH NO VALUE: NaN', () => {
       ['Divide', 1, 't'],
       ['Divide', c, ['Subtract', 1, 't']],
     ];
-    expect(
-      integral(ce, body(1), [['t', 0, 1]]).evaluate().isNaN
-    ).toBe(true);
+    expect(integral(ce, body(1), [['t', 0, 1]]).evaluate().isNaN).toBe(true);
     const float = integral(ce, body(1.5), [['t', 0, 1]]).evaluate();
     expect(float.isNaN).toBe(true);
   });
@@ -286,41 +284,163 @@ describe('A SYMBOL WITH NO DECLARED TYPE IS REAL, WHATEVER THE ENGINE DID BEFORE
 });
 
 describe('AN ISOLATED SINGULAR POINT IN A DOUBLE INTEGRAL', () => {
-  // `((x − 1/64)² + (y − 1/64)²)^(−1/2)` is singular only at the point
-  // `(1/64, 1/64)`, the center of the first cell of the grid of the scan for
-  // moving poles in each dimension. The inner integral diverges on the two
-  // lines through that point only, a set of zero measure, and the double
-  // integral is finite: about 1.9451 (in polar coordinates around the
-  // point, the integrand is 1/r and the area element is r dr dθ). The scan
-  // counted one pole in each dimension and gave `+∞`.
-  test('the integral is not infinite', () => {
+  // An integrand such as `((x − a)² + (y − b)²)^(−1/2)` is singular only at
+  // the point `(a, b)`. In polar coordinates around the point, the integrand
+  // is `1/r` and the area element is `r dr dθ`, so the double integral is
+  // finite. The nested quadrature cannot resolve the inner integral on the
+  // line through the point: it gave `NaN` when the point was the center of
+  // a cell of the scan for moving poles (`1/64`), and `0 ± 1.8·10⁹` at other
+  // points (`0.3`). The box is now cut at the point, and each part is
+  // integrated with the point at a corner.
+  //
+  // The expected values come from the antiderivative of `1/r` over a
+  // rectangle with a corner at the point, `F(A, B) = A·asinh(B/A) +
+  // B·asinh(A/B)`: the integral over the box is the sum of `F` over its
+  // four parts. The value with a cross term was checked in polar
+  // coordinates.
+  const F = (a: number, b: number) =>
+    a * Math.asinh(b / a) + b * Math.asinh(a / b);
+  const inverseDistance = (a: unknown, b: unknown) => [
+    'Power',
+    [
+      'Add',
+      ['Power', ['Subtract', 'x', a], 2],
+      ['Power', ['Subtract', 'y', b], 2],
+    ],
+    ['Rational', -1, 2],
+  ];
+  // The time limit is far above the time each integral takes (about 1 s).
+  const value = (ce: ComputeEngine, e: { N(): { re: number } }) =>
+    ce.withTimeLimit(20_000, () => e.N()).re;
+
+  test('the point is the center of a cell of the scan', () => {
     const ce = new ComputeEngine();
     const a = ['Rational', 1, 64];
-    const body = [
-      'Power',
+    const e = integral(ce, inverseDistance(a, a), [
+      ['x', 0, 1],
+      ['y', 0, 1],
+    ]);
+    const expected =
+      F(1 / 64, 1 / 64) + 2 * F(1 / 64, 63 / 64) + F(63 / 64, 63 / 64);
+    expect(value(ce, e)).toBeCloseTo(expected, 8); // 1.9451316397
+  });
+
+  test('the nested integral that LaTeX gives', () => {
+    const ce = new ComputeEngine();
+    const e = ce.parse(
+      '\\int_0^1\\int_0^1 ((x-1/64)^2+(y-1/64)^2)^{-1/2} dy\\,dx'
+    );
+    const expected =
+      F(1 / 64, 1 / 64) + 2 * F(1 / 64, 63 / 64) + F(63 / 64, 63 / 64);
+    expect(value(ce, e)).toBeCloseTo(expected, 8);
+  });
+
+  test('the point is the origin, inside the box', () => {
+    // The shifted divisor `x² + y²` is already the quadratic form, so there
+    // is nothing to replace, and the box is still cut.
+    const ce = new ComputeEngine();
+    const e = integral(ce, inverseDistance(0, 0), [
+      ['x', ['Rational', -1, 64], ['Rational', 63, 64]],
+      ['y', ['Rational', -1, 64], ['Rational', 63, 64]],
+    ]);
+    const expected =
+      F(1 / 64, 1 / 64) + 2 * F(1 / 64, 63 / 64) + F(63 / 64, 63 / 64);
+    expect(value(ce, e)).toBeCloseTo(expected, 8);
+  });
+
+  test('a decimal coordinate', () => {
+    // With a shift made on floating-point numbers, `x − 0.3` is exactly 0
+    // at the quadrature nodes next to the point.
+    const ce = new ComputeEngine();
+    const e = integral(ce, inverseDistance(0.3, 0.3), [
+      ['x', 0, 1],
+      ['y', 0, 1],
+    ]);
+    const expected = F(0.3, 0.3) + 2 * F(0.3, 0.7) + F(0.7, 0.7);
+    expect(value(ce, e)).toBeCloseTo(expected, 8); // 3.2958436629
+  });
+
+  test('the point is on an edge of the box', () => {
+    const ce = new ComputeEngine();
+    const e = integral(ce, inverseDistance(0.5, 0), [
+      ['x', 0, 1],
+      ['y', 0, 1],
+    ]);
+    expect(value(ce, e)).toBeCloseTo(2 * F(0.5, 1), 8); // 2.4060591253
+  });
+
+  test('reversed bounds negate the integral', () => {
+    const ce = new ComputeEngine();
+    const e = integral(ce, inverseDistance(0.5, 0.5), [
+      ['x', 1, 0],
+      ['y', 0, 1],
+    ]);
+    expect(value(ce, e)).toBeCloseTo(-4 * F(0.5, 0.5), 8); // -3.5254943481
+  });
+
+  test('a divisor with a small positive minimum is not cut', () => {
+    // `r² + 10⁻¹²` is not zero at the point. Replaced by `r²`, it gave
+    // 3.525494348 (the value of `1/r`), wrong by 6·10⁻⁶.
+    const ce = new ComputeEngine();
+    const e = integral(
+      ce,
       [
-        'Add',
-        ['Power', ['Subtract', 'x', a], 2],
-        ['Power', ['Subtract', 'y', a], 2],
+        'Power',
+        [
+          'Add',
+          ['Power', ['Subtract', 'x', 0.5], 2],
+          ['Power', ['Subtract', 'y', 0.5], 2],
+          ['Power', 10, -12],
+        ],
+        ['Rational', -1, 2],
       ],
-      ['Rational', -1, 2],
-    ];
-    // The grid scan finds the pole at the center of the cell, so the result
-    // is `NaN` as soon as one level of the nested quadrature fails. The
-    // quadrature then stops: it took about 0.1 s here. Before, it ran to the
-    // end (1.7·10⁸ evaluations of the integrand, about 60 s, and up to 300 s
-    // on a loaded machine) and returned the same `NaN`. The time limit is far
-    // above the time it takes now and far below the time it took before.
-    const value = ce.withTimeLimit(10_000, () =>
-      integral(ce, body, [
+      [
         ['x', 0, 1],
         ['y', 0, 1],
-      ]).N()
+      ]
     );
-    expect(value.isInfinity).not.toBe(true);
-    expect(
-      value.isNaN === true || Math.abs(value.re - 1.9451316) < 1e-2
-    ).toBe(true);
+    expect(value(ce, e)).toBeCloseTo(3.5254880649, 8);
+  });
+
+  test('a divisor that is not a quadratic form is not cut', () => {
+    // `u² + v² + u²·v²` with `u = x − a`, `v = y − a`, in a box of width
+    // 10⁻⁵. The term `u²·v²` is too small for the floating-point checks,
+    // but replaced by a quadratic form computed from steps of 1, the
+    // divisor was `u² + u·v + v²`, and the value 3.7325·10⁻⁵ was wrong by
+    // 6%.
+    const ce = new ComputeEngine();
+    const a = ['Rational', 1, 200000];
+    const u = ['Power', ['Subtract', 'x', a], 2];
+    const v = ['Power', ['Subtract', 'y', a], 2];
+    const e = integral(
+      ce,
+      ['Power', ['Add', u, v, ['Multiply', u, v]], ['Rational', -1, 2]],
+      [
+        ['x', 0, 1e-5],
+        ['y', 0, 1e-5],
+      ]
+    );
+    expect(Math.abs(value(ce, e) - 3.732528e-5)).toBeGreaterThan(1e-7);
+  });
+
+  test('a quadratic form with a cross term, and a smooth factor', () => {
+    // `x² + xy + y² − x − y + 1/3` is zero only at `(1/3, 1/3)`.
+    const ce = new ComputeEngine();
+    const crossTerm = ce.parse(
+      '\\int_0^1\\int_0^1 \\frac{1}{\\sqrt{x^2+xy+y^2-x-y+1/3}} dy\\,dx'
+    );
+    expect(value(ce, crossTerm)).toBeCloseTo(3.5118877251, 8);
+    // By symmetry about `x = ½`, the integral of `x/r` is half the integral
+    // of `1/r`.
+    const factor = integral(
+      ce,
+      ['Multiply', 'x', inverseDistance(0.5, 0.5)],
+      [
+        ['x', 0, 1],
+        ['y', 0, 1],
+      ]
+    );
+    expect(value(ce, factor)).toBeCloseTo(2 * F(0.5, 0.5), 8); // 1.7627471740
   });
 });
 

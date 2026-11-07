@@ -87,6 +87,17 @@
 
 ### Resolved Issues
 
+- **A numeric double integral whose integrand grows like `1/r` near one point
+  of the box now gives its value.**
+  `\int_0^1\int_0^1 ((x-1/64)^2+(y-1/64)^2)^{-1/2} dy\,dx` gave `NaN` under
+  `.N()`, and it now gives `1.945131639720 ± 0.000000000014`. With the point
+  at `(0.3, 0.3)` the result was `0 ± 1800000000`, and it is now
+  `3.295843662862 ± 0.000000000025`. This applies when a divisor of the
+  integrand is a positive definite quadratic polynomial of the two variables,
+  such as `(x − a)² + (y − b)²`, that is zero at one point of the box. The box
+  is cut at that point, and each part is integrated with the point at a
+  corner. A divergent integral, such as one of `((x − a)² + (y − b)²)^{-1}`,
+  still gives `NaN`.
 - **In `mode: 'complex'` on the `javascript` target, a function literal that
   receives a square root as its argument now gives the correct value when its
   body uses the parameter as a real number.** With `y: real`,
