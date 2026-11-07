@@ -446,6 +446,15 @@
 
 ### Performance
 
+- **A call of a user function does fewer type computations.** Each call
+  declares the parameters of the function, so the types of the expressions in
+  its body are computed again at each call. Four tests that read such a type
+  at each call now read a cheaper fact first when that fact gives the answer:
+  a `Declare` with attributes (`let m = n * 2` in Epsil), a comparison of two
+  operands, and the broadcast and tuple tests of `And`, `Or` and of the
+  operators with broadcast exemptions. For example,
+  `count(filter(1..20000, f))` with `f(n) = do { let m = n * 2; m % 3 == 0 }`
+  took about 1.1 s and now takes about 0.8 s. The values do not change.
 - **At machine precision, a sum, a difference or a product of two lists of
   more than 100 numbers, and a quotient with such a list as an operand, are
   now computed at once.** With `L` a list of 2,000 points,

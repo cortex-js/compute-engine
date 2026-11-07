@@ -9022,6 +9022,16 @@ export class BoxedFunction
             // (`lambdaBroadcast`) lifts a set whole into every cell, so it
             // is not affected.
             unindexedOperandBroadcast(def, tail) !== 'veto')) &&
+        // A necessary condition of `isPostEvalBroadcastOperand`, tested
+        // before `skipBroadcastForVectorOps`: an operand that is not an
+        // indexed collection answers it without its type, and
+        // `skipBroadcastForVectorOps` reads the type of each operand
+        // (`isTextAtom`) for an operator with broadcast exemptions
+        // (`Equal`, `Less`, ...).
+        // A function body evaluates these applications at each call, and
+        // the type of an application in the body is derived again at each
+        // call.
+        tail.some(isBroadcastableCollection) &&
         !skipBroadcastForVectorOps(def, false, tail) &&
         !pointIsOneLegOf(this.operator, tail) &&
         tail.some(isPostEvalBroadcastOperand);
@@ -10503,6 +10513,8 @@ export class BoxedFunction
               !hasSurplusOperands(def, tail) &&
               // A set has no positions (mirrors the sync path).
               unindexedOperandBroadcast(def, tail) !== 'veto')) &&
+          // A necessary condition, tested first (as on the sync path).
+          tail.some(isBroadcastableCollection) &&
           !skipBroadcastForVectorOps(def, false, tail) &&
           !pointIsOneLegOf(this.operator, tail) &&
           tail.some(isPostEvalBroadcastOperand);

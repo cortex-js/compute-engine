@@ -223,16 +223,27 @@ function evaluateChainOperands(
   // (`kindCompare()`), and an undecided comparison keeps the measurement
   // (`Less(2 ± 0.1, x)` stays as written; the nominal it held before lost
   // the uncertainty).
-  if (rawOps.some(isCollectionShaped))
-    return rawOps.map((op) => op.evaluate(evalOptions));
+  //
+  // One or two operands are all evaluated whatever their shape, so the
+  // shape test (a read of the type of each operand) runs only when it
+  // changes the result: for a chain, or for the near-tie test of `.N()`.
+  // A function body such as `n % 2 == 0` evaluates this comparison at each
+  // call, and the type of an application in the body is derived again at
+  // each call.
   if (rawOps.length <= 2) {
+    const nearTieTest =
+      numericApproximation &&
+      rawOps.length === 2 &&
+      !rawOps.some(isCollectionShaped);
     const ops = rawOps.map((op) => op.evaluate(evalOptions));
-    if (numericApproximation && ops.length === 2) {
+    if (nearTieTest) {
       const exact = exactPairAtNearTie(rawOps[0], ops[0], rawOps[1], ops[1]);
       if (exact !== undefined) return exact;
     }
     return ops;
   }
+  if (rawOps.some(isCollectionShaped))
+    return rawOps.map((op) => op.evaluate(evalOptions));
   const ops: Expression[] = [];
   for (let i = 0; i < rawOps.length; i++) {
     const stop = chainStep(
@@ -326,7 +337,9 @@ async function evaluateChainOperandsAsync(
   const inContext = <T>(f: () => T): T =>
     runWithEvaluationEffects(ce, effects, f, _contextStack, _precisionWindow);
   const ops: Expression[] = [];
-  if (rawOps.some(isCollectionShaped) || rawOps.length <= 2) {
+  // The length test first: it makes the shape test unnecessary, as in the
+  // synchronous form.
+  if (rawOps.length <= 2 || rawOps.some(isCollectionShaped)) {
     // A measurement is kept, as in the synchronous form
     // (`evaluateChainOperands`).
     for (const op of rawOps) ops.push(await op.evaluateAsync(options));

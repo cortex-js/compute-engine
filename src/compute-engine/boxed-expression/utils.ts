@@ -119,12 +119,17 @@ export function isDictionary(expr: unknown): expr is DictionaryInterface {
   // `dictionary` excluded absence markers, and testing it made `Declare`
   // fail to recognize exactly such a bag and go inert; the bare name admits
   // them now, and this spelling is kept as it is.)
-  return (
-    expr !== null &&
-    expr !== undefined &&
-    expr instanceof _BoxedExpression &&
-    expr.type.matches(DICTIONARY_SHAPE_TYPE)
-  );
+  if (!(expr instanceof _BoxedExpression)) return false;
+  // A dictionary node is typed `dictionary<T>` or a closed `record{…}` by
+  // construction, and both match `dictionary<any>` for every cell type (an
+  // `error` or `missing` cell included), so the node answers without its
+  // type. That type is derived from the types of the cells, and it is
+  // derived again after each declaration (the type cache keys on the
+  // engine generation): in a function body, `let m = n * 2` is
+  // `Declare(m, {value: n * 2})`, and each call of the function tests its
+  // last operand here.
+  if (expr._kind === 'dictionary') return true;
+  return expr.type.matches(DICTIONARY_SHAPE_TYPE);
 }
 
 export function isExpression(x: unknown): x is Expression {

@@ -1305,7 +1305,12 @@ export function isFiniteBroadcastParticipant(x: Expression): boolean {
  * kernels apply. Only that broadcast arm consults this predicate.
  */
 export function isTupleBroadcastParticipant(x: Expression): boolean {
-  return isTuple(x) && isFiniteIndexedCollection(x);
+  // The collection test first: an application that is not a collection
+  // (`Equal(d(m), n)` in `And(m != n, d(m) == n)`, whose operands a lazy
+  // operator sees unevaluated) answers it without its type, which `isTuple`
+  // reads. The type of an application in a function body is derived again
+  // at each call of the function.
+  return isFiniteIndexedCollection(x) && isTuple(x);
 }
 
 /**
