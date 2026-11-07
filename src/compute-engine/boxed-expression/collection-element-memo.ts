@@ -766,6 +766,40 @@ function snapshotDepsUnderChain(
   const visited = new Map<Expression, Map<object, Set<BoxedValueDefinition>>>();
   const NO_SKIP = {};
   const NO_EXCLUSION: Set<BoxedValueDefinition> = new Set();
+  /** The local scopes of the `Block` nodes the walk is inside, innermost
+   * last (see `isBlockLocalName`). */
+  const blockScopes: Scope[] = [];
+  /** True when `ops[i]` is an operand of `e` that names something and reads
+   * no binding: the target of a `Declare` or an `Assign` that names a local
+   * of an enclosing `Block` (operand 0), and the type of such a `Declare`
+   * when it is written as a symbol (operand 1, `Declare(c, unknown, v)`).
+   * Both are held as raw symbols: the name of the local and the name of a
+   * type, not reads. The statement declares or writes the local in the
+   * scope of the block, and the canonical occurrences of the local in the
+   * block read it, so they are the dependencies (the local itself is
+   * tracked through its definition, as any other symbol). Without this
+   * test, the raw target made the instance ineligible, and a block with
+   * `Declare(c, "unknown", v)`, the form that a block local with a value
+   * must have since language 3.4.4, had no memo entry. A target that no
+   * enclosing block binds can be a write of an outer variable, and stays
+   * ineligible. */
+  const isBlockLocalName = (
+    e: Expression,
+    ops: ReadonlyArray<Expression>,
+    i: number
+  ): boolean => {
+    if (i > 1 || (i === 1 && e.operator !== 'Declare')) return false;
+    if (e.operator !== 'Declare' && e.operator !== 'Assign') return false;
+    const target = ops[0];
+    if (
+      !isSymbol(target) ||
+      target.isCanonical !== false ||
+      !blockScopes.some((scope) => scope.bindings.has(target.symbol))
+    )
+      return false;
+    const op = ops[i];
+    return isSymbol(op) && op.isCanonical === false;
+  };
   const visit = (e: Expression, skipNames?: ReadonlySet<string>): void => {
     if (!eligible) return;
     if (isFunction(e)) {
@@ -884,6 +918,9 @@ function snapshotDepsUnderChain(
     // dependency (see `boundDefsOf`). A binding an enclosing node already
     // excluded stays excluded after this one is left.
     const entered: BoxedValueDefinition[] = [];
+    const blockScope =
+      e.operator === 'Block' ? (e.localScope ?? undefined) : undefined;
+    if (blockScope !== undefined) blockScopes.push(blockScope);
     for (const def of boundDefsOf(e))
       if (!excluded.has(def)) {
         excluded.add(def);
@@ -915,9 +952,12 @@ function snapshotDepsUnderChain(
       // written-out data (a list of numbers and failed cells,
       // `_isLiteralData()`) holds no symbol, so no dependency either.
       if (e._numericStore !== undefined || e._isLiteralData()) return;
-      for (const op of e.ops) visit(op, skipNames);
+      const ops = e.ops;
+      for (let i = 0; i < ops.length; i++)
+        if (!isBlockLocalName(e, ops, i)) visit(ops[i], skipNames);
     } finally {
       for (const def of entered) excluded.delete(def);
+      if (blockScope !== undefined) blockScopes.pop();
     }
   };
   visit(expr);

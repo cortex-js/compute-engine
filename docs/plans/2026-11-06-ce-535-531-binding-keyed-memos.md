@@ -1,10 +1,13 @@
 # Memos keyed on the bindings they read (CE-535, CE-531, CE-321)
 
-Status: approved by the user on 2026-11-06.
+Status: approved by the user on 2026-11-06, then STOPPED the same day (user
+decision (B), §7). No part of it is in the code, except the snapshot rule for
+block locals (§7). Decision 2 (b) of
+`docs/plans/2026-10-30-evaluation-cache-architecture.md` stays in force.
 
 The user chose, on 2026-11-06 in `issues/CE-535.md`, to write one design for
-CE-535 and CE-531. For the memos named in this document, this design replaces
-Decision 2 (option (b), "no key per call now") of
+CE-535 and CE-531. For the memos named in this document, this design was to
+replace Decision 2 (option (b), "no key per call now") of
 `docs/plans/2026-10-30-evaluation-cache-architecture.md`. The caches of each
 node (`_type`, `_sgn`, `_effects`) do not change.
 
@@ -175,3 +178,43 @@ phase 2 S, phase 3 M.
 
 Approve this document, or change it. If it is approved, phase 1 starts. If
 nothing is decided, no code changes, and CE-535 and CE-531 stay open.
+
+## 7. Result (2026-11-06): stopped
+
+Phases 1 and 2 were built in a worktree and measured on the replay of §1;
+nothing of them was applied.
+
+- **The lookup counter of §3 refuses every fill.** In the replay, the fills
+  made about 63 700 lookups by name, nearly all of operator names that occur
+  in the walked body (`Add` 14 885, `Multiply` 14 242, `Ceil` 7 056). The
+  counter moved in all 269 fills, so the second key served none of the 246
+  repeated walks.
+- **A narrower rule needs a record of each read.** The rule that was then
+  built refuses a fill only when it looks up a name that the stamp does not
+  record with the same binding. Each type computation and each memo fill
+  records the names it looks up, and the type cache of each node keeps them
+  with its cell, because a served type hides the reads that made it. With
+  that rule the memo missed 22 times instead of 269, no served entry
+  differed from a new walk (verification mode), and the replay was about
+  11 % faster (median 646 and 654 ms against 723 and 742 ms on the main
+  checkout, load average about 2.7 to 3.0). The 15 % target of phase 2 was
+  not met.
+- **The record is complete only if every lookup by name is recorded.**
+  Recording in `ce.lookupDefinition()` missed the direct callers of
+  `lookup()` (`function-utils.ts`), for example `receiverDefinition()`
+  (`field-callee.ts`), which can run inside a type computation. Recording in
+  the five lookup functions still left 156 direct `.bindings.get(` and 53
+  `.bindings.has(` calls in `src/compute-engine` that were not audited. The
+  diff had grown to about 500 lines in 9 files, plus a new module.
+
+**User decision 2026-11-06 (B):** stop, and close CE-535. CE-531 and CE-321
+return to the board. A new design would need one point that records every
+read of a scope binding (for example a map class for `Scope.bindings` whose
+`get` and `has` record), and its cost on the hottest code is not measured.
+
+**Kept:** the dependency snapshot (`snapshotMemoDeps()`,
+`collection-element-memo.ts`) now accepts a block local declared with a
+value. The target of a `Declare` or `Assign` that an enclosing `Block` binds,
+and the type operand of such a `Declare` written as a symbol, are skipped:
+they name the local and its type and read no binding. Before, such a block
+had no memo entry. Test: `test/compute-engine/element-memo-block-local.test.ts`.
