@@ -115,8 +115,7 @@ const CASES: [string, unknown, unknown, Record<string, string>][] = [
     ['List', ['List', 1, 2], ['List', 3, 4]],
     ['Function', ['List', 'x', 'x'], 'x'],
     {
-      ListFrom:
-        '["List",["List",1,2],["List",1,2],["List",3,4],["List",3,4]]',
+      ListFrom: '["List",["List",1,2],["List",1,2],["List",3,4],["List",3,4]]',
       Count: '4',
       Length: '4',
       Sum: '["List",8,12]',
@@ -146,10 +145,13 @@ describe('consumers of a FlatMap whose finiteness is not known', () => {
       ).toBe(value);
     });
 
-    test.each(Object.entries(expected))('%s, evaluateAsync', async (op, value) => {
-      const json = consumer(op, view);
-      expect(show(await box(json).evaluateAsync())).toBe(value);
-    });
+    test.each(Object.entries(expected))(
+      '%s, evaluateAsync',
+      async (op, value) => {
+        const json = consumer(op, view);
+        expect(show(await box(json).evaluateAsync())).toBe(value);
+      }
+    );
   });
 });
 
@@ -233,16 +235,21 @@ describe('a FlatMap with an inner Filter over an infinite source', () => {
   ];
   describe.each(CASES)('%s', (_label, inner) => {
     const view = ['FlatMap', ['List', 1], ['Function', inner, 'x']];
-    test.each(['Count', 'Length', 'Sum', 'Max', 'ListFrom', 'Reduce', 'IsEmpty'])(
-      '%s stays unevaluated',
-      (op) => {
-        const json = consumer(op, view);
-        expect(limited(() => box(json).evaluate()).operator).toBe(op);
-        expect(
-          limited(() => box(json).evaluate({ materialization: true })).operator
-        ).toBe(op);
-      }
-    );
+    test.each([
+      'Count',
+      'Length',
+      'Sum',
+      'Max',
+      'ListFrom',
+      'Reduce',
+      'IsEmpty',
+    ])('%s stays unevaluated', (op) => {
+      const json = consumer(op, view);
+      expect(limited(() => box(json).evaluate()).operator).toBe(op);
+      expect(
+        limited(() => box(json).evaluate({ materialization: true })).operator
+      ).toBe(op);
+    });
     test('the materialization of the view stays lazy', () => {
       expect(
         limited(() => box(view).evaluate({ materialization: true })).operator
@@ -302,18 +309,22 @@ describe('the callback is applied only to the elements that are read', () => {
   });
 });
 
-// `FlatMap` has no `evaluateAsync` handler: its walk is synchronous, and does
-// not await a callback whose result holds an operator with only an
-// `evaluateAsync` handler. The view then stays lazy. Before, the unevaluated
-// calls were listed as elements: `FlatMap([1, 2], x ↦ slowRange(x))` was
-// `[slowRange(1), slowRange(2)]`, and `Sum` of it under `evaluateAsync()`
-// was `slowRange(1) + slowRange(2)`.
+// The synchronous walk of `FlatMap` does not await a callback whose result
+// holds an operator with only an `evaluateAsync` handler: under `evaluate()`
+// the view stays lazy. Before, the unevaluated calls were listed as
+// elements: `FlatMap([1, 2], x ↦ slowRange(x))` was
+// `[slowRange(1), slowRange(2)]`. The `evaluateAsync` handler of `FlatMap`
+// awaits the callback, so under `evaluateAsync()` the view is listed as
+// `[1, 1, 2]`, and each consumer reads that list.
 describe('a FlatMap whose callback is asynchronous only', () => {
   const engine = new ComputeEngine();
+  let slowCalls = 0;
   engine.declare('slowRange', {
     signature: '(integer) -> list<integer>',
-    evaluateAsync: async (ops, { engine: e }) =>
-      e.function('Range', [e.One, ops[0]]),
+    evaluateAsync: async (ops, { engine: e }) => {
+      slowCalls += 1;
+      return e.function('Range', [e.One, ops[0]]);
+    },
   });
   const view = [
     'FlatMap',
@@ -321,21 +332,35 @@ describe('a FlatMap whose callback is asynchronous only', () => {
     ['Function', ['slowRange', 'x'], 'x'],
   ] as Parameters<typeof engine.box>[0];
 
-  test('the materialization stays lazy', async () => {
-    expect(
-      engine.box(view).evaluate({ materialization: true }).operator
-    ).toBe('FlatMap');
-    expect(
-      (await engine.box(view).evaluateAsync({ materialization: true }))
-        .operator
-    ).toBe('FlatMap');
+  test('the synchronous materialization stays lazy', () => {
+    expect(engine.box(view).evaluate({ materialization: true }).operator).toBe(
+      'FlatMap'
+    );
   });
 
-  test.each(['Sum', 'Reduce', 'ListFrom', 'Count'])(
-    '%s stays unevaluated under evaluateAsync',
-    async (op) => {
+  test('the asynchronous materialization awaits the callback', async () => {
+    slowCalls = 0;
+    expect(
+      show(await engine.box(view).evaluateAsync({ materialization: true }))
+    ).toBe('["List",1,1,2]');
+    expect(slowCalls).toBe(2);
+  });
+
+  test.each([
+    ['Sum', '4'],
+    ['Reduce', '4'],
+    ['ListFrom', '["List",1,1,2]'],
+    ['Count', '3'],
+    ['Max', '2'],
+    ['Min', '1'],
+  ])(
+    '%s stays unevaluated under evaluate, and is %s under evaluateAsync',
+    async (op, expected) => {
       const json = consumer(op, view) as Parameters<typeof engine.box>[0];
-      expect((await engine.box(json).evaluateAsync()).operator).toBe(op);
+      expect(engine.box(json).evaluate().operator).toBe(op);
+      slowCalls = 0;
+      expect(show(await engine.box(json).evaluateAsync())).toBe(expected);
+      expect(slowCalls).toBe(2);
     }
   );
 });
@@ -357,7 +382,9 @@ describe('a FlatMap whose callback symbol holds an error value', () => {
       const value = engine.box(json).evaluate();
       expect(value.operator).toBe('Error');
       expect(JSON.stringify(value.json)).toContain(LN_ERROR);
-      expect(JSON.stringify(value.json)).toContain(`["ErrorFrame","'${op}'",1]`);
+      expect(JSON.stringify(value.json)).toContain(
+        `["ErrorFrame","'${op}'",1]`
+      );
       const asyncValue = await engine.box(json).evaluateAsync();
       expect(asyncValue.operator).toBe('Error');
       expect(JSON.stringify(asyncValue.json)).toContain(LN_ERROR);
@@ -372,7 +399,12 @@ test('async Reduce over a listed FlatMap reads a reducer local to a Block', asyn
   const block = ce.box([
     'Block',
     ['Assign', 'f', ['Function', ['Add', 'a', 'b'], 'a', 'b']],
-    ['Reduce', ['FlatMap', SOURCE, ['Function', ['Range', 1, 'x'], 'x']], 'f', 0],
+    [
+      'Reduce',
+      ['FlatMap', SOURCE, ['Function', ['Range', 1, 'x'], 'x']],
+      'f',
+      0,
+    ],
   ]);
   expect(show(block.evaluate())).toBe('4');
   expect(show(await block.evaluateAsync())).toBe('4');
@@ -394,12 +426,11 @@ describe('a FlatMap whose inner result maps an asynchronous-only symbol', () => 
   ] as Parameters<typeof engine.box>[0];
 
   test('the materialization stays lazy', async () => {
+    expect(engine.box(view).evaluate({ materialization: true }).operator).toBe(
+      'FlatMap'
+    );
     expect(
-      engine.box(view).evaluate({ materialization: true }).operator
-    ).toBe('FlatMap');
-    expect(
-      (await engine.box(view).evaluateAsync({ materialization: true }))
-        .operator
+      (await engine.box(view).evaluateAsync({ materialization: true })).operator
     ).toBe('FlatMap');
   });
 

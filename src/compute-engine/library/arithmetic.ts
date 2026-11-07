@@ -33,7 +33,11 @@ import {
   evidenceAdmissionOf,
   heldNonNumericScalar,
 } from '../boxed-expression/value-membership.js';
-import { hasAsyncOnlyApplication } from '../boxed-expression/async-only-descendants.js';
+import {
+  appliesAsyncOnlyOperator,
+  hasAsyncOnlyApplication,
+} from '../boxed-expression/async-only-descendants.js';
+import { withCallableBinding } from '../boxed-expression/binders.js';
 import {
   bignumPreferred,
   boxBignumResult,
@@ -483,6 +487,7 @@ import {
   isAbsentSymbol,
   isAbsentArithmeticOperand,
   kindValueIsNaN,
+  isExpression,
 } from '../boxed-expression/type-guards.js';
 import {
   isElementwiseWhich,
@@ -524,7 +529,11 @@ import { signFromAssumedPart } from './complex.js';
 import { complexParts } from './complex-parts.js';
 import { guardDigitsN } from './exact-operands-under-n.js';
 import { isShadowedSymbol } from '../library-shadowing.js';
-import { MeasuredWalk } from '../boxed-expression/incomplete-walks.js';
+import {
+  MeasuredWalk,
+  failedWalkErrorSince,
+  incompleteWalkCount,
+} from '../boxed-expression/incomplete-walks.js';
 
 // When processing an arithmetic expression, the following are the core
 // canonical arithmetic operations to account for:
@@ -13744,6 +13753,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Max'),
+      evaluateAsync: (xs, options) => evaluateMinMaxAsync(xs, options, 'Max'),
     },
 
     Min: {
@@ -13779,6 +13789,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Min'),
+      evaluateAsync: (xs, options) => evaluateMinMaxAsync(xs, options, 'Min'),
     },
 
     // Element-wise binary max/min (the NumPy `maximum`/`minimum` primitive).
@@ -13985,6 +13996,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Supremum'),
+      evaluateAsync: (xs, options) =>
+        evaluateMinMaxAsync(xs, options, 'Supremum'),
     },
 
     Infimum: {
@@ -14002,6 +14015,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Infimum'),
+      evaluateAsync: (xs, options) =>
+        evaluateMinMaxAsync(xs, options, 'Infimum'),
     },
 
     Distance: {
@@ -16894,11 +16909,64 @@ function kindExtremumType(
   return types.length === 1 ? types[0] : reduceType({ kind: 'union', types });
 }
 
+/** The value of `Min`, `Max`, `Supremum` or `Infimum` (`mode`) of the
+ * operands `ops`, on the synchronous route ({@link minMaxSteps}). */
 function evaluateMinMax(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
   mode: 'Min' | 'Max' | 'Supremum' | 'Infimum'
 ): Expression {
+  // Without `listAsync`, the walk yields nothing, and its first step is its
+  // end.
+  const step = minMaxSteps(ce, ops, mode, undefined).next();
+  if (!step.done)
+    throw new Error('The synchronous walk of an extremum yielded');
+  return step.value ?? ce._fn(mode, flatten(ops));
+}
+
+/**
+ * The listing of a `FlatMap` operand of an extremum on the asynchronous
+ * route: the promise of `listedFlatMapViewAsync()`, or `undefined` when that
+ * function does not list the operand.
+ */
+type ExtremumListing = (
+  operand: Expression
+) => Promise<Expression | undefined> | undefined;
+
+/**
+ * The walk of `Min`, `Max`, `Supremum` or `Infimum` (`mode`) over the
+ * operands `ops`. It ends with the value, or with `undefined` when the
+ * operator stays unevaluated.
+ *
+ * On the synchronous route (`listAsync` is `undefined`), the walk yields
+ * nothing and never ends with `undefined`. On the asynchronous route,
+ * `listAsync` lists a `FlatMap` operand with its callback awaited, and the
+ * walk yields the promise of that listing at the position of the operand, so
+ * that the callbacks of the operands run in the order of the operands, as on
+ * the synchronous route. The driver (`evaluateMinMaxAsync()`) gives back the
+ * settled listing. An operand that `listAsync` walked is not listed again
+ * by `listedFlatMapView()`, so that its callback is not applied a second
+ * time.
+ *
+ * On the asynchronous route, a `FlatMap` operand whose walk applies an
+ * operator with only an `evaluateAsync` handler (`appliesAsyncOnlyOperator()`)
+ * and that is not listed (its source applies such an operator, the list has
+ * more than `maxCollectionSize` elements, or an awaited inner result still
+ * applies one) makes the walk end with `undefined`: the synchronous read of
+ * its elements would give the unevaluated calls, and a wrong value when the
+ * callback reads them (`x ↦ [Length(String(slowF(x)))]` is the length of the
+ * string "slowF(1)").
+ */
+function* minMaxSteps(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  mode: 'Min' | 'Max' | 'Supremum' | 'Infimum',
+  listAsync: ExtremumListing | undefined
+): Generator<
+  Promise<Expression | undefined>,
+  Expression | undefined,
+  Expression | undefined
+> {
   const upper = mode === 'Max' || mode === 'Supremum';
 
   // The rule for an aggregate that consumes data: a `Missing` datum (as an
@@ -16921,7 +16989,19 @@ function evaluateMinMax(
     // evaluation of the view is the answer. The operands were flattened, so
     // the position of `operand` in the call as written is not known, and no
     // frame is added.
-    const listed = listedFlatMapView(operand);
+    let listed: Expression | undefined;
+    if (listAsync === undefined) listed = listedFlatMapView(operand);
+    else {
+      const pending = listAsync(operand);
+      if (pending !== undefined) listed = yield pending;
+      if (
+        listed === undefined &&
+        isFunction(operand, 'FlatMap') &&
+        appliesAsyncOnlyOperator(operand)
+      )
+        return undefined;
+      if (pending === undefined) listed = listedFlatMapView(operand);
+    }
     if (listed !== undefined && !isFunction(listed, 'List')) {
       if (!isInfiniteListing(listed)) return listed;
     }
@@ -16963,6 +17043,98 @@ function evaluateMinMax(
   // function just performed.
   if (result === undefined) return ce.NaN;
   return result;
+}
+
+/**
+ * The asynchronous form of {@link evaluateMinMax}: the walk of
+ * {@link minMaxSteps}, where each `FlatMap` operand that
+ * `listedFlatMapViewAsync()` lists is walked with its callback awaited, at
+ * its position among the operands, so that an operator in the callback that
+ * has only an `evaluateAsync` handler is evaluated:
+ * `Max(FlatMap([1, 2], x ↦ [x, slowF(x)]))` is `20` when `slowF(x)` is
+ * `10x`. The synchronous walk read the elements with `each()`, which does
+ * not await the callback, and the answer was `max(2, slowF(1), slowF(2))`.
+ * Each synchronous step of the walk runs in the registry, the context stack
+ * and the precision window of this evaluation.
+ *
+ * The asynchronous route does not measure the walks of an `evaluateAsync`
+ * handler, as it does for a synchronous handler (`walksMeasuredBy()`,
+ * `boxed-function.ts`). So this handler measures each synchronous step of
+ * the walk, where no other evaluation can run, never across an `await`
+ * (`incomplete-walks.ts`). When a walk in a step missed elements, the answer
+ * is the error of a walk that failed (`failedWalkErrorSince()`), or else the
+ * operator stays unevaluated: `Max(Take(FlatMap([1, 2], x ↦ Join([x], v)),
+ * 3))` with a valueless `v` is not `2`.
+ *
+ * The operator stays unevaluated with the answer `Max(…)` over the
+ * operands, not with `undefined`: the route calls a handler that answers
+ * `undefined` a second time over its listed views
+ * (`evaluateAsyncOverListedFlatMaps()`, `boxed-function.ts`), and that call
+ * would walk the views that were not listed again and apply their callbacks
+ * a second time. The synchronous route does not call the handler again after
+ * a walk that missed elements either. The answer is built as the route
+ * builds it for a handler that answers `undefined`: in the context of this
+ * evaluation, and bound to the definition that the call is bound to
+ * (`withCallableBinding()`), not to a definition of the same name declared
+ * in a scope that is current when the walk ends.
+ *
+ * This handler is never called a second time, so its listings are not kept
+ * for a second call (`ListingMemo`, `collection-utils.ts`).
+ */
+async function evaluateMinMaxAsync(
+  ops: ReadonlyArray<Expression>,
+  options: EvaluateHandlerOptions,
+  mode: 'Min' | 'Max' | 'Supremum' | 'Infimum'
+): Promise<Expression> {
+  const { engine, signal, effects, _contextStack, _precisionWindow } = options;
+  const flat = flatten(ops);
+  const steps = minMaxSteps(engine, flat, mode, (operand) =>
+    listedFlatMapViewAsync(operand, {
+      signal,
+      _effects: effects,
+      _contextStack,
+      _precisionWindow,
+    })
+  );
+  let missedElements = false;
+  let failure: Expression | undefined;
+  let received: Expression | undefined;
+  for (;;) {
+    const step = runWithEvaluationEffects(
+      engine,
+      effects,
+      () => {
+        const walksBefore = incompleteWalkCount();
+        const result = steps.next(received);
+        if (incompleteWalkCount() !== walksBefore) {
+          missedElements = true;
+          const error = failedWalkErrorSince(walksBefore);
+          if (failure === undefined && isExpression(error)) failure = error;
+        }
+        return result;
+      },
+      _contextStack,
+      _precisionWindow
+    );
+    if (step.done) {
+      if (!missedElements && step.value !== undefined) return step.value;
+      if (failure !== undefined) return failure;
+      const call = options.expression;
+      return runWithEvaluationEffects(
+        engine,
+        effects,
+        () =>
+          call === undefined
+            ? engine.function(mode, ops)
+            : withCallableBinding(call, () =>
+                engine.function(call.operator, ops)
+              ),
+        _contextStack,
+        _precisionWindow
+      );
+    }
+    received = await step.value;
+  }
 }
 
 /**

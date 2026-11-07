@@ -4,9 +4,11 @@ import type { Expression } from '../../src/compute-engine';
 // A `FlatMap` over a finite source whose finiteness is not known (the
 // callback result is typed as a list of unknown length) is counted and
 // listed by one walk of the view (`listedFlatMapView()`,
-// `collection-utils.ts`). The walk is synchronous, so the listing declines
-// when the walk applies an operator that has only an `evaluateAsync`
-// handler. Before, it also declined when the callback held such an operator
+// `collection-utils.ts`). The synchronous walk declines when the walk
+// applies an operator that has only an `evaluateAsync` handler; under
+// `evaluateAsync()` the walk awaits the callback, and lists the view when
+// only the callback applies such an operator. Before, the synchronous walk
+// also declined when the callback held such an operator
 // as data: in `x ↦ [x, slowF]` the symbol `slowF` is one element, and it is
 // not applied. `Count(FlatMap([1, 2], x ↦ [x, slowF]))` stayed unevaluated
 // under `evaluate()` and `evaluateAsync()`, although the materialization of
@@ -42,12 +44,15 @@ describe('a FlatMap whose callback gives an asynchronous-only symbol as data', (
     ['Count', '4'],
     ['Length', '4'],
     ['ListFrom', '["List",1,"slowF",2,"slowF"]'],
-  ])('%s lists the view under evaluate and evaluateAsync', async (op, expected) => {
-    expect(show(engine.box([op, DATA_VIEW]).evaluate())).toBe(expected);
-    expect(show(await engine.box([op, DATA_VIEW]).evaluateAsync())).toBe(
-      expected
-    );
-  });
+  ])(
+    '%s lists the view under evaluate and evaluateAsync',
+    async (op, expected) => {
+      expect(show(engine.box([op, DATA_VIEW]).evaluate())).toBe(expected);
+      expect(show(await engine.box([op, DATA_VIEW]).evaluateAsync())).toBe(
+        expected
+      );
+    }
+  );
 
   test('a symbol as data in one branch of an If is listed', async () => {
     const view: Json = [
@@ -64,17 +69,28 @@ describe('a FlatMap whose callback gives an asynchronous-only symbol as data', (
   });
 });
 
-// The views whose walk applies an asynchronous-only operator still decline:
-// the synchronous walk cannot run it, so the elements are not known.
+// The views whose walk applies an asynchronous-only operator decline on the
+// synchronous route: the synchronous walk cannot run it, so the elements are
+// not known. Under `evaluateAsync()`, the walk of `FlatMap` awaits its
+// callback, so a callback that applies the operator is listed. A callback
+// result that is itself a view (`Map(slowF, Range(1, x))`) has elements that
+// are computed synchronously when they are read: that view still declines on
+// both routes.
 describe('a FlatMap whose walk applies an asynchronous-only operator', () => {
   test.each([
     ['an application in the callback', ['Function', ['slowRange', 'x'], 'x']],
     ['the callback given by name', 'slowRange'],
-    [
-      'a symbol at the callback parameter of Map',
-      ['Function', ['Map', 'slowF', ['Range', 1, 'x']], 'x'],
-    ],
-  ] as [string, Json][])('%s: Count stays unevaluated', async (_, fn) => {
+  ] as [string, Json][])(
+    '%s: Count stays unevaluated, and is 3 under evaluateAsync',
+    async (_, fn) => {
+      const json: Json = ['Count', ['FlatMap', ['List', 1, 2], fn]];
+      expect(engine.box(json).evaluate().operator).toBe('Count');
+      expect(show(await engine.box(json).evaluateAsync())).toBe('3');
+    }
+  );
+
+  test('a symbol at the callback parameter of Map: Count stays unevaluated', async () => {
+    const fn: Json = ['Function', ['Map', 'slowF', ['Range', 1, 'x']], 'x'];
     const json: Json = ['Count', ['FlatMap', ['List', 1, 2], fn]];
     expect(engine.box(json).evaluate().operator).toBe('Count');
     expect((await engine.box(json).evaluateAsync()).operator).toBe('Count');
@@ -145,23 +161,34 @@ describe('a symbol at an operand position that can apply it', () => {
   ce.declare('alias', 'function');
   ce.assign('alias', ce.box('slowF'));
 
-  test.each([
-    [
-      'the comparator of Sort',
+  // The callback result is the value of `Sort`, a list: under
+  // `evaluateAsync()` the walk of `FlatMap` awaits the callback, and `Sort`
+  // awaits its comparator.
+  test('the comparator of Sort', async () => {
+    const json: Json = [
+      'ListFrom',
       [
-        'ListFrom',
-        [
-          'FlatMap',
-          ['List', 1, 2],
-          ['Function', ['Sort', ['List', 'x', 3, 1], 'slowLess'], 'x'],
-        ],
+        'FlatMap',
+        ['List', 1, 2],
+        ['Function', ['Sort', ['List', 'x', 3, 1], 'slowLess'], 'x'],
       ],
-    ],
+    ];
+    expect(ce.box(json).evaluate().operator).toBe('ListFrom');
+    expect(show(await ce.box(json).evaluateAsync())).toBe(
+      '["List",1,1,3,1,2,3]'
+    );
+  });
+
+  test.each([
     [
       'the generator of Tabulate',
       [
         'Sum',
-        ['FlatMap', ['List', 1, 2], ['Function', ['Tabulate', 'slowF', 'x'], 'x']],
+        [
+          'FlatMap',
+          ['List', 1, 2],
+          ['Function', ['Tabulate', 'slowF', 'x'], 'x'],
+        ],
       ],
     ],
     [
@@ -198,10 +225,14 @@ describe('a symbol at an operand position that can apply it', () => {
 // callback, which `FlatMap` applies. The body of `mk` is not the body of the
 // callback, so `slowEmpty` there is not data. `slowEmpty` gives `[]`, so the
 // view is empty: a walk that read `slowEmpty(1)` unevaluated as one element
-// gave `IsEmpty` as `False`.
-test.each(['IsEmpty', 'Count'])(
-  '%s of a FlatMap whose callback is an application stays unevaluated',
-  async (op) => {
+// gave `IsEmpty` as `False`. Under `evaluateAsync()` the walk of `FlatMap`
+// awaits the callback, and the view is listed as empty.
+test.each([
+  ['IsEmpty', '"True"'],
+  ['Count', '0'],
+])(
+  '%s of a FlatMap whose callback is an application stays unevaluated, and is %s under evaluateAsync',
+  async (op, expected) => {
     const ce = new ComputeEngine();
     ce.declare('slowEmpty', {
       signature: '(integer) -> list<integer>',
@@ -211,6 +242,6 @@ test.each(['IsEmpty', 'Count'])(
     ce.assign('mk', ce.box(['Function', 'slowEmpty', 'n']));
     const json: Json = [op, ['FlatMap', ['List', 1], ['mk', 0]]];
     expect(ce.box(json).evaluate().operator).toBe(op);
-    expect((await ce.box(json).evaluateAsync()).operator).toBe(op);
+    expect(show(await ce.box(json).evaluateAsync())).toBe(expected);
   }
 );

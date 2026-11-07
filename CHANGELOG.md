@@ -87,6 +87,22 @@
 
 ### Resolved Issues
 
+- **Under `evaluateAsync()`, `FlatMap` awaits its callback, and `Max`, `Min`,
+  `Supremum`, `Infimum` and `Sum` of a `FlatMap` read the awaited
+  elements.** With `slowF` an operator that has only an `evaluateAsync`
+  handler and gives `10x`, `await ce.box(["Max", ["FlatMap", ["List", 1, 2],
+  ["Function", ["List", "x", ["slowF", "x"]], "x"]]]).evaluateAsync()` gave
+  `max(2, slowF(1), slowF(2))`, and it now gives `20`; `Min` gives `1` and
+  `Sum` gives `33`. `evaluateAsync({ materialization: true })` of the
+  `FlatMap` now gives `[1, 10, 2, 20]`. When the callback gives a list of a
+  length that is not known from such an operator (`x ↦ slowRange(x)`),
+  `Count`, `Reduce` and `ListFrom` of the `FlatMap` read the awaited elements
+  too: `Count` of it stayed unevaluated, and it now gives the count.
+  `evaluate()` is not changed. `ListFrom` of the first `FlatMap` above still
+  gives the unevaluated calls. `Max`, `Min`, `Supremum` and `Infimum` of a
+  `FlatMap` whose source is a `Map` or another lazy view that applies such an
+  operator stay unevaluated.
+
 - **The type of a call of a function that a block defines with an assignment
   or a `let` no longer claims a list for a list argument.** The type of
   `["Block", ["Assign", "f", ["Function", ["Count", "t"], "t"]], ["f", ["List", ["List", 0, 0], 5]]]`

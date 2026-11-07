@@ -3,6 +3,7 @@ import { registerProvedAbsentDomain } from '../boxed-expression/proved-absent-do
 import { beginStoreGuard } from '../boxed-expression/store-guard.js';
 import {
   appliesAsyncOnlyOperator,
+  awaitAsyncOnlyDescendants,
   hasAsyncOnlyApplication,
 } from '../boxed-expression/async-only-descendants.js';
 import { callableBindingInContext } from '../boxed-expression/binders.js';
@@ -16045,115 +16046,36 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!fn) return null;
       return engine._fn('FlatMap', [collection, fn]);
     },
-    evaluate: (ops, { engine, materialization }) => {
-      if (!materialization) return undefined;
-      const expr = engine._fn('FlatMap', ops);
-      // Only materialize when the source is finite; an infinite source stays
-      // lazy (consumers can still bound it with Take).
-      if (!isWalkableFiniteCollection(ops[0])) return undefined;
-      // A finite source is not enough: the callback can return an infinite
-      // collection (`FlatMap([1, 2], n => Range(1, Infinity))`), and splicing
-      // it never ends. So each inner result is checked before it is walked.
-      // The splice rule is the one of the `iterator` handler below: a
-      // collection result other than a string is spliced, anything else is
-      // one element.
-      // - An inner result that is provably infinite cannot be materialized.
-      //   A full materialization (`materialization: true`) stops with the
-      //   `out-of-range` error "a finite collection" that `RandomShuffle`
-      //   and `RandomSample` give for an infinite collection. A bounded
-      //   request (a number or a pair, which includes the display preview of
-      //   `toString()` and `latex`) leaves the view lazy, so that the
-      //   expression prints as written instead of as an error.
-      // - An inner result whose finiteness is not known (a nested `FlatMap`,
-      //   a `Filter` over an infinite source) is walked, but the whole result
-      //   is bounded by `maxCollectionSize`: past it, the view stays lazy, as
-      //   a finite collection larger than that size does in the generic
-      //   materialization.
-      // The view itself is unchanged: a read of a prefix (`At(…, 3)`,
-      // `First`) walks the first inner collection lazily and stays valid.
-      const f = applicable(ops[1]);
-      const cap = engine.maxCollectionSize;
-      const xs: Expression[] = [];
-      // A walk of the source or of an inner result can itself meet an inner
-      // collection that cannot be walked, although the result reports that
-      // it can be walked: `FlatMap([1], x ↦ FlatMap([x], y ↦ Join([y], v)))`
-      // with a valueless `v` listed `[1]`. Such a walk records an incomplete
-      // walk (`noteIncompleteWalk()`), and the view then stays lazy.
-      const walksBefore = incompleteWalkCount();
-      for (const value of ops[0].each()) {
-        const mapped = f([value]) ?? absenceMarker(engine, expr);
-        // An inner result that cannot be walked now (`Join([x], v)` with a
-        // valueless `v`, or a symbol of a list type with no value) has
-        // elements that are not known: the view stays lazy. Before, the
-        // splice read it as empty, or kept the symbol as one element, and
-        // the list had the wrong elements.
-        if (innerCollectionCannotBeWalked(mapped)) return undefined;
-        // This walk is synchronous, also under `evaluateAsync()`: `FlatMap`
-        // has no `evaluateAsync` handler. A result that holds an operator
-        // with only an `evaluateAsync` handler (`x ↦ slowRange(x)`) is not
-        // evaluated by it, so the elements are not known: the view stays
-        // lazy. Before, the unevaluated call was one element, and
-        // `FlatMap([1, 2], x ↦ slowRange(x))` listed `[slowRange(1),
-        // slowRange(2)]`.
-        // A symbol at the callback parameter of an operator in the result
-        // (`x ↦ Map(slowF, Range(1, x))`) is applied too
-        // (`appliesAsyncOnlyOperator`). A symbol in the result as data
-        // (`x ↦ (x, slowF)`) is not applied, and is one element.
-        if (appliesAsyncOnlyOperator(mapped)) return undefined;
-        // A `Filter` over a provably infinite source can be finite
-        // (`Filter(Range(1, ∞), y ↦ y < 3)`), but its walk never ends: it
-        // stops only at `maxCollectionSize` or at the iteration limit of
-        // `Filter`, and then the view stays lazy. The view stays lazy at
-        // once, so that the walk is not done on every evaluation. (A
-        // `FlatMap` over an infinite source is infinite by its `isFinite`
-        // handler, and is the error below.)
-        if (
-          isFunction(mapped, 'Filter') &&
-          mapped.op1.isFiniteCollection === false
-        )
-          return undefined;
-        if (!mapped.isCollection || isString(mapped)) {
-          xs.push(mapped);
-        } else {
-          if (mapped.isFiniteCollection === false) {
-            if (materialization !== true) return undefined;
-            // The error is recorded (`markInfiniteListing`), so that a
-            // consumer that lists the view (`listedFlatMapView`) can tell it
-            // from another error: it proves that the view is infinite.
-            return markInfiniteListing(
-              withErrorFrames(
-                engine.error([
-                  'out-of-range',
-                  'a finite collection',
-                  mapped.toString(),
-                ]),
-                [{ operator: 'FlatMap', index: 2 }]
-              )
-            );
-          }
-          // The walk of an inner `Filter` with a long run of rejected
-          // elements stops with the `iteration-limit-exceeded` cancellation
-          // (`Filter(Filter(Range(1, ∞), y ↦ y > 0), y ↦ y < 0)`): the view
-          // then stays lazy, as the `Filter` itself does. The cancellation
-          // escaped to the caller of `evaluate()`.
-          try {
-            for (const x of mapped.each()) {
-              if (xs.length >= cap) return undefined;
-              xs.push(x);
-            }
-          } catch (e) {
-            if (
-              e instanceof CancellationError &&
-              e.cause === 'iteration-limit-exceeded'
-            )
-              return undefined;
-            throw e;
-          }
-        }
-        if (xs.length > cap) return undefined;
-      }
-      if (incompleteWalkCount() !== walksBefore) return undefined;
-      return engine._fn('List', xs);
+    // The list of the elements, when `materialization` is set
+    // (`flatMapListingWalk`).
+    evaluate: (ops, { engine, materialization }) =>
+      runUnyielding(
+        flatMapListingWalk(ops, engine, materialization, undefined)
+      ),
+    // The same walk, with the callback awaited (`asyncCallbackRoute`), so
+    // that an operator in the callback that has only an `evaluateAsync`
+    // handler is evaluated: `FlatMap([1, 2], x ↦ [x, slowF(x)])` lists
+    // `[1, 10, 2, 20]` when `slowF(x)` is `10x`.
+    // The operands are held (`FlatMap` is `lazy`), and the route awaits the
+    // asynchronous-only applications in the held operands of a lazy operator
+    // only when it has no `evaluateAsync` handler. So they are awaited here,
+    // before the walk: `FlatMap([slowF(1)], x ↦ [String(x)])` lists
+    // `["10"]`, not the string of the unevaluated call. The callback is a
+    // function literal, which `awaitAsyncOnlyDescendants()` does not enter.
+    evaluateAsync: async (ops, options) => {
+      if (!options.materialization) return undefined;
+      const held = options.engine._hasAsyncOnlyOperator
+        ? await awaitAsyncOnlyDescendants(ops, awaitedOperandOptions(options))
+        : ops;
+      return runWalkAsync(
+        flatMapListingWalk(
+          held,
+          options.engine,
+          options.materialization,
+          asyncCallbackRoute(options)
+        ),
+        options
+      );
     },
     collection: {
       isEnumerable: enumerableFromSource,
@@ -22933,6 +22855,173 @@ function* applyCallback(
   const result = f(args, route);
   if (isThenable(result)) return (yield result) as Expression | undefined;
   return result;
+}
+
+/**
+ * The walk of the `evaluate` and `evaluateAsync` handlers of `FlatMap` over
+ * `ops`, the source and the callback: the `List` of the elements of the
+ * view when `materialization` is set, or `undefined` when the view stays
+ * lazy. On the asynchronous route (`route`, see `CallbackRoute`), the
+ * callback is applied with `evaluateAsync()` and awaited, so that an
+ * operator in it that has only an `evaluateAsync` handler is evaluated.
+ *
+ * Only a finite source is walked: an infinite source stays lazy (consumers
+ * can still bound it with `Take`). A finite source is not enough: the
+ * callback can return an infinite collection
+ * (`FlatMap([1, 2], n ↦ Range(1, ∞))`), and splicing it never ends. So each
+ * inner result is checked before it is walked. The splice rule is the one of
+ * the `iterator` handler of `FlatMap`: a collection result other than a
+ * string is spliced, anything else is one element.
+ * - An inner result that is provably infinite cannot be materialized. A full
+ *   materialization (`materialization: true`) stops with the `out-of-range`
+ *   error "a finite collection" that `RandomShuffle` and `RandomSample` give
+ *   for an infinite collection. A bounded request (a number or a pair, which
+ *   includes the display preview of `toString()` and `latex`) leaves the
+ *   view lazy, so that the expression prints as written instead of as an
+ *   error.
+ * - An inner result whose finiteness is not known (a nested `FlatMap`, a
+ *   `Filter` over an infinite source) is walked, but the whole result is
+ *   bounded by `maxCollectionSize`: past it, the view stays lazy, as a
+ *   finite collection larger than that size does in the generic
+ *   materialization.
+ * The view itself is unchanged: a read of a prefix (`At(…, 3)`, `First`)
+ * walks the first inner collection lazily and stays valid.
+ *
+ * Only the callback is awaited. The elements of the source and of each
+ * inner result are read with the synchronous `each()`. So, on the
+ * asynchronous route, the view stays lazy when the source, or an awaited
+ * inner result, still applies an operator that has only an `evaluateAsync`
+ * handler (`appliesAsyncOnlyOperator()`): the synchronous read would give
+ * its unevaluated calls as elements.
+ *
+ * The count of incomplete walks (`incompleteWalkCount()`) is read around
+ * each synchronous step of the walk, never across an `await`, because
+ * another evaluation can change it during an `await`. A walk made by the
+ * callback after its own first `await` is therefore not seen; the
+ * synchronous route sees every walk of the callback.
+ */
+function* flatMapListingWalk(
+  ops: ReadonlyArray<Expression>,
+  engine: ComputeEngine,
+  materialization: EvaluateHandlerOptions['materialization'],
+  route: CallbackRoute
+): Generator<PromiseLike<unknown>, Expression | undefined, unknown> {
+  if (!materialization) return undefined;
+  const expr = engine._fn('FlatMap', ops);
+  if (!isWalkableFiniteCollection(ops[0])) return undefined;
+  // On the asynchronous route the elements of the source are still read
+  // synchronously: a source such as `Map(slowF, [1, 2])` would give the
+  // callback `slowF(1)` unevaluated, and `x ↦ String(x)` would make the
+  // string "slowF(1)" of it.
+  if (route !== undefined && appliesAsyncOnlyOperator(ops[0])) return undefined;
+  const f = applicable(ops[1]);
+  const cap = engine.maxCollectionSize;
+  // On the asynchronous route, a source with more elements than the cap,
+  // whose callback applies an operator with only an `evaluateAsync`
+  // handler, stays lazy before the first application. A walk that stops at
+  // the cap discards the awaited results, and the generic materialization
+  // of the view that follows applies the callback again to the elements it
+  // reads, so a host operator with effects would run twice for them. A
+  // source within the cap whose inner results go past it still has that
+  // limit.
+  if (route !== undefined) {
+    const n = ops[0].count;
+    if (n !== undefined && n > cap && appliesAsyncOnlyOperator(expr))
+      return undefined;
+  }
+  const xs: Expression[] = [];
+  // A walk of the source or of an inner result can itself meet an inner
+  // collection that cannot be walked, although the result reports that it
+  // can be walked: `FlatMap([1], x ↦ FlatMap([x], y ↦ Join([y], v)))` with a
+  // valueless `v` listed `[1]`. Such a walk records an incomplete walk
+  // (`noteIncompleteWalk()`), and the view then stays lazy. `mark` is the
+  // count at the start of the current synchronous step.
+  let mark = incompleteWalkCount();
+  for (const value of ops[0].each()) {
+    // On the asynchronous route, a pull that missed elements stops the walk
+    // before the callback starts. A callback that started an asynchronous
+    // application is always awaited, so that it does not run on after the
+    // evaluation ended, and a rejection of it is handled. The synchronous
+    // route reads the count after the application, as it always did.
+    if (route !== undefined && incompleteWalkCount() !== mark) return undefined;
+    let applied = f([value], route);
+    if (isThenable(applied)) {
+      const missedElements = incompleteWalkCount() !== mark;
+      applied = (yield applied) as Expression | undefined;
+      if (missedElements) return undefined;
+      mark = incompleteWalkCount();
+    }
+    const mapped = applied ?? absenceMarker(engine, expr);
+    // An inner result that cannot be walked now (`Join([x], v)` with a
+    // valueless `v`, or a symbol of a list type with no value) has elements
+    // that are not known: the view stays lazy. Before, the splice read it as
+    // empty, or kept the symbol as one element, and the list had the wrong
+    // elements.
+    if (innerCollectionCannotBeWalked(mapped)) return undefined;
+    // A result that holds an operator with only an `evaluateAsync` handler
+    // was not evaluated by it: on the synchronous route, or on the
+    // asynchronous route when the application did not await (a free symbol
+    // in an argument, a recursive callback), or when the result is a view
+    // whose elements are computed when they are read
+    // (`x ↦ Map(slowF, Range(1, x))`). Its elements are then not known, and
+    // the view stays lazy. Before, the unevaluated call was one element, and
+    // `FlatMap([1, 2], x ↦ slowRange(x))` listed
+    // `[slowRange(1), slowRange(2)]`.
+    // A symbol at the callback parameter of an operator in the result
+    // (`x ↦ Map(slowF, Range(1, x))`) is applied too
+    // (`appliesAsyncOnlyOperator`). A symbol in the result as data
+    // (`x ↦ (x, slowF)`) is not applied, and is one element.
+    if (appliesAsyncOnlyOperator(mapped)) return undefined;
+    // A `Filter` over a provably infinite source can be finite
+    // (`Filter(Range(1, ∞), y ↦ y < 3)`), but its walk never ends: it stops
+    // only at `maxCollectionSize` or at the iteration limit of `Filter`, and
+    // then the view stays lazy. The view stays lazy at once, so that the
+    // walk is not done on every evaluation. (A `FlatMap` over an infinite
+    // source is infinite by its `isFinite` handler, and is the error below.)
+    if (isFunction(mapped, 'Filter') && mapped.op1.isFiniteCollection === false)
+      return undefined;
+    if (!mapped.isCollection || isString(mapped)) {
+      xs.push(mapped);
+    } else {
+      if (mapped.isFiniteCollection === false) {
+        if (materialization !== true) return undefined;
+        // The error is recorded (`markInfiniteListing`), so that a consumer
+        // that lists the view (`listedFlatMapView`) can tell it from another
+        // error: it proves that the view is infinite.
+        return markInfiniteListing(
+          withErrorFrames(
+            engine.error([
+              'out-of-range',
+              'a finite collection',
+              mapped.toString(),
+            ]),
+            [{ operator: 'FlatMap', index: 2 }]
+          )
+        );
+      }
+      // The walk of an inner `Filter` with a long run of rejected elements
+      // stops with the `iteration-limit-exceeded` cancellation
+      // (`Filter(Filter(Range(1, ∞), y ↦ y > 0), y ↦ y < 0)`): the view then
+      // stays lazy, as the `Filter` itself does. The cancellation escaped to
+      // the caller of `evaluate()`.
+      try {
+        for (const x of mapped.each()) {
+          if (xs.length >= cap) return undefined;
+          xs.push(x);
+        }
+      } catch (e) {
+        if (
+          e instanceof CancellationError &&
+          e.cause === 'iteration-limit-exceeded'
+        )
+          return undefined;
+        throw e;
+      }
+    }
+    if (xs.length > cap) return undefined;
+  }
+  if (incompleteWalkCount() !== mark) return undefined;
+  return engine._fn('List', xs);
 }
 
 /**

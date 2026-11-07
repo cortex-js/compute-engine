@@ -401,8 +401,10 @@ export function listedFlatMapView(
  * view again, and its callback runs a second time. No handler that is
  * called again lists a view after an `await` today: the handlers that do
  * (`Sum`, `Reduce`, `MaxBy`) are `lazy`, and a `lazy` handler is not called
- * again. A new handler of an operator that is not `lazy` must list its
- * views before its first `await`.
+ * again; the handler of `Max`, `Min`, `Supremum` and `Infimum`
+ * (`evaluateMinMaxAsync()`, `library/arithmetic.ts`) never answers
+ * `undefined`, so it is not called again. A new handler of an operator that
+ * is not `lazy` must list its views before its first `await`.
  */
 export type ListingMemo = {
   replay: boolean;
@@ -504,17 +506,33 @@ export function walkedElements(
 
 /**
  * The asynchronous form of {@link listedFlatMapView}, for an `evaluateAsync`
- * handler, or `undefined` when `xs` is not such a view. The view is evaluated with `evaluateAsync()` and the options of
- * the handler (`signal`, `_effects`, `_contextStack`, `_precisionWindow`), so
- * that the callback runs in the context of that evaluation: its effects,
- * its deadline and its `signal`.
+ * handler, or `undefined` when `xs` is not such a view. The view is
+ * evaluated with `evaluateAsync()` and the options of the handler (`signal`,
+ * `_effects`, `_contextStack`, `_precisionWindow`), so that the callback
+ * runs in the context of that evaluation: its effects, its deadline and its
+ * `signal`.
  *
- * `FlatMap` has no `evaluateAsync` handler: its walk is the synchronous one
- * of its `evaluate` handler, which does not await a callback. A view whose
- * walk applies an operator with only an `evaluateAsync` handler is therefore
- * not listed, as in {@link listedFlatMapView}. Listed, the callback
- * `x ↦ slowRange(x)` gave the unevaluated calls as elements:
- * `Sum(FlatMap([1, 2], x ↦ slowRange(x)))` was `slowRange(1) + slowRange(2)`.
+ * The `evaluateAsync` handler of `FlatMap` awaits each application of the
+ * callback, so a callback that applies an operator with only an
+ * `evaluateAsync` handler gives the awaited values:
+ * `Sum(FlatMap([1, 2], x ↦ slowRange(x)))` is the sum of the elements of
+ * `slowRange(1)` and `slowRange(2)`.
+ *
+ * Two more kinds of view are handled here and not in
+ * {@link listedFlatMapView}:
+ * - A `FlatMap` that is known to be finite, over a source that can be
+ *   walked, whose walk applies such an operator
+ *   (`appliesAsyncOnlyOperator()`). A consumer reads the elements of a finite
+ *   view with the synchronous `each()`, which does not await the callback:
+ *   `Max(FlatMap([1, 2], x ↦ [x, slowF(x)]))` was
+ *   `max(2, slowF(1), slowF(2))`. Listed here, the elements are the awaited
+ *   values.
+ * - Not listed: a view whose source applies such an operator
+ *   (`FlatMap(Map(slowF, [1, 2]), x ↦ [x])`). The elements of the source are
+ *   computed synchronously when they are read, also by the asynchronous
+ *   walk of `FlatMap`, so the listing would hold the unevaluated calls. The
+ *   answer is then `undefined`, and the consumer does what it does for a
+ *   view that is not listed.
  */
 export function listedFlatMapViewAsync(
   xs: Expression,
@@ -526,7 +544,9 @@ export function listedFlatMapViewAsync(
   // that the caller does not await: code after an `await` runs in a later
   // task, and every evaluation of an operand that does not hold such a view
   // then lost the bindings of the caller.
-  if (!isFlatMapOverFiniteSource(xs)) return undefined;
+  if (!isFlatMapOverFiniteSource(xs) && !isFiniteFlatMapWithAsyncOnly(xs))
+    return undefined;
+  if (!isFunction(xs) || appliesAsyncOnlyOperator(xs.op1)) return undefined;
   // The listings of this handler call (see `ListingMemo`): the memo given by
   // a caller that resumed after an `await`, or else the memo of the
   // synchronous handler call that runs now.
@@ -535,7 +555,6 @@ export function listedFlatMapViewAsync(
   let pending: Promise<Expression | null>;
   if (known !== undefined) pending = Promise.resolve(known);
   else {
-    if (appliesAsyncOnlyOperator(xs)) return undefined;
     pending = xs
       .evaluateAsync({
         ...options,
@@ -568,10 +587,11 @@ export function listedFlatMapViewAsync(
       );
   }
   return pending.then((value) => {
-    // The walk of `FlatMap` is synchronous and does not read the signal. A
-    // signal aborted while the callback ran (a host callback that aborts) is
-    // honored here, before a consumer reads the list: the evaluation is
-    // canceled, as an asynchronous walk would be.
+    // The asynchronous walk of `FlatMap` reads the signal between two of its
+    // steps only (`runWalkAsync()`, `library/collections.ts`), so a signal
+    // aborted while the last callback ran (a host callback that aborts) is
+    // not seen by the walk. It is honored here, before a consumer reads the
+    // list: the evaluation is canceled.
     const signal = options.signal;
     if (signal?.aborted)
       throw new CancellationError({ cause: signal.reason as unknown });
@@ -652,6 +672,20 @@ function isFlatMapOverFiniteSource(xs: Expression): boolean {
     xs.isValid &&
     xs.isFiniteCollection === undefined &&
     isWalkableFiniteCollection(xs.op1)
+  );
+}
+
+/** Whether `xs` is a valid `FlatMap` that is known to be finite, over a
+ * source that can be walked, whose walk applies an operator that has only an
+ * `evaluateAsync` handler: its elements are known on the asynchronous route
+ * only when it is listed (see {@link listedFlatMapViewAsync}). */
+function isFiniteFlatMapWithAsyncOnly(xs: Expression): boolean {
+  return (
+    isFunction(xs, 'FlatMap') &&
+    xs.isValid &&
+    xs.isFiniteCollection === true &&
+    isWalkableFiniteCollection(xs.op1) &&
+    appliesAsyncOnlyOperator(xs)
   );
 }
 

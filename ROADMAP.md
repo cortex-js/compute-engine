@@ -154,8 +154,7 @@ collection through `runAsync`) already yield and honour an abort signal.
 - **CE-111.1** These operators stay synchronous, can have a long operand, and
   need a design: `Assign` (the right-hand side is evaluated in about ten
   branches, interleaved with writes to the scope), `When` and
-  `Match` (conditional evaluation of a branch, with a large handler), `FlatMap`
-  (its materialization walks a lazy view without a generator), `Timing` (a
+  `Match` (conditional evaluation of a branch, with a large handler), `Timing` (a
   wall-clock measure that would include the yields), `WithRandomSeed` and
   `HoldValues` (their frame, a seed or a value shield, cannot span an `await`),
   and `NumericApproximation` (the marker of a lazy `Map`, evaluated per
@@ -221,6 +220,12 @@ collection through `runAsync`) already yield and honour an abort signal.
   readers. A one-page spec comes before the implementation: which lazy
   operators get the iterator, which readers use it, and how an abort signal
   and the evaluation context carry across each `await`.
+  Done 2026-11-07 (CE-767): `FlatMap` has an `evaluateAsync` twin of its
+  listing (spec section 4, item 3), which awaits the callback but still reads
+  the source and each inner result with `each()`; `Max`, `Min`, `Supremum`,
+  `Infimum` and `Sum` list a `FlatMap` operand with it. A view over the
+  `FlatMap` (`Max(Take(FlatMap(…), 3))`) and the other readers of spec
+  section 4, item 6 (`Mean`, `Median`, `Total`) still read it synchronously.
 
 ### CE-123. A validation phase before canonicalization, so that a probe does not declare
 
