@@ -494,6 +494,16 @@ export function analyzeReferences(
       // to supply. A BOUND name or a `vars` key spelled `Missing` is a
       // genuine variable and was claimed above.
       if (isAbsentSymbol(e)) return;
+      // The symbol `Nothing` is not an input either. In a value position
+      // the compilation declines (`nothingOperandDecline()`, the symbol
+      // branch of `_compileInner`), and in a statement position (the `else`
+      // branch of `If(k > 2, Break(), Nothing)`, a statement of a block) the
+      // emitter drops it, so no emitted code reads a variable of that name.
+      // Reported as free, a host that checks each free symbol against its
+      // inputs read it as an input with no value (Tycho row 506). A BOUND
+      // name or a `vars` key spelled `Nothing` is a genuine variable and was
+      // claimed above.
+      if (isSymbol(e, 'Nothing')) return;
       // No mapping, no value, not a constant: a genuinely free symbol.
       addFree(e);
       return;

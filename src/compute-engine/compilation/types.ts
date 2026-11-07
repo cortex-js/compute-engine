@@ -1186,7 +1186,8 @@ export interface CompileTarget<Expr = unknown> {
   /**
    * When set, a cap on the trip count of emitted `Sum`/`Product` loops: a
    * loop whose iteration count would exceed the budget (including infinite
-   * or `NaN` bounds) evaluates to `NaN` instead of running. Internal numeric
+   * or `NaN` bounds) evaluates to `NaN` instead of running, or to the
+   * `entire` interval on the `interval-js` target. Internal numeric
    * probes (the Richardson limit ladder) set this so a single compiled call
    * stays cheap enough for the engine deadline to be honored between calls.
    * The `compile()` option of the same name sets it for a host. A compilation
@@ -2677,7 +2678,8 @@ export interface CompilationOptions<Expr = unknown> {
   /**
    * Cap the trip count of emitted `Sum`/`Product` loops: a loop whose
    * iteration count would exceed the budget (including infinite bounds)
-   * evaluates to `NaN` instead of running. It also caps (floors, then
+   * evaluates to `NaN` instead of running, or to the `entire` interval on
+   * the `interval-js` target. It also caps (floors, then
    * truncates to) the `PointList` zip length on the JavaScript target — a
    * capped point list is truncated, not `NaN`-poisoned. See
    * `CompileTarget.iterationBudget`.

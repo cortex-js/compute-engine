@@ -341,6 +341,59 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       expect(compile(ce.parse('\\pi x')).freeSymbols).toEqual(['x']);
     });
   });
+
+  // Tycho row 506. The symbol `Nothing` has no engine value and reached the
+  // free-symbol branch, so `freeSymbols` reported it, and a host that checks
+  // each free symbol against its inputs read it as an input with no value. No
+  // emitted code reads it: in a statement position the emitter drops it, and
+  // in a value position the compilation declines.
+  describe('the symbol `Nothing` is not a free symbol', () => {
+    const loop = [
+      'Block',
+      ['Declare', 'k', "'unknown'", 0],
+      [
+        'Loop',
+        ['If', ['Greater', 'k', 2], ['Break'], 'Nothing'],
+        ['Element', 'm', ['Range', 1, 3]],
+      ],
+      'k',
+    ];
+
+    it('as the else branch of an `If` statement, which the code drops', () => {
+      const ce = new ComputeEngine();
+      const r = compile(ce.box(loop as never));
+      expect(r.success).toBe(true);
+      expect(r.code).not.toContain('Nothing');
+      expect(r.freeSymbols).toEqual([]);
+    });
+
+    it('as a statement of a block', () => {
+      const ce = new ComputeEngine();
+      const r = compile(
+        ce.box(['Block', 'Nothing', ['Add', 'x', 1]] as never)
+      );
+      expect(r.success).toBe(true);
+      expect(r.freeSymbols).toEqual(['x']);
+    });
+
+    it('in a value position, where the compilation declines', () => {
+      const ce = new ComputeEngine();
+      ce.declare('x', 'real');
+      const r = compile(
+        ce.box(['If', ['Greater', 'x', 0], 'Nothing', 7] as never)
+      );
+      expect(r.success).toBe(false);
+      expect(r.freeSymbols).toEqual(['x']);
+    });
+
+    it('a `vars` key spelled `Nothing` is an input', () => {
+      const ce = new ComputeEngine();
+      const r = compile(ce.box(['Add', 'x', 'Nothing'] as never), {
+        vars: { Nothing: '_.Nothing' },
+      });
+      expect(r.freeSymbols).toContain('Nothing');
+    });
+  });
 });
 
 describe('the reference analysis probes a caller compile handler without compiling its operands', () => {

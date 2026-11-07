@@ -4858,6 +4858,20 @@ function compileIntervalSumProduct(
           : `if (!(${lower} <= _upper)) return ${identity}; `) +
         hoistedPrelude(bindings);
 
+  // With the `iterationBudget` option, a range of more passes than the budget
+  // answers `entire` at loop entry, before the first pass, as the loop of the
+  // JavaScript target answers `NaN` (`compileLoop()` in `compile-loops.ts`).
+  // The test is the same as there, `!(_upper - lower < budget)`, so a bound
+  // that is `NaN` fails it too, and the budget is floored as the `Loop`
+  // counter floors it. Without the option the loop has no check: a plot row
+  // `\sum_{i=1}^{n} i` with `n` at 10^12 ran every pass on the interval lane
+  // and froze the page, also when the host set the option (Tycho row 509).
+  const budget = target.iterationBudget;
+  const budgetGuard = (lower: string): string =>
+    budget === undefined
+      ? ''
+      : `if (!(_upper - (${lower}) < ${Math.floor(budget)})) return { kind: 'entire' }; `;
+
   // A SYMBOLIC bound can still be `±∞`/`NaN` at run time — the same
   // non-terminating loop. Guard once at loop entry (never per iteration);
   // `entire` is the interval target's "cannot bound this" answer. Constant
@@ -4867,10 +4881,10 @@ function compileIntervalSumProduct(
   // 2^53 − 1 a floored bound is finite, but `k++` does not change `k` there
   // and the loop would never end. The interpreter answers `out-of-range`.
   if (lowerNum === undefined || upperNum === undefined) {
-    return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; const _lower = ${lowerCode}; if (!Number.isSafeInteger(_upper) || !Number.isSafeInteger(_lower)) return { kind: 'entire' }; ${prelude('_lower')}for (let ${indexCode} = _lower; ${indexCode} <= _upper; ${indexCode}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
+    return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; const _lower = ${lowerCode}; if (!Number.isSafeInteger(_upper) || !Number.isSafeInteger(_lower)) return { kind: 'entire' }; ${budgetGuard('_lower')}${prelude('_lower')}for (let ${indexCode} = _lower; ${indexCode} <= _upper; ${indexCode}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
   }
 
-  return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; ${prelude(undefined)}for (let ${indexCode} = ${lowerCode}; ${indexCode} <= _upper; ${indexCode}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
+  return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; ${budgetGuard(lowerCode)}${prelude(undefined)}for (let ${indexCode} = ${lowerCode}; ${indexCode} <= _upper; ${indexCode}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
 }
 
 /**
@@ -6902,8 +6916,9 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // The caller's requested compile mode; validated against
       // `supportedModes` (strict only here) by `BaseCompiler.compile`.
       mode: options.mode,
-      // The limit on the passes of a `Loop` in one call (`loopPassCount`).
-      // The `Sum` and `Product` of this target do not read it.
+      // The limit on the passes of a `Loop` in one call (`loopPassCount`),
+      // and on the passes of a `Sum` or a `Product` loop, which answers
+      // `entire` over the limit (`compileIntervalSumProduct`).
       iterationBudget: options.iterationBudget,
       // Constant folding is UNSOUND on this target, unconditionally: it bakes
       // a subtree's `.N()` value as a zero-width point, discarding the

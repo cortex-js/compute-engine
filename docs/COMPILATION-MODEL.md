@@ -1693,7 +1693,8 @@ known at compile time, and a `Loop` with no indexing set already declines.
 
 **Not covered.**
 
-- A `Sum` or a `Product` keeps its own rule: the loop gives `NaN`.
+- A `Sum` or a `Product` keeps its own rule: the loop gives `NaN`, or the
+  `entire` interval on `interval-js`, before its first pass.
 - A `Comprehension` has no count, and a guard that keeps few elements can run
   over a long range: `Comprehension(1, Element(i, 1..m, i < 0))` with `m` at 3e7
   runs all of its elements.

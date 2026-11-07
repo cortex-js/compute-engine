@@ -1,3 +1,19 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **The compile option `iterationBudget` limits a `Sum` and a `Product` on the
+  `interval-js` target.** With `iterationBudget: 1e6`,
+  `Sum(i, Limits(i, 1, 1e12))` compiled to `interval-js` ran every pass, where
+  the `javascript` code gave `NaN` at once. The interval loop now gives the
+  `entire` interval before its first pass when the range has more passes than
+  the budget. Without the option the code is unchanged. (Tycho row 509)
+- **`compile(…).freeSymbols` no longer reports `Nothing`.**
+  `If(k > 2, Break(), Nothing)` compiles to `if (2 < k) { break }`, which reads
+  no such value, and `freeSymbols` held `"Nothing"`, so a host that checks each
+  free symbol against its inputs read it as an input with no value.
+  `expr.symbols` still lists it. (Tycho row 506)
+
 ## 0.182.0 _2026-11-06_
 
 ### Breaking Changes

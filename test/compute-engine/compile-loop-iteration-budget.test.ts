@@ -377,13 +377,13 @@ describe('COMPILE Loop - with no iterationBudget', () => {
     }
   );
 
-  test('a budget with no `Loop` adds nothing to the code', () => {
+  test('a budget with no `Loop` adds no count to the code', () => {
     const sum = () => ce.box(['Sum', 'i', ['Limits', 'i', 1, 'm']] as any);
     const limited = stored(js(sum(), { iterationBudget: 10 }));
     expect(JSON.stringify(limited)).not.toContain('LoopPass');
-    expect(JSON.stringify(stored(interval(sum(), { iterationBudget: 10 })))).toBe(
-      JSON.stringify(stored(interval(sum())))
-    );
+    expect(
+      JSON.stringify(stored(interval(sum(), { iterationBudget: 10 })))
+    ).not.toContain('LoopPass');
   });
 
   test('a `Sum` over the budget keeps its value of NaN', () => {
@@ -391,6 +391,46 @@ describe('COMPILE Loop - with no iterationBudget', () => {
     const { run } = js(sum, { iterationBudget: 10 });
     expect(run!({ m: 4 })).toBe(10);
     expect(run!({ m: 1000 })).toBeNaN();
+  });
+
+  // Tycho row 509: the interval loop of a `Sum` or a `Product` had no check,
+  // so `Sum(i, Limits(i, 1, 1e12))` compiled with the option ran every pass
+  // on the interval lane of a plot row and froze the page. Over the budget the
+  // loop now answers `entire`, the interval that says "unknown", before its
+  // first pass, as the JavaScript loop answers `NaN`.
+  test.each([
+    ['Sum', 10, 500500],
+    ['Product', 24, Infinity],
+  ])(
+    'an interval `%s` over the budget gives `entire` before its first pass',
+    (head, four, thousand) => {
+      const symbolic = ce.box([head, 'i', ['Limits', 'i', 1, 'm']] as any);
+      const { run, code } = interval(symbolic, { iterationBudget: 10 });
+      expect(code).toContain("< 10)) return { kind: 'entire' }");
+      expect(run!({ m: 4 })).toEqual({
+        kind: 'interval',
+        value: { lo: four, hi: four },
+      });
+      expect(run!({ m: 10 }).kind).toBe('interval');
+      expect(run!({ m: 11 })).toEqual({ kind: 'entire' });
+      // Without the option, the loop runs every pass.
+      expect(interval(symbolic).run!({ m: 1000 }).value.hi).toBe(thousand);
+      // A literal range past the unroll limit is a loop too, with constant
+      // bounds in its code.
+      const literal = ce.box([head, 'i', ['Limits', 'i', 1, 1e12]] as any);
+      const { run: runLiteral, code: literalCode } = interval(literal, {
+        iterationBudget: 1e6,
+      });
+      expect(literalCode).toContain('for (let i = 1;');
+      expect(runLiteral!({})).toEqual({ kind: 'entire' });
+    }
+  );
+
+  test('an interval `Sum` with a fractional budget floors it', () => {
+    const sum = ce.box(['Sum', 'i', ['Limits', 'i', 1, 'm']] as any);
+    const { run } = interval(sum, { iterationBudget: 4.5 });
+    expect(run!({ m: 4 }).kind).toBe('interval');
+    expect(run!({ m: 5 })).toEqual({ kind: 'entire' });
   });
 });
 
