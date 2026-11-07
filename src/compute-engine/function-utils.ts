@@ -8716,7 +8716,21 @@ export function captureNestedLocals(
   if (retain) retainScopesReachedByLiteral(fn);
   const inUse: Scope[] = [];
   let top: Scope | null = body.localScope.parent;
-  while (top && (liveNestedScopes.get(top) ?? 0) > 0) {
+  // A scope in the chain can also be an activation of a scope that is in
+  // use. On the asynchronous route, a `Sum` or a `Product` evaluates its
+  // body in an activation of its index scope (`asyncScopeActivation`,
+  // `boxed-expression/boxed-function.ts`), and the scope of a block in the
+  // body is chained onto that activation. The handler marks the index scope
+  // itself, not the activation. Without this test, the walk stopped at the
+  // activation, the closure read the index in the activation after the sum,
+  // and with `Sum(Block(Assign(g, x ↦ x + i), i), Limits(i, 1, 3))` the call
+  // `g(1)` gave `1 + i` with `evaluateAsync()` and `4` with `evaluate()`.
+  const isInUse = (s: Scope): boolean => {
+    if ((liveNestedScopes.get(s) ?? 0) > 0) return true;
+    const template = scopeActivationTemplate(s);
+    return template !== undefined && (liveNestedScopes.get(template) ?? 0) > 0;
+  };
+  while (top && isInUse(top)) {
     inUse.push(top);
     top = top.parent;
   }
@@ -8742,10 +8756,15 @@ export function captureNestedLocals(
   for (let i = inUse.length - 1; i >= 0; i--) {
     const live = liveScopeOf(ce._evalContextStack, inUse[i]);
     parent = snapshotNestedScope(ce, live, parent);
-    if (live !== inUse[i] && scopeActivationTemplate(live) === inUse[i]) {
+    // `live` is an activation when the stack holds one of `inUse[i]`, and
+    // also when `inUse[i]` is itself an activation in the chain (the walk
+    // above takes an activation of a scope in use). In both cases the copy
+    // is a run of the template of the activation.
+    const template = scopeActivationTemplate(live);
+    if (template !== undefined) {
       if (isStatementListScope(live)) STATEMENT_LIST_SCOPES.add(parent);
-      BLOCK_RUN_TEMPLATES.set(parent.bindings, inUse[i]);
-      TEMPLATES_WITH_BLOCK_RUNS.add(inUse[i]);
+      BLOCK_RUN_TEMPLATES.set(parent.bindings, template);
+      TEMPLATES_WITH_BLOCK_RUNS.add(template);
     }
   }
   return captureClosures(ce, fn, parent!, inUse[0]);

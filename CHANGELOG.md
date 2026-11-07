@@ -159,6 +159,14 @@
 
 ### Resolved Issues
 
+- **A function made in the body of a `Sum` or a `Product` keeps the value
+  that the index has in the iteration where the function is made**, as a
+  function made in a `Loop` does. After
+  `["Sum", ["Block", ["If", ["Equal", "i", 1], ["Assign", "g", ["Function", ["Add", "x", "i"], "x"]], "Nothing"], "i"], ["Limits", "i", 1, 3]]`,
+  `g(1)` gave `4`, because the function read the last value of the index,
+  and with `evaluateAsync()` it gave `["Add", "i", 1]`. It now gives `2` in
+  both cases.
+
 - **A function that calls a function that the same block assigned before it
   takes a list argument whole when the called function does.** The value of
   `Block(Assign(h, t ↦ Count(t)), Assign(q, a ↦ h(a)), q([1, 2]))` was a

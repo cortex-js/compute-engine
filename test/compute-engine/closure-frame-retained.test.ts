@@ -331,6 +331,84 @@ f(1)`
     expect(ce.box(['g', 1]).evaluate().json).toBe(4);
   });
 
+  // A `Sum` and a `Product` mark their index scope as in use while they
+  // evaluate, as a `Loop` does, so a closure made in the body keeps the
+  // value of the index of its iteration (`captureNestedLocals`). Since the
+  // iteration puts back the value that the index had before it
+  // (`saveLoopIndexes`), the closure must not read the scope of the
+  // operator: `g(1)` gave `1 + i`.
+  test.each([
+    ['Sum', 6],
+    ['Product', 6],
+  ])(
+    'a closure assigned at one iteration of a %s keeps the index of that iteration',
+    async (op, value) => {
+      for (const asynchronous of [false, true]) {
+        const ce = new ComputeEngine();
+        ce._debugBindings = debug;
+        ce.declare('g', 'function');
+        ce.assign('g', ce.box(['Function', 'x', 'x']));
+        const expr = ce.box([
+          op,
+          [
+            'Block',
+            [
+              'If',
+              ['Equal', 'i', 1],
+              ['Assign', 'g', ['Function', ['Add', 'x', 'i'], 'x']],
+              'Nothing',
+            ],
+            'i',
+          ],
+          ['Limits', 'i', 1, 3],
+        ]);
+        const result = asynchronous
+          ? await expr.evaluateAsync()
+          : expr.evaluate();
+        expect(result.json).toBe(value);
+        expect(ce.box(['g', 1]).evaluate().json).toBe(2);
+      }
+    }
+  );
+
+  // A bound that names another index makes the handler evaluate nested
+  // `Sum` nodes (`nestDependentLimits`), and the body keeps the scopes of the
+  // original node. The closure keeps the values of both indexes.
+  test('a closure assigned in a Sum with a dependent limit keeps both indexes', async () => {
+    for (const asynchronous of [false, true]) {
+      const ce = new ComputeEngine();
+      ce._debugBindings = debug;
+      ce.declare('g', 'function');
+      ce.assign('g', ce.box(['Function', 'x', 'x']));
+      const expr = ce.box([
+        'Sum',
+        [
+          'Block',
+          [
+            'If',
+            ['And', ['Equal', 'i', 2], ['Equal', 'j', 1]],
+            [
+              'Assign',
+              'g',
+              [
+                'Function',
+                ['Add', 'x', ['Multiply', 10, 'i'], ['Multiply', 100, 'j']],
+                'x',
+              ],
+            ],
+            'Nothing',
+          ],
+          'i',
+        ],
+        ['Limits', 'i', 1, 3],
+        ['Limits', 'j', 1, 'i'],
+      ]);
+      if (asynchronous) await expr.evaluateAsync();
+      else expr.evaluate();
+      expect(ce.box(['g', 1]).evaluate().json).toBe(121);
+    }
+  });
+
   test('a closure assigned in a comprehension element gives the same value with the flag on and off', () => {
     const src = `let h = (x) => x
 let b: (number) scope -> number = (n) => do { let c = [do { h = (x => x + d); 0 } for d in [3 * n]]; ListFrom(c); 0 }
