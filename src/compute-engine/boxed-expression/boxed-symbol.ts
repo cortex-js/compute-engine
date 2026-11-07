@@ -2314,17 +2314,22 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // which the window does not advance: storing it would serve a
     // raised-precision value at the working precision after the window.
     if (this.engine._atTransientConfiguration) return compute();
-    // A written-out list is its own value: evaluating it is one pass over its
-    // elements, so remembering it buys nothing — and the walks below would
-    // READ its elements, which a store-backed numeric list (`ce.list`) keeps
-    // unboxed until something asks for them. A tuple that is written-out
-    // data (`_isLiteralData()`) is its own value too. Any other tuple is
-    // remembered: a point `(f(u), g(u))` that a symbol holds evaluated
-    // `f(u)` and `g(u)` again at each read of the symbol, and a tuple has
-    // few elements, so the walks below are cheap.
+    // A list or a tuple that is written-out data (`_isLiteralData()`: its
+    // elements are numbers, strings and such lists, or a store-backed numeric
+    // list made by `ce.list`) is not remembered. It is its own value under a
+    // plain evaluation; on a numeric route a list of exact numbers gets a new
+    // node, but its approximation is one cheap pass over the numbers. The
+    // test does not read the elements of a store-backed list, which stay
+    // unboxed; the walks below would read them. Any other list or
+    // tuple is remembered, because each read of the symbol evaluated each of
+    // its elements again: a point `(f(u), g(u))` evaluated `f(u)` and `g(u)`,
+    // and the value of `D(PointY(h(u)), u)` for a path `h` of 29 pieces, a
+    // list of 29 symbolic elements, took about 40 ms at each read after an
+    // assignment to any other symbol. The walks below are of the same order
+    // as one evaluation of the elements.
     if (
-      value.operator === 'List' ||
-      (value.operator === 'Tuple' && value._isLiteralData())
+      (value.operator === 'List' || value.operator === 'Tuple') &&
+      value._isLiteralData()
     )
       return compute();
     const ce = this.engine;

@@ -264,6 +264,15 @@
   own argument in `2x`. A derivative that uses the `derivative` handler of an
   operator declared by the caller is still worked out at each evaluation,
   because that handler can read any state. The values do not change. (CE-442)
+- **A symbol that holds a list of symbolic elements keeps its evaluated value
+  while nothing that the list reads changes.** Each `evaluate()` of the symbol
+  evaluated every element of the list again after an assignment to any other
+  symbol. For `h(t)`, a path of 29 linear pieces read from a list of points,
+  a symbol `d` assigned the value of `["D", ["PointY", ["h", "u"]], "u"]`
+  took about 46 ms to evaluate after `ce.assign("z", 1)`, and now takes less
+  than 0.1 ms (one run from source). An assignment to a symbol that an
+  element reads still gives the new value. A list of numbers and strings was
+  already its own value and is not changed. The values do not change. (CE-313)
 
 ## 0.182.0 _2026-11-06_
 
