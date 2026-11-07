@@ -6688,14 +6688,22 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     return `[list(_t) for _t in zip(${colls.join(', ')})]`;
   },
   // Both endpoints included (native np.linspace); count truncated and
-  // clamped ≥ 0; defaults mirror the interpreter (start 1, count 50).
+  // clamped ≥ 0; defaults mirror the interpreter (start 1, count 50). An
+  // endpoint that is an infinity or NaN gives NaN, no value, as the
+  // interpreter has no count and no element for such a `Linspace`
+  // (`linspaceHasNoValue()` in `library/collections.ts`). A count that is 0
+  // after it is truncated and clamped (0, 0.5, −2) has no samples, so it
+  // gives the empty list for an infinite endpoint, and NaN only for a NaN
+  // endpoint. The tests `abs(x) < inf` (finite) and `x == x` (not NaN)
+  // accept every Python number, a complex one included; `np.isfinite`
+  // raises a TypeError for an integer too large for NumPy's integer types.
   Linspace: (args, compile) => {
     if (args[0] == null)
       throw new Error('Could not compile `Linspace`: missing argument');
     const start = args[1] == null ? '1' : compile(args[0]);
     const end = args[1] == null ? compile(args[0]) : compile(args[1]);
     const count = args[2] == null ? '50' : compile(args[2]);
-    return `[float(_v) for _v in np.linspace(${start}, ${end}, max(0, int(${count})))]`;
+    return `(lambda _s, _e, _n: [float(_v) for _v in np.linspace(_s, _e, _n)] if (abs(_s) < float('inf') and abs(_e) < float('inf')) or (_n == 0 and _s == _s and _e == _e) else float('nan'))(${start}, ${end}, max(0, int(${count})))`;
   },
   // --- Higher-order collection operators ------------------------------------
   Map: (args, compile) => {

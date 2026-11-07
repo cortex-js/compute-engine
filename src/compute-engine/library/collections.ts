@@ -13571,12 +13571,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // @todo: the canonical form should consider if this can be simplified to a range (if the elements are integers)
 
     // @todo: need eq handler
+
+    // A `Linspace` with an endpoint that is an infinity or `NaN` has no
+    // value (except the empty list for a count that rounds down to 0 or less
+    // and an infinite endpoint): it is not enumerable, and it has no count,
+    // no element, no iterator and no members, so that every read of it
+    // (`Sum`, `Count`, `Max`, `At`, `Element`, a loop) stays unevaluated, as
+    // for a symbolic endpoint. Its samples cannot be computed: the step is an
+    // infinity or `NaN`. The compiled targets give `NaN` (JavaScript, Python)
+    // or `empty` (`interval-js`) for it. See `linspaceHasNoValue()`.
     collection: {
       isEnumerable: (expr) =>
-        isFunction(expr) && !expr.ops.some((op) => isSymbolicOperand(op)),
+        isFunction(expr) &&
+        !expr.ops.some((op) => isSymbolicOperand(op)) &&
+        !linspaceHasNoValue(expr.ops),
       isLazy: (_expr) => true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
+        if (linspaceHasNoValue(expr.ops)) return undefined;
         // A symbolic count (e.g. Linspace(0, 1, m)) is indeterminate; only a
         // *missing* count selects the default.
         if (isSymbolicOperand(expr.op3)) return undefined;
@@ -13666,6 +13678,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         };
       },
       contains: (expr, target) => {
+        if (!isFunction(expr)) return undefined;
+        // No element, so no answer. The test below would divide by the
+        // step `(upper − lower) / (count − 1)`, which is an infinity here,
+        // and would find every target between the endpoints a member.
+        if (linspaceHasNoValue(expr.ops)) return undefined;
         const t = target.re;
         // Symbolic target: indeterminate unless the type refutes membership
         // (`'number'`, not `'real'` — see the Range.contains note)
@@ -13673,7 +13690,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return typeMembership(target, 'number') === false ? false : undefined;
         if (target.im !== 0) return false;
         if (!isFinite(t)) return false;
-        if (!isFunction(expr)) return undefined;
         const lower = operandNumericValue(expr.op1);
         const upper = operandNumericValue(expr.op2);
         // Symbolic bounds cannot be decided structurally
@@ -22569,6 +22585,47 @@ function isLinspaceOneOperandForm(expr: Expression): boolean {
   if (expr.nops < 2) return true;
   const op2 = expr.op2;
   return isSymbol(op2) && op2.symbol === 'Nothing';
+}
+
+/**
+ * True when the `Linspace` with the operands `ops` has no value because an
+ * endpoint is not finite:
+ * - an endpoint is `NaN`: the number literal, or an expression with no
+ *   unknowns whose float value is `NaN` (a symbol whose value is `NaN`);
+ * - or an endpoint is infinite and the count is not 0. An infinite endpoint
+ *   is a number literal `+∞`, `−∞` or `~∞`, or an expression whose float
+ *   value is an infinity (a symbol whose value is `+∞`, or an exact literal
+ *   too large for a double, `1e400`, which the iterator also reads as an
+ *   infinity). The count is 0 when it rounds down to 0 or less (0, 0.5,
+ *   −2), as the `count` handler reads it. Such a `Linspace` has no samples,
+ *   so it is the empty list whatever its endpoints are, except a `NaN`
+ *   endpoint.
+ *
+ * The endpoints are among the first two operands (the form `Linspace(end)`
+ * has one, and an absent second operand is `Nothing`). An endpoint with no
+ * numeric value (`a` with no value) is symbolic, not infinite, and gives
+ * false.
+ */
+function linspaceHasNoValue(ops: ReadonlyArray<Expression>): boolean {
+  let infinite = false;
+  for (const op of ops.slice(0, 2)) {
+    if (isSymbol(op) && op.symbol === 'Nothing') continue;
+    if (isNumber(op) && op.isNaN) return true;
+    const v = operandNumericValue(op);
+    // A NaN value with no unknowns (a symbol whose value is `NaN`) is a NaN
+    // endpoint. With unknowns, NaN only means that the value is not known
+    // yet, and the endpoint is symbolic.
+    if (Number.isNaN(v) && op.unknowns.length === 0) return true;
+    if ((isNumber(op) && !op.isFinite) || v === Infinity || v === -Infinity)
+      infinite = true;
+  }
+  if (!infinite) return false;
+  // The count, as the `count` handler reads it. An absent or symbolic count
+  // is not 0.
+  const c = ops[2];
+  if (c === undefined || (isSymbol(c) && c.symbol === 'Nothing')) return true;
+  const count = operandNumericValue(c);
+  return !(Number.isFinite(count) && Math.floor(count) <= 0);
 }
 
 /**

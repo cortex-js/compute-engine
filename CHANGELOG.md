@@ -54,6 +54,14 @@
 
 ### Behavior Changes
 
+- **A `Linspace` with an endpoint that is an infinity or `NaN` has no value.**
+  Its samples cannot be computed, and its reads disagreed: for
+  `Linspace(0, +∞, 3)`, `Sum` gave `0`, `Count` gave `3`, `Max` gave `+∞` and
+  `Element(5, …)` gave `True`. Each of these now stays unevaluated, as for an
+  endpoint with no value yet (`Linspace(a, 1, 3)`). Compiled JavaScript and
+  Python give `NaN` for such a `Linspace`, also when an input endpoint is
+  `±∞` or `NaN` at run time. With a count of 0 there are no samples, so
+  `Linspace(0, +∞, 0)` is still the empty list.
 - **A compiled integer power or product of a list declared with a type that
   admits both a matrix and a list of points (the bare `list`,
   `list<unknown>`, `list<any>`, `indexed_collection`) now fails to compile

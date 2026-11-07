@@ -250,6 +250,10 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `python`, `c: boolean | integer`: `If(c, 1, 2)` at `c = 1` compiles to
   `((1) if (c) else (2))` and gives `1`; the interpreter leaves it
   unevaluated. The JavaScript target declines it.
+- `python`, `n: integer`: `Linspace(0, 1e20, n)` at `n = 2` raises a NumPy
+  `UFuncTypeError`. The target writes `1e20` as the Python integer
+  `100000000000000000000`, which `np.linspace` cannot convert to a float. The
+  interpreter gives `[0, 1e20]`.
 - `javascript`, the interpreter fallback of a decline: with `L: list<real>`
   and `p: any` assigned `2L`, `compile(p + 1, { constantFold: false })`
   declines and `run({ L: [1, 2] })` gives `null` (the fallback does not pass

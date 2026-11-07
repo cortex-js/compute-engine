@@ -6845,14 +6845,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // rounded) and clamped to ≥ 0; a count of 1 yields [start]. An integer
   // grid between safe integers samples `start + k·step`, as the interpreter
   // does (`linspaceSample`, `library/collections.ts`): the product of the
-  // usual form `start + span·k/denom` rounds past 2⁵³.
+  // usual form `start + span·k/denom` rounds past 2⁵³. An endpoint that is
+  // an infinity or NaN gives NaN, no value, as the interpreter has no count
+  // and no element for such a `Linspace` (`linspaceHasNoValue()` in
+  // `library/collections.ts`). A count that is 0 after it is floored and
+  // clamped (0, 0.5, −2) has no samples, so it gives the empty array for an
+  // infinite endpoint, and NaN only for a NaN endpoint.
   Linspace: (args, compile) => {
     if (args[0] == null)
       throw new Error('Could not compile `Linspace`: missing argument');
     const start = args[1] == null ? '1' : compile(args[0]);
     const end = args[1] == null ? compile(args[0]) : compile(args[1]);
     const count = args[2] == null ? '50' : compile(args[2]);
-    return `((_s, _e, _c) => { _c = Math.floor(_c); if (!Number.isFinite(_c)) _c = 50; _c = Math.max(0, _c); if (_c === 1) return [_s]; const _sp = _e - _s, _st = _sp / (_c - 1), _g = Number.isInteger(_st) && Number.isInteger(_s) && Math.abs(_sp) <= Number.MAX_SAFE_INTEGER; return Array.from({ length: _c }, (_, _i) => _g ? _s + _i * _st : _s + (_sp * _i) / (_c - 1)); })(${start}, ${end}, ${count})`;
+    return `((_s, _e, _c) => { _c = Math.floor(_c); if (!Number.isFinite(_c)) _c = 50; _c = Math.max(0, _c); if (_c > 0 ? !(Number.isFinite(_s) && Number.isFinite(_e)) : Number.isNaN(_s) || Number.isNaN(_e)) return NaN; if (_c === 1) return [_s]; const _sp = _e - _s, _st = _sp / (_c - 1), _g = Number.isInteger(_st) && Number.isInteger(_s) && Math.abs(_sp) <= Number.MAX_SAFE_INTEGER; return Array.from({ length: _c }, (_, _i) => _g ? _s + _i * _st : _s + (_sp * _i) / (_c - 1)); })(${start}, ${end}, ${count})`;
   },
   // Split into k chunks of ceil(len/k) elements — mirroring the interpreter
   // exactly, including k > len producing trailing empty chunks. A statically
