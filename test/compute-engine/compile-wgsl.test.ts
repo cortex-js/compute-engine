@@ -35,6 +35,51 @@ describe('WGSL COMPILATION', () => {
     });
   });
 
+  // WGSL gives `&&` and `||` no precedence over each other: `a && b || c` is
+  // a syntax error, so an `And` under an `Or` needs parentheses on WGSL.
+  describe('Mixed And and Or', () => {
+    const fresh = new ComputeEngine();
+    for (const v of ['x', 'y', 'z']) fresh.declare(v, 'real');
+    const code = (json: unknown) =>
+      compile(fresh.expr(json as never), { to: 'wgsl' }).code;
+
+    it('puts parentheses around a comparison chain under an Or', () => {
+      expect(
+        code(['Or', ['Less', 3, 'y', 'x'], ['Less', 'x', 5]])
+      ).toMatchInlineSnapshot(`((3.0 < y) && (y < x)) || x < 5.0`);
+      expect(
+        code(['Or', ['Less', 'x', 1], ['Less', 'y', 'x', 'z']])
+      ).toMatchInlineSnapshot(`x < 1.0 || ((y < x) && (x < z))`);
+    });
+
+    it('puts parentheses around an And under an Or', () => {
+      expect(
+        code(['Or', ['And', ['Less', 'x', 1], ['Less', 'y', 2]], ['Less', 'x', 5]])
+      ).toMatchInlineSnapshot(`(x < 1.0 && y < 2.0) || x < 5.0`);
+    });
+
+    it('puts parentheses around an Or under an And', () => {
+      expect(
+        code(['And', ['Or', ['Less', 'x', 1], ['Less', 'y', 2]], ['Less', 'x', 5]])
+      ).toMatchInlineSnapshot(`(x < 1.0 || y < 2.0) && x < 5.0`);
+    });
+
+    it('adds no parentheses to a chain under an And', () => {
+      expect(
+        code(['And', ['Less', 3, 'y', 'x'], ['Less', 'x', 5]])
+      ).toMatchInlineSnapshot(`(3.0 < y) && (y < x) && x < 5.0`);
+    });
+
+    it('keeps the GLSL emission, where && binds tighter than ||', () => {
+      expect(
+        compile(
+          fresh.expr(['Or', ['Less', 3, 'y', 'x'], ['Less', 'x', 5]]),
+          { to: 'glsl' }
+        ).code
+      ).toMatchInlineSnapshot(`(3.0 < y) && (y < x) || x < 5.0`);
+    });
+  });
+
   describe('WGSL-Specific Functions', () => {
     it('should compile inverseSqrt (camelCase)', () => {
       const expr = ce.expr(['Inversesqrt', 'x']);

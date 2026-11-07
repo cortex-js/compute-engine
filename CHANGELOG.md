@@ -71,6 +71,12 @@
 
 ### Resolved Issues
 
+- **The WGSL code of an `Or` with an `And` operand is now valid.** WGSL does
+  not let `&&` and `||` appear together without parentheses, so the code that
+  `compile(expr, { to: 'wgsl' })` gave for `Or(Less(3, y, x), Less(x, 5))`,
+  `(3.0 < y) && (y < x) || x < 5.0`, did not compile in a shader. It is now
+  `((3.0 < y) && (y < x)) || x < 5.0`. The same applies to an `And` operand:
+  `Or(And(p, q), r)` gives `(p && q) || r`. The GLSL code does not change.
 - **The limit at infinity of a quotient of an exponential and a power is now
   correct when the exponent grows slowly.** `\lim_{x\to\infty} e^{\sqrt{x}}/x^5`
   gave `0` and is now `+∞`; `\lim_{x\to\infty} x^5/e^{\sqrt{x}}` gave `+∞` and

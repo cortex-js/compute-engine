@@ -756,12 +756,24 @@ export function compileExprOperator(
             // wrong grouping). `Add`/`Multiply` are associative, so their
             // operands need no extra parens.
             const leftAssocNonAssociative = h === 'Subtract' || h === 'Divide';
+            // WGSL gives `&&` and `||` no precedence over each other, so
+            // `a && b || c` is a syntax error there, where GLSL and
+            // JavaScript read it as `(a && b) || c`. On WGSL, the operands of
+            // an `Or` are compiled as if their parent bound tighter than
+            // `And`: an `And` operand, and a comparison chain that lowers to
+            // a conjunction (`3 < y < x` → `(3.0 < y) && (y < x)`), get
+            // parentheses. An `Or` operand of an `And` gets them already,
+            // because `Or` has the lower precedence of the two.
+            const wgslOrOperandPrec =
+              h === 'Or' && target.language === 'wgsl'
+                ? Math.max(op[1], (target.operators?.('And')?.[1] ?? 0) + 1)
+                : op[1];
             // A loop, not `args.map`: the callback and the frame of `map`
             // would be two more frames for each level of a nested
             // expression (ROADMAP CE-320.2).
             const operandCodes: TargetSource[] = [];
             for (let i = 0; i < args.length; i++) {
-              let operandPrec = op[1];
+              let operandPrec = wgslOrOperandPrec;
               if (rightAssoc && i < args.length - 1) operandPrec = op[1] + 1;
               else if (leftAssocNonAssociative && i > 0)
                 operandPrec = op[1] + 1;
