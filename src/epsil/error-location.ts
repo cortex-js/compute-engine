@@ -97,10 +97,24 @@ export function traceFrames(error: MathJsonExpression): ErrorFrameRef[] {
  * The value that an error names as its cause: the operand that follows the
  * error code (`["Error", code, where, trace]`), such as `'a'` for the error
  * of `Ln("a")`. `undefined` when the error has no such operand.
+ *
+ * Only an `incompatible-type` error gives a value: `ce.typeError()` puts the
+ * argument itself after the code. Other errors put a text there, often the
+ * `toString()` of the argument: the error of `Sqrt(2, "a")` is
+ * `["Error", "'unexpected-argument'", "'\"a\"'"]`, with the quotes of the
+ * string in the text, and the error of `Sqrt(2, 3)` has the text `'3'`, not
+ * the number `3`. Such a text, compared with the written argument as a value,
+ * would show that the argument is not the cause.
  */
 export function offendingValue(
   error: MathJsonExpression
 ): MathJsonExpression | undefined {
+  const cause = operand(error, 1);
+  const code =
+    operator(cause) === 'ErrorCode'
+      ? stringValue(operand(cause, 1))
+      : stringValue(cause);
+  if (code !== 'incompatible-type') return undefined;
   const where = operand(error, 2);
   if (where === null || operator(where) === 'ErrorTrace') return undefined;
   return where;
@@ -199,25 +213,25 @@ export function locateError(
     const { name } = frames[k];
     const matches: MathJsonExpression[] = [];
     findWrittenCalls(stmt, name, matches);
-    let found: { call: MathJsonExpression; arg: MathJsonExpression | null };
-    if (matches.length === 1) {
-      // When the argument is not sure, the whole call is the range: it
-      // contains the error.
-      found = frameArgument(
+    // When the argument is not sure, the whole call is the range: it
+    // contains the error.
+    const callOf = (call: MathJsonExpression) =>
+      frameArgument(
         frames,
         k,
-        matches[0],
+        call,
         stmt,
         stmt,
         frameIndexOrder,
         slotNamesFor,
         canonicalOrder,
         rejected
-      ) ?? {
-        call: clusterTop(stmt, matches[0], name),
-        arg: null,
-      };
+      ) ?? { call: clusterTop(stmt, call, name), arg: null };
+    let found: { call: MathJsonExpression; arg: MathJsonExpression | null };
+    if (matches.length === 1) {
+      found = callOf(matches[0]);
     } else if (matches.length > 1) {
+      const reached = { scope: stmt };
       const walked = walkToFrame(
         frames,
         k,
@@ -225,10 +239,49 @@ export function locateError(
         frameIndexOrder,
         slotNamesFor,
         canonicalOrder,
-        rejected
+        rejected,
+        reached
       );
-      if (walked === undefined) continue;
-      found = walked;
+      if (walked !== undefined) found = walked;
+      else {
+        if (offending === undefined) continue;
+        // In `Ln("a") + Ln(2)`, both calls match the frame `Ln argument 1`,
+        // and the walk cannot select one. The `2` of `Ln(2)` is not the
+        // value `"a"` that the error names, so `Ln(2)` did not make the
+        // error. The argument of `Ln("a")` is the value, so `Ln("a")` is
+        // the call of the frame.
+        //
+        // Only the calls in the argument that the outer frames selected are
+        // compared (`reached.scope`): with `let x = Ln("a")`, the error of
+        // `if n == 1 { Ln("a") } else { x + Ln(2) + Ln(3) }` has the frame
+        // `If argument 3`, and the `Ln("a")` of the other branch did not
+        // run. A call whose argument is not a literal (`Ln(y)`) is never
+        // selected this way: the error of `x + Ln(y) + Ln(2)` is in `x`, not
+        // in `y`. When no call can have made the error
+        // (`x + Ln(2) + Ln(3)`), the frame is skipped, as for one call
+        // below.
+        const inScope: MathJsonExpression[] = [];
+        // Every call is compared, not only the first two.
+        findWrittenCalls(reached.scope, name, inScope, Infinity);
+        const checks = inScope.map((call) =>
+          literalArgumentMatch(
+            call,
+            frames[k],
+            offending,
+            frameIndexOrder,
+            slotNamesFor,
+            canonicalOrder
+          )
+        );
+        if (checks.length > 0 && checks.every((check) => check === 'is-not')) {
+          rejected.frames.add(k);
+          for (const call of inScope) rejected.calls.add(call);
+          continue;
+        }
+        const possible = checks.filter((check) => check !== 'is-not');
+        if (possible.length !== 1 || possible[0] !== 'is') continue;
+        found = callOf(inScope[checks.indexOf('is')]);
+      }
     } else continue;
 
     // The frame can come from a call in an EARLIER statement: with
@@ -240,7 +293,7 @@ export function locateError(
     if (
       offending !== undefined &&
       found.arg !== null &&
-      cannotBeValue(found.arg, offending)
+      compareLiteral(found.arg, offending) === 'is-not'
     ) {
       rejected.frames.add(k);
       rejected.calls.add(found.call);
@@ -302,7 +355,11 @@ function walkToFrame(
     operatorName: string
   ) => readonly (string | undefined)[] | undefined,
   canonicalOrder?: CanonicalOrder,
-  rejected?: Rejected
+  rejected?: Rejected,
+  /** Set to the last argument that an outer frame selected, also when the
+   * walk then stops with `undefined`. It stays `stmt` when no outer frame
+   * selected a call. */
+  reached?: { scope: MathJsonExpression }
 ): { call: MathJsonExpression; arg: MathJsonExpression | null } | undefined {
   let scope = stmt;
   // Whether an outer frame selected a call (and its argument is `scope`).
@@ -369,6 +426,7 @@ function walkToFrame(
     if (arg === null) return undefined;
     scope = arg;
     narrowed = true;
+    if (reached !== undefined) reached.scope = arg;
   }
   return undefined;
 }
@@ -587,26 +645,64 @@ function mayFail(node: MathJsonExpression): boolean {
 }
 
 /**
- * Whether the written argument `arg` surely is not the value `value` that an
- * error names as its cause (see {@link offendingValue}). This is true only
- * when `arg` is a number or string literal and `value` is a different number
- * or string. Any other argument, such as a symbol or a call, can evaluate to
- * the value, and the answer is then `false`.
+ * Whether the written argument `arg` is the value `value` that an error
+ * names as its cause (see {@link offendingValue}).
+ *
+ * - `'is'`: `arg` is a number or string literal equal to `value`.
+ * - `'is-not'`: `arg` is a number or string literal, and `value` is a
+ *   different number or string.
+ * - `'unsure'`: any other case. An argument such as a symbol or a call can
+ *   evaluate to the value.
  */
-function cannotBeValue(
+function compareLiteral(
   arg: MathJsonExpression,
   value: MathJsonExpression
-): boolean {
-  if (mayFail(arg)) return false;
+): 'is' | 'is-not' | 'unsure' {
+  if (mayFail(arg)) return 'unsure';
   const valueString = stringValue(value);
   const valueNumber = machineValue(value);
-  if (valueString === null && valueNumber === null) return false;
+  if (valueString === null && valueNumber === null) return 'unsure';
   const argString = stringValue(arg);
-  if (argString !== null) return argString !== valueString;
+  if (argString !== null) return argString === valueString ? 'is' : 'is-not';
   const argNumber = machineValue(arg);
-  if (argNumber !== null)
-    return valueNumber === null || !Object.is(argNumber, valueNumber);
-  return false;
+  if (argNumber === null) return 'unsure';
+  if (valueNumber === null) return 'is-not';
+  return Object.is(argNumber, valueNumber) ? 'is' : 'is-not';
+}
+
+/**
+ * Whether the argument of the written call `call` that `frame` names is the
+ * value `offending` that the error names (see {@link compareLiteral}).
+ * `'unsure'` when the argument is not known: the argument index of an
+ * operator that canonicalization reorders counts the operands of the
+ * canonical call, and the argument of a named call is not known without the
+ * declared slot names.
+ */
+function literalArgumentMatch(
+  call: MathJsonExpression,
+  frame: ErrorFrameRef,
+  offending: MathJsonExpression,
+  frameIndexOrder: 'declaration' | 'written',
+  slotNamesFor?: (
+    operatorName: string
+  ) => readonly (string | undefined)[] | undefined,
+  canonicalOrder?: CanonicalOrder
+): 'is' | 'is-not' | 'unsure' {
+  // `findWrittenCalls` can give a written `Subtract` for an `Add` frame.
+  if (operator(call) !== frame.name) return 'unsure';
+  if (
+    REORDERED_OPERATORS.has(frame.name) ||
+    canonicalOrder?.reorders(frame.name) === true
+  )
+    return 'unsure';
+  const arg = argumentAtSlot(
+    [...operands(call)],
+    frame.index - 1,
+    frame.name,
+    frameIndexOrder,
+    slotNamesFor
+  );
+  return arg === null ? 'unsure' : compareLiteral(arg, offending);
 }
 
 /** Collect the nodes of `expr` whose operator is `name` and that are not
@@ -699,36 +795,39 @@ export function narrowToFrames(
   ).range;
 }
 
-/** Collect every node of `expr` whose operator is `name` (early-exits once
- * ambiguous — two matches decide {@link narrowToFrames} as surely as ten). */
+/** Collect every node of `expr` whose operator is `name`. The search stops
+ * when it has `limit` matches: two matches tell that a name is ambiguous as
+ * surely as ten. */
 function findByOperator(
   expr: MathJsonExpression | null,
   name: string,
-  matches: MathJsonExpression[]
+  matches: MathJsonExpression[],
+  limit = 2
 ): void {
-  if (expr === null || matches.length > 1) return;
+  if (expr === null || matches.length >= limit) return;
   if (operator(expr) === '') return;
   if (operator(expr) === name) matches.push(expr);
-  for (const op of operands(expr)) findByOperator(op, name, matches);
+  for (const op of operands(expr)) findByOperator(op, name, matches, limit);
 }
 
 /**
  * Collect the written calls of `expr` that a frame of the operator `name`
- * can name (early-exits once there are two). These are the calls of `name`
- * itself. When there is none, they are the calls of the other written
- * operators that canonicalization merges into a call of `name` (see
- * {@link clusterOperators}): `3 - Ln(w)` has no written `Add`, and its
- * `Subtract` is the call of an `Add` frame.
+ * can name (the search stops when it has `limit` matches). These are the
+ * calls of `name` itself. When there is none, they are the calls of the
+ * other written operators that canonicalization merges into a call of
+ * `name` (see {@link clusterOperators}): `3 - Ln(w)` has no written `Add`,
+ * and its `Subtract` is the call of an `Add` frame.
  */
 function findWrittenCalls(
   expr: MathJsonExpression | null,
   name: string,
-  matches: MathJsonExpression[]
+  matches: MathJsonExpression[],
+  limit = 2
 ): void {
-  findByOperator(expr, name, matches);
+  findByOperator(expr, name, matches, limit);
   for (const other of clusterOperators(name)) {
     if (matches.length > 0) return;
-    if (other !== name) findByOperator(expr, other, matches);
+    if (other !== name) findByOperator(expr, other, matches, limit);
   }
 }
 

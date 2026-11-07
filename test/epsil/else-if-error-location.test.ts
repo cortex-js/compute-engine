@@ -173,12 +173,24 @@ describe('NESTED CALLS OF ONE OPERATOR', () => {
   test('a static error has one frame: the argument must contain the error', () => {
     // The static check gives only the innermost frame, `Arctan2 argument 1`.
     // Argument 1 of the outer call is `1`, which does not contain the inner
-    // call, so the locator keeps the whole statement.
+    // call, so the walk down from the statement cannot select a call. The
+    // error names the value `"a"`: argument 1 of the inner call is that
+    // value, and the `1` of the outer call is not.
     const r = run('Arctan2(1, Arctan2("a", 1))\n1');
     const stat = r.diagnostics.findIndex(
       (d) => d.message[0] === 'static-type-error'
     );
-    expect(r.at[stat]).toBe('Arctan2(1, Arctan2("a", 1))');
+    expect(r.at[stat]).toBe('"a"');
+  });
+
+  test('a static error with one frame and an argument that is not a literal', () => {
+    // The value does not select the inner call when its argument is a
+    // variable: the locator keeps the whole statement.
+    const r = run('let s = "a"\nArctan2(1, Arctan2(s, 1))\n1');
+    const stat = r.diagnostics.findIndex(
+      (d) => d.message[0] === 'static-type-error'
+    );
+    expect(r.at[stat]).toBe('Arctan2(1, Arctan2(s, 1))');
   });
 
   test('a static error in the first argument of the outer call', () => {
@@ -283,7 +295,7 @@ describe('A FRAME OF AN OPERATOR THAT REORDERS ITS OPERANDS', () => {
     const d = r.diagnostics.find((x) => x.message[0] === 'runtime-error');
     expect(d!.message[2]).toBe('in Ln argument 1, in Add argument 2');
     const at = source.slice(d!.range[0], d!.range[1]);
-    expect(at).toContain('ln("a")');
+    expect(at).toBe('"a"');
   });
 
   test('an operand that the sum refuses keeps its written position', () => {

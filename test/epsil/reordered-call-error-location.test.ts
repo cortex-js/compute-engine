@@ -14,17 +14,19 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 // that cannot have made the error.
 //
 
-/** The text underlined by each `runtime-error` diagnostic of the statement
+/** The text underlined by each diagnostic of kind `kind` of the statement
  * that starts with `marker`. */
-function underlines(src: string, marker = 'let v'): string[] {
+function underlines(
+  src: string,
+  marker = 'let v',
+  kind = 'runtime-error'
+): string[] {
   const result = executeEpsil(new ComputeEngine(), src);
   const at = src.indexOf(marker);
   return result.diagnostics
     .filter(
       (d) =>
-        Array.isArray(d.message) &&
-        d.message[0] === 'runtime-error' &&
-        d.range[0] >= at
+        Array.isArray(d.message) && d.message[0] === kind && d.range[0] >= at
     )
     .map((d) => src.slice(d.range[0], d.range[1]));
 }
@@ -148,6 +150,88 @@ describe('an error value made in an earlier statement', () => {
   test('the call that made the error is still underlined', () => {
     expect(underlines('let x = Ln(2)\nlet v = x + Ln("a")\n0')).toEqual([
       '"a"',
+    ]);
+  });
+
+  test('no call of the statement made the error', () => {
+    expect(underlines(`${failing}let v = x + Ln(2) + Ln(3)\n0`)).toEqual(['x']);
+  });
+});
+
+describe('an error in one of two calls of the same function', () => {
+  // Both calls match the frame `Ln argument 1`. The argument of the other
+  // call is a literal that is not the value that the error names, so it did
+  // not make the error.
+  test.each([
+    ['let v = Ln("a") + Ln(2)', '"a"'],
+    ['let v = Ln(2) + Ln("a")', '"a"'],
+    ['let v = Ln("a") * Ln(2)', '"a"'],
+    ['let v = Max(Ln(2), Ln("a"))', '"a"'],
+    ['let v = Max(Ln(2), Ln(3), Ln("a"))', '"a"'],
+  ])('%s underlines %s', (stmt, expected) => {
+    const src = `${stmt}\n0`;
+    expect(underlines(src)).toEqual([expected]);
+    expect(underlines(src, 'let v', 'static-type-error')).toEqual([expected]);
+  });
+
+  test('two arguments that can be the value underline the whole call', () => {
+    const src = 'let v = Ln("a") + Ln(x)\n0';
+    expect(underlines(src)).toEqual(['Ln("a") + Ln(x)']);
+  });
+
+  test('an argument that is not a literal does not select its call', () => {
+    // The error is in `x`, made by the first statement. The value does not
+    // select `Ln(y)`, whose argument is a variable. No call is sure, and
+    // the whole statement is underlined.
+    const src = 'let x = Ln("a")\nlet y = 2\nlet v = x + Ln(y) + Ln(2)\n0';
+    expect(underlines(src)).toEqual(['let v = x + Ln(y) + Ln(2)']);
+  });
+
+  test.each([
+    'let v = if n == 1 { Ln("a") } else { x + Ln(2) }',
+    'let v = if n == 1 { Ln("a") } else { x + Ln(2) + Ln(3) }',
+    'let v = if n == 1 { Ln("a") + 0 } else { Ln(2) + x }',
+  ])('a call in the branch that did not run: %s', (stmt) => {
+    // The frame `If argument 3` selects the `else` branch, and the error is
+    // in `x`, not in the `Ln("a")` of the other branch.
+    const src = `let x = Ln("a")\nlet n = 2\n${stmt}\n0`;
+    expect(underlines(src)).toEqual(['x']);
+  });
+
+  test('three calls of the same function', () => {
+    const src = 'let v = Ln(2) + Ln(3) + Ln("a")\n0';
+    expect(underlines(src)).toEqual(['"a"']);
+    expect(underlines(src, 'let v', 'static-type-error')).toEqual(['"a"']);
+  });
+
+  test('a third call with the value', () => {
+    // Two calls have the argument `"a"`. The second one is evaluated, and
+    // its range is underlined.
+    const src =
+      'let n = 2\nlet v = if n == 1 { Ln("a") + Ln(2) } else { Ln("a") }\n0';
+    const result = executeEpsil(new ComputeEngine(), src);
+    const ranges = result.diagnostics
+      .filter(
+        (d) => Array.isArray(d.message) && d.message[0] === 'runtime-error'
+      )
+      .map((d) => d.range[0]);
+    expect(ranges).toEqual([src.lastIndexOf('"a"')]);
+  });
+
+  // The error of an extra argument names it by its text, not by its value:
+  // `'3'` for `3`, and `'"a"'` for `"a"`.
+  test.each([
+    ['let v = Sqrt(2, 3)', '3'],
+    ['let v = Sqrt(2, "a")', '"a"'],
+  ])('an error that names the argument by its text: %s', (stmt, expected) => {
+    const src = `${stmt}\n0`;
+    expect(underlines(src)).toEqual([expected]);
+    expect(underlines(src, 'let v', 'static-type-error')).toEqual([expected]);
+  });
+
+  test('two extra arguments underline the whole call', () => {
+    expect(underlines('let v = Sqrt(2, 3) + Sqrt(2, 4)\n0')).toEqual([
+      'Sqrt(2, 3) + Sqrt(2, 4)',
     ]);
   });
 });

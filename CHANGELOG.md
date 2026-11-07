@@ -71,6 +71,17 @@
 
 ### Resolved Issues
 
+- **Epsil: an error in one of two calls of the same function is underlined on
+  the argument of the call that failed.** In `let v = Ln("a") + Ln(2)`, the
+  run-time error underlined the whole sum and the static type error
+  underlined the whole statement; both now underline `"a"`. The value that a
+  type error names selects the call: the `2` of `Ln(2)` is not the value
+  `"a"`. When the argument of more than one call can be the value, as in
+  `Ln("a") + Ln(x)`, the run-time error still underlines the whole sum and the
+  static error the whole statement. The run-time error of an extra argument,
+  `let v = Sqrt(2, 3)`, now underlines the `3`, as the static error does, not
+  the whole statement.
+
 - **`Hypergeometric2F1` at machine precision no longer gives a wrong number
   for parameters near 100.** A product of two values of the Gamma function
   in its formulas went past the largest double, and the result had the wrong

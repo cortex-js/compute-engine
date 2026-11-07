@@ -88,6 +88,7 @@ import { definitionSites } from './definition-sites.js';
 import {
   enclosingFrame,
   locateError,
+  offendingValue,
   type ErrorFrameRef,
 } from './error-location.js';
 import {
@@ -1278,7 +1279,11 @@ function canonicalizationDiagnostics(
         // own normalization failures were never permuted, so their index
         // counts written positions and is used directly.
         (operatorName) => calleeSlotNames(ce, operatorName),
-        frameOrderOf(code)
+        frameOrderOf(code),
+        undefined,
+        // When two calls match the frame (`Ln("a") + Ln(2)`), the value that
+        // the error names tells which one made it.
+        offendingValue(error)
       );
       const [from, to] = located.range;
       // The problem is already reported as a rule at a function slot. The
