@@ -913,6 +913,22 @@ missing + 1
 // ➔ "Missing"
 ```
 
+### Module
+
+`(symbol) -> unknown`
+
+The definition of a name in the standard library, also where a local definition shadows the name
+
+```epsil
+Module(Pi)
+// ➔ pi
+```
+
+```epsil
+apply(Module(Floor), 2.5)
+// ➔ 2
+```
+
 ### N
 
 `(any, (integer | list<number>)?) -> unknown`

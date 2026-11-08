@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Control structures
 
-The 12 definitions of the control structures library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 16 definitions of the control structures library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -20,6 +20,12 @@ it has none), with its signature in the engine's type syntax. The
 category.
 
 ## Definitions
+
+### AddTo
+
+`(expression, any) scope -> any`
+
+Compound assignment: `AddTo(s, e)` is `Assign(s, Add(s, e))`, and `AddTo(At(L, i, …), e)` is `Assign(L, ReplaceAt(L, i, …, Add(At(L, i, …), e)))`, with each position evaluated once, before `e`. In the body of a `ParallelLoop`, it adds a contribution to an accumulator, a variable declared outside the loop.
 
 ### Alternatives
 
@@ -97,6 +103,24 @@ Structural pattern match. `Match(subject, MatchCase(pattern, body), …)` evalua
 `(expression, expression, expression?) -> nothing`
 
 A case of a `Match`: `MatchCase(pattern, body)` or `MatchCase(pattern, guard, body)`. The pattern holds engine wildcards; the body references the bound capture names.
+
+### ParallelComprehension
+
+`(body: expression, iterators: expression+) random -> list`
+
+Parallel comprehension: `ParallelComprehension(body, Element(x, xs), …)` is the list that `Comprehension` with the same operands gives, but the passes of the first clause can run in any order. The other clauses run in order inside each pass. The body changes no variable declared outside it. Inside a `WithRandomSeed` frame, the comprehension consumes one draw index and each pass draws from its own frame (`docs/RANDOMNESS-MODEL.md`). Unlike `Comprehension`, it is evaluated at once to a `List`.
+
+### parallelDomain
+
+MathJSON `ParallelDomain` · `(collection: any) random -> any`
+
+The domain of the passes of a parallel loop (engine-internal).
+
+### ParallelLoop
+
+`(body: expression, iterators: expression+) random -> any`
+
+Parallel loop, evaluated **for effect**: `ParallelLoop(body, Element(x, coll))` evaluates `body` once for each element of `coll` (a pass), and the passes can run in any order. The body can change a variable declared outside the loop only with `AddTo` (an accumulator). A read of an accumulator in a pass gives an unspecified value. Inside a `WithRandomSeed` frame, the loop consumes one draw index and each pass draws from its own frame (`docs/RANDOMNESS-MODEL.md`). The value is `Nothing`.
 
 ### Pin
 

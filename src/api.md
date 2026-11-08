@@ -840,13 +840,13 @@ parses one.
 ####### type
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -1675,13 +1675,13 @@ type(type): BoxedType
 ####### type
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -1777,13 +1777,13 @@ createScope(bindings?, parent?): InspectableScope
 
 `Record`\<`string`, 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -1900,13 +1900,13 @@ declareType(name, type, options?): void
 ####### type
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -1974,13 +1974,13 @@ declare(id, type, scope?): IComputeEngine
 ####### type
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -2053,13 +2053,13 @@ declare(arg1, arg2?, arg3?): IComputeEngine
 ####### arg2?
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -2073,13 +2073,13 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   \| `Partial`\<`OnlyFirst`\<[`ValueDefinition`](#valuedefinition), [`BaseDefinition`](#basedefinition) & \{
   `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
   `type`:   \| `string`
-     \| [`ListType`](#listtype)
+     \| [`RecordType`](#recordtype)
      \| [`AlgebraicType`](#algebraictype)
      \| [`NegationType`](#negationtype)
      \| [`CollectionType`](#collectiontype)
+     \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
-     \| [`RecordType`](#recordtype)
      \| [`ObjectType`](#objecttype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -2103,13 +2103,13 @@ declare(arg1, arg2?, arg3?): IComputeEngine
  \} & `Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
   `type`: [`OperatorTypeHandlerOnTypes`](#operatortypehandlerontypes);
   `signature`:   \| `string`
-     \| [`ListType`](#listtype)
+     \| [`RecordType`](#recordtype)
      \| [`AlgebraicType`](#algebraictype)
      \| [`NegationType`](#negationtype)
      \| [`CollectionType`](#collectiontype)
+     \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
-     \| [`RecordType`](#recordtype)
      \| [`ObjectType`](#objecttype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -2157,13 +2157,13 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   \| `Partial`\<`OnlyFirst`\<[`OperatorDefinition`](#operatordefinition), [`BaseDefinition`](#basedefinition) & \{
   `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
   `type`:   \| `string`
-     \| [`ListType`](#listtype)
+     \| [`RecordType`](#recordtype)
      \| [`AlgebraicType`](#algebraictype)
      \| [`NegationType`](#negationtype)
      \| [`CollectionType`](#collectiontype)
+     \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
-     \| [`RecordType`](#recordtype)
      \| [`ObjectType`](#objecttype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -2187,13 +2187,13 @@ declare(arg1, arg2?, arg3?): IComputeEngine
  \} & `Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
   `type`: [`OperatorTypeHandlerOnTypes`](#operatortypehandlerontypes);
   `signature`:   \| `string`
-     \| [`ListType`](#listtype)
+     \| [`RecordType`](#recordtype)
      \| [`AlgebraicType`](#algebraictype)
      \| [`NegationType`](#negationtype)
      \| [`CollectionType`](#collectiontype)
+     \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
-     \| [`RecordType`](#recordtype)
      \| [`ObjectType`](#objecttype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -4995,13 +4995,13 @@ type(type): BoxedType
 ####### type
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -5141,6 +5141,12 @@ of two forms:
 In both forms the derivative of `F(g₁, …, gₙ)` with respect to `v` is
 given by the chain rule: `Σᵢ ∂ᵢF(g₁, …, gₙ) · ∂gᵢ/∂v`. A partial
 derivative is requested only for an argument that depends on `v`.
+
+For an argument that is a point (a tuple or a list of tuples), the
+product `∂ᵢF · ∂gᵢ/∂v` multiplies each coordinate. It is correct only
+when the partial derivative is a number `c` (the Jacobian is `c·I`). When
+the partial derivative is a point (a gradient) or is not given, the
+derivative of the application stays unevaluated.
 
 </MemberCard>
 
@@ -6237,13 +6243,13 @@ of `admittedAs`. `undefined` leaves the expression unevaluated.
 ```ts
 resultType(operator, operandTypes): 
   | string
-  | ListType
+  | RecordType
   | AlgebraicType
   | NegationType
   | CollectionType
+  | ListType
   | SetType
   | BroadcastableType
-  | RecordType
   | ObjectType
   | DictionaryType
   | TupleType
@@ -13493,13 +13499,13 @@ parses one.
 ####### type
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -14328,13 +14334,13 @@ type(type): BoxedType
 ####### type
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -14430,13 +14436,13 @@ createScope(bindings?, parent?): InspectableScope
 
 `Record`\<`string`, 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -14553,13 +14559,13 @@ declareType(name, type, options?): void
 ####### type
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -14627,13 +14633,13 @@ declare(id, type, scope?): IComputeEngine
 ####### type
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -14706,13 +14712,13 @@ declare(arg1, arg2?, arg3?): IComputeEngine
 ####### arg2?
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -14726,13 +14732,13 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   \| `Partial`\<`OnlyFirst`\<[`ValueDefinition`](#valuedefinition), [`BaseDefinition`](#basedefinition) & \{
   `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
   `type`:   \| `string`
-     \| [`ListType`](#listtype)
+     \| [`RecordType`](#recordtype)
      \| [`AlgebraicType`](#algebraictype)
      \| [`NegationType`](#negationtype)
      \| [`CollectionType`](#collectiontype)
+     \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
-     \| [`RecordType`](#recordtype)
      \| [`ObjectType`](#objecttype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -14756,13 +14762,13 @@ declare(arg1, arg2?, arg3?): IComputeEngine
  \} & `Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
   `type`: [`OperatorTypeHandlerOnTypes`](#operatortypehandlerontypes);
   `signature`:   \| `string`
-     \| [`ListType`](#listtype)
+     \| [`RecordType`](#recordtype)
      \| [`AlgebraicType`](#algebraictype)
      \| [`NegationType`](#negationtype)
      \| [`CollectionType`](#collectiontype)
+     \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
-     \| [`RecordType`](#recordtype)
      \| [`ObjectType`](#objecttype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -14810,13 +14816,13 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   \| `Partial`\<`OnlyFirst`\<[`OperatorDefinition`](#operatordefinition), [`BaseDefinition`](#basedefinition) & \{
   `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
   `type`:   \| `string`
-     \| [`ListType`](#listtype)
+     \| [`RecordType`](#recordtype)
      \| [`AlgebraicType`](#algebraictype)
      \| [`NegationType`](#negationtype)
      \| [`CollectionType`](#collectiontype)
+     \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
-     \| [`RecordType`](#recordtype)
      \| [`ObjectType`](#objecttype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -14840,13 +14846,13 @@ declare(arg1, arg2?, arg3?): IComputeEngine
  \} & `Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
   `type`: [`OperatorTypeHandlerOnTypes`](#operatortypehandlerontypes);
   `signature`:   \| `string`
-     \| [`ListType`](#listtype)
+     \| [`RecordType`](#recordtype)
      \| [`AlgebraicType`](#algebraictype)
      \| [`NegationType`](#negationtype)
      \| [`CollectionType`](#collectiontype)
+     \| [`ListType`](#listtype)
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
-     \| [`RecordType`](#recordtype)
      \| [`ObjectType`](#objecttype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
@@ -18366,6 +18372,15 @@ Returns `true` if the expression is structurally identical to `rhs`.
 The value of a symbol is never followed: if `one` is assigned `1`,
 `ce.symbol('one').isSame(1)` is `false`.
 
+Two symbols, or two calls, with the same name are the same only when
+they denote the same binding. A call of the library `Sqrt`, boxed before
+a user function `Sqrt` is declared in a scope, and a call `Sqrt(y)`
+boxed in that scope are not the same: they are calls of two different
+functions. Two calls of the library function are the same, also when
+they come from two engines. A raw call (boxed with `form: 'raw'`, or
+held by `Hold`) has no binding: two raw calls are compared by their
+names, and a raw call is not the same as a canonical call.
+
 The elements of a set literal are not ordered, so two sets with the same
 elements in a different order are the same:
 `ce.box(['Set', 2, 1]).isSame(ce.box(['Set', 1, 2]))` is `true`. A
@@ -18376,6 +18391,10 @@ A finite `Range` whose bounds and step are integer literals and that has
 at most 10,000 elements is the same as the `List` of its integers, and
 has the same `hash`: `ce.box(['Range', 1, 3]).isSame(ce.box(['List', 1,
 2, 3]))` is `true`. A larger range is compared by its operands only.
+The range and the list are the same only when both are calls of the
+library functions, or both are raw calls: a raw `Range(1, 3)` is not the
+same as a canonical `[1, 2, 3]`, and a call of a user function named
+`Range` is not the same as a list.
 
 A character and a one-cluster string with the same content are the same,
 although their types are different: `ce.string('a')` is the same as
@@ -18629,13 +18648,13 @@ singular values of a matrix.
 get type(): BoxedType
 set type(type: 
   | string
-  | ListType
+  | RecordType
   | AlgebraicType
   | NegationType
   | CollectionType
+  | ListType
   | SetType
   | BroadcastableType
-  | RecordType
   | ObjectType
   | DictionaryType
   | TupleType
@@ -20051,13 +20070,13 @@ new BoxedType(type, typeResolver?): BoxedType
 ####### type
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -20350,13 +20369,13 @@ Box an ordinary type, sharing immutable type values within a resolver.
 ####### type
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -20410,13 +20429,13 @@ Normalization is shared only for immutable input types.
 ####### type
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -20446,13 +20465,13 @@ Normalization is shared only for immutable input types.
 ####### type
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -20525,13 +20544,13 @@ polymorphic one.
 ####### other
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -20557,13 +20576,13 @@ is(other): boolean
 ####### other
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -20603,13 +20622,13 @@ Throws if `other` is a string that is not a valid type.
 ####### other
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -20681,13 +20700,13 @@ Throws if `other` is a string that is not a valid type.
 ####### other
 
   \| `string`
-  \| [`ListType`](#listtype)
+  \| [`RecordType`](#recordtype)
   \| [`AlgebraicType`](#algebraictype)
   \| [`NegationType`](#negationtype)
   \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
-  \| [`RecordType`](#recordtype)
   \| [`ObjectType`](#objecttype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
@@ -21349,30 +21368,37 @@ type ValueType = {
 type RecordType = {
   kind: "record";
   elements: Record<string, Type>;
-  closed: true;
+  optional: readonly string[];
 };
 ```
 
 A record is a collection of key-value pairs.
 
-The keys are strings. The set of keys is fixed.
+The keys are strings. A record type is CLOSED: a value of
+`record{a: integer, b: string}` has exactly the keys `a` and `b`, and no
+other key. A field can be OPTIONAL (`record{a: integer, b: string?}`): a
+value can leave the key `b` out, and when the key is there, its value is a
+`string`. A read of an optional field that the value leaves out gives the
+absent value of a read (`Missing`, or `NaN` for a numeric field), as an
+index out of range does.
 
-For a record type to be a subtype of another record type, it must contain
-every key required by the other type, and all their types must match (width
-subtyping). It may contain additional keys.
+Subtyping:
 
-A record type is OPEN: `record{a: integer}` holds every value that has a
-field `a` of type `integer`, and also other fields of any type. So it is a
-`dictionary<T>` only when `T` holds every value.
+- Depth subtyping: `record{a: integer}` is a subtype of `record{a: real}`.
+- No width subtyping: `record{a: integer, b: string}` is NOT a subtype of
+  `record{a: integer}`, because the second type has no key `b`.
+- A record type is a subtype of a record type that has every one of its
+  keys, when each key that the second type requires is also required by
+  the first: `record{a: integer}` and `record{a: integer, b: string}` are
+  subtypes of `record{a: integer, b: string?}`.
+- A record type is a subtype of `dictionary<V>` when every field type,
+  optional fields too, is a subtype of `V`.
 
-The type of a dictionary VALUE is CLOSED (`closed: true`): the value has
-exactly the listed fields and no other. `{a: 1}` is typed
-`record{a: integer}` with `closed: true`, and that type is a subtype of
-`dictionary<integer>`. No type syntax spells a closed record: a closed
-record prints as the open record with the same fields, and the parser
-makes only open records. A closed record is a subtype of the open record
-with the same fields, and a record type is a subtype of a closed record
-only when it is closed and has the same set of keys.
+A program that must accept other keys takes a `dictionary`. The bare
+primitive `record` holds every record.
+
+Build a record type with [makeRecordType](#makerecordtype), which keeps the list of
+optional keys in its normal form.
 
 </MemberCard>
 
@@ -21909,6 +21935,88 @@ value of the `~oo` value-literal type. Reads the tag, never the identity.
 ##### v
 
 `unknown`
+
+</MemberCard>
+
+<MemberCard>
+
+### isOptionalField() {#isoptionalfield}
+
+```ts
+function isOptionalField(t, key): boolean
+```
+
+Whether `key` is an optional field of the record type `t`. A key that
+`t` does not list is not optional: it is not a field.
+
+##### t
+
+`Readonly`\<[`RecordType`](#recordtype)\>
+
+##### key
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
+### hasRecordField() {#hasrecordfield}
+
+```ts
+function hasRecordField(t, key): boolean
+```
+
+Whether `key` is a field of the record type `t`, required or optional.
+An own-property test: `Object.prototype` member names (`toString`) are
+valid keys, and `key in` would find them on the prototype.
+
+##### t
+
+`Readonly`\<[`RecordType`](#recordtype)\>
+
+##### key
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
+### requiredFieldKeys() {#requiredfieldkeys}
+
+```ts
+function requiredFieldKeys(t): string[]
+```
+
+The keys of the record type `t` that every value has.
+
+##### t
+
+`Readonly`\<[`RecordType`](#recordtype)\>
+
+</MemberCard>
+
+<MemberCard>
+
+### makeRecordType() {#makerecordtype}
+
+```ts
+function makeRecordType(elements, optional?): RecordType
+```
+
+A record type with the fields `elements`, of which the keys in `optional`
+are optional. The list of optional keys is sorted, keeps only keys of
+`elements`, and is left out when it is empty, so that two spellings of
+one type have one structure.
+
+##### elements
+
+`Record`\<`string`, [`Type`](#type-3)\>
+
+##### optional?
+
+`Iterable`\<`string`, `any`, `any`\>
 
 </MemberCard>
 
