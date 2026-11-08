@@ -72,6 +72,14 @@
 
 ### Performance
 
+- **The parse of a long list after a symbol is linear in the length of the
+  list.** `ce.parse('G=\\left[1,2,\\dots\\right]')` with thousands of
+  numbers took a time proportional to the square of their count: with
+  40,000 numbers about 5 s, where the same list without `G=` took about
+  0.2 s. Each number of the list was tested as the base of a script, and the
+  test copied every token since the symbol `G` before it looked at the
+  number. The test now looks at the number first, and the parse with `G=`
+  takes about the same time as the parse without it.
 - **The definitions of a discarded scope are released, also when their
   bodies apply a name that has no definition.** A function such as
   `f(x) := h(x) + 1`, defined while `h` has no definition, is re-derived when

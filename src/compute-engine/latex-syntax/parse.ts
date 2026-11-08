@@ -537,6 +537,20 @@ function isPrimeMarkSpan(tokens: readonly LatexToken[]): boolean {
 }
 
 /**
+ * Whether the tokens `tokens`, read between a symbol and the scripts that
+ * follow it, let the symbol be the base of the scripts: only white space,
+ * or, when the symbol carries prime marks (`primed`), only prime marks and
+ * white space.
+ */
+function isGapBeforeScripts(
+  tokens: readonly LatexToken[],
+  primed: boolean
+): boolean {
+  if (primed) return isPrimeMarkSpan(tokens);
+  return tokens.every((token) => token === '<space>');
+}
+
+/**
  * Whether a prime mark starts at token `k`, after optional white space: `'`,
  * `\prime`, `\doubleprime`, `\tripleprime`, or a `^` followed by one of
  * these commands, braced or not (`^\prime`, `^{\prime}`). A function name
@@ -6081,16 +6095,17 @@ export class _Parser implements Parser {
     const primed =
       (operator(lhs) === 'Prime' || operator(lhs) === 'Derivative') &&
       typeof operand(lhs, 1) === 'string';
-    const between =
-      symbolBase === null ? [] : this._tokens.slice(symbolBase.end, index);
+    // The tokens between the symbol and the scripts are copied only after
+    // the base is known to be that symbol. The copy is proportional to the
+    // distance from the last symbol: in `G=\left[1,2,…\right]` every number
+    // of the list reaches this method with `G` as the last symbol, so a copy
+    // at each number made the parse of the list quadratic in its length.
     const isSymbolBase =
       (typeof lhs === 'string' || primed) &&
       symbolBase !== null &&
       symbolBase.id === (primed ? operand(lhs, 1) : lhs) &&
       symbolBase.start === baseStart &&
-      (primed
-        ? isPrimeMarkSpan(between)
-        : between.every((token) => token === '<space>'));
+      isGapBeforeScripts(this._tokens.slice(symbolBase.end, index), primed);
 
     // In non-strict mode, a single letter immediately followed by one or more
     // digits is treated as an implicit *subscript*: `x2 → x_2`, `x1 → x_1`,
