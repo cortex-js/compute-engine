@@ -4023,30 +4023,52 @@ function quadraticZeroPoint(
 }
 
 /**
+ * The largest number of singular points at which
+ * `integrateAroundSingularPoint` cuts a box. With `n` points, the box has
+ * up to `(n + 1)²` parts, plus three for each part cut again at its center.
+ */
+const MAX_SINGULAR_POINTS = 4;
+
+/**
  * The double integral of `body` over the box `box` (the bounds of the two
  * variables `vars`, in either order), computed as the sum of the integrals
- * over the parts of the box around a singular point, or `undefined` when
+ * over the parts of the box around its singular points, or `undefined` when
  * the integrand has no such point in the box or a part has no result.
  *
- * The singular point is the zero of a positive definite quadratic divisor,
+ * A singular point is the zero of a positive definite quadratic divisor,
  * such as `1/√((x − a)² + (y − b)²)` at `(a, b)` (see `quadraticZeroPoint`).
  * The integral of `r^(−p)` near such a point is finite when `p < 2`, but the
  * nested quadrature of `nIntegrateMultiple` fails on it: the inner integral
  * on the line through the point diverges, and next to the point the inner
- * integrand has a peak that is too narrow to resolve. Thus the box is cut at
- * the point into up to four parts, so that the point is a corner of each
- * part, and the variables are shifted so that the point is at the origin.
- * The shift is made on the expression, with exact coordinates, and the
- * divisor is replaced by its exact quadratic form in the shifted variables:
- * with the shift made on floating-point numbers, `x − 0.3` is exactly zero
- * for each `x` nearer to `0.3` than about `5·10⁻¹⁷`, and the integrand is
- * infinite at the quadrature nodes next to the corner.
+ * integrand has a peak that is too narrow to resolve.
+ *
+ * Thus the box is cut at each coordinate of each singular point, so that
+ * each singular point is a corner of each part that touches it. A part
+ * whose corners hold two or more singular points (two points on a diagonal,
+ * or on one line) is cut again at its center: each of its four quarters then
+ * has at most one singular point, at a corner. For the singular points
+ * `(1/4, 1/4)` and `(1/2, 1/2)` of the unit square, the cuts are at `1/4` and
+ * `1/2` in each variable, and the square `[1/4, 1/2]²` between the two points
+ * is cut again at `3/8`.
+ *
+ * In a part with a singular corner, the variables are shifted so that the
+ * corner is at the origin. The shift is made on the expression, with exact
+ * coordinates, and the divisor of that point is replaced by its exact
+ * quadratic form in the shifted variables: with the shift made on
+ * floating-point numbers, `x − 0.3` is exactly zero for each `x` nearer to
+ * `0.3` than about `5·10⁻¹⁷`, and the integrand is infinite at the
+ * quadrature nodes next to the corner. The other divisors are shifted too,
+ * but they are not zero in that part, so their rounding error is small.
+ * Two divisors that are zero at the same point give `undefined`: the one
+ * that is not replaced would keep the rounding error at the corner.
  *
  * Each part is integrated by `nIntegrateMultiple`. The result is the sum of
  * the estimates and of the errors of the parts; an infinite part gives its
  * infinity, two infinities of different signs or a `NaN` part give `NaN`. A
  * part that has no result, or that has a complex value, gives `undefined`,
- * and the caller then integrates the whole box as before.
+ * and the caller then integrates the whole box as before. More than
+ * `MAX_SINGULAR_POINTS` singular points also give `undefined`, since the
+ * number of parts grows as the square of the number of points.
  */
 function integrateAroundSingularPoint(
   ce: ComputeEngine,
@@ -4058,104 +4080,149 @@ function integrateAroundSingularPoint(
     return undefined;
   const bases = singularBases(body);
   if (bases === undefined) return undefined;
-  let found: ReturnType<typeof quadraticZeroPoint>;
-  let base: Expression | undefined;
+  type SingularPoint = NonNullable<ReturnType<typeof quadraticZeroPoint>> & {
+    base: Expression;
+    coordinates: [number, number];
+  };
+  const points: SingularPoint[] = [];
+  const seen: Expression[] = [];
   for (const candidate of bases) {
     if (!candidate.has(vars[0]) || !candidate.has(vars[1])) continue;
-    if (base !== undefined && candidate.isSame(base)) continue;
+    if (seen.some((b) => candidate.isSame(b))) continue;
+    seen.push(candidate);
     const zero = quadraticZeroPoint(ce, candidate, vars, box);
     if (zero === undefined) continue;
-    // A second divisor with a singular point. At another point, a part
-    // would still have a singular point inside it. At the same point, the
-    // second divisor would keep the rounding error of the shift, since only
-    // `base` is replaced by its exact form.
-    if (found !== undefined) return undefined;
-    found = zero;
-    base = candidate;
+    // A second divisor that is zero at the same point would keep the
+    // rounding error of the shift, since only one divisor is replaced by its
+    // exact form.
+    if (points.some((p) => p.point.every((c, i) => c.isSame(zero.point[i]))))
+      return undefined;
+    if (points.length === MAX_SINGULAR_POINTS) return undefined;
+    points.push({
+      ...zero,
+      base: candidate,
+      coordinates: [zero.point[0].re, zero.point[1].re],
+    });
   }
-  if (found === undefined || base === undefined) return undefined;
-  const { point, quadratic } = found;
+  if (points.length === 0) return undefined;
 
-  // The pieces of each dimension, in the shifted variable: the bounds minus
-  // the coordinate of the point. A piece of zero length is left out.
-  const pieces = box.map(([lo, hi], i): [number, number][] => {
-    const p = point[i].re;
-    return [
-      [lo - p, 0],
-      [0, hi - p],
-    ].filter(([a, b]) => a !== b) as [number, number][];
+  // The cuts of each dimension, in the order of its bounds: the lower bound,
+  // the coordinates of the points strictly between the bounds, and the upper
+  // bound.
+  const cuts = box.map(([lo, hi], i): number[] => {
+    const direction = Math.sign(hi - lo);
+    const inside = [...new Set(points.map((p) => p.coordinates[i]))]
+      .filter((c) => c !== lo && c !== hi)
+      .sort((a, b) => direction * (a - b));
+    return [lo, ...inside, hi];
   });
-  // The point is already at the origin and at a corner of the box: the
+  // The parts of the box, each with the index of the singular point at one
+  // of its corners, or -1 when it has none.
+  type Part = { x: [number, number]; y: [number, number]; corner: number };
+  const parts: Part[] = [];
+  const cornersOf = (x: [number, number], y: [number, number]): number[] => {
+    const corners: number[] = [];
+    for (const [k, { coordinates }] of points.entries())
+      if (x.includes(coordinates[0]) && y.includes(coordinates[1]))
+        corners.push(k);
+    return corners;
+  };
+  for (let i = 1; i < cuts[0].length; i++) {
+    for (let j = 1; j < cuts[1].length; j++) {
+      const x: [number, number] = [cuts[0][i - 1], cuts[0][i]];
+      const y: [number, number] = [cuts[1][j - 1], cuts[1][j]];
+      // A part of zero width, when the two bounds of a dimension are equal,
+      // adds 0. It is left out: on the line through a singular point, the
+      // inner integral diverges, and the quadrature of the part could give
+      // `0·∞`, which is `NaN`.
+      if (x[0] === x[1] || y[0] === y[1]) continue;
+      const corners = cornersOf(x, y);
+      if (corners.length <= 1) {
+        parts.push({ x, y, corner: corners[0] ?? -1 });
+        continue;
+      }
+      const xm = (x[0] + x[1]) / 2;
+      const ym = (y[0] + y[1]) / 2;
+      for (const qx of [
+        [x[0], xm],
+        [xm, x[1]],
+      ] as [number, number][]) {
+        for (const qy of [
+          [y[0], ym],
+          [ym, y[1]],
+        ] as [number, number][])
+          parts.push({ x: qx, y: qy, corner: cornersOf(qx, qy)[0] ?? -1 });
+      }
+    }
+  }
+  // One point, already at the origin and at a corner of the box: the
   // quadrature of the whole box resolves it.
-  if (
-    point.every((p) => p.isSame(ce.Zero)) &&
-    pieces.every((dimension) => dimension.length === 1)
-  )
+  if (parts.length === 1 && points[0].point.every((p) => p.isSame(ce.Zero)))
     return undefined;
 
-  const shift = Object.fromEntries(
-    vars.map((v, i) => [v, ce.function('Add', [ce.symbol(v), point[i]])])
-  );
-  const shiftedBase = base.subs(shift);
-  const shiftedBody = body.subs(shift);
-  // The shifted divisor is already the quadratic form when the point is the
-  // origin (`x² + y²`): there is nothing to replace, and `replace()` gives
-  // `null`. Otherwise the divisor must be gone from the shifted integrand,
-  // or the rounding error of the shift stays.
-  let replaced: Expression | null = shiftedBody;
-  if (!shiftedBase.isSame(quadratic)) {
-    replaced = shiftedBody.replace(
-      { match: shiftedBase, replace: quadratic },
-      { recursive: true }
+  // The integrand of each part: shifted to the singular point at its
+  // corner, or, for a part with no singular corner, not shifted.
+  const shiftedFns: Expression[] = [];
+  for (const { point, quadratic, base } of points) {
+    const shift = Object.fromEntries(
+      vars.map((v, i) => [v, ce.function('Add', [ce.symbol(v), point[i]])])
     );
-    if (replaced === null) return undefined;
-    let left = false;
-    const visit = (e: Expression): void => {
-      if (left) return;
-      if (e.isSame(shiftedBase)) left = true;
-      else if (isFunction(e)) e.ops.forEach(visit);
-    };
-    visit(replaced);
-    if (left) return undefined;
+    const shiftedBase = base.subs(shift);
+    const shiftedBody = body.subs(shift);
+    // The shifted divisor is already the quadratic form when the point is
+    // the origin (`x² + y²`): there is nothing to replace, and `replace()`
+    // gives `null`. Otherwise the divisor must be gone from the shifted
+    // integrand, or the rounding error of the shift stays.
+    let replaced: Expression | null = shiftedBody;
+    if (!shiftedBase.isSame(quadratic)) {
+      replaced = shiftedBody.replace(
+        { match: shiftedBase, replace: quadratic },
+        { recursive: true }
+      );
+      if (replaced === null) return undefined;
+      let left = false;
+      const visit = (e: Expression): void => {
+        if (left) return;
+        if (e.isSame(shiftedBase)) left = true;
+        else if (isFunction(e)) e.ops.forEach(visit);
+      };
+      visit(replaced);
+      if (left) return undefined;
+    }
+    shiftedFns.push(ce.expr(['Function', replaced, ...vars]));
   }
-  const fn = ce.expr(['Function', replaced, ...vars]);
+  const unshiftedFn = ce.expr(['Function', body, ...vars]);
 
   let estimate = 0;
   let error = 0;
   let infinity = 0;
   let noValue = false;
-  for (const [a, b] of pieces[0]) {
-    for (const [c, d] of pieces[1]) {
-      const r = nIntegrateMultiple(
-        ce,
-        fn,
-        [
-          ce.function('Limits', [
-            ce.symbol(vars[0]),
-            ce.number(a),
-            ce.number(b),
-          ]),
-          ce.function('Limits', [
-            ce.symbol(vars[1]),
-            ce.number(c),
-            ce.number(d),
-          ]),
-        ],
-        undefined,
-        false
-      );
-      if (r === undefined) return undefined;
-      const value = isFunction(r, 'Measurement') ? r.op1 : r;
-      if (!isNumber(value) || value.im !== 0) return undefined;
-      if (Number.isNaN(value.re)) noValue = true;
-      else if (!Number.isFinite(value.re)) {
-        const sign = Math.sign(value.re);
-        if (infinity !== 0 && infinity !== sign) noValue = true;
-        infinity = sign;
-      } else {
-        estimate += value.re;
-        if (isFunction(r, 'Measurement')) error += r.op2.re;
-      }
+  for (const part of parts) {
+    const fn = part.corner < 0 ? unshiftedFn : shiftedFns[part.corner];
+    const [px, py] = part.corner < 0 ? [0, 0] : points[part.corner].coordinates;
+    const [a, b] = part.x.map((v) => v - px);
+    const [c, d] = part.y.map((v) => v - py);
+    const r = nIntegrateMultiple(
+      ce,
+      fn,
+      [
+        ce.function('Limits', [ce.symbol(vars[0]), ce.number(a), ce.number(b)]),
+        ce.function('Limits', [ce.symbol(vars[1]), ce.number(c), ce.number(d)]),
+      ],
+      undefined,
+      false
+    );
+    if (r === undefined) return undefined;
+    const value = isFunction(r, 'Measurement') ? r.op1 : r;
+    if (!isNumber(value) || value.im !== 0) return undefined;
+    if (Number.isNaN(value.re)) noValue = true;
+    else if (!Number.isFinite(value.re)) {
+      const sign = Math.sign(value.re);
+      if (infinity !== 0 && infinity !== sign) noValue = true;
+      infinity = sign;
+    } else {
+      estimate += value.re;
+      if (isFunction(r, 'Measurement')) error += r.op2.re;
     }
   }
   if (noValue) return ce.NaN;
@@ -4166,7 +4233,7 @@ function integrateAroundSingularPoint(
 
 /**
  * The numeric value of a nested double integral, `∫_a^b (∫_c^d f dy) dx`,
- * when its integrand is singular at one point of the box (see
+ * when its integrand is singular at one or more points of the box (see
  * `integrateAroundSingularPoint`), or `undefined` in every other case.
  *
  * `fnExpr` is the integrand of the outer integral, a `Function` literal of
@@ -4393,9 +4460,10 @@ function nIntegrateMultiple(
   const interior = poleValue(interiorPoleVerdict);
   if (interior !== undefined) return interior;
 
-  // A double integral over a box whose integrand is singular at one point,
-  // `((x − a)² + (y − b)²)^(−1/2)`: the box is cut at the point and each
-  // part is integrated with the point at a corner (see
+  // A double integral over a box whose integrand is singular at one or more
+  // points, such as `((x − a)² + (y − b)²)^(−1/2)` at `(a, b)`: the box is
+  // cut at the points and each part is integrated with at most one point,
+  // at a corner (see
   // `integrateAroundSingularPoint`). The parts are integrated with this
   // function, with `splitAtSingularPoint` false, so that they are not cut
   // again.

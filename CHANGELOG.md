@@ -143,6 +143,17 @@
 
 ### Resolved Issues
 
+- **A numeric double integral whose integrand grows like `1/r` near two,
+  three or four points of the box now gives its value.** The potential of two
+  point charges over the unit square,
+  `\int_0^1\int_0^1 \frac{1}{\sqrt{(x-0.5)^2+(y-0.5)^2}}+\frac{1}{\sqrt{(x-0.25)^2+(y-0.25)^2}} dy\,dx`,
+  gave `0 ± 50000000` under `.N()`, and it now gives
+  `6.68863997708 ± 0.00000000038`. Since the previous release, this worked
+  for one such point only. The box is now cut at each point, and each part is
+  integrated with at most one point, at a corner. This applies to a sum and
+  to a product of such divisors. With five or more points, or with two
+  divisors that are zero at the same point, the box is still integrated
+  whole.
 - **The error of a call that returns a value of the wrong type, as a term of
   a sum or a factor of a product, now names that operand.** With
   `w = ["a"]`, the value of `["Multiply", ["At", "w", 1], ["Cos", "x"]]` was

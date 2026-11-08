@@ -444,6 +444,84 @@ describe('AN ISOLATED SINGULAR POINT IN A DOUBLE INTEGRAL', () => {
   });
 });
 
+describe('TWO OR MORE SINGULAR POINTS IN A DOUBLE INTEGRAL', () => {
+  // The box is cut at each coordinate of each singular point. A part with
+  // two singular points at its corners is cut again at its center, so that
+  // each part has at most one singular point, at a corner. The quadrature of
+  // the whole box cannot resolve two singular points: its uncertainty is
+  // about 10⁷. The value must agree with the exact sum, with an uncertainty
+  // below 10⁻⁶.
+  //
+  // The expected value of `1/r` with the point `(a, b)` in the unit square
+  // is the sum of `F` (the antiderivative of `1/r` over a rectangle with a
+  // corner at the point) over the four rectangles around the point.
+  const F = (a: number, b: number) =>
+    a * Math.asinh(b / a) + b * Math.asinh(a / b);
+  const G = (a: number, b: number) => {
+    let sum = 0;
+    for (const width of [a, 1 - a])
+      for (const height of [b, 1 - b])
+        if (width > 0 && height > 0) sum += F(width, height);
+    return sum;
+  };
+  const r = (a: string, b: string) =>
+    `\\frac{1}{\\sqrt{(x-${a})^2+(y-${b})^2}}`;
+  // The value and the uncertainty of the integral over the unit square. The
+  // time limit is far above the time each integral takes (about 2 to 5 s).
+  const integrate = (body: string): [number, number] => {
+    const ce = new ComputeEngine();
+    const result = ce.withTimeLimit(60_000, () =>
+      ce.parse(`\\int_0^1\\int_0^1 ${body} dy\\,dx`).N()
+    );
+    const json = result.json;
+    if (!Array.isArray(json) || json[0] !== 'Measurement')
+      return [result.re, 0];
+    return [json[1] as number, json[2] as number];
+  };
+
+  test('two points on a diagonal: the potential of two charges', () => {
+    const [estimate, error] = integrate(
+      `${r('0.5', '0.5')}+${r('0.25', '0.25')}`
+    );
+    expect(estimate).toBeCloseTo(G(0.5, 0.5) + G(0.25, 0.25), 8); // 6.6886399771
+    expect(error).toBeLessThan(1e-6);
+  });
+
+  test('two points on one line', () => {
+    // The points are at two corners of one side of the part between them.
+    const [sum, error] = integrate(`${r('0.25', '0.5')}+${r('0.75', '0.5')}`);
+    expect(sum).toBeCloseTo(G(0.25, 0.5) + G(0.75, 0.5), 8); // 6.6710209116
+    expect(error).toBeLessThan(1e-6);
+  });
+
+  test('two points at opposite corners of the box', () => {
+    const [estimate] = integrate(`${r('0', '0')}+${r('1', '1')}`);
+    expect(estimate).toBeCloseTo(2 * F(1, 1), 8); // 3.5254943481
+  });
+
+  test('a product of two divisors', () => {
+    // A sum of terms could be integrated term by term, but a product could
+    // not. The expected value was computed in polar coordinates around the
+    // singular corner of each part, with a Gauss–Legendre rule of 80 points.
+    const [estimate, error] = integrate(
+      '\\frac{1}{\\sqrt{((x-0.5)^2+(y-0.5)^2)((x-0.25)^2+(y-0.25)^2)}}'
+    );
+    expect(estimate).toBeCloseTo(11.2545137984, 8);
+    expect(error).toBeLessThan(1e-6);
+  });
+
+  test('four points', () => {
+    const [estimate, error] = integrate(
+      `${r('0.1', '0.2')}+${r('0.3', '0.4')}+${r('0.5', '0.6')}+${r('0.7', '0.8')}`
+    );
+    expect(estimate).toBeCloseTo(
+      G(0.1, 0.2) + G(0.3, 0.4) + G(0.5, 0.6) + G(0.7, 0.8),
+      8
+    ); // 12.7695723304
+    expect(error).toBeLessThan(1e-6);
+  });
+});
+
 describe('A DIAGONAL SINGULAR SET IN A TRIPLE INTEGRAL', () => {
   // `((x − ½)² + (y − z)²)^(−3/4)` is singular on the line `x = ½, y = z`,
   // a set of zero measure, and its triple integral over the unit cube is
