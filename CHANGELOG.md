@@ -478,6 +478,15 @@
   not known yet. `∫₁² 1/x dx` took about 138 µs and now takes about 122 µs
   (medians of seven rounds). The values and the effects do not change.
   (CE-351)
+- **The `latex` of a product with a rational coefficient is about 10 times
+  faster to compute.** To write `Multiply(1/8, Abs(Sin(8x + 1/1000)))`, the
+  serializer split the product into a numerator and a denominator, which
+  built and typed new expressions, and then wrote the product as it was. It
+  now writes such a product with no split. The serializer also no longer
+  computes the type of each sub-expression to find a dictionary. For the
+  1,000 elements of `\sum_{n=0}^{3}\frac{1}{2^n}|\sin(2^nx+\frac{[0...999]}{1000})|`,
+  reading `latex` took about 600 ms and now takes about 50 ms. The LaTeX
+  and the MathJSON do not change. (CE-1018)
 
 ## 0.183.0 _2026-11-07_
 

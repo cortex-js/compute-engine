@@ -1,5 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil';
+import { Product } from '../../src/compute-engine/boxed-expression/arithmetic-mul-div';
+import { _setProduct } from '../../src/compute-engine/boxed-expression/serialize';
 
 // ROADMAP CE-438 (Tycho row 444): the `latex` getter keeps its string for a
 // boxed expression (`latexStrings`, src/compute-engine/boxed-expression/
@@ -150,5 +152,67 @@ describe('CE-438: a product with no denominator', () => {
     ['y\\cdot(\\frac{a}{x})^2', '\\frac{ya^2}{x^2}'],
   ])('%s is written %s, as before', (input, expected) => {
     expect(new ComputeEngine().parse(input).latex).toBe(expected);
+  });
+});
+
+// CE-1018: a number literal factor never goes to the denominator of the
+// split (the serializer builds the `Product` with `canonical: false`, which
+// keeps a literal as a factor of the numerator), so a product whose only
+// other factors stay in the numerator is not split. Before, every product
+// with a rational coefficient was split, and the split gave the same
+// product back: it built and typed new nodes for nothing.
+describe('CE-1018: a product with a number literal factor', () => {
+  /** Counts the `Product` objects that the serializer builds. */
+  function countingProducts(): { calls: () => number; restore: () => void } {
+    let n = 0;
+    class CountingProduct extends Product {
+      constructor(...args: ConstructorParameters<typeof Product>) {
+        super(...args);
+        n++;
+      }
+    }
+    _setProduct(CountingProduct as never);
+    return { calls: () => n, restore: () => _setProduct(Product as never) };
+  }
+
+  test.each([
+    [
+      '\\frac{1}{8}|\\sin(8x+\\frac{1}{1000})|',
+      '\\frac{1}{8}\\vert\\sin(8x+\\frac{1}{1\\,000})\\vert',
+    ],
+    ['-\\frac{3}{4}|x|', '-\\frac{3\\vert x\\vert}{4}'],
+    ['\\frac{2}{3}\\sqrt{2}y', '\\frac{2\\sqrt{2}y}{3}'],
+    ['0.5\\sin(x)', '0.5\\sin(x)'],
+  ])('%s is written %s, with no split', (input, expected) => {
+    const e = new ComputeEngine().parse(input);
+    const { calls, restore } = countingProducts();
+    try {
+      expect(e.latex).toBe(expected);
+      expect(calls()).toBe(0);
+    } finally {
+      restore();
+    }
+  });
+
+  test.each([
+    ['\\frac{1}{2}\\cdot\\frac{1}{x}\\cdot y', '\\frac{y}{2x}'],
+    ['\\frac{1}{2}x^{-2}', '\\frac{1}{2x^2}'],
+    ['\\frac{1}{2}\\cdot\\frac{a}{b}', '\\frac{a}{2b}'],
+  ])('%s with a denominator is still split: %s', (input, expected) => {
+    const e = new ComputeEngine().parse(input);
+    const { calls, restore } = countingProducts();
+    try {
+      expect(e.latex).toBe(expected);
+      expect(calls()).toBeGreaterThan(0);
+    } finally {
+      restore();
+    }
+  });
+
+  test('a symbol typed dictionary is written as a symbol', () => {
+    const ce = new ComputeEngine();
+    ce.declare('d', 'dictionary<integer>');
+    expect(ce.box('d').latex).toBe('d');
+    expect(ce.box('d').json).toBe('d');
   });
 });

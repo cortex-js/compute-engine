@@ -40,7 +40,7 @@ import type {
   JsonSerializationOptions,
   DisplayDigits,
 } from '../global-types.js';
-import { boxBignumResult, isDictionary, isOperatorDef } from './utils.js';
+import { boxBignumResult, isOperatorDef } from './utils.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
 import { freeAnonymousSlots } from './function-literal.js';
 import {
@@ -50,6 +50,7 @@ import {
   isCharacter,
   isFunction,
   isObject,
+  isDictionary,
   containsContinuationOperand,
 } from './type-guards.js';
 import { isImaginaryPartFinite } from './imaginary-part.js';
@@ -181,14 +182,21 @@ function serializeSubtract(
  * (`Product.asNumeratorDenominator()`). `Product` takes an exact integer
  * exponent out of a power and splits its base too (`(a/x)^2` is `a^2·x^{-2}`),
  * and it splits a negation and a nested product into their parts, so the
- * test looks into them the same way: an exact number that is not an integer
- * (`1/2`), a `Divide`, a power or root whose exponent is not a known
- * non-negative real number or whose base can contribute a denominator, and a
- * negation or product of such a factor. Any other factor stays in the
- * numerator, so a product of such factors is not a fraction.
+ * test looks into them the same way: a `Divide`, a power or root whose
+ * exponent is not a known non-negative real number or whose base can
+ * contribute a denominator, and a negation or product of such a factor. Any
+ * other factor stays in the numerator, so a product of such factors is not a
+ * fraction.
+ *
+ * A number literal is never in the denominator, also a rational one such as
+ * `1/2`. The serializer builds the `Product` with `canonical: false`, and
+ * such a product does not fold a number literal into its coefficient: it
+ * keeps the literal as a factor with the exponent 1, which is a factor of
+ * the numerator. So `Multiply(1/8, |u|)` is written as it is, and the split,
+ * which builds and types new nodes, is not made for it.
  */
 function mayContributeDenominator(x: Expression): boolean {
-  if (isNumber(x)) return x.isExact && x.isInteger !== true;
+  if (isNumber(x)) return false;
   if (!isFunction(x)) return false;
   const op = x.operator;
   if (op === 'Divide') return true;
@@ -1591,11 +1599,14 @@ function serializeJsonExpression(
       latex: expr.verbatimLatex,
     });
 
-  // Is it a dictionary *value*? (`isDictionary` is type-based, so a symbol
-  // merely *typed* `dictionary` matches too — it has no entries and must
-  // serialize as a symbol below. Re-entering the public `toMathJson()` here
-  // would recurse forever and re-trip its option-validation warnings.)
-  if (isDictionary(expr) && Array.isArray(expr.entries)) {
+  // Is it a dictionary *value*? The test is on the kind of the node, not on
+  // its type: a symbol merely *typed* `dictionary` has no entries and must
+  // serialize as a symbol below, and reading the type of every node that is
+  // serialized derives the type of each node that the serializer builds (the
+  // quotient of a product, for one), which was about 40 % of the time of
+  // `.latex` for a sum of products. Re-entering the public `toMathJson()` here
+  // would recurse forever and re-trip its option-validation warnings.
+  if (isDictionary(expr)) {
     if (options.shorthands.includes('dictionary')) {
       const json = expr.json;
       // `.json` serializes every entry with the default options, so the
