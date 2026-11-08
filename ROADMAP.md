@@ -894,6 +894,92 @@ alone.
   third pass compacts the list. Today the kernel declines, and the host must
   filter the list after the kernel or put the test in the element.
 
+### CE-1158. GPU targets: `fract(c · n)` with a literal `c` and an integer `n` in exact integer arithmetic
+
+**Status:** ready; capability, M. Approved by the user 2026-11-08 (option 1 of
+the report on the Buddhabrot kernel in a worker). Links: CE-1075 (closed, the
+kernel), `docs/plans/2026-11-07-ce1093-parallel-for.md` §6,
+`src/compute-engine/compilation/gpu-exact-trig.ts` (the sibling lowering for
+the sine hash).
+**Witness:** corpus; the step of Tycho's showcase entry `buddhabrot`, whose
+sample `k` is at `3 · fract(0.7548776662 · (r + k)) − 2` with `r + k` up to
+1.2 million per statement and growing with each firing of the action.
+
+**The problem.** A shader computes in `f32`. The kernel emits the sample
+sequence as `fract(0.7548777 * (f32(k) + ce_params.r))`: the constant is
+rounded to `f32` and so is the product. At `n = 1.2 · 10⁶` the product is
+about `9 · 10⁵`, where the spacing of `f32` is `0.0625`, so only 16 distinct
+fractions remain and the low-discrepancy sequence is gone. The 200-cell grid
+needs a resolution near `1/200`, which `f32` keeps only while the product is
+below about `84,000`, that is about `110,000` samples. The 5,000-sample
+test of CE-1075 did not reach this. The compilation model allows it (the
+precision of the target), so it is not a defect; it makes the kernel unusable
+for the witness at its size. The same loss happens on GLSL for a colour that
+hashes an integer index, `fract(0.618 · i)`, once `i` is large.
+
+**The lowering.** `Fract(u)` and `Mod(u, 1)` on the GLSL and WGSL targets,
+when `u` is a `Multiply` with exactly one numeric literal factor `c` that is
+not an integer (a float or an exact rational, of either sign) and whose other
+factors each have the static type `integer` (their product `n` is then an
+integer; in the witness, `n = r + k` with `r = H[90001]` of a
+`list<integer>` and `k` the index of the range). Every other `Fract` keeps its
+code, including `fract(c · n + d)` and a product with a real factor.
+
+- The constant: `C = round(frac(|c|) · 2⁶⁴)` from the exact `f64` value of `c`
+  (`BigInt`; an `f64` in `(0, 1)` is a dyadic rational, so the product is
+  exact for `|c| ≥ 2⁻¹²` and rounded below), as two `u32` words `hi`, `lo`.
+  The integer part of `c` is dropped: an integer times an integer has no
+  fractional part. The `f64` value, not the decimal text, because the CPU
+  targets multiply by the `f64` value: the GPU then reproduces the CPU's
+  sequence, not a more exact one.
+- The arithmetic: `w = hi · m + mulhi(lo, m)` in wrapping `u32` arithmetic,
+  with `m = u32(|n|)` and `mulhi` the high word of the 64-bit product of two
+  `u32` (four 16-bit partial products; Tycho's hand-written probe
+  `scripts/repros/2026-11-07-buddhabrot-webgpu-probe.mjs` has this form).
+  Then `f = f32(w >> 8) / 2²⁴`, the fractional part of `|c| · |n|` to 24 bits.
+  The sign: when exactly one of `c`, `n` is negative, the result is
+  `1 − f` for `f ≠ 0` and `0` for `f = 0`.
+- The range: the GPU targets carry an integer as `f32`, so `u32(|n|)` is exact
+  only for `|n| < 2²⁴`. Beyond, the `f32` value of `n` itself is wrong, so the
+  emitted code selects the plain `fract(c · n)` for `|n| ≥ 2²⁴` and the exact
+  form below (`select` on WGSL, a ternary on GLSL). This is a
+  known-limitations line of `docs/COMPILATION-MODEL.md`: exact for
+  `|n| < 16,777,216`.
+- Where: a new file `gpu-weyl-fract.ts` beside `gpu-exact-trig.ts`, called
+  first by the `Fract` handler of `gpu-functions.ts` (and by the path that
+  turns `Mod(u, 1)` into `fract`, `gpuAbsorbedConstant('fract', 1, 1)` in
+  `wgsl-target.ts` and `glsl-target.ts`: check that it reaches the handler,
+  or add the call there). Helpers `_gpu_mulhi` and `_gpu_weyl` in the shared
+  GPU preamble, registered the way `gpu-nan-safe.ts` registers
+  `_gpu_isnonfinite`, so that `preambleFor(code)` includes them when the code
+  names them. GLSL ES 3.00 has `uint` with wrapping multiply and `uint(float)`;
+  declare the helpers `highp` (a `mediump uint` can be 16 bits). WGSL has
+  `u32` and `u32(f32)`, which saturates.
+- Precision claim, to state in the test and the guide: for `|n| < 2²⁴` the
+  GPU value differs from the CPU `f64` value of `fract(c · n)` by less than
+  `2⁻²³` (the 24-bit truncation plus `n · 2⁻⁶⁴` plus the `f64` product's
+  rounding), unless the `f64` value is within that distance of an integer,
+  where the two can differ by a wrap.
+
+**Tests.** `test/compute-engine/compile-gpu-weyl-fract.test.ts`: the emitted
+text on both targets for the witness line and for `Mod(u, 1)`; a JavaScript
+model of the emitted `u32` arithmetic (`BigInt`) against the `f64`
+`fract(c · n)` for `c = 0.7548776662`, `0.5698402910`, a negative `c`, an
+exact rational `1/7`, over `n` sampled in `[0, 2²⁴)` with `1,200,000` and
+`2²⁴ − 1` included, error below `2⁻²³`; the sign cases; the selection of the
+plain form at `|n| ≥ 2²⁴`; `fract(c · n + d)` and `fract(x · n)` with `x`
+real unchanged. The witness test in `compile-wgsl-kernel.test.ts` expects the
+new form. The GPU run is Tycho's: its probe with the counts of 1,200,000
+samples against the interpreter, where the only differences left are the
+`f32` escapes of CE-1075 (same sample positions).
+
+**Documentation.** `docs/COMPILATION-MODEL.md` (the GPU precision notes and
+the known-limitations line), the compile guide
+`~/dev/cortexjs.io/docs/compute-engine/13-guide-compile.md` (the WGSL kernel
+section and the shader precision notes), `CHANGELOG.md`. Tell Tycho
+(`~/dev/tycho/docs/COMPUTE_ENGINE_LOG.md` or the session that owns the entry)
+that the step needs no rewrite of the sequence.
+
 ### CE-1110. GPU targets: read a parameter declared `real` as an argument that is not NaN, for `Max` and `Min`
 
 **Status:** waits for user (approval); performance, S. Recorded by the user
