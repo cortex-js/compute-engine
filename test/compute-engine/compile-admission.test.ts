@@ -2681,8 +2681,10 @@ describe('Assignments in a function literal (R3)', () => {
 
   // A block that assigns a parameter of an enclosing function writes the
   // parameter, in the interpreter and in the compiled code, although the
-  // local scope of the block lists it. At p = 2 the interpreter gives 14
-  // and [6, 6]; the compiled code gave 8 and null.
+  // local scope of the block lists it. At p = 2 the interpreter gives 8
+  // (the guard runs one time for each element: 2 + 1 + 2 + 3) and [6, 6].
+  // The compilation declines, because the program writes a parameter inside
+  // the `Comprehension`.
   test.each<[string, MathJsonExpression, unknown]>([
     [
       'a guard',
@@ -2703,7 +2705,7 @@ describe('Assignments in a function literal (R3)', () => {
         ],
         ['Add', 'p', 0]
       ),
-      14,
+      8,
     ],
     [
       'a body',

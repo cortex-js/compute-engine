@@ -768,8 +768,11 @@ describe('At — an aggregate index whose shape lives only in a local frame', ()
   });
 
   test('a vector-typed user-function parameter index declines', () => {
-    // A SYNTHESIZED signature: `gpuDeclaredTypeOf` has nothing for `p`, so the
-    // frame's width is the only reading of it there is.
+    // The argument `v` is a list input, so the shader call `f(v)` takes a
+    // copy of `f` whose body reads the input `v` in place of the parameter
+    // `p`. The index of `At` is then the input itself, a vector of 3 values
+    // known only at run time, and a gather with a run-time index vector is
+    // not lowered: the compilation declines with that reason.
     const cef = new ComputeEngine();
     cef.declare('v', 'vector<3>');
     cef.declare('f', '(vector<3>) -> number');
@@ -781,7 +784,7 @@ describe('At — an aggregate index whose shape lives only in a local frame', ()
       msg = e.message;
     }
     expect(msg).toMatch(
-      /index is the local name "p", which holds an aggregate/
+      /the index is a collection of 3 runtime-valued entries/
     );
   });
 

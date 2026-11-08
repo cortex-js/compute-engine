@@ -119,7 +119,9 @@ needs a user decision (no option is clearly sound, or a documented contract
 changes), write the options with an example for each and your recommendation
 in the body of `issues/{{ID}}.md`, run `issues.mjs set {{ID}} state
 needs-decision` and `set {{ID}} ask "<one sentence: what the board must
-choose>"`, commit nothing else, and stop. When you stop before the work is
+choose>"`, commit nothing else, and stop: a code change committed with the
+question can be made wrong or not necessary by the decision, and the board
+reads only the issue. When you stop before the work is
 done, run `issues.mjs set {{ID}} state open`, add one paragraph to the body
 that says what remains and where the worktree is, and leave the worktree in
 place.

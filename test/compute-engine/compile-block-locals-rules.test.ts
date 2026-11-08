@@ -390,10 +390,14 @@ describe('THE TWO SPELLINGS OF A DECLARATION COMPILE THE SAME', () => {
     // The interpreter gives the same values.
     ce.assign('x', 0);
     ce.assign('P', ce.box(['List', 0, 1]));
-    const interpreted = expr.N().json as any[];
-    expect(interpreted[0]).toBe('List');
-    expect(Number(interpreted[1])).toBeCloseTo(1, 12);
-    expect(Number(interpreted[2])).toBeCloseTo(
+    // Read each element as a number from the boxed value: at the default
+    // precision an element can be a decimal with more digits than a double,
+    // and its MathJSON form is then an object `{ num: "…" }`, not a number.
+    const interpreted = expr.N();
+    expect(interpreted.operator).toBe('List');
+    const elements = [...interpreted.each()].map((e) => e.re);
+    expect(elements[0]).toBeCloseTo(1, 12);
+    expect(elements[1]).toBeCloseTo(
       Math.cos(1) + 2 * Math.sin(1),
       12
     );
