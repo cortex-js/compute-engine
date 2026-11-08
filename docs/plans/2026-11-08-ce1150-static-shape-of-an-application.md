@@ -9,6 +9,17 @@ as the accessor `staticShape` (`BoxedFunction.staticShape`, `_typeShape()`,
 `docs/COLLECTIONS-MODEL.md`, "The shape of an unevaluated application". Date:
 2026-11-08. Issue: `issues/CE-1150.md` (Tycho ROADMAP row LK). Size: M.
 
+DECISION 2026-11-08 (after the audit
+`docs/plans/2026-11-08-iscollection-readers-audit.md`): `isCollection` stays
+the capability "a collection value is present", and is not renamed; the
+migration of the getters to the static shape is CLOSED, not deferred. Of the
+214 readers of `isCollection` in the engine, 137 ask whether a value is
+present, 59 ask the shape (50 of them already paired with a type test), 4 need
+a constant value, and 83 sites would change their result if the getter
+answered from the type. The one follow-up the user may pick up: the shape
+readers that are not yet paired with a type test read `staticShape` or the
+type instead, one line each.
+
 STATE 2026-11-08, end of day: the user chose option (b) (a separate
 accessor), and it is implemented. `Expression.staticShape`
 (`types-expression.ts`) gives `{ indexed, count, elementType }` or
