@@ -156,6 +156,15 @@
 
 ### Resolved Issues
 
+- **A function that a function body defines reads the variables of the body
+  when a closure calls it after the call has ended.** With the body
+  `Block(Declare(c, "real", 5), DefineFunction(h, k ↦ c + k), Assign(g, x ↦ h(x)))`
+  applied to `1`, the call `g(10)` gave `c + 10`; it now gives `15`. A
+  closure that the body returns (`k ↦ h(k)`) had the same defect, with
+  `evaluate()` and with `evaluateAsync()`, and so did a function of the body
+  that reads a parameter of the body. Each call keeps its own values: a
+  closure of an earlier call still reads the values of that call.
+
 - **A function whose body defines a helper with `let` or `=` and calls it
   with a parameter takes a list argument whole when the helper does.**
   With `function f(xs) { let h = (t) => count(t); h(xs) }`, `f([1, 2])`

@@ -4237,8 +4237,11 @@ export function resolveEscapingLambda(
 const BLOCK_RUN_CAPTURES = new WeakMap<Scope, Scope>();
 
 /**
- * For each scope that `closeOverBlockRun` makes, the scope of the block whose
- * run it holds (the template). The key is the map of bindings of the scope:
+ * For each scope that holds a run of another scope (the template): a scope
+ * that `closeOverBlockRun` or `captureNestedLocals` makes, with the scope of
+ * the block whose run it holds, or the call frame of a function literal that
+ * a closure reads after the call, with the body scope of the literal
+ * (`recordCallFrameRun`). The key is the map of bindings of the scope:
  * when the end of a call re-roots a literal again, the copy of the scope
  * shares that map (`rerootCapturedLocals`), so the copy is found too.
  * `capturedRunOf` reads it.
@@ -8582,12 +8585,17 @@ export function functionLiteralDefiningScope(
  * `Apply(Block(Declare(c, 'real', 5), DefineFunction(h, k ↦ c + k), k ↦ h(k)), 1)`
  * gave `c + 1` with `evaluateAsync()` and `6` with `evaluate()`.
  *
+ * The call frame of a function literal whose body is the block is also a run
+ * of the body scope, on both routes (`recordCallFrameRun`): the locals of the
+ * body are declared in the frame, and the parent of the body scope is the
+ * frame only while the call runs.
+ *
  * The caller is lexically inside that run of the block, because only a
  * closure of the run has the copy in its chain. The first scope of the chain
  * that is the template, or such a copy of a run of it (`BLOCK_RUN_TEMPLATES`),
- * is used. Only these copies are matched, and only the asynchronous route
- * makes them, so a synchronous evaluation of the block does not depend on an
- * earlier asynchronous one.
+ * is used. Only these scopes are matched. A copy of an activation is made
+ * only on the asynchronous route, so a synchronous evaluation of a nested
+ * block does not depend on an earlier asynchronous one.
  */
 function capturedRunOf(ce: ComputeEngine, template: Scope): Scope | undefined {
   for (let s: Scope | null = ce.context.lexicalScope; s != null; s = s.parent) {
@@ -8595,6 +8603,28 @@ function capturedRunOf(ce: ComputeEngine, template: Scope): Scope | undefined {
     if (BLOCK_RUN_TEMPLATES.get(s.bindings) === template) return s;
   }
   return undefined;
+}
+
+/**
+ * Record the call frame `frame` of a function literal as a run of its body
+ * scope `bodyScope` (`BLOCK_RUN_TEMPLATES`). Call it when a closure that
+ * reads the frame leaves the call: a closure that the call returns, or one
+ * that the body creates (it can leave by an assignment to an outer
+ * variable).
+ *
+ * A function that the body defines with `DefineFunction` keeps the body
+ * scope as its defining scope, and reads the locals of the body (declared in
+ * the frame) through the parent of the body scope, which is the frame only
+ * while the call runs. After the call, a closure that calls the function has
+ * the frame in its chain, and `capturedRunOf` finds it there. Without the
+ * record, with `f := n ↦ Block(Declare(c, 'real', 5), DefineFunction(h, k ↦
+ * c + k), Assign(g, x ↦ h(x)))`, the call `g(10)` after `f(1)` gave `c + 10`,
+ * not `15`, and the closure `k ↦ h(k)` that the same body returns gave the
+ * same result.
+ */
+function recordCallFrameRun(frame: Scope, bodyScope: Scope): void {
+  BLOCK_RUN_TEMPLATES.set(frame.bindings, bodyScope);
+  TEMPLATES_WITH_BLOCK_RUNS.add(bodyScope);
 }
 
 /**
@@ -8624,6 +8654,7 @@ function rerootOnCreatingFrame(ce: ComputeEngine, fn: Expression): Expression {
   // assignment to an outer variable): the pop of the frame keeps its
   // definitions alive (`retainScope`).
   retainScope(top.parent);
+  recordCallFrameRun(top.parent, top);
   return captureClosures(ce, fn, top.parent, top);
 }
 
@@ -9739,8 +9770,12 @@ function makeLambda(
         const readersBefore = nodesReadingLeftCall;
         result = captureClosures(ce, result, freshScope, bodyScope);
         // A closure of the result reads the frame after the call: the pop
-        // keeps its definitions alive (`nodesReadingLeftCall`).
-        if (nodesReadingLeftCall !== readersBefore) retainScope(freshScope);
+        // keeps its definitions alive (`nodesReadingLeftCall`), and a function
+        // that the body defines finds the frame (`recordCallFrameRun`).
+        if (nodesReadingLeftCall !== readersBefore) {
+          retainScope(freshScope);
+          recordCallFrameRun(freshScope, bodyScope);
+        }
         // The rebuild keeps the creation context of each lazy callback view.
         if (lazyViewRecordSerial() !== viewSerial)
           carryLazyViewContexts(uncaptured, result);
@@ -11127,8 +11162,12 @@ function makeLambda(
         keptNodes
       );
       // A closure of the result reads the frame after the call: the pop
-      // keeps its definitions alive (`nodesReadingLeftCall`).
-      if (nodesReadingLeftCall !== readersBefore) retainScope(freshScope);
+      // keeps its definitions alive (`nodesReadingLeftCall`), and a function
+      // that the body defines finds the frame (`recordCallFrameRun`).
+      if (nodesReadingLeftCall !== readersBefore) {
+        retainScope(freshScope);
+        recordCallFrameRun(freshScope, bodyScope);
+      }
       if (viewsMade) carryLazyViewContexts(uncaptured, result);
 
       // Substitute unresolved parameter occurrences with their final values.
