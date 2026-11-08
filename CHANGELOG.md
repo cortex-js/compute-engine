@@ -450,6 +450,16 @@
 
 ### Performance
 
+- **A compiled minimum or maximum of a `Map` over a list of known length runs
+  as fast as the written-out form.** `Min(Map(k ↦ (x − k)² + (2k)², L))`, where
+  `L` is a list of up to 64 elements whose length is known at compile time,
+  compiles to `Math.min(…)` of one written-out body per element, on every
+  target. The JavaScript code built the mapped list at each call and folded
+  it, which took 2.5 to 6 times as long per call (73 ns against 29 ns for
+  `L = x + [0, 4, 2]`, 202 ns against 31 ns for a list of 24 numbers). A
+  nested `Max` of a `Map` in the function is written out too. The values do
+  not change. A `Map` whose function has an effect, or whose value is a list,
+  keeps its fold.
 - **More copies of a sub-expression read the value of the first copy in one
   `evaluate()`.** Two cases computed each copy again: a copy that is a branch
   of `Which` (or of another operator that evaluates its operands itself), and

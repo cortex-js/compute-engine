@@ -322,6 +322,15 @@ interpreter's value. A line is removed when the case declines or is fixed.
   interpreter gives `(NaN, NaN)`, a false restriction of a point (user
   decision of 2026-11-03). With `c: boolean | list<boolean>`, `If(c, P)`
   agrees: the declared union compiles one body per member.
+- `javascript`, `x: real`, the option `operators: { Add: ['*', 11] }`:
+  `Min(Map(k ↦ x + k, [0, 1, 2, 3, 4, x]))` at `x = 2` gives 2, where the
+  caller's `*` applied to each element gives 0 (`2 * 0`). The interpreter
+  does not read the option and gives 2. The unroll pass (`tryUnrollMap()` in `compilation/fixed-width-unroll.ts`)
+  writes out a `Map` over a list of five or more elements, and the
+  substitution builds `x + 0` again in canonical form, as `x`, so the
+  caller's operator is lost. The same applies to the shader targets, which
+  write out a `Map` of any width. A `Map` under a `Min` or a `Max` over a
+  narrower list declines this rewrite when the caller supplies a head in it.
 
 ## Shapes are settled at compile time
 

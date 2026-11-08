@@ -24,6 +24,7 @@ import {
   literalTakesArgumentCount,
 } from './compile-parameter-defaults.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
+import { unrollFits, unrolledTermSize } from './unroll-budget.js';
 import {
   builtinCallbackArity,
   builtinOperatorDefinition,
@@ -274,7 +275,9 @@ const MAX_REWRITE_ROUNDS = 16;
  * all — a three-element `Min` declines today. The n-ary form the rule produces
  * (`Math.min(a, b, c)`, `min(a, b, c)`, a fold of `_IA.min`) is at least as
  * good as a reduce over an array at every width, so rule 3 applies from one
- * element up.
+ * element up. For the same reason, a `Map` that is the operand of a `Min` or
+ * a `Max` is written out at every width ({@link unrollMappedExtremum}): its
+ * list goes into the n-ary form, not into a list lowering of the target.
  *
  * Exported because the JavaScript target reads the SAME boundary from the
  * other side. Where this pass fans a literal collection out from five elements
@@ -340,6 +343,7 @@ function rewrite(
     const next =
       foldPointAccessor(node, options) ??
       tryUnrollMap(node, options) ??
+      unrollMappedExtremum(node, options) ??
       unrollReduction(node, options) ??
       distributeOverList(node, options) ??
       foldLiteralIndex(node, options) ??
@@ -1021,14 +1025,23 @@ function literalPointOperands(
  * shader targets) has no `Map` lowering at all, so for it the width floor does
  * not apply, and the source can also be any list whose width the structure
  * proves ({@link mapSourceElements}).
+ *
+ * `reduced` is set by {@link unrollMappedExtremum}, for a `Map` that is the
+ * operand of a `Min` or a `Max`. The written-out list then goes into an n-ary
+ * `Min` or `Max`, not into a list lowering of the target, so the rule accepts
+ * the same sources and bodies as for a shader target, on every target. It
+ * also limits the total size of the written-out bodies
+ * ({@link writtenOutFits}).
  */
 function tryUnrollMap(
   expr: Expression,
-  options: UnrollOptions
+  options: UnrollOptions,
+  reduced = false
 ): Expression | undefined {
   if (!isFunction(expr, 'Map') || expr.nops !== 2) return undefined;
   const callback = expr.op1;
-  const elements = mapSourceElements(expr.op2, options);
+  const writeAll = reduced || options.unrollComprehensions === true;
+  const elements = mapSourceElements(expr.op2, options, writeAll);
   if (elements === undefined) return undefined;
   if (isSymbol(callback))
     return unrollMapOfNamedFunction(callback.symbol, elements, expr.engine);
@@ -1089,20 +1102,42 @@ function tryUnrollMap(
     return undefined;
   // A body with a binder of its own (an inner lambda, a `Sum`) is written
   // out only for a target with no `Map` lowering at all (the shader
-  // targets). Every other target lowers the `Map` as a loop, and writing
-  // out a nested `Map` over two wide lists there gives N×M copies of the
-  // inner body: 2 MB of JavaScript for two lists of 300 elements.
+  // targets), or for a `Map` under a `Min` or a `Max` (`reduced`). Every
+  // other target lowers the `Map` as a loop, and writing out a nested `Map`
+  // over two wide lists there gives N×M copies of the inner body: 2 MB of
+  // JavaScript for two lists of 300 elements. `nestedUnrollFits` limits the
+  // count of such copies to `MAX_UNROLLED_COMPREHENSION_SIZE`.
   if (
-    options.unrollComprehensions === true
+    writeAll
       ? !binderSafeSubstitution(body, parameter, elements) ||
         !nestedUnrollFits(body, elements.length)
       : collectBinderNames(body).size > 0
   )
     return undefined;
+  if (reduced && !writtenOutFits(body, elements.length)) return undefined;
 
   return expr.engine.function(
     'List',
     elements.map((e) => body.subs({ ...defaults, [parameter]: e }))
+  );
+}
+
+/**
+ * Do `width` copies of `body` stay within the size limit of an unrolled
+ * clause (`unrollFits()` in `unroll-budget.ts`: at most
+ * `MAX_UNROLLED_COMPREHENSION_SIZE` copies and at most `MAX_UNROLLED_NODES`
+ * nodes in all)? A `Map` under a `Min` or a `Max` is written out on targets
+ * that have a `Map` lowering too, and there a long body over a wide list is
+ * better as a loop, which holds the body once. The estimate counts the
+ * nodes of the body before the substitution: an element that replaces the
+ * parameter counts as one node, also when it is an expression
+ * (`x + 4` for the source `x + [0, 4, 2]`).
+ */
+function writtenOutFits(body: Expression, width: number): boolean {
+  return unrollFits(
+    width,
+    unrolledTermSize(body),
+    MAX_UNROLLED_COMPREHENSION_SIZE
   );
 }
 
@@ -1254,13 +1289,17 @@ function writtenBodies(e: Expression): number | undefined {
  *    `x + 4` and `x + 2`.
  * The count is capped at `MAX_UNROLLED_COMPREHENSION_SIZE`, and at the
  * target's iteration budget when it has one, as for a comprehension.
+ *
+ * `writeAll` gives these sources on every target. It is set for a shader
+ * target and for a `Map` under a `Min` or a `Max` ({@link tryUnrollMap}).
  */
 function mapSourceElements(
   source: Expression,
-  options: UnrollOptions
+  options: UnrollOptions,
+  writeAll = options.unrollComprehensions === true
 ): ReadonlyArray<Expression> | undefined {
   if (isUnrollableList(source, options)) return source.ops;
-  if (options.unrollComprehensions !== true) return undefined;
+  if (!writeAll) return undefined;
   if (!isFunction(source)) return undefined;
   if (options.skipHeads?.has(source.operator) === true) return undefined;
   if (readsCallerSource(source, options)) return undefined;
@@ -1530,6 +1569,65 @@ function unrollReduction(
   return expr.engine.function(head, keepSeed ? [seed, ...list.ops] : list.ops, {
     form: 'structural',
   });
+}
+
+/**
+ * `Min(Map(f, L))` or `Max(Map(f, L))`, where the width of `L` is known at
+ * compile time, rewritten to the n-ary `Min(f(e1), …, f(eN))` or
+ * `Max(f(e1), …, f(eN))` on every target.
+ *
+ * Without this rule, a target with a `Map` lowering builds the mapped list
+ * at run time and folds it: the JavaScript target emitted
+ * `((_f) => L.map((_x) => _f(_x)))(f)` and a `reduce` over the result,
+ * which cost 2.5 to 6 times the written-out form per call (a Voronoi
+ * diagram, `Min(Map(k ↦ (x − k)² + (2k)², [24 numbers]))`). The rule
+ * accepts any width, with the limits of {@link mapSourceElements} and
+ * {@link writtenOutFits}, because the written-out list goes into an n-ary
+ * call, not into a list lowering of the target.
+ *
+ * The `Map` is written out by {@link tryUnrollMap}, with its conditions:
+ * a pure body and pure elements, and a substitution that no inner binder
+ * changes. Then {@link unrollReduction} writes the n-ary form, with its
+ * conditions: no head that the caller supplies, and elements that are
+ * provably numbers (`Min` over a written-out list of lists would flatten
+ * nested data, which a target can refuse where it compiled the `Map`).
+ * When a condition fails, the node is returned unchanged.
+ *
+ * Two conditions are tested on the original nodes, before the rewrite:
+ *  - `Min` or `Max`, and `Map`, are the library operators where the
+ *    expression was built (`isLibraryOperator()`). A definition of `Map`
+ *    by the host has its own semantics, which the substitution would
+ *    replace. The new `Min` or `Max` node is bound in the scope of the
+ *    compilation, so a local definition of `Min` that the original node
+ *    holds would not be seen on the new node.
+ *  - no node of the `Map` has a head that the caller supplies
+ *    (`readsCallerSource()`). The substitution builds each body again in
+ *    canonical form, which can remove such a node: with
+ *    `operators: { Add: ['*', 11] }`, `x + k` at `k = 0` becomes `x`, not
+ *    `x * 0`.
+ *
+ * The values are the same: the interpreter evaluates `Min(Map(f, L))` as
+ * the minimum of the values `f(e)`, and so does the n-ary form. A `NaN`
+ * value gives `NaN` in both forms. An empty `L` is not rewritten
+ * (`mapSourceElements` gives no elements for it), because the n-ary form
+ * has no operand to give the `NaN` of an empty extremum.
+ */
+function unrollMappedExtremum(
+  expr: Expression & FunctionInterface,
+  options: UnrollOptions
+): Expression | undefined {
+  if (expr.operator !== 'Min' && expr.operator !== 'Max') return undefined;
+  if (expr.nops !== 1 || !isFunction(expr.op1, 'Map')) return undefined;
+  if (!isLibraryOperator(expr, expr.operator)) return undefined;
+  if (!isLibraryOperator(expr.op1, 'Map')) return undefined;
+  if (readsCallerSource(expr.op1, options)) return undefined;
+  const list = tryUnrollMap(expr.op1, options, true);
+  if (!isFunction(list, 'List') || list.nops === 0) return undefined;
+  const reduction = expr.engine.function(expr.operator, [list], {
+    form: 'structural',
+  });
+  if (!isFunction(reduction)) return undefined;
+  return unrollReduction(reduction, options);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
