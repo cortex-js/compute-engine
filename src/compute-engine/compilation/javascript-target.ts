@@ -14650,6 +14650,16 @@ function callbackArg(
   if (extraArgTypes.length === 0) {
     const eta = BaseCompiler.stringElementCallbackEta(callback, source, target);
     if (eta !== undefined) return compile(eta);
+    // A bare BLOCK-LOCAL function symbol over string elements compiles to
+    // the binding of the block, which has the same defect. The callback is
+    // the literal of the local with its parameter typed `string`, compiled
+    // here as the same literal written in place of the symbol is.
+    const typed = BaseCompiler.stringElementLocalCallback(
+      callback,
+      source,
+      target
+    );
+    if (typed !== undefined) return compile(typed);
   }
   // A one-parameter literal fed the elements of a range whose start and step
   // are finite literals receives a finite number at every call. It needs no

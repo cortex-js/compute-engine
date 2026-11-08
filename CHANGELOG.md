@@ -123,6 +123,16 @@
   first condition after the `k\in` clause was read; the second was dropped
   with no message, so the sum gave `5`. Every condition that follows the
   clause is now kept, joined with `And`, and the sum gives `2`.
+- **A function defined in a block and used with a string now gives the
+  interpreter's value in compiled JavaScript.** With `t: string`, the
+  compiled `["Block", ["Assign", "g", ["Function", ["Length", "s"], "s"]],
+  ["g", "t"]]` threw `RangeError: Length: the operand is not a list or a
+  set` at `t = "abc"`; it now gives `3`. With `S: list<string>`, the same
+  block with `["Map", "g", "S"]` threw at `S = ["xy", "z"]`; it now gives
+  `[2, 1]`, and so do `Filter`, `Count`, `Any` and `All` with `g` as their
+  predicate. The compilation declines, and the interpreter gives the value,
+  when the body of `g` reads another variable of the block, calls another
+  function of the block or calls `g` itself.
 
 ### Performance
 

@@ -331,6 +331,20 @@ interpreter's value. A line is removed when the case declines or is fixed.
   caller's operator is lost. The same applies to the shader targets, which
   write out a `Map` of any width. A `Map` under a `Min` or a `Max` over a
   narrower list declines this rewrite when the caller supplies a head in it.
+- `javascript`, `u: string | list<real>` at `u = "abc"` (crafted: a union
+  of a string and a list at a collection parameter):
+  `Block(Assign(g, s ↦ Length(s)), g(u))`, and `f(u)` with `f := s ↦
+  Length(s)` defined on the engine, throw `RangeError: Length: the operand
+  is not a list or a set at run time` (the function compiled with the
+  parameter typed `string` is used only for an argument whose static type is
+  a string); the interpreter gives 3.
+- `python`, `t: string` at a `t` of three code points, `e`, U+0301
+  (combining acute accent) and `x` (crafted: a character made of two code
+  points): `Block(Assign(g, s ↦ Reverse(s)), g(t))` gives the code points
+  `x`, U+0301, `e` (the body is compiled for a list, as `s[::-1]`, which
+  reverses the code points of a string); the interpreter gives the code
+  points `x`, U+00E9, the accented `e` kept as one character.
+  `Reverse(t)` written without the function declines.
 
 ## Shapes are settled at compile time
 
@@ -2294,6 +2308,44 @@ boolean, or a result that is an object or a function, bypasses the record. The
 record lives in the definition's closure, so two artifacts never share it. A
 definition called from one place, or only from the root, is emitted unchanged.
 The rule is implemented by `memoizeSharedDefinitions` in `javascript-target.ts`.
+
+### A string at a collection parameter
+
+A string is a collection of its characters, so a parameter that the body
+reads as a collection has a collection type: in `s ↦ Length(s)`, `s` is a
+`collection`. The function is compiled for a list or a set, and that code
+throws a `RangeError` for a string. On the JavaScript target, a use that
+gives a string to such a parameter therefore uses the function compiled with
+the parameter typed `string`. The uses are a call whose argument has a string
+type, and the function given by its name as the callback of an operator
+that passes one element (`Map`, `Filter`, `Count`, `Any`, `All`) over a
+collection of strings.
+
+- A function defined on the engine gets a copy with its own name
+  (`_fn_f_string`; `ensureSpecializedUserCallEmitted()` in
+  `compiler-core.ts`, `stringElementCallbackEta()` in
+  `compile-user-functions.ts`).
+- A block-local function is bound once in its block, so the function with
+  the parameter typed `string` is written at the use
+  (`stringTypedLocalLiteral()` in `compile-user-functions.ts`). A use that
+  gives a list keeps the binding of the block.
+
+The use of a block-local function declines when the function cannot be
+written there:
+
+| Program (`t: string`)                                              | Compiled JavaScript |
+| ------------------------------------------------------------------ | ------------------- |
+| `g := s ↦ Length(s)`, `g(t)`                                       | 3 at `t = "abc"`    |
+| `k := 2`, `g := s ↦ Length(s) + k`, `g(t)`                         | declines: the body reads `k`, a name bound at the use |
+| `k := x ↦ 2x`, `g := s ↦ k(Length(s))`, `g(t)`                     | declines: the body calls `k`, a name bound at the use |
+| `g := s ↦ If(Length(s) = 0, 0, 1 + g(Rest(s)))`, `g(t)`            | declines: the body calls `g` itself |
+| `g := (s, k) ↦ Length(s) + k`, `g(t, L)` with `L: list<real>`      | declines: the interpreter binds `L` whole, and the function typed `(string, k)` maps over a list |
+| `Declare(g, "(list<real>) -> integer", s ↦ Length(s))`, `g(t)`     | declines: the interpreter gives an `incompatible-type` error |
+
+The test for a name bound at the use does not tell a binder between the
+definition and the use from the block that defines the function, so a body
+that reads another local of that block declines too. A body that reads an
+input of the compiled expression compiles.
 
 ### Function values
 

@@ -106,7 +106,11 @@ import { tempVar, withBoundScope } from './compiler-naming.js';
 import { compileValueOperand } from './compile-statements.js';
 import { collectionElementTypeOf, typedTemp } from './compile-declarations.js';
 import { CompilerState } from './compiler-state.js';
-import { resetCompilationMemos, tryConstantFold } from './compile-folding.js';
+import {
+  parametersCanBeTyped,
+  resetCompilationMemos,
+  tryConstantFold,
+} from './compile-folding.js';
 import {
   absentPointType,
   appliedArgumentTypeMismatch,
@@ -121,6 +125,7 @@ import {
   pointLaneMismatch,
   laneMismatchAt,
   laneRequestParamType,
+  literalWithParameterTypes,
   namedPointArgumentAtUntypedParameter,
 } from './compile-callbacks.js';
 import { laneMismatch, userParamBinding } from './compile-lanes.js';
@@ -2278,6 +2283,181 @@ function localLaneMismatchAt(
 }
 
 /**
+ * For a use of the block-local function `literal` that gives a value of
+ * type `argTypes[i]` to parameter `i`: `'string'` at each position where
+ * the value is a string and the literal reads the parameter as a
+ * collection type wider than `string`, and `undefined` at every other
+ * position. `undefined` when no position is such a string.
+ *
+ * A string is a collection of its characters, so the body of
+ * `g := s ↦ Length(s)` infers `s: collection`, and an annotation
+ * `s: collection` gives the same type. The block binds the literal compiled
+ * against that type: `Length` of a `collection` reads the operand with
+ * `_SYS.elts`, which accepts an array or a set and throws a `RangeError`
+ * for a string, and `Reverse` calls a method that only an array has. The
+ * interpreter binds the string whole, and gives the number of its
+ * characters. A use that gives a string at such a parameter therefore
+ * needs the literal compiled with the parameter typed `string`
+ * (`stringTypedLocalLiteral()`).
+ *
+ * A parameter needs no other type when its type is not a collection type
+ * (`unknown`, `any`, `value`, a number), does not admit a string (`list`),
+ * or is `string` already: the binding of the block is then compiled as a
+ * string argument needs, or the interpreter refuses the string too. A
+ * literal with a generic signature is read at the bounds of its type
+ * variables by its call (`tryCompileLocalFunctionCall()`), and is left to
+ * that route.
+ */
+function stringTypesAtCollectionParameters(
+  literal: Expression & FunctionInterface,
+  argTypes: ReadonlyArray<Type>
+): ('string' | undefined)[] | undefined {
+  const signature = literal.type.type;
+  if (isPolymorphicType(signature)) return undefined;
+  let found = false;
+  const types = argTypes.map((t, i) => {
+    if (t === 'never' || !isSubtype(t, 'string')) return undefined;
+    const own = signatureParamType(signature, i);
+    if (
+      own === undefined ||
+      !isSubtype(own, 'collection') ||
+      !isSubtype('string', own) ||
+      isSubtype(own, 'string')
+    )
+      return undefined;
+    found = true;
+    return 'string' as const;
+  });
+  return found ? types : undefined;
+}
+
+/**
+ * The literal of the block-local function `h` with parameter `i` typed
+ * `types[i]` (`stringTypesAtCollectionParameters()`), for a use that gives
+ * a string to a parameter that the literal reads as a collection. The
+ * caller compiles this literal at the use, in place of a reference to the
+ * binding of the block, which is compiled for a list or a set.
+ *
+ * The compilation is declined, with the reason, when the literal cannot be
+ * written at the use:
+ * - The body assigns a parameter, or a parameter is a rest or a
+ *   destructuring parameter (`parametersCanBeTyped()`). A typed parameter
+ *   also checks each value assigned to it, which the parameter of the
+ *   original literal does not.
+ * - The body reads or calls a name that is bound at the use. A binder
+ *   between the definition and the use can bind that name to another
+ *   value, and the literal written at the use would read that value. The
+ *   test does not tell such a binder from the block that defines the
+ *   function, so a body that reads another local of that block, or calls
+ *   another function of that block, is declined too.
+ * - The body reads or calls `h` itself. A recursive call that gives a
+ *   string would write the literal again at each level, without end.
+ * - The literal with the typed parameters is not valid.
+ * - A `Declare` statement of `h` (`CompileTarget.declaredVarTypes`)
+ *   declares, for a parameter that receives a string, a type that no
+ *   string has: `g: (list<real>) -> integer`. The interpreter checks the
+ *   argument against that type too, and gives an `incompatible-type` error
+ *   for the string, where the typed literal would give a value.
+ */
+function stringTypedLocalLiteral(
+  h: string,
+  literal: Expression & FunctionInterface,
+  types: ReadonlyArray<Type | undefined>,
+  target: CompileTarget<Expression>
+): Expression & FunctionInterface {
+  const reason =
+    `Could not compile \`${h}\`: a string is given to a parameter that the ` +
+    `block-local function reads as a collection. The block binds the ` +
+    `function compiled for a list or a set, so this use needs the function ` +
+    `compiled with the parameter typed \`string\`, written at the use, and `;
+  const declaredSignature = target.declaredVarTypes?.[h];
+  types.forEach((t, i) => {
+    if (t === undefined) return;
+    const declared = signatureParamType(declaredSignature, i);
+    if (declared !== undefined && !couldMatch('string', declared))
+      throw new Error(
+        `Could not compile \`${h}\`: a string is given to parameter ` +
+          `${i + 1} of the block-local function, which a \`Declare\` ` +
+          `statement declares with the type ` +
+          `\`${typeToString(declared)}\`. No string has that type, so the ` +
+          `interpreter gives an \`incompatible-type\` error for this use.`
+      );
+  });
+  if (!parametersCanBeTyped(literal))
+    throw new Error(
+      `${reason}the body assigns a parameter, or a parameter is a rest or ` +
+        `a destructuring parameter.`
+    );
+  // The names that the body reads: its free symbols, and the head of each
+  // call, which `freeSymbolNames()` does not report. A node object can be
+  // at several positions of the body, so each node is walked once.
+  const names = freeSymbolNames(literal);
+  const walked = new Set<Expression>();
+  const addHeads = (node: Expression): void => {
+    if (!isFunction(node) || walked.has(node)) return;
+    walked.add(node);
+    names.add(node.operator);
+    for (const op of node.ops) addHeads(op);
+  };
+  addHeads(literal.op1);
+  const captured = [...names].find(
+    (n) => n === h || target.boundVars?.has(n) === true
+  );
+  if (captured !== undefined)
+    throw new Error(
+      `${reason}its body reads or calls \`${captured}\`, which a binding ` +
+        `at the use can change, or which is the function itself.`
+    );
+  const typed = literalWithParameterTypes(literal.engine, literal, types);
+  if (typed === undefined)
+    throw new Error(
+      `${reason}the function with the parameter typed \`string\` is not ` +
+        `valid.`
+    );
+  return typed;
+}
+
+/**
+ * The block-local function that the symbol `callback` names, with its
+ * parameter typed `string`, when `callback` is the unary element callback
+ * over a `source` whose elements are strings, on the JavaScript target, and
+ * the literal of the function reads its parameter as a collection type
+ * wider than `string` (`stringTypesAtCollectionParameters()`). `undefined`
+ * when nothing needs to change.
+ *
+ * With `g := s ↦ Length(s)` local to a block, the symbol `g` in callback
+ * position compiles to the binding of the block, whose `Length` reads the
+ * operand with `_SYS.elts`. That helper throws a `RangeError` for a string:
+ * `Map(g, S)` over `S: list<string>` threw, while the interpreter gives the
+ * number of characters of each string. The caller compiles the literal
+ * that this function gives as the callback, as it compiles the literal
+ * `(s: string) ↦ Length(s)` written in place of `g`.
+ *
+ * The compilation is declined when the typed literal cannot be written at
+ * the callback (`stringTypedLocalLiteral()`). A local whose literal cannot
+ * be read here (`blockLocalFunction()` gives `null`) and a function defined
+ * on the engine (`stringElementCallbackEta()`) are not changed.
+ */
+export function stringElementLocalCallback(
+  callback: Expression | undefined,
+  source: Expression | undefined,
+  target: CompileTarget<Expression> | undefined
+): Expression | undefined {
+  if (callback === undefined || source === undefined) return undefined;
+  if (target?.language !== 'javascript' || !isSymbol(callback))
+    return undefined;
+  const h = callback.symbol;
+  const literal = blockLocalFunction(h, target);
+  if (literal === undefined || literal === null || literal.ops.length !== 2)
+    return undefined;
+  const eltType = collectionElementTypeOf(source);
+  if (eltType === undefined) return undefined;
+  const types = stringTypesAtCollectionParameters(literal, [eltType]);
+  if (types === undefined) return undefined;
+  return stringTypedLocalLiteral(h, literal, types, target);
+}
+
+/**
  * If head `h` names a FUNCTION-VALUED BLOCK LOCAL of an enclosing statement
  * list (`target.localFunctions` — `const g = (k) => …` earlier in the same
  * block), compile the call site as an ordinary call of that binding.
@@ -2405,6 +2585,47 @@ export function tryCompileLocalFunctionCall(
       expressionAt,
       argTypes[expressionAt]
     );
+
+  // A STRING argument at a parameter that the literal reads as a collection
+  // type wider than `string` (`stringTypesAtCollectionParameters()`): with
+  // `g := s ↦ Length(s)`, `g(t)` for a string `t`. The binding of the block
+  // is compiled for a list or a set and throws a `RangeError` for a string,
+  // where the interpreter gives the number of characters. The call is
+  // compiled as the application of the literal with the parameter typed
+  // `string`, as `Apply((s: string) ↦ Length(s), t)` is: each argument is
+  // evaluated once, and `Length` counts the characters.
+  //
+  // The interpreter binds every argument of the call whole, because the
+  // literal has a collection parameter. When each parameter of the typed
+  // literal is a scalar, its application maps over a list argument
+  // instead. The two agree only when no argument is a list, so a call with
+  // an argument that is not provably a scalar then declines.
+  //
+  // JavaScript only, as the copy typed `string` of a function defined on
+  // the engine is (`ensureSpecializedUserCallEmitted()`, `compiler-core.ts`).
+  if (target.language === 'javascript') {
+    const stringTypes = stringTypesAtCollectionParameters(literal, argTypes);
+    if (stringTypes !== undefined) {
+      const typed = stringTypedLocalLiteral(h, literal, stringTypes, target);
+      const notScalar = argTypes.findIndex(
+        (t, i) => stringTypes[i] === undefined && !isScalarShaped(t)
+      );
+      if (notScalar >= 0 && paramsAreScalar(typed.type.type))
+        throw new Error(
+          `Could not compile \`${h}\`: a string is given to a parameter ` +
+            `that the block-local function reads as a collection, and ` +
+            `argument ${notScalar + 1}, of type ` +
+            `\`${typeToString(argTypes[notScalar])}\`, is not provably a ` +
+            `scalar. The interpreter binds each argument whole, and the ` +
+            `function compiled with the parameter typed \`string\` maps ` +
+            `over a list argument.`
+        );
+      return `(${core.compile(
+        literal.engine.function('Apply', [typed, ...args]),
+        target
+      )})`;
+    }
+  }
 
   const declared = literal.type?.type;
 
