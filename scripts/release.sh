@@ -40,7 +40,7 @@ set -o pipefail
 cd "$(dirname "$0")/.."
 
 BUMP="minor"
-YES=0
+YES=1
 for arg in "$@"; do
   case "$arg" in
     --yes) YES=1 ;;
@@ -67,7 +67,7 @@ DOC_FILES="src/api.md src/epsil/docs/errors.md src/epsil/docs/library.md src/eps
 
 # Step 1: checks that change nothing.
 if [ -n "$(git diff --cached --name-only)" ]; then
-  fail "Files are staged. Commit them, or remove them from the index, then run the release again."
+  fail "✗ Files are staged. Commit them then run the release again."
 fi
 # The files that the release writes must have no uncommitted change: the
 # release would overwrite it, commit it, or remove it with the undo command
@@ -77,7 +77,7 @@ fi
 OWN_CHANGES=$(git status --porcelain --untracked-files=all -- $VERSION_FILES $DOC_FILES)
 if [ -n "$OWN_CHANGES" ]; then
   echo "$OWN_CHANGES"
-  fail "The release writes these files, and they have uncommitted changes. Commit or remove them, then run the release again."
+  fail "✗ The release writes these files, and they have uncommitted changes. Commit or remove them, then run the release again."
 fi
 # The same rule as the check of `npm publish` (scripts/prepublish-check.sh),
 # so that a tree it refuses is refused here, before the version changes:
@@ -100,20 +100,20 @@ if [ -f "$SUITE_STATUS" ]; then
       ;;
     1)
       echo "$CHECK_OUTPUT"
-      fail "Commit or remove the uncommitted changes named above, then run the release again."
+      fail "✗ Commit or remove the uncommitted changes named above, then run the release again."
       ;;
     *)
       echo "$CHECK_OUTPUT"
-      fail "The release check failed with exit $CHECK_STATUS: it cannot tell whether the tree is clean."
+      fail "✗ The release check failed with exit $CHECK_STATUS: it cannot tell whether the tree is clean."
       ;;
   esac
 elif [ "${GITHUB_ACTIONS:-}" != "true" ] && [ "${CE_FULL_SUITE_PASSED:-}" != "1" ]; then
   # prepublish-check.sh refuses in this case too, but only after the release
   # commit.
-  fail "$SUITE_STATUS is missing, so the publish check cannot tell whether the full test suite passed. Run 'npm run ci:extended'; if it passes, run 'CE_FULL_SUITE_PASSED=1 npm run release -- $BUMP'."
+  fail "✗ $SUITE_STATUS is missing, so the publish check cannot tell whether the full test suite passed. Run 'npm run ci:extended'; if it passes, run 'CE_FULL_SUITE_PASSED=1 npm run release -- $BUMP'."
 elif [ -n "$(git status --porcelain --untracked-files=all)" ]; then
   git status --short --untracked-files=all
-  fail "The tree has uncommitted changes or untracked files (above). Commit or remove them, then run the release again."
+  fail "✗ The tree has uncommitted changes or untracked files (above). Commit or remove them, then run the release again."
 fi
 # npm settings that change what the release does: with ignore-scripts,
 # `npm version` and `npm publish` skip their hooks (the changelog, the build,
@@ -121,13 +121,13 @@ fi
 # the tag would still be made.
 for setting in ignore-scripts dry-run; do
   if [ "$(npm config get "$setting")" = "true" ]; then
-    fail "The npm setting '$setting' is on. Turn it off ('npm config delete $setting', or unset npm_config_$(printf '%s' "$setting" | tr - _)), then run the release again."
+    fail "✗ The npm setting '$setting' is on. Turn it off ('npm config delete $setting', or unset npm_config_$(printf '%s' "$setting" | tr - _)), then run the release again."
   fi
 done
 REGISTRY=$(npm config get registry)
 NPM_USER=$(npm whoami --registry "$REGISTRY" 2>/dev/null) ||
-  fail "Not authenticated with the npm registry ($REGISTRY). Run 'npm login', then run the release again."
-echo "✓ Authenticated with $REGISTRY as $NPM_USER"
+  fail "✗ Not authenticated with $REGISTRY. Run 'npm login', then run the release again."
+# echo "✓ Authenticated with $REGISTRY as $NPM_USER"
 # The checks of `npm run ci` that the full suite does not run, after a
 # Prettier step that formats the source and commits the files that changed
 # (scripts/release-checks.sh). They are skipped when the caller says that
@@ -153,13 +153,13 @@ if [ -d issues ]; then
   node scripts/issues.mjs release "$NEXT_VERSION" || ISSUES_STATUS=$?
   case $ISSUES_STATUS in
     0) ;;
-    1) fail "An issue assigned to $NEXT_VERSION is still open, is carried over from an earlier version, or a confirmed P0 is open (above). Nothing was changed. Fix, close or reassign the issues, then run the release again." ;;
-    *) fail "scripts/issues.mjs failed with exit status $ISSUES_STATUS (above). Nothing was changed." ;;
+    1) fail "✗ An issue assigned to $NEXT_VERSION is still open, is carried over from an earlier version, or a confirmed P0 is open (above). Nothing was changed. Fix, close or reassign the issues, then run the release again." ;;
+    *) fail "✗ scripts/issues.mjs failed with exit status $ISSUES_STATUS (above). Nothing was changed." ;;
   esac
 fi
 if [ "${GITHUB_ACTIONS:-}" != "true" ] && [ "${CE_FULL_SUITE_PASSED:-}" != "1" ]; then
   bash scripts/release-checks.sh ||
-    fail "A release check failed (above). Nothing was changed, except the formatting commit when the 'Formatting' line names one. Fix the cause, commit, then run the release again."
+    fail "✗ A release check failed (above). Nothing was changed, except the formatting commit when the 'Formatting' line names one. Fix the cause, commit, then run the release again."
 fi
 # CHECKED_SHA is the commit that the release checks checked. It is read
 # after them, because their formatting step can commit. The release commit
@@ -173,12 +173,12 @@ fi
 
 # Step 2: the version.
 OLD_VERSION=$(node -pe "require('./package.json').version")
-bash scripts/run-quietly.sh "Version ($BUMP)" npm version "$BUMP" --no-git-tag-version ||
-  fail "npm version failed. Restore the changed files listed by 'git status' before running the release again."
+bash scripts/run-quietly.sh "→ Version ($BUMP)" npm version "$BUMP" --no-git-tag-version ||
+  fail "✗ npm version failed. Restore the changed files listed by 'git status' before running the release again."
 VERSION=$(node -pe "require('./package.json').version")
 TAG="v$VERSION"
 if git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
-  fail "The tag $TAG exists already. Restore the files changed by 'npm version' (git status lists them)."
+  fail "✗ The tag $TAG exists already. Restore the files changed by 'npm version' (git status lists them)."
 fi
 # The version must be new on the registry too. Step 5 relies on this: when
 # the upload fails, finding this version on the registry then proves that
@@ -198,8 +198,8 @@ registry_has_version() {
 }
 case "$(registry_has_version)" in
   no) ;;
-  yes) fail "$PACKAGE@$VERSION is already on the registry. Restore the files changed by 'npm version' (git status lists them), then choose another version." ;;
-  *) fail "The registry did not say whether $PACKAGE@$VERSION exists (network error?). Restore the files changed by 'npm version' (git status lists them), then run the release again." ;;
+  yes) fail "✗ $PACKAGE@$VERSION is already on the registry. Restore the files changed by 'npm version' (git status lists them), then choose another version." ;;
+  *) fail "✗ The registry did not say whether $PACKAGE@$VERSION exists (network error?). Restore the files changed by 'npm version' (git status lists them), then run the release again." ;;
 esac
 
 # Step 3: the documentation.
@@ -209,7 +209,7 @@ undo_hint() {
   echo "  (and delete any new file that 'git status' lists under src/epsil/docs/reference)."
 }
 
-bash scripts/run-quietly.sh "Documentation" npm run doc || {
+bash scripts/run-quietly.sh "→ Documentation" npm run doc || {
   echo ""
   echo "✗ npm run doc failed. The version change ($OLD_VERSION → $VERSION) is in the tree, not committed."
   undo_hint
@@ -218,9 +218,9 @@ bash scripts/run-quietly.sh "Documentation" npm run doc || {
 
 # Step 4: the release commit.
 # shellcheck disable=SC2086 # The file lists are split on purpose.
-git add -- $VERSION_FILES $DOC_FILES || fail "git add failed."
+git add -- $VERSION_FILES $DOC_FILES || fail "✗ git add failed."
 echo ""
-echo "Release $OLD_VERSION → $VERSION. Changes to commit:"
+echo "  Release $OLD_VERSION → $VERSION. Changes to commit:"
 # shellcheck disable=SC2086 # The file lists are split on purpose.
 git diff --cached --stat -- $VERSION_FILES $DOC_FILES
 echo ""
@@ -266,14 +266,14 @@ if [ "$PARENT_SHA" != "$CHECKED_SHA" ]; then
   exit 1
 fi
 git commit -q -m "$VERSION" --only -- $VERSION_FILES $DOC_FILES ||
-  fail "git commit failed. The changes are staged."
+  fail "✗ git commit failed. The changes are staged."
 RELEASE_SHA=$(git rev-parse HEAD)
 # Another session can commit between `git commit` and the line above: HEAD
 # would then be its commit. The release commit has the version as its
 # message and the HEAD before the commit as its parent.
 if [ "$(git log -1 --format=%s "$RELEASE_SHA")" != "$VERSION" ] ||
   [ "$(git rev-parse "$RELEASE_SHA^")" != "$PARENT_SHA" ]; then
-  fail "HEAD moved right after the release commit: ${RELEASE_SHA:0:9} is not it. Nothing was published. Find the commit \"$VERSION\" with 'git log', then run 'npm publish' from a tree where it is HEAD."
+  fail "✗ HEAD moved right after the release commit: ${RELEASE_SHA:0:9} is not it. Nothing was published. Find the commit \"$VERSION\" with 'git log', then run 'npm publish' from a tree where it is HEAD."
 fi
 echo "✓ Committed ${RELEASE_SHA:0:9} \"$VERSION\""
 
@@ -288,7 +288,7 @@ UPLOAD_MARK="$(git rev-parse --git-dir)/ce-release-upload-mark"
 rm -f "$UPLOAD_MARK"
 if ! CE_RELEASE_SKIP_VSIX=1 CE_RELEASE_CHECKS_DONE=1 CE_RELEASE_SHA="$RELEASE_SHA" CE_RELEASE_UPLOAD_MARK="$UPLOAD_MARK" npm publish; then
   if [ ! -f "$UPLOAD_MARK" ]; then
-    fail "npm publish failed before the upload; nothing was published. The release commit ${RELEASE_SHA:0:9} stays. Fix the cause, commit, run 'npm publish', then tag the commit that was published: 'git tag $TAG <commit>'."
+    fail "✗ npm publish failed before the upload; nothing was published. The release commit ${RELEASE_SHA:0:9} stays. Fix the cause, commit, run 'npm publish', then tag the commit that was published: 'git tag $TAG <commit>'."
   fi
   rm -f "$UPLOAD_MARK"
   # The registry can take several minutes to show a new version: ask every
@@ -304,7 +304,7 @@ if ! CE_RELEASE_SKIP_VSIX=1 CE_RELEASE_CHECKS_DONE=1 CE_RELEASE_SHA="$RELEASE_SH
     sleep 30
   done
   if [ "$FOUND" -ne 1 ]; then
-    fail "The registry does not show $PACKAGE@$VERSION after 10 minutes: the upload most likely failed. The release commit ${RELEASE_SHA:0:9} stays. Run 'npm publish' again, then 'git tag $TAG ${RELEASE_SHA:0:9}'."
+    fail "✗ The registry does not show $PACKAGE@$VERSION after 10 minutes: the upload most likely failed. The release commit ${RELEASE_SHA:0:9} stays. Run 'npm publish' again, then 'git tag $TAG ${RELEASE_SHA:0:9}'."
   fi
   echo "✓ The registry shows $PACKAGE@$VERSION: the upload succeeded."
 fi
@@ -312,7 +312,7 @@ rm -f "$UPLOAD_MARK"
 
 # Step 6: the tag.
 git tag "$TAG" "$RELEASE_SHA" ||
-  fail "Published, but 'git tag $TAG $RELEASE_SHA' failed. Run it by hand, then 'bash scripts/package-vsix.sh'."
+  fail "✗ Published, but 'git tag $TAG $RELEASE_SHA' failed. Run it by hand, then 'bash scripts/package-vsix.sh'."
 echo "✓ Published $VERSION and tagged ${RELEASE_SHA:0:9} as $TAG"
 
 # Step 7: the VS Code extension.
@@ -328,11 +328,11 @@ same_tree_as_release() {
     [ -z "$(git status --porcelain --untracked-files=all -- src vscode-epsil package.json package-lock.json)" ]
 }
 same_tree_as_release ||
-  fail "The package is published and tagged, but the tree is no longer the release commit (HEAD moved, or src/, vscode-epsil/ or package.json has uncommitted changes). Package the extension from a checkout of $TAG: 'bash scripts/package-vsix.sh'."
+  fail "✗ The package is published and tagged, but the tree is no longer the release commit (HEAD moved, or src/, vscode-epsil/ or package.json has uncommitted changes). Package the extension from a checkout of $TAG: 'bash scripts/package-vsix.sh'."
 bash scripts/package-vsix.sh ||
-  fail "The package is published and tagged, but packaging the VS Code extension failed. Fix the cause, then run 'bash scripts/package-vsix.sh'."
+  fail "✗ The package is published and tagged, but packaging the VS Code extension failed. Fix the cause, then run 'bash scripts/package-vsix.sh'."
 same_tree_as_release ||
-  fail "The tree changed while the VS Code extension was packaged: vscode-epsil/epsil.vsix may not contain the published engine. Package it again from a checkout of $TAG."
+  fail "✗ The tree changed while the VS Code extension was packaged: vscode-epsil/epsil.vsix may not contain the published engine. Package it again from a checkout of $TAG."
 echo ""
 echo "✓ Released $VERSION. To push the commit and the tag:"
 echo "    git push && git push origin $TAG"

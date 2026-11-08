@@ -23,16 +23,14 @@ REGISTRY=$(npm config get registry)
 
 if ! NPM_USER=$(npm whoami --registry "$REGISTRY" 2>/dev/null); then
   echo ""
-  echo "✗ Not authenticated with the npm registry ($REGISTRY)."
-  echo "  Your npm token is missing or has expired."
+  echo "✗ Not authenticated with $REGISTRY."
   echo ""
   echo "  Run:  npm login"
-  echo "  then re-run:  npm publish"
   echo ""
   exit 1
 fi
 
-echo "✓ Authenticated with $REGISTRY as $NPM_USER"
+# echo "✓ Authenticated with $REGISTRY as $NPM_USER"
 
 # scripts/release.sh sets CE_RELEASE_SHA to the release commit that it made.
 # Another session can commit before this hook runs: the package would then
@@ -146,7 +144,7 @@ if [ "${1:-}" != "--after-pack" ]; then
   if [ "${CE_RELEASE_CHECKS_DONE:-}" != "1" ]; then
     bash scripts/release-checks.sh || {
       echo ""
-      echo "✗ A release check failed (above). Nothing was built or published."
+      echo "✗ A release check failed. Nothing was built or published."
       echo ""
       exit 1
     }
@@ -167,17 +165,14 @@ if [ "$(git rev-parse HEAD)" != "$(cat "$HEAD_FILE" 2>/dev/null)" ]; then
 fi
 release_check
 if [ "$STATUS" -eq 3 ]; then
-  echo "→ Running the full test suite at HEAD. It waits for the box lock, then"
-  echo "  takes about 7 minutes. (A one-time password given with --otp expires"
-  echo "  meanwhile: in that case run 'bash scripts/ci-nightly.sh run' first.)"
+  echo "→ Full test suite running (about 7 minutes)"
   bash scripts/ci-nightly.sh run --commit "$(git rev-parse HEAD)"
   release_check
   if [ "$STATUS" -eq 3 ]; then
     node "$SUITE_STATUS" release-check --repo .
     echo ""
-    echo "✗ The full test suite did not pass at HEAD, or did not complete (no box"
-    echo "  lock, or interrupted). Its log is named above. Fix the cause, commit,"
-    echo "  and re-run npm publish."
+    echo "✗ The full test suite did not pass at HEAD, or did not complete."
+    echo "Fix the cause, commit,  and re-run npm publish."
     echo ""
     exit 1
   fi
@@ -191,5 +186,5 @@ if [ "$(git rev-parse HEAD)" != "$(cat "$HEAD_FILE" 2>/dev/null)" ]; then
   echo ""
   exit 1
 fi
-echo "✓ Full test suite: passed at HEAD; the package is the checked code"
+echo "✓ Full test suite passed"
 mark_upload_next "${1:-}"

@@ -28,8 +28,8 @@ cd "$(dirname "$0")/.."
 
 QUIET="bash scripts/run-quietly.sh"
 bash scripts/release-format.sh &&
-  $QUIET "Lint" npm run lint &&
-  $QUIET "Documentation references" npm run check:docs &&
-  $QUIET "Circular imports" npm run check:deps &&
-  $QUIET "Script tests" npm run test:tools &&
-  $QUIET "Corpus pipeline" npm run ci:corpus-pipeline
+  $QUIET "→ Lint" npm run lint &&
+  $QUIET "→ Documentation references" npm run check:docs &&
+  $QUIET "→ Circular imports" npm run check:deps &&
+  $QUIET "→ Script tests" npm run test:tools &&
+  $QUIET "→ Corpus pipeline" npm run ci:corpus-pipeline

@@ -869,26 +869,29 @@ function release(all, version) {
       ready,
     });
   else {
-    console.log(`# Release ${version}, ${TODAY}`);
-    printList(
-      `Items of ${version}`,
-      items.map((i) => [i, isDone(i) ? 'done' : 'OPEN'])
-    );
-    printList(
-      'Carried over from an earlier version: set a new `release`',
-      carried.map((i) => [i, i.fields.release])
-    );
-    printList(
-      'Confirmed P0 open',
-      p0.map((i) => [i, ''])
-    );
+    // console.log(`# Release ${version}, ${TODAY}`);
+    if (items.length > 0)
+      printList(
+        `Items of ${version}`,
+        items.map((i) => [i, isDone(i) ? 'done' : 'OPEN'])
+      );
+    if (carried.length > 0)
+      printList(
+        'Carried over from an earlier version: set a new `release`',
+        carried.map((i) => [i, i.fields.release])
+      );
+    if (p0.length > 0)
+      printList(
+        'Confirmed P0 open',
+        p0.map((i) => [i, ''])
+      );
     if (broken.length)
       console.log(
         `\nFiles with lint errors (run lint): ${broken.map((i) => i.name).join(', ')}`
       );
     console.log(
       ready
-        ? `\n${version} can ship.`
+        ? `\n✓ Release ${version} is ready to ship.`
         : `\n${version} cannot ship: ${open.length} item(s) open, ${carried.length} carried over, ${p0.length} P0, ${broken.length} file(s) with errors.`
     );
   }

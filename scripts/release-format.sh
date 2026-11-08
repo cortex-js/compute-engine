@@ -27,20 +27,20 @@ cd "$(dirname "$0")/.."
 
 FORMAT_DIRS=(src vscode-epsil/src vscode-epsil/test)
 START=$SECONDS
-printf 'Formatting … '
+printf '→ Formatting … '
 
 DIRTY=$(git status --porcelain --untracked-files=all -- "${FORMAT_DIRS[@]}")
 if [ -n "$DIRTY" ]; then
   if OUT=$(npm run --silent format:check 2>&1); then
-    echo "checked, not formatted ($((SECONDS - START))s): uncommitted changes in ${FORMAT_DIRS[*]}"
+    echo "· checked, not formatted ($((SECONDS - START))s): uncommitted changes in ${FORMAT_DIRS[*]}"
     exit 0
   fi
   echo "failed"
   printf '%s\n' "$OUT"
   echo ""
-  echo "These files have uncommitted changes, so the source was not formatted:"
+  echo "  These files have uncommitted changes, so the source was not formatted:"
   printf '%s\n' "$DIRTY"
-  echo "Commit or remove them, then run the release again: it formats and commits."
+  echo "  Commit or remove them, then run the release again: it formats and commits."
   exit 1
 fi
 
@@ -52,7 +52,7 @@ if ! CHANGED=$(npm run --silent format -- --list-different 2>/dev/null); then
   exit 1
 fi
 if [ -z "$CHANGED" ]; then
-  echo "done ($((SECONDS - START))s), no file changed"
+  echo "done, no file changed"
   exit 0
 fi
 
@@ -61,11 +61,11 @@ while IFS= read -r FILE; do
   [ -n "$FILE" ] && FILES+=("$FILE")
 done <<< "$CHANGED"
 
-if ! git commit --quiet -m "Format the source with Prettier" -- "${FILES[@]}"; then
-  echo "failed"
-  echo "git commit failed (above). These files are formatted but not committed:"
+if ! git commit --quiet -m "chore format" -- "${FILES[@]}"; then
+  echo "✗ failed"
+  echo "  git commit failed. These files are formatted but not committed:"
   printf '  %s\n' "${FILES[@]}"
   exit 1
 fi
-echo "done ($((SECONDS - START))s), ${#FILES[@]} files formatted and committed as $(git rev-parse --short HEAD):"
-printf '  %s\n' "${FILES[@]}"
+echo "done, ${#FILES[@]} files formatted and committed"
+# printf '  %s\n' "${FILES[@]}"
