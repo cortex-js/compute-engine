@@ -119,10 +119,10 @@ describe('an error in an operand of a sum or product', () => {
 
 describe('a variable that holds a string, as an operand of a sum or product', () => {
   // The variable evaluates to a valid string, and the handler of `Add` or
-  // `Multiply` makes the type error, which names the string. The evaluation
-  // of the sum or product adds a frame for the variable whose value is that
-  // string (`_operandValueTypeError()` in
-  // `src/compute-engine/boxed-expression/boxed-function.ts`). Before, the
+  // `Multiply` makes the type error, which names the string. The handler
+  // records the operand whose value is that string, and the evaluation of
+  // the sum or product adds a frame for it (`recordRefusedOperand()` in
+  // `src/compute-engine/boxed-expression/error-value.ts`). Before, the
   // error had no frame, and the whole statement was underlined.
   const prefix = 'let s: any = "a"\n';
 
@@ -149,14 +149,53 @@ describe('a variable that holds a string, as an operand of a sum or product', ()
     const named = String(errors[0].message[1]).endsWith('at `a`') ? 's' : 't';
     expect(src.slice(errors[0].range[0], errors[0].range[1])).toBe(named);
   });
+});
 
-  test('a call that returns a string is not found: the statement is underlined', () => {
-    // The error names the value "a", and the call `w[1]` is not evaluated
-    // again to compare its value.
-    expect(
-      underlines('let w: any = ["a"]\nlet v = w[1] * Cos(x)\n0')
-    ).toEqual(['let v = w[1] * Cos(x)']);
+describe('a call that returns a string, as an operand of a sum or product', () => {
+  // The handler of `Add` or `Multiply` records the operand that it
+  // evaluated to the string that the error names. The call is not
+  // evaluated again. Before, the error had no frame, and the whole
+  // statement was underlined.
+  const prefix = 'let w: any = ["a"]\nlet y = 5\n';
+
+  test.each([
+    ['let v = w[1] * Cos(x)', 'w[1]'],
+    ['let v = Cos(x) * w[1]', 'w[1]'],
+    ['let v = w[1] + Cos(x)', 'w[1]'],
+    ['let v = 2 * w[1]', 'w[1]'],
+    ['let v = w[1] - 3', 'w[1]'],
+    ['let v = y * w[1] * Sin(x)', 'w[1]'],
+    ['let v = Sin(x) + 2 * w[1]', 'w[1]'],
+  ])('%s underlines %s', (stmt, expected) => {
+    expect(underlines(`${prefix}${stmt}\n0`)).toEqual([expected]);
   });
+
+  test('of two operands with the same value, the first is underlined', () => {
+    const src = `${prefix}let v = w[1] * w[1]\n0`;
+    const result = executeEpsil(new ComputeEngine(), src);
+    const ranges = result.diagnostics
+      .filter(
+        (d) => Array.isArray(d.message) && d.message[0] === 'runtime-error'
+      )
+      .map((d) => d.range);
+    const first = src.indexOf('w[1] *');
+    expect(ranges).toEqual([[first, first + 'w[1]'.length]]);
+  });
+
+  test.each([
+    ['"b"', 'let v = s * F()', 'F()'],
+    ['2', 'let v = F() * s', 's'],
+  ])(
+    'a call that assigns an operand and returns %s: %s underlines %s',
+    (value, stmt, expected) => {
+      // `F()` assigns `"a"` to the operand `s`. The handler records the
+      // operand from the values that it evaluated, so the operand that is
+      // underlined is the one whose value the handler refused: `F()` when it
+      // returns `"b"`, and `s` when `s` is evaluated after the call.
+      const src = `let s: any = 1\nlet F: () scope -> any = () => do { s = "a"\n ${value} }\n${stmt}\n0`;
+      expect(underlines(src)).toEqual([expected]);
+    }
+  );
 });
 
 describe('a sum or product in the body of a called function', () => {

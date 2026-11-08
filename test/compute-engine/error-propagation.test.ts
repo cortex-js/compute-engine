@@ -687,9 +687,11 @@ describe('ERROR PROPAGATION — the frame of a sum or a product names the operan
     expect(errorFrames(value)).toHaveLength(1);
   });
 
-  test('a product with an operand that is not pure adds no frame', () => {
+  test('a product with an operand that is not pure names the call', () => {
     // `F` assigns `s = "a"` and returns "a": the value that the handler read
-    // for `s` was 1, so `s` did not make the error.
+    // for `s` was 1, so `s` did not make the error. The handler records the
+    // operand from the values that it evaluated, so the frame names `F()`,
+    // not `s`, whose value after the evaluation is also "a".
     const ce = new ComputeEngine();
     ce.declare('s', 'any');
     ce.assign('s', 1);
@@ -701,9 +703,40 @@ describe('ERROR PROPAGATION — the frame of a sum or a product names the operan
         return ce.string('a');
       },
     });
-    const value = ce.box(['Multiply', 's', ['F']]).evaluate();
+    const expr = ce.box(['Multiply', 's', ['F']]);
+    const value = expr.evaluate();
     expect(value.operator).toBe('Error');
-    expect(errorFrames(value)).toEqual([]);
+    const frames = errorFrames(value);
+    expect(frames).toHaveLength(1);
+    expect(frames[0].operator).toBe('Multiply');
+    expect(expr.ops![frames[0].index - 1].operator).toBe('F');
+  });
+
+  test.each(['Add', 'Multiply'])(
+    'a call operand of %s that returns a string is named',
+    async (operator) => {
+      const ce = engine();
+      ce.declare('w', 'any');
+      ce.assign('w', ce.box(['List', "'a'"]));
+      const expr = ce.box([operator, ['Cos', 'x'], ['At', 'w', 1]]);
+      const value = expr.evaluate();
+      const frames = errorFrames(value);
+      expect(frames).toHaveLength(1);
+      expect(frames[0].operator).toBe(operator);
+      expect(expr.ops![frames[0].index - 1].operator).toBe('At');
+      expect(errorFrames(await expr.evaluateAsync())).toEqual(frames);
+    }
+  );
+
+  test('a cell of a broadcast product adds no frame for its operand', () => {
+    // The product `y·["a", 1]` evaluates the cell `y·"a"`, a node that was
+    // not written. A frame for the `"a"` of that cell would count its
+    // operands, not the operands of the written product.
+    const value = engine()
+      .box(['Multiply', 'y', ['List', "'a'", 1]])
+      .evaluate();
+    expect(value.operator).toBe('List');
+    expect(errorFrames(value.ops![0])).toEqual([]);
   });
 
   test('a sum in the body of a called function adds no frame', () => {

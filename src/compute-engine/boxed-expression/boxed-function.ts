@@ -442,6 +442,7 @@ import {
   isInvalidNonCollection,
   isIterableWithFailedCells,
   potentialErrorValue,
+  refusedOperand,
   withBroadcastFrame,
   withErrorFrames,
 } from './error-value.js';
@@ -7746,23 +7747,25 @@ export class BoxedFunction
 
   /**
    * The `incompatible-type` error that the handler of this node made for the
-   * value of one of its symbol operands, with a breadcrumb frame that names
-   * that operand, or `undefined`.
+   * value of one of its operands, with a breadcrumb frame that names that
+   * operand, or `undefined`.
    *
    * The handler of `Add` or `Multiply` evaluates its operands. When an
    * operand evaluates to a valid value of the wrong type, the handler returns
    * a type error that names the value, and this error is the value of the
-   * node: `s·Cos(x)` with `s = "a"` gives the error "expected `number`, got
-   * `string`" with the value `"a"`. No evaluation returned an error, so no
-   * record names the operand, and the error has no frame. Without a frame,
-   * the Epsil error location underlines the whole statement.
+   * node: `s·Cos(x)` with `s = "a"`, or `w[1]·Cos(x)` with `w = ["a"]`,
+   * gives the error "expected `number`, got `string`" with the value `"a"`.
+   * No evaluation returned an error, so no record of `errorEvaluatedFrom`
+   * names the operand. Without a frame, the Epsil error location underlines
+   * the whole statement.
    *
-   * The operand is the first symbol operand whose value is the same as the
-   * value that the error names. The value of a symbol is read from its
-   * binding: nothing is evaluated again. When two operands hold the same
-   * value (`s·s`), the first one is named. An operand that is not a symbol,
-   * such as a call that returns a string, is not found, and the error keeps
-   * no frame.
+   * The handler records the operand whose value the error names
+   * (`recordRefusedOperand()` in `error-value.ts`), from the values that it
+   * evaluated: nothing is evaluated again. When two operands have the same
+   * value (`s·s`), the first one is recorded. The frame is added only when
+   * the recorded operand is an operand of this node: a handler that runs
+   * for a node that the evaluation built (one cell of a broadcast) records
+   * an operand of that node.
    *
    * Only an error with no breadcrumb is read: an error with a breadcrumb was
    * made by the evaluation of an operand, not by this handler.
@@ -7772,16 +7775,10 @@ export class BoxedFunction
    * `_handlerOperandTypeError()`, which finds the evaluated operand that the
    * handler received.
    *
-   * The binding is read after the handler evaluated every operand. When an
-   * operand can assign a variable (`s·F()` with a function `F` that assigns
-   * `s = "a"` and returns `"a"`), the value of `s` that is read is not the
-   * value that the handler used. So no frame is added when the node is not
-   * pure (`isPure`).
-   *
    * The caller runs this function in the evaluation context of the node
    * (`withEvaluationContext()`): after the `await` of an asynchronous
-   * evaluation, the engine has another context, and a binding would be read
-   * in the wrong scope.
+   * evaluation, the engine has another evaluation-context stack, and the
+   * test for a `'call'` frame below would read the wrong stack.
    *
    * No frame is added when the node is evaluated in the body of a called
    * function: the evaluation-context stack holds a `'call'` frame, which the
@@ -7803,7 +7800,6 @@ export class BoxedFunction
       this.engine._evalContextStack.some((context) => context.name === 'call')
     )
       return undefined;
-    if (!this.isPure) return undefined;
     const code = result.op1;
     if (
       !isFunction(code, 'ErrorCode') ||
@@ -7811,11 +7807,9 @@ export class BoxedFunction
       code.op1.string !== 'incompatible-type'
     )
       return undefined;
-    const value = errorWhere(result);
-    if (value === undefined) return undefined;
-    const index = this._ops.findIndex(
-      (op) => isSymbol(op) && op.value?.isSame(value) === true
-    );
+    const operand = refusedOperand(result);
+    if (operand === undefined) return undefined;
+    const index = this._ops.indexOf(operand);
     if (index < 0) return undefined;
     return withErrorFrames(result, [
       { operator: this._operator, index: index + 1 },

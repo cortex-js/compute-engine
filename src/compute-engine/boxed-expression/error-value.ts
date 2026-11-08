@@ -633,6 +633,73 @@ export function isErrorFramedByNode(
 }
 
 /**
+ * The errors that the `evaluate` handler of a lazy operator made for the
+ * value of one of its operands, each mapped to that operand as written.
+ *
+ * The handler of `Add` or `Multiply` evaluates its operands itself. When an
+ * operand evaluates to a valid value of the wrong type, the handler returns
+ * a type error that names that value, and the error has no breadcrumb:
+ * `w[1]·Cos(x)` with `w = ["a"]` gives the error "expected `number`, got
+ * `string`" with the value `"a"`. Only the handler knows which operand gave
+ * the value. It records the operand here ({@link recordRefusedOperand}),
+ * and the evaluation of the node then adds the frame of that operand
+ * (`_operandValueTypeError()` in `boxed-function.ts`).
+ *
+ * The map holds its keys weakly, so a record goes away with its error.
+ */
+const refusedOperands = new WeakMap<Expression, Expression>();
+
+/**
+ * Record the operand of `ops` whose value the error `result` names, and
+ * return `result`. `ops` are the operands of the node as written, and
+ * `evaluated` holds the value of each operand, in the same order. See
+ * {@link refusedOperands}.
+ *
+ * Nothing is recorded when `result` is not an `Error` without breadcrumb,
+ * when `result` is the value of an operand (an error that an operand
+ * returned, which the handler passed through), when no value is the value
+ * that the error names, or when the operand with that value is its own
+ * value. The value is found by identity first, then by `isSame()`. When
+ * several operands have the value, the first one is recorded: the handler
+ * checks the operands in order.
+ */
+export function recordRefusedOperand(
+  result: Expression | undefined,
+  ops: ReadonlyArray<Expression>,
+  evaluated: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (
+    result === undefined ||
+    !isFunction(result, 'Error') ||
+    ops.length !== evaluated.length ||
+    evaluated.includes(result) ||
+    errorTrace(result) !== undefined
+  )
+    return result;
+  const where = errorWhere(result);
+  if (where === undefined) return result;
+  let index = evaluated.indexOf(where);
+  if (index < 0) index = evaluated.findIndex((x) => x.isSame(where));
+  if (index < 0) return result;
+  // An operand that is its own value, such as the string `"a"`, is not
+  // recorded. Canonicalization refuses such an operand in a sum or product
+  // as written (`1 + "a"`), so the node is one that the evaluation built,
+  // such as one cell `y·"a"` of the product `y·["a", 1]`. A frame for the
+  // operand of such a node would count operands that were not written.
+  const operand = ops[index];
+  if (operand === evaluated[index] || operand.isSame(evaluated[index]))
+    return result;
+  refusedOperands.set(result, operand);
+  return result;
+}
+
+/** The operand, as written, whose value the error `err` names, when the
+ * handler that made `err` recorded it ({@link recordRefusedOperand}). */
+export function refusedOperand(err: Expression): Expression | undefined {
+  return refusedOperands.get(err);
+}
+
+/**
  * The error for the first surplus operand of a call to a built-in operator
  * whose `evaluate` handler reads at most `max` operands, or `undefined` for
  * a call with `max` operands or fewer.

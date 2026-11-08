@@ -49,8 +49,8 @@ export type CanonicalOrder = {
    * the index counts the operands of the result of the evaluation. No such
    * case is known. The frame of an error that the handler of `Add` or
    * `Multiply` makes itself (`s * Cos(x)` with `s = "a"`) also counts the
-   * operands of the canonical call: it names the symbol operand whose value
-   * the error names (`_operandValueTypeError()` in
+   * operands of the canonical call: it names the operand whose value the
+   * error names (`_operandValueTypeError()` in
    * `boxed-expression/boxed-function.ts`). */
   argumentOffsets(
     operatorName: string,

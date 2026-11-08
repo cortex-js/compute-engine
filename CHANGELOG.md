@@ -71,12 +71,14 @@
   `["Apply", ["Module", "Floor"], x]` calls the library function `Floor`
   where a user function `Floor` exists. The canonical form of `Module(Pi)` is
   the symbol bound to the library definition. A qualified call is the plain
-  call `[f, …]` where `f` is not shadowed. Where it is shadowed, a call of an
-  ordinary library function (not lazy, no held or bound operand, no named
-  argument) stays `["Apply", f, …]` with the callee bound to the library
-  definition, and is evaluated from the values of its arguments, with no
-  symbolic simplification; any other qualified call there gives
-  `["Error", "'qualified-call-shadowed'", f]`. A name that the library does not
+  call `[f, …]` bound to the library definition, also where `f` is shadowed:
+  the library rules simplify it (`["Apply", ["Module", "Sqrt"], ["Power",
+  "y", 2]]` with a user function `Sqrt` and a real `y` simplifies to
+  `["Abs", "y"]`), a library function that holds or binds an operand reads
+  it as the library does (`Sum`, `If`), and a named argument is valid. The
+  arguments read the definitions of the scope: with a user function `Not`
+  that returns its argument, `["Apply", ["Module", "Not"], ["Not",
+  "False"]]` is `True`. A name that the library does not
   define gives `["Error", "'not-a-library-name'", name]`. A second operand is
   reserved for the name of another module. LaTeX has no spelling of the
   qualifier: `["Module", "Pi"]` is written `\pi`.
@@ -84,10 +86,10 @@
   library constant π and `std::floor(2.5)` calls the library function
   `Floor`, whatever the program binds: after `function Floor(x) { x + 100 }`
   and `let floor = 7`, `std::floor(2.5)` is `2`. Where a function or a
-  parameter of the program has the name, a qualified call of a library
-  function that holds or binds an argument (`std::sum(k, k in 1..3)` after
-  `function Sum(x) { 0 }`), or with a named argument, is the error
-  `qualified-call-shadowed`. `std` is not a reserved
+  parameter of the program has the name, a qualified call is still the call
+  of the library function, also of a library function that holds or binds
+  an argument, or with a named argument: after `function Sum(x) { 0 }`,
+  `std::sum(k, k in 1..3)` is `6`. `std` is not a reserved
   word, so `let std = 5` is still valid. A name other than `std` before `::`
   is the error `unknown-module`, and a name that the library does not define
   after `std::` is the error `not-a-library-name`. The serializer writes
@@ -140,6 +142,17 @@
   change.
 
 ### Resolved Issues
+
+- **The error of a call that returns a value of the wrong type, as a term of
+  a sum or a factor of a product, now names that operand.** With
+  `w = ["a"]`, the value of `["Multiply", ["At", "w", 1], ["Cos", "x"]]` was
+  the `incompatible-type` error with no `ErrorFrame`, so an Epsil program
+  `let v = w[1] * Cos(x)` underlined the whole statement. The error now has
+  the frame of the operand `w[1]`, and Epsil underlines `w[1]`. The same
+  applies to `Add`. The frame names the operand whose value the sum or
+  product refused, also when an operand assigns a variable: with a function
+  `F` that assigns `"a"` to `s` and returns `"b"`, the error of `s * F()`
+  names `F()`. Before, such a product had no frame.
 
 - **A function that calls a parameter with no declared signature does not
   claim a list type for that call.** The type of

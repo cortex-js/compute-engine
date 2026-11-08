@@ -68,7 +68,10 @@ import {
   isNearRoundingJumpValue,
 } from '../boxed-expression/numerics.js';
 import { addOrder } from '../boxed-expression/order.js';
-import { surplusOperandError } from '../boxed-expression/error-value.js';
+import {
+  recordRefusedOperand,
+  surplusOperandError,
+} from '../boxed-expression/error-value.js';
 import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';
 import { logarithmAtExceptionalPoint } from '../boxed-expression/logarithm.js';
 
@@ -7307,11 +7310,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ? x.evaluate({ numericApproximation: true })
             : x.evaluate()
         );
-        return addEvaluatedOperands(ops, evaluated, {
-          numericApproximation,
-          engine,
-          expression,
-        });
+        // A type error that names the value of an operand records that
+        // operand, for the frame of the error (`recordRefusedOperand()`).
+        return recordRefusedOperand(
+          addEvaluatedOperands(ops, evaluated, {
+            numericApproximation,
+            engine,
+            expression,
+          }),
+          ops,
+          evaluated
+        );
       },
       // The asynchronous twin of `evaluate`: each held operand is evaluated
       // with `evaluateAsync`, in order, so that a long operand (a `Sum` over
@@ -7359,11 +7368,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           engine,
           effects,
           () =>
-            addEvaluatedOperands(ops, evaluated, {
-              numericApproximation,
-              engine,
-              expression,
-            }),
+            recordRefusedOperand(
+              addEvaluatedOperands(ops, evaluated, {
+                numericApproximation,
+                engine,
+                expression,
+              }),
+              ops,
+              evaluated
+            ),
           _contextStack,
           _precisionWindow
         );
@@ -11204,11 +11217,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             engine,
             expression,
           });
-        return mulEvaluatedOperands(ops, evaluated, {
-          numericApproximation,
-          engine,
-          expression,
-        });
+        // A type error that names the value of an operand records that
+        // operand, for the frame of the error (`recordRefusedOperand()`).
+        return recordRefusedOperand(
+          mulEvaluatedOperands(ops, evaluated, {
+            numericApproximation,
+            engine,
+            expression,
+          }),
+          ops,
+          evaluated
+        );
       },
       // The asynchronous twin of `evaluate`: each held operand is evaluated
       // with `evaluateAsync`, in order, so that a long operand (a `Sum` over
@@ -11262,11 +11281,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                   engine,
                   expression,
                 })
-              : mulEvaluatedOperands(ops, evaluated, {
-                  numericApproximation,
-                  engine,
-                  expression,
-                }),
+              : recordRefusedOperand(
+                  mulEvaluatedOperands(ops, evaluated, {
+                    numericApproximation,
+                    engine,
+                    expression,
+                  }),
+                  ops,
+                  evaluated
+                ),
           _contextStack,
           _precisionWindow
         );
