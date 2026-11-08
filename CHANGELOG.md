@@ -462,6 +462,13 @@
   at each read. For a loop of 1,000,000 passes that adds 1 to two elements of
   a list (`L = ReplaceAt(L, c, L[c] + 1)`), `run()` took 15 ms and now takes
   3.5 ms. The emitted code and the values do not change.
+- **A definite integral is about 11% faster.** To know whether an expression
+  that applies a function literal (`x ↦ …`) has effects, such as a random
+  draw, the engine computed the full type of the literal, with the type of
+  its body. It now computes only the effects of the literal when its type is
+  not known yet. `∫₁² 1/x dx` took about 138 µs and now takes about 122 µs
+  (medians of seven rounds). The values and the effects do not change.
+  (CE-351)
 
 ## 0.183.0 _2026-11-07_
 

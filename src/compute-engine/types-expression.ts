@@ -1553,6 +1553,16 @@ export interface Expression {
   _effectsOf?(): ComputedEffects;
 
   /**
+   * The effects on the arrow of a function literal (an expression whose
+   * operator is `Function`), in canonical form: the effect slot of its
+   * signature type, computed without the rest of the type when the type is
+   * not in its cache. Present only on function expressions.
+   *
+   * @internal
+   */
+  _literalArrowEffects?(): EffectSet | undefined;
+
+  /**
    * `True` if evaluating this expression always returns the same value.
    *
    * If *true* and a function expression, implies that it is *pure* and

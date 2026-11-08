@@ -410,7 +410,7 @@ export function returnTypeText(t: Type): string {
  * `undefined`, `'any'` and the stated-pure `[]` are preserved exactly, and an
  * already-canonical array is returned unchanged (no allocation).
  */
-function canonicalEffectSet(
+export function canonicalEffectSet(
   effects: EffectSet | undefined
 ): EffectSet | undefined {
   if (effects === undefined || effects === 'any' || effects.length <= 1)

@@ -1355,8 +1355,14 @@ function valueHeadEffects(
  * `isPure` behavior for a bare symbol operand.
  */
 function latentEffectsOf(op: Expression): ComputedEffects {
-  // An inline literal: its own arrow, stamped by the construction seam.
-  if (isFunction(op, 'Function')) return signatureEffects(op.type.type);
+  // An inline literal: the effects of its own arrow, stamped by the
+  // construction seam. A `BoxedFunction` computes them without the types of
+  // the parameters and of the body when its type is not in its cache
+  // (`_literalArrowEffects()`).
+  if (isFunction(op, 'Function'))
+    return typeof op._literalArrowEffects === 'function'
+      ? op._literalArrowEffects()
+      : signatureEffects(op.type.type);
 
   const name = sym(op);
   if (name !== undefined) {

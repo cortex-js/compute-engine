@@ -126,3 +126,43 @@ flat: no function takes more than 4 % of its case on its own.
   of this, but the type is computed in the static view of the bindings and
   kept per generation, and a second route would have to give the same
   answer.
+
+## Measures of 2026-11-08 (session cebatch-351)
+
+Profile of `∫₁² 1/x dx` (bundle of the source with the options of the
+release build, one warm process): three reads compute the full type of a
+function literal, 11.8 % of the integral. Two of them only read the
+effects on its arrow, for `isPure`: the literal `F` of `EvaluateAt`
+(5.1 %) and, at the end of `evaluate()`, the integrand literal (3.2 %).
+The third is `integrateListIntegrand()`, which reads the result type of the
+integrand literal (3.5 %). The integrand is typed two times because the
+type cache key (`_typeCacheGeneration()`) moves during the evaluation: each
+literal that the integration boxes declares its parameter in a new scope,
+and the declaration, the inference of the parameter type and the pop of
+the scope each advance the type version. Of the type of a literal, the
+type of the body is 7.4 % and the effects walk 1.7 %.
+
+The change: when the type of an inline literal is not in its cache, its
+latent effects are computed alone (`BoxedFunction._literalArrowEffects()`,
+`functionLiteralArrowEffects()`), with the function that the type
+computation calls for its effect slot, in the same static view of the
+bindings. 150 related test files and the Epsil tests pass with
+`CE_EFFECTS_PARANOID=1`, which compares the two sets at each call.
+Medians of seven rounds of `benchmarks/type-derivation.mjs`, both orders of
+the two bundles, box lock held, load 1.4 to 1.9 on 18 cores, µs:
+
+```
+case                  before → after (order 1)   before → after (order 2)
+∫₁² 1/x dx              137.0 → 120.2 (−12%)      138.7 → 123.2 (−11%)
+```
+
+The other cases of the harness do not change (within 2 %).
+
+What remains for `∫₁² 1/x dx`: the application of the literal of
+`EvaluateAt` through `invoke()` (about 9 % for its call frame, its
+declarations and its clean-up), boxing the input and the literal, and the
+types computed again after each move of the type version. Not moving the
+type version for the declarations of the parameters of a literal while it
+is boxed would keep the cached types, but it is a change of the rule of the
+type cache (`typeVersion`, `engine-configuration-lifecycle.ts`), and needs
+its own analysis of soundness.

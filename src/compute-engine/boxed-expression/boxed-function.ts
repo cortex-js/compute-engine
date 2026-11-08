@@ -304,6 +304,7 @@ import {
 } from './generic-instantiation.js';
 import type {
   EffectLabel,
+  EffectSet,
   FunctionSignature,
 } from '../../common/type/types.js';
 import { Type } from '../../common/type/types.js';
@@ -365,6 +366,8 @@ import {
   widenWithNan,
   signatureSlotType,
   signatureArms,
+  signatureEffects,
+  canonicalEffectSet,
   staticCollectionDims,
   withoutKindArms,
 } from '../../common/type/utils.js';
@@ -464,6 +467,7 @@ import {
   cachedCell,
   cachedValue,
   CachedValue,
+  type CachedCell,
   forgetSettledValue,
 } from './cache.js';
 import { CACHE_STATS, recordCache } from '../../common/cache-stats.js';
@@ -551,6 +555,7 @@ import {
 } from './validate.js';
 import { admissionOf, concreteValueOf } from './value-membership.js';
 import {
+  functionLiteralArrowEffects,
   functionLiteralSignatureType,
   inferFunctionLiteralEffects,
   namedLiteralSignatureType,
@@ -4361,6 +4366,77 @@ export class BoxedFunction
     );
   }
 
+  /** Whether the `type` getter serves the value of `typeCell`, the cell of
+   * the type cache for `generation`, with no computation: the cache is on,
+   * the cell was consulted and filled at this generation, and the objects
+   * that the cached type read did not change since. */
+  private _typeCellServes(
+    typeCell: CachedCell<BoxedType | undefined>,
+    generation: number
+  ): boolean {
+    return (
+      !cacheOff('type') &&
+      this._typeGeneration === generation &&
+      typeCell.generation === generation &&
+      typeCell.value !== null &&
+      objectDepsValid(typeCell.objectDeps)
+    );
+  }
+
+  /**
+   * The effects on the arrow of this function literal (an expression whose
+   * operator is `Function`): the effect slot of its signature type, which
+   * the latent effects of an operand read (`latentEffectsOf()`,
+   * `effects-of.ts`). The result is in canonical form (sorted, with no
+   * repeated label).
+   *
+   * The type of a literal also has the types of its parameters and of its
+   * body, and these cost more than its effects: a definite integral boxes a
+   * new literal for `EvaluateAt` at each evaluation, and typing its body
+   * took about 5 % of the integral. So, when the type is not in its cache,
+   * the effects are computed alone, by the function that the type
+   * computation calls for its effect slot (`functionLiteralArrowEffects()`),
+   * in the same static view of the bindings. The type is read instead when
+   * it is in its cache; while it is being computed (a read inside that
+   * computation gets the provisional `unknown`, with no effects, and is
+   * noted as an answer that depends on the computations in progress); and
+   * when it is not computed by `functionLiteralSignatureType()`: for a
+   * literal that is not valid, or that the type computation reads from
+   * another node boxed again for its callee (`_reboxedForCallee()`,
+   * `_reboxedForForwardCallee()`).
+   *
+   * With `CE_EFFECTS_PARANOID` set, the effects computed alone are compared
+   * with those of the type, and a difference throws.
+   *
+   * @internal
+   */
+  _literalArrowEffects(): EffectSet | undefined {
+    const generation = this._typeStackDependent
+      ? this.engine._typeCacheFallbackGeneration()
+      : this.engine._typeCacheGeneration();
+    if (
+      !this.isValid ||
+      this._isTypeInFlight() ||
+      this._typeCellServes(cachedCell(this._type, generation), generation) ||
+      this._reboxedForCallee() !== undefined ||
+      this._reboxedForForwardCallee() !== undefined
+    )
+      return signatureEffects(this.type.type);
+    const effects = canonicalEffectSet(
+      withStaticTypingView(this.engine, () => functionLiteralArrowEffects(this))
+    );
+    if (EFFECTS_PARANOID) {
+      const fromType = signatureEffects(this.type.type);
+      if (!sameComputedEffects(effects, fromType))
+        throw new Error(
+          `CE_EFFECTS_PARANOID: the effects of a function literal computed ` +
+            `alone, ${JSON.stringify(effects)}, differ from those of its ` +
+            `type, ${JSON.stringify(fromType)}`
+        );
+    }
+    return effects;
+  }
+
   /** The type of the value of the function */
   get type(): BoxedType {
     // Keyed on `_typeCacheGeneration()`, which the declarations of a call of
@@ -4405,13 +4481,7 @@ export class BoxedFunction
     // the previous value from here — one computed under another key, which
     // since the value-shield key (`_cacheGeneration()`) can be the
     // value-blind answer of a shield, or the valued answer outside one.
-    if (
-      !cacheOff('type') &&
-      this._typeGeneration === generation &&
-      typeCell.generation === generation &&
-      typeCell.value !== null &&
-      objectDepsValid(typeCell.objectDeps)
-    ) {
+    if (this._typeCellServes(typeCell, generation)) {
       mergeObjectDeps(typeCell.objectDeps);
       if (CACHE_STATS) recordCache('type', 'hitFastPath');
       // A type that depends on the computations in progress makes the type

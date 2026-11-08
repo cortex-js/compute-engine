@@ -1852,7 +1852,6 @@ export function functionLiteralParameterSlots(
 }
 
 export function functionLiteralSignatureType(expr: Expression): Type {
-  const ce = expr.engine;
   const body = functionLiteralBody(expr);
   // A `Function` with no body (raw input held unbound by `Hold`) has no
   // signature to build: it is an error value, not a throw (CE-106).
@@ -1951,23 +1950,7 @@ export function functionLiteralSignatureType(expr: Expression): Type {
   if (ascribedReturn === undefined)
     bodyType = joinEarlyReturnTypes(derivedBodyExpr, args, bodyType);
 
-  // The effect specifier slot. An INFERRED empty set is written as an empty
-  // slot, i.e. nothing at all — the author's `pure` spelling is a statement,
-  // and inference states nothing (`inferFunctionLiteralEffects` collapses a
-  // `[]` accumulated from an applied stated-pure callback).
-  //
-  // A full-signature marker STATES the arrow's effects, so they join the
-  // inferred set: the union preserves a stated `[]` (`[] ∪ undefined = []`,
-  // spelled ` pure`) and, where the contract holds (`inferred ⊆ declared`),
-  // equals the declared set. Where it is violated the union is a sound
-  // over-approximation and the violation surfaces at install time, through the
-  // definition-annotation check.
-  const declaredEffects = functionLiteralDeclaredEffects(expr);
-  const inferredEffects = inferFunctionLiteralEffects(ce, expr).effects;
-  const effects =
-    declaredEffects === undefined
-      ? inferredEffects
-      : unionEffectSets(declaredEffects, inferredEffects);
+  const effects = functionLiteralArrowEffects(expr);
 
   // A GENERIC marker (a `where` clause) is the literal's contract of record on
   // every TYPE axis: the clause, the argument types and the result are carried
@@ -1996,6 +1979,43 @@ export function functionLiteralSignatureType(expr: Expression): Type {
     ...(effects !== undefined ? { effects } : {}),
     result: bodyType,
   };
+}
+
+/**
+ * The effects on the arrow of the function literal `expr`: the effect slot
+ * of its signature type (`functionLiteralSignatureType()`, which calls this
+ * function), computed without the types of the parameters and of the body.
+ *
+ * An inferred empty set is no slot (`undefined`): the author's `pure`
+ * spelling is a statement, and inference states nothing
+ * (`inferFunctionLiteralEffects()` collapses a `[]` accumulated from an
+ * applied stated-pure callback).
+ *
+ * A full-signature marker states the effects of the arrow, so they join the
+ * inferred set: the union keeps a stated `[]` (`[] ∪ undefined = []`,
+ * spelled ` pure`) and, where the contract holds (`inferred ⊆ declared`),
+ * equals the declared set. Where the contract is violated, the union is a
+ * sound over-approximation, and the violation is reported at install time
+ * by the definition-annotation check.
+ *
+ * A literal with no body has the type `error`, which has no effect slot:
+ * the result is `undefined`.
+ *
+ * Call it in the static view of the bindings (`withStaticTypingView()`), as
+ * the type computation does, so that both give the same set.
+ */
+export function functionLiteralArrowEffects(
+  expr: Expression
+): EffectSet | undefined {
+  if (functionLiteralBody(expr) === undefined) return undefined;
+  const declaredEffects = functionLiteralDeclaredEffects(expr);
+  const inferredEffects = inferFunctionLiteralEffects(
+    expr.engine,
+    expr
+  ).effects;
+  return declaredEffects === undefined
+    ? inferredEffects
+    : unionEffectSets(declaredEffects, inferredEffects);
 }
 
 /**
