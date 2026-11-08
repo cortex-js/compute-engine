@@ -309,14 +309,29 @@ const MAX_NESTED_PARTIAL_ORDER = 64;
  * `(x ↦ D(x^2, x))(x + 1)` gave `2x`. An occurrence that comes from the
  * variable of the binder cannot come from the argument, so it is replaced
  * here, where this is known: the value is `2(x + 1)`.
+ *
+ * `expression` is the node of the binder, from the options of its evaluate
+ * handler. The evaluation of a scoped node pushes the local scope of the node
+ * before it calls the handler, and the re-binding reads that scope on top of
+ * the stack. A host can call the handler with no `expression`: then no scope
+ * was pushed, the scope on top is the scope of the host (the global scope),
+ * and the result is not re-bound. A re-binding there would box each symbol
+ * of that scope again in its parent scope, which declares the name in the
+ * parent scope: `x` in the system scope, where it reads as a library
+ * definition that the global `x` hides, so the result would be written
+ * `["Cos", ["Module", "x"]]`.
  */
 function rebindEscapingBinderResult(
   ce: ComputeEngine,
   result: Expression,
   variables: readonly string[],
-  numericApproximation: boolean | undefined
+  numericApproximation: boolean | undefined,
+  expression: Expression | undefined
 ): Expression {
-  const rebound = rebindEscapingCurrentScope(ce, result);
+  const rebound =
+    expression?.localScope === undefined
+      ? result
+      : rebindEscapingCurrentScope(ce, result);
   if (variables.length === 0) return rebound;
   let closedValues = true;
   const inlined = rewriteWithBinders(rebound, (s, shadowed) => {
@@ -364,7 +379,8 @@ function rebindIntegralResult(
     ce,
     value,
     [...((expression && indefiniteIntegralVariables(expression)) ?? [])],
-    numericApproximation
+    numericApproximation,
+    expression
   );
 }
 
@@ -7184,7 +7200,8 @@ volumes
               ce,
               result,
               diffVars,
-              numericApproximation
+              numericApproximation,
+              expression
             );
       },
       compile: (args, compile, context) =>
@@ -10086,7 +10103,7 @@ volumes
         const n = ops[3] ? ops[3].canonical : ce.number(5);
         return ce._fn('Series', [f, x, x0, n]);
       },
-      evaluate: (ops, { engine: ce, numericApproximation }) => {
+      evaluate: (ops, { engine: ce, expression, numericApproximation }) => {
         const [f, xSym, x0, nExpr] = ops;
         const x = sym(xSym);
         if (!x || !x0) return undefined;
@@ -10119,7 +10136,8 @@ volumes
           ce,
           numericApproximation ? result.N() : result,
           [x],
-          numericApproximation
+          numericApproximation,
+          expression
         );
       },
     },

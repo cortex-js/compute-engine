@@ -2692,7 +2692,7 @@ export class BoxedFunction
       !isFoldBarrierProduct(this)
     ) {
       // Flatten the arguments if they are the same as the operator
-      const xs: Expression[] = this.ops.map((x) => x.structural);
+      const xs: Expression[] = this._structuralOps();
       let ys: Expression[] = [];
       if (!def.associative) ys = xs;
       else {
@@ -2730,7 +2730,7 @@ export class BoxedFunction
     // The operands are made structural outside the scope of
     // `_withLibraryBinding()`: a call of a user function `Floor` among them
     // must keep its own binding.
-    const structuralOps = this.ops.map((x) => x.structural);
+    const structuralOps = this._structuralOps();
     return this._withLibraryBinding(() =>
       this.engine.function(
         this._operator,
@@ -2743,6 +2743,23 @@ export class BoxedFunction
           },
         }
       )
+    );
+  }
+
+  /**
+   * The structural forms of the operands. The structural form of a call is
+   * boxed again by its name, so a scoped node (a `Function` literal, a
+   * `Block`) makes the structural forms of its operands in its own local
+   * scope, where its operands were bound. In `(N, a) ↦ N(a)`, the call
+   * `N(a)` is a call of the parameter `N`: boxed by name outside the scope
+   * of the literal, it would be a call of the library function `N`, and the
+   * MathJSON of the literal would be `["Apply", ["Module", "N"], "a"]`.
+   */
+  private _structuralOps(): Expression[] {
+    const scope = this._localScope;
+    if (scope === undefined) return this.ops.map((x) => x.structural);
+    return this.engine._inScope(scope, () =>
+      this.ops.map((x) => x.structural)
     );
   }
 
