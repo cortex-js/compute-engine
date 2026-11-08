@@ -185,7 +185,11 @@ export function createSymbolExpression(
           { type: declaredType, inferred: false },
           autoScope
         );
-      engine._setShadowedParameterDef(name, pdef);
+      engine._setShadowedParameterDef(
+        name,
+        pdef,
+        existingTyped === undefined
+      );
       const typedParamSym = new BoxedSymbol(engine, name, {
         metadata,
         def: pdef,
@@ -279,7 +283,7 @@ export function createSymbolExpression(
         },
         autoScope
       );
-    engine._setShadowedParameterDef(name, pdef);
+    engine._setShadowedParameterDef(name, pdef, existingBare === undefined);
     const bareParamSym = new BoxedSymbol(engine, name, { metadata, def: pdef });
     // Provenance: binding created as a side effect of boxing a bare
     // parameter's first reference — see the annotated-parameter branch above

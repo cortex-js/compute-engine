@@ -116,6 +116,17 @@
   `["Divide", ["Power", ["Module", "Pi"], 2], 6]`, and boxed in the block it
   gives 1.6449, not 1.5. Outside such a scope, the output does not change.
 
+### Performance
+
+- **More copies of a sub-expression read the value of the first copy in one
+  `evaluate()`.** Two cases computed each copy again: a copy that is a branch
+  of `Which` (or of another operator that evaluates its operands itself), and
+  a copy next to an element-wise operation on a list of more than 100
+  elements, such as `Abs(L)` or `Real(L)`. A formula of a host document holds
+  13 copies of three `Which` expressions over a list of 500 points, under
+  `Real`, `Imaginary` and `Abs`. Its evaluation computed a `Which` 13 times,
+  and now computes one 5 times; the value does not change.
+
 ## 0.183.0 _2026-11-07_
 
 ### Breaking Changes

@@ -233,6 +233,7 @@ import {
 } from './boxed-expression/value-kinds.js';
 import { canonicalFunctionLiteralOperands } from './function-utils.js';
 import { markFunctionLiteralParameter } from './boxed-expression/function-literal.js';
+import { sharedEvaluationStarts } from './boxed-expression/shared-evaluation-memo.js';
 import {
   declareProtocolImpl,
   declareProtocolImplementationImpl,
@@ -3514,6 +3515,13 @@ export class ComputeEngine implements IComputeEngine {
      * (`headHasNoTypeInformation()`, `boxed-expression/invisible-operator.ts`).
      */
     liftedBody: boolean;
+    /** The bindings of `defs` that this frame DECLARED, at the first
+     * reference of their name. A binding that existed before the frame was
+     * pushed (a local that a `Block` hoisted, a binding left by an earlier
+     * canonicalization of the same scope) is in `defs` but not here. */
+    created: Set<BoxedDefinition>;
+    /** `sharedEvaluationStarts()` when the frame was pushed. */
+    memoStarts: number;
   }[] = [];
 
   /** @internal */
@@ -3533,7 +3541,23 @@ export class ComputeEngine implements IComputeEngine {
       boundary: boundary ?? this.context.lexicalScope,
       functionLiteral,
       liftedBody,
+      created: new Set(),
+      memoStarts: sharedEvaluationStarts(),
     });
+  }
+
+  /** See `IComputeEngine._parameterNarrowingKeepsEvaluations`. @internal */
+  _parameterNarrowingKeepsEvaluations(
+    name: string,
+    def: BoxedDefinition
+  ): boolean {
+    const frame = this._shadowFrame(name);
+    return (
+      frame !== undefined &&
+      frame.functionLiteral &&
+      frame.created.has(def) &&
+      frame.memoStarts === sharedEvaluationStarts()
+    );
   }
 
   /** The innermost frame that shadows `name` in the current lexical scope.
@@ -3665,11 +3689,18 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /** Cache the binding auto-declared for an active shadowed parameter, so later
-   * references reuse it. @internal */
-  _setShadowedParameterDef(name: string, def: BoxedDefinition): void {
+   * references reuse it. `created` is true when the caller declared the
+   * binding now, false when it reuses a binding that existed before.
+   * @internal */
+  _setShadowedParameterDef(
+    name: string,
+    def: BoxedDefinition,
+    created = false
+  ): void {
     const frame = this._shadowFrame(name);
     if (frame === undefined) return;
     frame.defs.set(name, def);
+    if (created) frame.created.add(def);
     // Marked now, not only when the literal is complete: a nested literal in
     // the body can compute its type before that, and the type is then cached.
     if (frame.functionLiteral && 'value' in def)

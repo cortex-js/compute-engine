@@ -2604,8 +2604,41 @@ export interface IComputeEngine {
    * the current body's canonicalization, if any. @internal */
   _shadowedParameterDef(name: string): BoxedDefinition | undefined;
   /** Cache the binding auto-declared for an active shadowed parameter so later
-   * references reuse it. @internal */
-  _setShadowedParameterDef(name: string, def: BoxedDefinition): void;
+   * references reuse it. `created` is true when the caller declared the
+   * binding now, false when it reuses a binding that existed before.
+   * @internal */
+  _setShadowedParameterDef(
+    name: string,
+    def: BoxedDefinition,
+    created?: boolean
+  ): void;
+  /**
+   * Whether a narrowing of `def`, the binding of the shadowed name `name` (a
+   * parameter of a function literal), can leave the results of the memo of
+   * shared evaluations as they are (`shared-evaluation-memo.ts`), so that it
+   * does not advance the evaluation version. True when all of these hold:
+   *
+   * - the innermost construct that shadows `name` is a function literal. A
+   *   `Block` hoists its locals into its scope before it pushes its frame,
+   *   so their bindings existed before its canonicalization started.
+   * - that construct DECLARED `def` while its
+   *   canonicalization, still in progress, ran. Every node that holds `def`
+   *   was then made by that canonicalization, and only such a node reads
+   *   the type of `def`.
+   * - no evaluation that keeps its result in the memo started since that
+   *   canonicalization started (`sharedEvaluationStarts()`). No entry can
+   *   then hold, and no evaluation in progress can keep, a result of a node
+   *   that read the type of `def` before the narrowing.
+   *
+   * Example: `Abs(L)` over a list `L` maps the literal `_1 ↦ Abs(_1)` on the
+   * elements (`lazyBroadcastMap`, `collection-utils.ts`). Boxing its body
+   * narrows `_1` from `number` to `complex | infinity`; no result of the memo
+   * can depend on `_1`, and the copies of the expression around the `Abs`
+   * keep their results. @internal */
+  _parameterNarrowingKeepsEvaluations(
+    name: string,
+    def: BoxedDefinition
+  ): boolean;
   /** The bindings cached on the TOP shadowed-parameter frame — read just
    * before popping it so a literal's parameter declarations can adopt the
    * binding the body's references accumulated type evidence on. @internal */

@@ -484,6 +484,7 @@ import {
   endHostHandlerCall,
   noteUncachedHostEvaluation,
   noteImpureEvaluation,
+  noteSharedEvaluationStart,
   rememberEvaluation,
   memoizableEvaluateOptions,
   rememberedEvaluation,
@@ -4738,6 +4739,7 @@ export class BoxedFunction
           }
           remember = true;
           memo.pending += 1;
+          noteSharedEvaluationStart();
           guard = beginStoreGuard();
           impureBefore = memo.impure;
           persistentBefore = engine._persistentEvaluationVersion;

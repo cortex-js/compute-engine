@@ -4,6 +4,7 @@ import {
 } from '../common/configuration-change.js';
 import { CACHE_STATS, recordBump } from '../common/cache-stats.js';
 import { runWhenIdle } from '../common/computation-depth.js';
+import { sharedEvaluationStarts } from './boxed-expression/shared-evaluation-memo.js';
 
 type ResetHooks = {
   refreshNumericConstants: () => void;
@@ -93,6 +94,13 @@ export type StateEvent =
        * (`scratch-scopes.ts`). See "Scratch events" in the documentation of
        * {@link axisMaskOf}. */
       scratch?: boolean;
+      /** Set only on a true narrowing: the binding is a parameter of a
+       * function literal that the canonicalization in progress declared,
+       * and no evaluation that keeps its result in the memo of shared
+       * evaluations started since that canonicalization started
+       * (`_parameterNarrowingKeepsEvaluations`). It does not advance the
+       * evaluation version: see `noteStateEvent`. */
+      parameter?: boolean;
     }
   /** The deferred half of a value-type inference: see `noteStateEvent`. */
   | { kind: 'inference-settled' }
@@ -426,6 +434,9 @@ export class EngineConfigurationLifecycle {
   private _scratchCallableAdvances = 0;
   /** A deferred `inference-settled` advance is waiting (`noteStateEvent`). */
   private _inferencePending = false;
+  /** `sharedEvaluationStarts()` when the waiting `inference-settled`
+   * advance was scheduled. */
+  private _startsAtInference = 0;
   private _tracker = new ConfigurationChangeTracker();
 
   get anyVersion(): number {
@@ -596,6 +607,7 @@ export class EngineConfigurationLifecycle {
     if (e.kind === 'inference' && e.valueType && !this._inferencePending) {
       // One advance covers every inference made before it runs.
       this._inferencePending = true;
+      this._startsAtInference = sharedEvaluationStarts();
       runWhenIdle(() => {
         this._inferencePending = false;
         this.noteStateEvent({ kind: 'inference-settled' });
@@ -614,14 +626,50 @@ export class EngineConfigurationLifecycle {
     // chain, so its advances are not private to the computation.
     const countsAsScratch =
       scratch && !(e.kind === 'binding-repair' && e.shadowing === true);
-    if (
+    // The evaluation version keys the memo of shared evaluations
+    // (`shared-evaluation-memo.ts`). The persistent evaluation version moves
+    // with it (less the ephemeral value writes), and a host handler call
+    // during which it moved counts as a change of state
+    // (`endHostHandlerCall`). Two events that advance other versions do not
+    // always advance them:
+    //
+    // - the narrowing of a parameter flagged `parameter` does not: no result
+    //   of the memo, kept or to be kept, can have read the type of that
+    //   binding before the narrowing (`_parameterNarrowingKeepsEvaluations`,
+    //   `index.ts`).
+    // - `inference-settled` advances them only when an evaluation that
+    //   keeps its result in the memo started after it was scheduled. Each
+    //   inference that it follows advanced them when it was sent, except a
+    //   narrowing flagged `parameter`. But a narrowing leaves the types
+    //   cached on the nodes until this event runs, so a result computed in
+    //   between can have read an outdated type of a node. The event runs
+    //   at once unless a cached computation is running (`runWhenIdle`), so
+    //   this interval is inside one. The test does not see an evaluation
+    //   that started before the narrowing and continues in that
+    //   computation: it can keep a result that read the wider type. That
+    //   result is less specific, never wrong, as for the types cached on
+    //   the nodes (see the deferral above).
+    //
+    // Neither event changes host state, so a host handler call during which
+    // only these events happened did not change state either.
+    //
+    // An element-wise operator over a list makes a function literal at each
+    // evaluation (`lazyBroadcastMap`, `collection-utils.ts`), and boxing its
+    // body narrows its parameter. When these two events always advanced the
+    // version, the copies of a node that holds such an operator could not
+    // read the result of the first copy, and each was evaluated (CE-882).
+    const advancesEvaluation =
       e.kind === 'declare'
         ? (e.shadowsCallable || e.changesFrameBinding === true) &&
           e.scratch !== true
         : e.kind === 'scope-pop'
           ? e.assumptionsDirty
-          : e.kind !== 'binding-repair' || m.any
-    ) {
+          : e.kind === 'inference'
+            ? e.parameter !== true || e.widening === true
+            : e.kind === 'inference-settled'
+              ? sharedEvaluationStarts() !== this._startsAtInference
+              : e.kind !== 'binding-repair' || m.any;
+    if (advancesEvaluation) {
       this._evaluationVersion += 1;
       if (e.kind !== 'value-write' || !e.ephemeral)
         this._persistentEvaluationVersion += 1;

@@ -238,3 +238,82 @@ describe('CE-882: COPIES OF A SUB-EXPRESSION ARE EVALUATED ONCE', () => {
     expect(e.evaluate().json).toEqual(24);
   });
 });
+
+/** `Costly` gives its argument, of any type, and counts its calls. */
+function engineWithIdentityCounter(): {
+  ce: ComputeEngine;
+  calls: () => number;
+} {
+  const ce = new ComputeEngine();
+  let count = 0;
+  ce.declare('Costly', {
+    signature: '(any) -> any',
+    pure: true,
+    evaluate: ([x]) => {
+      count += 1;
+      return x;
+    },
+  });
+  return { ce, calls: () => count };
+}
+
+describe('CE-882: COPIES UNDER A SELECTION AND AN ELEMENT-WISE OPERATOR', () => {
+  // `Which` evaluates the branch it selects with the options it received as
+  // a handler, which hold the engine and the node of the handler. The memo
+  // refused these options, so a copy that is a branch kept no result.
+  test('Copies that are branches of a selection are evaluated once', () => {
+    const { ce, calls } = engineWithIdentityCounter();
+    ce.assign('a', 3);
+    const copy = () => ['Costly', ['Add', 'a', 1]];
+    const e = ce.box([
+      'Add',
+      ['Which', 'True', copy()],
+      ['Which', 'False', 0, 'True', copy()],
+      ['Which', ['Greater', 'a', 0], copy(), 'True', 0],
+    ] as any);
+    expect(e.evaluate().json).toEqual(12);
+    expect(calls()).toBe(2);
+  });
+
+  // An element-wise operator over a list of more than 100 elements makes a
+  // function literal and maps it lazily (`lazyBroadcastMap`). Boxing the
+  // body of the literal narrows its parameter. That narrowing advanced the
+  // evaluation version, and the copies after it did not read the result of
+  // the second copy.
+  test('Copies around an element-wise operator over a long list are evaluated once', () => {
+    const { ce, calls } = engineWithIdentityCounter();
+    // A zero at every tenth place selects the branch `1/0`.
+    const values = Array.from({ length: 101 }, (_, i) =>
+      i % 10 === 0 ? 0 : Math.cos(i)
+    );
+    ce.declare('L', 'unknown');
+    ce.assign('L', ce.box(['List', ...values]));
+    const w = () => ['Which', ['Greater', 'L', 0], ['Costly', 'L'], 'True', ['Divide', 1, 0]];
+    const component = () => [
+      'Real',
+      ['Divide', w(), ['Add', 1, ['Power', ['Abs', w()], 2]]],
+    ];
+    const expanded = ce
+      .box(['Tuple', component(), component()] as any)
+      .evaluate({ materialization: true });
+    expect(calls()).toBe(2);
+
+    // The same expression with one shared node in place of the four copies
+    // gives the same value.
+    const node = ce.box(w() as any);
+    const shared = (): any =>
+      ce.function('Real', [
+        ce.function('Divide', [
+          node,
+          ce.function('Add', [
+            ce.number(1),
+            ce.function('Power', [ce.function('Abs', [node]), ce.number(2)]),
+          ]),
+        ]),
+      ]);
+    const value = ce
+      .function('Tuple', [shared(), shared()])
+      .evaluate({ materialization: true });
+    expect(expanded.toString()).toBe(value.toString());
+  });
+});

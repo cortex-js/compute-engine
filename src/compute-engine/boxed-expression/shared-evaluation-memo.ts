@@ -30,7 +30,21 @@
  * - the engine's evaluation version (`IComputeEngine._evaluationVersion`):
  *   every value write (the index of a `Sum` or of a loop included, and an
  *   assignment that host code makes from a handler), redefinition, retype,
- *   inference, assumption and configuration change advances it.
+ *   inference, assumption and configuration change advances it. One
+ *   inference does not: the narrowing of a parameter of a function literal
+ *   whose binding the canonicalization in progress created, when no
+ *   evaluation that keeps its result started since that canonicalization
+ *   started (`sharedEvaluationStarts()`). Only a node that holds the binding
+ *   can read its type, and each such node was made by that
+ *   canonicalization, so no entry holds, and no evaluation in progress will
+ *   keep, a result computed with the type before the narrowing. An
+ *   element-wise operator over a list (`Abs`, `Power`, `Real`) makes such a
+ *   literal at each evaluation (`lazyBroadcastMap`, `collection-utils.ts`),
+ *   and the advance made every copy of a node that holds one evaluate again
+ *   (CE-882). The deferred half of a narrowing (`inference-settled`, which
+ *   retires the types cached on nodes) advances it only when such an
+ *   evaluation started after the narrowing (`noteStateEvent`,
+ *   `engine-configuration-lifecycle.ts`).
  * - the number of evaluations of impure nodes in this top-level evaluation
  *   (`noteImpureEvaluation`), counted when such a node starts and when it
  *   ends. A node with an effect can change state without a state event: a
@@ -219,6 +233,35 @@ let lastMemo: SharedEvaluationMemo<unknown> | undefined;
 
 /** The last number given to a top-level evaluation (`mark`). */
 let lastMark = 0;
+
+/** The number of evaluations, on every engine, that started with the intent
+ * to keep their result (`noteSharedEvaluationStart`). */
+let startCount = 0;
+
+/**
+ * Count the start of an evaluation that will keep its result in the memo if
+ * nothing changes while it runs (`BoxedFunction.evaluate`). Every result
+ * that `rememberEvaluation` keeps had such a start.
+ */
+export function noteSharedEvaluationStart(): void {
+  startCount += 1;
+}
+
+/**
+ * The number of evaluations, on every engine, that started with the intent
+ * to keep their result in the memo. It never decreases: when it has the same
+ * value at two moments, the memo kept no result made by an evaluation that
+ * started between them, and no evaluation in progress at the second moment
+ * started between them. A caller compares two readings to show that no
+ * evaluation that keeps its result started in an interval
+ * (`_parameterNarrowingKeepsEvaluations`, `index.ts`; `noteStateEvent`,
+ * `engine-configuration-lifecycle.ts`). An evaluation that started before
+ * the interval and runs through it is not seen. A start on another engine
+ * also counts, which can only make that test fail when it could pass.
+ */
+export function sharedEvaluationStarts(): number {
+  return startCount;
+}
 
 function memoOf(engine: object): SharedEvaluationMemo<unknown> | undefined {
   if (engine === lastEngine) return lastMemo;
@@ -607,6 +650,16 @@ export function rememberEvaluation<T>(
  * of an asynchronous evaluation, a precision window, a cancellation signal)
  * can change the result or how it is computed, and is not in the key. An
  * option set to `undefined` or `false` is the same as no option.
+ *
+ * The fields that only an `evaluate` handler receives
+ * (`HANDLER_OPTION_KEYS`) are ignored: a handler that evaluates an operand
+ * passes its own options on (`Which` evaluates the selected branch with
+ * `args[i + 1].evaluate(options)`), and they always hold these fields.
+ * `evaluate()` does not read them: it makes the options of the handler of
+ * each node again, from the node and the engine (`_computeValue`,
+ * `boxed-function.ts`). Refusing them kept no result for any node under such
+ * an operand, so six copies of a `Which` under a `Which` were evaluated six
+ * times (CE-882).
  */
 export function memoizableEvaluateOptions(
   options: { readonly [key: string]: unknown } | undefined
@@ -616,7 +669,23 @@ export function memoizableEvaluateOptions(
     const value = options[key];
     if (value === undefined || value === false) continue;
     if (key === 'numericApproximation') continue;
+    if (HANDLER_OPTION_KEYS.has(key)) continue;
     return false;
   }
   return true;
 }
+
+/**
+ * The fields of the options of an `evaluate` handler that are not
+ * `EvaluateOptions` (`EvaluateHandlerOptions`): the engine, the node of the
+ * handler, the digits that a numeric approximation requests, and the host
+ * capabilities. The precision and the capabilities are read from the engine
+ * when the handler is called, and the memo compares the same engine fields
+ * (`rememberedEvaluation`).
+ */
+const HANDLER_OPTION_KEYS: ReadonlySet<string> = new Set([
+  'engine',
+  'expression',
+  'precision',
+  'effects',
+]);

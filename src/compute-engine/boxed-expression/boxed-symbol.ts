@@ -1112,18 +1112,29 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // narrowing leaves the derived-signature memos merely loose; any
         // other write can leave them wrong, so it must advance the
         // definition version they key on (`noteStateEvent`).
-        if (!equalType)
+        if (!equalType) {
+          const widening =
+            inferenceMode !== 'narrow' ||
+            !isSubtype(inferred.type, previousType.type);
           this.engine._noteStateEvent({
             kind: 'inference',
             valueType: true,
-            widening:
-              inferenceMode !== 'narrow' ||
-              !isSubtype(inferred.type, previousType.type),
+            widening,
             // A binding under a scratch scope (`scratch-scopes.ts`) dies with
             // the computation that declared it: its inference advances no
             // version that a cache outliving that computation keys on.
             ...(isScratchBinding(this.engine, def) ? { scratch: true } : {}),
+            // The narrowing of a parameter that the canonicalization in
+            // progress declared, when no evaluation that keeps its result in
+            // the memo of shared evaluations started since it started: it
+            // does not advance the evaluation version
+            // (`_parameterNarrowingKeepsEvaluations`).
+            ...(!widening &&
+            this.engine._parameterNarrowingKeepsEvaluations(this._id, def)
+              ? { parameter: true }
+              : {}),
           });
+        }
         // Single emission point for the write's passive observers: the
         // provenance history, the fresh-inference set (unknown → concrete
         // during a boxing, for the fresh-matrix-inference repair), and the
