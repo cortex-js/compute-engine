@@ -17,7 +17,7 @@ import { isExpression, isFunction, isNumber } from './type-guards.js';
 import { registerNumericCanonicalHandler } from './numeric-canonical-registry.js';
 import { readJuxtaposition } from './invisible-operator.js';
 import { productMayHaveMatrix } from './matrix-operand.js';
-import { shadowsLibraryName } from '../library-shadowing.js';
+import { shadowsLibraryNameInOperand } from '../library-shadowing.js';
 import { logOperandMayThread } from './logarithm.js';
 
 /**
@@ -73,9 +73,10 @@ export const NUMERIC_CANONICAL_NAMES: ReadonlySet<string> = new Set([
  * already have their final order. Nothing is spliced in a product that holds
  * an ellipsis (`ContinuationPlaceholder`) anywhere: the operands of such a
  * product are fold barriers (see `isFoldBarrierProduct()` in
- * `type-guards.ts`). A nested `Negate`, `Divide`, `Delimiter` or
- * `InvisibleOperator` is not read when the library definition of that
- * operator is replaced (`shadowsLibraryName()`).
+ * `type-guards.ts`). A nested `Multiply`, `Negate`, `Divide` or `Delimiter`
+ * is not read when a binding of the program replaces the library definition
+ * of that operator, or while `ce._libraryCall()` boxes a qualified call of
+ * the same name (`shadowsLibraryNameInOperand()`).
  */
 export function canonicalProductOperands(
   ce: ComputeEngine,
@@ -161,11 +162,14 @@ function nestedProductNode(
 ): FactorNode | undefined {
   let parts = rawParts(x);
   if (parts?.name === 'Delimiter' && parts.ops.length === 1) {
-    if (shadowsLibraryName(ce, 'Delimiter')) return undefined;
+    if (shadowsLibraryNameInOperand(ce, 'Delimiter')) return undefined;
     parts = rawParts(parts.ops[0]);
   }
   if (parts === undefined) return undefined;
-  if (parts.name === 'Multiply')
+  if (
+    parts.name === 'Multiply' &&
+    !shadowsLibraryNameInOperand(ce, 'Multiply')
+  )
     return {
       kind: 'product',
       children: parts.ops.map((op) => factorNode(ce, op, scope)),
@@ -187,7 +191,7 @@ function nestedProductNode(
   if (
     parts.name === 'Negate' &&
     parts.ops.length === 1 &&
-    !shadowsLibraryName(ce, 'Negate')
+    !shadowsLibraryNameInOperand(ce, 'Negate')
   ) {
     const child = nestedProductNode(ce, parts.ops[0], scope);
     if (child === undefined) return undefined;
@@ -204,7 +208,7 @@ function nestedProductNode(
   if (
     parts.name === 'Divide' &&
     parts.ops.length === 2 &&
-    !shadowsLibraryName(ce, 'Divide')
+    !shadowsLibraryNameInOperand(ce, 'Divide')
   ) {
     const divisor = integerLiteral(parts.ops[1]);
     if (divisor === undefined) return undefined;

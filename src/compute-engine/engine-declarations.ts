@@ -160,11 +160,14 @@ import {
 import {
   canonicalFunctionLiteral,
   functionLiteralDefiningScope,
+  isApplicableDef,
   kindTypedFunctionLiteral,
   lookup,
 } from './function-utils.js';
 import {
   extendedLibraryOperator,
+  hidesLibraryBinding,
+  inSerializationScope,
   markLibraryExtension,
 } from './library-shadowing.js';
 import { isInferredTypedParameter } from './boxed-expression/inferred-annotations.js';
@@ -4836,17 +4839,44 @@ function jsonWithSourceOffsets(expr: Expression): MathJsonExpression {
   // The re-boxed literal is canonicalized in the same body scope, where the
   // inference runs again and marks the annotation again.
   const fn = [
-    expr.operator,
-    ...ops.map((op, i) =>
-      expr.operator === 'Function' &&
-      i > 0 &&
-      isInferredTypedParameter(op) &&
-      isFunction(op)
-        ? jsonWithSourceOffsets(op.op1)
-        : jsonWithSourceOffsets(op)
+    ...copiedHead(expr),
+    ...inSerializationScope(expr.localScope, () =>
+      ops.map((op, i) =>
+        expr.operator === 'Function' &&
+        i > 0 &&
+        isInferredTypedParameter(op) &&
+        isFunction(op)
+          ? jsonWithSourceOffsets(op.op1)
+          : jsonWithSourceOffsets(op)
+      )
     ),
   ] as [MathJsonSymbol, ...MathJsonExpression[]];
   return sourceOffsets !== undefined ? { fn, sourceOffsets } : fn;
+}
+
+/**
+ * The head of the copy of the call `expr` that `jsonWithSourceOffsets()` and
+ * `rawCopyWithSourceOffsets()` make: the operator name, or
+ * `"Apply", ["Module", name]` for a call bound to the library definition of
+ * its name where a binding of the current scopes hides that definition, as
+ * `BoxedFunction.get json` writes it. Without the qualifier, the copy of the
+ * body of `function Floor(x) { std::floor(x) + 1 }` is boxed again by name
+ * in the scope that binds the user function `Floor`, and the function calls
+ * itself. The operands of a scoped node are copied inside
+ * `inSerializationScope()` with its local scope, so a parameter `Floor` of
+ * the literal also hides the library definition.
+ */
+function copiedHead(
+  expr: Expression
+): [MathJsonSymbol] | ['Apply', ['Module', MathJsonSymbol]] {
+  const name = expr.operator;
+  const def = expr.operatorDefinition;
+  if (
+    def !== undefined &&
+    hidesLibraryBinding(expr.engine, name, def, isApplicableDef)
+  )
+    return ['Apply', ['Module', name]];
+  return [name];
 }
 
 /**
@@ -4890,14 +4920,16 @@ function rawCopyWithSourceOffsets(
       const structural = node.structural;
       const ops = isFunction(structural) ? structural.ops : node.ops;
       const fn = [
-        node.operator,
-        ...ops.map((op, i) =>
-          node.operator === 'Function' &&
-          i > 0 &&
-          isInferredTypedParameter(op) &&
-          isFunction(op)
-            ? copy(op.op1)
-            : copy(op)
+        ...copiedHead(node),
+        ...inSerializationScope(node.localScope, () =>
+          ops.map((op, i) =>
+            node.operator === 'Function' &&
+            i > 0 &&
+            isInferredTypedParameter(op) &&
+            isFunction(op)
+              ? copy(op.op1)
+              : copy(op)
+          )
         ),
       ] as [MathJsonSymbol, ...Expression[]];
       const sourceOffsets = node.sourceOffsets;

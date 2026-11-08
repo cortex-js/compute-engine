@@ -1659,6 +1659,25 @@ export interface IComputeEngine {
    * @internal */
   _inferenceCause: InferenceCauseContext | null;
 
+  /** The head of the library call that is being boxed by
+   * `_libraryCall()`: its name and the definition of the name in the
+   * system scope. While it is set, the node of the call, and each node of
+   * the name that the `canonical` handler of the library operator builds
+   * with `ce._fn()` or `new BoxedFunction()`, is bound to this definition,
+   * and the name is not shadowed for the tests of the boxing. Every other
+   * boxing of a function node (`ce.function()`, `ce.box()`), the boxing of
+   * each operand among them, starts with this field cleared, and restores
+   * it at its end. So an operand is boxed in the current scope: a call of a
+   * user function of the same name in an operand stays a call of the user
+   * function. A node of the name that the `canonical` handler builds with
+   * `ce.function()` is also bound to the user definition. A raw operand of
+   * the name (not boxed yet) is read as a call of the user definition by
+   * the rules that fold an operand by its name
+   * (`shadowsLibraryNameInOperand()`, `isLibraryOperator()`).
+   * `undefined` outside such a boxing.
+   * @internal */
+  _qualifiedHead: { name: string; definition: BoxedDefinition } | undefined;
+
   /**
    * Run `fn` with at most `ms` milliseconds (numeric form) or `limit.ms`
    * (object form, which also accepts an attribution `label`). A tighter
@@ -2493,6 +2512,28 @@ export interface IComputeEngine {
    * does not define `name`.
    * @internal */
   _librarySymbol(name: MathJsonSymbol): Expression | undefined;
+
+  /**
+   * The canonical call `name(…ops)` bound to the operator definition of
+   * `name` in the system scope, whatever definition the current scope
+   * resolves the name to: the canonical form of the qualified call
+   * `["Apply", ["Module", name], …ops]` where a binding of the program
+   * shadows `name`. The operands are boxed in the current scope, and the
+   * library operator reads them as its rules say. An operand that is not
+   * canonical yet (MathJSON, or a raw boxed expression) is given as written:
+   * a lazy operator holds it, and a binder binds its variable. An operand
+   * that is canonical already was canonicalized by the caller, in the scope
+   * of the caller, so a binder cannot bind its variable. The `Apply`
+   * canonical handler (`library/core.ts`), whose operands are canonical,
+   * calls this function only for an operator that does not hold or bind an
+   * operand. `undefined`
+   * when the system scope does not define `name` as an operator.
+   * @internal */
+  _libraryCall(
+    name: MathJsonSymbol,
+    ops: ReadonlyArray<ExpressionInput>,
+    options?: { metadata?: Metadata; scope?: Scope }
+  ): Expression | undefined;
 
   /**
    * Push a set of parameter names that, while canonicalizing a function body,

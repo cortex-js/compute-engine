@@ -26,6 +26,7 @@ import {
   isUnresolvedCollectionOperand,
 } from '../collection-utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
+import { shadowsLibraryOperator } from '../library-shadowing.js';
 import { everyOperand, VALUE_ROLE } from './operand-roles.js';
 import {
   eq,
@@ -2684,11 +2685,19 @@ function canonicalRelational(
   // splice below is adequate.
   ops = flatten(ops, operator);
 
+  // A call of a user function with the name of a relational operator (the
+  // operand of the qualified call `std::TildeEqual(TildeEqual(a), b)` with
+  // a user `TildeEqual`) is a value, not a link of the chain
+  // (`shadowsLibraryOperator()`).
   const nestedRelational: Expression[] = [];
   const newOps: Expression[] = [];
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
-    if (isRelationalOperator(op.operator) && isFunction(op)) {
+    if (
+      isRelationalOperator(op.operator) &&
+      isFunction(op) &&
+      !shadowsLibraryOperator(op)
+    ) {
       nestedRelational.push(op);
       newOps.push(i === 0 ? op.ops[op.ops.length - 1] : op.ops[0]);
     } else newOps.push(op);

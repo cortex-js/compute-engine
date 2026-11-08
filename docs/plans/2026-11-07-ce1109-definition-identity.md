@@ -217,4 +217,50 @@ canonical boxing and the `simplify()` of the corpus
   rounds (round 1: the `Range` branch and the repeated wildcard; round 2: a
   reordering of the `Range` test). Full suite: 1,927 suites, 81,326 tests
   passed, 0 failed.
-- CE-1109.5: in progress.
+- CE-1109.5: done 2026-11-07. A shadowed
+  qualified call is the plain call bound to the library definition, in
+  every case; the `Apply` form, the error `qualified-call-shadowed`, its
+  Epsil diagnostic, explanation and documentation are gone. Mechanism: not a
+  `definition` option of the `BoxedFunction` constructor, because the
+  `canonical` handler of a library operator builds its result by name
+  (`ce._fn(name, …)`), and an option of the constructor does not reach it.
+  Instead, `ce._libraryCall(name, ops)` boxes the call with the option
+  `libraryHead` of `boxFunction()`; `boxFunctionInternal()` holds the head
+  in `ce._qualifiedHead` while the call is boxed, and clears it while each
+  other node (each operand) is boxed. While the head is held, the lookup of
+  the head in `makeCanonicalFunctionCore()`, `BoxedFunction._bind()` for a
+  node of the name, and `shadowsLibraryName()` for the name read the
+  library. So the arguments are canonicalized in the current scope (a user
+  `Not` inside `std::Not(…)` stays the user function, an argument `max`
+  reads the variable), a lazy operator canonicalizes its operands itself in
+  the current scope, and a binder binds its own index (`Sum` declares no
+  `k` in the enclosing scope). `qualifiedCallForm()` became
+  `shadowsQualifiedName()` (`function-utils.ts`); the `Apply` canonical
+  handler uses `ce._libraryCall()` for a library-bound callee symbol of an
+  operator, and keeps the `Apply` of a library constant. The compiler still
+  declines the call (D6 of the CE-1099 plan), with the interpreter value.
+  Tests: `test/compute-engine/qualified-call-library-binding.test.ts`; one
+  assertion changed in `module-qualified-name.test.ts` and one `test.each`
+  in `test/epsil/std-qualified-name.test.ts`.
+  Review (Claude and Codex, three rounds). Round 1: a user function that
+  calls the library function of its own name (`function Floor(x) {
+  std::floor(x) + 1 }`) recursed, because `ce.assign()` copies the body by
+  name (`rawCopyWithSourceOffsets()`, which now writes the `Module` form);
+  canonical folds read an operand by name inside the qualified call
+  (`Negate`, `Multiply`, relational chains, `Join`: they now test
+  `isLibraryOperator()`, which also fixed CE-1113); `canonicalShortCircuit`
+  validated with the user definition; a boxed callee gave a binder operands
+  already canonical. Round 2: a mark (`markLibraryCall()`) limits the
+  rebuild through `_libraryCall()` to nodes bound to a library definition
+  that the current scope hides, so an ordinary structural call keeps the
+  rebuild by name that `docs/SCOPING-MODEL.md` states; the `Power` and
+  `Divide` folds test `isLibraryOperator()`; a callee in parentheses
+  (`["Delimiter", ["Module", f]]`) is unwrapped; the error
+  `qualified-call-arguments-canonical` is given only for a callee of another
+  form applied to an operator that holds or binds an operand. Round 3: only
+  the library `Delimiter` is unwrapped, also with the explicit `'()'`
+  delimiters; `_bind()` sets the mark, so a rebuild by `subs()` or
+  `evaluate()` keeps it. The fixes of round 3 had no review of their own.
+  Older defects filed: CE-1133 (`(a/b)^-n` reads a user `Divide`), and
+  witnesses added to CE-1118 (`Hold`, `Not`) and CE-1122 (`Sqrt` in a
+  product).

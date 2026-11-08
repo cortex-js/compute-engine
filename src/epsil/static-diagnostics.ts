@@ -1255,21 +1255,6 @@ function canonicalizationDiagnostics(
     const seen = new Set<string>();
     for (const error of errors) {
       const code = errorCode(error);
-      // A qualified call `std::f(…)` in a scope that shadows `f`, whose
-      // library operator holds or binds an operand (`qualifiedCallForm()`,
-      // `function-utils.ts`): reported with its own code, once for each
-      // name of the statement.
-      if (code === 'qualified-call-shadowed') {
-        const name = symbol(operand(error, 2)) ?? '';
-        if (seen.has(`${code}:${name}`)) continue;
-        seen.add(`${code}:${name}`);
-        diagnostics.push({
-          severity: 'error',
-          message: ['qualified-call-shadowed', name],
-          range: [start, end, start],
-        });
-        continue;
-      }
       if (!isCanonicalizationError(code)) continue;
       const description = describeError(error);
       // Dedup and authored-subtraction key on the SITE-LESS description

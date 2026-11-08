@@ -318,14 +318,25 @@ describe('a qualified call boxes its arguments as the library call does', () => 
 });
 
 describe('a qualified call in a scope that shadows the name', () => {
-  test('a library If with an Assign branch under a user If is an error', () => {
+  test('a library If with an Assign branch under a user If is the library If', () => {
+    // The `Assign` branch is valid: the call is bound to the library `If`,
+    // whose branches are statements.
     const ce = new ComputeEngine();
     ce.pushScope();
     try {
       ce.assign('If', ce.box(['Function', 0, 'a', 'b', 'c']));
       ce.declare('y', 'integer');
       const e = ce.box(['Apply', ['Module', 'If'], 'True', ['Assign', 'y', 1], 2]);
-      expect(e.json).toEqual(['Error', "'qualified-call-shadowed'", 'If']);
+      expect(e.json).toEqual([
+        'Apply',
+        ['Module', 'If'],
+        'True',
+        ['Assign', 'y', 1],
+        2,
+      ]);
+      expect(e.isValid).toBe(true);
+      expect(e.evaluate().re).toBe(1);
+      expect(ce.box('y').evaluate().re).toBe(1);
     } finally {
       ce.popScope();
     }

@@ -28,6 +28,7 @@ import {
   machinePairBroadcast,
 } from './machine-broadcast.js';
 import { bignumPreferred, hasAssignedVariable } from './utils.js';
+import { isLibraryOperator } from '../library-shadowing.js';
 import {
   isNumber,
   isFunction,
@@ -1910,28 +1911,33 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // A divisor that is a quotient by the number 0 (`x/0`, kept because `x`
   // may be zero) is not inverted: `1/(x/0)` would become `(1·0)/x`, which is
   // 0, although its value at `x = 0` is `1/(0/0)`, which has none.
-  if (isFunction(op2, 'Divide') && isLiteral(op2.op2, 0))
-    return ce._fn('Divide', [op1, op2]);
+  //
+  // A call of a user function `Divide` (in a qualified call
+  // `std::Divide(Divide(x, 2), 3)`) is a value, not a quotient, and the
+  // rules below leave it as it is.
+  const q1 =
+    isFunction(op1, 'Divide') && isLibraryOperator(op1, 'Divide')
+      ? op1
+      : undefined;
+  const q2 =
+    isFunction(op2, 'Divide') && isLibraryOperator(op2, 'Divide')
+      ? op2
+      : undefined;
+  if (q2 && isLiteral(q2.op2, 0)) return ce._fn('Divide', [op1, op2]);
 
   // (a/b)/(c/d) = (a*d)/(b*c)
-  if (
-    isFunction(op1, 'Divide') &&
-    isFunction(op2) &&
-    op2.operator === 'Divide'
-  ) {
+  if (q1 && q2) {
     return canonicalDivide(
-      canonicalMultiply(ce, [op1.op1, op2.op2]),
-      canonicalMultiply(ce, [op1.op2, op2.op1])
+      canonicalMultiply(ce, [q1.op1, q2.op2]),
+      canonicalMultiply(ce, [q1.op2, q2.op1])
     );
   }
 
   // (a/b)/c = a/(b*c)
-  if (isFunction(op1, 'Divide'))
-    return canonicalDivide(op1.op1, canonicalMultiply(ce, [op1.op2, op2]));
+  if (q1) return canonicalDivide(q1.op1, canonicalMultiply(ce, [q1.op2, op2]));
 
   // a/(b/c) = (a*c)/b
-  if (isFunction(op2, 'Divide'))
-    return canonicalDivide(canonicalMultiply(ce, [op1, op2.op2]), op2.op1);
+  if (q2) return canonicalDivide(canonicalMultiply(ce, [op1, q2.op2]), q2.op1);
 
   // a/1 = a
   if (isLiteral(op2, 1)) return op1;
@@ -2533,14 +2539,21 @@ export function canonicalMultiply(
   // flattened one while `isSame`/`hash` disagree about them (Tycho item 170).
   // Re-enter the lifted operands so the sign channel and the flattening stay
   // in lockstep, at any depth. A nested product that is an ellipsis-fold
-  // barrier is left alone, as in the pass above.
+  // barrier is left alone, as in the pass above. A call of a user function
+  // named `Multiply` or `Negate` is a value, not a product or a negation
+  // (`isLibraryOperator()`): it can be an operand of a library product made
+  // in another scope, or of the qualified call `std::multiply(…)`.
   let sign = 1;
   let xs: Expression[] = [];
   {
     const unnegateInto = (op: Expression) => {
       const [o, s] = unnegate(op);
       sign *= s;
-      if (isFunction(o, 'Multiply') && !containsContinuationOperand(o))
+      if (
+        isFunction(o, 'Multiply') &&
+        isLibraryOperator(o, 'Multiply') &&
+        !containsContinuationOperand(o)
+      )
         for (const x of o.ops) unnegateInto(x);
       else xs.push(o);
     };
@@ -2851,7 +2864,7 @@ export function canonicalMultiply(
 
 function unnegate(op: Expression): [Expression, sign: number] {
   let sign = 1;
-  while (isFunction(op, 'Negate')) {
+  while (isFunction(op, 'Negate') && isLibraryOperator(op, 'Negate')) {
     sign = -sign;
     op = op.op1;
   }

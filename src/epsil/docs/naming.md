@@ -223,22 +223,26 @@ a name after `std::` that the library does not define, such as
 `std::mine` for a function of the program (`not-a-library-name`), `std::`
 with no name, and a nested name such as `std::a::b`.
 
-Where a function or a parameter of the program has the name, a qualified
-call of an ordinary library function, such as `std::floor(x)` or
-`std::abs(x)`, is applied to the values of its arguments: the engine does
-not simplify it. A qualified call there of a library function that holds or
-binds an argument, such as `std::sum(k, k in 1..3)` or `std::If(c, a, b)`,
-or a call with a named argument, such as `std::log(8, base: 2)`, is an
-error (`qualified-call-shadowed`):
+A qualified call is the call of the library function, also where a
+function or a parameter of the program has the name. The engine simplifies
+it by the rules of the library, a library function that holds or binds an
+argument, such as `std::sum(k, k in 1..3)` or `std::If(c, a, b)`, reads its
+arguments as the library does, and a named argument, such as
+`std::log(8, base: 2)`, is valid. The arguments read the bindings of the
+program, so a call of the function of the program inside them stays a call
+of that function:
 
 ```epsil
 function Sum(x) { 0 }
 std::sum(k, k in 1..3)
-// ➔ error: qualified-call-shadowed
+// ➔ 6
 ```
 
-Where the program does not bind the name, every qualified call is the
-plain call.
+```epsil
+function Not(x) { x }
+std::Not(Not(false))
+// ➔ true
+```
 
 In MathJSON, a qualified name is `["Module", "Pi"]`, and a qualified call
 is `["Apply", ["Module", "Floor"], 2.5]`. The engine writes these forms in

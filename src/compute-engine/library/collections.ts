@@ -7,6 +7,7 @@ import {
   hasAsyncOnlyApplication,
 } from '../boxed-expression/async-only-descendants.js';
 import { callableBindingInContext } from '../boxed-expression/binders.js';
+import { isLibraryOperator } from '../library-shadowing.js';
 import { appliedLiteralResultType } from '../boxed-expression/call-result-type.js';
 import { isOperatorCallee } from '../boxed-expression/callee-type-derivation.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -25066,11 +25067,15 @@ function canonicalJoin(
   // Defensive: a `Join` or a `ListJoin` never types as a tuple
   // (`joinResultType` returns a list/set/record/dictionary/collection, and
   // a `ListJoin` is a list), but an atomic operand must never be spliced.
+  // A call of a user function named `Join` or `ListJoin` is a value, not a
+  // join (`isLibraryOperator()`): it can be an operand of a library join made
+  // in another scope, or of the qualified call `std::Join(…)`.
   const spliced = (
     op: Expression | undefined
   ): op is Expression & FunctionInterface =>
     op !== undefined &&
     isFunction(op, head) &&
+    isLibraryOperator(op, head) &&
     op.isCanonical &&
     !isAtomicJoinOperand(op);
   let joined: ReadonlyArray<Expression> = args;

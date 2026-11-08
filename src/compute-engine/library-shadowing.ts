@@ -68,6 +68,7 @@ export function shadowsLibraryName(
       };
     }>;
     readonly _customLibraryOperators: ReadonlySet<string>;
+    readonly _qualifiedHead?: { readonly name: string } | undefined;
     _isShadowedParameter(name: string): boolean;
   },
   name: string,
@@ -77,10 +78,33 @@ export function shadowsLibraryName(
   if (library === undefined) return false;
   if (options?.customLibrary !== false && ce._customLibraryOperators.has(name))
     return true;
+  // While `ce._libraryCall()` boxes a call of `name`, the call is bound to
+  // the library definition, so the tests of that boxing see no shadow
+  // (`ce._qualifiedHead`). The boxing of an operand clears the field.
+  if (ce._qualifiedHead?.name === name) return false;
   if (ce._isShadowedParameter(name)) return true;
   const current = ce.lookupDefinition(name);
   if (current === undefined) return false;
   return isShadowOf(current, library);
+}
+
+/**
+ * True when an operand `name(…)` that is not canonical yet (MathJSON, or a
+ * raw boxed expression) is not a call of the library operator `name`, so a
+ * rule that folds or splices a call of the library operator by its name must
+ * read it as a leaf. This is {@link shadowsLibraryName}, and also true while
+ * `ce._libraryCall()` boxes a call of the same name (`ce._qualifiedHead`):
+ * that call is made only where a binding of the program shadows `name`, and
+ * the raw operands of the call are written in that scope. In
+ * `std::multiply(Multiply(2, 3), 4)` with a user function `Multiply`, the
+ * inner call is a call of the user function, and is not spliced into the
+ * product.
+ */
+export function shadowsLibraryNameInOperand(
+  ce: Parameters<typeof shadowsLibraryName>[0],
+  name: string
+): boolean {
+  return ce._qualifiedHead?.name === name || shadowsLibraryName(ce, name);
 }
 
 /**
@@ -165,6 +189,10 @@ export function isLibraryOperator(
   const def = node.operatorDefinition;
   if (def !== undefined) return keepsLibraryDefinition(def, libraryOperator);
   if (node.valueDefinition !== undefined) return false;
+  // A node with no definition while `ce._libraryCall()` boxes a call of
+  // `name` is a raw operand of that call, written in the scope that shadows
+  // `name` (`shadowsLibraryNameInOperand()`).
+  if (ce._qualifiedHead?.name === name) return false;
   return !shadowsLibraryName(ce, name, options);
 }
 
@@ -499,6 +527,64 @@ export function markQualifiedName(symbol: object): void {
  */
 export function isQualifiedName(symbol: object): boolean {
   return QUALIFIED_NAMES.has(symbol);
+}
+
+/**
+ * The calls that `ce._libraryCall()` made (the canonical form of a qualified
+ * call `std::floor(x)`), bound to the library definition of their name, and
+ * the structural forms of these calls. The canonical form of such a node is
+ * the library call again, also where a binding of the program hides the
+ * library definition. The canonical form of every other call is rebuilt by
+ * its name in the current scope.
+ */
+const LIBRARY_CALLS = new WeakSet<object>();
+
+/** Mark `call` as a library call: see {@link isLibraryCall}. */
+export function markLibraryCall(call: object): void {
+  LIBRARY_CALLS.add(call);
+}
+
+/**
+ * True when `call` was made by `ce._libraryCall()`, or is the structural
+ * form of such a call (`markLibraryCall()`).
+ */
+export function isLibraryCall(call: object): boolean {
+  return LIBRARY_CALLS.has(call);
+}
+
+/**
+ * True when a call of `name` bound to `def` in the scope chain that starts
+ * at `scope` is bound to the library definition of `name` (the definition
+ * of the system scope) where a binding of the program hides it: a scope of
+ * the chain binds `name` to another definition that can be applied
+ * (`isApplicable`) and that is not an extension or a copy of the library
+ * definition (`isShadowOf()`). A scope that holds the library definition
+ * itself is skipped: it is a scope that `withBorrowedBinding()` pushed for a
+ * rebuild that keeps the library binding of a call. `BoxedFunction._bind()`
+ * marks such a call (`markLibraryCall()`), so a rebuild of a qualified call
+ * by `subs()` or `evaluate()` in the scope that hides the name is a library
+ * call too.
+ */
+export function boundToHiddenLibrary(
+  ce: {
+    readonly _evalContextStack: ReadonlyArray<{
+      readonly lexicalScope: ScopeLike;
+    }>;
+  },
+  name: string,
+  def: unknown,
+  scope: ScopeLike,
+  isApplicable: (def: never) => boolean
+): boolean {
+  const system = ce._evalContextStack[0]?.lexicalScope;
+  if (def === undefined || system?.bindings.get(name) !== def) return false;
+  for (let s: ScopeLike | null = scope; s && s !== system; s = s.parent) {
+    const found = s.bindings.get(name);
+    if (found === undefined || found === def || !isApplicable(found as never))
+      continue;
+    return isShadowOf(found, def);
+  }
+  return false;
 }
 
 /** The parts of a lexical scope that {@link hidesLibraryBinding} reads. */

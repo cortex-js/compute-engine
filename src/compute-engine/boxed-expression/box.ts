@@ -1,6 +1,9 @@
 import { markForwardCallReference } from './forward-call-reference.js';
 import { Complex } from 'complex.js';
-import { shadowsLibraryName } from '../library-shadowing.js';
+import {
+  isLibraryOperator,
+  shadowsLibraryName,
+} from '../library-shadowing.js';
 import { canonicalBranch } from '../statement-position.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import type {
@@ -10,6 +13,7 @@ import type {
   IComputeEngine as ComputeEngine,
   Metadata,
   Scope,
+  BoxedDefinition,
   BoxedValueDefinition,
   BoxedOperatorDefinition,
 } from '../global-types.js';
@@ -57,6 +61,7 @@ import {
   moduleQualifiedName,
   splitNamedArguments,
   valueCalleeSignature,
+  withoutParentheses,
   writtenArgumentSlots,
   type WrittenArgumentSlot,
 } from './named-arguments.js';
@@ -144,8 +149,7 @@ import {
 import {
   annotateFunctionLiteralParams,
   lookupApplicable,
-  qualifiedCallForm,
-  qualifiedCallShadowedError,
+  shadowsQualifiedName,
   writtenUntypedFunctionLiteral,
 } from '../function-utils.js';
 import {
@@ -272,6 +276,13 @@ const RAW_OPERAND = { canonical: false, structural: false } as const;
  * devolve earlier than it needs to. Added 2026-09-22.
  */
 let boxingDepth = 0;
+
+/**
+ * True between the moment `boxFunctionInternal()` sets or clears
+ * `ce._qualifiedHead` for the node it boxes and the start of the inner call
+ * that boxes the node: see there.
+ */
+let qualifiedHeadSet = false;
 
 /**
  * The nesting depth at which boxing stops recursing and boxes the rest of the
@@ -462,6 +473,10 @@ type BoxFunctionOptions = {
    * `Sum(k^2, Limits(k, 1, 3))` was typed `list<integer>`). Set by
    * `boxFunctionInternal` (`isStructuralBinder`). */
   unboundSymbols?: boolean;
+  /** The definition of `name` in the system scope, given by
+   * `ce._libraryCall()`: the call is bound to this definition, also where
+   * a binding of the program shadows `name` (`ce._qualifiedHead`). */
+  libraryHead?: BoxedDefinition;
 };
 
 /**
@@ -548,6 +563,32 @@ function boxFunctionInternal(
   ops: readonly ExpressionInput[],
   options?: BoxFunctionOptions
 ): Expression {
+  // The boxing of a library call made by `ce._libraryCall()` (the option
+  // `libraryHead`) binds each node of its name to the library definition
+  // (`ce._qualifiedHead`). The boxing of every other node, an operand of
+  // that call among them, clears the field until it ends, so that an operand
+  // is boxed in the current scope. The field is set or cleared here, and the
+  // function is entered again with `qualifiedHeadSet`, which this entry
+  // resets at once, so a nested boxing sees `false`. In the usual case, with
+  // no such call in progress, this costs two field reads and one write.
+  const libraryHead = options?.libraryHead;
+  if (
+    !qualifiedHeadSet &&
+    (libraryHead !== undefined || ce._qualifiedHead !== undefined)
+  ) {
+    const outer = ce._qualifiedHead;
+    ce._qualifiedHead =
+      libraryHead !== undefined ? { name, definition: libraryHead } : undefined;
+    qualifiedHeadSet = true;
+    try {
+      return boxFunctionInternal(ce, name, ops, options);
+    } finally {
+      qualifiedHeadSet = false;
+      ce._qualifiedHead = outer;
+    }
+  }
+  qualifiedHeadSet = false;
+
   // A deadline frame is armed only by an enclosing `ce.withTimeLimit()` span,
   // so work outside a span pays one `undefined` comparison and nothing else.
   //
@@ -567,6 +608,9 @@ function boxFunctionInternal(
 
   options = options ? { ...options } : {};
   if (!('canonical' in options)) options.canonical = true;
+  // `ce._qualifiedHead` holds the library head now. Some routes below pass
+  // `options` on to the boxing of an operand, which must not see it.
+  if (libraryHead !== undefined) delete options.libraryHead;
 
   if (!isValidSymbol(name)) {
     throw new Error(
@@ -3227,9 +3271,15 @@ function makeCanonicalFunctionCore(
   // applied (a user symbol `N = 85` shadowing the built-in `N` operator)
   // defers to an outer applicable definition — see `lookupApplicable` — so
   // the operator path (with its canonical handler) runs. `_bind()` performs
-  // the same resolution, keeping construction and binding consistent.
+  // the same resolution, keeping construction and binding consistent. A
+  // library call made by `ce._libraryCall()` reads the library definition
+  // (`ce._qualifiedHead`), as `_bind()` does.
   //
-  let def = lookupApplicable(name, scope ?? ce.context.lexicalScope, ce);
+  const qualifiedHead = ce._qualifiedHead;
+  let def =
+    qualifiedHead?.name === name
+      ? qualifiedHead.definition
+      : lookupApplicable(name, scope ?? ce.context.lexicalScope, ce);
   // A parameter first used as a call head needs its annotation before the
   // value-callee path validates the arguments and records the binding.
   if (def === undefined && ce._shadowedParameterType(name) !== undefined) {
@@ -3375,34 +3425,82 @@ function makeCanonicalFunctionCore(
   let fieldReceiver: BoxedValueDefinition | undefined = undefined;
   if (name === 'Apply') {
     // A qualified callee, `Apply(Module(Floor), …)` (the Epsil
-    // `std::floor(…)`), whose name the system scope defines as an operator.
-    // The form of the call is chosen before any argument is canonicalized
-    // (`qualifiedCallForm()`, `function-utils.ts`): where `Floor` is not
-    // shadowed, the plain call `Floor(…)`, boxed by the normal route, so a
-    // lazy operator gets its operands raw; where it is shadowed, an `Apply`
-    // whose callee is the symbol bound to the library operator, or the error
-    // `qualified-call-shadowed` when the library operator holds or binds an
-    // operand, or when the call has a named argument. A value definition of
-    // the library (a constant) is left to the `Apply` canonical handler.
-    const qualifiedName = moduleQualifiedName(ops[0]);
+    // `std::floor(…)`), whose name the system scope defines as an operator,
+    // is the plain call `Floor(…)`, boxed before any argument is
+    // canonicalized, so a lazy operator gets its operands raw and a binder
+    // binds its variable. Where `Floor` is not shadowed
+    // (`shadowsQualifiedName()`, `function-utils.ts`), the call is boxed by
+    // the normal route. Where it is shadowed, it is boxed by
+    // `ce._libraryCall()`, which binds the call to the library operator and
+    // boxes the arguments in the current scope. A value definition of the
+    // library (a constant) is left to the `Apply` canonical handler.
+    //
+    // A callee that is already boxed, a symbol bound to the library operator
+    // of its name (the canonical form of `["Module", "Sum"]`), is read here
+    // too, but only where the name is shadowed: the `Apply` canonical handler
+    // would get the arguments canonicalized in the current scope, so a lazy
+    // or binding library operator would not get its operands as written, and
+    // the index `k` of `Sum(k, Limits(k, 1, 3))` would be declared in the
+    // current scope. A callee in parentheses, `Delimiter(Module(Sum))`, is
+    // read without them, when `Delimiter` is the library operator in the
+    // scope of the boxing: the canonical handler of a `Delimiter` that the
+    // program defines can return another callee.
+    const callee = withoutParentheses(ops[0], (delimiter) => {
+      if (delimiter instanceof _BoxedExpression && delimiter.isCanonical)
+        return isLibraryOperator(delimiter, 'Delimiter');
+      const library =
+        ce._evalContextStack[0]?.lexicalScope.bindings.get('Delimiter');
+      return (
+        library !== undefined &&
+        !shadowsQualifiedName(
+          ce,
+          'Delimiter',
+          library,
+          scope ?? ce.context.lexicalScope
+        )
+      );
+    });
+    let qualifiedName = moduleQualifiedName(callee);
+    let boxedCallee = false;
+    if (
+      qualifiedName === undefined &&
+      callee instanceof _BoxedExpression &&
+      isSymbol(callee)
+    ) {
+      const library = ce._evalContextStack[0]?.lexicalScope.bindings.get(
+        callee.symbol
+      );
+      if (
+        library !== undefined &&
+        'operator' in library &&
+        callee.operatorDefinition === library.operator
+      ) {
+        qualifiedName = callee.symbol;
+        boxedCallee = true;
+      }
+    }
     if (qualifiedName !== undefined) {
       const library =
         ce._evalContextStack[0]?.lexicalScope.bindings.get(qualifiedName);
       if (library !== undefined && 'operator' in library) {
         const args = ops.slice(1);
-        const form = qualifiedCallForm(
-          ce,
-          qualifiedName,
-          library,
-          scope ?? ce.context.lexicalScope,
-          named
-        );
-        if (form === 'call')
-          return ce.function(qualifiedName, args, { metadata, scope });
-        if (form === 'shadowed')
-          return qualifiedCallShadowedError(ce, qualifiedName);
-        const callee = ce._librarySymbol(qualifiedName);
-        if (callee !== undefined) ops = [callee, ...args];
+        if (
+          !shadowsQualifiedName(
+            ce,
+            qualifiedName,
+            library,
+            scope ?? ce.context.lexicalScope
+          )
+        ) {
+          if (!boxedCallee)
+            return ce.function(qualifiedName, args, { metadata, scope });
+        } else {
+          const call = ce._libraryCall(qualifiedName, args, {
+            metadata,
+            scope,
+          });
+          if (call !== undefined) return call;
+        }
       }
     }
     const field = resolveFieldCallee(

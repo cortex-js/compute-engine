@@ -91,8 +91,7 @@ import {
   inlineCallParameters,
   isStatementListScope,
   literalArgumentsWithDefaults,
-  qualifiedCallForm,
-  qualifiedCallShadowedError,
+  shadowsQualifiedName,
   snapshotRunVariables,
   type ApplyOptions,
 } from '../function-utils.js';
@@ -248,7 +247,6 @@ import {
 import type { Rule } from '../types-evaluation.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import { evaluateInOwnBindings } from '../boxed-expression/binders.js';
-import { hasNamedArguments } from '../boxed-expression/named-arguments.js';
 import {
   markQualifiedName,
   shadowsLibraryName,
@@ -7176,10 +7174,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     //
     // There is no node of this kind in a canonical expression: the canonical
     // form is the symbol bound to the library definition. A call
-    // `["Apply", ["Module", "Floor"], x]` is the call `Floor(x)` where `Floor`
-    // is not shadowed, else an `Apply` of the library-bound symbol or the
-    // error `qualified-call-shadowed` (`qualifiedCallForm()`,
-    // `function-utils.ts`). A second operand, the
+    // `["Apply", ["Module", "Floor"], x]` is the call `Floor(x)` bound to the
+    // library operator, also where `Floor` is shadowed: there it is boxed by
+    // `ce._libraryCall()`, which boxes the arguments in the current scope
+    // (`shadowsQualifiedName()`, `function-utils.ts`). A second operand, the
     // name of another module, is reserved; until it is defined it is an
     // `unexpected-argument` error.
     Module: {
@@ -7294,11 +7292,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (s) {
           // A callee bound to the library definition of its name (the
           // canonical form of `["Module", "Floor"]`): where the name is
-          // shadowed (a user function or a parameter `Floor`), the call is
-          // not a call by name, which would read the shadow. It stays an
-          // `Apply`, evaluated from the values of its arguments, or is the
-          // error `qualified-call-shadowed` when the library operator holds
-          // or binds an operand (`qualifiedCallForm()`, `function-utils.ts`).
+          // shadowed (a user function or a parameter `Floor`), a call by name
+          // would read the shadow. The call of a library operator is the
+          // call bound to the library operator (`ce._libraryCall()`), and the
+          // call of a library constant stays an `Apply`, evaluated from the
+          // values of its arguments (`shadowsQualifiedName()`,
+          // `function-utils.ts`).
           const library = ce._evalContextStack[0]?.lexicalScope.bindings.get(
             s
           );
@@ -7312,15 +7311,38 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               : 'value' in library &&
                 callee.valueDefinition === library.value)
           ) {
-            const form = qualifiedCallForm(
-              ce,
-              s,
-              library,
-              ce.context.lexicalScope,
-              hasNamedArguments(args.slice(1))
-            );
-            if (form === 'apply') return ce._fn('Apply', args);
-            if (form === 'shadowed') return qualifiedCallShadowedError(ce, s);
+            if (
+              shadowsQualifiedName(ce, s, library, ce.context.lexicalScope)
+            ) {
+              if (!('operator' in library)) return ce._fn('Apply', args);
+              // The boxing of `Apply` gives a callee written `Module(name)`,
+              // in parentheses or not, or boxed already, to
+              // `ce._libraryCall()` with the arguments as written
+              // (`makeCanonicalFunctionCore()`, `box.ts`). Here the callee
+              // is another form that canonicalizes to the library symbol,
+              // and the arguments are canonical in the current scope
+              // already. A library operator that holds or binds an operand
+              // must read its operands as written (the index `k` of
+              // `Sum(k, Limits(k, 1, 3))` must not be declared in the
+              // current scope), so this call is an error. An operator that
+              // declares the role `value` for each operand (`Equal`, `List`,
+              // lazy or not) reads the canonical arguments. A lazy operator
+              // that declares no roles is read as one that holds its
+              // operands.
+              const op = library.operator;
+              if (
+                op.scoped ||
+                op.bindingSites !== undefined ||
+                (op.operands !== undefined
+                  ? !op
+                      .operands(args.slice(1))
+                      .every((role) => role.kind === 'value')
+                  : op.lazy)
+              )
+                return ce.error(['qualified-call-arguments-canonical', s]);
+              const call = ce._libraryCall(s, args.slice(1));
+              if (call !== undefined) return call;
+            }
           }
           // The callee was canonicalized as a symbol: when the name is not
           // defined yet, that declared it in the scope of the body of a

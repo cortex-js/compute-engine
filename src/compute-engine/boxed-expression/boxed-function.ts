@@ -11,10 +11,13 @@ import {
 } from './binders.js';
 import { isScratchBinding } from '../scratch-scopes.js';
 import {
+  boundToHiddenLibrary,
   hidesLibraryBinding,
   hidesLibraryBindingInContext,
   inSerializationScope,
+  isLibraryCall,
   isLibraryOperator,
+  markLibraryCall,
   noteStructuralScope,
   sameOperator,
   structuralScope,
@@ -2159,11 +2162,32 @@ export class BoxedFunction
     // Operator (function-application) position: an inner binding that
     // provably cannot be applied — a user symbol `N = 85` shadowing the
     // built-in `N` operator — defers to an outer applicable definition.
-    this._def = lookupApplicable(
-      this._operator,
-      this._localScope ?? this.engine.context.lexicalScope,
-      this.engine
-    );
+    // While `ce._libraryCall()` boxes a call, a node of its name is bound to
+    // the library definition of the name (`ce._qualifiedHead`).
+    const head = this.engine._qualifiedHead;
+    const lookupScope = this._localScope ?? this.engine.context.lexicalScope;
+    this._def =
+      head !== undefined && head.name === this._operator
+        ? head.definition
+        : lookupApplicable(this._operator, lookupScope, this.engine);
+    // A canonical call bound to the library definition of its name where a
+    // binding of the program hides that name (by `ce._qualifiedHead`, or by
+    // a scope that `withBorrowedBinding()` pushed for a rebuild) is a
+    // library call: its structural form is canonicalized as the library
+    // call again (`isLibraryCall()`). A structural node gets the mark of the
+    // node that it is the structural form of, not this one: the structural
+    // form of a plain call is canonicalized by its name.
+    if (
+      !this._isStructural &&
+      boundToHiddenLibrary(
+        this.engine,
+        this._operator,
+        this._def,
+        lookupScope,
+        isApplicableDef
+      )
+    )
+      markLibraryCall(this);
     // Forward and statement-declared function slots may acquire an operator
     // definition when their declaration runs. Keep the slot's lexical home.
     if (this._def !== undefined && !hasCallableHome(this._def)) {
@@ -2595,15 +2619,38 @@ export class BoxedFunction
       if (hit !== undefined && hit.scope === scope) return hit.result;
     }
     try {
-      const result = this._withParseScope(() =>
-        this.engine.function(
-          this._operator,
-          operandsForCanonicalRebuild(this, this._ops),
+      const result = this._withParseScope(() => {
+        const ops = operandsForCanonicalRebuild(this, this._ops);
+        const options =
           this.sourceOffsets !== undefined
             ? { metadata: { sourceOffsets: this.sourceOffsets } }
-            : undefined
-        )
-      );
+            : undefined;
+        // The structural form of a qualified call `std::floor(x)` (a node
+        // made by `ce._libraryCall()`, `isLibraryCall()`), read where a
+        // binding of the program hides the library definition, is rebuilt
+        // as the library call: a rebuild by name would bind it to the user
+        // definition. `ce._libraryCall()` canonicalizes the operands in the
+        // current scope, so a call of the user function in an operand keeps
+        // its binding. Every other node is rebuilt by its name in the
+        // current scope, also when it is bound to the library definition
+        // (`docs/SCOPING-MODEL.md`).
+        const def = this._def;
+        if (
+          isLibraryCall(this) &&
+          def &&
+          isOperatorDef(def) &&
+          hidesLibraryBindingInContext(
+            this.engine,
+            this._operator,
+            def,
+            isApplicableDef
+          )
+        ) {
+          const call = this.engine._libraryCall(this._operator, ops, options);
+          if (call !== undefined) return call;
+        }
+        return this.engine.function(this._operator, ops, options);
+      });
       memo.set(this, { scope, result });
       return result;
     } finally {
@@ -2670,6 +2717,10 @@ export class BoxedFunction
         // serialized (`_serializationScope()`).
         if (this._localScope !== undefined && structural !== this)
           noteStructuralScope(structural, this._localScope);
+        // The structural form of a library call is a library call too: its
+        // canonical form is bound to the library definition again.
+        if (structural !== this && isLibraryCall(this))
+          markLibraryCall(structural);
         return structural;
       },
       undefined,
@@ -2929,7 +2980,9 @@ export class BoxedFunction
     //
     // Divide
     //
-    if (isFunction(expr, 'Divide')) {
+    // A call of a user function `Divide` (in a qualified call
+    // `std::Divide(Divide(x, 2), 3)`) is a value, not a quotient.
+    if (isFunction(expr, 'Divide') && isLibraryOperator(expr, 'Divide')) {
       const [coef1, numer] = expr.op1.toNumericValue();
       const [coef2, denom] = expr.op2.toNumericValue();
       // A quotient by zero has no coefficient: `a/0` is kept by
@@ -4986,6 +5039,9 @@ export class BoxedFunction
         : undefined
     );
     result._def = this._def;
+    // The node has the binding of this node, so it is a library call when
+    // this node is one (`isLibraryCall()`).
+    if (isLibraryCall(this)) markLibraryCall(result);
     if (sameOps) result._parseScope = this._parseScope;
     return result;
   }

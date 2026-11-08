@@ -258,6 +258,32 @@ export function moduleQualifiedName(
   return rawSymbolName(ops[0]);
 }
 
+/** A raw callee without the parentheses around it, in any input spelling:
+ * the operand of each call of the library `Delimiter` that wraps it with one
+ * operand (`(std::equal)(1, 1)` is the callee `Delimiter(Module(Equal))`),
+ * or with a second operand that is a string of parentheses (`'()'`: a
+ * string that starts with `(` and ends with `)`, which the canonical handler
+ * of the library `Delimiter` reads as parentheses too).
+ * `isLibraryDelimiter` tells whether a `Delimiter` node is a call of the
+ * library `Delimiter`: a `Delimiter` that the program defines is not read as
+ * parentheses, because its canonical handler can return another callee. */
+export function withoutParentheses(
+  x: ExpressionInput,
+  isLibraryDelimiter: (delimiter: ExpressionInput) => boolean
+): ExpressionInput {
+  for (;;) {
+    const ops = rawOperands(x, 'Delimiter');
+    if (ops === undefined || ops.length === 0 || ops.length > 2) return x;
+    if (ops.length === 2) {
+      const s = rawStringValue(ops[1]);
+      if (s === undefined || !(s.startsWith('(') && s.endsWith(')')))
+        return x;
+    }
+    if (!isLibraryDelimiter(x)) return x;
+    x = ops[0];
+  }
+}
+
 /** The `(protocol, member)` names of a raw `ProtocolMember(P, m, …)` operand
  * list — the box-route spelling of a qualified protocol call, where the first
  * two operands name the protocol and the member as strings (or symbols, which

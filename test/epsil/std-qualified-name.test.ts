@@ -325,23 +325,13 @@ describe('a qualified call where the program binds the capitalized name', () => 
   });
 
   test.each([
-    ['function Sum(x) { 0 }\nstd::sum(k, k in 1..3)', 'Sum'],
-    ['function Log(x) { 0 }\nstd::log(8, base: 2)', 'Log'],
-    ['function If(c, a, b) { 0 }\nstd::If(true, 1, 2)', 'If'],
+    ['function Sum(x) { 0 }\nstd::sum(k, k in 1..3)', '6'],
+    ['function Log(x) { 0 }\nstd::log(8, base: 2)', '3'],
+    ['function If(c, a, b) { 0 }\nstd::If(true, 1, 2)', '1'],
   ])(
     'a library function that holds or binds an argument, or a named argument: %j',
-    (source, name) => {
-      const r = executeEpsil(new ComputeEngine(), source);
-      expect(r.value.json).toEqual([
-        'Error',
-        "'qualified-call-shadowed'",
-        name,
-      ]);
-      expect(
-        r.diagnostics.map((d) =>
-          Array.isArray(d.message) ? d.message[0] : d.message
-        )
-      ).toEqual(['qualified-call-shadowed']);
+    (source, value) => {
+      expect(run(source)).toEqual([value, []]);
     }
   );
 });

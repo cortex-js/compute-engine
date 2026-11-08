@@ -11762,73 +11762,33 @@ export function lookupApplicable(
 }
 
 /**
- * The canonical form of the qualified call `["Apply", ["Module", name], …]`
- * (the Epsil `std::name(…)`), where `library` is the operator definition of
- * `name` in the system scope (a constant, in the `Apply` canonical handler,
- * is kept as an `Apply` where it is shadowed), chosen before the arguments
- * are canonicalized:
+ * True when `name`, the name of the qualified call
+ * `["Apply", ["Module", name], …]` (the Epsil `std::name(…)`), is shadowed
+ * in `scope`, where `library` is the definition of `name` in the system
+ * scope. The answer is read before the arguments are canonicalized.
  *
- * - `'call'`: the name is not shadowed in `scope` (the lookup of a head,
- *   `lookupApplicable()`, with the parameter shadows, gives `library`, or an
- *   extension or a copy of it that keeps its handlers, or gives nothing for a
- *   name that is not a parameter being canonicalized). The canonical form
- *   is the plain call `[name, …args]`, built by the normal route.
- * - `'apply'`: the name is shadowed, the library operator is an ordinary
- *   function (not lazy, not scoped, no binding sites and no operand roles,
- *   so it neither holds nor binds an operand), and the call has no named
- *   argument. The canonical form stays `Apply(name, …args)`, with a callee
- *   symbol bound to `library`: no rule that matches a call by its name can
- *   read it as a call of the shadow. It is evaluated by the `Apply` route,
- *   from the values of its arguments.
- * - `'shadowed'`: the name is shadowed, and the library operator holds or
- *   binds an operand, or the call has a named argument. Such a call cannot
- *   be kept as an `Apply`: its arguments must be canonicalized by the rules
- *   of the library operator, which match the call by its name. The canonical
- *   form is the error `["Error", "'qualified-call-shadowed'", name]`.
+ * The name is not shadowed when the lookup of a head (`lookupApplicable()`,
+ * with the parameter shadows) gives `library`, or an extension or a copy of
+ * it that keeps its handlers, or gives nothing for a name that is not a
+ * parameter being canonicalized. The call is then the plain call
+ * `[name, …args]`, built by the normal route. Otherwise it is the same call
+ * bound to `library`, built by `ce._libraryCall()`.
  */
-export function qualifiedCallForm(
+export function shadowsQualifiedName(
   ce: ComputeEngine,
   name: string,
   library: BoxedDefinition,
-  scope: Scope,
-  named: boolean
-): 'call' | 'apply' | 'shadowed' {
+  scope: Scope
+): boolean {
   const current = lookupApplicable(name, scope, ce);
   // A parameter of a function literal whose body is being canonicalized gets
   // its binding on its first reference, so the lookup gives nothing for a
   // parameter that the body has not named yet. It still shadows the library
   // name: with `function g(Floor) { std::floor(2.5) }`, a plain call
   // `Floor(2.5)` would be a call of the parameter.
-  const shadowed =
-    current === undefined
-      ? ce._isShadowedParameter(name)
-      : isShadowOf(current, library);
-  if (!shadowed) return 'call';
-  // A constant of the library applied as a function has no operator rules.
-  if (!('operator' in library)) return 'apply';
-  const op = library.operator;
-  if (
-    named ||
-    op.lazy ||
-    op.scoped ||
-    op.bindingSites !== undefined ||
-    op.operands !== undefined
-  )
-    return 'shadowed';
-  return 'apply';
-}
-
-/** The canonical form of a qualified call `std::name(…)` whose library
- * operator holds or binds an operand, in a scope that shadows `name`: see
- * {@link qualifiedCallForm}. */
-export function qualifiedCallShadowedError(
-  ce: ComputeEngine,
-  name: string
-): Expression {
-  return ce.function('Error', [
-    ce.string('qualified-call-shadowed'),
-    ce.symbol(name, { canonical: false }),
-  ]);
+  return current === undefined
+    ? ce._isShadowedParameter(name)
+    : isShadowOf(current, library);
 }
 
 /** True when `s` is a type string that parses to a POLYTYPE (a `where`

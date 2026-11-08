@@ -59,25 +59,31 @@ canonical form of `["Module", name]` is the symbol bound to the system-scope
 definition; in a scope that shadows the name, it is a new symbol marked as
 qualified, which the parameter repair of a function literal does not rebind
 to the parameter (`hidesLibraryBinding()`, `markQualifiedName()`,
-`library-shadowing.ts`; the `Module` operator, `library/core.ts`). The
-form of a qualified call `["Apply", ["Module", f], …]` is chosen before its
-arguments are canonicalized (`qualifiedCallForm()`, `function-utils.ts`).
-Where `f` is not shadowed (the lookup of a head, with the parameter
-shadows, gives the library definition), it is the plain call `[f, …]`, and
-every rule of the library operator applies. Where `f` is shadowed and the
-library operator is an ordinary function (not lazy, not scoped, no operand
-roles) and the call has no named argument, it stays
-`["Apply", f, …]` with a callee symbol bound to the library definition and
-the arguments canonicalized in the current scope (an argument `max` reads
-the variable `max`): no rule that matches a call by its name reads it, and
-the `Apply` route evaluates it from the values of its arguments, with no
-symbolic simplification. Where `f` is shadowed and the library operator
-holds or binds an operand (`Sum`, `If`), or the call has a named argument,
-it is the error `["Error", "'qualified-call-shadowed'", f]`. A plain call
-made where `f` is not shadowed keeps its binding (see "Callable
-resolution"), and in a shadowing scope it is written
-`["Apply", ["Module", f], …]`, which is boxed again in one of the two last
-forms. A
+`library-shadowing.ts`; the `Module` operator, `library/core.ts`). A
+qualified call `["Apply", ["Module", f], …]` is the plain call `[f, …]`
+bound to the library definition of `f`, in every scope, and every rule of
+the library operator applies to it. It is boxed before its arguments are
+canonicalized, so a lazy operator receives its operands as written and a
+binder (`Sum`) binds its own variable. Where `f` is not shadowed (the
+lookup of a head, with the parameter shadows, gives the library
+definition), the call is boxed by the normal route. Where `f` is shadowed
+(`shadowsQualifiedName()`, `function-utils.ts`), it is boxed by
+`ce._libraryCall()`: while the call is boxed, the engine holds its head
+(`ce._qualifiedHead`), the lookup of the head and the binding of each node
+of the name read the library definition, and the name tests of that boxing
+see no shadow. The boxing of each operand clears the head first, so the
+arguments are canonicalized in the current scope: an argument `max` reads
+the variable `max`, and a call `Not(false)` of a user function `Not` inside
+`std::Not(…)` stays a call of the user function. The canonical steps that
+compare an operand with the call compare definitions, not names (see
+"Symbol identity" above), so the fold `Not(Not(x)) = x` does not apply to
+that operand. A call bound to the library keeps its binding (see "Callable
+resolution"), and in a scope that shadows `f` it is written
+`["Apply", ["Module", f], …]`, which boxes again to the same call. The
+canonical form of its structural form is the library call again, also in
+such a scope (`isLibraryCall()`, `library-shadowing.ts`); the canonical form
+of every other structural call binds its name in the current scope (see
+"Callable resolution"). A
 `Declare`, an `Assign` or a `DefineFunction` of `Module` defines nothing and
 evaluates to the `module-binding` error, and a block does not hoist such a
 `Declare`. The head `Module` always resolves to the operator of the system

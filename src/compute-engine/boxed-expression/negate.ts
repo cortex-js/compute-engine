@@ -4,6 +4,7 @@ import type {
 } from '../global-types.js';
 import { isNumber, isFunction, isContinuationOperand } from './type-guards.js';
 import { sortAddTerms, sortProductOperands } from './order.js';
+import { isLibraryOperator } from '../library-shadowing.js';
 import {
   couldBeNumericTuple,
   hasAccessibleComponents,
@@ -69,9 +70,12 @@ function negateTupleComponents(
 }
 
 export function canonicalNegate(expr: Expression): Expression {
-  // Negate(Negate(x)) -> x
+  // Negate(Negate(x)) -> x. A call of a user function named `Negate` or
+  // `Multiply` is a value, not a negation or a product
+  // (`isLibraryOperator()`): it can be the operand of the qualified call
+  // `std::Negate(…)`, made in the scope of the user function.
   let sign = -1;
-  while (isFunction(expr, 'Negate')) {
+  while (isFunction(expr, 'Negate') && isLibraryOperator(expr, 'Negate')) {
     expr = expr.op1;
     sign = -sign;
   }
@@ -92,6 +96,7 @@ export function canonicalNegate(expr: Expression): Expression {
   // `arithmetic-mul-div.ts`).
   if (
     isFunction(expr, 'Multiply') &&
+    isLibraryOperator(expr, 'Multiply') &&
     !expr.ops.some((op) => isContinuationOperand(op))
   )
     return negateProduct(expr.engine, expr.ops);

@@ -78,10 +78,14 @@
   it as the library does (`Sum`, `If`), and a named argument is valid. The
   arguments read the definitions of the scope: with a user function `Not`
   that returns its argument, `["Apply", ["Module", "Not"], ["Not",
-  "False"]]` is `True`. A name that the library does not
-  define gives `["Error", "'not-a-library-name'", name]`. A second operand is
-  reserved for the name of another module. LaTeX has no spelling of the
-  qualifier: `["Module", "Pi"]` is written `\pi`.
+  "False"]]` is `True`. A callee written in parentheses,
+  `["Apply", ["Delimiter", ["Module", f]], …]`, is the same library call; a
+  callee of another form applied to a library function that holds or binds
+  an operand gives the error `qualified-call-arguments-canonical`. A name
+  that the library does not define gives
+  `["Error", "'not-a-library-name'", name]`. A second operand is reserved
+  for the name of another module. LaTeX has no spelling of the qualifier:
+  `["Module", "Pi"]` is written `\pi`.
 - **Epsil: the qualified name `std::name`.** `std::pi` (or `std::Pi`) is the
   library constant π and `std::floor(2.5)` calls the library function
   `Floor`, whatever the program binds: after `function Floor(x) { x + 100 }`
@@ -326,6 +330,13 @@
   `(length(v), sum(v), v)` gave `(4, 23, [1,3,5,6,8])`. Now the length, the
   emptiness and the elements of one list come from the same draws:
   `(4, 11, [1,2,3,5])`.
+- **A function declared to take a point checks each coordinate of the point.**
+  With `U` declared `(tuple<integer, integer>) -> integer` and defined as
+  `U(p) := p.x`, `U((1.5, 2))` was valid, typed `integer`, and gave `1.5`.
+  Now it is an `incompatible-type` error, as `U([(1.5, 2)])` already was for
+  the point in the list. The same check applies to a variable that holds the
+  point, and to an argument whose value is such a point when the call is
+  evaluated.
 
 ### Performance
 

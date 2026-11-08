@@ -778,16 +778,6 @@ function* executeEpsilSteps(
             d.message[0] === markerKind &&
             d.message[1] === markerName
         )) ||
-      // A qualified call that a binding of the program shadows: the static
-      // check reports it with its own code (`qualified-call-shadowed`).
-      (markerError !== undefined &&
-        errorCode(markerError.json) === 'qualified-call-shadowed' &&
-        diagnostics.some(
-          (d) =>
-            Array.isArray(d.message) &&
-            d.message[0] === 'qualified-call-shadowed' &&
-            d.message[1] === symbol(operand(markerError.json, 2))
-        )) ||
       // A `function` statement on a `const` binding: the static check reports
       // it as a `static-type-error` with the engine code
       // `invalid-clause-definition` at this statement, so the error value of

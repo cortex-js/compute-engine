@@ -153,7 +153,13 @@ function canonicalShortCircuit(
       ops,
       flattenNested ? name : undefined
     );
-    const def = ce.lookupDefinition(name);
+    // While `ce._libraryCall()` boxes the qualified call `std::And(…)` in a
+    // scope with a user `And`, the call is bound to the library definition
+    // (`ce._qualifiedHead`), and the arguments are checked against its
+    // signature, not the signature of the user definition.
+    const head = ce._qualifiedHead;
+    const def =
+      head?.name === name ? head.definition : ce.lookupDefinition(name);
     if (def && isOperatorDef(def)) {
       const opDef = def.operator;
       const adjusted = validateArguments(

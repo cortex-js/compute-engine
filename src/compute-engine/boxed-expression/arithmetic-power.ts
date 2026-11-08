@@ -39,7 +39,11 @@ import {
   complexNumericValueRoute,
 } from './apply.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
-import { isShadowedSymbol, shadowsLibraryName } from '../library-shadowing.js';
+import {
+  isLibraryOperator,
+  isShadowedSymbol,
+  shadowsLibraryName,
+} from '../library-shadowing.js';
 import { realExponentValue } from './imaginary-part.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { complexPow } from '../numerics/numeric-complex.js';
@@ -370,7 +374,9 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     if (reduced) return reduced;
   }
 
-  if (isFunction(a, 'Power')) {
+  // A call of a user function `Power` (in a qualified call
+  // `std::Power(Power(x, 2), 3)`) is a value, not a power to combine.
+  if (isFunction(a, 'Power') && isLibraryOperator(a, 'Power')) {
     const [base, aPow] = a.ops;
     // (a^n)^m -> a^{n*m} only when mathematically safe:
     // - base is non-negative (no sign info to lose), or

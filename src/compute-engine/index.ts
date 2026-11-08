@@ -232,6 +232,7 @@ import {
   kindRegistryRollbackPoint,
 } from './boxed-expression/value-kinds.js';
 import { canonicalFunctionLiteralOperands } from './function-utils.js';
+import { markLibraryCall } from './library-shadowing.js';
 import { markFunctionLiteralParameter } from './boxed-expression/function-literal.js';
 import { sharedEvaluationStarts } from './boxed-expression/shared-evaluation-memo.js';
 import {
@@ -1670,6 +1671,14 @@ export class ComputeEngine implements IComputeEngine {
    * @internal
    */
   _inferenceCause: InferenceCauseContext | null = null;
+
+  /** The head of the library call that `_libraryCall()` is boxing — see
+   * `IComputeEngine._qualifiedHead`. Set and cleared by
+   * `boxFunctionInternal()` (`box.ts`).
+   * @internal
+   */
+  _qualifiedHead: { name: string; definition: BoxedDefinition } | undefined =
+    undefined;
 
   /** The inference-write choke point — see
    * `IComputeEngine._noteInferenceWrite`. Subscribers, in order: the
@@ -3468,6 +3477,26 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal */
   _librarySymbol(name: MathJsonSymbol): Expression | undefined {
     return createLibrarySymbolExpression(this, this._commonSymbols, name);
+  }
+
+  /** @internal */
+  _libraryCall(
+    name: MathJsonSymbol,
+    ops: ReadonlyArray<ExpressionInput>,
+    options?: { metadata?: Metadata; scope?: Scope }
+  ): Expression | undefined {
+    const library = this._evalContextStack[0]?.lexicalScope.bindings.get(name);
+    if (library === undefined || !('operator' in library)) return undefined;
+    const call = boxFunction(this, name, ops, {
+      metadata: options?.metadata,
+      scope: options?.scope,
+      libraryHead: library,
+    });
+    // The canonical form of the call, and of its structural form, is this
+    // library call again (`isLibraryCall()`). A fold of the library operator
+    // can give another expression, which is not marked.
+    if (call.operatorDefinition === library.operator) markLibraryCall(call);
+    return call;
   }
 
   /** The `resolveSymbol` handler of the `parse()` call in progress; see the

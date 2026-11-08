@@ -603,8 +603,9 @@ Still open:
     cannot bind a module to the name `std`.
   - A `::` name of an imported module follows the rules of `std::` where they
     apply: the name `Module` cannot be bound, and a qualified call of a
-    shadowed name follows the three forms of the CE-1099 design (a plain call,
-    an `Apply` of the bound function, or `qualified-call-shadowed`).
+    shadowed name is the plain call bound to the definition that the
+    qualified name names, with its arguments read in the current scope
+    (CE-1109.5; the three forms of the CE-1099 design are gone).
 
 ## 12. Future dynamic imports
 
