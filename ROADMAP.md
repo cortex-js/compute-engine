@@ -857,6 +857,43 @@ array-uniform loop codegen, and it needs witnesses first.
   `Random()` draw in the shader. The other option (an `if`/`else` lowering with
   a temporary) needs a second witness; the count is one.
 
+### CE-1110. GPU targets: read a parameter declared `real` as an argument that is not NaN, for `Max` and `Min`
+
+**Status:** waits for user (approval); performance, S. Recorded by the user
+2026-11-07. Issue `CE-1105` (closed, not a defect) holds the observation.
+**Witness:** plausible; the prelude function `tone` of the Tycho showcase entry
+`buddhabrot`.
+
+The GLSL and WGSL targets emit the NaN-safe helper `_gpu_max` (or `_gpu_min`)
+in place of the built-in `max` when they cannot prove that each operand is
+finite (`compileGPUElementExtremum` in
+`src/compute-engine/compilation/gpu-extrema.ts`). For
+`max(0, v)` in the body of a user function `t`, called as `t(z)` with `z`
+undeclared, the current source gives:
+
+| How `t` is written                                   | Body emitted          |
+| ---------------------------------------------------- | --------------------- |
+| Function literal with `["Typed", "v", "'real'"]`     | `max(0.0, v)`         |
+| `t` declared `(real) -> real`                        | `_gpu_max(0.0, v)`    |
+| `t` declared `(real<-1..1>) -> real`                 | `max(0.0, v)`         |
+
+A declared signature gives a parameter a finite fact only when its type has two
+finite bounds (`gpuDeclaredParameterRanges` in
+`src/compute-engine/compilation/gpu-finite-proof.ts`). A bare `real` is not
+enough for the general finite proof, because the argument is computed in f32:
+`exp(x)` is a `real` that is `+∞` in f32 for `x > 88.7`, and a sum, product or
+quotient of it can then be NaN.
+
+`Max` and `Min` need less than a finite operand: the helper exists only for a
+NaN operand, and `max(0.0, +∞)` is defined. A NaN argument is outside the type
+`real`, so its compiled value is unspecified. The change: for the extremum
+helpers only, accept a parameter that the host declared `real` (or any subtype
+of `real`) in the signature, and keep the bounded-range rule for every other
+use of the finite proof. Make the Function-literal form follow the same rule,
+so that the two ways of writing `t` give the same code. Measure: the number of
+`_gpu_max` and `_gpu_min` helpers in the Tycho corpus before and after, and 0
+changed values.
+
 ## LaTeX parsing and serialization
 
 ### CE-297. The lenient grammar makes reading choices that a host cannot detect
