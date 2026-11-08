@@ -25,6 +25,62 @@ function lastStatement(source: string): unknown {
   return Array.isArray(block) && block[0] === 'Block' ? block.at(-1) : block;
 }
 
+/** The number of nested `ReplaceAt`, `Insert` and `DeleteAt` views along
+ * the first operand of `expr`. */
+function chainDepth(expr: {
+  operator: string;
+  ops?: ReadonlyArray<unknown>;
+}): number {
+  let depth = 0;
+  let node = expr;
+  while (
+    ['ReplaceAt', 'Insert', 'DeleteAt'].includes(node.operator) &&
+    node.ops !== undefined
+  ) {
+    depth += 1;
+    node = node.ops[0] as typeof expr;
+  }
+  return depth;
+}
+
+describe('a chain of rebuilding views of a large list', () => {
+  // `ReplaceAt`, `Insert` and `DeleteAt` over a source of more than 100
+  // elements give a lazy view. Each operator, applied 3000 times to its
+  // previous result, gives a chain of at most 32 views, with the values of
+  // the writes.
+  const ce = new ComputeEngine();
+  const start = () => ce.function('List', Array.from({ length: 200 }, () => ce.number(0)));
+
+  test('ReplaceAt', () => {
+    let xs = start();
+    for (let k = 1; k <= 3000; k++)
+      xs = ce.function('ReplaceAt', [xs, ce.number((k % 200) + 1), ce.number(k)]).evaluate();
+    expect(chainDepth(xs)).toBeLessThanOrEqual(32);
+    expect(xs.count).toBe(200);
+    expect(xs.at(1)!.re).toBe(3000);
+    expect(xs.at(2)!.re).toBe(2801);
+    expect(JSON.stringify(xs.json).length).toBeGreaterThan(0);
+  });
+
+  test('Insert and DeleteAt', () => {
+    let xs = start();
+    for (let k = 1; k <= 3000; k++)
+      xs = ce.function('Insert', [xs, ce.number(1), ce.number(k)]).evaluate();
+    expect(chainDepth(xs)).toBeLessThanOrEqual(32);
+    expect(xs.count).toBe(3200);
+    expect(xs.at(1)!.re).toBe(3000);
+    for (let k = 1; k <= 3000; k++)
+      xs = ce.function('DeleteAt', [xs, ce.number(1)]).evaluate();
+    expect(chainDepth(xs)).toBeLessThanOrEqual(32);
+    expect([...xs.each()].map((x) => x.re)).toEqual(new Array(200).fill(0));
+  });
+
+  test('one write stays a lazy view', () => {
+    const xs = ce.function('ReplaceAt', [start(), ce.number(1), ce.number(9)]).evaluate();
+    expect(xs.operator).toBe('ReplaceAt');
+  });
+});
+
 describe('an assignment to a list element rebinds the list', () => {
   test.each([
     ['`=`', 'let xs = [1, 2, 3]\nxs[2] = 9\nxs'],
@@ -182,6 +238,20 @@ describe('a write that does not give a list is an error, and the variable keeps 
     );
     expect(diagnostics).toEqual([]);
     expect(value.json).toEqual(['List', 9, 2, 7]);
+  });
+
+  // A write to a list of more than 100 elements gives a lazy view over the
+  // list. A loop of writes made a chain of views with one level for each
+  // write, and a walk of the value (its `json`) exceeded the call stack.
+  // The chain is now listed into a `List` when it has 32 levels.
+  test('a loop of writes to a list of more than 100 elements (CE-1143)', () => {
+    const { value, diagnostics } = run(
+      'let xs = [0 for k in 1..200]\nfor k in 1..5000 { xs[k % 200 + 1] = xs[k % 200 + 1] + 1 }\nxs'
+    );
+    expect(diagnostics).toEqual([]);
+    const counts = [...value.each()].map((x) => x.re);
+    expect(counts).toEqual(new Array(200).fill(25));
+    expect(chainDepth(value)).toBeLessThanOrEqual(32);
   });
 
   test('an undeclared list is assignment-to-list-element', () => {

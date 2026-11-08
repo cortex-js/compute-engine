@@ -1,3 +1,17 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A loop that writes to the elements of a large list no longer exceeds the
+  call stack.** In Epsil, a loop such as
+  `for k in 1..5000 { xs[k % 200 + 1] = xs[k % 200 + 1] + 1 }` over a list of
+  more than 100 elements, or the same loop with `replaceAt`, `insert` or
+  `deleteAt`, gave the error "Maximum call stack size exceeded" after some
+  thousands of writes. It now gives the list. The same applies to
+  `ReplaceAt`, `Insert` and `DeleteAt` applied again and again to their
+  previous result in MathJSON, for a list of at most `maxCollectionSize`
+  elements.
+
 ## 0.184.0 _2026-11-08_
 
 ### Breaking Changes

@@ -3897,12 +3897,65 @@ function walkOfListedSource(
  * list the expression stayed unevaluated. When the list cannot be made (an
  * inner collection that cannot be walked, more than `maxCollectionSize`
  * elements), the answer is `undefined`.
+ *
+ * A larger source with a count is also read when it is a chain of
+ * {@link MAX_REBUILD_VIEW_DEPTH} or more of these views, and it has at most
+ * `maxCollectionSize` elements. A loop that updates a large list
+ * (`L = ReplaceAt(L, k, v)` with 901 elements) otherwise wraps the view of
+ * the previous turn in a new view at each turn. Each read of an element, and
+ * each walk of the value (its `json`, its `structural` form), then goes
+ * through every level of the chain by recursion, and after some thousands of
+ * turns the walk exceeds the JavaScript call stack. With this rule, the
+ * chain has at most that many levels, and a loop pays one copy of the list
+ * for each `MAX_REBUILD_VIEW_DEPTH` turns. One view over a large source
+ * stays lazy.
  */
 function eagerElementsOf(xs: Expression): Expression[] | undefined {
   const size = xs.count;
   if (size === undefined) return listFiniteUncountedCollection(xs);
-  if (size > MAX_SIZE_EAGER_COLLECTION) return undefined;
+  if (
+    size > MAX_SIZE_EAGER_COLLECTION &&
+    !(
+      size <= xs.engine.maxCollectionSize &&
+      rebuildViewDepth(xs) >= MAX_REBUILD_VIEW_DEPTH
+    )
+  )
+    return undefined;
   return Array.from(xs.each()) as Expression[];
+}
+
+/**
+ * The number of levels of a chain of lazy views from which
+ * {@link eagerElementsOf} lists the chain into one `List`. A walk of a chain
+ * uses about ten JavaScript frames for each level, so this depth uses a
+ * small part of the call stack.
+ */
+const MAX_REBUILD_VIEW_DEPTH = 32;
+
+/**
+ * The number of nested lazy views of `Insert`, `DeleteAt` and `ReplaceAt`
+ * (with one position) at the start of `xs`, read through the collection
+ * operand of each view. The count stops at
+ * {@link MAX_REBUILD_VIEW_DEPTH}. A node of a user operator with one of these
+ * names is not counted. The count also stops at the first view of another
+ * operator, so a loop that wraps each write in a lazy view of another
+ * operator still makes a chain without a limit.
+ */
+function rebuildViewDepth(xs: Expression): number {
+  let depth = 0;
+  let node = xs;
+  while (
+    depth < MAX_REBUILD_VIEW_DEPTH &&
+    isFunction(node) &&
+    ((node.operator === 'ReplaceAt' && node.nops === 3) ||
+      (node.operator === 'Insert' && node.nops === 3) ||
+      (node.operator === 'DeleteAt' && node.nops === 2)) &&
+    isLibraryOperator(node, node.operator)
+  ) {
+    depth += 1;
+    node = node.op1;
+  }
+  return depth;
 }
 
 /**
