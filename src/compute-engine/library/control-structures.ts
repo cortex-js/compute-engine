@@ -159,6 +159,8 @@ import { widenAssignedType } from '../boxed-expression/boxed-value-definition.js
 import {
   elementMemoFillTo,
   ELEMENT_MEMO_CAP,
+  elementMemoCanKeep,
+  validElementMemo,
 } from '../boxed-expression/collection-element-memo.js';
 import {
   buildCaseClosure,
@@ -7026,8 +7028,10 @@ function comprehensionIsDependent(clauses: ReadonlyArray<Expression>): boolean {
 /**
  * Count the elements of a dependent comprehension by traversing its iterator
  * DOMAINS only — the nested iteration is driven with a trivial (`Nothing`) body,
- * so reading `.count` never evaluates (or re-runs the side effects of) the real
- * comprehension body. Returns `undefined` if the domain is unbounded (the
+ * so this count never evaluates (or re-runs the side effects of) the real
+ * comprehension body. A comprehension whose domain or guard is not pure is
+ * counted here only when its count cannot be read from the elements that its
+ * element memo keeps (see `comprehensionCount()`). Returns `undefined` if the domain is unbounded (the
  * iteration-limit cancellation); a genuine time-budget cancellation propagates.
  */
 function comprehensionEnumeratedCount(
@@ -7199,11 +7203,42 @@ function scanIndependentClauses(expr: Expression):
  * clause order): an empty clause ⇒ 0; else an unknown-count clause ⇒ undefined;
  * else an infinite clause ⇒ Infinity; else the product. A DEPENDENT
  * comprehension has no closed form, so it is counted by a domain-only traversal.
+ * A comprehension whose domain or guard is not pure is counted from the
+ * elements that its element memo keeps, when the memo can keep them
+ * (`comprehensionCountFromElements()`): that count evaluates the body of the
+ * comprehension.
  */
 function comprehensionCount(expr: Expression): number | undefined {
   if (!isFunction(expr)) return undefined;
   const clauses = expr.ops.slice(1);
   if (clauses.length === 0) return undefined;
+  // A comprehension whose domain or guard is not pure is counted from the
+  // elements that its element memo keeps, so that the count and the
+  // elements come from one evaluation of the domains and the guards
+  // (`comprehensionCountFromElements()`).
+  if (comprehensionClausesAreImpure(clauses)) {
+    const kept = validElementMemo(expr);
+    if (kept?.complete) return kept.elements.length;
+    // In a transient precision window (the window of `N(x, p)`) the memo is
+    // neither served nor kept, so the next read of the elements outside the
+    // window evaluates them again, and no count can agree with it.
+    if (expr.engine._atTransientConfiguration) return undefined;
+    // The walk of the elements is made only when the memo can keep it, and
+    // when the form of the comprehension shows that each domain can be
+    // walked now and that the walk ends (these two tests run no user code).
+    // Otherwise the count below is used: a walk that the memo does not keep
+    // gives nothing that the count below does not give, and it evaluates
+    // the body too; a domain that cannot be walked now (`Linspace(a, 1, 3)`
+    // with `a` unknown) gives no element, and the walk would count 0; and
+    // a walk of a comprehension that is not known to be finite evaluates the
+    // body up to the iteration limit.
+    if (
+      elementMemoCanKeep(expr) &&
+      independentDomainsAreEnumerable(clauses) &&
+      comprehensionIsFinite(expr) === true
+    )
+      return comprehensionCountFromElements(expr);
+  }
   if (comprehensionIsDependent(clauses))
     return comprehensionEnumeratedCount(expr);
 
@@ -7236,6 +7271,97 @@ function comprehensionCount(expr: Expression): number | undefined {
   return guarded || s.patternBeforeLast
     ? comprehensionEnumeratedCount(expr)
     : s.product;
+}
+
+/**
+ * Whether the domain or the guard of a clause is not transitively pure: it
+ * can draw a random number (`Random()`) or run another side effect, so two
+ * evaluations of it can give two different results.
+ */
+function comprehensionClausesAreImpure(
+  clauses: ReadonlyArray<Expression>
+): boolean {
+  return clauses.some(
+    (clause) =>
+      isFunction(clause, 'Element') &&
+      clause.ops
+        .slice(1, 3)
+        .some((op) => sym(op) !== 'Nothing' && !isTransitivelyPure(op))
+  );
+}
+
+/**
+ * Whether each clause domain that reads no earlier index can be walked now
+ * (`isEnumerableCollection`, read from its form, with no user code run).
+ * `Linspace(a, 1, 3)` with `a` unknown has 3 elements by its form, but gives
+ * none now. A domain that reads an earlier index is not tested here:
+ * `comprehensionIsFinite()` accepts an impure one only for a form that can
+ * be walked when the indices have values (`dependentDomainShape()`).
+ */
+function independentDomainsAreEnumerable(
+  clauses: ReadonlyArray<Expression>
+): boolean {
+  const bound: string[] = [];
+  for (const clause of clauses) {
+    if (!isFunction(clause, 'Element')) return false;
+    const domain = clause.ops[1];
+    if (domain === undefined) return false;
+    const dependent = bound.length > 0 && domain.has(bound);
+    if (!dependent && domain.isEnumerableCollection !== true) return false;
+    const idx = clause.ops[0];
+    if (idx && isSymbol(idx) && idx.symbol !== 'Nothing') bound.push(idx.symbol);
+    else if (isFunction(idx, 'Tuple')) bound.push(...tuplePatternNames(idx));
+  }
+  return true;
+}
+
+/**
+ * The count of a comprehension whose domain or guard is not pure, read from
+ * one complete walk of its elements, which the element memo of the instance
+ * keeps.
+ *
+ * The other counts evaluate the domains (`scanIndependentClauses()`) and
+ * the guards (`comprehensionEnumeratedCount()`) in a walk of their own, and
+ * do not keep the elements. When a domain or a guard draws, that walk uses
+ * other draws than the walk that gives the elements, so the count and the
+ * elements do not agree: `[j for j in 1..10 if Random() < 0.5]` could have
+ * the length 4 and five elements. A walk with `each()` keeps its elements in
+ * the element memo (`docs/RANDOMNESS-MODEL.md` §6, "One instance, one draw
+ * set"), and a later read of the elements gets the same elements.
+ *
+ * This walk evaluates the body of the comprehension for each element, and
+ * runs its side effects, which the other counts do not do. When the memo
+ * keeps the walk, these are the effects of the first read of the elements:
+ * the later reads are served by the memo.
+ *
+ * The caller makes this walk only when the memo can keep it
+ * (`elementMemoCanKeep()`), and when the form of the comprehension shows
+ * that its domains can be walked now and that it is finite. The memo can still refuse the walk for its content:
+ * more than `ELEMENT_MEMO_CAP` elements, an element that holds a mutable
+ * object, or a store guard that moved (host code that is not stated pure, a
+ * stopped read of a sequence term). Then the next read of the elements
+ * evaluates them again, and the count is not known. A walk that missed
+ * elements or failed (a domain that is an error value), or that stopped at
+ * the iteration limit, gives no count either.
+ */
+function comprehensionCountFromElements(expr: Expression): number | undefined {
+  try {
+    let n = 0;
+    // A walk of more elements than the memo keeps stops here: it gives no
+    // count, and a partial walk of an impure instance is not kept.
+    for (const _ of expr.each()) if (++n > ELEMENT_MEMO_CAP) break;
+    // The memo does not keep a walk that missed elements or failed
+    // (`commitRecordedWalk()`), so such a walk gives no count.
+    const kept = validElementMemo(expr);
+    return kept?.complete ? kept.elements.length : undefined;
+  } catch (e) {
+    if (
+      e instanceof CancellationError &&
+      e.cause === 'iteration-limit-exceeded'
+    )
+      return undefined;
+    throw e;
+  }
 }
 
 /** Whether any clause carries a guard, a third `Element` operand. */

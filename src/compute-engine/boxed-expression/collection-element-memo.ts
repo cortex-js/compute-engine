@@ -1600,6 +1600,20 @@ export function elementMemoFillTo(
   return elements;
 }
 
+/**
+ * Whether the element memo can keep a complete walk of `expr` now: the
+ * memo is on (`cacheOff('element')`), no transient precision window is
+ * open, and the memo can follow every dependency of the instance (the
+ * snapshot that `commitRecordedWalk()` takes). A walk can still be refused
+ * for its own content (an element that holds a mutable object, a store
+ * guard that moved, more than `ELEMENT_MEMO_CAP` elements).
+ */
+export function elementMemoCanKeep(expr: Expression): boolean {
+  if (cacheOff('element') || expr.engine._atTransientConfiguration)
+    return false;
+  return snapshotDeps(expr, true) !== undefined;
+}
+
 /** TEST-ONLY: drop an instance's element memo, so a test of a layer BELOW
  * the memo (e.g. the map-auto-compile cache) can force a re-walk. */
 export function _clearElementMemoForTest(expr: Expression): void {

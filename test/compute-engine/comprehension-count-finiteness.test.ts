@@ -154,6 +154,9 @@ describe('COMPREHENSION FINITENESS — no callback runs', () => {
     // `keep` changes the symbol `calls`, so the memo of the domain expires
     // after each walk. The count reads the emptiness of the domain from its
     // count: a second read would walk the domain again (CE-494.2).
+    // The domain is not pure, but the element memo of the comprehension
+    // cannot follow the outer `calls` that `keep` writes, so it keeps no
+    // walk, and the count is not read from a walk of the elements.
     for (const [cond, count] of [
       ['j > 0', 3],
       ['j > 5', 0],
@@ -173,6 +176,25 @@ describe('COMPREHENSION FINITENESS — no callback runs', () => {
       expect(c.count).toBe(count);
       expect(run('calls').json).toBe(3);
     }
+  });
+
+  test('an impure domain that cannot be walked now has no count', () => {
+    // `Linspace(a, 1, 3)` has 3 elements by its form, but with `a` unknown
+    // it gives no element now. A walk of the comprehension would give no
+    // element, and the count must not be 0.
+    const ce = new ComputeEngine();
+    ce.declare('keep', {
+      signature: '(number) -> boolean',
+      pure: false,
+      evaluate: () => ce.True,
+    });
+    const c = ce.box([
+      'Comprehension',
+      'i',
+      ['Element', 'i', ['Filter', ['Linspace', 'a', 1, 3], 'keep']],
+    ]);
+    expect(c.count).not.toBe(0);
+    expect(c.isEmptyCollection).not.toBe(true);
   });
 
   test('a dependent range is finite from its form', () => {

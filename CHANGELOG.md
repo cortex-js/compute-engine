@@ -251,6 +251,13 @@
   `-1.4e-22`, and its `Inverse` has very large entries. Machine numbers, and
   big numbers that a machine number holds exactly, give the same results as
   before.
+- **The length of a random list is the number of its elements.** A
+  comprehension whose guard or domain draws a random number, such as
+  `[j for j in 1..10 if random() < 0.5]`, computed its length with draws of
+  its own, so the length and the elements could disagree:
+  `(length(v), sum(v), v)` gave `(4, 23, [1,3,5,6,8])`. Now the length, the
+  emptiness and the elements of one list come from the same draws:
+  `(4, 11, [1,2,3,5])`.
 
 ### Performance
 
