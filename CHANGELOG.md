@@ -156,6 +156,21 @@
 
 ### Resolved Issues
 
+- **The derivative of an expression that holds a named point is computed.**
+  The derivative of a symbol that holds a point is the zero point, not the
+  number `0`. With `p := (1, 2)`, `D(p + (\sin u, u^2), u)` was an
+  `incompatible-type` error, and `D(PointY(p + (\sin u, u^2)), u)`,
+  `D(PointY(u^2 p), u)` and, with `g(t, z) := t^2 z`, `D(PointY(g(u, p)), u)`
+  stayed unevaluated. They are now `(\cos u, 2u)`, `2u`, `4u` and `4u`. A
+  named list of points gives a list of zero points: with
+  `S := [(1, 2), (3, 4)]`, `D(PointY(u^2 S), u)` is `[4u, 8u]`. A symbol that
+  holds a number or a list of numbers keeps the derivative `0`. The
+  derivative of a function applied to a point, such as
+  `D(Norm(p - (\sin u, u)), u)` or `D(f((u, u^2)), u)`, gave a point, a wrong
+  shape: the partial derivative with respect to a point is a gradient. It now
+  stays unevaluated, except for an operator whose `derivative` key gives a
+  number for that partial derivative.
+
 - **On the GLSL and WGSL targets, a function can take a list input as an
   argument.** With the input `H: list<real^1600>` and
   `g: (list<integer>, real) -> real`, the compilation of `g(H, x)` failed:

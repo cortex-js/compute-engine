@@ -1984,6 +1984,7 @@ function differentiateApplied(
       ce._fn('D', [arg, ce.symbol(v)]);
     if (!argPrime.isValid) return undefined;
     if (argPrime.isSame(0)) continue;
+    if (isPointDerivative(arg, argPrime)) return undefined;
     const nextOrders = orders.slice();
     nextOrders[i] = (nextOrders[i] ?? 0) + 1;
     const nextDeriv = ce._fn('Derivative', [
@@ -2404,6 +2405,103 @@ function withZeroOfShape(op: Expression, d: Expression, v: string): Expression {
 }
 
 /**
+ * The derivative of `expr`, a symbol that is not the variable and is not a
+ * user function: the zero of its shape when that zero holds a point, and
+ * the scalar `0` otherwise.
+ *
+ * The scalar `0` is a zero for a number, and for a list or a matrix of
+ * numbers, because `0` adds to them and multiplies them element by element.
+ * It is not a zero for a point: `Add` of a point and a number is a type
+ * error. So with `p := (1, 2)`, the sum rule for `p + (sin u, u²)` needs
+ * `(0, 0) + (cos u, 2u)`, and the product rule for `u²·p` needs
+ * `2u·p + u²·(0, 0)`.
+ *
+ * The zero is built from the value of the symbol when it is known
+ * (`zeroOfConstantContainerValue()`, which keeps an absent element absent:
+ * `[(1, 2), Missing]` gives `[(0, 0), Missing]`), and otherwise from its
+ * type (`zeroOfConstantValue()`: `tuple<real, real>` gives `(0, 0)`, a list
+ * of points of unknown length gives `Map(x ↦ (0, 0), S)`). A zero built
+ * from a type whose lengths are known and larger than the size limit of a
+ * differentiation stops the differentiation (`zeroList()`).
+ *
+ * A symbol whose type cannot hold a point (`typeMayHoldPoint()`: a number,
+ * a list of numbers, a string) is not evaluated, and no zero is built for
+ * it: `vector<real^30000>` gives the scalar `0`.
+ */
+function zeroOfConstantSymbol(expr: Expression): Expression {
+  const ce = expr.engine;
+  if (!typeMayHoldPoint(expr.type.type)) return ce.Zero;
+  // A symbol is always pure, but its stored value need not be (a `Block`
+  // that assigns a variable): such a value is not evaluated here, and the
+  // zero is built from the type.
+  const value = expr.value;
+  const zero =
+    (value?.isPure ? zeroOfConstantContainerValue(value) : undefined) ??
+    zeroOfConstantValue(expr, true);
+  return zero !== undefined && containsTuple(zero) ? zero : ce.Zero;
+}
+
+/**
+ * Whether a value of type `t` can be a point or hold a point at some level.
+ * `false` for a number, a string, a boolean, and a list, a set or a
+ * collection whose elements cannot hold a point. `true` for a tuple, for a
+ * union with an arm that can hold a point, and for every other type
+ * (`unknown`, `any`, a dictionary), whose values are not known from the type.
+ */
+function typeMayHoldPoint(t: Type, seen: AliasDescent = undefined): boolean {
+  if (isSubtype(t, 'number')) return false;
+  // A self-referential alias is unfolded once per path of the walk
+  // (`unfoldAliasOnDescent()`).
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return false;
+  const r = unfolded.type;
+  if (typeof r === 'string')
+    return !isSubtype(r, 'string') && !isSubtype(r, 'boolean');
+  if (r.kind === 'tuple') return true;
+  if (r.kind === 'union')
+    return r.types.some((arm) => typeMayHoldPoint(arm, unfolded.seen));
+  if (
+    r.kind === 'list' ||
+    r.kind === 'set' ||
+    r.kind === 'collection' ||
+    r.kind === 'indexed_collection'
+  )
+    return typeMayHoldPoint(r.elements, unfolded.seen);
+  return true;
+}
+
+/**
+ * Whether `arg`, an argument of a call, or `argPrime`, its derivative, is a
+ * point or holds a point: then the chain rule `F′(g)·g′` has no correct
+ * form, and the derivative of the call declines.
+ *
+ * A partial derivative `F′(g)` with respect to an argument that is a point
+ * is a gradient, and its product with the derivative of the point is a dot
+ * product. The `Multiply` of the chain rule multiplies each coordinate
+ * instead: with `p := (1, 2)`, it would give the point
+ * `(-cos u·Norm′(…), -Norm′(…))` for the derivative of the number
+ * `Norm(p - (sin u, u))`.
+ *
+ * The test reads the types, not the structure: the derivative of `u·p` is
+ * the symbol `p`, which has no `Tuple` node, and the derivative of a number
+ * `h(u, (1, 2))` holds a `Tuple` as a constant argument of `h′`.
+ */
+function isPointDerivative(arg: Expression, argPrime: Expression): boolean {
+  return isPointValued(arg) || isPointValued(argPrime);
+}
+
+/** Whether the type of `expr` is a point or a list of points. */
+function isPointValued(expr: Expression): boolean {
+  return expr.type.matches('tuple') || expr.type.matches('list<tuple>');
+}
+
+/** Whether `expr` is a `Tuple` or has a `Tuple` among its subexpressions. */
+function containsTuple(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  return expr.operator === 'Tuple' || expr.ops.some(containsTuple);
+}
+
+/**
  * Whether `expr` is a zero that `zeroOfConstantValue()` or `zeroOfType()`
  * builds: the scalar `0`, a tuple or a list whose elements are zeros, or
  * `Map(x ↦ z, xs)` where `z` is a zero. The derivative of a container
@@ -2732,7 +2830,7 @@ function differentiateNode(
       }
     }
 
-    return expr.engine.Zero;
+    return zeroOfConstantSymbol(expr);
   }
   if (!expr.operator || !isFunction(expr)) return undefined;
 
@@ -3277,15 +3375,28 @@ function differentiateNode(
       });
       return terms.length === 0 ? ce.Zero : ce.function('Add', terms);
     });
-    const terms = expr.ops.map((op, i) => {
-      const gPrime =
+    const gPrimes = expr.ops.map(
+      (op) =>
         differentiate(op, v, depth + 1, trace) ??
-        ce._fn('D', [op, ce.symbol(v)]);
-      if (ordered) return productWithFactorReplaced(ce, expr.ops, i, gPrime);
+        ce._fn('D', [op, ce.symbol(v)])
+    );
+    // A factor whose derivative is a zero point or a zero list (the
+    // derivative of a constant point `p`, `(0, 0)`) adds a zero term, and
+    // `add()` keeps such a term: `D(u²·p, u)` would be `2u·p + (0, 0)`. The
+    // term is left out when the derivative of another factor is not a zero.
+    // Each term holds every other factor, so the term of that factor has the
+    // shape of the product. When every derivative is a zero (`D(2·p, u)`),
+    // all the terms are kept: the zero point gives the result its shape.
+    const isZeroOfShape = (d: Expression) => !d.isSame(0) && isZeroValue(d);
+    const keepAll = gPrimes.every((d) => isZeroValue(d));
+    const terms = expr.ops.flatMap((_, i) => {
+      const gPrime = gPrimes[i];
+      if (!keepAll && isZeroOfShape(gPrime)) return [];
+      if (ordered) return [productWithFactorReplaced(ce, expr.ops, i, gPrime)];
       const otherTerms = expr.ops.slice();
       otherTerms.splice(i, 1);
       const otherProduct = mul(...otherTerms);
-      return gPrime.mul(otherProduct);
+      return [gPrime.mul(otherProduct)];
     });
     if (terms.some((term) => term === undefined)) return undefined;
     return simplifyDerivative(add(...(terms as Expression[])));
@@ -5203,6 +5314,17 @@ function differentiateWithDerivativeKey(
       ce._fn('D', [arg, ce.symbol(v)]);
     if (!argPrime.isValid) return undefined;
     if (argPrime.isSame(0)) continue;
+    // For a point argument, the product is correct only when the partial
+    // that the `derivative` key gives is a number `c`: the Jacobian is then
+    // `c·I`. A partial that is a point (a gradient), or that the key does
+    // not give (the symbolic `Apply(Derivative(F, …), …)`), declines
+    // (`isPointDerivative()`).
+    if (
+      isPointDerivative(arg, argPrime) &&
+      (isPointValued(p) ||
+        (isFunction(p, 'Apply') && isFunction(p.op1, 'Derivative')))
+    )
+      return undefined;
     terms.push(p.mul(argPrime));
   }
   if (terms.length === 0) return ce.Zero;

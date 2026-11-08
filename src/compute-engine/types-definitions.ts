@@ -801,6 +801,12 @@ export type OperatorDerivativeHandler = (
  * given by the chain rule: `Σᵢ ∂ᵢF(g₁, …, gₙ) · ∂gᵢ/∂v`. A partial
  * derivative is requested only for an argument that depends on `v`.
  *
+ * For an argument that is a point (a tuple or a list of tuples), the
+ * product `∂ᵢF · ∂gᵢ/∂v` multiplies each coordinate. It is correct only
+ * when the partial derivative is a number `c` (the Jacobian is `c·I`). When
+ * the partial derivative is a point (a gradient) or is not given, the
+ * derivative of the application stays unevaluated.
+ *
  * @category Definitions
  */
 export type OperatorDerivative =
