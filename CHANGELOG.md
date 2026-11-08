@@ -156,6 +156,17 @@
 
 ### Resolved Issues
 
+- **A function whose body defines a helper with `let` or `=` and calls it
+  with a parameter takes a list argument whole when the helper does.**
+  With `function f(xs) { let h = (t) => count(t); h(xs) }`, `f([1, 2])`
+  applied `f` to each element and gave two `incompatible-type` errors; it
+  now gives `2`, as when the helper is declared with
+  `function h(t) { count(t) }`. The slot of `xs` in the type of `f` is now
+  `collection<any> | value`, not `unknown`. This also applies to a helper
+  written `h = (t) => count(t)` and to a chain of helpers written with `=`.
+  A helper that reads its parameter element by element (`(t) => t + 1`)
+  still maps over the list.
+
 - **In an Epsil function body or block, a second clause of a function with
   the same parameters is the error `function-redefinition`.** At the top level
   of a program this was already an error. In a body, the second clause gave no

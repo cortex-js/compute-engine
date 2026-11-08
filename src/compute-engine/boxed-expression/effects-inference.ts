@@ -1121,6 +1121,20 @@ function excludesEveryScalar(t: Type): boolean {
  *   a statement of the same list (inside an `If` or a nested `Block`). The
  *   tests in `test/compute-engine/whole-collection-parameter.test.ts` pin
  *   both orders.
+ * - A local of the body assigned a function literal before the call
+ *   (`let h = (t) => count(t)` or `h = (t) => count(t)`, then `h(xs)`) is
+ *   read through the record of that literal, made when the walk meets the
+ *   assignment ({@link literalFirstSlotCollectionArm}): the call has no
+ *   definition to read, because the signature of the enclosing function is
+ *   derived before its body runs. The record is the last literal assigned
+ *   to the name before the call in the order of the body. A record made
+ *   inside a nested function literal or block ends with it. A plain
+ *   assignment there (`h = …` in a branch of an `If`) also removes the
+ *   record that the name had before, so a call after the `If` gives no
+ *   evidence through it.
+ *   `localFunctions` holds the records of an enclosing
+ *   body, read when the body of one of its literals is walked (the chain
+ *   `h = …; q = (a) => h(a)`).
  * - An operator whose signature is an overload set (an intersection of
  *   arms, such as `Take` and `Drop`) is not read. Those two check their
  *   operands with their own validation.
@@ -1130,7 +1144,8 @@ function excludesEveryScalar(t: Type): boolean {
  */
 export function wholeCollectionParameterType(
   param: Expression | undefined,
-  body: Expression | undefined
+  body: Expression | undefined,
+  localFunctions?: ReadonlyMap<string, Type>
 ): Type | undefined {
   if (param === undefined || body === undefined || !isSymbol(param))
     return undefined;
@@ -1152,9 +1167,17 @@ export function wholeCollectionParameterType(
   // name is not taken for it.
   const holders = new Set<unknown>([binding]);
   const aliasNames = new Set<string>();
-  // The alias names that an enclosing inner function literal binds as its
-  // own parameters: inside it, that name is the inner parameter, not the
-  // alias (`map(ys => mean(ys), …)` after `let ys = xs`).
+  // The locals of the body assigned a function literal whose first slot
+  // has a collection arm, with that arm. When the body is boxed, the call
+  // `h(xs)` is bound to the body-local placeholder of `h`, which has no
+  // definition yet, so the call gives no evidence through a definition.
+  // The record is copied from `localFunctions`: the locals of an enclosing
+  // body that are visible here (the chain `let q = (a) => h(a)`).
+  const localFunctionArms = new Map<string, Type>(localFunctions);
+  // The alias names and the local function names that an enclosing inner
+  // function literal binds as its own parameters: inside it, that name is
+  // the inner parameter, not the alias (`map(ys => mean(ys), …)` after
+  // `let ys = xs`) or the local function.
   let shadowed = new Set<string>();
   const holderByName = (e: Expression & { symbol: string }): boolean =>
     e.valueDefinition === undefined
@@ -1178,7 +1201,33 @@ export function wholeCollectionParameterType(
   // A shared subexpression is walked once.
   const seen = new Set<Expression>();
   const arms: Type[] = [];
+  // A nested function literal or block is a scope: a helper that it
+  // declares with `let` (`if c { let h = (t) => count(t) }`) is not the
+  // local `h` of the body after it, so the records are put back as they
+  // were when the walk leaves it. A plain assignment (`h = …`) in it can
+  // write the local of the body, but only when the branch runs or the
+  // literal is called, so after the scope the name has no record, and a
+  // call of it gives no evidence. `scopeWrites` holds the names that a
+  // plain assignment wrote in each scope that the walk is in.
+  const scopeWrites: Set<string>[] = [];
   const visit = (expr: Expression): void => {
+    if (!isFunction(expr, 'Function') && !isFunction(expr, 'Block')) {
+      visitNode(expr);
+      return;
+    }
+    const outer = [...localFunctionArms];
+    const writes = new Set<string>();
+    scopeWrites.push(writes);
+    visitNode(expr);
+    scopeWrites.pop();
+    localFunctionArms.clear();
+    for (const [name, arm] of outer) localFunctionArms.set(name, arm);
+    for (const name of writes) {
+      localFunctionArms.delete(name);
+      scopeWrites.at(-1)?.add(name);
+    }
+  };
+  const visitNode = (expr: Expression): void => {
     if (!isFunction(expr) || seen.has(expr)) return;
     seen.add(expr);
     // `ys := xs` is an `Assign`; the canonical `let ys = xs` of a block is
@@ -1192,6 +1241,16 @@ export function wholeCollectionParameterType(
       const value =
         expr.operator === 'Assign' ? expr.op2 : declaredValueOf(expr.op2);
       const local = expr.op1;
+      // A local assigned a function literal (`let h = (t) => count(t)` or
+      // `h = (t) => count(t)`) records the collection arm of the first slot
+      // of that literal, read now, so that a later `h(xs)` reads it. Any
+      // other value assigned to the name removes the record.
+      localFunctionArms.delete(local.symbol);
+      if (expr.operator === 'Assign') scopeWrites.at(-1)?.add(local.symbol);
+      if (isFunction(value, 'Function')) {
+        const arm = literalFirstSlotCollectionArm(value, localFunctionArms);
+        if (arm !== undefined) localFunctionArms.set(local.symbol, arm);
+      }
       if (value !== undefined && reaches(value)) {
         if (local.valueDefinition !== undefined)
           holders.add(local.valueDefinition);
@@ -1203,18 +1262,28 @@ export function wholeCollectionParameterType(
       }
     }
     if (expr.nops === 1 && reaches(expr.op1)) {
-      const def = expr.operatorDefinition ?? calledOperatorDefinition(expr);
-      const arm =
-        def === undefined
+      // A call bound to an operator definition (a library operator, or a
+      // function declared with `function h(t) { … }`) is not a call of a
+      // local assigned a literal, so it reads that definition.
+      const localArm =
+        expr.operatorDefinition !== undefined || shadowed.has(expr.operator)
           ? undefined
-          : wholeCollectionSlotArm(expr.operator, def);
-      if (arm !== undefined) arms.push(arm);
+          : localFunctionArms.get(expr.operator);
+      if (localArm !== undefined) arms.push(localArm);
+      else {
+        const def = expr.operatorDefinition ?? calledOperatorDefinition(expr);
+        const arm =
+          def === undefined
+            ? undefined
+            : wholeCollectionSlotArm(expr.operator, def);
+        if (arm !== undefined) arms.push(arm);
+      }
     }
     if (expr.operator === 'Function') {
       const names = expr.ops
         .slice(1)
         .flatMap((p) => functionLiteralParameterNames(p))
-        .filter((n) => aliasNames.has(n));
+        .filter((n) => aliasNames.has(n) || localFunctionArms.has(n));
       if (names.length > 0) {
         const outer = shadowed;
         shadowed = new Set([...outer, ...names]);
@@ -1356,6 +1425,63 @@ function calledOperatorDefinition(
 }
 
 /**
+ * The collection arm of the first slot of the function literal `literal`,
+ * or `undefined` when that slot has none.
+ *
+ * It is the evidence that a call `h(xs)` gives when a function body assigns
+ * the literal to the local `h` (`let h = (t) => count(t)` or
+ * `h = (t) => count(t)`) before the call. The signature of the enclosing
+ * function is derived when that function is defined, before its body runs,
+ * so the call is bound to the body-local placeholder of `h`, which has no
+ * definition, and {@link calledOperatorDefinition} finds none. With this
+ * evidence, `function f(xs) { let h = (t) => count(t); h(xs) }` binds the
+ * list of `f([1, 2])` whole and gives `2`, as it does when `h` is declared
+ * with `function h(t) { count(t) }`. Without it, `f` is applied to each
+ * element, and each element gives an `incompatible-type` error.
+ *
+ * The slot is first read from the declared signature of the literal, or
+ * from its parameter slots ({@link functionLiteralParameterSlots}), which
+ * cover a declared parameter type and the rules of {@link
+ * wholeCollectionParameterType} for a bare parameter. Neither reads the type
+ * of the body of the literal, so the walk can run while an enclosing call
+ * is being boxed. When the body of the
+ * literal calls another local function of the same enclosing body (the chain
+ * `let h = …; let q = (a) => h(a)`), the type of the literal does not know
+ * the local, so a bare parameter is read again with `localFunctions`, the
+ * records of the locals assigned before the literal. A record whose name is
+ * a parameter of the literal is left out: inside the literal, that name is
+ * the parameter.
+ */
+function literalFirstSlotCollectionArm(
+  literal: Expression,
+  localFunctions: ReadonlyMap<string, Type>
+): Type | undefined {
+  // A literal held raw (not canonical) has no type to read.
+  if (!isFunction(literal, 'Function') || !literal.isCanonical)
+    return undefined;
+  const declared = functionLiteralDeclaredSignature(literal);
+  if (declared !== undefined) return firstSlotCollectionArm(declared, undefined);
+  const body = functionLiteralBody(literal);
+  if (body === undefined) return undefined;
+  const slot = functionLiteralParameterSlots(literal, body)?.[0];
+  if (slot === undefined) return undefined;
+  const arm = collectionArm(slot.type);
+  if (arm !== undefined || localFunctions.size === 0) return arm;
+  const params = literal.ops.slice(1);
+  const target = optionalParameterTarget(params[0]);
+  if (target === undefined || !isSymbol(target)) return undefined;
+  const ownNames = new Set(
+    params.flatMap((p) => functionLiteralParameterNames(p))
+  );
+  const visible = new Map(
+    [...localFunctions].filter(([name]) => !ownNames.has(name))
+  );
+  if (visible.size === 0) return undefined;
+  const t = wholeCollectionParameterType(target, body, visible);
+  return t === undefined ? undefined : collectionArm(t);
+}
+
+/**
  * The operators whose slot type is a top type (`value` or `any`) but that
  * read a collection operand WHOLE: `Flatten`, `SetFrom` and `TupleFrom` take
  * the elements of the collection. Their signatures cannot say so: a slot
@@ -1400,7 +1526,20 @@ function wholeCollectionSlotArm(
   def: BoxedOperatorDefinition
 ): Type | undefined {
   if (def.broadcastable || operator === 'Norm') return undefined;
-  const sig = def.signature?.type;
+  return firstSlotCollectionArm(def.signature?.type, operator);
+}
+
+/**
+ * The collection arm of the first slot of the signature `sig`, or
+ * `undefined`. `operator` is the name of the operator that has this
+ * signature, or `undefined` for a function literal: a slot typed `value` or
+ * `any` counts as a collection arm only for the operators in
+ * {@link TOP_SLOT_WHOLE_COLLECTION_OPERATORS}.
+ */
+function firstSlotCollectionArm(
+  sig: Type | undefined,
+  operator: string | undefined
+): Type | undefined {
   if (sig === undefined || typeof sig === 'string' || sig.kind !== 'signature')
     return undefined;
   const slot = signatureSlotType(sig, 0);
@@ -1408,9 +1547,18 @@ function wholeCollectionSlotArm(
   const t = substituteDeclaredBounds(sig.typeParams, slot);
   if (
     (t === 'value' || t === 'any') &&
+    operator !== undefined &&
     TOP_SLOT_WHOLE_COLLECTION_OPERATORS.has(operator)
   )
     return { kind: 'collection', elements: 'any' };
+  return collectionArm(t);
+}
+
+/**
+ * The union of the members of `t` that are collection types, or
+ * `undefined` when no member is one.
+ */
+function collectionArm(t: Type): Type | undefined {
   const members = typeof t === 'object' && t.kind === 'union' ? t.types : [t];
   // A wide arm (`any`, `expression`, `value`) is not a collection arm:
   // `isScalarType` reads it as "not scalar" only because a parameter

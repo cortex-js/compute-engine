@@ -508,6 +508,37 @@ const ROUTE_CASES: [string, string, Arg[], string, unknown][] = [
     14 / 3,
   ],
   ['mean(xs^2) over a scalar', 'function h(xs) { mean(xs^2) }', [A5], '25', 25],
+  // A helper that the body assigns a function literal (`let g = …` or
+  // `g = …`) and then calls with the parameter gives the slot of its own
+  // parameter, as a helper declared with `function g(t) { … }` does.
+  [
+    'a let helper over a list',
+    'function h(xs) { let g = (t) => mean(t)\ng(xs) }',
+    [L123],
+    '2',
+    2,
+  ],
+  [
+    'an assigned helper over a list',
+    'function h(xs) { g = (t) => mean(t)\ng(xs) }',
+    [L123],
+    '2',
+    2,
+  ],
+  [
+    'a let helper over a scalar',
+    'function h(xs) { let g = (t) => mean(t)\ng(xs) }',
+    [A5],
+    '5',
+    5,
+  ],
+  [
+    'an element-wise let helper over a list',
+    'function h(xs) { let g = (t) => t + 1\ng(xs) }',
+    [L123],
+    '[2,3,4]',
+    [2, 3, 4],
+  ],
   // With a second operand, `Mean` reads each operand as one datum: one
   // value per sample.
   [
@@ -619,6 +650,82 @@ describe('Limitations of the rule, as they behave today', () => {
     expect(ce.symbol('h').type.toString()).toBe(
       '(xs: collection<number> | value) -> number'
     );
+  });
+
+  test('a call to a helper that the body assigns a function literal is a whole use', () => {
+    // The signature of `f` is derived when `f` is defined, before its body
+    // runs, so the call `h(xs)` is bound to the body-local placeholder of
+    // `h`, which has no definition. The walk of the body records the slot of
+    // the literal assigned to `h` and reads it at the call.
+    const value = (source: string): [string, string] => {
+      const ce = new ComputeEngine();
+      return [epsilValue(ce, source), ce.symbol('f').type.toString()];
+    };
+    expect(
+      value('function f(xs) { let h = (t) => count(t)\nh(xs) }\nf([1, 2])')
+    ).toEqual(['2', '(xs: collection<any> | value) -> unknown']);
+    expect(
+      value('function f(xs) { h = (t) => count(t)\nh(xs) }\nf([1, 2])')
+    ).toEqual(['2', '(xs: collection<any> | value) -> unknown']);
+    // Through an alias of the parameter.
+    expect(
+      value(
+        'function f(xs) { let ys = xs\nlet h = (t) => count(t)\nh(ys) }\nf([1, 2])'
+      )[0]
+    ).toBe('2');
+    // A chain of two assigned helpers: the slot of `q` reads the record of
+    // `h`.
+    expect(
+      value(
+        'function f(xs) { h = (t) => count(t)\nq = (a) => h(a)\nq(xs) }\nf([1, 2])'
+      )[0]
+    ).toBe('2');
+    // The last literal assigned before the call is read: an element-wise
+    // helper keeps the map.
+    expect(
+      value(
+        'function f(xs) { let h = (t) => count(t)\nh = (t) => t * 2\nh(xs) }\nf([1, 2])'
+      )
+    ).toEqual(['[2,4]', '(xs: unknown) -> unknown']);
+    // Inside an inner literal whose parameter is named `h`, `h` is that
+    // parameter, not the helper.
+    expect(
+      value(
+        'function f(xs) { let h = (t) => count(t)\nlet g = (h) => h(xs)\ng((u) => u + 1) }\nf([1, 2])'
+      )
+    ).toEqual(['[2,3]', '(xs: unknown) -> unknown']);
+    // A helper that a nested function or block assigns is local to it: the
+    // record of the body is the same after it.
+    expect(
+      value(
+        'function f(xs) { let h = (t) => count(t)\nfunction g(u) { let h = (w) => w + 1\nh(u) }\nh(xs) }\nf([1, 2])'
+      )[0]
+    ).toBe('2');
+    expect(
+      value(
+        'function f(xs) { h = (t) => t + 1\nif xs == 0 { let h = (w) => count(w)\n0 }\nlet r = [h(xs)]\nr }\nf([1, 2])'
+      )[0]
+    ).toBe('[[2],[3]]');
+    // A function that a nested block declares with `function` is the callee
+    // in that block, not the outer helper.
+    expect(
+      value(
+        'function f(xs) { let h = (t) => count(t)\nif xs != 0 { function h(t) { t + 1 }\nlet r = [h(xs)]\nr } }\nf([1, 2])'
+      )[0]
+    ).toBe('[[2],[3]]');
+    // An assignment in a branch of an `If` gives no evidence after the `If`,
+    // and removes the record that the name had before it: the branch can
+    // replace the helper with an element-wise one.
+    expect(
+      value(
+        'function f(xs) { h = (t) => t * 2\nif xs == 0 { h = (t) => count(t) }\nh(xs) }\nf([1, 2])'
+      )
+    ).toEqual(['[2,4]', '(xs: unknown) -> unknown']);
+    expect(
+      value(
+        'function f(xs) { h = (t) => count(t)\nif xs == 0 { h = (t) => [t] }\nh(xs) }\nf([1, 2])'
+      )[1]
+    ).toBe('(xs: unknown) -> unknown');
   });
 
   test('a use through a local assigned AFTER the use is not followed', () => {
