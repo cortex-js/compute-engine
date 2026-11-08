@@ -1,5 +1,11 @@
 import type { MathJsonExpression } from '../math-json/types.js';
-import { operands, operator, symbol } from '../math-json/utils.js';
+import {
+  isNumberExpression,
+  isStringObject,
+  operands,
+  operator,
+  symbol,
+} from '../math-json/utils.js';
 
 import type { Expression, ComputeEngine } from '../compute-engine.js';
 import type { BoxedDefinition } from '../compute-engine/global-types.js';
@@ -17,6 +23,7 @@ import {
   documentBindings,
   protocolFunctionMembers,
   type BinderSite,
+  type ProgramDeclaration,
   type ProtocolFunctionMember,
 } from './occurrences.js';
 
@@ -236,10 +243,16 @@ const IMPLICIT_VARIABLE_OPERATORS: ReadonlySet<string> = new Set([
  * its own parameter) and an operand with an anonymous slot (`_`) bind no
  * name.
  *
- * `isBound(name)` says whether the program binds `name` at the call. When
- * the first candidate is such a name and other candidates follow, the
- * result is `undefined`, because the choice of the engine depends on the
- * value of that name. A host that leaves out `isBound` gets the first
+ * `isBound(name)` says whether the program binds `name` at the call. The
+ * engine reads the value of such a name, and does not choose it when it is
+ * a constant or when its value cannot be a number. `declarationOf(name)`
+ * gives the declaration of the name when the program fixes it, and
+ * `canBeImplicitVariable()` reads from it whether the engine can choose the
+ * name. A name that the engine cannot choose is not a candidate. When the
+ * first candidate is a name that the program binds, the declaration does
+ * not tell whether the engine can choose it, and other candidates follow,
+ * the result is `undefined`, because the choice of the engine depends on
+ * the value of that name. A host that leaves out `isBound` gets the first
  * candidate in every case.
  */
 function implicitVariableOf(
@@ -248,6 +261,7 @@ function implicitVariableOf(
   source: string,
   members: ReadonlyMap<string, ProtocolFunctionMember> | undefined,
   isBound: (name: string) => boolean,
+  declarationOf: (name: string) => ProgramDeclaration | undefined,
   memo: BinderSitesMemo
 ): string | undefined {
   if (f === undefined || symbol(f) !== null) return undefined;
@@ -255,7 +269,8 @@ function implicitVariableOf(
   if (hasFreeAnonymousSlot(ce, f)) return undefined;
 
   // A nested call sees the bindings of `f` and those of the program around
-  // the call.
+  // the call. The walk of `f` alone does not see the whole program, so a
+  // name that `f` binds has no fixed declaration.
   const groups = documentBindings(f, source, {
     binderSites: (node, isBoundInF) =>
       memoizedBinderSites(
@@ -264,6 +279,7 @@ function implicitVariableOf(
         source,
         members,
         (name) => isBoundInF(name) || isBound(name),
+        (name) => (isBoundInF(name) ? undefined : declarationOf(name)),
         memo
       ),
   });
@@ -307,6 +323,23 @@ function implicitVariableOf(
   } finally {
     ce.popScope();
   }
+  // Whether the engine can choose a name that the program binds, when the
+  // declaration of the name tells: after `let L = [1, 2]`, the variable of
+  // `limit(total(L)*t, 0)` is `t`, and `limit(total(L), 0)` binds no name.
+  const canChoose = (name: string): boolean | undefined =>
+    isBound(name) ? canBeImplicitVariable(declarationOf(name)) : undefined;
+  candidates = candidates.filter((candidate) => {
+    const written = writtenName.get(candidate);
+    return written === undefined || canChoose(written) !== false;
+  });
+  // In the scope of their own, a name that the program binds can box as a
+  // library constant (`e` is `ExponentialE`), which is not a candidate. After
+  // `let e = 5` the engine reads the variable, and chooses it in
+  // `limit(e + t, 1)`.
+  for (const [engineName, written] of writtenName)
+    if (!candidates.includes(engineName) && canChoose(written) === true)
+      candidates.push(engineName);
+  candidates.sort();
   const [first] = candidates;
   if (first === undefined) return undefined;
   const variable = writtenName.get(first);
@@ -315,14 +348,96 @@ function implicitVariableOf(
   // engine binds the verbatim `pi` only, and the plain `pi` must stay free
   // to become `Pi`: no site.
   if (mixed.has(variable)) return undefined;
-  // The engine reads the value of a name that the program binds, and that
-  // value is not known here. When such a name comes first and other
-  // candidates follow, the engine chooses it only if its value can be a
-  // number: in `let L = [1, 2]` followed by `limit(total(L)*t, 0)` the
-  // variable is `t`, and in `let a = 5` followed by `limit(a*h, 0)` it is
-  // `a`. The choice is left open: no site.
-  if (candidates.length > 1 && isBound(variable)) return undefined;
+  // The engine reads the value of a name that the program binds. When the
+  // declaration does not tell whether the engine can choose such a name,
+  // the name comes first, and other candidates follow, the choice depends
+  // on that value: after `function f(a) { limit(a*h, 0) }`, the variable is
+  // `a` when `a` is a number and `h` when it is a list. The choice is left
+  // open: no site.
+  if (
+    candidates.length > 1 &&
+    isBound(variable) &&
+    canChoose(variable) !== true
+  )
+    return undefined;
   return variable;
+}
+
+/**
+ * Whether the engine can choose a name that the program binds as an
+ * implicit variable, from the declaration of the name that
+ * `documentBindings()` gives (`ProgramDeclaration`): `true` or `false` when
+ * the declaration tells, `undefined` when the choice depends on a value that
+ * the analysis does not know (no declaration that the program fixes, or no
+ * initializer that is a literal).
+ *
+ * The engine does not choose a constant, nor a name whose value cannot be a
+ * number (`isImplicitVariableCandidate()`, `implicit-variable-rule.ts`). The
+ * kind of a literal initializer gives the type of the value:
+ *
+ * - a number, or arithmetic on numbers only (`5`, `-5`, `1/2`): the engine
+ *   can choose a `let` name;
+ * - a string, a list (`[1, 2]`) or a function literal: the engine never
+ *   chooses the name.
+ *
+ * When the statement has run, the engine reads the value, so the literal
+ * tells also for a name with an annotation (`let L: any = [1, 2]`), and a
+ * `const` name is a constant, which the engine does not choose. In the body
+ * of a `function` statement that the runner can box before the statement
+ * runs (`boxedEarly`), the name can be a valueless variable that is not a
+ * constant: its type is then the static type of the initializer, which the
+ * literal gives, or the declared type when the statement has an annotation,
+ * which the analysis does not read. Since the body can also be boxed after
+ * the statement, a `const` whose initializer is a number is not decided
+ * there: `const h = 5`, then `let r = g()`, then
+ * `function g() { limit(sin(h)/h, 0) }` binds `h` because the runner boxes
+ * `g` early, and the analysis does not know it. After `let L: any = [1, 2]`
+ * the choice is not known either.
+ */
+function canBeImplicitVariable(
+  declaration: ProgramDeclaration | undefined
+): boolean | undefined {
+  if (declaration === undefined) return undefined;
+  if (declaration.boxedEarly && declaration.annotated) return undefined;
+  const kind = literalKind(declaration.value);
+  if (kind === 'not-number') return false;
+  if (declaration.constant) return declaration.boxedEarly ? undefined : false;
+  return kind === 'number' ? true : undefined;
+}
+
+/** The arithmetic operators whose result is a number when every operand is
+ * a number. */
+const NUMERIC_OPERATORS: ReadonlySet<string> = new Set([
+  'Negate',
+  'Add',
+  'Subtract',
+  'Multiply',
+  'Divide',
+  'Power',
+  'Rational',
+]);
+
+/**
+ * The kind of the value of the literal `value`, as the raw tree of the
+ * parser writes it: `'number'` for a number or arithmetic on numbers only,
+ * `'not-number'` for a string, a list or a function literal, and
+ * `undefined` for any other expression, whose value depends on names.
+ */
+function literalKind(
+  value: MathJsonExpression | undefined
+): 'number' | 'not-number' | undefined {
+  if (value === undefined) return undefined;
+  if (isNumberExpression(value)) return 'number';
+  if (isStringObject(value)) return 'not-number';
+  const head = operator(value);
+  if (head === 'List' || head === 'Function') return 'not-number';
+  if (
+    NUMERIC_OPERATORS.has(head) &&
+    operands(value).length > 0 &&
+    operands(value).every((op) => literalKind(op) === 'number')
+  )
+    return 'number';
+  return undefined;
 }
 
 /**
@@ -359,10 +474,19 @@ function memoizedBinderSites(
   source: string,
   members: ReadonlyMap<string, ProtocolFunctionMember> | undefined,
   isBound: (name: string) => boolean,
+  declarationOf: (name: string) => ProgramDeclaration | undefined,
   memo: BinderSitesMemo
 ): readonly BinderSite[] | undefined {
   if (memo.has(node)) return memo.get(node);
-  const sites = binderSitesWithMemo(ce, node, source, members, isBound, memo);
+  const sites = binderSitesWithMemo(
+    ce,
+    node,
+    source,
+    members,
+    isBound,
+    declarationOf,
+    memo
+  );
   memo.set(node, sites);
   return sites;
 }
@@ -449,12 +573,18 @@ function memoizedBinderSites(
  * `isBound(name)`, when given, says whether the program binds `name` at the
  * call; `documentBindings()` gives it as the second argument of its
  * `binderSites` callback. Only the third source reads it. The engine reads
- * the value of such a name, which is not known before the program runs: an
- * implicit variable that is such a name gives no site when other candidates
- * follow it. In `let L = [1, 2]` followed by `limit(total(L)*t, 0)`, the
- * engine binds `t` because `L` is a list, and in `let a = 5` followed by
- * `limit(a*h, 0)` it binds `a`; with `isBound`, both calls give `[]`.
- * Without `isBound`, no name is bound by the program, and the two calls
+ * the value of such a name, and does not choose it when it is a constant or
+ * when its value cannot be a number. `declarationOf(name)`, when given, is
+ * the declaration of such a name when the program fixes it
+ * (`ProgramDeclaration`); `documentBindings()` gives it as the third
+ * argument of its callback. From a `let` with a literal initializer and
+ * from a `const`, the function tells as the engine does: after
+ * `let L = [1, 2]`, `limit(total(L)*t, 0)` binds `t` and `limit(total(L),
+ * 0)` binds no name, and after `let a = 5`, `limit(a*h, 0)` binds `a`. When
+ * the declaration does not tell (a parameter, a `let` whose initializer is
+ * not a literal, a name that another statement writes), an implicit
+ * variable that is such a name gives no site when other candidates follow
+ * it. Without `isBound`, no name is bound by the program, and the calls
  * give `L` and `a`.
  */
 export function binderSitesOf(
@@ -462,9 +592,20 @@ export function binderSitesOf(
   node: MathJsonExpression,
   source: string,
   members?: ReadonlyMap<string, ProtocolFunctionMember>,
-  isBound: (name: string) => boolean = () => false
+  isBound: (name: string) => boolean = () => false,
+  declarationOf: (
+    name: string
+  ) => ProgramDeclaration | undefined = () => undefined
 ): readonly BinderSite[] | undefined {
-  return binderSitesWithMemo(ce, node, source, members, isBound, new Map());
+  return binderSitesWithMemo(
+    ce,
+    node,
+    source,
+    members,
+    isBound,
+    declarationOf,
+    new Map()
+  );
 }
 
 /** `binderSitesOf()`, with the results already computed for the nodes of
@@ -475,6 +616,7 @@ function binderSitesWithMemo(
   source: string,
   members: ReadonlyMap<string, ProtocolFunctionMember> | undefined,
   isBound: (name: string) => boolean,
+  declarationOf: (name: string) => ProgramDeclaration | undefined,
   memo: BinderSitesMemo
 ): readonly BinderSite[] | undefined {
   const head = operator(node);
@@ -567,6 +709,7 @@ function binderSitesWithMemo(
       source,
       members,
       isBound,
+      declarationOf,
       memo
     );
     if (variable !== undefined) sites.push({ name: variable, operands: [0] });
@@ -630,8 +773,8 @@ export function resolveLibraryNames(
   resolveQualifiedNames(ast, source, ce);
   const members = protocolFunctionMembers(ast);
   const groups = documentBindings(ast, source, {
-    binderSites: (node, isBound) =>
-      binderSitesOf(ce, node, source, members, isBound),
+    binderSites: (node, isBound, declarationOf) =>
+      binderSitesOf(ce, node, source, members, isBound, declarationOf),
   });
 
   // The occurrences to rewrite, keyed by the start offset AND the name of the

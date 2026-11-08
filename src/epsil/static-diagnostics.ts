@@ -972,8 +972,8 @@ function canonicalizationDiagnostics(
   // same way.
   const members = protocolFunctionMembers(ast);
   const bindings = documentBindings(ast, source, {
-    binderSites: (node, isBound) =>
-      binderSitesOf(ce, node, source, members, isBound),
+    binderSites: (node, isBound, declarationOf) =>
+      binderSitesOf(ce, node, source, members, isBound, declarationOf),
   });
   diagnostics.push(...absenceMarkerBindingDiagnostics(bindings));
   diagnostics.push(...equationBodyDiagnostics(ast, source, bindings));
@@ -2705,8 +2705,8 @@ function constantWritesOf(
   // that shadows a library binder binds nothing.
   const members = protocolFunctionMembers(ast);
   for (const group of documentBindings(ast, source, {
-    binderSites: (node, isBound) =>
-      binderSitesOf(ce, node, source, members, isBound),
+    binderSites: (node, isBound, declarationOf) =>
+      binderSitesOf(ce, node, source, members, isBound, declarationOf),
   })) {
     const named = byName.get(group.name);
     if (named === undefined) byName.set(group.name, [group]);

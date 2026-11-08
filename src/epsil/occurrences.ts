@@ -40,6 +40,35 @@ import { tokenize } from './lexer.js';
  */
 export type BinderSite = { name: string; operands: 'all' | readonly number[] };
 
+/**
+ * The declaration of a name that is visible at a call, when the program
+ * fixes it: a `let` or `const` statement at the top level of the program
+ * that declares the name alone (not a destructuring pattern), when no other
+ * statement of the program writes or declares the name. An assignment, an
+ * `+=` or another declaration of the same name anywhere in the program, also
+ * in another scope, counts as such a write. `documentBindings()` gives it to
+ * its `binderSites` callback, and `binderSitesOf()` reads it to choose the
+ * implicit variable of a `limit` as the engine does.
+ */
+export type ProgramDeclaration = {
+  /** The statement is a `const`. */
+  constant: boolean;
+  /** The statement has a type annotation (`let a: any = 5`). */
+  annotated: boolean;
+  /** The initializer of the statement, when it has one. */
+  value: MathJsonExpression | undefined;
+  /** The call is in the body of a `function` statement that the runner can
+   * box before the statements above it run: a top-level statement above
+   * the `function` statement, other than a `function` statement, names the
+   * function, directly or through the clauses of the functions it names.
+   * The runner leaves out some of these functions, so `true` means that the
+   * body CAN be boxed early. When it is, the name is a valueless variable of
+   * its declared type, or of the static type of its initializer when it has
+   * no annotation, and it is not yet a constant. When this is `false`, the
+   * statement has run when the call is boxed. */
+  boxedEarly: boolean;
+};
+
 /** How one occurrence uses its symbol. */
 export type OccurrenceRole = 'definition' | 'write' | 'read';
 
@@ -107,6 +136,128 @@ const ROLE_RANK: Record<OccurrenceRole, number> = {
   read: 2,
 };
 
+/** The operators that write or declare the names of their first operand. */
+const WRITE_OPERATORS: ReadonlySet<string> = new Set([
+  'Declare',
+  'Assign',
+  'AddTo',
+]);
+
+/**
+ * For each name, the number of nodes of `ast` that write or declare it: a
+ * `let` or `const` statement, an assignment or an `+=` whose target holds
+ * the name. A destructuring target counts once for each name it holds. The
+ * count does not look at scopes: a write in a function body counts also
+ * when the function binds the name as a parameter.
+ */
+function countWrites(ast: MathJsonExpression | null): Map<string, number> {
+  const counts = new Map<string, number>();
+  const namesOf = (node: MathJsonExpression | null, into: Set<string>): void => {
+    if (node === null) return;
+    const name = symbol(node);
+    if (name !== null) into.add(name);
+    else for (const op of operands(node)) namesOf(op, into);
+  };
+  const visit = (node: MathJsonExpression | null): void => {
+    if (node === null || typeof node !== 'object') return;
+    if (!Array.isArray(node) && 'dict' in node) {
+      for (const value of Object.values(node.dict as Record<string, unknown>))
+        visit(value as MathJsonExpression);
+      return;
+    }
+    const head = operator(node);
+    if (typeof head !== 'string') visit(head as MathJsonExpression);
+    else if (WRITE_OPERATORS.has(head)) {
+      const names = new Set<string>();
+      namesOf(operand(node, 1), names);
+      for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    for (const op of operands(node)) visit(op);
+  };
+  visit(ast);
+  return counts;
+}
+
+/** Add to `into` every name that `node` writes as a symbol or as the head of
+ * a call, the names that `function` statements define included. */
+function namesIn(node: MathJsonExpression | null, into: Set<string>): void {
+  if (node === null || typeof node !== 'object') {
+    const name = symbol(node);
+    if (name !== null) into.add(name);
+    return;
+  }
+  if (!Array.isArray(node) && 'dict' in node) {
+    for (const value of Object.values(node.dict as Record<string, unknown>))
+      namesIn(value as MathJsonExpression, into);
+    return;
+  }
+  const name = symbol(node);
+  if (name !== null) {
+    into.add(name);
+    return;
+  }
+  const head = operator(node);
+  if (typeof head === 'string') into.add(head);
+  else namesIn(head as MathJsonExpression, into);
+  for (const op of operands(node)) namesIn(op, into);
+}
+
+/**
+ * The top-level `function` statements of `ast` whose body the runner can box
+ * before the statements above them run. The runner prepares a function that
+ * a top-level statement other than a `function` statement names above the
+ * last `function` statement of that function, directly or through the
+ * clauses of the functions it names (`prepareFunctionDeclarations()`,
+ * `execute-epsil.ts`), and it leaves out some of these functions (a function
+ * after a `type` statement, a function whose body reads a variable that is
+ * written twice before it). This set holds every clause of each function
+ * that the first rule gives, without the exclusions: it holds every
+ * function that the runner prepares, and can hold more. A function that the
+ * set leaves out is boxed at its turn.
+ */
+function functionsBoxedEarly(
+  ast: MathJsonExpression | null
+): Set<MathJsonExpression> {
+  const statements =
+    ast === null ? [] : operator(ast) === 'Block' ? [...operands(ast)] : [ast];
+  // The clauses of each function, with the index of its last clause.
+  const clauses = new Map<string, MathJsonExpression[]>();
+  const last = new Map<string, number>();
+  statements.forEach((statement, i) => {
+    if (operator(statement) !== 'DefineFunction') return;
+    const name = symbol(operand(statement, 1));
+    if (name === null) return;
+    clauses.set(name, [...(clauses.get(name) ?? []), statement]);
+    last.set(name, i);
+  });
+  const early = new Set<string>();
+  statements.forEach((statement, k) => {
+    if (operator(statement) === 'DefineFunction') return;
+    // The names that the statement reaches, through the clauses of the
+    // functions it names.
+    const reached = new Set<string>();
+    const pending: string[] = [];
+    const add = (node: MathJsonExpression): void => {
+      const names = new Set<string>();
+      namesIn(node, names);
+      for (const name of names)
+        if (!reached.has(name)) {
+          reached.add(name);
+          pending.push(name);
+        }
+    };
+    add(statement);
+    while (pending.length > 0)
+      for (const clause of clauses.get(pending.pop()!) ?? []) add(clause);
+    for (const name of reached)
+      if (k < (last.get(name) ?? -1)) early.add(name);
+  });
+  const result = new Set<MathJsonExpression>();
+  for (const name of early)
+    for (const clause of clauses.get(name) ?? []) result.add(clause);
+  return result;
+}
+
 /**
  * Resolve every symbol occurrence in a parsed (raw, uncanonicalized) Epsil
  * program to its binding. Groups come back in order of first occurrence.
@@ -159,11 +310,14 @@ export function documentBindings(
      *
      * `isBound(name)` is true when a binding of the document is visible at
      * the call for `name` (a `let` above the call, a parameter of an
-     * enclosing function).
+     * enclosing function). `declarationOf(name)` gives the declaration of
+     * that binding when the program fixes it (`ProgramDeclaration`), and
+     * `undefined` otherwise.
      */
     binderSites?: (
       node: MathJsonExpression,
-      isBound: (name: string) => boolean
+      isBound: (name: string) => boolean,
+      declarationOf: (name: string) => ProgramDeclaration | undefined
     ) => readonly BinderSite[] | undefined;
   }
 ): BindingGroup[] {
@@ -177,6 +331,20 @@ export function documentBindings(
   // literal a `let` or an assignment binds).
   const parametersOf = new Map<MathJsonExpression, Map<string, BindingGroup>>();
   const literalsOf = new Map<BindingGroup, MathJsonExpression[]>();
+  // The bindings that a `let` or `const` statement at the top level of the
+  // program makes for one name, with the statement. `writeCounts` tells how
+  // many statements of the program write or declare each name, and
+  // `earlyFunctions` which `function` statements the runner can box early
+  // (`ProgramDeclaration`). Both are computed on the first read.
+  const programDeclarations = new Map<
+    BindingGroup,
+    Omit<ProgramDeclaration, 'boxedEarly'>
+  >();
+  let writeCounts: Map<string, number> | undefined;
+  let earlyFunctions: Set<MathJsonExpression> | undefined;
+  // The `function` statements whose body holds the node that the walk is
+  // in, the outermost first.
+  const enclosingDefinitions: MathJsonExpression[] = [];
   const labels: {
     callee: string;
     name: string;
@@ -596,6 +764,16 @@ export function documentBindings(
   /** The initializer of a `let`/`const`: the parser puts it in the trailing
    * attributes dictionary, under the key `value`. */
   function initializerOf(node: MathJsonExpression): MathJsonExpression | null {
+    return attributeOf(node, 'value');
+  }
+
+  /** The attribute `key` of a `let`/`const`, in the trailing attributes
+   * dictionary: `value` holds the initializer, and `constant` is `True` for
+   * a `const`. */
+  function attributeOf(
+    node: MathJsonExpression,
+    key: string
+  ): MathJsonExpression | null {
     const ops = [...operands(node)];
     const attributes = ops[ops.length - 1] ?? null;
     if (attributes === null || operator(attributes) !== 'Dictionary')
@@ -603,7 +781,7 @@ export function documentBindings(
     for (const entry of operands(attributes))
       if (
         operator(entry) === 'KeyValuePair' &&
-        symbol(operand(entry, 1) ?? 'Nothing') === 'value'
+        symbol(operand(entry, 1) ?? 'Nothing') === key
       )
         return operand(entry, 2);
     return null;
@@ -652,6 +830,19 @@ export function documentBindings(
           scope,
           statementSpan?.[1] ?? scope.span[0]
         );
+        const target = writtenSymbol(ops[0] ?? null);
+        const group =
+          scope === root && target !== undefined
+            ? scope.bindings.get(target.name)
+            : undefined;
+        if (group !== undefined)
+          programDeclarations.set(group, {
+            constant:
+              symbol(attributeOf(node, 'constant') ?? 'Nothing') === 'True',
+            // The annotation is a direct string operand (see above).
+            annotated: ops.slice(1).some((op) => stringValue(op) !== null),
+            value: initializerOf(node) ?? undefined,
+          });
         for (let i = 1; i < ops.length; i++)
           signatureParameterNames(ops[i], initializerOf(node));
         return;
@@ -695,8 +886,10 @@ export function documentBindings(
             scope,
             sum: false,
           });
+        enclosingDefinitions.push(node);
         if (fn !== null && operator(fn) === 'Function') walkFunction(fn, scope);
         else walk(fn, scope);
+        enclosingDefinitions.pop();
         bindsLiteral(
           operand(node, 1),
           fn,
@@ -905,7 +1098,28 @@ export function documentBindings(
                 node,
                 (name) =>
                   visibleBinding(scope, name, span?.[0] ?? scope.span[0]) !==
-                  undefined
+                  undefined,
+                (name) => {
+                  const group = visibleBinding(
+                    scope,
+                    name,
+                    span?.[0] ?? scope.span[0]
+                  );
+                  const declared =
+                    group === undefined
+                      ? undefined
+                      : programDeclarations.get(group);
+                  if (declared === undefined) return undefined;
+                  writeCounts ??= countWrites(ast);
+                  if (writeCounts.get(name) !== 1) return undefined;
+                  const early = (earlyFunctions ??= functionsBoxedEarly(ast));
+                  return {
+                    ...declared,
+                    boxedEarly: enclosingDefinitions.some((definition) =>
+                      early.has(definition)
+                    ),
+                  };
+                }
               )
             : undefined;
         if (bound !== undefined && bound.length > 0) {

@@ -111,11 +111,28 @@ write its variable binds the variable that the engine chooses, in its first
 operand only: `limit(sin(h)/h, 0)` gives `[{ name: "h", operands: [0] }]`.
 The engine reads the value of a name that the program binds, so its choice
 can depend on that value: after `let L = [1, 2]`, the variable of
-`limit(total(L)*t, 0)` is `t`, because `L` is a list. A host that knows the
-names the program binds at the call gives them as a fifth argument,
+`limit(total(L)*t, 0)` is `t`, because `L` is a list, and the engine does not
+choose a `const` name. A host that knows the names the program binds at the
+call gives them as a fifth argument,
 `binderSitesOf(ce, call, source, undefined, (name) => …)`: when such a name
 comes first and other names follow, the result is `[]`. Without it, the
-result for this call is `[{ name: "L", operands: [0] }]`.
+result for this call is `[{ name: "L", operands: [0] }]`. A host that also
+knows how the program declares such a name gives a sixth argument, a
+function that returns a `ProgramDeclaration` for the name, or `undefined`:
+`{ constant, annotated, value, boxedEarly }`, for a `let` or `const` at the
+top level of the program that no other statement writes. `constant` is
+`true` for a `const`, `annotated` is `true` when the statement has a type
+annotation, `value` is the raw initializer, and `boxedEarly` is `true` when
+the call is in the body of a `function` statement that the program can call
+above that statement. With it, a `let` whose initializer is a number, a
+string, a list or a function literal, and a `const`, give the variable that
+the engine chooses: after `let L = [1, 2]` the result for
+`limit(total(L)*t, 0)` is `[{ name: "t", operands: [0] }]`, and after
+`const h = 5` the result for `limit(sin(h)/h, 0)` is `[]`. In the body of a
+function that the program can call above its `function` statement, the
+engine can box the body before the declaration runs, so a `const` whose
+initializer is a number, and a name with a type annotation, are not decided
+there.
 
 ### Execution
 

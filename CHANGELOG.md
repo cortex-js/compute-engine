@@ -156,6 +156,18 @@
 
 ### Resolved Issues
 
+- **In the Epsil editor model, a `limit` that does not name its variable
+  binds the variable that the engine chooses also when that name is a `let`
+  or a `const` of the program.** After `let a = 5`, the program
+  `limit(a + h, 1)` gives `h + 1`: the engine binds `a`. A rename of `let a`
+  changed the `a` of the limit too; it now changes only the `let`. After
+  `const h = 5`, `limit(sin(h)/h, 0)` gives `sin(5)/5`, and a rename of
+  `const h` now changes the `h` of the limit too. `binderSitesOf()` takes an
+  optional sixth argument, a function that gives the `ProgramDeclaration` of
+  a name (exported type): with it, after `let L = [1, 2]`, the result for
+  `limit(total(L)*t, 0)` is `[{ name: "t", operands: [0] }]`, where it was
+  `[]`. The same applies to `nLimit`, `nd` and `nIntegrate`.
+
 - **A convergent integral of `1/(t·(−ln t)^p)` with `p` slightly above 1 is
   no longer `+∞`.** `\int_0^{1/2} \frac{dt}{t(-\ln t)^{1.005}}` with `.N()`
   gave `+∞`; it now gives `200.354 ± 0.042` (the exact value is `200.367`),

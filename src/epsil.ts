@@ -20,7 +20,7 @@ export {
   binderSitesOf,
   resolveLibraryNames,
 } from './epsil/resolve-library-names.js';
-export type { BinderSite } from './epsil/occurrences.js';
+export type { BinderSite, ProgramDeclaration } from './epsil/occurrences.js';
 export { checkEpsil } from './epsil/check-epsil.js';
 export type { CheckEpsilResult } from './epsil/check-epsil.js';
 export {
