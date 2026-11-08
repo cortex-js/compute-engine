@@ -118,6 +118,16 @@
 
 ### Resolved Issues
 
+- **The derivative of a long list is computed when the derivative of each
+  element is.** The size limit of a derivative (25 000 nodes) applied to the
+  whole list, so a list of many small elements stayed unevaluated: `D` of the
+  x coordinate of a list of 14 or more cubic Bezier pieces, each read from a
+  list of 31 points with `At(P, 3⌈u⌉ + j)`, stayed `D(…)`, although each piece
+  alone was differentiated. The limit now applies to each element of a `List`
+  and to each operand of a `Join` whose value is a list, and the result is the
+  list of the derivatives. An element whose derivative passes the limit still
+  makes the whole derivative stay unevaluated.
+
 - **`toMathJson()` keeps `Tuple` for a destructuring pattern, so that
   `ce.box()` reads the MathJSON back.** A `Tuple` of one, two or three
   elements is written `Single`, `Pair` or `Triple`, but a destructuring

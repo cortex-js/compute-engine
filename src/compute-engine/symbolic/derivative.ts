@@ -108,6 +108,14 @@ const MAX_DIFFERENTIATION_DEPTH = 100;
  * let/common-subexpression representation) in the derivative itself, which
  * this guard does not attempt.
  *
+ * The limit applies to each element of a list (`withLimitPerElement()`).
+ * The derivative of a list is the list of the derivatives of its elements,
+ * each computed alone, so its size grows with the number of elements, not
+ * with the depth of one element. A curve made of 29 small pieces has a
+ * derivative of more than 25 000 nodes, although the derivative of each
+ * piece is small. One element that passes the limit still makes the whole
+ * differentiation decline.
+ *
  * Deliberately internal: a safety valve against pathological input, not a
  * tuning knob.
  */
@@ -134,10 +142,31 @@ const nodeCountCache = new WeakMap<Expression, number>();
 let differentiationFootprint = 0;
 
 /**
+ * The number of nodes of the list derivatives that the current call of
+ * `differentiate()` has accepted with a limit for each element
+ * (`withLimitPerElement()`), in the result that it builds. The size check
+ * of a result adds it to `MAX_DERIVATIVE_NODES`, because the result of a
+ * level that encloses the list (`PointX(…)`, the product rule) holds the
+ * whole list.
+ *
+ * Each call of `differentiate()` starts it at 0, and adds its own value to
+ * the value of its caller when it returns (except a call at depth 0, see
+ * the `finally` of `differentiate()`). Thus a list raises the size
+ * limit only of the levels that enclose it. An operand that is
+ * differentiated after the list (the next operand of a `Tuple`, the other
+ * factor of a product) keeps the limit `MAX_DERIVATIVE_NODES`.
+ */
+let differentiationListAllowance = 0;
+
+/**
  * The number of nodes in `expr`, saturating above `limit`: the value is
  * exact when it is `<= limit`, and merely "greater than `limit`" otherwise.
  * Saturating bounds a single measurement even when nothing is shared, and
  * keeps the count from overflowing on a heavily shared tree.
+ *
+ * Only an exact count goes in the memo. The limit is not the same for all
+ * measurements (`differentiationListAllowance` raises it), so a count that
+ * saturated at a small limit would be too low for a larger one.
  */
 function boundedNodeCount(expr: Expression, limit: number): number {
   const cached = nodeCountCache.get(expr);
@@ -150,11 +179,76 @@ function boundedNodeCount(expr: Expression, limit: number): number {
       if (n > limit) break;
     }
   }
-  nodeCountCache.set(expr, n);
+  if (n <= limit) nodeCountCache.set(expr, n);
   return n;
 }
 
-// Set once a differentiation has exceeded `MAX_DERIVATIVE_NODES`. The
+/**
+ * Differentiate the elements `ops` of a list with `differentiateOne`, each
+ * element with its own size limit `MAX_DERIVATIVE_NODES`: before each
+ * element, the footprint starts again at 0.
+ *
+ * After the last element, the footprint is again the footprint before the
+ * list, so the operands that are differentiated after the list have the
+ * same room as before it. The number of nodes of the derivatives of the
+ * elements is added to `differentiationListAllowance`, so that the levels
+ * that enclose the list accept a result that holds it. It replaces the
+ * allowance of the lists inside the elements, which these nodes already
+ * hold.
+ *
+ * A list of fewer than two elements keeps the limit of the enclosing
+ * differentiation, so the limit of an expression that holds no list of two
+ * or more elements does not change.
+ *
+ * When `differentiateOne` gives `undefined`, the remaining elements are not
+ * differentiated and the result is `undefined`. An element that passes its
+ * limit throws `kOverBudget`, as any other differentiation does, and the
+ * whole differentiation declines.
+ */
+function withLimitPerElement(
+  ops: ReadonlyArray<Expression>,
+  differentiateOne: (op: Expression) => Expression | undefined
+): Expression[] | undefined {
+  const results: Expression[] = [];
+  if (ops.length < 2) {
+    for (const op of ops) {
+      const d = differentiateOne(op);
+      if (d === undefined) return undefined;
+      results.push(d);
+    }
+    return results;
+  }
+  const outerFootprint = differentiationFootprint;
+  const outerAllowance = differentiationListAllowance;
+  let size = 0;
+  try {
+    for (const op of ops) {
+      differentiationFootprint = 0;
+      differentiationListAllowance = 0;
+      const d = differentiateOne(op);
+      if (d === undefined) return undefined;
+      // `differentiateOne` can give a value that no call of
+      // `differentiate()` has checked (a `D(op, v)` placeholder that holds
+      // the operand, a zero of its shape), so the element gets the same
+      // check here.
+      const limit = MAX_DERIVATIVE_NODES + differentiationListAllowance;
+      const n = boundedNodeCount(d, limit);
+      if (n > limit) {
+        differentiationOverBudget = true;
+        throw kOverBudget;
+      }
+      size += n;
+      results.push(d);
+    }
+  } finally {
+    differentiationFootprint = outerFootprint;
+    differentiationListAllowance = outerAllowance;
+  }
+  differentiationListAllowance += size;
+  return results;
+}
+
+// Set once a differentiation has exceeded its size limit. The
 // recursion then unwinds by throwing `kOverBudget`, which every enclosing
 // level lets pass: returning `undefined` instead would have each level run
 // its own rule (`mul()`, `add()`, a `D(…)` placeholder for the operand that
@@ -1796,6 +1890,7 @@ function differentiateApplied(
  * It also includes a SIZE limit (`MAX_DERIVATIVE_NODES`): an expression can
  * blow up in width without ever getting deep, and the result is the same
  * `undefined` decline rather than a result too large to be of any use.
+ * The limit applies to each element of a list (`withLimitPerElement()`).
  *
  * @param expr - The expression to differentiate
  * @param v - The variable to differentiate with respect to
@@ -1810,9 +1905,12 @@ export function differentiate(
 ): Expression | undefined {
   if (differentiationNesting === 0) {
     differentiationFootprint = 0;
+    differentiationListAllowance = 0;
     differentiationOverBudget = false;
   }
   differentiationNesting += 1;
+  const callerListAllowance = differentiationListAllowance;
+  differentiationListAllowance = 0;
   try {
     if (differentiationOverBudget) throw kOverBudget;
     const result = differentiateNode(expr, v, depth, trace);
@@ -1823,10 +1921,13 @@ export function differentiate(
     // budget: the accumulated footprint (how much has been built so far —
     // the metric that stops the work early) and the size of this level's
     // result (which catches a result whose sharing keeps the footprint
-    // small but which still prints as millions of characters).
+    // small but which still prints as millions of characters). The size
+    // limit of the result adds the lists that this level accepted with a
+    // limit for each element (`differentiationListAllowance`).
+    const sizeLimit = MAX_DERIVATIVE_NODES + differentiationListAllowance;
     if (
       result !== undefined &&
-      (boundedNodeCount(result, MAX_DERIVATIVE_NODES) > MAX_DERIVATIVE_NODES ||
+      (boundedNodeCount(result, sizeLimit) > sizeLimit ||
         differentiationFootprint > MAX_DERIVATIVE_NODES)
     ) {
       differentiationOverBudget = true;
@@ -1837,6 +1938,12 @@ export function differentiate(
     if (e === kOverBudget && depth === 0) return undefined;
     throw e;
   } finally {
+    // A call at depth 0 that runs inside another differentiation comes from
+    // an evaluation in a rule (`D(D(…))` evaluates the inner `D`). The rule
+    // differentiates that value again, or checks it, so the lists of the
+    // value do not raise the limit of the caller.
+    if (depth === 0) differentiationListAllowance = callerListAllowance;
+    else differentiationListAllowance += callerListAllowance;
     differentiationNesting -= 1;
   }
 }
@@ -2609,13 +2716,18 @@ function differentiateNode(
   // `[(1, 0), (1, 0)]`; the scalar `0` gave the single point `(1, 0)`. A
   // component whose zero cannot be built stays the scalar `0`, and a
   // selector of the `PointList` declines (`accessorOfContainerDerivative()`).
+  //
+  // Each element of a `List` has its own size limit
+  // (`withLimitPerElement()`): a list of many small pieces is
+  // differentiated when each piece is. A `Tuple` or a `PointList` has one
+  // operand per coordinate, and keeps one limit for all its operands.
   if (
     expr.operator === 'List' ||
     expr.operator === 'Tuple' ||
     expr.operator === 'PointList'
   ) {
     const isPointList = expr.operator === 'PointList';
-    const elements = expr.ops.map((op) => {
+    const differentiateElement = (op: Expression): Expression => {
       const d = withZeroOfShape(
         op,
         differentiate(op, v, depth + 1, trace) ??
@@ -2631,8 +2743,18 @@ function differentiateNode(
           d
         );
       return d;
-    });
-    if (elements.some((e) => !e.isValid)) return undefined;
+    };
+    // An element that is not valid gives `undefined` to
+    // `withLimitPerElement()`, so that the list adds no allowance.
+    const elements =
+      expr.operator === 'List'
+        ? withLimitPerElement(expr.ops, (op) => {
+            const d = differentiateElement(op);
+            return d.isValid ? d : undefined;
+          })
+        : expr.ops.map(differentiateElement);
+    if (elements === undefined || elements.some((e) => !e.isValid))
+      return undefined;
     return ce.function(expr.operator, elements);
   }
 
@@ -2643,10 +2765,11 @@ function differentiateNode(
   // tuple (`withZeroOfShape()` gives a constant point the zero point). The
   // derivative of a collection operand must stay a collection: when it is
   // the scalar `0` (a constant list whose length the type does not give),
-  // the `Join` would read it as one element, so the rule declines.
+  // the `Join` would read it as one element, so the rule declines. Each
+  // operand has its own size limit, as each element of a `List` has
+  // (`withLimitPerElement()`).
   if (expr.operator === 'Join' && expr.type.matches('list')) {
-    const parts: Expression[] = [];
-    for (const op of expr.ops) {
+    const parts = withLimitPerElement(expr.ops, (op) => {
       const d = withZeroOfShape(
         op,
         differentiate(op, v, depth + 1, trace) ??
@@ -2655,8 +2778,9 @@ function differentiateNode(
       );
       if (!d.isValid) return undefined;
       if (d.isSame(0) && !op.type.matches('number')) return undefined;
-      parts.push(d);
-    }
+      return d;
+    });
+    if (parts === undefined) return undefined;
     return ce.function('Join', parts);
   }
 
