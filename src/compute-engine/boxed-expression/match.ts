@@ -15,7 +15,8 @@ import {
   wildcardType,
 } from './pattern-utils.js';
 import { isOperatorDef } from './utils.js';
-import { sameSyntactic } from './compare.js';
+import { sameNamesAndCallHeads, sameSyntactic } from './compare.js';
+import { isLibraryOperator } from '../library-shadowing.js';
 import {
   isNumber,
   isFunction,
@@ -101,11 +102,23 @@ function captureWildcard(
 
   if (wildcard in substitution) {
     // There was already a matching wildcard, make sure this one is identical.
-    // Patterns are syntax: a capture can contain pattern-side artifacts (a
-    // pre-bound wildcard like the unknown `_x` during equation solving, raw
-    // by construction), so consistency between two captures is a syntactic
-    // question, not one about which binding a symbol denotes.
-    if (!sameSyntactic(expr, substitution[wildcard])) return null;
+    // Two parts of the subject are compared by structure, with the head of
+    // each call compared by its binding (`sameNamesAndCallHeads()`): in
+    // `Tuple(_x, _x)`, a call of the library `Sqrt` and a call of a user
+    // function `Sqrt` are two different values. Symbols are compared by
+    // name: a part can contain a variable that a scoped node of the subject
+    // binds (the parameter `x` of the `Function` of a canonical `Integrate`),
+    // and the same variable has another definition in another part (the `x`
+    // of its `Limits`). A part that is not bound is compared by syntax: a
+    // capture can contain pattern-side artifacts (a pre-bound wildcard like
+    // the unknown `_x` during equation solving, raw by construction), or be
+    // a raw node that the matcher built (a `Sequence` of captured operands).
+    const previous = substitution[wildcard];
+    const consistent =
+      isBoundNode(expr) && isBoundNode(previous)
+        ? sameNamesAndCallHeads(expr, previous)
+        : sameSyntactic(expr, previous);
+    if (!consistent) return null;
     return substitution;
   }
 
@@ -116,6 +129,117 @@ function captureWildcard(
   if (hasUnboundWildcards(expr, substitution)) return null;
 
   return { ...substitution, [wildcard]: expr };
+}
+
+/**
+ * True when `expr` is bound: a canonical or structural call, or a
+ * canonical symbol or literal. A raw node (a node that the matcher built, a
+ * raw symbol of a pattern) is not bound.
+ */
+function isBoundNode(expr: Expression): boolean {
+  if (isFunction(expr)) return expr.isCanonical || expr.isStructural;
+  return expr.isCanonical;
+}
+
+/**
+ * The operator definition of `name` in the system scope, where the standard
+ * library and the libraries of the constructor's `libraries` option are
+ * installed, or `undefined` when the system scope does not define `name` as
+ * an operator.
+ */
+function systemOperatorDefinition(
+  ce: Expression['engine'],
+  name: string
+): OperatorDefinitionLike | undefined {
+  const binding = ce._evalContextStack[0]?.lexicalScope.bindings.get(name);
+  if (binding === undefined || !isOperatorDef(binding)) return undefined;
+  return binding.operator;
+}
+
+type OperatorDefinitionLike = { readonly commutativeMatch?: boolean };
+
+/**
+ * True when the pattern head `name` admits the subject call `subject`.
+ *
+ * A pattern is made structural in the current scope, so the binding of its
+ * head is not read: a pattern head that is a library name (a name that the
+ * system scope defines as an operator, and that no caller library defined)
+ * means the library function. Rule sets are boxed in a scope that inherits
+ * only from the system scope, so they cannot name a user function with a
+ * library name in any case. Such a head admits a subject call only when the
+ * subject is a call of the library operator (`isLibraryOperator()`): a call
+ * of a user function `Sqrt` is another function, and a library rule for
+ * `Sqrt` must not apply to it. A pattern head that is not a library name
+ * matches by name.
+ *
+ * `subject` is the call whose operator the matcher reads, before the matcher
+ * builds a variant of it: for the pattern `Divide(_a, _b)` and the subject
+ * `Multiply(x, 1/2)`, read as a division, it is the `Multiply` call. A raw
+ * subject has no binding: only a node that the matcher built is raw here
+ * (`match()` makes the subject structural, which binds each call), and the
+ * matcher builds such a node only from a subject that this test admitted,
+ * so it is admitted.
+ */
+function headAdmits(name: string, subject: Expression): boolean {
+  const ce = subject.engine;
+  if (systemOperatorDefinition(ce, name) === undefined) return true;
+  if (
+    ce._customLibraryOperators.size > 0 &&
+    ce._customLibraryOperators.has(name)
+  )
+    return true;
+  if (!isBoundNode(subject)) return true;
+  return isLibraryOperator(subject);
+}
+
+/**
+ * True when every call of the literal pattern `pattern` (a pattern with no
+ * wildcard) admits the call at the same position in `subject`
+ * (`headAdmits()`). `sameSyntactic()` compares the two by name only, so this
+ * test is made after it. Where the two do not have the same operator and
+ * the same number of operands at a position (a `Range` that
+ * `sameSyntactic()` compares with a `List`, the elements of a set, which it
+ * compares in any order), the operands are not walked: the test is then a
+ * necessary condition only, and the matcher compares each anchor again with
+ * `matchOnce()`, which applies `headAdmits()`.
+ */
+function literalHeadsAdmit(subject: Expression, pattern: Expression): boolean {
+  if (!isFunction(pattern) || !isFunction(subject)) return true;
+  if (subject.operator !== pattern.operator) return true;
+  if (!headAdmits(pattern.operator, subject)) return false;
+  if (subject.nops !== pattern.nops) return true;
+  if (isUnorderedSet(pattern.operator, pattern.ops)) return true;
+  const ops = subject.ops;
+  return pattern.ops.every((op, i) => literalHeadsAdmit(ops[i], op));
+}
+
+/**
+ * True when the subject operand `subject` is the literal pattern operand
+ * `pattern`: the same syntax (`sameSyntactic()`), and each call of the
+ * pattern admits the call of the subject at its position
+ * (`literalHeadsAdmit()`).
+ */
+function sameLiteral(subject: Expression, pattern: Expression): boolean {
+  return (
+    sameSyntactic(subject, pattern) && literalHeadsAdmit(subject, pattern)
+  );
+}
+
+/**
+ * The operator definition that gives the flags of the pattern head that
+ * the matcher reads (`commutativeMatch`). For a name that the system scope
+ * defines as an operator, it is the system-scope definition: the pattern is
+ * made structural in the current scope, which can bind the head to a user
+ * function of the same name. For another name, it is the definition of the
+ * pattern head (a user function declared in the scope of the caller).
+ */
+function patternOperatorDefinition(
+  pattern: Expression
+): OperatorDefinitionLike | undefined {
+  return (
+    systemOperatorDefinition(pattern.engine, pattern.operator) ??
+    pattern.operatorDefinition
+  );
 }
 
 /**
@@ -233,7 +357,8 @@ function matchOnce(
     if (
       operator === 'Divide' &&
       isFunction(expr) &&
-      expr.operator === 'Multiply'
+      expr.operator === 'Multiply' &&
+      headAdmits(operator, expr)
     ) {
       const ops = expr.ops;
       for (let i = 0; i < ops.length; i++) {
@@ -275,7 +400,8 @@ function matchOnce(
       operator === 'Power' &&
       isFunction(expr) &&
       expr.operator === 'Divide' &&
-      expr.op1.isSame(1)
+      expr.op1.isSame(1) &&
+      headAdmits(operator, expr)
     ) {
       // Create a synthetic Power expression: Power(x, -1)
       const powerExpr = ce.function('Power', [expr.op2, ce.number(-1)], {
@@ -292,7 +418,11 @@ function matchOnce(
 
     // Special case: Match Root(x, n) against a Power pattern
     // This handles cases like x^(1/3) which is canonicalized as Root(x, 3)
-    if (operator === 'Power' && isFunction(expr, 'Root')) {
+    if (
+      operator === 'Power' &&
+      isFunction(expr, 'Root') &&
+      headAdmits(operator, expr)
+    ) {
       // Create a synthetic Power expression: Power(x, 1/n)
       const powerExpr = ce.function(
         'Power',
@@ -315,9 +445,12 @@ function matchOnce(
       result = captureWildcard(operator, ce.expr(expr.operator), substitution);
       if (result !== null)
         result = matchArguments(expr, pattern.ops, result, options);
-    } else if (operator === expr.operator) {
+    } else if (operator === expr.operator && headAdmits(operator, expr)) {
       //
-      // 2. Both operator names match
+      // 2. Both operator names match, and a pattern head that is a library
+      // name admits the subject only when the subject is a call of the
+      // library operator (`headAdmits()`). The test is made here, on the
+      // subject, before `matchWithMissingTerms()` below builds a sub-pattern.
       //
       // Operators that admit permutation matching (`commutativeMatch`,
       // which defaults to `commutative`) try operand permutations unless
@@ -339,9 +472,12 @@ function matchOnce(
             isUnorderedSet(operator, expr.ops)));
       // Note: the pattern operator may have no definition, e.g. a user-defined
       // function in a rule pattern (rules are boxed in a scope that only
-      // inherits from the system scope)
+      // inherits from the system scope). The flag of a library name is read
+      // from the system-scope definition (`patternOperatorDefinition()`).
+      const commutativeMatch =
+        patternOperatorDefinition(pattern)?.commutativeMatch === true;
       result =
-        pattern.operatorDefinition?.commutativeMatch && matchPerms
+        commutativeMatch && matchPerms
           ? matchPermutation(expr, pattern, substitution, options)
           : matchArguments(expr, pattern.ops, substitution, options);
       // The permutation search is bounded (its permutation generator
@@ -349,11 +485,7 @@ function matchOnce(
       // own combination cap), so a pattern it declines could still match
       // in exact written order. Positional matching is one of the
       // permutations — never let the bound lose it.
-      if (
-        result === null &&
-        pattern.operatorDefinition?.commutativeMatch &&
-        matchPerms
-      )
+      if (result === null && commutativeMatch && matchPerms)
         result = matchArguments(expr, pattern.ops, substitution, options);
 
       // When matchMissingTerms is enabled and the expression has fewer
@@ -429,6 +561,12 @@ function matchRecursive(
  *
  * For example, we accept `0+x` as a match for `x`, and
  * 'Square(x)' as a match for 'Power(x, 2)`.
+ *
+ * A variant that reads the operator of the subject (`a - b` read as
+ * `a + (-b)`) is tried only when the pattern head admits the subject call
+ * (`headAdmits()`): a call of a user function `Negate` is not a negation.
+ * The test is made on the subject, before the variant is built: the variant
+ * is a raw node, which has no binding.
  */
 function matchVariations(
   expr: Expression,
@@ -462,7 +600,7 @@ function matchVariations(
     if (result !== null) return result;
 
     // a-b -> a+(-b)
-    if (isFunction(expr, 'Subtract'))
+    if (isFunction(expr, 'Subtract') && headAdmits(operator, expr))
       result = matchVariation('Add', [expr.op1, ['Negate', expr.op2]]);
 
     if (result !== null) return result;
@@ -475,7 +613,7 @@ function matchVariations(
     if (result !== null) return result;
 
     // -a -> 0-a
-    if (isFunction(expr, 'Negate'))
+    if (isFunction(expr, 'Negate') && headAdmits(operator, expr))
       result = matchVariation('Subtract', [0, expr.op1]);
 
     if (result !== null) return result;
@@ -488,13 +626,13 @@ function matchVariations(
     if (result !== null) return result;
 
     // -x -> -1*x
-    if (isFunction(expr, 'Negate')) {
+    if (isFunction(expr, 'Negate') && headAdmits(operator, expr)) {
       result = matchVariation('Multiply', [-1, expr.op1]);
       if (result !== null) return result;
     }
 
     // x/a -> (1/a)*x
-    if (isFunction(expr, 'Divide')) {
+    if (isFunction(expr, 'Divide') && headAdmits(operator, expr)) {
       result = matchVariation('Multiply', [expr.op1, ['Divide', 1, expr.op2]]);
       if (result !== null) return result;
     }
@@ -515,7 +653,11 @@ function matchVariations(
   if (operator === 'Exp') {
     // Power(E, x) -> Exp(x): a subject `e^z` (canonicalized to
     // `Power(E, z)`) matches an `Exp` pattern as `Exp(z)`
-    if (isFunction(expr, 'Power') && isSymbol(expr.op1, 'ExponentialE')) {
+    if (
+      isFunction(expr, 'Power') &&
+      isSymbol(expr.op1, 'ExponentialE') &&
+      headAdmits(operator, expr)
+    ) {
       const result = matchVariation('Exp', [expr.op2]);
       if (result !== null) return result;
     }
@@ -631,7 +773,9 @@ function matchPermutation(
             // Anchor matching compares a PATTERN operand (raw by
             // construction — see `sameSyntactic`) against subject operands, so
             // it asks about syntax, not about which binding a symbol denotes.
-            if (!usedIndices.has(idx) && sameSyntactic(exprOps[idx], op)) {
+            // A call of the pattern that is a library name admits only a
+            // call of the library operator (`sameLiteral()`).
+            if (!usedIndices.has(idx) && sameLiteral(exprOps[idx], op)) {
               usedIndices.add(idx);
               found = true;
               break;
@@ -645,7 +789,7 @@ function matchPermutation(
       const availableOps = [...exprOps];
       for (const op of patternOps) {
         if (!hasWildcards(op)) {
-          const idx = availableOps.findIndex((e) => sameSyntactic(e, op));
+          const idx = availableOps.findIndex((e) => sameLiteral(e, op));
           if (idx === -1) return null; // Anchor not found
           availableOps.splice(idx, 1); // Remove to handle multiplicity
         }
@@ -1460,6 +1604,26 @@ function combinations(n: number, k: number): number[][] {
  *
  * - **Power/Root**: Expressions like `['Root', 'x', 3]` (cube root) will
  *   match a `Power` pattern, returning `{_base: x, _exp: ['Divide', 1, 3]}`.
+ *
+ * ## Library Names in a Pattern
+ *
+ * A pattern head that is the name of a library function (for example
+ * `Sqrt`) means the library function, in every scope. It matches a call of
+ * the library function only: in a scope where a user function `Sqrt` is
+ * declared, a call `Sqrt(y)` of the user function does not match the
+ * pattern `['Sqrt', '_x']`, and a library rule does not apply to it. The
+ * same test is made when the matcher reads a subject in another form (a
+ * `Multiply` read as a `Divide`, a `Negate` read as a `Subtract`). A
+ * pattern head that is not a library name matches a call by its name. A
+ * wildcard head (`['_f', '_x']`) captures the name of the operator.
+ *
+ * A wildcard that occurs more than once in the pattern (`['Tuple', '_x',
+ * '_x']`) matches only parts of the subject with the same structure, the
+ * same names, and call heads with the same binding: a call of the library
+ * `Sqrt` and a call of a user function `Sqrt` are two different values.
+ * Symbols are compared by name, so a variable bound by a scoped part of the
+ * subject (the parameter `x` of a `Function`) matches the same variable in
+ * another part (the `x` of `Limits(x, 0, 1)`).
  *
  * <!--
  * @consider?

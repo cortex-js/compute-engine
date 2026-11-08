@@ -115,6 +115,29 @@
   `π²/6` of `Sum(1/n², n, 1, ∞)` is written
   `["Divide", ["Power", ["Module", "Pi"], 2], 6]`, and boxed in the block it
   gives 1.6449, not 1.5. Outside such a scope, the output does not change.
+- **`isSame()` and `match()` compare the function that a call is bound to,
+  not only its name.** Take `L = ce.box(['Sqrt', 'y'])`, then push a scope
+  where a user function `Sqrt` is declared (`ce.declare('Sqrt', 'function')`
+  and `ce.assign()`), and box `U = ce.box(['Sqrt', 'y'])` there:
+  - `L.isSame(U)` was `true`; it is now `false`, as for two symbols of the
+    same name bound to different definitions.
+  - `U.match(['Sqrt', '_x'])` was `{_x: y}`; it is now `null`. A library name
+    in a pattern means the library function, so `replace()` and the rules do
+    not apply a library rule to a call of a user function of that name. A
+    pattern head that is not a library name still matches by name.
+  - `ce.function('Tuple', [L, U]).match(['Tuple', '_x', '_x'])` was a match;
+    it is now `null`.
+
+  Two calls of a library function are still `isSame`, also when they come
+  from two engines, or when one was made after `ce.declare(name, …,
+  { extend: true })` kept the library handlers. A raw call is still compared
+  by name with another raw call, but it is not `isSame` to a canonical call:
+  `ce.box(['Hold', ['Sqrt', 'y']]).op1.isSame(ce.box(['Sqrt', 'y']))` was
+  `true`; it is now `false`. The same holds for a finite `Range` and the list
+  of its integers: a canonical `Range(1, 3)` and a canonical `[1, 2, 3]` are
+  still `isSame`, but a raw `Range(1, 3)` or a raw `[1, 2, 3]` is no longer
+  `isSame` to a canonical `Range(1, 3)`. The `hash` of a call does not
+  change.
 
 ### Resolved Issues
 

@@ -2225,6 +2225,15 @@ export interface Expression {
    * The value of a symbol is never followed: if `one` is assigned `1`,
    * `ce.symbol('one').isSame(1)` is `false`.
    *
+   * Two symbols, or two calls, with the same name are the same only when
+   * they denote the same binding. A call of the library `Sqrt`, boxed before
+   * a user function `Sqrt` is declared in a scope, and a call `Sqrt(y)`
+   * boxed in that scope are not the same: they are calls of two different
+   * functions. Two calls of the library function are the same, also when
+   * they come from two engines. A raw call (boxed with `form: 'raw'`, or
+   * held by `Hold`) has no binding: two raw calls are compared by their
+   * names, and a raw call is not the same as a canonical call.
+   *
    * The elements of a set literal are not ordered, so two sets with the same
    * elements in a different order are the same:
    * `ce.box(['Set', 2, 1]).isSame(ce.box(['Set', 1, 2]))` is `true`. A
@@ -2235,6 +2244,10 @@ export interface Expression {
    * at most 10,000 elements is the same as the `List` of its integers, and
    * has the same `hash`: `ce.box(['Range', 1, 3]).isSame(ce.box(['List', 1,
    * 2, 3]))` is `true`. A larger range is compared by its operands only.
+   * The range and the list are the same only when both are calls of the
+   * library functions, or both are raw calls: a raw `Range(1, 3)` is not the
+   * same as a canonical `[1, 2, 3]`, and a call of a user function named
+   * `Range` is not the same as a list.
    *
    * A character and a one-cluster string with the same content are the same,
    * although their types are different: `ce.string('a')` is the same as

@@ -5,6 +5,7 @@ import {
   callableBindingInContext,
   markCallableHome,
   hasCallableHome,
+  sameBindingDef,
   withBorrowedBinding,
   withCallableBinding,
 } from './binders.js';
@@ -2802,19 +2803,45 @@ export class BoxedFunction
    * of a library call `Floor(x)`, read in a scope with a user function
    * `Floor`, would be a call of the user function, and `.json`, which writes
    * the structural form, would lose the `Module` qualifier of the call.
+   *
+   * The structural form keeps the binding of a call of a user function too.
+   * A call of a user function `Sqrt`, read after the scope of the
+   * declaration is popped, would otherwise be rebuilt as a call of the
+   * library `Sqrt`, and the matcher, which reads the structural form,
+   * would apply the library rules to it. This case is found after the build:
+   * when the node that `build` made is bound to another definition, or to
+   * none, it is built again in a scope that borrows the definition of this
+   * node. The usual case costs two field reads. A call-frame activation of
+   * the definition counts as the same binding (`sameBindingDef()`).
    */
   private _withLibraryBinding(build: () => Expression): Expression {
     const def = this._def;
+    if (!def) return build();
     if (
-      !def ||
-      !hidesLibraryBindingInContext(
+      hidesLibraryBindingInContext(
         this.engine,
         this._operator,
         def,
         isApplicableDef
       )
     )
-      return build();
+      return withBorrowedBinding(this.engine, this._operator, def, build);
+    const result = build();
+    if (
+      !(result instanceof BoxedFunction) ||
+      result._operator !== this._operator ||
+      result._def === def
+    )
+      return result;
+    const other = result._def;
+    if (
+      other &&
+      sameBindingDef(
+        isOperatorDef(other) ? other.operator : other.value,
+        isOperatorDef(def) ? def.operator : def.value
+      )
+    )
+      return result;
     return withBorrowedBinding(this.engine, this._operator, def, build);
   }
 
@@ -22872,11 +22899,15 @@ const SAME_CALL_RESULT = new WeakMap<Expression, Expression>();
  * two number literals of the same class with the same value and exactness,
  * or two strings (or two characters) with the same content.
  *
- * The test keeps the kind of each operand and the binding of each symbol
- * and call, which `isSame()` does not: a character and a one-character
- * string are `isSame`, and so are an integer `Range` and the `List` of its
- * elements, and two symbols or two calls of the same name bound in different
- * scopes. A handler can answer differently for each of these. Any other
+ * The test keeps the kind of each operand and the exact definition of each
+ * symbol and call, which `isSame()` does not: a character and a
+ * one-character string are `isSame`, and so are an integer `Range` and the
+ * `List` of its elements. `isSame()` also compares the binding of a symbol
+ * or of the head of a call, but it counts some different definitions as
+ * one binding: a definition and its call-frame activation, the library
+ * definition of a name and an extension or a copy of it that keeps the
+ * library handlers, and two user constants with the same value. A handler
+ * can answer differently for each of these. Any other
  * kind of node (a dictionary, a tensor, a list that holds its numbers
  * unboxed) must be the same object. Used by `_primeUnchangedResult()`.
  *

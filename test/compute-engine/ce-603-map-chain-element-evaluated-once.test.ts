@@ -153,7 +153,12 @@ describe('CE-603: each level of a Map chain is applied once per element', () => 
       },
     });
     const r = ce.function('q', [outerCall]).evaluate();
-    expect(r.isSame(ce.function('q', [outerCall]))).toBe(true);
+    // The result `q(h(1))` holds the inner `h`. Since CE-1109.4, `isSame`
+    // compares the binding of the head of a call, so it is not `isSame` to
+    // the call that holds the outer `h` (it was `true`).
+    expect(r.operator).toBe('q');
+    expect(r.isSame(ce.function('q', [outerCall]))).toBe(false);
+    expect(r.isSame(ce.function('q', [innerCall]))).toBe(true);
     expect(isFunction(r) && r.op1.valueDefinition !== outerDef).toBe(true);
     expect(calls).toBe(1);
     r.evaluate();

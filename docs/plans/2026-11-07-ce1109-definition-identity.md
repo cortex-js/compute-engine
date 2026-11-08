@@ -186,5 +186,35 @@ canonical boxing and the `simplify()` of the corpus
 - CE-1109.4: spec revision 2
   (`docs/plans/2026-11-07-ce1109-4-match-and-same-spec.md`) approved by the
   user on 2026-11-07, with option (a) for its question Q1; CE-1109.5
-  approved the same day.
-- CE-1109.5: waits for CE-1109.4.
+  approved the same day. Done 2026-11-07.
+  `same()` compares the head of two calls of the same name
+  (`sameCallHead()`, `compare.ts`) as `sameBinding()` compares a symbol, with
+  the library-operator class (`isLibraryOperator()`) in place of the
+  root-scope test, so a name that a caller library adds is not merged across
+  engines. The matcher admits a subject call for a pattern head that is a
+  library name only when the subject is a library call (`headAdmits()`,
+  `match.ts`), at the function branch, the three special cases, the five
+  variants that read the subject operator, and the anchor tests
+  (`sameLiteral()`); `commutativeMatch` of a library name is read from the
+  system scope; a repeated wildcard compares bound captures with symbols by
+  name and call heads by binding (`sameNamesAndCallHeads()`), so the
+  parameter and the `Limits` variable of one `Integrate` still match one
+  `_x`; a finite `Range` and the `List` of its integers are the same only
+  when both are raw or both are library calls (`sameRangeHead()`), which
+  keeps `isSame` transitive.
+  The structural form of a call keeps the binding of the call
+  (`_withLibraryBinding()`, `boxed-function.ts`, rebuilds in a borrowed
+  scope when the build bound another definition). Tests:
+  `test/compute-engine/call-identity-is-same-and-match.test.ts` (37). Two
+  existing assertions changed (`batch9-misc.test.ts`: a raw sequence capture
+  is made canonical before `isSame`; `ce-603-…test.ts`: `q(h_inner(1))` is
+  no longer `isSame` to `q(h_outer(1))`), no snapshot. Timing (one lock
+  window, load 25.0 at acquire): boxing 64.2 → 62.75 ms, simplify 79.21 →
+  77.21 ms, same fingerprint, registration 56.1 → 51.9 ms; within the
+  noise. Not fixed, older code: `BoxedFunction.toNumericValue()` reads
+  `Sqrt`, `Root`, `Power`, `Abs` by name and rebuilds them by name, so
+  `L.add(U)` gives `2·Sqrt(y)` (CE-1122). Review: Claude and Codex, two
+  rounds (round 1: the `Range` branch and the repeated wildcard; round 2: a
+  reordering of the `Range` test). Full suite: 1,927 suites, 81,326 tests
+  passed, 0 failed.
+- CE-1109.5: in progress.

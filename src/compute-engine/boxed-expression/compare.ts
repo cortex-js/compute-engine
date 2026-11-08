@@ -30,7 +30,7 @@ import {
   isUnorderedSet,
   integerRangeElements,
 } from './type-guards.js';
-import { isShadowedSymbol } from '../library-shadowing.js';
+import { isLibraryOperator, isShadowedSymbol } from '../library-shadowing.js';
 import { boundVariableBindings, sameBindingDef } from './binders.js';
 import { isTensorValue } from './tensor-view.js';
 import { stochasticEqual } from './stochastic-equal.js';
@@ -164,6 +164,72 @@ export function sameBinding(
 }
 
 /**
+ * Do two calls with the same name denote the same function?
+ *
+ * A canonical call denotes the definition that its head is bound to, not
+ * its name: in a scope where a user function `Sqrt` is declared, the call
+ * `Sqrt(y)` boxed there is a call of the user function, and a call
+ * `Sqrt(y)` boxed before the declaration is a call of the library
+ * function. The two have the same name and operands, but they are not the
+ * same expression: `Add` must not merge them into `2·Sqrt(y)`.
+ *
+ * The head is compared as {@link sameBinding} compares a symbol occurrence
+ * of the name:
+ *
+ * - a head bound by a binder that encloses the call (a parameter `f` in
+ *   `Function(f(x), f)`) denotes that binder, on each side: the two heads
+ *   are the same when both are bound by a binder at the same position, and
+ *   different when only one is;
+ * - the same definition, or a call-frame activation of it
+ *   (`sameBindingDef()`), is the same function. Two raw calls have no
+ *   definition, so they compare by name. A raw call and a bound call are
+ *   different, as a raw symbol and a bound symbol are;
+ * - two calls that are each a call of the library operator of the name
+ *   (`isLibraryOperator()`) are the same: this includes two engines, each
+ *   with its own library definition, and a call made before and one made
+ *   after `ce.declare(name, patch, { extend: true })` that keeps the library
+ *   handlers. Every member of this class denotes the library function, so
+ *   the relation stays transitive. A name that a caller library (the
+ *   constructor's `libraries` option) defined is not a library operator, so
+ *   two engines with different definitions of it give different calls;
+ * - two user constants compare by their value.
+ *
+ * The definition of a call is its operator definition or its value
+ * definition (`baseDefinition`): a function declared with
+ * `ce.declare(name, 'function')` and then assigned is a value definition,
+ * and a function assigned to a new name is an operator definition.
+ *
+ * The syntactic mode (`sameSyntactic()`) does not call this function, as it
+ * does not compare the bindings of symbols. The hash does not read the
+ * head binding, so two calls that are not the same can have the same hash.
+ */
+function sameCallHead(
+  a: Expression,
+  b: Expression,
+  boundA: BinderMap | undefined,
+  boundB: BinderMap | undefined
+): boolean {
+  if (boundA !== undefined || boundB !== undefined) {
+    const aBound = isBoundHere(boundA?.get(a.operator), a.valueDefinition);
+    const bBound = isBoundHere(boundB?.get(b.operator), b.valueDefinition);
+    if (aBound !== bBound) return false;
+    if (aBound) return true;
+  }
+  const ad = a.baseDefinition;
+  const bd = b.baseDefinition;
+  if (sameBindingDef(ad, bd)) return true;
+  if (ad === undefined || bd === undefined) return false;
+  if (isLibraryOperator(a) && isLibraryOperator(b)) return true;
+  if (ad.isConstant && bd.isConstant) {
+    const av = (ad as { value?: Expression }).value;
+    const bv = (bd as { value?: Expression }).value;
+    if (av === undefined || bv === undefined) return false;
+    return same(av, bv);
+  }
+  return false;
+}
+
+/**
  * Is `def` the standard-library definition of `sym.symbol`?
  *
  * The engine's ROOT scope (the end of the parent chain) holds exactly the
@@ -202,6 +268,70 @@ function isLibraryBinding(
  */
 export function sameSyntactic(a: Expression, b: Expression): boolean {
   return same(a, b, undefined, undefined, true);
+}
+
+/**
+ * Structural equality that compares symbols by NAME, and the head of each
+ * call by its binding (`sameCallHead()`).
+ *
+ * For comparing two parts of the same subject that a repeated wildcard
+ * captured (`_x` in `Tuple(_x, _x)`). A call of the library `Sqrt` and a
+ * call of a user function `Sqrt` are two different values, so their heads
+ * are compared by binding. A symbol is compared by name: a part can contain
+ * a variable that a scoped node of the subject binds, and that variable
+ * has another definition than the same variable in another part. In the
+ * canonical `Integrate(Function(Block(x^2), x), Limits(x, 0, 1))`, the `x`
+ * of the `Function` and the `x` of `Limits` have different definitions, and
+ * the pattern `Integrate(Function(Block(_x^_n), _x), Limits(_x, _a, _b))`
+ * must match.
+ */
+export function sameNamesAndCallHeads(a: Expression, b: Expression): boolean {
+  return same(a, b, undefined, undefined, 'heads');
+}
+
+/**
+ * The bindings that `same()` compares, in addition to the structure and the
+ * names:
+ *
+ * - `false`: the binding of each symbol and of each call head (`isSame`);
+ * - `'heads'`: the binding of each call head only; symbols are compared by
+ *   name (`sameNamesAndCallHeads()`);
+ * - `true`: no binding (`sameSyntactic()`).
+ */
+type SameMode = boolean | 'heads';
+
+/**
+ * Do the heads of `a` and `b` allow them to be the same integer sequence,
+ * when at least one of them is a finite `Range` of integers?
+ *
+ * Two calls with the same name follow the rule of the other calls
+ * (`sameCallHead()`). A `Range` and a call of another name (a `List`) can
+ * be the same only when both are raw calls, or both are calls of the
+ * library operator of their name (`isLibraryOperator()`). Thus the library
+ * `Range(1, 3)` is the same as the library `[1, 2, 3]`, a raw `Range(1, 3)`
+ * is the same as a raw `[1, 2, 3]`, and no member of one of these two
+ * classes is the same as a member of the other, or as a call of a user
+ * function named `Range` or `List`. Without this test, the library
+ * `Range(1, 3)` would be the same as both a raw and a canonical
+ * `[1, 2, 3]`, which are not the same: the relation would not be
+ * transitive.
+ */
+function sameRangeHead(
+  a: Expression,
+  b: Expression,
+  boundA: BinderMap | undefined,
+  boundB: BinderMap | undefined
+): boolean {
+  if (a.operator === b.operator) return sameCallHead(a, b, boundA, boundB);
+  if (
+    isBoundHere(boundA?.get(a.operator), a.valueDefinition) ||
+    isBoundHere(boundB?.get(b.operator), b.valueDefinition)
+  )
+    return false;
+  const ad = a.baseDefinition;
+  const bd = b.baseDefinition;
+  if (ad === undefined || bd === undefined) return ad === bd;
+  return isLibraryOperator(a) && isLibraryOperator(b);
 }
 
 /** What a node binds: name → its definition, or `null` when the binder names
@@ -256,6 +386,13 @@ function extendBinders(
  * capture a value's free symbols and let `Add` merge two unrelated `x` terms
  * into `2x`. See docs/SCOPING-MODEL.md.
  *
+ * Two calls are the same call when they have the same name, the same
+ * operands, and heads that denote the same binding (`sameCallHead()`): a
+ * call of the library `Sqrt` and a call of a user function `Sqrt` with the
+ * same operands are different, so `Add` does not merge them into
+ * `2·Sqrt(y)`. A raw call and a bound call are different, as a raw symbol
+ * and a bound symbol are. The hash reads only the name of the head.
+ *
  * `bound` carries the names bound by binders ENCLOSING the current position
  * (a `Function`'s parameters, a scoped `Block`/`Sum`/`Comprehension`'s local
  * bindings). A bound occurrence is compared by NAME only: it denotes its
@@ -287,13 +424,15 @@ function extendBinders(
  * Comparing a TEMPLATE against a subject — a rule pattern is raw by
  * necessity — is now an explicit mode (`sameSyntactic`) rather than an
  * implicit consequence of unboundness.
+ *
+ * `syntactic` selects the bindings that are compared ({@link SameMode}).
  */
 export function same(
   a: Expression,
   b: Expression,
   boundA?: BinderMap,
   boundB?: BinderMap,
-  syntactic = false
+  syntactic: SameMode = false
 ): boolean {
   if (a === b) return true;
 
@@ -314,12 +453,17 @@ export function same(
   // A finite `Range` of integers and the `List` literal of its integers are
   // the same element: `Range(1, 3)`, `Range(1, 3, 1)` and `[1, 2, 3]` are all
   // the same (`integerRangeElements`). `BoxedFunction.hash` gives such a
-  // range the hash of that list.
+  // range the hash of that list. The heads follow the rule of the function
+  // branch below (`sameRangeHead()`).
   if (a.operator === 'Range' || b.operator === 'Range') {
     const ra = integerRangeElements(a);
     const rb = integerRangeElements(b);
-    if (ra !== undefined || rb !== undefined)
-      return sameIntegerSequence(a, ra, b, rb);
+    if (ra !== undefined || rb !== undefined) {
+      // The elements first: most comparisons with a range fail there, and
+      // the head test reads definitions.
+      if (!sameIntegerSequence(a, ra, b, rb)) return false;
+      return syntactic === true || sameRangeHead(a, b, boundA, boundB);
+    }
   }
 
   //
@@ -330,6 +474,8 @@ export function same(
     if (a.operator !== b.operator) return false;
     if (!isFunction(b)) return false;
     if (a.nops !== b.nops) return false;
+    if (syntactic !== true && !sameCallHead(a, b, boundA, boundB))
+      return false;
     // Two store-backed lists (`ce.list()`) compare their numbers directly,
     // without boxing: an element is the same when both are `NaN` or when
     // they are `===` (a store never holds `-0`). This is `BoxedNumber.isSame`
@@ -412,7 +558,7 @@ export function same(
   if (isSymbol(a) || isSymbol(b)) {
     if (!isSymbol(a) || !isSymbol(b)) return false;
     if (a.symbol !== b.symbol) return false;
-    return sameBinding(a, b, boundA, boundB, syntactic);
+    return sameBinding(a, b, boundA, boundB, syntactic !== false);
   }
 
   // (No tensor special case: tensor values are canonical `List` function
@@ -498,7 +644,7 @@ function sameUnordered(
   ys: ReadonlyArray<Expression>,
   boundA: BinderMap | undefined,
   boundB: BinderMap | undefined,
-  syntactic: boolean
+  syntactic: SameMode
 ): boolean {
   const n = xs.length;
   let start = 0;

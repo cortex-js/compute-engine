@@ -210,10 +210,39 @@ a structural result of these operations reads the inner function when it is
 made canonical or evaluated: in the example above,
 `e.subs({a: k}, {canonical: false}).canonical.evaluate()` is 101.
 
-`isSame()` and the hash compare a call by its name and its operands, not by
-the function it is bound to: a call of the outer `h` and a call of the inner
-`h` with the same arguments are `isSame`, and canonical `Add` can merge them
-into one term. This is a known limit, accepted by user decision 2026-10-30.
+`isSame()` compares a call by its name, its operands and the function its
+head is bound to, as it compares a symbol occurrence (`sameCallHead()`,
+`boxed-expression/compare.ts`): a call of the outer `h` and a call of the
+inner `h` with the same arguments are not `isSame`, so canonical `Add` keeps
+them as two terms. The head is compared as `sameBinding()` compares a symbol:
+the same definition or a call-frame activation of it, a parameter of an
+enclosing binder at the same position (`f` in `Function(f(x), f)`), or two user
+constants with the same value. Two calls that are each a call of the library
+operator of their name (`isLibraryOperator()`, `library-shadowing.ts`) are
+`isSame`: two engines, and a call made before and one made after an extension
+of the library definition that keeps its handlers. A name that a caller
+library (the constructor's `libraries` option) defines is not a library
+operator here. Two raw calls compare by name; a raw call and a bound call are
+not `isSame`. `sameSyntactic()` does not read the binding of a head: the cycle
+and progress checks of `simplify()` compare forms that were boxed again by
+name. The hash reads only the name, so two calls that are not `isSame` can
+have the same hash.
+
+The matcher reads a pattern head that is a library name as the library
+function: `match()` makes the pattern structural in the current scope, so the
+binding of the pattern head is not read, and a call of a user function `Sqrt`
+does not match `Sqrt(_x)`. A pattern head that is not a library name matches by
+name. The flag `commutativeMatch` of a library name is read from the
+system-scope definition. A repeated wildcard compares its two captures with
+symbols by name and call heads by binding (`sameNamesAndCallHeads()`,
+`compare.ts`): `Tuple(L, U)` does not match `Tuple(_x, _x)` when `L` and `U`
+call different functions, and the parameter `x` of the `Function` of an
+`Integrate` and the `x` of its `Limits`, which have different definitions,
+still match one `_x`. The structural form of a call keeps the binding of the call, also
+when it is read after the scope of the binding ends. (CE-1109.4,
+`docs/plans/2026-11-07-ce1109-4-match-and-same-spec.md`; this replaces the
+limit that the user accepted on 2026-10-30, by which calls of the same name
+were `isSame`.)
 
 Ordinary data-symbol lookup keeps the compatibility behavior below. This
 callable rule changes function application, not every symbol read.

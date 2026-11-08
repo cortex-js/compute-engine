@@ -62,10 +62,15 @@ that a call of an outer `h` and of an inner `h` with the same arguments are
    `matchWithMissingTerms()` and the anchor test for `Add` and `Multiply`, and
    the comparison of a literal sub-pattern with subject operands.
 6. **Repeated wildcard.** When a wildcard is captured again (`_x` twice), the
-   two subject parts are compared with `isSame` (item 1) when both are bound,
-   and with `sameSyntactic` otherwise (a raw part that the matcher built).
-   Today the comparison is syntactic, so `Tuple(L, U)` matches
-   `Tuple(_x, _x)` (measured by the review).
+   two subject parts are compared with symbols by name and call heads by
+   binding (item 1) when both are bound, and with `sameSyntactic` otherwise
+   (a raw part that the matcher built). Today the comparison is syntactic,
+   so `Tuple(L, U)` matches `Tuple(_x, _x)` (measured by the review).
+   Correction made during the implementation (2026-11-07, review): the first
+   version compared the parts with `isSame`, which compares a variable that a
+   scoped node of the subject binds as if it were free, so the parameter `x`
+   and the `Limits` variable `x` of one `Integrate` no longer matched one
+   `_x`.
 7. **Structural form keeps bindings.** The structural form of a call keeps
    the binding of the call. Today `_computeStructural()` binds a call again
    by name in the current scope, so a stored user `Sqrt(y)` read after its

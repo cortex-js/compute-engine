@@ -249,7 +249,11 @@ describe('Commutative matching of a sum with many terms', () => {
     const sub = sum.match(['Add', ['Multiply', '_a', 'x'], '__b']);
     expect(sub).not.toBeNull();
     expect(sub!._a.json).toEqual(3);
-    expect(sub!.__b.isSame(ce.box(['Add', ...terms]))).toBe(true);
+    // The capture of `__b` is a raw `Add` that the matcher builds. A raw
+    // call has no binding, and it is not `isSame` to a canonical call
+    // (CE-1109.4), so it is made canonical before the comparison.
+    expect(sub!.__b.isCanonical).toBe(false);
+    expect(sub!.__b.canonical.isSame(ce.box(['Add', ...terms]))).toBe(true);
   });
 });
 
