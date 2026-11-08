@@ -374,14 +374,12 @@ function walkToFrame(
       if (inStatement.length === 0) continue;
     }
 
+    // A written subtraction is also a call of an `Add` frame (see
+    // `clusterOperators`), so the calls of both operators are searched
+    // together. In `Sqrt(y + 2) - s`, the shallowest one is the subtraction,
+    // not the `y + 2` inside `Sqrt`.
     const shallowest: MathJsonExpression[] = [];
-    findShallowestByOperator(scope, name, shallowest);
-    // A written subtraction is the call of an `Add` frame when the scope has
-    // no written `Add` (see `clusterOperators`).
-    for (const other of clusterOperators(name)) {
-      if (shallowest.length > 0) break;
-      if (other !== name) findShallowestByOperator(scope, other, shallowest);
-    }
+    findShallowestByOperators(scope, clusterOperators(name), shallowest);
     if (shallowest.length !== 1) return undefined;
     const selected = frameArgument(
       frames,
@@ -414,11 +412,12 @@ function walkToFrame(
           // nested call that canonicalization merges with `call`).
           if (pathTo(op, arg, [])) continue;
           const other: MathJsonExpression[] = [];
-          findByOperator(op, name, other);
+          findWrittenCalls(op, name, other);
           // Another call of `name` inside an operand can be the call of the
           // frame, so the argument is not sure. For a sum or a product, the
           // call contains that other call, and its range is the result:
-          // `Ln(x * y) * Sin(s)` underlines the whole product.
+          // `Ln(x * y) * Sin(s)` underlines the whole product, and so does
+          // `Sqrt(y - 2) + s`, whose `y - 2` is a sum in canonical form.
           if (other.length > 0) return merges ? { call, arg: null } : undefined;
         }
       }
@@ -524,8 +523,11 @@ function frameArgument(
   } else if (reordered && inner !== undefined) {
     const top = clusterTop(scope, call, name);
     const holders = clusterLeaves(top, name).filter((leaf) => {
+      // `inner` was found with `findWrittenCalls`, which can give a written
+      // subtraction for an `Add` frame, so the operands are searched the
+      // same way.
       const found: MathJsonExpression[] = [];
-      findByOperator(leaf, inner, found);
+      findWrittenCalls(leaf, inner, found);
       return found.length > 0;
     });
     // When more than one operand holds a call of the inner operator, the
@@ -728,20 +730,20 @@ function literalArgumentMatch(
   return arg === null ? 'unsure' : compareLiteral(arg, offending);
 }
 
-/** Collect the nodes of `expr` whose operator is `name` and that are not
- * inside another such node (early-exits once there are two). */
-function findShallowestByOperator(
+/** Collect the nodes of `expr` whose operator is one of `names` and that are
+ * not inside another such node (early-exits once there are two). */
+function findShallowestByOperators(
   expr: MathJsonExpression | null,
-  name: string,
+  names: readonly string[],
   matches: MathJsonExpression[]
 ): void {
   if (expr === null || matches.length > 1) return;
   if (operator(expr) === '') return;
-  if (operator(expr) === name) {
+  if (names.includes(operator(expr))) {
     matches.push(expr);
     return;
   }
-  for (const op of operands(expr)) findShallowestByOperator(op, name, matches);
+  for (const op of operands(expr)) findShallowestByOperators(op, names, matches);
 }
 
 /**
@@ -835,11 +837,18 @@ function findByOperator(
 
 /**
  * Collect the written calls of `expr` that a frame of the operator `name`
- * can name (the search stops when it has `limit` matches). These are the
- * calls of `name` itself. When there is none, they are the calls of the
- * other written operators that canonicalization merges into a call of
- * `name` (see {@link clusterOperators}): `3 - Ln(w)` has no written `Add`,
- * and its `Subtract` is the call of an `Add` frame.
+ * can name (the search stops when it has `limit` matches).
+ *
+ * For most operators these are the calls of `name`. When canonicalization
+ * merges other written operators into a call of `name` (see
+ * {@link clusterOperators}), each match is one cluster: the outermost call
+ * of a chain of nested calls of these operators ({@link clusterTop}). The
+ * calls of the cluster become one canonical call, so they are one match:
+ * `p + q - r` is one sum. A cluster inside an operand that is not merged is
+ * another match: `Sqrt(y + 2) - s` has two sums, the `y + 2` and the
+ * subtraction, and a frame of `Add` can name either one. A search for the
+ * written `Add` alone would find only `y + 2`, and select an operand of the
+ * wrong sum.
  */
 function findWrittenCalls(
   expr: MathJsonExpression | null,
@@ -847,11 +856,20 @@ function findWrittenCalls(
   matches: MathJsonExpression[],
   limit = 2
 ): void {
-  findByOperator(expr, name, matches, limit);
-  for (const other of clusterOperators(name)) {
-    if (matches.length > 0) return;
-    if (other !== name) findByOperator(expr, other, matches, limit);
+  const merged = clusterOperators(name);
+  if (merged.length === 1) {
+    findByOperator(expr, name, matches, limit);
+    return;
   }
+  // A call of `merged` whose parent is not a call of `merged` is the
+  // outermost call of its cluster.
+  const visit = (node: MathJsonExpression, inCluster: boolean): void => {
+    if (matches.length >= limit || operator(node) === '') return;
+    const isMerged = merged.includes(operator(node));
+    if (isMerged && !inCluster) matches.push(node);
+    for (const op of operands(node)) visit(op, isMerged);
+  };
+  if (expr !== null) visit(expr, false);
 }
 
 /** The `sourceOffsets` of a raw AST node, when it carries them. */

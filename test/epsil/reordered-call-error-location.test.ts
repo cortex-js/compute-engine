@@ -255,10 +255,12 @@ describe('an error in one of two calls of the same function', () => {
 
   test('an argument that is not a literal does not select its call', () => {
     // The error is in `x`, made by the first statement. The value does not
-    // select `Ln(y)`, whose argument is a variable. No call is sure, and
-    // the whole statement is underlined.
+    // select `Ln(y)`, whose argument is a variable. No call of `Ln` is sure.
+    // The two written `+` make one canonical sum, which the frame
+    // `Add argument 1` names, and its operand is not sure: the whole sum is
+    // underlined.
     const src = 'let x = Ln("a")\nlet y = 2\nlet v = x + Ln(y) + Ln(2)\n0';
-    expect(underlines(src)).toEqual(['let v = x + Ln(y) + Ln(2)']);
+    expect(underlines(src)).toEqual(['x + Ln(y) + Ln(2)']);
   });
 
   test.each([
@@ -318,8 +320,28 @@ describe('an error in an operand of a subtraction', () => {
   test.each([
     ['let v = 3 - Ln(w)', 'w'],
     ['let v = (3 - Ln(w)) - 1', 'w'],
+    ['let v = Sqrt(y + 2) - Ln(w)', 'w'],
   ])('%s underlines %s', (stmt, expected) => {
-    expect(underlines(`${prefix}${stmt}\n0`)).toEqual([expected]);
+    expect(underlines(`${prefix}let y = 5\n${stmt}\n0`)).toEqual([expected]);
+  });
+
+  // The frame `Add argument 1` can name the subtraction or a sum inside one
+  // of its operands. The written `Add` and `Subtract` calls are searched
+  // together, so the frame does not select an operand of the inner sum. When
+  // an operand holds another sum, such as the `y + 2` inside `Sqrt`, the
+  // frame can name that sum, and the whole subtraction is underlined, as for
+  // a sum.
+  test.each([
+    ['let v = Sqrt(y + 2) - s', 'Sqrt(y + 2) - s'],
+    ['let v = s - Sqrt(y + 2)', 's - Sqrt(y + 2)'],
+    ['let v = Sqrt(y - 2) - s', 'Sqrt(y - 2) - s'],
+    ['let v = Sqrt(y + 2) + s', 'Sqrt(y + 2) + s'],
+    ['let v = Sqrt(y - 2) + s', 'Sqrt(y - 2) + s'],
+    ['let v = y + 2 - s', 's'],
+    ['let v = s - y + 2', 's'],
+  ])('%s underlines %s', (stmt, expected) => {
+    const src = `let s: any = "a"\nlet y = 5\n${stmt}\n0`;
+    expect(underlines(src)).toEqual([expected]);
   });
 });
 

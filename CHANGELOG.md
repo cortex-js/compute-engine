@@ -141,6 +141,15 @@
 
 ### Resolved Issues
 
+- **In Epsil, the location of an error in a subtraction does not select a
+  variable of another sum.** With `let s: any = "a"` and `let y = 5`, the
+  error of `let v = Sqrt(y + 2) - s` underlined the `y` of `y + 2`, which did
+  not make the error. Now it underlines the whole subtraction
+  `Sqrt(y + 2) - s`, as it does for the sum `Sqrt(y + 2) + s`: the error of a
+  subtraction names a sum, and the `y + 2` inside `Sqrt` is another sum. The
+  location of an error in `x + Ln(y) + Ln(2)`, when no operand is sure, is
+  now that sum, not the whole statement.
+
 - **The LaTeX of a sum or a product over a set with a condition keeps the
   condition.** `["Sum", "k", ["Element", "k", ["Set", 1, 2, 3], ["Greater",
   "k", 1]]]` gave the LaTeX `\sum_{k\in \lbrace1, 2, 3\rbrace}k`, which parsed
