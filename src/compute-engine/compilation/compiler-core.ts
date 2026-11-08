@@ -6385,6 +6385,10 @@ export function emitFunctionLiteralDefinition(
     key: string;
     types: readonly Type[];
     pointWidths?: readonly (number | undefined)[];
+    /** The positions of the parameters of `literal` in the declaration
+     * of `h`, for a variant that leaves out some of them (the
+     * `parameterPositions` of the `define` hook). */
+    positions?: { readonly at: ReadonlyArray<number>; readonly arity: number };
   },
   /**
    * Emit the INVARIANT-PREFIX VARIANT of `h` instead of its definition:
@@ -6553,6 +6557,7 @@ export function emitFunctionLiteralDefinition(
                 body: bodyExpr,
                 literal,
                 parameterTypes: specialization?.types,
+                parameterPositions: specialization?.positions,
                 target: bodyTarget,
                 extraParams: prefixed?.prefixes.map((p, i) => ({
                   name: extraParams[i],

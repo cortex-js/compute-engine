@@ -6,6 +6,7 @@ import {
   isString,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
+import { boundVariableNames } from '../boxed-expression/binders.js';
 import { tryGetConstant } from './constant-folding.js';
 import type { CompileTarget } from './types.js';
 import {
@@ -545,7 +546,13 @@ function gpuUnsizedCollectionReason(t: Type): string | undefined {
  * operator position or as a value), and of the value of each symbol, because
  * the shader targets write such a body or value in place. A body or a value
  * is entered at most once, so a recursive definition cannot loop here, and a
- * node that several parents share is visited once.
+ * node that several parents share is visited once in each binding scope.
+ *
+ * A name that an enclosing form binds (a parameter of a user function or of
+ * a `Function` literal, a `Block` local, an index) is not visited: it is not
+ * an input. A parameter can have the name of an input and another type:
+ * with the input `H: list<real^1600>` and `g(H: list<integer>, x)`, the
+ * parameter `H` has no static length, and the input `H` has one.
  */
 function forEachReachableSymbol(
   expr: Expression | undefined,
@@ -553,35 +560,46 @@ function forEachReachableSymbol(
 ): void {
   const expanded = new Set<string>();
   const expandedValues = new Set<string>();
+  const NONE: ReadonlySet<string> = new Set();
   const walkUserFunctionBody = (e: Expression, name: string): void => {
     if (expanded.has(name)) return;
     expanded.add(name);
     const engine = e.engine;
     if (engine === undefined) return;
     const literal = BaseCompiler.userFunctionLiteral(engine, name);
-    if (literal !== undefined && literal.ops.length > 0) walk(literal.ops[0]);
+    if (literal !== undefined && literal.ops.length > 0) walk(literal, NONE);
   };
-  const visited = new Set<Expression>();
-  const walk = (e: Expression): void => {
-    if (visited.has(e)) return;
-    visited.add(e);
+  const visited = new Map<Expression, Set<ReadonlySet<string>>>();
+  const walk = (e: Expression, bound: ReadonlySet<string>): void => {
+    const scopes = visited.get(e);
+    if (scopes?.has(bound)) return;
+    if (scopes === undefined) visited.set(e, new Set([bound]));
+    else scopes.add(bound);
     if (isSymbol(e)) {
+      if (bound.has(e.symbol)) return;
       visit(e);
       walkUserFunctionBody(e, e.symbol);
       if (!expandedValues.has(e.symbol)) {
         expandedValues.add(e.symbol);
         const value = e.engine?._getSymbolValue(e.symbol);
-        if (value !== undefined) walk(value);
+        if (value !== undefined) walk(value, NONE);
       }
       return;
     }
     if (isFunction(e)) {
-      if (typeof e.operator === 'string' && e.operator !== '')
+      if (
+        typeof e.operator === 'string' &&
+        e.operator !== '' &&
+        !bound.has(e.operator)
+      )
         walkUserFunctionBody(e, e.operator);
-      for (const op of e.ops) walk(op);
+      const names = boundVariableNames(e);
+      const inner =
+        names.length === 0 ? bound : new Set([...bound, ...names]);
+      for (const op of e.ops) walk(op, inner);
     }
   };
-  if (expr !== undefined) walk(expr);
+  if (expr !== undefined) walk(expr, NONE);
 }
 
 /**

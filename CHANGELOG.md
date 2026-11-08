@@ -156,6 +156,16 @@
 
 ### Resolved Issues
 
+- **On the GLSL and WGSL targets, a function can take a list input as an
+  argument.** With the input `H: list<real^1600>` and
+  `g: (list<integer>, real) -> real`, the compilation of `g(H, x)` failed:
+  `parameter "H" has no static GLSL type`. It now compiles to a call of a
+  definition of `g` with no parameter for the list, whose body reads the input
+  `H` itself, through the texture of a `sampler2D` storage hint, the buffer of
+  a `storage-buffer` hint, or the uniform array. The argument must be an input
+  of the expression: for a list that is a local, a literal or a computed
+  list, the function still has no shader definition.
+
 - **The derivative of a list made by a spread or a join is computed.** The
   derivative of `ListJoin` (the form of a list literal with a spread,
   `[...a, b]`) is the `ListJoin` of the derivatives of its operands. With

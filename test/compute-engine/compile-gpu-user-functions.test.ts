@@ -513,7 +513,11 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     const ce = new ComputeEngine();
     ce.declare('m', '(list<real>) -> real');
     ce.assign('m', ce.parse('M \\mapsto 1'));
-    expect(() => glsl.compile(ce.expr(['m', 'A']))).toThrow(
+    ce.declare('A', 'list<real^3>');
+    // The argument is a list computed from the input `A`. The input itself as
+    // the argument, `m(A)`, takes the variant of `m` that reads the input in
+    // place of `M` (`ensureBoundListVariantEmitted`).
+    expect(() => glsl.compile(ce.expr(['m', ['Add', 'A', 1]]))).toThrow(
       /^Could not compile `m`: parameter "M" has no static GLSL type/
     );
   });

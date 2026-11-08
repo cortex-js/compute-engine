@@ -2285,6 +2285,19 @@ export interface CompileTarget<Expr = unknown> {
         /** The whole `["Function", body, …params]` literal. */
         literal: Expr;
         parameterTypes?: readonly Type[];
+        /**
+         * For a variant that leaves out parameters of the declaration of
+         * `id` (`ensureBoundListVariantEmitted`): `at[i]` is the position in
+         * that declaration of the formal parameter `i`, and `arity` is the
+         * number of parameters of the declaration. A fact that is recorded
+         * by position for `id` (a call-site fact, a declared range) is read
+         * at `at[i]`. Absent when the formal parameters are those of the
+         * declaration.
+         */
+        parameterPositions?: {
+          readonly at: ReadonlyArray<number>;
+          readonly arity: number;
+        };
         /** Target with the parameters shadowed and bound. */
         target: CompileTarget<Expr>;
         /**

@@ -150,6 +150,10 @@ export interface CoreHooks {
       key: string;
       types: readonly Type[];
       pointWidths?: readonly (number | undefined)[];
+      positions?: {
+        readonly at: ReadonlyArray<number>;
+        readonly arity: number;
+      };
     },
     prefixed?: {
       key: string;

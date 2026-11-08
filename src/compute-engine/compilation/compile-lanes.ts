@@ -67,7 +67,9 @@ import {
   userFunctionLanes,
 } from './compile-definitions.js';
 import {
+  boundListArguments,
   complexCoordinateArgumentAt,
+  ensureBoundListVariantEmitted,
   inlinedUserFunctionCall,
   pointArgumentAtUntypedParameter,
 } from './compile-user-calls.js';
@@ -675,9 +677,32 @@ export function userCallDefinition(
   )
     return undefined;
   if (pointArgumentAtUntypedParameter(engine, h, args) >= 0) return inline();
-  const ordinary = emit(() =>
-    core.ensureUserFunctionEmitted(engine, h, target)
-  );
+  // On a shader target, a call whose ordinary definition fails can take the
+  // variant whose body reads a list input in place of its parameter
+  // (`ensureBoundListVariantEmitted`), as `tryCompileUserFunction` does.
+  // Which arguments are list inputs is read here, before `emit` hides the
+  // bindings of the caller: a local of the caller is not an input.
+  const inputs =
+    registry.lowering === undefined
+      ? undefined
+      : boundListArguments(engine, args, target);
+  const ordinary = emit(() => {
+    try {
+      return core.ensureUserFunctionEmitted(engine, h, target);
+    } catch (e) {
+      if (e instanceof Error && e.name === 'CancellationError') throw e;
+      if (inputs === undefined) throw e;
+      const bound = ensureBoundListVariantEmitted(
+        engine,
+        h,
+        args,
+        target,
+        inputs
+      );
+      if (bound === undefined) throw e;
+      return bound.name;
+    }
+  });
   if (ordinary === undefined) return inline();
   return ordinary.name === undefined ? undefined : { name: ordinary.name };
 }

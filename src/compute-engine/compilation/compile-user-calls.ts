@@ -13,6 +13,7 @@ import type {
 } from '../global-types.js';
 import { isScalarParam } from './javascript-value-facts.js';
 import {
+  collectBinderNames,
   isOperatorDef,
   isValueDef,
   freeSymbolNames,
@@ -76,9 +77,11 @@ import {
   invariantPrefixes,
   isSinglePointArg,
   substitutedUserFunctionBody,
+  userFunctionIsGeneric,
   userFunctionName,
 } from './compile-cse.js';
 import { core } from './compiler-core-hooks.js';
+import { CompilerState } from './compiler-state.js';
 import { NO_NAMES } from './compiler-tables.js';
 import { CompileDeclineError, UNSETTLED_SHAPE_CODE } from './diagnostics.js';
 import {
@@ -1992,4 +1995,142 @@ export function ensureUserFunctionVariantEmitted(
   if (variant !== undefined)
     (registry.variantBases ??= new Map()).set(variant, baseName);
   return variant;
+}
+
+/**
+ * For each argument of a call, whether it is a LIST INPUT of the compiled
+ * expression: a symbol of a list type that names a value and that no
+ * enclosing form binds (not a parameter, a block local or an index). Only
+ * such a symbol is visible to a module-level shader function. The test reads
+ * every record of the bindings of the caller (`CompileTarget.boundVars`,
+ * the local shape frames, `CompilerState._boundVarsCtx` and the binder
+ * shield of an analysis), so it must run before a route hides them
+ * (`withCallerBindingsHidden`).
+ */
+export function boundListArguments(
+  engine: ComputeEngine,
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): boolean[] {
+  return args.map(
+    (a) =>
+      isSymbol(a) &&
+      target.boundVars?.has(a.symbol) !== true &&
+      localShapeFrameOf(a.symbol)?.has(a.symbol) !== true &&
+      CompilerState._boundVarsCtx?.has(a.symbol) !== true &&
+      !CompilerState._binderShield.some((f) => f.has(a.symbol)) &&
+      isValueDef(engine.lookupDefinition(a.symbol)) &&
+      isSubtype(a.type.type, 'list<any>')
+  );
+}
+
+/**
+ * On a target with its own definition lowering (the shader targets), emit
+ * the BOUND-LIST VARIANT of the user function `h` for the call `h(args)`,
+ * and return its local name with the arguments that the variant still
+ * takes. `undefined` when the call has no argument to bind, or when the
+ * variant cannot be emitted.
+ *
+ * A shader function cannot take a list parameter: GLSL and WGSL have no
+ * array type of an unknown length, a sampler parameter has no index helper
+ * of the width of the argument, and WGSL cannot pass a storage buffer to a
+ * function. So `define` declines `g(H: list<integer>, x: real)`. The
+ * variant has no parameter for such a list: its body reads the argument
+ * itself, which is an input of the compiled expression. With the input `H`
+ * in a texture, `g(H, x)` compiles to `_fn_g_bind0_H(x)`, and the body reads
+ * `_gpu_texat90001(H, k)` where the definition of `g` reads `H[k]`. The
+ * interpreter binds the value of the argument to the parameter, so the body
+ * computes the same value. One variant is emitted for each function and
+ * each set of bound arguments, and every call with the same set shares it.
+ *
+ * An argument is bound when it is a symbol of a list type that no enclosing
+ * form binds (not a parameter, a block local or an index): only an input of
+ * the expression is visible to a module-level function. The variant is not
+ * emitted when the body binds the name of an argument or of a bound
+ * parameter itself, or when another parameter has the name of an argument,
+ * because the substituted body would then read a different value.
+ */
+export function ensureBoundListVariantEmitted(
+  engine: ComputeEngine,
+  h: string,
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>,
+  /** Which arguments are list inputs (`boundListArguments`), when the
+   * caller read it before it hid its own bindings. */
+  inputs: ReadonlyArray<boolean> = boundListArguments(engine, args, target)
+): { name: string; args: Expression[] } | undefined {
+  const registry = target.userFunctions;
+  if (registry?.lowering === undefined) return undefined;
+  const literal = userFunctionLiteral(engine, h);
+  if (literal === undefined || userFunctionIsGeneric(engine, h, literal))
+    return undefined;
+  const params = literal.ops.slice(1);
+  if (params.length !== args.length) return undefined;
+  const names = params.map((p) =>
+    isSymbol(p) || isFunction(p, 'Typed')
+      ? functionLiteralParameterName(p)
+      : undefined
+  );
+  if (names.some((n) => n === undefined)) return undefined;
+  const bound = args.map((_, i) => inputs[i] === true);
+  if (!bound.includes(true)) return undefined;
+  const body = literal.ops[0];
+  // The names that the body binds. The scope of the top `Block` of a body
+  // also holds the parameters, so that block is read by its statements: its
+  // own locals are the names of its `Declare` statements.
+  const binders = new Set<string>();
+  if (isFunction(body, 'Block'))
+    for (const statement of body.ops) {
+      if (isFunction(statement, 'Declare') && isSymbol(statement.op1))
+        binders.add(statement.op1.symbol);
+      collectBinderNames(statement, binders);
+    }
+  else collectBinderNames(body, binders);
+  const kept = new Set(names.filter((_, i) => !bound[i]) as string[]);
+  const substitution: Record<string, Expression> = {};
+  // The key of the variant names each bound position and its input. The
+  // name of the input is quoted, so that two sets of bound arguments never
+  // give the same key: with unquoted names, `(0, X_1_Y)` and
+  // `(0, X), (1, Y_2_Z)` gave the same text.
+  const key: string[] = [];
+  for (const [i, a] of args.entries()) {
+    if (!bound[i] || !isSymbol(a)) continue;
+    const name = names[i]!;
+    if (binders.has(name) || binders.has(a.symbol) || kept.has(a.symbol))
+      return undefined;
+    substitution[name] = a;
+    key.push(`${i}=${JSON.stringify(a.symbol)}`);
+  }
+  const variantBody = body.subs(substitution);
+  if (!variantBody.isValid) return undefined;
+  // The variant is boxed again from its MathJSON, so that each name binds
+  // in the scope of the variant. When the argument has the name of its
+  // parameter (`g(H, x)` with the parameter `H`), the substitution keeps
+  // the occurrences of the body as they are, bound to the parameter, and
+  // they would keep its type (`list<integer>`, with no length) instead of
+  // the type of the input (`list<real^1600>`).
+  const variant = engine.box([
+    'Function',
+    variantBody.json,
+    ...params.filter((_, i) => !bound[i]).map((p) => p.json),
+  ]) as Expression & FunctionInterface;
+  if (!variant.isValid || !isFunction(variant, 'Function')) return undefined;
+  target.symbolDeps?.add(h);
+  // The positions in the declaration of `h` of the parameters that the
+  // variant keeps. A type or a fact that is recorded for `h` by position is
+  // read there, because the positions of the variant differ.
+  const at = args.flatMap((_, i) => (bound[i] ? [] : [i]));
+  const name = core.emitFunctionLiteralDefinition(
+    h,
+    variant,
+    target,
+    registry,
+    {
+      key: `${h}#bind${key.join(',')}`,
+      types: at.map((i) => userFunctionParamType(engine, h, i) ?? 'unknown'),
+      positions: { at, arity: args.length },
+    }
+  );
+  if (name === undefined) return undefined;
+  return { name, args: args.filter((_, i) => !bound[i]) };
 }

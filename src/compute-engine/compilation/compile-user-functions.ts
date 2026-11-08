@@ -141,6 +141,7 @@ import {
   complexCoordinateArgumentAt,
   expressionParameterDecline,
   emitUserFunctionCall,
+  ensureBoundListVariantEmitted,
   ensureUserFunctionVariantEmitted,
   isRealListArg,
   listArgumentAtOpenWholeParameter,
@@ -1873,6 +1874,36 @@ export function tryCompileUserFunction(
     // the engine, so a `CancellationError` crossing a bundle boundary is
     // not an instance of the host's class (the `box.ts` convention).
     if (e instanceof Error && e.name === 'CancellationError') throw e;
+    // A shader target has no function parameter for a list. When a list
+    // argument is an input of the expression, the call takes a variant
+    // whose body reads that input directly (`ensureBoundListVariantEmitted`).
+    // When the variant fails, the call takes the route below, and the
+    // error of the variant is the one reported: it names what the body
+    // cannot compile, where the first error names only the parameter.
+    let variantError: unknown;
+    // When the call of an emitted variant fails, the variant stays in the
+    // preamble: it compiled, so it is valid code. Removing it could also
+    // remove a definition that the compiled arguments emitted and that a
+    // temporary of the caller already calls. The error is passed on as it
+    // is, so that a `CompileDeclineError` keeps its code. Its argument
+    // numbers count the arguments that the variant keeps.
+    const lowering = target.userFunctions?.lowering;
+    if (lowering !== undefined) {
+      try {
+        const bound = ensureBoundListVariantEmitted(engine, h, args, target);
+        if (bound !== undefined)
+          return lowering.call({
+            id: h,
+            name: bound.name,
+            args: bound.args,
+            target,
+          });
+      } catch (inner) {
+        if (inner instanceof Error && inner.name === 'CancellationError')
+          throw inner;
+        variantError = inner;
+      }
+    }
     // A list of real numbers at a parameter typed as a tuple only by
     // index reads in the body is substituted whole too. Such a tuple is
     // not a contract (`isIndexReadTuple()`, index-read-tuple.ts): the
@@ -1895,7 +1926,7 @@ export function tryCompileUserFunction(
         )
     );
     if (inlined !== undefined) return inlined;
-    throw e;
+    throw variantError ?? e;
   }
   if (name === undefined) return undefined;
 

@@ -1710,6 +1710,11 @@ function gpuCombinedFact(
  * assigns: the body then reads another value under its name. With no
  * recorded call sites (the shader route, `compileFunction`), only the
  * declared ranges give facts.
+ *
+ * `positions` is given for a variant whose parameters are a part of the
+ * parameters of `id` (`ensureBoundListVariantEmitted`): the facts of the
+ * parameter `i` are then read at the position `positions.at[i]` of the
+ * declaration of `id`, which has `positions.arity` parameters.
  */
 export function gpuDefinitionParameterFacts(
   id: string,
@@ -1717,13 +1722,18 @@ export function gpuDefinitionParameterFacts(
   shaderTypes: ReadonlyArray<string>,
   body: Expression,
   target: CompileTarget<Expression>,
-  isWGSL: boolean
+  isWGSL: boolean,
+  positions?: { readonly at: ReadonlyArray<number>; readonly arity: number }
 ): ReadonlyMap<string, GPUParameterFact> | undefined {
   const callSites =
     target.userFunctions === undefined
       ? undefined
       : GPU_CALL_SITE_FACTS.get(target.userFunctions)?.get(id);
-  const declared = gpuDeclaredParameterRanges(body.engine, id, params.length);
+  const declared = gpuDeclaredParameterRanges(
+    body.engine,
+    id,
+    positions?.arity ?? params.length
+  );
   if (callSites === undefined && declared === undefined) return undefined;
   const rebound = gpuReboundNames(body);
   const facts = new Map<string, GPUParameterFact>();
@@ -1732,9 +1742,12 @@ export function gpuDefinitionParameterFacts(
     if (rebound.has(p)) return;
     // A recorded fact already holds the declared range
     // (`gpuRecordCallSiteFacts`).
-    const site = callSites?.[i];
+    const at = positions?.at[i] ?? i;
+    const site = callSites?.[at];
     const fact =
-      site?.finite === true ? site : gpuCombinedFact(true, null, declared?.[i]);
+      site?.finite === true
+        ? site
+        : gpuCombinedFact(true, null, declared?.[at]);
     if (fact.finite) facts.set(p, fact);
   });
   return facts.size === 0 ? undefined : facts;

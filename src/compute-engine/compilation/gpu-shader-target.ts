@@ -1036,6 +1036,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           literal,
           target,
           parameterTypes,
+          parameterPositions,
           extraParams,
         }) => {
           // A symbol of the body whose type admits a point and a list of
@@ -1188,7 +1189,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             paramTypes,
             body,
             target,
-            isWGSL
+            isWGSL,
+            parameterPositions
           );
           const { ret, code } = BaseCompiler.withLocalShapeFrame(
             complexFrame,
