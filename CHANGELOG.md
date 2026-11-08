@@ -147,6 +147,12 @@
 
 ### Resolved Issues
 
+- **In Epsil, an error in the argument of `Exp` or in the numerator of a
+  division underlines the argument.** With `w` a variable that holds the
+  string `"s"`, the error of `let v = Exp(w) + 1` underlined `Exp(w)`, and
+  that of `let v = w/2` underlined the whole statement. Both now underline
+  `w`.
+
 - **A number made at a higher precision gives the same digits in a list as
   alone, after the engine is set to machine precision.** With `b` the
   number `0.3` made at precision 30 and the engine then set to `"machine"`,

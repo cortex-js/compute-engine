@@ -180,6 +180,13 @@ export function enclosingFrame(
  * statement reads, or by a call that canonicalization made) is not used when
  * no call of its operator is inside the argument that an outer frame of the
  * statement selected ({@link rejectFramesOutsideScope}).
+ *
+ * A frame of a call that canonicalization renamed (`Exp(w)` is
+ * `Power(ExponentialE, w)`, `w/2` is `Multiply(1/2, w)`) is first changed into
+ * the frame of the written call ({@link renamedCallFrame}), so that it
+ * selects the written argument. This is done only for a written call that is
+ * the value of the statement or the argument that an outer frame of the
+ * statement selected ({@link rejectFramesOutsideScope}).
  */
 export function locateError(
   frames: readonly ErrorFrameRef[],
@@ -216,8 +223,13 @@ export function locateError(
    * {@link offendingValue}), such as `"a"` for the error of `Ln("a")`. */
   offending?: MathJsonExpression
 ): { range: [number, number]; call?: MathJsonExpression } {
+  // The frames as recorded name the canonical calls. `rejectFramesOutsideScope`
+  // changes the frames of renamed calls in `written`, which is used from
+  // here on, and compares the frames as recorded with the canonical operands.
+  const written = [...frames];
   const rejected: Rejected = { frames: new Set(), calls: new Set() };
   rejectFramesOutsideScope(
+    written,
     frames,
     stmt,
     frameIndexOrder,
@@ -225,6 +237,7 @@ export function locateError(
     canonicalOrder,
     rejected
   );
+  frames = written;
   for (let k = 0; k < frames.length; k++) {
     if (rejected.frames.has(k)) continue;
     const { name } = frames[k];
@@ -327,6 +340,109 @@ export function locateError(
 }
 
 /**
+ * The frame of the written call `node` for `frame`, when canonicalization
+ * made the call of `frame` from `node`, a written call of another operator.
+ * `undefined` when the frame is kept as it is.
+ *
+ * The canonical form of `Exp(w)` is `Power(ExponentialE, w)`, and that of
+ * `w/2` is `Multiply(1/2, w)`, so the frames of their errors are
+ * `Power argument 2` and `Multiply argument 2`, and the statement has no
+ * written call of these operators. A canonical call keeps the source range of
+ * the written call it was made from, and its operand keeps the source range of
+ * the written operand. The frame `Power argument 2` thus becomes
+ * `Exp argument 1`, and `Multiply argument 2` becomes `Divide argument 1`.
+ * The argument is the written operand that contains the canonical operand: in
+ * `-w/2`, whose canonical form is `Multiply(-1/2, w)`, the written `-w`.
+ *
+ * The caller gives only a `node` that the error went through: the value of
+ * the statement, or the argument that an outer frame selected. A frame
+ * recorded in an earlier statement or in a called function can have the
+ * operator of a canonical call of the statement, and that call did not make
+ * the error: with `function g(x) { Ln(x) * 2 }`, the frame
+ * `Multiply argument 2` of `[u/2, g("a")]` is not the frame of `u/2`.
+ *
+ * The frame is kept when `node` is not a call, when it is a call of the
+ * operator of the frame, when the canonical call at its source range is not a
+ * call of that operator or its operand has no source range, and when no
+ * written operand contains the canonical operand. It is also kept when `node`
+ * is a call of an operator whose canonical form sorts or merges its operands,
+ * because the index of a frame of such an operator counts canonical operands.
+ */
+function renamedCallFrame(
+  frame: ErrorFrameRef,
+  node: MathJsonExpression,
+  canonicalOrder: CanonicalOrder
+): ErrorFrameRef | undefined {
+  const { name, index } = frame;
+  const head = operator(node);
+  // A written subtraction is part of the canonical sum (see
+  // `clusterOperators`).
+  if (
+    head === '' ||
+    head === name ||
+    REORDERED_OPERATORS.has(head) ||
+    head === 'Subtract' ||
+    canonicalOrder.reorders(head)
+  )
+    return undefined;
+  const callRange = nodeOffsets(node);
+  if (callRange === undefined) return undefined;
+  const argRange = canonicalOrder.argumentOffsets(name, callRange, index);
+  if (argRange === undefined) return undefined;
+  const at = [...operands(node)].findIndex((op) => {
+    const o = nodeOffsets(op);
+    return o !== undefined && o[0] <= argRange[0] && argRange[1] <= o[1];
+  });
+  return at < 0 ? undefined : { name: head, index: at + 1 };
+}
+
+/**
+ * The nodes that a frame of the statement `stmt` can name when its written
+ * call is `scope` (see {@link isDirectlyAt}), or, when `scope` is
+ * `undefined`, the value of the statement: `stmt`, or the value inside the
+ * nodes that the parser adds around it (the `Declare` of a `let`, its
+ * `Dictionary` and `KeyValuePair`, the `Assign` of an assignment).
+ *
+ * A written call that spans the whole statement is not such a node: the
+ * elements of the list of the statement `[u/2, z]` are not the value of the
+ * statement, and a list records no frame for its elements.
+ */
+function nodesAt(
+  stmt: MathJsonExpression,
+  scope: MathJsonExpression | undefined
+): MathJsonExpression[] {
+  const nodes: MathJsonExpression[] = [];
+  if (scope !== undefined) {
+    let node = scope;
+    nodes.push(node);
+    while (operator(node) === 'Block') {
+      const ops = [...operands(node)];
+      if (ops.length !== 1) break;
+      node = ops[0];
+      nodes.push(node);
+    }
+    return nodes;
+  }
+  const visit = (node: MathJsonExpression): void => {
+    nodes.push(node);
+    if (STATEMENT_WRAPPERS.has(operator(node)))
+      for (const op of operands(node)) visit(op);
+  };
+  visit(stmt);
+  return nodes;
+}
+
+/** The nodes that the parser adds around the value of a statement:
+ * `let v = w/2` is `Declare(v, Dictionary(KeyValuePair("value", w/2)))`, and
+ * `v = w/2` is `Assign(v, w/2)`. */
+const STATEMENT_WRAPPERS = new Set([
+  'Declare',
+  'Dictionary',
+  'KeyValuePair',
+  'Assign',
+]);
+
+/**
  * Add to `rejected.frames` the frames that name no written call of the
  * statement. The frames of a runtime error record each call that the error
  * passes through, innermost first. The frames of the written calls of the
@@ -367,9 +483,18 @@ export function locateError(
  * next inner frame. The error went through the scope, so a frame with no
  * written call inside the scope names no written call of the statement, and
  * it is rejected. Such a frame does no harm when it is rejected, also when a
- * call that canonicalization made in the scope recorded it: in
- * `y^2 + Exp(Ln(w))`, the frame `Power argument 2` of `Exp` would select the
- * `2` of `y^2`. When a frame has a written call inside the scope that is not
+ * function that the scope calls recorded it: in `y^2 + g(w)`, a frame
+ * `Power argument 2` recorded in the body of `g` would select the `2` of
+ * `y^2`.
+ *
+ * Before these tests, a frame of a call that canonicalization renamed is
+ * changed into the frame of the written call at the scope, or of the value
+ * of the statement for the outermost frame ({@link renamedCallFrame}): in
+ * `y^2 + Exp(Ln(w))`, the frame `Power argument 2` of `Exp` becomes
+ * `Exp argument 1`, and selects `Ln(w)`. A frame recorded outside the
+ * statement is changed only when the written call at the scope is a renamed
+ * call of its operator, and then only into a frame of that call, which the
+ * error went through. When a frame has a written call inside the scope that is not
  * known to be its call, the reading stops, and rejects nothing more. The
  * inner frames are not used to
  * select the argument, because they are not yet known to come from the
@@ -377,7 +502,11 @@ export function locateError(
  * written arguments, nothing is rejected.
  */
 function rejectFramesOutsideScope(
-  frames: readonly ErrorFrameRef[],
+  /** A copy of the frames as recorded. The frame of a renamed call of the
+   * statement is changed here into the frame of the written call. */
+  frames: ErrorFrameRef[],
+  /** The frames as recorded: they name the canonical calls. */
+  canonicalFrames: readonly ErrorFrameRef[],
   stmt: MathJsonExpression,
   frameIndexOrder: 'declaration' | 'written',
   slotNamesFor:
@@ -394,6 +523,12 @@ function rejectFramesOutsideScope(
   // before a frame selected one.
   let scope: MathJsonExpression | undefined;
   for (let j = frames.length - 1; j >= 0; j--) {
+    // The error went through the written call at `scope`: when
+    // canonicalization renamed it, the frame names the written call.
+    const renamed = nodesAt(stmt, scope)
+      .map((node) => renamedCallFrame(frames[j], node, canonicalOrder))
+      .filter((frame) => frame !== undefined);
+    if (renamed.length === 1) frames[j] = renamed[0];
     const { name } = frames[j];
     const calls: MathJsonExpression[] = [];
     findWrittenCalls(stmt, name, calls, Infinity);
@@ -438,13 +573,18 @@ function rejectFramesOutsideScope(
     // The canonical call at the source range of the written call must have,
     // at the frame's index, the operand made from the selected argument.
     // `Exp(u)^y` is `Power(ExponentialE, u·y)`: the canonical operand 2 is
-    // not the written `y`.
+    // not the written `y`. The frame as recorded names the canonical call: the
+    // frame `Exp argument 1` of a written `Exp(w)` was `Power argument 2`.
     const callRange = nodeOffsets(selected.call);
     const argRange = nodeOffsets(selected.arg);
     const canonicalRange =
       callRange === undefined
         ? undefined
-        : canonicalOrder.argumentOffsets(name, callRange, frames[j].index);
+        : canonicalOrder.argumentOffsets(
+            canonicalFrames[j].name,
+            callRange,
+            canonicalFrames[j].index
+          );
     if (
       argRange === undefined ||
       canonicalRange === undefined ||
