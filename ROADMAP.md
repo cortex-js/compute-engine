@@ -797,10 +797,10 @@ requires matching genTypes), pinned in
 `test/compute-engine/compile-gpu-shape-gate-holes.test.ts`. Unrolling to SCALAR
 selections avoids it; a design that lifts the vec-width cap meets it.
 
-### CE-280. Compile-target coverage: heads and shapes that decline on GLSL and WGSL
+### CE-280. Compile-target coverage: heads and shapes that decline on GLSL
 
-**Status:** ready; capability. Ledger: do one sub-item per session. Approved 2026-11-01.
-**Witness:** corpus; 280.1: GLSL `Integrate` declines on a corpus row (1 row in CE-270.3), direction decided 2026-10-17; other sub-items drop (no witness; 280.9 allowed).
+**Status:** ready; capability. Ledger: do one sub-item per session. Approved 2026-11-01. Revised 2026-11-08 for the GLSL fragment (`docs/plans/2026-11-08-glsl-fragment-spec.md`): the WGSL target is dropped, and CE-280.1 (`Integrate` on glsl) and CE-280.5 (dictionary and string-key forms of `At`) are removed, since the fragment puts quadrature, dictionaries and strings outside the target by contract. The sub-items that remain are inside the fragment.
+**Witness:** corpus; the `At` and `PointList` sub-items drop (no witness; 280.9 allowed).
 
 A decline on a shader target demotes the row from GPU to CPU. Counts are from
 the same Tycho corpus as the JavaScript coverage ledger.
@@ -811,13 +811,6 @@ board) have no `vecN` to live in. The consumer handles that with instanced
 draws. If profiles ever justify one shader body for such rows, the ask is
 array-uniform loop codegen, and it needs witnesses first.
 
-- **CE-280.1** `Integrate` on glsl: quadrature inside a shader (22 states in the
-  0.99.0 census). Large. A design pass must come before implementation. User
-  decision 2026-10-17 on the direction: a fixed composite rule with an error
-  estimate, and `NaN` on non-convergence. A shader quadrature whose error
-  estimate is too large gives `NaN`, as the other GPU special functions do. The
-  iteration budget is still to decide. Until then, `\int_0^x t^2 \sin t\,dt`
-  with `to: 'glsl'` declines.
 - `At` on GPU: the scalar-index and literal-gather tiers over statically-sized
   numeric bases are done. The design and the D4 disposition table are in
   `docs/COMPILATION-MODEL.md`; do not derive the table again. Do not retire the
@@ -827,7 +820,6 @@ array-uniform loop codegen, and it needs witnesses first.
   - **CE-280.3** Gather with K > 4 (width ceiling).
   - **CE-280.4** Gather with K 0 or 1 (the pinned 1-element-list contract has no
     shader shape).
-  - **CE-280.5** Dictionary, string-key and multi-index forms.
   - Not work: runtime-valued boolean masks (the result length is not static, so
     there is no shader value shape) and bases or index lists of unknown length.
 - `PointList`/`PointZ`: rules in `docs/COLLECTIONS-MODEL.md`. GPU construction

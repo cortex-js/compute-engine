@@ -563,7 +563,10 @@ No census can decide these; the npm users are not measured.
 | `broadcast()` API, kernel pool  | about 1,900                                           | Tycho, throughout                            | Keep (decided)                                                                 |
 
 **Decided by the user on 2026-11-02: WGSL, Python and value kinds are
-kept.** Every feature of this table stays.
+kept.** Every feature of this table stays. **Replaced for WGSL on
+2026-11-08: the WGSL target is dropped**, with the reason and the removal
+list in `docs/plans/2026-11-08-glsl-fragment-spec.md` (status line and
+section 5). Python and the value kinds stay as decided here.
 
 **Separate packages for the targets: not now.** The user asked whether the
 targets other than JavaScript (GLSL, WGSL, Python, interval-js) and value
