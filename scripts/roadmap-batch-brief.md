@@ -20,10 +20,12 @@ Read `AGENTS.md`, then the documents it names for your work:
 `docs/COMPUTE-ENGINE-BOX-SPECIFICS.md`, `~/.claude/SHARED-BOX-PROTOCOL.md`
 (sections 1, 2, 5) and `docs/ISSUE_TRACKING.md`. They apply in full.
 
-Stop and report when you have made about 150 tool calls, when the same
-failure comes back a third time, or when the planned approach does not work.
-Report what you tried, the state of the diff, what is still open, and the
-next step you propose. Stopping is a normal result, not a failure.
+At about 150 tool calls, stop and judge. Continue only when the approach
+works and what remains is a known list of steps (a review round, delivery,
+CHANGELOG, commit). Otherwise stop and report. Also stop and report when the
+same failure comes back a third time, or when the planned approach does not
+work. Report what you tried, the state of the diff, what is still open, and
+the next step you propose. Stopping is a normal result, not a failure.
 
 NEVER run `git stash`, `git checkout`, `git restore`, `git reset`, or ANY git
 command that modifies the tree or index. If the working tree looks wrong,
