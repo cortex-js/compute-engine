@@ -143,6 +143,15 @@
 
 ### Resolved Issues
 
+- **A function with a local variable, mapped over the rows of a matrix,
+  gives a row for each row.** A function made with `ce.box()` before the
+  call, such as `f = row ↦ (q ≔ 1; q·row/row)`, read `row` as a number, so
+  `ce.function('Map', [f, [[1, 2], [3, 4]]])` gave `[1, 1]` and was typed
+  `vector<2>`. It now gives `[[1, 1], [1, 1]]`, typed `matrix<2x2>`, as the
+  same function written in the call does. The same applies to a function
+  whose body holds another function literal, and to the other operators
+  that apply a function to the elements of a collection, such as `Reduce`.
+
 - **A function mapped over residue classes reads the variables of the scope
   where it was made.** With `k = 1`, a function `f = x ↦ k·x` made with
   `ce.box()`, and an inner scope that declares another `k = 2`,

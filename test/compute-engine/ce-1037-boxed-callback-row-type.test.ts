@@ -95,8 +95,12 @@ describe('A FOLD OVER ROWS WITH A LITERAL BOXED BEFORE THE CALL (CE-1037)', () =
     try {
       engine.declare('offset', 'integer');
       engine.assign('offset', 20);
+      // The literal is canonicalized again in the scope where it was boxed,
+      // so it reads the outer `offset` and takes the type of a row.
       const call = engine.function('Map', [f, engine.box(M as any)]);
-      expect(call.op1).toBe(f);
+      expect(call.op1.type.toString()).toBe(
+        '(row: vector<integer^2>) -> integer'
+      );
       expect(
         JSON.stringify(engine.box(['ListFrom', call]).evaluate().json)
       ).toBe('["List",11,13]');
@@ -155,7 +159,9 @@ describe('A FOLD OVER ROWS WITH A LITERAL BOXED BEFORE THE CALL (CE-1037)', () =
         evaluate: () => engine.box(99),
       });
       const call = engine.function('Map', [f, engine.box(M as any)]);
-      expect(call.op1).toBe(f);
+      expect(call.op1.type.toString()).toBe(
+        '(row: vector<integer^2>) -> vector<integer^2>'
+      );
       expect(
         JSON.stringify(engine.box(['ListFrom', call]).evaluate().json)
       ).toBe('["List",["List",0,1],["List",2,3]]');

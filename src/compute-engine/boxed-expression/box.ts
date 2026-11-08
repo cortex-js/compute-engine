@@ -2340,45 +2340,40 @@ function annotateCallbacksFromContextualSolve(
     // For a number type the boxed literal is kept as it is: its canonical
     // body already reads the parameter as a number.
     //
-    // The written form is bound again in the scope of the call, not in the
-    // scope where the literal was boxed. For a type that is not a kind, the
-    // literal is canonicalized again only when each name it reads has the
-    // same binding in both scopes (`bindsAsInCurrentScope()`): a literal
-    // that reads `offset` of an outer scope, applied in a scope that
-    // declares another `offset`, must keep the outer value. Such a literal
-    // keeps its boxed form, which reads the parameter as a number: its type
-    // is less precise, and a body that this reading simplified (`row/row`
-    // to `1`) gives a value of the wrong shape, as before this rule. The
-    // test also fails for a body with a `Block` local or a nested literal.
-    // A kind value cannot keep its boxed form, because the boxed body can
-    // give a wrong value. When the call is in another scope than the one
-    // where the literal was boxed (`boxedIn`) and the test fails, the
-    // literal is canonicalized here, in `boxedIn`: `x ↦ k·x` boxed where
-    // `k = 1`, and mapped over residue classes in a scope that declares
-    // another `k = 2`, reads `k = 1`, as `Apply` of the boxed literal does.
-    // Otherwise the literal is left raw, as an inline literal is, because
-    // the canonical handler of a fold re-canonicalizes a raw literal to
-    // refine the type of its accumulator (`bareAccumulatorName()`,
-    // `library/collections.ts`). A literal canonicalized here does not get
-    // that refinement: a fold that builds a list of residue classes in
-    // another scope is typed `collection<any>`, not `list<residue>`; its
-    // value is the same. A name that `boxedIn` declares after the literal
-    // was boxed is read in `boxedIn` as it is now.
+    // The boxed form cannot be kept for such a type, because the boxed body
+    // can give a wrong value: with `f = row ↦ (q ≔ 1; q·row/row)` boxed
+    // before the call, `Map(f, [[1, 2], [3, 4]])` gave `[1, 1]`, one number
+    // per row, where the inline literal gives `[[1, 1], [1, 1]]`.
+    //
+    // Each name of the written form must bind as it did when the literal
+    // was boxed, in the lexical scope `boxedIn`. When the call is in another
+    // scope and a name can bind in another way (`bindsAsInCurrentScope()`
+    // returns `false`), the literal is canonicalized here, in `boxedIn`:
+    // `x ↦ k·x` boxed where `k = 1`, and mapped over rows or residue classes
+    // in a scope that declares another `k = 2`, reads `k = 1`, as `Apply` of
+    // the boxed literal does. The test also returns `false` for a body with
+    // a `Block` local or a nested literal, because it cannot compare them;
+    // canonicalization in `boxedIn` is then correct too. Otherwise the
+    // literal is left raw, as an inline literal is, and the call
+    // canonicalizes it in its own scope, because the canonical handler of a
+    // fold re-canonicalizes a raw literal to refine the type of its
+    // accumulator (`bareAccumulatorName()`, `library/collections.ts`). A
+    // literal canonicalized here does not get that refinement: a fold that
+    // builds a list of residue classes in another scope is typed
+    // `collection<any>`, not `list<residue>`; its value is the same. A name
+    // that `boxedIn` declares after the literal was boxed is read in
+    // `boxedIn` as it is now.
     let canonicalIn: Scope | undefined = undefined;
     if (boxedIn !== undefined) {
-      const kind = paramTypes.some(
-        (x) => x !== undefined && isKindElementType(x)
-      );
-      if (!kind) {
-        if (
-          !(
-            paramTypes.some(
-              (x) => x !== undefined && !isSubtype(resolveType(x), 'number')
-            ) && bindsAsInCurrentScope(ce, ops[slot.index] as Expression, raw)
-          )
+      if (
+        !paramTypes.some(
+          (x) =>
+            x !== undefined &&
+            (isKindElementType(x) || !isSubtype(resolveType(x), 'number'))
         )
-          continue;
-      } else if (
+      )
+        continue;
+      if (
         boxedIn !== ce.context.lexicalScope &&
         !bindsAsInCurrentScope(ce, ops[slot.index] as Expression, raw)
       )
@@ -2549,9 +2544,10 @@ function inlineLiteral(
  * it.
  *
  * The written form of a literal boxed before a call is canonicalized again
- * in the scope of the call (`annotateCallbacksFromContextualSolve()`), not
- * in the scope where it was boxed. Two tests, with the parameters of `fn`
- * left out:
+ * in the scope of the call (`annotateCallbacksFromContextualSolve()`) when
+ * that scope is the one where the literal was boxed, or when this function
+ * returns `true`; otherwise it is canonicalized again in the scope where it
+ * was boxed. Two tests, with the parameters of `fn` left out:
  * - each symbol of the body of `fn`, and the operator of each application,
  *   is bound in `fn` to the definition that a lookup of its name in the
  *   current scope returns;
@@ -2564,8 +2560,8 @@ function inlineLiteral(
  * A name bound inside the body (the parameter of a nested literal, a local
  * of a `Block`) is not visible in the current scope, and an application
  * whose operator has no operator definition (a function held by a variable)
- * cannot be compared: both give `false`, so the literal is kept as it was
- * boxed.
+ * cannot be compared: both give `false`, so the caller canonicalizes the
+ * literal again in the scope where it was boxed.
  */
 function bindsAsInCurrentScope(
   ce: ComputeEngine,
