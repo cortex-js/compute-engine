@@ -155,11 +155,13 @@ describe('the `.N()` route keeps a point view a view of points (found under item
   const B = ['Multiply', L, ['Tuple', 0, 1]];
 
   test('a literal list scaled by a point floats to a list of points (was a crash)', () => {
+    // At the default precision of 21 digits, each element keeps the digits
+    // of `N(1/3)`, as the scalar product `N(1/3 · (1, 0))` does.
     const ce = new ComputeEngine();
     const v = ce
       .box(['Multiply', ['List', 0, ['Rational', 1, 3]], ['Tuple', 1, 0]])
       .N();
-    expect(v.toString()).toBe('[(0, 0),(0.3333333333333333, 0)]');
+    expect(v.toString()).toBe('[(0, 0),(0.333333333333333333333, 0)]');
   });
 
   test('with the length unbound, N() of the view is a lazy view of points', () => {
@@ -177,14 +179,14 @@ describe('the `.N()` route keeps a point view a view of points (found under item
     ce.declare('n', 'number');
     ce.assign('n', 3);
     expect(ce.box(A).N().toString()).toBe(
-      '[(0, 0),(0.3333333333333333, 0),(0.6666666666666666, 0),(1, 0)]'
+      '[(0, 0),(0.333333333333333333333, 0),(0.666666666666666666667, 0),(1, 0)]'
     );
     expect(
       ce
         .box(['PointY', ['N', ['Subtract', A, B]]])
         .evaluate()
         .toString()
-    ).toBe('[0,-0.3333333333333333,-0.6666666666666666,-1]');
+    ).toBe('[0,-0.333333333333333333333,-0.666666666666666666667,-1]');
   });
 });
 

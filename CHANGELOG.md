@@ -208,6 +208,28 @@
   callback now calls the copy of `f` with its parameter typed `string`, as
   the call `["f", "t"]` with a string `t` already did.
 
+- **Above machine precision, the arithmetic of lists and matrices keeps all
+  the digits of each element.** A number times a list or a matrix, the sum
+  and the element-wise product of two lists, and the matrix product
+  (`Multiply`, `Add`, `MatrixMultiply`) kept only about 16 digits of an
+  element with more digits than a machine number holds. At precision 30,
+  `2\cdot\lbrack 0.123456789012345678901234567, 1.5\rbrack` was
+  `[0.24691357802469136, 3]`; it is now
+  `[0.246913578024691357802469134, 3]`, as the product of the two numbers
+  is. The same holds for a complex element, and for `Determinant`, `Inverse`,
+  `Trace`, `Transpose` and the other matrix operators. So at the default
+  precision of 21 digits, the matrix operators on the `N()` of a matrix give
+  21 digits, and they take more time: on a 12×12 matrix, `Determinant` went
+  from 0.4 ms to 3.6 ms and `Inverse` from 0.6 ms to 9.2 ms in one
+  measurement. Two other results change with such an element. An integer
+  cell of a matrix product that does not depend on it is exact, as beside an
+  exact rational: `4`, not `4.0`. A matrix that is singular in exact
+  arithmetic has a small determinant, the rounding residue of its digits, in
+  place of `0`: `Determinant(N([[1/3, 2/3], [1/7, 2/7]]))` is about
+  `-1.4e-22`, and its `Inverse` has very large entries. Machine numbers, and
+  big numbers that a machine number holds exactly, give the same results as
+  before.
+
 ### Performance
 
 - **More copies of a sub-expression read the value of the first copy in one

@@ -4529,8 +4529,17 @@ function mulTensors(
  *   holds. A scalar made at a higher precision keeps its decimal digits when
  *   the engine is later set to machine precision, and the cell product
  *   multiplies those digits: `0.1 · [3]` is `[0.3]` for such a `0.1`, where
- *   the doubles give `0.30000000000000004`. The ELEMENTS need no such test:
- *   the cell products read them from the packed tensor, which holds doubles.
+ *   the doubles give `0.30000000000000004`. The ELEMENTS are not tested
+ *   this way. `array` is defined only when each element has the value of
+ *   its double, so an element with more digits than a double holds is not
+ *   read here: the packed tensor of {@link scaleTensor} then holds the boxed
+ *   elements (`float64HoldsDigits()` in `tensor/tensor-fields.ts`), and each
+ *   cell product multiplies all their digits. An element such as `0.3` made
+ *   at a higher precision has the value of its double but is stored as a
+ *   decimal, and at machine precision it is multiplied here as a double,
+ *   where the scalar product multiplies its decimal (`3 · 0.3` is `0.9`, and
+ *   the doubles give `0.8999999999999999`). That difference is a known
+ *   defect, recorded in `issues/CE-1097.md`.
  *
  * The answer is a list that holds its numbers unboxed (`ce._list`).
  *

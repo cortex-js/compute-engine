@@ -585,13 +585,21 @@ describe('compiled code', () => {
 
   it('an operand computed from a union of list types dispatches on the values', () => {
     const type = 'list<number> | list<list<number>>';
-    for (const expr of [
-      ['Multiply', ['Add', 'p', 1], 'q'],
-      ['Multiply', 'p', ['Sin', 'q']],
-    ] as MathJsonExpression[]) {
-      const { result, expected } = run(type, expr, M, Q);
-      expect(result).toEqual(expected);
-    }
+    const exact = run(type, ['Multiply', ['Add', 'p', 1], 'q'], M, Q);
+    expect(exact.result).toEqual(exact.expected);
+    // The interpreter computes `sin(1)` and its products with the 21 digits
+    // of the default precision, and compiled code with doubles, so the last
+    // digit of a cell can differ: each cell is compared to 14 decimal places.
+    const { result, expected } = run(type, ['Multiply', 'p', ['Sin', 'q']], M, Q);
+    expect(Array.isArray(result) && Array.isArray(expected)).toBe(true);
+    const rows = result as number[][];
+    const expectedRows = expected as number[][];
+    expect(rows.map((row) => row.length)).toEqual(
+      expectedRows.map((row) => row.length)
+    );
+    rows.forEach((row, i) =>
+      row.forEach((x, j) => expect(x).toBeCloseTo(expectedRows[i][j], 14))
+    );
   });
 });
 

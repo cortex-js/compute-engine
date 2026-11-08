@@ -9,6 +9,7 @@ import {
 } from '../global-types.js';
 import { isSymbol, isNumber } from '../boxed-expression/type-guards.js';
 import { float64HoldsNumber } from '../boxed-expression/constraint-subject.js';
+import { BigDecimal } from '../../big-decimal/index.js';
 import { stripNumericRanges } from '../../common/type/utils.js';
 import { isComplexInfinityValue } from '../../common/type/types.js';
 
@@ -645,9 +646,10 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
         // float64 would lose precision, so it uses the `expression` dtype. An
         // inexact (machine/decimal) value uses float64.
         // An inexact value whose magnitude is outside the float64 range
-        // (a decimal such as `1e-400` from `.N()`) would also be lost in a
-        // float64 cell, so it uses the `expression` dtype too.
-        return expr.isExact || !float64HoldsNumber(expr)
+        // (a decimal such as `1e-400` from `.N()`), or a decimal with more
+        // digits than a double holds, would also be lost in a float64 cell,
+        // so it uses the `expression` dtype too (`float64HoldsDigits()`).
+        return expr.isExact || !float64HoldsDigits(expr)
           ? 'expression'
           : 'float64';
 
@@ -696,9 +698,11 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
         // An inexact value whose real part is outside the float64 range
         // (`1e400 + i` or `1e-400 + i` as a big decimal) would be lost in a
         // `complex128` cell, so it uses the `expression` dtype too, as for
-        // the real tiers. The imaginary part of a big decimal value is a
-        // machine number, so a float64 holds it.
-        return expr.isExact || !float64HoldsNumber(expr)
+        // the real tiers. So does a value with a part (real or imaginary)
+        // that a double does not hold for another reason: a big decimal with
+        // more digits than a double holds, or an imaginary part outside the
+        // float64 range (`float64HoldsDigits()` tests both parts).
+        return expr.isExact || !float64HoldsDigits(expr)
           ? 'expression'
           : 'complex128';
 
@@ -708,4 +712,63 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
   }
 
   return 'expression';
+}
+
+/**
+ * False when the number literal `x` is a float with a part (the real part,
+ * or the imaginary part of a complex value) that is a big decimal a double
+ * does not hold: one with more digits than a double holds, such as
+ * `0.123456789012345678901234567` made at precision 30, or one outside the
+ * range of a double. True for every other value, also a big decimal such as
+ * `0.5` that a double holds.
+ *
+ * A float64 cell would keep only about 16 of the digits of such a value, and
+ * every cell of the result would lose the others: at precision 30,
+ * `2·[0.123456789012345678901234567, 1.5]` was `[0.24691357802469136, 3]`,
+ * where the scalar product `2·0.123456789012345678901234567` is
+ * `0.246913578024691357802469134`. A tensor with such a cell uses the
+ * `expression` dtype, so the element-wise sums and products and the matrix
+ * product compute on the boxed values, as the scalar operations do.
+ *
+ * The test does not depend on the precision of the engine: a big decimal
+ * made at a higher precision keeps its digits when the engine is later set
+ * to machine precision, and the scalar operations compute with those digits.
+ *
+ * The range test of `float64HoldsNumber()` is included: a decimal outside
+ * the range of a double is not the decimal of a double.
+ *
+ * Tensor packing runs this test on every cell that is a float, so a machine
+ * number returns at once, and a big decimal is converted to a double only
+ * when its number of digits does not decide the answer (`doubleHolds()`).
+ */
+function float64HoldsDigits(x: Expression): boolean {
+  if (!isNumber(x) || x.isExact) return true;
+  const nv = x.numericValue;
+  if (typeof nv === 'number') return true;
+  return doubleHolds(nv.bignumRe) && doubleHolds(nv.bignumIm);
+}
+
+/**
+ * Is the decimal `d` the decimal of a double? True when `d` is `undefined`,
+ * not finite (a `NaN` or an infinity, which a double holds) or zero.
+ *
+ * A double converts to the shortest decimal that gives the same double back
+ * (`new BigDecimal(double)`), which has at most 17 significant digits. So a
+ * decimal with 18 digits or more is not the decimal of a double, and one
+ * with 15 digits or fewer is, when its magnitude is well inside the range of
+ * a double (about `5e-324` to `1.8e308`). Every other decimal is compared
+ * with its double.
+ */
+function doubleHolds(d: BigDecimal | undefined): boolean {
+  if (d === undefined || !d.isFinite() || d.isZero()) return true;
+  const digits = d._digitCount();
+  if (digits >= 18) return false;
+  // The magnitude of `d` is at least `10^exponent` and less than
+  // `10^(exponent + digits)`.
+  if (digits <= 15 && d.exponent > -300 && d.exponent + digits < 300)
+    return true;
+  const double = d.toNumber();
+  return (
+    Number.isFinite(double) && double !== 0 && d.eq(new BigDecimal(double))
+  );
 }

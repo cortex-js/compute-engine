@@ -234,8 +234,9 @@ describe('big-float broadcast: the values are the element-by-element values', ()
       JSON.stringify(long.ops![0].json).replace(/[^0-9]/g, '').length
     ).toBeGreaterThan(62);
     // A product with a symbol that holds the list is a broadcast over the
-    // elements. (A product with the list itself multiplies the doubles of a
-    // packed tensor, which do not hold these digits: CE-1048.)
+    // elements. (A product with the list itself takes a packed tensor, whose
+    // cells are the boxed elements when a double does not hold their digits,
+    // so it keeps these digits too.)
     ce.declare('B', { value: long });
     ce.declare('Ones', {
       value: ce.function(
