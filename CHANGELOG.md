@@ -156,6 +156,14 @@
 
 ### Resolved Issues
 
+- **The derivative of a list made by a spread or a join is computed.** The
+  derivative of `ListJoin` (the form of a list literal with a spread,
+  `[...a, b]`) is the `ListJoin` of the derivatives of its operands. With
+  `a = (u, u^2)` and `b = (u, u^3)`, `D(PointY(ListJoin(a, b)), u)` stayed
+  unevaluated; it is now `[2u, 3u^2]`. An operand that is a list, or an
+  expression whose value is a list, gives the derivatives of its elements.
+  A `ListJoin` with a set or a string operand still stays unevaluated.
+
 - **Above machine precision, a real number plus an imaginary number keeps
   every digit of the imaginary part.** At precision 30,
   `1+0.123456789012345678901234567i` was the complex number

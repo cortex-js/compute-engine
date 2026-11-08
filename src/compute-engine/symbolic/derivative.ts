@@ -2595,8 +2595,9 @@ function withZeroPoints(d: Expression, t: Type): Expression | undefined {
   // The derivative of a `Join` is the `Join` of the derivatives of its
   // operands. An operand that is a list contributes its elements, and is
   // repaired as a list of the type `t`; any other operand (a point) is one
-  // element, and is repaired as an element.
-  if (isFunction(d, 'Join')) {
+  // element, and is repaired as an element. The derivative of a `ListJoin`
+  // is read in the same way.
+  if (isFunction(d, 'Join') || isFunction(d, 'ListJoin')) {
     const ops: Expression[] = [];
     for (const op of d.ops) {
       const repaired = withZeroPoints(
@@ -2606,7 +2607,7 @@ function withZeroPoints(d: Expression, t: Type): Expression | undefined {
       if (repaired === undefined) return undefined;
       ops.push(repaired);
     }
-    return ce.function('Join', ops);
+    return ce.function(d.operator, ops);
   }
   return isSubtype(stripMissingFromType(element), 'number') ? d : undefined;
 }
@@ -2895,7 +2896,35 @@ function differentiateNode(
   // the `Join` would read it as one element, so the rule declines. Each
   // operand has its own size limit, as each element of a `List` has
   // (`withLimitPerElement()`).
-  if (expr.operator === 'Join' && expr.type.matches('list')) {
+  //
+  // `ListJoin`, the canonical form of a list literal with a spread
+  // (`[...a, 0]`), joins its operands in the same way, and its result is
+  // always a list: `d/du ListJoin((u, u²), [(u, u³)])` is
+  // `ListJoin((1, 2u), [(1, 3u²)])`. Its operand can also be a set (whose
+  // elements come in the iteration order of the set) or a string (whose
+  // characters are the elements). The derivative of a set does not keep
+  // the order or the number of its elements (`Set(u, u + 1)` has two
+  // elements, the derivatives `1` and `1` are one element of a set), so
+  // the derivative of a `ListJoin` declines unless each operand is a list,
+  // a tuple or a number. (The canonical form puts a scalar operand in a
+  // `List`, so only a `ListJoin` that is not canonical has a number
+  // operand.) It does not go on to the generic chain rule below,
+  // which reads `ListJoin` as an unknown function of its operands and gives
+  // a product of a point and an unknown partial derivative.
+  if (
+    expr.operator === 'ListJoin' &&
+    !expr.ops.every(
+      (op) =>
+        op.type.matches('list') ||
+        op.type.matches('tuple') ||
+        op.type.matches('number')
+    )
+  )
+    return undefined;
+  if (
+    (expr.operator === 'Join' && expr.type.matches('list')) ||
+    expr.operator === 'ListJoin'
+  ) {
     const parts = withLimitPerElement(expr.ops, (op) => {
       const d = withZeroOfShape(
         op,
@@ -2908,7 +2937,7 @@ function differentiateNode(
       return d;
     });
     if (parts === undefined) return undefined;
-    return ce.function('Join', parts);
+    return ce.function(expr.operator, parts);
   }
 
   // An accessor of a literal container selects one of its operands, so its
