@@ -4849,12 +4849,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
  * Expect an expression of the form ['Equal', index, lower] or
  * ['Equal', index, ['Range', lower, upper]]
  *
+ * The result has an `upper` only when the subscript item itself gives one
+ * (`i=1..10`, `1\le i\le 10`, `i\le 10`). `getIndexes()` gives an upper bound
+ * from the superscript to a range that has none.
+ *
  * `binderName` gives the name of the index from the expression read in the
  * index position (see `Parser.binderSymbol()`).
  */
 function getIndexAssignment(
   expr: MathJsonExpression | null,
-  upper: MathJsonExpression | undefined,
   binderName: (expr: MathJsonExpression | null | undefined) => string | null
 ):
   | {
@@ -4866,18 +4869,18 @@ function getIndexAssignment(
   | undefined {
   if (expr === null) return undefined;
   // We only have a symbol, e.g. `i`
-  if (binderName(expr)) return { index: binderName(expr) ?? 'Nothing', upper };
+  if (binderName(expr)) return { index: binderName(expr) ?? 'Nothing' };
 
   // A bare numeric subscript, e.g. `\sum_1^9`: a bounds pair with no index
   // symbol. Preserve it (`Limits(Nothing, 1, 9)`) rather than silently
   // dropping the bounds.
-  if (isNumberExpression(expr)) return { index: 'Nothing', lower: expr, upper };
+  if (isNumberExpression(expr)) return { index: 'Nothing', lower: expr };
 
   // We have `i>=1` in the subscript
   if (operator(expr) === 'GreaterEqual') {
     const index = binderName(operand(expr, 1)) ?? 'Nothing';
     const lower = operand(expr, 2) ?? 1;
-    return { index, lower, upper };
+    return { index, lower };
   }
 
   // We have a `\le` range in the subscript. The chained form
@@ -4899,7 +4902,7 @@ function getIndexAssignment(
       if (binderName(ops[0]))
         return { index: binderName(ops[0])!, lower: 1, upper: ops[1] };
       if (binderName(ops[1]))
-        return { index: binderName(ops[1])!, lower: ops[0], upper };
+        return { index: binderName(ops[1])!, lower: ops[0] };
     }
   }
 
@@ -4917,7 +4920,7 @@ function getIndexAssignment(
     }
     // We have i=1
     const lower = rhs ?? 1;
-    return { index, lower, upper };
+    return { index, lower };
   }
 
   // Handle Element expressions: ["Element", "n", "N"]
@@ -4977,10 +4980,10 @@ function isElementCondition(
   binderName: (expr: MathJsonExpression | null | undefined) => string | null
 ): boolean {
   if (isConditionExpression(expr)) return true;
-  // A bare number is a bound with no index (`\sum_{k\in S, 1}^{m, n}` keeps
+  // A bare number is a bound with no index (`\sum_{k\in S, 1}^{n}` keeps
   // `Limits(Nothing, 1, n)`), not a condition.
   if (isNumberExpression(expr)) return false;
-  const assignment = getIndexAssignment(expr, undefined, binderName);
+  const assignment = getIndexAssignment(expr, binderName);
   return (
     assignment === undefined ||
     assignment.index === 'Nothing' ||
@@ -5059,7 +5062,23 @@ function getIndexes(
   // `i=1..10, j=1..20`... or just `i=1, j=1` with an implied
   // infinite upper bound
 
-  // In both cases, we access sups[i], which may be undefined
+  // The superscript items are the upper bounds, in order, of the ranges
+  // whose subscript item gives no upper bound. A superscript item is not
+  // paired with the subscript item at the same position, because some
+  // subscript items take no upper bound: a clause `k\in S`, each condition
+  // of that clause, and a range that gives its own upper bound
+  // (`1\le i\le 10`). So in `\sum_{k\in S, k>1, j=1}^{3}` the `3` is the
+  // upper bound of `j`. The serializer of `Sum` and `Product`
+  // (`serializeBigOp()`) writes one superscript item for each clause that
+  // has an upper bound, and none for an `Element` clause, so this rule reads
+  // the LaTeX of `Element` clauses and of ranges with both bounds back as
+  // the same sum. It does not do so for a range with no upper bound that
+  // comes before a range with one: the serializer writes no superscript
+  // item for the first, so `Limits(i, 1, Nothing), Limits(j, 1, 3)` is
+  // written `_{i=1, j=1}^{3}`, and the `3` is read as the upper bound of
+  // `i`. A superscript item that is left after the last range with no upper
+  // bound is not used.
+  let nextSup = 0;
 
   // EL-3: Process subscripts, attaching conditions to preceding Element expressions
   const results: {
@@ -5072,9 +5091,16 @@ function getIndexes(
   let i = 0;
   while (i < subs.length) {
     const subExpr = subs[i];
-    const assignment = getIndexAssignment(subExpr, sups[i], binderName);
+    const assignment = getIndexAssignment(subExpr, binderName);
 
     if (assignment) {
+      if (
+        !assignment.element &&
+        assignment.upper === undefined &&
+        nextSup < sups.length
+      )
+        assignment.upper = sups[nextSup++];
+
       // The items that follow an `Element` clause are its conditions, not
       // new indexing sets, while `isElementCondition()` says so. For
       // example, `n\ge 2` after `n\in S` is a condition, while a standalone

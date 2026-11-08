@@ -127,13 +127,15 @@ describe('SUM parsing', () => {
     );
   });
 
-  test('INVALID mix of range and equation', () => {
+  // The range `n=0..10` gives its own upper bound, so it takes no
+  // superscript item, and the `2` is the upper bound of `m`.
+  test('mix of a range and an equation with a superscript', () => {
     expect(ce.parse(`\\sum_{n=0..10, m=1}^{2}(n+m)`)).toMatchInlineSnapshot(`
       [
         "Sum",
         ["Add", "m", "n"],
         ["Limits", "n", 0, 10],
-        ["Limits", "m", 1, "Nothing"]
+        ["Limits", "m", 1, 2]
       ]
     `);
   });
@@ -629,9 +631,10 @@ describe('LaTeX round trip of a condition in an Element clause', () => {
   });
 
   // A bare number after the clause is a bound with no index, not a
-  // condition.
+  // condition. The superscript is its upper bound: the clause `k\in S`
+  // takes none.
   test('a number after the clause stays a bound with no index', () => {
-    expect(ce.parse('\\sum_{k\\in S, 1}^{m, n} k').json).toEqual([
+    expect(ce.parse('\\sum_{k\\in S, 1}^{n} k').json).toEqual([
       'Sum',
       'k',
       ['Element', 'k', 'S'],
@@ -737,6 +740,128 @@ describe('two or more conditions after an Element clause', () => {
       'k',
       ['Element', 'k', 'S', ['And', ['Less', 1, 'k'], ['Less', 'k', 5]]],
       ['Limits', 'Nothing', 1, 'Nothing'],
+    ]);
+  });
+});
+
+// The superscript items are the upper bounds, in order, of the ranges whose
+// subscript item gives no upper bound. A clause `k\in S` and its conditions
+// take no superscript item, so in `\sum_{k\in S, j=1}^{3}` the `3` is the
+// upper bound of `j`. A pairing by position would give the `3` to the clause
+// `k\in S`, and the sum would have no value.
+describe('upper bounds of a sum over a set and a range', () => {
+  test('the range after an Element clause keeps its upper bound', () => {
+    const expr = ce.expr([
+      'Sum',
+      ['Multiply', 'k', 'j'],
+      ['Element', 'k', ['Set', 1, 2, 3]],
+      ['Tuple', 'j', 1, 3],
+    ]);
+    expect(expr.latex).toMatchInlineSnapshot(
+      `\\sum_{k\\in \\lbrace1, 2, 3\\rbrace, j=1}^3jk`
+    );
+    expect(expr.evaluate().json).toBe(36);
+    const reparsed = ce.parse(expr.latex);
+    expect(reparsed.json).toEqual([
+      'Sum',
+      ['Multiply', 'j', 'k'],
+      ['Element', 'k', ['Set', 1, 2, 3]],
+      ['Limits', 'j', 1, 3],
+    ]);
+    expect(reparsed.isSame(expr)).toBe(true);
+    expect(reparsed.evaluate().json).toBe(36);
+  });
+
+  test('the condition of the clause takes no upper bound', () => {
+    const expr = ce.expr([
+      'Sum',
+      ['Multiply', 'k', 'j'],
+      ['Element', 'k', ['Set', 1, 2, 3], ['Greater', 'k', 1]],
+      ['Tuple', 'j', 1, 3],
+    ]);
+    expect(expr.latex).toMatchInlineSnapshot(
+      `\\sum_{k\\in \\lbrace1, 2, 3\\rbrace, 1\\lt k, j=1}^3jk`
+    );
+    expect(expr.evaluate().json).toBe(30);
+    const reparsed = ce.parse(expr.latex);
+    expect(reparsed.isSame(expr)).toBe(true);
+    expect(reparsed.evaluate().json).toBe(30);
+  });
+
+  test('ranges and Element clauses in any order', () => {
+    expect(
+      ce.parse(
+        '\\sum_{k\\in \\lbrace1,2\\rbrace, j=1, m\\in\\lbrace1,2\\rbrace, l=1}^{2, 3} jklm'
+      ).json
+    ).toEqual([
+      'Sum',
+      ['Multiply', 'j', 'k', 'l', 'm'],
+      ['Element', 'k', ['Set', 1, 2]],
+      ['Limits', 'j', 1, 2],
+      ['Element', 'm', ['Set', 1, 2]],
+      ['Limits', 'l', 1, 3],
+    ]);
+    // The range first: it takes the superscript item, and the clause none.
+    expect(
+      ce.parse('\\sum_{j=1, k\\in \\lbrace1,2,3\\rbrace}^{3} jk').json
+    ).toEqual([
+      'Sum',
+      ['Multiply', 'j', 'k'],
+      ['Limits', 'j', 1, 3],
+      ['Element', 'k', ['Set', 1, 2, 3]],
+    ]);
+  });
+
+  test('a product over a set and a range', () => {
+    const expr = ce.parse('\\prod_{k\\in \\lbrace1,2\\rbrace, j=1}^{3} (j+k)');
+    expect(expr.json).toEqual([
+      'Product',
+      ['Add', 'j', 'k'],
+      ['Element', 'k', ['Set', 1, 2]],
+      ['Limits', 'j', 1, 3],
+    ]);
+    expect(expr.evaluate().json).toBe(1440);
+  });
+
+  // A range that gives its upper bound in the subscript takes no superscript
+  // item, so the superscript is the upper bound of the next range.
+  test('a range with its own upper bound takes no superscript item', () => {
+    for (const latex of [
+      '\\sum_{1\\le i\\le 3, j=1}^{2} ij',
+      '\\sum_{i=1..3, j=1}^{2} ij',
+      '\\sum_{i\\le 3, j=1}^{2} ij',
+    ]) {
+      const expr = ce.parse(latex);
+      expect(expr.json).toEqual([
+        'Sum',
+        ['Multiply', 'i', 'j'],
+        ['Limits', 'i', 1, 3],
+        ['Limits', 'j', 1, 2],
+      ]);
+      expect(expr.evaluate().json).toBe(18);
+    }
+  });
+
+  test('two ranges and two upper bounds pair in order', () => {
+    expect(ce.parse('\\sum_{i=1, j=1}^{10, 20} ij').json).toEqual([
+      'Sum',
+      ['Multiply', 'i', 'j'],
+      ['Limits', 'i', 1, 10],
+      ['Limits', 'j', 1, 20],
+    ]);
+  });
+
+  // An upper bound with no range to take it is not used.
+  test('a superscript item with no range is not used', () => {
+    expect(ce.parse('\\sum_{k\\in \\lbrace1,2\\rbrace}^{3} k').json).toEqual([
+      'Sum',
+      'k',
+      ['Element', 'k', ['Set', 1, 2]],
+    ]);
+    expect(ce.parse('\\sum_{i=1}^{3, 4} i').json).toEqual([
+      'Sum',
+      'i',
+      ['Limits', 'i', 1, 3],
     ]);
   });
 });

@@ -56,6 +56,16 @@
 
 ### Resolved Issues
 
+- **A sum or product over a set and a range keeps the upper bound of the
+  range.** `\sum_{k\in \lbrace1,2,3\rbrace, j=1}^{3} jk` was parsed with no
+  upper bound for `j`, so it had no value; it now gives `36`. The LaTeX of
+  `["Sum", ["Multiply", "k", "j"], ["Element", "k", ["Set", 1, 2, 3]],
+  ["Limits", "j", 1, 3]]` is that LaTeX, so it now parses back to the same
+  sum. The items of the superscript are the upper bounds, in order, of the
+  ranges that have none in the subscript: a clause `k\in S`, its conditions
+  and a range such as `n=0..10` or `1\le n\le 10` take none. So
+  `\sum_{n=0..10, m=1}^{2}(n+m)` now gives `m` the upper bound `2`, where it
+  had none before.
 - **Two integral signs with both differentials in the numerator of a
   fraction give the right value when a term is before the inner integral.**
   `\int_1^2 1+\int_3^4 \frac{dx\,dy}{xy}` was parsed with no variable for
