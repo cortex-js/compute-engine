@@ -1,7 +1,48 @@
 ## [Unreleased]
 
+### New Features
+
+- **A `parallel for` loop compiles to a WebGPU compute shader.**
+  `WGSLTarget.compileKernel(expr, options)` takes a `parallel for` loop
+  (`ParallelLoop`) or a parallel comprehension (`ParallelComprehension`) over
+  an integer range `a..b` and gives a WGSL module whose compute entry point
+  runs one pass in each invocation. A variable that the body changes with
+  `+=` is an accumulator, a `read_write` storage buffer of `atomic<i32>` (an
+  `integer`, or a `list<integer>` with the `len` header and the index rules
+  of a storage-buffer list), so the result does not depend on the order of
+  the passes. A list that the body reads takes a `'storage-buffer'` hint in
+  `options.storage`; a scalar or a point is a field of one uniform struct, as
+  in `compileFieldFunction()`. The result gives the module, the bindings,
+  the range of the loop (an integer literal or the name of a parameter, so
+  that the host counts the invocations) and the parameter layout; the host
+  makes the buffers, dispatches and reads back. A parallel comprehension
+  writes each element to a result buffer. A pass that reads an accumulator,
+  draws a random value or leaves the loop with `return`, a bound that is not
+  an integer literal or an integer parameter, an accumulator that is not an
+  integer or a list of integers, and a list the body reads with no storage
+  hint decline, with a diagnostic that names the reason.
+
+### Improvements
+
+- **A shader loop reads a bound at run time.** On the `glsl` and `wgsl`
+  targets, a `for` loop over `1..e`, where `e` is a local of the function or
+  an input of the shader, reads `e` into an integer temporary before the
+  loop. Before, it declined: "the bounds of the `Range` must be numbers
+  known at compile time". A bound read at run time must have the static
+  type `integer`.
+- **On the shader targets, an else-less `if` whose branch holds a `for`
+  loop is an `if` statement.** `if e > 0 { for m in 1..e { … } }` compiles to
+  `glsl` and `wgsl`; before, it declined with "Could not compile `If`: wrong
+  number of arguments".
+
 ### Resolved Issues
 
+- **A shader loop whose bound is a local assigned after its declaration ran
+  the number of turns of the declaration.** On the `glsl` and `wgsl`
+  targets, `let e = 0; for m in 1..5 { if m > 2 { e = m; break } }; for j in
+  1..e { s = s + j }` gave `s = 3`: the second loop ran to the value that the
+  compiler read from the declaration of `e`. It now reads `e` at run time and
+  gives `6`, the value of the interpreter.
 - **A loop that writes to the elements of a large list no longer exceeds the
   call stack.** In Epsil, a loop such as
   `for k in 1..5000 { xs[k % 200 + 1] = xs[k % 200 + 1] + 1 }` over a list of

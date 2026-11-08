@@ -313,11 +313,13 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     // The interpreter evaluates the `Range` of an inner clause again each
     // time the outer loop enters it, so a write in the body to a bound
     // changes the next inner loop: with `N := 2` the inner loop runs 2
-    // times, then 4 times, and `s` is 6. The bound of a shader loop is read
-    // once, at compile time. A body that writes `N` declines: a symbol with
-    // a value is written in place in the shader, so the write cannot be
-    // compiled, and a block local has no value at compile time.
-    it('should decline a multi-clause Loop whose body writes an inner bound', () => {
+    // times, then 4 times, and `s` is 6. A body that writes `N`, a symbol
+    // with a value, declines: the value is written in place in the shader,
+    // so the write cannot be compiled. A block local `M` is read at run
+    // time, into a temporary declared before the `for` statement of the
+    // inner clause, inside the outer loop, so each entry of the inner loop
+    // reads the value of that moment, as the interpreter does.
+    it('declines a multi-clause Loop whose body writes an inner bound with a value, and reads a local bound at each entry', () => {
       const engine = new ComputeEngine();
       const loop = (bound: string) => [
         'Loop',
@@ -348,8 +350,16 @@ describe('GLSL COMPILATION — structures and control flow', () => {
         expect(() => target.compile(assigned)).toThrow(
           /Could not compile `Assign`: "N" has an assigned value/
         );
-        expect(() => target.compile(local)).toThrow(
-          /bounds of the `Range` must be numbers known at compile time/
+        const code = target.compile(local).code ?? '';
+        const read =
+          target === glsl ? 'int _tv1 = int(M);' : 'let _tv1: i32 = i32(M);';
+        // The read of `M` is inside the outer loop, before the inner one.
+        expect(code).toContain(
+          `${target === glsl ? 'for (int i = 1; i <= 2; i++) {' : 'for (var i: i32 = 1; i <= 2; i++) {'}\n  ${read}\n  ${
+            target === glsl
+              ? 'for (int j = 1; j <= _tv1; j++) {'
+              : 'for (var j: i32 = 1; j <= _tv1; j++) {'
+          }`
         );
       }
     });

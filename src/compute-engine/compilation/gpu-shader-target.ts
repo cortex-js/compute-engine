@@ -682,6 +682,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       target.hostInputVars = extension.hostInputVars;
       if (extension.onReturn !== undefined)
         target.onReturn = extension.onReturn;
+      if (extension.kernel !== undefined) target.kernel = extension.kernel;
     }
     // The body of each user-defined function is a shader function of its
     // own, with its own common-subexpression pass, or is substituted at a

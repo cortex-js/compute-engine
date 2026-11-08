@@ -590,7 +590,7 @@ export const GPU_SUPPORTED_MODES: readonly CompileMode[] = ['strict'];
  */
 export type GPUTargetExtension = Pick<
   CompileTarget<Expression>,
-  'storage' | 'storageRead' | 'hostInputVars' | 'onReturn'
+  'storage' | 'storageRead' | 'hostInputVars' | 'onReturn' | 'kernel'
 >;
 
 /**

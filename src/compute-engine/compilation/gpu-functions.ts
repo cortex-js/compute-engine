@@ -141,6 +141,7 @@ import {
   gpuStorageOperandSource,
   gpuWGSLInPlaceArray,
 } from './gpu-at.js';
+import { numericLiteralSource } from './compiler-type-facts.js';
 import { targetFoldValueImpure } from './compile-folding.js';
 import {
   gpuArmDrawsWhileBinding,
@@ -3772,6 +3773,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // The compiled guard of each clause, or `undefined` for a clause with
     // no guard.
     const tests: (string | undefined)[] = [];
+    // For each clause, the statements that read a bound at run time, placed
+    // before the `for` statement of the clause: inside the loops of the
+    // clauses before it, so that a bound is read each time the loop of its
+    // clause starts, as the interpreter evaluates the `Range` of an inner
+    // clause each time the outer loop enters it (a body that writes the
+    // bound changes the next inner loop).
+    const prologues: string[][] = [];
     for (const indexing of clauses) {
       if (!isFunction(indexing, 'Element'))
         throw new Error(
@@ -3797,40 +3805,81 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
           `Could not compile \`Loop\` on this target: two Element clauses use the same index \`${index}\``
         );
       // A bound or a step that reads an outer index (`Element(j, Range(1,
-      // i))`) changes on each turn of the outer loop, but the bounds below
-      // are read at compile time, from the value of the symbol outside the
-      // loop. Decline it.
+      // i))`) is compiled outside the scope that declares the index, where
+      // the name is an input of the shader. Decline it.
       const outer = indices.find((name) => rangeExpr.has(name));
       if (outer !== undefined)
         throw new Error(
-          `Could not compile \`Loop\` on this target: the \`Range\` of the index \`${index}\` reads the outer index \`${outer}\`, and the bounds of a shader loop must be known at compile time`
+          `Could not compile \`Loop\` on this target: the \`Range\` of the index \`${index}\` reads the outer index \`${outer}\`, and the bounds of a shader loop do not read an index`
         );
 
-      // A shader loop needs its bounds and its step at compile time. A number
-      // literal, or a symbol whose value is known when the shader is compiled
-      // (`Range(1, N)` with `N := 4`), gives a finite value through `.re`, and
-      // the JavaScript target folds such a value the same way. The JavaScript
-      // target also reads a symbolic bound with no value (`Range(1, n)`) at run
-      // time, but a shader has no such lowering, so the decline names the
-      // requirement. A number literal that is not finite (`Range(1, +oo)`) is
-      // declined below with its own message.
-      const lowerValue = rangeExpr.ops[0].re;
-      const upperValue = rangeExpr.ops[1].re;
-      if (
-        (!Number.isFinite(lowerValue) && !isNumber(rangeExpr.ops[0])) ||
-        (!Number.isFinite(upperValue) && !isNumber(rangeExpr.ops[1]))
-      )
-        throw new Error(
-          'Could not compile `Loop` on this target: the bounds of the `Range` must be numbers known at compile time (a number literal, or a symbol with a value)'
+      // A number literal, or a symbol of the engine whose value is known
+      // when the shader is compiled (`Range(1, N)` with `N := 4`), gives a
+      // finite value through `.re`, which is written in the `for`
+      // statement; the JavaScript target folds such a value the same way.
+      // Any other bound (`Range(1, e)` with `e` a local of the function, or
+      // `Range(1, n)` with `n` an input of the shader) is compiled as code
+      // and read into an integer temporary before the `for` statement of
+      // its clause, so that the number of turns follows its value at run
+      // time, as on the JavaScript target. The value of a local is never
+      // read from the expression: a local declared with a value and
+      // assigned later (`let e = 0; …; e = m`) would give the value of its
+      // declaration, and the loop would run the wrong number of turns. A
+      // run-time bound must have the static type `integer`: the counter is
+      // a shader integer, and the integer conversion of a run-time value
+      // rounds toward zero, so a non-integer bound would not follow the
+      // rounding of the `Range` of the interpreter. A number literal that is
+      // not finite (`Range(1, +oo)`) is declined with its own message.
+      const prologue: string[] = [];
+      prologues.push(prologue);
+      const bound = (which: 0 | 1): string => {
+        const b = rangeExpr.ops[which];
+        // A symbol that `vars` maps to an input of the shader is read from
+        // that input, as everywhere else in the code, never from a value
+        // stored in the engine.
+        if (
+          isNumber(b) ||
+          (isSymbol(b) &&
+            !gpuIsBoundName(b.symbol, target) &&
+            target.varsKeys?.has(b.symbol) !== true)
+        ) {
+          const value = b.re;
+          if (Number.isFinite(value)) return `${Math.floor(value)}`;
+          if (isNumber(b))
+            throw new Error(
+              'Could not compile `Loop`: bounds must be finite numbers'
+            );
+        }
+        // The bound compiles with a statement sink of its own, so that a
+        // statement it hoists (a loop-form `Sum`, a temporary) goes into
+        // the prologue of its clause, and runs each time the loop of the
+        // clause starts, not once ahead of the whole loop.
+        const lines = BaseCompiler.compileListStatement(target, b, (t) => [
+          BaseCompiler.compile(b, t),
+        ]);
+        const code = lines.pop()!;
+        const folded = numericLiteralSource(code);
+        if (folded !== undefined && Number.isFinite(folded) && lines.length === 0)
+          return `${Math.floor(folded)}`;
+        if (!b.type.matches('integer'))
+          throw new Error(
+            `Could not compile \`Loop\` on this target: the ${which === 0 ? 'lower' : 'upper'} bound \`${b.toString()}\` of the \`Range\` of the index \`${index}\` is read at run time, so it must have the static type \`integer\` (it has the type \`${b.type.toString()}\`)`
+          );
+        if (code.includes('\n'))
+          throw new Error(
+            `Could not compile \`Loop\` on this target: the ${which === 0 ? 'lower' : 'upper'} bound \`${b.toString()}\` of the \`Range\` of the index \`${index}\` compiles to statements, which the read of a bound cannot hold`
+          );
+        const name = BaseCompiler.tempVar(target);
+        prologue.push(
+          ...lines.map((line) => (/[;}]\s*$/.test(line) ? line : `${line};`)),
+          isWGSL
+            ? `let ${name}: i32 = i32(${code});`
+            : `int ${name} = int(${code});`
         );
-
-      const lower = Math.floor(lowerValue);
-      const upper = Math.floor(upperValue);
-
-      if (!Number.isFinite(lower) || !Number.isFinite(upper))
-        throw new Error(
-          'Could not compile `Loop`: bounds must be finite numbers'
-        );
+        return name;
+      };
+      const lower = bound(0);
+      const upper = bound(1);
 
       // The step of the range. The JavaScript target advances the counter by
       // it (`Range(1, 10, 3)` visits 1, 4, 7 and 10); the shader loop visited
@@ -3920,6 +3969,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const test = tests[k];
       if (test !== undefined) code = `if (${test}) {\n${indent(code)}\n}`;
       code = `${headers[k]}\n${indent(code)}\n}`;
+      const prologue = prologues[k];
+      if (prologue.length > 0) code = `${prologue.join('\n')}\n${code}`;
     }
     return code;
   },

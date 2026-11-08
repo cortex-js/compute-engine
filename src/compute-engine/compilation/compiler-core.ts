@@ -4318,6 +4318,23 @@ function compileExprStatementHead(
     return h === 'Break' ? 'break' : 'continue';
   }
 
+  // In a compute-shader kernel (`WGSLTarget.compileKernel()`), the parallel
+  // loop or comprehension is the pass that each invocation runs, and `+=`
+  // adds to an accumulator buffer (`CompileTarget.kernel`).
+  if (
+    target.kernel !== undefined &&
+    (h === 'ParallelLoop' || h === 'ParallelComprehension' || h === 'AddTo') &&
+    (node === undefined || isLibraryOperator(node, h))
+  ) {
+    if (h === 'AddTo')
+      return target.kernel.compileAddTo(
+        args,
+        (expr) => compileValueOperand(expr, target),
+        target
+      );
+    return target.kernel.compilePass(args, target);
+  }
+
   // The `parallel for` heads and `+=` reach this point on every target but
   // JavaScript, which lowers them first (`lowerParallelHeads()`,
   // `parallel-lowering.ts`). Each pass of a parallel loop draws from its own
@@ -4737,20 +4754,32 @@ export function shaderSelectionStatement(
   // The operators in the operands, outside a function literal. An expression
   // is a graph with shared nodes, so each node is visited once: a walk of the
   // tree takes time exponential in the depth of a tower of shared operands.
+  // A `Break` or a `Continue` inside a `Loop` of a branch leaves that loop,
+  // not a loop around the selection, so it is not recorded; the `Loop` is.
+  // A branch that holds a loop, or a `+=` of a compute-shader kernel
+  // (`AddTo`, an atomic addition), takes the statement form, as a branch
+  // that assigns does: `if e > 0 { for m in 1..e { … } }` and
+  // `if e <= 50 { L[c] += 1 }` are statements.
   const heads = new Set<string>();
   const visited = new Set<Expression>();
-  const pending = [...ops];
+  const pending: Array<[Expression, boolean]> = ops.map((op) => [op, false]);
   while (pending.length > 0) {
-    const e = pending.pop()!;
+    const [e, inLoop] = pending.pop()!;
     if (!isFunction(e) || e.operator === 'Function' || visited.has(e)) continue;
     visited.add(e);
-    heads.add(e.operator);
-    pending.push(...e.ops);
+    const jump = e.operator === 'Break' || e.operator === 'Continue';
+    if (!jump || !inLoop) heads.add(e.operator);
+    const loop = inLoop || e.operator === 'Loop';
+    pending.push(...e.ops.map((op): [Expression, boolean] => [op, loop]));
   }
   if (heads.has('Return')) return undefined;
   if (heads.has('Break') || heads.has('Continue')) {
     if (!admitsJumps) return undefined;
-  } else if (ternary || !heads.has('Assign')) return undefined;
+  } else if (
+    ternary ||
+    !(heads.has('Assign') || heads.has('AddTo') || heads.has('Loop'))
+  )
+    return undefined;
   for (const [c] of clauses) {
     if (c < 0) continue;
     assertScalarCondition(ops[c]);

@@ -1007,7 +1007,12 @@ function operandUse(
   const h = node.operator;
   const last = i === node.nops - 1;
   if (h === 'Block') return last ? 'end' : 'statement';
-  if (h === 'Loop') return i === 0 ? 'statement' : 'value';
+  // The body of a `ParallelLoop` is a statement list, as the body of a
+  // `Loop`: a compute-shader kernel compiles the node itself
+  // (`WGSLTarget.compileKernel()`), and the JavaScript target lowers it to
+  // a `Loop` before this check.
+  if (h === 'Loop' || h === 'ParallelLoop')
+    return i === 0 ? 'statement' : 'value';
   if (h === 'If')
     return i > 0 && hasScalarCondition(node.ops[0]) ? 'end' : 'value';
   if (h === 'Which')

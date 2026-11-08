@@ -3,6 +3,8 @@ import type {
   CompiledFunctions,
   FieldFunctionOptions,
   FieldFunctionResult,
+  KernelOptions,
+  KernelResult,
 } from './types.js';
 import {
   GPUShaderTarget,
@@ -22,6 +24,7 @@ import { tryGetConstant } from './constant-folding.js';
 import { gpuAmplifiedTrigMod } from './gpu-exact-trig.js';
 import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
 import { compileWGSLFieldFunction } from './wgsl-field-function.js';
+import { compileWGSLKernel } from './wgsl-kernel.js';
 
 /**
  * WGSL-specific function overrides.
@@ -472,6 +475,69 @@ export class WGSLTarget extends GPUShaderTarget {
         emittedUserFunctionNames: () => this.emittedUserFunctionNames(),
         assertBodyShape: (e) =>
           wgslAssertFunctionBodyShape('compileFieldFunction()', e),
+      },
+      expr,
+      options
+    );
+  }
+
+  /**
+   * Compile `expr`, an Epsil `parallel for` loop (`ParallelLoop`) or a
+   * parallel comprehension (`ParallelComprehension`) over an integer range
+   * `a..b`, to a WGSL compute shader that runs one pass in each invocation.
+   * Invocation `i` runs the pass `k = a + i` and does nothing when `k > b`.
+   *
+   * Each free symbol of the expression is an input of the kernel:
+   *
+   * - a symbol that the body changes with `+=` is an accumulator, a
+   *   `var<storage, read_write>` of `atomic<i32>`: a list of integers
+   *   (`CE_List_atomic_i32`, a `len: u32` header and the elements, which
+   *   the index rules of `At` address; an index that is not a position of
+   *   the list writes nothing, where the interpreter gives the error
+   *   `out-of-range`) or one integer. Each `+=` is an `atomicAdd`, so the
+   *   counts do not depend on the order of the passes. The host sizes the
+   *   buffer, writes its `len` and its initial values, and reads it back
+   *   after the dispatch.
+   * - a list that the body only reads needs a `'storage-buffer'` hint in
+   *   `options.storage`, declared and read as in `compile()`;
+   * - a scalar or a point is a field of one uniform struct
+   *   (`paramsStruct`, `paramsVariable`), as in `compileFieldFunction()`.
+   *   A real or integer scalar is an `f32`.
+   *
+   * A bound of the range is an integer literal, a symbol with an integer
+   * value, or a scalar parameter declared `integer`, and `range` of the
+   * result gives its value or the name of the parameter, so that the host
+   * counts the invocations, `max(0, upper − lower + 1)`, and dispatches
+   * `⌈invocations / workgroupSize⌉` workgroups. A parallel comprehension
+   * writes element `k − a` of the result buffer (`resultVariable`, a
+   * `CE_List_f32` or `CE_List_vecNf` with the layout of a storage-buffer
+   * list) in the pass `k`; the host sizes it and writes its `len`.
+   *
+   * The result is the whole module (`code`), the entry point, the
+   * bindings (group, binding, kind, type, layout), the range and the
+   * parameter struct. It is `success: false` with a `diagnostic` when the
+   * body declines in `compile(expr, { to: 'wgsl' })` (with the same
+   * diagnostic), and when the kernel cannot run the loop: a domain that is
+   * not a range with such bounds, a step, a second clause, a guard on a
+   * comprehension, an accumulator that is not an `integer` or a
+   * `list<integer>`, a `+=` of a non-integer amount, a read of an
+   * accumulator in a pass (its value during the loop is not defined), a
+   * pass that draws a random value (each pass has its own frame in the
+   * interpreter, which the shader does not derive), a `Return` that leaves
+   * the pass, a list the passes read with no storage hint, or an element of
+   * a comprehension that is not a real scalar or a point. An option that is
+   * not a WGSL identifier, or that is a reserved word or a predeclared
+   * function or type of WGSL, throws, as does a `workgroupSize` outside 1
+   * to 256.
+   */
+  compileKernel(expr: Expression, options?: KernelOptions): KernelResult {
+    return compileWGSLKernel(
+      {
+        compile: (e, o) => this.compile(e, o),
+        createTarget: () => this.createTarget(),
+        withTargetExtension: (extension, fn) =>
+          this.withTargetExtension(extension, fn),
+        preambleFor: (code) => this.preambleFor(code),
       },
       expr,
       options

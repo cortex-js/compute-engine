@@ -295,6 +295,128 @@ export type FieldFunctionResult = {
 };
 
 /**
+ * The hooks that `WGSLTarget.compileKernel()` gives the compilation of a
+ * kernel (`CompileTarget.kernel`). Each returns WGSL source: `compilePass`
+ * the statements of one pass, on several lines, and `compileAddTo` the
+ * atomic addition of one `+=`, one statement. `compile` compiles an operand
+ * of the `AddTo` as a value.
+ */
+export type KernelHooks<Expr> = {
+  compilePass(args: ReadonlyArray<Expr>, target: CompileTarget<Expr>): string;
+  compileAddTo(
+    args: ReadonlyArray<Expr>,
+    compile: (expr: Expr) => string,
+    target: CompileTarget<Expr>
+  ): string;
+};
+
+/**
+ * The options of `WGSLTarget.compileKernel()`.
+ *
+ * The kernel is a compute shader that runs one pass of a `parallel for`
+ * loop (`ParallelLoop`) or of a parallel comprehension
+ * (`ParallelComprehension`) in each invocation. Each free symbol of the
+ * expression is an input of the kernel: a symbol that the body changes with
+ * `+=` is an accumulator, a `read_write` storage buffer of `atomic<i32>`; a
+ * list that the body reads needs a `'storage-buffer'` hint in `storage`; a
+ * scalar or a point is a field of one uniform struct, as in
+ * `WGSLTarget.compileFieldFunction()`.
+ */
+export type KernelOptions = {
+  /** The name of the compute entry point. Default `'main'`. */
+  name?: string;
+  /** The number of invocations of one workgroup, from 1 to 256. Default
+   * 64. The host dispatches `⌈invocations / workgroupSize⌉` workgroups. */
+  workgroupSize?: number;
+  /** The bind group of the declarations of the kernel. Default 0. */
+  group?: number;
+  /** The name of the parameter struct type. Default `'CEParams'`. */
+  paramsStruct?: string;
+  /** The name of the uniform variable that holds the parameters. Default
+   * `'ce_params'`. */
+  paramsVariable?: string;
+  /** The name of the storage buffer that receives the elements of a
+   * parallel comprehension. Default `'ce_result'`. */
+  resultVariable?: string;
+  /** The storage hints of `compile()` (`CompilationOptions.storage`) for
+   * the lists that the body reads: each a `'storage-buffer'` hint, at a
+   * group and a binding that the host chooses. */
+  storage?: Readonly<Record<MathJsonSymbol, StorageHint>>;
+  /** See `CompilationOptions.constantFold`. */
+  constantFold?: boolean;
+};
+
+/** One resource that a kernel of `WGSLTarget.compileKernel()` binds. */
+export type KernelBinding = {
+  /** `'parameters'`: the uniform struct of the scalar and point parameters;
+   * `'accumulator'`: a storage buffer that the passes add to with `+=`;
+   * `'list'`: the storage buffer of a `storage` hint that the passes read;
+   * `'result'`: the storage buffer that receives the elements of a parallel
+   * comprehension. */
+  kind: 'parameters' | 'accumulator' | 'list' | 'result';
+  /** The engine symbol of an accumulator or a list; `paramsVariable` for
+   * the parameters and `resultVariable` for the result. */
+  symbol: string;
+  /** The WGSL name of the variable. */
+  name: string;
+  group: number;
+  binding: number;
+  /** The WGSL type of the variable: the parameter struct, `atomic<i32>` for
+   * an integer accumulator, `CE_List_atomic_i32` for a list accumulator,
+   * `CE_List_f32` or `CE_List_vecNf` for a list or for the result. */
+  wgslType: string;
+  /** The type of the symbol in the compute engine, as `toString()` writes
+   * it (`list<integer^90001>`). Absent for the parameters. */
+  ceType?: string;
+  /** For a list (an accumulator of a list, a list, the result): the byte
+   * offset of the first element, after the `len: u32` header at byte 0,
+   * and the bytes from one element to the next. An integer accumulator is
+   * one `i32` at byte 0, and has neither. */
+  dataOffset?: number;
+  stride?: number;
+  /** For an accumulator whose list type gives a length
+   * (`list<integer^n>`), that length. */
+  length?: number;
+  /** The smallest buffer size, in bytes, that WebGPU accepts for the
+   * binding. */
+  minBindingSize: number;
+};
+
+/** The result of `WGSLTarget.compileKernel()`. */
+export type KernelResult = {
+  /** `false` when the compilation declined. The other fields are then
+   * empty, and `diagnostic` gives the reason. */
+  success: boolean;
+  /** The reason of a decline, as `CompilationResult.diagnostic`. */
+  diagnostic?: CompileDiagnostic;
+  /** Warnings about a successful compilation, as
+   * `CompilationResult.warnings`. */
+  warnings?: CompileDiagnostic[];
+  /** The WGSL module: the declarations of the bindings, the helpers and the
+   * compute entry point. */
+  code: string;
+  /** The name of the compute entry point. */
+  entryPoint: string;
+  workgroupSize: number;
+  /** Every resource that the module declares. */
+  bindings: KernelBinding[];
+  /** The bounds of the range of the loop: a number, or the name of a
+   * parameter of `params` whose value the host reads. Invocation `i` runs
+   * the pass `k = lower + i`, and does nothing when `k > upper`, so the
+   * number of invocations is `max(0, upper − lower + 1)`. */
+  range: { lower: number | string; upper: number | string };
+  /** The fields of the parameter struct, in struct order, as
+   * `FieldFunctionResult.params`. A real or integer scalar is an `f32`. */
+  params: FieldFunctionParameter[];
+  /** The number of bytes of the parameter buffer: a multiple of 16, and 0
+   * when there is no parameter. */
+  paramsSize: number;
+  /** The WGSL declaration of the parameter struct type, or `''` when the
+   * kernel has no parameter. It is also in `code`. */
+  paramsStructSource: string;
+};
+
+/**
  * Which of the two kinds of compile decline a diagnostic reports:
  *
  * - `'capability'` — a compilable thing that this target or mode cannot
@@ -1034,6 +1156,16 @@ export interface CompileTarget<Expr = unknown> {
    * type, so a `Return` of any shape is valid there.
    */
   onReturn?: (value: Expr | undefined) => void;
+
+  /**
+   * The hooks of a compute-shader kernel (`WGSLTarget.compileKernel()`).
+   * `compilePass` writes the statements of one pass of the `ParallelLoop`
+   * or `ParallelComprehension` that is the kernel, and `compileAddTo`
+   * writes the `+=` of an accumulator (`AddTo`) as an atomic addition to
+   * its storage buffer. Absent on every other compilation, where the three
+   * heads decline on the shader targets.
+   */
+  kernel?: KernelHooks<Expr>;
 
   /**
    * When `true`, this target's multi-statement constructs (loop-form

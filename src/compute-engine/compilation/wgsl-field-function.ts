@@ -250,7 +250,7 @@ export function wgslDeclarationsByName(src: string): Map<string, string> {
  * holds only non-real values (`complex`, `imaginary`) is refused, and so is
  * the type `nan`, which a value with a `NaN` component gives.
  */
-function pointComponentCount(t: Type): number | undefined {
+export function pointComponentCount(t: Type): number | undefined {
   if (typeof t === 'string' || t.kind !== 'tuple') return undefined;
   const n = t.elements.length;
   if (n < 2 || n > 4) return undefined;

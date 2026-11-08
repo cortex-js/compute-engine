@@ -604,6 +604,11 @@ export function shaderExpressionStatement(
       'Break',
       'Continue',
       'Block',
+      // The `+=` of a compute-shader kernel (`WGSLTarget.compileKernel()`)
+      // is a function call statement: the helper of a list accumulator has
+      // no value, and the value of `atomicAdd` may be discarded, since the
+      // function is not `@must_use`.
+      'AddTo',
     ].includes(stmt.operator)
   )
     return code;
