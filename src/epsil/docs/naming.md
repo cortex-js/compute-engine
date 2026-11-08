@@ -206,6 +206,13 @@ f()
 // ➔ 3 + pi
 ```
 
+A library name that has no lowercase spelling (see
+[Names with no lowercase spelling](#names-with-no-lowercase-spelling)) takes
+its capitalized name after `std::`: `std::Not(x)`, `std::Add(a, b)`,
+`std::If(c, a, b)`, `std::D(f, x)`. The language writes these with `!`, `+`,
+`if` and `D`, so `std::not`, `std::add`, `std::if` and `std::d` are the error
+`not-a-library-name`.
+
 `std` is not a reserved word and not a variable: `let std = 5` is a
 binding like any other, and `std::pi` still names the constant π in that
 program. A qualified name reads a name of a module, and `.` reads a field
