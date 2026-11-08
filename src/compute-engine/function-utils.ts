@@ -10535,12 +10535,9 @@ function makeLambda(
       //   the body reads was also read at partial application, not at the
       //   call that supplies the last argument.
       //
-      // Substituting the prefix VALUES into the body instead would be the
-      // obvious encoding and is wrong: `subs()` is not capture-avoiding, so a
-      // nested literal that rebinds a parameter name has its own parameter
-      // symbol overwritten (`(a) ↦ a * 2` becomes `(1) ↦ 2`). Re-application
-      // keeps the body untouched, and binding goes through the same scope
-      // machinery as a saturated call.
+      // Re-application, not a substitution of the prefix VALUES into the
+      // body, keeps the body untouched, and the binding of the parameters
+      // goes through the same scope machinery as a saturated call.
       //
       // The prefix ARGUMENTS are evaluated here (above): producing an operand
       // is not the body's effect, and eager operands are evaluated at the

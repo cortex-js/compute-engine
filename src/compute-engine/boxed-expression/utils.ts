@@ -458,12 +458,13 @@ function betaReduceLambda(call: Expression): Expression | undefined {
   // in `symbolic/derivative.ts`).
   if (isFunction(body, 'Typed')) body = body.op1;
 
-  // `subs` is NOT binder-aware (unlike `resolveBoundSymbols` below): it rewrites
-  // through inner `Function`/`Block`/`Sum`/… binders blindly. Inlining is only
-  // capture-safe when no substituted parameter name is rebound by a binder
-  // inside the body, and no argument introduces a symbol that such a binder
-  // would capture. When either could happen, decline (leave the application
-  // opaque) — value-safe, and strictly better than silently corrupting.
+  // `subs` replaces only the free occurrences of a parameter, and it renames
+  // an inner `Function`/`Block`/`Sum`/… binder that would capture a symbol of
+  // an argument, except in the cases that `subsIfCaptureFree()`
+  // (`subs-capture-mode.ts`) lists. This test is stricter: when a substituted
+  // parameter name is rebound by a binder inside the body, or an argument
+  // has a symbol that such a binder binds, decline (leave the application
+  // opaque), also when `subs` gives the correct body.
   const binders = collectBinderNames(body);
   if (binders.size > 0) {
     for (const name of Object.keys(substitution)) {

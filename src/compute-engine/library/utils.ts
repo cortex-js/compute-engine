@@ -748,9 +748,11 @@ function isDegenerateBounds(
  * Distinct from `undefined` ("not degenerate, carry on") because the callers'
  * next move is the symbolic closed forms, and those substitute the bound for
  * the index with NO capture guard of their own
- * (`symbolicSumClosedForm`/`symbolicProductClosedForm`). Falling through would
- * land exactly the corruption the decline exists to prevent, so on this
- * sentinel the caller must keep the expression symbolic.
+ * (`symbolicSumClosedForm`/`symbolicProductClosedForm`), and `subs` does not
+ * rename a capturing binder in the cases that `subsIfCaptureFree()`
+ * (`boxed-expression/subs-capture-mode.ts`) lists. On this sentinel the
+ * caller keeps the expression symbolic, so a degenerate operator that this
+ * guard declines is not given a value by another route.
  */
 export const DEGENERATE_CAPTURE_UNSAFE = Symbol('degenerate-capture-unsafe');
 
@@ -766,10 +768,13 @@ export const DEGENERATE_CAPTURE_UNSAFE = Symbol('degenerate-capture-unsafe');
  * role of `Sum` and `Product`, so `ce.assign(i, x)` for a bound of
  * unknown type throws `TypeCompatibilityError` — a symbolic bound is exactly
  * the case that cannot go through the assign. The neighbouring symbolic
- * closed forms substitute for the same reason. `subs` is not binder-aware, so
- * the substitution is guarded against capture the way lambda inlining is
- * (`collectBinderNames`): if any binder inside the body could capture the
- * index or a symbol of the bound, decline and stay symbolic.
+ * closed forms substitute for the same reason. `subs` replaces only the free
+ * occurrences of the index, and renames an inner binder that would capture
+ * a symbol of the bound, except in the cases that `subsIfCaptureFree()`
+ * (`boxed-expression/subs-capture-mode.ts`) lists. The substitution is still
+ * guarded the way lambda inlining is (`collectBinderNames`), which is
+ * stricter: if any binder inside the body binds the index or a symbol of
+ * the bound, decline and stay symbolic.
  *
  * Returns undefined (caller carries on) when the indexing set is not a
  * degenerate `Limits`, and `DEGENERATE_CAPTURE_UNSAFE` when it IS degenerate

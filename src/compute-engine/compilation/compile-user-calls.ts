@@ -1397,12 +1397,13 @@ export function multiClauseLaneMismatchAt(
  *    ONCE, while substitution repeats it at every occurrence of its
  *    parameter — `(Random(), y)` into a body reading `P.x` twice would
  *    draw twice;
- *  - no binder in the body captures the substitution: `subs` replaces
- *    only the free occurrences of a parameter, but it is not
- *    capture-avoiding, so an argument symbol that an inner `Sum`/
- *    `Function`/`Block` binds would be CAPTURED by that binder. A
- *    parameter REBOUND by such a binder is refused as well. This is the
- *    condition `betaReduceLambda`
+ *  - no binder in the body binds a parameter or a symbol of an argument.
+ *    `subs` replaces only the free occurrences of a parameter, and it
+ *    renames an inner `Sum`/`Function`/`Block` binder that would capture
+ *    a symbol of an argument, except in the cases that
+ *    `subsIfCaptureFree()` (`boxed-expression/subs-capture-mode.ts`)
+ *    lists. This condition is stricter: it declines such a body also when
+ *    `subs` gives the correct one. This is the condition `betaReduceLambda`
  *    (`boxed-expression/utils.ts`) applies to a lambda application, and only
  *    that condition: a body that merely CONTAINS a binder colliding with
  *    nothing — `Map(p ↦ …, list)` as the whole body — inlines.
@@ -1542,8 +1543,10 @@ export function inlinedUserFunctionCall(
  * `onPath` holds the names being inlined above this point, so a mutually
  * recursive pair stops rather than expanding forever; `budget` caps the
  * total substitutions (see {@link MAX_NESTED_INLINES}). A subtree that BINDS
- * a name is left untouched: `subs` is not capture-avoiding, and rebuilding a
- * scoped node would re-canonicalize its scope.
+ * a name is descended with those names added to the names that the
+ * enclosing definition binds, and is rebuilt with its own scope; a
+ * `Function` literal, or a binder whose scope cannot be reused, is left
+ * untouched, because rebuilding it would re-canonicalize its scope.
  *
  * `enclosing` describes the definition whose body is being rewritten, on the
  * definition-emission route. Its `scalarNames` reach

@@ -1001,10 +1001,12 @@ function literalPointOperands(
  *    ONE argument, the element, and canonicalization rejects a callback of
  *    any other arity as a `callback-arity` error, so only that shape is a
  *    mapping the substitution can reproduce;
- *  - the body binds no name of its own: `subs` is not capture-avoiding, so
- *    an inner binder could capture a symbol of an element. A target that
- *    asks for `UnrollOptions.unrollComprehensions` (the shader targets,
- *    which have no `Map` lowering) accepts a body with binders when the
+ *  - the body binds no name of its own. This condition is stricter than the
+ *    substitution needs: `subs` renames an inner binder that would capture
+ *    a symbol of an element, except in the cases that `subsIfCaptureFree()`
+ *    (`boxed-expression/subs-capture-mode.ts`) lists. A target that asks
+ *    for `UnrollOptions.unrollComprehensions` (the shader targets, which
+ *    have no `Map` lowering) accepts a body with binders when the
  *    substitution is still correct ({@link binderSafeSubstitution}): that
  *    is what writes out a `Map` inside the lambda of another `Map` there;
  *  - the body is pure: an effect in it runs once per element either way, but
@@ -1124,11 +1126,12 @@ function tryUnrollMap(
  *    names than its binder writes (the `Block` of the inner lambda of
  *    `k ↦ Map(j ↦ j·k, …)` also holds `k`, which `subs` still treats as
  *    free there), and `subs` protects a real inner binder of that name;
- *  - an element mentions a name that an inner binder binds. `subs` is not
- *    capture-avoiding: the copy of the element under that binder refers to
- *    the inner binder, not to the outer value. So the substitution is
- *    refused when a symbol of an element is a name that a scope in `body`
- *    holds.
+ *  - an element mentions a name that an inner binder binds. `subs` renames
+ *    such a binder, except in the cases that `subsIfCaptureFree()`
+ *    (`boxed-expression/subs-capture-mode.ts`) lists, and a scope can hold
+ *    names that its binder does not bind. The substitution is refused when
+ *    a symbol of an element is a name that a scope in `body` holds, also
+ *    when `subs` gives the correct copy.
  *
  * The test reads every name of every scope in `body`
  * (`collectBinderNames()`), and every symbol at any depth of each element,
@@ -1925,8 +1928,10 @@ const MAX_UNROLLED_COMPREHENSION_SIZE = 64;
  * have no loop lowering for a comprehension and lower the written-out list
  * as a fixed-size array.
  *
- * The body must be pure and bind no name of its own (the substitution is
- * not capture-avoiding), every clause must bind a plain symbol, no domain
+ * The body must be pure and bind no name of its own (stricter than the
+ * substitution needs: `subs` renames an inner binder that would capture a
+ * symbol of an element, except in the cases that `subsIfCaptureFree()`
+ * lists), every clause must bind a plain symbol, no domain
  * may read an earlier clause's variable (a dependent domain has no literal
  * elements), and the element count is capped
  * (`MAX_UNROLLED_COMPREHENSION_SIZE`, and the target's iteration budget when

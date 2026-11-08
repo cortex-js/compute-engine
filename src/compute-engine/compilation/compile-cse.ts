@@ -299,13 +299,14 @@ export function substitutedUserFunctionBody(
       if (!substitutedNames.has(sym) && enclosing.localNames.has(sym))
         return undefined;
   }
-  // `subs` replaces only the free occurrences of a parameter, but it is
-  // not capture-avoiding: a free symbol of an argument that an inner
-  // `Function`/`Block`/`Sum` binder binds is CAPTURED by that binder, and
-  // the binder's index is not renamed. The substitution is refused when no
-  // such capture can be ruled out: when a parameter name being substituted
-  // is REBOUND by a binder in the body, or a free symbol of an argument is
-  // bound by one.
+  // `subs` replaces only the free occurrences of a parameter, and it
+  // renames an inner `Function`/`Block`/`Sum` binder that would capture a
+  // free symbol of an argument, except in the cases that
+  // `subsIfCaptureFree()` (`boxed-expression/subs-capture-mode.ts`) lists.
+  // This test is stricter: the substitution is refused when a parameter
+  // name being substituted is REBOUND by a binder in the body, or a free
+  // symbol of an argument is bound by one, also when `subs` gives the
+  // correct body.
   // This is the same condition `betaReduceLambda`
   // (`boxed-expression/utils.ts`) applies to a lambda application. Declining
   // on the mere PRESENCE of a binder is coarser and refuses bodies that are
@@ -2077,9 +2078,9 @@ export function computeInvariantPrefixes(
  * A prefix is hoistable at this call when every argument at a parameter
  * it reads is invariant across the repetitions (`varying`, `assigned` are
  * the site's own varying and assigned names), pure and admissible to
- * evaluate once, not complex-valued, and free of binders (the
- * substitution is not capture-avoiding); and when no OTHER symbol the
- * prefix reads — a global of the callee's body — is bound at the call
+ * evaluate once, not complex-valued, and free of binders; and when no
+ * OTHER symbol the prefix reads — a global of the callee's body — is bound
+ * at the call
  * site, where the substituted expression is compiled: a site-bound name
  * would capture it. The substituted expression must pass the same
  * invariance bar itself.

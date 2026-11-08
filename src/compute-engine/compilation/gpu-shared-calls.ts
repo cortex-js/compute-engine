@@ -705,8 +705,9 @@ class SharedCallsPass {
     // the shader targets accumulate as a complex `vec2` is left to them.
     if (BaseCompiler.isComplexValuedUnderIndices(termBody, [name]))
       return undefined;
-    // `subs` is not capture-avoiding: a binder inside the body that binds
-    // the index again would have its own occurrences replaced.
+    // A binder inside the body that binds the index again declines the
+    // written-out form. `subs` replaces only the free occurrences of the
+    // index, so this test is stricter than the substitution needs.
     const binders = collectBinderNames(termBody);
     if (binders.has(name)) return undefined;
     const terms: Expression[] = [];

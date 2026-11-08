@@ -764,8 +764,9 @@ export function bodyWithArguments(
   const reason =
     `Could not compile \`${h}\`: the call is written with the body of the ` +
     `function, `;
-  // `subs` does not avoid capture (see the same check in
-  // `wholeTupleCall`).
+  // A binder of the body with the name of a parameter or of a symbol of an
+  // argument declines the call, as in `wholeTupleCall`
+  // (`compile-assignment-checks.ts`), which gives the reasons.
   const body = literal.op1;
   const statements = isFunction(body, 'Block') ? body.ops : [body];
   const binders = new Set<string>();

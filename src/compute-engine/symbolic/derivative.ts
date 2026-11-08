@@ -5227,10 +5227,12 @@ function partialFromFunctionLiteral(
   // A declared result type wraps the value in `Typed(value, type)`, which
   // has no derivative rule: the value is used.
   if (isFunction(body, 'Typed')) body = body.op1;
-  // `subs()` is not capture-avoiding: an argument with a free symbol that
-  // has the name of a variable bound inside the body (the index `k` of a
-  // `Sum` in the body, with the argument `2k`) would be captured by that
-  // binder. Rename each such bound variable to a fresh name first.
+  // When the body calls a parameter, `substituteParameters()` replaces the
+  // parameters in a canonical node with a walk of its own, which does not
+  // rename a binder (`subs()` does): an argument with a free symbol that has
+  // the name of a variable bound inside the body (the index `k` of a `Sum`
+  // in the body, with the argument `2k`) would be captured by that binder.
+  // Rename each such bound variable to a fresh name first.
   body = renameCapturingBinders(ce, body, args);
   const map: Record<string, Expression> = Object.create(null);
   names.forEach((n, i) => {

@@ -4249,8 +4249,12 @@ function gpuBroadcastScalars(
  *  - every argument is pure. The body can read a parameter more than once,
  *    and the substitution then repeats the argument, while the interpreter
  *    evaluates it once;
- *  - no binder in the body rebinds a parameter or captures a symbol of an
- *    argument, because `subs` is not capture-avoiding.
+ *  - no binder in the body rebinds a parameter or binds a symbol of an
+ *    argument. This condition is stricter than the substitution needs:
+ *    `subs` replaces only the free occurrences of a parameter, and renames
+ *    an inner binder that would capture a symbol of an argument, except in
+ *    the cases that `subsIfCaptureFree()`
+ *    (`boxed-expression/subs-capture-mode.ts`) lists.
  *
  * When the parameters of the literal are scalar and an argument is a
  * collection, the interpreter applies the function to each element, not to

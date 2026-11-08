@@ -7499,14 +7499,15 @@ volumes
             const rename = Object.fromEntries(
               paramDefault.map((p, i) => [p, ce.symbol(names[i])])
             );
-            // `subs` replaces only the free occurrences of a parameter, but it
-            // is not capture-avoiding: renaming to a target name that an inner
-            // `Sum`/`Function`/… binder already binds (e.g.
-            // `x ↦ Sum(x·k, k, 1, 3)` with vars `[k]`, where the substituted
-            // `k` would be captured by the `Sum`) yields a wrong derivative.
-            // A parameter that an inner binder rebinds is refused as well.
-            // Decline in those cases (leave `JacobianMatrix` symbolic),
-            // value-safe and strictly better than corrupting.
+            // `subs` replaces only the free occurrences of a parameter, and it
+            // renames an inner binder that would capture a symbol of a
+            // replacement (with vars `[k]`, the body `Sum(x·k, k, 1, 3)` of
+            // `x ↦ …` becomes `Sum(k·k_1, k_1, 1, 3)`), except in the
+            // cases that `subsIfCaptureFree()`
+            // (`boxed-expression/subs-capture-mode.ts`) lists. This test is
+            // stricter: it declines (leaves `JacobianMatrix` symbolic) when
+            // an inner binder binds a parameter or a target name, also when
+            // `subs` gives the correct body.
             for (const f of fs) {
               const binders = collectBinderNames(f);
               if (binders.size === 0) continue;

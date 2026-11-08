@@ -447,11 +447,12 @@ export function unrolledIndexValueFold(
   }
   const names = new Set(Object.keys(values));
   let result: Expression | undefined;
-  // `.subs()` replaces only the free occurrences of a name, but it is not
-  // capture-avoiding: a value that reads a name an inner binder binds
-  // would be captured by that binder, and the binder's index is not
-  // renamed. A node that re-binds one of the index names is left
-  // undecided.
+  // `.subs()` replaces only the free occurrences of a name, and it renames
+  // an inner binder that would capture a name that a value reads, except in
+  // the cases that `subsIfCaptureFree()`
+  // (`boxed-expression/subs-capture-mode.ts`) lists. A node that re-binds
+  // one of the index names is still left undecided: this test is stricter
+  // than the substitution needs.
   if (mentionsAnyName(expr, names) && !rebindsAnyName(expr, names)) {
     try {
       result = core.constantFoldValue(expr.subs(values), target)?.value;

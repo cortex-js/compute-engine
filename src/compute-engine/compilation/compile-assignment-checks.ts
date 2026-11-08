@@ -164,15 +164,19 @@ export function wholeTupleCall(
       if (name === undefined) return undefined;
       substitutions[name] = callArgs[i];
     }
-    // `subs` does not avoid capture. A binder of the body (a `Sum` index, a
-    // nested `Function` parameter, a `Block` local) that has the name of a
-    // parameter would get the tuple in place of its own variable, and a
-    // binder with the name of a symbol of a tuple would capture that
-    // symbol: `Apply(u ↦ Sum(k·u[1], k=1..3), (k, 2))` would read the
-    // index `k` instead of the outer `k`. The body is a `Block` whose scope
-    // also holds the parameters, so its statements are walked one by one,
-    // and of its own bindings only the locals that are not parameters are
-    // kept. A statement that declares or assigns a parameter rebinds it.
+    // A binder of the body (a `Sum` index, a nested `Function` parameter, a
+    // `Block` local) that has the name of a parameter or of a symbol of a
+    // tuple declines the call. The body is a `Block` whose scope also holds
+    // the parameters, so its statements are walked one by one, and of its
+    // own bindings only the locals that are not parameters are kept. A
+    // statement that declares or assigns a parameter rebinds it: `subs` then
+    // does not replace the parameter anywhere in the block. For the other
+    // binders the test is stricter than needed: `subs` replaces only the
+    // free occurrences of a parameter, and renames an inner binder that
+    // would capture a symbol of a tuple (`Apply(u ↦ Sum(k·u[1], k=1..3),
+    // (k, 2))` gives a `Sum` over `k_1`), except in the cases that
+    // `subsIfCaptureFree()` (`boxed-expression/subs-capture-mode.ts`)
+    // lists.
     const body = literal.op1;
     const statements = isFunction(body, 'Block') ? body.ops : [body];
     const binders = new Set<string>();
