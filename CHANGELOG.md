@@ -52,6 +52,11 @@
   `ReplaceAt`, `Insert` and `DeleteAt` applied again and again to their
   previous result in MathJSON, for a list of at most `maxCollectionSize`
   elements.
+- **A sum or product over a set with two or more conditions keeps every
+  condition.** In `\sum_{k\in \lbrace1,2,3\rbrace, k>1, k<3} k`, only the
+  first condition after the `k\in` clause was read; the second was dropped
+  with no message, so the sum gave `5`. Every condition that follows the
+  clause is now kept, joined with `And`, and the sum gives `2`.
 
 ## 0.184.0 _2026-11-08_
 

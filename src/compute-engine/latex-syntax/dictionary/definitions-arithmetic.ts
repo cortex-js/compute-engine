@@ -5075,27 +5075,38 @@ function getIndexes(
     const assignment = getIndexAssignment(subExpr, sups[i], binderName);
 
     if (assignment) {
-      // EL-3: Check if this is an Element expression and the next item is a condition
-      if (assignment.element && i + 1 < subs.length) {
-        const nextExpr = subs[i + 1];
-        // The next item is a condition of this clause, not a new indexing
-        // set, when `isElementCondition()` says so. For example, `n\ge 2`
-        // after `n\in S` is a condition, while a standalone `n\ge 2` is an
-        // index assignment.
-        if (isElementCondition(nextExpr, assignment.index, binderName)) {
-          // Attach condition to the Element expression
-          // Element goes from ["Element", var, domain] to ["Element", var, domain, condition]
-          const elementExpr = assignment.element;
-          if (Array.isArray(elementExpr) && elementExpr.length >= 3) {
-            // Create a new array with the condition appended
-            const newElement: MathJsonExpression = [
-              elementExpr[0] as string,
-              ...elementExpr.slice(1),
-              nextExpr,
-            ];
-            assignment.element = newElement;
-          }
-          i++; // Skip the condition expression
+      // The items that follow an `Element` clause are its conditions, not
+      // new indexing sets, while `isElementCondition()` says so. For
+      // example, `n\ge 2` after `n\in S` is a condition, while a standalone
+      // `n\ge 2` is an index assignment. Every such item is taken, not only
+      // the first: `\sum_{k\in S, k>1, k<3}` has two conditions, and the
+      // clause keeps both, joined with `And`, so that the sum is not over
+      // every `k>1`. The first item that is not a condition (`j\in T`, a
+      // bare number) starts the next clause.
+      if (assignment.element) {
+        const conditions: MathJsonExpression[] = [];
+        while (
+          i + 1 < subs.length &&
+          isElementCondition(subs[i + 1], assignment.index, binderName)
+        ) {
+          conditions.push(subs[i + 1]);
+          i++;
+        }
+        const elementExpr = assignment.element;
+        if (
+          conditions.length > 0 &&
+          Array.isArray(elementExpr) &&
+          elementExpr.length >= 3
+        ) {
+          // `["Element", var, domain]` becomes
+          // `["Element", var, domain, condition]`.
+          const condition =
+            conditions.length === 1 ? conditions[0] : ['And', ...conditions];
+          assignment.element = [
+            elementExpr[0] as string,
+            ...elementExpr.slice(1),
+            condition,
+          ] as MathJsonExpression;
         }
       }
       results.push(assignment);

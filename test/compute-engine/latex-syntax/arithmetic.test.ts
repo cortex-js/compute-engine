@@ -675,6 +675,72 @@ describe('LaTeX round trip of a condition in an Element clause', () => {
   });
 });
 
+// Every item after an `Element` clause that reads as a condition is a
+// condition of that clause, and two or more are joined with `And`. A clause
+// with a second condition dropped would sum over every `k>1`, with no message
+// that `k<3` was left out.
+describe('two or more conditions after an Element clause', () => {
+  test('two conditions are joined with And', () => {
+    const expr = ce.parse('\\sum_{k\\in \\lbrace1,2,3\\rbrace, k>1, k<3} k');
+    expect(expr.json).toEqual([
+      'Sum',
+      'k',
+      [
+        'Element',
+        'k',
+        ['Set', 1, 2, 3],
+        ['And', ['Less', 1, 'k'], ['Less', 'k', 3]],
+      ],
+    ]);
+    expect(expr.evaluate().json).toBe(2);
+  });
+
+  test('three conditions, on a product', () => {
+    const expr = ce.parse(
+      '\\prod_{k\\in \\lbrace1,2,3,4,5\\rbrace, k>1, k<5, k\\ne 3} k'
+    );
+    expect(expr.evaluate().json).toBe(8);
+  });
+
+  test('the LaTeX parsed again gives the same sum', () => {
+    const expr = ce.parse('\\sum_{k\\in \\lbrace1,2,3\\rbrace, k>1, k<3} k');
+    expect(expr.latex).toMatchInlineSnapshot(
+      `\\sum_{k\\in \\lbrace1, 2, 3\\rbrace, 1\\lt k\\land k\\lt3}k`
+    );
+    const reparsed = ce.parse(expr.latex);
+    expect(reparsed.isSame(expr)).toBe(true);
+    expect(reparsed.evaluate().json).toBe(2);
+  });
+
+  test('a new clause after the conditions starts a new indexing set', () => {
+    const expr = ce.parse(
+      '\\sum_{k\\in \\lbrace1,2,3\\rbrace, k>1, k<3, j\\in\\lbrace1,2\\rbrace, j<2, j>0} kj'
+    );
+    expect(expr.json).toEqual([
+      'Sum',
+      ['Multiply', 'j', 'k'],
+      [
+        'Element',
+        'k',
+        ['Set', 1, 2, 3],
+        ['And', ['Less', 1, 'k'], ['Less', 'k', 3]],
+      ],
+      ['Element', 'j', ['Set', 1, 2], ['And', ['Less', 'j', 2], ['Less', 0, 'j']]],
+    ]);
+    expect(expr.evaluate().json).toBe(2);
+  });
+
+  // A bare number is a bound with no index, so it ends the conditions.
+  test('a number after the conditions is a bound, not a condition', () => {
+    expect(ce.parse('\\sum_{k\\in S, k>1, k<5, 1} k').json).toEqual([
+      'Sum',
+      'k',
+      ['Element', 'k', 'S', ['And', ['Less', 1, 'k'], ['Less', 'k', 5]]],
+      ['Limits', 'Nothing', 1, 'Nothing'],
+    ]);
+  });
+});
+
 describe('EL-5: Non-enumerable domains stay symbolic', () => {
   // EL-5: When the domain cannot be enumerated, the expression should
   // remain symbolic instead of returning NaN
