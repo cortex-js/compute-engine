@@ -166,3 +166,101 @@ type version for the declarations of the parameters of a literal while it
 is boxed would keep the cached types, but it is a change of the rule of the
 type cache (`typeVersion`, `engine-configuration-lifecycle.ts`), and needs
 its own analysis of soundness.
+
+## Measures of 2026-11-08, second session (session cebatch-351)
+
+The source of that day (`1f2e45346`) against published versions, in one
+process (`benchmarks/type-derivation.mjs`, eleven bundles, box lock held,
+load 2.2 at the start, medians of seven rounds, µs). The bundle of the
+source is built from `src/compute-engine.ts` with the options of the release
+build (`console.assert` removed, not minified); the published bundles are
+minified.
+
+```
+case         0.118.2 0.124.3 0.133.0 0.140.0 0.150.0 0.160.0 0.167.0 0.172.0 0.178.0 0.184.0 source
+box               14      13      15      15      16      18      17      19      20      16     15
+simplify         138     126     150     151     171     189     175     186     200     179    175
+nested-root       36      37      40      43      49      64      61      64      66      66     65
+integral        1005    1028    1117    1259    1637    1687    1576    1630    1694    1476   1464
+definite          42      50      58      64      80     112     114     145     179     140    140
+```
+
+The slowdown is a sum of steps of 5 to 30 % each, and no release carries
+more than a third of it. The steps of the definite integral were followed to
+commits: at each commit a bundle of the source was built with the same
+options and timed between the two nearest published bundles in one process
+(medians of five rounds of sixty calls, the three bundles alternated). The
+reading of one bundle varies by about 10 % from one run to the next, so a
+step under about 8 % is not resolved, and a step is accepted only when the
+commit before it reads as the earlier bundle and the commit itself as the
+later one.
+
+- `4a2328c46` (0.158.0): the definite integral tests its value for an
+  imaginary part (`hasImaginaryPart()`, a numeric approximation), +11 %.
+  The commit `f32d05973` of 2026-11-07 reads the type of the value first,
+  which removes most of it.
+- `f29912a45` (0.171.0, value kinds phase 2): the `Abs` type handler built a
+  new union type `nan | real<0..> | signed_infinity` at each call, +10 %.
+  `magnitudeOrNaNType()` (`type-handlers.ts`) now keeps the union per
+  magnitude type; 2.7 % of the integral remained in the handler, half of it
+  in the `collection` fact of the operand descriptor, which asked the operand
+  after its type had already excluded a collection.
+- `2abc19a20` (0.171.0, CE-538 and CE-533, `subs()` of a binder variable
+  and the quadrature error estimates): +10 %, spread over `liftIntegrand()`
+  (3.3 → 6.1 % of the integral), the canonical form of `Divide` and the
+  application of the literal, with no single function responsible.
+- `28f74e381` (0.174.0, CE-601, a shared subexpression is evaluated once):
+  the `isPure` test of the evaluation memo computed the full type of each
+  function literal operand, +16 %. The commit `acd490ae8` of 2026-11-08
+  computes the effects alone; 3.6 % of the integral remain in that test.
+
+The steps of 0.150 → 0.160 of the two simplifications (`√6x + √2x` +10 %,
+`√(3+2√2)` +30 %) were not followed to commits.
+
+An experiment on the open question of the previous section: the type
+version was set back after each state event during one evaluation, so that
+no cached type was computed again. `∫₁² 1/x dx` changed by 1 %, boxing and
+simplifying `√6x + √2x` by 0 % (medians of five alternated rounds in one
+process). The types computed again after a move of the version are not a
+measurable cost, and the rule of the type cache stays as it is.
+
+A change tried in this session and not kept: the collection tests of a
+symbol (`isCollection`, `isIndexedCollection`, `isFiniteCollection`,
+`isLazyCollection`, `boxed-symbol.ts`) read the value of the symbol before
+they enter the cycle guard (`cycle-guard.ts`, a `Map` write and a delete
+per query), so that a symbol with no value answers at once. In the profile
+of boxing `√6x + √2x` the guards were 3 % of the time and were gone, but
+the benchmark could not resolve the gain (box 16 → 16 and 15 → 15 µs in
+two alternated runs), and the review found two reads that the guard must
+cover and that the reordering moved out of it: the value of a definition
+is computed at its first read from LaTeX or from a host function
+(`BoxedValueDefinition.storedValue`), and the lookup of the binding in the
+context (`bindingInContext()`, `binders.ts`) reads the value of a shadowing
+definition (`readsNoOtherBinding()`). Each computation boxes an expression
+whose type derivation asks the same test, and the guard is what ends that
+recursion. A fast path needs a lookup that provably runs no computation,
+which the binding resolution does not offer; a cheaper guard (a flag on the
+definition record in place of the `Map`) would keep every semantics but
+changes the shape of a plain record that other code copies. The same
+review refused a second change, which made the `collection` and `indexed`
+facts of an operand descriptor trust a type that excludes a collection
+without asking the operand: the type of a symbol is the type of its static
+definition, while its value can come from a run-time copy of the binding.
+Neither change is in the source.
+
+What remains in `∫₁² 1/x dx` (profile of the source, percent of the
+integral): boxing the input 32 % (of which the binder scope of `Integrate`
+12 %, and the function literal of the integrand 6.5 %); the value of
+`EvaluateAt` 21 % (the two applications of the literal through `invoke()`
+13.5 %, of which the declaration of the parameter 2.5 %); building the
+literal of `EvaluateAt` and the `EvaluateAt` node 12 %, of which
+`rebindParameters()` 7 %: the antiderivative is built in the scope of the
+handler, and each node that holds the variable is built again, canonical,
+with the parameter in its place; the antiderivative 11 %;
+`liftIntegrand()` 3.4 %, the inverse rebuild. The proposed next step is to
+compute the antiderivative inside the body scope of the integrand literal,
+where a minted `ce.symbol(variable)` binds to the parameter: neither rebuild
+is then needed (about 10 % of the integral). It changes the scoping of the
+`Integrate` handler (the value shield and the independent parameters are
+declared in the handler scope today) and needs its own design and the
+integration test suites.
