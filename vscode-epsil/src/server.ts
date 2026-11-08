@@ -53,10 +53,12 @@ import {
   protocolFunctionMembers,
   unresolvedLabels,
   type BindingGroup,
+  type BindingKind,
   type Occurrence,
   type ProtocolFunctionMember,
   type ProtocolMemberDeclaration,
 } from '../../src/epsil/occurrences.js';
+import { binderSitesOf } from '../../src/epsil/resolve-library-names.js';
 import { ERROR_EXPLANATIONS } from '../../src/epsil/error-explanations.js';
 import { HARD_RESERVED_WORDS } from '../../src/epsil/reserved-words.js';
 import type { ParsingDiagnostic } from '../../src/epsil/diagnostics.js';
@@ -613,7 +615,11 @@ let hoverEngine: ComputeEngine | undefined;
 let hoverCache: {
   text: string;
   tokens?: Token[];
-  parse?: { ast: MathJsonExpression | null; errors: number };
+  parse?: {
+    ast: MathJsonExpression | null;
+    errors: number;
+    engine: ComputeEngine;
+  };
   sites?: Map<number, DefinitionSite>;
   bindings?: BindingGroup[];
   protocolMembers?: Map<string, ProtocolFunctionMember>;
@@ -639,6 +645,7 @@ function tokensOf(text: string): Token[] {
 function parseOf(text: string): {
   ast: MathJsonExpression | null;
   errors: number;
+  engine: ComputeEngine;
 } {
   const cache = cacheFor(text);
   if (cache.parse === undefined) {
@@ -652,14 +659,16 @@ function parseOf(text: string): {
     // be refused a rename because another document's island made the engine
     // report `x` as library-defined. Only one construction per edit: this
     // result is memoized by document text.
-    const { ast, diagnostics } = parseSource(
-      text,
-      undefined,
-      new ComputeEngine()
-    );
+    //
+    // The engine is kept with the tree: `bindingsOf()` asks it which
+    // variables a library call binds, and the answer depends on what the
+    // engine defines, so it must be the engine that parsed the document.
+    const engine = new ComputeEngine();
+    const { ast, diagnostics } = parseSource(text, undefined, engine);
     cache.parse = {
       ast,
       errors: diagnostics.filter((d) => d.severity === 'error').length,
+      engine,
     };
   }
   return cache.parse;
@@ -681,8 +690,54 @@ function sitesOf(text: string): Map<number, DefinitionSite> {
  * resolves. */
 function bindingsOf(text: string): BindingGroup[] {
   const cache = cacheFor(text);
-  cache.bindings ??= documentBindings(parseOf(text).ast, text);
+  if (cache.bindings === undefined) {
+    const { ast, engine } = parseOf(text);
+    cache.bindings = resolveBindings(
+      ast,
+      engine,
+      text,
+      protocolMembersOf(text)
+    );
+  }
   return cache.bindings;
+}
+
+/**
+ * The binding groups of `text`, whose raw tree is `ast`, parsed by `engine`.
+ *
+ * A library call that binds a variable (`sum(k^2, k, 1, 3)` binds `k`,
+ * `limit(sin(h)/h, 0)` binds `h`) gets a scope of its own, so that an outer
+ * `let k` and the index of the sum are two bindings, as they are when the
+ * program runs. Without the option, the resolver reads such a variable as a
+ * use of the enclosing scope, and a highlight or a rename of the `let k`
+ * would also take the `k` of the sum. The callback is the one of the
+ * library-name resolution pass (`resolveLibraryNames()`), so the editor and
+ * the runner agree on which names a call binds. It asks the engine what the
+ * callee defines, so the engine must be the one that parsed the document:
+ * a LaTeX island declares its symbols in it.
+ */
+function resolveBindings(
+  ast: MathJsonExpression | null,
+  engine: ComputeEngine,
+  text: string,
+  members: ReadonlyMap<string, ProtocolFunctionMember>
+): BindingGroup[] {
+  return documentBindings(ast, text, {
+    binderSites: (node, isBound, declarationOf) =>
+      binderSitesOf(engine, node, text, members, isBound, declarationOf),
+  });
+}
+
+/** The function members that the top-level `protocol` statements of the
+ * document declare, by name. */
+function protocolMembersOf(text: string): Map<string, ProtocolFunctionMember> {
+  const cache = cacheFor(text);
+  if (cache.protocolMembers === undefined) {
+    const { ast } = parseOf(text);
+    cache.protocolMembers =
+      ast === null ? new Map() : protocolFunctionMembers(ast);
+  }
+  return cache.protocolMembers;
 }
 
 /**
@@ -762,13 +817,7 @@ function protocolMemberAt(
   name: string,
   offset: number
 ): ProtocolMemberDeclaration[] | undefined {
-  const cache = cacheFor(text);
-  if (cache.protocolMembers === undefined) {
-    const { ast } = parseOf(text);
-    cache.protocolMembers =
-      ast === null ? new Map() : protocolFunctionMembers(ast);
-  }
-  const member = cache.protocolMembers.get(name);
+  const member = protocolMembersOf(text).get(name);
   if (member === undefined || offset < member.from) return undefined;
   hoverEngine ??= new ComputeEngine();
   if (hoverEngine.lookupDefinition(name) !== undefined) return undefined;
@@ -1209,6 +1258,120 @@ connection.onPrepareRename(({ textDocument, position }) => {
   };
 });
 
+/**
+ * Whether the program means the same after the rename: the renamed text,
+ * parsed and resolved again, has the same binding groups as the current
+ * text, with `cooked` in place of the old name at the renamed group.
+ *
+ * The checks of the rename handler compare scopes and names, which is enough
+ * for the bindings of the program itself. A library call that binds a
+ * variable without writing it chooses that variable BY NAME: in
+ * `limit(sin(h)/h, 0)`, the engine takes the implicit variable among the
+ * names that the first operand reads, never a library name (`Pi`), and the
+ * first in sorted order when there are several (`limit(sin(x)/x + y, 0)`
+ * binds `x`). A rename of such a variable to `Pi`, or to `z`, makes the call
+ * bind another name or none, and the value changes. The renamed program is
+ * resolved like the current one, and any difference in the groups refuses
+ * the rename. An explicit binder (`sum(k^2, k, 1, 3)`) names its variable in
+ * an operand, so its groups do not change and the rename goes through.
+ *
+ * `spelling` is the new name as typed (a verbatim spelling with its
+ * backticks), which the edits insert; `cooked` is the name it means, which
+ * the resolver gives to the group.
+ */
+function renameKeepsBindings(
+  at: {
+    text: string;
+    groups: BindingGroup[];
+    group: BindingGroup;
+  },
+  spelling: string,
+  cooked: string
+): boolean {
+  const renamed = at.group.occurrences;
+  let text = at.text;
+  for (let i = renamed.length - 1; i >= 0; i--)
+    text =
+      text.slice(0, renamed[i].start) + spelling + text.slice(renamed[i].end);
+  // The offset in the renamed text of an offset of the current text that is
+  // not inside a renamed span: each renamed span before it moves it by the
+  // difference of the lengths.
+  const moved = (offset: number): number => {
+    let shift = 0;
+    for (const o of renamed)
+      if (o.end <= offset) shift += spelling.length - (o.end - o.start);
+    return offset + shift;
+  };
+  // The scope is part of the signature: in `limit(limit(K/(K + M), 0), 0)`
+  // the inner limit binds `K` and the outer one `M`; after a rename of `K`
+  // to `N`, the inner one binds `M` and the outer one `N`, with the same
+  // kinds and the same spans, and only the scopes tell the two apart.
+  const signature = (
+    name: string,
+    kind: BindingKind,
+    scope: readonly [number, number],
+    visibleFrom: number,
+    spans: readonly { start: number; end: number; role: string }[]
+  ): string =>
+    `${name} ${kind} ${scope[0]}-${scope[1]}@${visibleFrom} ${spans
+      .map((o) => `${o.role}:${o.start}-${o.end}`)
+      .join(' ')}`;
+  const movedScope = (group: BindingGroup): [number, number] => [
+    moved(group.scope[0]),
+    moved(group.scope[1]),
+  ];
+  const expected = at.groups
+    .map((group) =>
+      group === at.group
+        ? signature(
+            cooked,
+            group.kind,
+            movedScope(group),
+            moved(group.visibleFrom),
+            group.occurrences.map((o) => {
+              const start = moved(o.start);
+              return { start, end: start + spelling.length, role: o.role };
+            })
+          )
+        : signature(
+            group.name,
+            group.kind,
+            movedScope(group),
+            moved(group.visibleFrom),
+            group.occurrences.map((o) => ({
+              start: moved(o.start),
+              end: moved(o.end),
+              role: o.role,
+            }))
+          )
+    )
+    .sort();
+  const engine = new ComputeEngine();
+  const { ast, diagnostics } = parseSource(text, undefined, engine);
+  if (ast === null || diagnostics.some((d) => d.severity === 'error'))
+    return false;
+  const actual = resolveBindings(
+    ast,
+    engine,
+    text,
+    protocolFunctionMembers(ast)
+  )
+    .map((group) =>
+      signature(
+        group.name,
+        group.kind,
+        group.scope,
+        group.visibleFrom,
+        group.occurrences
+      )
+    )
+    .sort();
+  return (
+    expected.length === actual.length &&
+    expected.every((line, i) => line === actual[i])
+  );
+}
+
 connection.onRenameRequest(
   ({ textDocument, position, newName }): WorkspaceEdit | null => {
     const at = bindingAt(textDocument.uri, position);
@@ -1338,6 +1501,14 @@ connection.onRenameRequest(
         for (const o of other.occurrences)
           if (o.start >= visibleFrom && o.start < at.group.scope[1])
             throw conflict;
+
+    if (!renameKeepsBindings(at, spelling, cooked))
+      throw new ResponseError(
+        LSPErrorCodes.RequestFailed,
+        `Renaming \`${at.group.name}\` to \`${cooked}\` would change which ` +
+          'variable a library call binds (`limit`, `nd`, ... choose it by ' +
+          'name), so the program would mean something else.'
+      );
 
     return {
       changes: {

@@ -689,6 +689,172 @@ await scenario('navigation', undefined, async (c) => {
   );
 });
 
+// A library call that binds a variable (`sum`, `limit`) gives it a scope of
+// its own, like a parameter: an outer `let` of the same name is another
+// binding. The resolver gets this from the engine's binding sites, the same
+// source as the runner's library-name resolution (CE-1141).
+const BINDER_SOURCE = [
+  'let k = 2', //            0  ← the outer k, never read
+  'sum(k^2, k, 1, 3)', //    1  ← the k of the sum, chars 4 and 9
+  'let h = 5', //            2  ← the outer h, never read
+  'limit(sin(h)/h, 0)', //   3  ← the implicit h of the limit, chars 10, 13
+  'limit(sin(x)/x + y, 0)', // 4  ← binds x (first in sorted order), reads y
+  'limit(limit(K/(K + M), 0), 0)', // 5 ← the inner limit binds K, the outer M
+].join('\n');
+
+await scenario('binder calls', undefined, async (c) => {
+  await c.open(URI, BINDER_SOURCE);
+
+  const outerK = await c.request('textDocument/documentHighlight', {
+    textDocument: { uri: URI },
+    position: { line: 0, character: 4 },
+  });
+  check(
+    'highlighting the let k leaves the index of the sum alone',
+    outerK?.length === 1 && outerK[0].range.start.line === 0,
+    JSON.stringify(outerK)
+  );
+
+  const sumK = await c.request('textDocument/documentHighlight', {
+    textDocument: { uri: URI },
+    position: { line: 1, character: 9 },
+  });
+  check(
+    'highlighting the index of the sum covers its occurrences in the call only',
+    sumK?.length === 2 &&
+      sumK.every((h) => h.range.start.line === 1) &&
+      sumK.map((h) => h.range.start.character).join(',') === '4,9',
+    JSON.stringify(sumK)
+  );
+
+  const renamedK = await c.request('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 0, character: 4 },
+    newName: 'm',
+  });
+  const editsK = renamedK?.changes?.[URI];
+  check(
+    'renaming the let k edits its declaration only',
+    editsK?.length === 1 && editsK[0].range.start.line === 0,
+    JSON.stringify(renamedK)
+  );
+
+  const renamedIndex = await c.request('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 1, character: 4 },
+    newName: 'j',
+  });
+  const editsIndex = renamedIndex?.changes?.[URI];
+  check(
+    'renaming the index of the sum edits the two k of the call only',
+    editsIndex?.length === 2 &&
+      editsIndex.every((e) => e.range.start.line === 1 && e.newText === 'j'),
+    JSON.stringify(renamedIndex)
+  );
+
+  const outerH = await c.request('textDocument/references', {
+    textDocument: { uri: URI },
+    position: { line: 2, character: 4 },
+    context: { includeDeclaration: true },
+  });
+  check(
+    'the let h has no reference in the limit, which binds its own h',
+    outerH?.length === 1 && outerH[0].range.start.line === 2,
+    JSON.stringify(outerH)
+  );
+
+  const limitH = await c.request('textDocument/references', {
+    textDocument: { uri: URI },
+    position: { line: 3, character: 10 },
+    context: { includeDeclaration: true },
+  });
+  check(
+    'the implicit variable of a limit has its two occurrences in the call',
+    limitH?.length === 2 &&
+      limitH.map((r) => r.range.start.character).join(',') === '10,13',
+    JSON.stringify(limitH)
+  );
+
+  // The engine chooses the implicit variable of a `limit` by name: never a
+  // library name, and the first in sorted order among the names the operand
+  // reads. A rename that changes that choice changes the value and is
+  // refused; one that keeps it goes through.
+  const toPi = await c.requestRaw('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 3, character: 10 },
+    newName: 'Pi',
+  });
+  check(
+    'renaming the implicit variable of a limit to a library name is refused',
+    toPi.error?.message.includes('would change which variable') === true,
+    JSON.stringify(toPi)
+  );
+
+  const toT = await c.request('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 3, character: 13 },
+    newName: 't',
+  });
+  const editsT = toT?.changes?.[URI];
+  check(
+    'renaming the implicit variable of a limit to a free name edits the call',
+    editsT?.length === 2 &&
+      editsT.every((e) => e.range.start.line === 3 && e.newText === 't'),
+    JSON.stringify(toT)
+  );
+
+  const toZ = await c.requestRaw('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 4, character: 10 },
+    newName: 'z',
+  });
+  check(
+    'renaming the implicit variable past another candidate in sorted order is refused',
+    toZ.error?.message.includes('would change which variable') === true,
+    JSON.stringify(toZ)
+  );
+
+  const toA = await c.request('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 4, character: 10 },
+    newName: 'a',
+  });
+  const editsA = toA?.changes?.[URI];
+  check(
+    'renaming the implicit variable to a name that keeps the choice edits the call',
+    editsA?.length === 2 &&
+      editsA.every((e) => e.range.start.line === 4 && e.newText === 'a'),
+    JSON.stringify(toA)
+  );
+
+  // After `K` becomes `N`, the inner limit binds `M` and the outer one `N`:
+  // the same kinds and spans, in exchanged scopes, and the value changes
+  // from 1 to 0.
+  const toN = await c.requestRaw('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 5, character: 12 },
+    newName: 'N',
+  });
+  check(
+    'a rename that exchanges the variables of two nested limits is refused',
+    toN.error?.message.includes('would change which variable') === true,
+    JSON.stringify(toN)
+  );
+
+  const toA2 = await c.request('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 5, character: 12 },
+    newName: 'A',
+  });
+  const editsA2 = toA2?.changes?.[URI];
+  check(
+    'a rename that keeps the variables of two nested limits edits the inner one',
+    editsA2?.length === 2 &&
+      editsA2.every((e) => e.range.start.line === 5 && e.newText === 'A'),
+    JSON.stringify(toA2)
+  );
+});
+
 await scenario(
   'outline',
   {
