@@ -8,6 +8,10 @@ import type {
   TypeParameter,
   TypeReference,
 } from '../common/type/types.js';
+import {
+  hasRecordField,
+  requiredFieldKeys,
+} from '../common/type/types.js';
 import { isSubtype, provablyDisjoint } from '../common/type/subtype.js';
 import { groundSkeleton } from '../common/type/instantiate.js';
 import { applyTypeReference, declarationOf } from '../common/type/reference.js';
@@ -676,48 +680,30 @@ function staticInhabits(t: Type, target: Type): Inhabits {
   return provablyDisjoint(t, target) ? 'no' : 'maybe';
 }
 
-/** D14b — record payloads are checked value-shape-aware with an EXACT key
- * set: record subtyping is width-based (extra lhs keys pass), and a
- * dictionary literal with exotic keys synthesizes `dictionary<V>` with no
- * key names at all, so a pure type-level check either over-admits or cannot
- * decide. The actual keys are compared against the definition's field map;
- * the field TYPES go through the ordinary subtype relation. */
+/** D14b — a record payload is checked against the actual keys of the value
+ * when the value is a dictionary literal: a dictionary literal with exotic
+ * keys synthesizes `dictionary<V>` with no key names at all, so a pure
+ * type-level check cannot decide. Records are closed, so the keys of the
+ * value must be fields of the definition, and every field that is not
+ * optional (`b: string?` is optional) must be there. The field TYPES go
+ * through the ordinary subtype relation. */
 function recordInhabits(expr: Expression, target: RecordType): Inhabits {
-  const fields = target.elements;
-  const fieldCount = Object.keys(fields).length;
-
   if (isDictionary(expr)) {
     const keys = expr.keys;
-    if (keys.length !== fieldCount) return 'no';
+    if (keys.some((k) => !hasRecordField(target, k))) return 'no';
+    if (requiredFieldKeys(target).some((k) => !keys.includes(k))) return 'no';
     let result: Inhabits = 'yes';
     for (const k of keys) {
-      const ft = fields[k];
-      if (ft === undefined) return 'no';
-      const r = staticInhabits(expr.get(k)!.type.type, ft);
+      const r = staticInhabits(expr.get(k)!.type.type, target.elements[k]);
       if (r === 'no') return 'no';
       if (r === 'maybe') result = 'maybe';
     }
     return result;
   }
 
-  // Not a dictionary VALUE — judge by static type. A record STATIC type has
-  // an exact key set by definition, so the key comparison stays exact.
-  const t = expr.type.type;
-  if (typeof t === 'object' && t.kind === 'record') {
-    const keys = Object.keys(t.elements);
-    if (keys.length !== fieldCount) return 'no';
-    let result: Inhabits = 'yes';
-    for (const k of keys) {
-      const ft = fields[k];
-      if (ft === undefined) return 'no';
-      const r = staticInhabits(t.elements[k], ft);
-      if (r === 'no') return 'no';
-      if (r === 'maybe') result = 'maybe';
-    }
-    return result;
-  }
-  if (t === 'unknown' || t === 'any') return 'maybe';
-  return provablyDisjoint(t, target) ? 'no' : 'maybe';
+  // Not a dictionary VALUE — judge by static type. Record types are closed,
+  // so the subtype relation compares the key sets exactly.
+  return staticInhabits(expr.type.type, target);
 }
 
 /** Tuple bodies check POSITIONALLY, ignoring field names: a tuple's field
@@ -942,8 +928,9 @@ export function installConstructorFunction(
       if (rawVerdict !== 'no') return undefined;
 
       // User arm. Arity outside the user arm (statically rejected already;
-      // reachable when a width-subtyped payload passed the static gate but
-      // failed the exact-key runtime check): report against the body.
+      // reachable when a payload whose static type did not decide the
+      // verdict passed the static gate but failed the exact-key runtime
+      // check): report against the body.
       const req = (userArm.args ?? []).length;
       const max =
         userArm.variadicArg !== undefined
@@ -958,12 +945,12 @@ export function installConstructorFunction(
 
       // The operands must inhabit the USER arm's domain before its body runs
       // — arity alone is not admission. Reachable when the static resolver
-      // selected the raw arm (a width-subtyped record payload) but the
-      // runtime exact-key check refuted it: falling through to a user arm a
-      // position of which DEFINITELY refutes would silently run the body on
-      // an argument it never admits. Blame the raw arm when the call has its
-      // shape (the mistake is the payload — e.g. an extra key), the refuting
-      // position otherwise. An undecided position proceeds: the static gate
+      // selected the raw arm (a payload whose static type did not decide the
+      // verdict) but the runtime exact-key check refuted it: falling through
+      // to a user arm a position of which DEFINITELY refutes would silently
+      // run the body on an argument it never admits. Blame the raw arm when
+      // the call has its shape (the mistake is the payload — e.g. an extra
+      // key), the refuting position otherwise. An undecided position proceeds: the static gate
       // admitted it.
       for (let i = 0; i < ops.length; i++) {
         // A generic user arm quantifies its own variables: membership is a

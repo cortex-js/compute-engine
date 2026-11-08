@@ -288,7 +288,7 @@ describe('THE SUBTYPE RELATION ON A SAMPLE OF TYPES', () => {
           'record{kind: value, next: record{kind: value, next: string} | integer}'
         )
     ).toBe(false);
-    expect(ce.type('R').matches('record{kind: value}')).toBe(true);
+    expect(ce.type('R').matches('record{kind: value, next: any}')).toBe(true);
     // Both types are parsed first: the keys of two calls are comparable only
     // while no question in between drops the interning table.
     const withInteger = ce.type('record{kind: value, next: integer}').type;
@@ -371,12 +371,14 @@ describe('COULDMATCH ON A SAMPLE OF TYPES', () => {
     ce.declareType('E0', 'never', { alias: true });
     for (let i = 1; i <= 10; i++)
       ce.declareType(`E${i}`, `E${i - 1}`, { alias: true });
-    expect(ce.type('record{a: E10}').couldMatch('record{b: integer}')).toBe(
-      false
-    );
-    expect(ce.type('record{b: integer}').couldMatch('record{a: E10}')).toBe(
-      false
-    );
+    // `record{a: any?, b: integer?}` overlaps every record of the keys `a`
+    // and `b` whose fields have values, so only the empty field refutes it.
+    expect(
+      ce.type('record{a: E10}').couldMatch('record{a: any?, b: integer?}')
+    ).toBe(false);
+    expect(
+      ce.type('record{a: any?, b: integer?}').couldMatch('record{a: E10}')
+    ).toBe(false);
     expect(ce.type('E10').couldMatch('integer')).toBe(false);
   });
 
@@ -705,15 +707,17 @@ describe('COULDMATCH ON A SAMPLE OF TYPES', () => {
   it('sees an empty field through an alias', () => {
     const ce = new ComputeEngine();
     ce.declareType('Empty', 'never', { alias: true });
-    expect(ce.type('record{a: Empty}').couldMatch('record{b: integer}')).toBe(
-      false
-    );
-    expect(ce.type('record{b: integer}').couldMatch('record{a: Empty}')).toBe(
-      false
-    );
-    // A field that holds values keeps the overlap of two open records.
     expect(
-      ce.type('record{a: tuple<integer>}').couldMatch('record{b: integer}')
+      ce.type('record{a: Empty}').couldMatch('record{a: any?, b: integer?}')
+    ).toBe(false);
+    expect(
+      ce.type('record{a: any?, b: integer?}').couldMatch('record{a: Empty}')
+    ).toBe(false);
+    // A field that holds values keeps the overlap.
+    expect(
+      ce
+        .type('record{a: tuple<integer>}')
+        .couldMatch('record{a: any?, b: integer?}')
     ).toBe(true);
   });
 
@@ -765,18 +769,18 @@ describe('COULDMATCH ON A SAMPLE OF TYPES', () => {
     ['tuple', 'indexed_collection<integer>'],
     ['record{a: any}', 'dictionary<integer>'],
     ['record{a: integer, b: any}', 'record'],
-    ['record{a: any}', 'record{a: integer, b: string}'],
+    ['record{a: any, b: string?}', 'record{a: integer, b: string}'],
     ['dictionary', 'dictionary<integer | missing>'],
     ['record{a: integer}', 'collection<tuple<string, integer>>'],
     // The value `{a: 1}` is both: its one entry is `("a", 1)`.
     ['record{a: integer}', 'collection<tuple<"a", integer>>'],
-    // Records are open: `{a: 1, b: 1}` is both.
-    ['record{a: integer}', 'record{b: integer}'],
-    // `list<never>` holds the empty list: `{a: [], b: 1}` is both.
-    ['record{a: list<never>}', 'record{b: integer}'],
+    // Two records whose fields are all optional share the empty record.
+    ['record{a: integer?}', 'record{b: integer?}'],
+    // `list<never>` holds the empty list: `{a: []}` is both.
+    ['record{a: list<never>}', 'record{a: list<integer>}'],
     // A closed range with equal endpoints holds that endpoint.
-    ['record{a: real<0..0>}', 'record{b: integer}'],
-    ['record{a: rational<1..1>}', 'record{b: integer}'],
+    ['record{a: real<0..0>}', 'record{a: integer}'],
+    ['record{a: rational<1..1>}', 'record{a: integer}'],
     ['value', '!integer'],
     // Two lists with no dimensions share the empty list, whatever their
     // elements.
@@ -809,13 +813,17 @@ describe('COULDMATCH ON A SAMPLE OF TYPES', () => {
     ['tuple', 'list<integer>'],
     ['record{a: string}', 'dictionary<integer>'],
     ['record{a: string}', 'record{a: integer}'],
+    // Record types are closed: a key that one side requires must be a key
+    // of the other.
+    ['record{a: integer}', 'record{b: integer}'],
+    ['record{a: any}', 'record{a: integer, b: string}'],
     // No value has the field `a` of the empty type.
-    ['record{a: never}', 'record{b: integer}'],
+    ['record{a: never}', 'record{a: any?, b: integer?}'],
     // A nested required field of the empty type empties the record too.
-    ['record{a: record{c: never}}', 'record{b: integer}'],
-    ['record{a: tuple<never>}', 'record{b: integer}'],
+    ['record{a: record{c: never}}', 'record{a: any?, b: integer?}'],
+    ['record{a: tuple<never>}', 'record{a: any?, b: integer?}'],
     // A list with one cell of the empty type has no value.
-    ['record{a: list<never^1>}', 'record{b: integer}'],
+    ['record{a: list<never^1>}', 'record{a: any?, b: integer?}'],
     // A type with no value overlaps nothing, through any route: the
     // subtype fallback (an empty type is a subtype of many others), a
     // negation, or a shared matrix.
@@ -831,9 +839,9 @@ describe('COULDMATCH ON A SAMPLE OF TYPES', () => {
     ['record{a: integer & string}', 'record{}'],
     // `integer` and `real` hold finite numbers only: a range that starts at
     // `+∞` or ends at `−∞` holds none.
-    ['record{a: integer<oo..>}', 'record{b: integer}'],
-    ['record{a: integer<..-oo>}', 'record{b: integer}'],
-    ['record{a: real<oo..>}', 'record{b: integer}'],
+    ['record{a: integer<oo..>}', 'record{a: any?, b: integer?}'],
+    ['record{a: integer<..-oo>}', 'record{a: any?, b: integer?}'],
+    ['record{a: real<oo..>}', 'record{a: any?, b: integer?}'],
     ['tuple<integer & string>', 'tuple'],
     ['record{a: !any}', 'record{}'],
     ['integer & string', 'integer'],

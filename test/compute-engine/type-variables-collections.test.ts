@@ -92,7 +92,7 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // what is left after removing one of a string's own characters is a
     // string, so it gained a leading string-preserving arm.
     expect(sig(ce, 'DeleteAt')).toBe(
-      '((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T: any)'
+      '((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T: any) & ((dictionary<V>, string) -> dictionary<V> where V: any)'
     );
     // UNBOUNDED (the D4 audit's spelling). A bound on `T` would also
     // constrain the SOURCE collection's elements, since the same variable

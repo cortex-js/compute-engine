@@ -9,7 +9,7 @@ import {
   isValidType,
   NUMERIC_TYPES_SET,
 } from './primitive.js';
-import { isComplexInfinityValue } from './types.js';
+import { isComplexInfinityValue, requiredFieldKeys } from './types.js';
 import { declarationOf } from './reference.js';
 import { typeToDedupKey, typeToString } from './serialize.js';
 import {
@@ -614,7 +614,7 @@ export function isPointElementType(
 }
 
 // Bare family names place no constraint on their contents. Entry iteration
-// of a dictionary or an open record still exposes a key/value tuple.
+// of a bare dictionary or record still exposes a key/value tuple.
 export function collectionElementType(type: Readonly<Type>): Type | undefined {
   // A transparent alias of a collection IS that collection, so its elements
   // are the body's elements: `At(L, 1)` for `L: myints` (an alias of
@@ -767,14 +767,8 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
       elements: [{ type: 'string' }, { type: type.values }],
     };
 
-  // A record type is open: `record{a: integer}` matches `{a: 1, b: Missing}`,
-  // a value with fields it does not declare, of any type. An entry of such a
-  // value is `("b", Missing)`, so the entry type is `tuple<string, any>`,
-  // not the join of the declared fields: with that join, `FlatMap(ra, x ↦
-  // [At(x, 2)])` refused the entry `("b", Missing)` with an
-  // `incompatible-type` error. (CE-77) A closed record (the type of a
-  // dictionary value) has exactly its listed fields, so its entries hold the
-  // join of their types.
+  // A record type is closed: a value has only the listed fields, so its
+  // entries hold the join of the field types, optional fields too.
   if (type.kind === 'record')
     return {
       kind: 'tuple',
@@ -784,14 +778,11 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
           // A field type that holds an open type variable cannot be
           // joined (`widen()` requires ground types): the union of the
           // fields is a sound supertype instead.
-          type:
-            type.closed !== true
-              ? 'any'
-              : Object.values(type.elements).some(
-                    (t) => freeTypeVariables(t).size > 0
-                  )
-                ? joinWithOpenMembers(Object.values(type.elements))
-                : widen(...Object.values(type.elements)),
+          type: Object.values(type.elements).some(
+            (t) => freeTypeVariables(t).size > 0
+          )
+            ? joinWithOpenMembers(Object.values(type.elements))
+            : widen(...Object.values(type.elements)),
         },
       ],
     };
@@ -799,25 +790,18 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
 }
 
 /**
- * The type of the values of a dictionary VALUE whose type is `t`: the join
- * of its field types when `t` is a record type, the value type of a
- * `dictionary<V>`, otherwise `undefined`.
- *
- * Only for the type of a dictionary value itself, never for a declared type.
- * The callers decide which types those are: a dictionary literal, or a symbol
- * whose type was inferred from the dictionary it holds
- * (`closedDictionaryType()`, `boxed-expression/generic-instantiation.ts`).
- * The type of a dictionary value is
- * the closed record of exactly the fields it has (`BoxedDictionary`), so the
- * join of those fields holds every value. A declared record type is open
- * (`collectionElementType()` gives `tuple<string, any>` for its entries), so
- * its values are `any`. (CE-77)
+ * The type of the values of a dictionary or record whose type is `t`: the
+ * join of its field types when `t` is a record type (records are closed, so
+ * a value has only those fields), the value type of a `dictionary<V>`,
+ * otherwise `undefined`.
  */
 export function dictionaryValueValuesType(t: Readonly<Type>): Type | undefined {
   if (typeof t === 'string') return undefined;
   if (t.kind === 'dictionary') return t.values;
-  if (t.kind === 'record')
-    return t.closed === true ? widen(...Object.values(t.elements)) : 'any';
+  if (t.kind === 'record') {
+    const fields = Object.values(t.elements);
+    return fields.length === 0 ? 'never' : widen(...fields);
+  }
   return undefined;
 }
 
@@ -3513,21 +3497,21 @@ function overlapsDeferred(
   // is exempt from the general overlap admission (`runtimeCheckExemptParam`
   // classes it with the collection kinds), so this function is the only
   // admission for such an operand that the subtype relation does not
-  // already accept. An open record type is not a subtype of
-  // `dictionary<V>` (its values can have other fields of any type), but its
-  // values with only the listed fields are dictionaries of `V` when each
-  // field can hold a `V`: `record{a: integer}` holds `{a: 1}`, a
-  // `dictionary<integer>`. So the operand is deferred unless a field type is
-  // provably disjoint from `V` (`record{a: string}` at
-  // `dictionary<integer>`).
+  // already accept. Record types are closed, so a record type is a subtype
+  // of `dictionary<V>` when every field type is a subtype of `V`. Another
+  // record type still has values that are dictionaries of `V` when each
+  // REQUIRED field can hold a `V` (an optional field can be left out):
+  // `record{a: number, b: string?}` holds `{a: 1}`, a `dictionary<integer>`.
+  // So the operand is deferred unless a required field type is provably
+  // disjoint from `V` (`record{a: string}` at `dictionary<integer>`).
   if (
     typeof t !== 'string' &&
     typeof param !== 'string' &&
     t.kind === 'record' &&
     param.kind === 'dictionary'
   )
-    return Object.values(t.elements).every(
-      (field) => !provablyDisjoint(field, param.values)
+    return requiredFieldKeys(t).every(
+      (key) => !provablyDisjoint(t.elements[key], param.values)
     );
 
   // TUPLE parameters participate too, and only against a tuple operand.

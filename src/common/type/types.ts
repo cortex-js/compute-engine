@@ -449,34 +449,78 @@ export type ValueType = {
 
 /** A record is a collection of key-value pairs.
  *
- * The keys are strings. The set of keys is fixed.
+ * The keys are strings. A record type is CLOSED: a value of
+ * `record{a: integer, b: string}` has exactly the keys `a` and `b`, and no
+ * other key. A field can be OPTIONAL (`record{a: integer, b: string?}`): a
+ * value can leave the key `b` out, and when the key is there, its value is a
+ * `string`. A read of an optional field that the value leaves out gives the
+ * absent value of a read (`Missing`, or `NaN` for a numeric field), as an
+ * index out of range does.
  *
- * For a record type to be a subtype of another record type, it must contain
- * every key required by the other type, and all their types must match (width
- * subtyping). It may contain additional keys.
+ * Subtyping:
  *
- * A record type is OPEN: `record{a: integer}` holds every value that has a
- * field `a` of type `integer`, and also other fields of any type. So it is a
- * `dictionary<T>` only when `T` holds every value.
+ * - Depth subtyping: `record{a: integer}` is a subtype of `record{a: real}`.
+ * - No width subtyping: `record{a: integer, b: string}` is NOT a subtype of
+ *   `record{a: integer}`, because the second type has no key `b`.
+ * - A record type is a subtype of a record type that has every one of its
+ *   keys, when each key that the second type requires is also required by
+ *   the first: `record{a: integer}` and `record{a: integer, b: string}` are
+ *   subtypes of `record{a: integer, b: string?}`.
+ * - A record type is a subtype of `dictionary<V>` when every field type,
+ *   optional fields too, is a subtype of `V`.
  *
- * The type of a dictionary VALUE is CLOSED (`closed: true`): the value has
- * exactly the listed fields and no other. `{a: 1}` is typed
- * `record{a: integer}` with `closed: true`, and that type is a subtype of
- * `dictionary<integer>`. No type syntax spells a closed record: a closed
- * record prints as the open record with the same fields, and the parser
- * makes only open records. A closed record is a subtype of the open record
- * with the same fields, and a record type is a subtype of a closed record
- * only when it is closed and has the same set of keys.
+ * A program that must accept other keys takes a `dictionary`. The bare
+ * primitive `record` holds every record.
  *
+ * Build a record type with {@link makeRecordType}, which keeps the list of
+ * optional keys in its normal form.
  */
 export type RecordType = {
   kind: 'record';
   elements: Record<string, Type>;
-  /** The values of this type have exactly the keys of `elements`. Set only
-   * on the type of a dictionary value; absent on every type that the parser
-   * makes. */
-  closed?: true;
+  /** The keys of `elements` that a value can leave out, sorted. Absent when
+   * every field is required; never an empty list (`makeRecordType()`). */
+  optional?: readonly string[];
 };
+
+/** Whether `key` is an optional field of the record type `t`. A key that
+ * `t` does not list is not optional: it is not a field. */
+export function isOptionalField(t: Readonly<RecordType>, key: string): boolean {
+  return t.optional !== undefined && t.optional.includes(key);
+}
+
+/** Whether `key` is a field of the record type `t`, required or optional.
+ * An own-property test: `Object.prototype` member names (`toString`) are
+ * valid keys, and `key in` would find them on the prototype. */
+export function hasRecordField(t: Readonly<RecordType>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(t.elements, key);
+}
+
+/** The keys of the record type `t` that every value has. */
+export function requiredFieldKeys(t: Readonly<RecordType>): string[] {
+  const keys = Object.keys(t.elements);
+  return t.optional === undefined
+    ? keys
+    : keys.filter((k) => !t.optional!.includes(k));
+}
+
+/**
+ * A record type with the fields `elements`, of which the keys in `optional`
+ * are optional. The list of optional keys is sorted, keeps only keys of
+ * `elements`, and is left out when it is empty, so that two spellings of
+ * one type have one structure.
+ */
+export function makeRecordType(
+  elements: Record<string, Type>,
+  optional?: Iterable<string>
+): RecordType {
+  if (optional === undefined) return { kind: 'record', elements };
+  const keys = [...new Set(optional)]
+    .filter((k) => Object.prototype.hasOwnProperty.call(elements, k))
+    .sort();
+  if (keys.length === 0) return { kind: 'record', elements };
+  return { kind: 'record', elements, optional: keys };
+}
 
 /** The stored-field layout of an **object** type — the engine's one mutable
  * value kind.

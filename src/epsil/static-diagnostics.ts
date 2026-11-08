@@ -206,6 +206,13 @@ const CANONICALIZATION_ERROR_CODES = new Set([
   // once the receiver's static type is decided, so it is a canonicalization
   // error and `epsil check` can report it.
   'dot-call-not-a-protocol-function',
+  // A read of a field that the record type of the operand does not list
+  // (`r.b` with `r: record{a: integer}`). Record types are closed, so the
+  // `Field` canonical handler (`library/collections.ts`) refuses it once the
+  // type of the operand is known, before anything runs. The same code from
+  // an evaluation (an object, a tagged nominal value) never reaches this
+  // pass, which evaluates nothing.
+  'unknown-field',
   // A collection operator's callback declares a different number of
   // parameters than the operator passes it (`Map((p, q) => p + q, xs)`). The
   // operators mint it from their canonical handlers, so — like the
@@ -3335,7 +3342,9 @@ function otherArmsFit(
 
 /** Whether `value` is a literal whose static type is exactly its runtime
  * type: a number, a string, a boolean, an absence or omission symbol, or a
- * list, tuple or set literal of such values. */
+ * list, tuple, set or dictionary literal of such values. The type of a
+ * dictionary literal is the record type of exactly its keys, and record
+ * types are closed. */
 function isClosedLiteralValue(
   value: ReturnType<ComputeEngine['box']>
 ): boolean {
@@ -3354,6 +3363,8 @@ function isClosedLiteralValue(
     isFunction(value, 'Set')
   )
     return value.ops.every((op) => isClosedLiteralValue(op));
+  if (isDictionary(value))
+    return value.values.every((op) => isClosedLiteralValue(op));
   return false;
 }
 
@@ -4160,6 +4171,23 @@ export function describeError(error: MathJsonExpression): string {
         name === undefined
           ? 'only a protocol function can be called with a dot'
           : `\`${name}\` is not a protocol function${type === undefined ? '' : ` on a value of type \`${type}\``}: write \`${name}(x)\` or \`x |> ${name}\``;
+      break;
+    }
+    case 'unknown-field': {
+      // Payload: [name, the fields of the value or its type, joined with
+      // `, `]. The site is the value read.
+      const [name, fields] = payload;
+      const list =
+        fields === undefined || fields === ''
+          ? ''
+          : `; the fields are ${fields
+              .split(', ')
+              .map((f) => `\`${f}\``)
+              .join(', ')}`;
+      detail =
+        name === undefined
+          ? 'unknown field'
+          : `\`${name}\` is not a field${list}`;
       break;
     }
     case 'constant-assignment':

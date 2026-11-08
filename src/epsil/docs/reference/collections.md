@@ -517,7 +517,7 @@ dedup([1, 1, 2, 2, 1])
 
 ### deleteAt
 
-MathJSON `DeleteAt` · `((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T: any)`
+MathJSON `DeleteAt` · `((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T: any) & ((dictionary<V>, string) -> dictionary<V> where V: any)`
 
 Return a copy of the indexed collection with the element at the 1-based `index` removed.
 
@@ -525,9 +525,18 @@ A negative index counts from the end. An out-of-range, zero, or non-integer inde
 
 Deleting from a string yields a string.
 
+On a dictionary or a record, `DeleteAt(d, key)` returns a copy without the entry of the string `key`; `d` does not change. A key that is not there gives the value unchanged. The type of a record loses the field (`record{a: integer, b: string?}` gives `record{a: integer}`); with a key known only at evaluation, every field of the record becomes optional.
+
+A value of a declared (nominal) record type is not a collection, so `DeleteAt` refuses it, as `At` does.
+
 ```epsil
 deleteAt([1, 2, 3, 4], 2)
 // ➔ [1,3,4]
+```
+
+```epsil
+deleteAt({a -> 1, b -> "x"}, "b")
+// ➔ {"a" -> 1}
 ```
 
 ### Dictionary
@@ -693,6 +702,8 @@ On a record or dictionary value, `Field(d, "x")` behaves exactly as `d["x"]` (`A
 On a value of a NOMINAL type whose definition body has named fields (a record body, or a named-tuple body), the field is resolved through the type definition — the sanctioned accessor window of the nominal-types design (D6/§4.5b D16). This does not make the value a collection: `First(p)` and `p["x"]` keep rejecting.
 
 A field name that is not in a record/named-tuple definition is a static defect (the result type is `error`); on an unknown-typed operand the expression stays symbolic.
+
+Record types are closed: on an operand of a record type, a field name that the type does not list is refused when the expression is boxed (`unknown-field`). An optional field (`b: string?`) that the value leaves out reads as the absent value of its type: `Missing`, or `NaN` for a numeric field.
 
 ```epsil
 {x -> 1, y -> 2}.y

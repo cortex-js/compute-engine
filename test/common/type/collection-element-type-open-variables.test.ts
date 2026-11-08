@@ -4,14 +4,14 @@
  * A generic signature has parameter types such as `dictionary<T>` or
  * `tuple<T, U>`. `collectionElementType()` threw on `dictionary<T>`: it
  * parsed the string `tuple<string, T>`, and the parser does not know `T`.
- * On a closed record and on a tuple whose field or slot types hold a type
+ * On a record and on a tuple whose field or slot types hold a type
  * variable, it joined them with `widen()`, which requires ground types
  * (`docs/TYPE-SYSTEM.md` §4.2) and fails an assertion in a development
  * build. Now the dictionary entry type is built directly, and only the
  * ground members are joined; each open member is added to the union as it
- * is. A ground type gives an equivalent result (the entry type of a
- * dictionary of closed records keeps `closed`, and a union keeps the order
- * of its members).
+ * is. A ground type gives an equivalent result (a union keeps the order of
+ * its members). Record types are closed, so the entries of a record hold the
+ * values of its listed fields.
  */
 import { collectionElementType } from '../../../src/common/type/utils';
 import type { Type } from '../../../src/common/type/types';
@@ -52,11 +52,10 @@ describe('collectionElementType of a type with open type variables', () => {
     expect(failures).toEqual([]);
   });
 
-  test('a closed record with open fields lists them as a union', () => {
+  test('a record with open fields lists them as a union', () => {
     const { result, failures } = elementOf({
       kind: 'record',
       elements: { a: T, b: U },
-      closed: true,
     });
     expect(result).toEqual({
       kind: 'tuple',
@@ -129,7 +128,6 @@ describe('collectionElementType of a type with open type variables', () => {
       elementOf({
         kind: 'record',
         elements: { a: 'integer', b: 'real' },
-        closed: true,
       }).result
     ).toEqual({
       kind: 'tuple',
@@ -141,10 +139,11 @@ describe('collectionElementType of a type with open type variables', () => {
         elements: [{ type: 'integer' }, { type: 'real' }],
       }).result
     ).toEqual('real');
-    // An open record has entries of any type.
+    // A record with one field whose type is a variable: the entries hold
+    // that variable.
     expect(elementOf({ kind: 'record', elements: { a: T } }).result).toEqual({
       kind: 'tuple',
-      elements: [{ type: 'string' }, { type: 'any' }],
+      elements: [{ type: 'string' }, { type: T }],
     });
   });
 });

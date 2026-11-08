@@ -1308,9 +1308,16 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
       ce,
       'type alias pt = record{x: number, y: number}\nconst p: pt = {x -> 1, z -> 2}\np'
     );
+    // Record types are closed, and the type of a dictionary literal is the
+    // record of exactly its keys, so the static pass refuses the literal, as
+    // it refuses a mismatched tuple literal; the run reports it too.
     const messages = r.diagnostics.map((d) => d.message);
-    expect(messages).toHaveLength(1);
-    expect(String(messages[0][1])).toContain('expected `');
+    expect(messages.map((m) => m[0])).toEqual([
+      'static-type-error',
+      'runtime-error',
+    ]);
+    expect(String(messages[0][1])).toContain('declared type "pt"');
+    expect(String(messages[1][1])).toContain('expected `pt`');
   });
 
   test('equality is structural over the tag (D9)', () => {

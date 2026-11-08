@@ -95,6 +95,51 @@ describe('Field on records and dictionaries (`d.x` ≡ `d["x"]`)', () => {
     expect(r.diagnostics ?? []).toEqual([]);
     expect(r.value!.toString()).toBe('(10, 10, NaN)');
   });
+
+  test('a declared dictionary: an absent key reads as the absence marker', () => {
+    // A dictionary has any keys, so a key that is not there reads as the
+    // absence marker of its value type.
+    const ce = new ComputeEngine();
+    const r = executeEpsil(
+      ce,
+      `const d: dictionary<integer> = {a -> 10, b -> 20}
+(d.a, d["a"], d.zz, d["zz"])`
+    );
+    expect(r.diagnostics ?? []).toEqual([]);
+    expect(r.value!.toString()).toBe('(10, 10, NaN, NaN)');
+  });
+
+  test('a declared record type has only its listed fields: an unlisted one is a static error', () => {
+    // Record types are closed. The refusal is for a declared type: the type
+    // of a literal, or of a symbol whose type was inferred from its value,
+    // describes only the current value, and a key that the value does not
+    // have reads as the absence marker.
+    const ce = new ComputeEngine();
+    for (const read of ['d.zz', 'd["zz"]']) {
+      const r = executeEpsil(
+        ce,
+        `let d: record{a: integer, b: integer} = {a -> 10, b -> 20}
+${read}`
+      );
+      expect(r.diagnostics?.map((x) => x.message[3])).toContain(
+        'unknown-field'
+      );
+      expect(r.diagnostics?.[0].message[1]).toBe(
+        '`zz` is not a field; the fields are `a`, `b` at `d`'
+      );
+    }
+  });
+
+  test('an optional field that the value leaves out reads as absent', () => {
+    const ce = new ComputeEngine();
+    const r = executeEpsil(
+      ce,
+      `function f(r: record{a: integer, b: string?, n: real?}) { (r.b, r.n, r["b"]) }
+f({a -> 1})`
+    );
+    expect(r.diagnostics ?? []).toEqual([]);
+    expect(r.value!.toString()).toBe('("Missing", NaN, "Missing")');
+  });
 });
 
 describe('Field on nominal types (the sanctioned accessor window)', () => {

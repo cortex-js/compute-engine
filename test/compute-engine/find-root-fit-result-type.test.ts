@@ -34,11 +34,17 @@ const ce = new ComputeEngine();
 
 const RESIDUAL_NORM = 'nan | real | signed_infinity';
 
+// Record types are closed, so the keys that only some calls write are
+// optional fields: `timedOut` and `phase` (a call cut short by a deadline),
+// `route` and `reason` (`evaluateAsync`).
+const OPTIONAL_KEYS =
+  'timedOut: boolean?, phase: string?, route: string?, reason: string?';
+
 const rootType = (params: string) =>
-  `record{parameters: ${params}, converged: boolean, residualNorm: ${RESIDUAL_NORM}, iterations: integer, stationary: boolean}`;
+  `record{parameters: ${params}, converged: boolean, residualNorm: ${RESIDUAL_NORM}, iterations: integer, stationary: boolean, ${OPTIONAL_KEYS}}`;
 
 const fitType = (params: string) =>
-  `record{parameters: ${params}, converged: boolean, residualNorm: ${RESIDUAL_NORM}, iterations: integer}`;
+  `record{parameters: ${params}, converged: boolean, residualNorm: ${RESIDUAL_NORM}, iterations: integer, ${OPTIONAL_KEYS}}`;
 
 /** Check the static type of `expr`, evaluate it, and check that the type of
  * the value is a subtype of the static type. Returns the value. */

@@ -2341,17 +2341,17 @@ function isCollectionKindArm(a: Type): boolean {
  * Whether the overlap deferral (`overlapsForDeferredValidation`) admits the
  * operand `op` at the parameter `param`.
  *
- * The deferral admits an open record type at a `dictionary<V>` parameter
- * when each listed field can hold a `V`: `record{a: integer}` holds
- * `{a: 1}`, a `dictionary<integer>`. But an open record also holds values
- * with other fields of any type, and a dictionary parameter is exempt from
- * the runtime conformance check (`runtimeCheckExemptParam`), so nothing
- * checks the value later. A symbol that HOLDS a dictionary value is
- * therefore judged by the type of that value, which lists every field:
- * with `r: record{a: integer}` holding `{a: 1, b: "x"}`, `f(r)` for
- * `f: (dictionary<integer>) -> integer` is refused, and with `r` holding
- * `{a: 1}` it is admitted. A symbol with no value is admitted on the
- * overlap of its type.
+ * The deferral admits a record type at a `dictionary<V>` parameter when
+ * each required field can hold a `V`: `record{a: number, b: string?}` holds
+ * `{a: 1}`, a `dictionary<integer>`. But the record type also holds values
+ * that are not dictionaries of `V` (`{a: 1, b: "x"}`), and a dictionary
+ * parameter is exempt from the runtime conformance check
+ * (`runtimeCheckExemptParam`), so nothing checks the value later. A symbol
+ * that HOLDS a dictionary value is therefore judged by the type of that
+ * value, which lists its fields: with `r: record{a: number, b: string?}`
+ * holding `{a: 1, b: "x"}`, `f(r)` for `f: (dictionary<integer>) -> integer`
+ * is refused, and with `r` holding `{a: 1}` it is admitted. A symbol with no
+ * value is admitted on the overlap of its type.
  */
 function admittedByDeferredOverlap(op: Expression, param: Type): boolean {
   if (!overlapsForDeferredValidation(op.type.type, param)) return false;

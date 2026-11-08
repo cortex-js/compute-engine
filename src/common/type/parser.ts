@@ -248,7 +248,9 @@ function normalizedTypeName(value: string): string {
 <object_type> ::= "object"
                 | "object" "{" ( <record_element> ( "," <record_element> )* )? "}"
 
-<record_element> ::= <key> ":" <type>
+<record_element> ::= <key> ":" <type> "?"?
+   (* A "?" after the field type makes the field optional:
+      `record{a: integer, b: string?}`. Only a record field can be optional. *)
 
 <key> ::= <identifier> | <verbatim_string>
 
@@ -2321,6 +2323,11 @@ export class Parser {
       do {
         const entry = this.parseRecordEntry();
         if (!entry) this.error(`Expected ${what} field`);
+        if (entry.optional === true && what === 'object')
+          this.error(
+            'An object field cannot be optional',
+            'Every field of an object type holds a value; declare the field with a type that admits the value you need'
+          );
         entries.push(entry);
       } while (this.match(','));
     }
@@ -2440,7 +2447,15 @@ export class Parser {
       this.error('Expected value type');
     }
 
-    return this.createNode<RecordEntryNode>('record_entry', { key, valueType });
+    // `b: string?`: the field is optional. The marker follows the whole
+    // field type, as the marker of an optional argument does.
+    const optional = this.match('?');
+
+    return this.createNode<RecordEntryNode>('record_entry', {
+      key,
+      valueType,
+      ...(optional ? { optional: true } : {}),
+    });
   }
 
   private parseDictionaryType(): DictionaryTypeNode | undefined {

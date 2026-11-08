@@ -540,6 +540,8 @@ p.x + p.y
 ```
 
 On a dictionary, `d.x` is exactly `d["x"]`, absent-key behavior included.
+On a record, a field that the type does not list is refused (see
+[records and dictionaries](#records-and-dictionaries)).
 The accessor reads one named field through the type's definition; it does
 not make the value a collection — `first(p)`, `p["x"]` and destructuring
 keep rejecting. (The dot must touch the value it reads: `p.x` is a field
@@ -822,6 +824,69 @@ between lengths (`^(M+N)`) is not supported.
 Note that a function is generic only when it is **declared** generic. Nothing
 is silently generalized: `x => x` is a function on some inferred type, not an
 implicit "for all `T`".
+
+## Records and dictionaries
+
+A **record** type lists the fields of its values, and a value has exactly
+those fields: `record{w: real, h: real}` holds `{w -> 2, h -> 3}`, and not
+`{w -> 2, h -> 3, d -> 1}`. The type of a dictionary literal is the record
+of exactly its keys.
+
+```epsil-live
+function area(r: record{w: real, h: real}) { r.w * r.h }
+area({w -> 2, h -> 3})
+// ➔ 6
+```
+
+A field that a value can leave out is **optional**: write a `?` after its
+type. A read of an optional field that the value leaves out gives the
+absent value of the field type — `missing`, or `NaN` for a numeric field —
+so `??` supplies a fallback:
+
+```epsil-live
+function label(r: record{id: integer, name: string?}) { r.name ?? "no name" }
+(label({id -> 1, name -> "a"}), label({id -> 2}))
+// ➔ ("a", "no name")
+```
+
+A field that a declared record type does not list is not a field: with
+`r: record{w: real, h: real}`, `r.d` is refused before the program runs
+(`unknown-field`). Without a declaration, the type of a value only describes
+that value, and a key that the value does not have reads as absent, as for a
+dictionary. The type of a conditional that gives records with different
+fields lists the fields of both, and a field that one branch leaves out is
+optional:
+
+```epsil-live
+function f(c: boolean) { if c { {a -> 1} } else { {a -> 2, b -> "x"} } }
+type(f(true))
+// ➔ TypeFrom("record{a: integer, b: string?}")
+```
+
+A record is a value: it does not change. A new field, or a new value for a
+field, is a copy made with the spread (`{->, ...p, z -> 3}`), and
+`deleteAt(p, key)` is a copy without the key. The type of the copy follows:
+
+```epsil-live
+let p = {x -> 1, y -> 2}
+let q = deleteAt(p, "y")
+(q, p, type(q))
+// ➔ ({"x" -> 1}, {"x" -> 1, "y" -> 2}, TypeFrom("record{x: integer}"))
+```
+
+A **dictionary** has any keys, with values of one type: declare it
+`dictionary<V>` when a program reads keys that are not known in advance. A
+key that it does not have reads as the absent value of `V`:
+
+```epsil-live
+let counts: dictionary<integer> = {a -> 1}
+(counts["b"], keys(counts))
+// ➔ (NaN, ["a"])
+```
+
+A record type is a `dictionary<V>` when every field type, optional fields
+too, is a `V`: a function that takes a `dictionary<integer>` takes
+`{a -> 1, b -> 2}`.
 
 ## Absence values
 

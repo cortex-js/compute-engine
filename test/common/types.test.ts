@@ -398,22 +398,20 @@ describe('Collection Type Parser', () => {
   // exactly the listed fields), and that type is a `dictionary<T>` when every
   // field type fits `T`. (CE-4, CE-10)
   it('makes a record a subtype of a dictionary', () => {
+    // Record types are closed, so a record is a dictionary of its field
+    // types.
     expect(
       isSubtype(
         parseType('record{red: integer, green: integer, blue: integer}'),
         parseType('dictionary<integer>')
       )
-    ).toBe(false);
+    ).toBe(true);
     expect(
       isSubtype(parseType('record{red: integer}'), parseType('dictionary<any>'))
     ).toBe(true);
     expect(
       isSubtype(
-        {
-          kind: 'record',
-          elements: { red: 'integer', green: 'integer' },
-          closed: true,
-        },
+        parseType('record{red: integer, green: integer?}'),
         parseType('dictionary<integer>')
       )
     ).toBe(true);
@@ -1603,21 +1601,17 @@ describe('reduceType Tests', () => {
   });
 
   describe('tuples and records meet structurally', () => {
-    it('merges the key sets of two records, because records are width-subtyped', () => {
-      // The value inhabiting both is the record carrying BOTH keys, and it is
-      // a subtype of each side — so refuting the pair, as this used to, was
-      // unsound.
-      expect(reduce('record{a: integer} & record{b: string}')).toBe(
-        'record{a: integer, b: string}'
-      );
+    it('refutes two records when one requires a key the other does not list', () => {
+      // Record types are closed: a value of both has only keys that both
+      // list.
+      expect(reduce('record{a: integer} & record{b: string}')).toBe('never');
       expect(
         reduce('record{a: integer, b: string} & record{b: string, c: boolean}')
-      ).toBe('record{a: integer, b: string, c: boolean}');
-      const merged = reduceType(
-        parseType('record{a: integer} & record{b: string}')
+      ).toBe('never');
+      // An optional key that the other side does not list is left out.
+      expect(reduce('record{a: integer, b: string?} & record{a: real}')).toBe(
+        'record{a: integer}'
       );
-      expect(isSubtype(merged, parseType('record{a: integer}'))).toBe(true);
-      expect(isSubtype(merged, parseType('record{b: string}'))).toBe(true);
     });
 
     it('treats an `Object.prototype` member name as an ordinary record key', () => {
@@ -1626,14 +1620,14 @@ describe('reduceType Tests', () => {
       // found the INHERITED function and handed it to `reduceType` as a type,
       // throwing "Unknown type kind" — and only when the name arrived from the
       // right-hand operand, so the meet was order-dependent too.
-      expect(reduce('record{a: integer} & record{toString: string}')).toBe(
-        'record{a: integer, toString: string}'
-      );
-      expect(reduce('record{toString: string} & record{a: integer}')).toBe(
-        'record{toString: string, a: integer}'
-      );
+      expect(
+        reduce('record{a: integer, toString: string?} & record{a: integer}')
+      ).toBe('record{a: integer}');
+      expect(
+        reduce('record{a: integer} & record{a: integer, toString: string?}')
+      ).toBe('record{a: integer}');
       expect(reduce('record{a: integer} & record{constructor: string}')).toBe(
-        'record{a: integer, constructor: string}'
+        'never'
       );
       // Still meets normally when both sides declare the prototype name.
       expect(
@@ -1642,19 +1636,19 @@ describe('reduceType Tests', () => {
     });
 
     it('does not let a record satisfy a key it never declared', () => {
-      // Width subtyping asks whether the lhs HAS each rhs key. `key in
-      // lhs.elements` answered yes for a prototype member name, so a record
-      // with no `toString` key satisfied a contract requiring one.
+      // The subtype test asks whether the lhs HAS each required rhs key.
+      // `key in lhs.elements` answered yes for a prototype member name, so a
+      // record with no `toString` key satisfied a contract requiring one.
       expect(
         isSubtype(
           parseType('record{a: integer}'),
-          parseType('record{toString: any}')
+          parseType('record{a: integer, toString: any}')
         )
       ).toBe(false);
       expect(
         isSubtype(
           parseType('record{a: integer, toString: string}'),
-          parseType('record{toString: string}')
+          parseType('record{a: integer, toString: string}')
         )
       ).toBe(true);
     });

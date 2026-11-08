@@ -2172,13 +2172,12 @@ function refineNestedUnknown(skeleton: Type, valueType: Type): Type {
     }
     case 'dictionary': {
       if (typeof valueType === 'string') return skeleton;
-      // Only a closed record (the type of a dictionary value) lists every
-      // field of its values. An open record type can have other fields, of
-      // any type, so it leaves the skeleton.
+      // A record type is closed: it lists every field of its values, so
+      // the values of the dictionary are the join of its field types.
       const values =
         valueType.kind === 'dictionary'
           ? valueType.values
-          : valueType.kind === 'record' && valueType.closed === true
+          : valueType.kind === 'record'
             ? widen(...Object.values(valueType.elements))
             : undefined;
       if (values === undefined) return skeleton;
@@ -2210,7 +2209,12 @@ function refineNestedUnknown(skeleton: Type, valueType: Type): Type {
       let changed = false;
       const elements: Record<string, Type> = {};
       for (const [key, field] of Object.entries(skeleton.elements)) {
-        const valueField = vt.elements[key];
+        const valueField = Object.prototype.hasOwnProperty.call(
+          vt.elements,
+          key
+        )
+          ? vt.elements[key]
+          : undefined;
         const refined =
           valueField === undefined
             ? field
@@ -2218,7 +2222,8 @@ function refineNestedUnknown(skeleton: Type, valueType: Type): Type {
         if (refined !== field) changed = true;
         elements[key] = refined;
       }
-      return changed ? { kind: 'record', elements } : skeleton;
+      // The optional keys of the skeleton stay optional.
+      return changed ? { ...skeleton, elements } : skeleton;
     }
     default:
       return skeleton;
@@ -2300,13 +2305,12 @@ export function refineConstructorPlaceholder(
       return { kind: 'set', elements: valueType.elements };
     case 'dictionary': {
       if (typeof valueType === 'string') return skeleton;
-      // Only a closed record (the type of a dictionary value) lists every
-      // field of its values. An open record type can have other fields, of
-      // any type, so it leaves the skeleton.
+      // A record type is closed: it lists every field of its values, so
+      // the values of the dictionary are the join of its field types.
       const values =
         valueType.kind === 'dictionary'
           ? valueType.values
-          : valueType.kind === 'record' && valueType.closed === true
+          : valueType.kind === 'record'
             ? widen(...Object.values(valueType.elements))
             : undefined;
       if (values === undefined || values === 'unknown') return skeleton;
@@ -2322,13 +2326,14 @@ export function refineConstructorPlaceholder(
       if (typeof valueType === 'string' || valueType.kind !== 'tuple')
         return skeleton;
       return { kind: 'tuple', elements: valueType.elements };
-    // A bare `record` takes the assigned record's field types
-    // (`r: record := {a: 1}` reports `record{a: integer}`); the record stays
-    // open, so a later field is still admitted by the contract. (D3.)
+    // A bare `record` takes the assigned record's type
+    // (`r: record := {a: 1}` reports `record{a: integer}`). The declared
+    // contract stays the bare `record`, so a later assignment of a record
+    // with other fields is still admitted.
     case 'record':
       if (typeof valueType === 'string' || valueType.kind !== 'record')
         return skeleton;
-      return { kind: 'record', elements: valueType.elements };
+      return valueType;
     default:
       return skeleton;
   }

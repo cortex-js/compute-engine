@@ -123,6 +123,9 @@ export interface RecordEntryNode extends ASTNode {
   kind: 'record_entry';
   key: string;
   valueType: TypeNode;
+  /** The field is optional (`b: string?`): a value can leave the key out.
+   * Only a record field can be optional; an object field cannot. */
+  optional?: boolean;
 }
 
 /** The parse of `object{name: T, …}` — the stored-field layout of an object

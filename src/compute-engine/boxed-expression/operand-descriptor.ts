@@ -763,12 +763,9 @@ class ExpressionOperandFacts implements OperandFacts {
     if (!(this._computed & ELEMENT_TYPE_COMPUTED)) {
       this._computed |= ELEMENT_TYPE_COMPUTED;
       const op = this.#op;
-      // A dictionary VALUE (a literal, or the value of a symbol with an
-      // inferred type, `closedDictionaryType()`) has exactly the fields of
-      // its record type, so its entries are typed by the join of those
-      // fields. The type alone cannot say so: a declared `record{…}` is
-      // open, and `collectionElementType()` gives `tuple<string, any>` for
-      // its entries. (CE-77)
+      // A dictionary value, or an operand of a record type
+      // (`closedDictionaryType()`), has exactly the fields of its type, so
+      // its entries are typed by the join of those fields.
       const closed = closedDictionaryType(op);
       const values =
         closed === undefined ? undefined : dictionaryValueValuesType(closed);

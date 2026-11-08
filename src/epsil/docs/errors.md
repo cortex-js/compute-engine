@@ -334,6 +334,16 @@ A protocol declares two kinds of member, and they are used differently. A `funct
 
 The mirror mistake, calling a property (`area(b)`), is reported as `protocol-property-not-callable`.
 
+## `unknown-field`
+
+A field was read, with a dot (`r.b`) or with a key (`r["b"]`), and the value has no field of that name.
+
+A record type lists every field of its values: `record{a: integer, b: string}` holds the values with the keys `a` and `b`, and no other key. So with `r: record{a: integer}`, `r.b` is refused before the program runs. A field that a value can leave out is declared optional, with a `?` after its type: with `r: record{a: integer, b: string?}`, `r.b` is a `string`, and it reads as `Missing` when the value has no key `b` (as `NaN` for a numeric field).
+
+A value that can have any keys is a dictionary: declare it `dictionary<V>`, and read a key with `d["b"]`.
+
+An object, or a value of a declared type, also has a fixed list of fields; the message names them.
+
 ## `dot-call-not-a-protocol-function`
 
 A function that is not a protocol member was called with a dot, as in `xs.Sort()`.

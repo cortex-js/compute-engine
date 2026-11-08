@@ -195,3 +195,22 @@ One issue of size L (CE-71):
   on 2026-11-02. Correct it in the same change.
 
 Separate: CE-1101 (P4), `Dot` over a list that holds `Nothing`.
+
+## 8. The implementation
+
+Implemented 2026-11-07 (session compute-engine-ac). Two choices differ from
+§7; the user can reverse each one:
+
+- `Field(r, "zz")` and `At(r, "zz")` refuse a field that the record type does
+  not list (the error `unknown-field`) only when `r` is a variable declared
+  with a record type and is not a constant. A dictionary literal, a variable
+  whose type is inferred and a constant give the absence value, as before.
+  Refusing them broke documented idioms (`d.missing` on a literal, a lookup
+  in an inferred character table). The alternative is the refusal for every
+  record type, with those idioms rewritten.
+- `DeleteAt` refuses a value of a nominal record type (`type P =
+  record{...}`): its signature accepts dictionaries and records, and a
+  nominal value is neither. The alternative is a fourth signature for
+  nominal records, whose result is no longer a value of the nominal type.
+
+Defects found on the way, older than this change: CE-1103 and CE-1104.

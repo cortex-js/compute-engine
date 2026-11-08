@@ -1,3 +1,44 @@
+## [Unreleased]
+
+### Breaking Changes
+
+- **Record types are closed, and a field can be optional.** A value of
+  `record{a: integer, b: string}` has exactly the keys `a` and `b`. There is
+  no width subtyping any more: `record{a: integer, b: string}` is not a
+  subtype of `record{a: integer}`, and a dictionary literal with an extra key
+  is not a value of the narrower record type. Depth subtyping stays. A field
+  written `b: string?` is optional: a value can leave its key out, and
+  `record{a: integer}` is a subtype of `record{a: integer, b: string?}`. A
+  field that holds `Missing` keeps its key. Dictionaries stay open: a record
+  type is a subtype of `dictionary<V>` when the type of each field, optional
+  fields too, is a subtype of `V`, and the empty dictionary `{->}` is a value
+  of every record type whose fields are all optional.
+  - The join of two record types has the keys of both; a key that only one
+    side lists, or that one side makes optional, is optional. The meet is
+    `never` when one side requires a key that the other does not list.
+  - `Values(r)`, the element type of a record and the type of its entries
+    are the join of the types of its fields.
+  - `Field(r, "zz")` and `At(r, "zz")` are the error `unknown-field` when `r`
+    is a variable declared with a record type that does not list `zz`. A
+    dictionary literal, a variable whose type is inferred and a constant
+    still give the absence value for a key they do not hold. Reading an
+    optional field that the value leaves out gives the absence value of the
+    field type (`Missing` for `b: string?`).
+  - `RecordType.closed` is removed from the type representation, and
+    `RecordType.optional` lists the optional keys.
+  - The result types of `FindRoot` and `FindFit` list `timedOut`, `phase`,
+    `route` and `reason` as optional fields.
+
+### New Features
+
+- **`DeleteAt(d, key)` removes a key from a dictionary or a record.**
+  `DeleteAt({"a" -> 1, "b" -> 2}, "b")` is `{"a" -> 1}`. The value is a copy:
+  the dictionary that the operand holds does not change. A key that the
+  dictionary does not hold gives the dictionary. For a record type the result
+  type has the field removed: with `r: record{a: integer, b: string}`, the
+  type of `DeleteAt(r, "b")` is `record{a: integer}`. A key that is not a
+  string is an error.
+
 ## 0.183.0 _2026-11-07_
 
 ### Breaking Changes

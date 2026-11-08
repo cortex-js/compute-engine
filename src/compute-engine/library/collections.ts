@@ -181,7 +181,10 @@ import {
   RecordType,
   TupleType,
   Type,
+  hasRecordField,
+  isOptionalField,
   listTensorRank,
+  makeRecordType,
 } from '../../common/type/types.js';
 import { typeToString } from '../../common/type/serialize.js';
 import {
@@ -230,10 +233,7 @@ import {
   readTypeVariablesAsBounds,
   substituteTypeVariables,
 } from '../../common/type/instantiate.js';
-import {
-  closedDictionaryType,
-  contextualSlotSignature,
-} from '../boxed-expression/generic-instantiation.js';
+import { contextualSlotSignature } from '../boxed-expression/generic-instantiation.js';
 import {
   broadcastAdmitsCollectionElement,
   broadcastCallbackResultType,
@@ -1473,14 +1473,20 @@ function unknownElementMapArm(t: Type): Type {
   // `Map(x ↦ x, v)` with `v` holding a dictionary, whose value is a set of
   // entries. An entry whose value can be absent can give an absent result
   // (`Map(x ↦ At(x, 2), w)` with `w := {a: Missing}` is `Set(Missing)`), as
-  // an absent slot of a tuple can. A record is open: it can hold more fields
-  // than it declares, absent ones included.
+  // an absent slot of a tuple can. A record type is closed: an entry holds
+  // the value of one of its listed fields.
   if (t.kind === 'dictionary')
     return mapResultType(
       t,
       provablyAdmits('missing', t.values) ? MISSING_OR_UNKNOWN : 'unknown'
     );
-  if (t.kind === 'record') return mapResultType(t, MISSING_OR_UNKNOWN);
+  if (t.kind === 'record')
+    return mapResultType(
+      t,
+      Object.values(t.elements).some((f) => provablyAdmits('missing', f))
+        ? MISSING_OR_UNKNOWN
+        : 'unknown'
+    );
   if (t.kind === 'tuple')
     return t.elements.some((e) => provablyAdmits('missing', e.type))
       ? { kind: 'list', elements: MISSING_OR_UNKNOWN }
@@ -1499,8 +1505,8 @@ const MISSING_OR_UNKNOWN: Type = {
  * Whether the type `t`, one arm of the source of a `Map`, states that an
  * element can be absent: a slot of a tuple, a value of a dictionary or an
  * element of another collection whose type admits `missing`
- * (`provablyAdmits`: an `unknown` element is no evidence). A record is open,
- * so it can hold an absent field that it does not declare.
+ * (`provablyAdmits`: an `unknown` element is no evidence). A record type is
+ * closed, so only a listed field can hold an absent value.
  */
 function armMayHoldAbsentElement(t: Type): boolean {
   const r = resolveTypeAlias(t);
@@ -1516,7 +1522,8 @@ function armMayHoldAbsentElement(t: Type): boolean {
       'collection',
       'indexed_collection',
     ].includes(r);
-  if (r.kind === 'record') return true;
+  if (r.kind === 'record')
+    return Object.values(r.elements).some((f) => provablyAdmits('missing', f));
   if (r.kind === 'dictionary') return provablyAdmits('missing', r.values);
   if (r.kind === 'tuple')
     return r.elements.some((e) => provablyAdmits('missing', e.type));
@@ -8864,6 +8871,60 @@ function canonicalMemberCall(
   return storedCall();
 }
 
+/**
+ * The `unknown-field` error of a read `base.name` when `base` is a variable
+ * whose DECLARED type is a record type that does not list `name` (a typed
+ * parameter, a typed `let`), or `undefined`.
+ *
+ * Record types are closed (a value has only the fields its type lists), so
+ * such a read cannot select a value of the declared type. The refusal is
+ * limited to a declared type, a contract: the type of a dictionary literal,
+ * or of a variable whose type was inferred from the value it holds,
+ * describes the current value only, and a read of a key that the value does
+ * not have gives the absent value of a read (`Missing`, or `NaN` for a
+ * numeric value), as for a dictionary. A constant is read as its value: an
+ * unannotated constant takes the exact type of its value with no mark that
+ * the type was inferred, so it cannot be told from an annotated one. A
+ * union of record types, an unknown type and a dictionary give `undefined`:
+ * their key sets are not known. A protocol property or a protocol function
+ * member of that name also gives `undefined`, so that the evaluation
+ * answers it as before (the property value, or
+ * `protocol-function-not-a-field`).
+ */
+function unknownRecordFieldError(
+  ce: ComputeEngine,
+  base: Expression,
+  name: string
+): Expression | undefined {
+  if (!base.isValid || !isSymbol(base)) return undefined;
+  const def = base.valueDefinition;
+  if (def === undefined || def.inferredType || def.isConstant) return undefined;
+  // A variable declared with a placeholder (the bare `record`, or a record
+  // type with an `unknown` position) has a type refined from the value it
+  // holds. It is judged by its declared contract: the bare `record` lists no
+  // field and admits a record with any keys; a record type lists its keys.
+  const contract = (def as { _placeholderSkeleton?: Type })
+    ._placeholderSkeleton;
+  if (
+    contract !== undefined &&
+    (typeof contract !== 'object' || contract.kind !== 'record')
+  )
+    return undefined;
+  const t = contract ?? base.type.type;
+  const rt = fieldBearingType(t);
+  if (rt === undefined || rt === 'none' || rt.kind !== 'record')
+    return undefined;
+  if (Object.prototype.hasOwnProperty.call(rt.elements, name))
+    return undefined;
+  if (protocolPropertyTypeOfReceiver(ce, t, name) !== undefined)
+    return undefined;
+  if (protocolFunctionMemberOwners(ce, t, name).length > 0) return undefined;
+  return ce.error(
+    ['unknown-field', name, Object.keys(rt.elements).join(', ')],
+    base.toString()
+  );
+}
+
 //
 // ── Property stores: `p.age = 43` ────────────────────────────────────────────
 //
@@ -9591,15 +9652,10 @@ function absenceMarker(
   const xt = xs.type.type;
   let t: Type | undefined;
   if (typeof xt !== 'string' && xt.kind === 'dictionary') t = xt.values;
-  // A dictionary value (a literal, or the value of a symbol with an inferred
-  // type, `closedDictionaryType()`) has exactly the fields of its record
-  // type, so its values are the join of those fields. A declared record type
-  // is open: a value can hold other fields, of any type. (CE-77)
+  // A record type is closed: a value has exactly the fields of its type, so
+  // its values are the join of those fields.
   else if (typeof xt !== 'string' && xt.kind === 'record')
-    t =
-      closedDictionaryType(xs) !== undefined
-        ? dictionaryValueValuesType(xt)
-        : 'any';
+    t = dictionaryValueValuesType(xt);
   else
     t =
       xs.operatorDefinition?.collection?.elttype?.(xs) ??
@@ -9660,6 +9716,29 @@ function domainAbsenceMarker(ce: ComputeEngine, t: Type): Expression {
   const n = pointArity(t);
   if (n !== undefined) return nanPoint(ce, n);
   return ce.Missing;
+}
+
+/**
+ * The absent value of a read of the key `key` that a value leaves out, when
+ * `written`, the type of the operand as written, is a record type that lists
+ * `key` (an optional field: `r.b` with `r: record{a: integer, b: string?}`):
+ * the absent value of the field type, `Missing`, or `NaN` for a numeric
+ * field. `undefined` otherwise, and the absent value is chosen from the
+ * value (`absenceMarker()`).
+ */
+function optionalFieldAbsenceMarker(
+  ce: ComputeEngine,
+  written: Type | undefined,
+  key: string
+): Expression | undefined {
+  if (written === undefined) return undefined;
+  const t = resolveTypeAlias(written);
+  if (typeof t !== 'object' || t.kind !== 'record' || !hasRecordField(t, key))
+    return undefined;
+  const fieldType = t.elements[key];
+  return absentMarkerIsNumeric(fieldType, undefined)
+    ? ce.NaN
+    : domainAbsenceMarker(ce, fieldType);
 }
 
 /** True when `idx` is a collection index (an integer gather or boolean mask),
@@ -12740,25 +12819,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           { kind: 'list', elements: t.values },
           context.engine._typeResolver
         );
-      // A dictionary value (a literal, or the value of a symbol with an
-      // inferred type, `closedDictionaryType()`) gives the type of its
-      // entries (`facts.elementType`, `tuple<string, V>`), and its values
-      // are `V`. A
-      // declared record type is open: a value can hold other fields, of any
-      // type, so its values are `any`. (CE-77)
-      if (typeof t === 'object' && t.kind === 'record') {
-        const entry = dict.facts.elementType;
-        const values =
-          typeof entry === 'object' &&
-          entry.kind === 'tuple' &&
-          entry.elements.length === 2
-            ? entry.elements[1].type
-            : 'any';
+      // A record type is closed: a value has only the listed fields, so its
+      // values are the join of the field types
+      // (`record{a: integer, b: string}` gives `list<integer | string>`).
+      if (typeof t === 'object' && t.kind === 'record')
         return BoxedType.forResult(
-          { kind: 'list', elements: values },
+          {
+            kind: 'list',
+            elements: dictionaryValueValuesType(t) ?? 'any',
+          },
           context.engine._typeResolver
         );
-      }
       return BoxedType.forResult(
         parseType('list<any>'),
         context.engine._typeResolver
@@ -16582,9 +16653,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'On a record or dictionary value, `Field(d, "x")` behaves exactly as `d["x"]` (`At` semantics, including the absence marker for a key a dictionary may not have).',
       'On a value of a NOMINAL type whose definition body has named fields (a record body, or a named-tuple body), the field is resolved through the type definition — the sanctioned accessor window of the nominal-types design (D6/§4.5b D16). This does not make the value a collection: `First(p)` and `p["x"]` keep rejecting.',
       'A field name that is not in a record/named-tuple definition is a static defect (the result type is `error`); on an unknown-typed operand the expression stays symbolic.',
+      'Record types are closed: on an operand of a record type, a field name that the type does not list is refused when the expression is boxed (`unknown-field`). An optional field (`b: string?`) that the value leaves out reads as the absent value of its type: `Missing`, or `NaN` for a numeric field.',
     ],
     complexity: 8200,
     signature: '(value: any, field: string) -> unknown',
+    // The operands are canonical (`Field` is not lazy). A record type is
+    // closed, so a read of a field that the type of the operand does not
+    // list cannot select a value: it is refused here, before anything runs,
+    // as `MemberCall` refuses a dotted call (`unknownRecordFieldError()`).
+    canonical: (ops, { engine: ce }) => {
+      if (ops.length === 2 && isString(ops[1])) {
+        const refusal = unknownRecordFieldError(ce, ops[0], ops[1].string);
+        if (refusal !== undefined) return refusal;
+      }
+      return ce._fn('Field', [...ops]);
+    },
     type: (ops, { engine: ce }) => {
       // A QUALIFIED protocol member (P14): `Comparable.compare` is a function
       // VALUE, whose type is the requirement's signature (with `Self` left
@@ -16628,17 +16711,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // shapes differ, and a read is not a store.)
         if (rt.kind === 'record' || rt.kind === 'object') {
           // A record's key set is fixed: a known-absent field is a static
-          // defect, not an out-of-band access.
-          if (name !== undefined) return rt.elements[name];
-          // A name known only at evaluation: a record type is open, so the
-          // name can select a field it does not list, of any type. A closed
-          // record (the type of a dictionary value) and an object layout
-          // list every field.
+          // defect, not an out-of-band access. An optional field gives its
+          // type; a read of a key that the value leaves out gives the
+          // absent value of a read, as `At` does out of range.
+          if (name !== undefined)
+            return Object.prototype.hasOwnProperty.call(rt.elements, name)
+              ? rt.elements[name]
+              : undefined;
+          // A name known only at evaluation: record types are closed, so the
+          // name selects one of the listed fields, or a key that the value
+          // does not have (the absent value of a read).
           return elementReadType(
             ops[0],
-            rt.kind === 'record' && rt.closed !== true
-              ? 'any'
-              : (widen(...Object.values(rt.elements)) as Type)
+            widen(...Object.values(rt.elements)) as Type
           );
         }
         if (rt.kind === 'tuple') {
@@ -16657,9 +16742,27 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (property !== undefined)
           return BoxedType.forResult(property, ce._typeResolver);
       }
+      // A key that the record type of a value does not list (a dictionary
+      // literal, a symbol whose type was inferred from its value): the read
+      // is the absent value of the field values, as for `At`. A declared
+      // record type is refused when the read is boxed
+      // (`unknownRecordFieldError()`), and a nominal type has no other keys.
+      if (
+        rt !== 'none' &&
+        rt.kind === 'record' &&
+        typeof ops[0].type === 'object' &&
+        ops[0].type.kind === 'record'
+      )
+        return BoxedType.forResult(
+          markerType(widen(...Object.values(rt.elements)) as Type),
+          ce._typeResolver
+        );
       return BoxedType.forResult('error', ce._typeResolver);
     },
-    evaluate: ([base, field], { engine: ce, numericApproximation }) => {
+    evaluate: (
+      [base, field],
+      { engine: ce, numericApproximation, expression }
+    ) => {
       if (!isString(field)) return undefined;
       const name = field.string;
 
@@ -16726,8 +16829,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       // A plain dictionary/record VALUE: exactly `d["x"]` — delegate to `At`
       // so the two surfaces can never drift (absence markers included).
-      if (isDictionary(base))
+      // One difference: a key that the value leaves out, read through an
+      // operand whose type lists it (an optional field,
+      // `r: record{a: integer, b: string?}`), gives the absent value of the
+      // field type (`optionalFieldAbsenceMarker()`): `Missing` for `r.b`
+      // with `r = {a -> 1}`, not the `NaN` that the integer field `a` of the
+      // value would choose.
+      if (isDictionary(base)) {
+        if (base.get(name) === undefined && isFunction(expression)) {
+          const marker = optionalFieldAbsenceMarker(
+            ce,
+            expression.ops[0]?.type.type,
+            name
+          );
+          if (marker !== undefined) return marker;
+        }
         return ce.function('At', [base, field]).evaluate();
+      }
 
       const rt = fieldBearingType(base.type.type);
       if (rt === undefined) return undefined; // unknown operand: stay symbolic
@@ -16760,6 +16878,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             // evaluating.
             const v = payload.get(name);
             if (v !== undefined) return v.canonical.evaluate();
+            // An optional field that the value leaves out reads as the
+            // absent value of the field type, as on a plain record value.
+            if (isOptionalField(rt, name)) {
+              const fieldType = rt.elements[name];
+              return absentMarkerIsNumeric(fieldType, undefined)
+                ? ce.NaN
+                : domainAbsenceMarker(ce, fieldType);
+            }
             return (
               property() ??
               protocolFunctionFieldError(
@@ -17059,12 +17185,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               : arm.kind === 'dictionary'
                 ? arm.values
                 : arm.kind === 'record'
-                  ? // A record type is open: a key it does not list can
-                    // hold any value. Only a closed record (the type of a
-                    // dictionary value) lists every key.
-                    arm.closed === true
-                    ? (widen(...Object.values(arm.elements)) as Type)
-                    : 'any'
+                  ? // A record type is closed: it lists every key.
+                    (widen(...Object.values(arm.elements)) as Type)
                   : indexElementType(arm);
           });
           if (arms.every((arm) => arm !== undefined)) {
@@ -17097,23 +17219,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // type; otherwise widen across all field value types.
           const key =
             ops[1] === undefined ? undefined : stringLiteralOf(ops[1]);
-          if (key !== undefined) {
-            const fieldType = named.elements[key];
-            if (fieldType) return fieldType;
-          }
-          // Another key: a dictionary value (a literal) has exactly its
-          // fields, so the read is one of their values. A declared record
-          // type is open, and the value of a field it does not declare can
-          // be anything (`At(ra, "b")` with `ra: record{a: integer}` holding
-          // `{a: 1, b: Missing}`). (CE-77)
-          const entry = ops[0].facts.elementType;
-          if (
-            typeof entry === 'object' &&
-            entry.kind === 'tuple' &&
-            entry.elements.length === 2
-          )
-            return entry.elements[1].type;
-          return 'any';
+          if (key !== undefined && hasRecordField(named, key))
+            return named.elements[key];
+          // Another key: record types are closed, so the read is one of the
+          // values of the listed fields.
+          return widen(...Object.values(named.elements)) as Type;
         } else if (named.kind === 'tuple') {
           // A literal integer index selects that slot's type (1-based,
           // negatives count from the end); otherwise `collectionElementType`
@@ -17240,25 +17350,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         } else if (rt.kind === 'dictionary') {
           return elementReadType(ops[0], rt.values);
         } else if (rt.kind === 'record') {
-          // A dictionary value (a literal) has exactly the fields of its
-          // record type: a key it does not have is absent. A declared record
-          // type is open: a key it does not declare can hold any value, or
-          // be absent, so the read is `any`. (CE-77)
-          const entry = ops[0].facts.elementType;
-          const isValue =
-            typeof entry === 'object' &&
-            entry.kind === 'tuple' &&
-            entry.elements.length === 2;
+          // Record types are closed: a listed field gives its type (an
+          // optional field reads as the absent value of its type when the
+          // value leaves it out, which the type does not show, as for `At`
+          // on a list). A literal key that a declared record type does not
+          // list is refused when the call is boxed
+          // (`unknownRecordFieldError()`). On the type of a value (a
+          // literal, a symbol whose type was inferred), such a read is the
+          // marker of the field values.
           const fields = widen(...Object.values(rt.elements)) as Type;
           const name = key === undefined ? undefined : stringLiteralOf(key);
-          if (name !== undefined) {
-            const fieldType = rt.elements[name];
-            if (fieldType) return fieldType; // present literal → exact
-            // absent literal → marker(⊔V)
-            return isValue ? markerType(fields) : 'any';
-          }
+          if (name !== undefined)
+            return hasRecordField(rt, name)
+              ? rt.elements[name]
+              : markerType(fields);
           // dynamic string → ⊔V | marker(⊔V)
-          return elementReadType(ops[0], isValue ? fields : 'any');
+          return elementReadType(ops[0], fields);
         }
         // A literal integer index into an operand PROVED to hold that
         // position: the element type, with no marker (`provenAccessType`).
@@ -17390,6 +17497,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (ops.length >= 2 && isRingConstant(ops[0]))
         return ce._fn('Adjoin', ops);
 
+      // A read of a key that the record type of the operand does not list
+      // (`At(r, "zz")` with `r: record{a: integer}`): record types are
+      // closed, so the read cannot select a value, as for `Field`.
+      if (ops.length === 2 && isString(ops[1])) {
+        const refusal = unknownRecordFieldError(ce, ops[0], ops[1].string);
+        if (refusal !== undefined) return refusal;
+      }
+
       // `ops` are already canonical (At is not lazy). `At` is declared
       // `handle`/`missingStrip: 'all'`, so validation strips a `missing` arm
       // from every position (§3.B): a `Missing`/`T | missing` base or index is
@@ -17512,6 +17627,35 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
         return collectionElementType(t);
       };
+      // The record type that the string key at position `step` reads, as
+      // written: the type of the base, followed through the indices before
+      // `step`: a string key through a field of a record type, an integer
+      // through the elements of a list or a tuple. With
+      // `r: record{p: record{a: integer, b: string?}}`, the key `"b"` of
+      // `At(r, "p", "b")` reads `record{a: integer, b: string?}`, and with
+      // `L: list<record{a: integer, b: string?}>`, the key `"b"` of
+      // `At(L, 1, "b")` reads the same type. `undefined` when an earlier
+      // index is neither.
+      const writtenRecordAt = (step: number): Type | undefined => {
+        let t: Type | undefined = declaredBase;
+        for (let i = 1; i < step && t !== undefined; i++) {
+          const r = resolveTypeAlias(t);
+          const k = ops[i];
+          if (isString(k))
+            t =
+              typeof r === 'object' &&
+              r.kind === 'record' &&
+              hasRecordField(r, k.string)
+                ? r.elements[k.string]
+                : undefined;
+          else
+            t =
+              isNumber(k) && !isCollectionIndex(k)
+                ? indexElementType(r)
+                : undefined;
+        }
+        return t;
+      };
       while (ops[index]) {
         // Value-level absorption: an absent current value (an absent base, or
         // an absent intermediate produced by a prior step) short-circuits the
@@ -17572,13 +17716,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // its string key directly. Only string (or character) keys are
         // supported; a missing key yields the absence marker, any other index
         // leaves `At` unevaluated.
+        // A key that the value leaves out, at the last index, read through
+        // a record type that lists it (an optional field), reads as the
+        // absent value of the field type (`optionalFieldAbsenceMarker()`,
+        // `writtenRecordAt()`): with `r: record{a: integer, b: string?}` and
+        // `r = {a -> 1}`, `r["b"]` is `Missing`, not the `NaN` that the
+        // integer field `a` of the value would choose.
         if (isDictionary(expr)) {
           if (key === undefined) return undefined;
           const v = expr.get(key);
           if (v === undefined)
             return index + 1 < ops.length
               ? chainAbsorbMarker(ce, expr.type.type, ops, index, readType)
-              : absenceMarker(ce, expr, readType);
+              : (optionalFieldAbsenceMarker(ce, writtenRecordAt(index), key) ??
+                  absenceMarker(ce, expr, readType));
           expr = v;
           index += 1;
           continue;
@@ -18999,11 +19150,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Elixir `List.delete_at/2`: return a copy with the element at the 1-based
   // `index` removed. Eager on finite indexed collections; inert otherwise.
   DeleteAt: {
-    examples: ['DeleteAt([1, 2, 3, 4], 2)'],
+    examples: [
+      'DeleteAt([1, 2, 3, 4], 2)',
+      'DeleteAt({a -> 1, b -> "x"}, "b")',
+    ],
     description: [
       'Return a copy of the indexed collection with the element at the 1-based `index` removed.',
       'A negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.',
       'Deleting from a string yields a string.',
+      'On a dictionary or a record, `DeleteAt(d, key)` returns a copy without the entry of the string `key`; `d` does not change. A key that is not there gives the value unchanged. The type of a record loses the field (`record{a: integer, b: string?}` gives `record{a: integer}`); with a key known only at evaluation, every field of the record becomes optional.',
+      'A value of a declared (nominal) record type is not a collection, so `DeleteAt` refuses it, as `At` does.',
     ],
     complexity: 8200,
     // The LEADING arm is the string-preservation rule: what is left after
@@ -19032,9 +19188,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // strips `missing`: an absent index is refused.
     threadsConditionals: [0, 1],
     missingStrip: [0],
+    // The third arm removes the entry of a KEY from a dictionary or a record
+    // (a record type is a subtype of `dictionary<V>` for the join `V` of
+    // its fields). The `type` handler below gives the precise record type.
     signature:
-      '((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T: any)',
+      '((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T: any) & ((dictionary<V>, string) -> dictionary<V> where V: any)',
+    type: ([xs, key], { engine: ce }) => {
+      if (xs === undefined || key === undefined) return undefined;
+      const t = deleteFieldType(xs.type, stringLiteralOf(key));
+      return t === undefined
+        ? undefined
+        : BoxedType.forResult(t, ce._typeResolver);
+    },
     evaluate: ([xs, idx], { engine: ce }) => {
+      // A dictionary or record value takes the key route only; a key it
+      // cannot decide yet (a symbol) leaves the call unevaluated.
+      if (isDictionary(xs)) return deleteDictionaryKey(ce, xs, idx);
       const refused = unindexedCollectionOperandError(ce, 'DeleteAt', xs);
       if (refused) return refused;
       if (!isWalkableFiniteCollection(xs)) return undefined;
@@ -19059,7 +19228,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       } else return undefined;
       return ce.function('List', [...all.slice(0, i0), ...all.slice(i0 + 1)]);
     },
-    collection: refusingUnindexedSource({
+    // A dictionary or record source with a string key is served by the copy
+    // without the key (`withDictionaryDeletion()`), not by the positional walk.
+    collection: withDictionaryDeletion(
+      refusingUnindexedSource({
       // The walk inserts or skips at the position the index names. When
       // there is no position (an index outside the source, a negative index
       // over a source whose length is not known, infinite or not a safe
@@ -19134,7 +19306,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           },
         };
       },
-    }),
+    })
+    ),
   },
 
   // Elixir `List.replace_at/3`: return a copy with the element at the 1-based
@@ -22206,6 +22379,106 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
   },
 };
+
+/**
+ * The type of `DeleteAt(xs, key)` when `t`, the type of `xs`, is a record
+ * type or a declared (nominal) record type; `undefined` otherwise, so that
+ * the declared result of the signature applies.
+ *
+ * - A record type loses the field `key`: `record{a: integer, b: string?}`
+ *   and `record{a: integer, b: string}` give `record{a: integer}`. A key
+ *   that the type does not list leaves the type as it is.
+ * - With a key known only at evaluation (`key` is `undefined`), every field
+ *   of the record becomes optional.
+ *
+ * A declared (nominal) record type is not a record type here: its values are
+ * not collections, and the signature of `DeleteAt` refuses them.
+ */
+function deleteFieldType(t: Type, key: string | undefined): Type | undefined {
+  if (typeof t !== 'object' || t.kind !== 'record') return undefined;
+  if (key === undefined)
+    return makeRecordType(t.elements, Object.keys(t.elements));
+  if (!hasRecordField(t, key)) return t;
+  const elements: Record<string, Type> = Object.create(null);
+  for (const [k, v] of Object.entries(t.elements))
+    if (k !== key) elements[k] = v;
+  // A record with no field left is the empty dictionary `{->}`, whose type
+  // is `dictionary<never>`.
+  if (Object.keys(elements).length === 0)
+    return { kind: 'dictionary', values: 'never' };
+  return makeRecordType(elements, t.optional);
+}
+
+/**
+ * The value of `DeleteAt(xs, key)` for a dictionary value `xs`, or
+ * `undefined` when the key is not decided yet.
+ *
+ * The result is a copy without the entry of `key`; `xs` does not change. A
+ * key that is not there gives `xs`. A key that is not a string is an
+ * `incompatible-type` error.
+ */
+function deleteDictionaryKey(
+  ce: ComputeEngine,
+  xs: Expression,
+  key: Expression | undefined
+): Expression | undefined {
+  if (!isDictionary(xs) || key === undefined) return undefined;
+  // A key that is not a string literal: refused when it cannot be a string,
+  // and left unevaluated otherwise (a symbol with no value).
+  if (!isString(key))
+    return provablyDisjoint(key.type.type, 'string')
+      ? ce.typeError('string', key.type, key)
+      : undefined;
+  const name = key.string;
+  if (xs.get(name) === undefined) return xs;
+  return ce.function(
+    'Dictionary',
+    xs.keys
+      .filter((k) => k !== name)
+      .map((k) => ce._fn('Tuple', [ce.string(k), xs.get(k)!]))
+  );
+}
+
+/**
+ * The collection handlers of `DeleteAt`, with the facets of a dictionary or
+ * record source read from the copy without the key
+ * (`deleteDictionaryKey()`). The positional handlers `handlers` refuse a
+ * source that is not indexed, so a lazy consumer (`Map(f, DeleteAt(d,
+ * "b"))`) would read such a call as not enumerable, and would not list it.
+ * A key that is not decided yet gives the positional answer, which refuses.
+ */
+function withDictionaryDeletion(
+  handlers: CollectionHandlers
+): CollectionHandlers {
+  const copyOf = (expr: Expression): Expression | undefined => {
+    if (!isFunction(expr) || !isDictionary(expr.op1)) return undefined;
+    const copy = deleteDictionaryKey(expr.engine, expr.op1, expr.op2);
+    return isDictionary(copy) ? copy : undefined;
+  };
+  return {
+    ...handlers,
+    iterator: (expr) => {
+      const copy = copyOf(expr);
+      return copy === undefined
+        ? handlers.iterator(expr)
+        : copy.each()[Symbol.iterator]();
+    },
+    count: (expr) => {
+      const copy = copyOf(expr);
+      return copy === undefined ? handlers.count(expr) : copy.count;
+    },
+    isEmpty: (expr) => {
+      const copy = copyOf(expr);
+      return copy === undefined
+        ? handlers.isEmpty?.(expr)
+        : copy.isEmptyCollection;
+    },
+    isFinite: (expr) =>
+      copyOf(expr) === undefined ? handlers.isFinite?.(expr) : true,
+    isEnumerable: (expr) =>
+      copyOf(expr) === undefined ? handlers.isEnumerable?.(expr) : true,
+  };
+}
 
 //
 // Hybrid-lazy resolution helpers for `Insert` / `DeleteAt` / `ReplaceAt`.

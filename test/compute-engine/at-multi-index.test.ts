@@ -182,13 +182,14 @@ describe('A read through an alias has the type of the read of the named type', (
     expect(read.type.toString()).toBe(expected);
   });
 
-  // A key that an open record type does not declare can hold any value.
+  // Record types are closed: a read of a key that the record type does not
+  // list is refused (`unknown-field`).
   test('a key that the record does not declare', () => {
     const ce = aliases();
     ce.declare('x', 'Rec');
-    expect(ce.box(['At', 'x', { str: 'z' }] as never).type.toString()).toBe(
-      'any'
-    );
+    const read = ce.box(['At', 'x', { str: 'z' }] as never);
+    expect(read.type.toString()).toBe('error');
+    expect(read.toString()).toContain('unknown-field');
   });
 
   // The union has no element type of its own, so `elementType()` reads each arm.

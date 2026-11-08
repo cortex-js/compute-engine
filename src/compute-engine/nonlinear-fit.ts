@@ -29,7 +29,7 @@ import type {
   IComputeEngine,
   OperandDescriptor,
 } from './global-types.js';
-import type { Type } from '../common/type/types.js';
+import { makeRecordType, type Type } from '../common/type/types.js';
 import { SIGNED_INFINITY_TYPE } from '../common/type/primitive.js';
 import { runWithEvaluationEffects } from './effects-registry.js';
 import {
@@ -331,9 +331,10 @@ function parseVars(varsExpr: Expression): string[] | null {
  *   literal `+∞` is typed by its tier, which is that pair.
  * - `iterations`: an integer.
  *
- * A record has no optional fields, so the keys `timedOut` and `phase`, which
- * only a call cut short by a deadline has, are not in the type: width
- * subtyping admits a record with more keys.
+ * Record types are closed, so the keys that only some calls write are
+ * optional fields: `timedOut` (a boolean) and `phase` (a string), which only
+ * a call cut short by a deadline has, and `route` and `reason` (strings),
+ * which `evaluateAsync` adds (`withRoute`).
  *
  * One value is outside this type, by decision: a deadline that fires while
  * the parameter starts are evaluated (`parseParamSpecs` evaluates each start
@@ -388,7 +389,11 @@ export function fitRecordType(
     iterations: 'integer',
   };
   if (operator === 'FindRoot') elements.stationary = 'boolean';
-  return { kind: 'record', elements };
+  elements.timedOut = 'boolean';
+  elements.phase = 'string';
+  elements.route = 'string';
+  elements.reason = 'string';
+  return makeRecordType(elements, ['timedOut', 'phase', 'route', 'reason']);
 }
 
 /**

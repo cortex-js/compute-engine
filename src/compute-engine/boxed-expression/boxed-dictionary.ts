@@ -427,10 +427,10 @@ export class BoxedDictionary
       // stored here, outside the function-node chokepoint.
       // Interned (`internType`) so equal record types built from different
       // dictionaries are one object and join by identity downstream.
-      // The record is closed: the value has exactly these keys, so its type
-      // is also a `dictionary<T>` of the join of its field types.
+      // Record types are closed: the value has exactly these keys, so its
+      // type is also a `dictionary<T>` of the join of its field types.
       return new BoxedType(
-        internType(boundTypeSize({ kind: 'record', elements, closed: true }))
+        internType(boundTypeSize({ kind: 'record', elements }))
       );
     }
     const eltType = widen(

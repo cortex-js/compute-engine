@@ -4,71 +4,96 @@ import { parseType } from '../../src/common/type/parse';
 import { typeToString } from '../../src/common/type/serialize';
 
 /**
- * CE-77. A record type is open: `record{a: integer}` matches
- * `{a: 1, b: Missing}`, a value with a field it does not declare. The entry
- * type read from the record type was `tuple<string, integer>` (the join of the
- * declared fields), so the entry `("b", Missing)` did not match it:
- * `FlatMap(ra, x ↦ [At(x, 2)])` was an `incompatible-type` error for that
- * entry, and `Map(x ↦ At(x, 2), ra)` was typed `collection<integer>` while
- * it holds `Missing`. The entry type is now `tuple<string, any>`.
+ * The entry type of a record. Record types are closed: a value of
+ * `record{a: integer, b: string}` has only the keys `a` and `b`, so an entry
+ * is `tuple<string, integer | string>`, the join of the field types, and
+ * `Map`, `FlatMap` and `Values` are typed by it. A field that holds
+ * `Missing` keeps its key (the store rule of `docs/ERROR-MODEL.md`, rule 5,
+ * admits it where the field type admits a present value).
+ *
+ * Design: `docs/plans/2026-11-07-ce71-record-fields.md` (CE-71). Before,
+ * record types were open and the entry type was `tuple<string, any>`
+ * (CE-77).
  */
 
 const ce = new ComputeEngine();
-ce.declare('ra', 'record{a: integer}');
+ce.declare('ra', 'record{a: integer, b: string?}');
 ce.assign(
   'ra',
   ce.box([
     'Dictionary',
     ['KeyValuePair', { str: 'a' }, 1],
-    ['KeyValuePair', { str: 'b' }, 'Missing'],
+    ['KeyValuePair', { str: 'b' }, { str: 'x' }],
   ])
 );
 
 const AT2 = ['Function', ['At', 'x', 2], 'x'];
 
-describe('CE-77: the entry type of an open record', () => {
+describe('the entry type of a record', () => {
   test('collectionElementType', () => {
     expect(
       typeToString(collectionElementType(parseType('record{a: integer}'))!)
-    ).toBe('tuple<string, any>');
+    ).toBe('tuple<string, integer>');
+    expect(
+      typeToString(
+        collectionElementType(parseType('record{a: integer, b: string?}'))!
+      )
+    ).toBe('tuple<string, integer | string>');
   });
 
-  test('FlatMap reads the undeclared field', () => {
+  test('FlatMap reads every field', () => {
     const e = ce.box(['FlatMap', 'ra', ['Function', ['List', ['At', 'x', 2]], 'x']]);
-    expect(e.evaluate().toString()).toBe('[1,"Missing"]');
-    expect(e.type.toString()).toBe('list<any>');
+    expect(e.evaluate().toString()).toBe('[1,"x"]');
+    expect(e.type.toString()).toBe('list<integer | string>');
   });
 
-  test('Map is typed by the open entries', () => {
+  test('Map is typed by the entries', () => {
     const e = ce.box(['Map', AT2, 'ra']);
-    expect(e.evaluate().toString()).toBe('Set(1, "Missing")');
-    expect(e.type.toString()).toBe('collection<any>');
+    expect(e.evaluate().toString()).toBe('Set(1, "x")');
+    expect(e.type.toString()).toBe('collection<integer | string>');
   });
 
   test('Map over Dedup of the record', () => {
     const e = ce.box(['Map', AT2, ['Dedup', 'ra']]);
-    expect(e.evaluate().toString()).toBe('Set(1, "Missing")');
-    expect(e.type.toString()).toBe('collection<any>');
+    expect(e.evaluate().toString()).toBe('Set(1, "x")');
+    expect(e.type.toString()).toBe('collection<integer | string>');
   });
 
   test('Values of the record', () => {
     const e = ce.box(['Values', 'ra']);
-    expect(e.evaluate().toString()).toBe('[1,"Missing"]');
-    expect(e.type.toString()).toBe('list<any>');
+    expect(e.evaluate().toString()).toBe('[1,"x"]');
+    expect(e.type.toString()).toBe('list<integer | string>');
   });
 
-  test('At with a key the record type does not declare', () => {
-    const b = ce.box(['At', 'ra', { str: 'b' }]);
-    expect(b.evaluate().toString()).toBe('"Missing"');
-    expect(b.type.toString()).toBe('any');
-    // A declared key keeps its type.
+  test('At with a listed key, and with a key the record type does not list', () => {
     expect(ce.box(['At', 'ra', { str: 'a' }]).type.toString()).toBe(
       'integer'
+    );
+    expect(ce.box(['At', 'ra', { str: 'b' }]).type.toString()).toBe('string');
+    const zz = ce.box(['At', 'ra', { str: 'zz' }]);
+    expect(zz.isValid).toBe(false);
+    expect(zz.toString()).toContain('unknown-field');
+  });
+
+  test('a field that holds Missing keeps its key', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('rm', 'record{a: integer, b: string}');
+    ce2.assign(
+      'rm',
+      ce2.box([
+        'Dictionary',
+        ['KeyValuePair', { str: 'a' }, 1],
+        ['KeyValuePair', { str: 'b' }, 'Missing'],
+      ])
+    );
+    expect(ce2.box(['Keys', 'rm']).evaluate().toString()).toBe('["a","b"]');
+    expect(ce2.box(['At', 'rm', { str: 'b' }]).evaluate().toString()).toBe(
+      '"Missing"'
     );
   });
 });
 
-describe('CE-77: a dictionary literal keeps the types of its fields', () => {
+describe('a dictionary literal keeps the types of its fields', () => {
   const LITERAL = [
     'Dictionary',
     ['KeyValuePair', { str: 'a' }, 1],
@@ -91,6 +116,8 @@ describe('CE-77: a dictionary literal keeps the types of its fields', () => {
   });
 
   test('At with a key the literal does not have is the absence marker', () => {
+    // The type of a literal describes the value only: the read is not
+    // refused, as it is on a declared record type (`ra` above).
     const e = ce.box(['At', LITERAL, { str: 'zz' }]);
     expect(e.type.toString()).toBe('nan');
     expect(e.evaluate().toString()).toBe('NaN');
@@ -104,7 +131,7 @@ describe('CE-77: a dictionary literal keeps the types of its fields', () => {
     );
     ce2.declare('rb', 'record{a: integer}');
     expect(ce2.box(['entryOf', 'rb']).type.toString()).toBe(
-      'tuple<string, any>'
+      'tuple<string, integer>'
     );
   });
 
@@ -149,7 +176,8 @@ describe('CE-77: a dictionary literal keeps the types of its fields', () => {
 
   test('a callback literal is stamped as for a symbol', () => {
     const ce2 = new ComputeEngine();
-    ce2.declare('app', '(record{a: T}, (T) -> U) -> U where T, U');
+    // Record types are closed: the parameter lists both keys of the literal.
+    ce2.declare('app', '(record{a: T, b: T}, (T) -> U) -> U where T, U');
     const F = ['Function', ['Add', 'x', 1], 'x'];
     ce2.assign('ds', ce2.box(LITERAL));
     for (const d of [LITERAL, 'ds']) {

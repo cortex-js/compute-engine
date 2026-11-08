@@ -22,7 +22,13 @@ import {
   STRING_STRUCTURAL_TYPE,
   VALUE_TYPES,
 } from './primitive.js';
-import { isComplexInfinityValue } from './types.js';
+import {
+  hasRecordField,
+  isComplexInfinityValue,
+  isOptionalField,
+  makeRecordType,
+  requiredFieldKeys,
+} from './types.js';
 import type {
   BroadcastableType,
   CollectionType,
@@ -628,9 +634,10 @@ function cycleNodeStructure(t: Exclude<Type, string>): string {
         : `value(${cycleDataKey(p)})`;
     }
     case 'record':
-      // A closed record (the type of a dictionary value) is another type
-      // than the open record with the same fields.
-      return `${t.kind}${t.closed === true ? '!' : ''}${fieldMap(t.elements)}`;
+      // An optional field is another type than a required one.
+      return `${t.kind}${fieldMap(t.elements)}${
+        t.optional === undefined ? '' : JSON.stringify(t.optional)
+      }`;
     case 'object':
       return `${t.kind}${fieldMap(t.elements)}`;
     case 'tuple':
@@ -1240,8 +1247,10 @@ const BARE_COLLECTION_EXPANSIONS: Partial<Record<string, Type>> = Object.assign(
  * proves no overlap either, and the record probes of `couldMatch` then add
  * no answer. */
 function recordFieldsInhabited(r: RecordType): boolean {
-  return Object.values(r.elements).every(
-    (t) => inhabitation(t) === 'inhabited'
+  // An optional field of an empty type is a key that a value leaves out, so
+  // only the required fields must hold a value.
+  return requiredFieldKeys(r).every(
+    (k) => inhabitation(r.elements[k]) === 'inhabited'
   );
 }
 
@@ -1343,7 +1352,9 @@ function inhabitationWalk(
       );
     }
     case 'record':
-      return all(Object.values(t.elements));
+      // An optional field of an empty type is a key that a value leaves
+      // out: only the required fields must hold a value.
+      return all(requiredFieldKeys(t).map((k) => t.elements[k]));
     case 'tuple':
       return all(t.elements.map((e) => e.type));
     case 'list':
@@ -1464,11 +1475,11 @@ function bareTupleOrRecordCouldMatch(bare: Type, other: Type): boolean {
   }
   if (bare === 'record') {
     if (other.kind === 'record')
-      return Object.values(other.elements).every((t) =>
-        couldMatchWithin('any', t)
+      return requiredFieldKeys(other).every((k) =>
+        couldMatchWithin('any', other.elements[k])
       );
-    if (other.kind === 'dictionary')
-      return couldMatchWithin('any', other.values);
+    // Every dictionary type holds the empty dictionary `{->}`, a record.
+    if (other.kind === 'dictionary') return true;
     if (other.kind === 'collection')
       return couldMatchWithin(
         {
@@ -1840,18 +1851,24 @@ function couldMatchStructure(a: Type, b: Type): boolean {
     } else if (a.kind === 'dictionary' && b.kind === 'dictionary') {
       if (couldMatchWithin(a.values, b.values)) return true;
     } else if (a.kind === 'record' && b.kind === 'record') {
-      // Width subtyping: a record with the fields of BOTH sides is below
-      // both, so the fields they share must agree, and every other required
-      // field must be able to hold a value (`record{a: never}` has no value).
-      const bElements = b.elements;
+      // Records are closed: a value of both has only keys that both list.
+      // So each key that one side requires must be a field of the other
+      // side, a field that both sides require must hold a value of both
+      // types, and every required field must be able to hold a value
+      // (`record{a: never}` has no value). A key that is optional on one
+      // side and required on the other must also hold a value of both
+      // types; a key that is optional on both sides can be left out.
+      const required = (x: RecordType, y: RecordType) =>
+        requiredFieldKeys(x).every(
+          (key) =>
+            hasRecordField(y, key) &&
+            couldMatchWithin(x.elements[key], y.elements[key])
+        );
       if (
         recordFieldsInhabited(a) &&
         recordFieldsInhabited(b) &&
-        Object.keys(a.elements).every(
-          (key) =>
-            !Object.prototype.hasOwnProperty.call(bElements, key) ||
-            couldMatchWithin(a.elements[key], bElements[key])
-        )
+        required(a, b) &&
+        required(b, a)
       )
         return true;
     } else if (a.kind !== b.kind) {
@@ -1917,12 +1934,14 @@ function couldMatchStructure(a: Type, b: Type): boolean {
       } else if (kinds.includes('record') && kinds.includes('dictionary')) {
         // A record is a dictionary with known keys: it overlaps
         // `dictionary<V>` when every field could hold a `V`.
+        // An optional field can be left out, so only the required fields
+        // must be able to hold a `V`.
         const rec = (a.kind === 'record' ? a : b) as RecordType;
         const dict = (a.kind === 'record' ? b : a) as DictionaryType;
         if (
           recordFieldsInhabited(rec) &&
-          Object.values(rec.elements).every((t) =>
-            couldMatchWithin(t, dict.values)
+          requiredFieldKeys(rec).every((k) =>
+            couldMatchWithin(rec.elements[k], dict.values)
           )
         )
           return true;
@@ -1931,20 +1950,20 @@ function couldMatchStructure(a: Type, b: Type): boolean {
         // Each entry the record type requires is probed with its own key, the
         // string literal type of the field name: `record{a: integer}` and
         // `collection<tuple<"b", integer>>` share no value, since the entry
-        // `("a", …)` is not a `tuple<"b", integer>`. Records are open, but a
-        // value with only the required fields exists, so the other fields
-        // add no constraint here.
+        // `("a", …)` is not a `tuple<"b", integer>`. A value with only the
+        // required fields exists, so the optional fields add no constraint
+        // here.
         const rec = (a.kind === 'record' ? a : b) as RecordType;
         const coll = (a.kind === 'record' ? b : a) as CollectionType;
         if (
           recordFieldsInhabited(rec) &&
-          Object.entries(rec.elements).every(([key, t]) =>
+          requiredFieldKeys(rec).every((key) =>
             couldMatchWithin(
               {
                 kind: 'tuple',
                 elements: [
                   { type: { kind: 'value', value: key } },
-                  { type: t },
+                  { type: rec.elements[key] },
                 ],
               },
               coll.elements
@@ -3199,7 +3218,13 @@ function isSubtypeRules(
     if (rhs === 'tuple') return lhs.kind === 'tuple';
     if (rhs === 'list') return lhs.kind === 'list';
     if (rhs === 'set') return lhs.kind === 'set';
-    if (rhs === 'record') return lhs.kind === 'record';
+    // The empty dictionary `{->}` (`dictionary<never>`) is a record: the
+    // record with no field.
+    if (rhs === 'record')
+      return (
+        lhs.kind === 'record' ||
+        (lhs.kind === 'dictionary' && lhs.values === 'never')
+      );
 
     // Bare `object` means "any object", and it is the ONE common bound every
     // declared object type has. Relating each of them to it does not
@@ -3603,31 +3628,32 @@ function isSubtypeRules(
   //
   // Handle Record Type
   //
-  // All the fields in the rhs must be present in the lhs
-  // but there may be additional fields in the lhs (width subtyping)
+  // Records are closed: a value has only the keys that its type lists. So
+  // the lhs is a subtype of the rhs when every key of the lhs is a field of
+  // the rhs, every key that the rhs requires is also required by the lhs, and
+  // each field type of the lhs is a subtype of the field type of the rhs
+  // (depth subtyping). There is no width subtyping: `record{a: integer,
+  // b: string}` is not a `record{a: integer}`. An optional field of the rhs
+  // can be required, optional or absent in the lhs: `record{a: integer}` is a
+  // `record{a: integer, b: string?}`.
   //
   if (lhs.kind === 'record' && rhs.kind === 'record') {
-    // A closed rhs (the type of a dictionary value) holds only values with
-    // exactly its keys: the lhs must be closed too, with the same keys.
-    if (rhs.closed === true) {
-      if (lhs.closed !== true) return false;
-      if (Object.keys(lhs.elements).length !== Object.keys(rhs.elements).length)
-        return false;
-    }
-    for (const key of Object.keys(rhs.elements)) {
-      // An own-property test, not `key in`: `Object.prototype` member names
-      // are valid record keys (`record{toString: string}` parses and
-      // serializes), and `in` finds those on the prototype of a record that
-      // does not declare them. That made `record{a: integer}` a subtype of
-      // `record{toString: any}` — width subtyping satisfied by a key the
-      // record does not have — because the inherited function was then
-      // compared against the declared type instead of reporting the key
-      // missing.
-      if (!Object.prototype.hasOwnProperty.call(lhs.elements, key))
+    for (const key of Object.keys(lhs.elements)) {
+      // An optional field of an empty type is a key that every value leaves
+      // out (`reduceRecordType()` removes it).
+      if (isOptionalField(lhs, key) && isEmptyType(lhs.elements[key])) continue;
+      // An own-property test (`hasRecordField()`), not `key in`:
+      // `Object.prototype` member names are valid record keys
+      // (`record{toString: string}` parses and serializes), and `in` finds
+      // those on the prototype of a record that does not declare them.
+      if (!hasRecordField(rhs, key)) return false;
+      if (isOptionalField(lhs, key) && !isOptionalField(rhs, key))
         return false;
       // Depth subtyping
       if (!isSubtype(lhs.elements[key], rhs.elements[key])) return false;
     }
+    for (const key of requiredFieldKeys(rhs))
+      if (!hasRecordField(lhs, key)) return false;
     return true;
   }
 
@@ -3676,19 +3702,20 @@ function isSubtypeRules(
     return isSubtype(lhs.values, rhs.values);
   }
 
-  // A record type is open: `record{a: integer}` also holds values with other
-  // fields, of any type (`{a: 1, b: "x"}`). So it is a subtype of
-  // `dictionary<T>` only when `T` holds every value. The type of a dictionary
-  // VALUE is a closed record (`closed: true`): the value has exactly the
-  // listed fields, so `{a: 1}` is a `dictionary<integer>`. With the old rule
-  // (every listed field type is a subtype of `T`) the relation was not
-  // transitive: `record{a: integer, b: string} <: record{a: integer} <:
-  // dictionary<integer>`, but the first is not a `dictionary<integer>`.
-  if (lhs.kind === 'record' && rhs.kind === 'dictionary') {
-    if (lhs.closed === true)
-      return Object.values(lhs.elements).every((t) => isSubtype(t, rhs.values));
-    return isSubtype('any', rhs.values);
-  }
+  // A record type is closed: a value has only the listed fields. So it is a
+  // subtype of `dictionary<T>` when every field type, optional fields too,
+  // is a subtype of `T`: `record{a: integer, b: integer?}` is a
+  // `dictionary<integer>`. The relation is transitive because there is no
+  // width subtyping between records.
+  if (lhs.kind === 'record' && rhs.kind === 'dictionary')
+    return Object.values(lhs.elements).every((t) => isSubtype(t, rhs.values));
+
+  // The empty dictionary `{->}` (`dictionary<never>`, the only dictionary
+  // with no entry) is a value of every record type whose fields are all
+  // optional. No other dictionary type is a subtype of a record type: its
+  // keys are not known.
+  if (lhs.kind === 'dictionary' && rhs.kind === 'record')
+    return lhs.values === 'never' && requiredFieldKeys(rhs).length === 0;
 
   //
   // Handle collections
@@ -3731,25 +3758,15 @@ function isSubtypeRules(
         rhs.elements
       );
 
-    // A record type is open (see the dictionary case above), so an entry of
-    // a value can have any key and any value: `tuple<string, any>`. The
-    // entries of a closed record are its listed fields only.
-    if (lhs.kind === 'record') {
-      if (lhs.closed === true)
-        return Object.values(lhs.elements).every((t) =>
-          isSubtype(
-            { kind: 'tuple', elements: [{ type: 'string' }, { type: t }] },
-            rhs.elements
-          )
-        );
-      return isSubtype(
-        {
-          kind: 'tuple',
-          elements: [{ type: 'string' }, { type: 'any' }],
-        },
-        rhs.elements
+    // A record type is closed (see the dictionary case above), so the
+    // entries of a value are its listed fields only.
+    if (lhs.kind === 'record')
+      return Object.values(lhs.elements).every((t) =>
+        isSubtype(
+          { kind: 'tuple', elements: [{ type: 'string' }, { type: t }] },
+          rhs.elements
+        )
       );
-    }
   }
 
   //
@@ -4581,6 +4598,27 @@ function widen2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   if (isSubtype(a, b)) return b;
   if (isSubtype(b, a)) return a;
 
+  // Two record types join to the record type with the keys of both. A key
+  // that only one side has, or that is optional on one side, is optional,
+  // and the type of a key is the join of its types:
+  // `widen(record{a: integer}, record{a: integer, b: string})` is
+  // `record{a: integer, b: string?}`. Records are closed, so this is the
+  // least record type above both.
+  if (
+    typeof a === 'object' &&
+    typeof b === 'object' &&
+    a.kind === 'record' &&
+    b.kind === 'record'
+  )
+    return joinRecords(a, b);
+  // The empty dictionary `{->}` joined with a record type: every field of
+  // the record becomes optional, as in a join with a record of no field.
+  if (typeof a === 'object' && typeof b === 'object') {
+    const [d, r] = a.kind === 'dictionary' ? [a, b] : [b, a];
+    if (d.kind === 'dictionary' && d.values === 'never' && r.kind === 'record')
+      return makeRecordType(r.elements, Object.keys(r.elements));
+  }
+
   // A UNION operand is joined arm by arm. The common supertype of a union
   // and another type is usually a lossy category (`any`), so the pair used
   // to become the union of the two sides, with no arm joined to another.
@@ -4644,6 +4682,32 @@ function widen2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   if (sup === 'number' && (isSubtype(a, 'nan') || isSubtype(b, 'nan')))
     return unionTypes(a, b);
   return sup;
+}
+
+/** The join of two record types: the keys of both; a key that one side
+ * leaves out, or that is optional on one side, is optional. See `widen2`. */
+function joinRecords(
+  a: Readonly<RecordType>,
+  b: Readonly<RecordType>
+): RecordType {
+  const elements: Record<string, Type> = Object.create(null);
+  const optional: string[] = [];
+  for (const key of new Set([
+    ...Object.keys(a.elements),
+    ...Object.keys(b.elements),
+  ])) {
+    const inA = hasRecordField(a, key);
+    const inB = hasRecordField(b, key);
+    elements[key] =
+      inA && inB
+        ? (widen2(a.elements[key], b.elements[key]) as Type)
+        : inA
+          ? a.elements[key]
+          : b.elements[key];
+    if (!inA || !inB || isOptionalField(a, key) || isOptionalField(b, key))
+      optional.push(key);
+  }
+  return makeRecordType(elements, optional);
 }
 
 /**

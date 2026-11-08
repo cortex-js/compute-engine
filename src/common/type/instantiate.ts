@@ -2266,14 +2266,24 @@ function elementTypeOf(type: Type): Type | undefined {
       kind: 'tuple',
       elements: [{ type: 'string' }, { type: type.values }],
     };
-  // A record type is open: a value can have fields it does not declare, of
-  // any type, so the value of an entry is `any`, as in
-  // `collectionElementType()` (`utils.ts`). (CE-77)
-  if (type.kind === 'record')
+  // A record type is closed: a value has only the listed fields, so the
+  // value of an entry is the join of the field types, as in
+  // `collectionElementType()` (`utils.ts`).
+  if (type.kind === 'record') {
+    const fields = Object.values(type.elements);
     return {
       kind: 'tuple',
-      elements: [{ type: 'string' }, { type: 'any' }],
+      elements: [
+        { type: 'string' },
+        {
+          type:
+            fields.length === 0
+              ? 'never'
+              : algebra().joinUnresolvedArm(fields, true),
+        },
+      ],
     };
+  }
   return undefined;
 }
 

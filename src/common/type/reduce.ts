@@ -38,6 +38,12 @@ import type {
   ObjectType,
   TypeReference,
 } from './types.js';
+import {
+  hasRecordField,
+  isOptionalField,
+  makeRecordType,
+  requiredFieldKeys,
+} from './types.js';
 import { isValidPrimitiveType } from './primitive.js';
 import { normalizeStatedEffectSet } from './effects.js';
 import { unfoldAliasOnDescent, type AliasDescent } from './utils.js';
@@ -740,6 +746,16 @@ function meet2Uncached(a: Type, b: Type): Type | undefined {
   if (isKeptOperand(a) || isKeptOperand(b))
     return provablyDisjoint(a, b) ? 'never' : undefined;
 
+  // The bare `record` and a dictionary type share the records whose fields
+  // are values of the dictionary (`{a: 1}` is a value of both `record` and
+  // `dictionary<integer>`). No record type lists those keys, so the
+  // intersection is kept as written.
+  if (
+    (a === 'record' && typeof b === 'object' && b.kind === 'dictionary') ||
+    (b === 'record' && typeof a === 'object' && a.kind === 'dictionary')
+  )
+    return undefined;
+
   return 'never';
 }
 
@@ -1015,13 +1031,17 @@ function mayShareFiniteValue(a: Type, b: Type): boolean {
       x.kind === 'record' &&
       y.kind === 'record'
     ) {
-      // Records are open: a value of both has the fields of both, and a
-      // field that both declare holds a value of both types.
-      return Object.keys(x.elements).every(
-        (k) =>
-          !Object.prototype.hasOwnProperty.call(y.elements, k) ||
-          walk(x.elements[k], y.elements[k], depth + 1)
-      );
+      // Records are closed: a value of both has only keys that both list,
+      // so a key that one side requires must be a field of the other, and a
+      // key that one side requires holds a value of both types. A key that
+      // is optional on both sides can be left out.
+      const required = (r: RecordType, s: RecordType) =>
+        requiredFieldKeys(r).every(
+          (k) =>
+            hasRecordField(s, k) &&
+            walk(r.elements[k], s.elements[k], depth + 1)
+        );
+      return required(x, y) && required(y, x);
     }
     return !provablyDisjoint(x, y);
   };
@@ -1332,12 +1352,18 @@ function meetTuples(a: Type, b: Type): Type | undefined {
  * The meet of two RECORD types, or `undefined` when `a` and `b` are not both
  * records.
  *
- * Records are width-subtyped — a record with more keys is a subtype of one
- * with fewer — so the meet carries the union of both key sets: the value
- * inhabiting both `record{a: integer}` and `record{b: string}` is
- * `record{a: integer, b: string}`. A key both sides declare takes the meet of
- * its two types, and an uninhabited key empties the whole record, since a
- * declared key must hold a value: `record{a: integer} & record{a: string}` is
+ * Records are closed: a value has only the keys that its type lists. So a
+ * value of both types has only keys that both list:
+ *
+ * - a key that one side requires and the other side does not list makes the
+ *   meet `never` (`record{a: integer} & record{b: string}` is `never`);
+ * - a key that one side lists as optional and the other does not list is
+ *   left out of the meet;
+ * - a key that both sides list takes the meet of its two types, and is
+ *   required when one side requires it.
+ *
+ * A required key whose meet is empty empties the whole record, since a
+ * required key must hold a value: `record{a: integer} & record{a: string}` is
  * `never`, not `record{a: never}`. (Ruled in `ROADMAP.md`, "The meet had no
  * structural rule for same-kind composites".)
  *
@@ -1349,40 +1375,43 @@ function meetRecords(a: Type, b: Type): Type | undefined {
   if (typeof a !== 'object' || typeof b !== 'object') return undefined;
   if (a.kind !== 'record' || b.kind !== 'record') return undefined;
 
-  // A closed record (the type of a dictionary value) has exactly its listed
-  // keys. A value of both types has every key of both, so a closed side that
-  // does not list a key of the other side shares no value with it.
-  const hasKeysOf = (x: RecordType, y: RecordType) =>
-    Object.keys(y.elements).every((k) =>
-      Object.prototype.hasOwnProperty.call(x.elements, k)
-    );
-  if (a.closed === true && !hasKeysOf(a, b)) return 'never';
-  if (b.closed === true && !hasKeysOf(b, a)) return 'never';
+  // Presence is an own-property test (`hasRecordField()`). `Object.prototype`
+  // member names are valid record keys — `record{toString: string}` parses
+  // and serializes — so a plain `elements[key]` lookup finds the inherited
+  // function for those names and hands it to `reduceType` as if it were a
+  // type.
+  for (const [x, y] of [
+    [a, b],
+    [b, a],
+  ])
+    for (const key of requiredFieldKeys(x))
+      if (!hasRecordField(y, key)) return 'never';
 
-  const elements: Record<string, Type> = { ...a.elements };
-  for (const [key, type] of Object.entries(b.elements)) {
-    // Presence must be an own-property test. `Object.prototype` member names
-    // are valid record keys — `record{toString: string}` parses and
-    // serializes — so a plain `elements[key]` lookup finds the inherited
-    // function for those names and hands it to `reduceType` as if it were a
-    // type, which throws "Unknown type kind". It also made the meet
-    // order-dependent, since the crash only happened when the prototype name
-    // arrived from the right-hand side.
-    if (!Object.prototype.hasOwnProperty.call(elements, key)) {
-      elements[key] = type;
-      continue;
-    }
+  const elements: Record<string, Type> = Object.create(null);
+  const optional: string[] = [];
+  for (const key of Object.keys(a.elements)) {
+    if (!hasRecordField(b, key)) continue;
     const meet = reduceType({
       kind: 'intersection',
-      types: [elements[key], type],
+      types: [a.elements[key], b.elements[key]],
     });
-    if (isEmptyType(meet)) return 'never';
+    const isOptional = isOptionalField(a, key) && isOptionalField(b, key);
+    if (isEmptyType(meet)) {
+      // A key that both sides make optional, and that no value can hold, is
+      // a key that every value of the meet leaves out.
+      if (isOptional) continue;
+      return 'never';
+    }
     elements[key] = meet;
+    if (isOptional) optional.push(key);
   }
 
-  if (a.closed === true || b.closed === true)
-    return decorate({ kind: 'record', elements, closed: true });
-  return decorate({ kind: 'record', elements });
+  // No field is left: the only value of the meet is the empty dictionary
+  // `{->}`, whose type is `dictionary<never>`. The bare `record` would hold
+  // every record.
+  if (Object.keys(elements).length === 0)
+    return decorate({ kind: 'dictionary', values: 'never' });
+  return decorate(makeRecordType(elements, optional));
 }
 
 /**
@@ -1390,17 +1419,12 @@ function meetRecords(a: Type, b: Type): Type | undefined {
  * and `b` are not such a pair.
  *
  * A value of `dictionary<V>` holds a `V` under each of its keys. A value of
- * the record type has every field of the record, and an open record also
- * allows other fields of any type. So a value of both has the fields of the
- * record, each field holds a value of the field type and of `V`, and every
- * other field also holds a `V`. The meet is the CLOSED record whose fields
- * are the record fields, each met with `V`: `record{a: integer} &
- * dictionary<number>` is the closed `record{a: integer}`, the type of
- * `{a: 1}`. The closed record does not describe the values with more fields
- * (`{a: 1, b: 2}`): no type spells "these fields, and others of type `V`",
- * and the closed record is the nearest type below both operands. The meet is
- * `never` only when a field cannot hold a `V`, since a field must hold a
- * value: `record{a: string} & dictionary<integer>` is `never`.
+ * the record type has only the fields of the record. So a value of both has
+ * the fields of the record, each holding a value of the field type and of
+ * `V`: `record{a: integer} & dictionary<number>` is `record{a: integer}`.
+ * The meet is `never` when a required field cannot hold a `V`, since a
+ * required field must hold a value: `record{a: string} & dictionary<integer>`
+ * is `never`. An optional field that cannot hold a `V` is left out.
  */
 function meetRecordDictionary(a: Type, b: Type): Type | undefined {
   if (typeof a !== 'object' || typeof b !== 'object') return undefined;
@@ -1414,16 +1438,24 @@ function meetRecordDictionary(a: Type, b: Type): Type | undefined {
     dictionary = a;
   } else return undefined;
 
-  const elements: Record<string, Type> = {};
+  const elements: Record<string, Type> = Object.create(null);
   for (const [key, type] of Object.entries(record.elements)) {
     const meet = reduceType({
       kind: 'intersection',
       types: [type, dictionary.values],
     });
-    if (isEmptyType(meet)) return 'never';
+    if (isEmptyType(meet)) {
+      if (isOptionalField(record, key)) continue;
+      return 'never';
+    }
     elements[key] = meet;
   }
-  return decorate({ kind: 'record', elements, closed: true });
+  // No field is left: the only value of the meet is the empty dictionary
+  // `{->}`, whose type is `dictionary<never>`. The bare `record` would hold
+  // every record.
+  if (Object.keys(elements).length === 0)
+    return decorate({ kind: 'dictionary', values: 'never' });
+  return decorate(makeRecordType(elements, record.optional));
 }
 
 /**
@@ -1941,39 +1973,34 @@ function reduceTupleType(type: TupleType): Type {
 }
 
 function reduceRecordType(type: RecordType): Type {
-  let reducedElements: Record<string, Type> = {};
-  for (const [key, value] of Object.entries(type.elements))
-    reducedElements[key] = reduceType(value);
-
-  if (Object.values(reducedElements).some((type) => type === 'error'))
-    return 'error';
-
-  // An uninhabited key empties the whole record, for the same reason a tuple
-  // slot does: a declared key must hold a value.
-  if (Object.values(reducedElements).some((type) => isEmptyType(type)))
-    return 'never';
-
-  // If the type of any key is 'nothing', remove it from the record
-  const count = Object.keys(reducedElements).length;
-  reducedElements = Object.fromEntries(
-    Object.entries(reducedElements).filter(([_, value]) => value !== 'nothing')
-  );
-
-  // An empty record is `record`
-  if (Object.keys(reducedElements).length === 0) return 'record';
-
-  // A closed record (the type of a dictionary value) lists every key of its
-  // values. When a key was removed above, the values still have that key, so
-  // the result is the open record.
-  if (type.closed === true && Object.keys(reducedElements).length !== count) {
-    const { closed: _closed, ...open } = type;
-    return decorate({ ...open, elements: reducedElements });
+  // Prototype-free, as in `visitRecordType()` (`type-builder.ts`): a key
+  // can be an `Object.prototype` member name such as `__proto__`.
+  const reducedElements: Record<string, Type> = Object.create(null);
+  for (const [key, value] of Object.entries(type.elements)) {
+    const reduced = reduceType(value);
+    if (reduced === 'error') return 'error';
+    if (isEmptyType(reduced)) {
+      // An uninhabited required key empties the whole record, for the same
+      // reason a tuple slot does: a required key must hold a value. An
+      // uninhabited optional key is a key that every value leaves out.
+      if (!isOptionalField(type, key)) return 'never';
+      continue;
+    }
+    // A field of type `nothing` stays: `Nothing` is an ordinary value, and
+    // `{a -> Nothing}` keeps the key `a` (`docs/ERROR-MODEL.md`, "One static
+    // error, one dynamic non-value per domain").
+    reducedElements[key] = reduced;
   }
 
-  return decorate({
-    ...type,
-    elements: reducedElements,
-  });
+  // A record type written with no field is the bare `record`. A record
+  // type whose fields were all optional fields of an empty type holds only
+  // the empty dictionary `{->}`, whose type is `dictionary<never>`.
+  if (Object.keys(reducedElements).length === 0)
+    return Object.keys(type.elements).length === 0
+      ? 'record'
+      : decorate({ kind: 'dictionary', values: 'never' });
+
+  return decorate(makeRecordType(reducedElements, type.optional));
 }
 
 /**
@@ -2004,11 +2031,11 @@ function reduceDictionaryType(type: DictionaryType): Type {
   const reducedValues = reduceType(type.values);
   if (reducedValues === 'error') return 'error';
 
-  // A dictionary of `nothing` is an EMPTY dictionary — writing `Nothing`
-  // into an entry deletes it (the same slot-collapse rule lists have), so
-  // the only inhabitant is `{->}`. Preserved like `list<nothing>` /
-  // `set<nothing>`; this used to reduce to `error`, which was inconsistent
-  // with its siblings (user-confirmed 2026-08-18).
+  // A dictionary of `nothing` holds `Nothing` under each of its keys:
+  // `Nothing` is an ordinary value, and an entry that holds it keeps its key
+  // (`{a -> Nothing}` is a `dictionary<nothing>`; `docs/ERROR-MODEL.md`,
+  // "One static error, one dynamic non-value per domain"). Preserved like
+  // `list<nothing>` and `set<nothing>`.
   if (reducedValues === 'nothing')
     return decorate({ kind: 'dictionary', values: 'nothing' });
 

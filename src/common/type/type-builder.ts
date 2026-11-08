@@ -38,6 +38,7 @@ import {
   TypeParameter,
   TypeReference,
   FunctionSignature,
+  makeRecordType,
 } from './types.js';
 import {
   TypeVariableError,
@@ -515,11 +516,13 @@ export class TypeBuilder implements ASTVisitor<Type> {
     // keys include `__proto__` did not round-trip through its own type
     // spelling.
     const elements: Record<string, Type> = Object.create(null);
+    const optional: string[] = [];
     for (const entry of node.entries) {
       elements[entry.key] = this.buildType(entry.valueType);
+      if (entry.optional === true) optional.push(entry.key);
     }
 
-    return { kind: 'record', elements };
+    return makeRecordType(elements, optional);
   }
 
   /** `object` with no field list is the bare primitive ("any object"); with

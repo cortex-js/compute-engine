@@ -845,20 +845,20 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     expect(
       solvedVar('(collection<T>) -> T where T', ['dictionary<number>'], 'T')
     ).toBe('tuple<string, number>');
-    // A record type is open (a value can have more fields, of any type), so
-    // the value of an entry is `any` (CE-77).
+    // A record type is closed (a value has only its listed fields), so the
+    // value of an entry is the join of the field types.
     expect(
       typeToString(
         collectionElementType(parseType('record{a: integer, b: string}'))!
       )
-    ).toBe('tuple<string, any>');
+    ).toBe('tuple<string, integer | string>');
     expect(
       solvedVar(
         '(collection<T>) -> T where T',
         ['record{a: integer, b: string}'],
         'T'
       )
-    ).toBe('tuple<string, any>');
+    ).toBe('tuple<string, integer | string>');
     // End to end: the operand pins `T`; it does not fall to the S3 `unknown`.
     const ce = fresh();
     ce.declare('entryOf', { signature: '(collection<T>) -> T where T' });

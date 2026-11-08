@@ -220,6 +220,49 @@ immediate functions and symbols as well. These restrictions are immediate:
 a nested collection is itself a value. Numeric `NaN` remains a numeric
 outcome, even where named absence markers are excluded.
 
+### Records are closed, dictionaries are open
+
+A value of `record{a: integer, b: string}` has exactly the keys `a` and
+`b`. A field written with a `?` after its type is optional
+(`record{a: integer, b: string?}`): a value can leave its key out. The
+`RecordType` node keeps the optional keys in `optional`, a sorted list that
+`makeRecordType()` (`src/common/type/types.ts`) normalizes. A dictionary
+(`dictionary<V>`) has any string keys, each holding a `V`. The type of a
+dictionary literal is the record of exactly its keys.
+
+- There is no width subtyping: `record{a: integer, b: string}` is not a
+  subtype of `record{a: integer}`. Depth subtyping stays:
+  `record{a: integer}` is a subtype of `record{a: real}`.
+- `record{a: integer}` and `record{a: integer, b: string}` are subtypes of
+  `record{a: integer, b: string?}`; the reverse is false.
+- A record type is a subtype of `dictionary<V>` when every field type,
+  optional fields too, is a subtype of `V`.
+- The join of two record types has the keys of both; a key that one side
+  does not have, or makes optional, is optional. The meet has the keys
+  that both list; a key that one side requires and the other does not list
+  makes the meet `never`.
+- A read of a listed field has the field type. A read of an optional field
+  that the value leaves out gives the absent value of the field type
+  (`Missing`, or `NaN` for a numeric field), as an index out of range does.
+  A read of a field that a DECLARED record type does not list (`Field` or
+  `At` with a literal key, on a variable whose type was declared: a typed
+  parameter, a typed `let`) is refused when it is boxed (`unknown-field`,
+  `unknownRecordFieldError()` in `library/collections.ts`). The type of a
+  dictionary literal, of a variable whose type was inferred from its value,
+  or of a constant, describes only that value: a key that the value does
+  not have reads as the absent value of a read, as for a dictionary. With a key
+  known only at evaluation, the read is one of the field values.
+- A store follows the rule of `docs/ERROR-MODEL.md`, rule 5: a field that
+  holds `Missing` is accepted where the field type accepts a present value,
+  and it keeps its key.
+- `DeleteAt(r, "b")` returns a copy without the key. Its type loses the
+  field; with a key known only at evaluation, every field becomes optional.
+- A nominal record constructor requires each field that is not optional,
+  accepts the optional fields, and refuses other keys.
+
+A program that must accept other keys takes a `dictionary`. Design record:
+`docs/plans/2026-11-07-ce71-record-fields.md`.
+
 Explicit element arguments remain explicit through parsing, reduction and
 serialization. In particular, `<unknown>` no longer collapses into a bare
 family name; bare `list` and `list<unknown>` denote the same values and both

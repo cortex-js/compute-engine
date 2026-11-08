@@ -71,8 +71,10 @@ neither an absent datum nor an inference placeholder.
 
 A lazy view keeps each raw callback result, and `ListFrom` materializes it
 as a list with the same elements. Storing, passing or nesting a view does
-not compact it, and a data tuple keeps every slot. Open record types are
-retained. Record-field omission remains open.
+not compact it, and a data tuple keeps every slot. Record types are
+closed, a field can be optional (`b: string?`), and a field that holds
+`Missing` keeps its key (user decision of 2026-11-07,
+`docs/plans/2026-11-07-ce71-record-fields.md`).
 
 The presence contracts were decided and implemented on 2026-10-21 (user
 decisions P1 to P5, `docs/plans/2026-10-21-presence-contracts-and-assertion.md`;
@@ -924,14 +926,15 @@ any other element. An operator that needs a value and meets it gives the
 is what `Missing` and `NaN` are for.
 
 A dictionary entry whose value is `Missing` is kept too (`{a: Missing}`
-keeps the key `a`). **Open:** whether such an entry is omitted, required
-versus optional keys, and omission of the `Missing` marker versus all
-absence forms, still need explicit rules. If omission is adopted,
-constructing `{a -> f(x)}` when `f(x)` may return `Missing` cannot promise
-a required `a` key. An existing key can instead be removed by filtering the
-dictionary's key/value entries and rebuilding with `DictionaryFrom`; this
-constructs a replacement dictionary. Retaining open record types does not
-decide whether a field value erases its key.
+keeps the key `a`), as a tuple keeps its slot and a list its position (user
+decision of 2026-11-07). A record type is closed, and a field that a value
+can leave out is declared optional (`record{a: integer, b: string?}`). A
+store of a record whose field holds `Missing` is accepted where the field
+type accepts a present value (rule 5 below). A program that leaves a field
+out says so: `DeleteAt(r, "b")` returns a copy without the key, and a
+conditional spread (`{->, ...(if c { {b -> "x"} } else { {->} }), a -> 1}`)
+builds the record with or without it. Design record:
+`docs/plans/2026-11-07-ce71-record-fields.md`.
 
 **Host exceptions.** The settled core: throws are reserved for API misuse
 by the embedding program, cancellation, and compiled-code boundaries per
@@ -1369,8 +1372,9 @@ information loss stated in §1.
 decision of 2026-11-02, two-valued comparisons; from 2026-07-24 to
 2026-11-02 it propagated by Kleene, `Less(Missing, 1) → Missing`, and an
 `If` or a `Which` on an absent condition was a catchable error
-expression, the absent-condition error) and preserves positional slots. Whether it omits a key during
-record/dictionary construction remains open, as described in §1.
+expression, the absent-condition error) and preserves positional slots. It
+does not omit a key during record or dictionary construction (§1, user
+decision of 2026-11-07).
 In a *numeric* slot, `Missing` is
 normalized to `NaN` at the boundary (numeric domains absorb absence, per
 §1), so numeric operators never need a `missing` arm; a `| missing` arm

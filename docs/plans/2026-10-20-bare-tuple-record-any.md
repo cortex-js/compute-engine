@@ -875,7 +875,7 @@ fusion at an explicit omission boundary; otherwise reject compilation.
 | Q3. When is possible absence a diagnostic? | A syntactic presence assertion is requested; checks/fallbacks treat `NaN` and `Indeterminate` alike and the failing-fallback idiom's type is corrected | Select assertion spelling; choose diagnostic default, specify supported presence proofs, and implement assertion compilation |
 | Q4. What does a lazy collection expose? | Decided: R, raw callback results; `ListFrom` materializes and omits `Nothing` | Implement honest element and length information; remaining consumer and conversion policies are Q5 |
 | Q5. Where does `Nothing` erase? | Decided: aggregates skip it, no implicit view compaction, data tuples/ordinary arguments preserve slots | Record fields, boundary inventory, custom folds, ordering operations, serialization, and whether a distinct unit value is needed remain open; callback and paired-consumer policies are Q9–Q10 |
-| Q6. What do unspecified record fields promise? | Decided: retain current open records and width subtyping | Make enumeration and dictionary relationships respect unconstrained extra fields; no closed-record syntax required for this work |
+| Q6. What do unspecified record fields promise? | Superseded 2026-11-07: record types are closed, with optional fields (`b: string?`), and dictionaries are open (`docs/plans/2026-11-07-ce71-record-fields.md`, CE-71). Decided 2026-10-20: retain current open records and width subtyping | Nothing: the 2026-11-07 design replaces this answer |
 | Q7. How should unbound generic variables behave? | Keep the current fallback initially; bind from actual arguments normally | Local explicit `where T: any` bounds are implemented for structural collection operators; global fallback migration remains separate |
 | Q8. How should the agreed inference-marker role of `unknown` be implemented? | The role is decided: it is a placeholder, not a concrete content type | Decide unresolved-type representation, subtype API behavior, bounds, and migration from the current lattice; inventory library signatures and classify inference requests versus explicit content contracts or named generics; coordinate with Q7 |
 | Q9. How do strict parameters and chained callbacks handle `Nothing`? | Decided: bypass callbacks for `Nothing`; `Map` preserves the raw position | `Map` preserves omitted positions; `Filter` drops them; callback bypass and immediate omission typing implemented for both; ordinary strict parameter contracts remain separate |
@@ -996,6 +996,12 @@ rest forms such as `record{a: integer, ...}`. A record value having a fixed
 set of keys does not mean its structural type requires exactly those keys.
 Thus closed-by-default records with opt-in openness would be a language
 change, not documentation of existing behavior.
+
+**Superseded on 2026-11-07.** The user decided that record types are
+closed and dictionaries are open: a record has exactly the fields its type
+lists, some of them optional (`b: string?`), and there is no width
+subtyping. The design is `docs/plans/2026-11-07-ce71-record-fields.md`
+(CE-71). The rest of this section records the decision of 2026-10-20.
 
 **Decision: retain the current open-record model.** An annotation promises
 the named fields and permits additional fields. This settles openness,

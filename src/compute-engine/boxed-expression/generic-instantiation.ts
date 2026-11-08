@@ -26,7 +26,7 @@ import type {
 
 import { couldBeUnkeyedCollectionOperand } from '../collection-utils.js';
 import type { Expression } from '../global-types.js';
-import { isDictionary, isSymbol } from './type-guards.js';
+import { isDictionary } from './type-guards.js';
 
 /**
  * The call-site solver's EMBEDDING (§4.3/§4.5 of
@@ -154,35 +154,22 @@ export interface SolveActual {
   readonly liftable: boolean;
   /** The type the solve binds variables from, when it differs from `type`.
    * A dictionary VALUE (a literal) is typed `record{a: integer, b:
-   * integer}`, and a record type is open, so `collection<T>` binds `T` to
-   * `tuple<string, any>` from it. The value has exactly those fields, so it
-   * is solved as `dictionary<integer>`, and `T` is `tuple<string,
-   * integer>`. Admission still reads `type`. (CE-77) */
+   * integer}`. Record types are closed, so the value has exactly those
+   * fields: it is solved as `dictionary<integer>`, and `collection<T>` binds
+   * `T` to `tuple<string, integer>`. Admission still reads `type`. */
   readonly solveType?: Type;
 }
 
 /**
- * The type of the dictionary value `op` is or holds, read as the type of a
- * value that has exactly the fields of that type, or `undefined`.
- *
- * - When `op` is a dictionary value (a literal), its type.
- * - When `op` is a symbol whose type was inferred (not declared) and whose
- *   value is a dictionary of the same type (`dd := {a: 1, b: 2}`), the type
- *   of the symbol. A later assignment of a dictionary with other fields
- *   changes the type of the symbol, and the two types no longer agree.
- *
- * A declared record type is open: a symbol declared `record{a: integer}`
- * can hold a value with other fields, of any type, so it gives `undefined`.
- * (CE-77)
+ * The type of `op` when `op` is a dictionary value (a literal) or has a
+ * record type, or `undefined`. Record types are closed, so a value of a
+ * record type has exactly the fields of that type, and its entries are
+ * typed by the join of those fields (`dictionaryValueValuesType()`).
  */
 export function closedDictionaryType(op: Expression): Type | undefined {
   if (isDictionary(op)) return op.type.type;
-  if (!isSymbol(op) || !op.valueDefinition?.inferredType) return undefined;
-  const value = op.value;
-  if (!isDictionary(value)) return undefined;
   const t = op.type.type;
-  const v = value.type.type;
-  return isSubtype(t, v) && isSubtype(v, t) ? t : undefined;
+  return typeof t === 'object' && t.kind === 'record' ? t : undefined;
 }
 
 /**

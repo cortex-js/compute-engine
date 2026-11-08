@@ -1,5 +1,5 @@
 import { effectSetToString } from './effects.js';
-import { isComplexInfinityValue } from './types.js';
+import { isComplexInfinityValue, isOptionalField } from './types.js';
 import type {
   NamedElement,
   NumericPrimitiveType,
@@ -62,41 +62,21 @@ let ELIDE_STATED_PURE = false;
 export function typeToDedupKey(type: Type): string {
   if (typeof type === 'string') return type;
   ELIDE_STATED_PURE = true;
-  MARK_CLOSED_RECORDS = true;
   try {
     return typeToString(type);
   } finally {
     ELIDE_STATED_PURE = false;
-    MARK_CLOSED_RECORDS = false;
   }
 }
 
 /**
- * While set, {@link typeToString} writes a closed record (`closed: true`,
- * the type of a dictionary value) as `record!{…}`, a spelling that the
- * parser does not read. Set by {@link typeToDedupKey} and
- * {@link typeToIdentityKey}, and restored around one synchronous,
- * non-reentrant call.
- */
-let MARK_CLOSED_RECORDS = false;
-
-/**
  * A key that tells two types apart when they are different types: the
- * serialization of the type, with a closed record written as `record!{…}`.
- *
- * A closed record prints as the open record with the same fields
- * (`record{a: integer}`), but the two are different types: only the closed
- * one is a `dictionary<integer>`. A table keyed by the plain serialization
- * (the intern table, `intern.ts`) would merge them.
+ * serialization of the type. Unlike {@link typeToDedupKey}, it keeps the
+ * ` pure` specifier of a stated empty effect set, so a table keyed by it (the
+ * intern table, `intern.ts`) keeps the two spellings of one signature apart.
  */
 export function typeToIdentityKey(type: Type): string {
-  if (typeof type === 'string') return type;
-  MARK_CLOSED_RECORDS = true;
-  try {
-    return typeToString(type);
-  } finally {
-    MARK_CLOSED_RECORDS = false;
-  }
+  return typeToString(type);
 }
 
 export function typeToString(type: Type, precedence = 0): string {
@@ -312,13 +292,20 @@ export function typeToString(type: Type, precedence = 0): string {
       // wrapped in backticks by `symbolName()`: the type lexer reads only
       // `[a-zA-Z_][a-zA-Z0-9_]*` bare, so an unquoted exotic key would not
       // parse back.
+      // An optional field is written with a `?` after its type
+      // (`b: string?`), the marker of an optional function argument. The
+      // parser reads the field type with `parseUnionType()` before it looks
+      // for the `?`, so the marker applies to the whole field type; a union
+      // or a function type is put in parentheses for the reader, as for an
+      // argument.
       const elements = Object.entries(type.elements)
-        .map(([key, value]) => `${symbolName(key)}: ${typeToString(value)}`)
+        .map(([key, value]) =>
+          isOptionalField(type, key)
+            ? `${symbolName(key)}: ${typeToString(value, ARGUMENT_MODIFIER_PRECEDENCE)}?`
+            : `${symbolName(key)}: ${typeToString(value)}`
+        )
         .join(', ');
-      result =
-        MARK_CLOSED_RECORDS && type.closed === true
-          ? `record!{${elements}}`
-          : `record{${elements}}`;
+      result = `record{${elements}}`;
       break;
 
     case 'object':
