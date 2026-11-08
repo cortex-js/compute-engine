@@ -156,6 +156,19 @@
 
 ### Resolved Issues
 
+- **A formula made before the user defines a function with the name of a
+  built-in function keeps the built-in function when it is evaluated after
+  that definition.** With `e = ce.box(["Add", "x", ["Sin", "x"]])`, then a
+  pushed scope where `Sin` is assigned `t ↦ t + 100`, `e.evaluate()` gave a
+  call of the user's `Sin`: at `x = 1` the result was `102`. It now gives
+  `x + sin(x)` with the built-in `Sin` (written
+  `["Apply", ["Module", "Sin"], "x"]` in that scope), which is `1.8415` at
+  `x = 1`. A `Hold` made before a user `Hold` stays held. In the other
+  direction, the call of a user function declared with no value, evaluated
+  after its scope ends, stays a call of the user function: a user `Sqrt(4)`
+  is no longer `2`. `evaluateAsync()`, and a host function that is declared
+  again in an inner scope, still read the new definition.
+
 - **A function that a function body defines reads the variables of the body
   when a closure calls it after the call has ended.** With the body
   `Block(Declare(c, "real", 5), DefineFunction(h, k ↦ c + k), Assign(g, x ↦ h(x)))`

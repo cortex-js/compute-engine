@@ -2904,6 +2904,51 @@ export class BoxedFunction
     return withBorrowedBinding(this.engine, this._operator, def, build);
   }
 
+  /**
+   * Run `call`, which calls the `evaluate` handler of the definition of this
+   * node, in a scope where the name of the operator resolves to the library
+   * definition of this node (`withBorrowedBinding()`). A handler builds its
+   * unevaluated result by name: the `Sin` handler returns
+   * `engine._fn('Sin', [x])` for a symbolic `x`, and the `Hold` handler
+   * returns a new `Hold`. A name boxed in the current scope is bound to the
+   * definition that the scope gives the name. So a library call `Sin(x)`
+   * boxed before a scope that declares a user function `Sin`, and evaluated
+   * in that scope, would otherwise give a call of the user function
+   * (`docs/SCOPING-MODEL.md`, "Callable resolution").
+   *
+   * The scope is borrowed only when a definition that can be applied hides
+   * the library definition (`hidesLibraryBindingInContext()`, the test of
+   * `_bind()`). A user variable `D = 3` does not hide the library `D`, and
+   * a borrowed scope would hide its value from the operands that the lazy
+   * handler of `D` evaluates. The pushed scope holds the declarations and
+   * the assumptions made while it is on the stack, and they are lost when
+   * it is popped. So the scope is not borrowed when the handler is not pure
+   * (`Assume`), or when the operator is lazy and an operand is not pure: a
+   * lazy handler evaluates its operands itself, and an operand can be an
+   * `Assume`. The operands of an operator that is not lazy were evaluated
+   * before the handler runs: `Sin(x + Random())` borrows the scope.
+   *
+   * A host function with an `evaluate` handler, and an `evaluateAsync`
+   * handler, are not covered: they still build their result by name.
+   */
+  private _inOwnBinding<T>(call: () => T): T {
+    const def = this._def;
+    if (
+      !def ||
+      !isOperatorDef(def) ||
+      !hidesLibraryBindingInContext(
+        this.engine,
+        this._operator,
+        def,
+        isApplicableDef
+      ) ||
+      def.operator.pure === false ||
+      (def.operator.lazy && !this.isPure)
+    )
+      return call();
+    return withBorrowedBinding(this.engine, this._operator, def, call);
+  }
+
   get isStructural(): boolean {
     return this._isStructural;
   }
@@ -9913,23 +9958,28 @@ export class BoxedFunction
           // second call (`ListingMemo`, `collection-utils.ts`).
           pushListingMemo();
           try {
-            evalResult = def.evaluate?.(ops, handlerOptions);
-            // A first call that read a walk that missed elements, or a walk
-            // that failed, keeps its decline, as on the asynchronous route:
-            // the handler is not called again.
-            if (
-              evalResult === undefined &&
-              def.evaluate !== undefined &&
-              !handlerWalkMissedElements(walksBefore) &&
-              handlerWalkFailure(failuresBefore) === undefined
-            )
-              evalResult = declinedOverListedFlatMaps(
-                this,
-                def,
-                ops,
-                handlerOptions,
-                def.evaluate
-              );
+            // The handler builds its result by name in a scope where the
+            // name denotes the binding of this node (`_inOwnBinding()`).
+            evalResult = this._inOwnBinding(() => {
+              const answer = def.evaluate?.(ops, handlerOptions);
+              // A first call that read a walk that missed elements, or a
+              // walk that failed, keeps its decline, as on the asynchronous
+              // route: the handler is not called again.
+              if (
+                answer === undefined &&
+                def.evaluate !== undefined &&
+                !handlerWalkMissedElements(walksBefore) &&
+                handlerWalkFailure(failuresBefore) === undefined
+              )
+                return declinedOverListedFlatMaps(
+                  this,
+                  def,
+                  ops,
+                  handlerOptions,
+                  def.evaluate
+                );
+              return answer;
+            });
           } finally {
             popListingMemo();
           }
@@ -11605,7 +11655,11 @@ export class BoxedFunction
                 : undefined;
               let declined = false;
               try {
-                const answer = def.evaluate?.(handlerOps, opts);
+                // See the synchronous call: the handler builds its result
+                // by name (`_inOwnBinding()`).
+                const answer = this._inOwnBinding(() =>
+                  def.evaluate?.(handlerOps, opts)
+                );
                 declined = answer === undefined;
                 return answer;
               } finally {
@@ -17692,8 +17746,21 @@ function applyFunctionLiteralWith(
       (opDef === undefined && expr._parseScope === undefined)
     )
       return evaluatedUnresolvedCall(expr, evaluated);
+    // The rebuild keeps the binding that the call reads (`opDef`): it is
+    // boxed in a scope that borrows that binding when the current scope
+    // resolves the name to another definition. The call of a user function
+    // `Not` declared with no value, evaluated after the scope of the
+    // declaration was popped, would otherwise be a call of the library
+    // `Not`, and a user `Sqrt(4)` would be folded to 2 by the canonical form
+    // of the library `Sqrt`. `opDef` is the binding that a scope of the
+    // chain holds, or a new record of `def` when no scope holds it (its
+    // scope was popped); the test for `undefined` is for the type only.
+    const rebuild = () => expr.engine.function(expr.operator, evaluated);
     const rebuilt = expr._withParseScope(() =>
-      expr.engine.function(expr.operator, evaluated)
+      opDef !== undefined &&
+      expr.engine.lookupDefinition(expr.operator) !== opDef
+        ? withBorrowedBinding(expr.engine, expr.operator, opDef, rebuild)
+        : rebuild()
     );
     if (
       rebuilt !== expr &&
