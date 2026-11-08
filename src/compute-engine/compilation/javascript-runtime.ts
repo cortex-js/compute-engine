@@ -6002,6 +6002,9 @@ export const SYS_HELPERS = {
       // sign (`divergentTailSign`), as in the interpreter
       // (`integrateRealPart`, library/calculus.ts): `∫₀^∞ x dx` is `+∞`.
       if (r.divergent) {
+        // The quadrature could not tell a divergence from a convergence
+        // (`undecided`): the tail gives no sign, as in the interpreter.
+        if (r.undecided === true) return NaN;
         const sign = divergentTailSign(f, a, b);
         return sign === 0 ? NaN : sign * Infinity;
       }

@@ -1229,22 +1229,42 @@ const SHELL_POWER_MIN_SHELLS = 10 * SHELL_BLOCK;
 
 /**
  * The largest exponent `p` of the shells `C·k^(−p)` (see
- * `shellsDecayAsPower`) that is read as a divergence. The series of the
- * terms `k^(−p)` diverges for `p ≤ 1` and converges for `p > 1`. The margin
- * above 1 is for the terms of lower order: `−1/(t·ln t) − 5/(t·ln²t)`
- * (divergent) gives an estimate of `1.003` after 200 shells. Measured after
- * 200 shells at 0 on `[0, ½]`: `−1/(t·ln t)` gives `0.9967`, and the
- * convergent `1/(t·ln²t)` gives `1.99`, `1/(t·(−ln t)^1.02)` gives `1.017`,
- * and `−t^0.0001/(t·ln t)` gives `1.021`. The convergent integrands that
- * this test reads as divergent have shells whose exponent is within 0.01 of
- * 1 at every reachable depth: `1/(t·(−ln t)^p)` with `p` from 1 to about
- * `1.008` (`∫₀^½ = (ln 2)^(1−p)/(p − 1)`, at least 125), and
- * `−t^ε/(t·ln t)` with `ε` up to about `3·10⁻⁵`. The quadrature cannot find
- * the value of these integrals: the part of the tail past the deepest shell
- * is most of the integral, and before this test the result was a wrong
- * finite value.
+ * `shellsDecayAsPower`) for which the shells can belong to a divergent
+ * integral. The series of the terms `k^(−p)` diverges for `p ≤ 1` and
+ * converges for `p > 1`. The margin above 1 is for the terms of lower order:
+ * `−1/(t·ln t) − 5/(t·ln²t)` (divergent) gives an estimate of `1.003` after
+ * 200 shells. Measured after 200 shells at 0 on `[0, ½]`: `−1/(t·ln t)`
+ * gives `0.9967`, and the convergent `1/(t·ln²t)` gives `1.99`,
+ * `1/(t·(−ln t)^1.02)` gives `1.017`, and `−t^0.0001/(t·ln t)` gives `1.021`.
+ *
+ * An exponent above {@link SHELL_POWER_CERTAIN} and at most this one does
+ * not decide: the convergent `1/(t·(−ln t)^p)` with `p` from 1 to about
+ * `1.008` (`∫₀^½ = (ln 2)^(1−p)/(p − 1)`, at least 125) and `−t^ε/(t·ln t)`
+ * with `ε` up to about `3·10⁻⁵` give the same estimates as the divergent
+ * `−1/(t·ln t)` after 200 shells. The estimate approaches `p` as the shells
+ * get deeper (for `p = 1.001`: `0.9977` after 200 shells, `1.0009` after
+ * 1000), so the refinement continues, and the extrapolation of the shells
+ * (`shellTail`, `endpoint-quadrature.ts`) finds the value of the integral
+ * when the shells are deep enough. When it does not, the result has no
+ * value and no sign (`undecided`). Before, the result was a divergence, and
+ * `∫₀^½ dt/(t·(−ln t)^1.001) = 1000.37` was `+∞`; before this test, it was a
+ * wrong finite value: the part of the tail past the deepest shell is most of
+ * the integral.
  */
 const SHELL_POWER_DIVERGENT = 1.005;
+
+/**
+ * The largest exponent `p` of the shells `C·k^(−p)` (see
+ * `shellsDecayAsPower`) that is read as a divergence without doubt. The
+ * estimate of the exponent is too low by the terms of lower order: the
+ * shells of the convergent `1/(t·(−ln t)^(1 + ε))` at 0 on `[0, ½]` give
+ * `0.9944` after 200 shells for a small `ε`, the lowest estimate that the
+ * test reads (the error falls as the square of the depth). The divergent
+ * `1/(t·(−ln t)^0.99)` gives `0.9845` after 200 shells and `0.99` after
+ * 1000, and `1/(t·(−ln t)^0.9)` gives less. An exponent between this one and
+ * {@link SHELL_POWER_DIVERGENT} does not decide.
+ */
+const SHELL_POWER_CERTAIN = 0.99;
 
 /**
  * The largest difference between the exponents that `shellsDecayAsPower`
@@ -1316,11 +1336,32 @@ function blockRatio(shells: number[], end: number): number | undefined {
 }
 
 /**
+ * What the shells toward an endpoint show (see `shellsDiverge`):
+ * - `'divergent'`: the integral diverges.
+ * - `'slow'`: the shells decrease as a power `C·k^(−p)` of the depth `k`
+ *   with `p` near 1, and do not show whether the integral diverges (see
+ *   `SHELL_POWER_DIVERGENT`).
+ * - `'shrinks'`: the shells were compared as a power of the depth, the
+ *   estimates of the exponent agree, and one of them is above
+ *   `SHELL_POWER_DIVERGENT`.
+ * - `undefined`: the shells do not decide, or were not compared as a power
+ *   of the depth.
+ */
+type ShellVerdict = 'divergent' | 'slow' | 'shrinks' | undefined;
+
+/**
  * Whether the shells toward an endpoint decrease as a power `C·k^(−p)` of the
- * depth `k` with `p ≤ SHELL_POWER_DIVERGENT`: the signature of a divergent
- * integral whose block ratio stays below `SHELL_DECAY` at every depth that
- * the doubles allow. The shells of `−1/(t·ln t)` at 0 are `ln(1 + 1/k)`,
- * about `1/k`, and `∫₀^½ −1/(t·ln t) dt` is `+∞` (the antiderivative is
+ * depth `k` with `p` near 1 or below: the signature of a divergent integral
+ * whose block ratio stays below `SHELL_DECAY` at every depth that the doubles
+ * allow, or of a convergent one whose value is mostly past the deepest
+ * shell. The result is `'divergent'` when every estimate of `p` is at most
+ * `SHELL_POWER_CERTAIN`, `'slow'` when they are at most
+ * `SHELL_POWER_DIVERGENT`, `'shrinks'` when they agree and one is above
+ * `SHELL_POWER_DIVERGENT`, and `undefined` when the estimate is not
+ * available or does not decide (too few shells, a block ratio that is not
+ * available or not in `(0, 1)`, an estimate that is not positive, or
+ * estimates that do not agree). The shells of `−1/(t·ln t)` at 0 are
+ * `ln(1 + 1/k)`, about `1/k`, and `∫₀^½ −1/(t·ln t) dt` is `+∞` (the antiderivative is
  * `−ln(−ln t)`), but the block ratio is about `1 − 20/k` and reaches 0.99
  * only at `k = 2000`, past the deepest shell (about 1070 next to 0).
  *
@@ -1339,31 +1380,40 @@ function blockRatio(shells: number[], end: number): number | undefined {
  *
  * The exponent is estimated from the four block ratios that end at the last
  * shell and `B`, `2·B` and `3·B` shells before it, which gives three
- * estimates. The test is true when all of the block ratios are in `(0, 1)`,
- * the three estimates are positive, at most `SHELL_POWER_DIVERGENT`, and
- * agree to within `SHELL_POWER_SPREAD`. A
+ * estimates. The shells are such a power when all of the block ratios are in
+ * `(0, 1)`, the three estimates are positive, at most
+ * `SHELL_POWER_DIVERGENT`, and agree to within `SHELL_POWER_SPREAD`. A
  * geometric decrease has a constant block ratio, so the change of `−1/ln r`
  * is zero or a rounding error, and the estimate is very large or negative.
  */
-function shellsDecayAsPower(shells: number[]): boolean {
+function shellsDecayAsPower(shells: number[]): ShellVerdict {
   const n = shells.length;
-  if (n < SHELL_POWER_MIN_SHELLS) return false;
+  if (n < SHELL_POWER_MIN_SHELLS) return undefined;
   let lowest = Infinity;
   let highest = -Infinity;
   let previous: number | undefined;
   for (let j = 3; j >= 0; j--) {
     const ratio = blockRatio(shells, n - j * SHELL_BLOCK);
-    if (ratio === undefined || !(ratio > 0 && ratio < 1)) return false;
+    if (ratio === undefined || !(ratio > 0 && ratio < 1)) return undefined;
     const inverse = -1 / Math.log(ratio);
     if (previous !== undefined) {
       const p = 1 / (inverse - previous);
-      if (!(p > 0 && p <= SHELL_POWER_DIVERGENT)) return false;
+      // A non-positive estimate is a geometric decrease or noise (see
+      // below): no decision.
+      if (!(p > 0)) return undefined;
       lowest = Math.min(lowest, p);
       highest = Math.max(highest, p);
     }
     previous = inverse;
   }
-  return highest - lowest <= SHELL_POWER_SPREAD;
+  // Estimates that do not agree are not a power of the depth, and do not
+  // show that the shells decrease faster than one: no decision. The adaptive
+  // loop then keeps the verdict of the last comparison, so that the
+  // rounding of the deepest shells of a slow tail (one estimate that is
+  // very large) does not clear it.
+  if (highest - lowest > SHELL_POWER_SPREAD) return undefined;
+  if (highest > SHELL_POWER_DIVERGENT) return 'shrinks';
+  return highest <= SHELL_POWER_CERTAIN ? 'divergent' : 'slow';
 }
 
 /**
@@ -1472,20 +1522,24 @@ function tailUnresolved(
  * `SHELL_DECAY` (see `SHELL_GEOMETRIC_FALL` and `SHELL_DEPTH_MARGIN`). `depth` is the number of halvings from a distance of 1 to the
  * endpoint at the first shell, plus `SHELL_DEPTH_MARGIN`; the extrapolation
  * reads the depth of a shell as its index plus `depth`.
+ *
+ * The result is a {@link ShellVerdict}: `'divergent'` for a divergence,
+ * `'slow'` or `'shrinks'` from the comparison with a power of the depth (see
+ * `shellsDecayAsPower`), and `undefined` otherwise.
  */
 function shellsDiverge(
   shells: number[],
   tolerance: number,
   depth: number
-): boolean {
+): ShellVerdict {
   const n = shells.length;
-  if (n < 2 * SHELL_BLOCK + 2) return false;
+  if (n < 2 * SHELL_BLOCK + 2) return undefined;
   const ratioAt = (end: number) => blockRatio(shells, end);
 
   // A non-shrinking tail below the requested tolerance cannot change the
   // answer; only a tail that actually carries mass is a divergence.
   if (!(Math.abs(blockSum(shells, n - SHELL_BLOCK)[0]) > tolerance))
-    return false;
+    return undefined;
 
   // The ratio at the last three shells. Successive ratios share all but one
   // shell of each block, so the comparisons need only `2·SHELL_BLOCK + 2`
@@ -1496,11 +1550,11 @@ function shellsDiverge(
   const before = ratioAt(n - 1);
   const first = ratioAt(n - 2);
   if (last === undefined || before === undefined || first === undefined)
-    return false;
+    return undefined;
   // A ratio below `SHELL_DECAY`: the shells shrink, but they can shrink too
   // slowly for the series to converge (see `shellsDecayAsPower`).
   if (!(last >= SHELL_DECAY)) return shellsDecayAsPower(shells);
-  if (!(before > 0) || !(first > 0)) return false;
+  if (!(before > 0) || !(first > 0)) return undefined;
 
   // The ratio has stopped falling: a pole of order 1 or more — unless the
   // three ratios are the same ratio BELOW 1. The shells then shrink
@@ -1516,7 +1570,7 @@ function shellsDiverge(
     const same =
       Math.abs(last - before) <= SHELL_GEOMETRIC_SAME * last &&
       Math.abs(before - first) <= SHELL_GEOMETRIC_SAME * before;
-    return !(same && last < 1 - SHELL_GEOMETRIC_SAME);
+    return same && last < 1 - SHELL_GEOMETRIC_SAME ? undefined : 'divergent';
   }
 
   // The ratio is still falling: extrapolate its limit. The integral diverges
@@ -1535,7 +1589,7 @@ function shellsDiverge(
     const m = n - SHELL_BLOCK + depth;
     limit = m * Math.log(last) - (m - 1) * Math.log(before);
   }
-  return limit >= Math.log(SHELL_DECAY);
+  return limit >= Math.log(SHELL_DECAY) ? 'divergent' : undefined;
 }
 
 /**
@@ -1848,6 +1902,12 @@ function adaptiveFinite(
   let widthHi = cornerHi.b - cornerHi.a;
   let regionLo = cornerLo.b;
   let regionHi = cornerHi.a;
+  // Whether the last comparison of the shells of each corner with a power of
+  // the depth found an exponent near 1 (`'slow'`, see `ShellVerdict`). The
+  // last comparison is kept when the next ones are not available: the
+  // deepest shells of `1/(t·(−ln t)^1.001)` at 0 overflow.
+  let slowLo = false;
+  let slowHi = false;
 
   // The absolute tolerance `atol` is scaled down for an integrand whose
   // values are small: `rtol` times the sum of the magnitudes of the panel
@@ -2070,6 +2130,7 @@ function adaptiveFinite(
         shellsLo.length = 0;
         shellErrorsLo.length = 0;
         shellQuadpackErrorsLo.length = 0;
+        slowLo = false;
         depthLo = depthOf(left);
         widthLo = mid - iv.a;
         regionLo = mid;
@@ -2091,6 +2152,7 @@ function adaptiveFinite(
         shellsHi.length = 0;
         shellErrorsHi.length = 0;
         shellQuadpackErrorsHi.length = 0;
+        slowHi = false;
         depthHi = depthOf(right);
         widthHi = iv.b - mid;
         regionHi = mid;
@@ -2109,15 +2171,24 @@ function adaptiveFinite(
     // the rest of the panel budget bisecting toward a singularity, which is
     // both the whole cost of a divergent integral and — once the shells reach
     // denormal arguments — the point where the shed values overflow and the
-    // diagnosis is no longer available.
+    // diagnosis is no longer available. Shells that decrease as a power of
+    // the depth with an exponent near 1 (`'slow'`) do not stop the loop: the
+    // deeper shells give the extrapolation of the shells
+    // (`resolveSingularEndpoints`) the value of a convergent integral, such
+    // as `∫₀^½ dt/(t·(−ln t)^1.005) = 200.37` with 1500 panels.
     const tol = tolerance();
-    if (
-      shellsDiverge(shellsLo, tol, depthLo) ||
-      shellsDiverge(shellsHi, tol, depthHi)
-    ) {
+    const verdictLo = shellsDiverge(shellsLo, tol, depthLo);
+    if (verdictLo === 'divergent') {
       divergent = true;
       break;
     }
+    const verdictHi = shellsDiverge(shellsHi, tol, depthHi);
+    if (verdictHi === 'divergent') {
+      divergent = true;
+      break;
+    }
+    if (verdictLo !== undefined) slowLo = verdictLo === 'slow';
+    if (verdictHi !== undefined) slowHi = verdictHi === 'slow';
   }
 
   // The refinement stopped on the floating-point spacing while the tail at an
@@ -2131,6 +2202,12 @@ function adaptiveFinite(
     !divergent &&
     (tailUnresolved(shellsLo, tolerance(), widthLo, a) ||
       tailUnresolved(shellsHi, tolerance(), widthHi, b));
+  // The shells at an endpoint decrease as a power of the depth with an
+  // exponent near 1 (see `SHELL_POWER_DIVERGENT`): the estimate is the sum
+  // of a truncated tail, and the integral diverges or has a value that is
+  // mostly past the deepest shell. Only the extrapolation of the shells
+  // (`resolveSingularEndpoints`) can give a value.
+  const slowTail = !divergent && (slowLo || slowHi);
   // The value and the error of the panels inside each starting corner
   // panel, which the extrapolation of its shells replaces. A non-finite
   // value or error is left out, as in the totals (`addPanel`): a panel with a
@@ -2211,6 +2288,7 @@ function adaptiveFinite(
   const converged =
     !divergent &&
     !unresolved &&
+    !slowTail &&
     !roundoffStop &&
     badPanels === 0 &&
     Number.isFinite(totalValue) &&
@@ -2257,6 +2335,7 @@ function adaptiveFinite(
     converged,
     divergent,
     unresolved,
+    ...(slowTail ? { slowTail: true as const } : {}),
     magnitude: Math.max(totalMagnitude, 0),
     ...(site === undefined ? {} : { interiorSite: { a: site.a, b: site.b } }),
     ...corners,
@@ -2814,6 +2893,11 @@ type AdaptiveQuadratureResult = {
   error: number;
   converged: boolean;
   divergent: boolean;
+  /** Set with `divergent` when the shells at an endpoint decrease as a power
+   * of the depth with an exponent near 1, and no extrapolation of the
+   * shells gave a value: the integral diverges or converges, and the result
+   * has no sign. See `QuadratureResult` in `endpoint-quadrature.ts`. */
+  undecided?: true;
   /** Set only with `singularEndpoints`: see `QuadratureResult` in
    * `endpoint-quadrature.ts`. */
   extrapolated?: boolean;
@@ -2871,6 +2955,14 @@ function combineHalves(
   // value, with no sign.
   if (left.oscillates === true || right.oscillates === true)
     return { estimate, error, converged, divergent, oscillates: true };
+  // The whole integral is `undecided` when every divergent half is: a half
+  // that is found divergent decides that the whole integral has no value.
+  if (
+    divergent &&
+    (!left.divergent || left.undecided === true) &&
+    (!right.divergent || right.undecided === true)
+  )
+    return { estimate, error, converged, divergent, undecided: true };
   // The whole integral is extrapolated when each half converged or was
   // extrapolated, and it did not converge.
   const extrapolated =
@@ -3641,11 +3733,17 @@ function quadrature(
           return whole;
         return split;
       }
+      // Without the extrapolation of the shells, shells that decrease as a
+      // power of the depth with an exponent near 1 (`slowTail`) give no
+      // value and no sign (`undecided`).
       return floored({
         estimate: r.estimate,
         error: r.error,
         converged: r.converged,
-        divergent: r.divergent || r.unresolved,
+        divergent: r.divergent || r.unresolved || r.slowTail === true,
+        ...(!r.divergent && !r.unresolved && r.slowTail === true
+          ? { undecided: true as const }
+          : {}),
       });
     });
   } finally {

@@ -111,6 +111,15 @@
 
 ### Behavior Changes
 
+- **Some divergent integrals of `1/(t·(−ln t)^p)` with `p` near 1 are `NaN`,
+  not `+∞`.** The numerical integration cannot tell these integrals from the
+  convergent ones with `p` slightly above 1 (see Resolved Issues). A
+  divergent integral of this kind in one variable is still `+∞` when its
+  antiderivative is known: `\int_0^{1/2} \frac{dt}{t(-\ln t)}` stays `+∞`.
+  Otherwise it is now `NaN`: `\int_0^{1/2} \frac{dt}{t(-\ln t)^{0.995}}`,
+  `\int_0^{1/2} \frac{dt}{t(-\ln t)(1+t)}` and an `Integrate` with the
+  limits of `t` and of a second variable `x` gave `+∞`.
+
 - **In a scope that shadows a library name, the MathJSON of a result writes
   `Module`.** `.json` and `toMathJson()` write a symbol bound to the library
   definition as `["Module", name]`, and a call as
@@ -146,6 +155,15 @@
   change.
 
 ### Resolved Issues
+
+- **A convergent integral of `1/(t·(−ln t)^p)` with `p` slightly above 1 is
+  no longer `+∞`.** `\int_0^{1/2} \frac{dt}{t(-\ln t)^{1.005}}` with `.N()`
+  gave `+∞`; it now gives `200.354 ± 0.042` (the exact value is `200.367`),
+  and `p = 1.008` gives `125.362 ± 0.016`. When the exponent is so close to
+  1 that the quadrature cannot tell a convergent integral from a divergent
+  one, the result is `NaN`: `p = 1.001` (exact value `1000.37`) gave `+∞`,
+  and now gives `NaN`. `NIntegrate`, an integral with more than one
+  variable and compiled code give the same results.
 
 - **In Epsil, an error in the argument of `Exp` or in the numerator of a
   division underlines the argument.** With `w` a variable that holds the

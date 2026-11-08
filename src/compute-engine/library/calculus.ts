@@ -2648,7 +2648,9 @@ function endpointHalves(
 function integrateEndpointHalves(
   ce: ComputeEngine,
   halves: EndpointHalvesPart
-): { estimate: number; error: number; divergent?: true } | undefined {
+):
+  | { estimate: number; error: number; divergent?: true; undecided?: true }
+  | undefined {
   const options = {
     deadline: ce._deadlineFrame,
     singularEndpoints: true,
@@ -2659,8 +2661,12 @@ function integrateEndpointHalves(
   );
   if (parts.some((p) => p.nanRegion === true || p.oscillates === true))
     return undefined;
+  // The halves are `undecided` when every divergent half is (see
+  // `undecided` in `QuadratureResult`, `numerics/endpoint-quadrature.ts`).
   if (parts.some((p) => p.divergent))
-    return { estimate: NaN, error: NaN, divergent: true };
+    return parts.every((p) => !p.divergent || p.undecided === true)
+      ? { estimate: NaN, error: NaN, divergent: true, undecided: true }
+      : { estimate: NaN, error: NaN, divergent: true };
   if (
     parts.every(
       (p) =>
@@ -2708,7 +2714,8 @@ function integrateEndpointHalves(
  * `divergent` is `true` when the estimate is `NaN` because the quadrature
  * found that the integral diverges (step 3). The caller can then look for a
  * pole at a bound to give the sign of the divergence (see
- * `endpointPoleVerdict`).
+ * `endpointPoleVerdict`), except when `undecided` is also set: the
+ * quadrature could not tell a divergence from a convergence.
  */
 function integrateRealPart(
   ce: ComputeEngine,
@@ -2740,6 +2747,11 @@ function integrateRealPart(
   estimate: number;
   error: number;
   divergent?: true;
+  /** Set with `divergent` when the quadrature could not tell a divergence
+   * from a convergence (see `undecided` in `QuadratureResult`,
+   * `numerics/endpoint-quadrature.ts`): the caller must not give the result
+   * the sign of a pole at a bound. */
+  undecided?: true;
   infinite?: 1 | -1;
   overflow?: true;
   /** Set with `divergent` when only the halves of the interval found the
@@ -2826,6 +2838,11 @@ function integrateRealPart(
   // pole at the bound (which gave `−∞` for that integral).
   if (gk.divergent) {
     if (gk.oscillates === true) return { estimate: NaN, error: NaN };
+    // The quadrature could not tell a divergence from a convergence
+    // (`undecided`): the tail gives no sign. `∫₂^∞ dx/(x·(ln x)^1.001)`
+    // converges, and its integrand is positive on the whole tail.
+    if (gk.undecided === true)
+      return { estimate: NaN, error: NaN, divergent: true, undecided: true };
     // Over an infinite bound, a divergence of the tail gives its sign
     // (`divergentTailSign`): `∫₀^∞ x dx` is `+∞`.
     const infinite = divergentTailSign(jsf, lower, upper);
@@ -2880,12 +2897,14 @@ function integrateRealPart(
     const split =
       halves !== undefined ? integrateEndpointHalves(ce, halves) : undefined;
     // The divergence test of the adaptive quadrature can find a divergence
-    // where a slow singularity converges: `∫_{1/2}^1 dt/((1 − t)(−ln(1 −
-    // t))^1.001) = 1000.37` gave a divergent half. A divergence of the
-    // halves carries the result that this function gives without them
-    // (`unconfirmed`, the `singularCorner` result below), and the caller
-    // keeps that result when nothing confirms the divergence (the sign of a
-    // pole at a bound, the exact route).
+    // where a slow singularity converges, or not decide (`undecided`):
+    // `∫_{1/2}^1 dt/((1 − t)(−ln(1 − t))^1.001) = 1000.37` gives an
+    // undecided half. A divergence of the halves carries the result that
+    // this function gives without them (`unconfirmed`, the `singularCorner`
+    // result below, whose error is widened to cover the corners: `3.96 ±
+    // 4415` for that integral), and the caller keeps that result when
+    // nothing confirms the divergence (the sign of a pole at a bound, which
+    // is not looked for when the halves are `undecided`, or the exact route).
     if (split?.divergent === true && Number.isFinite(gk.estimate))
       return {
         ...split,
@@ -4672,6 +4691,9 @@ function nIntegrateMultiple(
   // before it returned `NaN`. The second pass (the imaginary part) is never
   // stopped: a failure there does not give `NaN` (see the end).
   let stopOnFailure = dependentPoles !== undefined;
+  // Whether the first pass (the real part) runs. A level that is
+  // `undecided` stops it (see `integrateDim`).
+  let firstPass = true;
   const firstPassStopped = Symbol('first pass stopped');
   let endpointValue: Expression | undefined | null = null;
   const levelFailed = () => {
@@ -4769,7 +4791,19 @@ function nIntegrateMultiple(
     // plausible-looking number (and make every outer node pay for it).
     // A level that oscillates without a value has no sign (see
     // `integrateRealPart`): it is not marked `divergent`, so no pole sign is
-    // looked for.
+    // looked for. Neither is a level whose quadrature could not tell a
+    // divergence from a convergence (`undecided`, see `integrateRealPart`):
+    // `∫₀¹ ∫₀^½ dt/(t·(−ln t)^1.001) dx = 1000.37` was `+∞`. Such a level
+    // gives the whole integral no value: the integral over that slice may be
+    // infinite. So the first pass stops at once, and the result is `NaN`.
+    // Each such level used its whole panel budget, and without the stop the
+    // outer levels computed it again at each of their nodes: 6.3 s for that
+    // integral. The second pass (the imaginary part) is not stopped (see
+    // `stopOnFailure`).
+    if (gk.divergent && gk.undecided === true) {
+      if (firstPass) throw firstPassStopped;
+      return { estimate: NaN, error: NaN };
+    }
     if (gk.divergent) {
       if (gk.oscillates !== true) {
         divergent = true;
@@ -4819,6 +4853,7 @@ function nIntegrateMultiple(
     throw err;
   } finally {
     stopOnFailure = false;
+    firstPass = false;
   }
   // A level found a divergence: a pole AT a bound of a dimension gives its
   // sign (`∫₀² ∫₀¹ t⁻² dt dx` is `+∞`).
@@ -8749,8 +8784,12 @@ volumes
           // The quadrature found a divergence, which has no sign. A pole AT
           // a bound (`∫₀¹ t⁻² dt`) gives the sign: the integral diverges with
           // the sign of the integrand next to that bound, inside the
-          // interval, as on the exact route (see `endpointPoleVerdict`).
-          if (re.divergent) {
+          // interval, as on the exact route (see `endpointPoleVerdict`). Not
+          // when the quadrature could not tell a divergence from a
+          // convergence (`undecided`): the convergent
+          // `∫₀^½ dt/(t·(−ln t)^1.001) = 1000.37` also has a pole at 0 by
+          // that test, and it was `+∞`.
+          if (re.divergent && re.undecided !== true) {
             const endpoint = withValueShield(ce, intVarNames, () =>
               endpointPoleVerdict(
                 withAssignedValues(
@@ -9693,8 +9732,10 @@ volumes
             : engine.NegativeInfinity;
         // A divergence found by the quadrature, with a pole AT a bound: the
         // sign of the integrand next to that bound gives the sign of the
-        // divergence (see the `Integrate` numeric path).
-        if (re.divergent) {
+        // divergence (see the `Integrate` numeric path). Not when the
+        // quadrature could not tell a divergence from a convergence
+        // (`undecided`).
+        if (re.divergent && re.undecided !== true) {
           const endpoint = nIntegratePoleVerdict(
             engine,
             f,

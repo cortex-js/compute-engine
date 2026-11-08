@@ -75,6 +75,14 @@ export interface GaussKronrodOutcome {
   /** The refinement stopped on the spacing of the doubles while the tail at
    * an endpoint was not shown to shrink (`tailUnresolved`). */
   unresolved: boolean;
+  /** The shells at an endpoint decrease as a power `k^(−p)` of the depth `k`
+   * with `p` near 1 (`SHELL_POWER_DIVERGENT`, `gauss-kronrod.ts`), and the
+   * integral was not found divergent. The estimate is the sum of a truncated
+   * tail: the integral diverges, or has a value that is mostly in the part
+   * of the tail closer to the endpoint than the deepest shell. Only an
+   * extrapolation of the shells gives a value; otherwise the result is
+   * `divergent` and `undecided` (see `QuadratureResult`). */
+  slowTail?: true;
   /** The sum of the magnitudes of the values of the panels: the scale of the
    * integrand, which bounds the absolute tolerance. */
   magnitude: number;
@@ -106,6 +114,17 @@ export interface QuadratureResult {
    * not `+∞` or `−∞`), so a caller must not look for the sign of a pole at
    * the bound. */
   oscillates?: true;
+  /** Set with `divergent` when the shells at an endpoint decrease as a power
+   * of the depth with an exponent near 1 (`slowTail` of
+   * `GaussKronrodOutcome`) and their extrapolation found no value: the
+   * integral diverges (`∫₀^½ dt/(t·(−ln t))`), or converges to a value that
+   * is mostly closer to the endpoint than the doubles allow
+   * (`∫₀^½ dt/(t·(−ln t)^1.001) = 1000.37`). The result has no value, and
+   * a caller must not give it a sign from a pole at the bound or from the
+   * tail: both integrands have the same sign and grow as fast at the bound.
+   * Only a test that tells a divergence from a convergence (the
+   * antiderivative) can give `+∞` or `−∞`. */
+  undecided?: true;
   /** The value next to a singular endpoint was found by the extrapolation
    * of the shells, and two extrapolations agree. `error` is then the error
    * of the extrapolation, which can be larger than the tolerance (but at
@@ -2714,10 +2733,21 @@ function resolveCorners(
     divergent: true,
   };
   if (gk.divergent) return divergentResult;
+  // Shells that decrease as a power of the depth with an exponent near 1
+  // (`slowTail`) and that the extrapolation does not resolve: no value, and
+  // no sign (see `undecided` in `QuadratureResult`).
+  const undecidedResult: QuadratureResult = {
+    ...divergentResult,
+    undecided: true,
+  };
   // A non-finite estimate with a tail that was not shown to shrink is a
   // divergence, as with a finite estimate.
   if (!Number.isFinite(gk.estimate))
-    return gk.unresolved ? divergentResult : plain(gk);
+    return gk.unresolved
+      ? divergentResult
+      : gk.slowTail === true
+        ? undecidedResult
+        : plain(gk);
 
   const corners = [gk.lo, gk.hi].filter(
     (c) => c.shells.length >= SINGULAR_SHELLS
@@ -2870,6 +2900,7 @@ function resolveCorners(
   }
   if (oscillates) return { ...divergentResult, oscillates: true };
   if (gk.unresolved) return divergentResult;
+  if (gk.slowTail === true) return undecidedResult;
 
   if (contradiction !== undefined)
     return unresolvedCorner({
