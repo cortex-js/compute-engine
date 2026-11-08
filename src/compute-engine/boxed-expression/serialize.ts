@@ -937,6 +937,11 @@ function serializeJsonFunction(
  * `["Assign", ["Pair", "a", "b"], v]` to an `incompatible-type` error. The
  * `Tuple` target of an `Element` clause is not listed: its canonical form
  * reads `Pair` back as `Tuple`.
+ *
+ * In a canonical tree, the pattern is a raw operand and is written as
+ * authored (`operandsToSerialize()`), which keeps `Tuple` on its own. This
+ * test, by position, covers the trees that carry no raw mark: a structural
+ * root (`expr.structural.toMathJson()`), whose operands are all structural.
  */
 function isBindingPattern(
   name: string,
@@ -1556,22 +1561,64 @@ export function serializeJson(
   expr: Expression,
   options: Readonly<JsonSerializationOptions>
 ): MathJsonExpression {
-  if (_serializeDepth === 0) _preserveStructure = !expr.isCanonical;
+  const isRoot = _serializeDepth === 0;
+  if (isRoot) _preserveStructure = !expr.isCanonical;
   _serializeDepth += 1;
   try {
     // Serialization is a read: the prettifier re-canonicalizes structural
     // rebuilds (`_Product.asRationalExpression()` → `flatten`), which must
     // not declare or infer into the current scope — an expression parsed
     // against a caller-supplied scope would otherwise leak its undeclared
-    // heads into whatever scope is ambient at serialization time.
-    return ce._resolveOnly(() => serializeJsonExpression(ce, expr, options));
+    // heads into whatever scope is ambient at serialization time. The
+    // structural forms that `originalsOf()` builds are reads of the same
+    // kind, so the map is built inside the region too.
+    return ce._resolveOnly(() => {
+      if (isRoot && hasRawOperand(expr)) {
+        _originalOf = originalsOf(expr);
+        _rawOperands = new Set();
+      }
+      return serializeJsonExpression(ce, expr, options);
+    });
   } finally {
     _serializeDepth -= 1;
+    if (isRoot) {
+      _originalOf = undefined;
+      _rawOperands = undefined;
+    }
   }
 }
 
 let _preserveStructure = false;
 let _serializeDepth = 0;
+
+/**
+ * For the serialization in progress, the original operand (canonical or raw)
+ * of which each structural node below the root is the structural form, as
+ * `operandsToSerialize()` records them; `undefined` when the tree has no raw
+ * operand. It lives from the root call of `serializeJson()` to its exit.
+ */
+let _originalOf: Map<Expression, Expression> | undefined = undefined;
+
+/**
+ * The raw operands that `operandsToSerialize()` put in place of their
+ * structural form, for the serialization in progress; `undefined` when the
+ * tree has no raw operand. Only these nodes turn on `_verbatim`: a raw node
+ * that a pretty rewrite builds (a `Multiply` of the denominators of a
+ * quotient) holds canonical operands, which keep their rewrites.
+ */
+let _rawOperands: Set<Expression> | undefined = undefined;
+
+/**
+ * True while the subtree of a raw operand of a canonical node is serialized
+ * (`_rawOperands`): every node of that subtree is written as authored, from
+ * its own operands and through `serializeJsonFunction()`, with no pretty
+ * rewrite, so that the MathJSON boxes back to the same raw operand. The flag
+ * is set when such an operand is met, and restored on exit from it. A raw
+ * ROOT (an expression boxed with `canonical: false`) does not set it: its
+ * children are serialized with the rewrites that `_preserveStructure`
+ * allows, as before.
+ */
+let _verbatim = false;
 
 /**
  * A "raw" expression: neither canonical nor structural, i.e. verbatim as
@@ -1690,12 +1737,20 @@ function serializeJsonExpression(
 
   // Is it a function?
   if (isFunction(expr)) {
-    // Turn on structure preservation when entering a raw (verbatim) node, or a
-    // node with a raw operand. The operands must be tested *here*, while they
-    // are still raw: taking `.structural` of a canonical parent rebuilds them
-    // as structural-but-not-canonical nodes, which erases the distinction
-    // (e.g. a raw operand held by a canonical `Hold`). Once on, the flag stays
-    // on for the whole subtree; it is restored on exit.
+    // A raw operand of a canonical node (`operandsToSerialize()`) starts a
+    // subtree that is written as authored, with no pretty rewrite
+    // (`_verbatim`): each raw node is serialized from its own operands, not
+    // from its structural form, which can order or splice them. The flag is
+    // restored on exit. A raw ROOT keeps the rewrites that
+    // `_preserveStructure` allows, which `serializeJson()` set.
+    const savedVerbatim = _verbatim;
+    if (!_verbatim && _rawOperands?.has(expr) === true) _verbatim = true;
+    // The fallback when the structural form of a raw operand is not memoized
+    // (a tree that holds a mutable object, see `originalsOf()`): the raw
+    // operand is then not found and is serialized from its structural form,
+    // so the structure-preserving mode of a raw tree is turned on for the
+    // subtree, as before this map existed. The test runs here, while the
+    // operands are still raw: `.structural` rebuilds them as structural nodes.
     const savedPreserveStructure = _preserveStructure;
     if (
       !_preserveStructure &&
@@ -1703,10 +1758,14 @@ function serializeJsonExpression(
     )
       _preserveStructure = true;
     try {
-      const structuralExpr = expr.structural;
-      const structuralOps = isFunction(structuralExpr)
-        ? structuralExpr.ops
-        : [];
+      let structuralOps: ReadonlyArray<Expression>;
+      if (_verbatim && isRawExpression(expr)) structuralOps = expr.ops;
+      else {
+        const structuralExpr = expr.structural;
+        structuralOps = isFunction(structuralExpr)
+          ? operandsToSerialize(expr, structuralExpr.ops)
+          : [];
+      }
       // The operands of a scoped node (a `Function` literal, a `Block`) are
       // written with its local scope as the reading scope: a local of the
       // node that shadows a library name makes a library-bound operand write
@@ -1715,7 +1774,8 @@ function serializeJsonExpression(
       const result = inSerializationScope(scope, () =>
         expr.isValid &&
         (expr.isCanonical || expr.isStructural) &&
-        options.prettify
+        options.prettify &&
+        !_verbatim
           ? serializePrettyJsonFunction(
               ce,
               expr.operator,
@@ -1747,11 +1807,111 @@ function serializeJsonExpression(
         return qualifiedCall(ce, expr.operator, result, options);
       return result;
     } finally {
+      _verbatim = savedVerbatim;
       _preserveStructure = savedPreserveStructure;
     }
   }
 
   return expr.json;
+}
+
+/**
+ * True when a canonical node of the tree `expr` has a raw operand
+ * (`isRawExpression()`). The walk enters canonical nodes, raw nodes, which
+ * can hold a canonical node made from boxed operands, and the values of a
+ * dictionary, which are serialized as trees of their own
+ * (`serializeJsonExpression()`); it does not enter a structural node, whose
+ * operands are structural. A raw root with raw operands is not a hit: its
+ * children keep the rewrites that `_preserveStructure` allows.
+ */
+function hasRawOperand(expr: Expression): boolean {
+  if (isDictionary(expr))
+    return expr.entries.some(([, value]) => hasRawOperand(value));
+  if (!isFunction(expr) || expr.isStructural) return false;
+  if (expr.isCanonical && expr.ops.some(isRawExpression)) return true;
+  return expr.ops.some(hasRawOperand);
+}
+
+/**
+ * The original node (canonical or raw) of which each function node of the
+ * structural form of the tree `root` is the structural form, by that
+ * structural node (`_originalOf`).
+ *
+ * The structural form of a canonical node rebuilds each operand as a
+ * structural node, so the raw mark (`isRawExpression()`) is not on the nodes
+ * that the serializer walks; this map leads back to the nodes that carry it.
+ * The structural form of `root` is built first: one build makes and memoizes
+ * the structural form of every node below, each in the scope of its parent
+ * (`BoxedFunction._structuralOps()`). The walk then reads each memoized form
+ * again, a hit that gives the object the parent's form holds, also when an
+ * associative operator spliced the operands of a nested call into its own.
+ * The walk enters a raw node too: a raw node made from boxed operands
+ * (`ce.function('List', [expr], { form: 'raw' })`) can hold a canonical node
+ * with raw operands of its own. When the memo did not keep a form (a tree
+ * that holds a mutable object), the read rebuilds it as another object, and
+ * the serializer does not find that node here: the raw operand is then
+ * serialized from its structural form, in the structure-preserving mode of a
+ * raw tree (`_preserveStructure`, which `serializeJsonExpression()` turns on
+ * for a node with a raw operand), as before this map existed.
+ */
+function originalsOf(root: Expression): Map<Expression, Expression> {
+  const map = new Map<Expression, Expression>();
+  const visit = (x: Expression): void => {
+    // The values of a dictionary are serialized as trees of their own.
+    if (isDictionary(x)) {
+      for (const [, value] of x.entries) visit(value);
+      return;
+    }
+    if (!isFunction(x)) return;
+    const s = x.structural;
+    if (s !== x) map.set(s, x);
+    for (const op of x.ops) visit(op);
+  };
+  visit(root);
+  return map;
+}
+
+/**
+ * The operands to serialize for the node `expr`, whose structural form has
+ * the operands `structuralOps`: a raw operand of a canonical node is given as
+ * is, every other operand in its structural form.
+ *
+ * A raw operand is kept as written by the canonical form of its operator,
+ * and is read back as written: the pattern and the guard of a `MatchCase`,
+ * the two sides of a `Rule`, the parameters of a `Function` literal, the
+ * target of an `Assign`, the operand of `Hold`. The pretty rewrites would
+ * change what it says. `Tuple(_a, _b)` written as `Pair(_a, _b)` and
+ * `Add(_x, -1)` written as `Subtract(_x, 1)` are other patterns, which do
+ * not match a `Tuple` or an `Add` value, and the canonical form of `Function`
+ * refuses a `Pair` parameter. So the raw operand itself replaces its
+ * structural form; when the nested call meets it, it is raw below the root
+ * and turns on `_verbatim` for its subtree.
+ *
+ * `expr` is the root, a structural form that `_originalOf` leads back to its
+ * original node, or a node that a pretty rewrite built (a `Sqrt` for a
+ * `Power`), which has no original and no raw operand of its own.
+ * `_originalOf` is `undefined` when the tree has no raw operand
+ * (`hasRawOperand()`): the common case pays that one walk of the tree.
+ */
+function operandsToSerialize(
+  expr: Expression & FunctionInterface,
+  structuralOps: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  const map = _originalOf;
+  if (map === undefined) return structuralOps;
+  const original = map.get(expr) ?? expr;
+  if (
+    !original.isCanonical ||
+    !isFunction(original) ||
+    !original.ops.some(isRawExpression)
+  )
+    return structuralOps;
+  return structuralOps.map((s) => {
+    const x = map.get(s);
+    if (x === undefined || !isRawExpression(x)) return s;
+    _rawOperands?.add(x);
+    return x;
+  });
 }
 
 /**

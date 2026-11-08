@@ -224,6 +224,14 @@ export type JsonSerializationOptions = {
   /**
    * If true, serialization applies readability transforms.
    * Example: `["Power", "x", 2]` -> `["Square", "x"]`.
+   *
+   * An operand that its operator keeps as written, and reads back as
+   * written, is not transformed: the pattern and the guard of a `MatchCase`,
+   * the two sides of a `Rule`, the parameters of a `Function` literal, the
+   * target of an `Assign` and the operand of `Hold` are serialized as
+   * authored, so that `ce.box()` of the result gives the same pattern.
+   * `["MatchCase", ["Tuple", "_a", "_b"], body]` keeps `Tuple`, where a value
+   * `["Tuple", 1, 2]` is written `["Pair", 1, 2]`.
    */
   prettify: boolean;
 

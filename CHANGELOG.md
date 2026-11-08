@@ -491,16 +491,25 @@
   list of the derivatives. An element whose derivative passes the limit still
   makes the whole derivative stay unevaluated.
 
-- **`toMathJson()` keeps `Tuple` for a destructuring pattern, so that
-  `ce.box()` reads the MathJSON back.** A `Tuple` of one, two or three
-  elements is written `Single`, `Pair` or `Triple`, but a destructuring
-  parameter of a `Function` and the destructuring target of an `Assign` or a
-  `Declare` are patterns, not values, and these operators read only `Tuple`.
-  The function `["Function", ["Multiply", "x", "y"], ["Tuple", "x", "y"]]`
-  was written `["Function", ["Multiply", "x", "y"], ["Pair", "x", "y"]]`, and
-  `ce.box()` of that gave an `expected-a-symbol` error in place of the
-  parameter. It is now written with `["Tuple", "x", "y"]`. A value `Tuple`,
-  for example the value of the `Assign`, is still written `Pair`.
+- **`toMathJson()` writes a pattern, and every other operand that its
+  operator keeps as written, as authored, so that `ce.box()` reads the
+  MathJSON back.** The readability rewrites of `toMathJson()` write a `Tuple`
+  of two elements as `Pair` and `["Add", "x", -1]` as `["Subtract", "x", 1]`.
+  Applied to a pattern, they gave another pattern: the function
+  `["Function", ["Match", "u", ["MatchCase", ["Tuple", "_a", "_b"], ["Add", "a", "b"]], ["MatchCase", "_", 0]], "u"]`
+  was written with `["Pair", "_a", "_b"]`, and read back, it gave `0` for
+  the pair `(1, 2)` where the original gave `3`;
+  `["Match", ["Subtract", "y", 1], ["MatchCase", ["Add", "_x", -1], "x"]]`
+  was written with `["Subtract", "_x", 1]`, and read back, it gave a
+  `match-no-case` error where the original gave `y`. The pattern and the
+  guard of a `MatchCase`, the two sides of a `Rule`, a destructuring
+  parameter of a `Function`, the destructuring target of an `Assign` or a
+  `Declare`, and the operand of `Hold` are now written as authored. A value,
+  for example the value of the `Assign` or the subject of the `Match`, is
+  still written with the rewrites: `["Tuple", 1, 2]` is `["Pair", 1, 2]`.
+  Before this release, the destructuring `Tuple` of a `Function`, an `Assign`
+  or a `Declare` was written `Pair`, and `ce.box()` of that gave an
+  `expected-a-symbol` error in place of the parameter.
 
 - **A call of a user function with the name of a library function is no
   longer read as the library function when it is used in another scope.** A

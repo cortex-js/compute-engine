@@ -855,10 +855,13 @@ describe('Tycho item 145 — a non-canonical tree keeps its shape (prettify)', (
   test('a raw non-canonical subtree under a canonical root keeps its shape', () => {
     const ce = new ComputeEngine();
     // `Hold` holds its operand raw (neither canonical nor structural) while
-    // the `Hold` itself is canonical, so the root-level flag capture does not
-    // see it. Taking `.structural` of the canonical `Hold` rebuilds the
-    // operand as a structural node, erasing the distinction — so the raw
-    // operand has to be detected before that rebuild.
+    // the `Hold` itself is canonical. Taking `.structural` of the canonical
+    // `Hold` rebuilds the operand as a structural node, which erases the
+    // distinction, so the serializer finds the raw operand through the
+    // original tree and writes it as authored: the factor order and the
+    // explicit `Delimiter` are kept, and no pretty rewrite applies to it
+    // (`Multiply(Power(n, -1), …)` is not written as a `Divide`), so that the
+    // MathJSON boxes back to the same held operand (CE-1119).
     const nonCanonicalMul = ce.box(
       ['Multiply', ['Power', 'n', -1], ['Delimiter', ['Multiply', 'k', 'f']]],
       { canonical: false }
@@ -866,7 +869,7 @@ describe('Tycho item 145 — a non-canonical tree keeps its shape (prettify)', (
     const held = ce.function('Hold', [nonCanonicalMul]);
     expect(held.toMathJson({ prettify: true })).toEqual([
       'Hold',
-      ['Divide', ['Delimiter', ['Multiply', 'k', 'f']], 'n'],
+      ['Multiply', ['Power', 'n', -1], ['Delimiter', ['Multiply', 'k', 'f']]],
     ]);
   });
 
