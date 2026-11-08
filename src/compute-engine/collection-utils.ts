@@ -6,6 +6,7 @@ import {
   broadcastShapedResultType,
   cellTypeMayCarryDimensions,
   collectionElementType,
+  typeElementCount,
   resolveTypeForCompilation as resolveType,
   resolveTypeAlias,
   stripMissingFromType,
@@ -76,6 +77,7 @@ import {
   CollectionHandlers,
   FunctionInterface,
   Sign,
+  StaticShape,
 } from './global-types.js';
 import type { IComputeEngine as ComputeEngine } from './global-types.js';
 import type { MathJsonExpression } from '../math-json/types.js';
@@ -183,6 +185,68 @@ export function isWalkableFiniteCollection(col: Expression): boolean {
   if (col.isFiniteCollection !== true) return false;
   if (col.isEnumerableCollection !== false) return true;
   return col.isEmptyCollection === true;
+}
+
+/**
+ * The collection type that the type `t` promises, or `undefined`. A
+ * `missing`, `nothing` or `never` arm of a union is an absence of the whole
+ * value, not another shape, so it is set aside: `list<real> | nothing`
+ * promises `list<real>`. A type that is only an absence (a bare `never`, the
+ * result of `RuntimeError`) promises nothing: `never` is a subtype of every
+ * type, so a subtype test alone would read it as a collection. A union of
+ * two shapes (`list<real> | integer`, `list<real> | set<real>`) promises
+ * nothing, and so does a string type (a string literal type included): a
+ * string is a collection of its characters by its own value, not a
+ * collection of elements that a type names.
+ *
+ * Used by `Expression.staticShape` (`BoxedSymbol`, `BoxedFunction`).
+ */
+export function collectionTypeBesideAbsence(
+  t: Readonly<Type>
+): Type | undefined {
+  const r = resolveTypeAlias(t);
+  let shape: Type | undefined;
+  if (typeof r !== 'string' && r.kind === 'union') {
+    for (const branch of r.types) {
+      const b = resolveTypeAlias(branch);
+      if (b === 'missing' || b === 'nothing' || b === 'never') continue;
+      if (shape !== undefined) return undefined;
+      shape = b;
+    }
+  } else shape = r;
+  if (shape === undefined || shape === 'never') return undefined;
+  if (isSubtype(shape, 'string')) return undefined;
+  if (typeof shape !== 'string' && shape.kind === 'union') return undefined;
+  return isSubtype(shape, 'collection') ? shape : undefined;
+}
+
+/**
+ * True when the type `t` is only an absence: `missing`, `nothing`, `never`,
+ * or a union whose every arm is one of these. A selection arm of such a type
+ * gives no value, so the shape of the selection is read from its other arms.
+ */
+export function isAbsenceOnlyType(t: Readonly<Type>): boolean {
+  const r = resolveTypeAlias(t);
+  if (r === 'missing' || r === 'nothing' || r === 'never') return true;
+  if (typeof r === 'string' || r.kind !== 'union') return false;
+  return r.types.every((branch) => {
+    const b = resolveTypeAlias(branch);
+    return b === 'missing' || b === 'nothing' || b === 'never';
+  });
+}
+
+/**
+ * The static shape that the collection type `t` names: indexed when `t` is
+ * an indexed collection type (a list, vector, matrix, tuple), the length it
+ * names (`vector<T^n>`, the arity of a tuple) and its element type. `t` is a
+ * result of `collectionTypeBesideAbsence()`.
+ */
+export function staticShapeOfType(t: Readonly<Type>): StaticShape {
+  return {
+    indexed: isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE),
+    count: typeElementCount(t),
+    elementType: collectionElementType(t),
+  };
 }
 
 /**

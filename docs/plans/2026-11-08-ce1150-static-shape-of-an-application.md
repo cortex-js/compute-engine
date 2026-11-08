@@ -1,7 +1,65 @@
 # CE-1150, request 1: the shape of an unevaluated application from its static type
 
-Status: proposed, waits for the user. Date: 2026-11-08. Issue: `issues/CE-1150.md`
-(Tycho ROADMAP row LK). Size: M.
+Status: APPROVED by the user 2026-11-08, R1 to R5, with one addition: the
+documentation of `each()` says that it can iterate another number of elements
+than `count` promises (§2, R3). Implemented 2026-11-08 by session `ce-desk`
+as the accessor `staticShape` (`BoxedFunction.staticShape`, `_typeShape()`,
+`_selectionShape()`, `_headHasSignature()` in `boxed-function.ts`); tests in
+`test/compute-engine/ce-1150-static-shape.test.ts`; the rule in
+`docs/COLLECTIONS-MODEL.md`, "The shape of an unevaluated application". Date:
+2026-11-08. Issue: `issues/CE-1150.md` (Tycho ROADMAP row LK). Size: M.
+
+STATE 2026-11-08, end of day: the user chose option (b) (a separate
+accessor), and it is implemented. `Expression.staticShape`
+(`types-expression.ts`) gives `{ indexed, count, elementType }` or
+`undefined`: a collection value from its facets, a valueless symbol from its
+declared type, an application whose head is bound (library operators
+included) from its static type (R1, R2), and `If`/`Which` from its arms (R5).
+The getters `isCollection`, `count`, `isIndexedCollection`,
+`isFiniteCollection`, `isEmptyCollection`, `each()` and `at()` keep their
+earlier behavior, so R3 and the "Library" bullet of §3 do not apply. The record
+of the measurement stays: with R1 applied to the getters themselves (narrowed
+to user-function heads, first note below), the full suite gave 30 failures
+in 12 files, because the compiler's constant folding
+(`tycho-row-425-index-of-broadcastable-call.test.ts`: `Sum(g(x))` compiled to
+`[6, 12]`), the lazy operators' source rule
+(`lazy-operator-eager-source.test.ts`), error propagation (`Map(f, h(1))`)
+and the compiled connectives (`compile-boolean-guard-relaxation.test.ts`)
+read `isCollection` as "walkable now, a value". The implementation notes
+below describe that getter variant; the accessor reads the type of a library
+operator too, and has no `isWalkableFiniteCollection()` change. Tests:
+`test/compute-engine/ce-1150-static-shape.test.ts`.
+
+Implementation notes that refine §2 (the user has not yet confirmed the
+first one):
+
+- **R1 is narrowed to a USER-function head** (an assigned function literal,
+  a declared signature, a lambda operator definition). A library operator
+  keeps its own facets, whatever its type: an eager collection operator
+  (`Sort`, `Characters`) describes itself with `elementCount` and
+  `canEnumerate`, and a broadcast (`Abs(L)`, `[1, 2] + x`) answers its length
+  from its participants and stays `isCollection: false`. Reason, measured
+  2026-11-08 on the first implementation (R1 as written in §2): the lazy
+  operators of the library read `isCollection` as "walkable now" to decide
+  whether to evaluate a source first (`docs/COLLECTIONS-MODEL.md`, "Lazy
+  collections"), so `Sum(Sort([2, 1]))` held a view over the raw call and
+  declined (29 failures in `lazy-join-eager-operand.test.ts`, 9 in
+  `inert-pointlist-projection.test.ts`, one each in `arithmetic`,
+  `collection-kind-contracts` and `comprehension-count-finiteness`), and
+  two test files looped (`apply-literal-maps.test.ts`,
+  `dag-shared-walks.test.ts`). Widening R1 to library operators needs an
+  audit of those readers first; it is a separate task. The narrowed rule
+  covers the 11 Tycho sites, which read calls of document functions.
+- A pre-evaluation broadcast does not admit a collection that has no
+  handlers of its own as a participant (`isWalkableFiniteCollection()`,
+  `collection-utils.ts`): the lazy `Map` it built over the raw call
+  evaluated the call again at each walk (the CE-882 test "copies around an
+  element-wise operator", 18 calls instead of 2).
+- A selection excludes point and string arms, as the restriction does.
+- Five tests of `tycho-item-167-broadcast-count.test.ts` changed from
+  `undefined` to the count the type names (`S(3)` 2, `S((1,2))` 2, `b(M)` 3,
+  `gen(M)` 3, `wild(M, M)` 3); each agrees with `evaluate().count` and with
+  the walk.
 
 ## 1. The rule today
 
@@ -88,9 +146,9 @@ that reads operands, and it adds a handler.
 - **Tycho**: the 11 shape sites of CE-1150 read the property of the unevaluated
   expression. Tycho's `classifyCollectionSchema` still needs the kind of the
   elements (finite real, 2- or 3-tuple, colour); the element type of the
-  static type gives `rational`, `integer` or `tuple<real, real>`, and a type of
-  `real` admits infinities, so that reader keeps a value check for `real`
-  elements or declares its inputs `finite_real`.
+  static type gives `rational`, `integer`, `real` or `tuple<real, real>`, and
+  `real` excludes the infinities and NaN, so the static element type answers
+  that question too.
 - **Compiler**: no decline that this rule removes is known. The compiler
   reads the type where `isCollection` is false for a typed node
   (`compile-conditions.ts:422`, `compile-operators.ts:331`,

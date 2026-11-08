@@ -86,9 +86,12 @@ describe('Tycho item 167: count of an un-evaluated broadcast', () => {
 
   describe('facets deliberately left alone', () => {
     test('isCollection stays false for a broadcast result', () => {
-      // Consumers rely on this: `.isCollection` is deliberately false for a
-      // `list<number>`. Item 167 asked for the LENGTH, not for these
-      // expressions to become collections.
+      // Consumers rely on this: `.isCollection` is "walkable now", and the
+      // lazy operators of the library read it to decide whether to evaluate
+      // a source first. Item 167 asked for the LENGTH, not for these
+      // expressions to become collections. The shape that such an
+      // expression promises before evaluation is read with `staticShape`
+      // (CE-1150, `ce-1150-static-shape.test.ts`).
       expect(ce.parse('\\left[1,2,3\\right]+1').isCollection).toBe(false);
     });
 

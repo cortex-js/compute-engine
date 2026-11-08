@@ -1112,6 +1112,21 @@ export type IntervalBounds = {
   upperStrict?: boolean;
 };
 
+/**
+ * The collection shape that an expression promises before it is evaluated.
+ * See `Expression.staticShape`.
+ *
+ * @category Boxed Expression
+ */
+export type StaticShape = {
+  /** True when the shape is an indexed collection (a list, vector, matrix, tuple, range or string), false for a set or a keyed collection. */
+  readonly indexed: boolean;
+  /** The number of elements the shape names (`vector<T^3>`, a tuple, the count of a collection value), or `undefined`. */
+  readonly count: number | bigint | undefined;
+  /** The element type, or `undefined` when the shape does not name one. */
+  readonly elementType: Type | undefined;
+};
+
 export interface Expression {
   /** @internal */
   readonly _kind: string;
@@ -3053,7 +3068,9 @@ export interface Expression {
    *   symbol declared `list<number>`/`vector<2>` that has not been assigned
    *   yet, and for an application whose head returns a collection (`L(1)`
    *   under `L: (number) -> vector<2>`): both are collection-shaped, but
-   *   there is nothing to walk.
+   *   there is nothing to walk. To ask what shape an expression promises
+   *   before evaluation (`L(1)` promises an indexed collection of 2
+   *   elements), read `staticShape`.
    * - `type.matches('collection<any>')` — "is this operand
    *   collection-**shaped**?" It is `true` for those valueless cases, and
    *   `false` for a materialized collection whose type is top
@@ -3104,6 +3121,48 @@ export interface Expression {
    * `scalarOrCollectionUnionBranches()` for a BROADCAST gate.
    */
   isCollection: boolean;
+
+  /**
+   * The collection shape that this expression promises, read without
+   * evaluating it, or `undefined` when it promises no collection.
+   *
+   * `staticShape` answers the SHAPE question: "what does this expression
+   * promise to be?". `isCollection` answers the CAPABILITY question: "is a
+   * collection value present that I can walk now?". The two differ for an
+   * expression that has no value yet:
+   *
+   * ```js
+   * ce.assign('f', ce.parse('n \\mapsto [n, n+1, n+2, n/2]'));
+   * const e = ce.box(['f', 3]);
+   * e.isCollection;  // false: nothing to walk before evaluation
+   * e.count;         // undefined
+   * e.staticShape;   // { indexed: true, count: 4, elementType: 'rational' }
+   * ```
+   *
+   * The answer comes from:
+   *
+   * - the collection facets, when `isCollection` is `true` (a list, a
+   *   string, a dictionary, a symbol that holds a collection);
+   * - the declared type of a symbol with no collection value
+   *   (`L: vector<2>` gives a count of 2). A type that the engine inferred
+   *   from the uses of an undeclared name is not a promise;
+   * - the static type of an application whose head is bound: a library
+   *   operator, a function literal assigned to a name, or a declared
+   *   signature. A call of an undeclared name (`foo([1, 2])`) promises
+   *   nothing, although its type lifts over the collection argument. A
+   *   broadcast (`x + 1`) promises a collection only when one of its
+   *   operands promises one. A `missing` or `nothing` arm of the type is an
+   *   absence of the whole value and is set aside; a type with a scalar arm
+   *   or a string type promises nothing;
+   * - the arms of a selection (`If(c, a, b)`, `Which`), when every arm
+   *   promises a collection and no arm is a point or a string.
+   *
+   * `each()` and `at()` give the elements of the VALUE. When the value
+   * does not have the declared type, `each()` can give another number of
+   * elements than `staticShape.count`; the host must supply values of the
+   * declared types.
+   */
+  readonly staticShape: StaticShape | undefined;
 
   /**
    * The elements of a `List` as plain machine numbers, or `undefined`.
@@ -3194,6 +3253,14 @@ export interface Expression {
    *  console.log(e);
    * }
    * ```
+   *
+   * `each()` gives the elements of the value, and `staticShape.count` gives
+   * the number of elements that the expression promises before evaluation.
+   * The two can differ when the value does not have the declared type: a
+   * call of a function declared `(integer) -> vector<3>` whose body gives
+   * two elements has a `staticShape.count` of 3, but its value gives two
+   * elements. The host must supply values of the declared types. Read
+   * `staticShape` for the promised shape and `each()` for the elements.
    */
   each(): Generator<Expression>;
 
@@ -3232,6 +3299,9 @@ export interface Expression {
    * If the number of elements cannot be determined, return `undefined`, for
    * example, if the collection is lazy and not finite and the size cannot
    * be determined without iterating over the collection.
+   *
+   * For the length that an expression with no value yet promises (a call of
+   * a function that returns a list), read `staticShape.count`.
    *
    * The count is a `bigint` only when it is finite and is not a safe integer
    * (larger than `Number.MAX_SAFE_INTEGER`), for example the count of

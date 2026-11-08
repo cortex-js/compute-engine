@@ -21,6 +21,25 @@
   an integer literal or an integer parameter, an accumulator that is not an
   integer or a list of integers, and a list the body reads with no storage
   hint decline, with a diagnostic that names the reason.
+- **`staticShape` gives the collection shape that an expression promises
+  before evaluation.** The new accessor `expr.staticShape` is
+  `{ indexed, count, elementType }`, or `undefined` when the expression
+  promises no collection. With `f := n ↦ [n, n+1, n+2, n/2]`, the
+  unevaluated `f(3)` has `isCollection: false` and `count: undefined`, and
+  its `staticShape` is `{ indexed: true, count: 4, elementType: 'rational' }`.
+  A collection value answers from its collection facets, a symbol with no
+  value from its declared type (`L: vector<2>` gives a count of 2), and an
+  application whose head is bound (a library operator, an assigned function
+  literal, a declared signature) from its static type, with a `missing` or
+  `nothing` arm set aside. A call of an undeclared name promises nothing: its
+  type is the lift of a vacuous binding. An `If` with an else branch or a
+  `Which` whose arms agree gives their shape: `If(c, [1, 2], [3, 4])` has a
+  count of 2. A host can read the shape of an expression without evaluating
+  it. The getters `isCollection`, `isIndexedCollection`, `count`,
+  `isFiniteCollection`, `isEmptyCollection`, `each()` and `at()` are
+  unchanged: they tell whether a collection value is present to walk now.
+  The rule is in `docs/COLLECTIONS-MODEL.md`, "The shape of an unevaluated
+  application" (CE-1150).
 
 ### Improvements
 

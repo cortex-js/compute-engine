@@ -53,12 +53,15 @@ import type {
   ExpressionInput,
   Scope,
   SymbolInterface,
+  StaticShape,
 } from '../global-types.js';
 
 import { activeRollbackFrame } from '../inference-rollback.js';
 import { contractTupleOfNarrow } from './index-read-tuple.js';
 import {
+  collectionTypeBesideAbsence,
   isUnresolvedList,
+  staticShapeOfType,
   typeCouldBeNumericCollection,
 } from '../collection-utils.js';
 
@@ -2754,6 +2757,18 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     } finally {
       exitCycleQuery(def, guard);
     }
+  }
+
+  // A symbol that holds a collection answers from its value (the base
+  // getter). A symbol with no collection value answers the shape of its
+  // declared type: a valueless `L: vector<2>` promises an indexed
+  // collection of 2 elements. A type that the engine inferred from the uses
+  // of an undeclared name (`inferredType`) is not a promise.
+  get staticShape(): StaticShape | undefined {
+    if (this.isCollection) return super.staticShape;
+    if (this.valueDefinition?.inferredType === true) return undefined;
+    const t = collectionTypeBesideAbsence(this.type.type);
+    return t === undefined ? undefined : staticShapeOfType(t);
   }
 
   get isEmptyCollection(): boolean | undefined {

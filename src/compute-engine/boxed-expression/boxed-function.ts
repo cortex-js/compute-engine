@@ -97,6 +97,7 @@ import type {
   ExpressionInput,
   FunctionInterface,
   OperandDescriptor,
+  StaticShape,
 } from '../global-types.js';
 import type { EffectHandlers } from '../types-effects.js';
 import { runWithEvaluationEffects } from '../effects-registry.js';
@@ -217,6 +218,9 @@ import {
   isRecordShapedType,
   broadcastCellTypeOf,
   pointArity,
+  collectionTypeBesideAbsence,
+  isAbsenceOnlyType,
+  staticShapeOfType,
 } from '../collection-utils.js';
 import {
   failedWalkErrorSince,
@@ -7069,7 +7073,9 @@ export class BoxedFunction
       // cannot deliver — which is settled as `undefined`; the invariant is
       // pinned by `test/compute-engine/tycho-item-167-broadcast-count.test.ts`
       // ("count does not outrun the walk"). A declared SYMBOL has no such
-      // ambiguity: its type is the user's own declaration.
+      // ambiguity: its type is the user's own declaration. The shape that
+      // the type of a bound head promises is answered by `staticShape`
+      // (`_typeShape()`), which no engine reader consults.
       return this._broadcastCount();
     });
   }
@@ -7249,6 +7255,234 @@ export class BoxedFunction
       else if (count !== c) return undefined;
     }
     return count;
+  }
+
+  /**
+   * The shape that this application promises before it is evaluated, or
+   * `undefined` when it promises none (`Expression.staticShape`). No engine
+   * reader consults it: the collection getters (`isCollection`, `count`,
+   * ...) answer the capability question "is a value present that I can walk
+   * now", and keep their own rules.
+   *
+   * Three sources, in order:
+   *
+   * - an application that is a collection now answers from its collection
+   *   facets (the base getter);
+   * - a selection answers from its arms (`_selectionShape()`);
+   * - an application with no collection handlers answers from its static
+   *   type (`_typeShape()`). An instance of a collection operator that
+   *   opted out of being a collection (a `Tuple`-valued restriction
+   *   `If(c, (1, 2))`) keeps its opt-out: its type is not read.
+   *
+   * The elements still come from the value. For a call of a function, and
+   * for a library operator with no collection handlers, `each()` and `at()`
+   * evaluate the application once and walk the value. A selection is not
+   * walked before it is evaluated: the restriction handlers of `If` opt out
+   * of the collection facets for three operands, so `each()` of the
+   * unevaluated `If(True, [1, 2], [3, 4])` yields nothing and `at(1)` is
+   * `undefined` although `staticShape` promises 2 elements; evaluate it
+   * first (`sel.evaluate().each()`). `each()` can also give another number
+   * of elements than `count` promises when the value violates the type; the
+   * host supplies values of the declared types (the caveats of
+   * `docs/COMPILATION-MODEL.md`), and a definition whose body disagrees
+   * with its declared result is a type error reported where the definition
+   * is checked.
+   */
+  get staticShape(): StaticShape | undefined {
+    if (this.isCollection) return super.staticShape;
+    if (isLibraryOperator(this, 'If') || isLibraryOperator(this, 'Which'))
+      return this._selectionShape();
+    if (this.baseDefinition?.collection !== undefined) return undefined;
+    return this._typeShape();
+  }
+
+  /**
+   * The shape that the static type of this application promises, when its
+   * head is bound (`_headHasSignature()`). `f(3)` under
+   * `f := n ↦ [n, n+1, n+2, n/2]` types `vector<rational^4>`, so it is an
+   * indexed collection of 4 elements; `g(3)` under
+   * `g: (integer) -> list<real>` is an indexed collection with no count.
+   *
+   * An UNDECLARED head binds vacuously and its result type lifts over a
+   * collection argument, so `Total([1, 2])` on a bare engine types
+   * `list<unknown^2>` although no rule produces its elements and `each()`
+   * walks none; such a node promises nothing (Tycho item 169).
+   *
+   * When the result type that the head declares or infers
+   * (`_headResultType()`, read without the lift over a collection operand)
+   * is itself a collection type, the shape is INTRINSIC to the head and is
+   * read from the type: `AbsArg(2)` is a tuple of 2 elements,
+   * `ComplexRoots(8, 3)` a list of 3. The type of the application can still
+   * lift over an operand typed as a collection that it does not promise
+   * (`isVacuousLiftOperand()`), so such an operand makes the application
+   * promise nothing: `AbsArg(foo([1, 2]))` with `foo` undeclared. Otherwise the
+   * collection type of the application can only come from a lift over its
+   * operands (a broadcastable operator, or a scalar function literal that
+   * `lambdaBroadcastType()` maps), so it is a promise only when one operand
+   * promises a collection (`operandPromisesCollection()`): `x + Total([1,
+   * 2])` on a bare engine lifts the vacuous `list<unknown^2>` of the
+   * undeclared call, and `g(Total([1, 2]))` with `g := x ↦ x^2 + 1` does
+   * the same, so both promise nothing as that call does.
+   *
+   * A `missing`, `nothing` or `never` arm of the type is an absence of the
+   * whole value, not another shape, so it is set aside
+   * (`collectionTypeBesideAbsence()`): `list<real> | nothing` promises a
+   * list. A string type promises nothing here: a string is a collection of
+   * its characters by its own value, and the readers of a shape ask about
+   * element collections.
+   *
+   * The count is the one that the collection getters already answer (the
+   * length of a broadcast read from its participants, the `elementCount` of
+   * an eager producer), else the length that the type names.
+   */
+  private _typeShape(): StaticShape | undefined {
+    if (!this._headHasSignature()) return undefined;
+    const headResult = this._headResultType();
+    const intrinsic =
+      headResult !== undefined &&
+      collectionTypeBesideAbsence(headResult) !== undefined;
+    if (!intrinsic && !this.ops.some(operandPromisesCollection))
+      return undefined;
+    if (intrinsic && this.ops.some(isVacuousLiftOperand)) return undefined;
+    const t = collectionTypeBesideAbsence(this.type.type);
+    if (t === undefined) return undefined;
+    const shape = staticShapeOfType(t);
+    const count = this.count;
+    return count === undefined ? shape : { ...shape, count };
+  }
+
+  /**
+   * The result type that the head of this application declares or infers,
+   * read from its signature without the lift over a collection operand:
+   * the signature of the operator definition, or the signature of the value
+   * definition (the type of the assigned function literal when the name is
+   * declared only as a bare `function`). A transparent type alias of the
+   * signature is unfolded first (`resolveTypeAlias()`), as
+   * `_headHasSignature()` does. An overload set is read through the
+   * arm that the call resolves to (`resolvedArm`), as
+   * `_lambdaBroadcastCount()` reads it. `undefined` when the head has no
+   * signature.
+   */
+  private _headResultType(): Type | undefined {
+    let source: Type | undefined;
+    const def = this.operatorDefinition;
+    if (def !== undefined) {
+      const signature = def.signature?.type;
+      source =
+        signature === undefined ? undefined : resolveTypeAlias(signature);
+    } else {
+      const valueDef = this.valueDefinition;
+      if (valueDef === undefined) return undefined;
+      const declared = resolveTypeAlias(valueDef.type.type);
+      source =
+        isFunction(valueDef.value, 'Function') &&
+        isWildcardFunctionType(declared)
+          ? (valueDef.value.type.type ?? declared)
+          : declared;
+    }
+    if (source === undefined) return undefined;
+    return functionResult(
+      readTypeVariablesAsBounds(resolvedArm(this, source) ?? source)
+    );
+  }
+
+  /**
+   * Is the head of this application bound, so that its result type is a
+   * promise that `_typeShape()` may read? A library operator or a lambda
+   * operator definition (a function installed as an operator, a
+   * multi-clause definition) is bound. A value definition is bound when it
+   * holds a function literal, or when the author declared a signature, an
+   * overload set (an intersection of signatures) or a union of signatures
+   * (`signatureArms()`); a
+   * definition whose type the engine inferred from the uses of the name
+   * (`inferredType`) is the vacuous binding of an undeclared name, not a
+   * promise.
+   */
+  private _headHasSignature(): boolean {
+    if (this.operatorDefinition !== undefined) return true;
+    const valueDef = this.valueDefinition;
+    if (valueDef === undefined) return false;
+    if (isFunction(valueDef.value, 'Function')) return true;
+    if (valueDef.inferredType) return false;
+    return signatureArms(resolveTypeAlias(valueDef.type.type)) !== undefined;
+  }
+
+  /**
+   * The shape that the arms of a selection agree on: an `If` with an else
+   * branch (`If(c, a, b)`), or a `Which` with an even number of operands.
+   * The selection is the library operator, recognized by its binding
+   * (`isLibraryOperator()`): a call of a user definition named `If` is read
+   * from its type by `_typeShape()`. A `Which` with no default condition
+   * can give no value when no condition holds; that absence is set aside
+   * like a `nothing` arm. An arm whose type is only an absence (`never`,
+   * the type of `RuntimeError("neg")`, or `nothing`) gives no value, so it
+   * is skipped: `If(c, [1, 2], RuntimeError("neg"))` promises 2 elements.
+   * Every other arm must promise a collection (`staticShape`), and no arm
+   * may be a point (a tuple) or a string, which stay atomic under a
+   * selection as they do under a restriction
+   * (`restrictionCollectionHandlers()`, `library/control-structures.ts`).
+   * The selection then promises a collection whatever its own type says
+   * (`If(c, [1, 2], [3, 4, 5])` types `list<integer | list<any>>`, which
+   * names no length); it is indexed when every arm is, it names a count
+   * when every arm names the same one, and its element type is the
+   * widening of the element types of the arms when every arm names one.
+   * `undefined` for every other node, and for the two-operand restriction
+   * `If(c, a)`, which its collection handlers describe.
+   *
+   * A condition whose type can be a collection is a mask (`If(L > 0, A,
+   * B)` with `L` a list, `Which([True, False], [1, 2])`): the selection is
+   * element-wise and an unmatched cell is `NaN` or a `NaN` point
+   * (`unmatchedCell` in `library/control-structures.ts`), so the arms do not
+   * describe its elements. Such a selection answers from its static type
+   * (`_typeShape()`), which admits those cells.
+   */
+  private _selectionShape(): StaticShape | undefined {
+    let arms: ReadonlyArray<Expression>;
+    let conditions: ReadonlyArray<Expression>;
+    if (isLibraryOperator(this, 'If')) {
+      if (this.nops !== 3) return undefined;
+      arms = [this.op2, this.op3];
+      conditions = [this.op1];
+    } else if (isLibraryOperator(this, 'Which')) {
+      const ops = this.ops;
+      if (ops.length < 2 || ops.length % 2 !== 0) return undefined;
+      arms = ops.filter((_, i) => i % 2 === 1);
+      conditions = ops.filter((_, i) => i % 2 === 0);
+    } else return undefined;
+    // A condition that can be a collection is a mask: the selection is
+    // element-wise, and an unmatched cell is `NaN` or a `NaN` point, which
+    // the element types of the arms do not admit. The static type of the
+    // selection describes that form (`_typeShape()`).
+    if (conditions.some((c) => typeCouldBeCollection(c.type.type)))
+      return this._typeShape();
+    let indexed = true;
+    let count: number | bigint | undefined;
+    let first = true;
+    const elementTypes: Type[] = [];
+    let everyElementType = true;
+    for (const arm of arms) {
+      if (isAbsenceOnlyType(arm.type.type)) continue;
+      const shape = arm.staticShape;
+      if (shape === undefined) return undefined;
+      const held = (isSymbol(arm) ? arm.value : undefined) ?? arm;
+      if (isTuple(held) || isString(held)) return undefined;
+      const armType = collectionTypeBesideAbsence(arm.type.type);
+      if (armType !== undefined && typeof armType !== 'string')
+        if (armType.kind === 'tuple') return undefined;
+      if (!shape.indexed) indexed = false;
+      if (shape.elementType === undefined) everyElementType = false;
+      else elementTypes.push(shape.elementType);
+      if (first) {
+        count = shape.count;
+        first = false;
+      } else if (shape.count !== count) count = undefined;
+    }
+    if (first) return undefined;
+    return {
+      indexed,
+      count,
+      elementType: everyElementType ? widen(...elementTypes) : undefined,
+    };
   }
 
   get isEmptyCollection(): boolean | undefined {
@@ -14113,6 +14347,41 @@ function wholeAbsentTupleArgumentType(
   )
     return 'any';
   return undefined;
+}
+
+/**
+ * Does the operand `op` of a broadcast promise a collection
+ * (`BoxedFunction._typeShape()`)? It does when it has a static shape: a
+ * collection value, a symbol whose author declared a collection type (with
+ * or without a value), or an application that promises a collection. A
+ * symbol whose collection type the engine inferred from its uses, and a call
+ * of an undeclared name, promise nothing: their type is the lift of a
+ * vacuous binding (Tycho item 169).
+ */
+function operandPromisesCollection(op: Expression): boolean {
+  return op.staticShape !== undefined;
+}
+
+/**
+ * Is the operand `op` of an application typed as a collection that it does
+ * not itself promise (its `staticShape` is `undefined`,
+ * `BoxedFunction._typeShape()`)? Such an operand is, for example, a call of
+ * an undeclared name or a symbol whose collection type the engine inferred
+ * from its uses (the lift of a vacuous binding, Tycho item 169), a selection
+ * of points, a restriction that opted out of the collection facets, or an
+ * unevaluated collection operator over a valueless declared symbol. In each
+ * case a head whose own result is a collection then promises nothing, which
+ * is conservative. The type of the application can lift over that operand although no
+ * broadcast happens when it is evaluated: with
+ * `f := n ↦ [n, n+1, n+2, n/2]` and `foo` undeclared, `f(foo([1, 2]))`
+ * types a list of 2 lists, but `foo([1, 2])` evaluates to itself, which is
+ * not a collection, so the value is one list of 4 elements.
+ */
+function isVacuousLiftOperand(op: Expression): boolean {
+  return (
+    collectionTypeBesideAbsence(op.type.type) !== undefined &&
+    op.staticShape === undefined
+  );
 }
 
 /**

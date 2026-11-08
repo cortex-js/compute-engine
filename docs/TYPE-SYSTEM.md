@@ -300,7 +300,9 @@ collection must allow for these facts:
   tuple kind explicitly.
 - `.isCollection` is false for a computed list whose operands are symbols
   (`L^2` or `|L - 1|` with `L` assigned a list), although its type is a list
-  type. Use the type for such a node.
+  type. Use the type for such a node. `.staticShape` gives the shape that the
+  type promises, without evaluation (`docs/COLLECTIONS-MODEL.md`, "The shape
+  of an unevaluated application").
 
 Compiled code reads each value in the shape that its declared or inferred
 static type gives, and emits no run-time test of a type: a value outside its

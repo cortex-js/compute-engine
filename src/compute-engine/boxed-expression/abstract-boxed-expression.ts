@@ -38,7 +38,9 @@ import type {
   Tensor,
   TensorDataType,
   ParseDiagnostic,
+  StaticShape,
 } from '../global-types.js';
+import { collectionElementType } from '../../common/type/utils.js';
 
 import type { NumericValue } from '../numeric-value/types.js';
 import type { SmallInteger } from '../numerics/types.js';
@@ -1600,9 +1602,23 @@ export abstract class _BoxedExpression implements Expression {
   // than consulting `this.type`: `BoxedFunction` must NOT answer from its
   // type, because an application's collection type can be an artifact of the
   // vacuous lift rather than a promise, and a base class that answered would
-  // make that an easily-missed opt-OUT instead of an explicit opt-in.
+  // make that an easily-missed opt-OUT instead of an explicit opt-in. The
+  // shape that a type promises is read by `staticShape`, not here.
   get count(): number | bigint | undefined {
     return undefined;
+  }
+
+  // The shape of a collection value (a list, a string, a dictionary) is the
+  // answer of its own collection facets. `BoxedSymbol` and `BoxedFunction`
+  // add the shape that a declared or static type promises when no value is
+  // present to answer.
+  get staticShape(): StaticShape | undefined {
+    if (!this.isCollection) return undefined;
+    return {
+      indexed: this.isIndexedCollection,
+      count: this.count,
+      elementType: collectionElementType(this.type.type),
+    };
   }
 
   // These stay gated on `isCollection`, deliberately: a DECLARED size does not

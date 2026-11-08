@@ -210,6 +210,86 @@ The user decided five rules on 2026-09-29:
   typed `broadcastable<R>`:** with `c: collection<real>` and `g(x) := x^2 +
   1`, `g(c)` is typed `broadcastable<number>`.
 
+## The shape of an unevaluated application
+
+Two questions about a collection have two names:
+
+- `staticShape` answers the SHAPE question: what does this expression promise
+  to be, read without evaluating it? It is `undefined` when the expression
+  promises no collection, else `{ indexed, count, elementType }`.
+- `isCollection` (with `isIndexedCollection`, `count`, `isFiniteCollection`
+  and `isEmptyCollection`) answers the CAPABILITY question: is a collection
+  value present that I can walk now? The lazy operators of the library read
+  it to decide whether to evaluate a source first (see "Lazy collections"),
+  and the compiler reads it to fold a value. These getters do not read the
+  type of an application (CE-1150, user decision 2026-11-08).
+
+With `f := n ↦ [n, n+1, n+2, n/2]`, the unevaluated `f(3)` types
+`vector<rational^4>`. Its `isCollection` is `false` and its `count` is
+`undefined`, and its `staticShape` is
+`{ indexed: true, count: 4, elementType: 'rational' }`.
+
+`staticShape` answers from these sources:
+
+- **A collection value** (a list, a string, a dictionary, a symbol that holds
+  a collection) answers from its collection facets.
+- **A symbol with no collection value** answers from its declared type:
+  `L: vector<2>` promises an indexed collection of 2 elements. A type that
+  the engine inferred from the uses of an undeclared name is not a promise.
+- **An application whose head is bound** answers from its static type. The
+  head is bound when it is a library operator, a lambda operator definition,
+  a function literal assigned to a name, or a declared signature, overload
+  set (an intersection of signatures) or union of signatures.
+  `g(3)` with `g: (integer) -> list<real>` promises an indexed collection
+  with no count. A `missing`, `nothing` or `never` arm of the type is an
+  absence of the whole value, not another shape, and is set aside (an error
+  constructor such as `RuntimeError` types `never`)
+  (`(integer) -> list<real> | nothing` promises a list). A union of two
+  shapes (`list<real> | integer`) promises nothing, and so does a string
+  type. The count is the one that the getters already answer (the length of
+  a broadcast, the `elementCount` of an eager producer), else the length
+  that the type names.
+- **A selection** whose arms agree answers their shape: an `If` with an else
+  branch or a `Which` whose arms all promise a collection, none a point or a
+  string, is indexed when every arm is, with the count that every arm names
+  when they name the same one. Its element type is the widening of the
+  element types of the arms when every arm names one. An arm whose type is
+  only an absence gives no value and is skipped:
+  `If(c, [1, 2], RuntimeError("neg"))` promises 2 elements. A `Which` with
+  no default condition can give no value; that absence is set aside like a
+  `nothing` arm. The two-operand
+  `If` is a restriction and answers from its own handlers. A condition whose
+  type can be a collection is a mask (`Which([True, False], [1, 2])`,
+  `If(L > 0, A, B)` with `L` a list): the selection is element-wise and an
+  unmatched cell is `NaN` or a `NaN` point, so the selection answers from its
+  static type, not from its arms.
+
+**The vacuous lift.** A call of an undeclared name promises nothing: the name
+binds vacuously and its result type lifts over a collection argument, so
+`Total([1, 2])` on a bare engine types `list<unknown^2>` although no rule
+produces its elements and `each()` walks none (Tycho item 169). A broadcast
+promises a collection only when one of its operands promises one, so
+`x + Total([1, 2])` promises nothing either. An operator whose own result is a
+collection type also promises nothing when an operand has such a vacuous
+collection type that it does not itself promise (its `staticShape` is
+`undefined`): with `foo` undeclared, the type of `AbsArg(foo([1, 2]))` lifts
+over the operand, but `foo([1, 2])` evaluates to itself and no broadcast
+happens. The same rule applies to an inferred symbol, a selection of points,
+a restriction that opted out of the collection facets, and an unevaluated
+collection operator over a valueless declared symbol; it is conservative.
+
+**The elements come from the value.** For a call of a function, and for a
+library operator with no collection handlers, `each()` and `at()` evaluate
+the application once and walk the value. A selection must be evaluated
+before a walk: the handlers of `If` opt out of the collection facets for
+three operands, so `each()` of the unevaluated `If(True, [1, 2], [3, 4])`
+yields nothing and `at(1)` is `undefined`, although its `staticShape`
+promises 2 elements. Write `sel.evaluate().each()`. When the value does not have the declared
+type, `each()` can give another number of elements than `staticShape.count`:
+a host that declares `(integer) -> vector<3>` and returns two elements wrote
+a type error, reported where the definition is checked, and the walk gives
+the two elements. The host supplies values of the declared types.
+
 ## Lists of machine numbers
 
 A broadcast over more than a hundred elements answers a lazy `Map`. That form
