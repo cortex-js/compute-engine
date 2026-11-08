@@ -37,6 +37,18 @@
 
 ### Resolved Issues
 
+- **A function whose parameter accepts a point of integers or a string
+  refuses a point with a fractional coordinate.** With
+  `F: (tuple<integer, integer> | string) -> unknown` and the body `p ↦ p`,
+  `F((1.5, 2))` was valid and gave `(1.5, 2)`, while the same point at a
+  parameter declared `tuple<integer, integer>` alone is an
+  `incompatible-type` error. The check of the components of a point now
+  reads each arm of a union parameter: the point is refused when a tuple
+  arm of its arity refutes a component and no other arm accepts a value of
+  its type. A symbol that holds such a point is refused when the call is
+  boxed, as the point literal is, instead of when the call is evaluated. A
+  union with an arm that the point fits (`tuple<integer, integer> |
+  tuple<real, real>`, or `collection`) still accepts it.
 - **Two reads of the same element of a random list give the same value.**
   With `let v = [j for j in 1..10 if random() < 0.5]`, the tuple
   `(v[2], v[2], v)` gave three different second elements, and the same

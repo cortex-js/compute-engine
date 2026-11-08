@@ -29,6 +29,11 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  *   `(1.5, 2)` given as the whole argument is an `incompatible-type` error,
  *   as it is as an element of a mapped list. Before, `U((1.5, 2))` was
  *   valid, typed `integer`, and gave `1.5`.
+ * - CE-1135: the same check at a union parameter with a tuple arm. With
+ *   `F: (tuple<integer, integer> | string) -> unknown`, the point `(1.5, 2)`
+ *   is refused, because the tuple arm refutes a component and a string is
+ *   not a tuple. Before, only one tuple type was checked, and `F((1.5, 2))`
+ *   with the body `p ↦ p` gave `(1.5, 2)`.
  */
 
 const POINT = 'tuple<real, real>';
@@ -441,5 +446,91 @@ describe('CE-1088: each component of a point given as the whole argument is chec
     expect(
       ce.box(['H', ['Tuple', 'NaN', 'NaN']]).evaluate().toString()
     ).toBe('NaN');
+  });
+});
+
+describe('CE-1135: each component of a point is checked at a union parameter with a tuple arm', () => {
+  /** `F(p) = p` with the parameter `tuple<integer, integer> | string`. */
+  function engineF(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('F', '(tuple<integer, integer> | string) -> unknown');
+    ce.parse('F(p) := p').evaluate();
+    return ce;
+  }
+  const errorCode = (e: {
+    operator: string;
+    op1: { op1: { string?: string } };
+  }) => (e.operator === 'Error' ? e.op1.op1.string : undefined);
+
+  test('a point literal with a component outside its position is refused when it is boxed', () => {
+    const ce = engineF();
+    for (const point of [
+      ['Tuple', 1.5, 2],
+      ['Tuple', ['Rational', 3, 2], 2],
+      ['Tuple', 1.5, 'a'],
+    ]) {
+      const call = ce.box(['F', point]);
+      expect(call.isValid).toBe(false);
+      expect(errorCode(call.evaluate() as any)).toBe('incompatible-type');
+    }
+  });
+
+  test('a symbol that holds such a point is refused when the call is boxed', () => {
+    const ce = engineF();
+    ce.assign('r', ce.box(['Tuple', 1.5, 2]));
+    const call = ce.box(['F', 'r']);
+    expect(call.isValid).toBe(false);
+    expect(errorCode(call.evaluate() as any)).toBe('incompatible-type');
+  });
+
+  test('an argument whose value is such a point is refused when the call is evaluated', () => {
+    const ce = engineF();
+    ce.assign('q', ce.box(['Tuple', 1, 2]));
+    const call = ce.box(['F', 'q']);
+    expect(call.evaluate().toString()).toBe('(1, 2)');
+    ce.assign('q', ce.box(['Tuple', 2.5, 2]));
+    expect(errorCode(call.evaluate() as any)).toBe('incompatible-type');
+  });
+
+  test('a value that an arm of the union accepts is bound', () => {
+    const ce = engineF();
+    expect(
+      ce
+        .box(['F', ['Tuple', 1, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('(1, 2)');
+    expect(
+      ce
+        .box(['F', { str: 'ab' }])
+        .evaluate()
+        .toString()
+    ).toBe('"ab"');
+    ce.declare('x', 'real');
+    const call = ce.box(['F', ['Tuple', 'x', 2]]);
+    expect(call.isValid).toBe(true);
+    expect(call.evaluate().toString()).toBe('(x, 2)');
+    // A tuple arm of another arity does not refuse a point that another
+    // arm accepts.
+    ce.declare(
+      'G',
+      '(tuple<integer, integer, integer> | tuple<real, real>) -> unknown'
+    );
+    ce.parse('G(p) := p').evaluate();
+    expect(
+      ce
+        .box(['G', ['Tuple', 1.5, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('(1.5, 2)');
+    // An arm that accepts every collection accepts the point.
+    ce.declare('K', '(tuple<integer, integer> | collection) -> unknown');
+    ce.parse('K(p) := p').evaluate();
+    expect(
+      ce
+        .box(['K', ['Tuple', 1.5, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('(1.5, 2)');
   });
 });

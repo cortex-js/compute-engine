@@ -2374,11 +2374,13 @@ function admittedByDeferredOverlap(op: Expression, param: Type): boolean {
 }
 
 /**
- * Whether `op` is a `Tuple` of the arity of the tuple type `param` (one
- * tuple type such as `tuple<integer, integer>`, not a union) with a
- * component that the type of its position refutes (`admissionOf()` in
- * `value-membership.ts`). A union parameter with a tuple arm is not checked
- * here. A concrete component is decided by its value:
+ * Whether `op` is a `Tuple` that every arm of the parameter type `param`
+ * refuses, and at least one arm refuses it by a component: a tuple arm of
+ * the arity of the point (`tuple<integer, integer>`) refuses the point when
+ * the type of a position refutes the component there (`admissionOf()` in
+ * `value-membership.ts`), and every other arm (`string`, a tuple of another
+ * arity) refuses it when its type does not overlap the type of the point.
+ * A concrete component is decided by its value:
  * `1.5` is refuted at `integer`. A symbolic component is refuted only when
  * its type is provably disjoint from the type of its position. A symbol
  * that holds a `Tuple` is judged by that tuple, as a symbol that holds a
@@ -2396,6 +2398,14 @@ function admittedByDeferredOverlap(op: Expression, param: Type): boolean {
  * the literal `(1.5, 2)` and for a symbol that holds it, and when it is
  * evaluated, for an argument that evaluates to such a tuple.
  *
+ * A union parameter refuses the point only when each of its arms refuses
+ * it: with `F: (tuple<integer, integer> | string) -> unknown`,
+ * `F((1.5, 2))` is refused, because the tuple arm refutes the first
+ * component and a string is not a tuple. A union with an arm that the point
+ * can fit (`tuple<integer, integer> | tuple<real, real>`, or `collection`)
+ * admits it. Before, only one tuple type was checked, and a function with
+ * such a union parameter and the body `p ↦ p` returned `(1.5, 2)` unchanged.
+ *
  * A call that maps over a list of points uses the same test for each point
  * it binds (`fitsPointSlot()` in `boxed-function.ts`), so a point gets the
  * same answer as the whole argument and as an element of a list.
@@ -2404,12 +2414,24 @@ export function pointComponentRefuted(op: Expression, param: Type): boolean {
   const held = isSymbol(op) ? op.valueDefinition?.value : undefined;
   const point = held !== undefined && held !== op ? held : op;
   if (!isFunction(point, 'Tuple')) return false;
-  const slot = resolveTypeReference(param) ?? param;
-  if (typeof slot === 'string' || slot.kind !== 'tuple') return false;
-  if (point.nops !== slot.elements.length) return false;
-  return point.ops.some(
-    (c, k) => admissionOf(c, slot.elements[k].type) === 'refute'
-  );
+  let refutedByTupleArm = false;
+  for (const arm of paramArms(resolveTypeReference(param) ?? param)) {
+    const slot = resolveTypeReference(arm) ?? arm;
+    if (
+      typeof slot !== 'string' &&
+      slot.kind === 'tuple' &&
+      slot.elements.length === point.nops
+    ) {
+      if (
+        !point.ops.some(
+          (c, k) => admissionOf(c, slot.elements[k].type) === 'refute'
+        )
+      )
+        return false;
+      refutedByTupleArm = true;
+    } else if (typesOverlap(point.type.type, slot)) return false;
+  }
+  return refutedByTupleArm;
 }
 
 const MATRIX_OF_INTEGERS = parseType('matrix<integer>');
@@ -3096,6 +3118,15 @@ function overlapAdmission(op: Expression, param: Type): boolean {
     return false;
   if (concreteValueOf(op) !== undefined)
     return admissionOf(op, param) === 'admit';
+  // A symbol that holds a point is judged by that point, as the point
+  // literal is (`pointComponentRefuted`): `concreteValueOf()` follows a
+  // symbol to a held number, not to a held tuple, so without this test the
+  // overlap of the types alone admits `r` holding `(1.5, 2)` at
+  // `tuple<integer, integer> | string`, while the literal `(1.5, 2)` is
+  // refused there, and `r` is refused at `tuple<integer, integer>` (a
+  // parameter exempt from this admission, which the overlap deferral
+  // decides). The call then failed only when it was evaluated.
+  if (pointComponentRefuted(op, param)) return false;
   // Epsil pre-pass assignment evidence (the ROADMAP entry "Epsil static
   // evidence diagnostics lost to overlap admission", paths 1 and 2, both
   // ruled 2026-08-23): during the static pre-pass a symbol carries the type
