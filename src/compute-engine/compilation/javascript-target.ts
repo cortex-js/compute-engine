@@ -14642,6 +14642,19 @@ function callbackArg(
     const eta = BaseCompiler.complexElementCallbackEta(callback, source);
     if (eta !== undefined) return compile(eta);
   }
+  // A bare USER function symbol over string elements compiles to its
+  // generic definition, whose body may read the parameter as a list
+  // (`_SYS.elts`, which throws for a string). The expansion
+  // `(_x: string) ↦ f(_x)` calls the copy of `f` with the parameter typed
+  // `string` instead.
+  if (extraArgTypes.length === 0) {
+    const eta = BaseCompiler.stringElementCallbackEta(
+      callback,
+      source,
+      target
+    );
+    if (eta !== undefined) return compile(eta);
+  }
   // A one-parameter literal fed the elements of a range whose start and step
   // are finite literals receives a finite number at every call. It needs no
   // static map.

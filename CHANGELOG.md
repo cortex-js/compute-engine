@@ -142,6 +142,15 @@
   call whose function is not the one its name reads where it is compiled now
   declines, and the interpreter gives the value.
 
+- **A user function given by its name as the callback of `Map`, `Filter`,
+  `Count`, `Any` or `All` over a list of strings now gives the interpreter's
+  value in compiled JavaScript.** With `S: list<string>` and
+  `f := s ↦ Length(s)`, the compiled `["Map", "f", "S"]` threw
+  `RangeError: Length: the operand is not a list or a set` at
+  `S = ["xy", "z"]`; it now gives `[2, 1]`, as the interpreter does. The
+  callback now calls the copy of `f` with its parameter typed `string`, as
+  the call `["f", "t"]` with a string `t` already did.
+
 ### Performance
 
 - **More copies of a sub-expression read the value of the first copy in one

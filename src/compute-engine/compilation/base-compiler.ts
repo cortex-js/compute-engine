@@ -94,6 +94,7 @@ import {
   mayBeAbsentCollection,
   mayBeAbsentCollectionNode,
   registryHelperName,
+  stringElementCallbackEta,
   tryCompileLocalFunctionCall,
   tryCompileUserFunction,
   uncheckedParameterError,
@@ -1673,6 +1674,7 @@ export class BaseCompiler {
     hasUniformComplexScalarElements;
   static readonly assertCallbackLaneMatch = assertCallbackLaneMatch;
   static readonly complexElementCallbackEta = complexElementCallbackEta;
+  static readonly stringElementCallbackEta = stringElementCallbackEta;
   static readonly assertBuiltinCallbackUsable = assertBuiltinCallbackUsable;
   static readonly provablyScalarOrFramedScalar = provablyScalarOrFramedScalar;
   static readonly laneRequestParamType = laneRequestParamType;

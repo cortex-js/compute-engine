@@ -1189,6 +1189,93 @@ export function complexElementCallbackEta(
 }
 
 /**
+ * The eta-expansion `(_x: string) ↦ f(_x)` of a bare USER function symbol
+ * `f` of one parameter, used as a unary ELEMENT callback over a `source`
+ * whose elements are strings, on the JavaScript target. `undefined` when
+ * nothing needs to change.
+ *
+ * A string is a collection of its characters, so the body of
+ * `f := s ↦ Length(s)` infers `s: collection`. A bare symbol in callback
+ * position compiles to the generic definition `_fn_f`, whose `Length` of a
+ * `collection` reads the operand with `_SYS.elts`. That helper accepts an
+ * array or a set and throws a `RangeError` for a string: `Map(f, S)` over
+ * `S: list<string>` threw, while the interpreter binds each string whole
+ * and gives the number of its characters. The call `f(_x)` of the
+ * expansion, with `_x` typed `string`, takes the copy of `f` with its
+ * parameter typed `string` (`_fn_f_string`, made by
+ * `ensureSpecializedUserCallEmitted()` in `compiler-core.ts`), whose
+ * `Length` counts the characters (`_SYS.chars`). An inline literal
+ * callback `s ↦ Length(s)` is typed by the elements it receives and needs
+ * no expansion.
+ *
+ * The expansion is made when the string test of that function holds: the
+ * parameter type of `f` (its declared signature, else the literal's own
+ * signature, else the type of the parameter) is a collection type that
+ * admits a string, and the literal's own type for the parameter is wider
+ * than `string`. That function can still refuse the copy for other
+ * reasons (a generic function, a parameter that the body assigns). The
+ * call `f(_x)` then takes the generic definition, which gives the same
+ * value as the bare symbol or declines. Any other callback keeps its
+ * emission unchanged.
+ */
+export function stringElementCallbackEta(
+  callback: Expression | undefined,
+  source: Expression | undefined,
+  target: CompileTarget<Expression> | undefined
+): Expression | undefined {
+  if (callback === undefined || source === undefined) return undefined;
+  if (target?.language !== 'javascript' || !isSymbol(callback))
+    return undefined;
+  const engine = callback.engine;
+  const h = callback.symbol;
+  if (builtinCallbackArity(engine, h) !== undefined) return undefined;
+  // A name that the caller maps in `vars`, or that a binding form of the
+  // expression binds, is not the engine-level function: its value is
+  // compiled once, and the expansion would read it again for each
+  // element. A block-local function hides the engine-level literal that
+  // the conditions below read.
+  if (
+    target.varsKeys?.has(h) === true ||
+    target.boundVars?.has(h) === true ||
+    blockLocalFunction(h, target) !== undefined
+  )
+    return undefined;
+  const literal = userFunctionLiteral(engine, h);
+  if (literal === undefined || literal.ops.length !== 2) return undefined;
+  const eltType = collectionElementTypeOf(source);
+  if (
+    eltType === undefined ||
+    eltType === 'never' ||
+    !isSubtype(eltType, 'string')
+  )
+    return undefined;
+  // The literal's own type for the parameter is in its signature: a
+  // parameter written `s: string` is a `Typed` node, whose own type is
+  // `unknown`.
+  const own =
+    signatureParamType(literal.type.type, 0) ?? literal.ops[1].type.type;
+  const declared = laneRequestParamType(engine, h, 0) ?? own;
+  if (
+    declared === undefined ||
+    !isSubtype(declared, 'collection') ||
+    !isSubtype('string', declared)
+  )
+    return undefined;
+  if (own !== undefined && isSubtype(own, 'string')) return undefined;
+  // Boxed in one call, so that `_x` is bound in the scope of the literal
+  // only. A symbol boxed alone (`engine.symbol('_x')`) is declared in the
+  // current scope of the engine, and the call `f(_x)` then narrows its
+  // type: the compilation would change the engine.
+  const eta = engine.box([
+    'Function',
+    [h, '_x'],
+    ['Typed', '_x', { str: 'string' }],
+  ]);
+  if (!isFunction(eta, 'Function') || !eta.isValid) return undefined;
+  return eta;
+}
+
+/**
  * Fail closed when `callback` is a single-uppercase-letter symbol that
  * names a built-in OPERATOR the engine cannot eta-expand (`D`).
  *
