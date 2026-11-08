@@ -311,22 +311,40 @@ export function canonicalAdd(
     );
   };
 
+  // The imaginary part of a pure-imaginary number literal, or `undefined`
+  // when `op` is not one or its imaginary part is zero. An inexact imaginary
+  // part held as a big decimal (at a precision above the machine precision)
+  // is returned as that big decimal: its double keeps only about 16 digits,
+  // and `1 + 0.123456789012345678901234567i` at precision 30 would then
+  // become `1 + 0.12345678901234568i`.
+  const imaginaryLiteralPart = (
+    op: Expression
+  ): number | BigDecimal | undefined => {
+    const facExpr = getImaginaryFactor(op);
+    if (facExpr === undefined || !isNumber(facExpr)) return undefined;
+    const f = facExpr.numericValue;
+    if (typeof f === 'number') return f !== 0 ? f : undefined;
+    const big = f.isExact ? undefined : f.bignumRe;
+    if (big !== undefined) return big.isZero() ? undefined : big;
+    return f.re !== 0 ? f.re : undefined;
+  };
+
   // First pass: check if there are any imaginary terms (otherwise skip entirely)
   const xs: Expression[] = [];
   {
-    let imSum = 0;
+    // The sum of the imaginary parts. It is a double until a part is a big
+    // decimal, and a big decimal from then on.
+    let imSum: number | BigDecimal = 0;
     let hasIm = false;
 
     for (const op of ops) {
       if (isNumber(op) && !isExactComplexLiteral(op)) {
-        const facExpr = getImaginaryFactor(op);
-        if (facExpr !== undefined && isNumber(facExpr)) {
-          const f = facExpr.numericValue;
-          const im = typeof f === 'number' ? f : f.re;
-          if (im !== 0 && typeof im === 'number') {
-            imSum += im;
-            hasIm = true;
-          }
+        const im = imaginaryLiteralPart(op);
+        if (im !== undefined) {
+          if (typeof imSum !== 'number') imSum = imSum.addBounded(im);
+          else if (typeof im !== 'number') imSum = im.addBounded(imSum);
+          else imSum += im;
+          hasIm = true;
         }
       }
     }
@@ -339,12 +357,7 @@ export function canonicalAdd(
       for (const op of ops) {
         if (isNumber(op) && !isExactComplexLiteral(op)) {
           // Skip pure imaginary terms (already summed above)
-          const facExpr = getImaginaryFactor(op);
-          if (isNumber(facExpr)) {
-            const f = facExpr.numericValue;
-            const im = typeof f === 'number' ? f : f.re;
-            if (im !== 0 && typeof im === 'number') continue;
-          }
+          if (imaginaryLiteralPart(op) !== undefined) continue;
 
           // Take only the first real to combine with imaginary
           if (!realFound) {
@@ -380,7 +393,7 @@ export function canonicalAdd(
 
       if (realFound)
         xs.push(ce.number(ce._numericValue({ re: realVal!, im: imSum })));
-      else if (imSum !== 0)
+      else if (typeof imSum === 'number' ? imSum !== 0 : !imSum.isZero())
         xs.push(ce.number(ce._numericValue({ re: 0, im: imSum })));
     } else {
       // No imaginary terms — nothing to combine. A loop, not `push(...ops)`:

@@ -156,6 +156,14 @@
 
 ### Resolved Issues
 
+- **Above machine precision, a real number plus an imaginary number keeps
+  every digit of the imaginary part.** At precision 30,
+  `1+0.123456789012345678901234567i` was the complex number
+  `1 + 0.12345678901234568i`; it is now
+  `1 + 0.123456789012345678901234567i`. This also applies to the MathJSON
+  `["Add", 1, ["Complex", 0, {"num": "0.123456789012345678901234567"}]]`
+  and to a sum of several imaginary numbers.
+
 - **In a block, a function that calls a function defined later in the block
   takes a list argument whole when the later function does.**
   `Block(Assign(q, a ↦ h(a)), Assign(h, t ↦ Count(t)), q([1, 2]))` applied
