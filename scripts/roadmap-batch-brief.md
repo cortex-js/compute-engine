@@ -36,6 +36,14 @@ Write a temporary file only in `/tmp`, never in another repo, because the rule
 that protects the uncommitted work of that repo allows only reads and test runs
 there.
 
+Edit a source or test file with the Edit tool, not with a Python or sed
+script, because the Edit tool refuses a missing or ambiguous match and a script
+replaces every match or none without an error.
+
+Give each Jest test file by its path, never by a glob, because a glob that
+matches no file leaves Jest with no file argument, and Jest then runs the whole
+suite without the box lock.
+
 ## Steps
 
 1. Run `node scripts/issues.mjs start {{ID}} {{NAME}}` in the main tree. If
@@ -81,7 +89,11 @@ there.
    new untracked files by hand), then `git apply --check` and `git apply` in
    the main tree. If the check fails, reconcile with the Edit tool. Then run
    in the main tree the targeted tests again and `npm run test:core`, and
-   `npm run check:deps` when imports changed.
+   `npm run check:deps` when imports changed. When the change is in
+   `src/compute-engine/boxed-expression/` or `src/common/type/`, also take the
+   box lock and run `npm test` in the main tree before you stage, because the
+   batch commits before the nightly run, and the nearby test files and
+   `test:core` do not hold every caller of these files.
 8. Add a `CHANGELOG.md` item under `[Unreleased]` when users can see the
    change (the rules are in `CODING-STYLEGUIDE.md`). Do not edit
    `src/api.md` by hand: it is generated from the doc comments of the
