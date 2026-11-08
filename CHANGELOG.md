@@ -300,6 +300,13 @@
   13 copies of three `Which` expressions over a list of 500 points, under
   `Real`, `Imaginary` and `Abs`. Its evaluation computed a `Which` 13 times,
   and now computes one 5 times; the value does not change.
+- **A higher derivative of a user function continues from the lower orders
+  already computed.** After `Derivative(f, 2)`, the evaluation of
+  `Derivative(f, 3)` computed the first and second derivatives of `f` again.
+  It now differentiates the second derivative once more, while the state that
+  it depends on is unchanged. For `f(x) = √(x + √(x + … + √(x + 1)))` nested
+  8 times, `Derivative(f, 3)` after `Derivative(f, 2)` took 3.4 s and now
+  takes 1.9 s; the result does not change.
 
 ## 0.183.0 _2026-11-07_
 

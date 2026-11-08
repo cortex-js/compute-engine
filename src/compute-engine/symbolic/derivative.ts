@@ -872,6 +872,13 @@ type FinishedDerivative = {
    * another reason (the closed form still holds a `D`, say) does not carry
    * this mark: such a reason can go away at a higher order. */
   differentiationDeclined?: true;
+  /** In an entry of {@link derivative}: the type of the definition of the
+   * variable of differentiation at the start of the request that computed
+   * the result, or `undefined` when no definition was in scope. A later
+   * request that differentiates with respect to a new definition of the
+   * variable uses the result only when that definition has this type at the
+   * start of that request (see `finishedOverNewVariable()`). */
+  variableType?: string;
 };
 
 /** A symbol node, the definition it is bound to (the inner value or operator
@@ -990,7 +997,8 @@ function finishedDerivative(
   ce: Expression['engine'],
   cache: DerivativeChainCache | undefined,
   subKey: string,
-  order: number
+  order: number,
+  variable?: string
 ): FinishedDerivative | undefined {
   const finished = cache?.results.get(subKey)?.get(order);
   if (finished === undefined) return undefined;
@@ -998,7 +1006,9 @@ function finishedDerivative(
   // to a definition that reports no state event still bumps its
   // `_writeVersion`.
   if (finished.deps !== undefined && !symbolDependenciesValid(finished.deps))
-    return undefined;
+    return variable === undefined
+      ? undefined
+      : finishedOverNewVariable(ce, finished, variable);
   const generation = ce._cacheGeneration();
   if (finished.generation === generation) return finished;
   // The low bit of the generation is the fact-suppression bit: a result
@@ -1009,6 +1019,106 @@ function finishedDerivative(
   finished.generation = generation;
   finished.any = ce._anyVersion;
   return finished;
+}
+
+/**
+ * `finished`, made valid for the variable of differentiation `variable` of
+ * the request that runs now, or `undefined` when it cannot be.
+ *
+ * The `Derivative` handler declares the hole `_` in a scope that it pushes
+ * for each request and discards after it. So each request differentiates
+ * with respect to a new definition of `_`, and a result recorded by an
+ * earlier request depends on a definition that is disposed now. The check of
+ * its dependencies fails, and without this function each order computed
+ * every lower order again: `Derivative(f, 3)` after `Derivative(f, 2)` took
+ * about twice as long as one more differentiation step.
+ *
+ * The result is used when its only invalid dependencies are the nodes of
+ * `variable`, these nodes are bound to one definition that is disposed, and
+ * the definition that `variable` reads now has no stored value and the type
+ * that the old definition had at the start of the request that computed the
+ * result (`variableType`). The other dependencies are the state that the
+ * simplifications read, so this request, from the same state, would compute
+ * the same result. The type is compared at the start of the requests, not
+ * at the end: the handler declares the hole with the type `unknown`, and the
+ * canonicalization of the differentiation steps narrows it by inference (to
+ * `number` under a square root), so the new hole, which no step has narrowed
+ * yet, never has the type that the old one had at the end.
+ *
+ * The nodes of the old variable are replaced with nodes of the new one: a
+ * symbol is the same as another symbol only when the two are bound to the
+ * same definition, and a result that mixed the two would not combine like
+ * terms. The replacement canonicalizes the nodes that hold the variable
+ * again, and so makes on the new hole the inferences that the steps made on
+ * the old one. It runs only after every check has passed: when the result
+ * is not used, the state of the engine is not changed.
+ *
+ * A decline (no value) is not used: the memo of the handler
+ * (`memoizedDerivativeResult`) serves a decline across requests.
+ *
+ * The returned record is a copy: the record in the cache is not changed.
+ */
+function finishedOverNewVariable(
+  ce: Expression['engine'],
+  finished: FinishedDerivative,
+  variable: string
+): FinishedDerivative | undefined {
+  if (
+    finished.deps === undefined ||
+    finished.variableType === undefined ||
+    finished.value === undefined
+  )
+    return undefined;
+  // The fact-suppression bit, as in `finishedDerivative()`.
+  if ((finished.generation & 1) !== (ce._cacheGeneration() & 1))
+    return undefined;
+  const others: SymbolDependency[] = [];
+  let old: object | undefined;
+  for (const dep of finished.deps) {
+    const [node, def] = dep;
+    if (!isSymbol(node) || node.symbol !== variable) others.push(dep);
+    else if (old === undefined) old = def;
+    else if (old !== def) return undefined;
+  }
+  if (old === undefined || (old as { disposed?: boolean }).disposed !== true)
+    return undefined;
+  if (!symbolDependenciesValid(others)) return undefined;
+  // Read the definition before `ce.symbol()`, which would declare the name
+  // when no definition is in scope.
+  const def = valueDefinitionInContext(ce, variable, undefined);
+  if (
+    def === undefined ||
+    def === old ||
+    def.disposed ||
+    def.storedValue !== undefined ||
+    def.type.toString() !== finished.variableType
+  )
+    return undefined;
+  const node = ce.symbol(variable);
+  if (node.valueDefinition !== def) return undefined;
+  const value = rewriteWithBinders(finished.value, (sym) =>
+    sym.valueDefinition === old ? node : sym
+  );
+  // The generation, the axis and the version are read after the replacement,
+  // whose inferences can advance them.
+  return {
+    generation: ce._cacheGeneration(),
+    any: ce._anyVersion,
+    value,
+    deps: [...others, [node, def, def._writeVersion]],
+    variableType: finished.variableType,
+  };
+}
+
+/**
+ * The type of the definition that `variable` reads now, or `undefined` when
+ * it reads none. See {@link finishedOverNewVariable}.
+ */
+function variableTypeNow(
+  ce: Expression['engine'],
+  variable: string
+): string | undefined {
+  return valueDefinitionInContext(ce, variable, undefined)?.type.toString();
 }
 
 /**
@@ -1123,8 +1233,9 @@ export function memoizedDerivativeResult(
   // body past the size limit (`MAX_DERIVATIVE_NODES`) cost about one second
   // before the numeric fallback took over. The search is here, and not only
   // in `derivative()`: the entries of `derivative()` depend on the hole `_`,
-  // which each request declares again, so they do not validate in the
-  // scope of the next request.
+  // which each request declares again, and `derivative()` uses an entry of
+  // an earlier request only when it has a value (`finishedOverNewVariable()`),
+  // so a decline does not validate in the scope of the next request.
   for (let k = order - 1; k >= 1; k--) {
     const lower = finishedDerivative(ce, cache, subKey, k);
     if (lower === undefined) continue;
@@ -1554,7 +1665,11 @@ export function derivative(
     appliedForm ? `apply:${v}` : `body:${v}`,
     foldMode
   );
-  const finished = finishedDerivative(ce, cache, subKey, originalOrder);
+  // The type of the variable at the start of this request, before a step
+  // narrows it: it is recorded with the result (see
+  // `finishedOverNewVariable()`).
+  const variableType = variableTypeNow(ce, v);
+  const finished = finishedDerivative(ce, cache, subKey, originalOrder, v);
   if (finished !== undefined) {
     cache!.lastFinishedGeneration = finished.generation;
     cache!.lastFinishedAny = finished.any;
@@ -1674,7 +1789,7 @@ export function derivative(
       let step = 0;
       let simplified = false;
       for (let k = order - 1; k >= 1; k--) {
-        const lower = finishedDerivative(ce, cache, subKey, k);
+        const lower = finishedDerivative(ce, cache, subKey, k, v);
         if (lower === undefined) continue;
         noteStateReads(lower.deps);
         // A recorded decline of order k: this order declines too (see
@@ -1744,12 +1859,24 @@ export function derivative(
     // pops scopes).
     const generation = ce._cacheGeneration();
     const any = ce._anyVersion;
-    byOrder.set(originalOrder, { generation, any, value: result, deps });
+    byOrder.set(originalOrder, {
+      generation,
+      any,
+      value: result,
+      deps,
+      variableType,
+    });
     // The steps after `declinedAt` did not run, so the state that this
     // request read is the state that the decline of order `declinedAt`
     // depends on.
     if (declinedAt !== undefined)
-      byOrder.set(declinedAt, { generation, any, value: undefined, deps });
+      byOrder.set(declinedAt, {
+        generation,
+        any,
+        value: undefined,
+        deps,
+        variableType,
+      });
     cache.lastFinishedDeclinedAt =
       result === undefined ? (declinedAt ?? originalOrder) : undefined;
     cache.lastFinishedGeneration = generation;
