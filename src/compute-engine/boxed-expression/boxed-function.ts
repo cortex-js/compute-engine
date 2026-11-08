@@ -540,6 +540,7 @@ import {
   listCoordinateTupleOperandError,
   markAbsentPointCells,
   nonNumericOperandError,
+  pointComponentRefuted,
   runtimeCheckExemptParam,
   runtimeConformanceError,
   isAbsentableCollectionOperand,
@@ -20742,9 +20743,12 @@ function declaredElementError(
  * Whether the element `el` of a mapped list is a point literal that the
  * point slot type `t` accepts, component by component: `el` is a `Tuple` of
  * the arity of `t`, and no component is refuted by the type of its
- * position (`admissionOf()` in `value-membership.ts`). A concrete
+ * position (`pointComponentRefuted()` in `validate.ts`). A concrete
  * component is decided by its value. A symbolic component is refuted only
- * when its type is provably disjoint from the type of its position.
+ * when its type is provably disjoint from the type of its position. The
+ * argument check of a direct call refuses a point by the same test, so
+ * `(1.5, 2)` at `tuple<integer, integer>` is an error both as the whole
+ * argument and as an element of a mapped list.
  *
  * With `a` and `b` not declared, the point `(a, b, 0)` has the type
  * `tuple<unknown, unknown, integer>`. That type is not a subtype of
@@ -20771,10 +20775,7 @@ function fitsPointSlot(el: Expression, t: Type): boolean {
     return concreteValueOf(el) === undefined && admissionOf(el, t) !== 'refute';
   const slot = resolveTypeReference(t) ?? t;
   if (typeof slot === 'string' || slot.kind !== 'tuple') return false;
-  if (el.nops !== slot.elements.length) return false;
-  return el.ops.every(
-    (c, k) => admissionOf(c, slot.elements[k].type) !== 'refute'
-  );
+  return el.nops === slot.elements.length && !pointComponentRefuted(el, t);
 }
 
 /** Whether the element `el` of a mapped list is a `NaN` point (a tuple whose

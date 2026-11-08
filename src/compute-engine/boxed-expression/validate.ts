@@ -36,6 +36,7 @@ import {
   nonEmptyQuestionArms,
   provablyAdmits,
   provablyDisjoint,
+  resolveTypeReference,
   widenAll,
 } from '../../common/type/subtype.js';
 import { callbackArityError } from './callback-arity.js';
@@ -2355,6 +2356,7 @@ function isCollectionKindArm(a: Type): boolean {
  */
 function admittedByDeferredOverlap(op: Expression, param: Type): boolean {
   if (!overlapsForDeferredValidation(op.type.type, param)) return false;
+  if (pointComponentRefuted(op, param)) return false;
   if (!isSymbol(op)) return true;
   const isRecordArm = (a: Type) =>
     a === 'record' || (typeof a !== 'string' && a.kind === 'record');
@@ -2368,6 +2370,45 @@ function admittedByDeferredOverlap(op: Expression, param: Type): boolean {
   if (!paramArms(heldType).some(isRecordArm)) return true;
   return (
     isSubtype(heldType, param) || overlapsForDeferredValidation(heldType, param)
+  );
+}
+
+/**
+ * Whether `op` is a `Tuple` of the arity of the tuple type `param` (one
+ * tuple type such as `tuple<integer, integer>`, not a union) with a
+ * component that the type of its position refutes (`admissionOf()` in
+ * `value-membership.ts`). A union parameter with a tuple arm is not checked
+ * here. A concrete component is decided by its value:
+ * `1.5` is refuted at `integer`. A symbolic component is refuted only when
+ * its type is provably disjoint from the type of its position. A symbol
+ * that holds a `Tuple` is judged by that tuple, as a symbol that holds a
+ * number is judged by the number at a scalar parameter (`concreteValueOf()`
+ * follows a symbol to a held number, but not to a held tuple).
+ *
+ * The type of the tuple `(1.5, 2)` is `tuple<real, integer>`, which overlaps
+ * `tuple<integer, integer>`, so the overlap deferral alone admits it. A
+ * tuple parameter is exempt from the runtime conformance check
+ * (`runtimeCheckExemptParam`), and the evaluation of a call checks its
+ * arguments with the same argument check, so nothing refused the point
+ * later: with `U: (tuple<integer, integer>) -> integer` and the body
+ * `p ↦ p.x`, `U((1.5, 2))` was valid, typed `integer`, and gave `1.5`. With
+ * this test, the call is an `incompatible-type` error when it is boxed, for
+ * the literal `(1.5, 2)` and for a symbol that holds it, and when it is
+ * evaluated, for an argument that evaluates to such a tuple.
+ *
+ * A call that maps over a list of points uses the same test for each point
+ * it binds (`fitsPointSlot()` in `boxed-function.ts`), so a point gets the
+ * same answer as the whole argument and as an element of a list.
+ */
+export function pointComponentRefuted(op: Expression, param: Type): boolean {
+  const held = isSymbol(op) ? op.valueDefinition?.value : undefined;
+  const point = held !== undefined && held !== op ? held : op;
+  if (!isFunction(point, 'Tuple')) return false;
+  const slot = resolveTypeReference(param) ?? param;
+  if (typeof slot === 'string' || slot.kind !== 'tuple') return false;
+  if (point.nops !== slot.elements.length) return false;
+  return point.ops.some(
+    (c, k) => admissionOf(c, slot.elements[k].type) === 'refute'
   );
 }
 

@@ -25,6 +25,10 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  *   returns such a list was typed with an `error` member, and the evaluation
  *   gave an `incompatible-type` error for each point, while one such point
  *   was accepted.
+ * - CE-1088: with `U: (tuple<integer, integer>) -> integer`, the point
+ *   `(1.5, 2)` given as the whole argument is an `incompatible-type` error,
+ *   as it is as an element of a mapped list. Before, `U((1.5, 2))` was
+ *   valid, typed `integer`, and gave `1.5`.
  */
 
 const POINT = 'tuple<real, real>';
@@ -360,5 +364,82 @@ describe('CE-1069: each component of a mapped point is checked', () => {
     expect(ce.box(['V', ['List', 'q']]).evaluate().ops![0].operator).toBe(
       'Error'
     );
+  });
+});
+
+describe('CE-1088: each component of a point given as the whole argument is checked', () => {
+  /** `U(p) = p.x` with the point parameter `tuple<integer, integer>`, and
+   * `V(p) = p.x` with a ranged first component. */
+  function engineUV(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('U', '(tuple<integer, integer>) -> integer');
+    ce.parse('U(p) := p.x').evaluate();
+    ce.declare('V', '(tuple<real<0..1>, real, real>) -> real');
+    ce.parse('V(p) := p.x').evaluate();
+    return ce;
+  }
+  const errorCode = (e: { operator: string; op1: { op1: { string?: string } } }) =>
+    e.operator === 'Error' ? e.op1.op1.string : undefined;
+
+  test('a point literal with a component outside its type is refused when it is boxed', () => {
+    const ce = engineUV();
+    for (const point of [
+      ['Tuple', 1.5, 2],
+      ['Tuple', ['Rational', 3, 2], 2],
+      ['Tuple', 1.5, 'a'],
+    ]) {
+      const call = ce.box(['U', point]);
+      expect(call.isValid).toBe(false);
+      expect(errorCode(call.evaluate() as any)).toBe('incompatible-type');
+    }
+    expect(ce.box(['V', ['Tuple', 5, 0, 0]]).isValid).toBe(false);
+  });
+
+  test('a symbol that holds such a point is refused when the call is boxed', () => {
+    const ce = engineUV();
+    ce.assign('r', ce.box(['Tuple', 1.5, 2]));
+    const call = ce.box(['U', 'r']);
+    expect(call.isValid).toBe(false);
+    expect(errorCode(call.evaluate() as any)).toBe('incompatible-type');
+  });
+
+  test('an argument whose value is such a point is refused when the call is evaluated', () => {
+    const ce = engineUV();
+    ce.assign('q', ce.box(['Tuple', 1, 2]));
+    const call = ce.box(['U', 'q']);
+    expect(call.evaluate().toString()).toBe('1');
+    ce.assign('q', ce.box(['Tuple', 2.5, 2]));
+    expect(errorCode(call.evaluate() as any)).toBe('incompatible-type');
+    const read = ce.box(['U', ['At', ['List', ['Tuple', 1.5, 2]], 1]]);
+    expect(errorCode(read.evaluate() as any)).toBe('incompatible-type');
+  });
+
+  test('an annotated parameter of a function literal refuses such a point', () => {
+    const ce = new ComputeEngine();
+    const call = ce.box([
+      'Apply',
+      ['Function', ['At', 'p', 1], ['Typed', 'p', "'tuple<integer, integer>'"]],
+      ['Tuple', 1.5, 2],
+    ]);
+    expect(call.isValid).toBe(false);
+    expect(errorCode(call.evaluate() as any)).toBe('incompatible-type');
+  });
+
+  test('a point whose components can fit is bound', () => {
+    const ce = engineUV();
+    expect(ce.box(['U', ['Tuple', 1, 2]]).evaluate().toString()).toBe('1');
+    expect(ce.box(['V', ['Tuple', 0.5, 0, 0]]).evaluate().toString()).toBe(
+      '0.5'
+    );
+    ce.declare('x', 'real');
+    const call = ce.box(['U', ['Tuple', 'x', 2]]);
+    expect(call.isValid).toBe(true);
+    expect(call.evaluate().toString()).toBe('x');
+    // A `NaN` point is accepted at a point parameter of its arity.
+    ce.declare('H', '(tuple<real, real>) -> real');
+    ce.parse('H(p) := p.x').evaluate();
+    expect(
+      ce.box(['H', ['Tuple', 'NaN', 'NaN']]).evaluate().toString()
+    ).toBe('NaN');
   });
 });

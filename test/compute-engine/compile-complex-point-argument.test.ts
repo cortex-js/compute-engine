@@ -422,9 +422,13 @@ describe('The decline message of an engine-level Map callback with no type', () 
 describe('A written complex point at a parameter declared with a real position', () => {
   // A call with a written point that has a complex coordinate is compiled
   // with the body of the function at the call site, which reads each
-  // coordinate in its own lane. The interpreter accepts a coordinate with a
-  // real part and an imaginary part at a position declared `real`, and the
-  // compiled call gives the same value in each mode.
+  // coordinate in its own lane. The interpreter refuses a coordinate with
+  // an imaginary part at a position declared `real` (CE-1088): the call is
+  // an `incompatible-type` error. The static type of `x + i·x`, with `x`
+  // untyped, is `number`, so it does not show that error, and the value of
+  // the compiled call is unspecified (`docs/COMPILATION-MODEL.md`, "Caveats
+  // of compiled code"). These tests check that the call compiles in each
+  // mode, and the value that the inlined body computes.
   ce.assign(
     'hr',
     ce.box([
@@ -440,10 +444,14 @@ describe('A written complex point at a parameter declared with a real position',
   ];
   test('the interpreter: hr((x + i·x, x))', () => {
     const v = ce.box(['Apply', json, 2] as any).evaluate();
-    expect(v.re).toBe(4);
-    expect(v.im).toBe(2);
+    expect(v.operator).toBe('Error');
+    expect(v.op1.op1.string).toBe('incompatible-type');
   });
-  test('complex: hr((x + i·x, x))', () => expectSameValue(json, 2, 2));
-  test('strict: hr((x + i·x, x))', () =>
-    expectSameValue(json, 2, 2, 'strict'));
+  for (const mode of ['complex', 'strict'] as const) {
+    test(`${mode}: hr((x + i·x, x))`, () => {
+      const r = compile(ce.box(json as any), { fallback: false, mode })!;
+      expect(r.success).toBe(true);
+      expect(parts(r.run!(2))).toEqual([4, 2]);
+    });
+  }
 });

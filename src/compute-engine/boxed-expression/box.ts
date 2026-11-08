@@ -100,6 +100,7 @@ import {
   refusedCollectionSourceOperands,
   inferGenericBoundArgs,
   inferNumericArgs,
+  pointComponentRefuted,
   refusesAbsentArgument,
   runtimeCheckExemptParam,
 } from './validate.js';
@@ -2828,10 +2829,16 @@ function keepProvisionalOperands(
       // `typesOverlap` reads them, and still finds the value that two
       // collection types share through the empty list (`list<string>` and
       // `list<integer>`), so it refuses only an operand that cannot fit.
+      // A point with a component that its position refutes cannot fit
+      // either, whatever value the free variables of the other components
+      // take: `(1.5, x)` at `tuple<integer, integer>` (`pointComponentRefuted`).
       if (
         params.length > 0 &&
         params.every(
-          (p) => orig.type.isDisjointFrom(p) || !typesOverlap(orig.type.type, p)
+          (p) =>
+            orig.type.isDisjointFrom(p) ||
+            !typesOverlap(orig.type.type, p) ||
+            pointComponentRefuted(orig, p)
         )
       )
         return r;
