@@ -431,6 +431,12 @@
   it depends on is unchanged. For `f(x) = √(x + √(x + … + √(x + 1)))` nested
   8 times, `Derivative(f, 3)` after `Derivative(f, 2)` took 3.4 s and now
   takes 1.9 s; the result does not change.
+- **Compiled JavaScript reads its run-time helpers faster, and a loop that
+  updates list elements runs about 4 times faster.** The helpers of a
+  compiled function were held in an object that V8 searched as a hash table
+  at each read. For a loop of 1,000,000 passes that adds 1 to two elements of
+  a list (`L = ReplaceAt(L, c, L[c] + 1)`), `run()` took 15 ms and now takes
+  3.5 ms. The emitted code and the values do not change.
 
 ## 0.183.0 _2026-11-07_
 

@@ -5677,7 +5677,8 @@ export const SYS_HELPERS = {
   },
   // The in-place form of a chain of `ReplaceAt` in the step of a fold that
   // owns its accumulator (`inPlaceUpdateChains` in `in-place-update.ts`):
-  // `updates` holds the index and the value of each level, innermost first.
+  // the operands after `x` are the index and the value of each update,
+  // innermost first (`i` and `v` for the first update, then `more`).
   // All of them were computed before this call, from the accumulator as it
   // was at the start of the step, so a step that swaps two slots reads both
   // old values, as in the interpreter. The indexes are checked as `replaceAt`
@@ -5685,8 +5686,39 @@ export const SYS_HELPERS = {
   // string seed is not copied by `ownedCopy`: the first update converts it to
   // a new array of its characters, which the fold then owns, as `replaceAt`
   // would.
-  replaceAtInPlace: (x: unknown, ...updates: unknown[]): unknown[] => {
+  //
+  // The first update has its own parameters, and the case of one update at
+  // an integer index in `1..length` of a plain array writes the element with
+  // no other work: this is the common form, an update of one list element
+  // in a loop. Every other case (a negative or invalid index, a string, more
+  // than one update) takes the general loop, which gives the same result for
+  // the first update. The general loop gathers its operands into an array
+  // at each call, which costs about one third of the time of such a loop.
+  // The array test is `x.constructor === Array`, as in `ownAtNumeric`,
+  // because V8 runs it faster than `Array.isArray(x)`. A typed array, a
+  // subclass of `Array` and an array of another realm take the general loop.
+  replaceAtInPlace: (
+    x: unknown,
+    i: unknown,
+    v: unknown,
+    ...more: unknown[]
+  ): unknown[] => {
+    const a = x as unknown[] | undefined | null;
+    if (
+      more.length === 0 &&
+      a !== undefined &&
+      a !== null &&
+      a.constructor === Array &&
+      typeof i === 'number' &&
+      i >= 1 &&
+      i <= a.length &&
+      Number.isInteger(i)
+    ) {
+      a[i - 1] = v;
+      return a;
+    }
     const arr = typeof x === 'string' ? listCopy(x) : (x as unknown[]);
+    const updates = [i, v, ...more];
     for (let k = 0; k < updates.length; k += 2)
       arr[listPosition('ReplaceAt', arr.length, updates[k])] = updates[k + 1];
     return arr;
@@ -6996,26 +7028,33 @@ export function makeLazyStreamHelpers(
  * copying); the random and lazy-stream families get own bindings over
  * `source`, so `_SYS.drawNextRandomNumber()` resolves the active
  * `WithRandomSeed` frame at call time.
+ *
+ * The own helpers are written in one object literal, which then gets
+ * `SYS_HELPERS` as its prototype. V8 keeps such an object in fast mode. An
+ * object that receives more than about 16 properties through
+ * `Object.assign` or through stores with computed keys after its creation
+ * goes to dictionary mode, and then each `_SYS.name` read of the compiled
+ * code is a hash lookup: a loop that reads a few helpers per pass ran about
+ * three times slower. Stores with literal names and `Object.defineProperties`
+ * (as `createSysRuntime` adds its members) do not have this low limit.
  */
 export function makeSysHelpers(source: RuntimeSource): SysHelpers {
-  const sys = Object.create(SYS_HELPERS) as SysHelpers;
-  Object.assign(
-    sys,
-    makeRandomHelpers(source),
-    makeLazyStreamHelpers(source),
-    makeLoopPassCounter()
-  );
   // The integrals' Monte-Carlo samples come from the live source, never from
   // `Math.random` directly: a host that mocks or denies it must see compiled
   // code follow. The draw is live inside a `WithRandomSeed` frame too —
   // compiled integrals sample live by ruling (`docs/RANDOMNESS-MODEL.md`).
   const draw = (): number => source.random();
-  sys.integrate = (fn, a, b, initialPanels) =>
-    SYS_HELPERS.integrate(fn, a, b, initialPanels, draw);
-  sys.integrateMC = (fn, a, b) => SYS_HELPERS.integrateMC(fn, a, b, draw);
-  sys.atNumeric = ownAtNumeric();
-  sys.atChecked = ownAtChecked();
-  return sys;
+  const own: Partial<SysHelpers> = {
+    ...makeRandomHelpers(source),
+    ...makeLazyStreamHelpers(source),
+    ...makeLoopPassCounter(),
+    integrate: (fn, a, b, initialPanels) =>
+      SYS_HELPERS.integrate(fn, a, b, initialPanels, draw),
+    integrateMC: (fn, a, b) => SYS_HELPERS.integrateMC(fn, a, b, draw),
+    atNumeric: ownAtNumeric(),
+    atChecked: ownAtChecked(),
+  };
+  return Object.setPrototypeOf(own, SYS_HELPERS) as SysHelpers;
 }
 
 /**
