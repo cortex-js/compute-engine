@@ -37,6 +37,18 @@
 
 ### Resolved Issues
 
+- **In the VS Code extension, the highlight and the rename of a variable no
+  longer take the index of a `sum`, or the variable of a `limit`, that has
+  the same name.** After `let k = 2`, the cursor on `k` highlighted the
+  three `k` of `sum(k^2, k, 1, 3)` too, and a rename of the `let k` changed
+  them, although the sum binds its own `k`. Highlight, Find All References
+  and Rename now give the `let k` alone, and the two `k` of the sum
+  together. The same applies to `let h = 5` followed by
+  `limit(sin(h)/h, 0)`, and to the variable of every library call that
+  binds one (`integrate`, `product`, `nd`, ...). A rename that would change
+  which variable such a call binds is refused: the implicit variable of a
+  `limit` or an `nd` is chosen by name, so `h` cannot become `Pi`, and the
+  `x` of `limit(sin(x)/x + y, 0)` cannot become `z`, which sorts after `y`.
 - **A shader loop whose bound is a local assigned after its declaration ran
   the number of turns of the declaration.** On the `glsl` and `wgsl`
   targets, `let e = 0; for m in 1..5 { if m > 2 { e = m; break } }; for j in
@@ -57,6 +69,24 @@
   first condition after the `k\in` clause was read; the second was dropped
   with no message, so the sum gave `5`. Every condition that follows the
   clause is now kept, joined with `And`, and the sum gives `2`.
+
+### Performance
+
+- **The definitions of a discarded scope are released, also when their
+  bodies apply a name that has no definition.** A function such as
+  `f(x) := h(x) + 1`, defined while `h` has no definition, is re-derived when
+  `h` gets one, so that `h(x)` reads as a call and not as a product. The
+  engine kept every such definition for its whole life, also after
+  `ce.popScope()` discarded the scope that held it, and each later
+  declaration of `h` walked them all. A host that pushed a scope, defined a
+  hundred such functions and popped the scope at each edit of a document
+  grew by about 1.5 MB per edit, and the tenth edit took about nine times
+  as long as the first. The engine now holds these definitions weakly: a
+  definition that nothing reaches is collected, and a definition in a scope
+  that the host keeps and pushes again later is re-derived as before. A
+  definition is released only after the end of the synchronous task that
+  made it, and `ce.withValues()` refuses a value for a name that only
+  collected bodies applied until the garbage collector has run.
 
 ## 0.184.0 _2026-11-08_
 

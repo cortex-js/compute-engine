@@ -178,20 +178,88 @@ export function provisionalLiteral(
   return literal === undefined ? undefined : LITERALS.get(literal);
 }
 
-const DEPENDENTS = new WeakMap<
-  object,
-  Map<string, Set<ProvisionalDependent>>
->();
+/** The definitions waiting on one name, as WEAK references.
+ *
+ * The registry holds a definition only weakly: a definition that nothing
+ * else reaches (its scope was popped and discarded, or a redefinition
+ * replaced it) is collected with its literal and raw operands, and its
+ * reference is removed from here at the next read of the name, or at the
+ * next sweep. Before, the registry held each definition strongly for the
+ * life of the engine, so a host that pushed a scope, defined functions whose
+ * bodies applied undeclared names, and popped the scope, kept every one of
+ * those definitions, and each later declaration of such a name walked them
+ * all (CE-1102). A definition that something still reaches, for example one
+ * in a popped scope that the host keeps and pushes again later, stays
+ * registered and is re-derived as before: the registry makes no assumption
+ * about the life of a scope.
+ *
+ * Two consequences of weak references. (1) `hasProvisionalDependents()`, which
+ * `withValues()` reads to refuse a value for a name that a stored body
+ * applies, answers false for a name that only collected bodies applied: the
+ * refusal depends on when the collector ran. (2) A `WeakRef` keeps its target
+ * alive until the end of the current job (ECMAScript `AddToKeptObjects`, in
+ * the constructor and in `deref()`), so the definitions of a scope that is
+ * pushed and popped many times in one synchronous job are released only when
+ * that job ends; a test must yield to the event loop before it collects. */
+type Waiting = {
+  refs: Set<WeakRef<ProvisionalDependent>>;
+  /** The size of `refs` at which the next sweep of collected references
+   * runs: twice the number of live references after the last sweep, at
+   * least `SWEEP_MIN`. The sweep bounds the registry to about twice its live
+   * size for a name that is never read: an undeclared name that a host
+   * applies in each edit and never declares. */
+  sweepAt: number;
+};
 
-/** The reverse of `DEPENDENTS`: the names each registered definition waits on.
- * A definition object is SUPERSEDED on every redefinition (`updateDef` builds a
- * fresh one for each `f(t) := …`), and without this index the superseded object
- * stayed in every set it had joined — one orphan, holding its literal and raw
- * operands, per reassignment. */
-const REGISTRATIONS = new WeakMap<
-  object,
-  { ce: IComputeEngine; names: Set<string> }
->();
+const SWEEP_MIN = 16;
+
+function newWaiting(): Waiting {
+  return { refs: new Set(), sweepAt: SWEEP_MIN };
+}
+
+/** Remove from `waiting` the references whose definition was collected, and
+ * set the size at which the next sweep runs. */
+function sweep(waiting: Waiting): void {
+  for (const ref of waiting.refs)
+    if (ref.deref() === undefined) waiting.refs.delete(ref);
+  waiting.sweepAt = Math.max(SWEEP_MIN, 2 * waiting.refs.size);
+}
+
+/** The definitions in `waiting` that are still in memory, each with its
+ * reference, in the order of their registration. The references whose
+ * definition was collected are removed from `waiting`. */
+function liveDependents(
+  waiting: Waiting
+): { ref: WeakRef<ProvisionalDependent>; def: ProvisionalDependent }[] {
+  const live: {
+    ref: WeakRef<ProvisionalDependent>;
+    def: ProvisionalDependent;
+  }[] = [];
+  for (const ref of waiting.refs) {
+    const def = ref.deref();
+    if (def === undefined) waiting.refs.delete(ref);
+    else live.push({ ref, def });
+  }
+  return live;
+}
+
+const DEPENDENTS = new WeakMap<object, Map<string, Waiting>>();
+
+/** The reverse of `DEPENDENTS`: the names each registered definition waits on,
+ * and the ONE weak reference through which every set of `DEPENDENTS` holds the
+ * definition, so that membership is tested and removed by the identity of
+ * that reference. A definition object is SUPERSEDED on every redefinition
+ * (`updateDef` builds a fresh one for each `f(t) := …`), and without this
+ * index the superseded object stayed in every set it had joined, and a
+ * later repair of the name re-derived the orphan instead of the installed
+ * definition. */
+type Registration = {
+  ce: IComputeEngine;
+  names: Set<string>;
+  ref: WeakRef<ProvisionalDependent>;
+};
+
+const REGISTRATIONS = new WeakMap<object, Registration>();
 
 /**
  * Rollback journal (family 5, the forward-reference registry): every
@@ -208,15 +276,14 @@ const REGISTRATIONS = new WeakMap<
  * rollback is never re-journaled into an enclosing frame.
  *
  * The CHECKPOINT journal (`checkpoint-journal.ts`) extends the same three
- * hooks: the registry holds STRONG references to definition halves, so a
- * restore that rewinds a redefinition without rewinding these deltas leaves
- * the reinstated half unregistered while the orphaned replacement stays in
- * every dependents set it joined — later forward-reference fulfillment then
- * repairs the orphan instead of the installed definition, and the orphan
- * never becomes collectable. Recorded with `recordDelta`, NOT with the
- * window's usual (owner, key) entries: each of these undos removes exactly
- * what ITS call added, so first-write-wins dedup would drop every later
- * call's delta and leave it applied.
+ * hooks: a restore that rewinds a redefinition without rewinding these
+ * deltas leaves the reinstated half unregistered while the orphaned
+ * replacement stays in every dependents set it joined for as long as
+ * something reaches it — later forward-reference fulfillment then repairs
+ * the orphan instead of the installed definition. Recorded with
+ * `recordDelta`, NOT with the window's usual (owner, key) entries: each of
+ * these undos removes exactly what ITS call added, so first-write-wins dedup
+ * would drop every later call's delta and leave it applied.
  */
 
 /** Register `def` to be re-derived when one of the symbols its body read
@@ -241,9 +308,10 @@ export function registerProvisionalDependents(
 
   let registration = priorRegistration;
   if (registration === undefined || registration.ce !== ce) {
-    registration = { ce, names: new Set() };
+    registration = { ce, names: new Set(), ref: new WeakRef(def) };
     REGISTRATIONS.set(def, registration);
   }
+  const ref = registration.ref;
 
   // Delta record for the rollback journal: only what THIS call added is
   // removed by the undo — prior membership (`def` already waiting on a
@@ -254,13 +322,17 @@ export function registerProvisionalDependents(
   const addedToDependents: string[] = [];
   const addedToReverseIndex: string[] = [];
   for (const name of info.heads) {
-    let defs = byName.get(name);
-    if (defs === undefined) {
-      defs = new Set();
-      byName.set(name, defs);
+    let waiting = byName.get(name);
+    if (waiting === undefined) {
+      waiting = newWaiting();
+      byName.set(name, waiting);
     }
-    if (journaling && !defs.has(def)) addedToDependents.push(name);
-    defs.add(def);
+    if (journaling && !waiting.refs.has(ref)) addedToDependents.push(name);
+    waiting.refs.add(ref);
+    // The sweep runs here, and not only when a name is read, because an
+    // undeclared name that no declaration ever reads is otherwise never
+    // read.
+    if (waiting.refs.size >= waiting.sweepAt) sweep(waiting);
     if (journaling && !registration.names.has(name))
       addedToReverseIndex.push(name);
     registration.names.add(name);
@@ -271,16 +343,23 @@ export function registerProvisionalDependents(
     const dependentsForEngine = byName;
     const undo = (): void => {
       for (const name of addedToDependents) {
-        const defs = dependentsForEngine.get(name);
-        if (defs === undefined) continue;
-        defs.delete(def);
-        if (defs.size === 0) dependentsForEngine.delete(name);
+        const waiting = dependentsForEngine.get(name);
+        if (waiting === undefined) continue;
+        waiting.refs.delete(ref);
+        if (waiting.refs.size === 0) dependentsForEngine.delete(name);
       }
       for (const name of addedToReverseIndex)
         installedRegistration.names.delete(name);
       if (installedRegistration !== priorRegistration) {
-        if (priorRegistration === undefined) REGISTRATIONS.delete(def);
-        else REGISTRATIONS.set(def, priorRegistration);
+        // The undo reads the definition through the weak reference: no
+        // entry of this registry holds a definition, so none of them
+        // decides what stays in memory. (A checkpoint window keeps the
+        // definitions made under it through its own entries, for its
+        // restore.) A collected definition has no index entry to restore.
+        const target = ref.deref();
+        if (target === undefined) return;
+        if (priorRegistration === undefined) REGISTRATIONS.delete(target);
+        else REGISTRATIONS.set(target, priorRegistration);
       }
     };
     frame?.record({ undo });
@@ -289,9 +368,10 @@ export function registerProvisionalDependents(
 }
 
 /** Drop a definition object that is no longer installed from every set it
- * joined. Called by `updateDef` for the record's superseded halves: the
- * registry holds STRONG references, so a definition that can never be
- * consulted again must not stay in it. */
+ * joined. Called by `updateDef` for the record's superseded halves: a
+ * superseded definition can stay in memory (a symbol caches the definition
+ * it resolved to), and a definition that can never be consulted again must
+ * not be re-derived in place of the installed one. */
 export function unregisterProvisionalDependent(def: object | undefined): void {
   if (def === undefined) return;
   const registration = REGISTRATIONS.get(def);
@@ -306,27 +386,32 @@ export function unregisterProvisionalDependent(def: object | undefined): void {
   const removedFrom: string[] = [];
   if (byName !== undefined) {
     for (const name of registration.names) {
-      const defs = byName.get(name);
-      if (defs === undefined) continue;
+      const waiting = byName.get(name);
+      if (waiting === undefined) continue;
       if (
-        defs.delete(def as ProvisionalDependent) &&
+        waiting.refs.delete(registration.ref) &&
         (frame !== undefined || window !== undefined)
       )
         removedFrom.push(name);
-      if (defs.size === 0) byName.delete(name);
+      if (waiting.refs.size === 0) byName.delete(name);
     }
   }
   if (frame !== undefined || window !== undefined) {
     const undo = (): void => {
-      REGISTRATIONS.set(def, registration);
+      // The undo reads the definition through the weak reference, as the
+      // other entries of this registry do. The references go back into the
+      // sets even for a collected definition: the next read of the name
+      // removes them.
+      const target = registration.ref.deref();
+      if (target !== undefined) REGISTRATIONS.set(target, registration);
       if (byName === undefined) return;
       for (const name of removedFrom) {
-        let defs = byName.get(name);
-        if (defs === undefined) {
-          defs = new Set();
-          byName.set(name, defs);
+        let waiting = byName.get(name);
+        if (waiting === undefined) {
+          waiting = newWaiting();
+          byName.set(name, waiting);
         }
-        defs.add(def as ProvisionalDependent);
+        waiting.refs.add(registration.ref);
       }
     };
     frame?.record({ undo });
@@ -346,20 +431,50 @@ export function _provisionalDependentCount(
   ce: IComputeEngine,
   name: string
 ): number {
-  return DEPENDENTS.get(ce)?.get(name)?.size ?? 0;
+  const byName = DEPENDENTS.get(ce);
+  const waiting = byName?.get(name);
+  if (waiting === undefined) return 0;
+  const count = liveDependents(waiting).length;
+  if (count === 0) byName!.delete(name);
+  return count;
 }
 
-/** Is at least one definition waiting on `name` in this engine? */
+/**
+ * How many references the registry holds under `name`, collected or not.
+ * **Test-only**, for the sweep: `_provisionalDependentCount` removes the
+ * references whose definition was collected, so it cannot show whether a
+ * registration swept them.
+ * @internal
+ */
+export function _provisionalReferenceCount(
+  ce: IComputeEngine,
+  name: string
+): number {
+  return DEPENDENTS.get(ce)?.get(name)?.refs.size ?? 0;
+}
+
+/** Is at least one definition waiting on `name` in this engine? A
+ * definition that was collected does not count, and its reference is
+ * removed. */
 export function hasProvisionalDependents(
   ce: IComputeEngine,
   name: string
 ): boolean {
-  return DEPENDENTS.get(ce)?.has(name) === true;
+  const byName = DEPENDENTS.get(ce);
+  const waiting = byName?.get(name);
+  if (waiting === undefined) return false;
+  for (const ref of waiting.refs) {
+    if (ref.deref() !== undefined) return true;
+    waiting.refs.delete(ref);
+  }
+  byName!.delete(name);
+  return false;
 }
 
 /** Remove from the registry the definitions waiting on `name` and return
  * them. With `select`, only the definitions it accepts are removed and
- * returned; the others stay registered under `name`. */
+ * returned; the others stay registered under `name`. A definition that was
+ * collected is neither returned nor kept. */
 export function takeProvisionalDependents(
   ce: IComputeEngine,
   name: string,
@@ -368,24 +483,23 @@ export function takeProvisionalDependents(
   const byName = DEPENDENTS.get(ce);
   const waiting = byName?.get(name);
   if (waiting === undefined) return undefined;
-  let defs: Iterable<ProvisionalDependent> = waiting;
-  let taken: ProvisionalDependent[] | undefined;
-  if (select !== undefined) {
-    taken = [];
-    for (const def of waiting) if (select(def)) taken.push(def);
-    if (taken.length === 0) return undefined;
-    if (taken.length === waiting.size) taken = undefined;
-    else defs = taken;
+  const live = liveDependents(waiting);
+  if (live.length === 0) {
+    byName!.delete(name);
+    return undefined;
   }
-  if (taken === undefined) byName!.delete(name);
-  else for (const def of taken) waiting.delete(def);
+  const taken =
+    select === undefined ? live : live.filter((entry) => select(entry.def));
+  if (taken.length === 0) return undefined;
+  if (taken.length === live.length) byName!.delete(name);
+  else for (const entry of taken) waiting.refs.delete(entry.ref);
   const frame = activeRollbackFrame(ce);
   const window = ce._checkpointWindow;
   // Reverse-index entries this take actually removed `name` from, captured
   // by identity for the rollback journal.
   const strippedRegistrations: { names: Set<string> }[] = [];
-  for (const def of defs) {
-    const registration = REGISTRATIONS.get(def);
+  for (const entry of taken) {
+    const registration = REGISTRATIONS.get(entry.def);
     if (registration === undefined) continue;
     if (
       registration.names.delete(name) &&
@@ -394,6 +508,9 @@ export function takeProvisionalDependents(
       strippedRegistrations.push(registration);
   }
   if (frame !== undefined || window !== undefined) {
+    // The undo holds the weak references, not the definitions: a journal
+    // entry must not keep a definition that nothing else reaches.
+    const takenRefs = taken.map((entry) => entry.ref);
     const undo = (): void => {
       // MERGED back into whatever set is currently under `name`, never
       // installed over it. Re-installing the detached set by identity is
@@ -409,17 +526,17 @@ export function takeProvisionalDependents(
       // current set is empty or absent by the time it runs.
       let current = byName!.get(name);
       if (current === undefined) {
-        current = new Set();
+        current = newWaiting();
         byName!.set(name, current);
       }
-      for (const def of defs) current.add(def);
+      for (const ref of takenRefs) current.refs.add(ref);
       for (const registration of strippedRegistrations)
         registration.names.add(name);
     };
     frame?.record({ undo });
     window?.recordDelta(undo);
   }
-  return taken ?? [...waiting];
+  return taken.map((entry) => entry.def);
 }
 
 //
@@ -453,7 +570,7 @@ export function repairProvisionalDependents(
   justInstalled?: ProvisionalDependent,
   declaredIn?: Scope
 ): void {
-  if (DEPENDENTS.get(ce)?.has(name) !== true) return;
+  if (!hasProvisionalDependents(ce, name)) return;
   // `declaredIn` is the scope that now holds the new binding of `name`, when
   // the caller knows it. A waiting literal resolves `name` from the scope it
   // was canonicalized in, through that scope's ancestors. The repair

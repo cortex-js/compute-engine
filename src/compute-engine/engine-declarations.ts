@@ -4240,6 +4240,10 @@ function assignNamedValue(
  *   body, which then reads `a·(t+1)` (`repairProvisionalDependents()`,
  *   called by `_setSymbolValue()`), and the restore of the name does not
  *   undo that rewrite. Declare the name first (`ce.declare('a', 'real')`).
+ *   A stored function that nothing reaches any more (its scope was popped
+ *   and discarded) cannot be rewritten: it stops counting once the garbage
+ *   collector has freed it, so the call throws or not by the time of the
+ *   last collection (`provisional-application.ts`).
  * - The value `undefined` gives the name no stored value while `fn` runs. A
  *   value that an assumption gives (`ce.assume(a = 3)`) still applies.
  *

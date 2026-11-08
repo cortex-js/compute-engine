@@ -440,8 +440,9 @@ describe('definition order does not change semantics', () => {
   });
 
   //
-  // 8/ The registry holds STRONG references to the definitions waiting on a
-  //    name, so a superseded definition must leave it with the record.
+  // 8/ A superseded definition must leave the registry with the record: a
+  //    symbol can still cache it, and a later repair of the name must
+  //    re-derive the installed definition only.
   //
   describe('superseded definitions leave the registry', () => {
     test('only the installed definition waits on the callee', () => {
