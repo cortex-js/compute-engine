@@ -113,6 +113,7 @@ import {
   isBoundPossiblyCollectionTyped,
   isGatedPoint,
   isGatedPointList,
+  isProvablyStringOperand,
   isRuntimePointShaped,
   literalDoubleRoundings,
   literalHasNoDoubleValue,
@@ -373,6 +374,7 @@ import {
   compileComprehension,
   compileForLoop,
   compileLoop,
+  compileRangeIterable,
   lexicalFunctionScope,
   newLocalFunctionScope,
   noteLocalFunction,
@@ -469,6 +471,7 @@ import {
   compiledNodeWhere,
   throwStaticTypeError,
 } from './compile-static-type-error.js';
+import { isLibraryOperator } from './builtin-callback.js';
 
 export function compile(
   expr: Expression | undefined,
@@ -2364,6 +2367,17 @@ export function constantFoldValue(
   // infinite pipeline (`Sum(Take(Map(_ ↦ _^2, 1..∞), 10))`) has its `∞`
   // inside the collection operand, not an indexing set, and still folds.
   if (containsUnboundedBigOp(expr)) return undefined;
+  // A lowered parallel loop or comprehension never folds. The JavaScript
+  // entry rewrites `ParallelLoop(body, Element(k, xs))` to `Loop(body,
+  // Element(k, ParallelDomain(xs)))` (`lowerParallelHeads()`), and the
+  // interpreter evaluates that `Loop` as a plain loop: `ParallelDomain`
+  // gives its operand, so the passes draw from the enclosing random frame
+  // and not from their own pass frames (`docs/RANDOMNESS-MODEL.md` §3). A
+  // `WithRandomSeed` frame is pure from the outside, so without this
+  // decline its body folds to the values of the plain loop, which differ
+  // from the interpreter's values of the parallel loop. The compiled code
+  // installs the pass frames (`_SYS.parallelPasses()`).
+  if (expr.has('ParallelDomain')) return undefined;
   // A `Tabulate` with a dimension that is a constant ≤ 0 is left to its
   // compile handler, which declines it (see
   // `isTabulateWithNonPositiveDimension`).
@@ -3912,6 +3926,56 @@ export function compileExpr(
           `with no else there.`
       );
     return h === 'Break' ? 'break' : 'continue';
+  }
+
+  // The `parallel for` heads and `+=` reach this point on every target but
+  // JavaScript, which lowers them first (`lowerParallelHeads()`,
+  // `parallel-lowering.ts`). Each pass of a parallel loop draws from its own
+  // random frame, which only the JavaScript runtime installs, so a sequential
+  // loop here would give other random values than the interpreter.
+  // On JavaScript, a head that reaches this point is in a part of the
+  // expression that the lowering did not visit. A call of a user function
+  // with one of these names (`function AddTo(a, b) { a * b }`) is not the
+  // construct, and compiles as a call of that function.
+  if (
+    (h === 'ParallelLoop' || h === 'ParallelComprehension' || h === 'AddTo') &&
+    (node === undefined || isLibraryOperator(node, h))
+  ) {
+    const construct =
+      h === 'AddTo' ? '`+=` assignment' : '`parallel for` construct';
+    throw new Error(
+      target.language === 'javascript'
+        ? `Could not compile \`${h}\`: the ${construct} is in a part of the ` +
+            `expression that was not lowered to the forms the JavaScript ` +
+            `target compiles (\`lowerParallelHeads()\`). The interpreter ` +
+            `evaluates it instead.`
+        : `Could not compile \`${h}\`: the ${construct} compiles only to the ` +
+            `JavaScript target, not to '${target.language ?? '?'}'. ` +
+            `The interpreter evaluates it instead.`
+    );
+  }
+
+  // `ParallelDomain(xs)`, the domain of a lowered parallel loop: the elements
+  // of `xs`, each pass in its own random frame (`_SYS.parallelPasses()`,
+  // `javascript-runtime.ts`).
+  if (h === 'ParallelDomain') {
+    if (target.language !== 'javascript')
+      throw new Error(
+        `Could not compile \`ParallelDomain\` on target '${target.language ?? '?'}'.`
+      );
+    const domain = args[0];
+    if (domain === undefined)
+      throw new Error('Could not compile `ParallelDomain`: no domain');
+    // A string domain is segmented first: its elements are its grapheme
+    // clusters, the elements of the interpreter's `BoxedString.each()`
+    // (`_SYS.chars`, as for a sequential loop over a string in
+    // `emitElementLoops()`).
+    const values = isFunction(domain, 'Range')
+      ? compileRangeIterable(domain, target)
+      : isProvablyStringOperand(domain)
+        ? `_SYS.chars(${compileValueOperand(domain, target)})`
+        : compileValueOperand(domain, target);
+    return `_SYS.parallelPasses(${values})`;
   }
 
   if (h === 'Loop') {

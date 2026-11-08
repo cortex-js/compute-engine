@@ -361,7 +361,9 @@ export function isStatementArm(arm: Expression | undefined): boolean {
   }
   return (
     h === 'Assign' ||
+    h === 'AddTo' ||
     h === 'Loop' ||
+    h === 'ParallelLoop' ||
     h === 'Declare' ||
     h === 'Return' ||
     h === 'Break' ||

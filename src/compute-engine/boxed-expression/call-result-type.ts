@@ -1985,9 +1985,15 @@ function literalBodyResultType(
           : describe(expr);
       if (
         expr.operatorDefinition?.scoped ||
-        ['Assign', 'Declare', 'Return', 'Loop', 'Break', 'Continue'].includes(
-          expr.operator
-        )
+        [
+          'Assign',
+          'AddTo',
+          'Declare',
+          'Return',
+          'Loop',
+          'Break',
+          'Continue',
+        ].includes(expr.operator)
       )
         return undefined;
       // A call whose head is a parameter or a local of the literal (a

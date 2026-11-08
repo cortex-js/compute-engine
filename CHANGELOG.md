@@ -38,6 +38,33 @@
   type has the field removed: with `r: record{a: integer, b: string}`, the
   type of `DeleteAt(r, "b")` is `record{a: integer}`. A key that is not a
   string is an error.
+
+- **Epsil: `parallel for` loops, parallel comprehensions and `+=`.**
+  `parallel for k in 1..n { L[c] += 1 }` runs its passes in an order that is
+  not specified (the MathJSON `ParallelLoop`), and `[f(k) parallel for k in
+  1..n]` is the list of a comprehension whose passes are independent
+  (`ParallelComprehension`). The body can change a variable declared outside
+  the loop only with `+=`, and can have no effect other than `random`; a read
+  of such an accumulator in a pass gives an unspecified value. `epsil check`
+  reports each rule with its own code (`parallel-outer-write`,
+  `parallel-accumulator-read`, `parallel-effect`, `parallel-exit`,
+  `parallel-comprehension-write`, `parallel-clause-not-first`). `epsil check`
+  reports a read of an accumulator written by name in the body; a read by
+  another route (a function that the body calls, `parse("s")`, a function of
+  the host) is not reported. The interpreter and the JavaScript target give
+  such a read the value that the passes, run in order, give; a target that
+  runs the passes in parallel declines a pass that reads an accumulator.
+  Inside `WithRandomSeed`, the loop consumes one
+  draw index of the frame and each pass draws from its own frame, so the
+  direct draws of a pass do not depend on how the passes are split
+  (`docs/RANDOMNESS-MODEL.md` §3); the draws of a lazy view inside a pass,
+  such as `[random() for j in 1..2]`, are unspecified. The interpreter runs the passes in order,
+  and the JavaScript target compiles them with the same values; the other
+  targets decline them. `s += e` (`AddTo`) is new everywhere: it is
+  `s = s + e`, and `L[i] += e` is `L[i] = L[i] + e`, with each position
+  evaluated once. `parallel` is now a contextual keyword: it is read as one
+  only before `for`, so a program that uses `parallel` as a name keeps its
+  meaning.
 - **`Module` reads the library definition of a name that a local definition
   shadows.** `["Module", "Pi"]` is the constant π of the standard library,
   also in a scope where `Pi` is declared and assigned `3`, and

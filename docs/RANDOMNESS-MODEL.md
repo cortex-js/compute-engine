@@ -240,6 +240,57 @@ Worked vectors:
 | `42` | `0x40450000` | `0x00000000` |
 | `"cell-a7"` | `0x1163A2F4` | `0x96EAC847` |
 
+### Pass frames of a parallel loop — normative
+
+A parallel loop or comprehension (the Epsil `parallel for`, the MathJSON
+`ParallelLoop` and `ParallelComprehension`) runs each pass in its own frame, so
+the values do not depend on the order of the passes or on how they are split
+between workers. The pass `k` is the position of its element in the domain of
+the first clause, from 1. Inside an enclosing frame `(seedLo, seedHi, next)`:
+
+1. The domain of the first clause is evaluated and walked to the end, with its
+   own draws from the enclosing frame.
+2. The loop consumes exactly **one** index `b = next` of the enclosing frame.
+3. Its base words are `(u0, u2)`, where
+   `(u0, u1, u2) = pcg3d(seedLo, seedHi, b)`.
+4. Pass `k` draws from the frame seeded by
+   `(v0, v1)`, where `(v0, v1, v2) = pcg3d(u0, u2, k)`, with its counter
+   starting at 0.
+
+The base takes `u2`, which neither presentation of §4 nor a derived sub-stream
+(§7) uses, so a pass frame does not repeat the seed words of a draw or of a
+sub-stream of the same frame. PCG3D decorrelates adjacent inputs, so the frames
+of adjacent passes give unrelated streams. Outside a frame, the draws of the
+passes are live, as every unframed draw is, and the loop consumes nothing.
+
+The frame of a pass applies to its **direct** draws: a `random()` that the pass
+evaluates, as in `s += random()` or `[random(), random()]`. The draws of a
+**lazy view** that draws inside a pass are not specified: a comprehension
+(`sum([random() for j in 1..2])`, `[j for j in 1..10 if random() < 0.5]`), a
+`Map` with a random callback, held in the body, in a `let`, in a function
+literal or reached through a variable. The reason: the passes evaluate the same
+boxed body, and the caches of a view are per instance (§6, "One instance, one
+draw set"), so the interpreter can give one pass the draws that the view made
+in another pass, and its values can differ from those of compiled code. An
+element of a parallel comprehension that is a lazy view stays a view. To get
+draws of each pass, draw directly: build the list as a list literal
+(`[random(), random()]`) or with a loop in the pass
+(`do { let v = []; for j in 1..2 { v = append(v, random()) }; v }`). A view
+filled before the loop keeps its elements in every pass.
+
+Worked vectors (`beginParallelLoop` and `parallelPassFrame`, `numerics/random.ts`):
+
+| Enclosing frame | `b` | `(u0, u2)` | `k` | pass seed `(v0, v1)` | first draw |
+|---|---|---|---|---|---|
+| seed `42` | 0 | `(0xBC9A5701, 0x1D9BFDA6)` | 1 | `(0x99119553, 0x91A7215A)` | `0.4704818508978077` |
+| seed `42` | 0 | `(0xBC9A5701, 0x1D9BFDA6)` | 2 | `(0xA189BD03, 0x517DFBF9)` | `0.9950572333920026` |
+| seed `"cell-a7"` | 5 | `(0xC91C5DFD, 0x44A48E57)` | 1 | `(0x98FBAC7B, 0xEC7C13FC)` | |
+
+The interpreter (`parallelPassValues()`, `library/control-structures.ts`) and
+the compiled JavaScript (`_SYS.parallelPasses()`, `javascript-runtime.ts`)
+apply these steps in the same order, so their direct draws are equal. A shader
+kernel computes step 4 from the base words with two PCG3D calls.
+
 ## 4. The stream — PCG3D
 
 > The *n*-th draw within a frame is **`hash(seed, n)`** — a pure function of the
@@ -381,6 +432,11 @@ rule:
   branch runs, and short-circuiting `And`/`Or` likewise.
 - `Map` and comprehension bodies consume indices in iteration order: element
   *i*'s draws follow element *i−1*'s.
+- A parallel loop or comprehension (`parallel for`) is the exception: after its
+  domain is evaluated, it consumes exactly one index of the enclosing frame,
+  and each pass draws from its own frame (§3, "Pass frames of a parallel
+  loop"). The draws of a pass do not move the counter of the enclosing frame
+  or of another pass, so the values do not depend on the order of the passes.
 - Compiled code keeps the order of the arguments. When a lowering must bind an
   impure operand to a temporary (because the operand appears more than once in
   the emitted code), it binds every impure operand of that node, in argument
@@ -761,6 +817,8 @@ fragment, seeded from the fragment's own coordinates or index (§8).
 | `withRandomSeedFrame` | `src/compute-engine/boxed-expression/utils.ts` |
 | the frame slot | `src/compute-engine/engine-runtime-state.ts`; `ce._randomFrame`, `ce._random()` in `src/compute-engine/index.ts` |
 | `WithRandomSeed`, `Random`, `RandomChoice`, tombstones | `src/compute-engine/library/core.ts` |
+| `beginParallelLoop`, `parallelPassFrame` (pass frames) | `src/compute-engine/numerics/random.ts` |
+| the pass frames of `ParallelLoop` / `ParallelComprehension` | `parallelPassValues()` in `src/compute-engine/library/control-structures.ts`; `_SYS.parallelPasses()` in `src/compute-engine/compilation/javascript-runtime.ts` |
 | `RandomShuffle` | `src/compute-engine/library/collections.ts` |
 | `RandomSample` | `src/compute-engine/library/statistics.ts` |
 | shared `k` validation | `src/compute-engine/library/random-utils.ts` |

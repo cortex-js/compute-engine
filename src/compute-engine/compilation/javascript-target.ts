@@ -575,6 +575,7 @@ import {
 } from './compile-admission.js';
 import { isNameLocallyBoundByCompilation } from './compile-real-analysis.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import { lowerParallelHeads } from './parallel-lowering.js';
 import { kindEntryCheck } from './kind-lowering.js';
 import { withShadowingCallsRenamed } from './shadowing-calls.js';
 import { compileJetDerivative, jetDerivativeTarget } from './jet-derivative.js';
@@ -11308,6 +11309,11 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     options: CompilationOptions<Expression>,
     batch?: BatchCompileState
   ): { expr: Expression; target: CompileTarget<Expression> } {
+    // The `parallel for` heads and `+=` become the `Loop`, `Comprehension`
+    // and `Assign` forms this target compiles, with the pass frames of a
+    // parallel loop in its domain (`parallel-lowering.ts`). First, so the
+    // rewrites below see only those forms.
+    expr = lowerParallelHeads(expr);
     // Compiled code is radian-based: reproduce the engine's `angularUnit`
     // semantics (scaled trig args, scaled inverse-trig results) so compiled
     // output agrees with evaluate().

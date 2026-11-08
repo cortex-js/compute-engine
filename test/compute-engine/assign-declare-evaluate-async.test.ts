@@ -78,6 +78,58 @@ describe('Assign and Declare on the asynchronous route', () => {
     }
   );
 
+  test.each([
+    [
+      'a variable',
+      ['Block', declare('s', 1), ['AddTo', 's', ['Late', 4]], 's'],
+      6,
+    ],
+    [
+      'an element of a list',
+      [
+        'Block',
+        declare('L', ['List', 1, 2]),
+        ['AddTo', ['At', 'L', 2], ['Late', 4]],
+        'L',
+      ],
+      ['List', 1, 7],
+    ],
+    // The increment writes the target before it awaits: the target was read
+    // before the increment, so the write is not seen, as on the synchronous
+    // route with an increment that does not await (`s` is 1 + 2, and `L` is
+    // the list read before the increment, with 2 + 2 at position 2).
+    [
+      'a variable that the increment writes before it awaits',
+      [
+        'Block',
+        declare('s', 1),
+        ['AddTo', 's', ['Block', ['Assign', 's', 10], ['Late', 1]]],
+        's',
+      ],
+      3,
+    ],
+    [
+      'an element of a list that the increment writes before it awaits',
+      [
+        'Block',
+        declare('L', ['List', 1, 2]),
+        [
+          'AddTo',
+          ['At', 'L', 2],
+          ['Block', ['Assign', 'L', ['List', 10, 20]], ['Late', 1]],
+        ],
+        'L',
+      ],
+      ['List', 1, 4],
+    ],
+  ])('AddTo of %s awaits its increment', async (_, program, expected) => {
+    // `s += Late(4)` gives the value of `s = s + Late(4)`, and the read of
+    // the target comes before the increment on both routes.
+    const ce = lateEngine();
+    const value = await ce.box(program as never).evaluateAsync();
+    expect(value.json).toEqual(expected);
+  });
+
   test('a field assignment awaits its value', async () => {
     const ce = lateEngine();
     const r = await executeEpsilAsync(

@@ -60,11 +60,28 @@ lets a program change a `for` into a `parallel for` by adding the keyword.
    accumulator. The body cannot read an accumulator: `L[c] += L[d]` and
    `if s > 3 { … }` are errors. This is the rule of the Dex language, and it
    makes the result the same for any order of the passes.
+   **How rule 2 is enforced (decided by the user on 2026-11-07).** A
+   static check cannot be sound: a pass can reach a variable through a
+   called function, `parse("s")`, `symbol("big")` given to `count`, a
+   library higher-order function, or host code. Two static designs (one
+   that followed called functions by name, then an allow-list of calls)
+   were reviewed and each had such holes; a run-time guard in the
+   interpreter was reviewed next, and it had holes and false errors in the
+   engine's caches, closures and analyses. So a read of an accumulator in a
+   pass has an **unspecified value**, as a data race has in OpenMP. `epsil
+   check` reports a read written by name in the pass. The interpreter and
+   the JavaScript target give the value of the passes in order. A target
+   that really runs the passes in parallel (the WGSL compute shader of
+   step 2, workers later) declines a pass whose code reads an accumulator:
+   its compiler sees every line it emits, so that check is sound.
 3. **Accepted targets of `+=`:** a variable (`s += e`), or an element of a list
    with the index forms that `L[i] = v` accepts (`L[i] += e`).
 4. **Effects.** The inferred effects of the body must be a subset of
    `{random}` (the effect labels of `src/epsil/docs/control-flow.md`). `Print`
-   (`console`), `state` and the others are errors.
+   (`console`), `state` and the others are errors. The check uses the
+   engine's effect inference, so it has the limits of that inference: a
+   function that calls an unannotated parameter is inferred pure
+   (`docs/EFFECTS-MODEL.md`, decision (c)), and CE-1106.
 5. **Control flow.** No `break`, `continue` or `return` leaves the parallel
    loop. An inner loop of the body can use `break` and `continue`.
 6. **Comprehension.** The body of a parallel comprehension writes no outer
@@ -88,6 +105,11 @@ with three differences:
   enclosing seed, `b` and `k` by a fixed function. That function is added to
   §3 of the randomness model, with test vectors. Then the values do not depend
   on how the passes are distributed. Outside a frame, draws are live, as today.
+  This holds for the direct draws of a pass (`s += random()`). The draws of
+  a lazy view that draws inside a pass (`[random() for j in 1..2]`) are
+  unspecified (decided by the user on 2026-11-07): the interpreter caches
+  a view per instance (randomness model §6), and two designs that gave
+  each pass its own cache had holes in other caches of the engine.
 - **Evaluation order is not specified.** The interpreter runs the passes in
   order, and a later version can split them over workers.
 
@@ -138,6 +160,9 @@ the reason:
   declares it `list<integer>`.)
 - a parallel comprehension with an `if` guard (the length of the result is
   not known before the run);
+- a pass whose code, including the user functions it calls, reads an
+  accumulator (§3: the interpreter gives such a read an unspecified value;
+  a parallel run must not give one);
 - everything in the body that `compile(…, { to: 'wgsl' })` declines in a block
   today.
 

@@ -714,7 +714,8 @@ export function documentBindings(
         walkFunction(node, scope);
         return;
 
-      case 'Loop': {
+      case 'Loop':
+      case 'ParallelLoop': {
         // A `for` loop: `Loop(body, Element(pattern, collection))`. The
         // collection is read OUTSIDE the loop's scope; the pattern binds
         // inside it. A `while` lowers to a `Loop` without the `Element`
@@ -737,7 +738,8 @@ export function documentBindings(
         return;
       }
 
-      case 'Comprehension': {
+      case 'Comprehension':
+      case 'ParallelComprehension': {
         // `[body for x in xs if cond, y in ys]` → `Comprehension(body,
         // Element(x, xs, cond?), Element(y, ys))`. Each clause's collection
         // is read in the scope the EARLIER clauses built (a later collection

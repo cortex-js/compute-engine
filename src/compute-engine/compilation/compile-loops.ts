@@ -835,7 +835,11 @@ export function compileElementLoops(
 
   if (target.language === 'javascript') {
     for (const binder of binders) {
-      const range = binder.clause.ops[1];
+      // The domain of a lowered parallel loop over a range is
+      // `ParallelDomain(Range(…))` (`parallel-lowering.ts`): its index has
+      // the integer range of the `Range`.
+      const source = binder.clause.ops[1];
+      const range = isFunction(source, 'ParallelDomain') ? source.op1 : source;
       if (
         binder.names.length !== 1 ||
         binders.filter((b) => b.names.includes(binder.names[0])).length !== 1 ||
@@ -980,17 +984,51 @@ export function emitElementLoops(
     // then count as two nested loops count.
     inner = passCount + inner;
     let collection: string;
+    // The domain of a lowered parallel loop over a range,
+    // `ParallelDomain(Range(…))` (`parallel-lowering.ts`), keeps the counted
+    // loop of a `Range`, with the random frame of pass `k` installed at the
+    // start of pass `k` (`_SYS.parallelPassesBegin`, `javascript-runtime.ts`),
+    // as `_SYS.parallelPasses` does for another domain. The bounds must make
+    // no draw: the loop consumes its index of the frame before the counted
+    // loop evaluates them, and the interpreter after.
+    const parallelRange =
+      isFunction(collExpr, 'ParallelDomain') &&
+      isFunction(collExpr.op1, 'Range') &&
+      collExpr.op1.isPure
+        ? collExpr.op1
+        : undefined;
+    const countedRange = parallelRange ?? collExpr;
     if (
       target.language === 'javascript' &&
-      isFunction(collExpr, 'Range') &&
+      isFunction(countedRange, 'Range') &&
       // The iterable lowering uses the real parts of complex constants.
-      !collExpr.ops.some((op) => isNumber(op) && op.isComplex) &&
+      !countedRange.ops.some((op) => isNumber(op) && op.isComplex) &&
       binders[i].names.length === 1 &&
-      !mentionsExcludedName(collExpr, new Set(binders[i].names), undefined) &&
+      !mentionsExcludedName(
+        countedRange,
+        new Set(binders[i].names),
+        undefined
+      ) &&
       target.cse?.harvestOptions !== undefined &&
-      !isCallerMapped(collExpr, target.cse.harvestOptions)
+      !isCallerMapped(countedRange, target.cse.harvestOptions)
     ) {
-      inner = compileCountedRange(collExpr, name, inner, bodyTarget);
+      if (parallelRange === undefined) {
+        inner = compileCountedRange(countedRange, name, inner, bodyTarget);
+        continue;
+      }
+      // With no active frame, `state` is `undefined` and a pass costs one
+      // test.
+      const state = tempVar(bodyTarget);
+      const pass = tempVar(bodyTarget);
+      const loop = compileCountedRange(
+        countedRange,
+        name,
+        `if (${state} !== undefined) _SYS.parallelPassesFrame(${state}, ++${pass}); ${inner}`,
+        bodyTarget
+      );
+      inner =
+        `{ const ${state} = _SYS.parallelPassesBegin(); let ${pass} = 0; ` +
+        `try { ${loop} } finally { _SYS.parallelPassesEnd(${state}); } }`;
       continue;
     }
     if (isFunction(collExpr, 'Range'))

@@ -82,7 +82,7 @@ them as names.
 `internal`, `import`, `iterator`, `label`, `lazy`, `local`, `loop`, `match`,
 `module`, `mutable`,
 `namespace`, `NaN`, `native`, `new`, `not`, `of`, `on`, `oo`, `optional`, `or`, `package`,
-`parallel`, `private`, `protected`, `protocol`, `public`, `repeat`, `return`,
+`private`, `protected`, `protocol`, `public`, `repeat`, `return`,
 `self`, `set`, `static`, `super`, `switch`, `this`, `throw`, `to`, `true`,
 `try`, `union`, `until`, `using`, `var`, `variant`, `warn`, `when`,
 `while`, `with`, `xor`, `yield`.

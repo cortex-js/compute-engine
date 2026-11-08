@@ -38,6 +38,7 @@ import { HARD_RESERVED_WORDS } from './reserved-words.js';
  * `Alternatives`, `Rule`).
  */
 export const GRAMMAR_CONSTRUCTS: ReadonlySet<string> = new Set([
+  'AddTo',
   'Alternatives',
   'Annotated',
   'At',
@@ -69,6 +70,8 @@ export const GRAMMAR_CONSTRUCTS: ReadonlySet<string> = new Set([
   'Optional',
   'OverParen',
   'Pair',
+  'ParallelComprehension',
+  'ParallelLoop',
   'PreDecrement',
   'PreIncrement',
   'ReleaseHold',

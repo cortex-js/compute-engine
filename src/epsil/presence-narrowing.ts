@@ -117,6 +117,14 @@ function assignedNames(stmt: MathJsonExpression, into: Set<string>): void {
     const target = symbol(operands(stmt)[0]);
     if (target !== null) into.add(target);
   }
+  // `s += e` rebinds `s`, and `L[i] += e` rebinds `L`.
+  if (h === 'AddTo') {
+    const target = operands(stmt)[0];
+    const root =
+      operator(target) === 'At' ? operands(target)[0] : (target ?? null);
+    const name = root === undefined ? null : symbol(root);
+    if (name !== null) into.add(name);
+  }
   for (const op of operands(stmt)) assignedNames(op, into);
 }
 
@@ -231,7 +239,15 @@ function rewrite(
   // is never wrapped. The right side is evaluated before the write, so the
   // proofs still hold in it (`v := f(v)`); the Block rule ends the proof
   // after the statement.
-  if (h === 'Assign' || h === 'Declare' || h === 'Let' || h === 'Const') {
+  // The target of `AddTo` (`s` or `L[i]`) is a binding position too: the
+  // `AddTo` handler needs it as written.
+  if (
+    h === 'Assign' ||
+    h === 'AddTo' ||
+    h === 'Declare' ||
+    h === 'Let' ||
+    h === 'Const'
+  ) {
     const [target, ...rest] = ops;
     if (target === undefined) return node;
     return withOperands(node, [
@@ -250,9 +266,16 @@ function rewrite(
   // reassignment anywhere in it invalidates, on the next iteration, the
   // proof for the statements before it. So every name the node assigns
   // leaves the proof set before the node is entered.
-  if (h === 'Loop' || h === 'Comprehension' || h === 'Sum' || h === 'Product') {
+  if (
+    h === 'Loop' ||
+    h === 'Comprehension' ||
+    h === 'ParallelLoop' ||
+    h === 'ParallelComprehension' ||
+    h === 'Sum' ||
+    h === 'Product'
+  ) {
     let known: ReadonlySet<string> = present;
-    if (h === 'Loop' || h === 'Comprehension') {
+    if (h !== 'Sum' && h !== 'Product') {
       const assigned = new Set<string>();
       assignedNames(node, assigned);
       for (const name of assigned) known = without(known, name);

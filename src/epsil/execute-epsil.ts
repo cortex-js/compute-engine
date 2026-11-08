@@ -2077,7 +2077,10 @@ function nestedStatementSites(
     // variable was made by an earlier statement, which reports it.
     if (
       head === 'Element' &&
-      (parent === 'Loop' || parent === 'Comprehension') &&
+      (parent === 'Loop' ||
+        parent === 'Comprehension' ||
+        parent === 'ParallelLoop' ||
+        parent === 'ParallelComprehension') &&
       index > 0
     ) {
       const coll = ops[1];
@@ -2124,7 +2127,7 @@ function nestedStatementSites(
       // the `Match` there, so the body's last statement is marked
       // `discarded` itself.
       const opLoopBody =
-        head === 'Loop'
+        head === 'Loop' || head === 'ParallelLoop'
           ? j === 0
           : head === 'Match'
             ? loopBody && j > 0

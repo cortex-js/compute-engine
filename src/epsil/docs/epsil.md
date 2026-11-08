@@ -201,7 +201,9 @@ names, so that a program keeps working when the language does claim them.
 - **Modules and imports** — `import`, `export`, `module`.
 - **Error-handling keywords** — `try`, `catch`, `throw`. In Epsil, errors are
   ordinary values, so these are not needed for the current design.
-- **Concurrency** — `async`, `await`, `parallel`.
+- **Concurrency** — `async`, `await`. (`parallel` is in use: it is the
+  contextual keyword of `parallel for`, see
+  [Control Flow](/epsil/control-flow#parallel-loops).)
 - **Macros** and compile-time metaprogramming.
 
 A word the grammar DOES claim — a literal or an active keyword such as `match`,

@@ -127,6 +127,9 @@ export const KEYWORDS_LIST = [
   'where',
   'readonly',
   'readwrite',
+  // `parallel` heads the `parallel for` loop and comprehension clause; it is
+  // an identifier everywhere else, like `type`.
+  'parallel',
   // ACTIVE_WORDS — the heads and word operators the parser claims.
   'break',
   'const',

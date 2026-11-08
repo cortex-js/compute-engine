@@ -1052,6 +1052,128 @@ optionally with an `if` guard:
 
 See [Comprehensions](/epsil/syntax/#comprehensions).
 
+### Parallel loops {#parallel-loops}
+
+`parallel for x in xs { … }` runs the body once for each element, as `for`
+does, but the passes are independent: they can run in any order, and a later
+version of the engine can split them between workers. The value is `nothing`.
+
+```epsil-live
+let L = [0, 0, 0]
+parallel for k in 1..6 { L[k % 3 + 1] += k }
+L
+// ➔ [9, 5, 7]
+```
+
+To make the result the same for any order of the passes, the body follows
+these rules. `epsil check` reports each one with its own code:
+
+- The body can declare and change its own locals. It can change a variable
+  declared outside the loop only with
+  [`+=`](/epsil/declarations/#compound-assignment): `s += e` or `L[i] += e`.
+  Any other write, such as `L[c] = v` or `L = replaceAt(L, c, v)`, is
+  `parallel-outer-write`.
+- A variable that the body changes with `+=` is an **accumulator**. Each pass
+  adds its contributions, and the value after the loop is the value before it
+  plus all the contributions. With exact numbers the result does not depend
+  on the order of the passes; with machine floating-point numbers, it can
+  differ in rounding. A read of an accumulator in a pass gives an
+  unspecified value. `epsil check` reports a read written by name in the
+  body, also in a function literal written in the body (`L[c] += L[d]`,
+  `if s > 3 { … }`), as `parallel-accumulator-read`. A read by another
+  route, such as a function that the body calls, `parse("s")` or a function
+  of the host, is not reported, and its value is unspecified too. The
+  interpreter and the JavaScript target run the passes in order, and such a
+  read gives the value that the earlier passes gave. A target that runs the
+  passes in parallel declines a pass that reads an accumulator (see the
+  examples after this list). A loop with no accumulator, and a parallel
+  comprehension, can call any function.
+- The effects of the body can only be `random` (see
+  [effect specifiers](#effect-specifiers)): a `print` in the body is
+  `parallel-effect`. The effects are the ones that the engine infers, also
+  for the functions that the body calls: a function that the program defines
+  has the effects of its body, and a loop variable or a parameter whose type
+  is a function type has the effects of that type. So
+  `parallel for f in [() => print(1)] { f() }` is `parallel-effect`. One case
+  is not seen: a call of a function value whose type is not known, such as a
+  function that an unannotated parameter holds, is inferred `pure`, whatever
+  function it holds. So `function run(fs) { parallel for f in fs { f() } }`
+  is accepted. Annotate the parameter with the effects that it admits
+  (`function run(fs: list<() any -> any>) { … }`) to have the loop refused.
+  A function that the program defines after the loop is not seen either.
+- No `break`, `continue` or `return` leaves the loop (`parallel-exit`). An
+  inner loop of the body can use `break` and `continue`.
+
+The domain `xs` is read to its end before the first pass, and it is not a
+part of the passes: it can read an accumulator, and a `+=` in it does not make
+its target an accumulator. A domain that is computed as it is read, such as
+`map((x) => s, 1..3)`, gives the values of before the loop.
+
+A read of an accumulator written by name is reported by `epsil check`:
+
+```epsil
+let s = 0
+parallel for k in 1..3 { if s < 2 { s += k } }   // parallel-accumulator-read
+```
+
+A read through a function is not reported, and its value is unspecified.
+Today the interpreter and the JavaScript target give 11 for `s` here (the
+passes add 1, 3 and 7), but this value is not guaranteed:
+
+```epsil
+let s = 0
+function total() { s }
+parallel for k in 1..3 { s += total() + k }   // not reported
+s                                             // unspecified (11 today)
+```
+
+To use values that the passes need, compute them before the loop:
+
+```epsil-live
+let s = 0
+let T = [k^2 for k in 1..3]
+parallel for k in 1..3 { s += T[k] }
+s
+// ➔ 14
+```
+
+Inside `WithRandomSeed`, each pass draws from its own random frame, derived
+from the seed, the position of the pass in the domain, and one draw of the
+enclosing frame. So the values of a pass do not depend on the other passes:
+the third element is the same in these two lists.
+
+```epsil
+WithRandomSeed(7, [random() parallel for k in 1..3])
+WithRandomSeed(7, [random() parallel for k in 1..5])
+```
+
+This applies to the direct draws of a pass, a `random()` that the pass
+evaluates. The draws of a lazy view inside a pass, such as
+`sum([random() for j in 1..2])`, are not specified, because the caches of a
+view are shared by the passes; to get the draws of each pass, build the list
+directly, as `[random(), random()]` or with a loop that appends.
+
+The **parallel comprehension** puts `parallel` before the first `for` of a
+comprehension. It is the list of the comprehension, in the order of the
+domain, and its passes follow the same rules; its body changes no variable
+declared outside it, also with `+=` (`parallel-comprehension-write`):
+
+```epsil-live
+[k^2 parallel for k in 1..4]
+// ➔ [1, 4, 9, 16]
+```
+
+Only the first clause can be `parallel` (`parallel-clause-not-first`); the
+other clauses run in order inside each pass. Unlike a plain comprehension,
+which is a lazy collection, a parallel comprehension is evaluated at once.
+
+`parallel` is a contextual keyword: it is read as a keyword only before `for`,
+and it stays an identifier everywhere else. The statement lowers to
+`["ParallelLoop", body, ["Element", "x", "xs"]]`, and the comprehension to
+`["ParallelComprehension", body, …clauses]`. Compiled to JavaScript, the
+passes run in order, with the same direct draws as the interpreter; the other
+compile targets do not compile them yet.
+
 ## Pipelines
 
 `x |> f` means exactly `f(x)`. For a single call that is a wash — `sqrt(2)`

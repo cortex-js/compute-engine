@@ -158,6 +158,21 @@ export const OPERATORS: OperatorDef[] = [
     assoc: 'right',
     relational: true,
   },
+  // The compound assignment `t += e` → `["AddTo", t, e]`. Like `:=`, it
+  // assigns in every position. The target is a variable or a list element
+  // (`L[i] += e`); the parser reports any other target (`add-to-target`).
+  // Outside a `parallel for` loop it is `t = t + e`; inside one, it adds a
+  // contribution to an accumulator (`docs/EPSIL-LANGUAGE-MODEL.md`). Before
+  // this row, the lexer already read `+=` as one token that no operator
+  // claimed, so no program that parsed before changes meaning.
+  {
+    name: 'AddTo',
+    symbol: '+=',
+    precedence: 10,
+    kind: 'infix',
+    assoc: 'right',
+    relational: true,
+  },
   // Anonymous-function (mapsto) arrow `x => expr`. Maximal-munches as one
   // OPERATOR token, distinct from `->` (KeyValuePair, which also writes
   // function TYPES) and `>=`. It binds very loosely (just above `Assign`, so

@@ -231,6 +231,38 @@ describe('Epsil CLI check command', () => {
     });
   });
 
+  test('the message of parallel-accumulator-read', async () => {
+    const { io, stdout } = makeIo();
+    await main(
+      ['check', '-e', 'let s = 0\nparallel for k in 1..3 { s += s + k }', '--json'],
+      io
+    );
+    const envelope = JSON.parse(stdout());
+    expect(
+      envelope.diagnostics
+        .filter((d: { code: string }) => d.code === 'parallel-accumulator-read')
+        .map((d: { message: string }) => d.message)
+    ).toEqual([
+      'The body of a "parallel for" loop changes "s" with "+=", so it cannot read "s": its value depends on the order of the passes',
+    ]);
+  });
+
+  // A read of an accumulator through a called function is not reported by
+  // `check`: its value is unspecified.
+  test('a call of a function of the program in a parallel loop has no diagnostic', async () => {
+    const { io, stdout } = makeIo();
+    await main(
+      [
+        'check',
+        '-e',
+        'let s = 0\nfunction total() { s }\nparallel for k in 1..3 { s += total() + k }',
+        '--json',
+      ],
+      io
+    );
+    expect(JSON.parse(stdout()).diagnostics).toEqual([]);
+  });
+
   test('reports error diagnostics in the JSON envelope', async () => {
     const { io, stdout } = makeIo();
     expect(await main(['check', '-e', '1 @ 2', '--json'], io)).toBe(1);

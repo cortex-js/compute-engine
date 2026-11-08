@@ -142,7 +142,7 @@ _dictionary_ → **`{`** \[(_key-value-pair_)#**`,`**\] **`}`** | **`{->}`** | *
 
 _key-value-pair_ → _expression_ **`->`** _expression_
 
-_comprehension-clauses_ → **`for`** (_comprehension-clause_)#**`,`**
+_comprehension-clauses_ → \[**`parallel`**\] **`for`** (_comprehension-clause_)#**`,`**
 
 _comprehension-clause_ → (_symbol_ | _tuple-pattern_) **`in`** _expression_ \[**`if`** _expression_\]
 
@@ -557,6 +557,11 @@ The lowering is the engine's `Comprehension` with one `Element` clause per
 {x for x in xs}          // ➔ ["SetFrom", ["Comprehension", "x", ["Element", "x", "xs"]]]
 {k -> v for (k, v) in ps} // ➔ ["DictionaryFrom", ["Comprehension", ["Tuple", "k", "v"], ["Element", ["Tuple", "k", "v"], "ps"]]]
 ```
+
+With `parallel` before the first `for`, the comprehension is a **parallel
+comprehension** (`[f(k) parallel for k in 1..n]`, lowered to
+`ParallelComprehension`): its passes can run in any order. See
+[Parallel loops](/epsil/control-flow/#parallel-loops).
 
 Trailing commas are allowed in every collection form (lists, sets, tuples,
 dictionaries, and call/index argument lists) — friendly to notebook editing

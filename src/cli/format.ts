@@ -525,6 +525,20 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `":=" in a condition assigns, and the assigned value becomes the test; use "==" to compare, or assign on its own line first`;
     case 'chained-assignment':
       return `An assignment is a statement, not a value, so assignments do not chain; write two statements, "b := 5; a := b", or "a := (b == 5)" if the comparison was meant`;
+    case 'add-to-target':
+      return `The target of "+=" must be a variable or a list element at integer positions: "s += e" or "L[i] += e"`;
+    case 'parallel-clause-not-first':
+      return `Only the first clause of a comprehension can be "parallel": the other clauses run in order inside each pass of the first one`;
+    case 'parallel-outer-write':
+      return `The body of a "parallel for" loop can change "${args[0]}", which is declared outside the loop, only with "+=": the passes can run in any order`;
+    case 'parallel-accumulator-read':
+      return `The body of a "parallel for" loop changes "${args[0]}" with "+=", so it cannot read "${args[0]}": its value depends on the order of the passes`;
+    case 'parallel-effect':
+      return `The body of a parallel loop can have only the "random" effect, and this body has: ${args[0]}`;
+    case 'parallel-exit':
+      return `"${args[0]}" cannot leave a parallel loop; an inner loop of the body can use "break" and "continue"`;
+    case 'parallel-comprehension-write':
+      return `The body of a parallel comprehension cannot change "${args[0]}", which is declared outside it; use a "parallel for" loop with "+=" to add to a variable`;
     case 'parameter-shadows-constant':
       return `The parameter "${args[0]}" shadows the constant of the same name: inside the body, "${args[0]}" is the argument, not the constant. Rename the parameter, or use the constant's value directly`;
     case 'zero-index':

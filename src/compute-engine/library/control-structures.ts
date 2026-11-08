@@ -87,6 +87,8 @@ import {
   isValidType,
 } from '../../common/type/primitive.js';
 import { reduceType } from '../../common/type/reduce.js';
+import { computedEffectsInclude } from '../../common/type/effects.js';
+import { effectsOf } from '../boxed-expression/effects-of.js';
 import {
   cannotHoldAList,
   isSubtype,
@@ -126,6 +128,12 @@ import {
   isErrorTypedWithoutErrorValue,
 } from '../boxed-expression/error-typed-operand.js';
 import { noteFailedWalk } from '../boxed-expression/incomplete-walks.js';
+import {
+  runOperandSteps,
+  runOperandStepsAsync,
+  type OperandSteps,
+} from './operand-steps.js';
+import { beginParallelLoop, parallelPassFrame } from '../numerics/random.js';
 import { unknownCallMayBeRecursive } from '../boxed-expression/declared-parameter-result.js';
 import {
   resolvesToSystemBinding,
@@ -778,6 +786,217 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // comprehension is therefore O(1), rather than materializing its whole
       // domain up front.
       collection: comprehensionCollectionHandlers(),
+    },
+
+    ParallelLoop: {
+      description:
+        'Parallel loop, evaluated **for effect**: ' +
+        '`ParallelLoop(body, Element(x, coll))` evaluates `body` once for ' +
+        'each element of `coll` (a pass), and the passes can run in any ' +
+        'order. The body can change a variable declared outside the loop ' +
+        'only with `AddTo` (an accumulator). A read of an accumulator in a ' +
+        'pass gives an unspecified value. ' +
+        'Inside a `WithRandomSeed` frame, the loop consumes one draw index ' +
+        'and each pass draws from its own frame (`docs/RANDOMNESS-MODEL.md`). ' +
+        'The value is `Nothing`.',
+      lazy: true,
+      // The same operand roles as `Loop`: a statement body and `Element`
+      // clauses whose indices this node binds.
+      operands: operandRolesFrom([STATEMENT_ROLE], CLAUSE_ROLE),
+      // `random`: inside a `WithRandomSeed` frame, the loop consumes one
+      // draw index of the frame, also when its body draws nothing, so the
+      // node is not pure, and a function that holds it is not folded or
+      // removed (`docs/RANDOMNESS-MODEL.md` §3, "Pass frames").
+      signature: '(body:expression, iterators:expression+) random -> any',
+      type: (_ops, context) =>
+        BoxedType.forResult('nothing', context.engine._typeResolver),
+      canonical: (ops, options) =>
+        canonicalLoopLike('ParallelLoop', ops, options),
+      // The interpreter runs the passes in order, as `Loop` does, each in
+      // its own random frame. There is no `evaluateAsync`: a pass frame is
+      // installed in the engine's frame slot while the pass runs, and an
+      // asynchronous run could let another evaluation see it, so the loop
+      // runs synchronously, as `WithRandomSeed` does.
+      //
+      // A read of an accumulator in a pass gives an unspecified value. The
+      // interpreter does not check such a read: it gives the value that the
+      // passes, run in order, give, and the compiled JavaScript does the
+      // same. The static check reports a read written by name in the pass
+      // (`src/epsil/parallel-checks.ts`), and a target that runs the passes
+      // in parallel declines a pass that reads an accumulator.
+      evaluate: (ops, { engine: ce, expression }) => {
+        const nested = enterNestedBodyScopes(expression, {
+          includeRoot: true,
+          save: false,
+        });
+        try {
+          return run(
+            runLoop(ops[0], ops.slice(1), ce, true),
+            ce._timeRemaining,
+            ce._deadlineFrame
+          );
+        } finally {
+          exitNestedBodyScopes(ce, nested);
+        }
+      },
+    },
+
+    ParallelComprehension: {
+      description:
+        'Parallel comprehension: `ParallelComprehension(body, Element(x, ' +
+        'xs), …)` is the list that `Comprehension` with the same operands ' +
+        'gives, but the passes of the first clause can run in any order. ' +
+        'The other clauses run in order inside each pass. The body changes ' +
+        'no variable declared outside it. Inside a `WithRandomSeed` frame, ' +
+        'the comprehension consumes one draw index and each pass draws from ' +
+        'its own frame (`docs/RANDOMNESS-MODEL.md`). Unlike `Comprehension`, ' +
+        'it is evaluated at once to a `List`.',
+      lazy: true,
+      operands: operandRolesFrom([RAW_ROLE], CLAUSE_ROLE),
+      // `random`, as for `ParallelLoop`: the comprehension consumes one draw
+      // index of an enclosing frame.
+      signature: '(body:expression, iterators:expression+) random -> list',
+      type: ([body, ...clauses], context) => {
+        if (!body)
+          return BoxedType.forResult('nothing', context.engine._typeResolver);
+        const elements = bodyTypeWithoutIndexRanges(body, clauses, context);
+        return BoxedType.forResult(
+          { kind: 'list', elements },
+          context.engine._typeResolver
+        );
+      },
+      canonical: (ops, options) =>
+        canonicalLoopLike('ParallelComprehension', ops, options),
+      // Evaluated at once (not a lazy view as `Comprehension` is): the
+      // comprehension consumes its draw index when it is evaluated, and the
+      // pass frames exist only while the passes run. As for `ParallelLoop`,
+      // there is no `evaluateAsync`.
+      evaluate: (_ops, { engine: ce, expression, numericApproximation }) => {
+        if (expression === undefined) return undefined;
+        const state: LoopState = {
+          stopped: false,
+          count: 0,
+          parallel: true,
+        };
+        // The numeric request of `N()` is applied to each element while the
+        // frame of its pass is still installed (`parallelPassValues()`
+        // installs the next frame only when the walk resumes). An element
+        // that is a lazy view (a nested comprehension, a `Map`) stays a
+        // view: its draws are not specified (`docs/RANDOMNESS-MODEL.md` §3,
+        // "Pass frames of a parallel loop").
+        const elements: Expression[] = [];
+        for (const value of comprehensionStream(expression, state))
+          elements.push(numericApproximation ? value.N() : value);
+        if (state.domainError !== undefined) return state.domainError;
+        // A domain that is not a collection is not known to be empty: the
+        // comprehension stays unevaluated, as the count of a `Comprehension`
+        // is not known in that case. Its first clause then holds the value
+        // of its domain, evaluated once: `Block(Random(), xs)` with `xs` a
+        // list with no value stays `xs`, and does not draw again when the
+        // comprehension is evaluated again.
+        if (state.unresolvedDomain === true)
+          return residualParallelComprehension(expression, state.firstDomain);
+        return ce.function('List', elements);
+      },
+    },
+
+    AddTo: {
+      description:
+        'Compound assignment: `AddTo(s, e)` is `Assign(s, Add(s, e))`, and ' +
+        '`AddTo(At(L, i, …), e)` is `Assign(L, ReplaceAt(L, i, …, ' +
+        'Add(At(L, i, …), e)))`, with each position evaluated once, before ' +
+        '`e`. In the body of a `ParallelLoop`, it adds a contribution to an ' +
+        'accumulator, a variable declared outside the loop.',
+      lazy: true,
+      // A write that outlives the application, as `Assign` is.
+      signature: '(expression, any) scope -> any',
+      invokes: false,
+      canonical: (ops, { engine: ce }) => {
+        if (ops.length !== 2) return null;
+        const [target, value] = ops;
+        // The target is a symbol, or an `At` whose list operand is a symbol.
+        // `At` is not canonicalized as a whole: its canonical form could
+        // change the shape (a literal position folded into another head).
+        // The equivalent assignment is canonicalized before the target: the
+        // canonical symbol declares a name that no scope declares, and the
+        // assignment must see that name undeclared to report a first
+        // assignment in a branch (`equivalentAssign()`).
+        //
+        // For the same reason, the first assignment in a branch is checked
+        // on the raw target before the positions and the value are
+        // canonicalized, as the canonical `Assign` checks its target before
+        // its value: `t` in `AddTo(t, t)`, or `L` in
+        // `AddTo(At(L, Length(L)), 1)`, would otherwise be declared by the
+        // canonical value or position, and the check would not see it.
+        const name = isSymbol(target)
+          ? target.symbol
+          : isFunction(target, 'At') && isSymbol(target.op1)
+            ? target.op1.symbol
+            : undefined;
+        if (
+          name !== undefined &&
+          name !== 'Nothing' &&
+          isInBranch() &&
+          !isDeclaredForAssignment(ce, name) &&
+          !ce._isShadowedParameter(name)
+        )
+          return ce.error(['first-assignment-in-branch', name]);
+        if (isFunction(target, 'At') && isSymbol(target.op1)) {
+          const positions = target.ops.slice(1).map((x) => x.canonical);
+          const v = value.canonical;
+          const assign = equivalentAssign(ce, target.op1, positions, v);
+          if (!assign.isValid) return assign;
+          return ce._fn('AddTo', [
+            ce._fn('At', [target.op1.canonical, ...positions]),
+            v,
+          ]);
+        }
+        if (isSymbol(target)) {
+          const v = value.canonical;
+          const assign = equivalentAssign(ce, target, undefined, v);
+          if (!assign.isValid) return assign;
+          return ce._fn('AddTo', [target.canonical, v]);
+        }
+        return null;
+      },
+      evaluate: (ops, { engine: ce }) => evaluateAddTo(ce, ops[0], ops[1]),
+      // The same steps, with each operand evaluated by `evaluateAsync()`, so
+      // that `s += f(x)` awaits an operator that has only an asynchronous
+      // handler, as `s = s + f(x)` does.
+      evaluateAsync: (ops, options) =>
+        runOperandStepsAsync(
+          addToSteps(options.engine, ops[0], ops[1]),
+          options
+        ),
+    },
+
+    // Engine-internal: the domain of the first clause of a parallel loop or
+    // comprehension, after the JavaScript target lowered
+    // `ParallelLoop(body, Element(x, xs))` to `Loop(body, Element(x,
+    // ParallelDomain(xs)))` (`lowerParallelHeads()`,
+    // `compilation/parallel-lowering.ts`). The compiled code iterates it with
+    // the pass frames (`_SYS.parallelPasses()`). Its value is its operand.
+    ParallelDomain: {
+      description:
+        'The domain of the passes of a parallel loop (engine-internal).',
+      // `random`: inside a frame, the loop consumes one draw index of it, so
+      // the node is not pure, and constant folding keeps it (a folded domain
+      // would lose the pass frames).
+      signature: '(collection:any) random -> any',
+      // The type of the operand, except for a string: the compiled domain of
+      // a string is the list of its grapheme clusters (`_SYS.chars`), each a
+      // `character` as in the interpreter, so the loop iterates it as a
+      // list, not as a string.
+      type: ([xs], { engine }) =>
+        BoxedType.forResult(
+          xs !== undefined &&
+            xs.type !== 'never' &&
+            isSubtype(xs.type, 'string')
+            ? 'list<character>'
+            : (xs?.type ?? 'unknown'),
+          engine._typeResolver
+        ),
+      evaluate: ([xs]) => xs,
     },
 
     // `Break`/`Continue` are inert: they have no `evaluate` handler, so they
@@ -5686,6 +5905,8 @@ function bodyTypeWithoutIndexRanges(
 const LOOP_LIKE_BINDERS: ReadonlySet<string> = new Set([
   'Comprehension',
   'Loop',
+  'ParallelComprehension',
+  'ParallelLoop',
   'Sum',
   'Product',
   'Integrate',
@@ -5779,7 +6000,7 @@ function patternBoundNames(d: OperandDescriptor, names: Set<string>): void {
  *   expression is visibly invalid.
  */
 function canonicalLoopLike(
-  head: 'Loop' | 'Comprehension',
+  head: 'Loop' | 'Comprehension' | 'ParallelLoop' | 'ParallelComprehension',
   ops: ReadonlyArray<Expression>,
   options: { engine: ComputeEngine; scope: Scope | undefined }
 ): Expression | null {
@@ -5792,7 +6013,9 @@ function canonicalLoopLike(
   if (iterators.length === 0) {
     // Bare form. `Loop(body)` is a valid infinite imperative loop;
     // `Comprehension(body)` needs at least one Element clause.
-    if (head === 'Comprehension') return null;
+    // The parallel heads need a clause too: their passes are the elements
+    // of the first clause.
+    if (head !== 'Loop') return null;
     return ce._fn('Loop', [canonicalBranch(ce, body)]);
   }
 
@@ -6134,7 +6357,8 @@ function canonicalLoopLike(
   // the term declares its locals also when the `Comprehension` is in a
   // branch, as for the body of a function literal (`enterFunctionBody()`).
   let canonicalBody: Expression;
-  if (head === 'Loop') canonicalBody = canonicalBranch(ce, body);
+  if (head === 'Loop' || head === 'ParallelLoop')
+    canonicalBody = canonicalBranch(ce, body);
   else {
     enterFunctionBody();
     try {
@@ -6149,6 +6373,31 @@ function canonicalLoopLike(
   });
 }
 
+/**
+ * The `ParallelComprehension` `expression` with the domain of its first
+ * clause replaced by `domain`, its value evaluated once, or `expression`
+ * when there is no such value. The local scope of the comprehension is kept,
+ * so its body and clauses keep their bindings.
+ */
+function residualParallelComprehension(
+  expression: Expression,
+  domain: Expression | undefined
+): Expression {
+  if (domain === undefined || !isFunction(expression)) return expression;
+  const [body, first, ...rest] = expression.ops;
+  if (!isFunction(first, 'Element') || first.ops[1] === domain)
+    return expression;
+  const ce = expression.engine;
+  const clause = ce._fn('Element', [
+    first.ops[0],
+    domain,
+    ...first.ops.slice(2),
+  ]);
+  return ce._fn('ParallelComprehension', [body, clause, ...rest], {
+    scope: expression.localScope,
+  });
+}
+
 /** Mutable state shared across the nested-iteration walker. */
 interface LoopState {
   stopped: boolean;
@@ -6159,6 +6408,70 @@ interface LoopState {
    * `Comprehension` records a failed walk with it (`noteFailedWalk()`), so
    * that the error is the value of the whole comprehension. */
   domainError?: Expression;
+  /** For a `ParallelLoop` or a `ParallelComprehension`: the elements of the
+   * first clause are passes, each with its own random frame
+   * (`parallelPassValues()`). */
+  parallel?: boolean;
+  /** True when the domain of a clause did not evaluate to a collection (a
+   * symbol of type `list` with no value, `Range(1, n)` with `n` unknown):
+   * the walk had no element for that clause, but the domain is not known to
+   * be empty. A `ParallelComprehension` then stays unevaluated. */
+  unresolvedDomain?: boolean;
+  /** For a `ParallelComprehension`: the value of the domain of its first
+   * clause, which the walk evaluated once. When the comprehension stays
+   * unevaluated, its first clause holds this value, so that a draw or a
+   * write in the domain is not made a second time when the comprehension
+   * is evaluated again. */
+  firstDomain?: Expression;
+}
+
+/**
+ * The elements of the domain of the first clause of a parallel loop or
+ * comprehension, with the frame of pass `k` (from 1) installed while the
+ * consumer handles element `k`: its guard, its inner clauses and the body
+ * (`docs/RANDOMNESS-MODEL.md` §3, "Pass frames", and §5).
+ *
+ * The domain is walked to the end before the first pass, so a domain whose
+ * elements are computed as they are read (a `Map`, a `Comprehension`) is read
+ * before any pass changes the variables that it reads. A domain whose elements
+ * draw as they are made has then drawn all of them. With no `WithRandomSeed`
+ * frame active, the draws of the passes are live, as every unframed draw is.
+ * Inside a frame, the loop then consumes its one index `b` of the frame. The
+ * compiled code does the same (`_SYS.parallelPasses()`), so the two consume
+ * the same indices.
+ *
+ * The frame of a pass applies to the direct draws of the pass (a `Random()`
+ * that the pass evaluates). The draws of a lazy view in the body (a
+ * comprehension that draws, held in the body, in a `let` or in a function
+ * literal) are not specified: the passes evaluate the same boxed body, and
+ * the caches of a view are per instance, so a pass can read the draws that
+ * the view made in another pass (`docs/RANDOMNESS-MODEL.md` §6, "One
+ * instance, one draw set").
+ *
+ * The enclosing frame is installed again when the walk ends or stops early
+ * (`return()` of this generator, from the `for … of` of the consumer).
+ */
+function* parallelPassValues(
+  ce: ComputeEngine,
+  values: Iterable<Expression>
+): Generator<Expression> {
+  const enclosing = ce._randomFrame;
+  const elements: Expression[] = [];
+  for (const value of values) {
+    elements.push(value);
+    if (elements.length > ce.iterationLimit)
+      throw new CancellationError({ cause: 'iteration-limit-exceeded' });
+  }
+  const base =
+    enclosing === undefined ? undefined : beginParallelLoop(enclosing);
+  try {
+    for (let k = 1; k <= elements.length; k++) {
+      if (base !== undefined) ce._randomFrame = parallelPassFrame(base, k);
+      yield elements[k - 1];
+    }
+  } finally {
+    ce._randomFrame = enclosing;
+  }
 }
 
 /**
@@ -6174,10 +6487,15 @@ interface LoopState {
 function* runLoop(
   body: Expression,
   elements: ReadonlyArray<Expression>,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  /** For a `ParallelLoop`: the elements of the first clause are passes. */
+  parallel?: boolean
 ): Generator<Expression> {
   body ??= ce.Nothing;
-  if (sym(body) === 'Nothing') return ce.Nothing;
+  // A parallel loop with an empty body still walks its domain and consumes
+  // its index of the random frame (`parallelPassValues()`), as the compiled
+  // code does, so the draws after the loop are the same.
+  if (sym(body) === 'Nothing' && parallel !== true) return ce.Nothing;
 
   if (elements.length === 0) {
     // Bare infinite imperative loop.
@@ -6198,7 +6516,11 @@ function* runLoop(
     }
   }
 
-  const state: LoopState = { stopped: false, count: 0 };
+  const state: LoopState = {
+    stopped: false,
+    count: 0,
+    parallel,
+  };
   yield* runNestedElements(body, elements, ce, state, (result) => {
     if (isFunction(result, 'Break')) {
       state.stopped = true;
@@ -6230,6 +6552,217 @@ function* runLoop(
   if (state.domainError !== undefined) return state.domainError;
   if (state.stopped && state.value !== undefined) return state.value;
   return ce.Nothing;
+}
+
+/**
+ * The canonical form of the assignment that `AddTo` stands for:
+ * `Assign(s, Add(s, v))` for a variable `s`, and
+ * `Assign(L, ReplaceAt(L, p…, Add(At(L, p…), v)))` for an element of `L`.
+ *
+ * The canonical `AddTo` keeps its operands and does not run the canonical
+ * handlers of `Add`, `At`, `ReplaceAt` or `Assign`. The equivalent assignment
+ * is canonicalized once, for two reasons:
+ *
+ * - The target receives the type information of its use: the inference that
+ *   the operator signatures write on the symbols, and the assignment evidence
+ *   that the canonical `Assign` records on the target
+ *   (`joinAssignmentEvidence()`, `library/core.ts`). Without it, an untyped
+ *   parameter `L` of `function step(L, n) { for k in 1..n { L[k] += 1 }; L }`
+ *   stayed `unknown`, and a call with a list argument was applied to each
+ *   element of the list.
+ * - The caller gets the static errors of the long form. When the result is
+ *   not valid, the canonical `AddTo` is that result, so `t += e` has the
+ *   errors of `t = t + e`: a first assignment of an undeclared `t` in a
+ *   branch or a loop body (`first-assignment-in-branch`), a value whose type
+ *   the local does not accept, and an invalid sum (`s += "a"` with `s` a
+ *   number).
+ *
+ * `target` is the symbol as it was written, not canonical. The value of the
+ * assignment is built without canonicalization, so the canonical `Assign`
+ * runs its checks of the target first, as for `t = t + e`: a canonical
+ * symbol would declare a name that no scope declares, and the first
+ * assignment would not be reported. The positions and `value` are already
+ * canonical, so nothing is canonicalized a second time.
+ */
+function equivalentAssign(
+  ce: ComputeEngine,
+  target: Expression,
+  positions: ReadonlyArray<Expression> | undefined,
+  value: Expression
+): Expression {
+  const raw = (h: string, ops: Expression[]): Expression =>
+    ce._fn(h, ops, { canonical: false });
+  if (positions === undefined)
+    return ce.function('Assign', [target, raw('Add', [target, value])]);
+  return ce.function('Assign', [
+    target,
+    raw('ReplaceAt', [
+      target,
+      ...positions,
+      raw('Add', [raw('At', [target, ...positions]), value]),
+    ]),
+  ]);
+}
+
+/**
+ * Evaluate `AddTo(target, value)`. The positions of an `At` target are
+ * evaluated once, then the current value of the target (`s`, or the element
+ * `At(L, p…)`) is read, then the value is evaluated, as in `s = s + v`, where
+ * `s` is read before `v`: so `s += do { s = 10; 2 }` with `s = 1` gives 3, as
+ * the compiled form does (`parallel-lowering.ts`). Then the assignment
+ * `Assign(s, Add(s₀, v))` or `Assign(L, ReplaceAt(L, p…, Add(e₀, v)))`, with
+ * `s₀` and `e₀` the values read before `v`, is evaluated with those values.
+ * So a position with an effect (`L[random(1..9)] += 1`) is evaluated once,
+ * and the write is the one that the `Assign` form makes: a write that cannot
+ * give a list keeps the value of the variable (`elementRebindingFailure()`,
+ * in this file).
+ */
+function evaluateAddTo(
+  ce: ComputeEngine,
+  target: Expression | undefined,
+  value: Expression | undefined
+): Expression | undefined {
+  return runOperandSteps(addToSteps(ce, target, value));
+}
+
+/**
+ * The steps of `evaluateAddTo()`, as a generator that yields each expression
+ * to evaluate (`operand-steps.ts`). The synchronous handler evaluates them
+ * with `evaluate()`, and the asynchronous handler with `evaluateAsync()`, in
+ * the same order.
+ */
+function* addToSteps(
+  ce: ComputeEngine,
+  target: Expression | undefined,
+  value: Expression | undefined
+): OperandSteps<Expression | undefined> {
+  if (target === undefined || value === undefined) return undefined;
+  if (isFunction(target, 'At') && isSymbol(target.op1)) {
+    const list = target.op1;
+    const positions: Expression[] = [];
+    for (const p of target.ops.slice(1)) {
+      const v = yield p;
+      if (v.operator === 'Error') return v;
+      positions.push(v);
+    }
+    const element = yield ce._fn('At', [list, ...positions]);
+    // An increment that can write a binding or an object (its effects
+    // include `scope` or `state`, or are not known) can assign the list
+    // itself: `L[1] += do { L = [10, 20]; 2 }`. The new list is then built
+    // from the value of the list read before the increment, as in
+    // `L = replaceAt(L, 1, L[1] + …)`, where the operand `L` of `replaceAt`
+    // is read before its last operand. A write that cannot give a list is
+    // refused as the assignment refuses it, and the variable keeps the value
+    // that the increment gave it. Otherwise the list stays a symbol in
+    // `ReplaceAt`, and the assignment updates it in place.
+    const effects = effectsOf(value);
+    if (
+      computedEffectsInclude(effects, 'scope') ||
+      computedEffectsInclude(effects, 'state')
+    ) {
+      const before = yield list;
+      const increment = yield value;
+      if (increment.operator === 'Error') return increment;
+      const replaced = yield ce._fn('ReplaceAt', [
+        before,
+        ...positions,
+        ce._fn('Add', [element, increment]),
+      ]);
+      const failed = elementRebindingFailure(ce, list.symbol, replaced);
+      if (failed !== undefined) return failed;
+      return yield ce._fn('Assign', [list, replaced]);
+    }
+    const increment = yield value;
+    if (increment.operator === 'Error') return increment;
+    return yield ce._fn('Assign', [
+      list,
+      ce._fn('ReplaceAt', [
+        list,
+        ...positions,
+        ce._fn('Add', [element, increment]),
+      ]),
+    ]);
+  }
+  if (!isSymbol(target)) return undefined;
+  const current = yield target;
+  const increment = yield value;
+  if (increment.operator === 'Error') return increment;
+  return yield ce._fn('Assign', [target, ce._fn('Add', [current, increment])]);
+}
+
+/**
+ * True when `value` is a collection that a rebinding can write into: an
+ * indexed collection (a `List`, a `Range`, the lazy view that `ReplaceAt`
+ * gives for a long list, a string, a tuple). The rebinding follows the result
+ * that `ReplaceAt` documents: `s[1] := "z"` with `s = "abc"` gives the list of
+ * characters `["z", "b", "c"]`, and a tuple gives a list. A number, a
+ * dictionary and a symbol with no value are not.
+ */
+function isIndexedValue(value: Expression): boolean {
+  return value.isIndexedCollection;
+}
+
+/**
+ * The error of the rebinding `name := ReplaceAt(name, …)`
+ * (`isElementRebinding()` in `library/core.ts`) whose evaluated value is
+ * `value`, or `undefined` when the value is stored. The value is read after
+ * the evaluation, so each
+ * position and each operand of the write is evaluated once, by `ReplaceAt`.
+ *
+ * - An error is returned, and the variable keeps its value.
+ * - A collection is stored.
+ * - A `ReplaceAt` that is still unevaluated has evaluated operands. In a
+ *   chain, its collection operand is the value of the inner `ReplaceAt`.
+ *   - A collection operand with no positions (a number, a symbol with no
+ *     value) is the error `assignment-to-list-element`.
+ *   - With positions that are all numbers, the positions are followed in the
+ *     collection, while the count of each level is known: a position that is
+ *     zero, not an integer, or past the end is the error `out-of-range` (the
+ *     length of a string is its number of characters), and a level that is
+ *     not an indexed collection (a number in `xs[1, 1] := 9`, with `xs` a
+ *     flat list) is the error `assignment-to-list-element`. When every
+ *     position is valid, the value is the lazy view that `ReplaceAt` gives
+ *     for a long list, and it is stored.
+ *   - Otherwise (a position that is not a number, as in `xs[k] := 1` with
+ *     `k` unknown, or a level whose count is not known), the unevaluated
+ *     `ReplaceAt` is stored, as `ReplaceAt` documents.
+ *
+ * In both error cases the variable keeps its value.
+ */
+export function elementRebindingFailure(
+  ce: ComputeEngine,
+  name: string,
+  value: Expression
+): Expression | undefined {
+  if (!value.isValid) return value;
+  if (!isFunction(value, 'ReplaceAt') || value.nops < 3) return undefined;
+  const notIndexed = (what: string): Expression =>
+    ce.error([
+      'assignment-to-list-element',
+      `${what} "${name}" is not an indexed collection`,
+    ]);
+  let level: Expression | undefined = value.op1;
+  if (!isIndexedValue(level)) return notIndexed('the value of');
+  const positions = value.ops.slice(1, -1);
+  if (!positions.every((p) => isNumber(p))) return undefined;
+  for (const [i, position] of positions.entries()) {
+    if (level === undefined || !isIndexedValue(level))
+      return notIndexed('an element of');
+    const count = level.count;
+    if (count === undefined) return undefined;
+    const n = Number(count);
+    const k = position.re;
+    if (!Number.isInteger(k) || k === 0 || Math.abs(k) > n)
+      return ce.error([
+        'out-of-range',
+        n === 0
+          ? 'an index of a non-empty list'
+          : `an index in 1..${n} or -${n}..-1`,
+        position.toString(),
+      ]);
+    if (i < positions.length - 1) level = level.at(k > 0 ? k : n + k + 1);
+  }
+  return undefined;
 }
 
 /** The index variable names of a comprehension's `Element` clauses, in order
@@ -6349,7 +6882,10 @@ class ComprehensionIndexFrame {
  * `CancellationError` from `runNested`.
  */
 function* comprehensionStream(
-  expr: Expression
+  expr: Expression,
+  /** The state of the walk, when the caller reads it after the walk (a
+   * `ParallelComprehension`, which also sets its `parallel` field). */
+  walkState?: LoopState
 ): Generator<Expression, undefined, any> {
   if (!isFunction(expr)) return;
   const ce = expr.engine;
@@ -6365,92 +6901,101 @@ function* comprehensionStream(
   // reach a runtime-created scope — resolves against, so the body evaluates
   // with the indices actually visible.
   const frame = new ComprehensionIndexFrame(ce, scope, indexNames);
-  const state: LoopState = { stopped: false, count: 0 };
+  const state: LoopState = walkState ?? { stopped: false, count: 0 };
   const inner = runNestedElements(body, elements, ce, state, () => {});
-  while (true) {
-    let r: IteratorResult<Expression>;
-    // Capture this iteration's index values BY VALUE while they are still
-    // installed (C2): a materialized body that is a function literal captures
-    // its free variables by reference against the scope active at apply time,
-    // so without the substitution below every element of
-    // `[x ↦ x + i for i in 1..3]` would share one `i` (resolving to its
-    // final value, or to nothing once the walk completes) instead of closing
-    // over 1, 2, 3. Substituting the index values into the element is a
-    // no-op for a body that already resolved them.
-    //
-    // The substitution reaches only the occurrences that DENOTE this
-    // comprehension's index (`substituteBinderValues`, ruled 2026-09-21).
-    // An occurrence of the same name that denotes a global keeps the global:
-    // with `w` valueless and `W := x ↦ [w x, x]`,
-    // `[W(w)[1] for w in [1, 2, 3]]` answers `[w, 2w, 3w]`, exactly what the
-    // spelling `[W(k)[1] for k in [1, 2, 3]]` answers. Substituting by name
-    // gave `[1, 4, 9]`. The comprehension's own scope is passed because it
-    // has left the ambient chain by this point.
-    let subs: Record<string, Expression> | undefined;
-    if (scope) ce._pushEvalContext(scope, undefined, { ambient: true });
-    frame.install();
-    // The scopes nested in the comprehension (an inner `Block` of the body,
-    // a `Sum` in it) are shared by every walk of this comprehension, like
-    // the index scope above. A walk can run outside any application of the
-    // function whose body contains the comprehension — a lazy comprehension
-    // is walked when its value is read, often after that function has
-    // returned — so a recursive call made from the body is not re-entrant
-    // for the function-application check. Marking the nested scopes as in
-    // use for the duration of the advance makes that inner application (and
-    // any inner walk of the same comprehension) save and restore them. See
-    // `enterNestedBodyScopes`.
-    //
-    // The index scope of the comprehension is marked as in use too, as a
-    // `Loop` marks its own scope, but it is not saved: the index frame above
-    // puts back the values of each walk. A function literal that the body
-    // evaluates (a closure that an element assigns to an outer variable)
-    // then captures the scopes that are in use (`captureNestedLocals`,
-    // `function-utils.ts`): it gets a copy of the index with the value of
-    // its element, and its chain reaches the frame of the call that runs the
-    // comprehension. Without the mark, the capture stopped below the index
-    // scope: with `h = (x) => x` and
-    // `b = (n) => do { let c = [do { h = (x => x + d); 0 } for d in [3 * n]];
-    // ListFrom(c); 0 }`, the call `b(1)` then `h(1)` gave `d + 1`, not `4`.
-    // An element that is itself a function literal (`[x => x + i for i in
-    // 1..3]`) is captured in the same way when the body evaluates it. Its
-    // symbols keep the binding of the index that they got at
-    // canonicalization, so the substitution of the index values below still
-    // replaces them, and the elements are `x ↦ x + 1`, `x ↦ x + 2`, ... as
-    // before. Each such element now also costs one snapshot of the index
-    // scope and one rebuild of the literal.
-    //
-    // While the index scope is marked, two other functions of
-    // `function-utils.ts` see it as in use: `copyChainToLeaving` replaces it,
-    // in a chain that it copies at the end of a call, by a snapshot that
-    // holds the index value of the element, and `rerootingIsNoop` never
-    // treats a re-rooting through it as a no-op.
-    const nested = enterNestedBodyScopes(expr, {
-      includeRoot: true,
-      saveRoot: false,
-    });
-    try {
-      r = inner.next();
-    } finally {
-      exitNestedBodyScopes(ce, nested);
-      frame.captureAndRestore();
-      if (scope) ce._popEvalContext();
+  // The walk is advanced by hand, so it is closed here when this stream
+  // ends or is closed by its consumer (`return()`, or a throw in the
+  // `for … of` of the consumer): a parallel walk then runs its `finally`
+  // and installs again the enclosing random frame (`parallelPassValues()`).
+  try {
+    while (true) {
+      let r: IteratorResult<Expression>;
+      // Capture this iteration's index values BY VALUE while they are still
+      // installed (C2): a materialized body that is a function literal captures
+      // its free variables by reference against the scope active at apply time,
+      // so without the substitution below every element of
+      // `[x ↦ x + i for i in 1..3]` would share one `i` (resolving to its
+      // final value, or to nothing once the walk completes) instead of closing
+      // over 1, 2, 3. Substituting the index values into the element is a
+      // no-op for a body that already resolved them.
+      //
+      // The substitution reaches only the occurrences that DENOTE this
+      // comprehension's index (`substituteBinderValues`, ruled 2026-09-21).
+      // An occurrence of the same name that denotes a global keeps the global:
+      // with `w` valueless and `W := x ↦ [w x, x]`,
+      // `[W(w)[1] for w in [1, 2, 3]]` answers `[w, 2w, 3w]`, exactly what the
+      // spelling `[W(k)[1] for k in [1, 2, 3]]` answers. Substituting by name
+      // gave `[1, 4, 9]`. The comprehension's own scope is passed because it
+      // has left the ambient chain by this point.
+      let subs: Record<string, Expression> | undefined;
+      if (scope) ce._pushEvalContext(scope, undefined, { ambient: true });
+      frame.install();
+      // The scopes nested in the comprehension (an inner `Block` of the body,
+      // a `Sum` in it) are shared by every walk of this comprehension, like
+      // the index scope above. A walk can run outside any application of the
+      // function whose body contains the comprehension — a lazy comprehension
+      // is walked when its value is read, often after that function has
+      // returned — so a recursive call made from the body is not re-entrant
+      // for the function-application check. Marking the nested scopes as in
+      // use for the duration of the advance makes that inner application (and
+      // any inner walk of the same comprehension) save and restore them. See
+      // `enterNestedBodyScopes`.
+      //
+      // The index scope of the comprehension is marked as in use too, as a
+      // `Loop` marks its own scope, but it is not saved: the index frame above
+      // puts back the values of each walk. A function literal that the body
+      // evaluates (a closure that an element assigns to an outer variable)
+      // then captures the scopes that are in use (`captureNestedLocals`,
+      // `function-utils.ts`): it gets a copy of the index with the value of
+      // its element, and its chain reaches the frame of the call that runs the
+      // comprehension. Without the mark, the capture stopped below the index
+      // scope: with `h = (x) => x` and
+      // `b = (n) => do { let c = [do { h = (x => x + d); 0 } for d in [3 * n]];
+      // ListFrom(c); 0 }`, the call `b(1)` then `h(1)` gave `d + 1`, not `4`.
+      // An element that is itself a function literal (`[x => x + i for i in
+      // 1..3]`) is captured in the same way when the body evaluates it. Its
+      // symbols keep the binding of the index that they got at
+      // canonicalization, so the substitution of the index values below still
+      // replaces them, and the elements are `x ↦ x + 1`, `x ↦ x + 2`, ... as
+      // before. Each such element now also costs one snapshot of the index
+      // scope and one rebuild of the literal.
+      //
+      // While the index scope is marked, two other functions of
+      // `function-utils.ts` see it as in use: `copyChainToLeaving` replaces it,
+      // in a chain that it copies at the end of a call, by a snapshot that
+      // holds the index value of the element, and `rerootingIsNoop` never
+      // treats a re-rooting through it as a no-op.
+      const nested = enterNestedBodyScopes(expr, {
+        includeRoot: true,
+        saveRoot: false,
+      });
+      try {
+        r = inner.next();
+      } finally {
+        exitNestedBodyScopes(ce, nested);
+        frame.captureAndRestore();
+        if (scope) ce._popEvalContext();
+      }
+      if (r.done) {
+        // A clause domain that is an error value makes the error the value of
+        // the whole comprehension, also after some elements were given: the
+        // walk records that it failed, in the pull of its consumer that met
+        // the error (`noteFailedWalk()`). A consumer that reads the walk
+        // (`Length`, `Count`, `Sum`, a materialization) then answers the
+        // error, and the element memo does not keep the walk.
+        if (state.domainError !== undefined && walkState === undefined)
+          noteFailedWalk(state.domainError);
+        return;
+      }
+      if (indexNames.length > 0) subs = frame.subs(indexNames);
+      const value =
+        subs !== undefined && r.value.has(indexNames)
+          ? substituteBinderValues(r.value, subs, () => scope)
+          : r.value;
+      yield value;
     }
-    if (r.done) {
-      // A clause domain that is an error value makes the error the value of
-      // the whole comprehension, also after some elements were given: the
-      // walk records that it failed, in the pull of its consumer that met
-      // the error (`noteFailedWalk()`). A consumer that reads the walk
-      // (`Length`, `Count`, `Sum`, a materialization) then answers the
-      // error, and the element memo does not keep the walk.
-      if (state.domainError !== undefined) noteFailedWalk(state.domainError);
-      return;
-    }
-    if (indexNames.length > 0) subs = frame.subs(indexNames);
-    const value =
-      subs !== undefined && r.value.has(indexNames)
-        ? substituteBinderValues(r.value, subs, () => scope)
-        : r.value;
-    yield value;
+  } finally {
+    inner.return(undefined);
   }
 }
 
@@ -7194,6 +7739,7 @@ function* runNested(
   // Re-evaluate the collection on each entry so that dependent bindings
   // (e.g. `Element(y, Range(1, x))`) see the current value of `x`.
   const collection = collExpr.evaluate();
+  if (index === 0 && state.parallel === true) state.firstDomain = collection;
   // The Epsil interpreter's hook (see `evaluateStatements`,
   // `function-utils.ts`) also receives the value of a loop or comprehension
   // header written in the source. No statement holds that value, so a failed
@@ -7228,6 +7774,7 @@ function* runNested(
   }
   if (!collection?.isCollection) {
     // Not a collection — nothing to iterate.
+    state.unresolvedDomain = true;
     return;
   }
 
@@ -7236,7 +7783,14 @@ function* runNested(
   // stray non-canonical `Loop(body, Element('Nothing', coll))` would walk to
   // the parent scope looking for a binding to assign into.
   const skipAssign = name === 'Nothing';
-  for (const value of collection.each()) {
+  // Whether the domain gave an element (see the test after the loop).
+  let walked = false;
+  // The passes of a parallel loop are the elements of its FIRST clause.
+  const passes = index === 0 && state.parallel === true;
+  for (const value of passes
+    ? parallelPassValues(ce, collection.each())
+    : collection.each()) {
+    walked = true;
     if (pattern !== undefined) {
       // A DESTRUCTURING loop variable (`for (p, q) in pairs { … }`): match the
       // element against the pattern and bind one leaf at a time. An element
@@ -7304,4 +7858,15 @@ function* runNested(
     yield* runNested(body, elements, index + 1, ce, state, onLeaf);
     if (state.stopped) return;
   }
+  // A walk that gives no element proves that the domain is empty only when
+  // the domain is known to be empty (a count of 0, an empty literal). Other
+  // domains with no element are not resolved: `Range(1, n)` with `n` unknown
+  // has no count, and `Linspace(a, 1, 3)` with `a` unknown has a count of 3
+  // but its elements cannot be computed.
+  if (
+    !walked &&
+    collection.isEmptyCollection !== true &&
+    collection.count !== 0
+  )
+    state.unresolvedDomain = true;
 }

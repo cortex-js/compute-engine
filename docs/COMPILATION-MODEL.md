@@ -135,6 +135,13 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `Arctan2(L - L, -1)`, at `L = [-1, 2]` give `[-π, π]`. The code computes
   `0 * -1` or `0 / -1`, which is `-0`, and `Math.atan2(-0, -1)` is `-π`. The
   interpreter gives `[π, π]`.
+- `plausible?` — `javascript`, `n: integer`: in
+  `function g(n: integer) { sum(map((x) => sum([random() for j in 1..2]), 1..n)) }`,
+  `WithRandomSeed(7, (g(m), random()))` at `m = 2` gives `[1.2722…, 0.2160…]`;
+  the interpreter gives `(0.5609…, 0.2415…)`. The interpreter evaluates the
+  comprehension in the function literal as one instance, so the two calls read
+  one draw set (`docs/RANDOMNESS-MODEL.md` §6, "One instance, one draw set");
+  the compiled code draws at each call.
 - `plausible?` — `javascript`, `b: boolean`, `u: list<real>`, a non-canonical
   box: `ce.box(['Not', ['And', 'b', ['Greater', 'u', 0]]], { form: 'raw' })` at
   `b = true`, `u = [1, 2, 3]` gives `true`, and the same box of

@@ -28,6 +28,7 @@ import {
   optionalParameterTarget,
 } from '../boxed-expression/function-literal.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import { bodyWithParallelHeadsLowered } from './parallel-lowering.js';
 import { compileJetDerivative, jetDerivativeTarget } from './jet-derivative.js';
 import { unrollFixedWidthCollections } from './fixed-width-unroll.js';
 import type {
@@ -335,9 +336,10 @@ export function substitutedUserFunctionBody(
   // On `interval-js` the factors of the angular unit are exact, as at the
   // compile entry of that target, so the scaled angle is an enclosure of
   // the true angle.
-  const substituted = rewriteAngularUnit(statement, {
-    exactFactors: target.language === 'interval-javascript',
-  }).subs(substitution);
+  const substituted = rewriteAngularUnit(
+    bodyWithParallelHeadsLowered(statement, target),
+    { exactFactors: target.language === 'interval-javascript' }
+  ).subs(substitution);
   // The substitution re-canonicalizes the body with the arguments in
   // place, and that can make it INVALID when an argument's static type
   // does not fit the body. Example: with `f(p) := Mod(p, 1) - 0.5` and a
@@ -760,9 +762,10 @@ export function definitionBodyExpr(
     inlineCollectionValuedCallsInDefinitionBody(
       // Exact factors on `interval-js`, as at the compile entry of that
       // target.
-      rewriteAngularUnit(literal.ops[0].canonical, {
-        exactFactors: target.language === 'interval-javascript',
-      }),
+      rewriteAngularUnit(
+        bodyWithParallelHeadsLowered(literal.ops[0].canonical, target),
+        { exactFactors: target.language === 'interval-javascript' }
+      ),
       target,
       registry,
       enclosingDefinitionOf(

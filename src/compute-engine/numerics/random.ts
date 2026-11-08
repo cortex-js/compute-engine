@@ -177,6 +177,58 @@ export function withSeedFrame<T>(
 }
 
 //
+// ─── Pass frames of a parallel loop ─────────────────────────────────────────
+//
+// `docs/RANDOMNESS-MODEL.md` §3 ("Pass frames") and §5. Each pass of a
+// `ParallelLoop` or `ParallelComprehension` draws from its OWN frame, so the
+// values do not depend on the order of the passes or on how they are split
+// between workers. Inside an enclosing frame, the loop consumes exactly one
+// index `b` of that frame when it starts, and pass `k` (the position of its
+// element in the domain, from 1) gets the frame seeded by
+// `parallelPassFrame(beginParallelLoop(frame), k)`. This mapping is a
+// cross-version contract, pinned by `random-vectors.test.ts`.
+//
+
+/**
+ * Start a parallel loop inside `frame`: consume one index `b` of the frame
+ * (the counter advances by exactly 1) and return the two words that seed the
+ * pass frames of the loop:
+ *
+ * ```
+ * (u0, u1, u2) = pcg3d(seedLo, seedHi, b)      // base = (u0, u2)
+ * ```
+ *
+ * The base takes `u2`, the word that the draw presentations and
+ * `deriveSubstream` do not use, so a pass frame never repeats the seed words
+ * of a draw or of a derived sub-stream of the same frame.
+ */
+export function beginParallelLoop(frame: RandomSeedFrame): [number, number] {
+  const b = frame.next >>> 0;
+  frame.next = (frame.next + 1) >>> 0;
+  const [u0, , u2] = pcg3dWords(frame.seedLo, frame.seedHi, b);
+  return [u0, u2];
+}
+
+/**
+ * The frame of pass `k` (from 1) of a parallel loop whose base words are
+ * `base` (`beginParallelLoop`):
+ *
+ * ```
+ * (v0, v1, v2) = pcg3d(base[0], base[1], k)    // frame seed = (v0, v1)
+ * ```
+ *
+ * The counter of the frame starts at 0. PCG3D decorrelates adjacent inputs,
+ * so the frames of adjacent passes give unrelated streams.
+ */
+export function parallelPassFrame(
+  base: readonly [number, number],
+  k: number
+): RandomSeedFrame {
+  const [seedLo, seedHi] = pcg3dWords(base[0], base[1], k);
+  return { seedLo, seedHi, next: 0 };
+}
+
+//
 // ─── Derived sub-streams ────────────────────────────────────────────────────
 //
 // `docs/RANDOMNESS-MODEL.md`. The stochastic ESTIMATORS —

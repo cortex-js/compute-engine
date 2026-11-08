@@ -204,6 +204,7 @@ import {
 import { findRoot, findRootAsync, fitRecordType } from '../nonlinear-fit.js';
 import {
   BLOCK_DEFINITION,
+  elementRebindingFailure,
   isDeclaredForAssignment,
 } from './control-structures.js';
 // BoxedDictionary will be dynamically imported to avoid circular dependency
@@ -2838,8 +2839,10 @@ function pipeStageBodyType(
 const CONTROL_STATEMENTS: ReadonlySet<string> = new Set([
   'Return',
   'Assign',
+  'AddTo',
   'Declare',
   'Loop',
+  'ParallelLoop',
   'Break',
   'Continue',
 ]);
@@ -14834,80 +14837,6 @@ function isElementRebinding(value: Expression, name: string): boolean {
     node = node.op1;
   }
   return false;
-}
-
-/**
- * True when `value` is a collection that a rebinding can write into: an
- * indexed collection (a `List`, a `Range`, the lazy view that `ReplaceAt`
- * gives for a long list, a string, a tuple). The rebinding follows the result
- * that `ReplaceAt` documents: `s[1] := "z"` with `s = "abc"` gives the list of
- * characters `["z", "b", "c"]`, and a tuple gives a list. A number, a
- * dictionary and a symbol with no value are not.
- */
-function isIndexedValue(value: Expression): boolean {
-  return value.isIndexedCollection;
-}
-
-/**
- * The error of the rebinding `name := ReplaceAt(name, …)`
- * (`isElementRebinding()`) whose evaluated value is `value`, or `undefined`
- * when the value is stored. The value is read after the evaluation, so each
- * position and each operand of the write is evaluated once, by `ReplaceAt`.
- *
- * - An error is returned, and the variable keeps its value.
- * - A collection is stored.
- * - A `ReplaceAt` that is still unevaluated has evaluated operands. In a
- *   chain, its collection operand is the value of the inner `ReplaceAt`.
- *   - A collection operand with no positions (a number, a symbol with no
- *     value) is the error `assignment-to-list-element`.
- *   - With positions that are all numbers, the positions are followed in the
- *     collection, while the count of each level is known: a position that is
- *     zero, not an integer, or past the end is the error `out-of-range` (the
- *     length of a string is its number of characters), and a level that is
- *     not an indexed collection (a number in `xs[1, 1] := 9`, with `xs` a
- *     flat list) is the error `assignment-to-list-element`. When every
- *     position is valid, the value is the lazy view that `ReplaceAt` gives
- *     for a long list, and it is stored.
- *   - Otherwise (a position that is not a number, as in `xs[k] := 1` with
- *     `k` unknown, or a level whose count is not known), the unevaluated
- *     `ReplaceAt` is stored, as `ReplaceAt` documents.
- *
- * In both error cases the variable keeps its value.
- */
-function elementRebindingFailure(
-  ce: ComputeEngine,
-  name: string,
-  value: Expression
-): Expression | undefined {
-  if (!value.isValid) return value;
-  if (!isFunction(value, 'ReplaceAt') || value.nops < 3) return undefined;
-  const notIndexed = (what: string): Expression =>
-    ce.error([
-      'assignment-to-list-element',
-      `${what} "${name}" is not an indexed collection`,
-    ]);
-  let level: Expression | undefined = value.op1;
-  if (!isIndexedValue(level)) return notIndexed('the value of');
-  const positions = value.ops.slice(1, -1);
-  if (!positions.every((p) => isNumber(p))) return undefined;
-  for (const [i, position] of positions.entries()) {
-    if (level === undefined || !isIndexedValue(level))
-      return notIndexed('an element of');
-    const count = level.count;
-    if (count === undefined) return undefined;
-    const n = Number(count);
-    const k = position.re;
-    if (!Number.isInteger(k) || k === 0 || Math.abs(k) > n)
-      return ce.error([
-        'out-of-range',
-        n === 0
-          ? 'an index of a non-empty list'
-          : `an index in 1..${n} or -${n}..-1`,
-        position.toString(),
-      ]);
-    if (i < positions.length - 1) level = level.at(k > 0 ? k : n + k + 1);
-  }
-  return undefined;
 }
 
 /**

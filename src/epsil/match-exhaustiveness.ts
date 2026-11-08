@@ -216,7 +216,8 @@ function walk(
       return;
     }
 
-    case 'Comprehension': {
+    case 'Comprehension':
+    case 'ParallelComprehension': {
       // `[body for x in xs if cond, …]` → `Comprehension(body, Element(x, xs,
       // cond?), …)`: each clause's collection is read with the earlier
       // clauses' names bound, its guard and the body with its own name bound
@@ -240,7 +241,8 @@ function walk(
       return;
     }
 
-    case 'Loop': {
+    case 'Loop':
+    case 'ParallelLoop': {
       // `for x in xs { … }` → `Loop(body, Element(x, xs))`: the collection is
       // read in the enclosing scope, the body with the element name bound.
       const [body, element] = operands(node);

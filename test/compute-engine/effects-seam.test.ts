@@ -138,6 +138,11 @@ describe('The Function-literal construction seam is the only builder', () => {
       // every arrow it handles comes from that literal's own `.type`, so it
       // builds none.
       'compute-engine/multi-clause.ts',
+      // The `parallel-effect` rule of the Epsil checker: the body of a
+      // parallel loop can have only the `random` effect. It RUNS the walk
+      // over a literal `Function(body)` built from the raw body and reads the
+      // inferred set and `unresolvedHead`; it builds no arrow.
+      'epsil/parallel-checks.ts',
     ].sort();
 
     const importers = sourceFiles()

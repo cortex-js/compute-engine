@@ -89,6 +89,7 @@ import { core } from './compiler-core-hooks.js';
 import { CompilerState } from './compiler-state.js';
 import { implicitIntegrationVariable } from '../boxed-expression/integration-variables.js';
 import { assignmentLocalsOf } from '../assignment-locals.js';
+import { bodyWithParallelHeadsLowered } from './parallel-lowering.js';
 
 /**
  * Analyze — without compiling, and never throwing — which external references
@@ -275,7 +276,21 @@ export function analyzeReferences(
     declaredTypes = literalDeclaredParamTypes(literal);
     indirectDepth++;
     try {
-      visit(literal.ops[0], params.length ? union(bound, params) : bound);
+      // The body as the emission compiles it: on JavaScript, a body that
+      // the engine defines has its `parallel for` heads and `+=` lowered
+      // (`bodyWithParallelHeadsLowered()`). A body that is not lowered (the
+      // lowering threw, or the target is not JavaScript) keeps its
+      // `ParallelLoop` and `ParallelComprehension` heads, whose clauses the
+      // walk binds as those of `Loop` and `Comprehension`.
+      let body = literal.ops[0];
+      try {
+        body = bodyWithParallelHeadsLowered(body, target);
+      } catch {
+        // The lowering throws for a body that the emission declines (a
+        // position with an effect in `L[random(1..9)] += 1`): the analysis
+        // then visits the body as it is, and does not throw.
+      }
+      visit(body, params.length ? union(bound, params) : bound);
     } finally {
       declaredTypes = saved;
       indirectDepth--;
@@ -924,7 +939,9 @@ export function analyzeReferences(
       h === 'Product' ||
       h === 'Integrate' ||
       h === 'Loop' ||
-      h === 'Comprehension'
+      h === 'ParallelLoop' ||
+      h === 'Comprehension' ||
+      h === 'ParallelComprehension'
     ) {
       const indices: string[] = [];
       const limitExprs: Array<[Expression, ReadonlySet<string>]> = [];
@@ -989,7 +1006,11 @@ export function analyzeReferences(
           }
           indices.push(...names);
           const outer =
-            h === 'Comprehension' || h === 'Integrate' ? earlier : bound;
+            h === 'Comprehension' ||
+            h === 'ParallelComprehension' ||
+            h === 'Integrate'
+              ? earlier
+              : bound;
           const own = names.length === 0 ? outer : union(outer, names);
           // The operands of an `Element` clause after its collection are
           // its conditions, which read the index of the clause
@@ -1002,7 +1023,12 @@ export function analyzeReferences(
               clause.operator === 'Element' && i >= 1 ? own : outer,
             ]);
           });
-          if (h === 'Comprehension' || h === 'Integrate') earlier = own;
+          if (
+            h === 'Comprehension' ||
+            h === 'ParallelComprehension' ||
+            h === 'Integrate'
+          )
+            earlier = own;
         } else {
           limitExprs.push([clause, bound]);
         }

@@ -163,7 +163,9 @@ import {
 import { integrateSemiInfiniteOscillatory } from '../numerics/oscillatory-quadrature.js';
 import {
   MAX_RANDOM_ELEMENT_COUNT,
+  beginParallelLoop,
   nextFrameDraw,
+  parallelPassFrame,
   withSeedFrame,
   foldSeed,
   type RandomSeedFrame,
@@ -6503,10 +6505,25 @@ export type RandomDomainDescriptor =
   | { continuous: true; lo: number; hi: number }
   | { continuous: false; n: number; at: (i: number) => unknown };
 
+/**
+ * The state of a compiled parallel loop over a `Range` that runs inside a
+ * `WithRandomSeed` frame (`parallelPassesBegin`): the enclosing frame, which
+ * is installed again when the loop ends, and the base words of the pass
+ * frames (`beginParallelLoop`).
+ */
+export type ParallelPassesState = {
+  enclosing: RandomSeedFrame;
+  base: [number, number];
+};
+
 /** The engine-bound half of the `_SYS` bundle: the random family. */
 export type RandomSysHelpers = {
   drawNextRandomNumber: () => number;
   withRandomSeed: <T>(seed: unknown, body: () => T) => T;
+  parallelPasses: <T>(values: Iterable<T>) => Iterable<T>;
+  parallelPassesBegin: () => ParallelPassesState | undefined;
+  parallelPassesFrame: (state: ParallelPassesState, k: number) => void;
+  parallelPassesEnd: (state: ParallelPassesState | undefined) => void;
   domainInterval: (
     op: string,
     lo: number,
@@ -6651,6 +6668,54 @@ export function makeRandomHelpers(source: RuntimeSource): RandomSysHelpers {
         source.setFrame,
         body
       );
+    },
+
+    // The domain of the first clause of a compiled parallel loop or
+    // comprehension (`ParallelDomain`, `parallel-lowering.ts`): the elements
+    // of `values`, with the frame of pass `k` (from 1) installed while the
+    // loop handles element `k`. The same steps as the interpreter's
+    // `parallelPassValues()` (`library/control-structures.ts`): with no
+    // active frame, the elements as they are (live draws); inside a frame,
+    // the domain is walked to the end, the loop consumes one index of the
+    // frame (`beginParallelLoop`), and pass `k` draws from
+    // `parallelPassFrame(base, k)`. The enclosing frame is installed again
+    // when the loop ends, also when it throws (`return()` of the generator).
+    parallelPasses: function* <T>(values: Iterable<T>): Generator<T> {
+      const enclosing = source.frame();
+      if (enclosing === undefined) {
+        yield* values;
+        return;
+      }
+      const elements = Array.isArray(values) ? values : [...values];
+      const base = beginParallelLoop(enclosing);
+      try {
+        for (let k = 1; k <= elements.length; k++) {
+          source.setFrame(parallelPassFrame(base, k));
+          yield elements[k - 1];
+        }
+      } finally {
+        source.setFrame(enclosing);
+      }
+    },
+
+    // The same passes for a parallel loop whose domain is a `Range`, which
+    // the compiled code runs as a counted loop (`emitElementLoops()` in
+    // `compile-loops.ts`): `parallelPassesBegin()` before the loop,
+    // `parallelPassesFrame(state, k)` at the start of pass `k` (from 1), and
+    // `parallelPassesEnd(state)` in the `finally` of the loop. With no active
+    // frame, the state is `undefined`, and the loop calls nothing per pass.
+    // The elements of a `Range` make no draws, so the loop consumes its index
+    // before the passes, as `parallelPasses` does after it walks the domain.
+    parallelPassesBegin: () => {
+      const enclosing = source.frame();
+      if (enclosing === undefined) return undefined;
+      return { enclosing, base: beginParallelLoop(enclosing) };
+    },
+    parallelPassesFrame: (state, k) => {
+      source.setFrame(parallelPassFrame(state.base, k));
+    },
+    parallelPassesEnd: (state) => {
+      if (state !== undefined) source.setFrame(state.enclosing);
     },
 
     domainInterval: (op, lo, hi) => {

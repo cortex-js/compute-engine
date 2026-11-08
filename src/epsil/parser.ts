@@ -990,6 +990,23 @@ export class Parser {
           return this.parseWhile();
         case 'for':
           return this.parseFor();
+        case 'parallel': {
+          // `parallel` is a CONTEXTUAL keyword, like `hold`: it is the head
+          // of a statement only when a `for` follows it on the same line
+          // (`parallel for x in xs { … }`). Everywhere else it stays an
+          // identifier, so `parallel = 5` and a `parallel` statement followed
+          // by a `for` on the next line keep their meaning.
+          const next = this.peek(1);
+          if (
+            next.type === 'SYMBOL' &&
+            next.text === 'for' &&
+            !next.precededByLinebreak
+          ) {
+            const parallelTok = this.advance();
+            return this.parseFor(parallelTok);
+          }
+          break;
+        }
         case 'match':
           return this.parseMatch();
         case 'break':
@@ -3532,9 +3549,15 @@ export class Parser {
    * binding position of the `Element` clause. Each iteration binds the
    * pattern's leaves to the element's components; an element that is not a
    * tuple of the pattern's arity is the same shape-mismatch error value the
-   * destructuring `let` produces. */
-  private parseFor(): MathJsonExpression | null {
-    const kw = this.advance(); // 'for'
+   * destructuring `let` produces.
+   *
+   * With `parallelTok`, the `parallel` keyword before the `for`, the loop is
+   * `["ParallelLoop", body, ["Element", "x", "xs"]]`: the passes can run in
+   * any order, and the static checks of `parallelLoopDiagnostics()`
+   * (`parallel-checks.ts`) restrict what the body can do. */
+  private parseFor(parallelTok?: Token): MathJsonExpression | null {
+    const kw = parallelTok ?? this.current;
+    this.advance(); // 'for'
     const binding = this.parseIterationBinding();
     if (binding === null) return null;
     const { node: varNode, start: varStart } = binding;
@@ -3563,7 +3586,11 @@ export class Parser {
       this.outerEnd(coll) ?? this.previousEnd()
     );
     return this.wrap(
-      ['Loop', body, elementNode] as MathJsonExpression[],
+      [
+        parallelTok === undefined ? 'Loop' : 'ParallelLoop',
+        body,
+        elementNode,
+      ] as MathJsonExpression[],
       kw.start,
       end
     );
@@ -3642,13 +3669,37 @@ export class Parser {
    *
    * On a malformed clause a diagnostic is emitted and `null` is returned; the
    * caller then resynchronizes at the closing bracket.
+   *
+   * When the current token is the contextual keyword `parallel` (followed by
+   * the `for`), the result is `["ParallelComprehension", body, clause, …]`:
+   * the passes of the first clause can run in any order. Only the first
+   * clause can be parallel, so a `parallel` at the start of a later clause
+   * (`, parallel for y in ys` or `, parallel y in ys`) is the diagnostic
+   * `parallel-clause-not-first`; the clause is then read without it.
    */
   private parseComprehensionClauses(
     body: MathJsonExpression
   ): MathJsonExpression | null {
-    const forTok = this.advance(); // 'for'
+    const parallel = this.current.text === 'parallel';
+    const forTok = this.current;
+    if (parallel) this.advance(); // 'parallel'
+    this.advance(); // 'for'
     const clauses: MathJsonExpression[] = [];
     for (;;) {
+      if (
+        clauses.length > 0 &&
+        this.check('SYMBOL') &&
+        this.current.text === 'parallel' &&
+        this.peek(1).type === 'SYMBOL' &&
+        (this.peek(1).text === 'for' || this.peek(2).text === 'in')
+      ) {
+        const kw = this.advance(); // 'parallel'
+        let end = kw.end;
+        const after: Token = this.current;
+        if (after.type === 'SYMBOL' && after.text === 'for')
+          end = this.advance().end;
+        this.error(['parallel-clause-not-first'], kw.start, end);
+      }
       const binding = this.parseIterationBinding();
       if (binding === null) return null;
       const coll = this.parseExpression(CONDITIONAL_PRECEDENCE + 1);
@@ -3681,7 +3732,11 @@ export class Parser {
       if (!this.match('COMMA')) break;
     }
     return this.wrap(
-      ['Comprehension', body, ...clauses] as MathJsonExpression[],
+      [
+        parallel ? 'ParallelComprehension' : 'Comprehension',
+        body,
+        ...clauses,
+      ] as MathJsonExpression[],
       this.outerStart(body) ?? forTok.start,
       this.previousEnd()
     );
@@ -6924,7 +6979,8 @@ export class Parser {
       // two statements, `b := 5; a := b`.
       if (
         (asAssign && right === this.lastBareEqualNode) ||
-        (def.name === 'Assign' && operator(right) === 'Assign')
+        ((def.name === 'Assign' || def.name === 'AddTo') &&
+          (operator(right) === 'Assign' || operator(right) === 'AddTo'))
       )
         this.error(
           ['chained-assignment'],
@@ -7679,6 +7735,8 @@ export class Parser {
       if (element !== null) return element;
     }
 
+    if (def.name === 'AddTo') return this.addToAssignment(left, right, start, end);
+
     // A parenthesized comparison is an operand, never a link of a chain:
     // `(a < b) <= c` compares the truth value of `a < b` with `c`.
     const leftIsGroup =
@@ -7774,6 +7832,47 @@ export class Parser {
       start,
       end
     );
+  }
+
+  /**
+   * The compound assignment `t += e` → `["AddTo", t, e]`. The target is a
+   * variable (`s += e`) or a list element with the positions that `L[i] = v`
+   * accepts: `L[i] += e`, `m[j, i] += e` and `m[j][i] += e`, which all lower
+   * to one `At` with the positions in order (`["At", "m", j, i]`). Any other
+   * target (a field `p.x`, a call, a literal) and a string position are the
+   * diagnostic `add-to-target`, and the statement is `Nothing`, which
+   * changes no variable.
+   *
+   * The `AddTo` head is kept, not lowered to `Assign(t, Add(t, e))`: inside a
+   * `parallel for` loop it is an accumulator update, which the static checks
+   * and the compile targets recognize by its head.
+   */
+  private addToAssignment(
+    target: MathJsonExpression,
+    value: MathJsonExpression,
+    start: number,
+    end: number
+  ): MathJsonExpression {
+    this.checkAssignTarget(target);
+    if (symbolNameOf(target) !== null && this.startsWithSymbolToken(target))
+      return this.wrap(['AddTo', target, value], start, end);
+    const element = elementTargetParts(target);
+    if (element !== null && !element.positions.some(isStringNode))
+      return this.wrap(
+        [
+          'AddTo',
+          this.wrap(
+            ['At', element.list, ...element.positions],
+            this.outerStart(target) ?? start,
+            this.outerEnd(target) ?? end
+          ),
+          value,
+        ],
+        start,
+        end
+      );
+    this.error(['add-to-target'], start, end);
+    return this.wrap({ sym: 'Nothing' }, start, end);
   }
 
   /**
@@ -9242,7 +9341,11 @@ export class Parser {
           [
             'DictionaryFrom',
             this.wrap(
-              ['Comprehension', pair, ...clauses] as MathJsonExpression[],
+              [
+                operator(comprehension),
+                pair,
+                ...clauses,
+              ] as MathJsonExpression[],
               open.start,
               end
             ),
@@ -9513,12 +9616,17 @@ export class Parser {
         }
         // `body for binding in collection …` — a comprehension. Only a first
         // plain element can be a body; the clauses run to the closer.
+        // `body parallel for …` is a parallel comprehension: `parallel` is
+        // a contextual keyword here, read only when a `for` follows it.
         if (
           allowComprehension &&
           values.length === 0 &&
           !dictMarker &&
           this.check('SYMBOL') &&
-          this.current.text === 'for'
+          (this.current.text === 'for' ||
+            (this.current.text === 'parallel' &&
+              this.peek(1).type === 'SYMBOL' &&
+              this.peek(1).text === 'for'))
         ) {
           comprehension = this.parseComprehensionClauses(expr) ?? undefined;
           // The clauses run to the closer: anything else after the last

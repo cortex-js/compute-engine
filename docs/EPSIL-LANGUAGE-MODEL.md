@@ -71,6 +71,43 @@ Type patterns lower to `MatchesType`, so first-class types and match do not
 diverge. Error values propagate through ordinary applications but `match` is a
 sanctioned recovery boundary that can inspect an error explicitly.
 
+## Parallel loops and compound assignment
+
+`parallel for x in xs { body }` lowers to `["ParallelLoop", body, ["Element",
+x, xs]]`, and the comprehension `[e parallel for x in xs, …]` to
+`["ParallelComprehension", e, …clauses]`; only the first clause can be
+parallel. `parallel` is a contextual keyword, read only before `for`. The
+heads are separate from `Loop` and `Comprehension`, so a handler of `Loop`
+that does not know the rules below fails closed on them.
+
+`t += e` lowers to `["AddTo", t, e]`, where `t` is a symbol or an `At` form
+(`L[i] += e` → `["AddTo", ["At", "L", "i"], "e"]`). Outside a parallel loop
+it is `Assign(t, Add(t, e))`, or `Assign(L, ReplaceAt(L, i, Add(At(L, i),
+e)))`, with each position evaluated once.
+
+The static checks (`src/epsil/parallel-checks.ts`) make the result of a
+parallel loop independent of the order of its passes: the body changes an
+outer variable only with `+=` (`parallel-outer-write`), does not read such an
+accumulator by name (`parallel-accumulator-read`), has no effect other than
+`random` (`parallel-effect`), and does not leave the loop (`parallel-exit`); a
+parallel comprehension changes no outer variable
+(`parallel-comprehension-write`). A static check cannot find every read of an
+accumulator (a called function, `parse("s")`, host code). A read of an
+accumulator in a pass gives an unspecified value, as in OpenMP and as in the
+caveats of compiled code: the interpreter does not check such a read, and
+gives the value that the passes, run in order, give. The interpreter runs the passes in order; inside a `WithRandomSeed` frame each pass
+draws from its own frame (`docs/RANDOMNESS-MODEL.md` §3, "Pass frames of a
+parallel loop"), so the values do not depend on how the passes are split. A
+parallel comprehension is evaluated at once to a `List`; it is not a lazy view.
+The JavaScript target lowers the heads to `Loop`, `Comprehension` and
+`Assign` (`compilation/parallel-lowering.ts`) and gives the interpreted values,
+also for a pass that reads an accumulator: its passes run in order too. It
+lowers only a node bound to the library definition, so a call of a user
+function named `AddTo` stays a call. The other targets decline the heads; a
+target that runs the passes in parallel will decline a pass that reads an
+accumulator. Design:
+`docs/plans/2026-11-07-ce1093-parallel-for.md`.
+
 ## Conditional and error values
 
 `When(value, condition)` represents one conditional value. `Which`/`If`

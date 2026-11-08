@@ -799,12 +799,18 @@ export function serializeEpsil(
     Comprehension: (expr: MathJsonExpression): FormattingBlock =>
       serializeComprehension(expr, '[', ']') ?? serializeGenericFunction(expr),
 
+    // `["ParallelComprehension", body, clause, …]` is `[body parallel for x
+    // in xs, …]`: the same clauses, with `parallel` before the first `for`.
+    ParallelComprehension: (expr: MathJsonExpression): FormattingBlock =>
+      serializeComprehension(expr, '[', ']') ?? serializeGenericFunction(expr),
+
     SetFrom: (expr: MathJsonExpression): FormattingBlock => {
       const source = operand(expr, 1);
       if (
         source !== null &&
         nops(expr) === 1 &&
-        operator(source) === 'Comprehension'
+        (operator(source) === 'Comprehension' ||
+          operator(source) === 'ParallelComprehension')
       ) {
         const block = serializeComprehension(source, '{', '}');
         if (block !== null) return block;
@@ -817,7 +823,8 @@ export function serializeEpsil(
       if (
         source !== null &&
         nops(expr) === 1 &&
-        operator(source) === 'Comprehension'
+        (operator(source) === 'Comprehension' ||
+          operator(source) === 'ParallelComprehension')
       ) {
         const pair = operand(source, 1);
         if (operator(pair) === 'Tuple' && nops(pair) === 2) {
@@ -1170,6 +1177,11 @@ export function serializeEpsil(
     // faithfully.
     //
     Loop: (expr: MathJsonExpression): FormattingBlock =>
+      serializeLoop(expr) ?? serializeGenericFunction(expr),
+
+    // `["ParallelLoop", Block(…), Element(x, xs)]` is `parallel for x in xs
+    // { … }`, the `for` shape of `Loop` with the `parallel` keyword.
+    ParallelLoop: (expr: MathJsonExpression): FormattingBlock =>
       serializeLoop(expr) ?? serializeGenericFunction(expr),
 
     //
@@ -2892,7 +2904,9 @@ export function serializeEpsil(
       const guard = operand(clause, 3);
       if (n === 3 && guard !== null) parts.push(' if ', clauseOperand(guard));
     }
-    return fmt.line(open, serializeBody(body), ' for ', ...parts, close);
+    const keyword =
+      operator(expr) === 'ParallelComprehension' ? ' parallel for ' : ' for ';
+    return fmt.line(open, serializeBody(body), keyword, ...parts, close);
   }
 
   /**
@@ -2969,7 +2983,7 @@ export function serializeEpsil(
       // around the body only), so a `["Break"]` buried in the collection
       // expression must keep whatever spelling that enclosing depth gives it.
       const head = fmt.line(
-        'for ',
+        operator(expr) === 'ParallelLoop' ? 'parallel for ' : 'for ',
         bindingText,
         ' in ',
         headOperand(collection)
@@ -2980,7 +2994,7 @@ export function serializeEpsil(
     }
 
     // `while`: no iterator clause, and a body that opens with the break guard.
-    if (args.length === 1) {
+    if (args.length === 1 && operator(expr) === 'Loop') {
       const parts = whileParts(args[0]);
       if (parts !== null) {
         // As in the `for` case, the condition belongs to the enclosing loop

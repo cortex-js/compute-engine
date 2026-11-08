@@ -215,7 +215,39 @@ The target is a name with no value (\`ys[1] = 9\` with \`ys\` not declared). The
 
 A string and a tuple are written as \`replaceAt\` writes them, and give a list: with \`s = "abc"\`, \`s[1] = "z"\` gives the list of characters \`["z", "b", "c"]\`. A position past the end, zero or not an integer is the error \`out-of-range\`; the length of a string is its number of characters. A target that is a number, or a position that selects a number (\`xs[1, 1] = 5\` when \`xs\` is a flat list), is the error \`incompatible-type\` of \`replaceAt\`.`,
 
-  'assignment-in-operand': `An assignment is a statement, not a value. In \`f(a := 2)\` and in \`x = (a := 2) + 1\` the assignment is an operand of another expression. Write the assignment as a statement of its own, then use the name: \`a := 2; f(a)\`.`,
+  'add-to-target': `The target of \`+=\` is not a variable or a list element. \`s += e\` is \`s = s + e\`, and \`L[i] += e\` is \`L[i] = L[i] + e\`, with the positions that \`L[i] = v\` accepts: \`m[j, i] += e\` and \`m[j][i] += e\` are the same element.
+
+A field (\`p.x += 1\`), a call (\`f(x) += 1\`) and a string position (\`d["a"] += 1\`) are not accepted. Write the assignment in full, \`p.x = p.x + 1\`, where that form is valid.`,
+
+  'parallel-clause-not-first': `In a comprehension, only the first clause can be \`parallel\`: \`[f(x, y) parallel for x in xs, y in ys]\`. The first clause gives the passes, which can run in any order; the other clauses run in order inside each pass, so they cannot be parallel.
+
+To run the inner clause in parallel instead, make it the first clause, or write a parallel comprehension inside the body: \`[[f(x, y) parallel for y in ys] for x in xs]\`.`,
+
+  'parallel-outer-write': `The body of a \`parallel for\` loop changes a variable that is declared outside the loop, and the change is not a \`+=\`. The passes of a parallel loop can run in any order, so a write such as \`L[c] = v\`, \`s = s + 1\` or \`L = replaceAt(L, c, v)\` would give a result that depends on that order.
+
+Write the change as \`+=\`: \`L[c] += 1\`, \`s += x\`. A variable that the body changes with \`+=\` is an accumulator: each pass adds its contributions, and the final value is the value before the loop plus all the contributions. The body can declare and change its own locals with \`let\` and \`=\`.`,
+
+  'parallel-accumulator-read': `The body of a \`parallel for\` loop reads a variable that it also changes with \`+=\` (an accumulator). While the loop runs, the value of an accumulator depends on which passes have run, so a read of it in the body gives an unspecified value. (This is the rule of the Dex language and of OpenMP.)
+
+\`epsil check\` reports a read written by name in the body, also in a function literal written in the body: \`L[c] += L[d]\` and \`if s > 3 { … }\`. A read by another route cannot be found before the program runs, and is not reported: a function that the body calls (\`s += total(k)\` with \`function total(x) { s + x }\`), \`parse("s")\`, a function of the host. Its value is still unspecified. The interpreter and the JavaScript target run the passes in order and give the value that this order gives, but a target that runs the passes in parallel declines such a loop, and a later version can give another value.
+
+Read the value after the loop. To use a value of the list from before the loop, copy it first: \`let H = L\` before the loop, then \`L[c] += H[d]\` in the body.`,
+
+  'parallel-effect': `The body of a parallel loop or a parallel comprehension can have only the \`random\` effect. Its passes can run in any order, so an effect such as \`console\` (\`print\`) or \`state\` would happen in an order that is not specified. The message lists the effects that the engine inferred for the body, also for the functions that it calls: a function of the program has the effects of its body, and a loop variable or a parameter whose type is a function type has the effects of that type. \`any\` means that the body calls a function that can have any effect.
+
+Move the effect out of the loop: collect the values with a parallel comprehension, then print them after it. A random draw is accepted: inside \`WithRandomSeed\`, each pass draws from its own frame, so the values do not depend on the order of the passes.
+
+A call of a function value whose type is not known, such as a function that an unannotated parameter holds, is inferred \`pure\`: in \`function run(fs) { parallel for f in fs { f() } }\`, a \`print\` in a function of \`fs\` is not seen. Annotate the parameter with the effects that it admits (\`fs: list<() any -> any>\`) to have such a loop checked.`,
+
+  'parallel-exit': `A \`break\`, \`continue\` or \`return\` in the body of a parallel loop would leave the loop, or skip the rest of a pass, in an order that depends on how the passes run. A parallel loop always runs every pass.
+
+An inner loop of the body can use \`break\` and \`continue\`: they leave or skip that inner loop only. To skip the rest of a pass, put it in an \`if\`.`,
+
+  'parallel-comprehension-write': `The body of a parallel comprehension changes a variable that is declared outside it. A parallel comprehension gives one element for each pass and changes nothing else, also with \`+=\`.
+
+To add to a variable in each pass, use the statement form: \`parallel for x in xs { s += f(x) }\`. The body of the comprehension can declare and change its own locals in a \`do { … }\` block.`,
+
+  'assignment-in-operand': `An assignment is a statement, not a value. In \`f(a := 2)\` and in \`x = (a := 2) + 1\` the assignment is an operand of another expression. Write the assignment as a statement of its own, then use the name: \`a := 2; f(a)\`. The compound assignment \`+=\` is an assignment too: write \`s += 1; f(s)\`, not \`f(s += 1)\`.`,
 
   'assignment-type-mismatch': `An assignment gives a local a value whose type cannot be the type of the local. The type of a local is its declared type (\`let n: integer = 0\`), or else the type of its first value, widened: a number gives \`number\`, a string gives \`string\`, a boolean gives \`boolean\`, and the elements of a list, a set or a tuple widen the same way. So \`s = 0\` then \`s = s + 0.5\` is valid, and \`s = 0\` then \`s = "x"\` is this error. Use another name for a value of another type.`,
 

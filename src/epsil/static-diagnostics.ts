@@ -14,6 +14,7 @@ import {
   symbol,
 } from '../math-json/utils.js';
 import { narrowGuardedReads } from './presence-narrowing.js';
+import { parallelLoopDiagnostics } from './parallel-checks.js';
 import type {
   EffectSet,
   FunctionSignature,
@@ -1069,6 +1070,11 @@ function canonicalizationDiagnostics(
       }
       // Otherwise canonicalization is best-effort: a statement the engine
       // cannot box is left to the run phase rather than crashing the check.
+      // The rules of its parallel loops still apply: the run time can
+      // evaluate a statement that the check could not box. The effect rule
+      // boxes a function literal of its own, and refuses with the effect
+      // `any` when it cannot.
+      diagnostics.push(...parallelLoopDiagnostics(ce, statement));
       continue;
     } finally {
       ce._epsilDeclarationRoute = enclosingRoute;
@@ -1132,6 +1138,12 @@ function canonicalizationDiagnostics(
       clauseRedefinition === undefined
     )
       recordEffectSummary(ce, statement, boxed, effects);
+
+    // The rules of the parallel loops and comprehensions of the statement
+    // (`parallel-checks.ts`). Read after the statement is boxed, so the
+    // effects of a function that this statement or an earlier one defines
+    // are known. The boxed statement gives the static types of rule 2.
+    diagnostics.push(...parallelLoopDiagnostics(ce, statement, boxed));
 
     // A declaration whose initializer PROVABLY cannot satisfy the annotation
     // is a static problem too, even though `Declare` only enforces it at
@@ -1831,7 +1843,8 @@ function equationBodyDiagnostics(
         );
         return;
       }
-      case 'Loop': {
+      case 'Loop':
+      case 'ParallelLoop': {
         const [body, ...iterators] = operands(node);
         if (body !== undefined) visit(body, 'discarded');
         for (const iterator of iterators) visit(iterator, 'used');

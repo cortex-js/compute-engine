@@ -216,7 +216,7 @@ export function deriveSignatureResultType(
     } else if (
       !isFunction(e) ||
       e.operatorDefinition?.scoped ||
-      ['Assign', 'Declare', 'Return', 'Loop', 'Break', 'Continue'].includes(
+      ['Assign', 'AddTo', 'Declare', 'Return', 'Loop', 'Break', 'Continue'].includes(
         e.operator
       )
     ) {

@@ -2494,6 +2494,7 @@ function collectWritesMasked(
   }
   if (
     expr.operator === 'Assign' ||
+    expr.operator === 'AddTo' ||
     expr.operator === 'Declare' ||
     expr.operator === 'DefineFunction'
   ) {
@@ -2874,6 +2875,20 @@ class Walker {
           );
         }
       } else this.scopeWrite(expr, ctx, /* confinable */ true);
+      for (const op of expr.ops.slice(1)) this.visit(op, ctx);
+      return;
+    }
+
+    if (head === 'AddTo') {
+      // `AddTo(s, e)` and `AddTo(At(L, i), e)` rebind `s` or `L`, as the
+      // `Assign` forms they stand for do (`evaluateAddTo()`,
+      // `library/control-structures.ts`), so the write is judged on that
+      // name: a write to a local of the literal is confined. The positions
+      // of an `At` target and the value are evaluated.
+      this.scopeWrite(expr, ctx, /* confinable */ true);
+      const target = expr.ops[0];
+      if (isFunction(target, 'At'))
+        for (const op of target.ops.slice(1)) this.visit(op, ctx);
       for (const op of expr.ops.slice(1)) this.visit(op, ctx);
       return;
     }
@@ -3716,6 +3731,12 @@ function assignTargets(expr: Expression): (string | undefined)[] {
   // `assignTargets` on a `Field` target inherits the rebinding reading above,
   // so a new one must make the same distinction.
   if (isFunction(target, 'Field')) {
+    const base = sym(target.ops[0]);
+    if (base !== undefined) return [base];
+  }
+  // The `At` target of an `AddTo`, `AddTo(At(L, i), e)`, rebinds the list
+  // `L` (`evaluateAddTo()`, `library/control-structures.ts`).
+  if (expr.operator === 'AddTo' && isFunction(target, 'At')) {
     const base = sym(target.ops[0]);
     if (base !== undefined) return [base];
   }

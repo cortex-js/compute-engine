@@ -412,7 +412,27 @@ constructors) are **global** — a `type` statement is only allowed at the top
 level of a program, and the declared name means the same thing everywhere on
 the engine.
 
-`let` and `const` are the binding keywords. There is currently no compound
-assignment (`+=`); destructuring declarations (`let (x, y) = t`) and
-destructuring assignments (`(x, y) := t`) are described above.
+`let` and `const` are the binding keywords. Destructuring declarations
+(`let (x, y) = t`) and destructuring assignments (`(x, y) := t`) are described
+above.
+
+## Compound assignment {#compound-assignment}
+
+`s += e` adds `e` to the variable `s`: it is `s = s + e`. `L[i] += e` adds `e`
+to an element of a list: it is `L[i] = L[i] + e`, with the positions that
+`L[i] = v` accepts (`m[j, i] += e`, `m[j][i] += e`). Each position is
+evaluated once, before `e`.
+
+```epsil-live
+let L = [1, 2, 3]
+L[2] += 10
+L
+// ➔ [1, 12, 3]
+```
+
+Any other target (a field `p.x`, a call, a string position) is the error
+`add-to-target`. `+=` is the only compound assignment. In the body of a
+[`parallel for` loop](/epsil/control-flow/#parallel-loops), it adds a
+contribution to a variable declared outside the loop. The MathJSON form is
+`["AddTo", target, e]`.
 

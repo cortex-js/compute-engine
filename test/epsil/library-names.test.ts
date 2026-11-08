@@ -462,6 +462,29 @@ describe('the resolution pass', () => {
     });
   });
 
+  test('a parallel loop and comprehension bind their variables', () => {
+    // `parallel for` binds its variable as `for` does: in the body, `pi` is
+    // the loop variable, not the constant.
+    expect(resolved('[pi parallel for pi in [1, 2]]')).toEqual({
+      fn: [
+        'ParallelComprehension',
+        { sym: 'pi' },
+        {
+          fn: [
+            'Element',
+            { sym: 'pi' },
+            { fn: ['List', { num: '1' }, { num: '2' }] },
+          ],
+        },
+      ],
+    });
+    const loop = resolved('parallel for pi in [1, 2] { s += pi }') as {
+      fn: unknown[];
+    };
+    expect(loop.fn[0]).toBe('ParallelLoop');
+    expect(JSON.stringify(loop.fn[1])).not.toContain('Pi');
+  });
+
   test('a verbatim callee borrows nothing from the library', () => {
     // `` `integrate` `` is the raw symbol, not `Integrate`, so it binds no
     // variable: both `sin` are the sine.
@@ -497,6 +520,8 @@ describe('the resolution pass', () => {
       'NDSolveFunction',
       'NotExists',
       'NotForAll',
+      'ParallelComprehension',
+      'ParallelLoop',
       'Product',
       'Series',
       'Sum',

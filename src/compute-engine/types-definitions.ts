@@ -2905,8 +2905,8 @@ export type OperatorDefinitionFlags = {
    * Without this handler, every operand of an operator that is not `lazy`
    * is a `value`, and every operand of a `lazy` operator is `raw`.
    *
-   * An `Assign` or a `Declare` operand at a `value`, `held` or `raw`
-   * position is the error `assignment-in-operand`: an assignment is a
+   * An `Assign`, an `AddTo` or a `Declare` operand at a `value`, `held` or
+   * `raw` position is the error `assignment-in-operand`: an assignment is a
    * statement, not a value. At a `statement` or an `opaque` position it is
    * valid.
    *

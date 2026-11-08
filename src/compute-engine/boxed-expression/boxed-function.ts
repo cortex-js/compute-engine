@@ -24223,7 +24223,8 @@ async function evaluateAsyncOverListedFlatMaps(
 
 /**
  * `ops`, the operands of an expression whose operator binds to the
- * definition `def`, where each operand that is an `Assign` or a `Declare`
+ * definition `def`, where each operand that is an `Assign`, an `AddTo` (the
+ * compound assignment `s += e`) or a `Declare`
  * at a position whose role is not `statement` or `opaque` is replaced by the
  * static error `["Error", ["ErrorCode", "assignment-in-operand", name]]`,
  * with `name` the target of the assignment when it is a symbol. The roles
@@ -24246,13 +24247,16 @@ function withoutStatementOperands(
   let roles: ReadonlyArray<string> | undefined | null = null;
   ops.forEach((op, i) => {
     const head = op.operator;
-    if (head !== 'Assign' && head !== 'Declare') return;
+    if (head !== 'Assign' && head !== 'Declare' && head !== 'AddTo') return;
     if (roles === null)
       roles =
         def && isOperatorDef(def) ? def.operator.operandRoles(ops) : undefined;
     const role = roles?.[i];
     if (role === 'statement' || role === 'opaque') return;
-    const target = isFunction(op) ? op.ops[0] : undefined;
+    // The target of an `AddTo` can also be an element, `At(L, i…)`: the
+    // name is then that of the list.
+    let target = isFunction(op) ? op.ops[0] : undefined;
+    if (head === 'AddTo' && isFunction(target, 'At')) target = target.op1;
     const name = isSymbol(target) ? target.symbol : undefined;
     result ??= [...ops];
     result[i] = ce.error(

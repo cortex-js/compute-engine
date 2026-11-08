@@ -1,9 +1,11 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import {
+  beginParallelLoop,
   deriveSubstream,
   foldSeed,
   frameDraw,
   mixTags,
+  parallelPassFrame,
   pcg3d,
   pcg3dWords,
 } from '../../src/compute-engine/numerics/random';
@@ -469,5 +471,54 @@ describe('deriveSubstream — pinned streams (DO NOT REGENERATE)', () => {
     expect(mixTags(1)).toBe(1);
     expect(mixTags(1, 2)).toBe(33);
     expect(mixTags(2, 1)).toBe(63);
+  });
+});
+
+// The frames of the passes of a parallel loop (`docs/RANDOMNESS-MODEL.md` §3,
+// "Pass frames"): the loop consumes index `b` of the enclosing frame, its
+// base words are `(u0, u2)` of `pcg3d(seedLo, seedHi, b)`, and pass `k`
+// draws from the frame seeded by the first two words of `pcg3d(u0, u2, k)`.
+// The same contract as the vectors above: DO NOT REGENERATE.
+describe('parallel pass frames — pinned words (DO NOT REGENERATE)', () => {
+  it('the loop consumes exactly one index of the enclosing frame', () => {
+    const frame = { seedLo: 0x40450000, seedHi: 0, next: 0 };
+    const base = beginParallelLoop(frame);
+    expect(frame.next).toBe(1);
+    // `u0` is the `w0` of draw 0 of seed 42 (the §4 worked vector), and `u2`
+    // is the third word of the same triple.
+    expect(base).toEqual([0xbc9a5701, 0x1d9bfda6]);
+    expect(pcg3dWords(0x40450000, 0, 0)).toEqual([
+      0xbc9a5701, 0xbf196adb, 0x1d9bfda6,
+    ]);
+  });
+
+  it.each([
+    [1, 0x99119553, 0x91a7215a, 0.4704818508978077, 0.3766592065311457],
+    [2, 0xa189bd03, 0x517dfbf9, 0.9950572333920026, 0.6581491678032402],
+    [3, 0xa5ee3175, 0x9544ab76, 0.6074182737763832, 0.5952890501579652],
+  ])(
+    'seed 42, b = 0, pass %i',
+    (k, seedLo, seedHi, draw0, draw1) => {
+      const frame = parallelPassFrame([0xbc9a5701, 0x1d9bfda6], k);
+      expect(frame).toEqual({ seedLo, seedHi, next: 0 });
+      // The definition, from the PCG3D words.
+      const [v0, v1] = pcg3d(0xbc9a5701, 0x1d9bfda6, k);
+      expect([v0, v1]).toEqual([seedLo, seedHi]);
+      expect(frameDraw(seedLo, seedHi, 0)).toBe(draw0);
+      expect(frameDraw(seedLo, seedHi, 1)).toBe(draw1);
+    }
+  );
+
+  it('a string seed, inside a frame that has drawn 5 times', () => {
+    const [seedLo, seedHi] = foldSeed('cell-a7');
+    const frame = { seedLo, seedHi, next: 5 };
+    const base = beginParallelLoop(frame);
+    expect(frame.next).toBe(6);
+    expect(base).toEqual([0xc91c5dfd, 0x44a48e57]);
+    expect(parallelPassFrame(base, 1)).toEqual({
+      seedLo: 0x98fbac7b,
+      seedHi: 0xec7c13fc,
+      next: 0,
+    });
   });
 });

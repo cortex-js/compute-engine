@@ -3758,6 +3758,38 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       ]);
     },
   },
+  // The parallel loop and comprehension of Epsil (`parallel for`) have no
+  // LaTeX notation of their own: they are written in the function form,
+  // `\operatorname{ParallelLoop}\left(body, k\in1..n\right)`, which the
+  // generic function-call parse reads back. A guarded clause, `Element(x, L,
+  // cond)`, is itself written in the function form: its infix spelling would
+  // chain the `\in` (`x\in L\in cond`), which re-parses as a nested
+  // membership. A `Block` body writes itself in parentheses (see the `Block`
+  // serializer), and the parse gives `Delimiter(Block(…))`, which
+  // canonicalizes back to the same `Block`.
+  ...['ParallelLoop', 'ParallelComprehension'].map((name) => ({
+    name,
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
+      joinLatex([
+        `\\operatorname{${name}}\\left(`,
+        operands(expr)
+          .map((x) =>
+            operator(x) === 'Element' &&
+            nops(x) >= 3 &&
+            symbol(operand(x, 3)) !== 'Nothing'
+              ? joinLatex([
+                  '\\operatorname{Element}\\left(',
+                  operands(x)
+                    .map((y) => serializer.serialize(y))
+                    .join(', '),
+                  '\\right)',
+                ])
+              : serializer.serialize(x)
+          )
+          .join(', '),
+        '\\right)',
+      ]),
+  })),
   // Serializer for Comprehension expressions (value-producing)
   {
     name: 'Comprehension',
