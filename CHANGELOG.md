@@ -56,6 +56,15 @@
 
 ### Resolved Issues
 
+- **Two integral signs with both differentials in the numerator of a
+  fraction give the right value when a term is before the inner integral.**
+  `\int_1^2 1+\int_3^4 \frac{dx\,dy}{xy}` was parsed with no variable for
+  the outer integral and evaluated to about 1.1111. It is now parsed as
+  `\int_1^2 1+\int_3^4 \frac{1}{xy}\,dx\,dy` is, the integral over `y` of
+  `1 + \int_3^4 \frac{dx}{xy}`, and evaluates to `1 + 2ln(2)^2 - ln(2)ln(3)`,
+  about 1.1994. The same holds for a difference
+  (`\int_1^2 1-\int_3^4 \frac{dx\,dy}{xy}`), and a term after the inner
+  integrand (`… + 5`) is outside both integrals.
 - **A function declared through a type alias of a signature types its calls
   from that signature.** With `ce.declareType('Fn', '(integer) ->
   list<real>', { alias: true })` and `ce.declare('g', 'Fn')`, `g(3)` was

@@ -679,6 +679,144 @@ describe('DIFFERENTIALS IN THE NUMERATOR OF A MULTIPLE INTEGRAL', () => {
       ce.parse('\\int_1^2 2\\int_3^4 \\frac{dx\\,dy}{xy}').evaluate().toString()
     ).toBe('-2ln(2) * ln(3) + 4ln(2)^2');
   });
+
+  // The inner integral is the last term of the body of the outer integral.
+  // The outer integral takes `dy`, and the terms before the inner integral
+  // are in its integrand.
+  test('a term before the inner integral (CE-1124)', () => {
+    const same = (fraction: string, tokens: string) =>
+      expect(raw(fraction)).toEqual(raw(tokens));
+    expect(raw('\\int_1^2 1+\\int_3^4 \\frac{dx\\,dy}{xy}')).toEqual([
+      'Integrate',
+      [
+        'Add',
+        1,
+        [
+          'Integrate',
+          ['Divide', 1, ['InvisibleOperator', 'x', 'y']],
+          ['Tuple', 'x', 3, 4],
+        ],
+      ],
+      ['Tuple', 'y', 1, 2],
+    ]);
+    same(
+      '\\int_1^2 1-\\int_3^4 \\frac{dx\\,dy}{xy}',
+      '\\int_1^2 1-\\int_3^4 \\frac{1}{xy}\\,dx\\,dy'
+    );
+    // Several terms, and a factor or a negation before the inner integral
+    same(
+      '\\int_1^2 1+2-\\int_3^4 \\frac{dx\\,dy}{xy}',
+      '\\int_1^2 1+2-\\int_3^4 \\frac{1}{xy}\\,dx\\,dy'
+    );
+    same(
+      '\\int_1^2 1-2+\\int_3^4 \\frac{dx\\,dy}{xy}',
+      '\\int_1^2 1-2+\\int_3^4 \\frac{1}{xy}\\,dx\\,dy'
+    );
+    same(
+      '\\int_1^2 1-2\\int_3^4 \\frac{dx\\,dy}{xy}',
+      '\\int_1^2 1-2\\int_3^4 \\frac{1}{xy}\\,dx\\,dy'
+    );
+    same(
+      '\\int_1^2 1+-\\int_3^4 \\frac{dx\\,dy}{xy}',
+      '\\int_1^2 1+-\\int_3^4 \\frac{1}{xy}\\,dx\\,dy'
+    );
+    // Three signs, with a term before the second and the third
+    same(
+      '\\int_0^1 7-\\int_1^2 1+\\int_3^4 \\frac{dx\\,dy\\,dz}{xyz}',
+      '\\int_0^1 7-\\int_1^2 1+\\int_3^4 \\frac{1}{xyz}\\,dx\\,dy\\,dz'
+    );
+    expect(
+      ce.parse('\\int_1^2 1+\\int_3^4 \\frac{dx\\,dy}{xy}').evaluate().toString()
+    ).toBe('1 + 2ln(2)^2 - ln(2) * ln(3)');
+    expect(
+      ce.parse('\\int_1^2 1-\\int_3^4 \\frac{dx\\,dy}{xy}').evaluate().toString()
+    ).toBe('1 - 2ln(2)^2 + ln(2) * ln(3)');
+  });
+
+  // The terms after the inner integrand are outside both integrals, with the
+  // sign they are written with, also when the inner integral is subtracted.
+  test('terms before and after the inner integral (CE-1124)', () => {
+    const same = (fraction: string, tokens: string) =>
+      expect(raw(fraction)).toEqual(raw(tokens));
+    expect(raw('\\int_1^2 1+\\int_3^4 \\frac{dx\\,dy}{xy} + 5')).toEqual([
+      'Add',
+      [
+        'Integrate',
+        [
+          'Add',
+          1,
+          [
+            'Integrate',
+            ['Divide', 1, ['InvisibleOperator', 'x', 'y']],
+            ['Tuple', 'x', 3, 4],
+          ],
+        ],
+        ['Tuple', 'y', 1, 2],
+      ],
+      5,
+    ]);
+    same(
+      '\\int_1^2 1+\\int_3^4 \\frac{dx\\,dy}{xy} - 5',
+      '\\int_1^2 1+\\int_3^4 \\frac{1}{xy}\\,dx\\,dy - 5'
+    );
+    same(
+      '\\int_1^2 1+\\int_3^4 \\frac{dx\\,dy}{xy} - 5 + z',
+      '\\int_1^2 1+\\int_3^4 \\frac{1}{xy}\\,dx\\,dy - 5 + z'
+    );
+    same(
+      '\\int_1^2 1+2+\\int_3^4 \\frac{dx\\,dy}{xy} + 5 + z',
+      '\\int_1^2 1+2+\\int_3^4 \\frac{1}{xy}\\,dx\\,dy + 5 + z'
+    );
+    same(
+      '\\int_1^2 1-\\int_3^4 \\frac{dx\\,dy}{xy} + 5',
+      '\\int_1^2 1-\\int_3^4 \\frac{1}{xy}\\,dx\\,dy + 5'
+    );
+    same(
+      '\\int_1^2 y-\\int_3^4 \\frac{dx\\,dy}{xy} - 5 + z',
+      '\\int_1^2 y-\\int_3^4 \\frac{1}{xy}\\,dx\\,dy - 5 + z'
+    );
+    same(
+      '\\int_1^2 1+2\\int_3^4 \\frac{dx\\,dy}{xy} + 5',
+      '\\int_1^2 1+2\\int_3^4 \\frac{1}{xy}\\,dx\\,dy + 5'
+    );
+    same(
+      '\\int_0^1 7+\\int_1^2 1+\\int_3^4 \\frac{dx\\,dy\\,dz}{xyz} + 5',
+      '\\int_0^1 7+\\int_1^2 1+\\int_3^4 \\frac{1}{xyz}\\,dx\\,dy\\,dz + 5'
+    );
+    // The term after the inner integrand is an integral with two
+    // differentials: the outer integral takes the `dy` of the first one.
+    same(
+      '\\int_1^2 1+\\int_3^4 \\frac{dx\\,dy}{xy} + \\int_5^6 \\frac{du\\,dv}{uv}',
+      '\\int_1^2 1+\\int_3^4 \\frac{1}{xy}\\,dx\\,dy + \\int_5^6 \\frac{du\\,dv}{uv}'
+    );
+    expect(
+      ce
+        .parse('\\int_1^2 1+\\int_3^4 \\frac{dx\\,dy}{xy} + 5')
+        .evaluate()
+        .toString()
+    ).toBe('6 + 2ln(2)^2 - ln(2) * ln(3)');
+  });
+
+  test('an integral with its own differential takes none from a later term (CE-1124)', () => {
+    // The first integral has `dy` in its first term and ends before the `+`.
+    // The second integral keeps both of its differentials.
+    expect(
+      raw('\\int_1^2 \\frac{dy}{y} + \\int_3^4 \\frac{dx\\,dz}{xz}')
+    ).toEqual([
+      'Add',
+      ['Integrate', ['Divide', 1, 'y'], ['Tuple', 'y', 1, 2]],
+      [
+        'Integrate',
+        ['Divide', 1, ['InvisibleOperator', 'x', 'z']],
+        ['Tuple', 'z', 3, 4],
+        'x',
+      ],
+    ]);
+    // An inner integral with one differential gives none to the outer one
+    expect(raw('\\int_1^2 1+\\int_3^4 \\frac{dx}{x}')).toEqual(
+      raw('\\int_1^2 1+\\int_3^4 \\frac{1}{x}\\,dx')
+    );
+  });
 });
 
 describe('EXOTIC INTEGRALS', () => {

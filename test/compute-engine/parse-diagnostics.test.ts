@@ -261,6 +261,25 @@ describe('bound variables do not fire undeclared-symbol (A1)', () => {
     ).toEqual(['y']);
   });
 
+  test('a term before the inner of two integrals that share a fraction is bound (CE-1124)', () => {
+    // The outer integral takes `dy`, and its integrand is the sum of `y` and
+    // the inner integral: that `y` is bound. A `y` after the inner integrand
+    // is outside both integrals, and fires. `x` is bound in the inner
+    // integral only, so an `x` before it fires.
+    const before = '\\int_1^2 y+\\int_3^4 \\frac{dx\\,dy}{xy}';
+    expect(undeclaredNames(before)).toEqual([]);
+    const after = `${before} + y`;
+    const ds = byCode(diags(after), 'undeclared-symbol');
+    expect(ds.map((d) => d.detail?.name)).toEqual(['y']);
+    expect(ds[0].start).toBeGreaterThan(after.lastIndexOf('+'));
+    expect(
+      undeclaredNames('\\int_1^2 y-2\\int_3^4 \\frac{dx\\,dy}{xy} - d')
+    ).toEqual(['d']);
+    expect(undeclaredNames('\\int_1^2 x+\\int_3^4 \\frac{dx\\,dy}{xy}')).toEqual(
+      ['x']
+    );
+  });
+
   test('the d of a differential inside a fraction does not fire (CE-291)', () => {
     // The parser reads `dx` inside a fraction as the product of a symbol `d`
     // and `x`, then takes the differential out of the product. That `d` is

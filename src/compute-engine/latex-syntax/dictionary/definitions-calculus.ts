@@ -26,7 +26,11 @@ import { endsTabularCell } from '../tokenizer.js';
  * inner integral again with one differential per sign and takes the others
  * (`claimExcessDifferentials()`). The enclosing integral also takes them when
  * the inner integral is the last factor of a product or the operand of a
- * negation that is its whole body (`\int_1^2 2\int_3^4 \frac{dx\,dy}{xy}`).
+ * negation that is its whole body (`\int_1^2 2\int_3^4 \frac{dx\,dy}{xy}`),
+ * and when its body is a sum or a difference that has no differential in its
+ * terms and whose last term holds the inner integral
+ * (`\int_1^2 1+\int_3^4 \frac{dx\,dy}{xy}`, see
+ * `claimExcessDifferentialsInSum()`).
  * When terms follow the integrand of the inner integral
  * (`\int_1^2\int_3^4 \frac{dx\,dy}{xy} + 1`), they are outside both
  * integrals, as in `\int_1^2\int_3^4 \frac{1}{xy}\,dx\,dy + 1`.
@@ -48,6 +52,30 @@ type IntegralParts = {
 /** A term of a sum, with `true` when it is subtracted. */
 type SignedTerm = [term: MathJsonExpression, negative: boolean];
 const excessDifferentials = new WeakMap<object, IntegralParts>();
+
+/**
+ * The results of `parseIntegral()` that are a key of `excessDifferentials`
+ * and are a sum (`Add(I, 5)` for `\int_3^4 \frac{dx\,dy}{xy} + 5`), keyed by
+ * the first operand of the sum.
+ *
+ * The parser of `+` does not keep a right operand that is a sum: it makes one
+ * sum with the operands of both sides, so `1 + Add(I, 5)` is `Add(1, I, 5)`
+ * and the recorded result is not in the body of the enclosing integral. The
+ * operands are the same objects, so the recorded result is found from its
+ * first operand (see `claimExcessDifferentialsInSum()`). The first operand is
+ * an integral or a difference that `finishIntegral()` made for this result,
+ * so it is the key of one result only.
+ */
+const mergedExcessDifferentials = new WeakMap<object, MathJsonExpression>();
+
+/** What an enclosing integral takes from an inner integral that has more
+ * differentials than signs: see `claimExcessDifferentials()`. */
+type ClaimedDifferentials = {
+  fn: MathJsonExpression;
+  indexes: string[];
+  rest: SignedTerm[];
+  integrandEnd: number;
+};
 
 // See https://de.wikipedia.org/wiki/Formelsatz
 // for a discussion of typographical notation in Germany, Russia and France
@@ -212,6 +240,16 @@ function parseIntegral(command: string, nIntegrals = 1) {
             ) ?? 'Nothing'
           );
         }
+        // With no differential in any term, this integral takes the
+        // differentials that an inner integral in the last term has no sign
+        // for (`\int_1^2 1+\int_3^4 \frac{dx\,dy}{xy}`), as it does above
+        // when the inner integral is the whole body. This search comes after
+        // the search for a differential in the terms: in
+        // `\int_1^2 \frac{dy}{y} + \int_3^4 \frac{dx\,dz}{xz}` the first
+        // integral has its own differential and ends before the `+`, so the
+        // second integral keeps `dz`.
+        const claimed = claimExcessDifferentialsInSum(fn);
+        if (claimed !== null) ({ fn, indexes, rest, integrandEnd } = claimed);
       } else if (operator(fn) === 'Divide') {
         // We recognize \frac{dx}{x} as an integral
         let altNumerator: MathJsonExpression | null;
@@ -316,8 +354,11 @@ function finishIntegral(
   const integral = makeIntegral(command, fn, { indexes, subs, sups });
   if (integral === null && rest.length === 0) return null;
   const result = addTerms(integral ?? 'Nothing', rest);
-  if (parts !== null && Array.isArray(result))
+  if (parts !== null && Array.isArray(result)) {
     excessDifferentials.set(result, parts);
+    const first = operator(result) === 'Add' ? operand(result, 1) : null;
+    if (Array.isArray(first)) mergedExcessDifferentials.set(first, result);
+  }
   return result;
 }
 
@@ -336,12 +377,9 @@ function finishIntegral(
  * again in it. A product is searched only at its last factor, as
  * `parseSubintegrand()` searches it for a differential.
  */
-function claimExcessDifferentials(body: MathJsonExpression): {
-  fn: MathJsonExpression;
-  indexes: string[];
-  rest: SignedTerm[];
-  integrandEnd: number;
-} | null {
+function claimExcessDifferentials(
+  body: MathJsonExpression
+): ClaimedDifferentials | null {
   if (!Array.isArray(body)) return null;
   const parts = excessDifferentials.get(body);
   if (parts !== undefined) {
@@ -370,6 +408,76 @@ function claimExcessDifferentials(body: MathJsonExpression): {
     if (claimed === null) return null;
     return { ...claimed, fn: [h, ...args.slice(0, -1), claimed.fn] };
   }
+  return null;
+}
+
+/**
+ * When the last term of the sum or the difference `sum` holds an integral
+ * that took more differentials than it has signs, make that integral again
+ * as `claimExcessDifferentials()` does. Return the sum with that integral as
+ * `fn`, and the other parts as that function returns them: the terms written
+ * after the integrand of the inner integral (`rest`) are not in `fn`, because
+ * they go after the enclosing integral. Return `null` otherwise.
+ *
+ * Only the last term is searched: an integral reads every term that follows
+ * its integrand, so no term of the enclosing body comes after it. The last
+ * term is the last operand of an `Add` or the second operand of a `Subtract`;
+ * it can be a product or a negation that holds the integral, or again a sum
+ * or a difference (`1 + 2 - I` is `Add(1, Subtract(2, I))`).
+ *
+ * In `\int_1^2 1+\int_3^4 \frac{dx\,dy}{xy} + 5`, the inner integral
+ * returns `Add(I, 5)`, and the parser of `+` makes `Add(1, I, 5)` of it. The
+ * recorded result `Add(I, 5)` is then not an operand of `sum`, but its
+ * operands are the last operands of `sum`, as the same objects (see
+ * `mergedExcessDifferentials`). They are replaced by the integral made again,
+ * and `5` is in `rest`. This case is tried first, so that when the term after
+ * the inner integrand is itself an integral with more differentials than
+ * signs, the differentials of the first of the two are taken, as they are
+ * when the recorded result is the whole body.
+ *
+ * The terms of `rest` keep the sign they are written with, also when the
+ * inner integral is subtracted: `1 - I + 5` adds 5. The parser does not keep
+ * a brace group, so `1-{\int_3^4 \frac{dx\,dy}{xy} + 5}` gives the same
+ * expression as the spelling without braces, and 5 is added there too,
+ * although the group subtracts it. `claimExcessDifferentials()` has the same
+ * limit for a negation or a factor before such a group.
+ */
+function claimExcessDifferentialsInSum(
+  sum: MathJsonExpression
+): ClaimedDifferentials | null {
+  const h = operator(sum);
+  const inLastTerm = (term: MathJsonExpression) =>
+    claimExcessDifferentials(term) ?? claimExcessDifferentialsInSum(term);
+
+  if (h === 'Subtract' && nops(sum) === 2) {
+    const claimed = inLastTerm(operand(sum, 2)!);
+    if (claimed === null) return null;
+    return { ...claimed, fn: ['Subtract', operand(sum, 1)!, claimed.fn] };
+  }
+
+  if (h === 'Add' && nops(sum) >= 2) {
+    const args = operands(sum);
+    for (let i = 1; i < args.length - 1; i++) {
+      const first = args[i];
+      const merged = Array.isArray(first)
+        ? mergedExcessDifferentials.get(first)
+        : undefined;
+      if (merged === undefined) continue;
+      const mergedArgs = operands(merged);
+      if (
+        mergedArgs.length !== args.length - i ||
+        !mergedArgs.every((arg, k) => arg === args[i + k])
+      )
+        continue;
+      const claimed = claimExcessDifferentials(merged);
+      if (claimed === null) return null;
+      return { ...claimed, fn: ['Add', ...args.slice(0, i), claimed.fn] };
+    }
+    const claimed = inLastTerm(args[args.length - 1]);
+    if (claimed === null) return null;
+    return { ...claimed, fn: ['Add', ...args.slice(0, -1), claimed.fn] };
+  }
+
   return null;
 }
 
