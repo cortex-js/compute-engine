@@ -91,6 +91,8 @@ import {
   inlineCallParameters,
   isStatementListScope,
   literalArgumentsWithDefaults,
+  qualifiedCallForm,
+  qualifiedCallShadowedError,
   snapshotRunVariables,
   type ApplyOptions,
 } from '../function-utils.js';
@@ -245,6 +247,11 @@ import {
 import type { Rule } from '../types-evaluation.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import { evaluateInOwnBindings } from '../boxed-expression/binders.js';
+import { hasNamedArguments } from '../boxed-expression/named-arguments.js';
+import {
+  markQualifiedName,
+  shadowsLibraryName,
+} from '../library-shadowing.js';
 import { arityBounds } from '../boxed-expression/overload.js';
 import {
   admissionOf,
@@ -438,6 +445,16 @@ import { noteUncachedHostEvaluation } from '../boxed-expression/shared-evaluatio
  * binding form (a parameter, a loop variable, a match pattern) as well.
  */
 const ABSENCE_MARKERS: ReadonlySet<string> = new Set(['Nothing', 'Missing']);
+
+/**
+ * `Module` cannot be rebound either: it is the operator of every qualified
+ * name (`["Module", "Pi"]`, the Epsil `std::pi`), and the engine reads it by
+ * its name, so a user binding of `Module` would change what every qualified
+ * name reads. A declaration, an assignment or a function definition of
+ * `Module` defines nothing and evaluates to the `module-binding` error; the
+ * Epsil static pass reports every other binding form as well.
+ */
+const MODULE_OPERATOR = 'Module';
 
 /**
  * The variables of `expr` when it is a `D`, a `Series` or an indefinite
@@ -753,6 +770,17 @@ function absenceMarkerBindingError(
 ): Expression | undefined {
   return name !== undefined && ABSENCE_MARKERS.has(name)
     ? ce.error(['absence-marker-binding', name])
+    : undefined;
+}
+
+/** The `module-binding` error when `name` is `Module`, the operator of a
+ * qualified name (see `MODULE_OPERATOR`). */
+function moduleBindingError(
+  ce: ComputeEngine,
+  name: string | undefined
+): Expression | undefined {
+  return name === MODULE_OPERATOR
+    ? ce.error(['module-binding', name])
     : undefined;
 }
 
@@ -7134,6 +7162,77 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
   },
   {
+    // `["Module", name]` names the definition of `name` in the system scope,
+    // where the standard library and the libraries of the constructor's
+    // `libraries` option are installed, also in a scope where a local
+    // definition shadows the name (`Pi` declared and assigned `3` in a block).
+    // The serializers write it when the bare name would read another
+    // definition (`hidesLibraryBinding()`, `library-shadowing.ts`), so that a
+    // MathJSON round trip in that scope keeps the value. Epsil writes it
+    // `std::pi`.
+    //
+    // There is no node of this kind in a canonical expression: the canonical
+    // form is the symbol bound to the library definition. A call
+    // `["Apply", ["Module", "Floor"], x]` is the call `Floor(x)` where `Floor`
+    // is not shadowed, else an `Apply` of the library-bound symbol or the
+    // error `qualified-call-shadowed` (`qualifiedCallForm()`,
+    // `function-utils.ts`). A second operand, the
+    // name of another module, is reserved; until it is defined it is an
+    // `unexpected-argument` error.
+    Module: {
+      description:
+        'The definition of a name in the standard library, also where a local definition shadows the name',
+      // The operand is a NAME, not a reference: canonicalizing it would bind
+      // it to the local definition, or declare it when it is not defined.
+      lazy: true,
+      signature: '(symbol) -> unknown',
+      examples: ['Module(Pi)', 'Apply(Module(Floor), 2.5)'],
+      canonical: (ops, { engine: ce }) => {
+        // Each extra operand is an `unexpected-argument` error, also when
+        // `ce.strict` is false: `checkArity()` then keeps the operands as
+        // they are, and the node would be a valid `Module` node that names
+        // nothing.
+        if (ops.length !== 1)
+          return ce._fn('Module', [
+            ...(ops.length === 0 ? [ce.error('missing')] : [ops[0]]),
+            ...ops
+              .slice(1)
+              .map((x) => ce.error('unexpected-argument', x.toString())),
+          ]);
+        const name = sym(ops[0]);
+        if (name === undefined)
+          return ce._fn('Module', [
+            ce.typeError('symbol', ops[0].type, ops[0]),
+          ]);
+        // The error holds the name as written (a symbol that is not bound),
+        // as `ce.error()` holds an expression site.
+        const library = ce._librarySymbol(name);
+        if (library === undefined)
+          return ce.function('Error', [
+            ce.string('not-a-library-name'),
+            ops[0],
+          ]);
+        // Where a local definition shadows the name (a parameter `Pi` of the
+        // function literal whose body is canonicalized), the symbol is a new
+        // node, marked as a qualified name: the repair that points every
+        // occurrence of a parameter name in the body at the parameter
+        // (`rebindToBindings()`, `binders.ts`) keeps a marked node bound to
+        // the library definition. The interned symbol (`ce.Pi`) is shared,
+        // so it cannot be marked.
+        if (isSymbol(library) && shadowsLibraryName(ce, name)) {
+          const own = ce._bindingSymbol(
+            name,
+            ce._evalContextStack[0].lexicalScope
+          );
+          if (own !== undefined) {
+            markQualifiedName(own);
+            return own;
+          }
+        }
+        return library;
+      },
+    },
+
     Apply: {
       description: 'Apply a function to a list of arguments',
       // An application route: it decides what an `Error` argument means
@@ -7190,6 +7289,36 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (args.length === 0) return ce._fn('Apply', checkArity(ce, args, 1));
         const s = sym(args[0]);
         if (s) {
+          // A callee bound to the library definition of its name (the
+          // canonical form of `["Module", "Floor"]`): where the name is
+          // shadowed (a user function or a parameter `Floor`), the call is
+          // not a call by name, which would read the shadow. It stays an
+          // `Apply`, evaluated from the values of its arguments, or is the
+          // error `qualified-call-shadowed` when the library operator holds
+          // or binds an operand (`qualifiedCallForm()`, `function-utils.ts`).
+          const library = ce._evalContextStack[0]?.lexicalScope.bindings.get(
+            s
+          );
+          const callee = args[0];
+          if (
+            library !== undefined &&
+            isSymbol(callee) &&
+            (callee.operatorDefinition !== undefined
+              ? 'operator' in library &&
+                callee.operatorDefinition === library.operator
+              : 'value' in library &&
+                callee.valueDefinition === library.value)
+          ) {
+            const form = qualifiedCallForm(
+              ce,
+              s,
+              library,
+              ce.context.lexicalScope,
+              hasNamedArguments(args.slice(1))
+            );
+            if (form === 'apply') return ce._fn('Apply', args);
+            if (form === 'shadowed') return qualifiedCallShadowedError(ce, s);
+          }
           // The callee was canonicalized as a symbol: when the name is not
           // defined yet, that declared it in the scope of the body of a
           // function literal, as a valueless local. The call reads the
@@ -7542,9 +7671,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // An absence marker cannot be rebound: install nothing (the install
         // below runs at canonicalization, so an evaluate-time refusal alone
         // left `function Missing(x) { x }` callable), and let the evaluate
-        // handler return the `absence-marker-binding` error.
+        // handler return the `absence-marker-binding` error. The same for
+        // `Module` and the `module-binding` error.
         const markerName = sym(symbol);
-        if (markerName !== undefined && ABSENCE_MARKERS.has(markerName))
+        if (
+          markerName !== undefined &&
+          (ABSENCE_MARKERS.has(markerName) || markerName === MODULE_OPERATOR)
+        )
           return ce._fn('DefineFunction', [
             symbol,
             args[1].canonical,
@@ -7892,7 +8025,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([op1, op2, op3], { engine: ce }) => {
         const name = sym(op1);
-        const refused = absenceMarkerBindingError(ce, name);
+        const refused =
+          absenceMarkerBindingError(ce, name) ?? moduleBindingError(ce, name);
         if (refused !== undefined) return refused;
         const attributes = definitionAttributes(op3);
         if (name === undefined)
@@ -14218,7 +14352,8 @@ function* assignSteps(
       ? [sym(op1.op1)]
       : [sym(op1)];
   for (const name of boundNames) {
-    const refused = absenceMarkerBindingError(ce, name);
+    const refused =
+      absenceMarkerBindingError(ce, name) ?? moduleBindingError(ce, name);
     if (refused !== undefined) return refused;
   }
   //
@@ -14828,7 +14963,8 @@ function* declareSteps(
   for (const name of isFunction(ops[0], 'Tuple')
     ? tuplePatternNames(ops[0])
     : [sym(ops[0])]) {
-    const refused = absenceMarkerBindingError(ce, name);
+    const refused =
+      absenceMarkerBindingError(ce, name) ?? moduleBindingError(ce, name);
     if (refused !== undefined) return refused;
   }
   // Separate an optional trailing attributes dictionary. When the last

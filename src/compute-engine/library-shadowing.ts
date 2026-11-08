@@ -78,11 +78,237 @@ export function shadowsLibraryName(
 }
 
 /**
+ * True when a node bound to the definition `def` of the name `name` must be
+ * serialized with the `Module` qualifier: `["Module", name]` for a symbol,
+ * `["Apply", ["Module", name], …operands]` for a call. `def` is the binding
+ * of the node as a scope holds it (`{ value }` or `{ operator }`), or one
+ * of its two parts (`baseDefinition`).
+ *
+ * This is the case when `def` is the definition of `name` in the system
+ * scope (the standard library and the libraries of the constructor's
+ * `libraries` option), and the name reads another definition where the
+ * MathJSON is boxed again, and that definition is a shadow of the library
+ * one (`isShadowOf()`: an extension or a copy that keeps the library
+ * handlers is not). In a block where `Pi` is declared and assigned `3`, a
+ * result built with the library `Pi` written as `"Pi"` would give `3` when
+ * it is boxed again. Elsewhere, this is false and the bare name is written.
+ *
+ * Where the MathJSON is boxed again, the name is read first in the local
+ * scopes of the scoped nodes (a `Function` literal, a `Block`) that enclose
+ * the node in the serialized expression, innermost first, each one for its
+ * own bindings only (`inSerializationScope()`): a serializer does not make
+ * them current, and a parameter `Pi` binds the name in the body. Then it is
+ * read in the scopes of the current scope chain, from the current scope to
+ * the system scope: a function literal made at the top level and serialized
+ * in a scope that declares `Pi` is boxed again in that scope.
+ *
+ * For a call node, pass `isApplicable`, the rule of the lookup that binds a
+ * bare head (`isApplicableDef()`, `function-utils.ts`): a binding that cannot
+ * be applied (a variable `N` declared `integer`) is skipped, so `["N", x]`
+ * still calls the library operator there, and no qualifier is needed.
+ *
+ * The test is made for each node that the serializers write, and most of
+ * these nodes are bound to the library, so the cheap parts come first. A
+ * node with no definition, or with a definition that is not the one of the
+ * system scope (one map read), answers false. Then each scope is read with
+ * one map read, and the first binding of `name` found (that can be applied,
+ * for a call) gives the answer. The scopes of the chain are read from
+ * `_evalContextStack`, not from `contextStack`, which copies the stack on
+ * each read.
+ */
+export function hidesLibraryBinding(
+  ce: {
+    readonly _evalContextStack: ReadonlyArray<{
+      readonly lexicalScope: ScopeLike;
+    }>;
+  },
+  name: string,
+  def: unknown,
+  isApplicable?: (def: never) => boolean
+): boolean {
+  return hides(ce, name, def, isApplicable, serializationFrame);
+}
+
+/**
+ * True when a node bound to the definition `def` of the name `name`, the
+ * definition of the system scope, would be bound to another definition if
+ * it were boxed by name in the current scope chain. This is
+ * {@link hidesLibraryBinding} without the scopes of the serialized nodes:
+ * it is the test for a rebuild of the node by name in the current scope
+ * (`BoxedFunction._withLibraryBinding()`).
+ */
+export function hidesLibraryBindingInContext(
+  ce: {
+    readonly _evalContextStack: ReadonlyArray<{
+      readonly lexicalScope: ScopeLike;
+    }>;
+  },
+  name: string,
+  def: unknown,
+  isApplicable?: (def: never) => boolean
+): boolean {
+  return hides(ce, name, def, isApplicable, undefined);
+}
+
+function hides(
+  ce: {
+    readonly _evalContextStack: ReadonlyArray<{
+      readonly lexicalScope: ScopeLike;
+    }>;
+  },
+  name: string,
+  def: unknown,
+  isApplicable: ((def: never) => boolean) | undefined,
+  frame: SerializationFrame | undefined
+): boolean {
+  if (def === undefined || def === null) return false;
+  const stack = ce._evalContextStack;
+  const system = stack[0]?.lexicalScope;
+  const library = system?.bindings.get(name) as
+    | { value?: unknown; operator?: unknown }
+    | undefined;
+  if (library === undefined) return false;
+  if (library !== def && library.value !== def && library.operator !== def)
+    return false;
+  for (let f = frame; f !== undefined; f = f.parent) {
+    const found = f.scope.bindings.get(name);
+    if (found !== undefined && (!isApplicable || isApplicable(found as never)))
+      return isShadowOf(found, library);
+  }
+  for (
+    let scope: ScopeLike | null = stack[stack.length - 1].lexicalScope;
+    scope && scope !== system;
+    scope = scope.parent
+  ) {
+    const found = scope.bindings.get(name);
+    if (found !== undefined && (!isApplicable || isApplicable(found as never)))
+      return isShadowOf(found, library);
+  }
+  return false;
+}
+
+/**
+ * The local scopes of the scoped nodes whose operands are being serialized,
+ * as a linked list from the innermost one (`inSerializationScope()`). A
+ * frame is made once for each pair of a parent frame and a scope, and kept
+ * while its scope lives, so the same nesting gives the same frame object,
+ * which a cache of serialized nodes can use as a key
+ * (`currentSerializationFrame()`).
+ */
+type SerializationFrame = {
+  readonly scope: ScopeLike;
+  readonly parent: SerializationFrame | undefined;
+  readonly children: WeakMap<ScopeLike, SerializationFrame>;
+};
+
+/** The frames whose parent is no frame (the outermost scoped nodes). */
+const OUTERMOST_FRAMES = new WeakMap<ScopeLike, SerializationFrame>();
+
+/** The innermost frame, or `undefined` outside a scoped node. */
+let serializationFrame: SerializationFrame | undefined;
+
+/**
+ * The current frame of the scopes of the serialized nodes, or `undefined`
+ * outside a scoped node: the same object for the same nesting of scopes. A
+ * cache of the serialized form of a node keys on it, because the qualifier
+ * of a node depends on these scopes (`boxedInCurrentScope()`,
+ * `compiler-core.ts`).
+ */
+export function currentSerializationFrame(): object | undefined {
+  return serializationFrame;
+}
+
+/**
+ * Run `serialize`, which serializes the operands of a scoped node (a
+ * `Function` literal, a `Block`), with `scope`, the local scope of the node,
+ * as the innermost scope where {@link hidesLibraryBinding} reads a name. A
+ * serializer does not push the scope of a node that it writes, so without
+ * this a local of the node (a parameter `Pi`) would not hide the library
+ * definition, and a library `Pi` in the body would be written as the bare
+ * name, which reads the parameter when the MathJSON is boxed again. With
+ * `scope` undefined (a node with no local scope), `serialize` runs with the
+ * scopes unchanged.
+ */
+export function inSerializationScope<T>(
+  scope: ScopeLike | undefined,
+  serialize: () => T
+): T {
+  if (scope === undefined) return serialize();
+  const saved = serializationFrame;
+  const siblings = saved?.children ?? OUTERMOST_FRAMES;
+  let frame = siblings.get(scope);
+  if (frame === undefined) {
+    frame = { scope, parent: saved, children: new WeakMap() };
+    siblings.set(scope, frame);
+  }
+  serializationFrame = frame;
+  try {
+    return serialize();
+  } finally {
+    serializationFrame = saved;
+  }
+}
+
+/**
+ * The local scope of the scoped node (a `Function` literal, a `Block`) whose
+ * structural form is the key. A structural form has no local scope of its
+ * own, and the serializers write the structural form of a node, so the
+ * reading scope of its operands (`inSerializationScope()`) is read here.
+ */
+const STRUCTURAL_SCOPES = new WeakMap<object, ScopeLike>();
+
+/** Record that `structural` is the structural form of a node whose local
+ * scope is `scope`. */
+export function noteStructuralScope(
+  structural: object,
+  scope: ScopeLike
+): void {
+  STRUCTURAL_SCOPES.set(structural, scope);
+}
+
+/** The local scope of the node whose structural form is `structural`, if
+ * {@link noteStructuralScope} recorded one. */
+export function structuralScope(structural: object): ScopeLike | undefined {
+  return STRUCTURAL_SCOPES.get(structural);
+}
+
+/**
+ * The symbol nodes that the canonical form of `["Module", name]` made in a
+ * scope where a local definition shadows `name`. Each one is bound to the
+ * library definition of its name on purpose, and a repair that points the
+ * occurrences of a name at a local binding (`rebindToBindings()`,
+ * `binders.ts`) leaves it alone.
+ */
+const QUALIFIED_NAMES = new WeakSet<object>();
+
+/** Mark `symbol` as a qualified name: see {@link isQualifiedName}. */
+export function markQualifiedName(symbol: object): void {
+  QUALIFIED_NAMES.add(symbol);
+}
+
+/**
+ * True when `symbol` is the canonical form of a `["Module", name]` made in a
+ * scope where a local definition shadows the name (`markQualifiedName()`).
+ */
+export function isQualifiedName(symbol: object): boolean {
+  return QUALIFIED_NAMES.has(symbol);
+}
+
+/** The parts of a lexical scope that {@link hidesLibraryBinding} reads. */
+type ScopeLike = {
+  readonly parent: ScopeLike | null;
+  readonly bindings: {
+    get(name: string): unknown;
+    has(name: string): boolean;
+  };
+};
+
+/**
  * True when the definition `current` of a name is not the library
  * definition `library` of the same name, and is not an extension or a copy
  * of it that keeps the library handlers (see {@link shadowsLibraryName}).
  */
-function isShadowOf(current: unknown, library: unknown): boolean {
+export function isShadowOf(current: unknown, library: unknown): boolean {
   if (current === library) return false;
   const operator = (current as { operator?: object }).operator;
   const libraryOperator = (library as { operator?: object }).operator;

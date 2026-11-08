@@ -35,6 +35,7 @@ import {
   composedApplication,
   compositionLiteral,
   compositionStepsResolveHere,
+  isApplicableDef,
   lookupApplicable,
 } from '../function-utils.js';
 import {
@@ -86,6 +87,11 @@ import {
   functionLiteralParameterName,
 } from '../boxed-expression/function-literal.js';
 import { withCallableBinding } from '../boxed-expression/binders.js';
+import {
+  currentSerializationFrame,
+  hidesLibraryBinding,
+  inSerializationScope,
+} from '../library-shadowing.js';
 import { ABS_ARG_REFUSAL, containsDerivativeHead } from './angular-unit.js';
 import { sumVariantInfo, taggedSumInType } from '../sum-representation.js';
 import type { ShapeNode } from '../boxed-expression/match-dispatch.js';
@@ -662,13 +668,20 @@ export function compileDeclaredUnionDispatch(
 
 /**
  * `expr` boxed again in the current scope of its engine, so that every
- * symbol reads its definition in that scope.
+ * symbol reads its definition in that scope, with one exception: a symbol
+ * or a call bound to the library definition of its name, where the name
+ * reads another definition (an input named `Pi` in that scope, or a local
+ * `Pi` of a block of `expr` that encloses the node), keeps the library
+ * definition. The MathJSON of such a node is the qualified name
+ * `["Module", "Pi"]` (`hidesLibraryBinding()`, `library-shadowing.ts`).
  *
  * The MathJSON of `expr` has one copy of a subexpression for each path to
  * it: 30 levels of `Beta(t, t)`, each level with the one node of the level
  * below twice, have 31 distinct nodes and 2^30 paths. When the paths are
  * many, the expression is boxed again node by node, once for each distinct
- * node, and the new nodes share their operands as the old ones do.
+ * node, and the new nodes share their operands as the old ones do. A node
+ * bound to the library definition of its name is then boxed as the same
+ * qualified name.
  */
 function boxedInCurrentScope(expr: Expression): Expression {
   const ce = expr.engine;
@@ -687,15 +700,39 @@ function boxedInCurrentScope(expr: Expression): Expression {
   // scope around the root, not in the scope of its block: the target of an
   // `Assign` that declares a local of a block was then declared in that
   // scope, and the compiled block wrote a symbol that it does not declare.
-  const memo = new Map<Expression, Expression>();
+  // The memo is kept for each frame of the scopes of the enclosing scoped
+  // nodes (`currentSerializationFrame()`): the qualifier of a node depends
+  // on these scopes, so a node shared by two blocks, one of which binds
+  // `Pi`, is boxed again once for each.
+  const memos = new Map<object | undefined, Map<Expression, Expression>>();
+  const qualified = (name: string): Expression =>
+    ce.function('Module', [ce.symbol(name, { canonical: false })], {
+      form: 'raw',
+    });
   const rebox = (e: Expression): Expression => {
+    const frame = currentSerializationFrame();
+    let memo = memos.get(frame);
+    if (memo === undefined) {
+      memo = new Map();
+      memos.set(frame, memo);
+    }
     const known = memo.get(e);
     if (known !== undefined) return known;
-    const r = isFunction(e)
-      ? ce.function(e.operator, e.ops.map(rebox), { form: 'raw' })
-      : isSymbol(e)
-        ? ce.symbol(e.symbol, { canonical: false })
-        : e;
+    let r: Expression = e;
+    if (isFunction(e)) {
+      const ops = inSerializationScope(e.localScope, () => e.ops.map(rebox));
+      r = hidesLibraryBinding(
+        ce,
+        e.operator,
+        e.baseDefinition,
+        isApplicableDef
+      )
+        ? ce.function('Apply', [qualified(e.operator), ...ops], { form: 'raw' })
+        : ce.function(e.operator, ops, { form: 'raw' });
+    } else if (isSymbol(e))
+      r = hidesLibraryBinding(ce, e.symbol, e.baseDefinition)
+        ? qualified(e.symbol)
+        : ce.symbol(e.symbol, { canonical: false });
     memo.set(e, r);
     return r;
   };

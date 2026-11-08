@@ -146,6 +146,7 @@ import {
   type ProvisionalDependent,
 } from './boxed-expression/provisional-application.js';
 import { activeRollbackFrame } from './inference-rollback.js';
+import { isShadowOf } from './library-shadowing.js';
 import { isScratchBinding } from './scratch-scopes.js';
 import { isTransitivelyPure } from './boxed-expression/transitive-purity.js';
 import { isExactRealLiteral } from './boxed-expression/constraint-subject.js';
@@ -487,6 +488,14 @@ export function canonicalFunctionLiteral(
   //    symbol.
   //
   if (isFunction(expr, 'BuiltinFunction')) return expr.op1;
+
+  //
+  // 3b/ A qualified name, e.g. ["Module", "Floor"]: its canonical form is
+  //    the symbol bound to the library definition (or an error when the
+  //    name is not in the library), which is a function operand as the
+  //    bare symbol is in step 2.
+  //
+  if (isFunction(expr, 'Module')) return expr.canonical;
 
   //
   // 4/ Parenthesized expression, e.g. ["Delimiter", ["Sin", "_"], "'()'"]
@@ -11689,6 +11698,18 @@ export function lookupApplicable(
 ): undefined | BoxedDefinition {
   console.assert(typeof id === 'string' && id.length > 0);
 
+  // `Module` is the operator of every qualified name (`["Module", "Pi"]`):
+  // as a head, it always reads the definition of the system scope, the root
+  // of the chain, whatever the program binds (a parameter, a block local, a
+  // binder index, a declaration of the host). So no binding of a program
+  // changes what a qualified name reads.
+  if (id === 'Module') {
+    let root: Scope = scope;
+    while (root.parent) root = root.parent;
+    const system = root.bindings.get(id);
+    if (system !== undefined) return system;
+  }
+
   // A shadowed name resolves to the binding the shadowing construct's own
   // references already created, if any; otherwise the walk below stops before
   // the scope enclosing that construct, so a binding from outside it is never
@@ -11724,6 +11745,76 @@ export function lookupApplicable(
     currentScope = currentScope.parent;
   }
   return innermost;
+}
+
+/**
+ * The canonical form of the qualified call `["Apply", ["Module", name], …]`
+ * (the Epsil `std::name(…)`), where `library` is the operator definition of
+ * `name` in the system scope (a constant, in the `Apply` canonical handler,
+ * is kept as an `Apply` where it is shadowed), chosen before the arguments
+ * are canonicalized:
+ *
+ * - `'call'`: the name is not shadowed in `scope` (the lookup of a head,
+ *   `lookupApplicable()`, with the parameter shadows, gives `library`, or an
+ *   extension or a copy of it that keeps its handlers, or gives nothing for a
+ *   name that is not a parameter being canonicalized). The canonical form
+ *   is the plain call `[name, …args]`, built by the normal route.
+ * - `'apply'`: the name is shadowed, the library operator is an ordinary
+ *   function (not lazy, not scoped, no binding sites and no operand roles,
+ *   so it neither holds nor binds an operand), and the call has no named
+ *   argument. The canonical form stays `Apply(name, …args)`, with a callee
+ *   symbol bound to `library`: no rule that matches a call by its name can
+ *   read it as a call of the shadow. It is evaluated by the `Apply` route,
+ *   from the values of its arguments.
+ * - `'shadowed'`: the name is shadowed, and the library operator holds or
+ *   binds an operand, or the call has a named argument. Such a call cannot
+ *   be kept as an `Apply`: its arguments must be canonicalized by the rules
+ *   of the library operator, which match the call by its name. The canonical
+ *   form is the error `["Error", "'qualified-call-shadowed'", name]`.
+ */
+export function qualifiedCallForm(
+  ce: ComputeEngine,
+  name: string,
+  library: BoxedDefinition,
+  scope: Scope,
+  named: boolean
+): 'call' | 'apply' | 'shadowed' {
+  const current = lookupApplicable(name, scope, ce);
+  // A parameter of a function literal whose body is being canonicalized gets
+  // its binding on its first reference, so the lookup gives nothing for a
+  // parameter that the body has not named yet. It still shadows the library
+  // name: with `function g(Floor) { std::floor(2.5) }`, a plain call
+  // `Floor(2.5)` would be a call of the parameter.
+  const shadowed =
+    current === undefined
+      ? ce._isShadowedParameter(name)
+      : isShadowOf(current, library);
+  if (!shadowed) return 'call';
+  // A constant of the library applied as a function has no operator rules.
+  if (!('operator' in library)) return 'apply';
+  const op = library.operator;
+  if (
+    named ||
+    op.lazy ||
+    op.scoped ||
+    op.bindingSites !== undefined ||
+    op.operands !== undefined
+  )
+    return 'shadowed';
+  return 'apply';
+}
+
+/** The canonical form of a qualified call `std::name(…)` whose library
+ * operator holds or binds an operand, in a scope that shadows `name`: see
+ * {@link qualifiedCallForm}. */
+export function qualifiedCallShadowedError(
+  ce: ComputeEngine,
+  name: string
+): Expression {
+  return ce.function('Error', [
+    ce.string('qualified-call-shadowed'),
+    ce.symbol(name, { canonical: false }),
+  ]);
 }
 
 /** True when `s` is a type string that parses to a POLYTYPE (a `where`

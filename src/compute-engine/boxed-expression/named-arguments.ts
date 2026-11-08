@@ -246,6 +246,18 @@ export function qualifiedFieldParts(
   return { base, member, receiver: ops[0] };
 }
 
+/** The name of a raw callee spelled as the qualified name
+ * `Module(⟨symbol⟩)` (the Epsil `std::floor`), in any input spelling, or
+ * `undefined` for any other callee. */
+export function moduleQualifiedName(
+  x: ExpressionInput | undefined
+): string | undefined {
+  if (x === undefined) return undefined;
+  const ops = rawOperands(x, 'Module');
+  if (ops === undefined || ops.length !== 1) return undefined;
+  return rawSymbolName(ops[0]);
+}
+
 /** The `(protocol, member)` names of a raw `ProtocolMember(P, m, …)` operand
  * list — the box-route spelling of a qualified protocol call, where the first
  * two operands name the protocol and the member as strings (or symbols, which

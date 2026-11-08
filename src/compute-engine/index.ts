@@ -289,6 +289,7 @@ import {
 import {
   type CommonNumberTable,
   createBindingSymbolExpression,
+  createLibrarySymbolExpression,
   createNumberExpression,
   createSymbolExpression,
 } from './engine-expression-entrypoints.js';
@@ -3461,6 +3462,11 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal */
   _bindingSymbol(name: MathJsonSymbol, scope: Scope): Expression | undefined {
     return createBindingSymbolExpression(this, name, scope);
+  }
+
+  /** @internal */
+  _librarySymbol(name: MathJsonSymbol): Expression | undefined {
+    return createLibrarySymbolExpression(this, this._commonSymbols, name);
   }
 
   /** The `resolveSymbol` handler of the `parse()` call in progress; see the

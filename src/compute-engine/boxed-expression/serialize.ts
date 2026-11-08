@@ -53,6 +53,12 @@ import {
   containsContinuationOperand,
 } from './type-guards.js';
 import { isImaginaryPartFinite } from './imaginary-part.js';
+import {
+  hidesLibraryBinding,
+  inSerializationScope,
+  structuralScope,
+} from '../library-shadowing.js';
+import { isApplicableDef } from '../function-utils.js';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils.js';
 import { latexSerializeOptions } from './latex-serialize-options.js';
 
@@ -695,21 +701,22 @@ function serializePrettyJsonFunction(
               x.symbol === `_${i + 1}` &&
               bodyWildcards.has(x.symbol)
           );
+        // The body is written without its `Block`, in the scope of the
+        // `Block`, where the parameters are bound (`inSerializationScope()`).
+        const scope = serializationScopeOf(block);
         if (wildcardParams) {
-          return serializeJsonFunction(
-            ce,
-            'Function',
-            [body],
-            options,
-            metadata
+          return inSerializationScope(scope, () =>
+            serializeJsonFunction(ce, 'Function', [body], options, metadata)
           );
         }
-        return serializeJsonFunction(
-          ce,
-          'Function',
-          [block.op1, ...args.slice(1)],
-          options,
-          metadata
+        return inSerializationScope(scope, () =>
+          serializeJsonFunction(
+            ce,
+            'Function',
+            [block.op1, ...args.slice(1)],
+            options,
+            metadata
+          )
         );
       }
     }
@@ -1607,10 +1614,21 @@ function serializeJsonExpression(
 
   // Is it a symbol?
   if (isSymbol(expr)) {
-    return serializeJsonSymbol(ce, expr.symbol, options, {
+    const result = serializeJsonSymbol(ce, expr.symbol, options, {
       latex: expr.verbatimLatex,
       wikidata,
     });
+    // A symbol bound to the library definition of its name, in a scope where
+    // the name reads another definition, is qualified (`["Module", "Pi"]`):
+    // see `hidesLibraryBinding()`. A symbol that the options replace with
+    // another expression (`Half` as a number) is not.
+    if (
+      (typeof result === 'string' ||
+        (typeof result === 'object' && result !== null && 'sym' in result)) &&
+      hidesLibraryBinding(ce, expr.symbol, expr.baseDefinition)
+    )
+      return moduleJson(result, options);
+    return result;
   }
 
   // Is it a function?
@@ -1632,31 +1650,111 @@ function serializeJsonExpression(
       const structuralOps = isFunction(structuralExpr)
         ? structuralExpr.ops
         : [];
-      if (
+      // The operands of a scoped node (a `Function` literal, a `Block`) are
+      // written with its local scope as the reading scope: a local of the
+      // node that shadows a library name makes a library-bound operand write
+      // the `Module` qualifier (`inSerializationScope()`).
+      const scope = serializationScopeOf(expr);
+      const result = inSerializationScope(scope, () =>
         expr.isValid &&
         (expr.isCanonical || expr.isStructural) &&
         options.prettify
-      )
-        return serializePrettyJsonFunction(
+          ? serializePrettyJsonFunction(
+              ce,
+              expr.operator,
+              structuralOps,
+              options,
+              {
+                latex: expr.verbatimLatex,
+                wikidata,
+                sourceOffsets: expr.sourceOffsets,
+              }
+            )
+          : serializeJsonFunction(ce, expr.operator, structuralOps, options, {
+              latex: expr.verbatimLatex,
+              wikidata,
+              sourceOffsets: expr.sourceOffsets,
+            })
+      );
+      // A call bound to the library definition of its operator, in a scope
+      // where the name reads another definition, is qualified
+      // (`["Apply", ["Module", "Floor"], …]`): see `hidesLibraryBinding()`.
+      if (
+        hidesLibraryBinding(
           ce,
           expr.operator,
-          structuralOps,
-          options,
-          {
-            latex: expr.verbatimLatex,
-            wikidata,
-            sourceOffsets: expr.sourceOffsets,
-          }
-        );
-      return serializeJsonFunction(ce, expr.operator, structuralOps, options, {
-        latex: expr.verbatimLatex,
-        wikidata,
-        sourceOffsets: expr.sourceOffsets,
-      });
+          expr.baseDefinition,
+          isApplicableDef
+        )
+      )
+        return qualifiedCall(ce, expr.operator, result, options);
+      return result;
     } finally {
       _preserveStructure = savedPreserveStructure;
     }
   }
 
   return expr.json;
+}
+
+/**
+ * The serialized call `json`, with its head `name` replaced by the qualified
+ * callee: `["Floor", "x"]` becomes `["Apply", ["Module", "Floor"], "x"]`,
+ * also in the `{ fn: … }` form that carries metadata. A form whose head is
+ * not `name` is returned unchanged: the options wrote the call as another
+ * expression (a `Negate` of a number is the number, an excluded `Sqrt` is a
+ * `Power`).
+ */
+function qualifiedCall(
+  ce: ComputeEngine,
+  name: string,
+  json: MathJsonExpression,
+  options: Readonly<JsonSerializationOptions>
+): MathJsonExpression {
+  const qualify = (fn: MathJsonExpression): MathJsonExpression | undefined =>
+    Array.isArray(fn) && fn[0] === name
+      ? ([
+          'Apply',
+          moduleJson(
+            serializeJsonSymbol(ce, name, { ...options, metadata: [] }),
+            options
+          ),
+          ...fn.slice(1),
+        ] as MathJsonExpression)
+      : undefined;
+  if (Array.isArray(json)) return qualify(json) ?? json;
+  if (typeof json === 'object' && json !== null && 'fn' in json) {
+    const fn = qualify(json.fn as MathJsonExpression);
+    if (fn !== undefined) return { ...json, fn } as MathJsonExpression;
+  }
+  return json;
+}
+
+/**
+ * The qualified name `["Module", name]`, where `name` is the serialized
+ * symbol. It is written in the array shorthand only when `options.shorthands`
+ * allows it for a function, as `serializeJsonFunction()` does.
+ */
+function moduleJson(
+  name: MathJsonExpression,
+  options: Readonly<JsonSerializationOptions>
+): MathJsonExpression {
+  const fn: [string, ...MathJsonExpression[]] = ['Module', name];
+  return options.shorthands.includes('function') ? fn : { fn };
+}
+
+/**
+ * The local scope that the operands of `expr` are serialized in
+ * (`inSerializationScope()`): the scope of a scoped node (a `Function`
+ * literal, a `Block`). The structural form of a scoped node has no scope of
+ * its own: the scope is the one of the node it was made from
+ * (`structuralScope()`). `undefined` for a node that is not scoped.
+ */
+function serializationScopeOf(expr: Expression & FunctionInterface) {
+  return (
+    expr.localScope ??
+    (expr.isStructural && expr.operatorDefinition?.scoped === true
+      ? structuralScope(expr)
+      : undefined)
+  );
 }

@@ -85,6 +85,11 @@ Postfix calls and indexing (`f(x)`, `xs[i]`) bind tighter than every entry in
 this table — they are handled directly by the parser rather than through the
 operator table, since they are not spelled with an operator symbol.
 
+The qualified name `std::name` is not in the table either. It is one
+primary, like a name: `std::floor(x)` is a call of `std::floor`, and
+`std::pi^2` is the square of `std::pi`. See
+[Qualified names](#qualified-names).
+
 The three Unicode-only rows — the radical signs, and the superscript and
 subscript runs — have no ASCII spelling. By default the serializer writes the
 ASCII forms `sqrt(x)`, `x ^ 2` and `Subscript(x, k + 1)`. In its
@@ -466,6 +471,30 @@ It binds tighter than relational operators and more loosely than addition and
 subtraction. The Unicode two-dot leader `‥` is an input alias. Serialization
 uses `Range(a, b)`, and a stepped range continues to use the three-argument
 call `Range(a, b, step)`.
+
+## Qualified names: `::` {#qualified-names}
+
+`std::name` is the definition of `name` in the standard library, also where
+a binding of the program shadows the name. The name takes either spelling:
+`std::pi` and `std::Pi` are the constant π.
+
+```epsil
+function f() { let Pi = 3; std::pi + Pi }
+f()
+// ➔ 3 + pi
+```
+
+```epsil
+let floor = 7
+std::floor(2.5) + floor
+// ➔ 9
+```
+
+The `::` must follow the module name with no space, as the `.` of a field
+follows its base. `std` is the only module name; any other name before `::`
+is the error `unknown-module`. A qualified name does not nest (`std::a::b`
+is an error). See [Naming Conventions](/epsil/naming/) for the rules of
+shadowing.
 
 ## Spread: `...` {#spread}
 

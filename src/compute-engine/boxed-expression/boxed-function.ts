@@ -5,9 +5,17 @@ import {
   callableBindingInContext,
   markCallableHome,
   hasCallableHome,
+  withBorrowedBinding,
   withCallableBinding,
 } from './binders.js';
 import { isScratchBinding } from '../scratch-scopes.js';
+import {
+  hidesLibraryBinding,
+  hidesLibraryBindingInContext,
+  inSerializationScope,
+  noteStructuralScope,
+  structuralScope,
+} from '../library-shadowing.js';
 import {
   detachEagerSourceValues,
   keptEagerSourceValue,
@@ -495,6 +503,7 @@ import {
   exactArgumentSources,
   freeNamesForSubs,
   heldBlockUndecidedLocals,
+  isApplicableDef,
   isUndecidedLiteralApplication,
   lookupApplicable,
   renameCapturingBinder,
@@ -2318,6 +2327,11 @@ export class BoxedFunction
   get json(): MathJsonExpression {
     const s = this.structural;
     const ops = isFunction(s) ? s.ops : this._ops;
+    // The operands of a scoped node (a `Function` literal, a `Block`) are
+    // written with its local scope as the reading scope: a local of the node
+    // that shadows a library name makes a library-bound operand write the
+    // `Module` qualifier (`inSerializationScope()`).
+    const scope = this._serializationScope();
     // A `Function` literal's parameter annotation that INFERENCE wrote (see
     // `isInferredTypedParameter`) is not part of what the author said: it is
     // left out, so the MathJSON — and the LaTeX, which serializes it — show
@@ -2326,13 +2340,32 @@ export class BoxedFunction
     if (this._operator === 'Function')
       return [
         this._operator,
-        ...ops.map((x, i) =>
-          i > 0 && isInferredTypedParameter(x) && isFunction(x)
-            ? x.op1.json
-            : x.json
+        ...inSerializationScope(scope, () =>
+          ops.map((x, i) =>
+            i > 0 && isInferredTypedParameter(x) && isFunction(x)
+              ? x.op1.json
+              : x.json
+          )
         ),
       ];
-    return [this._operator, ...ops.map((x) => x.json)];
+    const jsonOps =
+      scope === undefined
+        ? ops.map((x) => x.json)
+        : inSerializationScope(scope, () => ops.map((x) => x.json));
+    // A call bound to the library definition of its operator, in a scope
+    // where the name reads another definition (a user function `Floor`), is
+    // written `["Apply", ["Module", "Floor"], …]`: the bare head would call
+    // the other definition when the MathJSON is boxed again in that scope.
+    if (
+      hidesLibraryBinding(
+        this.engine,
+        this._operator,
+        this._def,
+        isApplicableDef
+      )
+    )
+      return ['Apply', ['Module', this._operator], ...jsonOps];
+    return [this._operator, ...jsonOps];
   }
 
   get operator(): string {
@@ -2624,7 +2657,15 @@ export class BoxedFunction
     const result = cachedValue(
       this._structural,
       gen,
-      () => this._computeStructural(),
+      () => {
+        const structural = this._computeStructural();
+        // A structural form has no local scope: record the one of this node,
+        // the reading scope of the operands when the structural form is
+        // serialized (`_serializationScope()`).
+        if (this._localScope !== undefined && structural !== this)
+          noteStructuralScope(structural, this._localScope);
+        return structural;
+      },
       undefined,
       this.engine
     );
@@ -2675,25 +2716,74 @@ export class BoxedFunction
         this.isCanonical || !this.isValid
           ? ys
           : sortOperands(this._operator, ys);
-      return this.engine.function(this._operator, sorted, {
-        form: 'structural',
-        metadata: {
-          latex: this.verbatimLatex,
-          sourceOffsets: this.sourceOffsets,
-        },
-      });
+      return this._withLibraryBinding(() =>
+        this.engine.function(this._operator, sorted, {
+          form: 'structural',
+          metadata: {
+            latex: this.verbatimLatex,
+            sourceOffsets: this.sourceOffsets,
+          },
+        })
+      );
     }
-    return this.engine.function(
-      this._operator,
-      this.ops.map((x) => x.structural),
-      {
-        form: 'structural',
-        metadata: {
-          latex: this.verbatimLatex,
-          sourceOffsets: this.sourceOffsets,
-        },
-      }
+    // The operands are made structural outside the scope of
+    // `_withLibraryBinding()`: a call of a user function `Floor` among them
+    // must keep its own binding.
+    const structuralOps = this.ops.map((x) => x.structural);
+    return this._withLibraryBinding(() =>
+      this.engine.function(
+        this._operator,
+        structuralOps,
+        {
+          form: 'structural',
+          metadata: {
+            latex: this.verbatimLatex,
+            sourceOffsets: this.sourceOffsets,
+          },
+        }
+      )
     );
+  }
+
+  /**
+   * The local scope that the operands of this node are serialized in
+   * (`inSerializationScope()`): the scope of a scoped node, or, for the
+   * structural form of a scoped node, which has no scope of its own, the
+   * scope of the node it was made from. `undefined` for a node that is not
+   * scoped, after one field read for most nodes.
+   */
+  private _serializationScope() {
+    if (this._localScope !== undefined) return this._localScope;
+    if (!this._isStructural) return undefined;
+    const def = this._def;
+    if (!def || !('operator' in def) || def.operator.scoped !== true)
+      return undefined;
+    return structuralScope(this);
+  }
+
+  /**
+   * Run `build`, which boxes a node of the same operator by name, so that
+   * the node is bound to the library definition of the operator when this
+   * node is bound to it and the current scope resolves the name to another
+   * definition (`hidesLibraryBinding()`). A rebuild by name binds the node
+   * to the definition that the current scope resolves: the structural form
+   * of a library call `Floor(x)`, read in a scope with a user function
+   * `Floor`, would be a call of the user function, and `.json`, which writes
+   * the structural form, would lose the `Module` qualifier of the call.
+   */
+  private _withLibraryBinding(build: () => Expression): Expression {
+    const def = this._def;
+    if (
+      !def ||
+      !hidesLibraryBindingInContext(
+        this.engine,
+        this._operator,
+        def,
+        isApplicableDef
+      )
+    )
+      return build();
+    return withBorrowedBinding(this.engine, this._operator, def, build);
   }
 
   get isStructural(): boolean {

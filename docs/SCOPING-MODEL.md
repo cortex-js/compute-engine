@@ -18,6 +18,52 @@ earlier type computation of that node cached: a node that a type handler
 evaluated (`Take(L, n + 1)` when its finiteness is read) can keep the symbolic
 answer.
 
+The MathJSON of an expression writes a binding by its name, which a reader
+resolves in its own scope. A symbol or a call bound to the definition of its
+name in the system scope (the standard library) is written
+`["Module", name]`, and a call `["Apply", ["Module", name], …]`, when the
+name reads another definition where the node is read back. The name is
+read first in the local scopes of the `Function` and `Block` nodes of the
+serialized expression that enclose the node, innermost first, each one for
+its own bindings, and then in the current scope chain. So a function
+literal made at the top level and serialized in a scope that declares `Pi`
+writes its library `Pi` as `["Module", "Pi"]`. In a block where `Pi` is declared and assigned `3`, the `.json` of
+`π²/6` is `["Divide", ["Power", ["Module", "Pi"], 2], 6]`, which boxes in the
+block to 1.6449, not to `3²/6`; and
+`["Function", ["Add", ["Module", "Pi"], "Pi"], "Pi"]` keeps the qualifier
+when it is serialized at the top level, because its parameter `Pi` shadows
+the library constant in its body. Elsewhere, the bare name is written. The
+canonical form of `["Module", name]` is the symbol bound to the system-scope
+definition; in a scope that shadows the name, it is a new symbol marked as
+qualified, which the parameter repair of a function literal does not rebind
+to the parameter (`hidesLibraryBinding()`, `markQualifiedName()`,
+`library-shadowing.ts`; the `Module` operator, `library/core.ts`). The
+form of a qualified call `["Apply", ["Module", f], …]` is chosen before its
+arguments are canonicalized (`qualifiedCallForm()`, `function-utils.ts`).
+Where `f` is not shadowed (the lookup of a head, with the parameter
+shadows, gives the library definition), it is the plain call `[f, …]`, and
+every rule of the library operator applies. Where `f` is shadowed and the
+library operator is an ordinary function (not lazy, not scoped, no operand
+roles) and the call has no named argument, it stays
+`["Apply", f, …]` with a callee symbol bound to the library definition and
+the arguments canonicalized in the current scope (an argument `max` reads
+the variable `max`): no rule that matches a call by its name reads it, and
+the `Apply` route evaluates it from the values of its arguments, with no
+symbolic simplification. Where `f` is shadowed and the library operator
+holds or binds an operand (`Sum`, `If`), or the call has a named argument,
+it is the error `["Error", "'qualified-call-shadowed'", f]`. A plain call
+made where `f` is not shadowed keeps its binding (see "Callable
+resolution"), and in a shadowing scope it is written
+`["Apply", ["Module", f], …]`, which is boxed again in one of the two last
+forms. A
+`Declare`, an `Assign` or a `DefineFunction` of `Module` defines nothing and
+evaluates to the `module-binding` error, and a block does not hoist such a
+`Declare`. The head `Module` always resolves to the operator of the system
+scope (`lookupApplicable()`, `function-utils.ts`), whatever a parameter, a
+block local, a binder index or the host binds, so no binding changes what
+a qualified name reads. LaTeX has no spelling of the
+qualifier: a parse of `\pi` in such a scope reads the local.
+
 ## Callable resolution
 
 A callable name denotes the binding selected where the call or callback was

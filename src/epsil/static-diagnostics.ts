@@ -976,6 +976,7 @@ function canonicalizationDiagnostics(
   });
   diagnostics.push(...absenceMarkerBindingDiagnostics(bindings));
   diagnostics.push(...equationBodyDiagnostics(ast, source, bindings));
+  diagnostics.push(...qualifiedNameDiagnostics(ce, ast));
 
   let statementIndex = -1;
   for (const statement of statements) {
@@ -1242,6 +1243,21 @@ function canonicalizationDiagnostics(
     const seen = new Set<string>();
     for (const error of errors) {
       const code = errorCode(error);
+      // A qualified call `std::f(…)` in a scope that shadows `f`, whose
+      // library operator holds or binds an operand (`qualifiedCallForm()`,
+      // `function-utils.ts`): reported with its own code, once for each
+      // name of the statement.
+      if (code === 'qualified-call-shadowed') {
+        const name = symbol(operand(error, 2)) ?? '';
+        if (seen.has(`${code}:${name}`)) continue;
+        seen.add(`${code}:${name}`);
+        diagnostics.push({
+          severity: 'error',
+          message: ['qualified-call-shadowed', name],
+          range: [start, end, start],
+        });
+        continue;
+      }
       if (!isCanonicalizationError(code)) continue;
       const description = describeError(error);
       // Dedup and authored-subtraction key on the SITE-LESS description
@@ -1612,6 +1628,11 @@ const ABSENCE_MARKER_NAMES: ReadonlySet<string> = new Set([
   'Missing',
 ]);
 
+/** `Module`, the operator of every qualified name (`std::pi` is
+ * `["Module", "Pi"]`), cannot be rebound either: see `MODULE_OPERATOR` in
+ * `library/core.ts`, whose declaration handlers refuse it at run time. */
+const MODULE_OPERATOR = 'Module';
+
 /**
  * A binding of an absence marker — `let Missing = 3`, `Nothing = 1`, a
  * parameter, loop variable, match pattern or function named `Missing` —
@@ -1623,14 +1644,22 @@ const ABSENCE_MARKER_NAMES: ReadonlySet<string> = new Set([
  * library call binds (`sum(Missing, Missing in xs)`) is found too. The
  * declaration, assignment and definition statements are also refused at run
  * time, by their handlers.
+ *
+ * A binding of `Module` is reported the same way, with the code
+ * `module-binding`: a user binding of the operator of every qualified name
+ * would change what every `std::name` reads.
  */
 function absenceMarkerBindingDiagnostics(
   groups: readonly BindingGroup[]
 ): ParsingDiagnostic[] {
   const found: ParsingDiagnostic[] = [];
   for (const group of groups) {
-    if (group.kind === 'free' || !ABSENCE_MARKER_NAMES.has(group.name))
-      continue;
+    const code = ABSENCE_MARKER_NAMES.has(group.name)
+      ? 'absence-marker-binding'
+      : group.name === MODULE_OPERATOR
+        ? 'module-binding'
+        : undefined;
+    if (group.kind === 'free' || code === undefined) continue;
     // Every binding site: the definition, and each later assignment to the
     // same name (`Missing = 1; Missing = 2` — the walker records the second
     // as a `write`). A variable a library call binds (`sum(Missing, Missing
@@ -1645,10 +1674,50 @@ function absenceMarkerBindingDiagnostics(
     for (const occurrence of sites)
       found.push({
         severity: 'error',
-        message: ['absence-marker-binding', group.name],
+        message: [code, group.name],
         range: [occurrence.start, occurrence.end, occurrence.start],
       });
   }
+  return found;
+}
+
+/**
+ * A `not-a-library-name` error for each qualified name `std::x` of the
+ * program whose name the library of `ce` does not define (the system scope,
+ * where the standard library and the libraries of the constructor's
+ * `libraries` option are installed). The resolution pass has already
+ * rewritten an Epsil spelling to its library name (`std::pi` is
+ * `["Module", "Pi"]`), so the name is read as it is. The engine gives the
+ * same statement an error value when it runs; this reports it before.
+ */
+function qualifiedNameDiagnostics(
+  ce: ComputeEngine,
+  ast: MathJsonExpression
+): ParsingDiagnostic[] {
+  const system = ce.contextStack[0]?.lexicalScope.bindings;
+  const found: ParsingDiagnostic[] = [];
+  const visit = (node: MathJsonExpression | null): void => {
+    if (node === null || typeof node !== 'object') return;
+    if (operator(node) === 'Module' && nops(node) === 1) {
+      const nameNode = operand(node, 1);
+      const name = symbol(nameNode);
+      const range = sourceRangeOf(nameNode) ?? sourceRangeOf(node);
+      if (name !== null && range !== undefined && !system?.has(name))
+        found.push({
+          severity: 'error',
+          message: ['not-a-library-name', name],
+          range: [range[0], range[1], range[0]],
+        });
+      return;
+    }
+    const head = operator(node);
+    if (typeof head === 'object') visit(head as MathJsonExpression);
+    for (const op of operands(node)) visit(op);
+    if ('dict' in node)
+      for (const value of Object.values(node.dict as Record<string, unknown>))
+        visit(value as MathJsonExpression);
+  };
+  visit(ast);
   return found;
 }
 

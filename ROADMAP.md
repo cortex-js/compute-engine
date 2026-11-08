@@ -250,37 +250,6 @@ takes the cheap option and never declares, so no scratch-scope exemption is
 necessary. Not scoped or scheduled. Do it when a third instance of the pattern
 appears.
 
-### CE-1099. More ways to read a symbol that a local definition shadows
-
-**Status:** ready; capability, M. Design approved by the user 2026-11-07:
-`docs/plans/2026-11-07-ce1099-std-module.md` (`std::name` in Epsil,
-`["Module", name]` in MathJSON; `super` stays reserved for the next binding
-outward, not part of this item). Issues CE-103, CE-716 and CE-835.
-
-A local definition hides every definition of the same name in the scopes
-around it, and the code in its scope has few ways to reach the hidden one:
-
-- A block that declares its own `Pi` hides the library constant. A result that
-  the engine builds with the library π serializes as `Pi`, and the same JSON
-  boxed in that block reads the local value: `Sum(1/n², n, 1, ∞)` gives π²/6,
-  and `ce.box` of its JSON in the block gives `3²/6` when the local `Pi` is 3
-  (CE-103; the user chose a spelling of the library symbol that a local
-  definition cannot capture, 2026-11-06).
-- In Epsil, a `function` or `let` of a library name hides the library function
-  for a bare call. Today the only way back is the capitalized name of the
-  library function (`Floor(2.5)` when `floor` is shadowed, from CE-716), and
-  it works only for a library function that has a lowercase alias.
-  `function` stays the way to shadow a name (CE-835).
-
-The design: `std::pi` in Epsil and `["Module", "Pi"]` in MathJSON name the
-standard-library definition, wherever they are read; a call is
-`["Apply", ["Module", "Floor"], x]`. A serializer writes the form only when
-the bare name would read another definition in the scope where it runs, so
-CE-103's JSON reads back as π inside the block. LaTeX has no spelling, and
-compilation adds no lowering. The design document has the steps, the tests
-and the relation to the Epsil import draft
-(`docs/plans/2026-09-05-epsil-import-system.md`).
-
 ## Symbolic computation
 
 ### CE-148. A complex-valued function whose parts cannot be separated has no symbolic limit

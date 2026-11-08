@@ -2221,6 +2221,21 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       ),
   },
 
+  // `Module(Pi)`, the library definition of a name that a local definition
+  // shadows, is written as the name (`\pi`): LaTeX has no spelling of the
+  // qualifier, so a parse in the scope of the local definition reads the
+  // local.
+  {
+    name: 'Module',
+    kind: 'function',
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      const name = nops(expr) === 1 ? operand(expr, 1) : null;
+      if (name === null || symbol(name) === null)
+        return serializer.serializeFunction(expr);
+      return serializer.serializeAtDepth(name, serializer.depth);
+    },
+  },
+
   {
     name: 'Apply',
     kind: 'function',
@@ -2229,6 +2244,18 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const lhs = operand(expr, 1); // The function body
 
       const h = operator(lhs);
+      // A call of a library function whose name a local definition shadows,
+      // `Apply(Module(Floor), x)`, is written as the call `Floor(x)`: LaTeX
+      // has no spelling of the qualifier, so a parse in the scope of the local
+      // definition reads the local.
+      if (h === 'Module' && nops(lhs) === 1) {
+        const name = symbol(operand(lhs, 1));
+        if (name !== null)
+          return serializer.serializeAtDepth(
+            [name, ...operands(expr).slice(1)] as MathJsonExpression,
+            serializer.depth
+          );
+      }
       if (h === 'Derivative') {
         // A multi-index partial derivative applied to plain symbols reads best
         // in Leibniz notation, e.g. ∂/∂x f(x,y). Univariate/prime derivatives

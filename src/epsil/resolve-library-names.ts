@@ -576,6 +576,47 @@ function binderSitesWithMemo(
 }
 
 /**
+ * Rewrite, in place, the name of each qualified name `std::name`
+ * (`["Module", name]`) written with an Epsil spelling to the library name it
+ * stands for: `std::pi` becomes `["Module", "Pi"]`. Unlike a free `pi`, the
+ * name is rewritten whatever the program or the engine binds, since a
+ * qualified name always names the library. A name that the system scope
+ * defines as written (`std::Pi`, or a lowercase library value) and a
+ * verbatim name (`` std::`pi` ``) are kept. A name that is neither is kept
+ * too, and the static pass reports it (`not-a-library-name`).
+ */
+function resolveQualifiedNames(
+  node: MathJsonExpression | null,
+  source: string,
+  ce: ComputeEngine
+): void {
+  if (node === null || typeof node !== 'object') return;
+  if (Array.isArray(node)) {
+    for (const item of node) resolveQualifiedNames(item, source, ce);
+    return;
+  }
+  if ('fn' in node) {
+    const fn = node.fn as MathJsonExpression[];
+    const name = fn[0] === 'Module' && fn.length === 2 ? fn[1] : null;
+    if (name !== null && typeof name === 'object' && 'sym' in name) {
+      const offsets = (name as { sourceOffsets?: [number, number] })
+        .sourceOffsets;
+      const verbatim = offsets !== undefined && source[offsets[0]] === '`';
+      const system = ce.contextStack[0]?.lexicalScope.bindings;
+      const canonical = canonicalLibraryName(name.sym);
+      if (!verbatim && canonical !== undefined && !system?.has(name.sym))
+        name.sym = canonical;
+      return;
+    }
+    for (const item of fn) resolveQualifiedNames(item, source, ce);
+    return;
+  }
+  if ('dict' in node)
+    for (const value of Object.values(node.dict as Record<string, unknown>))
+      resolveQualifiedNames(value as MathJsonExpression, source, ce);
+}
+
+/**
  * Rewrite, in place, every free occurrence of a standard-library spelling
  * in `ast` to the library name it stands for. `source` is the text `ast`
  * was parsed from (the occurrence spans index into it), `ce` the engine the
@@ -586,6 +627,7 @@ export function resolveLibraryNames(
   source: string,
   ce: ComputeEngine
 ): MathJsonExpression {
+  resolveQualifiedNames(ast, source, ce);
   const members = protocolFunctionMembers(ast);
   const groups = documentBindings(ast, source, {
     binderSites: (node, isBound) =>

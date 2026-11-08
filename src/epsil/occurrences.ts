@@ -842,6 +842,13 @@ export function documentBindings(
         return;
       }
 
+      case 'Module':
+        // A qualified name (`std::floor`) names a definition of the library,
+        // never a binding of the program: the name after `::` is not an
+        // occurrence of a user `floor`, and a rename of that binding does
+        // not edit it.
+        return;
+
       case 'KeyValuePair':
       case 'NamedArgument': {
         // The key/label is a name for the READER, not a reference — and the

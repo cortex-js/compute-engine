@@ -4576,7 +4576,9 @@ function canonicalBlock(
       ? []
       : hoistedNames.filter(
           (name) =>
-            (firstIndex.get(name) ?? 0) > 0 && isLibraryConstant(ce, name)
+            (firstIndex.get(name) ?? 0) > 0 &&
+            isLibraryConstant(ce, name) &&
+            !UNBINDABLE_NAMES.has(name)
         )
   );
 
@@ -4604,8 +4606,13 @@ function canonicalBlock(
   // runtime behavior is unchanged); it is what lets reads of the local later
   // in the block, and the compiler's operand type gates, see the type the
   // program declared.
+  // A name that cannot be bound (`UNBINDABLE_NAMES`: `Nothing`, `Missing`,
+  // `Module`) is not hoisted: its `Declare` defines nothing, and a local of
+  // that name would capture the later reads of the absence marker (a
+  // `Missing` operand read as a local of the declared type) or the head of a
+  // qualified name.
   const hoistDeclared = (scope: Scope, name: string): void => {
-    if (name === 'Nothing') return;
+    if (UNBINDABLE_NAMES.has(name)) return;
     const existing = scope.bindings.get(name);
     if (existing !== undefined) {
       markCallableHome(existing, scope);
@@ -4626,7 +4633,7 @@ function canonicalBlock(
   if (scope) {
     for (const name of hoistedNames) {
       if (deferred.has(name)) continue;
-      if (name !== 'Nothing' && !scope.bindings.has(name)) {
+      if (!UNBINDABLE_NAMES.has(name) && !scope.bindings.has(name)) {
         hoistDeclared(scope, name);
         noteHoisted(name);
       }
@@ -4775,7 +4782,9 @@ function canonicalBlock(
   // names (`_shadowedParameterBoundary()`).
   const boundary = ce.context.lexicalScope;
   ce._pushShadowedParameters(
-    hoistedNames.filter((name) => !deferred.has(name))
+    hoistedNames.filter(
+      (name) => !deferred.has(name) && !UNBINDABLE_NAMES.has(name)
+    )
   );
   // The number of frames pushed for the names in `deferred`.
   let deferredFrames = 0;
@@ -5202,19 +5211,24 @@ function firstDeclarationIndex(
 
 /**
  * The names that cannot be bound: a definition of one of them installs
- * nothing and evaluates to the `absence-marker-binding` error. The same set
- * as `ABSENCE_MARKERS` in `library/core.ts`, which imports this file and so
- * cannot be imported here.
+ * nothing and evaluates to the `absence-marker-binding` error (`Nothing`,
+ * `Missing`) or the `module-binding` error (`Module`). The same names as
+ * `ABSENCE_MARKERS` and `MODULE_OPERATOR` in `library/core.ts`, which imports
+ * this file and so cannot be imported here.
  */
-const UNBINDABLE_NAMES: ReadonlySet<string> = new Set(['Nothing', 'Missing']);
+const UNBINDABLE_NAMES: ReadonlySet<string> = new Set([
+  'Nothing',
+  'Missing',
+  'Module',
+]);
 
 /**
  * True when the statement `statement` is a function declaration of its
  * statement list: a `DefineFunction(name, Function(…))` (the Epsil
  * `function g(k) { … }` and `g(k) = …`), where
  *
- * - `name` is a symbol and is not an absence marker (`Nothing`, `Missing`),
- *   whose definition installs nothing;
+ * - `name` is a symbol and is not an absence marker (`Nothing`, `Missing`)
+ *   or `Module`, whose definition installs nothing;
  * - the second operand is a `Function` literal, the only clause that the
  *   `DefineFunction` canonical handler installs;
  * - `name` is not the constructor of a declared nominal type: such a

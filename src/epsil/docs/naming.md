@@ -79,8 +79,9 @@ A user binding shadows a library name for the rest of its scope, whichever
 spelling the library name has: a `let`, a `const`, a parameter, a loop
 variable, a `match` pattern, or a `function` definition. A function member
 of a `protocol` shadows a library name the same way, from the `protocol`
-statement onward; the library function stays reachable by its capitalized
-name (`Floor(x)`).
+statement onward. The qualified name `std::name` always names the library
+definition: `std::floor(x)` calls the library function wherever the program
+binds `floor` or `Floor`.
 
 ```epsil
 let sum = 0
@@ -174,8 +175,69 @@ absent — so a binding could never behave like the value it holds. In a
 `match`, test for a marker with `== Missing`: a bare `Missing` there would
 be a new variable.
 
+`Module` cannot be rebound either, and a binding of it is an error
+(`module-binding`): it is the form of every qualified name (`std::pi` is
+`["Module", "Pi"]`). A `let`, a `const`, an assignment or a `function`
+named `Module` defines nothing and gives the error when it runs; the static
+check reports every binding of `Module`, also a parameter, a loop variable,
+a `match` pattern and the index of a `sum`. A qualified name reads the
+library in every case, whatever the program binds.
+
 To name a raw symbol that happens to spell a library name, use the verbatim
 form: `` `sin` `` is the symbol `sin`, not the sine function.
+
+### The qualified name `std::name`
+
+`std` is the name of the standard library, and `std::name` is the library
+definition of `name`, in either spelling: `std::pi` and `std::Pi` are the
+constant π, and `std::floor(2.5)` calls the library function `Floor`. A
+binding of the program never changes what a qualified name reads:
+
+```epsil
+function Floor(x) { x + 100 }
+let floor = 7
+std::floor(2.5) + Floor(1) + floor
+// ➔ 110
+```
+
+```epsil
+function f() { let Pi = 3; std::pi + Pi }
+f()
+// ➔ 3 + pi
+```
+
+`std` is not a reserved word and not a variable: `let std = 5` is a
+binding like any other, and `std::pi` still names the constant π in that
+program. A qualified name reads a name of a module, and `.` reads a field
+of a value, so `m.x` is the field `x` of a variable `m`.
+
+These are errors: a name other than `std` before `::` (`unknown-module`),
+a name after `std::` that the library does not define, such as
+`std::mine` for a function of the program (`not-a-library-name`), `std::`
+with no name, and a nested name such as `std::a::b`.
+
+Where a function or a parameter of the program has the name, a qualified
+call of an ordinary library function, such as `std::floor(x)` or
+`std::abs(x)`, is applied to the values of its arguments: the engine does
+not simplify it. A qualified call there of a library function that holds or
+binds an argument, such as `std::sum(k, k in 1..3)` or `std::If(c, a, b)`,
+or a call with a named argument, such as `std::log(8, base: 2)`, is an
+error (`qualified-call-shadowed`):
+
+```epsil
+function Sum(x) { 0 }
+std::sum(k, k in 1..3)
+// ➔ error: qualified-call-shadowed
+```
+
+Where the program does not bind the name, every qualified call is the
+plain call.
+
+In MathJSON, a qualified name is `["Module", "Pi"]`, and a qualified call
+is `["Apply", ["Module", "Floor"], 2.5]`. The engine writes these forms in
+the MathJSON of a result only in a scope where the bare name would read
+another definition, so that the result, read again in that scope, keeps its
+value.
 
 ## Glyph Aliases
 

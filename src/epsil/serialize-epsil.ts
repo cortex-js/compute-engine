@@ -195,6 +195,22 @@ export function serializeEpsil(
     spellings.set(name, written);
     return written;
   };
+
+  /**
+   * The qualified name `std::spelling` of a standard-library name: the
+   * spelling the resolution pass reads back to the library name inside a
+   * qualified name (`std::pi` for `Pi`), or the name itself when it has no
+   * spelling or under `libraryNames: 'mathjson'` (`std::Pi`).
+   */
+  const qualifiedName = (name: string): string => {
+    const spelling =
+      options?.libraryNames === 'mathjson' ? undefined : epsilNameOf(name);
+    return `std::${escapeSymbol(
+      spelling !== undefined && canonicalLibraryName(spelling) === name
+        ? spelling
+        : name
+    )}`;
+  };
   // To provide automatic formatting of the result, a Formatter is used.
   // The result of the serialization is a series of `FormattingBlock`
   // representing various layout options. They are then combined and arranged
@@ -856,6 +872,35 @@ export function serializeEpsil(
           fmt.separator(','),
           ']',
           indices.map((x) => serializeExpression(x))
+        )
+      );
+    },
+
+    //
+    // Qualified names: `["Module", "Pi"]` → `std::pi`, and the call
+    // `["Apply", ["Module", "Floor"], x]` → `std::floor(x)`. Any other
+    // `Apply` keeps its generic form.
+    //
+    Module: (expr: MathJsonExpression): FormattingBlock => {
+      const name = nops(expr) === 1 ? symbol(operand(expr, 1)) : null;
+      if (name === null) return serializeGenericFunction(expr);
+      return fmt.text(qualifiedName(name));
+    },
+    Apply: (expr: MathJsonExpression): FormattingBlock => {
+      const callee = operand(expr, 1);
+      const name =
+        operator(callee) === 'Module' && nops(callee) === 1
+          ? symbol(operand(callee, 1))
+          : null;
+      if (name === null)
+        return serializeOperator(expr) ?? serializeGenericFunction(expr);
+      return fmt.line(
+        qualifiedName(name),
+        fmt.fencedList(
+          '(',
+          fmt.separator(','),
+          ')',
+          operands(expr).slice(1).map((x) => serializeExpression(x))
         )
       );
     },

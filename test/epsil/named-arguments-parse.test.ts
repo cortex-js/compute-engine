@@ -190,11 +190,12 @@ describe('the lexer munch hazard (design §1)', () => {
   });
 
   test('`f(a::b)` is a clean parse error, not a crash', () => {
-    // The leading `:` opens the named argument; the remaining `:` cannot start
-    // a value expression and is reported at its own offset.
+    // A token that starts with `::` does not open a named argument: `a::b` is
+    // a qualified name, and `a` is not a module (only `std` is), so the error
+    // is reported at the module name.
     const [, diagnostics] = parseEpsil('f(a::b)');
-    expect(diagnostics.map((d) => d.range)).toEqual([[4, 5]]);
-    expect(codes('f(a::b)')).toEqual(['unexpected-symbol']);
+    expect(diagnostics.map((d) => d.range)).toEqual([[2, 3]]);
+    expect(codes('f(a::b)')).toEqual(['unknown-module']);
   });
 });
 

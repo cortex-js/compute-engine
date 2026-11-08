@@ -2486,6 +2486,15 @@ export interface IComputeEngine {
   _bindingSymbol(name: MathJsonSymbol, scope: Scope): Expression | undefined;
 
   /**
+   * The symbol `name` bound to its definition in the system scope (the
+   * standard library and the libraries of the constructor's `libraries`
+   * option), whatever definition the current scope resolves the name to: the
+   * canonical form of `["Module", name]`. `undefined` when the system scope
+   * does not define `name`.
+   * @internal */
+  _librarySymbol(name: MathJsonSymbol): Expression | undefined;
+
+  /**
    * Push a set of parameter names that, while canonicalizing a function body,
    * shadow any same-named constant (`i`, `e`, ...) so they resolve as ordinary
    * local variables. Balanced with `_popShadowedParameters`. Optional `types`

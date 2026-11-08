@@ -406,6 +406,40 @@ export function createBindingSymbolExpression(
   return new BoxedSymbol(engine, name, { def: binding });
 }
 
+/**
+ * The symbol `name` bound to its definition in the system scope, where the
+ * standard library and the libraries of the constructor's `libraries` option
+ * are installed, whatever definition the current scope resolves the name to.
+ * This is the canonical form of `["Module", name]`. `undefined` when the
+ * system scope does not define `name`.
+ *
+ * The interned symbol of the name (`Pi`, `ExponentialE`, …) is returned when
+ * it is bound to that definition, so that engine code that compares such a
+ * symbol by identity (`=== ce.Pi`) still recognizes it. A constant whose
+ * value replaces it at boxing (`holdUntil: 'never'`) gives that value, as
+ * `ce.symbol()` does.
+ */
+export function createLibrarySymbolExpression(
+  engine: ComputeEngine,
+  commonSymbols: { [symbol: string]: null | Expression },
+  name: MathJsonSymbol
+): Expression | undefined {
+  const library = engine._evalContextStack[0]?.lexicalScope.bindings.get(name);
+  if (library === undefined) return undefined;
+  const common = Object.hasOwn(commonSymbols, name)
+    ? commonSymbols[name]
+    : undefined;
+  if (
+    common instanceof BoxedSymbol &&
+    isValueDef(library) &&
+    common.valueDefinition === library.value
+  )
+    return common;
+  if (isValueDef(library) && library.value.holdUntil === 'never')
+    return library.value.value ?? engine.Nothing;
+  return new BoxedSymbol(engine, name, { def: library });
+}
+
 export function createNumberExpression(
   engine: NumberHost,
   commonNumbers: CommonNumberTable,

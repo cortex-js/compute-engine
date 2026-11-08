@@ -8713,6 +8713,14 @@ export class Parser {
         // `control-outside-loop`.
         if (token.text === 'break' || token.text === 'continue')
           return this.parseLoopControl();
+        // `std::pi`: a qualified name. The `::` abuts the module name, as
+        // the dot of a field clause abuts its base.
+        if (
+          this.peek().type === 'OPERATOR' &&
+          this.peek().text === '::' &&
+          !this.peek().precededByWhitespace
+        )
+          return this.parseQualifiedName();
         return this.parseSymbol();
       case 'VERBATIM_SYMBOL':
         return this.parseVerbatimSymbol();
@@ -8787,6 +8795,85 @@ export class Parser {
       this.error(['reserved-word', token.text], token.start, token.end);
 
     return this.wrap({ sym: token.text }, token.start, token.end);
+  }
+
+  /**
+   * A qualified name `std::name`, the cursor on the module name: the
+   * definition of `name` in the standard library, also where a binding of
+   * the program shadows the name. It lowers to `["Module", name]`, with the
+   * name as written (`std::pi` is `["Module", "pi"]`): the resolution pass
+   * (`resolveLibraryNames()`) rewrites an Epsil spelling to the library name,
+   * as it does for a free `pi`. A call `std::floor(2.5)` is the postfix call
+   * clause applied to this node, `["Apply", ["Module", "floor"], 2.5]`.
+   *
+   * `std` is the only module name: it is not a reserved word and not a
+   * binding, so `let std = 5` is legal and `std::pi` still names the library
+   * constant in that program. Another name before `::` is the error
+   * `unknown-module`. A qualified name does not nest (`std::a::b`), and
+   * `std::` must be followed by a name. Each of these errors gives an `Error`
+   * node, so that the program is never read with another meaning.
+   */
+  private parseQualifiedName(): MathJsonExpression {
+    const moduleToken = this.advance();
+    this.harvest(moduleToken);
+    const separator = this.advance(); // '::'
+    const nameToken = this.current;
+    if (nameToken.type !== 'SYMBOL' && nameToken.type !== 'VERBATIM_SYMBOL') {
+      this.error(['symbol-expected'], separator.start, separator.end);
+      return this.wrap(
+        ['Error', { str: 'symbol-expected' }] as MathJsonExpression[],
+        moduleToken.start,
+        separator.end
+      );
+    }
+    this.advance();
+    this.harvest(nameToken);
+    const name =
+      nameToken.type === 'VERBATIM_SYMBOL'
+        ? (nameToken.value ?? '')
+        : nameToken.text;
+    let end = nameToken.end;
+    let nested = false;
+    while (this.current.type === 'OPERATOR' && this.current.text === '::') {
+      const extra = this.advance();
+      if (!nested)
+        this.error(['unexpected-symbol', extra.text], extra.start, extra.end);
+      nested = true;
+      end = extra.end;
+      const next: Token = this.current;
+      if (next.type === 'SYMBOL' || next.type === 'VERBATIM_SYMBOL')
+        end = this.advance().end;
+    }
+    if (nested)
+      return this.wrap(
+        ['Error', { str: 'unexpected-symbol' }] as MathJsonExpression[],
+        moduleToken.start,
+        end
+      );
+    if (moduleToken.text !== 'std') {
+      this.error(
+        ['unknown-module', moduleToken.text],
+        moduleToken.start,
+        moduleToken.end
+      );
+      return this.wrap(
+        [
+          'Error',
+          { str: 'unknown-module' },
+          { str: moduleToken.text },
+        ] as MathJsonExpression[],
+        moduleToken.start,
+        end
+      );
+    }
+    return this.wrap(
+      [
+        'Module',
+        this.wrap({ sym: name }, nameToken.start, nameToken.end),
+      ] as MathJsonExpression[],
+      moduleToken.start,
+      end
+    );
   }
 
   private parseVerbatimSymbol(): MathJsonExpression {
@@ -9380,13 +9467,16 @@ export class Parser {
         // argument, and `consumeNamedArgumentColon()` splits the leading `:`
         // off it so the remainder (`-`) starts the value expression — valid
         // syntax must not depend on the space in `f(a: -1)`. A token starting
-        // with `:=` is excluded so `f(a := 1)` keeps its assignment reading.
+        // with `:=` is excluded so `f(a := 1)` keeps its assignment reading,
+        // and one starting with `::` so `f(std::pi)` keeps its qualified
+        // name.
         if (
           allowNamedArgs &&
           (this.check('SYMBOL') || this.check('VERBATIM_SYMBOL')) &&
           this.peek(1).type === 'OPERATOR' &&
           this.peek(1).text.startsWith(':') &&
-          !this.peek(1).text.startsWith(':=')
+          !this.peek(1).text.startsWith(':=') &&
+          !this.peek(1).text.startsWith('::')
         ) {
           const nameTok = this.advance();
           this.consumeNamedArgumentColon();

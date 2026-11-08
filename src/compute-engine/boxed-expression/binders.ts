@@ -32,6 +32,7 @@ import { isInvalidNonCollection } from './error-value.js';
 import { copyContextStack } from './evaluation-epoch.js';
 import { chainedScopeOf } from '../scope-chaining.js';
 import { isPendingCallScope } from '../pending-call-scopes.js';
+import { isQualifiedName } from '../library-shadowing.js';
 import {
   inStaticTypingView,
   noteCallFrame,
@@ -245,7 +246,40 @@ export function withCallableBinding<T>(expr: Expression, build: () => T): T {
   const binding = callableBindingInContext(ce, expr.operator, own);
   if (binding === undefined || ce.lookupDefinition(expr.operator) === binding)
     return build();
-  const bindings = new Map([[expr.operator, binding]]);
+  return withBorrowedBinding(ce, expr.operator, binding, build);
+}
+
+/**
+ * Run `build` in a scope where `name` resolves to `binding`, a definition
+ * that a scope of the chain or the system scope already holds: a call that
+ * `build` boxes by name is bound to `binding`, not to the definition the
+ * current scope resolves the name to. `withCallableBinding()` uses it to keep
+ * the binding of a call that is rebuilt, and
+ * `BoxedFunction._withLibraryBinding()` to keep the library binding of a call
+ * whose structural form is rebuilt in a scope that shadows its name.
+ */
+export function withBorrowedBinding<T>(
+  ce: ComputeEngine,
+  name: string,
+  binding: BoxedDefinition,
+  build: () => T
+): T {
+  // The scope of the chain (or the system scope) that holds `binding` is its
+  // home: mark it before `build` runs. `BoxedFunction._bind()` marks the
+  // first scope of the chain that holds the binding of a call, and that
+  // would be the temporary scope below, which would then stay alive with
+  // its parent chain for as long as the definition.
+  if (!hasCallableHome(binding))
+    for (
+      let scope: Scope | null = ce.context.lexicalScope;
+      scope;
+      scope = scope.parent
+    )
+      if (scope.bindings.get(name) === binding) {
+        markCallableHome(binding, scope);
+        break;
+      }
+  const bindings = new Map([[name, binding]]);
   // The scope holds only the borrowed binding. A name that the build
   // declares automatically (a new symbol of a raw operand) goes to the
   // enclosing scope: a declaration in this scope would be lost when the
@@ -1563,6 +1597,10 @@ export function shadowedKey(shadowed: ReadonlySet<string> | undefined): string {
  *   symbol's VALUE and the declaration would silently vanish).
  * - An occurrence already on `scope`'s binding for the name is returned
  *   unchanged, so an already-correct body is preserved by identity.
+ * - A qualified name, the canonical form of `["Module", name]` made where a
+ *   local definition shadows the name (`isQualifiedName()`,
+ *   `library-shadowing.ts`), is returned unchanged: it names the library
+ *   definition on purpose.
  * - Everything else is re-pointed at `replacements`.
  *
  * `accept` restricts a name to part of the tree — the clause ordering of
@@ -1595,6 +1633,7 @@ export function rebindToBindings(
       // imports this module).
       const own = scope.bindings.get(name);
       if (own !== undefined && 'value' in own && own.value === def) return sym;
+      if (isQualifiedName(sym)) return sym;
       return target;
     },
     undefined,

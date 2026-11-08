@@ -734,8 +734,9 @@ function* executeEpsilSteps(
     // first declaration's site as a note) is not reported a second time as a
     // `runtime-error`: it is one problem, and the value carries it.
     // The same holds for a binding of an absence marker (`let Missing =
-    // 3`): the static pass reports it at the binding, and the statement's
-    // `absence-marker-binding` error value is that same problem.
+    // 3`) or of `Module`: the static pass reports it at the binding, and the
+    // statement's `absence-marker-binding` or `module-binding` error value is
+    // that same problem.
     // The walks of the value below run outside the per-statement `try`, and
     // nothing may throw to the host from them: a value can be nested so
     // deeply that a recursive walk (`errors`, `json`) overflows the stack.
@@ -749,10 +750,16 @@ function* executeEpsilSteps(
       isFunction(markerError.op1, 'ErrorCode')
         ? markerError.op1.ops
         : undefined;
-    const markerName =
+    const markerKind =
       markerCode !== undefined &&
       isString(markerCode[0]) &&
-      markerCode[0].string === 'absence-marker-binding' &&
+      (markerCode[0].string === 'absence-marker-binding' ||
+        markerCode[0].string === 'module-binding')
+        ? markerCode[0].string
+        : undefined;
+    const markerName =
+      markerKind !== undefined &&
+      markerCode !== undefined &&
       isString(markerCode[1])
         ? markerCode[1].string
         : undefined;
@@ -768,8 +775,18 @@ function* executeEpsilSteps(
         diagnostics.some(
           (d) =>
             Array.isArray(d.message) &&
-            d.message[0] === 'absence-marker-binding' &&
+            d.message[0] === markerKind &&
             d.message[1] === markerName
+        )) ||
+      // A qualified call that a binding of the program shadows: the static
+      // check reports it with its own code (`qualified-call-shadowed`).
+      (markerError !== undefined &&
+        errorCode(markerError.json) === 'qualified-call-shadowed' &&
+        diagnostics.some(
+          (d) =>
+            Array.isArray(d.message) &&
+            d.message[0] === 'qualified-call-shadowed' &&
+            d.message[1] === symbol(operand(markerError.json, 2))
         )) ||
       // A `function` statement on a `const` binding: the static check reports
       // it as a `static-type-error` with the engine code

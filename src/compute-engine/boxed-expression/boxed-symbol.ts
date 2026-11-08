@@ -6,6 +6,7 @@ import type {
   MathJsonSymbol,
 } from '../../math-json/types.js';
 import { isValidSymbol, validateSymbol } from '../../math-json/symbols.js';
+import { hidesLibraryBinding } from '../library-shadowing.js';
 
 import type { Type, TypeString } from '../../common/type/types.js';
 import {
@@ -357,7 +358,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   get json(): MathJsonExpression {
-    return matchesSymbol(this._id) ? this._id : { sym: this._id };
+    const name = matchesSymbol(this._id) ? this._id : { sym: this._id };
+    // A symbol bound to the library definition of its name, in a scope where
+    // the name reads another definition (`Pi` assigned `3` in a block), is
+    // written `["Module", "Pi"]`: the bare name would read the other
+    // definition when the MathJSON is boxed again in that scope.
+    if (hidesLibraryBinding(this.engine, this._id, this._def))
+      return ['Module', name];
+    return name;
   }
 
   get hash(): number {

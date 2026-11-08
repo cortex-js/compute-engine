@@ -54,6 +54,7 @@ import {
   normalizeNamedArguments,
   protocolMemberParts,
   qualifiedFieldParts,
+  moduleQualifiedName,
   splitNamedArguments,
   valueCalleeSignature,
   writtenArgumentSlots,
@@ -143,6 +144,8 @@ import {
 import {
   annotateFunctionLiteralParams,
   lookupApplicable,
+  qualifiedCallForm,
+  qualifiedCallShadowedError,
   writtenUntypedFunctionLiteral,
 } from '../function-utils.js';
 import {
@@ -3347,6 +3350,37 @@ function makeCanonicalFunctionCore(
   // assignment to the receiver (see below).
   let fieldReceiver: BoxedValueDefinition | undefined = undefined;
   if (name === 'Apply') {
+    // A qualified callee, `Apply(Module(Floor), …)` (the Epsil
+    // `std::floor(…)`), whose name the system scope defines as an operator.
+    // The form of the call is chosen before any argument is canonicalized
+    // (`qualifiedCallForm()`, `function-utils.ts`): where `Floor` is not
+    // shadowed, the plain call `Floor(…)`, boxed by the normal route, so a
+    // lazy operator gets its operands raw; where it is shadowed, an `Apply`
+    // whose callee is the symbol bound to the library operator, or the error
+    // `qualified-call-shadowed` when the library operator holds or binds an
+    // operand, or when the call has a named argument. A value definition of
+    // the library (a constant) is left to the `Apply` canonical handler.
+    const qualifiedName = moduleQualifiedName(ops[0]);
+    if (qualifiedName !== undefined) {
+      const library =
+        ce._evalContextStack[0]?.lexicalScope.bindings.get(qualifiedName);
+      if (library !== undefined && 'operator' in library) {
+        const args = ops.slice(1);
+        const form = qualifiedCallForm(
+          ce,
+          qualifiedName,
+          library,
+          scope ?? ce.context.lexicalScope,
+          named
+        );
+        if (form === 'call')
+          return ce.function(qualifiedName, args, { metadata, scope });
+        if (form === 'shadowed')
+          return qualifiedCallShadowedError(ce, qualifiedName);
+        const callee = ce._librarySymbol(qualifiedName);
+        if (callee !== undefined) ops = [callee, ...args];
+      }
+    }
     const field = resolveFieldCallee(
       ce,
       ops[0],
@@ -4913,7 +4947,16 @@ function applyOperatorDefinition(
   //
   // 4/ Apply `idempotent` and `involution`
   //
-  if (args.length === 1 && args[0].operator === name) {
+  // The inner call must be bound to the same definition, not only have the
+  // same name: the qualified call `std::Not(…)` is evaluated by building the
+  // library `Not` from the values of its arguments, and a value can still be
+  // a call of a user function named `Not`. `Not_library(Not_user(p))` is not
+  // `p`.
+  if (
+    args.length === 1 &&
+    args[0].operator === name &&
+    args[0].operatorDefinition === opDef
+  ) {
     // f(f(x)) -> x
     //
     // `Not` reads an absent operand as `False`, so `Not(Not(Missing))` is

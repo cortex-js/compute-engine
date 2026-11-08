@@ -38,6 +38,56 @@
   type has the field removed: with `r: record{a: integer, b: string}`, the
   type of `DeleteAt(r, "b")` is `record{a: integer}`. A key that is not a
   string is an error.
+- **`Module` reads the library definition of a name that a local definition
+  shadows.** `["Module", "Pi"]` is the constant π of the standard library,
+  also in a scope where `Pi` is declared and assigned `3`, and
+  `["Apply", ["Module", "Floor"], x]` calls the library function `Floor`
+  where a user function `Floor` exists. The canonical form of `Module(Pi)` is
+  the symbol bound to the library definition. A qualified call is the plain
+  call `[f, …]` where `f` is not shadowed. Where it is shadowed, a call of an
+  ordinary library function (not lazy, no held or bound operand, no named
+  argument) stays `["Apply", f, …]` with the callee bound to the library
+  definition, and is evaluated from the values of its arguments, with no
+  symbolic simplification; any other qualified call there gives
+  `["Error", "'qualified-call-shadowed'", f]`. A name that the library does not
+  define gives `["Error", "'not-a-library-name'", name]`. A second operand is
+  reserved for the name of another module. LaTeX has no spelling of the
+  qualifier: `["Module", "Pi"]` is written `\pi`.
+- **Epsil: the qualified name `std::name`.** `std::pi` (or `std::Pi`) is the
+  library constant π and `std::floor(2.5)` calls the library function
+  `Floor`, whatever the program binds: after `function Floor(x) { x + 100 }`
+  and `let floor = 7`, `std::floor(2.5)` is `2`. Where a function or a
+  parameter of the program has the name, a qualified call of a library
+  function that holds or binds an argument (`std::sum(k, k in 1..3)` after
+  `function Sum(x) { 0 }`), or with a named argument, is the error
+  `qualified-call-shadowed`. `std` is not a reserved
+  word, so `let std = 5` is still valid. A name other than `std` before `::`
+  is the error `unknown-module`, and a name that the library does not define
+  after `std::` is the error `not-a-library-name`. The serializer writes
+  `["Module", "Pi"]` as `std::pi`. A bare name keeps its spelling, because
+  it reads what the name reads where the text is read. `Module` cannot be
+  rebound, as `Nothing` and `Missing` cannot: it is the form of every
+  qualified name. A `let`, a `const`, an assignment or a function named
+  `Module` (in MathJSON, a `Declare`, an `Assign` or a `DefineFunction` of
+  `Module`, in any scope) defines nothing and gives the error
+  `module-binding` when it runs; the static check of Epsil reports every
+  binding of `Module`, also a parameter, a loop variable, a `match` pattern
+  and the index of a `sum`. A qualified name reads the library in every
+  case: the head `Module` always reads the library operator, whatever the
+  program or the host binds.
+
+### Behavior Changes
+
+- **In a scope that shadows a library name, the MathJSON of a result writes
+  `Module`.** `.json` and `toMathJson()` write a symbol bound to the library
+  definition as `["Module", name]`, and a call as
+  `["Apply", ["Module", name], …]`, when the name reads another definition
+  where the result is read again: in the current scope, or in a local scope
+  of a `Function` or a `Block` of the result that encloses the node. So a
+  result read again in that scope keeps its value: in a block with `Declare(Pi, real)` and `Assign(Pi, 3)`, the result
+  `π²/6` of `Sum(1/n², n, 1, ∞)` is written
+  `["Divide", ["Power", ["Module", "Pi"], 2], 6]`, and boxed in the block it
+  gives 1.6449, not 1.5. Outside such a scope, the output does not change.
 
 ## 0.183.0 _2026-11-07_
 

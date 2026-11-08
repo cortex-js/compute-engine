@@ -240,9 +240,15 @@ Rename one side so the two agree — the quick fix renames the annotation's para
 
 ## `absence-marker-binding`
 
-A binding names one of the absence markers `Nothing` or `Missing`: a `let`, a `const`, an assignment, a function, a parameter, a loop variable or a `match` pattern. The engine recognizes these markers by their name wherever they appear — an arithmetic operand named `Nothing` is refused as a non-number, and an arithmetic operand named `Missing` is read as absent — so a binding of one of them could never behave like the value it holds. They are the only library names that cannot be rebound in any scope. Every other one, including `Pi` and `Square`, is shadowed by a user binding, with one exception: at the top level of a program, a `let` or `const` of a library constant that results carry by name (`Pi`, `ExponentialE`, `GoldenRatio`) is refused with a run-time error, because a result built with the library constant would read the user value when its MathJSON is boxed again.
+A binding names one of the absence markers `Nothing` or `Missing`: a `let`, a `const`, an assignment, a function, a parameter, a loop variable or a `match` pattern. The engine recognizes these markers by their name wherever they appear — an arithmetic operand named `Nothing` is refused as a non-number, and an arithmetic operand named `Missing` is read as absent — so a binding of one of them could never behave like the value it holds. With `Module` (see `epsil doc module-binding`), they are the only library names that cannot be rebound in any scope. Every other one, including `Pi` and `Square`, is shadowed by a user binding, with one exception: at the top level of a program, a `let` or `const` of a library constant that results carry by name (`Pi`, `ExponentialE`, `GoldenRatio`) is refused with a run-time error, because a result built with the library constant would read the user value when its MathJSON is boxed again.
 
 Choose another name. In a `match`, a bare name is a new variable, not a comparison: to test for the marker, write `== Missing`.
+
+## `module-binding`
+
+A binding names `Module`: a `let`, a `const`, an assignment, a function, a parameter, a loop variable, a `match` pattern or the index of a `sum`. `Module` is the operator of every qualified name: `std::pi` is `["Module", "Pi"]` in MathJSON. It cannot be rebound in any scope. The static check reports every such binding. A `let`, a `const`, an assignment or a `function` statement also defines nothing when it runs, and it evaluates to a `module-binding` error value. A parameter, a loop variable, a pattern or an index named `Module` is still bound when the program runs, but no binding changes what a qualified name reads: the head of a qualified name always reads the library operator `Module`.
+
+Choose another name.
 
 ## `variable-redeclaration`
 
@@ -379,6 +385,24 @@ For the author of the host: capabilities are the handlers of `ce.effects`. A han
 This problem was detected before anything ran, when the program was canonicalized — the same analysis `epsil check` performs.
 
 A static diagnostic never suppresses evaluation: the program still runs exactly as written (errors are values — see `epsil doc runtime-error`), so the same mistake may be reported a second time by the run itself. The label distinguishes the tiers: "Type error"/"Static error" for the pre-run analysis, "Runtime error" for the run.
+
+## `unknown-module`
+
+A qualified name `m::x` names a module that does not exist. The only module is `std`, the standard library: `std::pi` is the library constant `Pi`, and `std::floor(2.5)` calls the library function `Floor`, also where the program binds `pi` or `floor` to something else.
+
+A qualified name reads a name of a module, and `.` reads a field of a value: to read a field of a variable `m`, write `m.x`.
+
+## `not-a-library-name`
+
+A qualified name `std::x` names a definition of the standard library, and the library defines no `x`. Both spellings of a library name are valid after `std::`: `std::pi` and `std::Pi` are the constant `Pi`. A name of the program is never a library name, so `std::` cannot reach a variable or a function that the program defines.
+
+The program still runs, and the qualified name evaluates to a `not-a-library-name` error value.
+
+## `qualified-call-shadowed`
+
+A qualified call `std::f(…)` is written where a function or a parameter of the program has the name `f` (a `function Sum(x)`), and the library function holds or binds an argument, or the call has a named argument: `std::sum(k, k in 1..3)`, `std::If(c, a, b)`, `std::log(8, base: 2)`. The engine reads the arguments of such a call by the rules of the library function, and these rules find the call by its name, which here names the binding of the program. So the call is an error, and it evaluates to a `qualified-call-shadowed` error value.
+
+A qualified call of an ordinary library function (`std::floor(x)`, `std::abs(x)`) is valid where the program binds the name: it is applied to the values of its arguments. Where the program does not bind the name, every qualified call is the plain call. To call the library function here, rename the binding of the program, or write the call where the name is not bound.
 
 ## `unknown-protocol`
 
