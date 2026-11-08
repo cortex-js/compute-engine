@@ -89,6 +89,46 @@ describe('callback parameter complexness', () => {
     });
   });
 
+  // The compiler writes `Map(Abs, zs)` as `Map((_x: complex) ↦ Abs(_x), zs)`.
+  // The name `_x` belongs to that function literal only: the engine of the
+  // caller has no symbol `_x` afterwards, and a symbol `_x` that the caller
+  // declared has no effect on the compiled code.
+  describe('the parameter name of the expanded built-in callback', () => {
+    it('is not declared in the engine by the compilation', () => {
+      const ce = engineWithSources();
+      expect(ce.lookupDefinition('_x')).toBeUndefined();
+      runner(ce, ['Map', 'Abs', 'zs']);
+      expect(ce.lookupDefinition('_x')).toBeUndefined();
+    });
+
+    it('keeps the type that a later use infers without the compilation', () => {
+      const compiled = engineWithSources();
+      runner(compiled, ['Map', 'Abs', 'zs']);
+      const untouched = engineWithSources();
+      expect(String(compiled.box(['Add', '_x', 1]).type)).toBe(
+        String(untouched.box(['Add', '_x', 1]).type)
+      );
+    });
+
+    it('is not declared in a scope that the caller pushed', () => {
+      const ce = engineWithSources();
+      ce.pushScope();
+      runner(ce, ['Map', 'Abs', 'zs']);
+      expect(ce.lookupDefinition('_x')).toBeUndefined();
+      ce.popScope();
+    });
+
+    it('does not read a symbol `_x` that the caller declared', () => {
+      // `Abs` of a string is an error. If the expansion used the symbol of
+      // the caller, it would be invalid, and the callback would be compiled
+      // for a real argument and give `NaN`.
+      const ce = engineWithSources();
+      ce.declare('_x', 'string');
+      expect(runner(ce, ['Map', 'Abs', 'zs'])({ zs: [Z] })).toEqual([5]);
+      expect(String(ce.box('_x').type)).toBe('string');
+    });
+  });
+
   describe('inline-literal callback over a declared list<complex>', () => {
     it('Map(x |-> Abs(x), zs) computes the modulus', () => {
       const ce = engineWithSources();

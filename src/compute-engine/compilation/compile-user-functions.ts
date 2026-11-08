@@ -1184,10 +1184,14 @@ export function complexElementCallbackEta(
     eltType !== undefined && isNonRealNumber(eltType)
       ? typeToString(eltType)
       : 'complex';
-  const x = engine.symbol('_x');
-  const eta = engine.function('Function', [
-    engine.function(callback.symbol, [x]),
-    engine.function('Typed', [x, engine.box({ str: eltTypeText })]),
+  // Boxed in one call, so that `_x` is bound in the scope of the literal
+  // only. A symbol boxed alone (`engine.symbol('_x')`) is declared in the
+  // current scope of the engine, and the call of the operator then narrows
+  // its type: the compilation would change the engine.
+  const eta = engine.box([
+    'Function',
+    [callback.symbol, '_x'],
+    ['Typed', '_x', { str: eltTypeText }],
   ]);
   // A built-in whose canonicalization refuses a complex argument would
   // yield an error body: leave the previous route alone rather than emit it.

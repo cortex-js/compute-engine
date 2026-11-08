@@ -133,6 +133,13 @@
   predicate. The compilation declines, and the interpreter gives the value,
   when the body of `g` reads another variable of the block, calls another
   function of the block or calls `g` itself.
+- **Compiling a built-in function mapped over a list of complex numbers no
+  longer declares the symbol `_x` in the engine.** With `zs: list<complex>`,
+  the compilation of `["Map", "Abs", "zs"]` to JavaScript declared `_x`, so
+  that `ce.box(["Add", "_x", 1]).type` was `complex | infinity` afterwards;
+  it is now `number`, as without the compilation. When the program had
+  declared `_x` as a `string`, the compiled code gave `[NaN]` at
+  `zs = [3 + 4i]`; it now gives `[5]`.
 
 ### Performance
 
