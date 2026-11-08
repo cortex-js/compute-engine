@@ -141,6 +141,16 @@
 
 ### Resolved Issues
 
+- **The LaTeX of a sum or a product over a set with a condition keeps the
+  condition.** `["Sum", "k", ["Element", "k", ["Set", 1, 2, 3], ["Greater",
+  "k", 1]]]` gave the LaTeX `\sum_{k\in \lbrace1, 2, 3\rbrace}k`, which parsed
+  again gives 6 instead of 5. Now the LaTeX is
+  `\sum_{k\in \lbrace1, 2, 3\rbrace, 1\lt k}k`. The parser also reads more
+  conditions after `k\in S`: a predicate (`\mathrm{IsPrime}(k)`), an equation
+  (`k\bmod 2=0`, `k=3`) and a membership of the same index (`k\in T`). Before,
+  it ignored a predicate and read an equation or a membership as one more
+  index range of the sum.
+
 - **Two integral signs with both differentials in the numerator of a fraction
   give the right value when a term follows the fraction or a factor comes
   before the inner sign.** `\int_1^2\int_3^4 \frac{dx\,dy}{xy} + 1` gave

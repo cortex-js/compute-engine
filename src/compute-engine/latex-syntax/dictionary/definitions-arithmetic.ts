@@ -4954,6 +4954,65 @@ function isConditionExpression(expr: MathJsonExpression): boolean {
 }
 
 /**
+ * Whether the subscript item `expr` that follows the clause `index \in S` is
+ * the condition of that clause, as in `\sum_{k\in S, k>1}`, rather than a
+ * new indexing set, as in `\sum_{k\in S, j\in T}`.
+ *
+ * It is a condition when it is a relation or a logical operation
+ * (`isConditionExpression()`), or when it is not a new indexing set:
+ * - an item that `getIndexAssignment()` does not read as an indexing set,
+ *   for example a predicate `\mathrm{IsPrime}(k)`;
+ * - an item that names no index and is not a number, for example
+ *   `k\bmod 2=0`, which reads as an assignment to the expression `k\bmod 2`;
+ * - an item that binds `index` again, for example `k=3`, `k\le 3` or
+ *   `k\in T`: the clause already binds `index`, so the item restricts it.
+ *
+ * The serializer of `Sum` and `Product` (`serializeIndexingSet()`) writes the
+ * condition of an `Element` clause in this position, so this test decides
+ * whether that LaTeX parsed again gives the same sum.
+ */
+function isElementCondition(
+  expr: MathJsonExpression,
+  index: string,
+  binderName: (expr: MathJsonExpression | null | undefined) => string | null
+): boolean {
+  if (isConditionExpression(expr)) return true;
+  // A bare number is a bound with no index (`\sum_{k\in S, 1}^{m, n}` keeps
+  // `Limits(Nothing, 1, n)`), not a condition.
+  if (isNumberExpression(expr)) return false;
+  const assignment = getIndexAssignment(expr, undefined, binderName);
+  return (
+    assignment === undefined ||
+    assignment.index === 'Nothing' ||
+    assignment.index === index
+  );
+}
+
+/**
+ * Whether the condition `condition` of the clause `index \in S` can be
+ * written without parentheses after the clause, because `getIndexes()`
+ * surely reads it back as the condition of that clause.
+ *
+ * The serializer tests the condition with `isElementCondition()` and the
+ * plain symbol name of each binder position. The parser uses
+ * `Parser.binderSymbol()`, which also reads a subscript form such as `a_k`
+ * (an `At`) as an index name. So a condition with an `At` or a `Subscript`
+ * at the top or as an operand is not written bare: `a_k=1` could read back
+ * as a new index `a_k`.
+ */
+function isBareElementCondition(
+  condition: MathJsonExpression,
+  index: string
+): boolean {
+  if (isConditionExpression(condition)) return true;
+  const subscripted = (x: MathJsonExpression | null) =>
+    operator(x) === 'At' || operator(x) === 'Subscript';
+  if (subscripted(condition) || operands(condition).some(subscripted))
+    return false;
+  return isElementCondition(condition, index, symbol);
+}
+
+/**
  * Extract operands from a sequence-like expression.
  * Handles Sequence, Tuple, and single expressions.
  */
@@ -5019,14 +5078,11 @@ function getIndexes(
       // EL-3: Check if this is an Element expression and the next item is a condition
       if (assignment.element && i + 1 < subs.length) {
         const nextExpr = subs[i + 1];
-        // Check if next expression is a condition (not another Element or assignment)
-        // Note: GreaterEqual IS allowed as a condition (e.g., n >= 2) when following an Element
-        // It's only a traditional index assignment when standalone (not after Element)
-        if (
-          isConditionExpression(nextExpr) &&
-          operator(nextExpr) !== 'Element' &&
-          operator(nextExpr) !== 'Equal'
-        ) {
+        // The next item is a condition of this clause, not a new indexing
+        // set, when `isElementCondition()` says so. For example, `n\ge 2`
+        // after `n\in S` is a condition, while a standalone `n\ge 2` is an
+        // index assignment.
+        if (isElementCondition(nextExpr, assignment.index, binderName)) {
           // Attach condition to the Element expression
           // Element goes from ["Element", var, domain] to ["Element", var, domain, condition]
           const elementExpr = assignment.element;
@@ -5266,8 +5322,11 @@ function serializeIndexingSet(
   serializer: Serializer,
   indexingSet: MathJsonExpression
 ): { sub?: string; sup?: string } {
-  // Handle Element expressions: ["Element", "n", "N"]
-  // Serialize as `n\in N`
+  // Handle Element expressions: ["Element", "n", "N"] serializes as
+  // `n\in N`, and ["Element", "n", "N", condition] as `n\in N, condition`.
+  // The condition must be written: without it, the LaTeX parsed again sums
+  // over every element of the collection. `getIndexes()` reads the item
+  // after an `Element` clause back as its condition.
   if (operator(indexingSet) === 'Element') {
     const indexLatex = serializer.serialize(operand(indexingSet, 1));
     const collection = operand(indexingSet, 2);
@@ -5276,7 +5335,20 @@ function serializeIndexingSet(
     const collectionLatex =
       serializeListDomain(serializer, collection) ??
       serializer.serialize(collection);
-    return { sub: `${indexLatex}\\in ${collectionLatex}` };
+    const condition = operand(indexingSet, 3);
+    if (condition === null)
+      return { sub: `${indexLatex}\\in ${collectionLatex}` };
+    // A condition that the parser could read as a new indexing set is
+    // written in parentheses: `x=1` alone reads back as the range `x=1..∞`,
+    // and a boolean symbol `p` alone as a new index `p`. The parser reads a
+    // parenthesized item as a condition, and the canonical form removes the
+    // parentheses.
+    const index = symbol(operand(indexingSet, 1)) ?? 'Nothing';
+    const conditionLatex = serializer.serialize(condition);
+    const bare = isBareElementCondition(condition, index);
+    return {
+      sub: `${indexLatex}\\in ${collectionLatex}, ${bare ? conditionLatex : `(${conditionLatex})`}`,
+    };
   }
 
   let indexExpr = operand(indexingSet, 1);

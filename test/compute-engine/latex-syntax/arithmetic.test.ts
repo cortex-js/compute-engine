@@ -542,6 +542,139 @@ describe('EL-3: Condition/Filter Support in Element Expressions', () => {
   });
 });
 
+// The LaTeX of a `Sum` or `Product` over an `Element` clause with a condition
+// writes the condition after the clause, and the parser reads it back as the
+// condition of that clause. Before, the condition was left out, so
+// `\sum_{k\in \lbrace1, 2, 3\rbrace}k` parsed again gave 6 instead of 5.
+describe('LaTeX round trip of a condition in an Element clause', () => {
+  test('the condition is written after the clause', () => {
+    const expr = ce.expr([
+      'Sum',
+      'k',
+      ['Element', 'k', ['Set', 1, 2, 3], ['Greater', 'k', 1]],
+    ]);
+    expect(expr.latex).toMatchInlineSnapshot(
+      `\\sum_{k\\in \\lbrace1, 2, 3\\rbrace, 1\\lt k}k`
+    );
+    expect(ce.parse(expr.latex).evaluate().json).toBe(5);
+  });
+
+  const conditions: [string, Expression][] = [
+    ['Greater', ['Greater', 'k', 1]],
+    ['GreaterEqual', ['GreaterEqual', 'k', 2]],
+    ['LessEqual', ['LessEqual', 'k', 4]],
+    ['NotEqual', ['NotEqual', 'k', 2]],
+    ['And', ['And', ['Greater', 'k', 1], ['Less', 'k', 5]]],
+    ['Or', ['Or', ['Less', 'k', 2], ['Greater', 'k', 4]]],
+    ['Not', ['Not', ['Equal', 'k', 3]]],
+    ['a chain', ['Less', 1, 'k', 5]],
+    ['Equal on the index', ['Equal', 'k', 3]],
+    ['Equal on an expression', ['Equal', ['Mod', 'k', 2], 0]],
+    ['a predicate', ['IsPrime', 'k']],
+    ['Element on the index', ['Element', 'k', ['Set', 2, 3]]],
+  ];
+  for (const [name, condition] of conditions) {
+    for (const op of ['Sum', 'Product']) {
+      test(`${op}, ${name}: the LaTeX parsed again gives the same value`, () => {
+        const expr = ce.expr([
+          op,
+          'k',
+          ['Element', 'k', ['Set', 1, 2, 3, 4, 5, 6], condition],
+        ]);
+        const reparsed = ce.parse(expr.latex);
+        expect(reparsed.isSame(expr)).toBe(true);
+        expect(reparsed.evaluate().json).toEqual(expr.evaluate().json);
+      });
+    }
+  }
+
+  test('a condition on each of two clauses', () => {
+    const expr = ce.expr([
+      'Sum',
+      ['Multiply', 'i', 'j'],
+      ['Element', 'i', ['Set', 1, 2, 3], ['Greater', 'i', 1]],
+      ['Element', 'j', ['Set', 1, 2], ['Less', 'j', 2]],
+    ]);
+    const reparsed = ce.parse(expr.latex);
+    expect(reparsed.isSame(expr)).toBe(true);
+    expect(reparsed.evaluate().json).toBe(5);
+  });
+
+  // A condition that the parser could read as a new indexing set is written
+  // in parentheses.
+  test('a condition on another symbol is written in parentheses', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('p', 'boolean');
+    const cases: [Expression, string][] = [
+      [['Equal', 'x', 1], '\\sum_{k\\in \\lbrace1, 2, 3\\rbrace, (x=1)}k'],
+      ['p', '\\sum_{k\\in \\lbrace1, 2, 3\\rbrace, (p)}k'],
+    ];
+    for (const [condition, latex] of cases) {
+      const expr = ce2.expr([
+        'Sum',
+        'k',
+        ['Element', 'k', ['Set', 1, 2, 3], condition],
+      ]);
+      expect(expr.latex).toBe(latex);
+      expect(ce2.parse(expr.latex).isSame(expr)).toBe(true);
+    }
+    ce2.assign('x', 1);
+    ce2.assign('p', true);
+    const sum = ce2.expr([
+      'Sum',
+      'k',
+      ['Element', 'k', ['Set', 1, 2, 3], ['Equal', 'x', 1]],
+    ]);
+    expect(ce2.parse(sum.latex).evaluate().json).toBe(6);
+  });
+
+  // A bare number after the clause is a bound with no index, not a
+  // condition.
+  test('a number after the clause stays a bound with no index', () => {
+    expect(ce.parse('\\sum_{k\\in S, 1}^{m, n} k').json).toEqual([
+      'Sum',
+      'k',
+      ['Element', 'k', 'S'],
+      ['Limits', 'Nothing', 1, 'n'],
+    ]);
+  });
+
+  // An item that binds another index stays a new indexing set.
+  test('an item that binds another index is a new clause', () => {
+    expect(
+      ce.parse('\\sum_{k\\in \\lbrace1,2\\rbrace, j\\in\\lbrace 3,4\\rbrace} kj')
+        .json
+    ).toMatchInlineSnapshot(`
+      [
+        Sum,
+        [
+          Multiply,
+          j,
+          k,
+        ],
+        [
+          Element,
+          k,
+          [
+            Set,
+            1,
+            2,
+          ],
+        ],
+        [
+          Element,
+          j,
+          [
+            Set,
+            3,
+            4,
+          ],
+        ],
+      ]
+    `);
+  });
+});
+
 describe('EL-5: Non-enumerable domains stay symbolic', () => {
   // EL-5: When the domain cannot be enumerated, the expression should
   // remain symbolic instead of returning NaN
