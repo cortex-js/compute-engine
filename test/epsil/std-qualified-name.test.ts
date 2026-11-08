@@ -354,3 +354,12 @@ describe('a parameter with the name of a library function', () => {
     ]);
   });
 });
+
+describe('the separator of a qualified name', () => {
+  test('only the ASCII `::` separates a qualified name; the glyph `∷` is an error', () => {
+    // `∷` (U+2237 PROPORTION) is not an input form of `::`
+    // (`FANCY_UNICODE` in `src/epsil/characters.ts`).
+    expect(parsed('std::pi')[1]).toEqual([]);
+    expect(parsed('std∷pi')[1]).toEqual(['unexpected-symbol']);
+  });
+});

@@ -553,7 +553,10 @@ export const FANCY_UNICODE = new Map<number, string>([
   [0x2228, '||'], // ∨
   // [  0x2254,  ':='], // COLON EQUALS
   // [  0x2255,  '=:'], // EQUALS COLON
-  [0x2237, '::'],
+  // `∷` (U+2237 PROPORTION) is deliberately absent. `::` is the separator of
+  // a qualified name (`std::pi`), which the parser reads only as the ASCII
+  // token; in mathematics `∷` is the proportion sign (a:b∷c:d), not a
+  // qualifier, so the glyph lexes as an unrecognized character and errors.
   [0x2260, '!='], // ≠ NOT EQUAL TO
   // The equivalence glyphs ≡ (U+2261 IDENTICAL TO), ≢ (U+2262), and
   // ≣ (U+2263 STRICTLY EQUIVALENT TO) are DELIBERATELY absent (user ruling

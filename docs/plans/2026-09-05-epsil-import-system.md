@@ -583,6 +583,28 @@ Still open:
   reset-to-reload alone does not decide binding replacement rules.
 - Symbol/closure representation, AST shape, preparation APIs, and the proposed
   type/protocol ownership and conformance contracts.
+- Qualified names of a module. Epsil already has one: `std::name` names the
+  standard-library definition of `name` whatever the program binds, and its
+  MathJSON form is `["Module", name]` (CE-1099, committed 2026-11-07;
+  `docs/plans/2026-11-07-ce1099-std-module.md`, sections 4 and 7). Proposals
+  for this design, not decided:
+  - The member access of a namespace import (decision 2 above) is
+    `geometry::circleArea`. `::` reads a name of a module that is known when
+    the program is checked; `.` stays the access to a field of a value. A
+    namespace value that a future dynamic import returns (section 12) is a
+    value, so `.` reads its members.
+  - The MathJSON persistence of a module-owned symbol (decision 5 above) uses
+    the second operand of `Module`, which CE-1099 reserved and which is an
+    error today: `["Module", "x", "'./geometry.epsil'"]`. A symbol written this
+    way keeps its module identity through a MathJSON round trip, and a
+    consumer's `let x = 10` cannot capture it.
+  - The name `std` before `::` and the `std:` specifiers reserved for the
+    resolver (section 6) name the same thing, the standard library. An import
+    cannot bind a module to the name `std`.
+  - A `::` name of an imported module follows the rules of `std::` where they
+    apply: the name `Module` cannot be bound, and a qualified call of a
+    shadowed name follows the three forms of the CE-1099 design (a plain call,
+    an `Apply` of the bound function, or `qualified-call-shadowed`).
 
 ## 12. Future dynamic imports
 
