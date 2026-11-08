@@ -118,6 +118,19 @@
 
 ### Resolved Issues
 
+- **An integral whose differential is in a factor before another factor is
+  an error, not a wrong value.** In `\int_1^2 \frac{dx}{x}\cdot 2`, the
+  parser searched only the end of the product and its last factor for the
+  differential, found none, and took the `d` of `dx` as the integration
+  variable: the integral evaluated to 3, not 2 ln 2. Now a factor before the
+  last one that holds a differential (`\frac{dx}{x}\cdot 2`,
+  `\frac{dx}{x} 2`, `(x\,dx) 3`, `\iint \frac{dx}{x}\frac{dy}{y}`) is replaced
+  by an `unexpected-differential` error, as a differential at the end of a
+  denominator already is. Write the differential last:
+  `\int_1^2 2\frac{dx}{x}` or `\int_1^2 \frac{2}{x}\,dx`. Parentheses that
+  hold only the differential after a symbol (`f(dx)\cdot 2`) are not changed:
+  they can be a function call.
+
 - **The derivative of a long list is computed when the derivative of each
   element is.** The size limit of a derivative (25 000 nodes) applied to the
   whole list, so a list of many small elements stayed unevaluated: `D` of the

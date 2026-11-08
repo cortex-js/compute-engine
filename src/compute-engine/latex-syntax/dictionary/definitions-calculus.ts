@@ -224,11 +224,14 @@ function parseIntegral(command: string, nIntegrals = 1) {
     // integral of 1 (CE-291).
     if (fn === null && indexes.length > 0) fn = 1;
 
-    // With no differential found, a differential at the end of a denominator
-    // anywhere in the body (`\int 2\frac{3x}{5dx}`, `\int \sin\frac{x}{5dx}`)
-    // is malformed: that denominator is replaced by an error (CE-305.5).
-    if (fn !== null && indexes.length === 0)
-      fn = markDenominatorDifferentials(fn, binderName);
+    // With fewer differentials found than integral signs, a differential at
+    // the end of a denominator anywhere in the body (`\int 2\frac{3x}{5dx}`,
+    // `\int \sin\frac{x}{5dx}`) or in a factor of a product other than the
+    // last factor (`\int \frac{dx}{x}\cdot 2`,
+    // `\iint \frac{dx}{x}\frac{dy}{y}`) is malformed: that denominator or that
+    // factor is replaced by an error.
+    if (fn !== null && indexes.length < nIntegrals)
+      fn = markMisplacedDifferentials(fn, binderName);
 
     //
     // 3/ Put together the limits, the function and the indexes
@@ -542,14 +545,29 @@ function parseSubintegrand(
 }
 
 /**
- * Replace by an `unexpected-differential` error the denominator of each
- * `Divide` in `expr` that ends with a differential (`\frac{3x}{5dx}`), at any
- * depth. `parseSubintegrand` detects such a denominator only when the
- * fraction is the whole body; a fraction inside a product, a sum, a negation,
- * parentheses or a function argument is found here. Return `expr` itself
- * when no denominator ends with a differential.
+ * Replace by an `unexpected-differential` error each differential in `expr`
+ * that cannot be the differential of the integral, at any depth. Call it only
+ * when the integral found fewer differentials than it has integral signs.
+ * Return `expr` itself when there is no such differential.
+ *
+ * Two places are marked:
+ * - the denominator of a `Divide` that ends with a differential
+ *   (`\frac{3x}{5dx}`) is replaced by the error. `parseSubintegrand` detects
+ *   such a denominator only when the fraction is the whole body; a fraction
+ *   inside a product, a sum, a negation, parentheses or a function argument
+ *   is found here.
+ * - a factor of a product, other than the last factor, that holds a
+ *   differential (`\frac{dx}{x}` in `\frac{dx}{x}\cdot 2`) is replaced by the
+ *   error. `parseSubintegrand` searches a product for the differential only
+ *   at its end and in its last factor. Without the error, the `d` stays a
+ *   free symbol, the canonical form takes it as the integration variable, and
+ *   `\int_1^2 \frac{dx}{x}\cdot 2` evaluates to 3, not 2 ln 2. Parentheses
+ *   that hold only the differential after a symbol (`f(dx)\cdot 2`) are not
+ *   marked: the symbol can be a function and the parentheses its call.
+ *   `parseSubintegrand` does not take such parentheses out of the last factor
+ *   either. Parentheses that hold more (`x(x\,dx)\cdot 2`) are marked.
  */
-function markDenominatorDifferentials(
+function markMisplacedDifferentials(
   expr: MathJsonExpression,
   binderName: (expr: MathJsonExpression | null | undefined) => string | null
 ): MathJsonExpression {
@@ -560,13 +578,29 @@ function markDenominatorDifferentials(
     if (parseSubintegrand(args[1], binderName)[1].length > 0)
       return [
         'Divide',
-        markDenominatorDifferentials(args[0], binderName),
+        markMisplacedDifferentials(args[0], binderName),
         ['Error', "'unexpected-differential'"],
       ];
   }
+  const isProduct = h === 'Multiply' || h === 'InvisibleOperator';
   let changed = false;
-  const newArgs = args.map((arg) => {
-    const result = markDenominatorDifferentials(arg, binderName);
+  const newArgs = args.map((arg, i) => {
+    if (isProduct && i < args.length - 1) {
+      const [body, indexes] = parseSubintegrand(arg, binderName);
+      if (
+        indexes.length > 0 &&
+        !(
+          body === null &&
+          operator(arg) === 'Delimiter' &&
+          i > 0 &&
+          symbol(args[i - 1]) !== null
+        )
+      ) {
+        changed = true;
+        return ['Error', "'unexpected-differential'"] as MathJsonExpression;
+      }
+    }
+    const result = markMisplacedDifferentials(arg, binderName);
     if (result !== arg) changed = true;
     return result;
   });
