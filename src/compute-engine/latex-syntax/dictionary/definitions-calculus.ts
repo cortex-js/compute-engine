@@ -299,6 +299,22 @@ function parseIntegral(command: string, nIntegrals = 1) {
     // last factor (`\int \frac{dx}{x}\cdot 2`,
     // `\iint \frac{dx}{x}\frac{dy}{y}`) is malformed: that denominator or that
     // factor is replaced by an error.
+    //
+    // An integral that found one differential for each of its signs is not
+    // searched: in its body, a `d` before a variable is the product of the
+    // symbol `d` and that variable. `\int_0^1 \frac{ax+by}{cx+dy}\,dx` has
+    // `dy` at the end of its denominator, and `\int_0^1 (c+dx)(a+bx)\,dx`
+    // has `dx` in a factor before the last one. Both are well formed, with a
+    // coefficient named `d`, and the search would replace that denominator
+    // and that factor by an error.
+    //
+    // The consequence is that an integral written with more differentials
+    // than signs keeps the `d` of an extra differential as a symbol when
+    // that differential is inside a sub-expression:
+    // `\int_1^2 \frac{dx}{x}\,dy` is the integral over `y` of `d·x/x`, and
+    // its value is `d`. With the `diagnostics` option of `parse()`, that `d`
+    // is reported as an `undeclared-symbol` unless `d` is declared (see
+    // `pruneDifferentialOperators()`).
     if (fn !== null && indexes.length < nIntegrals)
       fn = markMisplacedDifferentials(fn, binderName);
 
@@ -776,7 +792,9 @@ function parseSubintegrand(
 /**
  * Replace by an `unexpected-differential` error each differential in `expr`
  * that cannot be the differential of the integral, at any depth. Call it only
- * when the integral found fewer differentials than it has integral signs.
+ * when the integral found fewer differentials than it has integral signs:
+ * in the body of an integral that has all its differentials, a `d` before a
+ * variable is a product (`dy` in `\int_0^1 \frac{ax+by}{cx+dy}\,dx`).
  * Return `expr` itself when there is no such differential.
  *
  * Two places are marked:
