@@ -868,7 +868,17 @@ function serializeJsonFunction(
 
   const fn: MathJsonExpression = [
     jsonHead,
-    ...args.map((x) => (x ? serializeJson(ce, x, argOptions) : 'Missing')),
+    ...args.map((x, i) =>
+      x
+        ? serializeJson(
+            ce,
+            x,
+            isBindingPattern(name, i, x)
+              ? bindingPatternOptions(argOptions)
+              : argOptions
+          )
+        : 'Missing'
+    ),
   ];
 
   const md: Metadata = { ...(metadata ?? {}) };
@@ -907,6 +917,42 @@ function serializeJsonFunction(
   if (md.wikidata) result.wikidata = md.wikidata;
   if (sourceOffsets) result.sourceOffsets = sourceOffsets;
   return result as MathJsonExpression;
+}
+
+/**
+ * True when the operand at `index` of a call to `name` is a destructuring
+ * pattern: a `Tuple` parameter of a `Function` literal (`((p, q)) => p q`),
+ * or the `Tuple` target of an `Assign` or a `Declare` (`(a, b) := v`). The
+ * canonical forms of these operators read the pattern as a raw `Tuple` and
+ * refuse another operator: `["Function", body, ["Pair", "x", "y"]]` boxes to
+ * an `expected-a-symbol` error in place of its parameter, and
+ * `["Assign", ["Pair", "a", "b"], v]` to an `incompatible-type` error. The
+ * `Tuple` target of an `Element` clause is not listed: its canonical form
+ * reads `Pair` back as `Tuple`.
+ */
+function isBindingPattern(
+  name: string,
+  index: number,
+  operand: Expression
+): boolean {
+  if (!isFunction(operand, 'Tuple')) return false;
+  if (name === 'Function') return index > 0;
+  return index === 0 && (name === 'Assign' || name === 'Declare');
+}
+
+/**
+ * The serialization options for a destructuring pattern
+ * (`isBindingPattern()`): the pretty serializer writes a value `Tuple` of
+ * one, two or three elements as `Single`, `Pair` or `Triple`, and a pattern
+ * must keep `Tuple`, also in its nested patterns, so that the MathJSON boxes
+ * back to the same pattern.
+ */
+function bindingPatternOptions(
+  options: Readonly<JsonSerializationOptions>
+): Readonly<JsonSerializationOptions> {
+  const tupleNames = ['Single', 'Pair', 'Triple'];
+  if (tupleNames.every((x) => options.exclude.includes(x))) return options;
+  return { ...options, exclude: [...options.exclude, ...tupleNames] };
 }
 
 function serializeJsonString(

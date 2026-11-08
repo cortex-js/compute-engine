@@ -118,6 +118,17 @@
 
 ### Resolved Issues
 
+- **`toMathJson()` keeps `Tuple` for a destructuring pattern, so that
+  `ce.box()` reads the MathJSON back.** A `Tuple` of one, two or three
+  elements is written `Single`, `Pair` or `Triple`, but a destructuring
+  parameter of a `Function` and the destructuring target of an `Assign` or a
+  `Declare` are patterns, not values, and these operators read only `Tuple`.
+  The function `["Function", ["Multiply", "x", "y"], ["Tuple", "x", "y"]]`
+  was written `["Function", ["Multiply", "x", "y"], ["Pair", "x", "y"]]`, and
+  `ce.box()` of that gave an `expected-a-symbol` error in place of the
+  parameter. It is now written with `["Tuple", "x", "y"]`. A value `Tuple`,
+  for example the value of the `Assign`, is still written `Pair`.
+
 - **A call of a user function with the name of a library function is no
   longer read as the library function when it is used in another scope.** A
   call keeps the function it was bound to where it was made, and the library
