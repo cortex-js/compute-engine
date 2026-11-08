@@ -252,9 +252,10 @@ appears.
 
 ### CE-1099. More ways to read a symbol that a local definition shadows
 
-**Status:** waits for user (design); capability, L. User decision 2026-11-07:
-record the feature; the `super` keyword is one way to do it. Issues CE-103,
-CE-716 and CE-835.
+**Status:** ready; capability, M. Design approved by the user 2026-11-07:
+`docs/plans/2026-11-07-ce1099-std-module.md` (`std::name` in Epsil,
+`["Module", name]` in MathJSON; `super` stays reserved for the next binding
+outward, not part of this item). Issues CE-103, CE-716 and CE-835.
 
 A local definition hides every definition of the same name in the scopes
 around it, and the code in its scope has few ways to reach the hidden one:
@@ -271,24 +272,14 @@ around it, and the code in its scope has few ways to reach the hidden one:
   it works only for a library function that has a lowercase alias.
   `function` stays the way to shadow a name (CE-835).
 
-The proposal is a syntax that names the definition outside the current scope:
-
-- Epsil: `super.symbol`, the definition that `symbol` has in the scope around
-  the one that shadows it (or in the library, when the library is the next
-  scope).
-- MathJSON: a form such as `Super:Symbol` (the user's first proposal,
-  2026-11-06), or an operator such as `["Super", "Pi"]`. The form must survive
-  a JSON round trip and be read by every consumer of MathJSON, so the choice
-  belongs to the design.
-- LaTeX: decide whether the form has a spelling, or serializes only from the
-  boxed expression.
-
-The design answers: whether `super` reads one scope out or goes to the
-library; how it nests (`super.super.x`); whether it reaches a variable or only
-a constant or a function; which serializations write it (all of them inside a
-shadowing scope, or only the ones that would otherwise read the local, as in
-CE-103); and how it compiles. CE-103 is the first user: once the form exists,
-the serializer writes `Pi` that way inside a scope that shadows `Pi`.
+The design: `std::pi` in Epsil and `["Module", "Pi"]` in MathJSON name the
+standard-library definition, wherever they are read; a call is
+`["Apply", ["Module", "Floor"], x]`. A serializer writes the form only when
+the bare name would read another definition in the scope where it runs, so
+CE-103's JSON reads back as π inside the block. LaTeX has no spelling, and
+compilation adds no lowering. The design document has the steps, the tests
+and the relation to the Epsil import draft
+(`docs/plans/2026-09-05-epsil-import-system.md`).
 
 ## Symbolic computation
 
