@@ -141,6 +141,15 @@
 
 ### Resolved Issues
 
+- **A function that calls a parameter with no declared signature does not
+  claim a list type for that call.** The type of
+  `["Apply", ["Function", ["h", ["List", ["List", 0, 0], 5]], "h"], ["Function", ["Count", "t"], "t"]]`
+  was `list<list<unknown^2> | unknown>`, but its value is `2`. The call of
+  `h` is now typed `unknown`, and the function literal is typed
+  `(h: unknown) -> unknown`, because the function that `h` receives can read
+  the whole list. A parameter declared with a signature, such as
+  `(list) -> integer`, keeps the result type of the signature.
+
 - **In Epsil, the location of an error in a subtraction does not select a
   variable of another sum.** With `let s: any = "a"` and `let y = 5`, the
   error of `let v = Sqrt(y + 2) - s` underlined the `y` of `y + 2`, which did

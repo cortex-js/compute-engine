@@ -553,6 +553,7 @@ import {
 import {
   functionLiteralParameterNames,
   functionLiteralParameterType,
+  isFunctionLiteralParameter,
   isScalarType,
   capturedTypesWidened,
   resultOutsideCallType,
@@ -16672,12 +16673,17 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
     // is typed `unknown`, not as the broadcast that the paragraph above
     // describes: `Block(Assign(f, t ↦ Count(t)), f([[0, 0], 5]))` was typed
     // `list<list<unknown^2> | unknown>`, but its value is `2`.
-    // A free name that is not declared is not a block local, and keeps the
-    // broadcast type: with `L = [1, 3, 5]`, `foo(L)` is typed
+    // A parameter of a function literal gets its value only when the literal
+    // is applied, so the same rule applies to it:
+    // `Apply(h ↦ h([[0, 0], 5]), t ↦ Count(t))` is typed `unknown`, not
+    // `list<list<unknown^2> | unknown>`, and its value is `2`.
+    // A free name that is not declared is not a local or a parameter, and
+    // keeps the broadcast type: with `L = [1, 3, 5]`, `foo(L)` is typed
     // `list<unknown^3>` (`docs/BROADCAST-MODEL.md`).
     if (
       heldValue === undefined &&
-      expr.valueDefinition._blockLocal &&
+      (expr.valueDefinition._blockLocal ||
+        isFunctionLiteralParameter(expr.valueDefinition)) &&
       (declaredType === 'unknown' || isWildcardFunctionType(declaredType))
     )
       return 'unknown';
