@@ -95,7 +95,12 @@ import {
 import { ABS_ARG_REFUSAL, containsDerivativeHead } from './angular-unit.js';
 import { sumVariantInfo, taggedSumInType } from '../sum-representation.js';
 import type { ShapeNode } from '../boxed-expression/match-dispatch.js';
-import type { CompileTarget, InvariantPrefix, TargetSource } from './types.js';
+import type {
+  CompileTarget,
+  CompiledFunction,
+  InvariantPrefix,
+  TargetSource,
+} from './types.js';
 import {
   CompileDeclineError,
   possibleNothingDecline,
@@ -479,8 +484,20 @@ export function compile(
   prec = 0
 ): TargetSource {
   if (expr === undefined) return '';
+  // Each level of a nested expression keeps one frame of this function on
+  // the stack, so the work of the outermost call is in a function of its
+  // own (`compileOutermost`): its locals would make every frame larger.
   if (CompilerState._compileDepth !== 0 || CompilerState._rootAdmission)
     return compileExpression(expr, target, prec);
+  return compileOutermost(expr, target, prec);
+}
+
+/** `compile()` of the outermost expression of a compilation. */
+function compileOutermost(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  prec: number
+): TargetSource {
   const dispatched = compileDeclaredUnionDispatch(expr, target);
   if (dispatched !== undefined) return dispatched;
   // The outermost compilation declines, on every target, when a value has
@@ -923,11 +940,10 @@ function compileExpression(
 
   // A node whose emission the D2/D6 runtime rule has BOUND to a temporary
   // (`realOperandGuard`): the real lowering re-emits its head with the
-  // operand's code replaced by the temporary's real projection.
-  const override = _codeOverrides.get(expr);
-  if (override !== undefined) return override;
-  const alias = _codeAliases.get(expr);
-  if (alias !== undefined) return alias;
+  // operand's code replaced by the temporary's real projection. An alias
+  // (`_codeAliases`) is read when there is no override.
+  const fixed = _codeOverrides.get(expr) ?? _codeAliases.get(expr);
+  if (fixed !== undefined) return fixed;
   if (!expr.isValid) {
     throw new Error(
       `Could not compile invalid expression: "${expr.toString()}"`
@@ -938,25 +954,8 @@ function compileExpression(
   // compiled code would compute a value. The walk covers the whole
   // expression and the user-function bodies it reaches, so it runs once, at
   // the compilation boundary.
-  if (CompilerState._compileDepth === 0) {
-    // Every value that the expression produces must have a settled shape,
-    // on every target. The value with no settled shape is found here, and
-    // `compile()` declines for it after the code was generated. A root
-    // that a target spells without this call is checked in
-    // `compileCseRoot()`. The check shares its walk with the check of a
-    // sub-expression of static type `error` (`throwStaticTypeError()`),
-    // which declines here, at once. Inside the emission of a root that
-    // `compileCseRoot()` checks itself, only the check of a sub-expression
-    // of static type `error` runs here.
-    if (CompilerState._rootAdmission) assertNoStaticTypeError(expr, target);
-    else {
-      const unsettled = unsettledShapeIn(expr, target, true);
-      if (admission !== undefined) {
-        admission.unsettled = unsettled;
-        CompilerState._pendingAdmission = { root: expr, target, unsettled };
-      }
-    }
-  }
+  if (CompilerState._compileDepth === 0)
+    admitOutermostExpression(expr, target, admission);
   // First-class type values do not compile — a reified type expression has
   // no runtime representation on any target, and the type-algebra
   // operators consult the engine's type registry, which compiled code does
@@ -1019,82 +1018,14 @@ function compileExpression(
   // On `interval-js` the lowering of the enclosure is set up also when a
   // free symbol MAY hold an enclosure (`y: real | enclosure`), so that the
   // runner checks its host value and its operations reach the contract.
-  if (CompilerState._compileDepth === 0) {
-    CompilerState._kindLowering = undefined;
-    CompilerState._lastKindLowering = undefined;
-  }
-  const possibleEnclosure =
-    CompilerState._compileDepth === 0 &&
-    target.language === 'interval-javascript' &&
-    hasEnclosureSymbol(expr);
-  if (
-    CompilerState._compileDepth === 0 &&
-    (possibleEnclosure ||
-      typeIsKindForCertain(expr.type.type, expr.engine) ||
-      holdsKindValueForCertain(expr))
-  ) {
-    const lowering = kindLoweringOf(expr, target, possibleEnclosure);
-    if (lowering !== undefined) {
-      CompilerState._kindLowering = lowering;
-      CompilerState._lastKindLowering = lowering;
-    }
-  }
-  if (
-    CompilerState._compileDepth === 0 &&
-    CompilerState._kindLowering === undefined &&
-    (typeIsKindForCertain(expr.type.type, expr.engine) ||
-      holdsKindValueForCertain(expr))
-  ) {
-    // The kinds whose values the expression holds, else the kinds of its
-    // result type. The held kinds are read first because they name the
-    // kinds more precisely: the result type of an arithmetic operator
-    // over kind values (`residueResultType()`) can be a union of the kind
-    // types of its operands, or a type that a `resultType` hook gives.
-    const held = kindTypesHeldBy(expr);
-    const kindTypes = new Set(
-      held.length > 0
-        ? held
-        : kindArmNames(expr.type.type, kindTypeNames(expr.engine))
-    );
-    const target_ = target.language ?? 'unknown';
-    if (
-      kindTypes.size === 0 ||
-      (kindTypes.size === 1 && kindTypes.has('residue'))
-    )
-      throw new Error(
-        `Could not compile an expression that holds a residue class (type ` +
-          `'residue') to target '${target_}': the ` +
-          `compiled targets compute over numbers, and a class of ℤ/nℤ has ` +
-          `no compiled representation.`
-      );
-    const names = [...kindTypes].map((t) => `'${t}'`).join(', ');
-    throw new Error(
-      `Could not compile an expression that holds a value of the kind ` +
-        `type ${names} to target '${target_}': the compiled targets ` +
-        `compute over numbers, and the value kind has no compiled ` +
-        `representation.`
-    );
-  }
+  if (CompilerState._compileDepth === 0)
+    setUpOutermostKindLowering(expr, target);
   if (
     isFunction(expr, 'Subtype') ||
     isFunction(expr, 'MatchesType') ||
     isFunction(expr, 'Conforms')
-  ) {
-    const ground = expr.ops.every(
-      (op) =>
-        isString(op) ||
-        (isFunction(op, 'TypeFrom') && op.nops === 1 && isString(op.op1))
-    );
-    if (
-      !ground &&
-      !(isFunction(expr, 'MatchesType') && matchesTypeLowerable(expr, target))
-    )
-      throw new Error(
-        `Could not compile \`${expr.operator}\`: a non-constant type ` +
-          `comparison needs the engine's type registry, which compiled ` +
-          `code does not carry (target '${target.language ?? 'unknown'}').`
-      );
-  }
+  )
+    assertTypeComparisonCompiles(expr, target);
   // Install the naming context EAGERLY, on the outermost call, for a target
   // that arrived without one (a hand-rolled target driven through
   // `BaseCompiler.compile`). It must be installed before the first
@@ -1110,110 +1041,8 @@ function compileExpression(
   // hole. Numeric-domain absence (`number | missing`) is `NaN` (I6) and needs
   // no object axis, so it is exempt. Only object-axis-less targets pay the
   // check (JS/Python declare `object`, so the guard short-circuits).
-  if (target.absence !== undefined && target.absence.object === undefined) {
-    // A single-branch `If(c, e)` (the parse of the restriction `e\{c\}`) is
-    // typed as its arm `e`, with no `missing` arm, but its value is absent
-    // where `c` fails, so the arm is added here.
-    // A restriction of a boolean by a scalar condition is `False` where
-    // the condition fails, not absent (`isBooleanScalarRestriction`).
-    const t: Type =
-      isFunction(expr, 'If') &&
-      expr.nops === 2 &&
-      !isStatementArm(expr.op2) &&
-      !isBooleanScalarRestriction('If', expr.ops)
-        ? { kind: 'union', types: [compilationType(expr), 'missing'] }
-        : compilationType(expr);
-    if (typeContainsMissing(t)) {
-      // On `interval-js` an enclosure is an interval of the value model,
-      // whose absence is the `NaN` interval of a number: its arm is read
-      // as a number (`x + y` with `x: enclosure` and `y: real | missing`
-      // is typed `enclosure | missing`).
-      const withoutMissing = resolveTypeForCompilation(stripMissingFromType(t));
-      const stripped =
-        target.language === 'interval-javascript' &&
-        hasEnclosureArm(withoutMissing)
-          ? withoutKindArms(withoutMissing, kindTypeNames(expr.engine))
-          : withoutMissing;
-      // A NUMERIC-SHAPED type — a tuple of 2 to 4 numeric components — is
-      // exempt like a scalar number is: absence fills every lane with NaN
-      // (`vec2(_gpu_nan())`), which is exactly what the `If`/`Which`
-      // no-match lowering emits for a shaped branch value (Tycho item 49).
-      // This is the arm a default-less `Which` over a numeric tuple carries
-      // since the no-selection ruling of 2026-08-27 (its value is `Missing`
-      // and its type says so). The width bound is the GPU `vecN` family:
-      // the no-match lowering has no NaN fill for a wider tuple — it falls
-      // back to a SCALAR `_gpu_nan()` against an array-typed value arm,
-      // which is an invalid shader — so a width outside 2–4 fails closed
-      // below, as does a tuple with a non-numeric component (there is no
-      // NaN for a string lane).
-      //
-      // A LIST of 2 to 4 real numbers (`vector<real^2>`, the type of
-      // `[x, y]`) lowers to a `vecN` as such a tuple does, and is exempt
-      // for the same reason: `If(c, [x, y])` and
-      // `If(c, [x, y], Missing)` fill every lane with NaN. A list of
-      // another length, or with complex cells, has no `vecN` lowering and
-      // stays fail-closed.
-      const numericShaped =
-        typeof stripped !== 'string' &&
-        ((stripped.kind === 'tuple' &&
-          stripped.elements.length >= 2 &&
-          stripped.elements.length <= 4 &&
-          stripped.elements.every((el) => isSubtype(el.type, 'number'))) ||
-          (stripped.kind === 'list' &&
-            stripped.dimensions?.length === 1 &&
-            stripped.dimensions[0] >= 2 &&
-            stripped.dimensions[0] <= 4 &&
-            isSubtype(stripped.elements, 'real')));
-      // A LIST whose cells are numbers that may be absent
-      // (`list<integer | missing>`, the type of `[sin x, x{x > 0}]`) is
-      // exempt for the same reason a scalar number is: an absent cell is a
-      // NaN lane, which is exactly what the `If`/`Which` no-match
-      // lowering emits for that cell. The exemption reads the UNSTRIPPED
-      // type: only a type that IS a list, with the marker on its element
-      // type, qualifies. `missing | list<number>` — the whole list may be
-      // absent — does not: the no-match lowering pairs an array arm with a
-      // scalar NaN there, which is not a shader, so it stays fail-closed.
-      // (A whole list of 2 to 4 real numbers that may be absent,
-      // `missing | vector<real^2>`, is a `vecN` and is exempt as
-      // `numericShaped` above.)
-      const numericCells = (() => {
-        const whole = resolveTypeForCompilation(t);
-        if (typeof whole === 'string' || whole.kind !== 'list') return false;
-        const cell = resolveTypeForCompilation(
-          stripMissingFromType(whole.elements)
-        );
-        return cell !== 'never' && isSubtype(cell, 'number');
-      })();
-      // A target whose absence spellings cover its whole value model
-      // (`absence.numeric.coversValueModel`, the interval target) is exempt
-      // for every type IN that model: numbers, verdicts, and indexed
-      // collections of them at any depth — `list<number> | missing |
-      // number` (a restricted value over a broadcastable helper),
-      // `boolean | missing` (a restricted relation),
-      // `vector<3> | missing`. A type outside the model (a string, a list
-      // of strings, an expression) keeps failing closed here: the
-      // target's lowerings do not all check element domains, and one
-      // would hand a string back behind `success: true`.
-      const inValueModel =
-        target.absence.numeric.coversValueModel === true &&
-        isNumericOrVerdictShaped(stripped);
-      if (
-        stripped !== 'never' &&
-        stripped !== 'unknown' &&
-        stripped !== 'any' &&
-        !isSubtype(stripped, 'number') &&
-        !numericShaped &&
-        !numericCells &&
-        !inValueModel
-      )
-        throw new Error(
-          `Could not compile an object-domain absent ('missing') position ` +
-            `(type '${expr.type.toString()}') to target ` +
-            `'${target.language ?? 'unknown'}': it has no object null ` +
-            `representation. Discharge with 'Coalesce' first.`
-        );
-    }
-  }
+  if (target.absence !== undefined && target.absence.object === undefined)
+    assertObjectAbsenceRepresentable(expr, target, target.absence);
   // The engine⇄compiled boundary for TAGGED sums
   // (`docs/plans/2026-08-12-sum-type-sugar-and-compilation.md` §B2). A
   // `{_tag, _ops}` object is an implementation detail of one compiled unit;
@@ -1230,19 +1059,29 @@ function compileExpression(
   // node it compiles, but some lowerings handle a node without compiling it
   // as a node (an `If` statement in a loop body), so the whole unit is
   // checked here once, with the bodies of the user functions it calls.
-  if (CompilerState._compileDepth === 0) {
-    const error = findShadowedLibraryLowering(expr, target);
-    if (error !== undefined) throw new Error(error);
-  }
-  if (CompilerState._compileDepth === 0) {
-    const tagged = taggedSumInType(expr.engine, expr.type.type);
-    if (tagged !== undefined)
-      throw new Error(
-        `Could not compile an expression whose result type '${expr.type.toString()}' ` +
-          `is the tagged sum variant '${tagged}': its compiled representation ` +
-          `is internal to the compiled unit and does not cross the boundary.`
-      );
-  }
+  if (CompilerState._compileDepth === 0) assertOutermostBoundary(expr, target);
+  return compileExpressionInFrame(expr, target, prec);
+}
+
+/**
+ * The part of `compileExpression()` that sets the state of the
+ * compilation for `expr`, compiles it, and restores the state.
+ *
+ * It is a function of its own, and the checks that `compileExpression()`
+ * makes before it are in functions of their own
+ * (`admitOutermostExpression()`, `setUpOutermostKindLowering()`,
+ * `assertObjectAbsenceRepresentable()`, ...), because the compiler is
+ * recursive: each level of a nested expression keeps one frame of
+ * `compileExpression()` and one of this function on the stack, and each
+ * local variable of a function makes its frame larger, so the deepest
+ * expression that compiles is less deep. This function keeps only the
+ * state that it saves and restores.
+ */
+function compileExpressionInFrame(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  prec: number
+): TargetSource {
   // Keep the compile-bound-variables context in sync for the contextless
   // analysis helpers (`isComplexValued`): every recursive compilation flows
   // through here with the innermost target, so the static always reflects
@@ -1257,32 +1096,7 @@ function compileExpression(
   // the nesting depth rather than a per-target hook. Engine symbol values
   // are stable within one compilation but not across compilations, and a
   // boxed expression can outlive the compile that cached its answer.
-  if (CompilerState._compileDepth === 0) {
-    resetCompilationMemos();
-    CompilerState._variantResultTypeMemo = new WeakMap();
-    // The report of a compilation that declines is the neutral one (see
-    // the reset of `_lastReport` below). It is written here too, because
-    // the `AbsArg` refusal below throws before that reset.
-    CompilerState._lastReport = { mode: 'strict' };
-    // `AbsArg` is refused in any angular unit other than radians, also
-    // when a stored value or a function body that the expression reads
-    // holds it. The test is made here, before any handler reads the
-    // operand, so that every target gives the same message.
-    if (expr.engine.angularUnit !== 'rad' && reachesAbsArg(expr))
-      throw new Error(ABS_ARG_REFUSAL);
-    // (The fold-aware oracle latch `_oracleFoldTarget` is synced below,
-    // OUTSIDE this depth-0 block — a re-entrant nested compile must be
-    // able to switch it off.)
-    // A fresh outermost compilation gets a fresh shared antiderivative
-    // pool. This is the only reset: putting it anywhere shallower missed a
-    // route — registered targets compile through `compileCseRoot`, never
-    // `compileRoot` or the public `compile()` entry, so a compilation that
-    // drained the pool left every later direct-target compilation skipping
-    // symbolic closed forms permanently. Nested compilations (depth > 0)
-    // deliberately consume the OUTER pool, so the aggregate stays bounded
-    // by one pool per outermost entry.
-    resetSharedCompilationBudgets();
-  }
+  if (CompilerState._compileDepth === 0) resetOutermostCompilation(expr);
   // The compile MODE (`CompileMode`) is latched from the OUTERMOST
   // compilation only. The analysis here and every target emitter must agree
   // on each node's value SHAPE — a parent that read `{re, im}` around a
@@ -1380,10 +1194,7 @@ function compileExpression(
     // compilation like the mode: nested targets (a user-function body, a
     // broadcast element) are spread from this one and lower every head the
     // same way.
-    CompilerState._realOnlyLowering =
-      target.language !== undefined && !target.language.startsWith('interval')
-        ? (h) => isRealOnlyLowering(target, h)
-        : undefined;
+    CompilerState._realOnlyLowering = realOnlyLoweringOf(target);
   }
   CompilerState._compileDepth += 1;
   CompilerState._callSiteTarget = target;
@@ -1437,56 +1248,16 @@ function compileExpression(
       emitted = true;
       return code;
     }
-    // Compile-time constant folding, attempted top-down at every function
-    // node so the largest constant subtree folds: a pure subtree with no
-    // free variables evaluates at compile time and emits as a literal
-    // (`Sum(Take(Map(_ ↦ _^2, 1..20), 10))` → `385`) instead of lowering
-    // structurally. Runs before the CSE walk so eliminated regions are
-    // never inventoried. All the safety gates live in `tryConstantFold`.
-    // A node that may hold a kind value is not folded under a kind
-    // lowering: the fold would evaluate it to a kind value, which has no
-    // literal of the target; its operations are lowered by the kind's
-    // contract instead (`compileKindOperation`).
+    // Compile-time constant folding and the rewrites that come with it
+    // (`compileRewrittenForm()`).
     if (
       isFunction(expr) &&
       !(CompilerState._kindLowering !== undefined && holdsKindValue(expr))
     ) {
-      const folded = tryConstantFold(expr, target, prec);
-      if (folded !== undefined) {
+      const rewritten = compileRewrittenForm(expr, target, prec);
+      if (rewritten !== undefined) {
         emitted = true;
-        return folded;
-      }
-      // A rounding function whose operand adds an integer to an exact
-      // constant that no double holds is compiled from an equivalent form
-      // that rounds the constant alone, so the constant fold computes the
-      // rounded constant exactly (`jumpShiftRewrite`). The other shapes
-      // that mix only integer variables with such a constant decline
-      // there.
-      const shifted = jumpShiftRewrite(expr, target);
-      if (shifted !== undefined) {
-        const code = core.compile(shifted, target, prec);
-        emitted = true;
-        return code;
-      }
-      // A `Power` whose exponent reads only constants and assigned symbols
-      // is compiled with the value of the exponent, so the lane rules of
-      // `Power` read a number literal (`knownExponentPower`).
-      const powered = knownExponentPower(expr);
-      if (powered !== undefined) {
-        const code = core.compile(powered, target, prec);
-        emitted = true;
-        return code;
-      }
-      // A `MatchesType` the gate above admitted (a ground one that did not
-      // fold reaches here too). Emitted INSIDE the frame so its subject
-      // compiles as an operand: at depth 0 a tagged-sum subject would trip
-      // the result-type boundary gate, although only the boolean crosses.
-      if (isFunction(expr, 'MatchesType')) {
-        const lowered = compileMatchesTypeJS(expr, target, prec);
-        if (lowered !== undefined) {
-          emitted = true;
-          return lowered;
-        }
+        return rewritten;
       }
     }
     const compiled = foldEmitted(
@@ -1560,6 +1331,351 @@ function compileExpression(
     // outermost compilation" and undoes the clear made at its entry.
     if (CompilerState._compileDepth === 0)
       CompilerState._unrolledIndexValues = prevUnrolledIndexValues;
+  }
+}
+
+/**
+ * The real-only lowerings of the outermost target `target`, as a test of a
+ * head, or `undefined` for an interval target. A function of its own so
+ * that `compileExpressionInFrame()` holds no closure over `target`.
+ */
+function realOnlyLoweringOf(
+  target: CompileTarget<Expression>
+): ((h: string) => boolean) | undefined {
+  return target.language !== undefined &&
+    !target.language.startsWith('interval')
+    ? (h) => isRealOnlyLowering(target, h)
+    : undefined;
+}
+
+/**
+ * The resets made when the outermost compilation of `expr` starts: the
+ * memos of the compilation, the neutral report, the refusal of `AbsArg`
+ * outside radians, and the shared budgets.
+ */
+function resetOutermostCompilation(expr: Expression): void {
+  resetCompilationMemos();
+  CompilerState._variantResultTypeMemo = new WeakMap();
+  // The report of a compilation that declines is the neutral one (see
+  // the reset of `_lastReport` in `compileExpressionInFrame()`). It is
+  // written here too, because the `AbsArg` refusal below throws before
+  // that reset.
+  CompilerState._lastReport = { mode: 'strict' };
+  // `AbsArg` is refused in any angular unit other than radians, also
+  // when a stored value or a function body that the expression reads
+  // holds it. The test is made here, before any handler reads the
+  // operand, so that every target gives the same message.
+  if (expr.engine.angularUnit !== 'rad' && reachesAbsArg(expr))
+    throw new Error(ABS_ARG_REFUSAL);
+  // (The fold-aware oracle latch `_oracleFoldTarget` is synced in
+  // `compileExpressionInFrame()`, at every depth — a re-entrant nested
+  // compile must be able to switch it off.)
+  // A fresh outermost compilation gets a fresh shared antiderivative
+  // pool. This is the only reset: putting it anywhere shallower missed a
+  // route — registered targets compile through `compileCseRoot`, never
+  // `compileRoot` or the public `compile()` entry, so a compilation that
+  // drained the pool left every later direct-target compilation skipping
+  // symbolic closed forms permanently. Nested compilations (depth > 0)
+  // deliberately consume the OUTER pool, so the aggregate stays bounded
+  // by one pool per outermost entry.
+  resetSharedCompilationBudgets();
+}
+
+/**
+ * The code of a function node `expr` compiled from a constant fold or
+ * from an equivalent form, or `undefined` when none applies and `expr`
+ * compiles as it is.
+ */
+function compileRewrittenForm(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  prec: number
+): TargetSource | undefined {
+  // Compile-time constant folding, attempted top-down at every function
+  // node so the largest constant subtree folds: a pure subtree with no
+  // free variables evaluates at compile time and emits as a literal
+  // (`Sum(Take(Map(_ ↦ _^2, 1..20), 10))` → `385`) instead of lowering
+  // structurally. Runs before the CSE walk so eliminated regions are
+  // never inventoried. All the safety gates live in `tryConstantFold`.
+  // A node that may hold a kind value is not folded under a kind
+  // lowering (the caller tests it): the fold would evaluate it to a kind
+  // value, which has no literal of the target; its operations are lowered
+  // by the kind's contract instead (`compileKindOperation`).
+  if (!isFunction(expr)) return undefined;
+  const folded = tryConstantFold(expr, target, prec);
+  if (folded !== undefined) return folded;
+  // A rounding function whose operand adds an integer to an exact
+  // constant that no double holds is compiled from an equivalent form
+  // that rounds the constant alone, so the constant fold computes the
+  // rounded constant exactly (`jumpShiftRewrite`). The other shapes
+  // that mix only integer variables with such a constant decline
+  // there.
+  const shifted = jumpShiftRewrite(expr, target);
+  if (shifted !== undefined) return core.compile(shifted, target, prec);
+  // A `Power` whose exponent reads only constants and assigned symbols
+  // is compiled with the value of the exponent, so the lane rules of
+  // `Power` read a number literal (`knownExponentPower`).
+  const powered = knownExponentPower(expr);
+  if (powered !== undefined) return core.compile(powered, target, prec);
+  // A `MatchesType` the gate in `compileExpression()` admitted (a ground
+  // one that did not fold reaches here too). Emitted INSIDE the frame so
+  // its subject compiles as an operand: at depth 0 a tagged-sum subject
+  // would trip the result-type boundary gate, although only the boolean
+  // crosses.
+  if (isFunction(expr, 'MatchesType'))
+    return compileMatchesTypeJS(expr, target, prec);
+  return undefined;
+}
+
+/**
+ * The checks of the outermost `compileExpression()` that read the whole
+ * expression: every value that it produces must have a settled shape, and
+ * no sub-expression may have the static type `error`.
+ */
+function admitOutermostExpression(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  admission: { unsettled?: UnsettledShape } | undefined
+): void {
+  // Every value that the expression produces must have a settled shape,
+  // on every target. The value with no settled shape is found here, and
+  // `compile()` declines for it after the code was generated. A root
+  // that a target spells without this call is checked in
+  // `compileCseRoot()`. The check shares its walk with the check of a
+  // sub-expression of static type `error` (`throwStaticTypeError()`),
+  // which declines here, at once. Inside the emission of a root that
+  // `compileCseRoot()` checks itself, only the check of a sub-expression
+  // of static type `error` runs here.
+  if (CompilerState._rootAdmission) {
+    assertNoStaticTypeError(expr, target);
+    return;
+  }
+  const unsettled = unsettledShapeIn(expr, target, true);
+  if (admission !== undefined) {
+    admission.unsettled = unsettled;
+    CompilerState._pendingAdmission = { root: expr, target, unsettled };
+  }
+}
+
+/**
+ * At the outermost `compileExpression()`: set up the lowering of the
+ * value kinds that `expr` holds (`kindLoweringOf()`), or decline when a
+ * kind has no lowering on `target`. The comment in `compileExpression()`
+ * above the call explains the rule.
+ */
+function setUpOutermostKindLowering(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): void {
+  CompilerState._kindLowering = undefined;
+  CompilerState._lastKindLowering = undefined;
+  const possibleEnclosure =
+    target.language === 'interval-javascript' && hasEnclosureSymbol(expr);
+  if (
+    possibleEnclosure ||
+    typeIsKindForCertain(expr.type.type, expr.engine) ||
+    holdsKindValueForCertain(expr)
+  ) {
+    const lowering = kindLoweringOf(expr, target, possibleEnclosure);
+    if (lowering !== undefined) {
+      CompilerState._kindLowering = lowering;
+      CompilerState._lastKindLowering = lowering;
+    }
+  }
+  if (
+    CompilerState._kindLowering === undefined &&
+    (typeIsKindForCertain(expr.type.type, expr.engine) ||
+      holdsKindValueForCertain(expr))
+  ) {
+    // The kinds whose values the expression holds, else the kinds of its
+    // result type. The held kinds are read first because they name the
+    // kinds more precisely: the result type of an arithmetic operator
+    // over kind values (`residueResultType()`) can be a union of the kind
+    // types of its operands, or a type that a `resultType` hook gives.
+    const held = kindTypesHeldBy(expr);
+    const kindTypes = new Set(
+      held.length > 0
+        ? held
+        : kindArmNames(expr.type.type, kindTypeNames(expr.engine))
+    );
+    const target_ = target.language ?? 'unknown';
+    if (
+      kindTypes.size === 0 ||
+      (kindTypes.size === 1 && kindTypes.has('residue'))
+    )
+      throw new Error(
+        `Could not compile an expression that holds a residue class (type ` +
+          `'residue') to target '${target_}': the ` +
+          `compiled targets compute over numbers, and a class of ℤ/nℤ has ` +
+          `no compiled representation.`
+      );
+    const names = [...kindTypes].map((t) => `'${t}'`).join(', ');
+    throw new Error(
+      `Could not compile an expression that holds a value of the kind ` +
+        `type ${names} to target '${target_}': the compiled targets ` +
+        `compute over numbers, and the value kind has no compiled ` +
+        `representation.`
+    );
+  }
+}
+
+/**
+ * Decline a type comparison `expr` (`Subtype`, `MatchesType`, `Conforms`)
+ * that is not ground, except a `MatchesType` that `target` lowers. The
+ * comment in `compileExpression()` above the call explains the rule.
+ */
+function assertTypeComparisonCompiles(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): void {
+  if (!isFunction(expr)) return;
+  const ground = expr.ops.every(
+    (op) =>
+      isString(op) ||
+      (isFunction(op, 'TypeFrom') && op.nops === 1 && isString(op.op1))
+  );
+  if (
+    !ground &&
+    !(isFunction(expr, 'MatchesType') && matchesTypeLowerable(expr, target))
+  )
+    throw new Error(
+      `Could not compile \`${expr.operator}\`: a non-constant type ` +
+        `comparison needs the engine's type registry, which compiled ` +
+        `code does not carry (target '${target.language ?? 'unknown'}').`
+    );
+}
+
+/**
+ * At the outermost `compileExpression()`: decline a unit that lowers a
+ * shadowed library head, or whose result type is a tagged sum variant.
+ * The comment in `compileExpression()` above the call explains the rules.
+ */
+function assertOutermostBoundary(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): void {
+  const error = findShadowedLibraryLowering(expr, target);
+  if (error !== undefined) throw new Error(error);
+  const tagged = taggedSumInType(expr.engine, expr.type.type);
+  if (tagged !== undefined)
+    throw new Error(
+      `Could not compile an expression whose result type '${expr.type.toString()}' ` +
+        `is the tagged sum variant '${tagged}': its compiled representation ` +
+        `is internal to the compiled unit and does not cross the boundary.`
+    );
+}
+
+/**
+ * Decline `expr` when its type has a `missing` arm in an object domain and
+ * `target` has no object absence spelling. The comment in
+ * `compileExpression()` above the call explains the rule.
+ */
+function assertObjectAbsenceRepresentable(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  absence: NonNullable<CompileTarget<Expression>['absence']>
+): void {
+  // A single-branch `If(c, e)` (the parse of the restriction `e\{c\}`) is
+  // typed as its arm `e`, with no `missing` arm, but its value is absent
+  // where `c` fails, so the arm is added here.
+  // A restriction of a boolean by a scalar condition is `False` where
+  // the condition fails, not absent (`isBooleanScalarRestriction`).
+  const t: Type =
+    isFunction(expr, 'If') &&
+    expr.nops === 2 &&
+    !isStatementArm(expr.op2) &&
+    !isBooleanScalarRestriction('If', expr.ops)
+      ? { kind: 'union', types: [compilationType(expr), 'missing'] }
+      : compilationType(expr);
+  if (typeContainsMissing(t)) {
+    // On `interval-js` an enclosure is an interval of the value model,
+    // whose absence is the `NaN` interval of a number: its arm is read
+    // as a number (`x + y` with `x: enclosure` and `y: real | missing`
+    // is typed `enclosure | missing`).
+    const withoutMissing = resolveTypeForCompilation(stripMissingFromType(t));
+    const stripped =
+      target.language === 'interval-javascript' &&
+      hasEnclosureArm(withoutMissing)
+        ? withoutKindArms(withoutMissing, kindTypeNames(expr.engine))
+        : withoutMissing;
+    // A NUMERIC-SHAPED type — a tuple of 2 to 4 numeric components — is
+    // exempt like a scalar number is: absence fills every lane with NaN
+    // (`vec2(_gpu_nan())`), which is exactly what the `If`/`Which`
+    // no-match lowering emits for a shaped branch value (Tycho item 49).
+    // This is the arm a default-less `Which` over a numeric tuple carries
+    // since the no-selection ruling of 2026-08-27 (its value is `Missing`
+    // and its type says so). The width bound is the GPU `vecN` family:
+    // the no-match lowering has no NaN fill for a wider tuple — it falls
+    // back to a SCALAR `_gpu_nan()` against an array-typed value arm,
+    // which is an invalid shader — so a width outside 2–4 fails closed
+    // below, as does a tuple with a non-numeric component (there is no
+    // NaN for a string lane).
+    //
+    // A LIST of 2 to 4 real numbers (`vector<real^2>`, the type of
+    // `[x, y]`) lowers to a `vecN` as such a tuple does, and is exempt
+    // for the same reason: `If(c, [x, y])` and
+    // `If(c, [x, y], Missing)` fill every lane with NaN. A list of
+    // another length, or with complex cells, has no `vecN` lowering and
+    // stays fail-closed.
+    const numericShaped =
+      typeof stripped !== 'string' &&
+      ((stripped.kind === 'tuple' &&
+        stripped.elements.length >= 2 &&
+        stripped.elements.length <= 4 &&
+        stripped.elements.every((el) => isSubtype(el.type, 'number'))) ||
+        (stripped.kind === 'list' &&
+          stripped.dimensions?.length === 1 &&
+          stripped.dimensions[0] >= 2 &&
+          stripped.dimensions[0] <= 4 &&
+          isSubtype(stripped.elements, 'real')));
+    // A LIST whose cells are numbers that may be absent
+    // (`list<integer | missing>`, the type of `[sin x, x{x > 0}]`) is
+    // exempt for the same reason a scalar number is: an absent cell is a
+    // NaN lane, which is exactly what the `If`/`Which` no-match
+    // lowering emits for that cell. The exemption reads the UNSTRIPPED
+    // type: only a type that IS a list, with the marker on its element
+    // type, qualifies. `missing | list<number>` — the whole list may be
+    // absent — does not: the no-match lowering pairs an array arm with a
+    // scalar NaN there, which is not a shader, so it stays fail-closed.
+    // (A whole list of 2 to 4 real numbers that may be absent,
+    // `missing | vector<real^2>`, is a `vecN` and is exempt as
+    // `numericShaped` above.)
+    const numericCells = (() => {
+      const whole = resolveTypeForCompilation(t);
+      if (typeof whole === 'string' || whole.kind !== 'list') return false;
+      const cell = resolveTypeForCompilation(
+        stripMissingFromType(whole.elements)
+      );
+      return cell !== 'never' && isSubtype(cell, 'number');
+    })();
+    // A target whose absence spellings cover its whole value model
+    // (`absence.numeric.coversValueModel`, the interval target) is exempt
+    // for every type IN that model: numbers, verdicts, and indexed
+    // collections of them at any depth — `list<number> | missing |
+    // number` (a restricted value over a broadcastable helper),
+    // `boolean | missing` (a restricted relation),
+    // `vector<3> | missing`. A type outside the model (a string, a list
+    // of strings, an expression) keeps failing closed here: the
+    // target's lowerings do not all check element domains, and one
+    // would hand a string back behind `success: true`.
+    const inValueModel =
+      absence.numeric.coversValueModel === true &&
+      isNumericOrVerdictShaped(stripped);
+    if (
+      stripped !== 'never' &&
+      stripped !== 'unknown' &&
+      stripped !== 'any' &&
+      !isSubtype(stripped, 'number') &&
+      !numericShaped &&
+      !numericCells &&
+      !inValueModel
+    )
+      throw new Error(
+        `Could not compile an object-domain absent ('missing') position ` +
+          `(type '${expr.type.toString()}') to target ` +
+          `'${target.language ?? 'unknown'}': it has no object null ` +
+          `representation. Discharge with 'Coalesce' first.`
+      );
   }
 }
 
@@ -2932,6 +3048,51 @@ export function _compileInner(
   target: CompileTarget<Expression>,
   prec = 0
 ): TargetSource {
+  // The compiler is recursive, and each level of a nested expression keeps
+  // one frame of this function on the stack. So the rewrites of a function
+  // node (`compileInnerRewritten()`) and the leaves (`compileInnerLeaf()`)
+  // are in functions of their own: their local variables would make every
+  // frame larger.
+  const rewritten = compileInnerRewritten(expr, target, prec);
+  if (rewritten !== undefined) return rewritten;
+  if (!isFunction(expr)) return compileInnerLeaf(expr, target, prec);
+  // The node itself is passed along: the CSE region inventory is keyed by
+  // the `(node, operandIndex)` EDGE (a tree may be a DAG, so a bare operand
+  // object is ambiguous), and `compileExpr` receives only the operand list.
+  const prevCseParent = CompilerState._cseParent;
+  CompilerState._cseParent = expr;
+  try {
+    return liftWideResult(
+      expr,
+      core.compileExpr(
+        expr.engine,
+        expr.operator,
+        expr.ops,
+        prec,
+        target,
+        expr
+      ),
+      target
+    );
+  } finally {
+    CompilerState._cseParent = prevCseParent;
+  }
+}
+
+/**
+ * The code of the function node `expr` compiled from an equivalent form
+ * (a spread operand spliced, a composition applied or written as a
+ * function literal, the default values of a call filled in, a nested `At`),
+ * the code of a call of a library function bound in the compilation, or
+ * `undefined` when `expr` compiles as it is. It also declines a node that
+ * lowers a shadowed library head, holds a function value, or applies
+ * arithmetic to a function.
+ */
+function compileInnerRewritten(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  prec: number
+): TargetSource | undefined {
   // `f(...p)` — a `Spread` operand splices a tuple into the call's
   // arguments. Rewrite statically and re-enter compilation; the rewrite is
   // target-agnostic (it lowers to positional `At` accesses, which each
@@ -3084,7 +3245,16 @@ export function _compileInner(
         );
     }
   }
+  return undefined;
+}
 
+/** The code of `expr`, which is not a function node: a symbol, a number, a
+ * string, a character or a dictionary. */
+function compileInnerLeaf(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  prec: number
+): TargetSource {
   // Is it a symbol?
   if (isSymbol(expr)) return compileInnerSymbol(expr, target);
 
@@ -3208,30 +3378,7 @@ export function _compileInner(
     return target.dictionary(entries);
   }
 
-  // It must be a function expression...
-  if (!isFunction(expr))
-    throw new Error(`Could not compile expression: "${expr.toString()}"`);
-  // The node itself is passed along: the CSE region inventory is keyed by
-  // the `(node, operandIndex)` EDGE (a tree may be a DAG, so a bare operand
-  // object is ambiguous), and `compileExpr` receives only the operand list.
-  const prevCseParent = CompilerState._cseParent;
-  CompilerState._cseParent = expr;
-  try {
-    return liftWideResult(
-      expr,
-      core.compileExpr(
-        expr.engine,
-        expr.operator,
-        expr.ops,
-        prec,
-        target,
-        expr
-      ),
-      target
-    );
-  } finally {
-    CompilerState._cseParent = prevCseParent;
-  }
+  throw new Error(`Could not compile expression: "${expr.toString()}"`);
 }
 
 /**
@@ -3303,9 +3450,8 @@ export function compileExpr(
   // compile-pure (`booleanClaim`). Control-flow heads are exempt: they
   // may lower to statements, which a literal cannot replace.
   if (node !== undefined && !CONTROL_FLOW_HEADS.has(h)) {
-    const claim = booleanClaim(node);
-    if (claim !== undefined)
-      return core.compile(claim ? engine.True : engine.False, target);
+    sub = compileExprBooleanClaim(engine, target, node);
+    if (sub !== undefined) return sub;
   }
 
   // A TUPLE argument at a parameter declared as a scalar maps over its
@@ -3314,80 +3460,294 @@ export function compileExpr(
   sub = compileExprTupleCall(engine, h, args, prec, target);
   if (sub !== undefined) return sub;
 
-  if (h === 'Sequence') {
-    if (args.length === 0) return '';
-    return `(${args.map((arg) => core.compile(arg, target, prec)).join(', ')})`;
-  }
+  if (h === 'Sequence') return compileExprSequence(args, prec, target);
 
   // A collection operand that can be absent as a whole (`missing | list<…>`)
   // at an operator that answers the absence marker for an absent operand:
   // the operand is bound once, and the operator is lowered on the present
   // collection under a test for the absent value. See
   // `absentCollectionOperandGuard`.
-  {
-    const guarded = absentCollectionOperandGuard(engine, h, args, target, node);
-    if (guarded !== undefined) return guarded;
+  sub = absentCollectionOperandGuard(engine, h, args, target, node);
+  if (sub !== undefined) return sub;
+
+  if (h === 'Sum' || h === 'Product')
+    return compileExprBigOp(engine, h, args, target, node);
+
+  // A user operator definition may supply its own target-aware compile
+  // handler (`compileExprCustomHandler`). It returns the code it wrote,
+  // `CUSTOM_HANDLER_DECLINED` when the handler ran and declined, or
+  // `undefined` when there is no handler.
+  const custom = compileExprCustomHandler(engine, h, args, target, node);
+  if (custom !== undefined && custom !== CUSTOM_HANDLER_DECLINED) return custom;
+
+  // After the per-operator handler: a user operator that supports these
+  // operand types lowers them itself.
+  assertOrderedOperandsAreNumbers(h, args, target);
+  assertNoListCoordinateOrPointNumberMix(engine, h, args);
+
+  sub = compileExprNormOrMatrixPower(engine, h, args, prec, target, node);
+  if (sub !== undefined) return sub;
+
+  // Element-wise broadcast of a `broadcastable` head (arithmetic + unary
+  // math) over one or more list-valued operands, for the JavaScript target.
+  // Emits a `_SYS.bcast` call wrapping the head's own scalar codegen — see
+  // `tryCompileBroadcast`. Other targets have native vector types (GLSL/WGSL
+  // `vec3 + vec3`) or their own broadcasting, so this is JavaScript-only. The
+  // decline of an operand declared `any` or `value` here also applies to the
+  // Python and `interval-js` targets.
+  sub = compileExprElementwiseBroadcast(engine, h, args, prec, target, node);
+  if (sub !== undefined) return sub;
+
+  // A declaration CONTRADICTED by its body, sitting in a scalar-consuming
+  // position (2026-08-12 ruling — the adjacency half of the
+  // `assertScalarBigOpBody` clause of the same name). Target-agnostic, and
+  // deliberately AFTER the JavaScript broadcast attempt above: a shape that
+  // already had a value-safe element-wise route (a sibling operand made the
+  // whole form broadcast) keeps it; what reaches here is the scalar emission
+  // the contradiction makes wrong. See
+  // `assertNoContradictedScalarOperand`.
+  assertNoContradictedScalarOperand(engine, h, args);
+
+  // An indexed read into a collection that mixes complex- and real-valued
+  // elements, with an index known only at run time: the element is a complex
+  // object for some indices and a plain number for others, so no single
+  // lowering is correct. Refuse rather than guess (D6), for the same reason
+  // and in the same place as the contradicted declaration above. See
+  // `assertNoAmbiguousComplexElementRead`.
+  assertNoAmbiguousComplexElementRead(h, args);
+
+  // The broadcast guards of the JavaScript, Python and GPU targets
+  // (`compileExprBroadcastGuards`).
+  sub = compileExprBroadcastGuards(engine, h, args, target);
+  if (sub !== undefined) return sub;
+
+  // The ordering comparisons (`compileExprOrdering`).
+  if (ORDERING_HEADS.has(h)) {
+    sub = compileExprOrdering(engine, h, args, prec, target, node);
+    if (sub !== undefined) return sub;
   }
 
-  if (h === 'Sum' || h === 'Product') {
-    // A clause with only one bound (`\sum_{k=1} k`, `Limits(k, 1,
-    // Nothing)`) has no value: the interpreter keeps the operator
-    // unevaluated and chooses no default for the missing bound
-    // (`hasOneSidedLimits()`). Every target declines it here with that
-    // reason. Before, the targets read the `Nothing` marker of the missing
-    // bound as a variable and declined with a message about `Nothing`
-    // (CE-142.5). A caller that maps a run-time input named `Nothing`
-    // through the `vars` option keeps that input as the bound.
-    if (
-      args.length > 1 &&
-      !target.varsKeys?.has('Nothing') &&
-      hasOneSidedLimits(args.slice(1))
-    )
+  // Handle operators
+  sub = compileExprInfix(engine, h, args, prec, target, node);
+  if (sub !== undefined) return sub;
+
+  // Handle special constructs
+  sub = compileExprFunctionLiteral(engine, h, args, target, node);
+  if (sub !== undefined) return sub;
+
+  sub = compileExprDeclare(h, args, target, node);
+  if (sub !== undefined) return sub;
+  sub = compileExprAssign(engine, h, args, prec, target, node);
+  if (sub !== undefined) return sub;
+
+  sub = compileExprStatementHead(h, args, target, node);
+  if (sub !== undefined) return sub;
+
+  sub = compileExprSelection(engine, h, args, target, node);
+  if (sub !== undefined) return sub;
+
+  sub = compileExprMatchOrBlock(engine, h, args, prec, target, node);
+  if (sub !== undefined) return sub;
+
+  // Absence-discharge primitives (§3.F). `IsMissing`/`Coalesce` lower through
+  // the target-supplied absence capability, choosing the numeric or object
+  // axis by the operand's (result's) domain (I6). A target lacking the needed
+  // axis — GPU has no `isAbsent`, interval/GPU have no `object` axis — fails
+  // closed with a diagnostic (propagation stays native; discharge does not).
+  if (h === 'IsMissing') return compileExprIsMissing(args, target);
+
+  // The presence assertion `AssertPresent(x)` (Epsil `x?!`): `x` unless it
+  // is absent, else a raised run-time error `expected-present` naming the
+  // operand as written (the interpreter's `Error("expected-present", …)`).
+  //
+  // - A static proof removes the check: an operand whose compilation type
+  //   has no `missing` member and does not admit `nan` can only be present,
+  //   so the operand compiles as is. This is the only way the check is
+  //   omitted (user decision P4).
+  // - A target with no `raise` (a shader) compiles the assertion as the
+  //   identity; the author accepts the absent value flowing on (user
+  //   decision P5, 2026-10-21). The operand is compiled with its OWN type,
+  //   not the asserted one, so nothing downstream reads the assertion as a
+  //   proof: the node's `Present(T)` type is not consulted here, and a
+  //   later `IsMissing`/`Coalesce` on the value keeps its test.
+  // - An operand that may be `Nothing` is declined, as for `IsMissing`: the
+  //   targets cannot tell an omission from an absent datum.
+  sub = compileExprAssertPresent(h, args, target);
+  if (sub !== undefined) return sub;
+
+  sub = compileExprCoalesce(h, args, target, node);
+  if (sub !== undefined) return sub;
+
+  // A type ascription must produce the representation its consumers read.
+  // Most values pass through unchanged. A complex ascription lifts a real
+  // scalar; a nonnumeric value cannot use that representation and declines.
+  //
+  // A real ascription selects real arithmetic when complex mode alone made
+  // the value complex. For example, a real-returning sqrt(x) uses the real
+  // square root and returns NaN outside its real domain. A value that stays
+  // complex with that choice disabled contradicts the ascription and declines.
+  // Abs(sqrt(x)) already returns a real value and keeps its internal complex
+  // square root, so it still gives 2 at x = -4 in complex mode.
+  // Shared user-function definitions retain their own representations, so an
+  // ascription cannot recompile a callee differently for one call site.
+  // Analysis and code generation make these choices in compileExprTyped.
+  sub = compileExprTyped(engine, h, args, target, node);
+  if (sub !== undefined) return sub;
+
+  // A qualified protocol call — `Comparable.compare(x, y)` — canonicalizes
+  // to `Apply(Field(Comparable, "compare"), x, y)` and STAYS that (the
+  // `ProtocolMember` node only appears when the `Field` EVALUATE handler's
+  // wrapper literal beta-reduces). Intercept it BEFORE the target's `Apply`
+  // mapping, which would otherwise compile the protocol-naming `Field`
+  // operand and die inside it. When the dispatch tier declines, fail closed
+  // for the whole unit rather than falling through to the generic `Apply`
+  // lowering (ruled 2026-08-12, `docs/COMPILATION-MODEL.md`).
+  sub = compileExprApplyField(engine, h, args, target);
+  if (sub !== undefined) return sub;
+
+  // `Clamp(x, lo, hi)` takes exactly three operands. Only non-canonical
+  // input has another count, and the interpreter answers an error for it
+  // (`Clamp(x)` evaluates to `Error("missing")`). The lowerings index the
+  // three operands, so they emitted invalid code such as `clamp(x + 1.0)`
+  // on the shader targets or `Math.max(_.x + 1, )` on JavaScript.
+  if (h === 'Clamp' && args.length !== 3)
+    throw new Error(
+      `Could not compile \`Clamp\`: expected three operands, got ${args.length}`
+    );
+
+  // Handle function calls
+  const fn = target.functions?.(h);
+  if (!fn)
+    // A per-operator `compile` handler that ran and DECLINED means that the
+    // head is known and lowerable in general, with no lowering for THIS
+    // operand shape or target: the decline is then not reported as
+    // `Unknown operator` (Tycho item 109a).
+    return compileExprUnmappedCall(
+      engine,
+      h,
+      args,
+      target,
+      node,
+      custom === CUSTOM_HANDLER_DECLINED
+    );
+
+  sub = compileExprFunctionCall(engine, h, args, prec, target, node, fn);
+  if (sub !== undefined) return sub;
+
+  // `fn` is a plain string: the target maps this head to a helper
+  // (`compileExprHelperCall`).
+  return compileExprHelperCall(engine, h, args, prec, target, node, fn);
+}
+
+/** `compileExpr()` of a node whose type is the value `true` or `false`
+ * (`booleanClaim()`), or `undefined` for another node. */
+function compileExprBooleanClaim(
+  engine: ComputeEngine,
+  target: CompileTarget<Expression>,
+  node: Expression
+): TargetSource | undefined {
+  const claim = booleanClaim(node);
+  if (claim === undefined) return undefined;
+  return core.compile(claim ? engine.True : engine.False, target);
+}
+
+/** `compileExpr()` of a `Sequence`. */
+function compileExprSequence(
+  args: ReadonlyArray<Expression>,
+  prec: number,
+  target: CompileTarget<Expression>
+): TargetSource {
+  if (args.length === 0) return '';
+  return `(${args.map((arg) => core.compile(arg, target, prec)).join(', ')})`;
+}
+
+/** `compileExpr()` of a `Sum` or a `Product`. */
+function compileExprBigOp(
+  engine: ComputeEngine,
+  h: string,
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>,
+  node: Expression | undefined
+): TargetSource {
+  // A clause with only one bound (`\sum_{k=1} k`, `Limits(k, 1,
+  // Nothing)`) has no value: the interpreter keeps the operator
+  // unevaluated and chooses no default for the missing bound
+  // (`hasOneSidedLimits()`). Every target declines it here with that
+  // reason. Before, the targets read the `Nothing` marker of the missing
+  // bound as a variable and declined with a message about `Nothing`
+  // (CE-142.5). A caller that maps a run-time input named `Nothing`
+  // through the `vars` option keeps that input as the bound.
+  if (
+    args.length > 1 &&
+    !target.varsKeys?.has('Nothing') &&
+    hasOneSidedLimits(args.slice(1))
+  )
+    throw new Error(
+      `Could not compile \`${h}\`: a ${h === 'Sum' ? 'sum' : 'product'} ` +
+        `with only one bound has no value, and the interpreter keeps it ` +
+        `unevaluated.`
+    );
+  // A body can write an index (`Sum(Block(Assign(j, j + 1), j), Limits(j,
+  // 1, n))`). The interpreter binds the index to its next value at each
+  // iteration, whatever the body wrote. A compiled loop that steps the
+  // index itself would read the written value (a wrong sum, or a loop that
+  // does not end), and an unrolled term reads the index as a literal. So
+  // every target declines such a body, and the interpreter evaluates it.
+  for (const clause of args.slice(1)) {
+    const index = isFunction(clause) ? clause.ops[0] : undefined;
+    if (isSymbol(index) && writesSymbol(args[0], index.symbol))
       throw new Error(
-        `Could not compile \`${h}\`: a ${h === 'Sum' ? 'sum' : 'product'} ` +
-          `with only one bound has no value, and the interpreter keeps it ` +
-          `unevaluated.`
+        `Could not compile \`${h}\`: the body writes the index ` +
+          `\`${index.symbol}\`, and a compiled loop does not keep the next ` +
+          `value of the index after such a write.`
       );
-    // A body can write an index (`Sum(Block(Assign(j, j + 1), j), Limits(j,
-    // 1, n))`). The interpreter binds the index to its next value at each
-    // iteration, whatever the body wrote. A compiled loop that steps the
-    // index itself would read the written value (a wrong sum, or a loop that
-    // does not end), and an unrolled term reads the index as a literal. So
-    // every target declines such a body, and the interpreter evaluates it.
-    for (const clause of args.slice(1)) {
-      const index = isFunction(clause) ? clause.ops[0] : undefined;
-      if (isSymbol(index) && writesSymbol(args[0], index.symbol))
-        throw new Error(
-          `Could not compile \`${h}\`: the body writes the index ` +
-            `\`${index.symbol}\`, and a compiled loop does not keep the next ` +
-            `value of the index after such a write.`
-        );
-    }
-    // A clause with no bounds (`\sum_k f`) runs over 1..+∞, as in the
-    // interpreter, so the targets read the bounds 1 and +∞ (and decline the
-    // infinite bound by name) instead of the `Nothing` marker.
-    const bigOpArgs =
-      args.length > 1
-        ? [args[0], ...withDefaultBigOpBounds(engine, args.slice(1))]
-        : args;
-    // Delegate to target-specific function handler if available,
-    // otherwise fall back to the generic loop compilation.
-    const sumProdFn = target.functions?.(h);
-    if (typeof sumProdFn === 'function') {
-      return sumProdFn(
-        bigOpArgs,
-        (expr) => compileValueOperand(expr, target),
-        target
-      );
-    }
-    if (typeof sumProdFn === 'string') {
-      return `${sumProdFn}(${bigOpArgs
-        .map((x) => core.compile(x, target))
-        .join(', ')})`;
-    }
-    return compileLoop(h, bigOpArgs, target, node);
   }
+  // A clause with no bounds (`\sum_k f`) runs over 1..+∞, as in the
+  // interpreter, so the targets read the bounds 1 and +∞ (and decline the
+  // infinite bound by name) instead of the `Nothing` marker.
+  const bigOpArgs =
+    args.length > 1
+      ? [args[0], ...withDefaultBigOpBounds(engine, args.slice(1))]
+      : args;
+  // Delegate to target-specific function handler if available,
+  // otherwise fall back to the generic loop compilation.
+  const sumProdFn = target.functions?.(h);
+  if (typeof sumProdFn === 'function') {
+    return sumProdFn(
+      bigOpArgs,
+      (expr) => compileValueOperand(expr, target),
+      target
+    );
+  }
+  if (typeof sumProdFn === 'string') {
+    return `${sumProdFn}(${bigOpArgs
+      .map((x) => core.compile(x, target))
+      .join(', ')})`;
+  }
+  return compileLoop(h, bigOpArgs, target, node);
+}
 
+/**
+ * The value of `compileExprCustomHandler()` when the compile handler of a
+ * user operator definition ran and declined. It is a symbol so that no
+ * value a handler returns can be read as a decline.
+ */
+const CUSTOM_HANDLER_DECLINED: unique symbol = Symbol(
+  'custom handler declined'
+);
+
+/**
+ * `compileExpr()` by the compile handler of a user operator definition:
+ * the code that the handler wrote, `CUSTOM_HANDLER_DECLINED` when the
+ * handler ran and declined, or `undefined` when `h` has no such handler.
+ */
+function compileExprCustomHandler(
+  engine: ComputeEngine,
+  h: string,
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>,
+  node: Expression | undefined
+): TargetSource | typeof CUSTOM_HANDLER_DECLINED | undefined {
   // A user operator definition may supply its own target-aware compile
   // handler (the public per-operator compilation extension point). It is
   // consulted HERE — before the target's built-in operator mappings, the
@@ -3402,11 +3762,6 @@ export function compileExpr(
   // no binding structure and keep the decline-falls-back contract. A handler
   // that returns `undefined`/`null` OR an
   // empty string falls through to the default compilation (finding A5).
-  // Set when a per-operator `compile` handler ran and DECLINED — the head is
-  // known and lowerable in general, it just has no lowering for THIS operand
-  // shape or target. Read by the fall-through diagnostic below so the decline
-  // is not reported as `Unknown operator` (Tycho item 109a).
-  let declinedByCustomHandler = false;
   // The compile handler of `D` and `Integrate` evaluates the derivative or
   // the antiderivative in a scope of the compilation, then compiles that
   // closed form. When a variable's enclosing binding (a parameter of a
@@ -3486,14 +3841,21 @@ export function compileExpr(
         recordCallerHandlerCode(h, customDef.operator, target);
         return custom;
       }
-      declinedByCustomHandler = true;
+      return CUSTOM_HANDLER_DECLINED;
     }
   }
+  return undefined;
+}
 
-  // After the per-operator handler: a user operator that supports these
-  // operand types lowers them itself.
-  assertOrderedOperandsAreNumbers(h, args, target);
-
+/**
+ * Decline, in `compileExpr()`, a tuple operand with a list coordinate, and
+ * the sum or the difference of a point and a number.
+ */
+function assertNoListCoordinateOrPointNumberMix(
+  engine: ComputeEngine,
+  h: string,
+  args: ReadonlyArray<Expression>
+): void {
   // Arithmetic, or a function applied to each coordinate (`Sin`, `Ln`,
   // `Floor`, …), over a `Tuple` with a LIST coordinate (`Tuple(A, B)` with
   // `A`, `B` declared lists, built as MathJSON) fails closed. Such a tuple
@@ -3539,12 +3901,28 @@ export function compileExpr(
         `operand is a number. The sum of a point and a number is an ` +
         `\`incompatible-type\` error, which compiled code cannot return.`
     );
+}
 
+/**
+ * `compileExpr()` of an `Abs` of a point or of a list of points (a norm),
+ * of a `Power` of a matrix, and of a `Multiply` of matrices; `undefined`
+ * for another node.
+ */
+function compileExprNormOrMatrixPower(
+  engine: ComputeEngine,
+  h: string,
+  args: ReadonlyArray<Expression>,
+  prec: number,
+  target: CompileTarget<Expression>,
+  node: Expression | undefined
+): TargetSource | undefined {
   // |(x,y)| over a fixed-arity point is the Euclidean norm (`Abs(Tuple)`
   // routes to `Norm` at evaluation). A point binds ATOMICALLY — it must
-  // never be broadcast into component-wise `abs`, so this rewrite sits
-  // BEFORE the broadcast lowering (which would map over the tuple) but
-  // AFTER the custom per-operator compile hook above, so a user-registered
+  // never be broadcast into component-wise `abs`, so `compileExpr()` calls
+  // this rewrite BEFORE the broadcast lowering
+  // (`compileExprElementwiseBroadcast()`, which would map over the tuple)
+  // but AFTER the compile handler of a user operator
+  // (`compileExprCustomHandler()`), so a user-registered
   // `Abs` handler keeps its documented precedence (Tycho item 74: the js
   // target compiled `|(x,y)|` to a bare array that concatenated into a
   // string downstream). `isTuple` (type-based), matching the evaluate and
@@ -3568,8 +3946,9 @@ export function compileExpr(
 
   // Same rule one level up: `|S|` over a LIST of points is the list of point
   // norms (the interpreter broadcasts `Abs`, and `Abs` of a point is its
-  // norm), NOT the component-wise `abs` the broadcast lowering below would
-  // emit behind `success: true` (Tycho item 138). Every target's `Norm`
+  // norm), NOT the component-wise `abs` that the broadcast lowering
+  // (`compileExprElementwiseBroadcast()`) would emit behind
+  // `success: true` (Tycho item 138). Every target's `Norm`
   // either lowers the point list (javascript) or fails closed on it, so the
   // rewrite is uniform rather than javascript-only.
   //
@@ -3610,7 +3989,8 @@ export function compileExpr(
   // union is tested where it is bound (`compileDeclaredUnionDispatch()`),
   // and in each body it has the type of one member. A type that also admits
   // a flat list of numbers (`list<number> | tuple<number, number>`) declines
-  // too: the element-wise lowering below gave `[|x|, |y|]` for a point,
+  // too: the element-wise lowering (`compileExprElementwiseBroadcast()`)
+  // gave `[|x|, |y|]` for a point,
   // where the interpreter gives its norm. The decline holds on every target.
   if (h === 'Abs' && args.length === 1 && isRuntimePointShaped(args[0]))
     throw unsettledShapeDecline(
@@ -3666,7 +4046,8 @@ export function compileExpr(
   // factors are written (user decision 2026-10-22): `evaluate()` reads the
   // shapes of the values (`mulTensors()`), and the code does the same
   // (`compileMatrixProduct`). A product of vectors, or of numbers and one
-  // matrix, keeps the element-wise code below.
+  // matrix, keeps the element-wise code that `compileExpr()` emits after
+  // this function.
   if (
     h === 'Multiply' &&
     (target.language === 'javascript' || target.language === 'python')
@@ -3674,35 +4055,22 @@ export function compileExpr(
     const product = compileMatrixProduct(engine, args, prec, target, node);
     if (product !== undefined) return product;
   }
+  return undefined;
+}
 
-  // Element-wise broadcast of a `broadcastable` head (arithmetic + unary
-  // math) over one or more list-valued operands, for the JavaScript target.
-  // Emits a `_SYS.bcast` call wrapping the head's own scalar codegen — see
-  // `tryCompileBroadcast`. Other targets have native vector types (GLSL/WGSL
-  // `vec3 + vec3`) or their own broadcasting, so this is JavaScript-only. The
-  // decline of an operand declared `any` or `value` here also applies to the
-  // Python and `interval-js` targets.
-  sub = compileExprElementwiseBroadcast(engine, h, args, prec, target, node);
-  if (sub !== undefined) return sub;
-
-  // A declaration CONTRADICTED by its body, sitting in a scalar-consuming
-  // position (2026-08-12 ruling — the adjacency half of the
-  // `assertScalarBigOpBody` clause of the same name). Target-agnostic, and
-  // deliberately AFTER the JavaScript broadcast attempt above: a shape that
-  // already had a value-safe element-wise route (a sibling operand made the
-  // whole form broadcast) keeps it; what reaches here is the scalar emission
-  // the contradiction makes wrong. See
-  // `assertNoContradictedScalarOperand`.
-  assertNoContradictedScalarOperand(engine, h, args);
-
-  // An indexed read into a collection that mixes complex- and real-valued
-  // elements, with an index known only at run time: the element is a complex
-  // object for some indices and a plain number for others, so no single
-  // lowering is correct. Refuse rather than guess (D6), for the same reason
-  // and in the same place as the contradicted declaration above. See
-  // `assertNoAmbiguousComplexElementRead`.
-  assertNoAmbiguousComplexElementRead(h, args);
-
+/**
+ * The broadcast guards of `compileExpr()`: the code of a node that the
+ * JavaScript or Python broadcast lowering writes, or a decline of a node
+ * that the JavaScript, Python or GPU targets cannot lower element by
+ * element; `undefined` for another node.
+ */
+function compileExprBroadcastGuards(
+  engine: ComputeEngine,
+  h: string,
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): TargetSource | undefined {
+  let sub: TargetSource | undefined;
   // A broadcastable head with a list/collection-typed operand that
   // `tryCompileBroadcast` did NOT handle would otherwise fall through to the
   // legacy scalar path and silently return garbage behind a `success: true`.
@@ -3782,8 +4150,8 @@ export function compileExpr(
   // operands — a tuple (point) is atomic in the interpreter too, and GLSL
   // `==` on two vecNs is scalar aggregate equality, so that lowering is
   // faithful. (On WGSL the same `==` is component-wise — excluded.)
-  // Complex operands are excluded: they already skip the infix path below
-  // and fail closed in function dispatch.
+  // Complex operands are excluded: they already skip the infix lowering
+  // (`compileExprInfix()`) and fail closed in function dispatch.
   sub = compileExprGpuRelational(h, args, target);
   if (sub !== undefined) return sub;
 
@@ -3799,9 +4167,22 @@ export function compileExpr(
   // point such as `If(c, (t, 1))`, which is typed as the tuple but whose
   // value is absent where the condition fails), and not for `t + P` with an
   // undeclared `t`. Fail closed instead.
-  sub = compileExprGpuPoint(h, args, target);
-  if (sub !== undefined) return sub;
+  return compileExprGpuPoint(h, args, target);
+}
 
+/**
+ * `compileExpr()` of an ordering comparison (`h` in `ORDERING_HEADS`) with
+ * a constant pole operand or an operand that may be complex, or a decline
+ * of one over a complex operand; `undefined` for another comparison.
+ */
+function compileExprOrdering(
+  engine: ComputeEngine,
+  h: string,
+  args: ReadonlyArray<Expression>,
+  prec: number,
+  target: CompileTarget<Expression>,
+  node: Expression | undefined
+): TargetSource | undefined {
   // An ORDERING comparison with an operand that is a constant pole (a
   // closed operand whose value is the complex infinity `~oo`: `1/0`,
   // `(-1)!`, a symbol assigned `1/0`) is `False` in the interpreter
@@ -3810,10 +4191,8 @@ export function compileExpr(
   // has an order, so `x < 1/0` compiled to `x < Infinity`, `true` at
   // `x = 1`. Such a comparison compiles to the target's `False`
   // (`constantPoleOrdering`). (ROADMAP CE-211.)
-  if (ORDERING_HEADS.has(h)) {
-    const pole = constantPoleOrdering(engine, args, target);
-    if (pole !== undefined) return pole;
-  }
+  const pole = constantPoleOrdering(engine, args, target);
+  if (pole !== undefined) return pole;
 
   // An ORDERING comparison over a complex-valued operand has no lowering:
   // the complex numbers are not ordered, so the interpreter leaves
@@ -3821,56 +4200,68 @@ export function compileExpr(
   // answers `False` once the value of an operand is not a real number,
   // whatever the other operands are (`x < i` is `False` with `x` free;
   // user decision of 2026-10-21, `nonRealKind()` in
-  // `library/relational-operator.ts`), while both the infix path
-  // below and the function codegen it falls through to emit a raw `<` over
+  // `library/relational-operator.ts`), while both the infix lowering
+  // (`compileExprInfix()`, which `compileExpr()` calls after this function)
+  // and the function codegen it falls through to emit a raw `<` over
   // the `{re, im}` object — a silent `false` behind `success: true`. Fail
   // closed instead. `Equal`/`NotEqual` are NOT affected: they have
   // their own complex-aware codegen (`_SYS.eq`/`_SYS.neq`). An operand of
   // merely UNKNOWN sign over a real kernel (`Sqrt(x)`) is not complex-valued
   // by `isComplexValued`'s carve-out, so `Less(Sqrt(x), 2)` still compiles.
-  if (ORDERING_HEADS.has(h)) {
-    // D2 (design §8, `docs/COMPILATION-MODEL.md`): an
-    // operand that MAY be complex — a `complex`-typed symbol, a wide binding
-    // under the complex discipline, a promoted radical — takes the RUNTIME
-    // rule (bind once, compare the real parts when every imaginary part is
-    // exactly zero, `false` otherwise); only a STATICALLY non-real operand
-    // is the compile-time decline, raised inside `realOperandGuard`.
-    // A CHAIN (`a < b < c`) binds each operand at its own edge so a later
-    // operand is never evaluated when an earlier edge already failed — the
-    // interpreter's short-circuit order (`realOperandChain`). A chain with
-    // an ARRAY operand is element-wise: every operand is an argument of
-    // one broadcast closure (evaluated exactly once, the edges conjoined
-    // per element), so it takes the element-wise form of
-    // `realOperandGuard`, which projects the operands and re-emits the
-    // closure over the projections.
-    const guarded =
-      args.length > 2 && !args.some((a) => isArrayOperand(a))
-        ? realOperandChain(h, args, target)
-        : core.realOperandGuard(
-            engine,
-            h,
-            args,
-            target,
-            () => core.compileExpr(engine, h, args, prec, target, node),
-            'boolean'
-          );
-    if (guarded !== undefined) return guarded;
-    const complexOperand = args.find((a) =>
-      realGuardCandidate(a, engine, target)
+  // D2 (design §8, `docs/COMPILATION-MODEL.md`): an
+  // operand that MAY be complex — a `complex`-typed symbol, a wide binding
+  // under the complex discipline, a promoted radical — takes the RUNTIME
+  // rule (bind once, compare the real parts when every imaginary part is
+  // exactly zero, `false` otherwise); only a STATICALLY non-real operand
+  // is the compile-time decline, raised inside `realOperandGuard`.
+  // A CHAIN (`a < b < c`) binds each operand at its own edge so a later
+  // operand is never evaluated when an earlier edge already failed — the
+  // interpreter's short-circuit order (`realOperandChain`). A chain with
+  // an ARRAY operand is element-wise: every operand is an argument of
+  // one broadcast closure (evaluated exactly once, the edges conjoined
+  // per element), so it takes the element-wise form of
+  // `realOperandGuard`, which projects the operands and re-emits the
+  // closure over the projections.
+  const guarded =
+    args.length > 2 && !args.some((a) => isArrayOperand(a))
+      ? realOperandChain(h, args, target)
+      : core.realOperandGuard(
+          engine,
+          h,
+          args,
+          target,
+          () => core.compileExpr(engine, h, args, prec, target, node),
+          'boolean'
+        );
+  if (guarded !== undefined) return guarded;
+  const complexOperand = args.find((a) =>
+    realGuardCandidate(a, engine, target)
+  );
+  if (complexOperand !== undefined)
+    throw new Error(
+      `Could not compile \`${h}\`: an ordering comparison over the ` +
+        `complex-valued operand \`${complexOperand.toString()}\` — the ` +
+        `complex numbers are not ordered. The interpreter answers ` +
+        `\`False\` when an operand has a value that is not a real ` +
+        `number, whatever the other operands are (\`x < i\` is ` +
+        `\`False\`), and leaves the comparison symbolic while the ` +
+        `operand depends on a free symbol (\`i·x < 0\`).`
     );
-    if (complexOperand !== undefined)
-      throw new Error(
-        `Could not compile \`${h}\`: an ordering comparison over the ` +
-          `complex-valued operand \`${complexOperand.toString()}\` — the ` +
-          `complex numbers are not ordered. The interpreter answers ` +
-          `\`False\` when an operand has a value that is not a real ` +
-          `number, whatever the other operands are (\`x < i\` is ` +
-          `\`False\`), and leaves the comparison symbolic while the ` +
-          `operand depends on a free symbol (\`i·x < 0\`).`
-      );
-  }
+  return undefined;
+}
 
-  // Handle operators
+/**
+ * `compileExpr()` of a head that `target` lowers to an operator
+ * (`compileExprOperator()`), or `undefined` for another head.
+ */
+function compileExprInfix(
+  engine: ComputeEngine,
+  h: string,
+  args: ReadonlyArray<Expression>,
+  prec: number,
+  target: CompileTarget<Expression>,
+  node: Expression | undefined
+): TargetSource | undefined {
   const op = target.operators?.(h);
 
   // A Python power that may need the real root of a negative base (an
@@ -3891,17 +4282,20 @@ export function compileExpr(
       negativeBaseFloatPower(args) !== undefined ||
       (!args.some((a) => core.isComplexValued(a)) &&
         core.promotesRadicalToComplex('Power', args)));
-  sub = compileExprOperator(h, args, prec, target, node, op, realPythonPower);
-  if (sub !== undefined) return sub;
+  return compileExprOperator(h, args, prec, target, node, op, realPythonPower);
+}
 
-  // Handle special constructs
-  sub = compileExprFunctionLiteral(engine, h, args, target, node);
-  if (sub !== undefined) return sub;
-
-  sub = compileExprDeclare(h, args, target, node);
-  if (sub !== undefined) return sub;
-  sub = compileExprAssign(engine, h, args, prec, target, node);
-  if (sub !== undefined) return sub;
+/**
+ * `compileExpr()` of a statement head (`Return`, `Break`, `Continue`,
+ * `Loop`, `Comprehension`), of a `parallel for` head or `+=` that was not
+ * lowered, and of `ParallelDomain`; `undefined` for another head.
+ */
+function compileExprStatementHead(
+  h: string,
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>,
+  node: Expression | undefined
+): TargetSource | undefined {
   if (h === 'Return') {
     // A target with a statically typed signature checks the returned value's
     // shape against it HERE, while the emitter's local frames are still
@@ -3987,7 +4381,20 @@ export function compileExpr(
       return compFn(args, (expr) => compileValueOperand(expr, target), target);
     return compileComprehension(args, target, node);
   }
+  return undefined;
+}
 
+/**
+ * `compileExpr()` of a selection (`If`, `Which`), with the restriction
+ * forms of an `If` with no else branch; `undefined` for another head.
+ */
+function compileExprSelection(
+  engine: ComputeEngine,
+  h: string,
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>,
+  node: Expression | undefined
+): TargetSource | undefined {
   if (h === 'If' && args.length !== 2 && args.length !== 3)
     throw new Error('Could not compile `If`: wrong number of arguments');
   // The else-less `If(c, t)` is the one-clause `Which(c, t)`: when the
@@ -4076,12 +4483,22 @@ export function compileExpr(
   if (h === 'If' && args.length === 2 && selectionHead === 'If')
     throw new Error('Could not compile `If`: wrong number of arguments');
 
-  sub = compileExprIf(engine, h, args, target, node, selectionHead);
+  const sub = compileExprIf(engine, h, args, target, node, selectionHead);
   if (sub !== undefined) return sub;
 
-  sub = compileExprWhich(args, target, node, selectionHead);
-  if (sub !== undefined) return sub;
+  return compileExprWhich(args, target, node, selectionHead);
+}
 
+/** `compileExpr()` of a `Match` or a `Block`, or `undefined` for another
+ * head. */
+function compileExprMatchOrBlock(
+  engine: ComputeEngine,
+  h: string,
+  args: ReadonlyArray<Expression>,
+  prec: number,
+  target: CompileTarget<Expression>,
+  node: Expression | undefined
+): TargetSource | undefined {
   if (h === 'Match') {
     // A target may override the whole construct (GPU emits target-specific
     // ternaries; interval/Python fail closed). Otherwise the default is the
@@ -4105,157 +4522,119 @@ export function compileExpr(
     if (collectionValue) CompilerState._collectionValueBlock = undefined;
     return compileBlock(args, target, node, true, prec, collectionValue);
   }
+  return undefined;
+}
 
-  // Absence-discharge primitives (§3.F). `IsMissing`/`Coalesce` lower through
-  // the target-supplied absence capability, choosing the numeric or object
-  // axis by the operand's (result's) domain (I6). A target lacking the needed
-  // axis — GPU has no `isAbsent`, interval/GPU have no `object` axis — fails
-  // closed with a diagnostic (propagation stays native; discharge does not).
-  if (h === 'IsMissing') {
-    if (args.length !== 1)
-      throw new Error(
-        'Could not compile `IsMissing`: expected exactly one argument'
-      );
-    if (hasNothingArm(compilationType(args[0])))
-      throw possibleNothingDecline(
-        '`IsMissing`',
-        'its operand can be `Nothing`, which is not an absent value'
-      );
-    const axis = absenceAxisForType(args[0].type.type, target, 'IsMissing');
-    if (axis.isAbsent === undefined)
-      throw new Error(
-        `Could not compile \`IsMissing\`: target '${target.language ?? 'unknown'}' cannot test ` +
-          `absence (no 'isAbsent' capability — e.g. GPU fast-math cannot ` +
-          `guarantee 'isnan' survives).`
-      );
-    return axis.isAbsent(compileValueOperand(args[0], target));
-  }
-
-  // The presence assertion `AssertPresent(x)` (Epsil `x?!`): `x` unless it
-  // is absent, else a raised run-time error `expected-present` naming the
-  // operand as written (the interpreter's `Error("expected-present", …)`).
-  //
-  // - A static proof removes the check: an operand whose compilation type
-  //   has no `missing` member and does not admit `nan` can only be present,
-  //   so the operand compiles as is. This is the only way the check is
-  //   omitted (user decision P4).
-  // - A target with no `raise` (a shader) compiles the assertion as the
-  //   identity; the author accepts the absent value flowing on (user
-  //   decision P5, 2026-10-21). The operand is compiled with its OWN type,
-  //   not the asserted one, so nothing downstream reads the assertion as a
-  //   proof: the node's `Present(T)` type is not consulted here, and a
-  //   later `IsMissing`/`Coalesce` on the value keeps its test.
-  // - An operand that may be `Nothing` is declined, as for `IsMissing`: the
-  //   targets cannot tell an omission from an absent datum.
-  sub = compileExprAssertPresent(h, args, target);
-  if (sub !== undefined) return sub;
-
-  sub = compileExprCoalesce(h, args, target, node);
-  if (sub !== undefined) return sub;
-
-  // A type ascription must produce the representation its consumers read.
-  // Most values pass through unchanged. A complex ascription lifts a real
-  // scalar; a nonnumeric value cannot use that representation and declines.
-  //
-  // A real ascription selects real arithmetic when complex mode alone made
-  // the value complex. For example, a real-returning sqrt(x) uses the real
-  // square root and returns NaN outside its real domain. A value that stays
-  // complex with that choice disabled contradicts the ascription and declines.
-  // Abs(sqrt(x)) already returns a real value and keeps its internal complex
-  // square root, so it still gives 2 at x = -4 in complex mode.
-  // Shared user-function definitions retain their own representations, so an
-  // ascription cannot recompile a callee differently for one call site.
-  // Analysis and code generation make these choices in compileExprTyped.
-  sub = compileExprTyped(engine, h, args, target, node);
-  if (sub !== undefined) return sub;
-
-  // A qualified protocol call — `Comparable.compare(x, y)` — canonicalizes
-  // to `Apply(Field(Comparable, "compare"), x, y)` and STAYS that (the
-  // `ProtocolMember` node only appears when the `Field` EVALUATE handler's
-  // wrapper literal beta-reduces). Intercept it BEFORE the target's `Apply`
-  // mapping, which would otherwise compile the protocol-naming `Field`
-  // operand and die inside it. When the dispatch tier declines, fail closed
-  // for the whole unit rather than falling through to the generic `Apply`
-  // lowering (ruled 2026-08-12, `docs/COMPILATION-MODEL.md`).
-  sub = compileExprApplyField(engine, h, args, target);
-  if (sub !== undefined) return sub;
-
-  // `Clamp(x, lo, hi)` takes exactly three operands. Only non-canonical
-  // input has another count, and the interpreter answers an error for it
-  // (`Clamp(x)` evaluates to `Error("missing")`). The lowerings index the
-  // three operands, so they emitted invalid code such as `clamp(x + 1.0)`
-  // on the shader targets or `Math.max(_.x + 1, )` on JavaScript.
-  if (h === 'Clamp' && args.length !== 3)
+/** `compileExpr()` of an `IsMissing`. */
+function compileExprIsMissing(
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): TargetSource {
+  if (args.length !== 1)
     throw new Error(
-      `Could not compile \`Clamp\`: expected three operands, got ${args.length}`
+      'Could not compile `IsMissing`: expected exactly one argument'
+    );
+  if (hasNothingArm(compilationType(args[0])))
+    throw possibleNothingDecline(
+      '`IsMissing`',
+      'its operand can be `Nothing`, which is not an absent value'
+    );
+  const axis = absenceAxisForType(args[0].type.type, target, 'IsMissing');
+  if (axis.isAbsent === undefined)
+    throw new Error(
+      `Could not compile \`IsMissing\`: target '${target.language ?? 'unknown'}' cannot test ` +
+        `absence (no 'isAbsent' capability — e.g. GPU fast-math cannot ` +
+        `guarantee 'isnan' survives).`
+    );
+  return axis.isAbsent(compileValueOperand(args[0], target));
+}
+
+/**
+ * `compileExpr()` of a head that `target` does not map to a function: a
+ * protocol call, a call of a block-local function or of a user function, or
+ * a decline. `declinedByCustomHandler` is true when the compile handler of a
+ * user operator definition ran and declined.
+ */
+function compileExprUnmappedCall(
+  engine: ComputeEngine,
+  h: string,
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>,
+  node: Expression | undefined,
+  declinedByCustomHandler: boolean
+): TargetSource {
+  // A four-operand `ProtocolProperty` is a property STORE, not a call — the
+  // shape a hand-built expression spells, and what `p.(P.name) = v` folds
+  // to at evaluation. Refused with the same message as the `Assign`
+  // spellings of the same write: a store writes a mutable object, and
+  // objects have no compiled representation yet.
+  if (h === 'ProtocolProperty' && args.length === 4)
+    throw new Error(
+      `Could not compile \`${isString(args[1]) ? args[1].string : 'property'}\`: this protocol ` +
+        `property assignment has no lowering on target ` +
+        `'${target.language ?? 'javascript'}' (a property store writes a ` +
+        `mutable object, and objects have no compiled representation).`
     );
 
-  // Handle function calls
-  const fn = target.functions?.(h);
-  if (!fn) {
-    // A four-operand `ProtocolProperty` is a property STORE, not a call — the
-    // shape a hand-built expression spells, and what `p.(P.name) = v` folds
-    // to at evaluation. Refused with the same message as the `Assign`
-    // spellings of the same write: a store writes a mutable object, and
-    // objects have no compiled representation yet.
-    if (h === 'ProtocolProperty' && args.length === 4)
-      throw new Error(
-        `Could not compile \`${isString(args[1]) ? args[1].string : 'property'}\`: this protocol ` +
-          `property assignment has no lowering on target ` +
-          `'${target.language ?? 'javascript'}' (a property store writes a ` +
-          `mutable object, and objects have no compiled representation).`
-      );
-
-    // A protocol call — a bare dispatcher head (`compare(x, y)`), the
-    // `ProtocolMember`/`ProtocolProperty` operators, or a `Field` read that
-    // only a protocol property can answer. Compiled as a direct call
-    // (static resolution) or a reified guard chain (dynamic dispatch); a
-    // decline falls through to the standard fail-closed throw below.
-    const protoCall = protocolCallParts(engine, h, args);
-    if (protoCall !== undefined) {
-      const code = tryCompileProtocolDispatch(engine, protoCall, target);
-      if (code !== undefined) return code;
-    }
-
-    // `h` may name a function-valued BLOCK LOCAL of an enclosing statement
-    // list (`const g = (k) => …`, then `g(3)`). That binding is emitted by
-    // the block itself, so the call is an ordinary call of it — and it must
-    // be resolved BEFORE the engine lookup below, which a same-named engine
-    // symbol would otherwise win.
-    const localFn = tryCompileLocalFunctionCall(h, args, target);
-    if (localFn !== undefined) return localFn;
-
-    // `h` may be a symbol whose engine definition is a user-defined function
-    // literal (`f(x) := …`, `x ↦ …`). Emit it as a named local function and
-    // compile the call site as `_fn_f(arg)`. Returns undefined for a truly
-    // unknown operator (no such definition) or a target that opts out.
-    //
-    // Skipped when `h` names a BOUND variable of the enclosing compilation —
-    // a function literal's parameter, a loop index, a block local. That
-    // binding is what the call applies, and it shadows any same-named engine
-    // definition; resolving the engine definition instead emitted a call to
-    // the WRONG function. With `f` assigned at engine level, the literal
-    // `(f, x) ↦ f(x)` emitted `_fn_f(x)` and so ignored its own `f`
-    // argument, disagreeing with the interpreter. A bound head that is a
-    // block-local FUNCTION was already resolved by
-    // `tryCompileLocalFunctionCall` above and never reaches this line;
-    // anything else falls through to the fail-closed throw below, so the
-    // interpreter — which resolves the parameter correctly — runs the call.
-    // Ruled by the user 2026-08-14: fail closed now; compiling such a call as
-    // a direct call of the bound parameter (true higher-order compilation)
-    // remains a possible future feature, not a bug fix.
-    const userFn = target.boundVars?.has(h)
-      ? undefined
-      : tryCompileUserFunction(engine, h, args, target, node);
-    if (userFn !== undefined) return userFn;
-    throw new Error(
-      noLoweringMessage(engine, h, args, target, declinedByCustomHandler)
-    );
+  // A protocol call — a bare dispatcher head (`compare(x, y)`), the
+  // `ProtocolMember`/`ProtocolProperty` operators, or a `Field` read that
+  // only a protocol property can answer. Compiled as a direct call
+  // (static resolution) or a reified guard chain (dynamic dispatch); a
+  // decline falls through to the standard fail-closed throw below.
+  const protoCall = protocolCallParts(engine, h, args);
+  if (protoCall !== undefined) {
+    const code = tryCompileProtocolDispatch(engine, protoCall, target);
+    if (code !== undefined) return code;
   }
 
-  sub = compileExprFunctionCall(engine, h, args, prec, target, node, fn);
-  if (sub !== undefined) return sub;
+  // `h` may name a function-valued BLOCK LOCAL of an enclosing statement
+  // list (`const g = (k) => …`, then `g(3)`). That binding is emitted by
+  // the block itself, so the call is an ordinary call of it — and it must
+  // be resolved BEFORE the engine lookup below, which a same-named engine
+  // symbol would otherwise win.
+  const localFn = tryCompileLocalFunctionCall(h, args, target);
+  if (localFn !== undefined) return localFn;
 
+  // `h` may be a symbol whose engine definition is a user-defined function
+  // literal (`f(x) := …`, `x ↦ …`). Emit it as a named local function and
+  // compile the call site as `_fn_f(arg)`. Returns undefined for a truly
+  // unknown operator (no such definition) or a target that opts out.
+  //
+  // Skipped when `h` names a BOUND variable of the enclosing compilation —
+  // a function literal's parameter, a loop index, a block local. That
+  // binding is what the call applies, and it shadows any same-named engine
+  // definition; resolving the engine definition instead emitted a call to
+  // the WRONG function. With `f` assigned at engine level, the literal
+  // `(f, x) ↦ f(x)` emitted `_fn_f(x)` and so ignored its own `f`
+  // argument, disagreeing with the interpreter. A bound head that is a
+  // block-local FUNCTION was already resolved by
+  // `tryCompileLocalFunctionCall` above and never reaches this line;
+  // anything else falls through to the fail-closed throw below, so the
+  // interpreter — which resolves the parameter correctly — runs the call.
+  // Ruled by the user 2026-08-14: fail closed now; compiling such a call as
+  // a direct call of the bound parameter (true higher-order compilation)
+  // remains a possible future feature, not a bug fix.
+  const userFn = target.boundVars?.has(h)
+    ? undefined
+    : tryCompileUserFunction(engine, h, args, target, node);
+  if (userFn !== undefined) return userFn;
+  throw new Error(
+    noLoweringMessage(engine, h, args, target, declinedByCustomHandler)
+  );
+}
+
+/**
+ * `compileExpr()` of a head that `target` maps to the helper named `fn`.
+ */
+function compileExprHelperCall(
+  engine: ComputeEngine,
+  h: string,
+  args: ReadonlyArray<Expression>,
+  prec: number,
+  target: CompileTarget<Expression>,
+  node: Expression | undefined,
+  fn: CompiledFunction<Expression>
+): TargetSource {
   // `fn` is a plain string: the target maps this head to a helper. When
   // the target declares the helper real-only (`isRealOnlyLowering`: by
   // default every helper name, e.g. JS `_SYS.erf`), it takes a real
@@ -4290,7 +4669,8 @@ export function compileExpr(
   const call = `${fn}(${args
     .map((x) => compileValueOperand(x, target))
     .join(', ')})`;
-  // Same shape gate as the function-codegen path above: a string-mapped
+  // Same shape gate as the function-codegen route
+  // (`compileExprFunctionCall()`): a string-mapped
   // helper is a scalar/genType signature too (`atan`, `clamp`, `mod`), and
   // handing it a `vecN`/`matN` operand it has no overload for is invalid
   // source, not a runtime concern.
