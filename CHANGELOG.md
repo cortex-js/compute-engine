@@ -147,6 +147,14 @@
 
 ### Resolved Issues
 
+- **In Epsil, an error in the body of a called function underlines the
+  call.** With `function g(x) { Ln(x) + 1 }` and `let y = 5`, the error of
+  `let v = y + g("a")` underlined `y`, because the sum in the body of `g`
+  was matched to the sum of the statement. It now underlines `g("a")`. The
+  same applies to an error that a variable holds from an earlier statement:
+  with `w2` the error of `Sin(q)`, `let v = w2 * Sin(x)` underlined `x`, and
+  it now underlines `w2`.
+
 - **In a sum or a product, each derivative with respect to a subscripted
   variable uses its own variable.**
   `\sum_{i=1}^{2} \frac{\partial}{\partial x_i} x_i^2` gave `4x_i`, and it

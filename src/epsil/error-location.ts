@@ -174,6 +174,12 @@ export function enclosingFrame(
  * ({@link walkToFrame}): each frame selects its call inside the argument that
  * the next outer frame selected. Only when that walk cannot decide does the
  * frame fall through to the next outer frame.
+ *
+ * A frame that names no written call of the statement (a frame recorded in
+ * the body of a called function, in an earlier statement whose value the
+ * statement reads, or by a call that canonicalization made) is not used when
+ * no call of its operator is inside the argument that an outer frame of the
+ * statement selected ({@link rejectFramesOutsideScope}).
  */
 export function locateError(
   frames: readonly ErrorFrameRef[],
@@ -211,7 +217,16 @@ export function locateError(
   offending?: MathJsonExpression
 ): { range: [number, number]; call?: MathJsonExpression } {
   const rejected: Rejected = { frames: new Set(), calls: new Set() };
+  rejectFramesOutsideScope(
+    frames,
+    stmt,
+    frameIndexOrder,
+    slotNamesFor,
+    canonicalOrder,
+    rejected
+  );
   for (let k = 0; k < frames.length; k++) {
+    if (rejected.frames.has(k)) continue;
     const { name } = frames[k];
     const matches: MathJsonExpression[] = [];
     findWrittenCalls(stmt, name, matches);
@@ -312,6 +327,174 @@ export function locateError(
 }
 
 /**
+ * Add to `rejected.frames` the frames that name no written call of the
+ * statement. The frames of a runtime error record each call that the error
+ * passes through, innermost first. The frames of the written calls of the
+ * statement come last, and each one names a call inside the argument that
+ * the next outer frame of the statement selected. The frames before them were
+ * recorded in the body of a function that the statement calls, in an earlier
+ * statement whose value the statement reads, or by a call that
+ * canonicalization or evaluation made. The call of the function and the read
+ * of the variable record no frame.
+ *
+ * Example: with `function g(x) { Ln(x) + 1 }`, the error of
+ * `let v = y + g("a")` has the frames `Ln argument 1, Add argument 1,
+ * Add argument 2`. The last frame selects the operand `g("a")` of the
+ * statement. The frame `Add argument 1` comes from the body of `g`, but its
+ * operator also occurs in the statement, and the argument 1 of the sum of the
+ * statement is `y`. No call of `Add` is inside `g("a")`, so this frame is
+ * rejected, and the error is located at `g("a")`.
+ *
+ * The frames are read from the outermost one, and a frame whose operator
+ * does not occur in the statement is skipped. A frame is a frame of the
+ * statement only when its written call is known:
+ *
+ * - The first such frame names the value of the statement (`y + g("a")`),
+ *   not a call inside it. A call inside it can be a call that the evaluation
+ *   made: the sum of the terms of `Sum(Ln(w) + k, k, 1, 3)` records frames
+ *   of `Add` that are not the frames of the written `Ln(w) + k`.
+ * - Each next frame names the argument that the frame before it selected,
+ *   or the one statement of that argument when it is a block. A call between
+ *   them that records no frame (the elements of a list) would leave the
+ *   frame unsure.
+ * - The canonical call at the source range of the written call has, at the
+ *   frame's index, the operand made from the selected argument. A call that
+ *   canonicalization made can have the operator of the written call:
+ *   `Exp(Ln(w))^y` is `Power(ExponentialE, Ln(w)·y)`, and its frame
+ *   `Power argument 2` does not name the written `y`.
+ *
+ * The argument that a frame of the statement selects is the scope of the
+ * next inner frame. The error went through the scope, so a frame with no
+ * written call inside the scope names no written call of the statement, and
+ * it is rejected. Such a frame does no harm when it is rejected, also when a
+ * call that canonicalization made in the scope recorded it: in
+ * `y^2 + Exp(Ln(w))`, the frame `Power argument 2` of `Exp` would select the
+ * `2` of `y^2`. When a frame has a written call inside the scope that is not
+ * known to be its call, the reading stops, and rejects nothing more. The
+ * inner frames are not used to
+ * select the argument, because they are not yet known to come from the
+ * statement. Without `canonicalOrder`, or when the frame indexes count
+ * written arguments, nothing is rejected.
+ */
+function rejectFramesOutsideScope(
+  frames: readonly ErrorFrameRef[],
+  stmt: MathJsonExpression,
+  frameIndexOrder: 'declaration' | 'written',
+  slotNamesFor:
+    | ((operatorName: string) => readonly (string | undefined)[] | undefined)
+    | undefined,
+  canonicalOrder: CanonicalOrder | undefined,
+  rejected: Rejected
+): void {
+  // The frame index of a named call counts declaration slots, and the source
+  // range of the canonical operand is the only check of the argument.
+  if (canonicalOrder === undefined || frameIndexOrder !== 'declaration')
+    return;
+  // The argument that the last frame of the statement selected; `undefined`
+  // before a frame selected one.
+  let scope: MathJsonExpression | undefined;
+  for (let j = frames.length - 1; j >= 0; j--) {
+    const { name } = frames[j];
+    const calls: MathJsonExpression[] = [];
+    findWrittenCalls(stmt, name, calls, Infinity);
+    if (calls.length === 0) continue;
+
+    let candidates: MathJsonExpression[];
+    if (scope === undefined) {
+      candidates = calls.filter((call) => isStatementValue(stmt, call));
+    } else {
+      const inScope = calls.filter((call) => pathTo(scope!, call, []));
+      if (inScope.length === 0) {
+        // The error went through `scope`, and no written call of the frame
+        // is inside it: the frame names no written call of the statement.
+        rejected.frames.add(j);
+        continue;
+      }
+      candidates = inScope.filter((call) => isDirectlyAt(scope!, call));
+    }
+    if (candidates.length !== 1) return;
+
+    // The inner frames are treated as rejected, so that they do not select
+    // the argument (see `frameArgument`): they are not yet known to come
+    // from the statement.
+    const withoutInner: Rejected = {
+      frames: new Set(rejected.frames),
+      calls: rejected.calls,
+    };
+    for (let i = 0; i < j; i++) withoutInner.frames.add(i);
+    const selected = frameArgument(
+      frames,
+      j,
+      candidates[0],
+      scope ?? stmt,
+      stmt,
+      frameIndexOrder,
+      slotNamesFor,
+      canonicalOrder,
+      withoutInner
+    );
+    if (selected === undefined || selected.arg === null) return;
+
+    // The canonical call at the source range of the written call must have,
+    // at the frame's index, the operand made from the selected argument.
+    // `Exp(u)^y` is `Power(ExponentialE, u·y)`: the canonical operand 2 is
+    // not the written `y`.
+    const callRange = nodeOffsets(selected.call);
+    const argRange = nodeOffsets(selected.arg);
+    const canonicalRange =
+      callRange === undefined
+        ? undefined
+        : canonicalOrder.argumentOffsets(name, callRange, frames[j].index);
+    if (
+      argRange === undefined ||
+      canonicalRange === undefined ||
+      argRange[0] !== canonicalRange[0] ||
+      argRange[1] !== canonicalRange[1]
+    )
+      return;
+
+    scope = selected.arg;
+  }
+}
+
+/**
+ * Whether `call` is the value of the statement `stmt`: `stmt` itself, or a
+ * node inside nodes that span the whole statement (the `Declare` of a `let`
+ * and its `Dictionary`, the `Assign` of an assignment), and that are thus not
+ * written calls.
+ */
+function isStatementValue(
+  stmt: MathJsonExpression,
+  call: MathJsonExpression
+): boolean {
+  const path: MathJsonExpression[] = [];
+  if (!pathTo(stmt, call, path)) return false;
+  const whole = nodeOffsets(stmt);
+  return path.slice(0, -1).every((node) => {
+    const o = nodeOffsets(node);
+    return (
+      o === undefined ||
+      (whole !== undefined && o[0] === whole[0] && o[1] === whole[1])
+    );
+  });
+}
+
+/** Whether `call` is `arg`, or the one statement of a block `arg` (also
+ * through nested blocks), such as the `Ln(w)` of the branch `{ Ln(w) }`. */
+function isDirectlyAt(
+  arg: MathJsonExpression,
+  call: MathJsonExpression
+): boolean {
+  let node = arg;
+  while (node !== call && operator(node) === 'Block') {
+    const ops = [...operands(node)];
+    if (ops.length !== 1) return false;
+    node = ops[0];
+  }
+  return node === call;
+}
+
+/**
  * Find the call of frame `k` when its operator occurs more than once in the
  * statement, by walking the frames from the OUTERMOST one down to frame `k`.
  *
@@ -369,6 +552,8 @@ function walkToFrame(
   for (let j = frames.length - 1; j >= k; j--) {
     const { name } = frames[j];
     if (j > k) {
+      // A rejected frame did not make the error in this statement.
+      if (rejected?.frames.has(j)) continue;
       const inStatement: MathJsonExpression[] = [];
       findWrittenCalls(stmt, name, inStatement);
       if (inStatement.length === 0) continue;

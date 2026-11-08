@@ -294,12 +294,13 @@ describe('an error in one of two calls of the same function', () => {
 
   test('an argument that is not a literal does not select its call', () => {
     // The error is in `x`, made by the first statement. The value does not
-    // select `Ln(y)`, whose argument is a variable. No call of `Ln` is sure.
-    // The two written `+` make one canonical sum, which the frame
-    // `Add argument 1` names, and its operand is not sure: the whole sum is
-    // underlined.
+    // select `Ln(y)`, whose argument is a variable. The two written `+` make
+    // one canonical sum, and the frame `Add argument 1` names its operand
+    // `x`, by the source range of the canonical operand. No call of `Ln` is
+    // inside `x`, so the frame `Ln argument 1` was recorded by an earlier
+    // statement, and `x` is underlined.
     const src = 'let x = Ln("a")\nlet y = 2\nlet v = x + Ln(y) + Ln(2)\n0';
-    expect(underlines(src)).toEqual(['x + Ln(y) + Ln(2)']);
+    expect(underlines(src)).toEqual(['x']);
   });
 
   test.each([
