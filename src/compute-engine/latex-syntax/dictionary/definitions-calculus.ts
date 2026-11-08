@@ -24,7 +24,12 @@ import { endsTabularCell } from '../tokenizer.js';
  * whole body of an enclosing integral that has no differential of its own
  * (`\int_1^2\int_3^4 \frac{dx\,dy}{xy}`), the enclosing integral makes the
  * inner integral again with one differential per sign and takes the others
- * (`claimExcessDifferentials()`).
+ * (`claimExcessDifferentials()`). The enclosing integral also takes them when
+ * the inner integral is the last factor of a product or the operand of a
+ * negation that is its whole body (`\int_1^2 2\int_3^4 \frac{dx\,dy}{xy}`).
+ * When terms follow the integrand of the inner integral
+ * (`\int_1^2\int_3^4 \frac{dx\,dy}{xy} + 1`), they are outside both
+ * integrals, as in `\int_1^2\int_3^4 \frac{1}{xy}\,dx\,dy + 1`.
  */
 type IntegralParts = {
   command: string;
@@ -34,7 +39,14 @@ type IntegralParts = {
   subs: MathJsonExpression[];
   sups: MathJsonExpression[];
   nIntegrals: number;
+  /** The terms written after the integrand, outside the integral. */
+  rest: SignedTerm[];
+  /** The token index where the integrand ends and the terms of `rest`
+   * begin. It is used only for diagnostics. */
+  integrandEnd: number;
 };
+/** A term of a sum, with `true` when it is subtracted. */
+type SignedTerm = [term: MathJsonExpression, negative: boolean];
 const excessDifferentials = new WeakMap<object, IntegralParts>();
 
 // See https://de.wikipedia.org/wiki/Formelsatz
@@ -121,11 +133,16 @@ function parseIntegral(command: string, nIntegrals = 1) {
     // eslint-disable-next-line prefer-const
     let [fn, indexes] = parseIntegralBody(parser, nIntegrals);
     // With no differential of its own, this integral takes the differentials
-    // that an inner integral, its whole body, found in its integrand and has
-    // no sign for (`\int_1^2\int_3^4 \frac{dx\,dy}{xy}`).
+    // that an inner integral found in its integrand and has no sign for
+    // (`\int_1^2\int_3^4 \frac{dx\,dy}{xy}`), when that inner integral is
+    // the body, its last factor or its negated operand. The terms after the
+    // integrand of the inner integral (`rest`) go after this integral.
+    let rest: SignedTerm[] = [];
+    let integrandEnd = bodyStartToken;
     if (fn !== null && indexes.length === 0) {
       const claimed = claimExcessDifferentials(fn);
-      if (claimed !== null) [fn, indexes] = claimed;
+      if (claimed !== null)
+        ({ fn, indexes, rest, integrandEnd } = claimed);
     }
     // An integration variable spelled as a subscript on an indexed
     // collection (`dn_{0}` when `n` is a list) is the new name `n_0`, and so
@@ -142,7 +159,7 @@ function parseIntegral(command: string, nIntegrals = 1) {
         // the terms after it are added to or subtracted from the integral,
         // with their sign. With no differential in any term, the whole sum is
         // the integrand (`\int \sin x + 1`).
-        const [body, rest, termIndexes] = splitSumAtDifferential(
+        const [body, termRest, termIndexes] = splitSumAtDifferential(
           fn,
           binderName
         );
@@ -153,11 +170,13 @@ function parseIntegral(command: string, nIntegrals = 1) {
           // integrand span is given as a declaration span. The body start
           // given is the current index: no reference collected so far starts
           // at or after it, so no other reference is pruned.
+          const termsStart = integrandEndToken(
+            parser,
+            bodyStartToken,
+            parser.index
+          );
           parser._pruneUndeclared(indexes, diagCp, parser.index, [
-            [
-              bodyStartToken,
-              integrandEndToken(parser, bodyStartToken, parser.index),
-            ],
+            [bodyStartToken, termsStart],
           ]);
           // The `d` of the differential. The tokens up to `signEnd` are
           // checked against the integrand only, so that a free `d` in a term
@@ -180,23 +199,19 @@ function parseIntegral(command: string, nIntegrals = 1) {
           );
           pruneDifferentialOperators(parser, diagCp, signEnd, [
             body,
-            ...rest.map(([term]) => term),
+            ...termRest.map(([term]) => term),
           ]);
           // A body that is only the differential (`\int (dx) + 1`) is the
           // integral of 1, as `\frac{dx}{x}` is the integral of `1/x`.
-          let result: MathJsonExpression =
-            makeIntegral(command, body === null ? 1 : rebind(body), {
-              indexes,
-              subs,
-              sups,
-            }) ?? 'Nothing';
-          for (const [term, negative] of rest) {
-            if (negative) result = ['Subtract', result, term];
-            else if (operator(result) === 'Add')
-              result = ['Add', ...operands(result), term];
-            else result = ['Add', result, term];
-          }
-          return result;
+          return (
+            finishIntegral(
+              command,
+              body === null ? 1 : rebind(body),
+              { indexes, subs, sups, nIntegrals },
+              termRest,
+              termsStart
+            ) ?? 'Nothing'
+          );
         }
       } else if (operator(fn) === 'Divide') {
         // We recognize \frac{dx}{x} as an integral
@@ -213,9 +228,26 @@ function parseIntegral(command: string, nIntegrals = 1) {
 
     // Retroactively un-flag references to the differential (dummy) variables
     // within the integrand/differential span only (leaving same-named limits).
+    // When an inner integral gave terms that are outside this integral
+    // (`rest`), a same-named reference in those terms is free and stays
+    // flagged: only the span up to the end of the integrand of the inner
+    // integral (`integrandEnd`, which that integral recorded) is given, as a
+    // declaration span, as for a sum above. The tokens are not scanned again
+    // from `bodyStartToken`: a brace group around the inner integral
+    // (`\int_1^2{\int_3^4 \frac{dx\,dy}{xy} + y}`) would change the depth of
+    // the `+`. The terms are also given to `pruneDifferentialOperators()`, so
+    // that a free `d` in them keeps its diagnostic.
     if (indexes.length > 0) {
-      parser._pruneUndeclared(indexes, diagCp, bodyStartToken);
-      pruneDifferentialOperators(parser, diagCp, bodyStartToken, [fn]);
+      if (rest.length === 0)
+        parser._pruneUndeclared(indexes, diagCp, bodyStartToken);
+      else
+        parser._pruneUndeclared(indexes, diagCp, parser.index, [
+          [bodyStartToken, integrandEnd],
+        ]);
+      pruneDifferentialOperators(parser, diagCp, bodyStartToken, [
+        fn,
+        ...rest.map(([term]) => term),
+      ]);
     }
 
     if (fn !== null && indexes.length > 0) fn = rebind(fn);
@@ -236,39 +268,129 @@ function parseIntegral(command: string, nIntegrals = 1) {
     //
     // 3/ Put together the limits, the function and the indexes
     //
-    // `makeIntegral()` adds entries to `subs` and `sups`: the recorded parts
-    // keep copies.
-    const parts: IntegralParts | null =
-      fn !== null && indexes.length > nIntegrals
-        ? { command, fn, indexes, subs: [...subs], sups: [...sups], nIntegrals }
-        : null;
-    const result = makeIntegral(command, fn, { indexes, subs, sups });
-    if (parts !== null && Array.isArray(result))
-      excessDifferentials.set(result, parts);
-    return result;
+    return finishIntegral(
+      command,
+      fn,
+      { indexes, subs, sups, nIntegrals },
+      rest,
+      integrandEnd
+    );
   };
+}
+
+/**
+ * Make the integral of `fn`, then add the terms of `rest` after it (see
+ * `addTerms()`). When the integral has more differentials than signs, record
+ * its parts on the result (see `excessDifferentials`), so that an enclosing
+ * integral can take the extra differentials. `integrandEnd` is the token
+ * index where the integrand ends and the terms of `rest` begin. Return
+ * `null` when `makeIntegral()` gives no integral and `rest` is empty.
+ */
+function finishIntegral(
+  command: string,
+  fn: MathJsonExpression | null,
+  limits: {
+    indexes: string[];
+    subs: MathJsonExpression[];
+    sups: MathJsonExpression[];
+    nIntegrals: number;
+  },
+  rest: SignedTerm[],
+  integrandEnd: number
+): MathJsonExpression | null {
+  const { indexes, subs, sups, nIntegrals } = limits;
+  // `makeIntegral()` adds entries to `subs` and `sups`: the recorded parts
+  // keep copies.
+  const parts: IntegralParts | null =
+    fn !== null && indexes.length > nIntegrals
+      ? {
+          command,
+          fn,
+          indexes,
+          subs: [...subs],
+          sups: [...sups],
+          nIntegrals,
+          rest,
+          integrandEnd,
+        }
+      : null;
+  const integral = makeIntegral(command, fn, { indexes, subs, sups });
+  if (integral === null && rest.length === 0) return null;
+  const result = addTerms(integral ?? 'Nothing', rest);
+  if (parts !== null && Array.isArray(result))
+    excessDifferentials.set(result, parts);
+  return result;
 }
 
 /**
  * When `body` is an integral that took more differentials than it has signs
  * (see `excessDifferentials`), make it again with one differential per sign,
- * the first ones in the written order, and return it with the other
- * differentials, which belong to the enclosing integral. Return `null`
- * otherwise.
+ * the first ones in the written order. Return it as `fn`, with the other
+ * differentials, which belong to the enclosing integral, as `indexes`, the
+ * terms that were written after its integrand, which go after the enclosing
+ * integral, as `rest`, and the token index where these terms begin as
+ * `integrandEnd`. Return `null` otherwise.
+ *
+ * Such an integral is also found as the last factor of a product
+ * (`2\int_3^4 \frac{dx\,dy}{xy}`) or as the operand of a negation, at any
+ * depth: `fn` is then the product or the negation with the integral made
+ * again in it. A product is searched only at its last factor, as
+ * `parseSubintegrand()` searches it for a differential.
  */
-function claimExcessDifferentials(
-  body: MathJsonExpression
-): [inner: MathJsonExpression, indexes: string[]] | null {
+function claimExcessDifferentials(body: MathJsonExpression): {
+  fn: MathJsonExpression;
+  indexes: string[];
+  rest: SignedTerm[];
+  integrandEnd: number;
+} | null {
   if (!Array.isArray(body)) return null;
   const parts = excessDifferentials.get(body);
-  if (parts === undefined) return null;
-  const inner = makeIntegral(parts.command, parts.fn, {
-    indexes: parts.indexes.slice(0, parts.nIntegrals),
-    subs: [...parts.subs],
-    sups: [...parts.sups],
-  });
-  if (inner === null) return null;
-  return [inner, parts.indexes.slice(parts.nIntegrals)];
+  if (parts !== undefined) {
+    const inner = makeIntegral(parts.command, parts.fn, {
+      indexes: parts.indexes.slice(0, parts.nIntegrals),
+      subs: [...parts.subs],
+      sups: [...parts.sups],
+    });
+    if (inner === null) return null;
+    return {
+      fn: inner,
+      indexes: parts.indexes.slice(parts.nIntegrals),
+      rest: parts.rest,
+      integrandEnd: parts.integrandEnd,
+    };
+  }
+  const h = operator(body);
+  if (h === 'Negate' && nops(body) === 1) {
+    const claimed = claimExcessDifferentials(operand(body, 1)!);
+    if (claimed === null) return null;
+    return { ...claimed, fn: ['Negate', claimed.fn] };
+  }
+  if ((h === 'Multiply' || h === 'InvisibleOperator') && nops(body) >= 2) {
+    const args = operands(body);
+    const claimed = claimExcessDifferentials(args[args.length - 1]);
+    if (claimed === null) return null;
+    return { ...claimed, fn: [h, ...args.slice(0, -1), claimed.fn] };
+  }
+  return null;
+}
+
+/**
+ * Add each term of `terms` to `expr`, or subtract it when it is marked
+ * negative, in order: `addTerms(I, [[1, false], [2, true]])` is
+ * `Subtract(Add(I, 1), 2)`. Return `expr` itself when `terms` is empty.
+ */
+function addTerms(
+  expr: MathJsonExpression,
+  terms: readonly SignedTerm[]
+): MathJsonExpression {
+  let result = expr;
+  for (const [term, negative] of terms) {
+    if (negative) result = ['Subtract', result, term];
+    else if (operator(result) === 'Add')
+      result = ['Add', ...operands(result), term];
+    else result = ['Add', result, term];
+  }
+  return result;
 }
 
 function makeIntegral(
@@ -626,7 +748,7 @@ function splitSumAtDifferential(
   binderName: (expr: MathJsonExpression | null | undefined) => string | null
 ): [
   body: MathJsonExpression | null,
-  rest: [term: MathJsonExpression, negative: boolean][],
+  rest: SignedTerm[],
   indexes: string[],
 ] {
   const h = operator(expr);
@@ -672,7 +794,7 @@ function splitSumAtDifferential(
           ...rest,
           ...terms
             .slice(i + 1)
-            .map((term): [MathJsonExpression, boolean] => [term, false]),
+            .map((term): SignedTerm => [term, false]),
         ],
         indexes,
       ];

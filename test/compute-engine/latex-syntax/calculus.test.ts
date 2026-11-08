@@ -603,6 +603,81 @@ describe('DIFFERENTIALS IN THE NUMERATOR OF A MULTIPLE INTEGRAL', () => {
     expect(raw('\\int \\frac{dx\\,dy}{xy}')).toEqual(
       raw('\\iint \\frac{dx\\,dy}{xy}')
     );
+    // With a term after the integrand, the term is outside the integral
+    expect(raw('\\int_3^4 \\frac{dx\\,dy}{xy} + 1')).toEqual([
+      'Add',
+      [
+        'Integrate',
+        ['Divide', 1, ['InvisibleOperator', 'x', 'y']],
+        ['Tuple', 'y', 3, 4],
+        'x',
+      ],
+      1,
+    ]);
+  });
+
+  // A term after the inner integrand, or a factor or a negation before the
+  // inner integral, gives the same parse as the differentials written after
+  // the integrand: the terms after the integrand are outside both integrals.
+  test('terms after the integrand are outside the integrals (CE-1046)', () => {
+    const same = (fraction: string, tokens: string) =>
+      expect(raw(fraction)).toEqual(raw(tokens));
+    same(
+      '\\int_1^2\\int_3^4 \\frac{dx\\,dy}{xy} + 1',
+      '\\int_1^2\\int_3^4 \\frac{1}{xy}\\,dx\\,dy + 1'
+    );
+    same(
+      '\\int_1^2\\int_3^4 \\frac{dx\\,dy}{xy} - 1',
+      '\\int_1^2\\int_3^4 \\frac{1}{xy}\\,dx\\,dy - 1'
+    );
+    // A term before the fraction stays in the integrand
+    same(
+      '\\int_1^2\\int_3^4 5 - \\frac{dx\\,dy}{xy} + 1',
+      '\\int_1^2\\int_3^4 5 - \\frac{1}{xy}\\,dx\\,dy + 1'
+    );
+    same(
+      '\\int_0^1\\int_1^2\\int_3^4 \\frac{dx\\,dy\\,dz}{xy} + 1',
+      '\\int_0^1\\int_1^2\\int_3^4 \\frac{1}{xy}\\,dx\\,dy\\,dz + 1'
+    );
+    expect(
+      ce
+        .parse('\\int_1^2\\int_3^4 \\frac{dx\\,dy}{xy} + 1')
+        .evaluate()
+        .toString()
+    ).toBe('1 + 2ln(2)^2 - ln(2) * ln(3)');
+  });
+
+  test('a factor or a negation before the inner integral (CE-1046)', () => {
+    const same = (fraction: string, tokens: string) =>
+      expect(raw(fraction)).toEqual(raw(tokens));
+    same(
+      '\\int_1^2 2\\int_3^4 \\frac{dx\\,dy}{xy}',
+      '\\int_1^2 2\\int_3^4 \\frac{1}{xy}\\,dx\\,dy'
+    );
+    same(
+      '\\int_1^2 2\\cdot\\int_3^4 \\frac{dx\\,dy}{xy}',
+      '\\int_1^2 2\\cdot\\int_3^4 \\frac{1}{xy}\\,dx\\,dy'
+    );
+    same(
+      '\\int_1^2 2\\int_3^4 \\frac{dx\\,dy}{xy} + 1',
+      '\\int_1^2 2\\int_3^4 \\frac{1}{xy}\\,dx\\,dy + 1'
+    );
+    same(
+      '\\int_1^2 -\\int_3^4 \\frac{dx\\,dy}{xy}',
+      '\\int_1^2 -\\int_3^4 \\frac{1}{xy}\\,dx\\,dy'
+    );
+    same(
+      '\\int_1^2 -\\int_3^4 \\frac{dx\\,dy}{xy} + 1',
+      '\\int_1^2 -\\int_3^4 \\frac{1}{xy}\\,dx\\,dy + 1'
+    );
+    // A factor before each of the three signs, and a term after
+    same(
+      '\\int_0^1 3\\int_1^2 2\\int_3^4 \\frac{dx\\,dy\\,dz}{xy} - 1',
+      '\\int_0^1 3\\int_1^2 2\\int_3^4 \\frac{1}{xy}\\,dx\\,dy\\,dz - 1'
+    );
+    expect(
+      ce.parse('\\int_1^2 2\\int_3^4 \\frac{dx\\,dy}{xy}').evaluate().toString()
+    ).toBe('-2ln(2) * ln(3) + 4ln(2)^2');
   });
 });
 

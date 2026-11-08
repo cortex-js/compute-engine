@@ -141,6 +141,18 @@
 
 ### Resolved Issues
 
+- **Two integral signs with both differentials in the numerator of a fraction
+  give the right value when a term follows the fraction or a factor comes
+  before the inner sign.** `\int_1^2\int_3^4 \frac{dx\,dy}{xy} + 1` gave
+  `1 - 2ln(2)ln(3) - 2ln(2) + 4ln(2)^2 + ln(3)` and
+  `\int_1^2 2\int_3^4 \frac{dx\,dy}{xy}` gave
+  `-4ln(2)ln(3) - 4ln(2) + 2ln(3) + 8ln(2)^2`: the outer integral had no
+  variable. Now each parses as the same expression written with the
+  differentials after the integrand (`\int_1^2\int_3^4 \frac{1}{xy}\,dx\,dy +
+  1`), and gives `1 + 2ln(2)^2 - ln(2)ln(3)` and `-2ln(2)ln(3) + 4ln(2)^2`.
+  The term after the fraction is outside both integrals. A negation before
+  the inner sign (`\int_1^2 -\int_3^4 \frac{dx\,dy}{xy}`) is also fixed.
+
 - **An integral whose differential is in a factor before another factor is
   an error, not a wrong value.** In `\int_1^2 \frac{dx}{x}\cdot 2`, the
   parser searched only the end of the product and its last factor for the

@@ -236,6 +236,31 @@ describe('bound variables do not fire undeclared-symbol (A1)', () => {
     expect(undeclaredNames('\\int x - \\frac{x\\,dx}{2} - x')).toEqual(['x']);
   });
 
+  test('a term after two integrals that share a fraction is free (CE-1046)', () => {
+    // The two differentials are in the numerator of the inner integrand, and
+    // the outer integral takes `dy`. The term after the integrand is outside
+    // both integrals: its `y`, `x` or `d` fires, and the bound variables and
+    // the `d` of the differentials do not.
+    const outer = '\\int_1^2\\int_3^4 \\frac{dx\\,dy}{xy}';
+    expect(undeclaredNames(`${outer} + 1`)).toEqual([]);
+    expect(undeclaredNames(`${outer} + y`)).toEqual(['y']);
+    expect(undeclaredNames(`${outer} + x`)).toEqual(['x']);
+    const freeD = `${outer} + d`;
+    const ds = byCode(diags(freeD), 'undeclared-symbol');
+    expect(ds.map((d) => d.detail?.name)).toEqual(['d']);
+    expect(ds[0].start).toBeGreaterThan(freeD.indexOf('+'));
+    expect(undeclaredNames('\\int_1^2 2\\int_3^4 \\frac{dx\\,dy}{xy}')).toEqual(
+      []
+    );
+    expect(
+      undeclaredNames('\\int_1^2 -\\int_3^4 \\frac{dx\\,dy}{xy} - y')
+    ).toEqual(['y']);
+    // A brace group around the inner integral and the term after it
+    expect(
+      undeclaredNames('\\int_1^2{\\int_3^4 \\frac{dx\\,dy}{xy} + y}')
+    ).toEqual(['y']);
+  });
+
   test('the d of a differential inside a fraction does not fire (CE-291)', () => {
     // The parser reads `dx` inside a fraction as the product of a symbol `d`
     // and `x`, then takes the differential out of the product. That `d` is
