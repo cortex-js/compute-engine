@@ -857,6 +857,43 @@ array-uniform loop codegen, and it needs witnesses first.
   `Random()` draw in the shader. The other option (an `if`/`else` lowering with
   a temporary) needs a second witness; the count is one.
 
+### CE-1155. WGSL compute kernels: real accumulators, random values in a pass, and a guard on a comprehension
+
+**Status:** waits for user (approval); capability, M. Recorded by the user
+2026-11-08. Links: `issues/CE-1075.md` (the request that added the kernels),
+`docs/plans/2026-11-07-ce1093-parallel-for.md` §6.
+**Witness:** corpus; Tycho's Buddhabrot showcase, the program of CE-1075.
+
+`WGSLTarget.compileKernel()` (`src/compute-engine/compilation/wgsl-kernel.ts`)
+compiles a `parallel for` loop or a parallel comprehension over an integer
+range to a WGSL compute shader that runs one pass in each invocation. Each
+`+=` is an `atomicAdd` on a storage buffer of `atomic<i32>`. The three
+sub-items remove three declines of that function. Each sub-item can be done
+alone.
+
+- **CE-1155.1** A `+=` of a real amount. WGSL has atomics only for `i32` and
+  `u32`, so a real accumulator needs another lowering. Options: (a) each
+  workgroup adds its passes in workgroup memory, writes one partial sum per
+  workgroup to a storage buffer, and the host (or a second dispatch) adds the
+  partial sums; (b) a compare-and-exchange loop on the bits of an `f32`
+  (`atomicCompareExchangeWeak` on an `atomic<u32>`). Option (a) gives the same
+  sum for the same workgroup size; option (b) gives a sum that depends on the
+  order of the invocations. Today the kernel declines a `+=` of a non-integer
+  amount.
+- **CE-1155.2** A pass that draws a random value. The interpreter gives each
+  pass its own random frame (`docs/RANDOMNESS-MODEL.md` §3, "Pass frames of a
+  parallel loop"). The shader must derive the same frame from the seed and the
+  pass index `k`, so that a pass on the GPU draws the values of the same pass
+  in the interpreter, within the precision of `f32`. Today the kernel declines,
+  and the host must draw the values before the loop into a list that the
+  passes read.
+- **CE-1155.3** A guard on a parallel comprehension (`[f(k) for k in a..b if
+  p(k)]`). The number of elements is known only after the passes run. One
+  design: each pass writes its element and a flag, and a prefix sum over the
+  flags (a second dispatch) gives the position of each kept element, then a
+  third pass compacts the list. Today the kernel declines, and the host must
+  filter the list after the kernel or put the test in the element.
+
 ### CE-1110. GPU targets: read a parameter declared `real` as an argument that is not NaN, for `Max` and `Min`
 
 **Status:** waits for user (approval); performance, S. Recorded by the user
