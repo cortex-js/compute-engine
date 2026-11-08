@@ -894,6 +894,56 @@ so that the two ways of writing `t` give the same code. Measure: the number of
 `_gpu_max` and `_gpu_min` helpers in the Tycho corpus before and after, and 0
 changed values.
 
+### CE-1149. The compiler selects the lowering of a call from the definition of the call, not from its name
+
+**Status:** waits for user (approval); capability, M. Recorded by the user
+2026-11-08. Follows CE-1109 (`docs/plans/2026-11-07-ce1109-definition-identity.md`).
+**Witness:** plausible; the Epsil program
+`function Floor(x) { std::floor(x) + 1 }`, the use of `std::` that
+`src/epsil/docs/naming.md` describes.
+
+Since CE-1109, a canonical call is bound to its definition: `std::floor(y)`
+is a `Floor` call bound to the library operator, also inside a user function
+named `Floor`. The interpreter reads that definition. The compiler does not:
+it selects the lowering of a call by the name of its head in the scope where
+the compilation runs (`lookupApplicable()` and `shadowsLibraryName()`). When
+that name reads another definition than the one of the node, the compilation
+declines and the result falls back to the interpreter
+(`compileReadsOtherDefinition()` and `shadowedLibraryLoweringError()` in
+`src/compute-engine/compilation/compile-definitions.ts`). The values are
+correct; the declines are the cost. With the current source:
+
+| Program                                                                                | Compiles | Value at `y = 2.5` |
+| -------------------------------------------------------------------------------------- | -------- | ------------------ |
+| A user `Floor` is `x ↦ std::floor(x) + 1`; compile `Floor(y)` in its scope             | no       | 3 (interpreter)    |
+| The same scope; compile `std::floor(y)`                                                | no       | 2 (interpreter)    |
+| A library `Sqrt(y)` boxed first, compiled in a scope that declares a user `Sqrt` with a `compile` handler | no | 2 at `y = 4` (interpreter) |
+| A call of that user `Sqrt`, compiled after its scope is popped                         | no       | 104 at `y = 4` (interpreter) |
+
+The change: the compiler reads `node.operatorDefinition` (or the value
+definition of a user function) to select the lowering. A call bound to the
+library operator gets the library lowering of the target (`target.functions`,
+`target.operators`, the named lowerings such as `If` and `Sum`). A call bound
+to a user operator definition gets its `compile` handler, or declines when it
+has none. A call bound to a user function compiles that function. Then
+`compileReadsOtherDefinition()` and the by-name branches of
+`shadowedLibraryLoweringError()` are removed.
+
+The current source has 16 calls of `lookupApplicable()` and
+`shadowsLibraryName()` in 11 files of `src/compute-engine/compilation/`
+(`compile-expr-handlers.ts`, `compiler-core.ts`, `compile-operators.ts`,
+`compile-user-functions.ts`, `compile-protocol-dispatch.ts`,
+`builtin-callback.ts`, `compile-complexness.ts`, `compile-real-analysis.ts`,
+`compile-definitions.ts`, `javascript-target.ts`,
+`interval-javascript-target.ts`). Not each one selects a lowering: some read
+a free variable or a parameter. The first step is a census of these calls
+that sorts them into the two groups.
+
+Measure: the four programs of the table compile on the JavaScript target with
+the interpreter's values; the number of lines removed from the compilation
+directory; the corpus declines before and after (not measured when this entry
+was written), and 0 changed values.
+
 ## LaTeX parsing and serialization
 
 ### CE-297. The lenient grammar makes reading choices that a host cannot detect
