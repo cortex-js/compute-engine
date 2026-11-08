@@ -145,17 +145,22 @@ describe('Map applies its callback to a Nothing element', () => {
       expect(mapped.count).toBe(3);
       expect(calls).toBe(0);
       // `DoublePresent` is declared `(integer) -> integer`: the argument
-      // `Nothing` is refused before its handler runs.
+      // `Nothing` is refused before its handler runs. `DoublePresent` is
+      // `pure: false`, so the view is impure, and a read by position of an
+      // impure finite view makes one complete walk that the element memo
+      // keeps (`docs/RANDOMNESS-MODEL.md` §6, CE-1125): the first read runs
+      // the handler for the two present elements, 1 and 3, and never for
+      // the element 2. Every later read is served from that walk.
       expect(mapped.at(2)?.operator).toBe('Error');
-      expect(calls).toBe(0);
+      expect(calls).toBe(2);
       expect(mapped.at(3)?.re).toBe(6);
-      expect(calls).toBe(1);
+      expect(calls).toBe(2);
       const before = calls;
       const values = [...mapped.each()];
       expect(
         values.map((v) => (v.operator === 'Error' ? 'Error' : v.re))
       ).toEqual([2, 'Error', 6]);
-      expect(calls - before).toBe(2);
+      expect(calls - before).toBe(0);
       expect(ce.function('ListFrom', [mapped]).evaluate().toString()).toBe(
         '[2,Error(ErrorCode("incompatible-type", "integer", "nothing"), "Nothing"),6]'
       );
@@ -217,8 +222,13 @@ describe('Map applies its callback to a Nothing element', () => {
         ce.box(['List', 10, 20, 30]),
       ])
       .evaluate();
+    // `AddPresent` is `pure: false`: the read by position of the impure
+    // finite view makes one complete walk that the element memo keeps
+    // (`docs/RANDOMNESS-MODEL.md` §6, CE-1125). The walk runs the handler
+    // for the rows 1 and 3 and never for the row with the `Nothing` input,
+    // and the later iteration is served from that walk.
     expect(mapped.at(2)?.operator).toBe('Error');
-    expect(calls).toBe(0);
+    expect(calls).toBe(2);
     expect(
       [...mapped.each()].map((v) => (v.operator === 'Error' ? 'Error' : v.re))
     ).toEqual([11, 'Error', 33]);

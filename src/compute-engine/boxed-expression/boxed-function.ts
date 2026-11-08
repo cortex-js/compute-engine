@@ -10264,15 +10264,21 @@ export class BoxedFunction
       // makes the children blind to any value later installed in the new
       // scope (a comprehension walk's index values).
       //
-      // A lazy view with an element memo and NO evaluate handler (`Map`,
-      // `Filter`, `Tabulate`) whose operands did not change is also THIS
-      // instance. The element memo is kept per instance
+      // An IMPURE lazy view with an element memo and NO evaluate handler
+      // (`Map`, `Filter`, `Tabulate`) whose operands did not change is also
+      // THIS instance. The element memo is kept per instance
       // (`collection-element-memo.ts`), and one instance of a collection has
       // one set of random draws (`docs/RANDOMNESS-MODEL.md` §6, "One
       // instance, one draw set"). A re-box of the same operands is a new
       // instance with an empty memo, so each evaluation of a symbol that
       // holds a `Map` with a random body gave a view that drew again:
       // `(v[2], v[2], v)` gave three different second elements (CE-1125).
+      // A PURE view keeps the re-box: its elements do not depend on the
+      // instance, and the re-canonicalization folds an application that was
+      // built without its canonical handler. The conditional-value lift
+      // builds `Join([1, 2], [3])` with `_fn()` inside `If(c, …)`, and only
+      // the re-box makes it the list `[1, 2, 3]` that the canonical form of
+      // `Join([1, 2], [3])` is.
       //
       // All other operators must keep re-boxing: the re-canonicalization of
       // the tail is essential both for non-scoped operators (e.g. the
@@ -10291,7 +10297,7 @@ export class BoxedFunction
       // the first `GF8` when it is evaluated in that scope.
       const result =
         evalResult ??
-        ((isScoped || def.collection?.elementMemo === true) &&
+        ((isScoped || (def.collection?.elementMemo === true && !this.isPure)) &&
         def.evaluate === undefined &&
         this.isCanonical &&
         tail.every((x, i) => x === this._ops[i])
@@ -12002,14 +12008,16 @@ export class BoxedFunction
           contextStack,
           options?._precisionWindow
         );
-      // Handler-less scoped-operator no-operand-change identity: see the
-      // matching comment in the sync path (avoids re-canonicalizing a lazy
-      // scoped collection into a fresh, split-off local scope; every other
-      // operator keeps the load-bearing re-box).
+      // Handler-less no-operand-change identity: see the matching comment in
+      // the sync path. A scoped operator is not re-canonicalized into a
+      // fresh, split-off local scope, and an impure lazy view with an
+      // element memo keeps its one instance and its one set of draws; every
+      // other operator keeps the essential re-box.
       const result = inContext(
         () =>
           value ??
-          (isScoped &&
+          ((isScoped ||
+            (def.collection?.elementMemo === true && !this.isPure)) &&
           def.evaluate === undefined &&
           def.evaluateAsync === undefined &&
           this.isCanonical &&

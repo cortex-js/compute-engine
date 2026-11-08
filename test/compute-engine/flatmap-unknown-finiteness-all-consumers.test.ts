@@ -527,8 +527,11 @@ describe('the second call of the handler', () => {
 
 // The same view at two operand positions is walked at each position, from
 // left to right, as without the second call: the `setter` assigns `n`
-// between the two walks of `s`, and the two walks of `v` draw independent
-// values.
+// between the two walks of `s`. The two operands `v` are one instance of
+// the random view (an impure lazy view whose operands did not change
+// evaluates to itself), and one instance has one set of draws
+// (`docs/RANDOMNESS-MODEL.md` §6, CE-1125): the second walk of `v` gives the
+// draws of the first.
 describe('the same view at two operand positions', () => {
   const setter = ['Map', fn(['Block', ['Assign', 'n', 2], 9]), ['List', 0]];
   test.each([
@@ -550,7 +553,7 @@ describe('the same view at two operand positions', () => {
     }
   });
 
-  test('ListFrom(v, v) draws four values', async () => {
+  test('ListFrom(v, v) draws two values and lists them twice', async () => {
     for (const route of ['sync', 'async']) {
       const local = new ComputeEngine();
       local.assign('v', local.box(['Map', fn(['Random']), ['List', 1, 2]]));
@@ -561,7 +564,8 @@ describe('the same view at two operand positions', () => {
           : await local.box(json).evaluateAsync();
       const draws = value.ops!.map((x) => x.re);
       expect(draws).toHaveLength(4);
-      expect(new Set(draws).size).toBe(4);
+      expect(new Set(draws).size).toBe(2);
+      expect(draws.slice(2)).toEqual(draws.slice(0, 2));
     }
   });
 });

@@ -611,11 +611,14 @@ without this walk each read by position drew again, and `(v[2], v[2], v)`
 gave three different second elements. A read of an instance that is not
 finite by its form (a `Map` over an infinite `Range`), or whose count is
 above the memo cap, still computes its one element, with its own draws. The
-instance that a read sees is also kept: `evaluate()` of a lazy view with an
-element memo and no `evaluate` handler (`Map`, `Filter`, `Tabulate`) whose
-operands did not change is the SAME instance, not a re-box with an empty
-memo, so a symbol that holds such a view gives the same draw set at each
-read (CE-1125; `Comprehension`, a scoped operator, already did). When the
+instance that a read sees is also kept: `evaluate()` (or `evaluateAsync()`)
+of an impure lazy view with an element memo and no `evaluate` handler (`Map`, `Filter`, `Tabulate`)
+whose operands did not change is the SAME instance, not a re-box with an
+empty memo, so a symbol that holds such a view gives the same draw set at
+each read (CE-1125; `Comprehension`, a scoped operator, already did). A pure
+view is re-boxed as before: its elements do not depend on the instance, and
+the re-box applies the canonical form (`Join([1, 2], [3])` built inside a
+restriction becomes `[1, 2, 3]`). When the
 memo refuses the complete walk for its content (an element holds a mutable
 object, the walk has more elements than the cap, the element function also
 runs host code that states no purity), the refusal is recorded for the

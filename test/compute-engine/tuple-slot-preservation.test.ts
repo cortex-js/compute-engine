@@ -109,8 +109,13 @@ describe('data tuples preserve positions', () => {
         expect(map.count).toBe(2);
         expect(calls).toBe(0);
         if (route === 'at') {
+          // `Seen` is `pure: false`: a read by position of the impure finite
+          // view makes one complete walk that the element memo keeps
+          // (`docs/RANDOMNESS-MODEL.md` §6, CE-1125), so the first read
+          // calls `Seen` for both elements, the `Nothing` coordinate
+          // included, and the read of element 1 is served from that walk.
           expect(map.at(2)?.re).toBe(99);
-          expect(calls).toBe(1);
+          expect(calls).toBe(2);
           expect(map.at(1)?.re).toBe(99);
         } else expect([...map.each()].map((x) => x.json)).toEqual([99, 99]);
         expect(calls).toBe(2);
