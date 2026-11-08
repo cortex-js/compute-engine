@@ -6,8 +6,10 @@
 #
 # Makes a release in one command:
 #
-#   1. Refuses unless the tree has no uncommitted change and nothing is
-#      staged, and unless npm accepts the login (`npm whoami`). Then runs
+#   1. Refuses unless the current branch is main, GitHub's main has no
+#      commit that the local main does not have, the tree has no
+#      uncommitted change and nothing is staged, and npm accepts the login
+#      (`npm whoami`). Then runs
 #      the checks of `npm run ci` that the full test suite does not run
 #      (scripts/release-checks.sh). These checks run first so that a refusal
 #      leaves nothing to undo.
@@ -29,12 +31,18 @@
 #      step 4, not the HEAD of that moment: another session can commit
 #      during the publish. The publish check refuses, before the upload,
 #      when HEAD is not that commit (CE_RELEASE_SHA).
-#   7. Packages the VS Code extension (scripts/package-vsix.sh).
-#
-# Nothing is pushed. The script prints the push command at the end.
+#   7. Pushes the release commit to main and the tag to origin, in one atomic
+#      push: GitHub gets both or neither. The push names the release commit,
+#      not the branch tip, so a commit that another session made after the
+#      release commit is not pushed. When the push fails, the release is
+#      still published and tagged: the script prints the push command,
+#      continues with step 8, and exits 1 at the end.
+#   8. Packages the VS Code extension (scripts/package-vsix.sh).
 #
 # When step 5 fails, the release commit stays and nothing is published. Fix
-# the cause, commit, and run `npm publish`, then tag the release commit.
+# the cause, commit, and run `npm publish`, then tag the commit that was
+# published and push it with its tag:
+# `git push --atomic origin <commit>:refs/heads/main refs/tags/v<version>`.
 
 set -o pipefail
 cd "$(dirname "$0")/.."
@@ -69,6 +77,24 @@ DOC_FILES="src/api.md src/epsil/docs/errors.md src/epsil/docs/library.md src/eps
 if [ -n "$(git diff --cached --name-only)" ]; then
   fail "✗ Files are staged. Commit them then run the release again."
 fi
+# Step 7 pushes the release commit to main, so the release must be made on
+# main.
+BRANCH=$(git symbolic-ref --short -q HEAD)
+if [ "$BRANCH" != "main" ]; then
+  fail "✗ The current branch is '${BRANCH:-(detached HEAD)}', not main. Switch to main, then run the release again."
+fi
+# Step 7 pushes after the upload, so a push that would fail must stop the
+# release here, before anything changes. A trial push (`--dry-run`) sends
+# nothing and changes no ref, but it signs in to origin and asks it whether
+# the push would be accepted. It fails when the credentials are refused, when
+# origin cannot be reached, and when main on origin has a commit that the
+# local main does not have (the push is not a fast-forward). A read such as
+# `git ls-remote` would not find the first case: the repository is public,
+# so a read needs no credentials.
+PUSH_TRIAL=$(git push --dry-run --atomic origin HEAD:refs/heads/main 2>&1) || {
+  printf '%s\n' "$PUSH_TRIAL"
+  fail "✗ A trial push to main on origin failed (above), so the release could not be pushed after the upload. Nothing was changed. When main on origin has commits that the local main does not have, get them into the local main; otherwise fix the access to origin. Then run the release again."
+}
 # The files that the release writes must have no uncommitted change: the
 # release would overwrite it, commit it, or remove it with the undo command
 # below. The publish check allows uncommitted markdown outside src/ and
@@ -288,7 +314,7 @@ UPLOAD_MARK="$(git rev-parse --git-dir)/ce-release-upload-mark"
 rm -f "$UPLOAD_MARK"
 if ! CE_RELEASE_SKIP_VSIX=1 CE_RELEASE_CHECKS_DONE=1 CE_RELEASE_SHA="$RELEASE_SHA" CE_RELEASE_UPLOAD_MARK="$UPLOAD_MARK" npm publish; then
   if [ ! -f "$UPLOAD_MARK" ]; then
-    fail "✗ npm publish failed before the upload; nothing was published. The release commit ${RELEASE_SHA:0:9} stays. Fix the cause, commit, run 'npm publish', then tag the commit that was published: 'git tag $TAG <commit>'."
+    fail "✗ npm publish failed before the upload; nothing was published. The release commit ${RELEASE_SHA:0:9} stays. Fix the cause, commit, run 'npm publish', then tag the commit that was published: 'git tag $TAG <commit>', and push it: 'git push --atomic origin <commit>:refs/heads/main refs/tags/$TAG'."
   fi
   rm -f "$UPLOAD_MARK"
   # The registry can take several minutes to show a new version: ask every
@@ -304,7 +330,7 @@ if ! CE_RELEASE_SKIP_VSIX=1 CE_RELEASE_CHECKS_DONE=1 CE_RELEASE_SHA="$RELEASE_SH
     sleep 30
   done
   if [ "$FOUND" -ne 1 ]; then
-    fail "✗ The registry does not show $PACKAGE@$VERSION after 10 minutes: the upload most likely failed. The release commit ${RELEASE_SHA:0:9} stays. Run 'npm publish' again, then 'git tag $TAG ${RELEASE_SHA:0:9}'."
+    fail "✗ The registry does not show $PACKAGE@$VERSION after 10 minutes: the upload most likely failed. The release commit ${RELEASE_SHA:0:9} stays. Run 'npm publish' again, then 'git tag $TAG ${RELEASE_SHA:0:9}', then 'git push --atomic origin $RELEASE_SHA:refs/heads/main refs/tags/$TAG'."
   fi
   echo "✓ The registry shows $PACKAGE@$VERSION: the upload succeeded."
 fi
@@ -312,10 +338,49 @@ rm -f "$UPLOAD_MARK"
 
 # Step 6: the tag.
 git tag "$TAG" "$RELEASE_SHA" ||
-  fail "✗ Published, but 'git tag $TAG $RELEASE_SHA' failed. Run it by hand, then 'bash scripts/package-vsix.sh'."
+  fail "✗ Published, but 'git tag $TAG $RELEASE_SHA' failed. Run it by hand, then 'git push --atomic origin $RELEASE_SHA:refs/heads/main refs/tags/$TAG', then 'bash scripts/package-vsix.sh'."
 echo "✓ Published $VERSION and tagged ${RELEASE_SHA:0:9} as $TAG"
 
-# Step 7: the VS Code extension.
+# Step 7: the push. It names the release commit, not the branch tip: another
+# session can commit after the release commit, and that commit must not go to
+# GitHub with the release. `--atomic` makes GitHub take both refs or neither,
+# so the tag is never on GitHub without its commit on main.
+# The push runs with its output shown, not through scripts/run-quietly.sh:
+# git can ask for credentials, and the question must be visible.
+PUSH_COMMAND="git push --atomic origin $RELEASE_SHA:refs/heads/main refs/tags/$TAG"
+PUSHED=0
+echo "→ Push"
+if git push --atomic origin "$RELEASE_SHA:refs/heads/main" "refs/tags/$TAG"; then
+  PUSHED=1
+else
+  # The trial push of step 1 passed, so the most likely cause is a commit
+  # pushed to main on origin during the release. The release commit can then
+  # reach main only through a merge: the command above would fail again.
+  # `git merge-base` fails too when the commit on origin is not in the local
+  # repository, which also means that origin has a commit that this tree
+  # does not have.
+  REMOTE_MAIN=$(git ls-remote origin refs/heads/main | cut -f1)
+  if [ -n "$REMOTE_MAIN" ] && ! git merge-base --is-ancestor "$REMOTE_MAIN" "$RELEASE_SHA" 2> /dev/null; then
+    PUSH_COMMAND="git pull --no-rebase origin main && git push origin main && git push origin refs/tags/$TAG"
+    echo ""
+    echo "⚠ The package is published and tagged, but main on origin moved during the release (${REMOTE_MAIN:0:9}), so the release commit cannot be pushed as it is. Merge main from origin into the local main, then push main and the tag:"
+  else
+    echo ""
+    echo "⚠ The package is published and tagged, but the push failed (above). Fix the cause, then run:"
+  fi
+  echo "    $PUSH_COMMAND"
+fi
+# fail_after_push: like fail, and repeats the push command when the push
+# failed, so that the last lines on the screen show every step still to do.
+fail_after_push() {
+  if [ "$PUSHED" -ne 1 ]; then
+    echo ""
+    echo "⚠ The commit and the tag are not pushed. Run: $PUSH_COMMAND"
+  fi
+  fail "$1"
+}
+
+# Step 8: the VS Code extension.
 # The extension bundles the engine from the source files on disk, which is
 # the shared tree, and reads the engine version from the root package.json.
 # It must contain the published engine: HEAD must still be the release
@@ -328,11 +393,15 @@ same_tree_as_release() {
     [ -z "$(git status --porcelain --untracked-files=all -- src vscode-epsil package.json package-lock.json)" ]
 }
 same_tree_as_release ||
-  fail "✗ The package is published and tagged, but the tree is no longer the release commit (HEAD moved, or src/, vscode-epsil/ or package.json has uncommitted changes). Package the extension from a checkout of $TAG: 'bash scripts/package-vsix.sh'."
+  fail_after_push "✗ The package is published and tagged, but the tree is no longer the release commit (HEAD moved, or src/, vscode-epsil/ or package.json has uncommitted changes). Package the extension from a checkout of $TAG: 'bash scripts/package-vsix.sh'."
 bash scripts/package-vsix.sh ||
-  fail "✗ The package is published and tagged, but packaging the VS Code extension failed. Fix the cause, then run 'bash scripts/package-vsix.sh'."
+  fail_after_push "✗ The package is published and tagged, but packaging the VS Code extension failed. Fix the cause, then run 'bash scripts/package-vsix.sh'."
 same_tree_as_release ||
-  fail "✗ The tree changed while the VS Code extension was packaged: vscode-epsil/epsil.vsix may not contain the published engine. Package it again from a checkout of $TAG."
+  fail_after_push "✗ The tree changed while the VS Code extension was packaged: vscode-epsil/epsil.vsix may not contain the published engine. Package it again from a checkout of $TAG."
 echo ""
-echo "✓ Released $VERSION. To push the commit and the tag:"
-echo "    git push && git push origin $TAG"
+if [ "$PUSHED" -ne 1 ]; then
+  echo "✗ Released $VERSION, but the commit and the tag are not pushed. Run:"
+  echo "    $PUSH_COMMAND"
+  exit 1
+fi
+echo "✓ Released $VERSION, pushed ${RELEASE_SHA:0:9} to main and $TAG to origin."

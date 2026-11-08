@@ -229,18 +229,23 @@ npm run release # a minor release; or: npm run release -- patch (major, or an ex
 
 `scripts/release.sh` does these steps, in this order:
 
-1. It refuses when files are staged, when a file that the release writes (the
-   version files, `CHANGELOG.md`, the generated documentation) has uncommitted
-   changes, when `node scripts/issues.mjs release <version>` says that an
-   item assigned to the version is still open or that a confirmed P0 is open
-   (`docs/ISSUE_TRACKING.md`, "Releases"), when the publish check would refuse the tree (an uncommitted change
-   or an untracked file that a test can see; markdown outside `src/` and `test/`
-   is allowed), or when npm does not accept the login. It warns when
-   `CHANGELOG.md` has no `## [Unreleased]` heading, and when the latest full
-   test run failed. Then it runs `scripts/release-checks.sh`: it formats the
-   source with Prettier and commits the files that changed, then runs lint,
-   `check:docs`, `check:deps`, `test:tools` and the corpus pipeline, the checks
-   of `npm run ci` that the full test suite does not run.
+1. It refuses when the current branch is not `main`, when a trial push
+   (`git push --dry-run`) to `main` on `origin` fails (origin cannot be reached,
+   the credentials are refused, or `main` on `origin` has a commit that the
+   local `main` does not have), when files are staged, when a file that the
+   release writes (the version files, `CHANGELOG.md`, the generated
+   documentation) has uncommitted changes, when
+   `node scripts/issues.mjs release <version>` says that an item assigned to the
+   version is still open or that a confirmed P0 is open
+   (`docs/ISSUE_TRACKING.md`, "Releases"), when the publish check would refuse
+   the tree (an uncommitted change or an untracked file that a test can see;
+   markdown outside `src/` and `test/` is allowed), or when npm does not accept
+   the login. It warns when `CHANGELOG.md` has no `## [Unreleased]` heading, and
+   when the latest full test run failed. Then it runs
+   `scripts/release-checks.sh`: it formats the source with Prettier and commits
+   the files that changed, then runs lint, `check:docs`, `check:deps`,
+   `test:tools` and the corpus pipeline, the checks of `npm run ci` that the
+   full test suite does not run.
 2. `npm version <bump> --no-git-tag-version`. The version hook
    (`scripts/version.sh`) writes the version and date in the changelog and the
    version of the VS Code extension.
@@ -251,12 +256,21 @@ npm run release # a minor release; or: npm run release -- patch (major, or an ex
 5. `npm publish` (see below), without its VS Code extension step, so that a
    failure of `npm publish` means that nothing was uploaded.
 6. After the upload, it tags the release commit `v<version>`.
-7. It packages the VS Code extension (`scripts/package-vsix.sh`). It does not
-   push; it prints the push command.
+7. It pushes the release commit to `main` and the tag to `origin` with one
+   `git push --atomic`: GitHub gets both or neither. The push names the release
+   commit, not the branch tip, so a commit that another session made after the
+   release commit is not pushed. When the push fails, the script prints the push
+   command, continues with step 8, and exits 1. When `main` on `origin` moved
+   during the release, the command it prints merges `main` from `origin` first,
+   then pushes `main` and the tag.
+8. It packages the VS Code extension (`scripts/package-vsix.sh`).
 
 When `npm publish` fails, nothing is published, and the release commit stays
 without a tag. Fix the cause, commit, run `npm publish`, then tag the published
-commit. When only step 7 fails, fix the cause and run
+commit and push it with its tag
+(`git push --atomic origin <commit>:refs/heads/main refs/tags/v<version>`). When
+only step 7 fails, fix the cause and run the push command that the
+script prints. When only step 8 fails, fix the cause and run
 `bash scripts/package-vsix.sh`.
 
 A local release takes no box lock, except for the full test suite, which
