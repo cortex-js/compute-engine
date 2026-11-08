@@ -441,14 +441,17 @@ describe('an assigned value that shares a tuple in several operands', () => {
     expect(leaf(await expr.evaluateAsync())).toEqual(['List', 11, 12]);
   });
 
-  // The evaluation of `(p, p)` makes a new object for each occurrence of the
-  // view `p`, so the two operands are listed separately, as two equal views
-  // `(p, q)` are. A budget of 2 elements keeps the impure view of 3 elements
-  // lazy in the literal, so the assignment is what lists it.
+  // Two equal views `(p, q)` are two instances, listed separately: the
+  // impure host function runs 6 times. The evaluation of `p` is the one
+  // instance that `p` holds (CE-1125: a lazy view with an element memo and
+  // no evaluate handler evaluates to itself), so `(p, p)` lists that
+  // instance once, and its element memo serves the second operand: 3 runs.
+  // A budget of 2 elements keeps the impure view of 3 elements lazy in the
+  // literal, so the assignment is what lists it.
   test.each([
-    ['(p, p)', ['Tuple', 'p', 'p']],
-    ['(p, q)', ['Tuple', 'p', 'q']],
-  ])('an impure view above the budget, %s', (_, rhs) => {
+    ['(p, p)', ['Tuple', 'p', 'p'], 3],
+    ['(p, q)', ['Tuple', 'p', 'q'], 6],
+  ])('an impure view above the budget, %s', (_, rhs, expectedCalls) => {
     const ce = new ComputeEngine();
     ce.maxCollectionSize = 2;
     let calls = 0;
@@ -474,7 +477,7 @@ describe('an assigned value that shares a tuple in several operands', () => {
       ['List', 11, 12, 13],
       ['List', 11, 12, 13],
     ]);
-    expect(calls).toBe(6);
+    expect(calls).toBe(expectedCalls);
   });
 
   test('in the body of a function', async () => {

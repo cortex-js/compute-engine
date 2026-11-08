@@ -7541,12 +7541,15 @@ export class BoxedFunction
     // `at(-1)` on a walked impure instance returns the memoized last element
     // rather than re-deriving (a fresh draw would break
     // one-instance-one-draw-set coherence). On a miss (or an uncovered
-    // index) the handler's own random-access path computes the ONE element
-    // — a first `at(n)` is never converted into an O(n) fill — and
-    // `elementMemoComputeCell` keeps it for a pure instance. Without that, a
+    // index) of a PURE instance the handler's own random-access path
+    // computes the ONE element — a first `at(n)` is never converted into an
+    // O(n) fill — and `elementMemoComputeCell` keeps it. Without that, a
     // chain of views that read each other by position (`At(xs, I)` over a
     // `Map`) computed each inner element again for each outer element, a
-    // cost exponential in the depth of the chain (CE-516).
+    // cost exponential in the depth of the chain (CE-516). A miss of an
+    // IMPURE finite instance walks the whole instance once, and the memo
+    // keeps that walk: a cell of an impure instance is never kept, so a
+    // read of one element would draw again at each read (CE-1125).
     if (idx >= 1 && this.operatorDefinition?.collection?.elementMemo === true) {
       const cached = elementMemoAt(this, idx);
       if (cached !== undefined) return cached;
@@ -10024,13 +10027,24 @@ export class BoxedFunction
       // FRESH local scope with fresh bindings while the already-canonical
       // children keep their bindings into the original scope — a split that
       // makes the children blind to any value later installed in the new
-      // scope (a comprehension walk's index values). All other operators must
-      // keep re-boxing: the re-canonicalization of the tail is load-bearing
-      // both for non-scoped operators (e.g. the broadcast/tensor contraction
-      // of `Multiply` on operands that became collections) and for scoped
-      // operators WITH a handler that declined (e.g. a symbolic `Sum`, whose
-      // re-canonicalization performs big-op cleanups the rubi pipeline
-      // depends on).
+      // scope (a comprehension walk's index values).
+      //
+      // A lazy view with an element memo and NO evaluate handler (`Map`,
+      // `Filter`, `Tabulate`) whose operands did not change is also THIS
+      // instance. The element memo is kept per instance
+      // (`collection-element-memo.ts`), and one instance of a collection has
+      // one set of random draws (`docs/RANDOMNESS-MODEL.md` §6, "One
+      // instance, one draw set"). A re-box of the same operands is a new
+      // instance with an empty memo, so each evaluation of a symbol that
+      // holds a `Map` with a random body gave a view that drew again:
+      // `(v[2], v[2], v)` gave three different second elements (CE-1125).
+      //
+      // All other operators must keep re-boxing: the re-canonicalization of
+      // the tail is essential both for non-scoped operators (e.g. the
+      // broadcast/tensor contraction of `Multiply` on operands that became
+      // collections) and for scoped operators WITH a handler that declined
+      // (e.g. a symbolic `Sum`, whose re-canonicalization performs big-op
+      // cleanups the rubi pipeline depends on).
       //
       // The re-box keeps the binding of this node (`withCallableBinding()`):
       // a lookup of the name in the current scope can find another
@@ -10042,7 +10056,7 @@ export class BoxedFunction
       // the first `GF8` when it is evaluated in that scope.
       const result =
         evalResult ??
-        (isScoped &&
+        ((isScoped || def.collection?.elementMemo === true) &&
         def.evaluate === undefined &&
         this.isCanonical &&
         tail.every((x, i) => x === this._ops[i])

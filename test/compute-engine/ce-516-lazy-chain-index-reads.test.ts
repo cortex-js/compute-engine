@@ -218,10 +218,14 @@ describe('CE-516: the element memo of an at() read', () => {
     expect(xs.at(5)?.toString()).toBe('25');
   });
 
-  test('an impure instance draws again at each at() read', () => {
+  test('an impure finite instance is read by position from one complete walk', () => {
     // The memo keeps an at() element of a PURE instance only: a later
     // complete walk of an impure instance draws again, and an element kept
-    // from an at() read would disagree with it.
+    // from an at() read would disagree with it. A read by position of an
+    // impure instance that is finite by its form is therefore served from
+    // one complete walk of the instance, which the memo keeps (CE-1125): the
+    // `at` handler of `Map` is not called, and two reads of the same
+    // position give the same draw, the one of the walk.
     const xs = ce.box([
       'Map',
       ['Function', ['Add', 'x', ['Random']], 'x'],
@@ -230,9 +234,12 @@ describe('CE-516: the element memo of an at() read', () => {
     expect(xs.isPure).toBe(false);
     const counter = countMapReads(ce);
     try {
-      xs.at(1);
-      xs.at(1);
-      expect(counter.reads()).toBe(2);
+      const a = xs.at(1)?.re;
+      const b = xs.at(1)?.re;
+      expect(counter.reads()).toBe(0);
+      expect(typeof a).toBe('number');
+      expect(b).toBe(a);
+      expect([...xs.each()][0].re).toBe(a);
     } finally {
       counter.restore();
     }

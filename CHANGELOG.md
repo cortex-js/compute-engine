@@ -37,6 +37,19 @@
 
 ### Resolved Issues
 
+- **Two reads of the same element of a random list give the same value.**
+  With `let v = [j for j in 1..10 if random() < 0.5]`, the tuple
+  `(v[2], v[2], v)` gave three different second elements, and the same
+  for a `Map`, a `Filter` or a `Tabulate` whose function draws: each read
+  by position drew again, and each evaluation of `v` made a new view with
+  no memory of the draws. One instance of a lazy collection has one set of
+  draws (`docs/RANDOMNESS-MODEL.md` §6): a read by position of such a
+  collection now walks it once, and every read of its elements, by position
+  or as a whole, is served from that walk. A view over an infinite source,
+  one with more than 100,000 elements, or one whose elements the memo does
+  not keep (an element that holds a mutable object, an element function
+  that also runs host code which states no purity) still draws at each read
+  by position.
 - **In the VS Code extension, the highlight and the rename of a variable no
   longer take the index of a `sum`, or the variable of a `limit`, that has
   the same name.** After `let k = 2`, the cursor on `k` highlighted the

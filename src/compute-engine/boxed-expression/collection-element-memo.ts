@@ -24,6 +24,7 @@ import { containsObject } from './object-walk';
 import { subscriptEvaluateReads } from './transitive-purity';
 import { beginStoreGuard, type StoreGuard } from './store-guard';
 import { cacheOff } from '../../common/cache-switches';
+import { CancellationError } from '../../common/interruptible';
 
 /**
  * Element memoization for lazy collection operators (Tycho item 126).
@@ -202,6 +203,20 @@ interface ElementMemoCache {
 /** Keyed on the boxed instance. A `WeakMap` so an unreferenced collection
  * (and its cached elements) is collectable. */
 const elementMemoCaches = new WeakMap<Expression, ElementMemoCache>();
+
+/** The impure instances whose complete walk the memo refused
+ * (`impureElementFromCompleteWalk()`), with the stamps that validate the
+ * refusal, the same as those of a cache entry. The memo refuses a walk for
+ * its content: an element that holds a mutable object, more elements than
+ * `ELEMENT_MEMO_CAP`, an element function that also runs host code that
+ * states no purity (an operator that states `pure: false` is kept: its code
+ * runs once per instance). These do not change until a dependency of the instance
+ * changes, so while the record is valid a read by position computes its one
+ * element, and does not walk the whole instance again at each read. */
+const refusedCompleteWalks = new WeakMap<
+  Expression,
+  { worldVersion: number; factsHidden: boolean; deps: ElementMemoDep[] }
+>();
 
 /** `CE_DEBUG_DEPS`: log why `snapshotDeps` declares an instance ineligible
  * (which gate, which name). A diagnosis aid for "this instance never
@@ -1259,6 +1274,17 @@ function commitRecordedWalk(
   // breaking one-instance/one-draw-set coherence. A COMPLETE commit of an
   // impure walk is fine: it IS the instance's draw set.
   if (!complete && !expr.isPure) return;
+  // The FIRST complete walk of an impure instance is its draw set. A read by
+  // position made while a walk of the instance is suspended (the body of a
+  // `Map` over `v` reads `v[1]`) makes a complete walk of its own and
+  // commits it (`impureElementFromCompleteWalk()`); the first walk, when it
+  // ends, does not replace that entry with its own set, so the reads made
+  // during the first walk and every later read agree. (The consumer of the
+  // first walk saw the elements of its own walk; that is the one read that
+  // can differ.) A pure instance has one set of elements, so a replacement
+  // changes nothing.
+  if (complete && !expr.isPure && validEntryOf(expr)?.complete === true)
+    return;
   if (suspendedEpochChange) return;
   const endDeps = snapshotDeps(expr, true);
   if (endDeps === undefined) return;
@@ -1653,14 +1679,23 @@ export function elementMemoAt(
  * of a call do not change these dependencies, so a read made while a
  * callback runs can be served too.
  *
- * Only ONE element is computed: a first `at(n)` is not made into a fill of
- * the first `n` elements.
+ * For a PURE instance only ONE element is computed: a first `at(n)` is not
+ * made into a fill of the first `n` elements.
+ *
+ * An IMPURE instance (its element function draws a random number, or runs
+ * another side effect) is read from one complete walk of its elements, which
+ * the memo keeps, when the instance is finite by its form and the memo can
+ * keep a walk (`impureElementFromCompleteWalk()`). A cell of an impure
+ * instance is never kept: it would be replaced by a later complete walk that
+ * draws again, and two reads of the same position would then differ (the
+ * rule for partial prefixes in `commitRecordedWalk`). Without the complete
+ * walk, each read by position drew again, and `(v[2], v[2], v)` for a random
+ * `v` gave three different second elements (CE-1125).
  *
  * The element is not kept when:
- * - the instance is impure: a cell of an impure instance would be replaced
- *   by a later complete walk that draws again, and two reads of the same
- *   position would then differ (the rule for partial prefixes in
- *   `commitRecordedWalk`);
+ * - the instance is impure and the complete walk is not kept: the instance
+ *   is not finite by its form, or has more than `ELEMENT_MEMO_CAP` elements,
+ *   or the memo refuses the walk for its content;
  * - the read is in a transient precision window (`validElementMemo`);
  * - the element is, or holds, a mutable object (the rule of
  *   `commitRecordedWalk`);
@@ -1676,8 +1711,11 @@ export function elementMemoComputeCell(
 ): Expression | undefined {
   const ce = expr.engine;
   if (!Number.isInteger(index) || index < 1) return compute();
-  if (ce._atTransientConfiguration || !expr.isPure || cacheOff('element'))
-    return compute();
+  if (ce._atTransientConfiguration || cacheOff('element')) return compute();
+  if (!expr.isPure) {
+    const fromWalk = impureElementFromCompleteWalk(expr, index);
+    return fromWalk === null ? compute() : fromWalk;
+  }
   const guard = beginStoreGuard();
   let value: Expression | undefined;
   let objectDeps: ObjectDeps | undefined;
@@ -1722,4 +1760,125 @@ export function elementMemoComputeCell(
     objectDeps,
   });
   return value;
+}
+
+/**
+ * The element at `index` of an impure instance, read from one complete walk
+ * of its elements that the memo keeps.
+ *
+ * One instance of a collection has one set of random draws
+ * (`docs/RANDOMNESS-MODEL.md` §6, "One instance, one draw set"): the second
+ * element read by position is the second element of the list. The memo
+ * keeps a partial walk of a pure instance only, so a read by position of an
+ * impure instance could not be served from a prefix: the walk here is
+ * complete, with `each()`, which records the walk and commits it as the
+ * memo of the instance (`commitRecordedWalk()`), and the element is then
+ * read from that memo. Every later read by position, and every later walk,
+ * is served from the same elements. A read made while a walk of the same
+ * instance is suspended (the body of a `Map` over `v` reads `v[1]`) makes
+ * this complete walk too, and the walk that was suspended does not replace
+ * it when it ends (`commitRecordedWalk()`), so the later reads agree with
+ * this one.
+ *
+ * Answers `null` when no complete walk is kept, and the caller computes the
+ * one element as before (a new draw):
+ * - the instance is not finite by its form (a `Map` over an infinite
+ *   `Range`), or the memo cannot keep a walk now (`elementMemoCanKeep()`);
+ * - the count, when the instance knows it without a walk, is above
+ *   `ELEMENT_MEMO_CAP`;
+ * - the memo refused the complete walk: the walk has more than
+ *   `ELEMENT_MEMO_CAP` elements, or an element holds a mutable object, or
+ *   the store guard moved (the element function also runs host code that
+ *   states no purity). The refusal is recorded (`refusedCompleteWalks`)
+ *   with the stamps of a cache entry, and while the record is valid no walk
+ *   is made: a refused walk is not repeated at each read, which would make
+ *   a loop over the positions of such an instance quadratic in its length;
+ * - the walk stopped at the iteration limit, or a read of a sequence term
+ *   was stopped while it ran: these causes do not follow the stamps of a
+ *   record (a host can raise the limit, and a stopped read declines its term
+ *   for that read only), so no refusal is recorded, and the next read walks
+ *   again.
+ *
+ * Answers `undefined`, with no element computed, for an index past the end
+ * of the kept walk: the walk is complete, so there is no such element.
+ */
+function impureElementFromCompleteWalk(
+  expr: Expression,
+  index: number
+): Expression | undefined | null {
+  if (expr.isFiniteCollection !== true || !elementMemoCanKeep(expr))
+    return null;
+  if (refusedWalkIsRecorded(expr)) return null;
+  // The store guard of the count read and of the walk (`store-guard.ts`).
+  const guard = beginStoreGuard();
+  // A count that the instance knows without a walk (a `Map` over a `Range`)
+  // saves a walk that the memo would refuse. The count of a `Filter`, or of
+  // a comprehension with a random guard, is itself read from a walk of the
+  // elements (`comprehensionCount()` in `library/control-structures.ts`)
+  // that the memo keeps: the read below is then served from it. When the
+  // memo refused that walk because the store guard moved, the walk is not
+  // made a second time here: the refusal is recorded at once.
+  const count = expr.count;
+  if (typeof count === 'bigint') return null;
+  if (typeof count === 'number' && count > ELEMENT_MEMO_CAP) return null;
+  if (validEntryOf(expr)?.complete !== true) {
+    if (!guard.movedOnly(...ELEMENT_MEMO_ACCEPTED, 'sequenceStop'))
+      return recordRefusedWalk(expr);
+    if (guard.moved('sequenceStop')) return null;
+    try {
+      let n = 0;
+      for (const _ of expr.each()) if (++n > ELEMENT_MEMO_CAP) break;
+    } catch (e) {
+      if (
+        e instanceof CancellationError &&
+        e.cause === 'iteration-limit-exceeded'
+      )
+        return null;
+      throw e;
+    }
+  }
+  const kept = validEntryOf(expr);
+  if (kept?.complete !== true) {
+    // A stopped read of a sequence term is a cause of this read only.
+    if (guard.moved('sequenceStop')) return null;
+    return recordRefusedWalk(expr);
+  }
+  if (index > kept.elements.length) return undefined;
+  mergeObjectDeps(kept.objectDeps);
+  return kept.elements[index - 1];
+}
+
+/** Record that the memo refused the complete walk of `expr` that
+ * `impureElementFromCompleteWalk()` made, validated as a cache entry is
+ * (`validEntryOf()`), and answer `null` for that caller. No record is made
+ * when the dependencies of the instance cannot be followed: the next read
+ * then makes no walk either (`elementMemoCanKeep()`). */
+function recordRefusedWalk(expr: Expression): null {
+  const deps = snapshotDeps(expr, true);
+  if (deps === undefined) return null;
+  const ce = expr.engine;
+  refusedCompleteWalks.set(expr, {
+    worldVersion: ce._worldVersion,
+    factsHidden: ce._factsHidden(),
+    deps,
+  });
+  return null;
+}
+
+/** Whether a valid record says that the memo refused the complete walk of
+ * `expr` (`refusedCompleteWalks`). A record that is no longer valid is
+ * removed: a dependency of the instance changed, so the next walk can have
+ * other content. */
+function refusedWalkIsRecorded(expr: Expression): boolean {
+  const record = refusedCompleteWalks.get(expr);
+  if (record === undefined) return false;
+  const ce = expr.engine;
+  if (
+    record.worldVersion === ce._worldVersion &&
+    record.factsHidden === ce._factsHidden() &&
+    memoDepsStillValid(expr, record.deps)
+  )
+    return true;
+  refusedCompleteWalks.delete(expr);
+  return false;
 }

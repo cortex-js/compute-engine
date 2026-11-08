@@ -602,6 +602,34 @@ would observe two different values for the same element — the memo refuses
 the partial instead. A COMPLETE walk of an impure instance is cached as
 usual: it is the instance's draw set.
 
+A read BY POSITION of an impure instance (`At(v, 2)`, `First(v)`) is served
+from that complete walk: the first such read walks the whole instance once,
+when the instance is finite by its form and the memo can keep the walk, and
+the element is read from the kept walk (revised 2026-11-08, CE-1125). The
+memo keeps no partial walk and no single cell of an impure instance, so
+without this walk each read by position drew again, and `(v[2], v[2], v)`
+gave three different second elements. A read of an instance that is not
+finite by its form (a `Map` over an infinite `Range`), or whose count is
+above the memo cap, still computes its one element, with its own draws. The
+instance that a read sees is also kept: `evaluate()` of a lazy view with an
+element memo and no `evaluate` handler (`Map`, `Filter`, `Tabulate`) whose
+operands did not change is the SAME instance, not a re-box with an empty
+memo, so a symbol that holds such a view gives the same draw set at each
+read (CE-1125; `Comprehension`, a scoped operator, already did). When the
+memo refuses the complete walk for its content (an element holds a mutable
+object, the walk has more elements than the cap, the element function also
+runs host code that states no purity), the refusal is recorded for the
+instance, and each read by position computes its one element, with its own
+draws, until a dependency of the instance changes: the refused walk is not
+repeated at each read. A walk stopped at the iteration limit, or during
+which a read of a sequence term was stopped, records no refusal: the next
+read walks again. A read made while a walk of the same instance is
+suspended (the body of a consumer of `v` reads `v[2]`) makes its own
+complete walk, which the memo keeps; the suspended walk does not replace it
+when it ends, so the read made during the walk and every later read agree.
+The consumer of the suspended walk saw the elements of its own walk: that is
+the one read that can differ.
+
 ## 7. Crossing the interpret↔compile boundary
 
 Dynamic scoping has to survive compilation, or it silently becomes lexical at the
