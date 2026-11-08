@@ -248,7 +248,7 @@ function bindsArgumentsWhole(
   let sig: Type | undefined;
   if ('operator' in binding) sig = binding.operator.signature?.type;
   else {
-    const declared = binding.value.type?.type;
+    const declared = resolveTypeAlias(binding.value.type.type);
     sig =
       typeof declared === 'object' && declared.kind === 'signature'
         ? declared
@@ -298,7 +298,9 @@ function declaredParameterTypes(
         binding.operator.signature?.type);
   } else {
     if (binding.value.inferredType) return undefined;
-    sig = binding.value.type?.type;
+    // A transparent alias of a signature is a declaration of that
+    // signature, so it is unfolded.
+    sig = resolveTypeAlias(binding.value.type.type);
   }
   if (
     typeof sig !== 'object' ||

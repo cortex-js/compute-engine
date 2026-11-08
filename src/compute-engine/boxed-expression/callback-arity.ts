@@ -2,6 +2,7 @@ import type { FunctionSignature, Type } from '../../common/type/types.js';
 import {
   collectionElementType,
   isWildcardFunctionType,
+  resolveTypeAlias,
   signatureArms,
 } from '../../common/type/utils.js';
 import { isFunction, isSymbol } from './type-guards.js';
@@ -109,8 +110,10 @@ export function callbackArity(fn: Expression): CallbackArity | undefined {
 
 /** The parameter-count range of a callable TYPE — see {@link callbackArity}
  * for which types decline and why. */
-function signatureArity(type: Type | undefined): CallbackArity | undefined {
-  if (type === undefined) return undefined;
+function signatureArity(type0: Type | undefined): CallbackArity | undefined {
+  if (type0 === undefined) return undefined;
+  // A transparent alias of a signature names the arity of that signature.
+  const type = resolveTypeAlias(type0);
   if (isWildcardFunctionType(type)) return undefined;
   const arms = signatureArms(type);
   if (arms === undefined || arms.length !== 1) return undefined;

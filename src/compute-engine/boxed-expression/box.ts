@@ -119,6 +119,7 @@ import {
 } from '../../common/type/primitive.js';
 import {
   isWildcardFunctionType,
+  resolveTypeAlias,
   resolveTypeForCompilation as resolveType,
   placeholderSlotsAs,
   signatureArms,
@@ -2679,10 +2680,14 @@ function stampableParamType(t: Type): Type | undefined {
  * function-typed VALUE definition. A bare-`function` wildcard declaration
  * carries no parameter types and deliberately stays that way through
  * assignment, so the assigned value's own signature is the only one there is
- * — the same source the narrowing sink below reads. */
+ * — the same source the narrowing sink below reads. A transparent alias of
+ * a signature (`ce.declare('g', 'Fn')` with `Fn` an alias of
+ * `(integer) -> list<real>`) is unfolded, so that the call is checked and
+ * typed as under the written-out declaration. */
 function calleeSignatureType(def: BoxedValueDefinition): Type | undefined {
-  if (isWildcardFunctionType(def.type.type)) return def.value?.type.type;
-  return def.type.type;
+  const declared = resolveTypeAlias(def.type.type);
+  if (isWildcardFunctionType(declared)) return def.value?.type.type;
+  return declared;
 }
 
 /**
@@ -3726,6 +3731,9 @@ function makeCanonicalFunctionCore(
     // annotated. Runs ahead of the wildcard narrowing sink below, preserving
     // the documented sink-before-noting order.
     const calleeType = calleeSignatureType(def.value);
+    // The declared type with a transparent alias unfolded, as
+    // `calleeSignatureType` reads it.
+    const declaredCalleeType = resolveTypeAlias(def.value.type.type);
     const calleeOps = ops.some(isSpreadOperand)
       ? ops
       : annotateCallbacksFromSignature(ce, ops, calleeType);
@@ -3767,7 +3775,7 @@ function makeCanonicalFunctionCore(
     const valueDefaults =
       calleeType === undefined ||
       (!def.value.inferredType &&
-        isWildcardFunctionType(def.value.type.type)) ||
+        isWildcardFunctionType(declaredCalleeType)) ||
       writtenOps.some((x) => x.operator === 'Spread')
         ? undefined
         : signatureDefaultOperands(ce, def.value, calleeType);
@@ -3788,7 +3796,7 @@ function makeCanonicalFunctionCore(
     // there are no parameter types to narrow from either — until something is
     // assigned, at which point `setSymbolValue`/`updateDef` fire the repair
     // and the re-canonicalization reads the signature below.
-    const wildcardCallee = isWildcardFunctionType(def.value.type.type);
+    const wildcardCallee = isWildcardFunctionType(declaredCalleeType);
 
     // The narrowing sink for a wildcard-declared callee. The declared type is
     // a widening that carries no parameter types, and it deliberately STAYS
@@ -3852,7 +3860,7 @@ function makeCanonicalFunctionCore(
       ? annotatedLiteral(def.value.value)
       : undefined;
     const pinned = def.value.inferredType || wildcardLiteral !== undefined;
-    const valueType = wildcardLiteral?.type.type ?? def.value.type.type;
+    const valueType = wildcardLiteral?.type.type ?? declaredCalleeType;
     if (
       ce.strict &&
       (!def.value.inferredType ||

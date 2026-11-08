@@ -56,6 +56,16 @@
 
 ### Resolved Issues
 
+- **A function declared through a type alias of a signature types its calls
+  from that signature.** With `ce.declareType('Fn', '(integer) ->
+  list<real>', { alias: true })` and `ce.declare('g', 'Fn')`, `g(3)` was
+  typed `unknown`, `g("a")` was not refused, and `g([1, 2])` was typed as a
+  call of an undeclared name, where the same declaration written out gives
+  `list<real>`, an `incompatible-type` error and a broadcast over the list.
+  The typing of a call, the check of its arguments, the broadcast decision
+  and the arity of a callback now unfold a transparent alias of the declared
+  type. The symbol `g` keeps the type `Fn`, and `staticShape` of the call
+  gives the shape that the signature promises.
 - **A function whose parameter accepts a point of integers or a string
   refuses a point with a fractional coordinate.** With
   `F: (tuple<integer, integer> | string) -> unknown` and the body `p ↦ p`,

@@ -727,7 +727,10 @@ export function deriveApplicationType(
   // function literal) has no operator definition: its application types from
   // its function type alone, a polytype instantiated against the operands.
   if (!('operator' in binding)) {
-    let ft = binding.value.type.type;
+    // A transparent alias of a signature is unfolded, so that a symbol
+    // declared `Fn` with `Fn` an alias of `(integer) -> list<real>` types
+    // its calls as the written-out declaration does.
+    let ft = resolveTypeAlias(binding.value.type.type);
     if (typeof ft !== 'object' || ft.kind !== 'signature') {
       // A bare `function` declaration later assigned a literal (the
       // document-manager route of a consumer that declares every function

@@ -7218,8 +7218,9 @@ export class BoxedFunction
       if (!isFunction(valueDef.value, 'Function')) return undefined;
       // A bare `function` wildcard declaration carries no signature of its
       // own: the assigned literal's type is the only one there is, as the
-      // type derivation reads it.
-      const declared = valueDef.type.type;
+      // type derivation reads it. A transparent alias of a signature is
+      // unfolded, as the type derivation unfolds it.
+      const declared = resolveTypeAlias(valueDef.type.type);
       source = isWildcardFunctionType(declared)
         ? (valueDef.value.type.type ?? declared)
         : declared;
@@ -17115,8 +17116,14 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
     // `m(n, s) = If(n = 0, s, m(n − 1, [1, 2]))`, the evidence types `s` as
     // a list, and `m(2, 3)` was then typed `integer`, the type of the base
     // case alone, although its value is `[1, 2]`.
+    // A declared type that is a transparent alias of a signature
+    // (`ce.declareType('Fn', '(integer) -> list<real>', { alias: true })`,
+    // then `ce.declare('g', 'Fn')`) is unfolded, so that the call is typed
+    // from the signature as the written-out declaration is; the symbol
+    // itself keeps the type `Fn`.
     const recursive = wildcardRecursiveSignature(expr.valueDefinition);
-    const declaredType = recursive ?? expr.valueDefinition.type.type;
+    const declaredType =
+      recursive ?? resolveTypeAlias(expr.valueDefinition.type.type);
     const heldValue = expr.valueDefinition.value;
     // A local of a block gets its value only when the block runs. When the
     // block is boxed, an `Assign` of a function literal gives the local the

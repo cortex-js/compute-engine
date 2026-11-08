@@ -54,6 +54,28 @@ describe('CE-1150: staticShape', () => {
     expect(shape?.elementType).toBe('real');
   });
 
+  // CE-1157: a head declared through a transparent type alias of a signature
+  // is typed, checked and broadcast as under the written-out signature. The
+  // symbol itself keeps the alias as its type.
+  test('a call of a head declared through a type alias of a signature', () => {
+    ce.declareType('Fn', '(integer) -> list<real>', { alias: true });
+    ce.declare('g', 'Fn');
+    ce.declare('h', '(integer) -> list<real>');
+    expect(ce.box('g').type.toString()).toBe('Fn');
+    const call = ce.parse('g(3)');
+    expect(call.type.toString()).toBe('list<real>');
+    const shape = call.staticShape;
+    expect(shape?.indexed).toBe(true);
+    expect(shape?.count).toBe(undefined);
+    expect(shape?.elementType).toBe('real');
+    // The argument check and the broadcast read the same signature as the
+    // written-out declaration.
+    expect(ce.box(['g', "'a'"]).type.toString()).toBe('error');
+    expect(ce.box(['g', ['List', 1, 2]]).type.toString()).toBe(
+      ce.box(['h', ['List', 1, 2]]).type.toString()
+    );
+  });
+
   test('a call that returns a point names two elements', () => {
     ce.assign('h', ce.parse('(n) \\mapsto (n, n+1)'));
     const call = ce.parse('h(3)');
