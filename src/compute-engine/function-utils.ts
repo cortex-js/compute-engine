@@ -161,7 +161,9 @@ import {
 } from './boxed-expression/effects-provenance.js';
 import {
   EffectContractError,
+  effectContractErrorValue,
   inferFunctionLiteralEffects,
+  isEffectContractError,
   presentedValueType,
 } from './boxed-expression/effects-inference.js';
 import { isTestedAtRead } from './boxed-expression/store-admission.js';
@@ -215,6 +217,8 @@ import {
   GENERIC_PARTIAL_APPLICATION_MESSAGE,
   INVALID_SIGNATURE_MARKER_MESSAGE,
   TYPE_VARIABLE_INTRODUCTION_MESSAGE,
+  isTypeCompatibilityError,
+  typeCompatibilityErrorValue,
   withoutFailedElementCheck,
 } from './boxed-expression/type-compatibility-error.js';
 import { substituteDeclaredBounds } from './boxed-expression/generic-instantiation.js';
@@ -3352,6 +3356,7 @@ export function evaluateStatements(
   program = false
 ): Expression {
   createBlockLocals(ce, ops);
+  const run: StatementRun = { scope: ce.context.lexicalScope };
   let result: Expression = ce.Nothing;
   const last = ops.length - 1;
   for (let i = 0; i <= last; i++) {
@@ -3367,6 +3372,10 @@ export function evaluateStatements(
     // operators and `Return` is unregistered, so a literal control-flow
     // statement evaluates to itself with its operand evaluated.
     result = op.evaluate(i === last ? lastStatementOptions : undefined);
+    // Before the hooks below, so that they receive the error of a function
+    // that the statement made break a contract.
+    if (result.operator !== 'Error')
+      result = afterFunctionAssignment(ce, run, op) ?? result;
     // Post-statement debugger hook (break-on-error-value); same guard shape
     // as the pre-statement hook above.
     if (
@@ -3403,6 +3412,165 @@ export function evaluateStatements(
       break;
   }
   return statementListValue(ce, ops, result);
+}
+
+/** A run of a list of statements: the scope where its statements run, and
+ * the earlier statements of the run that assigned a function literal to a
+ * symbol, with the symbol. */
+type StatementRun = {
+  scope: Scope;
+  assigned?: { name: string; literal: Expression }[];
+};
+
+/**
+ * Statement `op` of the run `run` of a list of statements has run. When
+ * `op` assigns a function literal to a symbol `h`, the signature of each
+ * function that an earlier statement of the run assigned, and whose literal
+ * applies `h`, is derived again, and `op` is added to `run.assigned`.
+ * Returns the error value of the statement when a function derived again
+ * breaks a contract, else `undefined`.
+ *
+ * The signature of a user function is derived when its `Assign` runs. The
+ * derivation reads the operator definition of each function that the body
+ * calls with a parameter of the function (`wholeCollectionParameterType()`,
+ * `boxed-expression/effects-inference.ts`): when the slot of the callee
+ * takes a whole collection, the slot of the parameter takes one too. In
+ * `Block(Assign(q, a ↦ h(a)), Assign(h, t ↦ Count(t)), q([1, 2]))`, `h` has
+ * no operator definition when `Assign(q, …)` runs, so the slot of `a` is a
+ * scalar slot, and `q([1, 2])` applied `q` to each element: `Count(1)` and
+ * `Count(2)` are errors. Derived again after `Assign(h, …)`, the slot of
+ * `a` takes the list whole, and the value is `2`, as with the two `Assign`
+ * in the other order, and as with `ce.assign()`, whose definitions are
+ * derived again by `repairProvisionalDependents()`.
+ *
+ * A function whose signature changed is a callee that changed too, so the
+ * functions that call it are derived again (`r` in `r(x) = q(x)`), in
+ * passes: each pass derives again the functions that apply a name whose
+ * signature changed in the pass before. A function can be derived in more
+ * than one pass, when two of its callees change in different passes. The
+ * number of passes is at most the number of entries plus one, so a cycle of
+ * calls whose signatures do not settle ends.
+ *
+ * Only a function with an inferred signature is derived again. A function
+ * with a declared signature does not depend on its callees. A literal with
+ * an annotated parameter has a signature derived from the type of the
+ * literal when it is assigned (`_derivedSignature`), and it is not derived
+ * again here: `Block(Assign(q, (a, n: number) ↦ h(a) + n), Assign(h, t ↦
+ * Count(t)), q([1, 2], 1))` still applies `q` to each element. An `Assign`
+ * that is not a statement of the list (inside an `If` or a nested `Block`)
+ * is not seen either.
+ *
+ * When the new definition of a function breaks a contract (a callee with a
+ * `scope` effect makes the body write outside a function that does not
+ * declare it), the function keeps its previous definition, and the error
+ * is the value of the statement, as when the `Assign` of the function runs
+ * after the `Assign` of its callee.
+ */
+function afterFunctionAssignment(
+  ce: ComputeEngine,
+  run: StatementRun,
+  op: Expression
+): Expression | undefined {
+  if (!isFunction(op, 'Assign') || op.nops !== 2) return undefined;
+  const target = op.op1;
+  const literal = op.op2;
+  if (!isSymbol(target) || !isFunction(literal, 'Function')) return undefined;
+  const assigned = run.assigned;
+  const name = target.symbol;
+  let error: Expression | undefined;
+  if (
+    assigned !== undefined &&
+    assigned.some((e) => e.name !== name && appliedNames(e.literal).has(name))
+  )
+    error = ce._inScope(run.scope, () =>
+      deriveCallerSignatures(ce, assigned, name)
+    );
+  (run.assigned ??= []).push({ name, literal });
+  return error;
+}
+
+/**
+ * Derive again the signature of each function of `assigned` whose literal
+ * applies `callee`, then of each function whose literal applies a function
+ * whose signature changed, in passes (see `afterFunctionAssignment()`).
+ * Called in the scope of the run, where each name resolves to the
+ * definition that the statements of the run installed. Returns the error
+ * value of the first contract that a new definition breaks, else
+ * `undefined`.
+ */
+function deriveCallerSignatures(
+  ce: ComputeEngine,
+  assigned: ReadonlyArray<{ name: string; literal: Expression }>,
+  callee: string
+): Expression | undefined {
+  let firstError: Expression | undefined;
+  let changed = new Set([callee]);
+  for (let pass = 0; changed.size > 0 && pass <= assigned.length; pass++) {
+    const next = new Set<string>();
+    for (const entry of assigned) {
+      const heads = appliedNames(entry.literal);
+      let applies = false;
+      for (const name of changed)
+        if (name !== entry.name && heads.has(name)) applies = true;
+      if (!applies) continue;
+      const def = ce.lookupDefinition(entry.name);
+      if (def === undefined || !isOperatorDef(def)) continue;
+      const opDef = def.operator;
+      const literal = opDef._lambdaLiteral;
+      if (!opDef.inferredSignature || literal === undefined) continue;
+      const before = opDef.signature.toString();
+      // `_update()` writes the signature and the literal before it checks
+      // the effects contract, so a throw leaves the definition partly
+      // updated. The snapshot restores the fields that an update with only
+      // `evaluate` can write (`_rederivationSnapshot()`), not the types of
+      // the captured bindings that `_update()` records for the check of a
+      // later call (`noteDefinitionCapturedTypes()`): those are the types
+      // at the time of the failed update.
+      const snapshot = opDef._rederivationSnapshot();
+      try {
+        installRebuiltLiteral(ce, opDef, literal);
+      } catch (e) {
+        opDef._restoreRederivationSnapshot(snapshot);
+        if (isEffectContractError(e))
+          firstError ??= effectContractErrorValue(ce, e);
+        else if (isTypeCompatibilityError(e))
+          firstError ??= typeCompatibilityErrorValue(ce, e);
+        else throw e;
+        continue;
+      }
+      ce._noteStateEvent({
+        kind: 'binding-repair',
+        ...(isScratchBinding(ce, opDef) ? { scratch: true } : {}),
+      });
+      if (opDef.signature.toString() !== before) next.add(entry.name);
+    }
+    changed = next;
+  }
+  return firstError;
+}
+
+/** The names of the operators that `literal` applies, computed once per
+ * literal. The canonical literal of a statement is the same object on each
+ * run of the statement. */
+const APPLIED_NAMES = new WeakMap<Expression, ReadonlySet<string>>();
+
+function appliedNames(literal: Expression): ReadonlySet<string> {
+  let names = APPLIED_NAMES.get(literal);
+  if (names !== undefined) return names;
+  const found = new Set<string>();
+  // An expression can share a subexpression in more than one place: each
+  // node is visited once.
+  const seen = new Set<Expression>();
+  const visit = (expr: Expression): void => {
+    if (!isFunction(expr) || seen.has(expr)) return;
+    seen.add(expr);
+    found.add(expr.operator);
+    for (const x of expr.ops) visit(x);
+  };
+  visit(literal);
+  names = found;
+  APPLIED_NAMES.set(literal, names);
+  return names;
 }
 
 /**
@@ -3606,6 +3774,9 @@ export async function evaluateStatementsAsync(
   // Before the first `await`, so the current lexical scope is still the
   // scope of these statements.
   createBlockLocals(ce, ops);
+  // The scope is read before the first `await`: after an `await`, the
+  // current scope can be the scope of another evaluation.
+  const run: StatementRun = { scope: ce.context.lexicalScope };
   let result: Expression = ce.Nothing;
   const last = ops.length - 1;
   for (let i = 0; i <= last; i++) {
@@ -3628,6 +3799,9 @@ export async function evaluateStatementsAsync(
       _contextStack: stack,
       _precisionWindow: precisionWindow,
     });
+    // Before the hooks, as on the synchronous route.
+    if (result.operator !== 'Error')
+      result = afterFunctionAssignment(ce, run, op) ?? result;
     if (
       debugStatementResultHook !== undefined &&
       op.sourceOffsets !== undefined

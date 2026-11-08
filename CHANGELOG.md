@@ -156,6 +156,14 @@
 
 ### Resolved Issues
 
+- **In a block, a function that calls a function defined later in the block
+  takes a list argument whole when the later function does.**
+  `Block(Assign(q, a ↦ h(a)), Assign(h, t ↦ Count(t)), q([1, 2]))` applied
+  `q` to each element and gave two `incompatible-type` errors; it now gives
+  `2`, as when `h` is assigned before `q`. This also applies to a chain of
+  such functions. The result of a function with a typed parameter still
+  depends on the order of the two assignments.
+
 - **In the Epsil editor model, a `limit` that does not name its variable
   binds the variable that the engine chooses also when that name is a `let`
   or a `const` of the program.** After `let a = 5`, the program

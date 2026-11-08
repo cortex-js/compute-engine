@@ -696,20 +696,95 @@ describe('Limitations of the rule, as they behave today', () => {
     ).toBe('[[0],[2]]');
   });
 
-  test('a callee that the block assigns AFTER the caller is not read', () => {
+  test('a callee that the block assigns AFTER the caller is read', () => {
     // The signature of `q` is derived when `Assign(q, …)` runs, before `h`
-    // has a definition, so `q` stays element-wise.
+    // has a definition. The `Assign` of `h` derives it again
+    // (`afterFunctionAssignment()`, `function-utils.ts`), so the list is
+    // bound whole, as with the two `Assign` in the other order.
     const ce = new ComputeEngine();
-    const value = ce
+    const fn = (body: MathJsonExpression, p: string): MathJsonExpression => [
+      'Function',
+      body,
+      p,
+    ];
+    const count = ['Assign', 'h', fn(['Count', 't'], 't')] as const;
+    const caller = ['Assign', 'q', fn(['h', 'a'], 'a')] as const;
+    const block = (...stmts: MathJsonExpression[]): string =>
+      ce
+        .box(['Block', ...stmts])
+        .evaluate()
+        .toString();
+    expect(block(caller, count, ['q', ['List', 1, 2]])).toBe('2');
+    // A chain of three functions, each assigned before its callee: the new
+    // signature of `q` derives the signature of `k` again.
+    expect(
+      block(['Assign', 'k', fn(['q', 'b'], 'b')], caller, count, [
+        'k',
+        ['List', 1, 2, 3],
+      ])
+    ).toBe('3');
+    // `top` calls `left` and `right`, and `right` calls `left`: the
+    // signature of `top` is derived again when `left` changes, and again
+    // in a later pass when `right` changes.
+    expect(
+      block(
+        ['Assign', 'top', fn(['List', ['left', 'a'], ['right', 'a']], 'a')],
+        ['Assign', 'right', fn(['left', 'b'], 'b')],
+        ['Assign', 'left', fn(['base', 'c'], 'c')],
+        ['Assign', 'base', fn(['Count', 't'], 't')],
+        ['top', ['List', 1, 2, 3]]
+      )
+    ).toBe('[3,3]');
+    // A callee that reads its parameter element-wise keeps the map.
+    expect(
+      block(caller, ['Assign', 'h', fn(['Multiply', 2, 't'], 't')], [
+        'q',
+        ['List', 1, 2],
+      ])
+    ).toBe('[2,4]');
+    // The block is the body of a function: each call gives the locals new
+    // bindings, and each call derives the signature of its `q` again.
+    ce.assign(
+      'outer',
+      ce.box(fn(['Block', caller, count, ['q', ['List', 1, 2, 'x']]], 'x'))
+    );
+    expect(ce.box(['outer', 5]).evaluate().toString()).toBe('3');
+    expect(ce.box(['outer', 6]).evaluate().toString()).toBe('3');
+  });
+
+  test('a caller derived again with a callee that has a scope effect gives the error of the other order', () => {
+    // The new definition of `q` writes outside a function and does not
+    // declare `scope`: `q` keeps its previous definition, and the error is
+    // the value of the block, with the two `Assign` in either order.
+    const ce = new ComputeEngine();
+    const caller = ['Assign', 'q', ['Function', ['h', 'a'], 'a']] as const;
+    const callee = [
+      'Assign',
+      'h',
+      [
+        'Function',
+        ['Typed', ['Count', 't'], "'(unknown) scope -> unknown'"],
+        't',
+      ],
+    ] as const;
+    const call = ['q', ['List', 1, 2]] as const;
+    const qFirst = ce.box(['Block', caller, callee, call]).evaluate();
+    const hFirst = ce.box(['Block', callee, caller, call]).evaluate();
+    expect(qFirst.operator).toBe('Error');
+    expect(qFirst.toString()).toBe(hFirst.toString());
+  });
+
+  test('a callee that the block assigns AFTER the caller is read by evaluateAsync()', async () => {
+    const ce = new ComputeEngine();
+    const value = await ce
       .box([
         'Block',
         ['Assign', 'q', ['Function', ['h', 'a'], 'a']],
         ['Assign', 'h', ['Function', ['Count', 't'], 't']],
         ['q', ['List', 1, 2]],
       ])
-      .evaluate();
-    expect(value.operator).toBe('List');
-    expect(value.ops!.every((x) => x.operator === 'Error')).toBe(true);
+      .evaluateAsync();
+    expect(value.toString()).toBe('2');
   });
 
   test('a recursive function that reads its parameter whole terminates', () => {

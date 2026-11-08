@@ -1111,10 +1111,16 @@ function excludesEveryScalar(t: Type): boolean {
  *   give the same result: the definition of `h` derives the signature of
  *   `k` again (`repairProvisionalDependents()`, `function-utils.ts`). In a
  *   `Block`, `h` is read through the definition that the call dispatches to
- *   when `Assign(k, …)` runs ({@link calledOperatorDefinition}), and nothing
- *   derives the signature of `k` again, so `h` must be assigned before `k`.
- *   The tests in `test/compute-engine/whole-collection-parameter.test.ts`
- *   pin both behaviors.
+ *   when the signature of `k` is derived ({@link calledOperatorDefinition}),
+ *   and the `Assign` of `h` derives the signature of `k` again when an
+ *   earlier statement of the same run of the block assigned `k`
+ *   (`afterFunctionAssignment()`, `function-utils.ts`), so both orders give
+ *   the same result there too. Two cases still depend on the order: a `k`
+ *   with an annotated parameter, whose signature is derived from the type
+ *   of its literal when it is assigned, and an `Assign` of `h` that is not
+ *   a statement of the same list (inside an `If` or a nested `Block`). The
+ *   tests in `test/compute-engine/whole-collection-parameter.test.ts` pin
+ *   both orders.
  * - An operator whose signature is an overload set (an intersection of
  *   arms, such as `Take` and `Drop`) is not read. Those two check their
  *   operands with their own validation.
@@ -1330,10 +1336,11 @@ function declaredValueOf(spec: Expression): Expression | undefined {
  * `incompatible-type` error.
  *
  * The lookup reads the definitions in the current scope chain, so the
- * result depends on the time the signature is derived: when the `Assign`
- * of the second function runs. When the callee has no operator definition
- * at that time (`h` is assigned AFTER `q` in the block), the call gives no
- * evidence, and the slot stays element-wise.
+ * result depends on the time the signature is derived. When the callee has
+ * no operator definition at that time (`h` is assigned AFTER `q` in the
+ * block), the call gives no evidence, and the slot is element-wise until
+ * the `Assign` of `h` derives the signature of `q` again
+ * (`afterFunctionAssignment()`, `function-utils.ts`).
  */
 function calledOperatorDefinition(
   expr: Expression
