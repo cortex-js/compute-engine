@@ -1,9 +1,6 @@
 import { markForwardCallReference } from './forward-call-reference.js';
 import { Complex } from 'complex.js';
-import {
-  isLibraryOperator,
-  shadowsLibraryName,
-} from '../library-shadowing.js';
+import { isLibraryOperator, shadowsLibraryName } from '../library-shadowing.js';
 import { canonicalBranch } from '../statement-position.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import type {

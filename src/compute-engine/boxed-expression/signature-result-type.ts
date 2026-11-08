@@ -216,9 +216,15 @@ export function deriveSignatureResultType(
     } else if (
       !isFunction(e) ||
       e.operatorDefinition?.scoped ||
-      ['Assign', 'AddTo', 'Declare', 'Return', 'Loop', 'Break', 'Continue'].includes(
-        e.operator
-      )
+      [
+        'Assign',
+        'AddTo',
+        'Declare',
+        'Return',
+        'Loop',
+        'Break',
+        'Continue',
+      ].includes(e.operator)
     ) {
       result = unknown;
     } else {

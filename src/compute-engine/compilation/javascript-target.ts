@@ -14648,11 +14648,7 @@ function callbackArg(
   // `(_x: string) ↦ f(_x)` calls the copy of `f` with the parameter typed
   // `string` instead.
   if (extraArgTypes.length === 0) {
-    const eta = BaseCompiler.stringElementCallbackEta(
-      callback,
-      source,
-      target
-    );
+    const eta = BaseCompiler.stringElementCallbackEta(callback, source, target);
     if (eta !== undefined) return compile(eta);
   }
   // A one-parameter literal fed the elements of a range whose start and step

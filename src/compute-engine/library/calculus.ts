@@ -5187,8 +5187,7 @@ function inlineShadowedCalls(
       if (e instanceof Error && e.name === 'CancellationError') throw e;
       return undefined;
     }
-    if (!body.isValid || shadowedCallsIn(ce, body) !== 'none')
-      return undefined;
+    if (!body.isValid || shadowedCallsIn(ce, body) !== 'none') return undefined;
     const parameters = wildcards.map((w) => sym(w)!);
     if (body.symbols.some((s) => !parameters.includes(s) && bound.includes(s)))
       return undefined;

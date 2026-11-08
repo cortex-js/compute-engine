@@ -7442,7 +7442,8 @@ function independentDomainsAreEnumerable(
     const dependent = bound.length > 0 && domain.has(bound);
     if (!dependent && domain.isEnumerableCollection !== true) return false;
     const idx = clause.ops[0];
-    if (idx && isSymbol(idx) && idx.symbol !== 'Nothing') bound.push(idx.symbol);
+    if (idx && isSymbol(idx) && idx.symbol !== 'Nothing')
+      bound.push(idx.symbol);
     else if (isFunction(idx, 'Tuple')) bound.push(...tuplePatternNames(idx));
   }
   return true;

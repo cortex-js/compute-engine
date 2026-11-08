@@ -7735,7 +7735,8 @@ export class Parser {
       if (element !== null) return element;
     }
 
-    if (def.name === 'AddTo') return this.addToAssignment(left, right, start, end);
+    if (def.name === 'AddTo')
+      return this.addToAssignment(left, right, start, end);
 
     // A parenthesized comparison is an operand, never a link of a chain:
     // `(a < b) <= c` compares the truth value of `a < b` with `c`.

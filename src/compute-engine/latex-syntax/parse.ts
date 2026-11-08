@@ -184,12 +184,7 @@ function isFactorHead(list: MathJsonExpression, name: string): boolean {
  * `\sum_{k=1}^{2}\frac{\partial}{\partial x_k} x_k^2` differentiates with
  * respect to its own variable, and the sum is `2x_1 + 2x_2`
  * (`subscriptVariableAsSymbol()` in `library/calculus.ts`). */
-const PARSED_BINDERS = new Set([
-  'Sum',
-  'Product',
-  'Integrate',
-  'Function',
-]);
+const PARSED_BINDERS = new Set(['Sum', 'Product', 'Integrate', 'Function']);
 
 /** The heads of an operand of a binder whose first operand is the bound
  * name: a clause (`Tuple`, `Limits`, `Element`), a typed parameter, a held

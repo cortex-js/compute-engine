@@ -474,8 +474,7 @@ export function same(
     if (a.operator !== b.operator) return false;
     if (!isFunction(b)) return false;
     if (a.nops !== b.nops) return false;
-    if (syntactic !== true && !sameCallHead(a, b, boundA, boundB))
-      return false;
+    if (syntactic !== true && !sameCallHead(a, b, boundA, boundB)) return false;
     // Two store-backed lists (`ce.list()`) compare their numbers directly,
     // without boxing: an element is the same when both are `NaN` or when
     // they are `===` (a store never holds `-0`). This is `BoxedNumber.isSame`

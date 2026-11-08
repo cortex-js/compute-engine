@@ -152,7 +152,10 @@ const WRITE_OPERATORS: ReadonlySet<string> = new Set([
  */
 function countWrites(ast: MathJsonExpression | null): Map<string, number> {
   const counts = new Map<string, number>();
-  const namesOf = (node: MathJsonExpression | null, into: Set<string>): void => {
+  const namesOf = (
+    node: MathJsonExpression | null,
+    into: Set<string>
+  ): void => {
     if (node === null) return;
     const name = symbol(node);
     if (name !== null) into.add(name);
@@ -249,8 +252,7 @@ function functionsBoxedEarly(
     add(statement);
     while (pending.length > 0)
       for (const clause of clauses.get(pending.pop()!) ?? []) add(clause);
-    for (const name of reached)
-      if (k < (last.get(name) ?? -1)) early.add(name);
+    for (const name of reached) if (k < (last.get(name) ?? -1)) early.add(name);
   });
   const result = new Set<MathJsonExpression>();
   for (const name of early)

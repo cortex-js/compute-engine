@@ -3647,8 +3647,7 @@ function isSubtypeRules(
       // (`record{toString: string}` parses and serializes), and `in` finds
       // those on the prototype of a record that does not declare them.
       if (!hasRecordField(rhs, key)) return false;
-      if (isOptionalField(lhs, key) && !isOptionalField(rhs, key))
-        return false;
+      if (isOptionalField(lhs, key) && !isOptionalField(rhs, key)) return false;
       // Depth subtyping
       if (!isSubtype(lhs.elements[key], rhs.elements[key])) return false;
     }

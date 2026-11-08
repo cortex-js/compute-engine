@@ -276,8 +276,7 @@ export function withoutParentheses(
     if (ops === undefined || ops.length === 0 || ops.length > 2) return x;
     if (ops.length === 2) {
       const s = rawStringValue(ops[1]);
-      if (s === undefined || !(s.startsWith('(') && s.endsWith(')')))
-        return x;
+      if (s === undefined || !(s.startsWith('(') && s.endsWith(')'))) return x;
     }
     if (!isLibraryDelimiter(x)) return x;
     x = ops[0];

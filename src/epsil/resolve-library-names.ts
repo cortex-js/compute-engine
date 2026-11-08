@@ -593,9 +593,8 @@ export function binderSitesOf(
   source: string,
   members?: ReadonlyMap<string, ProtocolFunctionMember>,
   isBound: (name: string) => boolean = () => false,
-  declarationOf: (
-    name: string
-  ) => ProgramDeclaration | undefined = () => undefined
+  declarationOf: (name: string) => ProgramDeclaration | undefined = () =>
+    undefined
 ): readonly BinderSite[] | undefined {
   return binderSitesWithMemo(
     ce,

@@ -517,8 +517,7 @@ function rejectFramesOutsideScope(
 ): void {
   // The frame index of a named call counts declaration slots, and the source
   // range of the canonical operand is the only check of the argument.
-  if (canonicalOrder === undefined || frameIndexOrder !== 'declaration')
-    return;
+  if (canonicalOrder === undefined || frameIndexOrder !== 'declaration') return;
   // The argument that the last frame of the statement selected; `undefined`
   // before a frame selected one.
   let scope: MathJsonExpression | undefined;
@@ -1068,7 +1067,8 @@ function findShallowestByOperators(
     matches.push(expr);
     return;
   }
-  for (const op of operands(expr)) findShallowestByOperators(op, names, matches);
+  for (const op of operands(expr))
+    findShallowestByOperators(op, names, matches);
 }
 
 /**

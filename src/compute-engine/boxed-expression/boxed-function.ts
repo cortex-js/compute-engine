@@ -2806,17 +2806,13 @@ export class BoxedFunction
     // must keep its own binding.
     const structuralOps = this._structuralOps();
     return this._withLibraryBinding(() =>
-      this.engine.function(
-        this._operator,
-        structuralOps,
-        {
-          form: 'structural',
-          metadata: {
-            latex: this.verbatimLatex,
-            sourceOffsets: this.sourceOffsets,
-          },
-        }
-      )
+      this.engine.function(this._operator, structuralOps, {
+        form: 'structural',
+        metadata: {
+          latex: this.verbatimLatex,
+          sourceOffsets: this.sourceOffsets,
+        },
+      })
     );
   }
 
@@ -2832,9 +2828,7 @@ export class BoxedFunction
   private _structuralOps(): Expression[] {
     const scope = this._localScope;
     if (scope === undefined) return this.ops.map((x) => x.structural);
-    return this.engine._inScope(scope, () =>
-      this.ops.map((x) => x.structural)
-    );
+    return this.engine._inScope(scope, () => this.ops.map((x) => x.structural));
   }
 
   /**

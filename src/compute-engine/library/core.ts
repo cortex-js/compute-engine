@@ -248,10 +248,7 @@ import {
 import type { Rule } from '../types-evaluation.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import { evaluateInOwnBindings } from '../boxed-expression/binders.js';
-import {
-  markQualifiedName,
-  shadowsLibraryName,
-} from '../library-shadowing.js';
+import { markQualifiedName, shadowsLibraryName } from '../library-shadowing.js';
 import { arityBounds } from '../boxed-expression/overload.js';
 import {
   admissionOf,
@@ -7268,9 +7265,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // call of a library constant stays an `Apply`, evaluated from the
           // values of its arguments (`shadowsQualifiedName()`,
           // `function-utils.ts`).
-          const library = ce._evalContextStack[0]?.lexicalScope.bindings.get(
-            s
-          );
+          const library = ce._evalContextStack[0]?.lexicalScope.bindings.get(s);
           const callee = args[0];
           if (
             library !== undefined &&
@@ -7278,12 +7273,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             (callee.operatorDefinition !== undefined
               ? 'operator' in library &&
                 callee.operatorDefinition === library.operator
-              : 'value' in library &&
-                callee.valueDefinition === library.value)
+              : 'value' in library && callee.valueDefinition === library.value)
           ) {
-            if (
-              shadowsQualifiedName(ce, s, library, ce.context.lexicalScope)
-            ) {
+            if (shadowsQualifiedName(ce, s, library, ce.context.lexicalScope)) {
               if (!('operator' in library)) return ce._fn('Apply', args);
               // The boxing of `Apply` gives a callee written `Module(name)`,
               // in parentheses or not, or boxed already, to

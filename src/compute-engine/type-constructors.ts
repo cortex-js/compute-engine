@@ -8,10 +8,7 @@ import type {
   TypeParameter,
   TypeReference,
 } from '../common/type/types.js';
-import {
-  hasRecordField,
-  requiredFieldKeys,
-} from '../common/type/types.js';
+import { hasRecordField, requiredFieldKeys } from '../common/type/types.js';
 import { isSubtype, provablyDisjoint } from '../common/type/subtype.js';
 import { groundSkeleton } from '../common/type/instantiate.js';
 import { applyTypeReference, declarationOf } from '../common/type/reference.js';

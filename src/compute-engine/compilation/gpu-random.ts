@@ -594,8 +594,7 @@ function forEachReachableSymbol(
       )
         walkUserFunctionBody(e, e.operator);
       const names = boundVariableNames(e);
-      const inner =
-        names.length === 0 ? bound : new Set([...bound, ...names]);
+      const inner = names.length === 0 ? bound : new Set([...bound, ...names]);
       for (const op of e.ops) walk(op, inner);
     }
   };

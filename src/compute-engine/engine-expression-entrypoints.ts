@@ -185,11 +185,7 @@ export function createSymbolExpression(
           { type: declaredType, inferred: false },
           autoScope
         );
-      engine._setShadowedParameterDef(
-        name,
-        pdef,
-        existingTyped === undefined
-      );
+      engine._setShadowedParameterDef(name, pdef, existingTyped === undefined);
       const typedParamSym = new BoxedSymbol(engine, name, {
         metadata,
         def: pdef,

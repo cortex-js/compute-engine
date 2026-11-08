@@ -907,7 +907,9 @@ export function serializeEpsil(
           '(',
           fmt.separator(','),
           ')',
-          operands(expr).slice(1).map((x) => serializeExpression(x))
+          operands(expr)
+            .slice(1)
+            .map((x) => serializeExpression(x))
         )
       );
     },

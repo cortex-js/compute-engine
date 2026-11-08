@@ -220,9 +220,7 @@ function literalHeadsAdmit(subject: Expression, pattern: Expression): boolean {
  * (`literalHeadsAdmit()`).
  */
 function sameLiteral(subject: Expression, pattern: Expression): boolean {
-  return (
-    sameSyntactic(subject, pattern) && literalHeadsAdmit(subject, pattern)
-  );
+  return sameSyntactic(subject, pattern) && literalHeadsAdmit(subject, pattern);
 }
 
 /**

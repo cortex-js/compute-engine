@@ -166,10 +166,7 @@ function nestedProductNode(
     parts = rawParts(parts.ops[0]);
   }
   if (parts === undefined) return undefined;
-  if (
-    parts.name === 'Multiply' &&
-    !shadowsLibraryNameInOperand(ce, 'Multiply')
-  )
+  if (parts.name === 'Multiply' && !shadowsLibraryNameInOperand(ce, 'Multiply'))
     return {
       kind: 'product',
       children: parts.ops.map((op) => factorNode(ce, op, scope)),

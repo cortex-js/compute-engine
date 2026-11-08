@@ -1460,7 +1460,8 @@ function literalFirstSlotCollectionArm(
   if (!isFunction(literal, 'Function') || !literal.isCanonical)
     return undefined;
   const declared = functionLiteralDeclaredSignature(literal);
-  if (declared !== undefined) return firstSlotCollectionArm(declared, undefined);
+  if (declared !== undefined)
+    return firstSlotCollectionArm(declared, undefined);
   const body = functionLiteralBody(literal);
   if (body === undefined) return undefined;
   const slot = functionLiteralParameterSlots(literal, body)?.[0];

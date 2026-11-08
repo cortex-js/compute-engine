@@ -241,10 +241,7 @@ export function compileReadsOtherDefinition(node: Expression): boolean {
   if (!library) return true;
   return (
     isOperatorDef(current) &&
-    isShadowOf(
-      current,
-      engine.contextStack[0]?.lexicalScope.bindings.get(head)
-    )
+    isShadowOf(current, engine.contextStack[0]?.lexicalScope.bindings.get(head))
   );
 }
 

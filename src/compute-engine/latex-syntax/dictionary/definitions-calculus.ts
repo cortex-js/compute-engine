@@ -141,8 +141,7 @@ function parseIntegral(command: string, nIntegrals = 1) {
     let integrandEnd = bodyStartToken;
     if (fn !== null && indexes.length === 0) {
       const claimed = claimExcessDifferentials(fn);
-      if (claimed !== null)
-        ({ fn, indexes, rest, integrandEnd } = claimed);
+      if (claimed !== null) ({ fn, indexes, rest, integrandEnd } = claimed);
     }
     // An integration variable spelled as a subscript on an indexed
     // collection (`dn_{0}` when `n` is a list) is the new name `n_0`, and so
@@ -746,11 +745,7 @@ function markMisplacedDifferentials(
 function splitSumAtDifferential(
   expr: MathJsonExpression,
   binderName: (expr: MathJsonExpression | null | undefined) => string | null
-): [
-  body: MathJsonExpression | null,
-  rest: SignedTerm[],
-  indexes: string[],
-] {
+): [body: MathJsonExpression | null, rest: SignedTerm[], indexes: string[]] {
   const h = operator(expr);
   if (h === 'Subtract' && nops(expr) === 2) {
     const lhs = operand(expr, 1)!;
@@ -792,9 +787,7 @@ function splitSumAtDifferential(
             : ['Add', ...bodyTerms],
         [
           ...rest,
-          ...terms
-            .slice(i + 1)
-            .map((term): SignedTerm => [term, false]),
+          ...terms.slice(i + 1).map((term): SignedTerm => [term, false]),
         ],
         indexes,
       ];

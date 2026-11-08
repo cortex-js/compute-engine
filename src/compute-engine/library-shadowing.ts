@@ -176,8 +176,7 @@ export function isLibraryOperator(
   else if (node.operator !== name) return false;
   const ce = node.engine;
   const library = ce._evalContextStack[0]?.lexicalScope.bindings.get(name) as
-    | { operator?: object }
-    | undefined;
+    { operator?: object } | undefined;
   const libraryOperator = library?.operator;
   if (libraryOperator === undefined) return false;
   if (
@@ -400,8 +399,7 @@ function hides(
   const stack = ce._evalContextStack;
   const system = stack[0]?.lexicalScope;
   const library = system?.bindings.get(name) as
-    | { value?: unknown; operator?: unknown }
-    | undefined;
+    { value?: unknown; operator?: unknown } | undefined;
   if (library === undefined) return false;
   if (library !== def && library.value !== def && library.operator !== def)
     return false;

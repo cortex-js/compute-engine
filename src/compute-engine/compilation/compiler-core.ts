@@ -724,12 +724,7 @@ function boxedInCurrentScope(expr: Expression): Expression {
     let r: Expression = e;
     if (isFunction(e)) {
       const ops = inSerializationScope(e.localScope, () => e.ops.map(rebox));
-      r = hidesLibraryBinding(
-        ce,
-        e.operator,
-        e.baseDefinition,
-        isApplicableDef
-      )
+      r = hidesLibraryBinding(ce, e.operator, e.baseDefinition, isApplicableDef)
         ? ce.function('Apply', [qualified(e.operator), ...ops], { form: 'raw' })
         : ce.function(e.operator, ops, { form: 'raw' });
     } else if (isSymbol(e))

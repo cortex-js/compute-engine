@@ -100,10 +100,7 @@ export function flatten<T extends ReadonlyArray<Expression> | Expression[]>(
     const ys: Expression[] = [];
     for (const x of xs) {
       // If the operator matches, flatten the expression
-      if (
-        isFunction(x) &&
-        (x.operator === 'Sequence' || isCallOf(x, operator))
-      )
+      if (isFunction(x) && (x.operator === 'Sequence' || isCallOf(x, operator)))
         for (const y of flatten(x.ops, operator, canonicalize)) ys.push(y);
       else ys.push(x);
     }
@@ -153,10 +150,7 @@ export function flattenHoldingBarriers<
       continue;
     }
     // Lift the requested operator and `Sequence`, still holding barriers back
-    if (
-      isFunction(x) &&
-      (x.operator === 'Sequence' || isCallOf(x, operator))
-    )
+    if (isFunction(x) && (x.operator === 'Sequence' || isCallOf(x, operator)))
       for (const y of flattenHoldingBarriers(x.ops, operator, canonicalize))
         ys.push(y);
     else ys.push(x);

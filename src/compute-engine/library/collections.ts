@@ -8915,8 +8915,7 @@ function unknownRecordFieldError(
   const rt = fieldBearingType(t);
   if (rt === undefined || rt === 'none' || rt.kind !== 'record')
     return undefined;
-  if (Object.prototype.hasOwnProperty.call(rt.elements, name))
-    return undefined;
+  if (Object.prototype.hasOwnProperty.call(rt.elements, name)) return undefined;
   if (protocolPropertyTypeOfReceiver(ce, t, name) !== undefined)
     return undefined;
   if (protocolFunctionMemberOwners(ce, t, name).length > 0) return undefined;
@@ -19233,81 +19232,81 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // without the key (`withDictionaryDeletion()`), not by the positional walk.
     collection: withDictionaryDeletion(
       refusingUnindexedSource({
-      // The walk inserts or skips at the position the index names. When
-      // there is no position (an index outside the source, a negative index
-      // over a source whose length is not known, infinite or not a safe
-      // integer), the walk yields nothing, so the view is not enumerable:
-      // answering the source's enumerability let a consumer read the empty
-      // walk as an empty collection.
-      // A finite source with no count is listed by the walk
-      // (`walkOfListedSource()`).
-      isEnumerable: (expr) =>
-        viewCanListSource(expr)
-          ? true
-          : targetPosition(expr) === undefined
-            ? false
-            : enumerableFromSource(expr),
-      isLazy: (_expr) => true,
-      // One `op1.count` per level, threaded into the position guard — see
-      // `targetPositionOf`.
-      count: (expr) => {
-        if (!isFunction(expr)) return undefined;
-        const n = expr.op1.count;
-        if (n === undefined || targetPositionOf(expr, n) === undefined)
-          return undefined;
-        // A source count that is not a safe integer is a `bigint`.
-        if (typeof n === 'bigint') return normalizeCount(n - 1n);
-        return Number.isFinite(n) ? n - 1 : Infinity;
-      },
-      isEmpty: (expr) => {
-        if (!isFunction(expr)) return undefined;
-        const n = expr.op1.count;
-        if (n === undefined || targetPositionOf(expr, n) === undefined)
-          return undefined;
-        if (typeof n === 'bigint') return false;
-        return Number.isFinite(n) ? n - 1 <= 0 : false;
-      },
-      isFinite: (expr) => {
-        if (!isFunction(expr)) return undefined;
-        // A source that the walk lists (`walkOfListedSource()`) is finite.
-        if (viewCanListSource(expr)) return true;
-        const n = expr.op1.count;
-        if (n === undefined || targetPositionOf(expr, n) === undefined)
-          return undefined;
-        return isFiniteCount(n);
-      },
-      at: (
-        expr: Expression,
-        index: number | string
-      ): undefined | Expression => {
-        if (typeof index !== 'number' || !isFunction(expr)) return undefined;
-        const g = targetPosition(expr);
-        if (g === undefined) return undefined;
-        if (index < 1) return undefined;
-        return index < g ? expr.op1.at(index) : expr.op1.at(index + 1);
-      },
-      iterator: (expr) => {
-        if (!isFunction(expr)) return undefined;
-        // A finite source with no count: see `walkOfListedSource()`.
-        const listed = walkOfListedSource(expr);
-        if (listed) return listed;
-        const g = targetPosition(expr);
-        if (g === undefined) return undefined;
-        const source = expr.op1.each();
-        let pos = 0;
-        return {
-          next: () => {
-            for (;;) {
-              const { value, done } = source.next();
-              if (done) return { value: undefined, done: true };
-              pos += 1;
-              if (pos === g) continue; // skip the deleted position
-              return { value, done: false };
-            }
-          },
-        };
-      },
-    })
+        // The walk inserts or skips at the position the index names. When
+        // there is no position (an index outside the source, a negative index
+        // over a source whose length is not known, infinite or not a safe
+        // integer), the walk yields nothing, so the view is not enumerable:
+        // answering the source's enumerability let a consumer read the empty
+        // walk as an empty collection.
+        // A finite source with no count is listed by the walk
+        // (`walkOfListedSource()`).
+        isEnumerable: (expr) =>
+          viewCanListSource(expr)
+            ? true
+            : targetPosition(expr) === undefined
+              ? false
+              : enumerableFromSource(expr),
+        isLazy: (_expr) => true,
+        // One `op1.count` per level, threaded into the position guard — see
+        // `targetPositionOf`.
+        count: (expr) => {
+          if (!isFunction(expr)) return undefined;
+          const n = expr.op1.count;
+          if (n === undefined || targetPositionOf(expr, n) === undefined)
+            return undefined;
+          // A source count that is not a safe integer is a `bigint`.
+          if (typeof n === 'bigint') return normalizeCount(n - 1n);
+          return Number.isFinite(n) ? n - 1 : Infinity;
+        },
+        isEmpty: (expr) => {
+          if (!isFunction(expr)) return undefined;
+          const n = expr.op1.count;
+          if (n === undefined || targetPositionOf(expr, n) === undefined)
+            return undefined;
+          if (typeof n === 'bigint') return false;
+          return Number.isFinite(n) ? n - 1 <= 0 : false;
+        },
+        isFinite: (expr) => {
+          if (!isFunction(expr)) return undefined;
+          // A source that the walk lists (`walkOfListedSource()`) is finite.
+          if (viewCanListSource(expr)) return true;
+          const n = expr.op1.count;
+          if (n === undefined || targetPositionOf(expr, n) === undefined)
+            return undefined;
+          return isFiniteCount(n);
+        },
+        at: (
+          expr: Expression,
+          index: number | string
+        ): undefined | Expression => {
+          if (typeof index !== 'number' || !isFunction(expr)) return undefined;
+          const g = targetPosition(expr);
+          if (g === undefined) return undefined;
+          if (index < 1) return undefined;
+          return index < g ? expr.op1.at(index) : expr.op1.at(index + 1);
+        },
+        iterator: (expr) => {
+          if (!isFunction(expr)) return undefined;
+          // A finite source with no count: see `walkOfListedSource()`.
+          const listed = walkOfListedSource(expr);
+          if (listed) return listed;
+          const g = targetPosition(expr);
+          if (g === undefined) return undefined;
+          const source = expr.op1.each();
+          let pos = 0;
+          return {
+            next: () => {
+              for (;;) {
+                const { value, done } = source.next();
+                if (done) return { value: undefined, done: true };
+                pos += 1;
+                if (pos === g) continue; // skip the deleted position
+                return { value, done: false };
+              }
+            },
+          };
+        },
+      })
     ),
   },
 
