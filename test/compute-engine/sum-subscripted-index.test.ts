@@ -149,6 +149,52 @@ describe('a joined name that stays a name in a sum', () => {
     expect(evaluated('\\sum_{k=1}^{2} (a_k \\mapsto a_k^2)(3)')).toEqual(18);
   });
 
+  // The variable of a derivative is free in its value, so each term
+  // differentiates with respect to its own variable.
+  test('the variable of an inner derivative follows the index', () => {
+    expect(
+      evaluated('\\sum_{i=1}^{2} \\frac{\\partial}{\\partial x_i} x_i^2')
+    ).toEqual(['Add', ['Multiply', 2, 'x_1'], ['Multiply', 2, 'x_2']]);
+    expect(
+      evaluated('\\prod_{i=1}^{2} \\frac{\\partial}{\\partial x_i} x_i^3')
+    ).toEqual(['Multiply', 9, ['Power', 'x_1', 2], ['Power', 'x_2', 2]]);
+    expect(
+      evaluated('\\sum_{i=1}^{2} \\frac{\\partial}{\\partial x_i} (x_1 x_2)')
+    ).toEqual(['Add', 'x_1', 'x_2']);
+    expect(
+      evaluated('\\sum_{i=1}^{2} \\frac{\\partial^2}{\\partial x_i^2} x_i^3')
+    ).toEqual(['Add', ['Multiply', 6, 'x_1'], ['Multiply', 6, 'x_2']]);
+    expect(
+      evaluated('\\sum_{i=1}^{2} \\frac{\\mathrm{d}}{\\mathrm{d}x_i} \\sin(x_i)')
+    ).toEqual(['Add', ['Cos', 'x_1'], ['Cos', 'x_2']]);
+  });
+
+  test('an inner derivative of a symbol or a number', () => {
+    expect(
+      evaluated('\\sum_{i=1}^{2} \\frac{\\partial x_i}{\\partial x_i}')
+    ).toEqual(2);
+    expect(
+      evaluated('\\sum_{i=1}^{2} \\frac{\\partial}{\\partial x_i} y')
+    ).toEqual(0);
+    expect(
+      evaluated('\\sum_{i=1}^{2} \\frac{\\partial}{\\partial x_i} 5')
+    ).toEqual(0);
+  });
+
+  test('an inner derivative with a symbolic bound stays unevaluated', () => {
+    expect(
+      evaluated('\\sum_{i=1}^{n} \\frac{\\partial}{\\partial x_i} x_i^2')
+    ).toEqual([
+      'Sum',
+      [
+        'D',
+        ['Power', ['Subscript', 'x', ['Delimiter', 'i']], 2],
+        ['Subscript', 'x', 'i'],
+      ],
+      ['Limits', 'i', 1, 'n'],
+    ]);
+  });
+
   test('the head of a call that the host declared', () => {
     const ce = new ComputeEngine();
     ce.declare('f_k', 'function');
@@ -378,6 +424,26 @@ describe('a subscript on a variable that is not the index of a binder', () => {
 
   test('the variable of a derivative is not an index', () => {
     expect(boxed(['D', ['Subscript', 'c', 'x'], 'x'])).toEqual(0);
+  });
+
+  test('a subscript variable of a derivative with an integer index is a name', () => {
+    expect(boxed(['D', ['Power', 'x_1', 2], ['Subscript', 'x', 1]])).toEqual([
+      'Multiply',
+      2,
+      'x_1',
+    ]);
+    expect(boxed(['D', 'x_1', ['Subscript', 'x', 1]])).toEqual(1);
+    expect(boxed(['D', 'y', ['Subscript', 'x', 1]])).toEqual(0);
+    // The canonical form has the symbol, so the derivative binds it, and a
+    // substitution gives the value of the derivative at that point.
+    const ce = new ComputeEngine();
+    const d = ce.box(['D', ['Power', 'x_1', 2], ['Subscript', 'x', 1]]);
+    expect(d.json).toEqual(['D', ['Power', 'x_1', 2], 'x_1']);
+    expect(d.subs({ x_1: 3 }).evaluate().json).toEqual(6);
+    // An index that is a symbol is not read by value: the derivative stays.
+    expect(boxed(['D', ['Power', 'x_1', 2], ['Subscript', 'x', 'i']])).toEqual(
+      ['D', ['Power', 'x_1', 2], ['Subscript', 'x', 'i']]
+    );
   });
 
   test('a comprehension over integers indexes the base', () => {

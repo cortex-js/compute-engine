@@ -143,6 +143,13 @@
 
 ### Resolved Issues
 
+- **In a sum or a product, each derivative with respect to a subscripted
+  variable uses its own variable.**
+  `\sum_{i=1}^{2} \frac{\partial}{\partial x_i} x_i^2` gave `4x_i`, and it
+  now gives `2x_1 + 2x_2`. In MathJSON, `["D", ["Power", "x_1", 2],
+  ["Subscript", "x", 1]]` is the derivative with respect to `x_1`, `2x_1`;
+  it stayed unevaluated before.
+
 - **A function with a local variable, mapped over the rows of a matrix,
   gives a row for each row.** A function made with `ce.box()` before the
   call, such as `f = row ↦ (q ≔ 1; q·row/row)`, read `row` as a number, so

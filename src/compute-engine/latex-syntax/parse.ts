@@ -175,13 +175,19 @@ function isFactorHead(list: MathJsonExpression, name: string): boolean {
 
 /** The binders that the parser makes, and that bind the names after their
  * first operand: the index of `Sum` and `Product`, the variable of
- * `Integrate` and `D`, the parameters of `Function` (which also holds the
- * variable of `Limit`). */
+ * `Integrate`, the parameters of `Function` (which also holds the variable
+ * of `Limit`). In the body of `\sum_{k=1}^{2}`, a joined name `x_k` that one
+ * of these binds stays one name.
+ *
+ * `D` is not in the list: its variable is free in its value, so `x_k` there
+ * is `Subscript(x, k)` and follows the index. Each term of
+ * `\sum_{k=1}^{2}\frac{\partial}{\partial x_k} x_k^2` differentiates with
+ * respect to its own variable, and the sum is `2x_1 + 2x_2`
+ * (`subscriptVariableAsSymbol()` in `library/calculus.ts`). */
 const PARSED_BINDERS = new Set([
   'Sum',
   'Product',
   'Integrate',
-  'D',
   'Function',
 ]);
 

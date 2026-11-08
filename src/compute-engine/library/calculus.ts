@@ -5487,6 +5487,38 @@ function variableStampsValid(stamps: VariableStamp[]): boolean {
   );
 }
 
+/**
+ * A differentiation variable of `D`, with a subscript `Subscript(x, 1)`
+ * whose index is an integer literal replaced by the symbol `x_1`, the
+ * canonical form of that subscript. Any other variable is returned as it
+ * is.
+ *
+ * The parser reads `x_k` in the body of `\sum_{k=1}^{2}` as
+ * `Subscript(x, k)`, also in the variable of a derivative, so that each term
+ * of `\sum_{k=1}^{2}\frac{\partial}{\partial x_k} x_k^2` differentiates with
+ * respect to its own variable (`_subscriptBoundIndexes()` in
+ * `latex-syntax/parse.ts`). The sum puts the value of the index in each
+ * term, but the variables of `D` are held, so they are not made canonical
+ * with the rest of the term. Once the variable is a symbol, `D` binds it as
+ * any other variable, also for a substitution: `x_1` in
+ * `D(x_1^2, x_1)` is not replaced. A symbol index (`Subscript(x, k)`) is
+ * not read by value, and the derivative stays unevaluated.
+ */
+function subscriptVariableAsSymbol(variable: Expression): Expression {
+  if (!isFunction(variable, 'Subscript') || !isSymbol(variable.op1))
+    return variable;
+  const index = isFunction(variable.op2, 'Delimiter')
+    ? variable.op2.op1
+    : variable.op2;
+  if (!isNumber(index) || index.isInteger !== true) return variable;
+  const joined = variable.engine.box([
+    'Subscript',
+    variable.op1.symbol,
+    index.json,
+  ]);
+  return isSymbol(joined) ? joined : variable;
+}
+
 /** The records of the differentiations of `D` nodes, one slot for
  * `evaluate()` and one for a numeric approximation. Weakly held: the record
  * goes with the node. */
@@ -7031,6 +7063,11 @@ volumes
           ops = expanded;
         }
 
+        // A variable `Subscript(x, 1)` is the symbol `x_1`
+        // (`subscriptVariableAsSymbol()`).
+        if (ops.slice(1).some((v) => isFunction(v, 'Subscript')))
+          ops = [ops[0], ...ops.slice(1).map(subscriptVariableAsSymbol)];
+
         // A function literal of the differentiation variable, `D(x ↦ body, x)`,
         // is the derivative of its body: `evaluate` differentiates the body
         // and ignores the parameter, so `D(Function(Block(a+b), x), x)` and
@@ -7126,6 +7163,15 @@ volumes
         if (isFunction(op0) && op0.operator) {
           return ce._fn('D', [op0, ...ops.slice(1)], { scope });
         }
+
+        // A function literal holds only symbols as parameters, so a body
+        // with a variable `Subscript(x, k)` whose index is a symbol (`x_k` in
+        // the body of `\sum_{k=1}^{2}`) stays as it is. The sum puts the
+        // value of the index in each term, and the variable of the term is
+        // then the symbol `x_1`. Until then, `evaluate` leaves the
+        // derivative unevaluated, because the variable is not a symbol.
+        if (ops.slice(1).some((v) => isFunction(v, 'Subscript')))
+          return ce._fn('D', [op0, ...ops.slice(1)], { scope });
 
         const f = canonicalFunctionLiteralArguments(ce, ops);
         if (!f) return null;
