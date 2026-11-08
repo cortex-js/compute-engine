@@ -156,6 +156,15 @@
 
 ### Resolved Issues
 
+- **In an Epsil function body or block, a second clause of a function with
+  the same parameters is the error `function-redefinition`.** At the top level
+  of a program this was already an error. In a body, the second clause gave no
+  message, and a call used one clause or the other: with
+  `function g(a) { f(y) = y + 1; f(x) = x + 3; f(a) }`, `[g(5), g(6)]` was
+  `[6, 9]`. Now `epsil check` reports `function-redefinition`, and `g` is not
+  defined, as with two `let` of one name in a body. Clauses with different
+  parameters (`f(0) = 1` and `f(x) = 3`) still make one function.
+
 - **The derivative of an expression that holds a named point is computed.**
   The derivative of a symbol that holds a point is the zero point, not the
   number `0`. With `p := (1, 2)`, `D(p + (\sin u, u^2), u)` was an

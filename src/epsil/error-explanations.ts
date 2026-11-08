@@ -263,7 +263,9 @@ A host that calls \`ce.assign()\` on a constant gets a thrown error with the sam
 
 Only replacement is refused. Clauses that dispatch on genuinely different domains accumulate — a different arity (\`k(x)\` and \`k(x, y)\`), different parameter types (\`h(x: integer)\` and \`h(x: string)\`), or a literal pattern (\`g(0) = 99\` alongside \`g(x) = x\`). That is what multi-clause definitions are for.
 
-The boundary is the program (one file, one cell). Within it, a same-domain redefinition is a mistake with no possible intent. Interactively, re-running an edited definition as a SEPARATE program — a later notebook cell, the next REPL line — replaces the earlier one; that is the intended redefinition gesture, and is legal.`,
+The boundary is the program (one file, one cell). Within it, a same-domain redefinition is a mistake with no possible intent. Interactively, re-running an edited definition as a SEPARATE program — a later notebook cell, the next REPL line — replaces the earlier one; that is the intended redefinition gesture, and is legal.
+
+The rule applies in a function body and in a block too: two clauses with the same domain in one block are this error, as two \`let\` of one name are \`variable-redeclaration\`. \`epsil check\` reports it, and the block is invalid: in \`function g() { f(y) = 1; f(x) = 3; f(0) }\`, \`g\` is not defined. A clause in a nested block, or in a function body, with the domain of a clause of an enclosing scope is not a redefinition: it makes a local function that shadows the outer one. A statement that runs more than once, such as a definition in a loop body, does not collide with itself.`,
 
   'type-redefinition': `One program declares the same type name twice. A sum type's variant names count as names its statement declares, so a variant colliding with a later \`type\` statement reports this too.
 

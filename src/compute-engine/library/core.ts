@@ -203,6 +203,7 @@ import {
 import { findRoot, findRootAsync, fitRecordType } from '../nonlinear-fit.js';
 import {
   BLOCK_DEFINITION,
+  declareHasValue,
   elementRebindingFailure,
   isDeclaredForAssignment,
 } from './control-structures.js';
@@ -847,37 +848,6 @@ function initializeBlockLocal(
   bindings.set(name, local);
   const scratchRoot = scratchRootOfBinding(ce, declared);
   if (scratchRoot !== undefined) noteScratchBinding(scratchRoot, [local]);
-}
-
-/**
- * True when the operands `args` of a `Declare` (not canonical) give the
- * declared name a value: a positional value operand, which is not a
- * dictionary (`Declare(x, "integer", 5)`), or a `value` entry of an
- * attributes dictionary (`Declare(x, Dictionary(KeyValuePair("value", 5)))`,
- * the Epsil `let x = 5`). A dictionary that is not boxed yet is read from
- * its raw key and value pairs, without canonicalization; a boxed dictionary
- * (the MathJSON `{dict: {value: 5}}`) is read from its keys.
- */
-function declareHasValue(args: ReadonlyArray<Expression>): boolean {
-  const hasValueEntry = (op: Expression): boolean => {
-    if (isDictionary(op)) return op.get('value') !== undefined;
-    return (
-      isFunction(op, 'Dictionary') &&
-      op.ops.some((pair) => {
-        if (!isFunction(pair) || pair.ops.length !== 2) return false;
-        const key = pair.ops[0];
-        return isString(key) ? key.string === 'value' : sym(key) === 'value';
-      })
-    );
-  };
-  if (args.length >= 4) return true;
-  if (args.length === 3)
-    return (
-      !(isFunction(args[2], 'Dictionary') || isDictionary(args[2])) ||
-      hasValueEntry(args[2])
-    );
-  if (args.length === 2) return hasValueEntry(args[1]);
-  return false;
 }
 
 /**

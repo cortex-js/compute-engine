@@ -169,6 +169,12 @@ const CANONICALIZATION_ERROR_CODES = new Set([
   // route. The top level has no block: `variableRedeclarationDiagnostic`
   // reports it there.
   'variable-redeclaration',
+  // A second clause of a function, with the parameter domain of an earlier
+  // clause of the same block, is refused by `canonicalBlock` in the same way
+  // (`blockClauseRedefinition()`). At the top level the canonical handler of
+  // `DefineFunction` mints no error node: `clauseRedefinitionDiagnostic`
+  // reports it there.
+  'function-redefinition',
   // The rules of block locals (`docs/ERROR-MODEL.md`): a declaration has a
   // value (`declaration-without-value`, minted by the `Declare` canonical
   // handler), a first assignment of a name is at the own level of a block

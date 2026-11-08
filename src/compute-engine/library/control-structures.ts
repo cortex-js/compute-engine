@@ -94,11 +94,15 @@ import {
   isSubtype,
   provablyDisjoint,
 } from '../../common/type/subtype.js';
-import type { Type } from '../../common/type/types.js';
+import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
 import { functionLiteralDeclaredSignature } from '../boxed-expression/function-literal.js';
 import { isGenericTarget } from '../multi-clause.js';
-import { canonInstallSkipped } from '../clause-identity.js';
+import {
+  canonInstallSkipped,
+  clauseSignatureOf,
+  sameParameterDomain,
+} from '../clause-identity.js';
 import {
   CancellationError,
   checkDeadline,
@@ -4771,10 +4775,8 @@ function canonicalBlock(
   // index of the first statement that declares it (a `Declare`, an `Assign`
   // or a `DefineFunction`). Kept only for the top-level block of a program
   // (`isProgramBlock()`): see `LATER_DECLARATIONS`.
-  const firstDeclaration =
-    scope !== undefined && isProgramBlock(ce, scope)
-      ? new Map<string, number>()
-      : undefined;
+  const programBlock = scope !== undefined && isProgramBlock(ce, scope);
+  const firstDeclaration = programBlock ? new Map<string, number>() : undefined;
   // The index of the first statement that declares each name, read in one
   // pass over the statements.
   const firstIndex =
@@ -4999,6 +5001,21 @@ function canonicalBlock(
   // The names that the function definition statements of this block define.
   const functionStatementNames = functionDefinitionNames(ops);
 
+  // The parameter domains of the function clauses that the statements of
+  // this block define, for each name (`blockClauseRedefinition()`). Only a
+  // block of an Epsil program has this record: while `executeEpsil()` runs
+  // (`_epsilBatchId`) or while the static pass of `epsil check` runs
+  // (`_staticTypeCheckDepth`). On the host route a clause with the parameter
+  // domain of an earlier clause replaces it, as the guide documents for
+  // `DefineFunction`. The top-level block of a program has no record either:
+  // there, the installation of each clause and the static pass make the
+  // check for the statements of an Epsil program.
+  const blockClauses =
+    !programBlock &&
+    (ce._epsilBatchId !== undefined || ce._staticTypeCheckDepth > 0)
+      ? new Map<string, FunctionSignature[]>()
+      : undefined;
+
   // The scope that encloses the block: the boundary of the shadow of its
   // names (`_shadowedParameterBoundary()`).
   const boundary = ce.context.lexicalScope;
@@ -5052,6 +5069,15 @@ function canonicalBlock(
                 canonicalStatement(ce, op)
               )
             : canonicalStatement(ce, op);
+          if (blockClauses !== undefined) {
+            const redefinition = blockClauseRedefinition(
+              ce,
+              op,
+              statement,
+              blockClauses
+            );
+            if (redefinition !== undefined) return redefinition;
+          }
           return isSymbol(statement)
             ? canonicalValueOperand(ce, statement)
             : statement;
@@ -5068,6 +5094,113 @@ function canonicalBlock(
     statements = withUseBeforeDeclarationErrors(ce, ops, statements, scope);
 
   return ce._fn('Block', statements, { scope });
+}
+
+/**
+ * True when the operands `args` of a `Declare` (not canonical) give the
+ * declared name a value: a positional value operand, which is not a
+ * dictionary (`Declare(x, "integer", 5)`), or a `value` entry of an
+ * attributes dictionary (`Declare(x, Dictionary(KeyValuePair("value", 5)))`,
+ * the Epsil `let x = 5`). A dictionary that is not boxed yet is read from
+ * its raw key and value pairs, without canonicalization; a boxed dictionary
+ * (the MathJSON `{dict: {value: 5}}`) is read from its keys.
+ */
+export function declareHasValue(args: ReadonlyArray<Expression>): boolean {
+  const hasValueEntry = (op: Expression): boolean => {
+    if (isDictionary(op)) return op.get('value') !== undefined;
+    return (
+      isFunction(op, 'Dictionary') &&
+      op.ops.some((pair) => {
+        if (!isFunction(pair) || pair.ops.length !== 2) return false;
+        const key = pair.ops[0];
+        return isString(key) ? key.string === 'value' : sym(key) === 'value';
+      })
+    );
+  };
+  if (args.length >= 4) return true;
+  if (args.length === 3)
+    return (
+      !(isFunction(args[2], 'Dictionary') || isDictionary(args[2])) ||
+      hasValueEntry(args[2])
+    );
+  if (args.length === 2) return hasValueEntry(args[1]);
+  return false;
+}
+
+/**
+ * The error `function-redefinition` when the block statement `op` defines a
+ * clause of a function whose parameter domain is the domain of a clause that
+ * an earlier statement of the same block defines, else `undefined`.
+ * `canonical` is the canonical form of `op`, and `clauses` holds, for each
+ * name, the parameter domains of the clauses that the earlier statements of
+ * the block define. The function adds the clause of `op` to `clauses` when it
+ * is not a redefinition.
+ *
+ * In an Epsil program, two clauses of one function with the same parameter
+ * domain are an error, because the second would replace the first with no
+ * message (`f(x) = x` then `f(x) = 2 * x`; the parameter names do not count).
+ * The caller, `canonicalBlock()`, calls this function only for a block of an
+ * Epsil program: on the host route the second clause replaces the first. At the
+ * top level of an Epsil program, the installation of the second clause
+ * (`checkSameUnitClauseRedefinition()`) and the static pass of `epsil check`
+ * report it. Those checks do not see the statements of a function body or of
+ * a block, so the block refuses the second statement here, as it refuses a
+ * second `let` of a name. The error makes the block invalid: a function whose
+ * body has it is not defined, and the static pass reports it before the
+ * program runs. Clauses with different parameter domains (another arity,
+ * another parameter type, a literal parameter) add to the function.
+ *
+ * The domain is the one that `defineFunctionClause()` (`multi-clause.ts`)
+ * compares to choose between replacing a clause and adding one. These
+ * statements are not compared:
+ * - a generic clause: a second clause of a generic function is the error
+ *   `generic-clause-unsupported`;
+ * - a definition of the constructor of a declared type, which is not a clause
+ *   (`isFunctionDeclarationStatement()`);
+ * - a definition that the canonical handler of `DefineFunction` did not
+ *   install for another reason (`canonInstallSkipped()`). It is not recorded,
+ *   so that a later clause is not reported as the redefinition of a clause
+ *   that does not exist.
+ *
+ * An assignment of the name (`f = (x) => 42`), or a declaration of the name
+ * with a value (`let f = (x) => 42`), removes the clauses recorded for it,
+ * because it replaces all the clauses of the function. A declaration without
+ * a value (`let f: (integer) -> integer`) states a signature and replaces no
+ * clause, so it removes nothing, as at the top level
+ * (`forgetReplacedClauses()`, `src/epsil/static-diagnostics.ts`).
+ */
+function blockClauseRedefinition(
+  ce: ComputeEngine,
+  op: Expression,
+  canonical: Expression,
+  clauses: Map<string, FunctionSignature[]>
+): Expression | undefined {
+  const raw = typedStatement(op);
+  if (!isFunction(raw, 'DefineFunction')) {
+    if (
+      isFunction(raw, 'Assign') ||
+      (isFunction(raw, 'Declare') && declareHasValue(raw.ops))
+    )
+      for (const name of statementDeclaredNames(op)) clauses.delete(name);
+    return undefined;
+  }
+  if (!isFunctionDeclarationStatement(ce, raw)) return undefined;
+  const statement = typedStatement(canonical);
+  if (!isFunction(statement, 'DefineFunction')) return undefined;
+  const name = sym(statement.ops[0]);
+  const literal = statement.ops[1];
+  if (name === undefined || !isFunction(literal, 'Function')) return undefined;
+  const literalType = literal.type.type;
+  if (isPolymorphicType(literalType)) return undefined;
+  const signature = clauseSignatureOf(literalType);
+  const defined = clauses.get(name) ?? [];
+  if (defined.some((earlier) => sameParameterDomain(earlier, signature)))
+    return ce.error(['function-redefinition', name]);
+  if (!canonInstallSkipped(ce.lookupDefinition(name))) {
+    defined.push(signature);
+    clauses.set(name, defined);
+  }
+  return undefined;
 }
 
 /**

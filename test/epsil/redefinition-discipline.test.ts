@@ -1070,6 +1070,125 @@ describe('the discipline over function clauses', () => {
     });
   });
 
+  describe('in a function body or a block', () => {
+    // The block refuses the second clause when it is canonicalized
+    // (`blockClauseRedefinition()`, `library/control-structures.ts`), as it
+    // refuses a second `let`: the static pass reports the error before the
+    // program runs, and a function whose body has it is not defined. Without
+    // the check, the first call of `g` used the first clause and the later
+    // calls used the second, with no message.
+    const run = (source: string) => {
+      const r = executeEpsil(new ComputeEngine(), source);
+      return { value: r.value.json, codes: codes(r.diagnostics) };
+    };
+    const staticCodes = (source: string) =>
+      checkSource(source).diagnostics.map((d) =>
+        Array.isArray(d.message) && d.message[0] === 'static-type-error'
+          ? d.message[3]
+          : codes([d])[0]
+      );
+
+    test('a second clause with the same parameters in a body is reported', () => {
+      const source = 'function g(a) {\n  f(y) := y + 1\n  f(x) := x + 3\n  f(a)\n}\n[g(5), g(6)]';
+      expect(staticCodes(source)).toEqual(['function-redefinition']);
+      const r = run(source);
+      expect(r.codes).toContain('static-type-error');
+      expect(r.codes).toContain('runtime-error');
+      // `g` is not defined, so each call stays unevaluated.
+      expect(r.value).toEqual(['List', ['g', 5], ['g', 6]]);
+    });
+
+    test('the same parameter types under other names, and a declared signature', () => {
+      expect(
+        staticCodes(
+          'function g() {\n  f(n: integer) = 1\n  f(m: integer) = 2\n  f(0)\n}\ng()'
+        )
+      ).toEqual(['function-redefinition']);
+      expect(
+        staticCodes(
+          'function g() {\n  let f: (integer) -> integer\n  f(n) = 1\n  f(m) = 2\n  f(0)\n}\ng()'
+        )
+      ).toEqual(['function-redefinition']);
+    });
+
+    test('in a block of a conditional, the block is the error', () => {
+      const source =
+        'if (true) {\n  f(y) := y + 1\n  f(x) := x + 3\n  f(5)\n} else { 0 }';
+      expect(staticCodes(source)).toEqual(['function-redefinition']);
+      expect((run(source).value as unknown[]).slice(0, 2)).toEqual([
+        'Error',
+        ['ErrorCode', "'function-redefinition'", "'f'"],
+      ]);
+    });
+
+    test('clauses with distinct parameter domains still add', () => {
+      const sources: [string, unknown][] = [
+        ['function g() {\n  f(x) = 1\n  f(x, y) = 2\n  f(0) + f(0, 0)\n}\ng()', 3],
+        ['function g() {\n  f(x: integer) = 1\n  f(x: string) = 2\n  f(0) + f("a")\n}\ng()', 3],
+        [
+          'function fib(n) {\n  function f(0) { 0 }\n  function f(1) { 1 }\n  function f(k) { f(k - 1) + f(k - 2) }\n  f(n)\n}\nfib(10)',
+          55,
+        ],
+      ];
+      for (const [source, value] of sources) {
+        expect(staticCodes(source)).toEqual([]);
+        expect(run(source)).toEqual({ value, codes: [] });
+      }
+    });
+
+    test('a statement that runs more than once is not a redefinition', () => {
+      const source =
+        'function g() {\n  let s = 0\n  for i in 1..3 {\n    h(x) = x + i\n    s += h(0)\n  }\n  s\n}\ng()';
+      expect(staticCodes(source)).toEqual([]);
+      expect(run(source)).toEqual({ value: 6, codes: [] });
+    });
+
+    test('an assignment between the clauses replaces them first', () => {
+      const source =
+        'function g() {\n  f(n) = 1\n  f = (x) => 42\n  f(m) = 2\n  f(0)\n}\ng()';
+      expect(staticCodes(source)).toEqual([]);
+      expect(run(source).codes).toEqual([]);
+    });
+
+    test('a nested block and an outer function shadow, and are not redefinitions', () => {
+      const nested =
+        'function g() {\n  f(n) = 1\n  if (true) {\n    f(m) = 2\n    f(0)\n  } else { f(0) }\n}\ng()';
+      expect(staticCodes(nested)).toEqual([]);
+      expect(run(nested)).toEqual({ value: 2, codes: [] });
+      const outer = 'f(x) = 1\nfunction g() {\n  f(x) = 2\n  f(0)\n}\n[g(), f(0)]';
+      expect(staticCodes(outer)).toEqual([]);
+      expect(run(outer)).toEqual({ value: ['List', 2, 1], codes: [] });
+    });
+
+    test('a declaration without a value between the clauses keeps them', () => {
+      // `let f: …` states a signature and replaces no clause.
+      const source =
+        'function g() {\n  f(n: integer) = 1\n  let f: (integer) -> integer\n  f(m: integer) = 2\n  f(0)\n}\ng()';
+      expect(staticCodes(source)).toEqual(['function-redefinition']);
+    });
+
+    test('on the host route, a clause in a nested block replaces the earlier one', () => {
+      // The host rule of `DefineFunction`: a new clause with the same
+      // parameter types replaces the earlier clause.
+      const ce = new ComputeEngine();
+      const nested = ce.box([
+        'Block',
+        [
+          'If',
+          'True',
+          [
+            'Block',
+            ['DefineFunction', 'f', ['Function', 1, 'x']],
+            ['DefineFunction', 'f', ['Function', 2, 'y']],
+            ['f', 0],
+          ],
+          0,
+        ],
+      ] as never);
+      expect(nested.evaluate().json).toBe(2);
+    });
+  });
+
   describe('the host route is exempt', () => {
     test('a box-route definition replaces freely, with no batch to collide in', () => {
       const ce = new ComputeEngine();
