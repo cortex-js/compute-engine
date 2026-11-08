@@ -30,6 +30,23 @@ async function collect(): Promise<void> {
   gc();
 }
 
+/** Collect until the definition that waits on `probe` is collected, at most
+ * 20 times. One collection does not always free the definitions of a popped
+ * scope when many test workers load the machine, so a test that counts the
+ * references of another name must first see a definition of the same scope
+ * collected. The read of `probe` removes only the references of `probe`, so
+ * the references of the other names stay as the test left them. */
+async function collectUntilProbeGone(
+  ce: ComputeEngine,
+  probe: string
+): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await collect();
+    if (_provisionalDependentCount(ce, probe) === 0) return;
+  }
+  throw new Error(`the definition that waits on "${probe}" was not collected`);
+}
+
 /** Define `fnName := x ↦ head(x) + 1`, with `head` undeclared: the body
  * applies `head` provisionally, and the definition waits on `head`. */
 function defineApplying(ce: ComputeEngine, fnName: string, head: string) {
@@ -144,9 +161,10 @@ describe('CE-1102: the registry of waiting definitions holds weak references', (
     const ce = new ComputeEngine();
     ce.pushScope();
     for (let i = 0; i < 40; i++) defineApplying(ce, `f_${i}`, 'h');
+    defineApplying(ce, 'probeFn', 'probeHead');
     ce.popScope();
     moveTypingMemo(ce);
-    await collect();
+    await collectUntilProbeGone(ce, 'probeHead');
     // No read of `h` yet: the 40 collected references are still there.
     expect(_provisionalReferenceCount(ce, 'h')).toBe(40);
 
