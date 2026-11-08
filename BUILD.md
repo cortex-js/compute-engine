@@ -87,9 +87,7 @@ defaults to the scope, risk, available checks, and work being done in parallel.
 
 Give each agent one issue or one ROADMAP item. Use the `implementer` agent (Opus) for
 implementation and the `mechanic` agent (Sonnet) for recipe-driven edits and
-read-only audits; both carry a stop rule that ends a run after about 150 tool
-calls or a third repeat of the same failure, with a report. The rule is in
-the shared protocol §9 and `docs/COMPUTE-ENGINE-BOX-SPECIFICS.md` §9.
+read-only audits.
 
 Before returning a delegated implementation:
 

@@ -988,6 +988,19 @@ subtype of `list<integer | list>`, and it can be wider than that type, for
 example `list<integer | list<unknown>>`. Each of these types holds every
 value.
 
+Known limitation: in a mutual recursion, the type of a call of the second
+function can leave out a value when the call of the first function was typed
+first. With `f` and `g` declared `(unknown) -> unknown` and `m: integer`,
+`f := n ↦ If(n = 0, "a", g(n − 1))`, then `g := n ↦ If(n = 0, 2, f(n − 1))`:
+when the type of `f(m)` is read first, `g(m)` is typed `number`, but `g(1)`
+is `"a"`. The body of `g` is typed while the result type of `f` is computed,
+with `f(n − 1)` left out of the join as a recursive call, and the type cache
+keeps that type after the computation of `f` ends. A sound fix records, for
+each cached type, the computations it depends on, in the most-used cache of
+the engine; it is done when a program from real use shows the defect. The
+analysis and the two attempts that failed are in
+`docs/plans/2026-11-08-ce1091-mutual-recursion-type-cache.md`.
+
 A use of a call at a typed parameter may refine a result that the body leaves
 `unknown`: `k := x ↦ x` used in `k(1) + 2` gets the result `real`
 (`_inferWithoutFacts`, `boxed-expression/boxed-function.ts`). A result that

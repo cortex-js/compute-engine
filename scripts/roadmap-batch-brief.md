@@ -20,40 +20,17 @@ Read `AGENTS.md`, then the documents it names for your work:
 `docs/COMPUTE-ENGINE-BOX-SPECIFICS.md`, `~/.claude/SHARED-BOX-PROTOCOL.md`
 (sections 1, 2, 5) and `docs/ISSUE_TRACKING.md`. They apply in full.
 
-At about 150 tool calls, stop and judge. Continue only when the approach
-works and what remains is a known list of steps (a review round, delivery,
-CHANGELOG, commit). Otherwise stop and report. Also stop and report when the
-same failure comes back a third time, or when the planned approach does not
-work. Report what you tried, the state of the diff, what is still open, and
-the next step you propose. Stopping is a normal result, not a failure.
-
-NEVER run `git stash`, `git checkout`, `git restore`, `git reset`, or ANY git
-command that modifies the tree or index. If the working tree looks wrong,
-inconsistent, or contains unexpected changes, STOP and report; do not attempt
-to clean, baseline, or recover it.
-Exceptions: `git worktree add --detach` and `git worktree remove` for your own
+Exceptions to the git rules of `~/.claude/CLAUDE.md`, for this item only:
+`git worktree add --detach` and `git worktree remove` for your own
 worktree, `git apply --check` then `git apply` of your own patch onto the main
 tree, staging your own files only with `~/.claude/scripts/stage-helper.mjs`,
 and `git commit` of what you staged. Owner name: `{{NAME}}`. Commit message:
 `{{ID}}: <what the change does, in one line>`, with no trailer that names a
 tool (the commit-msg hook refuses one).
 
-Wrap every test run in `timeout -k 30 600 …`, for example
-`timeout -k 30 600 npx jest -w 2 -- test/compute-engine/<file>.test.ts`.
-Run a check without a pipe and record its own exit code, because the exit
-status of a pipeline is that of its last command.
-
-Edit a TypeScript file with the Edit tool, not with a Python, sed or heredoc
-script, because a script replace can change every match or none with no error.
-
-Do not run Prettier (`prettier --write`, `npm run format`) on the files you
-edit, because it can reformat lines that your change does not touch, and the
-diff must hold only your change.
-
 After you write or change an issue file, run `node scripts/issues.mjs lint`
 and fix each error before you commit, because the backlog and the board leave
-out a file with an error. An issue body is at most 500 words; a longer
-analysis goes in a plan document in `docs/plans/`, which the body links.
+out a file with an error.
 
 Write a temporary file only in `/tmp`, never in another repo, because the rule
 that protects the uncommitted work of that repo allows only reads and test runs
@@ -83,7 +60,11 @@ there.
 4. Make a worktree: `git worktree add --detach /tmp/wt-{{NAME}} HEAD`, then
    `ln -s /Users/arno/dev/compute-engine/node_modules /tmp/wt-{{NAME}}/node_modules`.
    Write every later command for it with an absolute path or
-   `git -C /tmp/wt-{{NAME}}`. Do the fix and its tests there. Do the work
+   `git -C /tmp/wt-{{NAME}}`. When `/tmp/wt-{{NAME}}` already exists, an
+   earlier session stopped there, and the "State of the work" paragraph of
+   the issue says what remains: do not make a new worktree; read its
+   `git -C /tmp/wt-{{NAME}} diff HEAD` and do only the steps that remain. Its
+   base can be older than HEAD; step 7 reconciles the patch. Do the fix and its tests there. Do the work
    yourself; use a subagent only for the review.
 5. Run the checks of `BUILD.md` "Completing delegated tasks" item 1 in the
    worktree: the test files of the change, the test files that contain a
@@ -124,9 +105,9 @@ needs-decision` and `set {{ID}} ask "<one sentence: what the board must
 choose>"`, commit nothing else, and stop: a code change committed with the
 question can be made wrong or not necessary by the decision, and the board
 reads only the issue. When you stop before the work is
-done, run `issues.mjs set {{ID}} state open`, add one paragraph to the body
-that says what remains and where the worktree is, and leave the worktree in
-place.
+done, run `issues.mjs set {{ID}} state open`, add a `## State of the work`
+section to the body that says what remains and where the worktree is, and
+leave the worktree in place.
 
 ## The report
 
