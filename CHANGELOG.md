@@ -143,6 +143,16 @@
 
 ### Resolved Issues
 
+- **A function mapped over residue classes reads the variables of the scope
+  where it was made.** With `k = 1`, a function `f = x ↦ k·x` made with
+  `ce.box()`, and an inner scope that declares another `k = 2`,
+  `Map(f, [ResidueClass(2, 5), ResidueClass(3, 5)])` gave
+  `[ResidueClass(4, 5), ResidueClass(1, 5)]`, although `f(ResidueClass(2, 5))`
+  gave `ResidueClass(2, 5)`. The map now gives
+  `[ResidueClass(2, 5), ResidueClass(3, 5)]`. The same applies to the other
+  operators that apply a function to the elements of a collection, such as
+  `Reduce`.
+
 - **A numeric double integral whose integrand grows like `1/r` near two,
   three or four points of the box now gives its value.** The potential of two
   point charges over the unit square,

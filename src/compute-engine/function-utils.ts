@@ -416,22 +416,31 @@ export function order(
  * (`docs/plans/2026-10-26-value-kinds.md`, section 4.2, decision B). For rows
  * (`Scan([[1, 2], [3, 4]], f, 0)` with `f = (a, t) ↦ a + t`) the body typed
  * the running sum as a number, so the scan was typed as a list of numbers.
+ *
+ * `scope` is the lexical scope in which `x` was canonicalized. The written
+ * form must be canonicalized again in that scope, not in the scope of the
+ * caller: a free name of the body (`k` in `x ↦ k·x`) is then bound to the
+ * definition that `x` reads, also when the scope of the caller declares
+ * another `k`.
  */
 export function writtenUntypedFunctionLiteral(
   x: Expression
-): Expression | undefined {
+): { literal: Expression; scope: Scope } | undefined {
   // The map keeps only the written operands. The non-canonical `Function`
   // expression is built here, when a caller asks for it, because few
   // literals boxed before a call are applied to elements that are not
   // numbers.
-  const ops = WRITTEN_UNTYPED_LITERALS.get(x);
-  if (ops === undefined) return undefined;
-  return x.engine._fn('Function', [...ops], { canonical: false });
+  const written = WRITTEN_UNTYPED_LITERALS.get(x);
+  if (written === undefined) return undefined;
+  return {
+    literal: x.engine._fn('Function', [...written.ops], { canonical: false }),
+    scope: written.scope,
+  };
 }
 
 const WRITTEN_UNTYPED_LITERALS = new WeakMap<
   Expression,
-  ReadonlyArray<Expression>
+  { ops: ReadonlyArray<Expression>; scope: Scope }
 >();
 
 export function canonicalFunctionLiteral(
@@ -748,7 +757,9 @@ export function kindTypedFunctionLiteral(
     input = literal as unknown as ExpressionInput;
   else if (isExpression(literal) && isFunction(literal, 'Function')) {
     const x = literal as Expression;
-    const written = x.isCanonical ? writtenUntypedFunctionLiteral(x) : x;
+    const written = x.isCanonical
+      ? writtenUntypedFunctionLiteral(x)?.literal
+      : x;
     if (written === undefined) return undefined;
     input = written;
   } else return undefined;
@@ -834,7 +845,10 @@ export function canonicalFunctionLiteralOperands(
     !ops.every((x) => x.isCanonical) &&
     ops.slice(1).every((x) => isSymbol(x))
   )
-    WRITTEN_UNTYPED_LITERALS.set(result, ops);
+    WRITTEN_UNTYPED_LITERALS.set(result, {
+      ops,
+      scope: ce.context.lexicalScope,
+    });
   return result;
 }
 

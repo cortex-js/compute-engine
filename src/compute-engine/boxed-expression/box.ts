@@ -2231,7 +2231,9 @@ function annotateCallbacksFromContextualSolve(
   const stampable: {
     slot: CallbackSlot;
     raw: Expression;
-    preboxed: boolean;
+    /** For a literal boxed before the call, the lexical scope in which it
+     * was boxed; `undefined` for an inline literal. */
+    boxedIn: Scope | undefined;
   }[] = [];
   for (const slot of plan.callbacks) {
     const op = ops[slot.index];
@@ -2241,7 +2243,7 @@ function annotateCallbacksFromContextualSolve(
     // work every multi-collection `Map` would otherwise pay.
     if (!mayBeInlineFunctionLiteral(op)) continue;
     const raw = inlineLiteral(ce, op);
-    if (raw !== undefined) stampable.push({ slot, raw, preboxed: false });
+    if (raw !== undefined) stampable.push({ slot, raw, boxedIn: undefined });
     else {
       // A function literal boxed before the call, with no annotated
       // parameter, is stamped too, from its written form, but only with a
@@ -2251,7 +2253,11 @@ function annotateCallbacksFromContextualSolve(
           ? writtenUntypedFunctionLiteral(op)
           : undefined;
       if (written !== undefined)
-        stampable.push({ slot, raw: written, preboxed: true });
+        stampable.push({
+          slot,
+          raw: written.literal,
+          boxedIn: written.scope,
+        });
     }
   }
   if (stampable.length === 0) return ops;
@@ -2285,7 +2291,7 @@ function annotateCallbacksFromContextualSolve(
 
   // §5 step 2 + step 3.
   const instantiated = instantiateCallbackSlots(arm, plan, actuals);
-  for (const { slot, raw, preboxed } of stampable) {
+  for (const { slot, raw, boxedIn } of stampable) {
     const s = instantiated.get(slot.index);
     if (s === undefined) continue;
     // A VARIADIC contextual arrow (`(T+) any -> U` as a SLOT) would pair one
@@ -2344,24 +2350,46 @@ function annotateCallbacksFromContextualSolve(
     // is less precise, and a body that this reading simplified (`row/row`
     // to `1`) gives a value of the wrong shape, as before this rule. The
     // test also fails for a body with a `Block` local or a nested literal.
-    // A kind value keeps the rule above without this test, because the
-    // boxed body can give a wrong value.
-    if (preboxed) {
+    // A kind value cannot keep its boxed form, because the boxed body can
+    // give a wrong value. When the call is in another scope than the one
+    // where the literal was boxed (`boxedIn`) and the test fails, the
+    // literal is canonicalized here, in `boxedIn`: `x ↦ k·x` boxed where
+    // `k = 1`, and mapped over residue classes in a scope that declares
+    // another `k = 2`, reads `k = 1`, as `Apply` of the boxed literal does.
+    // Otherwise the literal is left raw, as an inline literal is, because
+    // the canonical handler of a fold re-canonicalizes a raw literal to
+    // refine the type of its accumulator (`bareAccumulatorName()`,
+    // `library/collections.ts`). A literal canonicalized here does not get
+    // that refinement: a fold that builds a list of residue classes in
+    // another scope is typed `collection<any>`, not `list<residue>`; its
+    // value is the same. A name that `boxedIn` declares after the literal
+    // was boxed is read in `boxedIn` as it is now.
+    let canonicalIn: Scope | undefined = undefined;
+    if (boxedIn !== undefined) {
       const kind = paramTypes.some(
         (x) => x !== undefined && isKindElementType(x)
       );
-      if (
-        !kind &&
-        !(
-          paramTypes.some(
-            (x) => x !== undefined && !isSubtype(resolveType(x), 'number')
-          ) && bindsAsInCurrentScope(ce, ops[slot.index] as Expression, raw)
+      if (!kind) {
+        if (
+          !(
+            paramTypes.some(
+              (x) => x !== undefined && !isSubtype(resolveType(x), 'number')
+            ) && bindsAsInCurrentScope(ce, ops[slot.index] as Expression, raw)
+          )
         )
+          continue;
+      } else if (
+        boxedIn !== ce.context.lexicalScope &&
+        !bindsAsInCurrentScope(ce, ops[slot.index] as Expression, raw)
       )
-        continue;
+        canonicalIn = boxedIn;
     }
-    const literal = annotateFunctionLiteralParams(ce, raw, paramTypes);
-    if (literal === undefined) continue;
+    const annotated = annotateFunctionLiteralParams(ce, raw, paramTypes);
+    if (annotated === undefined) continue;
+    const literal =
+      canonicalIn === undefined
+        ? annotated
+        : ce._inScope(canonicalIn, () => annotated.canonical);
     result ??= [...ops];
     result[slot.index] = literal;
     // The record keeps the literal that the call received. For a literal
@@ -2372,7 +2400,7 @@ function annotateCallbacksFromContextualSolve(
     if (out !== undefined)
       (literals ??= new Map()).set(
         slot.index,
-        preboxed ? (ops[slot.index] as Expression) : raw
+        boxedIn !== undefined ? (ops[slot.index] as Expression) : raw
       );
   }
 
