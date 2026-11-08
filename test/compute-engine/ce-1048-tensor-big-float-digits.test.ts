@@ -10,8 +10,9 @@ import type { Expression } from '../../src/compute-engine';
 // only about 16 digits, so an element that is a big-number float with more
 // digits than a double holds makes the tensor use the `expression` dtype
 // (`float64HoldsDigits()`, `tensor/tensor-fields.ts`), whose cells are the
-// boxed elements. These tests hold that each element of the result is the
-// value that the interpreter computes for the same scalars.
+// boxed elements. At machine precision, every big-number float does so, also
+// one that a double holds. These tests hold that each element of the result
+// is the value that the interpreter computes for the same scalars.
 //
 
 const BIG = '0.123456789012345678901234567';
@@ -149,6 +150,54 @@ describe('a number times a list or a matrix', () => {
       .box(['Multiply', 2, ['List', ['List', el, 1], ['List', 2, 3]]])
       .evaluate();
     expect(matrix.ops![0].ops![0].json).toEqual(scalar.json);
+  });
+
+  // A float such as `0.3` made at a higher precision is stored as a decimal,
+  // and a double holds its value. At machine precision the scalar product
+  // multiplies the decimal (`3·0.3` is `0.9`), so each element of a list or
+  // a matrix must be multiplied as a decimal too, not as the double, which
+  // gives `0.8999999999999999`.
+  test('a float that a double holds, made at a higher precision, then machine precision', () => {
+    const ce = engine();
+    const el = ce.parse('0.3');
+    ce.precision = 'machine';
+    const scalar = ce.box(['Multiply', 3, el]).evaluate();
+    expect(scalar.json).toEqual(0.9);
+    const products: Expression[] = [
+      ce.box(['Multiply', 3, ['List', el, 1.5]]).evaluate().ops![0],
+      ce.box(['Multiply', ['List', el, 1.5], 3]).evaluate().ops![0],
+      ce.box(['Multiply', ['List', el, 1], ['List', 3, 3]]).evaluate().ops![0],
+      ce.box(['Multiply', 3, ['List', ['List', el, 1], ['List', 2, 3]]])
+        .evaluate()
+        .ops![0].ops![0],
+      ce.box(['Dot', ['List', el, 1], ['List', 3, 0]]).evaluate(),
+      ce
+        .box([
+          'MatrixMultiply',
+          ['List', ['List', el, 1]],
+          ['List', ['List', 3], ['List', 0]],
+        ])
+        .evaluate()
+        .ops![0].ops![0],
+    ];
+    for (const x of products) expect(x.json).toEqual(scalar.json);
+    // A division by a number, also as a product with its reciprocal.
+    const quotient = ce.box(['Divide', el, 3]).evaluate();
+    expect(quotient.json).toEqual(0.1);
+    expect(
+      ce.box(['Divide', ['List', el, 1.5], 3]).evaluate().ops![0].json
+    ).toEqual(quotient.json);
+  });
+
+  test('a list of machine numbers is multiplied as doubles at machine precision', () => {
+    const ce = new ComputeEngine();
+    ce.precision = 'machine';
+    const x = ce.box(['Multiply', 3, ['List', 0.3, 1.5]]).evaluate();
+    expect(x.json).toEqual(['List', 0.8999999999999999, 4.5]);
+    const m = ce
+      .box(['Multiply', 3, ['List', ['List', 0.3, 1], ['List', 2, 3]]])
+      .evaluate();
+    expect(m.ops![0].ops![0].json).toEqual(0.8999999999999999);
   });
 
   test('a list of doubles gives the same answer as before', () => {

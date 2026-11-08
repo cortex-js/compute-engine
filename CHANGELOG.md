@@ -147,6 +147,14 @@
 
 ### Resolved Issues
 
+- **A number made at a higher precision gives the same digits in a list as
+  alone, after the engine is set to machine precision.** With `b` the
+  number `0.3` made at precision 30 and the engine then set to `"machine"`,
+  `3b` is `0.9`, but `3·[b, 1.5]` and `3·[[b, 1], [2, 3]]` gave
+  `0.8999999999999999` for the element of `b`. They now give `0.9`, and so
+  do the element-wise product, `Dot` and the matrix product. A list of
+  machine numbers is computed on doubles as before, at the same speed.
+
 - **In Epsil, an error in the body of a called function underlines the
   call.** With `function g(x) { Ln(x) + 1 }` and `let y = 5`, the error of
   `let v = y + g("a")` underlined `y`, because the sum in the body of `g`

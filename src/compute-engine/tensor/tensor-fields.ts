@@ -1,5 +1,6 @@
 import { Complex } from 'complex.js';
 import { complexDivide } from '../numerics/numeric-complex.js';
+import { MACHINE_PRECISION } from '../numerics/numeric.js';
 import {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -648,7 +649,10 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
         // An inexact value whose magnitude is outside the float64 range
         // (a decimal such as `1e-400` from `.N()`), or a decimal with more
         // digits than a double holds, would also be lost in a float64 cell,
-        // so it uses the `expression` dtype too (`float64HoldsDigits()`).
+        // so it uses the `expression` dtype too (`float64HoldsDigits()`). So
+        // does, at machine precision, any big decimal (a float made at a
+        // higher precision): the scalar operations compute its decimal, and
+        // a float64 cell would compute its double.
         return expr.isExact || !float64HoldsDigits(expr)
           ? 'expression'
           : 'float64';
@@ -701,7 +705,8 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
         // the real tiers. So does a value with a part (real or imaginary)
         // that a double does not hold for another reason: a big decimal with
         // more digits than a double holds, or an imaginary part outside the
-        // float64 range (`float64HoldsDigits()` tests both parts).
+        // float64 range (`float64HoldsDigits()` tests both parts). At
+        // machine precision, so does any value with a big-decimal part.
         return expr.isExact || !float64HoldsDigits(expr)
           ? 'expression'
           : 'complex128';
@@ -719,8 +724,10 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
  * or the imaginary part of a complex value) that is a big decimal a double
  * does not hold: one with more digits than a double holds, such as
  * `0.123456789012345678901234567` made at precision 30, or one outside the
- * range of a double. True for every other value, also a big decimal such as
- * `0.5` that a double holds.
+ * range of a double. At machine precision, also false for a big decimal that
+ * a double holds, such as `0.3` made at precision 30 (see below). True for
+ * every other value: a machine number, and above machine precision a big
+ * decimal such as `0.5` that a double holds.
  *
  * A float64 cell would keep only about 16 of the digits of such a value, and
  * every cell of the result would lose the others: at precision 30,
@@ -730,9 +737,17 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
  * `expression` dtype, so the element-wise sums and products and the matrix
  * product compute on the boxed values, as the scalar operations do.
  *
- * The test does not depend on the precision of the engine: a big decimal
- * made at a higher precision keeps its digits when the engine is later set
- * to machine precision, and the scalar operations compute with those digits.
+ * A big decimal made at a higher precision keeps its digits when the engine
+ * is later set to machine precision, and the scalar operations compute with
+ * those digits.
+ *
+ * At machine precision the answer is also false for a big decimal that a
+ * double holds, such as `0.3` made at precision 30. The scalar operations
+ * compute its decimal (`3·0.3` is `0.9`), and a float64 cell computes its
+ * double (`0.8999999999999999`), so `3·[0.3, 1.5]` would differ from the
+ * scalar product in the last digit. Above machine precision, a double in a
+ * cell is read back as its shortest decimal, which is the same decimal, so
+ * a float64 cell gives the same result there.
  *
  * The range test of `float64HoldsNumber()` is included: a decimal outside
  * the range of a double is not the decimal of a double.
@@ -745,6 +760,9 @@ function float64HoldsDigits(x: Expression): boolean {
   if (!isNumber(x) || x.isExact) return true;
   const nv = x.numericValue;
   if (typeof nv === 'number') return true;
+  // A machine numeric value stores its real part as a double.
+  if (typeof (nv as { decimal?: unknown }).decimal === 'number') return true;
+  if (x.engine.precision <= MACHINE_PRECISION) return false;
   return doubleHolds(nv.bignumRe) && doubleHolds(nv.bignumIm);
 }
 
