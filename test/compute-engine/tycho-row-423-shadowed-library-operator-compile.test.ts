@@ -420,10 +420,11 @@ describe('the parts of the compiler that read a head by its name', () => {
     ]);
   });
 
-  test('a node bound to the library Gamma before a user Gamma declines', () => {
+  test('a node bound to the library Gamma before a user Gamma compiles as the library Gamma', () => {
     // The node keeps its binding: the interpreter computes the library
-    // value. The current scope shadows the name, so the compiler cannot
-    // lower it as the library operator either, and declines.
+    // value. The compiler reads the binding of the node too
+    // (`isLibraryOperator()`), so it lowers the call as the library
+    // operator, although the current scope shadows the name.
     const ce = new ComputeEngine();
     const early = ce.box(['Add', ['Gamma', 'y'], 0]);
     ce.pushScope();
@@ -431,7 +432,7 @@ describe('the parts of the compiler that read a head by its name', () => {
     ce.assign('Gamma', ce.parse('x\\mapsto x+100'));
     for (const to of ['javascript', 'interval-js']) {
       const { result } = compiled(early, to);
-      expect(result.success).toBe(false);
+      expect(result.success).toBe(true);
     }
     ce.assign('y', 0.5);
     expect(early.N().re).toBeCloseTo(Math.sqrt(Math.PI), 12);

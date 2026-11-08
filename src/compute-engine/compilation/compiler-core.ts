@@ -3017,7 +3017,8 @@ export function _compileInner(
     const error = shadowedLibraryLoweringError(
       expr.engine,
       expr.operator,
-      target
+      target,
+      expr
     );
     if (error !== undefined) throw new Error(error);
     // A function value passed through a parameter, returned by a call, or

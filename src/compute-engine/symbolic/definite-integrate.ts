@@ -1,7 +1,11 @@
 import type { Expression, IComputeEngine } from '../global-types.js';
 import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
 import { getPolynomialCoefficients } from '../boxed-expression/polynomials.js';
-import { shadowsLibraryName } from '../library-shadowing.js';
+import {
+  libraryRuleBlocked,
+  shadowsLibraryName,
+} from '../library-shadowing.js';
+import { isApplicableDef } from '../function-utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { exactSign } from './contour.js';
 
@@ -44,7 +48,7 @@ export function definiteUnshadowed(f: Expression): boolean {
     if (++nodes > 256) return false;
     return (
       !isFunction(e) ||
-      (!shadowsLibraryName(e.engine, e.operator) && e.ops.every(walk))
+      (!libraryRuleBlocked(e, isApplicableDef) && e.ops.every(walk))
     );
   };
   return (

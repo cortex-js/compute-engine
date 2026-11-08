@@ -9,6 +9,28 @@ substitution, free-symbol analysis, closure capture, and dereference must use
 the binding selected by the scope chain. Raw-name fallback is a compatibility
 escape hatch, not the identity model.
 
+A canonical call denotes its definition (`operatorDefinition`, or the value
+definition of a head bound to a variable, such as a function made with
+`DefineFunction`), not its name. A library rule (a canonical fold, a
+simplification rule, a derivative table, a compiled lowering) is a fact
+about the library operator, so it applies to a node only when the node is
+bound to that operator. A test of `node.operator` against a name is a
+pre-filter. The decision is `isLibraryOperator(node, name)`: the node's
+operator definition is the definition of the name in the system scope (one
+map read), or an extension or a copy of it that keeps the library handlers.
+Two nodes are calls of the same operator when `sameOperator(a, b)`: the same
+name and the same definition. Because the node's binding was selected where
+the node was bound, the answer holds in every scope: a library call made
+before a declaration of a user `Sqrt` stays a library call, and a call bound
+to the user `Sqrt` is not a library call after the scope of the declaration
+ends. The scope-based guard `shadowsLibraryName(ce, name)` answers for the
+current scope, so it is used only before the node exists, and for a node
+that has no definition (a non-canonical node), where `isLibraryOperator()`
+uses it as its answer. A name that a caller-supplied library defines (the
+constructor's `libraries` option) is not a library operator for these rules,
+unless the caller passes `customLibrary: false`, as a compilation target
+does to read the custom definition's own lowering (`library-shadowing.ts`).
+
 A type computation does not use this fallback for a parameter of a function
 literal, which has a value only in a call: with `n := [1, 2]`, the type of
 `n ↦ n + 1` is `(n: unknown) -> number` (`bindingInContext()`,

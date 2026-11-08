@@ -1,6 +1,10 @@
 import type { Expression } from '../global-types.js';
 
-import { flatten, flattenKeepingNotationalProducts } from './flatten.js';
+import {
+  flatten,
+  flattenKeepingNotationalProducts,
+  type FlattenOperator,
+} from './flatten.js';
 import {
   isFunction,
   isContinuationOperand,
@@ -44,7 +48,7 @@ export function holdMap(
   const hasContinuation = xs.some((x) => isContinuationOperand(x));
   let positions: ReadonlyArray<number> | undefined;
   if (def?.associative && !hasContinuation)
-    [xs, positions] = flattenWithPositions(xs, expr.operator);
+    [xs, positions] = flattenWithPositions(xs, expr);
 
   //
   // Apply the hold as necessary
@@ -69,7 +73,7 @@ export function holdMap(
     }
   }
   return def?.associative && !hasContinuation
-    ? flattenOperands(result, expr.operator)
+    ? flattenOperands(result, expr)
     : result;
 }
 
@@ -104,7 +108,7 @@ export async function holdMapAsync(
   const hasContinuation = xs.some((x) => isContinuationOperand(x));
   let positions: ReadonlyArray<number> | undefined;
   if (def?.associative && !hasContinuation)
-    [xs, positions] = flattenWithPositions(xs, expr.operator);
+    [xs, positions] = flattenWithPositions(xs, expr);
 
   //
   // Apply the hold as necessary
@@ -134,7 +138,7 @@ export async function holdMapAsync(
     }
   }
   return def?.associative && !hasContinuation
-    ? flattenOperands(result, expr.operator)
+    ? flattenOperands(result, expr)
     : result;
 }
 
@@ -152,8 +156,10 @@ export function isValueRole(
 
 /**
  * Lift the nested applications of `operator` and the `Sequence` operands of
- * `xs`, as `flatten()` does, but keep a nested product with a direct
- * `ContinuationPlaceholder` operand (`2 · 4 · … · 2n`) whole. Such a product
+ * `xs`, as `flatten()` does (a nested application is a call of the same
+ * definition as the call `operator`: see `FlattenOperator`), but keep a
+ * nested product with a direct `ContinuationPlaceholder` operand
+ * (`2 · 4 · … · 2n`) whole. Such a product
  * is a notation, not an arithmetic value: when its operands are lifted into
  * the enclosing product, the last sample `2n` becomes the two factors `2` and
  * `n`, and `3(2 · 4 · … · 2n)` evaluates to `3 · 2 · 4 · … · 2 · n`. The
@@ -162,7 +168,7 @@ export function isValueRole(
  */
 function flattenOperands(
   xs: ReadonlyArray<Expression>,
-  operator: string
+  operator: FlattenOperator
 ): ReadonlyArray<Expression> {
   if (xs.some((x) => containsContinuationOperand(x)))
     return flattenKeepingNotationalProducts(xs, operator);
@@ -179,7 +185,7 @@ function flattenOperands(
  */
 function flattenWithPositions(
   xs: ReadonlyArray<Expression>,
-  operator: string
+  operator: FlattenOperator
 ): [ReadonlyArray<Expression>, ReadonlyArray<number> | undefined] {
   const flat = flattenOperands(xs, operator);
   // Nothing to flatten: the positions are the indexes.

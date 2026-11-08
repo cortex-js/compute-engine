@@ -36,8 +36,8 @@ import { withScratchScope } from '../scratch-scopes.js';
  * definition in the system scope (the standard library, or a library given
  * to the engine constructor) is not renamed. A node that was bound to the
  * library operator before a user definition shadowed the name is not renamed
- * either: the compiler then declines it, because the name is shadowed in the
- * current scope (`shadowedLibraryLoweringError()`, `base-compiler.ts`).
+ * either: the compiler lowers it as the library operator, because it is
+ * bound to it (`shadowedLibraryLoweringError()`, `compile-definitions.ts`).
  *
  * The body of a renamed function is renamed too, so a recursive call
  * (`Gamma(x) := (x - 1)·Gamma(x - 1)`) calls the private copy. A user

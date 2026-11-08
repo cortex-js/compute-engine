@@ -2,12 +2,13 @@
 // unrolled index binders, local complexness and the complex-valued-function
 // test.
 
-import { shadowsLibraryName } from '../library-shadowing.js';
-import type {
-  Expression,
-  IComputeEngine as ComputeEngine,
-  Scope,
-} from '../global-types.js';
+import {
+  isLibraryOperator,
+  shadowsLibraryName,
+  shadowsLibraryOperator,
+} from '../library-shadowing.js';
+import { compileReadsOtherDefinition } from './compile-definitions.js';
+import type { Expression, Scope } from '../global-types.js';
 import type { MathJsonSymbol } from '../../math-json/types.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
@@ -826,16 +827,31 @@ export function withRealLoopIndices<T>(
 }
 
 /**
- * `true` when a user definition shadows the library operator `head`
- * (`shadowsLibraryName()`) and that definition has its own `compile`
- * handler. The compiler consults that handler before the built-in
- * lowering of the head, so the built-in lowering does not apply.
+ * `true` when a user definition shadows the library operator of the call
+ * `expr` (`shadowsLibraryName()`) and that definition has its own
+ * `compile` handler. The compiler consults that handler before the
+ * built-in lowering of the head, so the built-in lowering does not apply.
+ *
+ * The compiler reads the handler of the definition of the head in the
+ * current scope, so the definition of `expr` must be that definition. When
+ * it is not (`compileReadsOtherDefinition()`), the answer is `true`: the
+ * library lowering is not known to compute the value of `expr`, and
+ * `shadowedLibraryLoweringError()` declines the call. When it is, a call
+ * bound to the library operator (`isLibraryOperator()`) answers `false`,
+ * and a call bound to a user operator definition answers whether that
+ * definition has a `compile` handler.
  */
-export function hasShadowingCompileHandler(
-  engine: ComputeEngine,
-  head: string
-): boolean {
+export function hasShadowingCompileHandler(expr: Expression): boolean {
+  const engine = expr.engine;
+  const head = expr.operator;
+  if (compileReadsOtherDefinition(expr)) return true;
+  if (
+    expr.operatorDefinition !== undefined &&
+    shadowsLibraryOperator(expr, { customLibrary: false })
+  )
+    return expr.operatorDefinition.compile !== undefined;
   if (!shadowsLibraryName(engine, head, { customLibrary: false })) return false;
+  if (isLibraryOperator(expr, head, { customLibrary: false })) return false;
   const shadow = engine.lookupDefinition(head);
   return isOperatorDef(shadow) && shadow.operator.compile !== undefined;
 }
@@ -870,7 +886,7 @@ export function _isComplexValuedFunction(
   if (
     COMPLEX_CONTINUATION_HEADS.has(expr.operator) &&
     hasComplexContinuationLowering() &&
-    !hasShadowingCompileHandler(expr.engine, expr.operator)
+    !hasShadowingCompileHandler(expr)
   )
     return (
       expr.ops.some((a) => core.isComplexValued(a)) ||

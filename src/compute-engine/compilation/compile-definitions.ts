@@ -1,7 +1,12 @@
 // Emission of function definitions: multi-clause functions, parameter guards,
 // definition bodies, builtin callbacks and the helpers preamble.
 
-import { shadowsLibraryName } from '../library-shadowing.js';
+import {
+  isLibraryOperator,
+  isShadowOf,
+  shadowsLibraryName,
+  shadowsLibraryOperator,
+} from '../library-shadowing.js';
 import type {
   Expression,
   FunctionInterface,
@@ -72,6 +77,7 @@ import {
 } from './compiler-mode.js';
 import { branchComplexCoercion } from './compile-shapes.js';
 import { isContradictedScalarFunctionBody } from './compile-conditions.js';
+import { lookupApplicable } from '../function-utils.js';
 
 /**
  * Whether the value of `e` may be a collection, by its type.
@@ -197,6 +203,52 @@ export function setUserFunctionLane(
 }
 
 /**
+ * `true` when the call `node` is bound to an operator definition of a name
+ * that the library defines as an operator, and the compiler would read
+ * another definition of that name. The compiler selects the `compile`
+ * handler of a call by its NAME in the current scope (`lookupApplicable()`
+ * in `compileExpr()`), not from the definition of the node, and the node
+ * can be bound in another scope:
+ *
+ * - a call of the library `Sqrt` boxed before a user `Sqrt` with a
+ *   `compile` handler is declared, and compiled where that declaration is
+ *   current: the interpreter computes the library value, and the emission
+ *   calls the user handler;
+ * - a call bound to a user `Sqrt` declared in a scope that is popped before
+ *   the call is compiled: the interpreter computes the user value, and the
+ *   emission is the library lowering.
+ *
+ * A node bound to a user operator definition must be bound to the very
+ * definition that the current scope reads. A node bound to the library
+ * operator gives `false` when the current scope reads the library operator,
+ * an extension or a copy of it that keeps the library handlers
+ * (`isShadowOf()` is false), or a value definition, such as a user function
+ * `Sqrt` assigned with `ce.assign()`: the compiler reads no `compile`
+ * handler from a value definition, and lowers the call as the library
+ * operator. `false` also for a node with no operator definition, which the
+ * current scope decides (`shadowsLibraryName()`).
+ */
+export function compileReadsOtherDefinition(node: Expression): boolean {
+  const def = node.operatorDefinition;
+  if (def === undefined) return false;
+  const engine = node.engine;
+  const head = node.operator;
+  const library = isLibraryOperator(node, head, { customLibrary: false });
+  if (!library && !shadowsLibraryOperator(node, { customLibrary: false }))
+    return false;
+  const current = lookupApplicable(head, engine.context.lexicalScope);
+  if (isOperatorDef(current) && current.operator === def) return false;
+  if (!library) return true;
+  return (
+    isOperatorDef(current) &&
+    isShadowOf(
+      current,
+      engine.contextStack[0]?.lexicalScope.bindings.get(head)
+    )
+  );
+}
+
+/**
  * The error message when `head` names a library operator that a user
  * definition shadows (`shadowsLibraryName()`) and the compiler would lower
  * it as the library operator: the target maps it (`target.functions`,
@@ -210,11 +262,40 @@ export function setUserFunctionLane(
  * makes overridable. An unchanged copy of the library definition
  * (`keepsLibraryOperator()`) is not a shadow, so it compiles as the
  * library operator.
+ *
+ * When `node`, a call of `head`, is given and is bound to an operator
+ * definition, that definition must be the one that the emission reads. The
+ * compiler selects the `compile` handler of `head` by its name in the
+ * current scope (`lookupApplicable()` in `compileExpr()`), not from the
+ * node. So the error is given when the current scope reads another
+ * definition of `head` (`compileReadsOtherDefinition()`): a call of the
+ * library `Sqrt` boxed before a user operator `Sqrt` is declared, or a call
+ * bound to a user `Sqrt` declared in a scope that is popped. A definition
+ * that is the library operator and an extension or a copy of it that keeps
+ * the library handlers count as the same definition, and a call of the
+ * library operator where the current scope reads a VALUE definition of
+ * `head` is lowered as the library operator. When the current scope reads
+ * the definition of the node:
+ *
+ * - the node is bound to the library operator (`isLibraryOperator()`):
+ *   there is no error. The interpreter computes the library value, and the
+ *   library lowering computes it too;
+ * - the node is bound to a user OPERATOR definition of `head`
+ *   (`shadowsLibraryOperator()`): the error is given, unless that
+ *   definition has its own `compile` handler.
+ *
+ * A node with no operator definition is decided by the current scope. A
+ * call bound to a VALUE definition is a call of a block local or a
+ * parameter, which the compiler reads by name
+ * (`compileLocallyBoundLibraryCall()`), or of a function literal, which is
+ * renamed before it is compiled (`withShadowingCallsRenamed()`,
+ * `shadowing-calls.ts`).
  */
 export function shadowedLibraryLoweringError(
   engine: ComputeEngine,
   head: string,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  node?: Expression
 ): string | undefined {
   if (
     !NAMED_LOWERING_HEADS.has(head) &&
@@ -222,17 +303,31 @@ export function shadowedLibraryLoweringError(
     target.operators?.(head) === undefined
   )
     return undefined;
-  if (!shadowsLibraryName(engine, head, { customLibrary: false }))
-    return undefined;
-  const shadow = engine.lookupDefinition(head);
+  // The `compile` handler of the definition that shadows the library one.
+  // It stays `undefined`, so the error is given, when the emission reads
+  // another definition than the one of `node`.
+  let shadowCompile: unknown;
+  if (node !== undefined && compileReadsOtherDefinition(node))
+    shadowCompile = undefined;
+  else if (
+    node?.operatorDefinition !== undefined &&
+    shadowsLibraryOperator(node, { customLibrary: false })
+  )
+    shadowCompile = node.operatorDefinition.compile;
+  else {
+    if (!shadowsLibraryName(engine, head, { customLibrary: false }))
+      return undefined;
+    if (
+      node !== undefined &&
+      isLibraryOperator(node, head, { customLibrary: false })
+    )
+      return undefined;
+    const shadow = engine.lookupDefinition(head);
+    shadowCompile = isOperatorDef(shadow) ? shadow.operator.compile : undefined;
+  }
   const handlerConsulted =
     !CONTROL_FLOW_HEADS.has(head) || OVERRIDABLE_CONTROL_FLOW_HEADS.has(head);
-  if (
-    handlerConsulted &&
-    isOperatorDef(shadow) &&
-    shadow.operator.compile !== undefined
-  )
-    return undefined;
+  if (handlerConsulted && shadowCompile !== undefined) return undefined;
   return (
     `Could not compile \`${head}\`: a user definition shadows the library ` +
     `operator \`${head}\`, and the compiler lowers \`${head}\` as the ` +

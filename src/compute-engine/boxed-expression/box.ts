@@ -4816,9 +4816,19 @@ function applyOperatorDefinition(
   // Flatten any sequence
   // f(a, Sequence(b, c), Sequence(), d) -> f(a, b, c, d)
   //
+  // For an associative operator, also splice an operand that is a call of
+  // the same definition: f(a, f(b, c)) -> f(a, b, c). A call of another
+  // definition with the same name (a user function `f` made in a scope that
+  // is now popped) is a value, and is kept.
   let args: ReadonlyArray<Expression> = flatten(
     xs,
-    opDef.associative ? name : undefined
+    opDef.associative
+      ? {
+          operator: name,
+          operatorDefinition: opDef,
+          valueDefinition: undefined,
+        }
+      : undefined
   );
   // The operands as written, before a default value is inserted. A call of a
   // user function is boxed again from these when the function is assigned

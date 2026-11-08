@@ -144,7 +144,10 @@ export function findShadowedLibraryLowering(
   target: CompileTarget<Expression>
 ): string | undefined {
   const engine = expr.engine;
-  const heads = new Map<string, string | undefined>();
+  // The error of a head, by the definition that its calls are bound to (by
+  // the name for a call with no definition): two calls of the same name can
+  // be bound to the library operator and to a user function.
+  const heads = new Map<unknown, string | undefined>();
   const names = new Set<string>();
   const seen = new Set<Expression>();
   const viaName = (s: string): string | undefined => {
@@ -174,9 +177,10 @@ export function findShadowedLibraryLowering(
     if (!isFunction(e) || seen.has(e)) return undefined;
     seen.add(e);
     const h = e.operator;
-    if (!heads.has(h))
-      heads.set(h, shadowedLibraryLoweringError(engine, h, target));
-    const error = heads.get(h);
+    const key = e.operatorDefinition ?? e.valueDefinition ?? h;
+    if (!heads.has(key))
+      heads.set(key, shadowedLibraryLoweringError(engine, h, target, e));
+    const error = heads.get(key);
     if (error !== undefined) return error;
     if (
       h === 'Range' &&

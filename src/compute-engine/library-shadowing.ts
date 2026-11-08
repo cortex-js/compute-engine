@@ -10,6 +10,12 @@
  * built-in lowering of `Sin` to `Math.sin` — must ask this first, or it
  * answers the library operator's value instead of the user's.
  *
+ * This function answers for the CURRENT scope, so it is the test to use
+ * before the node exists (a canonical short path that runs before the call
+ * is built). For a node that exists, use {@link isLibraryOperator}, which
+ * reads the definition the node is bound to, and so answers for the scope
+ * where the node was bound.
+ *
  * A name the library does not define (no binding in the outermost, system,
  * scope) is never shadowed: a user function `Tick` shadows nothing. A
  * library name is shadowed when:
@@ -75,6 +81,207 @@ export function shadowsLibraryName(
   const current = ce.lookupDefinition(name);
   if (current === undefined) return false;
   return isShadowOf(current, library);
+}
+
+/**
+ * True when `node` is a call of the library operator `name`: a library rule
+ * (a canonical fold, a simplification rule, a derivative table, a compiled
+ * lowering) is a fact about the library operator, and it applies to the node
+ * only when this is true. `name` defaults to `node.operator`; when it is
+ * given, a node with another operator answers false, so a test of
+ * `node.operator === name` before the call is only a pre-filter.
+ *
+ * A canonical call denotes its definition (`operatorDefinition`), not its
+ * name. So the node is a call of the library operator when its operator
+ * definition is the operator definition of `name` in the system scope, where
+ * the standard library is installed, or an extension or a copy of it that
+ * keeps the library handlers (the cases where {@link isShadowOf} answers
+ * false; see {@link shadowsLibraryName}). The binding of the node was
+ * selected by the scope chain where the node was bound, so the answer is
+ * correct for that scope, also when it is read in another scope: a call of
+ * the library `Sqrt` made before a declaration of a user `Sqrt` is still a
+ * library call after the declaration, and a call bound to the user `Sqrt`
+ * is not a library call after the scope of the declaration is popped. The
+ * scope-based {@link shadowsLibraryName} answers for the current scope, which
+ * is wrong in both cases.
+ *
+ * The cost is one map read (the binding of `name` in the system scope, read
+ * from `_evalContextStack`, not from `contextStack`, which copies the stack
+ * on each read) and one comparison of objects in the usual case. A node bound
+ * to a user definition also compares the handlers of the two definitions.
+ *
+ * The other cases:
+ *
+ * - a name that the system scope does not define as an operator: false;
+ * - a name that a caller-supplied library (the constructor's `libraries`
+ *   option) defined: false, unless `customLibrary: false`. Such a library
+ *   installs into the same system scope, so the system-scope definition is
+ *   the custom one, and a rule that knows the standard library operator must
+ *   not apply to it. A compilation target reads the custom definition's own
+ *   lowering, so it passes `customLibrary: false`, as it does for
+ *   {@link shadowsLibraryName};
+ * - a node bound to a value definition: false. A function made with
+ *   `DefineFunction` or an Epsil `function Sqrt(x) { … }` is a variable
+ *   whose value is a function literal, so a call of it is bound to a value
+ *   definition and has no operator definition;
+ * - a node with no definition (a non-canonical node, or a canonical node for
+ *   which the lookup found no definition, such as a call of a parameter of a
+ *   function literal whose body is being canonicalized): the answer of the
+ *   scope-based guard, `!shadowsLibraryName(ce, name, options)`.
+ *
+ * A symbol node has the operator `Symbol`, so a symbol named `Sqrt` is not a
+ * call of `Sqrt`.
+ */
+export function isLibraryOperator(
+  node: {
+    readonly operator: string;
+    readonly operatorDefinition: object | undefined;
+    readonly valueDefinition: unknown;
+    readonly engine: Parameters<typeof shadowsLibraryName>[0] & {
+      readonly _evalContextStack: ReadonlyArray<{
+        readonly lexicalScope: {
+          readonly bindings: { get(name: string): unknown };
+        };
+      }>;
+    };
+  },
+  name?: string,
+  options?: { customLibrary?: boolean }
+): boolean {
+  if (name === undefined) name = node.operator;
+  else if (node.operator !== name) return false;
+  const ce = node.engine;
+  const library = ce._evalContextStack[0]?.lexicalScope.bindings.get(name) as
+    | { operator?: object }
+    | undefined;
+  const libraryOperator = library?.operator;
+  if (libraryOperator === undefined) return false;
+  if (
+    options?.customLibrary !== false &&
+    ce._customLibraryOperators.size > 0 &&
+    ce._customLibraryOperators.has(name)
+  )
+    return false;
+  const def = node.operatorDefinition;
+  if (def !== undefined) return keepsLibraryDefinition(def, libraryOperator);
+  if (node.valueDefinition !== undefined) return false;
+  return !shadowsLibraryName(ce, name, options);
+}
+
+/**
+ * True when `node.operator` is a name that the system scope defines as an
+ * operator, and `node` is not a call of that library operator
+ * ({@link isLibraryOperator}): the node is bound to a user definition of the
+ * name, to a parameter or a local of that name, or the name is one that a
+ * caller-supplied library defined (unless `customLibrary: false`).
+ *
+ * This is the test on a node that {@link shadowsLibraryName} makes on a
+ * name: code that selects a call by its name, such as a table of
+ * derivatives, asks it, and treats the call as a call of a user function
+ * when it is true. A call of a name that the library does not define gives
+ * false, as it does for {@link shadowsLibraryName}, so such a call is not
+ * classified here. `!isLibraryOperator(node)` is true for it.
+ */
+export function shadowsLibraryOperator(
+  node: Parameters<typeof isLibraryOperator>[0],
+  options?: { customLibrary?: boolean }
+): boolean {
+  const library = node.engine._evalContextStack[0]?.lexicalScope.bindings.get(
+    node.operator
+  ) as { operator?: object } | undefined;
+  if (library?.operator === undefined) return false;
+  return !isLibraryOperator(node, node.operator, options);
+}
+
+/**
+ * True when a library rule that builds its result BY NAME in the current
+ * scope must not apply to the call `node`. Such a rule (an antiderivative, a
+ * derivative table, a piecewise or a discrete integration rule) applies only
+ * when both of these are true:
+ *
+ * - the call is bound to the library operator: a call bound to a user
+ *   definition of a library name has another meaning
+ *   ({@link shadowsLibraryOperator});
+ * - a call head of that name built in the current scope is bound to the
+ *   library definition. Otherwise the result that the rule builds is bound
+ *   to the user definition. For example, with a user `Sin := t ↦ t + 100`
+ *   declared in the current scope, the library rule for `∫ Sin(x)² dx`,
+ *   where `Sin` is a call of the library operator boxed before the
+ *   declaration, gives `x/2 − Sin(2x)/4`, and that `Sin` is the user
+ *   function, so the result is false.
+ *
+ * The second test reads the scopes as the binding of a call head reads them:
+ * `isApplicable` is that rule (`isApplicableDef()`, `function-utils.ts`,
+ * which this leaf module cannot import), so a binding that cannot be applied
+ * is skipped. A user value `Gamma := 1.4` does not block the rule for
+ * `Gamma(x)`: a call `Gamma(…)` built in that scope still calls the library
+ * operator. A parameter of a function body being canonicalized is a shadow
+ * too (`_isShadowedParameter`), as for {@link shadowsLibraryName}. The scopes
+ * are read from `_evalContextStack`, with one map read for each scope
+ * ({@link hidesLibraryBindingInContext}), not from `contextStack`, which
+ * copies the stack on each read: the test runs for each node of a
+ * derivative or an integrand.
+ *
+ * The second test applies only to a name that the system scope defines as
+ * an operator. A call of a name that the library does not define gives
+ * false, as it does for {@link shadowsLibraryOperator}.
+ */
+export function libraryRuleBlocked(
+  node: Parameters<typeof isLibraryOperator>[0],
+  isApplicable: (def: never) => boolean,
+  options?: { customLibrary?: boolean }
+): boolean {
+  if (shadowsLibraryOperator(node, options)) return true;
+  const ce = node.engine;
+  const library = ce._evalContextStack[0]?.lexicalScope.bindings.get(
+    node.operator
+  ) as { operator?: object } | undefined;
+  if (library?.operator === undefined) return false;
+  if (ce._isShadowedParameter(node.operator)) return true;
+  return hidesLibraryBindingInContext(
+    ce as unknown as Parameters<typeof hidesLibraryBindingInContext>[0],
+    node.operator,
+    library.operator,
+    isApplicable
+  );
+}
+
+/**
+ * True when the call nodes `a` and `b` are calls of the same operator: they
+ * have the same operator name, and the same definition. Two calls named
+ * `Sqrt`, one bound to the library operator and one bound to a user function
+ * `Sqrt`, are calls of two operators. A copy or an extension of a definition
+ * is another definition here: this compares the bindings of the two nodes,
+ * not what they compute (for that, use {@link isLibraryOperator}).
+ *
+ * The definition of a call is its operator definition, or its value
+ * definition when the head is bound to a variable: a function made with
+ * `DefineFunction` or an Epsil `function` is a variable whose value is a
+ * function literal, so its calls have no operator definition.
+ *
+ * When one of the nodes has no definition (a non-canonical node, or a node
+ * for which the lookup found no definition), only the names are compared.
+ * Such a node has no binding to compare, and a non-canonical node is read by
+ * its name in the scope where it will be canonicalized, so the name is the
+ * only identity it has.
+ */
+export function sameOperator(
+  a: {
+    readonly operator: string;
+    readonly operatorDefinition: object | undefined;
+    readonly valueDefinition: object | undefined;
+  },
+  b: {
+    readonly operator: string;
+    readonly operatorDefinition: object | undefined;
+    readonly valueDefinition: object | undefined;
+  }
+): boolean {
+  if (a.operator !== b.operator) return false;
+  const defA = a.operatorDefinition ?? a.valueDefinition;
+  const defB = b.operatorDefinition ?? b.valueDefinition;
+  if (defA === undefined || defB === undefined) return true;
+  return defA === defB;
 }
 
 /**
@@ -313,9 +520,23 @@ export function isShadowOf(current: unknown, library: unknown): boolean {
   const operator = (current as { operator?: object }).operator;
   const libraryOperator = (library as { operator?: object }).operator;
   if (operator === undefined || libraryOperator === undefined) return true;
+  return !keepsLibraryDefinition(operator, libraryOperator);
+}
+
+/**
+ * True when the operator definition `operator` is the library operator
+ * definition `libraryOperator`, or an extension of it
+ * (`markLibraryExtension()`) that keeps the library flags, or a copy of it
+ * that keeps the library handlers and flags (`keepsLibraryOperator()`).
+ */
+function keepsLibraryDefinition(
+  operator: object,
+  libraryOperator: object
+): boolean {
+  if (operator === libraryOperator) return true;
   if (LIBRARY_EXTENSIONS.get(operator) === libraryOperator)
-    return !keepsLibraryFlags(operator, libraryOperator);
-  return !keepsLibraryOperator(operator, libraryOperator);
+    return keepsLibraryFlags(operator, libraryOperator);
+  return keepsLibraryOperator(operator, libraryOperator);
 }
 
 /**

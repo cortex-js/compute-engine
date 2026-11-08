@@ -105,6 +105,7 @@ import {
   applicableN1,
   canonicalFunctionLiteral,
   canonicalFunctionLiteralArguments,
+  isApplicableDef,
   lookupApplicable,
 } from '../function-utils.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
@@ -250,7 +251,8 @@ import {
 import { holdsKindValue } from '../boxed-expression/residue-class.js';
 import {
   libraryNamesShadowedIn,
-  shadowedLibraryNames,
+  libraryRuleBlocked,
+  shadowsLibraryOperator,
 } from '../library-shadowing.js';
 
 /** `list<any>`, parsed once when the module loads, so the list tests below
@@ -4978,22 +4980,31 @@ function blockIntegrandValue(
 
 /**
  * Find the calls in `expr` of a user function that has the name of a library
- * function (`Sin`, `Exp`, `Ln`, …). `names` holds the library names that a
- * user definition in the current scope chain shadows
- * (`shadowedLibraryNames()`). Inside a function literal, its parameters with
- * a library name are added, and inside an expression with a local scope (a
- * function body, a block), the library names that the bindings of this
- * scope shadow are added (`libraryNamesShadowedIn()`). These local scopes
- * are not in the current scope chain while the integral is evaluated.
+ * function (`Sin`, `Exp`, `Ln`, …): a call that is not bound to the library
+ * operator (`shadowsLibraryOperator()`). The test reads the definition of
+ * the call, so it is correct for a call made in another scope than the
+ * current one. Inside a function literal, its parameters with a library name
+ * are local names, and inside an expression with a local scope (a function
+ * body, a block), the library names that the bindings of this scope shadow
+ * are local names (`libraryNamesShadowedIn()`).
  *
- * Return `'local'` when a call is of a name that a local scope shadows,
- * `'call'` when the calls are all of names in `names`, and `'none'` when
- * there is no such call.
+ * A call bound to the library operator, of a name that a call head built in
+ * the current scope reads as a user function (a library `Sin(x)` boxed
+ * before a user `Sin` was declared; `libraryRuleBlocked()`, which skips a
+ * user value such as `Gamma := 1.4` because a call head does), is also a
+ * call of a local name. The library rules build their result by name
+ * in the current scope, so the result would be bound to the user function.
+ * The body of the user function cannot replace the call either: the call is
+ * not a call of it.
+ *
+ * Return `'local'` when a call is of a local name, `'call'` when the calls
+ * are all of user functions of the scope chain, and `'none'` when there is
+ * no such call. For `'local'`, a contour integral stays unevaluated, and an
+ * `Integrate` stays unevaluated under `evaluate()`.
  */
 function shadowedCallsIn(
   ce: ComputeEngine,
-  expr: Expression,
-  names: ReadonlySet<string>
+  expr: Expression
 ): 'none' | 'call' | 'local' {
   const system = ce.contextStack[0]?.lexicalScope;
   let result: 'none' | 'call' | 'local' = 'none';
@@ -5001,7 +5012,8 @@ function shadowedCallsIn(
     if (result === 'local' || !isFunction(x)) return;
     if (isOperatorDef(system?.bindings.get(x.operator))) {
       if (local.has(x.operator)) result = 'local';
-      else if (names.has(x.operator)) result = 'call';
+      else if (shadowsLibraryOperator(x)) result = 'call';
+      else if (libraryRuleBlocked(x, isApplicableDef)) result = 'local';
     }
     let inner = local;
     const add = (name: string) => {
@@ -5046,14 +5058,12 @@ function shadowedCallsIn(
 function inlineShadowedCalls(
   ce: ComputeEngine,
   integrand: Expression,
-  names: ReadonlySet<string>,
   bound: ReadonlyArray<string>
 ): Expression | undefined {
   // A function literal that `liftIntegrand()` did not unwrap would be
   // canonicalized again when its body changes, which wraps the body again.
   if (integrand.operator === 'Function') return undefined;
 
-  const system = ce.contextStack[0]?.lexicalScope;
   const bodyOf = (call: Expression): Expression | undefined => {
     if (!isFunction(call)) return undefined;
     const def = ce.lookupDefinition(call.operator);
@@ -5074,7 +5084,7 @@ function inlineShadowedCalls(
       if (e instanceof Error && e.name === 'CancellationError') throw e;
       return undefined;
     }
-    if (!body.isValid || shadowedCallsIn(ce, body, names) !== 'none')
+    if (!body.isValid || shadowedCallsIn(ce, body) !== 'none')
       return undefined;
     const parameters = wildcards.map((w) => sym(w)!);
     if (body.symbols.some((s) => !parameters.includes(s) && bound.includes(s)))
@@ -5086,13 +5096,7 @@ function inlineShadowedCalls(
 
   let failed = false;
   const result = integrand.map((x) => {
-    if (
-      failed ||
-      !isFunction(x) ||
-      !names.has(x.operator) ||
-      !isOperatorDef(system?.bindings.get(x.operator))
-    )
-      return x;
+    if (failed || !isFunction(x) || !shadowsLibraryOperator(x)) return x;
     // The body is that of the function the call was made with, not of a
     // declaration of the same name in a scope pushed later: `bodyOf()` reads
     // the function by name (`withCallableBinding()`).
@@ -5123,11 +5127,10 @@ function contourIntegrand(
   f: Expression,
   variable: string
 ): Expression | undefined {
-  const names = shadowedLibraryNames(ce);
-  const calls = shadowedCallsIn(ce, f.canonical, names);
+  const calls = shadowedCallsIn(ce, f.canonical);
   if (calls === 'none') return liftIntegrand(f);
   if (calls === 'local') return undefined;
-  return inlineShadowedCalls(ce, liftIntegrand(f.canonical), names, [variable]);
+  return inlineShadowedCalls(ce, liftIntegrand(f.canonical), [variable]);
 }
 
 /**
@@ -8184,15 +8187,13 @@ volumes
         // integral stays unevaluated. The numeric route compiles the user
         // function and is correct, so under `N()` only the residue method is
         // not used.
-        const names = shadowedLibraryNames(ce);
-        const shadowedCalls = shadowedCallsIn(ce, ops[0].canonical, names);
+        const shadowedCalls = shadowedCallsIn(ce, ops[0].canonical);
         if (shadowedCalls !== 'none' && !numericApproximation) {
           const inlined =
             shadowedCalls === 'call'
               ? inlineShadowedCalls(
                   ce,
                   liftIntegrand(ops[0].canonical),
-                  names,
                   intVarNames
                 )
               : undefined;

@@ -116,6 +116,32 @@
   `["Divide", ["Power", ["Module", "Pi"], 2], 6]`, and boxed in the block it
   gives 1.6449, not 1.5. Outside such a scope, the output does not change.
 
+### Resolved Issues
+
+- **A call of a user function with the name of a library function is no
+  longer read as the library function when it is used in another scope.** A
+  call keeps the function it was bound to where it was made, and the library
+  rules (canonical forms, simplification, derivatives, compilation) now apply
+  to a call only when it is bound to the library function. With a user `Sqrt`
+  defined as `x ↦ x + 100` in a pushed scope, a call `Sqrt(y^2)` made there
+  and simplified after the scope ends gave `|y|`; it now keeps its form. With
+  a user `Add` that multiplies, the call `Add(2, 3)` made in its scope and
+  then used as an operand of the library `Add` (`Add(u, 1)`) was merged into
+  the library sum and gave 6; it gives 7. The same holds for the operands of
+  `And`, `Or`, `Xor`, `Union`, `Intersection` and `Chop`, and an assignment
+  operator of the same name as a user function (`AddTo`, `Assign`) is no
+  longer reported as an assignment inside an operand. A library call made
+  before the declaration of a user function of the same name is now
+  simplified in that scope: `Sqrt(y^2)` gives `|y|` there too. The
+  derivative of such a library call in that scope stays unevaluated, because
+  its result would name the user function: in a scope with a user
+  `Sin(t) = t + 100`, the derivative of a library `Sin(x)` was
+  `Apply(Derivative(Sin, 1), x)`, which reads `Sin` by name; it is now the
+  unevaluated `D(Sin(x), x)`, which holds the library `Sin`: after the scope
+  ends, its numeric value is `cos(x)`. A compiled
+  call whose function is not the one its name reads where it is compiled now
+  declines, and the interpreter gives the value.
+
 ### Performance
 
 - **More copies of a sub-expression read the value of the first copy in one

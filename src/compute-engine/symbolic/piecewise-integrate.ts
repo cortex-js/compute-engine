@@ -7,7 +7,8 @@ import { isExactConstantExpression } from '../boxed-expression/compare.js';
 import { differentiate } from './derivative.js';
 import { exactSign } from './contour.js';
 import { checkDeadline } from '../../common/interruptible.js';
-import { shadowsLibraryName } from '../library-shadowing.js';
+import { libraryRuleBlocked } from '../library-shadowing.js';
+import { isApplicableDef } from '../function-utils.js';
 import { integrateDiscrete } from './discrete-integrate.js';
 
 const PIECEWISE = new Set([
@@ -234,7 +235,7 @@ export function integratePiecewise(
     if (sym(e) === variable) return true;
     if (!e.has(variable)) return finiteReal(e.evaluate());
     if (!isFunction(e)) return false;
-    if (shadowsLibraryName(ce, e.operator)) return false;
+    if (libraryRuleBlocked(e, isApplicableDef)) return false;
     if (!e.ops.every(continuous)) return false;
     const op = e.operator;
     if (
@@ -291,7 +292,7 @@ export function integratePiecewise(
       return value === 'True' || value === 'False';
     }
     if (!isFunction(e)) return false;
-    if (shadowsLibraryName(ce, e.operator)) return false;
+    if (libraryRuleBlocked(e, isApplicableDef)) return false;
     if (e.operator === 'Not' && e.nops === 1) return condition(e.op1);
     if (e.operator === 'And' || e.operator === 'Or')
       return e.ops.every(condition);
@@ -309,7 +310,7 @@ export function integratePiecewise(
   const collect = (e: Expression): boolean => {
     if (++nodes > MAX_NODES) return false;
     if (!isFunction(e) || !e.has(variable)) return true;
-    if (shadowsLibraryName(ce, e.operator)) return false;
+    if (libraryRuleBlocked(e, isApplicableDef)) return false;
     if (e.operator === 'If' || e.operator === 'Which') {
       if (e.operator === 'If') {
         if (e.nops < 2 || e.nops > 3 || !condition(e.op1)) return false;

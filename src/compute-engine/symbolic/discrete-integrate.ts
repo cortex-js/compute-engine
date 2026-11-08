@@ -2,7 +2,11 @@ import type { Expression, IComputeEngine } from '../global-types.js';
 import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
 import { getPolynomialCoefficients } from '../boxed-expression/polynomials.js';
 import { exactSign } from './contour.js';
-import { shadowsLibraryName } from '../library-shadowing.js';
+import {
+  libraryRuleBlocked,
+  shadowsLibraryName,
+} from '../library-shadowing.js';
+import { isApplicableDef } from '../function-utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { angularChainFactor } from './angular-unit.js';
 
@@ -62,7 +66,7 @@ export function integrateDiscrete(
       body.ops.filter((x) => x !== selector)
     );
   }
-  if (!isFunction(selector) || shadowsLibraryName(ce, selector.operator))
+  if (!isFunction(selector) || libraryRuleBlocked(selector, isApplicableDef))
     return undefined;
   if (['Floor', 'Ceil', 'Fract'].includes(selector.operator)) {
     const p = affine(selector.op1);
@@ -142,7 +146,7 @@ export function integrateDiscrete(
     !['Abs', 'Sign'].includes(selector.operator) ||
     !isFunction(selector.op1) ||
     !['Sin', 'Cos'].includes(selector.op1.operator) ||
-    shadowsLibraryName(ce, selector.op1.operator)
+    libraryRuleBlocked(selector.op1, isApplicableDef)
   )
     return undefined;
   if (shadowsLibraryName(ce, 'Pi')) return undefined;

@@ -1,4 +1,4 @@
-import { apply } from '../function-utils.js';
+import { apply, isApplicableDef } from '../function-utils.js';
 import { checkDeadlineEvery } from '../../common/interruptible.js';
 import { mul } from '../boxed-expression/arithmetic-mul-div.js';
 import { mayBeMatrixValued } from '../boxed-expression/matrix-operand.js';
@@ -31,7 +31,11 @@ import {
   liftIntegrand,
   rebindEscaping,
 } from '../boxed-expression/utils.js';
-import { shadowsLibraryName } from '../library-shadowing.js';
+import {
+  isShadowOf,
+  libraryRuleBlocked,
+  shadowsLibraryOperator,
+} from '../library-shadowing.js';
 import { isFoldingConstant } from '../boxed-expression/simplify.js';
 import { beginStoreGuard } from '../boxed-expression/store-guard.js';
 import type { Type } from '../../common/type/types.js';
@@ -548,8 +552,10 @@ function isUserFunction(sym: Expression): boolean {
     // A copy or an extension of the builtin definition that keeps its
     // `evaluate`, `canonical`, `compile` and `derivative` handlers, its
     // `lazy` and `broadcastable` flags and its `evaluateAsync` handler is the
-    // builtin too (`shadowsLibraryName()`, `library-shadowing.ts`).
-    if (isOperatorDef(systemDef) && !shadowsLibraryName(sym.engine, sym.symbol))
+    // builtin too (`isShadowOf()`, `library-shadowing.ts`). The test reads
+    // the definition of `sym`, not the definition that the name has in the
+    // current scope, which is another one for a symbol made in another scope.
+    if (isOperatorDef(systemDef) && !isShadowOf({ operator: opDef }, systemDef))
       return false;
     return true;
   }
@@ -2508,8 +2514,24 @@ function differentiateNode(
   // shadows a library operator (`Sinh(x) := 3x`), or a caller library that
   // defines a standard name, has another meaning: differentiate it as a user
   // function, as `evaluate()` does, never with the library operator's rule.
-  if (shadowsLibraryName(ce, expr.operator))
+  // The test reads the definition of the call, so a call made in a scope
+  // that is popped keeps the meaning it had there.
+  if (shadowsLibraryOperator(expr))
     return differentiateUnknownApplication(expr, v, depth, trace);
+
+  // A call of the library operator is not differentiated when the current
+  // scope shadows its name: the `D` stays unevaluated. The rules below build
+  // their result by name in the current scope, so in such a scope the result
+  // would be bound to the user definition: with a user `Sqrt := y ↦ y + 100`,
+  // the rule for a library `Sqrt(x)` gives `1/(2·Sqrt(x))`, and that `Sqrt`
+  // is the user function. The result of an unknown function,
+  // `Apply(Derivative(Sqrt, 1), x)`, has the same defect: the evaluation of
+  // `Derivative` reads `Sqrt` by name. An unevaluated `D` keeps the library
+  // call, which is differentiated when it is evaluated where its name reads
+  // the library. A call whose operands do not depend on `v` has the
+  // derivative 0 for any definition, so it is not left unevaluated.
+  if (libraryRuleBlocked(expr, isApplicableDef))
+    return dependsOnVariable(expr, v) ? undefined : ce.Zero;
 
   if (expr.operator === 'Negate') {
     recordD(trace, expr, v, 'derivative.constant-multiple', () =>

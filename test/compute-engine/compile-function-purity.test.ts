@@ -469,8 +469,11 @@ describe('the NaN exit is gated on effects, not on provenance', () => {
     };
     expect(build(true, false)).toBe(0); // boxed first, then shadowed impure
     expect(build(false, false)).toBe(0); // shadowed first
-    expect(build(true, true)).toBe(30); // pure either way
-    expect(build(false, true)).toBe(30);
+    // Boxed first, then shadowed pure: the node is bound to the library `At`,
+    // which the interpreter evaluates (`R[k]`), and the emission would read
+    // the handler of the copy (`R[1]`), so the compilation declines.
+    expect(build(true, true)).toBe(0);
+    expect(build(false, true)).toBe(30); // shadowed first, pure
   });
 
   test('a signature-only declaration is not vetoed by its own `isPure`', () => {

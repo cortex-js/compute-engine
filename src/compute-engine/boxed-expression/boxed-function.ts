@@ -13,7 +13,9 @@ import {
   hidesLibraryBinding,
   hidesLibraryBindingInContext,
   inSerializationScope,
+  isLibraryOperator,
   noteStructuralScope,
+  sameOperator,
   structuralScope,
 } from '../library-shadowing.js';
 import {
@@ -2696,8 +2698,20 @@ export class BoxedFunction
       let ys: Expression[] = [];
       if (!def.associative) ys = xs;
       else {
-        for (const x of xs) {
-          if (isFunction(x, this.operator)) ys.push(...x.ops);
+        // A call of the same name is spliced only when it is a call of the
+        // same definition, as in the canonical form (`flatten()`): a call of
+        // a user function with the same name is a value. The test reads the
+        // operand of this node, not its structural form, which can be bound
+        // again by its name. An operand with another operator whose
+        // structural form is a call of this operator (the exact number
+        // `50/9·√2`, whose structural form is a `Multiply`) is spliced.
+        for (const [i, x] of xs.entries()) {
+          const op = this.ops[i];
+          if (
+            isFunction(x, this.operator) &&
+            (op.operator !== this.operator || sameOperator(op, this))
+          )
+            ys.push(...x.ops);
           else ys.push(x);
         }
       }
@@ -24267,6 +24281,16 @@ function withoutStatementOperands(
   ops.forEach((op, i) => {
     const head = op.operator;
     if (head !== 'Assign' && head !== 'Declare' && head !== 'AddTo') return;
+    // The name is only a pre-filter. A call of a user function named
+    // `Assign`, `Declare` or `AddTo` is bound to another definition: it is a
+    // value, and is valid at any position. An operand with no definition is
+    // read by its name.
+    if (
+      (op.operatorDefinition !== undefined ||
+        op.valueDefinition !== undefined) &&
+      !isLibraryOperator(op, head)
+    )
+      return;
     if (roles === null)
       roles =
         def && isOperatorDef(def) ? def.operator.operandRoles(ops) : undefined;

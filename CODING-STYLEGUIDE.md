@@ -88,6 +88,12 @@ its [implementation conventions](ARCHITECTURE.md#implementation-conventions).
 - Use `.isSame()` for internal literal comparisons, guarding with `isNumber`
   when an operand might be a symbol. Reserve `.is()`'s numerical fallback for
   public API behavior. Choose arithmetic equality or identity proof explicitly.
+- Library code recognizes a call of a library operator by its definition: test
+  the node with `isLibraryOperator(node, 'Name')` (`library-shadowing.ts`),
+  because a user binding can give the name another definition. A
+  `node.operator === 'Name'` test alone is only a pre-filter. Use the
+  scope-based `shadowsLibraryName()` only before the node exists: it answers
+  for the current scope, not for the scope where the node was bound.
 - Tests that change precision must account for module-global
   `BigDecimal.precision`, including changes made by constructing an engine.
   Avoid reusing numeric test symbols in Boolean contexts: that use infers a

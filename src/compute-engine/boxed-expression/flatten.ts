@@ -1,9 +1,61 @@
 import type { Expression } from '../global-types.js';
+import { isLibraryOperator, sameOperator } from '../library-shadowing.js';
 import {
   isFoldBarrierProduct,
   isFunction,
   isNotationalProduct,
 } from './type-guards.js';
+
+/**
+ * The associative operator whose nested calls {@link flatten} splices into
+ * the operand list. A nested call is spliced only when it is a call of this
+ * operator, which is a question about its definition, not its name: in
+ * `Add(Add_user(2, 3), 1)`, where `Add_user` is a call of a user function
+ * named `Add` (made in a scope that is now popped, or the value of an
+ * argument of the qualified call `std::Add`), the operand is a value, and
+ * splicing its operands would give `Add(2, 3, 1)`.
+ *
+ * - A call node, or an object with the same three fields: an operand is
+ *   spliced when it is a call of the same operator, `sameOperator()` (the
+ *   same name and the same definition). The canonical form of an operator
+ *   with no canonical handler (`box.ts`) passes the definition of the call
+ *   that it builds, and the evaluation of the operands of a call
+ *   (`hold.ts`) passes the call.
+ * - A name: the library operator of that name. An operand is spliced when
+ *   it is a call bound to the system-scope definition of the name, or to an
+ *   extension or a copy of it that keeps its handlers
+ *   (`isLibraryOperator()`). A canonical handler of the library (`Add`,
+ *   `Multiply`, `And`, `Union`, …) passes its name: it runs for a call of
+ *   the library operator, and the associativity that it applies is a fact
+ *   about that operator. A name that a caller-supplied library defines is
+ *   read as the definition of that library.
+ *
+ * In both cases, an operand with no definition (a non-canonical operand) is
+ * spliced when its name is the name of the operator: it has no binding to
+ * compare, and its name is the only identity it has.
+ */
+export type FlattenOperator =
+  | string
+  | {
+      readonly operator: string;
+      readonly operatorDefinition: object | undefined;
+      readonly valueDefinition: object | undefined;
+    };
+
+/** The name of the operator `operator`. */
+function operatorName(operator: FlattenOperator): string {
+  return typeof operator === 'string' ? operator : operator.operator;
+}
+
+/** True when `x` is a call of the operator `operator` (see
+ * {@link FlattenOperator}), so that its operands are spliced. */
+function isCallOf(x: Expression, operator: FlattenOperator): boolean {
+  if (typeof operator !== 'string') return sameOperator(x, operator);
+  if (x.operator !== operator) return false;
+  if (x.operatorDefinition === undefined && x.valueDefinition === undefined)
+    return true;
+  return isLibraryOperator(x, operator, { customLibrary: false });
+}
 
 /**
  *
@@ -13,7 +65,8 @@ import {
  * e.g. `["Add", 1, ["Sequence", 2, 3]]` -> `["Add", 1, 2, 3]`
  *
  * Additionally, if an operator is provided, also lift nested expressions
- * with the same operator.
+ * with the same operator: calls of the same definition, see
+ * {@link FlattenOperator}.
  *  e.g. `["f", a, ["f", b, c]]` -> `["f", a, b, c]`
  *
  * `Nothing` is an operand like any other and is kept: `[1, Nothing]` has two
@@ -24,7 +77,7 @@ import {
  */
 export function flatten<T extends ReadonlyArray<Expression> | Expression[]>(
   ops: T,
-  operator?: string,
+  operator?: FlattenOperator,
   canonicalize = true
 ): T {
   // Optionally make all the arguments canonical.
@@ -34,8 +87,11 @@ export function flatten<T extends ReadonlyArray<Expression> | Expression[]>(
       : ops.map((x) => x.canonical);
 
   if (operator) {
+    const name = operatorName(operator);
+    // A test of the names only: the definition is compared below, for an
+    // operand that has the name.
     const shouldFlatten = (x: Expression) =>
-      x.operator === operator || x.operator === 'Sequence';
+      x.operator === name || x.operator === 'Sequence';
 
     // Bypass memory allocation for the common case where there is nothing to flatten
     if (xs.every((x) => !shouldFlatten(x))) return xs as T;
@@ -46,7 +102,7 @@ export function flatten<T extends ReadonlyArray<Expression> | Expression[]>(
       // If the operator matches, flatten the expression
       if (
         isFunction(x) &&
-        (x.operator === operator || x.operator === 'Sequence')
+        (x.operator === 'Sequence' || isCallOf(x, operator))
       )
         for (const y of flatten(x.ops, operator, canonicalize)) ys.push(y);
       else ys.push(x);
@@ -83,7 +139,7 @@ export function flatten<T extends ReadonlyArray<Expression> | Expression[]>(
  */
 export function flattenHoldingBarriers<
   T extends ReadonlyArray<Expression> | Expression[],
->(ops: T, operator: string, canonicalize = true): T {
+>(ops: T, operator: FlattenOperator, canonicalize = true): T {
   const xs: ReadonlyArray<Expression> =
     !canonicalize || ops.every((x) => x.isCanonical)
       ? ops
@@ -97,7 +153,10 @@ export function flattenHoldingBarriers<
       continue;
     }
     // Lift the requested operator and `Sequence`, still holding barriers back
-    if (isFunction(x) && (x.operator === operator || x.operator === 'Sequence'))
+    if (
+      isFunction(x) &&
+      (x.operator === 'Sequence' || isCallOf(x, operator))
+    )
       for (const y of flattenHoldingBarriers(x.ops, operator, canonicalize))
         ys.push(y);
     else ys.push(x);
@@ -117,14 +176,14 @@ export function flattenHoldingBarriers<
  */
 export function flattenKeepingNotationalProducts(
   ops: ReadonlyArray<Expression>,
-  operator: string
+  operator: FlattenOperator
 ): Expression[] {
   const ys: Expression[] = [];
   for (const x of ops) {
     if (isNotationalProduct(x)) ys.push(x);
     else if (
       isFunction(x) &&
-      (x.operator === operator || x.operator === 'Sequence')
+      (x.operator === 'Sequence' || isCallOf(x, operator))
     )
       ys.push(...flattenKeepingNotationalProducts(x.ops, operator));
     else ys.push(x);
