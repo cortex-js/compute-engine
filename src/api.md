@@ -1353,11 +1353,11 @@ target lacks one of `getOperators()`, `getFunctions()`, `createTarget()`
 and `compile()`.
 
 Every engine has `javascript` and `interval-js`. Every engine also has
-`glsl`, `wgsl` and `python` once the full package entry,
+`glsl` and `python` once the full package entry,
 `@cortex-js/compute-engine/epsil` or the CLI has been loaded anywhere in
 the program, whichever entry made the engine and in whichever order. A
 program that loads only `@cortex-js/compute-engine/core` has the two
-built-in targets: import `GLSLTarget`, `WGSLTarget` or `PythonTarget`
+built-in targets: import `GLSLTarget` or `PythonTarget`
 from `@cortex-js/compute-engine/compile` and register it here.
 
 ####### name
@@ -3007,6 +3007,23 @@ Lower and upper bounds for a symbol extracted from a domain restriction.
 
 </MemberCard>
 
+<MemberCard>
+
+### StaticShape {#staticshape}
+
+```ts
+type StaticShape = {
+  indexed: boolean;
+  count: number | bigint | undefined;
+  elementType: Type | undefined;
+};
+```
+
+The collection shape that an expression promises before it is evaluated.
+See `Expression.staticShape`.
+
+</MemberCard>
+
 ### NumberLiteralInterface {#numberliteralinterface}
 
 Narrowed interface for number literal expressions.
@@ -3330,7 +3347,7 @@ readonly isCollection: true;
 
 <MemberCard>
 
-##### CollectionInterface.count {#count-2}
+##### CollectionInterface.count {#count-3}
 
 ```ts
 readonly count: number | bigint | undefined;
@@ -5535,8 +5552,8 @@ callsCallbackOnRead?: boolean;
 ```
 
 Set on a lazy operator that calls a function operand when its elements
-are read, not when it is evaluated (`Map`, `Filter`, `Tabulate`, `Fill`,
-…). An instance created during a function call keeps the evaluation
+are read, not when it is evaluated (`Map`, `Filter`, `Tabulate`, …).
+An instance created during a function call keeps the evaluation
 context of that call, and each read of the instance runs in it, so that
 a name that the callback reads by its binding in the context (the symbol
 default `d` of a parameter `(x, k = d) => x * k`) has the value it had in
@@ -14012,11 +14029,11 @@ target lacks one of `getOperators()`, `getFunctions()`, `createTarget()`
 and `compile()`.
 
 Every engine has `javascript` and `interval-js`. Every engine also has
-`glsl`, `wgsl` and `python` once the full package entry,
+`glsl` and `python` once the full package entry,
 `@cortex-js/compute-engine/epsil` or the CLI has been loaded anywhere in
 the program, whichever entry made the engine and in whichever order. A
 program that loads only `@cortex-js/compute-engine/core` has the two
-built-in targets: import `GLSLTarget`, `WGSLTarget` or `PythonTarget`
+built-in targets: import `GLSLTarget` or `PythonTarget`
 from `@cortex-js/compute-engine/compile` and register it here.
 
 ####### name
@@ -17812,7 +17829,9 @@ different questions and neither implies the other:
   symbol declared `list<number>`/`vector<2>` that has not been assigned
   yet, and for an application whose head returns a collection (`L(1)`
   under `L: (number) -> vector<2>`): both are collection-shaped, but
-  there is nothing to walk.
+  there is nothing to walk. To ask what shape an expression promises
+  before evaluation (`L(1)` promises an indexed collection of 2
+  elements), read `staticShape`.
 - `type.matches('collection<any>')` — "is this operand
   collection-**shaped**?" It is `true` for those valueless cases, and
   `false` for a materialized collection whose type is top
@@ -17861,6 +17880,55 @@ union predicates in `collection-utils.ts` as well:
 `unionMayHoldACollection()` for an ENUMERATION gate (a big op folding its
 body — tuple, string and fixed-shape branches enumerate too), or
 `scalarOrCollectionUnionBranches()` for a BROADCAST gate.
+
+</MemberCard>
+
+<MemberCard>
+
+##### Expression.staticShape {#staticshape-1}
+
+```ts
+readonly staticShape: StaticShape | undefined;
+```
+
+The collection shape that this expression promises, read without
+evaluating it, or `undefined` when it promises no collection.
+
+`staticShape` answers the SHAPE question: "what does this expression
+promise to be?". `isCollection` answers the CAPABILITY question: "is a
+collection value present that I can walk now?". The two differ for an
+expression that has no value yet:
+
+```js
+ce.assign('f', ce.parse('n \\mapsto [n, n+1, n+2, n/2]'));
+const e = ce.box(['f', 3]);
+e.isCollection;  // false: nothing to walk before evaluation
+e.count;         // undefined
+e.staticShape;   // { indexed: true, count: 4, elementType: 'rational' }
+```
+
+The answer comes from:
+
+- the collection facets, when `isCollection` is `true` (a list, a
+  string, a dictionary, a symbol that holds a collection);
+- the declared type of a symbol with no collection value
+  (`L: vector<2>` gives a count of 2). A type that the engine inferred
+  from the uses of an undeclared name is not a promise;
+- the static type of an application whose head is bound: a library
+  operator, a function literal assigned to a name, or a declared
+  signature. A call of an undeclared name (`foo([1, 2])`) promises
+  nothing, although its type lifts over the collection argument. A
+  broadcast (`x + 1`) promises a collection only when one of its
+  operands promises one. A `missing` or `nothing` arm of the type is an
+  absence of the whole value and is set aside; a type with a scalar arm
+  or a string type promises nothing;
+- the arms of a selection (`If(c, a, b)`, `Which`), when every arm
+  promises a collection and no arm is a point or a string.
+
+`each()` and `at()` give the elements of the VALUE. When the value
+does not have the declared type, `each()` can give another number of
+elements than `staticShape.count`; the host must supply values of the
+declared types.
 
 </MemberCard>
 
@@ -17988,6 +18056,14 @@ for (const e of expr.each()) {
 }
 ```
 
+`each()` gives the elements of the value, and `staticShape.count` gives
+the number of elements that the expression promises before evaluation.
+The two can differ when the value does not have the declared type: a
+call of a function declared `(integer) -> vector<3>` whose body gives
+two elements has a `staticShape.count` of 3, but its value gives two
+elements. The host must supply values of the declared types. Read
+`staticShape` for the promised shape and `each()` for the elements.
+
 </MemberCard>
 
 <MemberCard>
@@ -18040,7 +18116,7 @@ If true, the subset relation is strict (i.e., proper subset).
 
 <MemberCard>
 
-##### Expression.count {#count-1}
+##### Expression.count {#count-2}
 
 If this is a collection, return the number of elements in the collection.
 
@@ -18055,6 +18131,9 @@ If the collection is infinite, return `Infinity`.
 If the number of elements cannot be determined, return `undefined`, for
 example, if the collection is lazy and not finite and the size cannot
 be determined without iterating over the collection.
+
+For the length that an expression with no value yet promises (a call of
+a function that returns a list), read `staticShape.count`.
 
 The count is a `bigint` only when it is finite and is not a safe integer
 (larger than `Number.MAX_SAFE_INTEGER`), for example the count of
