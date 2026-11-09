@@ -31,6 +31,8 @@
  * must give the same value (no state of the first call leaks into it).
  */
 import { ComputeEngine } from '../../src/compute-engine';
+import { _setProvisionalRepair } from '../../src/compute-engine/boxed-expression/provisional-application';
+import { repairProvisionalDependents } from '../../src/compute-engine/function-utils';
 
 type Definitions = [name: string, value: unknown][];
 
@@ -517,5 +519,128 @@ describe('a closure of a recursive call inside a closure of a deeper call', () =
   ])('f(%i, y ↦ 0)(0) = %i', async (n, expected) => {
     expect(twice([['f', f]], at(n))).toEqual([expected, expected]);
     expect(await twiceAsync([['f', f]], at(n))).toEqual([expected, expected]);
+  });
+
+  // The run-time assignment of the local `h`, which the body applies,
+  // re-derives the stored body of `f` (`repairWave()`, `function-utils.ts`),
+  // so each depth of the recursion ran a different body object, and the `n`
+  // of each depth had its own binding. The closures must keep their own `n`
+  // also when every depth runs the same body object: the substitution at the
+  // end of a call leaves alone a closure of another depth that is inside a
+  // closure it keeps whole (`recordNodesOfOtherCalls()`). Before, with one
+  // body object, the three values were `0`.
+  describe('when every depth runs the same body object', () => {
+    beforeAll(() => _setProvisionalRepair(() => {}));
+    afterAll(() => _setProvisionalRepair(repairProvisionalDependents));
+
+    test.each([
+      [1, 1],
+      [2, 3],
+      [3, 6],
+    ])('f(%i, y ↦ 0)(0) = %i', async (n, expected) => {
+      expect(twice([['f', f]], at(n))).toEqual([expected, expected]);
+      expect(await twiceAsync([['f', f]], at(n))).toEqual([expected, expected]);
+    });
+  });
+});
+
+describe('a local that holds a function, passed by name to a recursive call', () => {
+  // f = (n, g) ↦ Block(q := (y ↦ n + g(y)), If(n = 0, q, f(n − 1, q))).
+  // The symbol `q` evaluates to itself, and the callee declares its own
+  // `q`: the argument must be the function that the caller's `q` holds
+  // (`bindLazyArgumentLocals()`, `function-utils.ts`). Before, the callee
+  // read its own `q` through `g`, and the call stayed as written.
+  // f(n, y ↦ 0)(0) = n + (n − 1) + … + 0, as with the literal written in
+  // place of `q`.
+  const literal = ['Function', ['Add', 'n', ['g', 'y']], 'y'];
+  const f = [
+    'Function',
+    [
+      'Block',
+      ['Assign', 'q', literal],
+      ['If', ['Equal', 'n', 0], 'q', ['f', ['Subtract', 'n', 1], 'q']],
+    ],
+    'n',
+    'g',
+  ];
+  const at = (n: number) => ['Apply', ['f', n, ['Function', 0, 'y']], 0];
+
+  test.each([
+    [0, 0],
+    [1, 1],
+    [2, 3],
+    [3, 6],
+  ])('f(%i, y ↦ 0)(0) = %i', async (n, expected) => {
+    expect(twice([['f', f]], at(n))).toEqual([expected, expected]);
+    expect(await twiceAsync([['f', f]], at(n))).toEqual([expected, expected]);
+  });
+
+  // The local function is installed with `DefineFunction`: its literal reads
+  // `n` and `g` through the body scope of `f`, and must keep the frame of
+  // the call that made it. Before: "Recursion limit exceeded".
+  test.each([
+    [0, 0],
+    [1, 1],
+    [2, 3],
+    [3, 6],
+  ])('with DefineFunction, f(%i, y ↦ 0)(0) = %i', (n, expected) => {
+    const defined = [
+      'Function',
+      [
+        'Block',
+        ['DefineFunction', 'q', literal],
+        ['If', ['Equal', 'n', 0], 'q', ['f', ['Subtract', 'n', 1], 'q']],
+      ],
+      'n',
+      'g',
+    ];
+    expect(twice([['f', defined]], at(n))).toEqual([expected, expected]);
+  });
+
+  test('the same values when the body is not re-derived', () => {
+    _setProvisionalRepair(() => {});
+    try {
+      for (const [n, expected] of [
+        [1, 1],
+        [3, 6],
+      ])
+        expect(twice([['f', f]], at(n))).toEqual([expected, expected]);
+    } finally {
+      _setProvisionalRepair(repairProvisionalDependents);
+    }
+  });
+
+  test('a local function that is passed and never applied', () => {
+    // The local is passed and not returned: `f(1, y ↦ 0)` is `7`. Before,
+    // the call stayed as written although no value depends on the local.
+    const g = [
+      'Function',
+      [
+        'Block',
+        ['Assign', 'q', ['Function', 'y', 'y']],
+        ['If', ['Equal', 'n', 0], 7, ['f', ['Subtract', 'n', 1], 'q']],
+      ],
+      'n',
+      'g',
+    ];
+    expect(twice([['f', g]], ['f', 1, ['Function', 0, 'y']])).toEqual([7, 7]);
+  });
+
+  test('a function of the top level passed by name is not frozen', () => {
+    // The callee has a parameter with the name of the argument, and
+    // assigns another function to the global `q` (through `reset`) before
+    // it applies its parameter. The call reads the function that the
+    // global binding holds then (`docs/SCOPING-MODEL.md`, "Callable
+    // resolution"): only a local of the caller is replaced by its literal.
+    const ce = new ComputeEngine();
+    ce.assign('q', ce.box(['Function', 1, 'x']));
+    ce.declare('reset', '() scope -> integer');
+    ce.assign(
+      'reset',
+      ce.box(['Function', ['Block', ['Assign', 'q', ['Function', 2, 'x']], 0]])
+    );
+    ce.declare('use', '(function) scope -> integer');
+    ce.assign('use', ce.box(['Function', ['Block', ['reset'], ['q', 0]], 'q']));
+    expect(ce.box(['use', 'q']).evaluate().json).toEqual(2);
   });
 });

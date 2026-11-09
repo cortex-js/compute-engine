@@ -14,6 +14,22 @@
   now re-derived only when the new definition is in its scope or in a scope
   above it, and the ten edits take about 0.2 seconds each. (CE-1102)
 
+- **A recursive function that passes a local function by name to its
+  recursive call gives a value.** With
+  `f := (n, g) ↦ Block(q := (y ↦ n + g(y)), If(n = 0, q, f(n − 1, q)))`,
+  `f(1, y ↦ 0)(0)` stayed `Apply(f(1, y ↦ 0), 0)`; it is now `1`, as when
+  the function literal is written in place of `q`. The same function with
+  the local defined by `DefineFunction(q, y ↦ n + g(y))` ended with
+  "Recursion limit exceeded" and now gives the same values. (CE-1185)
+
+- **A selection on the equality of two points compiles to `glsl`.** With `p`
+  and `q` declared `tuple<real, real>`, `If(p = q, 1, 2)` declined with "a
+  tuple operand in an element-wise condition has no element-wise reading",
+  although `canCompile()` accepted it. It now compiles to
+  `((p == q) ? (1.0) : (2.0))`: GLSL `==` on two `vec2` values is true when
+  every component is equal, as the interpreter compares two points.
+  `NotEqual` and a condition such as `p = q ∧ x < 1` compile too.
+
 ## 0.185.1 _2026-11-09_
 
 ### Resolved Issues

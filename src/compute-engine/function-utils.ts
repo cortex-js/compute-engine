@@ -5496,6 +5496,49 @@ function bindLazyArgumentLocals(
   calleeScope: Scope | null,
   calleeNames: () => ReadonlySet<string>
 ): Expression {
+  // An argument that is the name of a function. An assignment of a function
+  // literal to a local (`q := (y ↦ …)`) gives the local an operator
+  // definition, and a symbol with an operator definition evaluates to
+  // itself. So the evaluated argument is still the name, and the callee
+  // reads the name in its own scope chain. In a recursive call the callee
+  // declares the same local again: `f(n - 1, q)` in the body of
+  // `f = (n, g) ↦ Block(q := (y ↦ n + g(y)), …)` gave the callee a `g` that
+  // read the callee's own `q`, and the call stayed unevaluated. The argument
+  // becomes the literal of the caller's binding, with the locals of the
+  // nested blocks in use captured, and re-rooted on the call frame that
+  // created it, as a function literal inside a lazy collection is (`walk`
+  // below). Without the re-rooting, the literal of a local function that
+  // `DefineFunction` installs read the parameters of the callee: with
+  // `DefineFunction(q, y ↦ n + g(y))` in place of the assignment above, `g`
+  // in the callee was a function that applied itself, and the call ended
+  // with "Recursion limit exceeded". A local declared with a value
+  // (`Declare(q, "function", y ↦ …)`) has a value definition: it evaluates
+  // to its literal and does not come here as a symbol.
+  //
+  // Only a binding that the chain of the callee's defining scope does not
+  // reach is replaced: a local of the caller. A name whose binding that
+  // chain reaches (a function of the top level, or of a function that
+  // encloses both) stays a symbol, also when the callee has a parameter or
+  // a local with the same name: a call of the callback in the callee must
+  // read the function that the binding holds at that time
+  // (`docs/SCOPING-MODEL.md`, "Callable resolution"). With a global
+  // `q = x ↦ 1` and `use = q ↦ Block(reset(), q(0))`, where `reset()`
+  // assigns `x ↦ 2` to the global `q`, `use(q)` is `2`. The callee cannot
+  // name a local of the caller, so it cannot assign to it during the call.
+  if (isSymbol(arg)) {
+    const own = arg.valueDefinition ?? arg.operatorDefinition;
+    const live = bindingInContext(ce, arg.symbol, own);
+    if (live === undefined || !('operator' in live)) return arg;
+    const literal = (live.operator as { _lambdaLiteral?: Expression })
+      ._lambdaLiteral;
+    if (literal === undefined) return arg;
+    if (bindingInContext(ce, arg.symbol, own, calleeScope) === live) return arg;
+    return rerootOnCreatingFrame(
+      ce,
+      captureNestedLocals(ce, literal) ?? literal
+    );
+  }
+
   // Most arguments have no lazy collection and no function literal: the walk
   // below would return them unchanged. Exit before it allocates anything.
   if (!mayReadCallerBindings(arg)) return arg;
@@ -6220,7 +6263,9 @@ function captureClosures(
   // because its chain does not read the call at all (`rerootKind` is
   // `'keep'`).
   // Only the nodes of the value itself are recorded, not those of the body
-  // of a literal that the capture rebuilds. See `bindingKeyedSubs`.
+  // of a literal that the capture rebuilds. The body of a node that the
+  // capture keeps whole (`'keep-current'`) is searched for such nodes
+  // (`recordNodesOfOtherCalls`). See `bindingKeyedSubs`.
   kept?: Set<Expression>
 ): Expression {
   if (!isFunction(expr) && !isDictionary(expr)) return expr;
@@ -6243,6 +6288,50 @@ function captureClosures(
   }
   byNode.set(expr, captured);
   return captured;
+}
+
+/**
+ * Record in `kept` each function literal or other scoped node of `expr`
+ * whose chain does not read the call with the frame `closureParent` and the
+ * body scope `leaving` (`rerootKind` is `'keep'`). The operands of a
+ * recorded node are not visited.
+ *
+ * `captureClosures` calls it for a node that it keeps whole because the
+ * node reads the call through the frame of another call
+ * (`'keep-current'`). That capture does not visit the body of the node, and
+ * the body can hold a closure of another call, put there in place of a
+ * parameter of the other frame. With `f = (n, g) ↦ Block(h := (m ↦ (y ↦ n
+ * + m(y))), If(n = 0, h(g), f(n − 1, h(g))))`, the closure that the call
+ * with `n = 0` returns reads `n` through the frame of `h`, and holds in
+ * place of `m` the closure that the call with `n = 1` made. Both closures
+ * are made from the same literal, so the `n` of each has the same binding.
+ * Without the record, the substitution at the end of the call with `n = 0`
+ * (`bindingKeyedSubs`) put `0` in place of the `n` of the other closure too,
+ * and `f(1, y ↦ 0)(0)` gave `0`, not `1`.
+ */
+function recordNodesOfOtherCalls(
+  expr: Expression,
+  closureParent: Scope,
+  leaving: Scope,
+  kept: Set<Expression>,
+  seen: Set<Expression> = new Set()
+): void {
+  if (isDictionary(expr)) {
+    for (const [, value] of expr.entries)
+      recordNodesOfOtherCalls(value, closureParent, leaving, kept, seen);
+    return;
+  }
+  if (!isFunction(expr) || expr._numericStore !== undefined) return;
+  if (seen.has(expr)) return;
+  seen.add(expr);
+  const body = expr.operator === 'Function' ? expr.op1 : expr;
+  const scope = isFunction(body) ? body.localScope : undefined;
+  if (scope && rerootKind(scope.parent, closureParent, leaving) === 'keep') {
+    kept.add(expr);
+    return;
+  }
+  for (const op of expr.ops)
+    recordNodesOfOtherCalls(op, closureParent, leaving, kept, seen);
 }
 
 /** The body of {@link captureClosures}: one node's capture. */
@@ -6283,6 +6372,8 @@ function captureClosuresUncached(
       if (kind !== 'keep') nodesReadingLeftCall += 1;
       if (kind === 'keep' || kind === 'keep-current') {
         if (kind === 'keep') kept?.add(expr);
+        else if (kept !== undefined)
+          recordNodesOfOtherCalls(innerBlock, closureParent, leaving, kept);
         return expr;
       }
       // A literal that the re-rooting would leave reading exactly what it
@@ -6406,6 +6497,9 @@ function captureClosuresUncached(
     if (kind !== 'keep') nodesReadingLeftCall += 1;
     if (kind === 'keep' || kind === 'keep-current') {
       if (kind === 'keep') kept?.add(expr);
+      else if (kept !== undefined)
+        for (const op of expr.ops)
+          recordNodesOfOtherCalls(op, closureParent, leaving, kept);
       return expr;
     }
     const scope: Scope = {
