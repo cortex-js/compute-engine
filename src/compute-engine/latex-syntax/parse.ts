@@ -2258,6 +2258,35 @@ export class _Parser implements Parser {
 
   _visualSpaceStops: ReadonlySet<number> | null = null;
 
+  /**
+   * The index of the token where the right operand of a juxtaposition
+   * starts, when that token starts visual space that a `+` or a `-` follows,
+   * as the `\,` of `a\, - 1`. Otherwise -1.
+   *
+   * The sign is then the infix operator of the left operand: `a\, - 1` is
+   * `a - 1`. The number reader skips visual space before the sign of a
+   * number, so at this token it would read `-1` as one number, and the
+   * juxtaposition would give the product `a·(-1)`. `parsePrimary()` does not
+   * call the number reader at this token. It reads the spacing command
+   * alone, as it does before a sign with no number after it (`a\, - b`), and
+   * the infix loop then reads the sign.
+   *
+   * At the start of an expression there is no left operand, so the number
+   * reader still reads `\, -1` as the number -1.
+   */
+  private _spacingBeforeSign = -1;
+
+  /** True when visual space is at the index and a `+` or a `-` follows it.
+   * The index does not move. */
+  private atSpacingBeforeSign(): boolean {
+    const start = this.index;
+    this.skipVisualSpace();
+    const result =
+      this.index !== start && (this.peek === '+' || this.peek === '-');
+    this.index = start;
+    return result;
+  }
+
   _isTilde(index: number): boolean {
     return this._tildes?.has(index) ?? false;
   }
@@ -7125,7 +7154,9 @@ export class _Parser implements Parser {
     //
     // 2. Is it a number?
     //
-    result ??= this.parseNumber();
+    // Not at the spacing before the infix sign of a juxtaposition: see
+    // `_spacingBeforeSign`.
+    if (start !== this._spacingBeforeSign) result ??= this.parseNumber();
 
     //
     // 2b. Is it a double-quoted string literal? (e.g. `"hello"`)
@@ -7754,10 +7785,15 @@ export class _Parser implements Parser {
               // delimiter/environment) — used to reconstruct the source span of
               // an applied letter-run (`divisors(…)`) in the diagnostic below.
               const rhsStartToken = this.index;
+              const outerSpacingBeforeSign = this._spacingBeforeSign;
+              this._spacingBeforeSign = this.atSpacingBeforeSign()
+                ? rhsStartToken
+                : -1;
               const rhs = this.parseExpression({
                 ...until,
                 minPrec: INVISIBLE_OP_PRECEDENCE + 1,
               });
+              this._spacingBeforeSign = outerSpacingBeforeSign;
               if (rhs !== null) {
                 // Diagnostic: an application-like juxtaposition (a bare symbol
                 // immediately followed by a delimited group or matrix

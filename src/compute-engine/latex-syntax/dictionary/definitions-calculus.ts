@@ -499,9 +499,9 @@ type BodyStops = {
  * after it. The tokens of an inner integral are not searched for a
  * differential (see `integralSpans`).
  *
- * When the body stops, the index is moved after the visual space, to the
- * sign: otherwise the parser of the enclosing expression would read
- * `\, - 1` as a factor `-1`, not as a subtraction.
+ * The index does not move. The visual space before the sign is left for the
+ * parser of the enclosing expression: it reads the space as spacing after
+ * the integral, then the sign as an infix operator.
  *
  * The test reads tokens only. It can find a differential that the parser
  * does not take (`\frac{d}{dx}` in a term before the integrand): the caller
@@ -550,10 +550,7 @@ function stopAfterTerm(parser: Parser, stops: BodyStops): boolean {
     stops.decisions.set(sign, stop);
     if (!stop && sign > stops.lastSign) stops.lastSign = sign;
   }
-  if (stop) {
-    stops.stoppedAt = sign;
-    parser.index = sign;
-  }
+  if (stop) stops.stoppedAt = sign;
   return stop;
 }
 

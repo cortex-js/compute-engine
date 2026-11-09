@@ -212,6 +212,15 @@
   it is now `number`, as without the compilation. When the program had
   declared `_x` as a `string`, the compiled code gave `[NaN]` at
   `zs = [3 + 4i]`; it now gives `[5]`.
+- **A spacing command before a `+` or a `-` that a number follows no longer
+  makes the sign a multiplication.** `a\, - 1` was parsed as the product of
+  `a` and `-1` and gave `-a`, and `x^2\, + 1` gave `x^2`. They are now
+  `a - 1` and `x^2 + 1`, as `a\, - b` already was `a - b`. The same holds
+  for the other spacing commands (`\;`, `\quad`, `\!`, `\hspace{1em}`, …) and
+  after a function with no parentheses: `\sin x\, - 1` was `\sin(-x)` and is
+  now `\sin(x) - 1`. With `form: 'raw'`, `\int \frac{dx}{x}\, - 1` now keeps
+  the spacing command as a `HorizontalSpacing` operand next to the integral,
+  as `\int \frac{1}{x}\,dx\, - 1` does.
 
 ### Performance
 

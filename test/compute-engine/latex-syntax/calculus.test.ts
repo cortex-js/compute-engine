@@ -833,10 +833,13 @@ describe('DIFFERENTIALS IN THE NUMERATOR OF A MULTIPLE INTEGRAL', () => {
     // The differential in the argument of a function
     same('2\\int \\sin\\frac{dx}{x} + 1', '2\\int \\sin\\frac{1}{x}\\,dx + 1');
     // Visual space before the sign after the integrand
-    same('\\int \\frac{dx}{x}\\, - 1', '\\int \\frac{1}{x}\\,dx - 1');
+    same('\\int \\frac{dx}{x}\\, - 1', '\\int \\frac{1}{x}\\,dx\\, - 1');
     same(
       '\\int_1^2\\int_3^4 \\frac{dx\\,dy}{xy}\\quad + 1',
-      '\\int_1^2\\int_3^4 \\frac{1}{xy}\\,dx\\,dy + 1'
+      '\\int_1^2\\int_3^4 \\frac{1}{xy}\\,dx\\,dy\\quad + 1'
+    );
+    expect(ce.parse('\\int_3^4 \\frac{dx}{x}\\, - 1').json).toEqual(
+      ce.parse('\\int_3^4 \\frac{1}{x}\\,dx - 1').json
     );
     // A Unicode variable, and a variable in braces
     same('2\\int_1^2 \\frac{dθ}{θ} + 1', '2\\int_1^2 \\frac{1}{θ}\\,dθ + 1');
