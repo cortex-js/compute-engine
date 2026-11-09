@@ -311,14 +311,16 @@ function operation(target: CompileTarget<Expression>) {
   };
 }
 
-/** A direct helper call may not acquire hidden arguments or changed operands. */
+/** True only for an owned scalar call with exact identity conversions.
+ * False is reserved for legacy targets; incomplete owned facts always fail. */
 export function assertScalarFragmentCall(
   target: CompileTarget<Expression>,
   args: readonly Expression[],
   held: readonly string[]
-): void {
+): boolean {
   const op = operation(target);
-  if (op === undefined) return;
+  if (op === undefined) return false;
+  assertPolicy(op.artifact, target);
   const helper = op.artifact.helper;
   const node = op.node;
   if (
@@ -329,6 +331,16 @@ export function assertScalarFragmentCall(
     args.some((arg, i) => arg !== node.ops[i])
   )
     throw new Error('JS scalar fragment invariant: different prepared call');
+  const conversions = op.facts.conversions;
+  if ((conversions?.length ?? 0) !== args.length ||
+      args.some((arg, i) => {
+        const conversion = conversions?.[i];
+        return !conversion || conversion.kind !== 'none' ||
+          !['number', 'boolean', 'complex'].includes(conversion.representation) ||
+          conversion.representation !== facts(op.artifact, arg).representation;
+      }))
+    throw new Error('JS scalar fragment invariant: invalid scalar call conversions');
+  return true;
 }
 
 /** Undefined is reserved for legacy targets, never for an absent fact. */

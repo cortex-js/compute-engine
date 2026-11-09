@@ -2,7 +2,6 @@
 // collection-valued calls, and operand types in context.
 
 import {
-  scalarConvertOperand,
   assertScalarFragmentCall,
 } from './javascript-fragment-facts.js';
 import {
@@ -204,7 +203,8 @@ export function emitUserFunctionCall(
    */
   held: ReadonlyArray<string> = []
 ): TargetSource {
-  assertScalarFragmentCall(target, args, held);
+  if (assertScalarFragmentCall(target, args, held))
+    return `${name}(${args.map(arg => compileValueOperand(arg, target)).join(', ')})`;
   const coerceToComplex = realLaneArguments(
     name,
     args,
@@ -256,14 +256,13 @@ export function emitUserFunctionCall(
   // three forms the argument's static shape already settles
   // (`complexWrapCode`). In a map, the wrap applies to the element.
   const coerce = (code: string, i: number) =>
-    scalarConvertOperand(i, code, target) ??
-    (coerceToComplex[i] === 'real'
+    coerceToComplex[i] === 'real'
       ? `_SYS.creal(${code})`
       : coerceToComplex[i] === 'real-operand'
         ? `_SYS.crealElements(${code})`
         : coerceToComplex[i]
           ? complexWrapCode(code, args[i], target)
-          : code);
+          : code;
 
   if (!ranks.some((r) => r! > 0))
     return `${name}(${[...compiledArgs.map(coerce), ...held].join(', ')})`;

@@ -124,7 +124,7 @@ test('named-body handoff rejects changed identity, scopes, policy and hidden arg
   const real = { type: { kind: 'real' as const }, representation: 'number' as const };
   const scope: FragmentScope<'number'> = {
     bindings: new Map(), facts: new Map([[call, { ...real,
-      conversions: [{ kind: 'none' as const, ...real }] }]]), inner: new Map(),
+      conversions: [{ kind: 'none' as const, ...real }] }], [call.op1, real]]), inner: new Map(),
     statements: new Set(),
   };
   const functionScope: FragmentScope<'number'> = {
