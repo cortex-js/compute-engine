@@ -1292,6 +1292,22 @@ export class _Parser implements Parser {
     d.length = w;
   }
 
+  _diagnosticsSince(checkpoint: number): readonly object[] {
+    if (this.diagnostics === null) return [];
+    return this.diagnostics
+      .filter((d) => d._seq >= checkpoint)
+      .map((d) => ({ ...d }));
+  }
+
+  _replayDiagnostics(entries: readonly object[]): void {
+    if (this.diagnostics === null) return;
+    for (const entry of entries)
+      this.diagnostics.push({
+        ...(entry as CollectedDiagnostic),
+        _seq: this._diagnosticSeq++,
+      });
+  }
+
   _isEmptyMatchfixBody(body: MathJsonExpression | null | undefined): boolean {
     if (body === 'Nothing' && this._matchfixBodyIsAuthoredNothing) return false;
     return isEmptySequence(body);

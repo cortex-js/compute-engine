@@ -82,6 +82,18 @@
 
 ### Resolved Issues
 
+- **A factor or a minus sign before an integral with its differential in a
+  fraction no longer applies to the terms after the integral.**
+  `2\int_0^1 \frac{dx}{1+x^2} + 1` was `2(∫ + 1) ≈ 3.5708` and is now
+  `2∫ + 1 = 1 + π/2`, as `2\int_0^1 \frac{1}{1+x^2}\,dx + 1` is.
+  `-\int_3^4 \frac{dx}{x} + 5` was `-5 - ln(4/3)` and is now `5 - ln(4/3)`.
+  A brace group around an inner integral and a term after it now keeps that
+  term in the group: `\int_1^2 1-{\int_3^4 \frac{dx\,dy}{xy} + 5}` subtracts
+  the 5 inside the integral over `y`. With `diagnostics: true`, a variable
+  after such an integral, with the name of its integration variable, is now
+  reported as undeclared also after a minus sign
+  (`\int \frac{dx}{x} - x`).
+
 - **`compileShader()` and `compileFunction()` of the GLSL target refuse a
   declared type that is not GLSL.** An input, output or uniform declared
   `{ name: 'u', type: 'vec3f' }` (or `f32`, `vec3<f32>`, `mat2x2f`,

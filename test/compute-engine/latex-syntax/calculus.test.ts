@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../../src/compute-engine';
 import { engine as ce, exprToString } from '../../utils';
+import { operator } from '../../../src/math-json/utils';
 
 function parse(s: string) {
   const expr = ce.parse(s);
@@ -795,6 +796,129 @@ describe('DIFFERENTIALS IN THE NUMERATOR OF A MULTIPLE INTEGRAL', () => {
         .evaluate()
         .toString()
     ).toBe('6 + 2ln(2)^2 - ln(2) * ln(3)');
+  });
+
+  // The integral ends after the term that holds its differential, so a
+  // factor or a minus sign before it does not apply to the terms after it.
+  test('a factor or a sign before an integral with its differential in a fraction (CE-1160)', () => {
+    const same = (fraction: string, tokens: string) =>
+      expect(raw(fraction)).toEqual(raw(tokens));
+    same(
+      '2\\int_0^1 \\frac{dx}{1+x^2} + 1',
+      '2\\int_0^1 \\frac{1}{1+x^2}\\,dx + 1'
+    );
+    same('-\\int_3^4 \\frac{dx}{x} + 5', '-\\int_3^4 \\frac{1}{x}\\,dx + 5');
+    same('1-\\int_3^4 \\frac{dx}{x} + 5', '1-\\int_3^4 \\frac{1}{x}\\,dx + 5');
+    same('1-\\int_3^4 \\frac{dx}{x} - 5', '1-\\int_3^4 \\frac{1}{x}\\,dx - 5');
+    // A term before the term that holds the differential stays in the
+    // integrand
+    same(
+      '2\\int_3^4 1 - \\frac{2dx}{x} + 5',
+      '2\\int_3^4 1 - \\frac{2}{x}\\,dx + 5'
+    );
+    same(
+      '2\\int_1^2\\int_3^4 \\frac{dx\\,dy}{xy} + 1',
+      '2\\int_1^2\\int_3^4 \\frac{1}{xy}\\,dx\\,dy + 1'
+    );
+    // A term before the differential that is joined by another operator
+    same(
+      '2\\int a \\oplus b + \\frac{dx}{x} + 1',
+      '2\\int a \\oplus b + \\frac{1}{x}\\,dx + 1'
+    );
+    // A `d` that is not a differential, in a term before the differential
+    same(
+      '\\int 2\\frac{x}{d} + \\frac{dx}{x} + 1',
+      '\\int 2\\frac{x}{d} + \\frac{1}{x}\\,dx + 1'
+    );
+    // The differential in the argument of a function
+    same('2\\int \\sin\\frac{dx}{x} + 1', '2\\int \\sin\\frac{1}{x}\\,dx + 1');
+    // Visual space before the sign after the integrand
+    same('\\int \\frac{dx}{x}\\, - 1', '\\int \\frac{1}{x}\\,dx - 1');
+    same(
+      '\\int_1^2\\int_3^4 \\frac{dx\\,dy}{xy}\\quad + 1',
+      '\\int_1^2\\int_3^4 \\frac{1}{xy}\\,dx\\,dy + 1'
+    );
+    // A Unicode variable, and a variable in braces
+    same('2\\int_1^2 \\frac{dθ}{θ} + 1', '2\\int_1^2 \\frac{1}{θ}\\,dθ + 1');
+    same('2\\int_1^2 \\frac{d{x}}{x} + 1', '2\\int_1^2 \\frac{1}{x}\\,dx + 1');
+    // A double integral with one differential in the fraction keeps the
+    // differential written after the integrand
+    expect(operator(raw('\\iint \\frac{dx}{x} + 1\\,dy'))).toBe('Integrate');
+    // A `d` in a word or in a Leibniz derivative is not a differential
+    same(
+      '\\int \\mathrm{grad}\\,f + \\frac{dx}{x} + 1',
+      '\\int \\mathrm{grad}\\,f + \\frac{1}{x}\\,dx + 1'
+    );
+    expect(
+      ce.parse('2\\int_0^1 \\frac{dx}{1+x^2} + 1').evaluate().toString()
+    ).toBe('1 + 1/2 * pi');
+    expect(
+      ce.parse('-\\int_3^4 \\frac{dx}{x} + 5').evaluate().toString()
+    ).toBe('5 - 2ln(2) + ln(3)');
+    expect(
+      ce.parse('1-\\int_3^4 \\frac{dx}{x} + 5').evaluate().toString()
+    ).toBe('6 - 2ln(2) + ln(3)');
+  });
+
+  // A term with a `d` that is not a differential makes the body of an
+  // integral be parsed again, without the inner integrals and at most twice,
+  // so the time stays linear in the length of the input. Before, eight
+  // nested integrals of this form took seconds.
+  test('terms with a d that is not a differential, in nested integrals (CE-1160)', () => {
+    const nested = (k: number): string =>
+      k === 0
+        ? 'x'
+        : `\\int ${nested(k - 1)} + ${'\\frac{x}{dy} + '.repeat(3)}\\frac{dv_${k}}{x}`;
+    const start = Date.now();
+    const parsed = raw(nested(8));
+    // A timing assertion fails on a loaded machine with no change to the
+    // code, so it runs only under CE_PERF=1
+    if (process.env.CE_PERF === '1')
+      expect(Date.now() - start).toBeLessThan(2000);
+    expect(operator(parsed)).toBe('Integrate');
+    // With diagnostics, the inner integrals are not parsed again either: a
+    // result used again records the diagnostics of its first reading
+    const withDiagnostics = new ComputeEngine().parse(nested(8), {
+      canonical: false,
+      diagnostics: true,
+    });
+    expect(operator(withDiagnostics.json)).toBe('Integrate');
+    // A span of zero tokens, from an integral command with no body, does not
+    // stop the search for a differential
+    expect(operator(raw('\\int{\\int}+1'))).toBe('Integrate');
+  });
+
+  // The parser does not keep a brace group, but the group ends the integrand:
+  // the terms after the inner integrand that are inside the group stay in it.
+  test('a brace group around an inner integral and a term after it (CE-1160)', () => {
+    const inner = [
+      'Integrate',
+      ['Divide', 1, ['InvisibleOperator', 'x', 'y']],
+      ['Tuple', 'x', 3, 4],
+    ];
+    expect(raw('\\int_1^2 1-{\\int_3^4 \\frac{dx\\,dy}{xy} + 5}')).toEqual([
+      'Integrate',
+      ['Subtract', 1, ['Add', inner, 5]],
+      ['Tuple', 'y', 1, 2],
+    ]);
+    expect(raw('\\int_1^2 2{\\int_3^4 \\frac{dx\\,dy}{xy} + 5}')).toEqual([
+      'Integrate',
+      ['InvisibleOperator', 2, ['Add', inner, 5]],
+      ['Tuple', 'y', 1, 2],
+    ]);
+    expect(raw('\\int_1^2 -{\\int_3^4 \\frac{dx\\,dy}{xy} + 5}')).toEqual([
+      'Integrate',
+      ['Negate', ['Add', inner, 5]],
+      ['Tuple', 'y', 1, 2],
+    ]);
+    // A brace group around the inner integrand and a term after it: the
+    // term is outside both integrals, also when the inner integral follows
+    // another term
+    expect(raw('\\int_1^2 1+\\int_3^4 {\\frac{dx\\,dy}{xy} + 5}')).toEqual([
+      'Add',
+      ['Integrate', ['Add', 1, inner], ['Tuple', 'y', 1, 2]],
+      5,
+    ]);
   });
 
   test('an integral with its own differential takes none from a later term (CE-1124)', () => {

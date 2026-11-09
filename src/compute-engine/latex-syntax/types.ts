@@ -1299,6 +1299,22 @@ export interface Parser {
 
   /**
    * @internal
+   * Diagnostics: copies of the diagnostics collected since `checkpoint` and
+   * still present. With {@link _replayDiagnostics}, a parselet that uses
+   * again a result it read before records the diagnostics of that reading
+   * again. Empty when diagnostics are off.
+   */
+  _diagnosticsSince(checkpoint: number): readonly object[];
+
+  /**
+   * @internal
+   * Diagnostics: record again diagnostics that {@link _diagnosticsSince}
+   * returned, as new entries after every diagnostic collected so far.
+   */
+  _replayDiagnostics(entries: readonly object[]): void;
+
+  /**
+   * @internal
    * True when `body`, the body that the `parse` handler of a matchfix entry
    * receives, holds no expression: the enclosure is empty (`()`) or holds
    * only decoration (`(\displaystyle)`). The parser gives the symbol

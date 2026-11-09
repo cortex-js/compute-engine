@@ -255,10 +255,14 @@ describe('bound variables do not fire undeclared-symbol (A1)', () => {
     expect(
       undeclaredNames('\\int_1^2 -\\int_3^4 \\frac{dx\\,dy}{xy} - y')
     ).toEqual(['y']);
-    // A brace group around the inner integral and the term after it
+    // A brace group around the inner integral and the term after it: the
+    // group is the integrand of the outer integral, so its `y` is bound
     expect(
       undeclaredNames('\\int_1^2{\\int_3^4 \\frac{dx\\,dy}{xy} + y}')
-    ).toEqual(['y']);
+    ).toEqual([]);
+    // A term after the integrand is free also after a minus sign
+    expect(undeclaredNames('\\int \\frac{dx}{x} - x')).toEqual(['x']);
+    expect(undeclaredNames('2\\int \\frac{dx}{x} + x')).toEqual(['x']);
   });
 
   test('a term before the inner of two integrals that share a fraction is bound (CE-1124)', () => {
@@ -308,8 +312,10 @@ describe('bound variables do not fire undeclared-symbol (A1)', () => {
     expect(dCount('\\int \\frac{dx}{d}')).toBe(2);
     // The free `d` is a factor of the integrand: `Divide(d, x)`.
     expect(dCount('\\int \\frac{d\\,dx}{x}')).toBe(2);
-    // The parse keeps the `d` of the first fraction: `Divide(d·x, x)`.
-    expect(dCount('\\int \\frac{dx}{x} + \\frac{dx}{x}')).toBe(2);
+    // The integral ends after the first fraction, which holds its
+    // differential. The second fraction is a term after the integral, and its
+    // `d` is a free symbol: `Divide(d·x, x)`. Only that `d` fires.
+    expect(dCount('\\int \\frac{dx}{x} + \\frac{dx}{x}')).toBe(1);
     // The factor `2` between the two products stops the search for
     // differentials, so the first `d x` is a free product.
     expect(dCount('\\int \\frac{d x\\,2\\,d\\mathrm{x}}{2}')).toBe(2);
