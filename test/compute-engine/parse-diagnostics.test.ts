@@ -786,6 +786,35 @@ describe('bound-variable post-filter + assert (follow-up item 2)', () => {
     expect(asserts.filter((m) => m.includes('bound-only'))).toEqual([]);
   });
 
+  test('the implicit variable of an integral with no differential does not trip the post-filter assert (CE-1171)', () => {
+    // The canonical form of `\int_0^1 x^2` integrates over `x`, a name that
+    // is free in the source: its diagnostic is kept, and the check is silent.
+    const realAssert = console.assert;
+    const asserts: string[] = [];
+    console.assert = ((cond: unknown, ...args: unknown[]): void => {
+      if (!cond) asserts.push(String(args[0] ?? ''));
+    }) as typeof console.assert;
+    const names: unknown[][] = [];
+    try {
+      for (const latex of [
+        '\\int_0^1 x^2',
+        '\\int_0^1 a+b',
+        '\\int_0^2\\int_0^1 (c+dx)(a+bx)\\,dx',
+      ]) {
+        const e = new ComputeEngine().parse(latex, { diagnostics: true });
+        names.push(
+          byCode(e.parseDiagnostics ?? [], 'undeclared-symbol').map(
+            (d) => d.detail?.name
+          )
+        );
+      }
+    } finally {
+      console.assert = realAssert;
+    }
+    expect(asserts.filter((m) => m.includes('bound-only'))).toEqual([]);
+    expect(names).toEqual([['x'], ['a', 'b'], ['c', 'd', 'a', 'b']]);
+  });
+
   test('the post-filter is skipped for non-canonical parses', () => {
     // Should not throw, and codes 1 & 2 still fire (canonical:false path).
     const ds = diags('x(3)', { canonical: false });

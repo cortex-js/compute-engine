@@ -105,8 +105,10 @@ import {
 } from './boxed-expression/type-provenance.js';
 import {
   adoptsForeignEngineObject,
+  isFunction,
   isSymbol,
 } from './boxed-expression/type-guards.js';
+import { functionLiteralParameterName } from './boxed-expression/function-literal.js';
 import {
   InferenceRollbackFrame,
   activeRollbackFrame,
@@ -384,6 +386,40 @@ import { fu as _fu } from './symbolic/fu.js';
 
 /** True if `x`, a part of a complex value given as a double or a big
  * decimal, is zero. `undefined` (a part that is not given) is zero. */
+/**
+ * The names that the canonical form binds as the implicit variable of an
+ * integral that names no variable: the parameters of the function literal in
+ * `Integrate(Function(x^2, x), Limits(Nothing, 0, 1))`, the canonical form of
+ * `\int_0^1 x^2` (see `implicitLiteralParameters()` in
+ * `library/calculus.ts`). In the source these names are free, so their
+ * `undeclared-symbol` diagnostics are correct, and the bound-only check of
+ * `parse()` skips them.
+ */
+function implicitIntegralVariables(expr: Expression): Set<string> {
+  const result = new Set<string>();
+  const visit = (e: Expression): void => {
+    if (!isFunction(e)) return;
+    const integrand = e.op1;
+    if (
+      e.operator === 'Integrate' &&
+      isFunction(integrand, 'Function') &&
+      e.ops
+        .slice(1)
+        .some(
+          (limit) =>
+            isFunction(limit, 'Limits') &&
+            isSymbol(limit.op1) &&
+            limit.op1.symbol === 'Nothing'
+        )
+    )
+      for (const param of integrand.ops.slice(1))
+        result.add(functionLiteralParameterName(param));
+    for (const op of e.ops) visit(op);
+  };
+  visit(expr);
+  return result;
+}
+
 function isZeroLike(x: number | BigDecimal | undefined): boolean {
   if (x === undefined) return true;
   if (typeof x === 'number') return x === 0;
@@ -4694,15 +4730,19 @@ export class ComputeEngine implements IComputeEngine {
         // deliberately-kept free occurrence whose name collides with the dummy
         // (`\int_x^1 x\,dx` — the canonical result then reports the shared
         // name as bound-only, hiding the free lower bound from this check).
+        // The implicit variable of an integral that names none
+        // (`\int_0^1 x^2`) is exempt too: the canonical form binds that free
+        // source name (see `implicitIntegralVariables()`).
         if (boxed.isCanonical) {
           try {
             const symbols = new Set(boxed.symbols);
             const free = new Set(boxed.freeVariables);
+            const implicit = implicitIntegralVariables(boxed);
             for (const d of diagnostics) {
               if (d.code !== 'undeclared-symbol') continue;
               const name = d.detail?.name;
               if (typeof name !== 'string') continue;
-              if (processedBoundNames.has(name)) continue;
+              if (processedBoundNames.has(name) || implicit.has(name)) continue;
               if (symbols.has(name) && !free.has(name))
                 console.assert(
                   false,
