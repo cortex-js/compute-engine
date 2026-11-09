@@ -21828,6 +21828,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Produce a sequence by repeating a single value. With 1 argument, returns an infinite sequence; with 2 arguments (value, count), returns a finite list of `count` copies.',
     complexity: 8200,
+    // A function value is an element, held and never called, so the effects
+    // of its body are not effects of `Repeat`. An operand with an effect of
+    // its own (`Repeat(Random(), 3)`) still makes the call impure.
+    invokes: false,
     signature: '(value: any, count: integer?) -> list',
     // Every element is the repeated value, so the result is `list<T>` where
     // `T` is the type of the value, widened as a list literal widens its

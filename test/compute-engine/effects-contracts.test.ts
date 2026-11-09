@@ -704,6 +704,25 @@ describe('5 — `invokes: false` containers are pure to build', () => {
     }
   });
 
+  it('`Repeat(randomF, n)` and `Fill(randomF, n)` are pure, as `List` is', () => {
+    // Both hold their value as an element and never call it.
+    const ce = engine();
+    for (const [name, e] of Object.entries({
+      'Repeat': ce.box(['Repeat', 'storedDraw', 2]),
+      'Repeat infinite': ce.box(['Repeat', 'storedDraw']),
+      'Fill': ce.box(['Fill', 'storedDraw', 2, 2]),
+    })) {
+      expect([name, eff(e)]).toEqual([name, undefined]);
+      expect([name, e.isPure]).toEqual([name, true]);
+    }
+    // An operand with an effect of its own still makes the call impure…
+    expect(ce.box(['Repeat', ['Random'], 2]).isPure).toBe(false);
+    expect(ce.box(['Fill', ['Random'], 2]).isPure).toBe(false);
+    // …and so does an element taken out and called.
+    const called = ce.box(['Apply', ['At', ['Repeat', 'storedDraw', 2], 1], 0]);
+    expect(eff(called)).toEqual(['random']);
+  });
+
   it('the effect surfaces at the application that INVOKES an element', () => {
     const ce = engine();
     // Storing it: nothing. Invoking it: `{random}`. Same value, two positions.

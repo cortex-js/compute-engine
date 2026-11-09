@@ -110,6 +110,13 @@
 
 ### Resolved Issues
 
+- **`Repeat(f, n)` no longer takes the effects of a function value that it
+  never calls.** `Repeat` holds its value as an element and never calls it, as
+  `List` does, but it took the effects of the body of `f`:
+  `Repeat((k) => Random(), 2)` was reported as not pure, while
+  `[(k) => Random(), (k) => Random()]` was pure. A value with an effect of
+  its own, `Repeat(Random(), 2)`, still makes the call impure. (CE-1174)
+
 - **A factor or a minus sign before an integral with its differential in a
   fraction no longer applies to the terms after the integral.**
   `2\int_0^1 \frac{dx}{1+x^2} + 1` was `2(∫ + 1) ≈ 3.5708` and is now
