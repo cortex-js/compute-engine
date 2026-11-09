@@ -1949,6 +1949,9 @@
    "wikidata": null
   },
   "ZerosOf": {
+   "fungrimNames": [
+    "Zeros"
+   ],
    "fungrimId": "f7ce46",
    "description": "Zeros (roots) of function",
    "arity": 2,
