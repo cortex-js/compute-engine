@@ -1283,8 +1283,7 @@ function commitRecordedWalk(
   // first walk saw the elements of its own walk; that is the one read that
   // can differ.) A pure instance has one set of elements, so a replacement
   // changes nothing.
-  if (complete && !expr.isPure && validEntryOf(expr)?.complete === true)
-    return;
+  if (complete && !expr.isPure && validEntryOf(expr)?.complete === true) return;
   if (suspendedEpochChange) return;
   const endDeps = snapshotDeps(expr, true);
   if (endDeps === undefined) return;

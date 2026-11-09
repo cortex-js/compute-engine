@@ -462,9 +462,7 @@ export function gpuAtBaseShape(
     };
   if (n === 0)
     return {
-      decline:
-        'the base is empty, and GLSL has no zero-length ' +
-        'value type',
+      decline: 'the base is empty, and GLSL has no zero-length ' + 'value type',
     };
   if (n === 1)
     return {

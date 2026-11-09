@@ -3774,8 +3774,7 @@ function makeCanonicalFunctionCore(
     // boxed again after the splice.
     const valueDefaults =
       calleeType === undefined ||
-      (!def.value.inferredType &&
-        isWildcardFunctionType(declaredCalleeType)) ||
+      (!def.value.inferredType && isWildcardFunctionType(declaredCalleeType)) ||
       writtenOps.some((x) => x.operator === 'Spread')
         ? undefined
         : signatureDefaultOperands(ce, def.value, calleeType);

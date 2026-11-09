@@ -55,9 +55,7 @@ export type FragmentValueType =
 
 /** The type of an element of a list. */
 export type FragmentElementType =
-  | { kind: 'real' }
-  | { kind: 'integer' }
-  | { kind: 'point'; size: number };
+  { kind: 'real' } | { kind: 'integer' } | { kind: 'point'; size: number };
 
 /** A list. `count` is absent when it is known only at run time. */
 export type FragmentListType = {
@@ -329,7 +327,11 @@ export type FragmentWalker<R> = {
     scope: FragmentScope<R>,
     name: string
   ):
-    | { facts: FragmentFacts<R>; role: FragmentBindingRole; scope: FragmentScope<R> }
+    | {
+        facts: FragmentFacts<R>;
+        role: FragmentBindingRole;
+        scope: FragmentScope<R>;
+      }
     | undefined;
   /** The facts of a computed value of `type`, or a refusal when the target
    *  has no representation for it. */
@@ -445,11 +447,15 @@ export type FragmentDefinition<R> = {
   readonly rules: Readonly<Record<string, FragmentRule<R>>>;
   /** The type of a free symbol, from its engine type, or `undefined` when
    *  the fragment has no type for it. */
-  typeOfSymbol(symbol: Expression): FragmentValueType | FragmentListType | undefined;
+  typeOfSymbol(
+    symbol: Expression
+  ): FragmentValueType | FragmentListType | undefined;
   /** The type of a free symbol that the pass reads as an input of the
    *  expression, when it differs from `typeOfSymbol()` (a node boxed before
    *  the declaration of its name). Absent: `typeOfSymbol()`. */
-  typeOfInput?(symbol: Expression): FragmentValueType | FragmentListType | undefined;
+  typeOfInput?(
+    symbol: Expression
+  ): FragmentValueType | FragmentListType | undefined;
   /** The fragment type of the engine type `t` (the ascribed type of a
    *  `Typed`), or `undefined` when the fragment has no type for it. */
   typeOfType?(t: Type): FragmentValueType | FragmentListType | undefined;
@@ -475,7 +481,9 @@ export type FragmentDefinition<R> = {
     }
   ): R | undefined;
   /** How the target holds a computed value of this type, or `undefined`. */
-  representationOfValue(type: FragmentValueType | FragmentListType): R | undefined;
+  representationOfValue(
+    type: FragmentValueType | FragmentListType
+  ): R | undefined;
   /** The names `s` of the statements `s = s + e` of the root as the
    *  program wrote it (`sumAssignedNames()`), or `undefined` when they are
    *  not known: the pass then reads no `Assign` of the root as a lowered
@@ -882,7 +890,10 @@ function factsUnderScope<R>(
   visit(scope);
   FACTS_UNDER_SCOPE.set(
     scope as FragmentScope<unknown>,
-    map as Map<Expression, FragmentValueFacts<unknown> | typeof CONFLICTING_FACTS>
+    map as Map<
+      Expression,
+      FragmentValueFacts<unknown> | typeof CONFLICTING_FACTS
+    >
   );
   return map;
 }
@@ -1033,7 +1044,11 @@ function makeWalker<R>(
     scope: FragmentScope<R>,
     name: string
   ):
-    | { facts: FragmentFacts<R>; role: FragmentBindingRole; scope: FragmentScope<R> }
+    | {
+        facts: FragmentFacts<R>;
+        role: FragmentBindingRole;
+        scope: FragmentScope<R>;
+      }
     | undefined => {
     for (let s: FragmentScope<R> | undefined = scope; s; s = s.parent) {
       if (state.pending.get(s)?.has(name))
@@ -1159,7 +1174,9 @@ function makeWalker<R>(
   const walker: FragmentWalker<R> = {
     definition,
     constant: (node, scope) =>
-      readsBoundName(node, scope) ? undefined : definition.constantValue?.(node),
+      readsBoundName(node, scope)
+        ? undefined
+        : definition.constantValue?.(node),
     refuse,
     sumAssigned: (name) => currentSumAssigned?.has(name),
     valueFacts,
@@ -1281,15 +1298,22 @@ function makeWalker<R>(
     if (known !== undefined) return known;
     const set = new Set<string>();
     if (isSymbol(node)) set.add(node.symbol);
-    else for (const op of opsOf(node)) for (const n of symbolNames(op)) set.add(n);
+    else
+      for (const op of opsOf(node)) for (const n of symbolNames(op)) set.add(n);
     namesOf.set(node, set);
     return set;
   };
   /** Whether `node` reads a name that a scope below the root binds. */
-  const readsBoundName = (node: Expression, scope: FragmentScope<R>): boolean => {
+  const readsBoundName = (
+    node: Expression,
+    scope: FragmentScope<R>
+  ): boolean => {
     if (scope === state.root) return false;
     for (const name of symbolNames(node))
-      if (fragmentScopeBinds(scope, name) || state.pending.get(scope)?.has(name))
+      if (
+        fragmentScopeBinds(scope, name) ||
+        state.pending.get(scope)?.has(name)
+      )
         return true;
     return false;
   };
@@ -1351,7 +1375,14 @@ function makeWalker<R>(
             `boolean or 2 to 4 component vector type`,
           name
         );
-      return bind(node, state.root, name, declared.type, 'input', declared.declared);
+      return bind(
+        node,
+        state.root,
+        name,
+        declared.type,
+        'input',
+        declared.declared
+      );
     }
     // A free symbol with a stored value: the compiler writes the value in
     // place of the symbol, so the value is typed, in the root scope, where
@@ -1938,13 +1969,7 @@ function makeWalker<R>(
               `${fragment} fragment: declare a numeric type for it`,
             name
           );
-        bind(
-          fn.parameterSymbols?.[i] ?? call,
-          scope,
-          name,
-          type,
-          'parameter'
-        );
+        bind(fn.parameterSymbols?.[i] ?? call, scope, name, type, 'parameter');
         return { name, type };
       });
       const result = walker.value(fn.body, scope, {
@@ -1985,7 +2010,15 @@ function makeWalker<R>(
 function indexOf(
   spec: Expression,
   parallel = false
-): { name: string; symbol: Expression; lower: Expression; upper: Expression; step?: Expression } | undefined {
+):
+  | {
+      name: string;
+      symbol: Expression;
+      lower: Expression;
+      upper: Expression;
+      step?: Expression;
+    }
+  | undefined {
   if (
     parallel &&
     isFunction(spec, 'Element') &&
@@ -2041,7 +2074,11 @@ function indexBounds<R>(
 ): FragmentConversion<R>[] {
   // An aggregate that the target writes with no loop has no loop counter.
   const value = (b: Expression): number | undefined => {
-    const v = isNumber(b) ? b : isFunction(b) ? w.constant(b, scope) : undefined;
+    const v = isNumber(b)
+      ? b
+      : isFunction(b)
+        ? w.constant(b, scope)
+        : undefined;
     return isNumber(v) && Number.isFinite(v.re) ? v.re : undefined;
   };
   const lo = value(index.lower);
@@ -2120,7 +2157,10 @@ export function walkAggregate<R>(
       );
     // The step of a `Range` index set is 1: an aggregate visits each
     // integer of its range.
-    if (index.step !== undefined && !(isNumber(index.step) && index.step.re === 1))
+    if (
+      index.step !== undefined &&
+      !(isNumber(index.step) && index.step.re === 1)
+    )
       return w.refuse(
         spec,
         'signature',
@@ -2210,10 +2250,10 @@ function walkLoop(kind: 'loop' | 'parallel') {
     w.bind(index.symbol, inner, index.name, { kind: 'integer' }, 'index');
     // A guard (`Element(i, Range(1, 5), i > 2)`) skips the passes where it
     // is false: it is a boolean of the index.
-    const guard = (ops[1] as Expression & { nops: number; op3: Expression })
-      .nops === 3
-      ? (ops[1] as Expression & { op3: Expression }).op3
-      : undefined;
+    const guard =
+      (ops[1] as Expression & { nops: number; op3: Expression }).nops === 3
+        ? (ops[1] as Expression & { op3: Expression }).op3
+        : undefined;
     if (guard !== undefined) {
       const g = w.value(guard, inner, { ...context, place: 'value' });
       if (g.type.kind !== 'boolean')
@@ -2344,7 +2384,8 @@ function walkDeclare<R>(
     // A declaration with no value: the type of the local is its declared
     // type, read from the engine type of the name.
     for (const name of names) {
-      const t = declared === undefined ? undefined : w.definition.typeOfSymbol(name);
+      const t =
+        declared === undefined ? undefined : w.definition.typeOfSymbol(name);
       if (t === undefined || t.kind === 'list')
         return void w.refuse(
           name,
@@ -2509,7 +2550,11 @@ export function walkBlock<R>(
       w.bind(s.op1, inner, name, type, 'local');
       last = { type: { kind: 'statement' } };
       if (place !== 'statement')
-        w.refuse(s, 'place', `The block ends with an assignment, so it has no value`);
+        w.refuse(
+          s,
+          'place',
+          `The block ends with an assignment, so it has no value`
+        );
       return;
     }
     if (isFunction(s, 'Declare')) {
@@ -2555,10 +2600,7 @@ export function walkIf<R>(
   // A condition that the code decides at compile time selects its branch:
   // the other branch is not written. An `If` with no else branch is
   // written as a `Which` (`If(True, x)` is `x`).
-  const decided = constantCondition(
-    ops.length === 2 ? 'Which' : 'If',
-    ops[0]
-  );
+  const decided = constantCondition(ops.length === 2 ? 'Which' : 'If', ops[0]);
   if (decided !== undefined) {
     const branch = decided ? ops[1] : ops[2];
     if (branch !== undefined) return w.type(branch, scope, context);
@@ -2654,7 +2696,11 @@ export function walkWhich<R>(
 ): FragmentFacts<R> {
   const ops = opsOf(node);
   if (ops.length < 2 || ops.length % 2 !== 0)
-    return w.refuse(node, 'signature', `\`Which\` needs condition and value pairs`);
+    return w.refuse(
+      node,
+      'signature',
+      `\`Which\` needs condition and value pairs`
+    );
   let t: FragmentValueType | FragmentListType | undefined;
   // The operands that the node reads as values, in order: each condition
   // that does not fold to `False`, and its value.
@@ -2787,7 +2833,11 @@ export function walkAt<R>(
           `with constant integer bounds`
       );
     if (t.kind !== 'list')
-      return w.refuse(node, 'signature', `\`At\` over a \`Range\` reads a list`);
+      return w.refuse(
+        node,
+        'signature',
+        `\`At\` over a \`Range\` reads a list`
+      );
     // A bound outside the static count is refused, as a constant index is
     // below: the interpreter reads 1 to n, and -n to -1 from the end.
     const n = t.count;
@@ -2834,7 +2884,8 @@ export function walkRange<R>(
   context: FragmentContext<R>,
   w: FragmentWalker<R>
 ): FragmentFacts<R> {
-  for (const op of opsOf(node)) w.index(op, scope, { ...context, place: 'value' });
+  for (const op of opsOf(node))
+    w.index(op, scope, { ...context, place: 'value' });
   return { type: { kind: 'range' } };
 }
 
@@ -2924,7 +2975,8 @@ export function walkElement<R>(
   if (!('representation' in base))
     return w.refuse(node, 'signature', `\`${head}\` reads a value`);
   const t = base.type;
-  const n = t.kind === 'point' ? t.size : t.kind === 'list' ? t.count : undefined;
+  const n =
+    t.kind === 'point' ? t.size : t.kind === 'list' ? t.count : undefined;
   if (t.kind !== 'point' && t.kind !== 'list')
     return w.refuse(
       node,
@@ -3093,9 +3145,7 @@ export function walkAssign<R>(
       nonLiteralTupleValue('assignment', ops[1])
     );
   const types =
-    targets.length === 1
-      ? [value.type]
-      : componentTypes(value, targets.length);
+    targets.length === 1 ? [value.type] : componentTypes(value, targets.length);
   if (types === undefined)
     return w.refuse(
       node,
@@ -3134,7 +3184,10 @@ export function walkAssign<R>(
     const facts =
       targets.length === 1
         ? value
-        : ({ type: from, representation: value.representation } as FragmentValueFacts<R>);
+        : ({
+            type: from,
+            representation: value.representation,
+          } as FragmentValueFacts<R>);
     if (
       local.kind === 'list' ||
       local.kind === 'statement' ||
@@ -3200,8 +3253,7 @@ export const walkParallelLoop = walkLoop('parallel');
 
 /** The answer of `canCompile()`. */
 export type CanCompileResult =
-  | { ok: true }
-  | { ok: false; diagnostic: CompileDiagnostic };
+  { ok: true } | { ok: false; diagnostic: CompileDiagnostic };
 
 /** The `outside-fragment` diagnostic of a refusal of the pass. */
 export function fragmentRefusalDiagnostic(

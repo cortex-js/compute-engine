@@ -421,7 +421,8 @@ export function canCompile(
           value: expr.toString(),
         },
       };
-    const name = options?.target === undefined ? (options?.to ?? 'javascript') : undefined;
+    const name =
+      options?.target === undefined ? (options?.to ?? 'javascript') : undefined;
     const languageTarget =
       name === undefined ? undefined : expr.engine._getCompilationTarget(name);
     const check = (

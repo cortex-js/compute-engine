@@ -419,7 +419,10 @@ port.on((m) => {
       // makes `postMessage()` throw: the task then fails, and the worker
       // takes the next one.
       try {
-        port.post({ type: 'call-result', job: m.job, value }, transferOf(value));
+        port.post(
+          { type: 'call-result', job: m.job, value },
+          transferOf(value)
+        );
       } catch (e) {
         port.post({ type: 'error', job: m.job, message: messageOf(e) });
       }

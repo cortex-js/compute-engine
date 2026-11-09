@@ -1240,7 +1240,10 @@ function ownedFromDeclaration(
   const first = stmts.findIndex((s) => mentions(s));
   if (first < 0) return undefined;
   const declaration = stmts[first];
-  if (!isFunction(declaration, 'Declare') || !isSymbol(declaration.ops[0], name))
+  if (
+    !isFunction(declaration, 'Declare') ||
+    !isSymbol(declaration.ops[0], name)
+  )
     return undefined;
   const value = declareValueOperand(declaration.ops);
   if (value === undefined || mentions(value)) return undefined;

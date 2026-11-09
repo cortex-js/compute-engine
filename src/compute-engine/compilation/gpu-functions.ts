@@ -2196,8 +2196,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       // `vecN` takes the broadcast constructor.
       const zeroShape = gpuOperandShape(base);
       if (zeroShape === 'scalar') return '1.0';
-      if (typeof zeroShape === 'number')
-        return `${gpuFVec(zeroShape)}(1.0)`;
+      if (typeof zeroShape === 'number') return `${gpuFVec(zeroShape)}(1.0)`;
       // A `matN` or an ARRAY base has no constructor this lowering can use,
       // and a bare `1.0` there is a silent scalar where the caller is owed an
       // aggregate — which the operand-shape gate cannot catch, because it
@@ -2438,11 +2437,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return gpuConditional(
       `${x} >= 0.0`,
       '0.0',
-      gpuConditional(
-        `${x} < 0.0`,
-        '3.14159265359',
-        gpuNonFiniteLiteral(NaN)
-      )
+      gpuConditional(`${x} < 0.0`, '3.14159265359', gpuNonFiniteLiteral(NaN))
     );
   },
   Conjugate: (args, compile, target) => {
@@ -3543,8 +3538,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const t = facts?.type;
     const count =
       t?.kind === 'point' ? t.size : t?.kind === 'list' ? t.count : undefined;
-    if (args.length === 1 && count !== undefined)
-      return formatGPUNumber(count);
+    if (args.length === 1 && count !== undefined) return formatGPUNumber(count);
     throw new Error(
       `Could not compile \`Length\`: the collection element count is not supported on the ` +
         `${target.language ?? 'GPU'} target: the '${target.language ?? 'GPU'}' ` +

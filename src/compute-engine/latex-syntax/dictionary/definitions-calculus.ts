@@ -835,9 +835,7 @@ function holdsIntegrand(
   if (splitSumAtDifferential(fn, binderName)[2].length > 0) return true;
   const claimed =
     claimExcessDifferentials(fn) ?? claimExcessDifferentialsInSum(fn);
-  return (
-    claimed !== null && (!claimed.alternative || alternativeAllowed())
-  );
+  return claimed !== null && (!claimed.alternative || alternativeAllowed());
 }
 
 /**
@@ -1151,9 +1149,7 @@ function parseIntegralBody(
       condition: () => {
         found = atDifferential(parser);
         return (
-          found ||
-          endsTabularCell(parser.peek) ||
-          stopAfterTerm(parser, stops)
+          found || endsTabularCell(parser.peek) || stopAfterTerm(parser, stops)
         );
       },
     });

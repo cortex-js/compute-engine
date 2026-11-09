@@ -1127,10 +1127,7 @@ function gpuReshapesOperands(code: string): string | undefined {
         const inner = gpuWithoutScalarReductions(
           code.slice(m.index + m[0].length, i)
         );
-        const nested =
-          /\b(?:[iub]?vec[234]|mat[234]|float\s*\[)/.exec(
-            inner
-          );
+        const nested = /\b(?:[iub]?vec[234]|mat[234]|float\s*\[)/.exec(inner);
         if (nested !== null)
           return (
             `it packs its operands into a \`${m[1]}\` constructor, which ` +

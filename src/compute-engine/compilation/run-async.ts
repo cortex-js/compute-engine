@@ -52,7 +52,11 @@ export interface RunAsyncSpec {
   readonly iterationLimit: () => number | undefined;
 }
 
-type AsyncBody = (sys: unknown, vars: unknown, run: RunState) => Promise<unknown>;
+type AsyncBody = (
+  sys: unknown,
+  vars: unknown,
+  run: RunState
+) => Promise<unknown>;
 
 /** The state of one run of the asynchronous copy, its `_run`. */
 type RunState = {
@@ -145,9 +149,7 @@ function abortable<T>(
 }
 
 /** The pool loops of `result`: the records with `route: 'pool'`. */
-function poolRecords(
-  result: RunAsyncSpec['result']
-): number {
+function poolRecords(result: RunAsyncSpec['result']): number {
   return (result.parallelLoops ?? []).filter((l) => l.route === 'pool').length;
 }
 
@@ -277,12 +279,7 @@ export function makeRunAsync(
           const settled = await abortable(
             Promise.allSettled(
               ranges.map((range) =>
-                pool.runCall(
-                  fn,
-                  argsOf(range),
-                  iterationLimit,
-                  signal
-                )
+                pool.runCall(fn, argsOf(range), iterationLimit, signal)
               )
             ),
             signal
@@ -298,8 +295,11 @@ export function makeRunAsync(
           // thread with the same function, in the order of the sub-ranges:
           // the first one that throws there gives the error of the run.
           const run = fn.run as (...a: unknown[]) => unknown;
-          return settled.map((r, p) =>
-            (r.status === 'fulfilled' ? r.value : run(...argsOf(ranges[p]))) as unknown[]
+          return settled.map(
+            (r, p) =>
+              (r.status === 'fulfilled'
+                ? r.value
+                : run(...argsOf(ranges[p]))) as unknown[]
           );
         })();
       },

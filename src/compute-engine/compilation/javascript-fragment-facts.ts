@@ -11,10 +11,16 @@ type ScalarFragmentArtifact = {
 };
 const artifactKey = Symbol('scalar fragment artifact');
 const policyKeys = [
-  'mode', 'constantFold', 'rootExpression', 'boundVars', 'symbolDeps',
-  'functions', 'operators', 'var',
+  'mode',
+  'constantFold',
+  'rootExpression',
+  'boundVars',
+  'symbolDeps',
+  'functions',
+  'operators',
+  'var',
 ] as const;
-type Policy = Pick<CompileTarget<Expression>, typeof policyKeys[number]>;
+type Policy = Pick<CompileTarget<Expression>, (typeof policyKeys)[number]>;
 type OwnedArtifact = ScalarFragmentArtifact & {
   readonly policy: Policy;
   annotation?: FragmentAnnotation<ScalarRepresentation>;
@@ -28,7 +34,9 @@ export function attachScalarFragment(
   target: CompileTarget<Expression>,
   artifact: ScalarFragmentArtifact
 ): void {
-  const policy = Object.fromEntries(policyKeys.map(key => [key, target[key]])) as Policy;
+  const policy = Object.fromEntries(
+    policyKeys.map((key) => [key, target[key]])
+  ) as Policy;
   (target as AnnotatedTarget)[artifactKey] = {
     root: artifact.root,
     annotate: artifact.annotate,
@@ -36,8 +44,11 @@ export function attachScalarFragment(
   };
 }
 
-function assertPolicy(artifact: OwnedArtifact, target: CompileTarget<Expression>): void {
-  if (policyKeys.some(key => target[key] !== artifact.policy[key]))
+function assertPolicy(
+  artifact: OwnedArtifact,
+  target: CompileTarget<Expression>
+): void {
+  if (policyKeys.some((key) => target[key] !== artifact.policy[key]))
     throw new Error('JS scalar fragment invariant: different prepared policy');
 }
 

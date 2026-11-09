@@ -89,8 +89,7 @@ const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
       // with no helper (a matrix, an array) keeps the built-in, and the
       // operand-shape check then judges it.
       return (
-        gpuFloorModCall(a, b, compile) ??
-        `mod(${compile(a)}, ${compile(b)})`
+        gpuFloorModCall(a, b, compile) ?? `mod(${compile(a)}, ${compile(b)})`
       );
     };
     // A trigonometric value amplified by a large constant (the "sine hash")

@@ -1093,10 +1093,7 @@ function gpuSelectionConditionWidth(c: Expression): 2 | 3 | 4 | undefined {
 }
 
 /** Conjoin boolean-vector masks componentwise. */
-function gpuMaskAnd(
-  masks: ReadonlyArray<string>,
-  n: 2 | 3 | 4
-): string {
+function gpuMaskAnd(masks: ReadonlyArray<string>, n: 2 | 3 | 4): string {
   if (masks.length === 1) return masks[0];
   // GLSL has no componentwise `&&`: convert to 0/1 floats, multiply, and let
   // the `bvecN` constructor read nonzero back as `true`.
@@ -1105,10 +1102,7 @@ function gpuMaskAnd(
 }
 
 /** Disjoin boolean-vector masks componentwise. */
-function gpuMaskOr(
-  masks: ReadonlyArray<string>,
-  n: 2 | 3 | 4
-): string {
+function gpuMaskOr(masks: ReadonlyArray<string>, n: 2 | 3 | 4): string {
   if (masks.length === 1) return masks[0];
   const f = gpuFVec(n);
   return `${gpuBVec(n)}(${masks.map((m) => `${f}(${m})`).join(' + ')})`;
@@ -1198,9 +1192,7 @@ function gpuSelectionMask(
         throw new Error('Could not compile `Not`: expected one argument');
       return `not(${masks[0]})`;
     }
-    return h === 'And'
-      ? gpuMaskAnd(masks, n)
-      : gpuMaskOr(masks, n);
+    return h === 'And' ? gpuMaskAnd(masks, n) : gpuMaskOr(masks, n);
   }
 
   // A boolean-vector value used directly as the condition, or a scalar boolean

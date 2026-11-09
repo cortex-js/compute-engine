@@ -96,20 +96,22 @@ export function compileExprIf(
     // `liveSelectionArms` keeps: a dead arm is not emitted, so it does not
     // decide the representation.
     const annotated = scalarResultIsComplex(target);
-    const coerce = annotated === undefined
-      ? branchComplexCoercion(
-          node !== undefined && isFunction(node, 'If')
-            ? liveSelectionArms(node)
-            : [args[1], args[2]],
-          target
-        )
-      : undefined;
+    const coerce =
+      annotated === undefined
+        ? branchComplexCoercion(
+            node !== undefined && isFunction(node, 'If')
+              ? liveSelectionArms(node)
+              : [args[1], args[2]],
+            target
+          )
+        : undefined;
     // Both arms are conditionally evaluated: each is its own region, so a
     // temporary bound inside an arm is never hoisted out of it (§7.3).
     const arm = (v: Expression, i: number): TargetSource => {
       const code = compileOp(node, i, target, 0, v);
       assertNoStatementOperand(v, code, target);
-      if (annotated !== undefined) return scalarConvertOperand(i, code, target)!;
+      if (annotated !== undefined)
+        return scalarConvertOperand(i, code, target)!;
       return coerce ? coerce(v, code) : code;
     };
     // A condition whose TYPE is the value `true` or `false` (a proven

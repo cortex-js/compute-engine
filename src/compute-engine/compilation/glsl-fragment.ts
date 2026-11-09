@@ -157,9 +157,7 @@ export function glslFragmentTypeOf(
   if (t.kind === 'tuple') {
     const n = t.elements.length;
     if (n < 2 || n > 4) return undefined;
-    if (
-      !t.elements.every((e) => isRealType(resolveTypeForCompilation(e.type)))
-    )
+    if (!t.elements.every((e) => isRealType(resolveTypeForCompilation(e.type))))
       return undefined;
     return { kind: 'point', size: n };
   }
@@ -177,9 +175,7 @@ export function glslFragmentTypeOf(
     if (
       typeof elements !== 'string' &&
       elements.kind === 'union' &&
-      elements.types.some((m) =>
-        isNonRealNumber(resolveTypeForCompilation(m))
-      )
+      elements.types.some((m) => isNonRealNumber(resolveTypeForCompilation(m)))
     )
       return undefined;
     const element = glslFragmentTypeOf(t.elements);
@@ -449,8 +445,10 @@ function pointNumberSumRefused(
         isSubtype(x.type.type, 'number');
       const vector = (x: Expression): boolean =>
         declaredVectors !== undefined &&
-        callerVector(x, (name) =>
-          declaredVectors.has(name) && !fragmentScopeBinds(scope, name)
+        callerVector(
+          x,
+          (name) =>
+            declaredVectors.has(name) && !fragmentScopeBinds(scope, name)
         );
       if (
         broadcast !== undefined &&
@@ -749,7 +747,11 @@ function walkBinomial(
 ): FragmentFacts<GlslRepresentation> {
   const ops = isFunction(node) ? node.ops : [];
   if (ops.length !== 2)
-    return w.refuse(node, 'signature', `\`${node.operator}\` takes two operands`);
+    return w.refuse(
+      node,
+      'signature',
+      `\`${node.operator}\` takes two operands`
+    );
   const n = w.value(ops[0], scope, context);
   // A first operand that is a non-finite constant: the interpreter gives
   // NaN, and the shader unrolling would give another value, so the emitter
@@ -764,12 +766,7 @@ function walkBinomial(
     );
   const k = ops[1];
   const kValue = k.re;
-  if (
-    !isNumber(k) ||
-    !Number.isInteger(kValue) ||
-    kValue < 0 ||
-    k.im !== 0
-  )
+  if (!isNumber(k) || !Number.isInteger(kValue) || kValue < 0 || k.im !== 0)
     return w.refuse(
       node,
       'signature',
@@ -836,9 +833,15 @@ function walkAppliedDerivative(
       `\`Apply\` is in the GLSL fragment only as the application of a ` +
         `derivative whose closed form the engine finds at compile time`
     );
-  const names = literal.ops.slice(1).map((p) => functionLiteralParameterName(p));
+  const names = literal.ops
+    .slice(1)
+    .map((p) => functionLiteralParameterName(p));
   if (names.some((n) => n === ''))
-    return w.refuse(node, 'head', `\`Apply\` of this derivative is outside the GLSL fragment`);
+    return w.refuse(
+      node,
+      'head',
+      `\`Apply\` of this derivative is outside the GLSL fragment`
+    );
   const body = literal.ops[0].subs(
     Object.fromEntries(names.map((n, i) => [n, args[i]]))
   );
@@ -959,11 +962,7 @@ function walkGlslIf(
   w: FragmentWalker<GlslRepresentation>
 ): FragmentFacts<GlslRepresentation> {
   const facts = walkIf(node, scope, context, w);
-  if (
-    !isFunction(node) ||
-    node.nops !== 2 ||
-    context.place === 'statement'
-  )
+  if (!isFunction(node) || node.nops !== 2 || context.place === 'statement')
     return facts;
   const t = facts.type;
   const vector =
@@ -1174,7 +1173,10 @@ export const GLSL_FRAGMENT_RULES: Readonly<
   Lg: REAL_1,
   // `atan(vecN, vecN)` acts on each component.
   Arctan2: {
-    signatures: [sig(['real', 'real'], 'real'), sig(['point', 'point'], 'point')],
+    signatures: [
+      sig(['real', 'real'], 'real'),
+      sig(['point', 'point'], 'point'),
+    ],
   },
   Sinc: REAL_1,
   Erf: REAL_1,
@@ -1219,7 +1221,10 @@ export const GLSL_FRAGMENT_RULES: Readonly<
   // The geometric functions of GLSL are declared over the `genType`, which
   // includes `float`: `dot(float, float)` is valid.
   Dot: {
-    signatures: [sig(['real', 'real'], 'real'), sig(['point', 'point'], 'real')],
+    signatures: [
+      sig(['real', 'real'], 'real'),
+      sig(['point', 'point'], 'real'),
+    ],
   },
   Cross: { signatures: [sig(['point', 'point'], 'point', { sizes: [3] })] },
   Norm: {
@@ -1400,7 +1405,9 @@ function operandsWrittenTwice(
       return k !== undefined && Number.isInteger(k) && k >= 2 ? [a] : undefined;
     }
     case 'Conjugate':
-      return a !== undefined && BaseCompiler.isComplexValued(a) ? [a] : undefined;
+      return a !== undefined && BaseCompiler.isComplexValued(a)
+        ? [a]
+        : undefined;
     case 'Coth':
       return a !== undefined &&
         BaseCompiler.isComplexValued(a) &&
@@ -1438,7 +1445,9 @@ function operandsWrittenTwice(
         BaseCompiler.isComplexValued(a) ||
         (b !== undefined && BaseCompiler.isComplexValued(b))
       )
-        return b !== undefined && tryGetConstant(b) === undefined ? [a, b] : [a];
+        return b !== undefined && tryGetConstant(b) === undefined
+          ? [a, b]
+          : [a];
       if (b === undefined) return undefined;
       const n = tryGetConstant(b);
       if (n === undefined || n === 2 || tryGetConstant(a) !== undefined)
@@ -1562,7 +1571,10 @@ export function glslFragmentDefinition(
       // `v[0]`) are the caller's code.
       const replacement = varsReplacement(binding);
       if (replacement !== undefined) {
-        if (typeof replacement === 'string' && /^[A-Za-z_]\w*$/.test(replacement))
+        if (
+          typeof replacement === 'string' &&
+          /^[A-Za-z_]\w*$/.test(replacement)
+        )
           gpuCheckIdentifier(replacement, 'glsl');
         return false;
       }
@@ -1583,7 +1595,11 @@ export function glslFragmentDefinition(
     const ops = isFunction(node) ? node.ops : [];
     const conversions = ops.map((op) => {
       const f = w.value(op, scope, context);
-      return { kind: 'none' as const, type: f.type, representation: f.representation };
+      return {
+        kind: 'none' as const,
+        type: f.type,
+        representation: f.representation,
+      };
     });
     return w.valueFacts(node, { kind: 'real' }, conversions);
   });
@@ -1635,7 +1651,9 @@ export function glslFragmentDefinition(
       // emitter there (a list of two dimensions, an element that is not a
       // real) are refused where the pass types the base.
       const kind =
-        base !== undefined && isSymbol(base) ? storage?.get(base.symbol) : undefined;
+        base !== undefined && isSymbol(base)
+          ? storage?.get(base.symbol)
+          : undefined;
       const carrier =
         kind !== undefined && base !== undefined
           ? resolveTypeAlias(base.type.type)
@@ -1668,8 +1686,12 @@ export function glslFragmentDefinition(
         );
       if (
         isFunction(node) &&
-        shadowedLibraryLoweringError(node.engine, node.operator, target, node) !==
-          undefined
+        shadowedLibraryLoweringError(
+          node.engine,
+          node.operator,
+          target,
+          node
+        ) !== undefined
       )
         return w.refuse(
           node,
@@ -1691,17 +1713,13 @@ export function glslFragmentDefinition(
       pointNumberSumRefused(SUM_N, declaredVectors, ARITHMETIC_N)
     );
     rules.Subtract = shadowChecked(
-      pointNumberSumRefused(
-        SUBTRACT,
-        declaredVectors,
-        {
-          signatures: [
-            sig(['real', 'real'], 'real'),
-            sig(['complex', 'complex'], 'complex'),
-            sig(['point', 'point'], 'point', { broadcast: true }),
-          ],
-        }
-      )
+      pointNumberSumRefused(SUBTRACT, declaredVectors, {
+        signatures: [
+          sig(['real', 'real'], 'real'),
+          sig(['complex', 'complex'], 'complex'),
+          sig(['point', 'point'], 'point', { broadcast: true }),
+        ],
+      })
     );
   }
   for (const name of Object.keys(options.functions ?? {}))
@@ -1752,7 +1770,10 @@ export function glslFragmentDefinition(
         binding.declared === undefined
           ? undefined
           : gpuNormalizeShaderType(binding.declared);
-      if (declared?.width === 1 && (declared.element === 'i' || declared.element === 'u'))
+      if (
+        declared?.width === 1 &&
+        (declared.element === 'i' || declared.element === 'u')
+      )
         return type.kind === 'integer'
           ? declared.element === 'i'
             ? 'int'
@@ -1857,7 +1878,11 @@ export function glslFragmentDefinition(
     aggregateHasNoLoop: (node, lower, upper) =>
       lower > upper ||
       (isFunction(node) &&
-        unrollFits(upper - lower + 1, unrolledTermSize(node.op1), GPU_UNROLL_LIMIT)),
+        unrollFits(
+          upper - lower + 1,
+          unrolledTermSize(node.op1),
+          GPU_UNROLL_LIMIT
+        )),
 
     sumAssigned: options.sumAssigned,
 

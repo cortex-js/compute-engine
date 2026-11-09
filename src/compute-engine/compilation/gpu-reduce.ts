@@ -419,12 +419,7 @@ export function gpuBoundConstant(
  * condition would otherwise re-evaluate the whole expression on every
  * iteration.
  */
-const GPU_BOUND_ONE_READ_CALLS = new Set([
-  'int',
-  'uint',
-  'float',
-  'floor',
-]);
+const GPU_BOUND_ONE_READ_CALLS = new Set(['int', 'uint', 'float', 'floor']);
 
 export function gpuBoundIsOneRead(code: string): boolean {
   const s = code.trim();

@@ -26,10 +26,7 @@ import type {
 } from './types.js';
 import { CompileDeclineError, compileDiagnosticOf } from './diagnostics.js';
 import { resolveStorageHints } from './storage-hints.js';
-import {
-  lowerParallelHeads,
-  sumAssignedNames,
-} from './parallel-lowering.js';
+import { lowerParallelHeads, sumAssignedNames } from './parallel-lowering.js';
 import {
   fragmentErrorDiagnostic,
   fragmentRefusalDiagnostic,
@@ -2367,7 +2364,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
    */
   private withPassCap(
     code: string,
-    facts: ReturnType<FragmentAnnotation<GlslRepresentation>['scope']['facts']['get']>,
+    facts: ReturnType<
+      FragmentAnnotation<GlslRepresentation>['scope']['facts']['get']
+    >,
     budget: number,
     target: CompileTarget<Expression>
   ): string {
@@ -2375,7 +2374,12 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       facts !== undefined && 'representation' in facts
         ? facts.representation
         : undefined;
-    if (type === undefined || type === 'int' || type === 'uint' || type === 'sampler2D')
+    if (
+      type === undefined ||
+      type === 'int' ||
+      type === 'uint' ||
+      type === 'sampler2D'
+    )
       throw new Error(
         `Could not compile: the value of the expression has no ` +
           `${this.languageId.toUpperCase()} type that the pass cap can hold.`

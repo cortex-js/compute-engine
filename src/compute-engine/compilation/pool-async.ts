@@ -318,7 +318,10 @@ export function asyncFunctionBody(body: string): string {
 
 /** The count of waits of the current function when a block starts, read
  * again when the block ends (`poolBlockCode()`). */
-export type PoolBlockMark = { readonly context: WaitContext; readonly waits: number };
+export type PoolBlockMark = {
+  readonly context: WaitContext;
+  readonly waits: number;
+};
 
 /** At the start of the emission of a block. */
 export function poolBlockMark(): PoolBlockMark | undefined {
@@ -385,7 +388,8 @@ function markStatement(
     return;
   }
   if (stmt.operator === 'If') {
-    for (const branch of stmt.ops.slice(1)) markStatement(state, context, branch);
+    for (const branch of stmt.ops.slice(1))
+      markStatement(state, context, branch);
     return;
   }
   if (stmt.operator !== 'Loop' || stmt.nops < 1) return;
@@ -731,9 +735,7 @@ export function poolLoopWait(
     state.refused.set(info.index, 'outer-type');
     return undefined;
   }
-  if (
-    accumulators.some((c) => c === undefined || c.startsWith('_.'))
-  ) {
+  if (accumulators.some((c) => c === undefined || c.startsWith('_.'))) {
     state.refused.set(info.index, 'accumulator-scope');
     return undefined;
   }

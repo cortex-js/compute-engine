@@ -305,9 +305,9 @@ export function compileExprOperator(
     // Skip infix operators for complex operands — fall through to function
     // dispatch. An operand the D2 runtime rule has bound to a real
     // projection (`_codeOverrides`) is real here.
-    const hasComplex = scalarResultIsComplex(target) ?? args.some(
-      (a) => core.isComplexValued(a) && !_codeOverrides.has(a)
-    );
+    const hasComplex =
+      scalarResultIsComplex(target) ??
+      args.some((a) => core.isComplexValued(a) && !_codeOverrides.has(a));
     if (!hasComplex) {
       // Check if this looks like a function name rather than an operator.
       // Function names are alphanumeric identifiers, operators are symbols.

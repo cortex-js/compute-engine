@@ -4649,7 +4649,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Add: (args, compile, target) => {
     if (args.length === 1) return compile(args[0]);
-    const anyComplex = scalarResultIsComplex(target) ??
+    const anyComplex =
+      scalarResultIsComplex(target) ??
       args.some((a) => BaseCompiler.isComplexValued(a));
     if (!anyComplex) {
       // Try full constant fold
@@ -4676,14 +4677,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // imaginary unit, or a complex literal — contributes its two components
       // as constants, so the object holding them is never built and never
       // read back (`x + i` is `{ re: x, im: 1 }`).
-      const literal = (scalarOperandIsComplex(index, target) ??
+      const literal =
+        (scalarOperandIsComplex(index, target) ??
         BaseCompiler.isComplexValued(a))
-        ? complexLiteralParts(a)
-        : undefined;
+          ? complexLiteralParts(a)
+          : undefined;
       if (literal !== undefined)
         return { re: String(literal.re), im: String(literal.im) };
       const code = compile(a);
-      const isComplex = scalarOperandIsComplex(index, target) ??
+      const isComplex =
+        scalarOperandIsComplex(index, target) ??
         BaseCompiler.isComplexValued(a);
       if (isComplex && !isSymbol(a) && !isNumber(a)) {
         const name = BaseCompiler.tempVar(target);
@@ -8699,7 +8702,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `Math.sinh(${compile(args[0])})`;
   },
   Sqrt: (args, compile, target) => {
-    if (scalarOperandIsComplex(0, target) ?? BaseCompiler.isComplexValued(args[0])) {
+    if (
+      scalarOperandIsComplex(0, target) ??
+      BaseCompiler.isComplexValued(args[0])
+    ) {
       return complexUnary(target, '_SYS.csqrt', compile(args[0]));
     }
     const c = tryGetConstant(args[0]);
@@ -11360,8 +11366,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         ? copy
         : undefined;
     const waited = valid?.outcome.waited ?? new Map<number, unknown>();
-    const refused =
-      valid?.outcome.refused ?? new Map<number, PoolLoopReason>();
+    const refused = valid?.outcome.refused ?? new Map<number, PoolLoopReason>();
     records.forEach((record, index) => {
       if (record.route === 'pool' && !waited.has(index))
         records[index] = {
@@ -11397,9 +11402,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       beginAsyncEmission(loops, prepared.expr);
       let js: string;
       try {
-        js = poolEntryCode(
-          BaseCompiler.compileCseRoot(prepared.expr, target)
-        );
+        js = poolEntryCode(BaseCompiler.compileCseRoot(prepared.expr, target));
       } catch (e) {
         endAsyncEmission();
         throw e;
