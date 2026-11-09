@@ -282,6 +282,11 @@
   `\,\neg p` is `Not(p)`. With `form: 'raw'`, the spacing command is not
   kept in these cases, and `\, -1` is `["Negate", 1]`, as `-1` is (it was
   the number `-1`).
+- **A spacing command directly after a minus sign or after `\neg` no longer
+  gives an error.** `x = -\,b` gave `x == (-Error(…), b)`; it is now
+  `x == -b`. `-\,\frac12` is now `-1/2`, and `\neg\,p` is `Not(p)`. With
+  `form: 'raw'`, the spacing command is not kept in these cases. After an
+  infix operator nothing changes: `a-\,b` was and is `a - b`.
 
 ### Performance
 

@@ -986,6 +986,13 @@ function makeParseHandler(
     if (h) {
       const prec = fields.precedence ?? 10000;
       return (parser: Parser, until?: Readonly<Terminator>) => {
+        // Visual space between the operator and its operand is skipped:
+        // `\neg\,p` is `Not(p)`. The operand is parsed at the precedence of
+        // the operator. When that is above the precedence of a
+        // juxtaposition, the parser would read the spacing command alone as
+        // the operand, `Not(HorizontalSpacing(3))`, whose canonical form is
+        // an error, and juxtapose `p` to it.
+        parser.skipVisualSpace();
         const rhs = parser.parseExpression({
           ...(until ?? []),
           minPrec: prec,

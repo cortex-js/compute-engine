@@ -4473,7 +4473,12 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         return parsePrefixMinusPlus(parser, terminator, signStart);
       }
       reportSignAfterSign(parser, parser.index - 1);
-      parser.skipSpace();
+      // Visual space between the sign and its operand is skipped: `-\,b` is
+      // `Negate(b)`. The operand is parsed above the precedence of a
+      // juxtaposition, so the parser would read the spacing command alone
+      // as the operand, `Negate(HorizontalSpacing(3))`, whose canonical
+      // form is an error, and juxtapose `b` to it.
+      parser.skipVisualSpace();
       const rhs = parser.parseExpression({
         ...terminator,
         minPrec: EXPONENTIATION_PRECEDENCE + 3,
