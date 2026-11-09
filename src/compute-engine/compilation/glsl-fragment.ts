@@ -1591,9 +1591,15 @@ export function glslFragmentDefinition(
     options.functions !== undefined && Object.hasOwn(options.functions, name);
 
   // A call of a head that the caller implements (`functions` option) is the
-  // caller's code: its operands are values of the fragment, and its result
-  // is read as a real, the type of a call of a shader function that the
-  // caller declares.
+  // caller's code: its operands are values of the fragment. Its result has
+  // the declared result type of the operator when that type is a color, a
+  // point, a complex number or a boolean: `g(0, x)` with `g` declared
+  // `(any, any) -> color` is a color, so `AsOklab(g(0, x))` compiles. Any
+  // other result is read as a real, the type of a call of a shader function
+  // that the caller declares: a head with no declaration (`h(x) + 1`), a
+  // number, and an integer (a host function declared `-> integer` can return
+  // a `float`, and a real reading converts it with `float(...)`, which is
+  // valid for both).
   const callerRule = walk((node, scope, context, w) => {
     const ops = isFunction(node) ? node.ops : [];
     const conversions = ops.map((op) => {
@@ -1604,7 +1610,16 @@ export function glslFragmentDefinition(
         representation: f.representation,
       };
     });
-    return w.valueFacts(node, { kind: 'real' }, conversions);
+    const declared = glslFragmentTypeOf(node.type.type);
+    const type: FragmentValueType =
+      declared !== undefined &&
+      (declared.kind === 'color' ||
+        declared.kind === 'point' ||
+        declared.kind === 'complex' ||
+        declared.kind === 'boolean')
+        ? declared
+        : { kind: 'real' };
+    return w.valueFacts(node, type, conversions);
   });
   // A user definition that shadows a library operator which the emitter
   // lowers by name (`If`, a head of the GPU table) replaces that lowering,

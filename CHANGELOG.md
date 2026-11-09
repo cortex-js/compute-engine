@@ -1,3 +1,17 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A call of a `functions` entry whose operator returns a color, a point, a
+  complex number or a boolean compiles to `glsl` again.** Since 0.185.0 the
+  GLSL compilation read every such call as a real, so a color operator
+  applied to it was refused: with `g` declared `(any, any) -> color`,
+  `compile(AsOklab(g(0, x)), { to: 'glsl', functions: { g: 'hostG' } })`
+  failed with "No signature of `AsOklab` in the GLSL fragment takes operands
+  of the types (real)". The call now has the declared result type of its
+  operator. A call of an operator with no declaration, or one that returns a
+  number or an integer, is still read as a real. (CE-1183)
+
 ## 0.185.0 _2026-11-09_
 
 ### Breaking Changes
