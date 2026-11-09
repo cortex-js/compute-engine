@@ -71,6 +71,12 @@ import {
 } from './compile-shapes.js';
 import { cseRegionOf, cseTop, withCseOperand } from './compile-conditions.js';
 import { core } from './compiler-core-hooks.js';
+import {
+  beginPoolLiteral,
+  endPoolFunction,
+  poolLiteralArrow,
+  poolLiteralWrapped,
+} from './pool-async.js';
 
 /**
  * Check an application of the `Function` literal `literal` to `args`, and
@@ -672,21 +678,32 @@ export function compileExprFunctionLiteral(
         ? `${name} = NaN`
         : name
     );
-    const arrow = `((${emittedParams.join(', ')}) => ${
-      framedComplex.size > 0
-        ? // Owned by the node being lowered: the frame describes THIS
-          // literal's parameters, so a re-entrant emission of the same
-          // literal keeps it, while a nested literal binding the same name
-          // sees a foreign frame and shadows it.
-          core.withLocalShapeFrame(
-            framedComplex,
-            framedVector,
-            compileBody,
-            false,
-            node
-          )
-        : compileBody()
-    })`;
+    // In the asynchronous copy of a program, the body of a literal bound to
+    // a name is the body of a user function, where a loop can wait
+    // (`beginPoolLiteral()`, `pool-async.ts`).
+    const poolContext = beginPoolLiteral(node);
+    let bodyCode: TargetSource;
+    try {
+      bodyCode =
+        framedComplex.size > 0
+          ? // Owned by the node being lowered: the frame describes THIS
+            // literal's parameters, so a re-entrant emission of the same
+            // literal keeps it, while a nested literal binding the same name
+            // sees a foreign frame and shadows it.
+            core.withLocalShapeFrame(
+              framedComplex,
+              framedVector,
+              compileBody,
+              false,
+              node
+            )
+          : compileBody();
+    } finally {
+      endPoolFunction(poolContext);
+    }
+    const arrow =
+      poolLiteralArrow(poolContext, emittedParams.join(', '), bodyCode) ??
+      `((${emittedParams.join(', ')}) => ${bodyCode})`;
 
     // A complex-lane body reads `.re`/`.im` off its parameter, while every
     // consumer of a function VALUE hands the callee a RAW element:
@@ -729,6 +746,10 @@ export function compileExprFunctionLiteral(
         ? callbackArgumentRanks(`a \`Function\` literal`, passed, params.length)
         : undefined;
     const maps = ranks !== undefined && ranks.some((r) => r > 0);
+    // A wrapper around the arrow is not the `async` function that the copy
+    // awaits (`poolLiteralWrapped()`).
+    if (callee !== arrow || maps || fills.some((f) => f !== undefined))
+      poolLiteralWrapped(poolContext);
     // The wrapper that fills the parameters with a default value (see
     // `fills` above), around `value`:
     // `((_tv2, _tv3 = 2) => _tv1(_tv2, _tv3))` with `value` bound to `_tv1`.

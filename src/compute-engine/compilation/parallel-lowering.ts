@@ -3,6 +3,7 @@ import type { CompileTarget } from './types.js';
 import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
 import { scopeForRebuild } from '../boxed-expression/binding-sites.js';
 import { isLibraryOperator } from './builtin-callback.js';
+import { noteLoweredParallelLoop } from './pool-loop.js';
 
 /**
  * Lower the heads of the Epsil `parallel for` construct to heads that the
@@ -41,16 +42,22 @@ export function lowerParallelHeads(expr: Expression): Expression {
   const ce = expr.engine;
   // A node can be shared by several parents: lower it once.
   const memo = new Map<Expression, Expression>();
+  // The nodes from the root to the node that the walk visits, outermost
+  // first: the analysis of a loop for the worker pool reads them
+  // (`noteLoweredParallelLoop()`, `pool-loop.ts`).
+  const ancestors: Expression[] = [];
   const walk = (e: Expression): Expression => {
     if (!isFunction(e)) return e;
     const known = memo.get(e);
     if (known !== undefined) return known;
     let changed = false;
+    ancestors.push(e);
     const ops = e.ops.map((op) => {
       const lowered = walk(op);
       if (lowered !== op) changed = true;
       return lowered;
     });
+    ancestors.pop();
     const h = e.operator;
     const library =
       (h === 'ParallelLoop' ||
@@ -66,11 +73,12 @@ export function lowerParallelHeads(expr: Expression): Expression {
       ops[1].nops >= 2
     ) {
       const [binding, domain, ...guard] = ops[1].ops;
-      const clause = ce._fn('Element', [
-        binding,
-        ce._fn('ParallelDomain', [domain]),
-        ...guard,
-      ]);
+      const parallelDomain = ce._fn('ParallelDomain', [domain]);
+      // The emitter of the loop finds the loop as written with the new
+      // domain node (`notePoolLoopDomain()`, `pool-loop.ts`).
+      if (h === 'ParallelLoop')
+        noteLoweredParallelLoop(parallelDomain, e, [...ancestors]);
+      const clause = ce._fn('Element', [binding, parallelDomain, ...guard]);
       const head = h === 'ParallelLoop' ? 'Loop' : 'Comprehension';
       const loweredOps = [ops[0], clause, ...ops.slice(2)];
       result = ce._fn(head, loweredOps, {

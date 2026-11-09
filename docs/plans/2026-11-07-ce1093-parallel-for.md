@@ -4,10 +4,10 @@
 §7. **Suspended on 2026-11-08:** the user dropped the WGSL target
 (`docs/plans/2026-11-08-glsl-fragment-spec.md`, status line), so the
 compute-shader backend of this plan is withdrawn. The construct (§2) and its
-rules (§3) stay. The backend is the JavaScript worker pool (approved
-2026-11-08): its design is `issues/CE-1163.md` (`runAsync()` on a
-compiled result), which replaces step 2 of §8 and waits for its own
-approval. On the `glsl` target a `ParallelLoop` with scalar local
+rules (§3) stay. The backend is `runAsync()` on the JavaScript worker pool
+(approved 2026-11-08), designed in
+`docs/plans/2026-11-08-ce1163-run-async-parallel-for.md`, which replaces
+step 2 of §8. On the `glsl` target a `ParallelLoop` with scalar local
 accumulators inside a function body compiles as a counted loop in order
 (section 2 of that spec).
 **Issues:** CE-1093 (the Epsil construct) and CE-1075 (the WGSL compute
@@ -140,7 +140,7 @@ round-trip test.
 | Interpreter | Passes in order; rules of §4 | Same |
 | JavaScript compile | A sequential loop with the frames of §4 | Same |
 | WGSL | `WGSLTarget.compileKernel()` (below) | Same function; each invocation writes its own element |
-| Worker pool | Not in this spec. A later item, only when a measurement shows the need (Tycho's workers study, § 8 of the code study, is in progress) | Same |
+| Worker pool | `runAsync()` on a JavaScript result, in `docs/plans/2026-11-08-ce1163-run-async-parallel-for.md` | Runs in order (section 7 of that plan) |
 
 **`WGSLTarget.compileKernel(loop, options)`** takes a `ParallelLoop` or
 `ParallelComprehension` expression. The host declares each free variable of the

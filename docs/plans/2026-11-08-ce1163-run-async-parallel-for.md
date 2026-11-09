@@ -140,7 +140,8 @@ except that the loop is one awaited call of the runtime. The emitter marks a
 statement as able to wait only in the positions of condition 1, and every
 other emitter leaves the mark off, so a position that the list does not name
 keeps the in-order loop. A sketch of the two texts for the example (the names
-are not final):
+are not final; the emitted code calls `_run.loop`, `_run.addNumber` and
+`_run.addList`, see section 9):
 
 ```js
 // The loop as a function of a sub-range of pass indices; a worker receives
@@ -243,8 +244,8 @@ consequences:
   test of the value (`if s > 2000`) can then take another branch. With one
   sub-range for each worker, the grouping depends on the size of the pool
   (decision D3).
-- **The sign of zero:** an element that holds `-0` before the loop, and whose
-  terms have a sum of exactly 0, keeps `-0`; `run()` gives `+0` when a pass
+- **The sign of zero:** an element that holds `-0` before the loop keeps `-0`
+  when the sum of each sub-range is exactly 0; `run()` gives `+0` when a pass
   adds `+0` to it. An element that no pass writes keeps its value in both
   (`-0`, `NaN`, an infinity).
 
@@ -331,3 +332,56 @@ prints `CE-1163: READY` (it tests only that `runAsync` exists), and the report
 gives the run time of the witness with `run()` and with `runAsync()` on a pool
 of 8 workers in Node. The proposal promises no number; Tycho's measurement by
 hand is the expectation.
+
+## 9. The result
+
+The code differs from sections 3 and 4 in these points. The user documents
+(`docs/COMPILATION-MODEL.md`, "The worker pool and `parallel for`:
+`runAsync()`") describe the code.
+
+1. **One form of each function in the copy.** A user function on the way to
+   a loop exists only in its `async` form in the asynchronous copy. So when
+   the program also uses the function in a position that cannot wait, its
+   loops run in order, also at its calls that could wait (the reason is
+   `'position'`): `let a = g(4); a + max(g(2), 1)` runs both loops in order.
+   The same applies to the functions that such a function awaits.
+2. **A substituted body.** A body that the compiler substitutes into its
+   caller (`compile-user-calls.ts`) keeps its loop in order, and the loop
+   never calls `onLoop`: no body block of a function declares its
+   accumulator (`isLocalOfEnclosing()` in `pool-loop.ts`).
+3. **A random frame.** A loop that the program reaches while a random frame
+   of the engine is installed runs in order and does not call `onLoop`: a
+   wait would leave the frame installed while other code runs.
+4. **Abort before a small loop.** An abort makes the next pool loop throw
+   `signal.reason` before its other checks, also when its count of passes is
+   under `minPasses`.
+5. **A worker that fails.** `onLoop` receives `route: 'calling-thread'`,
+   `reason: 'pool-declined'` when a worker does not complete its sub-range
+   (an error of a pass, a failure of the worker, a pool that turns out to be
+   unusable), and the calling thread runs that sub-range again.
+6. **A bounded count of emissions.** The copy is emitted at most 6 times
+   (retries without the loops of a function with a use that is not a waited
+   call, then each loop alone). After that, the program gets no copy and its
+   loops run in order with the reason `'position'`.
+
+The positions that keep a loop in order: an operand (`total(H, 4) + 1`), an
+argument of a call (`max(total(H, 4), 1)`), a callback of a library function
+(`map`), the argument of `WithRandomSeed`, two calls in one statement, the
+body of another `parallel for`, a function of a block with a default value
+of a parameter (its arrow is wrapped), a variant of a function for one shape
+of call, the loop form of a list recursion, and a body substituted into its
+caller. The positions that can wait are a statement of the program or of a
+function body, also inside a nested block, the branches of an `if` and the
+body of a `for` or `while`; and a call that is a whole statement, the value
+of a declaration or of an assignment, the last value of a body, or the whole
+body of a function. The last-call memo does not wrap an `async` function of
+the copy, so a function of the engine that `run()` calls through the memo
+can wait in the copy.
+
+**The measurement of the witness** (2026-11-08, Tycho's `buddhabrot` step in
+its `parallel for` form, 1.2 million samples, Node 26.13.0, Apple M5 Max, a
+pool of 8 worker threads, the median of 7 runs after a warm-up, load average
+1.9): `run()` 257.0 ms, `runAsync()` 39.6 ms, with equal counts. The `for`
+form of the entry ran in 242.6 ms with `run()`. Compiling the witness-shaped
+program of `test/compute-engine/ce-1163-pool-loop.test.ts` took 33 ms with
+the asynchronous copy and 27 ms without it (the median of 20 compilations).

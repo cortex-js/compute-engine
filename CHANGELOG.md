@@ -21,6 +21,32 @@
 
 ### New Features
 
+- **A `parallel for` runs on the worker pool with `runAsync()`.** A
+  `javascript` result called with an object of variables has
+  `runAsync(inputs, options)`, a promise of the value of `run(inputs)`. It
+  sends each `parallel for` that can run on the pool to the workers of
+  `ce.workers`, one range of consecutive passes for each worker, and adds the
+  sums of the ranges to the accumulators in their order. For
+  `let L = H; parallel for k in 1..n { L[k % 3 + 1] += 1 }; L` with
+  `n = 900000` and 3 workers, `await result.runAsync({ H: [0, 0, 0], n })`
+  gives `[300000, 300000, 300000]`, and `onLoop` receives
+  `{ passes: 900000, route: 'pool' }`. A loop runs on the pool when its
+  domain is a range, each accumulator is a local number or list of numbers
+  changed only with `+=`, the body reads no accumulator, writes no other
+  outer variable, makes no random draw and calls no function value, and the
+  loop is a statement of the program or of a function that the program calls
+  as a statement or as the value of a declaration or an assignment. Every
+  other loop runs in order, with the code of `run()`. At run time the loop
+  goes to the pool when it has at least `minPasses` passes (default 20 000)
+  and the private lists of the workers hold at most 16 million numbers. An
+  accumulator of integers gives the value of `run()`; one of real numbers can
+  differ in the last bits, because the terms are added in another grouping.
+  `willParallelize(passes)` tells in advance whether the pool would take a
+  loop, `options.signal` stops the run, and `onLoop` reports the route of each
+  loop. The new types are `RunAsyncOptions`, `ParallelLoopReport` and
+  `ParallelLoopReason`. `run()` does not change. The rules are in
+  `docs/COMPILATION-MODEL.md`, "The worker pool and `parallel for`:
+  `runAsync()`" (CE-1163).
 - **`staticShape` gives the collection shape that an expression promises
   before evaluation.** The new accessor `expr.staticShape` is
   `{ indexed, count, elementType }`, or `undefined` when the expression

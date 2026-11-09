@@ -3099,6 +3099,63 @@ export type BroadcastAsyncReason =
   | 'below-threshold'
   | 'pool-declined';
 
+/**
+ * Why `runAsync()` ran a `parallel for` on the calling thread and not on the
+ * engine's worker pool:
+ * - `'no-pool'`: the engine has no pool (`ce.workers` is not set, or is not
+ *   a pool from `createKernelPool()`).
+ * - `'pool-unusable'`: the workers of the pool run another version of the
+ *   compiled-code runtime than this engine.
+ * - `'below-threshold'`: the loop has fewer passes than
+ *   `RunAsyncOptions.minPasses`.
+ * - `'too-large'`: the private lists of the accumulators, one copy for each
+ *   worker, would hold more than 16 million numbers together.
+ * - `'pool-declined'`: the loop went to the pool, and a worker refused or
+ *   failed a sub-range of the passes (or a pass threw there): the calling
+ *   thread ran that sub-range again.
+ */
+export type ParallelLoopReason =
+  | 'no-pool'
+  | 'pool-unusable'
+  | 'below-threshold'
+  | 'too-large'
+  | 'pool-declined';
+
+/**
+ * What `RunAsyncOptions.onLoop` receives for each run of a `parallel for`
+ * that can run on the pool: the count of passes of this run, where the
+ * passes ran, and with `route: 'calling-thread'`, why the pool did not run
+ * them all.
+ */
+export interface ParallelLoopReport {
+  passes: number;
+  route: 'pool' | 'calling-thread';
+  reason?: ParallelLoopReason;
+}
+
+/** The options of `runAsync()` (see `CompilationResult.runAsync`). */
+export interface RunAsyncOptions {
+  /**
+   * Stops the run. A signal that is already aborted rejects the promise
+   * with `signal.reason` before any statement runs. An abort while the
+   * program waits for the workers rejects the promise with `signal.reason`:
+   * the program stops at that loop. The workers that still run a sub-range
+   * are terminated and replaced after the grace period of the pool. An
+   * abort while the calling thread runs statements is seen at the next loop
+   * that can run on the pool.
+   */
+  signal?: AbortSignal;
+  /**
+   * The smallest count of passes of a `parallel for` that goes to the
+   * pool. A positive integer. Default: 20 000.
+   */
+  minPasses?: number;
+  /** Called once for each run of a `parallel for` that can run on the
+   * pool, when its route is known. A loop that runs in order because of a
+   * condition of the compiler never calls it. */
+  onLoop?: (report: ParallelLoopReport) => void;
+}
+
 export interface BroadcastAsyncResult {
   /** The output array (`options.out` when given). */
   out: Float64Array;
@@ -3171,6 +3228,90 @@ export type StoredBatchBody = {
   preambleOnce?: string;
   preamblePerCall?: string;
 };
+
+/**
+ * Why a `parallel for` of a JavaScript compilation runs in order and not on
+ * the pool (`pool-loop.ts`). One string for each condition of section 3 of
+ * `docs/plans/2026-11-08-ce1163-run-async-parallel-for.md`:
+ *
+ * - `'domain'` (condition 2): the domain is not a range that the compiler
+ *   emits as a counted loop with bounds that make no draw (a loop over a
+ *   list, a guarded clause, a destructuring binder).
+ * - `'mode'` (condition 3): the program is compiled in `complex` or `bigint`
+ *   mode.
+ * - `'accumulator-scope'` (condition 3): an accumulator is not a local
+ *   variable of the function or block that holds the loop.
+ * - `'accumulator-type'` (condition 3): an accumulator is not a number or a
+ *   list of numbers with one index, or it is changed both as a number and as
+ *   a list.
+ * - `'accumulator-read'` (condition 4): the name of an accumulator appears
+ *   in the loop as written other than as the target of a `+=`.
+ * - `'outer-write'` (condition 5): the body, or a user function that it
+ *   calls, assigns a variable that is not its own local.
+ * - `'jump'` (condition 5): a `return`, `break` or `continue` leaves the
+ *   loop.
+ * - `'function-value'` (condition 6): the body reads an outer variable that
+ *   holds a function, or calls a function that the program defines as a
+ *   value (a function of a block, a parameter). A call of a function that
+ *   the engine holds as a value (`let h = (x) |-> …`), directly or from a
+ *   user function that the body calls, also gives this reason.
+ * - `'outer-type'` (condition 6): the body reads an outer variable whose
+ *   static type is not a number, a boolean, a string, or a list or tuple of
+ *   these.
+ * - `'iteration-budget'` (condition 8): the program is compiled with
+ *   `iterationBudget`.
+ * - `'function-declined'` (condition 7): the compilation of the loop as a
+ *   function declines, or its code reads the object of variables of the
+ *   program (a user function that reads an input of the program).
+ * - `'not-shippable'` (condition 7): the loop as a function makes a random
+ *   draw or names an identifier of the host, or the body calls a function
+ *   that the `functions` or `operators` option of the compilation gives.
+ * - `'position'` (condition 1): the loop passes the other conditions, but
+ *   the asynchronous copy of the program cannot wait at it: the loop is not
+ *   a statement of the program or of a function that the program calls at a
+ *   statement position, or the compiler emits a JavaScript function without
+ *   `async` between the entry and the loop (`pool-async.ts`).
+ *
+ * @internal
+ */
+export type PoolLoopReason =
+  | 'position'
+  | 'domain'
+  | 'mode'
+  | 'accumulator-scope'
+  | 'accumulator-type'
+  | 'accumulator-read'
+  | 'outer-write'
+  | 'jump'
+  | 'function-value'
+  | 'outer-type'
+  | 'iteration-budget'
+  | 'function-declined'
+  | 'not-shippable';
+
+/** An accumulator of a loop: a variable changed with `s += e` (`number`) or
+ * with `L[i] += e` (`list`).
+ *
+ * @internal
+ */
+export type PoolAccumulator = { name: string; kind: 'number' | 'list' };
+
+/**
+ * One `parallel for` of a compiled program, as `CompilationResult.
+ * parallelLoops` stores it: a loop that can run on the pool, with its loop
+ * as a function compiled (`calling: 'lambda'`), or the reason why it runs in
+ * order.
+ *
+ * @internal
+ */
+export type ParallelLoopRecord =
+  | {
+      readonly route: 'pool';
+      readonly fn: CompilationResult<'javascript'>;
+      readonly outer: ReadonlyArray<string>;
+      readonly accumulators: ReadonlyArray<PoolAccumulator>;
+    }
+  | { readonly route: 'in-order'; readonly reason: PoolLoopReason };
 
 /**
  * Result of compiling an expression.
@@ -3597,6 +3738,90 @@ export type CompilationResult<
    * (`reason: 'pool-declined'`). Present where `broadcastAsync` is.
    */
   willUsePool?: (cells: number) => boolean;
+
+  /**
+   * Run the program as `run(inputs)` does, and send each `parallel for`
+   * that can run on the engine's worker pool (`ce.workers`) to the pool: the
+   * passes of the loop are split into one sub-range of consecutive passes
+   * for each worker, each worker adds the terms of its passes to zero, and
+   * the calling thread adds these sums to the accumulators, in the order of
+   * the sub-ranges. Present on a `javascript` result called with a vars
+   * object (`calling: 'expression'`).
+   *
+   * The promise resolves to the value of `run(inputs)`, except that the
+   * terms of an accumulator are added in another grouping. An accumulator of
+   * integers, whose value and partial sums stay within ±2^53, has the value
+   * of `run()`. An accumulator of real numbers can differ from it, usually in
+   * the last bits, and the difference depends on the count of workers. An
+   * element of a list accumulator that holds `-0` keeps `-0` when the sum
+   * of each sub-range is exactly 0, where `run()` gives `+0` if a pass adds
+   * `+0` to it. The inputs are checked and the value converted
+   * as `run()` does; an error of the program rejects the promise, and the
+   * call never throws.
+   *
+   * A loop can run on the pool when it is a statement of the program, or of
+   * a user function that the program calls as a statement, as the value of
+   * a declaration or an assignment, or as the last value of a body (also
+   * inside the branches of an `if` and the body of a `for` or a `while`);
+   * when its domain is a range; when each accumulator is a local number or a
+   * local list of numbers changed only with `+=`; when the passes read no
+   * accumulator, write no other outer variable, make no random draw and call
+   * no function value; and when the program has no `iterationBudget`.
+   * Every other loop runs in order, with the code of `run()`. At run time,
+   * the loop goes to the pool when the pool is usable, the count of passes
+   * is at least `options.minPasses`, and the private lists of all workers
+   * together hold at most 16 million numbers.
+   *
+   * The calling thread is free only while the program waits for the
+   * workers. The host must not change the values of `inputs` until the
+   * promise settles. A program with no loop that can run on the pool runs
+   * `run(inputs)`.
+   */
+  runAsync?: (
+    inputs?: Record<string, unknown>,
+    options?: RunAsyncOptions
+  ) => Promise<unknown>;
+
+  /**
+   * Whether `runAsync()` would send a `parallel for` of this program to the
+   * pool now: the program has a loop that can run on the pool (also inside a
+   * function that it calls), the engine has a usable pool (`ce.workers`),
+   * and `passes`, when it is given, is at least the default threshold of
+   * 20 000 passes. It does not know the range of a loop, and it does not
+   * check the size limit of the private lists. Present where `runAsync` is.
+   */
+  willParallelize?: (passes?: number) => boolean;
+
+  /**
+   * The `parallel for` loops of a `javascript` compilation, in the order in
+   * which the emitter meets them, each with the route that it can take: a
+   * loop that passes the conditions of the compiler can run on the worker
+   * pool (`route: 'pool'`), and every other one runs in order with the
+   * `reason` (a condition of `pool-loop.ts`, `PoolLoopReason`). For a pool
+   * loop, `fn` is the loop as a function, compiled with `calling:
+   * 'lambda'`: its parameters are the first value and the step of the
+   * range, the first and the last pass index of a sub-range (from 0, both
+   * included), the outer variables in the order of `outer`, and the length
+   * of each list accumulator in the order of `accumulators`. It returns the
+   * sums of the sub-range for each accumulator, in that order. Absent when
+   * the program has no `parallel for`. Internal to the engine for now: the
+   * runtime of `runAsync()` reads it, and it is not part of the public API.
+   *
+   * @internal
+   */
+  parallelLoops?: ReadonlyArray<ParallelLoopRecord>;
+
+  /**
+   * The asynchronous copy of the program that `runAsync()` runs: the body
+   * of an `AsyncFunction` of `_SYS`, `_` (the vars object) and `_run` (the
+   * state of one run). It is the code of `run()`, except at each loop of
+   * `parallelLoops` with `route: 'pool'`, where it awaits
+   * `_run.loop(index, …)`. Absent when no loop can run on the pool.
+   * Internal to the engine, as `parallelLoops`.
+   *
+   * @internal
+   */
+  parallelCode?: string;
 } & (T extends ExecutableTarget
   ? { calling: 'expression' | 'lambda'; run: CompiledRunner<R, V> }
   : // eslint-disable-next-line @typescript-eslint/no-empty-object-type

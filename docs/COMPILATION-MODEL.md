@@ -345,6 +345,258 @@ interpreter's value. A line is removed when the case declines or is fixed.
   reverses the code points of a string); the interpreter gives the code
   points `x`, U+00E9, the accented `e` kept as one character.
   `Reverse(t)` written without the function declines.
+- `javascript`, a `+=` inside a dictionary value of a `parallel for` body
+  (crafted, MathJSON only): `Block(Declare(s, 0), ParallelLoop(Block(
+  Dictionary(KeyValuePair('a', AddTo(s, k)))), Element(k, Range(1, 4))), s)`
+  declines ("the value of the key "a" has the type `any`"), and the
+  interpreter gives 10. `lowerParallelHeads()` (`parallel-lowering.ts`) does
+  not walk into a `Dictionary`, so the `AddTo` in it is not rewritten.
+
+## The worker pool and `parallel for`: `runAsync()`
+
+A `javascript` result called with an object of variables
+(`calling: 'expression'`) has `runAsync(inputs, options?)` and
+`willParallelize(passes?)`. `run()` does not change: it runs each
+`parallel for` in order, on the calling thread.
+
+`runAsync()` runs a second, asynchronous copy of the program. The copy is the
+code of `run()`, except at each `parallel for` that can run on the engine's
+worker pool (`ce.workers`, from `createKernelPool()`). At such a loop, the
+calling thread computes the count of passes with the code of the in-order
+loop (with its checks), splits the passes into one sub-range of consecutive
+passes for each worker, and sends each worker one call of the loop compiled
+as a function of its own. Each worker adds the terms of its passes to zero.
+When all calls are done, the calling thread adds the sums to the
+accumulators, one sub-range after the other. The statements outside these
+loops run on the calling thread, with the code of `run()`, and the calling
+thread is free only while the program waits for the workers.
+
+`runAsync()` returns a promise of the value of `run(inputs)`, except for the
+order of the additions (see "Values" below). It checks `inputs` and converts
+the value as `run()` does. An error of the program rejects the promise;
+`runAsync()` never throws. A program with no loop that can run on the pool
+has no copy, and its `runAsync()` gives `run(inputs)`. The host must not
+change the values of `inputs` until the promise settles.
+
+The options:
+
+- `signal`: an `AbortSignal` (see "Errors, failures and abort").
+- `minPasses`: the smallest count of passes that goes to the pool, a positive
+  integer. Default: 20 000, the count from which `broadcastAsync()` starts to
+  use the pool. Another value rejects the promise with a `TypeError`.
+- `onLoop(report)`: called once for each run of a loop that can run on the
+  pool, with `{ passes, route, reason }`. `route` is `'pool'` or
+  `'calling-thread'`. With `'calling-thread'`, `reason` is `'no-pool'`,
+  `'pool-unusable'` (the workers hold another runtime version),
+  `'below-threshold'`, `'too-large'` or `'pool-declined'`. A loop that runs in
+  order because of a condition of the compiler (below) never calls it.
+
+`willParallelize(passes?)` is `true` when the program has a loop that can run
+on the pool (also inside a function that it calls), the engine has a usable
+pool, and `passes`, when it is given, is at least 20 000. It does not know the
+range of a loop, does not read `minPasses`, and does not check the size limit.
+
+```js
+// let L = H
+// parallel for k in 1..n { L[k % 3 + 1] += 1 }
+// L
+const count = compile(ce.box(['Block', ['Assign', 'L', 'H'],
+  ['ParallelLoop', ['AddTo', ['At', 'L', ['Add', ['Mod', 'k', 3], 1]], 1],
+    ['Element', 'k', ['Range', 1, 'n']]],
+  'L']));
+count.willParallelize(900_000);              // ➔ true (with a pool)
+await count.runAsync({ H: [0, 0, 0], n: 900_000 }, { onLoop: console.log });
+// onLoop: { passes: 900000, route: 'pool' }
+// ➔ [300000, 300000, 300000]
+```
+
+### The loops that run in order
+
+A loop that fails one of these conditions runs in order inside `runAsync()`,
+with the code of `run()`, and does not call `onLoop`. No condition makes a
+compilation decline. `result.parallelLoops` (internal) records the reason of
+each loop (`PoolLoopReason` in `compilation/types.ts`). The examples are
+Epsil; `H` is an input `list<number>`, and
+`total(L, n) = { let s = 0; parallel for k in 1..n { s += L[k] * k }; s }` is
+a function of the engine.
+
+1. **Position** (`'position'`). The asynchronous copy can wait for the pool
+   only at a loop that is a statement of the program, or of a user function
+   that the program calls in a position that can wait (see the next section).
+   `total(H, 4) + 1`, `max(total(H, 4), 1)`,
+   `map((x) => total(H, x), [1, 2])` and `WithRandomSeed(7, total(H, 4))` run
+   their loop in order: the call is an operand, an argument or a callback.
+2. **Domain** (`'domain'`). The domain is a range that the compiler emits as
+   a counted loop, with bounds and a step that make no random draw.
+   `parallel for x in [1, 2, 3] { s += x }` runs in order: its domain is a
+   list.
+3. **Accumulators** (`'accumulator-scope'`, `'accumulator-type'`, `'mode'`).
+   Each accumulator is a local variable of the function or block that holds
+   the loop, and is a number (`s += e`) or a list of numbers with one index
+   (`L[i] += e`), not both. The program is compiled in the default mode:
+   with `mode: 'complex'`, `parallel for k in 1..3 { s += k }` runs in order.
+   The `bigint` mode declines a block of statements before this analysis.
+4. **No read of an accumulator** (`'accumulator-read'`). In the loop as
+   written, before `lowerParallelHeads()` rewrites `+=`, the name of each
+   accumulator is only the target of a `+=`.
+   `parallel for k in 1..2 { L[k] += L[k + 1] }` runs in order (the Epsil
+   checker also reports it, as `parallel-accumulator-read`).
+5. **No other write, and no jump out** (`'outer-write'`, `'jump'`). The body,
+   and each user function that it calls, assign only their own locals, and no
+   `return`, `break` or `continue` leaves the loop. The Epsil checker refuses
+   these; the compiler checks them again for MathJSON:
+   `ParallelLoop(Block(Assign(t, k), AddTo(s, k)), Element(k, Range(1, 4)))`
+   and `ParallelLoop(Block(AddTo(s, k), If(k > 2, Break())), …)` run in
+   order.
+6. **The body reads data only** (`'function-value'`, `'outer-type'`). Each
+   outer variable that the body reads has a static type that is a number, a
+   boolean, a string, or a list or tuple of these. A function value cannot go
+   to a worker: with `let h = (x) => x + 1`,
+   `parallel for k in 1..3 { s += h(k) }` runs in order.
+7. **The loop can run on a worker** (`'not-shippable'`,
+   `'function-declined'`). The loop compiled as a function of its own is
+   shippable: it makes no random draw, names no identifier of the host, and
+   calls no function of the `functions` or `operators` option. Its
+   compilation must not decline, and its code must not read the object of
+   variables of the program (a user function that reads an input of the
+   program).
+   `parallel for k in 1..3 { s += random() * 0 + k }` runs in order. A
+   function object given in `functions` is copied as source, and a `compile`
+   handler can declare itself shippable: as for `broadcastAsync()`, such a
+   function must read only its arguments and have no effect, or the value of
+   `runAsync()` is unspecified.
+8. **No pass budget** (`'iteration-budget'`). A program compiled with
+   `iterationBudget` counts its passes in one counter for the call, which a
+   worker cannot share.
+
+A program whose code reads or makes a value of a kind (`valueKinds`) gets no
+asynchronous copy: its `runAsync()` gives `run(inputs)`.
+
+At run time, a loop that passes these conditions goes to the pool when the
+engine has a usable pool (otherwise `'no-pool'` or `'pool-unusable'`), the
+count of passes is at least `minPasses` (otherwise `'below-threshold'`), and
+the private lists of the workers hold at most 16 million numbers together
+(otherwise `'too-large'`). Each worker has a private list of the length of
+each list accumulator, so the count is the sum of these lengths times the
+count of sub-ranges (the size of the pool, or the count of passes when it is
+smaller). A number accumulator does not count. In each of these cases the
+loop runs in order on the calling thread and `onLoop` receives
+`route: 'calling-thread'` with the reason.
+
+A loop that the program reaches while a random frame of the engine is
+installed runs in order and does not call `onLoop`: a wait there would leave
+the frame installed while other code runs. For example, a host function that
+starts `runAsync()` while the interpreter evaluates `WithRandomSeed(7, …)`.
+
+### The positions that can wait
+
+An `await` is valid only directly inside an `async` JavaScript function, so
+the copy makes `async` each function between the entry and a loop that waits,
+and awaits each call of such a function (`pool-async.ts`). These positions
+can wait:
+
+- a `parallel for` that is a statement of the program (a `Block`) or of the
+  body of a user function, of the engine (an Epsil `function` that
+  `executeEpsil` defines) or of the program (`function f(…) { … }` in a
+  block);
+- the same inside a nested block, the branches of an `if` statement, and the
+  body of a `for` or `while` loop, at any depth;
+- a call of a user function whose body can wait, when the call is a whole
+  statement, the value of a declaration or of an assignment
+  (`let a = f(…)`, `a = f(…)`), the last value of a body, or the whole body
+  of a function. The function can call a second function in the same
+  positions.
+
+```epsil
+let a = total(H, 4)                        // waits
+if a > 0 { a = total(H, 3) }               // waits
+for j in 1..2 { a = total(H, j) }          // waits
+```
+
+Every other position keeps the in-order loop of `run()`: an operand
+(`total(H, 4) + 1`), an argument (`max(total(H, 4), 1)`), a callback of a
+library function (`map`), the body of another `parallel for`, the argument
+of `WithRandomSeed`, two calls in one statement. The remedy is a statement
+of its own: `let t = total(H, 4)`, then `t + 1`.
+
+A user function has only its asynchronous form in the copy. So when the
+program also uses the function in a position that cannot wait, its loops run
+in order, also at its calls that could wait:
+`function g(m) { let s = 0; parallel for k in 1..m { s += k }; s }` then
+`let a = g(4); a + max(g(2), 1)` runs both loops in order (the reason is
+`'position'`). With `let a = g(4); let b = g(2); a + b`, both run on the
+pool. The same applies to a function that the copy makes `async` only because
+it awaits another one, and to the functions that it awaits.
+
+These forms of a function also keep its loops in order:
+
+- a body that the compiler substitutes into its caller (a one-statement
+  body, `compile-user-calls.ts`): the analysis finds no body block that
+  declares the accumulator (`isLocalOfEnclosing()` in `pool-loop.ts`), so
+  the loop runs in order and never calls `onLoop`;
+- a variant of a function for one shape of call, the loop form of a list
+  recursion, and a function wrapped to convert its arguments or to fill a
+  default value of a parameter
+  (`function g(m: integer, c: integer = 2) { … }`, then `g(4)`).
+
+The copy is a second emission of the whole program. When a function has a use
+that is not a waited call, or the text does not compile (an `await` inside a
+JavaScript function that is not `async`), the copy is emitted again without
+the loops concerned, or with each loop tried alone. After at most 6 emissions
+the program gets no copy, and each loop runs in order with the reason
+`'position'`.
+
+### Values
+
+`run()` adds each term to the accumulator in the order of the passes. The pool
+adds the terms of each sub-range to zero, then adds these sums to the
+accumulator in the order of the sub-ranges. The `parallel for` rules leave the
+order of the additions unspecified.
+
+- **Equal to `run()`:** an accumulator of static type `integer` (a number, or
+  a list of integers), while its value before the loop and every partial sum
+  stay within ±2^53. The statements outside the pool loops run the code of
+  `run()`, so they give its values when the accumulators are equal.
+- **Can differ from `run()`:** an accumulator of real numbers, and one of
+  integers beyond 2^53. The difference is that of another grouping of a
+  floating-point sum. It is usually in the last bits: the sum of `1/k` for
+  `k` in `1..1000000` gave `14.392726722864989` with `run()` and
+  `14.392726722865703` with `runAsync()` on 3 workers. It can be larger
+  (terms that cancel, a sum that overflows in one grouping only), and a later
+  test of the value (`if s > 2000`) can then take another branch. The grouping
+  depends on the size of the pool.
+- **The sign of zero:** an element of a list accumulator that holds `-0`
+  before the loop, and whose sum in each sub-range is exactly 0, keeps `-0`
+  (an element whose sum is 0 is not written); `run()` gives `+0` when a pass
+  adds `+0` to it. An element that no pass writes keeps its value in both
+  (`-0`, `NaN`, an infinity).
+
+The input list and a second variable that holds the list of an accumulator
+before the loop (`const before = L`) keep their values, as with `run()`: the
+sums are written in place only where the in-order loop writes in place
+(`in-place-update.ts`).
+
+### Errors, failures and abort
+
+- **An error of a pass, a worker that fails.** When a worker does not complete
+  its sub-range (an error of a pass, a worker that fails or refuses the call,
+  a pool that turns out to be unusable), the calling thread runs that
+  sub-range again with the same function, in the order of the sub-ranges, and
+  `onLoop` receives `route: 'calling-thread'`, `reason: 'pool-declined'`. A
+  sub-range that fails there too throws, and the promise rejects with the
+  error of the first such sub-range: the error of the first failing pass,
+  which `run()` throws.
+- **Limits.** Each call carries the engine's iteration limit
+  (`ce.iterationLimit`), so a pass that exceeds it on a worker fails as in
+  `run()`.
+- **Abort.** A signal that is already aborted at the call rejects the promise
+  with `signal.reason` before any statement runs. An abort while the program
+  waits for the workers rejects it with `signal.reason`: the program stops at
+  that loop. The pool drops the calls that it has not sent, and a worker that
+  still runs a sub-range is terminated and replaced after the grace period of
+  the pool. An abort while the calling thread runs statements is seen at the
+  next loop that can run on the pool, before its other checks: that loop
+  throws `signal.reason` also when its count of passes is under `minPasses`.
 
 ## Shapes are settled at compile time
 

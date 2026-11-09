@@ -126,6 +126,13 @@ import {
 } from './compiler-type-facts.js';
 import { CompilerState } from './compiler-state.js';
 import {
+  beginPoolDefinition,
+  endPoolFunction,
+  isPoolAsyncDefinition,
+  poolDefinitionText,
+  poolStatementCode,
+} from './pool-async.js';
+import {
   copyingUpdateInLoop,
   noteCopyingUpdateInLoop,
 } from './in-place-update.js';
@@ -5076,8 +5083,11 @@ export function compileLoopBody(
 
   // Every statement here is in statement position, so a nested loop is a
   // block statement, not an arrow function that is called at once
-  // (`discardedValueStatement()`).
-  return discardedValueStatement(target, compileOp(expr, -1, target, 0, expr));
+  // (`discardedValueStatement()`). In the asynchronous copy of a program, a
+  // call of a function that waits is awaited (`poolStatementCode()`).
+  return poolStatementCode(expr, [
+    discardedValueStatement(target, compileOp(expr, -1, target, 0, expr)),
+  ])[0];
 }
 
 /**
@@ -7052,6 +7062,14 @@ export function emitFunctionLiteralDefinition(
       // can avoid wrapping it again.
       let complexShaped = false;
       let body: TargetSource;
+      // In the asynchronous copy of a program, a loop of the body of the
+      // definition under its own name can wait (`beginPoolDefinition()`,
+      // `pool-async.ts`).
+      const poolContext = beginPoolDefinition(
+        bodyExpr,
+        prefixed === undefined &&
+          (specialization === undefined || specialization.key === h)
+      );
       try {
         body = emitWithRecursiveLaneRetry(registry, name, () => {
           const frames = {
@@ -7076,6 +7094,7 @@ export function emitFunctionLiteralDefinition(
           );
         });
       } finally {
+        endPoolFunction(poolContext);
         for (const node of overridden) _codeOverrides.delete(node);
       }
       assertExtraParamsRead(h, body, extraParams, 0);
@@ -7085,15 +7104,26 @@ export function emitFunctionLiteralDefinition(
       const allParams = [...params, ...extraParams];
       registry.defs.set(
         name,
-        statements?.has(body)
-          ? `const ${name} = (${allParams.join(', ')}) => { ${statements.functionBody(body)} };`
-          : `const ${name} = (${allParams.join(', ')}) => ${body};`
+        poolDefinitionText(
+          poolContext,
+          name,
+          allParams,
+          body,
+          statements?.has(body)
+            ? () => statements.functionBody(body)
+            : undefined
+        ) ??
+          (statements?.has(body)
+            ? `const ${name} = (${allParams.join(', ')}) => { ${statements.functionBody(body)} };`
+            : `const ${name} = (${allParams.join(', ')}) => ${body};`)
       );
       // A variant is never memoized: the last-call memo keys on the
       // ordinary parameters, and a variant's value depends on the extra
-      // ones as well.
+      // ones as well. Nor is an `async` definition of the asynchronous copy
+      // of a program: its value is a promise.
       if (
         prefixed === undefined &&
+        !isPoolAsyncDefinition(name) &&
         lastCallMemoEligible(h, bodyExpr, params, bodyTarget, complexShaped)
       )
         (registry.memoizable ??= new Map()).set(name, { params, body });

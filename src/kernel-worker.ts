@@ -30,6 +30,13 @@
 // point the main thread would solve. The loop stops at the deadline it was
 // sent and returns the points done.
 //
+// It also runs a stored `javascript` lambda once with positional arguments
+// (`call`): the task of a `parallel for` loop that `runAsync()` splits over
+// the pool (design: `docs/plans/2026-11-08-ce1163-run-async-parallel-for.md`,
+// section 4). A kernel compiled as a lambda (`calling: 'lambda'`) is rebuilt
+// with `createJavaScriptRuntime().load()`, and has no batch form: a `run` task
+// on it fails. An error that the lambda throws fails the task, not the worker.
+//
 // The file is built self-contained (no chunk imports) so that a host can copy
 // it next to its own files and start it with
 // `new Worker(url, { type: 'module' })`; in Node, with `worker_threads`. The
@@ -70,14 +77,21 @@ export const version = '{{SDK_VERSION}}';
 /** A loaded kernel: its slice loop and the values it writes per cell by
  * default (3 for `interval-js`; for `javascript`, the stored
  * `broadcastOutputs`, or 1, which the `outputs` of a `run` message
- * overrides). */
+ * overrides). A `javascript` lambda has no slice loop: it has the function
+ * that a `call` task calls instead. */
 interface Kernel {
-  slice: (
-    inputs: BroadcastInputs,
-    options: BroadcastOptions | undefined,
-    out: Float64Array,
-    slice: BroadcastSlice
-  ) => number;
+  slice:
+    | ((
+        inputs: BroadcastInputs,
+        options: BroadcastOptions | undefined,
+        out: Float64Array,
+        slice: BroadcastSlice
+      ) => number)
+    | undefined;
+  /** The function of a `javascript` lambda, as `load()` builds it: it
+   * checks and converts its arguments by the stored entry plan, and
+   * normalizes its result, as `run()` of the compilation result does. */
+  call: ((...args: unknown[]) => unknown) | undefined;
   interval: boolean;
   perCellOut: number;
   /** The shared inputs that the batch body of the kernel reads in place
@@ -136,13 +150,32 @@ const jsRuntime = createJavaScriptRuntime({});
 const defaultIterationLimit = jsRuntime.iterationLimit;
 const intervalRuntime = createIntervalRuntime();
 const kernels = new Map<number, Kernel>();
+/** The message of each kernel whose `load` failed, by id, until `unload`:
+ * a `call` task on that kernel fails with it. */
+const refusals = new Map<number, string>();
 
 function loadKernel(kernel: StoredKernel): Kernel {
   if (kernel.kind === 'interval-js')
     return {
       slice: intervalRuntime.loadBroadcastSlice(kernel),
+      call: undefined,
       interval: true,
       perCellOut: 3,
+      inPlace: new Set(),
+    };
+  // `load()` refuses code compiled for another runtime version, and code
+  // that reads or makes a value of a kind type (`valueKinds`).
+  if (kernel.calling === 'lambda')
+    return {
+      slice: undefined,
+      call: jsRuntime.load({
+        ...kernel,
+        entryPlan: kernel.entryPlan as Parameters<
+          typeof jsRuntime.load
+        >[0]['entryPlan'],
+      }),
+      interval: false,
+      perCellOut: 1,
       inPlace: new Set(),
     };
   return {
@@ -154,6 +187,7 @@ function loadKernel(kernel: StoredKernel): Kernel {
         typeof jsRuntime.loadBroadcastSlice
       >[0]['entryPlan'],
     }),
+    call: undefined,
     interval: false,
     perCellOut: kernel.broadcastOutputs ?? 1,
     inPlace: sharedInputsReadInPlace(kernel.batch?.params),
@@ -227,6 +261,32 @@ function cancelCheck(
 const messageOf = (e: unknown): string =>
   e instanceof Error ? e.message : String(e);
 
+/**
+ * The buffers to transfer with the value of a `call` task: the buffer of a
+ * `Float64Array` that is the value, or an element of the value when it is an
+ * array. Deeper arrays are copied. A buffer is listed once, since
+ * `postMessage()` refuses a transfer list that names a buffer twice (two
+ * views of one buffer). A `SharedArrayBuffer` cannot be transferred, and is
+ * left out: it is shared, not copied. A view that covers only a part of its
+ * buffer (a `subarray`) is copied too: the transfer would empty the whole
+ * buffer, which the function can still hold through another view.
+ */
+function transferOf(value: unknown): ArrayBuffer[] {
+  const buffers = new Set<ArrayBuffer>();
+  const add = (v: unknown): void => {
+    if (
+      v instanceof Float64Array &&
+      v.buffer instanceof ArrayBuffer &&
+      v.byteOffset === 0 &&
+      v.byteLength === v.buffer.byteLength
+    )
+      buffers.add(v.buffer);
+  };
+  add(value);
+  if (Array.isArray(value)) for (const v of value) add(v);
+  return [...buffers];
+}
+
 port.on((m) => {
   switch (m.type) {
     case 'load':
@@ -234,6 +294,7 @@ port.on((m) => {
         kernels.set(m.id, loadKernel(m.kernel));
         port.post({ type: 'loaded', id: m.id });
       } catch (e) {
+        refusals.set(m.id, messageOf(e));
         port.post({ type: 'error', id: m.id, message: messageOf(e) });
       }
       return;
@@ -247,6 +308,7 @@ port.on((m) => {
       return;
     case 'unload':
       kernels.delete(m.id);
+      refusals.delete(m.id);
       fits.delete(m.id);
       return;
     case 'release':
@@ -320,6 +382,49 @@ port.on((m) => {
       }
       return;
     }
+    case 'call': {
+      const kernel = kernels.get(m.id);
+      const call = kernel?.call;
+      if (call === undefined) {
+        port.post({
+          type: 'error',
+          job: m.job,
+          message:
+            kernel === undefined
+              ? (refusals.get(m.id) ?? `kernel ${m.id} is not loaded`)
+              : `kernel ${m.id} is not a lambda: it cannot be called`,
+        });
+        return;
+      }
+      // The pool settled the task when its signal aborted after the message
+      // was sent: the call is not started, and the answer is dropped. The
+      // compiled function does not read the flag, so a call that has started
+      // runs to its end.
+      if (cancelCheck(m.cancel, m.job)?.() === true) {
+        port.post({ type: 'error', job: m.job, message: 'cancelled' });
+        return;
+      }
+      let value: unknown;
+      try {
+        // The runtime state the compiled code's helpers read, as for `run`.
+        // A call has no deadline.
+        jsRuntime.iterationLimit = m.iterationLimit ?? defaultIterationLimit;
+        jsRuntime.deadline = undefined;
+        value = call(...m.args);
+      } catch (e) {
+        port.post({ type: 'error', job: m.job, message: messageOf(e) });
+        return;
+      }
+      // A value that structured clone cannot copy (a function, for example)
+      // makes `postMessage()` throw: the task then fails, and the worker
+      // takes the next one.
+      try {
+        port.post({ type: 'call-result', job: m.job, value }, transferOf(value));
+      } catch (e) {
+        port.post({ type: 'error', job: m.job, message: messageOf(e) });
+      }
+      return;
+    }
     case 'run': {
       // The shared inputs are kept first, before the kernel is checked, so
       // that the later tasks of the batch find them even when this one
@@ -338,11 +443,15 @@ port.on((m) => {
         batches.set(m.batch, kept);
       }
       const kernel = kernels.get(m.id);
-      if (kernel === undefined) {
+      const slice = kernel?.slice;
+      if (kernel === undefined || slice === undefined) {
         port.post({
           type: 'error',
           job: m.job,
-          message: `kernel ${m.id} is not loaded`,
+          message:
+            kernel === undefined
+              ? `kernel ${m.id} is not loaded`
+              : `kernel ${m.id} is a lambda: it has no batch form`,
         });
         return;
       }
@@ -402,7 +511,7 @@ port.on((m) => {
             ? cancelled
             : () => Date.now() > deadline || cancelled?.() === true;
         const failures = { count: 0 };
-        const done = kernel.slice(inputs, options, out, {
+        const done = slice(inputs, options, out, {
           from: m.from,
           to: m.to,
           deadline,

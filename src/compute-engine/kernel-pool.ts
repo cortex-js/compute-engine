@@ -56,6 +56,19 @@
  * worker is sent the fit problem once (`fit-load`), then each slice
  * (`fit-run`). These methods are not part of the public `KernelPool`
  * interface; `fitSlicePool()` reaches them.
+ *
+ * It also carries calls of a stored `javascript` lambda (`runCall`): the
+ * worker is sent the kernel once (`load`), then each call with its
+ * positional arguments (`call`), and it answers with the value of the
+ * lambda. `runAsync()` runs the sub-ranges of a `parallel for` loop this way
+ * (design: `docs/plans/2026-11-08-ce1163-run-async-parallel-for.md`, section
+ * 4). The arguments are copied; a `Float64Array` of the value, at the top
+ * level or as an element of a top-level array, is transferred. An abort
+ * rejects the call at once with the signal's reason. The compiled function
+ * does not read the cancel flag, so a worker that runs an aborted call is
+ * terminated and replaced after the grace period, unless it answers first.
+ * `runCall` is not part of the public `KernelPool` interface either;
+ * `callPool()` reaches it.
  */
 
 import type {
@@ -169,7 +182,28 @@ interface FitSliceTask {
   reject: (e: Error) => void;
 }
 
-type QueuedTask = Task | FitSliceTask;
+/** A task queued for a worker: one call of a stored `javascript` lambda
+ * (`runCall`). It has no deadline. Unlike the other tasks, an abort rejects
+ * it, with the signal's reason (`settleAborted()`). */
+interface CallTask {
+  type: 'call';
+  stored: StoredResult;
+  args: unknown[];
+  iterationLimit: number | undefined;
+  signal: AbortSignal | undefined;
+  resolve: (value: unknown) => void;
+  reject: (e: unknown) => void;
+}
+
+type QueuedTask = Task | FitSliceTask | CallTask;
+
+/** Settle `task` as the abort of its signal does: a cells or fit task
+ * resolves with no cells or points done, a call task rejects with the
+ * signal's reason. */
+function settleAborted(task: QueuedTask): void {
+  if (task.type === 'call') task.reject(task.signal?.reason);
+  else task.resolve({ out: new Float64Array(0), done: 0 });
+}
 
 interface Slot {
   worker: WorkerLike;
@@ -247,6 +281,7 @@ function wireSharedElement(element: unknown): unknown {
  * worker makes before its first cell or point: the cell loop stops when
  * `Date.now()` is after the deadline, the fit loop when it reaches it. */
 function deadlinePassed(task: QueuedTask): boolean {
+  if (task.type === 'call') return false;
   const deadline = task.type === 'fit' ? task.deadline : task.slice.deadline;
   if (deadline === undefined) return false;
   return task.type === 'fit' ? Date.now() >= deadline : Date.now() > deadline;
@@ -293,7 +328,7 @@ export function isShippableCode(text: string): boolean {
   return !RANDOM_HELPERS.test(text);
 }
 
-class KernelPoolImpl implements KernelPool, FitSlicePool {
+class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
   readonly [POOL_BRAND] = true;
   readonly size: number;
   private slots: (Slot | undefined)[];
@@ -442,12 +477,17 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
 
   /** The watchdog of `running` fired: if the worker still runs that task,
    * settle the task with no cells done (its deadline passed and the worker
-   * did not answer), and replace the worker. */
+   * did not answer), and replace the worker. A call task has no deadline:
+   * its watchdog is armed only by an abort, which settled it already; if it
+   * was not settled, it is rejected, since it has no partial value. */
   private overrun(slot: Slot, running: NonNullable<Slot['running']>): void {
     if (slot.dead || slot.running !== running) return;
     if (!running.settled) {
       running.settled = true;
-      running.task.resolve({ out: new Float64Array(0), done: 0 });
+      const task = running.task;
+      if (task.type === 'call')
+        task.reject(new Error('The kernel worker did not answer'));
+      else task.resolve({ out: new Float64Array(0), done: 0 });
     }
     this.replace(slot);
   }
@@ -466,7 +506,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
     // A waiting task whose deadline has passed is settled here, so that a
     // batch whose deadline has passed does not create a new worker.
     const waiting = slot.queue.splice(0).filter((task) => {
-      if (!deadlinePassed(task)) return true;
+      if (task.type === 'call' || !deadlinePassed(task)) return true;
       task.resolve({ out: new Float64Array(0), done: 0 });
       return false;
     });
@@ -528,6 +568,17 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
           resolveReady();
           return;
         }
+        case 'call-result': {
+          const running = slot.running;
+          if (!running || running.job !== m.job) return;
+          this.endRunning(slot);
+          // A late value of a call that the main thread settled on abort is
+          // dropped; the worker is free again either way.
+          if (!running.settled && running.task.type === 'call')
+            running.task.resolve(m.value);
+          void this.pump(slot);
+          return;
+        }
         case 'result':
         case 'fit-result': {
           const running = slot.running;
@@ -535,7 +586,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
           this.endRunning(slot);
           // A late result of a task the main thread settled on abort is
           // dropped; the worker is free again either way.
-          if (!running.settled)
+          if (!running.settled && running.task.type !== 'call')
             running.task.resolve({
               out: m.out,
               done: m.done,
@@ -702,6 +753,58 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
     );
   }
 
+  /**
+   * Call the stored `javascript` lambda `stored` (`calling: 'lambda'`) once
+   * on a worker, with the positional arguments `args`, and resolve to its
+   * value. The worker is sent the kernel once (`load`) and keeps it until
+   * `stored` is collected. `iterationLimit` is the engine's iteration limit,
+   * for the lazy-stream helpers of the compiled code; `undefined` gives the
+   * worker's default.
+   *
+   * The arguments and the value are numbers, booleans, strings, nested plain
+   * arrays of these, and `Float64Array`s. The arguments are copied, not
+   * transferred: the caller keeps them. A `Float64Array` of the value, at the
+   * top level or as an element of a top-level array, is transferred by the
+   * worker when it covers its whole buffer, and copied otherwise. The
+   * transfer empties the array in the worker, so the function must not keep
+   * a `Float64Array` that it returns (in a variable of its code that lasts
+   * between calls): its next call would find it empty.
+   *
+   * The calls go to the slot with the shortest queue, so `n` calls made at
+   * once on an idle pool of `n` workers run on `n` workers. The promise
+   * rejects with an `Error` that holds the message of the cause when the pool
+   * is unusable, when the worker refused the kernel or failed, and when the
+   * lambda threw: the caller then makes the call itself. It rejects with
+   * `signal.reason` when the signal is aborted: before the call (nothing is
+   * sent), while the call waits in the queue (it is dropped), or while a
+   * worker runs it (the worker is not told to stop: it is terminated and
+   * replaced after the grace period, unless it answers first, as for a
+   * batch task that does not read the cancel flag).
+   */
+  runCall(
+    stored: StoredResult,
+    args: unknown[],
+    iterationLimit: number | undefined,
+    signal: AbortSignal | undefined
+  ): Promise<unknown> {
+    if (signal?.aborted) return Promise.reject(signal.reason);
+    if (this.unusable !== undefined)
+      return Promise.reject(new Error(this.unusable));
+    const slot = this.pickSlotOrReject();
+    if (slot instanceof Promise) return slot;
+    return new Promise<unknown>((resolve, reject) =>
+      this.enqueue(slot, {
+        type: 'call',
+        stored,
+        args,
+        iterationLimit,
+        signal,
+        resolve,
+        reject,
+      })
+    );
+  }
+
   /** The slot `pickSlot()` gives, or a rejected promise when it throws (the
    * host's worker factory failed, for example because the page may not
    * create workers): the caller then finishes inline. */
@@ -749,7 +852,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
         const q = holder.queue.indexOf(task);
         if (q >= 0) holder.queue.splice(q, 1);
         else if (holder.running?.task === task) this.cancelRunning(holder);
-        task.resolve({ out: new Float64Array(0), done: 0 });
+        settleAborted(task);
         // The aborted task may be the one a pending `pump()` waits to send:
         // that call then stops, and this one sends the next task.
         void this.pump(holder);
@@ -765,9 +868,15 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
     // worker that never becomes ready (a worker that never posts `ready`
     // and fails only when it gets a message) never settles: the watchdog
     // of the deadline is armed only when the task is sent (`armDeadline()`).
-    // A task that runs on the worker at its deadline is the watchdog's.
-    const deadline = task.type === 'fit' ? task.deadline : task.slice.deadline;
-    if (deadline !== undefined) {
+    // A task that runs on the worker at its deadline is the watchdog's. A
+    // call task has no deadline (the second test narrows its type).
+    const deadline =
+      task.type === 'call'
+        ? undefined
+        : task.type === 'fit'
+          ? task.deadline
+          : task.slice.deadline;
+    if (deadline !== undefined && task.type !== 'call') {
       // One millisecond after the deadline, so that `deadlinePassed()` is
       // true for both kinds of task when the timer fires.
       const delay = Math.max(0, deadline + 1 - Date.now());
@@ -784,12 +893,17 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
       }
     }
     if (cleanups.length > 0) {
-      const { resolve, reject } = task;
-      task.resolve = (r) => {
+      // The type of a call task's `resolve` differs from that of the other
+      // tasks: the wrapper passes its argument through, whatever its type.
+      const { resolve, reject } = task as {
+        resolve: (r: unknown) => void;
+        reject: (e: unknown) => void;
+      };
+      task.resolve = (r: unknown) => {
         for (const cleanup of cleanups) cleanup();
         resolve(r);
       };
-      task.reject = (e) => {
+      task.reject = (e: unknown) => {
         for (const cleanup of cleanups) cleanup();
         reject(e);
       };
@@ -874,7 +988,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
    */
   private postTask(
     slot: Slot,
-    message: MainToWorkerMessage & { type: 'run' | 'fit-run' },
+    message: MainToWorkerMessage & { type: 'run' | 'fit-run' | 'call' },
     transfer: ArrayBuffer[]
   ): void {
     try {
@@ -894,6 +1008,69 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
   private armDeadline(slot: Slot, deadline: number | undefined): void {
     if (deadline !== undefined)
       this.arm(slot, Math.max(deadline, Date.now()) + this.grace);
+  }
+
+  /** Send the worker the stored result `stored` under the kernel id `id`,
+   * unless it holds it already. */
+  private sendLoad(
+    slot: Slot,
+    id: number,
+    kind: KernelKind,
+    stored: StoredResult
+  ): void {
+    if (slot.loaded.has(id)) return;
+    slot.loaded.add(id);
+    const kernel: StoredKernel = {
+      kind,
+      runtimeVersion: stored.runtimeVersion,
+      code: stored.code,
+      calling: stored.calling,
+      preamble: stored.preamble,
+      preambleOnce: stored.preambleOnce,
+      preamblePerCall: stored.preamblePerCall,
+      callCode: stored.callCode,
+      entryPlan: stored.entryPlan,
+      reconstructionDigits: stored.reconstructionDigits,
+      broadcastOutputs: stored.broadcastOutputs,
+      batch: stored.batch,
+      booleanInputs: stored.booleanInputs,
+      valueKinds: stored.valueKinds,
+    };
+    slot.worker.postMessage({
+      type: 'load',
+      id,
+      kernel,
+    } satisfies MainToWorkerMessage);
+  }
+
+  /** Send a call task to the slot's worker, whose kernel `id` is loaded or
+   * on its way. The arguments are copied by structured clone, not
+   * transferred. A call has no deadline: its watchdog is armed only by an
+   * abort (`cancelRunning()`). */
+  private sendCall(slot: Slot, id: number, task: CallTask): void {
+    const job = this.nextJob++;
+    slot.running = { job, task };
+    // A message that cannot be sent (an argument that structured clone
+    // cannot copy) gets no reply: the task is rejected here, and the caller
+    // makes the call itself.
+    try {
+      this.postTask(
+        slot,
+        {
+          type: 'call',
+          job,
+          id,
+          args: task.args,
+          iterationLimit: task.iterationLimit,
+          ...(slot.cancel !== undefined ? { cancel: slot.cancel } : {}),
+        },
+        []
+      );
+    } catch (e) {
+      this.endRunning(slot);
+      task.reject(e instanceof Error ? e : new Error(String(e)));
+      void this.pump(slot);
+    }
   }
 
   /** Send the slot's next queued task once the worker is ready and idle. */
@@ -917,7 +1094,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
     // An aborted task, or one whose deadline has passed (the worker would
     // stop before its first cell or point), is settled here and not sent.
     if (task.signal?.aborted || deadlinePassed(task)) {
-      task.resolve({ out: new Float64Array(0), done: 0 });
+      settleAborted(task);
       void this.pump(slot);
       return;
     }
@@ -932,27 +1109,15 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
       void this.pump(slot);
       return;
     }
-    if (!slot.loaded.has(id)) {
-      slot.loaded.add(id);
-      const kernel: StoredKernel = {
-        kind: task.kind,
-        runtimeVersion: task.stored.runtimeVersion,
-        code: task.stored.code,
-        calling: task.stored.calling,
-        preamble: task.stored.preamble,
-        preambleOnce: task.stored.preambleOnce,
-        preamblePerCall: task.stored.preamblePerCall,
-        entryPlan: task.stored.entryPlan,
-        reconstructionDigits: task.stored.reconstructionDigits,
-        broadcastOutputs: task.stored.broadcastOutputs,
-        batch: task.stored.batch,
-        booleanInputs: task.stored.booleanInputs,
-      };
-      slot.worker.postMessage({
-        type: 'load',
-        id,
-        kernel,
-      } satisfies MainToWorkerMessage);
+    this.sendLoad(
+      slot,
+      id,
+      task.type === 'call' ? 'javascript' : task.kind,
+      task.stored
+    );
+    if (task.type === 'call') {
+      this.sendCall(slot, id, task);
+      return;
     }
     const job = this.nextJob++;
     const layout = task.options?.layout ?? 'cells';
@@ -1107,6 +1272,30 @@ export function isKernelPool(pool: unknown): pool is KernelPoolImpl {
 export function fitSlicePool(
   pool: unknown
 ): (FitSlicePool & { releaseFit(problem: WireFitProblem): void }) | undefined {
+  return isKernelPool(pool) && pool.unusable === undefined ? pool : undefined;
+}
+
+/** The methods of a pool that `runAsync()` uses (`callPool()`). */
+export interface CallPool {
+  /** The count of workers: `runAsync()` splits a loop into one sub-range
+   * per worker. */
+  readonly size: number;
+  /** See `KernelPoolImpl.runCall`. */
+  runCall(
+    stored: StoredResult,
+    args: unknown[],
+    iterationLimit: number | undefined,
+    signal: AbortSignal | undefined
+  ): Promise<unknown>;
+}
+
+/**
+ * The pool `pool` as `runAsync()` uses it to run the sub-ranges of a
+ * `parallel for` loop (`runCall`), or `undefined` when it is not a pool this
+ * module built or it is unusable (its workers hold another runtime version).
+ * `runCall` is not part of the public `KernelPool` interface.
+ */
+export function callPool(pool: unknown): CallPool | undefined {
   return isKernelPool(pool) && pool.unusable === undefined ? pool : undefined;
 }
 

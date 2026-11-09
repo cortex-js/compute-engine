@@ -1178,6 +1178,41 @@ invocation, and each `+=` is an atomic addition to an accumulator of
 integers; a pass that reads an accumulator or draws a random value is not
 compiled there. The other compile targets do not compile them.
 
+**On worker threads.** A host that compiles a program to JavaScript can call
+`runAsync()` on the result in place of `run()`. When the engine has a worker
+pool, `runAsync()` gives each worker one range of consecutive passes of a
+`parallel for`, and adds the sums of the workers to the accumulators. A loop
+that does not meet the conditions of the compiler runs in order, as with
+`run()`; a loop that reads an accumulator is one of these. Three conditions
+depend on how the program is written:
+
+- The domain is a range, `a..b`, not a list.
+- Each accumulator is a number or a list of numbers, declared with `let` in
+  the function or block that holds the loop, and the loop changes it only
+  with `+=`.
+- The loop is a statement of a function (also inside an `if`, a `for` or a
+  `while`), and the program calls that function as a statement, as the value
+  of `let a = f(…)` or of `a = f(…)`, or as its last value. A call in an
+  operand, `f(…) + 1`, runs the loop in order: write `let a = f(…)`, then
+  `a + 1`.
+
+This function meets the three conditions:
+
+```epsil-live
+function count(H: list<integer>, n: integer) -> list<integer> {
+  let L = H
+  parallel for k in 1..n { L[k % 3 + 1] += 1 }
+  L
+}
+count([0, 0, 0], 9)
+// ➔ [3, 3, 3]
+```
+
+The other conditions, the threshold of 20 000 passes, and the values (an
+accumulator of integers gives the value of `run()`, one of real numbers can
+differ in rounding) are in the
+[compile guide](/compute-engine/guides/compiling/#parallel-loops-on-worker-threads-runasync).
+
 ## Pipelines
 
 `x |> f` means exactly `f(x)`. For a single call that is a wash — `sqrt(2)`

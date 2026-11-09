@@ -576,6 +576,28 @@ import {
 import { isNameLocallyBoundByCompilation } from './compile-real-analysis.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { lowerParallelHeads } from './parallel-lowering.js';
+import {
+  beginPoolLoopCollection,
+  compilePoolLoops,
+  endPoolLoopCollection,
+  type ParallelLoopRecord,
+  type PoolLoopCollection,
+  type PoolLoopReason,
+} from './pool-loop.js';
+import {
+  asyncFunctionBody,
+  beginAsyncEmission,
+  endAsyncEmission,
+  poolEntryCode,
+  withoutAsyncEmission,
+  type AsyncEmissionOutcome,
+  type PoolWaitLoop,
+} from './pool-async.js';
+import {
+  makeRunAsync,
+  makeWillParallelize,
+  type RunAsyncSpec,
+} from './run-async.js';
 import { kindEntryCheck } from './kind-lowering.js';
 import { withShadowingCallsRenamed } from './shadowing-calls.js';
 import { compileJetDerivative, jetDerivativeTarget } from './jet-derivative.js';
@@ -902,6 +924,11 @@ const JS_RESERVED_EMITTED_NAMES: ReadonlySet<string> = new Set([
   // array `result` around the code of its term. A user name `result` in
   // the term would read the array instead of its own value.
   'result',
+  // The asynchronous copy of a program (`pool-async.ts`), which `runAsync()`
+  // runs, reads the state of the run from the parameter `_run`. A user name
+  // `_run` would hide that state. The code of `run()` renames it too, so
+  // that both emissions of a program spell its locals the same way.
+  '_run',
   // The reserved words of JavaScript, `eval`, `arguments`, and the globals
   // that the emitted code reads (see `JAVASCRIPT_RESERVED_IDENTIFIERS`).
   ...JAVASCRIPT_RESERVED_IDENTIFIERS,
@@ -11171,10 +11198,12 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // A `vars`-mapped symbol is compiled as the valueless input of its
       // declared type: its engine value is hidden (`withVarsValuesHidden`).
       // A call of a user function that shadows a library operator is
-      // compiled under a private name (`withShadowingCallsRenamed`).
+      // compiled under a private name (`withShadowingCallsRenamed`). A
+      // compilation that starts while the asynchronous copy of another
+      // program is emitted is an ordinary one (`withoutAsyncEmission()`).
       return withVarsValuesHidden(expr, options.vars, () =>
         withShadowingCallsRenamed(expr, options, (renamed) =>
-          this.compileOrThrow(renamed, options)
+          withoutAsyncEmission(() => this.compileOrThrow(renamed, options))
         )
       );
     } catch (e) {
@@ -11206,29 +11235,239 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'javascript'> {
-    const prepared = this.prepareCompilation(expr, options);
-    // The batch body is a second compilation of the same size as the first
-    // (ROADMAP CE-423), so it is built only when the caller asks for it with
-    // `broadcast: true`; otherwise `broadcast()` runs the ordinary body.
-    const result = compileToTarget(
-      prepared.expr,
-      prepared.target,
-      options.entryChecks !== false,
-      options.broadcast === true
-        ? (names) => this.compileBatchBody(expr, options, names)
-        : undefined
-    );
+    // The `parallel for` loops that the emission meets (`pool-loop.ts`).
+    const poolLoops = beginPoolLoopCollection();
+    let prepared: ReturnType<typeof this.prepareCompilation>;
+    let result: CompilationResult<'javascript'>;
+    try {
+      prepared = this.prepareCompilation(expr, options);
+      // The batch body is a second compilation of the same size as the first
+      // (ROADMAP CE-423), so it is built only when the caller asks for it with
+      // `broadcast: true`; otherwise `broadcast()` runs the ordinary body.
+      result = compileToTarget(
+        prepared.expr,
+        prepared.target,
+        options.entryChecks !== false,
+        options.broadcast === true
+          ? (names) => this.compileBatchBody(expr, options, names)
+          : undefined
+      );
+    } finally {
+      endPoolLoopCollection(poolLoops);
+    }
     // A list update in a loop that copies the list on each pass
     // (`noteCopyingUpdateInLoop`, recorded by `compileBlock`).
     const warnings = copyingUpdateWarnings(prepared.target);
     if (warnings.length > 0)
       result.warnings = [...(result.warnings ?? []), ...warnings];
-    return BaseCompiler.withReferences(
+    const withReferences = BaseCompiler.withReferences(
       result,
       prepared.expr,
       prepared.target,
       options.vars ? new Set(Object.keys(options.vars)) : undefined
     );
+    // Each loop as a function is compiled after the result of the program is
+    // complete, with the options of the program: the compilation of the
+    // program reads no state that it changes.
+    const parallelLoops = compilePoolLoops(
+      poolLoops,
+      options,
+      prepared.target.hostNames === true,
+      (fn, fnOptions) => this.compile(fn, fnOptions),
+      (code) => VARS_OBJECT_READ.test(code)
+    );
+    if (parallelLoops !== undefined) {
+      withReferences.parallelLoops = parallelLoops;
+      // The asynchronous copy of the program, which `runAsync()` runs, for
+      // a program called with a vars object whose code reads or makes no
+      // value of a kind (`compileParallelCopy()`).
+      if (
+        withReferences.calling === 'expression' &&
+        withReferences.valueKinds === undefined
+      )
+        this.compileParallelCopy(
+          expr,
+          options,
+          poolLoops!,
+          parallelLoops,
+          withReferences
+        );
+    }
+    return withReferences;
+  }
+
+  /**
+   * The asynchronous copy of the program `expr` that `runAsync()` runs
+   * (`pool-async.ts`), stored in `result.parallelCode`. `records` are the
+   * `parallelLoops` of the result, in the order of the loops of
+   * `collection`. A loop with `route: 'pool'` that the copy does not wait
+   * at is changed to `route: 'in-order'`, with the reason that
+   * `poolLoopWait()` gave or `'position'`, and runs in order in the copy.
+   *
+   * The copy is emitted with every pool loop first. A function of the copy
+   * whose loops wait has an `async` form, so each use of it must be a
+   * waited call: when a use is not (`bad`), the copy is emitted again
+   * without the loops of that function and of the functions that it awaits,
+   * transitively. When the text of the copy does not
+   * compile (an emitter put a wait inside a JavaScript function that is not
+   * `async`) or its emission declines, each loop is tried alone, and the
+   * copy is emitted with the loops that passed alone.
+   */
+  private compileParallelCopy(
+    expr: Expression,
+    options: CompilationOptions<Expression>,
+    collection: PoolLoopCollection,
+    records: ParallelLoopRecord[],
+    result: CompilationResult<'javascript'>
+  ): void {
+    const asWritten = [...collection.loops.keys()];
+    const candidates = new Map<Expression, PoolWaitLoop>();
+    records.forEach((record, index) => {
+      if (record.route === 'pool')
+        candidates.set(asWritten[index], {
+          index,
+          outer: record.outer,
+          accumulators: record.accumulators,
+        });
+    });
+    if (candidates.size === 0) return;
+    // Each attempt is a whole emission of the program, and the retries below
+    // can make about 2N + 2 of them for N loops. A program with one or two
+    // loops that can wait needs at most 4 in the common cases (one attempt,
+    // one retry, or two loops tried alone and once together); after 6, the
+    // program gets no copy, and each of its loops runs in order with the
+    // reason `'position'`, so that `compile()` costs at most 7 emissions.
+    const MAX_ATTEMPTS = 6;
+    let attempts = 0;
+    const attempt = (loops: ReadonlyMap<Expression, PoolWaitLoop>) =>
+      loops.size === 0
+        ? undefined
+        : attempts++ >= MAX_ATTEMPTS
+          ? ('invalid' as const)
+          : this.parallelCopyAttempt(expr, options, loops);
+    let enabled = new Map(candidates);
+    let copy = attempt(enabled);
+    for (
+      let round = 0;
+      copy !== undefined &&
+      copy !== 'invalid' &&
+      copy.bad.size > 0 &&
+      round < candidates.size;
+      round++
+    ) {
+      for (const [loop, info] of enabled)
+        if (copy.bad.has(info.index)) enabled.delete(loop);
+      copy = attempt(enabled);
+    }
+    if (copy === 'invalid' && candidates.size > 1) {
+      enabled = new Map();
+      for (const [loop, info] of candidates) {
+        const alone = attempt(new Map([[loop, info]]));
+        if (
+          alone !== undefined &&
+          alone !== 'invalid' &&
+          alone.bad.size === 0 &&
+          alone.outcome.waited.has(info.index)
+        )
+          enabled.set(loop, info);
+      }
+      copy = attempt(enabled);
+    }
+    const valid =
+      copy !== undefined && copy !== 'invalid' && copy.bad.size === 0
+        ? copy
+        : undefined;
+    const waited = valid?.outcome.waited ?? new Map<number, unknown>();
+    const refused =
+      valid?.outcome.refused ?? new Map<number, PoolLoopReason>();
+    records.forEach((record, index) => {
+      if (record.route === 'pool' && !waited.has(index))
+        records[index] = {
+          route: 'in-order',
+          reason: refused.get(index) ?? 'position',
+        };
+    });
+    if (valid !== undefined && waited.size > 0)
+      result.parallelCode = valid.text;
+  }
+
+  /**
+   * One emission of the asynchronous copy of `expr` in which the loops
+   * `loops` can wait: its text, the outcome of the emission, and `bad`, the
+   * indexes of the loops of the awaited closure of a function that could not
+   * be emitted in its `async` form or that has a use other than a waited
+   * call. `'invalid'` when the emission declines, its text does not compile,
+   * or such a function has no loop in its closure.
+   */
+  private parallelCopyAttempt(
+    expr: Expression,
+    options: CompilationOptions<Expression>,
+    loops: ReadonlyMap<Expression, PoolWaitLoop>
+  ):
+    | { text: string; outcome: AsyncEmissionOutcome; bad: Set<number> }
+    | 'invalid' {
+    // The emission meets the loops again: a collection of its own keeps
+    // them out of the collection of an enclosing compilation.
+    const collection = beginPoolLoopCollection();
+    try {
+      const prepared = this.prepareCompilation(expr, options);
+      const { target } = prepared;
+      beginAsyncEmission(loops, prepared.expr);
+      let js: string;
+      try {
+        js = poolEntryCode(
+          BaseCompiler.compileCseRoot(prepared.expr, target)
+        );
+      } catch (e) {
+        endAsyncEmission();
+        throw e;
+      }
+      const outcome = endAsyncEmission();
+      // No last-call memo (`memoizeSharedDefinitions`): a memo changes no
+      // value, and the value of an `async` definition is a promise.
+      if (target.userFunctions)
+        BaseCompiler.pruneUnreferencedVariantBases(target.userFunctions, js);
+      const body =
+        javascriptStatements(target)?.functionBody(js) ?? `return ${js};`;
+      // Every definition runs on each call: the definitions of the copy
+      // read `_run`, the state of the call.
+      const text = [
+        target.preamble ?? '',
+        BaseCompiler.userFunctionsPreamble(target),
+        asyncFunctionBody(body),
+      ]
+        .filter((part) => part !== '')
+        .join('\n');
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+        new (Object.getPrototypeOf(async () => {}).constructor)(
+          '_SYS',
+          '_',
+          '_run',
+          text
+        );
+      } catch {
+        return 'invalid';
+      }
+      // A function with a use that is not a waited call keeps the loops of
+      // its awaited closure in order (`fn.loops`); with no loop there, no
+      // retry can remove its `async` form.
+      if (outcome.invalid) return 'invalid';
+      const bad = new Set(outcome.failed);
+      for (const [name, fn] of outcome.functions) {
+        const uses = text.match(identifierPattern(name, 'gu'))?.length ?? 0;
+        if (uses !== 1 + fn.awaitedBy && !(uses === 0 && fn.awaitedBy === 0)) {
+          if (fn.loops.size === 0) return 'invalid';
+          for (const i of fn.loops) bad.add(i);
+        }
+      }
+      return { text, outcome, bad };
+    } catch (e) {
+      throwIfCallerCancellation(e, expr.engine._deadlineFrame);
+      return 'invalid';
+    } finally {
+      endPoolLoopCollection(collection);
+    }
   }
 
   /**
@@ -12640,6 +12879,24 @@ function compileToTarget(
     kinds !== undefined || mode === 'bigint'
       ? () => false
       : makeWillUsePool(asyncSpec);
+  // `runAsync` runs the asynchronous copy of the program, which
+  // `JavaScriptTarget.compile()` stores in `parallelCode` after this result
+  // is built; with no copy, it runs `run()` (`run-async.ts`).
+  const runner = fn as unknown as (...args: unknown[]) => unknown;
+  const runAsyncSpec: RunAsyncSpec = {
+    result,
+    sys: fn.SYS,
+    check: (args) => (entryPlan ? checkEntry(entryPlan, args) : args),
+    finish: (value) =>
+      runResult(value, kinds !== undefined || keyedResult(expr)),
+    error: (args, error) => namedEntryError(entryPlan, args, error),
+    digits: reconstructionDigits,
+    run: (inputs) => (inputs === undefined ? runner() : runner(inputs)),
+    workers: () => engine.workers,
+    iterationLimit: () => engine.iterationLimit,
+  };
+  result.runAsync = makeRunAsync(runAsyncSpec);
+  result.willParallelize = makeWillParallelize(runAsyncSpec);
   return result;
 }
 

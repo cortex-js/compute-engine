@@ -80,6 +80,7 @@ import {
 } from './compile-loops.js';
 import { CompilerState } from './compiler-state.js';
 import { tempVar, withBoundScope } from './compiler-naming.js';
+import { poolBlockCode, poolBlockMark, poolStatement } from './pool-async.js';
 import {
   callOnlyLocalFunctionLiterals,
   markCheckedLiteralApplications,
@@ -683,6 +684,9 @@ export function compileBlock(
     // tests (`blockLocalValueFrame`).
     localValueFrame = blockLocalValueFrame(stmts, locals, node?.localScope);
     _localValueFrames.push(localValueFrame);
+    // The count of waits of the asynchronous copy of the program before the
+    // statements compile (`poolBlockMark()`, `pool-async.ts`).
+    const poolMark = poolBlockMark();
     const result = withCseScope(node, -1, localTarget, () =>
       stmts
         .flatMap((arg, i) =>
@@ -690,6 +694,9 @@ export function compileBlock(
             // Bring this statement's own function-valued binding into scope
             // before compiling it (see `localFunctions` above).
             noteLocalFunction(arg, localFunctions, reboundLocals);
+            // The positions of the statement where the asynchronous copy of
+            // the program can wait (`poolStatement()`, `pool-async.ts`).
+            poolStatement(node, arg);
             // An ELSE-LESS `If` in STATEMENT position. `if c { … }` with no
             // else has no value — the interpreter answers `Nothing`, which is
             // the erasure marker and deliberately has no lowering — so
@@ -1119,9 +1126,14 @@ export function compileBlock(
         : null;
     if (declared !== null) result.push(declared[1]);
     result[result.length - 1] = `return ${result[result.length - 1]}`;
-    return `(() => {${target.ws('\n')}${result.join(
-      `;${target.ws('\n')}`
-    )}${target.ws('\n')}})()`;
+    // In the asynchronous copy of the program, the function is `async` and
+    // awaited when a statement waited (`poolBlockCode()`, `pool-async.ts`).
+    return poolBlockCode(
+      poolMark,
+      `(() => {${target.ws('\n')}${result.join(
+        `;${target.ws('\n')}`
+      )}${target.ws('\n')}})()`
+    );
   } finally {
     _popLocalComplex();
     CompilerState._localVector.pop();

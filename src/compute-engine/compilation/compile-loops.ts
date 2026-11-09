@@ -57,6 +57,8 @@ import {
 } from './compile-conditions.js';
 import { assertScalarBigOpBody } from './compile-shapes.js';
 import { CompilerState } from './compiler-state.js';
+import { notePoolLoopDomain } from './pool-loop.js';
+import { poolLoopWait } from './pool-async.js';
 
 /**
  * Compile a `Loop` expression — imperative control flow, **for effect** (no
@@ -1016,6 +1018,13 @@ export function emitElementLoops(
         inner = compileCountedRange(countedRange, name, inner, bodyTarget);
         continue;
       }
+      // A counted parallel loop can run on the worker pool when it passes
+      // the other conditions (`pool-loop.ts`).
+      notePoolLoopDomain(collExpr, true);
+      // In the asynchronous copy of the program, a loop that can run on the
+      // pool waits for the runtime there (`poolLoopWait()`); `undefined`
+      // everywhere else.
+      const wait = poolLoopWait(collExpr, target);
       // With no active frame, `state` is `undefined` and a pass costs one
       // test.
       const state = tempVar(bodyTarget);
@@ -1024,13 +1033,19 @@ export function emitElementLoops(
         countedRange,
         name,
         `if (${state} !== undefined) _SYS.parallelPassesFrame(${state}, ++${pass}); ${inner}`,
-        bodyTarget
+        bodyTarget,
+        wait &&
+          ((forLoop, first, step, count) =>
+            wait(forLoop, first, step, count, state))
       );
       inner =
         `{ const ${state} = _SYS.parallelPassesBegin(); let ${pass} = 0; ` +
         `try { ${loop} } finally { _SYS.parallelPassesEnd(${state}); } }`;
       continue;
     }
+    // Another parallel loop runs in order (`pool-loop.ts`, condition 2).
+    if (isFunction(collExpr, 'ParallelDomain'))
+      notePoolLoopDomain(collExpr, false);
     if (isFunction(collExpr, 'Range'))
       collection = compileRangeIterable(collExpr, bodyTarget);
     else if (isProvablyStringOperand(collExpr)) {
@@ -1126,12 +1141,24 @@ export function isLegacyCompatibleRange(coll: Expression): boolean {
 
 /** Iterate range values without allocating the intermediate array. Bounds
  * are captured in source order and each value uses the same multiplication
- * as Array.from, avoiding cumulative error for fractional steps. */
+ * as Array.from, avoiding cumulative error for fractional steps.
+ *
+ * `around`, when given, receives the `for` statement, and the first value,
+ * the step and the count of passes of the range (names that the code before
+ * the statement computed with its checks, or numbers), and gives the code
+ * that replaces the statement: the asynchronous copy of a program puts a
+ * wait for the worker pool there (`poolLoopWait()` in `pool-async.ts`). */
 export function compileCountedRange(
   range: Expression & { ops: ReadonlyArray<Expression> },
   name: string,
   body: string,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  around: (
+    forLoop: string,
+    first: string,
+    step: string,
+    count: string
+  ) => string = (forLoop) => forLoop
 ): string {
   const [loExpr, hiExpr, stepExpr] = range.ops;
 
@@ -1154,9 +1181,12 @@ export function compileCountedRange(
     )
       return undefined;
     const index = tempVar(target);
-    return (
+    return around(
       `for (let ${index} = 0; ${index} < ${count}; ${index}++) { ` +
-      `const ${name} = ${lo} + (${step}) * ${index}; ${body} }`
+        `const ${name} = ${lo} + (${step}) * ${index}; ${body} }`,
+      `${lo}`,
+      `(${step})`,
+      `${count}`
     );
   };
 
@@ -1233,8 +1263,14 @@ export function compileCountedRange(
     // hang the calling thread instead of raising the error `Array.from`
     // raised.
     `if (${count} > 4294967295) throw new RangeError('Invalid array length'); ` +
-    `for (let ${index} = 0; ${index} < ${count}; ${index}++) { ` +
-    `const ${name} = ${lo} + ${step} * ${index}; ${body} } }`
+    around(
+      `for (let ${index} = 0; ${index} < ${count}; ${index}++) { ` +
+        `const ${name} = ${lo} + ${step} * ${index}; ${body} }`,
+      lo,
+      step,
+      count
+    ) +
+    ` }`
   );
 }
 

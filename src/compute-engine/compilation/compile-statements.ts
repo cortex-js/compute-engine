@@ -26,6 +26,7 @@ import { core } from './compiler-core-hooks.js';
 import { writesBlocksAsIife } from './compile-conditions.js';
 import { collectUsedNames } from './compiler-names.js';
 import { newNamingContext, withBoundScope } from './compiler-naming.js';
+import { poolStatementCode } from './pool-async.js';
 
 /**
  * The STATEMENT head `expr` lowers to at a body position — `'Assign'` or
@@ -526,7 +527,10 @@ export function compileListStatement(
   unit: Expression | undefined,
   compileWith: (t: CompileTarget<Expression>) => string[]
 ): string[] {
-  if (!target.bareStatementBlocks) return compileWith(target);
+  // In the asynchronous copy of a program, a call of a function that waits
+  // is awaited (`poolStatementCode()`, `pool-async.ts`).
+  if (!target.bareStatementBlocks)
+    return poolStatementCode(unit, compileWith(target));
   return withStatementRecompile(target, unit, () => {
     const sink = { stmts: [] as string[], boundVars: target.boundVars, unit };
     const lines = compileWith({ ...target, hoist: sink });

@@ -22,6 +22,20 @@
  * `SharedArrayBuffer`, the task runs to its end. In both cases, a worker
  * that does not answer within the pool's grace period is terminated and
  * replaced.
+ *
+ * A `call` task runs a stored `javascript` lambda (`calling: 'lambda'`)
+ * once, with positional arguments, and answers with its value
+ * (`call-result`). It is the task of a `parallel for` loop that
+ * `runAsync()` gives to the pool: each worker runs the loop over one
+ * sub-range of its passes (design:
+ * `docs/plans/2026-11-08-ce1163-run-async-parallel-for.md`, section 4). The
+ * arguments and the value are numbers, booleans, strings, nested plain
+ * arrays of these, and `Float64Array`s. The arguments are copied, so the
+ * caller keeps them. A `Float64Array` of the value, at the top level or as
+ * an element of a top-level array, is transferred. The compiled function
+ * does not read the cancel flag: the worker reads it only before the call
+ * starts, and an aborted call that has started runs to its end, or until
+ * the pool terminates the worker after the grace period.
  */
 
 import type { FitScanProblemOf } from './fit-scan.js';
@@ -55,6 +69,13 @@ export interface StoredKernel {
   /** The free variables declared `boolean` of an `interval-js` result
    * (`CompilationResult.booleanInputs`). */
   booleanInputs?: string[];
+  /** A `javascript` lambda with `preambleOnce`: `code` without the
+   * once-only definitions (`CompilationResult.callCode`). */
+  callCode?: string;
+  /** The value kind types whose compiled representation the code reads or
+   * makes (`CompilationResult.valueKinds`). The worker refuses such code,
+   * as `createJavaScriptRuntime().load()` does. */
+  valueKinds?: string[];
 }
 
 /** The inputs of a batch in wire form: the names and, in the same order, a
@@ -143,6 +164,21 @@ export type MainToWorkerMessage =
        * `job` (as a 32-bit integer). */
       cancel?: Int32Array;
     }
+  /** Call the lambda of kernel `id` (a `javascript` kernel with
+   * `calling: 'lambda'`) once with `args`, and answer with its value. */
+  | {
+      type: 'call';
+      job: number;
+      id: number;
+      args: unknown[];
+      /** The engine's iteration limit at the time of the call, for the
+       * lazy-stream helpers of the compiled-code runtime. */
+      iterationLimit?: number;
+      /** The worker's cancel flag: the worker does not start the call when
+       * the flag holds `job` (as a 32-bit integer). The compiled function
+       * does not read it once it runs. */
+      cancel?: Int32Array;
+    }
   /** Forget kernel or fit problem `id`: its compilation result was
    * collected, or the fit is over. */
   | { type: 'unload'; id: number }
@@ -175,6 +211,8 @@ export type WorkerToMainMessage =
    * of points written: all of them, or fewer when the deadline stopped the
    * loop or a point was nonlinear (it is then the last one written). */
   | { type: 'fit-result'; job: number; out: Float64Array; done: number }
+  /** The value that the lambda of a `call` task returned. */
+  | { type: 'call-result'; job: number; value: unknown }
   /** A failure to load a kernel or a fit problem (`id`) or to run a task
    * (`job`). */
   | { type: 'error'; job?: number; id?: number; message: string };
