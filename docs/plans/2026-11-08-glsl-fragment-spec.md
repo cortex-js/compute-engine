@@ -45,8 +45,8 @@ length; in Tycho these are the `byReference` names of a row, and the
 `buddhabrot` showcase entry reads a 90,001-element list and `game-of-life` a
 22,500-cell board this way), and, if decision 1 says so, a matrix of at
 most 4 × 4 real entries. Every free symbol has one of these types, declared
-or inferred, or given by the options of the call (`hideValues` and the
-per-symbol input types). A symbol typed `unknown`, `any`, `expression`,
+or inferred in the engine (`compile()` has no option that gives a type;
+`hideValues` is an option of Tycho's wrapper). A symbol typed `unknown`, `any`, `expression`,
 `symbol`, `string`, `function` or a collection without a static count is
 outside the fragment. The `vars` option, a rename map from the user's
 symbols to shader identifiers (`{ x: "v_pos.x" }`), is spelling, not a
@@ -85,7 +85,10 @@ language form: the predicate accepts it and ignores it.
   aggregate of one evaluation (nested aggregates multiply), gives `NaN` over
   the cap; the cap is the `iterationBudget` option that the JavaScript target
   has, so a host sets one option for every target. A bound raised past the
-  cap by a slider gives `NaN` pixels, not a recompile decline.
+  cap by a slider gives `NaN` pixels, not a recompile decline. The counter
+  counts the passes that the emitted code runs, as the JavaScript target
+  does: two equal aggregates that the common-subexpression pass writes once
+  count once.
 - Indexing: `At` with a constant index or an integer-valued fragment index on
   a base that is a constant list, a sampler-backed list input or a point;
   `Range` with integer-valued bounds, as the index set of a `Sum`, `Product`
@@ -142,15 +145,18 @@ as a value, recursion, and a free symbol outside the types above.
 ## 3. The predicate and the boundary
 
 `canCompile(expr, options)`, on the engine and exported from the compile
-entry, takes the same options object as `compile()` (the input types,
-`hideValues`, `storage` and `vars` decide the answer) and
+entry, takes the same options object as `compile()` (`vars`, `storage`,
+`functions`, `mode`, `iterationBudget`, `constantFold` and `cse` decide the
+answer) and
 answers `{ ok: true }` or `{ ok: false, diagnostic }` with one decline code,
 `outside-fragment`, in the `CompileDiagnostic` form that `compile()` already
 reports, naming the head that is outside or, for a free symbol without a
 numeric type, the symbol (the one cause a host can repair by declaring the
 type). It walks the typed tree once, emits nothing, never throws, and its
-verdict depends only on the expression and the options, so a host may cache
-it per function. `compile()` to `glsl` runs the same predicate first;
+verdict depends only on the expression, the options and the declarations
+that the expression reaches (the types of its free symbols, the definitions
+of the functions it calls), so a host may cache it per function until one of
+those declarations changes. `compile()` to `glsl` runs the same predicate first;
 emission never declines a fragment expression, so a decline during emission
 is a defect. The `float32-unsafe-argument` warning of a compile that
 succeeds stays: Tycho keeps a curve row with a sine hash on the CPU because
@@ -158,18 +164,21 @@ of it.
 
 **How to build it (decision 9).** The predicate is a
 typing pass, not a yes-or-no walk: it annotates each node of the tree with
-its fragment type (f32 scalar, integer, boolean, complex, point of n
-components, color, constant list of n, sampler-backed list, function body)
-and keeps the annotation beside the tree; the verdict is "every node has a
-type". The GLSL emitter reads the annotation where it asks the same question
-today (the shape frames of `gpu-shapes.ts`, the declared-type frame of
-`gpu-declared-types.ts`) instead of deriving it again. The type is the
-critical fact; the annotation is designed so that more facts can be
-propagated on it later (an effect, an evaluation-count rule, a provenance),
-without a change to its shape. This annotated tree is the first pass at the
-engine's intermediate representation: a later IR, if one is built, starts
-from this pass and widens the fragment toward the numeric core of the
-JavaScript target. It is not part of this change.
+its fragment type (real, integer, boolean, complex, point of n components,
+color, list, function), its representation on the target (a `float`, a
+`vec3`, an array, a sampler) and the conversion of each operand, and keeps
+the annotation beside the tree; the verdict is "every node has a type". The
+GLSL emitter reads the annotation where it asks the same question today (the
+shape frames of `gpu-shapes.ts`, the declared-type frame of
+`gpu-declared-types.ts`) instead of deriving it again. The annotation can
+take another fact later only when that fact has the same value at every read
+of the node in its scope (the origin of a node, the names it reads and
+writes). A fact about a value that the body assigns, and the count of the
+evaluations of a node, do not fit it. The annotated tree is a typed front
+end: a later intermediate representation, if one is built, takes it as its
+input and adds values with an identity, conversions as operations, effects,
+and rewrites that each make a new revision. It is not part of this change.
+The design is `docs/plans/2026-11-08-glsl-fragment-annotation-design.md`.
 
 Tycho calls the predicate at resolve time, on the by-reference form and then
 on the textual expansion, and ships a row that is out on its CPU legs there
@@ -320,8 +329,8 @@ Decisions 1 to 5 were taken as recommended.
    (section 2).
 8. The function-body forms nest, and a list parameter that every call binds
    to a storage-backed list input is admitted (section 2).
-9. The predicate is built as a typing pass whose annotation is the first
-   pass at the engine's intermediate representation (section 3).
+9. The predicate is built as a typing pass whose annotation is a typed front
+   end, the input of a later intermediate representation (section 3).
 10. The WGSL target is dropped (section 5). `parallel for` runs on the
     JavaScript worker pool: the construct's rules (independent passes, outer
     writes only through `+=` accumulators) are the proof that a range split

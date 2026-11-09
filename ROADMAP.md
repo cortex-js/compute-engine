@@ -801,7 +801,7 @@ selections avoids it; a design that lifts the vec-width cap meets it.
 
 ### CE-1166. The GLSL fragment: a positive list for the shader target, and the removal of WGSL
 
-**Status:** waits for user (approval); task, L. Spec `docs/plans/2026-11-08-glsl-fragment-spec.md`; steps, files, checks and the definition of done of each sub-item in `docs/plans/2026-11-08-compile-targets-implementation-plan.md`.
+**Status:** ready, approved 2026-11-08; task, L. Spec `docs/plans/2026-11-08-glsl-fragment-spec.md`; steps, files, checks and the definition of done of each sub-item in `docs/plans/2026-11-08-compile-targets-implementation-plan.md`.
 **Witness:** corpus; Tycho's codegen audit of 2026-11-08: every compiled GLSL record is inside the fragment, and Tycho compiles no row to WGSL.
 
 The `glsl` target compiles only the forms of a positive list, checked before
@@ -811,10 +811,10 @@ its step in the implementation plan. One sub-item per session.
 
 - **CE-1166.1** Remove the WGSL target: code and tests, then documents
   (plan, step 1). Can start at once.
-- **CE-1166.2** The design note of the annotation (plan, step 2). Can start at
-  once; the user approves the note before CE-1166.3.
 - **CE-1166.3** `canCompile()` as a typing pass, called first by `compile()`
-  to `glsl` (plan, step 3). After CE-1166.2.
+  to `glsl` (plan, step 3). The design is
+  `docs/plans/2026-11-08-glsl-fragment-annotation-design.md` (plan, step 2);
+  read it after the spec.
 - **CE-1166.4** Remove the shader statement machinery that the predicate
   makes unreachable, one module per session, after a first session that
   measures which functions still serve a function body (plan, step 5). After
