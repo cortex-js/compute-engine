@@ -126,10 +126,8 @@ import type {
 import { gpuColorOperand } from './gpu-color.js';
 import {
   compileGPUConditionalArm,
-  compileGPUSelection,
   gpuAssertExpressionBody,
   gpuAssertExpressionOnly,
-  gpuAssertReturnPlacement,
   gpuCanPlaceStatement,
 } from './gpu-statements.js';
 import {
@@ -588,12 +586,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // of the shader language, or the generated shader fails to compile. Fail
       // closed with a clear diagnostic naming the offending identifier.
       mangleId: (id) => gpuCheckIdentifier(id, this.languageId),
-      // A `Which`/`If` with a statically-shaped (vec2–vec4) collection
-      // condition selects ELEMENT-WISE: lower it to boolean-vector masks
-      // combined with `mix`/`select`. Returns `null` — leaving the scalar
-      // emission below byte-identical — when every condition is a scalar.
-      selection: (args, compile, selTarget) =>
-        compileGPUSelection(args, compile, selTarget),
+      // No `selection` hook: the GLSL fragment admits only a `boolean`
+      // condition in an `If` or a `Which` (`walkIf()` and `walkWhich()` of
+      // `fragment.ts`), so a selection always takes the scalar emission.
       // A `broadcastable` unary head over a statically shaped (vec2–vec4)
       // collection needs NO fan-out: the shader builtins and operators are
       // already componentwise on a vector, so the scalar form applies directly
@@ -1331,16 +1326,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                     `${language.toUpperCase()} type — only scalars, booleans, ` +
                     `colors, complex values and 2–4 component vectors have one.`
                 );
-              // Every `Return` in the body must yield the shape the
-              // signature just synthesized: a shader function has ONE return
-              // type and GLSL does not convert between a scalar, a
-              // `bool` and a `vecN`. Checked AT the emission, not by a
-              // pre-walk, because the shape of a `Return`'s value is only
-              // knowable while the emitter's local frames are pushed — a
-              // `Return(z)` naming a `vec2` block-local reads as a scalar
-              // once `compileBlock` has popped its frame, which is exactly
-              // how `float _fn_a(float t) { … return z; }` went out behind
-              // `success: true`.
+              // The body is compiled with no `onReturn` hook: `Return` is not
+              // in the GLSL fragment (the rule table of `glsl-fragment.ts`
+              // has no rule for it), so the typing pass refuses a body that
+              // holds one, and the only return of a shader function is the
+              // value of its body.
               const bodyTarget: CompileTarget<Expression> &
                 FragmentTargetFields<GlslRepresentation> = {
                 ...target,
@@ -1349,25 +1339,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 // pass typed the nodes of the body.
                 fragmentScope: entry?.scope,
                 fragmentBody: entry?.body,
-                onReturn: (value) => {
-                  const t =
-                    value === undefined
-                      ? undefined
-                      : gpuTypeOfValue(value, bodyTarget);
-                  if (t === ret) return;
-                  throw new Error(
-                    `Could not compile \`${id}\`: a \`Return\` in this body yields ` +
-                      (t === undefined
-                        ? `a value with no static ${language.toUpperCase()} type`
-                        : `a "${t}" value`) +
-                      `, but "${id}" is declared to return "${ret}" (the ` +
-                      `shape of the body's own final value). ` +
-                      `${language.toUpperCase()} has no implicit conversion ` +
-                      `between them, and a shader function has a single ` +
-                      `return type. Make every \`Return\` — and the body's ` +
-                      `final value — the same shape.`
-                  );
-                },
               };
               // The body gets a common-subexpression harvest of its own: it
               // is not part of the root tree, so without one no node of the
@@ -1396,11 +1367,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             },
             true
           );
-
-          // …and every `Return` that survived that check must also be in a
-          // position the language can express. Run on the EMITTED body, after
-          // the shape gate above (whose message is the more specific one).
-          gpuAssertReturnPlacement(id, code, language);
 
           const allNames = [...params, ...extras.map((x) => x.name)];
           const allTypes = [...paramTypes, ...extraTypes.map((x) => x.shader)];
@@ -1707,11 +1673,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           BaseCompiler.compileFunctionBody(prepared, target)
       )
     );
-    // The caller's declared return type is not this analysis's to check, but
-    // the PLACEMENT of an emitted `return` is: a `Return` in a conditional arm,
-    // or in the body's value position (which `compileFunction` return-prefixes),
-    // is source no driver accepts (D6).
-    gpuAssertReturnPlacement('this function body', body, this.languageId);
     return body;
   }
 
@@ -2345,9 +2306,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         budget,
         target
       );
-    // `code` is spliced into a shader function body by the caller, so the same
-    // placement rule applies here as inside an emitted definition (D6).
-    gpuAssertReturnPlacement('this expression', code, this.languageId);
     const result: CompilationResult = {
       target: this.languageId,
       success: true,

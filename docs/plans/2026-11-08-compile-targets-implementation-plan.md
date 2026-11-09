@@ -332,6 +332,57 @@ audit through `CE_ALT_PKG` (764 documents, 17,421 records): 0 changed code, 0
 new declines, 0 disagreements of `canCompile()` with `compile()`. The review
 found an older disagreement, filed as CE-1184.
 
+**The result of the `gpu-statements.ts` session** (2026-11-09, base
+`13c41f1c7`, after Tycho's reading in `issues/CE-1181.md`: 0 disagreements
+of `canCompile()` with `compile()`). Removed, as the table row lists: the
+statement form of `Match` (`compileGPUMatchStatement()`,
+`gpuMatchSelectedPieces()`, and the `statement` option that the GLSL `Match`
+entry gave to `compileMatchTernary()`); the element-wise selection by a
+vector condition (`compileGPUSelection()`, `gpuSelectionConditionWidth()`,
+`gpuSelectionMask()`, `gpuMaskAnd()`, `gpuMaskOr()`, `gpuSelectionDecline()`,
+`gpuIsTupleShaped()`, and the `selection` hook of the GLSL target);
+`gpuAssertReturnPlacement()` with its three calls and the `onReturn` hook of
+the `define` hook; the `Continue` branch of `gpuShaderLoopJumps()`.
+`gpu-statements.ts` went from 1,322 to 781 lines; the source files lost 626
+lines and gained 40 (comments). The field `CompileTarget.onReturn` and its
+call in `compiler-core.ts` stay: the field is in the exported type, so its
+removal is a change of the public API. The kept functions did not change.
+
+Two differences from the measure:
+
+- One decline went. `gpuSelectionConditionWidth()` refused a comparison of
+  two points even as a scalar condition, so `If(p = q, 1, 2)` with `p` and
+  `q` of type `tuple<real, real>` declined while `canCompile()` accepted it.
+  It now compiles to `((p == q) ? (1.0) : (2.0))`, which gives the value of
+  the interpreter (GLSL `==` on two `vec2` values is true when every
+  component is equal). Test `glsl-point-equality-condition.test.ts`; a
+  CHANGELOG line.
+- The removed hook was not without effect. It read the shape of each
+  condition before the arms were compiled, and that query wrote the
+  definition of a function that the condition calls. Without it, the
+  definitions are written in the order in which the emitter first compiles
+  each call: with `If(y < g(x), s(x), 0)`, `_fn_g` came before `_fn_s`, and
+  now `_fn_s` comes first. The code is the same, and no definition calls a
+  later one.
+
+Measures: the 235 test files that name GLSL pass (11,367 tests), with one
+test comment changed; `npm run test:glsl`: 0 disagreements. Tycho's
+whole-corpus codegen audit through `CE_ALT_PKG` (764 documents, 17,421
+records; production builds of the base and of the change; load 3.7 to 6.7
+on 18 cores): 0 new declines, 0 resolved declines, 0 disagreements of
+`canCompile()` with `compile()` (3,661 GLSL records, 46 refused), and 3
+records with changed code, all on `glsl` and all for the order above:
+`showcase/mandelbrot-colorings` and `showcase/underwater-caustics` (two
+independent definitions of the preamble change places) and
+`neyret/62urmx2dcm` (a temporary is named `_tv1` instead of `_tv9`, and the
+common subexpressions of a definition are numbered from `_cse2` instead of
+`_cse1`; the code is otherwise the same).
+
+Open after this session: the GLSL `Match` entry of `gpu-functions.ts` does
+not run, because the pass refuses `Match` on every route; it and
+`BaseCompiler.compileMatchTernary()`, whose only caller it is, can go in a
+later session.
+
 **CE-1176: option (a) is recommended, inside step 5, in the session of
 `gpu-draw-order.ts`.** Each piece of caller code is bound to a local once,
 in the order of the interpreter, at the start of its statement. A piece in

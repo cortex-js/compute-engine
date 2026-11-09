@@ -1380,10 +1380,9 @@ export type GlslFragmentOptions = {
  *   two comparisons read.
  *
  * These operands are a subset of the operands that the emitter declines.
- * The emitter declines more operands than these: the subject of
- * `Match`, the squared term of a `Sum` (`gpu-reduce.ts`), the bound of
- * `Random` (`gpu-random.ts`) and the middle operand of a chained
- * comparison of vectors (`gpu-statements.ts`) are not in this list.
+ * The emitter declines more operands than these: the squared term of a
+ * `Sum` (`gpu-reduce.ts`) and the bound of `Random` (`gpu-random.ts`) are
+ * not in this list.
  */
 function operandsWrittenTwice(
   node: Expression
@@ -1516,10 +1515,9 @@ function colorOperandOfUnsettledSpace(
  * interpreter evaluates the operand once. These operands
  * (`operandsWrittenTwice()`) are a subset of the operands that the emitter
  * declines (`gpuOperandOnce()`).
- * The emitter declines more operands than these: the subject of
- * `Match`, the squared term of a `Sum` (`gpu-reduce.ts`), the bound of
- * `Random` (`gpu-random.ts`) and the middle operand of a chained
- * comparison of vectors (`gpu-statements.ts`) are not in this list.
+ * The emitter declines more operands than these: the squared term of a
+ * `Sum` (`gpu-reduce.ts`) and the bound of `Random` (`gpu-random.ts`) are
+ * not in this list.
  * An operand that is the read of one variable (`isShaderVariableRead()`)
  * runs no code.
  */

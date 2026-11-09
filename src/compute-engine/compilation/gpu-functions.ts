@@ -164,7 +164,6 @@ import {
 } from './gpu-extrema.js';
 import {
   compileGPUConditionalArm,
-  compileGPUMatchStatement,
   compileGPUStatementSelection,
   gpuArmSharesWork,
   gpuAssertSelectableArms,
@@ -266,8 +265,7 @@ export function assertGPUInlineElementCount(head: string, count: number): void {
  * default emitted a JavaScript `.map((v) => …)` arrow here, which no shader
  * compiler accepts.
  *
- * Gated on the operand having a static `vec2`–`vec4` shape — the same
- * activation gate as the element-wise selection lowering
+ * Gated on the operand having a static `vec2`–`vec4` shape
  * (`gpuComponentCount`). Anything else (an unknown-length list, a matrix, a
  * 5+-element list, or a fixed-length list whose elements are not shader
  * floats) has no shader vector value at all, so it fails closed rather
@@ -2030,8 +2028,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // lowerings do. The SUBJECT stays outside it: it is compiled first and
   // evaluated unconditionally, so a loop-form `Sum` there is safe to hoist.
   //
-  // A case body or guard that needs statements (a loop-form `Sum`) takes the
-  // statement form of `If`/`Which` (`compileGPUMatchStatement`).
+  // `Match` is not in the GLSL fragment (the rule table of `glsl-fragment.ts`
+  // has no rule for it), so the typing pass refuses it on every route before
+  // emission, and this entry does not run on GLSL. It has no statement form.
+  // The entry and `BaseCompiler.compileMatchTernary()`, whose only caller it
+  // is, can be removed in a later step of the removal of the shader statement
+  // code (`docs/plans/2026-11-08-compile-targets-implementation-plan.md`,
+  // step 5).
   //
   // Caller code (`gpuReachesCallerCode`) in the subject would run once per
   // comparison, so it declines. A subject that draws is bound to a temporary ahead of the statement, so
@@ -2046,8 +2049,6 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       noMatch: gpuNaN(target),
       allowStrings: false,
       arm: (f) => compileGPUConditionalArm('Match', f, target),
-      statement: (clauses) =>
-        compileGPUMatchStatement(args[0]!, clauses, target),
     });
   },
   Power: (args, compile, target) => {

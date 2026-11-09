@@ -2052,7 +2052,9 @@ is not implemented. A form with no caller code compiles as before.
 
 ### `Break` and `Continue` on the shader targets
 
-A jump is a statement in GLSL. So `Break` and `Continue` compile only
+`Continue` is not in the GLSL fragment: the typing pass refuses it in every
+position, and the interpreter runs the program. A jump is a statement in
+GLSL. So `Break` compiles only
 as a statement of a `Loop` body, alone or as the branch of a selection with one
 clause: `If(c, Break())`, `If(c, Break(), Nothing)`, `Which(c, Break())`, or
 `If(c, Block(n ≔ k, Break()))`. With `a` a local of the block,
@@ -2081,8 +2083,7 @@ Each other position declines:
   outside a loop is an error that only the driver reports, after the
   compilation has reported success.
 - A `Break` in a `Loop` over several `Element` clauses: it would leave only the
-  innermost `for` statement, where the interpreter stops the whole loop. A
-  `Continue` goes to the next turn of the innermost loop in both, so it compiles.
+  innermost `for` statement, where the interpreter stops the whole loop.
 
 On a NaN operand, the shader and the interpreter take the same action: a
 relation is `false`, so `If(v > 4, Break())` does not jump, and `≠` is `true`,

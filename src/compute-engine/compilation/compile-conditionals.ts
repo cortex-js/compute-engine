@@ -68,8 +68,8 @@ export function compileExprIf(
     // A condition that may be an indexed collection at run time selects
     // ELEMENT-WISE: `If(c, t, f)` is the two-clause `Which(c, t, True, f)`
     // (see the `Which` branch below and `target.selection`). Consulted BEFORE
-    // the target's `functions` entry, so a target that has both — GPU,
-    // interval-js — gets the hook first. `null` — every condition provably
+    // the target's `functions` entry, so a target that has both
+    // (interval-js) gets the hook first. `null` — every condition provably
     // scalar — keeps the `functions` entry / ternary below unchanged.
     // The clause list handed to `selection` is in `Which` shape, so its
     // positions are NOT the `If` node's operand indices: 0 → 0 (condition),
@@ -152,7 +152,7 @@ export function compileExprWhich(
     // `docs/BROADCAST-MODEL.md`): the target lowers
     // the whole clause list to its own selection helper. Consulted BEFORE the
     // target's `functions` entry (as in the `If` branch above), so a target
-    // that has both — GPU, interval-js — gets the hook first. `null` — every
+    // that has both (interval-js) gets the hook first. `null` — every
     // condition provably scalar — keeps the `functions` entry / ternary chain
     // below unchanged.
     const selection = target.selection?.(

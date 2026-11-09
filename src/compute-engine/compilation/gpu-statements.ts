@@ -1,5 +1,5 @@
-// Statement-level lowering: selection, conditionals and match, and the checks
-// on expression-only bodies.
+// Statement-level lowering: the statement form of a selection, the arms of a
+// conditional, the jumps of a loop, and the checks on expression-only bodies.
 
 import type { Expression } from '../global-types.js';
 import {
@@ -9,24 +9,15 @@ import {
 } from '../boxed-expression/type-guards.js';
 import type { CompileTarget } from './types.js';
 import { compileSubject } from './diagnostics.js';
-import {
-  BaseCompiler,
-  statementBodyHead,
-  type MatchStatementClause,
-} from './base-compiler.js';
+import { BaseCompiler, statementBodyHead } from './base-compiler.js';
 import { signatureEffects } from '../../common/type/utils.js';
 import { couldMatch } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
 import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
-import { isRelationalOperator } from '../latex-syntax/utils.js';
 import {
-  GPU_COMPARE_GLSL,
   conditionalGPUSinks,
-  gpuBVec,
   gpuEvaluatedUnit,
-  gpuFVec,
   gpuNaN,
-  gpuType,
   gpuVec2,
   gpuVecType,
   statementCaptureSinks,
@@ -37,70 +28,17 @@ import {
   gpuDrawOrderError,
   gpuHoistKeepsCallerOrder,
   gpuInSelectionBranch,
-  gpuOperandOnce,
 } from './gpu-draw-order.js';
 import { gpuComponentCount, gpuNaNFor, gpuOperandShape } from './gpu-shapes.js';
 import { gpuTypeOfValue } from './gpu-declared-types.js';
 
 /**
- * Fail closed when the compiled shader body `body` places a `return`
- * anywhere but at the start of a statement.
- *
- * `Return` is emitted by the base compiler as the bare statement `return <v>`,
- * which is correct only where a statement is expected. Three positions in a
- * shader body are NOT that, and each emitted source no driver accepts behind
- * `success: true`:
- *
- * - the block's VALUE (its last statement), which the caller return-prefixes —
- *   `return return s;`;
- * - a conditional ARM, which GLSL lowers to an EXPRESSION (a `?:`
- *   ternary) — `((0.0 < t) ? (return t) : …)`;
- * - a branch of a conditional nested in a loop body, for the same reason.
- *
- * Lowering an early return properly means restructuring the body into a result
- * flag and guarded statements, which is a feature, not a gate — so this refuses
- * the shapes it cannot emit and lets the interpreter evaluate them. The one
- * shape that IS valid, an early `Return` as a plain statement of the body, is
- * untouched: its `return` starts its line.
- *
- * `singleLine` bodies are EXPRESSIONS — the caller wraps them in
- * `return <body>;` — so a `return` anywhere in them is misplaced, including at
- * offset 0.
- *
- * A token scan, deliberately: it reads the source that is actually about to be
- * emitted, so it covers every shape (including ones no probe enumerated)
- * rather than mirroring the emitter's position rules. `return` is a reserved
- * word in both languages (`gpuCheckIdentifier`), so `\breturn\b` cannot match a
- * user identifier.
- */
-export function gpuAssertReturnPlacement(
-  subject: string,
-  body: string,
-  language: string
-): void {
-  if (!/\breturn\b/.test(body)) return;
-  const lines = body.split('\n');
-  const singleLine = lines.length === 1;
-  for (const line of lines) {
-    const start = line.length - line.trimStart().length;
-    for (const m of line.matchAll(/\breturn\b/g)) {
-      if (!singleLine && m.index === start) continue;
-      throw new Error(
-        `Could not compile ${compileSubject(subject)}: an early \`Return\` here has no ` +
-          `${language.toUpperCase()} lowering — the emitted source would place ` +
-          `a \`return\` where the language requires an expression ` +
-          `(\`${line.trim()}\`). A shader function returns once, at the end of ` +
-          `its body, so a \`Return\` inside a conditional — or one that IS the ` +
-          `body's final value — cannot be emitted. Rewrite it as a conditional ` +
-          `VALUE, or evaluate instead.`
-      );
-    }
-  }
-}
-
-/**
  * The nodes of `body`, the body of a shader `Loop`, that can emit a jump as a
  * statement of that loop (`CompileTarget.shaderLoopJumps`).
+ *
+ * The only jump is `Break`. `Continue` is not in the GLSL fragment: the rule
+ * table of `glsl-fragment.ts` has no rule for it, so the typing pass refuses
+ * it before this function runs.
  *
  * The search follows statement positions only: the statements of a `Block`,
  * and the branch of an `If` or a `Which` with one clause (`If(c, t)`,
@@ -123,7 +61,7 @@ export function gpuShaderLoopJumps(body: Expression): ReadonlySet<Expression> {
     if (!isFunction(stmt)) return;
     const h = stmt.operator;
     const ops = stmt.ops;
-    if (h === 'Break' || h === 'Continue') {
+    if (h === 'Break') {
       if (ops.length === 0) found.add(stmt);
     } else if (h === 'Block') {
       ops.forEach(visit);
@@ -163,8 +101,8 @@ export function gpuShaderLoopJumps(body: Expression): ReadonlySet<Expression> {
  * assignment and answer a temporary, so they never reach this check either.
  *
  * A token scan on the source about to be emitted, deliberately — the same
- * technique (and the same two signals) as `gpuAssertReturnPlacement` and
- * `BaseCompiler.compileValueOperand`'s `bareStatementBlocks` gate: a multi-line
+ * technique as `BaseCompiler.compileValueOperand`'s `bareStatementBlocks`
+ * gate: a multi-line
  * emission is a statement sequence on these targets, and `return` is a reserved
  * word (`gpuCheckIdentifier`) so it cannot match a user identifier.
  *
@@ -584,113 +522,6 @@ export function compileGPUStatementSelection(
 }
 
 /**
- * A `Match` as a STATEMENT (`compileGPUStatementSelection`), for a match
- * whose case body or guard needs statements a ternary cannot hold
- * (`gpuNeedsStatements`): `Match(n, 1 -> Σ_{k=1}^{⌊t⌋} cos(kt), _ -> 0)`
- * runs the loop inside the branch of its case, only when the case is
- * selected, as the interpreter does. The ternary form declined it, because
- * the loop could only be hoisted ahead of the ternary, where it would run
- * for every case.
- *
- * The cases (`MatchStatementClause`, from `BaseCompiler.compileMatchTernary`)
- * are given to the statement form as `Which` clauses: the case test is the
- * condition and the case body the value, and an irrefutable last case is the
- * `True` clause. The statement form reads the clause EXPRESSIONS for its
- * requirements (no effect in a clause other than the draws the gate allows,
- * no write outside the clauses, one static type for every value); the
- * expression for a case test is its guard, or `False` for a case with no
- * guard, because a pattern is a constant with no effect. The clause CODE
- * comes from the functions of the case, so the comparisons with the subject
- * are those of the ternary form.
- *
- * `undefined`, and the ternary form, when no case needs statements, when the
- * subject has an effect (its evaluation would move ahead of the siblings of
- * the selection), when a case value is complex (the ternary form does not
- * lift a real case value to a `vec2`, and neither does this form), and in
- * every case where the statement form itself answers `undefined`. CE-274.
- */
-export function compileGPUMatchStatement(
-  subject: Expression,
-  clauses: ReadonlyArray<MatchStatementClause>,
-  target: CompileTarget<Expression>
-): string | undefined {
-  if (
-    !clauses.some(
-      (c) =>
-        gpuNeedsStatements(c.body) ||
-        (c.guard !== undefined && gpuNeedsStatements(c.guard))
-    )
-  )
-    return undefined;
-  if (BaseCompiler.hasObservableEffect(subject)) return undefined;
-  const ce = subject.engine;
-  // The statement form reads a condition that is the symbol `True` as the
-  // default branch: it emits the value with no test and drops the clauses
-  // after it. So only a case that always matches (no test) gets `True`. A
-  // case that can fail gets its guard, which is read only for effects and
-  // writes, or `False` when the guard is absent or is the symbol `True`.
-  const whichArgs = clauses.flatMap((c) => [
-    c.test === undefined
-      ? ce.True
-      : c.guard === undefined || isSymbol(c.guard, 'True')
-        ? ce.False
-        : c.guard,
-    c.body,
-  ]);
-  if (gpuSelectionIsComplex('Which', whichArgs)) return undefined;
-  // The clauses given to the statement form hold the guards, not the
-  // comparisons of the subject with the patterns, but the hoisted `if`
-  // statement computes those comparisons too. Caller code in a pin
-  // (`vars: { Pi: 'nextValue()' }`) must keep its order with the rest of the
-  // statement (`gpuHoistKeepsCallerOrder`).
-  if (
-    !gpuHoistKeepsCallerOrder(
-      [...whichArgs, ...clauses.flatMap((c) => c.comparisons)],
-      target
-    )
-  )
-    return undefined;
-  return compileGPUStatementSelection(
-    whichArgs,
-    (_, i) => {
-      const clause = clauses[Math.floor(i / 2)];
-      // An odd position is a case value. A position past the first is
-      // evaluated only when the clauses before it did not match, so it is
-      // compiled through `compileGPUConditionalArm`: the statement form
-      // captures the statements of such a piece into its branch and lets the
-      // guard of that function pass them once.
-      if (i % 2 === 1)
-        return compileGPUConditionalArm('Match', clause.compileBody, target);
-      const test = clause.test!;
-      return i === 0 ? test() : compileGPUConditionalArm('Match', test, target);
-    },
-    target
-  );
-}
-
-/**
- * The pieces of a `Match` that its ternary form places behind a `select`:
- * none when the first case always matches (it has no test), else the body
- * and guard of every clause, and the comparison expressions of every clause
- * after the first (`MatchStatementClause.comparisons`: with
- * `vars: { Pi: 'nextValue()' }`, the pin of `MatchCase(Pin(Pi), 20)` would
- * call `nextValue()` also when an earlier case matches). The comparison of
- * the first clause is computed in every case. `clauses` stops at the first
- * case that always matches (`BaseCompiler.compileMatchTernary`), so the
- * cases after it are not included.
- */
-export function gpuMatchSelectedPieces(
-  clauses: ReadonlyArray<MatchStatementClause>
-): Expression[] {
-  if (clauses.length === 0 || clauses[0].test === undefined) return [];
-  return clauses.flatMap((c, i) => [
-    c.body,
-    ...(c.guard === undefined ? [] : [c.guard]),
-    ...(i === 0 ? [] : c.comparisons),
-  ]);
-}
-
-/**
  * Can a statement be placed at the current position on a shader target? A
  * statement sink must exist (`canHoist`) and must not be a
  * conditionally-evaluated arm of a conditional (`conditionalGPUSinks`),
@@ -829,14 +660,6 @@ export function gpuConditional(
   return `((${cond}) ? (${whenTrue}) : (${whenFalse}))`;
 }
 
-/** True when `expr` is a `Tuple` literal or is tuple-typed. */
-function gpuIsTupleShaped(expr: Expression): boolean {
-  if (isFunction(expr, 'Tuple')) return true;
-  const t = gpuType(expr);
-  return typeof t !== 'string' && t.kind === 'tuple';
-}
-
-/** Fail closed on a shape the element-wise selection cannot render. */
 /**
  * Fail closed when a value arm of a selection is a WRITTEN list or
  * tuple that lowers to a shader ARRAY — a list of points (`vec2[2](…)`) or
@@ -859,10 +682,6 @@ export function gpuAssertSelectableArms(
         `scalars or vectors only.`
     );
   }
-}
-
-function gpuSelectionDecline(reason: string): never {
-  throw new Error(`Could not compile \`Which\`: ${reason}`);
 }
 
 /**
@@ -959,364 +778,4 @@ export function gpuSelectionArm(
         `selection is complex.`
     );
   return `${gpuVec2()}(${code}, 0.0)`;
-}
-
-/**
- * Width (2–4) of a `Which` CONDITION lowered element-wise on a GPU target, or
- * `undefined` when the condition is a plain shader scalar. Throws (D6) for a
- * non-scalar condition with no static `vec2`–`vec4` shape — the case that used
- * to emit garbage such as `u_L == 3.0` behind `success: true`.
- */
-function gpuSelectionConditionWidth(c: Expression): 2 | 3 | 4 | undefined {
-  // `True` marks the default clause; `False` is a scalar (never-taken) mask.
-  if (isSymbol(c, 'True') || isSymbol(c, 'False')) return undefined;
-
-  if (isFunction(c, 'List')) {
-    for (const cell of c.ops) {
-      // A cell that is provably a SCALAR boolean lowers as its own scalar
-      // condition inside the `bvecN`/`vecN<bool>` constructor — a literal
-      // `True`/`False`, or a scalar comparison such as `x < 0`. Anything
-      // else declines: the interpreter selects only when every cell
-      // evaluates to a boolean, and a non-scalar cell has no single slot.
-      if (isSymbol(cell, 'True') || isSymbol(cell, 'False')) continue;
-      if (
-        BaseCompiler.isBooleanValued(cell) &&
-        !BaseCompiler.isComplexValued(cell) &&
-        !BaseCompiler.isNonScalarShape(cell)
-      )
-        continue;
-      gpuSelectionDecline(
-        `a literal list condition needs provably boolean scalar cells ` +
-          `(\`True\`/\`False\` or a scalar comparison); the cell ` +
-          `\`${cell.toString()}\` is not one, and the interpreter only ` +
-          `selects when every cell evaluates to a boolean.`
-      );
-    }
-    const n = c.nops;
-    if (n < 2 || n > 4)
-      gpuSelectionDecline(
-        `a ${n}-element list condition has no GPU vector lowering (only ` +
-          `vec2–vec4 are shader values).`
-      );
-    return n as 2 | 3 | 4;
-  }
-
-  const h = c.operator;
-  const ops: ReadonlyArray<Expression> = isFunction(c) ? c.ops : [];
-  if (isRelationalOperator(h)) {
-    let width: 2 | 3 | 4 | undefined = undefined;
-    for (const op of ops) {
-      // A complex value is ALSO lowered as a `vec2`, so it must be recognized
-      // BEFORE the width or it masquerades as a 2-cell collection.
-      if (BaseCompiler.isComplexValued(op))
-        gpuSelectionDecline(
-          `a complex-valued operand (\`${op.toString()}\`) in an element-wise ` +
-            `condition is lowered as a \`vec2\` of (re, im), which has no cell ` +
-            `meaning in a selection.`
-        );
-      if (gpuIsTupleShaped(op))
-        gpuSelectionDecline(
-          `a tuple operand (\`${op.toString()}\`) in an element-wise condition ` +
-            `has no element-wise reading — the interpreter binds a tuple ` +
-            `atomically.`
-        );
-      const w = gpuComponentCount(op);
-      if (w === undefined) {
-        if (BaseCompiler.isNonScalarShape(op))
-          gpuSelectionDecline(
-            `the condition operand \`${op.toString()}\` is not a shader scalar ` +
-              `and has no static vec2–vec4 shape (an unknown-length list, a ` +
-              `matrix, or a 5+-element list).`
-          );
-        continue;
-      }
-      if (width !== undefined && width !== w)
-        gpuSelectionDecline(
-          `an element-wise condition mixes vec${width} and vec${w} operands.`
-        );
-      width = w;
-    }
-    if (width === undefined) return undefined;
-    if ((h === 'Equal' || h === 'NotEqual') && ops.length > 2)
-      gpuSelectionDecline(
-        `an n-ary \`${h}\` over a collection operand has no faithful ` +
-          `element-wise lowering — the interpreter's n-ary form switches shape ` +
-          `on how many operands are collections at run time, so no pairwise ` +
-          `conjunction matches it.`
-      );
-    if (GPU_COMPARE_GLSL[h] === undefined)
-      gpuSelectionDecline(
-        `the relation \`${h}\` has no componentwise shader form.`
-      );
-    return width;
-  }
-
-  if (h === 'And' || h === 'Or' || h === 'Not') {
-    let width: 2 | 3 | 4 | undefined = undefined;
-    for (const op of ops) {
-      const w = gpuSelectionConditionWidth(op);
-      if (w === undefined) continue;
-      if (width !== undefined && width !== w)
-        gpuSelectionDecline(
-          `an element-wise \`${h}\` mixes vec${width} and vec${w} operands.`
-        );
-      width = w;
-    }
-    return width;
-  }
-
-  // A complex-valued condition is a scalar-side value (its `vec2` is (re, im),
-  // not two cells): left exactly as it is today.
-  if (BaseCompiler.isComplexValued(c)) return undefined;
-  // The RAW width, not `gpuComponentCount`: a mask is a `bvecN` / `vec<bool>`,
-  // whose cells are booleans, so the shader-float element test that reading
-  // applies would reject the very shape this slot exists for. The elements are
-  // checked here instead, against `boolean` rather than against a float.
-  const w = BaseCompiler.vectorComponentCount(c);
-  if (w !== undefined) {
-    // A value used DIRECTLY as a boolean-vector condition (e.g. a `vars`-mapped
-    // `bvec` uniform). Anything else with a vector shape is a numeric vector,
-    // which is not a condition.
-    if (!c.type.matches('indexed_collection<boolean>'))
-      gpuSelectionDecline(
-        `the condition \`${c.toString()}\` is a collection of ` +
-          `\`${c.type.toString()}\`, not of booleans.`
-      );
-    return w;
-  }
-  if (BaseCompiler.isNonScalarShape(c))
-    gpuSelectionDecline(
-      `the condition \`${c.toString()}\` is not a shader scalar and has no ` +
-        `static vec2–vec4 shape.`
-    );
-  return undefined;
-}
-
-/** Conjoin boolean-vector masks componentwise. */
-function gpuMaskAnd(masks: ReadonlyArray<string>, n: 2 | 3 | 4): string {
-  if (masks.length === 1) return masks[0];
-  // GLSL has no componentwise `&&`: convert to 0/1 floats, multiply, and let
-  // the `bvecN` constructor read nonzero back as `true`.
-  const f = gpuFVec(n);
-  return `${gpuBVec(n)}(${masks.map((m) => `${f}(${m})`).join(' * ')})`;
-}
-
-/** Disjoin boolean-vector masks componentwise. */
-function gpuMaskOr(masks: ReadonlyArray<string>, n: 2 | 3 | 4): string {
-  if (masks.length === 1) return masks[0];
-  const f = gpuFVec(n);
-  return `${gpuBVec(n)}(${masks.map((m) => `${f}(${m})`).join(' + ')})`;
-}
-
-/**
- * Emit a `bvecN` / `vecN<bool>` mask for one `Which` condition.
- *
- * Boolean vectors — NOT float masks: a float `mix(a, b, t)` computes
- * `a·(1−t) + b·t`, so a NaN in the unselected operand poisons the result
- * (`mix(NaN, x, 1.0)` is NaN). The `genBType` `mix` overload
- * is a true per-component SELECTION and are therefore NaN-safe.
- */
-function gpuSelectionMask(
-  c: Expression,
-  n: 2 | 3 | 4,
-  compile: (e: Expression) => string,
-  target: CompileTarget<Expression>
-): string {
-  const bvec = gpuBVec(n);
-  const fvec = gpuFVec(n);
-
-  if (isSymbol(c, 'True')) return `${bvec}(true)`;
-  if (isSymbol(c, 'False')) return `${bvec}(false)`;
-
-  if (isFunction(c, 'List'))
-    return `${bvec}(${c.ops
-      .map((x) =>
-        isSymbol(x, 'True')
-          ? 'true'
-          : isSymbol(x, 'False')
-            ? 'false'
-            : // A provably-boolean scalar cell (validated by
-              // `gpuSelectionConditionWidth`) compiles as its own scalar
-              // condition inside the constructor: `bvec2((x < 0.0), true)`.
-              compile(x)
-      )
-      .join(', ')})`;
-
-  const h = c.operator;
-  const ops: ReadonlyArray<Expression> = isFunction(c) ? c.ops : [];
-  if (isRelationalOperator(h)) {
-    // `isRelationalOperator` covers the FULL inequality set (`Precedes`,
-    // `Approx`, `Tilde`, …), not just the six componentwise comparators. A
-    // scalar-operand relation skips the width pass's compare-form check, so
-    // guard again at the emission site — indexing past the map would splice
-    // the literal string `undefined` into the shader source.
-    const cmp = GPU_COMPARE_GLSL[h];
-    if (cmp === undefined)
-      gpuSelectionDecline(
-        `the relation \`${h}\` has no componentwise shader form.`
-      );
-    const operand = (op: Expression, once: boolean): string => {
-      const code = once ? gpuOperandOnce(h, op, compile, target) : compile(op);
-      return gpuComponentCount(op) === undefined ? `${fvec}(${code})` : code;
-    };
-    // A chained ordering `a < m < b` conjoins the successive pairwise masks,
-    // splicing each MIDDLE operand (indices 1..n-2) into two of them. An
-    // IMPURE (Random-family) operand must still be drawn exactly once —
-    // `_gpu_rnd_draw` advances a runtime counter, so a repeated splice draws a
-    // DIFFERENT value there AND shifts every later draw in the shader. Bind
-    // those to a hoisted temporary (or decline where there is no statement
-    // sink). Pure operands are safe to duplicate and stay inline.
-    //
-    // A hoisted temporary runs BEFORE the mask expression, so binding only the
-    // middles would draw a middle ahead of an impure ENDPOINT left inline —
-    // reversing the interpreter's argument order. Once a middle is bound, route
-    // EVERY impure operand through `gpuOperandOnce`, in argument order (the
-    // hoisted statements are emitted in that order).
-    const impureMiddle = ops.some(
-      (op, i) => i >= 1 && i <= ops.length - 2 && op.isPure === false
-    );
-    const codes = ops.map((op) =>
-      operand(op, impureMiddle && op.isPure === false)
-    );
-    const masks: string[] = [];
-    for (let i = 0; i < codes.length - 1; i++) {
-      masks.push(`${cmp}(${codes[i]}, ${codes[i + 1]})`);
-    }
-    return gpuMaskAnd(masks, n);
-  }
-
-  if (h === 'And' || h === 'Or' || h === 'Not') {
-    const masks = ops.map((op) => gpuSelectionMask(op, n, compile, target));
-    if (h === 'Not') {
-      if (masks.length !== 1)
-        throw new Error('Could not compile `Not`: expected one argument');
-      return `not(${masks[0]})`;
-    }
-    return h === 'And' ? gpuMaskAnd(masks, n) : gpuMaskOr(masks, n);
-  }
-
-  // A boolean-vector value used directly as the condition, or a scalar boolean
-  // splat across the selection width. The RAW width again, for the reason
-  // `gpuSelectionConditionWidth` states: this slot holds a `bvecN`, and that
-  // width has already been admitted there as a collection of booleans.
-  if (
-    !BaseCompiler.isComplexValued(c) &&
-    BaseCompiler.vectorComponentCount(c) !== undefined
-  )
-    return compile(c);
-  return `${bvec}(${compile(c)})`;
-}
-
-/**
- * Lower a `Which`/`If` whose condition may be an indexed collection to the GPU
- * ELEMENT-WISE selection form (`np.select` semantics — R1–R4 of
- * `docs/BROADCAST-MODEL.md`). Clauses arrive in
- * `Which` shape (condition, arm, condition, arm, …); the base compiler
- * normalizes `If(c, t, f)` to `[c, t, True, f]`.
- *
- * Only STATICALLY SHAPED conditions lower: every non-scalar condition must have
- * a `vec2`–`vec4` shape, and all of them the same one. Each condition becomes a
- * boolean vector (`bvecN`), and the clauses are folded
- * right-to-left with GLSL `mix` — first match wins (R1), with
- * `vecN(NaN)` as the no-match value (R4). Returns `null` when every condition is
- * provably scalar, so the ordinary scalar `Which`/`If` emission is untouched;
- * throws (D6) on any shape the shader languages cannot render.
- *
- * Documented divergences from the interpreter (a shader cannot throw —
- * CO-P2-24, the same reason the `absence` capability at `createTarget` declares
- * no `isAbsent`):
- *
- * - R2: a shader evaluates EVERY condition and EVERY arm. This goes BEYOND
- *   what R2 licenses (R2 promises an arm is evaluated only if selection
- *   reaches it; it only permits computing unselected CELLS of a selected
- *   arm) — a genuine GPU-specific divergence, accepted because the domain is
- *   pure and total: no arm can throw, no draw count is observable, so only
- *   the cells selection keeps are visible in the result.
- * - R4′: an absent (NaN) condition cell follows IEEE comparison semantics
- *   rather than the interpreter's consumed error cell: the orderings and
- *   `equal` answer `false` (the position falls through to LATER clauses),
- *   but `notEqual` answers `true` for a NaN cell (the clause SELECTS it) and
- *   `Not` inverts. Absence is not detectable here — `isnan`, and under
- *   aggressive fast-math even the NaN-comparison results themselves, are
- *   unreliable (the same limitation that omits `absence.isAbsent`).
- * - A non-boolean condition VALUE at run time cannot throw; only statically
- *   visible non-boolean conditions are declined here.
- */
-export function compileGPUSelection(
-  args: ReadonlyArray<Expression>,
-  compile: (e: Expression) => string,
-  target: CompileTarget<Expression>
-): string | null {
-  let n: 2 | 3 | 4 | undefined = undefined;
-  for (let i = 0; i < args.length; i += 2) {
-    const w = gpuSelectionConditionWidth(args[i]);
-    if (w === undefined) continue;
-    if (n !== undefined && n !== w)
-      gpuSelectionDecline(
-        `the conditions of an element-wise selection mix vec${n} and vec${w}.`
-      );
-    n = w;
-  }
-  // Every condition is a scalar: leave the ordinary emission alone.
-  if (n === undefined) return null;
-
-  const width = n;
-  const fvec = gpuFVec(width);
-
-  const armCode = (arm: Expression): string => {
-    if (BaseCompiler.isComplexValued(arm))
-      gpuSelectionDecline(
-        `an element-wise selection cannot have a complex-valued arm ` +
-          `(\`${arm.toString()}\`) — a compiled complex value is a \`vec2\` of ` +
-          `(re, im), which has no cell convention inside a selection.`
-      );
-    if (gpuIsTupleShaped(arm))
-      gpuSelectionDecline(
-        `an element-wise selection cannot have a tuple arm ` +
-          `(\`${arm.toString()}\`) — a lifted point would be a list of points, ` +
-          `which is not a GPU value.`
-      );
-    // A boolean arm has no GPU rendering: the selection's value operands are
-    // one numeric vector type, and a `bvecN` (or a scalar `true`/`false`,
-    // which is not even a float) spliced into `mix`/`select` is invalid
-    // shader source. (The JS target returns boolean cells; a GPU consumer
-    // should spell the mask numerically — 1 and 0 arms.)
-    if (
-      isSymbol(arm, 'True') ||
-      isSymbol(arm, 'False') ||
-      arm.type.matches('boolean') ||
-      arm.type.matches('indexed_collection<boolean>')
-    )
-      gpuSelectionDecline(
-        `an element-wise selection cannot have a boolean-valued arm ` +
-          `(\`${arm.toString()}\`) — a GPU selection produces one numeric ` +
-          `vector, and there is no boolean-cell convention. Use numeric arms ` +
-          `(e.g. 1 and 0) instead.`
-      );
-    const w = gpuComponentCount(arm);
-    if (w === width) return compile(arm);
-    if (w === undefined && !BaseCompiler.isNonScalarShape(arm))
-      return `${fvec}(${compile(arm)})`;
-    gpuSelectionDecline(
-      `the arm \`${arm.toString()}\` does not fit the vec${width} shape of the ` +
-        `element-wise conditions (the interpreter answers ` +
-        `\`incompatible-dimensions\`).`
-    );
-  };
-
-  // First match wins: fold the clauses from LAST to FIRST over the no-match
-  // vector, so an earlier clause's mask overrides a later one.
-  let acc = `${fvec}(${gpuNaN(target)})`;
-  for (let i = args.length - 2; i >= 0; i -= 2) {
-    const code = armCode(args[i + 1]);
-    // A `True` condition is the default clause: everything built for the later
-    // (now unreachable) clauses is replaced.
-    if (isSymbol(args[i], 'True')) {
-      acc = code;
-      continue;
-    }
-    const mask = gpuSelectionMask(args[i], width, compile, target);
-    acc = `mix(${acc}, ${code}, ${mask})`;
-  }
-  return acc;
 }

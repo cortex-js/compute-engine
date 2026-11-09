@@ -4156,9 +4156,8 @@ function compileExprBroadcastGuards(
   // operand must not lower through the scalar infix operators — GLSL rejects
   // `vecN < float` outright, and where an infix form IS legal it means the
   // wrong thing (GLSL `vecN == vecN` is ATOMIC aggregate equality where the
-  // interpreter broadcasts a `List` element-wise). The element-wise `Which`/`If` selection path builds its
-  // boolean-vector masks directly (`compileGPUSelection`) and never routes a
-  // condition through here; everything else fails closed. One shape is
+  // interpreter broadcasts a `List` element-wise). Such a comparison fails
+  // closed. One shape is
   // deliberately admitted: GLSL `Equal`/`NotEqual` over TUPLE-shaped
   // operands — a tuple (point) is atomic in the interpreter too, and GLSL
   // `==` on two vecNs is scalar aggregate equality, so that lowering is

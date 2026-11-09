@@ -654,10 +654,9 @@ export interface CompileTarget<Expr = unknown> {
    * Consulted BEFORE the target's `functions` entry for the operator, for both
    * `If` and `Which`, so a target that defines both gets the hook first.
    *
-   * The JavaScript target lowers to its runtime `_SYS.select`; the GPU shader
-   * targets lower a statically shaped (`vec2`–`vec4`) condition to
-   * boolean-vector masks combined with `mix`/`select`, and decline anything
-   * with no static shape; interval-js implements it as a clean decline (the
+   * The JavaScript target lowers to its runtime `_SYS.select`; the GLSL
+   * target has no hook, because its typing pass admits only a `boolean`
+   * condition; interval-js implements it as a clean decline (the
    * interval domain is scalar — one interval per quantity — so it has no
    * element-wise selection convention). Targets that leave it undefined keep
    * the fail-closed scalar-condition guard.

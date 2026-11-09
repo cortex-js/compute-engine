@@ -5512,10 +5512,8 @@ describe('a GPU user-function body with an early `Return`', () => {
   });
 
   it('a `Return` in a conditional BRANCH fails closed', () => {
-    // Two gates cover this shape and either may fire first: the value-operand
-    // gate (`compileValueOperand`), which sees the arm's bare `return`
-    // statement, and the emitted-source placement scan
-    // (`gpuAssertReturnPlacement`).
+    // `Return` is not in the GLSL fragment: the typing pass refuses it before
+    // any code is emitted.
     for (const target of gpuTargets())
       expect(() =>
         target.compile(engineWithA(RETURN_IN_BRANCH).box(['a', 'u']))
