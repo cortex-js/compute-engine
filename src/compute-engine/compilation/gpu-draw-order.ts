@@ -356,7 +356,7 @@ function gpuReadsVarsBefore(
  * advances a runtime counter, so a repeated splice re-draws and shifts every
  * later value in the shader) is bound to a hoisted temporary, or the head
  * declines where no statement sink is available. `complex` selects a
- * `vec2`/`vec2f` temporary (a complex operand has no scalar shape, so the
+ * `vec2` temporary (a complex operand has no scalar shape, so the
  * scalar-shape gate is skipped there — `canHoist` is the applicable gate).
  * An operand that contains caller code (`gpuReachesCallerCode`) declines,
  * whether it draws or not.

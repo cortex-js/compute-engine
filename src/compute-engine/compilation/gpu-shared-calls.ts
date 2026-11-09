@@ -292,12 +292,12 @@ class SharedCallsPass {
    * Is `arg` lowered to a scalar float by this shader target? A free symbol
    * whose type is open (`unknown`) is not a scalar by its static type
    * (`isScalarShaped()`), but the shader targets read it as a
-   * `float`/`f32` input, which is also what an emitted definition would
+   * `float` input, which is also what an emitted definition would
    * receive. Substituting it for a parameter therefore reads the same value.
    */
   private isShaderScalar(arg: Expression): boolean {
     const type = this.target.loweredSymbolType?.(arg);
-    return type === 'f32' || type === 'float';
+    return type === 'float';
   }
 
   /** Does the caller supply the code of the head `name` (`functions`,

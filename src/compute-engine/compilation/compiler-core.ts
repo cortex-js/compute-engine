@@ -5817,7 +5817,7 @@ export function ensureSpecializedUserCallEmitted(
         // declines. A shader target has no such mode, and its ordinary
         // definition types an undeclared parameter `float`, so the call
         // would decline. Instead the call gets a copy of the definition
-        // whose parameter is typed `complex` (a `vec2`/`vec2f`
+        // whose parameter is typed `complex` (a `vec2`
         // parameter), and the body is compiled with that parameter
         // complex. The copy has its own name (`_fn_f_complex`), and is
         // emitted only when a call needs it. A parameter declared `real` rejects the `complex` type

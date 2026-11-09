@@ -95,7 +95,7 @@ describe.each(['glsl'] as const)(
       const r = shader(TABLE, to);
       expect(r.declined).toBeUndefined();
       expect(r.code).toContain('vec3[12](');
-      expect(r.code.match(/vec3f?\(/g)!.length).toBeGreaterThanOrEqual(12);
+      expect(r.code.match(/vec3\(/g)!.length).toBeGreaterThanOrEqual(12);
       expect(r.code).not.toContain(';;');
     });
 

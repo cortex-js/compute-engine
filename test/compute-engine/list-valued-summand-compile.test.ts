@@ -939,11 +939,7 @@ describe('a contradicted scalar declaration is refused, or declines at DEFINITIO
       const ce = withDeclaration('(unknown) -> unknown');
       const r = compile(ce.box(['a', 'u']), { to, fallback: true } as any);
       expect(r?.success).toBe(true);
-      expect((r as any).code).toBe(
-        to === 'glsl'
-          ? 'vec2(_gpu_cos(u), _gpu_sin(u))'
-          : 'vec2f(_gpu_cos(u), _gpu_sin(u))'
-      );
+      expect((r as any).code).toBe('vec2(_gpu_cos(u), _gpu_sin(u))');
       expect((r as any).preamble ?? '').not.toContain('_fn_a');
     }
   );
@@ -968,9 +964,7 @@ describe('a contradicted scalar declaration is refused, or declines at DEFINITIO
       const r = compile(ce.box(['a', 'u']), { to, fallback: true } as any);
       expect(r?.success).toBe(true);
       expect((r as any).code).toBe('_fn_a(u)');
-      expect((r as any).preamble).toMatch(
-        to === 'glsl' ? /vec2 _fn_a\(float t\)/ : /fn _fn_a\(t: f32\) -> vec2f/
-      );
+      expect((r as any).preamble).toMatch(/vec2 _fn_a\(float t\)/);
     }
   );
 

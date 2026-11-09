@@ -803,3 +803,29 @@ describe('a type spelling that is not GLSL in a declaration', () => {
     expect(shader({})).toContain('uniform vec3 u;\n');
   });
 });
+
+describe('a type spelling that is not GLSL in a compileFunction() signature', () => {
+  // `compileFunction()` writes the signature with the types as given, so
+  // `f32 f(f32 x)` would be a function that does not compile on the GPU.
+  const fn = (ret: string, param: string) =>
+    glsl.compileFunction(ce.box(['Add', 'x', 1]), 'f', ret, [['x', param]]);
+
+  it('is refused for a parameter', () => {
+    expect(() => fn('float', 'f32')).toThrow(
+      'Could not compile `compileFunction()`: the declared type `f32` of ' +
+        'the parameter "x" is not a GLSL type.'
+    );
+  });
+
+  it('is refused for the result', () => {
+    expect(() => fn('f32', 'float')).toThrow(
+      /the declared type `f32` of the result is not a GLSL type/
+    );
+  });
+
+  it('the GLSL spelling compiles', () => {
+    expect(fn('float', 'float')).toBe(
+      'float f(float x) {\n  return x + 1.0;\n}'
+    );
+  });
+});

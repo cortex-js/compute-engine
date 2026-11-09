@@ -268,7 +268,7 @@ function gpuSquaredBase(expr: Expression): Expression | undefined {
  *
  * The empty collection is the identity (`Sum([]) = 0`, `Product([]) = 1`),
  * matching the interpreter. It is recognized BEFORE the operand is compiled:
- * `[]` lowers to `float[0]()` / `array<f32, 0>()`, which
+ * `[]` lowers to `float[0]()`, which
  * `assertGPUScalarComponents` refuses outright, so compiling it first would
  * decline the whole reduction — the same ordering `compileGPUExtremum` uses.
  */
@@ -384,8 +384,8 @@ export function compileGPUCollectionReduce(
 
 /**
  * Fold a bound only when its literal has the same exact value in binary32
- * and in host arithmetic. Keep the counter and its final increment in i32
- * range; other values retain the existing shader floor/conversion path.
+ * and in host arithmetic. Keep the counter and its final increment in the
+ * range of a 32-bit `int`; other values retain the existing shader floor/conversion path.
  */
 export function gpuBoundConstant(
   expr: Expression,
@@ -410,7 +410,7 @@ export function gpuBoundConstant(
  *
  * True for a numeric literal, a bare identifier, and any nesting of the
  * CONVERSION and ROUNDING spellings around one of those — `K`, `int(K)`,
- * `i32(K)`, `int(floor(K))`. Those are the spellings `boundCode` produces for
+ * `int(floor(K))`. Those are the spellings `boundCode` produces for
  * a caller-declared parameter or a bare symbolic bound; each is a register
  * read plus at most a conversion, which every driver folds.
  *
@@ -421,11 +421,8 @@ export function gpuBoundConstant(
  */
 const GPU_BOUND_ONE_READ_CALLS = new Set([
   'int',
-  'i32',
-  'u32',
   'uint',
   'float',
-  'f32',
   'floor',
 ]);
 

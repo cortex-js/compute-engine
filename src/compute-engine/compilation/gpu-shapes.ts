@@ -369,7 +369,7 @@ export function gpuComponentCount(
  * The component count every element of a `List` literal shares when EVERY
  * element is a vector value of one width between 2 and 4 — a list of points
  * of the same arity, which lowers as a fixed-size array of `vecK`
- * (`vec3[N](…)` / `array<vec3f, N>(…)`) — or `undefined` when the elements
+ * (`vec3[N](…)`) — or `undefined` when the elements
  * are scalars, of mixed widths, or not vectors at all.
  */
 export function gpuUniformVectorWidth(
@@ -436,7 +436,7 @@ export function assertGPUScalarComponents(
 
 /**
  * A NaN matching the SHAPE of `val`: scalar NaN for a scalar value, a
- * broadcast vector constructor (`vec2(_gpu_nan())` / `vec2f(_gpu_nan())`)
+ * broadcast vector constructor (`vec2(_gpu_nan())`)
  * for a vector-valued one. GLSL has no implicit float→vecN conversion in a
  * ternary, so a masked (restriction or `Which` else) branch whose value is a tuple
  * body (a restricted parametric `(x(t), y(t))`) must emit a NaN of the same
@@ -465,7 +465,7 @@ export function gpuNaNFor(
  *
  *  - a `_gpu_…` PREAMBLE HELPER (`_gpu_sinc`, `_gpu_gamma`, `_gpu_heaviside`,
  *    `_gpu_fresnelC`, `_gpu_powi`, …). Every helper reachable from a SCALAR
- *    element lowering is declared with scalar `float`/`f32` parameters, so
+ *    element lowering is declared with scalar `float` parameters, so
  *    `_gpu_sinc` of a `vec3` is source no driver accepts. The `_gpu_` prefix
  *    IS the property being tested. (A few helpers ARE aggregate-aware — the
  *    complex arithmetic and the colour converters take `vec2`/`vec3`, and the
@@ -496,7 +496,7 @@ export function gpuIsComponentwise(
   if (helper !== null)
     return (
       `it calls the preamble helper \`${helper[0].slice(0, -1).trim()}\`, ` +
-      `which is declared with scalar float/f32 parameters.`
+      `which is declared with scalar float parameters.`
     );
   if (vector === undefined) return undefined;
   if (/\?|[<>]=?|[=!]=/.test(code))
@@ -511,7 +511,7 @@ export function gpuIsComponentwise(
 
 /**
  * The SHADER shape an operand lowers to: a scalar, a `vecN` (reported as its
- * width), a `matN`, or an array (`float[N]` / `array<f32, N>`).
+ * width), a `matN`, or an array (`float[N]`).
  *
  * Derived from the shape helpers the rest of the GPU analysis already uses —
  * `isNonScalarShape` ("is this a scalar at all?") and `gpuComponentCount`
@@ -883,17 +883,6 @@ function gpuMatrixDims(
 }
 
 /**
- * A type TEMPLATE — the type keyword and its opening angle bracket
- * (`array<`, `vec3<`, `mat2x2<`, `atomic<`, `ptr<`). GLSL has no such
- * spelling; the pattern keeps a template's comma inside its argument.
- *
- * Sticky, and used only with `lastIndex` set immediately before each test, so
- * it carries no state between calls.
- */
-const GPU_TYPE_TEMPLATE =
-  /(?:array|[iub]?vec[234]|mat[234]x[234]|atomic|ptr)\s*</y;
-
-/**
  * The callee and top-level argument count of `code` when the WHOLE emission is
  * a single call. `undefined` for an infix/compound emission (`a + b`,
  * `(c ? a : b)`, `log(a) / log(10.0)`), which is what tells the gate below
@@ -913,34 +902,13 @@ export function gpuTopLevelCall(
   code: string
 ): { callee: string; argCount: number; operands: string[] } | undefined {
   const s = code.trim();
-  // `sin`, `_gpu_powi`, `vec3f`, `mat2x2f`, `float[5]`, `array<f32, 5>`
-  const m = /^([A-Za-z_]\w*(?:\s*<[^<>()]*>)?(?:\s*\[\d+\])?)\s*\(/.exec(s);
+  // `sin`, `_gpu_powi`, `vec3`, `mat2x3`, `float[5]`, `vec2[3]`
+  const m = /^([A-Za-z_]\w*(?:\s*\[\d+\])?)\s*\(/.exec(s);
   if (m === null) return undefined;
   let depth = 0;
   let start = m[0].length;
   const operands: string[] = [];
   for (let i = m[0].length - 1; i < s.length; i++) {
-    // A type template carries a COMMA of its own: an `array<f32, 5>(…)`
-    // argument used to split into `array<f32` and `5>(…)`, so the argument
-    // count came out one too high and every check keyed to it (the one-for-one
-    // tests in `gpuCheckOperandShapes`) silently stepped aside — which let an
-    // array operand of a scalar-only helper through as invalid source. Skip
-    // past the matching `>`. Anchored on the type KEYWORD at a token start, so
-    // a `<` that is a less-than inside a comparison operand is untouched.
-    if (i === 0 || !/[\w$]/.test(s[i - 1])) {
-      GPU_TYPE_TEMPLATE.lastIndex = i;
-      if (GPU_TYPE_TEMPLATE.test(s)) {
-        let angle = 1;
-        let j = GPU_TYPE_TEMPLATE.lastIndex;
-        for (; j < s.length && angle > 0; j++) {
-          if (s[j] === '<') angle++;
-          else if (s[j] === '>') angle--;
-        }
-        if (angle > 0) return undefined;
-        i = j - 1;
-        continue;
-      }
-    }
     if (s[i] === '(') {
       if (++depth === 1) start = i + 1;
     } else if (s[i] === ',' && depth === 1) {
@@ -1074,7 +1042,7 @@ function gpuReshapesOperands(code: string): string | undefined {
           code.slice(m.index + m[0].length, i)
         );
         const nested =
-          /\b(?:[iub]?vec[234]|mat[234]|array\s*<|(?:float|f32)\s*\[)/.exec(
+          /\b(?:[iub]?vec[234]|mat[234]|float\s*\[)/.exec(
             inner
           );
         if (nested !== null)
@@ -1356,7 +1324,7 @@ function gpuSourceIsVector(
 ): boolean {
   const call = gpuTopLevelCall(code);
   if (call === undefined) return false;
-  // An ARRAY of vectors — `vec2[2](…)`, `array<vec2f, 2>(…)`, the lowering
+  // An ARRAY of vectors — `vec2[2](…)`, the lowering
   // of a written list of points — is not a vector value, though its callee
   // starts like one.
   if (GPU_AGGREGATE_CONSTRUCTOR.test(call.callee))
@@ -1637,8 +1605,8 @@ export function gpuCheckOperandShapes(
     }
     if (hasArray)
       decline(
-        `an operand lowers to a shader ARRAY (\`float[N]\` / ` +
-          `\`array<f32, N>\`), which has no arithmetic operators — only ` +
+        `an operand lowers to a shader ARRAY (\`float[N]\`), ` +
+          `which has no arithmetic operators — only ` +
           `scalars, \`vecN\` and \`matN\` values do.`
       );
     if (!hasMatrix) {
@@ -1883,8 +1851,8 @@ export function gpuCheckOperandShapes(
  * of the uniform the host must declare. A symbol read as a colour operand is
  * a `vec3`; otherwise the type is read from the same analysis that types the
  * parameters and return values of emitted functions (`gpuTypeOfValue`),
- * then a matrix (`mat2`, `mat3x2f`) or an array (`float[5]`,
- * `array<f32, 5>`; `vec2[3]`, `array<vec2f, 3>` for a list of points).
+ * then a matrix (`mat2`, `mat3x2`) or an array (`float[5]`;
+ * `vec2[3]` for a list of points).
  * `undefined` when none of these apply.
  */
 export function gpuLoweredSymbolTypeHook(): (

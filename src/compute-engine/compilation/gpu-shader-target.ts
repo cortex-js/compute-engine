@@ -1270,8 +1270,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
    * The declaration-syntax half of `compileFunction`, split out because the
    * user-function emission must compile the body itself (parameters shadowed,
    * shapes framed, same registry and naming context) rather than against a
-   * fresh target of its own. `params`/`ret` are already language-specific
-   * types (`float`/`vec2` vs `f32`/`vec2f`).
+   * fresh target of its own. `params`/`ret` are already GLSL types
+   * (`float`, `vec2`).
    */
   protected declareGPUFunction(
     name: string,

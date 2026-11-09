@@ -165,7 +165,7 @@ function gpuAtFramedBaseElements(
  *
  * The same blind spot as `gpuAtFramedBaseElements`, on the other operand: a
  * caller-declared name's boxed type is `unknown`, which the
- * unknown-as-numeric-parameter rule reads as a float — so a `bool` or `i32`
+ * unknown-as-numeric-parameter rule reads as a float — so a `bool` or `int`
  * shader input sailed into `_gpu_atN(v, i)` as a shader type error behind a
  * reported success.
  */
@@ -505,7 +505,7 @@ export function gpuAtSlot(i: number, n: number): number | null {
  * A literal base folds to the element's own compiled source (`At([10,20,30],
  * 2)` → `20.0`, not `vec3(…).y`) — zero runtime cost. Otherwise a base of
  * width 2–4 is a `vecN` and takes a component swizzle; a wider one is a
- * `float[N]` / `array<f32, N>` and takes a direct subscript. The
+ * `float[N]` and takes a direct subscript. The
  * atomic-emission rule (the sibling point-list as-built note) keeps a bare
  * identifier unparenthesized so the emission stays atomic for the operand-
  * shape gate; anything else is parenthesized and judged as the compound it is.
@@ -612,7 +612,7 @@ export function gpuAtEntryKind(e: Expression): GPUAtEntry {
  * The shader shape of an `At` base that is a list of points: `m` (2 to 4) is
  * the arity of a point, which lowers to a `vecM`, `n` the static number of
  * points, `source()` the emission of the base as a shader ARRAY of `n`
- * `vecM` values (`vec2[3](…)`, `array<vec2f, 3>(…)`), and `point(j)` the
+ * `vecM` values (`vec2[3](…)`), and `point(j)` the
  * emission of the point at the 0-based position `j`. `undefined` when the
  * base is not a list of points, and the decline reason when it is one with
  * no such shape.

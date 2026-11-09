@@ -2136,7 +2136,7 @@ export interface CompileTarget<Expr = unknown> {
        *
        * Such a lowering cannot survive a function whose declared scalar result
        * type is contradicted by a collection-constructing body: the declaration
-       * would say `float`/`f32` while the `return` statement emits a `vecN`.
+       * would say `float` while the `return` statement emits a `vecN`.
        * `emitFunctionLiteralDefinition` fails closed on that pair, after
        * `define` has had its own (more specific) chance to decline — see
        * `isContradictedScalarFunctionBody`.

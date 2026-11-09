@@ -88,7 +88,7 @@ export function gpuNonFiniteLiteral(n: number, _language?: string): string {
  * Three values are left to `toString`. One too large for single precision
  * would round to an infinity that no decimal literal spells. An
  * INTEGER-valued one keeps every digit it has, because an integer literal is
- * what a loop bound, an array length and the argument of an `int()`/`i32()`
+ * what a loop bound, an array length and the argument of an `int()`
  * conversion are made of: a shader compiler can evaluate a float literal in a
  * const expression at abstract-float precision, which is at least single and
  * may be double, so moving `16777217.0` to its single-precision neighbour

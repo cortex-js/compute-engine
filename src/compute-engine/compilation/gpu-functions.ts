@@ -197,7 +197,7 @@ import {
  */
 /**
  * The most elements a shader target inlines into a fixed-size array
- * constructor (`float[n](…)` / `array<f32, n>(…)`).
+ * constructor (`float[n](…)`).
  *
  * Shared by the `Range` handler, which materializes a constant range as such
  * a literal, by the `List`/`Tuple`/`PointList` compilers of the GLSL
@@ -1263,12 +1263,12 @@ function compileGPUSumProduct(
   // (`int(x)` alone truncates toward zero, disagreeing for a negative bound).
   //
   // The exception is a bound that is ALREADY a shader integer: a name the
-  // caller declared `int`/`i32` (a `compileFunction` parameter, a shader
+  // caller declared `int` (a `compileFunction` parameter, a shader
   // uniform). Ordinary references to it go through a float conversion
   // (`gpuDeclaredBodyTarget`), which the header does not want — `floor()`
   // takes only a float, and `int(floor(float(K)))` is a needless round trip
-  // — so such a bound is used bare (a `uint`/`u32` is converted with
-  // `int(K)`/`i32(K)`, no flooring needed). A declared bound with any other
+  // — so such a bound is used bare (a `uint` is converted with
+  // `int(K)`, no flooring needed). A declared bound with any other
   // type (`bool`, a vector) is no loop bound at all and fails closed.
   const boundCode = (bound: Expression, which: 'lower' | 'upper'): string => {
     const declared = gpuDeclaredTypeOf(bound);
@@ -2305,7 +2305,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const built = gpuTopLevelCall(code);
       if (
         built !== undefined &&
-        /^vec2f?$/.test(built.callee) &&
+        built.callee === 'vec2' &&
         built.operands.length === 2
       )
         return `${gpuAtan2()}(${built.operands[1]}, ${built.operands[0]})`;
@@ -2823,7 +2823,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // negative). Route through the sign-preserving helper, which also evaluates
     // the base subexpression once instead of duplicating it. A `vecN` base
     // takes the componentwise overload of that helper (`_gpu_powi3`); the
-    // scalar one is declared with `float`/`f32` parameters and has no vector
+    // scalar one is declared with `float` parameters and has no vector
     // reading.
     const width = gpuOperandShape(x);
     return gpuFixedPower(compile(x), 2, width);
@@ -3504,7 +3504,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const intType = 'int';
 
     // The counter is declared as an integer (for `i++`), but shader scalar math
-    // is float. Consume the index as a float (`float(i)` / `f32(i)`) so it is
+    // is float. Consume the index as a float (`float(i)`) so it is
     // type-consistent wherever the body uses it in float arithmetic — mirroring
     // the Sum/Product for-loop path.
     const indexAsFloat = (index: string) => `float(${index})`;
@@ -4298,7 +4298,7 @@ export function compileGPUMatrix(
   const firstRow = rows[0];
   const numCols = isFunction(firstRow) ? firstRow.nops : 0;
 
-  // Column vector (Nx1): flatten to vecN or array<f32, N>
+  // Column vector (Nx1): flatten to vecN or float[N]
   if (numCols === 1 && rows.every((row) => isFunction(row) && row.nops === 1)) {
     const elements = rows.map((row) =>
       compile(isFunction(row) ? row.ops[0] : row)

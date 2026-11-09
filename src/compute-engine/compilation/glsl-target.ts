@@ -224,6 +224,19 @@ export class GLSLTarget extends GPUShaderTarget {
     // declaration has neither emission (D6) — GLSL assignment is an operator,
     // so only a declaration is declined here (see `gpuAssertExpressionBody`).
     gpuAssertExpressionBody('compileFunction()', expr, this.languageId);
+    // The signature is written with the types as the caller gave them, as the
+    // declarations of `compileShader()` are: a spelling such as `f32` is not
+    // a GLSL type, so the function would not compile on the GPU.
+    for (const [name, type] of [
+      ['the result', returnType],
+      ...parameters.map(([p, t]) => [`the parameter "${p}"`, t]),
+    ])
+      if (gpuIsForeignTypeSpelling(type))
+        throw new Error(
+          `Could not compile \`compileFunction()\`: the declared type ` +
+            `\`${type.trim()}\` of ${name} is not a GLSL type. Use the ` +
+            `GLSL spelling (\`float\`, \`vec3\`, \`ivec3\`, \`mat2\`).`
+        );
     // Compiled under the caller's declared parameter shapes, so the body
     // analysis agrees with the signature emitted below.
     const body = this.compileDeclaredFunctionBody(expr, parameters, options);

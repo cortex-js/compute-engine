@@ -301,7 +301,7 @@ export function gpuRoundToInteger(
  * The sign-preserving integer power over a `vecN` base, componentwise: the
  * `_gpu_powiN` overload family (`_gpu_powi2`, `_gpu_powi3`, `_gpu_powi4`).
  *
- * The scalar `_gpu_powi` is declared with `float`/`f32` parameters, so a
+ * The scalar `_gpu_powi` is declared with `float` parameters, so a
  * vector base has no lowering through it and the operand-shape gate declines
  * the call. The widened bodies are the same computation over the genType:
  * `pow` and `abs` are componentwise in GLSL, and the exponent stays
@@ -336,7 +336,7 @@ ${v} _gpu_powi${n}(${v} x, float n) {
 }
 
 /**
- * The `_gpu_powi` overloads `code` calls: `'scalar'` for the `float`/`f32`
+ * The `_gpu_powi` overloads `code` calls: `'scalar'` for the `float`
  * form, and the widths of the `_gpu_powiN` vector forms — deduplicated, so a
  * helper used many times is declared once. Read off the EMITTED source rather
  * than kept in a per-compilation table, like every other `preambleFor` scan.

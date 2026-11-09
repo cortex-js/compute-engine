@@ -56,12 +56,14 @@
 
 ### Resolved Issues
 
-- **`compileShader()` refuses a declared type that is not GLSL.** An input,
-  output or uniform declared `{ name: 'u', type: 'vec3f' }` (or `f32`,
-  `vec3<f32>`, `mat2x2f`, `array<f32, 5>`) gave `uniform vec3f u;` and
-  reported success, but the shader did not compile on the GPU. It now throws
-  an error that names the declaration and the GLSL spellings to use (`float`,
-  `vec3`, `ivec3`, `mat2`, `float[5]`).
+- **`compileShader()` and `compileFunction()` of the GLSL target refuse a
+  declared type that is not GLSL.** An input, output or uniform declared
+  `{ name: 'u', type: 'vec3f' }` (or `f32`, `vec3<f32>`, `mat2x2f`,
+  `array<f32, 5>`) gave `uniform vec3f u;` and reported success, and
+  `compileFunction(x + 1, 'f', 'f32', [['x', 'f32']])` gave
+  `f32 f(f32 x) { … }`, but such a shader did not compile on the GPU. Both
+  now throw an error that names the declaration and the GLSL spellings to use
+  (`float`, `vec3`, `ivec3`, `mat2`, `float[5]`).
 
 - **A `parallel for` whose body ends with an inner loop compiles to
   JavaScript.** In `parallel for k in 1..n { if k > 0 { for m in 1..3 {

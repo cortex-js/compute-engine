@@ -803,7 +803,7 @@ export function gpuRandomDomainDraw(
  * | Seed form | Folding | Stream identity |
  * |---|---|---|
  * | compile-time constant (number or string literal, a declared constant such as `Pi`, an assigned engine value) | HOST `foldSeed`, emitted as a `uvec2` constant | **identical** to the interpreted/JS stream |
- * | a FREE symbol the shader supplies (uniform/varying, not in `vars`) | in-shader `floatBitsToUint` / `bitcast<u32>`, `seedHi = 0u` | its OWN stream — deterministic given the seed BITS |
+ * | a FREE symbol the shader supplies (uniform/varying, not in `vars`) | in-shader `floatBitsToUint`, `seedHi = 0u` | its OWN stream — deterministic given the seed BITS |
  * | a `vars`-mapped symbol (a HOST-supplied uniform) | — | **compile error**: the host-uniform ABI row is not implemented |
  * | a COMPUTED expression | — | **compile error**: the seed is spliced per draw site |
  * | a string computed at run time | impossible in a shader | **compile error** |

@@ -189,7 +189,7 @@ export function compileGPUElementExtremum(
  * of gpu-shapes.ts, never from a list of head names:
  *
  *  - the operand lowers to an aggregate CONSTRUCTOR (`vec3(1.0, 2.0, 3.0)`,
- *    `float[5](…)`, `array<f32, 5>(…)`) — a `List`/`Tuple`/`Range` literal, and
+ *    `float[5](…)`) — a `List`/`Tuple`/`Range` literal, and
  *    any other head that builds one. Its top-level arguments ARE the
  *    components when there is one argument per component. A matrix
  *    constructor with fewer arguments declines. A `vecN` constructor with
@@ -339,7 +339,7 @@ export function compileGPUExtremum(
     );
   const shapes = args.map(gpuOperandShape);
   // An EMPTY collection contributes nothing to the fold. Recognized BEFORE the
-  // operand is compiled: `[]` lowers to `float[0]()` / `array<f32, 0>()`, which
+  // operand is compiled: `[]` lowers to `float[0]()`, which
   // `assertGPUScalarComponents` refuses outright, so compiling it first would
   // decline the whole reduction.
   const isEmpty = args.map((a) => a.isCollection && a.count === 0);

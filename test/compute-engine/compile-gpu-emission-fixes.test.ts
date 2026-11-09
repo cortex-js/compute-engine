@@ -72,12 +72,12 @@ describe('ContrastingColor with a tuple background and colour candidates (CE-241
 describe('Oklch and Oklab check their channels on the shader targets (CE-241.3)', () => {
   test.each(TARGETS)('%s: a channel that is not a literal is checked', (to) => {
     const lch = shader(['Oklch', 'u', 0.1, 30], to);
-    expect(lch.code).toMatch(/^_gpu_finite_color\(vec3f?\(u, 0\.1, 30\.0\)\)$/);
+    expect(lch.code).toMatch(/^_gpu_finite_color\(vec3\(u, 0\.1, 30\.0\)\)$/);
     expect(lch.preamble).toMatch(/_gpu_finite_color\(/);
     expect(lch.preamble).toContain('3.4028234663852886e38');
     const lab = shader(['Oklab', 'u', 0.1, 0.2], to);
     expect(lab.code).toMatch(
-      /^_gpu_oklab_to_oklch\(_gpu_finite_color\(vec3f?\(u, 0\.1, 0\.2\)\)\)$/
+      /^_gpu_oklab_to_oklch\(_gpu_finite_color\(vec3\(u, 0\.1, 0\.2\)\)\)$/
     );
   });
 
@@ -88,7 +88,7 @@ describe('Oklch and Oklab check their channels on the shader targets (CE-241.3)'
           ? ['Oklch', 'PositiveInfinity', 0.1, 30]
           : ['AsOklch', ['Oklch', 'PositiveInfinity', 0.1, 30]];
       expect(shader(json, to, { constantFold: false }).code).toMatch(
-        /^_gpu_finite_color\(vec3f?\(_gpu_inf\(\), 0\.1, 30\.0\)\)$/
+        /^_gpu_finite_color\(vec3\(_gpu_inf\(\), 0\.1, 30\.0\)\)$/
       );
     }
   });
@@ -97,7 +97,7 @@ describe('Oklch and Oklab check their channels on the shader targets (CE-241.3)'
     '%s: finite literal channels keep the plain vector',
     (to) => {
       expect(shader(['Oklch', 0.5, 0.1, 30], to).code).toMatch(
-        /^vec3f?\(0\.5, 0\.1, 30\.0\)$/
+        /^vec3\(0\.5, 0\.1, 30\.0\)$/
       );
     }
   );
@@ -164,7 +164,7 @@ describe('a loop-invariant binding with no reader is not declared (CE-258)', () 
       expect(r.success).toBe(true);
       // The list literal was bound as its own class, and `Min` folded to 1
       // without reading it.
-      expect(r.code).not.toMatch(/vec3f?\(1\.0, 2\.0, 3\.0\)/);
+      expect(r.code).not.toMatch(/vec3\(1\.0, 2\.0, 3\.0\)/);
       // Every declared temporary is read.
       for (const [, name] of r.code!.matchAll(
         /(?:float|f32|let|var) (_tv\d+)/g

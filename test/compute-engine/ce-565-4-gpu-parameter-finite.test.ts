@@ -90,7 +90,7 @@ function shader(
 /** The text of the emitted definition `name` (`_fn_F`) in `preamble`. */
 function definition(preamble: string, name: string): string {
   const start = preamble.search(
-    new RegExp(`(?:float|vec2f?|fn) ${name}\\s*\\(`)
+    new RegExp(`(?:float|vec2) ${name}\\s*\\(`)
   );
   expect(start).toBeGreaterThanOrEqual(0);
   const end = preamble.indexOf('\n}', start);

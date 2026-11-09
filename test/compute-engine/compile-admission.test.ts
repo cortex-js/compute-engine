@@ -486,7 +486,7 @@ describe('A value with no settled shape declines (R3)', () => {
         to,
       });
       expect(kept.success).toBe(true);
-      expect(String(kept.code)).toMatch(/^vec2f?\(1\.0, 2\.0\)$/);
+      expect(String(kept.code)).toMatch(/^vec2\(1\.0, 2\.0\)$/);
       for (const json of [
         ['If', 'False', ['Tuple', 1, 2], 0],
         ['Which', ['Less', 2, 3], ['Tuple', 1, 2], 'True', 0],

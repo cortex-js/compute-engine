@@ -311,8 +311,9 @@ export function gpuDeclaredBodyTarget(
  * boolean, a string, a complex value (itself a `vec2`) and a nested aggregate
  * all have a lowering of their own that does not fit a component slot.
  *
- * Without this, a `tuple<boolean, boolean>` declared `vec2f` and emitted
- * `vec2f(true, false)` — source no driver accepts, behind a reported success.
+ * Without this, a `tuple<boolean, boolean>` is declared `vec2` and emitted as
+ * `vec2(true, false)`, which GLSL reads as `vec2(1.0, 0.0)`: numbers where
+ * the program has booleans, behind a reported success.
  */
 export function gpuIsVectorComponentType(t: Type): boolean {
   // Exactly the types `gpuTypeOfDeclaredType` lowers to the shader SCALAR —
@@ -394,7 +395,7 @@ export function gpuDeclaredComponentCount(t: Type): number | undefined {
  * over-wide list, a function value).
  *
  * No declared type — the common `x ↦ …` case, whose parameters type as
- * `unknown` — is a shader scalar. Deliberately never `int`/`i32`: GPU number
+ * `unknown` — is a shader scalar. Deliberately never `int`: GPU number
  * literals are always emitted with a decimal point (`formatGPUNumber`) and
  * scalar shader arithmetic is float, so an integer-typed parameter would
  * disagree with its own call sites and poison every downstream use in float
@@ -465,7 +466,7 @@ export function gpuTypeOfValue(expr: Expression): string | undefined {
   if (n !== undefined) {
     if (n < 2 || n > 4) return undefined;
     // Width alone is not enough: every component must also fit a `vecN` slot,
-    // or the emission is `vec2f(true, false)` — see `gpuIsVectorComponentType`.
+    // or the emission is `vec2(true, false)` — see `gpuIsVectorComponentType`.
     return gpuValueHasVectorComponents(expr) ? gpuVecType(n) : undefined;
   }
   if (BaseCompiler.isNonScalarShape(expr)) return undefined;

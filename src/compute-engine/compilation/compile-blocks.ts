@@ -230,7 +230,7 @@ export function compileBlock(
   // `Block(s ≔ x; Declare(t))`), the erasure marker, which has no compiled
   // representation. Without this check the declaration was dropped from the
   // value position (Python returned the value of the statement before it)
-  // or spliced into it (`return var t: f32;`, `return let t`).
+  // or spliced into it (`return float t;`, `return let t`).
   const lastArg = args[args.length - 1];
   if (
     valueUsed &&
@@ -342,7 +342,7 @@ export function compileBlock(
   // the local is the block's value (`vec2 f(…) { float p; p = vec2(…);
   // return p; }` — "return type mismatch" on a real driver).
   // Widths outside 2–4 are tracked too: the list compilers lower those to an
-  // ARRAY constructor (`float[5](…)` / `array<f32, 5>(…)`), so the local's
+  // ARRAY constructor (`float[5](…)`), so the local's
   // declaration must be the matching array type — a `float` declaration with
   // an array assignment is the same mismatch, one width up.
   const vectorFrame = new Map<string, number>();
@@ -517,13 +517,13 @@ export function compileBlock(
 
     // GPU type hints for block locals.
     //
-    // GPU shader scalars are always `float`/`f32`. We intentionally never
-    // infer `int`/`i32` for an integer-valued local: GPU number literals are
+    // GPU shader scalars are always `float`. We intentionally never
+    // infer `int` for an integer-valued local: GPU number literals are
     // always emitted with a decimal point (`3` → `3.0`, see formatGPUNumber)
     // and scalar shader arithmetic is float, so an `int`-typed declaration
     // would disagree with its own float assignment (`int r; r = 3.0;` — not
     // valid GLSL) and poison every downstream use in float math. Only a
-    // complex-valued local needs a non-default hint (`vec2`/`vec2f`), as
+    // complex-valued local needs a non-default hint (`vec2`), as
     // does a vector-valued (point/tuple) one (`vec2`…`vec4`) or a color
     // (`vec3`); everything
     // else uses the `float` default in `target.declare`.

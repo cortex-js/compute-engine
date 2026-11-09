@@ -508,7 +508,7 @@ export function compileGPUStatementSelection(
   // integer or boolean type has none, so such a selection needs a `True`
   // default clause to take this form.
   if (
-    !/^(float|vec[234]|f32|vec[234]f)$/.test(type) &&
+    !/^(float|vec[234])$/.test(type) &&
     !isSymbol(args[args.length - 2], 'True')
   )
     return undefined;
