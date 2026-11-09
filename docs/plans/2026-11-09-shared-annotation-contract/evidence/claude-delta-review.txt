@@ -1,0 +1,17 @@
+I found no regressions in this set of fixes.
+
+I read the five earlier findings, `review-fix.diff`, and the corrected `profile-browser-coordinator.ts` and `profile-browser-run.mjs`. The corrected files match the diff. Each fix does what it should:
+
+- **Replacement workers:** the check `replacementCalls.length===2 && every(worker>2)` only counts `call` messages sent after `replacementStart`. In the pool's `create()`, workers are numbered from 1 by `++created`. The first two workers come from `prewarm()` and are never replaced before the abort. So a worker number above 2 can only be a replacement.
+- **Pre-abort sends nothing:** it counts `call` messages before and after the pre-aborted run. `check()` throws on failure (line 6), so the fixed value `preAbortCallCount:0` in the output is backed by that check.
+- **Route of the product answer:** in `/tmp/js-contract-browser/product-result.json`, `answer` has a `route` field and its value is `compiled`. The new `assert.equal` therefore checks a real field.
+- **Provenance:** the HEAD and status of both worktrees are now read with `execFileSync('git', ['-C', …])`. They are read before the build, and the build writes only under `/tmp/js-contract-browser`, so it cannot change the status that was recorded. Before, the script already assumed it ran from the Tycho worktree (`node_modules/...` was relative), so `process.cwd()` for Tycho adds no new assumption.
+- **Per-plane observations:** the slices `p*30000 … (p+1)*30000` match `PLANE = 30000` in `profile-browser-reference.ts:2,48`. The increments are `value − H` for each bin. These numbers are only recorded; nothing checks them, which is what the fix intended.
+- **Zero-work policy:** the empty check was removed and the result now says `tested:false`.
+- **Renamed output fields** (`zero`, `terminated` and `midflightAbort` became `zeroPolicy`, `terminateRequests` and `afterDispatchAbort`): a search of `scripts/profile-browser-*` and the `.md` and `.mjs` files in `/tmp/js-contract-browser` finds no reader of the old names. `run.mjs` only prints `result.controls`.
+
+One small point, not a regression: `git status --porcelain` can briefly take `index.lock` in `/tmp/wt-js-contract`. If another git command runs in that worktree at the same moment, one of the two can fail. Adding `--no-optional-locks` would prevent this. This is optional.
+
+I made no edits and ran no tests or agents. I ran only read-only commands.
+
+**Separate issue:** the nightly full test run of compute-engine failed at `ede66c90d`. The three failing files are `ce-1102-provisional-registry-weak-references`, `fungrim-loader` and `fungrim-loops`. No session has claimed it, and I did not start on it.

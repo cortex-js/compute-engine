@@ -1,0 +1,54 @@
+function step(H: list<integer>, n: integer) -> list<integer> {
+  let L = H
+  const r = H[90001]
+  for k in 1..n {
+    const p = 3 * fract(0.7548776662 * (r + k)) - 2
+    const q = 3 * fract(0.5698402910 * (r + k)) - 1.5
+    // A sample in the main cardioid or in the disc of radius 1/4 around -1
+    // never escapes, so the step skips it.
+    const x = p - 0.25
+    const t = x^2 + q^2
+    if t * (t + x) > q^2 / 4 && (p + 1)^2 + q^2 > 1/16 {
+      let a = 0.0
+      let b = 0.0
+      let e = 0
+      // An orbit that comes back to the point saved at pass 2, 4, 8, … is
+      // periodic: it never escapes, so the loop stops early.
+      let sa = 0.0
+      let sb = 0.0
+      let s = 2
+      for m in 1..5000 {
+        (a, b) := (a^2 - b^2 + p, 2*a*b + q)
+        if a^2 + b^2 > 4 { e = m; break }
+        if abs(a - sa) < 1e-12 && abs(b - sb) < 1e-12 { break }
+        if m == s { sa = a; sb = b; s = 2*s }
+      }
+      if e > 0 {
+        a = 0.0
+        b = 0.0
+        for m in 1..e {
+          (a, b) := (a^2 - b^2 + p, 2*a*b + q)
+          if a^2 + b^2 > 4 { break }
+          const i = floor((b + 1.125) / 2.25 * 150)
+          const j = floor((1 - a) / 3 * 200)
+          if i >= 0 && i < 150 && j >= 0 && j < 200 {
+            const c = 1 + i + 150*j
+            const d = 150 - i + 150*j
+            L = replaceAt(L, c, L[c] + 1)
+            L = replaceAt(L, d, L[d] + 1)
+            if e <= 500 {
+              L = replaceAt(L, c + 30000, L[c + 30000] + 1)
+              L = replaceAt(L, d + 30000, L[d + 30000] + 1)
+            }
+            if e <= 50 {
+              L = replaceAt(L, c + 60000, L[c + 60000] + 1)
+              L = replaceAt(L, d + 60000, L[d + 60000] + 1)
+            }
+          }
+        }
+      }
+    }
+  }
+  L = replaceAt(L, 90001, r + n)
+  L
+}

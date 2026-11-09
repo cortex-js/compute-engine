@@ -1,0 +1,17 @@
+{
+  "exitCode": 0,
+  "passed": 14,
+  "failed": 0,
+  "skipped": 0,
+  "files": {
+    "tests/node/graph-paper/showcase-traffic.test.ts": "429b599e8b8123182d8482c6fab88dffb77a3f3160c1ca12558e9342ebb8c4cb",
+    "tests/node/graph-paper/showcase-heat.test.ts": "f2dfd444a572efcd65153c73d51c1a5e24a1f33085967e7d83fc7d785b8394db",
+    "tests/node/graph-paper/showcase-othello.test.ts": "888ff05428f170b56ab7ece2899d7885e2b6a4bc5e59885ddb324665ba77455f"
+  },
+  "worktree": "/tmp/wt-tycho-browser-profile",
+  "tychoCommit": "0e6482e1f",
+  "computeEngine": "0.184.0",
+  "command": "TYCHO_NODE_JOBS=2 TYCHO_NODE_QUIET_MS=120000 TYCHO_NODE_COMPILE_BATCH=2 npm run test:quick -- --fresh --file=tests/node/graph-paper/showcase-traffic.test.ts --file=tests/node/graph-paper/showcase-heat.test.ts --file=tests/node/graph-paper/showcase-othello.test.ts",
+  "limits": "2 test workers, compile batch 2, 120s per-test runner timeout and120s no-output watchdog",
+  "scope": "Observed focused regression assertions only; no profile admission/capture/performance claim"
+}

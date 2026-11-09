@@ -1,3 +1,8 @@
+import {
+  scalarResultIsComplex,
+  scalarOperandIsComplex,
+  scalarConvertOperand,
+} from './javascript-fragment-facts.js';
 import { derivativeClosedForm } from './derivative-closed-form.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
 import {
@@ -4644,7 +4649,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Add: (args, compile, target) => {
     if (args.length === 1) return compile(args[0]);
-    const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
+    const anyComplex = scalarResultIsComplex(target) ??
+      args.some((a) => BaseCompiler.isComplexValued(a));
     if (!anyComplex) {
       // Try full constant fold
       const constants = args.map(tryGetConstant);
@@ -4665,18 +4671,20 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // literals stay inline (free to duplicate; keeps simple shapes
     // byte-identical to the previous emission).
     const bindings: Array<[name: string, value: string]> = [];
-    const parts = args.map((a) => {
+    const parts = args.map((a, index) => {
       // A complex operand whose value is known at compile time — the
       // imaginary unit, or a complex literal — contributes its two components
       // as constants, so the object holding them is never built and never
       // read back (`x + i` is `{ re: x, im: 1 }`).
-      const literal = BaseCompiler.isComplexValued(a)
+      const literal = (scalarOperandIsComplex(index, target) ??
+        BaseCompiler.isComplexValued(a))
         ? complexLiteralParts(a)
         : undefined;
       if (literal !== undefined)
         return { re: String(literal.re), im: String(literal.im) };
       const code = compile(a);
-      const isComplex = BaseCompiler.isComplexValued(a);
+      const isComplex = scalarOperandIsComplex(index, target) ??
+        BaseCompiler.isComplexValued(a);
       if (isComplex && !isSymbol(a) && !isNumber(a)) {
         const name = BaseCompiler.tempVar(target);
         bindings.push([name, code]);
@@ -8691,7 +8699,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `Math.sinh(${compile(args[0])})`;
   },
   Sqrt: (args, compile, target) => {
-    if (BaseCompiler.isComplexValued(args[0])) {
+    if (scalarOperandIsComplex(0, target) ?? BaseCompiler.isComplexValued(args[0])) {
       return complexUnary(target, '_SYS.csqrt', compile(args[0]));
     }
     const c = tryGetConstant(args[0]);
@@ -8712,11 +8720,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // NaN-poison it. In `strict` mode an unknown-sign operand keeps
     // `Math.sqrt` (pinned; `promotesToComplexLane` mirrors the
     // `isComplexValued` Sqrt/Ln/Log carve-out so the parent agrees).
-    if (promotesToComplexLane('Sqrt', args))
+    if (scalarResultIsComplex(target) ?? promotesToComplexLane('Sqrt', args))
       return complexUnary(
         target,
         '_SYS.csqrt',
-        complexOperandCode(args[0], compile)
+        scalarResultIsComplex(target) !== undefined
+          ? scalarConvertOperand(0, compile(args[0]), target)!
+          : complexOperandCode(args[0], compile)
       );
     return `Math.sqrt(${compile(args[0])})`;
   },
@@ -8936,7 +8946,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Negate: ([x], compile, target) => {
     if (x === null) throw new Error('Could not compile `Negate`: no argument');
-    if (!BaseCompiler.isComplexValued(x)) {
+    if (!(scalarResultIsComplex(target) ?? BaseCompiler.isComplexValued(x))) {
       const c = tryGetConstant(x);
       if (c !== undefined) return String(-c);
       return `(-(${compile(x)}))`;
@@ -11524,7 +11534,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
    * compilation, with its CSE session open. With `batch`, the target of the
    * `broadcast()` batch body (`compileBatchBody`).
    */
-  private prepareCompilation(
+  protected prepareCompilation(
     expr: Expression,
     options: CompilationOptions<Expression>,
     batch?: BatchCompileState

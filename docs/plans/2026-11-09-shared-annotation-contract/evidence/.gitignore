@@ -1,0 +1,4 @@
+# Retained research validation logs.
+!*.log
+!inventory/*.log
+!before-review/*.log

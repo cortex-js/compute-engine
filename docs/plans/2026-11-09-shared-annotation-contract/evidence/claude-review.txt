@@ -1,0 +1,41 @@
+First, an unrelated notice: the nightly full test run of compute-engine failed at `ede66c90d`. Three test files failed: `ce-1102-provisional-registry-weak-references`, `fungrim-loader` and `fungrim-loops`. No session has claimed it, and I did not start on it.
+
+## Review of the four browser test scripts
+
+I found no defect that makes a reported result wrong. Every value comparison passes for a reason I could check. I found four gaps where the code does not assert what the results claim, plus one weak assertion.
+
+### What holds
+
+- **Reference oracle** (`profile-browser-reference.ts`): I compared it line by line with `original.epsil`. It matches on these points:
+  - the 1-based to 0-based index change (`c → i+150j`, `d → 149-i+150j`);
+  - the simultaneous `(a, b) :=` update;
+  - the cycle check with period doubling;
+  - the three planes (5000, 500 and 50, where `e ≤ 5000` is always true);
+  - the cursor value `r + n`.
+- **Value comparisons**: all compare every bin with `Object.is` over 90,001 elements. This covers the original, the changed program run serially, `runAsync` with no pool, and both pool cases. Each run also checks that the input `H` is unchanged.
+- **Program change**: the script checks that exactly 6 `replaceAt` lines become `+=`, and that the static route is `pool`. `adaptation.diff` shows only the `parallel for` line and the six increments.
+- **Route choice**: the counts of `call` messages are asserted. They are 0 below the threshold, 2 at or above it, and 2 for 25,000 passes with a threshold of 20,000. The no-pool reason is asserted.
+- **Product run**: the code now compares the exact `answer` against `stepReference(zeros, 100)`, and checks that `asyncRuns === 0`. In the stored result, `answer.route` is `compiled`.
+
+### Gaps
+
+1. **Replacement workers are not asserted** (`profile-browser-coordinator.ts:34`). `check(terminated===created)` also passes when the pool never replaced a worker (2 created, 2 terminated). The data does show replacement: `created: 4`, and the next job ran on workers 3 and 4 (`s3:call:7`, `s4:call:8`). No check enforces it, so another run could lose that evidence without a failure. **Fix:** assert `created === 4`, or assert that the replacement job's `call` messages go to workers with an index greater than 2.
+
+2. **The zero-work control checks nothing** (`profile-browser-coordinator.ts:26`). `const zero=H.slice(); equal(zero,H)` runs no compiled code. The result still writes `zero:{hostSkipped:true}` beside the real controls. A reader can take it as evidence. **Fix:** remove it, or mark it in the output and in the report as a statement about how the host behaves, with no test behind it.
+
+3. **The provenance commits are fixed strings in the code** (`profile-browser-run.mjs:20`). The values `tycho:'0e6482e1f'` and `ceSource:'916aff07c'` are typed in, not read from the worktrees. I checked both worktrees: today they match. CE is at `916aff07c` with only `node_modules` untracked. Tycho is at `0e6482e1f` with only the new scripts and a handoff file untracked. A later run on another commit, or on modified files, would record wrong provenance. **Fix:** read `git rev-parse HEAD` and `git status --porcelain` for both worktrees during the run.
+
+4. **The route of the product answer is not asserted** (`profile-browser-run.mjs:18-19`). `compiled > 0` only counts calls to `compile()`. The data does show `answer.route === 'compiled'`. **Fix:** assert that field, if the report says the product answer came from compiled code.
+
+5. **Weak assertion: the pre-abort test** (`profile-browser-coordinator.ts:28`). It checks only the rejection reason. It does not check that the pre-aborted run sent no `call` message. The traffic log confirms that it sent none, but no check enforces it.
+
+### Limitations the report should state (not defects)
+
+- The mid-flight abort happens after the jobs are sent. Nothing proves the workers were computing at that moment. Jobs 5 and 6 have no `call-result`, which agrees with this.
+- The `terminated` counter counts `terminate()` requests. It does not prove that a worker exited.
+- The product test runs the prelude worker module in its own bundle against installed CE 0.184.0. It is not the full Tycho UI or render route. The pool tests run against the CE source at `916aff07c`.
+- No COOP/COEP headers are set, so `crossOriginIsolated` is false and `SharedArrayBuffer` is undefined. The result records this.
+- The results print only the total and the cursor, not a count for each plane. The match against the reference therefore does not show that planes 2 and 3 (`e ≤ 500` and `e ≤ 50`) received any increments.
+- The scripts make no performance claim.
+
+I made no edits and ran no tests. The only code I ran was a read-only `node` command that printed parts of the result files. `browser-report.md` did not exist yet, so I did not review it.

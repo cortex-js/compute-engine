@@ -1,5 +1,10 @@
 // If, Which and When expressions, and the reads a condition tests.
 
+import {
+  scalarResultIsComplex,
+  scalarConvertOperand,
+} from './javascript-fragment-facts.js';
+
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -90,17 +95,21 @@ export function compileExprIf(
     // `isComplexValued` of the node, reads only the arms that
     // `liveSelectionArms` keeps: a dead arm is not emitted, so it does not
     // decide the representation.
-    const coerce = branchComplexCoercion(
-      node !== undefined && isFunction(node, 'If')
-        ? liveSelectionArms(node)
-        : [args[1], args[2]],
-      target
-    );
+    const annotated = scalarResultIsComplex(target);
+    const coerce = annotated === undefined
+      ? branchComplexCoercion(
+          node !== undefined && isFunction(node, 'If')
+            ? liveSelectionArms(node)
+            : [args[1], args[2]],
+          target
+        )
+      : undefined;
     // Both arms are conditionally evaluated: each is its own region, so a
     // temporary bound inside an arm is never hoisted out of it (§7.3).
     const arm = (v: Expression, i: number): TargetSource => {
       const code = compileOp(node, i, target, 0, v);
       assertNoStatementOperand(v, code, target);
+      if (annotated !== undefined) return scalarConvertOperand(i, code, target)!;
       return coerce ? coerce(v, code) : code;
     };
     // A condition whose TYPE is the value `true` or `false` (a proven

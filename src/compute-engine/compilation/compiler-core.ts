@@ -2,6 +2,10 @@
 // mutual recursion. It imports every handler module and installs the hubs in
 // the record of compiler-core-hooks.ts.
 
+import {
+  enterScalarFragment,
+  assertScalarPreparedNode,
+} from './javascript-fragment-facts.js';
 import { isIndexReadTuple } from '../boxed-expression/index-read-tuple.js';
 import { nonScalarEnclosingBindings } from '../boxed-expression/enclosing-binding-result-type.js';
 import { derivativeClosedForm } from './derivative-closed-form.js';
@@ -937,6 +941,7 @@ function compileExpression(
    * settled shape that `unsettledShapeIn()` finds. */
   admission?: { unsettled?: UnsettledShape }
 ): TargetSource {
+  assertScalarPreparedNode(expr, target);
   // Check before folding/inlining can replace a captured call by its body.
   if (CompilerState._compileDepth === 0) {
     assertCapturedCallableBindings(expr, target);
@@ -1227,11 +1232,13 @@ function compileExpressionInFrame(
   // `finally` below knows not to freeze a report for code that was never
   // emitted.
   let emitted = false;
+  let leaveScalarFragment: (() => void) | undefined;
   // A function node stays on the stack while its operands compile
   // (`_compileParents`).
   const isParent = isFunction(expr);
   if (isParent) _compileParents.push(expr);
   try {
+    leaveScalarFragment = enterScalarFragment(expr, target);
     // In `mode: 'bigint'` the lane analysis of the outermost expression
     // decides, before any emission, whether every numeric node is on the
     // integer lane (`compile-bigint-lane.ts`); a node that is not declines
@@ -1274,6 +1281,7 @@ function compileExpressionInFrame(
     emitted = true;
     return compiled;
   } finally {
+    leaveScalarFragment?.();
     if (isParent) _compileParents.pop();
     CompilerState._compileDepth -= 1;
     CompilerState._callSiteTarget = prevCallSiteTarget;

@@ -1,6 +1,7 @@
 // Operator expressions: compileExprOperator, shadowed library lowerings, and
 // the head tables that decide real-only and complex-propagating operators.
 
+import { scalarResultIsComplex } from './javascript-fragment-facts.js';
 import type {
   Expression,
   FunctionInterface,
@@ -304,7 +305,7 @@ export function compileExprOperator(
     // Skip infix operators for complex operands — fall through to function
     // dispatch. An operand the D2 runtime rule has bound to a real
     // projection (`_codeOverrides`) is real here.
-    const hasComplex = args.some(
+    const hasComplex = scalarResultIsComplex(target) ?? args.some(
       (a) => core.isComplexValued(a) && !_codeOverrides.has(a)
     );
     if (!hasComplex) {

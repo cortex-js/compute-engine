@@ -1,0 +1,13 @@
+{
+  "browser": "156.0.8078.4",
+  "node": "v26.13.0",
+  "tycho": "0e6482e1f",
+  "ceSource": "916aff07c",
+  "installedCE": "0.184.0",
+  "errors": [],
+  "assets": {
+    "coordinator": "03277dbc89040b2d7a9a510848f011ba9f2d181e8904ccaa6db023559367c632",
+    "product": "04d86418fcd935b9d0ac65b8c1fab10b9fc36d8c5c73d9900ded3050f910c2f6",
+    "kernel-worker": "4932b562f408522f8584a1d5571a90429892fb5be4c461a10c7a289acac4fb89"
+  }
+}

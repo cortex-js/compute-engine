@@ -1,0 +1,51 @@
+--- before/profile-browser-coordinator.ts
++++ after/profile-browser-coordinator.ts
+@@ -20,20 +20,20 @@
+  check(typeof parallel.runAsync==='function','current CE runAsync present');check(parallel.parallelLoops?.length===1&&parallel.parallelLoops[0].route==='pool','static pool route '+JSON.stringify(parallel.parallelLoops));
+  const H=Array.from({length:90001},(_,i)=>i===90000?137:i%997===0?2:0);const unchanged=H.slice();
+  const rows=[];
+- function sample(value,n,label){const expected=stepReference(H,n);equal(value,expected,label);equal(H,unchanged,'input unchanged');return {label,n,cursor:value[90000],sum:value.slice(0,90000).reduce((a,b)=>a+b,0),exact:true};}
++ function sample(value,n,label){const expected=stepReference(H,n);equal(value,expected,label);equal(H,unchanged,'input unchanged');return {label,n,cursor:value[90000],sum:value.slice(0,90000).reduce((a,b)=>a+b,0),planes:[0,1,2].map(p=>({sum:value.slice(p*30000,(p+1)*30000).reduce((a,b)=>a+b,0),increments:value.slice(p*30000,(p+1)*30000).reduce((a,b,i)=>a+b-H[p*30000+i],0)})),exact:true};}
+  for(const n of [100,25000]){const v=serial.run({H,sampleCount:n});sample(v,n,'original');equal(parallel.run({H,sampleCount:n}),v,'adapted serial');rows.push(sample(v,n,'serial+reference'));}
+  const noPool=[];rows.push({...sample(await parallel.runAsync({H,sampleCount:100},{minPasses:1,onLoop:r=>noPool.push(r)}),100,'no-pool'),reports:noPool});check(noPool[0]?.reason==='no-pool','no pool reason');
+  const pool=createKernelPool({size:2,cancelGrace:5,create:()=>{const worker=new Worker('./kernel-worker.js',{type:'module'});const index=++created;return {postMessage:(m,t)=>{traffic.push({direction:'send',worker:index,type:m.type,job:m.job});worker.postMessage(m,t??[]);},terminate:()=>{terminated++;worker.terminate();},addEventListener:(event,handler)=>worker.addEventListener(event,e=>{if(event==='message')traffic.push({direction:'receive',worker:index,type:e.data.type,job:e.data.job});handler(e);})};}});pools.push(pool);ce.workers=pool;await pool.prewarm();
+  for(const [n,minPasses] of [[100,20000],[100,1],[25000,20000]]){const reports=[];const before=traffic.filter(x=>x.type==='call'&&x.direction==='send').length;const value=await parallel.runAsync({H,sampleCount:n},{minPasses,onLoop:r=>reports.push(r)});const calls=traffic.filter(x=>x.type==='call'&&x.direction==='send').length-before;check(n<minPasses?calls===0:calls===2,'routing calls');rows.push({...sample(value,n,'runAsync'),minPasses,reports,calls});}
+- // The host explicitly skips zero work; raw Range(1,0) is not empty.
+- const zero=H.slice();equal(zero,H,'zero host identity');
+- const pre=new AbortController();pre.abort('pre-aborted');let preReason;try{await parallel.runAsync({H,sampleCount:100},{signal:pre.signal,minPasses:1});}catch(e){preReason=e;}check(preReason==='pre-aborted','preabort reason');
++ // Zero work is a host policy outside this experiment, not an execution control.
++ const callsBeforePreAbort=traffic.filter(x=>x.type==='call'&&x.direction==='send').length;
++ const pre=new AbortController();pre.abort('pre-aborted');let preReason;try{await parallel.runAsync({H,sampleCount:100},{signal:pre.signal,minPasses:1});}catch(e){preReason=e;}check(preReason==='pre-aborted','preabort reason');check(traffic.filter(x=>x.type==='call'&&x.direction==='send').length===callsBeforePreAbort,'preabort sends no calls');
+  const ctl=new AbortController();const reason='superseded-job';let published=0;const beforeCalls=traffic.filter(x=>x.type==='call'&&x.direction==='send').length;
+  const pending=parallel.runAsync({H,sampleCount:10000000},{minPasses:1,signal:ctl.signal}).then(()=>{published++;return 'resolved';},e=>e);
+  for(let attempts=0;attempts<200&&traffic.filter(x=>x.type==='call'&&x.direction==='send').length===beforeCalls;attempts++)await wait(1);
+  check(traffic.filter(x=>x.type==='call'&&x.direction==='send').length>beforeCalls,'cancel after dispatch');ctl.abort(reason);check(await pending===reason,'abort reason');check(published===0,'no partial publication');
+- await wait(30);rows.push(sample(await parallel.runAsync({H,sampleCount:100},{minPasses:1}),100,'replacement job'));equal(H,unchanged,'abort input unchanged');
++ await wait(30);const replacementStart=traffic.length;rows.push(sample(await parallel.runAsync({H,sampleCount:100},{minPasses:1}),100,'replacement job'));const replacementCalls=traffic.slice(replacementStart).filter(x=>x.type==='call'&&x.direction==='send');check(replacementCalls.length===2&&replacementCalls.every(x=>x.worker>2),'replacement job uses replacement workers');equal(H,unchanged,'abort input unchanged');
+  pool.dispose();check(terminated===created,'all created workers terminated through pool');
+- self.postMessage({ok:true,original,adapted,rows,zero:{hostSkipped:true,cursor:zero[90000]},controls:{preAbort:true,midflightAbort:true,published,created,terminated},traffic,staticRoutes:parallel.parallelLoops.map(l=>l.route),crossOriginIsolated:self.crossOriginIsolated,sharedArrayBuffer:typeof SharedArrayBuffer,originalCode:serial.code,parallelCode:parallel.parallelCode,productExpected:stepReference(new Array(90001).fill(0),100),productSource:original+'\nconst H = [0 for k in 1..90001]\nconst answer = step(H, 100)'});
++ self.postMessage({ok:true,original,adapted,rows,zeroPolicy:{tested:false,description:'Host must skip zero; raw Range(1,0) is descending inclusive'},controls:{preAbort:true,preAbortCallCount:0,afterDispatchAbort:true,replacementWorkerIds:replacementCalls.map(x=>x.worker),published,created,terminateRequests:terminated},traffic,staticRoutes:parallel.parallelLoops.map(l=>l.route),crossOriginIsolated:self.crossOriginIsolated,sharedArrayBuffer:typeof SharedArrayBuffer,originalCode:serial.code,parallelCode:parallel.parallelCode,productExpected:stepReference(new Array(90001).fill(0),100),productSource:original+'\nconst H = [0 for k in 1..90001]\nconst answer = step(H, 100)'});
+  }catch(e){self.postMessage({ok:false,error:String(e),stack:e.stack,traffic});}finally{for(const p of pools)p.dispose();}
+ };
+--- before/profile-browser-run.mjs
++++ after/profile-browser-run.mjs
+@@ -5,6 +5,9 @@
+ import {resolve,basename} from 'node:path';
+ import {createHash} from 'node:crypto';
+ import assert from 'node:assert/strict';
++import {execFileSync} from 'node:child_process';
++const worktreeProvenance=path=>({path,head:execFileSync('git',['-C',path,'rev-parse','HEAD'],{encoding:'utf8'}).trim(),status:execFileSync('git',['-C',path,'status','--porcelain'],{encoding:'utf8'})});
++const treeState={tycho:worktreeProvenance(process.cwd()),ce:worktreeProvenance('/tmp/wt-js-contract')};
+ const out='/tmp/js-contract-browser';mkdirSync(out,{recursive:true});
+ const entries={'coordinator':'scripts/profile-browser-coordinator.ts','product':'scripts/profile-browser-product.ts','kernel-worker':'/tmp/wt-js-contract/src/kernel-worker.ts'};
+ for(const [name,entry] of Object.entries(entries))await build({entryPoints:[entry],outfile:`${out}/${name}.js`,bundle:true,format:'esm',platform:'browser',target:'es2022',logLevel:'warning',metafile:true}).then(result=>writeFileSync(`${out}/${name}-meta.json`,JSON.stringify(result.metafile)));
+@@ -17,7 +20,7 @@
+ writeFileSync(`${out}/original.epsil`,result.original);writeFileSync(`${out}/parallel.epsil`,result.adapted);
+ const product=await page.evaluate(source=>new Promise((resolve,reject)=>{const w=new Worker('/product.js',{type:'module'});const messages=[];const timer=setTimeout(()=>{w.terminate();reject(Error('product timeout'));},30000);w.onerror=e=>{clearTimeout(timer);w.terminate();reject(Error(e.message));};w.onmessage=e=>{messages.push(e.data);if(e.data.type==='result'||e.data.type==='failed'){clearTimeout(timer);w.terminate();resolve(messages);}};w.postMessage({type:'check',id:91,source,settings:{angleUnit:'radians',precision:'standard',complexMode:false}});}),result.productSource);
+ writeFileSync(`${out}/product-result.json`,JSON.stringify(product,null,2));assert.equal(product.at(-1).type,'result');assert.equal(product.at(-1).result.valid,true,JSON.stringify(product));assert.equal(product.at(-1).instrument.asyncRuns,0);assert(product.at(-1).instrument.compiled>0);
+-const answer=product.at(-1).result.values.find(v=>v.name==='answer');assert(answer,'product answer exists');assert.deepEqual(answer.json,['List',...result.productExpected]);
+-writeFileSync(`${out}/provenance.json`,JSON.stringify({browser:browser.version(),node:process.version,tycho:'0e6482e1f',ceSource:'916aff07c',installedCE:JSON.parse(readFileSync('node_modules/@cortex-js/compute-engine/package.json')).version,errors,assets:Object.fromEntries(Object.keys(entries).map(n=>[n,createHash('sha256').update(readFileSync(`${out}/${n}.js`)).digest('hex')]))},null,2));assert.deepEqual(errors,[]);
++const answer=product.at(-1).result.values.find(v=>v.name==='answer');assert(answer,'product answer exists');assert.equal(answer.route,'compiled');assert.deepEqual(answer.json,['List',...result.productExpected]);
++writeFileSync(`${out}/provenance.json`,JSON.stringify({browser:browser.version(),node:process.version,worktrees:treeState,installedCE:JSON.parse(readFileSync('node_modules/@cortex-js/compute-engine/package.json')).version,errors,assets:Object.fromEntries(Object.keys(entries).map(n=>[n,createHash('sha256').update(readFileSync(`${out}/${n}.js`)).digest('hex')]))},null,2));assert.deepEqual(errors,[]);
+ console.log(JSON.stringify({ok:true,rows:result.rows,controls:result.controls,product:{valid:product.at(-1).result.valid,instrument:product.at(-1).instrument},browser:browser.version()}));
+ }finally{await browser?.close();await new Promise(r=>server.close(r));}

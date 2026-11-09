@@ -1,0 +1,23 @@
+{
+  "browser": "156.0.8078.4",
+  "node": "v26.13.0",
+  "worktrees": {
+    "tycho": {
+      "path": "/private/tmp/wt-tycho-browser-profile",
+      "head": "0e6482e1f08f3925852cae9fc157da9a9e274463",
+      "status": "?? docs/scratch/2026-11-09-browser-profile-handoff.md\n?? scripts/profile-browser-coordinator.ts\n?? scripts/profile-browser-product.ts\n?? scripts/profile-browser-reference.ts\n?? scripts/profile-browser-run.mjs\n"
+    },
+    "ce": {
+      "path": "/tmp/wt-js-contract",
+      "head": "916aff07c13e34482688631008c0c7a0275e45af",
+      "status": "?? node_modules\n"
+    }
+  },
+  "installedCE": "0.184.0",
+  "errors": [],
+  "assets": {
+    "coordinator": "7c8e054555a6019285c619edd041f386b4e3041c6538a52b65a308e65afda07d",
+    "product": "04d86418fcd935b9d0ac65b8c1fab10b9fc36d8c5c73d9900ded3050f910c2f6",
+    "kernel-worker": "4932b562f408522f8584a1d5571a90429892fb5be4c461a10c7a289acac4fb89"
+  }
+}

@@ -1,0 +1,5 @@
+
+> tycho@1.0.0 test:quick
+> node scripts/tasks.mjs test:quick --fresh --file=tests/node/graph-paper/showcase-traffic.test.ts --file=tests/node/graph-paper/showcase-heat.test.ts --file=tests/node/graph-paper/showcase-othello.test.ts
+
+node: PASS (6.49s) node-tests: PASS (14 passed, 0 failed, 0 skipped)
