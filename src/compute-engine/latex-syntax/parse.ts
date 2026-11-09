@@ -2259,22 +2259,49 @@ export class _Parser implements Parser {
   _visualSpaceStops: ReadonlySet<number> | null = null;
 
   /**
-   * The index of the token where the right operand of a juxtaposition
-   * starts, when that token starts visual space that a `+` or a `-` follows,
-   * as the `\,` of `a\, - 1`. Otherwise -1.
+   * The index of the token where the right operand of the juxtaposition
+   * that is being parsed starts, or -1. Visual space at this token is
+   * between two operands; visual space at the start of any other expression
+   * has no operand before it. Two rules read the difference.
    *
-   * The sign is then the infix operator of the left operand: `a\, - 1` is
-   * `a - 1`. The number reader skips visual space before the sign of a
-   * number, so at this token it would read `-1` as one number, and the
-   * juxtaposition would give the product `a·(-1)`. `parsePrimary()` does not
-   * call the number reader at this token. It reads the spacing command
-   * alone, as it does before a sign with no number after it (`a\, - b`), and
-   * the infix loop then reads the sign.
+   * After an operand, a `+` or a `-` after visual space is the infix
+   * operator of that operand: `a\, - 1` is `a - 1`. The number reader skips
+   * visual space before the sign of a number, so at this token it would read
+   * `-1` as one number, and the juxtaposition would give the product
+   * `a·(-1)`. `parsePrimary()` does not call the number reader when visual
+   * space and then a sign are at this token. It reads the spacing command
+   * alone, and the infix loop then reads the sign.
    *
-   * At the start of an expression there is no left operand, so the number
-   * reader still reads `\, -1` as the number -1.
+   * With no operand before it, an operator after visual space is a prefix
+   * operator: `x = \, -b` is `x = -b`. See
+   * `parsePrefixOperatorAfterSpacing()`, which `parseExpression()` does not
+   * call at this token.
    */
-  private _spacingBeforeSign = -1;
+  private _juxtaposedOperandStart = -1;
+
+  /**
+   * Skip visual space, then parse a prefix operator and its operand:
+   * `\, -b` is `Negate(b)`, as `-b` is. The spacing command is not kept in
+   * the result.
+   *
+   * Without this, the primary parser read the spacing command as an operand,
+   * and the infix loop read the sign with that operand on its left:
+   * `\, -b` was `Subtract(HorizontalSpacing(3), b)`, whose canonical form is
+   * an error.
+   *
+   * Return `null`, with the index unchanged, when no visual space is at the
+   * index or when no prefix operator applies after it.
+   */
+  private parsePrefixOperatorAfterSpacing(
+    until: Readonly<Terminator>
+  ): MathJsonExpression | null {
+    const start = this.index;
+    this.skipVisualSpace();
+    if (this.index === start) return null;
+    const result = this.parsePrefixOperator(until);
+    if (result === null) this.index = start;
+    return result;
+  }
 
   /** True when visual space is at the index and a `+` or a `-` follows it.
    * The index does not move. */
@@ -7154,9 +7181,10 @@ export class _Parser implements Parser {
     //
     // 2. Is it a number?
     //
-    // Not at the spacing before the infix sign of a juxtaposition: see
-    // `_spacingBeforeSign`.
-    if (start !== this._spacingBeforeSign) result ??= this.parseNumber();
+    // Not at visual space before the infix sign of a juxtaposition: see
+    // `_juxtaposedOperandStart`.
+    if (start !== this._juxtaposedOperandStart || !this.atSpacingBeforeSign())
+      result ??= this.parseNumber();
 
     //
     // 2b. Is it a double-quoted string literal? (e.g. `"hello"`)
@@ -7655,6 +7683,11 @@ export class _Parser implements Parser {
     // 1. Do we have a prefix operator?
     //
     let lhs = this.parsePrefixOperator({ ...until, minPrec: 0 });
+    // Visual space, then a prefix operator (`x = \, -b`). Not at the right
+    // operand of a juxtaposition (`a\, - b`), where the operator is an infix
+    // operator: see `_juxtaposedOperandStart`.
+    if (lhs === null && start !== this._juxtaposedOperandStart)
+      lhs = this.parsePrefixOperatorAfterSpacing({ ...until, minPrec: 0 });
 
     //
     // 2. Do we have a primary?
@@ -7785,15 +7818,13 @@ export class _Parser implements Parser {
               // delimiter/environment) — used to reconstruct the source span of
               // an applied letter-run (`divisors(…)`) in the diagnostic below.
               const rhsStartToken = this.index;
-              const outerSpacingBeforeSign = this._spacingBeforeSign;
-              this._spacingBeforeSign = this.atSpacingBeforeSign()
-                ? rhsStartToken
-                : -1;
+              const outerOperandStart = this._juxtaposedOperandStart;
+              this._juxtaposedOperandStart = rhsStartToken;
               const rhs = this.parseExpression({
                 ...until,
                 minPrec: INVISIBLE_OP_PRECEDENCE + 1,
               });
-              this._spacingBeforeSign = outerSpacingBeforeSign;
+              this._juxtaposedOperandStart = outerOperandStart;
               if (rhs !== null) {
                 // Diagnostic: an application-like juxtaposition (a bare symbol
                 // immediately followed by a delimited group or matrix

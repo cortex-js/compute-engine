@@ -268,6 +268,13 @@
   now `\sin(x) - 1`. With `form: 'raw'`, `\int \frac{dx}{x}\, - 1` now keeps
   the spacing command as a `HorizontalSpacing` operand next to the integral,
   as `\int \frac{1}{x}\,dx\, - 1` does.
+- **A spacing command at the start of an expression, before a sign or another
+  prefix operator, no longer gives an error.** `x = \, -b` was parsed as
+  `x = \mathrm{space} - b` and gave `x == -b + Error(…)`; it is now `x == -b`.
+  `\frac{\,-b}{2}` and `\sqrt{\quad -b}` are now `-b/2` and `sqrt(-b)`, and
+  `\,\neg p` is `Not(p)`. With `form: 'raw'`, the spacing command is not
+  kept in these cases, and `\, -1` is `["Negate", 1]`, as `-1` is (it was
+  the number `-1`).
 
 ### Performance
 

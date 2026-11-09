@@ -81,11 +81,14 @@ describe('CE-1170 visual space before a plus or a minus sign', () => {
     }
   });
 
-  test('with no left operand, the sign is the sign of the number', () => {
-    expect(raw('\\,-1')).toEqual(-1);
-    expect(raw('x=\\,-1')).toEqual(['Equal', 'x', -1]);
-    expect(raw('a+\\,-1')).toEqual(['Add', 'a', -1]);
-    expect(raw('a\\cdot\\,-1')).toEqual(['Multiply', 'a', -1]);
+  test.each([
+    ['\\,-1', '-1'],
+    ['x=\\,-1', 'x=-1'],
+    ['a+\\,-1', 'a+-1'],
+    ['a\\cdot\\,-1', 'a\\cdot -1'],
+  ])('with no left operand, the sign of %s is a prefix sign', (spaced, plain) => {
+    expect(raw(spaced)).toEqual(raw(plain));
+    expect(canonical(spaced)).toEqual(canonical(plain));
   });
 
   test('visual space before a number with no sign is still skipped', () => {
