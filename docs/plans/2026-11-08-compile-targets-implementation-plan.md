@@ -385,6 +385,56 @@ route, so the entry did not run. The 236 GLSL test files pass and
 `npm run test:glsl` reports 0 disagreements. No audit ran: the removed code
 could not write code for any record.
 
+**The result of the `gpu-draw-order.ts` session** (2026-11-09, base
+`b9b37fca6`). Removed: the random-draw part of `gpu-draw-order.ts`
+(`gpuBindEveryDraw`, `gpuDrawComesAfter()`, `gpuDrawOrderError()`,
+`gpuArmDrawsWhileBinding()`, `gpuRecompileWithBoundDraws()`,
+`gpuAssertBindingKeepsDrawOrder()`, `gpuRecordBoundDraws()`,
+`gpuDrawCount()` and their helpers), the draw-count conditions of its
+callers (the statement form of a selection in `gpu-statements.ts`,
+`gpuHoistKeepsCallerOrder()`, `gpuOperandOnce()`, `gpu-extrema.ts`, the
+`Sum` lowerings, `Remainder`, `Cot` and the `If`/`Which` arm tests of
+`gpu-functions.ts`, the `valueBlock` and `recompileStatement` hooks of
+`gpu-shader-target.ts`), and the draw code of `gpu-random.ts`: the random
+state, the draws, the seed folding, the PCG3D preamble and the five
+Random-family entries of the GLSL table. The measure of `gpu-random.ts`, made
+first (a probe at the entry of each draw function over the 236 GLSL test
+files): its draw code ran only on the route that skips the pass, a GLSL
+target object passed to `compile()` as `target` (5 entries, all in
+`random-gpu.test.ts`); on that route a draw now declines with "target 'glsl'
+has no lowering for it". The functions of `gpu-random.ts` that do not serve
+draws (`gpuTextSymbols()`, `gpuInputShapeRefusals()`,
+`gpuPlainUniformRead()`, `gpuRefuseShadowedVarsSources()`) moved unchanged
+to `gpu-inputs.ts`. `gpu-draw-order.ts` went from 724 to 379 lines; the
+source lost 1,675 lines and gained 478 (341 of them `gpu-inputs.ts`, 323
+moved). `findReferences` confirmed each removed export.
+
+One difference from the measure: the removed checks counted every impure
+node as a draw, and a block used as a value or a call of a function whose
+body is a block is impure. So `W + Block(a := x², a)` with
+`vars: { W: 'nextValue()' }` declined although `canCompile()` accepted it,
+and now compiles (`compile-gpu-extremum.test.ts`, a CHANGELOG entry).
+
+CE-1176 option (a) was not implemented: it changes the documented contract
+of caller code (`docs/COMPILATION-MODEL.md`, "Code that the caller supplies
+is held to the interpreter's order"), and the recommendation above leaves
+choices open (every expression with caller code becomes statements; the same
+node at two places; `And`, `Or` and loop bodies; caller code reached through
+a symbol value or a function body). They are in
+`docs/plans/2026-11-09-ce1176-caller-code-binding.md`, which waits for the
+user's approval. The caller-code part of `gpu-draw-order.ts` stays until
+then.
+
+Measures: the 236 test files that name GLSL pass (11,370 tests);
+`npm run test:glsl`: 0 disagreements (966 expressions accepted by
+`canCompile()`); typecheck and `check:deps` pass. Tycho's whole-corpus
+codegen audit through `CE_ALT_PKG` (764 documents, 17,421 records;
+production builds of the base and of the change; load 4.8 at acquire, 2.6 at
+release, on 18 cores): 0 changed code, 0 new declines, 0 resolved declines,
+0 disagreements of `canCompile()` with `compile()` (3,661 GLSL records, 46
+refused). The corpus has no GLSL record with caller code or a draw, so no
+order of function definitions changed.
+
 **CE-1176: option (a) is recommended, inside step 5, in the session of
 `gpu-draw-order.ts`.** Each piece of caller code is bound to a local once,
 in the order of the interpreter, at the start of its statement. A piece in

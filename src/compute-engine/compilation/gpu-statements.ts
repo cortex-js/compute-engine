@@ -23,9 +23,6 @@ import {
   statementCaptureSinks,
 } from './gpu-emit.js';
 import {
-  gpuBindEveryDraw,
-  gpuDrawCount,
-  gpuDrawOrderError,
   gpuHoistKeepsCallerOrder,
   gpuInSelectionBranch,
 } from './gpu-draw-order.js';
@@ -204,8 +201,8 @@ export function gpuNeedsStatements(e: Expression): boolean {
     // certainly does, and an unrolled one may still hoist a loop-invariant
     // declaration for a term that does not depend on the index. An impure
     // operand that a lowering binds to a temporary (the operand of `Cot`) is
-    // not read here. A selection whose clauses draw keeps the ternary,
-    // which declines the hoisted temporary in a conditional arm.
+    // not read here: it keeps the ternary, which declines the hoisted
+    // temporary in a conditional arm.
     if (h === 'Sum' || h === 'Product' || h === 'Block' || h === 'Loop')
       return true;
     return x.ops.some(walk);
@@ -287,7 +284,6 @@ function gpuBlockWritesOutside(
  * inlines. A node pure through every inlined value (`foldValueImpure`)
  * writes nothing. A `Block` is read statement by statement
  * (`gpuBlockWritesOutside`), so its writes to its own locals do not count.
- * A random draw is not a write: the callers count the draws separately.
  */
 function gpuWritesOutside(
   node: Expression,
@@ -354,9 +350,9 @@ export function compileGPUStatementSelection(
   // Hoisted as one statement, the selection runs ahead of the whole
   // expression at its statement position (`hoist.unit`), so a sibling
   // written BEFORE the selection runs after it. Two things could observe
-  // that order, and the gate refuses both: an effect inside the selection
-  // that could change places with a sibling's (see the draw rule below) —
-  // and a sibling that WRITES a binding, since the selection could read that
+  // that order, and the gate refuses both: caller code inside the selection
+  // that could change places with a sibling's (`gpuHoistKeepsCallerOrder`
+  // below) — and a sibling that WRITES a binding, since the selection could read that
   // binding before the write, directly, through a symbol whose value is
   // inlined, or inside a function it calls. Where a read hides is not
   // examined; the writes are: an assignment anywhere in the unit outside
@@ -375,53 +371,18 @@ export function compileGPUStatementSelection(
   // only the evaluated side is examined for writes (`gpuEvaluatedUnit`).
   const evaluated = gpuEvaluatedUnit(target);
   if (evaluated === undefined) return undefined;
-  // The one effect a clause may have is a random draw, and only when nothing
-  // else in the statement draws: the hoisted selection then makes its draws
-  // in the same order as the interpreter, since no draw of a sibling can
-  // come between. Each clause may draw once only: a clause's own hoisted
-  // statements run before the rest of the clause (and those of the first
-  // condition before the `if`), so a second draw could change places with
-  // the first (`Tuple(Random(), Cot(Random()))` binds the operand of `Cot`
-  // first). A clause that writes a binding (`gpuWritesOutside`) is refused.
-  // The rule is stricter than the order needs: a draw written after the
-  // selection (`W + Random()`), a draw already bound ahead of it, and a
-  // selection nested in a clause of another (which reads the outer clause's
-  // draw as outside its own) are refused too. Such a statement is compiled
-  // again with every draw bound to a temporary in the order of the
-  // interpreter (`gpuRecompileWithBoundDraws`), and this rule is then
-  // skipped.
-  if (args.some(BaseCompiler.hasObservableEffect)) {
-    if (args.some((a) => gpuWritesOutside(a, new Set()))) return undefined;
-    // When every draw of the statement is bound to a temporary at the point
-    // it is compiled (`gpuBindEveryDraw`), the draws of the siblings and of
-    // the clauses run in the order they are compiled, which is the order of
-    // the interpreter, so the counts below are not needed.
-    if (gpuBindEveryDraw === undefined) {
-      // A draw outside the selection is found by counting, not by identity:
-      // the same node object can stand in a clause and in a sibling.
-      const memo = new Map<Expression, number>();
-      const own = args.map((a) => gpuDrawCount(a, memo));
-      const inClauses = own.reduce((n, c) => n + c, 0);
-      if (
-        gpuDrawCount(evaluated, memo) !== inClauses ||
-        own.some((c) => c > 1)
-      ) {
-        // The ternary form cannot hold a clause that needs statements, so
-        // the statement is compiled again with every draw bound in order
-        // (`gpuRecompileWithBoundDraws`), where this rule does not apply.
-        if (args.some(gpuNeedsStatements))
-          throw gpuDrawOrderError(
-            'Could not compile the selection: a clause needs statements and ' +
-              'draws a random value, and a draw of the rest of the statement ' +
-              'could then change places with its draws.'
-          );
-        return undefined;
-      }
-    }
-  }
+  // A clause that writes a binding (`gpuWritesOutside`) is refused. The
+  // GLSL fragment has no random draw, and the other effects that reach the
+  // emitter are blocks used as values and calls of functions whose body is
+  // a block, which write only their own locals: their order is not checked.
+  if (
+    args.some(BaseCompiler.hasObservableEffect) &&
+    args.some((a) => gpuWritesOutside(a, new Set()))
+  )
+    return undefined;
   // The hoisted selection runs ahead of the rest of the statement, so caller
-  // code in a clause must not move ahead of other code with an effect, nor a
-  // draw in a clause ahead of caller code (`gpuHoistKeepsCallerOrder`).
+  // code in a clause must not move ahead of other caller code
+  // (`gpuHoistKeepsCallerOrder`).
   if (!gpuHoistKeepsCallerOrder(args, target)) return undefined;
   if (gpuWritesOutside(evaluated, new Set(args))) return undefined;
   const arms = args.filter((_, i) => i % 2 === 1);
@@ -593,13 +554,10 @@ export function gpuArmSharesWork(e: Expression): boolean {
  *
  * GLSL's `?:` short-circuits: an arm runs only when it is selected. A lowering
  * that hoists statements (the loop form of `Sum`/`Product`, Tycho item 110)
- * would move that work OUT of the conditional, where it runs unconditionally.
- * That is not merely a cost: `_gpu_rnd_draw(seed, inout uint n)` advances a
- * RUNTIME counter, so a loop stranded ahead of a ternary it never feeds shifts
- * the value of every later draw in the shader — a silent disagreement with the
- * interpreter, which evaluates only the taken branch. Fail closed; the
- * caller falls back to interpretation, exactly as it did before hoisting
- * existed.
+ * would move that work OUT of the conditional, where it runs unconditionally:
+ * caller code in it would run where the interpreter, which evaluates only the
+ * taken branch, does not run it. Fail closed; the caller falls back to
+ * interpretation, exactly as it did before hoisting existed.
  */
 export function compileGPUConditionalArm(
   head: string,
@@ -627,17 +585,12 @@ export function compileGPUConditionalArm(
     // `compile()` catches it to build the interpreter fallback) and a caller
     // reusing the target must not inherit orphaned code.
     sink.stmts.length = before;
-    // Marked for the second compilation (`gpuRecompileWithBoundDraws`): when
-    // the statement is the binding of a draw, the selection then takes its
-    // statement form (`gpuArmDrawsWhileBinding`), where the branch can hold
-    // it.
-    throw gpuDrawOrderError(
+    throw new Error(
       `Could not compile \`${head}\`: a conditionally-evaluated branch contains a multi-statement ` +
         `construct (a loop-form Sum/Product, or an impure operand bound to a ` +
         `hoisted temporary). Hoisting it out of the branch would run it ` +
         `unconditionally — a shader conditional is an expression, not a ` +
-        `statement — which changes the result whenever the branch draws ` +
-        `from the random stream.`
+        `statement.`
     );
   }
   return code;

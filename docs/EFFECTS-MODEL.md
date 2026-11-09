@@ -138,8 +138,7 @@ Consumers: `isConstant` and derived caches; `Add`/`Multiply` keeping impure
 operands evaluated under `.N()` (`library/arithmetic.ts`); the `Map`
 lowering gate (`isImpureHead`, `library/map-broadcast-shape.ts` — note
 the stale comment at `boxed-operator-definition.ts` ~616 citing
-`map-lowering.ts`; fix in passing during Stage 1); GPU compile
-failing closed on impure seeds/endpoints (`compilation/gpu-random.ts`); and
+`map-lowering.ts`; fix in passing during Stage 1); and
 `WithRandomSeed`'s pending-draw gate (`hasPendingImpureApplication`,
 `library/core.ts`).
 

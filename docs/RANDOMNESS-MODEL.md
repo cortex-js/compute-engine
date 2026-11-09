@@ -30,8 +30,7 @@ Two consequences, and they are the point:
   the same two values every time.
 - **Outside a frame, randomness is live.** There is no ambient seed to set, so
   an unframed draw is nondeterministic by construction — which is what an
-  animation or ticker needs. (The one exception is a GLSL fragment shader,
-  which has no clock to be live with; see §8.)
+  animation or ticker needs. (The GLSL target has no draw at all; see §8.)
 
 The surface:
 
@@ -358,7 +357,7 @@ contract is tiered around the **integer** stream:
 |---|---|
 | **Canonical object** | the integer stream `pcg3d(seedLo, seedHi, n)` — u32 ops, exact on ES 3.00 |
 | **f64 targets** (interpreted, compiled JS) | bit-identical to each other; present the integer stream as f64 |
-| **GPU target** (GLSL) | present the **same** integer stream as f32 through integer ops and an **exact power-of-two** conversion — never implementation-rounded float math |
+| **GPU target** (GLSL), not implemented (§8) | present the **same** integer stream as f32 through integer ops and an **exact power-of-two** conversion — never implementation-rounded float math |
 
 The presentations:
 
@@ -441,8 +440,8 @@ rule:
   impure operand to a temporary (because the operand appears more than once in
   the emitted code), it binds every impure operand of that node, in argument
   order. Binding only one of them would run its draw before the draws of
-  operands written to its left (`javascript-target.ts` and `gpu-draw-order.ts`,
-  the comments on binding impure chain operands).
+  operands written to its left (`javascript-target.ts`, the comments on
+  binding impure chain operands).
 - The run-time real check of a real-only head in `complex` mode (`Max(√x, …)`,
   an ordering comparison) does not move or skip a draw. When an operand has
   an effect, every operand is evaluated before the check, once and in
@@ -732,90 +731,23 @@ fails closed, since the target does not derive the support of a source
 (`interval-javascript-target.ts`, the `Random` and `WithRandomSeed`
 handlers).
 
-## 8. The GPU model, as implemented
+## 8. The GPU target has no draw
 
-A shader invocation cannot share a mutable counter cell with the host, and
-fragments run in parallel, so a shared counter would be nondeterministic by
-construction. **GPU frames are lexically inside the shader**: the seed is an
-expression (typically invocation-varying), the counter is an invocation-local
-u32 global (a `uint` global in GLSL) initialized before
-the entry point runs, and every invocation runs each of its frames from `n = 0`.
+The GLSL target compiles only the GLSL fragment (`docs/COMPILATION-MODEL.md`),
+and `Random`, `WithRandomSeed`, `RandomChoice`, `RandomSample` and
+`RandomShuffle` are not in it: `canCompile()` refuses an expression that
+contains one, and `compile()` to `glsl` declines it before it writes any code.
+A GLSL target object passed to `compile()` as the `target` option has no
+lowering for these heads either, and declines them.
 
-This is not a compromise — it is how shader randomness already works. Per-pixel
-seeding is `WithRandomSeed(perPixelSeed, Random())`, one frame per fragment.
+A seeded frame whose value is a constant (`WithRandomSeed(42, Random())`) is
+folded to that constant before the fragment check, as on every target, so it
+compiles to the number it draws. A shader that needs random values computes
+them from its own inputs (for example a hash of the fragment coordinate)
+outside the engine.
 
-| Form | GLSL |
-|---|---|
-| `Random()` inside `WithRandomSeed` | `hash(seed, n)` |
-| `Random(Interval/Range)` inside a frame | arithmetic on the draw |
-| `Random()` unframed | **fragment** stage: deterministic spatial noise (below); any other stage **throws** |
-| `Random(collection)` | **throws** — no general indexing |
-| `RandomChoice` / `RandomSample` / `RandomShuffle` | **throws** |
-| any draw whose only enclosing frame is on the **host** | **throws** at CE compile time |
-
-The last row is the cross-domain rule: a shader draw inside a *host* frame fails
-closed, never a silent live draw.
-
-The emitted preamble is the same PCG3D transcription (`_gpu_pcg3d`), with
-`_gpu_rnd_draw(seed, n)` presenting `float(w.x >> 8u) * (1.0 / 16777216.0)` —
-`2⁻²⁴` exactly — and advancing the caller's counter.
-
-**ES 3.00+ is the baseline** (the GLSL target throws below `300 es`), so the
-u32 ops are available; no WebGL1 fallback exists.
-
-### Seed ABI
-
-A shader has neither f64 nor strings, so the normative `foldSeed` cannot run
-inside one. Which fold applies is decided by **where the seed value lives**:
-
-| Seed form | Folding | Stream identity |
-|---|---|---|
-| compile-time constant (number or string — determined by `tryGetConstant` on the boxed value, so `Pi` folds the true f64, never a truncated emission string) | **host** `foldSeed`; `(seedLo, seedHi)` emitted as a `uvec2` constant | **identical** to the interpreted and JS stream for that seed |
-| bare invocation-varying **symbol** (`perPixelSeed`) — not mapped through `vars` | **in-shader**: `seedLo = floatBitsToUint(seed)`, `seedHi = 0u` | its **own** stream — deterministic given the seed bits, but *not* the stream a host f64 fold of the same real produces |
-| computed seed **expression** (`x*100 + y`) | **compile error** — the seed source is spliced at every draw site, so once-evaluation cannot be guaranteed without statement emission. Hoist the computation into a varying/symbol and seed with that |
-| seed mapped through the compiler's `vars` option | **compile error**, naming the unimplemented host-uniform ABI row (below) |
-| a string computed at run time | impossible in a shader | **compile error** |
-
-> **Not implemented: a host-provided uniform row.** The design sketched one more
-> form — the host folds a seed and uploads a `uvec2` uniform per render, stream-
-> identical to the host tier. No CE-controlled uniform plumbing exists. A seed
-> mapped through the compiler's `vars` option therefore **fails closed** (2026
-> review round: it previously fell through to the shader-computed fold and
-> silently produced a different stream than the host — the one silent case in an
-> otherwise loud boundary). A consumer that wants the host stream passes a
-> **constant** seed at compile time.
-
-`floatBitsToUint`/`bitcast` are exact bit reinterpretations, so a derived stream
-is bit-deterministic *given the seed bits*. The seed **expression's** own f32
-arithmetic remains subject to ordinary GPU float variance (GLSL ES float ops are
-not IEEE-pinned). Determinism claims stop at the fold's input.
-
-### Unframed GLSL draws are spatial noise — a stated exception
-
-A `gl_FragCoord`-derived seed is stable for a fragment across renders, so an
-unframed GLSL fragment draw is **deterministic spatial noise**, not the live
-randomness §1 promises elsewhere: a shader has no clock to be live with. This is
-the one documented exception to the liveness contract. Consumers who want time
-variation pass a time uniform into a frame seed.
-
-Two pins make it well-defined: both fragment coordinates are reinterpreted whole
-(so there is no row-aliasing bound), and repeated unframed draws in one
-invocation consume a shared invocation-local counter, so they decorrelate
-instead of returning one value.
-
-### Open: sibling-draw order on the GPU
-
-GLSL leaves the operand evaluation order unspecified. So for two sibling draws in **one
-expression** inside one GLSL frame, which one receives `n = 0` and which `n = 1`
-is not pinned across drivers: `Random() - Random()` in one frame may differ in
-*sign* between GPUs. The set of values drawn is fixed, and each draw is
-individually deterministic; only the assignment of indices to sibling positions
-is free. The host tiers, which evaluate left to right, have no such freedom.
-
-The mutable-counter design is required regardless (a loop body must advance),
-so this is a documented caveat awaiting a ruling rather than a defect with a
-known fix. The caveat is repeated at `allocGPURandomCounter`
-(`compilation/gpu-random.ts`).
+The GPU tier of §4 ("Parity is tiered") describes how a shader would present
+the stream if a draw were compiled; no target implements it now.
 
 ## 9. Guidance: seed per cell, not per document
 
@@ -836,9 +768,6 @@ The failure mode of the opposite arrangement is worth stating plainly: with one
 document-wide frame, inserting a draw early in the document shifts every later
 draw in it (§5). Nothing errors; every value below the edit simply changes.
 
-For per-pixel GPU work the same rule applies one level down: one frame per
-fragment, seeded from the fragment's own coordinates or index (§8).
-
 ## 10. Where the pieces live
 
 | Piece | File |
@@ -853,6 +782,5 @@ fragment, seeded from the fragment's own coordinates or index (§8).
 | `RandomSample` | `src/compute-engine/library/statistics.ts` |
 | shared `k` validation | `src/compute-engine/library/random-utils.ts` |
 | `_SYS` random helpers, domain descriptors | `src/compute-engine/compilation/javascript-target.ts` |
-| GPU frames, seed ABI, PCG3D preamble | `src/compute-engine/compilation/gpu-random.ts`, `gpu-preambles.ts` |
 | stability vectors | `test/compute-engine/random-vectors.test.ts` |
 | GPU tier | `test/compute-engine/random-gpu.test.ts` |

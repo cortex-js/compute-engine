@@ -479,14 +479,14 @@ function callTypeAdmitsInlinedPoint(type: Type): boolean {
  * loop or binder variable or a parameter of the compiled code can have. It
  * also holds names that are only read; that makes the set larger than
  * needed, which is safe for its use in `gpuPlainUniformRead()`
- * (`gpu-random.ts`).
+ * (`gpu-inputs.ts`).
  *
  * `written` is the subset that the compiled code declares or writes: the
  * target of a `Declare` or an `Assign`, a variable bound by a binder (the
  * index of a `Sum`, a `Loop` element), and a parameter of a function literal,
  * the reachable user-function definitions included. A variable of that name
  * exists in the emitted code: on a shader target, it hides a uniform of the
- * same name (`gpuRefuseShadowedVarsSources()` in `gpu-random.ts`), and a
+ * same name (`gpuRefuseShadowedVarsSources()` in `gpu-inputs.ts`), and a
  * point value that reads the name is not written in place of its symbol
  * (`inlinePointValues`).
  *

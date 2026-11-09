@@ -25,10 +25,8 @@ import {
 import { gpuProvablyFinite } from './gpu-finite-proof.js';
 import { gpuCanPlaceStatement } from './gpu-statements.js';
 import {
-  gpuAssertBindingKeepsDrawOrder,
   gpuAssertHoistKeepsCallerOrder,
   gpuReachesCallerCode,
-  gpuRecordBoundDraws,
 } from './gpu-draw-order.js';
 
 /**
@@ -210,9 +208,8 @@ export function compileGPUElementExtremum(
  *    used verbatim only for a BARE identifier; anything compound is bound to a
  *    hoisted temporary first, and where there is no statement sink (inside a
  *    conditional arm — see `compileGPUConditionalArm`) there is no safe reading
- *    and this declines. Repeating a compound source is not merely slow:
- *    `_gpu_rnd_draw` advances a runtime counter, so a repeated draw shifts
- *    every later value in the shader.
+ *    and this declines. Repeating a compound source is slow, and caller
+ *    code in it would run once per copy.
  *
  * A matrix, or an array of unknown/runtime length, has no compile-time
  * component list at all, and a shader has no dynamic iteration to fall back on.
@@ -303,8 +300,6 @@ export function gpuScalarComponents(
   const comps = ['x', 'y', 'z', 'w'].slice(0, width);
   if (/^[A-Za-z_]\w*$/.test(code)) return comps.map((c) => `${code}.${c}`);
   if (!BaseCompiler.canHoist(target)) return undefined;
-  const draws = BaseCompiler.foldValueImpure(expr);
-  if (draws) gpuAssertBindingKeepsDrawOrder(expr.operator, [expr], target);
   gpuAssertHoistKeepsCallerOrder(
     isSymbol(expr) ? expr.symbol : expr.operator,
     [expr],
@@ -314,7 +309,6 @@ export function gpuScalarComponents(
   const type = ctorType ?? `vec${width}`;
   const decl = `${type} ${tv}`;
   BaseCompiler.hoistStatement(target, `${decl} = ${code};`);
-  if (draws) gpuRecordBoundDraws([expr], target);
   return comps.map((c) => `${tv}.${c}`);
 }
 
@@ -344,7 +338,7 @@ export function compileGPUExtremum(
   // decline the whole reduction.
   const isEmpty = args.map((a) => a.isCollection && a.count === 0);
   // Each operand is compiled EXACTLY ONCE: a second `compile()` of the same
-  // operand would re-advance the `_gpu_rnd_draw` counter.
+  // operand would write its code, and any caller code in it, twice.
   const codes = args.map((a, i) => (isEmpty[i] ? '' : compile(a)));
   // Non-scalar by the shape analysis, OR by the emitted source: a `Range` types
   // only as `indexed_collection` (no `list` dimensions), which
@@ -441,7 +435,7 @@ export function compileGPUGcdLcm(
     // which `gpuScalarComponents` would refuse.
     if (a.isCollection && a.count === 0) continue;
     // Each operand is compiled exactly once: a second `compile()` would
-    // advance the `_gpu_rnd_draw` counter again.
+    // write its code, and any caller code in it, twice.
     const code = compile(a);
     const call = gpuTopLevelCall(code);
     const aggregate =

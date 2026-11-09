@@ -9,7 +9,27 @@
   fragment. A custom target that compiles `Match` writes its own lowering in
   its `functions` table.
 
+- **The GLSL target no longer compiles a random draw on any route.**
+  `Random`, `WithRandomSeed`, `RandomChoice`, `RandomSample` and
+  `RandomShuffle` are not in the GLSL fragment, so `compile()` to `glsl`
+  already declined them. A GLSL target object passed to `compile()` as the
+  `target` option, which skips the fragment check, compiled a draw to a
+  PCG3D hash in the shader; it now declines with "target 'glsl' has no
+  lowering for it". A seeded frame with a constant value
+  (`WithRandomSeed(42, Random())`) still folds to the number it draws.
+
 ### Resolved Issues
+
+- **On GLSL, `canCompile()` and `compile()` agree on a block used as a
+  value, and on a call of a function whose body is a block, next to code
+  that the caller supplies or next to each other.** These nodes write only
+  their own locals, but the GLSL emitter counted them as random draws, whose
+  order it checked. With `vars: { W: 'nextValue()' }`,
+  `W + Block(a := x², a)` was accepted by `canCompile()` and declined by
+  `compile()`; so was `(f(x), Cot(f(y)))` with `f` a function whose body
+  is a block. They now compile. A selection whose clauses call such a
+  function can now take its statement form (`if`/`else`) where it took the
+  conditional expression; the values do not change.
 
 - **An edit of a document that pops and pushes a scope no longer takes
   longer than the edit before it.** A function such as `f(x) := h(x) + 1`,

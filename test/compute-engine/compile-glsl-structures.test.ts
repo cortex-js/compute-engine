@@ -552,8 +552,6 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       });
 
       it('binds the impure temporary in its branch when it can', () => {
-        // With branches of one type, the selection is compiled again in its
-        // statement form, and the branch binds its own draw (`gpuRecompileWithBoundDraws`).
         // The fragment has no `WithRandomSeed`, so the compilation declines.
         expect(() =>
           glsl.compile(

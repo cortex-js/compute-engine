@@ -785,8 +785,8 @@ describe('GPU SUM/PRODUCT — an unrolled term keeps its own statement order', (
     expect(code.match(/for \(int j =/g)?.length).toBe(2);
     // Each term's value is bound to a temporary right after its own
     // statements. Collecting all the statements and draining them at the end
-    // reordered the unroll (loop1, loop2, rest1, rest2), which moves a
-    // `_gpu_rnd_draw` in term 2 ahead of one in term 1's remainder.
+    // reordered the unroll (loop1, loop2, rest1, rest2), which moves caller
+    // code in term 2 ahead of caller code in term 1's remainder.
     const term1 = code.search(/^float _\w+ = 1\.0 \* _\w+;$/m);
     const term2Loop = code.indexOf(
       'for (int j =',

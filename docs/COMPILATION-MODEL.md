@@ -1986,30 +1986,15 @@ loop-form `Sum` or `Product`, a `Block` used as a value, the statement form of
 a conditional, a lowering that binds an impure operand to a temporary — is
 hoisted into the enclosing statement sink, AHEAD of the whole enclosing
 expression. An operand written EARLIER in that expression therefore runs after
-the hoisted statements where the interpreter runs it first. Random draws are
-the exception: when the order of the draws of a statement would change, the
-statement is compiled again with each draw bound to a temporary of its own, in
-the order of the interpreter. With constant folding off,
-`(Random(), Σ_{n=1}^{⌊t⌋} Random())` in a `WithRandomSeed` frame emits
-
-```glsl
-float _tv2 = _gpu_rnd_draw(uvec2(0x3ff00000u, 0x00000000u), _gpu_rnd_n1);
-float _tv3 = 0.0;
-for (int n = 1; n <= int(floor(floor(t))); n++) {
-  float _tv4 = _gpu_rnd_draw(uvec2(0x3ff00000u, 0x00000000u), _gpu_rnd_n1);
-  _tv3 += _tv4;
-}
-return vec2(_tv2, _tv3);
-```
-
-so the first component is the first draw. Other effects are not bound:
-`(k := 1, Σ_n k·n)` reads `k` into `_tv1` before the assignment. This is a
-documented difference of the shader targets (decided 2026-09-21): an
-expression that mixes a hoisting operand with an effect other than a draw
-written before it does not keep the interpreter's order. A general reordering (bind an earlier operand
-ahead of a hoisting sibling, decided per occurrence at the parent's lowering
-dispatch) was built and withdrawn in 2026-09 after review kept finding compile
-paths it did not cover; it is not planned. Pure expressions, which every corpus
+the hoisted statements where the interpreter runs it first. In the GLSL
+fragment this order cannot be observed, except for code that the caller
+supplies (below): the fragment has no random draw (`Random` and
+`WithRandomSeed` are not in it), an assignment writes only a local of its
+function, a block used as an operand may only declare names with a value
+(the `block-value` decline of `compile-admission.ts`, which `canCompile()`
+runs too), so it writes no local declared outside
+it, and the other impure nodes are calls of functions whose body is a block,
+which write only their own locals. Pure expressions, which every corpus
 document has at this position, are unaffected.
 
 Code that the caller supplies is held to the interpreter's order: a `vars`
@@ -2028,15 +2013,12 @@ before it, or compute it in a branch that is not taken. With
 
 - `Max(V)` compiles to a temporary that holds `V` once, but `W + Max(V)`
   declines (the temporary would call `V` before `W`), and so do `Cot(W)`
-  (`cos` and `sin` would each call `W`), `Cot([W, x, 1])`, `x < W < 3`,
-  `Random(Interval(W, 1))` (the draw would run before `W`) and
-  `(W, Cot(Random()))`.
+  (`cos` and `sin` would each call `W`), `Cot([W, x, 1])` and `x < W < 3`.
 - A `vars` entry whose code is the read of one variable (`u_t`, `params.x`,
   `v[0]`) runs no code, so a form may write it twice even when it counts as
   caller source (`{ a: 'u_t', b: 'u_t' }`: `Cot(a)` is
-  `cos(u_t) / sin(u_t)`). A random draw can also move ahead of such a read,
-  as can a bound draw whose endpoints are such reads. Hoisted caller code
-  cannot move ahead of it (next item).
+  `cos(u_t) / sin(u_t)`). Hoisted caller code cannot move ahead of it
+  (next item).
 - Caller code can also write a variable that a plain read reads. So hoisted
   caller code declines when the interpreter reads a `vars` key (whatever its
   source) before it: with `vars: { W: 'state.value' }`, `(W, Max(V))`
@@ -2047,8 +2029,7 @@ before it, or compute it in a branch that is not taken. With
 
 The check is simple, not precise: a hoisted statement with caller code
 declines when anything else in its statement has an effect, also when that
-code comes after it. Binding caller code in order, as random draws are bound,
-is not implemented. A form with no caller code compiles as before.
+code comes after it. Binding caller code in order is not implemented. A form with no caller code compiles as before.
 
 ### `Break` and `Continue` on the shader targets
 

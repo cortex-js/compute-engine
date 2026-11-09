@@ -237,62 +237,31 @@ describe('seed ABI — once-evaluation and the deferred host-uniform row', () =>
   });
 });
 
-describe('the random state is per-compilation, never on the caller’s target', () => {
-  it('a hand-rolled target is not mutated by a compilation', () => {
-    // A target that never went through `createTarget()` carries no
-    // compilation identity; its state lives in a module-level WeakMap, so a
-    // caller that reuses the object gets no engine bookkeeping written onto
-    // it.
-    const foreign: any = { ...glsl.createTarget(), ...NO_FOLD };
-    delete foreign.gpuRandomRoot;
-    const before = Object.keys(foreign).sort();
-    const code = BaseCompiler.compile(
-      framed(42, ce.expr(['Random'])) as any,
-      foreign
-    );
-    expect(code).toContain('_gpu_rnd_draw');
-    expect(Object.keys(foreign).sort()).toEqual(before);
+describe('a draw on a GLSL target object passed to compile()', () => {
+  // A target object passed as the `target` option is compiled without the
+  // fragment pass. The GLSL target has no lowering for `Random`, so the
+  // draw declines there too.
+  it('declines', () => {
+    const target: any = { ...glsl.createTarget(), ...NO_FOLD };
+    expect(() =>
+      compile(framed(42, ce.expr(['Random'])) as any, {
+        target,
+        fallback: false,
+        ...NO_FOLD,
+      })
+    ).toThrow(/target 'glsl' has no lowering for it/);
+    expect(() =>
+      BaseCompiler.compile(framed(42, ce.expr(['Random'])) as any, target)
+    ).toThrow(/target 'glsl' has no lowering for it/);
   });
 
-  it('each compile() call restarts the counter numbering', () => {
-    // The GLSL fragment refuses the draw, so each compilation declines the
-    // same way.
+  it('each compile() call of a draw declines the same way', () => {
     const expr = framed(42, ce.expr(['Random']));
     expect(() => glsl.compile(expr, NO_FOLD)).toThrow(FRAGMENT);
     expect(() => glsl.compile(expr, NO_FOLD)).toThrow(FRAGMENT);
   });
 
-  it('a REUSED external target restarts the numbering too', () => {
-    // The caller builds the target once and passes it to two successive
-    // `compile()` calls. Without the compilation-boundary hook the second
-    // compilation continued the first one's numbering (`_gpu_rnd_n1`), so two
-    // compilations of ONE expression emitted different source — recompile
-    // replay was broken on the external-target path only.
-    const expr = framed(42, ce.expr(['Random']));
-    const target = glsl.createTarget();
-    const first = compile(expr as any, { target, fallback: false, ...NO_FOLD });
-    const second = compile(expr as any, { target, fallback: false, ...NO_FOLD });
-    expect(second.code).toBe(first.code);
-    expect(second.code).toContain('_gpu_rnd_n0');
-    expect(second.code).not.toContain('_gpu_rnd_n1');
-  });
-
-  it('the reset reaches a spread copy of a target', () => {
-    // `{ ...target }` copies the identity token by reference (and a
-    // hand-rolled target has none at all), so the hook resets through the
-    // target it is HANDED, not one captured when the target was created.
-    const expr = framed(42, ce.expr(['Random']));
-    const foreign: any = { ...glsl.createTarget(), ...NO_FOLD };
-    delete foreign.gpuRandomRoot;
-    const first = BaseCompiler.compileRoot(expr as any, foreign);
-    const second = BaseCompiler.compileRoot(expr as any, foreign);
-    expect(second).toBe(first);
-    expect(second).toContain('_gpu_rnd_n0');
-    // Still nothing written onto the caller's object.
-    expect(Object.keys(foreign)).not.toContain('gpuRandomRoot');
-  });
-
-  it('a shader body keeps ONE numbering across its statements', () => {
+  it('a shader body with draws declines', () => {
     expect(() =>
       glsl.compileShader({
         type: 'fragment',
@@ -494,9 +463,6 @@ describe('route parity — `WithRandomSeed` is lazy', () => {
   // A `lazy: true` operator's held operands arrive UNBOUND on the box and
   // parse routes, so a suite exercising only `ce.function(...)` would miss the
   // whole failure class (ARCHITECTURE.md, "Implementation conventions").
-  const expected =
-    '_gpu_rnd_draw(uvec2(0x40450000u, 0x00000000u), _gpu_rnd_n0)';
-
   it('box route', () => {
     expect(() =>
       glsl.compile(ce.box(['WithRandomSeed', 42, ['Random']]), NO_FOLD)

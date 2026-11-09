@@ -21,7 +21,6 @@ export {
   gpuAbsorbedConstant,
 } from './gpu-shapes.js';
 export type { GPUShapeRules } from './gpu-shapes.js';
-export { gpuDrawCount } from './gpu-draw-order.js';
 export {
   GPU_FLOOR_MOD_PREAMBLE_GLSL,
   gpuFloorModCall,
@@ -29,12 +28,6 @@ export {
 } from './gpu-nan-safe.js';
 export { gpuPointDeclaration } from './gpu-points.js';
 export { gpuAtIndexGuard } from './gpu-at.js';
-export {
-  newGPURandomState,
-  gpuRandomState,
-  GPU_RANDOM_COUNTER_PREFIX,
-} from './gpu-random.js';
-export type { GPURandomState } from './gpu-random.js';
 export {
   GPU_GAMMA_PREAMBLE_GLSL,
   GPU_POLYGAMMA_PREAMBLE_GLSL,
@@ -49,7 +42,6 @@ export {
   GPU_BESSELJ_PREAMBLE_GLSL,
   GPU_FRACTAL_PREAMBLE_GLSL,
   GPU_GCD_PREAMBLE_GLSL,
-  GPU_PCG3D_PREAMBLE_GLSL,
   GPU_MEDIAN_PREAMBLE_GLSL,
   GPU_COLOR_PREAMBLE_GLSL,
   GPU_POWI_PREAMBLE_GLSL,

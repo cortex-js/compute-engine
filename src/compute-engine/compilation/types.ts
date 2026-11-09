@@ -921,10 +921,10 @@ export interface CompileTarget<Expr = unknown> {
    * let `error` propagate.
    *
    * Called by the statement positions of a `bareStatementBlocks` target
-   * (`BaseCompiler.compileStatementBody`, the statements of a block). The
-   * shader targets use it when the order of the random draws of a statement
-   * would change: they compile the statement again with every draw bound to
-   * a temporary of its own, in the order of the interpreter.
+   * (`BaseCompiler.compileStatementBody`, the statements of a block). No
+   * built-in target defines it: the GLSL target used it to bind random
+   * draws in order, and the GLSL fragment has no random draw. It stays for
+   * custom targets, as a field of this exported type.
    */
   recompileStatement?: <R>(
     error: unknown,
@@ -1771,13 +1771,12 @@ export interface CompileTarget<Expr = unknown> {
    * Compilation-boundary hook: invoked **once**, at the root of each
    * compilation (`BaseCompiler.compileRoot`), before any code is emitted.
    *
-   * A target that allocates per-compilation NUMBERING (the GPU targets number
-   * their invocation-local random counters `_gpu_rnd_n0`, `_gpu_rnd_n1`, …)
-   * resets that numbering here, so compiling the same expression twice with
-   * one target object emits identical source — the recompile-replay
-   * determinism the engine-created targets get for free by being fresh. Only
-   * numbering is reset, never the compilation CONTEXT (shader stage, host-frame
-   * flag) the target was created with, and never module-level state a
+   * A target that allocates per-compilation NUMBERING (the GLSL target
+   * numbers its generated temporaries `_tv1`, `_tv2`, …) resets that
+   * numbering here, so compiling the same expression twice with one target
+   * object emits identical source — the recompile-replay determinism the
+   * engine-created targets get for free by being fresh. Only numbering is
+   * reset, never the compilation CONTEXT the target was created with, and never module-level state a
    * previously compiled function still references.
    *
    * The receiving target is passed explicitly rather than captured: the

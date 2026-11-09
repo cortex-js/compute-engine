@@ -91,16 +91,11 @@ import {
 } from './gpu-shapes.js';
 import type { GPUShapeRules, GPUShapeRulesTarget } from './gpu-shapes.js';
 import {
-  GPU_RANDOM_COUNTER_PREFIX,
   gpuPlainUniformRead,
   gpuInputShapeRefusals,
-  gpuRandomState,
   gpuRefuseShadowedVarsSources,
   gpuTextSymbols,
-  installGPURandomState,
-  resetGPURandomNumbering,
-} from './gpu-random.js';
-import type { GPURandomTarget } from './gpu-random.js';
+} from './gpu-inputs.js';
 import {
   GPU_SUPPORTED_MODES,
   gpuAssignedName,
@@ -130,12 +125,7 @@ import {
   gpuAssertExpressionOnly,
   gpuCanPlaceStatement,
 } from './gpu-statements.js';
-import {
-  gpuAssertBindingKeepsDrawOrder,
-  gpuAssertHoistKeepsCallerOrder,
-  gpuRecompileWithBoundDraws,
-  gpuRecordBoundDraws,
-} from './gpu-draw-order.js';
+import { gpuAssertHoistKeepsCallerOrder } from './gpu-draw-order.js';
 import {
   GLSL_STAGE_BUILTINS,
   GLSL_STAGE_BUILTIN_OUTPUTS,
@@ -172,7 +162,6 @@ import {
   GPU_LERCH_PREAMBLE_GLSL,
   GPU_MEDIAN_PREAMBLE_GLSL,
   GPU_NAN_PREAMBLE_GLSL,
-  GPU_PCG3D_PREAMBLE_GLSL,
   GPU_PI_TRIG_PREAMBLE_GLSL,
   GPU_POLEVL_PREAMBLE_GLSL,
   GPU_POLYGAMMA_PREAMBLE_GLSL,
@@ -455,7 +444,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const constants = this.getConstants();
     const v2 = 'vec2';
     const rules = this.getShapeRules();
-    const target: GPURandomTarget & GPUShapeRulesTarget = {
+    const target: GPUShapeRulesTarget = {
       language: this.languageId,
       isRealOnlyLowering: gpuIsRealOnlyLowering,
       // A shader value has ONE static shape (`float` or `vec2`), decided by
@@ -479,11 +468,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // `min`/`max` fold, whose nested calls no longer line up with the CE
       // operand positions (`foldNaryBuiltin`).
       gpuShapeRules: rules,
-      // Restart the random-counter numbering at each compilation boundary, so
-      // a target the CALLER reuses across two `compile()` calls emits the same
-      // source both times (§7). Target-specific: only the GPU languages number
-      // anything per compilation.
-      beginCompilation: resetGPURandomNumbering,
+      // Restart the numbering of the generated temporaries (`_tv1`, `_tv2`,
+      // …) at each compilation boundary, so that a target the caller reuses
+      // across two `compile()` calls writes the same source both times.
+      beginCompilation: (current) => BaseCompiler.resetNaming(current),
       // Bind an index-free scalar subexpression of a `Sum`/`Product` body once
       // ahead of the loop instead of recomputing it per iteration (see
       // `CompileTarget`). A shader runs its loop per fragment, so the cost of
@@ -534,7 +522,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // than splice a bare block into a sub-expression. Gated to the pure GPU
       // languages by language id.
       bareStatementBlocks: this.languageId === 'glsl',
-      recompileStatement: gpuRecompileWithBoundDraws,
       // A multi-statement `Block` used as a VALUE — a `with` clause as the
       // term of a `Sum`, or as an operand of an addition — becomes one
       // compound statement in the enclosing sink: the block's locals are
@@ -558,11 +545,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           conditionalGPUSinks.has(current.hoist!)
         )
           return undefined;
-        // The block runs ahead of the statement as one compound statement,
-        // so a draw in it must not come before a draw written before it.
-        const draws =
-          block !== undefined && BaseCompiler.foldValueImpure(block);
-        if (draws) gpuAssertBindingKeepsDrawOrder('Block', [block], current);
         gpuAssertHoistKeepsCallerOrder(
           'Block',
           block === undefined ? undefined : [block],
@@ -579,7 +561,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           .map((line) => `  ${line}`)
           .join('\n');
         BaseCompiler.hoistStatement(current, `${type} ${tv};`, `{\n${body}\n}`);
-        if (draws) gpuRecordBoundDraws([block], current);
         return tv;
       },
       // A free symbol emitted as a bare identifier must not be a reserved word
@@ -693,9 +674,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         return BaseCompiler.joinShaderStatements(stmts);
       },
       // Per-compilation naming state for generated temporaries (the loop
-      // accumulator of `compileGPUSumProduct`). Numbered per compilation like
-      // the random counters below, and reset alongside them at each
-      // compilation boundary (`resetGPURandomNumbering`).
+      // accumulator of `compileGPUSumProduct`), reset at each compilation
+      // boundary (`beginCompilation` above).
       naming: { counter: 0, usedNames: new Set<string>() },
       ...options,
     };
@@ -715,24 +695,18 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       target.foldEmittedConstant = (_expr, code) =>
         foldEmittedGPUCode(code, splices);
     }
-    // Per-compilation random state (§7 of the Random family redesign),
-    // installed EAGERLY: the base compiler recurses through `{ ...target }`
-    // spreads, which copy the identity token by reference, so a
-    // `WithRandomSeed` frame pushed here is visible to the `Random` draws
-    // nested in its body. The state itself is held off the target.
-    installGPURandomState(target);
     return target;
   }
 
   /**
-   * A target for compiling `expr`, with the random-draw context (§7) stamped
-   * on it: the shader stage when the caller knows it, and whether a HOST
-   * `WithRandomSeed` frame is active — the cross-domain case an unframed
-   * shader draw must fail closed on.
+   * A target for compiling `expr`. `_stage` is the shader stage when the
+   * caller knows it; no compilation reads it, since the GLSL fragment has no
+   * random draw, the one form whose code depended on the stage. It stays a
+   * parameter because subclasses of this exported class call this method.
    */
   protected createTargetFor(
     expr: Expression | undefined,
-    stage?: string,
+    _stage?: string,
     options: Partial<CompileTarget<Expression>> = {}
   ): CompileTarget<Expression> {
     const target = this.createTarget(options);
@@ -881,9 +855,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         return innerMangle ? innerMangle(id) : id;
       };
     }
-    const state = gpuRandomState(target);
-    state.stage = stage;
-    state.hostFrame = expr?.engine?._randomFrame !== undefined;
     // Seed the generated-temporary collision inventory from the expression,
     // unless the caller supplied a context of its own (a root that knows more
     // than one expression, or the caller's `vars` source).
@@ -2136,9 +2107,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         ...(vars ? Object.values(vars) : []),
       ]),
     });
-    // The `vars` names, for the seed ABI check (§7): a seed that resolves to a
-    // HOST-supplied uniform is the deferred ABI row, and must fail loudly
-    // rather than silently draw a different stream than the host.
     // A helper whose value is a LIST has no by-reference lowering here (a
     // shader function cannot return a run-time list), and the fixed-width
     // unroll cannot see the list's width through the call. Substituting the
@@ -2196,7 +2164,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         },
       }
     );
-    if (vars) gpuRandomState(target).varNames = new Set(Object.keys(vars));
 
     const cseOptions = {
       isOverriddenOperator: (name: string) =>
@@ -2529,22 +2496,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // A Mandelbrot row carried the Julia iteration and a Julia row carried the
     // Mandelbrot one before the per-function pass.
     preamble += gpuLibrarySubset(code, GPU_FRACTAL_PREAMBLE_GLSL);
-    if (code.includes('_gpu_rnd_draw')) {
-      // One invocation-local u32 counter per frame (plus one shared by the
-      // unframed spatial-noise draws). A shader global is per-invocation and initialized before the entry point runs, so
-      // every invocation runs each of its frames from `n = 0`.
-      const counters = [
-        ...new Set(
-          code.match(new RegExp(`${GPU_RANDOM_COUNTER_PREFIX}\\d+`, 'g')) ?? []
-        ),
-      ].sort(
-        (a, b) =>
-          Number(a.slice(GPU_RANDOM_COUNTER_PREFIX.length)) -
-          Number(b.slice(GPU_RANDOM_COUNTER_PREFIX.length))
-      );
-      preamble += '\n' + counters.map((n) => `uint ${n} = 0u;\n`).join('');
-      preamble += gpuLibrarySubset(code, GPU_PCG3D_PREAMBLE_GLSL);
-    }
     // A shader that calls only `_gpu_gcd` does not carry `_gpu_lcm`; one
     // that calls `_gpu_lcm` also gets `_gpu_gcd`, which its body calls.
     preamble += gpuLibrarySubset(code, GPU_GCD_PREAMBLE_GLSL);
@@ -2650,18 +2601,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   /**
    * Compile the statements of a shader body, for a KNOWN stage.
    *
-   * ONE target — and therefore ONE random state — for the WHOLE body. The
-   * random counters are numbered per compilation and `preambleFor` declares
-   * each allocated name once over the JOINED emission, so compiling each
-   * statement against a fresh target would restart the numbering and let two
-   * independent frames in different statements ALIAS one counter (the second
-   * frame's first draw would then be `hash(seed, 1)`).
-   *
-   * The stage is what makes the §7 check possible: an unframed `Random()`
-   * lowers to `gl_FragCoord`-derived spatial noise, which exists only in a
-   * fragment shader, so a non-fragment stage throws at CE compile time rather
-   * than emitting code that fails later at GPU shader-compile time. It is a
-   * property of the SHADER, not of the statement.
+   * ONE target for the WHOLE body: the generated temporaries are numbered
+   * per compilation, so compiling each statement against a fresh target
+   * would restart the numbering and give two statements the same temporary
+   * name.
    *
    * `declarations` are the shader's own typed names — its `in`/varying inputs
    * and its uniforms. They are the exact analog of a `compileFunction`
@@ -2781,8 +2724,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         framed.push({ name: d.name, type: d.type });
       }
     // ONE naming context for the whole body too, seeded from EVERY statement:
-    // the counter must stay distinct across statements (same reason as the
-    // random counters), and a `_tv`-named symbol in any statement is a
+    // the counter must stay distinct across statements, and a `_tv`-named
+    // symbol in any statement is a
     // collision for all of them. The caller-supplied assignment TARGETS are
     // seeded as source text as well: a hoisted loop declares its accumulator
     // ahead of the assignment, so a shader output spelled `_tv1` would

@@ -134,13 +134,10 @@ import {
 import { numericLiteralSource } from './compiler-type-facts.js';
 import { targetFoldValueImpure } from './compile-folding.js';
 import {
-  gpuArmDrawsWhileBinding,
-  gpuAssertBindingKeepsDrawOrder,
   gpuAssertCallerCodeNotRepeated,
   gpuAssertHoistKeepsCallerOrder,
   gpuOperandOnce,
   gpuReachesCallerCode,
-  gpuRecordBoundDraws,
 } from './gpu-draw-order.js';
 import { gpuDeclaredTypeOf, gpuTypeOfValue } from './gpu-declared-types.js';
 import { gpuCheckIdentifier } from './gpu-reserved.js';
@@ -183,14 +180,6 @@ import {
   gpuColorOperand,
   gpuFiniteColorChannels,
 } from './gpu-color.js';
-import {
-  allocGPURandomCounter,
-  gpuFoldSeedSource,
-  gpuNoIndexingMessage,
-  gpuRandomDomainDraw,
-  gpuRandomDraw,
-  gpuRandomState,
-} from './gpu-random.js';
 
 /** The contract of the lowering of the exponent of `e` into a real part and
  *  an angle in half-turns (`Power`). The angle is made as in
@@ -305,14 +294,11 @@ export function compileGPUBroadcastUnary(
         `not a shader vector and the componentwise builtins do not apply to it.`
     );
   const vector = lowering.collection();
-  // An impure operand (one that draws a random value with `_gpu_rnd_draw`)
-  // must be computed once. An element lowering can use its operand twice
-  // (`Cot` is `cos(u) / sin(u)`), and on this route it receives a pure
-  // placeholder, so its own guard does not apply. Such a lowering declines
-  // below. The vector is not bound to a temporary: a hoisted statement runs
-  // before the rest of the expression, so its draw would come before the
-  // draws written before it, and the random stream would change. Code that
-  // the caller supplied (`gpuReachesCallerCode`: `List(W, x, 1)` with
+  // An impure operand (in the GLSL fragment, a block used as a value or a
+  // call of a function whose body is a block) must be computed once. An element lowering can use its
+  // operand twice (`Cot` is `cos(u) / sin(u)`), and on this route it
+  // receives a pure placeholder, so its own guard does not apply. Such a
+  // lowering declines below. Code that the caller supplied (`gpuReachesCallerCode`: `List(W, x, 1)` with
   // `vars: { W: 'nextValue()' }`) can count its calls, so it must run once
   // too, and it declines in the same way. The value of a symbol that reads
   // an input is not emitted, so it is not read (`targetFoldValueImpure`).
@@ -1129,10 +1115,9 @@ function compileGPUSumProduct(
       // A term that hoists is drained IMMEDIATELY and its remaining value bound
       // to a temporary, which is what enters the combined expression. Collecting
       // every term's statements first and draining them at the end reordered the
-      // unroll — term1-loop, term2-loop, term1-rest, term2-rest — and
-      // `_gpu_rnd_draw` advances a runtime counter, so a draw in term2's loop
-      // would move ahead of a draw in term1's remainder and every later value in
-      // the shader would shift.
+      // unroll — term1-loop, term2-loop, term1-rest, term2-rest — so caller
+      // code in term2's loop would run ahead of caller code in term1's
+      // remainder.
       for (let k = lowerNum; k <= upperNum; k++) {
         const kStr = formatGPUNumber(k);
         const termScope = BaseCompiler.withBoundScope(target, [index]);
@@ -1170,16 +1155,12 @@ function compileGPUSumProduct(
         // A term whose value is already a bare name — a block term stores its
         // value in a temporary the hoisted statements declare (`valueBlock`)
         // — is read through that name; binding it again would only copy it.
-        // The term's statements run ahead of the enclosing statement, so a
-        // draw among them must not come before a draw written before the
-        // `Sum`.
-        if (BaseCompiler.foldValueImpure(args[0]))
-          gpuAssertBindingKeepsDrawOrder(kind, [args[0]], target);
+        // The term's statements run ahead of the enclosing statement, so
+        // caller code among them must not run ahead of caller code written
+        // before the `Sum`.
         gpuAssertHoistKeepsCallerOrder(kind, [args[0]], target);
         if (/^[A-Za-z_$][\w$]*$/.test(code)) {
           BaseCompiler.hoistStatement(target, ...termSink.stmts);
-          if (BaseCompiler.foldValueImpure(args[0]))
-            gpuRecordBoundDraws([args[0]], target);
           terms.push(`(${code})`);
           continue;
         }
@@ -1190,8 +1171,6 @@ function compileGPUSumProduct(
           ...termSink.stmts,
           `${decl} = ${code};`
         );
-        if (BaseCompiler.foldValueImpure(args[0]))
-          gpuRecordBoundDraws([args[0]], target);
         terms.push(`(${tv})`);
       }
       // The statements of a hoisted term run ahead of the whole expression,
@@ -1432,16 +1411,10 @@ function compileGPUSumProduct(
   ];
 
   if (BaseCompiler.canHoist(target)) {
-    // The loop runs ahead of the enclosing statement, so a draw in its body
-    // must not come before a draw written before the `Sum`.
-    if (BaseCompiler.foldValueImpure(args[0]))
-      gpuAssertBindingKeepsDrawOrder(kind, [args[0]], target);
     // The bounds and the body run in the loop statement, so caller code in
     // any of them must not move ahead of earlier code with an effect.
     gpuAssertHoistKeepsCallerOrder(kind, args, target);
     BaseCompiler.hoistStatement(target, loop.join('\n'));
-    if (BaseCompiler.foldValueImpure(args[0]))
-      gpuRecordBoundDraws([args[0]], target);
     return acc;
   }
   return [...loop, `return ${acc};`].join('\n');
@@ -1877,10 +1850,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       gpuNeedsStatements(args[1]) ||
       gpuNeedsStatements(args[2]) ||
       (gpuCanPlaceStatement(target) &&
-        (gpuArmSharesWork(args[1]) ||
-          gpuArmSharesWork(args[2]) ||
-          gpuArmDrawsWhileBinding(args[1]) ||
-          gpuArmDrawsWhileBinding(args[2])))
+        (gpuArmSharesWork(args[1]) || gpuArmSharesWork(args[2])))
     ) {
       const statement = compileGPUStatementSelection(
         [args[0], args[1], args[0].engine.True, args[2]],
@@ -1940,7 +1910,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         (a, i) =>
           i > 0 &&
           (gpuNeedsStatements(a) ||
-            (canPlace && (gpuArmSharesWork(a) || gpuArmDrawsWhileBinding(a))))
+            (canPlace && gpuArmSharesWork(a)))
       )
     ) {
       const statement = compileGPUStatementSelection(
@@ -2435,10 +2405,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         'toward-positive-infinity',
         gpuOperandShape(a) === 'scalar' && gpuOperandShape(b) === 'scalar'
       );
-    // An IMPURE operand (the Random family) must be evaluated exactly once:
-    // both operands are spliced twice, and `_gpu_rnd_draw` advances a runtime
-    // counter, so a repeated draw returns a different value AND shifts every
-    // later draw in the shader. Bind scalars to hoisted temporaries; where
+    // An IMPURE operand (in the GLSL fragment, a block used as a value or a
+    // call of a function whose body is a block) is computed once: both
+    // operands are spliced twice.
+    // Bind scalars to hoisted temporaries; where
     // there is no statement sink (a conditional arm), or the operand is not
     // a scalar, there is no safe reading — decline.
     // Read through the value of a symbol, as the shader inlines it. Caller
@@ -2451,11 +2421,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         gpuOperandShape(b) !== 'scalar'
       )
         throw new Error(
-          'Could not compile `Remainder`: an impure (Random) operand cannot be bound to a ' +
-            'temporary at this position — a repeated draw would shift every ' +
-            'later value in the shader.'
+          'Could not compile `Remainder`: an impure operand cannot be bound to a ' +
+            'temporary at this position, and the code writes it twice.'
         );
-      gpuAssertBindingKeepsDrawOrder('Remainder', [a, b], target);
       gpuAssertHoistKeepsCallerOrder('Remainder', [a, b], target);
       const ta = BaseCompiler.tempVar(target);
       const tb = BaseCompiler.tempVar(target);
@@ -2465,7 +2433,6 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         `${decl(ta)} = ${compile(a)};`,
         `${decl(tb)} = ${compile(b)};`
       );
-      gpuRecordBoundDraws([a, b], target);
       return `(${ta} - ${tb} * ${remainderQuotient(`${ta} / ${tb}`)})`;
     }
     // `compile()` emits sub-expressions without outer parentheses, and
@@ -2482,41 +2449,35 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // twice (`gpuAssertCallerCodeNotRepeated`).
     gpuAssertCallerCodeNotRepeated('Cot', [x], target);
     if (BaseCompiler.isComplexValued(x)) {
-      // The operand is spliced TWICE below, so an IMPURE one must first be
-      // bound to a hoisted temporary — compiling it once is not enough, since
-      // `_gpu_rnd_draw` advances its counter on every evaluation of the
-      // spliced text (see the real branch and `Remainder`).
+      // The operand is spliced TWICE below, so an IMPURE one is first bound
+      // to a hoisted temporary, so that it is computed once (see the real
+      // branch and `Remainder`).
       if (BaseCompiler.foldValueImpure(x)) {
         if (!BaseCompiler.canHoist(target))
           throw new Error(
-            'Could not compile `Cot`: an impure (Random) complex operand cannot be bound to a ' +
-              'temporary at this position — a repeated draw would shift ' +
-              'every later value in the shader.'
+            'Could not compile `Cot`: an impure complex operand cannot be bound to a ' +
+              'temporary at this position, and the code writes it twice.'
           );
-        gpuAssertBindingKeepsDrawOrder('Cot', [x], target);
         gpuAssertHoistKeepsCallerOrder('Cot', [x], target);
         const t = BaseCompiler.tempVar(target);
         const decl = `${gpuVec2()} ${t}`;
         BaseCompiler.hoistStatement(target, `${decl} = ${compile(x)};`);
-        gpuRecordBoundDraws([x], target);
         return `_gpu_cdiv(_gpu_ccos(${t}), _gpu_csin(${t}))`;
       }
-      // Compile the operand ONCE: two `compile()` calls would allocate two
-      // distinct `_gpu_rnd` sites for an impure operand.
+      // Compile the operand ONCE: two `compile()` calls would do the work of
+      // the compilation twice.
       const z = compile(x);
       return `_gpu_cdiv(_gpu_ccos(${z}), _gpu_csin(${z}))`;
     }
-    // An IMPURE operand (Random) is spliced twice below, and `_gpu_rnd_draw`
-    // advances a runtime counter — bind it to a hoisted temporary, or decline
-    // where there is no statement sink (see `Remainder`).
+    // An IMPURE operand is spliced twice below: bind it to a hoisted
+    // temporary, or decline where there is no statement sink (see
+    // `Remainder`).
     if (BaseCompiler.foldValueImpure(x)) {
       if (!BaseCompiler.canHoist(target) || gpuOperandShape(x) !== 'scalar')
         throw new Error(
-          'Could not compile `Cot`: an impure (Random) operand cannot be bound to a temporary ' +
-            'at this position — a repeated draw would shift every later ' +
-            'value in the shader.'
+          'Could not compile `Cot`: an impure operand cannot be bound to a temporary ' +
+            'at this position, and the code writes it twice.'
         );
-      gpuAssertBindingKeepsDrawOrder('Cot', [x], target);
       gpuAssertHoistKeepsCallerOrder('Cot', [x], target);
       const t = BaseCompiler.tempVar(target);
       const decl = `float ${t}`;
@@ -2524,7 +2485,6 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         target,
         `${decl} = ${compile(gpuReduceTrigOffset(x, 1, true, target))};`
       );
-      gpuRecordBoundDraws([x], target);
       return `(_gpu_cos(${t}) / _gpu_sin(${t}))`;
     }
     // The NaN-safe `_gpu_cos`/`_gpu_sin` (CE-520).
@@ -3087,16 +3047,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // Every operand is spliced TWICE by the comparison below (the background
     // in both arms of the comparison, each foreground in its arm and in the
     // result). A color operand is `vec3`-shaped, so there is no scalar (or
-    // `vec2`) temporary to bind it to — an impure (Random-family) operand
-    // would be re-drawn, and `_gpu_rnd_draw` advances a runtime counter, so
-    // the two splices compare DIFFERENT colors and every later draw in the
-    // shader shifts. No safe reading — decline (the `gpuOperandOnce` rule for
-    // a non-scalar operand).
+    // `vec2`) temporary to bind it to: an impure operand would be computed
+    // once per splice. Decline (the `gpuOperandOnce` rule for a non-scalar
+    // operand).
     if (args.slice(0, 3).some((a) => a.isPure === false))
       throw new Error(
-        `Could not compile \`ContrastingColor\`: an impure (Random) operand cannot be bound to a ` +
-          `temporary at this position — a repeated draw would shift every ` +
-          `later value in the shader.`
+        `Could not compile \`ContrastingColor\`: an impure operand cannot be bound to a ` +
+          `temporary at this position, and the code writes it more than once.`
       );
     // Caller code in a color operand would run once per copy, or ahead of
     // earlier code when the operand is bound to a temporary below.
@@ -3952,95 +3909,6 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `_gpu_median_${n}(${compiled.join(', ')})`;
   }, gpuDestructuresListOperand),
 
-  /**
-   * One draw from the counter-based PCG3D stream — the GPU tier of the
-   * random family redesign
-   * (`docs/RANDOMNESS-MODEL.md` §2, §4, §7).
-   *
-   * Every form returns a GLSL `float`, so it composes with the
-   * surrounding float arithmetic without a cast. The domain forms return an
-   * integer-valued float (the result of `floor`) for a `Range`, matching the
-   * convention `Floor` and the other ostensibly integer-returning operators
-   * of this target use.
-   *
-   * | Form | GLSL |
-   * |---|---|
-   * | `Random()` inside `WithRandomSeed` | `hash(seed, n)` |
-   * | `Random(Interval/Range)` inside a frame | arithmetic on the draw |
-   * | `Random()` unframed | fragment stage: spatial noise; any other stage **throws** |
-   * | `Random(collection)` | **throws** — no general indexing |
-   *
-   * The presented value is `(w0 >> 8) * 2⁻²⁴` — an EXACT power-of-two
-   * conversion of the top 24 bits of the same `w0` the f64 tier is built
-   * from, so the two tiers agree to within 2⁻²⁴ by construction rather than
-   * by tuning. See `gpuRandomDraw`.
-   *
-   * `markAggregateConsuming` for the one-operand form: the DOMAIN is a
-   * collection (an `Interval` is `set<real>`, a `Range` is `range`), and
-   * `gpuRandomDomainDraw` DESTRUCTURES it into scalar endpoints — the draw
-   * arithmetic contains the endpoints, never the collection. Without the
-   * declaration the generic shape gate judges the emission against an array
-   * operand shape that the emission does not contain. A domain this head
-   * cannot destructure still fails closed, through the head's own diagnostic.
-   */
-  Random: markAggregateConsuming(
-    (args, compile, target) => {
-      if (args.length === 0) return gpuRandomDraw(target);
-      if (args.length === 1)
-        return gpuRandomDomainDraw(args[0], compile, target);
-      throw new Error(
-        'Could not compile `Random`: expects at most one operand, the DOMAIN to draw from ' +
-          '(`Random()`, `Random(Interval(a, b))`, `Random(Range(…))`). The ' +
-          'seed argument was removed by the Random family redesign — seed ' +
-          'with `WithRandomSeed(seed, body)`.'
-      );
-    },
-    (args) => args.length === 1
-  ),
-
-  /**
-   * A LEXICALLY scoped random-seed frame (§4 "The GPU boundary is genuinely
-   * one-domain"). A shader invocation cannot share the host's mutable draw
-   * counter, and fragments run in parallel, so a GPU frame lives entirely
-   * inside the shader: the seed is folded (see `gpuFoldSeedSource` for the
-   * seed ABI) and the frame gets its own invocation-local u32 counter, which
-   * every invocation starts at 0.
-   *
-   * `WithRandomSeed` returns its body's value, so the emission is the body's
-   * code — the frame exists only as the counter the enclosed draws consume.
-   * Nested frames each allocate their own counter, so an inner frame cannot
-   * perturb its parent's subsequent draws (the §2 per-frame-counter rule).
-   */
-  WithRandomSeed: (args, compile, target) => {
-    if (args.length !== 2)
-      throw new Error(
-        'Could not compile `WithRandomSeed(seed, body)`: expects exactly two operands'
-      );
-    const state = gpuRandomState(target);
-    // The seed is folded ONCE per frame, before the body is compiled.
-    const seed = gpuFoldSeedSource(args[0], compile, target);
-    const counter = allocGPURandomCounter(state);
-    state.frames.push({ seed, counter });
-    try {
-      return gpuIdentityPassthrough(args[1], compile, target);
-    } finally {
-      state.frames.pop();
-    }
-  },
-
-  // The multi-draw members of the family need general collection indexing (or
-  // a mutable permutation buffer), which a shader expression has no way to
-  // express. Fail closed with the reason rather than let them fall
-  // through to a bare `Unknown operator`.
-  RandomChoice: (_args, _compile, target) => {
-    throw new Error(gpuNoIndexingMessage('RandomChoice(domain, k)', target));
-  },
-  RandomSample: (_args, _compile, target) => {
-    throw new Error(gpuNoIndexingMessage('RandomSample(xs, k)', target));
-  },
-  RandomShuffle: (_args, _compile, target) => {
-    throw new Error(gpuNoIndexingMessage('RandomShuffle(xs)', target));
-  },
 
   // `Apply(callee, args…)`: the parse of `f'(x)` is
   // `Apply(Derivative(f, 1), x)`. A shader has no function values, so the

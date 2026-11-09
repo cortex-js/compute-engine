@@ -507,10 +507,8 @@ export function compileExprOperator(
             //
             // A target WITHOUT `bindExpr` (the GPU shaders) has no
             // expression-level binding form, so it inlines everything. That
-            // is safe for a PURE operand only: a shader `Random` draw is
-            // deterministic per invocation but `_gpu_rnd_draw` advances a
-            // runtime counter, so a second splice draws a DIFFERENT value
-            // and shifts every later draw in the shader. An impure middle
+            // is safe for a PURE operand only: a second splice of an impure
+            // operand computes it twice. An impure middle
             // operand is therefore bound to a hoisted temporary instead; if
             // there is no statement sink to hoist into, the head declines.
             //

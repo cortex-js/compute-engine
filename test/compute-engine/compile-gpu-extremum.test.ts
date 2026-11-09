@@ -211,7 +211,7 @@ describe('GPU Max/Min over a declared vector operand', () => {
 
   it('binds a COMPOUND vector operand to a temporary before swizzling', () => {
     // The operand source is repeated once per component, so a compound one is
-    // hoisted: repeating it would be slow AND would re-advance `_gpu_rnd_draw`.
+    // hoisted: repeating it would compute it once per component.
     expect(gv(['Max', ['Multiply', 2, 'v']])).toBe(
       'vec3 _tv1 = 2.0 * v;\nreturn (_gpu_max(_gpu_max(_tv1.x, _tv1.y), _tv1.z));'
     );
@@ -519,9 +519,27 @@ describe('GPU code supplied by the caller runs once, in order', () => {
       ['Add', 'W', ['Sum', ['Multiply', ['Max', 'V'], 'k'], ['Limits', 'k', 1, 3]]],
       MOVED
     );
-    both(
-      ['Add', 'W', ['Block', ['Declare', 'a', "'unknown'", ['Square', 'x']], 'a']],
-      MOVED
+  });
+
+  it('a block with no caller code runs ahead of caller code', () => {
+    // The block writes only its own local, so running it ahead of `W`
+    // changes nothing; `canCompile()` and `compile()` agree.
+    const expr = cev.box([
+      'Add',
+      'W',
+      ['Block', ['Declare', 'a', "'unknown'", ['Square', 'x']], 'a'],
+    ]);
+    expect(glsl.canCompile(expr, opts)).toEqual({ ok: true });
+    expect(glsl.compile(expr, opts).code).toBe(
+      [
+        'float _tv1;',
+        '{',
+        '  float a;',
+        '  a = (x * x);',
+        '  _tv1 = a;',
+        '}',
+        'return nextValue() + _tv1;',
+      ].join('\n')
     );
   });
 

@@ -322,9 +322,10 @@ export class GLSLTarget extends GPUShaderTarget {
     let code = `#version ${version}\n\n`;
 
     if (type === 'fragment') {
-      // `highp int` is declared alongside `highp float`: the PCG3D draw helper
-      // needs EXACT 32-bit unsigned arithmetic, and the default integer
-      // precision of an ES 3.00 fragment shader is not reliably `highp`.
+      // `highp int` is declared alongside `highp float`: the integer
+      // arithmetic of the helpers (`floatBitsToUint` in `_gpu_isnan`, the
+      // loop counters) needs 32 bits, and the default integer precision of an
+      // ES 3.00 fragment shader is not reliably `highp`.
       code += 'precision highp float;\nprecision highp int;\n\n';
     }
 
@@ -347,10 +348,8 @@ export class GLSLTarget extends GPUShaderTarget {
     // `_gpu_*` helper they reference, so the preamble is derived from the
     // emitted code and spliced in ahead of `main()` — this route returns a
     // complete shader, with no separate `preamble` channel for the caller to
-    // assemble. (Passing the STAGE is the redesign's §7 check: an unframed
-    // `Random()` lowers to `gl_FragCoord`-derived spatial noise, which only a
-    // fragment shader has.) The whole body compiles against ONE target, so
-    // random frames in different statements get DISTINCT counters.
+    // assemble. The whole body compiles against ONE target, so the
+    // generated temporaries of different statements get distinct names.
     // The declared inputs and uniforms are framed and bound for the body
     // analysis: nothing but these declarations carries their shader types, and
     // GLSL references both kinds bare (see `compileShaderBody`). An `out`

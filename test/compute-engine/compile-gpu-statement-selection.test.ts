@@ -231,9 +231,6 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
   });
 
   test('a branch with several draws binds each one in order', () => {
-    // More than one draw in a branch: the statement is compiled again with
-    // every draw bound to a temporary where it is compiled, so the statement
-    // form keeps the order of the draws (`gpuRecompileWithBoundDraws`).
     // The GLSL fragment has no `Random`, so each of these declines.
     const decline = (expr: unknown): void => {
       expect(() =>

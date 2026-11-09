@@ -322,7 +322,6 @@ describe('GPU: First, Second, Third and Last of other operands', () => {
 // draw in it happens. A compiled element read must keep each draw once, or
 // decline: a draw that is left out changes the random stream of the shader.
 describe('GPU: First, Second, Third and Last of an operand with a draw', () => {
-  const draws = (s: string) => s.split('_gpu_rnd_draw(').length - 1;
   const R = ['Random'];
   const code = (to: 'glsl', json: unknown) =>
     compile(ce.box(json as any), { to, fallback: false }).code!;

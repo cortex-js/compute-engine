@@ -2181,39 +2181,6 @@ float _gpu_lcm(float a, float b) {
 `;
 
 /**
- * GPU Random preamble (GLSL syntax) — PCG3D.
- *
- * `_gpu_pcg3d` is transcribed VERBATIM from Jarzynski & Olano, *Hash Functions
- * for GPU Rendering*, JCGT 2020, §6 — the same listing `pcg3d()` in
- * `numerics/random.ts` transcribes. Pure u32 arithmetic (exact on ES 3.00+),
- * so the shader computes the identical integer words as the host for identical
- * inputs; changing a constant or the operation order is a BREAKING change to
- * the seed→stream mapping, pinned by `test/compute-engine/random-vectors.test.ts`.
- *
- * The cross-multiply-adds are SEQUENTIAL — `v.y += v.z*v.x` reads the `v.x`
- * just updated.
- *
- * `_gpu_rnd_draw` presents `w0` as `(w0 >> 8) * 2⁻²⁴`: the top 24 bits scaled
- * by an exact power of two, never implementation-rounded float math. It
- * advances the caller's invocation-local counter, taken by `inout`, so
- * repeated draws in one frame decorrelate.
- */
-export const GPU_PCG3D_PREAMBLE_GLSL = `
-uvec3 _gpu_pcg3d(uvec3 v) {
-  v = v * 1664525u + 1013904223u;
-  v.x += v.y*v.z; v.y += v.z*v.x; v.z += v.x*v.y;
-  v ^= v >> 16u;
-  v.x += v.y*v.z; v.y += v.z*v.x; v.z += v.x*v.y;
-  return v;
-}
-float _gpu_rnd_draw(uvec2 seed, inout uint n) {
-  uvec3 w = _gpu_pcg3d(uvec3(seed.x, seed.y, n));
-  n = n + 1u;
-  return float(w.x >> 8u) * (1.0 / 16777216.0);
-}
-`;
-
-/**
  * GPU Median preamble (GLSL syntax).
  *
  * One function per supported list size (2..8) using sorting networks

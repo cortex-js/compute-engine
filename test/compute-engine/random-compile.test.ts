@@ -682,10 +682,10 @@ describe('an impure operand spliced by a multi-use template draws exactly once',
   // Regression (2026-07-31): the `Mod`/`Remainder` templates splice their
   // compiled operands two or three times, and the GPU `Cot` splices its
   // operand into `cos(…)/sin(…)` — so a Random-family operand was re-drawn
-  // at run time (`Remainder(Random(), 2)` consumed TWO draws, and on GPU
-  // shifted every later `_gpu_rnd_draw` in the shader). Impure operands are
-  // now bound to a temporary (IIFE on JS, hoisted statement on GPU); pure
-  // operands keep the direct emission byte-identical.
+  // at run time (`Remainder(Random(), 2)` consumed TWO draws). Impure
+  // operands are now bound to a temporary (an IIFE on JS); pure operands
+  // keep the direct emission byte-identical. The GLSL fragment has no
+  // `Random`, so GLSL declines these.
   const ce = new ComputeEngine();
 
   test('JS: Remainder(Random(), 2) emits a single draw', () => {
