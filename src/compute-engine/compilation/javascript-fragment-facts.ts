@@ -25,16 +25,23 @@ type Annotation = {
   }>;
   readonly refusal?: unknown;
 };
+export type ScalarFragmentCapture = {
+  readonly symbols: ReadonlySet<Expression>;
+  readonly value: Expression;
+  readonly assertCurrent: () => void;
+};
 export type ScalarFragmentHelper = {
   readonly name: string;
   readonly literal: Expression;
   readonly body: Expression;
+  readonly capture?: ScalarFragmentCapture;
 };
 type ScalarFragmentArtifact = {
   readonly root: Expression;
   readonly annotate: () => Annotation;
   readonly functionRoot?: Expression;
   readonly helper?: ScalarFragmentHelper;
+  readonly capture?: ScalarFragmentCapture;
 };
 const artifactKey = Symbol('scalar fragment artifact');
 const policyKeys = [
@@ -73,6 +80,7 @@ export function attachScalarFragment(
     annotate: artifact.annotate,
     functionRoot: artifact.functionRoot,
     helper: artifact.helper,
+    capture: artifact.capture ?? artifact.helper?.capture,
     policy,
   };
 }
@@ -99,7 +107,28 @@ function facts(artifact: OwnedArtifact, node: Expression): Facts {
   return value;
 }
 
+/**
+ * The walker types stored values in the root scope. Read those facts only
+ * while substituting the exact literal for its recorded captured symbol;
+ * ordinary helper-body nodes continue to use their lexical scope.
+ */
+function storedCaptureScope(artifact: OwnedArtifact, node: Expression): Scope | undefined {
+  const capture = artifact.capture;
+  if (!capture) return undefined;
+  if (capture.symbols.has(node)) capture.assertCurrent();
+  if (node !== capture.value || artifact.current === undefined ||
+      !capture.symbols.has(artifact.current)) return undefined;
+  capture.assertCurrent();
+  return artifact.annotation?.scope;
+}
+
 function assertMember(artifact: OwnedArtifact, node: Expression): void {
+  const storedScope = storedCaptureScope(artifact, node);
+  if (storedScope) {
+    const value = storedScope.facts.get(node);
+    if (value && 'representation' in value) return;
+    throw new Error('JS scalar fragment invariant: missing captured-value facts');
+  }
   if (artifact.statements?.has(node)) return;
   facts(artifact, node);
 }
@@ -148,6 +177,7 @@ export function bindScalarFragmentDefinition(
     policy,
     annotation: artifact.annotation,
     scope: entry.scope,
+    capture: artifact.capture,
   };
 }
 
@@ -237,9 +267,12 @@ export function enterScalarFragment(
   }
   assertMember(artifact, node);
   const previous = artifact.current;
+  const previousScope = artifact.scope;
+  artifact.scope = storedCaptureScope(artifact, node) ?? previousScope;
   artifact.current = node;
   return () => {
     artifact.current = previous;
+    artifact.scope = previousScope;
   };
 }
 

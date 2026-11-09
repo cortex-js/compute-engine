@@ -31,6 +31,7 @@ import {
   attachScalarFragment,
   type ScalarRepresentation,
   type ScalarFragmentHelper,
+  type ScalarFragmentCapture,
 } from './javascript-fragment-facts.js';
 
 const numericRule = {
@@ -157,6 +158,12 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
                 Add: scopedNumericRule,
                 Negate: scopedNumericRule,
                 Block: { walk: walkBlock },
+              },
+              storedValue: node => {
+                const capture = helper?.capture;
+                if (!capture?.symbols.has(node)) return undefined;
+                capture.assertCurrent();
+                return capture.value;
               },
               functionOf: call => calls.has(call) && isFunction(call)
                 ? { ...helper!.fragment, arguments: call.ops }
@@ -349,7 +356,7 @@ function attachBoundFunction(
   });
 }
 
-/** Helper bodies have no captures or writes; scoped operand facts select lanes. */
+/** Helper bodies have no writes; scoped operand facts select lanes. */
 const scopedNumericRule: FragmentRule<ScalarRepresentation> = {
   walk: (node, scope, context, w) => {
     if (context.fn === undefined) return numericRule.walk(node, scope, context, w);
@@ -404,13 +411,40 @@ function resolveHelper(call: Expression, target: CompileTarget<Expression>): Res
   if ((signature.args?.length ?? 0) !== parameters.length)
     throw new Error('JS scalar fragment: helper signature arity differs');
   const body = literal.op1.canonical;
+  let capture: ScalarFragmentCapture | undefined;
+  const captureSymbols = new Set<Expression>();
   const check = (node: Expression, root = false): void => {
     if (!node.isValid || node.type.type === 'error')
       throw new Error('JS scalar fragment: invalid helper body');
     if (isNumber(node)) return;
     if (isSymbol(node)) {
       if (parameters.includes(node.symbol) || node.symbol === 'True' || node.symbol === 'False') return;
-      throw new Error(`JS scalar fragment: unsupported helper capture ${node.symbol}`);
+      const binding = node.valueDefinition;
+      const value = binding?.value;
+      const ambient = node.engine.lookupDefinition(node.symbol);
+      if (!binding || binding.inferredType || !isSubtype(binding.type.type, 'real') ||
+          !value || !isNumber(value) || !Number.isFinite(value.re) || value.im !== 0 ||
+          !ambient || !('value' in ambient) || ambient.value !== binding ||
+          node.engine._getSymbolValue(node.symbol) !== value)
+        throw new Error(`JS scalar fragment: unsupported helper capture ${node.symbol}`);
+      if (capture && !capture.symbols.has(node) &&
+          [...capture.symbols][0].valueDefinition !== binding)
+        throw new Error('JS scalar fragment: only one numeric capture is supported');
+      const declaredType = binding.type.type;
+      captureSymbols.add(node);
+      capture ??= {
+        symbols: captureSymbols,
+        value,
+        assertCurrent: () => {
+          const current = node.engine.lookupDefinition(node.symbol);
+          if (!current || !('value' in current) || current.value !== binding ||
+              node.valueDefinition !== binding || binding.inferredType ||
+              binding.type.type !== declaredType || binding.value !== value ||
+              node.engine._getSymbolValue(node.symbol) !== value)
+            throw new Error('JS scalar fragment invariant: different captured binding or value');
+        },
+      };
+      return;
     }
     if (!isFunction(node) || !isLibraryOperator(node, node.operator) ||
         !(node.operator === 'Add' ||
@@ -422,7 +456,7 @@ function resolveHelper(call: Expression, target: CompileTarget<Expression>): Res
   };
   check(body, true);
   return {
-    name: call.operator, literal, body, binding,
+    name: call.operator, literal, body, binding, capture,
     resultRepresentation: representation(result)!,
     fragment: { key: call.operator, name: call.operator, body,
       parameters, parameterTypes, parameterSymbols },
