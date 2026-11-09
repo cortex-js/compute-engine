@@ -127,6 +127,15 @@ describe('a compiled loop that adds to list elements', () => {
     expect(result.code).toContain('_SYS.replaceAtInPlace');
   });
 
+  test('copies the list at the declaration, and tests nothing at an update', () => {
+    // The local is declared with a value and every other write of it is an
+    // update in a loop, so it holds the copy from its declaration to the end
+    // of the block (`ownedFromDeclaration` in `compile-blocks.ts`).
+    expect(result.code).toContain('let L = _SYS.ownedCopy(_.H)');
+    expect(result.code).toContain('L = _SYS.replaceAtInPlace(L, c,');
+    expect(result.code).not.toMatch(/L === _tv\d+/);
+  });
+
   test('gives the counts and leaves the input unchanged', () => {
     const H = new Array(10).fill(0);
     const expected = new Array(10).fill(0);

@@ -10191,11 +10191,18 @@ function assertWrittenLevelsAreLists(args: ReadonlyArray<Expression>): void {
  * name; otherwise the result is `undefined` and the caller keeps the
  * copying form. With more than one position, the first update copies that
  * many levels, and `_SYS.replaceAtPathInPlace` writes each of them in place.
+ *
+ * With `owned` equal to `null`, the declaration of the local copied the list
+ * and the local holds that copy to the end of the block
+ * (`ownedFromDeclaration` in `compile-blocks.ts`), so the chain writes the
+ * local with no test and no temporary. The update of a string local returns
+ * a new array of characters, which the assignment of the chain stores in the
+ * local.
  */
 function compileInPlaceUpdateChain(
   args: ReadonlyArray<Expression>,
   compile: (expr: Expression) => string,
-  owned: string
+  owned: string | null
 ): string | undefined;
 function compileInPlaceUpdateChain(
   args: ReadonlyArray<Expression>,
@@ -10204,7 +10211,7 @@ function compileInPlaceUpdateChain(
 function compileInPlaceUpdateChain(
   args: ReadonlyArray<Expression>,
   compile: (expr: Expression) => string,
-  owned?: string
+  owned?: string | null
 ): string | undefined {
   // The number of positions of each `ReplaceAt`, the same at every node of a
   // chain (`ownedLocalUpdateChains`). A fold accepts one position only
@@ -10221,6 +10228,8 @@ function compileInPlaceUpdateChain(
     // indexed collection. The owned form is used only when `elementsArg`
     // gives the plain name, so it skips no check.
     if (elementsArg('ReplaceAt', node[0], compile) !== root) return undefined;
+  }
+  if (owned !== undefined && owned !== null) {
     const copy =
       levels === 1
         ? `_SYS.ownedCopy(${root})`
@@ -10244,7 +10253,7 @@ function compileInPlaceUpdateChain(
   // `_SYS.ownedCopy` returns unchanged, it is the new array of characters
   // that `_SYS.replaceAtInPlace` made, so the next update writes that array
   // in place instead of copying it again.
-  return owned === undefined ? call : `(${owned} = ${call})`;
+  return owned === undefined || owned === null ? call : `(${owned} = ${call})`;
 }
 
 /**

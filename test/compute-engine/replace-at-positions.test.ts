@@ -514,9 +514,10 @@ describe('a block local written at two levels', () => {
   test('compiles to one deep copy, and then writes in place', () => {
     const json = ['Block', declare, ['Loop', update, range], 'L'];
     const code = compiled(ce, json).code;
-    expect(code).toContain(
-      'L = (_tv1 = _SYS.replaceAtPathInPlace(L === _tv1 ? L : (_tv1 = _SYS.ownedCopyLevels(L, 2)), 2, k, 1,'
-    );
+    // The declaration copies both levels, and each update writes with no
+    // test (`ownedFromDeclaration` in `compile-blocks.ts`).
+    expect(code).toContain('let L = _SYS.ownedCopyLevels(_.X, 2)');
+    expect(code).toContain('L = _SYS.replaceAtPathInPlace(L, 2, k, 1,');
     const row = [1, 2];
     const X = [row, [3, 4]];
     expect(run(ce, json, { X, n: 2 })).toEqual([

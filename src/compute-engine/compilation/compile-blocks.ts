@@ -13,6 +13,7 @@ import { typeToString } from '../../common/type/serialize.js';
 import { isSymbol, isFunction } from '../boxed-expression/type-guards.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import {
+  OWNED_LOCAL_DECLARATIONS,
   OWNED_LOCAL_UPDATE_OPS,
   copyingUpdateInLoop,
   noteCopyingUpdateInLoop,
@@ -498,6 +499,9 @@ export function compileBlock(
   // (`ownedLocalUpdateChains`).
   const ownedTemps: string[] = [];
   const ownedOps: ReadonlyArray<Expression>[] = [];
+  // The declarations that copy the list of a local whose updates then write
+  // it with no test (`ownedFromDeclaration`, `OWNED_LOCAL_DECLARATIONS`).
+  const ownedDeclarations: Expression[] = [];
   // The fresh names that this block gave to its locals that shadow a name
   // bound outside it on a shader target (see `spelled` below). They are
   // removed from `_freshLocalNames` in the `finally` below.
@@ -673,8 +677,20 @@ export function compileBlock(
             noteCopyingUpdateInLoop(target, local, update);
           continue;
         }
-        const temp = tempVar(target);
-        ownedTemps.push(temp);
+        // A local that holds its copy from its declaration to the end of the
+        // block is copied at the declaration, and its updates test nothing
+        // (`ownedFromDeclaration`). `null` in `OWNED_LOCAL_UPDATE_OPS` marks
+        // such an update.
+        const declaration = ownedFromDeclaration(args, local, chains);
+        if (declaration !== undefined) {
+          OWNED_LOCAL_DECLARATIONS.set(declaration, {
+            levels: chains[0].length - 2,
+            copied: false,
+          });
+          ownedDeclarations.push(declaration);
+        }
+        const temp = declaration === undefined ? tempVar(target) : null;
+        if (temp !== null) ownedTemps.push(temp);
         for (const ops of chains) {
           OWNED_LOCAL_UPDATE_OPS.set(ops, temp);
           ownedOps.push(ops);
@@ -965,6 +981,21 @@ export function compileBlock(
         .filter((s) => s !== '')
     );
 
+    // The updates of a local in `ownedDeclarations` write its list with no
+    // test, so the code of its declaration must copy the list. The JavaScript
+    // lowering of `Declare` marks each declaration that it emits with the
+    // copy. A declaration that another part of the compiler emitted would
+    // leave the caller's array to the updates, so the block declines. The
+    // JavaScript target has no `declare` hook, so each `Declare` statement
+    // of the block compiles through `compileExprDeclare` and this check
+    // never fails: a decline here is a defect of the compiler.
+    for (const d of ownedDeclarations)
+      if (OWNED_LOCAL_DECLARATIONS.get(d)?.copied !== true)
+        throw new Error(
+          'Could not compile `Block`: a list local whose updates write the ' +
+            'list in place was declared without a copy of its value.'
+        );
+
     // An empty statement list evaluates to `Nothing`, the erasure marker,
     // which has no compiled representation. In VALUE position — a function
     // body, a block spliced into an operand — the block declines (D6): a
@@ -1118,6 +1149,7 @@ export function compileBlock(
     unmarkChecked?.();
     unnoteReserved?.();
     for (const ops of ownedOps) OWNED_LOCAL_UPDATE_OPS.delete(ops);
+    for (const d of ownedDeclarations) OWNED_LOCAL_DECLARATIONS.delete(d);
     for (const name of shadowSpellings) _freshLocalNames.delete(name);
   }
 }
@@ -1154,6 +1186,91 @@ function containsLoop(e: Expression): boolean {
   if (e.operator === 'Loop') return true;
   if (e.operator === 'Function') return false;
   return e.ops.some(containsLoop);
+}
+
+/**
+ * For a local `name` of the statement list `stmts` whose updates
+ * `ownedLocalUpdateChains` accepts (`chains`), the statement that declares the
+ * local with a value, when the block can copy the list once at that
+ * declaration. Otherwise `undefined`.
+ *
+ * The usual form copies the list at the first update and keeps the copy in a
+ * temporary, and each update tests that the local still holds that copy:
+ *
+ *     (_tv1 = _SYS.replaceAtInPlace(xs === _tv1 ? xs : (_tv1 = _SYS.ownedCopy(xs)), i, v))
+ *
+ * In a loop, this test and the call that the compiled code keeps for the
+ * copy cost about 0.3 ns for each update, which is about 25 % of a loop that
+ * only updates elements. When the local is declared with a value
+ * (`let xs = L`) and every other write of the local is an update chain, the
+ * local holds the copy from its declaration to the end of the block, so the
+ * declaration copies the list and each update writes it with no test:
+ *
+ *     let xs = _SYS.ownedCopy(L); ... xs = _SYS.replaceAtInPlace(xs, i, v)
+ *
+ * The conditions:
+ *
+ * - The first statement of `stmts` that mentions `name` declares it with a
+ *   value, and that value does not mention `name`.
+ * - Every other `Assign` or `Declare` of `name` in `stmts` is the assignment
+ *   of a chain in `chains`. `ownedLocalUpdateChains` has already refused
+ *   every other way to give the local a value (a loop variable, a
+ *   destructuring assignment) and every mention in a function literal.
+ * - An update chain is in a loop (`copyingUpdateInLoop`). The declaration
+ *   copies the list also when no update runs, so an update that runs at most
+ *   once keeps the usual form, which copies only when an update runs.
+ *
+ * A string value is not copied by `ownedCopy`: the first update converts it
+ * to a new array of its characters, which the local then holds, as in the
+ * usual form.
+ */
+function ownedFromDeclaration(
+  stmts: ReadonlyArray<Expression>,
+  name: string,
+  chains: ReadonlyArray<ReadonlyArray<Expression>>
+): Expression | undefined {
+  if (copyingUpdateInLoop(stmts, name) === undefined) return undefined;
+  // True when `e` mentions `name`. A node can be an operand of several
+  // nodes, so the answer for each node is kept.
+  const memo = new Map<Expression, boolean>();
+  const mentions = (e: Expression): boolean => {
+    if (isSymbol(e, name)) return true;
+    if (!isFunction(e)) return false;
+    let result = memo.get(e);
+    if (result === undefined) {
+      result = e.ops.some(mentions);
+      memo.set(e, result);
+    }
+    return result;
+  };
+  const first = stmts.findIndex((s) => mentions(s));
+  if (first < 0) return undefined;
+  const declaration = stmts[first];
+  if (!isFunction(declaration, 'Declare') || !isSymbol(declaration.ops[0], name))
+    return undefined;
+  const value = declareValueOperand(declaration.ops);
+  if (value === undefined || mentions(value)) return undefined;
+  const chainOps = new Set(chains);
+  // True when every write of `name` in `e` is the assignment of a chain.
+  const seen = new Set<Expression>();
+  const onlyChainWrites = (e: Expression): boolean => {
+    if (!isFunction(e) || seen.has(e)) return true;
+    seen.add(e);
+    if (
+      (e.operator === 'Assign' || e.operator === 'Declare') &&
+      isSymbol(e.ops[0], name) &&
+      !(
+        e.operator === 'Assign' &&
+        isFunction(e.ops[1], 'ReplaceAt') &&
+        chainOps.has(e.ops[1].ops)
+      )
+    )
+      return false;
+    return e.ops.every(onlyChainWrites);
+  };
+  if (!declaration.ops.slice(1).every(onlyChainWrites)) return undefined;
+  if (!stmts.slice(first + 1).every(onlyChainWrites)) return undefined;
+  return declaration;
 }
 
 /**

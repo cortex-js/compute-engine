@@ -191,6 +191,18 @@
   definition is released only after the end of the synchronous task that
   made it, and `ce.withValues()` refuses a value for a name that only
   collected bodies applied until the garbage collector has run.
+- **A compiled loop that updates the elements of a local list tests nothing
+  at each update.** In `let L = H; for k in 1..n { L = replaceAt(L, c, L[c]
+  + 1) }`, each update tested that `L` still held the copy the block had
+  made, and kept a call to make that copy in the loop. When the local is
+  declared with a value and every other write of it is such an update, the
+  declaration now copies the list (`let L = _SYS.ownedCopy(_.H)`) and each
+  update writes it directly (`L = _SYS.replaceAtInPlace(L, c, …)`). The
+  input list is never changed, as before. A loop of 1,000,000 passes with
+  two updates each takes 1.15 to 1.25 times as long as the same loop
+  written by hand with `L[c - 1] += 1`, against 1.32 to 1.44 before
+  (CE-1098). A list that is updated only outside loops keeps the copy at
+  its first update, so a block that does not update it does not copy it.
 
 ## 0.184.0 _2026-11-08_
 

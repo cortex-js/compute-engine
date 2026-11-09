@@ -344,12 +344,36 @@ function ownedLocalChains(
  *
  *     (_tv1 = _SYS.replaceAtPathInPlace(m === _tv1 ? m : (_tv1 = _SYS.ownedCopyLevels(m, 2)), 2, j, i, v))
  *
+ * The value is `null` instead of a temporary when the declaration of the
+ * local copies the list (`ownedFromDeclaration` in `compile-blocks.ts`): the
+ * local then holds the array the block owns from its declaration to the end
+ * of the block, and the update writes it with no test:
+ *
+ *     _SYS.replaceAtInPlace(xs, i, v)
+ *
  * If the compiler passes a different array, the update keeps the copying
  * form, which is slower but correct.
  */
 export const OWNED_LOCAL_UPDATE_OPS = new WeakMap<
   ReadonlyArray<Expression>,
-  string
+  string | null
+>();
+
+/**
+ * The `Declare` statements that copy the list of their local, with the
+ * number of levels to copy (the number of positions of each update of the
+ * local), when the updates of the local are marked `null` in
+ * `OWNED_LOCAL_UPDATE_OPS` (`ownedFromDeclaration` in `compile-blocks.ts`).
+ * The block lowering adds them for the time it compiles its statements. The
+ * JavaScript lowering of `Declare` then emits
+ * `let xs = _SYS.ownedCopy(value)`, or `_SYS.ownedCopyLevels(value, levels)`
+ * for more than one level, and sets `copied`. The block lowering declines
+ * when a declaration was compiled without the copy: the updates of the local
+ * would then write the caller's array.
+ */
+export const OWNED_LOCAL_DECLARATIONS = new WeakMap<
+  Expression,
+  { levels: number; copied: boolean }
 >();
 
 /**

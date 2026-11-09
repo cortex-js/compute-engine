@@ -334,10 +334,11 @@ describe('a block local replaced element by element is written in place (CE-329)
       ['Loop', update, range],
       'xs',
     ];
+    // The declaration copies the list, and each update writes it with no
+    // test (`ownedFromDeclaration` in `compile-blocks.ts`).
     const code = codeOf(ce, json);
-    expect(code).toContain(
-      'xs = (_tv1 = _SYS.replaceAtInPlace(xs === _tv1 ? xs : (_tv1 = _SYS.ownedCopy(xs)), i,'
-    );
+    expect(code).toContain('let xs = _SYS.ownedCopy(_.L)');
+    expect(code).toContain('xs = _SYS.replaceAtInPlace(xs, i,');
     const L = [1, 2, 3];
     expect(run(ce, json, { L })).toEqual([2, 4, 6]);
     expect(L).toEqual([1, 2, 3]);
@@ -379,8 +380,47 @@ describe('a block local replaced element by element is written in place (CE-329)
       ['Loop', update, range],
       'xs',
     ];
+    // The local can hold another array after its declaration, so each
+    // update tests that it holds the copy of the block.
+    expect(codeOf(ce, json)).toContain(
+      'xs = (_tv1 = _SYS.replaceAtInPlace(xs === _tv1 ? xs : (_tv1 = _SYS.ownedCopy(xs)), i,'
+    );
     const L = [1, 2, 3];
     expect(run(ce, json, { L })).toEqual([2, 4, 6]);
+    expect(L).toEqual([1, 2, 3]);
+  });
+
+  test('an update that is not in a loop copies at the update', () => {
+    // The declaration copies the list only when an update is in a loop: a
+    // block that updates the list at most once copies it only when the
+    // update runs.
+    const json = [
+      'Block',
+      declare,
+      [
+        'If',
+        ['Greater', ['Length', 'L'], 2],
+        ['Assign', 'xs', ['ReplaceAt', 'xs', 1, 0]],
+      ],
+      'xs',
+    ];
+    const code = codeOf(ce, json);
+    expect(code).not.toContain('let xs = _SYS.ownedCopy');
+    const L = [1, 2, 3];
+    expect(run(ce, json, { L })).toEqual([0, 2, 3]);
+    expect(L).toEqual([1, 2, 3]);
+  });
+
+  test('a loop that runs zero times gives the input values', () => {
+    const json = [
+      'Block',
+      declare,
+      ['Loop', update, ['Element', 'i', ['Range', 1, 0, 1]]],
+      'xs',
+    ];
+    expect(codeOf(ce, json)).toContain('let xs = _SYS.ownedCopy(_.L)');
+    const L = [1, 2, 3];
+    expect(run(ce, json, { L })).toEqual([1, 2, 3]);
     expect(L).toEqual([1, 2, 3]);
   });
 

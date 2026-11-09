@@ -52,6 +52,7 @@ import {
   withPromotionSuppressed,
 } from './compiler-mode.js';
 import { absenceAxisForType } from './compile-absence.js';
+import { OWNED_LOCAL_DECLARATIONS } from './in-place-update.js';
 import {
   compileOp,
   compileOpValue,
@@ -416,6 +417,17 @@ export function compileExprDeclare(
         : compileOp(node, valueIndex, target, 0, value),
       target
     );
+    // A local whose updates write its list in place with no test copies the
+    // list here, so they never write the caller's array
+    // (`OWNED_LOCAL_DECLARATIONS`).
+    const owned =
+      node !== undefined ? OWNED_LOCAL_DECLARATIONS.get(node) : undefined;
+    if (owned !== undefined) {
+      owned.copied = true;
+      return owned.levels === 1
+        ? `let ${name} = _SYS.ownedCopy(${valueCode})`
+        : `let ${name} = _SYS.ownedCopyLevels(${valueCode}, ${owned.levels})`;
+    }
     return `let ${name} = ${valueCode}`;
   }
   return undefined;
