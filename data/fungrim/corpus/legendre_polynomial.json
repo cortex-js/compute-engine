@@ -826,7 +826,7 @@
     [
      "Count",
      [
-      "Zeros",
+      "ZerosOf",
       [
        "Function",
        [
@@ -853,7 +853,7 @@
    "subclass": null,
    "heads": [
     "LegendrePolynomial",
-    "Zeros"
+    "ZerosOf"
    ],
    "guardLevel": "real-simple",
    "flavor": null,
@@ -2487,7 +2487,7 @@
    "formula": [
     "Subset",
     [
-     "Zeros",
+     "ZerosOf",
      [
       "Function",
       [
@@ -2523,7 +2523,7 @@
    "subclass": null,
    "heads": [
     "LegendrePolynomial",
-    "Zeros"
+    "ZerosOf"
    ],
    "guardLevel": "real-simple",
    "flavor": null,

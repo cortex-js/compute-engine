@@ -121,7 +121,10 @@ upstream revisions can be diffed later.
   `PowerSeries(RR, x)`) — small entry count, no CE analogue. Skip.
 - **Set-valued property operators** (`Poles`, `Zeros`, `BranchPoints`, `BranchCuts`,
   `Residues` with generator syntax) — ~242 entries. Translate into a *metadata side
-  table*, not into expressions (see §4, Feature E).
+  table*, not into expressions (see §4, Feature E). Where `Zeros(f, S)` stays
+  in an expression (6 corpus entries, one property value), its head is `ZerosOf`:
+  the library's `Zeros(d1, …)` makes an array of zeros, so the corpus cannot
+  declare the Fungrim meaning under that name.
 - **Quantifiers** (`All`, `Exists`) — appear mostly inside Assumptions. CE's
   `ForAll`/`Exists` exist but are inert (enumerate finite domains only). For rule
   guards, translate quantified assumptions into per-binding predicate checks where

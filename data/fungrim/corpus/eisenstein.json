@@ -1408,7 +1408,7 @@
    "formula": [
     "Subset",
     [
-     "Zeros",
+     "ZerosOf",
      [
       "Function",
       [
@@ -1479,7 +1479,7 @@
     "Exp",
     "Map",
     "ModularGroupFundamentalDomain",
-    "Zeros"
+    "ZerosOf"
    ],
    "guardLevel": "real-simple",
    "flavor": null,
@@ -3621,7 +3621,7 @@
     [
      "Count",
      [
-      "Zeros",
+      "ZerosOf",
       [
        "Function",
        [
@@ -3660,7 +3660,7 @@
    "heads": [
     "EisensteinE",
     "ModularGroupFundamentalDomain",
-    "Zeros"
+    "ZerosOf"
    ],
    "guardLevel": "real-simple",
    "flavor": null,

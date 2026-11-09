@@ -725,7 +725,7 @@
    "formula": [
     "Subset",
     [
-     "Zeros",
+     "ZerosOf",
      [
       "Function",
       [
@@ -757,7 +757,7 @@
    "heads": [
     "AiryAi",
     "Derivative",
-    "Zeros"
+    "ZerosOf"
    ],
    "guardLevel": "none",
    "flavor": null,
@@ -919,7 +919,7 @@
    "formula": [
     "Subset",
     [
-     "Zeros",
+     "ZerosOf",
      [
       "Function",
       [
@@ -938,7 +938,7 @@
    "subclass": null,
    "heads": [
     "AiryAi",
-    "Zeros"
+    "ZerosOf"
    ],
    "guardLevel": "none",
    "flavor": null,
