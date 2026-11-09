@@ -55,6 +55,7 @@ agents. Repository-wide validation remains the orchestrator's responsibility.
 | Developing a change           | Typecheck and tests for the changed area; see delegated-task guidance below. |
 | Opening a PR                  | `npm run ci`. GitHub also builds and checks the package.                     |
 | Changing the Python compiler  | `npm run test:python` in addition to the normal checks.                      |
+| Changing the GLSL compiler    | `npm run test:glsl` in addition to the normal checks.                        |
 | Changing documentation inputs | `npm run doc`; review the generated changes.                                 |
 | Preparing a release           | `npm run release`; see the release sequence below.                           |
 
@@ -178,6 +179,7 @@ release requirements. Worker limits and box-lock rules still apply.
 | `npm run snapshot`                           | Update snapshots; never update a snapshot marked `@fixme`.                                                        |
 | `npm run coverage`                           | Runtime coverage and checkpoint canary.                                                                           |
 | `npm run test:python`                        | Check Python dependencies and run suites with Python execution assertions.                                        |
+| `npm run test:glsl`                          | Compile the GLSL that the engine writes with the WebGL 2 compiler of a headless Chromium.                         |
 | `npm run test:nightly`                       | Run only the additional `CE_NIGHTLY`-gated suites; not the full nightly pipeline.                                 |
 | `npm run test:perf`                          | Run timing assertions serially with `CE_PERF=1`.                                                                  |
 | `npm run ci:corpus-pipeline`                 | Check corpus regressions and generated rule artifacts.                                                            |
@@ -200,6 +202,15 @@ variables are required for a configured checkout. If setup is missing, use an
 interpreter with NumPy/SciPy at `venv/bin/python3`, or set `CE_PYTHON` to its
 path. Normal tests still check Python code generation without starting an
 interpreter.
+
+`npm run test:glsl` (`scripts/glsl-check/`) is not part of `npm test`: it
+starts a headless Chromium of `playwright-core`, which renders with SwiftShader
+(no GPU necessary). It compiles and links a fragment shader for each operator
+of the GPU function tables, and fails when WebGL 2 refuses a shader that the
+engine wrote with no decline. A shader that WebGL 2 refuses because of an open
+issue is in the `KNOWN_FAILURES` list of the test, with the issue id. When the
+browser is missing, run `npx playwright-core install chromium-headless-shell`.
+No box lock is necessary: the run takes about one second.
 
 `npm run test:nightly` runs only the additional nightly suites. The local
 `bash scripts/ci-nightly.sh run` checks committed HEAD in an isolated worktree
