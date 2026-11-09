@@ -29,6 +29,7 @@ import {
   type FragmentDefinition,
   type FragmentRule,
   type FragmentFunction,
+  type FragmentScope,
 } from './fragment.js';
 import {
   attachScalarFragment,
@@ -49,11 +50,38 @@ const numericRule = {
     ]);
   },
 } satisfies FragmentRule<ScalarRepresentation>;
+/** Scoped operand facts select lanes without reading ambient initializer values. */
+const operandNumericRule = {
+  walk: (node, scope, context, w) => {
+    const operands = isFunction(node) ? node.ops : [];
+    const lane = operands.some(
+      (operand) => w.value(operand, scope, context).representation === 'complex'
+    )
+      ? 'complex'
+      : 'real';
+    return w.signatures(node, scope, context, [
+      {
+        operands: [lane],
+        ...(node.operator === 'Add' ? { rest: lane } : {}),
+        result: lane,
+      },
+    ]);
+  },
+} satisfies FragmentRule<ScalarRepresentation>;
+
+// Helper bodies use scoped operand facts; ordinary scalar roots retain the
+// existing numeric policy, including its constant-value analysis.
+const scopedNumericRule: FragmentRule<ScalarRepresentation> = {
+  walk: (node, scope, context, w) => context.fn === undefined
+    ? numericRule.walk(node, scope, context, w)
+    : operandNumericRule.walk(node, scope, context, w),
+};
+
 const definition: FragmentDefinition<ScalarRepresentation> = {
   name: 'JS scalar',
   rules: {
-    Add: numericRule,
-    Negate: numericRule,
+    Add: scopedNumericRule,
+    Negate: scopedNumericRule,
     Sqrt: numericRule,
     If: { walk: walkIf },
   },
@@ -101,8 +129,7 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       attachBoundFunction(prepared.expr, prepared.target);
       return prepared;
     }
-    let helper: ResolvedHelper | undefined;
-    const calls = new Set<Expression>();
+    const named: NamedCalls = { calls: new Set() };
     const seen = new Set<Expression>();
     const check = (node: Expression): void => {
       if (seen.has(node)) return;
@@ -122,19 +149,7 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
         return;
       }
       if (isFunction(node) && !Object.hasOwn(definition.rules, node.operator)) {
-        const resolved = resolveHelper(node, prepared.target);
-        if (
-          helper &&
-          (helper.name !== resolved.name ||
-            helper.binding !== resolved.binding ||
-            helper.literal !== resolved.literal ||
-            helper.body !== resolved.body)
-        )
-          throw new Error(
-            'JS scalar fragment: only one resolved helper is supported'
-          );
-        helper ??= resolved;
-        calls.add(node);
+        collectHelper(node, prepared.target, named);
         for (const operand of node.ops) check(operand);
         return;
       }
@@ -157,60 +172,8 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     check(prepared.expr);
     attachScalarFragment(prepared.target, {
       root: prepared.expr,
-      helper,
-      annotate: () => {
-        const namedDefinition: FragmentDefinition<ScalarRepresentation> =
-          helper === undefined
-            ? definition
-            : {
-                ...definition,
-                rules: {
-                  ...definition.rules,
-                  Add: scopedNumericRule,
-                  Negate: scopedNumericRule,
-                  Block: { walk: walkBlock },
-                },
-                storedValue: (node) => {
-                  const capture = helper?.capture;
-                  if (!capture?.symbols.has(node)) return undefined;
-                  capture.assertCurrent();
-                  return capture.value;
-                },
-                functionOf: (call) =>
-                  calls.has(call) && isFunction(call)
-                    ? { ...helper!.fragment, arguments: call.ops }
-                    : undefined,
-              };
-        const annotation = typeFragment(prepared.expr, namedDefinition);
-        if (annotation.refusal)
-          throw new Error(`JS scalar fragment: ${annotation.refusal.message}`);
-        if (helper) {
-          const entry = annotation.functions.get(helper.name);
-          if (
-            !entry ||
-            entry.body !== helper.body ||
-            entry.type.kind !== 'function' ||
-            representation(entry.type.result) !== helper.resultRepresentation
-          )
-            throw new Error(
-              'JS scalar fragment: helper return representation differs from its signature'
-            );
-          for (const call of calls) {
-            const facts = annotation.scope.facts.get(call);
-            if (
-              !facts ||
-              !('representation' in facts) ||
-              facts.conversions?.some(
-                (conversion) => conversion.kind !== 'none'
-              )
-            )
-              throw new Error(
-                'JS scalar fragment: helper arguments must preserve representation'
-              );
-          }
-        }
-        return annotation;
-      },
+      helper: named.helper,
+      annotate: () => annotateCalls(prepared.expr, definition, named),
     });
     return prepared;
   }
@@ -281,6 +244,8 @@ function attachBoundFunction(
   )
     throw new Error('JS scalar fragment: unsupported local declaration');
   const names = new Set(inputs.map((input) => input.name));
+  const bindings = new Set([...names, local]);
+  const named: NamedCalls = { calls: new Set() };
   const checkValue = (node: Expression): void => {
     if (!node.isValid || node.type.type === 'error')
       throw new Error('JS scalar fragment: invalid bound expression');
@@ -293,6 +258,15 @@ function attachBoundFunction(
       )
         return;
       throw new Error(`JS scalar fragment: unsupported capture ${node.symbol}`);
+    }
+    if (isFunction(node) && !['Add', 'Negate', 'If', 'Sqrt'].includes(node.operator)) {
+      collectHelper(node, target, named);
+      const helper = named.helper!;
+      if (bindings.has(helper.name) || [...(helper.capture?.symbols ?? [])]
+          .some(symbol => isSymbol(symbol) && bindings.has(symbol.symbol)))
+        throw new Error('JS scalar fragment: helper bindings collide with the root function');
+      for (const operand of node.ops) checkValue(operand);
+      return;
     }
     // Sqrt is excluded here: a write can change the sign of a local, so its
     // initializer cannot determine whether a later square root is complex.
@@ -324,28 +298,11 @@ function attachBoundFunction(
     checkValue(statement.op2);
   }
   checkValue(body.ops[body.nops - 1]);
-  const boundNumeric: FragmentRule<ScalarRepresentation> = {
-    walk: (node, scope, context, w) => {
-      const operands = isFunction(node) ? node.ops : [];
-      const complex = operands.some(
-        (operand) =>
-          w.value(operand, scope, context).representation === 'complex'
-      );
-      const lane = complex ? 'complex' : 'real';
-      return w.signatures(node, scope, context, [
-        {
-          operands: [lane],
-          ...(node.operator === 'Add' ? { rest: lane } : {}),
-          result: lane,
-        },
-      ]);
-    },
-  };
   const boundDefinition: FragmentDefinition<ScalarRepresentation> = {
     ...definition,
     rules: {
-      Add: boundNumeric,
-      Negate: boundNumeric,
+      Add: operandNumericRule,
+      Negate: operandNumericRule,
       If: { walk: walkIf },
       Block: { walk: walkBlock },
       Assign: { walk: walkAssign },
@@ -354,10 +311,9 @@ function attachBoundFunction(
   attachScalarFragment(target, {
     root: body,
     functionRoot: fn,
+    helper: named.helper,
     annotate: () => {
-      const annotation = typeFragment(body, boundDefinition, { inputs });
-      if (annotation.refusal)
-        throw new Error(`JS scalar fragment: ${annotation.refusal.message}`);
+      const annotation = annotateCalls(body, boundDefinition, named, inputs, body);
       const scope = annotation.scope.inner.get(body);
       const binding = scope?.bindings.get(local);
       if (!scope || !binding || !('representation' in binding))
@@ -381,32 +337,68 @@ function attachBoundFunction(
   });
 }
 
-/** Helper bodies have no writes; scoped operand facts select lanes. */
-const scopedNumericRule: FragmentRule<ScalarRepresentation> = {
-  walk: (node, scope, context, w) => {
-    if (context.fn === undefined)
-      return numericRule.walk(node, scope, context, w);
-    const operands = isFunction(node) ? node.ops : [];
-    const lane = operands.some(
-      (operand) => w.value(operand, scope, context).representation === 'complex'
-    )
-      ? 'complex'
-      : 'real';
-    return w.signatures(node, scope, context, [
-      {
-        operands: [lane],
-        ...(node.operator === 'Add' ? { rest: lane } : {}),
-        result: lane,
-      },
-    ]);
-  },
-};
 
 type ResolvedHelper = ScalarFragmentHelper & {
   readonly binding: object;
   readonly resultRepresentation: ScalarRepresentation;
   readonly fragment: Omit<FragmentFunction, 'arguments'>;
 };
+
+type NamedCalls = { helper?: ResolvedHelper; calls: Set<Expression> };
+
+function collectHelper(node: Expression, target: CompileTarget<Expression>, named: NamedCalls): void {
+  const resolved = resolveHelper(node, target);
+  const helper = named.helper;
+  if (helper && (helper.name !== resolved.name || helper.binding !== resolved.binding ||
+      helper.literal !== resolved.literal || helper.body !== resolved.body))
+    throw new Error('JS scalar fragment: only one resolved helper is supported');
+  named.helper ??= resolved;
+  named.calls.add(node);
+}
+
+/**
+ * Type the root and check the helper's return representation against its
+ * signature. Check each call's argument conversions in its root or block scope.
+ */
+function annotateCalls(
+  root: Expression,
+  base: FragmentDefinition<ScalarRepresentation>,
+  named: NamedCalls,
+  inputs?: FragmentDeclaredInput[],
+  block?: Expression
+) {
+  const { helper, calls } = named;
+  const definition = helper === undefined ? base : {
+    ...base,
+    rules: { ...base.rules, Block: { walk: walkBlock } },
+    storedValue: (node: Expression) => {
+      const capture = helper.capture;
+      if (!capture?.symbols.has(node)) return undefined;
+      capture.assertCurrent();
+      return capture.value;
+    },
+    functionOf: (call: Expression) => calls.has(call) && isFunction(call)
+      ? { ...helper.fragment, arguments: call.ops } : undefined,
+  };
+  const annotation = typeFragment(root, definition, { inputs });
+  if (annotation.refusal)
+    throw new Error(`JS scalar fragment: ${annotation.refusal.message}`);
+  if (helper) {
+    const entry = annotation.functions.get(helper.name);
+    if (!entry || entry.body !== helper.body || entry.type.kind !== 'function' ||
+        representation(entry.type.result) !== helper.resultRepresentation)
+      throw new Error('JS scalar fragment: helper return representation differs from its signature');
+    const scope: FragmentScope<ScalarRepresentation> | undefined = block === undefined
+      ? annotation.scope : annotation.scope.inner.get(block);
+    for (const call of calls) {
+      const facts = scope?.facts.get(call);
+      if (!facts || !('representation' in facts) ||
+          facts.conversions?.some(conversion => conversion.kind !== 'none'))
+        throw new Error('JS scalar fragment: helper arguments must preserve representation');
+    }
+  }
+  return annotation;
+}
 
 function resolveHelper(
   call: Expression,
