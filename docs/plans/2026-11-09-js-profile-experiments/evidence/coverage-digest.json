@@ -1,0 +1,5440 @@
+{
+ "generatedAt": "2026-11-09T16:23:09.139Z",
+ "computeEngine": "0.184.0",
+ "tychoCommit": "8777c57e3",
+ "desmosScope": "core",
+ "documents": [
+  {
+   "corpus": "showcase",
+   "doc": "burning-ship",
+   "rows": 1,
+   "series": 1,
+   "ms": 252,
+   "prelude": {
+    "ran": true,
+    "valid": true,
+    "names": [
+     "B"
+    ],
+    "diagnostics": [],
+    "runMs": 31
+   }
+  },
+  {
+   "corpus": "showcase",
+   "doc": "multibrot",
+   "rows": 2,
+   "series": 1,
+   "ms": 106,
+   "prelude": {
+    "ran": true,
+    "valid": true,
+    "names": [
+     "M"
+    ],
+    "diagnostics": [],
+    "runMs": 9
+   }
+  },
+  {
+   "corpus": "showcase",
+   "doc": "buddhabrot",
+   "rows": 0,
+   "series": 1,
+   "ms": 669,
+   "prelude": {
+    "ran": true,
+    "valid": true,
+    "names": [
+     "N",
+     "H_0",
+     "step",
+     "H_1",
+     "tone",
+     "c"
+    ],
+    "diagnostics": [],
+    "runMs": 497
+   }
+  },
+  {
+   "corpus": "showcase",
+   "doc": "julia-set",
+   "rows": 1,
+   "series": 1,
+   "ms": 130,
+   "prelude": {
+    "ran": true,
+    "valid": true,
+    "names": [
+     "J",
+     "pick",
+     "seg",
+     "channel",
+     "shade"
+    ],
+    "diagnostics": [],
+    "runMs": 24
+   }
+  },
+  {
+   "corpus": "showcase",
+   "doc": "rainbow-trig",
+   "rows": 0,
+   "series": 6,
+   "ms": 19,
+   "prelude": null
+  },
+  {
+   "corpus": "showcase",
+   "doc": "damped-oscillation",
+   "rows": 1,
+   "series": 3,
+   "ms": 16,
+   "prelude": null
+  },
+  {
+   "corpus": "showcase",
+   "doc": "domain-coloring",
+   "rows": 1,
+   "series": 1,
+   "ms": 11,
+   "prelude": null
+  },
+  {
+   "corpus": "showcase",
+   "doc": "implicit-heart",
+   "rows": 0,
+   "series": 1,
+   "ms": 13,
+   "prelude": null
+  },
+  {
+   "corpus": "showcase",
+   "doc": "fourier-harmonics",
+   "rows": 0,
+   "series": 3,
+   "ms": 14,
+   "prelude": null
+  },
+  {
+   "corpus": "showcase",
+   "doc": "game-of-life",
+   "rows": 2,
+   "series": 1,
+   "ms": 87,
+   "prelude": {
+    "ran": true,
+    "valid": true,
+    "names": [
+     "N",
+     "P",
+     "S_0",
+     "life"
+    ],
+    "diagnostics": [],
+    "runMs": 37
+   }
+  },
+  {
+   "corpus": "showcase",
+   "doc": "metaballs",
+   "rows": 4,
+   "series": 1,
+   "ms": 109,
+   "prelude": null
+  },
+  {
+   "corpus": "showcase",
+   "doc": "frenet-knot-tube",
+   "rows": 21,
+   "series": 5,
+   "ms": 447,
+   "prelude": null
+  },
+  {
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "rows": 21,
+   "series": 6,
+   "ms": 153,
+   "prelude": null
+  },
+  {
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "rows": 0,
+   "series": 7,
+   "ms": 269,
+   "prelude": {
+    "ran": true,
+    "valid": true,
+    "names": [
+     "minR",
+     "csqrt",
+     "fourth",
+     "tangent",
+     "seen",
+     "admitted",
+     "fill",
+     "outer",
+     "right",
+     "left",
+     "top",
+     "bottom",
+     "circles",
+     "generations",
+     "G_1",
+     "G_2",
+     "G_3",
+     "G_4",
+     "G_5",
+     "G_6",
+     "X_1",
+     "Y_1",
+     "K_1",
+     "X_2",
+     "Y_2",
+     "K_2",
+     "X_3",
+     "Y_3",
+     "K_3",
+     "X_4",
+     "Y_4",
+     "K_4",
+     "X_5",
+     "Y_5",
+     "K_5",
+     "X_6",
+     "Y_6",
+     "K_6"
+    ],
+    "diagnostics": [],
+    "runMs": 173
+   }
+  },
+  {
+   "corpus": "showcase",
+   "doc": "projectile-with-drag",
+   "rows": 25,
+   "series": 5,
+   "ms": 183,
+   "prelude": null
+  }
+ ],
+ "shape": "digest",
+ "note": "One entry per distinct (target, input, code, preamble, error). `occurrences` counts identical compile calls; `durationMs` is the fastest, `maxDurationMs` the slowest. `row` is the authored LaTeX ('(setup)' = a document definition compiled at load); `input` is the LaTeX of the boxed expression handed to compile(). `hash` is sha256(code + newline + preamble), truncated: it sees emitted TEXT only, so a CE change to how that text runs (when a baked preamble local is evaluated, say) is invisible here by design. Written by scripts/audit-ce-codegen.mts. Digest: code and preamble text omitted; see the full file.",
+ "records": [
+  {
+   "id": 1,
+   "corpus": "showcase",
+   "doc": "burning-ship",
+   "row": "B(x, -y)",
+   "input": "\\operatorname{asOklab}(\\begin{cases}\\operatorname{rgb}(0, 0, 0)&1\\le\\max(z, 0)\\\\\\operatorname{oklch}(0.83L(z)^2+0.12, 0.17, 130L(z)+330)&\\top\\end{cases})",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 2.85,
+   "freeSymbols": [
+    "z"
+   ],
+   "freeSymbolTypes": {
+    "z": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "901275ebd4a009d6",
+   "inputHash": "0c8988b97db50504",
+   "codeLength": 181,
+   "preambleLength": 89,
+   "occurrences": 2,
+   "maxDurationMs": 20.22
+  },
+  {
+   "id": 2,
+   "corpus": "showcase",
+   "doc": "burning-ship",
+   "row": "B(x, -y)",
+   "input": "\\operatorname{asOklab}(\\begin{cases}\\operatorname{rgb}(0, 0, 0)&1\\le\\max(z, 0)\\\\\\operatorname{oklch}(0.83L(z)^2+0.12, 0.17, 130L(z)+330)&\\top\\end{cases})",
+   "target": "glsl",
+   "options": {
+    "to": "glsl",
+    "vars": {
+     "x": "v_pos.x",
+     "y": "v_pos.y",
+     "z": "v_pos.z"
+    }
+   },
+   "success": true,
+   "durationMs": 4,
+   "freeSymbols": [
+    "z"
+   ],
+   "freeSymbolTypes": {
+    "z": {
+     "type": "real",
+     "lowered": "float",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "69bb4c101c5f446c",
+   "inputHash": "0c8988b97db50504",
+   "codeLength": 207,
+   "preambleLength": 1917,
+   "occurrences": 2,
+   "maxDurationMs": 12.43
+  },
+  {
+   "id": 3,
+   "corpus": "showcase",
+   "doc": "burning-ship",
+   "row": "B(x, -y)",
+   "input": "B(x, -y)",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "broadcast": true,
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 7.12,
+   "freeSymbols": [
+    "x",
+    "y"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "e60ff73555dfe924",
+   "inputHash": "cb17383d0c3544d9",
+   "codeLength": 16,
+   "preambleLength": 466,
+   "occurrences": 1,
+   "maxDurationMs": 7.12
+  },
+  {
+   "id": 4,
+   "corpus": "showcase",
+   "doc": "burning-ship",
+   "row": "B(x, -y)",
+   "input": "B(x, -y)",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 5.75,
+   "freeSymbols": [
+    "x",
+    "y"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "interval",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "87c83517fe4c81d6",
+   "inputHash": "cb17383d0c3544d9",
+   "codeLength": 27,
+   "preambleLength": 1191,
+   "occurrences": 1,
+   "maxDurationMs": 5.75
+  },
+  {
+   "id": 5,
+   "corpus": "showcase",
+   "doc": "burning-ship",
+   "row": "B(x, -y)",
+   "input": "\\mathrm{Declare}(a, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0))); \\mathrm{Declare}(b, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0))); \\mathrm{Declare}(n, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0))); \\mathrm{Declare}(s, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0))); \\mathrm{Declare}(t, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0))); \\keyword{for}k\\keyword{from}1\\keyword{to}128\\keyword{do}\\left(\\mathrm{Assign}(s, a^2+b^2); \\left(\\left(\\keyword{break};\\right)\\keyword{where}65\\,536\\lt s\\right); \\mathrm{Assign}(n, n+1); \\mathrm{Assign}(t, a^2-b^2+x); \\mathrm{Assign}(b, \\vert2ab\\vert-y); \\mathrm{Assign}(a, t)\\right); \\mathrm{Assign}(s, a^2+b^2); \\keyword{if}s\\le65\\,536\\keyword{then}\\left(1;\\right)\\keyword{else}\\left(\\mathrm{ElementMin}(1, (n-\\ln(\\ln(s)/\\ln(65\\,536))/\\ln(2)+1)/128);\\right)",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "broadcast": true,
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 5.29,
+   "freeSymbols": [
+    "x",
+    "y"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "ddb4112b9ed013eb",
+   "inputHash": "74011bf75091e146",
+   "codeLength": 420,
+   "preambleLength": 24,
+   "occurrences": 1,
+   "maxDurationMs": 5.29
+  },
+  {
+   "id": 6,
+   "corpus": "showcase",
+   "doc": "burning-ship",
+   "row": "B(x, -y)",
+   "input": "\\mathrm{Declare}(a, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0))); \\mathrm{Declare}(b, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0))); \\mathrm{Declare}(n, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0))); \\mathrm{Declare}(s, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0))); \\mathrm{Declare}(t, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0))); \\keyword{for}k\\keyword{from}1\\keyword{to}128\\keyword{do}\\left(\\mathrm{Assign}(s, a^2+b^2); \\left(\\left(\\keyword{break};\\right)\\keyword{where}65\\,536\\lt s\\right); \\mathrm{Assign}(n, n+1); \\mathrm{Assign}(t, a^2-b^2+x); \\mathrm{Assign}(b, \\vert2ab\\vert-y); \\mathrm{Assign}(a, t)\\right); \\mathrm{Assign}(s, a^2+b^2); \\keyword{if}s\\le65\\,536\\keyword{then}\\left(1;\\right)\\keyword{else}\\left(\\mathrm{ElementMin}(1, (n-\\ln(\\ln(s)/\\ln(65\\,536))/\\ln(2)+1)/128);\\right)",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 3.52,
+   "freeSymbols": [
+    "x",
+    "y"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "interval",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "3e3ede8b5fe52d3b",
+   "inputHash": "74011bf75091e146",
+   "codeLength": 807,
+   "preambleLength": 361,
+   "occurrences": 1,
+   "maxDurationMs": 3.52
+  },
+  {
+   "id": 7,
+   "corpus": "showcase",
+   "doc": "burning-ship",
+   "row": "B(x, -y)",
+   "input": "B(x, -y)",
+   "target": "glsl",
+   "options": {
+    "to": "glsl"
+   },
+   "success": true,
+   "durationMs": 5.26,
+   "freeSymbols": [
+    "x",
+    "y"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "float",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "float",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "cf3a9d3441330b43",
+   "inputHash": "cb17383d0c3544d9",
+   "codeLength": 12,
+   "preambleLength": 728,
+   "occurrences": 1,
+   "maxDurationMs": 5.26
+  },
+  {
+   "id": 8,
+   "corpus": "showcase",
+   "doc": "multibrot",
+   "row": "M(x, y, d)",
+   "input": "\\operatorname{asOklab}(\\begin{cases}\\operatorname{rgb}(0, 0, 0)&1\\le\\max(z, 0)\\\\\\operatorname{oklch}(0.85L(z)+0.12, 0.12, 285-130L(z))&\\top\\end{cases})",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 1.94,
+   "freeSymbols": [
+    "z"
+   ],
+   "freeSymbolTypes": {
+    "z": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "a4f161506353f738",
+   "inputHash": "7f40c75eebb32a21",
+   "codeLength": 171,
+   "preambleLength": 89,
+   "occurrences": 2,
+   "maxDurationMs": 2.65
+  },
+  {
+   "id": 9,
+   "corpus": "showcase",
+   "doc": "multibrot",
+   "row": "M(x, y, d)",
+   "input": "\\operatorname{asOklab}(\\begin{cases}\\operatorname{rgb}(0, 0, 0)&1\\le\\max(z, 0)\\\\\\operatorname{oklch}(0.85L(z)+0.12, 0.12, 285-130L(z))&\\top\\end{cases})",
+   "target": "glsl",
+   "options": {
+    "to": "glsl",
+    "vars": {
+     "x": "v_pos.x",
+     "y": "v_pos.y",
+     "z": "v_pos.z"
+    }
+   },
+   "success": true,
+   "durationMs": 2.51,
+   "freeSymbols": [
+    "z"
+   ],
+   "freeSymbolTypes": {
+    "z": {
+     "type": "real",
+     "lowered": "float",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "1332676580831944",
+   "inputHash": "7f40c75eebb32a21",
+   "codeLength": 197,
+   "preambleLength": 1873,
+   "occurrences": 2,
+   "maxDurationMs": 3.19
+  },
+  {
+   "id": 10,
+   "corpus": "showcase",
+   "doc": "multibrot",
+   "row": "M(x, y, d)",
+   "input": "M(x, y, d)",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "broadcast": true,
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 3.49,
+   "freeSymbols": [
+    "x",
+    "y",
+    "d"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "d": {
+     "type": "real<-10..10>",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "497adb1d4c96253d",
+   "inputHash": "d6e1498a07b32a5f",
+   "codeLength": 20,
+   "preambleLength": 546,
+   "occurrences": 1,
+   "maxDurationMs": 3.49
+  },
+  {
+   "id": 11,
+   "corpus": "showcase",
+   "doc": "multibrot",
+   "row": "M(x, y, d)",
+   "input": "M(x, y, d)",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 2.9,
+   "freeSymbols": [
+    "x",
+    "y",
+    "d"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "interval",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "interval",
+     "provenance": "declared"
+    },
+    "d": {
+     "type": "real<-10..10>",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "d2bc5e22eb3c8b9c",
+   "inputHash": "d6e1498a07b32a5f",
+   "codeLength": 20,
+   "preambleLength": 1314,
+   "occurrences": 1,
+   "maxDurationMs": 2.9
+  },
+  {
+   "id": 12,
+   "corpus": "showcase",
+   "doc": "multibrot",
+   "row": "M(x, y, d)",
+   "input": "\\mathrm{Declare}(a, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, x))); \\mathrm{Declare}(b, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, y))); \\mathrm{Declare}(n, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 1))); \\mathrm{Declare}(s, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0))); \\mathrm{Declare}(t, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0))); \\mathrm{Declare}(w, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0))); \\mathrm{Declare}(r, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0))); \\keyword{for}k\\keyword{from}1\\keyword{to}128\\keyword{do}\\left(\\mathrm{Assign}(s, a^2+b^2); \\left(\\left(\\keyword{break};\\right)\\keyword{where}4\\,096\\lt s\\right); \\mathrm{Assign}(n, n+1); \\mathrm{Assign}(w, \\keyword{if}0\\lt s\\keyword{then}\\left(d\\arctan(b, a);\\right)\\keyword{else}\\left(0.0;\\right)); \\mathrm{Assign}(r, s^{d/2}); \\mathrm{Assign… [1252 chars]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "broadcast": true,
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 4.13,
+   "freeSymbols": [
+    "x",
+    "y",
+    "d"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "d": {
+     "type": "real<-10..10>",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "91508c650b2eb092",
+   "inputHash": "9ceb91e61b079324",
+   "codeLength": 506,
+   "preambleLength": 24,
+   "occurrences": 1,
+   "maxDurationMs": 4.13
+  },
+  {
+   "id": 13,
+   "corpus": "showcase",
+   "doc": "multibrot",
+   "row": "M(x, y, d)",
+   "input": "\\mathrm{Declare}(a, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, x))); \\mathrm{Declare}(b, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, y))); \\mathrm{Declare}(n, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 1))); \\mathrm{Declare}(s, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0))); \\mathrm{Declare}(t, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0))); \\mathrm{Declare}(w, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0))); \\mathrm{Declare}(r, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0))); \\keyword{for}k\\keyword{from}1\\keyword{to}128\\keyword{do}\\left(\\mathrm{Assign}(s, a^2+b^2); \\left(\\left(\\keyword{break};\\right)\\keyword{where}4\\,096\\lt s\\right); \\mathrm{Assign}(n, n+1); \\mathrm{Assign}(w, \\keyword{if}0\\lt s\\keyword{then}\\left(d\\arctan(b, a);\\right)\\keyword{else}\\left(0.0;\\right)); \\mathrm{Assign}(r, s^{d/2}); \\mathrm{Assign… [1252 chars]",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 2.87,
+   "freeSymbols": [
+    "x",
+    "y",
+    "d"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "interval",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "interval",
+     "provenance": "declared"
+    },
+    "d": {
+     "type": "real<-10..10>",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "3f8ae19b9d240354",
+   "inputHash": "9ceb91e61b079324",
+   "codeLength": 1029,
+   "preambleLength": 273,
+   "occurrences": 1,
+   "maxDurationMs": 2.87
+  },
+  {
+   "id": 14,
+   "corpus": "showcase",
+   "doc": "multibrot",
+   "row": "M(x, y, d)",
+   "input": "M(x, y, d)",
+   "target": "glsl",
+   "options": {
+    "to": "glsl"
+   },
+   "success": true,
+   "durationMs": 4.48,
+   "freeSymbols": [
+    "x",
+    "y",
+    "d"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "float",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "float",
+     "provenance": "declared"
+    },
+    "d": {
+     "type": "real<-10..10>",
+     "lowered": "float",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "39e3fb97c2c436dd",
+   "inputHash": "d6e1498a07b32a5f",
+   "codeLength": 14,
+   "preambleLength": 1198,
+   "occurrences": 1,
+   "maxDurationMs": 4.48
+  },
+  {
+   "id": 15,
+   "corpus": "showcase",
+   "doc": "buddhabrot",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(N, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 90\\,001), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\(N,)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 1.16,
+   "freeSymbols": [],
+   "freeSymbolTypes": {},
+   "mode": "strict",
+   "hash": "59aa35cc95f19505",
+   "inputHash": "15fc1c2af603fda6",
+   "codeLength": 39,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 1.16
+  },
+  {
+   "id": 16,
+   "corpus": "showcase",
+   "doc": "buddhabrot",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(H_0, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[0 \\operatorname{for} k = 1..N\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(H_0)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 3.51,
+   "freeSymbols": [],
+   "freeSymbolTypes": {},
+   "mode": "strict",
+   "hash": "10957b9b131db7b2",
+   "inputHash": "1a8877c5affd1b72",
+   "codeLength": 172,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 3.51
+  },
+  {
+   "id": 17,
+   "corpus": "showcase",
+   "doc": "buddhabrot",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(H_1, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\mathrm{step}(H_0, 1\\,200\\,000)), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(H_1)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 14.59,
+   "freeSymbols": [
+    "H_0"
+   ],
+   "freeSymbolTypes": {
+    "H_0": {
+     "type": "vector<integer^90001>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "7e4c3a867348ed9c",
+   "inputHash": "69fef084bed12e6d",
+   "codeLength": 62,
+   "preambleLength": 2804,
+   "occurrences": 1,
+   "maxDurationMs": 14.59
+  },
+  {
+   "id": 18,
+   "corpus": "showcase",
+   "doc": "buddhabrot",
+   "row": "\\frac{1000H_1\\left[\\max(1, \\min(30000, 1 + \\lfloor x \\rfloor + 150 \\lfloor y \\rfloor))\\right]}{1 + H_1\\left[90001\\right]}",
+   "input": "\\operatorname{asOklab}(c(H_1, x, y, z))",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 3.13,
+   "freeSymbols": [
+    "H_1",
+    "x",
+    "y",
+    "z"
+   ],
+   "freeSymbolTypes": {
+    "H_1": {
+     "type": "vector<integer^90001>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "z": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "0b730d7d4eb71bee",
+   "inputHash": "eccc89a8a137e182",
+   "codeLength": 41,
+   "preambleLength": 541,
+   "occurrences": 2,
+   "maxDurationMs": 5.9
+  },
+  {
+   "id": 19,
+   "corpus": "showcase",
+   "doc": "buddhabrot",
+   "row": "\\frac{1000H_1\\left[\\max(1, \\min(30000, 1 + \\lfloor x \\rfloor + 150 \\lfloor y \\rfloor))\\right]}{1 + H_1\\left[90001\\right]}",
+   "input": "\\operatorname{asOklab}(c(H_1, x, y, z))",
+   "target": "glsl",
+   "options": {
+    "to": "glsl",
+    "vars": {
+     "x": "v_pos.x",
+     "y": "v_pos.y",
+     "z": "v_pos.z"
+    },
+    "storage": {
+     "H_1": "sampler2D"
+    }
+   },
+   "success": true,
+   "durationMs": 16.35,
+   "freeSymbols": [
+    "H_1",
+    "x",
+    "y",
+    "z"
+   ],
+   "freeSymbolTypes": {
+    "H_1": {
+     "type": "list<nan | real | signed_infinity^90001>",
+     "lowered": "float[90001]",
+     "provenance": "declared"
+    },
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "float",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "float",
+     "provenance": "declared"
+    },
+    "z": {
+     "type": "real",
+     "lowered": "float",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "713191a7ecbb9641",
+   "inputHash": "eccc89a8a137e182",
+   "codeLength": 63,
+   "preambleLength": 3216,
+   "occurrences": 1,
+   "maxDurationMs": 16.35
+  },
+  {
+   "id": 20,
+   "corpus": "showcase",
+   "doc": "buddhabrot",
+   "row": "\\frac{1000H_1\\left[\\max(1, \\min(30000, 1 + \\lfloor x \\rfloor + 150 \\lfloor y \\rfloor))\\right]}{1 + H_1\\left[90001\\right]}",
+   "input": "\\frac{1\\,000H_1[\\max(1, \\min(30\\,000, \\lfloor x\\rfloor+150\\lfloor y\\rfloor+1))]}{H_1[90\\,001]+1}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "broadcast": true,
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 2.53,
+   "freeSymbols": [
+    "H_1",
+    "x",
+    "y"
+   ],
+   "freeSymbolTypes": {
+    "H_1": {
+     "type": "vector<integer^90001>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "6d3865138f394462",
+   "inputHash": "166534355af0b1de",
+   "codeLength": 164,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 2.53
+  },
+  {
+   "id": 21,
+   "corpus": "showcase",
+   "doc": "buddhabrot",
+   "row": "\\frac{1000H_1\\left[\\max(1, \\min(30000, 1 + \\lfloor x \\rfloor + 150 \\lfloor y \\rfloor))\\right]}{1 + H_1\\left[90001\\right]}",
+   "input": "\\frac{1\\,000H_1[\\max(1, \\min(30\\,000, \\lfloor x\\rfloor+150\\lfloor y\\rfloor+1))]}{1+H_1[90\\,001]}",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 1.27,
+   "freeSymbols": [
+    "H_1",
+    "x",
+    "y"
+   ],
+   "freeSymbolTypes": {
+    "H_1": {
+     "type": "vector<integer^90001>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "interval",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "b76f260c300efdf3",
+   "inputHash": "1d594ea3807e67ba",
+   "codeLength": 171,
+   "preambleLength": 142,
+   "occurrences": 1,
+   "maxDurationMs": 1.27
+  },
+  {
+   "id": 22,
+   "corpus": "showcase",
+   "doc": "buddhabrot",
+   "row": "\\frac{1000H_1\\left[\\max(1, \\min(30000, 1 + \\lfloor x \\rfloor + 150 \\lfloor y \\rfloor))\\right]}{1 + H_1\\left[90001\\right]}",
+   "input": "\\frac{1\\,000H_1[\\max(1, \\min(30\\,000, \\lfloor x\\rfloor+150\\lfloor y\\rfloor+1))]}{H_1[90\\,001]+1}",
+   "target": "glsl",
+   "options": {
+    "to": "glsl",
+    "storage": {
+     "H_1": "sampler2D"
+    }
+   },
+   "success": true,
+   "durationMs": 1.44,
+   "freeSymbols": [
+    "H_1",
+    "x",
+    "y"
+   ],
+   "freeSymbolTypes": {
+    "H_1": {
+     "type": "list<nan | real | signed_infinity^90001>",
+     "lowered": "float[90001]",
+     "provenance": "declared"
+    },
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "float",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "float",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "293d08411e6b56aa",
+   "inputHash": "166534355af0b1de",
+   "codeLength": 130,
+   "preambleLength": 811,
+   "occurrences": 1,
+   "maxDurationMs": 1.44
+  },
+  {
+   "id": 23,
+   "corpus": "showcase",
+   "doc": "julia-set",
+   "row": "J(x, y, \\cos(a), \\sin(a))",
+   "input": "\\operatorname{asOklab}(\\mathrm{shade}(z))",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 4.34,
+   "freeSymbols": [
+    "z"
+   ],
+   "freeSymbolTypes": {
+    "z": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "fbf17b1730c982cb",
+   "inputHash": "c9f5a595529b9fd5",
+   "codeLength": 28,
+   "preambleLength": 1218,
+   "occurrences": 2,
+   "maxDurationMs": 6.74
+  },
+  {
+   "id": 24,
+   "corpus": "showcase",
+   "doc": "julia-set",
+   "row": "J(x, y, \\cos(a), \\sin(a))",
+   "input": "\\operatorname{asOklab}(\\mathrm{shade}(z))",
+   "target": "glsl",
+   "options": {
+    "to": "glsl",
+    "vars": {
+     "x": "a_position.x",
+     "y": "a_position.y",
+     "z": "a_position.z"
+    }
+   },
+   "success": true,
+   "durationMs": 5.96,
+   "freeSymbols": [
+    "z"
+   ],
+   "freeSymbolTypes": {
+    "z": {
+     "type": "real",
+     "lowered": "float",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "c6f8e7c87e97e75a",
+   "inputHash": "c9f5a595529b9fd5",
+   "codeLength": 44,
+   "preambleLength": 3073,
+   "occurrences": 2,
+   "maxDurationMs": 7.35
+  },
+  {
+   "id": 25,
+   "corpus": "showcase",
+   "doc": "julia-set",
+   "row": "J(x, y, \\cos(a), \\sin(a))",
+   "input": "\\operatorname{asOklab}(\\mathrm{shade}(z))",
+   "target": "glsl",
+   "options": {
+    "to": "glsl",
+    "vars": {
+     "x": "v_pos.x",
+     "y": "v_pos.y",
+     "z": "v_pos.z"
+    }
+   },
+   "success": true,
+   "durationMs": 5.28,
+   "freeSymbols": [
+    "z"
+   ],
+   "freeSymbolTypes": {
+    "z": {
+     "type": "real",
+     "lowered": "float",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "d6845c895b28315a",
+   "inputHash": "c9f5a595529b9fd5",
+   "codeLength": 39,
+   "preambleLength": 3073,
+   "occurrences": 2,
+   "maxDurationMs": 6.9
+  },
+  {
+   "id": 26,
+   "corpus": "showcase",
+   "doc": "julia-set",
+   "row": "J(x, y, \\cos(a), \\sin(a))",
+   "input": "J(x, y, \\cos(a), \\sin(a))",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "broadcast": true,
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 3.76,
+   "freeSymbols": [
+    "x",
+    "y",
+    "a"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "a": {
+     "type": "real<-10..10>",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "84163b0fc45f5362",
+   "inputHash": "d9e702aa018360b2",
+   "codeLength": 45,
+   "preambleLength": 712,
+   "occurrences": 1,
+   "maxDurationMs": 3.76
+  },
+  {
+   "id": 27,
+   "corpus": "showcase",
+   "doc": "julia-set",
+   "row": "J(x, y, \\cos(a), \\sin(a))",
+   "input": "J(x, y, \\cos(a), \\sin(a))",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 2.95,
+   "freeSymbols": [
+    "x",
+    "y",
+    "a"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "interval",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "interval",
+     "provenance": "declared"
+    },
+    "a": {
+     "type": "real<-10..10>",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "817e11b64fb680d5",
+   "inputHash": "d9e702aa018360b2",
+   "codeLength": 43,
+   "preambleLength": 1778,
+   "occurrences": 1,
+   "maxDurationMs": 2.95
+  },
+  {
+   "id": 28,
+   "corpus": "showcase",
+   "doc": "julia-set",
+   "row": "J(x, y, \\cos(a), \\sin(a))",
+   "input": "J(x, y, \\cos(a), \\sin(a))",
+   "target": "glsl",
+   "options": {
+    "to": "glsl"
+   },
+   "success": true,
+   "durationMs": 3.67,
+   "freeSymbols": [
+    "x",
+    "y",
+    "a"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "float",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "float",
+     "provenance": "declared"
+    },
+    "a": {
+     "type": "real<-10..10>",
+     "lowered": "float",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "e6e2539022173654",
+   "inputHash": "d9e702aa018360b2",
+   "codeLength": 37,
+   "preambleLength": 1345,
+   "occurrences": 1,
+   "maxDurationMs": 3.67
+  },
+  {
+   "id": 29,
+   "corpus": "showcase",
+   "doc": "rainbow-trig",
+   "row": "\\sin(x)",
+   "input": "\\sin(x)",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.18,
+   "freeSymbols": [
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "50838d3e7384fadc",
+   "inputHash": "093a71f90a97d521",
+   "codeLength": 13,
+   "preambleLength": 0,
+   "occurrences": 2,
+   "maxDurationMs": 0.3
+  },
+  {
+   "id": 30,
+   "corpus": "showcase",
+   "doc": "rainbow-trig",
+   "row": "\\sin(x)",
+   "input": "\\sin(x)",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.13,
+   "freeSymbols": [
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "01a5263dc1e2e5c5",
+   "inputHash": "093a71f90a97d521",
+   "codeLength": 12,
+   "preambleLength": 0,
+   "occurrences": 2,
+   "maxDurationMs": 0.22
+  },
+  {
+   "id": 31,
+   "corpus": "showcase",
+   "doc": "rainbow-trig",
+   "row": "\\sin(x + 1/6)",
+   "input": "\\sin(x+\\frac{1}{6})",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.37,
+   "freeSymbols": [
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "71aa59912979befa",
+   "inputHash": "dfff12f07e4eaa46",
+   "codeLength": 35,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.37
+  },
+  {
+   "id": 32,
+   "corpus": "showcase",
+   "doc": "rainbow-trig",
+   "row": "\\sin(x + 1/6)",
+   "input": "\\sin(x+\\frac{1}{6})",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.36,
+   "freeSymbols": [
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "9d322b84137eea75",
+   "inputHash": "dfff12f07e4eaa46",
+   "codeLength": 26,
+   "preambleLength": 65,
+   "occurrences": 1,
+   "maxDurationMs": 0.36
+  },
+  {
+   "id": 33,
+   "corpus": "showcase",
+   "doc": "rainbow-trig",
+   "row": "\\sin(x + 2/6)",
+   "input": "\\sin(x+\\frac{1}{3})",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.25,
+   "freeSymbols": [
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "a25540f186bde352",
+   "inputHash": "55330f59d3a41d55",
+   "codeLength": 34,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.25
+  },
+  {
+   "id": 34,
+   "corpus": "showcase",
+   "doc": "rainbow-trig",
+   "row": "\\sin(x + 2/6)",
+   "input": "\\sin(x+\\frac{1}{3})",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.25,
+   "freeSymbols": [
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "489e074270f4a345",
+   "inputHash": "55330f59d3a41d55",
+   "codeLength": 26,
+   "preambleLength": 65,
+   "occurrences": 1,
+   "maxDurationMs": 0.25
+  },
+  {
+   "id": 35,
+   "corpus": "showcase",
+   "doc": "rainbow-trig",
+   "row": "\\sin(x + 3/6)",
+   "input": "\\sin(x+\\frac{1}{2})",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.21,
+   "freeSymbols": [
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "e8d189c97b8001a5",
+   "inputHash": "789b91bf2a63a935",
+   "codeLength": 19,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.21
+  },
+  {
+   "id": 36,
+   "corpus": "showcase",
+   "doc": "rainbow-trig",
+   "row": "\\sin(x + 3/6)",
+   "input": "\\sin(x+\\frac{1}{2})",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.26,
+   "freeSymbols": [
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "95fe7b335643958b",
+   "inputHash": "789b91bf2a63a935",
+   "codeLength": 26,
+   "preambleLength": 27,
+   "occurrences": 1,
+   "maxDurationMs": 0.26
+  },
+  {
+   "id": 37,
+   "corpus": "showcase",
+   "doc": "rainbow-trig",
+   "row": "\\sin(x + 4/6)",
+   "input": "\\sin(x+\\frac{2}{3})",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.24,
+   "freeSymbols": [
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "b716a5cf7fdb3eab",
+   "inputHash": "6377f9b37309c227",
+   "codeLength": 34,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.24
+  },
+  {
+   "id": 38,
+   "corpus": "showcase",
+   "doc": "rainbow-trig",
+   "row": "\\sin(x + 4/6)",
+   "input": "\\sin(x+\\frac{2}{3})",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.2,
+   "freeSymbols": [
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "86d9f6e4c8cf1062",
+   "inputHash": "6377f9b37309c227",
+   "codeLength": 26,
+   "preambleLength": 63,
+   "occurrences": 1,
+   "maxDurationMs": 0.2
+  },
+  {
+   "id": 39,
+   "corpus": "showcase",
+   "doc": "rainbow-trig",
+   "row": "\\sin(x + 5/6)",
+   "input": "\\sin(x+\\frac{5}{6})",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.2,
+   "freeSymbols": [
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "e15ba7698ab1ffb0",
+   "inputHash": "c21469f9900334f0",
+   "codeLength": 34,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.2
+  },
+  {
+   "id": 40,
+   "corpus": "showcase",
+   "doc": "rainbow-trig",
+   "row": "\\sin(x + 5/6)",
+   "input": "\\sin(x+\\frac{5}{6})",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.18,
+   "freeSymbols": [
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "9742ea8a8243cec6",
+   "inputHash": "c21469f9900334f0",
+   "codeLength": 26,
+   "preambleLength": 63,
+   "occurrences": 1,
+   "maxDurationMs": 0.18
+  },
+  {
+   "id": 41,
+   "corpus": "showcase",
+   "doc": "damped-oscillation",
+   "row": "-\\exp(-c |x|)",
+   "input": "-\\exp(-(c\\vert x\\vert))",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.55,
+   "freeSymbols": [
+    "c",
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "c": {
+     "type": "real<-10..10>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "x": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "afc1a5b2b78d0ee3",
+   "inputHash": "0213da848adcb333",
+   "codeLength": 33,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.55
+  },
+  {
+   "id": 42,
+   "corpus": "showcase",
+   "doc": "damped-oscillation",
+   "row": "-\\exp(-c |x|)",
+   "input": "-\\exp(-(c\\vert x\\vert))",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.39,
+   "freeSymbols": [
+    "c",
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "c": {
+     "type": "real<-10..10>",
+     "lowered": "interval",
+     "provenance": "declared"
+    },
+    "x": {
+     "type": "real",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "24d72b0a8dab0f84",
+   "inputHash": "0213da848adcb333",
+   "codeLength": 59,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.39
+  },
+  {
+   "id": 43,
+   "corpus": "showcase",
+   "doc": "damped-oscillation",
+   "row": "\\exp(-c |x|)",
+   "input": "\\exp(-(c\\vert x\\vert))",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.38,
+   "freeSymbols": [
+    "c",
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "c": {
+     "type": "real<-10..10>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "x": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "8d58f82d60d0dcea",
+   "inputHash": "10e5d7ed9ab4da70",
+   "codeLength": 32,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.38
+  },
+  {
+   "id": 44,
+   "corpus": "showcase",
+   "doc": "damped-oscillation",
+   "row": "\\exp(-c |x|)",
+   "input": "\\exp(-(c\\vert x\\vert))",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.28,
+   "freeSymbols": [
+    "c",
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "c": {
+     "type": "real<-10..10>",
+     "lowered": "interval",
+     "provenance": "declared"
+    },
+    "x": {
+     "type": "real",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "6d81058139c1483e",
+   "inputHash": "10e5d7ed9ab4da70",
+   "codeLength": 47,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.28
+  },
+  {
+   "id": 45,
+   "corpus": "showcase",
+   "doc": "damped-oscillation",
+   "row": "\\exp(-c |x|) \\sin(1.5x)",
+   "input": "\\sin(1.5x)\\exp(-(c\\vert x\\vert))",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.77,
+   "freeSymbols": [
+    "x",
+    "c"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "c": {
+     "type": "real<-10..10>",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "f15dbd9f89947f61",
+   "inputHash": "6dbce8af7e5142d9",
+   "codeLength": 54,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.77
+  },
+  {
+   "id": 46,
+   "corpus": "showcase",
+   "doc": "damped-oscillation",
+   "row": "\\exp(-c |x|) \\sin(1.5x)",
+   "input": "\\sin(1.5x)\\exp(-(c\\vert x\\vert))",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.66,
+   "freeSymbols": [
+    "x",
+    "c"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real",
+     "lowered": "interval",
+     "provenance": "declared"
+    },
+    "c": {
+     "type": "real<-10..10>",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "89ebb16320b3b1f7",
+   "inputHash": "6dbce8af7e5142d9",
+   "codeLength": 86,
+   "preambleLength": 27,
+   "occurrences": 1,
+   "maxDurationMs": 0.66
+  },
+  {
+   "id": 47,
+   "corpus": "showcase",
+   "doc": "domain-coloring",
+   "row": "z^a",
+   "input": "z^{a}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "complex",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.36,
+   "freeSymbols": [
+    "z",
+    "a"
+   ],
+   "freeSymbolTypes": {
+    "z": {
+     "type": "complex",
+     "lowered": "complex",
+     "provenance": "declared"
+    },
+    "a": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "complex",
+   "hash": "c02eea6242a5931c",
+   "inputHash": "b4d52ffdcfa6a1dd",
+   "codeLength": 19,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.36
+  },
+  {
+   "id": 48,
+   "corpus": "showcase",
+   "doc": "domain-coloring",
+   "row": "z^a",
+   "input": "z^{a}",
+   "target": "glsl",
+   "options": {
+    "to": "glsl"
+   },
+   "success": true,
+   "durationMs": 0.4,
+   "freeSymbols": [
+    "z",
+    "a"
+   ],
+   "freeSymbolTypes": {
+    "z": {
+     "type": "complex",
+     "lowered": "vec2",
+     "provenance": "declared"
+    },
+    "a": {
+     "type": "real",
+     "lowered": "float",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "a450fd2e0f06f625",
+   "inputHash": "b4d52ffdcfa6a1dd",
+   "codeLength": 26,
+   "preambleLength": 714,
+   "occurrences": 1,
+   "maxDurationMs": 0.4
+  },
+  {
+   "id": 49,
+   "corpus": "showcase",
+   "doc": "implicit-heart",
+   "row": "(x^2+y^2-1)^3 - x^2 y^3",
+   "input": "(x^2+y^2-1)^3-y^3x^2",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "broadcast": true,
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.84,
+   "freeSymbols": [
+    "y",
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "7097f6e0e4ec6b08",
+   "inputHash": "cc114fa96abf6e1f",
+   "codeLength": 112,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.84
+  },
+  {
+   "id": 50,
+   "corpus": "showcase",
+   "doc": "implicit-heart",
+   "row": "(x^2+y^2-1)^3 - x^2 y^3",
+   "input": "(x^2+y^2-1)^3-y^3x^2",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.61,
+   "freeSymbols": [
+    "y",
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "interval",
+     "provenance": "declared"
+    },
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "edfaaf4a472966ca",
+   "inputHash": "cc114fa96abf6e1f",
+   "codeLength": 152,
+   "preambleLength": 26,
+   "occurrences": 1,
+   "maxDurationMs": 0.61
+  },
+  {
+   "id": 51,
+   "corpus": "showcase",
+   "doc": "implicit-heart",
+   "row": "(x^2+y^2-1)^3 - x^2 y^3",
+   "input": "(x^2+y^2-1)^3-y^3x^2",
+   "target": "glsl",
+   "options": {
+    "to": "glsl"
+   },
+   "success": true,
+   "durationMs": 0.81,
+   "freeSymbols": [
+    "y",
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "float",
+     "provenance": "declared"
+    },
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "float",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "56324f11ae80a80d",
+   "inputHash": "cc114fa96abf6e1f",
+   "codeLength": 89,
+   "preambleLength": 48,
+   "occurrences": 1,
+   "maxDurationMs": 0.81
+  },
+  {
+   "id": 52,
+   "corpus": "showcase",
+   "doc": "fourier-harmonics",
+   "row": "\\sin(x) + 0.4\\cos(2x)",
+   "input": "0.4\\cos(2x)+\\sin(x)",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.61,
+   "freeSymbols": [
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "d44517f0732938af",
+   "inputHash": "387723e77031bcf8",
+   "codeLength": 39,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.61
+  },
+  {
+   "id": 53,
+   "corpus": "showcase",
+   "doc": "fourier-harmonics",
+   "row": "\\sin(x) + 0.4\\cos(2x)",
+   "input": "0.4\\cos(2x)+\\sin(x)",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.4,
+   "freeSymbols": [
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "d0a3bcd53a37cefd",
+   "inputHash": "387723e77031bcf8",
+   "codeLength": 67,
+   "preambleLength": 53,
+   "occurrences": 1,
+   "maxDurationMs": 0.4
+  },
+  {
+   "id": 54,
+   "corpus": "showcase",
+   "doc": "fourier-harmonics",
+   "row": "0.4\\cos(2x)",
+   "input": "0.4\\cos(2x)",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.26,
+   "freeSymbols": [
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "a91054e8e088efe6",
+   "inputHash": "1018b00696549414",
+   "codeLength": 23,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.26
+  },
+  {
+   "id": 55,
+   "corpus": "showcase",
+   "doc": "fourier-harmonics",
+   "row": "0.4\\cos(2x)",
+   "input": "0.4\\cos(2x)",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.23,
+   "freeSymbols": [
+    "x"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "cf7500dfd3494b21",
+   "inputHash": "1018b00696549414",
+   "codeLength": 44,
+   "preambleLength": 53,
+   "occurrences": 1,
+   "maxDurationMs": 0.23
+  },
+  {
+   "id": 56,
+   "corpus": "showcase",
+   "doc": "game-of-life",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(N, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 150), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\(N,)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.59,
+   "freeSymbols": [],
+   "freeSymbolTypes": {},
+   "mode": "strict",
+   "hash": "50455307958230ec",
+   "inputHash": "e128f031a927a447",
+   "codeLength": 37,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.59
+  },
+  {
+   "id": 57,
+   "corpus": "showcase",
+   "doc": "game-of-life",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(P, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\bigl\\lbrack9\\,543, 9\\,544, 9\\,693, 9\\,841, 9\\,843, 9\\,991, 9\\,992, 10\\,138, 10\\,288, 10\\,289, 10\\,437, 10\\,439, 11\\,330, 11\\,331, 11\\,481, 11\\,482, 11\\,630, 11\\,769, 11\\,770, 11\\,918, 11\\,922, 12\\,067, 12\\,073, 12\\,081, 12\\,207, 12\\,208, 12\\,217, 12\\,221, 12\\,223, 12\\,224, 12\\,229, 12\\,231, 12\\,357, 12\\,358, 12\\,367, 12\\,373, 12\\,377, 12\\,378, 12\\,518, 12\\,522, 12\\,527, 12\\,528, 12\\,541, 12\\,542, 12\\,669, 12\\,670, 12\\,677, 12\\,678, 12\\,691, 12\\,692, 12\\,829, 12\\,831, 12\\,981\\bigr\\rbrack), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(P)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.9,
+   "freeSymbols": [],
+   "freeSymbolTypes": {},
+   "mode": "strict",
+   "hash": "9f1b5d43cc30a161",
+   "inputHash": "79a17964d2df6a46",
+   "codeLength": 40,
+   "preambleLength": 381,
+   "occurrences": 1,
+   "maxDurationMs": 0.9
+  },
+  {
+   "id": 58,
+   "corpus": "showcase",
+   "doc": "game-of-life",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(S_0, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[0 \\operatorname{for} k = 1..(N^2)\\right])))\\\\\\operatorname{Tuple}(S_0)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 1.42,
+   "freeSymbols": [],
+   "freeSymbolTypes": {},
+   "mode": "strict",
+   "hash": "81ce7426c9a1754c",
+   "inputHash": "c23e700c4d4fcd60",
+   "codeLength": 172,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 1.42
+  },
+  {
+   "id": 59,
+   "corpus": "showcase",
+   "doc": "game-of-life",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(S_{0Local}, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, S_0)))\\\\\\operatorname{Loop}(\\left(\\mathrm{Assign}(S_{0Local}, \\mathrm{ReplaceAt}(S_{0Local}, p, 1));\\right), p\\in P)\\\\\\operatorname{Tuple}(S_{0Local})\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.99,
+   "freeSymbols": [
+    "S_0",
+    "P"
+   ],
+   "freeSymbolTypes": {
+    "S_0": {
+     "type": "list<real>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "P": {
+     "type": "vector<integer^53>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "cad32406e5b6fda8",
+   "inputHash": "3bd20bc2e296d211",
+   "codeLength": 156,
+   "preambleLength": 24,
+   "occurrences": 1,
+   "maxDurationMs": 0.99
+  },
+  {
+   "id": 60,
+   "corpus": "showcase",
+   "doc": "game-of-life",
+   "row": "(setup)",
+   "input": "S_0",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.28,
+   "freeSymbols": [
+    "S_0"
+   ],
+   "freeSymbolTypes": {
+    "S_0": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "9de8f0d95ce926dd",
+   "inputHash": "f1e5183bd7411038",
+   "codeLength": 5,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.28
+  },
+  {
+   "id": 61,
+   "corpus": "showcase",
+   "doc": "game-of-life",
+   "row": "S\\left[1 + \\lfloor x \\rfloor + N \\lfloor y \\rfloor\\right]",
+   "input": "S[\\lfloor x\\rfloor+N\\lfloor y\\rfloor+1]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "broadcast": true,
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 1.54,
+   "freeSymbols": [
+    "S",
+    "x",
+    "y"
+   ],
+   "freeSymbolTypes": {
+    "S": {
+     "type": "list<integer>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "0ed0f3c4b14e17dc",
+   "inputHash": "50021e41aa0375c0",
+   "codeLength": 75,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 1.54
+  },
+  {
+   "id": 62,
+   "corpus": "showcase",
+   "doc": "game-of-life",
+   "row": "S\\left[1 + \\lfloor x \\rfloor + N \\lfloor y \\rfloor\\right]",
+   "input": "S[\\lfloor x\\rfloor+N\\lfloor y\\rfloor+1]",
+   "target": "interval-js",
+   "options": {
+    "to": "interval-js",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.68,
+   "freeSymbols": [
+    "S",
+    "x",
+    "y"
+   ],
+   "freeSymbolTypes": {
+    "S": {
+     "type": "list<integer>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "interval",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "interval",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "0cf75b681584137c",
+   "inputHash": "50021e41aa0375c0",
+   "codeLength": 82,
+   "preambleLength": 53,
+   "occurrences": 1,
+   "maxDurationMs": 0.68
+  },
+  {
+   "id": 63,
+   "corpus": "showcase",
+   "doc": "game-of-life",
+   "row": "S\\left[1 + \\lfloor x \\rfloor + N \\lfloor y \\rfloor\\right]",
+   "input": "S[\\lfloor x\\rfloor+N\\lfloor y\\rfloor+1]",
+   "target": "glsl",
+   "options": {
+    "to": "glsl",
+    "storage": {
+     "S": "sampler2D"
+    }
+   },
+   "success": true,
+   "durationMs": 0.88,
+   "freeSymbols": [
+    "S",
+    "x",
+    "y"
+   ],
+   "freeSymbolTypes": {
+    "S": {
+     "type": "list<nan | real | signed_infinity^22500>",
+     "lowered": "float[22500]",
+     "provenance": "declared"
+    },
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "float",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "float",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "f74ac4fb356645da",
+   "inputHash": "50021e41aa0375c0",
+   "codeLength": 53,
+   "preambleLength": 811,
+   "occurrences": 1,
+   "maxDurationMs": 0.88
+  },
+  {
+   "id": 64,
+   "corpus": "showcase",
+   "doc": "metaballs",
+   "row": "\\sum_{k=1}^{10} \\frac{2}{5((x - a(k))^2 + (y - b(k))^2 + (z - c(k))^2)} = 1",
+   "input": "(\\sum_{k=1}^{10}\\frac{2}{5((x-a(k))^2+(y-b(k))^2+(z-c(k))^2)})-1",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "broadcast": false,
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 10.16,
+   "freeSymbols": [
+    "x",
+    "T",
+    "y",
+    "z"
+   ],
+   "freeSymbolTypes": {
+    "x": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "T": {
+     "type": "real<-10..10>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "y": {
+     "type": "real<-1000000000000000..1000000000000000>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "z": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "5c51a2eb619d8d28",
+   "inputHash": "25227b21a74acb26",
+   "codeLength": 1396,
+   "preambleLength": 268,
+   "occurrences": 1,
+   "maxDurationMs": 10.16
+  },
+  {
+   "id": 65,
+   "corpus": "showcase",
+   "doc": "metaballs",
+   "row": "\\sum_{k=1}^{10} \\frac{2}{5((x - a(k))^2 + (y - b(k))^2 + (z - c(k))^2)} = 1",
+   "input": "\\keyword{let}\\mathrm{base}\\colon integer\\coloneq\\mathrm{ci}\\mathrm{cs}+\\mathrm{cj}\\mathrm{ct}+\\mathrm{ck}+1; \\keyword{let}\\mathrm{v0}\\colon real\\coloneq F[\\mathrm{base}]; \\keyword{let}\\mathrm{v1}\\colon real\\coloneq F[\\mathrm{base}+\\mathrm{cs}]; \\keyword{let}\\mathrm{v2}\\colon real\\coloneq F[\\mathrm{base}+\\mathrm{cs}+\\mathrm{ct}]; \\keyword{let}\\mathrm{v3}\\colon real\\coloneq F[\\mathrm{base}+\\mathrm{ct}]; \\keyword{let}\\mathrm{v4}\\colon real\\coloneq F[\\mathrm{base}+1]; \\keyword{let}\\mathrm{v5}\\colon real\\coloneq F[\\mathrm{base}+\\mathrm{cs}+1]; \\keyword{let}\\mathrm{v6}\\colon real\\coloneq F[\\mathrm{base}+\\mathrm{cs}+\\mathrm{ct}+1]; \\keyword{let}\\mathrm{v7}\\colon real\\coloneq F[\\mathrm{base}+\\mathrm{ct}+1]; (\\keyword{if}\\mathrm{v0}\\le0\\keyword{then}1\\keyword{else}0+\\keyword{if}\\mathrm{v1}\\le0\\keyword{then}2\\keyword{else}0+\\keyword{if}\\mathrm{v2}\\le0\\keyword{then}4\\keyword{else}0+\\keyword{if}\\mathrm{v3}\\le0\\keyword{then}8\\keyword{else}0+\\keyword{if}\\mathrm{v4}\\le0\\keyword{then}16\\keyword{else}0… [6423 chars]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "broadcast": true,
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 19.09,
+   "freeSymbols": [
+    "ci",
+    "cs",
+    "cj",
+    "ct",
+    "ck",
+    "F"
+   ],
+   "freeSymbolTypes": {
+    "ci": {
+     "type": "integer<0..>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "cs": {
+     "type": "integer<0..>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "cj": {
+     "type": "integer<0..>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "ct": {
+     "type": "integer<0..>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "ck": {
+     "type": "integer<0..>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "F": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "aeb47e645f482059",
+   "inputHash": "4d8d6882502a2ed4",
+   "codeLength": 2817,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 19.09
+  },
+  {
+   "id": 66,
+   "corpus": "showcase",
+   "doc": "frenet-knot-tube",
+   "row": "(g_x(u, v),\\; g_y(u, v),\\; g_z(u, v))",
+   "input": "(g_{x}(u, v),g_{y}(u, v),g_{z}(u, v))",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000,
+    "vars": {
+     "c": "_.c"
+    }
+   },
+   "success": true,
+   "durationMs": 14.42,
+   "freeSymbols": [
+    "c",
+    "u",
+    "v"
+   ],
+   "freeSymbolTypes": {
+    "c": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "u": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "v": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "8775a8ffe8a67048",
+   "inputHash": "668ce8235ee957e4",
+   "codeLength": 57,
+   "preambleLength": 2110,
+   "occurrences": 1,
+   "maxDurationMs": 14.42
+  },
+  {
+   "id": 67,
+   "corpus": "showcase",
+   "doc": "frenet-knot-tube",
+   "row": "(g_x(u + \\frac{2\\pi}{5}, v),\\; g_y(u + \\frac{2\\pi}{5}, v),\\; g_z(u + \\frac{2\\pi}{5}, v))",
+   "input": "(g_{x}(u+\\frac{2\\pi}{5}, v),g_{y}(u+\\frac{2\\pi}{5}, v),g_{z}(u+\\frac{2\\pi}{5}, v))",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000,
+    "vars": {
+     "c": "_.c"
+    }
+   },
+   "success": true,
+   "durationMs": 12.52,
+   "freeSymbols": [
+    "c",
+    "u",
+    "v"
+   ],
+   "freeSymbolTypes": {
+    "c": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "u": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "v": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "4e2d10b295a077e9",
+   "inputHash": "64e7ab8cd21b3f01",
+   "codeLength": 125,
+   "preambleLength": 2110,
+   "occurrences": 1,
+   "maxDurationMs": 12.52
+  },
+  {
+   "id": 68,
+   "corpus": "showcase",
+   "doc": "frenet-knot-tube",
+   "row": "(g_x(u + \\frac{4\\pi}{5}, v),\\; g_y(u + \\frac{4\\pi}{5}, v),\\; g_z(u + \\frac{4\\pi}{5}, v))",
+   "input": "(g_{x}(u+\\frac{4\\pi}{5}, v),g_{y}(u+\\frac{4\\pi}{5}, v),g_{z}(u+\\frac{4\\pi}{5}, v))",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000,
+    "vars": {
+     "c": "_.c"
+    }
+   },
+   "success": true,
+   "durationMs": 11.98,
+   "freeSymbols": [
+    "c",
+    "u",
+    "v"
+   ],
+   "freeSymbolTypes": {
+    "c": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "u": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "v": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "9a1e248db28f20a6",
+   "inputHash": "5977fce84876621a",
+   "codeLength": 125,
+   "preambleLength": 2110,
+   "occurrences": 1,
+   "maxDurationMs": 11.98
+  },
+  {
+   "id": 69,
+   "corpus": "showcase",
+   "doc": "frenet-knot-tube",
+   "row": "(g_x(u + \\frac{6\\pi}{5}, v),\\; g_y(u + \\frac{6\\pi}{5}, v),\\; g_z(u + \\frac{6\\pi}{5}, v))",
+   "input": "(g_{x}(u+\\frac{6\\pi}{5}, v),g_{y}(u+\\frac{6\\pi}{5}, v),g_{z}(u+\\frac{6\\pi}{5}, v))",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000,
+    "vars": {
+     "c": "_.c"
+    }
+   },
+   "success": true,
+   "durationMs": 12.01,
+   "freeSymbols": [
+    "c",
+    "u",
+    "v"
+   ],
+   "freeSymbolTypes": {
+    "c": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "u": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "v": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "1b2ff0dce8ee7fca",
+   "inputHash": "b29e7c3f5564137c",
+   "codeLength": 125,
+   "preambleLength": 2110,
+   "occurrences": 1,
+   "maxDurationMs": 12.01
+  },
+  {
+   "id": 70,
+   "corpus": "showcase",
+   "doc": "frenet-knot-tube",
+   "row": "(g_x(u + \\frac{8\\pi}{5}, v),\\; g_y(u + \\frac{8\\pi}{5}, v),\\; g_z(u + \\frac{8\\pi}{5}, v))",
+   "input": "(g_{x}(u+\\frac{8\\pi}{5}, v),g_{y}(u+\\frac{8\\pi}{5}, v),g_{z}(u+\\frac{8\\pi}{5}, v))",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000,
+    "vars": {
+     "c": "_.c"
+    }
+   },
+   "success": true,
+   "durationMs": 11.76,
+   "freeSymbols": [
+    "c",
+    "u",
+    "v"
+   ],
+   "freeSymbolTypes": {
+    "c": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "u": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "v": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "2c211310e9e9e6c8",
+   "inputHash": "01576d23d381cb22",
+   "codeLength": 124,
+   "preambleLength": 2110,
+   "occurrences": 1,
+   "maxDurationMs": 11.76
+  },
+  {
+   "id": 71,
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "row": "(setup)",
+   "input": "\\left[\\sum_{j=1}^3\\frac{X[j]-X[k]}{((X[j]-X[k])^2+(Y[j]-Y[k])^2+10^{-4})^{3/2}} \\operatorname{for} k = 1..3\\right]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 3.6,
+   "freeSymbols": [
+    "X",
+    "Y"
+   ],
+   "freeSymbolTypes": {
+    "X": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "Y": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "1173bf9186feee58",
+   "inputHash": "5a51dc3f040cfd4d",
+   "codeLength": 1008,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 3.6
+  },
+  {
+   "id": 72,
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "row": "(setup)",
+   "input": "\\left[\\sum_{j=1}^3\\frac{Y[j]-Y[k]}{((X[j]-X[k])^2+(Y[j]-Y[k])^2+10^{-4})^{3/2}} \\operatorname{for} k = 1..3\\right]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 3.78,
+   "freeSymbols": [
+    "Y",
+    "X"
+   ],
+   "freeSymbolTypes": {
+    "Y": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "X": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "9e5b489de0fca4df",
+   "inputHash": "70e28c6d41af12cb",
+   "codeLength": 1008,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 3.78
+  },
+  {
+   "id": 73,
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "row": "(setup)",
+   "input": "\\frac{Ah^2}{2}+Uh+X",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 1.65,
+   "freeSymbols": [
+    "A",
+    "h",
+    "U",
+    "X"
+   ],
+   "freeSymbolTypes": {
+    "A": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "h": {
+     "type": "nan | real | signed_infinity",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "U": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "X": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "a3cb3acb78919a91",
+   "inputHash": "3ea8eca97ebeea4f",
+   "codeLength": 185,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 1.65
+  },
+  {
+   "id": 74,
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "row": "(setup)",
+   "input": "\\frac{Bh^2}{2}+Vh+Y",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.88,
+   "freeSymbols": [
+    "B",
+    "h",
+    "V",
+    "Y"
+   ],
+   "freeSymbolTypes": {
+    "B": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "h": {
+     "type": "nan | real | signed_infinity",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "V": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "Y": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "84609219d2df6a70",
+   "inputHash": "75105678269d8702",
+   "codeLength": 185,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.88
+  },
+  {
+   "id": 75,
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "row": "(setup)",
+   "input": "\\left[\\sum_{j=1}^3\\frac{X_{n}[j]-X_{n}[k]}{((X_{n}[j]-X_{n}[k])^2+(Y_{n}[j]-Y_{n}[k])^2+10^{-4})^{3/2}} \\operatorname{for} k = 1..3\\right]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 2.75,
+   "freeSymbols": [
+    "X_n",
+    "Y_n"
+   ],
+   "freeSymbolTypes": {
+    "X_n": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "Y_n": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "fc2e1bc720c685a2",
+   "inputHash": "1a31ec0c15829767",
+   "codeLength": 1024,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 2.75
+  },
+  {
+   "id": 76,
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "row": "(setup)",
+   "input": "\\left[\\sum_{j=1}^3\\frac{Y_{n}[j]-Y_{n}[k]}{((X_{n}[j]-X_{n}[k])^2+(Y_{n}[j]-Y_{n}[k])^2+10^{-4})^{3/2}} \\operatorname{for} k = 1..3\\right]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 2.49,
+   "freeSymbols": [
+    "Y_n",
+    "X_n"
+   ],
+   "freeSymbolTypes": {
+    "Y_n": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "X_n": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "a07b725b9cbb5951",
+   "inputHash": "44ebac77056ab2b8",
+   "codeLength": 1024,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 2.49
+  },
+  {
+   "id": 77,
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "row": "\\left(P_1, Q_1\\right)",
+   "input": "P_1",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.2,
+   "freeSymbols": [
+    "P_1"
+   ],
+   "freeSymbolTypes": {
+    "P_1": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "d9d500e189c1e985",
+   "inputHash": "d1641bdc80ea783c",
+   "codeLength": 5,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.2
+  },
+  {
+   "id": 78,
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "row": "\\left(P_1, Q_1\\right)",
+   "input": "Q_1",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.11,
+   "freeSymbols": [
+    "Q_1"
+   ],
+   "freeSymbolTypes": {
+    "Q_1": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "6279d6259da71731",
+   "inputHash": "190c2533d86dd7b7",
+   "codeLength": 5,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.11
+  },
+  {
+   "id": 79,
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "row": "\\left(P_2, Q_2\\right)",
+   "input": "P_2",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.12,
+   "freeSymbols": [
+    "P_2"
+   ],
+   "freeSymbolTypes": {
+    "P_2": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "58f9596839f40ee4",
+   "inputHash": "c5e705958e40c3bd",
+   "codeLength": 5,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.12
+  },
+  {
+   "id": 80,
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "row": "\\left(P_2, Q_2\\right)",
+   "input": "Q_2",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.09,
+   "freeSymbols": [
+    "Q_2"
+   ],
+   "freeSymbolTypes": {
+    "Q_2": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "13919af591b75394",
+   "inputHash": "eda0b1a24e71fdef",
+   "codeLength": 5,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.09
+  },
+  {
+   "id": 81,
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "row": "\\left(P_3, Q_3\\right)",
+   "input": "P_3",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.09,
+   "freeSymbols": [
+    "P_3"
+   ],
+   "freeSymbolTypes": {
+    "P_3": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "927691cc18fc84ba",
+   "inputHash": "f0242a419961441b",
+   "codeLength": 5,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.09
+  },
+  {
+   "id": 82,
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "row": "\\left(P_3, Q_3\\right)",
+   "input": "Q_3",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.08,
+   "freeSymbols": [
+    "Q_3"
+   ],
+   "freeSymbolTypes": {
+    "Q_3": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "1651013a704363a5",
+   "inputHash": "f5c3a1f5ac4f85f5",
+   "codeLength": 5,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.08
+  },
+  {
+   "id": 83,
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "row": "\\left(X[1], Y[1]\\right)",
+   "input": "X[1]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.23,
+   "freeSymbols": [
+    "X"
+   ],
+   "freeSymbolTypes": {
+    "X": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "511945e7d7b10168",
+   "inputHash": "24b7f0eb2dc64ce7",
+   "codeLength": 54,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.23
+  },
+  {
+   "id": 84,
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "row": "\\left(X[1], Y[1]\\right)",
+   "input": "Y[1]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.16,
+   "freeSymbols": [
+    "Y"
+   ],
+   "freeSymbolTypes": {
+    "Y": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "a92d4aad8b204aee",
+   "inputHash": "157db435d9f2e861",
+   "codeLength": 54,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.16
+  },
+  {
+   "id": 85,
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "row": "\\left(X[2], Y[2]\\right)",
+   "input": "X[2]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.17,
+   "freeSymbols": [
+    "X"
+   ],
+   "freeSymbolTypes": {
+    "X": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "90b70db74d678c74",
+   "inputHash": "7ad36c37352c3c82",
+   "codeLength": 54,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.17
+  },
+  {
+   "id": 86,
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "row": "\\left(X[2], Y[2]\\right)",
+   "input": "Y[2]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.15,
+   "freeSymbols": [
+    "Y"
+   ],
+   "freeSymbolTypes": {
+    "Y": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "859b6bbcc939d32a",
+   "inputHash": "36d26cd6b864294a",
+   "codeLength": 54,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.15
+  },
+  {
+   "id": 87,
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "row": "\\left(X[3], Y[3]\\right)",
+   "input": "X[3]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.22,
+   "freeSymbols": [
+    "X"
+   ],
+   "freeSymbolTypes": {
+    "X": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "c457bc75578c9bdf",
+   "inputHash": "a8fbda0b3dcbd6aa",
+   "codeLength": 54,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.22
+  },
+  {
+   "id": 88,
+   "corpus": "showcase",
+   "doc": "three-body-problem",
+   "row": "\\left(X[3], Y[3]\\right)",
+   "input": "Y[3]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.17,
+   "freeSymbols": [
+    "Y"
+   ],
+   "freeSymbolTypes": {
+    "Y": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "3712e8f3a4a1b145",
+   "inputHash": "61a6510bc4252c77",
+   "codeLength": 54,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.17
+  },
+  {
+   "id": 89,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(\\mathrm{minR}, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, 0.008), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\(\\mathrm{minR},)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.68,
+   "freeSymbols": [],
+   "freeSymbolTypes": {},
+   "mode": "strict",
+   "hash": "b3ae4089140a60dd",
+   "inputHash": "5438a2ebeca0913e",
+   "codeLength": 45,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.68
+  },
+  {
+   "id": 90,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(\\mathrm{outer}, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, (-1,0,0)), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\(\\mathrm{outer},)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.75,
+   "freeSymbols": [],
+   "freeSymbolTypes": {},
+   "mode": "strict",
+   "hash": "499d091753dfee88",
+   "inputHash": "cc07b81c0f12f21a",
+   "codeLength": 52,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.75
+  },
+  {
+   "id": 91,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(\\mathrm{right}, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, (2,0.5,0)), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\(\\mathrm{right},)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.44,
+   "freeSymbols": [],
+   "freeSymbolTypes": {},
+   "mode": "strict",
+   "hash": "6a89a73d8cc3d52a",
+   "inputHash": "a732c58b5ecafe31",
+   "codeLength": 53,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.44
+  },
+  {
+   "id": 92,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(\\mathrm{left}, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, (2,-0.5,0)), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\(\\mathrm{left},)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.34,
+   "freeSymbols": [],
+   "freeSymbolTypes": {},
+   "mode": "strict",
+   "hash": "378f421c73bd603c",
+   "inputHash": "89ead03aef420e08",
+   "codeLength": 52,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.34
+  },
+  {
+   "id": 93,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(\\top, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, (3,0.0,0.666\\,666\\,666\\,666\\,666\\,6)), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\(\\top,)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.35,
+   "freeSymbols": [],
+   "freeSymbolTypes": {},
+   "mode": "strict",
+   "hash": "101a5a95acc510ca",
+   "inputHash": "cf8119ca880375bb",
+   "codeLength": 64,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.35
+  },
+  {
+   "id": 94,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(\\bot, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, (3,0.0,-0.666\\,666\\,666\\,666\\,666\\,6)), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\(\\bot,)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.29,
+   "freeSymbols": [],
+   "freeSymbolTypes": {},
+   "mode": "strict",
+   "hash": "26ceaa736144bc0a",
+   "inputHash": "3bc8e687408fffee",
+   "codeLength": 71,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.29
+  },
+  {
+   "id": 95,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(\\mathrm{circles}, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\bigl\\lbrack(\\mathrm{right}[1],\\mathrm{right}[2],\\mathrm{right}[3],1), (\\mathrm{left}[1],\\mathrm{left}[2],\\mathrm{left}[3],1), (\\top[1],\\top[2],\\top[3],1), (\\bot[1],\\bot[2],\\bot[3],1)\\bigr\\rbrack)))\\\\(\\mathrm{circles},)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 1.61,
+   "freeSymbols": [],
+   "freeSymbolTypes": {},
+   "mode": "strict",
+   "hash": "dfdda789739202f9",
+   "inputHash": "309a6f93a98187d2",
+   "codeLength": 142,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 1.61
+  },
+  {
+   "id": 96,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(\\mathrm{circlesLocal}, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\mathrm{circles})))\\\\\\operatorname{Loop}(\\left(\\mathrm{Assign}(\\mathrm{circlesLocal}, \\mathrm{fill}(\\mathrm{gap}[1], \\mathrm{gap}[2], \\mathrm{gap}[3], 2, \\mathrm{circlesLocal}));\\right), \\mathrm{gap}\\in\\bigl\\lbrack(\\mathrm{outer},\\mathrm{right},\\top), (\\mathrm{outer},\\mathrm{left},\\top), (\\mathrm{right},\\mathrm{left},\\top), (\\mathrm{outer},\\mathrm{right},\\bot), (\\mathrm{outer},\\mathrm{left},\\bot), (\\mathrm{right},\\mathrm{left},\\bot)\\bigr\\rbrack)\\\\(\\mathrm{circlesLocal},)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 19.84,
+   "freeSymbols": [
+    "circles"
+   ],
+   "freeSymbolTypes": {
+    "circles": {
+     "type": "list<tuple<real, real, real, real>>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "1096f5c1723c0dae",
+   "inputHash": "5606c05ecc01aa3d",
+   "codeLength": 462,
+   "preambleLength": 3074,
+   "occurrences": 1,
+   "maxDurationMs": 19.84
+  },
+  {
+   "id": 97,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(G_1, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\mathrm{generations}(\\mathrm{circles}, 1, 1)), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\(G_1,)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 3.18,
+   "freeSymbols": [
+    "circles"
+   ],
+   "freeSymbolTypes": {
+    "circles": {
+     "type": "list<tuple<integer, real, real, integer>^224>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "b7178320b8d6a3dc",
+   "inputHash": "4c45914607908ec5",
+   "codeLength": 70,
+   "preambleLength": 1109,
+   "occurrences": 1,
+   "maxDurationMs": 3.18
+  },
+  {
+   "id": 98,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(G_2, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\mathrm{generations}(\\mathrm{circles}, 2, 2)), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\(G_2,)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 2.29,
+   "freeSymbols": [
+    "circles"
+   ],
+   "freeSymbolTypes": {
+    "circles": {
+     "type": "list<tuple<integer, real, real, integer>^224>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "d226023dace9d0e7",
+   "inputHash": "439f9236f75b85ef",
+   "codeLength": 70,
+   "preambleLength": 1109,
+   "occurrences": 1,
+   "maxDurationMs": 2.29
+  },
+  {
+   "id": 99,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(G_3, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\mathrm{generations}(\\mathrm{circles}, 3, 3)), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\(G_3,)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 2.21,
+   "freeSymbols": [
+    "circles"
+   ],
+   "freeSymbolTypes": {
+    "circles": {
+     "type": "list<tuple<integer, real, real, integer>^224>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "b1a0ddfb757ed8f3",
+   "inputHash": "3ab5da5e4f27ee2b",
+   "codeLength": 70,
+   "preambleLength": 1109,
+   "occurrences": 1,
+   "maxDurationMs": 2.21
+  },
+  {
+   "id": 100,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(G_4, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\mathrm{generations}(\\mathrm{circles}, 4, 4)), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\(G_4,)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 2.39,
+   "freeSymbols": [
+    "circles"
+   ],
+   "freeSymbolTypes": {
+    "circles": {
+     "type": "list<tuple<integer, real, real, integer>^224>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "6b4e0a6f0b008dcb",
+   "inputHash": "35b7f07ab7b1355c",
+   "codeLength": 70,
+   "preambleLength": 1109,
+   "occurrences": 1,
+   "maxDurationMs": 2.39
+  },
+  {
+   "id": 101,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(G_5, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\mathrm{generations}(\\mathrm{circles}, 5, 5)), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\(G_5,)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 2.3,
+   "freeSymbols": [
+    "circles"
+   ],
+   "freeSymbolTypes": {
+    "circles": {
+     "type": "list<tuple<integer, real, real, integer>^224>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "c4a73be7888dd892",
+   "inputHash": "8dfff9ab137c3454",
+   "codeLength": 70,
+   "preambleLength": 1109,
+   "occurrences": 1,
+   "maxDurationMs": 2.3
+  },
+  {
+   "id": 102,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(G_6, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\mathrm{generations}(\\mathrm{circles}, 6, 1\\,000)), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\(G_6,)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 2.36,
+   "freeSymbols": [
+    "circles"
+   ],
+   "freeSymbolTypes": {
+    "circles": {
+     "type": "list<tuple<integer, real, real, integer>^224>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "c82df5d89582851b",
+   "inputHash": "2f8cb9d680020f4f",
+   "codeLength": 73,
+   "preambleLength": 1109,
+   "occurrences": 1,
+   "maxDurationMs": 2.36
+  },
+  {
+   "id": 103,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(X_1, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[c[2] \\operatorname{for} c = G_1\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(X_1)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.62,
+   "freeSymbols": [
+    "G_1"
+   ],
+   "freeSymbolTypes": {
+    "G_1": {
+     "type": "list<(tuple<integer, integer, real, integer> | tuple<integer, real, integer, integer>)^4>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "c876e1ba00d8ebc0",
+   "inputHash": "03ac78503da96a87",
+   "codeLength": 155,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.62
+  },
+  {
+   "id": 104,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(Y_1, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[c[3] \\operatorname{for} c = G_1\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(Y_1)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.49,
+   "freeSymbols": [
+    "G_1"
+   ],
+   "freeSymbolTypes": {
+    "G_1": {
+     "type": "list<(tuple<integer, integer, real, integer> | tuple<integer, real, integer, integer>)^4>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "aa3e2a32e1be55a3",
+   "inputHash": "d3c818ff3f32f022",
+   "codeLength": 155,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.49
+  },
+  {
+   "id": 105,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(K_1, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[c[1] \\operatorname{for} c = G_1\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(K_1)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.46,
+   "freeSymbols": [
+    "G_1"
+   ],
+   "freeSymbolTypes": {
+    "G_1": {
+     "type": "list<(tuple<integer, integer, real, integer> | tuple<integer, real, integer, integer>)^4>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "4988d7257b5fb181",
+   "inputHash": "739bf0ae8e2721c2",
+   "codeLength": 155,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.46
+  },
+  {
+   "id": 106,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(X_2, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[c[2] \\operatorname{for} c = G_2\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(X_2)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.41,
+   "freeSymbols": [
+    "G_2"
+   ],
+   "freeSymbolTypes": {
+    "G_2": {
+     "type": "list<tuple<integer, real, real, integer>^6>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "c5690e08b054d43b",
+   "inputHash": "a6cdb1f4da7e545b",
+   "codeLength": 155,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.41
+  },
+  {
+   "id": 107,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(Y_2, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[c[3] \\operatorname{for} c = G_2\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(Y_2)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.41,
+   "freeSymbols": [
+    "G_2"
+   ],
+   "freeSymbolTypes": {
+    "G_2": {
+     "type": "list<tuple<integer, real, real, integer>^6>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "675782342b554a48",
+   "inputHash": "fb7127b40c71a2ad",
+   "codeLength": 155,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.41
+  },
+  {
+   "id": 108,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(K_2, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[c[1] \\operatorname{for} c = G_2\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(K_2)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.36,
+   "freeSymbols": [
+    "G_2"
+   ],
+   "freeSymbolTypes": {
+    "G_2": {
+     "type": "list<tuple<integer, real, real, integer>^6>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "c72d17be795be90a",
+   "inputHash": "1a57e3c9bfe1dc5b",
+   "codeLength": 158,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.36
+  },
+  {
+   "id": 109,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(X_3, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[c[2] \\operatorname{for} c = G_3\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(X_3)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.37,
+   "freeSymbols": [
+    "G_3"
+   ],
+   "freeSymbolTypes": {
+    "G_3": {
+     "type": "list<tuple<integer, real, real, integer>^18>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "a0e06c939f8adb2a",
+   "inputHash": "0d487d4b4bc0cc81",
+   "codeLength": 155,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.37
+  },
+  {
+   "id": 110,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(Y_3, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[c[3] \\operatorname{for} c = G_3\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(Y_3)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.34,
+   "freeSymbols": [
+    "G_3"
+   ],
+   "freeSymbolTypes": {
+    "G_3": {
+     "type": "list<tuple<integer, real, real, integer>^18>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "ef44f718b2064f5d",
+   "inputHash": "0de47ddf75201688",
+   "codeLength": 155,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.34
+  },
+  {
+   "id": 111,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(K_3, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[c[1] \\operatorname{for} c = G_3\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(K_3)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.34,
+   "freeSymbols": [
+    "G_3"
+   ],
+   "freeSymbolTypes": {
+    "G_3": {
+     "type": "list<tuple<integer, real, real, integer>^18>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "49d37cf1b465199d",
+   "inputHash": "156959b6c8cab741",
+   "codeLength": 158,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.34
+  },
+  {
+   "id": 112,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(X_4, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[c[2] \\operatorname{for} c = G_4\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(X_4)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.37,
+   "freeSymbols": [
+    "G_4"
+   ],
+   "freeSymbolTypes": {
+    "G_4": {
+     "type": "list<tuple<integer, real, real, integer>^54>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "411e833b0cedc60e",
+   "inputHash": "f005ae93f6fa6696",
+   "codeLength": 155,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.37
+  },
+  {
+   "id": 113,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(Y_4, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[c[3] \\operatorname{for} c = G_4\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(Y_4)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.37,
+   "freeSymbols": [
+    "G_4"
+   ],
+   "freeSymbolTypes": {
+    "G_4": {
+     "type": "list<tuple<integer, real, real, integer>^54>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "f98868cf6ffc1ac6",
+   "inputHash": "1a61c153e392cc8f",
+   "codeLength": 155,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.37
+  },
+  {
+   "id": 114,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(K_4, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[c[1] \\operatorname{for} c = G_4\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(K_4)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.36,
+   "freeSymbols": [
+    "G_4"
+   ],
+   "freeSymbolTypes": {
+    "G_4": {
+     "type": "list<tuple<integer, real, real, integer>^54>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "264b5802c9cc844f",
+   "inputHash": "f95aab497d3b3ff5",
+   "codeLength": 158,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.36
+  },
+  {
+   "id": 115,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(X_5, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[c[2] \\operatorname{for} c = G_5\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(X_5)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.37,
+   "freeSymbols": [
+    "G_5"
+   ],
+   "freeSymbolTypes": {
+    "G_5": {
+     "type": "list<tuple<integer, real, real, integer>^86>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "98840dbd06ce509f",
+   "inputHash": "4215241626f05860",
+   "codeLength": 155,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.37
+  },
+  {
+   "id": 116,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(Y_5, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[c[3] \\operatorname{for} c = G_5\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(Y_5)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.35,
+   "freeSymbols": [
+    "G_5"
+   ],
+   "freeSymbolTypes": {
+    "G_5": {
+     "type": "list<tuple<integer, real, real, integer>^86>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "3bc2dab73a4ba122",
+   "inputHash": "9445116b0f9c89d3",
+   "codeLength": 155,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.35
+  },
+  {
+   "id": 117,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(K_5, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[c[1] \\operatorname{for} c = G_5\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(K_5)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.38,
+   "freeSymbols": [
+    "G_5"
+   ],
+   "freeSymbolTypes": {
+    "G_5": {
+     "type": "list<tuple<integer, real, real, integer>^86>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "a464073347b9d075",
+   "inputHash": "418f89d71b7a4d83",
+   "codeLength": 158,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.38
+  },
+  {
+   "id": 118,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(X_6, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[c[2] \\operatorname{for} c = G_6\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(X_6)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.38,
+   "freeSymbols": [
+    "G_6"
+   ],
+   "freeSymbolTypes": {
+    "G_6": {
+     "type": "list<tuple<integer, real, real, integer>^56>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "7ee55dfb348accd5",
+   "inputHash": "5ff7682796b3a000",
+   "codeLength": 155,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.38
+  },
+  {
+   "id": 119,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(Y_6, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[c[3] \\operatorname{for} c = G_6\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(Y_6)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.33,
+   "freeSymbols": [
+    "G_6"
+   ],
+   "freeSymbolTypes": {
+    "G_6": {
+     "type": "list<tuple<integer, real, real, integer>^56>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "580d7221ff6a0ea4",
+   "inputHash": "2030088637043354",
+   "codeLength": 155,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.33
+  },
+  {
+   "id": 120,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(prelude)",
+   "input": "\\begin{cases}\\mathrm{Declare}(K_6, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{value}, \\left[c[1] \\operatorname{for} c = G_6\\right]), \\operatorname{KeyValuePair}(\\text{constant}, \\top)))\\\\\\operatorname{Tuple}(K_6)\\end{cases}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "iterationBudget": 100000000
+   },
+   "success": true,
+   "durationMs": 0.34,
+   "freeSymbols": [
+    "G_6"
+   ],
+   "freeSymbolTypes": {
+    "G_6": {
+     "type": "list<tuple<integer, real, real, integer>^56>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "9078016cfe888e7e",
+   "inputHash": "3b6846a7695f3d9a",
+   "codeLength": 158,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.34
+  },
+  {
+   "id": 121,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(\\cos(t), \\sin(t))",
+   "input": "(\\cos(t),\\sin(t))",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.56,
+   "freeSymbols": [
+    "t"
+   ],
+   "freeSymbolTypes": {
+    "t": {
+     "type": "real<-0.3141592653589793..6.5973445725385655>",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "35cc7b35eb594093",
+   "inputHash": "fd747c4b3bc1acd7",
+   "codeLength": 30,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.56
+  },
+  {
+   "id": 122,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "(\\cos(t), \\sin(t))",
+   "input": "(\\cos(t),\\sin(t))",
+   "target": "glsl",
+   "options": {
+    "to": "glsl"
+   },
+   "success": true,
+   "durationMs": 0.69,
+   "freeSymbols": [
+    "t"
+   ],
+   "freeSymbolTypes": {
+    "t": {
+     "type": "real<-0.3141592653589793..6.5973445725385655>",
+     "lowered": "float",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "d86e6072ee1d2c12",
+   "inputHash": "fd747c4b3bc1acd7",
+   "codeLength": 20,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.69
+  },
+  {
+   "id": 123,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "[\\operatorname{polygon}([(X_1[k] + \\frac{\\cos(2\\pi j/36)}{K_1[k]}, Y_1[k] + \\frac{\\sin(2\\pi j/36)}{K_1[k]}) \\operatorname{for} j = [1...36]]) \\operatorname{for} k = [1...4]]",
+   "input": "\\left[(\\frac{\\cos((\\pi j)/18)}{K_1[k]}+X_1[k],\\frac{\\sin((\\pi j)/18)}{K_1[k]}+Y_1[k]) \\operatorname{for} k = 1..4, j = 1..36\\right]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 1.86,
+   "freeSymbols": [
+    "K_1",
+    "X_1",
+    "Y_1"
+   ],
+   "freeSymbolTypes": {
+    "K_1": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "X_1": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "Y_1": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "9f3fabd12c34c6c4",
+   "inputHash": "f539fbc88fc2cb48",
+   "codeLength": 473,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 1.86
+  },
+  {
+   "id": 124,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "[\\operatorname{polygon}([(X_2[k] + \\frac{\\cos(2\\pi j/36)}{K_2[k]}, Y_2[k] + \\frac{\\sin(2\\pi j/36)}{K_2[k]}) \\operatorname{for} j = [1...36]]) \\operatorname{for} k = [1...6]]",
+   "input": "\\left[(\\frac{\\cos((\\pi j)/18)}{K_2[k]}+X_2[k],\\frac{\\sin((\\pi j)/18)}{K_2[k]}+Y_2[k]) \\operatorname{for} k = 1..6, j = 1..36\\right]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 1.88,
+   "freeSymbols": [
+    "K_2",
+    "X_2",
+    "Y_2"
+   ],
+   "freeSymbolTypes": {
+    "K_2": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "X_2": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "Y_2": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "fb7a8682c2b19540",
+   "inputHash": "95639f8dcf64cb0e",
+   "codeLength": 473,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 1.88
+  },
+  {
+   "id": 125,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "[\\operatorname{polygon}([(X_3[k] + \\frac{\\cos(2\\pi j/36)}{K_3[k]}, Y_3[k] + \\frac{\\sin(2\\pi j/36)}{K_3[k]}) \\operatorname{for} j = [1...36]]) \\operatorname{for} k = [1...18]]",
+   "input": "\\left[(\\frac{\\cos((\\pi j)/18)}{K_3[k]}+X_3[k],\\frac{\\sin((\\pi j)/18)}{K_3[k]}+Y_3[k]) \\operatorname{for} k = 1..18, j = 1..36\\right]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 1.51,
+   "freeSymbols": [
+    "K_3",
+    "X_3",
+    "Y_3"
+   ],
+   "freeSymbolTypes": {
+    "K_3": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "X_3": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "Y_3": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "7bbec85a889beb43",
+   "inputHash": "b2d94183f344e83a",
+   "codeLength": 474,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 1.51
+  },
+  {
+   "id": 126,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "[\\operatorname{polygon}([(X_4[k] + \\frac{\\cos(2\\pi j/36)}{K_4[k]}, Y_4[k] + \\frac{\\sin(2\\pi j/36)}{K_4[k]}) \\operatorname{for} j = [1...36]]) \\operatorname{for} k = [1...54]]",
+   "input": "\\left[(\\frac{\\cos((\\pi j)/18)}{K_4[k]}+X_4[k],\\frac{\\sin((\\pi j)/18)}{K_4[k]}+Y_4[k]) \\operatorname{for} k = 1..54, j = 1..36\\right]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 1.38,
+   "freeSymbols": [
+    "K_4",
+    "X_4",
+    "Y_4"
+   ],
+   "freeSymbolTypes": {
+    "K_4": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "X_4": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "Y_4": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "83a1972b209cfbe7",
+   "inputHash": "82b6d2509c1bcc22",
+   "codeLength": 474,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 1.38
+  },
+  {
+   "id": 127,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "[\\operatorname{polygon}([(X_5[k] + \\frac{\\cos(2\\pi j/36)}{K_5[k]}, Y_5[k] + \\frac{\\sin(2\\pi j/36)}{K_5[k]}) \\operatorname{for} j = [1...36]]) \\operatorname{for} k = [1...86]]",
+   "input": "\\left[(\\frac{\\cos((\\pi j)/18)}{K_5[k]}+X_5[k],\\frac{\\sin((\\pi j)/18)}{K_5[k]}+Y_5[k]) \\operatorname{for} k = 1..86, j = 1..36\\right]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 1.26,
+   "freeSymbols": [
+    "K_5",
+    "X_5",
+    "Y_5"
+   ],
+   "freeSymbolTypes": {
+    "K_5": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "X_5": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "Y_5": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "73abb1c3f44eeaa7",
+   "inputHash": "5f477eed07badb55",
+   "codeLength": 474,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 1.26
+  },
+  {
+   "id": 128,
+   "corpus": "showcase",
+   "doc": "apollonian-gasket",
+   "row": "[\\operatorname{polygon}([(X_6[k] + \\frac{\\cos(2\\pi j/36)}{K_6[k]}, Y_6[k] + \\frac{\\sin(2\\pi j/36)}{K_6[k]}) \\operatorname{for} j = [1...36]]) \\operatorname{for} k = [1...56]]",
+   "input": "\\left[(\\frac{\\cos((\\pi j)/18)}{K_6[k]}+X_6[k],\\frac{\\sin((\\pi j)/18)}{K_6[k]}+Y_6[k]) \\operatorname{for} k = 1..56, j = 1..36\\right]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 1.46,
+   "freeSymbols": [
+    "K_6",
+    "X_6",
+    "Y_6"
+   ],
+   "freeSymbolTypes": {
+    "K_6": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "X_6": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "Y_6": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "181e5a7dac7d3a5e",
+   "inputHash": "f618ca3e266ba1c2",
+   "codeLength": 474,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 1.46
+  },
+  {
+   "id": 129,
+   "corpus": "showcase",
+   "doc": "projectile-with-drag",
+   "row": "(setup)",
+   "input": "\\bigl\\lbrack S[3], S[4], -(cS[3]\\sqrt{S[3]^2+S[4]^2}), -(cS[4]\\sqrt{S[3]^2+S[4]^2})-g\\bigr\\rbrack",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 1.84,
+   "freeSymbols": [
+    "S",
+    "c",
+    "g"
+   ],
+   "freeSymbolTypes": {
+    "S": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "c": {
+     "type": "nan | real | signed_infinity",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "g": {
+     "type": "nan | real | signed_infinity",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "eaa27263f14b5e27",
+   "inputHash": "5e4e7d1f6a28aa70",
+   "codeLength": 447,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 1.84
+  },
+  {
+   "id": 130,
+   "corpus": "showcase",
+   "doc": "projectile-with-drag",
+   "row": "(setup)",
+   "input": "\\frac{K_1h}{2}+S",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.63,
+   "freeSymbols": [
+    "K_1",
+    "h",
+    "S"
+   ],
+   "freeSymbolTypes": {
+    "K_1": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "h": {
+     "type": "nan | real | signed_infinity",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "S": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "917d5e75a2b7780a",
+   "inputHash": "ecb063eca966d0cd",
+   "codeLength": 122,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.63
+  },
+  {
+   "id": 131,
+   "corpus": "showcase",
+   "doc": "projectile-with-drag",
+   "row": "(setup)",
+   "input": "\\bigl\\lbrack S_2[3], S_2[4], -(cS_2[3]\\sqrt{S_2[3]^2+S_2[4]^2}), -(cS_2[4]\\sqrt{S_2[3]^2+S_2[4]^2})-g\\bigr\\rbrack",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 1.34,
+   "freeSymbols": [
+    "S_2",
+    "c",
+    "g"
+   ],
+   "freeSymbolTypes": {
+    "S_2": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "c": {
+     "type": "nan | real | signed_infinity",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "g": {
+     "type": "nan | real | signed_infinity",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "62ec315e89bda6fc",
+   "inputHash": "2fd5833ad4d82ea0",
+   "codeLength": 459,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 1.34
+  },
+  {
+   "id": 132,
+   "corpus": "showcase",
+   "doc": "projectile-with-drag",
+   "row": "(setup)",
+   "input": "\\frac{K_2h}{2}+S",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.5,
+   "freeSymbols": [
+    "K_2",
+    "h",
+    "S"
+   ],
+   "freeSymbolTypes": {
+    "K_2": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "h": {
+     "type": "nan | real | signed_infinity",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "S": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "5320bc9d34c757c4",
+   "inputHash": "35a6ec8efef42b25",
+   "codeLength": 122,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.5
+  },
+  {
+   "id": 133,
+   "corpus": "showcase",
+   "doc": "projectile-with-drag",
+   "row": "(setup)",
+   "input": "\\bigl\\lbrack S_3[3], S_3[4], -(cS_3[3]\\sqrt{S_3[3]^2+S_3[4]^2}), -(cS_3[4]\\sqrt{S_3[3]^2+S_3[4]^2})-g\\bigr\\rbrack",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 1.16,
+   "freeSymbols": [
+    "S_3",
+    "c",
+    "g"
+   ],
+   "freeSymbolTypes": {
+    "S_3": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "c": {
+     "type": "nan | real | signed_infinity",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "g": {
+     "type": "nan | real | signed_infinity",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "482395bef8c78b5d",
+   "inputHash": "795c848ea99f666b",
+   "codeLength": 459,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 1.16
+  },
+  {
+   "id": 134,
+   "corpus": "showcase",
+   "doc": "projectile-with-drag",
+   "row": "(setup)",
+   "input": "K_3h+S",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.38,
+   "freeSymbols": [
+    "K_3",
+    "h",
+    "S"
+   ],
+   "freeSymbolTypes": {
+    "K_3": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "h": {
+     "type": "nan | real | signed_infinity",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "S": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "7369e7220d5f1cbb",
+   "inputHash": "41c57d01495902a6",
+   "codeLength": 104,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.38
+  },
+  {
+   "id": 135,
+   "corpus": "showcase",
+   "doc": "projectile-with-drag",
+   "row": "(setup)",
+   "input": "\\bigl\\lbrack S_4[3], S_4[4], -(cS_4[3]\\sqrt{S_4[3]^2+S_4[4]^2}), -(cS_4[4]\\sqrt{S_4[3]^2+S_4[4]^2})-g\\bigr\\rbrack",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 1.18,
+   "freeSymbols": [
+    "S_4",
+    "c",
+    "g"
+   ],
+   "freeSymbolTypes": {
+    "S_4": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "c": {
+     "type": "nan | real | signed_infinity",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "g": {
+     "type": "nan | real | signed_infinity",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "622f75aa593a8eda",
+   "inputHash": "f4059159301b1a70",
+   "codeLength": 459,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 1.18
+  },
+  {
+   "id": 136,
+   "corpus": "showcase",
+   "doc": "projectile-with-drag",
+   "row": "(setup)",
+   "input": "\\frac{1}{6}h\\times(K_1+2K_2+2K_3+K_4)+S",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.75,
+   "freeSymbols": [
+    "h",
+    "K_1",
+    "K_2",
+    "K_3",
+    "K_4",
+    "S"
+   ],
+   "freeSymbolTypes": {
+    "h": {
+     "type": "nan | real | signed_infinity",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "K_1": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "K_2": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "K_3": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "K_4": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    },
+    "S": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "63daaa1aea1e6293",
+   "inputHash": "139cdfed07eed2b4",
+   "codeLength": 312,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.75
+  },
+  {
+   "id": 137,
+   "corpus": "showcase",
+   "doc": "projectile-with-drag",
+   "row": "\\left(w\\cos(b)Tt, w\\sin(b)Tt - \\frac{g}{2}(Tt)^2\\right)",
+   "input": "(Ttw\\cos(b),Ttw\\sin(b)-\\frac{1}{2}g\\times(Tt)^2)",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000,
+    "vars": {
+     "a": "_.a",
+     "w": "_.w",
+     "c": "_.c",
+     "g": "_.g",
+     "h": "_.h",
+     "N": "_.N",
+     "b": "_.b",
+     "T": "_.T",
+     "u_0": "_.u_0",
+     "v_0": "_.v_0"
+    }
+   },
+   "success": true,
+   "durationMs": 0.97,
+   "freeSymbols": [
+    "T",
+    "t",
+    "w",
+    "b",
+    "g"
+   ],
+   "freeSymbolTypes": {
+    "T": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "t": {
+     "type": "real<-0.05..1.05>",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "w": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "b": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    },
+    "g": {
+     "type": "real",
+     "lowered": "number",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "b0c1ebbc0711535c",
+   "inputHash": "44d8c266a2adebe8",
+   "codeLength": 102,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.97
+  },
+  {
+   "id": 138,
+   "corpus": "showcase",
+   "doc": "projectile-with-drag",
+   "row": "\\left(w\\cos(b)Tt, w\\sin(b)Tt - \\frac{g}{2}(Tt)^2\\right)",
+   "input": "(Ttw\\cos(b),Ttw\\sin(b)-\\frac{1}{2}g\\times(Tt)^2)",
+   "target": "glsl",
+   "options": {
+    "to": "glsl",
+    "vars": {
+     "T": "T",
+     "w": "w",
+     "b": "b",
+     "g": "g"
+    }
+   },
+   "success": true,
+   "durationMs": 1.47,
+   "freeSymbols": [
+    "T",
+    "t",
+    "w",
+    "b",
+    "g"
+   ],
+   "freeSymbolTypes": {
+    "T": {
+     "type": "real",
+     "lowered": "float",
+     "provenance": "declared"
+    },
+    "t": {
+     "type": "real<-0.05..1.05>",
+     "lowered": "float",
+     "provenance": "declared"
+    },
+    "w": {
+     "type": "nan | real | signed_infinity",
+     "lowered": "float",
+     "provenance": "declared"
+    },
+    "b": {
+     "type": "real",
+     "lowered": "float",
+     "provenance": "declared"
+    },
+    "g": {
+     "type": "nan | real | signed_infinity",
+     "lowered": "float",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "94ea828d16e29fe2",
+   "inputHash": "44d8c266a2adebe8",
+   "codeLength": 74,
+   "preambleLength": 44,
+   "occurrences": 1,
+   "maxDurationMs": 1.47
+  },
+  {
+   "id": 139,
+   "corpus": "showcase",
+   "doc": "projectile-with-drag",
+   "row": "\\left(F_x, F_y\\right)",
+   "input": "F_{x}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.17,
+   "freeSymbols": [
+    "F_x"
+   ],
+   "freeSymbolTypes": {
+    "F_x": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "2fb0821e8745ceb8",
+   "inputHash": "03c8f088e04c69de",
+   "codeLength": 5,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.17
+  },
+  {
+   "id": 140,
+   "corpus": "showcase",
+   "doc": "projectile-with-drag",
+   "row": "\\left(F_x, F_y\\right)",
+   "input": "F_{y}",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.09,
+   "freeSymbols": [
+    "F_y"
+   ],
+   "freeSymbolTypes": {
+    "F_y": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "2a2c5704b41a60d5",
+   "inputHash": "89c53d460f76deb5",
+   "codeLength": 5,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.09
+  },
+  {
+   "id": 141,
+   "corpus": "showcase",
+   "doc": "projectile-with-drag",
+   "row": "\\left(P, Q\\right)",
+   "input": "P",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.1,
+   "freeSymbols": [
+    "P"
+   ],
+   "freeSymbolTypes": {
+    "P": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "e0fec94d0f089da6",
+   "inputHash": "5c62e091b8c0565f",
+   "codeLength": 3,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.1
+  },
+  {
+   "id": 142,
+   "corpus": "showcase",
+   "doc": "projectile-with-drag",
+   "row": "\\left(P, Q\\right)",
+   "input": "Q",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.08,
+   "freeSymbols": [
+    "Q"
+   ],
+   "freeSymbolTypes": {
+    "Q": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "f9fd9f7ba3196236",
+   "inputHash": "4ae81572f06e1b88",
+   "codeLength": 3,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.08
+  },
+  {
+   "id": 143,
+   "corpus": "showcase",
+   "doc": "projectile-with-drag",
+   "row": "\\left(S[1], S[2]\\right)",
+   "input": "S[1]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.22,
+   "freeSymbols": [
+    "S"
+   ],
+   "freeSymbolTypes": {
+    "S": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "5a40c93b091fdc2c",
+   "inputHash": "8c10837fa09ca998",
+   "codeLength": 54,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.22
+  },
+  {
+   "id": 144,
+   "corpus": "showcase",
+   "doc": "projectile-with-drag",
+   "row": "\\left(S[1], S[2]\\right)",
+   "input": "S[2]",
+   "target": "javascript",
+   "options": {
+    "to": "javascript",
+    "mode": "strict",
+    "iterationBudget": 1000000
+   },
+   "success": true,
+   "durationMs": 0.16,
+   "freeSymbols": [
+    "S"
+   ],
+   "freeSymbolTypes": {
+    "S": {
+     "type": "list<nan | real | signed_infinity>",
+     "lowered": "array",
+     "provenance": "declared"
+    }
+   },
+   "mode": "strict",
+   "hash": "120a06a99b86eb41",
+   "inputHash": "dad7aa6632903a74",
+   "codeLength": 54,
+   "preambleLength": 0,
+   "occurrences": 1,
+   "maxDurationMs": 0.16
+  }
+ ]
+}

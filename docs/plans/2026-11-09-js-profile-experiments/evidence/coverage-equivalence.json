@@ -1,0 +1,10 @@
+{
+  "equal": true,
+  "records": 144,
+  "excluded": [
+    "durationMs",
+    "maxDurationMs",
+    "id"
+  ],
+  "sha256Normalized": "a84e7335f7bec0761c384567ec281da5475f772219f406ebb6fd81cf07fb8bb8"
+}

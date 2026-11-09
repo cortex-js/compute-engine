@@ -1,0 +1,30 @@
+{
+  "entrySha256": "0eebc438293ff41ec099a6de655af439d6ecb3ea8bd0e1442f48e0a0c7c4a020",
+  "finalRecords": 1101,
+  "baselineRecords": 1101,
+  "onlyFinalSignatures": 5,
+  "onlyBaselineSignatures": 5,
+  "instrumentErrors": false,
+  "control": "burning-ship instrumented vs uninstrumented records identical excluding timings",
+  "fullCoreUnmodifiedComparison": {
+    "records": 1101,
+    "identical": true,
+    "comparedKeys": [
+      "corpus",
+      "doc",
+      "row",
+      "target",
+      "input",
+      "options",
+      "success",
+      "code",
+      "preamble",
+      "error",
+      "unsupported",
+      "freeSymbolTypes",
+      "occurrences"
+    ],
+    "replayLimit": "Both full runs were compared in the original session, but only capture records and control summaries were archived. Reproduce by regenerating instrumented and unmodified full gateway outputs at the pinned Tycho revision; compare the listed keys after removing timings. Archived summaries alone do not independently reproduce this comparison."
+  },
+  "signatureComparisonExplanation": "The five signatures on each side compare the final pinned capture with a historical Tycho digest from a different revision; all five are Buddhabrot generated expressions. Signature keys: target,input,hash,success,error,threw. These are not the same-revision instrument control."
+}

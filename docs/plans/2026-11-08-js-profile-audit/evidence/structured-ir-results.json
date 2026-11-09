@@ -1,0 +1,1541 @@
+{
+  "root": "/tmp/wt-js-profile-prior",
+  "revision": "9c126c5d8b2f3fc93e125985cc90b43398c46c28",
+  "node": "v26.13.0",
+  "purpose": "correctness-only bounded structured IR experiment",
+  "limitations": [
+    "Raw MathJSON lowering; no CE fragment annotations",
+    "Only declared numeric fixtures and listed binary/unary operations",
+    "Finite small integer loop bounds supplied by fixture; default Range direction and explicit unit steps supported; no budgets, fractional steps, break/continue or general mutation",
+    "No host binding, shadowing, complex mode, absence, runtime packaging or worker support",
+    "No timing or memory measurements; source byte counts exclude different runtime wrappers"
+  ],
+  "results": [
+    {
+      "name": "repeated-arithmetic",
+      "declarations": [
+        [
+          "x",
+          "real"
+        ]
+      ],
+      "mathjson": [
+        "Add",
+        [
+          "Sin",
+          [
+            "Add",
+            [
+              "Multiply",
+              "x",
+              "x"
+            ],
+            1
+          ]
+        ],
+        [
+          "Cos",
+          [
+            "Add",
+            [
+              "Multiply",
+              "x",
+              "x"
+            ],
+            1
+          ]
+        ]
+      ],
+      "legacySource": "Math.sin(_.x * _.x + 1) + Math.cos(_.x * _.x + 1)",
+      "legacySourceBytes": 49,
+      "variants": [
+        {
+          "cse": false,
+          "instructions": 9,
+          "sourceBytes": 212,
+          "source": "const v0 = inputs[\"x\"];\nconst v1 = v0 * v0;\nconst v2 = 1;\nconst v3 = v1 + v2;\nconst v4 = Math.sin(v3);\nconst v5 = v0 * v0;\nconst v6 = 1;\nconst v7 = v5 + v6;\nconst v8 = Math.cos(v7);\nconst v9 = v4 + v8;\nreturn v9;",
+          "ir": {
+            "inputs": [
+              {
+                "name": "x",
+                "id": "v0",
+                "type": "f64"
+              }
+            ],
+            "body": {
+              "ops": [
+                {
+                  "kind": "Multiply",
+                  "args": [
+                    "v0",
+                    "v0"
+                  ],
+                  "result": {
+                    "id": "v1",
+                    "type": "f64"
+                  }
+                },
+                {
+                  "kind": "Constant",
+                  "args": [],
+                  "result": {
+                    "id": "v2",
+                    "type": "f64"
+                  },
+                  "literal": 1
+                },
+                {
+                  "kind": "Add",
+                  "args": [
+                    "v1",
+                    "v2"
+                  ],
+                  "result": {
+                    "id": "v3",
+                    "type": "f64"
+                  }
+                },
+                {
+                  "kind": "Sin",
+                  "args": [
+                    "v3"
+                  ],
+                  "result": {
+                    "id": "v4",
+                    "type": "f64"
+                  }
+                },
+                {
+                  "kind": "Multiply",
+                  "args": [
+                    "v0",
+                    "v0"
+                  ],
+                  "result": {
+                    "id": "v5",
+                    "type": "f64"
+                  }
+                },
+                {
+                  "kind": "Constant",
+                  "args": [],
+                  "result": {
+                    "id": "v6",
+                    "type": "f64"
+                  },
+                  "literal": 1
+                },
+                {
+                  "kind": "Add",
+                  "args": [
+                    "v5",
+                    "v6"
+                  ],
+                  "result": {
+                    "id": "v7",
+                    "type": "f64"
+                  }
+                },
+                {
+                  "kind": "Cos",
+                  "args": [
+                    "v7"
+                  ],
+                  "result": {
+                    "id": "v8",
+                    "type": "f64"
+                  }
+                },
+                {
+                  "kind": "Add",
+                  "args": [
+                    "v4",
+                    "v8"
+                  ],
+                  "result": {
+                    "id": "v9",
+                    "type": "f64"
+                  }
+                }
+              ],
+              "result": {
+                "id": "v9",
+                "type": "f64"
+              }
+            }
+          },
+          "values": [
+            {
+              "inputs": {
+                "x": -3
+              },
+              "result": -1.383092639965822,
+              "legacy": -1.383092639965822,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": 0
+              },
+              "result": 1.3817732906760363,
+              "legacy": 1.3817732906760363,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": 0.5
+              },
+              "result": 1.2643069817508548,
+              "legacy": 1.2643069817508548,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": 2
+              },
+              "result": -0.6752620891999122,
+              "legacy": -0.6752620891999122,
+              "trace": []
+            }
+          ]
+        },
+        {
+          "cse": true,
+          "instructions": 6,
+          "sourceBytes": 158,
+          "source": "const v0 = inputs[\"x\"];\nconst v1 = v0 * v0;\nconst v2 = 1;\nconst v3 = v1 + v2;\nconst v4 = Math.sin(v3);\nconst v5 = Math.cos(v3);\nconst v6 = v4 + v5;\nreturn v6;",
+          "ir": {
+            "inputs": [
+              {
+                "name": "x",
+                "id": "v0",
+                "type": "f64"
+              }
+            ],
+            "body": {
+              "ops": [
+                {
+                  "kind": "Multiply",
+                  "args": [
+                    "v0",
+                    "v0"
+                  ],
+                  "result": {
+                    "id": "v1",
+                    "type": "f64"
+                  }
+                },
+                {
+                  "kind": "Constant",
+                  "args": [],
+                  "result": {
+                    "id": "v2",
+                    "type": "f64"
+                  },
+                  "literal": 1
+                },
+                {
+                  "kind": "Add",
+                  "args": [
+                    "v1",
+                    "v2"
+                  ],
+                  "result": {
+                    "id": "v3",
+                    "type": "f64"
+                  }
+                },
+                {
+                  "kind": "Sin",
+                  "args": [
+                    "v3"
+                  ],
+                  "result": {
+                    "id": "v4",
+                    "type": "f64"
+                  }
+                },
+                {
+                  "kind": "Cos",
+                  "args": [
+                    "v3"
+                  ],
+                  "result": {
+                    "id": "v5",
+                    "type": "f64"
+                  }
+                },
+                {
+                  "kind": "Add",
+                  "args": [
+                    "v4",
+                    "v5"
+                  ],
+                  "result": {
+                    "id": "v6",
+                    "type": "f64"
+                  }
+                }
+              ],
+              "result": {
+                "id": "v6",
+                "type": "f64"
+              }
+            }
+          },
+          "values": [
+            {
+              "inputs": {
+                "x": -3
+              },
+              "result": -1.383092639965822,
+              "legacy": -1.383092639965822,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": 0
+              },
+              "result": 1.3817732906760363,
+              "legacy": 1.3817732906760363,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": 0.5
+              },
+              "result": 1.2643069817508548,
+              "legacy": 1.2643069817508548,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": 2
+              },
+              "result": -0.6752620891999122,
+              "legacy": -0.6752620891999122,
+              "trace": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "lazy-conditional",
+      "declarations": [
+        [
+          "x",
+          "real"
+        ]
+      ],
+      "mathjson": [
+        "If",
+        [
+          "Greater",
+          "x",
+          0
+        ],
+        [
+          "Sqrt",
+          "x"
+        ],
+        [
+          "Negate",
+          "x"
+        ]
+      ],
+      "legacySource": "((0 < _.x) ? (Math.sqrt(_.x)) : (-_.x))",
+      "legacySourceBytes": 39,
+      "variants": [
+        {
+          "cse": false,
+          "instructions": 5,
+          "sourceBytes": 157,
+          "source": "const v0 = inputs[\"x\"];\nconst v1 = 0;\nconst v2 = v0 > v1;\nlet v5; if (v2) { const v3 = Math.sqrt(v0); v5 = v3; } else { const v4 = -v0; v5 = v4; }\nreturn v5;",
+          "ir": {
+            "inputs": [
+              {
+                "name": "x",
+                "id": "v0",
+                "type": "f64"
+              }
+            ],
+            "body": {
+              "ops": [
+                {
+                  "kind": "Constant",
+                  "args": [],
+                  "result": {
+                    "id": "v1",
+                    "type": "f64"
+                  },
+                  "literal": 0
+                },
+                {
+                  "kind": "Greater",
+                  "args": [
+                    "v0",
+                    "v1"
+                  ],
+                  "result": {
+                    "id": "v2",
+                    "type": "bool"
+                  }
+                },
+                {
+                  "kind": "If",
+                  "args": [
+                    "v2"
+                  ],
+                  "result": {
+                    "id": "v5",
+                    "type": "f64"
+                  },
+                  "yes": {
+                    "ops": [
+                      {
+                        "kind": "Sqrt",
+                        "args": [
+                          "v0"
+                        ],
+                        "result": {
+                          "id": "v3",
+                          "type": "f64"
+                        }
+                      }
+                    ],
+                    "result": {
+                      "id": "v3",
+                      "type": "f64"
+                    }
+                  },
+                  "no": {
+                    "ops": [
+                      {
+                        "kind": "Negate",
+                        "args": [
+                          "v0"
+                        ],
+                        "result": {
+                          "id": "v4",
+                          "type": "f64"
+                        }
+                      }
+                    ],
+                    "result": {
+                      "id": "v4",
+                      "type": "f64"
+                    }
+                  }
+                }
+              ],
+              "result": {
+                "id": "v5",
+                "type": "f64"
+              }
+            }
+          },
+          "values": [
+            {
+              "inputs": {
+                "x": -4
+              },
+              "result": 4,
+              "legacy": 4,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": 0
+              },
+              "result": 0,
+              "legacy": 0,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": 0.25
+              },
+              "result": 0.5,
+              "legacy": 0.5,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": 9
+              },
+              "result": 3,
+              "legacy": 3,
+              "trace": []
+            }
+          ]
+        },
+        {
+          "cse": true,
+          "instructions": 5,
+          "sourceBytes": 157,
+          "source": "const v0 = inputs[\"x\"];\nconst v1 = 0;\nconst v2 = v0 > v1;\nlet v5; if (v2) { const v3 = Math.sqrt(v0); v5 = v3; } else { const v4 = -v0; v5 = v4; }\nreturn v5;",
+          "ir": {
+            "inputs": [
+              {
+                "name": "x",
+                "id": "v0",
+                "type": "f64"
+              }
+            ],
+            "body": {
+              "ops": [
+                {
+                  "kind": "Constant",
+                  "args": [],
+                  "result": {
+                    "id": "v1",
+                    "type": "f64"
+                  },
+                  "literal": 0
+                },
+                {
+                  "kind": "Greater",
+                  "args": [
+                    "v0",
+                    "v1"
+                  ],
+                  "result": {
+                    "id": "v2",
+                    "type": "bool"
+                  }
+                },
+                {
+                  "kind": "If",
+                  "args": [
+                    "v2"
+                  ],
+                  "result": {
+                    "id": "v5",
+                    "type": "f64"
+                  },
+                  "yes": {
+                    "ops": [
+                      {
+                        "kind": "Sqrt",
+                        "args": [
+                          "v0"
+                        ],
+                        "result": {
+                          "id": "v3",
+                          "type": "f64"
+                        }
+                      }
+                    ],
+                    "result": {
+                      "id": "v3",
+                      "type": "f64"
+                    }
+                  },
+                  "no": {
+                    "ops": [
+                      {
+                        "kind": "Negate",
+                        "args": [
+                          "v0"
+                        ],
+                        "result": {
+                          "id": "v4",
+                          "type": "f64"
+                        }
+                      }
+                    ],
+                    "result": {
+                      "id": "v4",
+                      "type": "f64"
+                    }
+                  }
+                }
+              ],
+              "result": {
+                "id": "v5",
+                "type": "f64"
+              }
+            }
+          },
+          "values": [
+            {
+              "inputs": {
+                "x": -4
+              },
+              "result": 4,
+              "legacy": 4,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": 0
+              },
+              "result": 0,
+              "legacy": 0,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": 0.25
+              },
+              "result": 0.5,
+              "legacy": 0.5,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": 9
+              },
+              "result": 3,
+              "legacy": 3,
+              "trace": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "accumulator-loop",
+      "declarations": [
+        [
+          "x",
+          "real"
+        ],
+        [
+          "n",
+          "integer"
+        ]
+      ],
+      "mathjson": [
+        "Block",
+        [
+          "Declare",
+          "s",
+          "'real'",
+          0
+        ],
+        [
+          "Loop",
+          [
+            "Assign",
+            "s",
+            [
+              "Add",
+              "s",
+              [
+                "Multiply",
+                "i",
+                "x"
+              ]
+            ]
+          ],
+          [
+            "Element",
+            "i",
+            [
+              "Range",
+              1,
+              "n",
+              1
+            ]
+          ]
+        ],
+        "s"
+      ],
+      "legacySource": "(() => {\nlet s = 0;\n{\n{ const _tv1 = 1; const _tv2 = _.n; const _tv3 = 1; const _tv4 = _SYS.rangeCount(_tv1, _tv2, _tv3); if (_tv4 > 4294967295) throw new RangeError('Invalid array length'); for (let _tv5 = 0; _tv5 < _tv4; _tv5++) { const i = _tv1 + _tv3 * _tv5; s = i * _.x + s } }\n};\nreturn s\n})()",
+      "legacySourceBytes": 299,
+      "variants": [
+        {
+          "cse": false,
+          "instructions": 5,
+          "sourceBytes": 254,
+          "source": "const v0 = inputs[\"x\"];\nconst v1 = inputs[\"n\"];\nconst v2 = 0;\nconst v3 = 1;\nlet v8 = v2; const step_v8 = 1; for (let v4 = v3; step_v8 > 0 ? v4 <= v1 : v4 >= v1; v4 += step_v8) { const v5 = v8; const v6 = v4 * v0;\nconst v7 = v5 + v6; v8 = v7; }\nreturn v8;",
+          "ir": {
+            "inputs": [
+              {
+                "name": "x",
+                "id": "v0",
+                "type": "f64"
+              },
+              {
+                "name": "n",
+                "id": "v1",
+                "type": "f64"
+              }
+            ],
+            "body": {
+              "ops": [
+                {
+                  "kind": "Constant",
+                  "args": [],
+                  "result": {
+                    "id": "v2",
+                    "type": "f64"
+                  },
+                  "literal": 0
+                },
+                {
+                  "kind": "Constant",
+                  "args": [],
+                  "result": {
+                    "id": "v3",
+                    "type": "f64"
+                  },
+                  "literal": 1
+                },
+                {
+                  "kind": "Loop",
+                  "args": [
+                    "v2",
+                    "v3",
+                    "v1"
+                  ],
+                  "result": {
+                    "id": "v8",
+                    "type": "f64"
+                  },
+                  "index": {
+                    "id": "v4",
+                    "type": "f64"
+                  },
+                  "carried": {
+                    "id": "v5",
+                    "type": "f64"
+                  },
+                  "body": {
+                    "ops": [
+                      {
+                        "kind": "Multiply",
+                        "args": [
+                          "v4",
+                          "v0"
+                        ],
+                        "result": {
+                          "id": "v6",
+                          "type": "f64"
+                        }
+                      },
+                      {
+                        "kind": "Add",
+                        "args": [
+                          "v5",
+                          "v6"
+                        ],
+                        "result": {
+                          "id": "v7",
+                          "type": "f64"
+                        }
+                      }
+                    ],
+                    "result": {
+                      "id": "v7",
+                      "type": "f64"
+                    }
+                  },
+                  "explicitStep": 1
+                }
+              ],
+              "result": {
+                "id": "v8",
+                "type": "f64"
+              }
+            }
+          },
+          "values": [
+            {
+              "inputs": {
+                "x": 0.5,
+                "n": 0
+              },
+              "result": 0,
+              "legacy": 0,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": -2,
+                "n": 0
+              },
+              "result": 0,
+              "legacy": 0,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": 0.5,
+                "n": 1
+              },
+              "result": 0.5,
+              "legacy": 0.5,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": -2,
+                "n": 1
+              },
+              "result": -2,
+              "legacy": -2,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": 0.5,
+                "n": 8
+              },
+              "result": 18,
+              "legacy": 18,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": -2,
+                "n": 8
+              },
+              "result": -72,
+              "legacy": -72,
+              "trace": []
+            }
+          ]
+        },
+        {
+          "cse": true,
+          "instructions": 5,
+          "sourceBytes": 254,
+          "source": "const v0 = inputs[\"x\"];\nconst v1 = inputs[\"n\"];\nconst v2 = 0;\nconst v3 = 1;\nlet v8 = v2; const step_v8 = 1; for (let v4 = v3; step_v8 > 0 ? v4 <= v1 : v4 >= v1; v4 += step_v8) { const v5 = v8; const v6 = v4 * v0;\nconst v7 = v5 + v6; v8 = v7; }\nreturn v8;",
+          "ir": {
+            "inputs": [
+              {
+                "name": "x",
+                "id": "v0",
+                "type": "f64"
+              },
+              {
+                "name": "n",
+                "id": "v1",
+                "type": "f64"
+              }
+            ],
+            "body": {
+              "ops": [
+                {
+                  "kind": "Constant",
+                  "args": [],
+                  "result": {
+                    "id": "v2",
+                    "type": "f64"
+                  },
+                  "literal": 0
+                },
+                {
+                  "kind": "Constant",
+                  "args": [],
+                  "result": {
+                    "id": "v3",
+                    "type": "f64"
+                  },
+                  "literal": 1
+                },
+                {
+                  "kind": "Loop",
+                  "args": [
+                    "v2",
+                    "v3",
+                    "v1"
+                  ],
+                  "result": {
+                    "id": "v8",
+                    "type": "f64"
+                  },
+                  "index": {
+                    "id": "v4",
+                    "type": "f64"
+                  },
+                  "carried": {
+                    "id": "v5",
+                    "type": "f64"
+                  },
+                  "body": {
+                    "ops": [
+                      {
+                        "kind": "Multiply",
+                        "args": [
+                          "v4",
+                          "v0"
+                        ],
+                        "result": {
+                          "id": "v6",
+                          "type": "f64"
+                        }
+                      },
+                      {
+                        "kind": "Add",
+                        "args": [
+                          "v5",
+                          "v6"
+                        ],
+                        "result": {
+                          "id": "v7",
+                          "type": "f64"
+                        }
+                      }
+                    ],
+                    "result": {
+                      "id": "v7",
+                      "type": "f64"
+                    }
+                  },
+                  "explicitStep": 1
+                }
+              ],
+              "result": {
+                "id": "v8",
+                "type": "f64"
+              }
+            }
+          },
+          "values": [
+            {
+              "inputs": {
+                "x": 0.5,
+                "n": 0
+              },
+              "result": 0,
+              "legacy": 0,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": -2,
+                "n": 0
+              },
+              "result": 0,
+              "legacy": 0,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": 0.5,
+                "n": 1
+              },
+              "result": 0.5,
+              "legacy": 0.5,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": -2,
+                "n": 1
+              },
+              "result": -2,
+              "legacy": -2,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": 0.5,
+                "n": 8
+              },
+              "result": 18,
+              "legacy": 18,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": -2,
+                "n": 8
+              },
+              "result": -72,
+              "legacy": -72,
+              "trace": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "lazy-effect-trace",
+      "declarations": [
+        [
+          "x",
+          "real"
+        ]
+      ],
+      "mathjson": [
+        "If",
+        [
+          "Greater",
+          "x",
+          0
+        ],
+        [
+          "TapPositive",
+          "x"
+        ],
+        [
+          "TapNegative",
+          "x"
+        ]
+      ],
+      "legacySource": "((0 < _.x) ? (((x) => { globalThis.__structuredIrTrace.push('positive'); return Math.sqrt(x); })(_.x)) : (((x) => { globalThis.__structuredIrTrace.push('negative'); return -x; })(_.x)))",
+      "legacySourceBytes": 185,
+      "variants": [
+        {
+          "cse": false,
+          "instructions": 5,
+          "sourceBytes": 179,
+          "source": "const v0 = inputs[\"x\"];\nconst v1 = 0;\nconst v2 = v0 > v1;\nlet v5; if (v2) { const v3 = tap('positive', v0); v5 = v3; } else { const v4 = tap('negative', v0); v5 = v4; }\nreturn v5;",
+          "ir": {
+            "inputs": [
+              {
+                "name": "x",
+                "id": "v0",
+                "type": "f64"
+              }
+            ],
+            "body": {
+              "ops": [
+                {
+                  "kind": "Constant",
+                  "args": [],
+                  "result": {
+                    "id": "v1",
+                    "type": "f64"
+                  },
+                  "literal": 0
+                },
+                {
+                  "kind": "Greater",
+                  "args": [
+                    "v0",
+                    "v1"
+                  ],
+                  "result": {
+                    "id": "v2",
+                    "type": "bool"
+                  }
+                },
+                {
+                  "kind": "If",
+                  "args": [
+                    "v2"
+                  ],
+                  "result": {
+                    "id": "v5",
+                    "type": "f64"
+                  },
+                  "yes": {
+                    "ops": [
+                      {
+                        "kind": "TapPositive",
+                        "args": [
+                          "v0"
+                        ],
+                        "result": {
+                          "id": "v3",
+                          "type": "f64"
+                        }
+                      }
+                    ],
+                    "result": {
+                      "id": "v3",
+                      "type": "f64"
+                    }
+                  },
+                  "no": {
+                    "ops": [
+                      {
+                        "kind": "TapNegative",
+                        "args": [
+                          "v0"
+                        ],
+                        "result": {
+                          "id": "v4",
+                          "type": "f64"
+                        }
+                      }
+                    ],
+                    "result": {
+                      "id": "v4",
+                      "type": "f64"
+                    }
+                  }
+                }
+              ],
+              "result": {
+                "id": "v5",
+                "type": "f64"
+              }
+            }
+          },
+          "values": [
+            {
+              "inputs": {
+                "x": -4
+              },
+              "result": 4,
+              "legacy": 4,
+              "trace": [
+                "negative"
+              ]
+            },
+            {
+              "inputs": {
+                "x": 0.25
+              },
+              "result": 0.5,
+              "legacy": 0.5,
+              "trace": [
+                "positive"
+              ]
+            }
+          ]
+        },
+        {
+          "cse": true,
+          "instructions": 5,
+          "sourceBytes": 179,
+          "source": "const v0 = inputs[\"x\"];\nconst v1 = 0;\nconst v2 = v0 > v1;\nlet v5; if (v2) { const v3 = tap('positive', v0); v5 = v3; } else { const v4 = tap('negative', v0); v5 = v4; }\nreturn v5;",
+          "ir": {
+            "inputs": [
+              {
+                "name": "x",
+                "id": "v0",
+                "type": "f64"
+              }
+            ],
+            "body": {
+              "ops": [
+                {
+                  "kind": "Constant",
+                  "args": [],
+                  "result": {
+                    "id": "v1",
+                    "type": "f64"
+                  },
+                  "literal": 0
+                },
+                {
+                  "kind": "Greater",
+                  "args": [
+                    "v0",
+                    "v1"
+                  ],
+                  "result": {
+                    "id": "v2",
+                    "type": "bool"
+                  }
+                },
+                {
+                  "kind": "If",
+                  "args": [
+                    "v2"
+                  ],
+                  "result": {
+                    "id": "v5",
+                    "type": "f64"
+                  },
+                  "yes": {
+                    "ops": [
+                      {
+                        "kind": "TapPositive",
+                        "args": [
+                          "v0"
+                        ],
+                        "result": {
+                          "id": "v3",
+                          "type": "f64"
+                        }
+                      }
+                    ],
+                    "result": {
+                      "id": "v3",
+                      "type": "f64"
+                    }
+                  },
+                  "no": {
+                    "ops": [
+                      {
+                        "kind": "TapNegative",
+                        "args": [
+                          "v0"
+                        ],
+                        "result": {
+                          "id": "v4",
+                          "type": "f64"
+                        }
+                      }
+                    ],
+                    "result": {
+                      "id": "v4",
+                      "type": "f64"
+                    }
+                  }
+                }
+              ],
+              "result": {
+                "id": "v5",
+                "type": "f64"
+              }
+            }
+          },
+          "values": [
+            {
+              "inputs": {
+                "x": -4
+              },
+              "result": 4,
+              "legacy": 4,
+              "trace": [
+                "negative"
+              ]
+            },
+            {
+              "inputs": {
+                "x": 0.25
+              },
+              "result": 0.5,
+              "legacy": 0.5,
+              "trace": [
+                "positive"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "default-descending-range",
+      "declarations": [
+        [
+          "x",
+          "real"
+        ],
+        [
+          "n",
+          "integer"
+        ]
+      ],
+      "mathjson": [
+        "Block",
+        [
+          "Declare",
+          "s",
+          "'real'",
+          0
+        ],
+        [
+          "Loop",
+          [
+            "Assign",
+            "s",
+            [
+              "Add",
+              "s",
+              [
+                "Multiply",
+                "i",
+                "x"
+              ]
+            ]
+          ],
+          [
+            "Element",
+            "i",
+            [
+              "Range",
+              1,
+              "n"
+            ]
+          ]
+        ],
+        "s"
+      ],
+      "legacySource": "(() => {\nlet s = 0;\n{\n{ const _tv1 = 1; const _tv2 = _.n; const _tv3 = (_tv2 >= _tv1 ? 1 : -1); const _tv4 = _SYS.rangeCount(_tv1, _tv2, _tv3); if (_tv4 > 4294967295) throw new RangeError('Invalid array length'); for (let _tv5 = 0; _tv5 < _tv4; _tv5++) { const i = _tv1 + _tv3 * _tv5; s = i * _.x + s } }\n};\nreturn s\n})()",
+      "legacySourceBytes": 321,
+      "variants": [
+        {
+          "cse": false,
+          "instructions": 5,
+          "sourceBytes": 270,
+          "source": "const v0 = inputs[\"x\"];\nconst v1 = inputs[\"n\"];\nconst v2 = 0;\nconst v3 = 1;\nlet v8 = v2; const step_v8 = v3 <= v1 ? 1 : -1; for (let v4 = v3; step_v8 > 0 ? v4 <= v1 : v4 >= v1; v4 += step_v8) { const v5 = v8; const v6 = v4 * v0;\nconst v7 = v5 + v6; v8 = v7; }\nreturn v8;",
+          "ir": {
+            "inputs": [
+              {
+                "name": "x",
+                "id": "v0",
+                "type": "f64"
+              },
+              {
+                "name": "n",
+                "id": "v1",
+                "type": "f64"
+              }
+            ],
+            "body": {
+              "ops": [
+                {
+                  "kind": "Constant",
+                  "args": [],
+                  "result": {
+                    "id": "v2",
+                    "type": "f64"
+                  },
+                  "literal": 0
+                },
+                {
+                  "kind": "Constant",
+                  "args": [],
+                  "result": {
+                    "id": "v3",
+                    "type": "f64"
+                  },
+                  "literal": 1
+                },
+                {
+                  "kind": "Loop",
+                  "args": [
+                    "v2",
+                    "v3",
+                    "v1"
+                  ],
+                  "result": {
+                    "id": "v8",
+                    "type": "f64"
+                  },
+                  "index": {
+                    "id": "v4",
+                    "type": "f64"
+                  },
+                  "carried": {
+                    "id": "v5",
+                    "type": "f64"
+                  },
+                  "body": {
+                    "ops": [
+                      {
+                        "kind": "Multiply",
+                        "args": [
+                          "v4",
+                          "v0"
+                        ],
+                        "result": {
+                          "id": "v6",
+                          "type": "f64"
+                        }
+                      },
+                      {
+                        "kind": "Add",
+                        "args": [
+                          "v5",
+                          "v6"
+                        ],
+                        "result": {
+                          "id": "v7",
+                          "type": "f64"
+                        }
+                      }
+                    ],
+                    "result": {
+                      "id": "v7",
+                      "type": "f64"
+                    }
+                  }
+                }
+              ],
+              "result": {
+                "id": "v8",
+                "type": "f64"
+              }
+            }
+          },
+          "values": [
+            {
+              "inputs": {
+                "x": 0.5,
+                "n": 0
+              },
+              "result": 0.5,
+              "legacy": 0.5,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": 2,
+                "n": -2
+              },
+              "result": -4,
+              "legacy": -4,
+              "trace": []
+            }
+          ]
+        },
+        {
+          "cse": true,
+          "instructions": 5,
+          "sourceBytes": 270,
+          "source": "const v0 = inputs[\"x\"];\nconst v1 = inputs[\"n\"];\nconst v2 = 0;\nconst v3 = 1;\nlet v8 = v2; const step_v8 = v3 <= v1 ? 1 : -1; for (let v4 = v3; step_v8 > 0 ? v4 <= v1 : v4 >= v1; v4 += step_v8) { const v5 = v8; const v6 = v4 * v0;\nconst v7 = v5 + v6; v8 = v7; }\nreturn v8;",
+          "ir": {
+            "inputs": [
+              {
+                "name": "x",
+                "id": "v0",
+                "type": "f64"
+              },
+              {
+                "name": "n",
+                "id": "v1",
+                "type": "f64"
+              }
+            ],
+            "body": {
+              "ops": [
+                {
+                  "kind": "Constant",
+                  "args": [],
+                  "result": {
+                    "id": "v2",
+                    "type": "f64"
+                  },
+                  "literal": 0
+                },
+                {
+                  "kind": "Constant",
+                  "args": [],
+                  "result": {
+                    "id": "v3",
+                    "type": "f64"
+                  },
+                  "literal": 1
+                },
+                {
+                  "kind": "Loop",
+                  "args": [
+                    "v2",
+                    "v3",
+                    "v1"
+                  ],
+                  "result": {
+                    "id": "v8",
+                    "type": "f64"
+                  },
+                  "index": {
+                    "id": "v4",
+                    "type": "f64"
+                  },
+                  "carried": {
+                    "id": "v5",
+                    "type": "f64"
+                  },
+                  "body": {
+                    "ops": [
+                      {
+                        "kind": "Multiply",
+                        "args": [
+                          "v4",
+                          "v0"
+                        ],
+                        "result": {
+                          "id": "v6",
+                          "type": "f64"
+                        }
+                      },
+                      {
+                        "kind": "Add",
+                        "args": [
+                          "v5",
+                          "v6"
+                        ],
+                        "result": {
+                          "id": "v7",
+                          "type": "f64"
+                        }
+                      }
+                    ],
+                    "result": {
+                      "id": "v7",
+                      "type": "f64"
+                    }
+                  }
+                }
+              ],
+              "result": {
+                "id": "v8",
+                "type": "f64"
+              }
+            }
+          },
+          "values": [
+            {
+              "inputs": {
+                "x": 0.5,
+                "n": 0
+              },
+              "result": 0.5,
+              "legacy": 0.5,
+              "trace": []
+            },
+            {
+              "inputs": {
+                "x": 2,
+                "n": -2
+              },
+              "result": -4,
+              "legacy": -4,
+              "trace": []
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "negativeControls": [
+    {
+      "name": "undefined-use/cse=false",
+      "rejected": true
+    },
+    {
+      "name": "operand-type-mismatch/cse=false",
+      "rejected": true
+    },
+    {
+      "name": "branch-region-escape/cse=false",
+      "rejected": true
+    },
+    {
+      "name": "loop-carried-type-mismatch/cse=false",
+      "rejected": true
+    },
+    {
+      "name": "undefined-use/cse=true",
+      "rejected": true
+    },
+    {
+      "name": "operand-type-mismatch/cse=true",
+      "rejected": true
+    },
+    {
+      "name": "branch-region-escape/cse=true",
+      "rejected": true
+    },
+    {
+      "name": "loop-carried-type-mismatch/cse=true",
+      "rejected": true
+    }
+  ],
+  "effectControls": [
+    {
+      "cse": false,
+      "duplicateCalls": 2,
+      "barrierRecomputations": 2,
+      "passed": true
+    },
+    {
+      "cse": true,
+      "duplicateCalls": 2,
+      "barrierRecomputations": 2,
+      "passed": true
+    }
+  ]
+}

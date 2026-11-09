@@ -1,0 +1,663 @@
+{
+  "root": "/tmp/wt-js-profile-next",
+  "timing": true,
+  "fixtureCount": 2,
+  "rows": [
+    {
+      "name": "repeated-arithmetic",
+      "cse": false,
+      "constantFold": false,
+      "nodes": 9,
+      "exactNodeReads": 11,
+      "emissionVisits": 9,
+      "preparedRootIdentical": true,
+      "codeSha256": "c06f32a93e1de59cdc4dd81aac7874beead6696fafbf5d729c41b818666c16b6",
+      "values": [
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": false
+          },
+          "value": 0.8438582128147682
+        },
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": true
+          },
+          "value": 0.8438582128147682
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": false
+          },
+          "value": 1.380426876732927
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": true
+          },
+          "value": 1.380426876732927
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": false
+          },
+          "value": 1
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": true
+          },
+          "value": 1
+        }
+      ],
+      "trials": [
+        {
+          "legacy": 0.5472167000000013,
+          "experimental": 0.37975420000000215
+        },
+        {
+          "experimental": 0.3542833999999971,
+          "legacy": 0.3610042000000021
+        },
+        {
+          "legacy": 0.42564170000000556,
+          "experimental": 0.5194374999999922
+        },
+        {
+          "experimental": 0.25772499999999354,
+          "legacy": 0.24594580000000404
+        },
+        {
+          "legacy": 0.20779999999999746,
+          "experimental": 0.21879579999999804
+        }
+      ]
+    },
+    {
+      "name": "repeated-arithmetic",
+      "cse": false,
+      "constantFold": true,
+      "nodes": 9,
+      "exactNodeReads": 11,
+      "emissionVisits": 9,
+      "preparedRootIdentical": true,
+      "codeSha256": "c06f32a93e1de59cdc4dd81aac7874beead6696fafbf5d729c41b818666c16b6",
+      "values": [
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": false
+          },
+          "value": 0.8438582128147682
+        },
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": true
+          },
+          "value": 0.8438582128147682
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": false
+          },
+          "value": 1.380426876732927
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": true
+          },
+          "value": 1.380426876732927
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": false
+          },
+          "value": 1
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": true
+          },
+          "value": 1
+        }
+      ],
+      "trials": [
+        {
+          "legacy": 0.3944707999999991,
+          "experimental": 0.4087166000000025
+        },
+        {
+          "experimental": 0.4422625000000039,
+          "legacy": 0.22817919999999958
+        },
+        {
+          "legacy": 0.4628459000000021,
+          "experimental": 0.46004159999999955
+        },
+        {
+          "experimental": 0.4120584000000008,
+          "legacy": 0.45429160000001045
+        },
+        {
+          "legacy": 0.21317909999999074,
+          "experimental": 0.22815839999999526
+        }
+      ]
+    },
+    {
+      "name": "repeated-arithmetic",
+      "cse": true,
+      "constantFold": false,
+      "nodes": 9,
+      "exactNodeReads": 11,
+      "emissionVisits": 9,
+      "preparedRootIdentical": true,
+      "codeSha256": "c06f32a93e1de59cdc4dd81aac7874beead6696fafbf5d729c41b818666c16b6",
+      "values": [
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": false
+          },
+          "value": 0.8438582128147682
+        },
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": true
+          },
+          "value": 0.8438582128147682
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": false
+          },
+          "value": 1.380426876732927
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": true
+          },
+          "value": 1.380426876732927
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": false
+          },
+          "value": 1
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": true
+          },
+          "value": 1
+        }
+      ],
+      "trials": [
+        {
+          "legacy": 0.27286659999999757,
+          "experimental": 0.23737499999999728
+        },
+        {
+          "experimental": 0.26062500000000455,
+          "legacy": 0.5038332999999966
+        },
+        {
+          "legacy": 0.2107250000000022,
+          "experimental": 0.22269999999999754
+        },
+        {
+          "experimental": 0.20552920000000086,
+          "legacy": 0.4586500000000001
+        },
+        {
+          "legacy": 0.3526665999999977,
+          "experimental": 0.36619590000000246
+        }
+      ]
+    },
+    {
+      "name": "repeated-arithmetic",
+      "cse": true,
+      "constantFold": true,
+      "nodes": 9,
+      "exactNodeReads": 11,
+      "emissionVisits": 9,
+      "preparedRootIdentical": true,
+      "codeSha256": "c06f32a93e1de59cdc4dd81aac7874beead6696fafbf5d729c41b818666c16b6",
+      "values": [
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": false
+          },
+          "value": 0.8438582128147682
+        },
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": true
+          },
+          "value": 0.8438582128147682
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": false
+          },
+          "value": 1.380426876732927
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": true
+          },
+          "value": 1.380426876732927
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": false
+          },
+          "value": 1
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": true
+          },
+          "value": 1
+        }
+      ],
+      "trials": [
+        {
+          "legacy": 0.18970410000000584,
+          "experimental": 0.3652790999999979
+        },
+        {
+          "experimental": 0.35872920000000474,
+          "legacy": 0.333137499999998
+        },
+        {
+          "legacy": 0.3469165999999973,
+          "experimental": 0.20923330000000534
+        },
+        {
+          "experimental": 0.18638749999998935,
+          "legacy": 0.21109579999999822
+        },
+        {
+          "legacy": 0.38426249999999984,
+          "experimental": 0.3822791999999936
+        }
+      ]
+    },
+    {
+      "name": "lazy-radical",
+      "cse": false,
+      "constantFold": false,
+      "nodes": 6,
+      "exactNodeReads": 10,
+      "emissionVisits": 6,
+      "preparedRootIdentical": true,
+      "codeSha256": "30359ed65eb2eb3a0d806acabbcd6f43b7ffa66f9b4e5c7713f6d24da545b27f",
+      "values": [
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": false
+          },
+          "value": -2
+        },
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": true
+          },
+          "value": 2
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": false
+          },
+          "value": -3
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": true
+          },
+          "value": "NaN"
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": false
+          },
+          "value": 2
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": true
+          },
+          "value": 0
+        }
+      ],
+      "trials": [
+        {
+          "legacy": 0.15501669999999876,
+          "experimental": 0.3870832999999948
+        },
+        {
+          "experimental": 0.24547079999999824,
+          "legacy": 0.25367080000000897
+        },
+        {
+          "legacy": 0.23888749999999845,
+          "experimental": 0.27175419999999806
+        },
+        {
+          "experimental": 0.1485541000000012,
+          "legacy": 0.1932790999999952
+        },
+        {
+          "legacy": 0.18124169999999823,
+          "experimental": 0.21692079999999123
+        }
+      ]
+    },
+    {
+      "name": "lazy-radical",
+      "cse": false,
+      "constantFold": true,
+      "nodes": 6,
+      "exactNodeReads": 10,
+      "emissionVisits": 6,
+      "preparedRootIdentical": true,
+      "codeSha256": "30359ed65eb2eb3a0d806acabbcd6f43b7ffa66f9b4e5c7713f6d24da545b27f",
+      "values": [
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": false
+          },
+          "value": -2
+        },
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": true
+          },
+          "value": 2
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": false
+          },
+          "value": -3
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": true
+          },
+          "value": "NaN"
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": false
+          },
+          "value": 2
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": true
+          },
+          "value": 0
+        }
+      ],
+      "trials": [
+        {
+          "legacy": 0.12967919999999822,
+          "experimental": 0.1379374999999982
+        },
+        {
+          "experimental": 0.13529579999999441,
+          "legacy": 0.129262499999993
+        },
+        {
+          "legacy": 0.255337499999996,
+          "experimental": 0.19755000000000109
+        },
+        {
+          "experimental": 0.14153330000000325,
+          "legacy": 0.12200419999999212
+        },
+        {
+          "legacy": 0.11950830000000678,
+          "experimental": 0.12313330000000633
+        }
+      ]
+    },
+    {
+      "name": "lazy-radical",
+      "cse": true,
+      "constantFold": false,
+      "nodes": 6,
+      "exactNodeReads": 10,
+      "emissionVisits": 6,
+      "preparedRootIdentical": true,
+      "codeSha256": "30359ed65eb2eb3a0d806acabbcd6f43b7ffa66f9b4e5c7713f6d24da545b27f",
+      "values": [
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": false
+          },
+          "value": -2
+        },
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": true
+          },
+          "value": 2
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": false
+          },
+          "value": -3
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": true
+          },
+          "value": "NaN"
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": false
+          },
+          "value": 2
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": true
+          },
+          "value": 0
+        }
+      ],
+      "trials": [
+        {
+          "legacy": 0.23087080000000243,
+          "experimental": 0.24413749999999937
+        },
+        {
+          "experimental": 0.2629041999999913,
+          "legacy": 0.14353330000000142
+        },
+        {
+          "legacy": 0.1373334,
+          "experimental": 0.14205409999999574
+        },
+        {
+          "experimental": 0.13953749999999446,
+          "legacy": 0.26061249999999064
+        },
+        {
+          "legacy": 0.18135409999999866,
+          "experimental": 0.15053330000000642
+        }
+      ]
+    },
+    {
+      "name": "lazy-radical",
+      "cse": true,
+      "constantFold": true,
+      "nodes": 6,
+      "exactNodeReads": 10,
+      "emissionVisits": 6,
+      "preparedRootIdentical": true,
+      "codeSha256": "30359ed65eb2eb3a0d806acabbcd6f43b7ffa66f9b4e5c7713f6d24da545b27f",
+      "values": [
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": false
+          },
+          "value": -2
+        },
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": true
+          },
+          "value": 2
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": false
+          },
+          "value": -3
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": true
+          },
+          "value": "NaN"
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": false
+          },
+          "value": 2
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": true
+          },
+          "value": 0
+        }
+      ],
+      "trials": [
+        {
+          "legacy": 0.14039999999999964,
+          "experimental": 0.14669999999999844
+        },
+        {
+          "experimental": 0.2580041000000051,
+          "legacy": 0.23348330000000034
+        },
+        {
+          "legacy": 0.1985541000000012,
+          "experimental": 0.25838340000000243
+        },
+        {
+          "experimental": 0.2328625000000102,
+          "legacy": 0.24750420000000303
+        },
+        {
+          "legacy": 0.24598330000000032,
+          "experimental": 0.1509290999999962
+        }
+      ]
+    }
+  ]
+}

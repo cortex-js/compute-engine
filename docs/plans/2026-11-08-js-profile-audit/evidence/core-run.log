@@ -1,0 +1,124 @@
+Compilation fallback for "Mandelbrot" (target: interval-js): Could not compile `Mandelbrot`: the operator is known to the engine but target 'interval-javascript' has no lowering for it.
+showcase/mandelbrot-set: 1 series, 89 ms
+Compilation fallback for "Mandelbrot" (target: interval-js): Could not compile `Mandelbrot`: the operator is known to the engine but target 'interval-javascript' has no lowering for it.
+showcase/mandelbrot-colorings: 1 series, 220 ms
+showcase/burning-ship: 1 series, 112 ms (prelude: 1 names, 25 ms)
+showcase/multibrot: 1 series, 86 ms (prelude: 1 names, 8 ms)
+showcase/buddhabrot: 1 series, 613 ms (prelude: 6 names, 476 ms)
+showcase/julia-set: 1 series, 114 ms (prelude: 5 names, 20 ms)
+showcase/rainbow-trig: 6 series, 17 ms
+showcase/polar-roses: 1 series, 14 ms
+showcase/damped-oscillation: 3 series, 16 ms
+showcase/domain-coloring: 1 series, 12 ms
+showcase/wave-interference: 1 series, 14 ms
+showcase/spherical-harmonics: 1 series, 12 ms
+showcase/implicit-heart: 1 series, 13 ms
+showcase/contour-landscape: 1 series, 14 ms
+showcase/mobius-strip: 1 series, 10 ms
+showcase/spiral-galaxy: 2 series, 16 ms
+showcase/saddle-surface: 1 series, 9 ms
+showcase/butterfly-curve: 1 series, 23 ms
+showcase/lissajous-family: 1 series, 11 ms
+showcase/conchoid-of-sluze: 2 series, 12 ms
+showcase/superellipse-family: 1 series, 11 ms
+showcase/fourier-harmonics: 3 series, 12 ms
+showcase/implicit-bouquet: 3 series, 16 ms
+showcase/buck-boost-converter: 3 series, 15 ms
+showcase/kernel-functions: 5 series, 20 ms
+showcase/klein-bottle: 1 series, 11 ms
+showcase/boys-surface: 1 series, 12 ms
+showcase/roman-surface: 1 series, 9 ms
+showcase/cross-cap: 1 series, 9 ms
+showcase/trefoil-knot: 1 series, 8 ms
+showcase/seashell: 1 series, 11 ms
+showcase/double-helix: 3 series, 9 ms
+showcase/torus-knot-family: 3 series, 14 ms
+showcase/frenet-frame: 5 series, 190 ms
+showcase/iris-clusters: 3 series, 8 ms
+showcase/hr-diagram: 1 series, 7 ms
+showcase/geyser-eruptions: 1 series, 7 ms
+showcase/normal-density: 2 series, 11 ms
+showcase/geyser-wait-times: 1 series, 7 ms
+showcase/monthly-rainfall: 1 series, 7 ms
+showcase/exam-scores-by-section: 1 series, 7 ms
+showcase/tych-stock-series: 1 series, 8 ms
+showcase/limacon-family: 1 series, 10 ms
+showcase/dipole-field: 1 series, 12 ms
+showcase/gaussian-explorer: 1 series, 13 ms
+showcase/lagrange-points: 5 series, 266 ms
+showcase/plasma-effect: 1 series, 63 ms
+showcase/creation-shader: 1 series, 123 ms
+showcase/cie-chromaticity: 3 series, 156 ms
+showcase/game-of-life: 1 series, 77 ms (prelude: 4 names, 36 ms)
+showcase/exoplanet-transit: 8 series, 515 ms
+showcase/complex-trig-sum: 1 series, 18 ms
+showcase/voronoi-diagram: 1 series, 681 ms
+showcase/rainbow-refraction: 14 series, 356 ms
+showcase/metaballs: 1 series, 61 ms
+showcase/frenet-knot-tube: 5 series, 308 ms
+showcase/poly-banana: 3 series, 51 ms
+showcase/platonic-solids: 10 series, 42 ms
+showcase/three-body-problem: 6 series, 105 ms
+showcase/lorenz-attractor: 2 series, 164 ms
+showcase/kelvin-wake: 4 series, 99 ms
+showcase/underwater-caustics: 3 series, 160 ms
+showcase/vibrating-drum: 2 series, 12 ms
+showcase/joukowsky-airfoil: 3 series, 1404 ms
+showcase/greek-wave-frieze: 1 series, 116 ms
+showcase/gyroid: 1 series, 33 ms
+showcase/apollonian-gasket: 7 series, 214 ms (prelude: 38 names, 138 ms)
+showcase/spirograph: 7 series, 108 ms
+showcase/whirling-squares: 3 series, 96 ms
+showcase/projectile-with-drag: 5 series, 180 ms
+showcase/predator-prey: 5 series, 143 ms
+showcase/elliptic-curve-group-law: 7 series, 38 ms
+showcase/droste-effect: 3 series, 123 ms
+Compilation fallback for "Comprehension" (target: javascript): Could not compile "Which(4 <= floor(1/15 * (n - 1)) + mod(n - 1, 15) <= 24, [Which(4 < ElementMin(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15)), 4, "True", ElementMin(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15))),Which(ElementMax(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15)) < 10, 0, "True", 10 - ElementMax(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15)))], "True", -1)": a `compile` handler wrote its code, but its type, integer | vector<integer^2>, admits values of different shapes (for example a number and a list), and the code of its consumer, which no handler wrote, would know its shape only at run time. Give the node a type of one shape (for example with a type handler on the definition of its operator), or write the code of the consumer with a `compile` handler too.
+Compilation fallback for "Comprehension" (target: javascript): Could not compile "Which(2 <= -mod(n - 1, 15) + floor(1/15 * (n - 1)) + 14 <= 26, [Which(2 < ElementMin(floor(1/15 * (n - 1)), mod(n - 1, 15)), 2, "True", ElementMin(floor(1/15 * (n - 1)), mod(n - 1, 15))),Which(ElementMax(floor(1/15 * (n - 1)), mod(n - 1, 15)) < 12, 0, "True", 12 - ElementMax(floor(1/15 * (n - 1)), mod(n - 1, 15)))], "True", -1)": a `compile` handler wrote its code, but its type, integer | vector<integer^2>, admits values of different shapes (for example a number and a list), and the code of its consumer, which no handler wrote, would know its shape only at run time. Give the node a type of one shape (for example with a type handler on the definition of its operator), or write the code of the consumer with a `compile` handler too.
+Compilation fallback for "Comprehension" (target: javascript): Could not compile "Which(2 <= floor(1/15 * (n - 1)) + mod(n - 1, 15) <= 26, [Which(2 < ElementMin(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15)), 2, "True", ElementMin(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15))),Which(ElementMax(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15)) < 12, 0, "True", 12 - ElementMax(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15)))], "True", -1)": a `compile` handler wrote its code, but its type, integer | vector<integer^2>, admits values of different shapes (for example a number and a list), and the code of its consumer, which no handler wrote, would know its shape only at run time. Give the node a type of one shape (for example with a type handler on the definition of its operator), or write the code of the consumer with a `compile` handler too.
+Compilation fallback for "Comprehension" (target: javascript): Could not compile "Which(3 <= -mod(n - 1, 15) + floor(1/15 * (n - 1)) + 14 <= 25, [Which(3 < ElementMin(floor(1/15 * (n - 1)), mod(n - 1, 15)), 3, "True", ElementMin(floor(1/15 * (n - 1)), mod(n - 1, 15))),Which(ElementMax(floor(1/15 * (n - 1)), mod(n - 1, 15)) < 11, 0, "True", 11 - ElementMax(floor(1/15 * (n - 1)), mod(n - 1, 15)))], "True", -1)": a `compile` handler wrote its code, but its type, integer | vector<integer^2>, admits values of different shapes (for example a number and a list), and the code of its consumer, which no handler wrote, would know its shape only at run time. Give the node a type of one shape (for example with a type handler on the definition of its operator), or write the code of the consumer with a `compile` handler too.
+Compilation fallback for "Comprehension" (target: javascript): Could not compile "Which(3 <= floor(1/15 * (n - 1)) + mod(n - 1, 15) <= 25, [Which(3 < ElementMin(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15)), 3, "True", ElementMin(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15))),Which(ElementMax(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15)) < 11, 0, "True", 11 - ElementMax(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15)))], "True", -1)": a `compile` handler wrote its code, but its type, integer | vector<integer^2>, admits values of different shapes (for example a number and a list), and the code of its consumer, which no handler wrote, would know its shape only at run time. Give the node a type of one shape (for example with a type handler on the definition of its operator), or write the code of the consumer with a `compile` handler too.
+Compilation fallback for "Comprehension" (target: javascript): Could not compile "Which(2 <= -mod(n - 1, 15) + floor(1/15 * (n - 1)) + 14 <= 26, [Which(2 < ElementMin(floor(1/15 * (n - 1)), mod(n - 1, 15)), 2, "True", ElementMin(floor(1/15 * (n - 1)), mod(n - 1, 15))),Which(ElementMax(floor(1/15 * (n - 1)), mod(n - 1, 15)) < 12, 0, "True", 12 - ElementMax(floor(1/15 * (n - 1)), mod(n - 1, 15)))], "True", -1)": a `compile` handler wrote its code, but its type, integer | vector<integer^2>, admits values of different shapes (for example a number and a list), and the code of its consumer, which no handler wrote, would know its shape only at run time. Give the node a type of one shape (for example with a type handler on the definition of its operator), or write the code of the consumer with a `compile` handler too.
+Compilation fallback for "Comprehension" (target: javascript): Could not compile "Which(2 <= floor(1/15 * (n - 1)) + mod(n - 1, 15) <= 26, [Which(2 < ElementMin(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15)), 2, "True", ElementMin(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15))),Which(ElementMax(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15)) < 12, 0, "True", 12 - ElementMax(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15)))], "True", -1)": a `compile` handler wrote its code, but its type, integer | vector<integer^2>, admits values of different shapes (for example a number and a list), and the code of its consumer, which no handler wrote, would know its shape only at run time. Give the node a type of one shape (for example with a type handler on the definition of its operator), or write the code of the consumer with a `compile` handler too.
+Compilation fallback for "Comprehension" (target: javascript): Could not compile "Which(3 <= -mod(n - 1, 15) + floor(1/15 * (n - 1)) + 14 <= 25, [Which(3 < ElementMin(floor(1/15 * (n - 1)), mod(n - 1, 15)), 3, "True", ElementMin(floor(1/15 * (n - 1)), mod(n - 1, 15))),Which(ElementMax(floor(1/15 * (n - 1)), mod(n - 1, 15)) < 11, 0, "True", 11 - ElementMax(floor(1/15 * (n - 1)), mod(n - 1, 15)))], "True", -1)": a `compile` handler wrote its code, but its type, integer | vector<integer^2>, admits values of different shapes (for example a number and a list), and the code of its consumer, which no handler wrote, would know its shape only at run time. Give the node a type of one shape (for example with a type handler on the definition of its operator), or write the code of the consumer with a `compile` handler too.
+Compilation fallback for "Comprehension" (target: javascript): Could not compile "Which(3 <= floor(1/15 * (n - 1)) + mod(n - 1, 15) <= 25, [Which(3 < ElementMin(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15)), 3, "True", ElementMin(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15))),Which(ElementMax(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15)) < 11, 0, "True", 11 - ElementMax(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15)))], "True", -1)": a `compile` handler wrote its code, but its type, integer | vector<integer^2>, admits values of different shapes (for example a number and a list), and the code of its consumer, which no handler wrote, would know its shape only at run time. Give the node a type of one shape (for example with a type handler on the definition of its operator), or write the code of the consumer with a `compile` handler too.
+Compilation fallback for "Comprehension" (target: javascript): Could not compile "Which(4 <= -mod(n - 1, 15) + floor(1/15 * (n - 1)) + 14 <= 24, [Which(4 < ElementMin(floor(1/15 * (n - 1)), mod(n - 1, 15)), 4, "True", ElementMin(floor(1/15 * (n - 1)), mod(n - 1, 15))),Which(ElementMax(floor(1/15 * (n - 1)), mod(n - 1, 15)) < 10, 0, "True", 10 - ElementMax(floor(1/15 * (n - 1)), mod(n - 1, 15)))], "True", -1)": a `compile` handler wrote its code, but its type, integer | vector<integer^2>, admits values of different shapes (for example a number and a list), and the code of its consumer, which no handler wrote, would know its shape only at run time. Give the node a type of one shape (for example with a type handler on the definition of its operator), or write the code of the consumer with a `compile` handler too.
+Compilation fallback for "Comprehension" (target: javascript): Could not compile "Which(4 <= floor(1/15 * (n - 1)) + mod(n - 1, 15) <= 24, [Which(4 < ElementMin(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15)), 4, "True", ElementMin(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15))),Which(ElementMax(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15)) < 10, 0, "True", 10 - ElementMax(floor(1/15 * (n - 1)), 14 - mod(n - 1, 15)))], "True", -1)": a `compile` handler wrote its code, but its type, integer | vector<integer^2>, admits values of different shapes (for example a number and a list), and the code of its consumer, which no handler wrote, would know its shape only at run time. Give the node a type of one shape (for example with a type handler on the definition of its operator), or write the code of the consumer with a `compile` handler too.
+art/khpocp8io0: 65 rows, 2 series, 20235 ms
+art/0ugzbaxw5r: 2 rows, 1 series, 13 ms
+art/1e9rxgmywb: 1 rows, 1 series, 14 ms
+art/4d3e41rzzg: 1 rows, 1 series, 9 ms
+art/djwfum6pke: 2 rows, 1 series, 11 ms
+art/eabbyqpnsu: 1 rows, 1 series, 8 ms
+art/f89lxd37ck: 1 rows, 1 series, 8 ms
+art/bdkswbqr6x: 1 rows, 1 series, 10 ms
+art/cc5cm3oeut: 2 rows, 1 series, 10 ms
+neyret/8m6fnxvzkp: 3 rows, 1 series, 54 ms
+neyret/iiypd8tktp: 4 rows, 1 series, 40 ms
+art/3ghyal8swu: 1 rows, 1 series, 11 ms
+neyret/dzrqmexxik: 2 rows, 3 series, 32 ms
+neyret/zstlwmmpkp: 13 rows, 72 series, 942 ms
+neyret/oeupgr064p: 15 rows, 5 series, 230 ms
+neyret/erjj08ecii: 1 rows, 1 series, 15 ms
+neyret/1dee4lkte2: 5 rows, 23 series, 160 ms
+neyret/qm6cgwyusu: 4 rows, 3 series, 65 ms
+neyret/7s0gi97blp: 3 rows, 1 series, 42 ms
+neyret/rccfsvo93r: 6 rows, 6 series, 107 ms
+neyret/62urmx2dcm: 9 rows, 2 series, 1321 ms
+art/n7uhaaoq1q: 58 rows, 103 series, 650 ms
+art/hyvhlz4chj: 21 rows, 13 series, 506 ms
+Compilation fallback for "Add" (target: glsl): Could not compile `List`: a constant collection of 9801 elements is above the 256 elements a shader array constructor takes on this target. Ship the collection as a texture (a `storage: sampler2D` input, read with `At`) instead.
+Compilation fallback for "Add" (target: glsl): Could not compile `List`: a constant collection of 9801 elements is above the 256 elements a shader array constructor takes on this target. Ship the collection as a texture (a `storage: sampler2D` input, read with `At`) instead.
+Compilation fallback for "Add" (target: glsl): Could not compile `List`: a constant collection of 9801 elements is above the 256 elements a shader array constructor takes on this target. Ship the collection as a texture (a `storage: sampler2D` input, read with `At`) instead.
+Compilation fallback for "Add" (target: glsl): Could not compile `List`: a constant collection of 9801 elements is above the 256 elements a shader array constructor takes on this target. Ship the collection as a texture (a `storage: sampler2D` input, read with `At`) instead.
+Compilation fallback for "Add" (target: glsl): Could not compile `List`: a constant collection of 9801 elements is above the 256 elements a shader array constructor takes on this target. Ship the collection as a texture (a `storage: sampler2D` input, read with `At`) instead.
+Compilation fallback for "Add" (target: glsl): Could not compile `List`: a constant collection of 9801 elements is above the 256 elements a shader array constructor takes on this target. Ship the collection as a texture (a `storage: sampler2D` input, read with `At`) instead.
+Compilation fallback for "Add" (target: glsl): Could not compile `List`: a constant collection of 9801 elements is above the 256 elements a shader array constructor takes on this target. Ship the collection as a texture (a `storage: sampler2D` input, read with `At`) instead.
+neyret/1a9de333a1: 9 rows, 7 series, 1293 ms
+
+1316 compile calls, 1101 distinct records, 97 documents
+sliders with a range promise (ROADMAP DZ): 67 of 67 with a domain
+full   → /tmp/js-profile-audit-results/core-full.json
+digest → /tmp/js-profile-audit-results/core-digest.json
+(node:83887) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)

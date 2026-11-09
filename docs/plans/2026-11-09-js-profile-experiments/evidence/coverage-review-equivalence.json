@@ -1,0 +1,9 @@
+{
+  "equal": true,
+  "records": 144,
+  "excluded": [
+    "durationMs",
+    "maxDurationMs",
+    "id"
+  ]
+}

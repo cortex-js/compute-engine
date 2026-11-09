@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import {ComputeEngine} from '@cortex-js/compute-engine';
+import {observedConstructor,inspectProfile,installPublicObserver} from './profile-coverage-capture.mts';
+const CE=observedConstructor(ComputeEngine);const ce=new CE();
+ce.assign('g',ce.box(['Function',['Block',['Loop',['Break',1],['Element','i',['Range',1,3]]],2],'x']));
+ce.assign('f',ce.box(['Function',['g','x'],'x']));
+const hidden=inspectProfile(ce.box(['f',2]));
+assert(hidden.heads.Loop,'transitive g loop captured');
+const host=inspectProfile(ce.box(['Sin',2]),{functions:{Sin:'hostSin'}});
+assert(host.unknown.includes('host-override:Sin'));
+ce.declare('a','real');ce.assign('a',3);
+ce.assign('captured',ce.box(['Function',['Add','a','x'],'x']));
+const before=ce.box(['captured',2]);
+ce.pushScope();ce.declare('a','real');ce.assign('a',9);
+const shadow=inspectProfile(before);ce.popScope();
+assert(shadow.symbols.some((s:any)=>s.name==='a'&&!s.ambientAgrees),'captured binding is not current same-name binding');
+assert(shadow.functions.some((f:any)=>f.name==='captured'));
+console.log(JSON.stringify({hidden,host,shadow},null,2));
+
+const restore=installPublicObserver(ComputeEngine);
+try {const direct=new ComputeEngine();direct.box(['DefineFunction','directHidden',['Function',['Block',['Loop',['Break',1],['Element','i',['Range',1,2]]],2],'x']]).evaluate();const captured=inspectProfile(direct.box(['directHidden',2]));assert(captured.heads.Loop,'direct constructor body captured');console.error('direct-constructor control passed');}finally{restore();}
+assert(!inspectProfile(ce.box(['Typed',2,{str:'real'}])).outside.includes('runtime-string'));
+assert(inspectProfile(ce.box({str:'hello'})).outside.includes('runtime-string'));
+ce.assign('same',ce.box(['Function',['Add','x',1],'x']));
+const globalCall=ce.box(['same',2]);
+const originalBody=inspectProfile(globalCall).functions.find((f:any)=>f.name==='same')?.bodyHash;
+assert(originalBody,'global definition provenance exists before local traversal');
+ce.pushScope();ce.declare('same','(real) -> real');
+const localDefinition=ce.box(['DefineFunction','same',['Function',['Multiply','x',7],'x']]);
+ce.popScope();
+inspectProfile(localDefinition);
+assert.equal(inspectProfile(globalCall).functions.find((f:any)=>f.name==='same')?.bodyHash,originalBody,'walking local definition does not overwrite ambient function provenance');

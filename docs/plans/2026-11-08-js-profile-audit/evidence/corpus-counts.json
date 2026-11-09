@@ -1,0 +1,309 @@
+{
+  "tests/fixtures/ce-codegen/ce-0.184.0.json": {
+    "generatedAt": "2026-11-08T23:57:41.281Z",
+    "computeEngine": "0.184.0",
+    "tychoCommit": "a40372202",
+    "desmosScope": "core",
+    "shape": "digest",
+    "sha256": "5af5ac0b1a49f599bfb938e778ae2478f493dc6da6fb94d51dd03b95ca7e80b7",
+    "documents": 97,
+    "records": 1101,
+    "occurrences": 1316,
+    "by_target": {
+      "glsl": {
+        "records": 209,
+        "success": 202,
+        "failed": 7,
+        "occurrences": 222,
+        "modes": {
+          "strict": 209
+        },
+        "requestedModes": {
+          "absent": 209
+        },
+        "distinctInputHashes": 206,
+        "withFreeSymbolTypes": 209,
+        "lowered": {
+          "float": 449,
+          "float[90001]": 2,
+          "vec2": 2,
+          "float[22500]": 1
+        }
+      },
+      "interval-js": {
+        "records": 180,
+        "success": 179,
+        "failed": 1,
+        "occurrences": 231,
+        "modes": {
+          "strict": 180
+        },
+        "requestedModes": {
+          "absent": 180
+        },
+        "distinctInputHashes": 180,
+        "withFreeSymbolTypes": 180,
+        "lowered": {
+          "interval": 444,
+          "array": 2
+        }
+      },
+      "javascript": {
+        "records": 712,
+        "success": 701,
+        "failed": 11,
+        "occurrences": 863,
+        "modes": {
+          "strict": 706,
+          "complex": 6
+        },
+        "requestedModes": {
+          "strict": 667,
+          "absent": 39,
+          "complex": 6
+        },
+        "distinctInputHashes": 711,
+        "withFreeSymbolTypes": 712,
+        "lowered": {
+          "number": 1472,
+          "array": 174,
+          "complex": 2
+        }
+      }
+    },
+    "corpora": {
+      "showcase": 414,
+      "art": 241,
+      "neyret": 446
+    },
+    "preludes": [
+      {
+        "corpus": "showcase",
+        "doc": "burning-ship",
+        "rows": 1,
+        "series": 1,
+        "ms": 111,
+        "prelude": {
+          "ran": true,
+          "valid": true,
+          "names": [
+            "B"
+          ],
+          "diagnostics": [],
+          "runMs": 26
+        }
+      },
+      {
+        "corpus": "showcase",
+        "doc": "multibrot",
+        "rows": 2,
+        "series": 1,
+        "ms": 83,
+        "prelude": {
+          "ran": true,
+          "valid": true,
+          "names": [
+            "M"
+          ],
+          "diagnostics": [],
+          "runMs": 7
+        }
+      },
+      {
+        "corpus": "showcase",
+        "doc": "buddhabrot",
+        "rows": 2,
+        "series": 1,
+        "ms": 635,
+        "prelude": {
+          "ran": true,
+          "valid": true,
+          "names": [
+            "N",
+            "H_0",
+            "step",
+            "H_1",
+            "tone",
+            "c"
+          ],
+          "diagnostics": [],
+          "runMs": 472
+        }
+      },
+      {
+        "corpus": "showcase",
+        "doc": "julia-set",
+        "rows": 1,
+        "series": 1,
+        "ms": 111,
+        "prelude": {
+          "ran": true,
+          "valid": true,
+          "names": [
+            "J",
+            "pick",
+            "seg",
+            "channel",
+            "shade"
+          ],
+          "diagnostics": [],
+          "runMs": 20
+        }
+      },
+      {
+        "corpus": "showcase",
+        "doc": "game-of-life",
+        "rows": 2,
+        "series": 1,
+        "ms": 74,
+        "prelude": {
+          "ran": true,
+          "valid": true,
+          "names": [
+            "N",
+            "P",
+            "S_0",
+            "life"
+          ],
+          "diagnostics": [],
+          "runMs": 34
+        }
+      },
+      {
+        "corpus": "showcase",
+        "doc": "apollonian-gasket",
+        "rows": 0,
+        "series": 7,
+        "ms": 221,
+        "prelude": {
+          "ran": true,
+          "valid": true,
+          "names": [
+            "minR",
+            "csqrt",
+            "fourth",
+            "tangent",
+            "seen",
+            "admitted",
+            "fill",
+            "outer",
+            "right",
+            "left",
+            "top",
+            "bottom",
+            "circles",
+            "generations",
+            "G_1",
+            "G_2",
+            "G_3",
+            "G_4",
+            "G_5",
+            "G_6",
+            "X_1",
+            "Y_1",
+            "K_1",
+            "X_2",
+            "Y_2",
+            "K_2",
+            "X_3",
+            "Y_3",
+            "K_3",
+            "X_4",
+            "Y_4",
+            "K_4",
+            "X_5",
+            "Y_5",
+            "K_5",
+            "X_6",
+            "Y_6",
+            "K_6"
+          ],
+          "diagnostics": [],
+          "runMs": 146
+        }
+      }
+    ],
+    "docErrors": []
+  },
+  "_TASK/desmos/desmos-corpus/codegen-audit/ce-0.184.0-all.json": {
+    "generatedAt": "2026-11-08T22:55:55.408Z",
+    "computeEngine": "0.184.0",
+    "tychoCommit": "9d75660ed",
+    "desmosScope": "all",
+    "shape": "full",
+    "sha256": "d13958d770884ebdb942a7b7305eaa37789b23a6a0d347a3c3923a3581e1ea4e",
+    "documents": 761,
+    "records": 17343,
+    "occurrences": 22229,
+    "by_target": {
+      "glsl": {
+        "records": 3657,
+        "success": 3605,
+        "failed": 52,
+        "occurrences": 4323,
+        "modes": {
+          "strict": 3657
+        },
+        "requestedModes": {
+          "absent": 3657
+        },
+        "distinctInputHashes": 3608,
+        "withFreeSymbolTypes": 3657,
+        "lowered": {
+          "float": 7834,
+          "vec2": 4,
+          "array": 1
+        }
+      },
+      "interval-js": {
+        "records": 4819,
+        "success": 4753,
+        "failed": 66,
+        "occurrences": 6466,
+        "modes": {
+          "strict": 4819
+        },
+        "requestedModes": {
+          "absent": 4819
+        },
+        "distinctInputHashes": 4792,
+        "withFreeSymbolTypes": 4819,
+        "lowered": {
+          "interval": 8785,
+          "array": 2
+        }
+      },
+      "javascript": {
+        "records": 8867,
+        "success": 8817,
+        "failed": 50,
+        "occurrences": 11440,
+        "modes": {
+          "strict": 8542,
+          "complex": 325
+        },
+        "requestedModes": {
+          "strict": 8541,
+          "complex": 326
+        },
+        "distinctInputHashes": 8747,
+        "withFreeSymbolTypes": 8867,
+        "lowered": {
+          "number": 16918,
+          "function": 2,
+          "complex": 4,
+          "array": 899,
+          "point": 176,
+          "color": 1
+        }
+      }
+    },
+    "corpora": {
+      "showcase": 367,
+      "art": 1471,
+      "neyret": 15505
+    },
+    "preludes": [],
+    "docErrors": []
+  }
+}

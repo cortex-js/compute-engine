@@ -1,0 +1,6 @@
+
+Test Suites: 3 passed, 3 total
+Tests:       264 passed, 264 total
+Snapshots:   0 total
+Time:        1.852 s, estimated 3 s
+Ran all test suites matching test/compute-engine/compile-javascript-fragment-experiment.test.ts|test/compute-engine/compile-complex.test.ts|test/compute-engine/compile-which-complex-selection.test.ts.

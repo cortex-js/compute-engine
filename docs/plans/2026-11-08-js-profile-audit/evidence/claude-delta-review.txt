@@ -1,0 +1,55 @@
+I found one medium finding and four low ones. None of them makes the bounded conclusions of the reports wrong. I made no edits, ran no tests and started no agents. I only ran read-only commands: `diff`, `cmp`, and Python that reads the JSON outputs.
+
+## Findings
+
+**1. Medium: the worker report describes a run of an older version of the script.**
+- `buddhabrot-workers.json` was written at 08:07. `profile-workers.mts` was changed at 08:16 (`worker-review-fix.diff`).
+- So all timings, the 36 records, "nine worker exit events" and `cancellation.started` come from `profile-workers-before-review.mts`.
+- The report, at lines 28–34, names the current script as the "exact final command" and says it exited 0. If you run it again, you get a different set of controls: `requestReceived`, the new `unexpectedWorkerError` control, and 10 exit events. The new control does not appear in the report.
+- `buddhabrot-workers.md:87` says "terminates that genuinely busy worker". The fixed comment at `profile-workers.mts:181-182` says the opposite: the "started" signal does not prove that the worker got into the compiled code.
+- The review fixes ran only with `CONTROLS_ONLY=1` (`worker-review-controls.json`, 3 exit events).
+- Fix: say that the measured run used the pre-review script, and keep that script. Say that the fixes were checked only by the controls-only run. Change the wording at lines 87–88. You do not need to run the timings again: the fix changes only the controls and how a worker failure is classified, not the kernel or the merge.
+
+**2. Low (classification): `profile-coverage-capture.mts:141-143`. The `outside` branch for built-in functions can never run.**
+- `baseline` (lines 30, 49) records only the names in the vocabulary.
+- Line 142 needs a head that is *not* in the vocabulary, so `baseline.get(head) === bound` is never true for such a head.
+- So every built-in function outside the vocabulary becomes `opaque-call` (unresolved). In this run that is `Count` ×7 and `Fract` ×1, and `outsideReasons` is `{}`.
+- Already disclosed: `profile-report.md` says that Fract and Count are "unmodeled" and counted as unresolved, so the totals are correct. Still open: the `opaque-call` count puts built-in functions together with unknown user calls, and the category `outside-candidate-vocabulary` can only come from strings and dictionaries.
+- Fix: record the library definition of each head when it is first seen, or rename the reason to `unmodeled-builtin`.
+
+**3. Low, not reached in this run: `profile-coverage-capture.mts:20`, `:123`. A definition is found by its name, not by the definition bound in the node.**
+- `remember()` finds the definition with `ce.lookupDefinition(name)` in the current scope. This contradicts the header at line 3.
+- From `walk` (line 123), a local `DefineFunction` with the same name as a document-level function would give its body to the global definition, or mark that definition ambiguous. The result would then also depend on the order of the records.
+- In this run, no `DefineFunction` head was reached during a walk. The origins are only `assign` (150), `evaluate event` (13) and `literal operand` (7). So the current evidence is not affected.
+- Fix: use `defOf(n.ops[0])` at line 123, or do not call `remember` there.
+
+**4. Low: `profile-coverage-audit.mts:405`. The capture append is inside the compile `try` block.**
+- If `JSON.stringify(captured)` throws, the record shows a compile throw that did not happen, and the compile result is lost.
+- This did not happen in this run: the comparison of the initial and corrected runs gives 144 equal records. Move the append after the `try` block.
+
+**5. Low (wording): `annotation-experiment.md:15-17`.**
+- Admission (`javascript-fragment-experiment.ts:269-271`) accepts only real, integer and boolean facts. So `experimentalOperandIsComplex` is always `false`, and the ten "consulting" sites get a constant that admission fixes.
+- So the byte-identical code shows that the old reader also gives `false` for these fixtures. It does not show that a fact can change a decision.
+- The second Sqrt site (`javascript-target.ts:8716`) uses a fact about the operand to answer a question about the result (whether the result goes to the complex lane). This is correct only because line 254 refuses an operand that is provably negative.
+- "Actual annotation consumption" is shown only as lookups of the same node. Say this in the report, or name the Sqrt site as dependent on admission.
+
+## Limitations already disclosed (not findings)
+- The coverage run has no comparison against an uninstrumented run. The observer patches `box`, `assign` and `evaluate`.
+- Assignment is only a syntax flag (the Block pre-pass at line 117 counts every `Assign` target as local).
+- Types are only counted (for example, `list<any>` passes).
+- Node workers are not a browser test.
+- The annotation experiment covers single-scope identity only.
+
+## Delta review of the prior fixes: no regressions
+- **`structured-ir.mjs`**:
+  - The negative controls now run with CSE on and off.
+  - The loop-carried control now matches its own message, which occurs only once in the file.
+  - The new barrier control fails if line 38 is deleted (the Multiply count would be 1).
+  - The duplicate-Tap control fails if effectful results go into the cache. The guard on line 35 alone does not need a test: an effectful result never goes into the cache (line 39), so the guard cannot change a result.
+- **`buddhabrot-partition`**:
+  - The cursor of each partition's own result is now checked.
+  - The negative control now corrupts the actual merged array. The cursor sum is always different from the serial cursor when there are 2 or more partitions, so the control always fails as intended.
+  - A retry now runs for each partition that has work. A zero-sample case gives `retryExact: false`, so it does not claim a retry.
+- **Prior capture finding 4**: the explanation you plan resolves it. It should also say that comparing the raw signatures needs a new run.
+
+The copies in `/tmp/js-profile-next` are byte-identical to the files that ran in the Tycho worktree. The coverage outputs are newer than the last edit of the coverage scripts. The worker timing JSON is the only output older than its script (finding 1).

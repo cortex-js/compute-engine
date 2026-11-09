@@ -1,0 +1,26 @@
+import { parentPort, workerData } from "node:worker_threads";
+import { createJavaScriptRuntime } from "@cortex-js/compute-engine/runtime";
+import { createHash } from "node:crypto";
+const port = parentPort;
+const LIST_LENGTH = 90001;
+const setupStart = performance.now();
+const runtime = createJavaScriptRuntime();
+const run = runtime.load(workerData.stored);
+const kernel = {run: (histogram, count) => count === 0 ? histogram.slice() : run({histogramInput:histogram,sampleCount:count})};
+port.postMessage({ type: "ready", setupMs: performance.now()-setupStart, codeHash: createHash("sha256").update(workerData.stored.code).digest("hex") });
+port.on("message", (task) => {
+  port.postMessage({ type: "started", requestId: task.requestId });
+  const prepStart = performance.now();
+  const initial = Array(LIST_LENGTH).fill(0);
+  initial[90000] = task.start;
+  const prepareMs = performance.now() - prepStart;
+  const computeStart = performance.now();
+  const result = kernel.run(initial, task.count);
+  const computeMs = performance.now() - computeStart;
+  const packStart = performance.now();
+  const packed = Float64Array.from(result);
+  const packMs = performance.now() - packStart;
+  const deliver = () => port.postMessage({ type: "result", requestId: task.requestId, jobId: task.jobId, chunkId: task.chunkId, start: task.start, count: task.count, prepareMs, computeMs, packMs, buffer: packed.buffer }, [packed.buffer]);
+  if (task.delayReplyMs) setTimeout(deliver, task.delayReplyMs);
+  else deliver();
+});

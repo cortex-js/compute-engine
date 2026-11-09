@@ -1,0 +1,18 @@
+I found no regression that the fixes introduce. I found one packaging gap: the coverage scripts in the package are still the versions from before the review.
+
+**Packaging gap (low): the coverage scripts in `package/instruments/` are the old versions.**
+- `profile-coverage-audit.mts`, `profile-coverage-capture.mts` and `profile-coverage-controls.mts` in `package/instruments/` differ from the corrected files in `/tmp/wt-tycho-profile-next/scripts/`. The packaged `audit` file is byte-identical to `profile-coverage-before-review-audit.mts`.
+- `profile-report.md:46` says that copies of the instruments are next to the report. Today those copies do not contain the fixes or the new negative control.
+- When the queued coverage run finishes, copy the three corrected scripts into `package/instruments/`. Also add the new control (a local `DefineFunction` with the same name as a global one) to the list of controls at `profile-report.md:17`.
+- The worker scripts and `profile-coverage-compare.py` in the package are byte-identical to the corrected copies, so they need no change.
+
+**What I checked (no findings):**
+- **`profile-coverage-capture.mts:123`**: the walk no longer records a definition when it reaches a `DefineFunction`. The definitions are now recorded only when the expression is boxed, when it is assigned, and when a `DefineFunction` is evaluated. A function defined inside a `Block` was already a local name (line 117). So the only effect is that a call can now be classed as unresolved where before it got a wrong body.
+- **`profile-coverage-controls.mts:24-32`**: the new control is a real negative control. With the old line 123, the walk ran `remember` after `popScope`, so the global `same` became "ambiguous" and the function list had no `same`. The `bodyHash` would then be `undefined`, so the assertion would fail.
+- **`profile-coverage-capture.mts:141`**: the merged condition only renames the reason, and the totals stay the same. The summary script groups reasons by the prefix before `:`, so the key becomes `unmodeled-or-opaque-call`. No report text quotes the old key `opaque-call`.
+- **`profile-coverage-audit.mts:377-416`**: a compile error is still thrown again, and the record is still pushed. If the capture append fails now, the error propagates and is no longer recorded as a compile throw. This is the intended change.
+- **`profile-coverage-compare.py`**: it compares only the compile records in `coverage-full.json`, in order, without `id` and the timing fields. The capture fix cannot change these records. The comparison supports what `profile-report.md:17` says, and no more.
+- **Worker fix (`profile-workers.mts`, `profile-workers-entry.mjs`)**: when a worker throws, the `error` handler stores the error before `exit`, so it is not classed as a requested termination. A termination is classed as requested only after `close()` sets `closeRequested`. `CONTROLS_ONLY` skips only the sizes, the pool loop and `cancellationToExitMs`. The kernel and the merge code are unchanged. `evidence/worker-review-controls.json` matches the result of the new control.
+- **Reports**: `buddhabrot-workers.md:28-30` and `:90` now say that the measured run used the archived pre-review scripts. They say that a receipt does not prove that the worker entered the compiled code, and that the 0.41 ms time is not evidence that cancellation works. The archived script is byte-identical to `profile-workers-before-review.mts`. `annotation-experiment.md:17` now says that every complex-lane answer is the constant `false`, and that the Sqrt promotion site is correct only because admission refuses an operand that is provably negative.
+
+I made no edits, ran no tests and started no agents.

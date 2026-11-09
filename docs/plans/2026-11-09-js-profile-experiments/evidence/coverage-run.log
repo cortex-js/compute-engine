@@ -1,0 +1,22 @@
+showcase/burning-ship: 1 series, 252 ms (prelude: 1 names, 31 ms)
+showcase/multibrot: 1 series, 106 ms (prelude: 1 names, 9 ms)
+showcase/buddhabrot: 1 series, 669 ms (prelude: 6 names, 497 ms)
+showcase/julia-set: 1 series, 130 ms (prelude: 5 names, 24 ms)
+showcase/rainbow-trig: 6 series, 19 ms
+showcase/damped-oscillation: 3 series, 16 ms
+showcase/domain-coloring: 1 series, 11 ms
+showcase/implicit-heart: 1 series, 13 ms
+showcase/fourier-harmonics: 3 series, 14 ms
+showcase/game-of-life: 1 series, 87 ms (prelude: 4 names, 37 ms)
+showcase/metaballs: 1 series, 109 ms
+showcase/frenet-knot-tube: 5 series, 447 ms
+showcase/three-body-problem: 6 series, 153 ms
+showcase/apollonian-gasket: 7 series, 269 ms (prelude: 38 names, 173 ms)
+showcase/projectile-with-drag: 5 series, 183 ms
+
+154 compile calls, 144 distinct records, 15 documents
+sliders with a range promise (ROADMAP DZ): 5 of 5 with a domain
+full   → /tmp/js-profile-next/coverage-full.json
+digest → /tmp/js-profile-next/coverage-digest.json
+(node:58429) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)

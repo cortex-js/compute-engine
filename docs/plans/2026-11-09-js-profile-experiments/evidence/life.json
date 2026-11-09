@@ -1,0 +1,733 @@
+{
+  "before": {
+    "state": {
+      "type": "list<integer>",
+      "valueType": "vector<integer^22500>",
+      "operator": "List",
+      "hash": "f0b96e018a51c1e433f6ed9191e235e5dc0fbd68f2e4a5db8d34a9ebb43861d7",
+      "length": 22500
+    },
+    "reader": {
+      "phase": "load",
+      "observation": "authored reader in live manager binding, not product renderer gateway",
+      "target": "javascript",
+      "mode": "strict",
+      "inputHash": "6db83a595feca06fe50e7804b3977967d2a9c13225807e52b4572fa874f7e6ac",
+      "resultType": "integer",
+      "classification": "candidate-syntax-only",
+      "heads": {
+        "At": 1,
+        "Symbol": 4,
+        "Add": 1,
+        "Floor": 2,
+        "Multiply": 1,
+        "Integer": 1
+      },
+      "types": {
+        "1": 1,
+        "150": 1,
+        "integer": 5,
+        "list<integer>": 1,
+        "real": 2
+      },
+      "functions": [],
+      "symbols": [
+        {
+          "name": "S",
+          "owner": "root",
+          "type": "list<integer>",
+          "binding": 4,
+          "ambientBinding": 4,
+          "ambientAgrees": true,
+          "hasValue": true,
+          "valueType": "vector<integer^22500>",
+          "valueHash": "f0b96e018a51c1e433f6ed9191e235e5dc0fbd68f2e4a5db8d34a9ebb43861d7"
+        },
+        {
+          "name": "x",
+          "owner": "root",
+          "type": "real",
+          "binding": 5,
+          "ambientBinding": 5,
+          "ambientAgrees": true,
+          "hasValue": false
+        },
+        {
+          "name": "N",
+          "owner": "root",
+          "type": "150",
+          "binding": 6,
+          "ambientBinding": 6,
+          "ambientAgrees": true,
+          "hasValue": true,
+          "valueType": "150",
+          "valueHash": "9ae2bdd7beedc2e766c6b76585530e16925115707dc7a06ab5ee4aa2776b2c7b"
+        },
+        {
+          "name": "y",
+          "owner": "root",
+          "type": "real",
+          "binding": 7,
+          "ambientBinding": 7,
+          "ambientAgrees": true,
+          "hasValue": false
+        }
+      ],
+      "unknown": [],
+      "outside": [],
+      "effects": [],
+      "nodeVisits": 10,
+      "options": {
+        "to": "javascript"
+      },
+      "limitations": [
+        "Pre-CE-preparation; no profile admission claim",
+        "Public definition events only; missing function provenance remains unresolved",
+        "Name-local call sites conservatively unresolved; no argument-shape specialization",
+        "Candidate syntax includes statements; independence and portability not established"
+      ]
+    }
+  },
+  "after": {
+    "state": {
+      "type": "list<integer>",
+      "valueType": "vector<integer^22500>",
+      "operator": "List",
+      "hash": "aea7cad91a4eeb6ea4a48460f71ee77424070c6d328212a24d47eb95bd98ba1e",
+      "length": 22500
+    },
+    "reader": {
+      "phase": "post-action",
+      "observation": "authored reader in live manager binding, not product renderer gateway",
+      "target": "javascript",
+      "mode": "strict",
+      "inputHash": "6db83a595feca06fe50e7804b3977967d2a9c13225807e52b4572fa874f7e6ac",
+      "resultType": "integer",
+      "classification": "candidate-syntax-only",
+      "heads": {
+        "At": 1,
+        "Symbol": 4,
+        "Add": 1,
+        "Floor": 2,
+        "Multiply": 1,
+        "Integer": 1
+      },
+      "types": {
+        "1": 1,
+        "150": 1,
+        "integer": 5,
+        "list<integer>": 1,
+        "real": 2
+      },
+      "functions": [],
+      "symbols": [
+        {
+          "name": "S",
+          "owner": "root",
+          "type": "list<integer>",
+          "binding": 11,
+          "ambientBinding": 11,
+          "ambientAgrees": true,
+          "hasValue": true,
+          "valueType": "vector<integer^22500>",
+          "valueHash": "aea7cad91a4eeb6ea4a48460f71ee77424070c6d328212a24d47eb95bd98ba1e"
+        },
+        {
+          "name": "x",
+          "owner": "root",
+          "type": "real",
+          "binding": 12,
+          "ambientBinding": 12,
+          "ambientAgrees": true,
+          "hasValue": false
+        },
+        {
+          "name": "N",
+          "owner": "root",
+          "type": "150",
+          "binding": 13,
+          "ambientBinding": 13,
+          "ambientAgrees": true,
+          "hasValue": true,
+          "valueType": "150",
+          "valueHash": "9ae2bdd7beedc2e766c6b76585530e16925115707dc7a06ab5ee4aa2776b2c7b"
+        },
+        {
+          "name": "y",
+          "owner": "root",
+          "type": "real",
+          "binding": 14,
+          "ambientBinding": 14,
+          "ambientAgrees": true,
+          "hasValue": false
+        }
+      ],
+      "unknown": [],
+      "outside": [],
+      "effects": [],
+      "nodeVisits": 10,
+      "options": {
+        "to": "javascript"
+      },
+      "limitations": [
+        "Pre-CE-preparation; no profile admission claim",
+        "Public definition events only; missing function provenance remains unresolved",
+        "Name-local call sites conservatively unresolved; no argument-shape specialization",
+        "Candidate syntax includes statements; independence and portability not established"
+      ]
+    }
+  },
+  "calls": [
+    {
+      "phase": "load",
+      "target": "javascript",
+      "mode": "strict",
+      "inputHash": "7f1293fa7529653d96ea1181ede2097eed6d39c0bf2c4145b5f9764103ef18ba",
+      "resultType": "tuple<integer>",
+      "classification": "candidate-syntax-only",
+      "heads": {
+        "Block": 1,
+        "Declare": 1,
+        "Dictionary": 1,
+        "Integer": 1,
+        "Tuple": 1,
+        "Symbol": 1
+      },
+      "types": {
+        "150": 1,
+        "tuple<integer>": 2,
+        "nothing": 1,
+        "record{value: integer, constant: boolean}": 1,
+        "integer": 1
+      },
+      "functions": [],
+      "symbols": [],
+      "unknown": [],
+      "outside": [],
+      "effects": [],
+      "nodeVisits": 6,
+      "options": {
+        "to": "javascript",
+        "iterationBudget": 100000000
+      },
+      "limitations": [
+        "Pre-CE-preparation; no profile admission claim",
+        "Public definition events only; missing function provenance remains unresolved",
+        "Name-local call sites conservatively unresolved; no argument-shape specialization",
+        "Candidate syntax includes statements; independence and portability not established"
+      ],
+      "success": true,
+      "freeSymbols": [],
+      "freeSymbolTypes": {}
+    },
+    {
+      "phase": "load",
+      "target": "javascript",
+      "mode": "strict",
+      "inputHash": "1797536e1c3872de95090f3efec1b529666b6e7703d88fdc797709b33b5c1797",
+      "resultType": "tuple<vector<integer^53>>",
+      "classification": "candidate-syntax-only",
+      "heads": {
+        "Block": 1,
+        "Declare": 1,
+        "Dictionary": 1,
+        "List": 1,
+        "Integer": 53,
+        "Tuple": 1,
+        "Symbol": 1
+      },
+      "types": {
+        "9543": 1,
+        "9544": 1,
+        "9693": 1,
+        "9841": 1,
+        "9843": 1,
+        "9991": 1,
+        "9992": 1,
+        "10138": 1,
+        "10288": 1,
+        "10289": 1,
+        "10437": 1,
+        "10439": 1,
+        "11330": 1,
+        "11331": 1,
+        "11481": 1,
+        "11482": 1,
+        "11630": 1,
+        "11769": 1,
+        "11770": 1,
+        "11918": 1,
+        "11922": 1,
+        "12067": 1,
+        "12073": 1,
+        "12081": 1,
+        "12207": 1,
+        "12208": 1,
+        "12217": 1,
+        "12221": 1,
+        "12223": 1,
+        "12224": 1,
+        "12229": 1,
+        "12231": 1,
+        "12357": 1,
+        "12358": 1,
+        "12367": 1,
+        "12373": 1,
+        "12377": 1,
+        "12378": 1,
+        "12518": 1,
+        "12522": 1,
+        "12527": 1,
+        "12528": 1,
+        "12541": 1,
+        "12542": 1,
+        "12669": 1,
+        "12670": 1,
+        "12677": 1,
+        "12678": 1,
+        "12691": 1,
+        "12692": 1,
+        "12829": 1,
+        "12831": 1,
+        "12981": 1,
+        "tuple<vector<integer^53>>": 2,
+        "nothing": 1,
+        "record{value: vector<integer^53>, constant: boolean}": 1,
+        "vector<integer^53>": 2
+      },
+      "functions": [],
+      "symbols": [],
+      "unknown": [],
+      "outside": [],
+      "effects": [],
+      "nodeVisits": 59,
+      "options": {
+        "to": "javascript",
+        "iterationBudget": 100000000
+      },
+      "limitations": [
+        "Pre-CE-preparation; no profile admission claim",
+        "Public definition events only; missing function provenance remains unresolved",
+        "Name-local call sites conservatively unresolved; no argument-shape specialization",
+        "Candidate syntax includes statements; independence and portability not established"
+      ],
+      "success": true,
+      "freeSymbols": [],
+      "freeSymbolTypes": {}
+    },
+    {
+      "phase": "load",
+      "target": "javascript",
+      "mode": "strict",
+      "inputHash": "31caf5a3ed73232f4b611cad7d9cacfcf88af4c858534e74a32200b36f5d6303",
+      "resultType": "tuple<list<integer>>",
+      "classification": "candidate-syntax-only",
+      "heads": {
+        "Block": 1,
+        "Declare": 1,
+        "Dictionary": 1,
+        "Comprehension": 1,
+        "Integer": 3,
+        "Range": 1,
+        "Power": 1,
+        "Symbol": 2,
+        "Tuple": 1
+      },
+      "types": {
+        "0": 1,
+        "1": 1,
+        "2": 1,
+        "150": 1,
+        "tuple<list<integer>>": 2,
+        "nothing": 1,
+        "record{value: list<integer>}": 1,
+        "list<integer>": 3,
+        "integer<22500..22500>": 1
+      },
+      "functions": [],
+      "symbols": [
+        {
+          "name": "N",
+          "owner": "root",
+          "type": "150",
+          "binding": 1,
+          "ambientBinding": 1,
+          "ambientAgrees": true,
+          "hasValue": true,
+          "valueType": "150",
+          "valueHash": "9ae2bdd7beedc2e766c6b76585530e16925115707dc7a06ab5ee4aa2776b2c7b"
+        }
+      ],
+      "unknown": [],
+      "outside": [],
+      "effects": [
+        "iteration"
+      ],
+      "nodeVisits": 12,
+      "options": {
+        "to": "javascript",
+        "iterationBudget": 100000000
+      },
+      "limitations": [
+        "Pre-CE-preparation; no profile admission claim",
+        "Public definition events only; missing function provenance remains unresolved",
+        "Name-local call sites conservatively unresolved; no argument-shape specialization",
+        "Candidate syntax includes statements; independence and portability not established"
+      ],
+      "success": true,
+      "freeSymbols": [],
+      "freeSymbolTypes": {}
+    },
+    {
+      "phase": "load",
+      "target": "javascript",
+      "mode": "strict",
+      "inputHash": "02447d4209192e756fa12ec428b8dd35c6f84c6400ba982032232beb8ce2a1e0",
+      "resultType": "tuple<list<real>>",
+      "classification": "candidate-syntax-only",
+      "heads": {
+        "Block": 2,
+        "Declare": 1,
+        "Dictionary": 1,
+        "Symbol": 5,
+        "Loop": 1,
+        "Assign": 1,
+        "ReplaceAt": 1,
+        "Integer": 1,
+        "Tuple": 1
+      },
+      "types": {
+        "1": 1,
+        "tuple<list<real>>": 2,
+        "nothing": 3,
+        "record{value: list<real>}": 1,
+        "list<real>": 5,
+        "integer": 1,
+        "vector<integer^53>": 1
+      },
+      "functions": [],
+      "symbols": [
+        {
+          "name": "S_0",
+          "owner": "root",
+          "type": "list<real>",
+          "binding": 2,
+          "ambientBinding": 2,
+          "ambientAgrees": true,
+          "hasValue": false
+        },
+        {
+          "name": "P",
+          "owner": "root",
+          "type": "vector<integer^53>",
+          "binding": 3,
+          "ambientBinding": 3,
+          "ambientAgrees": true,
+          "hasValue": false
+        }
+      ],
+      "unknown": [],
+      "outside": [],
+      "effects": [
+        "assignment",
+        "iteration"
+      ],
+      "nodeVisits": 14,
+      "options": {
+        "to": "javascript",
+        "iterationBudget": 100000000
+      },
+      "limitations": [
+        "Pre-CE-preparation; no profile admission claim",
+        "Public definition events only; missing function provenance remains unresolved",
+        "Name-local call sites conservatively unresolved; no argument-shape specialization",
+        "Candidate syntax includes statements; independence and portability not established"
+      ],
+      "success": true,
+      "freeSymbols": [
+        "S_0",
+        "P"
+      ],
+      "freeSymbolTypes": {
+        "S_0": {
+          "type": "list<real>",
+          "lowered": "array",
+          "provenance": "declared"
+        },
+        "P": {
+          "type": "vector<integer^53>",
+          "lowered": "array",
+          "provenance": "declared"
+        }
+      }
+    },
+    {
+      "phase": "action",
+      "target": "javascript",
+      "mode": "strict",
+      "inputHash": "69edb755adf26666b59cf9a99be373eda7880656c05ed3516fb1becdea76e6d1",
+      "resultType": "list<integer>",
+      "classification": "unresolved",
+      "heads": {
+        "Apply": 1,
+        "Function": 1,
+        "Block": 4,
+        "Declare": 1,
+        "Dictionary": 1,
+        "Add": 5,
+        "RotateLeft": 8,
+        "Symbol": 22,
+        "Negate": 3,
+        "Integer": 12,
+        "Typed": 1,
+        "Comprehension": 1,
+        "If": 2,
+        "Equal": 2,
+        "At": 3,
+        "Range": 1,
+        "Power": 1
+      },
+      "types": {
+        "0": 1,
+        "1": 5,
+        "2": 2,
+        "3": 1,
+        "list<integer>": 25,
+        "(S_gpBound: list<integer>) -> list<integer>": 1,
+        "nothing": 1,
+        "record{value: list<integer>}": 1,
+        "nan | real | signed_infinity": 14,
+        "-1": 3,
+        "integer": 11,
+        "boolean": 2,
+        "nan | real<0..> | signed_infinity": 1,
+        "list<nan | real | signed_infinity>": 1
+      },
+      "functions": [
+        {
+          "name": "literal",
+          "binding": 8,
+          "origin": "literal operand",
+          "parameters": [
+            "S_gpBound"
+          ],
+          "bodyHash": "703341bb54a7701a28dcb50d2e466c1e0ac9942d6c25b214d69a6b8a0a7b4dc1",
+          "type": "(S_gpBound: list<integer>) -> list<integer>",
+          "definitionJson": [
+            "Function",
+            [
+              "Block",
+              [
+                "Declare",
+                "n_gpBound",
+                [
+                  "Dictionary",
+                  [
+                    "KeyValuePair",
+                    {
+                      "str": "value"
+                    },
+                    [
+                      "Add",
+                      [
+                        "RotateLeft",
+                        "S_gpBound",
+                        "N"
+                      ],
+                      [
+                        "RotateLeft",
+                        "S_gpBound",
+                        [
+                          "Negate",
+                          "N"
+                        ]
+                      ],
+                      [
+                        "RotateLeft",
+                        "S_gpBound",
+                        [
+                          "Add",
+                          "N",
+                          -1
+                        ]
+                      ],
+                      [
+                        "RotateLeft",
+                        "S_gpBound",
+                        [
+                          "Add",
+                          "N",
+                          1
+                        ]
+                      ],
+                      [
+                        "RotateLeft",
+                        "S_gpBound",
+                        [
+                          "Add",
+                          [
+                            "Negate",
+                            "N"
+                          ],
+                          -1
+                        ]
+                      ],
+                      [
+                        "RotateLeft",
+                        "S_gpBound",
+                        [
+                          "Add",
+                          [
+                            "Negate",
+                            "N"
+                          ],
+                          1
+                        ]
+                      ],
+                      [
+                        "RotateLeft",
+                        "S_gpBound",
+                        -1
+                      ],
+                      [
+                        "RotateLeft",
+                        "S_gpBound",
+                        1
+                      ]
+                    ]
+                  ]
+                ]
+              ],
+              [
+                "Typed",
+                [
+                  "Comprehension",
+                  [
+                    "If",
+                    [
+                      "Equal",
+                      [
+                        "At",
+                        "n_gpBound",
+                        "k_gpBound"
+                      ],
+                      3
+                    ],
+                    [
+                      "Block",
+                      1
+                    ],
+                    [
+                      "If",
+                      [
+                        "Equal",
+                        [
+                          "At",
+                          "n_gpBound",
+                          "k_gpBound"
+                        ],
+                        2
+                      ],
+                      [
+                        "Block",
+                        [
+                          "At",
+                          "S_gpBound",
+                          "k_gpBound"
+                        ]
+                      ],
+                      [
+                        "Block",
+                        0
+                      ]
+                    ]
+                  ],
+                  [
+                    "Element",
+                    "k_gpBound",
+                    [
+                      "Range",
+                      1,
+                      [
+                        "Power",
+                        "N",
+                        2
+                      ]
+                    ]
+                  ]
+                ],
+                "'list<integer>'"
+              ]
+            ],
+            [
+              "Typed",
+              "S_gpBound",
+              "'list<integer>'"
+            ]
+          ]
+        }
+      ],
+      "symbols": [
+        {
+          "name": "N",
+          "owner": "function:literal#8",
+          "type": "nan | real | signed_infinity",
+          "binding": 9,
+          "ambientBinding": 9,
+          "ambientAgrees": true,
+          "hasValue": false
+        },
+        {
+          "name": "S_0",
+          "owner": "root",
+          "type": "list<nan | real | signed_infinity>",
+          "binding": 10,
+          "ambientBinding": 10,
+          "ambientAgrees": true,
+          "hasValue": false
+        }
+      ],
+      "unknown": [
+        "unmodeled-or-opaque-call:function:literal#8:RotateLeft",
+        "unmodeled-or-opaque-call:root:Apply"
+      ],
+      "outside": [],
+      "effects": [
+        "iteration"
+      ],
+      "nodeVisits": 69,
+      "options": {
+        "to": "javascript",
+        "mode": "strict",
+        "iterationBudget": 1000000
+      },
+      "limitations": [
+        "Pre-CE-preparation; no profile admission claim",
+        "Public definition events only; missing function provenance remains unresolved",
+        "Name-local call sites conservatively unresolved; no argument-shape specialization",
+        "Candidate syntax includes statements; independence and portability not established"
+      ],
+      "success": true,
+      "freeSymbols": [
+        "N",
+        "S_0"
+      ],
+      "freeSymbolTypes": {
+        "N": {
+          "type": "nan | real | signed_infinity",
+          "lowered": "number",
+          "provenance": "declared"
+        },
+        "S_0": {
+          "type": "list<nan | real | signed_infinity>",
+          "lowered": "array",
+          "provenance": "declared"
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "Real action uses existing node harness; clock/deadline lifted",
+    "Reader comparison inspects live bindings; no claim of post-action renderer sampler routing"
+  ]
+}

@@ -1,0 +1,477 @@
+diff --git a/src/compute-engine/compilation/compile-shapes.ts b/src/compute-engine/compilation/compile-shapes.ts
+index 7e1eacd30..6bf308f95 100644
+--- a/src/compute-engine/compilation/compile-shapes.ts
++++ b/src/compute-engine/compilation/compile-shapes.ts
+@@ -1,3 +1,4 @@
++import { experimentalOperandIsComplex } from './javascript-fragment-experiment-facts.js';
+ // Local shape frames, aggregate component counts, scalar and vector shapes,
+ // and branch coercions.
+ 
+@@ -269,7 +270,8 @@ export function branchComplexCoercion(
+   | ((val: Expression | undefined, code: TargetSource) => TargetSource)
+   | undefined {
+   if (target.language !== 'javascript') return undefined;
+-  if (!values.some((v) => v !== undefined && core.isComplexValued(v)))
++  if (!values.some((v) => v !== undefined &&
++    (experimentalOperandIsComplex(v, target) ?? core.isComplexValued(v))))
+     return undefined;
+   // Statically wrap ONLY provably-real arms. A wide-typed arm (`number`,
+   // `unknown` — e.g. a pass-through parameter `z` in
+diff --git a/src/compute-engine/compilation/compiler-core.ts b/src/compute-engine/compilation/compiler-core.ts
+index 1ee8ceb07..fa8c5adc5 100644
+--- a/src/compute-engine/compilation/compiler-core.ts
++++ b/src/compute-engine/compilation/compiler-core.ts
+@@ -1,3 +1,4 @@
++import { assertExperimentalPreparedNode } from './javascript-fragment-experiment-facts.js';
+ // The compiler core: compile, compileExpr and the other hub functions of the
+ // mutual recursion. It imports every handler module and installs the hubs in
+ // the record of compiler-core-hooks.ts.
+@@ -937,6 +938,7 @@ function compileExpression(
+    * settled shape that `unsettledShapeIn()` finds. */
+   admission?: { unsettled?: UnsettledShape }
+ ): TargetSource {
++  assertExperimentalPreparedNode(expr, target);
+   // Check before folding/inlining can replace a captured call by its body.
+   if (CompilerState._compileDepth === 0) {
+     assertCapturedCallableBindings(expr, target);
+diff --git a/src/compute-engine/compilation/javascript-target.ts b/src/compute-engine/compilation/javascript-target.ts
+index 803b63c9c..364d627e2 100644
+--- a/src/compute-engine/compilation/javascript-target.ts
++++ b/src/compute-engine/compilation/javascript-target.ts
+@@ -1,3 +1,4 @@
++import { experimentalOperandIsComplex } from './javascript-fragment-experiment-facts.js';
+ import { derivativeClosedForm } from './derivative-closed-form.js';
+ import { shadowsLibraryName } from '../library-shadowing.js';
+ import {
+@@ -4644,7 +4645,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
+   },
+   Add: (args, compile, target) => {
+     if (args.length === 1) return compile(args[0]);
+-    const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
++    const anyComplex = args.some((a) => experimentalOperandIsComplex(a, target) ?? BaseCompiler.isComplexValued(a));
+     if (!anyComplex) {
+       // Try full constant fold
+       const constants = args.map(tryGetConstant);
+@@ -4837,7 +4838,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
+   Chop: (args, compile) =>
+     `_SYS.chop(${compile(args[0])}, ${args[0]?.engine?.tolerance ?? 1e-10})`,
+   Cos: (args, compile, target) => {
+-    if (BaseCompiler.isComplexValued(args[0]))
++    if (experimentalOperandIsComplex(args[0], target) ?? BaseCompiler.isComplexValued(args[0]))
+       return complexUnary(target, '_SYS.ccos', compile(args[0]));
+     const u = BaseCompiler.piMultiple(args[0]);
+     if (u !== undefined) return `_SYS.cospi(${compile(u)})`;
+@@ -8676,7 +8677,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
+   FresnelS: '_SYS.fresnelS',
+   FresnelC: '_SYS.fresnelC',
+   Sin: (args, compile, target) => {
+-    if (BaseCompiler.isComplexValued(args[0]))
++    if (experimentalOperandIsComplex(args[0], target) ?? BaseCompiler.isComplexValued(args[0]))
+       return complexUnary(target, '_SYS.csin', compile(args[0]));
+     const u = BaseCompiler.piMultiple(args[0]);
+     if (u !== undefined) return `_SYS.sinpi(${compile(u)})`;
+@@ -8691,7 +8692,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
+     return `Math.sinh(${compile(args[0])})`;
+   },
+   Sqrt: (args, compile, target) => {
+-    if (BaseCompiler.isComplexValued(args[0])) {
++    if (experimentalOperandIsComplex(args[0], target) ?? BaseCompiler.isComplexValued(args[0])) {
+       return complexUnary(target, '_SYS.csqrt', compile(args[0]));
+     }
+     const c = tryGetConstant(args[0]);
+@@ -8712,7 +8713,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
+     // NaN-poison it. In `strict` mode an unknown-sign operand keeps
+     // `Math.sqrt` (pinned; `promotesToComplexLane` mirrors the
+     // `isComplexValued` Sqrt/Ln/Log carve-out so the parent agrees).
+-    if (promotesToComplexLane('Sqrt', args))
++    if (experimentalOperandIsComplex(args[0], target) ?? promotesToComplexLane('Sqrt', args))
+       return complexUnary(
+         target,
+         '_SYS.csqrt',
+@@ -8864,8 +8865,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
+   Divide: ([a, b], compile, target) => {
+     if (a === null || b === null)
+       throw new Error('Could not compile `Divide`: missing argument');
+-    const ac = BaseCompiler.isComplexValued(a);
+-    const bc = BaseCompiler.isComplexValued(b);
++    const ac = experimentalOperandIsComplex(a, target) ?? BaseCompiler.isComplexValued(a);
++    const bc = experimentalOperandIsComplex(b, target) ?? BaseCompiler.isComplexValued(b);
+     if (!ac && !bc) {
+       const ca = tryGetConstant(a);
+       const cb = tryGetConstant(b);
+@@ -8936,7 +8937,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
+   },
+   Negate: ([x], compile, target) => {
+     if (x === null) throw new Error('Could not compile `Negate`: no argument');
+-    if (!BaseCompiler.isComplexValued(x)) {
++    if (!(experimentalOperandIsComplex(x, target) ?? BaseCompiler.isComplexValued(x))) {
+       const c = tryGetConstant(x);
+       if (c !== undefined) return String(-c);
+       return `(-(${compile(x)}))`;
+@@ -8945,7 +8946,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
+   },
+   Multiply: (args, compile, target) => {
+     if (args.length === 1) return compile(args[0]);
+-    const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
++    const anyComplex = args.some((a) => experimentalOperandIsComplex(a, target) ?? BaseCompiler.isComplexValued(a));
+     if (!anyComplex) {
+       // Short-circuit on zero
+       if (args.some((a) => tryGetConstant(a) === 0)) return '0';
+@@ -11524,7 +11525,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
+    * compilation, with its CSE session open. With `batch`, the target of the
+    * `broadcast()` batch body (`compileBatchBody`).
+    */
+-  private prepareCompilation(
++  protected prepareCompilation(
+     expr: Expression,
+     options: CompilationOptions<Expression>,
+     batch?: BatchCompileState
+diff --git a/src/compute-engine/compilation/javascript-fragment-experiment.ts b/src/compute-engine/compilation/javascript-fragment-experiment.ts
+new file mode 100644
+--- /dev/null
++++ b/src/compute-engine/compilation/javascript-fragment-experiment.ts
+@@ -0,0 +1,149 @@
++/** Worktree-only integration of the real fragment pass and existing JS emitter. */
++import type { Expression } from '../global-types.js';
++import type { CompilationOptions, CompileTarget } from './types.js';
++import {
++  isFunction,
++  isNumber,
++  isSymbol,
++} from '../boxed-expression/type-guards.js';
++import { isSubtype } from '../../common/type/subtype.js';
++import { isLibraryOperator } from './builtin-callback.js';
++import { JavaScriptTarget } from './javascript-target.js';
++import {
++  typeFragment,
++  walkIf,
++  type FragmentDefinition,
++  type FragmentRule,
++  type FragmentValueType,
++} from './fragment.js';
++import type {
++  ScalarExperiment,
++  ScalarExperimentTarget,
++} from './javascript-fragment-experiment-facts.js';
++
++type Representation = 'number' | 'boolean';
++const realUnary: FragmentRule<Representation> = {
++  signatures: [{ operands: ['real'], result: 'real' }],
++};
++const numeric = (type: { kind: string }): Representation | undefined =>
++  type.kind === 'boolean'
++    ? 'boolean'
++    : type.kind === 'real' || type.kind === 'integer'
++      ? 'number'
++      : undefined;
++const definition: FragmentDefinition<Representation> = {
++  name: 'experimental strict JS scalar',
++  rules: {
++    Add: { signatures: [{ operands: ['real'], rest: 'real', result: 'real' }] },
++    Multiply: {
++      signatures: [{ operands: ['real'], rest: 'real', result: 'real' }],
++    },
++    Divide: { signatures: [{ operands: ['real', 'real'], result: 'real' }] },
++    Negate: realUnary,
++    Sin: realUnary,
++    Cos: realUnary,
++    Sqrt: realUnary,
++    Less: {
++      signatures: [
++        { operands: ['real', 'real'], rest: 'real', result: 'boolean' },
++      ],
++    },
++    Greater: {
++      signatures: [
++        { operands: ['real', 'real'], rest: 'real', result: 'boolean' },
++      ],
++    },
++    If: { walk: walkIf },
++    Random: { signatures: [{ operands: [], result: 'real' }] },
++  },
++  typeOfSymbol(node): FragmentValueType | undefined {
++    if (node.valueDefinition?.value !== undefined) return undefined;
++    const type = node.type.type;
++    if (isSubtype(type, 'boolean')) return { kind: 'boolean' };
++    if (isSubtype(type, 'integer')) return { kind: 'integer' };
++    if (isSubtype(type, 'real')) return { kind: 'real' };
++    return undefined;
++  },
++  representationOfBinding: numeric,
++  representationOfValue: numeric,
++  functionOf: () => undefined,
++};
++
++export class ExperimentalScalarJavaScriptTarget extends JavaScriptTarget {
++  lastExperiment?: ScalarExperiment;
++
++  protected prepareCompilation(
++    expr: Expression,
++    options: CompilationOptions<Expression>,
++    batch?: unknown
++  ): { expr: Expression; target: CompileTarget<Expression> } {
++    // Keep host source, batch/async variants, and alternative lanes outside
++    // this experiment. No public option or target registration is added.
++    if (
++      batch !== undefined ||
++      (options.mode !== undefined && options.mode !== 'strict') ||
++      options.functions ||
++      options.operators ||
++      options.vars ||
++      options.preamble ||
++      options.imports?.length ||
++      options.broadcast
++    )
++      throw new Error('Scalar experiment: unsupported compile options');
++    const prepared = super.prepareCompilation(expr, options);
++    const seen = new Set<Expression>();
++    const check = (node: Expression): void => {
++      if (seen.has(node)) return;
++      seen.add(node);
++      if (!node.isValid || node.type.type === 'error')
++        throw new Error('Scalar experiment: invalid or error-typed node');
++      if (isNumber(node) && node.im !== 0)
++        throw new Error('Scalar experiment: complex lane is outside the slice');
++      if (
++        isSymbol(node) &&
++        node.valueDefinition?.value !== undefined &&
++        node.symbol !== 'True' &&
++        node.symbol !== 'False'
++      )
++        throw new Error(
++          'Scalar experiment: stored bindings are outside the slice'
++        );
++      if (isFunction(node)) {
++        if (
++          !Object.hasOwn(definition.rules, node.operator) ||
++          !isLibraryOperator(node, node.operator)
++        )
++          throw new Error(
++            `Scalar experiment: unsupported head ${node.operator}`
++          );
++        // A strict unknown-sign radical stays real; a provably negative one
++        // promotes in the legacy emitter and must decline in this real slice.
++        if (node.operator === 'Sqrt' && node.op1.isNegative === true)
++          throw new Error(
++            'Scalar experiment: promoted radical is outside the slice'
++          );
++        if (node.operator === 'If' && node.nops !== 3)
++          throw new Error(
++            'Scalar experiment: only three-operand If is admitted'
++          );
++        for (const op of node.ops) check(op);
++      }
++    };
++    check(prepared.expr);
++    const annotation = typeFragment(prepared.expr, definition);
++    if (annotation.refusal)
++      throw new Error(`Scalar experiment: ${annotation.refusal.message}`);
++    for (const facts of annotation.scope.facts.values()) {
++      if (!('representation' in facts) || numeric(facts.type) === undefined)
++        throw new Error('Scalar experiment: non-scalar annotation');
++      if (facts.conversions?.some((conversion) => conversion.kind !== 'none'))
++        throw new Error(
++          'Scalar experiment: conversion outside real scalar slice'
++        );
++    }
++    const experiment = { annotation, queries: 0, checkedNodes: 0 };
++    this.lastExperiment = experiment;
++    (prepared.target as ScalarExperimentTarget).scalarExperiment = experiment;
++    return prepared;
++  }
++}
+diff --git a/src/compute-engine/compilation/javascript-fragment-experiment-facts.ts b/src/compute-engine/compilation/javascript-fragment-experiment-facts.ts
+new file mode 100644
+--- /dev/null
++++ b/src/compute-engine/compilation/javascript-fragment-experiment-facts.ts
+@@ -0,0 +1,50 @@
++/** Worktree experiment only: exact-node facts, with no analysis fallback. */
++import type { Expression } from '../global-types.js';
++import type { CompileTarget } from './types.js';
++import type { FragmentAnnotation, FragmentValueFacts } from './fragment.js';
++
++export type ScalarExperiment = {
++  annotation: FragmentAnnotation<'number' | 'boolean'>;
++  queries: number;
++  checkedNodes: number;
++};
++export type ScalarExperimentTarget = CompileTarget<Expression> & {
++  scalarExperiment?: ScalarExperiment;
++};
++
++export function experimentalScalarFacts(
++  node: Expression,
++  target: CompileTarget<Expression>
++): FragmentValueFacts<'number' | 'boolean'> | undefined {
++  const experiment = (target as ScalarExperimentTarget).scalarExperiment;
++  if (experiment === undefined) return undefined;
++  const facts = experiment.annotation.scope.facts.get(node);
++  if (facts === undefined || !('representation' in facts))
++    throw new Error(
++      `Scalar experiment: missing prepared-node facts for ${node}`
++    );
++  if (facts.representation !== 'number' && facts.representation !== 'boolean')
++    throw new Error(
++      `Scalar experiment: unsupported representation for ${node}`
++    );
++  experiment.queries++;
++  return facts;
++}
++
++export function experimentalOperandIsComplex(
++  node: Expression,
++  target: CompileTarget<Expression>
++): boolean | undefined {
++  const facts = experimentalScalarFacts(node, target);
++  return facts === undefined ? undefined : facts.type.kind === 'complex';
++}
++
++export function assertExperimentalPreparedNode(
++  node: Expression,
++  target: CompileTarget<Expression>
++): void {
++  const experiment = (target as ScalarExperimentTarget).scalarExperiment;
++  if (experiment === undefined) return;
++  experimentalScalarFacts(node, target);
++  experiment.checkedNodes++;
++}
+diff --git a/test/compute-engine/compile-javascript-fragment-experiment.test.ts b/test/compute-engine/compile-javascript-fragment-experiment.test.ts
+new file mode 100644
+--- /dev/null
++++ b/test/compute-engine/compile-javascript-fragment-experiment.test.ts
+@@ -0,0 +1,135 @@
++import { ComputeEngine, compile } from '../../src/compute-engine';
++import { ExperimentalScalarJavaScriptTarget } from '../../src/compute-engine/compilation/javascript-fragment-experiment';
++import { experimentalScalarFacts } from '../../src/compute-engine/compilation/javascript-fragment-experiment-facts';
++import { withRandomSeedFrame } from '../../src/compute-engine/boxed-expression/utils';
++import type { MathJsonExpression } from '../../src/math-json/types';
++
++function setup() {
++  const ce = new ComputeEngine();
++  ce.declare('x', 'real');
++  ce.declare('y', 'real');
++  ce.declare('C', 'boolean');
++  return { ce, target: new ExperimentalScalarJavaScriptTarget() };
++}
++
++const cases: Array<{
++  json: MathJsonExpression;
++  oracle: (x: number, y: number, c: boolean) => number | boolean;
++}> = [
++  {
++    json: [
++      'Add',
++      ['Sin', ['Multiply', 'x', 'y']],
++      ['Cos', ['Multiply', 'x', 'y']],
++    ],
++    oracle: (x, y) => Math.sin(x * y) + Math.cos(x * y),
++  },
++  {
++    json: ['Divide', ['Add', 'x', 2], ['Add', 'y', 1]],
++    oracle: (x, y) => (x + 2) / (y + 1),
++  },
++  {
++    json: ['If', 'C', ['Sqrt', 'x'], ['Negate', 'y']],
++    oracle: (x, y, c) => (c ? Math.sqrt(x) : -y),
++  },
++  { json: ['Add', ['Sqrt', 4], 'x'], oracle: (x) => 2 + x },
++  { json: ['Less', 'x', 'y'], oracle: (x, y) => x < y },
++];
++
++for (const cse of [false, true])
++  for (const constantFold of [false, true]) {
++    describe(`scalar annotation cse=${cse} fold=${constantFold}`, () => {
++      test.each(cases)(
++        'matches values and legacy emission for $json',
++        ({ json, oracle }) => {
++          const { ce, target } = setup();
++          const expr = ce.expr(json);
++          const options = { fallback: false, cse, constantFold };
++          const before = compile(expr, options);
++          const result = target.compile(expr, options);
++          const after = compile(expr, options);
++          expect(result.success).toBe(true);
++          expect(result.code).toBe(before.code);
++          expect(after.code).toBe(before.code);
++          const experiment = target.lastExperiment!;
++          expect(experiment.annotation.root).toBe(expr);
++          expect(experiment.checkedNodes).toBeGreaterThan(0);
++          expect(experiment.queries).toBeGreaterThanOrEqual(
++            experiment.checkedNodes
++          );
++          for (const [x, y] of [
++            [4, 2],
++            [-4, 3],
++            [0, -2],
++          ])
++            for (const C of [false, true]) {
++              const input = { x, y, C };
++              expect(result.run!(input)).toEqual(oracle(x, y, C));
++              expect(result.run!(input)).toEqual(before.run!(input));
++            }
++        }
++      );
++
++      test('keeps lazy random draw count and stream order', () => {
++        const { ce, target } = setup();
++        const expr = ce.expr([
++          'If',
++          'C',
++          ['Random'],
++          ['Add', ['Random'], ['Random']],
++        ]);
++        const options = { fallback: false, cse, constantFold };
++        const result = target.compile(expr, options);
++        const legacy = compile(expr, options);
++        for (const C of [false, true]) {
++          const sample = (run: () => unknown) =>
++            withRandomSeedFrame(ce, 42, () => [run(), ce._random()]);
++          expect(sample(() => result.run!({ C }))).toEqual(
++            sample(() => legacy.run!({ C }))
++          );
++          expect(sample(() => result.run!({ C }))).toEqual(
++            sample(() => expr.subs({ C }).N().re)
++          );
++        }
++      });
++    });
++  }
++
++test.each([
++  ['Sqrt', -1],
++  ['Complex', 1, 2],
++  ['List', 1, 2],
++  ['Power', 'x', 'y'],
++  ['If', 'C', 'x'],
++] as MathJsonExpression[])('declines outside scalar slice %j', (json) => {
++  const { ce, target } = setup();
++  expect(() => target.compile(ce.expr(json), { fallback: false })).toThrow(
++    /Scalar experiment/
++  );
++});
++
++test('declines stored bindings, unknown inputs, custom source, and complex mode', () => {
++  const { ce, target } = setup();
++  ce.assign('a', -2);
++  for (const json of ['a', 'u'] as MathJsonExpression[])
++    expect(() => target.compile(ce.expr(json), { fallback: false })).toThrow(
++      /Scalar experiment/
++    );
++  const expr = ce.expr(['Sin', 'x']);
++  expect(() => target.compile(expr, { mode: 'complex' })).toThrow(
++    /Scalar experiment/
++  );
++  expect(() =>
++    target.compile(expr, { functions: { Sin: 'Math.sin' } })
++  ).toThrow(/Scalar experiment/);
++});
++
++test('missing facts are an invariant error rather than a legacy recomputation', () => {
++  const { ce, target } = setup();
++  target.compile(ce.expr(['Sin', 'x']), { fallback: false });
++  const experiment = target.lastExperiment!;
++  const missing = ce.expr(['Cos', 'y']);
++  expect(() =>
++    experimentalScalarFacts(missing, { scalarExperiment: experiment } as never)
++  ).toThrow(/missing prepared-node facts/);
++});

@@ -1,0 +1,75 @@
+--- /tmp/js-profile-next/profile-coverage-before-review-capture.mts
++++ /tmp/wt-tycho-profile-next/scripts/profile-coverage-capture.mts
+@@ -120,7 +120,7 @@
+   if(head==='Typed') {walk(n.ops?.[0],locals,owner);return;}
+   if(head==='Declare') {for(const op of (n.ops??[]).slice(1))walk(op,locals,owner,'metadata');return;}
+   if(head==='Assign') {effects.add('assignment');for(const op of (n.ops??[]).slice(1))walk(op,locals,owner);return;}
+-  if(head==='DefineFunction'){remember(n,'observed DefineFunction');walk(n.ops?.[1],locals,owner);return;}
++  if(head==='DefineFunction'){walk(n.ops?.[1],locals,owner);return;}
+   if(['Loop','ParallelLoop','Sum','Product','Comprehension'].includes(head)) {
+    effects.add(head==='ParallelLoop'?'parallel-loop-syntax':'iteration');
+    const nested=new Set(locals);
+@@ -138,9 +138,7 @@
+    const literal=known?.literal ?? (n.valueDefinition?.value?.operator==='Function'?n.valueDefinition.value:undefined);
+    if(known?.ambiguous)unknown.add(`ambiguous-definition-history:${head}`);
+    else if(literal)expand(literal,head,bound,locals,owner,known?.origin??'public bound value');
+-   else if(bound && baseline?.get(head)===bound) {
+-    if(!numeric.has(head)&&!structural.has(head))outside.add(`builtin:${head}`);
+-   } else if(!structural.has(head))unknown.add(`opaque-call:${owner}:${head}`);
++   else if(!(bound && baseline?.get(head)===bound) && !structural.has(head))unknown.add(`unmodeled-or-opaque-call:${owner}:${head}`);
+   }
+   if(['Random','RandomExpression','RandomInteger','RandomReal','Print'].includes(head))effects.add(head);
+   for(const op of n.ops??[])walk(op,locals,owner);
+--- /tmp/js-profile-next/profile-coverage-before-review-audit.mts
++++ /tmp/wt-tycho-profile-next/scripts/profile-coverage-audit.mts
+@@ -374,8 +374,11 @@
+     success: false,
+     durationMs: 0,
+   };
++  let r:any;
++  let compileError:unknown;
++  let didThrow=false;
+   try {
+-    const r = rawCompile(expr, options);
++    r = rawCompile(expr, options);
+     rec.durationMs = Math.round((performance.now() - t) * 100) / 100;
+     rec.success = r?.success === true;
+     if (typeof r?.code === "string") rec.code = r.code;
+@@ -402,16 +405,15 @@
+         ...(typeof e.binding === "string" ? { binding: e.binding } : {}),
+       };
+     }
+-    appendProfile(process.env.PROFILE_CAPTURE!, JSON.stringify({...captured, success:rec.success, error:rec.error, threw:rec.threw, freeSymbols:rec.freeSymbols, freeSymbolTypes:rec.freeSymbolTypes})+'\n');
+-    records.push(rec);
+-    return r;
+   } catch (e) {
+     rec.durationMs = Math.round((performance.now() - t) * 100) / 100;
+     rec.threw = String((e as Error).message).slice(0, 300);
+-    appendProfile(process.env.PROFILE_CAPTURE!, JSON.stringify({...captured, success:rec.success, error:rec.error, threw:rec.threw, freeSymbols:rec.freeSymbols, freeSymbolTypes:rec.freeSymbolTypes})+'\n');
+-    records.push(rec);
+-    throw e;
+-  }
++    didThrow=true;compileError=e;
++  }
++  appendProfile(process.env.PROFILE_CAPTURE!, JSON.stringify({...captured, success:rec.success, error:rec.error, threw:rec.threw, freeSymbols:rec.freeSymbols, freeSymbolTypes:rec.freeSymbolTypes})+'\n');
++  records.push(rec);
++  if(didThrow)throw compileError;
++  return r;
+ }
+ registerComputeEngineModule({
+   ...(ceModule as unknown as Record<string, unknown>),
+--- /tmp/js-profile-next/profile-coverage-before-review-controls.mts
++++ /tmp/wt-tycho-profile-next/scripts/profile-coverage-controls.mts
+@@ -21,3 +21,12 @@
+ try {const direct=new ComputeEngine();direct.box(['DefineFunction','directHidden',['Function',['Block',['Loop',['Break',1],['Element','i',['Range',1,2]]],2],'x']]).evaluate();const captured=inspectProfile(direct.box(['directHidden',2]));assert(captured.heads.Loop,'direct constructor body captured');console.error('direct-constructor control passed');}finally{restore();}
+ assert(!inspectProfile(ce.box(['Typed',2,{str:'real'}])).outside.includes('runtime-string'));
+ assert(inspectProfile(ce.box({str:'hello'})).outside.includes('runtime-string'));
++ce.assign('same',ce.box(['Function',['Add','x',1],'x']));
++const globalCall=ce.box(['same',2]);
++const originalBody=inspectProfile(globalCall).functions.find((f:any)=>f.name==='same')?.bodyHash;
++assert(originalBody,'global definition provenance exists before local traversal');
++ce.pushScope();ce.declare('same','(real) -> real');
++const localDefinition=ce.box(['DefineFunction','same',['Function',['Multiply','x',7],'x']]);
++ce.popScope();
++inspectProfile(localDefinition);
++assert.equal(inspectProfile(globalCall).functions.find((f:any)=>f.name==='same')?.bodyHash,originalBody,'walking local definition does not overwrite ambient function provenance');

@@ -1,0 +1,54 @@
+First, a notice from the session start: the nightly full test run of compute-engine **failed** at `ede66c90d`. Three test files failed: `ce-1102-provisional-registry-weak-references`, `fungrim-loader` and `fungrim-loops`. The log is `/Users/arno/.local/state/compute-engine-ci-nightly/logs/20261109-023005-69307.log`. No session has claimed it. I did not start on it.
+
+## Review of the three research instruments
+
+**Result: no finding makes the bounded conclusions wrong.** I found five low-severity gaps. In each one, a check or a statement in the README is weaker than its wording says.
+
+I read `structured-ir.mjs`, `buddhabrot-partition.mts`, `typed-capture.patch`, `README.md`, `structured-ir.md`, `buddhabrot-partition.md`, `evidence/capture-validation.json`, `evidence/run-status.md`, the case table in `evidence/buddhabrot-partition.json`, and the start of `docs/REVIEW-CHECKLIST.md`. Most items in the checklist are for diffs to `src/`, so they do not apply here. As you asked, I ran nothing, edited nothing and started no agents.
+
+Things I checked that are correct:
+- The IR oracles are closed forms that do not use the code under test. I checked the descending-range formula by hand for n=0 and n=−2.
+- The count of 36 evaluations is correct (18 inputs × 2 CSE settings). The instruction counts of 9 and 6 are correct.
+- The verifier rejects a value that escapes a branch region, because nested definitions do not go into the parent's visible set.
+- The partition ranges are disjoint and cover all samples (offsets `floor(s·p/P)`, local cursor = 137 + offset).
+- The histogram additions are exact integers, so the merge order cannot change the result.
+- In the capture, the unmodified control compares outcomes, code and free-symbol types. This rules out a side effect of the recorder on compilation, for example from `expr.engine.box(name)`.
+
+### Findings
+
+1. **Low: `structured-ir.mjs:35`, `:38`. The rules for effects under CSE are not tested.**
+   - No fixture calls an effectful operation twice, and no fixture repeats a pure expression on both sides of an effect.
+   - The effect fixture has one `Tap` in each branch, so its IR is the same with CSE on and off (5 / 5 instructions).
+   - Two rules have no test: "an effectful operation is never merged" and "an effect clears the cache". If you delete line 35 or line 38, every check still passes.
+   - README finding 5 says only that branch effects are preserved, so it is still correct. But `structured-ir.md` ("effectful calls clear the local CSE cache") describes a mechanism that no test exercises.
+
+2. **Low: `buddhabrot-partition.mts:116–118`. The cursor negative control does not exercise the check that it is meant to support.**
+   - Line 118 compares two numbers that the instrument computes: the sum of private cursors and the serial cursor. With two or more partitions, they always differ.
+   - No merged array with summed cursors goes through the `deepEqual` at line 117.
+   - Line 116 writes `merged[90000]`, so the cursor of the merged result is correct by construction.
+   - No line asserts that a partition's own returned cursor (`result[90000]`) equals `startExclusive + count`.
+   - The serial cursor against the reference is a real check, and the histogram equality would detect a wrong sample range. The README wording "the deliberately incorrect cursor-summing reducer failed every control" says more than this control shows.
+
+3. **Low: `buddhabrot-partition.mts:123`. In half of the cases, the retry check does not run compiled code.**
+   - The retry runs only partition 0.
+   - For 0 samples, and for 1 sample with 2 or 4 partitions, partition 0 has `count: 0` (see the `ranges` in the evidence). The retry therefore compares two results of the `count === 0` shortcut (`histogram.slice()`).
+   - "Deterministic retry checks passed" is evidence only for the 101-sample and 1,000-sample cases. Those 4 of the 8 cases are enough for the stated conclusion, but the README says all 8.
+
+4. **Low: `evidence/capture-validation.json`. Unexplained counts, and no retained script for the comparison.**
+   - The file reports `onlyFinalSignatures: 5` and `onlyBaselineSignatures: 5` next to `fullCoreUnmodifiedComparison.identical: true`. No retained file says what these "signatures" are or why five differ.
+   - The script that made the comparison is not among the retained instruments. So the statement "identical 1,101 records" cannot be reproduced from the retained files.
+   - I expect that the counts come from the Burning Ship control or include timings. Add one sentence that explains them, or retain the comparison script.
+
+5. **Low: `structured-ir.mjs:272`. The loop-carried control matches its error message too loosely.**
+   - The pattern `/f64/` accepts any assertion message that contains "f64", so it does not show which check rejected the corrupted IR.
+   - All four corruption controls mutate only the IR built without CSE.
+   - The rejection itself is real. Only the evidence of the reason is weak.
+
+### Not reported
+
+- The capture marks a record as truncated (`truncated`) when the queue still holds nodes that were already seen. This is conservative, and there were zero truncations.
+- `JSON.stringify(-0)` loses the sign of zero. This is documented.
+- Declarations leak to later sibling expressions in the same region. No fixture reaches this, and shadowing is refused.
+- The capture counts head/type pairs once per object, not once per occurrence. The README presents them as feature incidence counts, which matches this.
+
+The README, line 261, still says that the Claude review is pending. When you record this review, update that line and `evidence/run-status.md`. I did not edit them.

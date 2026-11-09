@@ -1,0 +1,202 @@
+{
+  "hidden": {
+    "target": "javascript",
+    "mode": "strict",
+    "inputHash": "f087771b09eb4fe3b66568ea0ca9cfe407e809dc2f1a7d4dbabbfff6c06962f6",
+    "resultType": "integer",
+    "classification": "unresolved",
+    "heads": {
+      "f": 1,
+      "Block": 2,
+      "g": 1,
+      "Loop": 1,
+      "Break": 1,
+      "Integer": 5,
+      "Range": 1,
+      "Symbol": 1
+    },
+    "types": {
+      "1": 2,
+      "2": 2,
+      "3": 1,
+      "integer": 4,
+      "unknown": 2,
+      "nothing": 1,
+      "range": 1
+    },
+    "functions": [
+      {
+        "name": "f",
+        "binding": 1,
+        "origin": "public assign boxed Function",
+        "parameters": [
+          "x"
+        ],
+        "bodyHash": "97ca6faca137edc1070df86133af9bd94b54470442644c14503b50eb1e5021b3",
+        "type": "(x: unknown) -> number",
+        "definitionJson": [
+          "Function",
+          [
+            "Block",
+            [
+              "g",
+              "x"
+            ]
+          ],
+          "x"
+        ]
+      },
+      {
+        "name": "g",
+        "binding": 2,
+        "origin": "public assign boxed Function",
+        "parameters": [
+          "x"
+        ],
+        "bodyHash": "8cfaeae2eaadb17ce3abfa59225cf9cb57dde37c03731e458901f1a9d5eb0cb5",
+        "type": "(x: unknown) -> number",
+        "definitionJson": [
+          "Function",
+          [
+            "Block",
+            [
+              "Loop",
+              [
+                "Break",
+                1
+              ],
+              [
+                "Element",
+                "i",
+                [
+                  "Range",
+                  1,
+                  3
+                ]
+              ]
+            ],
+            2
+          ],
+          "x"
+        ]
+      }
+    ],
+    "symbols": [],
+    "unknown": [
+      "unspecialized-type:unknown"
+    ],
+    "outside": [],
+    "effects": [
+      "iteration"
+    ],
+    "nodeVisits": 13,
+    "options": {},
+    "limitations": [
+      "Pre-CE-preparation; no profile admission claim",
+      "Public definition events only; missing function provenance remains unresolved",
+      "Name-local call sites conservatively unresolved; no argument-shape specialization",
+      "Candidate syntax includes statements; independence and portability not established"
+    ]
+  },
+  "host": {
+    "target": "javascript",
+    "mode": "strict",
+    "inputHash": "424bcafa4b111e3d5a7b4e47ce913431e82706e70c79ac08c1e929743fb030fe",
+    "resultType": "real",
+    "classification": "unresolved",
+    "heads": {
+      "Sin": 1,
+      "Integer": 1
+    },
+    "types": {
+      "2": 1,
+      "real": 1
+    },
+    "functions": [],
+    "symbols": [],
+    "unknown": [
+      "host-override:Sin"
+    ],
+    "outside": [],
+    "effects": [],
+    "nodeVisits": 2,
+    "options": {
+      "functions": [
+        "Sin"
+      ]
+    },
+    "limitations": [
+      "Pre-CE-preparation; no profile admission claim",
+      "Public definition events only; missing function provenance remains unresolved",
+      "Name-local call sites conservatively unresolved; no argument-shape specialization",
+      "Candidate syntax includes statements; independence and portability not established"
+    ]
+  },
+  "shadow": {
+    "target": "javascript",
+    "mode": "strict",
+    "inputHash": "3fa21016d4cd73d4638a39a380fcde7c087896d09891ea4a7c7b1e2d18d47706",
+    "resultType": "number",
+    "classification": "candidate-syntax-only",
+    "heads": {
+      "captured": 1,
+      "Block": 1,
+      "Add": 1,
+      "Symbol": 2,
+      "Integer": 1
+    },
+    "types": {
+      "2": 1,
+      "number": 4,
+      "real": 1
+    },
+    "functions": [
+      {
+        "name": "captured",
+        "binding": 3,
+        "origin": "public assign boxed Function",
+        "parameters": [
+          "x"
+        ],
+        "bodyHash": "79c35b6e02a267c5d820d58e52301b057d084e7284cc64998d77c8efe44ec627",
+        "type": "(x: unknown) -> number",
+        "definitionJson": [
+          "Function",
+          [
+            "Block",
+            [
+              "Add",
+              "a",
+              "x"
+            ]
+          ],
+          "x"
+        ]
+      }
+    ],
+    "symbols": [
+      {
+        "name": "a",
+        "owner": "function:captured#3",
+        "type": "real",
+        "binding": 4,
+        "ambientBinding": 5,
+        "ambientAgrees": false,
+        "hasValue": true,
+        "valueType": "3",
+        "valueHash": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce"
+      }
+    ],
+    "unknown": [],
+    "outside": [],
+    "effects": [],
+    "nodeVisits": 6,
+    "options": {},
+    "limitations": [
+      "Pre-CE-preparation; no profile admission claim",
+      "Public definition events only; missing function provenance remains unresolved",
+      "Name-local call sites conservatively unresolved; no argument-shape specialization",
+      "Candidate syntax includes statements; independence and portability not established"
+    ]
+  }
+}

@@ -1,0 +1,683 @@
+{
+  "calls": 154,
+  "targets": {
+    "javascript": 116,
+    "interval-js": 20,
+    "glsl": 18
+  },
+  "success": {
+    "True": 154
+  },
+  "classification": {
+    "candidate-syntax-only": 146,
+    "unresolved": 8
+  },
+  "documents": {
+    "apollonian-gasket": {
+      "calls": 40,
+      "targets": {
+        "javascript": 39,
+        "glsl": 1
+      },
+      "classification": {
+        "candidate-syntax-only": 33,
+        "unresolved": 7
+      },
+      "resolvedFunctions": [
+        "admitted",
+        "csqrt",
+        "fill",
+        "fourth",
+        "generations",
+        "literal",
+        "seen",
+        "tangent"
+      ],
+      "heads": [
+        "Abs",
+        "Add",
+        "And",
+        "Assign",
+        "At",
+        "Block",
+        "Comprehension",
+        "Cos",
+        "Count",
+        "Declare",
+        "Dictionary",
+        "Divide",
+        "Drop",
+        "Equal",
+        "Function",
+        "If",
+        "Integer",
+        "Less",
+        "LessEqual",
+        "List",
+        "ListJoin",
+        "Loop",
+        "Max",
+        "Multiply",
+        "Negate",
+        "Not",
+        "Or",
+        "Power",
+        "Range",
+        "Rational",
+        "Real",
+        "Sin",
+        "Sqrt",
+        "String",
+        "Symbol",
+        "Take",
+        "Tuple",
+        "admitted",
+        "csqrt",
+        "fill",
+        "fourth",
+        "generations",
+        "seen",
+        "tangent"
+      ],
+      "unknown": {
+        "unspecialized-type:unknown": 7,
+        "unmodeled-or-opaque-call:function:generations#215:Count": 6,
+        "recursive-call:fill": 1,
+        "unmodeled-or-opaque-call:function:seen#209:Count": 1
+      },
+      "effects": {
+        "iteration": 31,
+        "assignment": 7
+      }
+    },
+    "buddhabrot": {
+      "calls": 9,
+      "targets": {
+        "javascript": 6,
+        "glsl": 2,
+        "interval-js": 1
+      },
+      "classification": {
+        "candidate-syntax-only": 8,
+        "unresolved": 1
+      },
+      "resolvedFunctions": [
+        "c",
+        "step",
+        "tone"
+      ],
+      "heads": [
+        "Abs",
+        "Add",
+        "And",
+        "AsOklab",
+        "Assign",
+        "At",
+        "Block",
+        "Break",
+        "Comprehension",
+        "Declare",
+        "Dictionary",
+        "Divide",
+        "Equal",
+        "Floor",
+        "Fract",
+        "If",
+        "Integer",
+        "Less",
+        "LessEqual",
+        "Loop",
+        "Max",
+        "Min",
+        "Multiply",
+        "Negate",
+        "Power",
+        "Range",
+        "Rational",
+        "Real",
+        "ReplaceAt",
+        "Rgb",
+        "Symbol",
+        "Tuple",
+        "Typed",
+        "c",
+        "step",
+        "tone"
+      ],
+      "unknown": {
+        "unmodeled-or-opaque-call:function:step#31:Fract": 1
+      },
+      "effects": {
+        "iteration": 2,
+        "assignment": 1
+      }
+    },
+    "burning-ship": {
+      "calls": 9,
+      "targets": {
+        "javascript": 4,
+        "glsl": 3,
+        "interval-js": 2
+      },
+      "classification": {
+        "candidate-syntax-only": 9
+      },
+      "resolvedFunctions": [
+        "B",
+        "L"
+      ],
+      "heads": [
+        "Abs",
+        "Add",
+        "AsOklab",
+        "Assign",
+        "B",
+        "Block",
+        "Break",
+        "Declare",
+        "Dictionary",
+        "Divide",
+        "ElementMin",
+        "If",
+        "Integer",
+        "L",
+        "Less",
+        "LessEqual",
+        "Ln",
+        "Loop",
+        "Max",
+        "Min",
+        "Multiply",
+        "Negate",
+        "Oklch",
+        "Power",
+        "Range",
+        "Rational",
+        "Real",
+        "Rgb",
+        "Symbol",
+        "Typed",
+        "Which"
+      ],
+      "unknown": {},
+      "effects": {
+        "assignment": 5,
+        "iteration": 5
+      }
+    },
+    "damped-oscillation": {
+      "calls": 6,
+      "targets": {
+        "javascript": 3,
+        "interval-js": 3
+      },
+      "classification": {
+        "candidate-syntax-only": 6
+      },
+      "resolvedFunctions": [],
+      "heads": [
+        "Abs",
+        "Multiply",
+        "Negate",
+        "Power",
+        "Real",
+        "Sin",
+        "Symbol"
+      ],
+      "unknown": {},
+      "effects": {}
+    },
+    "domain-coloring": {
+      "calls": 2,
+      "targets": {
+        "javascript": 1,
+        "glsl": 1
+      },
+      "classification": {
+        "candidate-syntax-only": 2
+      },
+      "resolvedFunctions": [],
+      "heads": [
+        "Power",
+        "Symbol"
+      ],
+      "unknown": {},
+      "effects": {}
+    },
+    "fourier-harmonics": {
+      "calls": 6,
+      "targets": {
+        "javascript": 3,
+        "interval-js": 3
+      },
+      "classification": {
+        "candidate-syntax-only": 6
+      },
+      "resolvedFunctions": [],
+      "heads": [
+        "Add",
+        "Cos",
+        "Integer",
+        "Multiply",
+        "Real",
+        "Sin",
+        "Symbol"
+      ],
+      "unknown": {},
+      "effects": {}
+    },
+    "frenet-knot-tube": {
+      "calls": 5,
+      "targets": {
+        "javascript": 5
+      },
+      "classification": {
+        "candidate-syntax-only": 5
+      },
+      "resolvedFunctions": [
+        "L_b",
+        "L_n",
+        "a_x",
+        "a_y",
+        "a_z",
+        "b_x",
+        "b_y",
+        "b_z",
+        "d_x",
+        "d_y",
+        "d_z",
+        "f_x",
+        "f_y",
+        "f_z",
+        "g_x",
+        "g_y",
+        "g_z",
+        "n_x",
+        "n_y",
+        "n_z"
+      ],
+      "heads": [
+        "Add",
+        "Block",
+        "Cos",
+        "Divide",
+        "Integer",
+        "L_b",
+        "L_n",
+        "Multiply",
+        "Negate",
+        "Power",
+        "Rational",
+        "Sin",
+        "Sqrt",
+        "Symbol",
+        "Tuple",
+        "a_x",
+        "a_y",
+        "a_z",
+        "b_x",
+        "b_y",
+        "b_z",
+        "d_x",
+        "d_y",
+        "d_z",
+        "f_x",
+        "f_y",
+        "f_z",
+        "g_x",
+        "g_y",
+        "g_z",
+        "n_x",
+        "n_y",
+        "n_z"
+      ],
+      "unknown": {},
+      "effects": {}
+    },
+    "game-of-life": {
+      "calls": 8,
+      "targets": {
+        "javascript": 6,
+        "interval-js": 1,
+        "glsl": 1
+      },
+      "classification": {
+        "candidate-syntax-only": 8
+      },
+      "resolvedFunctions": [],
+      "heads": [
+        "Add",
+        "Assign",
+        "At",
+        "Block",
+        "Comprehension",
+        "Declare",
+        "Dictionary",
+        "Floor",
+        "Integer",
+        "List",
+        "Loop",
+        "Multiply",
+        "Power",
+        "Range",
+        "ReplaceAt",
+        "Symbol",
+        "Tuple"
+      ],
+      "unknown": {},
+      "effects": {
+        "iteration": 2,
+        "assignment": 1
+      }
+    },
+    "implicit-heart": {
+      "calls": 3,
+      "targets": {
+        "javascript": 1,
+        "interval-js": 1,
+        "glsl": 1
+      },
+      "classification": {
+        "candidate-syntax-only": 3
+      },
+      "resolvedFunctions": [],
+      "heads": [
+        "Add",
+        "Integer",
+        "Multiply",
+        "Negate",
+        "Power",
+        "Symbol"
+      ],
+      "unknown": {},
+      "effects": {}
+    },
+    "julia-set": {
+      "calls": 9,
+      "targets": {
+        "glsl": 5,
+        "javascript": 3,
+        "interval-js": 1
+      },
+      "classification": {
+        "candidate-syntax-only": 9
+      },
+      "resolvedFunctions": [
+        "J",
+        "channel",
+        "pick",
+        "seg",
+        "shade"
+      ],
+      "heads": [
+        "Abs",
+        "Add",
+        "AsOklab",
+        "Assign",
+        "Block",
+        "Break",
+        "Cos",
+        "Declare",
+        "Dictionary",
+        "Divide",
+        "Equal",
+        "Floor",
+        "If",
+        "Integer",
+        "J",
+        "Less",
+        "LessEqual",
+        "Ln",
+        "Loop",
+        "Max",
+        "Min",
+        "Multiply",
+        "Negate",
+        "Power",
+        "Range",
+        "Rational",
+        "Real",
+        "Rgb",
+        "Sin",
+        "Symbol",
+        "Typed",
+        "channel",
+        "pick",
+        "seg",
+        "shade"
+      ],
+      "unknown": {},
+      "effects": {
+        "assignment": 3,
+        "iteration": 3
+      }
+    },
+    "metaballs": {
+      "calls": 2,
+      "targets": {
+        "javascript": 2
+      },
+      "classification": {
+        "candidate-syntax-only": 2
+      },
+      "resolvedFunctions": [
+        "a",
+        "b",
+        "c"
+      ],
+      "heads": [
+        "Add",
+        "At",
+        "Block",
+        "Cos",
+        "Declare",
+        "Divide",
+        "If",
+        "Integer",
+        "LessEqual",
+        "Multiply",
+        "NaN",
+        "Negate",
+        "Power",
+        "Real",
+        "Sin",
+        "String",
+        "Sum",
+        "Symbol",
+        "Tuple",
+        "a",
+        "b",
+        "c"
+      ],
+      "unknown": {},
+      "effects": {
+        "iteration": 1
+      }
+    },
+    "multibrot": {
+      "calls": 9,
+      "targets": {
+        "javascript": 4,
+        "glsl": 3,
+        "interval-js": 2
+      },
+      "classification": {
+        "candidate-syntax-only": 9
+      },
+      "resolvedFunctions": [
+        "L",
+        "M"
+      ],
+      "heads": [
+        "Add",
+        "Arctan2",
+        "AsOklab",
+        "Assign",
+        "Block",
+        "Break",
+        "Cos",
+        "Declare",
+        "Dictionary",
+        "Divide",
+        "ElementMin",
+        "If",
+        "Integer",
+        "L",
+        "Less",
+        "LessEqual",
+        "Ln",
+        "Loop",
+        "M",
+        "Max",
+        "Min",
+        "Multiply",
+        "Negate",
+        "Oklch",
+        "Power",
+        "Range",
+        "Rational",
+        "Real",
+        "Rgb",
+        "Sin",
+        "Symbol",
+        "Typed",
+        "Which"
+      ],
+      "unknown": {},
+      "effects": {
+        "assignment": 5,
+        "iteration": 5
+      }
+    },
+    "projectile-with-drag": {
+      "calls": 16,
+      "targets": {
+        "javascript": 15,
+        "glsl": 1
+      },
+      "classification": {
+        "candidate-syntax-only": 16
+      },
+      "resolvedFunctions": [],
+      "heads": [
+        "Add",
+        "At",
+        "Cos",
+        "Integer",
+        "List",
+        "Multiply",
+        "Negate",
+        "Power",
+        "Rational",
+        "Sin",
+        "Sqrt",
+        "Symbol",
+        "Tuple"
+      ],
+      "unknown": {},
+      "effects": {}
+    },
+    "rainbow-trig": {
+      "calls": 12,
+      "targets": {
+        "javascript": 6,
+        "interval-js": 6
+      },
+      "classification": {
+        "candidate-syntax-only": 12
+      },
+      "resolvedFunctions": [],
+      "heads": [
+        "Add",
+        "Rational",
+        "Sin",
+        "Symbol"
+      ],
+      "unknown": {},
+      "effects": {}
+    },
+    "three-body-problem": {
+      "calls": 18,
+      "targets": {
+        "javascript": 18
+      },
+      "classification": {
+        "candidate-syntax-only": 18
+      },
+      "resolvedFunctions": [],
+      "heads": [
+        "Add",
+        "At",
+        "Comprehension",
+        "Divide",
+        "Integer",
+        "Multiply",
+        "Negate",
+        "Power",
+        "Range",
+        "Rational",
+        "Sum",
+        "Symbol"
+      ],
+      "unknown": {},
+      "effects": {
+        "iteration": 4
+      }
+    }
+  },
+  "unknownReasons": {
+    "unmodeled-or-opaque-call": 8,
+    "unspecialized-type": 7,
+    "recursive-call": 1
+  },
+  "outsideReasons": {},
+  "functions": {
+    "L": 8,
+    "literal": 7,
+    "shade": 6,
+    "channel": 6,
+    "seg": 6,
+    "pick": 6,
+    "generations": 6,
+    "g_x": 5,
+    "n_x": 5,
+    "d_z": 5,
+    "b_y": 5,
+    "a_x": 5,
+    "d_x": 5,
+    "a_z": 5,
+    "d_y": 5,
+    "b_z": 5,
+    "a_y": 5,
+    "L_n": 5,
+    "n_z": 5,
+    "b_x": 5,
+    "n_y": 5,
+    "L_b": 5,
+    "f_x": 5,
+    "g_y": 5,
+    "f_y": 5,
+    "g_z": 5,
+    "f_z": 5,
+    "c": 4,
+    "B": 3,
+    "M": 3,
+    "tone": 3,
+    "J": 3,
+    "step": 1,
+    "a": 1,
+    "b": 1,
+    "fill": 1,
+    "admitted": 1,
+    "tangent": 1,
+    "seen": 1,
+    "fourth": 1,
+    "csqrt": 1
+  },
+  "functionBodies": 43,
+  "uniqueInputTrees": 112,
+  "sha256": "f7030a88e715a84a6725a76d045bbb5aea555fdea7edb6e02b8d1eb6480af1bf",
+  "captureAmbientMismatch": 16,
+  "callsWithResolvedBody": 40,
+  "loopCalls": 22
+}

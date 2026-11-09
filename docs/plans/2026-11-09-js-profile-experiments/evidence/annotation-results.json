@@ -1,0 +1,487 @@
+{
+  "root": "/tmp/wt-js-profile-next",
+  "timing": false,
+  "fixtureCount": 2,
+  "rows": [
+    {
+      "name": "repeated-arithmetic",
+      "cse": false,
+      "constantFold": false,
+      "nodes": 9,
+      "exactNodeReads": 11,
+      "emissionVisits": 9,
+      "preparedRootIdentical": true,
+      "codeSha256": "c06f32a93e1de59cdc4dd81aac7874beead6696fafbf5d729c41b818666c16b6",
+      "values": [
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": false
+          },
+          "value": 0.8438582128147682
+        },
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": true
+          },
+          "value": 0.8438582128147682
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": false
+          },
+          "value": 1.380426876732927
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": true
+          },
+          "value": 1.380426876732927
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": false
+          },
+          "value": 1
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": true
+          },
+          "value": 1
+        }
+      ]
+    },
+    {
+      "name": "repeated-arithmetic",
+      "cse": false,
+      "constantFold": true,
+      "nodes": 9,
+      "exactNodeReads": 11,
+      "emissionVisits": 9,
+      "preparedRootIdentical": true,
+      "codeSha256": "c06f32a93e1de59cdc4dd81aac7874beead6696fafbf5d729c41b818666c16b6",
+      "values": [
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": false
+          },
+          "value": 0.8438582128147682
+        },
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": true
+          },
+          "value": 0.8438582128147682
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": false
+          },
+          "value": 1.380426876732927
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": true
+          },
+          "value": 1.380426876732927
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": false
+          },
+          "value": 1
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": true
+          },
+          "value": 1
+        }
+      ]
+    },
+    {
+      "name": "repeated-arithmetic",
+      "cse": true,
+      "constantFold": false,
+      "nodes": 9,
+      "exactNodeReads": 11,
+      "emissionVisits": 9,
+      "preparedRootIdentical": true,
+      "codeSha256": "c06f32a93e1de59cdc4dd81aac7874beead6696fafbf5d729c41b818666c16b6",
+      "values": [
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": false
+          },
+          "value": 0.8438582128147682
+        },
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": true
+          },
+          "value": 0.8438582128147682
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": false
+          },
+          "value": 1.380426876732927
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": true
+          },
+          "value": 1.380426876732927
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": false
+          },
+          "value": 1
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": true
+          },
+          "value": 1
+        }
+      ]
+    },
+    {
+      "name": "repeated-arithmetic",
+      "cse": true,
+      "constantFold": true,
+      "nodes": 9,
+      "exactNodeReads": 11,
+      "emissionVisits": 9,
+      "preparedRootIdentical": true,
+      "codeSha256": "c06f32a93e1de59cdc4dd81aac7874beead6696fafbf5d729c41b818666c16b6",
+      "values": [
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": false
+          },
+          "value": 0.8438582128147682
+        },
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": true
+          },
+          "value": 0.8438582128147682
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": false
+          },
+          "value": 1.380426876732927
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": true
+          },
+          "value": 1.380426876732927
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": false
+          },
+          "value": 1
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": true
+          },
+          "value": 1
+        }
+      ]
+    },
+    {
+      "name": "lazy-radical",
+      "cse": false,
+      "constantFold": false,
+      "nodes": 6,
+      "exactNodeReads": 10,
+      "emissionVisits": 6,
+      "preparedRootIdentical": true,
+      "codeSha256": "30359ed65eb2eb3a0d806acabbcd6f43b7ffa66f9b4e5c7713f6d24da545b27f",
+      "values": [
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": false
+          },
+          "value": -2
+        },
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": true
+          },
+          "value": 2
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": false
+          },
+          "value": -3
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": true
+          },
+          "value": "NaN"
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": false
+          },
+          "value": 2
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": true
+          },
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "lazy-radical",
+      "cse": false,
+      "constantFold": true,
+      "nodes": 6,
+      "exactNodeReads": 10,
+      "emissionVisits": 6,
+      "preparedRootIdentical": true,
+      "codeSha256": "30359ed65eb2eb3a0d806acabbcd6f43b7ffa66f9b4e5c7713f6d24da545b27f",
+      "values": [
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": false
+          },
+          "value": -2
+        },
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": true
+          },
+          "value": 2
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": false
+          },
+          "value": -3
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": true
+          },
+          "value": "NaN"
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": false
+          },
+          "value": 2
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": true
+          },
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "lazy-radical",
+      "cse": true,
+      "constantFold": false,
+      "nodes": 6,
+      "exactNodeReads": 10,
+      "emissionVisits": 6,
+      "preparedRootIdentical": true,
+      "codeSha256": "30359ed65eb2eb3a0d806acabbcd6f43b7ffa66f9b4e5c7713f6d24da545b27f",
+      "values": [
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": false
+          },
+          "value": -2
+        },
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": true
+          },
+          "value": 2
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": false
+          },
+          "value": -3
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": true
+          },
+          "value": "NaN"
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": false
+          },
+          "value": 2
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": true
+          },
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "lazy-radical",
+      "cse": true,
+      "constantFold": true,
+      "nodes": 6,
+      "exactNodeReads": 10,
+      "emissionVisits": 6,
+      "preparedRootIdentical": true,
+      "codeSha256": "30359ed65eb2eb3a0d806acabbcd6f43b7ffa66f9b4e5c7713f6d24da545b27f",
+      "values": [
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": false
+          },
+          "value": -2
+        },
+        {
+          "input": {
+            "x": 4,
+            "y": 2,
+            "C": true
+          },
+          "value": 2
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": false
+          },
+          "value": -3
+        },
+        {
+          "input": {
+            "x": -4,
+            "y": 3,
+            "C": true
+          },
+          "value": "NaN"
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": false
+          },
+          "value": 2
+        },
+        {
+          "input": {
+            "x": 0,
+            "y": -2,
+            "C": true
+          },
+          "value": 0
+        }
+      ]
+    }
+  ]
+}

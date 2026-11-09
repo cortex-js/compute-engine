@@ -1,0 +1,24 @@
+{
+  "codex": {
+    "status": "passed",
+    "reviewer": "independent corpus_inventory agent",
+    "scope": [
+      "structured-ir.mjs",
+      "buddhabrot-partition.mts",
+      "typed-capture.patch"
+    ],
+    "findings": [],
+    "limitations": "Bounded research scope; no general compiler correctness or runtime worker claim",
+    "deltaReview": "Independent agents reviewed IR and partition deltas: no actionable findings."
+  },
+  "claude": {
+    "status": "passed-after-evidence-corrections",
+    "initialAuthenticatedExitCode": 0,
+    "deltaReviewExitCode": 0,
+    "findings": "Five low-severity evidence gaps: effect controls, cursor reducer control, retry scope, capture comparison provenance, exact verifier rejection. Corrected and delta reviewed; no regressions.",
+    "reviewFiles": [
+      "claude-review.txt",
+      "claude-delta-review.txt"
+    ]
+  }
+}

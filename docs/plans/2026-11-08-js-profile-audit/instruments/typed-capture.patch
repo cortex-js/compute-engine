@@ -1,0 +1,40 @@
+diff --git a/scripts/audit-ce-codegen.mts b/scripts/audit-ce-codegen.mts
+index 422c30a75..56c7a61df 100644
+--- a/scripts/audit-ce-codegen.mts
++++ b/scripts/audit-ce-codegen.mts
+@@ -91,6 +91,7 @@
+ import {
+   readFileSync,
+   writeFileSync,
++  appendFileSync,
+   writeSync,
+   mkdirSync,
+   readdirSync,
+@@ -359,6 +360,27 @@ function recordOneCompile(
+   expr: Expression,
+   options?: Record<string, unknown>,
+ ) {
++  try {
++  // Temporary profile census. Timings from this instrument are not benchmarks.
++  const headTypes: Record<string, number> = {};
++  const seenNodes = new Set<Expression>();
++  const todo = [expr];
++  while (todo.length && seenNodes.size < 10000) {
++    const n = todo.pop()!;
++    if (seenNodes.has(n)) continue;
++    seenNodes.add(n);
++    const key = `${n.operator || (n.symbol ? "Symbol" : "Literal")} :: ${n.type.toString()}`;
++    headTypes[key] = (headTypes[key] ?? 0) + 1;
++    if (n.ops) todo.push(...n.ops);
++    for (const key of n.keys ?? []) { const value = n.get(key); if (value) todo.push(value); }
++  }
++  appendFileSync("/tmp/js-profile-audit-results/typed-records.jsonl", JSON.stringify({
++    ...context, target: options?.to ?? "javascript", mode: options?.mode ?? "strict",
++    resultType: expr.type.toString(), headTypes, uniqueNodes: seenNodes.size,
++    truncated: todo.length > 0,
++    unknownSymbolTypes: (expr.unknowns ?? []).map((name) => ({name, type: expr.engine.box(name).type.toString()})),
++  }) + "\n");
++  } catch (e) { appendFileSync("/tmp/js-profile-audit-results/instrument-errors.log", String(e) + "\n"); }
+   const t = performance.now();
+   let latex = "(unserializable)";
+   try {

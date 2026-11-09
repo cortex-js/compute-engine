@@ -1,0 +1,34 @@
+{
+  "controlsOnly": true,
+  "controls": {
+    "reference1000Exact": true,
+    "independentReferenceWorkloads": [],
+    "duplicateSuppression": {
+      "duplicates": 1,
+      "exact": true,
+      "noPartialPublication": true
+    },
+    "supersession": {
+      "oldPublished": false,
+      "staleRejected": 1,
+      "replacementStaleRejected": 1,
+      "replacementExact": true,
+      "replyDelayMs": 50
+    },
+    "cancellation": {
+      "requestReceived": true,
+      "outcome": "terminated",
+      "noPartialPublication": true
+    },
+    "unexpectedWorkerError": {
+      "notClassifiedAsTermination": true,
+      "error": {
+        "unexpectedError": "Error: injected worker failure"
+      }
+    }
+  },
+  "cleanup": {
+    "liveOwnedWorkers": 0,
+    "exitEvents": 3
+  }
+}
