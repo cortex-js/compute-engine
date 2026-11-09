@@ -2,7 +2,11 @@
 import { isFunction } from '../boxed-expression/type-guards.js';
 import type { Expression } from '../global-types.js';
 import type { CompileTarget } from './types.js';
-import type { FragmentAnnotation, FragmentScope, FragmentValueFacts } from './fragment.js';
+import type {
+  FragmentAnnotation,
+  FragmentScope,
+  FragmentValueFacts,
+} from './fragment.js';
 
 export type ScalarRepresentation = 'number' | 'boolean' | 'complex';
 type Facts = FragmentValueFacts<ScalarRepresentation>;
@@ -55,9 +59,13 @@ function assertPolicy(
   artifact: OwnedArtifact,
   target: CompileTarget<Expression>
 ): void {
-  const changed = policyKeys.find((key) => target[key] !== artifact.policy[key]);
+  const changed = policyKeys.find(
+    (key) => target[key] !== artifact.policy[key]
+  );
   if (changed)
-    throw new Error(`JS scalar fragment invariant: different prepared policy (${changed})`);
+    throw new Error(
+      `JS scalar fragment invariant: different prepared policy (${changed})`
+    );
 }
 
 function facts(artifact: OwnedArtifact, node: Expression): Facts {
@@ -84,8 +92,14 @@ export function bindScalarFragmentFunction(
   const artifact = (outer as AnnotatedTarget)[artifactKey];
   if (artifact === undefined) return;
   assertPolicy(artifact, outer);
-  if (artifact.functionRoot !== fn || artifact.root !== body || artifact.annotation)
-    throw new Error('JS scalar fragment invariant: different prepared function');
+  if (
+    artifact.functionRoot !== fn ||
+    artifact.root !== body ||
+    artifact.annotation
+  )
+    throw new Error(
+      'JS scalar fragment invariant: different prepared function'
+    );
   attachScalarFragment(inner, artifact);
 }
 
@@ -99,19 +113,31 @@ export function bindScalarFragmentBlock(
   const artifact = (outer as AnnotatedTarget)[artifactKey];
   if (artifact === undefined) return;
   assertPolicy(artifact, outer);
-  const scope = block === undefined ? undefined : artifact.scope?.inner.get(block);
-  if (!scope || block === undefined || !isFunction(block, 'Block') ||
-      block !== artifact.current || block !== artifact.root ||
-      statements.length !== block.nops ||
-      statements.some((statement, i) => statement !== block.ops[i]))
+  const scope =
+    block === undefined ? undefined : artifact.scope?.inner.get(block);
+  if (
+    !scope ||
+    block === undefined ||
+    !isFunction(block, 'Block') ||
+    block !== artifact.current ||
+    block !== artifact.root ||
+    statements.length !== block.nops ||
+    statements.some((statement, i) => statement !== block.ops[i])
+  )
     throw new Error('JS scalar fragment invariant: different prepared block');
-  const policy = Object.fromEntries(policyKeys.map(key => [key, inner[key]])) as Policy;
+  const policy = Object.fromEntries(
+    policyKeys.map((key) => [key, inner[key]])
+  ) as Policy;
   (inner as AnnotatedTarget)[artifactKey] = {
     ...artifact,
     policy,
     scope,
-    statements: new Set(statements.filter(statement =>
-      statement.operator === 'Declare' || statement.operator === 'Assign')),
+    statements: new Set(
+      statements.filter(
+        (statement) =>
+          statement.operator === 'Declare' || statement.operator === 'Assign'
+      )
+    ),
     current: undefined,
   };
 }

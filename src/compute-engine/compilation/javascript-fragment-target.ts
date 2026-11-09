@@ -10,7 +10,10 @@ import {
 import { isSubtype } from '../../common/type/subtype.js';
 import { JavaScriptTarget } from './javascript-target.js';
 import { BaseCompiler } from './base-compiler.js';
-import { functionLiteralParameterName, functionLiteralParameterType } from '../boxed-expression/function-literal.js';
+import {
+  functionLiteralParameterName,
+  functionLiteralParameterType,
+} from '../boxed-expression/function-literal.js';
 import { declaredTypeSource } from './compile-declarations.js';
 import { isLibraryOperator } from './builtin-callback.js';
 import {
@@ -148,7 +151,10 @@ function scalarType(type: Type) {
   return undefined;
 }
 
-function attachBoundFunction(fn: Expression, target: CompileTarget<Expression>): void {
+function attachBoundFunction(
+  fn: Expression,
+  target: CompileTarget<Expression>
+): void {
   if (!isFunction(fn, 'Function')) return;
   if (!isLibraryOperator(fn, 'Function'))
     throw new Error('JS scalar fragment: shadowed function constructor');
@@ -157,62 +163,108 @@ function attachBoundFunction(fn: Expression, target: CompileTarget<Expression>):
     const name = functionLiteralParameterName(parameter);
     const declared = functionLiteralParameterType(parameter);
     const type = declared === undefined ? undefined : scalarType(declared);
-    if (!isFunction(parameter, 'Typed') || parameter.nops !== 2 ||
-        !name || !type || name === 'True' || name === 'False' ||
-        inputs.some(input => input.name === name))
-      throw new Error('JS scalar fragment: explicit distinct scalar parameters required');
+    if (
+      !isFunction(parameter, 'Typed') ||
+      parameter.nops !== 2 ||
+      !name ||
+      !type ||
+      name === 'True' ||
+      name === 'False' ||
+      inputs.some((input) => input.name === name)
+    )
+      throw new Error(
+        'JS scalar fragment: explicit distinct scalar parameters required'
+      );
     inputs.push({ name, type, declared: type.kind });
   }
   const body = fn.op1.canonical;
-  if (!isFunction(body, 'Block') || body.nops < 2 || !isLibraryOperator(body, 'Block'))
-    throw new Error('JS scalar fragment: a bound body requires one straight-line block');
+  if (
+    !isFunction(body, 'Block') ||
+    body.nops < 2 ||
+    !isLibraryOperator(body, 'Block')
+  )
+    throw new Error(
+      'JS scalar fragment: a bound body requires one straight-line block'
+    );
   const declaration = body.op1;
-  if (!isFunction(declaration, 'Declare') || !isLibraryOperator(declaration, 'Declare') || declaration.nops !== 3 ||
-      !isSymbol(declaration.op1))
-    throw new Error('JS scalar fragment: one explicit initialized local required');
+  if (
+    !isFunction(declaration, 'Declare') ||
+    !isLibraryOperator(declaration, 'Declare') ||
+    declaration.nops !== 3 ||
+    !isSymbol(declaration.op1)
+  )
+    throw new Error(
+      'JS scalar fragment: one explicit initialized local required'
+    );
   const local = declaration.op1.symbol;
   const declared = declaredTypeSource(declaration.op2);
-  if (!declared || !['real', 'integer', 'complex', 'boolean'].includes(declared) ||
-      inputs.some(input => input.name === local) || local === 'True' || local === 'False')
+  if (
+    !declared ||
+    !['real', 'integer', 'complex', 'boolean'].includes(declared) ||
+    inputs.some((input) => input.name === local) ||
+    local === 'True' ||
+    local === 'False'
+  )
     throw new Error('JS scalar fragment: unsupported local declaration');
-  const names = new Set(inputs.map(input => input.name));
+  const names = new Set(inputs.map((input) => input.name));
   const checkValue = (node: Expression): void => {
     if (!node.isValid || node.type.type === 'error')
       throw new Error('JS scalar fragment: invalid bound expression');
     if (isNumber(node)) return;
     if (isSymbol(node)) {
-      if (names.has(node.symbol) || node.symbol === 'True' || node.symbol === 'False') return;
+      if (
+        names.has(node.symbol) ||
+        node.symbol === 'True' ||
+        node.symbol === 'False'
+      )
+        return;
       throw new Error(`JS scalar fragment: unsupported capture ${node.symbol}`);
     }
     // Sqrt is excluded here: a write can change the sign of a local, so its
     // initializer cannot determine whether a later square root is complex.
-    if (!isFunction(node) || !['Add', 'Negate', 'If'].includes(node.operator) ||
-        !isLibraryOperator(node, node.operator) ||
-        (node.operator === 'Negate' && node.nops !== 1) ||
-        (node.operator === 'If' && node.nops !== 3))
-      throw new Error(`JS scalar fragment: unsupported bound head ${node.operator}`);
+    if (
+      !isFunction(node) ||
+      !['Add', 'Negate', 'If'].includes(node.operator) ||
+      !isLibraryOperator(node, node.operator) ||
+      (node.operator === 'Negate' && node.nops !== 1) ||
+      (node.operator === 'If' && node.nops !== 3)
+    )
+      throw new Error(
+        `JS scalar fragment: unsupported bound head ${node.operator}`
+      );
     for (const operand of node.ops) checkValue(operand);
   };
   checkValue(declaration.op3);
   names.add(local);
   for (const statement of body.ops.slice(1, -1)) {
-    if (!isFunction(statement, 'Assign') || !isLibraryOperator(statement, 'Assign') || statement.nops !== 2 ||
-        !isSymbol(statement.op1) || statement.op1.symbol !== local)
-      throw new Error('JS scalar fragment: only writes to the declared local are supported');
+    if (
+      !isFunction(statement, 'Assign') ||
+      !isLibraryOperator(statement, 'Assign') ||
+      statement.nops !== 2 ||
+      !isSymbol(statement.op1) ||
+      statement.op1.symbol !== local
+    )
+      throw new Error(
+        'JS scalar fragment: only writes to the declared local are supported'
+      );
     checkValue(statement.op2);
   }
   checkValue(body.ops[body.nops - 1]);
   const boundNumeric: FragmentRule<ScalarRepresentation> = {
     walk: (node, scope, context, w) => {
       const operands = isFunction(node) ? node.ops : [];
-      const complex = operands.some(operand =>
-        w.value(operand, scope, context).representation === 'complex');
+      const complex = operands.some(
+        (operand) =>
+          w.value(operand, scope, context).representation === 'complex'
+      );
       const lane = complex ? 'complex' : 'real';
-      return w.signatures(node, scope, context, [{
-        operands: [lane],
-        ...(node.operator === 'Add' ? { rest: lane } : {}),
-        result: lane,
-      }]);
+      return w.signatures(node, scope, context, [
+        {
+          operands: [lane],
+          ...(node.operator === 'Add' ? { rest: lane } : {}),
+          result: lane,
+        },
+      ]);
     },
   };
   const boundDefinition: FragmentDefinition<ScalarRepresentation> = {
@@ -238,11 +290,17 @@ function attachBoundFunction(fn: Expression, target: CompileTarget<Expression>):
         throw new Error('JS scalar fragment invariant: missing local binding');
       for (const statement of body.ops.slice(0, -1)) {
         if (!isFunction(statement)) continue;
-        const value = statement.operator === 'Declare' ? statement.op3 : statement.op2;
+        const value =
+          statement.operator === 'Declare' ? statement.op3 : statement.op2;
         const valueFacts = scope.facts.get(value);
-        if (!valueFacts || !('representation' in valueFacts) ||
-            valueFacts.representation !== binding.representation)
-          throw new Error('JS scalar fragment: local writes must preserve representation');
+        if (
+          !valueFacts ||
+          !('representation' in valueFacts) ||
+          valueFacts.representation !== binding.representation
+        )
+          throw new Error(
+            'JS scalar fragment: local writes must preserve representation'
+          );
       }
       return annotation;
     },
