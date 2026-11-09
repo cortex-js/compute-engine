@@ -125,9 +125,11 @@ test('named-body handoff rejects changed identity, scopes, policy and hidden arg
   const scope: FragmentScope<'number'> = {
     bindings: new Map(), facts: new Map([[call, { ...real,
       conversions: [{ kind: 'none' as const, ...real }] }]]), inner: new Map(),
+    statements: new Set(),
   };
   const functionScope: FragmentScope<'number'> = {
     parent: scope, bindings: new Map(), facts: new Map([[body, real]]), inner: new Map(),
+    statements: new Set(),
   };
   const target = { rootExpression: call, mode: 'strict' } as CompileTarget<Expression>;
   attachScalarFragment(target, { root: call, helper: { name: 'helper', literal, body },

@@ -39,7 +39,10 @@ import {
   userFunctionParamType,
 } from './compile-user-calls.js';
 import { definitionBodyExpr, userFunctionIsGeneric } from './compile-cse.js';
-import { constantFoldValue } from './compiler-core.js';
+import {
+  constantFoldValue,
+  userCallSpecialization,
+} from './compiler-core.js';
 import { core } from './compiler-core-hooks.js';
 import {
   inlinePointCalls,
@@ -2095,24 +2098,6 @@ function glslFunctionOf(
           (declared === undefined || isSubtype('list<number>', declared))))
   );
 
-  // The body that the emitter compiles, prepared by the same two functions
-  // as the emission: `definitionBodyExpr()` (the angular unit, the `parallel
-  // for` heads and `+=` lowered, the collection-valued calls inlined, the
-  // collections of fixed width unrolled), which `prepareUserFunctionBody()`
-  // calls, then `shaderFunctionBody()`, which the `define` hook of the
-  // shader targets calls. With no registry of user functions, the compiler
-  // emits no definition, and the body has the lowering only.
-  const registry = target.userFunctions;
-  const definitionBody =
-    registry === undefined
-      ? undefined
-      : definitionBodyExpr(emitted, target, registry, h);
-  const prepared = shaderFunctionBody(
-    definitionBody ?? bodyWithParallelHeadsLowered(body, target),
-    target,
-    parameterNames
-  );
-
   // The emitter writes each parameter name unchanged into the shader
   // function, and refuses a name that GLSL reserves (the `define` hook of
   // `gpu-shader-target.ts`, `gpuCheckIdentifier()`). When it refuses, it
@@ -2137,6 +2122,51 @@ function glslFunctionOf(
       : undefined;
   const inlined = substituted !== undefined;
   if (inlined) key = `${h}#inlined`;
+
+  // The body that the emitter compiles, prepared by the same two functions
+  // as the emission: `definitionBodyExpr()` (the angular unit, the `parallel
+  // for` heads and `+=` lowered, the collection-valued calls inlined, the
+  // collections of fixed width unrolled), which `prepareUserFunctionBody()`
+  // calls, then `shaderFunctionBody()`, which the `define` hook of the
+  // shader targets calls. With no registry of user functions, the compiler
+  // emits no definition, and the body has the lowering only.
+  const registry = target.userFunctions;
+  // A call whose arguments have narrower types than the parameters (a
+  // `real` argument at a parameter with no declared type) is emitted from
+  // a copy of the literal whose parameters have the types of the arguments,
+  // under the key of the definition (`userCallSpecialization()`, with
+  // `scalarDefinition`). The preparation of the body reads the types of its
+  // nodes, and these differ in the copy: in `g(k) := (j := k; (v, j) :=
+  // step(j); …)`, the local `j` is a `number` in the copy and has no type
+  // in the literal, and a call of a tuple-valued `step(j)` is replaced by
+  // the body of `step` only when its argument is a number. So when this
+  // call takes the copy, the body is prepared from the copy, as the emitter
+  // would prepare it. The entry of the function keeps the body of the
+  // first call that the pass types, and the `define` hook of the shader
+  // targets compiles that body, whichever call emits the definition: the
+  // emitter writes the tree that the pass typed. A call that is written in
+  // place (the key `h#inlined` above) takes no copy: the emitter
+  // substitutes its arguments into the body of the literal.
+  if (registry !== undefined && key === h) {
+    const specialization = userCallSpecialization(
+      engine,
+      h,
+      literal,
+      args,
+      target
+    );
+    if (specialization?.scalarDefinition === true)
+      emitted = specialization.specialized;
+  }
+  const definitionBody =
+    registry === undefined
+      ? undefined
+      : definitionBodyExpr(emitted, target, registry, h);
+  const prepared = shaderFunctionBody(
+    definitionBody ?? bodyWithParallelHeadsLowered(body, target),
+    target,
+    parameterNames
+  );
 
   return {
     key,

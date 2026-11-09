@@ -955,6 +955,7 @@ function compileExpression(
   // (`_codeAliases`) is read when there is no override.
   const fixed = _codeOverrides.get(expr) ?? _codeAliases.get(expr);
   if (fixed !== undefined) return fixed;
+  CompilerState._emitProbe?.(expr, target);
   if (!expr.isValid) {
     throw new Error(
       `Could not compile invalid expression: "${expr.toString()}"`
@@ -5667,13 +5668,21 @@ export function walkMatchShape(
 }
 
 /**
- * The emission part of `trySpecializedUserCall`: emit the call-shape
- * specialization of `h` that the call `h(args)` uses, and return its name
- * with what the call site needs to know. `undefined` when the call takes
- * no specialization. Also used to find the definition whose lane a call
- * returns (`userCallDefinition`), before the call is compiled.
+ * The call-shape specialization of `h` that the call `h(args)` uses: a copy
+ * of `literal` whose parameters have the types of the arguments
+ * (`specialized`), the key of the copy in the registry of user functions
+ * and what the call site needs to know. `undefined` when the call takes no
+ * specialization. It emits nothing. The copy is made once per key and kept
+ * in `registry.specializations`, so two calls of this function for the
+ * same key give the same tree.
+ *
+ * A specialization with `scalarDefinition` is emitted under the key `h`,
+ * the key of the definition itself. The typing pass of the GLSL target
+ * prepares the body of the function from this copy for such a call
+ * (`glslFunctionOf()` in `glsl-fragment.ts`), so that it types the tree
+ * that the emitter writes.
  */
-export function ensureSpecializedUserCallEmitted(
+export function userCallSpecialization(
   engine: ComputeEngine,
   h: string,
   literal: Expression & FunctionInterface,
@@ -5681,7 +5690,10 @@ export function ensureSpecializedUserCallEmitted(
   target: CompileTarget<Expression>
 ):
   | {
-      name: string;
+      specialized: Expression & FunctionInterface;
+      key: string;
+      types: Type[];
+      pointWidths: (number | undefined)[];
       scalarDefinition: boolean;
       listArgument: boolean;
       bindsListsWhole: boolean;
@@ -6138,6 +6150,63 @@ export function ensureSpecializedUserCallEmitted(
     cache.set(key, specialized);
   }
   if (!isFunction(specialized, 'Function')) return undefined;
+  return {
+    specialized,
+    key,
+    types,
+    pointWidths,
+    scalarDefinition,
+    listArgument,
+    bindsListsWhole,
+    rangeKey: rangeTypes === undefined ? undefined : key,
+    absentPointAt,
+  };
+}
+
+/**
+ * The emission part of `trySpecializedUserCall`: emit the call-shape
+ * specialization of `h` that the call `h(args)` uses
+ * (`userCallSpecialization()`), and return its name with what the call
+ * site needs to know. `undefined` when the call takes no specialization.
+ * Also used to find the definition whose lane a call returns
+ * (`userCallDefinition`), before the call is compiled.
+ */
+export function ensureSpecializedUserCallEmitted(
+  engine: ComputeEngine,
+  h: string,
+  literal: Expression & FunctionInterface,
+  args: readonly Expression[],
+  target: CompileTarget<Expression>
+):
+  | {
+      name: string;
+      scalarDefinition: boolean;
+      listArgument: boolean;
+      bindsListsWhole: boolean;
+      /** The specialization key, for a range specialization only. */
+      rangeKey?: string;
+      /**
+       * The position of an argument that is one point that may be absent
+       * (`absentPointType()`), or -1. The call gives the absent value to
+       * the definition for a scalar (`absentPointFork()`).
+       */
+      absentPointAt: number;
+    }
+  | undefined {
+  const found = userCallSpecialization(engine, h, literal, args, target);
+  if (found === undefined) return undefined;
+  const registry = target.userFunctions!;
+  const {
+    specialized,
+    key,
+    types,
+    pointWidths,
+    scalarDefinition,
+    listArgument,
+    bindsListsWhole,
+    rangeKey,
+    absentPointAt,
+  } = found;
   // The copy types each parameter with the static type of its argument, so
   // a node of its body can have the static type `error` where the
   // definition with the declared types has none. The check of the root
@@ -6177,7 +6246,7 @@ export function ensureSpecializedUserCallEmitted(
     scalarDefinition,
     listArgument,
     bindsListsWhole,
-    rangeKey: rangeTypes === undefined ? undefined : key,
+    rangeKey,
     absentPointAt,
   };
 }
@@ -6925,35 +6994,27 @@ export function emitFunctionLiteralDefinition(
       const lowering = registry.lowering;
       if (lowering) {
         try {
-          // The body of a target-lowered definition gets its OWN nested
-          // harvest scope, exactly as the JavaScript arrow form below does:
-          // the body is not part of the root tree, so without a harvest of
-          // its own nothing inside it is ever a candidate and a subexpression
-          // repeated in the body is emitted — and evaluated — once per
-          // occurrence. A shader function body is a statement position with a
-          // hoist sink, which is where the temporaries land
-          // (`CompileTarget.cseMaterialize`). The Tycho code-generation audit
-          // of 2026-09-08 measured this on the GLSL corpus: no `_fn_*` body
-          // carried a single temporary, while bodies calling the same
-          // function twice were common.
+          // The hook opens the common-subexpression harvest of the body
+          // itself, on the tree that it compiles: a shader target compiles
+          // the body that its typing pass typed, which is another copy of
+          // `bodyExpr`, and a harvest of `bodyExpr` would share none of its
+          // nodes (`CompileTarget.userFunctions.lowering.define`).
           const def = withEnforcedParams(literal, () =>
-            withNestedCseHarvest(bodyExpr, bodyTarget, params, () =>
-              lowering.define({
-                id: h,
-                name,
-                key: prefixed?.key ?? specialization?.key ?? h,
-                params,
-                body: bodyExpr,
-                literal,
-                parameterTypes: specialization?.types,
-                parameterPositions: specialization?.positions,
-                target: bodyTarget,
-                extraParams: prefixed?.prefixes.map((p, i) => ({
-                  name: extraParams[i],
-                  expr: p.expr,
-                })),
-              })
-            )
+            lowering.define({
+              id: h,
+              name,
+              key: prefixed?.key ?? specialization?.key ?? h,
+              params,
+              body: bodyExpr,
+              literal,
+              parameterTypes: specialization?.types,
+              parameterPositions: specialization?.positions,
+              target: bodyTarget,
+              extraParams: prefixed?.prefixes.map((p, i) => ({
+                name: extraParams[i],
+                expr: p.expr,
+              })),
+            })
           );
           // Wave 3 of the 2026-08-12 contradicted-declaration ruling, as a
           // BACKSTOP on what `define` was willing to emit. A lowering that

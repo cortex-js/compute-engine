@@ -265,10 +265,10 @@ function glslPassBudget(option: unknown): number | undefined {
 /**
  * The entry of the user function `id` in the fragment annotation, under the
  * registry key `key` of its definition (`f`, or `f#bind…` for a variant that
- * reads a list input by name). A definition under another key (a
- * specialization by the types of its arguments, `f_complex`, or an
- * invariant-prefix variant) has no entry: its parameter types are those of
- * the specialization, which the `define` hook reads as before.
+ * reads a list input by name). A definition under another key (a copy
+ * typed by the arguments under a key of its own, such as the complex copy
+ * `f#complex`, or an invariant-prefix variant) has no entry: its parameter
+ * types are those of the copy, which the `define` hook reads as before.
  */
 function gpuAnnotationEntry(
   annotation: FragmentAnnotation<GlslRepresentation> | undefined,
@@ -1091,16 +1091,26 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           parameterPositions,
           extraParams,
         }) => {
-          // The point values and the point-valued calls of the body written
-          // in place, for this compilation only. The fragment pass prepares
-          // the body that it types with the same function. The nodes of
-          // this body are new, and the pass did not type them: the body
-          // that the pass typed is `FragmentAnnotation.functions.get(key)`.
-          // The two bodies can differ: the stored body of the definition
-          // has a call of a tuple-valued function already replaced by its
-          // body, where the pass typed the call. So the emitter does not
-          // check that the two are the same.
-          const body = shaderFunctionBody(storedBody, target, params);
+          // The entry of the function in the fragment annotation of this
+          // compilation: the body that the pass typed, its signature (the
+          // type of each parameter and of the result) and its scope, where
+          // the pass bound the parameters and typed each node of the body.
+          const entry = gpuAnnotationEntry(this.currentAnnotation, id, key);
+          // The body that is compiled. With an entry, it is the body of the
+          // entry, so that each node that the emitter writes has facts in
+          // the annotation. Without an entry (no annotation, or a definition
+          // that the pass did not type under this key: a copy typed by the
+          // arguments under a key of its own, such as the complex copy
+          // (key `f#complex`, emitted as `_fn_f_complex`), or an
+          // invariant-prefix variant, whose code
+          // overrides are keyed by the nodes of the stored body), it is the
+          // stored body with the point values and the
+          // point-valued calls written in place (`shaderFunctionBody()`, the
+          // preparation that the pass runs on the body that it types).
+          const body =
+            entry !== undefined
+              ? entry.body
+              : shaderFunctionBody(storedBody, target, params);
           // The generated name is emitted bare; a shader reserved word here
           // would be source no driver accepts (D6).
           gpuCheckIdentifier(name, language);
@@ -1125,17 +1135,12 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           const vectorFrame = new Map<string, number>();
           const colors: boolean[] = [];
           const complexParams: boolean[] = [];
-          // The entry of the function in the fragment annotation of this
-          // compilation: its signature (the type of each parameter and of
-          // the result) and its scope, where the pass bound the parameters.
-          // The signature then comes from the annotation, so that the
-          // emitted declaration is the one that the pass checked each call
-          // against: a parameter with no declared type has the type of its
-          // argument (the spec, decision 11), not a `float`. A definition
-          // that the annotation does not hold (no annotation, or a variant
-          // that the pass did not type under this key) keeps the reading of
-          // the declared signature below.
-          const entry = gpuAnnotationEntry(this.currentAnnotation, id, key);
+          // The signature comes from the annotation, so that the emitted
+          // declaration is the one that the pass checked each call against:
+          // a parameter with no declared type has the type of its argument
+          // (the spec, decision 11), not a `float`. A definition that the
+          // annotation does not hold keeps the reading of the declared
+          // signature below.
           const signature =
             entry !== undefined &&
             entry.type.kind === 'function' &&
@@ -1338,6 +1343,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 // The scope of the function in the annotation, where the
                 // pass typed the nodes of the body.
                 fragmentScope: entry?.scope,
+                fragmentBody: entry?.body,
                 onReturn: (value) => {
                   const t =
                     value === undefined
@@ -1358,7 +1364,21 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                   );
                 },
               };
-              const code = BaseCompiler.compileFunctionBody(body, bodyTarget);
+              // The body gets a common-subexpression harvest of its own: it
+              // is not part of the root tree, so without one no node of the
+              // body is a candidate, and a subexpression repeated in the
+              // body is written, and evaluated, once per occurrence. The
+              // harvest is of `body`, the tree that is compiled: the
+              // harvest finds the repeated nodes by identity, so a harvest
+              // of another copy of the body shares nothing. A shader
+              // function body is a statement position, and the temporaries
+              // are declared in it (`CompileTarget.cseMaterialize`).
+              const code = BaseCompiler.withNestedCseHarvest(
+                body,
+                bodyTarget,
+                params,
+                () => BaseCompiler.compileFunctionBody(body, bodyTarget)
+              );
               // The lane of the value, read by the call sites
               // (`BaseCompiler.userCallLane`): a `vec2` return type is also
               // the type of a two-component point, so the return type alone

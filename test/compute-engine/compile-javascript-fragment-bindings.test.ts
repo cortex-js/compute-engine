@@ -131,9 +131,11 @@ test('scope handoffs reject foreign bodies, statements, nodes and policies', () 
   const value = { type: { kind: 'real' as const }, representation: 'number' as const };
   const root: FragmentScope<'number'> = {
     bindings: new Map(), facts: new Map([[body, value], [rootOnly, value]]), inner: new Map(),
+    statements: new Set(),
   };
   const block: FragmentScope<'number'> = {
     parent: root, bindings: new Map(), facts: new Map([[final, value]]), inner: new Map(),
+    statements: new Set(),
   };
   root.inner.set(body, block);
   const outer = { rootExpression: fn, mode: 'strict' } as CompileTarget<Expression>;

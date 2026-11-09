@@ -464,6 +464,19 @@ export class CompilerState {
    */
   static _rootAdmission = false;
   /**
+   * For tests only: a function that `compile()` calls with each node whose
+   * code it writes, and the target that it writes it for, before it writes
+   * the code. A node whose code is fixed by an override (a code override or
+   * an alias) is not passed. A test of the GLSL target sets it to check
+   * that every node written in the body of a user function has facts in
+   * the annotation of the typing pass (`FragmentTargetFields.fragmentScope`,
+   * `fragmentNodeIsTyped()` in `fragment.ts`). It is `undefined` outside a
+   * test, and the compiler then does nothing for it.
+   */
+  static _emitProbe:
+    | ((expr: Expression, target: CompileTarget<Expression>) => void)
+    | undefined = undefined;
+  /**
    * The admission checks of the outermost compilation in progress: its
    * root, its target, and the value with no settled shape that
    * `unsettledShapeIn()` found before the code was generated. `compile()`

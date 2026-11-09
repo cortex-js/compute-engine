@@ -128,6 +128,11 @@ export type FragmentScope<R> = {
   readonly bindings: Map<string, FragmentFacts<R>>;
   /** The facts of each node that was typed in this scope. */
   readonly facts: Map<Expression, FragmentFacts<R>>;
+  /** The statements (an `Assign`, a `Loop`, a `Break`, ...) that the pass
+   *  checked in this scope. A statement has no facts in `facts`: it is
+   *  checked again at each use, because a `Break` is valid in a loop and
+   *  not outside one. */
+  readonly statements: Set<Expression>;
   /** The scope that a node of this scope opens. Only a node that binds a
    *  name opens one: a block, a loop, a `Sum` or a `Product`. A function
    *  opens its scope in `FragmentAnnotation.functions`. */
@@ -577,7 +582,13 @@ function opsOf(node: Expression): readonly Expression[] {
 }
 
 function newScope<R>(parent?: FragmentScope<R>): FragmentScope<R> {
-  return { parent, bindings: new Map(), facts: new Map(), inner: new Map() };
+  return {
+    parent,
+    bindings: new Map(),
+    facts: new Map(),
+    statements: new Set(),
+    inner: new Map(),
+  };
 }
 
 function isValueFacts<R>(
@@ -679,12 +690,18 @@ export function fragmentFactsOf<R>(
  *   code: the root scope, or the scope of the user function whose body it
  *   writes. A block, a loop and an aggregate inside open inner scopes, which
  *   `fragmentFactsUnder()` searches.
+ * - `fragmentBody`: in the body of a user function, the body of its entry
+ *   in `FragmentAnnotation.functions`, which the pass typed in
+ *   `fragmentScope` and which the emitter writes. A node that the emitter
+ *   writes and that is not a node of this tree is a node that emission
+ *   made (a folded constant, an unrolled term).
  * - `fragmentPassBudget`: the pass cap of the evaluation (the
  *   `iterationBudget` option). Each loop that the emitter writes counts its
  *   passes when it is set.
  */
 export type FragmentTargetFields<R> = {
   fragmentScope?: FragmentScope<R>;
+  fragmentBody?: Expression;
   fragmentPassBudget?: number;
 };
 
@@ -754,6 +771,24 @@ function typedUnder<R>(scope: FragmentScope<R>, node: Expression): boolean {
   for (const inner of scope.inner.values())
     if (typedUnder(inner, node)) return true;
   return false;
+}
+
+/**
+ * Whether the pass typed `node` where the emitter writes code under
+ * `scope`: `node` has facts in `scope` or in a scope inside it, or is a
+ * statement that the pass checked there, or a trusted lowering made `node`
+ * and `fragmentReplaceOperands()` accepted it. A test reads it to check
+ * that the emitter writes only the nodes that the pass typed
+ * (`CompilerState._emitProbe`).
+ */
+export function fragmentNodeIsTyped<R>(
+  scope: FragmentScope<R>,
+  node: Expression
+): boolean {
+  if (LOWERED_NODES.has(node) || typedUnder(scope, node)) return true;
+  const checked = (s: FragmentScope<R>): boolean =>
+    s.statements.has(node) || [...s.inner.values()].some(checked);
+  return checked(scope);
 }
 
 /**
@@ -1196,7 +1231,9 @@ function makeWalker<R>(
         facts = computeFacts(node, scope, context);
         // A statement is checked against its loop at each use, so its facts
         // are not kept: a `Break` is valid in one loop and not outside it.
+        // The statement is recorded as checked.
         if (facts.type.kind !== 'statement') scope.facts.set(node, facts);
+        else scope.statements.add(node);
       }
       checkPlace(node, facts, context);
       return facts;
@@ -2548,6 +2585,7 @@ export function walkBlock<R>(
           name
         );
       w.bind(s.op1, inner, name, type, 'local');
+      inner.statements.add(s);
       last = { type: { kind: 'statement' } };
       if (place !== 'statement')
         w.refuse(
@@ -2559,6 +2597,7 @@ export function walkBlock<R>(
     }
     if (isFunction(s, 'Declare')) {
       walkDeclare(s, inner, { ...context, place: 'value' }, w);
+      inner.statements.add(s);
       last = { type: { kind: 'statement' } };
       if (place !== 'statement')
         w.refuse(

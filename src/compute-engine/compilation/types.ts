@@ -2058,6 +2058,14 @@ export interface CompileTarget<Expr = unknown> {
        * compiled body. Called once per function, with the body's parameters
        * already shadowed on `target`. Anything it cannot type statically it
        * must fail closed on.
+       *
+       * The hook opens the nested common-subexpression harvest of the body
+       * that it compiles (`withNestedCseHarvest()`, with `params` as the
+       * shadowed names). The caller opens none, because the hook can
+       * compile another tree than `body`: the shader targets compile the
+       * body that their typing pass typed. Without a harvest, a
+       * subexpression repeated in the body is written, and evaluated, once
+       * per occurrence.
        */
       define: (ctx: {
         /** The engine symbol being emitted (`f`). */

@@ -305,6 +305,33 @@ invariant-prefix variant, whose code overrides are keyed by nodes of
 `bodyExpr`) keep the current route until their own preparation moves; the
 removal session lists them.
 
+**The result of CE-1177** (2026-11-09, base `c8bf12127`). The `define`
+hook compiles the body of the annotation entry, and opens the nested
+common-subexpression harvest on it; `compiler-core.ts` opens none for a
+target-lowered definition. The two tests of the definition route had one
+cause, not two: a call with a `real` argument at a parameter with no declared
+type is emitted from a copy of the literal typed by the arguments, under the
+key of the definition (`userCallSpecialization()`, split from
+`ensureSpecializedUserCallEmitted()`). The node types of the copy differ
+(`j := k` is a `number` in the copy of `g(k)`), so `definitionBodyExpr()`
+substitutes `step(j)` in the copy and not in the literal, and keeps
+`theta_0(x, y)` a call in the copy and not in the literal. `glslFunctionOf()`
+now prepares the body from the same copy, unless the call is written in place
+(key `h#inlined`). A definition with no entry (a copy under a key of its own,
+`f#complex`; an invariant-prefix variant) keeps the old route. Measures: the
+233 GLSL test files (11,348 tests) write the same GLSL, byte for byte; the
+nodes of a typed body written without facts went from 5,111 compilations
+(the run of 2026-11-09) to 0, and the new test
+`ce-1177-glsl-function-body-typed.test.ts` checks it
+(`CompilerState._emitProbe`; the pass records the statements it checked in
+`FragmentScope.statements`). 171 compilations of nodes that emission makes
+(folded constants, unrolled terms, destructuring temporaries, a derivative)
+are outside the typed body and remain for the step 5 sessions that move those
+rewrites. `npm run test:glsl`: 0 disagreements. Tycho's whole-corpus codegen
+audit through `CE_ALT_PKG` (764 documents, 17,421 records): 0 changed code, 0
+new declines, 0 disagreements of `canCompile()` with `compile()`. The review
+found an older disagreement, filed as CE-1184.
+
 **CE-1176: option (a) is recommended, inside step 5, in the session of
 `gpu-draw-order.ts`.** Each piece of caller code is bound to a local once,
 in the order of the interpreter, at the start of its statement. A piece in
