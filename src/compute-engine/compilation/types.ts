@@ -154,6 +154,11 @@ export type CompileDiagnosticKind = 'capability' | 'correctness';
  *   for a `'static-type-error'` decline, the sub-expression of type `error`,
  *   as `toString()` writes it; for a warning, the expression it is about, as
  *   `toString()` writes it.
+ * - `operator` — the head of the node that the diagnostic is about, when it
+ *   is a function expression: for an `'outside-fragment'` decline of
+ *   `canCompile()`, the head of the first node outside the fragment of the
+ *   target (`Integrate`). A host counts declines by head with it, without
+ *   parsing `value`.
  */
 export type CompileDiagnostic = {
   code: string;
@@ -162,6 +167,7 @@ export type CompileDiagnostic = {
   boundary?: string;
   binding?: string;
   value?: string;
+  operator?: string;
 };
 
 /**

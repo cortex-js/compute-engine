@@ -4,7 +4,11 @@
 export const version = '{{SDK_VERSION}}';
 
 // The compile() function — takes an Expression and produces code
-export { compile } from './compute-engine/compilation/compile-expression.js';
+export {
+  compile,
+  canCompile,
+} from './compute-engine/compilation/compile-expression.js';
+export type { CanCompileResult } from './compute-engine/compilation/compile-expression.js';
 
 // Built-in compilation targets
 export { JavaScriptTarget } from './compute-engine/compilation/javascript-target.js';

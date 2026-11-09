@@ -21,6 +21,15 @@ import type {
 } from './types.js';
 import { compileDiagnosticOf } from './diagnostics.js';
 import { resolveStorageHints } from './storage-hints.js';
+import {
+  fragmentErrorDiagnostic,
+  fragmentRefusalDiagnostic,
+  typeFragment,
+} from './fragment.js';
+import type { CanCompileResult } from './fragment.js';
+import { glslFragmentDefinition } from './glsl-fragment.js';
+import { strictTypesError } from './compile-expression.js';
+import { resolveCompileMode } from './compile-lanes.js';
 import { BaseCompiler, explicitBroadcastPointNorm } from './base-compiler.js';
 import {
   isNonRealNumber,
@@ -1460,6 +1469,76 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         options.vars ? new Set(Object.keys(options.vars)) : undefined,
         compileDiagnosticOf(e, error)
       );
+    }
+  }
+
+  /**
+   * Whether `compile()` gives code for `expr` with `options`, by the fragment
+   * of the target: the prepare stage (`prepareRoot()`) and the typing pass
+   * (`typeFragment()` with `glslFragmentDefinition()`). It writes no code.
+   *
+   * It never throws. An error of an option (an unknown storage kind, a mode
+   * that the target does not offer), and a decline of the prepare stage (the
+   * written size of the code), give `ok: false` with the code
+   * `outside-fragment` and the message of the error.
+   */
+  canCompile(
+    expr: Expression,
+    options: CompilationOptions<Expression> = {}
+  ): CanCompileResult {
+    try {
+      const storage =
+        options.storage === undefined
+          ? undefined
+          : resolveStorageHints(options.storage, [expr], this.createTarget(), {
+              vars: options.vars,
+              functions: options.functions,
+            });
+      // The same wrappers as `compile()`: a `vars`-mapped symbol is read as
+      // the valueless input of its declared type, and a call of a user
+      // function that shadows a library operator has a private name.
+      return withVarsValuesHidden(expr, options.vars, () =>
+        withShadowingCallsRenamed(expr, options, (renamed) => {
+          const prepared = this.prepareRoot(renamed, options, storage);
+          // A mode that the target does not offer is refused, as
+          // `BaseCompiler.compile` refuses it when it emits.
+          resolveCompileMode(prepared.target);
+          const annotation = typeFragment(
+            prepared.expr,
+            glslFragmentDefinition(prepared.target, {
+              functions: options.functions,
+              vars: options.vars,
+            })
+          );
+          if (annotation.refusal !== undefined)
+            return {
+              ok: false as const,
+              diagnostic: fragmentRefusalDiagnostic(annotation.refusal),
+            };
+          if (options.strictTypes !== true) return { ok: true as const };
+          // With `strictTypes`, `compile()` declines when a free symbol has
+          // an inferred type: the same check, on the free symbols that the
+          // reference analysis of `emitPreparedRoot()` reports for the
+          // prepared tree.
+          const references = BaseCompiler.withReferences(
+            {} as Pick<CompilationResult, 'success' | 'freeSymbolTypes'>,
+            prepared.expr,
+            prepared.target,
+            options.vars ? new Set(Object.keys(options.vars)) : undefined
+          );
+          const error = strictTypesError(references.freeSymbolTypes);
+          if (error === undefined) return { ok: true as const };
+          return {
+            ok: false as const,
+            diagnostic: {
+              ...fragmentErrorDiagnostic(new Error(error.message)),
+              binding: error.names[0],
+            },
+          };
+        })
+      );
+    } catch (e) {
+      return { ok: false, diagnostic: fragmentErrorDiagnostic(e) };
     }
   }
 

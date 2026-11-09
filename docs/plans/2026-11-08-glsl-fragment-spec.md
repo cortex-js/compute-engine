@@ -48,7 +48,12 @@ most 4 × 4 real entries. Every free symbol has one of these types, declared
 or inferred in the engine (`compile()` has no option that gives a type;
 `hideValues` is an option of Tycho's wrapper). A symbol typed `unknown`, `any`, `expression`,
 `symbol`, `string`, `function` or a collection without a static count is
-outside the fragment. The `vars` option, a rename map from the user's
+outside the fragment. A parameter of a user function with no declared type
+is not a free symbol: it takes the type of its argument at the calls
+(decision 11). A free list input of at most 256 elements without a
+`storage` hint is a uniform array; a longer one is refused with a
+diagnostic that gives its length, the limit and the `storage` option
+(decision 12). The `vars` option, a rename map from the user's
 symbols to shader identifiers (`{ x: "v_pos.x" }`), is spelling, not a
 language form: the predicate accepts it and ignores it.
 
@@ -95,8 +100,11 @@ language form: the predicate accepts it and ignores it.
   or `At` only.
 - Calls of user functions whose parameters and result have fragment types and
   whose body is in the fragment, with no recursion, direct or mutual. Such a
-  function is emitted once as a GLSL function.
-- The body of a user function, and only there, never at the row root, may be
+  function is emitted once as a GLSL function. A parameter with no declared
+  type takes the type of the argument at the first call; a later call with
+  an argument of another type is refused, and the diagnostic names the
+  parameter and the two types (decision 11).
+- The body of a user function, and the row root (decision 13), may be
   a scalar block (decision 6): `let` and `const`
   declarations of scalar, point or complex locals, assignment to a local, a
   tuple assignment of locals, a counted `for` over an integer range with
@@ -111,7 +119,8 @@ language form: the predicate accepts it and ignores it.
   target define a `parallel for` as the values of the passes in order, so one
   fragment that runs them in order gives the same value; without this entry,
   a function that gains the keyword for the CPU route would lose its GPU
-  route. A `ParallelLoop` at the row root, a list accumulator (`L[c] += e`,
+  route. A `ParallelLoop` whose accumulator is not a scalar local, a list
+  accumulator (`L[c] += e`,
   a list write) and a `ParallelComprehension` whose range is not constant
   are outside the fragment: the GPU does not run a `parallel for` in
   parallel, since an accumulation into an outer variable computes data, and
@@ -133,7 +142,8 @@ language form: the predicate accepts it and ignores it.
   the fragment (`min([T(x, y, i, j) for j = 0..1, i = 0..1])` compiles to
   four calls today).
 
-**Out.** `Loop`, `Block`, `Declare`, `Assign`, `Break`, `Continue`, `Match`,
+**Out.** `Loop`, `Block`, `Declare`, `Assign`, `Break` and `Continue`
+outside the block forms above, `Match`,
 `Map`, `Filter`, `Reduce` and every other callback form over a collection
 without a static count, a comprehension whose range depends on an input,
 function literals and function values, `Apply`, `Random` and the other random
@@ -251,7 +261,8 @@ a language form, and the fragment does not restrict it.
 ## 5. What the engine retires
 
 With the fragment as the contract: the part of `gpu-statements.ts` (1,585
-lines) that does not serve a scalar block inside a function body (the share
+lines) that does not serve a scalar block inside a function body or at the
+row root (decision 13) (the share
 is not measured; step 3 measures it first), the
 shader statement-order and hoisting rules and the random-draw reorder
 (`gpu-draw-order.ts`, 729 lines), `Break` and `Continue` on shaders, the
@@ -322,7 +333,8 @@ Decisions 1 to 5 were taken as recommended.
      GPU table today; `burning-ship` and `multibrot` do not). Each new fractal
      a user writes in Epsil stays off the GPU.
    **Decided: (a).** The admitted forms are in
-   section 2, "The body of a user function".
+   section 2, "The body of a user function". Decision 13 replaces "never at
+   the row root": the row root takes the same forms.
 
 7. Epsil's `parallel for` inside a function body: `AddTo` on a scalar local
    and an in-order `ParallelLoop` with scalar local accumulators are in
@@ -338,6 +350,47 @@ Decisions 1 to 5 were taken as recommended.
     the Buddhabrot step at 500,000 samples is 75 to 107 ms down to 12 to
     16 ms with 8 workers (Tycho `roadmap/BUDDHABROT_CODE_STUDY.md` § 8.5).
     The design is `issues/CE-1163.md`, which waits for its own approval.
+
+Decisions 11 to 13, approved 2026-11-08, come from the comparison of
+`canCompile()` with `compile()` over the expressions of the GLSL tests (step 3
+of the implementation plan, phase B):
+
+11. **A parameter with no declared type takes the type of its argument.**
+    `f(x) := x^2` called as `f(t)` with `t: real` compiles with a `float`
+    parameter; called as `f(z)` with `z: complex`, with a `vec2` parameter.
+    The type comes from the argument at the first call of the function; a
+    later call with an argument of another type (`f(t)` and `f(z)` in one
+    expression) is refused, and the diagnostic names the parameter and the
+    two types. Before this decision, the compiler read such a parameter as a
+    `float` whatever the argument, which gives a wrong shape for a complex or
+    point argument; the spec as first written refused it (44 test
+    expressions). One emitted function per set of argument types is a later
+    task, done only on request.
+12. **A free list input longer than 256 elements without `storage` is
+    refused, and the diagnostic names the fix.** `At(S, k)` with
+    `S: list<real^1600>` gave `uniform float S[1600];` and reported success,
+    but GLSL ES 3.00 guarantees 224 uniform vectors in a fragment shader, so
+    such a shader can fail to link on a GPU. The diagnostic gives the length,
+    the limit 256 and `storage: { S: 'sampler2D' }`. A list input of at most
+    256 elements without `storage` stays a uniform array.
+13. **The row root takes the block forms of a function body** (decision 6
+    (a), section 2). `Block(Assign(s, x), s)` at the root compiles, as it does
+    in the body of a user function: the emitter already writes the root as a
+    function body (133 test expressions). Section 5 therefore keeps the part
+    of the statement emission that a root block uses.
+14. **A list parameter bound to a list input held as a uniform array is
+    admitted**, as decision 8 admits one bound to a sampler-backed input.
+    `g(H, x) := H[1] x` called as `g(L, x)`, with `L: list<real^5>` not named
+    in `storage`, compiles to a variant of `g` that reads `L` by name
+    (`float L[5]`), as the compiler did before the fragment. Decision 12
+    keeps such an input as a uniform array, so its function variant is
+    admitted too. A list parameter bound to anything else stays outside.
+
+A bound or an index whose type is real (`Limits(k, 1, n)` with `n: real`)
+stays admitted, and the emitted code truncates it with `int()`. This gives
+the interpreter's value only when the bound holds an integer. Step 3 of the
+implementation plan counts the corpus records with such a bound and records
+the difference as an issue with that count; the rule is decided then.
 
 ## 7. Steps
 

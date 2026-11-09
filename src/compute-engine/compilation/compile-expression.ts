@@ -21,6 +21,10 @@ import {
 } from './fixed-width-unroll.js';
 import { assertCompilationOptionsContract } from '../engine-extension-contracts.js';
 import { withVarsValuesHidden } from './vars-inputs.js';
+import { fragmentErrorDiagnostic } from './fragment.js';
+import type { CanCompileResult } from './fragment.js';
+
+export type { CanCompileResult } from './fragment.js';
 
 export type CompileExpressionOptions<T extends string = string> = {
   to?: T;
@@ -380,6 +384,111 @@ export function compile<
 }
 
 /**
+ * Whether `compile(expr, options)` gives code for `expr`, without writing
+ * code: `{ ok: true }`, or `{ ok: false, diagnostic }` with the code
+ * `outside-fragment`, naming the first node outside the fragment of the
+ * target (its head in `operator`, or the name of a free symbol without a
+ * numeric type in `binding`).
+ *
+ * It takes the options of `compile()`. The answer depends on the
+ * expression, the options and the declarations that the expression reaches
+ * (the types of its free symbols, the definitions of the functions it
+ * calls): a host that keeps the answer must discard it when one of those
+ * declarations changes.
+ *
+ * Only the `glsl` target has a fragment. For another target, or a direct
+ * custom target (`target` option), the answer is `ok: false`: the predicate
+ * has no list of what that target compiles, and a "yes" that `compile()`
+ * then contradicts would be wrong.
+ *
+ * It never throws: an invalid expression, an invalid option or an error of
+ * the preparation of the tree gives `ok: false` with the message of the
+ * error.
+ */
+export function canCompile(
+  expr: Expression,
+  options?: CompileExpressionOptions
+): CanCompileResult {
+  try {
+    assertCompilationOptionsContract(options);
+    if (!expr.isValid)
+      return {
+        ok: false,
+        diagnostic: {
+          code: 'outside-fragment',
+          kind: 'capability',
+          message: `Could not compile: the expression is not valid.`,
+          value: expr.toString(),
+        },
+      };
+    const name = options?.target === undefined ? (options?.to ?? 'javascript') : undefined;
+    const languageTarget =
+      name === undefined ? undefined : expr.engine._getCompilationTarget(name);
+    const check = (
+      languageTarget as
+        | {
+            canCompile?: (
+              expr: Expression,
+              options: Record<string, unknown>
+            ) => CanCompileResult;
+          }
+        | undefined
+    )?.canCompile;
+    if (name !== 'glsl' || typeof check !== 'function')
+      return {
+        ok: false,
+        diagnostic: {
+          code: 'outside-fragment',
+          kind: 'capability',
+          message:
+            `canCompile() answers for the 'glsl' target only: the target ` +
+            `'${name ?? 'custom'}' has no fragment definition. Call compile().`,
+        },
+      };
+    return check.call(languageTarget, expr, {
+      functions: options?.functions,
+      vars: options?.vars,
+      preamble: options?.preamble,
+      mode: options?.mode,
+      iterationBudget: options?.iterationBudget,
+      cse: options?.cse,
+      constantFold: options?.constantFold,
+      storage: options?.storage,
+      strictTypes: options?.strictTypes,
+    });
+  } catch (e) {
+    return { ok: false, diagnostic: fragmentErrorDiagnostic(e) };
+  }
+}
+
+/**
+ * The error of the `strictTypes` option for the type report `types` of the
+ * free symbols (`CompilationResult.freeSymbolTypes`): the message, and the
+ * names of the free symbols whose type was inferred from their uses, not
+ * declared. `undefined` when every free symbol is declared.
+ */
+export function strictTypesError(
+  types: CompilationResult['freeSymbolTypes'] | undefined
+): { message: string; names: string[] } | undefined {
+  const undeclared = Object.entries(types ?? {}).filter(
+    ([, t]) => t.provenance !== 'declared'
+  );
+  if (undeclared.length === 0) return undefined;
+  const message =
+    `strictTypes: ` +
+    undeclared
+      .map(
+        ([name, t]) =>
+          `declare \`${name}\` (inferred \`${t.type}\`, would lower to ` +
+          `\`${t.lowered}\`)`
+      )
+      .join(', ') +
+    `. Every free symbol must have a declaration (\`ce.declare\`) when the ` +
+    `\`strictTypes\` option is set.`;
+  return { message, names: undeclared.map(([name]) => name) };
+}
+
+/**
  * Apply the `strictTypes` option to the result of a compilation: when it is
  * set and the compilation succeeded, every free symbol must have a
  * declaration. A free symbol whose type was inferred from its uses turns the
@@ -401,21 +510,8 @@ function strictTypesChecked<T extends string, R>(
   languageTarget: { createTarget(): CompileTarget<Expression> } | undefined
 ): CompilationResult<T, R> {
   if (options?.strictTypes !== true || !result.success) return result;
-  const undeclared = Object.entries(result.freeSymbolTypes ?? {}).filter(
-    ([, t]) => t.provenance !== 'declared'
-  );
-  if (undeclared.length === 0) return result;
-  const error =
-    `strictTypes: ` +
-    undeclared
-      .map(
-        ([name, t]) =>
-          `declare \`${name}\` (inferred \`${t.type}\`, would lower to ` +
-          `\`${t.lowered}\`)`
-      )
-      .join(', ') +
-    `. Every free symbol must have a declaration (\`ce.declare\`) when the ` +
-    `\`strictTypes\` option is set.`;
+  const error = strictTypesError(result.freeSymbolTypes)?.message;
+  if (error === undefined) return result;
   const e = new Error(error);
   if (options.fallback === false) throw e;
   console.warn(

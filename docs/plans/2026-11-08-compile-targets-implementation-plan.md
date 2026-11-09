@@ -187,7 +187,8 @@ session of step 5 reads that arm.
 **First session: measure.** For `gpu-statements.ts`, `gpu-draw-order.ts`,
 `gpu-at.ts`, `gpu-shapes.ts` and the shader branches of `compile-blocks.ts`,
 `compile-statements.ts` and `compile-admission.ts`: which functions serve a
-form of the fragment (a scalar block in a function body, a counted loop, a
+form of the fragment (a scalar block in a function body or at the row root,
+a counted loop, a
 nested block, a sampler-backed `At`) and which serve only forms that the
 predicate now refuses. The result is a table in this file, one row per
 module, with the lines that can go.

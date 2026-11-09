@@ -211,9 +211,12 @@ refuse. The emitter still finds them itself (`gpuWidenToVector()`, the
 recorded conversions.
 
 **The type of a symbol** comes from `typeOfSymbol()`. A symbol whose type is
-`unknown` or `any` has no fragment type. Today `gpuTypeOfDeclaredType()`
-reads such a parameter as a `float`; the acceptance audit of step 3 shows
-whether a corpus record depends on that.
+`unknown` or `any` has no fragment type. A parameter of a user function with
+no declared type is not read that way: it takes the type of the argument at
+the first call that reaches the function, and a later call is checked
+against it (the spec, section 6, decision 11). Before step 3,
+`gpuTypeOfDeclaredType()` read such a parameter as a `float` whatever the
+argument.
 
 **A parameter bound to a sampler-backed list** needs no type of its own. The
 variant of the function has no such parameter: its body reads the input by
@@ -377,7 +380,7 @@ order below. Its cases are tests written by hand.
 
 | Head | Order |
 | --- | --- |
-| A call of a user function | The arguments, in the scope of the call. Then, at the first call for a key, the definition: a new scope whose parent is the root scope and not the scope of the call, since the function is emitted at the top level; the parameters are bound from the declared signature; then the body. The types of the arguments are checked against the parameters. A function that is already being typed is a recursion, and is refused. |
+| A call of a user function | The arguments, in the scope of the call. Then, at the first call for a key, the definition: a new scope whose parent is the root scope and not the scope of the call, since the function is emitted at the top level; the parameters are bound from the declared signature, and a parameter with no declared type from the type of its argument at this call; then the body. The types of the arguments are checked against the parameters. A function that is already being typed is a recursion, and is refused. |
 | `Block` (in a function body only) | A new scope. First the rule collects the names of the `Declare` statements of the block, with no type yet. Then the statements in order. A declaration gives its name the declared type, or the type of its first value, and marks it as reached. A read of a collected name that is not reached yet is refused, also from an inner scope, and also when an outer scope binds the same name: the lookup stops at the block and does not continue outward. An assignment of another type is refused. The type of the block is the type of the final expression. |
 | A counted loop, `ParallelLoop` | The bounds, in the outer scope: they must be `integer`. A new scope that binds the index as `integer`. Then the body, with the loop in the context. |
 | `Break` | No operand. Refused when the context has no loop. |
@@ -509,7 +512,7 @@ reason has one message form:
 | The head is not in the list | `Integrate` | the head |
 | No signature for these operands | `Less` on a complex operand; an `If` with branches of two types | the head and the types of the operands |
 | A free symbol has no fragment type | `a` typed `unknown` | the name, its type, and "declare a numeric type" |
-| The form is in the list but not at this place | a `Block` at the row root; a `Range` as a value | the head and the place |
+| The form is in the list but not at this place | a `Break` outside a loop; a `Range` as a value | the head and the place |
 | A limit | a list of 9,801 elements; a recursive function | the limit and the value |
 
 The code is the same for the five. `compile()` to `glsl` returns this

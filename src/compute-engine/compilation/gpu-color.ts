@@ -33,6 +33,18 @@ export const GPU_COLOR_SPACES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The gamuts that `GamutMap` accepts on a shader, with the preamble helper
+ * that maps an OKLCh color into each one. The gamut is a string literal, as
+ * a shader has no run-time string. The `GamutMap` emitter and the rule of
+ * the GLSL fragment (`glsl-fragment.ts`) both read this map, so a gamut is
+ * added in one place.
+ */
+export const GPU_GAMUT_HELPERS: ReadonlyMap<string, string> = new Map([
+  ['srgb', '_gpu_gamut_map_oklch'],
+  ['display-p3', '_gpu_gamut_map_oklch_p3'],
+]);
+
+/**
  * The `vec3` of the three channels of an `Oklch` or `Oklab` color, wrapped in
  * the run-time channel check `_gpu_finite_color` (see
  * `GPU_FINITE_COLOR_GLSL`), which gives the `NaN` color for an infinite or

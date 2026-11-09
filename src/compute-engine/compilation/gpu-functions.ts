@@ -173,6 +173,7 @@ import {
 import {
   GPU_COLOR_HEADS,
   GPU_COLOR_SPACES,
+  GPU_GAMUT_HELPERS,
   assertNoGPUAlpha,
   gpuColorEntryOperand,
   gpuColorOperand,
@@ -2965,11 +2966,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         );
       name = literal;
     }
-    if (name === 'srgb') return `_gpu_gamut_map_oklch(${c})`;
-    if (name === 'display-p3') return `_gpu_gamut_map_oklch_p3(${c})`;
+    const helper = GPU_GAMUT_HELPERS.get(name);
+    if (helper !== undefined) return `${helper}(${c})`;
     throw new Error(
-      `Could not compile \`GamutMap\`: unknown gamut "${name}" — the gamut is "srgb" or ` +
-        `"display-p3".`
+      `Could not compile \`GamutMap\`: unknown gamut "${name}" — the gamut is ` +
+        `${[...GPU_GAMUT_HELPERS.keys()].map((g) => `"${g}"`).join(' or ')}.`
     );
   },
   ColorMix: (args, compile, target) => {

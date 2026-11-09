@@ -152,7 +152,7 @@ export function gpuFixedPowerPreamble(code: string): string {
  * expression has no statement sink for a long product, so this cap is
  * tighter and a larger `k` fails closed.)
  */
-const GPU_BINOMIAL_UNROLL_LIMIT = 8;
+export const GPU_BINOMIAL_UNROLL_LIMIT = 8;
 
 /**
  * `Binomial(n, k)` / `Choose(n, k)` for a literal non-negative integer `k`,
