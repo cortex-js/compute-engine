@@ -236,6 +236,29 @@ describe('bound variables do not fire undeclared-symbol (A1)', () => {
     expect(undeclaredNames('\\int x - \\frac{x\\,dx}{2} - x')).toEqual(['x']);
   });
 
+  test('a term after the integrand in a brace group or after a null delimiter is free (CE-1077)', () => {
+    // The parser does not keep a brace group, and `\right.` has no closing
+    // bracket: the free `x` after the integrand still fires.
+    expect(undeclaredNames('\\int {\\frac{x\\,dx}{2} + x}')).toEqual(['x']);
+    expect(
+      undeclaredNames('\\int \\left(\\frac{x\\,dx}{2}\\right. + x')
+    ).toEqual(['x']);
+    expect(undeclaredNames('\\int {\\frac{x\\,dx}{2} + 1}')).toEqual([]);
+    // A sign inside the denominator does not end the integrand: its `x` is
+    // bound
+    expect(undeclaredNames('\\int {\\frac{x\\,dx}{1+x} + 1}')).toEqual([]);
+    expect(undeclaredNames('\\int {\\frac{x\\,dx}{1+x} + x}')).toEqual(['x']);
+  });
+
+  test('a differential written \\differentialD in a fraction is bound (CE-1032)', () => {
+    expect(undeclaredNames('\\int_1^2 \\frac{\\differentialD x}{x}')).toEqual(
+      []
+    );
+    // Outside a differential it is reported, as `\mathrm{d}` is
+    expect(undeclaredNames('\\differentialD x')).toEqual(['d_upright', 'x']);
+    expect(undeclaredNames('\\mathrm{d}x')).toEqual(['d_upright', 'x']);
+  });
+
   test('a term after two integrals that share a fraction is free (CE-1046)', () => {
     // The two differentials are in the numerator of the inner integrand, and
     // the outer integral takes `dy`. The term after the integrand is outside

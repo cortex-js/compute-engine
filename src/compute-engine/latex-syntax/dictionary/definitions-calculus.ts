@@ -10,6 +10,8 @@ import {
 } from '../../../math-json/utils.js';
 import { LatexDictionary, Parser, Serializer } from '../types.js';
 import { endsTabularCell } from '../tokenizer.js';
+import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators.js';
+import { DEFINITIONS_LOGIC } from './definitions-logic.js';
 
 /**
  * The parts of an integral that took more differentials than it has signs,
@@ -54,6 +56,14 @@ type IntegralParts = {
   /** The token index where the integrand ends and the terms of `rest`
    * begin. It is used only for diagnostics. */
   integrandEnd: number;
+  /** The token span of the body and the differentials of the integral. It
+   * is used only for diagnostics: an enclosing integral that takes the extra
+   * differentials binds the variables of `indexes` in this span. */
+  bodySpan: [start: number, end: number];
+  /** True when the integral has one differential for each sign, and these
+   * parts are a second reading of its tokens with one more differential,
+   * found in its integrand (see `parseIntegralAt()`). */
+  alternative: boolean;
 };
 /** A term of a sum, with `true` when it is subtracted. */
 type SignedTerm = [term: MathJsonExpression, negative: boolean];
@@ -75,6 +85,12 @@ type ClaimedDifferentials = {
   indexes: string[];
   rest: SignedTerm[];
   integrandEnd: number;
+  /** The variables of the inner integral made again, and the token span
+   * where they are bound (see `IntegralParts.bodySpan`). */
+  bound: { names: string[]; span: [start: number, end: number] };
+  /** True when the differentials come from a second reading of the inner
+   * integral (see `IntegralParts.alternative`). */
+  alternative: boolean;
 };
 
 // See https://de.wikipedia.org/wiki/Formelsatz
@@ -184,22 +200,32 @@ function parseIntegralAt(command: string, nIntegrals = 1) {
       stoppedAt: null,
       cache: new Map(),
       needed: nIntegrals,
+      differentialLater: undefined,
     };
-    let [fn, indexes] = parseIntegralBody(parser, nIntegrals, stops);
-    let reparses = 0;
-    while (
-      stops.stoppedAt !== null &&
-      !holdsIntegrand(fn, indexes, binderName)
-    ) {
-      reparses += 1;
-      stops.excluded.add(stops.stoppedAt);
-      stops.disabled = reparses >= MAX_BODY_REPARSES;
+    const parseBodyAgain = () => {
       stops.decisions.clear();
       stops.lastSign = bodyStartToken - 1;
       stops.stoppedAt = null;
       parser._rollbackDiagnostics(bodyDiagCp);
       parser.index = bodyStartToken;
-      [fn, indexes] = parseIntegralBody(parser, nIntegrals, stops);
+      return parseIntegralBody(parser, nIntegrals, stops);
+    };
+    let [fn, indexes] = parseIntegralBody(parser, nIntegrals, stops);
+    let reparses = 0;
+    while (
+      stops.stoppedAt !== null &&
+      !holdsIntegrand(fn, indexes, binderName, () => {
+        stops.differentialLater ??= differentialInTokensAfter(
+          parser,
+          stops.stoppedAt ?? parser.index
+        );
+        return !stops.differentialLater;
+      })
+    ) {
+      reparses += 1;
+      stops.excluded.add(stops.stoppedAt);
+      stops.disabled = reparses >= MAX_BODY_REPARSES;
+      [fn, indexes] = parseBodyAgain();
     }
     // With no differential of its own, this integral takes the differentials
     // that an inner integral found in its integrand and has no sign for
@@ -212,9 +238,21 @@ function parseIntegralAt(command: string, nIntegrals = 1) {
     // group.
     let rest: SignedTerm[] = [];
     let integrandEnd = bodyStartToken;
+    let bound: ClaimedDifferentials['bound'] | null = null;
+    // The last differential of an inner integral that has only a second
+    // reading is taken only when no differential follows in the body (see
+    // `BodyStops.differentialLater`): in
+    // `\int_0^2 \int_1^2 \frac{dx}{x}\,dy + \int_3^4 u\,du`, the `du` of the
+    // second inner integral follows, and this integral keeps no differential,
+    // as the same input with `\frac{1}{x}\,dx\,dy` does not give its
+    // integrand the second term.
+    const allowed = (claimed: ClaimedDifferentials | null) =>
+      claimed !== null &&
+      !(claimed.alternative && stops.differentialLater === true);
     if (fn !== null && indexes.length === 0) {
       const claimed = claimExcessDifferentials(fn);
-      if (claimed !== null) ({ fn, indexes, rest, integrandEnd } = claimed);
+      if (allowed(claimed))
+        ({ fn, indexes, rest, integrandEnd, bound } = claimed!);
     }
     const rebind = (e: MathJsonExpression) =>
       parser.rebindSubscripts(e, new Set(indexes)) ?? e;
@@ -235,34 +273,29 @@ function parseIntegralAt(command: string, nIntegrals = 1) {
         );
         if (termIndexes.length > 0) {
           indexes = termIndexes;
-          // The bound variable is bound only in the integrand: a same-named
-          // reference in a term after it is free and stays flagged. The
-          // integrand span is given as a declaration span. The body start
-          // given is the current index: no reference collected so far starts
-          // at or after it, so no other reference is pruned. With no term
-          // after the integrand, the integrand ends at the current index.
-          const termsStart =
+          // With no term after the integrand, the integrand ends at the
+          // current index. Terms follow it only inside a brace group
+          // (`\int {\frac{x\,dx}{2} + x}`, see `stopAfterTerm()`), which
+          // the parser does not keep: the end is found in the tokens (see
+          // `integrandEndInTokens()`).
+          const signEnd =
             termRest.length === 0
               ? parser.index
-              : integrandEndToken(parser, bodyStartToken, parser.index);
+              : integrandEndInTokens(parser, bodyStartToken, parser.index);
+          // The bound variable is bound only in the integrand: a same-named
+          // reference in a term after it is free and stays flagged. The
+          // tokens up to `signEnd` are given as a declaration span. The body
+          // start given is the current index: no reference collected so far
+          // starts at or after it, so no other reference is pruned.
+          const termsStart = signEnd;
           parser._pruneUndeclared(indexes, diagCp, parser.index, [
             [bodyStartToken, termsStart],
           ]);
           // The `d` of the differential. The tokens up to `signEnd` are
           // checked against the integrand only, so that a free `d` in a term
-          // after the integrand (`\int \frac{x\,dx}{2} + d`) does not keep
-          // the diagnostic of the `d` of the differential. `signEnd` is never
-          // after the true end of the integrand, so the tokens after it are
-          // checked against the integrand and the terms after it: a free `d`
-          // is never hidden.
-          const signEnd =
-            termRest.length === 0
-              ? parser.index
-              : firstSignAfterDifferential(
-                  parser,
-                  bodyStartToken,
-                  parser.index
-                );
+          // after the integrand does not keep the diagnostic of the `d` of
+          // the differential. The tokens after it are checked against the
+          // integrand and the terms after it: a free `d` is never hidden.
           pruneDifferentialOperators(
             parser,
             diagCp,
@@ -282,7 +315,8 @@ function parseIntegralAt(command: string, nIntegrals = 1) {
               body === null ? 1 : rebind(body),
               { indexes, subs, sups, nIntegrals },
               termRest,
-              termsStart
+              termsStart,
+              [bodyStartToken, parser.index]
             ) ?? 'Nothing'
           );
         }
@@ -295,7 +329,8 @@ function parseIntegralAt(command: string, nIntegrals = 1) {
         // integral has its own differential and ends before the `+`, so the
         // second integral keeps `dz`.
         const claimed = claimExcessDifferentialsInSum(fn);
-        if (claimed !== null) ({ fn, indexes, rest, integrandEnd } = claimed);
+        if (allowed(claimed))
+          ({ fn, indexes, rest, integrandEnd, bound } = claimed!);
       } else if (operator(fn) === 'Divide') {
         // We recognize \frac{dx}{x} as an integral
         let altNumerator: MathJsonExpression | null;
@@ -331,6 +366,39 @@ function parseIntegralAt(command: string, nIntegrals = 1) {
         fn,
         ...rest.map(([term]) => term),
       ]);
+      // The variables of an inner integral made again are bound in its span:
+      // `x` in `\int_3^4\int_1^2 \frac{dx}{x}\,dy`, which the inner
+      // integral did not bind when it read `dy`
+      if (bound !== null)
+        parser._pruneUndeclared(bound.names, diagCp, parser.index, [
+          bound.span,
+        ]);
+    }
+
+    // An integral with one differential for each sign keeps its body as
+    // parsed (see below). When the body also holds a differential
+    // (`\frac{dx}{x}` in `\int_1^2 \frac{dx}{x}\,dy`), the integral records
+    // the reading with that differential as well: an enclosing integral with
+    // no differential of its own (`\int_3^4\int_1^2 \frac{dx}{x}\,dy`) then
+    // takes the last one, `dy`, and this integral is made again over `x`
+    // (see `claimExcessDifferentials()`). With no such enclosing integral,
+    // the `d` stays a symbol.
+    let alternative: { fn: MathJsonExpression; indexes: string[] } | null =
+      null;
+    if (fn !== null && indexes.length === nIntegrals && rest.length === 0) {
+      const [altFn, inBody] = parseSubintegrand(fn, binderName);
+      // One more differential, which one enclosing sign takes, in a
+      // numerator or a product. With more (`\frac{dx\,dz}{x}\,dy`), or in a
+      // term of a sum (`(c+dy)\,dx`, where `d` is a coefficient), the body
+      // is kept as parsed.
+      if (inBody.length === 1 && !searchMeetsSum(fn)) {
+        const altIndexes = [...inBody, ...indexes];
+        const body = altFn ?? 1;
+        alternative = {
+          fn: parser.rebindSubscripts(body, new Set(altIndexes)) ?? body,
+          indexes: altIndexes,
+        };
+      }
     }
 
     if (fn !== null && indexes.length > 0) fn = rebind(fn);
@@ -372,7 +440,9 @@ function parseIntegralAt(command: string, nIntegrals = 1) {
       fn,
       { indexes, subs, sups, nIntegrals },
       rest,
-      integrandEnd
+      integrandEnd,
+      [bodyStartToken, parser.index],
+      alternative
     );
   };
 }
@@ -409,9 +479,13 @@ function parseIntegral(command: string, nIntegrals = 1) {
       spans = new Map();
       integralSpans.set(parser, spans);
     }
+    const parts = Array.isArray(result)
+      ? excessDifferentials.get(result)
+      : undefined;
     spans.set(start, {
       end: parser.index,
-      excess: Array.isArray(result) && excessDifferentials.has(result),
+      excess: parts !== undefined && !parts.alternative,
+      alternative: parts?.alternative === true,
     });
     enclosing?.cache.set(start, {
       result,
@@ -425,8 +499,10 @@ function parseIntegral(command: string, nIntegrals = 1) {
 /**
  * The token spans of the integrals that a parser has read, keyed by the
  * token index after the integral command (`\int`). `end` is the token index
- * after the integral, and `excess` is true when the integral took more
- * differentials than it has signs (see `excessDifferentials`).
+ * after the integral, `excess` is true when the integral took more
+ * differentials than it has signs (see `excessDifferentials`), and
+ * `alternative` is true when it has a second reading with one more
+ * differential (see `IntegralParts.alternative`).
  *
  * `stopAfterTerm()` does not search the tokens of an inner integral for a
  * differential: the `d` tokens there belong to the inner integral, except the
@@ -435,7 +511,7 @@ function parseIntegral(command: string, nIntegrals = 1) {
  */
 const integralSpans = new WeakMap<
   Parser,
-  Map<number, { end: number; excess: boolean }>
+  Map<number, { end: number; excess: boolean; alternative: boolean }>
 >();
 
 /**
@@ -473,6 +549,10 @@ const MAX_BODY_REPARSES = 2;
  * - `needed`: the number of integral signs of the integral (see
  *   `nIntegrals` in `parseIntegralAt()`): the body stops only after a
  *   term that holds that many differentials.
+ * - `differentialLater`: whether a differential follows, at the top level
+ *   of the body, the first sign after an inner integral that has only a
+ *   second reading (see `differentialInTokensAfter()`); `undefined` until
+ *   such a sign is met.
  */
 type BodyStops = {
   start: number;
@@ -486,6 +566,7 @@ type BodyStops = {
     { result: MathJsonExpression; end: number; diagnostics: readonly object[] }
   >;
   needed: number;
+  differentialLater: boolean | undefined;
 };
 
 /**
@@ -539,7 +620,16 @@ function stopAfterTerm(parser: Parser, stops: BodyStops): boolean {
     for (let i = termStart; i < at && !holds; i++) {
       const span = spans?.get(i);
       if (span !== undefined && span.end > i && span.end <= at) {
-        holds = span.excess;
+        // An inner integral with only a second reading (see
+        // `IntegralParts.alternative`) gives its last differential to this
+        // integral only when this integral has none of its own after it: in
+        // `\int_0^1 \int_0^2 \frac{dx}{x}\,dy + 1\,dz`, the integral over `z`
+        // holds the inner integral and the 1.
+        if (span.alternative && !span.excess)
+          stops.differentialLater ??= differentialInTokensAfter(parser, sign);
+        holds =
+          span.excess ||
+          (span.alternative && stops.differentialLater === false);
         i = span.end - 1;
         continue;
       }
@@ -598,37 +688,164 @@ function isDifferentialToken(parser: Parser, i: number, end: number): boolean {
     if (token(next) !== '}') return false;
     next += 1;
   }
-  while (next < end && VISUAL_SPACE_TOKENS.has(token(next))) next += 1;
+  // Past the last token, `latex()` gives an empty string, which a space
+  // token also gives once trimmed: the untrimmed text tells them apart.
+  while (
+    next < end &&
+    parser.latex(next, next + 1) !== '' &&
+    VISUAL_SPACE_TOKENS.has(token(next))
+  )
+    next += 1;
   if (next >= end) return false;
   const v = token(next);
   return v === '{' || /^\p{L}\p{M}*$/u.test(v) || /^\\[a-zA-Z]+$/.test(v);
 }
 
 /**
+ * True when a differential (see `isDifferentialToken()`) is in the tokens
+ * after the token index `from`, at the top level of the body of an integral:
+ * outside the groups that are open at `from`'s level, and before the body
+ * ends. The body ends where the depth falls below that level, or at a token
+ * that ends a body at any level (a relation, a comma, a cell separator).
+ * A differential of a later inner integral written after its integrand
+ * (`\int_3^4 u\,du`) also counts: the answer is then `true`, no stop is
+ * made after an earlier inner integral, and that integral gives no
+ * differential to this one (see `parseIntegralAt()`).
+ *
+ * The tokens are read with `parser.latex()`, and `parser.index` does not
+ * change.
+ */
+function differentialInTokensAfter(parser: Parser, from: number): boolean {
+  // Past the last token, `latex()` gives an empty string; a space token
+  // gives `' '`.
+  const n = Number.MAX_SAFE_INTEGER;
+  let depth = 0;
+  for (let i = from; ; i++) {
+    const raw = parser.latex(i, i + 1);
+    if (raw === '') return false;
+    const t = raw.trim();
+    // `\mathrm{d}z` and `\operatorname{d}z`: the braces around the `d` do
+    // not change the depth of the differential
+    if (
+      depth === 0 &&
+      (t === '\\mathrm' || t === '\\operatorname') &&
+      parser.latex(i + 1, i + 2).trim() === '{' &&
+      isDifferentialToken(parser, i + 2, n)
+    )
+      return true;
+    if (t === '\\left' || t === '\\right') {
+      depth += t === '\\left' ? 1 : -1;
+      i += 1;
+    } else if (t === '{' || t === '(' || t === '[') depth += 1;
+    else if (t === '}' || t === ')' || t === ']') depth -= 1;
+    else if (depth === 0 && bodyEndTokens().has(t)) return false;
+    else if (depth === 0 && isDifferentialToken(parser, i, n)) return true;
+    if (depth < 0) return false;
+  }
+}
+
+/**
+ * The tokens that end the body of an integral at its top level: the
+ * one-token triggers of the relations and of the logic operators, whose
+ * precedence is below the precedence of the body (see `parseIntegralBody()`),
+ * the set relations, and the separators of a list, of a cell and of an
+ * environment. Built once, at the first call.
+ */
+let BODY_END_TOKENS: Set<string> | null = null;
+function bodyEndTokens(): Set<string> {
+  if (BODY_END_TOKENS !== null) return BODY_END_TOKENS;
+  const result = new Set([
+    '\\in',
+    '\\notin',
+    '\\ni',
+    '\\subset',
+    '\\subseteq',
+    '\\supset',
+    '\\supseteq',
+    '\\mid',
+    ':',
+    '\\colon',
+    ',',
+    ';',
+    '&',
+    '\\\\',
+    '\\cr',
+    '\\end',
+  ]);
+  for (const entry of [...DEFINITIONS_INEQUALITIES, ...DEFINITIONS_LOGIC]) {
+    const def = entry as {
+      kind?: string;
+      precedence?: number;
+      latexTrigger?: string | readonly string[];
+    };
+    if (def.kind !== 'infix' || (def.precedence ?? 0) >= 266) continue;
+    const trigger = def.latexTrigger;
+    const token = typeof trigger === 'string' ? trigger : trigger?.[0];
+    // A trigger of several tokens (`\operatorname{and}`) is left out: its
+    // first token starts many other things.
+    if (
+      token !== undefined &&
+      (typeof trigger === 'string'
+        ? /^(\\[a-zA-Z]+|\\.|.)$/.test(trigger)
+        : trigger?.length === 1)
+    )
+      result.add(token);
+  }
+  BODY_END_TOKENS = result;
+  return result;
+}
+
+/**
+ * True when the search of `parseSubintegrand()` for a differential in
+ * `expr` goes through a term of a sum: `(c+dy)` holds `dy` as the last
+ * term of a sum, `\frac{dx}{x}` and `2x\,dx` hold it in a numerator or a
+ * product.
+ */
+function searchMeetsSum(expr: MathJsonExpression): boolean {
+  const h = operator(expr);
+  const first = operand(expr, 1);
+  if (h === 'Add') return true;
+  if (first === null) return false;
+  if (h === 'Divide' || h === 'Negate' || h === 'Delimiter' || h === 'Sequence')
+    return searchMeetsSum(first);
+  if (h === 'Multiply' || h === 'InvisibleOperator') {
+    const args = withoutFinalSpacing(operands(expr));
+    return args.length > 0 && searchMeetsSum(args[args.length - 1]);
+  }
+  return nops(expr) === 1 && searchMeetsSum(first);
+}
+
+/**
  * True when the body `fn` of an integral, with the differentials `indexes`
  * read after it, holds the differential of the integral: in `indexes`, in a
  * term of a sum (`splitSumAtDifferential()`), or as the extra differentials
- * of an inner integral (`claimExcessDifferentials()`).
+ * of an inner integral (`claimExcessDifferentials()`). The last differential
+ * of an inner integral that has only a second reading counts only when
+ * `alternativeAllowed()` is true: when no differential of this integral
+ * follows (see `BodyStops.differentialLater`).
  */
 function holdsIntegrand(
   fn: MathJsonExpression | null,
   indexes: readonly string[],
-  binderName: (expr: MathJsonExpression | null | undefined) => string | null
+  binderName: (expr: MathJsonExpression | null | undefined) => string | null,
+  alternativeAllowed: () => boolean
 ): boolean {
   if (indexes.length > 0) return true;
   if (fn === null) return false;
+  if (splitSumAtDifferential(fn, binderName)[2].length > 0) return true;
+  const claimed =
+    claimExcessDifferentials(fn) ?? claimExcessDifferentialsInSum(fn);
   return (
-    splitSumAtDifferential(fn, binderName)[2].length > 0 ||
-    claimExcessDifferentials(fn) !== null ||
-    claimExcessDifferentialsInSum(fn) !== null
+    claimed !== null && (!claimed.alternative || alternativeAllowed())
   );
 }
 
 /**
  * Make the integral of `fn`, then add the terms of `rest` after it (see
- * `addTerms()`). When the integral has more differentials than signs, record
- * its parts on the result (see `excessDifferentials`), so that an enclosing
- * integral can take the extra differentials. `integrandEnd` is the token
+ * `addTerms()`). When the integral has more differentials than signs, or
+ * when `alternative` is given, record its parts on the result (see
+ * `excessDifferentials`), so that an enclosing integral can take the extra
+ * differentials. `integrandEnd` is the token
  * index where the integrand ends and the terms of `rest` begin. Return
  * `null` when `makeIntegral()` gives no integral and `rest` is empty.
  */
@@ -642,22 +859,32 @@ function finishIntegral(
     nIntegrals: number;
   },
   rest: SignedTerm[],
-  integrandEnd: number
+  integrandEnd: number,
+  bodySpan: [start: number, end: number],
+  alternative: { fn: MathJsonExpression; indexes: string[] } | null = null
 ): MathJsonExpression | null {
   const { indexes, subs, sups, nIntegrals } = limits;
   // `makeIntegral()` adds entries to `subs` and `sups`: the recorded parts
-  // keep copies.
+  // keep copies. An integral with one differential for each sign records
+  // the parts of `alternative`, a reading of the same tokens with more
+  // differentials (see `parseIntegralAt()`).
+  const recorded =
+    fn !== null && indexes.length > nIntegrals ? { fn, indexes } : alternative;
   const parts: IntegralParts | null =
-    fn !== null && indexes.length > nIntegrals
+    recorded !== null
       ? {
           command,
-          fn,
-          indexes,
+          fn: recorded.fn,
+          indexes: recorded.indexes,
           subs: [...subs],
           sups: [...sups],
           nIntegrals,
           rest,
           integrandEnd,
+          // Terms after the integrand, in a brace group, are outside this
+          // integral: its variables are bound up to `integrandEnd` only.
+          bodySpan: rest.length === 0 ? bodySpan : [bodySpan[0], integrandEnd],
+          alternative: recorded === alternative,
         }
       : null;
   const integral = makeIntegral(command, fn, { indexes, subs, sups });
@@ -706,6 +933,11 @@ function claimExcessDifferentials(
       indexes: parts.indexes.slice(parts.nIntegrals),
       rest: parts.rest,
       integrandEnd: parts.integrandEnd,
+      bound: {
+        names: parts.indexes.slice(0, parts.nIntegrals),
+        span: parts.bodySpan,
+      },
+      alternative: parts.alternative,
     };
   }
   const h = operator(body);
@@ -937,7 +1169,18 @@ function parseIntegralBody(
   if (fn !== null && !found)
     return parseSubintegrand(fn, binderNameFor(parser));
 
-  return [fn, parseIndexes(parser, maxIndexes)];
+  // With fewer differentials after the integrand than integral signs
+  // (`\iint_1^2 \frac{dx}{x}\,dy`), the integrand is searched for the others,
+  // as when no differential follows it. They come first in the written
+  // order: `dx`, then `dy`. With one differential for each sign, the
+  // integrand is kept as parsed: in `\int_0^1 \frac{ax+by}{cx+dy}\,dx`, `d`
+  // is a coefficient.
+  const indexes = parseIndexes(parser, maxIndexes);
+  if (fn !== null && indexes.length > 0 && indexes.length < maxIndexes) {
+    const [body, inBody] = parseSubintegrand(fn, binderNameFor(parser));
+    if (inBody.length > 0) return [body, [...inBody, ...indexes]];
+  }
+  return [fn, indexes];
 }
 
 /** The name of the variable that an expression read in a binder position
@@ -1237,67 +1480,48 @@ function splitSumAtDifferential(
 }
 
 /**
- * The token index where the integrand ends, when the differential is inside
- * one term of a sum or a difference (`\int \frac{dx}{x} + 1`).
+ * The token index where the integrand ends, in the tokens from `start` to
+ * `end`, when the body of an integral is a sum whose integrand is the terms
+ * up to the one that holds the differential, and terms follow it inside a
+ * brace group (`\int {\frac{x\,dx}{1+x} + x}`). Return `start` when no
+ * differential is found (the span is empty: every diagnostic is kept), and
+ * `end` when no sign ends the integrand.
  *
- * This is the first `+` or `-` at the top level of the body (outside braces,
- * parentheses and brackets) after the first differential operator token (`d`
- * or `\differentialD`) at or after `start`. When no `+` or `-` follows it, the
- * integrand ends at `end`. When no differential operator token is found,
- * return `start`: the span is empty.
- *
- * The tokens are read with `parser.latex()`, and `parser.index` does not
- * change: moving the index back would discard the diagnostics of the body.
- * The result is used only for diagnostics, never for the parse output.
- */
-function integrandEndToken(parser: Parser, start: number, end: number): number {
-  let depth = 0;
-  let afterDifferential = false;
-  for (let i = start; i < end; i++) {
-    const token = parser.latex(i, i + 1).trim();
-    if (token === 'd' || token === '\\differentialD') afterDifferential = true;
-    else if (token === '{' || token === '(' || token === '[') depth += 1;
-    else if (token === '}' || token === ')' || token === ']') depth -= 1;
-    else if (
-      afterDifferential &&
-      depth === 0 &&
-      (token === '+' || token === '-')
-    )
-      return i;
-  }
-  return afterDifferential ? end : start;
-}
-
-/**
- * The token index of the first `+` or `-` at any depth after the first
- * differential operator token (`d` or `\differentialD`) in the tokens from
- * `start` to `end`, when the body of an integral is a sum whose integrand is
- * the terms up to the one that holds the differential. Return `start` when
- * there is no such sign.
- *
- * The result is never after the true end of the integrand: the integrand
- * ends at a `+` or `-` token (the only triggers of `Add` and `Subtract`)
- * that comes after the `d` of its differential, and so after the first `d`
- * token. It can be before it: in `\int \frac{dx}{1+x} + d` it is the `+` of
- * `1+x`. Unlike `integrandEndToken()`, it does not count brackets, which
- * give a wrong depth for a group that the parser does not keep
- * (`\int {\frac{x\,dx}{2} + d}`) or a null delimiter (`\right.`).
+ * The integrand ends at the first `+` or `-` after the first differential
+ * (see `isDifferentialToken()`) whose group depth is not greater than the
+ * smallest depth reached since the differential: the sign that separates the
+ * terms is outside the groups that hold the differential. In the example the
+ * `+` of `1+x` is inside the denominator, deeper than the closing brace of
+ * the numerator, and the `+` before the last `x` ends the integrand. Braces,
+ * parentheses and brackets count, and `\left` and `\right` count with the
+ * delimiter after them, so that a null delimiter (`\right.`) closes the
+ * group of its `\left`.
  *
  * The tokens are read with `parser.latex()`, and `parser.index` does not
  * change. The result is used only for diagnostics.
  */
-function firstSignAfterDifferential(
+function integrandEndInTokens(
   parser: Parser,
   start: number,
   end: number
 ): number {
-  let afterDifferential = false;
-  for (let i = start; i < end; i++) {
-    const token = parser.latex(i, i + 1).trim();
-    if (token === 'd' || token === '\\differentialD') afterDifferential = true;
-    else if (afterDifferential && (token === '+' || token === '-')) return i;
+  const token = (k: number) => parser.latex(k, k + 1).trim();
+  let i = start;
+  while (i < end && !isDifferentialToken(parser, i, end)) i += 1;
+  if (i >= end) return start;
+  let depth = 0;
+  let lowest = 0;
+  for (i += 1; i < end; i++) {
+    const t = token(i);
+    if (t === '\\left' || t === '\\right') {
+      depth += t === '\\left' ? 1 : -1;
+      i += 1;
+    } else if (t === '{' || t === '(' || t === '[') depth += 1;
+    else if (t === '}' || t === ')' || t === ']') depth -= 1;
+    else if ((t === '+' || t === '-') && depth <= lowest) return i;
+    lowest = Math.min(lowest, depth);
   }
-  return start;
+  return end;
 }
 
 /**
@@ -1528,6 +1752,27 @@ function compactMultiIntegralSign(
   return variant[n - 2] + (prefix[0] ?? '');
 }
 export const DEFINITIONS_CALCULUS: LatexDictionary = [
+  // The differential operator of MathLive, `\differentialD`, is the symbol
+  // of `\mathrm{d}`. After the integrand, `matchDifferentialOperator()` reads
+  // it. Inside a sub-expression (`\frac{\differentialD x}{x}`), the search
+  // for a differential (`parseFinalDiffOperator()`) finds this symbol, and
+  // the parser of a derivative (`\frac{\differentialD}{\differentialD x}`)
+  // accepts it. Outside a differential it is a free symbol, reported as
+  // `\mathrm{d}` is when `d_upright` is not declared.
+  {
+    kind: 'symbol',
+    latexTrigger: ['\\differentialD'],
+    parse: (parser: Parser): MathJsonExpression => {
+      if (parser.resolveSymbol('d_upright') === undefined)
+        parser.emitDiagnostic(
+          'undeclared-symbol',
+          parser.index - 1,
+          parser.index,
+          { name: 'd_upright', type: 'unknown' }
+        );
+      return 'd_upright';
+    },
+  },
   {
     kind: 'expression',
     name: 'Integrate',

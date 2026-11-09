@@ -94,6 +94,25 @@
   reported as undeclared also after a minus sign
   (`\int \frac{dx}{x} - x`).
 
+- **A double integral with one differential in a fraction and the other after
+  the integrand is read as a double integral.**
+  `\int_3^4\int_1^2 \frac{dx}{x}\,dy` gave `7/2` (the `d` of `dx` was a
+  variable) and now gives `ln 2`, as `\int_3^4\int_1^2 \frac{1}{x}\,dx\,dy`
+  does. `\iint_1^2 \frac{dx}{x}\,dy` now integrates over `x` and `y`, where it
+  gave `d`. An integral with one differential for each sign and no enclosing
+  integral still reads a `d` in its integrand as a coefficient:
+  `\int_0^1 \frac{ax+by}{cx+dy}\,dx` is unchanged.
+
+- **The differential operator `\differentialD` of MathLive is read inside a
+  fraction.** `\int_1^2 \frac{\differentialD x}{x}` gave an
+  `unexpected-command` error and now gives `ln 2`, and
+  `\frac{\differentialD}{\differentialD x}x^2` is now the derivative `2x`.
+
+- **With `diagnostics: true`, a variable after an integral in a brace group is
+  reported.** In `\int {\frac{x\,dx}{2} + x}`, the last `x` is outside the
+  integral, and is now reported as undeclared; a variable of the integrand
+  after a sign inside a fraction (`\frac{x\,dx}{1+x}`) is not.
+
 - **`compileShader()` and `compileFunction()` of the GLSL target refuse a
   declared type that is not GLSL.** An input, output or uniform declared
   `{ name: 'u', type: 'vec3f' }` (or `f32`, `vec3<f32>`, `mat2x2f`,
