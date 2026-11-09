@@ -1,4 +1,5 @@
 import {
+  bindScalarFragmentFunction,
   scalarResultIsComplex,
   scalarOperandIsComplex,
   scalarConvertOperand,
@@ -12433,6 +12434,7 @@ function compileToTarget(
         ...BaseCompiler.literalDeclaredParamTypes(expr),
       },
     };
+    bindScalarFragmentFunction(target, lambdaTarget, expr, args[0].canonical);
     // A root literal whose parameters are scalar compiles its scalar
     // variant (decision D3 of the CE-712.2 design,
     // `docs/plans/2026-10-31-static-shape-compilation.md` rule R2): the

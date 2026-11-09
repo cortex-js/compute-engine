@@ -1,5 +1,6 @@
 // compileBlock and the local function scopes of a block.
 
+import { bindScalarFragmentBlock } from './javascript-fragment-facts.js';
 import type { Expression } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import { recordBlockScalarLocals } from './javascript-value-facts.js';
@@ -615,6 +616,7 @@ export function compileBlock(
       lexicalFunctions,
       reboundFunctions: reboundFunctionScope(args, target, reboundLocals),
     };
+    bindScalarFragmentBlock(target, localTarget, node, args);
     if (target.language === 'javascript')
       recordBlockScalarLocals(args, localTarget);
 
