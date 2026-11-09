@@ -19,10 +19,13 @@ type Scope = {
 type Annotation = {
   readonly root: Expression;
   readonly scope: Scope;
-  readonly functions: ReadonlyMap<string, {
-    readonly body: Expression;
-    readonly scope: Scope;
-  }>;
+  readonly functions: ReadonlyMap<
+    string,
+    {
+      readonly body: Expression;
+      readonly scope: Scope;
+    }
+  >;
   readonly refusal?: unknown;
 };
 export type ScalarFragmentCapture = {
@@ -112,12 +115,19 @@ function facts(artifact: OwnedArtifact, node: Expression): Facts {
  * while substituting the exact literal for its recorded captured symbol;
  * ordinary helper-body nodes continue to use their lexical scope.
  */
-function storedCaptureScope(artifact: OwnedArtifact, node: Expression): Scope | undefined {
+function storedCaptureScope(
+  artifact: OwnedArtifact,
+  node: Expression
+): Scope | undefined {
   const capture = artifact.capture;
   if (!capture) return undefined;
   if (capture.symbols.has(node)) capture.assertCurrent();
-  if (node !== capture.value || artifact.current === undefined ||
-      !capture.symbols.has(artifact.current)) return undefined;
+  if (
+    node !== capture.value ||
+    artifact.current === undefined ||
+    !capture.symbols.has(artifact.current)
+  )
+    return undefined;
   capture.assertCurrent();
   return artifact.annotation?.scope;
 }
@@ -127,7 +137,9 @@ function assertMember(artifact: OwnedArtifact, node: Expression): void {
   if (storedScope) {
     const value = storedScope.facts.get(node);
     if (value && 'representation' in value) return;
-    throw new Error('JS scalar fragment invariant: missing captured-value facts');
+    throw new Error(
+      'JS scalar fragment invariant: missing captured-value facts'
+    );
   }
   if (artifact.statements?.has(node)) return;
   facts(artifact, node);
@@ -166,11 +178,22 @@ export function bindScalarFragmentDefinition(
   if (artifact === undefined) return;
   assertPolicy(artifact, outer);
   const helper = artifact.helper;
-  const entry = name === undefined ? undefined : artifact.annotation?.functions.get(name);
-  if (!helper || helper.name !== name || helper.literal !== literal ||
-      helper.body !== body || !entry || entry.body !== body)
-    throw new Error('JS scalar fragment invariant: different prepared definition');
-  const policy = Object.fromEntries(policyKeys.map(key => [key, inner[key]])) as Policy;
+  const entry =
+    name === undefined ? undefined : artifact.annotation?.functions.get(name);
+  if (
+    !helper ||
+    helper.name !== name ||
+    helper.literal !== literal ||
+    helper.body !== body ||
+    !entry ||
+    entry.body !== body
+  )
+    throw new Error(
+      'JS scalar fragment invariant: different prepared definition'
+    );
+  const policy = Object.fromEntries(
+    policyKeys.map((key) => [key, inner[key]])
+  ) as Policy;
   (inner as AnnotatedTarget)[artifactKey] = {
     root: body,
     annotate: artifact.annotate,
@@ -298,8 +321,13 @@ export function assertScalarFragmentCall(
   if (op === undefined) return;
   const helper = op.artifact.helper;
   const node = op.node;
-  if (!helper || !isFunction(node, helper.name) || held.length !== 0 ||
-      args.length !== node.nops || args.some((arg, i) => arg !== node.ops[i]))
+  if (
+    !helper ||
+    !isFunction(node, helper.name) ||
+    held.length !== 0 ||
+    args.length !== node.nops ||
+    args.some((arg, i) => arg !== node.ops[i])
+  )
     throw new Error('JS scalar fragment invariant: different prepared call');
 }
 

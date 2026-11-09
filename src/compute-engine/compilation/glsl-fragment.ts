@@ -39,10 +39,7 @@ import {
   userFunctionParamType,
 } from './compile-user-calls.js';
 import { definitionBodyExpr, userFunctionIsGeneric } from './compile-cse.js';
-import {
-  constantFoldValue,
-  userCallSpecialization,
-} from './compiler-core.js';
+import { constantFoldValue, userCallSpecialization } from './compiler-core.js';
 import { core } from './compiler-core-hooks.js';
 import {
   inlinePointCalls,

@@ -1,6 +1,9 @@
 // compileBlock and the local function scopes of a block.
 
-import { bindScalarFragmentBlock, scalarFragmentUnwrappedBlock } from './javascript-fragment-facts.js';
+import {
+  bindScalarFragmentBlock,
+  scalarFragmentUnwrappedBlock,
+} from './javascript-fragment-facts.js';
 import type { Expression } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import { recordBlockScalarLocals } from './javascript-value-facts.js';

@@ -1,7 +1,10 @@
 // Calls of user and local functions: emission, parameter types, inlining of
 // collection-valued calls, and operand types in context.
 
-import { scalarConvertOperand, assertScalarFragmentCall } from './javascript-fragment-facts.js';
+import {
+  scalarConvertOperand,
+  assertScalarFragmentCall,
+} from './javascript-fragment-facts.js';
 import {
   describe as describeOperand,
   describeType,
@@ -253,7 +256,8 @@ export function emitUserFunctionCall(
   // three forms the argument's static shape already settles
   // (`complexWrapCode`). In a map, the wrap applies to the element.
   const coerce = (code: string, i: number) =>
-    scalarConvertOperand(i, code, target) ?? (coerceToComplex[i] === 'real'
+    scalarConvertOperand(i, code, target) ??
+    (coerceToComplex[i] === 'real'
       ? `_SYS.creal(${code})`
       : coerceToComplex[i] === 'real-operand'
         ? `_SYS.crealElements(${code})`
