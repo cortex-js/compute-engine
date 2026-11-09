@@ -1,3 +1,19 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **An edit of a document that pops and pushes a scope no longer takes
+  longer than the edit before it.** A function such as `f(x) := h(x) + 1`,
+  defined while `h` has no definition, is re-derived when `h` gets one. Since
+  0.185.0 the engine releases such a definition after `ce.popScope()`
+  discarded its scope, but only when the garbage collector runs. Until then,
+  `ce.declare('h', 'function')` followed by `ce.assign('h', …)` in a new
+  scope re-derived the `f` of every discarded scope, although none of them
+  can see the new `h`. In a host that pops and pushes a scope at each edit,
+  ten edits of a document took 0.3, 0.4, 0.7 … 1.9 seconds. A definition is
+  now re-derived only when the new definition is in its scope or in a scope
+  above it, and the ten edits take about 0.2 seconds each. (CE-1102)
+
 ## 0.185.1 _2026-11-09_
 
 ### Resolved Issues

@@ -539,6 +539,32 @@ export function takeProvisionalDependents(
   return taken.map((entry) => entry.def);
 }
 
+/** The scope that holds the binding of `name` that `holds` accepts: the first
+ * such scope from `start` through its ancestors, or `undefined` when no scope
+ * of that chain holds it.
+ *
+ * A caller of `repairProvisionalDependents()` that was not given the scope of
+ * the binding it installed uses this to find it, so that the repair
+ * re-derives only the definitions that can see the binding. `holds` tests
+ * the identity of the binding record or of one of its halves, never the name
+ * alone: another binding of the same name on the chain is a different
+ * binding, and its scope would exclude definitions that the repair must
+ * re-derive. */
+export function scopeOfBinding(
+  start: Scope | null | undefined,
+  name: string,
+  holds: (binding: {
+    value?: BoxedValueDefinition;
+    operator?: BoxedOperatorDefinition;
+  }) => boolean
+): Scope | undefined {
+  for (let scope = start; scope; scope = scope.parent) {
+    const binding = scope.bindings.get(name);
+    if (binding !== undefined && holds(binding)) return scope;
+  }
+  return undefined;
+}
+
 //
 // 3/ The repair hook
 //
@@ -547,7 +573,8 @@ type RepairFn = (
   ce: IComputeEngine,
   name: string,
   justInstalled?: ProvisionalDependent,
-  declaredIn?: Scope
+  declaredIn?: Scope,
+  boundIn?: Scope
 ) => void;
 
 let _repair: RepairFn | undefined;
@@ -568,7 +595,8 @@ export function repairProvisionalDependents(
   ce: IComputeEngine,
   name: string,
   justInstalled?: ProvisionalDependent,
-  declaredIn?: Scope
+  declaredIn?: Scope,
+  boundIn?: Scope
 ): void {
   if (!hasProvisionalDependents(ce, name)) return;
   // `declaredIn` is the scope that now holds the new binding of `name`, when
@@ -587,5 +615,35 @@ export function repairProvisionalDependents(
   // (Tycho item 336, `test/compute-engine/tycho-item-336-nested-signature-derivation.test.ts`).
   // A declaration in a scope on a waiting literal's chain (the global scope,
   // or the scope a definition was made in) still repairs that definition.
-  _repair?.(ce, name, justInstalled, declaredIn);
+  //
+  // `boundIn` is for a caller that installed a definition in an existing
+  // binding and found the scope of that binding itself (`scopeOfBinding()`).
+  // Such a binding can be a local that a `Function` literal assigns in its
+  // own body when it runs, in a scope UNDER the scope the literal was
+  // canonicalized in, and the literal waits on it. So the repair re-derives
+  // the waiting definitions whose literal has `boundIn` on its chain, as for
+  // `declaredIn`, and also those whose literal was canonicalized in a scope
+  // that `boundIn` has on its own chain. It leaves the definitions of a
+  // scope that is neither above nor under `boundIn`: for them `name`
+  // resolves as before. Two scope objects that stand for one lexical level
+  // (a scope and the copy or the run of it that an evaluation makes) count
+  // as one scope in this test (`sameLexicalLevel()`, `function-utils.ts`),
+  // and a definition is re-derived too when a scope of its chain holds the
+  // same binding as `boundIn` (`ce.createScope()` installs one definition in
+  // two scopes).
+  // The test reads the parent links as they are at the repair: a scope that
+  // is chained under another scope only while a frame lives
+  // (`pushEvalContext()` with `ambient`, `engine-scope.ts`) is not under
+  // that scope for this test, as for `declaredIn`.
+  //
+  // This keeps the repair away from the definitions of a scope that the
+  // host popped and discarded. The registry holds them, through weak
+  // references, until the collector frees them, and a host that pops and
+  // pushes a scope at each edit of a document declares the same names again
+  // in each new scope. A repair with neither scope re-derived the
+  // definitions of every earlier scope at each of those declarations, so
+  // each edit took longer than the one before until a full collection ran
+  // (`issues/CE-1102.md`). With neither scope, the repair re-derives every
+  // waiting definition.
+  _repair?.(ce, name, justInstalled, declaredIn, boundIn);
 }

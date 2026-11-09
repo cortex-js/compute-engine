@@ -46,6 +46,7 @@ import {
   hasProvisionalDependents,
   registerProvisionalDependents,
   repairProvisionalDependents,
+  scopeOfBinding,
   unregisterProvisionalDependent,
 } from './provisional-application.js';
 import { outsideDefinitions } from './declared-parameter-result.js';
@@ -2108,12 +2109,25 @@ export function updateDef(
     // re-derived against itself. The dependents are other functions, so a
     // call of `name` in their bodies is not a recursive call of `name`
     // (`outsideDefinitions()`).
+    // A caller that did not pass the scope of the record: the scope is found
+    // from the current scope, by the identity of the record. When the record
+    // is in no scope of that chain, the repair takes every waiting
+    // definition, as it does for an unknown scope.
+    const boundIn =
+      scope === undefined
+        ? scopeOfBinding(
+            ce.context?.lexicalScope,
+            name,
+            (binding) => binding === def
+          )
+        : undefined;
     outsideDefinitions(() =>
       repairProvisionalDependents(
         ce,
         name,
         mutableDef.operator ?? (callableValue ? installedValue : undefined),
-        scope
+        scope,
+        boundIn
       )
     );
   }

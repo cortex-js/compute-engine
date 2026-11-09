@@ -140,6 +140,7 @@ import {
   endProvisionalCapture,
   provisionalLiteral,
   registerProvisionalDependents,
+  scopeOfBinding,
   setProvisionalLiteral,
   takeProvisionalDependents,
   type ProvisionalCapture,
@@ -1699,7 +1700,55 @@ let WAVE_DEPTH = 0;
  * registered on `base` BEFORE `middle`, installing `base` rebuilds `outer`
  * against middle's stale signature, and middle's cascade then finds `outer`
  * guarded and skips it. Drained by the outermost wave. */
-let DEFERRED: { name: string; def: ProvisionalDependent }[] = [];
+let DEFERRED: {
+  name: string;
+  def: ProvisionalDependent;
+  /** The scopes of the binding of `name`, as the wave that skipped `def`
+   * had them: the drain repairs with the same selection. */
+  declaredIn: Scope | undefined;
+  boundIn: Scope | undefined;
+}[] = [];
+
+/** Whether the scopes `a` and `b` stand for the same lexical level, for the
+ * selection of `repairWave()`. Two scope objects do when they are the same
+ * object, when they share their map of bindings (the copy of a scope that a
+ * closure keeps, `copyChainToLeaving()`), or when one is a run of the other:
+ * the activation that an evaluation pushes in place of the local scope of a
+ * scoped node (`scopeActivationTemplate()`), or the copy that holds one run
+ * of a block (`BLOCK_RUN_TEMPLATES`). A run has the parent of its template
+ * as its parent, not the template, so the parent links alone do not relate
+ * a binding in a call frame under a run to a literal that was canonicalized
+ * in the template. */
+function sameLexicalLevel(a: Scope, b: Scope): boolean {
+  if (a === b || a.bindings === b.bindings) return true;
+  const templateOf = (s: Scope): Scope | undefined =>
+    scopeActivationTemplate(s) ?? BLOCK_RUN_TEMPLATES.get(s.bindings);
+  const ta = templateOf(a);
+  const tb = templateOf(b);
+  return ta === b || tb === a || (ta !== undefined && ta === tb);
+}
+
+/** The scope that holds the definition `def` under `name`, for the repair
+ * that follows a rebuild of `def`: that repair re-derives only the
+ * definitions that can see `def`. `home` is the scope the literal of `def`
+ * was canonicalized in. The binding is in `home` or in a scope above it (a
+ * definition is made in the scope of its statement, and its literal is
+ * canonicalized there), or else on the chain of the current scope.
+ * `undefined` when neither chain holds it: the repair then takes every
+ * waiting definition. */
+function scopeOfDependent(
+  ce: ComputeEngine,
+  name: string,
+  def: ProvisionalDependent,
+  home: Scope | undefined
+): Scope | undefined {
+  const holds = (binding: { value?: unknown; operator?: unknown }): boolean =>
+    binding.value === def || binding.operator === def;
+  return (
+    scopeOfBinding(home, name, holds) ??
+    scopeOfBinding(ce.context?.lexicalScope, name, holds)
+  );
+}
 
 /** Rebuilds already spent on each definition in the current top-level wave,
  * reset when it ends. */
@@ -1726,13 +1775,14 @@ export function repairProvisionalDependents(
   ce: ComputeEngine,
   name: string,
   justInstalled?: ProvisionalDependent,
-  declaredIn?: Scope
+  declaredIn?: Scope,
+  boundIn?: Scope
 ): void {
   const outermost = WAVE_DEPTH === 0;
   let firstError: { error: unknown } | undefined;
   WAVE_DEPTH += 1;
   try {
-    repairWave(ce, name, justInstalled, declaredIn);
+    repairWave(ce, name, justInstalled, declaredIn, boundIn);
   } catch (error) {
     firstError = { error };
   } finally {
@@ -1753,12 +1803,28 @@ export function repairProvisionalDependents(
         DEFERRED = [];
         // The defs were re-registered when they were skipped, so firing the
         // name once picks up every dependent that queued under it.
-        const fired = new Set<string>();
+        // A name is fired once for each pair of scopes of its binding: the
+        // selection of a wave depends on them.
+        const fired: typeof batch = [];
         for (const entry of batch) {
-          if (fired.has(entry.name)) continue;
-          fired.add(entry.name);
+          if (
+            fired.some(
+              (f) =>
+                f.name === entry.name &&
+                f.declaredIn === entry.declaredIn &&
+                f.boundIn === entry.boundIn
+            )
+          )
+            continue;
+          fired.push(entry);
           try {
-            repairWave(ce, entry.name);
+            repairWave(
+              ce,
+              entry.name,
+              undefined,
+              entry.declaredIn,
+              entry.boundIn
+            );
           } catch (error) {
             firstError ??= { error };
           }
@@ -1780,7 +1846,8 @@ function repairWave(
   ce: ComputeEngine,
   name: string,
   justInstalled?: ProvisionalDependent,
-  declaredIn?: Scope
+  declaredIn?: Scope,
+  boundIn?: Scope
 ): void {
   // When the new binding of `name` is in a known scope (`declaredIn`), only
   // the dependents that can see it are taken: those whose literal was
@@ -1792,13 +1859,44 @@ function repairWave(
   const defs = takeProvisionalDependents(
     ce,
     name,
-    declaredIn === undefined
+    declaredIn === undefined && boundIn === undefined
       ? undefined
       : (def) => {
           const home = provisionalLiteral(dependentLiteral(def))?.scope;
           if (home === undefined) return true;
-          for (let s: Scope | null | undefined = home; s; s = s.parent)
-            if (s === declaredIn) return true;
+          if (declaredIn !== undefined) {
+            for (let s: Scope | null | undefined = home; s; s = s.parent)
+              if (s === declaredIn) return true;
+            return false;
+          }
+          // With `boundIn`, the definition is taken when a scope of its
+          // chain holds the binding itself: the same record, or a record
+          // with the same value or operator definition. One binding can be
+          // in several scopes that are not related by their parent links:
+          // `ce.createScope()` installs a definition of another scope, and a
+          // copy of a scope that an evaluation makes keeps the records of
+          // its source (`snapshotNestedScope()`). Two scope objects can also
+          // stand for one lexical level (`sameLexicalLevel()`), and the
+          // binding can be a local that the literal assigns in its own body,
+          // in a scope under `home`: the literal reads it, so its definition
+          // is taken too (`repairProvisionalDependents()`,
+          // `provisional-application.ts`).
+          const bound = boundIn!.bindings.get(name) as
+            { value?: unknown; operator?: unknown } | undefined;
+          for (let s: Scope | null | undefined = home; s; s = s.parent) {
+            if (sameLexicalLevel(s, boundIn!)) return true;
+            const seen = s.bindings.get(name) as
+              { value?: unknown; operator?: unknown } | undefined;
+            if (seen === undefined || bound === undefined) continue;
+            if (
+              seen === bound ||
+              (seen.value !== undefined && seen.value === bound.value) ||
+              (seen.operator !== undefined && seen.operator === bound.operator)
+            )
+              return true;
+          }
+          for (let s: Scope | null | undefined = boundIn; s; s = s.parent)
+            if (sameLexicalLevel(s, home)) return true;
           return false;
         }
   );
@@ -1818,7 +1916,11 @@ function repairWave(
   // The definitions this wave actually re-installed, with the name each is
   // installed under. Collected during the loop and cascaded AFTER it (see
   // below), not fired per-rebuild.
-  const cascade: { name: string; def: ProvisionalDependent }[] = [];
+  const cascade: {
+    name: string;
+    def: ProvisionalDependent;
+    home: Scope | undefined;
+  }[] = [];
   try {
     for (const def of defs) {
       if (REPAIRING.has(def)) {
@@ -1832,7 +1934,7 @@ function repairWave(
         // Re-registering alone does not retrigger it, so queue it for the
         // drain the outermost wave runs once the guards are released.
         if ((REBUILD_COUNTS?.get(def) ?? 0) < MAX_REBUILDS_PER_WAVE)
-          DEFERRED.push({ name, def });
+          DEFERRED.push({ name, def, declaredIn, boundIn });
         continue;
       }
       // The definition just installed FOR `name` is dropped, not re-derived: it
@@ -1890,7 +1992,7 @@ function repairWave(
           });
           const installedName = dependentName(def);
           if (installedName !== undefined)
-            cascade.push({ name: installedName, def });
+            cascade.push({ name: installedName, def, home: info.scope });
         }
       } catch (error) {
         // When the definition constructor refuses an invalid body, the error
@@ -1936,7 +2038,13 @@ function repairWave(
     // re-derived against itself, exactly as on the `updateDef` route.
     for (const entry of cascade) {
       try {
-        repairProvisionalDependents(ce, entry.name, entry.def);
+        repairProvisionalDependents(
+          ce,
+          entry.name,
+          entry.def,
+          undefined,
+          scopeOfDependent(ce, entry.name, entry.def, entry.home)
+        );
       } catch (error) {
         firstError ??= { error };
       }

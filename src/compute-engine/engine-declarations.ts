@@ -176,6 +176,7 @@ import {
   provisionalLiteral,
   registerProvisionalDependents,
   repairProvisionalDependents,
+  scopeOfBinding,
   setProvisionalLiteral,
 } from './boxed-expression/provisional-application.js';
 import {
@@ -973,16 +974,35 @@ export function setSymbolValue(
     // its own body may carry a provisional reading (register it), and `id`
     // becoming callable re-derives every body that read `id` as a
     // multiplication operand (`boxed-expression/provisional-application.ts`).
+    // The repairs below re-derive only the definitions that can see this
+    // binding: those made in the scope that holds it, in a scope under it,
+    // or in a scope above it (a function that assigns a local of its own
+    // body). `lookup()` reads the scopes in the static view inside a type
+    // computation, so the record may be in no scope of the plain chain; the
+    // repair then takes every waiting definition.
+    const bindingScope = hasProvisionalDependents(ce, id)
+      ? scopeOfBinding(
+          ce.context.lexicalScope,
+          id,
+          (binding) => binding === def
+        )
+      : undefined;
     if (def.value.type.matches('function')) {
       registerProvisionalDependents(ce, value, def.value);
       // `def.value` is what was just installed for `id`: a recursive literal
       // waits on its own name, and must not be re-derived against itself.
-      repairProvisionalDependents(ce, id, def.value);
+      repairProvisionalDependents(ce, id, def.value, undefined, bindingScope);
     } else if (!def.value.type.isUnknown) {
       // A value that is not a function: a body that APPLIED `id` while it had
       // no definition is re-derived and reads the product instead (see the
       // same step in `updateDef`). A no-op when nothing waits on `id`.
-      repairProvisionalDependents(ce, id, def.value);
+      repairProvisionalDependents(
+        ce,
+        id,
+        def.value,
+        undefined,
+        bindingScope
+      );
     }
     return;
   }
