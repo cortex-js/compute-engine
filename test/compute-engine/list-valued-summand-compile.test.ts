@@ -806,7 +806,11 @@ describe('a contradicted scalar declaration is refused, or declines in every sca
         fallback: true,
       } as any);
       expect([to, r?.success ?? false]).toEqual([to, false]);
-      expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
+      // The GLSL fragment refuses the body before the emitter runs, with its
+      // own message.
+      expect((r as any).error).toMatch(
+        to === 'glsl' ? /The body of the function `a` contradicts its declared result type/ : CONTRADICTED_SCALAR_POSITION
+      );
     }
   });
 
@@ -946,9 +950,9 @@ describe('a contradicted scalar declaration is refused, or declines at DEFINITIO
         fallback: true,
       } as any);
       expect(r?.success ?? false).toBe(false);
-      expect((r as any).error).toMatch(CONTRADICTED_DEFINITION);
-      expect((r as any).error).toMatch(/'a'/);
-      expect((r as any).error).toMatch(/-> list<number>/);
+      // The GLSL fragment refuses the body before the emitter runs, with its
+      // own message.
+      expect((r as any).error).toMatch(/The body of the function `a` contradicts its declared result type/);
       // No preamble with a scalar return over a vector ships behind the
       // decline.
       expect((r as any).preamble ?? '').not.toContain('_fn_a');
@@ -1369,7 +1373,11 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
       fallback: true,
     } as any);
     expect(r?.success ?? false).toBe(false);
-    expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
+    // The GLSL fragment refuses the body before the emitter runs, with its
+    // own message.
+    expect((r as any).error).toMatch(
+      to === 'glsl' ? /The body of the function `a` contradicts its declared result type/ : CONTRADICTED_SCALAR_POSITION
+    );
   });
 
   // The big-op body check reads the same predicate.
@@ -1399,7 +1407,9 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
         fallback: true,
       } as any);
       expect(r?.success ?? false).toBe(false);
-      expect((r as any).error).toMatch(CONTRADICTED_DEFINITION);
+      // The GLSL fragment refuses the body before the emitter runs, with its
+      // own message.
+      expect((r as any).error).toMatch(/The body of the function `a` contradicts its declared result type/);
       expect((r as any).preamble ?? '').not.toContain('_fn_a');
     }
   );
@@ -1646,7 +1656,10 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
           // list of booleans; the emitter refuses the other body.
           if (bodyName === '[t < 1, t < 2]')
             expect((r as any).diagnostic?.code).toBe('outside-fragment');
-          else expect((r as any).error).toMatch(CONTRADICTED_DEFINITION);
+          else
+            expect((r as any).error).toMatch(
+              /The body of the function `b` contradicts its declared result type/
+            );
           expect((r as any).preamble ?? '').not.toContain('_fn_b');
         }
       );

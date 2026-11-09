@@ -241,7 +241,7 @@ export function gpuAtFramedIndex(
  * Unlike the value-shape reading, a ONE-element list is admissible here:
  * there is no `vec1`, but a one-texel texture reads like any other.
  */
-function gpuStorageAtBaseShape(
+export function gpuStorageAtBaseShape(
   base: Expression & { symbol: string },
   kind: StorageKind
 ): GPUAtBase {

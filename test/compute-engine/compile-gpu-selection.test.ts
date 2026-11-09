@@ -139,7 +139,7 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
       // WHOLE list may be absent, and the no-match lowering would pair an
       // array arm with a scalar NaN. That stays fail-closed.
       expect(() => g(['Which', 'c', ['List', 1, 2, 3, 4, 5]])).toThrow(
-        /object-domain absent/
+        /has no representation of `Missing` in GLSL/
       );
     });
     it('declines an unknown-length list condition operand', () => {

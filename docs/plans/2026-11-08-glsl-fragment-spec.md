@@ -55,7 +55,9 @@ is not a free symbol: it takes the type of its argument at the calls
 diagnostic that gives its length, the limit and the `storage` option
 (decision 12). The `vars` option, a rename map from the user's
 symbols to shader identifiers (`{ x: "v_pos.x" }`), is spelling, not a
-language form: the predicate accepts it and ignores it.
+language form: the predicate accepts it and ignores it, except that it
+refuses an entry that is code where the emitter would write that code twice
+(`Cot(w)` with `{ w: "nextValue()" }`).
 
 **Heads.**
 
@@ -385,6 +387,16 @@ of the implementation plan, phase B):
     (`float L[5]`), as the compiler did before the fragment. Decision 12
     keeps such an input as a uniform array, so its function variant is
     admitted too. A list parameter bound to anything else stays outside.
+15. **A number added to a shader vector** (approved 2026-11-08). `Add` and
+    `Subtract` take a number beside a name that `compileShader()` or
+    `compileFunction()` declares with a GLSL vector type (`vec2`, `vec3`,
+    `vec4`; a built-in variable such as `gl_FragCoord`), as GLSL does:
+    `gl_FragCoord + 1` compiles to `gl_FragCoord + 1.0`. The same applies
+    to an arithmetic expression of such names and numbers:
+    `2 * gl_FragCoord + 1` compiles to `2.0 * gl_FragCoord + 1.0`. The name
+    must be the declared input: a parameter or a local of the same name is
+    not. A point of the user's expression beside a number stays refused,
+    because the interpreter refuses `(1, 2) + 2`.
 
 A bound or an index whose type is real (`Limits(k, 1, n)` with `n: real`)
 stays admitted, and the emitted code truncates it with `int()`. This gives

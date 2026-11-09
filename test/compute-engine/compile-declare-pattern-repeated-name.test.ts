@@ -65,6 +65,10 @@ describe('A destructuring declaration with a repeated name declines', () => {
         expect(r.error).toMatch(
           /declares a pattern that is not a name or a tuple of names/
         );
+      else if (to === 'glsl')
+        expect(r.error).toMatch(
+          /The destructuring declaration has the name `a` at more than one position/
+        );
       else expect(r.error).toMatch(DECLINE);
     }
   });

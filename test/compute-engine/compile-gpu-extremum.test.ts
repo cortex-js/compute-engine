@@ -543,7 +543,7 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     both(['ContrastingColor', ['Tuple', 'W', 1, 1], ['Rgb', 1, 0, 0], ['Rgb', 0, 0, 1]], REPEATED);
     declinesOutside(['Match', 'W', ['MatchCase', 1, 10], ['MatchCase', 2, 20], ['MatchCase', '_', 30]]);
     // The middle operand of a chained comparison is in two comparisons.
-    both(['Less', 'x', 'W', 3], /chained comparison/);
+    both(['Less', 'x', 'W', 3], /more than once/);
   });
 
   it('a head mapped through `functions` is caller code', () => {

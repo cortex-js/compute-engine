@@ -516,7 +516,7 @@ describe('A value with no settled shape declines (R3)', () => {
       ] as MathJsonExpression[]) {
         const r = compile(ce.box(json), { to });
         expect(r.success).toBe(false);
-        expect(r.diagnostic?.code).toBe('unsettled-shape');
+        expect(r.diagnostic?.code).toBe('outside-fragment');
       }
       // A clause after the first `True` clause is not emitted.
       const after = compile(
@@ -657,7 +657,7 @@ describe('A condition known at compile time selects its branch (R3)', () => {
     const ce = engine();
     const r = compile(ce.box(['If', 'False', ['Tuple', 1, 2], 0]), { to });
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.diagnostic?.code).toBe('outside-fragment');
   });
 
   // A condition that is not known stays a choice made at run time.
@@ -818,7 +818,7 @@ describe('A branch that the code drops is not checked', () => {
     const r = compile(ce.box(['If', 'True', 0, 'z']), { to });
     if (to === 'glsl') {
       expect(r.success).toBe(false);
-      expect(r.diagnostic?.code).toBe('untyped-input');
+      expect(r.diagnostic?.code).toBe('outside-fragment');
       expect(r.unsupported).toContain('z');
     } else expect(r.success).toBe(true);
   });
@@ -1102,7 +1102,7 @@ describe('A conditional in a statement position (R3)', () => {
   test.each(['glsl'])('a statement of a block on %s', (to) => {
     const r = compile(engine().box(STATEMENTS[0][1]), { to });
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.diagnostic?.code).toBe('outside-fragment');
   });
 
   test('the last statement of a block is its value', () => {

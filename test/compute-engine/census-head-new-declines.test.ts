@@ -286,7 +286,9 @@ describe('neyret/ra1p9naofs: a scalar function applied to a vec2 list on GLSL', 
           .evaluate().json
       )
     ).toMatch(/incompatible-type/);
-    expect(() => glsl(ce, json)).toThrow(/call of `f`: argument 1 is a point/);
+    expect(() => glsl(ce, json)).toThrow(
+      /No signature of `Add` in the GLSL fragment takes operands of the types \(point<2>, real\)/
+    );
   });
 });
 

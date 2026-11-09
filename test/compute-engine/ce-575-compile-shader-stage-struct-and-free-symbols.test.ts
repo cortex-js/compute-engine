@@ -99,7 +99,21 @@ describe('CE-575 a body that reads an undeclared symbol is refused', () => {
   it('GLSL: a `gl_` built-in variable and an output are in scope', () => {
     const ce = engine();
     // `gl_FragCoord` is a `vec4`, so the output that receives it is a `vec4`
-    // too: a `float` output is refused (CE-580).
+    // too: a `float` output is refused (CE-580). A name declared with a
+    // GLSL vector type, such as `gl_FragCoord`, takes a number in a sum, as
+    // in GLSL.
+    expect(
+      glsl.compileShader({
+        type: 'fragment',
+        outputs: [{ name: 'c', type: 'vec4' }],
+        body: [
+          {
+            variable: 'c',
+            expression: ce.box(['Multiply', 'gl_FragCoord', 2]),
+          },
+        ],
+      })
+    ).toContain('c = 2.0 * gl_FragCoord;');
     expect(
       glsl.compileShader({
         type: 'fragment',

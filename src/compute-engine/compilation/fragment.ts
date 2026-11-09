@@ -32,9 +32,13 @@ import {
 import { isSubtype } from '../../common/type/subtype.js';
 import {
   declareTypeOperand,
+  declaredTypeSource,
   declareValueOperand,
 } from './compile-declarations.js';
 import { foldCaptureRefusal } from './compile-folded-values.js';
+import { booleanClaim } from './compile-conditions.js';
+import { contradictedDeclaredResult } from './compile-callbacks.js';
+import { isRuntimePointShaped } from './compiler-type-facts.js';
 
 //
 // Types (the design note, section 2)
@@ -166,7 +170,12 @@ export type FragmentAnnotation<R> = {
    *  `FragmentDefinition.functionOf()` gives. */
   readonly functions: Map<
     string,
-    { body: Expression; scope: FragmentScope<R>; type: FragmentType }
+    {
+      body: Expression;
+      scope: FragmentScope<R>;
+      type: FragmentType;
+      sizeCheck?: FragmentFunction['sizeCheck'];
+    }
   >;
   /** The first node with no type. Absent when every node has one. */
   readonly refusal?: FragmentRefusal;
@@ -238,6 +247,12 @@ export type FragmentSignature = {
    *  target admits it at some positions only (GLSL `mod(vec3, float)`, but
    *  not `mod(float, vec3)`). Absent: every position. */
   readonly scalarSlots?: readonly number[];
+  /** The positions (0-based) where a broadcast scalar may stand when a
+   *  vector operand is a point (a tuple), not a list. The interpreter
+   *  refuses a point and a number in a sum (`(1, 2) + 3` is an
+   *  `incompatible-type` error) and a number divided by a point, but takes
+   *  a number added to a list. Absent: the positions of `scalarSlots`. */
+  readonly pointScalarSlots?: readonly number[];
 };
 
 /** The place of a use (the design note, section 4). */
@@ -383,6 +398,12 @@ export type FragmentFunction = {
   readonly arguments: readonly Expression[];
   /** The prepared body. */
   readonly body: Expression;
+  /** The tree whose size the emitter checks, and whether the check counts
+   *  a node that several paths reach once (the body of a definition, which
+   *  has a common-subexpression pass of its own) or once per path (a body
+   *  written at the call site). `undefined` when the emitter checks no
+   *  size for this function. */
+  readonly sizeCheck?: { body: Expression; shared: boolean };
   /** The names `s` of the statements `s = s + e` of the body as the
    *  program wrote it (`sumAssignedNames()`), or `undefined` when they are
    *  not known: the pass then reads no `Assign` of the body as a lowered
@@ -1255,6 +1276,15 @@ function makeWalker<R>(
       if (!ok || (signature.broadcast === true && vectorKinds.size > 1))
         continue;
       if (
+        signature.pointScalarSlots !== undefined &&
+        vectorKinds.has('point') &&
+        conversions.some(
+          (c, i) =>
+            c.kind === 'broadcast' && !signature.pointScalarSlots!.includes(i)
+        )
+      )
+        continue;
+      if (
         usesPoint &&
         (patterns.includes('point') || patterns.includes('tuple')) &&
         vectorKinds.size === 0 &&
@@ -1489,7 +1519,31 @@ function makeWalker<R>(
         );
       return c;
     });
-    return valueFacts(node, type.result, conversions);
+    // A function whose declared result its body contradicts
+    // (`contradictedDeclaredResult()`: `a: (number) -> number`,
+    // `a := t ↦ h(t)`, `h := t ↦ [cos t, sin t]`) is refused: the compiler
+    // declines its definition.
+    if (contradictedDeclaredResult(node.engine, fn.name) !== undefined)
+      return refuse(
+        node,
+        'signature',
+        `The body of the function \`${fn.name}\` contradicts its declared ` +
+          `result type`
+      );
+    // A call whose engine type admits a point and another shape
+    // (`isRuntimePointShaped()`: `Q: (real) -> list<tuple<number, number>>
+    // | tuple<number, number>`) has no settled shape: the compiler reads
+    // the call by that type, not by the type of the body, and declines it
+    // where a point is read (`Norm(Q(x))`).
+    const result = type.result;
+    if (isRuntimePointShaped(node))
+      return refuse(
+        node,
+        'signature',
+        `The call \`${node.toString()}\` has the type ` +
+          `\`${node.type.toString()}\`, which admits more than one shape`
+      );
+    return valueFacts(node, result, conversions);
   };
 
   const typeFunction = (
@@ -1548,6 +1602,7 @@ function makeWalker<R>(
       });
       const entry = {
         body: fn.body,
+        sizeCheck: fn.sizeCheck,
         scope,
         type: {
           kind: 'function' as const,
@@ -1802,6 +1857,22 @@ function walkLoop(kind: 'loop' | 'parallel') {
     }
     const inner = w.open(node, scope);
     w.bind(index.symbol, inner, index.name, { kind: 'integer' }, 'index');
+    // A guard (`Element(i, Range(1, 5), i > 2)`) skips the passes where it
+    // is false: it is a boolean of the index.
+    const guard = (ops[1] as Expression & { nops: number; op3: Expression })
+      .nops === 3
+      ? (ops[1] as Expression & { op3: Expression }).op3
+      : undefined;
+    if (guard !== undefined) {
+      const g = w.value(guard, inner, { ...context, place: 'value' });
+      if (g.type.kind !== 'boolean')
+        return w.refuse(
+          guard,
+          'signature',
+          `The guard of the index \`${index.name}\` has the type ` +
+            `\`${fragmentTypeToString(g.type)}\`, not \`boolean\``
+        );
+    }
     w.type(ops[0], inner, {
       place: 'statement',
       fn: context.fn,
@@ -1856,6 +1927,39 @@ function declaredNames(statement: Expression): Expression[] | undefined {
   if (isFunction(target, 'Tuple') && target.ops.every((t) => isSymbol(t)))
     return [...target.ops];
   return undefined;
+}
+
+/**
+ * Whether the value of a destructuring declaration or assignment is one
+ * that the code writes as a literal tuple: a literal tuple, or the call of
+ * a user function (a head with no rule in the fragment), whose body the
+ * compiler writes in place of the call. The code writes each name from its
+ * component of the literal tuple. It does not read the components of
+ * another value, such as a point local, a point input or a sum of points
+ * (`destructureViaTemp()` does it on JavaScript only): `(a, b) ≔ (b, a + b)`
+ * and `(v, j) ≔ step(j)` are in the fragment, `(a, b) ≔ p` is not.
+ */
+function isDestructurableValue<R>(
+  value: Expression,
+  w: FragmentWalker<R>
+): boolean {
+  if (isFunction(value, 'Tuple')) return true;
+  return (
+    isFunction(value) && !Object.hasOwn(w.definition.rules, value.operator)
+  );
+}
+
+/** The reason to refuse a destructuring declaration or assignment whose
+ * value is not one that the code writes as a literal tuple
+ * (`isDestructurableValue()`). */
+function nonLiteralTupleValue(
+  kind: 'declaration' | 'assignment',
+  value: Expression
+): string {
+  return (
+    `The value of the destructuring ${kind}, \`${value.toString()}\`, ` +
+    `is not a literal tuple`
+  );
 }
 
 /** The component types of a value that a tuple of `n` names receives. */
@@ -1914,6 +2018,23 @@ function walkDeclare<R>(
     if (declared !== undefined) {
       const t = w.definition.typeOfSymbol(name);
       if (t !== undefined && t.kind !== 'list') type = localType(t);
+      // A declared scalar type with a value that is a point or a list
+      // (`Declare(p, "number", (t, t^2, 1))`) gives the name two shapes.
+      const source = declaredTypeSource(declared);
+      if (
+        source !== undefined &&
+        /^(number|real|integer|rational|complex|finite_\w+|boolean)$/.test(
+          source
+        ) &&
+        (facts.type.kind === 'point' || facts.type.kind === 'list')
+      )
+        return void w.refuse(
+          statement,
+          'signature',
+          `The local \`${name.symbol}\` is declared \`${source}\`, and its ` +
+            `value has the type \`${fragmentTypeToString(facts.type)}\``,
+          name.symbol
+        );
     }
     if (type.kind === 'list')
       return void w.refuse(
@@ -1935,6 +2056,26 @@ function walkDeclare<R>(
     w.bind(name, scope, name.symbol, type, 'local');
     return;
   }
+  // A name that the pattern of a destructuring declaration has twice has
+  // no single value.
+  const symbolOf = (e: Expression): string =>
+    (e as Expression & { symbol: string }).symbol;
+  const repeated = names.find(
+    (n, i) => names.findIndex((m) => symbolOf(m) === symbolOf(n)) !== i
+  );
+  if (repeated !== undefined)
+    return void w.refuse(
+      statement,
+      'signature',
+      `The destructuring declaration has the name ` +
+        `\`${repeated.toString()}\` at more than one position`
+    );
+  if (!isDestructurableValue(value, w))
+    return void w.refuse(
+      statement,
+      'signature',
+      nonLiteralTupleValue('declaration', value)
+    );
   const components = componentTypes(facts, names.length);
   if (components === undefined)
     return void w.refuse(
@@ -2056,9 +2197,13 @@ export function walkIf<R>(
       `The condition of \`If\` has the type ` +
         `\`${fragmentTypeToString(condition.type)}\`, not \`boolean\``
     );
-  // A condition that the compiler folds to `True` or `False` selects its
-  // branch at compile time: the other branch is not written.
-  const decided = constantCondition(ops[0], scope, w);
+  // A condition that the code decides at compile time selects its branch:
+  // the other branch is not written. An `If` with no else branch is
+  // written as a `Which` (`If(True, x)` is `x`).
+  const decided = constantCondition(
+    ops.length === 2 ? 'Which' : 'If',
+    ops[0]
+  );
   if (decided !== undefined) {
     const branch = decided ? ops[1] : ops[2];
     if (branch !== undefined) return w.type(branch, scope, context);
@@ -2066,6 +2211,28 @@ export function walkIf<R>(
   }
   if (context.place === 'statement') {
     for (const branch of ops.slice(1)) w.type(branch, scope, context);
+    // The GLSL code of an `If` statement with two branches that are
+    // assignments is a conditional expression too (`c ? (p = a) : (n = b)`),
+    // and an assignment has the type of its value: the two values must have
+    // one type.
+    if (
+      ops.length === 3 &&
+      ops.slice(1).every((b) => isFunction(b, 'Assign'))
+    ) {
+      const [a, b] = ops
+        .slice(1)
+        .map((x) =>
+          w.value((x as Expression & { op2: Expression }).op2, scope, context)
+        );
+      if (w.join(a.type, b.type) === undefined)
+        return w.refuse(
+          node,
+          'signature',
+          `The branches of the \`If\` statement assign values of the types ` +
+            `\`${fragmentTypeToString(a.type)}\` and ` +
+            `\`${fragmentTypeToString(b.type)}\`, and they must have one type`
+        );
+    }
     return { type: { kind: 'statement' } };
   }
   if (ops.length !== 3)
@@ -2124,7 +2291,7 @@ export function walkWhich<R>(
       );
     // A condition that the compiler folds to `False` drops its value, and
     // one that it folds to `True` drops the values after it.
-    const decided = constantCondition(ops[i], scope, w);
+    const decided = constantCondition('Which', ops[i]);
     if (decided === false) continue;
     read.push({ facts: condition, condition: true });
     if (context.place === 'statement') {
@@ -2166,17 +2333,26 @@ export function walkWhich<R>(
   return w.valueFacts(node, t, conversions as FragmentConversion<R>[]);
 }
 
-/** `true` or `false` when the condition `node` is `True` or `False`, or
- * the compiler folds it to one of them; `undefined` otherwise. */
-function constantCondition<R>(
-  node: Expression,
-  scope: FragmentScope<R>,
-  w: FragmentWalker<R>
+/** `true` or `false` when the code of the conditional `operator` selects
+ * its branch at compile time on the condition `node`; `undefined` when the
+ * code keeps the branches. The pass keeps the branches that the code keeps,
+ * because every branch that the shader code has must have one type:
+ * - an `If` selects its branch only when the static type of the condition
+ *   is the literal value `True` or `False` (`booleanClaim()`, as for
+ *   `2 < 3`). An `If` whose condition is the symbol `False` keeps both
+ *   branches, so `If(False, (1, 2), 0)` is refused (a `vec2` and a `float`
+ *   branch).
+ * - a `Which` drops only the clauses after a condition that is the symbol
+ *   `True`: `Which(2 < 3, (1, 2), True, 0)` is refused.
+ * This is the rule of the shader code in `docs/COMPILATION-MODEL.md`
+ * ("On the shader targets, only the branches that the shader code keeps
+ * are compared"). */
+function constantCondition(
+  operator: 'If' | 'Which',
+  node: Expression
 ): boolean | undefined {
-  const value = isSymbol(node) ? node : w.constant(node, scope);
-  if (isSymbol(value, 'True')) return true;
-  if (isSymbol(value, 'False')) return false;
-  return undefined;
+  if (operator === 'Which') return isSymbol(node, 'True') || undefined;
+  return booleanClaim(node);
 }
 
 /** The constant integer value of `node`, or `undefined`. */
@@ -2530,6 +2706,12 @@ export function walkAssign<R>(
       'signature',
       `\`${head}\` writes a name or a tuple of names, not ` +
         `\`${ops[0].toString()}\``
+    );
+  if (targets.length > 1 && !isDestructurableValue(ops[1], w))
+    return w.refuse(
+      node,
+      'signature',
+      nonLiteralTupleValue('assignment', ops[1])
     );
   const types =
     targets.length === 1

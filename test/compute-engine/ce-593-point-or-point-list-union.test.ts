@@ -404,7 +404,9 @@ describe('CE-593: user functions and locals read the point', () => {
       } catch (e) {
         message = (e as Error).message;
       }
-      expect(message).toMatch(/^Could not compile/);
+      expect(message).toMatch(
+        /The operand `f\(x\)` of `Add` may be a point by its type/
+      );
     }
   );
 });
@@ -419,7 +421,7 @@ describe('CE-593: only the union is read through its value', () => {
     ce.declare('P', 'list<real>');
     ce.assign('P', ce.parse('[x, y]'));
     expect(compileError(ce, 'x + P.x', to)).toMatch(
-      /^Could not compile `PointX`: a list of points has no GPU lowering/
+      /The operand `P` of `PointX` is a list with no stated length, not a point/
     );
   });
 });
@@ -562,7 +564,7 @@ describe('CE-593: compileShader() reads the shader declarations', () => {
     ce.parse('g(t) := t P + (u, u)').evaluate();
     const uniforms = [{ name: 'u', type: 'float' }];
     expect(shader(ce, 'g(x).x', { uniforms, constantFold: false })).toMatch(
-      /^Could not compile `PointX`: `g\(x\)` has the type/
+      /The call `g\(x\)` has the type .* which admits more than one shape/
     );
     expect(shader(ce, 'g(x).x', { constantFold: false })).toBe(
       'o = (x * vec2(1.0, 2.0) + vec2(7.0, 7.0)).x;'

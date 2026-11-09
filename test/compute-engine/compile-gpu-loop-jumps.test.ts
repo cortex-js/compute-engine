@@ -286,6 +286,9 @@ describe('a jump declines everywhere else', () => {
       'a Break in a Match case',
       'a Break with a value',
       'a Break with a value in a branch',
+      'a Break in a Block that is a value',
+      'a Break beside an else branch',
+      'a Break beside a second clause',
     ]);
     const pattern = refusedByFragment.has(name)
       ? /GLSL fragment|is a statement, and it stands where a value is expected/

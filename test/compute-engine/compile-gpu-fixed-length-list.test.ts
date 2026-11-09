@@ -205,10 +205,10 @@ describe('GPU FIXED-LENGTH LIST — element type gates the vecN reading', () => 
   test('a union whose finite part is complex is not a float cell', () => {
     const ce = engineWith({ u: 'list<complex | +oo | -oo ^2>' });
     expect(() => glsl.compile(ce.box(['Sin', 'u']), NO_FOLD)).toThrow(
-      /no array overload/
+      /has no type in the GLSL fragment: declare a numeric type for `u`/
     );
     expect(() => glsl.compile(ce.box(['Add', 'u', 'u']), NO_FOLD)).toThrow(
-      /shader ARRAY/
+      /has no type in the GLSL fragment: declare a numeric type for `u`/
     );
   });
 

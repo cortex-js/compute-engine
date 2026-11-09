@@ -544,7 +544,7 @@ describe('CE-580 the width of a Block local', () => {
       'q',
     ];
     expect(() => code(glsl, json)).toThrow(
-      /The local `p` is a list: a function body of the GLSL fragment has scalar, complex or point locals/
+      /The local `p` is declared `real`, and its value has the type `list<real, 2>`/
     );
   });
 });
@@ -634,11 +634,11 @@ describe('CE-580 complex arithmetic on a vector is refused', () => {
     ['Assign', 'q', ['Add', 'p', 1]],
     value,
   ];
-  // The fragment refuses the local `p`, which is a list, before the complex
-  // arithmetic is reached.
+  // The fragment refuses the local `p`, which is declared `real` and holds a
+  // list, before the complex arithmetic is reached.
   const message = (_head: string) =>
-    'The local `p` is a list: a function body of the GLSL fragment has ' +
-    'scalar, complex or point locals.';
+    'The local `p` is declared `real`, and its value has the type ' +
+    '`list<real, 2>`.';
 
   for (const [name, target] of [['GLSL', glsl]] as const) {
     it(`${name}: q + i and q · i`, () => {

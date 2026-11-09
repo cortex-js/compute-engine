@@ -244,7 +244,9 @@ describe('GLSL COMPILATION — structures and control flow', () => {
         ],
         's',
       ]);
-      expect(() => glsl.compile(expr)).toThrow(/is not a boolean/);
+      expect(() => glsl.compile(expr)).toThrow(
+        /The guard of the index `i` has the type `real`, not `boolean`/
+      );
     });
 
     // The interpreter evaluates the `Range` of an inner clause again each
@@ -799,7 +801,9 @@ describe('GLSL vector-valued block locals declare a vecN', () => {
       ['Declare', 'p', 'number', ['Tuple', 't', ['Square', 't'], 1]],
       'p',
     ]);
-    expect(() => glsl.compile(expr)).toThrow(/different shapes/);
+    expect(() => glsl.compile(expr)).toThrow(
+      /The local `p` is declared `number`, and its value has the type `point<3>`/
+    );
   });
 
   it('a Declare with a 3-tuple initial value is declared vec3', () => {
@@ -1088,7 +1092,7 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     expect(() =>
       glsl.compile(e.box(['Mod', ['Sqrt', -2], 1]), NO_FOLD)
     ).toThrow(
-      /Could not compile `Mod`: the target's lowering for this head is real-only/
+      /No signature of `Mod` in the GLSL fragment takes operands of the types \(complex, integer\)/
     );
     // `Mod` declares the finite real carrier (Contract B), so a non-real
     // LITERAL operand is already an `incompatible-type` error at boxing and
@@ -1159,7 +1163,7 @@ describe('GLSL Tycho item 147: real-by-definition heads read real', () => {
     expect(() =>
       glsl.compile(e.box(['Mod', ['Sqrt', -2], 1]), NO_FOLD)
     ).toThrow(
-      /Could not compile `Mod`: the target's lowering for this head is real-only/
+      /No signature of `Mod` in the GLSL fragment takes operands of the types \(complex, integer\)/
     );
     expect(() =>
       glsl.compile(e.box(['Mod', ['Multiply', 'ImaginaryUnit', 'x'], 1]))

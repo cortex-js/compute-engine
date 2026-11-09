@@ -30,6 +30,7 @@ import type {
 import { glslFragmentDefinition } from '../../src/compute-engine/compilation/glsl-fragment';
 import type { GlslRepresentation } from '../../src/compute-engine/compilation/glsl-fragment';
 import { isFunction } from '../../src/compute-engine/boxed-expression/type-guards';
+import type { Expression } from '../../src/compute-engine/global-types';
 
 const ce = new ComputeEngine();
 ce.declare('x', 'real');
@@ -769,8 +770,12 @@ describe('review fixes', () => {
       'none',
       'real-to-complex',
     ]);
-    // A condition folded to `False` drops its pair: neither operand is read.
+    // A condition that is the symbol `False` keeps its pair, as the shader
+    // code keeps it (`false ? x : …`): its value is read as the type of the
+    // `Which`. Only the clauses after a `True` condition are dropped.
     expect(kinds(['Which', 'False', 'x', 'b', 'z', 'True', 'x'])).toEqual([
+      'none',
+      'real-to-complex',
       'none',
       'none',
       'none',
@@ -1209,4 +1214,624 @@ describe('phase C, second review fixes', () => {
     );
     expect(r.diagnostic.message).toMatch(/only with `\+=`/);
   });
+});
+
+// Phase C2: `canCompile()` and `compile()` to GLSL agree. Each case is in
+// (both accept) or out (both refuse with the diagnostic of the pass). A
+// rule of the pass below mirrors a test of the emitter, so that the pass
+// refuses what the emitter would decline.
+describe('phase C2: canCompile() and compile() agree', () => {
+  /** Both refuse `json` on the engine `engine`, with the same message.
+   *  `code` is the diagnostic code of `compile()`; the code of
+   *  `canCompile()` is `outside-fragment`. */
+  function outOn(
+    engine: ComputeEngine,
+    json: unknown,
+    message: RegExp,
+    options: Record<string, unknown> = {},
+    code = 'outside-fragment'
+  ): void {
+    const expr = engine.box(json as any);
+    const r = canCompile(expr, { to: 'glsl', ...options });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.diagnostic.code).toBe('outside-fragment');
+    expect(r.diagnostic.message).toMatch(message);
+    const result = compile(expr, { to: 'glsl', ...options });
+    expect(result.success).toBe(false);
+    expect(result.diagnostic?.code).toBe(code);
+    expect(result.diagnostic?.message).toMatch(message);
+  }
+  /** Both accept `json` on the engine `engine`. */
+  function inOn(
+    engine: ComputeEngine,
+    json: unknown,
+    options: Record<string, unknown> = {}
+  ): string {
+    const expr = engine.box(json as any);
+    expect(canCompile(expr, { to: 'glsl', ...options })).toEqual({ ok: true });
+    const result = compile(expr, { to: 'glsl', fallback: false, ...options });
+    expect(result.success).toBe(true);
+    return String(result.code);
+  }
+
+  test('a condition: the shader code keeps both branches of an If whose condition is the symbol True or False', () => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    // The static type of `2 < 3` is the value `True`: one branch is kept.
+    expect(inOn(e, ['If', ['Less', 2, 3], ['Tuple', 1, 2], 0])).toBe(
+      'vec2(1.0, 2.0)'
+    );
+    // An `If` with no else branch is a `Which`: `If(True, x)` is `x`.
+    expect(inOn(e, ['If', 'True', 'x'])).toBe('(x)');
+    // A `Which` drops the clauses after a condition that is the symbol
+    // `True`.
+    inOn(e, [
+      'Which',
+      ['Greater', 'x', 0],
+      1,
+      'True',
+      2,
+      'True',
+      ['Tuple', 1, 2],
+    ]);
+    outOn(e, ['If', 'False', ['Tuple', 1, 2], 0], /branches of `If`/);
+    outOn(
+      e,
+      ['Which', ['Less', 2, 3], ['Tuple', 1, 2], 'True', 0],
+      /values of `Which`/
+    );
+    outOn(e, ['If', 'True', 0, 'z0'], /`z0` has the type `unknown`/);
+  });
+
+  // `canCompile()` runs the search of `compile()` for a value with no
+  // settled shape (`unsettledShapeIn()`), and gives its diagnostic, with
+  // the code `outside-fragment`; `compile()` gives the code
+  // `unsettled-shape`.
+  test('a value with no settled shape (rule R3)', () => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    e.declare('c', 'real');
+    // A block with an assignment is not an operand.
+    outOn(
+      e,
+      ['Add', ['Block', ['Assign', 'q', 2], 'q'], 1],
+      /a block with a statement other than/,
+      {},
+      'unsettled-shape'
+    );
+    outOn(
+      e,
+      [
+        'Block',
+        ['Assign', 's', 'x'],
+        ['Assign', 't', ['Block', ['Assign', 'u', 's'], ['Multiply', 2, 'u']]],
+        ['Add', 't', 1],
+      ],
+      /a block with a statement other than/,
+      {},
+      'unsettled-shape'
+    );
+    // A block that only declares names with a value is an operand.
+    inOn(e, [
+      'Add',
+      [
+        'Block',
+        ['Declare', 'a', "'unknown'", ['Multiply', 3.7, 'x']],
+        ['Subtract', 'a', ['Floor', 'a']],
+      ],
+      1,
+    ]);
+    // A local assigned a real and a complex value in mode `strict`.
+    outOn(
+      e,
+      [
+        'Block',
+        ['Assign', 'a', 1],
+        ['If', ['Less', 0, 'c'], ['Assign', 'a', ['Sqrt', ['Negate', 'x']]]],
+        'a',
+      ],
+      /different shapes/,
+      { mode: 'strict' },
+      'unsettled-shape'
+    );
+  });
+
+  test('a Break is a statement of the loop body, or the branch of an If with no else branch', () => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    const loop = (body: unknown) => [
+      'Block',
+      ['Assign', 's', 0],
+      ['Loop', body, ['Element', 'k', ['Range', 1, 3]]],
+      's',
+    ];
+    inOn(
+      e,
+      loop([
+        'Block',
+        ['If', ['Less', 'x', 'k'], ['Break']],
+        ['Assign', 's', ['Add', 's', 'k']],
+      ])
+    );
+    const misplaced =
+      /A `Break` of a `Loop` is in the GLSL fragment as a statement/;
+    outOn(
+      e,
+      loop([
+        'Assign',
+        's',
+        ['Add', 's', ['Block', ['If', ['Less', 1, 'x'], ['Break']], 'k']],
+      ]),
+      misplaced
+    );
+    outOn(
+      e,
+      loop(['If', ['Less', 1, 'x'], ['Break'], ['Assign', 's', 1]]),
+      misplaced
+    );
+    outOn(
+      e,
+      loop([
+        'Which',
+        ['Less', 1, 'x'],
+        ['Break'],
+        ['Less', 0, 'x'],
+        ['Assign', 's', 1],
+      ]),
+      misplaced
+    );
+  });
+
+  test('a destructuring takes a literal tuple, or the call of a user function', () => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    e.declare('t', 'tuple<number, number>');
+    e.assign('t', e.box(['Tuple', 3, 4]));
+    inOn(e, [
+      'Block',
+      ['Declare', ['Tuple', 'a', 'b'], "'unknown'", ['Tuple', 'x', 2]],
+      ['Add', 'a', 'b'],
+    ]);
+    outOn(
+      e,
+      [
+        'Block',
+        [
+          'Declare',
+          ['Tuple', 'a', 'b'],
+          ['Dictionary', ['KeyValuePair', { str: 'value' }, 't']],
+        ],
+        ['Add', ['Multiply', 10, 'a'], 'b'],
+      ],
+      /The value of the destructuring declaration, `t`, is not a literal tuple/
+    );
+    outOn(
+      e,
+      [
+        'Block',
+        ['Declare', 'a', "'unknown'", 0],
+        ['Declare', 'b', "'unknown'", 0],
+        ['Assign', ['Tuple', 'a', 'b'], 't'],
+        ['Add', ['Multiply', 10, 'a'], 'b'],
+      ],
+      /The value of the destructuring assignment, `t`, is not a literal tuple/
+    );
+  });
+
+  test('a Which with no default clause has a GLSL value for Missing only when it is a number or a point', () => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    e.declare('t', 'real');
+    e.declare('c', 'boolean');
+    inOn(e, ['Which', 'c', ['Tuple', 1, 2]]);
+    outOn(
+      e,
+      ['Which', 'c', ['List', 1, 2, 3, 4, 5]],
+      /no representation of `Missing`/
+    );
+    outOn(
+      e,
+      [
+        'Which',
+        ['Greater', 'x', 0],
+        'True',
+        ['Greater', ['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]], 3],
+        'False',
+      ],
+      /no representation of `Missing`/,
+      { constantFold: false }
+    );
+  });
+
+  test('types that the emitter reads as another shape', () => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    e.declare('y', 'real');
+    // The finite part of the element type is complex.
+    e.declare('u', 'list<complex | +oo | -oo ^2>');
+    outOn(e, ['Add', 'u', 'u'], /The symbol `u` has the type/);
+    // There is no `vec1`.
+    e.declare('v1', 'vector<1>');
+    outOn(e, ['At', 'v1', 1], /list of one element/);
+    // A list of no stated length is not a point, whatever its value.
+    e.declare('P', 'list<real>');
+    e.assign('P', e.box(['List', 'x', 'y']));
+    outOn(
+      e,
+      ['Add', 'x', ['PointX', 'P']],
+      /a list with no stated length, not a point/
+    );
+    // `Sqrt(-2)` is complex, and `Mod` takes reals only; `Sqrt(x)` is real.
+    outOn(e, ['Mod', ['Sqrt', -2], 1], /No signature of `Mod`/, {
+      constantFold: false,
+    });
+    inOn(e, ['Mod', ['Sqrt', 'x'], 1], { constantFold: false });
+    inOn(e, ['Add', ['Sqrt', -2], 1], { constantFold: false });
+  });
+
+  test('a color operand in two color spaces', () => {
+    const e = new ComputeEngine();
+    e.declare('u', 'number');
+    e.declare('v', 'number');
+    outOn(
+      e,
+      [
+        'ColorMix',
+        [
+          'Which',
+          ['Greater', 'u', 0],
+          ['AsRgb', ['Hsv', 'u', 0.5, 0.5]],
+          'True',
+          ['AsHsv', ['Hsv', 'v', 0.5, 0.5]],
+        ],
+        ['Rgb', 0, 0, 1],
+        0.5,
+      ],
+      /holds colors in different color spaces/
+    );
+  });
+
+  test('user functions and caller code', () => {
+    // A stored value that reads the parameter of the function that reads it.
+    const e = new ComputeEngine();
+    e.assign('a', e.parse('3t + 1'));
+    e.assign('g', e.parse('(t) \\mapsto t + a'));
+    outOn(e, ['g', 2], /mentions `t`/);
+
+    // A body that contradicts the declared result.
+    const e2 = new ComputeEngine();
+    e2.declare('a', { signature: '(number) -> number' });
+    e2.assign('a', e2.box(['Function', ['h', 't'], 't']));
+    e2.assign(
+      'h',
+      e2.box(['Function', ['List', ['Cos', 't'], ['Sin', 't']], 't'])
+    );
+    e2.declare('u', 'number');
+    outOn(e2, ['Add', ['a', 'u'], 1], /contradicts its declared result type/);
+
+    // A value that admits a point and another shape.
+    const e3 = new ComputeEngine();
+    e3.declare('x', 'real');
+    e3.declare('t', 'real');
+    e3.declare('H', '(real) -> list<number> | tuple<number, number>');
+    outOn(e3, ['Abs', ['H', 't']], /admits a point and another shape/, {
+      functions: { H: (t: number) => [3 * t, -4 * t] },
+    });
+    e3.declare(
+      'Q',
+      '(real) -> list<tuple<number, number>> | tuple<number, number>'
+    );
+    e3.assign(
+      'Q',
+      e3.box([
+        'Function',
+        ['Block', ['Assign', 'r', ['Tuple', 'x', 1]], 'r'],
+        'x',
+      ])
+    );
+    outOn(e3, ['Norm', ['Q', 'x']], /admits more than one shape/);
+    e3.declare('PU', 'list<tuple<number, number>> | tuple<number, number>');
+    e3.assign('PU', e3.box(['Tuple', 3, 4]));
+    outOn(
+      e3,
+      [
+        'Block',
+        ['Assign', 's', 0],
+        ['Assign', 's', ['Add', 's', ['Multiply', ['At', 'PU', 1], 'x']]],
+        's',
+      ],
+      /may be a point by its type/
+    );
+
+    // A `vars` entry that is a name or a field.
+    const e4 = new ComputeEngine();
+    e4.declare('x', 'real');
+    expect(inOn(e4, ['Power', 'x', 2], { vars: { x: 'v_pos.x' } })).toContain(
+      'v_pos.x'
+    );
+  });
+});
+
+describe('phase C2, review fixes', () => {
+  function outOn(
+    engine: ComputeEngine,
+    json: unknown,
+    message: RegExp,
+    options: Record<string, unknown> = {}
+  ): void {
+    const expr = engine.box(json as any);
+    const r = canCompile(expr, { to: 'glsl', ...options });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.diagnostic.message).toMatch(message);
+    const result = compile(expr, { to: 'glsl', ...options });
+    expect(result.success).toBe(false);
+  }
+  function inOn(
+    engine: ComputeEngine,
+    json: unknown,
+    options: Record<string, unknown> = {}
+  ): string {
+    const expr = engine.box(json as any);
+    expect(canCompile(expr, { to: 'glsl', ...options })).toEqual({ ok: true });
+    const result = compile(expr, { to: 'glsl', fallback: false, ...options });
+    expect(result.success).toBe(true);
+    return String(result.code);
+  }
+
+  test('a `vars` entry that is code is caller code, refused only where the code writes it twice', () => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    expect(inOn(e, ['Add', 'x', 1], { vars: { x: 'u.x + 1.0' } })).toContain(
+      'u.x + 1.0'
+    );
+    inOn(e, ['Multiply', 'x', 2], { vars: { x: 'v_uv.x * 2.0' } });
+    inOn(e, ['Add', 'x', 1], { vars: { x: '-3' } });
+    // `cot(x)` is `cos(x) / sin(x)`: the code would run twice.
+    outOn(e, ['Cot', 'x'], /writes that operand more than once/, {
+      vars: { x: 'draw()' },
+    });
+  });
+
+  test('an operand that the code writes once is not refused for caller code', () => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    const functions = { F: 'external_f' };
+    inOn(e, ['Round', ['F', 'x']], { functions });
+    inOn(e, ['Power', ['F', 'x'], 2], { functions });
+    // The real branch of `Power` with a constant non-integer exponent writes
+    // the base twice (`sign(b) * pow(abs(b), e)`).
+    outOn(
+      e,
+      ['Power', ['F', 'x'], ['Rational', 1, 3]],
+      /writes that operand more than once/,
+      { functions }
+    );
+  });
+
+  test('a value with no settled shape is refused also when the expression calls caller code', () => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    outOn(
+      e,
+      ['Add', ['Block', ['Assign', 'q', 2], 'q'], ['F', 'x']],
+      /a block with a statement other than/,
+      { functions: { F: 'external_f' } }
+    );
+  });
+
+  test('decision 15: a number added to a name declared with a GLSL vector type', () => {
+    const e = new ComputeEngine();
+    const glsl = e._getCompilationTarget('glsl') as unknown as {
+      compileFunction(
+        e: unknown,
+        name: string,
+        ret: string,
+        params: [string, string][]
+      ): string;
+    };
+    expect(
+      glsl.compileFunction(e.box(['Add', 'v', 1]), 'f', 'vec2', [
+        ['v', 'vec2'],
+      ])
+    ).toContain('v + 1.0');
+    expect(
+      glsl.compileFunction(e.box(['Subtract', 'v', 1]), 'f', 'vec2', [
+        ['v', 'vec2'],
+      ])
+    ).toContain('v + -1.0');
+    // A point of the expression beside a number is still refused.
+    expect(() =>
+      glsl.compileFunction(
+        e.box([
+          'Block',
+          ['Assign', 'q', ['Tuple', 'u', 'u']],
+          ['Add', 'v', 'q', 1],
+        ]),
+        'f',
+        'vec2',
+        [
+          ['v', 'vec2'],
+          ['u', 'float'],
+        ]
+      )
+    ).toThrow(/may be a point by its type/);
+  });
+
+  test('a user function whose code would be over the size limit is refused', () => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    e.declare('c', 'real');
+    const t = e.symbol('t');
+    // `e_{k+1} = If(t > k, e_k, Sin(e_k))`: the two branches read the
+    // level below, so its code doubles at each level.
+    let body = e.function('Add', [t, e.symbol('c')]);
+    for (let i = 0; i < 14; i++)
+      body = e.function('If', [
+        e.function('Greater', [t, e.number(i)]),
+        body,
+        e.function('Sin', [body]),
+      ]);
+    e.declare('h', '(real) -> real');
+    e.assign('h', e.function('Function', [body, t]));
+    outOn(e, ['h', 'x'], /would have more than 50,000 nodes/);
+  });
+
+  test('a base of At in a texture with no stated length, an empty one, or a tuple', () => {
+    for (const type of ['list<number>', 'list<number^0>', 'tuple<number, number>']) {
+      const e = new ComputeEngine();
+      e.declare('S', type);
+      e.declare('k', 'integer');
+      outOn(e, ['At', 'S', 'k'], /"S" is sampler2D-backed/, {
+        storage: { S: 'sampler2D' },
+      });
+    }
+  });
+});
+
+describe('phase C2, third review fixes', () => {
+  function outOn(
+    engine: ComputeEngine,
+    json: unknown,
+    message: RegExp,
+    options: Record<string, unknown> = {}
+  ): void {
+    const expr = engine.box(json as any);
+    const r = canCompile(expr, { to: 'glsl', ...options });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.diagnostic.message).toMatch(message);
+    const result = compile(expr, { to: 'glsl', ...options });
+    expect(result.success).toBe(false);
+  }
+  function inOn(
+    engine: ComputeEngine,
+    json: unknown,
+    options: Record<string, unknown> = {}
+  ): string {
+    const expr = engine.box(json as any);
+    expect(canCompile(expr, { to: 'glsl', ...options })).toEqual({ ok: true });
+    const result = compile(expr, { to: 'glsl', fallback: false, ...options });
+    expect(result.success).toBe(true);
+    return String(result.code);
+  }
+  type GlslTarget = {
+    compileFunction(
+      e: unknown,
+      name: string,
+      ret: string,
+      params: [string, string][]
+    ): string;
+    compileShader(shader: unknown): string;
+  };
+  /** `e_depth`, with `e_0 = t + c` and `e_{k+1} = e_k + Sin(e_k)`: each
+   *  level reads the level below twice, the same node object. */
+  function graph(e: ComputeEngine, t: Expression, depth: number): Expression {
+    let g = e.function('Add', [t, e.symbol('c')]);
+    for (let i = 0; i < depth; i++)
+      g = e.function('Add', [g, e.function('Sin', [g])]);
+    return g;
+  }
+
+  test('the size of a user function is measured with the `cse` option of compile()', () => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    e.declare('c', 'real');
+    const t = e.symbol('t');
+    e.declare('h', '(real) -> real');
+    e.assign('h', e.function('Function', [graph(e, t, 14), t]));
+    // With no node shared, the body has more than 50,000 nodes.
+    outOn(e, ['h', 'x'], /would have more than 50,000 nodes/, { cse: false });
+    // The common-subexpression pass of the definition shares each level.
+    inOn(e, ['h', 'x']);
+  });
+
+  test('decision 15: an arithmetic expression of declared vectors takes a number', () => {
+    const e = new ComputeEngine();
+    const glsl = e._getCompilationTarget('glsl') as unknown as GlslTarget;
+    expect(
+      glsl.compileFunction(
+        e.box(['Subtract', ['Multiply', 'uv', 2], 1]),
+        'f',
+        'vec2',
+        [
+          ['uv', 'vec2'],
+        ]
+      )
+    ).toMatch(/return 2\.0 \* uv (\+ -1\.0|- 1\.0);/);
+    expect(
+      glsl.compileShader({
+        type: 'fragment',
+        outputs: [{ name: 'o', type: 'vec4' }],
+        body: [
+          {
+            variable: 'o',
+            expression: e.box([
+              'Add',
+              ['Multiply', 2, 'gl_FragCoord'],
+              1,
+            ]),
+          },
+        ],
+      })
+    ).toContain('o = 2.0 * gl_FragCoord + 1.0;');
+    // A point of the user's expression in the operand stays out.
+    expect(() =>
+      glsl.compileFunction(
+        e.box([
+          'Block',
+          ['Assign', 'q', ['Tuple', 'u', 'u']],
+          ['Add', ['Multiply', 2, 'q'], 1],
+        ]),
+        'f',
+        'vec2',
+        [['u', 'float']]
+      )
+    ).toThrow(/may be a point by its type/);
+  });
+
+  test('decision 15: a parameter with the name of a declared vector is not the vector', () => {
+    const e = new ComputeEngine();
+    // The parameter `v` of `f` takes a point of the user's expression,
+    // not the `vec2` input `v` of the shader function: `(1, 2) + 1` is
+    // an `incompatible-type` error in the interpreter.
+    e.declare('f', '(any) -> any');
+    e.assign('f', e.box(['Function', ['Add', 'v', 1], 'v']));
+    const glsl = e._getCompilationTarget('glsl') as unknown as GlslTarget;
+    expect(() =>
+      glsl.compileFunction(
+        e.box(['f', ['Tuple', 1, 2]]),
+        'g',
+        'vec2',
+        [['v', 'vec2']]
+      )
+    ).toThrow(/No signature of `Add`.*in the body of the user function `f`/);
+  });
+
+  test('a block search of the operands of And visits a shared graph once per node', () => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    e.declare('c', 'real');
+    // At depth 27 the graph has about 2^27 paths and 80 distinct nodes. A
+    // search of each path took about 1.3 s, and doubles at each level; the
+    // search of each node, with the rest of canCompile(), about 10 ms. The
+    // depth is kept small because the canonical form of each level takes a
+    // time that also doubles at each level (about 4 s here).
+    const expr = e.function('And', [
+      e.function('Greater', [e.symbol('x'), e.number(0)]),
+      e.function('Less', [graph(e, e.symbol('x'), 27), e.number(1)]),
+    ]);
+    const start = Date.now();
+    expect(canCompile(expr, { to: 'glsl' })).toEqual({ ok: true });
+    expect(Date.now() - start).toBeLessThan(500);
+  });
+
+  test('At over a list of one point compiles', () => {
+    const e = new ComputeEngine();
+    e.declare('P', 'list<tuple<real, real>^1>');
+    e.declare('k', 'integer');
+    inOn(e, ['At', 'P', 'k']);
+  });
+
 });

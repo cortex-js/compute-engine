@@ -472,7 +472,7 @@ describe('At — every declining shape names its OWN cause', () => {
       ['At', ['List', ['List', 1, 2], ['List', 3, 4]], 1, 2],
       /`At` is in the GLSL fragment with one index/,
     ],
-    ['vector<1> base', ['At', 'v1', 1], /base has 1 element/],
+    ['vector<1> base', ['At', 'v1', 1], /The base of `At` is a list of one element, which has no value in GLSL/],
     [
       'bare `tuple` base',
       ['At', 'tp', 1],

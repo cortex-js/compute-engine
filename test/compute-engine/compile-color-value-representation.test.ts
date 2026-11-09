@@ -647,7 +647,9 @@ describe('the shader targets keep the vec3 OKLCh color', () => {
     ];
     const declined = glsl(ce, ['ColorMix', which, ['Rgb', 0, 0, 1], 0.5]);
     expect(declined.success).toBe(false);
-    expect(declined.error).toContain('cannot settle the color space');
+    expect(declined.error).toContain(
+      'holds colors in different color spaces'
+    );
     // A selection between two colors that are already canonical is unaffected.
     expect(
       glsl(ce, [

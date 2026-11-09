@@ -210,11 +210,10 @@ describe.each(['glsl'] as const)(
         { to, constantFold: false }
       );
       expect(r.success).toBe(false);
-      // The value-block hook declines on a conditional sink, so the operand
-      // gate reports; a loop-form Sum in the same position reports through
-      // the arm guard instead. Both are the same fail-closed decision.
+      // The GLSL fragment refuses a block in an operand of `And` after the
+      // first, because GLSL cannot evaluate it there.
       expect(r.error).toMatch(
-        /conditionally-evaluated branch|cannot be used as a sub-expression/
+        /An operand of `And` after the first holds a block, which GLSL cannot evaluate there/
       );
     });
 

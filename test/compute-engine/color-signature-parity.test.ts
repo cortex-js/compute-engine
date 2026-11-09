@@ -693,7 +693,7 @@ describe('a shader selection between colors in named spaces', () => {
   test('arms that name different spaces decline', () => {
     const expr = ['AsOklch', ['Which', CONDITION, RGB_ARM, 'True', HSV_ARM]];
     expect(() => glsl.compile(ce.expr(expr), NO_FOLD as any)).toThrow(
-      /cannot settle the color space/
+      /holds colors in different color spaces/
     );
     // At a consuming head too, which reads the same fact.
     expect(() =>
@@ -706,7 +706,7 @@ describe('a shader selection between colors in named spaces', () => {
         ]),
         NO_FOLD as any
       )
-    ).toThrow(/cannot settle the color space/);
+    ).toThrow(/holds colors in different color spaces/);
   });
 
   test('arms that name the same space compile and agree with JavaScript', () => {

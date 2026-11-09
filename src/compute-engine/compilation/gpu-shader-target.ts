@@ -2,7 +2,12 @@
 
 import type { Expression } from '../global-types.js';
 import { entrySource } from './function-purity.js';
-import { cseRecordingRules, isOpaqueVarsSource } from './cse.js';
+import {
+  cseRecordingRules,
+  isCallerMapped,
+  isOpaqueVarsSource,
+} from './cse.js';
+import { CompilerState } from './compiler-state.js';
 import { withVarsValuesHidden } from './vars-inputs.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
@@ -36,6 +41,8 @@ import type {
   FragmentDeclaredInput,
   FragmentTargetFields,
 } from './fragment.js';
+import { assertAdmitted, unsettledShapeIn } from './compile-admission.js';
+import { reachesCallerCodeOn } from './compile-folding.js';
 import {
   glslFragmentDefinition,
   glslFragmentTypeOfSpelling,
@@ -295,6 +302,48 @@ function gpuPassCapValue(type: string): string {
     return `${type}(${Array(Number(array[2])).fill(element).join(', ')})`;
   }
   return `${type}(${nan})`;
+}
+
+/** The message of the decline for user-defined functions whose code would
+ * have more than `GPU_MAX_WRITTEN_NODES` nodes. */
+function userFunctionsTooLarge(language: string): string {
+  return (
+    `Could not compile: the ${language.toUpperCase()} code of ` +
+    `the user-defined functions that the expression calls would ` +
+    `have more than ${GPU_MAX_WRITTEN_NODES.toLocaleString('en-US')} ` +
+    `nodes. A subexpression that several paths reach is written once ` +
+    `for each path when the shader cannot compute it once: the paths ` +
+    `go through different branches of an \`If\`, the subexpression ` +
+    `reads a \`vars\` source that is not a variable or a field of a ` +
+    `variable (\`u.c\`), it is not pure, or the \`cse\` option is ` +
+    `false. A call that is written in place of its definition is ` +
+    `written in full at each call site.`
+  );
+}
+
+/**
+ * Run `f` while each node whose operator has a `compile` handler of the
+ * caller (`isCallerMapped()` with no `functions` entry) counts as a node
+ * whose code that handler wrote (`CompilerState._callerLowered`). The
+ * search for a value with no settled shape (`unsettledShapeIn()`) then
+ * reads such a node as `compile()` reads it after the handler wrote its
+ * code: one value of its static type, not a conditional.
+ */
+function withHandlerNodesLowered<T>(f: () => T): T {
+  const handlerOnly = { isOverriddenOperator: () => false };
+  class HandlerNodes extends Map<Expression, boolean> {
+    override get(node: Expression): boolean | undefined {
+      if (!this.has(node)) this.set(node, isCallerMapped(node, handlerOnly));
+      return super.get(node);
+    }
+  }
+  const outer = CompilerState._callerLowered;
+  CompilerState._callerLowered = new HandlerNodes();
+  try {
+    return f();
+  } finally {
+    CompilerState._callerLowered = outer;
+  }
 }
 
 export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
@@ -716,18 +765,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       const size = gpuWrittenSize(body, rules);
       if (!shared) substituted += size;
       if (size > GPU_MAX_WRITTEN_NODES || substituted > GPU_MAX_WRITTEN_NODES)
-        throw new Error(
-          `Could not compile: the ${this.languageId.toUpperCase()} code of ` +
-            `the user-defined functions that the expression calls would ` +
-            `have more than ${GPU_MAX_WRITTEN_NODES.toLocaleString('en-US')} ` +
-            `nodes. A subexpression that several paths reach is written once ` +
-            `for each path when the shader cannot compute it once: the paths ` +
-            `go through different branches of an \`If\`, the subexpression ` +
-            `reads a \`vars\` source that is not a variable or a field of a ` +
-            `variable (\`u.c\`), it is not pure, or the \`cse\` option is ` +
-            `false. A call that is written in place of its definition is ` +
-            `written in full at each call site.`
-        );
+        throw new Error(userFunctionsTooLarge(this.languageId));
     };
     // A TEXT-TYPED SYMBOL is the same target limitation as the string literal
     // the `string` hook refuses, one step later: a `string`- or
@@ -1527,7 +1565,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       type: glslFragmentTypeOfSpelling(d.type),
       declared: d.type.trim(),
     }));
-    const definition = glslFragmentDefinition(target);
+    // A name declared with a GLSL vector type takes a number in `Add` and
+    // `Subtract` (`pointNumberSumRefused()`).
+    const definition = glslFragmentDefinition(target, {
+      declaredVectors: new Set(
+        inputs.filter((d) => d.type?.kind === 'point').map((d) => d.name)
+      ),
+    });
     const annotation = typeFragment(
       expr,
       options.userFunctions === false
@@ -1718,7 +1762,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // function that shadows a library operator has a private name.
       return withVarsValuesHidden(expr, options.vars, () =>
         withShadowingCallsRenamed(expr, options, (renamed) => {
-          const { prepared, annotation } = this.prepareAndType(
+          const { prepared, annotation, handlerCode } = this.prepareAndType(
             renamed,
             options,
             storage
@@ -1728,6 +1772,62 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
               ok: false as const,
               diagnostic: fragmentRefusalDiagnostic(annotation.refusal),
             };
+          // `compile()` declines a value with no settled shape (rule R3:
+          // a block with an assignment as an operand, a local assigned
+          // values of two shapes), found by `unsettledShapeIn()` on the
+          // prepared tree before the code is written, and a sub-expression
+          // of static type `error`, also in a branch that the code drops
+          // and that the pass does not type. The same search here gives the
+          // same answer. A `functions` or `vars` entry does not change it.
+          // When a `compile` handler of the caller writes the code of a
+          // node, `compile()` searches again after the code is written, and
+          // reads that node as one value of its static type
+          // (`CompilerState._callerLowered`). Here the search reads each
+          // node whose operator has such a handler in the same way, as if
+          // the handler writes its code (`withHandlerNodesLowered()`). A
+          // handler that gives no code for a node leaves the stock code,
+          // and `compile()` then does not read that node as one value: it
+          // does not give the decline of reason 'handler-value' for it.
+          // This search cannot tell such a node from another, so it gives
+          // no decline of that reason: `canCompile()` can then accept an
+          // expression that `compile()` declines, but it does not refuse
+          // one that `compile()` compiles.
+          const unsettled = handlerCode
+            ? withHandlerNodesLowered(() => {
+                const found = unsettledShapeIn(
+                  prepared.expr,
+                  prepared.target,
+                  true
+                );
+                return found?.reason === 'handler-value' ? undefined : found;
+              })
+            : unsettledShapeIn(prepared.expr, prepared.target, true);
+          if (unsettled !== undefined)
+            assertAdmitted(prepared.expr, prepared.target, unsettled);
+          // `compile()` declines when the code of a user-defined function
+          // that it writes would be too large (`checkDefinitionBody` in
+          // `createTargetFor()`). It measures the body of a definition,
+          // before the point calls and values are written in place, with
+          // the nodes that its common-subexpression pass can bind shared
+          // when the `cse` option is not false, and a body written in place
+          // of a call with no node shared. The pass records that tree and
+          // that setting for each function (`sizeCheck`), and the same
+          // measure is made here. A function with no record is not measured
+          // by `compile()` either. The sum of the bodies written in place of
+          // their calls is not checked here.
+          for (const { sizeCheck } of annotation.functions.values()) {
+            if (sizeCheck === undefined) continue;
+            const body = sizeCheck.body;
+            const rules = {
+              ...cseRecordingRules(body, {
+                ...prepared.cseOptions,
+                admitPureUserFunctions: true,
+              }),
+              share: sizeCheck.shared && options.cse !== false,
+            };
+            if (gpuWrittenSize(body, rules) > GPU_MAX_WRITTEN_NODES)
+              throw new Error(userFunctionsTooLarge(this.languageId));
+          }
           if (options.strictTypes !== true) return { ok: true as const };
           // With `strictTypes`, `compile()` declines when a free symbol has
           // an inferred type: the same check, on the free symbols that the
@@ -1795,6 +1895,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   ): {
     prepared: GpuPreparedRoot;
     annotation: FragmentAnnotation<GlslRepresentation>;
+    /** Whether the prepared tree reaches an operator with a `compile`
+     *  handler of the caller (`reachesCallerCodeOn()` with no `functions`
+     *  entry and no `vars` entry). Computed only when the pass accepts the
+     *  tree. */
+    handlerCode: boolean;
   } {
     // An `iterationBudget` that is not a cap is refused before the tree is
     // prepared, so that `canCompile()` and `compile()` both refuse it.
@@ -1803,17 +1908,49 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // A mode that the target does not offer is refused, as
     // `BaseCompiler.compile` refuses it when it emits.
     resolveCompileMode(prepared.target);
-    const annotation = typeFragment(
-      prepared.expr,
-      glslFragmentDefinition(prepared.target, {
-        functions: options.functions,
-        vars: options.vars,
-        // Read on the tree as the program wrote it, before the prepare
-        // stage lowers each `+=` to an `Assign`.
-        sumAssigned: sumAssignedNames(expr),
-      })
-    );
-    return { prepared, annotation };
+    // The pass asks which operands hold code that the caller supplies
+    // (`reachesCallerCodeOn()`), which reads the predicates of the caller's
+    // options from the session of the common-subexpression pass. The emit
+    // stage opens that session; the pass runs before it, so it reads the
+    // same predicates from a session with no sharing, removed after.
+    const target = prepared.target;
+    const outerCse = target.cse;
+    target.cse ??= {
+      enabled: false,
+      harvestOptions: { ...prepared.cseOptions },
+      instances: [],
+    };
+    let annotation: FragmentAnnotation<GlslRepresentation>;
+    let handlerCode = false;
+    try {
+      annotation = typeFragment(
+        prepared.expr,
+        glslFragmentDefinition(target, {
+          functions: options.functions,
+          vars: options.vars,
+          // Read on the tree as the program wrote it, before the prepare
+          // stage lowers each `+=` to an `Assign`.
+          sumAssigned: sumAssignedNames(expr),
+        })
+      );
+      if (annotation.refusal === undefined) {
+        // The same test, with the `functions` and `vars` entries left
+        // out: only a `compile` handler remains.
+        target.cse = {
+          enabled: false,
+          harvestOptions: {
+            ...prepared.cseOptions,
+            isOverriddenOperator: () => false,
+            isStringVar: () => false,
+          },
+          instances: [],
+        };
+        handlerCode = reachesCallerCodeOn(prepared.expr, target);
+      }
+    } finally {
+      target.cse = outerCse;
+    }
+    return { prepared, annotation, handlerCode };
   }
 
   /**
