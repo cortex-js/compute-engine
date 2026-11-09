@@ -108,7 +108,10 @@ import {
   isFunction,
   isSymbol,
 } from './boxed-expression/type-guards.js';
-import { functionLiteralParameterName } from './boxed-expression/function-literal.js';
+import {
+  functionLiteralParameterName,
+  markFunctionLiteralParameter,
+} from './boxed-expression/function-literal.js';
 import {
   InferenceRollbackFrame,
   activeRollbackFrame,
@@ -235,7 +238,6 @@ import {
 } from './boxed-expression/value-kinds.js';
 import { canonicalFunctionLiteralOperands } from './function-utils.js';
 import { markLibraryCall } from './library-shadowing.js';
-import { markFunctionLiteralParameter } from './boxed-expression/function-literal.js';
 import { sharedEvaluationStarts } from './boxed-expression/shared-evaluation-memo.js';
 import {
   declareProtocolImpl,
