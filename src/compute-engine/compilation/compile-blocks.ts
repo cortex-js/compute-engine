@@ -1,6 +1,6 @@
 // compileBlock and the local function scopes of a block.
 
-import { bindScalarFragmentBlock } from './javascript-fragment-facts.js';
+import { bindScalarFragmentBlock, scalarFragmentUnwrappedBlock } from './javascript-fragment-facts.js';
 import type { Expression } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import { recordBlockScalarLocals } from './javascript-value-facts.js';
@@ -323,8 +323,9 @@ export function compileBlock(
     // The value of a lone statement is the value of the block, so a
     // `Return` there gives its value (`tailValueFor`).
     const value = valueUsed ? tailValueFor(args[0], target) : args[0];
-    return withCseScope(node, -1, target, () =>
-      compileOp(args[0], -1, target, prec, value)
+    const innerTarget = scalarFragmentUnwrappedBlock(target, node, args);
+    return withCseScope(node, -1, innerTarget, () =>
+      compileOp(args[0], -1, innerTarget, prec, value)
     );
   }
 

@@ -1,6 +1,7 @@
 // Emission of function definitions: multi-clause functions, parameter guards,
 // definition bodies, builtin callbacks and the helpers preamble.
 
+import { bindScalarFragmentDefinition } from './javascript-fragment-facts.js';
 import {
   isLibraryOperator,
   isShadowOf,
@@ -868,6 +869,7 @@ export function prepareUserFunctionBody(
     // leak in), replacing whatever the spread copied from `root`.
     declaredVarTypes: literalDeclaredParamTypes(literal),
   };
+  bindScalarFragmentDefinition(target, bodyTarget, literal, bodyExpr, h);
   bodyTarget.checkDefinitionBody?.(bodyExpr, bodyTarget, true);
   return { params, bodyExpr, bodyTarget };
 }

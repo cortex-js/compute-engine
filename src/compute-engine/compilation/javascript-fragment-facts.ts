@@ -2,18 +2,39 @@
 import { isFunction } from '../boxed-expression/type-guards.js';
 import type { Expression } from '../global-types.js';
 import type { CompileTarget } from './types.js';
-import type {
-  FragmentAnnotation,
-  FragmentScope,
-  FragmentValueFacts,
-} from './fragment.js';
-
 export type ScalarRepresentation = 'number' | 'boolean' | 'complex';
-type Facts = FragmentValueFacts<ScalarRepresentation>;
+// The emitter consumes this readonly view of the real fragment annotation.
+// Keeping the view here avoids a dependency on the walker's preparation code.
+type Facts = {
+  readonly representation: ScalarRepresentation;
+  readonly conversions?: readonly {
+    readonly kind: string;
+    readonly representation: ScalarRepresentation;
+  }[];
+};
+type Scope = {
+  readonly facts: ReadonlyMap<Expression, Facts | { readonly type: unknown }>;
+  readonly inner: ReadonlyMap<Expression, Scope>;
+};
+type Annotation = {
+  readonly root: Expression;
+  readonly scope: Scope;
+  readonly functions: ReadonlyMap<string, {
+    readonly body: Expression;
+    readonly scope: Scope;
+  }>;
+  readonly refusal?: unknown;
+};
+export type ScalarFragmentHelper = {
+  readonly name: string;
+  readonly literal: Expression;
+  readonly body: Expression;
+};
 type ScalarFragmentArtifact = {
   readonly root: Expression;
-  readonly annotate: () => FragmentAnnotation<ScalarRepresentation>;
+  readonly annotate: () => Annotation;
   readonly functionRoot?: Expression;
+  readonly helper?: ScalarFragmentHelper;
 };
 const artifactKey = Symbol('scalar fragment artifact');
 const policyKeys = [
@@ -31,8 +52,8 @@ const policyKeys = [
 type Policy = Pick<CompileTarget<Expression>, (typeof policyKeys)[number]>;
 type OwnedArtifact = ScalarFragmentArtifact & {
   readonly policy: Policy;
-  annotation?: FragmentAnnotation<ScalarRepresentation>;
-  scope?: FragmentScope<ScalarRepresentation>;
+  annotation?: Annotation;
+  scope?: Scope;
   statements?: ReadonlySet<Expression>;
   current?: Expression;
 };
@@ -51,6 +72,7 @@ export function attachScalarFragment(
     root: artifact.root,
     annotate: artifact.annotate,
     functionRoot: artifact.functionRoot,
+    helper: artifact.helper,
     policy,
   };
 }
@@ -101,6 +123,44 @@ export function bindScalarFragmentFunction(
       'JS scalar fragment invariant: different prepared function'
     );
   attachScalarFragment(inner, artifact);
+}
+
+/** Bind only the exact helper body that root annotation already proved. */
+export function bindScalarFragmentDefinition(
+  outer: CompileTarget<Expression>,
+  inner: CompileTarget<Expression>,
+  literal: Expression,
+  body: Expression,
+  name: string | undefined
+): void {
+  const artifact = (outer as AnnotatedTarget)[artifactKey];
+  if (artifact === undefined) return;
+  assertPolicy(artifact, outer);
+  const helper = artifact.helper;
+  const entry = name === undefined ? undefined : artifact.annotation?.functions.get(name);
+  if (!helper || helper.name !== name || helper.literal !== literal ||
+      helper.body !== body || !entry || entry.body !== body)
+    throw new Error('JS scalar fragment invariant: different prepared definition');
+  const policy = Object.fromEntries(policyKeys.map(key => [key, inner[key]])) as Policy;
+  (inner as AnnotatedTarget)[artifactKey] = {
+    root: body,
+    annotate: artifact.annotate,
+    policy,
+    annotation: artifact.annotation,
+    scope: entry.scope,
+  };
+}
+
+/** A one-value block still has an annotated lexical scope when unwrapped. */
+export function scalarFragmentUnwrappedBlock(
+  target: CompileTarget<Expression>,
+  node: Expression | undefined,
+  statements: readonly Expression[]
+): CompileTarget<Expression> {
+  if ((target as AnnotatedTarget)[artifactKey] === undefined) return target;
+  const inner = { ...target };
+  bindScalarFragmentBlock(target, inner, node, statements);
+  return inner;
 }
 
 /** Only the emitter of the recorded block may authorize its local target. */
@@ -164,8 +224,8 @@ export function enterScalarFragment(
   const artifact = (target as AnnotatedTarget)[artifactKey];
   if (artifact === undefined) return undefined;
   assertPolicy(artifact, target);
-  if (target.rootExpression !== (artifact.functionRoot ?? artifact.root))
-    throw new Error('JS scalar fragment invariant: different prepared scope');
+  // The authorized target's root expression is part of its policy. A named
+  // definition has its own annotated body but retains the registry's root.
   if (artifact.annotation === undefined) {
     if (node !== artifact.root)
       throw new Error('JS scalar fragment invariant: different prepared root');
@@ -193,6 +253,21 @@ function operation(target: CompileTarget<Expression>) {
     node: artifact.current,
     facts: facts(artifact, artifact.current),
   };
+}
+
+/** A direct helper call may not acquire hidden arguments or changed operands. */
+export function assertScalarFragmentCall(
+  target: CompileTarget<Expression>,
+  args: readonly Expression[],
+  held: readonly string[]
+): void {
+  const op = operation(target);
+  if (op === undefined) return;
+  const helper = op.artifact.helper;
+  const node = op.node;
+  if (!helper || !isFunction(node, helper.name) || held.length !== 0 ||
+      args.length !== node.nops || args.some((arg, i) => arg !== node.ops[i]))
+    throw new Error('JS scalar fragment invariant: different prepared call');
 }
 
 /** Undefined is reserved for legacy targets, never for an absent fact. */
