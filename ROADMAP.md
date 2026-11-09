@@ -69,8 +69,10 @@ code comments, plans and replies, for example "CE-42.3".
   the agent's report to the user, and becomes an entry
   (`waits for user (approval)`) only when the user says to record it. A defect
   that an agent finds is an issue file, never an entry here.
-- Record a user decision with its date. Link the plan document, the GitHub issue
-  or PR, and the issue file when there is one.
+- Record a user decision once, in the status line, as `approved <date>`; the
+  body of the entry states what was decided, with no date and no "decided by
+  the user". Link the plan document, the GitHub issue or PR, and the issue
+  file when there is one.
 - Write what a person needs to do the work: the design, the files and
   functions, the options and their costs. Do not record who found the item,
   when, or how.

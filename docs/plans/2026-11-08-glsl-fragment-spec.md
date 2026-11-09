@@ -1,18 +1,13 @@
 # The GLSL fragment: a positive list of what the shader target compiles
 
-**Status:** approved by the user on 2026-11-08, with every recommendation of
-section 6 (matrices out; `Map` with a function literal over a non-constant
-collection out; random draws out; the pass cap is `iterationBudget`, counted
-over the whole evaluation at run time, default 10,000; the constant-list
-limit stays 256 and does not apply to a sampler-backed list input; a scalar
-block is admitted as the body of a user function). **The WGSL target is
-dropped, decided by the user on 2026-11-08** (it replaces the "keep" of
-2026-11-02 in `docs/plans/2026-11-02-language-axes-options.md`): the GPU
-renders pixels in f32 and never computes data, so a compute target has no
-job, and the f32 repairs that GPU data would need (exact `fract` of a large
-product, CE-1158) are not wanted. No code yet; step 2 of section 7 is next.
+**Status:** approved 2026-11-08, with the decisions of section 6. No code yet; step 2 of section 7 is next.
+
 This changes the documented target boundaries of `docs/COMPILATION-MODEL.md`
-("Target boundaries").
+("Target boundaries"). It also drops the WGSL target, which replaces the
+"keep" of `docs/plans/2026-11-02-language-axes-options.md`: the GPU renders
+pixels in f32 and never computes data, so a compute target has no job, and
+the f32 repairs that GPU data would need (an exact `fract` of a large
+product, CE-1158) are not wanted.
 
 ## 1. Problem
 
@@ -43,10 +38,12 @@ of these lists. The check runs on the canonical, type-inferred tree.
 **Values and types.** A real scalar (f32), an integer, a boolean, a complex
 number as `vec2`, a point or vector of 2 to 4 real components, a color, a
 constant list of at most 256 real scalars or points (the shader array limit),
-a list input named in the `byReference` option whose width the `sampler`
-option gives (read through a `sampler2D` fetch with a bound guard, with no
-limit on its length; Tycho's by-reference heatmaps and implicit rows, among
-them a 22,500-cell board, use it), and, if decision 1 says so, a matrix of at
+a list input that the `storage` option of `compile()` names with the hint
+`'sampler2D'` (`CompilationOptions.storage` in `compilation/types.ts`; read
+through a `texelFetch` helper with a bound guard, with no limit on its
+length; in Tycho these are the `byReference` names of a row, and the
+`buddhabrot` showcase entry reads a 90,001-element list and `game-of-life` a
+22,500-cell board this way), and, if decision 1 says so, a matrix of at
 most 4 × 4 real entries. Every free symbol has one of these types, declared
 or inferred, or given by the options of the call (`hideValues` and the
 per-symbol input types). A symbol typed `unknown`, `any`, `expression`,
@@ -97,14 +94,14 @@ language form: the predicate accepts it and ignores it.
   whose body is in the fragment, with no recursion, direct or mutual. Such a
   function is emitted once as a GLSL function.
 - The body of a user function, and only there, never at the row root, may be
-  a scalar block (decision 6, decided 2026-11-08): `let` and `const`
+  a scalar block (decision 6): `let` and `const`
   declarations of scalar, point or complex locals, assignment to a local, a
   tuple assignment of locals, a counted `for` over an integer range with
   `break`, `if` statements, and a final expression. No list parameter, no
   list local or write, no nested function, no `Loop` without a range. GLSL
   has each of these natively. The pass counter of the aggregates counts
   these loops too. Two heads of Epsil's `parallel for` are part of this list
-  (decided by the user on 2026-11-08): `AddTo` on a scalar local (`s += e`),
+  (decision 7): `AddTo` on a scalar local (`s += e`),
   which is `s = s + e`, and a `ParallelLoop` over an integer range whose
   accumulators are scalar locals of the function, which compiles as the
   counted loop with its passes in order. The interpreter and the JavaScript
@@ -116,6 +113,16 @@ language form: the predicate accepts it and ignores it.
   are outside the fragment: the GPU does not run a `parallel for` in
   parallel, since an accumulation into an outer variable computes data, and
   the per-pixel evaluation of a row is already the GPU's parallel form.
+  Two refinements come from the audit with preludes (section 4,
+  decision 8): (1) the forms nest, so a branch
+  of an `if` and the body of a loop are blocks of the same forms, with their
+  own `const` locals (the colour formula of `buddhabrot` declares two locals
+  inside a branch); (2) "no list parameter" has one exception: a parameter
+  that every call binds to a storage-backed list input, read only with `At`.
+  The function is then emitted once per bound list, with the list as a
+  global sampler (`c(H, x, y, z)` of `buddhabrot` compiles to
+  `_fn_c_bind0_H(x, y, z)` today). A list parameter bound to anything else,
+  and any write to it, stay outside the fragment.
 - Compile-time work whose result is in the fragment: constant folding, the
   closed-form derivative (`derivative-closed-form.ts`), common-subexpression
   elimination, and the unrolling of a comprehension or a `Map` over constant
@@ -136,7 +143,7 @@ as a value, recursion, and a free symbol outside the types above.
 
 `canCompile(expr, options)`, on the engine and exported from the compile
 entry, takes the same options object as `compile()` (the input types,
-`hideValues`, `byReference`, `sampler` and `vars` decide the answer) and
+`hideValues`, `storage` and `vars` decide the answer) and
 answers `{ ok: true }` or `{ ok: false, diagnostic }` with one decline code,
 `outside-fragment`, in the `CompileDiagnostic` form that `compile()` already
 reports, naming the head that is outside or, for a free symbol without a
@@ -149,7 +156,7 @@ is a defect. The `float32-unsafe-argument` warning of a compile that
 succeeds stays: Tycho keeps a curve row with a sine hash on the CPU because
 of it.
 
-**How to build it (decided by the user on 2026-11-08).** The predicate is a
+**How to build it (decision 9).** The predicate is a
 typing pass, not a yes-or-no walk: it annotates each node of the tree with
 its fragment type (f32 scalar, integer, boolean, complex, point of n
 components, color, constant list of n, sampler-backed list, function body)
@@ -198,8 +205,9 @@ Under the fragment every record that compiles today still compiles (one
 record with `Transpose` excepted if decision 1 leaves matrices out), and the
 52 declines become one decline code answered before emission.
 
-What the load-time audit does not cover (Tycho, 2026-11-08): the
-`byReference` and `sampler` options (no audit record carries them), the
+What the whole-corpus audit of 14:55 did not cover (Tycho, 2026-11-08): the
+`storage` option (no record of that run carries it; three records of the run
+with preludes do, see below), the
 `hideValues` and typed inputs that the implicit rows get at render time, and
 the 71 records with a `vars` map, which the audit records but the census did
 not inspect. Whether a plot row's by-reference compile ever carries a
@@ -214,8 +222,22 @@ has a 256-pass loop with `break` and colour functions with `const` locals and
 nested if/else; `buddhabrot`'s colour formula `c(H, x, y, z)` has `const`
 locals and an if/else value. Such a function compiles to a GLSL
 `float _fn_f(…)` with a `for` loop today, so these heatmaps are on the GPU
-through the statement machinery of section 5. The audit cannot see them: its
-harness runs no prelude. Decision 6 decides their route.
+through the statement machinery of section 5. The audit could not see them:
+its harness ran no prelude. Decision 6 decides their route.
+
+The audit with preludes (`ce-0.184.0.json` of 2026-11-08 15:57, Tycho
+`a40372202`, the CORE corpus and the showcase entries: 209 GLSL records, 7
+declined, all the 9,801-element list of one document). Its GLSL preambles
+hold 78 distinct user functions in 21 documents. 21 of them declare locals,
+6 have a counted `for` (3 with `break`: `burning-ship`, `multibrot`,
+`julia-set`; 3 are a `Sum` inside a function), 7 have an `if` statement, none
+has a `while`, a `continue`, an array local or an array parameter. Three
+records carry `storage: { <name>: "sampler2D" }` (`buddhabrot` twice,
+`game-of-life` once). Every one of these functions is inside the function
+body list of section 2 with its two refinements. The emitter
+also declares locals and nested blocks of its own for pure expressions (the
+arguments of an inlined call, a shared subexpression): that is emission, not
+a language form, and the fragment does not restrict it.
 
 ## 5. What the engine retires
 
@@ -230,7 +252,7 @@ the shader branches of the shared statement modules (`compile-blocks.ts` has
 and the per-head decline paths that the predicate makes unreachable. The
 NaN-safe helpers, the finite proof over declared ranges and the exact sine
 hash stay: they are rendering concerns with corpus witnesses. The WGSL target
-goes (decided 2026-11-08): `wgsl-*.ts` (3,325 lines), about 300 WGSL
+goes (decision 10): `wgsl-*.ts` (3,325 lines), about 300 WGSL
 branches in the shared GPU files, the `wgsl` entry of the target registry and
 the `compileShader`/`compileKernel` routes that only it used, its tests (186
 test files name it; most also test GLSL and keep their GLSL half) and its
@@ -239,7 +261,9 @@ The `parallel for` plan (`docs/plans/2026-11-07-ce1093-parallel-for.md`)
 loses its compute-shader backend; the construct stays, and its backend is a
 new decision (section 6, note after decision 6).
 
-## 6. Decisions for the user
+## 6. Decisions (approved 2026-11-08)
+
+Decisions 1 to 5 were taken as recommended.
 
 1. Matrices: in or out. One corpus record (one document) uses `Transpose`
    and compiles today; no emitted GLSL in today's run contains `mat2` to
@@ -288,20 +312,23 @@ new decision (section 6, note after decision 6).
      cost above, or get built-in heads (`Mandelbrot` and `Julia` exist in the
      GPU table today; `burning-ship` and `multibrot` do not). Each new fractal
      a user writes in Epsil stays off the GPU.
-   **Decided by the user on 2026-11-08: (a).** The admitted forms are in
+   **Decided: (a).** The admitted forms are in
    section 2, "The body of a user function".
 
-Not decided here: the backend of `parallel for`. With WGSL gone, the
-candidate is the JavaScript worker pool (`broadcast()` and the kernel pool
-of `docs/plans/2026-10-20-worker-kernel-pool.md`): the construct's rules
-(independent passes, outer writes only through `+=` accumulators) are the
-proof that a range split is valid, the result is f64 and deterministic, and
-the measured gain on the Buddhabrot step at 500,000 samples is 75 to 107 ms
-down to 12 to 16 ms with 8 workers (Tycho `roadmap/BUDDHABROT_CODE_STUDY.md`
-§ 8.5). Decided by the user on 2026-11-08: `parallel for` is implemented on
-the JavaScript target first, as `issues/CE-1163.md` requests (`runAsync()`
-on a compiled result, the pool route, a query before the run); the design
-of that issue is the record, and it waits for its own approval.
+7. Epsil's `parallel for` inside a function body: `AddTo` on a scalar local
+   and an in-order `ParallelLoop` with scalar local accumulators are in
+   (section 2).
+8. The function-body forms nest, and a list parameter that every call binds
+   to a storage-backed list input is admitted (section 2).
+9. The predicate is built as a typing pass whose annotation is the first
+   pass at the engine's intermediate representation (section 3).
+10. The WGSL target is dropped (section 5). `parallel for` runs on the
+    JavaScript worker pool: the construct's rules (independent passes, outer
+    writes only through `+=` accumulators) are the proof that a range split
+    is valid, the result is f64 and deterministic, and the measured gain on
+    the Buddhabrot step at 500,000 samples is 75 to 107 ms down to 12 to
+    16 ms with 8 workers (Tycho `roadmap/BUDDHABROT_CODE_STUDY.md` § 8.5).
+    The design is `issues/CE-1163.md`, which waits for its own approval.
 
 ## 7. Steps
 
@@ -314,7 +341,8 @@ of that issue is the record, and it waits for its own approval.
    disagreement between the predicate and the compile as a record field;
    Tycho's GPU test lane (`tests/` under `src/plot/webgl`) and a browser pass
    of the showcase GPU entries run too, because the audit does not exercise
-   `byReference`, `sampler` or the render-time input types.
+   the render-time input types, and exercises the `storage` option in three
+   showcase records only.
 3. Removal of the shader statement machinery (section 5), one module per
    change, each checked by the corpus audit and the GLSL test lane.
 4. The model document: "Target boundaries" gains the fragment, and the shader

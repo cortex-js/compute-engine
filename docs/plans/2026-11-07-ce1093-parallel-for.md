@@ -4,8 +4,8 @@
 §7. **Suspended on 2026-11-08:** the user dropped the WGSL target
 (`docs/plans/2026-11-08-glsl-fragment-spec.md`, status line), so the
 compute-shader backend of this plan is withdrawn. The construct (§2) and its
-rules (§3) stay. The backend is the JavaScript worker pool, decided by the
-user on 2026-11-08: its design is `issues/CE-1163.md` (`runAsync()` on a
+rules (§3) stay. The backend is the JavaScript worker pool (approved
+2026-11-08): its design is `issues/CE-1163.md` (`runAsync()` on a
 compiled result), which replaces step 2 of §8 and waits for its own
 approval. On the `glsl` target a `ParallelLoop` with scalar local
 accumulators inside a function body compiles as a counted loop in order
