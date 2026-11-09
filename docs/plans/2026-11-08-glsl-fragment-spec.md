@@ -474,12 +474,30 @@ Decisions 16 to 18, approved 2026-11-09, come from the corpus audit of
     the call is refused unless decision 8 or 14 admits it. Corpus: 14
     records in 8 documents (`neyret/0et6fx01id`: "The parameter
     `ceArg_0` of `d` has no type in the GLSL fragment").
+19. **A function call that the interpreter broadcasts over a list is in the
+    fragment** (approved 2026-11-09). The compiler, not the host, gives a
+    call the value that the interpreter gives; a host without a textual
+    expansion of the function bodies would otherwise lose the GPU route.
+    Two forms, from the 2026-11-09 corpus audit (10 records in 5 documents
+    that 0.184.0 compiled by reference and that now compile only through
+    Tycho's textual expansion):
+    - A scalar function called with a list of 2 to 4 reals is applied to
+      each element: `f(x) = x mod 1` and `f([-x, -y])` compile to an
+      element-wise wrapper (`vec2 _fn_f_each2_1(vec2)`), as 0.184.0 wrote
+      it (`neyret/0et6fx01id`, `neyret/74cc5c82a3`).
+    - A parameter with no declared type whose body reads it as a vector
+      takes the list type of its argument, with one GLSL function for each
+      set of argument types (`vec2 _fn_R_vector_2_number(vec2, float)` in
+      `neyret/pqflulcixs`), but only where the interpreter also reads the
+      list whole. Where the interpreter maps the function over the elements,
+      the call compiles as the first form or is refused.
+    The work is `issues/CE-1180.md`.
 
 A bound or an index whose type is real (`Limits(k, 1, n)` with `n: real`)
-stays admitted, and the emitted code truncates it with `int()`. This gives
-the interpreter's value only when the bound holds an integer. Step 3 of the
-implementation plan counts the corpus records with such a bound and records
-the difference as an issue with that count; the rule is decided then.
+stays admitted. The emitted code floors it (`int(floor(n))`), and the
+interpreter floors it too: `Sum(k, k, r, 3)` gives 6 at `r = 0.5` in both.
+The corpus audit of 2026-11-09 found no record with a real-typed loop bound
+in the root code.
 
 ## 7. Steps
 
