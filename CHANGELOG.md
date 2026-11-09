@@ -56,6 +56,12 @@
 
 ### Resolved Issues
 
+- **A `parallel for` whose body ends with an inner loop compiles to
+  JavaScript.** In `parallel for k in 1..n { if k > 0 { for m in 1..3 {
+  L[m] += 1 } } }`, the compilation declined with "the value of this `Loop`
+  is used", and the program ran on the interpreter. The body of a
+  `parallel for` is now a statement list, as the body of a `for`, so the
+  same body compiles under both. (CE-1164)
 - **A sum or product over a set and a range keeps the upper bound of the
   range.** `\sum_{k\in \lbrace1,2,3\rbrace, j=1}^{3} jk` was parsed with no
   upper bound for `j`, so it had no value; it now gives `36`. The LaTeX of

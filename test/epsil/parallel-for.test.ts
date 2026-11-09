@@ -837,6 +837,32 @@ describe('the JavaScript target', () => {
     }
   });
 
+  // The body of a `parallel for` is a statement list, as the body of a
+  // `for`: its last statement, here an `if` with no `else` whose branch
+  // ends with an inner `for`, is a statement, and the value of the inner
+  // loop is not used. Before, the check of a used loop value read the body
+  // of a `ParallelLoop` as a value, and the compilation declined with "the
+  // value of this `Loop` is used" (issue CE-1164).
+  test('a parallel loop whose body ends with an inner loop compiles', () => {
+    const ce = new ComputeEngine();
+    ce.declare('n', 'integer');
+    const definition = `function f(H: list<integer>, n: integer) -> list<integer> {
+      let L = H
+      parallel for k in 1..n {
+        if k > 0 {
+          for m in 1..3 { L[m] += 1 }
+        }
+      }
+      L
+    }`;
+    expect(executeEpsil(ce, definition).diagnostics).toEqual([]);
+    const result = compileEpsil(ce, 'f([0, 0, 0, 0], n)');
+    expect(result.success).toBe(true);
+    expect(result.run({ n: 5 })).toEqual([5, 5, 5, 0]);
+    const interpreted = run(`${definition}\nf([0, 0, 0, 0], 5)`).value;
+    expect([...interpreted.each()].map((x) => x.re)).toEqual([5, 5, 5, 0]);
+  });
+
   // A parameter with no declared type takes the type that the assignment
   // `+=` stands for gives it: a list argument is then bound whole, not
   // applied to each element.
