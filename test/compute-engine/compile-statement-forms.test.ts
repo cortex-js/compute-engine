@@ -2,29 +2,21 @@
  * Two compiled forms that need a statement where the expression form has
  * none.
  *
- * 1. WGSL. The expression form of a selection (`If`, `Which`) is a
- *    `select(…)` call, whose operands are expressions, and an assignment is a
- *    statement in WGSL. A selection whose branch assigns a variable declined.
- *    Where the selection is a STATEMENT — a statement of a block that is not
- *    its value, any statement of a loop body, a branch of such a statement —
- *    its value is discarded, and it is now an `if (…) { … } else { … }`
- *    statement. GLSL keeps its ternary (an assignment is an expression
- *    there), except for an else-less `If`, which has no ternary form on
- *    either language. A selection in a value position (the value of a block,
- *    the right side of an assignment, the whole body) still declines on WGSL.
- *    WGSL also has no expression statement, so a discarded value is a phony
- *    assignment (`_ = x + 1.0;`).
+ * 1. GLSL. A selection (`If`, `Which`) whose branch assigns a variable keeps
+ *    its ternary, because an assignment is an expression in GLSL. An else-less
+ *    `If` has no ternary form: where it is a STATEMENT (its value is
+ *    discarded), it is an `if (…) { … }` statement.
  *
  * 2. Python. The lowering of `Sum`/`Product` is a generator expression, whose
  *    element is an expression. A body that is an assignment or a block of
  *    statements declined. Where the `Sum` is the value of a statement (the
  *    body of `compile()` or of `compileFunction()`, a statement of a block,
  *    the right side of an assignment there), it is now a `for` loop with an
- *    accumulator, written ahead of the statement, as the GLSL and WGSL
- *    targets write a loop-form `Sum`. In any other position the `Sum` still
+ *    accumulator, written ahead of the statement, as the GLSL
+ *    target writes a loop-form `Sum`. In any other position the `Sum` still
  *    declines.
  *
- * There is no WGSL validator in this repository: the tests check the emitted
+ * There is no shader validator in this repository: the tests check the emitted
  * source, and run the scalar programs after a small translation to
  * JavaScript. The Python programs run with the repository Python
  * (`TEST_PYTHON`).
@@ -46,7 +38,7 @@ function interpreted(src: any, inputs: Record<string, number>): number {
   return ce.box(src).evaluate().N().re;
 }
 
-function shader(src: any, to: 'glsl' | 'wgsl', options: any = {}): any {
+function shader(src: any, to: 'glsl', options: any = {}): any {
   const ce = new ComputeEngine();
   ce.declare('x', 'real');
   ce.declare('n', 'real | signed_infinity | nan');
@@ -56,17 +48,15 @@ function shader(src: any, to: 'glsl' | 'wgsl', options: any = {}): any {
 
 /**
  * The JavaScript form of the scalar shader body `code`: declarations become
- * `let`, the integer loop index and its conversion to a float are kept as
- * numbers, and a phony assignment is a `void` expression. Enough for the
- * programs of this file, not a general translator.
+ * `let`, and the integer loop index and its conversion to a float are kept
+ * as numbers. Enough for the programs of this file, not a general
+ * translator.
  */
 function shaderToJS(code: string): string {
   return code
     .replace(/^(\s*)(?:float|int) (\w+)(;| =)/gm, '$1let $2$3')
-    .replace(/^(\s*)var (\w+): \w+(;| =)/gm, '$1let $2$3')
-    .replace(/for \((?:int|var) (\w+)(?:: i32)? =/g, 'for (let $1 =')
-    .replace(/\b(?:float|f32)\(/g, '(')
-    .replace(/^(\s*)_ = /gm, '$1void ');
+    .replace(/for \(int (\w+) =/g, 'for (let $1 =')
+    .replace(/\bfloat\(/g, '(');
 }
 
 function runShader(code: string, x: number, u = 5): number {
@@ -175,148 +165,6 @@ const ASSIGNING: [string, any][] = [
   ],
 ];
 
-describe('WGSL: A SELECTION WHOSE BRANCHES ASSIGN, IN STATEMENT POSITION', () => {
-  for (const [name, src] of ASSIGNING)
-    test(name, () => {
-      const c = shader(src, 'wgsl');
-      expect(c.success).toBe(true);
-      expect(c.code).not.toContain('select(');
-      expect(c.code).toMatch(/^\s*if \(.*\) \{$/m);
-      for (const x of X_VALUES)
-        expect([x, runShader(c.code, x)]).toEqual([
-          x,
-          interpreted(src, { x, u: 5 }),
-        ]);
-    });
-
-  test('a branch that writes an input declines', () => {
-    // A write to a symbol declared in the engine declines.
-    expect(() =>
-      shader(
-        [
-          'Block',
-          [
-            'Which',
-            ['Greater', 'x', 0],
-            ['Assign', 'u', 1],
-            'True',
-            ['Assign', 'u', 2],
-          ],
-          ['Add', 'u', 'x'],
-        ],
-        'wgsl'
-      )
-    ).toThrow(/"u" is not a local of the compiled expression/);
-  });
-
-  test('the code of an If in a block', () => {
-    expect(shader(ASSIGNING[0][1], 'wgsl').code).toBe(
-      [
-        'var t: f32;',
-        't = 0.0;',
-        'if (0.0 < x) {',
-        '  t = 1.0;',
-        '} else {',
-        '  t = 2.0;',
-        '}',
-        'return t;',
-      ].join('\n')
-    );
-  });
-
-  test('a later condition hoists its statements into the else branch', () => {
-    // The loop of the `Sum` in the second condition runs only when the first
-    // condition is false.
-    const src = [
-      'Block',
-      ['Assign', 't', 0],
-      [
-        'Which',
-        ['Greater', 'x', 1],
-        ['Assign', 't', 1],
-        [
-          'Greater',
-          ['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', 1, 'n']],
-          0,
-        ],
-        ['Assign', 't', 2],
-      ],
-      't',
-    ];
-    const code = shader(src, 'wgsl').code;
-    expect(code).toMatch(
-      /\} else \{\n {2}var _tv1: f32 = 0\.0;\n {2}for \(var k: i32 = 1;[^\n]*\n {4}_tv1 \+= [^\n]*\n {2}\}\n {2}if \(0\.0 < _tv1\) \{/
-    );
-  });
-
-  test('a loop-form Sum in a branch runs in that branch', () => {
-    const src = [
-      'Block',
-      ['Assign', 't', 0],
-      [
-        'If',
-        ['Greater', 'x', 0],
-        [
-          'Assign',
-          't',
-          ['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', 1, 'n']],
-        ],
-        ['Assign', 't', 2],
-      ],
-      't',
-    ];
-    expect(shader(src, 'wgsl').code).toMatch(
-      /if \(0\.0 < x\) \{\n {2}var _tv1: f32 = 0\.0;\n {2}for \(/
-    );
-  });
-
-  test('a selection in a value position still declines', () => {
-    const value: [string, any][] = [
-      [
-        'the value of a block',
-        [
-          'Block',
-          ['Assign', 't', 0],
-          ['If', ['Greater', 'x', 0], ['Assign', 't', 1], ['Assign', 't', 2]],
-        ],
-      ],
-      [
-        'the right side of an assignment',
-        [
-          'Block',
-          ['Assign', 't', 0],
-          [
-            'Assign',
-            'q',
-            ['If', ['Greater', 'x', 0], ['Assign', 't', 1], ['Assign', 't', 2]],
-          ],
-          'q',
-        ],
-      ],
-    ];
-    for (const [, src] of value)
-      expect(() => shader(src, 'wgsl')).toThrow(
-        /a branch assigns a variable, and the WGSL selection/
-      );
-  });
-
-  test('a selection of values keeps select(…)', () => {
-    expect(shader(['If', ['Greater', 'x', 0], 1, 2], 'wgsl').code).toBe(
-      'select(2.0, 1.0, 0.0 < x)'
-    );
-  });
-
-  test('a discarded value is a phony assignment', () => {
-    // WGSL has no expression statement: `x + 1.0;` is a syntax error.
-    expect(
-      shader(['Block', ['Add', 'x', 1], ['Multiply', 'x', 2]], 'wgsl').code
-    ).toBe('_ = x + 1.0;\nreturn 2.0 * x;');
-    expect(
-      shader(['Block', ['Add', 'x', 1], ['Multiply', 'x', 2]], 'glsl').code
-    ).toBe('x + 1.0;\nreturn 2.0 * x;');
-  });
-});
-
 describe('GLSL: A SELECTION WHOSE BRANCHES ASSIGN', () => {
   test('an else-ful selection keeps the ternary', () => {
     expect(shader(ASSIGNING[0][1], 'glsl').code).toMatch(
@@ -331,6 +179,12 @@ describe('GLSL: A SELECTION WHOSE BRANCHES ASSIGN', () => {
     expect(c.code).toContain('if (0.0 < x) {\n  t = t + x;\n}');
     for (const x of X_VALUES)
       expect(runShader(c.code, x)).toBe(interpreted(src, { x }));
+  });
+
+  test('a discarded value is an expression statement', () => {
+    expect(
+      shader(['Block', ['Add', 'x', 1], ['Multiply', 'x', 2]], 'glsl').code
+    ).toBe('x + 1.0;\nreturn 2.0 * x;');
   });
 });
 
@@ -636,7 +490,7 @@ describe('AN ASSIGNMENT THAT IS AN OPERAND', () => {
   ];
 
   test('every target declines', () => {
-    for (const to of ['javascript', 'glsl', 'python', 'wgsl'] as const)
+    for (const to of ['javascript', 'glsl', 'python'] as const)
       for (const src of [operand, argument]) {
         const ce = new ComputeEngine();
         expect(ce.box(src).isValid).toBe(false);
@@ -781,33 +635,7 @@ describe('PYTHON: A ROOT ASSIGNMENT OF A SUM WITH A STATEMENT BODY', () => {
   );
 });
 
-describe('WGSL: AN ASSIGNMENT IN A CONDITION', () => {
-  test('a condition that assigns declines', () => {
-    // `Not(flag := …)` is the static error `assignment-in-operand`. A bare
-    // assignment as the condition is not marked as an error, and WGSL
-    // declines it as an operand.
-    for (const cond of [
-      ['Assign', 'flag', ['Greater', 'x', 0]],
-      ['Not', ['Assign', 'flag', ['Greater', 'x', 0]]],
-    ]) {
-      const ce = new ComputeEngine();
-      ce.declare('flag', 'boolean');
-      expect(() =>
-        compile(
-          ce.box([
-            'Block',
-            ['Assign', 't', 0],
-            ['If', cond, ['Assign', 't', 1], ['Assign', 't', 2]],
-            't',
-          ] as any),
-          { to: 'wgsl', fallback: false }
-        )
-      ).toThrow(
-        /invalid expression|the assignment to "flag" is an operand of an expression/
-      );
-    }
-  });
-
+describe('AN ASSIGNMENT IN A CONDITION', () => {
   test('GLSL declines a write to a boolean input', () => {
     // A write to a symbol declared in the engine declines.
     const ce = new ComputeEngine();
@@ -829,20 +657,6 @@ describe('WGSL: AN ASSIGNMENT IN A CONDITION', () => {
         { to: 'glsl', fallback: false }
       )
     ).toThrow(/"flag" is not a local of the compiled expression/);
-  });
-});
-
-describe('WGSL: A DISCARDED VALUE WHOSE NAME STARTS WITH A KEYWORD', () => {
-  test('letter, format and variant are values, not statements', () => {
-    for (const name of ['letter', 'format', 'variant', 'iffy', 'returned']) {
-      const ce = new ComputeEngine();
-      ce.declare(name, 'real');
-      const code = compile(ce.box(['Block', name, ['Multiply', 'x', 2]]), {
-        to: 'wgsl',
-        fallback: false,
-      }).code;
-      expect(code).toBe(`_ = ${name};\nreturn 2.0 * x;`);
-    }
   });
 });
 

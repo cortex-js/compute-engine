@@ -46,29 +46,24 @@ import {
 /**
  * The shader spelling of a NON-FINITE value (`NaN`, `±∞`).
  *
- * Neither GLSL nor WGSL has a `NaN` or an `Infinity` LITERAL — but both can
+ * GLSL has no `NaN` or `Infinity` LITERAL — but it can
  * MAKE those values from a bit pattern, and the GPU target already routes the
  * masked (restriction or `Which` fall-through) NaN through exactly that mechanism
  * (`gpuNaN` in `gpu-emit.ts`, which delegates here so there is exactly one
  * spelling). A non-finite CONSTANT is the same value reached by another route,
  * so it gets the same spelling instead of failing the compilation.
  *
- * Both targets go through the preamble helpers `_gpu_nan()` / `_gpu_inf()` —
- * one symbol a host can redefine without touching the generated code. The
- * helpers build the value from its bit pattern (`GPU_NAN_PREAMBLE_GLSL` and
- * `GPU_NAN_PREAMBLE_WGSL` in `gpu-preambles.ts`). WGSL cannot spell it inline:
- * a bitcast of a CONSTANT to a non-finite f32 is a const-expression, and a
- * const-expression that evaluates to NaN or an infinity is a shader-creation
- * error (Chrome's compiler reports "value nan cannot be represented as
- * 'f32'"). Inside the helper the bit pattern is a `let`, a run-time value.
+ * The GLSL target goes through the preamble helpers `_gpu_nan()` /
+ * `_gpu_inf()` — one symbol a host can redefine without touching the
+ * generated code. The helpers build the value from its bit pattern
+ * (`GPU_NAN_PREAMBLE_GLSL` in `gpu-preambles.ts`).
  *
  * Infinity is a BIT PATTERN, never `1.0 / 0.0`: a fast-math driver is licensed
  * to fold a division by a constant zero (ANGLE→Metal fast-math already
  * destroys compensated arithmetic in this project), and a bit pattern is not
  * foldable.
  *
- * The spelling is the same on both targets; `language` is kept for callers
- * that pass it.
+ * `language` is kept for callers that pass it.
  */
 export function gpuNonFiniteLiteral(n: number, _language?: string): string {
   if (Number.isNaN(n)) return '_gpu_nan()';
@@ -94,7 +89,7 @@ export function gpuNonFiniteLiteral(n: number, _language?: string): string {
  * would round to an infinity that no decimal literal spells. An
  * INTEGER-valued one keeps every digit it has, because an integer literal is
  * what a loop bound, an array length and the argument of an `int()`/`i32()`
- * conversion are made of: WGSL evaluates an unsuffixed float literal in a
+ * conversion are made of: a shader compiler can evaluate a float literal in a
  * const expression at abstract-float precision, which is at least single and
  * may be double, so moving `16777217.0` to its single-precision neighbour
  * `16777216.0` could move such a bound by one where every value context reads
@@ -116,9 +111,6 @@ function shortestFloat32Decimal(n: number): string {
   return single.toString();
 }
 
-/** The largest finite single precision value, exactly. */
-const F32_MAX = 3.4028234663852886e38;
-
 /**
  * Format a number as a GPU float literal, ensuring a decimal point.
  *
@@ -127,27 +119,16 @@ const F32_MAX = 3.4028234663852886e38;
  * The digits are the shortest that read back as the same single precision
  * value (`shortestFloat32Decimal`), which is all a shader can hold.
  *
- * A non-finite value has no literal spelling in either shader language, so it
- * is emitted through `gpuNonFiniteLiteral` instead (which needs `language` to
- * pick the right form — pass it wherever the target is in scope).
+ * A non-finite value has no literal spelling in GLSL, so it is emitted
+ * through `gpuNonFiniteLiteral` instead.
  */
 export function formatFloat(n: number, language?: string): string {
   if (!Number.isFinite(n)) return gpuNonFiniteLiteral(n, language);
   // A finite value that rounds to an infinity in single precision (its
-  // magnitude is above the f32 maximum, about 3.4e38). GLSL reads such a
-  // literal as an infinity, but WGSL rejects the whole shader ("value
-  // 2.6881171418161356e+43 cannot be represented as 'f32'"), so on WGSL it
-  // is spelled as the infinity it becomes. GLSL keeps the literal: on WebGL2
-  // over ANGLE Metal, arithmetic with the constant `_gpu_inf()` gives a wrong
-  // value (CE-287 in `ROADMAP.md`), and the literal does not. CE-510 (Tycho
-  // row 455).
-  if (language === 'wgsl' && !Number.isFinite(Math.fround(n)))
-    return gpuNonFiniteLiteral(n > 0 ? Infinity : -Infinity, language);
-  // A value just above the f32 maximum that still rounds to it (such as
-  // 3.4028235e38) is written as the maximum itself: its own decimal is above
-  // the f32 range, which WGSL can reject.
-  if (language === 'wgsl' && Math.abs(n) > F32_MAX)
-    return formatFloat(Math.sign(n) * F32_MAX, language);
+  // magnitude is above the f32 maximum, about 3.4e38) keeps its literal,
+  // which GLSL reads as an infinity: on WebGL2 over ANGLE Metal, arithmetic
+  // with the constant `_gpu_inf()` gives a wrong value (CE-287 in
+  // `ROADMAP.md`), and the literal does not. CE-510 (Tycho row 455).
   const str = shortestFloat32Decimal(n);
   if (!str.includes('.') && !str.includes('e') && !str.includes('E')) {
     return `${str}.0`;
@@ -528,7 +509,7 @@ interface EmittedFoldDialect {
   readonly round: (x: number) => number;
   /** Whether `%` is an operator of the language. JavaScript's `%` on doubles
    * is exact (the remainder after a truncated division), so it folds like any
-   * other operator. Neither shader language has it. */
+   * other operator. GLSL has no `%` on floats. */
   readonly remainder: boolean;
   /** Whether a numeric literal must carry a decimal point or an exponent to be
    * read as a number. Set on the shader targets: every float literal they emit
@@ -620,7 +601,7 @@ class EmittedCodeReader {
     const next = this.code[this.pos + text.length];
     // A literal that continues into a letter, a digit, a second point or an
     // identifier character is not a decimal double: `0x7f800000u` (a shader
-    // bit pattern), `1f` (a WGSL suffix), `2.0f`. `parseFloat` reads a PREFIX
+    // bit pattern), `1f` (a type suffix), `2.0f`. `parseFloat` reads a PREFIX
     // of such text and answers a different value.
     if (next !== undefined && /[A-Za-z0-9_$.]/.test(next)) return undefined;
     if (this.dialect.decimalPointRequired && !/[.eE]/.test(text))
@@ -1313,7 +1294,7 @@ function gpuPowiHelper(base: number, exponent: number): number | undefined {
 }
 
 /**
- * The GLSL / WGSL emitted-code dialect.
+ * The GLSL emitted-code dialect.
  *
  * Every step rounds to single (`Math.fround`), so a folded literal is
  * bit-identical to what the shader computes. Only `sqrt`, `pow` at an integer
@@ -1321,13 +1302,13 @@ function gpuPowiHelper(base: number, exponent: number): number | undefined {
  * `sqrt` are correctly rounded in IEEE single, so a double computation rounded
  * once reproduces them exactly, while a shader `sin`, `cos`, `exp` or a
  * fractional `pow` is NOT correctly rounded and its value is the driver's, not
- * one this compiler may predict. There are no constants: neither shader
- * language has a named numeric constant, so a bare name in shader code is
+ * one this compiler may predict. There are no constants: GLSL has no named
+ * numeric constant, so a bare name in shader code is
  * always a variable, a uniform or a helper.
  *
  * `pow` at an INTEGER exponent is admitted for a different reason than the
  * correctly-rounded operations, and it fixes a wrong VALUE rather than a cost.
- * Both shader languages define `pow(x, y)` as `exp2(y·log2(x))`, which is
+ * GLSL defines `pow(x, y)` as `exp2(y·log2(x))`, which is
  * undefined for a negative `x` — `pow(-1.0, 1.0)` answers NaN on most drivers,
  * so a kernel alternating signs with `(-1)^k` computes the wrong thing. The GPU
  * target already refuses to write `pow` for a literal integer exponent for
@@ -1461,10 +1442,10 @@ export function foldEmittedJavaScriptCode(
 }
 
 /**
- * Fold the literal arithmetic in a GLSL or WGSL emission
- * (`CompileTarget.foldEmittedConstant` on the shader targets). The two
- * languages share one dialect: they agree on the spelling of a float literal,
- * on `sqrt`, and on the fixed-power helper names the GPU target declares.
+ * Fold the literal arithmetic in a GLSL emission
+ * (`CompileTarget.foldEmittedConstant` on the GLSL target). The dialect
+ * knows the GLSL spelling of a float literal, `sqrt`, and the fixed-power
+ * helper names the GPU target declares.
  */
 export function foldEmittedGPUCode(
   code: string,

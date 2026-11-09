@@ -272,7 +272,7 @@ describe('the other targets', () => {
     return ce;
   }
 
-  test.each(['glsl', 'wgsl'])('%s emits a call of the user function', (to) => {
+  test.each(['glsl'])('%s emits a call of the user function', (to) => {
     const ce = engine();
     const { result, warnings } = compiled(
       ce.box(['Add', ['Gamma', 'x'], 1]),

@@ -174,7 +174,7 @@ describe('a body that contradicts the declared result declines', () => {
     expect(compiled(ce, ['g', 'x']).success).toBe(false);
   });
 
-  test.each(['glsl', 'wgsl', 'interval-js'])(
+  test.each(['glsl', 'interval-js'])(
     'a boolean value from a function assigned later under `-> number` declines on %s',
     (to) => {
       const ce = engineWithLater('(x: number) -> number', BOOLEAN_BODY);

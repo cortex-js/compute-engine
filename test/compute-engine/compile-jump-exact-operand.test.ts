@@ -124,10 +124,9 @@ describe('Compiled jump function of a closed exact operand, other targets', () =
     expect(compile(e, { to: 'python', ...NO_FOLD }).code).toBe('True');
   });
 
-  test('GLSL and WGSL, no constant fold', () => {
+  test('GLSL, no constant fold', () => {
     const e = box(['Floor', nearInt]);
     expect(compile(e, { to: 'glsl', ...NO_FOLD }).code).toBe('24.0');
-    expect(compile(e, { to: 'wgsl', ...NO_FOLD }).code).toBe('24.0');
   });
 });
 

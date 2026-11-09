@@ -16,7 +16,7 @@
  * counts, and at `c = -2.0000000001` it is 3. Only a deep zoom near `c = -2` or
  * near a repelling fixed point reaches this edge.
  *
- * The GLSL and WGSL forms of this function are `_fractal_smooth` in
+ * The GLSL form of this function is `_fractal_smooth` in
  * `compilation/gpu-preambles.ts`.
  */
 export function smoothEscape(

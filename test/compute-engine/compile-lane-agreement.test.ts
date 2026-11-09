@@ -181,7 +181,7 @@ describe('Real-only lowerings over a statically non-real operand', () => {
   });
 
   it('the shader targets fail closed', () => {
-    for (const to of ['glsl', 'wgsl'])
+    for (const to of ['glsl'])
       expect(() =>
         compile(engine().parse('\\operatorname{erf}(x+\\imaginaryI)'), {
           to,

@@ -125,16 +125,6 @@ describe('COMPILE: assigned-symbol folding', () => {
     });
   });
 
-  describe('WGSL target', () => {
-    it('folds an assigned value', () => {
-      const ce = new ComputeEngine();
-      ce.assign('a', 1.5);
-      expect(
-        ce._getCompilationTarget('wgsl')!.compile(ce.parse('a x')).code
-      ).toBe('1.5 * x');
-    });
-  });
-
   describe('interval-js target', () => {
     it('folds an assigned value into an interval point', () => {
       const ce = new ComputeEngine();
@@ -253,22 +243,20 @@ describe('COMPILE: assigned-symbol folding', () => {
 });
 
 describe('COMPILE: non-finite numbers on GPU targets', () => {
-  // GLSL/WGSL have no infinity or NaN LITERAL — but both can MAKE those values
+  // GLSL has no infinity or NaN LITERAL — but it can MAKE those values
   // from a bit pattern, which is what the masked (restriction or `Which` else) branch
   // already does. A non-finite CONSTANT is the same value reached by another
   // route, so it goes through the same symbols (`gpuNonFiniteLiteral`) instead
-  // of failing the compilation: GLSL through the overridable `_gpu_nan()` /
-  // `_gpu_inf()` preamble helpers, WGSL through an inline `bitcast`.
+  // of failing the compilation: the overridable `_gpu_nan()` /
+  // `_gpu_inf()` preamble helpers.
   const NAN_CODE = {
     glsl: '_gpu_nan()',
-    wgsl: '_gpu_nan()',
   } as const;
   const INF_CODE = {
     glsl: '_gpu_inf()',
-    wgsl: '_gpu_inf()',
   } as const;
 
-  for (const target of ['glsl', 'wgsl'] as const) {
+  for (const target of ['glsl'] as const) {
     describe(target, () => {
       it('emits +∞ as a bit pattern, never a `1.0 / 0.0` a driver may fold', () => {
         const ce = new ComputeEngine();
@@ -554,7 +542,7 @@ describe('COMPILE: a declared vars-mapped input compiles as if it had no value (
     '\\int_0^x a t\\,dt',
     'a^{1/2} + n x',
   ];
-  for (const to of ['javascript', 'python', 'glsl', 'wgsl', 'interval-js']) {
+  for (const to of ['javascript', 'python', 'glsl', 'interval-js']) {
     it(`${to}: the output is the same with and without the held value`, () => {
       for (const src of sources) {
         const emit = (withValue: boolean) => {

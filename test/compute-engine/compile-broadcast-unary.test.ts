@@ -5,7 +5,7 @@
  * Two defects are pinned here:
  *
  *  A. The unary fan-out used to be a hardcoded JavaScript `.map((v) => …)`
- *     arrow emitted into EVERY target — `sin(vec4(…)).map(…)` for GLSL/WGSL,
+ *     arrow emitted into EVERY target — `sin(vec4(…)).map(…)` for GLSL,
  *     `([1,2,3]).map(…)` for Python — behind `success: true`. It is now
  *     target-mediated (`CompileTarget.broadcastUnary`): the shader targets do
  *     not fan out at all (their builtins are componentwise on a `vecN`),
@@ -20,7 +20,6 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
@@ -45,7 +44,6 @@ ce.declare('x', 'number');
 ce.declare('SN', 'set<number>');
 
 const glsl = new GLSLTarget();
-const wgsl = new WGSLTarget();
 const python = new PythonTarget();
 const intervalJs = new IntervalJavaScriptTarget();
 
@@ -57,8 +55,6 @@ const intervalJs = new IntervalJavaScriptTarget();
 // instead, short-circuiting the very code path being pinned.
 const g = (expr: any): string =>
   glsl.compile(ce.box(expr), { constantFold: false }).code!;
-const w = (expr: any): string =>
-  wgsl.compile(ce.box(expr), { constantFold: false }).code!;
 const p = (expr: any): string =>
   python.compile(ce.box(expr), { constantFold: false }).code!;
 
@@ -69,13 +65,10 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
   });
   afterAll(() => warn.mockRestore());
 
-  describe('GLSL / WGSL — componentwise, no fan-out', () => {
+  describe('GLSL — componentwise, no fan-out', () => {
     it('applies a builtin directly to a static vec4 operand', () => {
       expect(g(['Sin', ['List', 1, 2, 3, 4]])).toBe(
         'sin(vec4(1.0, 2.0, 3.0, 4.0))'
-      );
-      expect(w(['Sin', ['List', 1, 2, 3, 4]])).toBe(
-        'sin(vec4f(1.0, 2.0, 3.0, 4.0))'
       );
     });
 
@@ -83,17 +76,12 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
       expect(g(['Negate', ['List', 1, 2, 3, 4]])).toBe(
         '(-(vec4(1.0, 2.0, 3.0, 4.0)))'
       );
-      expect(w(['Negate', ['List', 1, 2, 3, 4]])).toBe(
-        '(-(vec4f(1.0, 2.0, 3.0, 4.0)))'
-      );
     });
 
     it('emits no JavaScript artifacts (`.map`, `=>`, `_SYS.`)', () => {
       for (const code of [
         g(['Sin', ['List', 1, 2, 3, 4]]),
-        w(['Sin', ['List', 1, 2, 3, 4]]),
         g(['Negate', ['List', 1, 2]]),
-        w(['Negate', ['List', 1, 2]]),
       ]) {
         expect(code).not.toContain('.map(');
         expect(code).not.toContain('=>');
@@ -105,9 +93,6 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
       expect(() => g(['Sin', ['List', 1, 2, 3, 4, 5]])).toThrow(
         /no static vec2–vec4 shape/
       );
-      expect(() => w(['Sin', ['List', 1, 2, 3, 4, 5]])).toThrow(
-        /no static vec2–vec4 shape/
-      );
     });
 
     it('fails closed on a nested list (no scalar components)', () => {
@@ -115,7 +100,6 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
       // vec2–vec4 shape for a componentwise call.
       const m = ['Sin', ['List', ['List', 1, 2], ['List', 3, 4]]];
       expect(() => g(m)).toThrow(/has no static vec2–vec4 shape/);
-      expect(() => w(m)).toThrow(/has no static vec2–vec4 shape/);
     });
 
     it('fails closed when the scalar lowering calls a scalar-only preamble helper', () => {
@@ -124,18 +108,12 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
       expect(() => g(['Sinc', ['List', 1, 2, 3]])).toThrow(
         /not componentwise.*preamble helper/s
       );
-      expect(() => w(['Gamma', ['List', 1, 2, 3]])).toThrow(
-        /not componentwise.*preamble helper/s
-      );
     });
 
     it('fails closed when the scalar lowering branches on a comparison', () => {
       // `Argument(x)` lowers to `((x >= 0.0) ? 0.0 : π)`; GLSL has no
       // `vecN >= float` and needs a scalar bool condition.
       expect(() => g(['Argument', ['List', 1, 2, 3]])).toThrow(
-        /not componentwise/
-      );
-      expect(() => w(['Argument', ['List', 1, 2, 3]])).toThrow(
         /not componentwise/
       );
     });
@@ -151,9 +129,6 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
     it('fails closed on a complex-valued list (a vec2 of re/im, not cells)', () => {
       expect(() =>
         g(['Sin', ['List', ['Complex', 1, 2], ['Complex', 3, 4]]])
-      ).toThrow(/complex-valued operand/);
-      expect(() =>
-        w(['Sin', ['List', ['Complex', 1, 2], ['Complex', 3, 4]]])
       ).toThrow(/complex-valued operand/);
     });
   });

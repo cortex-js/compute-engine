@@ -5,7 +5,7 @@ import { ComputeEngine, compile } from '../../src/compute-engine';
 // a constructor whose last argument is only partly used, so
 // `vec2(t, _fn_h(t))` with a `vec2`-returning `_fn_h` compiled and the shader
 // kept only the real part of the component. These spellings must fail closed
-// on both shader targets, with a diagnostic that names the component.
+// on the shader target, with a diagnostic that names the component.
 //
 // The call `h(t)` of a function declared `(unknown) -> unknown` types
 // `number`, although the body `s + i` is complex. The compiler reads the
@@ -22,7 +22,7 @@ function engine(): ComputeEngine {
   return ce;
 }
 
-const TARGETS = ['glsl', 'wgsl'] as const;
+const TARGETS = ['glsl'] as const;
 
 function run(
   to: (typeof TARGETS)[number],
@@ -73,49 +73,34 @@ describe('GPU POINT WITH A COMPLEX COMPONENT FAILS CLOSED', () => {
     ).toThrow(
       'Could not compile `vec2`: element 2 (`h(t)`) is itself vector-valued'
     );
-    expect(() =>
-      run('wgsl', (ce) => ce.parse('\\operatorname{PointList}(t, h(t))'))
-    ).toThrow(
-      'Could not compile `vec2f`: element 2 (`h(t)`) is itself vector-valued'
-    );
   });
 });
 
 describe('GPU POINT WITH REAL COMPONENTS STILL COMPILES', () => {
-  const cases: [string, any, string, string][] = [
+  const cases: [string, any, string][] = [
     [
       '\\operatorname{PointList}(t, g(t))',
       ['PointList', 't', ['g', 't']],
       'vec2(t, _fn_g(t))',
-      'vec2f(t, _fn_g(t))',
     ],
-    [
-      '(t, t^2)',
-      ['Tuple', 't', ['Power', 't', 2]],
-      'vec2(t, (t * t))',
-      'vec2f(t, (t * t))',
-    ],
+    ['(t, t^2)', ['Tuple', 't', ['Power', 't', 2]], 'vec2(t, (t * t))'],
     [
       '\\operatorname{PointList}(t, t^2, 1)',
       ['PointList', 't', ['Power', 't', 2], 1],
       'vec3(t, (t * t), 1.0)',
-      'vec3f(t, (t * t), 1.0)',
     ],
     [
       '(t, \\operatorname{Re}(h(t)))',
       ['Tuple', 't', ['Re', ['h', 't']]],
       'vec2(t, (_fn_h(t)).x)',
-      'vec2f(t, (_fn_h(t)).x)',
     ],
   ];
-  for (const [latex, json, glsl, wgsl] of cases) {
+  for (const [latex, json, glsl] of cases) {
     it(`parse route: ${latex}`, () => {
       expect(run('glsl', (ce) => ce.parse(latex)).code).toBe(glsl);
-      expect(run('wgsl', (ce) => ce.parse(latex)).code).toBe(wgsl);
     });
     it(`box route: ${JSON.stringify(json)}`, () => {
       expect(run('glsl', (ce) => ce.box(json)).code).toBe(glsl);
-      expect(run('wgsl', (ce) => ce.box(json)).code).toBe(wgsl);
     });
   }
 
@@ -123,15 +108,9 @@ describe('GPU POINT WITH REAL COMPONENTS STILL COMPILES', () => {
     expect(run('glsl', (ce) => ce.box(['PointList', 't'])).code).toBe(
       'float[1](t)'
     );
-    expect(run('wgsl', (ce) => ce.box(['PointList', 't'])).code).toBe(
-      'array<f32, 1>(t)'
-    );
     expect(
       run('glsl', (ce) => ce.box(['PointList', 't', 1, 2, 3, 4])).code
     ).toBe('float[5](t, 1.0, 2.0, 3.0, 4.0)');
-    expect(
-      run('wgsl', (ce) => ce.box(['PointList', 't', 1, 2, 3, 4])).code
-    ).toBe('array<f32, 5>(t, 1.0, 2.0, 3.0, 4.0)');
   });
 });
 
@@ -141,12 +120,6 @@ describe('A CALL OF A USER FUNCTION WITH A COMPLEX BODY IS COMPLEX', () => {
   it('glsl: 1 - h(t) is complex arithmetic', () => {
     expect(run('glsl', (ce) => ce.parse('1 - h(t)')).code).toBe(
       '(-(_fn_h(t))) + vec2(1.0, 0.0)'
-    );
-  });
-
-  it('wgsl: |h(t)| is the modulus', () => {
-    expect(run('wgsl', (ce) => ce.parse('|h(t)|')).code).toBe(
-      'length(_fn_h(t))'
     );
   });
 
@@ -649,7 +622,7 @@ describe('A RECURSIVE CALL OF A FUNCTION WITH A WIDE RESULT TYPE', () => {
 });
 
 describe('A TUPLE COMPONENT TYPED indexed_collection IS NOT A SHADER SCALAR (CE-224)', () => {
-  for (const to of ['glsl', 'wgsl'] as const) {
+  for (const to of ['glsl'] as const) {
     for (const type of [
       'list<real>',
       'indexed_collection<real>',

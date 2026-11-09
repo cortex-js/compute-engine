@@ -62,19 +62,12 @@ export function gpuPointOrPointListUnion(
 }
 
 /**
- * A caller-declared shader name: its declared type, plus the identifier the
- * emitted body must REFERENCE it by when that is not the bare name.
- *
- * `ref` exists for the WGSL shader inputs, which are FIELDS of the entry
- * point's `input` struct (`VertexInput`, `FragmentInput` or `ComputeInput`,
- * by stage) — a body referencing a bare `v` names
- * nothing at all. Uniforms (both languages) and the GLSL `in` varyings are
- * bare globals and leave it unset.
+ * A caller-declared shader name and its declared type. The emitted body
+ * references the name by its bare identifier.
  */
 export type GPUShaderDeclaration = {
   name: string;
   type: string;
-  ref?: string;
 };
 
 /**
@@ -87,15 +80,13 @@ type GPUElementKind = 'f' | 'i' | 'u' | 'b';
  * A shader value type normalized into ONE comparison space: an element kind ×
  * a component count (`1` for a scalar).
  *
- * Both languages' spellings collapse into it — `vec2`, `vec2f` and `vec2<f32>`
- * are all `{f, 2}`; `bvec3` and `vec3<bool>` are both `{b, 3}` — which is what
- * lets a caller's GLSL-flavored declaration on the WGSL route (`toWGSLType`
- * maps it) be compared against a WGSL-spelled synthesized parameter.
+ * The accepted spellings collapse into it — `vec2` is `{f, 2}`; `bvec3` is
+ * `{b, 3}`.
  *
- * The element axis is load-bearing: `vec2<bool>`, `vec2<i32>` and `vec2<f32>`
- * are all two components, and neither language converts between them — a
- * width-only frame reported all three as `vec2f` and let a `vec2<bool>`
- * argument "match" a `vec2<f32>` parameter.
+ * The element axis is load-bearing: `bvec2`, `ivec2` and `vec2` are all two
+ * components, and no conversion between them is implicit — a width-only
+ * frame reported all three as `vec2` and let a `bvec2` argument "match" a
+ * `vec2` parameter.
  */
 export type GPUValueType = { element: GPUElementKind; width: number };
 
@@ -111,8 +102,8 @@ type GPUDeclaredType = {
    */
   value?: GPUValueType;
   /**
-   * The identifier the emitted source references the name by — its own name,
-   * or a WGSL input's field of the entry point's `input` struct. This is the
+   * The identifier the emitted source references the name by, which is its
+   * own name. This is the
    * RAW slot, before the float conversion `gpuDeclaredBodyTarget` wraps around
    * an integer-declared scalar (see `gpuDeclaredIsIntegerScalar`), for the
    * few positions that consume the integer itself (a loop bound).
@@ -121,16 +112,16 @@ type GPUDeclaredType = {
 };
 
 /**
- * Is `v` a caller-declared scalar INTEGER (`int`/`i32`/`uint`/`u32`)?
+ * Is `v` a caller-declared scalar INTEGER (`int`/`uint`)?
  *
  * Shader scalar math on these targets is float: every number literal is
  * emitted with a decimal point (`formatGPUNumber`) and no synthesized
- * user-function parameter is ever an integer (`gpuTypeOfDeclaredType`). Neither
- * GLSL ES nor WGSL promotes an integer to a float, so an integer-declared
+ * user-function parameter is ever an integer (`gpuTypeOfDeclaredType`). GLSL ES
+ * does not promote an integer to a float, so an integer-declared
  * name reaching float arithmetic bare (`float f(int K) { return K + 1.0; }`)
  * is a driver-side type error behind a reported success. Such a name is
  * therefore converted where it is referenced (`gpuDeclaredBodyTarget` binds it
- * to `float(K)` / `f32(K)`), and every reading of it downstream is a float
+ * to `float(K)`), and every reading of it downstream is a float
  * (`gpuTypeOfValue`, `gpuAtFramedIndex`).
  *
  * The conversion is LOSSY above 2^24 (≈16.7M): a shader float has a 24-bit
@@ -148,63 +139,43 @@ export function gpuDeclaredIsIntegerScalar(
 }
 
 /**
- * Normalize a shader type SPELLING of EITHER language, or `undefined` for one
- * that names no scalar/vector value type here.
+ * Normalize a shader type SPELLING, or `undefined` for one that names no
+ * scalar/vector value type here.
  *
- * Both languages' spellings are accepted whatever the target: `compileFunction`
- * takes GLSL-flavored names on the WGSL route too (`toWGSLType` maps them).
- * A leading GLSL precision, interpolation or storage qualifier is ignored
- * (`gpuWithoutQualifiers`).
+ * Only the GLSL spellings are accepted. A leading GLSL precision,
+ * interpolation or storage qualifier is ignored (`gpuWithoutQualifiers`).
  */
 export function gpuNormalizeShaderType(type: string): GPUValueType | undefined {
   // A GLSL qualifier before the type (`highp vec2`) does not change it.
   const t = gpuWithoutQualifiers(type);
   // Every float width collapses to the ONE float element: the emission has a
-  // single float precision, so `double`/`f16`/`f64` are the same value type
-  // here as `float`/`f32`.
-  if (/^(float|double|half|f16|f32|f64)$/.test(t))
-    return { element: 'f', width: 1 };
-  if (/^(int|i32)$/.test(t)) return { element: 'i', width: 1 };
-  if (/^(uint|u32)$/.test(t)) return { element: 'u', width: 1 };
-  // Both languages spell it `bool`.
+  // single float precision, so `double` is the same value type here as
+  // `float`.
+  if (/^(float|double)$/.test(t)) return { element: 'f', width: 1 };
+  if (t === 'int') return { element: 'i', width: 1 };
+  if (t === 'uint') return { element: 'u', width: 1 };
+  // `bool`.
   if (t === 'bool') return { element: 'b', width: 1 };
-  // GLSL: `vecN` (float), plus the `ivecN`/`uvecN`/`bvecN` element prefixes.
+  // `vecN` (float), plus the `ivecN`/`uvecN`/`bvecN` element prefixes.
   const glsl = /^([ibu]?)vec([234])$/.exec(t);
   if (glsl)
     return {
       element: (glsl[1] || 'f') as GPUElementKind,
       width: Number(glsl[2]),
     };
-  // WGSL: the `vecNf`/`vecNh`/`vecNi`/`vecNu` aliases…
-  const alias = /^vec([234])([fhiu])$/.exec(t);
-  if (alias)
-    return {
-      element: (alias[2] === 'h' ? 'f' : alias[2]) as GPUElementKind,
-      width: Number(alias[1]),
-    };
-  // …and the explicit `vecN<T>` form, whose element is a scalar spelling.
-  const wgsl = /^vec([234])<\s*([a-z0-9]+)\s*>$/.exec(t);
-  if (wgsl) {
-    const element = gpuNormalizeShaderType(wgsl[2]);
-    if (element === undefined || element.width !== 1) return undefined;
-    return { element: element.element, width: Number(wgsl[1]) };
-  }
   return undefined;
 }
 
 /** The target language's spelling of a normalized shader value type. */
-export function gpuSpellValueType(t: GPUValueType, isWGSL: boolean): string {
+export function gpuSpellValueType(t: GPUValueType): string {
   if (t.width === 1) {
     if (t.element === 'b') return 'bool';
-    if (t.element === 'i') return isWGSL ? 'i32' : 'int';
-    if (t.element === 'u') return isWGSL ? 'u32' : 'uint';
-    return gpuScalarType(isWGSL);
+    if (t.element === 'i') return 'int';
+    if (t.element === 'u') return 'uint';
+    return gpuScalarType();
   }
-  if (t.element === 'f') return gpuVecType(t.width, isWGSL);
-  if (!isWGSL) return `${t.element}vec${t.width}`;
-  return `vec${t.width}<${
-    t.element === 'b' ? 'bool' : t.element === 'i' ? 'i32' : 'u32'
-  }>`;
+  if (t.element === 'f') return gpuVecType(t.width);
+  return `${t.element}vec${t.width}`;
 }
 
 /**
@@ -244,9 +215,9 @@ export function gpuDeclaredShapeFrame(
 ): Map<string, number> {
   const frame = new Map<string, number>();
   const types = new Map<string, GPUDeclaredType>();
-  for (const { name, type, ref } of declarations) {
+  for (const { name, type } of declarations) {
     const value = gpuNormalizeShaderType(type);
-    types.set(name, { spelling: type.trim(), value, ref: ref ?? name });
+    types.set(name, { spelling: type.trim(), value, ref: name });
     frame.set(
       name,
       value === undefined
@@ -301,16 +272,15 @@ export function gpuAssignedName(
 }
 
 /**
- * `target`, with the caller-declared names BOUND: each resolves to the
- * identifier the emitted source references it by — its own name, or a WGSL
- * input's field of the entry point's `input` struct — and joins `boundVars`.
+ * `target`, with the caller-declared names BOUND: each resolves to its own
+ * name (or to a float conversion of it, see below) and joins `boundVars`.
  *
  * Framing the declared SHAPES is only half the job: without the binding the
  * declared name is still a free engine symbol, so a same-named assigned value
  * or user-function literal folds over the declaration the emitter is about to
  * write, and the analysis then describes a parameter the emission ignores.
  * `boundVars` carries the binding for the resolutions that are NOT the bare
- * identifier (finding A2) — `input.v` would otherwise read as a free
+ * identifier (finding A2) — such a reference would otherwise read as a free
  * user-function reference.
  */
 export function gpuDeclaredBodyTarget(
@@ -318,20 +288,16 @@ export function gpuDeclaredBodyTarget(
   declarations: ReadonlyArray<GPUShaderDeclaration>
 ): CompileTarget<Expression> {
   if (declarations.length === 0) return target;
-  const isWGSL = target.language === 'wgsl';
   // An integer-declared scalar is referenced through a float conversion; see
   // `gpuDeclaredIsIntegerScalar` for why. Positions that need the raw integer
   // read `GPUDeclaredType.ref` instead of `var()`.
   const refs = new Map(
-    declarations.map((d) => {
-      const ref = d.ref ?? d.name;
-      return [
-        d.name,
-        gpuDeclaredIsIntegerScalar(gpuNormalizeShaderType(d.type))
-          ? `${isWGSL ? 'f32' : 'float'}(${ref})`
-          : ref,
-      ];
-    })
+    declarations.map((d) => [
+      d.name,
+      gpuDeclaredIsIntegerScalar(gpuNormalizeShaderType(d.type))
+        ? `float(${d.name})`
+        : d.name,
+    ])
   );
   return {
     ...target,
@@ -351,9 +317,8 @@ export function gpuDeclaredBodyTarget(
 export function gpuIsVectorComponentType(t: Type): boolean {
   // Exactly the types `gpuTypeOfDeclaredType` lowers to the shader SCALAR —
   // including the untyped (`unknown`) case, which is a float by that same
-  // convention. The language is irrelevant to the predicate, so it asks in
-  // GLSL spelling.
-  return gpuTypeOfDeclaredType(t, false) === gpuScalarType(false);
+  // convention.
+  return gpuTypeOfDeclaredType(t) === gpuScalarType();
 }
 
 /**
@@ -394,7 +359,7 @@ export function gpuPointListArity(
 
 /**
  * The component count a SHADER TYPE spelling denotes — `vec2`/`vec3`/`vec4`
- * and the WGSL `vec2f`/`vec3<f32>` spellings — or `1` for a scalar and
+ * — or `1` for a scalar and
  * `bool`. The inverse reading of `gpuTypeOfValue`, for a value whose shader
  * type is already known.
  */
@@ -435,23 +400,19 @@ export function gpuDeclaredComponentCount(t: Type): number | undefined {
  * disagree with its own call sites and poison every downstream use in float
  * math. This is the same rule `compileBlock` applies to block locals.
  */
-export function gpuTypeOfDeclaredType(
-  t: Type | undefined,
-  isWGSL: boolean
-): string | undefined {
-  if (t === undefined || t === 'unknown' || t === 'any')
-    return gpuScalarType(isWGSL);
+export function gpuTypeOfDeclaredType(t: Type | undefined): string | undefined {
+  if (t === undefined || t === 'unknown' || t === 'any') return gpuScalarType();
   // A `type alias` / nominal `type` reference lowers to its DEFINITION's
   // shader type: compilation is type erasure (§4.6 step 1). Covers both a
   // nominal-typed value and a nominal declared parameter type.
   t = resolveTypeForCompilation(t);
-  if (isSubtype(t, 'color')) return gpuVecType(3, isWGSL);
+  if (isSubtype(t, 'color')) return gpuVecType(3);
   // Complex lowers to `vec2(re, im)` — the target's existing convention.
-  if (isNonRealNumber(t)) return gpuVecType(2, isWGSL);
+  if (isNonRealNumber(t)) return gpuVecType(2);
   if (isSubtype(t, 'boolean')) return 'bool';
-  if (isSubtype(t, 'number')) return gpuScalarType(isWGSL);
+  if (isSubtype(t, 'number')) return gpuScalarType();
   const n = gpuDeclaredComponentCount(t);
-  if (n !== undefined && n >= 2 && n <= 4) return gpuVecType(n, isWGSL);
+  if (n !== undefined && n >= 2 && n <= 4) return gpuVecType(n);
   return undefined;
 }
 
@@ -466,10 +427,7 @@ export function gpuTypeOfDeclaredType(
  * those to an array constructor, which is not a value a shader function
  * parameter or return slot accepts here.
  */
-export function gpuTypeOfValue(
-  expr: Expression,
-  isWGSL: boolean
-): string | undefined {
+export function gpuTypeOfValue(expr: Expression): string | undefined {
   // A name whose shader type the CALLER declared (a `compileFunction`
   // parameter, a shader input/uniform). Asked FIRST and answered in full:
   // nothing else carries that type — `expr.type` for such a name is the
@@ -482,9 +440,8 @@ export function gpuTypeOfValue(
     // An integer-declared scalar is referenced through a float conversion
     // (`gpuDeclaredBodyTarget`), so what a call site or return slot receives
     // IS a float.
-    if (gpuDeclaredIsIntegerScalar(declared.value))
-      return gpuScalarType(isWGSL);
-    return declared.value && gpuSpellValueType(declared.value, isWGSL);
+    if (gpuDeclaredIsIntegerScalar(declared.value)) return gpuScalarType();
+    return declared.value && gpuSpellValueType(declared.value);
   }
   // A name framed `bool` by a synthesized user-function signature.
   if (isSymbol(expr) && BaseCompiler.isLocalBoolean(expr.symbol)) return 'bool';
@@ -502,20 +459,18 @@ export function gpuTypeOfValue(
   )
     // A visible color constructor or conversion emits three channels even
     // when its cached type still permits broadcasting through a local.
-    return gpuVecType(3, isWGSL);
-  if (BaseCompiler.isComplexValued(expr)) return gpuVecType(2, isWGSL);
+    return gpuVecType(3);
+  if (BaseCompiler.isComplexValued(expr)) return gpuVecType(2);
   const n = BaseCompiler.aggregateComponentCount(expr);
   if (n !== undefined) {
     if (n < 2 || n > 4) return undefined;
     // Width alone is not enough: every component must also fit a `vecN` slot,
     // or the emission is `vec2f(true, false)` — see `gpuIsVectorComponentType`.
-    return gpuValueHasVectorComponents(expr)
-      ? gpuVecType(n, isWGSL)
-      : undefined;
+    return gpuValueHasVectorComponents(expr) ? gpuVecType(n) : undefined;
   }
   if (BaseCompiler.isNonScalarShape(expr)) return undefined;
   if (expr.type.matches('boolean')) return 'bool';
-  return gpuScalarType(isWGSL);
+  return gpuScalarType();
 }
 
 /**
@@ -574,7 +529,7 @@ export type GPUUserFunctionSignature = {
  * Abstract base class for GPU shader compilation targets.
  *
  * Provides shared operators, math functions, constants, and number formatting
- * for both GLSL and WGSL. Subclasses implement language-specific details:
+ * for GLSL. Subclasses implement language-specific details:
  * function naming differences, vector constructors, function declaration
  * syntax, and shader structure.
  */
@@ -583,15 +538,6 @@ export type GPUUserFunctionSignature = {
  * only. See `createTarget`.
  */
 export const GPU_SUPPORTED_MODES: readonly CompileMode[] = ['strict'];
-
-/**
- * The target fields that `GPUShaderTarget.withTargetExtension` adds to each
- * target of one compilation.
- */
-export type GPUTargetExtension = Pick<
-  CompileTarget<Expression>,
-  'storage' | 'storageRead' | 'hostInputVars' | 'onReturn' | 'kernel'
->;
 
 /**
  * A GLSL type spelling without its leading precision, interpolation and
@@ -609,19 +555,32 @@ function gpuWithoutQualifiers(type: string): string {
 }
 
 /**
- * The value type of a matrix or array spelling of either language (`mat2`,
- * `mat3x2f`, `mat2x2<f32>`, `float[5]`, `array<f32, 5>`), or `undefined` for
- * another spelling. No scalar or vector target accepts such a value.
+ * The value type of a GLSL matrix or array spelling (`mat2`, `mat3x2`,
+ * `float[5]`), or `undefined` for another spelling. No scalar or vector
+ * target accepts such a value.
  */
 export function gpuMatrixOrArraySpelling(
   type: string
 ): { kind: 'matrix' | 'array'; spelling: string } | undefined {
   const t = gpuWithoutQualifiers(type);
-  if (/^d?mat[234](x[234])?([fh]|<\s*\w+\s*>)?$/.test(t))
-    return { kind: 'matrix', spelling: t };
-  if (/^array\s*<.*>$/.test(t) || /\[\s*\d*\s*\]$/.test(t))
-    return { kind: 'array', spelling: t };
+  if (/^d?mat[234](x[234])?$/.test(t)) return { kind: 'matrix', spelling: t };
+  if (/\[\s*\d*\s*\]$/.test(t)) return { kind: 'array', spelling: t };
   return undefined;
+}
+
+/**
+ * Is `type` a scalar, vector, matrix or array spelling that is not GLSL
+ * (`f32`, `vec3f`, `vec3<f32>`, `mat2x2f`, `array<f32, 5>`)? A shader that
+ * declares a name with such a type does not compile on the GPU.
+ */
+export function gpuIsForeignTypeSpelling(type: string): boolean {
+  const t = gpuWithoutQualifiers(type);
+  return (
+    /^(f16|f32|f64|i32|u32)$/.test(t) ||
+    /^vec[234]([fhiu]|\s*<.*>)$/.test(t) ||
+    /^mat[234]x[234]([fh]|\s*<.*>)$/.test(t) ||
+    /^array\s*<.*>$/.test(t)
+  );
 }
 
 /**
@@ -680,11 +639,10 @@ export const GPU_SCALAR_PREDICATES = new Set([
  * `variable`, or the reason why the target is not valid.
  *
  * `outputs` are the names that the body can assign, in the spelling of the
- * emitted source (a WGSL output is a field of the `output` struct, so it is
- * `output.c`), with the type the caller declared. A target is one of these
+ * emitted source, with the type the caller declared. A target is one of these
  * names, or a component selection of one with a vector type (`c.x`,
- * `output.c.rg`). The selection letters come from one set (`xyzw` or `rgba`,
- * and also `stpq` in GLSL), each letter selects a component that the vector
+ * `c.rg`). The selection letters come from one set (`xyzw`, `rgba` or
+ * `stpq`), each letter selects a component that the vector
  * has, and no letter is repeated: GLSL ES 3.00 §5.5 refuses a repeated
  * component in an assignment target.
  *
@@ -692,18 +650,11 @@ export const GPU_SCALAR_PREDICATES = new Set([
  * scalar or vector type that `gpuNormalizeShaderType` reads (a matrix, an
  * array, a struct). The value of such a target is not checked. A GLSL
  * qualifier before the type (`highp vec4`) is ignored.
- *
- * For a component selection, `base` is the output and `letters` are the
- * selection letters. `compileShaderBody()` uses them to write a WGSL target of
- * two or more components as one assignment per component.
  */
 export function gpuShaderAssignmentTarget(
   variable: string,
-  outputs: ReadonlyArray<{ name: string; type: string }>,
-  isWGSL: boolean
-):
-  | { type: GPUValueType | undefined; base?: string; letters?: string }
-  | { error: string } {
+  outputs: ReadonlyArray<{ name: string; type: string }>
+): { type: GPUValueType | undefined } | { error: string } {
   const whole = outputs.find((d) => d.name === variable);
   if (whole !== undefined) return { type: gpuNormalizeShaderType(whole.type) };
   const selection = /^(.+)\.([a-z]{1,4})$/.exec(variable);
@@ -737,7 +688,7 @@ export function gpuShaderAssignmentTarget(
   });
   if (t === undefined || t.width < 2)
     return invalid('the output is not a vector');
-  const sets = isWGSL ? ['xyzw', 'rgba'] : ['xyzw', 'rgba', 'stpq'];
+  const sets = ['xyzw', 'rgba', 'stpq'];
   const set = sets.find((s) => [...letters].every((c) => s.includes(c)));
   if (set === undefined)
     return invalid(
@@ -749,24 +700,18 @@ export function gpuShaderAssignmentTarget(
     return invalid(`the vector has only ${t.width} components`);
   if (new Set(letters).size !== letters.length)
     return invalid('an assignment cannot write a component more than once');
-  return {
-    type: { element: t.element, width: letters.length },
-    base: base.name,
-    letters,
-  };
+  return { type: { element: t.element, width: letters.length } };
 }
 
 /**
  * Can a value of type `from` be assigned to a target of type `to`?
  *
- * WGSL converts only abstract types (the types of literals) implicitly, and
- * the emitted values are concrete, so the two types must be the same. GLSL
- * ES 3.00 has no implicit conversions (§4.1.10 says so). Desktop GLSL 3.30
+ * GLSL ES 3.00 has no implicit conversions (§4.1.10 says so). Desktop GLSL 3.30
  * converts an `int` or a `uint` to a `float`, and an `ivecN` or a `uvecN` to a
  * `vecN`; desktop GLSL 4.00 and later also convert an `int` to a `uint`
  * (§4.1.10 "Implicit Conversions" of each version). A scalar is never
  * converted to a vector. `desktopGLSLVersion` is the version number of a
- * desktop GLSL shader, and `undefined` for WGSL and GLSL ES.
+ * desktop GLSL shader, and `undefined` for GLSL ES.
  */
 export function gpuAssignmentConverts(
   from: GPUValueType,

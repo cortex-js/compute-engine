@@ -14,7 +14,7 @@ const forms = [
 ];
 
 describe('small powers and conditional CSE', () => {
-  test.each(['javascript', 'glsl', 'wgsl', 'interval-js'])(
+  test.each(['javascript', 'glsl', 'interval-js'])(
     '%s shares repeated symbol squares',
     (to) => {
       for (const square of forms) {
@@ -104,7 +104,7 @@ describe('small powers and conditional CSE', () => {
     }
   });
 
-  test.each(['glsl', 'wgsl'])(
+  test.each(['glsl'])(
     '%s reuses outer bindings inside conditional operands',
     (to) => {
       const ce = engine();
@@ -126,7 +126,7 @@ describe('small powers and conditional CSE', () => {
     }
   );
 
-  test.each(['glsl', 'wgsl'])(
+  test.each(['glsl'])(
     '%s does not hoist new work from conditional arms',
     (to) => {
       const ce = engine();

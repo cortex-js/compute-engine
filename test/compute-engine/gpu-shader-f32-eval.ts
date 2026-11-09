@@ -1,5 +1,5 @@
 /**
- * An f32 interpreter for the small subset of GLSL and WGSL that the GPU
+ * An f32 interpreter for the small subset of GLSL that the GPU
  * complex helpers (`GPU_COMPLEX_FUNCTIONS`, `compilation/gpu-target.ts`) are
  * written in. Shader text cannot run under jest; this interpreter runs the
  * EMITTED text of a helper, so a test checks the shader source itself, not
@@ -8,54 +8,43 @@
  * Every arithmetic result is rounded to f32 with `Math.fround`, and every
  * built-in function (`sqrt`, `log`, `atan`, ...) is the double result
  * rounded once to f32: a CORRECTLY ROUNDED built-in. The shading languages
- * allow much larger errors: GLSL.std.450 and WGSL allow `log` an absolute
+ * allow much larger errors: GLSL.std.450 allows `log` an absolute
  * error of 2⁻²¹ on [0.5, 2] and 3 ULP elsewhere, and `atan`/`atan2` an error
  * of 4096 ULP. So this tests the algorithm (cancellation, overflow, the side
  * of a branch cut), not a driver: an accuracy measured here is the accuracy
  * with correctly rounded built-ins. A subnormal result is kept (many GPUs
  * flush it to zero).
  *
- * The subset: function definitions (GLSL `float f(float x) {...}` and WGSL
- * `fn f(x: f32) -> f32 {...}`), `float`/`vec2`/`let`/`var` declarations
- * (with or without a WGSL type, and a `var`/GLSL declaration with no value),
- * assignments, `if` with an optional `else`, `return`, the operators `?:` (GLSL only), `||`, `&&`,
- * `==`, `!=`, `<`, `<=`, `>`, `>=`, `+`, `-`, `*`, `/`, unary `-`, the members
- * `.x` and `.y`, and calls of the helpers and of `abs`, `max`, `min`,
- * `sqrt`, `log`, `exp`, `pow`, `floor`, `fract`, `sin`, `cos`, `length`, GLSL
- * `atan` (one or two arguments) and `vec2`, and WGSL `atan` (one
- * argument), `atan2`, `select`, `vec2f`, `vec3f`, `vec4f`, `dot` and
- * `distance`. A WGSL vector has 2, 3 or 4 components (the members `.z` and
- * `.w` of a `vec3f` or `vec4f` are read too), and the arithmetic operators
- * are componentwise on it. `sin`, `cos`, `sign`, `max`
- * and `min` are componentwise on a vector. The NaN and infinity helpers
- * `_gpu_nan` and `_gpu_inf`, which build their value from a bit pattern,
- * are read as `0.0 / 0.0` and `1.0 / 0.0`. The NaN test on the bit pattern
- * of a name, `(floatBitsToUint(x) & 0x7FFFFFFFu) > 0x7F800000u` in GLSL and
- * `(bitcast<u32>(x) & 0x7FFFFFFFu) > 0x7F800000u` in WGSL (the NaN-safe
- * helpers of `gpuNaNSafeLibrary` and `_gpu_heaviside`), is read as a test
- * that `x` is NaN, and the same test with `>=` (in `_gpu_cossinpi`) as a
- * test that `x` is not finite. A NaN built from its bit pattern
- * (`intBitsToFloat(0x7FC00000)`, or `bitcast<f32>` of a `let`) is read as
- * `0.0 / 0.0`. A function can return `bool`. The operator `!`, the
- * conversion `i32` (read as a truncation) and an index `a[i]` are read too,
- * and a name that no function declares is read from `globals`: a struct is
- * an object, and an array (`array<vec4f, k>`) is a JavaScript array. An
- * index out of bounds is an error.
+ * The subset: function definitions (`float f(float x) {...}`), `float` and
+ * `vec2` declarations (with or without a value), assignments, `if` with an
+ * optional `else`, `return`, the operators `?:`, `||`, `&&`, `==`, `!=`,
+ * `<`, `<=`, `>`, `>=`, `+`, `-`, `*`, `/`, unary `-`, the members `.x` and
+ * `.y`, and calls of the helpers and of `abs`, `max`, `min`, `sqrt`, `log`,
+ * `exp`, `pow`, `floor`, `fract`, `sin`, `cos`, `length`, `atan` (one or two
+ * arguments) and `vec2`. The arithmetic operators are componentwise on a
+ * vector, and so are `sin`, `cos`, `sign`, `max` and `min`. The NaN and
+ * infinity helpers `_gpu_nan` and `_gpu_inf`, which build their value from a
+ * bit pattern, are read as `0.0 / 0.0` and `1.0 / 0.0`. The NaN test on the
+ * bit pattern of a name, `(floatBitsToUint(x) & 0x7FFFFFFFu) > 0x7F800000u`
+ * (the NaN-safe helpers of `gpuNaNSafeLibrary` and `_gpu_heaviside`), is
+ * read as a test that `x` is NaN, and the same test with `>=` (in
+ * `_gpu_cossinpi`) as a test that `x` is not finite. A NaN built from its
+ * bit pattern (`intBitsToFloat(0x7FC00000)`) is read as `0.0 / 0.0`. A
+ * function can return `bool`. The operator `!` and an index `a[i]` are read
+ * too, and a name that no function declares is read from `globals`: a struct
+ * is an object, and an array is a JavaScript array. An index out of bounds
+ * is an error.
  *
- * The text is also checked against some rules of its language, which a
- * shader compiler enforces and this interpreter would otherwise not see:
- *  - both: a numeric literal must have a decimal point (the helpers compute
- *    with floats only, and GLSL ES has no implicit int-to-float conversion);
- *  - GLSL: a function must be defined before a call to it; a declaration
- *    starts with its type; there is no `fn`, `let`, `var`, `atan2`,
- *    `select` or `vec2f`;
- *  - WGSL: no `?:`; the body of an `if` is a block; a declaration starts
- *    with `let` or `var`, and only a `var` can be assigned (a parameter and
- *    a `let` cannot); there is no `vec2` and no two-argument `atan`.
+ * The text is also checked against some rules of GLSL, which a shader
+ * compiler enforces and this interpreter would otherwise not see: a numeric
+ * literal must have a decimal point (the helpers compute with floats only,
+ * and GLSL ES has no implicit int-to-float conversion); a function must be
+ * defined before a call to it; a declaration starts with its type; there is
+ * no `fn`, `let` or `var`.
  */
 
 /** A scalar, or a vector of 2, 3 or 4 components (`z` and `w` present
- * for a `vec3f` and a `vec4f`). */
+ * for a vector of 3 and of 4 components). */
 export type Value = number | { x: number; y: number; z?: number; w?: number };
 
 /** The components of a vector, in order. */
@@ -97,7 +86,7 @@ interface Fn {
   body: Stmt[];
 }
 
-export type ShaderLanguage = 'glsl' | 'wgsl';
+export type ShaderLanguage = 'glsl';
 
 function tokenize(src: string): string[] {
   const re =
@@ -118,7 +107,7 @@ function tokenize(src: string): string[] {
   return out;
 }
 
-const TYPES = new Set(['float', 'vec2', 'f32', 'vec2f', 'vec3f', 'vec4f']);
+const TYPES = new Set(['float', 'vec2']);
 
 const COMMON_BUILTINS = new Set([
   'abs',
@@ -140,15 +129,6 @@ const COMMON_BUILTINS = new Set([
 ]);
 const LANGUAGE_BUILTINS: Record<ShaderLanguage, Set<string>> = {
   glsl: new Set(['vec2']),
-  wgsl: new Set([
-    'atan2',
-    'select',
-    'vec2f',
-    'vec3f',
-    'vec4f',
-    'dot',
-    'distance',
-  ]),
 };
 
 class Parser {
@@ -182,33 +162,18 @@ class Parser {
     while (this.peek() !== undefined) {
       let name: string;
       const params: string[] = [];
-      if ((this.peek() === 'fn') !== (this.lang === 'wgsl'))
+      if (this.peek() === 'fn')
         this.fail(`function definition at "${this.peek()} ${this.peek(1)}"`);
-      if (this.peek() === 'fn') {
-        this.next();
-        name = this.next();
-        this.expect('(');
-        while (this.peek() !== ')') {
-          params.push(this.next());
-          this.expect(':');
-          this.next();
-          if (this.peek() === ',') this.next();
-        }
-        this.expect(')');
-        this.expect('->');
-        this.next();
-      } else {
-        this.next(); // return type
-        name = this.next();
-        this.expect('(');
-        while (this.peek() !== ')') {
-          this.next(); // type
-          params.push(this.next());
-          if (this.peek() === ',') this.next();
-        }
-        this.expect(')');
+      this.next(); // return type
+      name = this.next();
+      this.expect('(');
+      while (this.peek() !== ')') {
+        this.next(); // type
+        params.push(this.next());
+        if (this.peek() === ',') this.next();
       }
-      this.mutable = new Map(params.map((p) => [p, this.lang === 'glsl']));
+      this.expect(')');
+      this.mutable = new Map(params.map((p) => [p, true]));
       fns.set(name, { params, body: this.block() });
       this.defined.add(name);
     }
@@ -230,13 +195,9 @@ class Parser {
       this.expect('(');
       const c = this.expr();
       this.expect(')');
-      if (this.lang === 'wgsl' && this.peek() !== '{')
-        this.fail('the body of an `if` must be a block');
       const body = this.peek() === '{' ? this.block() : [this.statement()];
       if (this.peek() !== 'else') return { k: 'if', c, body };
       this.next();
-      if (this.lang === 'wgsl' && this.peek() !== '{' && this.peek() !== 'if')
-        this.fail('the body of an `else` must be a block');
       const orElse = this.peek() === '{' ? this.block() : [this.statement()];
       return { k: 'if', c, body, orElse };
     }
@@ -247,20 +208,14 @@ class Parser {
       return { k: 'return', e };
     }
     if (TYPES.has(s) || s === 'let' || s === 'var') {
-      if ((s === 'let' || s === 'var') !== (this.lang === 'wgsl'))
+      if (s === 'let' || s === 'var')
         this.fail(`a declaration cannot start with "${s}"`);
       this.next();
       const name = this.next();
-      this.mutable.set(name, s !== 'let');
-      // A WGSL declaration may name its type (`let a: f32 = …;`).
-      if (this.peek() === ':') {
-        this.next();
-        this.next();
-      }
-      // A variable declared with no value (`var a: f32;`, `float a;`) is
-      // assigned before it is read; it starts as NaN here.
+      this.mutable.set(name, true);
+      // A variable declared with no value (`float a;`) is assigned before it
+      // is read; it starts as NaN here.
       if (this.peek() === ';') {
-        if (s === 'let') this.fail('a `let` must have a value');
         this.next();
         return { k: 'decl', name, e: { k: 'num', v: NaN } };
       }
@@ -281,7 +236,6 @@ class Parser {
   expr(): Node {
     const c = this.binary(0);
     if (this.peek() !== '?') return c;
-    if (this.lang === 'wgsl') this.fail('there is no `?:` operator');
     this.next();
     const t = this.expr();
     this.expect(':');
@@ -355,10 +309,11 @@ class Parser {
         if (this.peek() === ',') this.next();
       }
       this.expect(')');
-      if (COMMON_BUILTINS.has(s) || LANGUAGE_BUILTINS[this.lang].has(s)) {
-        if (s === 'atan' && this.lang === 'wgsl' && args.length !== 1)
-          this.fail('`atan` takes one argument (use `atan2`)');
-      } else if (this.lang === 'glsl' && !this.defined.has(s))
+      if (
+        !COMMON_BUILTINS.has(s) &&
+        !LANGUAGE_BUILTINS[this.lang].has(s) &&
+        !this.defined.has(s)
+      )
         this.fail(`call of "${s}" before its definition`);
       return { k: 'call', name: s, args };
     }
@@ -383,7 +338,7 @@ const num = (v: Value): number => {
 };
 
 /** A one-operand built-in that is componentwise on a `vec2`, as `sin`,
- * `cos` and `sign` are in both languages. */
+ * `cos` and `sign` are in GLSL. */
 function each(x: Value, f: (x: number) => number): Value {
   if (typeof x === 'number') return f(x);
   return vec(components(x).map(f));
@@ -404,7 +359,6 @@ const BUILTINS: Record<string, (...a: Value[]) => Value> = {
   cos: (x) => each(x, (v) => fr(Math.cos(v))),
   atan: (y, x) =>
     x === undefined ? fr(Math.atan(num(y))) : fr(Math.atan2(num(y), num(x))),
-  atan2: (y, x) => fr(Math.atan2(num(y), num(x))),
   length: (v) => {
     if (typeof v === 'number') return Math.abs(v);
     return fr(Math.sqrt(num(BUILTINS.dot(v, v))));
@@ -415,19 +369,10 @@ const BUILTINS: Record<string, (...a: Value[]) => Value> = {
     const bc = components(b);
     return components(a).reduce((s, v, i) => fr(s + fr(v * bc[i])), 0);
   },
-  distance: (a, b) => BUILTINS.length(lift(a, b, (x, y) => x - y)),
-  select: (f, t, c) => (c ? t : f),
   // The NaN test on a bit pattern (see the rewrite in `shaderFunctions`).
   _gpu_bits_isnan: (x) => Number.isNaN(num(x)) as unknown as Value,
   _gpu_bits_nonfinite: (x) => !Number.isFinite(num(x)) as unknown as Value,
   vec2: (x, y) => ({ x: num(x), y: num(y ?? x) }),
-  vec2f: (x, y) => ({ x: num(x), y: num(y ?? x) }),
-  vec3f: (...a) =>
-    vec(a.length === 1 ? [0, 1, 2].map(() => num(a[0])) : a.map(num)),
-  vec4f: (...a) =>
-    vec(a.length === 1 ? [0, 1, 2, 3].map(() => num(a[0])) : a.map(num)),
-  // The conversion to an integer, used only for an array index here.
-  i32: (x) => Math.trunc(num(x)),
 };
 
 /** Parse the shader text `src` (one or more function definitions) and
@@ -440,23 +385,19 @@ export function shaderFunctions(
   // A line comment is not read.
   src = src.replace(/\/\/[^\n]*/g, '');
   // The NaN and infinity helpers are built from a bit pattern (a hex literal
-  // and `intBitsToFloat` or `bitcast<f32>`): their bodies are replaced.
+  // and `intBitsToFloat`): their bodies are replaced.
   src = src.replace(
-    /(float _gpu_(inf|nan)\(\)|fn _gpu_(inf|nan)\(\) -> f32)\s*\{[^}]*\}/g,
-    (_m, head: string, a?: string, b?: string) =>
-      `${head} { return ${(a ?? b) === 'inf' ? '1.0' : '0.0'} / 0.0; }`
+    /(float _gpu_(inf|nan)\(\))\s*\{[^}]*\}/g,
+    (_m, head: string, a: string) =>
+      `${head} { return ${a === 'inf' ? '1.0' : '0.0'} / 0.0; }`
   );
-  // A NaN built from its bit pattern, inline (`intBitsToFloat(0x7FC00000)`
-  // in GLSL) or from a `let` (`let bits = 0x7fc00000u;` and
-  // `bitcast<f32>(bits)` in WGSL), is read as `0.0 / 0.0`.
-  src = src
-    .replace(/intBitsToFloat\(0x7FC00000\)/g, '(0.0 / 0.0)')
-    .replace(/let bits = 0x7fc00000u;/g, '')
-    .replace(/bitcast<f32>\(bits\)/g, '(0.0 / 0.0)');
+  // A NaN built from its bit pattern, `intBitsToFloat(0x7FC00000)`, is read
+  // as `0.0 / 0.0`.
+  src = src.replace(/intBitsToFloat\(0x7FC00000\)/g, '(0.0 / 0.0)');
   // The NaN test on the bit pattern of a name is read as a call of
   // `_gpu_bits_isnan`, since the interpreter has no integer arithmetic.
   src = src.replace(
-    /\((?:floatBitsToUint|bitcast<u32>)\(([A-Za-z_]\w*(?:\.[xyz])?)\) & 0x7FFFFFFFu\) (>=?) 0x7F800000u/g,
+    /\(floatBitsToUint\(([A-Za-z_]\w*(?:\.[xyz])?)\) & 0x7FFFFFFFu\) (>=?) 0x7F800000u/g,
     (_m, name: string, op: string) =>
       `${op === '>' ? '_gpu_bits_isnan' : '_gpu_bits_nonfinite'}(${name})`
   );

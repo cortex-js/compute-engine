@@ -922,10 +922,8 @@ describe('GCD/LCM on non-integer reals (tolerant float Euclid)', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const {
       GPU_GCD_PREAMBLE_GLSL,
-      GPU_GCD_PREAMBLE_WGSL,
     } = require('../../src/compute-engine/compilation/gpu-target');
     expect(GPU_GCD_PREAMBLE_GLSL).toContain('floor(a) == a');
-    expect(GPU_GCD_PREAMBLE_WGSL).toContain('floor(a) == a');
 
     // Transliterate the GLSL shader loop (f32 arithmetic) and verify behavior.
     const f = Math.fround;

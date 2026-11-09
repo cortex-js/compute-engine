@@ -7,7 +7,7 @@
  * The n-th draw of a frame is `hash(seed, n)` — a PURE function of the seed and
  * the draw index, computed with PCG3D over pure u32 arithmetic. Because there
  * is no mutable stream state and no 64-bit integer arithmetic, every target
- * (the interpreter, the JavaScript compile target, GLSL and WGSL) is a
+ * (the interpreter, the JavaScript compile target, GLSL) is a
  * TRANSCRIPTION of one algorithm rather than an independent reimplementation,
  * which is what makes the cross-target parity contract of `RANDOMNESS-MODEL.md`
  * §4 hold.

@@ -245,7 +245,6 @@ import {
 import {
   _compileParents,
   _cseInlineCode,
-  assertAssignmentIsStatement,
   compileListStatement,
   compileValueOperand,
   loopBodyTempTarget,
@@ -3316,7 +3315,7 @@ function compileInnerLeaf(
   // `string`, because holding the cluster is only half of it: ordering two
   // characters, segmenting a string into them and counting them all need
   // grapheme-cluster awareness. Python has string literals but no stdlib
-  // grapheme segmentation, and GLSL/WGSL have no text at all, so both decline
+  // grapheme segmentation, and GLSL has no text at all, so both decline
   // here instead of emitting a target string that would then be compared with
   // the wrong order or indexed by the wrong unit.
   // (`docs/STRING_ROADMAP.md`, decision D13.)
@@ -3491,7 +3490,7 @@ export function compileExpr(
   // Element-wise broadcast of a `broadcastable` head (arithmetic + unary
   // math) over one or more list-valued operands, for the JavaScript target.
   // Emits a `_SYS.bcast` call wrapping the head's own scalar codegen — see
-  // `tryCompileBroadcast`. Other targets have native vector types (GLSL/WGSL
+  // `tryCompileBroadcast`. Other targets have native vector types (GLSL
   // `vec3 + vec3`) or their own broadcasting, so this is JavaScript-only. The
   // decline of an operand declared `any` or `value` here also applies to the
   // Python and `interval-js` targets.
@@ -4095,7 +4094,7 @@ function compileExprBroadcastGuards(
   //
   // Deliberately narrow, to avoid false positives on genuinely supported list
   // forms:
-  //   - GLSL/WGSL/GPU targets have native vector types (`vec3 + vec3`) and
+  //   - GLSL/GPU targets have native vector types (`vec3 + vec3`) and
   //     express their own element-wise lowering through the target's
   //     `broadcastUnary` hook, so this guard is scoped to `javascript` only.
   //   - Relational (`Equal`/`Less`/…) and logical (`And`/`Or`/…) heads are
@@ -4140,16 +4139,14 @@ function compileExprBroadcastGuards(
   // GPU shader targets: a comparison or logical connective over a non-scalar
   // operand must not lower through the scalar infix operators — GLSL rejects
   // `vecN < float` outright, and where an infix form IS legal it means the
-  // wrong thing (WGSL `vecN == vecN` is a `vecN<bool>`, not the scalar bool
-  // the surrounding expression expects; GLSL `vecN == vecN` is ATOMIC
-  // aggregate equality where the interpreter broadcasts a `List`
-  // element-wise). The element-wise `Which`/`If` selection path builds its
+  // wrong thing (GLSL `vecN == vecN` is ATOMIC aggregate equality where the
+  // interpreter broadcasts a `List` element-wise). The element-wise `Which`/`If` selection path builds its
   // boolean-vector masks directly (`compileGPUSelection`) and never routes a
   // condition through here; everything else fails closed. One shape is
   // deliberately admitted: GLSL `Equal`/`NotEqual` over TUPLE-shaped
   // operands — a tuple (point) is atomic in the interpreter too, and GLSL
   // `==` on two vecNs is scalar aggregate equality, so that lowering is
-  // faithful. (On WGSL the same `==` is component-wise — excluded.)
+  // faithful.
   // Complex operands are excluded: they already skip the infix lowering
   // (`compileExprInfix()`) and fail closed in function dispatch.
   sub = compileExprGpuRelational(h, args, target);
@@ -4307,7 +4304,7 @@ function compileExprStatementHead(
     // JavaScript finds a jump with no loop when it parses the code. A shader is
     // parsed later, by the driver, and the compilation would report success.
     if (
-      (target.language === 'glsl' || target.language === 'wgsl') &&
+      target.language === 'glsl' &&
       (node === undefined || !target.shaderLoopJumps?.has(node))
     )
       throw new Error(
@@ -4316,23 +4313,6 @@ function compileExprStatementHead(
           `with no else there.`
       );
     return h === 'Break' ? 'break' : 'continue';
-  }
-
-  // In a compute-shader kernel (`WGSLTarget.compileKernel()`), the parallel
-  // loop or comprehension is the pass that each invocation runs, and `+=`
-  // adds to an accumulator buffer (`CompileTarget.kernel`).
-  if (
-    target.kernel !== undefined &&
-    (h === 'ParallelLoop' || h === 'ParallelComprehension' || h === 'AddTo') &&
-    (node === undefined || isLibraryOperator(node, h))
-  ) {
-    if (h === 'AddTo')
-      return target.kernel.compileAddTo(
-        args,
-        (expr) => compileValueOperand(expr, target),
-        target
-      );
-    return target.kernel.compilePass(args, target);
   }
 
   // The `parallel for` heads and `+=` reach this point on every target but
@@ -4700,12 +4680,9 @@ function compileExprHelperCall(
  * target, written as an `if (…) { … } else { … }` statement, or
  * `undefined` when the selection keeps its expression form.
  *
- * The expression form of a selection is a WGSL `select(…)` call, whose
- * operands are expressions, and an assignment is a statement in WGSL: a
- * branch that assigns a variable has no expression form there. GLSL keeps
- * its ternary, where an assignment is an expression and only the selected
- * branch runs, except for an else-less `If`, which has no ternary form on
- * either language. In statement position the value of the selection is
+ * GLSL keeps its ternary, where an assignment is an expression and only the
+ * selected branch runs, except for an else-less `If`, which has no ternary
+ * form. In statement position the value of the selection is
  * discarded, so the statement form is exact: each branch is compiled as a
  * statement list (`compileStatementList`) and runs only when its clause is
  * selected. A condition after the first is compiled inside the `else` of
@@ -4714,7 +4691,7 @@ function compileExprHelperCall(
  *
  * The form is taken when a branch or a condition assigns a variable (outside
  * a function literal, whose body is not run here) and no operand contains a
- * `Return`, `Break` or `Continue`. It is also taken, on both languages, for a
+ * `Return`, `Break` or `Continue`. It is also taken for a
  * selection with one clause that is a statement of a `Loop` body and holds a
  * `Break` or a `Continue` (`CompileTarget.shaderLoopJumps`): a ternary cannot
  * hold a jump. Any other selection with a jump, and any selection with a
@@ -4729,8 +4706,7 @@ export function shaderSelectionStatement(
   stmt: Expression,
   target: CompileTarget<Expression>
 ): string | undefined {
-  if (target.language !== 'wgsl' && target.language !== 'glsl')
-    return undefined;
+  if (target.language !== 'glsl') return undefined;
   if (!isFunction(stmt)) return undefined;
   const h = stmt.operator;
   const ops = stmt.ops;
@@ -4749,16 +4725,15 @@ export function shaderSelectionStatement(
   } else return undefined;
   // A selection that GLSL keeps as a ternary needs no search of its operands.
   const admitsJumps = target.shaderLoopJumps?.has(stmt) === true;
-  const ternary = target.language !== 'wgsl' && !elseless;
+  const ternary = !elseless;
   if (ternary && !admitsJumps) return undefined;
   // The operators in the operands, outside a function literal. An expression
   // is a graph with shared nodes, so each node is visited once: a walk of the
   // tree takes time exponential in the depth of a tower of shared operands.
   // A `Break` or a `Continue` inside a `Loop` of a branch leaves that loop,
   // not a loop around the selection, so it is not recorded; the `Loop` is.
-  // A branch that holds a loop, or a `+=` of a compute-shader kernel
-  // (`AddTo`, an atomic addition), takes the statement form, as a branch
-  // that assigns does: `if e > 0 { for m in 1..e { … } }` and
+  // A branch that holds a loop or a `+=` (`AddTo`) takes the statement form,
+  // as a branch that assigns does: `if e > 0 { for m in 1..e { … } }` and
   // `if e <= 50 { L[c] += 1 }` are statements.
   const heads = new Set<string>();
   const visited = new Set<Expression>();
@@ -4796,13 +4771,6 @@ export function shaderSelectionStatement(
       const body = branch(b);
       return body === '' ? [] : [body];
     }
-    // A condition is a value: an assignment there (`if (flag = c)`) has no
-    // WGSL form, and the compilation declines as for any other operand
-    // (`assertAssignmentIsStatement`). An assignment nested deeper in the
-    // condition reaches the same test through `compileValueOperand`.
-    const condition = ops[c];
-    if (isFunction(condition, 'Assign') && isSymbol(condition.ops[0]))
-      assertAssignmentIsStatement(condition.ops[0].symbol, target);
     // The first condition runs whenever the statement runs: a statement it
     // hoists goes to the sink of the statement, ahead of the `if`. A later
     // condition is compiled with a sink of its own, in the `else` branch.
@@ -5727,7 +5695,6 @@ export function ensureSpecializedUserCallEmitted(
     !registry ||
     (target.language !== 'javascript' &&
       target.language !== 'glsl' &&
-      target.language !== 'wgsl' &&
       !interval)
   )
     return undefined;
@@ -5852,9 +5819,8 @@ export function ensureSpecializedUserCallEmitted(
         // would decline. Instead the call gets a copy of the definition
         // whose parameter is typed `complex` (a `vec2`/`vec2f`
         // parameter), and the body is compiled with that parameter
-        // complex. The copy has its own name (`_fn_f_complex`), since
-        // WGSL has no overloading, and is emitted only when a call needs
-        // it. A parameter declared `real` rejects the `complex` type
+        // complex. The copy has its own name (`_fn_f_complex`), and is
+        // emitted only when a call needs it. A parameter declared `real` rejects the `complex` type
         // below, so that call still declines: the declaration is a
         // contract.
         if (target.language === 'javascript' || interval) return undefined;
@@ -6824,8 +6790,8 @@ export function emitFunctionLiteralDefinition(
     // `RangeError` within milliseconds — consistent with compiled
     // unbounded `Loop`, which is likewise unguarded at run time.
     //
-    // Where the target language forbids recursion outright — GLSL and WGSL
-    // both do — there is no such call to emit: the name is not declared yet
+    // Where the target language forbids recursion outright — GLSL does —
+    // there is no such call to emit: the name is not declared yet
     // and no shader compiler would accept it. Fail closed naming the
     // function instead.
     if (registry.compiling.has(name)) {

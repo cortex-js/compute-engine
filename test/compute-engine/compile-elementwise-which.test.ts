@@ -501,7 +501,7 @@ describe('element-wise selection: what stays unchanged', () => {
       'True',
       0,
     ] as any);
-    for (const to of ['glsl', 'wgsl', 'interval-js', 'python']) {
+    for (const to of ['glsl', 'interval-js', 'python']) {
       let source = '';
       try {
         source = compile(expr, { to, fallback: false } as any)?.code ?? '';

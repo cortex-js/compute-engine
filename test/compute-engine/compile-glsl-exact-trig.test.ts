@@ -5,8 +5,8 @@
  * magnitude ≥ 1000 has no float32 value related to its exact value. On GLSL,
  * the shapes `O·sin(Σ K·x + c)` (or `cos`, or with a `Dot`) compile to exact
  * arithmetic built from float32, and the result lists the bound of each
- * operand (`float32Bounds`); every other flagged operand, and every flagged
- * operand on WGSL, keeps the usual float32 code and the result has a warning
+ * operand (`float32Bounds`); every other flagged operand keeps the usual
+ * float32 code and the result has a warning
  * (`warnings`, code `float32-unsafe-argument`). User decision 2026-10-18: a
  * decline moved Tycho's 2-D noise fields to the CPU at up to 2.7 s per zoom.
  *
@@ -292,21 +292,5 @@ describe('a warning where no exact form exists', () => {
     e.declare('x', 'real');
     e.parse('f(t) := \\operatorname{mod}(10^4\\sin(10^4 t),1)').evaluate();
     warned(compile(e.parse('f(x)'), { to: 'glsl', fallback: true }));
-  });
-
-  test('WGSL: every amplified operand', () => {
-    for (const latex of [
-      '\\operatorname{mod}(10^4\\sin(10^4x),1)',
-      '\\operatorname{mod}(43758.5453\\sin(12.9898x),1)',
-    ]) {
-      const r = compile(ce.parse(latex), { to: 'wgsl', fallback: true });
-      expect(r.success).toBe(true);
-      expect(r.code).toMatch(/^fract\(/);
-      expect(r.warnings?.[0]?.code).toBe('float32-unsafe-argument');
-    }
-    expect(
-      compile(ce.parse('\\operatorname{mod}(\\sin(x)+1,1)'), { to: 'wgsl' })
-        .code
-    ).toBe('fract(fract(sin(x) + 1.0))');
   });
 });

@@ -1,4 +1,4 @@
-// The GPUShaderTarget class: the compile target shared by GLSL and WGSL.
+// The GPUShaderTarget class: the compile target of the GLSL shader language.
 
 import type { Expression } from '../global-types.js';
 import { entrySource } from './function-purity.js';
@@ -20,8 +20,7 @@ import type {
   CompilationResult,
 } from './types.js';
 import { compileDiagnosticOf } from './diagnostics.js';
-import { resolveStorageHints, storageBufferBindings } from './storage-hints.js';
-import { storageBufferHelpers } from './gpu-storage-buffer.js';
+import { resolveStorageHints } from './storage-hints.js';
 import { BaseCompiler, explicitBroadcastPointNorm } from './base-compiler.js';
 import {
   isNonRealNumber,
@@ -93,7 +92,6 @@ import {
 } from './gpu-declared-types.js';
 import type {
   GPUShaderDeclaration,
-  GPUTargetExtension,
   GPUUserFunctionSignature,
 } from './gpu-declared-types.js';
 import { gpuColorOperand } from './gpu-color.js';
@@ -118,21 +116,13 @@ import {
   gpuCheckIdentifier,
 } from './gpu-reserved.js';
 import {
-  GPU_WGSL_FUNCTION_SCOPE_BYTES,
   gpuAtHelperWidths,
-  gpuAtInPlaceBindings,
-  gpuAtInPlacePreambleWGSL,
   gpuAtPointHelperShapes,
-  gpuAtPointInPlacePreambleWGSL,
   gpuAtPointPreamble,
   gpuAtPreamble,
   gpuRefuseStorageReference,
-  gpuStorageBuffersRead,
-  gpuTexAtBindings,
   gpuTexAtHelperWidths,
   gpuTexAtPreamble,
-  gpuTexAtPreambleWGSL,
-  gpuWGSLArrayBytes,
 } from './gpu-at.js';
 import { gpuPointCallsOverBudget, gpuPointDeclaration } from './gpu-points.js';
 import {
@@ -142,47 +132,26 @@ import {
 import { buildComplexPreamble } from './gpu-complex-functions.js';
 import {
   GPU_BESSELJ_PREAMBLE_GLSL,
-  GPU_BESSELJ_PREAMBLE_WGSL,
   GPU_COLOR_LIBRARY_GLSL,
-  GPU_COLOR_LIBRARY_WGSL,
   GPU_ERF_PREAMBLE_GLSL,
-  GPU_ERF_PREAMBLE_WGSL,
   GPU_FRACTAL_PREAMBLE_GLSL,
-  GPU_FRACTAL_PREAMBLE_WGSL,
   GPU_FRESNELC_PREAMBLE_GLSL,
-  GPU_FRESNELC_PREAMBLE_WGSL,
   GPU_FRESNELS_PREAMBLE_GLSL,
-  GPU_FRESNELS_PREAMBLE_WGSL,
   GPU_GAMMA_PREAMBLE_GLSL,
-  GPU_GAMMA_PREAMBLE_WGSL,
   GPU_GCD_PREAMBLE_GLSL,
-  GPU_GCD_PREAMBLE_WGSL,
   GPU_HEAVISIDE_PREAMBLE_GLSL,
-  GPU_HEAVISIDE_PREAMBLE_WGSL,
   GPU_INF_PREAMBLE_GLSL,
-  GPU_INF_PREAMBLE_WGSL,
   GPU_LERCH_PREAMBLE_GLSL,
-  GPU_LERCH_PREAMBLE_WGSL,
   GPU_MEDIAN_PREAMBLE_GLSL,
-  GPU_MEDIAN_PREAMBLE_WGSL,
   GPU_NAN_PREAMBLE_GLSL,
-  GPU_NAN_PREAMBLE_WGSL,
   GPU_PCG3D_PREAMBLE_GLSL,
-  GPU_PCG3D_PREAMBLE_WGSL,
   GPU_PI_TRIG_PREAMBLE_GLSL,
-  GPU_PI_TRIG_PREAMBLE_WGSL,
   GPU_POLEVL_PREAMBLE_GLSL,
-  GPU_POLEVL_PREAMBLE_WGSL,
   GPU_POLYGAMMA_PREAMBLE_GLSL,
-  GPU_POLYGAMMA_PREAMBLE_WGSL,
   GPU_POWI_PREAMBLE_GLSL,
-  GPU_POWI_PREAMBLE_WGSL,
   GPU_ROUND_PREAMBLE_GLSL,
-  GPU_ROUND_PREAMBLE_WGSL,
   GPU_SINC_PREAMBLE_GLSL,
-  GPU_SINC_PREAMBLE_WGSL,
   GPU_ZETA_PREAMBLE_GLSL,
-  GPU_ZETA_PREAMBLE_WGSL,
 } from './gpu-preambles.js';
 import { gpuFixedPowerPreamble } from './gpu-reduce.js';
 import {
@@ -192,14 +161,11 @@ import {
 } from './gpu-library.js';
 import {
   GPU_FLOOR_MOD_PREAMBLE_GLSL,
-  GPU_FLOOR_MOD_PREAMBLE_WGSL,
   GPU_NAN_SAFE_PREAMBLE_GLSL,
-  GPU_NAN_SAFE_PREAMBLE_WGSL,
-  GPU_TANH_PREAMBLE_WGSL,
 } from './gpu-nan-safe.js';
 
 export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
-  /** Language identifier (e.g., 'glsl', 'wgsl') */
+  /** Language identifier (e.g., 'glsl') */
   protected abstract readonly languageId: string;
 
   /**
@@ -270,22 +236,18 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
 
   /**
    * Where this shader language admits a SCALAR among otherwise-`vecN`
-   * operands — the one place GLSL and WGSL genuinely differ, so each target
-   * overrides it (`GLSL_SHAPE_RULES`, `WGSL_SHAPE_RULES`).
+   * operands. The GLSL target overrides it (`GLSL_SHAPE_RULES`).
    *
-   * The default is the INTERSECTION of the two, so a further subclass that
-   * forgets to override it fails closed rather than open: only the builtins
-   * whose scalar argument is admitted in BOTH languages (`mix`'s blend
-   * factor, `refract`'s index) — and, within those, only the SLOT both
-   * languages declare scalar (the third) — and only the matrix arithmetic both
-   * define (no unary matrix negation: GLSL has it, WGSL does not).
+   * The default is strict, so a further subclass that forgets to override it
+   * fails closed rather than open: only the third slot of `mix` (the blend
+   * factor) and of `refract` (the index) admits a scalar, and only the
+   * matrix arithmetic without unary matrix negation is admitted.
    *
    * `mandatoryScalarSlots` and `vectorOnlySlots` are OBLIGATIONS, so their
-   * fail-closed default is the UNION rather than the intersection — more
-   * obligations is stricter, where more permissions is laxer. Both languages
-   * oblige `refract`'s third argument and nothing else, so the two coincide
-   * for `mandatoryScalarSlots`; the vector-only table is WGSL's plus `cross`,
-   * which both languages declare over `vec3` alone.
+   * fail-closed default is the larger set: more obligations is stricter,
+   * where more permissions is laxer. `refract`'s third argument is the one
+   * mandatory scalar slot, and the vector-only table lists the geometric
+   * builtins that a shader language can declare over vectors only.
    */
   protected getShapeRules(): GPUShapeRules {
     return {
@@ -313,7 +275,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   ): CompileTarget<Expression> {
     const functions = this.getFunctions();
     const constants = this.getConstants();
-    const v2 = this.languageId === 'wgsl' ? 'vec2f' : 'vec2';
+    const v2 = 'vec2';
     const rules = this.getShapeRules();
     const target: GPURandomTarget & GPUShapeRulesTarget = {
       language: this.languageId,
@@ -325,7 +287,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       supportedModes: GPU_SUPPORTED_MODES,
       // The shader type of each free symbol, for
       // `CompilationResult.freeSymbolTypes`. See `gpuLoweredSymbolTypeHook`.
-      loweredSymbolType: gpuLoweredSymbolTypeHook(this.languageId === 'wgsl'),
+      loweredSymbolType: gpuLoweredSymbolTypeHook(),
       // Constant-collection folding inlines up to the SAME limit this
       // target's `Range` handler already inlines to. On a shader target a
       // dynamic collection has no lowering at all, so for a constant one the
@@ -382,14 +344,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       cseCanMaterialize: gpuCanPlaceStatement,
       cseMaterialize: (expr, name, code, current) => {
         if (!gpuCanPlaceStatement(current)) return false;
-        const type = gpuTypeOfValue(expr, current.language === 'wgsl');
+        const type = gpuTypeOfValue(expr);
         if (type === undefined) return false;
-        BaseCompiler.hoistStatement(
-          current,
-          current.language === 'wgsl'
-            ? `let ${name}: ${type} = ${code};`
-            : `${type} ${name} = ${code};`
-        );
+        BaseCompiler.hoistStatement(current, `${type} ${name} = ${code};`);
         return true;
       },
       // A shader has no expression-level loop or IIFE, so the multi-statement
@@ -398,8 +355,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // statement sink is available and fails closed elsewhere, rather
       // than splice a bare block into a sub-expression. Gated to the pure GPU
       // languages by language id.
-      bareStatementBlocks:
-        this.languageId === 'glsl' || this.languageId === 'wgsl',
+      bareStatementBlocks: this.languageId === 'glsl',
       recompileStatement: gpuRecompileWithBoundDraws,
       // A multi-statement `Block` used as a VALUE — a `with` clause as the
       // term of a `Sum`, or as an operand of an addition — becomes one
@@ -434,8 +390,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           block === undefined ? undefined : [block],
           current
         );
-        const isWGSL = current.language === 'wgsl';
-        const type = gpuTypeOfValue(valueNode, isWGSL);
+        const type = gpuTypeOfValue(valueNode);
         if (type === undefined) return undefined;
         const tv = BaseCompiler.tempVar(current);
         const body = BaseCompiler.joinShaderStatements([
@@ -445,11 +400,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           .split('\n')
           .map((line) => `  ${line}`)
           .join('\n');
-        BaseCompiler.hoistStatement(
-          current,
-          isWGSL ? `var ${tv}: ${type};` : `${type} ${tv};`,
-          `{\n${body}\n}`
-        );
+        BaseCompiler.hoistStatement(current, `${type} ${tv};`, `{\n${body}\n}`);
         if (draws) gpuRecordBoundDraws([block], current);
         return tv;
       },
@@ -504,7 +455,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // Text has no shader representation, so a string literal in any
       // position fails closed rather than emitting one.
       //
-      // GLSL and WGSL have no string type, no character type and no text
+      // GLSL has no string type, no character type and no text
       // storage class: there is nothing a quoted literal could be. Declining
       // in this hook covers every position because all string values pass
       // through it.
@@ -541,23 +492,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       ws: (s?: string) => s ?? '',
       preamble: '',
       declare: (name, typeHint) => {
-        const type = typeHint ?? (this.languageId === 'wgsl' ? 'f32' : 'float');
-        // A `Block` local is a function-scope variable, and WGSL guarantees
-        // only 8192 bytes of them per function.
-        const bytes =
-          this.languageId === 'wgsl' ? gpuWGSLArrayBytes(type) : undefined;
-        if (bytes !== undefined && bytes > GPU_WGSL_FUNCTION_SCOPE_BYTES)
-          throw new Error(
-            `Could not compile \`Block\`: the local "${name}" (\`${type}\`, ` +
-              `${bytes} bytes) is a function-scope variable, and WGSL ` +
-              `guarantees only ${GPU_WGSL_FUNCTION_SCOPE_BYTES} bytes of ` +
-              `them per function. Read the list where it is, from a ` +
-              `storage buffer (the storage kind 'storage-buffer'), instead ` +
-              `of copying it into a local.`
-          );
-        return this.languageId === 'wgsl'
-          ? `var ${name}: ${type}`
-          : `${type} ${name}`;
+        const type = typeHint ?? 'float';
+        return `${type} ${name}`;
       },
       block: (stmts) => {
         if (stmts.length === 0) return '';
@@ -565,7 +501,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         // A statement-form construct as the block's LAST element — a `Loop`
         // emits a `for (…) { … }` statement — has no value to return.
         // Return-prefixing it would produce `return for (…) { … }` (invalid
-        // GLSL/WGSL), and a shader block must evaluate to a typed value, so
+        // GLSL), and a shader block must evaluate to a typed value, so
         // there is no `return None` analog either. Fail closed. A Loop in
         // a non-final position is fine (it stays a bare statement).
         if (/^\s*(for|while)\b/.test(stmts[last]))
@@ -575,9 +511,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
               `block must evaluate to a typed value.`
           );
         // A last statement that is an assignment is returned as it is in
-        // GLSL, where an assignment is an expression (`return s = x;`). In
-        // WGSL an assignment is a statement, and such a block declines
-        // before it reaches this hook (`compileBlock()`).
+        // GLSL, where an assignment is an expression (`return s = x;`).
         stmts[last] = `return ${stmts[last]}`;
         // A statement a list member hoisted (a loop, a compound block) is
         // already terminated; the joiner adds `;` only where one is missing.
@@ -616,46 +550,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   }
 
   /**
-   * The target fields that `withTargetExtension` adds to each target that
-   * `createTargetFor` makes while `fn` runs, else `undefined`.
-   */
-  private targetExtension?: GPUTargetExtension;
-
-  /**
-   * Run `fn` (a compilation) with `extension` added to each target that
-   * `createTargetFor` makes. An entry point of a subclass uses it to give
-   * `compile()` facts that its public options cannot carry: the list
-   * parameters of `WGSLTarget.compileFieldFunction()` and their read
-   * (`storage`, `storageRead`), the parameters read from a struct field
-   * (`hostInputVars`), and the check of the value of each `Return` of the
-   * body against the return type of the function (`onReturn`). Instance
-   * state is safe here for the reason given at `currentUserFunctions`: a GPU
-   * compilation is synchronous and not reentrant.
-   */
-  protected withTargetExtension<T>(
-    extension: GPUTargetExtension,
-    fn: () => T
-  ): T {
-    const saved = this.targetExtension;
-    this.targetExtension = extension;
-    try {
-      return fn();
-    } finally {
-      this.targetExtension = saved;
-    }
-  }
-
-  /**
-   * The names of the user-defined function declarations that the most
-   * recent compilation emitted: the keys of the `defs` of its user-function
-   * registry. `WGSLTarget.compileFieldFunction()` renames these names, and
-   * only these, after the compilation.
-   */
-  protected emittedUserFunctionNames(): string[] {
-    return [...(this.currentUserFunctions?.defs?.keys() ?? [])];
-  }
-
-  /**
    * A target for compiling `expr`, with the random-draw context (§7) stamped
    * on it: the shader stage when the caller knows it, and whether a HOST
    * `WithRandomSeed` frame is active — the cross-domain case an unframed
@@ -667,23 +561,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     options: Partial<CompileTarget<Expression>> = {}
   ): CompileTarget<Expression> {
     const target = this.createTarget(options);
-    // The fields that `withTargetExtension` adds for the compilation in
-    // flight. The list parameters it places in storage are added to the
-    // validated `storage` hints of the caller, before the reference gate
-    // below reads them.
-    const extension = this.targetExtension;
-    if (extension !== undefined) {
-      if (extension.storage !== undefined)
-        target.storage = new Map([
-          ...(target.storage ?? []),
-          ...extension.storage,
-        ]);
-      target.storageRead = extension.storageRead;
-      target.hostInputVars = extension.hostInputVars;
-      if (extension.onReturn !== undefined)
-        target.onReturn = extension.onReturn;
-      if (extension.kernel !== undefined) target.kernel = extension.kernel;
-    }
     // The body of each user-defined function is a shader function of its
     // own, with its own common-subexpression pass, or is substituted at a
     // call site, where no pass reads it. The size limit of the root
@@ -911,7 +788,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
    */
   private newUserFunctions(): CompileTarget<Expression>['userFunctions'] {
     const language = this.languageId;
-    const isWGSL = language === 'wgsl';
     const signatures = new Map<string, GPUUserFunctionSignature>();
     const declareFn = (
       name: string,
@@ -948,8 +824,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       args: ReadonlyArray<Expression>,
       target: CompileTarget<Expression>
     ): string | undefined => {
-      if (args.length === 0 || sig.ret !== (isWGSL ? 'f32' : 'float'))
-        return undefined;
+      if (args.length === 0 || sig.ret !== 'float') return undefined;
       const engine = args[0].engine;
       if (!BaseCompiler.userFunctionParamsAreScalar(engine, id))
         return undefined;
@@ -960,13 +835,12 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         // (`gpuColorOperand`, the `vec2(x, 0.0)` lift), which the wrapper
         // does not do.
         if (sig.complex[i] || sig.colors[i]) return undefined;
-        const t = gpuTypeOfValue(arg, isWGSL);
+        const t = gpuTypeOfValue(arg);
         if (t === sig.params[i]) return false;
         if (
-          sig.params[i] !== (isWGSL ? 'f32' : 'float') ||
+          sig.params[i] !== 'float' ||
           t === undefined ||
-          !/^vec[234]f?$/.test(t) ||
-          (isWGSL ? !t.endsWith('f') : t.endsWith('f')) ||
+          !/^vec[234]$/.test(t) ||
           !BaseCompiler.isShaderVectorListArg(arg)
         )
           return undefined;
@@ -1019,7 +893,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       defs: new Map<string, string>(),
       compiling: new Set<string>(),
       lowering: {
-        // GLSL and WGSL both forbid recursion outright.
+        // GLSL forbids recursion outright.
         noRecursion: true,
 
         // `define` below synthesizes the return type with `gpuTypeOfValue` on
@@ -1091,7 +965,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             const own = paramSymbols[i]?.type?.type;
             const t =
               declared === undefined || declared === 'unknown' ? own : declared;
-            const shader = gpuTypeOfDeclaredType(t, isWGSL);
+            const shader = gpuTypeOfDeclaredType(t);
             colors.push(
               t !== undefined &&
                 isSubtype(resolveTypeForCompilation(t), 'color')
@@ -1143,7 +1017,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             vectorFrame,
             () =>
               extras.map((x) => {
-                const shader = gpuTypeOfValue(x.expr, isWGSL);
+                const shader = gpuTypeOfValue(x.expr);
                 if (shader === undefined)
                   throw new Error(
                     `Could not compile \`${id}\`: the hoisted value \`${x.expr.toString()}\` has ` +
@@ -1190,14 +1064,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             paramTypes,
             body,
             target,
-            isWGSL,
             parameterPositions
           );
           const { ret, code } = BaseCompiler.withLocalShapeFrame(
             complexFrame,
             vectorFrame,
             () => {
-              const ret = gpuTypeOfValue(body, isWGSL);
+              const ret = gpuTypeOfValue(body);
               const pointOrList =
                 ret === undefined
                   ? gpuReadsPointOrPointListSymbol(body)
@@ -1223,7 +1096,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 );
               // Every `Return` in the body must yield the shape the
               // signature just synthesized: a shader function has ONE return
-              // type and neither language converts between a scalar, a
+              // type and GLSL does not convert between a scalar, a
               // `bool` and a `vecN`. Checked AT the emission, not by a
               // pre-walk, because the shape of a `Return`'s value is only
               // knowable while the emitter's local frames are pushed — a
@@ -1236,9 +1109,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 gpuParameterFacts: parameterFacts,
                 onReturn: (value) => {
                   const t =
-                    value === undefined
-                      ? undefined
-                      : gpuTypeOfValue(value, isWGSL);
+                    value === undefined ? undefined : gpuTypeOfValue(value);
                   if (t === ret) return;
                   throw new Error(
                     `Could not compile \`${id}\`: a \`Return\` in this body yields ` +
@@ -1317,7 +1188,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             if (each !== undefined) return each;
           }
           const code = args.map((arg, i) => {
-            const t = gpuTypeOfValue(arg, isWGSL);
+            const t = gpuTypeOfValue(arg);
             // A name the CALLER declared with a spelling this analysis has no
             // value type for (a matrix, an array, a struct, an alias). It is
             // NOT a float — classifying it as one is how a `mat4` uniform
@@ -1348,17 +1219,12 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
               );
             // A real argument to a complex parameter. A real number is a
             // complex number, so the call is valid, but the parameter is a
-            // `vec2` and neither language converts a scalar to a vector
+            // `vec2` and GLSL does not convert a scalar to a vector
             // implicitly. Lift the argument to `vec2(x, 0.0)`, as the
             // JavaScript target wraps it in `{ re: x, im: 0 }`. Only a
-            // floating-point scalar is lifted: WGSL has no `vec2f(i32, f32)`
-            // constructor, and a `bool` is not a number.
-            if (
-              sig.complex[i] &&
-              t === (isWGSL ? 'f32' : 'float') &&
-              t !== sig.params[i]
-            )
-              return `${gpuVec2(target)}(${BaseCompiler.compileValueOperand(
+            // floating-point scalar is lifted: a `bool` is not a number.
+            if (sig.complex[i] && t === 'float' && t !== sig.params[i])
+              return `${gpuVec2()}(${BaseCompiler.compileValueOperand(
                 arg,
                 target
               )}, 0.0)`;
@@ -1413,14 +1279,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     params: ReadonlyArray<[name: string, type: string]>,
     body: string
   ): string {
-    const signature =
-      this.languageId === 'wgsl'
-        ? `fn ${name}(${params
-            .map(([n, t]) => `${n}: ${t}`)
-            .join(', ')}) -> ${returnType}`
-        : `${returnType} ${name}(${params
-            .map(([n, t]) => `${t} ${n}`)
-            .join(', ')})`;
+    const signature = `${returnType} ${name}(${params
+      .map(([n, t]) => `${t} ${n}`)
+      .join(', ')})`;
     // A multi-line body already carries its own `return` on the last line (the
     // block convention, and what `compileFunctionBody` emits once anything
     // hoisted); a single-line one is an expression.
@@ -1448,9 +1309,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
    * shapes lets the existing call-site check see the mismatch and fail closed
    * (D6).
    *
-   * The complete declared TYPE is carried (element × width, both languages'
-   * spellings normalized), not just a width: `ivec2` and `bvec2` are two
-   * components each and convert to `vec2` in neither language. A spelling with
+   * The complete declared TYPE is carried (element × width, the GLSL
+   * spelling normalized), not just a width: `ivec2` and `bvec2` are two
+   * components each and GLSL does not convert them to `vec2`. A spelling with
    * no static value type here (a matrix, an array, a struct, a `#define`
    * alias) is recorded as such and fails closed if it reaches a user-function
    * call. Complex-ness is deliberately NOT framed: a `vec2` parameter may be a
@@ -1580,20 +1441,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     options: CompilationOptions<Expression> = {},
     storage?: CompileTarget<Expression>['storage']
   ): CompilationResult {
-    // WebGL2 has no storage buffers, so a `'storage-buffer'` hint has no
-    // lowering on GLSL. It is a decline, which the interpreter fallback can
-    // take, not an error of the option: the same options can serve the WGSL
-    // target.
-    if (this.languageId !== 'wgsl')
-      for (const [name, kind] of storage ?? [])
-        if (kind === 'storage-buffer')
-          throw new Error(
-            `Could not compile \`${name}\`: the storage kind ` +
-              `'storage-buffer' of "${name}" is not supported on the ` +
-              `${this.languageId} target, because WebGL2 has no storage ` +
-              `buffers. Compile to 'wgsl', or give "${name}" the storage ` +
-              `kind 'sampler2D'.`
-          );
     // Reproduce the engine's `angularUnit` semantics in radian-based code.
     expr = rewriteAngularUnit(expr);
     // Turn a collection whose WIDTH is known at compile time into straight-line
@@ -1650,7 +1497,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const allFunctions = this.getFunctions();
     const constants = this.getConstants();
 
-    const v2 = this.languageId === 'wgsl' ? 'vec2f' : 'vec2';
+    const v2 = 'vec2';
     const target = this.createTargetFor(expr, undefined, {
       // Constant-folder contract (`BaseCompiler.tryConstantFold`): a
       // `vars`-mapped symbol is a live runtime input (a uniform) and a
@@ -1668,9 +1515,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // the `At` lowering and by the reference gate `createTargetFor`
       // installs. Stamped per call like `constantFold`.
       storage,
-      storageBufferBindings: storageBufferBindings(options.storage),
-      // Filled by the storage-buffer reads (`gpuStorageBufferOperand`).
-      storageBuffersRead: new Map(),
       // The caller's requested compile mode; validated against
       // `supportedModes` (strict only here) by `BaseCompiler.compile`.
       mode: options.mode,
@@ -1846,20 +1690,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       success: true,
       code,
     };
-    let preamble = this.preambleFor(code);
-    // The declarations of the storage buffers that the code reads, ahead of
-    // the helpers that name them, and their layouts for the host.
-    if (target.storageBufferBindings !== undefined) {
-      const buffers = gpuStorageBuffersRead(
-        `${code}\n${preamble}`,
-        target.storageBufferBindings,
-        target.storageBuffersRead ?? new Map()
-      );
-      if (buffers.layouts.length > 0) {
-        result.storageBuffers = buffers.layouts;
-        preamble = buffers.declarations + preamble;
-      }
-    }
+    const preamble = this.preambleFor(code);
     if (preamble) result.preamble = preamble;
     // The operands of an exact sine hash and the range in which its value is
     // exact (`gpuAmplifiedTrigMod`).
@@ -1876,11 +1707,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       target,
       vars ? new Set(Object.keys(vars)) : undefined
     );
-    // A list in a storage buffer is read as the struct of its buffer.
-    for (const layout of result.storageBuffers ?? []) {
-      const entry = result.freeSymbolTypes?.[layout.symbol];
-      if (entry !== undefined) entry.lowered = layout.struct;
-    }
     return result;
   }
 
@@ -1904,16 +1730,15 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const userDefs = this.userFunctionDefs(code);
     if (userDefs) code = `${code}\n${userDefs}`;
     let preamble = '';
-    const isWGSL = this.languageId === 'wgsl';
     // A complex helper can call `_gpu_inf()` from its body (`_gpu_casech` at
     // z = 0). GLSL requires a declaration before its use, so the GLSL
     // Infinity helper then goes BEFORE the complex helpers.
-    const complexPreamble = buildComplexPreamble(code, this.languageId);
-    const complexUsesInf = !isWGSL && complexPreamble.includes('_gpu_inf(');
+    const complexPreamble = buildComplexPreamble(code);
+    const complexUsesInf = complexPreamble.includes('_gpu_inf(');
     if (complexUsesInf) preamble += GPU_INF_PREAMBLE_GLSL;
     preamble += complexPreamble;
-    // Both targets spell NaN and +∞ as `_gpu_nan()` / `_gpu_inf()`. On GLSL
-    // both helpers are built from the ES 3.00 `intBitsToFloat` this target
+    // NaN and +∞ are spelled `_gpu_nan()` / `_gpu_inf()`. Both helpers are
+    // built from the ES 3.00 `intBitsToFloat` this target
     // already assumes, and must be declared before their first use, so they
     // are emitted here, ahead of every helper that calls them.
     //
@@ -1921,8 +1746,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // BODIES, which these scans never see — they read the EMITTED code, never
     // a helper body — so an `At` lowering FORCES the GLSL NaN helper: a
     // compilation whose code contains only `_gpu_at3(…)` must still get it.
-    // WGSL declarations are order-independent, so the WGSL helpers are added
-    // at the end instead, from a scan of the finished preamble (see there).
     const atWidths = gpuAtHelperWidths(code);
     const atPointShapes = gpuAtPointHelperShapes(code);
     const texAtWidths = gpuTexAtHelperWidths(code);
@@ -1940,14 +1763,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // and `_gpu_inf()` from their bodies (at -inf and at a pole).
     const usesPolygamma = /_gpu_(di|tri|poly)gamma\(/.test(code);
     if (
-      !isWGSL &&
-      (code.includes('_gpu_nan') ||
-        atWidths.length > 0 ||
-        atPointShapes.length > 0 ||
-        texAtWidths.length > 0 ||
-        usesZeta ||
-        usesLerch ||
-        usesPolygamma)
+      code.includes('_gpu_nan') ||
+      atWidths.length > 0 ||
+      atPointShapes.length > 0 ||
+      texAtWidths.length > 0 ||
+      usesZeta ||
+      usesLerch ||
+      usesPolygamma
     )
       preamble += GPU_NAN_PREAMBLE_GLSL;
     // `_gpu_gamma` calls `_gpu_inf()` from its BODY at a pole (the float
@@ -1959,7 +1781,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // non-positive integer a with s > 0). So do the hyperbolic functions of
     // `iπu` (`_gpu_ipi_csch` and the others) and `_gpu_tanpi` at a pole.
     if (
-      !isWGSL &&
       !complexUsesInf &&
       (code.includes('_gpu_inf') ||
         code.includes('_gpu_gamma') ||
@@ -1973,68 +1794,28 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // AFTER the NaN branches, and that ORDER is load-bearing: GLSL requires a
     // declaration before its use, and these bodies call `_gpu_nan()`. The
     // order test in `at-gpu-compile.test.ts` is the tripwire.
-    for (const w of atWidths) preamble += gpuAtPreamble(w, isWGSL);
-    for (const [m, n] of atPointShapes)
-      preamble += gpuAtPointPreamble(m, n, isWGSL);
+    for (const w of atWidths) preamble += gpuAtPreamble(w);
+    for (const [m, n] of atPointShapes) preamble += gpuAtPointPreamble(m, n);
     // The texture helpers call `_gpu_nan()` too, so the same order rule
-    // applies. GLSL declares one per length; WGSL one per binding.
+    // applies. GLSL declares one per length.
     for (const w of texAtWidths) preamble += gpuTexAtPreamble(w);
-    if (isWGSL)
-      for (const [binding, w] of gpuTexAtBindings(code))
-        preamble += gpuTexAtPreambleWGSL(binding, w);
-    // The WGSL helpers that index a module-scope array by its name.
-    if (isWGSL) {
-      const inPlace = gpuAtInPlaceBindings(code);
-      for (const [binding, w] of inPlace.numbers)
-        preamble += gpuAtInPlacePreambleWGSL(binding, w);
-      for (const [binding, m, w] of inPlace.points)
-        preamble += gpuAtPointInPlacePreambleWGSL(binding, m, w);
-    }
-    // The helpers that read a list in a storage buffer. Their text is added
-    // to the code that the library scans below read, because they call
-    // `_gpu_max` and `_gpu_min`.
-    if (isWGSL) {
-      const helpers = storageBufferHelpers(code);
-      if (helpers) {
-        preamble += helpers;
-        code = `${code}\n${helpers}`;
-      }
-    }
     // The scalar `_gpu_powi` and its per-width `vecN` overloads
     // (`_gpu_powi2`–`_gpu_powi4`) are declared independently: a compilation
     // that only powers a vector needs the vector form alone.
-    preamble += gpuFixedPowerPreamble(code, isWGSL);
+    preamble += gpuFixedPowerPreamble(code);
     for (const form of gpuPowiHelperForms(code))
       preamble +=
-        form === 'scalar'
-          ? isWGSL
-            ? GPU_POWI_PREAMBLE_WGSL
-            : GPU_POWI_PREAMBLE_GLSL
-          : gpuPowiVecPreamble(form, isWGSL);
-    preamble += gpuLibrarySubset(
-      code,
-      isWGSL ? GPU_FLOOR_MOD_PREAMBLE_WGSL : GPU_FLOOR_MOD_PREAMBLE_GLSL
-    );
-    if (isWGSL) preamble += gpuLibrarySubset(code, GPU_TANH_PREAMBLE_WGSL);
-    preamble += gpuLibrarySubset(
-      code,
-      isWGSL ? GPU_NAN_SAFE_PREAMBLE_WGSL : GPU_NAN_SAFE_PREAMBLE_GLSL
-    );
+        form === 'scalar' ? GPU_POWI_PREAMBLE_GLSL : gpuPowiVecPreamble(form);
+    preamble += gpuLibrarySubset(code, GPU_FLOOR_MOD_PREAMBLE_GLSL);
+    preamble += gpuLibrarySubset(code, GPU_NAN_SAFE_PREAMBLE_GLSL);
     // Every library goes through `gpuLibrarySubset`, which keeps only the
     // definitions this compilation names and the ones those call. A shader
     // preamble is compiled by the driver once per program, so an unused
     // definition costs first-draw time on every program that carries it.
-    preamble += gpuLibrarySubset(
-      code,
-      isWGSL ? GPU_ROUND_PREAMBLE_WGSL : GPU_ROUND_PREAMBLE_GLSL
-    );
-    preamble += gpuLibrarySubset(
-      code,
-      isWGSL ? GPU_PI_TRIG_PREAMBLE_WGSL : GPU_PI_TRIG_PREAMBLE_GLSL
-    );
-    // The exact sine hash (`gpu-exact-trig.ts`), GLSL only.
-    if (!isWGSL)
-      preamble += gpuLibrarySubset(code, GPU_EXACT_TRIG_PREAMBLE_GLSL);
+    preamble += gpuLibrarySubset(code, GPU_ROUND_PREAMBLE_GLSL);
+    preamble += gpuLibrarySubset(code, GPU_PI_TRIG_PREAMBLE_GLSL);
+    // The exact sine hash (`gpu-exact-trig.ts`).
+    preamble += gpuLibrarySubset(code, GPU_EXACT_TRIG_PREAMBLE_GLSL);
     // `_gpu_zeta` calls `_gpu_gamma` from its own body for the s < 0
     // functional-equation branch, and every other zeta entry point
     // (`_gpu_hurwitz_zeta`, `_gpu_zeta_generalized`) can reach `_gpu_zeta`
@@ -2044,70 +1825,35 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // needed.
     preamble += gpuLibrarySubset(
       usesZeta || usesLerch ? `${code} _gpu_gamma(` : code,
-      isWGSL ? GPU_GAMMA_PREAMBLE_WGSL : GPU_GAMMA_PREAMBLE_GLSL
+      GPU_GAMMA_PREAMBLE_GLSL
     );
     // AFTER the NaN and Infinity helpers, which the three bodies call.
-    preamble += gpuLibrarySubset(
-      code,
-      isWGSL ? GPU_POLYGAMMA_PREAMBLE_WGSL : GPU_POLYGAMMA_PREAMBLE_GLSL
-    );
+    preamble += gpuLibrarySubset(code, GPU_POLYGAMMA_PREAMBLE_GLSL);
     // `_gpu_lerch_phi` calls `_gpu_zeta_pow` and `_gpu_hurwitz_zeta` from
     // its own body without naming them in the emitted code (only
     // `_gpu_lerch_phi` itself appears there), the same gap as above — force
     // both names in so the subset scan pulls their definitions in too.
     preamble += gpuLibrarySubset(
       usesLerch ? `${code} _gpu_zeta_pow( _gpu_hurwitz_zeta(` : code,
-      isWGSL ? GPU_ZETA_PREAMBLE_WGSL : GPU_ZETA_PREAMBLE_GLSL
+      GPU_ZETA_PREAMBLE_GLSL
     );
     // AFTER the zeta preamble: `_gpu_lerch_phi` calls `_gpu_zeta_pow` and
     // `_gpu_hurwitz_zeta`, and GLSL requires their declaration first.
-    preamble += gpuLibrarySubset(
-      code,
-      isWGSL ? GPU_LERCH_PREAMBLE_WGSL : GPU_LERCH_PREAMBLE_GLSL
-    );
-    preamble += gpuLibrarySubset(
-      code,
-      isWGSL ? GPU_ERF_PREAMBLE_WGSL : GPU_ERF_PREAMBLE_GLSL
-    );
+    preamble += gpuLibrarySubset(code, GPU_LERCH_PREAMBLE_GLSL);
+    preamble += gpuLibrarySubset(code, GPU_ERF_PREAMBLE_GLSL);
     if (code.includes('_gpu_heaviside'))
-      preamble +=
-        this.languageId === 'wgsl'
-          ? GPU_HEAVISIDE_PREAMBLE_WGSL
-          : GPU_HEAVISIDE_PREAMBLE_GLSL;
-    if (code.includes('_gpu_sinc'))
-      preamble +=
-        this.languageId === 'wgsl'
-          ? GPU_SINC_PREAMBLE_WGSL
-          : GPU_SINC_PREAMBLE_GLSL;
-    if (code.includes('_gpu_fresnel'))
-      preamble +=
-        this.languageId === 'wgsl'
-          ? GPU_POLEVL_PREAMBLE_WGSL
-          : GPU_POLEVL_PREAMBLE_GLSL;
-    if (code.includes('_gpu_fresnelC'))
-      preamble +=
-        this.languageId === 'wgsl'
-          ? GPU_FRESNELC_PREAMBLE_WGSL
-          : GPU_FRESNELC_PREAMBLE_GLSL;
-    if (code.includes('_gpu_fresnelS'))
-      preamble +=
-        this.languageId === 'wgsl'
-          ? GPU_FRESNELS_PREAMBLE_WGSL
-          : GPU_FRESNELS_PREAMBLE_GLSL;
-    preamble += gpuLibrarySubset(
-      code,
-      isWGSL ? GPU_BESSELJ_PREAMBLE_WGSL : GPU_BESSELJ_PREAMBLE_GLSL
-    );
+      preamble += GPU_HEAVISIDE_PREAMBLE_GLSL;
+    if (code.includes('_gpu_sinc')) preamble += GPU_SINC_PREAMBLE_GLSL;
+    if (code.includes('_gpu_fresnel')) preamble += GPU_POLEVL_PREAMBLE_GLSL;
+    if (code.includes('_gpu_fresnelC')) preamble += GPU_FRESNELC_PREAMBLE_GLSL;
+    if (code.includes('_gpu_fresnelS')) preamble += GPU_FRESNELS_PREAMBLE_GLSL;
+    preamble += gpuLibrarySubset(code, GPU_BESSELJ_PREAMBLE_GLSL);
     // A Mandelbrot row carried the Julia iteration and a Julia row carried the
     // Mandelbrot one before the per-function pass.
-    preamble += gpuLibrarySubset(
-      code,
-      isWGSL ? GPU_FRACTAL_PREAMBLE_WGSL : GPU_FRACTAL_PREAMBLE_GLSL
-    );
+    preamble += gpuLibrarySubset(code, GPU_FRACTAL_PREAMBLE_GLSL);
     if (code.includes('_gpu_rnd_draw')) {
       // One invocation-local u32 counter per frame (plus one shared by the
-      // unframed spatial-noise draws). A shader global / WGSL `var<private>`
-      // is per-invocation and initialized before the entry point runs, so
+      // unframed spatial-noise draws). A shader global is per-invocation and initialized before the entry point runs, so
       // every invocation runs each of its frames from `n = 0`.
       const counters = [
         ...new Set(
@@ -2118,49 +1864,17 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           Number(a.slice(GPU_RANDOM_COUNTER_PREFIX.length)) -
           Number(b.slice(GPU_RANDOM_COUNTER_PREFIX.length))
       );
-      preamble +=
-        '\n' +
-        counters
-          .map((n) =>
-            this.languageId === 'wgsl'
-              ? `var<private> ${n}: u32 = 0u;\n`
-              : `uint ${n} = 0u;\n`
-          )
-          .join('');
-      preamble += gpuLibrarySubset(
-        code,
-        isWGSL ? GPU_PCG3D_PREAMBLE_WGSL : GPU_PCG3D_PREAMBLE_GLSL
-      );
+      preamble += '\n' + counters.map((n) => `uint ${n} = 0u;\n`).join('');
+      preamble += gpuLibrarySubset(code, GPU_PCG3D_PREAMBLE_GLSL);
     }
     // A shader that calls only `_gpu_gcd` does not carry `_gpu_lcm`; one
     // that calls `_gpu_lcm` also gets `_gpu_gcd`, which its body calls.
-    preamble += gpuLibrarySubset(
-      code,
-      isWGSL ? GPU_GCD_PREAMBLE_WGSL : GPU_GCD_PREAMBLE_GLSL
-    );
-    preamble += gpuLibrarySubset(
-      code,
-      isWGSL ? GPU_MEDIAN_PREAMBLE_WGSL : GPU_MEDIAN_PREAMBLE_GLSL
-    );
+    preamble += gpuLibrarySubset(code, GPU_GCD_PREAMBLE_GLSL);
+    preamble += gpuLibrarySubset(code, GPU_MEDIAN_PREAMBLE_GLSL);
     // The colour library and the sRGB round trip that calls three of its
     // functions are subset together, so a row that converts one colour space
     // no longer carries the other twelve conversions.
-    preamble += gpuLibrarySubset(
-      code,
-      isWGSL ? GPU_COLOR_LIBRARY_WGSL : GPU_COLOR_LIBRARY_GLSL
-    );
-    // WGSL: the NaN and +∞ helpers go in when the emitted code, a user
-    // definition or ANY helper body included above calls them. Reading the
-    // finished preamble covers every helper that calls them from its body
-    // (the zeta, Lerch, Gamma, positional-access and colour helpers), with no
-    // per-helper forcing list to keep in step.
-    if (isWGSL) {
-      const all = `${preamble}\n${code}`;
-      if (/(?<![\w$])_gpu_inf\(/.test(all))
-        preamble = GPU_INF_PREAMBLE_WGSL + preamble;
-      if (/(?<![\w$])_gpu_nan\(/.test(all))
-        preamble = GPU_NAN_PREAMBLE_WGSL + preamble;
-    }
+    preamble += gpuLibrarySubset(code, GPU_COLOR_LIBRARY_GLSL);
     if (!userDefs) return preamble;
     return preamble ? `${preamble}\n${userDefs}` : userDefs;
   }
@@ -2183,9 +1897,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // installed, a loop-form `Sum` falls back to the legacy block exactly as it
     // did before hoisting existed — which is a statement sequence, so the gate
     // below declines it rather than handing back statements as an "expression".
-    // The single-line statements the emitted-source scan below cannot see: on
-    // WGSL an assignment body emits `s = x`, which is a statement there, and on
-    // BOTH targets a root `Declare` emits a bare declaration (dropping its
+    // The single-line statement the emitted-source scan below cannot see: a
+    // root `Declare` emits a bare declaration (dropping its
     // initializer). Checked structurally, before the body is compiled (D6).
     gpuAssertExpressionBody('compileToSource()', expr, this.languageId);
     // A sampler-backed read needs its helper declared, and this route has no
@@ -2264,17 +1977,15 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
    * undeclared user function classified as a scalar, agreed with the
    * synthesized `float` parameter, and passed a `vec2` into a `float` slot
    * behind a reported success; without the binding a same-named engine symbol
-   * folded over the declaration, and a WGSL input — a FIELD of the entry
-   * point's `input` struct — emitted a bare identifier that names nothing
-   * (each declaration's `ref` supplies the identifier to emit).
+   * folded over the declaration (each declaration's `ref` supplies the
+   * identifier to emit).
    *
    * `stageNames` are the other names of the shader that the body can read
    * bare: the `out` variables of a GLSL shader. A free symbol of the body
    * that is not a declaration and not one of these names is refused.
    *
    * `outputs` are the names that a body statement can assign, in the spelling
-   * of the emitted source (`output.c` for a WGSL output), with their declared
-   * types. A GLSL body can also assign the built-in outputs of its stage
+   * of the emitted source, with their declared types. A GLSL body can also assign the built-in outputs of its stage
    * (`GLSL_STAGE_BUILTIN_OUTPUTS`). A statement whose target is not one of
    * these names, or components of one of them, is refused, and so is a
    * statement whose value has a type that the target does not accept
@@ -2291,7 +2002,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     outputs: ReadonlyArray<{ name: string; type: string }> = [],
     desktopGLSLVersion?: number
   ): Array<{ variable: string; code: string; stmts: string[] }> {
-    const isWGSL = this.languageId === 'wgsl';
     // The target of each statement is copied as text to the left of
     // `<variable> = <code>;`. A target that names nothing, or a value of
     // another type, gives a shader that fails only when the GPU compiles it,
@@ -2302,19 +2012,14 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           `\`compileShader()\`: a compute shader from \`compileShader()\` ` +
           `cannot write a result. It has no outputs and no storage buffer, ` +
           `so the statement would assign a name that the shader does not ` +
-          `declare. To compute values on the GPU, use \`compile()\` or ` +
-          `\`WGSLTarget.compileFieldFunction()\`.`
+          `declare. To compute values on the GPU, use \`compile()\`.`
       );
     const assignable = [
       ...outputs,
-      ...(isWGSL ? [] : (GLSL_STAGE_BUILTIN_OUTPUTS[stage] ?? [])),
+      ...(GLSL_STAGE_BUILTIN_OUTPUTS[stage] ?? []),
     ];
     const targetTypes = body.map((assignment) => {
-      const target = gpuShaderAssignmentTarget(
-        assignment.variable,
-        assignable,
-        isWGSL
-      );
+      const target = gpuShaderAssignmentTarget(assignment.variable, assignable);
       if ('error' in target)
         throw new Error(
           `Could not compile the body statement "${assignment.variable}" ` +
@@ -2352,9 +2057,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           `of its own (\`Block\`).`
       );
     // One name, two declarations (an input AND a uniform) is a redeclaration
-    // neither language accepts — and on WGSL the two do not even resolve to
-    // the same identifier (`input.v` vs the global `v`), so there is no
-    // reading of the body to pick. Fail closed naming the collision (D6).
+    // GLSL does not accept. Fail closed naming the collision (D6).
     const seen = new Set<string>();
     for (const d of declarations) {
       if (seen.has(d.name))
@@ -2374,17 +2077,16 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // integer input is (`gpuDeclaredBodyTarget`). They are not inputs or
     // uniforms, so the read-only check below does not apply to them.
     const framed: GPUShaderDeclaration[] = [...declarations];
-    if (!isWGSL)
-      for (const d of [
-        ...outputs,
-        ...Object.entries(GLSL_STAGE_BUILTIN_TYPES[stage] ?? {}).map(
-          ([name, type]) => ({ name, type })
-        ),
-      ])
-        if (!seen.has(d.name)) {
-          seen.add(d.name);
-          framed.push({ name: d.name, type: d.type });
-        }
+    for (const d of [
+      ...outputs,
+      ...Object.entries(GLSL_STAGE_BUILTIN_TYPES[stage] ?? {}).map(
+        ([name, type]) => ({ name, type })
+      ),
+    ])
+      if (!seen.has(d.name)) {
+        seen.add(d.name);
+        framed.push({ name: d.name, type: d.type });
+      }
     // ONE naming context for the whole body too, seeded from EVERY statement:
     // the counter must stay distinct across statements (same reason as the
     // random counters), and a `_tv`-named symbol in any statement is a
@@ -2449,17 +2151,16 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       () =>
         body.map((assignment, i) => {
           // Same single-line holes as `compileToSource()`: `code` lands on the
-          // right of `${variable} = …;`, where neither a WGSL assignment nor a
-          // declaration (either language) is an expression. Checked on the
+          // right of `${variable} = …;`, where a declaration is not an
+          // expression. Checked on the
           // body, before it is compiled.
           gpuAssertExpressionBody(
             `compileShader() body statement "${assignment.variable}"`,
             assignment.expression,
             this.languageId
           );
-          // A declared input or uniform is read-only in both languages (a
-          // GLSL `uniform` or `in` variable, a WGSL `var<uniform>` or a field
-          // of the input struct), so `x = x + 1.0;` is not valid source. The
+          // A declared input or uniform is read-only (a GLSL `uniform` or
+          // `in` variable), so `x = x + 1.0;` is not valid source. The
           // test is on the expression and is conservative: an assignment to a
           // block local that has the same name as a declaration also
           // declines.
@@ -2545,15 +2246,12 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             to.element !== 'f' &&
             integerType !== undefined &&
             gpuDeclaredIsIntegerScalar(integerType);
-          const from = keepsInteger
-            ? integerType
-            : gpuCertainValueType(value, isWGSL);
+          const from = keepsInteger ? integerType : gpuCertainValueType(value);
           // When the type of the value is not certain, the number of its
           // components can still be known: the width that the emitter gives
           // a vector expression (`aggregateComponentCount`), such as 3 for
           // `2·uv` with `vec3 uv`. A value of another width than the target
-          // is refused, because nothing would assign the other components
-          // (and the WGSL split below would copy only some of them).
+          // is refused, because nothing would assign the other components.
           const width =
             from === undefined
               ? BaseCompiler.aggregateComponentCount(value)
@@ -2562,7 +2260,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             `Could not compile the body statement "${assignment.variable}" ` +
             `of \`compileShader()\`: the value ${valueType}, and the target ` +
             `"${assignment.variable}" has the type ` +
-            `\`${gpuSpellValueType(to!, isWGSL)}\`.`;
+            `\`${gpuSpellValueType(to!)}\`.`;
           const noConversion =
             `${this.languageId.toUpperCase()} does not convert the one to ` +
             `the other in an assignment. Give the value the type of the ` +
@@ -2580,7 +2278,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             keepsInteger &&
             gpuAssignmentConverts(integerType!, to!, desktopGLSLVersion)
           )
-            code = integerName!.ref ?? integerName!.name;
+            code = integerName!.name;
           else if (
             to !== undefined &&
             from !== undefined &&
@@ -2588,9 +2286,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
               !gpuAssignmentConverts(from, to, desktopGLSLVersion))
           ) {
             const valueType = `has the type \`${
-              'element' in from
-                ? gpuSpellValueType(from, isWGSL)
-                : from.spelling
+              'element' in from ? gpuSpellValueType(from) : from.spelling
             }\``;
             // Every scalar that the shader computes is a float, so an
             // integer output can receive only an integer name or an integer
@@ -2600,61 +2296,15 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 `${subject(valueType)} \`compileShader()\` computes float ` +
                   `values, and cannot assign an integer output. Declare the ` +
                   `output with a float type ` +
-                  `(\`${gpuSpellValueType({ element: 'f', width: to.width }, isWGSL)}\`).`
+                  `(\`${gpuSpellValueType({ element: 'f', width: to.width })}\`).`
               );
             throw new Error(`${subject(valueType)} ${noConversion}`);
-          }
-          // WGSL writes through a selection of two or more components
-          // (`output.c.rg = v;`) only with the `swizzle_assignment` language
-          // extension (WGSL §6.5.4 and §9.2.2), which a GPU does not always
-          // have. A selection of one component is a reference without any
-          // extension (WGSL §8.5.1.3). So the value is bound to a `let`, and
-          // each component is assigned on its own:
-          // `let _tv1 = v; output.c.r = _tv1.x; output.c.g = _tv1.y;`. The
-          // last assignment is the statement itself, and the others go after
-          // the hoisted statements of the value.
-          const { base, letters } = targetTypes[i];
-          if (
-            isWGSL &&
-            base !== undefined &&
-            letters !== undefined &&
-            letters.length > 1
-          ) {
-            // The split reads one component of the value for each letter, so
-            // a value with more components would be cut without an error.
-            // When neither check above gives the width of the value, the
-            // split is refused.
-            if (from === undefined && width === undefined)
-              throw new Error(
-                `Could not compile the body statement "${assignment.variable}" ` +
-                  `of \`compileShader()\`: the number of components of the ` +
-                  `value cannot be determined, and WGSL assigns a target of ` +
-                  `${letters.length} components one component at a time. ` +
-                  `Assign the whole output, or one component in each ` +
-                  `statement (\`${base}.${letters[0]}\`).`
-              );
-            const temp = BaseCompiler.tempVar(target);
-            const writes = [...letters].map((letter, k) => [
-              `${base}.${letter}`,
-              `${temp}.${'xyzw'[k]}`,
-            ]);
-            const [variable, value] = writes.pop()!;
-            return {
-              variable,
-              code: value,
-              stmts: [
-                ...stmts,
-                `let ${temp} = ${code};`,
-                ...writes.map(([v, c]) => `${v} = ${c};`),
-              ],
-            };
           }
           return { variable: assignment.variable, code, stmts };
         })
     );
     recording = false;
-    // A free symbol of the body is emitted as a bare identifier (or, for a
-    // WGSL input, as a field of the input struct). This route returns a
+    // A free symbol of the body is emitted as a bare identifier. This route returns a
     // complete shader, so only the shader's own inputs and uniforms, and the
     // names the stage itself declares (`stageNames`), are in scope there. Any
     // other free symbol names nothing, and the shader fails when the GPU

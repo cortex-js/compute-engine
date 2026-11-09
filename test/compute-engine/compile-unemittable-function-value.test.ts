@@ -147,7 +147,7 @@ describe('UNEMITTABLE USER FUNCTION IN VALUE POSITION — fail closed', () => {
 // It now fails closed at compile time, and the interpreted fallback answers.
 //
 describe('HOST-DECLARED OPERATOR IN VALUE POSITION — fail closed', () => {
-  const TARGETS = ['javascript', 'python', 'glsl', 'wgsl', 'interval-js'];
+  const TARGETS = ['javascript', 'python', 'glsl', 'interval-js'];
 
   function silent<T>(f: () => T): T {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});

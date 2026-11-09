@@ -1,23 +1,11 @@
 /**
- * CE-583. On WGSL, a read with a proven index of a list that a `Block` local
- * holds indexes the local, with no second copy.
- *
- * A `Block` local is a function-scope `var` (`var U: array<f32, 10>;`), and
- * WGSL can index a `var` with a run-time index. Before the fix, each read
- * copied the local to a new `var` first (`var _tv1 = U; … _tv1[1 - 1]`),
- * because the compiler could not tell a block local from a value of the
- * same name, which must be copied before a run-time index. The `Block` now
- * records its locals as variables on its scope. The search for this record
- * stops at a scope that binds the name without recording it, so a free
- * input of the same name still gets its copy. The GLSL output of these
- * reads does not change.
+ * CE-583. The GLSL output of the reads of a `Block` local: a list local is
+ * indexed as it is, with no copy.
  *
  * The file also tests the defects found with this fix:
  *  - On a shader target, a `Block` local with the name of a parameter of
  *    the function gets a fresh name. GLSL emitted a redeclaration of the
- *    parameter (`float f(float U) { float[10] U;`), and WGSL refused the
- *    function because it took the write of the local for a write of the
- *    parameter.
+ *    parameter (`float f(float U) { float[10] U;`).
  *  - A nested `Block` in statement position compiles as a statement: a
  *    compound statement (`{ … }`) on the shader targets, and statements in
  *    the enclosing list with fresh local names on Python. A block with one
@@ -34,27 +22,15 @@
  *    function (a parameter, a local, a free symbol, a name that a `vars`
  *    entry reads) gets a fresh name, and the body can still assign it.
  *  - Programs whose branch conditions read a block local compile as before.
- *  - The WGSL copy before an index declines with a diagnostic, not an
- *    internal error, at a position with no place for the copy statement.
- *    No input is known to reach this, so it has no test.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import {
-  isVariableLocal,
-  recordVariableLocals,
-} from '../../src/compute-engine/compilation/javascript-value-facts';
-import type { CompileTarget } from '../../src/compute-engine/compilation/types';
-import type { Expression } from '../../src/compute-engine/global-types';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { execFileSync } from 'child_process';
 import { TEST_PYTHON } from './test-python';
 
-const wgsl = new WGSLTarget();
 const glsl = new GLSLTarget();
 const NO_FOLD = { constantFold: false };
 
@@ -106,8 +82,7 @@ function fnText(preamble: string, head: string): string {
  * Run the emitted function `_fn_f` in JavaScript. The bodies these tests
  * emit use declarations, assignments, compound statements, array indexes,
  * `+` and `return`, so a text translation is enough: a declaration
- * (`var a: T;`, `float[10] a;`, `float a;`) becomes `let a;`, and a WGSL
- * phony assignment `_ = e;` becomes `e;`.
+ * (`float[10] a;`, `float a;`) becomes `let a;`.
  */
 function runF(
   preamble: string,
@@ -118,16 +93,13 @@ function runF(
   const text = fnText(preamble, head);
   const body = text
     .slice(text.indexOf('{\n') + 2, -2)
-    .replace(/\bvar (\w+): [^;]+;/g, 'let $1;')
-    .replace(/^(\s*)float(?:\[\d+\])? (\w+);/gm, '$1let $2;')
-    .replace(/^(\s*)_ = /gm, '$1');
+    .replace(/^(\s*)float(?:\[\d+\])? (\w+);/gm, '$1let $2;');
   return new Function('B', 'C', 'U', body)(lists.B, lists.C, x) as number;
 }
 
-/** The two shader functions and the JavaScript target agree at x = 2.5. */
+/** The shader function and the JavaScript target agree at x = 2.5. */
 function expectSameValues(
   ce: ComputeEngine,
-  wgslPreamble: string,
   glslPreamble: string,
   expected: number
 ): void {
@@ -141,95 +113,10 @@ function expectSameValues(
     C,
   });
   expect(want).toBe(expected);
-  expect(runF(wgslPreamble, 'fn _fn_f(', { B, C }, 2.5)).toBe(want);
   expect(runF(glslPreamble, 'float _fn_f(', { B, C }, 2.5)).toBe(want);
 }
 
-describe('CE-583: WGSL reads a Block local list with a proven index in place', () => {
-  test('a Sum over the local: no second copy', () => {
-    const ce = engine();
-    const r = wgsl.compile(ce.box(blockLocal(SUM_U) as any), NO_FOLD);
-    expect(r.success).toBe(true);
-    expect(r.code).toBe(`var U: array<f32, 10>;\nU = B;\nreturn ${UNROLLED};`);
-  });
-
-  test('a read with a dynamic index calls the helper, as before', () => {
-    const ce = engine();
-    const r = wgsl.compile(
-      ce.box(blockLocal(['At', 'U', 'x']) as any),
-      NO_FOLD
-    );
-    expect(r.code).toBe(
-      'var U: array<f32, 10>;\nU = B;\nreturn _gpu_at10(U, x);'
-    );
-  });
-
-  test('a read inside a conditional branch indexes the local', () => {
-    const ce = engine();
-    const r = wgsl.compile(
-      ce.box(blockLocal(['If', ['Greater', 'x', 0], ['At', 'U', 3], 0]) as any)
-    );
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('U[2]');
-    expect(r.code).not.toMatch(/var _tv\d+ = U;/);
-  });
-
-  test('a local of a nested Block is indexed in place too', () => {
-    const ce = engine();
-    const r = wgsl.compile(
-      ce.box(
-        blockLocal([
-          'Block',
-          ['Declare', 'V', "'list<real^10>'", 'U'],
-          ['Sum', ['At', 'V', 'k'], ['Limits', 'k', 1, 10]],
-        ]) as any
-      ),
-      NO_FOLD
-    );
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('(V[1 - 1]) + (V[2 - 1])');
-    expect(r.code).not.toMatch(/var _tv\d+ = [UV];/);
-  });
-});
-
-describe('CE-583: a value of the same name is still copied', () => {
-  test('a free input U, with no Block local', () => {
-    const ce = engine();
-    ce.declare('U', 'list<real^10>');
-    const r = wgsl.compile(ce.box(SUM_U as any), NO_FOLD);
-    expect(r.code).toMatch(/^var _tv1 = U;\nvar _tv2: f32 = _tv1\[1 - 1\];/);
-    expect(r.code.match(/var _tv\d+ = U;/g)).toHaveLength(10);
-  });
-
-  test('a scope that rebinds the name stops the search', () => {
-    // A `Block` frame records `U` as a variable. A binder inside it that
-    // binds `U` again (a parameter, a loop index) makes a different
-    // variable, which is not a `var`. A binder that binds another name
-    // keeps the record visible.
-    const root = { boundVars: undefined } as CompileTarget<Expression>;
-    const block = BaseCompiler.withBoundNames(root, ['U'])!;
-    recordVariableLocals({ boundVars: block } as CompileTarget<Expression>, [
-      'U',
-    ]);
-    expect(isVariableLocal('U', block)).toBe(true);
-    const loop = BaseCompiler.withBoundNames(
-      { boundVars: block } as CompileTarget<Expression>,
-      ['k']
-    );
-    expect(isVariableLocal('U', loop)).toBe(true);
-    const parameter = BaseCompiler.withBoundNames(
-      { boundVars: loop } as CompileTarget<Expression>,
-      ['U']
-    );
-    expect(isVariableLocal('U', parameter)).toBe(false);
-    const inner = BaseCompiler.withBoundNames(
-      { boundVars: parameter } as CompileTarget<Expression>,
-      ['j']
-    );
-    expect(isVariableLocal('U', inner)).toBe(false);
-    expect(isVariableLocal('U', undefined)).toBe(false);
-  });
-
+describe('CE-583: a value of the same name is not a block local', () => {
   test('a Block local inside a user function whose parameter is U', () => {
     // The local of the inner `Block` hides the parameter `U` of `f`. It is
     // spelled with a fresh name (`_tv1`), so its declaration and its write
@@ -245,20 +132,6 @@ describe('CE-583: a value of the same name is still copied', () => {
       ['Add', 'r', 'U'],
     ]);
     const unrolled = UNROLLED.replace(/\bU\[/g, '_tv1[');
-    const w = wgsl.compile(ce.box(['f', 'x']), NO_FOLD);
-    expect(w.code).toBe('_fn_f(x)');
-    expect(fnText(w.preamble!, 'fn _fn_f(')).toBe(
-      'fn _fn_f(U: f32) -> f32 {\n' +
-        '  var r: f32;\n' +
-        '  r = 0.0;\n' +
-        '  {\n' +
-        '    var _tv1: array<f32, 10>;\n' +
-        '    _tv1 = C;\n' +
-        `    r = ${unrolled};\n` +
-        '  }\n' +
-        '  return U + r;\n' +
-        '}'
-    );
     const g = glsl.compile(ce.box(['f', 'x']), NO_FOLD);
     expect(fnText(g.preamble!, 'float _fn_f(')).toBe(
       'float _fn_f(float U) {\n' +
@@ -272,11 +145,11 @@ describe('CE-583: a value of the same name is still copied', () => {
         '  return U + r;\n' +
         '}'
     );
-    expectSameValues(ce, w.preamble!, g.preamble!, 55 + 2.5);
+    expectSameValues(ce, g.preamble!, 55 + 2.5);
   });
 
   test('compileFunction(): a Block local with the name of a parameter', () => {
-    // The `Assign` writes the local, not the parameter, so WGSL compiles it.
+    // The local gets a fresh name, so it does not redeclare the parameter.
     const ce = engine();
     ce.declare('U', 'real');
     const body = ce.box([
@@ -285,15 +158,6 @@ describe('CE-583: a value of the same name is still copied', () => {
       SUM_U,
     ] as any);
     const unrolled = UNROLLED.replace(/\bU\[/g, '_tv1[');
-    expect(
-      wgsl.compileFunction(body, 'g', 'f32', [['U', 'f32']], NO_FOLD)
-    ).toBe(
-      'fn g(U: f32) -> f32 {\n' +
-        '  var _tv1: array<f32, 10>;\n' +
-        '  _tv1 = C;\n' +
-        `  return ${unrolled};\n` +
-        '}'
-    );
     expect(
       glsl.compileFunction(body, 'g', 'float', [['U', 'float']], NO_FOLD)
     ).toBe(
@@ -309,8 +173,8 @@ describe('CE-583: a value of the same name is still copied', () => {
 describe('CE-583: a local that hides an outer local and a parameter', () => {
   // `f := U ↦ Block(U ≔ C; Block(U ≔ B; Σ U_k) + Σ U_k) + U`, with
   // `k = 1..3`. The local of the inner block hides the local of the outer
-  // block, which hides the parameter. Both locals get a fresh name, so WGSL
-  // does not take a write of either for a write of the parameter.
+  // block, which hides the parameter. Both locals get a fresh name, so
+  // neither redeclares the parameter.
   test('both locals get a fresh name', () => {
     const ce = engine();
     const sum3 = ['Sum', ['At', 'U', 'k'], ['Limits', 'k', 1, 3]];
@@ -330,26 +194,6 @@ describe('CE-583: a local that hides an outer local and a parameter', () => {
     ]);
     const inner = '((_tv2[1 - 1]) + (_tv2[2 - 1]) + (_tv2[3 - 1]))';
     const outer = '((_tv1[1 - 1]) + (_tv1[2 - 1]) + (_tv1[3 - 1]))';
-    const w = wgsl.compile(ce.box(['f', 'x']), NO_FOLD);
-    expect(fnText(w.preamble!, 'fn _fn_f(')).toBe(
-      'fn _fn_f(U: f32) -> f32 {\n' +
-        '  var r: f32;\n' +
-        '  r = 0.0;\n' +
-        '  {\n' +
-        '    var _tv1: array<f32, 10>;\n' +
-        '    _tv1 = C;\n' +
-        '    var q: f32;\n' +
-        '    q = 0.0;\n' +
-        '    {\n' +
-        '      var _tv2: array<f32, 10>;\n' +
-        '      _tv2 = B;\n' +
-        `      q = ${inner};\n` +
-        '    }\n' +
-        `    r = q + ${outer};\n` +
-        '  }\n' +
-        '  return U + r;\n' +
-        '}'
-    );
     const g = glsl.compile(ce.box(['f', 'x']), NO_FOLD);
     expect(fnText(g.preamble!, 'float _fn_f(')).toBe(
       'float _fn_f(float U) {\n' +
@@ -371,24 +215,7 @@ describe('CE-583: a local that hides an outer local and a parameter', () => {
         '}'
     );
     // B = 100·C, so the sums are 600 and 6.
-    expectSameValues(ce, w.preamble!, g.preamble!, 600 + 6 + 2.5);
-  });
-
-  test('compileFunction(): an assignment before the declaration is refused', () => {
-    // The canonical form refuses this order with the static error
-    // `read-before-declaration`, and a compilation refuses an invalid
-    // expression.
-    const ce = engine();
-    ce.declare('U', 'real');
-    const body = ce.box([
-      'Block',
-      ['Assign', 'U', 2],
-      ['Declare', 'U', "'real'", 3],
-      ['Add', 'U', 1],
-    ] as any);
-    expect(() =>
-      wgsl.compileFunction(body, 'g', 'f32', [['U', 'f32']], NO_FOLD)
-    ).toThrow(/read-before-declaration/);
+    expectSameValues(ce, g.preamble!, 600 + 6 + 2.5);
   });
 });
 
@@ -401,17 +228,6 @@ describe('CE-583: a nested Block in statement position', () => {
   test('it is a compound statement, with no return', () => {
     const ce = engine();
     defineF(ce, ['Block', innerU('U'), ['Add', 'U', 1]]);
-    const w = wgsl.compile(ce.box(['f', 'x']), NO_FOLD);
-    expect(fnText(w.preamble!, 'fn _fn_f(')).toBe(
-      'fn _fn_f(U: f32) -> f32 {\n' +
-        '  {\n' +
-        '    var _tv1: array<f32, 10>;\n' +
-        '    _tv1 = C;\n' +
-        '    _ = _tv1;\n' +
-        '  }\n' +
-        '  return U + 1.0;\n' +
-        '}'
-    );
     const g = glsl.compile(ce.box(['f', 'x']), NO_FOLD);
     expect(fnText(g.preamble!, 'float _fn_f(')).toBe(
       'float _fn_f(float U) {\n' +
@@ -423,21 +239,18 @@ describe('CE-583: a nested Block in statement position', () => {
         '  return U + 1.0;\n' +
         '}'
     );
-    expectSameValues(ce, w.preamble!, g.preamble!, 2.5 + 1);
+    expectSameValues(ce, g.preamble!, 2.5 + 1);
   });
 
   test('a scalar block statement is not stored in a temporary', () => {
     // Before, the value was stored in `_tv1`, and `_tv1;` was then written
-    // as a statement, which is not valid WGSL.
+    // as a statement.
     const ce = engine();
     const expr = ce.box([
       'Block',
       ['Block', ['Declare', 'V', "'real'", 'x'], 'V'],
       ['Add', 'x', 1],
     ] as any);
-    expect(wgsl.compile(expr, NO_FOLD).code).toBe(
-      '{\n  var V: f32;\n  V = x;\n  _ = V;\n}\nreturn x + 1.0;'
-    );
     expect(glsl.compile(expr, NO_FOLD).code).toBe(
       '{\n  float V;\n  V = x;\n  V;\n}\nreturn x + 1.0;'
     );
@@ -563,7 +376,7 @@ describe('CE-583: a use of a block local before its Declare declines', () => {
         'Error(ErrorCode("read-before-declaration", "U"))'
       );
       const decline = /read-before-declaration/;
-      for (const to of ['javascript', 'glsl', 'wgsl', 'python'])
+      for (const to of ['javascript', 'glsl', 'python'])
         expect(() => compile(expr, { to, fallback: false })).toThrow(decline);
       // The interval target gives its decline in the result.
       const interval = compile(expr, { to: 'interval-js', fallback: false });

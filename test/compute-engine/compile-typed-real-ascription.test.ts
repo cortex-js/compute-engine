@@ -328,7 +328,7 @@ describe('A real result over a value that is complex without promotion', () => {
 });
 
 describe('Targets that never promote are unchanged', () => {
-  for (const to of ['glsl', 'wgsl'] as const)
+  for (const to of ['glsl'] as const)
     it(`${to}: the body compiles on the real lane`, () => {
       const ce = engineWith('(real) -> real');
       const r = compile(ce.box(['Add', ['p', 3], ['p', 'x']]), {

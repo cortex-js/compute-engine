@@ -257,19 +257,17 @@ describe('A FUNCTION DECLARED IN THE ENGINE', () => {
       kind: 'interval',
       value: { lo: 3, hi: 3 },
     });
-    for (const to of ['glsl', 'wgsl'])
+    for (const to of ['glsl'])
       expect(build(ce, ['g', 'x'], to).success).toBe(true);
   });
 
   test('a declared argument that proves the type still compiles on a shader', () => {
     const ce = engine('(integer) -> integer');
     expect(build(ce, ['g', 'n'], 'glsl').success).toBe(true);
-    expect(build(ce, ['g', 'n'], 'wgsl').success).toBe(true);
   });
 
   test('a real parameter is not tested on a shader, as before', () => {
     const ce = engine('(real) -> real');
     expect(build(ce, ['g', 'x'], 'glsl').success).toBe(true);
-    expect(build(ce, ['g', 'x'], 'wgsl').success).toBe(true);
   });
 });

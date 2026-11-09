@@ -122,8 +122,6 @@ describe('COMPILE DERIVATIVE — partial derivatives of Arctan2', () => {
     ['interval-js', 'y'],
     ['glsl', 'x'],
     ['glsl', 'y'],
-    ['wgsl', 'x'],
-    ['wgsl', 'y'],
   ] as const)('D(Arctan2(y, x), %s) compiles on %s', (to, v) => {
     const expr = ce.box(['D', ['Arctan2', 'y', 'x'], v]);
     const result = compile(expr, { to, fallback: false });
@@ -132,7 +130,7 @@ describe('COMPILE DERIVATIVE — partial derivatives of Arctan2', () => {
     expect(result.code).not.toContain('Derivative');
   });
 
-  test.each(['javascript', 'interval-js', 'glsl', 'wgsl'] as const)(
+  test.each(['javascript', 'interval-js', 'glsl'] as const)(
     'D(Mod(x, m), m) compiles on %s',
     (to) => {
       const result = compile(ce.box(['D', ['Mod', 'x', 'm'], 'm']), {
@@ -236,7 +234,7 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
           expect(v.lo).toBeLessThanOrEqual(expected + 1e-12);
           expect(v.hi).toBeGreaterThanOrEqual(expected - 1e-12);
         }
-        for (const to of ['glsl', 'wgsl'] as const) {
+        for (const to of ['glsl'] as const) {
           const gpu = compile(expr, { to, fallback: false });
           expect(gpu.success).toBe(true);
           expect(gpu.code).not.toContain('Derivative');
@@ -265,11 +263,9 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
     ['BesselJ', 'javascript'],
     ['BesselJ', 'interval-js'],
     ['BesselJ', 'glsl'],
-    ['BesselJ', 'wgsl'],
     ['Gamma', 'javascript'],
     ['Gamma', 'interval-js'],
     ['Gamma', 'glsl'],
-    ['Gamma', 'wgsl'],
   ])('Derivative(%s, 1, 0) with no closed form declines on %s', (f, to) => {
     const expr = ce.box(['Apply', ['Derivative', f, 1, 0], 's', 'x']);
     expect(declineMessage(expr, to)).toMatch(
@@ -277,7 +273,7 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
     );
   });
 
-  test.each(['javascript', 'interval-js', 'glsl', 'wgsl'])(
+  test.each(['javascript', 'interval-js', 'glsl'])(
     'a high mixed order of a large function of two arguments declines quickly on %s',
     (to) => {
       // The closed form of this mixed derivative of order 3 takes more than
@@ -327,7 +323,7 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
   test('each decline gives its true reason', () => {
     // A closed form with the wrong number of parameters is an arity decline,
     // not a missing closed form.
-    for (const to of ['javascript', 'interval-js', 'glsl', 'wgsl']) {
+    for (const to of ['javascript', 'interval-js', 'glsl']) {
       expect(
         declineMessage(
           ce.box(['Apply', ['Derivative', 'Power', 0, 1], 'x']),
@@ -347,7 +343,7 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
     const ceBig = new ComputeEngine();
     ceBig.parse('f(x):=\\sqrt{x+\\sqrt{x+\\sqrt{x+\\sqrt{x+x}}}}').evaluate();
     const big = ceBig.box(['Apply', ['Derivative', 'f', 3], 'x']);
-    for (const to of ['interval-js', 'glsl', 'wgsl'])
+    for (const to of ['interval-js', 'glsl'])
       expect(declineMessage(big, to)).toMatch(
         /the closed form of the derivative is too large to write out/
       );

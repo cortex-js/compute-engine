@@ -533,7 +533,7 @@ function knownCondition(cond: Expression): boolean | undefined {
  * condition known to be `True` (their conditions and their values) are
  * dropped.
  *
- * On the shader targets (GLSL, WGSL), every branch that the shader code has
+ * On the shader target (GLSL), every branch that the shader code has
  * must have the same type, also a branch that is never taken, or the shader
  * is not valid. The operands dropped are those that the shader lowering
  * does not emit:
@@ -685,9 +685,9 @@ function droppedOperandsOf(
   return dropped !== undefined && dropped.size > 0 ? dropped : undefined;
 }
 
-/** True on the shader targets, GLSL and WGSL. */
+/** True on the shader target, GLSL. */
 function isShaderTarget(target: CompileTarget<Expression>): boolean {
-  return target.language === 'glsl' || target.language === 'wgsl';
+  return target.language === 'glsl';
 }
 
 /**
@@ -700,7 +700,7 @@ function isShaderTarget(target: CompileTarget<Expression>): boolean {
  *
  * Of an `If` or a `Which`, only the branches that the generated code keeps
  * are returned (`droppedOperands()`, where `shader` selects the rule of the
- * GLSL and WGSL targets): on JavaScript, `Which(2 < 3, [1, 2], True, 0)`
+ * GLSL target): on JavaScript, `Which(2 < 3, [1, 2], True, 0)`
  * has one branch, the list. `unknownIsScalar` is as in
  * `hasScalarCondition()`.
  *
@@ -1008,9 +1008,7 @@ function operandUse(
   const last = i === node.nops - 1;
   if (h === 'Block') return last ? 'end' : 'statement';
   // The body of a `ParallelLoop` is a statement list, as the body of a
-  // `Loop`: a compute-shader kernel compiles the node itself
-  // (`WGSLTarget.compileKernel()`), and the JavaScript target lowers it to
-  // a `Loop` before this check.
+  // `Loop`: the JavaScript target lowers it to a `Loop` before this check.
   if (h === 'Loop' || h === 'ParallelLoop')
     return i === 0 ? 'statement' : 'value';
   if (h === 'If')

@@ -5,7 +5,6 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
@@ -379,14 +378,6 @@ describe('COMPILE', () => {
           `vec2(_gpu_sin(t), _gpu_cos(t))`
         );
       });
-
-      it('should compile a tuple to WGSL', () => {
-        const expr = ce.expr(['Tuple', ['Sin', 't'], ['Cos', 't']]);
-        const compiled = compile(expr, { to: 'wgsl' });
-        expect(compiled?.code).toMatchInlineSnapshot(
-          `vec2f(_gpu_sin(t), _gpu_cos(t))`
-        );
-      });
     });
 
     describe('Distance compilation', () => {
@@ -462,12 +453,6 @@ describe('COMPILE', () => {
         expect(compiled?.code).toMatchInlineSnapshot(`vec3(1.0, 2.0, 3.0)`);
       });
 
-      it('should compile a column vector to WGSL', () => {
-        const expr = ce.parse('\\begin{pmatrix}1\\\\ 2\\\\ 3\\end{pmatrix}');
-        const compiled = compile(expr, { to: 'wgsl' });
-        expect(compiled?.code).toMatchInlineSnapshot(`vec3f(1.0, 2.0, 3.0)`);
-      });
-
       it('should compile a 2x2 matrix to GLSL with native mat2', () => {
         const expr = ce.expr([
           'Matrix',
@@ -477,18 +462,6 @@ describe('COMPILE', () => {
         // Column-major: col0=(1,3), col1=(2,4)
         expect(compiled?.code).toMatchInlineSnapshot(
           `mat2(vec2(1.0, 3.0), vec2(2.0, 4.0))`
-        );
-      });
-
-      it('should compile a 2x2 matrix to WGSL with native mat2x2f', () => {
-        const expr = ce.expr([
-          'Matrix',
-          ['List', ['List', 1, 2], ['List', 3, 4]],
-        ]);
-        const compiled = compile(expr, { to: 'wgsl' });
-        // Column-major: col0=(1,3), col1=(2,4)
-        expect(compiled?.code).toMatchInlineSnapshot(
-          `mat2x2f(vec2f(1.0, 3.0), vec2f(2.0, 4.0))`
         );
       });
 
@@ -655,25 +628,6 @@ describe('COMPILE', () => {
         'List',
         'Conjugate',
       ]),
-      'wgsl': new Set([
-        'Clamp',
-        'Mix',
-        'Step',
-        'Degrees',
-        'Radians',
-        'Exp2',
-        'Log2',
-        'Inversesqrt',
-        'Cross',
-        'Distance',
-        'Dot',
-        'Length',
-        'Normalize',
-        'Reflect',
-        'Refract',
-        'List',
-        'Conjugate',
-      ]),
       'interval-javascript': new Set(['If']),
       'python': new Set([
         'Arctan2',
@@ -701,7 +655,6 @@ describe('COMPILE', () => {
     > = [
       ['javascript', new JavaScriptTarget()],
       ['glsl', new GLSLTarget()],
-      ['wgsl', new WGSLTarget()],
       ['interval-javascript', new IntervalJavaScriptTarget()],
       ['python', new PythonTarget()],
     ];
@@ -729,7 +682,7 @@ describe('COMPILE', () => {
     // re-merging on every `compile()` normalizes the result to dictionary
     // mode — ~22KB of transient garbage per call, twice per compilation.
     it('gpu targets memoize their merged function table', () => {
-      for (const target of [new GLSLTarget(), new WGSLTarget()]) {
+      for (const target of [new GLSLTarget()]) {
         const first = target.getFunctions();
         expect(target.getFunctions()).toBe(first);
         target.compile(ce.parse('\\sin(x)'));
@@ -821,7 +774,6 @@ describe('COMPILE', () => {
     > = [
       ['javascript', new JavaScriptTarget()],
       ['glsl', new GLSLTarget()],
-      ['wgsl', new WGSLTarget()],
       ['interval-javascript', new IntervalJavaScriptTarget()],
       ['python', new PythonTarget()],
     ];
@@ -843,7 +795,6 @@ describe('COMPILE', () => {
         const expectedMissing: Record<string, string[]> = {
           'javascript': [],
           'glsl': [],
-          'wgsl': [],
           'interval-javascript': [],
           'python': [],
         };
@@ -3422,7 +3373,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     );
     // The GPU targets compile only the default order, so the order 2 of a
     // matrix declines there too.
-    for (const to of ['glsl', 'wgsl'] as const)
+    for (const to of ['glsl'] as const)
       expect(() =>
         compile(e.box(['Norm', M, 2]), {
           to,
@@ -5046,7 +4997,7 @@ describe('block-locals bound by bare assignment (no `Declare`)', () => {
 // reached only when the target declares no `Loop` function.)
 //
 // These pin that routing by its OBSERVABLE consequence: a vector-valued
-// loop-body local is declared `vec2`/`vec2f` (never the `float` default paired
+// loop-body local is declared `vec2` (never the `float` default paired
 // with a `vecN` assignment — source no driver accepts), an aggregate wider than
 // 4 gets the matching array type, and a local bound to disagreeing shapes fails
 // closed instead of emitting either.
@@ -5112,15 +5063,6 @@ describe('GPU loop-body block-locals get the shader type inference', () => {
     );
   });
 
-  it('WGSL: the same local is declared `vec2f`', () => {
-    const wgsl = new WGSLTarget();
-    const r = wgsl.compile(engineWithA(IMPLICIT_VEC2).box(['a', 'u']));
-    expect(r.success).toBe(true);
-    expect(r.preamble).toContain('var p: vec2f;');
-    expect(r.preamble).toContain('p = vec2f(t, 2.0 * t);');
-    expect(r.preamble).not.toContain('var p: f32;');
-  });
-
   it('GLSL: the `Declare`+`Assign` sibling emits the same definition', () => {
     const glsl = new GLSLTarget();
     expect(
@@ -5154,7 +5096,7 @@ describe('GPU loop-body block-locals get the shader type inference', () => {
       ['Assign', 'p', ['Multiply', 3, 't']],
       ['Assign', 's', ['Add', 's', ['At', 'p', 1]]],
     ]);
-    for (const target of [new GLSLTarget(), new WGSLTarget()])
+    for (const target of [new GLSLTarget()])
       expect(() => target.compile(engineWithA(body).box(['a', 'u']))).toThrow(
         /assignment-type-mismatch/
       );
@@ -5468,28 +5410,12 @@ describe('GPU user-function return type comes from the body VALUE', () => {
     expect(r.preamble).toContain('return s;');
   });
 
-  it('WGSL: the same body declares `-> f32`', () => {
-    const r = new WGSLTarget().compile(
-      engineWithA(REAL_VALUE_COMPLEX_LOCAL).box(['a', 'u'])
-    );
-    expect(r.success).toBe(true);
-    expect(r.preamble).toContain('fn _fn_a(t: f32) -> f32');
-    expect(r.preamble).not.toContain('-> vec2f');
-    expect(r.preamble).toContain('var z: vec2f;');
-    expect(r.preamble).toContain('return s;');
-  });
-
   it('a body that genuinely returns a complex value still gets `vec2`', () => {
     const glsl = new GLSLTarget().compile(
       engineWithA(COMPLEX_VALUE).box(['a', 'u'])
     );
     expect(glsl.success).toBe(true);
     expect(glsl.preamble).toContain('vec2 _fn_a(float t)');
-    const wgsl = new WGSLTarget().compile(
-      engineWithA(COMPLEX_VALUE).box(['a', 'u'])
-    );
-    expect(wgsl.success).toBe(true);
-    expect(wgsl.preamble).toContain('fn _fn_a(t: f32) -> vec2f');
   });
 
   it('JS: both bodies agree with the interpreter', () => {
@@ -5516,9 +5442,9 @@ describe('GPU user-function return type comes from the body VALUE', () => {
 // the body's own value, so every `return` in the body must also agree with it.
 // Neither held, and the mismatches went out behind `success: true`:
 //
-//  - a `Return` in a conditional arm lands inside the GLSL ternary / WGSL
-//    `select(…)` the branches lower to — `((0.0 < t) ? (return …) : …)`, which
-//    is not GLSL at all;
+//  - a `Return` in a conditional arm lands inside the GLSL ternary the
+//    branches lower to — `((0.0 < t) ? (return …) : …)`, which is not GLSL at
+//    all;
 //  - a `Return` that IS the block's value gets return-prefixed by the block
 //    emitter — `return return s;`;
 //  - a `Return` whose value has a different shape than the body's value emits
@@ -5586,13 +5512,13 @@ describe('a GPU user-function body with an early `Return`', () => {
     's',
   ];
 
-  const gpuTargets = () => [new GLSLTarget(), new WGSLTarget()];
+  const gpuTargets = () => [new GLSLTarget()];
 
   it('a `Return` whose shape disagrees with the body fails closed', () => {
     for (const body of [RETURN_SHAPE_MISMATCH, RETURN_COMPLEX_LOCAL])
       for (const target of gpuTargets())
         expect(() => target.compile(engineWithA(body).box(['a', 'u']))).toThrow(
-          /a `Return` in this body yields a "vec2f?" value, but "a" is declared to return "(float|f32)"/
+          /a `Return` in this body yields a "vec2" value, but "a" is declared to return "float"/
         );
   });
 
@@ -5605,7 +5531,7 @@ describe('a GPU user-function body with an early `Return`', () => {
       expect(() =>
         target.compile(engineWithA(RETURN_IN_BRANCH).box(['a', 'u']))
       ).toThrow(
-        /an early `Return` here has no (GLSL|WGSL) lowering .* requires an expression|Could not compile `Return`: a multi-statement construct .* cannot be used as a sub-expression/s
+        /an early `Return` here has no GLSL lowering .* requires an expression|Could not compile `Return`: a multi-statement construct .* cannot be used as a sub-expression/s
       );
   });
 
@@ -5637,13 +5563,6 @@ describe('a GPU user-function body with an early `Return`', () => {
     expect(glsl.preamble).toContain('float _fn_a(float t)');
     expect(glsl.preamble).toContain('return 2.0 * t;');
     expect(glsl.preamble).toContain('return s;');
-
-    const wgsl = new WGSLTarget().compile(
-      engineWithA(EARLY_RETURN_OK).box(['a', 'u'])
-    );
-    expect(wgsl.success).toBe(true);
-    expect(wgsl.preamble).toContain('fn _fn_a(t: f32) -> f32');
-    expect(wgsl.preamble).toContain('return 2.0 * t;');
   });
 
   it('JS is unchanged: it lowers every one of these bodies itself', () => {
@@ -5702,24 +5621,21 @@ describe('the expression-only GPU routes decline statement bodies', () => {
   const BARE_RETURN: MathJsonExpression = ['Block', ['Return', 'x']];
   /**
    * The single-line hole the emitted-source scan cannot see: an assignment
-   * body emits `s = x` — one line, no `return` token — on BOTH targets. GLSL
-   * assignment is an OPERATOR, so `fragColor = s = x;` is valid there; WGSL
-   * assignment is a STATEMENT, so the same emission is invalid source behind a
-   * reported success. Declined structurally on WGSL only.
+   * body emits `s = x` — one line, no `return` token. GLSL assignment is an
+   * OPERATOR, so `fragColor = s = x;` is valid there.
    */
   const ASSIGN_ONLY: MathJsonExpression = ['Block', ['Assign', 's', 'x']];
   /**
    * The other single-line hole the emitted-source scan cannot see: a ROOT
-   * `Declare` emits one bare declaration — `float s` / `var s: f32` — on both
-   * targets. A declaration is a STATEMENT in BOTH languages (unlike the
-   * assignment above, which GLSL keeps), and the emission also silently DROPS
+   * `Declare` emits one bare declaration — `float s`. A declaration is a
+   * STATEMENT in GLSL (unlike the assignment above), and the emission also silently DROPS
    * the initializer `x`. Only the bare root shape leaks: block-wrapped with
    * anything after it, the declaration is followed by more lines and the
    * multi-line gate already declines it.
    */
   const DECLARE_ONLY: MathJsonExpression = ['Declare', 's', 'number', 'x'];
 
-  const gpuTargets = () => [new GLSLTarget(), new WGSLTarget()];
+  const gpuTargets = () => [new GLSLTarget()];
 
   /** The decline of a block whose last statement is an assignment or a
    * declaration, where the value of the block is used. */
@@ -5727,7 +5643,7 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     /an assignment or a declaration is a statement, and its value is used here/;
 
   const shaderFor = (
-    target: GLSLTarget | WGSLTarget,
+    target: GLSLTarget,
     expr: MathJsonExpression,
     e: ComputeEngine
   ): string =>
@@ -5737,8 +5653,7 @@ describe('the expression-only GPU routes decline statement bodies', () => {
       outputs: [{ name: 'fragColor', type: 'float' }],
       body: [
         {
-          variable:
-            target instanceof WGSLTarget ? 'output.fragColor' : 'fragColor',
+          variable: 'fragColor',
           expression: e.box(expr),
         },
       ],
@@ -5749,7 +5664,7 @@ describe('the expression-only GPU routes decline statement bodies', () => {
       for (const target of gpuTargets()) {
         const e = engineWithX();
         expect(() => target.compileToSource(e.box(body))).toThrow(
-          /Could not compile with `compileToSource\(\)`: this route emits a single (GLSL|WGSL) EXPRESSION, but the body lowers to a statement sequence/
+          /Could not compile with `compileToSource\(\)`: this route emits a single GLSL EXPRESSION, but the body lowers to a statement sequence/
         );
         expect(() => target.compileToSource(e.box(body))).toThrow(
           /Compile a statement body with compile\(\) instead/
@@ -5762,7 +5677,7 @@ describe('the expression-only GPU routes decline statement bodies', () => {
       expect(() =>
         target.compileToSource(engineWithX().box(BARE_RETURN))
       ).toThrow(
-        /Could not compile with `compileToSource\(\)`: this route emits a single (GLSL|WGSL) EXPRESSION, but the body lowers to a bare `return` statement \(`return (x|input\.x)`\)/
+        /Could not compile with `compileToSource\(\)`: this route emits a single GLSL EXPRESSION, but the body lowers to a bare `return` statement \(`return x`\)/
       );
   });
 
@@ -5770,7 +5685,7 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     for (const body of [DECLARE_ASSIGN_RETURN, BARE_RETURN])
       for (const target of gpuTargets())
         expect(() => shaderFor(target, body, engineWithX())).toThrow(
-          /Could not compile the body statement "(fragColor|output\.fragColor)" of `compileShader\(\)`: this route emits a single (GLSL|WGSL) EXPRESSION/
+          /Could not compile the body statement "fragColor" of `compileShader\(\)`: this route emits a single GLSL EXPRESSION/
         );
   });
 
@@ -5792,9 +5707,7 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     for (const target of gpuTargets()) {
       const shader = shaderFor(target, body, engineWithX());
       expect(shader).toMatch(
-        target instanceof WGSLTarget
-          ? /var _tv1: f32;\n\s*\{\n\s*var q: f32;\n\s*q = input\.x;\n\s*_tv1 = q;\n\s*\}\n\s*output\.fragColor = _tv1;/
-          : /float _tv1;\n\s*\{\n\s*float q;\n\s*q = x;\n\s*_tv1 = q;\n\s*\}\n\s*fragColor = _tv1;/
+        /float _tv1;\n\s*\{\n\s*float q;\n\s*q = x;\n\s*_tv1 = q;\n\s*\}\n\s*fragColor = _tv1;/
       );
     }
   });
@@ -5814,52 +5727,25 @@ describe('the expression-only GPU routes decline statement bodies', () => {
       const bare = shaderFor(target, EXPR, engineWithX());
       const wrapped = shaderFor(target, WRAPPED, engineWithX());
       expect(wrapped).toBe(bare);
-      expect(bare).toContain(
-        target instanceof WGSLTarget
-          ? '  output.fragColor = input.x + 1.0;\n'
-          : '  fragColor = x + 1.0;\n'
-      );
+      expect(bare).toContain('  fragColor = x + 1.0;\n');
     }
   });
 
-  it('WGSL declines an assignment body on both routes', () => {
-    // A `Block` nests too: the base compiler unwraps a single-statement block
-    // to its statement, so the check follows the block's value statement down.
-    const NESTED: MathJsonExpression = ['Block', ASSIGN_ONLY];
-    const wgsl = new WGSLTarget();
-
-    for (const body of [
-      ASSIGN_ONLY,
-      NESTED,
-      ['Assign', 's', 'x'] as MathJsonExpression,
-    ])
-      expect(() => wgsl.compileToSource(engineWithX().box(body))).toThrow(
-        /Could not compile with `compileToSource\(\)`: this route emits a single WGSL EXPRESSION, but the body is an assignment/
-      );
-
-    expect(() => wgsl.compileToSource(engineWithX().box(ASSIGN_ONLY))).toThrow(
-      /WGSL assignment is a STATEMENT \(unlike GLSL, where it is an operator\)/
-    );
-    expect(() => shaderFor(wgsl, ASSIGN_ONLY, engineWithX())).toThrow(
-      /Could not compile the body statement "output\.fragColor" of `compileShader\(\)`: this route emits a single WGSL EXPRESSION, but the body is an assignment/
-    );
-  });
-
-  it('both languages decline a bare-`Declare` body, whose initializer was dropped', () => {
-    // Before the gate: `compileToSource` returned `"float s"` / `"var s: f32"`
+  it('GLSL declines a bare-`Declare` body, whose initializer was dropped', () => {
+    // Before the gate: `compileToSource` returned `"float s"`
     // and `compileShader` emitted `fragColor = float s;` — a statement in an
     // expression position, with the initializer `x` nowhere in the output.
     const NESTED: MathJsonExpression = ['Block', DECLARE_ONLY];
     for (const target of gpuTargets())
       for (const body of [DECLARE_ONLY, NESTED]) {
         expect(() => target.compileToSource(engineWithX().box(body))).toThrow(
-          /Could not compile with `compileToSource\(\)`: this route emits a single (GLSL|WGSL) EXPRESSION, but the body is a declaration/
+          /Could not compile with `compileToSource\(\)`: this route emits a single GLSL EXPRESSION, but the body is a declaration/
         );
         expect(() => target.compileToSource(engineWithX().box(body))).toThrow(
           /carries no initializer, so the declared value would be silently DROPPED/
         );
         expect(() => shaderFor(target, body, engineWithX())).toThrow(
-          /Could not compile the body statement "(fragColor|output\.fragColor)" of `compileShader\(\)`: this route emits a single (GLSL|WGSL) EXPRESSION, but the body is a declaration/
+          /Could not compile the body statement "fragColor" of `compileShader\(\)`: this route emits a single GLSL EXPRESSION, but the body is a declaration/
         );
       }
     // A declaration with no value is a static error.
@@ -5901,16 +5787,12 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     for (const target of gpuTargets()) {
       const r = target.compile(engineWithX().box(ASSIGN_THEN_VALUE));
       expect(r.success).toBe(true);
-      expect(r.code).toBe(
-        target instanceof WGSLTarget
-          ? 'var s: f32;\ns = x;\nreturn s;'
-          : 'float s;\ns = x;\nreturn s;'
-      );
+      expect(r.code).toBe('float s;\ns = x;\nreturn s;');
     }
     // A body whose value is an assignment or a declaration declines: the
     // value is `Nothing`.
     expect(() =>
-      new WGSLTarget().compile(engineWithX().box(ASSIGN_ONLY))
+      new GLSLTarget().compile(engineWithX().box(ASSIGN_ONLY))
     ).toThrow(VALUE_USED);
     for (const target of gpuTargets())
       expect(() => target.compile(engineWithX().box(DECLARE_ONLY))).toThrow(
@@ -5941,81 +5823,28 @@ describe('the expression-only GPU routes decline statement bodies', () => {
   // `compileFunction()` — the route every message above points at — had the
   // same defect one level down, in BOTH its branches: the single-line one
   // wraps the body in `return`, the multi-line one relies on the block hook
-  // having placed one on the last line. Neither an assignment (WGSL) nor a
-  // declaration (both languages) has that emission — GLSL keeps the
-  // assignment, since assignment is an operator there.
+  // having placed one on the last line. A declaration has no such emission;
+  // GLSL keeps the assignment, since assignment is an operator there.
   it('compileFunction() declines a statement body in either branch', () => {
-    // Declaration: declined on BOTH languages, single-line branch — emitted
-    // `return float s;` / `return var s: f32;` before, dropping `x`.
+    // Declaration: declined, single-line branch — emitted `return float s;`
+    // before, dropping `x`.
     for (const target of gpuTargets()) {
-      const lang = target instanceof WGSLTarget ? 'WGSL' : 'GLSL';
       expect(() =>
         target.compileFunction(engineWithX().box(DECLARE_ONLY), 'f', 'float', [
           ['x', 'float'],
         ])
       ).toThrow(
         new RegExp(
-          `Could not compile with \`compileFunction\\(\\)\`: this route emits a single ${lang} EXPRESSION, but the body is a declaration`
+          `Could not compile with \`compileFunction\\(\\)\`: this route emits a single GLSL EXPRESSION, but the body is a declaration`
         )
       );
     }
-
-    const wgsl = new WGSLTarget();
-    // Assignment: declined on WGSL only, single-line branch — emitted
-    // `return s = x;` before.
-    expect(() =>
-      wgsl.compileFunction(
-        engineWithX().box(['Assign', 's', 'x']),
-        'f',
-        'float',
-        [['x', 'float']]
-      )
-    ).toThrow(
-      /Could not compile with `compileFunction\(\)`: this route emits a single WGSL EXPRESSION, but the body is an assignment/
-    );
-    // A block whose last statement is an assignment has the value
-    // `Nothing`: the function body declines, with one statement or more.
-    expect(() =>
-      wgsl.compileFunction(engineWithX().box(ASSIGN_ONLY), 'f', 'float', [
-        ['x', 'float'],
-      ])
-    ).toThrow(VALUE_USED);
-    expect(() =>
-      wgsl.compileFunction(
-        engineWithX().box([
-          'Block',
-          ['Assign', 's', 'x'],
-          ['Assign', 't', 's'],
-        ]),
-        'f',
-        'float',
-        [['x', 'float']]
-      )
-    ).toThrow(VALUE_USED);
   });
 
-  it('WGSL compileFunction() declines an assignment to a parameter', () => {
-    // A WGSL function parameter is an immutable value, so `x = x + 1.0;` in
-    // `fn f(x: f32)` is not valid source.
-    for (const body of [
-      ['Block', ['Assign', 'x', ['Add', 'x', 1]], ['Multiply', 2, 'x']],
-      ['Block', ['Assign', 'x', ['Add', 'x', 1]], ['Assign', 't', 'x']],
-    ] as MathJsonExpression[])
-      expect(() =>
-        new WGSLTarget().compileFunction(
-          engineWithX().box(body),
-          'f',
-          'float',
-          [['x', 'float']]
-        )
-      ).toThrow(/the body assigns the parameter "x"/);
-  });
-
-  it('WGSL compile() declines a user function that assigns its parameter', () => {
+  it('GLSL compile() keeps a user function that assigns its parameter', () => {
     // The shader `userFunctions` route emits `h` as its own declaration,
-    // `fn _fn_h(x: f32)`, whose body assigned the immutable parameter
-    // (`x = x + 1.0;`). GLSL passes a parameter as a writable copy, so it
-    // keeps the definition.
+    // whose body assigns the parameter (`x = x + 1.0;`). GLSL passes a
+    // parameter as a writable copy, so it keeps the definition.
     const engine = new ComputeEngine();
     engine.declare('h', '(real) -> real');
     engine.assign(
@@ -6025,9 +5854,6 @@ describe('the expression-only GPU routes decline statement bodies', () => {
         ['Block', ['Assign', 'x', ['Add', 'x', 1]], 'x'],
         'x',
       ])
-    );
-    expect(() => new WGSLTarget().compile(engine.parse('h(u)'))).toThrow(
-      /Could not compile `_fn_h`: the body assigns the parameter "x"/
     );
     expect(new GLSLTarget().compile(engine.parse('h(u)')).preamble).toContain(
       'x = x + 1.0;'
@@ -6413,7 +6239,6 @@ describe('COMPILE Apply maps a tuple at a parameter declared as a scalar (a numb
         if (arg !== 'P') {
           expect(interval.success).toBe(true);
           new GLSLTarget().compile(expr);
-          new WGSLTarget().compile(expr);
         }
         const run = interval.success
           ? intervalMidpoints(interval.run!(TUPLE_VALUES as never))
@@ -6613,10 +6438,8 @@ describe('COMPILE a call of a named function maps a tuple at a parameter declare
         const interval = new IntervalJavaScriptTarget().compile(expr);
         if (arg !== 'P') {
           expect(interval.success).toBe(true);
-          for (const target of [new GLSLTarget(), new WGSLTarget()])
-            expect(target.compile(expr).code).toMatch(
-              /^(vec2f?|vec2\[2\]|array<vec2f, 2>)\(/
-            );
+          for (const target of [new GLSLTarget()])
+            expect(target.compile(expr).code).toMatch(/^(vec2|vec2\[2\])\(/);
         }
         const run = interval.success
           ? intervalMidpoints(interval.run!(TUPLE_VALUES as never))
@@ -7136,7 +6959,7 @@ describe('COMPILE a call of a block local or a parameter with a library name', (
       // "Function values").
       const reason =
         /the argument `\(t\) => t \+ 1` is a function, and compiled code does not pass a function value through a parameter/;
-      for (const to of ['javascript', 'glsl', 'wgsl', 'python'] as const)
+      for (const to of ['javascript', 'glsl', 'python'] as const)
         expect(() =>
           compile(engine().box(param), { to, fallback: false })
         ).toThrow(reason);

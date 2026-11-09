@@ -55,13 +55,12 @@ export function isPointListSource(e: Expression): boolean {
  *
  * The emitted width is the shortest source length (statically evaluated
  * shortest-zip); a longer source is swizzle-truncated (`(v).xy`), a scalar slot
- * broadcasts as `vecW(slot)` (`vecWf` on WGSL).
+ * broadcasts as `vecW(slot)`.
  */
 function compilePointListProjection(
   arg: Expression,
   k: number,
-  compile: (e: Expression) => string,
-  target: CompileTarget<Expression>
+  compile: (e: Expression) => string
 ): string | { decline: string } {
   if (!isFunction(arg, 'PointList'))
     return {
@@ -122,7 +121,7 @@ function compilePointListProjection(
 
   const slot = ops[k];
   if (!isPointListSource(slot)) {
-    const ctor = target.language === 'wgsl' ? `vec${width}f` : `vec${width}`;
+    const ctor = `vec${width}`;
     return `${ctor}(${compile(slot)})`;
   }
   const n = BaseCompiler.aggregateComponentCount(slot)!;
@@ -289,7 +288,7 @@ export function compilePointSwizzle(
       : undefined;
 
   if (pointArity === undefined && arg.type.matches('indexed_collection<any>')) {
-    const projected = compilePointListProjection(arg, idx, compile, target);
+    const projected = compilePointListProjection(arg, idx, compile);
     if (typeof projected === 'string') return projected;
     throw new Error(
       `Could not compile \`Point${comp.toUpperCase()}\`: a list of points has no GPU lowering ` +
@@ -322,11 +321,11 @@ export function compilePointSwizzle(
 export function gpuSwizzle(code: string, sw: string): string {
   const s = code.trim();
   // An absent operand (`Missing`) compiles to the SCALAR NaN of
-  // the target (`_gpu_nan()`, on both targets). A scalar has no components:
-  // WGSL rejects `.x` on an `f32`, and GLSL before 4.20 rejects it on a
+  // the target (`_gpu_nan()`). A scalar has no components:
+  // GLSL before 4.20 rejects `.x` on a
   // `float`. Every coordinate of an absent point is NaN, so one component of
   // that NaN is the NaN itself, and several components are a vector of it.
-  // `vecN(x)` is a splat in both languages (WGSL infers the element type).
+  // `vecN(x)` is a splat.
   if (s === gpuNonFiniteLiteral(NaN)) {
     if (sw.length === 1) return s;
     return `vec${sw.length}(${s})`;

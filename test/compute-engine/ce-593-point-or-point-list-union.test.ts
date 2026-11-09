@@ -14,9 +14,6 @@
  *    `P`), and the value is a point, `P.x` is the `.x` of that `vec2`.
  *    Otherwise the compilation declines with a message that names `P`, its
  *    type and the declaration to write.
- * 3. `compileFieldFunction()` reads each parameter from the buffer, whatever
- *    its value, and a buffer field has one fixed type: such a parameter
- *    declines, with the same remedy.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -25,7 +22,6 @@ import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { rewriteAngularUnit } from '../../src/compute-engine/symbolic/angular-unit';
 import { isFunction } from '../../src/compute-engine/boxed-expression/type-guards';
 import type { Expression } from '../../src/compute-engine';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const UNION = 'list<tuple<number, number>> | tuple<number, number>';
 
@@ -41,7 +37,7 @@ function engine(value?: unknown): ComputeEngine {
 function compileError(
   ce: ComputeEngine,
   src: string,
-  to: 'glsl' | 'wgsl',
+  to: 'glsl',
   vars?: Record<string, string>
 ): string {
   try {
@@ -117,10 +113,7 @@ describe('CE-593: the javascript target', () => {
 describe('CE-593: the shader targets read the assigned point', () => {
   // The compilation writes the point value in place of `P` before it
   // starts, so `P` compiles as the tuple `(1, 2)` does.
-  test.each([
-    ['glsl', 'y + 1.0'],
-    ['wgsl', 'y + 1.0'],
-  ] as const)('%s', (to, code) => {
+  test.each([['glsl', 'y + 1.0']] as const)('%s', (to, code) => {
     const ce = engine(['Tuple', 1, 2]);
     const r = compile(ce.parse('P.x + y'), { to, fallback: false });
     expect(r.success).toBe(true);
@@ -141,18 +134,11 @@ describe('CE-593: the shader targets read the assigned point', () => {
     // `x` has no declared range: `2x` can overflow f32, so the NaN-safe
     // helper (CE-619.2).
     ['glsl', '\\sin(xP)', '_gpu_sin2(x * vec2(1.0, 2.0))'],
-    ['wgsl', '\\sin(xP)', '_gpu_sin2(x * vec2f(1.0, 2.0))'],
     ['glsl', '2P', 'vec2(2.0, 4.0)'],
     [
       'glsl',
       '\\operatorname{distance}((x,y),P)',
       'distance(vec2(x, y), vec2(1.0, 2.0))',
-    ],
-    ['wgsl', 'P + (y, y)', 'vec2f(y, y) + vec2f(1.0, 2.0)'],
-    [
-      'wgsl',
-      '\\operatorname{distance}((x,y),P)',
-      'distance(vec2f(x, y), vec2f(1.0, 2.0))',
     ],
   ] as const)('%s: %s', (to, src, code) => {
     const ce = engine(['Tuple', 1, 2]);
@@ -161,7 +147,7 @@ describe('CE-593: the shader targets read the assigned point', () => {
     expect(r.code).toBe(code);
   });
 
-  test.each(['glsl', 'wgsl'] as const)('%s: Norm and Dot', (to) => {
+  test.each(['glsl'] as const)('%s: Norm and Dot', (to) => {
     const ce = engine(['Tuple', 1, 2]);
     for (const json of [
       ['Norm', 'P'],
@@ -192,18 +178,15 @@ describe('CE-593: the shader targets decline when the value is not used', () => 
     'assign a point to "P" and do not map it with `vars`, so that the ' +
     'shader uses its value.';
 
-  test.each(['glsl', 'wgsl'] as const)('%s: no value', (to) => {
+  test.each(['glsl'] as const)('%s: no value', (to) => {
     expect(compileError(engine(), 'P.x + y', to)).toBe(MESSAGE);
   });
 
-  test.each(['glsl', 'wgsl'] as const)(
-    '%s: a value, and a vars entry for P',
-    (to) => {
-      expect(
-        compileError(engine(['Tuple', 1, 2]), 'P.x + y', to, { P: 'P' })
-      ).toBe(MESSAGE);
-    }
-  );
+  test.each(['glsl'] as const)('%s: a value, and a vars entry for P', (to) => {
+    expect(
+      compileError(engine(['Tuple', 1, 2]), 'P.x + y', to, { P: 'P' })
+    ).toBe(MESSAGE);
+  });
 
   // A read of `P` as a shader input declines with the same message, with
   // `P` as the head: a bare `P`, and every whole-vector use of it.
@@ -216,7 +199,7 @@ describe('CE-593: the shader targets decline when the value is not used', () => 
     '\\operatorname{distance}((x,y),P)',
   ];
 
-  test.each(['glsl', 'wgsl'] as const)('%s: P as an input', (to) => {
+  test.each(['glsl'] as const)('%s: P as an input', (to) => {
     for (const src of WHOLE) {
       expect(compileError(engine(), src, to)).toBe(INPUT_MESSAGE);
       expect(compileError(engine(['Tuple', 1, 2]), src, to, { P: 'P' })).toBe(
@@ -235,45 +218,6 @@ describe('CE-593: the shader targets decline when the value is not used', () => 
   });
 });
 
-describe('CE-593: compileFieldFunction() declines the parameter', () => {
-  const MESSAGE_START =
-    'Could not compile with `compileFieldFunction()`: the parameter "P" has ' +
-    'the type `list<tuple<number, number>> | tuple<number, number>`, which ' +
-    'admits a point and a list of points, and a field of the parameter ' +
-    'struct has one fixed type. Declare "P" as a point (`ce.declare(\'P\', ' +
-    "'tuple<real, real>')`).";
-
-  test.each([
-    ['with an assigned point', ['Tuple', 1, 2]],
-    ['with no value', undefined],
-  ])('%s', (_, value) => {
-    const ce = engine(value);
-    for (const src of ['P.x + y', 'P_1 + y']) {
-      const r = new WGSLTarget().compileFieldFunction(ce.parse(src), {
-        name: 'f',
-        coordinates: ['x', 'y'],
-      });
-      expect(r.success).toBe(false);
-      expect(r.diagnostic?.code).toBe('unsupported-parameter');
-      expect(r.diagnostic?.binding).toBe('P');
-      expect(r.diagnostic?.message.startsWith(MESSAGE_START)).toBe(true);
-    }
-  });
-
-  test('a parameter declared as a point compiles', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('y', 'real');
-    ce.declare('P', 'tuple<real, real>');
-    const r = new WGSLTarget().compileFieldFunction(ce.parse('P.x + y'), {
-      name: 'f',
-      coordinates: ['x', 'y'],
-    });
-    expect(r.success).toBe(true);
-    expect(r.function).toContain('ce_params.P.x');
-  });
-});
-
 describe('CE-593: user functions and locals read the point', () => {
   // The signature of `f(t) := t·P` returns the union, because it was
   // derived from the stored body. A call of `f` is replaced by its body with
@@ -288,15 +232,6 @@ describe('CE-593: user functions and locals read the point', () => {
         '(x * vec2(1.0, 2.0)).x',
         'x * vec2(1.0, 2.0) + vec2(y, y)',
         'distance(x * vec2(1.0, 2.0), vec2(x, y))',
-      ],
-    ],
-    [
-      'wgsl',
-      [
-        'x * vec2f(1.0, 2.0)',
-        '(x * vec2f(1.0, 2.0)).x',
-        'x * vec2f(1.0, 2.0) + vec2f(y, y)',
-        'distance(x * vec2f(1.0, 2.0), vec2f(x, y))',
       ],
     ],
   ] as const)('%s: calls of a user function', (to, codes) => {
@@ -325,10 +260,6 @@ describe('CE-593: user functions and locals read the point', () => {
       'glsl',
       'float _fn_k(float s) {\n  return (s * vec2(1.0, 2.0)).x + 1.0;\n}\n',
     ],
-    [
-      'wgsl',
-      'fn _fn_k(s: f32) -> f32 {\n  return (s * vec2f(1.0, 2.0)).x + 1.0;\n}\n',
-    ],
   ] as const)('%s: a shader function that calls f', (to, preamble) => {
     const ce = engine(['Tuple', 1, 2]);
     ce.parse('f(t) := t P').evaluate();
@@ -340,7 +271,6 @@ describe('CE-593: user functions and locals read the point', () => {
 
   test.each([
     ['glsl', 'vec2 a;\na = x * vec2(1.0, 2.0);\nreturn a.x;'],
-    ['wgsl', 'var a: vec2f;\na = x * vec2f(1.0, 2.0);\nreturn a.x;'],
   ] as const)('%s: a Block local holding f(x)', (to, code) => {
     const ce = engine(['Tuple', 1, 2]);
     ce.parse('f(t) := t P').evaluate();
@@ -351,7 +281,7 @@ describe('CE-593: user functions and locals read the point', () => {
     expect(r.code).toBe(code);
   });
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s: a function that returns a list of points declines',
     (to) => {
       const ce = engine(['Tuple', 1, 2]);
@@ -371,7 +301,7 @@ describe('CE-593: user functions and locals read the point', () => {
 
   // The value dependency is recorded as for a symbol declared as a point:
   // the same `symbolDeps` capture set, on every target.
-  test.each(['glsl', 'wgsl'] as const)('%s: the capture set', (to) => {
+  test.each(['glsl'] as const)('%s: the capture set', (to) => {
     const deps = (decl: string): string[] => {
       const ce = new ComputeEngine();
       ce.declare('y', 'real');
@@ -389,11 +319,6 @@ describe('CE-593: user functions and locals read the point', () => {
       'glsl',
       'vec2 a;\na = vec2(2.0, 4.0);\nreturn a;',
       'vec2 a;\na = x * vec2(1.0, 2.0);\nreturn a.x;',
-    ],
-    [
-      'wgsl',
-      'var a: vec2f;\na = vec2f(2.0, 4.0);\nreturn a;',
-      'var a: vec2f;\na = x * vec2f(1.0, 2.0);\nreturn a.x;',
     ],
   ] as const)('%s: a Block local', (to, whole, coordinate) => {
     const ce = engine(['Tuple', 1, 2]);
@@ -420,7 +345,7 @@ describe('CE-593: user functions and locals read the point', () => {
   // number once the point is in place. Before, `f(x) + x` declined with
   // "Could not compile an object-domain absent ('missing') position".
   // (Tycho ledger row 479.)
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s: a call that returns a coordinate of P',
     (to) => {
       const ce = engine(['Tuple', 3, 4]);
@@ -438,7 +363,7 @@ describe('CE-593: user functions and locals read the point', () => {
 
   // A number body whose type is a range (`Square(3)` is an integer from 0
   // up) or the type of a ranged coordinate (`u: real<0..1>`) is kept too.
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s: a call whose body has a ranged number type',
     (to) => {
       const ce = engine(['Tuple', 3, 4]);
@@ -468,7 +393,7 @@ describe('CE-593: user functions and locals read the point', () => {
   // A body that stays a union after the substitution keeps the call as
   // written, and the compilation declines as before: with a list of points
   // in `P`, `At(P, 1)` is not written in place.
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s: a call over a list of points still declines',
     (to) => {
       const ce = engine(['List', ['Tuple', 3, 4], ['Tuple', 5, 6]]);
@@ -492,7 +417,7 @@ describe('CE-593: user functions and locals read the point', () => {
 describe('CE-593: only the union is read through its value', () => {
   // A symbol of another type keeps the reading of its declared type: a
   // `list<real>` of no stated length is not a point, whatever its value.
-  test.each(['glsl', 'wgsl'] as const)('%s: P: list<real>', (to) => {
+  test.each(['glsl'] as const)('%s: P: list<real>', (to) => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     ce.declare('y', 'real');
@@ -528,7 +453,7 @@ describe('CE-593: a tuple value under an indexed_collection option', () => {
 describe('CE-593: the rewrites keep the other compile contracts', () => {
   // A head that the caller overrides keeps the caller's implementation: its
   // call is not replaced by the engine's body.
-  test.each(['glsl', 'wgsl'] as const)('%s: a functions override', (to) => {
+  test.each(['glsl'] as const)('%s: a functions override', (to) => {
     const ce = engine(['Tuple', 1, 2]);
     ce.parse('f(t) := t P').evaluate();
     const r = compile(ce.parse('f(x)'), {
@@ -549,11 +474,6 @@ describe('CE-593: the rewrites keep the other compile contracts', () => {
       'glsl',
       'vec2(sin(0.017453292 * x), 0.0).x',
       '(x * vec2(sin(0.017453292 * x), 0.0)).x',
-    ],
-    [
-      'wgsl',
-      'vec2f(sin(0.017453292 * x), 0.0).x',
-      '(x * vec2f(sin(0.017453292 * x), 0.0)).x',
     ],
   ] as const)('%s: degree mode', (to, coordinate, call) => {
     const ce = new ComputeEngine();
@@ -576,7 +496,7 @@ describe('CE-593: the rewrites keep the other compile contracts', () => {
   // CONSTANT shared graph during the shader lowering takes a time
   // exponential in its depth whatever the type of `P` (see the report of
   // CE-593), which is not what this test measures.
-  test.each(['glsl', 'wgsl'] as const)('%s: a shared graph', (to) => {
+  test.each(['glsl'] as const)('%s: a shared graph', (to) => {
     const ce = engine(['Tuple', 1, 2]);
     let e = ce.box(['Add', ['PointX', 'P'], 'x']);
     for (let i = 0; i < 20; i++)
@@ -674,7 +594,7 @@ describe('CE-593: an impure argument is not substituted', () => {
   // wrote `r`, and its draw, at each occurrence of the parameter: two draws
   // instead of one. The call stays a call, which has the union type, and
   // the compilation declines.
-  test.each(['glsl', 'wgsl'] as const)('%s', (to) => {
+  test.each(['glsl'] as const)('%s', (to) => {
     const ce = engine(['Tuple', 1, 2]);
     ce.parse('f(t) := (t - t^2) P').evaluate();
     ce.declare('r', 'real');
@@ -726,7 +646,7 @@ describe('CE-593: the inlining reads the scope of the definition', () => {
     return ce;
   }
 
-  test.each(['glsl', 'wgsl'] as const)('%s: compile()', (to) => {
+  test.each(['glsl'] as const)('%s: compile()', (to) => {
     const ce = scoped();
     expect(ce.parse('f(x).x').subs({ x: 2 }).evaluate().re).toBe(2);
     expect(compileError(ce, 'f(x).x', to)).toMatch(
@@ -774,7 +694,7 @@ describe('CE-593: the substituted value is checked', () => {
   // the definition of a 2-D `P` is refused where `P` is read
   // (`compileSymbol`); the substitution of the value removed `P` first and
   // compiled `1.0`.
-  test.each(['glsl', 'wgsl'] as const)('%s: a value of another type', (to) => {
+  test.each(['glsl'] as const)('%s: a value of another type', (to) => {
     const ce = engine(['Tuple', 1, 2]);
     (ce.lookupDefinition('P') as any).value.value = ce.box(['Tuple', 1, 2, 3]);
     expect(compileError(ce, 'P.x', to)).toMatch(

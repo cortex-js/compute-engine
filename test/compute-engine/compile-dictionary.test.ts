@@ -6,7 +6,7 @@
 // value, in the run-time form that the host supplies for an input of type
 // `dictionary`: a plain object in JavaScript, a `dict` in Python. A value
 // whose type is `unknown` declines, and so does a dictionary on a target that
-// has no dictionary value (interval-js, GLSL, WGSL).
+// has no dictionary value (interval-js, GLSL).
 
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
@@ -370,9 +370,9 @@ describe('COMPILE A DICTIONARY: PYTHON', () => {
 });
 
 describe('COMPILE A DICTIONARY: TARGETS WITH NO DICTIONARY VALUE', () => {
-  test('GLSL, WGSL and interval-js decline with a reason', () => {
+  test('GLSL and interval-js decline with a reason', () => {
     for (const expr of [['Dictionary'], MIXED]) {
-      for (const to of ['glsl', 'wgsl']) {
+      for (const to of ['glsl']) {
         expect(() => compiled(expr, to)).toThrow(
           /the target has no dictionary value/
         );

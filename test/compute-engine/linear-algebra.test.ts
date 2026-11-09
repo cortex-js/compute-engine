@@ -4844,7 +4844,7 @@ describe('Norm — the string order "Infinity" compiles as the symbol order', ()
         return (err as Error).message;
       }
     };
-    for (const to of ['glsl', 'wgsl', 'interval-js']) {
+    for (const to of ['glsl', 'interval-js']) {
       const symbol = message(to, 'PositiveInfinity');
       expect(symbol).toMatch(/only the default L2 norm compiles/);
       expect(message(to, { str: 'Infinity' })).toBe(symbol);

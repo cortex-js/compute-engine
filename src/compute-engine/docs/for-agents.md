@@ -254,7 +254,7 @@ canceled; // ➔ true
 | :--- | :--- |
 | `@cortex-js/compute-engine` | everything: `ComputeEngine`, LaTeX parsing and serialization, free functions, compilation, type guards |
 | `@cortex-js/compute-engine/core` | the engine and type guards, without LaTeX parsing or compilation |
-| `@cortex-js/compute-engine/compile` | compilation targets (JavaScript, GLSL, WGSL, Python, interval arithmetic) |
+| `@cortex-js/compute-engine/compile` | compilation targets (JavaScript, GLSL, Python, interval arithmetic) |
 | `@cortex-js/compute-engine/math-json` | MathJSON types and utilities only |
 | `@cortex-js/compute-engine/epsil` | `executeEpsil()` to run [Epsil](/epsil/) programs |
 

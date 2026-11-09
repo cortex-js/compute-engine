@@ -39,8 +39,8 @@ interface GpuLibraryDefinition {
 const GPU_LIBRARY_DEFINITIONS = new Map<string, GpuLibraryDefinition[]>();
 
 /**
- * The head of a top-level function definition, anchored at column 0 — `fn
- * _gpu_x(` in WGSL, `vec3 _gpu_x(` or `float _gpu_x(` in GLSL, with an
+ * The head of a top-level function definition, anchored at column 0 —
+ * `vec3 _gpu_x(` or `float _gpu_x(`, with an
  * optional precision qualifier (`highp float _gpu_x(`). Every definition in
  * these library strings starts in column 0 and everything inside a body is
  * indented, so the anchor is what tells a declaration apart from a local
@@ -90,7 +90,7 @@ function gpuLibraryDefinitions(library: string): GpuLibraryDefinition[] {
       name = undefined;
     }
   }
-  // A definition can only call one declared BEFORE it: both languages require
+  // A definition can only call one declared BEFORE it: GLSL requires
   // a declaration to precede its use, so a library string is written in
   // dependency order and the search is over the earlier entries alone.
   for (let i = 0; i < defs.length; i++)
@@ -111,7 +111,7 @@ function gpuLibraryDefinitions(library: string): GpuLibraryDefinition[] {
  * (Measured by the Tycho code-generation audit of 2026-09-08.)
  *
  * The pass runs BACKWARD because a library's source order is already its
- * dependency order: both languages require a function to be declared before
+ * dependency order: GLSL requires a function to be declared before
  * it is called, so a definition can only be called by a LATER one. One
  * backward sweep therefore closes the set, and emitting the survivors in
  * source order keeps the declaration-before-use property.
@@ -145,7 +145,7 @@ export function gpuLibrarySubset(code: string, library: string): string {
  * so is an impure step, which both forms splice twice.
  *
  * A constant step is folded. A constant zero step fails closed: the result
- * is `NaN`, and neither language has a `NaN` literal.
+ * is `NaN`, and GLSL has no `NaN` literal.
  */
 export function gpuRoundToStep(
   round: string | ((q: string, isScalar: boolean) => string),
@@ -193,12 +193,10 @@ export function gpuRoundToStep(
         `scalar or a vector.`
     );
   // A `vecN` operand: the same computation, componentwise. A choice between
-  // two vectors is a SELECTION (`select` in WGSL, `mix` with a boolean
-  // vector in GLSL), never the arithmetic `mix(a, b, t)`, which gives `NaN`
-  // when the other branch is infinite. Both sides of a comparison are
-  // vectors: WGSL has no comparison of a vector with a scalar.
-  const isWGSL = target.language === 'wgsl';
-  const vt = gpuVecType(width, isWGSL);
+  // two vectors is a SELECTION (`mix` with a boolean vector), never the
+  // arithmetic `mix(a, b, t)`, which gives `NaN` when the other branch is
+  // infinite. Both sides of a comparison are vectors.
+  const vt = gpuVecType(width);
   const choose = (
     a: string,
     b: string,
@@ -206,7 +204,6 @@ export function gpuRoundToStep(
     op: '<=' | '>' | '==',
     r: string
   ): string => {
-    if (isWGSL) return `select(${a}, ${b}, ${l} ${op} ${r})`;
     const fn = { '<=': 'lessThanEqual', '>': 'greaterThan', '==': 'equal' }[op];
     return `mix(${a}, ${b}, ${fn}(${l}, ${r}))`;
   };
@@ -217,23 +214,18 @@ export function gpuRoundToStep(
   const bind = (value: string, type: string): string => {
     if (!hoist || /^[A-Za-z_]\w*$/.test(value)) return value;
     const t = BaseCompiler.tempVar(target);
-    BaseCompiler.hoistStatement(
-      target,
-      isWGSL ? `var ${t}: ${type} = ${value};` : `${type} ${t} = ${value};`
-    );
+    BaseCompiler.hoistStatement(target, `${type} ${t} = ${value};`);
     return t;
   };
   const xv = bind(gpuOperandOnce(name, x, compile, target), vt);
-  const kv = c !== undefined ? k : bind(k, gpuScalarType(isWGSL));
+  const kv = c !== undefined ? k : bind(k, gpuScalarType());
   const q0 = bind(`(${xv} / ${kv})`, vt);
   // The smallest normal float of the sign of `x`, for a quotient that
   // underflows: `0` for an infinite step, whose quotient is truly `0`.
   const tiny =
     c !== undefined
       ? '1.17549435e-38'
-      : isWGSL
-        ? `select(0.0, 1.17549435e-38, ${kv} < 3.4e38)`
-        : `(${kv} < 3.4e38 ? 1.17549435e-38 : 0.0)`;
+      : `(${kv} < 3.4e38 ? 1.17549435e-38 : 0.0)`;
   const q = bind(
     choose(q0, `(sign(${xv}) * ${tiny})`, q0, '==', `${vt}(0.0)`),
     vt
@@ -258,9 +250,9 @@ export function gpuRoundToStep(
  * The shader code that rounds `c` to an integer, with a value halfway between
  * two integers rounded with the rule `ties` (see `RoundingTies`).
  *
- * Neither language's own `round()` can be used for a rule other than
- * `to-even`: both round a tie to the EVEN neighbour (GLSL leaves the choice
- * to the implementation; its `roundEven()` is defined to round to even).
+ * The GLSL `round()` cannot be used for a rule other than `to-even`: GLSL
+ * leaves the rounding of a tie to the implementation, and its `roundEven()`
+ * is defined to round to even.
  *
  * A SCALAR operand (`isScalar`) goes through a preamble helper
  * (`GPU_ROUND_PREAMBLE_GLSL`), which writes the operand once. A `vecN`
@@ -275,10 +267,9 @@ export function gpuRoundToStep(
 export function gpuRoundToInteger(
   c: string,
   ties: RoundingTies,
-  isScalar: boolean,
-  isWGSL: boolean
+  isScalar: boolean
 ): string {
-  if (ties === 'to-even') return isWGSL ? `round(${c})` : `roundEven(${c})`;
+  if (ties === 'to-even') return `roundEven(${c})`;
   if (isScalar) {
     const helper = {
       'away-from-zero': '_gpu_round',
@@ -313,12 +304,11 @@ export function gpuRoundToInteger(
  * The scalar `_gpu_powi` is declared with `float`/`f32` parameters, so a
  * vector base has no lowering through it and the operand-shape gate declines
  * the call. The widened bodies are the same computation over the genType:
- * `pow` and `abs` are componentwise in both languages, and the exponent stays
+ * `pow` and `abs` are componentwise in GLSL, and the exponent stays
  * a SCALAR at every call site (the operand-shape gate declines a vector
  * exponent), so both `if` conditions remain the scalar `bool` a shader
  * requires. As in the scalar helper, `n` may be NEGATIVE and the parity test
- * is taken on `abs(n)`: GLSL `mod` is floored and WGSL `%` is truncated, so a
- * bare `n` would miss the odd branch on WGSL.
+ * is taken on `abs(n)`, as in the scalar helper.
  *
  * The per-component sign is restored by multiplying `r` with `-1` where
  * `x < 0` and with `1` elsewhere, because a vector has no single sign to
@@ -327,24 +317,11 @@ export function gpuRoundToInteger(
  * `sign(0) * ∞` is `0 · ∞ = NaN`, where the scalar helper answers `+∞`
  * (CE-243).
  *
- * The name carries the width because WGSL has no function overloading; GLSL
- * would accept one name for all four declarations, but one spelling serves
- * both languages.
+ * The name carries the width; GLSL would accept one name for all four
+ * declarations.
  */
-export function gpuPowiVecPreamble(n: number, isWGSL: boolean): string {
-  const v = gpuVecType(n, isWGSL);
-  if (isWGSL)
-    return `
-fn _gpu_powi${n}(x: ${v}, n: f32) -> ${v} {
-  if (n == 0.0) { return ${v}(1.0); }
-  if (n == 2.0) { return x * x; }
-  if (n == 3.0) { return x * x * x; }
-  if (n == 4.0) { let s = x * x; return s * s; }
-  let r = pow(abs(x), ${v}(n));
-  if ((abs(n) % 2.0) == 1.0) { return select(${v}(1.0), ${v}(-1.0), x < ${v}(0.0)) * r; }
-  return r;
-}
-`;
+export function gpuPowiVecPreamble(n: number): string {
+  const v = gpuVecType(n);
   return `
 ${v} _gpu_powi${n}(${v} x, float n) {
   if (n == 0.0) return ${v}(1.0);

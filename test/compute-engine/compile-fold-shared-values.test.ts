@@ -268,7 +268,7 @@ describe('COMPILE: folded symbol values are bound once', () => {
     ce.assign('a', ce.parse('3t + 1'));
     ce.assign('g', ce.parse('(t) \\mapsto t + a'));
     expect(ce.parse('g(2)').evaluate().toString()).toBe('3t + 3');
-    for (const to of ['glsl', 'wgsl'] as const) {
+    for (const to of ['glsl'] as const) {
       expect(() => compile(ce.parse('g(2)'), { to, fallback: false })).toThrow(
         /mentions `t`/s
       );

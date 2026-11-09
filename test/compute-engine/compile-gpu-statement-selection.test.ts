@@ -1,7 +1,7 @@
 /**
  * A shader conditional whose arm needs statements is emitted as a STATEMENT.
  *
- * A GLSL ternary and a WGSL `select` are expressions, so an arm has no
+ * A GLSL ternary is an expression, so an arm has no
  * statement position: a loop-form `Sum` in an arm could only be hoisted
  * ahead of the conditional, where it would run whichever branch is
  * selected — and shift every later draw of the shader's random stream —
@@ -43,7 +43,7 @@ const MINIMAL = String.raw`\begin{cases}\sum_{n=1}^{\lfloor t\rfloor}\cos(nt)&1\
 /** The compiled root; with `withPreamble`, the helper definitions ahead of it. */
 function shader(
   latex: string,
-  to: 'glsl' | 'wgsl',
+  to: 'glsl',
   withPreamble = false
 ): string {
   const r = compile(ce.parse(latex), { to, fallback: false });
@@ -52,8 +52,8 @@ function shader(
 }
 
 describe('A conditional arm with a loop-form Sum takes the statement form', () => {
-  test('the audit shape compiles on both shader targets', () => {
-    for (const to of ['glsl', 'wgsl'] as const) {
+  test('the audit shape compiles on the shader target', () => {
+    for (const to of ['glsl'] as const) {
       const code = shader(String.raw`f_{mx}(x, t)`, to, true);
       // The helper holds the if/else with the loop inside the taken branch.
       expect(code).toMatch(/if \(1\.0 <= N\) \{/);
@@ -79,11 +79,6 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
         'return _tv1;',
       ].join('\n')
     );
-    const wgsl = shader(MINIMAL, 'wgsl');
-    expect(wgsl).toContain(
-      'var _tv1: f32;\nif (1.0 <= t) {\n  var _tv2: f32 = 0.0;'
-    );
-    expect(wgsl).toContain('} else {\n  _tv1 = 0.0;\n}\nreturn _tv1;');
   });
 
   test('a later condition with a loop runs inside the else of the clause before it', () => {

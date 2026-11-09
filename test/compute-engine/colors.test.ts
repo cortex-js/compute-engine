@@ -870,24 +870,6 @@ describe('GPU color compilation', () => {
     expect(compiled.preamble).not.toContain('_gpu_srgb_to_oklab');
   });
 
-  test('compile ColorContrast to WGSL', () => {
-    const expr = ce.expr([
-      'ColorContrast',
-      ['Tuple', 1, 1, 1],
-      ['Tuple', 0, 0, 0],
-    ]);
-    // `constantFold: false`: both colors are literals, so the whole contrast
-    // is a constant subtree the compiler would otherwise evaluate at compile
-    // time and emit as a bare number — this test pins the APCA helper and its
-    // preamble, which only the structural lowering emits.
-    const compiled = compile(expr, { to: 'wgsl', constantFold: false });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_apca');
-    expect(compiled.preamble).toContain('fn _gpu_apca(');
-    // WGSL uses vec3f
-    expect(compiled.preamble).toContain('vec3f');
-  });
-
   test('compile ColorToColorspace to GLSL', () => {
     // Canonical color value is OKLCh; converting to oklab routes through
     // _gpu_oklch_to_oklab (no sRGB pinch).
@@ -946,30 +928,6 @@ describe('GPU color compilation', () => {
     expect(compiled.code).toBe('_gpu_srgb_roundtrip(vec3(0.7, 0.1, 0.3))');
   });
 
-  test('compile ColorFromColorspace to WGSL keeps the named space', () => {
-    // The value is the channels themselves, in the space they were given in
-    // — the shader counterpart of the `Oklab(...)` head the interpreter
-    // answers. A CONSUMER converts them back to OKLCh, which is what the
-    // second half of this test pins.
-    const expr = ce.expr([
-      'ColorFromColorspace',
-      ['Tuple', 0.6, 0.2, 0.1],
-      "'oklab'",
-    ]);
-    // `constantFold: false`: constant operands would otherwise fold to a
-    // literal vec3f, hiding the lowering this test pins.
-    const compiled = compile(expr, { to: 'wgsl', constantFold: false });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toBe('vec3f(0.6, 0.2, 0.1)');
-
-    const consumed = compile(ce.expr(['AsOklch', expr.json]), {
-      to: 'wgsl',
-      constantFold: false,
-    });
-    expect(consumed.success).toBe(true);
-    expect(consumed.code).toContain('_gpu_oklab_to_oklch');
-  });
-
   test('compile ColorFromColorspace to GLSL routes rgb to OKLCh at its consumer', () => {
     const expr = ce.expr(['ColorFromColorspace', ['Tuple', 1, 0, 0], "'rgb'"]);
     // `constantFold: false`: constant operands would otherwise fold to a
@@ -1010,26 +968,6 @@ describe('GPU compile: HSL space', () => {
     expect(compiled.code).toContain('_gpu_rgb_to_hsl');
     expect(compiled.code).toContain('_gpu_oklch_to_srgb');
     expect(compiled.preamble).toContain('vec3 _gpu_rgb_to_hsl');
-  });
-
-  test('a consumed ColorFromColorspace hsl emits the HSL→sRGB→OKLCh chain', () => {
-    // The operator itself answers the HSL channels; the chain back to OKLCh
-    // is emitted at the consumer, exactly as it is for an `AsHsl` operand.
-    const expr = ce.expr([
-      'ColorFromColorspace',
-      ['Tuple', 0, 1, 0.5],
-      "'hsl'",
-    ]);
-    // `constantFold: false`: constant operands would otherwise fold to a
-    // literal vec3f, hiding the HSL→sRGB→OKLCh chain this test pins.
-    const compiled = compile(ce.expr(['AsOklch', expr.json]), {
-      to: 'wgsl',
-      constantFold: false,
-    });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_hsl_to_rgb');
-    expect(compiled.code).toContain('_gpu_srgb_to_oklch');
-    expect(compiled.preamble).toContain('fn _gpu_hsl_to_rgb');
   });
 
   test('ColorToColorspace hsv routes through _gpu_rgb_to_hsv', () => {
@@ -1101,14 +1039,6 @@ describe('GPU compile: typed color heads', () => {
     expect(compiled.code).toContain('_gpu_srgb_to_oklch');
   });
 
-  test('Hsl head routes through _gpu_hsl_to_rgb → _gpu_srgb_to_oklch', () => {
-    const expr = ce.expr(['Hsl', 0, 1, 0.5]);
-    const compiled = compile(expr, { to: 'wgsl' });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_hsl_to_rgb');
-    expect(compiled.code).toContain('_gpu_srgb_to_oklch');
-  });
-
   // Alpha is orthogonal to color-space conversion and the whole `_gpu_*`
   // chain is vec3 end to end, so a 4th operand has nowhere to go. Emitting
   // the 3-component form would SILENTLY drop the alpha the JS target
@@ -1119,8 +1049,8 @@ describe('GPU compile: typed color heads', () => {
     ['Hsl', ['Hsl', 0, 1, 0.5, 0.25]],
     ['Oklab', ['Oklab', 0.628, 0.225, 0.126, 0.5]],
     ['Oklch', ['Oklch', 0.628, 0.258, 29.23, 0.5]],
-  ] as const)('%s with alpha fails closed on GLSL and WGSL', (head, json) => {
-    for (const to of ['glsl', 'wgsl'] as const) {
+  ] as const)('%s with alpha fails closed on GLSL', (head, json) => {
+    for (const to of ['glsl'] as const) {
       const compiled = compile(ce.expr(json as any), { to });
       expect(compiled.success).toBe(false);
       expect(compiled.error).toMatch(
@@ -1137,7 +1067,7 @@ describe('GPU compile: typed color heads', () => {
   // flowed into vec3 helpers), and a CSS literal whose alpha byte was parsed
   // and then silently dropped by the RGB-only lowering.
   test('ColorFromColorspace with a 4-component tuple fails closed', () => {
-    for (const to of ['glsl', 'wgsl'] as const) {
+    for (const to of ['glsl'] as const) {
       // `constantFold: false`: the tuple is all literals, so the compiler
       // would otherwise evaluate the subtree and emit a `vec4` literal,
       // never reaching the alpha check this test pins.
@@ -1154,7 +1084,7 @@ describe('GPU compile: typed color heads', () => {
   });
 
   test('Color(literal) with a non-opaque alpha fails closed', () => {
-    for (const to of ['glsl', 'wgsl'] as const) {
+    for (const to of ['glsl'] as const) {
       const compiled = compile(ce.expr(['Color', "'#ff000080'"]), { to });
       expect(compiled.success).toBe(false);
       expect(compiled.error).toMatch(/carries an alpha channel/);
@@ -1169,12 +1099,9 @@ describe('GPU compile: typed color heads', () => {
     expect(compiled.code).toMatch(/vec3\(0\.62[^,]*, 0\.25[^,]*, 29\./);
   });
 
-  test('3-operand color heads still compile on GLSL and WGSL', () => {
+  test('3-operand color heads still compile on GLSL', () => {
     expect(compile(ce.expr(['Rgb', 0.1, 0.2, 0.3]), { to: 'glsl' }).code).toBe(
       '_gpu_srgb_to_oklch(vec3(0.1, 0.2, 0.3))'
-    );
-    expect(compile(ce.expr(['Rgb', 0.1, 0.2, 0.3]), { to: 'wgsl' }).code).toBe(
-      '_gpu_srgb_to_oklch(vec3f(0.1, 0.2, 0.3))'
     );
     expect(
       compile(ce.expr(['Oklch', 0.1, 0.2, 0.3]), { to: 'glsl' }).code
@@ -1218,14 +1145,6 @@ describe('GPU compile: As* operators', () => {
     expect(compiled.code).toContain('_gpu_oklch_to_srgb');
     // 0-1 sRGB throughout — no 255-divide needed.
     expect(compiled.code).not.toContain('/ 255.0');
-  });
-
-  test('AsHsv routes through sRGB→HSV', () => {
-    const expr = ce.expr(['AsHsv', ['Oklch', 0.7, 0.2, 30]]);
-    const compiled = compile(expr, { to: 'wgsl' });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_rgb_to_hsv');
-    expect(compiled.code).toContain('_gpu_oklch_to_srgb');
   });
 
   test('AsHsl routes through sRGB→HSL', () => {

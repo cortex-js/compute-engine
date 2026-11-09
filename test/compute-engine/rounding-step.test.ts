@@ -1,7 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 /**
@@ -242,32 +241,13 @@ describe('compiled code', () => {
     expect(r.map((v) => Math.round(v * 1e9) / 1e9)).toEqual([0.3, 0.7, 1.1]);
   });
 
-  test('GLSL and WGSL', () => {
+  test('GLSL', () => {
     const scalar = new GLSLTarget().compile(ce.box(['Floor', 'x', 0.1]), {});
     expect(scalar.code).toBe(
       '_gpu_step_fix(floor(_gpu_step_quotient(x, 0.1)) * 0.1, x, 0.1)'
     );
     expect(scalar.preamble).toContain('float _gpu_step_quotient(float x');
     expect(scalar.preamble).toContain('float _gpu_step_fix(float m');
-    const engine = new ComputeEngine();
-    engine.declare('v', 'vector<3>');
-    const vector = new WGSLTarget().compile(
-      engine.box(['Ceil', 'v', 0.5]),
-      {}
-    ).code;
-    // The vector form is componentwise, with its quotients bound to
-    // temporaries. Every choice is a `select` with vector operands on both
-    // sides of each comparison (WGSL compares no vector with a scalar), so
-    // an infinite value in the branch not taken cannot make the result
-    // `NaN`. The last choice keeps `v` when the quotient overflows.
-    expect(vector).toBe(
-      'var _tv1: vec3f = (v / 0.5);\n' +
-        'var _tv2: vec3f = select(_tv1, (sign(v) * 1.17549435e-38), ' +
-        '_tv1 == vec3f(0.0));\n' +
-        'var _tv3: vec3f = select(_tv2, round(_tv2), ' +
-        'abs(_tv2 - round(_tv2)) <= 4.8e-7 * abs(_tv2));\n' +
-        'return (select((ceil(_tv3) * 0.5), v, abs(_tv1) > vec3f(3.4e38)));'
-    );
     // A shader has no NaN literal.
     expect(() =>
       new GLSLTarget().compile(ce.box(['Floor', 'x', 0]), {})

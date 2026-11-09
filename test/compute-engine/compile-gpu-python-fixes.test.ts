@@ -5,9 +5,9 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * Complex values on the targets that have no complex form for a head, or a
  * limited one.
  *
- * - GLSL and WGSL lower a complex value to a `vec2` of (re, im) and a real
+ * - GLSL lowers a complex value to a `vec2` of (re, im) and a real
  *   value to a `float`. A selection (`If`, `Which`) with one complex value
- *   lifts every real value to `vec2(v, 0.0)`: a ternary or a `select` with a
+ *   lifts every real value to `vec2(v, 0.0)`: a ternary with a
  *   `vec2` arm and a `float` arm is not valid shader source. `Norm` of a list
  *   with complex entries is the length of the vector of the entries' moduli.
  * - `interval-js` computes with real intervals only, so a complex symbol
@@ -43,14 +43,11 @@ function value(result: any): string {
 const T_POS = ['Greater', 't', 0];
 
 describe('GPU: a selection with one complex value lifts its real values', () => {
-  test('If: the real arm is `vec2(v, 0.0)` / `vec2f(v, 0.0)`', () => {
+  test('If: the real arm is `vec2(v, 0.0)`', () => {
     const ce = engine();
     const g = run(ce, 'glsl', ['If', T_POS, 'z', 1]);
     expect(g.success).toBe(true);
     expect(g.code).toBe('((0.0 < t) ? (z) : (vec2(1.0, 0.0)))');
-    const w = run(ce, 'wgsl', ['If', T_POS, 'z', 1]);
-    expect(w.success).toBe(true);
-    expect(w.code).toBe('select(vec2f(1.0, 0.0), z, 0.0 < t)');
   });
 
   test('a parent of the selection reads the lifted value', () => {
@@ -84,12 +81,6 @@ describe('GPU: a selection with one complex value lifts its real values', () => 
   test('Which: each real value is lifted, and so is the fall-through NaN', () => {
     const ce = engine();
     expect(
-      run(ce, 'wgsl', ['Which', T_POS, 'z', ['Less', 't', -1], 2, 'True', 3])
-        .code
-    ).toBe(
-      'select(select((vec2f(3.0, 0.0)), vec2f(2.0, 0.0), t < -1.0), z, 0.0 < t)'
-    );
-    expect(
       run(ce, 'glsl', ['Which', T_POS, 'z', ['Less', 't', -1], 2]).code
     ).toBe(
       '((0.0 < t) ? (z) : (((t < -1.0) ? (vec2(2.0, 0.0)) : (vec2(_gpu_nan())))))'
@@ -103,10 +94,6 @@ describe('GPU: a selection with one complex value lifts its real values', () => 
     expect(g.success).toBe(true);
     expect(g.code).toContain('vec2 _tv1;');
     expect(g.code).toContain('_tv1 = vec2(_tv2, 0.0);');
-    const w = run(ce, 'wgsl', ['If', T_POS, 'z', sum]);
-    expect(w.success).toBe(true);
-    expect(w.code).toContain('var _tv1: vec2f;');
-    expect(w.code).toContain('_tv1 = vec2f(_tv2, 0.0);');
   });
 
   test('a selection of real values is unchanged', () => {
@@ -117,17 +104,12 @@ describe('GPU: a selection with one complex value lifts its real values', () => 
   });
 
   test('a boolean value beside a complex one fails closed', () => {
-    // `vec2f(true, 0.0)` is not valid WGSL, nor `vec2(true, 0.0)` a complex
-    // value in GLSL.
+    // `vec2(true, 0.0)` is not a complex value in GLSL.
     const ce = engine();
-    for (const to of ['wgsl', 'glsl'])
+    for (const to of ['glsl'])
       expect(() => run(ce, to, ['If', T_POS, 'z', 'True'])).toThrow(
         /Could not compile `If`: the value `.*True.*` is not a number/
       );
-    // A value of unknown type is read as a float, and lifted.
-    expect(run(ce, 'wgsl', ['If', T_POS, 'z', 'w']).code).toBe(
-      'select(vec2f(w, 0.0), z, 0.0 < t)'
-    );
   });
 
   test('a real value that is not a scalar beside a complex one fails closed', () => {
@@ -151,9 +133,6 @@ describe('GPU: Norm of a list with complex entries', () => {
       'length(vec3(length(z), 1.0, t))'
     );
     expect(run(ce, 'glsl', ['Norm', ['List', 'z']]).code).toBe('length(z)');
-    expect(
-      value(run(ce, 'wgsl', ['Norm', ['List', ['h', 't'], ['h', 't']]]))
-    ).toBe('return length(vec2f(length(_cse1), length(_cse1)));');
   });
 
   test('the value agrees with the interpreter', () => {
@@ -197,7 +176,7 @@ describe('GPU: the real-only shader lowerings', () => {
       ['Gamma', 'z'],
       ['Factorial', 'z'],
     ];
-    for (const to of ['glsl', 'wgsl'])
+    for (const to of ['glsl'])
       for (const expr of cases)
         expect(() => run(ce, to, expr)).toThrow(/real-only/);
   });

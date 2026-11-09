@@ -10,10 +10,10 @@ import { resolveTypeForCompiledLanes as resolveTypeForCompilation } from '../../
 import type { Type } from '../../common/type/types.js';
 
 /**
- * GPU shader operators shared by GLSL and WGSL.
+ * GPU shader operators of the GLSL target.
  *
- * Both languages use identical C-style operators for arithmetic,
- * comparison, and logical operations.
+ * GLSL uses C-style operators for arithmetic, comparison, and logical
+ * operations.
  */
 // Null-prototype: this table is indexed by an OPERATOR or SYMBOL NAME, and a
 // name is arbitrary user text. A plain object literal inherits
@@ -42,13 +42,13 @@ export const GPU_OPERATORS: CompiledOperators = {
 };
 
 /** Return the vec2 constructor name for the target language. */
-export function gpuVec2(target?: CompileTarget<Expression>): string {
-  return target?.language === 'wgsl' ? 'vec2f' : 'vec2';
+export function gpuVec2(): string {
+  return 'vec2';
 }
 
 /** Return the vec3 constructor name for the target language. */
-export function gpuVec3(target?: CompileTarget<Expression>): string {
-  return target?.language === 'wgsl' ? 'vec3f' : 'vec3';
+export function gpuVec3(): string {
+  return 'vec3';
 }
 
 /**
@@ -118,12 +118,10 @@ export function gpuParenthesizeIdentity(
 /**
  * Emit a NaN value valid for the target shader language.
  *
- * Neither GLSL nor WGSL has a `NaN` identifier (the base compiler's default
- * `If`/`Which` emit a bare `NaN`, which fails to compile on GPU). WGSL
- * rejects a NaN or an infinity produced by any constant expression, `0.0 / 0.0`
- * and a bitcast of a constant bit pattern alike. Both targets therefore route
- * through the `_gpu_nan()` preamble helper (see `GPU_NAN_PREAMBLE_GLSL` and
- * `GPU_NAN_PREAMBLE_WGSL`): a masked (restriction or `Which` else) branch's NaN is thus
+ * GLSL has no `NaN` identifier (the base compiler's default `If`/`Which`
+ * emit a bare `NaN`, which fails to compile on GPU). The target therefore
+ * routes through the `_gpu_nan()` preamble helper (see
+ * `GPU_NAN_PREAMBLE_GLSL`): a masked (restriction or `Which` else) branch's NaN is thus
  * centralized in one overridable symbol, so a host can redefine what a masked
  * branch produces without touching the generated code.
  *
@@ -149,15 +147,13 @@ export const statementCaptureSinks = new WeakSet<object>();
 /**
  * The two-argument arc tangent of the target language.
  *
- * GLSL overloads `atan` on arity (`atan(y_over_x)` and `atan(y, x)`); WGSL
- * declares the two-argument form under its own name, `atan2`, and has no
- * two-argument `atan` at all, so the GLSL spelling is a compile error there.
+ * GLSL overloads `atan` on arity (`atan(y_over_x)` and `atan(y, x)`).
  */
-export function gpuAtan2(target?: CompileTarget<Expression>): string {
-  return target?.language === 'wgsl' ? 'atan2' : 'atan';
+export function gpuAtan2(): string {
+  return 'atan';
 }
 
-/** Componentwise comparison builtins (GLSL) / operators (WGSL). */
+/** Componentwise comparison builtins (GLSL). */
 export const GPU_COMPARE_GLSL: Readonly<Record<string, string>> = {
   Less: 'lessThan',
   LessEqual: 'lessThanEqual',
@@ -166,23 +162,14 @@ export const GPU_COMPARE_GLSL: Readonly<Record<string, string>> = {
   Equal: 'equal',
   NotEqual: 'notEqual',
 };
-export const GPU_COMPARE_WGSL: Readonly<Record<string, string>> = {
-  Less: '<',
-  LessEqual: '<=',
-  Greater: '>',
-  GreaterEqual: '>=',
-  Equal: '==',
-  NotEqual: '!=',
-};
-
-/** The boolean-vector (`bvecN` / `vecN<bool>`) type name for the target. */
-export function gpuBVec(n: number, target?: CompileTarget<Expression>): string {
-  return target?.language === 'wgsl' ? `vec${n}<bool>` : `bvec${n}`;
+/** The boolean-vector (`bvecN`) type name for the target. */
+export function gpuBVec(n: number): string {
+  return `bvec${n}`;
 }
 
-/** The float-vector (`vecN` / `vecNf`) type name for the target. */
-export function gpuFVec(n: number, target?: CompileTarget<Expression>): string {
-  return target?.language === 'wgsl' ? `vec${n}f` : `vec${n}`;
+/** The float-vector (`vecN`) type name for the target. */
+export function gpuFVec(n: number): string {
+  return `vec${n}`;
 }
 
 /**
@@ -196,20 +183,17 @@ export function gpuType(expr: Expression): Type {
 }
 
 /**
- * An aggregate CONSTRUCTOR of either shader language (`vec3`, `bvec2`,
- * `mat2x2f`, `float[5]`, `array<f32, 5>`). Such a lowering BUILDS a shape from
- * its operands instead of acting on them, so the componentwise gate does not
- * apply to it; the constructors have their own guards
- * (`assertGPUScalarComponents`, `gpuValueHasVectorComponents`). The spellings
- * of the two languages are disjoint, so one predicate serves both.
+ * An aggregate CONSTRUCTOR of GLSL (`vec3`, `bvec2`, `mat2`, `float[5]`).
+ * Such a lowering BUILDS a shape from its operands instead of acting on them,
+ * so the componentwise gate does not apply to it; the constructors have their
+ * own guards (`assertGPUScalarComponents`, `gpuValueHasVectorComponents`).
  */
 export const GPU_AGGREGATE_CONSTRUCTOR =
-  /^(?:[iub]?vec[234]|mat[234]|array\s*<|(?:float|f32|int|i32|uint|u32|bool)\s*\[)/;
+  /^(?:[iub]?vec[234]|mat[234]|(?:float|int|uint|bool)\s*\[)/;
 
-/** The callee of an array-of-vectors constructor: `vec3[12]` (GLSL) or
- * `array<vec3f, 12>` (WGSL) — the lowering of a written list of points. */
-export const GPU_VECTOR_ARRAY_CONSTRUCTOR =
-  /^(?:[iub]?vec[234]\s*\[|array\s*<\s*vec)/;
+/** The callee of an array-of-vectors constructor: `vec3[12]`, the lowering
+ * of a written list of points. */
+export const GPU_VECTOR_ARRAY_CONSTRUCTOR = /^(?:[iub]?vec[234]\s*\[)/;
 
 /**
  * `GPU_AGGREGATE_CONSTRUCTOR` unanchored: does an aggregate constructor appear
@@ -217,7 +201,7 @@ export const GPU_VECTOR_ARRAY_CONSTRUCTOR =
  * aggregate one when a reduction reads an operand's components back out.
  */
 export const GPU_AGGREGATE_CONSTRUCTOR_ANYWHERE =
-  /\b(?:[iub]?vec[234]|mat[234]|array\s*<|(?:float|f32|int|i32|uint|u32|bool)\s*\[)/;
+  /\b(?:[iub]?vec[234]|mat[234]|(?:float|int|uint|bool)\s*\[)/;
 
 /**
  * Does this emission APPLY nothing — a bare identifier (possibly swizzled or
@@ -255,7 +239,7 @@ export function gpuIsAtomicEmission(code: string): boolean {
 }
 
 /**
- * Constants shared by both GLSL and WGSL.
+ * Constants of the GLSL target.
  *
  * Null-prototype so a lookup answers only for a key the table actually
  * declares. A plain object literal inherits `Object.prototype`, so indexing it
@@ -266,8 +250,8 @@ export function gpuIsAtomicEmission(code: string): boolean {
  */
 export const GPU_CONSTANTS: Record<string, string> = {
   __proto__: null as never,
-  // The boolean literals are constants, not free symbols. Both shader
-  // languages spell them lowercase, so without these a bare `True` was
+  // The boolean literals are constants, not free symbols. GLSL spells them
+  // lowercase, so without these a bare `True` was
   // emitted verbatim — an undeclared identifier that makes the shader fail to
   // compile, behind a `success: true` result — and was also reported in
   // `freeSymbols` as an input the caller must supply.
@@ -283,14 +267,13 @@ export const GPU_CONSTANTS: Record<string, string> = {
 /**
  * Format a number as a GPU float literal.
  *
- * Both GLSL and WGSL require float literals to have a decimal point.
+ * GLSL requires float literals to have a decimal point.
  *
- * A NON-FINITE value has no literal spelling in either language, but both can
- * MAKE the value from a bit pattern, in the `_gpu_nan()` / `_gpu_inf()`
- * preamble helpers — which is what the masked-branch NaN already does
- * (`gpuNaN`). A `NaN` / `±∞` constant therefore routes through the
- * same `gpuNonFiniteLiteral` symbols instead of failing the compilation, which
- * is why this formatter needs to know the language.
+ * A NON-FINITE value has no literal spelling in GLSL, but GLSL can MAKE the
+ * value from a bit pattern, in the `_gpu_nan()` / `_gpu_inf()` preamble
+ * helpers — which is what the masked-branch NaN already does (`gpuNaN`). A
+ * `NaN` / `±∞` constant therefore routes through the same
+ * `gpuNonFiniteLiteral` symbols instead of failing the compilation.
  *
  * One spelling for the whole compiler: this is `formatFloat`, which the
  * emitted-code constant fold prints its shader literals with. The two must not
@@ -311,11 +294,11 @@ export function formatGPUNumber(n: number, language?: string): string {
 // ---------------------------------------------------------------------------
 
 /** The shader scalar type. Always float: see `gpuTypeOfDeclaredType`. */
-export function gpuScalarType(isWGSL: boolean): string {
-  return isWGSL ? 'f32' : 'float';
+export function gpuScalarType(): string {
+  return 'float';
 }
 
-/** The `vecN` type of the language (`vec2` / `vec2f`). */
-export function gpuVecType(n: number, isWGSL: boolean): string {
-  return isWGSL ? `vec${n}f` : `vec${n}`;
+/** The `vecN` type of the language (`vec2`). */
+export function gpuVecType(n: number): string {
+  return `vec${n}`;
 }

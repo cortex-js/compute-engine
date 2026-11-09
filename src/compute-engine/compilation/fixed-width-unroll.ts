@@ -44,7 +44,7 @@ import {
  * in contrast, evaluates the same expression to scalar arithmetic. This pass
  * reproduces that scalar shape structurally, so all targets compile it and the
  * JavaScript one emits flat expressions. Measured on the nine-point Voronoi
- * chain of the Desmos state `62urmx2dcm`: `glsl`, `wgsl` and `interval-js`
+ * chain of the Desmos state `62urmx2dcm`: `glsl` and `interval-js`
  * went from a decline to a compile, and the JavaScript kernel from 6.1 to 0.9
  * microseconds per sample.
  *

@@ -210,7 +210,7 @@ describe('GammaRegularized compiled, against mpmath', () => {
 
   // No kernel on these targets: the compile declines (`success: false`, no
   // code) and `run` falls back to the interpreter.
-  for (const to of ['glsl', 'wgsl', 'interval-js'] as const) {
+  for (const to of ['glsl', 'interval-js'] as const) {
     test(`${to} declines rather than answer`, () => {
       const r = compile(ce.box(['GammaRegularized', 'a', 'z']), { to });
       expect(r.success).toBe(false);

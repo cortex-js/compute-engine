@@ -1,7 +1,6 @@
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import type { MathJsonExpression } from '../../src/math-json/types';
 
 const color: MathJsonExpression = ['Hsv', ['Add', 'x', 1], 1, 1];
@@ -19,10 +18,9 @@ function engine() {
   return ce;
 }
 
-describe.each(['glsl', 'wgsl'] as const)('%s color bindings', (to) => {
-  const vec = to === 'glsl' ? 'vec3' : 'vec3f';
-  const declaration = (name: string) =>
-    to === 'glsl' ? `vec3 ${name};` : `var ${name}: vec3f;`;
+describe.each(['glsl'] as const)('%s color bindings', (to) => {
+  const vec = 'vec3';
+  const declaration = (name: string) => `vec3 ${name};`;
 
   test.each([true, false])(
     'local and alias retain color storage (typed=%s)',
@@ -80,16 +78,10 @@ describe.each(['glsl', 'wgsl'] as const)('%s color bindings', (to) => {
       constantFold: false,
     });
     expect(r.success).toBe(true);
-    expect(r.preamble).toContain(
-      to === 'glsl' ? 'vec3 _fn_maker()' : 'fn _fn_maker() -> vec3f'
-    );
+    expect(r.preamble).toContain('vec3 _fn_maker()');
     expect(r.preamble?.match(/_fn_maker\(/g)).toHaveLength(1);
     expect(r.code?.match(/_fn_maker\(/g)).toHaveLength(1);
-    expect(r.code).toMatch(
-      to === 'glsl'
-        ? /vec3 _cse\d+ = _fn_maker\(\)/
-        : /let _cse\d+: vec3f = _fn_maker\(\)/
-    );
+    expect(r.code).toMatch(/vec3 _cse\d+ = _fn_maker\(\)/);
     expect(r.code).not.toContain('_gpu_hsv_to_rgb');
   });
 
@@ -121,11 +113,7 @@ describe.each(['glsl', 'wgsl'] as const)('%s color bindings', (to) => {
       constantFold: false,
     });
     expect(r.success).toBe(true);
-    expect(r.preamble).toContain(
-      to === 'glsl'
-        ? 'vec3 _fn_identityColor(vec3 c)'
-        : 'fn _fn_identityColor(c: vec3f) -> vec3f'
-    );
+    expect(r.preamble).toContain('vec3 _fn_identityColor(vec3 c)');
     expect(r.preamble).toContain('return c;');
     expect(r.code).toContain('_fn_identityColor(_gpu_srgb_to_oklch(');
   });
@@ -154,7 +142,7 @@ describe.each(['glsl', 'wgsl'] as const)('%s color bindings', (to) => {
   test('a scalar local frame overrides an ambient color type', () => {
     const ce = engine();
     ce.declare('c', 'color');
-    const target = to === 'glsl' ? new GLSLTarget() : new WGSLTarget();
+    const target = new GLSLTarget();
     const r = BaseCompiler.withLocalShapeFrame(
       new Map([['c', false]]),
       new Map([['c', BaseCompiler.LOCAL_SCALAR]]),
@@ -163,9 +151,7 @@ describe.each(['glsl', 'wgsl'] as const)('%s color bindings', (to) => {
           ['c', 'float'],
         ])
     );
-    expect(r).toContain(
-      to === 'glsl' ? 'float scalar(float c)' : 'fn scalar(c: f32) -> f32'
-    );
+    expect(r).toContain('float scalar(float c)');
     expect(r).not.toContain(vec);
   });
 

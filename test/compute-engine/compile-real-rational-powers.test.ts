@@ -148,7 +148,7 @@ describe('real branches of exact rational powers', () => {
     close(out, want.re);
   });
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s uses the real magnitude and a nonzero sign at zero',
     (to) => {
       const ce = realEngine();
@@ -247,17 +247,14 @@ describe('a decimal exponent or root index read as an odd-denominator rational',
     }
   });
 
-  for (const language of ['glsl', 'wgsl'] as const) {
+  for (const language of ['glsl'] as const) {
     test.each(SHAPES)(`${language}: %s agrees with the interpreter`, (latex) => {
       const ce = realEngine();
       const expr = ce.parse(latex);
       const result = compile(expr, { to: language });
       expect(result.success).toBe(true);
       expect(result.code).toContain('pow(abs(x)');
-      const main =
-        language === 'glsl'
-          ? `float _main(float x) { return ${result.code}; }`
-          : `fn _main(x: f32) -> f32 { return ${result.code}; }`;
+      const main = `float _main(float x) { return ${result.code}; }`;
       const run = shaderFunctions(`${result.preamble ?? ''}\n${main}`, language);
       for (const x of [-8, -1, 2]) {
         const want = expr.subs({ x: ce.number(x) }).N().re;

@@ -72,7 +72,7 @@ export function gpuComplexPowLiteral(
   target?: CompileTarget<Expression>
 ): string {
   const r = principalComplexPow(base, exp);
-  return `${gpuVec2(target)}(${formatFloat(r.re, target?.language)}, ${formatFloat(
+  return `${gpuVec2()}(${formatFloat(r.re, target?.language)}, ${formatFloat(
     r.im,
     target?.language
   )})`;
@@ -170,12 +170,11 @@ export function declineComplexContinuation(
  */
 export function gpuComplexOperand(
   x: Expression,
-  compile: (expr: Expression) => string,
-  target?: CompileTarget<Expression>
+  compile: (expr: Expression) => string
 ): string {
   if (BaseCompiler.isComplexValued(x)) return compile(x);
   assertScalarComplexOperand(undefined, x);
-  return `${gpuVec2(target)}(${compile(x)}, 0.0)`;
+  return `${gpuVec2()}(${compile(x)}, 0.0)`;
 }
 
 /**
@@ -408,8 +407,7 @@ export function gpuUniformVectorWidth(
  * `(mat2(…), 1)` → `vec2(mat2(…), 1.0)` is exactly as unacceptable to a driver.
  *
  * Also rejects the EMPTY constructor: an empty tuple/list would lower to
- * `float[0]()` / `array<f32, 0>()`, and neither language has a zero-length
- * array type.
+ * `float[0]()`, and GLSL has no zero-length array type.
  */
 export function assertGPUScalarComponents(
   args: ReadonlyArray<Expression>,
@@ -417,8 +415,8 @@ export function assertGPUScalarComponents(
 ): void {
   if (args.length === 0)
     throw new Error(
-      `Could not compile \`${ctor}\`: an empty tuple/list has no GPU lowering — neither GLSL nor ` +
-        `WGSL has a zero-length array type.`
+      `Could not compile \`${ctor}\`: an empty tuple/list has no GPU lowering — GLSL has ` +
+        `no zero-length array type.`
     );
   for (const [i, arg] of args.entries()) {
     if (!BaseCompiler.isNonScalarShape(arg)) continue;
@@ -442,8 +440,7 @@ export function assertGPUScalarComponents(
  * for a vector-valued one. GLSL has no implicit float→vecN conversion in a
  * ternary, so a masked (restriction or `Which` else) branch whose value is a tuple
  * body (a restricted parametric `(x(t), y(t))`) must emit a NaN of the same
- * component count or the driver rejects the shader (Tycho item 49). WGSL's
- * `select` likewise requires both operands to share one type.
+ * component count or the driver rejects the shader (Tycho item 49).
  */
 export function gpuNaNFor(
   val: Expression | null,
@@ -451,7 +448,7 @@ export function gpuNaNFor(
 ): string {
   const n = gpuComponentCount(val);
   if (n === undefined) return gpuNaN(target);
-  const ctor = target?.language === 'wgsl' ? `vec${n}f` : `vec${n}`;
+  const ctor = `vec${n}`;
   return `${ctor}(${gpuNaN(target)})`;
 }
 
@@ -477,7 +474,7 @@ export function gpuNaNFor(
  *    emitted DECLARATION, `gpuHelperIsScalarOnly`, before reusing this
  *    verdict.)
  *  - a COMPARISON or a TERNARY (`Argument(x)` → `((x >= 0.0) ? 0.0 : π)`):
- *    GLSL has no `vecN >= float`, and both languages require a scalar `bool`
+ *    GLSL has no `vecN >= float`, and requires a scalar `bool`
  *    condition, so there is no componentwise reading of either.
  *  - a lowering that DROPS the operand (`Imaginary(x)` → `0.0` for a real
  *    `x`): the result is a scalar where the caller is owed a `vecN`, which is
@@ -833,9 +830,9 @@ export function gpuBinaryVectorWidth(
  * in is a vector one and the operand itself lowers to a scalar.
  *
  * The genType builtins (`pow`, `atan`, `mod`, …) are declared over ONE type
- * for all their arguments; neither GLSL nor WGSL promotes a scalar argument to
+ * for all their arguments; GLSL does not promote a scalar argument to
  * the vector of its neighbours, so the promotion has to be written out.
- * `vec3(y)` is the broadcast constructor of both languages — every component
+ * `vec3(y)` is the broadcast constructor — every component
  * takes the same value.
  *
  * `width` of `undefined` (a scalar lowering) and an operand that is already
@@ -849,12 +846,11 @@ export function gpuBinaryVectorWidth(
 export function gpuWidenToVector(
   expr: Expression,
   width: 2 | 3 | 4 | undefined,
-  compile: (expr: Expression) => string,
-  target?: CompileTarget<Expression>
+  compile: (expr: Expression) => string
 ): string {
   if (width === undefined || gpuOperandShape(expr) !== 'scalar')
     return compile(expr);
-  return `${gpuFVec(width, target)}(${compile(expr)})`;
+  return `${gpuFVec(width)}(${compile(expr)})`;
 }
 
 /**
@@ -887,9 +883,9 @@ function gpuMatrixDims(
 }
 
 /**
- * A WGSL type TEMPLATE — the type keyword and its opening angle bracket
+ * A type TEMPLATE — the type keyword and its opening angle bracket
  * (`array<`, `vec3<`, `mat2x2<`, `atomic<`, `ptr<`). GLSL has no such
- * spelling, so one pattern serves both languages.
+ * spelling; the pattern keeps a template's comma inside its argument.
  *
  * Sticky, and used only with `lastIndex` set immediately before each test, so
  * it carries no state between calls.
@@ -924,7 +920,7 @@ export function gpuTopLevelCall(
   let start = m[0].length;
   const operands: string[] = [];
   for (let i = m[0].length - 1; i < s.length; i++) {
-    // A WGSL type template carries a COMMA of its own: an `array<f32, 5>(…)`
+    // A type template carries a COMMA of its own: an `array<f32, 5>(…)`
     // argument used to split into `array<f32` and `5>(…)`, so the argument
     // count came out one too high and every check keyed to it (the one-for-one
     // tests in `gpuCheckOperandShapes`) silently stepped aside — which let an
@@ -975,7 +971,6 @@ export function gpuTopLevelCall(
  */
 function gpuHelperIsScalarOnly(name: string, preamble: string): boolean {
   // GLSL: `float _gpu_powi(float x, float n) {`
-  // WGSL: `fn _gpu_powi(x: f32, n: f32) -> f32 {`
   // Anchored to a declaration (a return type or `fn` at the head of a line) so
   // a CALL of the same helper inside another body cannot be read as one.
   const decl = new RegExp(
@@ -988,11 +983,11 @@ function gpuHelperIsScalarOnly(name: string, preamble: string): boolean {
 
 /**
  * The shader builtins that REDUCE an aggregate argument to a scalar result —
- * a fact of both languages' specifications, in the same way the entries of
+ * a fact of the GLSL specification, in the same way the entries of
  * `GPUShapeRules` are, not a list of CE heads. `dot`, `length` and `distance`
- * are declared over the genType and return `float`/`f32`; `determinant` takes
+ * are declared over the genType and return `float`; `determinant` takes
  * a `matN` and returns one scalar; `any` and `all` reduce a `bvecN` to a
- * `bool`. Both languages spell all six the same way, so one table serves both.
+ * `bool`.
  *
  * An aggregate CONSTRUCTOR standing inside one of these calls is consumed by
  * it: what reaches the enclosing slot is the scalar the call returns, not the
@@ -1096,7 +1091,7 @@ function gpuReshapesOperands(code: string): string | undefined {
 }
 
 /**
- * Per-language shape rules for `gpuCheckOperandShapes`. GLSL and WGSL agree on
+ * Per-language shape rules for `gpuCheckOperandShapes`. The languages agree on
  * the broad strokes — the builtins and the arithmetic operators are
  * genType-polymorphic — but not on where a SCALAR may stand in for a `vecN`,
  * so each target supplies its own table (see `GPUShaderTarget.getShapeRules`).
@@ -1114,12 +1109,10 @@ export type GPUShapeRules = {
    * builtin with no such overload at all.
    *
    * A builtin ABSENT from the map requires MATCHING genTypes throughout, so
-   * `atan(vec3, float)` and `pow(float, vec3)` are not valid source in either
-   * language.
+   * `atan(vec3, float)` and `pow(float, vec3)` are not valid source.
    *
    * These are shader BUILTIN names — a fact of each language's specification,
-   * not a list of CE heads — so tabulating them is what keeps the two
-   * languages' genuinely different overload sets apart.
+   * not a list of CE heads.
    */
   readonly scalarGenTypeSlots: ReadonlyMap<string, ReadonlySet<number>>;
   /**
@@ -1130,8 +1123,8 @@ export type GPUShapeRules = {
    * signature. `mix` is declared BOTH `mix(genType, genType, float)` AND
    * `mix(genType, genType, genType)`, so its third argument MAY be a scalar;
    * `refract` is declared ONLY `refract(genType I, genType N, float eta)`
-   * (GLSL ES 3.00 §8.4 / GLSL 4.60 §8.5 / WGSL §17.5, `refract(e1: vecN<T>,
-   * e2: vecN<T>, e3: T)`), so its third argument MUST be one. Every other
+   * (GLSL ES 3.00 §8.4 / GLSL 4.60 §8.5), so its third argument MUST be
+   * one. Every other
    * builtin in `scalarGenTypeSlots` — `min`, `max`, `clamp`, `step`,
    * `smoothstep`, `mod` — has a matched all-genType overload alongside its
    * scalar-tailed one, so none of them belongs here.
@@ -1150,15 +1143,9 @@ export type GPUShapeRules = {
    * GLSL declares its geometric functions over the genType, which INCLUDES
    * `float`: `refract(float, float, float)`, `dot(float, float)` and
    * `normalize(float)` are all valid GLSL (§8.4 / §8.5 — "genType" is
-   * `float`, `vec2`, `vec3`, `vec4`). WGSL does not: `refract(e1: vecN<T>,
-   * e2: vecN<T>, e3: T)`, `dot(e1: vecN<T>, e2: vecN<T>)`,
-   * `faceForward(e1: vecN<T>, e2: vecN<T>, e3: vecN<T>)`,
-   * `normalize(e: vecN<T>)` and `reflect(e1: vecN<T>, e2: vecN<T>)` (§17.5)
-   * have no all-scalar form at all, so `refract(1.0, 2.0, 0.5)` — perfectly
-   * good GLSL — is source no WebGPU driver accepts. `cross` is narrower still
-   * and vector-only in BOTH languages (`vec3` only). `length` and `distance`
-   * are declared over both a scalar and a `vecN` in either language and are
-   * therefore absent.
+   * `float`, `vec2`, `vec3`, `vec4`). `cross` is narrower: it is declared
+   * over `vec3` only. `length` and `distance` are declared over both a
+   * scalar and a `vecN` and are therefore absent.
    *
    * The all-scalar case is exactly the one the rest of the gate never sees: it
    * returns early on operands that are all scalars, which is why this check
@@ -1177,9 +1164,7 @@ export type GPUShapeRules = {
   /**
    * Does the language define unary negation on a `matN`? GLSL does — its
    * unary operators "operate on integer or floating-point values (including
-   * vectors and matrices)" (GLSL 4.60 §5.9) — but WGSL's negation (§8.7,
-   * "Unary arithmetic expressions") is declared over scalars and `vecN` only,
-   * so `-mat2x2f(…)` is not valid WGSL source.
+   * vectors and matrices)" (GLSL 4.60 §5.9).
    */
   readonly matrixNegate: boolean;
 };
@@ -1215,7 +1200,7 @@ export function gpuShapeRules(
  * The capability is declared at the handler's own definition site
  * (`markAggregateConsuming`) — never a table of CE head names kept elsewhere,
  * and never inferred from the shape of the emitted source. This prevents an
- * ordinary compound lowering such as WGSL's `Mod` from being mistaken for an
+ * ordinary compound lowering such as a `Mod` lowering from being mistaken for an
  * aggregate-consuming one.
  *
  * The value is a PREDICATE over the operands, not a flag, because a handler
@@ -1259,7 +1244,7 @@ export function markAggregateConsuming<T extends CompiledFunction<Expression>>(
 
 /**
  * Lowerings that, in one of their forms, leave an operand out of the emitted
- * call because a peephole has absorbed it. GLSL's and WGSL's `Mod(a, 1)` emit
+ * call because a peephole has absorbed it. GLSL's `Mod(a, 1)` emits
  * `fract(a)` (the divisor 1 is absorbed), and `Power(2, y)` emits `exp2(y)`
  * (the base 2 is absorbed). The emitted call then has fewer arguments than
  * the head has operands, and judging it against all of the operand shapes
@@ -1573,10 +1558,8 @@ export function gpuCheckOperandShapes(
 
   // A slot with no SCALAR overload at all — the mirror of
   // `mandatoryScalarSlots`, and the only fault an ALL-SCALAR call can have.
-  // WGSL declares `refract(e1: vecN<T>, e2: vecN<T>, e3: T)` and no all-scalar
-  // form, where GLSL's genType includes `float`, so `Refract(1, 2, 0.5)`
-  // emitted `refract(1.0, 2.0, 0.5)` — good GLSL, and source no WebGPU driver
-  // accepts. Positional, so it needs the lowering to pass its operands through
+  // A target whose table names such a slot (`cross` on GLSL) declines an
+  // all-scalar call there. Positional, so it needs the lowering to pass its operands through
   // one for one; and only SCALARS are judged here, because a `matN` or array
   // in such a slot gets a more specific verdict from the branches below.
   const topCall = gpuTopLevelCall(code);
@@ -1619,8 +1602,7 @@ export function gpuCheckOperandShapes(
 
   if (call === undefined) {
     // Not a single call: an infix operator emission or a compound lowering
-    // lowering (WGSL's `Mod` → `(((a % b) - b * floor((a % b) / b)) % b)`,
-    // `Log10` → `log(a) / log(10.0)`). Aggregate-consuming lowerings have already
+    // lowering (`Log10` → `log(a) / log(10.0)`). Aggregate-consuming lowerings have already
     // returned above through an explicit capability. Other compound lowerings
     // still need array, matrix, and vector-width checks.
     const sym = GPU_OPERATORS[head]?.[0];
@@ -1635,7 +1617,7 @@ export function gpuCheckOperandShapes(
       // same genType-polymorphic builtins and operators, which require ONE
       // genType across the whole expression and have no `matN` or array
       // reading at all. (A scalar mixed with same-width vectors stays
-      // admissible: the arithmetic operators broadcast it in both languages,
+      // admissible: the arithmetic operators broadcast it in GLSL,
       // and a compound lowering is built from those.)
       if (hasArray || hasMatrix)
         decline(
@@ -1661,11 +1643,9 @@ export function gpuCheckOperandShapes(
       );
     if (!hasMatrix) {
       declineWidths();
-      // A scalar mixed with (same-width) vectors is valid in BOTH languages
-      // under every arithmetic operator: GLSL 4.60 §5.9 ("one operand is a
-      // scalar, and the other is a vector or matrix"), WGSL §8.7 ("Binary
-      // arithmetic expressions with mixed scalar and vector operands", which
-      // lists `+ - * / %` in both orders).
+      // A scalar mixed with (same-width) vectors is valid under every
+      // arithmetic operator: GLSL 4.60 §5.9 ("one operand is a scalar, and
+      // the other is a vector or matrix").
       return;
     }
 
@@ -1732,8 +1712,8 @@ export function gpuCheckOperandShapes(
       return;
     }
     if (args.length === 1) {
-      // Unary negation of a matrix — the one arity where the two languages
-      // split on the KIND itself (see `GPUShapeRules.matrixNegate`).
+      // Unary negation of a matrix, which a target's shape rules decide on
+      // the KIND itself (see `GPUShapeRules.matrixNegate`).
       if (!rules.matrixNegate)
         decline(
           `the shader unary \`-\` is declared over scalars and \`vecN\` ` +
@@ -1871,7 +1851,7 @@ export function gpuCheckOperandShapes(
   // The OBLIGATIONS, last: a slot that must be scalar is violated by a `vecN`
   // standing in it, so — unlike everything above — this check does not depend
   // on a scalar being present anywhere, and is the only one an all-vector call
-  // can fail. `refract(vec3, vec3, vec3)` is not a signature either language
+  // can fail. `refract(vec3, vec3, vec3)` is not a signature GLSL
   // declares, but the permission table above is consulted only once
   // `shapes.includes('scalar')`.
   // Positional, so it needs the lowering to pass its operands through one for
@@ -1907,19 +1887,17 @@ export function gpuCheckOperandShapes(
  * `array<f32, 5>`; `vec2[3]`, `array<vec2f, 3>` for a list of points).
  * `undefined` when none of these apply.
  */
-export function gpuLoweredSymbolTypeHook(
-  isWGSL: boolean
-): (symbol: Expression) => string | undefined {
+export function gpuLoweredSymbolTypeHook(): (
+  symbol: Expression
+) => string | undefined {
   const colorReads = new Set<string>();
   const hook = (symbol: Expression): string | undefined => {
-    if (isSymbol(symbol) && colorReads.has(symbol.symbol))
-      return gpuVecType(3, isWGSL);
+    if (isSymbol(symbol) && colorReads.has(symbol.symbol)) return gpuVecType(3);
     const shape = gpuOperandShape(symbol);
     if (shape === 'matrix') {
       const dims = gpuMatrixDims(symbol);
       if (dims === undefined) return undefined;
       const [rows, cols] = dims;
-      if (isWGSL) return `mat${cols}x${rows}f`;
       return rows === cols ? `mat${cols}` : `mat${cols}x${rows}`;
     }
     if (shape === 'array') {
@@ -1934,23 +1912,22 @@ export function gpuLoweredSymbolTypeHook(
         gpuTupleWithoutShaderType(t) === undefined
       ) {
         const n = t.elements.length;
-        return isWGSL ? `array<f32, ${n}>` : `float[${n}]`;
+        return `float[${n}]`;
       }
       if (typeof t === 'string' || t.kind !== 'list') return undefined;
       const n = t.dimensions?.length === 1 ? t.dimensions[0] : undefined;
       if (n === undefined || !(n > 0)) return undefined;
       // A list of points (tuples of 2 to 4 real coordinates) is read as an
       // array of `vecM`: the `At` lowering indexes it as `P[j]` and passes it
-      // to the `_gpu_atpM_N` helper, whose parameter is `vecM v[N]`
-      // (`array<vecMf, N>` on WGSL). `gpuPointListAtBase` uses the same test
+      // to the `_gpu_atpM_N` helper, whose parameter is `vecM v[N]`.
+      // `gpuPointListAtBase` uses the same test
       // (`gpuPointListArity`), so the reported type and the emitted reads
       // agree. (CE-685)
       const m = gpuPointListArity(t);
-      if (typeof m === 'number')
-        return isWGSL ? `array<vec${m}f, ${n}>` : `vec${m}[${n}]`;
-      return isWGSL ? `array<f32, ${n}>` : `float[${n}]`;
+      if (typeof m === 'number') return `vec${m}[${n}]`;
+      return `float[${n}]`;
     }
-    return gpuTypeOfValue(symbol, isWGSL);
+    return gpuTypeOfValue(symbol);
   };
   gpuColorSymbolReads.set(hook, colorReads);
   return hook;
@@ -1980,12 +1957,11 @@ export function gpuLoweredSymbolTypeHook(
  * typed, and its statement is not checked.
  */
 export function gpuCertainValueType(
-  expr: Expression,
-  isWGSL: boolean
+  expr: Expression
 ): GPUValueType | { kind: 'matrix' | 'array'; spelling: string } | undefined {
   if (BaseCompiler.isComplexValued(expr)) return undefined;
   const isFloatScalar = (e: Expression): boolean => {
-    const t = gpuCertainValueType(e, isWGSL);
+    const t = gpuCertainValueType(e);
     return (
       t !== undefined && 'element' in t && t.element === 'f' && t.width === 1
     );
@@ -2022,7 +1998,7 @@ export function gpuCertainValueType(
       if (rows >= 2 && rows <= 4) return { element: 'f', width: rows };
       return {
         kind: 'array',
-        spelling: isWGSL ? `array<f32, ${rows}>` : `float[${rows}]`,
+        spelling: `float[${rows}]`,
       };
     }
     // Another shape with 2 to 4 columns is written as an array of its rows
@@ -2031,14 +2007,12 @@ export function gpuCertainValueType(
       return cols >= 2 && cols <= 4
         ? {
             kind: 'array',
-            spelling: isWGSL
-              ? `array<vec${cols}f, ${rows}>`
-              : `vec${cols}[${rows}]`,
+            spelling: `vec${cols}[${rows}]`,
           }
         : undefined;
     return {
       kind: 'matrix',
-      spelling: isWGSL ? `mat${cols}x${rows}f` : `mat${cols}`,
+      spelling: `mat${cols}`,
     };
   }
   if (op === 'Tuple' || op === 'List') {
@@ -2047,7 +2021,7 @@ export function gpuCertainValueType(
     if (n >= 2 && n <= 4) return { element: 'f', width: n };
     return {
       kind: 'array',
-      spelling: isWGSL ? `array<f32, ${n}>` : `float[${n}]`,
+      spelling: `float[${n}]`,
     };
   }
   if (GPU_SCALAR_ARITHMETIC.has(op))
@@ -2057,14 +2031,14 @@ export function gpuCertainValueType(
   if (GPU_SCALAR_PREDICATES.has(op))
     return expr.nops > 0 &&
       expr.ops.every((e) => {
-        const t = gpuCertainValueType(e, isWGSL);
+        const t = gpuCertainValueType(e);
         return t !== undefined && 'element' in t && t.width === 1;
       })
       ? { element: 'b', width: 1 }
       : undefined;
   if (op === 'If' && expr.nops === 3) {
-    const a = gpuCertainValueType(expr.ops[1], isWGSL);
-    const b = gpuCertainValueType(expr.ops[2], isWGSL);
+    const a = gpuCertainValueType(expr.ops[1]);
+    const b = gpuCertainValueType(expr.ops[2]);
     if (
       a !== undefined &&
       b !== undefined &&

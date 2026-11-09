@@ -1,6 +1,6 @@
 /**
  * Root inlining of the user-function calls that several shader functions
- * repeat, for the GLSL and WGSL targets.
+ * repeat, for the GLSL target.
  *
  * The shader targets emit each user-defined function as a shader function of
  * its own (`_fn_F`), and the common-subexpression pass (`cse.ts`) works inside
@@ -90,7 +90,7 @@ export const GPU_SHARED_CALLS_MAX_NODES = 10_000;
  *
  * The expansion of the `voronoi-diagram` row as Tycho compiles it holds
  * 498,274 paths and 1,936 distinct nodes, and its shader is smaller than the
- * code by reference (10.8 KB of WGSL against 12.3 KB): most paths go through
+ * code by reference (10.8 KB of shader code against 12.3 KB): most paths go through
  * nodes that the common-subexpression pass binds once. With the earlier
  * limit, 250,000, that row stayed by reference, and WebGPU drew it about 2.1
  * times slower than WebGL (ROADMAP CE-570).

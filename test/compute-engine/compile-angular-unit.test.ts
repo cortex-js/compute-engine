@@ -156,29 +156,21 @@ describe('ANGULAR UNIT — compiled output agrees with evaluate()', () => {
     );
   });
 
-  test('deg: compileShader scales the angle on glsl and wgsl (CE-282)', () => {
+  test('deg: compileShader scales the angle on glsl (CE-282)', () => {
     const ce = degEngine();
-    for (const language of ['glsl', 'wgsl'] as const) {
-      const target = ce._getCompilationTarget(language)! as any;
-      const shader: string = target.compileShader({
-        type: 'fragment',
-        ...(language === 'glsl' ? { version: '300 es' } : {}),
-        inputs: [{ name: 'x', type: 'float' }],
-        outputs: [{ name: 'o', type: language === 'glsl' ? 'float' : 'f32' }],
-        body: [
-          {
-            variable: language === 'glsl' ? 'o' : 'output.o',
-            expression: ce.parse('\\sin(x)'),
-          },
-          {
-            variable: language === 'glsl' ? 'o' : 'output.o',
-            expression: ce.parse('\\arctan(x)'),
-          },
-        ],
-      });
-      expect(shader).toContain('0.017453292');
-      expect(shader).toContain('57.29578');
-    }
+    const target = ce._getCompilationTarget('glsl')! as any;
+    const shader: string = target.compileShader({
+      type: 'fragment',
+      version: '300 es',
+      inputs: [{ name: 'x', type: 'float' }],
+      outputs: [{ name: 'o', type: 'float' }],
+      body: [
+        { variable: 'o', expression: ce.parse('\\sin(x)') },
+        { variable: 'o', expression: ce.parse('\\arctan(x)') },
+      ],
+    });
+    expect(shader).toContain('0.017453292');
+    expect(shader).toContain('57.29578');
   });
 
   test('grad and turn: javascript target', () => {

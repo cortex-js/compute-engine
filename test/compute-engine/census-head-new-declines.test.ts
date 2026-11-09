@@ -236,19 +236,6 @@ describe('neyret/ra1p9naofs: a scalar function applied to a vec2 list on GLSL', 
     }
   });
 
-  test('on WGSL, the wrapper takes and returns a vec2f', () => {
-    const ce = ra1p9naofs();
-    const result = compile(ce.box(['f', ['List', 'x', 'y']] as any), {
-      to: 'wgsl',
-      fallback: false,
-    } as any) as { success: boolean; code: string; preamble?: string };
-    expect(result.success).toBe(true);
-    expect(result.code).toBe('_fn_f_each2_1(vec2f(x, y))');
-    expect(result.preamble).toMatch(
-      /fn _fn_f_each2_1\(a0: vec2f\) -> vec2f \{\n {2}return vec2f\(_fn_f\(a0\.x\), _fn_f\(a0\.y\)\);/
-    );
-  });
-
   test('a two-parameter function with a list and a scalar', () => {
     const ce = ra1p9naofs();
     ce.assign(

@@ -6,7 +6,6 @@
 
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const ce = new ComputeEngine();
 
@@ -174,12 +173,6 @@ describe('GammaLn is the principal log of Γ(z), LogGamma the continuation', () 
       'GLSL',
       new GLSLTarget(),
       /float _gpu_gammaln\(float z\)/,
-      /return _gpu_inf\(\);/,
-    ],
-    [
-      'WGSL',
-      new WGSLTarget(),
-      /fn _gpu_gammaln\(z: f32\) -> f32/,
       /return _gpu_inf\(\);/,
     ],
   ];

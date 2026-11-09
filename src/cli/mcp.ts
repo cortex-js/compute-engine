@@ -72,13 +72,12 @@ const STREAMABLE_HTTP_PROTOCOL_VERSIONS = new Set(
   PROTOCOL_VERSIONS.filter((x) => x !== '2024-11-05')
 );
 
-const INSTRUCTIONS = `Tools for Epsil, the programming language of the Compute Engine (https://cortexjs.io). Before writing Epsil source, read the language card resource (${CARD_URI}). Each "evaluate" call runs a complete, self-contained program in a fresh session; definitions do not persist between calls. Use "check" for fast syntax validation and "doc" to look up library functions. To compute a single formula you already have in LaTeX, pass it to "evaluate" with "format": "latex" instead of translating it; write Epsil for anything with several steps or definitions. Every "evaluate" result includes a "latex" form of the value, ready to display. Use "compile" to see the code a target (JavaScript, GLSL, WGSL, Python, interval JavaScript) generates for an expression, or why the target declines it. To write JavaScript or TypeScript code that uses the Compute Engine library (@cortex-js/compute-engine), read the API card resource (${API_CARD_URI}) first.`;
+const INSTRUCTIONS = `Tools for Epsil, the programming language of the Compute Engine (https://cortexjs.io). Before writing Epsil source, read the language card resource (${CARD_URI}). Each "evaluate" call runs a complete, self-contained program in a fresh session; definitions do not persist between calls. Use "check" for fast syntax validation and "doc" to look up library functions. To compute a single formula you already have in LaTeX, pass it to "evaluate" with "format": "latex" instead of translating it; write Epsil for anything with several steps or definitions. Every "evaluate" result includes a "latex" form of the value, ready to display. Use "compile" to see the code a target (JavaScript, GLSL, Python, interval JavaScript) generates for an expression, or why the target declines it. To write JavaScript or TypeScript code that uses the Compute Engine library (@cortex-js/compute-engine), read the API card resource (${API_CARD_URI}) first.`;
 
 /** The targets the `compile` tool offers: the engine's built-in targets. */
 const COMPILE_TARGETS = [
   'javascript',
   'glsl',
-  'wgsl',
   'python',
   'interval-js',
 ] as const;
@@ -218,7 +217,7 @@ const TOOLS = [
           type: 'string',
           enum: [...COMPILE_MODES],
           description:
-            'The arithmetic discipline: "strict" (the default of every target: the lane of a value follows its static type, an operation whose exact value is complex on a real lane gives NaN, and a lane mismatch declines), "complex" (unknown-sign radicals and logarithms give complex values; "javascript" and "python" only), or "bigint" ("javascript" only: integer values are exact JavaScript bigint values; an expression that is not on the integer lane declines with the code "bigint-lane"). "glsl", "wgsl" and "interval-js" offer only "strict"; another mode declines with the code "unsupported-mode"',
+            'The arithmetic discipline: "strict" (the default of every target: the lane of a value follows its static type, an operation whose exact value is complex on a real lane gives NaN, and a lane mismatch declines), "complex" (unknown-sign radicals and logarithms give complex values; "javascript" and "python" only), or "bigint" ("javascript" only: integer values are exact JavaScript bigint values; an expression that is not on the integer lane declines with the code "bigint-lane"). "glsl" and "interval-js" offer only "strict"; another mode declines with the code "unsupported-mode"',
         },
         timeLimit: {
           type: 'number',

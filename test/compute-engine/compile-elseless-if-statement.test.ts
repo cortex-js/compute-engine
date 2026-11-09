@@ -332,7 +332,7 @@ describe('an EMPTY block — effect position compiles, value position declines',
         ['Loop', body, ['Element', 'i', ['Range', 1, 3]]],
         's',
       ]);
-      for (const to of ['glsl', 'wgsl'] as const) {
+      for (const to of ['glsl'] as const) {
         const r = compile(expr, { to, fallback: false });
         expect([to, r.success]).toEqual([to, true]);
         expect(r.code).toContain('for (');
@@ -434,7 +434,7 @@ describe('the admission is plain-JavaScript only', () => {
     // The shader statement form of a selection whose branch assigns
     // (`compile-statement-forms.test.ts`): an else-less `If` has no ternary
     // form, and in statement position its value is discarded.
-    for (const to of ['glsl', 'wgsl'] as const) {
+    for (const to of ['glsl'] as const) {
       const e = new ComputeEngine();
       const r = compile(elselessBlock(e), { to, fallback: false });
       expect(r.success).toBe(true);

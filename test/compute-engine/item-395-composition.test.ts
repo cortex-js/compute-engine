@@ -264,16 +264,6 @@ describe('Composition compiled', () => {
         .toString()
     ).toBe('[1,2]');
   });
-
-  test('WGSL lowers to the nested call', () => {
-    const r = compile(ce.box(['Apply', ['Composition', 'Sin', 'Exp'], 'x']), {
-      to: 'wgsl',
-    });
-    const nested = compile(ce.box(['Sin', ['Exp', 'x']]), { to: 'wgsl' });
-    expect(r.success).toBe(true);
-    expect(r.code).toBe(nested.code);
-    expect(r.code).toContain('exp(x)');
-  });
 });
 
 describe('Composition review fixes', () => {

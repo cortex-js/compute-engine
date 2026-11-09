@@ -511,7 +511,7 @@ export function mintTypeConstructor(
   // exactly where the equivalent plain value compiles, to the same emission —
   // no more, no less. Unary (scalar/list/… bodies): the compiled operand
   // itself, zero cost. N-ary (tuple bodies): whatever the SAME-target `Tuple`
-  // construction emits (JS pair, GLSL/WGSL `vecN`), by lowering an actual
+  // construction emits (JS pair, GLSL `vecN`), by lowering an actual
   // `Tuple` node through the caller's `compile` callback — so a target/position
   // where `Tuple` fails closed declines identically, with that path's own
   // diagnostic. Both kinds erase: an alias identity constructor can appear

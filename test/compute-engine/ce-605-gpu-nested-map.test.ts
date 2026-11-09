@@ -1,5 +1,5 @@
 /**
- * CE-605 (Tycho ledger row 475): on the `glsl` and `wgsl` targets, a `Map`
+ * CE-605 (Tycho ledger row 475): on the `glsl` target, a `Map`
  * inside the lambda of another `Map` compiles when each source is a list of
  * a length known at compile time.
  *
@@ -31,7 +31,7 @@ import { shaderFunctions } from './gpu-shader-f32-eval';
 
 const ce = new ComputeEngine();
 
-type Language = 'glsl' | 'wgsl';
+type Language = 'glsl';
 
 function shader(latex: string, to: Language) {
   const r = compile(ce.parse(latex, { strict: false }), {
@@ -48,10 +48,7 @@ function runShader(latex: string, language: Language): (x: number) => number {
   // A compilation with common subexpressions emits statements that end with
   // a `return`; otherwise the code is one expression.
   const body = /\breturn\b/.test(code) ? code : `return ${code};`;
-  const main =
-    language === 'glsl'
-      ? `float _main(float x) { ${body} }`
-      : `fn _main(x: f32) -> f32 { ${body} }`;
+  const main = `float _main(float x) { ${body} }`;
   const f = shaderFunctions(`${preamble}\n${main}`, language);
   return (x) => f('_main', x) as number;
 }
@@ -69,7 +66,7 @@ const SAMPLES = [-1.5, 0, 0.7, 2];
 
 function expectSameValues(latex: string): void {
   const js = runJavaScript(latex);
-  for (const language of ['glsl', 'wgsl'] as const) {
+  for (const language of ['glsl'] as const) {
     const gpu = runShader(latex, language);
     for (const x of SAMPLES)
       expect([language, x, gpu(x)]).toEqual([
@@ -88,27 +85,27 @@ const X_IN_INNER = String.raw`\min\left(\mathrm{Map}\left(k\mapsto \max\left(\ma
 describe('CE-605 — a Map inside the lambda of another Map on the GPU', () => {
   it('min of max, x in the outer lambda: written out', () => {
     // k = 1 gives max(1, 3) + x, k = 2 gives max(2, 6) + x.
-    for (const to of ['glsl', 'wgsl'] as const)
+    for (const to of ['glsl'] as const)
       expect(shader(X_IN_OUTER, to).code).toBe('_gpu_min(x + 3.0, x + 6.0)');
     expectSameValues(X_IN_OUTER);
   });
 
   it('min of max, x in the inner lambda', () => {
-    for (const to of ['glsl', 'wgsl'] as const)
+    for (const to of ['glsl'] as const)
       expect(shader(X_IN_INNER, to).code).toContain('_gpu_max(x + 1.0, x + 3.0)');
     expectSameValues(X_IN_INNER);
   });
 
   it('sum of sums', () => {
     const latex = String.raw`\sum\left(\mathrm{Map}\left(k\mapsto \sum\left(\mathrm{Map}\left(j\mapsto j\cdot k\cdot x, \left[1,2,3\right]\right)\right), \left[1,2\right]\right)\right)`;
-    for (const to of ['glsl', 'wgsl'] as const)
+    for (const to of ['glsl'] as const)
       expect(shader(latex, to).code).not.toContain('Map');
     expectSameValues(latex);
   });
 
   it('max over a Map whose lambda holds a Sum', () => {
     const latex = String.raw`\max\left(\mathrm{Map}\left(k\mapsto \sum_{i=1}^{3} k i + x, \left[1,2\right]\right)\right)`;
-    for (const to of ['glsl', 'wgsl'] as const)
+    for (const to of ['glsl'] as const)
       expect(shader(latex, to).code).toBe('_gpu_max(x + 6.0, x + 12.0)');
     expectSameValues(latex);
   });
@@ -121,7 +118,7 @@ describe('CE-605 — a Map inside the lambda of another Map on the GPU', () => {
 
   it('an inner source of unknown length: the decline stays', () => {
     const latex = String.raw`\min\left(\mathrm{Map}\left(k\mapsto \max\left(\mathrm{Map}\left(j\mapsto j\cdot k, L\right)\right)+x, \left[1,2\right]\right)\right)`;
-    for (const to of ['glsl', 'wgsl'] as const)
+    for (const to of ['glsl'] as const)
       expect(() =>
         compile(ce.parse(latex, { strict: false }), {
           to,
@@ -166,7 +163,7 @@ describe('CE-605 — a Map inside the lambda of another Map on the GPU', () => {
           x,
           expect.closeTo(expr.subs({ x }).N().re, 9),
         ]);
-      for (const to of ['glsl', 'wgsl'] as const)
+      for (const to of ['glsl'] as const)
         expect(() =>
           compile(expr, { to, fallback: false } as never)
         ).toThrow(/Could not compile `Map`: .* has no lowering for it/);
@@ -240,7 +237,7 @@ describe('CE-605 — a Map inside the lambda of another Map on the GPU', () => {
           ],
         ],
       ] as never);
-    for (const to of ['glsl', 'wgsl'] as const) {
+    for (const to of ['glsl'] as const) {
       // 8 × 8 = 64 bodies: written out.
       const r = compile(nested(8, 8), { to, fallback: false } as never) as {
         code: string;
@@ -284,16 +281,13 @@ describe('CE-605 — a Map inside the lambda of another Map on the GPU', () => {
     const js = compile(small, { to: 'javascript', fallback: false } as never) as {
       run: (v: object) => number;
     };
-    for (const language of ['glsl', 'wgsl'] as const) {
+    for (const language of ['glsl'] as const) {
       const r = compile(small, { to: language, fallback: false } as never) as {
         code: string;
         preamble?: string;
       };
       const body = /\breturn\b/.test(r.code) ? r.code : `return ${r.code};`;
-      const main =
-        language === 'glsl'
-          ? `float _main(float x) { ${body} }`
-          : `fn _main(x: f32) -> f32 { ${body} }`;
+      const main = `float _main(float x) { ${body} }`;
       const f = shaderFunctions(`${r.preamble ?? ''}\n${main}`, language);
       for (const x of SAMPLES) {
         const expected = small.subs({ x }).N().re;
@@ -307,7 +301,7 @@ describe('CE-605 — a Map inside the lambda of another Map on the GPU', () => {
     }
 
     // 64 × 64 = 4,096 bodies: declined.
-    for (const to of ['glsl', 'wgsl'] as const)
+    for (const to of ['glsl'] as const)
       expect(() =>
         compile(mapOverComprehension(64), { to, fallback: false } as never)
       ).toThrow(/Could not compile `Map`: .* has no lowering for it/);
@@ -317,7 +311,7 @@ describe('CE-605 — a Map inside the lambda of another Map on the GPU', () => {
     // Writing `j` for `k` under the inner lambda `j ↦ j + k` would read the
     // inner `j`, so the outer `Map` is not written out.
     const latex = String.raw`\min\left(\mathrm{Map}\left(k\mapsto \max\left(\mathrm{Map}\left(j\mapsto j+k, \left[1,3\right]\right)\right), \left[j,2\right]\right)\right)+x`;
-    for (const to of ['glsl', 'wgsl'] as const)
+    for (const to of ['glsl'] as const)
       expect(() =>
         compile(ce.parse(latex, { strict: false }), {
           to,

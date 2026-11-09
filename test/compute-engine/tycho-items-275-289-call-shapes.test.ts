@@ -39,13 +39,12 @@ test('scalar point calls use shared helpers and retain list admission', () => {
     ['F', ['Tuple', 1, 2, 3], ['Tuple', 'x', 1, 2]],
   ]);
   expectTypeBetween(scalar, { atMost: 'number' });
-  for (const to of ['javascript', 'glsl', 'wgsl'] as const) {
+  for (const to of ['javascript', 'glsl'] as const) {
     const result = compile(scalar, { to });
     expect(result.success).toBe(true);
     expect(result.preamble).toMatch(/_fn_F/);
     if (to === 'javascript') expect(result.run!({ x: 4 })).toBe(5);
     if (to === 'glsl') expect(result.preamble).toMatch(/vec3 _fn_F/);
-    if (to === 'wgsl') expect(result.preamble).toMatch(/-> vec3f/);
   }
   expect(ce.symbol('F').type.toString()).toBe(signature);
   const list = ce.box([

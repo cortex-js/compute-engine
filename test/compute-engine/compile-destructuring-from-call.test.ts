@@ -313,7 +313,7 @@ describe('non-JavaScript targets keep the fail-closed refusal', () => {
     agrees(assign, 34);
   });
 
-  for (const to of ['glsl', 'wgsl', 'python', 'interval-js'] as const) {
+  for (const to of ['glsl', 'python', 'interval-js'] as const) {
     test(`${to} fails closed on the declare form`, () => {
       const r = compile(declareBlock(tupleSymbolEngine()), { to });
       expect(r?.success).toBe(false);

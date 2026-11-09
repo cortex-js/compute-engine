@@ -305,7 +305,7 @@ export const COMPLEX_TRANSPARENT_HEADS: ReadonlySet<string> = new Set([
 /**
  * Heads that produce a real-SHAPED value BY DEFINITION — whatever their
  * operand's type or complexness. Every target lowers them to a real scalar
- * (`Imaginary` → `(z).y` on GLSL/WGSL, `.im` on JS, `np.imag` on Python;
+ * (`Imaginary` → `(z).y` on GLSL, `.im` on JS, `np.imag` on Python;
  * `Argument` → `atan(z.y, z.x)` / `_SYS.carg`), so an enclosing form may
  * treat them as real without parent and child disagreeing on the value
  * shape.

@@ -10,7 +10,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 
 const ce = new ComputeEngine();
 
-const TARGETS = ['javascript', 'glsl', 'wgsl', 'python', 'interval-js'];
+const TARGETS = ['javascript', 'glsl', 'python', 'interval-js'];
 
 describe('CE-142.5 a sum with one bound on the compile targets', () => {
   let warn: jest.SpyInstance;

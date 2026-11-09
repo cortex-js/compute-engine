@@ -26,7 +26,7 @@ function js(
   return { code: r.code!, value: r.run!(vars) };
 }
 
-function code(latex: string, to: 'glsl' | 'wgsl' | 'python' | 'interval-js'): string {
+function code(latex: string, to: 'glsl' | 'python' | 'interval-js'): string {
   const r = compile(ce.parse(latex), { to });
   expect(r.success).toBe(true);
   return r.code!;
@@ -93,7 +93,6 @@ describe('the interpreter machine lane uses the same kernels', () => {
 describe('the other targets', () => {
   test('shaders take the log2 builtin for base 2', () => {
     expect(code('\\log_{2}(x)', 'glsl')).toBe('log2(x)');
-    expect(code('\\log_{2}(x)', 'wgsl')).toBe('log2(x)');
     expect(code('\\log(x)', 'glsl')).toBe('(log(x) / log(10.0))');
   });
 

@@ -31,10 +31,6 @@ describe('CE-778: a negated comparison chain keeps its parentheses', () => {
     expect(code(NEGATED_CHAIN, 'glsl')).toBe('!((3.0 < y) && (y < x))');
   });
 
-  test('WGSL', () => {
-    expect(code(NEGATED_CHAIN, 'wgsl')).toBe('!((3.0 < y) && (y < x))');
-  });
-
   test('JavaScript', () => {
     expect(code(NEGATED_CHAIN, 'javascript')).toBe(
       '!((3 < _.y) && (_.y < _.x))'

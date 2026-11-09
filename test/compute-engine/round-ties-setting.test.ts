@@ -1,7 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import {
   _mapAutoCompileStats as stats,
@@ -317,28 +316,25 @@ describe('an interval that contains a tie', () => {
 
 describe('the shader code of each rule', () => {
   const glsl = new GLSLTarget();
-  const wgsl = new WGSLTarget();
-  const code: Record<RoundingTies, [string, string]> = {
-    'away-from-zero': ['_gpu_round(x)', '_gpu_round(x)'],
-    'to-even': ['roundEven(x)', 'round(x)'],
-    'toward-zero': ['_gpu_round_tz(x)', '_gpu_round_tz(x)'],
-    'toward-positive-infinity': ['_gpu_round_up(x)', '_gpu_round_up(x)'],
-    'toward-negative-infinity': ['_gpu_round_down(x)', '_gpu_round_down(x)'],
+  const code: Record<RoundingTies, string> = {
+    'away-from-zero': '_gpu_round(x)',
+    'to-even': 'roundEven(x)',
+    'toward-zero': '_gpu_round_tz(x)',
+    'toward-positive-infinity': '_gpu_round_up(x)',
+    'toward-negative-infinity': '_gpu_round_down(x)',
   };
 
   test.each(RULES)('%s', (rule) => {
     const ce = engine(rule);
     const g = glsl.compile(ce.box(['Round', 'x']), {});
-    const w = wgsl.compile(ce.box(['Round', 'x']), {});
-    expect([g.code, w.code]).toEqual(code[rule]);
+    expect(g.code).toEqual(code[rule]);
     // The preamble holds only the helper that the code calls.
-    const helper = /_gpu_round\w*/.exec(code[rule][0])?.[0];
+    const helper = /_gpu_round\w*/.exec(code[rule])?.[0];
     const declared = (p: string | undefined) =>
       [...(p ?? '').matchAll(/(?:float|fn) (_gpu_round\w*)\(/g)].map(
         (m) => m[1]
       );
     expect(declared(g.preamble)).toEqual(helper ? [helper] : []);
-    expect(declared(w.preamble)).toEqual(helper ? [helper] : []);
   });
 
   test('an infix vector operand is put in parentheses', () => {
@@ -356,8 +352,6 @@ describe('the shader code of each rule', () => {
     expect(glsl.compile(ce.box(['Round', 'v']), {}).code).toBe(
       '(floor(v) + ceil(0.5 + 0.5 * sign(v - floor(v) - 0.5)))'
     );
-    ce.roundingTies = 'to-even';
-    expect(wgsl.compile(ce.box(['Round', 'v']), {}).code).toBe('round(v)');
   });
 });
 

@@ -58,7 +58,7 @@ describe('code generation for document samples', () => {
     if (n > 2) expect(fn.code).not.toContain('Math.pow');
   });
 
-  test.each(['javascript', 'glsl', 'wgsl'] as const)(
+  test.each(['javascript', 'glsl'] as const)(
     '%s uses native exp',
     (to) => {
       const ce = new ComputeEngine();
@@ -74,7 +74,7 @@ describe('code generation for document samples', () => {
     }
   );
 
-  test.each(['javascript', 'glsl', 'wgsl'] as const)(
+  test.each(['javascript', 'glsl'] as const)(
     '%s shares a small expensive call and honors cse:false',
     (to) => {
       const ce = new ComputeEngine();
@@ -96,7 +96,7 @@ describe('code generation for document samples', () => {
     }
   );
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s keeps GPU temporaries in their scope',
     (to) => {
       const ce = new ComputeEngine();
@@ -128,7 +128,7 @@ describe('code generation for document samples', () => {
     }
   );
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s preserves lazy connective operands',
     (to) => {
       const ce = new ComputeEngine();

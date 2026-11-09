@@ -20,7 +20,7 @@ import { IntervalJavaScriptTarget } from './compilation/interval-javascript-targ
  * - `interval-js`, which the solver's domain enumeration asks for
  *   (`intervalFunction` in `boxed-expression/solve-domain.ts`).
  *
- * The GPU targets (`glsl`, `wgsl`) and the source-only `python` target are
+ * The GPU target (`glsl`) and the source-only `python` target are
  * NOT imported here, so that the `@cortex-js/compute-engine/core` entry does
  * not carry them (measured on 0.169.2: 316 KB minified for the GPU targets,
  * 93 KB for Python). The full package entry (`src/compute-engine.ts`) adds

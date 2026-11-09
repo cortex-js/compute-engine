@@ -350,14 +350,9 @@ export type {
   CompileDiagnosticKind,
   StorageHint,
   StorageKind,
-  StorageBufferBinding,
-  StorageBufferLayout,
   LanguageTarget,
   TargetSource,
   CompiledFunction,
-  FieldFunctionOptions,
-  FieldFunctionParameter,
-  FieldFunctionResult,
 } from './compilation/types.js';
 export {
   CompileDeclineError,
@@ -1992,11 +1987,11 @@ export class ComputeEngine implements IComputeEngine {
    * `createTarget()` and `compile()`; otherwise this throws.
    *
    * Every engine has `javascript` and `interval-js`. Every engine also has
-   * `glsl`, `wgsl` and `python` once the full package entry,
+   * `glsl` and `python` once the full package entry,
    * `@cortex-js/compute-engine/epsil` or the CLI has been loaded anywhere in
    * the program, whichever entry made the engine and in whichever order. A
    * program that loads only `@cortex-js/compute-engine/core` has the two
-   * built-in targets: import `GLSLTarget`, `WGSLTarget` or `PythonTarget`
+   * built-in targets: import `GLSLTarget` or `PythonTarget`
    * from `@cortex-js/compute-engine/compile` and register it here.
    */
   registerCompilationTarget(

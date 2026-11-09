@@ -9777,7 +9777,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // Euclidean distance between two tuples (any positive dimension).
-  // The GPU target maps `Distance` to the GLSL/WGSL `distance()` builtin
+  // The GPU target maps `Distance` to the GLSL `distance()` builtin
   // (vec-only); this JS handler works on plain arrays of any length.
   Distance: ([a, b], compile) => {
     if (a === null || b === null)

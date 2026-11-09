@@ -14,7 +14,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
-const TARGETS = ['javascript', 'interval-js', 'glsl', 'wgsl', 'python'];
+const TARGETS = ['javascript', 'interval-js', 'glsl', 'python'];
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -73,7 +73,7 @@ describe('A user-function call with the wrong number of arguments', () => {
 
   test('a call with the declared number of arguments compiles', () => {
     const ce = engine();
-    for (const to of ['javascript', 'interval-js', 'glsl', 'wgsl']) {
+    for (const to of ['javascript', 'interval-js', 'glsl']) {
       const r = compile(ce.parse('a(t, 1, 2)'), { to } as never);
       expect(r.success).toBe(true);
     }

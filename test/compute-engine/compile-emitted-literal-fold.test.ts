@@ -127,7 +127,7 @@ describe('the emitted-code folder', () => {
     });
   });
 
-  describe('GLSL / WGSL', () => {
+  describe('GLSL', () => {
     it('folds with single-precision rounding at every step', () => {
       // What the shader computes for `_gpu_pow2(0.025 * (1.0 + -0.5))`.
       const half = Math.fround(Math.fround(0.025) * Math.fround(0.5));
@@ -220,12 +220,6 @@ describe('an unrolled Sum leaves no literal arithmetic', () => {
     // The first term, computed the way the shader would compute it.
     const half = Math.fround(Math.fround(0.025) * Math.fround(0.5));
     expect(glsl).toContain(`-${formatFloat(Math.fround(half * half))} + s`);
-  });
-
-  it('WGSL: no substituted index survives', () => {
-    const ce = new ComputeEngine();
-    const r = compile(ce.parse(SUM_LATEX), { to: 'wgsl', fallback: false });
-    expect(source(r)).not.toMatch(UNFOLDED_TERM);
   });
 
   it('folds the literal arguments of a user-function call', () => {

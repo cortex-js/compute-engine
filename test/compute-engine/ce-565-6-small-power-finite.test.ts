@@ -23,7 +23,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { shaderFunctions } from './gpu-shader-f32-eval';
 
-type Target = 'glsl' | 'wgsl';
+type Target = 'glsl';
 
 function shader(
   ce: ComputeEngine,
@@ -45,15 +45,12 @@ function shaderOf(
   to: Target
 ): (x: number, y: number, T: number) => number {
   const body = code.includes('return') ? code : `return ${code};`;
-  const src =
-    to === 'glsl'
-      ? `${preamble}\nfloat f(float x, float y, float T) {\n${body}\n}`
-      : `${preamble}\nfn f(x: f32, y: f32, T: f32) -> f32 {\n${body}\n}`;
+  const src = `${preamble}\nfloat f(float x, float y, float T) {\n${body}\n}`;
   const run = shaderFunctions(src, to);
   return (x, y, T) => run('f', x, y, T) as number;
 }
 
-describe.each(['glsl', 'wgsl'] as const)('CE-565.6 on %s', (to) => {
+describe.each(['glsl'] as const)('CE-565.6 on %s', (to) => {
   const ranged = new ComputeEngine();
   ranged.declare('x', 'real<-10..10>');
   ranged.declare('y', 'real<-10..10>');

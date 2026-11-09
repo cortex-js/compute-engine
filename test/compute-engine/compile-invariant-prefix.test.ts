@@ -252,7 +252,7 @@ describe('Invariant prefix reuse across the calls of a repetition site', () => {
   });
 
   test('the read check skips the declaration of a complete definition', () => {
-    // A target lowering (GLSL, WGSL) returns the whole definition, whose
+    // A target lowering (GLSL) returns the whole definition, whose
     // signature names every extra parameter once: a parameter is read only
     // when the text names it again.
     const check = (code: string, inSignature: 0 | 1) => () =>
@@ -425,7 +425,7 @@ describe('Invariant prefix reuse across the calls of a repetition site', () => {
     );
   });
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     'the %s target substitutes the functions of a sum with literal bounds',
     (to) => {
       // On a shader target, the pure user functions of `B` are substituted
@@ -441,7 +441,7 @@ describe('Invariant prefix reuse across the calls of a repetition site', () => {
     }
   );
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     'the %s target takes the prefix as an extra typed parameter',
     (to) => {
       // A sum whose upper bound is a symbol stays a loop. The shader target
@@ -462,15 +462,12 @@ describe('Invariant prefix reuse across the calls of a repetition site', () => {
       const source = (r.preamble ?? '') + r.code;
       const lines = source.split('\n');
       // The variant's signature carries the extra parameter, typed as the
-      // hoisted value: `float _fn_S_inv0(float r, float t, float _tv3)` /
-      // `fn _fn_S_inv0(r: f32, t: f32, _tv3: f32) -> f32`.
+      // hoisted value: `float _fn_S_inv0(float r, float t, float _tv3)`.
       const signature = lines.find(
         (l) => /_fn_S_inv0\(/.test(l) && /^(float|fn) /.test(l)
       );
       expect(signature).toMatch(
-        to === 'glsl'
-          ? /^float _fn_S_inv0\(float r, float t, float \w+\) \{/
-          : /^fn _fn_S_inv0\(r: f32, t: f32, \w+: f32\) -> f32 \{/
+        /^float _fn_S_inv0\(float r, float t, float \w+\) \{/
       );
       // `_fn_Bn` binds m(t) once and calls the variant in its loop; the
       // ordinary `_fn_S`, which nothing references, is not emitted.

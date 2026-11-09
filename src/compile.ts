@@ -10,7 +10,6 @@ export { compile } from './compute-engine/compilation/compile-expression.js';
 export { JavaScriptTarget } from './compute-engine/compilation/javascript-target.js';
 export { GPUShaderTarget } from './compute-engine/compilation/gpu-target.js';
 export { GLSLTarget } from './compute-engine/compilation/glsl-target.js';
-export { WGSLTarget } from './compute-engine/compilation/wgsl-target.js';
 export { PythonTarget } from './compute-engine/compilation/python-target.js';
 export { IntervalJavaScriptTarget } from './compute-engine/compilation/interval-javascript-target.js';
 export { BaseCompiler } from './compute-engine/compilation/base-compiler.js';
@@ -25,8 +24,6 @@ export type {
   ExecutableTarget,
   ComplexResult,
   RunnerListInput,
-  StorageBufferBinding,
-  StorageBufferLayout,
   CompiledColor,
   CompiledColorSpace,
   CompiledValue,
@@ -36,12 +33,6 @@ export type {
   LanguageTarget,
   TargetSource,
   CompiledFunction,
-  FieldFunctionOptions,
-  FieldFunctionParameter,
-  FieldFunctionResult,
-  KernelOptions,
-  KernelBinding,
-  KernelResult,
   CompileDiagnostic,
   CompileDiagnosticKind,
   StorageHint,

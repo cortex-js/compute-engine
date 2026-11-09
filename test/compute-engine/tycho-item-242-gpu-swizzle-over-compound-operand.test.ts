@@ -16,7 +16,7 @@ const ce = new ComputeEngine();
 ce.declare('x', 'number');
 ce.declare('y', 'number');
 
-function code(latex: string, to: 'glsl' | 'wgsl'): string {
+function code(latex: string, to: 'glsl'): string {
   const r = compile(ce.parse(latex), { to });
   expect(r.success).toBe(true);
   return r.code!;
@@ -30,12 +30,6 @@ describe('a component read over a sum of points', () => {
         'glsl'
       )
     ).toBe('(vec2(x, y) + vec2(1.0, 2.0)).x');
-    expect(
-      code(
-        '\\mathrm{PointX}\\left(\\left(x,y\\right)+\\left(1,2\\right)\\right)',
-        'wgsl'
-      )
-    ).toBe('(vec2f(x, y) + vec2f(1.0, 2.0)).x');
   });
 
   test('the Desmos rotation: scaled points summed, then read', () => {
@@ -82,7 +76,7 @@ describe('a primary operand keeps the direct suffix', () => {
 
 // An absent operand (`Missing`) compiles to the SCALAR NaN of the target.
 // (`Undefined` is not an absent value: it is an ordinary symbol, since
-// `Missing` became a result only, `docs/ERROR-MODEL.md`.) A scalar has no components: WGSL rejects `.x` on an `f32`, so
+// `Missing` became a result only, `docs/ERROR-MODEL.md`.) A scalar has no components: a shader compiler can reject `.x` on a `float`, so
 // the coordinate read of an absent point is that NaN, with no swizzle.
 describe('a component read over an absent operand', () => {
   for (const op of ['PointX', 'PointY', 'PointZ'])
@@ -93,12 +87,6 @@ describe('a component read over an absent operand', () => {
           fallback: false,
         });
         expect(glsl.code).toBe('_gpu_nan()');
-        const wgsl = compile(ce.box([op, arg]), {
-          to: 'wgsl',
-          fallback: false,
-        });
-        expect(wgsl.code).toBe('_gpu_nan()');
-        expect(wgsl.code).not.toMatch(/\.[xyzw]$/);
       });
 
   // A positional read is `At` with a constant index, which declines an
@@ -107,7 +95,7 @@ describe('a component read over an absent operand', () => {
   for (const op of ['First', 'Second', 'Third', 'Last'])
     for (const arg of ['Missing'])
       test(`${op}(${arg}) declines`, () => {
-        for (const to of ['glsl', 'wgsl'] as const)
+        for (const to of ['glsl'] as const)
           expect(() =>
             compile(ce.box([op, arg]), { to, fallback: false })
           ).toThrow(/the base is the absence marker/);
@@ -130,9 +118,6 @@ describe('Last reads the component at the static width', () => {
     expect(glsl(['Last', ['Add', ['Tuple', 'x', 'y'], ['Tuple', 1, 2]]])).toBe(
       '(vec2(x, y) + vec2(1.0, 2.0)).y'
     );
-    expect(
-      compile(ce.box(['Last', 'p3']), { to: 'wgsl', fallback: false }).code
-    ).toBe('p3.z');
   });
 
   test('a list of unknown length declines', () => {
@@ -147,14 +132,11 @@ describe('Last reads the component at the static width', () => {
 
 describe('a multi-component read of an absent operand', () => {
   // `gpuSwizzle` with several components on the scalar NaN builds a vector
-  // of it: `.xy` on an `f32` is rejected by WGSL as `.x` is.
-  test('is a vector of the scalar NaN on both targets', () => {
+  // of it: a shader compiler can reject `.xy` on a `float` as it can `.x`.
+  test('is a vector of the scalar NaN', () => {
     const ce = new ComputeEngine();
     const p = ce.box(['Tuple', 'Missing', 'Missing']);
     expect(compile(p, { to: 'glsl' }).code).not.toMatch(
-      /_gpu_nan\(\)\.[xyzw]{2,}/
-    );
-    expect(compile(p, { to: 'wgsl' }).code).not.toMatch(
       /_gpu_nan\(\)\.[xyzw]{2,}/
     );
   });

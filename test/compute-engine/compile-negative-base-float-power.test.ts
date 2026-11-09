@@ -9,7 +9,7 @@
  * - JavaScript at run time (`_SYS.pow`, `_SYS.cpow`);
  * - Python at run time (the helper `_ce_pow`), and for a constant exponent
  *   when the code is generated;
- * - GLSL/WGSL for a constant exponent, when the code is generated. A shader
+ * - GLSL for a constant exponent, when the code is generated. A shader
  *   cannot decide it for a variable exponent, which it holds as an f32, and
  *   keeps `pow`.
  */
@@ -17,7 +17,6 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { shaderFunctions } from './gpu-shader-f32-eval';
 import { TEST_PYTHON } from './test-python';
 import { execFileSync } from 'child_process';
@@ -186,23 +185,17 @@ describe('Python', () => {
   });
 });
 
-describe('GLSL and WGSL', () => {
+describe('GLSL', () => {
   const ce = new ComputeEngine();
   ce.declare('x', 'real');
   ce.declare('y', 'real');
   ce.declare('z', 'complex');
 
-  for (const [language, Target] of [
-    ['glsl', GLSLTarget],
-    ['wgsl', WGSLTarget],
-  ] as const) {
+  for (const [language, Target] of [['glsl', GLSLTarget]] as const) {
     it(`${language}: x^0.4 and x^0.3333333333333333 (real lane)`, () => {
       for (const e of [0.4, 0.3333333333333333]) {
         const r = new Target().compile(ce.box(['Power', 'x', e]));
-        const main =
-          language === 'glsl'
-            ? `float _main(float x) { return ${r.code}; }`
-            : `fn _main(x: f32) -> f32 { return ${r.code}; }`;
+        const main = `float _main(float x) { return ${r.code}; }`;
         const run = shaderFunctions(`${r.preamble ?? ''}\n${main}`, language);
         for (const x of [-8, 8, -0.001]) {
           const v = run('_main', Math.fround(x)) as number;
@@ -216,10 +209,7 @@ describe('GLSL and WGSL', () => {
     it(`${language}: z^0.4 (complex lane)`, () => {
       const r = new Target().compile(ce.box(['Power', 'z', 0.4]));
       expect(r.code).toContain('_gpu_cpowrr(');
-      const main =
-        language === 'glsl'
-          ? `vec2 _main(vec2 z) { return ${r.code}; }`
-          : `fn _main(z: vec2f) -> vec2f { return ${r.code}; }`;
+      const main = `vec2 _main(vec2 z) { return ${r.code}; }`;
       const run = shaderFunctions(`${r.preamble}\n${main}`, language);
       for (const [x, y] of [
         [-8, 0],

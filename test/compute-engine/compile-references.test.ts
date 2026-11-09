@@ -294,11 +294,11 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
     // Every target spells the boolean literals — `true` in JavaScript and both
     // shader languages, `True` in Python, and the `BoolInterval` string
     // `'true'` on the interval target — so none of them reports one as an
-    // input. Before this, GLSL/WGSL emitted the undeclared identifier `True`
+    // input. Before this, GLSL emitted the undeclared identifier `True`
     // (a shader that fails to compile behind `success: true`) and the interval
     // target emitted a dangling `_.True` vars-object lookup that threw at run
     // time.
-    for (const to of ['javascript', 'python', 'glsl', 'wgsl', 'interval-js']) {
+    for (const to of ['javascript', 'python', 'glsl', 'interval-js']) {
       for (const [label, expr] of booleanShapes) {
         it(`${to}: ${label}`, () => {
           const ce = new ComputeEngine();
@@ -316,7 +316,6 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       expect(src('javascript')).toBe('true');
       expect(src('python')).toBe('True');
       expect(src('glsl')).toBe('true');
-      expect(src('wgsl')).toBe('true');
       // The interval target's boolean domain is `BoolInterval`
       // (`'true' | 'false' | 'maybe'`), so the value is the STRING.
       expect(src('interval-js')).toBe("'true'");
@@ -602,7 +601,7 @@ describe('COMPILE reference analysis of a declaration', () => {
   it('does not list a local that an assignment declares as a free symbol', () => {
     const ce = new ComputeEngine();
     ce.declare('u', 'real');
-    for (const to of ['javascript', 'glsl', 'wgsl'] as const) {
+    for (const to of ['javascript', 'glsl'] as const) {
       expect(
         compile(ce.box(['Block', ['Assign', 'v', 2], ['Multiply', 'v', 'x']]), {
           to,

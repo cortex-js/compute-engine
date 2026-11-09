@@ -475,10 +475,6 @@ describe('THE GPU COMPLEX POWER AT ZERO', () => {
   });
   for (const [to, guard] of [
     ['glsl', 'if (z.x == 0.0 && z.y == 0.0 && w.x > 0.0) return vec2(0.0);'],
-    [
-      'wgsl',
-      'if (z.x == 0.0 && z.y == 0.0 && w.x > 0.0) { return vec2f(0.0); }',
-    ],
   ] as const)
     it(`${to}: Root(z, 4) answers 0 at z = 0`, () => {
       const ce = new ComputeEngine();

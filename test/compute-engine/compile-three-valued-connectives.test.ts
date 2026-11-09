@@ -7,7 +7,6 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 /**
  * Three-valued (Kleene) lowering of `And`/`Or`/`Not` in compiled code.
@@ -403,7 +402,6 @@ describePython('COMPILE three-valued connectives — Python execution', () => {
 describe('COMPILE three-valued connectives — GPU and interval targets untouched', () => {
   const ce = realEngine();
   const glsl = new GLSLTarget();
-  const wgsl = new WGSLTarget();
   const cond = ['And', gt('x'), ['Less', 'y', 1]];
 
   it('keeps the GLSL JavaScript-style selection', () => {
@@ -417,15 +415,6 @@ describe('COMPILE three-valued connectives — GPU and interval targets untouche
     );
     expect(glsl.compile(ce.expr(['Which', cond, 1, 'True', -1] as any)).code).toBe(
       '((0.0 < x && y < 1.0) ? (1.0) : ((-1.0)))'
-    );
-  });
-
-  it('keeps the WGSL select()', () => {
-    expect(wgsl.compile(ce.expr(['If', cond, 1, -1] as any)).code).toBe(
-      'select(-1.0, 1.0, 0.0 < x && y < 1.0)'
-    );
-    expect(wgsl.compile(ce.expr(['Which', cond, 1, 'True', -1] as any)).code).toBe(
-      'select((-1.0), 1.0, 0.0 < x && y < 1.0)'
     );
   });
 });

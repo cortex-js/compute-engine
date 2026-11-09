@@ -161,7 +161,7 @@ describe('Shapes the interpreter refuses for a restricted point', () => {
     const expr = ce.box(json as never);
     expect(expr.isValid).toBe(false);
     expect(JSON.stringify(expr.json)).toContain(code);
-    for (const to of ['javascript', 'glsl', 'wgsl', 'python'])
+    for (const to of ['javascript', 'glsl', 'python'])
       expect(declines(json, to)).toBe(true);
   });
 
@@ -179,7 +179,6 @@ describe('Shapes the interpreter refuses for a restricted point', () => {
     ['a number plus a plain point', ['Add', 't', P]],
   ])('%s fails closed on the shader targets', (_l, json) => {
     expect(declines(json, 'glsl')).toBe(true);
-    expect(declines(json, 'wgsl')).toBe(true);
   });
 
   test.each([
@@ -206,7 +205,6 @@ describe('Shader targets keep the supported shapes', () => {
     ['two plain points', ['Add', P, ['PointList', 2, 't']]],
   ])('%s compiles', (_l, json) => {
     expect(declines(json, 'glsl')).toBe(false);
-    expect(declines(json, 'wgsl')).toBe(false);
   });
 });
 
@@ -404,7 +402,7 @@ describe('A point with an undecided component type beside a list', () => {
     ['a point times a list', ['Multiply', ['Tuple', 'x', 1], ['List', 1, 2]]],
     ['a point divided by a list', ['Divide', ['Tuple', 3, 1], ['List', 1, 2]]],
   ])('%s fails closed on the shader targets', (_l, json) => {
-    for (const to of ['glsl', 'wgsl']) {
+    for (const to of ['glsl']) {
       expect(declines(json, to)).toBe(true);
       // With `t` untyped, as in a fresh engine.
       const r = compile(new ComputeEngine().box(json as never), {

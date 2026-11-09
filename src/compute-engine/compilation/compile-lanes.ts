@@ -585,7 +585,6 @@ export function userCallLane(
 export const LANE_RECORD_LANGUAGES: ReadonlySet<string> = new Set([
   'javascript',
   'glsl',
-  'wgsl',
 ]);
 
 /**

@@ -4,7 +4,7 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 const source = (r: { code?: string; preamble?: string }) =>
   (r.preamble ?? '') + (r.code ?? '');
 
-describe.each(['glsl', 'wgsl'] as const)('%s emitted shader validity', (to) => {
+describe.each(['glsl'] as const)('%s emitted shader validity', (to) => {
   test.each(['Sum', 'Product'])(
     '%s lowers a block term to a scoped compound statement and rejects a Return term',
     (head) => {
@@ -41,7 +41,7 @@ describe.each(['glsl', 'wgsl'] as const)('%s emitted shader validity', (to) => {
             if (Array.isArray(body) && body.length > 2) {
               // The block's local is declared inside braces of its own, once
               // per unrolled term or once in the loop body.
-              const decl = to === 'wgsl' ? 'var a: f32;' : 'float a;';
+              const decl = 'float a;';
               const n = upper === 3 ? 3 : 1;
               expect(
                 code.split(`{\n  ${decl}`).length -
@@ -97,9 +97,7 @@ describe.each(['glsl', 'wgsl'] as const)('%s emitted shader validity', (to) => {
     const r = compile(expr, { to, constantFold: false });
     expect(r.success).toBe(true);
     const declarations = [
-      ...(r.preamble ?? '').matchAll(
-        to === 'glsl' ? /float (_fn_?\w*)\(/g : /fn (_fn_?\w*)\(/g
-      ),
+      ...(r.preamble ?? '').matchAll(/float (_fn_?\w*)\(/g),
     ].map((m) => m[1]);
     expect(declarations).toHaveLength(names.length);
     expect(new Set(declarations).size).toBe(names.length);
@@ -150,9 +148,7 @@ describe.each(['glsl', 'wgsl'] as const)('%s emitted shader validity', (to) => {
         constantFold: false,
       });
       expect(r.success).toBe(true);
-      expect(r.preamble).toContain(
-        to === 'glsl' ? 'vec3 _fn_shade(' : 'fn _fn_shade(t: f32) -> vec3f'
-      );
+      expect(r.preamble).toContain('vec3 _fn_shade(');
       expect(r.code).toContain('_fn_shade(x)');
     }
   );

@@ -701,8 +701,8 @@ export function reachesCallerCode(
 /**
  * Does the emitted code of `expr` run code that the caller supplied, on
  * `target` (`reachesCallerCode`)? Every target uses this one test: the
- * JavaScript, interval-JavaScript and Python targets, and the GLSL and WGSL
- * shader targets.
+ * JavaScript, interval-JavaScript and Python targets, and the GLSL
+ * shader target.
  *
  * The `vars`, `functions` and `operators` entries of the caller are those of
  * the target's common-subexpression session (`isCallerMapped`). A route with
@@ -806,8 +806,8 @@ export function targetReadsInput(
  * variable: a `vars` entry that is a bare identifier, optionally followed by
  * field accesses and literal indexes (`u_t`, `params.x`, `v[0]`)? Such an
  * entry is caller source for `reachesCallerCodeOn` when another `vars`
- * key has the same source (`{ a: 'u_t', b: 'u_t' }`), but GLSL and WGSL
- * have no getters, so a second copy of the read reads the same value and
+ * key has the same source (`{ a: 'u_t', b: 'u_t' }`), but GLSL
+ * has no getters, so a second copy of the read reads the same value and
  * runs no code. A form that writes its operand more than once can then
  * accept it. A form that moves the operand ahead of other code must not use
  * this test: the order of reads and writes of the variable can matter.

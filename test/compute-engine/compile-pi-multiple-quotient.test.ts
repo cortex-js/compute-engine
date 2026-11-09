@@ -13,7 +13,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 
 const ce = new ComputeEngine();
 
-function code(latex: string, to: 'javascript' | 'glsl' | 'wgsl'): string {
+function code(latex: string, to: 'javascript' | 'glsl'): string {
   const r = compile(ce.parse(latex), { to, fallback: false } as never);
   expect([to, r.success]).toEqual([to, true]);
   return r.code!;
@@ -26,9 +26,6 @@ describe('a quotient with a factor π in the numerator is a multiple of π', () 
     );
     expect(code('\\sin\\left(\\frac{2\\pi s}{P}\\right)', 'glsl')).toBe(
       '_gpu_sinpi((2.0 * s) / P)'
-    );
-    expect(code('\\cos\\left(\\frac{\\pi}{P}\\right)', 'wgsl')).toBe(
-      '_gpu_cospi(1.0 / P)'
     );
   });
 

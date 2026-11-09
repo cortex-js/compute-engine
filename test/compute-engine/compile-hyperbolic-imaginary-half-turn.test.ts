@@ -9,7 +9,6 @@
  */
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { shaderFunctions } from './gpu-shader-f32-eval';
 import { TEST_PYTHON } from './test-python';
@@ -98,11 +97,6 @@ describe('GPU: HYPERBOLIC FUNCTIONS OF iπu', () => {
       'glsl',
       GLSLTarget,
       (code: string) => `vec2 _main(float x) { return ${code}; }`,
-    ],
-    [
-      'wgsl',
-      WGSLTarget,
-      (code: string) => `fn _main(x: f32) -> vec2f { return ${code}; }`,
     ],
   ] as const)
     for (const head of HEADS)

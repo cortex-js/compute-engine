@@ -180,16 +180,13 @@ const ROWS: Record<string, string> = {
 describe.each(Object.entries(ROWS))(
   'The audit point table %s',
   (_label, latex) => {
-    test('compiles to a fixed-size array of vectors on both shader targets', () => {
+    test('compiles to a fixed-size array of vectors on the GLSL target', () => {
       const expr = ce.parse(latex);
       expect(expr.isValid).toBe(true);
       const glsl = compile(expr, { to: 'glsl', fallback: false });
       expect(glsl.success).toBe(true);
       expect(glsl.code).toContain('vec3[9](');
       expect(glsl.code).not.toContain('_fn_');
-      const wgsl = compile(expr, { to: 'wgsl', fallback: false });
-      expect(wgsl.success).toBe(true);
-      expect(wgsl.code).toContain('array<vec3f, 9>(');
     });
 
     test('the JavaScript target agrees with the interpreter', () => {
@@ -223,11 +220,11 @@ describe('A list-valued helper is substituted at the shader root', () => {
 
   test('the audit row by reference compiles to the same array of vectors', () => {
     const latex = ROWS['record 685'].split(COLS).join('P(u, v)');
-    for (const to of ['glsl', 'wgsl'] as const) {
+    for (const to of ['glsl'] as const) {
       const r = compile(ce.parse(latex), { to, fallback: false });
       expect(r.success).toBe(true);
       expect(r.code).not.toContain('_fn_P');
-      expect(r.code).toContain(to === 'glsl' ? 'vec3[9](' : 'array<vec3f, 9>(');
+      expect(r.code).toContain('vec3[9](');
     }
   });
 

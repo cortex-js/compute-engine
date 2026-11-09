@@ -312,7 +312,7 @@ describe('NORM / ABS of a point list agree on both routes (item 138)', () => {
     // `constantFold: false` throughout: `S_TUPLES` is a literal point list, so
     // each of these would otherwise be evaluated at compile time and emitted
     // as a literal vector, bypassing the point-list declines under test.
-    for (const lang of ['glsl', 'wgsl', 'python', 'interval-js']) {
+    for (const lang of ['glsl', 'python', 'interval-js']) {
       const target = e._getCompilationTarget(lang as any);
       for (const head of ['Norm', 'Abs']) {
         expect(

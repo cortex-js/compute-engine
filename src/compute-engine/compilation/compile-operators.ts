@@ -549,9 +549,7 @@ export function compileExprOperator(
             // the GPU check below declines a shader chain with caller code. A
             // target with no `bindExpr` that is not a shader (a target that a
             // caller builds) binds it by a hoisted temporary, or declines.
-            const bindsCallerCode = !(
-              target.language === 'glsl' || target.language === 'wgsl'
-            );
+            const bindsCallerCode = !(target.language === 'glsl');
             const callerCode = (arg: Expression): boolean =>
               bindsCallerCode && reachesCallerCodeOn(arg, target);
             const impureArg = (arg: Expression): boolean =>
@@ -579,10 +577,7 @@ export function compileExprOperator(
             // impure to the engine. As a middle operand it would run once per
             // comparison. With a draw bound to a hoisted temporary, the draw
             // would run ahead of caller code written before it. Both decline.
-            if (
-              !target.bindExpr &&
-              (target.language === 'glsl' || target.language === 'wgsl')
-            ) {
+            if (!target.bindExpr && target.language === 'glsl') {
               const reaches = (e: Expression): boolean =>
                 reachesCallerCodeOn(e, target);
               const unit = target.hoist?.unit;
@@ -648,10 +643,7 @@ export function compileExprOperator(
                       'comparison already decided the chain.'
                   );
                 const name = tempVar(target);
-                const decl =
-                  target.language === 'wgsl'
-                    ? `var ${name}: f32`
-                    : `float ${name}`;
+                const decl = `float ${name}`;
                 hoistStatement(target, `${decl} = ${code};`);
                 return name;
               }
@@ -737,7 +729,7 @@ export function compileExprOperator(
             // Insert a separating space when gluing the operator to an
             // operand that begins with the same symbol would form a different
             // token: `-` + `-3.0` must not become `--3.0` (invalid in
-            // GLSL/WGSL, a decrement in C-likes/JS). This arises when a
+            // GLSL, a decrement in C-likes/JS). This arises when a
             // negative value is spliced in (e.g. a Sum unroll substituting a
             // negative index into `Negate(i)`). A leading `(` is already safe.
             const glues =
@@ -760,24 +752,12 @@ export function compileExprOperator(
             // wrong grouping). `Add`/`Multiply` are associative, so their
             // operands need no extra parens.
             const leftAssocNonAssociative = h === 'Subtract' || h === 'Divide';
-            // WGSL gives `&&` and `||` no precedence over each other, so
-            // `a && b || c` is a syntax error there, where GLSL and
-            // JavaScript read it as `(a && b) || c`. On WGSL, the operands of
-            // an `Or` are compiled as if their parent bound tighter than
-            // `And`: an `And` operand, and a comparison chain that lowers to
-            // a conjunction (`3 < y < x` → `(3.0 < y) && (y < x)`), get
-            // parentheses. An `Or` operand of an `And` gets them already,
-            // because `Or` has the lower precedence of the two.
-            const wgslOrOperandPrec =
-              h === 'Or' && target.language === 'wgsl'
-                ? Math.max(op[1], (target.operators?.('And')?.[1] ?? 0) + 1)
-                : op[1];
             // A loop, not `args.map`: the callback and the frame of `map`
             // would be two more frames for each level of a nested
             // expression (ROADMAP CE-320.2).
             const operandCodes: TargetSource[] = [];
             for (let i = 0; i < args.length; i++) {
-              let operandPrec = wgslOrOperandPrec;
+              let operandPrec = op[1];
               if (rightAssoc && i < args.length - 1) operandPrec = op[1] + 1;
               else if (leftAssocNonAssociative && i > 0)
                 operandPrec = op[1] + 1;
@@ -828,8 +808,8 @@ export function compileExprOperator(
              *   a negative zero: `-0 + 0` is `+0`.
              *
              * JavaScript only, like the leading-numeric-run fold below. On a
-             * shader target a literal factor also carries a TYPE — WGSL has
-             * no implicit conversion between `i32` and `f32` — so dropping
+             * shader target a literal factor also carries a TYPE — a shader
+             * language need not convert between integer and float — so dropping
              * one could leave an operand of the wrong type for the position
              * it sits in.
              *
@@ -983,8 +963,7 @@ export function compileExprOperator(
           // operators of a shader language are genType-polymorphic with
           // their own overload table, and a typed-symbol or `Matrix` operand
           // — for which `.isCollection` is false — reaches this path with
-          // shapes the operator may have no overload for (`vec3 + vec2`,
-          // `2.0 + mat2x2f(…)` on WGSL). Throws to fail closed.
+          // shapes the operator may have no overload for (`vec3 + vec2`). Throws to fail closed.
           // No hook (JavaScript, Python, interval-js): unchanged.
           target.checkOperandShapes?.(h, args, resultStr, target);
           return resultPrec < prec ? `(${resultStr})` : resultStr;

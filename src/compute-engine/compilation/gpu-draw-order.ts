@@ -386,13 +386,8 @@ export function gpuOperandOnce(
   gpuAssertBindingKeepsDrawOrder(head, [x], target);
   gpuAssertHoistKeepsCallerOrder(head, [x], target);
   const t = BaseCompiler.tempVar(target);
-  const type = complex
-    ? gpuVec2(target)
-    : target.language === 'wgsl'
-      ? 'f32'
-      : 'float';
-  const decl =
-    target.language === 'wgsl' ? `var ${t}: ${type}` : `${type} ${t}`;
+  const type = complex ? gpuVec2() : 'float';
+  const decl = `${type} ${t}`;
   BaseCompiler.hoistStatement(target, `${decl} = ${compile(x)};`);
   gpuRecordBoundDraws([x], target);
   return t;
@@ -514,7 +509,7 @@ export function gpuArmDrawsWhileBinding(e: Expression): boolean {
  * The `recompileStatement` hook of the shader targets. A statement that
  * declined because the order of its random draws would change (a draw
  * bound to a temporary ahead of the statement while a draw written before
- * it stays in the statement, or a WGSL selection with a branch that draws)
+ * it stays in the statement)
  * is compiled again with every draw bound to a temporary at the point it is
  * compiled (`gpuRandomDraw`). The operands of a node are compiled from the
  * first to the last, depth first, and the draw of a node after its

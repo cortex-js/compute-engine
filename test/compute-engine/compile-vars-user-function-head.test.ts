@@ -60,7 +60,7 @@ describe('COMPILE a call of a user function mapped by `vars`', () => {
   // cannot be called, so `myG(x)` would not be valid shader source. The
   // shader targets keep the engine definition of `g` for its calls, and a
   // caller that has a shader function to call names it in `functions`.
-  it.each(['glsl', 'wgsl'])(
+  it.each(['glsl'])(
     'keeps the engine definition on %s',
     (to) => {
       const r = compiled('g(x)', { to, vars: { g: 'myG' } });

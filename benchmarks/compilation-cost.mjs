@@ -28,9 +28,9 @@ const cases = [
   { id: 'point', json: ['Add', ['At', 'P', 1], ['Multiply', 'x', ['At', 'P', 2]]], expected: (x) => 2 + 3 * x },
   ...[6, 10].map((foldDepth) => ({ id: `shared-complex-fold-${foldDepth}`, foldDepth, mode: 'complex', constantFold: true, expected: (x) => ({ re: x + 0.75 ** foldDepth, im: 0.75 ** foldDepth }) })),
   ...[6, 10].map((depth) => ({ id: `shared-node-${depth}`, depth, expected: (x) => { for (let i = 0; i < depth; i++) x = Math.sin(x) + Math.cos(x); return x; } })),
-  ...[6, 10].map((depth) => ({ id: `shared-node-wgsl-${depth}`, depth, to: 'wgsl' })),
+  ...[6, 10].map((depth) => ({ id: `shared-node-glsl-${depth}`, depth, to: 'glsl' })),
   ...[4, 7].map((functions) => ({ id: `shared-functions-${functions}`, functions, expected: (x) => { let slope = 1, offset = 1; for (let i = 1; i <= functions; i++) { slope *= 3; offset *= 2; } return slope * x + offset; } })),
-  { id: 'plot-wgsl', to: 'wgsl', json: ['Add', ['Sin', ['Multiply', 'a', 'x']], ['Divide', ['Power', 'x', 2], 10]] },
+  { id: 'plot-glsl', to: 'glsl', json: ['Add', ['Sin', ['Multiply', 'a', 'x']], ['Divide', ['Power', 'x', 2], 10]] },
 ];
 const only = process.env.ONLY?.split(',');
 if (only) for (const id of only) assert.ok(cases.some((c) => c.id === id), `Unknown case ${id}`);

@@ -142,7 +142,6 @@ describe('a symbol named after an Object.prototype member', () => {
           'javascript',
           'python',
           'glsl',
-          'wgsl',
           'interval-js',
         ] as const) {
           const ce = new ComputeEngine();

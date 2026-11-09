@@ -15,6 +15,7 @@ import {
   type GPUShapeRules,
 } from './gpu-target.js';
 import { gpuAmplifiedTrigMod } from './gpu-exact-trig.js';
+import { gpuIsForeignTypeSpelling } from './gpu-declared-types.js';
 
 /**
  * GLSL-specific function overrides.
@@ -88,7 +89,7 @@ const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
       // with no helper (a matrix, an array) keeps the built-in, and the
       // operand-shape check then judges it.
       return (
-        gpuFloorModCall(a, b, compile, target) ??
+        gpuFloorModCall(a, b, compile) ??
         `mod(${compile(a)}, ${compile(b)})`
       );
     };
@@ -161,8 +162,7 @@ markOperandConsuming(GLSL_FUNCTIONS.Mod, gpuAbsorbedConstant('fract', 1, 1));
  * so a matrix mixes with a scalar under any of `+ - * /` (the `matN`/`vecN`
  * pairing is separately restricted to `*` by the shared gate), and the unary
  * operators "operate on integer or floating-point values (including vectors
- * and matrices)" (GLSL 4.60 §5.9), so `-matN` is valid source — where WGSL's
- * negation is declared over scalars and `vecN` only.
+ * and matrices)" (GLSL 4.60 §5.9), so `-matN` is valid source.
  */
 const GLSL_SHAPE_RULES: GPUShapeRules = {
   scalarGenTypeSlots: new Map([
@@ -186,7 +186,7 @@ const GLSL_SHAPE_RULES: GPUShapeRules = {
   // float, float)`, `dot(float, float)`, `normalize(float)` and
   // `faceforward(float, float, float)` are all valid GLSL. The one exception
   // is `cross`, declared `vec3 cross(vec3 x, vec3 y)` and nothing else — so it
-  // is the only vector-only entry here, where WGSL's table has six.
+  // is the only vector-only entry here.
   vectorOnlySlots: new Map([['cross', new Set([0, 1])]]),
   matrixArithmetic: () => true,
   matrixNegate: true,
@@ -283,8 +283,7 @@ export class GLSLTarget extends GPUShaderTarget {
       throw new Error(
         `Could not compile \`compileShader()\`: the GLSL target writes only ` +
           `vertex and fragment shaders, not a "${String(type)}" shader. ` +
-          `GLSL ES 3.00 (WebGL 2) has no compute stage. For a compute ` +
-          `shader, use the WGSL target.`
+          `GLSL ES 3.00 (WebGL 2) has no compute stage.`
       );
 
     // ES 3.00+ (or desktop 3.30+) only: the emitted code uses `in`/`out` and
@@ -295,6 +294,18 @@ export class GLSLTarget extends GPUShaderTarget {
       throw new Error(
         `GLSL version "${version}" is not supported: ES 3.00+ (or desktop 3.30+) is required`
       );
+
+    // A declaration is written with the type as the caller gave it. A
+    // spelling such as `vec3f` is not a GLSL type, so the shader would not
+    // compile on the GPU: it is refused here.
+    for (const d of [...inputs, ...outputs, ...uniforms])
+      if (gpuIsForeignTypeSpelling(d.type))
+        throw new Error(
+          `Could not compile \`compileShader()\`: the declared type ` +
+            `\`${d.type.trim()}\` of "${d.name}" is not a GLSL type. ` +
+            `Use the GLSL spelling (\`float\`, ` +
+            `\`vec3\`, \`ivec3\`, \`mat2\`, \`float[5]\`).`
+        );
 
     let code = `#version ${version}\n\n`;
 

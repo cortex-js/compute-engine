@@ -86,8 +86,6 @@ export type {
   ExecutableTarget,
   ComplexResult,
   RunnerListInput,
-  StorageBufferBinding,
-  StorageBufferLayout,
   CompiledColor,
   CompiledColorSpace,
   CompiledValue,
@@ -97,12 +95,6 @@ export type {
   LanguageTarget,
   TargetSource,
   CompiledFunction,
-  FieldFunctionOptions,
-  FieldFunctionParameter,
-  FieldFunctionResult,
-  KernelOptions,
-  KernelBinding,
-  KernelResult,
   CompileDiagnostic,
   CompileDiagnosticKind,
   StorageHint,
@@ -112,25 +104,22 @@ export type {
 export { JavaScriptTarget } from './compute-engine/compilation/javascript-target.js';
 export { GPUShaderTarget } from './compute-engine/compilation/gpu-target.js';
 export { GLSLTarget } from './compute-engine/compilation/glsl-target.js';
-export { WGSLTarget } from './compute-engine/compilation/wgsl-target.js';
 export { PythonTarget } from './compute-engine/compilation/python-target.js';
 export { IntervalJavaScriptTarget } from './compute-engine/compilation/interval-javascript-target.js';
 export { BaseCompiler } from './compute-engine/compilation/base-compiler.js';
 
 // The engine module knows only `javascript` and `interval-js`
 // (`engine-compilation-targets.ts` says why: the `./core` entry must not
-// carry the GPU and Python targets). This full entry adds the three others to
+// carry the GPU and Python targets). This full entry adds the two others to
 // the program-wide table of defaults, which every engine reads on each
 // lookup: every engine of the program, one made earlier from `./core`
 // included (such as the default engine the free functions cache), and every
-// engine of `./epsil` and of the CLI, has all five targets from here on. The
+// engine of `./epsil` and of the CLI, has all four targets from here on. The
 // source-only Python target produces `.code` and no `run`.
 import { addDefaultCompilationTarget } from './compute-engine/engine-compilation-targets.js';
 import { GLSLTarget as _GLSLTarget } from './compute-engine/compilation/glsl-target.js';
-import { WGSLTarget as _WGSLTarget } from './compute-engine/compilation/wgsl-target.js';
 import { PythonTarget as _PythonTarget } from './compute-engine/compilation/python-target.js';
 addDefaultCompilationTarget('glsl', () => new _GLSLTarget());
-addDefaultCompilationTarget('wgsl', () => new _WGSLTarget());
 addDefaultCompilationTarget('python', () => new _PythonTarget());
 
 // ── Interval types ──────────────────────────────────────────────────

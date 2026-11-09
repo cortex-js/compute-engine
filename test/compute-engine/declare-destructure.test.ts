@@ -788,7 +788,7 @@ describe('Assign with a Tuple pattern: compilation', () => {
       expect(code).toMatch(new RegExp(`${name} = `));
   });
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     'the %s target compiles it, with no stray `return` in the loop',
     (to) => {
       const r = compile(

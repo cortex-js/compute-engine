@@ -7,14 +7,9 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const glsl = new GLSLTarget();
-const wgsl = new WGSLTarget();
-const TARGETS = [
-  ['glsl', glsl],
-  ['wgsl', wgsl],
-] as const;
+const TARGETS = [['glsl', glsl]] as const;
 
 function engineWith(decls: Record<string, string>): ComputeEngine {
   const ce = new ComputeEngine();
@@ -42,7 +37,7 @@ describe('A shader input with no static length declines', () => {
       );
     });
 
-    // GLSL and WGSL have no array of zero elements.
+    // GLSL has no array of zero elements.
     test('an input that is a list of no element', () => {
       const ce = engineWith({ L: 'list<real^0>' });
       expect(() => target.compile(ce.box('L'))).toThrow(
@@ -74,20 +69,5 @@ describe('A shader input with no static length declines', () => {
       for (const name of ['V', 'W', 'M'])
         expect(target.compile(ce.box(name)).code).toBe(name);
     });
-  });
-
-  // A storage hint gives the shape of the input: the shader reads its
-  // elements from a storage buffer, not from a declared value.
-  test('a list in a WGSL storage buffer is still read', () => {
-    const ce = engineWith({ L: 'list<real>', i: 'real' });
-    const storage = {
-      storage: { L: { kind: 'storage-buffer', group: 0, binding: 0 } },
-    } as never;
-    expect(wgsl.compile(ce.box(['At', 'L', 'i']), storage).code).toBe(
-      '_gpu_sbat_L(i)'
-    );
-    expect(wgsl.compile(ce.box(['Length', 'L']), storage).code).toBe(
-      'f32(min(L.len, arrayLength(&L.data)))'
-    );
   });
 });

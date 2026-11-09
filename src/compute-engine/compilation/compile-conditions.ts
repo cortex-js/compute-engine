@@ -45,7 +45,7 @@ export { isStatementArm };
  * declarations remain authoritative unless the stored body disproves them.
  *
  * The guard applies on every target. JavaScript would otherwise consume the
- * returned array as a number, while GLSL/WGSL could emit a vector from a
+ * returned array as a number, while GLSL could emit a vector from a
  * scalar-returning function. Open and broadcastable result types do not count
  * as scalar promises and retain their existing target-specific paths.
  */

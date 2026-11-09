@@ -27,7 +27,7 @@ const ce = new ComputeEngine();
 ce.declare('x', 'real');
 ce.declare('y', 'real');
 
-const TARGETS = ['javascript', 'interval-js', 'python', 'glsl', 'wgsl'];
+const TARGETS = ['javascript', 'interval-js', 'python', 'glsl'];
 const NOTHING = /evaluates to `Nothing`, the erasure marker/;
 
 const range = (a: number, b: number) => ['Range', a, b];
@@ -50,7 +50,7 @@ describe('A Loop whose value is used declines', () => {
     [
       'a loop that is the whole expression',
       ['Loop', ['Add', 'k', 'x'], ['Element', 'k', range(1, 3)]],
-      ['javascript', 'python', 'glsl', 'wgsl'],
+      ['javascript', 'python', 'glsl'],
     ],
     [
       'a loop whose body is a destructuring declaration',

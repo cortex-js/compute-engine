@@ -321,11 +321,11 @@ describe('Subtype: `Subtype(t, u)` is true iff t <: u', () => {
 describe('compile fail-closed (plan §3.3)', () => {
   // The shared gate lives in `BaseCompiler.compile`, so ALL FIVE built-in
   // targets fail closed through one check. The FAILURE SHAPE differs by each
-  // target's documented contract: `javascript`/`glsl`/`wgsl`/`python` throw
+  // target's documented contract: `javascript`/`glsl`/`python` throw
   // from `compile()`, while `interval-js` converts the throw into its
   // `success: false` result shape, carrying the same diagnostic in `.error`
   // (`.code` is empty in that shape — a consumer must check `.success`).
-  const THROWING_TARGETS = ['javascript', 'glsl', 'wgsl', 'python'] as const;
+  const THROWING_TARGETS = ['javascript', 'glsl', 'python'] as const;
 
   // A subject the constant folder cannot evaluate away: a Subtype call with
   // a valueless string-typed symbol operand.
@@ -618,7 +618,7 @@ describe('compile fail-closed: the phase-2 operators', () => {
     const eng = new ComputeEngine();
     eng.declare('gx', 'integer');
     const mt = eng.box(['MatchesType', 'gx', { str: 'integer' }]);
-    for (const name of ['glsl', 'wgsl', 'python'])
+    for (const name of ['glsl', 'python'])
       expect(() =>
         (eng as any)._getCompilationTarget(name).compile(mt)
       ).toThrow(/could not compile/i);
@@ -636,7 +636,7 @@ describe('compile fail-closed: the phase-2 operators', () => {
     // type text or settled type values), so the call must fail closed too.
     executeEpsil(eng, 'protocol MarkerC { }');
     const cf = eng.box(['Conforms', 'gx', { str: 'MarkerC' }]);
-    for (const name of ['javascript', 'glsl', 'wgsl', 'python'])
+    for (const name of ['javascript', 'glsl', 'python'])
       expect(() =>
         (eng as any)._getCompilationTarget(name).compile(cf)
       ).toThrow(/could not compile/i);

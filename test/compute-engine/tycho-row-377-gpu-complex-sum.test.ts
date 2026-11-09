@@ -1,6 +1,6 @@
 /**
- * A `Sum` or `Product` with a complex-valued body compiles on the `glsl` and
- * `wgsl` targets (Tycho ledger row 377).
+ * A `Sum` or `Product` with a complex-valued body compiles on the `glsl`
+ * target (Tycho ledger row 377).
  *
  * Before, a shader `Sum`/`Product` refused any complex-valued body, while
  * the same terms written out by hand compiled. The consumer case was a domain
@@ -22,7 +22,7 @@ function engine(): ComputeEngine {
   return ce;
 }
 
-function gpu(latex: string, to: 'glsl' | 'wgsl'): any {
+function gpu(latex: string, to: 'glsl'): any {
   const r = compile(engine().parse(latex), { to, fallback: false } as any);
   expect(r.success).toBe(true);
   return r;
@@ -45,7 +45,7 @@ const complexHelpers = (code: string) =>
   [...new Set(code.match(/_gpu_c\w+/g) ?? [])].sort();
 
 describe('Tycho row 377: a complex-valued Sum or Product compiles on GPU targets', () => {
-  for (const to of ['glsl', 'wgsl'] as const) {
+  for (const to of ['glsl'] as const) {
     test(`${to}: the arctangent Taylor sum unrolls to eleven complex powers`, () => {
       const code = String(gpu(ARCTAN_SUM, to).code);
       expect(code.startsWith('length(')).toBe(true);
@@ -71,28 +71,17 @@ describe('Tycho row 377: a complex-valued Sum or Product compiles on GPU targets
     );
   });
 
-  test('glsl and wgsl: a product multiplies the terms with _gpu_cmul', () => {
+  test('glsl: a product multiplies the terms with _gpu_cmul', () => {
     const glsl = gpu('\\prod_{n=1}^{3}(x+in)', 'glsl');
     expect(glsl.code).toBe(
       '(_gpu_cmul(_gpu_cmul((vec2(x, 1.0)), (vec2(x, 2.0))), (vec2(x, 3.0))))'
     );
     expect(glsl.preamble).toContain('vec2 _gpu_cmul(vec2 a, vec2 b)');
-    const wgsl = gpu('\\prod_{n=1}^{3}(x+in)', 'wgsl');
-    expect(wgsl.code).toBe(
-      '(_gpu_cmul(_gpu_cmul((vec2f(x, 1.0)), (vec2f(x, 2.0))), (vec2f(x, 3.0))))'
-    );
-    expect(wgsl.preamble).toContain(
-      'fn _gpu_cmul(a: vec2f, b: vec2f) -> vec2f'
-    );
   });
 
   test('an empty range answers the complex identity', () => {
     expect(gpu('\\sum_{n=3}^{1}(x+iy)^n', 'glsl').code).toBe('vec2(0.0, 0.0)');
     expect(gpu('\\prod_{n=3}^{1}(x+iy)^n', 'glsl').code).toBe('vec2(1.0, 0.0)');
-    expect(gpu('\\sum_{n=3}^{1}(x+iy)^n', 'wgsl').code).toBe('vec2f(0.0, 0.0)');
-    expect(gpu('\\prod_{n=3}^{1}(x+iy)^n', 'wgsl').code).toBe(
-      'vec2f(1.0, 0.0)'
-    );
   });
 
   test('glsl: the loop form accumulates in a vec2', () => {
@@ -110,27 +99,6 @@ describe('Tycho row 377: a complex-valued Sum or Product compiles on GPU targets
         'vec2 _tv1 = vec2(1.0, 0.0);',
         'for (int n = 1; n <= int(floor(m)); n++) {',
         '  _tv1 = _gpu_cmul(_tv1, vec2(x, float(n)));',
-        '}',
-        'return _tv1;',
-      ].join('\n')
-    );
-  });
-
-  test('wgsl: the loop form accumulates in a vec2f', () => {
-    expect(gpu('\\sum_{n=1}^{m}(x+iy)^n', 'wgsl').code).toBe(
-      [
-        'var _tv1: vec2f = vec2f(0.0, 0.0);',
-        'for (var n: i32 = 1; n <= i32(floor(m)); n++) {',
-        '  _tv1 += _gpu_cpow(vec2f(x, y), vec2f(f32(n), 0.0));',
-        '}',
-        'return _tv1;',
-      ].join('\n')
-    );
-    expect(gpu('\\prod_{n=1}^{m}(x+in)', 'wgsl').code).toBe(
-      [
-        'var _tv1: vec2f = vec2f(1.0, 0.0);',
-        'for (var n: i32 = 1; n <= i32(floor(m)); n++) {',
-        '  _tv1 = _gpu_cmul(_tv1, vec2f(x, f32(n)));',
         '}',
         'return _tv1;',
       ].join('\n')
@@ -162,7 +130,7 @@ describe('Tycho row 377: the index of a GPU Sum or Product is a real counter', (
     ['Assign', 'n', ['Add', 'x', 'ImaginaryUnit']],
     ['Add', ['Abs', 'n'], body],
   ];
-  const gpuBox = (json: unknown, to: 'glsl' | 'wgsl'): string => {
+  const gpuBox = (json: unknown, to: 'glsl'): string => {
     const r = compile(engine().box(json as any), {
       to,
       fallback: false,
@@ -195,16 +163,6 @@ describe('Tycho row 377: the index of a GPU Sum or Product is a real counter', (
     expect(code).toContain('float _tv1 = 0.0;');
     expect(code).toContain('_tv1 += _gpu_pow2(float(n));');
     expect(code).not.toMatch(/_gpu_c\w+/);
-  });
-
-  test('wgsl: a real Product over n compiles on the real lane', () => {
-    const code = gpuBox(
-      inBlock(['Product', 'n', ['Limits', 'n', 1, 'm']]),
-      'wgsl'
-    );
-    expect(code).toContain('var _tv1: f32 = 1.0;');
-    expect(code).toContain('_tv1 *= f32(n);');
-    expect(code).not.toMatch(/_gpu_cmul/);
   });
 
   test('glsl: an unrolled real Sum over n has real terms', () => {

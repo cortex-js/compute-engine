@@ -2,7 +2,6 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
@@ -44,7 +43,6 @@ describe('PointList compile — scalar parity with Tuple', () => {
   const targets: Array<[string, { compile: (e: any, o?: any) => any }]> = [
     ['javascript', new JavaScriptTarget()],
     ['glsl', new GLSLTarget()],
-    ['wgsl', new WGSLTarget()],
     ['python', new PythonTarget()],
   ];
 
@@ -74,11 +72,6 @@ describe('PointList compile — scalar parity with Tuple', () => {
   it('glsl: PointList(x,y) emits vec2(x, y)', () => {
     const r = new GLSLTarget().compile(ce.box(['PointList', 'x', 'y']));
     expect(r.code).toBe('vec2(x, y)');
-  });
-
-  it('wgsl: PointList(x,y) emits vec2f(x, y)', () => {
-    const r = new WGSLTarget().compile(ce.box(['PointList', 'x', 'y']));
-    expect(r.code).toBe('vec2f(x, y)');
   });
 
   it('python: PointList(x,y) emits the Python tuple', () => {
@@ -361,11 +354,7 @@ describe('PointList compile — the all-scalar opaque-slot guard', () => {
     // targets compile no function literal, so the plain point is checked on
     // Python only, with `u` and `v` parameters of the root function.
     const ce = opaqueEngine();
-    for (const target of [
-      new GLSLTarget(),
-      new WGSLTarget(),
-      new PythonTarget(),
-    ])
+    for (const target of [new GLSLTarget(), new PythonTarget()])
       expect(() => target.compile(ce.box(['PointList', 'u', 'v']))).toThrow(
         /have no type/
       );
@@ -516,14 +505,6 @@ describe('Dot over points — compile targets (Tycho item 158)', () => {
     ).toThrow();
   });
 
-  it('wgsl: Dot(Tuple, Tuple) emits dot() over vecNf', () => {
-    const r = new WGSLTarget().compile(
-      ce.box(['Dot', ['Tuple', 'x', 'y'], ['Tuple', 3, 4]])
-    );
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('dot(vec2f(x, y), vec2f(3.0, 4.0))');
-  });
-
   it('javascript: compiled Dot matches the interpreter', () => {
     const expr = ce.box(['Dot', ['Tuple', 1, 2], ['Tuple', 3, 4]]);
     const r = new JavaScriptTarget().compile(expr);
@@ -561,14 +542,6 @@ describe('Dot composed under Dot — GPU shape gate (Tycho item 159)', () => {
     expect(r.success).toBe(true);
     expect(r.code).toBe(
       'dot(vec2(dot(vec3(x, y, z), vec3(1.0, 2.0, 3.0)), 0.0), vec2(1.0, 2.0))'
-    );
-  });
-
-  it('wgsl: the same composition compiles', () => {
-    const r = new WGSLTarget().compile(ce.box(nested));
-    expect(r.success).toBe(true);
-    expect(r.code).toBe(
-      'dot(vec2f(dot(vec3f(x, y, z), vec3f(1.0, 2.0, 3.0)), 0.0), vec2f(1.0, 2.0))'
     );
   });
 

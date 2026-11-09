@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
@@ -26,7 +25,6 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 const NO_FOLD = { constantFold: false } as const;
 
 const glsl = new GLSLTarget();
-const wgsl = new WGSLTarget();
 const python = new PythonTarget();
 
 function makeEngine(): ComputeEngine {
@@ -61,7 +59,7 @@ function scaledAtom(k: number, head: string, sym: string) {
   return ce.box(['Multiply', k, [head, sym] as never] as never);
 }
 
-describe('IDENTITY PASSTHROUGH PARENTHESES — GPU (GLSL and WGSL)', () => {
+describe('IDENTITY PASSTHROUGH PARENTHESES — GPU (GLSL)', () => {
   // `Floor`/`Ceil`/`Round`/`Truncate` of an INTEGER-valued operand, `Abs` of a
   // NON-NEGATIVE one, `Real`/`Conjugate` of a REAL one: each returns the
   // operand's code unchanged.
@@ -83,7 +81,6 @@ describe('IDENTITY PASSTHROUGH PARENTHESES — GPU (GLSL and WGSL)', () => {
     test(`${label}: the infix operand is parenthesized`, () => {
       const expr = scaled(3, head, sym, extra ?? []);
       expect(glsl.compile(expr, NO_FOLD).code).toBe(`3.0 * (${sym} + 1.0)`);
-      expect(wgsl.compile(expr, NO_FOLD).code).toBe(`3.0 * (${sym} + 1.0)`);
     });
   }
 
@@ -94,7 +91,6 @@ describe('IDENTITY PASSTHROUGH PARENTHESES — GPU (GLSL and WGSL)', () => {
       ['WithRandomSeed', 1, ['Add', 'x', 1]],
     ]);
     expect(glsl.compile(expr, NO_FOLD).code).toBe('3.0 * (x + 1.0)');
-    expect(wgsl.compile(expr, NO_FOLD).code).toBe('3.0 * (x + 1.0)');
   });
 
   // A postfix swizzle binds tighter than every infix operator, so a complex
@@ -127,7 +123,6 @@ describe('IDENTITY PASSTHROUGH PARENTHESES — GPU (GLSL and WGSL)', () => {
       test(`${head} of a symbol`, () => {
         const expr = scaledAtom(3, head, sym);
         expect(glsl.compile(expr, NO_FOLD).code).toBe(`3.0 * ${sym}`);
-        expect(wgsl.compile(expr, NO_FOLD).code).toBe(`3.0 * ${sym}`);
       });
     }
   });

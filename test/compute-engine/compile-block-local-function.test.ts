@@ -860,12 +860,12 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     // On Python the root `Block` lowers to statements, which the dispatch on
     // the shape of `x` (declared `real | list<real>`) cannot join in one
     // conditional expression: the call of `k` over the union declines.
-    for (const to of ['glsl', 'wgsl', 'python'])
+    for (const to of ['glsl', 'python'])
       expect(() =>
         compile(ce.box(json as never), { to, fallback: false } as never)
       ).toThrow();
     // The GPU targets say why: they have no function values.
-    for (const to of ['glsl', 'wgsl'])
+    for (const to of ['glsl'])
       expect(() =>
         compile(ce.box(inBranch as never), { to, fallback: false } as never)
       ).toThrow(/Anonymous functions \(Function\) are not supported/);

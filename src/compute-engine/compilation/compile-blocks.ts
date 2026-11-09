@@ -2,10 +2,7 @@
 
 import type { Expression } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
-import {
-  recordBlockScalarLocals,
-  recordVariableLocals,
-} from './javascript-value-facts.js';
+import { recordBlockScalarLocals } from './javascript-value-facts.js';
 import { discardedValueStatement } from './javascript-statements.js';
 import { resolveTypeForCompiledLanes as resolveTypeForCompilation } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -48,7 +45,6 @@ import {
   compileListStatement,
   joinShaderStatements,
   loopBodyTempTarget,
-  shaderExpressionStatement,
   statementBodyHead,
   statementLines,
   statementListDeclaredVarTypes,
@@ -123,14 +119,12 @@ export function compileStatementList(
   // On a shader target the lone statement gets a statement sink of its own
   // (see `compileListStatement`): a loop-form `Sum` on the right of the
   // assignment has nowhere else to put its loop. A selection whose branches
-  // assign takes the statement form (`shaderSelectionStatement`), and a
-  // value is written as a WGSL statement (`shaderExpressionStatement`).
+  // assign takes the statement form (`shaderSelectionStatement`).
   if (stmts === null)
     return target.bareStatementBlocks
       ? joinShaderStatements(
           compileListStatement(target, expr, (t) => [
-            core.shaderSelectionStatement(expr, t) ??
-              shaderExpressionStatement(expr, core.compile(expr, t), t),
+            core.shaderSelectionStatement(expr, t) ?? core.compile(expr, t),
           ])
         )
       : core.compile(expr, target);
@@ -359,7 +353,7 @@ export function compileBlock(
   // prevent, by intra-block reassignment instead of aliasing.
   //
   // Disagreement FAILS CLOSED rather than widening to a union, because
-  // neither GLSL nor WGSL has a type a scalar and a `vecN` (or a `vec2` and
+  // GLSL has no type a scalar and a `vecN` (or a `vec2` and
   // a `vec3`) both fit: there is no variant type and no implicit
   // scalar↔vector assignment conversion. "Widening" could only mean
   // splatting the scalar binding (`p = vec2(cos(t))`), which silently
@@ -367,7 +361,7 @@ export function compileBlock(
   // vector arithmetic — and for two different vector widths not even that
   // exists. A diagnostic naming the two shapes beats source no driver
   // accepts (D6).
-  const isGPUTarget = target.language === 'glsl' || target.language === 'wgsl';
+  const isGPUTarget = target.language === 'glsl';
   const declaredVarTypes = statementListDeclaredVarTypes(
     args,
     target.declaredVarTypes
@@ -420,7 +414,7 @@ export function compileBlock(
     if (count === 0)
       throw new Error(
         `Could not compile the block local \`${name}\`: an empty tuple/list has no GPU lowering — ` +
-          `neither GLSL nor WGSL has a zero-length array type, so there is ` +
+          `GLSL has no zero-length array type, so there is ` +
           `no declaration its assignment could match.`
       );
     // Provably non-scalar, but with no single component count (a `Matrix`,
@@ -455,7 +449,7 @@ export function compileBlock(
       throw new Error(
         `Could not compile the block local \`${name}\`: it is bound to values of disagreeing shapes ` +
           `(${shapeName(prev)}, then ${shapeName(n)}); a shader local has ` +
-          `one declared type and neither GLSL nor WGSL can convert between ` +
+          `one declared type and GLSL cannot convert between ` +
           `these.`
       );
   };
@@ -535,22 +529,17 @@ export function compileBlock(
     // else uses the `float` default in `target.declare`.
     const typeHints: Record<string, string | undefined> = {};
     if (target.declare && target.language) {
-      const isWGSL = target.language === 'wgsl';
-      const vecN = (n: number) => (isWGSL ? `vec${n}f` : `vec${n}`);
+      const vecN = (n: number) => `vec${n}`;
       // A width with no `vecN` gets the array type the list compilers emit
       // for it, so declaration and assignment agree.
       const aggregateType = (n: number) =>
-        n >= 2 && n <= 4
-          ? vecN(n)
-          : isWGSL
-            ? `array<f32, ${n}>`
-            : `float[${n}]`;
+        n >= 2 && n <= 4 ? vecN(n) : `float[${n}]`;
       for (const local of locals) {
         if (complexFrame.get(local)) typeHints[local] = vecN(2);
         else {
           const n = vectorFrame.get(local);
           // Negative entries are the "not an aggregate" sentinels. A width
-          // of `0` has no valid array type in either language; on a GPU
+          // of `0` has no valid array type in GLSL; on a GPU
           // target `noteVectorWidth` has already failed closed on it, and
           // this guard keeps any other target from emitting `float[0]`.
           if (n !== undefined && n > 0) typeHints[local] = aggregateType(n);
@@ -589,10 +578,9 @@ export function compileBlock(
     // the block (a parameter of the function, a loop index, a local of an
     // enclosing block) gets a fresh name too. The statements of the block
     // that is the body of a function or of a loop are in the same scope as
-    // the parameters or the index, and GLSL and WGSL do not let a
+    // the parameters or the index, and GLSL does not let a
     // declaration have the name of a parameter of its scope
-    // (`float f(float U) { float[10] U;` is a redeclaration). WGSL also
-    // refuses a write of a parameter, and its check reads the name at the
+    // (`float f(float U) { float[10] U;` is a redeclaration). The check reads the name at the
     // start of each emitted line, so a local of a nested block that hides
     // a parameter must not have its name either, even when a local of an
     // enclosing block has the same name.
@@ -628,11 +616,6 @@ export function compileBlock(
     };
     if (target.language === 'javascript')
       recordBlockScalarLocals(args, localTarget);
-    // A shader target declares each local as a variable (`var U` in
-    // WGSL), which an expression can index with a run-time index. A read
-    // of a list local then indexes it as it is, with no copy
-    // (`isVariableLocal` in `compileGPUAt`, `gpu-functions.ts`).
-    if (isGPUTarget) recordVariableLocals(localTarget, locals);
 
     // The statement LIST is one INERT region — no binding is placed at the
     // statement-list level, so early-exit reachability and inter-statement
@@ -872,8 +855,7 @@ export function compileBlock(
             // last statement is a list were put in the enclosing scope
             // with a `return` of that list (`return U; return x + 1.0;`),
             // and a block with a scalar value was stored in a temporary
-            // that was then written as a statement (`_tv1;`, which is not
-            // valid WGSL).
+            // that was then written as a statement (`_tv1;`).
             //
             // Python has no compound statement and no block scope. Its
             // statements are put in the enclosing list, with no `return`,
@@ -966,14 +948,14 @@ export function compileBlock(
                 ),
               ];
             const code = compileOp(arg, -1, stmtTarget, 0, value);
-            // A discarded value is a WGSL phony assignment
-            // (`shaderExpressionStatement`). On JavaScript, a loop whose
+            // A discarded value is kept as it is on a shader target. On
+            // JavaScript, a loop whose
             // value is discarded is a block statement, not an arrow function
             // that is called at once (`discardedValueStatement()`).
             if (!isStatement) return [code];
             return [
               target.bareStatementBlocks
-                ? shaderExpressionStatement(arg, code, stmtTarget)
+                ? code
                 : discardedValueStatement(stmtTarget, code),
             ];
           })
@@ -1039,12 +1021,12 @@ export function compileBlock(
     // does not count as used (the branch of a conditional that is a
     // statement) compiles on only when the compilation has no other value
     // with no settled shape: on JavaScript and GLSL, where an assignment is
-    // an expression, the code below returns the assignment. In Python and
-    // WGSL an assignment is a statement, with no form that the code below
+    // an expression, the code below returns the assignment. In Python an
+    // assignment is a statement, with no form that the code below
     // can return, so the block declines.
     if (isFunction(lastArg, 'Assign') || isFunction(lastArg, 'Declare')) {
       core.throwPendingUnsettledShape();
-      if (target.language === 'python' || target.language === 'wgsl')
+      if (target.language === 'python')
         throw new Error(
           `Could not compile \`Block\`: the last statement of the block is ` +
             `an assignment or a declaration, so the value of the block is ` +
@@ -1157,7 +1139,7 @@ export function compileBlock(
 /**
  * True when `t` is a list of points: a list whose elements are tuples, or a
  * tuple whose elements are all tuples. A shader lowers such a value as an
- * array of vectors (`vec2[3]` in GLSL, `array<vec2f, 3>` in WGSL), for which
+ * array of vectors (`vec2[3]` in GLSL), for which
  * a block local has no declaration. The component count of such a type is
  * the number of points, so without this test the local would be declared
  * `vec3` (three points) or `vec2` (two points).

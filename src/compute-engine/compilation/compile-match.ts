@@ -930,7 +930,7 @@ export function compileMatchTernary(
           'in the shader.'
       );
     const t = tempVar(target);
-    const decl = target.language === 'wgsl' ? `var ${t}: f32` : `float ${t}`;
+    const decl = `float ${t}`;
     hoistStatement(target, `${decl} = ${subj};`);
     subj = t;
   }

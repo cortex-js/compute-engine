@@ -1,9 +1,9 @@
 /**
  * `Break` and `Continue` on the shader targets.
  *
- * A jump is a statement in GLSL and WGSL, so it compiles only where it is a
+ * A jump is a statement in GLSL, so it compiles only where it is a
  * statement of a `Loop` body, alone or as the branch of a selection with one
- * clause. Everywhere else it declines: a ternary or a `select` cannot hold it,
+ * clause. Everywhere else it declines: a ternary cannot hold it,
  * and a `break` outside a loop is an error that only the driver reports, after
  * the compilation has reported success. `CompileTarget.shaderLoopJumps` holds
  * the nodes that are admitted.
@@ -12,7 +12,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
-const SHADERS = ['glsl', 'wgsl'] as const;
+const SHADERS = ['glsl'] as const;
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();

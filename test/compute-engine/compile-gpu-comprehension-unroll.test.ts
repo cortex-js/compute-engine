@@ -1,15 +1,15 @@
 /**
  * A `Comprehension` over LITERAL domains on the shader targets.
  *
- * GLSL and WGSL have no dynamic arrays, so a comprehension declined whole on
- * both — the four point-table rows of the 3-D art document `art/n7uhaaoq1q`
+ * GLSL has no dynamic arrays, so a comprehension declined whole there —
+ * the four point-table rows of the 3-D art document `art/n7uhaaoq1q`
  * in the Tycho code-generation audit of 0.128.9 (`[PointList(…) for y = 1..4,
  * x = 1..3]`). The target-independent pre-pass (`fixed-width-unroll.ts`,
  * rule 6) now writes such a comprehension out as the literal list of its
  * substituted bodies when every domain is a literal range or list of a small
  * total size, on the targets that ask for it (`CompileTarget.unrollComprehensions`),
  * and the shader targets lower a list of points of one arity as an array of
- * vectors (`vec3[12](…)`, `array<vec3f, 12>(…)`). A literal index into a
+ * vectors (`vec3[12](…)`). A literal index into a
  * literal range folds to the number (rule 5), which the substituted rows
  * need. The JavaScript target keeps its loop.
  *
@@ -70,7 +70,7 @@ const TABLE = [
 
 function shader(
   json: unknown,
-  to: 'glsl' | 'wgsl'
+  to: 'glsl'
 ):
   | { code: string; declined?: undefined }
   | { code?: undefined; declined: string } {
@@ -88,15 +88,13 @@ function shader(
   }
 }
 
-describe.each(['glsl', 'wgsl'] as const)(
+describe.each(['glsl'] as const)(
   '%s — a comprehension over literal domains is a fixed-size array',
   (to) => {
     test('the audit point table compiles to an array of twelve points', () => {
       const r = shader(TABLE, to);
       expect(r.declined).toBeUndefined();
-      expect(r.code).toContain(
-        to === 'glsl' ? 'vec3[12](' : 'array<vec3f, 12>('
-      );
+      expect(r.code).toContain('vec3[12](');
       expect(r.code.match(/vec3f?\(/g)!.length).toBeGreaterThanOrEqual(12);
       expect(r.code).not.toContain(';;');
     });
@@ -110,11 +108,7 @@ describe.each(['glsl', 'wgsl'] as const)(
       ];
       expect(ce.box(json).evaluate().toString()).toBe('[11,21,31,12,22,32]');
       const r = shader(json, to);
-      expect(r.code).toBe(
-        to === 'glsl'
-          ? 'float[6](11.0, 21.0, 31.0, 12.0, 22.0, 32.0)'
-          : 'array<f32, 6>(11.0, 21.0, 31.0, 12.0, 22.0, 32.0)'
-      );
+      expect(r.code).toBe('float[6](11.0, 21.0, 31.0, 12.0, 22.0, 32.0)');
     });
 
     test('a scalar comprehension over a literal list domain', () => {
@@ -124,12 +118,8 @@ describe.each(['glsl', 'wgsl'] as const)(
         ['Element', 'k', ['List', 1, 2, 5]],
       ];
       const r = shader(json, to);
-      // Three scalars are a native vector on both targets.
-      expect(r.code).toBe(
-        to === 'glsl'
-          ? 'vec3(u, 2.0 * u, 5.0 * u)'
-          : 'vec3f(u, 2.0 * u, 5.0 * u)'
-      );
+      // Three scalars are a native vector.
+      expect(r.code).toBe('vec3(u, 2.0 * u, 5.0 * u)');
     });
 
     test('a literal index into a literal range is the number', () => {
@@ -170,7 +160,7 @@ describe.each(['glsl', 'wgsl'] as const)(
   }
 );
 
-describe.each(['glsl', 'wgsl'] as const)('%s — guards', (to) => {
+describe.each(['glsl'] as const)('%s — guards', (to) => {
   test('a huge literal range is declined without being enumerated', () => {
     const t0 = performance.now();
     const r = shader(
@@ -214,8 +204,7 @@ describe.each(['glsl', 'wgsl'] as const)('%s — guards', (to) => {
 
   // The value of these locals is a list of points by its TYPE, not by its
   // form. The component count of the type is the number of points, which
-  // declared the local as `vec3 Q` (GLSL) or `var Q: vec3f` (WGSL) over the
-  // `vec2[3]` value of `P`.
+  // declared the local as `vec3 Q` over the `vec2[3]` value of `P`.
   test.each([
     ['a copy of a declared list', ['Block', ['Assign', 'Q', 'P'], ['At', 'Q', 'k']]],
     [
@@ -283,11 +272,7 @@ describe.each(['glsl', 'wgsl'] as const)('%s — guards', (to) => {
 
   test('a list of points of one arity is an array of vectors', () => {
     const r = shader(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]], to);
-    expect(r.code).toBe(
-      to === 'glsl'
-        ? 'vec2[2](vec2(1.0, 2.0), vec2(3.0, 4.0))'
-        : 'array<vec2f, 2>(vec2f(1.0, 2.0), vec2f(3.0, 4.0))'
-    );
+    expect(r.code).toBe('vec2[2](vec2(1.0, 2.0), vec2(3.0, 4.0))');
   });
 });
 

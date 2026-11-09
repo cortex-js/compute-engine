@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { implicitCompile } from '../../src/compute-engine/implicit-compile';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
@@ -46,19 +45,8 @@ describe('compiled Mod/Remainder operand parenthesization', () => {
     }
   });
 
-  it('WGSL Mod parenthesizes the compiled dividend', () => {
-    const wgsl = new WGSLTarget();
-    const code = wgsl.compile(ce.box(['Mod', ['Add', 'x', 29], 900]), {
-      vars: { x: 'u_x' },
-    }).code;
-    expect(code).toBe(
-      '_gpu_fmod(u_x + 29.0, 900.0)'
-    );
-  });
-
   it('GLSL Remainder parenthesizes the compiled dividend', () => {
-    // The GPU `Remainder` handler is SHARED by GLSL and WGSL (WGSL only
-    // overrides `Mod`), so this pins both.
+    // The GPU `Remainder` handler is shared by every shader target.
     const glsl = new GLSLTarget();
     const code = glsl.compile(ce.box(['Remainder', ['Add', 'x', 29], 3]), {
       vars: { x: 'x' },

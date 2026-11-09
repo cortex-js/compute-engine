@@ -25,7 +25,7 @@ ce.declare('x', 'real');
 ce.assign('N', 4);
 
 /** The shader code, or the message of the decline under `fallback: false`. */
-function shader(expr: unknown, to: 'glsl' | 'wgsl'): string {
+function shader(expr: unknown, to: 'glsl'): string {
   try {
     const r = compile(ce.box(expr as never), { to, fallback: false });
     return r.success ? (r.code ?? '') : `DECLINED: ${r.error ?? ''}`;
@@ -56,7 +56,6 @@ const statementLoop = (range: unknown[]) => [
 describe('a Loop over a Range on a shader target', () => {
   test.each([
     ['glsl', 'int _tv1 = int(n);\nfor (int j = 1; j <= _tv1; j++) {'],
-    ['wgsl', 'let _tv1: i32 = i32(n);\nfor (var j: i32 = 1; j <= _tv1; j++) {'],
   ] as const)(
     '%s reads a symbolic integer bound with no value once, before the loop',
     (to, text) => {
@@ -64,7 +63,7 @@ describe('a Loop over a Range on a shader target', () => {
     }
   );
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s reads a bound that `vars` maps to an input from that input, not from its stored value',
     (to) => {
       const engine = new ComputeEngine();
@@ -76,12 +75,12 @@ describe('a Loop over a Range on a shader target', () => {
         vars: { N: 'u_N' },
       });
       expect(r.success).toBe(true);
-      expect(r.code).toContain(to === 'wgsl' ? 'i32(u_N)' : 'int(u_N)');
+      expect(r.code).toContain('int(u_N)');
       expect(r.code).not.toContain('j <= 4;');
     }
   );
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s puts the statements that a run-time bound hoists in the prologue of its clause',
     (to) => {
       // The bound `Sum` of the inner clause is a loop-form sum over the
@@ -106,9 +105,9 @@ describe('a Loop over a Range on a shader target', () => {
       );
       expect(r.success).toBe(true);
       const code = r.code ?? '';
-      const outer = code.indexOf(to === 'wgsl' ? 'for (var i: i32' : 'for (int i');
+      const outer = code.indexOf('for (int i');
       const sumLoop = code.indexOf('for (', outer + 1);
-      const inner = code.indexOf(to === 'wgsl' ? 'for (var j: i32' : 'for (int j');
+      const inner = code.indexOf('for (int j');
       // The outer loop, then the hoisted loop of the Sum, then the inner loop.
       expect(outer).toBeGreaterThanOrEqual(0);
       expect(sumLoop).toBeGreaterThan(outer);
@@ -116,7 +115,7 @@ describe('a Loop over a Range on a shader target', () => {
     }
   );
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s declines a run-time bound whose static type is not integer',
     (to) => {
       expect(shader(statementLoop([1, 'x']), to)).toBe(
@@ -125,7 +124,7 @@ describe('a Loop over a Range on a shader target', () => {
     }
   );
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s reads the bound that is a local of the function at run time, not from its declaration',
     (to) => {
       // `e` is declared 0 and assigned 3 in the first loop. The second loop
@@ -150,12 +149,12 @@ describe('a Loop over a Range on a shader target', () => {
         ],
         to
       );
-      expect(code).toContain(to === 'wgsl' ? 'i32(e)' : 'int(e)');
+      expect(code).toContain('int(e)');
       expect(code).not.toContain('m <= 0;');
     }
   );
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s keeps the "finite" message for an infinite literal bound',
     (to) => {
       expect(shader(loop([1, 'PositiveInfinity']), to)).toBe(
@@ -164,14 +163,14 @@ describe('a Loop over a Range on a shader target', () => {
     }
   );
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s compiles a bound that is a symbol with a value',
     (to) => {
       expect(shader(statementLoop([1, 'N']), to)).toContain('j <= 4; j++');
     }
   );
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s advances the counter by the step of the Range',
     (to) => {
       expect(shader(statementLoop([1, 10, 3]), to)).toContain(
@@ -183,7 +182,7 @@ describe('a Loop over a Range on a shader target', () => {
     }
   );
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s declines a step that is not a non-zero integer',
     (to) => {
       const message =

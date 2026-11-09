@@ -286,7 +286,7 @@ describe('J5: a complex value built as a + i·b stays on the real lane', () => {
     const raw = (json: unknown) => ce.box(json as never, { form: 'raw' });
     const sub = raw(['Multiply', 3, ['Subtract', ['Add', 'x', 1]]]);
     expect(sub.canonical.subs({ x: 2 }).evaluate().re).toBe(9);
-    for (const to of ['javascript', 'glsl', 'wgsl']) {
+    for (const to of ['javascript', 'glsl']) {
       const code = compile(sub, { to, fallback: false } as never)
         .code as string;
       expect(code).toMatch(/^3(\.0)? \* \((_\.)?x \+ 1(\.0)?\)$/);
@@ -296,7 +296,7 @@ describe('J5: a complex value built as a + i·b stays on the real lane', () => {
         x: 2,
       })
     ).toBe(9);
-    for (const to of ['javascript', 'glsl', 'wgsl'])
+    for (const to of ['javascript', 'glsl'])
       for (const head of ['Divide', 'Power'])
         expect(() =>
           compile(raw(['Multiply', 3, [head, ['Add', 'x', 1]]]), {

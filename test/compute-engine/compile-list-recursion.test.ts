@@ -16,7 +16,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { listRecursionPlan } from '../../src/compute-engine/boxed-expression/recursive-list-builder';
 
 /** `F(n)` builds `[n, n+1, …, D-1]` by prepending to a self-call. */
@@ -318,7 +317,7 @@ describe('list-building recursion compiles to a loop', () => {
     // form is never emitted for them.
     const ce = new ComputeEngine();
     declareCountUp(ce, 6);
-    for (const target of [new GLSLTarget(), new WGSLTarget()])
+    for (const target of [new GLSLTarget()])
       expect(() => target.compile(ce.box(['F', 0]))).toThrow(
         /Could not compile/
       );

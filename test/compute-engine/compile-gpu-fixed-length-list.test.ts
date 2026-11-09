@@ -30,10 +30,8 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const glsl = new GLSLTarget();
-const wgsl = new WGSLTarget();
 
 /**
  * Compile-time constant folding is off throughout: the literal probes below
@@ -127,16 +125,6 @@ describe('GPU FIXED-LENGTH LIST — element type gates the vecN reading', () => 
         /no compile-time component list/
       );
     });
-  });
-
-  test('WGSL gates the same shapes', () => {
-    const ce = engineWith({ c: 'list<complex^3>' });
-    expect(() => wgsl.compile(ce.box(['Sin', 'c']), NO_FOLD)).toThrow(
-      /no array overload/
-    );
-    expect(() => wgsl.compile(ce.box(['Add', 'c', 'c']), NO_FOLD)).toThrow(
-      /shader ARRAY/
-    );
   });
 
   test('a real-element fixed-length list keeps its vecN reading', () => {
@@ -336,33 +324,6 @@ describe('GPU FIXED-LENGTH LIST — At decline reasons stay distinct', () => {
     expect(message).not.toMatch(/is not a statically counted collection/);
   });
 
-  // A WGSL shader INPUT is referenced from the emitted source as a field of
-  // the entry point's `input` struct, so the frame's `ref` for it is
-  // `input.S`, not `S`. The diagnostic must name what the caller WROTE — the
-  // name they can find in their own declaration list. `compileFunction` omits
-  // `ref` (it defaults to the name), so only this route witnesses the
-  // difference.
-  test('the message names the declared name, not its emission identifier', () => {
-    const ce = engineWith({ S: 'list<number^1600>', k: 'integer' });
-    let message = '';
-    try {
-      wgsl.compileShader({
-        type: 'vertex',
-        inputs: [
-          { name: 'S', type: 'array<f32, 1600>' },
-          { name: 'k', type: 'i32' },
-        ],
-        outputs: [{ name: 'pos', type: 'vec4f' }],
-        body: [{ variable: 'output.pos.x', expression: ce.box(['At', 'S', 'k']) }],
-        constantFold: false,
-      });
-    } catch (e) {
-      message = (e as Error).message;
-    }
-    expect(message).toMatch(/caller-declared name "S"/);
-    expect(message).not.toMatch(/input\.S/);
-  });
-
   // The route a shader host actually uses: the carrier is a free engine symbol
   // of counted type, and the host injects `uniform float S[1600];` itself.
   test('a counted free symbol compiles through the array helper', () => {
@@ -474,16 +435,6 @@ describe('GPU FIXED-LENGTH LIST — Sum/Product collection form', () => {
   test('the empty collection is the identity', () => {
     const ce = new ComputeEngine();
     expect(glsl.compile(ce.box(['Sum', ['List']]), NO_FOLD).code).toBe('0.0');
-  });
-
-  test('WGSL folds the same shapes', () => {
-    const ce = engineWith({ v: 'vector<3>' });
-    expect(wgsl.compile(ce.box(['Sum', 'v']), NO_FOLD).code).toBe(
-      '((v.x) + (v.y) + (v.z))'
-    );
-    expect(wgsl.compile(ce.box(['Sum', ['List', 1, 2, 3]]), NO_FOLD).code).toBe(
-      '((1.0) + (2.0) + (3.0))'
-    );
   });
 
   describe('fails closed where there is no component list', () => {

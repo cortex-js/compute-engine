@@ -1,7 +1,6 @@
 import { engine as ce } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const glsl = new GLSLTarget();
 
@@ -147,22 +146,6 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       );
     });
 
-    it('should nest one WGSL for-loop per Element clause, first outermost', () => {
-      const expr = ce.expr(multiClause);
-      expect(new WGSLTarget().compile(expr).code).toBe(
-        [
-          'var s: f32;',
-          's = 0.0;',
-          'for (var i: i32 = 1; i <= 2; i++) {',
-          '  for (var j: i32 = 1; j <= 3; j++) {',
-          '    s = f32(j) + 10.0 * s;',
-          '  }',
-          '}',
-          'return s;',
-        ].join('\n')
-      );
-    });
-
     it('should decline a multi-clause Loop whose inner Range reads an outer index', () => {
       // The bounds of a shader loop are read at compile time, but
       // `Range(1, i)` changes on each turn of the loop over `i`.
@@ -178,9 +161,6 @@ describe('GLSL COMPILATION — structures and control flow', () => {
         's',
       ]);
       expect(() => glsl.compile(expr)).toThrow(/reads the outer index `i`/);
-      expect(() => new WGSLTarget().compile(expr)).toThrow(
-        /reads the outer index `i`/
-      );
     });
 
     it('should decline a multi-clause Loop whose body can Break', () => {
@@ -198,9 +178,6 @@ describe('GLSL COMPILATION — structures and control flow', () => {
         's',
       ]);
       expect(() => glsl.compile(expr)).toThrow(/several Element clauses/);
-      expect(() => new WGSLTarget().compile(expr)).toThrow(
-        /several Element clauses/
-      );
     });
 
     // A guarded clause, `Element(i, Range(1, 5), Greater(i, 2))`, visits an
@@ -225,18 +202,6 @@ describe('GLSL COMPILATION — structures and control flow', () => {
           'for (int i = 1; i <= 5; i++) {',
           '  if (2.0 < float(i)) {',
           '    s = float(i) + s;',
-          '  }',
-          '}',
-          'return s;',
-        ].join('\n')
-      );
-      expect(new WGSLTarget().compile(expr).code).toBe(
-        [
-          'var s: f32;',
-          's = 0.0;',
-          'for (var i: i32 = 1; i <= 5; i++) {',
-          '  if (2.0 < f32(i)) {',
-          '    s = f32(i) + s;',
           '  }',
           '}',
           'return s;',
@@ -275,22 +240,6 @@ describe('GLSL COMPILATION — structures and control flow', () => {
           'return s;',
         ].join('\n')
       );
-      expect(new WGSLTarget().compile(expr).code).toBe(
-        [
-          'var s: f32;',
-          's = 0.0;',
-          'for (var i: i32 = 1; i <= 3; i++) {',
-          '  if (f32(i) < 3.0) {',
-          '    for (var j: i32 = 1; j <= 3; j++) {',
-          '      if (1.0 < f32(j)) {',
-          '        s = f32(j) + s;',
-          '      }',
-          '    }',
-          '  }',
-          '}',
-          'return s;',
-        ].join('\n')
-      );
     });
 
     it('should decline a Loop guard that is not a boolean', () => {
@@ -307,7 +256,6 @@ describe('GLSL COMPILATION — structures and control flow', () => {
         's',
       ]);
       expect(() => glsl.compile(expr)).toThrow(/is not a boolean/);
-      expect(() => new WGSLTarget().compile(expr)).toThrow(/is not a boolean/);
     });
 
     // The interpreter evaluates the `Range` of an inner clause again each
@@ -346,22 +294,15 @@ describe('GLSL COMPILATION — structures and control flow', () => {
         's',
       ]);
       expect(local.evaluate().re).toBe(6);
-      for (const target of [glsl, new WGSLTarget()]) {
-        expect(() => target.compile(assigned)).toThrow(
-          /Could not compile `Assign`: "N" has an assigned value/
-        );
-        const code = target.compile(local).code ?? '';
-        const read =
-          target === glsl ? 'int _tv1 = int(M);' : 'let _tv1: i32 = i32(M);';
-        // The read of `M` is inside the outer loop, before the inner one.
-        expect(code).toContain(
-          `${target === glsl ? 'for (int i = 1; i <= 2; i++) {' : 'for (var i: i32 = 1; i <= 2; i++) {'}\n  ${read}\n  ${
-            target === glsl
-              ? 'for (int j = 1; j <= _tv1; j++) {'
-              : 'for (var j: i32 = 1; j <= _tv1; j++) {'
-          }`
-        );
-      }
+      expect(() => glsl.compile(assigned)).toThrow(
+        /Could not compile `Assign`: "N" has an assigned value/
+      );
+      const code = glsl.compile(local).code ?? '';
+      const read = 'int _tv1 = int(M);';
+      // The read of `M` is inside the outer loop, before the inner one.
+      expect(code).toContain(
+        `for (int i = 1; i <= 2; i++) {\n  ${read}\n  for (int j = 1; j <= _tv1; j++) {`
+      );
     });
   });
 
@@ -412,7 +353,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     });
   });
 
-  // CO-P1-2: GLSL/WGSL `min`/`max` are 2-argument builtins; 3+ args must fold
+  // CO-P1-2: GLSL `min`/`max` are 2-argument builtins; 3+ args must fold
   // into a nest of 2-argument calls (a variadic `max(a, b, c)` is invalid).
   describe('CO-P1-2 min/max variadic folding', () => {
     it('folds 3-arg Max into nested _gpu_max()', () => {
@@ -492,14 +433,13 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       expect(code).not.toMatch(/return\s+\w+;\s*\+/);
     });
 
-    it('folds a constant loop-form Sum to a float literal (GLSL and WGSL)', () => {
+    it('folds a constant loop-form Sum to a float literal (GLSL)', () => {
       // With folding on, the compiler evaluates the constant subtree with
       // `.N()` and emits one float literal. The value of Σ sin(i), i = 1..1000,
       // is 0.8139696340731652 in double precision. In `1 + Σ…` the sum is an
       // operand of `Add`, which must evaluate it numerically too: an exact
       // evaluation of the 1000 symbolic terms took seconds.
-      const wgsl = new WGSLTarget();
-      for (const target of [glsl, wgsl]) {
+      for (const target of [glsl]) {
         expect(target.compile(ce.box(bigSum)).code).toBe('0.8139696');
         expect(target.compile(ce.box(['Add', bigSum, 1])).code).toBe(
           '1.8139696'

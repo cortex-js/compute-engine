@@ -8641,7 +8641,7 @@ const MAX_ABSENCE_MARKER_PROBE = 10;
 
 /**
  * The target languages `PointList`'s compile handler lowers (a point value with
- * scalar components). On `glsl` and `wgsl` the handler checks the operand
+ * scalar components). On `glsl` the handler checks the operand
  * shapes and then leaves the emission to the target's own `PointList` entry.
  * On any OTHER language the handler declines by returning
  * `undefined` — it has no opinion there, so a custom target's own `PointList`
@@ -8652,7 +8652,6 @@ const POINT_LIST_COMPILE_LANGUAGES: ReadonlySet<string> = new Set([
   'javascript',
   'python',
   'glsl',
-  'wgsl',
 ]);
 
 /**
@@ -12313,8 +12312,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Compile handler: when no component is provably non-scalar (a subtype of
   // `collection`), a `PointList` is a plain point and compiles
   // byte-identically to the equivalent `Tuple(...)` on each target — a JS array
-  // on the `javascript` target, a `vecN`/`float[N]` on `glsl` (and `vecNf`/
-  // `array<f32,N>` on `wgsl`). This includes free plot variables (typed
+  // on the `javascript` target, a `vecN`/`float[N]` on `glsl`. This includes free plot variables (typed
   // `unknown`), which the compile model treats as numeric parameters exactly as
   // `Tuple` does. That all-scalar path lives HERE, on every language.
   //
@@ -12325,7 +12323,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // expression-level value on JS (nested arrays), so a `PointList` with one or
   // more list SOURCES compiles to an IIFE zip (shortest-zip, scalars
   // broadcast), and the shapes that still have no lowering throw from there
-  // with a per-component diagnostic. On every other language (`glsl`, `wgsl`,
+  // with a per-component diagnostic. On every other language (`glsl`,
   // `python`) a provably non-scalar component keeps failing closed here, and
   // `interval-javascript` (no `Tuple` lowering at all) keeps returning
   // `undefined`.
@@ -12674,8 +12672,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // `compileIntervalCollectionValue` in
       // `compilation/interval-javascript-target.ts`.
       //
-      // On `glsl` and `wgsl`, decline by fall-through to the target table
-      // (`PointList` in `glsl-target.ts`/`wgsl-target.ts`). A shader point is
+      // On `glsl`, decline by fall-through to the target table
+      // (`PointList` in `glsl-target.ts`). A shader point is
       // a `vecN` of floats, so each component must be a shader scalar. A
       // complex component is a `vec2(re, im)`, and the type alone does not
       // always show it: a call of a user function whose body is complex can
@@ -12684,7 +12682,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // with `h(s) = s + i` emitted `vec2(t, _fn_h(t))`: GLSL accepts a
       // constructor whose last argument is only partly used, so the shader
       // kept the real part of `h(t)` and dropped the imaginary part.
-      if (language === 'glsl' || language === 'wgsl') return undefined;
+      if (language === 'glsl') return undefined;
       const parts = args.map((a) => compile(a));
       if (language === 'javascript') {
         // An OPAQUE component — one whose type does not prove it is a number,
@@ -17034,7 +17032,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
         if (language === 'javascript' || language === 'python')
           return `${compile(base)}[${i}]`;
-        if ((language === 'glsl' || language === 'wgsl') && i < 4)
+        if (language === 'glsl' && i < 4)
           return `${compile(base)}.${'xyzw'[i]}`;
       }
       return undefined;
@@ -22231,15 +22229,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // `vecN`/array literals. An all-scalar `ListFrom` is exactly the
       // equivalent `List`, so emit that; anything with a provably collection
       // operand fails closed (`undefined` → reported as uncompilable).
-      if (language === 'glsl' || language === 'wgsl') {
+      if (language === 'glsl') {
         if (!args.every(isProvablyScalar)) return undefined;
-        const suffix = language === 'wgsl' ? 'f' : '';
         if (parts.length >= 2 && parts.length <= 4)
-          return `vec${parts.length}${suffix}(${parts.join(', ')})`;
-        const arrayType =
-          language === 'wgsl'
-            ? `array<f32, ${parts.length}>`
-            : `float[${parts.length}]`;
+          return `vec${parts.length}(${parts.join(', ')})`;
+        const arrayType = `float[${parts.length}]`;
         return `${arrayType}(${parts.join(', ')})`;
       }
       return undefined;

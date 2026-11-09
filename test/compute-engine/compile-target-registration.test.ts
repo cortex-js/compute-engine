@@ -2,13 +2,13 @@
  * Which compilation targets an engine registers, by package entry.
  *
  * Every engine registers `javascript` and `interval-js`. The full entry
- * (`src/compute-engine.ts`) adds `glsl`, `wgsl` and `python` to the table of
+ * (`src/compute-engine.ts`) adds `glsl` and `python` to the table of
  * defaults when it is imported; the `./core` entry (`src/core.ts`) does not,
  * so a `./core` consumer registers a GPU or Python target with
  * `ce.registerCompilationTarget()` after importing it from `./compile`.
  *
  * The jest module registry is shared by every test of this file, and the full
- * entry is imported here, so an engine from either entry has all five targets
+ * entry is imported here, so an engine from either entry has all four targets
  * in this process. The `./core`-only behavior is checked by `jest.isolateModules`,
  * which gives the engine module a fresh registry with nothing added.
  *
@@ -18,13 +18,12 @@
 import { ComputeEngine, GLSLTarget, PythonTarget } from '../../src/compute-engine';
 
 describe('compilation target registration', () => {
-  test('an engine of the full entry has the five default targets', () => {
+  test('an engine of the full entry has the four default targets', () => {
     const ce = new ComputeEngine();
     expect(ce._listCompilationTargets()).toEqual([
       'javascript',
       'interval-js',
       'glsl',
-      'wgsl',
       'python',
     ]);
   });
@@ -93,7 +92,6 @@ describe('compilation target registration', () => {
         'javascript',
         'interval-js',
         'glsl',
-        'wgsl',
         'python',
       ]);
       const glsl = ce._compile(ce.box(['Add', 'x', 1]), { to: 'glsl' });
@@ -103,9 +101,9 @@ describe('compilation target registration', () => {
         ce._getCompilationTarget('glsl')
       );
       // A removed default stays removed for this engine.
-      ce.unregisterCompilationTarget('wgsl');
-      expect(ce._listCompilationTargets()).not.toContain('wgsl');
-      expect(ce._getCompilationTarget('wgsl')).toBeUndefined();
+      ce.unregisterCompilationTarget('python');
+      expect(ce._listCompilationTargets()).not.toContain('python');
+      expect(ce._getCompilationTarget('python')).toBeUndefined();
     });
   });
 

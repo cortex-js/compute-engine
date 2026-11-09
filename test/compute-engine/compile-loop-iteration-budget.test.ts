@@ -663,7 +663,7 @@ describe('COMPILE Loop - iterationBudget on the other targets', () => {
     ).toBe(compile(sum, { to: 'python', fallback: false } as any).code);
   });
 
-  test.each(['glsl', 'wgsl'])('%s: the code does not change', (to) => {
+  test.each(['glsl'])('%s: the code does not change', (to) => {
     const options = { to, fallback: false } as any;
     expect(
       compile(counted(), { ...options, iterationBudget: 2 }).code

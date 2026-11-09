@@ -12,7 +12,6 @@
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { shaderFunctions } from './gpu-shader-f32-eval';
 import { TEST_PYTHON } from './test-python';
 import { execFileSync } from 'child_process';
@@ -143,19 +142,13 @@ describe('PYTHON: e^{iπx} WITH x UNDECLARED', () => {
 });
 
 describe('GPU: e^{iπx} WITH x UNDECLARED', () => {
-  for (const [language, Target] of [
-    ['glsl', GLSLTarget],
-    ['wgsl', WGSLTarget],
-  ] as const)
+  for (const [language, Target] of [['glsl', GLSLTarget]] as const)
     test(`${language}: an integer or a half-integer x has exact parts`, () => {
       const ce = new ComputeEngine();
       for (const [name, make] of CASES) {
         const r = new Target().compile(ce.box(make('x')));
         expect([name, r.code.includes('_gpu_cossinpi(')]).toEqual([name, true]);
-        const main =
-          language === 'glsl'
-            ? `vec2 _main(float x, float y) { return ${r.code}; }`
-            : `fn _main(x: f32, y: f32) -> vec2f { return ${r.code}; }`;
+        const main = `vec2 _main(float x, float y) { return ${r.code}; }`;
         const run = shaderFunctions(`${r.preamble ?? ''}\n${main}`, language);
         for (const [x, exact] of POINTS) {
           if (x === 0.25) continue;

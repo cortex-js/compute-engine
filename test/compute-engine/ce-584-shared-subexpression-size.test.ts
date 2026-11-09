@@ -4,11 +4,10 @@
  * grew exponentially with the depth of the expression.
  *
  * The witness is `e_{k+1} = e_k + sin(e_k)` with `e_0 = x + c`: 2k + 2
- * distinct nodes, 2^k paths to `e_0`. `compileFieldFunction()` maps each
- * parameter to a field of the parameter struct (`vars: { c: 'ce_params.c' }`),
- * and the pass did not share a node that reads a `vars` source other than a
- * bare identifier, so at depth 20 the field function had 24 MB of WGSL and
- * took 25 seconds.
+ * distinct nodes, 2^k paths to `e_0`. A `vars` entry can map a parameter
+ * to a field of a struct (`vars: { c: 'p.c' }`), and the pass did not share
+ * a node that reads a `vars` source other than a bare identifier, so at
+ * depth 20 the shader code had 24 MB and took 25 seconds.
  *
  * Two changes:
  * - on the shader targets, a `vars` source that is a read path (an
@@ -25,7 +24,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
+import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { gpuWrittenSize } from '../../src/compute-engine/compilation/gpu-written-size';
 import { cseRecordingRules } from '../../src/compute-engine/compilation/cse';
 
@@ -67,33 +66,10 @@ function timed<T>(fn: () => T): [T, number] {
 }
 
 const LIMIT_MESSAGE =
-  /Could not compile: the (WGSL|GLSL) code for this expression would have more than 50,000 nodes/;
+  /Could not compile: the GLSL code for this expression would have more than 50,000 nodes/;
 
 describe('CE-584: a vars source that is a read path is shared', () => {
-  test('compileFieldFunction() at depth 20', () => {
-    const ce = engine();
-    const e = dag(ce, 20);
-    const [r, ms] = timed(() =>
-      new WGSLTarget().compileFieldFunction(e, {
-        name: 'f',
-        coordinates: ['x'],
-      })
-    );
-    expect(r.success).toBe(true);
-    expect(r.params.map((p) => p.name)).toEqual(['c']);
-    expect(r.function.length).toBeLessThan(10_000);
-    expect(ms).toBeLessThan(5_000);
-    // Close to the code of `compile()` with no `vars` (2,324 characters).
-    const plain = compile(e, { to: 'wgsl' });
-    expect(plain.success).toBe(true);
-    expect(r.function.length).toBeLessThan(2 * plain.code.length);
-    // One read of the struct field for each level: the canonical form
-    // flattens each sum, so `c + x` is an operand list of each level (it
-    // was written 2^20 times).
-    expect(count(r.function, 'ce_params.c')).toBe(21);
-  });
-
-  test.each(['wgsl', 'glsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s: compile() with vars { c: "p.c" } at depth 20',
     (to) => {
       const ce = engine();
@@ -106,19 +82,16 @@ describe('CE-584: a vars source that is a read path is shared', () => {
     }
   );
 
-  test.each(['wgsl', 'glsl'] as const)(
-    '%s: a literal index is a read path',
-    (to) => {
-      const ce = engine();
-      const r = compile(dag(ce, 6), { to, vars: { c: 'v[0]' } });
-      expect(r.success).toBe(true);
-      expect(count(r.code, 'v[0]')).toBe(7);
-    }
-  );
+  test.each(['glsl'] as const)('%s: a literal index is a read path', (to) => {
+    const ce = engine();
+    const r = compile(dag(ce, 6), { to, vars: { c: 'v[0]' } });
+    expect(r.success).toBe(true);
+    expect(count(r.code, 'v[0]')).toBe(7);
+  });
 
   // Other source stays opaque: the code writes it once for each path. At
   // depth 6, `e_0` is reached by 2^6 = 64 paths.
-  test.each(['wgsl', 'glsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s: a call or an expression stays opaque',
     (to) => {
       const ce = engine();
@@ -141,7 +114,7 @@ describe('CE-584: a vars source that is a read path is shared', () => {
 
   // The read path `k.x` reads the variable `k`, which the code declares:
   // the shader would read the local, not the uniform the host meant.
-  test.each(['wgsl', 'glsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s: a read path whose variable the code declares is refused',
     (to) => {
       const ce = engine();
@@ -163,7 +136,7 @@ describe('CE-584: a vars source that is a read path is shared', () => {
 });
 
 describe('CE-584: the size limit of the shader code', () => {
-  test.each(['wgsl', 'glsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s: a graph through an opaque source declines',
     (to) => {
       const ce = engine();
@@ -180,7 +153,7 @@ describe('CE-584: the size limit of the shader code', () => {
     }
   );
 
-  test.each(['wgsl', 'glsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s: a graph through the branches of an If declines',
     (to) => {
       const ce = engine();
@@ -194,29 +167,29 @@ describe('CE-584: the size limit of the shader code', () => {
     }
   );
 
-  test('wgsl: with cse: false, a shared graph declines', () => {
+  test('glsl: with cse: false, a shared graph declines', () => {
     const ce = engine();
-    const r = compile(dag(ce, 20), { to: 'wgsl', cse: false, fallback: true });
+    const r = compile(dag(ce, 20), { to: 'glsl', cse: false, fallback: true });
     expect(r.success).toBe(false);
     expect(r.error).toMatch(LIMIT_MESSAGE);
-    expect(compile(dag(ce, 20), { to: 'wgsl' }).success).toBe(true);
+    expect(compile(dag(ce, 20), { to: 'glsl' }).success).toBe(true);
   });
 
   // `compileShader()` has no common-subexpression pass: each path is
-  // written. Depth 16 wrote 1.5 MB of WGSL in 0.9 s.
-  test('wgsl: compileShader() declines a body above the limit', () => {
+  // written. Depth 16 wrote 1.5 MB of shader code in 0.9 s.
+  test('glsl: compileShader() declines a body above the limit', () => {
     const ce = engine();
     const shader = (depth: number) =>
-      new WGSLTarget().compileShader({
+      new GLSLTarget().compileShader({
         type: 'fragment',
-        inputs: [{ name: 'x', type: 'f32', location: 0 }],
-        uniforms: [{ name: 'c', type: 'f32' }],
-        outputs: [{ name: 'o', type: 'f32', location: 0 }],
-        body: [{ variable: 'output.o', expression: dag(ce, depth) }],
+        inputs: [{ name: 'x', type: 'float' }],
+        uniforms: [{ name: 'c', type: 'float' }],
+        outputs: [{ name: 'o', type: 'float' }],
+        body: [{ variable: 'o', expression: dag(ce, depth) }],
       });
-    expect(shader(8)).toContain('fn main');
+    expect(shader(8)).toContain('void main');
     expect(() => shader(16)).toThrow(
-      /Could not compile `compileShader\(\)`: the WGSL code of the body statements would have more than 50,000 nodes/
+      /Could not compile `compileShader\(\)`: the GLSL code of the body statements would have more than 50,000 nodes/
     );
   });
 
@@ -250,28 +223,28 @@ describe('CE-584: the size limit of the shader code', () => {
     return e;
   }
   const FUNCTION_LIMIT_MESSAGE =
-    /Could not compile: the WGSL code of the user-defined functions that the expression calls would have more than 50,000 nodes/;
+    /Could not compile: the GLSL code of the user-defined functions that the expression calls would have more than 50,000 nodes/;
 
-  test('wgsl: a user function whose body is a graph is shared', () => {
+  test('glsl: a user function whose body is a graph is shared', () => {
     const ce = engineWithH((ce, t) => chain(ce, t, 14, false));
-    const [r, ms] = timed(() => compile(ce.parse('h(x)'), { to: 'wgsl' }));
+    const [r, ms] = timed(() => compile(ce.parse('h(x)'), { to: 'glsl' }));
     expect(r.success).toBe(true);
     expect(r.code).toBe('_fn_h(x)');
     expect(r.preamble!.length).toBeLessThan(10_000);
     expect(ms).toBeLessThan(10_000);
   });
 
-  test('wgsl: a user function whose body is an If chain declines', () => {
+  test('glsl: a user function whose body is an If chain declines', () => {
     const ce = engineWithH((ce, t) => chain(ce, t, 14, true));
-    const r = compile(ce.parse('h(x)'), { to: 'wgsl', fallback: true });
+    const r = compile(ce.parse('h(x)'), { to: 'glsl', fallback: true });
     expect(r.success).toBe(false);
     expect(r.error).toMatch(FUNCTION_LIMIT_MESSAGE);
   });
 
-  test('wgsl: a user function whose body reads an opaque source declines', () => {
+  test('glsl: a user function whose body reads an opaque source declines', () => {
     const ce = engineWithH((ce, t) => chain(ce, t, 14, false));
     const r = compile(ce.parse('h(x)'), {
-      to: 'wgsl',
+      to: 'glsl',
       vars: { c: 'f()' },
       fallback: true,
     });
@@ -284,7 +257,7 @@ describe('CE-584: the size limit of the shader code', () => {
   // `g` has a pure definition, so the node is pure, and the estimate must
   // read the option. At depth 14 the code has 16,383 calls of `myG` (213 KB),
   // and the estimate is 49,154 nodes.
-  test('wgsl: a graph through an operator the caller replaces declines', () => {
+  test('glsl: a graph through an operator the caller replaces declines', () => {
     const ce = engine();
     ce.declare('g', '(real) -> real');
     ce.assign('g', ce.box(['Function', ['Square', 't'], 't'] as never));
@@ -294,11 +267,11 @@ describe('CE-584: the size limit of the shader code', () => {
         e = ce.function('Add', [e, ce.function('g', [e])]);
       return e;
     };
-    const small = compile(graph(10), { to: 'wgsl', functions: { g: 'myG' } });
+    const small = compile(graph(10), { to: 'glsl', functions: { g: 'myG' } });
     expect(small.success).toBe(true);
     expect(count(small.code, 'myG(')).toBe(2 ** 10 - 1);
     const r = compile(graph(16), {
-      to: 'wgsl',
+      to: 'glsl',
       functions: { g: 'myG' },
       fallback: true,
     });
@@ -309,7 +282,7 @@ describe('CE-584: the size limit of the shader code', () => {
   // An operator with a compile handler of the caller is not shared either:
   // the handler receives its operands as text. At depth 12 the code has
   // 4,095 calls of `sin`, one for each path.
-  test('wgsl: a graph through an operator with a compile handler declines', () => {
+  test('glsl: a graph through an operator with a compile handler declines', () => {
     const ce = engine();
     ce.declare('G', {
       signature: '(number) -> number',
@@ -322,10 +295,10 @@ describe('CE-584: the size limit of the shader code', () => {
         e = ce.function('Add', [e, ce.function('G', [e])]);
       return e;
     };
-    const small = compile(graph(8), { to: 'wgsl' });
+    const small = compile(graph(8), { to: 'glsl' });
     expect(small.success).toBe(true);
     expect(count(small.code, 'sin(')).toBe(2 ** 8 - 1);
-    const r = compile(graph(16), { to: 'wgsl', fallback: true });
+    const r = compile(graph(16), { to: 'glsl', fallback: true });
     expect(r.success).toBe(false);
     expect(r.error).toMatch(LIMIT_MESSAGE);
   });
@@ -337,7 +310,7 @@ describe('CE-584: the size limit of the shader code', () => {
   // checked at depth 10: the harvest of the common-subexpression pass takes
   // a time exponential in the depth for this graph (1.6 s at depth 12,
   // 36 s at depth 14), which is a separate defect.
-  test('wgsl: a node written before a branch is not counted again in it', () => {
+  test('glsl: a node written before a branch is not counted again in it', () => {
     const ce = engine();
     const graph = (depth: number) => {
       let e = ce.function('Sin', [ce.symbol('x')]);
@@ -356,7 +329,7 @@ describe('CE-584: the size limit of the shader code', () => {
       const e = graph(depth);
       expect(gpuWrittenSize(e, cseRecordingRules(e))).toBeLessThan(20 * depth);
     }
-    const r = compile(graph(10), { to: 'wgsl' });
+    const r = compile(graph(10), { to: 'glsl' });
     expect(r.success).toBe(true);
     expect(r.code.length).toBeLessThan(2_000);
     expect(count(r.code, 'sin(')).toBe(1);
@@ -368,7 +341,7 @@ describe('CE-584: the size limit of the shader code', () => {
   // their index order counted `e_k` again in the value and refused depth
   // 16. The compilation is checked at depth 8: as for `Arctan2` above, the
   // harvest of the pass takes a time exponential in the depth.
-  test('wgsl: the condition of a When is written before its value', () => {
+  test('glsl: the condition of a When is written before its value', () => {
     const ce = engine();
     const graph = (depth: number) => {
       let e = ce.function('Sin', [ce.symbol('x')]);
@@ -383,7 +356,7 @@ describe('CE-584: the size limit of the shader code', () => {
       const e = graph(depth);
       expect(gpuWrittenSize(e, cseRecordingRules(e))).toBeLessThan(20 * depth);
     }
-    const r = compile(graph(8), { to: 'wgsl' });
+    const r = compile(graph(8), { to: 'glsl' });
     expect(r.success).toBe(true);
     expect(r.code.length).toBeLessThan(2_000);
   });
@@ -391,24 +364,24 @@ describe('CE-584: the size limit of the shader code', () => {
   // Below an operator that the caller replaces, the pass shares nothing:
   // the caller's code receives the operand as text. The graph of depth 20
   // is small on its own, and written as a tree inside `myCos(…)`.
-  test('wgsl: a graph below an operator the caller replaces declines', () => {
+  test('glsl: a graph below an operator the caller replaces declines', () => {
     const ce = engine();
     const wrapped = (depth: number) => ce.function('Cos', [dag(ce, depth)]);
     const small = compile(wrapped(6), {
-      to: 'wgsl',
+      to: 'glsl',
       functions: { Cos: 'myCos' },
     });
     expect(small.success).toBe(true);
     expect(small.code).toContain('myCos(');
     const r = compile(wrapped(20), {
-      to: 'wgsl',
+      to: 'glsl',
       functions: { Cos: 'myCos' },
       fallback: true,
     });
     expect(r.success).toBe(false);
     expect(r.error).toMatch(LIMIT_MESSAGE);
     // Without the replacement, the same graph is shared and compiles.
-    expect(compile(wrapped(20), { to: 'wgsl' }).success).toBe(true);
+    expect(compile(wrapped(20), { to: 'glsl' }).success).toBe(true);
   });
 
   // The pass shares no node between the bodies of two binders, and the
@@ -417,7 +390,7 @@ describe('CE-584: the size limit of the shader code', () => {
   // writes `e_k` again, and the code grows by 4 every two levels (59,391
   // characters at depth 8). A single `Sum` whose body is a shared graph
   // binds the graph inside its body.
-  test('wgsl: nested binders over one subtree decline', () => {
+  test('glsl: nested binders over one subtree decline', () => {
     const ce = engine();
     ce.declare('N', 'integer');
     const sum = (body: Expression, j: string) =>
@@ -436,14 +409,14 @@ describe('CE-584: the size limit of the shader code', () => {
       }
       return e;
     };
-    expect(compile(nested(4), { to: 'wgsl' }).success).toBe(true);
-    const r = compile(nested(12), { to: 'wgsl', fallback: true });
+    expect(compile(nested(4), { to: 'glsl' }).success).toBe(true);
+    const r = compile(nested(12), { to: 'glsl', fallback: true });
     expect(r.success).toBe(false);
     expect(r.error).toMatch(LIMIT_MESSAGE);
 
     const single = compile(
       sum(ce.function('Multiply', [ce.symbol('j'), dag(ce, 20)]), 'j'),
-      { to: 'wgsl' }
+      { to: 'glsl' }
     );
     expect(single.success).toBe(true);
     expect(single.code.length).toBeLessThan(10_000);
@@ -453,16 +426,16 @@ describe('CE-584: the size limit of the shader code', () => {
   // condition is `False`: no form leaves an operand out of the count. So the
   // graph below `If(False, value)` is counted as a tree, and the compile
   // declines at the size limit (a decline falls back to the interpreter).
-  test('wgsl: every operand of a decided restriction is counted', () => {
+  test('glsl: every operand of a decided restriction is counted', () => {
     const ce = engine();
     const e = ce.function('If', [ce.False, dag(ce, 20)]);
-    const r = compile(e, { to: 'wgsl', cse: false, fallback: true });
+    const r = compile(e, { to: 'glsl', cse: false, fallback: true });
     expect(r.success).toBe(false);
     expect(r.error).toMatch(LIMIT_MESSAGE);
     expect(gpuWrittenSize(e, undefined)).toBeGreaterThan(50_000);
     // A restriction that the caller replaces also receives all its operands.
     const replaced = compile(e, {
-      to: 'wgsl',
+      to: 'glsl',
       cse: false,
       functions: { If: 'myWhen' },
       fallback: true,
@@ -474,7 +447,7 @@ describe('CE-584: the size limit of the shader code', () => {
   // Each read of a node written before costs one node. `Max` of 1,000
   // copies of `x` is written once in each branch of a chain of ten `If`
   // (1,024 copies), with 1,000 reads of `x` in each.
-  test('wgsl: the reads of a node written before are counted', () => {
+  test('glsl: the reads of a node written before are counted', () => {
     const ce = engine();
     const x = ce.symbol('x');
     const chain = (depth: number) => {
@@ -490,8 +463,8 @@ describe('CE-584: the size limit of the shader code', () => {
         ]);
       return e;
     };
-    expect(compile(chain(2), { to: 'wgsl' }).success).toBe(true);
-    const r = compile(chain(10), { to: 'wgsl', fallback: true });
+    expect(compile(chain(2), { to: 'glsl' }).success).toBe(true);
+    const r = compile(chain(10), { to: 'glsl', fallback: true });
     expect(r.success).toBe(false);
     expect(r.error).toMatch(LIMIT_MESSAGE);
   });
@@ -500,7 +473,7 @@ describe('CE-584: the size limit of the shader code', () => {
   // parameter `b`, a pair of booleans, has no shader type) is written in
   // full at each call site. Each body has 1,025 nodes; the limit applies
   // to their sum.
-  test('wgsl: the bodies written at many call sites decline together', () => {
+  test('glsl: the bodies written at many call sites decline together', () => {
     const ce = engine();
     ce.declare('p', 'tuple<boolean, boolean>');
     const t = ce.symbol('t');
@@ -519,17 +492,17 @@ describe('CE-584: the size limit of the shader code', () => {
           ])
         )
       );
-    const few = compile(sites(10), { to: 'wgsl', vars: { c: 'f()' } });
+    const few = compile(sites(10), { to: 'glsl', vars: { c: 'f()' } });
     expect(few.success).toBe(true);
     expect(few.code).not.toContain('_fn_h');
     const r = compile(sites(60), {
-      to: 'wgsl',
+      to: 'glsl',
       vars: { c: 'f()' },
       fallback: true,
     });
     expect(r.success).toBe(false);
     expect(r.error).toMatch(
-      /Could not compile: the WGSL code of the user-defined functions that the expression calls would have more than 50,000 nodes/
+      /Could not compile: the GLSL code of the user-defined functions that the expression calls would have more than 50,000 nodes/
     );
   });
 

@@ -1,11 +1,10 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 // Element-wise `Which`/`If` selection on the GPU shader targets
 // (docs/BROADCAST-MODEL.md, R1–R4): a statically
 // shaped (vec2–vec4) condition lowers to boolean-vector masks combined with
-// GLSL `mix` / WGSL `select`; anything with no static shape fails closed.
+// GLSL `mix`; anything with no static shape fails closed.
 //
 // A fresh engine: these declarations must not leak into (or inherit from) the
 // shared test engine.
@@ -13,7 +12,6 @@ const ce = new ComputeEngine();
 ce.declare('c', 'boolean');
 ce.declare('x', 'real | signed_infinity | nan');
 const glsl = new GLSLTarget();
-const wgsl = new WGSLTarget();
 
 ce.declare('N2', 'vector<integer^2>');
 ce.declare('N4', 'vector<integer^4>');
@@ -45,7 +43,6 @@ const VARS = {
 };
 
 const g = (expr: any): string => glsl.compile(ce.box(expr), VARS).code!;
-const w = (expr: any): string => wgsl.compile(ce.box(expr), VARS).code!;
 
 describe('GPU ELEMENT-WISE SELECTION', () => {
   describe('GLSL', () => {
@@ -131,68 +128,6 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
     });
   });
 
-  describe('WGSL', () => {
-    it('lowers a literal boolean-list condition to a vecN<bool> mask', () => {
-      expect(w(['Which', ['List', 'True', 'False'], 1, 'True', 0])).toBe(
-        'select(vec2f(0.0), vec2f(1.0), vec2<bool>(true, false))'
-      );
-    });
-
-    it('lowers a multi-clause witness over a vec4 uniform', () => {
-      expect(
-        w(['Which', ['Equal', 'N4', 3], 1, ['Equal', 'N4', 2], 'S4', 'True', 0])
-      ).toBe(
-        'select(select(vec4f(0.0), u_s, ((u_n) == (vec4f(2.0)))), vec4f(1.0), ((u_n) == (vec4f(3.0))))'
-      );
-    });
-
-    it('uses the vecNf NaN helper as the no-match value (R4)', () => {
-      expect(w(['Which', ['Equal', 'N4', 3], 1])).toBe(
-        'select(vec4f(_gpu_nan()), vec4f(1.0), ((u_n) == (vec4f(3.0))))'
-      );
-    });
-
-    it('routes `If` through the same lowering', () => {
-      expect(w(['If', ['Equal', 'N2', 3], 1, 0])).toBe(
-        'select(vec2f(0.0), vec2f(1.0), ((u_m) == (vec2f(3.0))))'
-      );
-    });
-
-    it('composes And / Or / Not masks componentwise', () => {
-      expect(
-        w([
-          'Which',
-          ['And', ['Less', 'N2', 3], ['Greater', 'N2', 0]],
-          1,
-          'True',
-          0,
-        ])
-      ).toBe(
-        'select(vec2f(0.0), vec2f(1.0), (((u_m) < (vec2f(3.0))) & ((vec2f(0.0)) < (u_m))))'
-      );
-      expect(
-        w([
-          'Which',
-          ['Or', ['Less', 'N2', 3], ['Greater', 'N2', 0]],
-          1,
-          'True',
-          0,
-        ])
-      ).toBe(
-        'select(vec2f(0.0), vec2f(1.0), (((u_m) < (vec2f(3.0))) | ((vec2f(0.0)) < (u_m))))'
-      );
-      expect(w(['Which', ['Not', ['Less', 'N2', 3]], 1, 'True', 0])).toBe(
-        'select(vec2f(0.0), vec2f(1.0), (!(((u_m) < (vec2f(3.0))))))'
-      );
-    });
-
-    it('conjoins a chained ordering', () => {
-      expect(w(['Which', ['Less', 0, 'N2', 5], 1, 'True', 0])).toBe(
-        'select(vec2f(0.0), vec2f(1.0), (((vec2f(0.0)) < (u_m)) & ((u_m) < (vec2f(5.0)))))'
-      );
-    });
-  });
-
   describe('scalar conditions are untouched', () => {
     // Pinned from the output BEFORE the selection hook was added to the GPU
     // targets: a scalar `Which`/`If` must stay byte-identical. The one later
@@ -205,13 +140,6 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
       );
       expect(g(['If', ['Less', 'x', 3], 1, 0])).toBe('float(x < 3.0)');
     });
-
-    it('WGSL scalar Which / If', () => {
-      expect(w(['Which', ['Less', 'x', 3], 1, 'True', 0])).toBe(
-        'select((0.0), 1.0, x < 3.0)'
-      );
-      expect(w(['If', ['Less', 'x', 3], 1, 0])).toBe('f32(x < 3.0)');
-    });
   });
 
   describe('fail closed', () => {
@@ -220,24 +148,17 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
     it('a list with absent NUMERIC cells compiles; a whole list that may be absent does not', () => {
       // `[sin x, x{c}]` types `list<number | missing>`: an absent cell is a
       // NaN lane, which the restriction no-match lowering emits, so the shape is
-      // admitted on both targets.
+      // admitted.
       expect(g(['List', ['Sin', 'x'], ['If', 'c', 'x']])).toMatch(/_gpu_nan/);
-      expect(w(['List', ['Sin', 'x'], ['If', 'c', 'x']])).toMatch(/_gpu_nan/);
       // A default-less `Which` over a list types `missing | list<…>`: the
       // WHOLE list may be absent, and the no-match lowering would pair an
       // array arm with a scalar NaN. That stays fail-closed.
       expect(() => g(['Which', 'c', ['List', 1, 2, 3, 4, 5]])).toThrow(
         /object-domain absent/
       );
-      expect(() => w(['Which', 'c', ['List', 1, 2, 3, 4, 5]])).toThrow(
-        /object-domain absent/
-      );
     });
     it('declines an unknown-length list condition operand', () => {
       expect(() => g(['Which', ['Equal', 'L', 3], 1, 'True', 0])).toThrow(
-        /no static vec2–vec4 shape/
-      );
-      expect(() => w(['Which', ['Equal', 'L', 3], 1, 'True', 0])).toThrow(
         /no static vec2–vec4 shape/
       );
       // The garbage comparison is gone.
@@ -315,9 +236,6 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
       expect(() => g(['If', ['List', 'True', 'False'], 1])).toThrow(
         /object-domain absent/
       );
-      expect(() => w(['If', ['List', 'True', 'False'], 1])).toThrow(
-        /object-domain absent/
-      );
     });
   });
 
@@ -329,7 +247,6 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
   describe('fail-closed outside selection position', () => {
     it('declines a vec comparison at the root', () => {
       expect(() => g(['Less', 'N2', 3])).toThrow(/scalar-only/);
-      expect(() => w(['Less', 'N2', 3])).toThrow(/scalar-only/);
     });
 
     it('declines a vec comparison in arm position', () => {
@@ -342,23 +259,16 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
       expect(() => g(['And', ['Less', 'N2', 3], ['Greater', 'N2', 0]])).toThrow(
         /scalar-only/
       );
-      expect(() => w(['Not', 'B2'])).toThrow(/scalar-only/);
     });
 
     it('keeps GLSL tuple equality (atomic aggregate ==, matching the interpreter)', () => {
       expect(g(['Equal', 'P', 'Q'])).toBe('u_p == u_q');
-      // WGSL `==` on vectors is component-wise (`vecN<bool>`), so the same
-      // shape declines there.
-      expect(() => w(['Equal', 'P', 'Q'])).toThrow(/scalar-only/);
     });
   });
 
   describe('selection-lowering shapes from the review round', () => {
     it('declines a boolean-vector arm', () => {
       expect(() => g(['Which', ['Less', 'N2', 3], 'B2', 'True', 0])).toThrow(
-        /boolean-valued arm/
-      );
-      expect(() => w(['Which', ['Less', 'N2', 3], 'B2', 'True', 0])).toThrow(
         /boolean-valued arm/
       );
     });

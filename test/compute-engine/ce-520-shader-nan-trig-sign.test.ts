@@ -1,14 +1,13 @@
 /**
- * CE-520: on the `glsl` and `wgsl` targets, `Sin`, `Cos` (and `Sec`, `Csc`,
+ * CE-520: on the `glsl` target, `Sin`, `Cos` (and `Sec`, `Csc`,
  * `Cot`), `Sign`, `Smoothstep` and `Heaviside` give NaN for a NaN operand,
  * as the `javascript` target does, and `tan(πx)` is `+∞` at a pole.
  *
- * Measured on an Apple M5 Max (WebGL2 over ANGLE Metal and WebGPU over
- * Metal, 2026-10-26): the built-ins `sin`, `cos`, `sign` and `smoothstep`
- * of a NaN gave 0 on both targets, `sin` and `cos` of ±∞ gave 0 too, `1 /
- * cos` gave +∞, and the GLSL `_gpu_heaviside` of a NaN gave 0.5. The targets
- * now call the NaN-safe helpers of `gpuNaNSafeLibrary`
- * (`compilation/gpu-target.ts`), which test the bit pattern of the operand:
+ * Measured on an Apple M5 Max (WebGL2 over ANGLE Metal, 2026-10-26): the
+ * built-ins `sin`, `cos`, `sign` and `smoothstep` of a NaN gave 0, `sin`
+ * and `cos` of ±∞ gave 0 too, `1 / cos` gave +∞, and `_gpu_heaviside` of a
+ * NaN gave 0.5. The target now calls the NaN-safe helpers of
+ * `gpuNaNSafeLibrary` (`compilation/gpu-target.ts`), which test the bit pattern of the operand:
  * `_gpu_sign` and `_gpu_smoothstep` return a NaN operand, and `_gpu_sin` and
  * `_gpu_cos` return a NaN built from its bit pattern for a NaN or an
  * infinite operand. The emitted shaders were run on that GPU and gave NaN at
@@ -28,10 +27,7 @@ import { shaderFunctions } from './gpu-shader-f32-eval';
 const ce = new ComputeEngine();
 ce.declare('v', 'vector<real^3>');
 
-function shader(
-  expr: unknown,
-  to: 'glsl' | 'wgsl'
-): { code: string; preamble: string } {
+function shader(expr: unknown, to: 'glsl'): { code: string; preamble: string } {
   const r = compile(ce.box(expr as never), { to, fallback: false } as never);
   expect([to, r.success]).toEqual([to, true]);
   return {
@@ -42,7 +38,7 @@ function shader(
 
 describe('CE-520 — the NaN-safe helpers', () => {
   it('Sin, Cos and Sign of a scalar call the scalar helper', () => {
-    for (const to of ['glsl', 'wgsl'] as const) {
+    for (const to of ['glsl'] as const) {
       expect(shader(['Sin', 'x'], to).code).toBe('_gpu_sin(x)');
       expect(shader(['Cos', ['Add', 'x', 1]], to).code).toBe(
         '_gpu_cos(x + 1.0)'
@@ -59,13 +55,13 @@ describe('CE-520 — the NaN-safe helpers', () => {
     // difference changed a threshold test in Tycho's `voronoi-diagram`.
     // Constant folding is off, so that the literal reaches the shader, as
     // in a compile whose folding leaves it (an exact `cos(12/5)`).
-    const unfolded = (expr: unknown, to: 'glsl' | 'wgsl') =>
+    const unfolded = (expr: unknown, to: 'glsl') =>
       compile(ce.box(expr as never), {
         to,
         fallback: false,
         constantFold: false,
       } as never).code;
-    for (const to of ['glsl', 'wgsl'] as const) {
+    for (const to of ['glsl'] as const) {
       expect(unfolded(['Add', 'x', ['Sin', 4.8]], to)).toBe('x + sin(4.8)');
       expect(unfolded(['Cos', ['Rational', 12, 5]], to)).toBe('cos(2.4)');
     }
@@ -79,12 +75,6 @@ describe('CE-520 — the NaN-safe helpers', () => {
       '_gpu_sin3(vec3(x, 1.0, 2.0))'
     );
     expect(shader(['Sin', 'v'], 'glsl').code).toBe('sin(v)');
-    expect(shader(['Sign', ['List', 'x', 1]], 'wgsl').code).toBe(
-      '_gpu_sign2(vec2f(x, 1.0))'
-    );
-    expect(shader(['Smoothstep', 0, 1, 'v'], 'wgsl').code).toBe(
-      '_gpu_smoothstep3(vec3f(0.0), vec3f(1.0), v)'
-    );
     expect(shader(['Smoothstep', 0, 1, 'x'], 'glsl').code).toBe(
       '_gpu_smoothstep(0.0, 1.0, x)'
     );
@@ -94,10 +84,6 @@ describe('CE-520 — the NaN-safe helpers', () => {
     const g = shader(['Sin', 'x'], 'glsl').preamble;
     expect(g).toContain(
       'return (_gpu_isnonfinite(x) ? intBitsToFloat(0x7FC00000) : sin(x));'
-    );
-    const w = shader(['Sign', ['List', 'x', 1, 2]], 'wgsl').preamble;
-    expect(w).toContain(
-      'fn _gpu_sign3(x: vec3f) -> vec3f {\n  return select(sign(x), x, _gpu_isnan3(x));\n}'
     );
     const s = shader(['Smoothstep', 0, 1, 'x'], 'glsl').preamble;
     expect(s).toContain(
@@ -109,9 +95,6 @@ describe('CE-520 — the NaN-safe helpers', () => {
     expect(shader(['Heaviside', 'x'], 'glsl').preamble).toContain(
       'float _gpu_heaviside(float x) {\n  if ((floatBitsToUint(x) & 0x7FFFFFFFu) > 0x7F800000u) return x;'
     );
-    expect(shader(['Heaviside', 'x'], 'wgsl').preamble).toContain(
-      'if ((bitcast<u32>(x) & 0x7FFFFFFFu) > 0x7F800000u) { return x; }'
-    );
     expect(shader(['Cos', ['Multiply', 'Pi', 'x']], 'glsl').preamble).toContain(
       'vec2 _gpu_cossinpi(float u) {\n  if ((floatBitsToUint(u) & 0x7FFFFFFFu) >= 0x7F800000u) return vec2(intBitsToFloat(0x7FC00000));'
     );
@@ -122,7 +105,7 @@ describe('CE-520 — operands the helpers do not take', () => {
   it('a complex Sign or Smoothstep declines, as before', () => {
     const cz = new ComputeEngine();
     cz.declare('z', 'complex');
-    for (const to of ['glsl', 'wgsl'] as const) {
+    for (const to of ['glsl'] as const) {
       for (const expr of [
         ['Sign', 'z'],
         ['Smoothstep', 0, 1, 'z'],
@@ -131,12 +114,6 @@ describe('CE-520 — operands the helpers do not take', () => {
           compile(cz.box(expr as never), { to, fallback: false } as never)
         ).toThrow(/real-only/);
     }
-  });
-
-  it('Haversine calls the NaN-safe cos', () => {
-    expect(shader(['Haversine', 'x'], 'wgsl').code).toBe(
-      '((1.0 - _gpu_cos(x)) * 0.5)'
-    );
   });
 
   it('a vector that draws a random value declines when Cot would use it twice', () => {
@@ -164,11 +141,9 @@ describe('CE-520 — operands the helpers do not take', () => {
 });
 
 describe('CE-520 — the half-turn helpers in f32', () => {
-  for (const language of ['glsl', 'wgsl'] as const) {
+  for (const language of ['glsl'] as const) {
     const main = (code: string): string =>
-      language === 'glsl'
-        ? `float _main(float x) { return ${code}; }`
-        : `fn _main(x: f32) -> f32 { return ${code}; }`;
+      `float _main(float x) { return ${code}; }`;
     const run = (expr: unknown) => {
       const r = shader(expr, language);
       const f = shaderFunctions(`${r.preamble}\n${main(r.code)}`, language);

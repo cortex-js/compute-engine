@@ -733,7 +733,7 @@ keep behavior comparable across releases whose default mode changed.
 Cases include an identity control, plotting, an assigned slider mapped through
 `vars`, real and complex radicals, a folded complex constant, a list callback,
 a point input, shared expression objects (open and closed complex graphs),
-shared function definitions, and WGSL emission. JavaScript values are checked
+shared function definitions, and GLSL emission. JavaScript values are checked
 against independent mathematical oracles at several inputs; shaders are checked for successful emission, not
 executed. Shared-node fixtures assert operand identity. `--check` records
 source digests; `MODE=counts` counts calls through the engine instance
@@ -861,8 +861,8 @@ retained twice. Depths 4/8/12/13/16/24 expose the existing estimation-visit limi
 Independent numeric results use `2^depth * (2 + Math.sqrt(3))`. Unshared copies
 at safe depths 4/8 compute the same values, with construction untimed. Every
 fixture runs with folding enabled and disabled. Host controls include a live
-slider expression on JavaScript and WGSL, a closed Map, and a shared constant
-inside/outside a function parameter binding. WGSL checks emission, not GPU
+slider expression on JavaScript and GLSL, a closed Map, and a shared constant
+inside/outside a function parameter binding. GLSL checks emission, not GPU
 execution. These small controls do not represent a captured document corpus.
 
 `test/compute-engine/compile-folding-work.test.ts` checks one estimator's visit

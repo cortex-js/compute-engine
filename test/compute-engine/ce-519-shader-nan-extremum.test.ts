@@ -1,16 +1,16 @@
 /**
- * CE-519 (Tycho row 465): on the `glsl` and `wgsl` targets, `Max`, `Min`,
+ * CE-519 (Tycho row 465): on the `glsl` target, `Max`, `Min`,
  * `Clamp`, `ElementMax` and `ElementMin` give NaN when an operand is NaN, as
  * the interpreter and the `javascript` target do.
  *
- * GLSL ES 3.0 and WGSL leave the built-ins `max`, `min` and `clamp`
+ * GLSL ES 3.0 leaves the built-ins `max`, `min` and `clamp`
  * undefined for a NaN operand, and on Apple GPUs they return the other
  * operand: `max(0, sqrt(1 - x²))` at x = 2 was 0. The targets now call the
  * helpers `_gpu_max`, `_gpu_min` and `_gpu_clamp` (and their vector forms),
- * which test the bit pattern of each operand (a test `a != a` was removed by
- * the compiler on WebGPU over Metal) and return a NaN operand by selection,
+ * which test the bit pattern of each operand (a shader compiler can remove a
+ * test `a != a`) and return a NaN operand by selection,
  * not through arithmetic. The emitted shaders were run on an Apple M5 Max
- * (WebGL2 over ANGLE Metal and WebGPU over Metal) on 2026-10-26 and gave the
+ * (WebGL2 over ANGLE Metal) on 2026-10-26 and gave the
  * `javascript` values, NaN included.
  *
  * Shader text cannot run under jest. The last block runs the GLSL scalar
@@ -30,10 +30,7 @@ ce.declare('n', 'vector<3>');
 
 const ROOT = ['Sqrt', ['Subtract', 1, ['Square', 'x']]];
 
-function shader(
-  expr: unknown,
-  to: 'glsl' | 'wgsl'
-): { code: string; preamble: string } {
+function shader(expr: unknown, to: 'glsl'): { code: string; preamble: string } {
   const r = compile(ce.box(expr as never), { to, fallback: false } as never);
   expect([to, r.success]).toEqual([to, true]);
   return {
@@ -43,8 +40,8 @@ function shader(
 }
 
 describe('CE-519 — Max, Min and Clamp call the NaN-safe helpers', () => {
-  it('emits the helpers for the Tycho row 465 cases on both targets', () => {
-    for (const to of ['glsl', 'wgsl'] as const) {
+  it('emits the helpers for the Tycho row 465 cases', () => {
+    for (const to of ['glsl'] as const) {
       expect(shader(['Max', 0, ROOT], to).code).toBe(
         '_gpu_max(0.0, sqrt(-(x * x) + 1.0))'
       );
@@ -65,13 +62,6 @@ describe('CE-519 — Max, Min and Clamp call the NaN-safe helpers', () => {
     expect(g).toContain(
       'return (_gpu_isnan(a) ? a : (_gpu_isnan(b) ? b : max(a, b)));'
     );
-    const w = shader(['Max', 0, ROOT], 'wgsl').preamble;
-    expect(w).toContain(
-      'fn _gpu_isnan(x: f32) -> bool {\n  return (bitcast<u32>(x) & 0x7FFFFFFFu) > 0x7F800000u;\n}'
-    );
-    expect(w).toContain(
-      'return select(select(max(a, b), b, _gpu_isnan(b)), a, _gpu_isnan(a));'
-    );
     // Only the helpers this compilation names are in the preamble.
     expect(g).not.toContain('_gpu_min');
     expect(g).not.toContain('_gpu_clamp');
@@ -81,45 +71,21 @@ describe('CE-519 — Max, Min and Clamp call the NaN-safe helpers', () => {
     expect(shader(['Clamp', 'n', 0, 1], 'glsl').code).toBe(
       '_gpu_clamp3(n, vec3(0.0), vec3(1.0))'
     );
-    expect(shader(['Clamp', 'n', 0, 1], 'wgsl').code).toBe(
-      '_gpu_clamp3(n, vec3f(0.0), vec3f(1.0))'
-    );
     expect(shader(['Clamp', 'v', 0, 1], 'glsl').code).toBe(
       'min(max(v, vec3(0.0)), vec3(1.0))'
     );
     expect(shader(['Clamp', 'n', 0, 1], 'glsl').preamble).toContain(
       'return mix(mix(mix(min(max(x, lo), hi), hi, _gpu_isnan3(hi)), lo, _gpu_isnan3(lo)), x, _gpu_isnan3(x));'
     );
-    expect(shader(['Clamp', 'n', 0, 1], 'wgsl').preamble).toContain(
-      'return select(select(select(min(max(x, lo), hi), hi, _gpu_isnan3(hi)), lo, _gpu_isnan3(lo)), x, _gpu_isnan3(x));'
-    );
   });
 
   it('ElementMax and ElementMin call the helpers, with a scalar broadcast', () => {
-    for (const to of ['glsl', 'wgsl'] as const)
+    for (const to of ['glsl'] as const)
       expect(shader(['ElementMax', 'x', ROOT], to).code).toBe(
         '_gpu_max(x, sqrt(-(x * x) + 1.0))'
       );
     expect(shader(['ElementMin', 0.5, 'n'], 'glsl').code).toBe(
       '_gpu_min3(vec3(0.5), n)'
-    );
-    expect(shader(['ElementMin', 0.5, 'n'], 'wgsl').code).toBe(
-      '_gpu_min3(vec3f(0.5), n)'
-    );
-    expect(shader(['ElementMin', 0.5, 'v'], 'wgsl').code).toBe(
-      'min(vec3f(0.5), v)'
-    );
-  });
-
-  it('a Max over a vector folds the helper over its components', () => {
-    // `x` has no declared type and can be NaN.
-    expect(shader(['Max', ['List', 'x', 1, 2], 0], 'wgsl').code).toBe(
-      '(_gpu_max(_gpu_max(_gpu_max(x, 1.0), 2.0), 0.0))'
-    );
-    // The components of `v: vector<real^3>` are finite for certain: the
-    // built-in (CE-565).
-    expect(shader(['Max', 'v', 0], 'wgsl').code).toBe(
-      '(max(max(max(v.x, v.y), v.z), 0.0))'
     );
   });
 
@@ -136,14 +102,6 @@ describe('CE-519 — Max, Min and Clamp call the NaN-safe helpers', () => {
     expect(g.preamble.indexOf('_gpu_isnan3(vec3 x)')).toBeLessThan(
       g.preamble.indexOf('_gpu_max3(vec3 a')
     );
-    const w = shader(['ElementMax', 2, 'n', 'n'], 'wgsl');
-    expect(w.code).toBe('_gpu_max3(_gpu_max3(vec3f(2.0), n), n)');
-    expect(w.preamble).toContain(
-      'fn _gpu_isnan3(x: vec3f) -> vec3<bool> {\n  return (bitcast<vec3u>(x) & vec3u(0x7FFFFFFFu)) > vec3u(0x7F800000u);\n}'
-    );
-    expect(w.preamble).toContain(
-      'return select(select(max(a, b), b, _gpu_isnan3(b)), a, _gpu_isnan3(a));'
-    );
   });
 
   it('a Clamp with vector bounds calls the vector helper', () => {
@@ -159,7 +117,7 @@ describe('CE-519 — Max, Min and Clamp call the NaN-safe helpers', () => {
     const cev = new ComputeEngine();
     cev.declare('v', 'vector<real^3>');
     cev.declare('u', 'vector<real^2>');
-    for (const to of ['glsl', 'wgsl'] as const) {
+    for (const to of ['glsl'] as const) {
       // A scalar `x` between vector bounds.
       expect(() =>
         compile(cev.box(['Clamp', 'x', 'v', 1] as never), {
@@ -187,9 +145,6 @@ describe('CE-519 — Max, Min and Clamp call the NaN-safe helpers', () => {
       const operand = head === 'Clamp' ? ['Clamp', 'x', 0, 1] : ['Max', 'x', 0];
       expect(shader(['Sin', ['List', operand, 0, 1]], 'glsl').code).toBe(
         `_gpu_sin3(vec3(${code}, 0.0, 1.0))`
-      );
-      expect(shader(['Sin', ['List', operand, 0, 1]], 'wgsl').code).toBe(
-        `_gpu_sin3(vec3f(${code}, 0.0, 1.0))`
       );
     }
     expect(shader(['Sin', ['List', ['Mod', 'x', 2], 0, 1]], 'glsl').code).toBe(

@@ -39,7 +39,7 @@ function interpreted(latex: string, x: number): number {
 
 function expectAllTargetsAgree(latex: string, xs: number[]): void {
   const expr = ce.parse(latex);
-  for (const to of ['interval-js', 'javascript', 'glsl', 'wgsl'] as const) {
+  for (const to of ['interval-js', 'javascript', 'glsl'] as const) {
     const r = compile(expr, { to, fallback: false });
     expect([to, r.success, r.error?.message]).toEqual([to, true, undefined]);
   }
@@ -328,7 +328,7 @@ describe('A selection over a wide list-shaped condition is written out', () => {
 
   test('the shader targets compile the written-out form', () => {
     const expr = ce.box(['Which', WIDE, 1, 'True', 0]);
-    for (const to of ['glsl', 'wgsl'] as const) {
+    for (const to of ['glsl'] as const) {
       const r = compile(expr, { to, fallback: false });
       expect([to, r.success, r.error?.message]).toEqual([to, true, undefined]);
     }

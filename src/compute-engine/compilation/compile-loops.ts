@@ -65,7 +65,7 @@ import { CompilerState } from './compiler-state.js';
  * 1. **Bare infinite loop:** `Loop(body)` → `(() => { while (true) { … } })()`.
  *    The body compiles as statements (`compileLoopBody`), so `break` /
  *    `continue` / `return` terminate it. Unbounded loops are rejected on GPU
- *    targets (GLSL/WGSL).
+ *    targets (GLSL).
  *
  * 2. **Counted loop:** `Loop(body, Element(i, Range(lo, hi)))` where the
  *    Range is integer-ascending with step 1 → the legacy
@@ -126,7 +126,7 @@ export function compileForLoop(
 
   // ── Bare infinite loop ────────────────────────────────────────────────
   if (elements.length === 0) {
-    if (lang === 'glsl' || lang === 'wgsl')
+    if (lang === 'glsl')
       throw new Error(
         `Could not compile \`${lang.toUpperCase()}\`: an unbounded Loop(body) is not supported.`
       );
@@ -208,7 +208,7 @@ export function compileForLoop(
   // bounds, and every other loop (several `Element` clauses, a collection
   // that is not a `Range`, a `Range` with a bound that is a symbol or an
   // expression) is read at run time, which a shader cannot do.
-  if (lang === 'glsl' || lang === 'wgsl')
+  if (lang === 'glsl')
     throw new Error(
       `Could not compile \`${lang.toUpperCase()}\`: a Loop compiles to a shader only over a single Range with integer literal bounds.`
     );
@@ -368,7 +368,7 @@ export function withDirectLoopPassReset(
  *   return result; })()
  * ```
  *
- * GLSL/WGSL have no dynamic arrays, so a comprehension is rejected there.
+ * GLSL has no dynamic arrays, so a comprehension is rejected there.
  */
 export function compileComprehension(
   args: ReadonlyArray<Expression>,
@@ -413,7 +413,7 @@ export function compileComprehension(
     );
 
   const lang = target.language ?? '';
-  if (lang === 'glsl' || lang === 'wgsl')
+  if (lang === 'glsl')
     throw new Error(
       `Could not compile \`${lang.toUpperCase()}\`: Comprehension is not supported (no dynamic arrays). ` +
         'TODO(E3-GLSL): unroll or use a fixed-size array.'

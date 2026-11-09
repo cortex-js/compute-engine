@@ -1,6 +1,6 @@
 /**
  * `Smoothstep(e0, e1, x)`: t²(3 − 2t) with t = Clamp((x − e0)/(e1 − e0), 0,
- * 1), the formula of the GLSL and WGSL built-in. The library definition is
+ * 1), the formula of the GLSL built-in. The library definition is
  * in `library/arithmetic.ts`. With `e0 = e1` the built-in is undefined; the
  * interpreter and the `javascript` and `python` targets give the step
  * function there (0 when `x < e0`, else 1).
@@ -93,7 +93,7 @@ describe('Smoothstep compiles', () => {
   });
 
   it('on the shader targets, to the NaN-safe built-in', () => {
-    for (const to of ['glsl', 'wgsl'] as const) {
+    for (const to of ['glsl'] as const) {
       const r = compile(ce.parse('\\operatorname{Smoothstep}(0, 1, x)'), {
         to,
         fallback: false,
@@ -152,7 +152,7 @@ describe('Smoothstep at its edge cases', () => {
   it('gives the interpreter value on the shader targets for e0 >= e1', () => {
     // The built-in `smoothstep` has no defined result there; the helper
     // writes the formula out.
-    for (const language of ['glsl', 'wgsl'] as const) {
+    for (const language of ['glsl'] as const) {
       const ce3 = new ComputeEngine();
       ce3.declare('a', 'number');
       ce3.declare('b', 'number');
@@ -161,10 +161,7 @@ describe('Smoothstep at its edge cases', () => {
         to: language,
         fallback: false,
       } as never);
-      const main =
-        language === 'glsl'
-          ? `float _main(float a, float b, float x) { return ${r.code}; }`
-          : `fn _main(a: f32, b: f32, x: f32) -> f32 { return ${r.code}; }`;
+      const main = `float _main(float a, float b, float x) { return ${r.code}; }`;
       const run = shaderFunctions(`${r.preamble ?? ''}\n${main}`, language);
       for (const [a, b, x] of [
         [1, 1, 0.5],

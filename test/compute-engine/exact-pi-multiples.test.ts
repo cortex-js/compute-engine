@@ -13,7 +13,6 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { shaderFunctions } from './gpu-shader-f32-eval';
 import { TEST_PYTHON } from './test-python';
 import { execFileSync } from 'child_process';
@@ -190,22 +189,14 @@ describe('compiled: sin(πx), cos(πx), tan(πx) and e^{iπx}', () => {
     expect(failures).toEqual([]);
   });
 
-  for (const [language, Target] of [
-    ['glsl', GLSLTarget],
-    ['wgsl', WGSLTarget],
-  ] as const)
+  for (const [language, Target] of [['glsl', GLSLTarget]] as const)
     it(`${language}: an integer or a half-integer x has an exact zero part`, () => {
       for (const [latex, head] of HEADS) {
         const r = new Target().compile(ce.parse(latex));
         const complex = head === 'exp';
-        const main =
-          language === 'glsl'
-            ? complex
-              ? `vec2 _main(float x) { return ${r.code}; }`
-              : `float _main(float x) { return ${r.code}; }`
-            : complex
-              ? `fn _main(x: f32) -> vec2f { return ${r.code}; }`
-              : `fn _main(x: f32) -> f32 { return ${r.code}; }`;
+        const main = complex
+          ? `vec2 _main(float x) { return ${r.code}; }`
+          : `float _main(float x) { return ${r.code}; }`;
         const run = shaderFunctions(`${r.preamble ?? ''}\n${main}`, language);
         for (const [x, exact] of POINTS) {
           if (x === 0.25) continue;
@@ -450,10 +441,7 @@ describe('compiled: a user binding of a library constant name', () => {
     expect(code).not.toContain('np.e');
   });
 
-  test.each([
-    ['GLSL', () => new GLSLTarget()],
-    ['WGSL', () => new WGSLTarget()],
-  ])('%s', (_label, make) => {
+  test.each([['GLSL', () => new GLSLTarget()]])('%s', (_label, make) => {
     const code = (make() as any).compile(ce.box(['Multiply', 'Pi', 'x'])).code;
     expect(code).not.toContain('3.14159');
     expect(code).toBe('1.0 * x');

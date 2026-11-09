@@ -16,7 +16,6 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const ce = new ComputeEngine();
 
@@ -652,7 +651,6 @@ describe('GPU PolyLog preamble', () => {
     // its decline flag to fall back to the inversion formula), not the
     // NaN-returning `_gpu_lerch_phi`.
     ['GLSL', new GLSLTarget(), 'vec2 _gpu_lerch_core('],
-    ['WGSL', new WGSLTarget(), 'fn _gpu_lerch_core('],
   ] as const;
 
   test.each(targets)(

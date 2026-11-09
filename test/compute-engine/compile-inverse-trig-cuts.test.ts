@@ -1,7 +1,7 @@
 import { TEST_PYTHON } from './test-python';
 /**
  * The compiled inverse trigonometric and inverse hyperbolic functions of a
- * complex argument on the GLSL, WGSL and Python targets agree with the
+ * complex argument on the GLSL and Python targets agree with the
  * interpreter: the same value, and the same side of each branch cut.
  *
  * GPU: the helpers `_gpu_casin` and the others (`compilation/gpu-target.ts`)
@@ -22,7 +22,6 @@ import { TEST_PYTHON } from './test-python';
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { shaderFunctions } from './gpu-shader-f32-eval';
 import { execFileSync } from 'child_process';
@@ -89,11 +88,6 @@ describe('GPU: inverse trigonometric functions of a complex argument', () => {
       GLSLTarget,
       (code: string) => `vec2 _main(vec2 z) { return ${code}; }`,
     ],
-    [
-      'wgsl',
-      WGSLTarget,
-      (code: string) => `fn _main(z: vec2f) -> vec2f { return ${code}; }`,
-    ],
   ] as const)
     for (const head of HEADS)
       it(`${language}: ${head}(z) agrees with the interpreter in f32`, () => {
@@ -122,16 +116,10 @@ describe('GPU: inverse trigonometric functions of a complex argument', () => {
 
   // The interpreter's `arsech 0` is `+∞` (the loop above skips a value that
   // is not finite); it was NaN.
-  for (const [language, Target] of [
-    ['glsl', GLSLTarget],
-    ['wgsl', WGSLTarget],
-  ] as const)
+  for (const [language, Target] of [['glsl', GLSLTarget]] as const)
     it(`${language}: Arsech(0) is +∞`, () => {
       const r = new Target().compile(ce.function('Arsech', ['z']));
-      const main =
-        language === 'glsl'
-          ? `vec2 _main(vec2 z) { return ${r.code}; }`
-          : `fn _main(z: vec2f) -> vec2f { return ${r.code}; }`;
+      const main = `vec2 _main(vec2 z) { return ${r.code}; }`;
       const run = shaderFunctions(`${r.preamble}\n${main}`, language);
       expect(run('_main', { x: 0, y: 0 })).toEqual({ x: Infinity, y: 0 });
       expect(reference('Arsech', 0, 0)).toEqual([Infinity, 0]);
@@ -188,11 +176,6 @@ describe('GPU: arctan is odd on its branch cut', () => {
       GLSLTarget,
       (code: string) => `vec2 _main(vec2 z) { return ${code}; }`,
     ],
-    [
-      'wgsl',
-      WGSLTarget,
-      (code: string) => `fn _main(z: vec2f) -> vec2f { return ${code}; }`,
-    ],
   ] as const)
     it(`${language}: the value of mpmath on each half of the cut`, () => {
       const r = new Target().compile(ce.function('Arctan', ['z']));
@@ -207,13 +190,7 @@ describe('GPU: arctan is odd on its branch cut', () => {
 });
 
 describe('GPU: the language checks of the f32 shader interpreter', () => {
-  const REJECTED: [string, 'glsl' | 'wgsl', string][] = [
-    ['fn f(x: f32) -> f32 { return x > 0.0 ? x : -x; }', 'wgsl', '?:'],
-    ['fn f(x: f32) -> f32 { if (x > 0.0) return x; return -x; }', 'wgsl', 'if'],
-    ['fn f(x: f32) -> f32 { x = 2.0 * x; return x; }', 'wgsl', 'parameter'],
-    ['fn f(x: f32) -> f32 { let y = x; y = 1.0; return y; }', 'wgsl', 'let'],
-    ['fn f(x: f32) -> f32 { return atan(x, 1.0); }', 'wgsl', 'atan'],
-    ['fn f(x: f32) -> f32 { return 2 * x; }', 'wgsl', 'integer literal'],
+  const REJECTED: [string, 'glsl', string][] = [
     ['float f(float x) { return 2 * x; }', 'glsl', 'integer literal'],
     [
       'float f(float x) { return g(x); }\nfloat g(float x) { return x; }',
@@ -229,12 +206,6 @@ describe('GPU: the language checks of the f32 shader interpreter', () => {
     });
 
   it('accepts the same functions written by the rules', () => {
-    expect(() =>
-      shaderFunctions(
-        'fn f(x: f32) -> f32 { var y = x; if (y < 0.0) { y = -y; } return select(y, 2.0 * y, y > 1.0); }',
-        'wgsl'
-      )
-    ).not.toThrow();
     expect(() =>
       shaderFunctions(
         'float g(float x) { return x; }\nfloat f(float x) { return x > 0.0 ? g(x) : atan(x, 1.0); }',

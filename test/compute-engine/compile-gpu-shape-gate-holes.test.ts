@@ -18,9 +18,9 @@
  *  3. Compound lowerings bypassed the gate entirely. A head absent from
  *     `GPU_OPERATORS` whose emission was not a single call was INFERRED to
  *     consume an aggregate on purpose, which is true of the `Max`/`Min`
- *     reduction and false of every ordinary compound lowering: WGSL's `Mod`
- *     → `(((P % Q) + Q) % Q)` over a `vector<3>` and a `vector<2>` compiled,
- *     while GLSL — whose `Mod` IS a single call — declined it correctly.
+ *     reduction and false of every ordinary compound lowering: a compound
+ *     lowering over a `vector<3>` and a `vector<2>` compiled to source with
+ *     operands of two widths.
  *
  * The obligations are derived per builtin from the language specs, and are
  * NOT the same thing as "has a scalar-tailed overload": `mix(genType, genType,
@@ -31,11 +31,9 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const ce = new ComputeEngine();
 const glsl = new GLSLTarget();
-const wgsl = new WGSLTarget();
 
 /**
  * Compile-time constant folding is off throughout this file: most probes are
@@ -48,8 +46,6 @@ const NO_FOLD = { constantFold: false } as const;
 
 const g = (expr: any, engine = ce): string =>
   glsl.compile(engine.box(expr), NO_FOLD).code!;
-const w = (expr: any, engine = ce): string =>
-  wgsl.compile(engine.box(expr), NO_FOLD).code!;
 
 const V3 = ['List', 1, 2, 3];
 const W3 = ['List', 4, 5, 6];
@@ -69,16 +65,16 @@ cev.declare('Q', 'vector<real^2>');
 describe('GPU SHAPE GATE — a MANDATORY scalar slot (finding 1)', () => {
   it('`refract`s third argument must be a scalar, even with no scalar present', () => {
     // GLSL ES 3.00 §8.4 / GLSL 4.60 §8.5: `genType refract(genType I, genType
-    // N, float eta)` — the ONLY signature. WGSL §17.5: `refract(e1: vecN<T>,
-    // e2: vecN<T>, e3: T)`. An all-vector call has no overload at all.
-    for (const emit of [g, w])
+    // N, float eta)` — the ONLY signature. An all-vector call has no overload
+    // at all.
+    for (const emit of [g])
       expect(() => emit(['Refract', V3, W3, U3])).toThrow(
         /^Could not compile `Refract`: the shader builtin `refract` requires a SCALAR in argument 3 .*$/s
       );
   });
 
   it('declines a declared-vector third argument too', () => {
-    for (const emit of [g, w])
+    for (const emit of [g])
       expect(() => emit(['Refract', 'v', 'w', 'v'], cev)).toThrow(
         /requires a SCALAR in argument 3/
       );
@@ -88,9 +84,6 @@ describe('GPU SHAPE GATE — a MANDATORY scalar slot (finding 1)', () => {
     expect(g(['Refract', V3, W3, 0.5])).toBe(
       'refract(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), 0.5)'
     );
-    expect(w(['Refract', V3, W3, 0.5])).toBe(
-      'refract(vec3f(1.0, 2.0, 3.0), vec3f(4.0, 5.0, 6.0), 0.5)'
-    );
   });
 
   it('a PERMISSION is not an obligation — the all-genType overloads still compile', () => {
@@ -99,9 +92,6 @@ describe('GPU SHAPE GATE — a MANDATORY scalar slot (finding 1)', () => {
     // any of them mandatory would decline valid source.
     expect(g(['Mix', V3, W3, U3])).toBe(
       'mix(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), vec3(7.0, 8.0, 9.0))'
-    );
-    expect(w(['Mix', V3, W3, U3])).toBe(
-      'mix(vec3f(1.0, 2.0, 3.0), vec3f(4.0, 5.0, 6.0), vec3f(7.0, 8.0, 9.0))'
     );
     expect(g(['Smoothstep', V3, W3, U3])).toBe(
       '_gpu_smoothstep3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), vec3(7.0, 8.0, 9.0))'
@@ -121,7 +111,7 @@ describe('GPU SHAPE GATE — a MANDATORY scalar slot (finding 1)', () => {
   });
 
   it('reports `success: false` (no source) through the fallback route', () => {
-    for (const target of [glsl, wgsl]) {
+    for (const target of [glsl]) {
       const r = target.compile(ce.box(['Refract', V3, W3, U3] as any), {
         fallback: true,
       });
@@ -140,7 +130,7 @@ describe('GPU SHAPE GATE — the variadic fold over declared vectors (finding 2)
 
   // `ElementMax`/`ElementMin` broadcast a scalar operand with `vec3(…)`
   // wherever it stands: the vector helpers `_gpu_max3`/`_gpu_min3` (CE-519)
-  // take two vectors of one width, and so does the WGSL built-in. The shapes
+  // take two vectors of one width. The shapes
   // come from the CE operands: neither `v` nor `w` has a `vecN` constructor in
   // its source. The cells of `v` and `w` (`vector<real^3>`) and the literals
   // are finite for certain, so the built-in `max`/`min` takes the broadcast
@@ -188,18 +178,6 @@ describe('GPU SHAPE GATE — the variadic fold over declared vectors (finding 2)
       '_gpu_max(_gpu_max(u, 2.0), 3.0)'
     );
   });
-
-  it('WGSL broadcasts the scalar the same way', () => {
-    expect(w(['ElementMax', 2, 'v', 'w'], cev)).toBe(
-      'max(max(vec3f(2.0), v), w)'
-    );
-    expect(w(['ElementMax', 'v', 'w', 2], cev)).toBe(
-      'max(max(v, w), vec3f(2.0))'
-    );
-    expect(w(['ElementMax', 'v', 'n', 2], cev)).toBe(
-      '_gpu_max3(_gpu_max3(v, n), vec3f(2.0))'
-    );
-  });
 });
 
 describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
@@ -209,10 +187,8 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
   });
   afterAll(() => warn.mockRestore());
 
-  it('WGSL `Mod` over mismatched widths declines, as GLSL already did', () => {
-    // WGSL lowers `Mod` to `(((a % b) - b * floor((a % b) / b)) % b)` — not a
-    // single call, so the gate used to step aside for it.
-    for (const emit of [g, w])
+  it('`Mod` over mismatched widths declines', () => {
+    for (const emit of [g])
       expect(() => emit(['Mod', 'P', 'Q'], cev)).toThrow(
         /^Could not compile `Mod`: its operands lower to shader vectors of different widths \(vec3, vec2\).*$/s
       );
@@ -223,7 +199,7 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
     // transcendentals have no `matN` overload and arrays have no operators.
     // (Base 2 is no longer a compound lowering: it takes the `log2` builtin,
     // whose own shape gate declines with the builtin's diagnostic.)
-    for (const emit of [g, w]) {
+    for (const emit of [g]) {
       expect(() => emit(['Cot', M2])).toThrow(
         /^Could not compile `Cot`: the compound shader lowering .* have no `matN` reading.*$/s
       );
@@ -234,18 +210,6 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
         /`log2` .* has no array overload/
       );
     }
-  });
-
-  it('WGSL `Mod(1, [1,2,3])` still compiles — `%` HAS a mixed form', () => {
-    // WGSL §8.7 defines the mixed scalar/vector arithmetic operators, so this
-    // is valid source and must not be "fixed".
-    expect(w(['Mod', 1, V3])).toBe(
-      '_gpu_fmod3(vec3f(1.0), vec3f(1.0, 2.0, 3.0))'
-    );
-    // A divisor of 2: a divisor of 1 is the `fract` peephole (CE-254).
-    expect(w(['Mod', V3, 2])).toBe(
-      '_gpu_fmod3(vec3f(1.0, 2.0, 3.0), vec3f(2.0))'
-    );
   });
 
   it('a DESTRUCTURING consumer of a literal list is left alone', () => {
@@ -263,14 +227,13 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
       ce.box(['Variance', ['List', 1, 2, 3, 4, 5]]).evaluate().re,
       10
     );
-    expect(w(['Variance', ['List', 1, 2, 3, 4, 5]])).not.toContain('array<');
   });
 
   it('the N-SCALAR form of a destructuring consumer stays gated', () => {
     // `Variance(x, y)` uses its operands ONE FOR ONE — nothing is
     // destructured — so mismatched widths there are still invalid source. The
     // capability is a predicate over the operands, not a blanket exemption.
-    for (const emit of [g, w])
+    for (const emit of [g])
       expect(() => emit(['Variance', 'P', 'Q'], cev)).toThrow(
         /different widths \(vec3, vec2\)/
       );
@@ -283,7 +246,6 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
     const cem = new ComputeEngine();
     cem.declare('m', 'matrix<real^2x2>');
     expect(glsl.compile(cem.box(['Real', 'm'] as any)).code).toBe('m');
-    expect(wgsl.compile(cem.box(['Real', 'm'] as any)).code).toBe('m');
   });
 });
 
@@ -317,8 +279,6 @@ describe('GPU SHAPE GATE — the Max/Min reduction is DECLARED, not inferred', (
   it.each(CASES)('%s reduces to the interpreter value', (_label, expr) => {
     const src = g(expr);
     expect(runShader(src)).toBe(ce.box(expr).evaluate().re);
-    // Byte-identical on WGSL for this subset.
-    expect(w(expr)).toBe(src);
   });
 
   it('the canonical emissions are unchanged', () => {
@@ -326,14 +286,8 @@ describe('GPU SHAPE GATE — the Max/Min reduction is DECLARED, not inferred', (
     expect(g(['Min', ['Range', 1, 5]])).toBe(
       '(_gpu_min(_gpu_min(_gpu_min(_gpu_min(1.0, 2.0), 3.0), 4.0), 5.0))'
     );
-    // WGSL's `max` has no scalar/vector overload, so a `vec3f` mixed with a
-    // scalar would fail the generic gate — the declared capability is what
-    // keeps this reduction compiling there.
-    expect(w(['Max', V3, 5])).toBe('(max(max(max(1.0, 2.0), 3.0), 5.0))');
-    // An empty collection contributes nothing; the WGSL NaN is a CALL, which
-    // the gate would otherwise judge against the `array` shape of `[]`.
+    // An empty collection contributes nothing.
     expect(g(['Max', ['List'], 5])).toBe('(5.0)');
-    expect(w(['Max', ['List']])).toBe('(_gpu_nan())');
   });
 });
 
@@ -378,9 +332,6 @@ describe('GPU SHAPE GATE — valid source still compiles (regression guard)', ()
     );
     expect(g(['Add', M2, M2])).toContain(') + mat2(');
     expect(g(['Multiply', M2, 2])).toContain('2.0 * mat2(');
-    expect(w(['Multiply', M2, ['List', 5, 6]])).toBe(
-      'mat2x2f(vec2f(1.0, 3.0), vec2f(2.0, 4.0)) * vec2f(5.0, 6.0)'
-    );
   });
 
   it('the destructuring and aggregate-aware helpers are unaffected', () => {
@@ -398,13 +349,10 @@ describe('GPU SHAPE GATE — valid source still compiles (regression guard)', ()
     );
   });
 
-  it('a vector and a scalar ElementMax compiles on both targets', () => {
+  it('a vector and a scalar ElementMax compiles', () => {
     // Finite operands: the built-in, with the scalar broadcast (CE-565.2).
     expect(g(['ElementMax', V3, 2])).toBe(
       'max(vec3(1.0, 2.0, 3.0), vec3(2.0))'
-    );
-    expect(w(['ElementMax', V3, 2])).toBe(
-      'max(vec3f(1.0, 2.0, 3.0), vec3f(2.0))'
     );
   });
 });
@@ -451,7 +399,7 @@ describe('GPU SHAPE GATE — collection-typed operands with no static count', ()
   it('a componentwise builtin declines for every collection spelling with no vec2–vec4 count', () => {
     for (const type of NO_STATIC_COUNT) {
       const e = withL(type);
-      for (const emit of [g, w])
+      for (const emit of [g])
         expect(() => emit(['Sin', 'L'], e)).toThrow(
           type === 'vector<real^7>'
             ? /^Could not compile `Sin`: the shader builtin `sin` .* the operand shapes \(array\) have no lowering\.$/s
@@ -465,7 +413,6 @@ describe('GPU SHAPE GATE — collection-typed operands with no static count', ()
       const e = withL(type);
       // Real cells are finite for certain: the built-in (CE-565).
       expect(g(['Sin', 'L'], e)).toBe('sin(L)');
-      expect(w(['Sin', 'L'], e)).toBe('sin(L)');
     }
     expect(g(['Sin', 'L'], withL('tuple<real, real>'))).toBe('sin(L)');
   });
@@ -473,12 +420,11 @@ describe('GPU SHAPE GATE — collection-typed operands with no static count', ()
   it('an `unknown`-typed symbol stays a scalar — the free-variable admission is untouched', () => {
     const e = withL('unknown');
     expect(g(['Sin', 'L'], e)).toBe('_gpu_sin(L)');
-    expect(w(['Sin', 'L'], e)).toBe('_gpu_sin(L)');
   });
 
   it('a STRING operand keeps its own diagnostic rather than being reported as an array', () => {
     const e = withL('string');
-    for (const emit of [g, w])
+    for (const emit of [g])
       expect(() => emit(['Sin', 'L'], e)).toThrow(/string/);
   });
 

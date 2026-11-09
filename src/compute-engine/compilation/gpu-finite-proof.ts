@@ -391,13 +391,10 @@ function gpuFiniteProof(
       // source, or a mapping of a library constant, replaces a value whose
       // type the engine knows with one it does not.
       const mapped = isMapped(e.symbol);
-      // A field of the uniform parameter struct of `compileFieldFunction()`
-      // (`hostInputVars`) is also the host's input of the declared type.
       const selfMapped =
         mapped &&
         e.valueDefinition?.isConstant !== true &&
-        (target.var(e.symbol) === e.symbol ||
-          target.hostInputVars?.has(e.symbol) === true);
+        target.var(e.symbol) === e.symbol;
       result =
         (baked !== undefined || e.valueDefinition?.inferredType !== true) &&
         (!strict || baked !== undefined || gpuFiniteRealCells(e)) &&
@@ -1038,8 +1035,7 @@ function gpuFiniteProof(
   // function node has an interval, even when `magnitude` gives it a bound.
   // That bound is the exact bound of the value (1 for `sin`, `cos` and
   // `tanh`, π/2 for `arctan`), but the error of a GPU trigonometric
-  // function is absolute: WGSL specifies 2⁻¹¹ only for an argument in
-  // [-π, π], and GLSL specifies none. So `1.0004 + sin(t)`, with the
+  // function is absolute, and GLSL does not specify it. So `1.0004 + sin(t)`, with the
   // interval `[-1, 1]` for `sin(t)`, would get the lower bound 4·10⁻⁴,
   // while the shader can compute 0 or less for it. Only a symbol that the
   // shader reads as the host's input (its declared range, a promise of the
@@ -1722,7 +1718,6 @@ export function gpuDefinitionParameterFacts(
   shaderTypes: ReadonlyArray<string>,
   body: Expression,
   target: CompileTarget<Expression>,
-  isWGSL: boolean,
   positions?: { readonly at: ReadonlyArray<number>; readonly arity: number }
 ): ReadonlyMap<string, GPUParameterFact> | undefined {
   const callSites =
@@ -1738,7 +1733,7 @@ export function gpuDefinitionParameterFacts(
   const rebound = gpuReboundNames(body);
   const facts = new Map<string, GPUParameterFact>();
   params.forEach((p, i) => {
-    if (shaderTypes[i] !== (isWGSL ? 'f32' : 'float')) return;
+    if (shaderTypes[i] !== 'float') return;
     if (rebound.has(p)) return;
     // A recorded fact already holds the declared range
     // (`gpuRecordCallSiteFacts`).

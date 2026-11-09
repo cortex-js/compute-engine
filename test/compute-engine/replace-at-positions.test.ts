@@ -761,7 +761,6 @@ describe('the other targets decline a form with more than one position', () => {
   test.each([
     ['python', /this target writes at one position/],
     ['glsl', /target 'glsl' has no lowering/],
-    ['wgsl', /target 'wgsl' has no lowering/],
   ])('%s', (to, message) => {
     expect(() =>
       compile(ce.box(json as never), { to, fallback: false } as never)

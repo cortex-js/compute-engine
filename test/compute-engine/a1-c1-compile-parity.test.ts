@@ -10,7 +10,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 describe('A1 — PointX/PointY/PointZ compile', () => {
   describe('JS target', () => {
@@ -102,17 +101,6 @@ describe('A1 — Range GPU compile', () => {
     expect(result.success).toBe(true);
     // Expect float[5](...) literal with all five values
     expect(result.code).toMatch(/float\[5\]/);
-    expect(result.code).toMatch(/1\.0,\s*2\.0,\s*3\.0,\s*4\.0,\s*5\.0/);
-  });
-
-  test('Range(1, 5) compiles to a small constant array in WGSL', () => {
-    const ce = new ComputeEngine();
-    const wgslTarget = new WGSLTarget();
-    const expr = ce.parse('\\operatorname{Range}(1, 5)');
-    const result = wgslTarget.compile(expr);
-    expect(result.success).toBe(true);
-    // Expect array<f32, 5>(...) literal with all five values
-    expect(result.code).toMatch(/array<f32,\s*5>/);
     expect(result.code).toMatch(/1\.0,\s*2\.0,\s*3\.0,\s*4\.0,\s*5\.0/);
   });
 
@@ -208,24 +196,6 @@ describe('A1 — Variance/GCD/Median GPU compile', () => {
     expect(result.code).toMatch(/_gpu_gcd\(/);
   });
 
-  test('Variance compiles for a constant-size list in WGSL', () => {
-    const ce = new ComputeEngine();
-    const target = new WGSLTarget();
-    const expr = ce.parse('\\operatorname{var}([1, 2, 3, 4, 5])');
-    const result = target.compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.code.length).toBeGreaterThan(0);
-  });
-
-  test('GCD compiles for two integers in WGSL', () => {
-    const ce = new ComputeEngine();
-    const target = new WGSLTarget();
-    const expr = ce.parse('\\operatorname{gcd}(12, 18)');
-    const result = target.compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.code.length).toBeGreaterThan(0);
-  });
-
   test('Variance with non-constant list elements compiles in GLSL', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
@@ -244,7 +214,7 @@ describe('A1 — Variance/GCD/Median GPU compile', () => {
 // redesign (`docs/RANDOMNESS-MODEL.md` §7) rewrites
 // them over the PCG3D frame stream, with a per-language/per-form matrix, the
 // GPU seed ABI, the GLSL stage check and the cross-domain fail-closed rule.
-// The suite that pinned `Random(seed)` on GLSL/WGSL is retired here rather
+// The suite that pinned `Random(seed)` on GLSL is retired here rather
 // than re-pointed: every one of its assertions is about the removed form.
 describe('A1 — Random GPU compile', () => {
   test.todo('Phase 3: the §7 GPU matrix (framed draws, seed ABI, stage check)');
@@ -256,13 +226,6 @@ describe('A1 — Random GPU compile', () => {
     const result = target.compile(expr);
     expect(result.success).toBe(true);
     expect(result.code).toMatch(/gl_FragCoord|_gpu_random/);
-  });
-
-  test('an unframed Random() still throws on WGSL (no stream, no fragment coord)', () => {
-    const ce = new ComputeEngine();
-    const target = new WGSLTarget();
-    const expr = ce.expr(['Random']);
-    expect(() => target.compile(expr)).toThrow();
   });
 });
 
@@ -428,7 +391,7 @@ describe('C1 — toSignedFunction()', () => {
 // GammaRegularized / BetaRegularized — regularized incomplete gamma/beta
 // kernels backing the distribution CDFs. JS target maps directly to the
 // `gammaQ`/`betaRegularized` numeric kernels (no argument reordering); GLSL
-// and WGSL have no kernel for either, so compiling must fail closed (D6,
+// has no kernel for either, so compiling must fail closed (D6,
 // base-compiler.ts ~477) rather than silently emit wrong code.
 describe('GammaRegularized / BetaRegularized compile', () => {
   const ce = new ComputeEngine();
@@ -476,23 +439,17 @@ describe('GammaRegularized / BetaRegularized compile', () => {
   // The diagnostic names the head and the target gap. `Unknown operator` is
   // reserved for a head the engine has no operator definition for at all
   // (Tycho item 109a) — these two have kernels on other targets.
-  test('GammaRegularized fails closed (no kernel) in GLSL and WGSL', () => {
+  test('GammaRegularized fails closed (no kernel) in GLSL', () => {
     const expr = ce.box(['GammaRegularized', 3, 'x']);
     expect(() => new GLSLTarget().compile(expr)).toThrow(
       /Could not compile `GammaRegularized`: .* target 'glsl' has no lowering/
     );
-    expect(() => new WGSLTarget().compile(expr)).toThrow(
-      /Could not compile `GammaRegularized`: .* target 'wgsl' has no lowering/
-    );
   });
 
-  test('BetaRegularized fails closed (no kernel) in GLSL and WGSL', () => {
+  test('BetaRegularized fails closed (no kernel) in GLSL', () => {
     const expr = ce.box(['BetaRegularized', 'x', 2, 3]);
     expect(() => new GLSLTarget().compile(expr)).toThrow(
       /Could not compile `BetaRegularized`: .* target 'glsl' has no lowering/
-    );
-    expect(() => new WGSLTarget().compile(expr)).toThrow(
-      /Could not compile `BetaRegularized`: .* target 'wgsl' has no lowering/
     );
   });
 });

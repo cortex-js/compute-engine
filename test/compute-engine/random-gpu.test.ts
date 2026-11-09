@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { withRandomSeedFrame } from '../../src/compute-engine/boxed-expression/utils';
@@ -25,7 +24,6 @@ import {
 
 const ce = new ComputeEngine();
 const glsl = new GLSLTarget();
-const wgsl = new WGSLTarget();
 
 /**
  * Compile-time constant folding is off for the emissions this suite pins.
@@ -41,7 +39,7 @@ const wgsl = new WGSLTarget();
 const NO_FOLD = { constantFold: false } as const;
 
 /** `code + preamble` — the two halves a caller concatenates. */
-function source(target: GLSLTarget | WGSLTarget, expr: any): string {
+function source(target: GLSLTarget, expr: any): string {
   const r = target.compile(expr, NO_FOLD);
   expect(r.success).toBe(true);
   return `${r.preamble ?? ''}\n${r.code}`;
@@ -56,13 +54,12 @@ describe('GPU random — the PCG3D preamble', () => {
   // (Jarzynski & Olano, JCGT 2020, §6). A diff here is a breaking change.
   for (const [name, target] of [
     ['GLSL', glsl],
-    ['WGSL', wgsl],
   ] as const) {
     it(`${name} emits pcg3d verbatim when a draw is compiled`, () => {
       const src = source(target, framed(42, ce.expr(['Random'])));
       expect(src).toContain('1664525u');
       expect(src).toContain('1013904223u');
-      // The two cross-multiply-add rounds, sequential in both.
+      // The two cross-multiply-add rounds, sequential.
       expect(src).toContain('v.x += v.y*v.z; v.y += v.z*v.x; v.z += v.x*v.y;');
       // The xor-shift-right-16 between them.
       expect(src).toMatch(/>>\s*(16u|vec3<u32>\(16u\))/);
@@ -91,14 +88,6 @@ describe('GPU random — the PCG3D preamble', () => {
     expect(src).toContain('uint _gpu_rnd_n0 = 0u;');
     expect(src).toContain('float _gpu_rnd_draw(uvec2 seed, inout uint n)');
   });
-
-  it('WGSL declares the counter as a per-invocation private var', () => {
-    const src = source(wgsl, framed(42, ce.expr(['Random'])));
-    expect(src).toContain('var<private> _gpu_rnd_n0: u32 = 0u;');
-    expect(src).toContain(
-      'fn _gpu_rnd_draw(seed: vec2<u32>, n: ptr<private, u32>) -> f32'
-    );
-  });
 });
 
 describe('GPU random — the invocation-local counter', () => {
@@ -110,12 +99,9 @@ describe('GPU random — the invocation-local counter', () => {
     expect(src).toContain('n = n + 1u;');
   });
 
-  it('GLSL passes the counter by `inout`, WGSL by pointer', () => {
+  it('GLSL passes the counter by `inout`', () => {
     expect(source(glsl, framed(42, ce.expr(['Random'])))).toMatch(
       /_gpu_rnd_draw\(uvec2\([^)]*\), _gpu_rnd_n0\)/
-    );
-    expect(source(wgsl, framed(42, ce.expr(['Random'])))).toMatch(
-      /_gpu_rnd_draw\(vec2<u32>\([^)]*\), &_gpu_rnd_n0\)/
     );
   });
 
@@ -169,9 +155,6 @@ describe('GPU seed ABI (§7)', () => {
     expect(glsl.compile(framed(42, ce.expr(['Random'])), NO_FOLD).code).toContain(
       `uvec2(${hex(lo)}, ${hex(hi)})`
     );
-    expect(wgsl.compile(framed(42, ce.expr(['Random'])), NO_FOLD).code).toContain(
-      `vec2<u32>(${hex(lo)}, ${hex(hi)})`
-    );
     // The words are the normative `foldSeed` output, not an ad-hoc GPU fold.
     expect([lo, hi]).toEqual([0x40450000, 0x00000000]);
   });
@@ -213,16 +196,13 @@ describe('GPU seed ABI (§7)', () => {
     expect(glsl.compile(expr).code).toContain(
       'uvec2(floatBitsToUint(p), 0u)'
     );
-    expect(wgsl.compile(expr).code).toContain(
-      'vec2<u32>(bitcast<u32>(p), 0u)'
-    );
   });
 
-  it('a RUNTIME string seed is a compile error on both languages', () => {
+  it('a RUNTIME string seed is a compile error on GLSL', () => {
     const e = new ComputeEngine();
     e.declare('s', 'string');
     const expr = e.box(['WithRandomSeed', 's', ['Random']]);
-    for (const target of [glsl, wgsl])
+    for (const target of [glsl])
       expect(() => target.compile(expr)).toThrow(/string/i);
   });
 });
@@ -261,9 +241,9 @@ describe('seed ABI — once-evaluation and the deferred host-uniform row', () =>
     ).toThrow(/COMPUTED seed/);
   });
 
-  it('an IMPURE seed throws on both languages', () => {
+  it('an IMPURE seed throws on GLSL', () => {
     const expr = ce.box(['WithRandomSeed', ['Random'], ['Random']] as any);
-    for (const target of [glsl, wgsl])
+    for (const target of [glsl])
       expect(() => target.compile(expr)).toThrow(/not pure/);
   });
 
@@ -498,50 +478,6 @@ describe('§7 form matrix — GLSL', () => {
   });
 });
 
-describe('§7 form matrix — WGSL', () => {
-  it('Random() unframed throws — no gl_FragCoord, no live stream', () => {
-    expect(() => wgsl.compile(ce.expr(['Random']))).toThrow(
-      /WGSL|gl_FragCoord/
-    );
-  });
-
-  it('every unframed form throws, including the closed-form domains', () => {
-    expect(() =>
-      wgsl.compile(ce.box(['Random', ['Interval', 0, 1]]))
-    ).toThrow();
-    expect(() => wgsl.compile(ce.box(['Random', ['Range', 1, 6]]))).toThrow();
-  });
-
-  it('Random() / Random(Interval) / Random(Range) inside a frame compile', () => {
-    expect(wgsl.compile(framed(42, ce.expr(['Random'])), NO_FOLD).success).toBe(
-      true
-    );
-    expect(
-      wgsl.compile(framed(42, ce.box(['Random', ['Interval', 2, 5]])), NO_FOLD)
-        .code
-    ).toContain('vec2<u32>(0x40450000u, 0x00000000u)');
-    expect(
-      wgsl.compile(framed(42, ce.box(['Random', ['Range', 1, 6]])), NO_FOLD).code
-    ).toContain('floor(');
-  });
-
-  it('Random(collection) and the multi-draw operators throw', () => {
-    const xs = ['List', 1, 2, 3];
-    expect(() =>
-      wgsl.compile(framed(42, ce.box(['Random', xs])), NO_FOLD)
-    ).toThrow(/indexing/i);
-    expect(() =>
-      wgsl.compile(ce.box(['RandomChoice', xs, 2] as any))
-    ).toThrow(/RandomChoice/);
-    expect(() =>
-      wgsl.compile(ce.box(['RandomSample', xs, 2] as any))
-    ).toThrow(/RandomSample/);
-    expect(() => wgsl.compile(ce.box(['RandomShuffle', xs] as any))).toThrow(
-      /RandomShuffle/
-    );
-  });
-});
-
 describe('cross-domain fail-closed (§4)', () => {
   it('an UNFRAMED shader draw compiled inside a HOST frame throws', () => {
     // A shader invocation cannot share the host's mutable counter, and
@@ -549,7 +485,7 @@ describe('cross-domain fail-closed (§4)', () => {
     // live) draw.
     const e = new ComputeEngine();
     withRandomSeedFrame(e as any, 42, () => {
-      for (const target of [glsl, wgsl])
+      for (const target of [glsl])
         expect(() => target.compile(e.expr(['Random']))).toThrow(
           /cross-domain|host `WithRandomSeed` frame|LEXICAL/
         );
@@ -671,28 +607,6 @@ float _gpu_rnd_draw(uvec2 seed, inout uint n) {
 "
 `);
   });
-
-  it('the WGSL preamble is pinned', () => {
-    expect(wgsl.compile(framed(42, ce.expr(['Random'])), NO_FOLD).preamble)
-      .toMatchInlineSnapshot(`
-"
-var<private> _gpu_rnd_n0: u32 = 0u;
-
-fn _gpu_pcg3d(v_in: vec3<u32>) -> vec3<u32> {
-  var v = v_in * 1664525u + 1013904223u;
-  v.x += v.y*v.z; v.y += v.z*v.x; v.z += v.x*v.y;
-  v = v ^ (v >> vec3<u32>(16u));
-  v.x += v.y*v.z; v.y += v.z*v.x; v.z += v.x*v.y;
-  return v;
-}
-fn _gpu_rnd_draw(seed: vec2<u32>, n: ptr<private, u32>) -> f32 {
-  let w = _gpu_pcg3d(vec3<u32>(seed.x, seed.y, *n));
-  *n = *n + 1u;
-  return f32(w.x >> 8u) * (1.0 / 16777216.0);
-}
-"
-`);
-  });
 });
 
 describe('route parity — `WithRandomSeed` is lazy', () => {
@@ -769,22 +683,6 @@ describe('compileShader splices the helper preamble (2026-07-25 fix)', () => {
     );
   });
 
-  it('WGSL: a framed draw shader defines pcg3d and a private counter', () => {
-    const shader = wgsl.compileShader({
-      type: 'fragment',
-      outputs: [{ name: 'color', type: 'vec4' }],
-      body: [
-        { variable: 'output.color.r', expression: framed(42, ['Random']) },
-      ],
-      ...NO_FOLD,
-    });
-    expect(shader).toContain('fn _gpu_pcg3d');
-    expect(shader).toContain('var<private> _gpu_rnd_n');
-    expect(shader.indexOf('fn _gpu_pcg3d')).toBeLessThan(
-      shader.indexOf('fn main(')
-    );
-  });
-
   it('GLSL: two framed statements get DISTINCT counters, both declared', () => {
     // ONE target per shader: the counters are numbered per compilation and
     // the preamble declares each allocated name once over the JOINED
@@ -804,22 +702,6 @@ describe('compileShader splices the helper preamble (2026-07-25 fix)', () => {
     expect(shader).toContain(', _gpu_rnd_n1)');
     expect(shader).toContain('uint _gpu_rnd_n0 = 0u;');
     expect(shader).toContain('uint _gpu_rnd_n1 = 0u;');
-  });
-
-  it('WGSL: two framed statements get DISTINCT counters, both declared', () => {
-    const shader = wgsl.compileShader({
-      type: 'fragment',
-      outputs: [{ name: 'color', type: 'vec4' }],
-      body: [
-        { variable: 'output.color.r', expression: framed(42, ['Random']) },
-        { variable: 'output.color.g', expression: framed(42, ['Random']) },
-      ],
-      ...NO_FOLD,
-    });
-    expect(shader).toContain(', &_gpu_rnd_n0)');
-    expect(shader).toContain(', &_gpu_rnd_n1)');
-    expect(shader).toContain('var<private> _gpu_rnd_n0: u32 = 0u;');
-    expect(shader).toContain('var<private> _gpu_rnd_n1: u32 = 0u;');
   });
 
   it('a GLSL fragment shader pins highp INT as well as highp float', () => {

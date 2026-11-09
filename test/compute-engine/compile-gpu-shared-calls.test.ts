@@ -26,7 +26,7 @@ import {
  * Every test builds its OWN engine: these tests assign symbols.
  */
 
-const TARGETS = ['glsl', 'wgsl'] as const;
+const TARGETS = ['glsl'] as const;
 
 /** The definitions of Tycho's `voronoi-diagram` document (the weight
  * function `n` is named `w` here). */
@@ -74,12 +74,10 @@ function countCalls(text: string, name: string): number {
 function mainFunction(
   code: string,
   params: string[],
-  language: 'glsl' | 'wgsl'
+  language: 'glsl'
 ): string {
   const body = /\breturn\b/.test(code) ? code : `return ${code};`;
-  return language === 'glsl'
-    ? `float _main(${params.map((p) => `float ${p}`).join(', ')}) {\n${body}\n}`
-    : `fn _main(${params.map((p) => `${p}: f32`).join(', ')}) -> f32 {\n${body}\n}`;
+  return `float _main(${params.map((p) => `float ${p}`).join(', ')}) {\n${body}\n}`;
 }
 
 describe('the voronoi-diagram row (Tycho row 467)', () => {
@@ -239,7 +237,7 @@ describe('a call shared by two functions', () => {
 
   test('a function that is called from one body only stays a call', () => {
     const ce = engine();
-    const r = compile(ce.parse('g(x)'), { to: 'wgsl' });
+    const r = compile(ce.parse('g(x)'), { to: 'glsl' });
     expect(`${r.preamble ?? ''}\n${r.code}`).toMatch(/_fn_g\(/);
   });
 
@@ -253,7 +251,7 @@ describe('a call shared by two functions', () => {
     ce.parse('h(x) := 2f(x)').evaluate();
     const r = compile(
       ce.box(['WithRandomSeed', 'x', ['Add', ['g', 'x'], ['h', 'x']]]),
-      { to: 'wgsl' }
+      { to: 'glsl' }
     );
     expect(r.success).toBe(true);
     const all = `${r.preamble ?? ''}\n${r.code}`;

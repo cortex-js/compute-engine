@@ -280,9 +280,7 @@ describe('Shader targets read a chained At as the nested access', () => {
   // access `R[1][2]`, not the decline of the multi-index form.
   test.each([
     ['glsl', 'matrix<real^2x2>', /multi-axis/],
-    ['wgsl', 'matrix<real^2x2>', /multi-axis/],
     ['glsl', 'list<list<real>>', /no statically known length/],
-    ['wgsl', 'list<list<real>>', /no statically known length/],
   ] as const)('%s, %s', (to, type, message) => {
     const ce = engine(type);
     expect(() =>

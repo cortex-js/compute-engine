@@ -9,7 +9,6 @@ import {
   gpuIntegerFact,
   recordGPUCounter,
 } from './gpu-value-facts.js';
-import { isVariableLocal } from './javascript-value-facts.js';
 import {
   COLLECTION_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
@@ -35,13 +34,11 @@ import {
 } from './constant-folding.js';
 import type { CompileTarget, CompiledFunctions } from './types.js';
 import { CompileDeclineError } from './diagnostics.js';
-import { storageBufferLength } from './gpu-storage-buffer.js';
 import {
   BaseCompiler,
   explicitBroadcastPointNorm,
   pointHasBroadcastComponent,
   type LoopInvariantBinding,
-  type MatchStatementClause,
 } from './base-compiler.js';
 import {
   resolveTypeAlias,
@@ -108,7 +105,6 @@ import { gpuProvablyFinite } from './gpu-finite-proof.js';
 import {
   GPU_NAN_SAFE_UNARY,
   GPU_OPERATORS,
-  conditionalGPUSinks,
   formatGPUNumber,
   gpuAtan2,
   gpuFVec,
@@ -124,9 +120,6 @@ import {
 } from './gpu-emit.js';
 import {
   compileGPUPointListAt,
-  compileGPUStorageBufferAt,
-  compileGPUStorageBufferReduce,
-  gpuAssertWGSLCopyFits,
   gpuAtBaseRefs,
   gpuAtBaseShape,
   gpuAtElement,
@@ -135,11 +128,8 @@ import {
   gpuAtGather,
   gpuAtSlot,
   gpuIsBoundName,
-  gpuIsStorageBufferSymbol,
   gpuPointListAtBase,
-  gpuStorageBufferOperand,
   gpuStorageOperandSource,
-  gpuWGSLInPlaceArray,
 } from './gpu-at.js';
 import { numericLiteralSource } from './compiler-type-facts.js';
 import { targetFoldValueImpure } from './compile-folding.js';
@@ -171,13 +161,7 @@ import {
   compileGPUConditionalArm,
   compileGPUMatchStatement,
   compileGPUStatementSelection,
-  gpuArmIsCostlyForSelect,
   gpuArmSharesWork,
-  gpuAssertNoAssignmentOperand,
-  gpuAssertNoEagerCallerCode,
-  gpuAssertNoEagerDraw,
-  gpuHasEagerCallerCode,
-  gpuMatchSelectedPieces,
   gpuAssertSelectableArms,
   gpuCanPlaceStatement,
   gpuConditional,
@@ -216,8 +200,8 @@ import {
  * constructor (`float[n](…)` / `array<f32, n>(…)`).
  *
  * Shared by the `Range` handler, which materializes a constant range as such
- * a literal, by the `List`/`Tuple`/`PointList` compilers of the GLSL and
- * WGSL targets (`assertGPUInlineElementCount`), and by
+ * a literal, by the `List`/`Tuple`/`PointList` compilers of the GLSL
+ * target (`assertGPUInlineElementCount`), and by
  * `CompileTarget.maxInlineElements`, which bounds constant-collection
  * FOLDING. They must agree: a fold cap below this would refuse a constant
  * collection that the handlers compile happily, and one above it would emit
@@ -259,7 +243,7 @@ export function assertGPUInlineElementCount(head: string, count: number): void {
  * Lower a `broadcastable` unary head applied to a collection operand
  * (`Sin([1,2,3,4])`, `-[1,2,3,4]`) on a shader target — WITHOUT fanning out.
  *
- * GLSL and WGSL builtins and operators are already componentwise on a vector
+ * GLSL builtins and operators are already componentwise on a vector
  * (`sin(vec4)` is a `vec4`, `-vec4` is a `vec4`), so the faithful lowering is
  * the head's OWN scalar form applied directly to the vector operand. There is
  * no element loop, no callback and no temporary — the base compiler's former
@@ -334,16 +318,6 @@ export function compileGPUBroadcastUnary(
       ? `(${vector} * ${vector})`
       : gpuFixedPower(vector, 2, gpuOperandShape(operand));
   const code = lowering.element(vector);
-  // The WGSL `Tanh` (and `Coth`, `1 / tanh`) lowering has the same problem:
-  // it calls the scalar helper `_gpu_tanh` on the placeholder. Its `vecN`
-  // form is the helper of that width, `_gpu_tanh2`–`_gpu_tanh4`, declared
-  // with `vecNf` parameters, which receives the vector code once.
-  const tanh = `_gpu_tanh(${vector})`;
-  if (code === tanh || code === `(1.0 / ${tanh})`)
-    return code.replace(
-      tanh,
-      `_gpu_tanh${gpuComponentCount(operand)}(${vector})`
-    );
   // The NaN-safe helpers of one operand (`_gpu_sin`, `_gpu_cos`, `_gpu_sign`,
   // `gpuNaNSafeLibrary`) have the same problem, and also a `vecN` form of
   // each width. Each call on the vector code takes the form of its width,
@@ -547,23 +521,18 @@ function compileGPUAt(
   const base = args[0];
   const index = args[1];
 
-  // A list in a storage buffer: the length is read at run time
-  // (`compileGPUStorageBufferAt`).
-  if (gpuIsStorageBufferSymbol(base, target))
-    return compileGPUStorageBufferAt(base, index, compile, target, decline);
-
   // A list of points: the result is a point, a `vecM`, and an absent point is
   // a vector of NaN components (`compileGPUPointListAt`).
   const points =
     isSymbol(base) && target.storage?.get(base.symbol) !== undefined
       ? undefined
-      : gpuPointListAtBase(base, compile, target);
+      : gpuPointListAtBase(base, compile);
   if (points !== undefined) {
     if ('decline' in points) decline(points.decline);
     if (!base.isPure && !index.isPure)
       decline(
-        'both the base and the index are impure, and neither shader ' +
-          'language specifies the order in which a call evaluates its ' +
+        'both the base and the index are impure, and GLSL does not ' +
+          'specify the order in which a call evaluates its ' +
           'arguments'
       );
     return compileGPUPointListAt(points, base, index, compile, target, decline);
@@ -572,7 +541,6 @@ function compileGPUAt(
   const shape = gpuAtBaseShape(base, target);
   if ('decline' in shape) decline(shape.decline);
   const n = shape.count;
-  const isWGSL = target.language === 'wgsl';
   // The storage kind of a sampler-backed base (`storage` compile option).
   // Such a base has no shader VALUE, so every tier reads it through the
   // texel-fetch helper: the dynamic index as one guarded call, a static index
@@ -586,42 +554,20 @@ function compileGPUAt(
   // the access to NaN without emitting the base.
   let texAtSource: string | undefined;
   const texAtCall = (floatIndex: string): string => {
-    // A list field of the parameter struct of `compileFieldFunction()`: the
-    // entry point that placed it there supplies the read.
-    if (storage === 'uniform-struct' && target.storageRead !== undefined)
-      return target.storageRead(
-        (base as Expression & { symbol: string }).symbol,
-        n,
-        floatIndex
-      );
     texAtSource ??= gpuStorageOperandSource(
       base as Expression & { symbol: string },
       compile
     );
     const src = texAtSource;
-    if (!isWGSL) return `_gpu_texat${n}(${src}, ${floatIndex})`;
-    // A WGSL texture cannot be passed to a helper the way a GLSL sampler
-    // can, so the helper is generated per BINDING: it names the module-scope
-    // texture in its body, and carries the binding identifier and the list
-    // length in its own name (`_gpu_texat_S_1600`), which is what the
-    // preamble scan reads back (`gpuTexAtBindings`). A binding is a plain
-    // identifier; a `vars` mapping to anything else has no helper name.
-    if (!/^[A-Za-z_]\w*$/.test(src))
-      decline(
-        `the base "${(base as Expression & { symbol: string }).symbol}" is ` +
-          `${storage}-backed (storage hint) and maps to \`${src}\`, which is ` +
-          `not a plain identifier; a WGSL texture is a module-scope binding ` +
-          `and the texel-read helper names it directly`
-      );
-    return `_gpu_texat_${src}_${n}(${floatIndex})`;
+    return `_gpu_texat${n}(${src}, ${floatIndex})`;
   };
 
-  // Evaluate-once. A shader language does not specify the evaluation ORDER of
-  // a call's arguments, so two impure operands could commute between drivers.
+  // Evaluate-once. GLSL does not specify the evaluation ORDER of a call's
+  // arguments, so two impure operands could commute between drivers.
   if (!base.isPure && !index.isPure)
     decline(
-      'both the base and the index are impure, and neither shader language ' +
-        'specifies the order in which a call evaluates its arguments'
+      'both the base and the index are impure, and GLSL does not ' +
+        'specify the order in which a call evaluates its arguments'
     );
   // An emission that DISCARDS the base entirely (an all-out-of-range gather)
   // or references the base source MORE THAN ONCE (a mixed gather constructor)
@@ -736,7 +682,7 @@ function compileGPUAt(
     const w = slots.length;
     if (w === 0)
       decline(
-        'the index selects 0 elements, and neither shader language has a ' +
+        'the index selects 0 elements, and GLSL has no ' +
           'zero-length value type'
       );
     if (w === 1)
@@ -755,7 +701,7 @@ function compileGPUAt(
     // base is a symbol, so pure; an out-of-range slot is the NaN spelling,
     // as in the array form). The helper takes the 1-based index.
     if (storage !== undefined) {
-      const ctor = isWGSL ? `vec${w}f` : `vec${w}`;
+      const ctor = `vec${w}`;
       const parts = slots.map((slot) =>
         slot === null
           ? gpuNaN(target)
@@ -881,39 +827,11 @@ function compileGPUAt(
         `number, so it selects no element and \`At\` has no value to project`
     );
 
-  // A WGSL base whose copy would not fit the function-scope memory that WGSL
-  // guarantees is indexed by its name, with no copy, when it is a
-  // module-scope declaration (`gpuWGSLInPlaceArray`). When it is not one, the
-  // read declines (`gpuAssertWGSLCopyFits`). `baseCode` is the emission of
-  // the base when the test compiled it, so that it is not compiled twice.
-  const inPlaceTest =
-    storage === undefined
-      ? gpuWGSLInPlaceArray(base, n, 4, compile, target)
-      : undefined;
-  const inPlace =
-    inPlaceTest !== undefined && 'name' in inPlaceTest
-      ? inPlaceTest.name
-      : undefined;
-  let baseCode =
-    inPlaceTest !== undefined && 'code' in inPlaceTest
-      ? inPlaceTest.code
-      : undefined;
+  let baseCode: string | undefined;
   const compileBase = (): string => (baseCode ??= compile(base));
-  // A `Block` local is a function-scope `var` too. A function parameter of
-  // the same name is a value, so `isVariableLocal` stops at the frame of the
-  // parameter. The spelling of the local must be a plain identifier: the
-  // code below indexes that name.
-  const localSpelling =
-    isSymbol(base) && isVariableLocal(base.symbol, target.boundVars)
-      ? target.var(base.symbol)
-      : undefined;
-  const isBlockVariable =
-    localSpelling !== undefined && /^[A-Za-z_]\w*$/.test(localSpelling);
 
   // A proven positive, in-range integer needs neither a guard nor a float
-  // conversion. Textures retain their storage helper. Other WGSL array values
-  // are copied to a local reference before dynamic indexing, as in
-  // gpuAtPreamble.
+  // conversion. Textures retain their storage helper.
   const fact = gpuIntegerFact(
     index,
     target,
@@ -922,68 +840,22 @@ function compileGPUAt(
       target.operators?.(op) === GPU_OPERATORS[op] &&
       target.functions?.(op) === GPU_FUNCTIONS[op]
   );
-  if (
-    storage === undefined &&
-    fact &&
-    fact.min >= 1 &&
-    fact.max <= n &&
-    (target.language !== 'wgsl' ||
-      n <= 4 ||
-      inPlace !== undefined ||
-      isBlockVariable ||
-      (BaseCompiler.canHoist(target) &&
-        !conditionalGPUSinks.has(target.hoist!)))
-  ) {
-    if (inPlace !== undefined) return `${inPlace}[${fact.code} - 1]`;
-    let code = compileBase();
-    if (
-      target.language === 'wgsl' &&
-      n > 4 &&
-      !(isBlockVariable && code === localSpelling)
-    ) {
-      gpuAssertWGSLCopyFits(base, n, 4, decline);
-      // The copy is a statement ahead of the statement of the `At`. The
-      // condition above admits a `Block` local with no place for such a
-      // statement, because it expects to index the local by its name. If
-      // the base compiles to other code, there is no copy to index.
-      if (
-        !BaseCompiler.canHoist(target) ||
-        conditionalGPUSinks.has(target.hoist!)
-      )
-        decline(
-          `WGSL indexes a list value with a run-time index only after it ` +
-            `copies the list to a local variable, and this position has no ` +
-            `place for the statement of that copy`
-        );
-      // The base runs ahead of the statement once it is bound, so a draw in
-      // it must not come before a draw written before the `At`.
-      const draws = BaseCompiler.foldValueImpure(base);
-      if (draws) gpuAssertBindingKeepsDrawOrder('At', [base], target);
-      gpuAssertHoistKeepsCallerOrder('At', [base], target);
-      const name = BaseCompiler.tempVar(target);
-      BaseCompiler.hoistStatement(target, `var ${name} = ${code};`);
-      if (draws) gpuRecordBoundDraws([base], target);
-      code = name;
-    }
+  if (storage === undefined && fact && fact.min >= 1 && fact.max <= n) {
+    const code = compileBase();
     return `${gpuIsAtomicEmission(code) ? code : `(${code})`}[${fact.code} - 1]`;
   }
 
   // Dynamic index: one call, so the base and the index are each evaluated
-  // exactly once. The guard inside the helper is what makes both languages'
+  // exactly once. The guard inside the helper is what makes the GLSL
   // out-of-bounds rules unreachable. A caller-declared INTEGER index is
   // converted at the call site — the guard runs entirely in float space.
   const idx = compile(index);
-  const floatIdx =
-    framedIndex === undefined ? idx : `${isWGSL ? 'f32' : 'float'}(${idx})`;
-  if (inPlace !== undefined) return `_gpu_at_${inPlace}_${n}(${floatIdx})`;
-  if (storage === undefined || !isSymbol(base)) {
-    if (isWGSL && n > 4) gpuAssertWGSLCopyFits(base, n, 4, decline);
+  const floatIdx = framedIndex === undefined ? idx : `float(${idx})`;
+  if (storage === undefined || !isSymbol(base))
     return `_gpu_at${n}(${compileBase()}, ${floatIdx})`;
-  }
 
   // A sampler-backed base: the same call shape and the same index contract,
-  // through the texel-fetch helper (`texAtCall`: per length on GLSL, per
-  // binding on WGSL).
+  // through the texel-fetch helper (`texAtCall`).
   return texAtCall(floatIdx);
 }
 
@@ -1053,15 +925,6 @@ function compileGPUSumProduct(
   target: CompileTarget<Expression>
 ): string {
   if (!args[0]) throw new Error(`Could not compile \`${kind}\`: no body`);
-  // A list in a storage buffer: a loop over its run-time length.
-  if (!args[1] && gpuIsStorageBufferSymbol(args[0], target))
-    return compileGPUStorageBufferReduce(
-      kind,
-      kind === 'Sum' ? 'sum' : 'prod',
-      args,
-      _compile,
-      target
-    );
   // No indexing set: the operand IS the collection to reduce
   // (`Sum([3, 4, 5])`), not a body indexed by one.
   if (!args[1])
@@ -1117,12 +980,11 @@ function compileGPUSumProduct(
 
   const isSum = kind === 'Sum';
   const op = isSum ? '+' : '*';
-  const isWGSL = target.language === 'wgsl';
-  const v2 = gpuVec2(target);
+  const v2 = gpuVec2();
   // A body that is a vector (`k·uv` with `vec2 uv`) gives a vector sum, so
   // the accumulator is a vector of the same width: a `float` accumulator
   // would not accept the terms. The `+` and `*` of two vectors are component
-  // by component in both languages, as the sum and the product of the
+  // by component in GLSL, as the sum and the product of the
   // engine are for a point. A body of another width (an array) has no
   // accumulator, and the compilation fails.
   const width = complex
@@ -1137,18 +999,16 @@ function compileGPUSumProduct(
   const identity = complex
     ? `${v2}(${isSum ? '0.0' : '1.0'}, 0.0)`
     : width !== undefined
-      ? `${gpuVecType(width, isWGSL)}(${isSum ? '0.0' : '1.0'})`
+      ? `${gpuVecType(width)}(${isSum ? '0.0' : '1.0'})`
       : isSum
         ? '0.0'
         : '1.0';
   // The shader type of the accumulator and of a term bound to a temporary.
   const valueType = complex
-    ? gpuVecType(2, isWGSL)
+    ? gpuVecType(2)
     : width !== undefined
-      ? gpuVecType(width, isWGSL)
-      : isWGSL
-        ? 'f32'
-        : 'float';
+      ? gpuVecType(width)
+      : 'float';
   // Combine two values of the body's type: the complex product is not the
   // component-wise `*` of two `vec2`.
   const combine = (a: string, b: string): string =>
@@ -1251,7 +1111,7 @@ function compileGPUSumProduct(
           continue;
         }
         const tv = BaseCompiler.tempVar(target);
-        const decl = isWGSL ? `var ${tv}: ${valueType}` : `${valueType} ${tv}`;
+        const decl = `${valueType} ${tv}`;
         BaseCompiler.hoistStatement(
           target,
           ...termSink.stmts,
@@ -1286,7 +1146,7 @@ function compileGPUSumProduct(
             result,
             ...sink.slice(declarationsAt),
           ]).map(([name, code, node]) =>
-            gpuInvariantDeclaration(name, code, node, isWGSL)
+            gpuInvariantDeclaration(name, code, node)
           )
         );
       return result;
@@ -1301,7 +1161,7 @@ function compileGPUSumProduct(
       [index],
       target,
       emitTerms,
-      (node) => gpuTypeOfValue(node, isWGSL) !== undefined
+      (node) => gpuTypeOfValue(node) !== undefined
     ).result;
   }
 
@@ -1311,10 +1171,9 @@ function compileGPUSumProduct(
   // ordinary expression — so `1 + \sum…` and `0.03\sum…` compose. Otherwise the
   // legacy bare block is returned, valid only as a top-level function body.
   const acc = BaseCompiler.tempVar(target);
-  const intType = isWGSL ? 'i32' : 'int';
+  const intType = 'int';
 
-  // The loop counter is a signed 32-bit integer (`int` in GLSL, `i32` in
-  // WGSL). A constant bound is written into the loop header as an integer
+  // The loop counter is a signed 32-bit integer (`int`). A constant bound is written into the loop header as an integer
   // literal, so it must fit that type, and the last increment, `upper + 1`,
   // must fit too: at an upper bound of 2147483647 the counter overflows and
   // the condition `index <= upper` stays true, so the loop does not end. A
@@ -1345,12 +1204,7 @@ function compileGPUSumProduct(
   };
   const bodyTarget: CompileTarget<Expression> = {
     ...target,
-    var: (id) =>
-      id === index
-        ? isWGSL
-          ? `f32(${index})`
-          : `float(${index})`
-        : target.var(id),
+    var: (id) => (id === index ? `float(${index})` : target.var(id)),
     ...bodyScope,
     hoist: bodySink,
   };
@@ -1391,7 +1245,7 @@ function compileGPUSumProduct(
             clearGPUCounters(bodyTarget);
           }
         }),
-      (node) => gpuTypeOfValue(node, isWGSL) !== undefined
+      (node) => gpuTypeOfValue(node) !== undefined
     );
 
   // Compiled BEFORE the loop statements are pushed, so anything the bounds
@@ -1399,11 +1253,11 @@ function compileGPUSumProduct(
   //
   // The counter is declared as an integer, but a non-literal bound normally
   // compiles to a FLOAT expression (shader scalar math is float, and a
-  // constant-folded `Length(L)` is spelled `3.0`). Neither GLSL ES nor WGSL
-  // promotes int to float, so `int j = K; j <= K + -1.0` is a driver-side
+  // constant-folded `Length(L)` is spelled `3.0`). GLSL ES does not
+  // promote int to float, so `int j = K; j <= K + -1.0` is a driver-side
   // type error that rejects the whole shader behind `success: true` (Tycho
   // item 191). Convert such a bound to the counter's type in the header —
-  // `int(floor(x))` / `i32(floor(x))` — flooring first so a non-integer bound
+  // `int(floor(x))` — flooring first so a non-integer bound
   // reads the way the JavaScript target's `Math.floor(bound)` and the
   // constant arm's `Math.floor` (`BaseCompiler.bigOpBoundConstant`) do
   // (`int(x)` alone truncates toward zero, disagreeing for a negative bound).
@@ -1424,14 +1278,14 @@ function compileGPUSumProduct(
       (value !== undefined && value.width === 1 && value.element === 'f')
     ) {
       const code = BaseCompiler.compile(bound, target);
-      return isWGSL ? `i32(floor(${code}))` : `int(floor(${code}))`;
+      return `int(floor(${code}))`;
     }
     // `var()` binds an integer-declared scalar to `float(K)`; the header wants
     // the integer itself, so it reads the raw slot.
     if (value !== undefined && value.width === 1 && value.element === 'i')
       return declared.ref;
     if (value !== undefined && value.width === 1 && value.element === 'u')
-      return isWGSL ? `i32(${declared.ref})` : `int(${declared.ref})`;
+      return `int(${declared.ref})`;
     throw new Error(
       `Could not compile \`${kind}\`: the ${which} bound \`${bound.toString()}\` is declared ` +
         `"${declared.spelling}" by the caller, which is not ` +
@@ -1450,10 +1304,10 @@ function compileGPUSumProduct(
   // The loop index is declared and referenced bare — reject a reserved name
   // (fail closed, D6) rather than emit a shader that fails to compile.
   gpuCheckIdentifier(index, target.language);
-  const accDecl = isWGSL ? `var ${acc}: ${valueType}` : `${valueType} ${acc}`;
-  const indexDecl = isWGSL ? `var ${index}: ${intType}` : `${intType} ${index}`;
+  const accDecl = `${valueType} ${acc}`;
+  const indexDecl = `${intType} ${index}`;
 
-  // A COMPUTED upper bound is bound to a local first. Both languages evaluate
+  // A COMPUTED upper bound is bound to a local first. GLSL evaluates
   // the loop condition on every iteration, so leaving the expression there
   // recomputes it once per step — `n <= int(floor(K + -1.0))` runs the
   // addition and the `floor` as many times as the loop runs. A bound that is
@@ -1469,7 +1323,7 @@ function compileGPUSumProduct(
   // holds exactly one name that is not a conversion or a rounding, its last
   // identifier, so this test is exact; any other bound gets a local anyway.
   // The lower bound needs no local: it is the initializer of the counter,
-  // and in both languages the scope of a declared name starts after its
+  // and in GLSL the scope of a declared name starts after its
   // initializer.
   const readsIndex = (code: string): boolean =>
     /([A-Za-z_]\w*)\)*$/.exec(code.trim())?.[1] === index;
@@ -1479,19 +1333,13 @@ function compileGPUSumProduct(
       ? BaseCompiler.tempVar(target)
       : '';
   const boundDecl =
-    boundVar === ''
-      ? []
-      : [
-          isWGSL
-            ? `let ${boundVar}: ${intType} = ${upperStr};`
-            : `${intType} ${boundVar} = ${upperStr};`,
-        ];
+    boundVar === '' ? [] : [`${intType} ${boundVar} = ${upperStr};`];
   const upperRef = boundVar === '' ? upperStr : boundVar;
 
   const loop = [
     ...boundDecl,
     ...gpuReadInvariants(invariants, [body, ...bodySink.stmts]).map(
-      ([name, code, node]) => gpuInvariantDeclaration(name, code, node, isWGSL)
+      ([name, code, node]) => gpuInvariantDeclaration(name, code, node)
     ),
     `${accDecl} = ${identity};`,
     `for (${indexDecl} = ${lowerStr}; ${index} <= ${upperRef}; ${index}++) {`,
@@ -1524,11 +1372,10 @@ function compileGPUSumProduct(
 }
 
 /**
- * GPU shader functions shared by GLSL and WGSL.
+ * GPU shader functions of the GLSL target.
  *
- * Both languages share identical built-in math functions. Language-specific
- * functions (inversesqrt naming, mod, vector constructors) are provided
- * by subclass overrides.
+ * GLSL-specific functions (inversesqrt naming, mod, vector constructors) are
+ * provided by subclass overrides.
  *
  * Complex numbers are represented as vec2(re, im). Functions that can
  * operate on complex values check `BaseCompiler.isComplexValued()` and
@@ -1566,7 +1413,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // A real operand of a complex sum must be a scalar.
     for (const a of args) assertScalarComplexOperand('Add', a);
     if (args.some((a) => isOpaqueComplexOperand(a))) {
-      const v2 = gpuVec2(target);
+      const v2 = gpuVec2();
       return args
         .map((a) => {
           const code = compile(a);
@@ -1586,7 +1433,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     const reSum = foldTerms(reParts, '0.0', '+', target.language);
     const imSum = foldTerms(imParts, '0.0', '+', target.language);
-    return `${gpuVec2(target)}(${reSum}, ${imSum})`;
+    return `${gpuVec2()}(${reSum}, ${imSum})`;
   },
   Multiply: (args, compile, target) => {
     if (args.length === 0) return '1.0';
@@ -1615,7 +1462,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         ? 1
         : (iFactor as any).im;
       const realFactors = args.filter((_, i) => i !== iIndex);
-      const v2 = gpuVec2(target);
+      const v2 = gpuVec2();
       if (realFactors.length === 0)
         return `${v2}(0.0, ${formatFloat(iScale, target.language)})`;
       // The `vec2(0.0, product)` shortcut is correct only when every other
@@ -1698,7 +1545,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     for (const a of args) assertScalarComplexOperand('Divide', a);
     if (ac && bc) return `_gpu_cdiv(${compile(args[0])}, ${compile(args[1])})`;
     if (ac && !bc) return `((${compile(args[0])}) / (${compile(args[1])}))`;
-    const v2 = gpuVec2(target);
+    const v2 = gpuVec2();
     return `_gpu_cdiv(${v2}(${compile(args[0])}, 0.0), ${compile(args[1])})`;
   },
   Negate: ([x], compile, target) => {
@@ -1706,12 +1553,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const c = tryGetConstant(x);
     if (c !== undefined) return formatFloat(-c, target.language);
     if (isNumber(x) && x.isComplex) {
-      return `${gpuVec2(target)}(${formatFloat(
+      return `${gpuVec2()}(${formatFloat(
         -x.re,
         target.language
       )}, ${formatFloat(-x.im, target.language)})`;
     }
-    if (isSymbol(x, 'ImaginaryUnit')) return `${gpuVec2(target)}(0.0, -1.0)`;
+    if (isSymbol(x, 'ImaginaryUnit')) return `${gpuVec2()}(0.0, -1.0)`;
     return `(-(${compile(x)}))`;
   },
 
@@ -1726,7 +1573,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return gpuIdentityPassthrough(args[0], compile, target);
     return `abs(${compile(args[0])})`;
   },
-  Arccos: (args, compile, target) => {
+  Arccos: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_cacos(${compile(args[0])})`;
     // Real operand, complex RESULT (`Arccos(2)`, or a real symbol of unknown
@@ -1735,14 +1582,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // `acos` there is broadcast against a `vec2` and yields garbage. See
     // `gpuResultIsComplexValued`.
     if (gpuResultIsComplexValued('Arccos', args))
-      return `_gpu_cacos(${gpuComplexOperand(args[0], compile, target)})`;
+      return `_gpu_cacos(${gpuComplexOperand(args[0], compile)})`;
     return `acos(${compile(args[0])})`;
   },
-  Arcsin: (args, compile, target) => {
+  Arcsin: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_casin(${compile(args[0])})`;
     if (gpuResultIsComplexValued('Arcsin', args))
-      return `_gpu_casin(${gpuComplexOperand(args[0], compile, target)})`;
+      return `_gpu_casin(${gpuComplexOperand(args[0], compile)})`;
     return `asin(${compile(args[0])})`;
   },
   Arctan: (args, compile) => {
@@ -1854,7 +1701,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       ) ?? plain()
     );
   },
-  Ln: (args, compile, target) => {
+  Ln: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_cln(${compile(args[0])})`;
     // PROVABLY negative real operand, complex result (`a := -2` → `Ln(a)` is
@@ -1863,11 +1710,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // `isComplexValued` Sqrt/Ln/Log carve-out makes the parent agree). See
     // `gpuResultIsComplexValued`.
     if (args[0]?.isNegative === true && gpuResultIsComplexValued('Ln', args))
-      return `_gpu_cln(${gpuComplexOperand(args[0], compile, target)})`;
+      return `_gpu_cln(${gpuComplexOperand(args[0], compile)})`;
     return `log(${compile(args[0])})`;
   },
   Log2: 'log2',
-  // GLSL/WGSL `min`/`max` are strictly 2-argument builtins; a variadic
+  // GLSL `min`/`max` are strictly 2-argument builtins; a variadic
   // `max(a, b, c)` is invalid shader source. Fold 3+ arguments into a nest of
   // 2-argument calls of the NaN-safe helpers, `_gpu_max(_gpu_max(a, b), c)`
   // (`gpuNaNSafeLibrary`). A COLLECTION operand makes these a
@@ -1876,26 +1723,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // operands, so the generic shape gate must not judge the emission against
   // operand shapes the emission no longer contains (`GPU_AGGREGATE_CONSUMING`).
   Max: markAggregateConsuming((args, compile, target) =>
-    args.some((a) => gpuIsStorageBufferSymbol(a, target))
-      ? compileGPUStorageBufferReduce('Max', 'max', args, compile, target)
-      : compileGPUExtremum('max', 'Max', args, compile, target)
+    compileGPUExtremum('max', 'Max', args, compile, target)
   ),
   Min: markAggregateConsuming((args, compile, target) =>
-    args.some((a) => gpuIsStorageBufferSymbol(a, target))
-      ? compileGPUStorageBufferReduce('Min', 'min', args, compile, target)
-      : compileGPUExtremum('min', 'Min', args, compile, target)
+    compileGPUExtremum('min', 'Min', args, compile, target)
   ),
-  // `Mean` has a lowering only for a list in a storage buffer. Any other
-  // operand gives the message of an operator with no lowering.
-  Mean: markAggregateConsuming((args, compile, target) => {
-    if (args.some((a) => gpuIsStorageBufferSymbol(a, target)))
-      return compileGPUStorageBufferReduce(
-        'Mean',
-        'mean',
-        args,
-        compile,
-        target
-      );
+  // `Mean` has no lowering: the entry gives the message of an operator with
+  // no lowering.
+  Mean: markAggregateConsuming((_args, _compile, target) => {
     throw new Error(
       `Could not compile \`Mean\`: the operator is known to the engine but ` +
         `target '${target.language ?? 'unknown'}' has no lowering for it.`
@@ -1912,10 +1747,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   ElementMin: (args, compile, target) =>
     compileGPUElementExtremum('min', 'ElementMin', args, compile, target),
   Mix: 'mix',
-  // Control-flow forms — the base compiler's default emits a JS ternary and a
-  // bare `NaN`, neither of which is valid GPU code (WGSL has no `?:`, and no
-  // shader language has a `NaN` identifier). Emit `select(...)` for WGSL and a
-  // language-appropriate NaN.
+  // Control-flow forms — the base compiler's default emits a bare `NaN`,
+  // which is not valid GPU code (no shader language has a `NaN` identifier).
+  // Emit a language-appropriate NaN.
   //
   // DIVERGENCE (documented, CO-P2-24): a shader cannot throw. Where the
   // interpreter throws on a non-boolean/NaN `Which` or restriction condition, the GPU
@@ -1943,20 +1777,15 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // An arm that needs statements, or that repeats a subexpression a
     // ternary would expand once per occurrence, takes the statement form;
     // the clause list is in `Which` shape, so its position 3 is the `If`
-    // node's operand 2. On WGSL, an arm with caller code takes it too, as
-    // `select` would compute that arm when it is not taken
-    // (`gpuHasEagerCallerCode`).
+    // node's operand 2.
     if (
       gpuNeedsStatements(args[1]) ||
       gpuNeedsStatements(args[2]) ||
       (gpuCanPlaceStatement(target) &&
         (gpuArmSharesWork(args[1]) ||
           gpuArmSharesWork(args[2]) ||
-          gpuArmIsCostlyForSelect(args[1], target) ||
-          gpuArmIsCostlyForSelect(args[2], target) ||
           gpuArmDrawsWhileBinding(args[1]) ||
-          gpuArmDrawsWhileBinding(args[2]) ||
-          gpuHasEagerCallerCode([args[1], args[2]], target)))
+          gpuArmDrawsWhileBinding(args[2])))
     ) {
       const statement = compileGPUStatementSelection(
         [args[0], args[1], args[0].engine.True, args[2]],
@@ -1975,18 +1804,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       );
       if (statement !== undefined) return statement;
     }
-    gpuAssertNoAssignmentOperand('If', args, target);
-    gpuAssertNoEagerDraw('If', [args[1], args[2]], target);
     // The condition is evaluated unconditionally, so it may hoist; the two arms
     // are selected and must not (see `compileGPUConditionalArm`). Operand
     // indices preserve their CSE regions, allowing reuse of outer bindings.
     const cond = compile(args[0], 0);
     const whenTrue = compileGPUConditionalArm('If', () => arm(1), target);
     const whenFalse = compileGPUConditionalArm('If', () => arm(2), target);
-    // Checked after the arms are compiled, so an arm that cannot be compiled
-    // at all reports its own reason first.
-    gpuAssertNoEagerCallerCode('If', [args[1], args[2]], target);
-    return gpuConditional(cond, whenTrue, whenFalse, target);
+    return gpuConditional(cond, whenTrue, whenFalse);
   },
   Which: (args, compile, target) => {
     if (args.length < 2 || args.length % 2 !== 0)
@@ -2012,35 +1836,17 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         target,
         values
       );
-    // The operands that the chain below places behind an emitted `select`:
-    // every operand after the first, up to the value of the first clause
-    // whose condition is the symbol `True`. A leading `True` clause emits its
-    // value with no `select`, and the clauses after a `True` clause are not
-    // emitted.
-    const firstDefault = args.findIndex(
-      (a, i) => i % 2 === 0 && isSymbol(a, 'True')
-    );
-    const selected =
-      firstDefault === 0
-        ? []
-        : args.slice(1, firstDefault === -1 ? args.length : firstDefault + 2);
     // An arm, or a condition past the first, that needs statements takes the
     // statement form (`compileGPUStatementSelection`); the ternary chain
-    // below cannot hold them. On WGSL, a selected operand with caller code
-    // takes it too, as `select` would compute that operand when its branch
-    // is not taken (`gpuHasEagerCallerCode`).
+    // below cannot hold them.
     const canPlace = gpuCanPlaceStatement(target);
     if (
       args.some(
         (a, i) =>
           i > 0 &&
           (gpuNeedsStatements(a) ||
-            (canPlace &&
-              (gpuArmSharesWork(a) ||
-                gpuArmIsCostlyForSelect(a, target) ||
-                gpuArmDrawsWhileBinding(a))))
-      ) ||
-      (canPlace && gpuHasEagerCallerCode(selected, target))
+            (canPlace && (gpuArmSharesWork(a) || gpuArmDrawsWhileBinding(a))))
+      )
     ) {
       const statement = compileGPUStatementSelection(
         args,
@@ -2059,10 +1865,6 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       );
       if (statement !== undefined) return statement;
     }
-    gpuAssertNoAssignmentOperand('Which', args, target);
-    // Every value, and every condition after the first, is evaluated only
-    // when the clauses before it did not match.
-    gpuAssertNoEagerDraw('Which', args.slice(1), target);
     // The fall-through NaN must match the branch values' shape (see
     // `gpuNaNFor`); every branch of a well-typed `Which` shares one shape,
     // so the first determinable value decides.
@@ -2072,7 +1874,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const build = (i: number): string => {
       if (i >= args.length)
         return complex
-          ? `${gpuVec2(target)}(${gpuNaN(target)})`
+          ? `${gpuVec2()}(${gpuNaN(target)})`
           : gpuNaNFor(shapeRef, target);
       const cond = args[i];
       // Only the FIRST condition is evaluated unconditionally. Every value, and
@@ -2085,7 +1887,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       if (isSymbol(cond, 'True')) return `(${armed(() => value(i + 1))})`;
       // CONSECUTIVE clauses that answer the same value collapse into one
       // clause whose condition is their disjunction: `c1 ? v : (c2 ? v : e)`
-      // is `(c1 || c2) ? v : e`. Both languages short-circuit `||`, so a
+      // is `(c1 || c2) ? v : e`. GLSL short-circuits `||`, so a
       // later condition is still evaluated only when every earlier one is
       // false — the evaluation order and count of the nested form, kept
       // exactly. The clauses must be PURE: merging writes the value once
@@ -2115,13 +1917,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return gpuConditional(
         condCode,
         compileGPUConditionalArm('Which', () => value(i + 1), target),
-        build(last + 2),
-        target
+        build(last + 2)
       );
     };
-    const code = build(0);
-    gpuAssertNoEagerCallerCode('Which', selected, target);
-    return code;
+    return build(0);
   },
   // Epsil `Match`: tier-0/1 constant dispatch as a nested `select`/ternary with
   // `==` comparisons, the subject inlined into each comparison (safe for a PURE
@@ -2138,47 +1937,21 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // statement form of `If`/`Which` (`compileGPUMatchStatement`).
   //
   // Caller code (`gpuReachesCallerCode`) in the subject would run once per
-  // comparison, so it declines. In a case on WGSL, caller code takes the
-  // statement form (`compileGPUMatchStatement`), where only the selected
-  // case runs; when that form is refused, the `select` form would compute
-  // every case, so it declines (`gpuAssertNoEagerCallerCode`). A single
-  // case that always matches emits no `select` and is not checked. A
-  // subject that draws is bound to a temporary ahead of the statement, so
+  // comparison, so it declines. A subject that draws is bound to a temporary ahead of the statement, so
   // the statement must have no caller code (`gpuAssertHoistKeepsCallerOrder`).
   Match: (args, _compile, target) => {
     gpuAssertCallerCodeNotRepeated('Match', [args[0]!], target);
     if (args[0]!.isPure === false)
       gpuAssertHoistKeepsCallerOrder('Match', [args[0]!], target);
-    let usesSelect = false;
-    // The cases that the compiler reaches, up to the first case that always
-    // matches; `undefined` when the statement form was not tried.
-    let reached: ReadonlyArray<MatchStatementClause> | undefined;
-    const code = BaseCompiler.compileMatchTernary(
-      args[0]!.engine,
-      args,
-      target,
-      {
-        ternary: (c, t, e) => {
-          usesSelect = true;
-          return gpuConditional(c, t, e, target);
-        },
-        eq: '==',
-        noMatch: gpuNaN(target),
-        allowStrings: false,
-        arm: (f) => compileGPUConditionalArm('Match', f, target),
-        statement: (clauses) => {
-          reached = clauses;
-          return compileGPUMatchStatement(args[0]!, clauses, target);
-        },
-      }
-    );
-    if (usesSelect)
-      gpuAssertNoEagerCallerCode(
-        'Match',
-        reached === undefined ? args.slice(1) : gpuMatchSelectedPieces(reached),
-        target
-      );
-    return code;
+    return BaseCompiler.compileMatchTernary(args[0]!.engine, args, target, {
+      ternary: (c, t, e) => gpuConditional(c, t, e),
+      eq: '==',
+      noMatch: gpuNaN(target),
+      allowStrings: false,
+      arm: (f) => compileGPUConditionalArm('Match', f, target),
+      statement: (clauses) =>
+        compileGPUMatchStatement(args[0]!, clauses, target),
+    });
   },
   Power: (args, compile, target) => {
     const base = args[0];
@@ -2228,7 +2001,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       }
       assertScalarComplexOperand('Power', base);
       assertScalarComplexOperand('Power', exp);
-      const v2 = gpuVec2(target);
+      const v2 = gpuVec2();
       const bCode = BaseCompiler.isComplexValued(base)
         ? compile(base)
         : `${v2}(${compile(base)}, 0.0)`;
@@ -2274,19 +2047,17 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const shape = (n: number): string =>
         width === undefined
           ? formatFloat(n, target.language)
-          : `${gpuFVec(width, target)}(${formatFloat(n, target.language)})`;
+          : `${gpuFVec(width)}(${formatFloat(n, target.language)})`;
       const magnitude = `pow(abs(${code}), ${shape(realPower.value)})`;
       if (!realPower.oddNumerator) return magnitude;
       const negative =
-        target.language === 'wgsl' || width === undefined
+        width === undefined
           ? `${code} < ${shape(0)}`
           : `lessThan(${code}, ${shape(0)})`;
       const sign =
-        target.language === 'wgsl'
-          ? `select(${shape(1)}, ${shape(-1)}, ${negative})`
-          : width === undefined
-            ? `(${negative} ? -1.0 : 1.0)`
-            : `mix(${shape(1)}, ${shape(-1)}, ${negative})`;
+        width === undefined
+          ? `(${negative} ? -1.0 : 1.0)`
+          : `mix(${shape(1)}, ${shape(-1)}, ${negative})`;
       return `(${sign} * ${magnitude})`;
     }
     // Real-emitted operands but a complex RESULT type (a negative base on the
@@ -2294,10 +2065,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // emission is `vec2(re, im)`; a scalar `pow` here would scalar-broadcast
     // into a silent `vec2(NaN, NaN)`. See `gpuResultIsComplexValued`.
     if (gpuResultIsComplexValued('Power', args))
-      return `_gpu_cpow(${gpuComplexOperand(base, compile, target)}, ${gpuComplexOperand(exp, compile, target)})`;
+      return `_gpu_cpow(${gpuComplexOperand(base, compile)}, ${gpuComplexOperand(exp, compile)})`;
     // The width of the `vecN` this power lowers to, when one of the two
     // operands is a shader vector. Every piece of the lowering below is
-    // componentwise in both languages (`pow`, `sqrt`, `*`, `/` all take the
+    // componentwise in GLSL (`pow`, `sqrt`, `*`, `/` all take the
     // genType), so the vector case needs only two adjustments: a piece that
     // would emit a bare scalar has to be widened to the same `vecN`, and the
     // scalar-declared `_gpu_powi` helper has to be swapped for its `vecN`
@@ -2311,7 +2082,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const zeroShape = gpuOperandShape(base);
       if (zeroShape === 'scalar') return '1.0';
       if (typeof zeroShape === 'number')
-        return `${gpuFVec(zeroShape, target)}(1.0)`;
+        return `${gpuFVec(zeroShape)}(1.0)`;
       // A `matN` or an ARRAY base has no constructor this lowering can use,
       // and a bare `1.0` there is a silent scalar where the caller is owed an
       // aggregate — which the operand-shape gate cannot catch, because it
@@ -2329,7 +2100,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     )
       return `exp(${compile(exp)})`;
     if (eConst === 0.5) return `sqrt(${compile(base)})`;
-    // Base two is the hardware's own exponential: both languages declare
+    // Base two is the hardware's own exponential: GLSL declares
     // `exp2` over the genType, and `pow(2.0, y)` is itself specified as
     // `exp2(y * log2(2.0))`, so this drops a logarithm the compiler would
     // otherwise have to fold.
@@ -2339,7 +2110,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // `exp2(v)` against the exponent alone, and a `vecN` exponent compiles
     // too.
     if (bConst === 2) return `exp2(${compile(exp)})`;
-    // Literal integer exponent: emit sign-preserving code. GLSL/WGSL `pow(x, y)`
+    // Literal integer exponent: emit sign-preserving code. GLSL `pow(x, y)`
     // is spec-defined as `exp2(y·log2(x))` and is undefined for a negative base
     // even when `y` is an integer-valued literal — on a real GPU `pow(-2.0, 3.0)`
     // returns `+8`, flipping the sign of odd powers (and `pow(-2.0, 2.0)` is NaN,
@@ -2368,7 +2139,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         // exponent stays a scalar in the `vecN` overloads too.
         pos = gpuFixedPower(compile(base), absN, gpuOperandShape(base));
       }
-      // `float / vecN` is a componentwise division in both languages, so the
+      // `float / vecN` is a componentwise division in GLSL, so the
       // reciprocal of a vector power needs no widening either.
       return n < 0 ? `(1.0 / ${pos})` : pos;
     }
@@ -2396,14 +2167,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // DIVERGENCE (documented, CO-P2-24): a literal `0^0` folds to NaN at
     // canonicalization and then fails closed here (no GPU NaN literal); `x^0`
     // folds to 1. A *runtime* dynamic `0^0` reaches `pow(0.0, 0.0)`, which is
-    // undefined in GLSL/WGSL and cannot be made to yield NaN (no NaN literal),
+    // undefined in GLSL and cannot be made to yield NaN (no NaN literal),
     // so it is left to the hardware — the JS target aligns this via `_SYS.pow`.
     // A genuinely fractional exponent (e.g. `x^2.5`) stays `pow`: it is
     // mathematically undefined for a negative base over the reals too.
     //
     // `pow` is declared over ONE genType, so a scalar standing beside a `vecN`
-    // is written as an explicit constructor: neither language promotes it.
-    return `pow(${gpuWidenToVector(base, powWidth, compile, target)}, ${gpuWidenToVector(exp, powWidth, compile, target)})`;
+    // is written as an explicit constructor: GLSL does not promote it.
+    return `pow(${gpuWidenToVector(base, powWidth, compile)}, ${gpuWidenToVector(exp, powWidth, compile)})`;
   },
   Radians: 'radians',
   Round: (args, compile, target) => {
@@ -2418,7 +2189,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const isScalar = gpuOperandShape(args[0]) === 'scalar';
     const ties = args[0].engine.roundingTies;
     const roundTie = (c: string): string =>
-      gpuRoundToInteger(c, ties, isScalar, target.language === 'wgsl');
+      gpuRoundToInteger(c, ties, isScalar);
     if (args.length < 2) {
       if (BaseCompiler.isIntegerValued(args[0]))
         return gpuIdentityPassthrough(args[0], compile, target);
@@ -2432,8 +2203,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // (`gpuRoundToStep()`), with the tie of the quotient rounded with the
     // same rule.
     return gpuRoundToStep(
-      (q, scalar) =>
-        gpuRoundToInteger(q, ties, scalar, target.language === 'wgsl'),
+      (q, scalar) => gpuRoundToInteger(q, ties, scalar),
       args[0],
       args[1]!,
       compile,
@@ -2476,7 +2246,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       // JS target's `complexSqrtLiteral`), never a scalar NaN, which the
       // surrounding complex arithmetic would consume as a real.
       if (c < 0)
-        return `${gpuVec2(target)}(0.0, ${formatFloat(
+        return `${gpuVec2()}(0.0, ${formatFloat(
           Math.sqrt(-c),
           target.language
         )})`;
@@ -2490,7 +2260,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // `sqrt` (pinned; the `isComplexValued` Sqrt/Ln/Log carve-out makes the
     // parent agree). See `gpuResultIsComplexValued`.
     if (args[0]?.isNegative === true && gpuResultIsComplexValued('Sqrt', args))
-      return `_gpu_csqrt(${gpuComplexOperand(args[0], compile, target)})`;
+      return `_gpu_csqrt(${gpuComplexOperand(args[0], compile)})`;
     return `sqrt(${compile(args[0])})`;
   },
   Step: 'step',
@@ -2538,17 +2308,16 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         /^vec2f?$/.test(built.callee) &&
         built.operands.length === 2
       )
-        return `${gpuAtan2(target)}(${built.operands[1]}, ${built.operands[0]})`;
+        return `${gpuAtan2()}(${built.operands[1]}, ${built.operands[0]})`;
       // `gpuSwizzle`, not a bare `${code}.y`: a postfix swizzle binds tighter
       // than every infix operator, so an operand that lowered to an infix
       // expression — the promote-and-add form of a complex `Add`, which joins
       // its operands with ` + ` — would take the suffix on its LAST term
       // alone.
-      return `${gpuAtan2(target)}(${gpuSwizzle(code, 'y')}, ${gpuSwizzle(code, 'x')})`;
+      return `${gpuAtan2()}(${gpuSwizzle(code, 'y')}, ${gpuSwizzle(code, 'x')})`;
     }
     // A real value's argument is 0 (x ≥ 0), π (x < 0), and NaN for NaN, as
-    // `evaluate()` gives. Use the target-appropriate conditional: WGSL has no
-    // `?:`, so this becomes nested `select()` calls. The operand is spliced
+    // `evaluate()` gives, as nested conditionals. The operand is spliced
     // twice, so an impure one is bound to a temporary (`gpuOperandOnce`).
     const x = gpuOperandOnce('Argument', args[0], compile, target);
     return gpuConditional(
@@ -2557,15 +2326,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       gpuConditional(
         `${x} < 0.0`,
         '3.14159265359',
-        gpuNonFiniteLiteral(NaN),
-        target
-      ),
-      target
+        gpuNonFiniteLiteral(NaN)
+      )
     );
   },
   Conjugate: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0])) {
-      const v2 = gpuVec2(target);
+      const v2 = gpuVec2();
       // Spliced TWICE (`.x` and `.y`) — see `Argument`.
       const code = gpuOperandOnce('Conjugate', args[0], compile, target, true);
       // `gpuSwizzle` for the same reason as `Argument` above: a bare
@@ -2580,14 +2347,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error('Could not compile `Remainder`: missing argument');
     // The interpreter rounds the quotient with a tie toward `+∞`
     // (JavaScript `Math.round`: `Remainder(5, 2)` is `-1`), whatever the
-    // tie rule of `Round`. The shader `round()` rounds a tie to even (WGSL)
-    // or as the implementation chooses (GLSL), so it is not used.
+    // tie rule of `Round`. The GLSL `round()` rounds a tie as the
+    // implementation chooses, so it is not used.
     const remainderQuotient = (q: string): string =>
       gpuRoundToInteger(
         q,
         'toward-positive-infinity',
-        gpuOperandShape(a) === 'scalar' && gpuOperandShape(b) === 'scalar',
-        target.language === 'wgsl'
+        gpuOperandShape(a) === 'scalar' && gpuOperandShape(b) === 'scalar'
       );
     // An IMPURE operand (the Random family) must be evaluated exactly once:
     // both operands are spliced twice, and `_gpu_rnd_draw` advances a runtime
@@ -2613,8 +2379,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       gpuAssertHoistKeepsCallerOrder('Remainder', [a, b], target);
       const ta = BaseCompiler.tempVar(target);
       const tb = BaseCompiler.tempVar(target);
-      const decl = (n: string) =>
-        target.language === 'wgsl' ? `var ${n}: f32` : `float ${n}`;
+      const decl = (n: string) => `float ${n}`;
       BaseCompiler.hoistStatement(
         target,
         `${decl(ta)} = ${compile(a)};`,
@@ -2651,10 +2416,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         gpuAssertBindingKeepsDrawOrder('Cot', [x], target);
         gpuAssertHoistKeepsCallerOrder('Cot', [x], target);
         const t = BaseCompiler.tempVar(target);
-        const decl =
-          target.language === 'wgsl'
-            ? `var ${t}: ${gpuVec2(target)}`
-            : `${gpuVec2(target)} ${t}`;
+        const decl = `${gpuVec2()} ${t}`;
         BaseCompiler.hoistStatement(target, `${decl} = ${compile(x)};`);
         gpuRecordBoundDraws([x], target);
         return `_gpu_cdiv(_gpu_ccos(${t}), _gpu_csin(${t}))`;
@@ -2677,7 +2439,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       gpuAssertBindingKeepsDrawOrder('Cot', [x], target);
       gpuAssertHoistKeepsCallerOrder('Cot', [x], target);
       const t = BaseCompiler.tempVar(target);
-      const decl = target.language === 'wgsl' ? `var ${t}: f32` : `float ${t}`;
+      const decl = `float ${t}`;
       BaseCompiler.hoistStatement(
         target,
         `${decl} = ${compile(gpuReduceTrigOffset(x, 1, true, target))};`
@@ -2692,7 +2454,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Csc: ([x], compile, target) => {
     if (x === null) throw new Error('Could not compile `Csc`: no argument');
     if (BaseCompiler.isComplexValued(x)) {
-      const v2 = gpuVec2(target);
+      const v2 = gpuVec2();
       return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_csin(${compile(x)}))`;
     }
     // The NaN-safe `_gpu_sin`: `1 / sin(NaN)` was +∞ on Apple GPUs (CE-520).
@@ -2701,7 +2463,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Sec: ([x], compile, target) => {
     if (x === null) throw new Error('Could not compile `Sec`: no argument');
     if (BaseCompiler.isComplexValued(x)) {
-      const v2 = gpuVec2(target);
+      const v2 = gpuVec2();
       return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_ccos(${compile(x)}))`;
     }
     // The NaN-safe `_gpu_cos`: `1 / cos(NaN)` was +∞ on Apple GPUs (CE-520).
@@ -2715,22 +2477,22 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // branch-free and matches the interpreter's (0, π) range for all real x.
     return `(1.5707963267948966 - atan(${compile(x)}))`;
   },
-  Arccsc: ([x], compile, target) => {
+  Arccsc: ([x], compile) => {
     if (x === null) throw new Error('Could not compile `Arccsc`: no argument');
     if (
       BaseCompiler.isComplexValued(x) ||
       gpuResultIsComplexValued('Arccsc', [x])
     )
-      return gpuReciprocalComplex('_gpu_cacsc', x, compile, target);
+      return gpuReciprocalComplex('_gpu_cacsc', x, compile);
     return `asin(1.0 / (${compile(x)}))`;
   },
-  Arcsec: ([x], compile, target) => {
+  Arcsec: ([x], compile) => {
     if (x === null) throw new Error('Could not compile `Arcsec`: no argument');
     if (
       BaseCompiler.isComplexValued(x) ||
       gpuResultIsComplexValued('Arcsec', [x])
     )
-      return gpuReciprocalComplex('_gpu_casec', x, compile, target);
+      return gpuReciprocalComplex('_gpu_casec', x, compile);
     return `acos(1.0 / (${compile(x)}))`;
   },
 
@@ -2751,13 +2513,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     return `cosh(${compile(args[0])})`;
   },
-  Tanh: (args, compile, target) => {
+  Tanh: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0])) {
       const u = gpuImaginaryPiMultiple(args[0], 1);
       if (u !== undefined) return `_gpu_ipi_tanh(${compile(u)})`;
       return `_gpu_ctanh(${compile(args[0])})`;
     }
-    return gpuRealTanh(args[0], compile, target);
+    return gpuRealTanh(args[0], compile);
   },
 
   // Reciprocal hyperbolic functions
@@ -2775,35 +2537,35 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // `1 / tanh(x)`, not `cosh(x) / sinh(x)`: in f32 `cosh` and `sinh`
     // overflow to infinity above about 89, and their quotient is then NaN,
     // where the true value is ±1. The real operand is spliced once.
-    return `(1.0 / ${gpuRealTanh(x, compile, target)})`;
+    return `(1.0 / ${gpuRealTanh(x, compile)})`;
   },
-  Csch: ([x], compile, target) => {
+  Csch: ([x], compile) => {
     if (x === null) throw new Error('Could not compile `Csch`: no argument');
     if (BaseCompiler.isComplexValued(x)) {
       const u = gpuImaginaryPiMultiple(x, 2);
       if (u !== undefined) return `_gpu_ipi_csch(${compile(u)})`;
-      const v2 = gpuVec2(target);
+      const v2 = gpuVec2();
       return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_csinh(${compile(x)}))`;
     }
     return `(1.0 / sinh(${compile(x)}))`;
   },
-  Sech: ([x], compile, target) => {
+  Sech: ([x], compile) => {
     if (x === null) throw new Error('Could not compile `Sech`: no argument');
     if (BaseCompiler.isComplexValued(x)) {
       const u = gpuImaginaryPiMultiple(x, 2);
       if (u !== undefined) return `_gpu_ipi_sech(${compile(u)})`;
-      const v2 = gpuVec2(target);
+      const v2 = gpuVec2();
       return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_ccosh(${compile(x)}))`;
     }
     return `(1.0 / cosh(${compile(x)}))`;
   },
 
   // Inverse hyperbolic functions with complex dispatch
-  Arcosh: (args, compile, target) => {
+  Arcosh: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_cacosh(${compile(args[0])})`;
     if (gpuResultIsComplexValued('Arcosh', args))
-      return `_gpu_cacosh(${gpuComplexOperand(args[0], compile, target)})`;
+      return `_gpu_cacosh(${gpuComplexOperand(args[0], compile)})`;
     return `acosh(${compile(args[0])})`;
   },
   Arsinh: (args, compile) => {
@@ -2811,43 +2573,43 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_gpu_casinh(${compile(args[0])})`;
     return `asinh(${compile(args[0])})`;
   },
-  Artanh: (args, compile, target) => {
+  Artanh: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_catanh(${compile(args[0])})`;
     if (gpuResultIsComplexValued('Artanh', args))
-      return `_gpu_catanh(${gpuComplexOperand(args[0], compile, target)})`;
+      return `_gpu_catanh(${gpuComplexOperand(args[0], compile)})`;
     return `atanh(${compile(args[0])})`;
   },
 
   // Inverse hyperbolic (reciprocal)
-  Arcoth: ([x], compile, target) => {
+  Arcoth: ([x], compile) => {
     if (x === null) throw new Error('Could not compile `Arcoth`: no argument');
     if (
       BaseCompiler.isComplexValued(x) ||
       gpuResultIsComplexValued('Arcoth', [x])
     )
-      return gpuReciprocalComplex('_gpu_cacoth', x, compile, target);
+      return gpuReciprocalComplex('_gpu_cacoth', x, compile);
     return `atanh(1.0 / (${compile(x)}))`;
   },
   Arcsch: ([x], compile) => {
     if (x === null) throw new Error('Could not compile `Arcsch`: no argument');
     return `asinh(1.0 / (${compile(x)}))`;
   },
-  Arsech: ([x], compile, target) => {
+  Arsech: ([x], compile) => {
     if (x === null) throw new Error('Could not compile `Arsech`: no argument');
     if (
       BaseCompiler.isComplexValued(x) ||
       gpuResultIsComplexValued('Arsech', [x])
     )
-      return gpuReciprocalComplex('_gpu_casech', x, compile, target);
+      return gpuReciprocalComplex('_gpu_casech', x, compile);
     return `acosh(1.0 / (${compile(x)}))`;
   },
 
   // Trigonometric (additional)
-  Arctan2: (args, compile, target) => {
+  Arctan2: (args, compile) => {
     if (args.length < 2)
       throw new Error('Could not compile `Arctan2`: need two arguments');
-    return `${gpuAtan2(target)}(${compile(args[0])}, ${compile(args[1])})`;
+    return `${gpuAtan2()}(${compile(args[0])}, ${compile(args[1])})`;
   },
   Hypot: ([x, y], compile) => {
     if (x === null || y === null)
@@ -3001,16 +2763,16 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error('Could not compile `FresnelS`: no argument');
     return `_gpu_fresnelS(${compile(x)})`;
   },
-  BesselJ: ([n, x], compile, target) => {
+  BesselJ: ([n, x], compile) => {
     if (n === null || x === null)
       throw new Error('Could not compile `BesselJ`: need two arguments');
-    const intCast = target?.language === 'wgsl' ? 'i32' : 'int';
+    const intCast = 'int';
     return `_gpu_besselJ(${intCast}(${compile(n)}), ${compile(x)})`;
   },
 
   // Additional math functions
   Lb: 'log2',
-  Log: (args, compile, target) => {
+  Log: (args, compile) => {
     if (args.length === 0)
       throw new Error('Could not compile `Log`: no argument');
     // Complex either because an operand is, or because the RESULT is complex
@@ -3024,12 +2786,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       (args.some((a) => a.isNegative === true) &&
         gpuResultIsComplexValued('Log', args))
     ) {
-      const num = `_gpu_cln(${gpuComplexOperand(args[0], compile, target)})`;
+      const num = `_gpu_cln(${gpuComplexOperand(args[0], compile)})`;
       // `ln(x) / ln(b)`: the base may itself be complex, or real-but-negative
       // (whose own `ln` is complex). Base 10 divides by a real, so it stays a
       // componentwise scalar multiply.
       if (args.length === 1) return `(${num} * 0.4342944819032518)`;
-      return `_gpu_cdiv(${num}, _gpu_cln(${gpuComplexOperand(args[1], compile, target)}))`;
+      return `_gpu_cdiv(${num}, _gpu_cln(${gpuComplexOperand(args[1], compile)}))`;
     }
     if (args.length === 1) return `(log(${compile(args[0])}) / log(10.0))`;
     // Base 2 has a shader builtin, exact at the powers of two like the
@@ -3084,7 +2846,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         throw new Error(
           'Could not compile `Root`: a complex degree has no shader lowering.'
         );
-      const v2 = gpuVec2(target);
+      const v2 = gpuVec2();
       const z = gpuOperandOnce('Root', x, compile, target, true);
       if (n == null) return `_gpu_csqrt(${z})`;
       const degreeConst = tryGetConstant(n);
@@ -3096,20 +2858,15 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         return gpuConditional(
           `(${z}).y == 0.0`,
           `${v2}(sign((${z}).x) * pow(abs((${z}).x), ${inverse}), 0.0)`,
-          principal,
-          target
+          principal
         );
       }
       const d = gpuOperandOnce('Root', n, compile, target);
-      const odd =
-        target.language === 'wgsl'
-          ? `abs(${d}) % 2.0 == 1.0`
-          : `mod(abs(${d}), 2.0) == 1.0`;
+      const odd = `mod(abs(${d}), 2.0) == 1.0`;
       return gpuConditional(
         `(${z}).y == 0.0 && fract(${d}) == 0.0 && ${odd}`,
         `${v2}(sign((${z}).x) * pow(abs((${z}).x), 1.0 / (${d})), 0.0)`,
-        `_gpu_cpow(${z}, ${v2}(1.0 / (${d}), 0.0))`,
-        target
+        `_gpu_cpow(${z}, ${v2}(1.0 / (${d}), 0.0))`
       );
     }
     if (n === null || n === undefined) return `sqrt(${compile(x)})`;
@@ -3150,7 +2907,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // negative base, e.g. `\sqrt[4]{a}` with `a ⩴ -2`). See
     // `gpuResultIsComplexValued`.
     if (gpuResultIsComplexValued('Root', [x, n]))
-      return `_gpu_cpow(${gpuComplexOperand(x, compile, target)}, ${gpuVec2(target)}(1.0 / (${compile(n)}), 0.0))`;
+      return `_gpu_cpow(${gpuComplexOperand(x, compile)}, ${gpuVec2()}(1.0 / (${compile(n)}), 0.0))`;
     // Odd integer degree: GPU has no `cbrt`, and `pow` is NaN for a negative
     // base. Emit the sign-corrected form `sign(x)·|x|^(1/n)`. A noninteger
     // degree that the interpreter reads as a rational exponent with an odd
@@ -3235,23 +2992,18 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // `markAggregateConsuming`: every colour operand goes through
   // `gpuColorOperand`, which checks its shape and converts it to an OKLCh
-  // `vec3` itself. The emitted `select(fg2, fg1, cond)` of WGSL has as many
-  // arguments as the head has operands, but its arguments are the converted
-  // colours and a boolean condition, not the operands. Judged against the
+  // `vec3` itself. The emitted `(cond ? fg1 : fg2)` has the converted
+  // colours and a boolean condition as its operands, not the operands of the
+  // head. Judged against the
   // operand shapes, a colour literal such as `Rgb(1, 0, 0)` (a scalar shape)
   // beside a tuple background (a `vec3` shape) made the shape check refuse
   // valid source. CE-241.2.
   ContrastingColor: markAggregateConsuming((args, compile, target) => {
     if (args.length === 0)
       throw new Error('Could not compile `ContrastingColor`: no argument');
-    // WGSL has no ternary operator: the selection must be spelled `select`.
     // GLSL keeps the EXACT `?:` text it has always emitted (pinned).
-    // `select` evaluates BOTH arms eagerly, unlike `?:` — sound here because
-    // every operand of this head is pure (an impure one declines below).
     const pick = (cond: string, whenTrue: string, whenFalse: string): string =>
-      target?.language === 'wgsl'
-        ? `select(${whenFalse}, ${whenTrue}, ${cond})`
-        : `(${cond} ? ${whenTrue} : ${whenFalse})`;
+      `(${cond} ? ${whenTrue} : ${whenFalse})`;
     // Every operand is spliced TWICE by the comparison below (the background
     // in both arms of the comparison, each foreground in its arm and in the
     // result). A color operand is `vec3`-shaped, so there is no scalar (or
@@ -3289,9 +3041,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       if (/^[A-Za-z_]\w*$/.test(code)) return code;
       if (!BaseCompiler.canHoist(target)) return code;
       const t = BaseCompiler.tempVar(target);
-      const type = gpuVec3(target);
-      const decl =
-        target.language === 'wgsl' ? `var ${t}: ${type}` : `${type} ${t}`;
+      const type = gpuVec3();
+      const decl = `${type} ${t}`;
       BaseCompiler.hoistStatement(target, `${decl} = ${code};`);
       return t;
     };
@@ -3322,8 +3073,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     // Default: choose between white and black in OKLCh. Black is vec3(0);
     // white is L=1 achromatic — vec3(1.0, 0.0, 0.0).
-    const isWGSL = target?.language === 'wgsl';
-    const v3 = isWGSL ? 'vec3f' : 'vec3';
+    const v3 = 'vec3';
     const black = `${v3}(0.0)`;
     const white = `${v3}(1.0, 0.0, 0.0)`;
     return pick(
@@ -3364,7 +3114,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         );
     }
   },
-  ColorFromColorspace: ([components, space], compile, target) => {
+  ColorFromColorspace: ([components, space], compile) => {
     if (components === null || space === null)
       throw new Error(
         'Could not compile `ColorFromColorspace`: need components and space'
@@ -3408,9 +3158,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // here too: a vector-valued component emitted
     // `vec3(1.0, vec2(0.0, 1.0), 0.0)`, which no driver accepts.
     if (typedHead)
-      assertGPUScalarComponents(typedHead.ops.slice(0, 3), gpuVec3(target));
+      assertGPUScalarComponents(typedHead.ops.slice(0, 3), gpuVec3());
     const c = typedHead
-      ? `${gpuVec3(target)}(${typedHead.ops
+      ? `${gpuVec3()}(${typedHead.ops
           .slice(0, 3)
           .map((op) => compile(op))
           .join(', ')})`
@@ -3436,7 +3186,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // separate uniform if it's needed at the framebuffer boundary.
   // ---------------------------------------------------------------------------
 
-  Color: ([s], _compile, target) => {
+  Color: ([s]) => {
     // Compile-time CSS-color-string parsing. Runtime parsing is impractical
     // in shader code, so the string must be a literal at compile time.
     if (s === null) throw new Error('Could not compile `Color`: no argument');
@@ -3471,48 +3221,48 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const g = (packed >>> 16) & 0xff;
     const b = (packed >>> 8) & 0xff;
     const oklch = rgbToOklch({ r, g, b });
-    return `${gpuVec3(target)}(${formatFloat(oklch.L)}, ${formatFloat(oklch.C)}, ${formatFloat(oklch.H)})`;
+    return `${gpuVec3()}(${formatFloat(oklch.L)}, ${formatFloat(oklch.C)}, ${formatFloat(oklch.H)})`;
   },
 
-  Rgb: (args, compile, target) => {
+  Rgb: (args, compile) => {
     if (args.length < 3)
       throw new Error('Could not compile `Rgb`: need 3 components');
     assertNoGPUAlpha('Rgb', args);
-    const v3 = gpuVec3(target);
+    const v3 = gpuVec3();
     // Channels are 0-1 sRGB — no scaling needed.
     return `_gpu_srgb_to_oklch(${v3}(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])}))`;
   },
 
-  Hsv: (args, compile, target) => {
+  Hsv: (args, compile) => {
     if (args.length < 3)
       throw new Error('Could not compile `Hsv`: need 3 components');
     assertNoGPUAlpha('Hsv', args);
-    const v3 = gpuVec3(target);
+    const v3 = gpuVec3();
     return `_gpu_srgb_to_oklch(_gpu_hsv_to_rgb(${v3}(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})))`;
   },
 
-  Hsl: (args, compile, target) => {
+  Hsl: (args, compile) => {
     if (args.length < 3)
       throw new Error('Could not compile `Hsl`: need 3 components');
     assertNoGPUAlpha('Hsl', args);
-    const v3 = gpuVec3(target);
+    const v3 = gpuVec3();
     return `_gpu_srgb_to_oklch(_gpu_hsl_to_rgb(${v3}(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})))`;
   },
 
-  Oklab: (args, compile, target) => {
+  Oklab: (args, compile) => {
     if (args.length < 3)
       throw new Error('Could not compile `Oklab`: need 3 components');
     assertNoGPUAlpha('Oklab', args);
-    return `_gpu_oklab_to_oklch(${gpuFiniteColorChannels(args, compile, target)})`;
+    return `_gpu_oklab_to_oklch(${gpuFiniteColorChannels(args, compile)})`;
   },
 
-  Oklch: (args, compile, target) => {
+  Oklch: (args, compile) => {
     if (args.length < 3)
       throw new Error('Could not compile `Oklch`: need 3 components');
     assertNoGPUAlpha('Oklch', args);
     // Already in canonical form — no conversion needed, only the channel
     // check of `gpuFiniteColorChannels`.
-    return gpuFiniteColorChannels(args, compile, target);
+    return gpuFiniteColorChannels(args, compile);
   },
 
   // ---------------------------------------------------------------------------
@@ -3572,24 +3322,24 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // Fractal functions
-  Mandelbrot: ([c, maxIter], compile, target) => {
+  Mandelbrot: ([c, maxIter], compile) => {
     if (c === null || maxIter === null)
       throw new Error('Could not compile `Mandelbrot`: missing arguments');
-    const iterCode = compileIntArg('Mandelbrot', maxIter, compile, target);
-    return `_fractal_mandelbrot(${gpuComplexOperand(c, compile, target)}, ${iterCode})`;
+    const iterCode = compileIntArg('Mandelbrot', maxIter, compile);
+    return `_fractal_mandelbrot(${gpuComplexOperand(c, compile)}, ${iterCode})`;
   },
-  Julia: ([z, c, maxIter], compile, target) => {
+  Julia: ([z, c, maxIter], compile) => {
     if (z === null || c === null || maxIter === null)
       throw new Error('Could not compile `Julia`: missing arguments');
-    const iterCode = compileIntArg('Julia', maxIter, compile, target);
-    return `_fractal_julia(${gpuComplexOperand(z, compile, target)}, ${gpuComplexOperand(c, compile, target)}, ${iterCode})`;
+    const iterCode = compileIntArg('Julia', maxIter, compile);
+    return `_fractal_julia(${gpuComplexOperand(z, compile)}, ${gpuComplexOperand(c, compile)}, ${iterCode})`;
   },
 
   // Vector/Matrix operations
   Cross: 'cross',
   Distance: 'distance',
   Dot: 'dot',
-  // The GLSL/WGSL `length()` builtin is the Euclidean NORM of a vector, which
+  // The GLSL `length()` builtin is the Euclidean NORM of a vector, which
   // is CE `Norm` — NOT CE `Length` (element count; fails closed below).
   // `length()` only accepts scalars and vec2/3/4: a fixed-arity point or list
   // literal outside that range compiles to an ARRAY constructor
@@ -3658,7 +3408,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
           return compile(x);
         });
         if (n === 1) return moduli[0];
-        return `length(${gpuFVec(n, target)}(${moduli.join(', ')}))`;
+        return `length(${gpuFVec(n)}(${moduli.join(', ')}))`;
       }
       if (n === 1) return `abs(${compile(arg.op1)})`;
       return `length(${compile(arg)})`;
@@ -3666,14 +3416,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // Non-literal operand (e.g. a vec-typed symbol): `length()` applies.
     return `length(${compile(arg)})`;
   }, isBroadcastPointNormOperand),
-  // `markAggregateConsuming`: the length of a list in a storage buffer is a
-  // scalar (`f32(S.len)`), and every other operand declines.
-  Length: markAggregateConsuming((args, compile, target) => {
-    // The length of a list in a storage buffer is its `len` header.
-    if (args.length === 1 && gpuIsStorageBufferSymbol(args[0], target))
-      return storageBufferLength(
-        gpuStorageBufferOperand(args[0], compile, target, 'Length').name
-      );
+  // `markAggregateConsuming`: every operand declines.
+  Length: markAggregateConsuming((_args, _compile, target) => {
     throw new Error(
       `Could not compile \`Length\`: the collection element count is not supported on the ` +
         `${target.language ?? 'GPU'} target: the '${target.language ?? 'GPU'}' ` +
@@ -3733,8 +3477,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     assertGPUInlineElementCount('Range', count);
     const values: number[] = [];
     for (let i = 0; i < count; i++) values.push(lo + i * step);
-    const isWGSL = target.language === 'wgsl';
-    const arrayType = isWGSL ? `array<f32, ${count}>` : `float[${count}]`;
+    const arrayType = `float[${count}]`;
     return `${arrayType}(${values
       .map((v) => formatGPUNumber(v, target.language))
       .join(', ')})`;
@@ -3758,15 +3501,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // accepted.
     BaseCompiler.assertBreakLeavesWholeLoop(clauses, args[0]);
 
-    const isWGSL = target.language === 'wgsl';
-    const intType = isWGSL ? 'i32' : 'int';
+    const intType = 'int';
 
     // The counter is declared as an integer (for `i++`), but shader scalar math
     // is float. Consume the index as a float (`float(i)` / `f32(i)`) so it is
     // type-consistent wherever the body uses it in float arithmetic — mirroring
     // the Sum/Product for-loop path.
-    const indexAsFloat = (index: string) =>
-      isWGSL ? `f32(${index})` : `float(${index})`;
+    const indexAsFloat = (index: string) => `float(${index})`;
 
     const indices: string[] = [];
     const headers: string[] = [];
@@ -3859,7 +3600,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         ]);
         const code = lines.pop()!;
         const folded = numericLiteralSource(code);
-        if (folded !== undefined && Number.isFinite(folded) && lines.length === 0)
+        if (
+          folded !== undefined &&
+          Number.isFinite(folded) &&
+          lines.length === 0
+        )
           return `${Math.floor(folded)}`;
         if (!b.type.matches('integer'))
           throw new Error(
@@ -3872,9 +3617,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         const name = BaseCompiler.tempVar(target);
         prologue.push(
           ...lines.map((line) => (/[;}]\s*$/.test(line) ? line : `${line};`)),
-          isWGSL
-            ? `let ${name}: i32 = i32(${code});`
-            : `int ${name} = int(${code});`
+          `int ${name} = int(${code});`
         );
         return name;
       };
@@ -3896,9 +3639,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         step = stepValue;
       }
 
-      const indexDecl = isWGSL
-        ? `var ${index}: ${intType}`
-        : `${intType} ${index}`;
+      const indexDecl = `${intType} ${index}`;
       const condition =
         step > 0 ? `${index} <= ${upper}` : `${index} >= ${upper}`;
       const advance = step === 1 ? `${index}++` : `${index} += ${step}`;
@@ -4088,7 +3829,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // We represent the "array" as a mutable JS array of code strings.
     // Each "comparator" sorts a pair: (v[i], v[j]) → min then max.
     // We inline this as: new_i = min(a, b); new_j = max(a, b)
-    // But since GLSL/WGSL have no statements in expressions, we encode
+    // But since GLSL has no statements in expressions, we encode
     // the full sorted sequence using nested min/max only when possible.
     //
     // Strategy: generate all comparator pairs for sorting network (as a list),
@@ -4104,7 +3845,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // This is O(n choose k+1) — too expensive for n=8.
     //
     // Cleanest solution: call `_gpu_median_N` preamble function.
-    // We emit a per-size preamble (GPU_MEDIAN_PREAMBLE_N_GLSL / WGSL)
+    // We emit a per-size preamble (GPU_MEDIAN_PREAMBLE_N_GLSL)
     // and return a call to `_gpu_median_N(v0, v1, ..., vN-1)`.
     return `_gpu_median_${n}(${compiled.join(', ')})`;
   }, gpuDestructuresListOperand),
@@ -4114,18 +3855,18 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
    * random family redesign
    * (`docs/RANDOMNESS-MODEL.md` §2, §4, §7).
    *
-   * Every form returns a GLSL `float` (WGSL `f32`), so it composes with the
+   * Every form returns a GLSL `float`, so it composes with the
    * surrounding float arithmetic without a cast. The domain forms return an
    * integer-valued float (the result of `floor`) for a `Range`, matching the
    * convention `Floor` and the other ostensibly integer-returning operators
    * of this target use.
    *
-   * | Form | GLSL | WGSL |
-   * |---|---|---|
-   * | `Random()` inside `WithRandomSeed` | `hash(seed, n)` | `hash(seed, n)` |
-   * | `Random(Interval/Range)` inside a frame | arithmetic on the draw | same |
-   * | `Random()` unframed | fragment stage: spatial noise; any other stage **throws** | **throws** |
-   * | `Random(collection)` | **throws** — no general indexing | **throws** |
+   * | Form | GLSL |
+   * |---|---|
+   * | `Random()` inside `WithRandomSeed` | `hash(seed, n)` |
+   * | `Random(Interval/Range)` inside a frame | arithmetic on the draw |
+   * | `Random()` unframed | fragment stage: spatial noise; any other stage **throws** |
+   * | `Random(collection)` | **throws** — no general indexing |
    *
    * The presented value is `(w0 >> 8) * 2⁻²⁴` — an EXACT power-of-two
    * conversion of the top 24 bits of the same `w0` the f64 tier is built

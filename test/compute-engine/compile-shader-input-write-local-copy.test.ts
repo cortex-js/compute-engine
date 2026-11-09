@@ -2,18 +2,16 @@
  * A shader body that assigns an input declines.
  *
  * When an engine scope binds `u` (`ce.declare('u', 'real')`), the body
- * `u ≔ u + 1` writes a symbol of the engine. On GLSL and WGSL the input is a
+ * `u ≔ u + 1` writes a symbol of the engine. On GLSL the input is a
  * uniform, which is read-only. Compiled code writes only the locals that it
  * declares, so the compilation declines: the host can return the value and
  * assign it, or the body can declare a local with a value and read the local.
  *
- * There is no GLSL or WGSL validator in this repository, so the tests check
- * the emitted source, and they run the scalar programs after a small
- * translation to JavaScript.
+ * There is no GLSL validator in this repository, so the tests check the
+ * emitted source.
  */
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const range = ['Element', 'i', ['Range', 1, 3]];
 
@@ -31,35 +29,14 @@ const PROGRAMS: [string, any][] = [
 
 const DECLINE = /"u" is not a local of the compiled expression/;
 
-function compiled(src: any, to: 'glsl' | 'wgsl', options: any = {}): any {
+function compiled(src: any, to: 'glsl', options: any = {}): any {
   const ce = new ComputeEngine();
   ce.declare('x', 'real | signed_infinity | nan');
   ce.declare('u', 'real');
   return compile(ce.box(src), { to, fallback: false, ...options }) as any;
 }
 
-/**
- * The JavaScript form of the scalar shader body `code`: declarations become
- * `let`, the integer loop index and its conversion to a float are kept as
- * numbers. Enough for the programs of this file, not a general translator.
- */
-function shaderToJS(code: string): string {
-  return code
-    .replace(/^(\s*)(?:float|int|vec2) (\w+)(;| =)/gm, '$1let $2$3')
-    .replace(/^(\s*)var (\w+): \w+(;| =)/gm, '$1let $2$3')
-    .replace(/for \((?:int|var) (\w+)(?:: i32)? =/g, 'for (let $1 =')
-    .replace(/\b(?:float|f32)\(/g, '(');
-}
-
-/** The interpreter's value of `src` with `x` given. */
-function interpretedAt(src: any, x: number): number {
-  const ce = new ComputeEngine();
-  ce.declare('x', 'real');
-  ce.assign('x', x);
-  return ce.box(src).evaluate().re;
-}
-
-for (const to of ['glsl', 'wgsl'] as const) {
+for (const to of ['glsl'] as const) {
   describe(`${to.toUpperCase()}: AN INPUT THAT THE BODY ASSIGNS`, () => {
     // A write to a symbol declared in the engine declines.
     for (const [name, src] of PROGRAMS)
@@ -76,11 +53,7 @@ for (const to of ['glsl', 'wgsl'] as const) {
         ['Multiply', 2, 'u'],
       ]);
       expect(() =>
-        to === 'glsl'
-          ? new GLSLTarget().compileFunction(body, 'f', 'float', [
-              ['x', 'float'],
-            ])
-          : new WGSLTarget().compileFunction(body, 'f', 'f32', [['x', 'f32']])
+        new GLSLTarget().compileFunction(body, 'f', 'float', [['x', 'float']])
       ).toThrow(DECLINE);
     });
 
@@ -110,13 +83,9 @@ for (const to of ['glsl', 'wgsl'] as const) {
 }
 
 describe('A SELECTION WHOSE BRANCHES ASSIGN', () => {
-  // WGSL lowers `If`/`Which` to `select(…)`, a function call, and a WGSL
-  // assignment is a statement: `If(x > 0, t ≔ 1, t ≔ 2)` gave
-  // `select(t = 2.0, t = 1.0, 0.0 < x);`, which no WGSL compiler accepts.
-  // In statement position (a statement of a block, a loop body) the
-  // selection is now an `if` statement on WGSL. In a value position (here,
-  // the whole body) WGSL fails closed. GLSL keeps its ternary, which is valid
-  // there.
+  // GLSL lowers `If`/`Which` to a ternary, and an assignment is an
+  // expression in GLSL, so a selection whose branches assign a block local
+  // keeps its ternary. A branch that writes an input declines.
   const programs: [string, any][] = [
     [
       'If in a block',
@@ -153,28 +122,6 @@ describe('A SELECTION WHOSE BRANCHES ASSIGN', () => {
   ];
   for (const [name, src] of programs) {
     if (src[0] === 'Block')
-      test(`WGSL writes an if statement: ${name}`, () => {
-        const c = compiled(src, 'wgsl');
-        expect(c.success).toBe(true);
-        expect(c.code).not.toContain('select(');
-        expect(c.code).toMatch(/^\s*if \(.*\) \{$/m);
-        // The free `x` of the first program is a host input: the JavaScript
-        // translation reads it as a parameter.
-        for (const x of [-1, 1])
-          // eslint-disable-next-line no-new-func
-          expect(new Function('x', shaderToJS(c.code))(x)).toBe(
-            interpretedAt(src, x)
-          );
-      });
-    else
-      test(`WGSL fails closed: ${name}`, () => {
-        expect(() => compiled(src, 'wgsl')).toThrow(
-          /a branch assigns a variable, and the WGSL selection/
-        );
-        // The fallback runs the interpreter.
-        expect(compiled(src, 'wgsl', { fallback: true }).success).toBe(false);
-      });
-    if (src[0] === 'Block')
       test(`GLSL keeps the ternary: ${name}`, () => {
         expect(compiled(src, 'glsl').code).toMatch(/\? \(\w+ = 1\.0\) :/);
       });
@@ -184,10 +131,4 @@ describe('A SELECTION WHOSE BRANCHES ASSIGN', () => {
         expect(() => compiled(src, 'glsl')).toThrow(DECLINE);
       });
   }
-
-  test('a selection of values is unchanged', () => {
-    expect(compiled(['If', ['Greater', 'x', 0], 1, 2], 'wgsl').code).toBe(
-      'select(2.0, 1.0, 0.0 < x)'
-    );
-  });
 });

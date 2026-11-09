@@ -124,7 +124,7 @@ export function angularChainFactor(ce: Expression['engine']): Expression {
  *
  * The scale factors are float literals (not exact `π/180` expressions): the
  * rewritten tree is only ever fed to codegen, which numericizes anyway, and
- * float factors keep the emitted GLSL/WGSL/JS free of symbolic constants.
+ * float factors keep the emitted GLSL/JS free of symbolic constants.
  *
  * With `options.exactFactors`, the factors are EXACT expressions instead:
  * `π/180` (`angularChainFactor`), its reciprocal for the inverse heads, and

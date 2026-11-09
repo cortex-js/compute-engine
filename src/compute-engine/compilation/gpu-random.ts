@@ -194,11 +194,11 @@ export function resetGPURandomNumbering(
  * Allocate the next invocation-local counter variable.
  *
  * Each frame owns one, plus one shared by the unframed spatial-noise draws.
- * The counter is a shader global (`var<private>` in WGSL): per-invocation and
+ * The counter is a shader global: per-invocation and
  * initialized before the entry point runs, so every invocation runs each of
  * its frames from `n = 0`.
  *
- * Caveat worth knowing: GLSL and WGSL leave the evaluation ORDER of an
+ * Caveat worth knowing: GLSL leaves the evaluation ORDER of an
  * expression's operands unspecified, so which of two sibling draws in one
  * frame gets `n = 0` is not pinned by the source. The set of values drawn is,
  * and so is each draw's own determinism — but `Random() - Random()` inside one
@@ -213,20 +213,10 @@ export function allocGPURandomCounter(state: GPURandomState): string {
  * preamble assembly). */
 export const GPU_RANDOM_COUNTER_PREFIX = '_gpu_rnd_n';
 
-/** How a draw site passes its counter: GLSL takes it by `inout`, WGSL by a
- * pointer into the private address space. */
-function gpuCounterArg(name: string, language: string | undefined): string {
-  return language === 'wgsl' ? `&${name}` : name;
-}
-
-/** A `uvec2` (WGSL `vec2<u32>`) literal holding the two folded seed words. */
-function gpuSeedWords(
-  lo: number,
-  hi: number,
-  language: string | undefined
-): string {
+/** A `uvec2` literal holding the two folded seed words. */
+function gpuSeedWords(lo: number, hi: number): string {
   const hex = (w: number) => `0x${(w >>> 0).toString(16).padStart(8, '0')}u`;
-  const ctor = language === 'wgsl' ? 'vec2<u32>' : 'uvec2';
+  const ctor = 'uvec2';
   return `${ctor}(${hex(lo)}, ${hex(hi)})`;
 }
 
@@ -297,26 +287,17 @@ export function gpuRandomDraw(target: CompileTarget<Expression>): string {
     true
   );
   const t = BaseCompiler.tempVar(target);
-  BaseCompiler.hoistStatement(
-    target,
-    target.language === 'wgsl'
-      ? `let ${t}: f32 = ${code};`
-      : `float ${t} = ${code};`
-  );
+  BaseCompiler.hoistStatement(target, `float ${t} = ${code};`);
   return t;
 }
 
 /** The code of one draw, `gpuRandomDraw` without the binding. */
 function gpuRandomDrawCode(target: CompileTarget<Expression>): string {
   const state = gpuRandomState(target);
-  const language = target.language;
 
   const frame = state.frames[state.frames.length - 1];
   if (frame !== undefined)
-    return `_gpu_rnd_draw(${frame.seed}, ${gpuCounterArg(
-      frame.counter,
-      language
-    )})`;
+    return `_gpu_rnd_draw(${frame.seed}, ${frame.counter})`;
 
   // Unframed. The cross-domain case first (§4): the enclosing frame lives on
   // the HOST, whose mutable counter a parallel shader invocation cannot share.
@@ -327,14 +308,6 @@ function gpuRandomDrawCode(target: CompileTarget<Expression>): string {
         "the host's mutable draw counter, and fragments run in parallel. GPU " +
         'frames must be LEXICAL: move the `WithRandomSeed(seed, …)` inside the ' +
         'compiled expression.'
-    );
-
-  if (language === 'wgsl')
-    throw new Error(
-      'Could not compile `Random()`: an unframed draw has no WGSL form — a shader has no ' +
-        'live random stream, and WGSL has no `gl_FragCoord` built-in to derive ' +
-        'spatial noise from. Wrap the draw in `WithRandomSeed(seed, …)`, whose ' +
-        'seed may be an invocation-varying expression.'
     );
 
   // `gl_FragCoord` exists only in a fragment shader. A vertex (or other) stage
@@ -483,8 +456,7 @@ export function gpuInputShapeRefusals(expr: Expression | undefined): {
           `with a size fixed at compile time (a scalar, a vector, a matrix ` +
           `or an array of a stated length, of at least one element), so no ` +
           `shader can declare "${name}". Declare its length in its type ` +
-          `(\`list<real^8>\`, \`matrix<real^3x3>\`). On the wgsl target, a ` +
-          `'storage-buffer' hint also holds a list of unknown length.`
+          `(\`list<real^8>\`, \`matrix<real^3x3>\`).`
       );
   });
   return { pointOrList, unsizedLists };
@@ -498,8 +470,8 @@ export function gpuInputShapeRefusals(expr: Expression | undefined): {
  * compile time: a list with no dimensions or with an open dimension
  * (`list<real>`, `matrix`, which is `matrix<number^(?x?)>`), a bare `list`,
  * a set, a range, a dictionary or an abstract collection. It is also
- * refused when it is a list with a dimension of 0, because GLSL and WGSL
- * have no array of zero elements. A list type whose dimensions are all
+ * refused when it is a list with a dimension of 0, because GLSL
+ * has no array of zero elements. A list type whose dimensions are all
  * stated and positive (`list<real^3>`, `matrix<real^(2x2)>`) is not
  * refused. Tuples and strings are not collections of this kind: the tuple
  * gate of `gpuInputShapeRefusals()` and the text gate of
@@ -610,7 +582,7 @@ function forEachReachableSymbol(
  * accesses and literal indexes (`ce_params.c`, `v[0]`), which only read the
  * variable `root`.
  *
- * A uniform is read-only in GLSL and WGSL. The one way for a read of `path`
+ * A uniform is read-only in GLSL. The one way for a read of `path`
  * to give a different value is a variable of the shader named `root` that
  * the shader writes: a `Block` local, an assigned symbol, a loop or binder
  * variable, or a parameter, here or in a user-function definition that the
@@ -854,16 +826,14 @@ export function gpuFoldSeedSource(
   compile: (expr: Expression) => string,
   target: CompileTarget<Expression>
 ): string {
-  const language = target.language;
-
   if (isString(seedExpr)) {
     const [lo, hi] = foldSeed(seedExpr.string);
-    return gpuSeedWords(lo, hi, language);
+    return gpuSeedWords(lo, hi);
   }
   if (seedExpr.type.matches('string'))
     throw new Error(
       'Could not compile `WithRandomSeed(seed, …)`: a string seed that is not a compile-time ' +
-        'literal cannot be folded in a shader — GLSL and WGSL have no ' +
+        'literal cannot be folded in a shader — GLSL has no ' +
         'strings. Use a literal string, a numeric seed, or fold the seed on ' +
         'the host.'
     );
@@ -893,7 +863,7 @@ export function gpuFoldSeedSource(
   const value = tryGetConstant(seed) ?? tryGetConstant(seed.N());
   if (value !== undefined) {
     const [lo, hi] = foldSeed(value);
-    return gpuSeedWords(lo, hi, language);
+    return gpuSeedWords(lo, hi);
   }
 
   const symbol = isSymbol(seed) ? seed.symbol : undefined;
@@ -930,7 +900,5 @@ export function gpuFoldSeedSource(
   // caller declares), so there is no host counterpart to agree with and the
   // frame derives its OWN stream from the seed's BITS.
   const src = compile(seed).trim();
-  return language === 'wgsl'
-    ? `vec2<u32>(bitcast<u32>(${src}), 0u)`
-    : `uvec2(floatBitsToUint(${src}), 0u)`;
+  return `uvec2(floatBitsToUint(${src}), 0u)`;
 }

@@ -89,7 +89,7 @@ describe('CE-595: a node read again in a conditional arm', () => {
       expect(harvest.regions.length).toBeLessThanOrEqual(41);
     });
 
-    for (const to of ['wgsl', 'glsl', 'javascript'] as const) {
+    for (const to of ['glsl', 'javascript'] as const) {
       test(`${name}: depth 20 compiles quickly to ${to}`, () => {
         const ce = engine();
         const e = graph(ce, 20);
@@ -536,29 +536,6 @@ describe('CE-595: the interval target', () => {
 
 // The code that the pass gave before the change, at depth 3.
 describe('CE-595: the emitted code does not change', () => {
-  test('If arm, WGSL', () => {
-    expect(compile(ifArmGraph(engine(), 3), { to: 'wgsl' }).code).toBe(
-      [
-        'let _cse1: f32 = sin(x);',
-        'let _cse2: f32 = atan2(_cse1, select(0.0, _cse1, 0.0 < x));',
-        'var _tv3: f32;',
-        'if (1.0 < x) {',
-        '  _tv3 = _cse2;',
-        '} else {',
-        '  _tv3 = 0.0;',
-        '}',
-        'let _cse4: f32 = atan2(_cse2, _tv3);',
-        'var _tv5: f32;',
-        'if (2.0 < x) {',
-        '  _tv5 = _cse4;',
-        '} else {',
-        '  _tv5 = 0.0;',
-        '}',
-        'return atan2(_cse4, _tv5);',
-      ].join('\n')
-    );
-  });
-
   test('If arm, GLSL', () => {
     expect(compile(ifArmGraph(engine(), 3), { to: 'glsl' }).code).toBe(
       [
@@ -588,29 +565,6 @@ describe('CE-595: the emitted code does not change', () => {
         'const _cse2 = Math.atan2(_cse1, ((0 < _.x) ? (_cse1) : (0))); ' +
         'const _cse3 = Math.atan2(_cse2, ((1 < _.x) ? (_cse2) : (0))); ' +
         'return Math.atan2(_cse3, ((2 < _.x) ? (_cse3) : (0))); })()'
-    );
-  });
-
-  test('When value, WGSL', () => {
-    expect(compile(whenArmGraph(engine(), 3), { to: 'wgsl' }).code).toBe(
-      [
-        'var _tv1: f32;',
-        'var _tv2: f32;',
-        'let _cse3: f32 = sin(x);',
-        'let _cse4: f32 = select(_gpu_nan(), sin(_cse3), 0.0 < _cse3);',
-        'if (1.0 < _cse4) {',
-        '  _tv2 = _gpu_sin(_cse4);',
-        '} else {',
-        '  _tv2 = _gpu_nan();',
-        '}',
-        'let _cse5: f32 = _tv2;',
-        'if (2.0 < _cse5) {',
-        '  _tv1 = _gpu_sin(_cse5);',
-        '} else {',
-        '  _tv1 = _gpu_nan();',
-        '}',
-        'return _tv1;',
-      ].join('\n')
     );
   });
 

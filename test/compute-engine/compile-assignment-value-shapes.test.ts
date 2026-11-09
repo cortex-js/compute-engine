@@ -2,7 +2,6 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import type { MathJsonExpression } from '../../src/math-json/types';
 import { TEST_PYTHON } from './test-python';
@@ -95,7 +94,7 @@ describe('an assignment whose value is a block', () => {
     ).toThrow(/the value assigned to "t" lowers to a statement sequence/);
   });
 
-  test.each(['glsl', 'wgsl'] as const)('%s declines', (to) => {
+  test.each(['glsl'] as const)('%s declines', (to) => {
     expect(() => compile(engine().box(json), { to, fallback: false })).toThrow(
       /a block with a statement other than a declaration with a value is an operand here/
     );
@@ -119,7 +118,7 @@ describe('an assignment whose value is another assignment', () => {
     expect(expr.toString()).toContain('assignment-in-operand');
   });
 
-  test.each(['javascript', 'python', 'glsl', 'wgsl'] as const)(
+  test.each(['javascript', 'python', 'glsl'] as const)(
     '%s declines',
     (to) => {
       expect(() =>
@@ -128,13 +127,6 @@ describe('an assignment whose value is another assignment', () => {
     }
   );
 
-  test('WGSL compileFunction() declines too', () => {
-    expect(() =>
-      new WGSLTarget().compileFunction(engine().box(json), 'f', 'f32', [
-        ['x', 'f32'],
-      ])
-    ).toThrow(/invalid expression/);
-  });
 });
 
 describe('a block whose last statement is a declaration', () => {
@@ -157,22 +149,13 @@ describe('a block whose last statement is a declaration', () => {
   );
 
   test.each(shapes.map((s) => [s]))('every target declines: %j', (json) => {
-    for (const to of [
-      'javascript',
-      'python',
-      'glsl',
-      'wgsl',
-      'interval-js',
-    ] as const) {
+    for (const to of ['javascript', 'python', 'glsl', 'interval-js'] as const) {
       const r = compile(engine().box(json), { to });
       expect(r.success).toBe(false);
     }
     expect(() =>
       new PythonTarget().compile(engine().box(json), { fallback: false })
     ).toThrow(/an assignment or a declaration is a statement, and its value/);
-    expect(() => new WGSLTarget().compile(engine().box(json))).toThrow(
-      /an assignment or a declaration is a statement, and its value/
-    );
   });
 
   test('a declaration with no value is a static error', () => {
@@ -204,7 +187,7 @@ describe('a nested block whose last statement is an assignment', () => {
     expect(engine().box(json).evaluate().symbol).toBe('Nothing');
   });
 
-  test.each(['javascript', 'python', 'glsl', 'wgsl'] as const)(
+  test.each(['javascript', 'python', 'glsl'] as const)(
     '%s compile() declines',
     (to) => {
       expect(() =>
@@ -229,7 +212,7 @@ describe('a nested block whose last statement is an assignment', () => {
     ];
     expect(interpreterAt3(named)).toBe('4');
     expect(compile(engine().box(named)).run!({ x: 3 })).toBe(4);
-    for (const to of ['glsl', 'wgsl'] as const) {
+    for (const to of ['glsl'] as const) {
       const r = compile(engine().box(named), { to });
       expect(r.success).toBe(true);
       expectValidShaderShape(gpuSource(r));
@@ -275,7 +258,7 @@ describe('a block local that is read before it has a value', () => {
     ).toBe('2(x + 1)');
   });
 
-  test.each(['javascript', 'python', 'glsl', 'wgsl', 'interval-js'] as const)(
+  test.each(['javascript', 'python', 'glsl', 'interval-js'] as const)(
     '%s declines on the box route and on the parse route',
     (to) => {
       const boxed = compile(new ComputeEngine().box(boxRoute), { to });
@@ -294,15 +277,6 @@ describe('a block local that is read before it has a value', () => {
     }
   );
 
-  test('a declaration with no value followed by a read declines', () => {
-    const ce = new ComputeEngine();
-    const r = compile(
-      ce.box(['Block', ['Declare', 't'], ['Multiply', 2, 't']]),
-      { to: 'wgsl' }
-    );
-    expect(r.success).toBe(false);
-  });
-
   test('a local assigned before it is read compiles', () => {
     const ce = new ComputeEngine();
     const json: MathJsonExpression = [
@@ -316,15 +290,6 @@ describe('a block local that is read before it has a value', () => {
     expect(r.success).toBe(true);
     expect(r.run!({ x: 3 })).toBe(4);
     expect(compile(ce.box(json), { to: 'glsl' }).success).toBe(true);
-    // WGSL has no expression form for the `If` whose branches assign: it
-    // was `select(y = 2.0, y = 1.0, 0.0 < x);`, which no WGSL compiler
-    // accepts, behind `success: true`. In statement position it is an `if`
-    // statement (`compile-statement-forms.test.ts`).
-    const wgsl = compile(ce.box(json), { to: 'wgsl' });
-    expect(wgsl.success).toBe(true);
-    expect(wgsl.code).toContain(
-      'if (0.0 < x) {\n  y = 1.0;\n} else {\n  y = 2.0;\n}'
-    );
   });
 
   test('a write to an outer variable declines', () => {
@@ -337,10 +302,7 @@ describe('a block local that is read before it has a value', () => {
     );
   });
 
-  test.each([
-    [new GLSLTarget(), 'GLSL'],
-    [new WGSLTarget(), 'WGSL'],
-  ] as const)(
+  test.each([[new GLSLTarget(), 'GLSL']] as const)(
     '%s compileShader() declines an assignment to a uniform',
     (target, lang) => {
       // Emitted `x = x + 1.0;` on a `uniform`, which is read-only.
@@ -351,7 +313,7 @@ describe('a block local that is read before it has a value', () => {
           outputs: [{ name: 'o', type: 'float' }],
           body: [
             {
-              variable: lang === 'WGSL' ? 'output.o' : 'o',
+              variable: 'o',
               expression: engine().box(boxRoute),
             },
           ],

@@ -902,7 +902,7 @@ describe('the JavaScript target', () => {
     expect(compiled.run({ H })).toEqual([6, 7, 8, 8]);
   });
 
-  test.each(['glsl', 'wgsl', 'interval-js', 'python'])(
+  test.each(['glsl', 'interval-js', 'python'])(
     'the target %s declines the parallel heads',
     (to) => {
       const ce = new ComputeEngine();

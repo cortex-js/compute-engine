@@ -33,7 +33,7 @@ function fail(message) {
 const ENTRIES = {
   'compute-engine': ['ComputeEngine', 'compile', 'parse', 'GLSLTarget'],
   core: ['ComputeEngine', 'simplify'],
-  compile: ['compile', 'GLSLTarget', 'WGSLTarget', 'PythonTarget'],
+  compile: ['compile', 'GLSLTarget', 'PythonTarget'],
   'math-json': ['isSymbolObject'],
   'latex-syntax': ['LatexSyntax', 'parse'],
   interval: ['ok', 'point'],
@@ -67,7 +67,7 @@ function load(name) {
 
 // `core` and `compile` first, and the core engine below is made BEFORE the
 // full entry loads: a program that loads `./core` alone has the two built-in
-// targets. The full entry then adds `glsl`, `wgsl` and `python` to the
+// targets. The full entry then adds `glsl` and `python` to the
 // program-wide table of default targets, which every engine reads on each
 // lookup, so the same core engine resolves them afterwards (checked below).
 for (const name of ['core', 'compile']) load(name);
@@ -104,20 +104,20 @@ if (!glsl.success || !/x \+ 1\.0/.test(glsl.code))
 // 1. (continued) The other entries, the full entry among them.
 for (const name of Object.keys(ENTRIES)) if (!loaded[name]) load(name);
 
-// Once the full entry is loaded, every engine of the program has the five
+// Once the full entry is loaded, every engine of the program has the four
 // targets: one made after the load, and the core engine made before it (the
 // default engine that the free functions of `./core` cache is in the same
 // position, so `compile(…, { to: 'python' })` of the full entry must not
 // throw on it).
 const full = new loaded['compute-engine'].ComputeEngine();
 const fullNames = full._listCompilationTargets();
-if (fullNames.join(',') !== 'javascript,interval-js,glsl,wgsl,python')
+if (fullNames.join(',') !== 'javascript,interval-js,glsl,python')
   fail(`a full-entry engine registers ${JSON.stringify(fullNames)}`);
 const upgraded = ce._listCompilationTargets();
-if (upgraded.join(',') !== 'javascript,interval-js,glsl,wgsl,python')
+if (upgraded.join(',') !== 'javascript,interval-js,glsl,python')
   fail(`the core engine made before the full entry loaded registers ${JSON.stringify(upgraded)}`);
-const wgsl = loaded.compile.compile(ce.box(['Add', 'x', 1]), { to: 'wgsl', fallback: false });
-if (!wgsl.success) fail('the core engine made before the full entry loaded does not compile to WGSL');
+const python = loaded.compile.compile(ce.box(['Add', 'x', 1]), { to: 'python', fallback: false });
+if (!python.success) fail('the core engine made before the full entry loaded does not compile to Python');
 loaded.core.expr(1); // the free functions of `./core` cache a default engine
 const viaFreeFunction = loaded['compute-engine'].compile(
   loaded['compute-engine'].parse('x + 1'),

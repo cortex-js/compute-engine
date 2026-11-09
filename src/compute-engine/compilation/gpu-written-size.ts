@@ -1,5 +1,5 @@
 /**
- * A size limit for the code that the GLSL and WGSL targets write for one
+ * A size limit for the code that the GLSL target writes for one
  * expression.
  *
  * An expression is a graph: one node can have several parents. The emitter
@@ -8,8 +8,8 @@
  * the node is written once and each path reads the temporary. When the pass
  * cannot bind the nodes of a deep graph, the code grows exponentially with
  * the depth: `e_{k+1} = e_k + sin(e_k)` over 20 levels, with each `e_k`
- * reading a `vars` source that the pass must not share, gave 24 MB of WGSL
- * in 25 seconds (ROADMAP CE-584). The shader targets refuse such an
+ * reading a `vars` source that the pass must not share, gave 24 MB of shader
+ * code in 25 seconds (ROADMAP CE-584). The shader targets refuse such an
  * expression before they write it.
  */
 
@@ -332,7 +332,7 @@ type Region = {
  * The body of a binder does not read a temporary of an enclosing region:
  * in `e_{k+1} = e_k + Sum(j·e_k, j, 1, N)` the loop of the inner `Sum` is
  * written again inside the body of the outer one, and the code doubles at
- * each level (43,641 characters of WGSL at depth 8). Two sibling binder
+ * each level (43,641 characters of shader code at depth 8). Two sibling binder
  * bodies do not share a node either (ROADMAP CE-458). The body region is
  * therefore `opaque`.
  */

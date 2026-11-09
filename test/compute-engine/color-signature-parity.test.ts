@@ -1,7 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 /**
  * The color operators and their SIGNATURES, checked route by route.
@@ -882,7 +881,7 @@ describe('a shader reads an infinite HSV or HSL channel as its bound', () => {
 // ---------------------------------------------------------------------------
 
 describe('a shader keeps a NaN channel NaN through a clamp or a sign', () => {
-  // GLSL and WGSL do not specify `min`, `max` or `clamp` of NaN, nor
+  // GLSL does not specify `min`, `max` or `clamp` of NaN, nor
   // `sign(NaN)`. These builtins give one answer the specifications allow and
   // that GPUs give: `min` and `max` return the operand that is not NaN (the
   // IEEE 754 `minNum` and `maxNum`), so `clamp(NaN, 0, 1)` is 0, and
@@ -927,23 +926,6 @@ describe('a shader keeps a NaN channel NaN through a clamp or a sign', () => {
     const expr = ['ColorContrast', ['Rgb', 'NaN', 0, 0], ['Rgb', 0, 0, 0]];
     expect(interp(expr).operator).toBe('Error');
     expect(Number.isNaN(evalGLSL(expr, GPU_NAN_BUILTINS))).toBe(true);
-  });
-
-  test('the WGSL helpers test for NaN before they clamp', () => {
-    const r = new WGSLTarget().compile(
-      ce.expr(['AsHsv', ['Hsv', 30, 'NaN', 1]]),
-      NO_FOLD as any
-    ) as any;
-    expect(r.preamble).toContain(
-      'if (h != h || hsv.y != hsv.y || hsv.z != hsv.z) { return vec3f(h + hsv.y + hsv.z); }'
-    );
-    expect(r.preamble).toContain(
-      'if (rgb_in.x != rgb_in.x || rgb_in.y != rgb_in.y || rgb_in.z != rgb_in.z) {'
-    );
-    expect(r.preamble).toContain(
-      'if (lc != lc || mc != mc || sc != sc) { return vec3f(lc + mc + sc); }'
-    );
-    expect(r.preamble).toContain('if (c != c) { return c; }');
   });
 });
 
@@ -1205,25 +1187,5 @@ describe('a shader maps a color into the gamut as the interpreter does', () => {
         NO_FOLD as any
       )
     ).toThrow(/rec2020/);
-  });
-
-  test('the WGSL preamble has the mapping helpers', () => {
-    const r = new WGSLTarget().compile(
-      ce.expr(['GamutMap', ['Oklch', 0.7, 0.4, 30], "'display-p3'"]),
-      NO_FOLD as any
-    ) as any;
-    expect(r.code).toContain('_gpu_gamut_map_oklch_p3(');
-    expect(r.preamble).toContain(
-      'fn _gpu_gamut_map_oklch_in(lch: vec3f, p3: bool) -> vec3f {'
-    );
-    expect(r.preamble).toContain(
-      'return all(rgb >= vec3f(-1e-6)) && all(rgb <= vec3f(1.000001));'
-    );
-    // A triple with an infinite channel is the NaN triple, before the
-    // lightness tests (WGSL has no `isinf`, so the test compares with the
-    // largest finite 32-bit float).
-    expect(r.preamble).toContain(
-      'if (!(abs(L) <= 3.4028234663852886e38 && abs(C) <= 3.4028234663852886e38 && abs(H) <= 3.4028234663852886e38)) {\n    return vec3f(_gpu_nan());'
-    );
   });
 });

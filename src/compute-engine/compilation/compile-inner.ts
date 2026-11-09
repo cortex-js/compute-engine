@@ -451,7 +451,7 @@ export function compileInnerSymbol(
     return folded;
   }
   // Genuinely free symbol: emit its bare identifier. Give the target a
-  // chance to mangle it or fail closed — e.g. a GLSL/WGSL reserved
+  // chance to mangle it or fail closed — e.g. a GLSL reserved
   // keyword used as a variable name would emit invalid shader source.
   return liftWideReference(
     expr,

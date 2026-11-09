@@ -132,7 +132,7 @@ describe('A COMPARISON WITH AN ABSENT NUMERIC OPERAND (CE-93)', () => {
   test('the GPU targets keep the IEEE reading, with no guard', () => {
     const ce = new ComputeEngine();
     ce.declare('w', 'number');
-    for (const to of ['glsl', 'wgsl'] as const)
+    for (const to of ['glsl'] as const)
       for (const expr of [
         ['Greater', 'w', 0],
         ['If', ['Greater', 'w', 0], 1, 0],

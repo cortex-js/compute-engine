@@ -7561,7 +7561,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
         // this target is a strict boolean either way (decided 2026-09-22).
         writtenSymbol: 'numeric',
       },
-      // A Python Block is a bare statement sequence (like GLSL/WGSL), never a
+      // A Python Block is a bare statement sequence (like GLSL), never a
       // JS IIFE. Fail closed if such a block is spliced as a sub-operand.
       bareStatementBlocks: true,
       // Python has no declaration keyword; a `Declare`'s value rides on the

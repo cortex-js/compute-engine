@@ -51,7 +51,7 @@ for (const shared of [true, false]) for (const depth of shared ? [4, 8, 12, 13, 
     },
   });
 }
-for (const fold of [true, false]) for (const host of ['slider-js', 'slider-wgsl', 'map', 'constant-parameter']) fixtures.push({
+for (const fold of [true, false]) for (const host of ['slider-js', 'slider-glsl', 'map', 'constant-parameter']) fixtures.push({
   id: `host/${host}/fold-${fold}`,
   setup() {
     const ce = engine();
@@ -61,11 +61,11 @@ for (const fold of [true, false]) for (const host of ['slider-js', 'slider-wgsl'
       ce.declare('x', 'real'); ce.declare('T', 'real'); ce.assign('T', 2);
       e = ce.box(['Add', ['Sin', ['Multiply', 'T', 'x']], ['Cos', ['Multiply', 'T', 'x']], ['Sqrt', 3]]);
       options = { ...options, vars: { T: 'T', x: 'x' } };
-      if (host === 'slider-wgsl') options.to = 'wgsl';
+      if (host === 'slider-glsl') options.to = 'glsl';
       else options.vars = { T: '_.T', x: '_.x' };
       checkValue = r => {
-        assert.match(r.code, host === 'slider-wgsl' ? /sin\(/ : /Math\.sin/);
-        if (host === 'slider-wgsl') { assert.match(r.code, /\bT\b/); assert.match(r.code, /\bx\b/); }
+        assert.match(r.code, host === 'slider-glsl' ? /sin\(/ : /Math\.sin/);
+        if (host === 'slider-glsl') { assert.match(r.code, /\bT\b/); assert.match(r.code, /\bx\b/); }
         if (host === 'slider-js') for (const T of [1, 2, 3]) for (const x of [0, 0.25, 2])
           close(r.run({T, x}), Math.sin(T * x) + Math.cos(T * x) + Math.sqrt(3));
       };

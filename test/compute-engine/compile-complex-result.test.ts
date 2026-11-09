@@ -5,7 +5,7 @@
  * `Sqrt(a)` is typed `complex` while the operand `a` is typed `integer`. The
  * ENCLOSING expression decides its codegen from the node
  * (`BaseCompiler.isComplexValued`), so it emits `{re, im}` (JS) /
- * `vec2(re, im)` (GLSL/WGSL) arithmetic. A handler that picked its lowering
+ * `vec2(re, im)` (GLSL) arithmetic. A handler that picked its lowering
  * from the argument alone emitted `Math.sqrt(-2)` — a `NaN` *number* — and the
  * parent then read `.re`/`.im` off it, producing `{re: NaN, im: undefined}`
  * behind `success: true`.
@@ -278,8 +278,8 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
     // A shader carries complex as `vec2(re, im)`, and shader scalar-broadcast
     // makes `sqrt(-2.0) + vec2(1.0, 0.0)` VALID source — a silent
     // `vec2(NaN, NaN)` rather than a compile error.
-    for (const language of ['glsl', 'wgsl'] as const) {
-      const v2 = language === 'wgsl' ? 'vec2f' : 'vec2';
+    for (const language of ['glsl'] as const) {
+      const v2 = 'vec2';
 
       // These cases assert on the EMITTED shader source. Every expression here
       // is variable-free (`a` is an assigned symbol), so compile-time constant

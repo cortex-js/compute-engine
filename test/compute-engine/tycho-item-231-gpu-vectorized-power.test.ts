@@ -5,27 +5,26 @@
  * `min((x − PointX(P))² + (y − PointY(P))²)`. With `P` assigned a literal
  * 3-point list, `PointX(P)` already vectorized to `vec3(…)`, and the sum, the
  * difference and the final `min` reduction all had componentwise lowerings —
- * but the SQUARE did not, so the whole family declined on `glsl` and `wgsl`
+ * but the SQUARE did not, so the whole family declined on `glsl`
  * while compiling on `javascript`:
  *
  *   Power: the shader lowering `_gpu_pow2(x + vec3(1.0, 3.0, 5.0))`
  *   cannot take the non-scalar operand shapes (vec3, scalar) …
  *
  * `_gpu_powi` is the sign-preserving integer power, declared with scalar
- * `float`/`f32` parameters because the languages' own `pow` is undefined for a
+ * `float` parameters because the GLSL `pow` is undefined for a
  * negative base. It now has a per-width overload family (`_gpu_powi2`,
  * `_gpu_powi3`, `_gpu_powi4`) with the same body over the genType, and the
  * `Power` lowering picks the overload from the base's shape.
  *
  * The other half of the gap is the plain `pow` call a fractional or symbolic
- * exponent reaches: it is declared over ONE genType, and neither language
- * promotes a scalar argument to the vector of its neighbours, so `Power` now
+ * exponent reaches: it is declared over ONE genType, and GLSL does not
+ * promote a scalar argument to the vector of its neighbours, so `Power` now
  * writes the broadcast constructor itself (`pow(v, vec3(y))`).
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 /**
  * A fresh engine per probe: `P` is ASSIGNED, and the point list is what makes
@@ -50,15 +49,9 @@ const V3 = ['List', 1, 2, 3];
 
 const g = (expr: any, ce = fresh()): string =>
   new GLSLTarget().compile(ce.box(expr), NO_FOLD).code!;
-const w = (expr: any, ce = fresh()): string =>
-  new WGSLTarget().compile(ce.box(expr), NO_FOLD).code!;
 const gl = (latex: string): string => {
   const ce = fresh();
   return new GLSLTarget().compile(ce.parse(latex)).code!;
-};
-const wl = (latex: string): string => {
-  const ce = fresh();
-  return new WGSLTarget().compile(ce.parse(latex)).code!;
 };
 
 describe('vectorized Power on the shader targets (Tycho item 231)', () => {
@@ -73,11 +66,6 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
         '_gpu_pow2_v3(y + vec3(-2.0, -4.0, -6.0));\n' +
         'return (_gpu_min(_gpu_min(_tv1.x, _tv1.y), _tv1.z));'
     );
-    expect(wl(latex)).toBe(
-      'var _tv1: vec3f = _gpu_pow2_v3(x + vec3f(1.0, 3.0, 5.0)) + ' +
-        '_gpu_pow2_v3(y + vec3f(-2.0, -4.0, -6.0));\n' +
-        'return (_gpu_min(_gpu_min(_tv1.x, _tv1.y), _tv1.z));'
-    );
   });
 
   it('the vecN helper is declared in the preamble, and the scalar one is not', () => {
@@ -90,12 +78,6 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
     // The scalar declaration is a different overload with a different name, so
     // a compilation that only powers a vector must not drag it in.
     expect(r.preamble).not.toContain('float _gpu_powi(');
-
-    const rw = new WGSLTarget().compile(
-      fresh().parse('\\left(x-\\mathrm{PointX}(P)\\right)^2')
-    );
-    expect(rw.preamble).toContain('fn _gpu_pow2_v3(x: vec3f) -> vec3f {');
-    expect(rw.preamble).not.toContain('fn _gpu_powi(');
   });
 
   it('every vector width has an overload', () => {
@@ -106,7 +88,6 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
     expect(g(['Power', ['List', 1, 2, 3, 4], 2])).toBe(
       '_gpu_pow2_v4(vec4(1.0, 2.0, 3.0, 4.0))'
     );
-    expect(w(['Power', V3, 3])).toBe('_gpu_pow3_v3(vec3f(1.0, 2.0, 3.0))');
   });
 
   it('`Square` takes the same overload as `Power(…, 2)`', () => {
@@ -120,13 +101,10 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
   });
 
   it('a NEGATIVE integer exponent divides into the vector', () => {
-    // `float / vecN` is componentwise in both languages, so the reciprocal
+    // `float / vecN` is componentwise in GLSL, so the reciprocal
     // needs no widening of its own.
     expect(g(['Power', V3, -2])).toBe(
       '(1.0 / _gpu_pow2_v3(vec3(1.0, 2.0, 3.0)))'
-    );
-    expect(w(['Power', V3, -2])).toBe(
-      '(1.0 / _gpu_pow2_v3(vec3f(1.0, 2.0, 3.0)))'
     );
   });
 
@@ -134,7 +112,6 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
     // A bare `1.0` here is a silent SHAPE error: the enclosing emission is
     // owed a `vec3`, and no driver reports it.
     expect(g(['Power', V3, 0])).toBe('vec3(1.0)');
-    expect(w(['Power', V3, 0])).toBe('vec3f(1.0)');
     // A scalar base keeps the bare literal.
     expect(g(['Power', 'x', 0])).toBe('1.0');
   });
@@ -150,9 +127,9 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
       ['List', 1],
       ['List', 1, 2, 3, 4, 5],
     ]) {
-      for (const emit of [g, w])
+      for (const emit of [g])
         expect(() => emit(['Power', base, 0])).toThrow(/_gpu_powi/);
-      for (const target of [new GLSLTarget(), new WGSLTarget()]) {
+      for (const target of [new GLSLTarget()]) {
         const r = target.compile(fresh().box(['Power', base, 0] as any), {
           fallback: true,
           ...NO_FOLD,
@@ -169,7 +146,7 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
     // parenthesis: a user symbol that merely spells a helper name is an
     // ordinary shader input, and declaring a function over that name would
     // redeclare the identifier the shader already takes as a parameter.
-    for (const target of [new GLSLTarget(), new WGSLTarget()]) {
+    for (const target of [new GLSLTarget()]) {
       const ce = new ComputeEngine();
       for (const name of ['_gpu_powi3', '_gpu_powi', '_gpu_at3'])
         ce.declare(name, 'number');
@@ -199,11 +176,6 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
       'mix(vec3(1.0), vec3(-1.0), lessThan(x, vec3(0.0))) * r'
     );
     expect(glsl.preamble).not.toContain('sign(x)');
-    const wgsl = new WGSLTarget().compile(expr);
-    expect(wgsl.preamble).toContain(
-      'select(vec3f(1.0), vec3f(-1.0), x < vec3f(0.0)) * r'
-    );
-    expect(wgsl.preamble).not.toContain('sign(x)');
   });
 
   it('exponents with no integer form widen the scalar side of `pow`', () => {
@@ -217,16 +189,10 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
     expect(g(['Power', 3, ['Add', 'x', V3]])).toBe(
       'pow(vec3(3.0), x + vec3(1.0, 2.0, 3.0))'
     );
-    expect(w(['Power', 3, ['Add', 'x', V3]])).toBe(
-      'pow(vec3f(3.0), x + vec3f(1.0, 2.0, 3.0))'
-    );
     // The base 2 is the `exp2` peephole, which leaves the base out of the
     // call and so applies to a vector exponent as well (CE-254).
     expect(g(['Power', 2, ['Add', 'x', V3]])).toBe(
       'exp2(x + vec3(1.0, 2.0, 3.0))'
-    );
-    expect(w(['Power', 2, ['Add', 'x', V3]])).toBe(
-      'exp2(x + vec3f(1.0, 2.0, 3.0))'
     );
   });
 
@@ -234,7 +200,7 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
     const latex =
       '\\max\\left(e^{-\\left(\\left(x-\\mathrm{PointX}(P)\\right)^2+' +
       '\\left(y-\\mathrm{PointY}(P)\\right)^2\\right)}\\right)';
-    for (const code of [gl(latex), wl(latex)]) {
+    for (const code of [gl(latex)]) {
       expect(code).toContain('_gpu_pow2_v3(');
       expect(code).toContain('pow(vec3');
       expect(code).toMatch(/_gpu_max\(_gpu_max\(/);
@@ -243,11 +209,11 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
 
   it('an operand with no `vecN` shape still fails closed', () => {
     // A 1-element list lowers to a shader ARRAY, which no `_gpu_powi`
-    // overload covers — and neither language gives an array any arithmetic.
-    for (const emit of [g, w])
+    // overload covers — and GLSL gives an array no arithmetic.
+    for (const emit of [g])
       expect(() => emit(['Power', ['List', 1], 2])).toThrow(/$/);
     // Operands of different widths have no ONE genType.
-    for (const emit of [g, w])
+    for (const emit of [g])
       expect(() => emit(['Power', V3, ['List', 4, 5]])).toThrow(
         /different widths/
       );

@@ -278,7 +278,7 @@ describe('data tuples preserve positions', () => {
     expect(result.run!({})).toEqual([[undefined, undefined]]);
   });
 
-  test.each(['javascript', 'python', 'glsl', 'wgsl'] as const)(
+  test.each(['javascript', 'python', 'glsl'] as const)(
     '%s refuses Nothing coordinates until representable',
     (to) => {
       const ce = new ComputeEngine();
@@ -288,7 +288,7 @@ describe('data tuples preserve positions', () => {
     }
   );
 
-  test.each(['javascript', 'python', 'glsl', 'wgsl'] as const)(
+  test.each(['javascript', 'python', 'glsl'] as const)(
     '%s refuses a conditional omission even when its branch join absorbs Nothing',
     (to) => {
       const ce = new ComputeEngine();

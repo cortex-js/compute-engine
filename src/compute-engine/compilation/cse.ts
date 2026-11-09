@@ -665,7 +665,7 @@ export function isCallerMapped(
  * change between two reads. A read path is a bare identifier (`u_var_s`),
  * optionally followed by field accesses (`ce_params.c`, `u.x`) and indexes
  * that are integer literals (`v[0]`). The callback receives the whole path
- * and its first identifier. The shader targets pass it: GLSL and WGSL have
+ * and its first identifier. The shader targets pass it: GLSL has
  * no getters, a field access or a constant index of a variable only reads
  * it, and a uniform cannot be written by the shader. The target must answer
  * `false` when anything in the compiled expression can write a variable

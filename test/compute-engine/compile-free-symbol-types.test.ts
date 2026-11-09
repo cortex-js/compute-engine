@@ -41,8 +41,6 @@ describe('freeSymbolTypes', () => {
     const g = run(ce, 'glsl', ['ColorMix', 'a', 'b', 0.5]);
     expect(g.success).toBe(true);
     expect(g.freeSymbolTypes).toEqual({ a: colour, b: colour });
-    const w = run(ce, 'wgsl', ['ColorMix', 'a', 'b', 0.5]);
-    expect(w.freeSymbolTypes.a).toEqual({ ...colour, lowered: 'vec3f' });
     const js = run(ce, 'javascript', ['ColorMix', 'a', 'b', 0.5]);
     expect(js.freeSymbolTypes.a).toEqual({ ...colour, lowered: 'color' });
   });
@@ -70,9 +68,6 @@ describe('freeSymbolTypes', () => {
       provenance: 'inferred',
     };
     expect(run(ce, 'glsl', 'f(x)').freeSymbolTypes).toEqual({ x: complex });
-    expect(run(ce, 'wgsl', 'f(x)').freeSymbolTypes).toEqual({
-      x: { ...complex, lowered: 'vec2f' },
-    });
   });
 
   it('a declared real symbol is a float, declared', () => {
@@ -95,15 +90,11 @@ describe('freeSymbolTypes', () => {
       lowered: 'vec2',
       provenance: 'declared',
     });
-    expect(run(ce, 'wgsl', 'q').freeSymbolTypes.q.lowered).toBe('vec3f');
     expect(
       run(ce, 'glsl', ['Multiply', 'M', 2]).freeSymbolTypes.M.lowered
     ).toBe('mat2');
     expect(run(ce, 'glsl', ['At', 'L', 2]).freeSymbolTypes.L.lowered).toBe(
       'float[5]'
-    );
-    expect(run(ce, 'wgsl', ['At', 'L', 2]).freeSymbolTypes.L.lowered).toBe(
-      'array<f32, 5>'
     );
   });
 
@@ -113,7 +104,7 @@ describe('freeSymbolTypes', () => {
     // of such a symbol declines; it was emitted as a bare identifier with
     // `lowered: 'point'`, `First(T)` as `T.x` and a local copy as
     // `vec2 Q; Q = M;`.
-    for (const to of ['glsl', 'wgsl']) {
+    for (const to of ['glsl']) {
       const ce = new ComputeEngine();
       ce.declare('T', 'tuple<tuple<real, real>, tuple<real, real>>');
       ce.declare('M', 'tuple<real, tuple<real, real>>');
@@ -158,7 +149,7 @@ describe('freeSymbolTypes', () => {
   });
 
   it('a tuple of 2 to 4 booleans is a boolean vector on the shader targets', () => {
-    // A host can declare `b` as a `bvec2` (GLSL) or a `vec2<bool>` (WGSL),
+    // A host can declare `b` as a `bvec2`,
     // so a read of it compiles, as it did before `First` compiled as `At`.
     // The interpreter gives 1 for `If(First((True, False)), 1, 0)`.
     const ce = new ComputeEngine();
@@ -166,8 +157,8 @@ describe('freeSymbolTypes', () => {
     expect(
       ce.box(['If', ['First', ['Tuple', 'True', 'False']], 1, 0]).evaluate().re
     ).toBe(1);
-    for (const to of ['glsl', 'wgsl']) {
-      const conv = to === 'glsl' ? 'float' : 'f32';
+    for (const to of ['glsl']) {
+      const conv = 'float';
       expect(run(ce, to, 'b').code).toBe('b');
       expect(run(ce, to, ['First', 'b']).code).toBe('b.x');
       expect(run(ce, to, ['If', ['First', 'b'], 1, 0]).code).toBe(
@@ -195,9 +186,6 @@ describe('freeSymbolTypes', () => {
     const g = run(ce, 'glsl', ['At', 'F', 'k']);
     expect(g.code).toBe('_gpu_at5(F, k)');
     expect(g.freeSymbolTypes.F.lowered).toBe('float[5]');
-    const w = run(ce, 'wgsl', ['At', 'F', 'k']);
-    expect(w.code).toBe('_gpu_at5(F, k)');
-    expect(w.freeSymbolTypes.F.lowered).toBe('array<f32, 5>');
   });
 
   it('a list of points is an array of vectors on the shader targets', () => {
@@ -213,11 +201,6 @@ describe('freeSymbolTypes', () => {
       expect(g.code).toBe(`_gpu_atp${m}_3(P, k)`);
       expect(g.preamble).toContain(`_gpu_atp${m}_3(vec${m} v[3], float i)`);
       expect(g.freeSymbolTypes.P.lowered).toBe(`vec${m}[3]`);
-      const w = run(ce, 'wgsl', ['At', 'P', 'k']);
-      expect(w.success).toBe(true);
-      expect(w.code).toBe(`_gpu_atp${m}_3(P, k)`);
-      expect(w.preamble).toContain(`_gpu_atp${m}_3(v: array<vec${m}f, 3>`);
-      expect(w.freeSymbolTypes.P.lowered).toBe(`array<vec${m}f, 3>`);
     }
     // Integer coordinates are read as floats, as for any other point.
     const ce = new ComputeEngine();
@@ -227,23 +210,9 @@ describe('freeSymbolTypes', () => {
     );
   });
 
-  it('a long list of points on WGSL is read in place as an array of vec2f', () => {
-    // Past 1024 elements the WGSL `At` reads the module-scope array where it
-    // is (`_gpu_atp_P_2_N`, whose body returns `P[j]` as a `vec2f`) instead
-    // of passing a copy to a helper.
-    const ce = new ComputeEngine();
-    ce.declare('P', 'list<tuple<real, real>^2000>');
-    ce.declare('k', 'integer');
-    const w = run(ce, 'wgsl', ['At', 'P', 'k']);
-    expect(w.success).toBe(true);
-    expect(w.code).toBe('_gpu_atp_P_2_2000(k)');
-    expect(w.preamble).toContain('fn _gpu_atp_P_2_2000(_gpu_i: f32) -> vec2f');
-    expect(w.freeSymbolTypes.P.lowered).toBe('array<vec2f, 2000>');
-  });
-
   it('an assignment of an input list of points declines', () => {
     // A write to a symbol declared in the engine declines.
-    for (const to of ['glsl', 'wgsl']) {
+    for (const to of ['glsl']) {
       const ce = new ComputeEngine();
       ce.declare('P', 'list<tuple<real, real>^3>');
       ce.declare('k', 'integer');
@@ -363,7 +332,7 @@ describe('strictTypes', () => {
   it('declared free symbols compile', () => {
     const ce = complexFunctionEngine();
     ce.declare('x', 'complex');
-    for (const to of ['glsl', 'wgsl', 'javascript']) {
+    for (const to of ['glsl', 'javascript']) {
       const r = run(ce, to, '\\arg(f(x))', { strictTypes: true });
       expect(r.success).toBe(true);
       expect(r.freeSymbolTypes.x.provenance).toBe('declared');
@@ -455,7 +424,6 @@ describe('Tycho item 308: a complex argument of a user function on GLSL', () => 
   ])
     it(latex, () => {
       expect(run(ce, 'glsl', latex).success).toBe(true);
-      expect(run(ce, 'wgsl', latex).success).toBe(true);
     });
 });
 

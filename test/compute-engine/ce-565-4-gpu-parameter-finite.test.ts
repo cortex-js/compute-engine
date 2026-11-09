@@ -26,9 +26,8 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { shaderFunctions } from './gpu-shader-f32-eval';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
-const TARGETS = ['glsl', 'wgsl'] as const;
+const TARGETS = ['glsl'] as const;
 type Target = (typeof TARGETS)[number];
 
 /** `F := (a, b) ↦ sin(a) + cos(b) + min(a, b)` */
@@ -108,9 +107,7 @@ function returned(preamble: string, name: string): string {
 /** The emitted root code as one shader function `_main` of `params`. */
 function mainFunction(code: string, params: string[], to: Target): string {
   const body = /\breturn\b/.test(code) ? code : `return ${code};`;
-  return to === 'glsl'
-    ? `float _main(${params.map((p) => `float ${p}`).join(', ')}) {\n${body}\n}`
-    : `fn _main(${params.map((p) => `${p}: f32`).join(', ')}) -> f32 {\n${body}\n}`;
+  return `float _main(${params.map((p) => `float ${p}`).join(', ')}) {\n${body}\n}`;
 }
 
 /** The shader agrees with the JavaScript target at `points` (`[x, y]`). */
@@ -475,20 +472,12 @@ describe.each(TARGETS)('CE-565.4 on %s', (to) => {
         ['Function', ['Sin', 'a'], 'a'],
         '(real<-5..5>) -> real'
       );
-      const src =
-        to === 'glsl'
-          ? new GLSLTarget().compileFunction(
-              ce.box(['F', 'x']) as never,
-              'f',
-              'float',
-              [['x', 'float']]
-            )
-          : new WGSLTarget().compileFunction(
-              ce.box(['F', 'x']) as never,
-              'f',
-              'f32',
-              [['x', 'f32']]
-            );
+      const src = new GLSLTarget().compileFunction(
+        ce.box(['F', 'x']) as never,
+        'f',
+        'float',
+        [['x', 'float']]
+      );
       expect(returned(src, '_fn_F')).toBe('_gpu_sin(a)');
     });
   });
@@ -502,20 +491,12 @@ describe.each(TARGETS)('CE-565.4 on %s', (to) => {
         ['Function', ['Sin', 'a'], 'a'],
         '(real) -> real'
       );
-      const src =
-        to === 'glsl'
-          ? new GLSLTarget().compileFunction(
-              ce.box(['F', 'x']) as never,
-              'f',
-              'float',
-              [['x', 'float']]
-            )
-          : new WGSLTarget().compileFunction(
-              ce.box(['F', 'x']) as never,
-              'f',
-              'f32',
-              [['x', 'f32']]
-            );
+      const src = new GLSLTarget().compileFunction(
+        ce.box(['F', 'x']) as never,
+        'f',
+        'float',
+        [['x', 'float']]
+      );
       expect(returned(src, '_fn_F')).toBe('_gpu_sin(a)');
     });
   });

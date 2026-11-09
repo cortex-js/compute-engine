@@ -1,5 +1,5 @@
 /**
- * Shape and emission fixes of the GLSL and WGSL targets
+ * Shape and emission fixes of the GLSL target
  * (`src/compute-engine/compilation/gpu-target.ts`). Each block names the
  * ROADMAP reference of the defect it pins.
  */
@@ -15,12 +15,12 @@ ce.declare('n', 'integer');
 ce.declare('v', 'vector<real^3>');
 ce.declare('M', 'matrix<real^(2x2)>');
 
-const TARGETS = ['glsl', 'wgsl'] as const;
+const TARGETS = ['glsl'] as const;
 
 /** The compiled result; the compile must succeed. */
 function shader(
   json: unknown,
-  to: 'glsl' | 'wgsl',
+  to: 'glsl',
   options: Record<string, unknown> = {}
 ): { code: string; preamble: string } {
   const r = compile(ce.box(json as never), {
@@ -36,7 +36,7 @@ function shader(
 }
 
 /** The same, from raw (non-canonical) MathJSON. */
-function rawShader(json: unknown, to: 'glsl' | 'wgsl'): string {
+function rawShader(json: unknown, to: 'glsl'): string {
   const r = compile(ce.box(json as never, { form: 'raw' } as never), {
     to,
     fallback: false,
@@ -45,16 +45,15 @@ function rawShader(json: unknown, to: 'glsl' | 'wgsl'): string {
   return r.code!;
 }
 
-function declines(json: unknown, to: 'glsl' | 'wgsl', message: RegExp): void {
+function declines(json: unknown, to: 'glsl', message: RegExp): void {
   expect(() =>
     compile(ce.box(json as never), { to, fallback: false } as never)
   ).toThrow(message);
 }
 
-// CE-241.2: the WGSL `select` of `ContrastingColor` has as many arguments as
-// the head has operands, so the operand-shape check compared the converted
-// colours with the operand shapes, and refused a colour literal (a scalar
-// shape) beside a tuple background (a `vec3` shape).
+// CE-241.2: the operand-shape check of `ContrastingColor` compared the
+// converted colours with the operand shapes, and refused a colour literal (a
+// scalar shape) beside a tuple background (a `vec3` shape).
 describe('ContrastingColor with a tuple background and colour candidates (CE-241.2)', () => {
   const expr = [
     'ContrastingColor',
@@ -62,8 +61,7 @@ describe('ContrastingColor with a tuple background and colour candidates (CE-241
     ['Rgb', 1, 0, 0],
     ['Rgb', 0, 0, 1],
   ];
-  test('compiles on both shader targets', () => {
-    expect(shader(expr, 'wgsl').code).toContain('select(');
+  test('compiles on the shader target', () => {
     expect(shader(expr, 'glsl').code).toContain(' ? ');
   });
 });
@@ -359,7 +357,7 @@ describe('Match with a loop-form Sum in a case body (CE-274)', () => {
 // operands evaluates to `Error("missing")`, and the lowerings emitted invalid
 // code for it (`clamp(u + 1.0)`, `Math.max(_.u + 1, )`).
 describe('Clamp with fewer than three operands fails closed', () => {
-  test.each(['glsl', 'wgsl', 'javascript', 'python'])('%s', (to) => {
+  test.each(['glsl', 'javascript', 'python'])('%s', (to) => {
     for (const json of [
       ['Clamp', ['Add', 'u', 1]],
       ['Clamp', ['Add', 'u', 1], 0],

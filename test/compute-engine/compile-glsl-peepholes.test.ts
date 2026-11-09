@@ -16,13 +16,11 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import {
   gpuLibrarySubset,
   GPU_COLOR_PREAMBLE_GLSL,
-  GPU_COLOR_PREAMBLE_WGSL,
   GPU_MEDIAN_PREAMBLE_GLSL,
-  GPU_BESSELJ_PREAMBLE_WGSL,
+  GPU_BESSELJ_PREAMBLE_GLSL,
 } from '../../src/compute-engine/compilation/gpu-target';
 import { shaderFunctions } from './gpu-shader-f32-eval';
 
@@ -39,8 +37,6 @@ function fresh(): ComputeEngine {
 
 const glsl = (expr: any, ce = fresh()) =>
   new GLSLTarget().compile(ce.box(expr));
-const wgsl = (expr: any, ce = fresh()) =>
-  new WGSLTarget().compile(ce.box(expr));
 
 /** The helper functions a preamble declares, in order. */
 function declaredIn(preamble: string | undefined): string[] {
@@ -86,7 +82,7 @@ describe('per-function preamble inclusion', () => {
       '_fractal_mandelbrot',
     ]);
 
-    const j = wgsl(['Julia', ['Complex', 'x', 'y'], ['Complex', 0.3, 0.5], 50]);
+    const j = glsl(['Julia', ['Complex', 'x', 'y'], ['Complex', 0.3, 0.5], 50]);
     expect(declaredIn(j.preamble)).toEqual([
       '_fractal_smooth',
       '_fractal_julia',
@@ -108,7 +104,7 @@ describe('per-function preamble inclusion', () => {
   it('the Gamma pole test covers every finite negative integer', () => {
     // A finite f32 integer below -3.0e38 is a pole too. The bound must be
     // the most negative finite f32, so that only -Infinity is excluded.
-    for (const r of [glsl(['Gamma', 'x']), wgsl(['Gamma', 'x'])]) {
+    for (const r of [glsl(['Gamma', 'x'])]) {
       expect(r.preamble).toContain('z >= -3.4028234663852886e38');
       expect(r.preamble).not.toContain('3.0e38');
     }
@@ -117,9 +113,8 @@ describe('per-function preamble inclusion', () => {
   it('a subset naming every function reproduces the library exactly', () => {
     for (const library of [
       GPU_COLOR_PREAMBLE_GLSL,
-      GPU_COLOR_PREAMBLE_WGSL,
       GPU_MEDIAN_PREAMBLE_GLSL,
-      GPU_BESSELJ_PREAMBLE_WGSL,
+      GPU_BESSELJ_PREAMBLE_GLSL,
     ]) {
       const all = declaredIn(library).join(' ');
       expect(gpuLibrarySubset(all, library)).toBe(library);
@@ -135,7 +130,7 @@ describe('per-function preamble inclusion', () => {
     // factorial; naming only the entry point must still bring all four.
     expect(
       declaredIn(
-        gpuLibrarySubset('_gpu_besselJ(x, 1)', GPU_BESSELJ_PREAMBLE_WGSL)
+        gpuLibrarySubset('_gpu_besselJ(x, 1)', GPU_BESSELJ_PREAMBLE_GLSL)
       )
     ).toEqual([
       '_gpu_factorial',
@@ -161,16 +156,6 @@ describe('sum of squared components is a dot product', () => {
     ).code;
     expect(code).toBe(
       'vec2 _tv1 = x + vec2(1.0, 3.0);\nreturn dot(_tv1, _tv1);'
-    );
-  });
-
-  it('WGSL binds the vector once and calls dot', () => {
-    const ce = withPoints();
-    const code = new WGSLTarget().compile(
-      ce.parse('\\sum\\left(\\left(x-\\mathrm{PointX}(P)\\right)^2\\right)')
-    ).code;
-    expect(code).toBe(
-      'var _tv1: vec2f = x + vec2f(1.0, 3.0);\nreturn dot(_tv1, _tv1);'
     );
   });
 
@@ -210,17 +195,14 @@ describe('sum of squared components is a dot product', () => {
 describe('small emission peepholes', () => {
   it('a modulus of one is the fractional part', () => {
     expect(glsl(['Mod', 'x', 1]).code).toBe('fract(fract(x))');
-    expect(wgsl(['Mod', 'x', 1]).code).toBe('fract(fract(x))');
     // Any other divisor keeps the general lowering.
     expect(glsl(['Mod', 'x', 2]).code).toBe('_gpu_fmod(x, 2.0)');
-    expect(wgsl(['Mod', 'x', 2]).code).toBe('_gpu_fmod(x, 2.0)');
     // A `vecN` dividend takes the peephole too (CE-254): the lowering
     // declares that `fract` leaves the divisor out of the call, so the
     // operand-shape check judges `fract(v)` against the dividend alone.
     const cev = fresh();
     cev.declare('v', 'vector<2>');
     expect(glsl(['Mod', 'v', 1], cev).code).toBe('fract(fract(v))');
-    expect(wgsl(['Mod', 'v', 1], cev).code).toBe('fract(fract(v))');
     // A dividend with no `fract` overload (a matrix) still declines.
     cev.declare('M', 'matrix<real^(2x2)>');
     expect(() => glsl(['Mod', 'M', 1], cev)).toThrow(
@@ -240,7 +222,6 @@ describe('small emission peepholes', () => {
 
   it('a conditional between one and zero is a cast of the condition', () => {
     expect(glsl(['If', ['Greater', 'x', 0], 1, 0]).code).toBe('float(0.0 < x)');
-    expect(wgsl(['If', ['Greater', 'x', 0], 1, 0]).code).toBe('f32(0.0 < x)');
   });
 
   it('a small integer power of a symbol is repeated multiplication', () => {
@@ -258,7 +239,6 @@ describe('small emission peepholes', () => {
 
   it('a power of two is exp2', () => {
     expect(glsl(['Power', 2, 'x']).code).toBe('exp2(x)');
-    expect(wgsl(['Power', 2, 'x']).code).toBe('exp2(x)');
     // Another base keeps `pow`.
     expect(glsl(['Power', 3, 'x']).code).toBe('pow(3.0, x)');
   });
@@ -285,9 +265,6 @@ describe('Which clauses that answer the same value', () => {
     expect(glsl(expr).code).toBe(
       '(((x < 1.0) || (x < 2.0) || (x < 3.0)) ? (0.5) : (_gpu_nan()))'
     );
-    expect(wgsl(expr).code).toBe(
-      'select(_gpu_nan(), 0.5, (x < 1.0) || (x < 2.0) || (x < 3.0))'
-    );
   });
 
   it('different arms keep their own clauses', () => {
@@ -298,7 +275,7 @@ describe('Which clauses that answer the same value', () => {
   });
 
   it('the merged form answers what the interpreter answers', () => {
-    // `||` short-circuits in both languages, so the merged condition selects
+    // `||` short-circuits in GLSL, so the merged condition selects
     // the same clause the nested selection did, at every sample point.
     const ce = fresh();
     for (const v of [0.5, 1.5, 2.5, 3.5]) {
@@ -329,15 +306,6 @@ describe('argument of a complex value, and rounding', () => {
     expect(code).toBe('atan((y + -0.329), -0.3127 + x)');
   });
 
-  it('WGSL spells the two-argument arc tangent atan2', () => {
-    // WGSL declares `atan(e)` and `atan2(y, x)`; a two-argument `atan` is not
-    // a WGSL builtin at all, so the GLSL spelling does not compile there.
-    expect(wgsl(['Arctan2', 'y', 'x']).code).toBe('atan2(y, x)');
-    const ce = fresh();
-    ce.declare('z', 'complex');
-    expect(wgsl(['Argument', 'z'], ce).code).toBe('atan2(z.y, z.x)');
-  });
-
   it('rounding goes through a helper that writes its operand once', () => {
     const r = glsl(['Round', 'x']);
     expect(r.code).toBe('_gpu_round(x)');
@@ -345,11 +313,10 @@ describe('argument of a complex value, and rounding', () => {
       'float _gpu_round(float x) {\n  float a = abs(x);\n  float m = floor(a);\n' +
         '  return sign(x) * (m + step(0.5, a - m));\n}'
     );
-    expect(wgsl(['Round', 'x']).code).toBe('_gpu_round(x)');
   });
 
   it('the helper rounds halves the way the interpreter does', () => {
-    // The interpreter rounds half AWAY from zero; both languages' own
+    // The interpreter rounds half AWAY from zero; GLSL's own
     // `round()` rounds a half to the even neighbour, which is why the helper
     // exists. Check the helper's expression against the interpreter.
     // The helper does not add 0.5 to the operand, which is rounded for a
@@ -404,36 +371,23 @@ describe('the imaginary unit times a complex factor', () => {
     ce.declare('t', 'real');
     return ce;
   }
-  const cases: [string, string, string][] = [
+  const cases: [string, string][] = [
     // A plain identifier is rotated by a swizzle, which reads it twice at no
     // cost; a call goes through `_gpu_cmul` so that it is evaluated once.
-    ['iz', 'vec2(-z.y, z.x)', 'vec2f(-z.y, z.x)'],
-    ['2iz', '(2.0 * vec2(-z.y, z.x))', '(2.0 * vec2f(-z.y, z.x))'],
-    [
-      'i\\tanh(z)',
-      '_gpu_cmul(vec2(0.0, 1.0), _gpu_ctanh(z))',
-      '_gpu_cmul(vec2f(0.0, 1.0), _gpu_ctanh(z))',
-    ],
-    [
-      't+i\\tanh(z)',
-      'vec2(t, 0.0) + _gpu_cmul(vec2(0.0, 1.0), _gpu_ctanh(z))',
-      'vec2f(t, 0.0) + _gpu_cmul(vec2f(0.0, 1.0), _gpu_ctanh(z))',
-    ],
+    ['iz', 'vec2(-z.y, z.x)'],
+    ['2iz', '(2.0 * vec2(-z.y, z.x))'],
+    ['i\\tanh(z)', '_gpu_cmul(vec2(0.0, 1.0), _gpu_ctanh(z))'],
+    ['t+i\\tanh(z)', 'vec2(t, 0.0) + _gpu_cmul(vec2(0.0, 1.0), _gpu_ctanh(z))'],
     // Controls: a real factor keeps the `vec2(0.0, X)` shortcut, and a
     // product with a complex literal other than `k·i` keeps `_gpu_cmul`.
-    ['it', 'vec2(0.0, t)', 'vec2f(0.0, t)'],
-    ['t+2it', 'vec2(t, 2.0 * t)', 'vec2f(t, 2.0 * t)'],
-    [
-      '(1+i)\\tanh(z)',
-      '_gpu_cmul(vec2(1.0, 1.0), _gpu_ctanh(z))',
-      '_gpu_cmul(vec2f(1.0, 1.0), _gpu_ctanh(z))',
-    ],
+    ['it', 'vec2(0.0, t)'],
+    ['t+2it', 'vec2(t, 2.0 * t)'],
+    ['(1+i)\\tanh(z)', '_gpu_cmul(vec2(1.0, 1.0), _gpu_ctanh(z))'],
   ];
-  for (const [latex, glslCode, wgslCode] of cases) {
-    it(`${latex} on both shader targets`, () => {
+  for (const [latex, glslCode] of cases) {
+    it(`${latex} on GLSL`, () => {
       const ce = complexEngine();
       expect(new GLSLTarget().compile(ce.parse(latex)).code).toBe(glslCode);
-      expect(new WGSLTarget().compile(ce.parse(latex)).code).toBe(wgslCode);
     });
   }
 
@@ -454,12 +408,6 @@ describe('the imaginary unit times a complex factor', () => {
           'glsl',
           GLSLTarget,
           (code: string) => `vec2 _main(vec2 z, float t) { return ${code}; }`,
-        ],
-        [
-          'wgsl',
-          WGSLTarget,
-          (code: string) =>
-            `fn _main(z: vec2f, t: f32) -> vec2f { return ${code}; }`,
         ],
       ] as const) {
         const r = new Target().compile(complexEngine().parse(latex));

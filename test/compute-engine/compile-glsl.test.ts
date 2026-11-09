@@ -1157,7 +1157,7 @@ describe('GLSL - SQUARE OF A VECTOR', () => {
   });
 
   // A list of more than four elements has no vector type. It is written as
-  // an array, one square per element, on GLSL as on WGSL.
+  // an array, one square per element.
   it('writes a list of more than four elements as an array', () => {
     const list = ['List', 1, 2, 3, 4, 'x'];
     const expected = 'float[5](1.0, 4.0, 9.0, 16.0, (x * x))';

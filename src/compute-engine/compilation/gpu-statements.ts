@@ -21,7 +21,6 @@ import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import {
   GPU_COMPARE_GLSL,
-  GPU_COMPARE_WGSL,
   conditionalGPUSinks,
   gpuBVec,
   gpuEvaluatedUnit,
@@ -39,7 +38,6 @@ import {
   gpuHoistKeepsCallerOrder,
   gpuInSelectionBranch,
   gpuOperandOnce,
-  gpuReachesCallerCode,
 } from './gpu-draw-order.js';
 import { gpuComponentCount, gpuNaNFor, gpuOperandShape } from './gpu-shapes.js';
 import { gpuTypeOfValue } from './gpu-declared-types.js';
@@ -55,8 +53,8 @@ import { gpuTypeOfValue } from './gpu-declared-types.js';
  *
  * - the block's VALUE (its last statement), which the caller return-prefixes —
  *   `return return s;`;
- * - a conditional ARM, which both languages lower to an EXPRESSION (a `?:`
- *   ternary in GLSL, `select(…)` in WGSL) — `((0.0 < t) ? (return t) : …)`;
+ * - a conditional ARM, which GLSL lowers to an EXPRESSION (a `?:`
+ *   ternary) — `((0.0 < t) ? (return t) : …)`;
  * - a branch of a conditional nested in a loop body, for the same reason.
  *
  * Lowering an early return properly means restructuring the body into a result
@@ -149,8 +147,8 @@ export function gpuShaderLoopJumps(body: Expression): ReadonlySet<Expression> {
  *
  * `compileToSource()` answers with a bare expression string, and each
  * `compileShader()` body statement is spliced into an assignment RHS
- * (`<variable> = <code>;`). Neither position accepts a statement, and neither
- * GLSL nor WGSL has an expression-level block or immediately-invoked function
+ * (`<variable> = <code>;`). Neither position accepts a statement, and GLSL
+ * has no expression-level block or immediately-invoked function
  * to wrap one in — so a body that lowers to a statement sequence (a `Block`
  * that returns early, a loop-form `Sum`/`Product`/`Loop` with no sink to hoist
  * into) or to a bare `return` has no honest emission here. Before this gate
@@ -196,19 +194,16 @@ export function gpuAssertExpressionOnly(
 
 /**
  * Fail closed on an expression-only GPU route whose body is STRUCTURALLY a
- * statement — an assignment (WGSL only) or a declaration (both languages).
+ * declaration.
  *
  * `gpuAssertExpressionOnly` scans the emitted source for the two signals a
  * statement leaves there — a newline and a `return` token — but these two
  * shapes leave neither. Both are single-line emissions:
  *
- * - `Assign(s, x)` emits `s = x` on both targets. The languages then diverge.
- *   In GLSL assignment is an OPERATOR, so `fragColor = s = x;` is valid source
- *   and the emission is honest. In WGSL assignment is a STATEMENT, so the same
- *   emission produces `output.fragColor = s = input.x;` — source no WGSL
- *   compiler accepts, behind a reported success.
- * - A root `Declare(s, 'number', x)` emits `float s` / `var s: f32` on BOTH
- *   targets — a declaration is a statement in both languages, and the emission
+ * - `Assign(s, x)` emits `s = x`. In GLSL assignment is an OPERATOR, so
+ *   `fragColor = s = x;` is valid source and the emission is honest.
+ * - A root `Declare(s, 'number', x)` emits `float s` — a declaration is a
+ *   statement, and the emission
  *   silently DROPS the initializer `x` as well. Only the bare-`Declare` root
  *   shape reaches here; wrapped in a multi-statement `Block` the declaration is
  *   followed by more lines, which the emitted-source scan already declines.
@@ -229,21 +224,12 @@ export function gpuAssertExpressionBody(
   const head = statementBodyHead(expr);
   if (head === undefined) return;
   const lang = language.toUpperCase();
-  // GLSL assignment is an operator, so only WGSL declines an assignment body.
-  if (head === 'Assign') {
-    if (language !== 'wgsl') return;
-    throw new Error(
-      `Could not compile ${compileSubject(subject)}: this route emits a single WGSL EXPRESSION, but the body is ` +
-        `an assignment. WGSL assignment is a STATEMENT (unlike GLSL, where it ` +
-        `is an operator), so the emitted \`… = <target> = <value>\` is not ` +
-        `valid source. Compile a statement body with compile() instead — that ` +
-        `route emits a function body.`
-    );
-  }
+  // GLSL assignment is an operator, so an assignment body is valid.
+  if (head === 'Assign') return;
   throw new Error(
     `Could not compile ${compileSubject(subject)}: this route emits a single ${lang} EXPRESSION, but the body ` +
       `is a declaration. A declaration is a STATEMENT in ${lang}, so the ` +
-      `emitted \`${language === 'wgsl' ? 'var s: f32' : 'float s'}\`-shaped ` +
+      `emitted \`float s\`-shaped ` +
       `source is not valid in an expression position — and it carries no ` +
       `initializer, so the declared value would be silently DROPPED. Compile ` +
       `a statement body with compile() instead — that route emits a function ` +
@@ -280,10 +266,8 @@ export function gpuNeedsStatements(e: Expression): boolean {
     // certainly does, and an unrolled one may still hoist a loop-invariant
     // declaration for a term that does not depend on the index. An impure
     // operand that a lowering binds to a temporary (the operand of `Cot`) is
-    // not read here. A selection whose clauses draw takes the statement form
-    // only on WGSL (`gpuArmIsCostlyForSelect`); on GLSL such an arm keeps
-    // the ternary, which declines the hoisted temporary in a conditional
-    // arm.
+    // not read here. A selection whose clauses draw keeps the ternary,
+    // which declines the hoisted temporary in a conditional arm.
     if (h === 'Sum' || h === 'Product' || h === 'Block' || h === 'Loop')
       return true;
     return x.ops.some(walk);
@@ -502,7 +486,6 @@ export function compileGPUStatementSelection(
   // draw in a clause ahead of caller code (`gpuHoistKeepsCallerOrder`).
   if (!gpuHoistKeepsCallerOrder(args, target)) return undefined;
   if (gpuWritesOutside(evaluated, new Set(args))) return undefined;
-  const isWGSL = target.language === 'wgsl';
   const arms = args.filter((_, i) => i % 2 === 1);
   // In a complex selection the caller lifts each real scalar arm to a `vec2`
   // (`gpuSelectionArm`), so such an arm has the complex type here.
@@ -515,8 +498,8 @@ export function compileGPUStatementSelection(
     : arms;
   const types = typedArms.map((a) =>
     complex && gpuOperandShape(a) === 'scalar'
-      ? gpuVecType(2, isWGSL)
-      : gpuTypeOfValue(a, isWGSL)
+      ? gpuVecType(2)
+      : gpuTypeOfValue(a)
   );
   if (types.some((t) => t === undefined) || new Set(types).size !== 1)
     return undefined;
@@ -563,7 +546,7 @@ export function compileGPUStatementSelection(
   const tv = BaseCompiler.tempVar(target);
   const shapeRef = arms.find((v) => gpuComponentCount(v)) ?? null;
   const noClause = complex
-    ? `${gpuVec2(target)}(${gpuNaN(target)})`
+    ? `${gpuVec2()}(${gpuNaN(target)})`
     : gpuNaNFor(shapeRef, target);
   const build = (i: number): string[] => {
     if (i >= args.length) return [`${tv} = ${noClause}`];
@@ -594,7 +577,7 @@ export function compileGPUStatementSelection(
   const lines = build(0);
   BaseCompiler.hoistStatement(
     target,
-    isWGSL ? `var ${tv}: ${type};` : `${type} ${tv};`,
+    `${type} ${tv};`,
     lines.map(terminated).join('\n')
   );
   return tv;
@@ -631,19 +614,11 @@ export function compileGPUMatchStatement(
   clauses: ReadonlyArray<MatchStatementClause>,
   target: CompileTarget<Expression>
 ): string | undefined {
-  // On WGSL, a case body or guard with caller code takes the statement form
-  // too, where it is computed only when its case is selected
-  // (`gpuHasEagerCallerCode`). A first case that always matches (no test)
-  // is the only clause, and the ternary form emits it with no `select`.
   if (
     !clauses.some(
       (c) =>
         gpuNeedsStatements(c.body) ||
         (c.guard !== undefined && gpuNeedsStatements(c.guard))
-    ) &&
-    !(
-      gpuCanPlaceStatement(target) &&
-      gpuHasEagerCallerCode(gpuMatchSelectedPieces(clauses), target)
     )
   )
     return undefined;
@@ -781,91 +756,6 @@ export function gpuArmSharesWork(e: Expression): boolean {
 }
 
 /**
- * The operators whose shader lowering is a helper with a loop or a long
- * series (`_gpu_hurwitz_zeta`, `_gpu_lerch_phi`, `_gpu_besselJ`, …).
- */
-const GPU_COSTLY_HELPER_HEADS = new Set([
-  'Zeta',
-  'HurwitzZeta',
-  'LerchPhi',
-  'PolyLog',
-  'PolyGamma',
-  'Digamma',
-  'Trigamma',
-  'BesselJ',
-  'FresnelC',
-  'FresnelS',
-  'GCD',
-  'LCM',
-  'Mandelbrot',
-  'Julia',
-]);
-
-/**
- * Is a WGSL conditional arm better written as a branch of an `if`
- * statement than as an operand of `select`?
- *
- * WGSL has no `?:` operator, and `select(f, t, c)` is a function call: it
- * computes both `f` and `t`, whichever one `c` selects. For an arm that calls
- * a user function, or an operator whose lowering is a helper with a loop
- * (`GPU_COSTLY_HELPER_HEADS`), that is the cost of the arm on every
- * invocation, where the interpreter and GLSL's `?:` compute only the arm that
- * is taken. Tycho measured `{x<0 : g(x), 0}` with
- * `g(x) = Σ_{i=1}^{300} cos(ix)`: 2.27 ms on WebGL2, 5.05 ms on WebGPU with
- * `select`, 2.36 ms with an `if`. So such an arm takes the statement form of
- * the conditional (`compileGPUStatementSelection`), as an arm that needs
- * statements already does. GLSL keeps the ternary. CE-513 (Tycho row 458).
- *
- * An arm that draws a random value takes the statement form too: `select`
- * would draw in the arm that is not taken, which shifts every later draw
- * (`gpuAssertNoEagerDraw`). Where the statement form is refused, that check
- * declines the selection (Tycho row 466).
- *
- * A symbol with a value is read through its value, as the shader targets
- * inline it (see `gpuNeedsStatements`).
- */
-export function gpuArmIsCostlyForSelect(
-  e: Expression,
-  target: CompileTarget<Expression>
-): boolean {
-  if (target.language !== 'wgsl') return false;
-  const seen = new Set<Expression>();
-  const expanding = new Set<string>();
-  const walk = (x: Expression): boolean => {
-    if (isSymbol(x)) {
-      const name = x.symbol;
-      if (expanding.has(name)) return false;
-      const value = x.engine._getSymbolValue(name);
-      if (value === undefined) return false;
-      expanding.add(name);
-      const found = walk(value);
-      expanding.delete(name);
-      return found;
-    }
-    if (!isFunction(x) || seen.has(x)) return false;
-    seen.add(x);
-    if (GPU_COSTLY_HELPER_HEADS.has(x.operator)) return true;
-    // A draw: the head itself is impure (its operands are not the cause).
-    if (
-      BaseCompiler.foldValueImpure(x) &&
-      !x.ops.some((op) => BaseCompiler.foldValueImpure(op))
-    )
-      return true;
-    // A call of a user function (`g := x ↦ …`, or a symbol whose value is a
-    // function), which the shader targets emit as a separate `_fn_…`
-    // function.
-    const def = x.engine.lookupDefinition(x.operator);
-    if (
-      isValueDef(def) ||
-      (isOperatorDef(def) && def.operator.isUserFunctionDefinition)
-    )
-      return true;
-    return x.ops.some(walk);
-  };
-  return walk(e);
-}
-
-/**
  * Compile a **conditionally-evaluated** operand of a GPU conditional — an
  * `If`/`Which`/`Match` arm, or a `Which` condition past the first —
  * with hoisting forbidden.
@@ -879,10 +769,6 @@ export function gpuArmIsCostlyForSelect(
  * interpreter, which evaluates only the taken branch. Fail closed; the
  * caller falls back to interpretation, exactly as it did before hoisting
  * existed.
- *
- * (WGSL's `select` is a function, so both operands ARE evaluated there — but
- * the emission is shared and the counter-ordering hazard is the same, so the
- * guard is not language-gated.)
  */
 export function compileGPUConditionalArm(
   head: string,
@@ -929,24 +815,17 @@ export function compileGPUConditionalArm(
 /**
  * Emit a conditional `cond ? whenTrue : whenFalse` for the target language.
  *
- * GLSL has the ternary operator; WGSL does not and uses
- * `select(false_value, true_value, condition)` instead.
- *
- * A conditional that chooses between one and zero is the boolean itself: both
- * languages convert a `bool` to a float with the scalar constructor
- * (`float(b)` in GLSL, `f32(b)` in WGSL), and both specify that conversion as
- * `true → 1.0` and `false → 0.0`. The cast needs no branch.
+ * A conditional that chooses between one and zero is the boolean itself: GLSL
+ * converts a `bool` to a float with the scalar constructor (`float(b)`), and
+ * specifies that conversion as `true → 1.0` and `false → 0.0`. The cast needs
+ * no branch.
  */
 export function gpuConditional(
   cond: string,
   whenTrue: string,
-  whenFalse: string,
-  target?: CompileTarget<Expression>
+  whenFalse: string
 ): string {
-  const isWGSL = target?.language === 'wgsl';
-  if (whenTrue === '1.0' && whenFalse === '0.0')
-    return `${isWGSL ? 'f32' : 'float'}(${cond})`;
-  if (isWGSL) return `select(${whenFalse}, ${whenTrue}, ${cond})`;
+  if (whenTrue === '1.0' && whenFalse === '0.0') return `float(${cond})`;
   return `((${cond}) ? (${whenTrue}) : (${whenFalse}))`;
 }
 
@@ -961,8 +840,8 @@ function gpuIsTupleShaped(expr: Expression): boolean {
 /**
  * Fail closed when a value arm of a selection is a WRITTEN list or
  * tuple that lowers to a shader ARRAY — a list of points (`vec2[2](…)`) or
- * a list of five or more scalars: GLSL's ternary and WGSL's `select` take
- * scalars and vectors, and neither language selects between arrays. Only
+ * a list of five or more scalars: GLSL's ternary takes scalars and vectors,
+ * and does not select between arrays. Only
  * the written shapes are judged here, before any arm is compiled; every
  * other arm keeps the selection lowering's own, more specific gates.
  */
@@ -976,130 +855,10 @@ export function gpuAssertSelectableArms(
     if (gpuOperandShape(value) !== 'array') continue;
     throw new Error(
       `Could not compile \`${head}\`: the value \`${value.toString()}\` lowers to a shader ARRAY, ` +
-        `and a selection (a GLSL ternary, a WGSL \`select\`) chooses between ` +
+        `and a selection (a GLSL ternary) chooses between ` +
         `scalars or vectors only.`
     );
   }
-}
-
-/**
- * Fail closed on WGSL when an arm of a selection draws a random value.
- * Caller code in an arm is checked by `gpuAssertNoEagerCallerCode`.
- */
-export function gpuAssertNoEagerDraw(
-  head: string,
-  lazyOperands: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>
-): void {
-  // WGSL has no `?:` operator, and `select(f, t, c)` is a function call that
-  // computes both `f` and `t`. A random draw (`_gpu_rnd_draw`) in an arm that
-  // is not taken still advances the runtime counter of the random stream, so
-  // every later draw in the shader takes a different value than in the
-  // interpreter, which evaluates only the taken arm. GLSL's `?:` evaluates
-  // only the selected arm. An arm that draws, directly or through the value
-  // of a symbol (`BaseCompiler.foldValueImpure`), fails closed on WGSL; the
-  // caller then falls back to interpretation.
-  if (target.language !== 'wgsl') return;
-  // A branch with a `Return` fails closed with the message of the `Return`
-  // gates (`gpuAssertReturnPlacement`), which says more.
-  const containsReturn = (e: Expression): boolean =>
-    isFunction(e) &&
-    e.operator !== 'Function' &&
-    (e.operator === 'Return' || e.ops.some(containsReturn));
-  if (lazyOperands.some(containsReturn)) return;
-  if (lazyOperands.some((e) => BaseCompiler.foldValueImpure(e)))
-    throw gpuDrawOrderError(
-      `Could not compile \`${head}\`: a branch draws a random value, and the ` +
-        `WGSL selection \`select(…)\` computes every branch, so a branch ` +
-        `that is not taken would still advance the random stream and shift ` +
-        `every later draw in the shader.`
-    );
-}
-
-/**
- * Fail closed on WGSL when an arm of a selection contains caller code
- * (`gpuReachesCallerCode`). `select(f, t, c)` computes both arms, so with
- * `vars: { W: 'nextValue()' }`, `If(c, W, 0)` would run the caller's code
- * even when `c` is false, and that code can count its calls or draw a
- * number. GLSL's `?:` evaluates only the selected arm.
- */
-export function gpuAssertNoEagerCallerCode(
-  head: string,
-  lazyOperands: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>
-): void {
-  if (gpuHasEagerCallerCode(lazyOperands, target))
-    throw new Error(
-      `Could not compile \`${head}\`: a branch contains code supplied by the ` +
-        `caller (a \`vars\` source, a \`functions\` or \`operators\` entry, ` +
-        `or a \`compile\` handler), and the WGSL selection \`select(…)\` ` +
-        `computes every branch, so that code would run even when its branch ` +
-        `is not taken.`
-    );
-}
-
-/**
- * The test of `gpuAssertNoEagerCallerCode`, as a boolean: on WGSL, does an
- * operand that the `select(…)` form would compute although its branch is
- * not taken contain caller code (`gpuReachesCallerCode`)? A selection that
- * can place a statement (`gpuCanPlaceStatement`) then takes its statement
- * form, an `if` statement that computes only the branch that is taken
- * (`compileGPUStatementSelection`, which keeps the order of caller code
- * with `gpuHoistKeepsCallerOrder`). When that form is refused, the `select`
- * form declines.
- */
-export function gpuHasEagerCallerCode(
-  lazyOperands: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>
-): boolean {
-  return (
-    target.language === 'wgsl' &&
-    lazyOperands.some((e) => gpuReachesCallerCode(e, target))
-  );
-}
-
-/**
- * Fail closed on WGSL when an operand of a selection (`If`, `Which`)
- * assigns a variable. The selection lowers to `select(…)`, a function call,
- * so its operands are expressions, and a WGSL assignment is a statement:
- * `If(x > 0, t ≔ 1, t ≔ 2)` gave `select(t = 2.0, t = 1.0, 0.0 < x)`, which
- * no WGSL compiler accepts (and `select` evaluates both operands). GLSL
- * keeps its ternary, where an assignment is an expression and only the
- * selected arm runs. An assignment inside a function literal is the body
- * of that function, not an operand of the selection. Called where the
- * selection is written as `select(…)`: the statement form
- * (`compileGPUStatementSelection`) writes a block arm that assigns its own
- * locals as statements, which is valid. A selection in statement position
- * (a statement of a block that is not its value, a loop body) does not
- * reach this function: the block statement dispatcher writes it as an `if`
- * statement (`BaseCompiler.shaderSelectionStatement`).
- */
-export function gpuAssertNoAssignmentOperand(
-  head: string,
-  operands: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>
-): void {
-  if (target.language !== 'wgsl') return;
-  // A block operand is not examined: it has no expression form, and it
-  // fails closed with its own message where it is compiled. A selection
-  // with a `Return` in a branch fails closed with the message of the
-  // `Return` gates (`gpuAssertReturnPlacement`), which says more.
-  const contains =
-    (head: string) =>
-    (e: Expression): boolean =>
-      isFunction(e) &&
-      e.operator !== 'Function' &&
-      e.operator !== 'Block' &&
-      (e.operator === head || e.ops.some(contains(head)));
-  if (operands.some(contains('Return'))) return;
-  if (operands.some(contains('Assign')))
-    throw new Error(
-      `Could not compile \`${head}\`: a branch assigns a variable, and the ` +
-        `WGSL selection \`select(…)\` takes expressions, where an assignment ` +
-        `is a statement in WGSL. Such a selection compiles as an \`if\` ` +
-        `statement only where its value is discarded: a statement of a ` +
-        `block that is not the block's value, or a loop body.`
-    );
 }
 
 function gpuSelectionDecline(reason: string): never {
@@ -1109,7 +868,7 @@ function gpuSelectionDecline(reason: string): never {
 /**
  * True when a value arm of a selection (`If`, `Which`, the statement form of
  * both) is complex. A complex value lowers to a `vec2` of (re, im) and a real
- * value to a `float`, and neither a GLSL ternary nor a WGSL `select` accepts
+ * value to a `float`, and a GLSL ternary does not accept
  * a `vec2` arm beside a `float` arm. The real arms are then lifted to
  * `vec2(v, 0.0)` (`gpuSelectionArm`), so every arm has the type of the
  * complex selection.
@@ -1161,7 +920,7 @@ function gpuAbsentArm(
   complex: boolean,
   target: CompileTarget<Expression>
 ): string {
-  if (complex) return `${gpuVec2(target)}(${gpuNaN(target)})`;
+  if (complex) return `${gpuVec2()}(${gpuNaN(target)})`;
   const shapeRef =
     arms.find((a) => !gpuIsWrittenAbsence(a, target) && gpuComponentCount(a)) ??
     null;
@@ -1172,7 +931,7 @@ function gpuAbsentArm(
  * The code of one value arm of a selection. In a complex selection
  * (`gpuSelectionIsComplex`) a real scalar arm is lifted to `vec2(v, 0.0)`;
  * an arm that is not a scalar (a point, a list), or a scalar whose type
- * cannot be a number (a boolean: `vec2f(true, 0.0)` is not valid WGSL), has
+ * cannot be a number (a boolean: `vec2(true, 0.0)` is not a complex value), has
  * no complex form, and the selection fails closed.
  */
 export function gpuSelectionArm(
@@ -1184,7 +943,7 @@ export function gpuSelectionArm(
   arms?: ReadonlyArray<Expression>
 ): string {
   // A written absence arm takes the NaN of the shape of the other arms. A
-  // GLSL ternary and a WGSL `select` need both operands of one type, so a
+  // GLSL ternary needs both operands of one type, so a
   // scalar NaN beside a `vec2` arm is not a valid shader.
   if (arms !== undefined && gpuIsWrittenAbsence(value, target))
     return gpuAbsentArm(arms, complex, target);
@@ -1199,7 +958,7 @@ export function gpuSelectionArm(
         `${scalar ? 'number' : 'scalar'}, and another value of the ` +
         `selection is complex.`
     );
-  return `${gpuVec2(target)}(${code}, 0.0)`;
+  return `${gpuVec2()}(${code}, 0.0)`;
 }
 
 /**
@@ -1336,27 +1095,23 @@ function gpuSelectionConditionWidth(c: Expression): 2 | 3 | 4 | undefined {
 /** Conjoin boolean-vector masks componentwise. */
 function gpuMaskAnd(
   masks: ReadonlyArray<string>,
-  n: 2 | 3 | 4,
-  target: CompileTarget<Expression>
+  n: 2 | 3 | 4
 ): string {
   if (masks.length === 1) return masks[0];
-  if (target.language === 'wgsl') return `(${masks.join(' & ')})`;
   // GLSL has no componentwise `&&`: convert to 0/1 floats, multiply, and let
   // the `bvecN` constructor read nonzero back as `true`.
-  const f = gpuFVec(n, target);
-  return `${gpuBVec(n, target)}(${masks.map((m) => `${f}(${m})`).join(' * ')})`;
+  const f = gpuFVec(n);
+  return `${gpuBVec(n)}(${masks.map((m) => `${f}(${m})`).join(' * ')})`;
 }
 
 /** Disjoin boolean-vector masks componentwise. */
 function gpuMaskOr(
   masks: ReadonlyArray<string>,
-  n: 2 | 3 | 4,
-  target: CompileTarget<Expression>
+  n: 2 | 3 | 4
 ): string {
   if (masks.length === 1) return masks[0];
-  if (target.language === 'wgsl') return `(${masks.join(' | ')})`;
-  const f = gpuFVec(n, target);
-  return `${gpuBVec(n, target)}(${masks.map((m) => `${f}(${m})`).join(' + ')})`;
+  const f = gpuFVec(n);
+  return `${gpuBVec(n)}(${masks.map((m) => `${f}(${m})`).join(' + ')})`;
 }
 
 /**
@@ -1364,8 +1119,8 @@ function gpuMaskOr(
  *
  * Boolean vectors — NOT float masks: a float `mix(a, b, t)` computes
  * `a·(1−t) + b·t`, so a NaN in the unselected operand poisons the result
- * (`mix(NaN, x, 1.0)` is NaN). The `genBType` `mix` / WGSL `select` overloads
- * are true per-component SELECTION and are therefore NaN-safe.
+ * (`mix(NaN, x, 1.0)` is NaN). The `genBType` `mix` overload
+ * is a true per-component SELECTION and are therefore NaN-safe.
  */
 function gpuSelectionMask(
   c: Expression,
@@ -1373,8 +1128,8 @@ function gpuSelectionMask(
   compile: (e: Expression) => string,
   target: CompileTarget<Expression>
 ): string {
-  const bvec = gpuBVec(n, target);
-  const fvec = gpuFVec(n, target);
+  const bvec = gpuBVec(n);
+  const fvec = gpuFVec(n);
 
   if (isSymbol(c, 'True')) return `${bvec}(true)`;
   if (isSymbol(c, 'False')) return `${bvec}(false)`;
@@ -1401,8 +1156,7 @@ function gpuSelectionMask(
     // scalar-operand relation skips the width pass's compare-form check, so
     // guard again at the emission site — indexing past the map would splice
     // the literal string `undefined` into the shader source.
-    const cmp =
-      target.language === 'wgsl' ? GPU_COMPARE_WGSL[h] : GPU_COMPARE_GLSL[h];
+    const cmp = GPU_COMPARE_GLSL[h];
     if (cmp === undefined)
       gpuSelectionDecline(
         `the relation \`${h}\` has no componentwise shader form.`
@@ -1432,13 +1186,9 @@ function gpuSelectionMask(
     );
     const masks: string[] = [];
     for (let i = 0; i < codes.length - 1; i++) {
-      masks.push(
-        target.language === 'wgsl'
-          ? `((${codes[i]}) ${cmp} (${codes[i + 1]}))`
-          : `${cmp}(${codes[i]}, ${codes[i + 1]})`
-      );
+      masks.push(`${cmp}(${codes[i]}, ${codes[i + 1]})`);
     }
-    return gpuMaskAnd(masks, n, target);
+    return gpuMaskAnd(masks, n);
   }
 
   if (h === 'And' || h === 'Or' || h === 'Not') {
@@ -1446,13 +1196,11 @@ function gpuSelectionMask(
     if (h === 'Not') {
       if (masks.length !== 1)
         throw new Error('Could not compile `Not`: expected one argument');
-      return target.language === 'wgsl'
-        ? `(!(${masks[0]}))`
-        : `not(${masks[0]})`;
+      return `not(${masks[0]})`;
     }
     return h === 'And'
-      ? gpuMaskAnd(masks, n, target)
-      : gpuMaskOr(masks, n, target);
+      ? gpuMaskAnd(masks, n)
+      : gpuMaskOr(masks, n);
   }
 
   // A boolean-vector value used directly as the condition, or a scalar boolean
@@ -1476,8 +1224,8 @@ function gpuSelectionMask(
  *
  * Only STATICALLY SHAPED conditions lower: every non-scalar condition must have
  * a `vec2`–`vec4` shape, and all of them the same one. Each condition becomes a
- * boolean vector (`bvecN` / `vecN<bool>`), and the clauses are folded
- * right-to-left with GLSL `mix` / WGSL `select` — first match wins (R1), with
+ * boolean vector (`bvecN`), and the clauses are folded
+ * right-to-left with GLSL `mix` — first match wins (R1), with
  * `vecN(NaN)` as the no-match value (R4). Returns `null` when every condition is
  * provably scalar, so the ordinary scalar `Which`/`If` emission is untouched;
  * throws (D6) on any shape the shader languages cannot render.
@@ -1521,7 +1269,7 @@ export function compileGPUSelection(
   if (n === undefined) return null;
 
   const width = n;
-  const fvec = gpuFVec(width, target);
+  const fvec = gpuFVec(width);
 
   const armCode = (arm: Expression): string => {
     if (BaseCompiler.isComplexValued(arm))
@@ -1576,10 +1324,7 @@ export function compileGPUSelection(
       continue;
     }
     const mask = gpuSelectionMask(args[i], width, compile, target);
-    acc =
-      target.language === 'wgsl'
-        ? `select(${acc}, ${code}, ${mask})`
-        : `mix(${acc}, ${code}, ${mask})`;
+    acc = `mix(${acc}, ${code}, ${mask})`;
   }
   return acc;
 }

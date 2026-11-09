@@ -7,8 +7,8 @@
  * radians: 0.894 at x = 90 instead of 1. The value is now rewritten alone
  * (`BaseCompiler.foldedValueInRadians()`), so nothing is converted twice.
  *
- * The routes `compileToSource()` and `compileFunction()` of the GLSL, WGSL
- * and Python targets did not rewrite their expression at all; they now do,
+ * The routes `compileToSource()` and `compileFunction()` of the GLSL and
+ * Python targets did not rewrite their expression at all; they now do,
  * as `compile()` does.
  *
  * Found during the work on ROADMAP CE-593.
@@ -17,7 +17,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { TEST_PYTHON } from './test-python';
 import { execFileSync } from 'child_process';
@@ -52,11 +51,6 @@ describe('a folded value in degree mode', () => {
 
   test.each([
     ['glsl', 'sin(0.017453292 * x) + 1.0', 'vec2(sin(0.017453292 * x), 0.0).x'],
-    [
-      'wgsl',
-      'sin(0.017453292 * x) + 1.0',
-      'vec2f(sin(0.017453292 * x), 0.0).x',
-    ],
   ] as const)('%s', (to, scalar, point) => {
     const ce = engine();
     expect(compile(ce.parse('c + 1'), { to, fallback: false }).code).toBe(
@@ -103,15 +97,15 @@ describe('compileToSource() and compileFunction() in degree mode', () => {
     return ce;
   }
 
-  test.each([
-    ['glsl', new GLSLTarget()],
-    ['wgsl', new WGSLTarget()],
-  ] as const)('%s: compileToSource()', (_, target) => {
-    const ce = engineWithY();
-    expect(target.compileToSource(ce.parse('\\sin(x) + c'))).toBe(
-      '_gpu_sin(0.017453292 * y) + _gpu_sin(0.017453292 * x)'
-    );
-  });
+  test.each([['glsl', new GLSLTarget()]] as const)(
+    '%s: compileToSource()',
+    (_, target) => {
+      const ce = engineWithY();
+      expect(target.compileToSource(ce.parse('\\sin(x) + c'))).toBe(
+        '_gpu_sin(0.017453292 * y) + _gpu_sin(0.017453292 * x)'
+      );
+    }
+  );
 
   test('glsl: compileFunction()', () => {
     const ce = engineWithY();
@@ -123,19 +117,6 @@ describe('compileToSource() and compileFunction() in degree mode', () => {
     );
     expect(source).toContain(
       'float f(float x) {\n  return _gpu_sin(0.017453292 * y) + _gpu_sin(0.017453292 * x);\n}'
-    );
-  });
-
-  test('wgsl: compileFunction()', () => {
-    const ce = engineWithY();
-    const source = new WGSLTarget().compileFunction(
-      ce.parse('\\sin(x) + c'),
-      'f',
-      'f32',
-      [['x', 'f32']]
-    );
-    expect(source).toContain(
-      'fn f(x: f32) -> f32 {\n  return _gpu_sin(0.017453292 * y) + _gpu_sin(0.017453292 * x);\n}'
     );
   });
 
@@ -353,13 +334,7 @@ describe('AbsArg in degree mode', () => {
   // and through a function body.
   const REFUSAL =
     /Could not compile `AbsArg` when the angular unit is not radians/;
-  const TARGETS = [
-    'javascript',
-    'interval-js',
-    'glsl',
-    'wgsl',
-    'python',
-  ] as const;
+  const TARGETS = ['javascript', 'interval-js', 'glsl', 'python'] as const;
 
   function engineWithK(unit: 'deg' | 'rad' = 'deg'): ComputeEngine {
     const ce = new ComputeEngine();
@@ -464,10 +439,6 @@ describe('Argument of a real value at NaN', () => {
     [
       'glsl',
       '((x >= 0.0) ? (0.0) : (((x < 0.0) ? (3.14159265359) : (_gpu_nan()))))',
-    ],
-    [
-      'wgsl',
-      'select(select(_gpu_nan(), 3.14159265359, x < 0.0), 0.0, x >= 0.0)',
     ],
   ] as const)('%s', (to, code) => {
     const ce = new ComputeEngine();

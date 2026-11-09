@@ -51,18 +51,15 @@ function compileTo(ce: ComputeEngine, json: MathJsonExpression, to: string) {
 }
 
 describe('A destructuring declaration with a repeated name declines', () => {
-  test.each(['javascript', 'interval-js', 'python', 'glsl', 'wgsl'])(
-    '%s',
-    (to) => {
-      const ce = new ComputeEngine();
-      // The interpreter gives the name the value at its last position.
-      expect(ce.box(FLAT).evaluate().re).toBe(2);
-      expect(ce.box(NESTED).evaluate().re).toBe(5);
-      for (const json of [FLAT, NESTED]) {
-        const r = compileTo(ce, json, to);
-        expect(r.success).toBe(false);
-        expect(r.error).toMatch(DECLINE);
-      }
+  test.each(['javascript', 'interval-js', 'python', 'glsl'])('%s', (to) => {
+    const ce = new ComputeEngine();
+    // The interpreter gives the name the value at its last position.
+    expect(ce.box(FLAT).evaluate().re).toBe(2);
+    expect(ce.box(NESTED).evaluate().re).toBe(5);
+    for (const json of [FLAT, NESTED]) {
+      const r = compileTo(ce, json, to);
+      expect(r.success).toBe(false);
+      expect(r.error).toMatch(DECLINE);
     }
-  );
+  });
 });

@@ -52,8 +52,8 @@ function gpuRepeatableSource(
 
 /**
  * Fold a variadic application of a 2-argument shader builtin (`min`/`max`)
- * into a left-nested tree of 2-argument calls: `max(max(a, b), c)`. GLSL and
- * WGSL do not accept a 3+-argument `min`/`max`, so emitting `max(a, b, c)`
+ * into a left-nested tree of 2-argument calls: `max(max(a, b), c)`. GLSL does
+ * not accept a 3+-argument `min`/`max`, so emitting `max(a, b, c)`
  * would be invalid shader source.
  *
  * Each GENERATED call is validated as it is produced, against the ORIGINAL
@@ -164,16 +164,14 @@ export function compileGPUElementExtremum(
   const widths = new Set(shapes.filter((s) => typeof s === 'number'));
   if (widths.size > 1) return builtin();
   const width = widths.size === 1 ? ([...widths][0] as number) : undefined;
-  const ctor =
-    width === undefined ? '' : gpuVecType(width, target.language === 'wgsl');
+  const ctor = width === undefined ? '' : gpuVecType(width);
   const codes = args.map((a, i) =>
     width !== undefined && shapes[i] === 'scalar'
       ? `${ctor}(${compile(a)})`
       : compile(a)
   );
   // A scalar beside a vector is broadcast with the vector constructor, for
-  // the helper and for the built-in alike: WGSL has no `max(vecN, f32)` and
-  // GLSL no `max(float, vecN)`. When every operand is finite for certain,
+  // the helper and for the built-in alike: GLSL has no `max(float, vecN)`. When every operand is finite for certain,
   // the built-in `max`/`min` takes the broadcast operands
   // (`max(v, vec3(0.0))`); otherwise the helper keeps the NaN of the
   // interpreter.
@@ -283,12 +281,7 @@ export function gpuScalarComponents(
           .slice(0, size)
           .map((c) => `${code.trim()}.${c}`);
       width = size;
-      // A bare WGSL `vecN(…)` infers its element type from the operands; the
-      // temporary is then declared without a type and infers the same one.
-      ctorType =
-        target.language === 'wgsl' && vec[3] === '' && vec[4] === undefined
-          ? ''
-          : call.callee.trim();
+      ctorType = call.callee.trim();
     } else {
       // A matrix constructor has one operand per component only when it has
       // columns × rows operands: `mat3(s)` is the diagonal matrix of `s`,
@@ -318,14 +311,8 @@ export function gpuScalarComponents(
     target
   );
   const tv = BaseCompiler.tempVar(target);
-  const type =
-    ctorType ?? (target.language === 'wgsl' ? `vec${width}f` : `vec${width}`);
-  const decl =
-    target.language === 'wgsl'
-      ? type === ''
-        ? `var ${tv}`
-        : `var ${tv}: ${type}`
-      : `${type} ${tv}`;
+  const type = ctorType ?? `vec${width}`;
+  const decl = `${type} ${tv}`;
   BaseCompiler.hoistStatement(target, `${decl} = ${code};`);
   if (draws) gpuRecordBoundDraws([expr], target);
   return comps.map((c) => `${tv}.${c}`);

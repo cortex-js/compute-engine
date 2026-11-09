@@ -1,18 +1,18 @@
 /**
- * Tycho item 191 — GLSL/WGSL `Sum`/`Product` for-loop headers were ill-typed.
+ * Tycho item 191 — GLSL `Sum`/`Product` for-loop headers were ill-typed.
  *
- * The loop counter is declared as an integer (`int i` / `var i: i32`), but a
+ * The loop counter is declared as an integer (`int i`), but a
  * bound that is not a compile-time constant compiles to a FLOAT expression
- * (`K + -1.0`, or a constant-folded `Length(L)` spelled `3.0`). Neither GLSL
- * ES nor WGSL promotes int to float, so `for (int j = 0; j <= K + -1.0; …)`
+ * (`K + -1.0`, or a constant-folded `Length(L)` spelled `3.0`). GLSL ES does
+ * not promote int to float, so `for (int j = 0; j <= K + -1.0; …)`
  * was a driver-side type error — the whole shader was rejected behind
  * `success: true`. The header now converts every non-literal bound to the
  * counter's type, flooring first (`int(floor(K + -1.0))`) so a non-integer
  * bound reads the way the JavaScript target's `Math.floor(bound)` does.
  *
  * A bound whose conversion wraps a COMPUTED expression is additionally bound
- * to an integer local ahead of the loop, because both languages evaluate the
- * loop condition on every iteration. The bound is then the local's name and
+ * to an integer local ahead of the loop, because GLSL evaluates the loop
+ * condition on every iteration. The bound is then the local's name and
  * the conversion is on that local's declaration; a bound that is already one
  * read (a literal, a bare name, a conversion around one of those) stays in
  * the header. `headerIsIntTyped` follows a local back to its declaration, so
@@ -20,7 +20,6 @@
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const ce = new ComputeEngine();
 ce.declare('K', 'number');
@@ -28,27 +27,22 @@ ce.declare('N', 'number');
 ce.assign('L', ce.box(['List', 1, 2, 3]));
 
 const glsl = new GLSLTarget();
-const wgsl = new WGSLTarget();
 
 /**
  * Every loop-header bound is either an integer literal or an int-cast.
  *
  * A bound the emitter lifted into a local reads as that local's NAME in the
- * header, so the name is resolved back through its `int _tvN = …;` (GLSL) or
- * `let _tvN: i32 = …;` (WGSL) declaration and the declaration's right-hand
- * side is checked instead.
+ * header, so the name is resolved back through its `int _tvN = …;`
+ * declaration and the declaration's right-hand side is checked instead.
  */
-function headerIsIntTyped(code: string, lang: 'glsl' | 'wgsl'): boolean {
+function headerIsIntTyped(code: string): boolean {
   const m = code.match(/for \((.*?)\) \{/);
   if (!m) return false;
   const [init, cond] = m[1].split(';').map((s) => s.trim());
-  const cast = lang === 'glsl' ? 'int(floor(' : 'i32(floor(';
+  const cast = 'int(floor(';
   const rhs = (s: string) => s.slice(s.indexOf('=') + 1).trim();
   const declared = (name: string): string | undefined => {
-    const decl =
-      lang === 'glsl'
-        ? new RegExp(`^int ${name} = (.*);$`, 'm')
-        : new RegExp(`^let ${name}: i32 = (.*);$`, 'm');
+    const decl = new RegExp(`^int ${name} = (.*);$`, 'm');
     return decl.exec(code)?.[1];
   };
   const ok = (s: string): boolean => {
@@ -76,12 +70,7 @@ describe('Tycho item 191 — GPU Sum/Product loop bounds are int-typed', () => {
     it(`GLSL: ${name}`, () => {
       const r = glsl.compile(ce.parse(latex));
       expect(r.success).toBe(true);
-      expect(headerIsIntTyped(r.code!, 'glsl')).toBe(true);
-    });
-    it(`WGSL: ${name}`, () => {
-      const r = wgsl.compile(ce.parse(latex));
-      expect(r.success).toBe(true);
-      expect(headerIsIntTyped(r.code!, 'wgsl')).toBe(true);
+      expect(headerIsIntTyped(r.code!)).toBe(true);
     });
   }
 
@@ -97,11 +86,10 @@ describe('Tycho item 191 — GPU Sum/Product loop bounds are int-typed', () => {
     expect(r.code).toContain('_tv1 += float(j) * x;');
   });
 
-  // Only the conversion and rounding spellings (`int`, `i32`, `u32`, `uint`,
-  // `float`, `f32`, `floor`) count as one read. A bound that CALLS a user
-  // function is real work, so it is lifted to a local instead of staying in
-  // the loop condition, where both languages would re-evaluate it on every
-  // iteration.
+  // Only the conversion and rounding spellings (`int`, `uint`, `float`,
+  // `floor`) count as one read. A bound that CALLS a user function is real
+  // work, so it is lifted to a local instead of staying in the loop
+  // condition, where the shader would re-evaluate it on every iteration.
   it('GLSL: a user-function call bound is lifted to a local', () => {
     const cef = new ComputeEngine();
     cef.declare('x', 'number');
@@ -115,14 +103,9 @@ describe('Tycho item 191 — GPU Sum/Product loop bounds are int-typed', () => {
     expect(r.code).toContain(`for (int j = 1; j <= ${bound}; j++) {`);
   });
 
-  it('emits the exact WGSL header for a symbolic lower bound', () => {
-    const r = wgsl.compile(ce.parse('\\sum_{j=K}^{9}jx'));
-    expect(r.code).toContain('for (var j: i32 = i32(floor(K)); j <= 9; j++) {');
-  });
-
   // A bound the caller declared as a shader INTEGER (a `compileFunction`
   // parameter, a shader uniform) is already the counter's type: `floor()`
-  // takes only a float in both languages, so wrapping it would be a driver
+  // takes only a float in GLSL, so wrapping it would be a driver
   // type error from the other direction. Such a bound is used bare.
   it('GLSL: an `int`-declared parameter bound is used bare', () => {
     const code = glsl.compileFunction(
@@ -141,16 +124,6 @@ describe('Tycho item 191 — GPU Sum/Product loop bounds are int-typed', () => {
     expect(lower).toContain('for (int j = K; j <= 9; j++) {');
   });
 
-  it('WGSL: an `i32`-declared parameter bound is used bare', () => {
-    const code = wgsl.compileFunction(
-      ce.parse('\\sum_{j=1}^{K}2j'),
-      'f',
-      'f32',
-      [['K', 'i32']]
-    );
-    expect(code).toContain('for (var j: i32 = 1; j <= K; j++) {');
-  });
-
   it('an unsigned-declared bound is converted without flooring', () => {
     const g = glsl.compileFunction(
       ce.parse('\\sum_{j=1}^{K}2j'),
@@ -159,10 +132,6 @@ describe('Tycho item 191 — GPU Sum/Product loop bounds are int-typed', () => {
       [['K', 'uint']]
     );
     expect(g).toContain('j <= int(K);');
-    const w = wgsl.compileFunction(ce.parse('\\sum_{j=1}^{K}2j'), 'f', 'f32', [
-      ['K', 'u32'],
-    ]);
-    expect(w).toContain('j <= i32(K);');
   });
 
   it('a `float`-declared parameter bound is floored and cast', () => {
@@ -185,7 +154,7 @@ describe('Tycho item 191 — GPU Sum/Product loop bounds are int-typed', () => {
 
   // An integer-declared scalar reaching float ARITHMETIC (the bound
   // expression `K - 1`, or a plain body `K + 1`) is converted where it is
-  // referenced — `float(K)` / `f32(K)` — so the arithmetic is well-typed too.
+  // referenced — `float(K)` — so the arithmetic is well-typed too.
   // (User-ruled 2026-08-15: cast at the reference site rather than fail
   // closed; found while fixing item 191.)
   it('an `int`-declared parameter in a bound EXPRESSION is converted', () => {
@@ -200,16 +169,6 @@ describe('Tycho item 191 — GPU Sum/Product loop bounds are int-typed', () => {
       /^ *int (_\w+) = int\(floor\(float\(K\) \+ -1\.0\)\);$/m.exec(g)?.[1];
     expect(gBound).toBeDefined();
     expect(g).toContain(`j <= ${gBound};`);
-    const w = wgsl.compileFunction(
-      ce.parse('\\sum_{j=1}^{K-1}2j'),
-      'f',
-      'f32',
-      [['K', 'i32']]
-    );
-    const wBound =
-      /^ *let (_\w+): i32 = i32\(floor\(f32\(K\) \+ -1\.0\)\);$/m.exec(w)?.[1];
-    expect(wBound).toBeDefined();
-    expect(w).toContain(`j <= ${wBound};`);
   });
 
   it('an `int`-declared parameter in plain float arithmetic is converted', () => {
@@ -217,8 +176,6 @@ describe('Tycho item 191 — GPU Sum/Product loop bounds are int-typed', () => {
       ['K', 'int'],
     ]);
     expect(g).toContain('return float(K) + 1.0;');
-    const w = wgsl.compileFunction(ce.parse('K+1'), 'f', 'f32', [['K', 'i32']]);
-    expect(w).toContain('return f32(K) + 1.0;');
   });
 
   it('constant small ranges still unroll (control)', () => {

@@ -25,7 +25,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { shaderFunctions } from './gpu-shader-f32-eval';
 
-type Target = 'glsl' | 'wgsl';
+type Target = 'glsl';
 
 function shader(
   ce: ComputeEngine,
@@ -41,7 +41,7 @@ function shader(
   return { code: r.code ?? '', preamble: r.preamble ?? '' };
 }
 
-describe.each(['glsl', 'wgsl'] as const)('CE-619 on %s', (to) => {
+describe.each(['glsl'] as const)('CE-619 on %s', (to) => {
   describe('CE-619.2: a product with a factor of unknown size', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
@@ -65,10 +65,7 @@ describe.each(['glsl', 'wgsl'] as const)('CE-619 on %s', (to) => {
     it('the helper gives NaN where the product overflows f32', () => {
       // `H·x` at `H = 10³⁰`, `x = 10⁹` is 10³⁹, `+∞` in f32.
       const { code, preamble } = shader(ce, '\\sin(Hx)', to);
-      const src =
-        to === 'glsl'
-          ? `${preamble}\nfloat f(float H, float x) {\n  return ${code};\n}`
-          : `${preamble}\nfn f(H: f32, x: f32) -> f32 {\n  return ${code};\n}`;
+      const src = `${preamble}\nfloat f(float H, float x) {\n  return ${code};\n}`;
       const f = shaderFunctions(src, to);
       expect(Number.isNaN(f('f', 1e30, 1e9) as number)).toBe(true);
       expect(f('f', 2, 0.25)).toBeCloseTo(Math.sin(0.5), 6);
@@ -98,10 +95,7 @@ describe.each(['glsl', 'wgsl'] as const)('CE-619 on %s', (to) => {
         constantFold: false,
       });
       expect(code).toMatch(/^_gpu_sin\(/);
-      const src =
-        to === 'glsl'
-          ? `${preamble}\nfloat f(float H) {\n  return ${code};\n}`
-          : `${preamble}\nfn f(H: f32) -> f32 {\n  return ${code};\n}`;
+      const src = `${preamble}\nfloat f(float H) {\n  return ${code};\n}`;
       const f = shaderFunctions(src, to);
       expect(Number.isNaN(f('f', 5e37) as number)).toBe(true);
     });
@@ -161,10 +155,7 @@ describe.each(['glsl', 'wgsl'] as const)('CE-619 on %s', (to) => {
   });
 
   describe('CE-619.3: `Random()` is not drawn at compile time', () => {
-    // WGSL draws only inside a seed frame (`WithRandomSeed`), whose seed
-    // varies at run time here: a constant seed is drawn at compile time.
-    const framed = (e: unknown[]) =>
-      to === 'wgsl' ? ['WithRandomSeed', 'n', e] : e;
+    const framed = (e: unknown[]) => e;
 
     it('gives the same code on every compilation', () => {
       // `5·Random()·10³⁸` is `+∞` in f32 for a draw above 0.68.
@@ -289,7 +280,7 @@ describe.each(['glsl', 'wgsl'] as const)('CE-619 on %s', (to) => {
     ce.declare('x', 'real<-1..1>');
     ce.declare('y', 'real<-1..1>');
     ce.declare('H', 'real<0..1e38>');
-    const v = to === 'glsl' ? 'vec4' : 'vec4f';
+    const v = 'vec4';
     const pointNorms = [
       'Sin',
       [

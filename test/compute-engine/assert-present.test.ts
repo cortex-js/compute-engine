@@ -190,7 +190,7 @@ describe('AssertPresent — compiled (JavaScript)', () => {
     });
     expect(py.success).toBe(true);
     expect(String(py.code)).toContain('ValueError("expected-present: x is absent")');
-    for (const to of ['glsl', 'wgsl'] as const) {
+    for (const to of ['glsl'] as const) {
       const sh = compile(ce.box(['Add', ['AssertPresent', 'x'], 1]), { to });
       expect(sh.success).toBe(true);
       expect(String(sh.code)).toBe('x + 1.0');

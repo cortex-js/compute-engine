@@ -1,5 +1,5 @@
 /**
- * The GPU (GLSL and WGSL) lowerings of `Digamma`, `Trigamma` and
+ * The GPU (GLSL) lowerings of `Digamma`, `Trigamma` and
  * `PolyGamma` (`GPU_POLYGAMMA_PREAMBLE_GLSL`, `compilation/gpu-target.ts`,
  * cortex-js/compute-engine#340, ROADMAP CE-239).
  *
@@ -16,7 +16,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import {
   digamma,
   polygamma,
@@ -30,7 +29,6 @@ ce.declare('pg_z', 'complex');
 
 const targets = [
   ['GLSL', new GLSLTarget(), (name: string) => `float ${name}(`],
-  ['WGSL', new WGSLTarget(), (name: string) => `fn ${name}(`],
 ] as const;
 
 /** The source of the top-level function `name` in `preamble`. */
@@ -105,7 +103,7 @@ describe('GPU Digamma / Trigamma / PolyGamma: emitted text', () => {
     }
   );
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s: a complex argument fails closed',
     (to) => {
       for (const expr of [
@@ -123,7 +121,7 @@ describe('GPU Digamma / Trigamma / PolyGamma: emitted text', () => {
   test('a pole folded at compile time is +Infinity, as the helpers answer at run time', () => {
     // The interpreter answers the undirected infinity at a pole; its float
     // projection is +Infinity (`docs/COMPILATION-MODEL.md`).
-    for (const to of ['glsl', 'wgsl'] as const)
+    for (const to of ['glsl'] as const)
       expect(compile(ce.box(['Digamma', -2]), { to }).code).toBe('_gpu_inf()');
     expect(polygammaModel(0, -2)).toBe(Infinity);
   });

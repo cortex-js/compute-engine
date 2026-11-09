@@ -198,7 +198,7 @@ describe('A complex point at an untyped parameter', () => {
 
 describe('A point-typed symbol at an untyped parameter on a shader', () => {
   // The variant compiled for a point takes a `vec2` and reads it whole.
-  for (const to of ['glsl', 'wgsl'] as const) {
+  for (const to of ['glsl'] as const) {
     test(`g3(q) on ${to}`, () => {
       const r = compile(ce.box(['g3', 'q']), {
         to,
@@ -424,7 +424,7 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
   });
 
   // The point may be absent, and a shader has no test of an absent value.
-  for (const to of ['glsl', 'wgsl'] as const)
+  for (const to of ['glsl'] as const)
     test(`gm(P[1]) on ${to} declines`, () =>
       expect(() =>
         compile(ce.box(['gm', ['At', 'P', 1]]), {
@@ -490,7 +490,7 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
       compile(ce.box(['gm', ['At', 'P', 1]]), { to: 'python', fallback: false })
     ).toThrow(/argument 1 is a point/));
 
-  for (const to of ['glsl', 'wgsl'] as const)
+  for (const to of ['glsl'] as const)
     test(`gm(q) on ${to}`, () => {
       const r = compile(ce.box(['gm', 'q']), {
         to,

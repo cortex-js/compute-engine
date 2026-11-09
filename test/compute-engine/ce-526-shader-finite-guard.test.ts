@@ -19,14 +19,14 @@ ce.declare('u', 'number');
 ce.declare('s', 'real<-10..10>');
 ce.assign('p', ce.parse('k \\mapsto \\cos(x + 1.9k)'));
 
-const code = (expr: unknown, to: 'glsl' | 'wgsl', options = {}) =>
+const code = (expr: unknown, to: 'glsl', options = {}) =>
   compile(typeof expr === 'string' ? ce.parse(expr) : ce.box(expr as never), {
     to,
     fallback: false,
     ...options,
   } as never);
 
-describe.each(['glsl', 'wgsl'] as const)('on %s', (to) => {
+describe.each(['glsl'] as const)('on %s', (to) => {
   it('a finite operand keeps the built-in', () => {
     expect(code('\\sin(x)', to).code).toBe('sin(x)');
     expect(code('\\cos(x + 1.9)', to).code).toBe('cos(x + 1.9)');

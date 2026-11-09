@@ -26,8 +26,8 @@
  *   of vectors of one width, are the built-ins. `smoothstep` always keeps
  *   its helper (the built-in has no defined result when `e0 >= e1`).
  * - CE-565.2: a scalar beside a vector in `ElementMax`, `ElementMin` or
- *   `Clamp` is broadcast with the vector constructor (WGSL has no
- *   `max(vecN, f32)`, GLSL no `max(float, vecN)`). The proof reads the scalar
+ *   `Clamp` is broadcast with the vector constructor (GLSL has no
+ *   `max(float, vecN)`). The proof reads the scalar
  *   as written: `vec3(s)` is finite exactly when `s` is. When every operand
  *   is finite for certain, `Clamp(v, 0, 1)` is
  *   `min(max(v, vec3(0.0)), vec3(1.0))`; a scalar that can be NaN (`x:
@@ -38,7 +38,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { shaderFunctions } from './gpu-shader-f32-eval';
 
-type Target = 'glsl' | 'wgsl';
+type Target = 'glsl';
 
 function shader(
   ce: ComputeEngine,
@@ -55,7 +55,7 @@ function shader(
   return { code: r.code ?? '', preamble: r.preamble ?? '' };
 }
 
-describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
+describe.each(['glsl'] as const)('CE-565 on %s', (to) => {
   describe('a product of declared symbols', () => {
     const ce = new ComputeEngine();
     ce.declare('k', 'real');
@@ -117,10 +117,7 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
       // +∞, and the helper gives NaN there (the built-in gives 0 on Apple
       // GPUs). The f64 product 10⁴⁰ is finite.
       const { code, preamble } = shader(ce, '\\sin(kt)', to);
-      const src =
-        to === 'glsl'
-          ? `${preamble}\nfloat f(float k, float t) {\n  return ${code};\n}`
-          : `${preamble}\nfn f(k: f32, t: f32) -> f32 {\n  return ${code};\n}`;
+      const src = `${preamble}\nfloat f(float k, float t) {\n  return ${code};\n}`;
       const f = shaderFunctions(src, to);
       expect(Number.isNaN(f('f', 1e20, 1e20) as number)).toBe(true);
       expect(f('f', 2, 0.25)).toBeCloseTo(Math.sin(0.5), 6);
@@ -128,10 +125,7 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
 
     it('the built-in of a ranged product matches the interpreter', () => {
       const { code } = shader(ce, '\\sin(KT)', to);
-      const src =
-        to === 'glsl'
-          ? `float f(float K, float T) {\n  return ${code};\n}`
-          : `fn f(K: f32, T: f32) -> f32 {\n  return ${code};\n}`;
+      const src = `float f(float K, float T) {\n  return ${code};\n}`;
       const f = shaderFunctions(src, to);
       for (const [K, T] of [
         [0, -7],
@@ -245,9 +239,7 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
     ce.declare('k', 'real');
     ce.declare('t', 'real');
     const defines = (preamble: string, name: string) =>
-      new RegExp(
-        to === 'glsl' ? `\\w+ ${name}\\(\\w+ x` : `fn ${name}\\(x:`
-      ).test(preamble);
+      new RegExp(`\\w+ ${name}\\(\\w+ x`).test(preamble);
 
     it('are left out when every call is a built-in', () => {
       const { code, preamble } = shader(
@@ -288,7 +280,7 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
     ce.declare('p', 'tuple<real, real>');
     // `z` is typed `vector<real^3>` by inference, from its value.
     ce.assign('z', ce.parse('[t, k, 1]'));
-    const vec3 = to === 'glsl' ? 'vec3' : 'vec3f';
+    const vec3 = 'vec3';
     const box = (json: unknown) =>
       compile(ce.box(json as never), { to, fallback: false } as never).code;
 
@@ -356,13 +348,10 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
 
     it('the vector built-ins give the interpreter values', () => {
       // The f32 interpreter has `vec2` only.
-      const vt = to === 'glsl' ? 'vec2' : 'vec2f';
+      const vt = 'vec2';
       const run = (latex: string, x: number, y: number) => {
         const { code } = shader(ce, latex, to);
-        const src =
-          to === 'glsl'
-            ? `vec2 f(float t, float k) {\n  return ${code};\n}`
-            : `fn f(t: f32, k: f32) -> vec2f {\n  return ${code};\n}`;
+        const src = `vec2 f(float t, float k) {\n  return ${code};\n}`;
         return {
           code,
           value: shaderFunctions(src, to)('f', x, y) as {
@@ -383,7 +372,7 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
   });
 });
 
-describe.each(['glsl', 'wgsl'] as const)(
+describe.each(['glsl'] as const)(
   'CE-565.2: a scalar beside a vector on %s',
   (to) => {
     const ce = new ComputeEngine();
@@ -412,7 +401,7 @@ describe.each(['glsl', 'wgsl'] as const)(
       expect([json, r.success]).toEqual([json, true]);
       return r.code ?? '';
     };
-    const vt = (n: number) => (to === 'glsl' ? `vec${n}` : `vec${n}f`);
+    const vt = (n: number) => `vec${n}`;
     const cells = ['a', 'b', 'c', 'd'];
 
     describe.each([2, 3, 4])('of width %i', (n) => {
@@ -483,10 +472,7 @@ describe.each(['glsl', 'wgsl'] as const)(
       const run = (json: unknown, x: number, y: number) => {
         const code = box(json);
         expect(code).not.toMatch(/_gpu_/);
-        const src =
-          to === 'glsl'
-            ? `vec2 f(float a, float b) {\n  return ${code};\n}`
-            : `fn f(a: f32, b: f32) -> vec2f {\n  return ${code};\n}`;
+        const src = `vec2 f(float a, float b) {\n  return ${code};\n}`;
         const shaderValue = shaderFunctions(src, to)('f', x, y) as {
           x: number;
           y: number;

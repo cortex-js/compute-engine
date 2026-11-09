@@ -8,7 +8,7 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 // `ADD = (x, y) ↦ x + y`, `ADD("ab", u)` gave `"ab2"` at `u = 2` on
 // `javascript`, where the interpreter gives an error.
 
-const TARGETS = ['javascript', 'interval-js', 'glsl', 'wgsl', 'python'];
+const TARGETS = ['javascript', 'interval-js', 'glsl', 'python'];
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -352,7 +352,7 @@ describe('Well-typed controls still compile', () => {
   test('ADD(1, u) compiles and gives the interpreter value', () => {
     const ce = engine();
     const expr = ce.box(['ADD', 1, 'u']);
-    for (const to of ['javascript', 'glsl', 'wgsl']) {
+    for (const to of ['javascript', 'glsl']) {
       const r = compile(expr, { to, fallback: false });
       expect(r.success).toBe(true);
     }

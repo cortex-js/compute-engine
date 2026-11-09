@@ -14035,7 +14035,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             : 'real | nan',
           context.engine._typeResolver
         ),
-      // The operands are `e0`, `e1`, `x`, in the order of the GLSL and WGSL
+      // The operands are `e0`, `e1`, `x`, in the order of the GLSL
       // built-in `smoothstep(e0, e1, x)`. With `e0 = e1` the result is the
       // step function (0 when `x < e0`, else 1), the limit of the formula.
       // With `e0 > e1` the formula is used as written: the result falls from

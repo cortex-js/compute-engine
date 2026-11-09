@@ -84,8 +84,8 @@ describe('Sum of a rounding of a loop index plus an exact constant', () => {
     }
   );
 
-  test('GLSL and WGSL code rounds the constant exactly', () => {
-    for (const to of ['glsl', 'wgsl'] as const) {
+  test('GLSL code rounds the constant exactly', () => {
+    for (const to of ['glsl'] as const) {
       const short = String(compile(sumOf('Floor', 1, 3), { to }).code);
       expect(short).not.toMatch(/floor\(/);
       expect(short).toContain('(x * 25.0) + (x * 26.0) + (x * 27.0)');

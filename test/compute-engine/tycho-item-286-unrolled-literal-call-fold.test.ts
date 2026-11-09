@@ -13,8 +13,8 @@ import {
  * one `_SYS.pow(-1, k)` call per term, with the exponent already a literal in
  * the emitted text.
  *
- * On the shader targets that was a wrong VALUE, not only a cost. GLSL and WGSL
- * define `pow(x, y)` as `exp2(y·log2(x))`, which is undefined for a negative
+ * On the shader targets that was a wrong VALUE, not only a cost. GLSL
+ * defines `pow(x, y)` as `exp2(y·log2(x))`, which is undefined for a negative
  * base — `pow(-1.0, 1.0)` answers NaN on most drivers — and the GPU target
  * therefore never writes `pow` for a literal integer exponent: it writes
  * repeated multiplication or the sign-preserving `_gpu_powi` helper. Only the
@@ -203,7 +203,7 @@ describe('the folds the unroll relies on', () => {
 });
 
 describe('a run-time integer exponent over a possibly negative base takes the sign-preserving helper on the shader targets', () => {
-  // GLSL and WGSL leave `pow(x, y)` undefined for a negative `x`, so
+  // GLSL leaves `pow(x, y)` undefined for a negative `x`, so
   // `(-1)^n` with a run-time `n` answered NaN on most drivers where the
   // interpreter answers `±1`. The exponent's TYPE is the gate: `_gpu_powi`
   // computes `pow(abs(x), n)` and negates for an odd `n`, which is right only
@@ -214,19 +214,19 @@ describe('a run-time integer exponent over a possibly negative base takes the si
   ce.declare('n', 'integer');
   ce.declare('p', 'real');
   ce.declare('V', 'vector<3>');
-  const gpu = (tex: string, to: 'glsl' | 'wgsl'): string => {
+  const gpu = (tex: string, to: 'glsl'): string => {
     const r = compile(ce.parse(tex), { to, fallback: false } as any);
     expect(r?.success).toBe(true);
     return r!.code!;
   };
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s: integer-typed exponents route through _gpu_powi',
     (to) => {
       expect(gpu('(-1)^{n}x', to)).toBe('x * _gpu_powi(-1.0, n)');
       expect(gpu('x^{n}', to)).toBe('_gpu_powi(x, n)');
       expect(gpu('V^{n}', to)).toBe('_gpu_powi3(V, n)');
       expect(gpu('\\sum_{k=1}^{n}(-1)^{k}x', to)).toContain(
-        to === 'glsl' ? '_gpu_powi(-1.0, float(k))' : '_gpu_powi(-1.0, f32(k))'
+        '_gpu_powi(-1.0, float(k))'
       );
       // A real exponent and a literal fractional one keep `pow`.
       expect(gpu('x^{p}', to)).toBe('pow(x, p)');
@@ -234,26 +234,20 @@ describe('a run-time integer exponent over a possibly negative base takes the si
     }
   );
 
-  // An `integer`-typed exponent may be NEGATIVE, and the two languages
-  // disagree on the remainder of a negative operand: GLSL `mod` is floored
-  // (`mod(-3.0, 2.0)` is 1.0) while WGSL `%` is truncated (`-3.0 % 2.0` is
-  // -1.0). Testing the parity of `abs(n)` makes the odd branch fire in both,
-  // so `_gpu_powi(-2.0, -3.0)` is -0.125 on either language.
-  test.each(['glsl', 'wgsl'] as const)(
+  // An `integer`-typed exponent may be NEGATIVE. The helper tests the parity
+  // of `abs(n)`, so the odd branch fires for a negative odd exponent:
+  // `_gpu_powi(-2.0, -3.0)` is -0.125.
+  test.each(['glsl'] as const)(
     '%s: the helper tests the parity of abs(n), so a negative odd exponent keeps the sign',
     (to) => {
       const r = compile(ce.parse('x^{n}'), { to, fallback: false } as any);
       expect(r?.success).toBe(true);
       const preamble = String(r!.preamble ?? '');
-      expect(preamble).toContain(
-        to === 'glsl' ? 'mod(abs(n), 2.0) == 1.0' : '(abs(n) % 2.0) == 1.0'
-      );
+      expect(preamble).toContain('mod(abs(n), 2.0) == 1.0');
       // The vector overloads carry the same parity test.
       const v = compile(ce.parse('V^{n}'), { to, fallback: false } as any);
       expect(v?.success).toBe(true);
-      expect(String(v!.preamble ?? '')).toContain(
-        to === 'glsl' ? 'mod(abs(n), 2.0) == 1.0' : '(abs(n) % 2.0) == 1.0'
-      );
+      expect(String(v!.preamble ?? '')).toContain('mod(abs(n), 2.0) == 1.0');
       // The emitted call itself is unchanged by the parity fix.
       expect(r!.code).toBe('_gpu_powi(x, n)');
     }

@@ -10,14 +10,10 @@
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { shaderFunctions } from './gpu-shader-f32-eval';
 
-const TARGETS = [
-  ['glsl', GLSLTarget],
-  ['wgsl', WGSLTarget],
-] as const;
+const TARGETS = [['glsl', GLSLTarget]] as const;
 
 let ce: ComputeEngine;
 beforeAll(() => {
@@ -25,7 +21,7 @@ beforeAll(() => {
   ce.declare('x', 'real');
 });
 
-function code(latex: string, Target: typeof GLSLTarget | typeof WGSLTarget) {
+function code(latex: string, Target: typeof GLSLTarget) {
   return new Target().compile(ce.parse(latex)).code;
 }
 
@@ -101,10 +97,7 @@ describe('the value of the emitted shader, in float32', () => {
   for (const [language, Target] of TARGETS)
     test.each(CASES)(`${language}: %s`, (latex) => {
       const r = new Target().compile(ce.parse(latex));
-      const main =
-        language === 'glsl'
-          ? `float _main(float x) { return ${r.code}; }`
-          : `fn _main(x: f32) -> f32 { return ${r.code}; }`;
+      const main = `float _main(float x) { return ${r.code}; }`;
       const run = shaderFunctions(`${r.preamble ?? ''}\n${main}`, language);
       for (const x of POINTS) {
         const got = run('_main', x) as number;

@@ -267,13 +267,6 @@ describe('CE-564.4: a list argument at a parameter bound whole', () => {
       );
     });
 
-    test(`WGSL emits a copy of R with a vec2f parameter (${route})`, () => {
-      const ce = engineWithR(route);
-      const result = compile(ce.box(row as any) as any, { to: 'wgsl' });
-      expect(result.success).toBe(true);
-      expect(result.preamble).toMatch(/fn _fn_R_\w+\(V: vec2f, t: f32\)/);
-    });
-
     // interval-js compiled the generic definition of `R` against the scalar
     // arm of its parameter and answered an empty interval, then failed
     // closed. It now emits a copy of `R` typed by the list argument, as

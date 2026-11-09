@@ -17,8 +17,7 @@
  * `Mod(u, 1)` and `Fract(u)` with `u = O·sin(Σ Kᵢ·xᵢ + c)` (or `cos`, and the
  * sum may be a `Dot` of a vector with a list of numbers), the GLSL target
  * emits an exact form when `|O| ≤ 5·10^4` and every `xᵢ` is a value whose
- * float32 form is exact (`exactOperand`). Every other flagged operand, and
- * every flagged operand on WGSL, compiles to the usual float32 code with a
+ * float32 form is exact (`exactOperand`). Every other flagged operand compiles to the usual float32 code with a
  * warning of kind `'correctness'` and code `'float32-unsafe-argument'` on
  * `CompilationResult.warnings`, so that the caller can compute it on the CPU
  * when the value matters (a curve) and keep the shader when it does not (a

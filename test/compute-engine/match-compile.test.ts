@@ -255,12 +255,6 @@ describe('COMPILE Match — GPU targets', () => {
     expect(r.code).toContain('?');
   });
 
-  it('compiles tier 0/1 to a WGSL select chain', () => {
-    const r = compile(ce.box(m), { to: 'wgsl', fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('select');
-  });
-
   it('fails closed on a string constant (no string type)', () => {
     const expr: MathJsonExpression = [
       'Match',
@@ -382,16 +376,11 @@ describe('COMPILE Match — range patterns', () => {
     ).toBe(-1);
   });
 
-  it('compiles to GLSL and WGSL (Infinity bounds included)', () => {
+  it('compiles to GLSL (Infinity bounds included)', () => {
     const glsl = compile(ce.box(expr), { to: 'glsl', fallback: false });
     expect(glsl.success).toBe(true);
     expect(glsl.code).toContain('>= 1.0');
     expect(glsl.code).toContain('<= 10.0');
-
-    const wgsl = compile(ce.box(expr), { to: 'wgsl', fallback: false });
-    expect(wgsl.success).toBe(true);
-    expect(wgsl.code).toContain('select');
-    expect(wgsl.code).toContain('>= 1.0');
   });
 
   it('fails closed on a `Range` with non-literal bounds (a tier-3 pattern)', () => {

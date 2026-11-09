@@ -761,9 +761,9 @@ describe('D13: the JavaScript fail-closed cells', () => {
   });
 });
 
-// ── GLSL / WGSL ─────────────────────────────────────────────────────────────
+// ── GLSL ────────────────────────────────────────────────────────────────────
 
-describe('D13: GLSL and WGSL reject strings and characters, as before', () => {
+describe('D13: GLSL rejects strings and characters, as before', () => {
   // The shader targets have no text at all — no string type, no grapheme
   // segmentation, no dynamic arrays. The lattice change (a string became an
   // indexed collection, and `character` a new scalar) must not have moved any
@@ -772,7 +772,7 @@ describe('D13: GLSL and WGSL reject strings and characters, as before', () => {
   // anything about the string lattice.
   const S = { str: 'abc' };
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s rejects every string-collection operation',
     (to) => {
       for (const src of [
@@ -789,7 +789,7 @@ describe('D13: GLSL and WGSL reject strings and characters, as before', () => {
     }
   );
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s rejects a text-typed symbol reached only through a user-function BODY',
     (to) => {
       // The text-symbol gate collects names once per compiled ROOT, but a
@@ -811,7 +811,7 @@ describe('D13: GLSL and WGSL reject strings and characters, as before', () => {
     }
   );
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s rejects a string-typed free symbol in the same shapes',
     (to) => {
       ce.declare('sv', 'string');
@@ -826,35 +826,29 @@ describe('D13: GLSL and WGSL reject strings and characters, as before', () => {
     }
   );
 
-  test.each(['glsl', 'wgsl'] as const)(
-    '%s rejects a character operand',
-    (to) => {
-      for (const src of [
-        ['CharacterFrom', { str: 'a' }],
-        ['Equal', char('a'), char('a')],
-        ['Less', char('a'), char('b')],
-        ['List', char('a'), char('b')],
-        ['Add', char('a'), 1],
-      ])
-        expect(
-          compile(ce.box(src as never), { to, constantFold: false }).success
-        ).toBe(false);
-    }
-  );
+  test.each(['glsl'] as const)('%s rejects a character operand', (to) => {
+    for (const src of [
+      ['CharacterFrom', { str: 'a' }],
+      ['Equal', char('a'), char('a')],
+      ['Less', char('a'), char('b')],
+      ['List', char('a'), char('b')],
+      ['Add', char('a'), 1],
+    ])
+      expect(
+        compile(ce.box(src as never), { to, constantFold: false }).success
+      ).toBe(false);
+  });
 
-  test.each(['glsl', 'wgsl'] as const)(
-    '%s rejects a bare string literal',
-    (to) => {
-      // Before this gate the target's `string` hook emitted
-      // `JSON.stringify(str)`, so a bare string literal compiled to `"a"` —
-      // source no shader driver accepts, behind `success: true`.
-      const r = compile(ce.box({ str: 'a' }), { to, constantFold: false });
-      expect(r.success).toBe(false);
-      expect(r.error ?? '').toMatch(/string literal .* is not supported/);
-    }
-  );
+  test.each(['glsl'] as const)('%s rejects a bare string literal', (to) => {
+    // Before this gate the target's `string` hook emitted
+    // `JSON.stringify(str)`, so a bare string literal compiled to `"a"` —
+    // source no shader driver accepts, behind `success: true`.
+    const r = compile(ce.box({ str: 'a' }), { to, constantFold: false });
+    expect(r.success).toBe(false);
+    expect(r.error ?? '').toMatch(/string literal .* is not supported/);
+  });
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s rejects a string literal as an operand of a supported op',
     (to) => {
       // `List` and the comparison operators DO lower on these targets, so the
@@ -873,7 +867,7 @@ describe('D13: GLSL and WGSL reject strings and characters, as before', () => {
     }
   );
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s rejects a string-TYPED symbol as an operand',
     (to) => {
       // A text-typed free symbol emitted a bare identifier, which the caller

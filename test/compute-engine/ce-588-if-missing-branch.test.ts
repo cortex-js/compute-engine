@@ -11,10 +11,10 @@ import { TEST_PYTHON } from './test-python';
  * marker of the shape of the other value, the marker the else-less
  * `If(c, (x, y))` already gave.
  *
- * - GLSL and WGSL: the written value compiled to a scalar `_gpu_nan()` beside
- *   a `vec2` value. A GLSL ternary and a WGSL `select` need two operands of
- *   one type, so the shader was not valid. It is now `vec2(_gpu_nan())`
- *   (`vec2f` in WGSL). Beside a complex value the selection declined ("the
+ * - GLSL: the written value compiled to a scalar `_gpu_nan()` beside
+ *   a `vec2` value. A GLSL ternary needs two operands of
+ *   one type, so the shader was not valid. It is now `vec2(_gpu_nan())`.
+ *   Beside a complex value the selection declined ("the
  *   value `Missing` is not a number"); it is now `vec2(_gpu_nan())` too. A
  *   2-element list `[x, y]` beside `Missing` declined, as did the else-less
  *   `If(c, [x, y])` ("object-domain absent
@@ -220,8 +220,8 @@ describe('CE-588 — javascript', () => {
   });
 });
 
-describe.each(['glsl', 'wgsl'] as const)('CE-588 — %s', (to) => {
-  const vec2 = to === 'glsl' ? 'vec2' : 'vec2f';
+describe.each(['glsl'] as const)('CE-588 — %s', (to) => {
+  const vec2 = 'vec2';
 
   /** The compiled code, and a shader function `f(c, d, x, y)` that returns
    * it. A boolean argument is passed as 1 or 0 (the interpreter of
@@ -236,10 +236,7 @@ describe.each(['glsl', 'wgsl'] as const)('CE-588 — %s', (to) => {
       fallback: false,
     } as never) as { success: boolean; code: string; preamble?: string };
     expect(r.success).toBe(true);
-    const src =
-      to === 'glsl'
-        ? `${r.preamble ?? ''}\nvec2 f(bool c, bool d, float x, float y) {\nreturn ${r.code};\n}`
-        : `${r.preamble ?? ''}\nfn f(c: bool, d: bool, x: f32, y: f32) -> vec2f {\nreturn ${r.code};\n}`;
+    const src = `${r.preamble ?? ''}\nvec2 f(bool c, bool d, float x, float y) {\nreturn ${r.code};\n}`;
     const run = shaderFunctions(src, to);
     return {
       code: r.code,
@@ -359,7 +356,7 @@ describe.each(['glsl', 'wgsl'] as const)('CE-588 — %s', (to) => {
       fallback: false,
     } as never) as { success: boolean; code: string };
     expect(r.success).toBe(true);
-    expect(r.code).toContain(to === 'glsl' ? 'vec2 _tv1;' : 'var _tv1: vec2f;');
+    expect(r.code).toContain('vec2 _tv1;');
     expect(r.code).toContain(`_tv1 = ${vec2}(_gpu_nan());`);
     expectOnlyVectorNaN(r.code);
   });
@@ -368,25 +365,12 @@ describe.each(['glsl', 'wgsl'] as const)('CE-588 — %s', (to) => {
     const t = (json: unknown) => shader(json).code;
     const nan = `${vec2}(_gpu_nan())`;
     const p = `${vec2}(x, y)`;
-    if (to === 'glsl') {
-      expect(t(['If', 'c', POINT, 'Missing'])).toBe(
-        `((c) ? (${p}) : (${nan}))`
-      );
-      expect(t(['If', 'c', 'Missing', POINT])).toBe(
-        `((c) ? (${nan}) : (${p}))`
-      );
-      expect(t(['If', 'c', LIST, 'Missing'])).toBe(`((c) ? (${p}) : (${nan}))`);
-      expect(t(['If', 'c', COMPLEX, 'Missing'])).toBe(
-        `((c) ? (${p}) : (${nan}))`
-      );
-    } else {
-      expect(t(['If', 'c', POINT, 'Missing'])).toBe(`select(${nan}, ${p}, c)`);
-      expect(t(['If', 'c', 'Missing', POINT])).toBe(`select(${p}, ${nan}, c)`);
-      expect(t(['If', 'c', LIST, 'Missing'])).toBe(`select(${nan}, ${p}, c)`);
-      expect(t(['If', 'c', COMPLEX, 'Missing'])).toBe(
-        `select(${nan}, ${p}, c)`
-      );
-    }
+    expect(t(['If', 'c', POINT, 'Missing'])).toBe(`((c) ? (${p}) : (${nan}))`);
+    expect(t(['If', 'c', 'Missing', POINT])).toBe(`((c) ? (${nan}) : (${p}))`);
+    expect(t(['If', 'c', LIST, 'Missing'])).toBe(`((c) ? (${p}) : (${nan}))`);
+    expect(t(['If', 'c', COMPLEX, 'Missing'])).toBe(
+      `((c) ? (${p}) : (${nan}))`
+    );
   });
 
   it('the else-less If and When over a list of two numbers', () => {
@@ -419,9 +403,7 @@ describe.each(['glsl', 'wgsl'] as const)('CE-588 — %s', (to) => {
       to,
       fallback: false,
     } as never);
-    expect(r.code).toBe(
-      to === 'glsl' ? '((c) ? (x) : (_gpu_nan()))' : 'select(_gpu_nan(), x, c)'
-    );
+    expect(r.code).toBe('((c) ? (x) : (_gpu_nan()))');
   });
 });
 

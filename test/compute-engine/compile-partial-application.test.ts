@@ -85,13 +85,7 @@ function evaluated(json: MathJsonExpression, u: number): number {
     .N().re;
 }
 
-const TARGETS = [
-  'javascript',
-  'interval-js',
-  'glsl',
-  'wgsl',
-  'python',
-] as const;
+const TARGETS = ['javascript', 'interval-js', 'glsl', 'python'] as const;
 
 /**
  * Expect every target to decline `json` with `message`. A target declines by
@@ -289,7 +283,7 @@ describe('PARTIAL APPLICATION — a call with every argument compiles', () => {
     expect(value.hi).toBeGreaterThanOrEqual(2.5);
   });
 
-  test.each(['glsl', 'wgsl'] as const)('%s', (to) => {
+  test.each(['glsl'] as const)('%s', (to) => {
     const r = compile(engine().box(['Apply', PURE_ADD, 1, 'u']), {
       to,
       fallback: false,

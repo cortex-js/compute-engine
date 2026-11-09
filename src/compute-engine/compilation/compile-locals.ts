@@ -652,8 +652,7 @@ export function nestedAssignmentsTo(
  * `Declare(x, "unknown", x + 1)`, which the parse of `x \coloneq x+1; 2x`
  * gives. The interpreter reads the enclosing binding of `x` in that value
  * (the symbol `x`, left symbolic), and the compiled code has no value for
- * it: JavaScript read `undefined` and answered `NaN`, WGSL read the zero a
- * `var` starts with, GLSL read an uninitialized variable, and Python read
+ * it: JavaScript read `undefined` and answered `NaN`, GLSL read an uninitialized variable, and Python read
  * a parameter of the same name.
  *
  * The first value of a local is the value of the first statement of the
@@ -723,7 +722,7 @@ export function assertLocalsAssignedBeforeRead(
  * (`read-before-declaration`), for a write as for a read, so a valid
  * expression has no such use, and this check stays as a second check.
  * Before the static rule, the compiled code did not report it:
- * JavaScript threw a `ReferenceError` when the code ran, and GLSL and WGSL
+ * JavaScript threw a `ReferenceError` when the code ran, and GLSL
  * wrote a variable before its declaration, which is not valid source.
  *
  * A use inside a function literal is not counted, since it happens when

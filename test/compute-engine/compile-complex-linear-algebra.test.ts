@@ -136,8 +136,8 @@ describe('NORM OF A LIST WITH A COMPLEX ENTRY', () => {
   // of the entries (`|i|` is `length(vec2(0.0, 1.0))`), which is what the
   // interpreter computes. Before 2026-09-24 the lowering emitted
   // `length(vec2[2](x, i))`, invalid shader code, behind `success: true`.
-  for (const to of ['glsl', 'wgsl'] as const) {
-    const vec = to === 'glsl' ? 'vec2' : 'vec2f';
+  for (const to of ['glsl'] as const) {
+    const vec = 'vec2';
     it(`${to} computes the norm of the moduli, parse route: Norm([x, i])`, () => {
       const ce = engine('real | signed_infinity | nan');
       const result = compile(

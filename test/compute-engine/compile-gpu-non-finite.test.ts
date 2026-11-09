@@ -1,15 +1,12 @@
 /**
  * NON-FINITE values and NO-REAL-VALUE constants on the GPU targets.
  *
- * Neither GLSL nor WGSL has a `NaN` or an `Infinity` LITERAL, and the number
+ * GLSL has no `NaN` or `Infinity` LITERAL, and the number
  * formatter used to reject both outright ("Cannot compile the non-finite
  * value …"). But the mechanism to MAKE those values already existed and was
  * already in use for masked restriction or `Which` branches: a bit pattern, reached
  * through `gpuNonFiniteLiteral` — the overridable `_gpu_nan()` / `_gpu_inf()`
- * preamble helpers, on both targets. (WGSL used an inline
- * `bitcast<f32>(0x7fc00000u)` until that was found to be a shader-creation
- * error in Chrome: a constant expression may not evaluate to NaN or an
- * infinity.) The literal path could
+ * preamble helpers. The literal path could
  * not reach it only because the formatter did not know the language.
  *
  * Consequently the constant-fold refusal for a provably non-real value is
@@ -24,7 +21,6 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import {
   formatFloat,
   principalComplexPow,
@@ -33,7 +29,6 @@ import {
 const ce = new ComputeEngine();
 ce.declare('x', 'real | signed_infinity | nan');
 const glsl = new GLSLTarget();
-const wgsl = new WGSLTarget();
 
 /**
  * Compile-time constant folding is off throughout this file. Every probe here
@@ -47,32 +42,26 @@ const wgsl = new WGSLTarget();
 const NO_FOLD = { constantFold: false } as const;
 
 const g = (expr: any): string => glsl.compile(ce.box(expr), NO_FOLD).code!;
-const w = (expr: any): string => wgsl.compile(ce.box(expr), NO_FOLD).code!;
 
-const NAN = { glsl: '_gpu_nan()', wgsl: '_gpu_nan()' };
-const INF = { glsl: '_gpu_inf()', wgsl: '_gpu_inf()' };
+const NAN = { glsl: '_gpu_nan()' };
+const INF = { glsl: '_gpu_inf()' };
 
 describe('GPU non-finite LITERALS route through the bit-pattern mechanism', () => {
   it('a NaN literal is the same symbol a masked branch produces', () => {
     expect(g('NaN')).toBe(NAN.glsl);
-    expect(w('NaN')).toBe(NAN.wgsl);
     // The same symbol the restriction else-branch has always used.
     expect(g(['If', ['Greater', 'x', 0], 'x'])).toContain(NAN.glsl);
-    expect(w(['If', ['Greater', 'x', 0], 'x'])).toContain(NAN.wgsl);
   });
 
   it('±∞ is a BIT PATTERN, never `1.0 / 0.0` (fast-math would fold it)', () => {
     expect(g('PositiveInfinity')).toBe(INF.glsl);
-    expect(w('PositiveInfinity')).toBe(INF.wgsl);
     expect(g('NegativeInfinity')).toBe(`(-${INF.glsl})`);
-    expect(w('NegativeInfinity')).toBe(`(-${INF.wgsl})`);
-    for (const code of [g('PositiveInfinity'), w('NegativeInfinity')])
+    for (const code of [g('PositiveInfinity'), g('NegativeInfinity')])
       expect(code).not.toMatch(/\/\s*0(\.0)?\b/);
   });
 
   it('a non-finite operand composes with ordinary arithmetic', () => {
     expect(g(['Add', 1, 'NaN'])).toBe(`1.0 + ${NAN.glsl}`);
-    expect(w(['Add', 1, 'PositiveInfinity'])).toBe(`1.0 + ${INF.wgsl}`);
   });
 
   it('ComplexInfinity lowers to the shader Infinity, not a vec2', () => {
@@ -84,7 +73,6 @@ describe('GPU non-finite LITERALS route through the bit-pattern mechanism', () =
     // also a shape mismatch wherever the surrounding expression expects a
     // float.
     expect(g(['Divide', 1, 0])).toBe(INF.glsl);
-    expect(w(['Divide', 1, 0])).toBe(INF.wgsl);
   });
 
   it('the gamma helper guards its poles, and GLSL declares Infinity before it', () => {
@@ -104,13 +92,6 @@ describe('GPU non-finite LITERALS route through the bit-pattern mechanism', () =
     expect(gPre.indexOf('float _gpu_inf')).toBeLessThan(
       gPre.indexOf('float _gpu_gamma')
     );
-
-    const wPre = wgsl.compile(ce.box(['Gamma', -2]), NO_FOLD).preamble ?? '';
-    expect(wPre).toContain('z <= 0.0 && z == floor(z)');
-    // WGSL declares the Infinity helper too (in any order: WGSL module
-    // declarations are order-independent).
-    expect(wPre).toContain(INF.wgsl);
-    expect(wPre).toContain('fn _gpu_inf() -> f32');
   });
 
   it('GLSL declares `_gpu_inf()` beside `_gpu_nan()`, both overridable', () => {
@@ -125,18 +106,6 @@ describe('GPU non-finite LITERALS route through the bit-pattern mechanism', () =
     expect(nan.preamble ?? '').not.toContain('_gpu_inf');
     expect(inf.preamble ?? '').not.toContain('_gpu_nan');
   });
-
-  it('WGSL declares the helper each literal needs, through a let', () => {
-    // A constant bitcast to a non-finite f32 is a shader-creation error in
-    // WGSL; the helper bitcasts a `let`, a run-time value.
-    const nan = wgsl.compile(ce.box('NaN')).preamble ?? '';
-    const inf = wgsl.compile(ce.box('PositiveInfinity')).preamble ?? '';
-    expect(nan).toContain('fn _gpu_nan() -> f32 {\n  let bits = 0x7fc00000u;');
-    expect(inf).toContain('fn _gpu_inf() -> f32 {\n  let bits = 0x7f800000u;');
-    expect(nan).not.toContain('_gpu_inf');
-    expect(inf).not.toContain('_gpu_nan');
-    expect(nan + inf).not.toMatch(/bitcast<f32>\(0x/);
-  });
 });
 
 describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () => {
@@ -147,7 +116,6 @@ describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () 
     // NaN would be consumed as a real by the surrounding complex arithmetic.
     expect(ce.box(['Sqrt', -5]).type.toString()).toBe('complex');
     expect(g(['Sqrt', -5])).toBe(`vec2(0.0, ${formatFloat(Math.sqrt(5))})`);
-    expect(w(['Sqrt', -5])).toBe(`vec2f(0.0, ${formatFloat(Math.sqrt(5))})`);
     // …and it composes as a complex value.
     expect(g(['Add', 1, ['Sqrt', -5]])).toBe(
       `vec2(1.0, 0.0) + vec2(0.0, ${formatFloat(Math.sqrt(5))})`
@@ -170,14 +138,10 @@ describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () 
     const pRe = formatFloat(p.re);
     const pIm = formatFloat(p.im);
     expect(g(['Power', -2, 0.3])).toBe(`vec2(${pRe}, ${pIm})`);
-    expect(w(['Power', -2, 0.3])).toBe(`vec2f(${pRe}, ${pIm})`);
     expect(ce.box(['Root', -8, 4]).type.toString()).toBe('complex');
     const r = principalComplexPow(-8, 0.25);
     expect(g(['Root', -8, 4])).toBe(
       `vec2(${formatFloat(r.re)}, ${formatFloat(r.im)})`
-    );
-    expect(w(['Root', -8, 4])).toBe(
-      `vec2f(${formatFloat(r.re)}, ${formatFloat(r.im)})`
     );
     // …and it composes as a complex value, rather than broadcasting a scalar
     // NaN into the parent's vec2 (`vec2(1.0, 0.0) + _gpu_nan()`).
@@ -194,21 +158,19 @@ describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () 
       'real<0..>'
     );
     expect(g(['Power', -8, ['Divide', 2, 3]])).toBe('4.0');
-    expect(w(['Power', -8, ['Divide', 2, 3]])).toBe('4.0');
     expect(g(['Root', -8, 3])).toBe('-2.0');
 
     // …including an exponent whose EXACT denominator is odd but whose double
     // reconstructs to an even one: `100/3`'s double expands by continued
     // fractions to the dyadic `4691249611844267/140737488355328`. The branch is
     // decided by the exact rational (as the type handler already did), so this
-    // folds to the real `+2^(100/3)` on both shader targets instead of the
+    // folds to the real `+2^(100/3)` on the shader target instead of the
     // shader NaN it used to yield.
     expect(ce.box(['Power', -2, ['Divide', 100, 3]]).type.toString()).toBe(
       'real<0..>'
     );
     const real100over3 = formatFloat(Math.pow(2, 100 / 3));
     expect(g(['Power', -2, ['Divide', 100, 3]])).toBe(real100over3);
-    expect(w(['Power', -2, ['Divide', 100, 3]])).toBe(real100over3);
   });
 
   it('the SIBLING cases it used to disagree with are unchanged', () => {
@@ -241,7 +203,6 @@ describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () 
 
   it('an odd root of a negative constant still folds to the REAL value', () => {
     expect(g(['Root', -8, 3])).toBe('-2.0');
-    expect(w(['Root', -8, 3])).toBe('-2.0');
   });
 });
 
@@ -266,9 +227,8 @@ describe('a POLE JOIN drives the GPU complex lane by its FINITE part', () => {
       );
   });
 
-  it('lowers them through the COMPLEX helpers on both shader targets', () => {
+  it('lowers them through the COMPLEX helpers on the shader target', () => {
     expect(g(['Artanh', 'xr'])).toBe('_gpu_catanh(vec2(xr, 0.0))');
-    expect(w(['Artanh', 'xr'])).toBe('_gpu_catanh(vec2f(xr, 0.0))');
     expect(g(['Arcoth', 'xr'])).toBe('_gpu_cacoth(vec2(xr, 0.0))');
     expect(g(['Arsech', 'xr'])).toBe('_gpu_casech(vec2(xr, 0.0))');
   });
@@ -278,6 +238,5 @@ describe('a POLE JOIN drives the GPU complex lane by its FINITE part', () => {
     // `atanh(xr)` on the left would broadcast instead of failing to compile.
     const sum = ['Add', ['Artanh', 'xr'], ['Complex', 0, 1]];
     expect(g(sum)).toBe('_gpu_catanh(vec2(xr, 0.0)) + vec2(0.0, 1.0)');
-    expect(w(sum)).toBe('_gpu_catanh(vec2f(xr, 0.0)) + vec2f(0.0, 1.0)');
   });
 });

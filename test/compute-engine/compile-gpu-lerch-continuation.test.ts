@@ -1,5 +1,5 @@
 /**
- * The GPU (GLSL and WGSL) LerchPhi and PolyLog helpers past the unit disk
+ * The GPU (GLSL) LerchPhi and PolyLog helpers past the unit disk
  * and where the direct sums cancel: the positive integral (s > 0, and after
  * n integrations by parts for s <= 0), the rational closed form for a
  * non-positive integer s, the Hermite-type representation, for PolyLog
@@ -19,7 +19,6 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import * as lerchModel from './gpu-lerch-f32-model';
 import {
   gpuHurwitzZetaModel,
@@ -43,11 +42,6 @@ const targets = [
     'GLSL',
     new GLSLTarget(),
     (name: string) => new RegExp(`^(?:float|vec2|vec4|void) ${name}\\(`, 'm'),
-  ],
-  [
-    'WGSL',
-    new WGSLTarget(),
-    (name: string) => new RegExp(`^fn ${name}\\(`, 'm'),
   ],
 ] as const;
 
@@ -119,7 +113,7 @@ describe('GPU LerchPhi / PolyLog continuation: emitted text', () => {
         '_gpu_lerch_hermite',
       ])
         expect(preamble).toMatch(head(name));
-      // Each definition precedes its first use (GLSL and WGSL both need it).
+      // Each definition precedes its first use (GLSL needs it).
       const names = definedNames(preamble);
       expect(names.indexOf('_gpu_lerch_core')).toBeLessThan(
         names.indexOf('_gpu_poly_log_inversion')
@@ -156,18 +150,6 @@ describe('GPU LerchPhi / PolyLog continuation: emitted text', () => {
   test('GLSL: no variable is named `out` (a GLSL keyword: the shader would not compile)', () => {
     const r = new GLSLTarget().compile(ce.box(['Add', LERCH, POLYLOG]));
     expect(r.preamble ?? '').not.toMatch(/\b(?:float|int|vec2|vec4)\s+out\b/);
-  });
-
-  test('WGSL: NaN and Infinity come from the _gpu_nan / _gpu_inf helpers', () => {
-    // A bitcast of a CONSTANT to a non-finite f32 is a shader-creation error
-    // in WGSL ("value nan cannot be represented as 'f32'"), so no helper may
-    // spell it inline; the helpers bitcast a let.
-    const r = new WGSLTarget().compile(ce.box(['Add', LERCH, POLYLOG]));
-    const preamble = r.preamble ?? '';
-    expect(preamble).not.toMatch(/bitcast<f32>\(0x/);
-    expect(preamble).toContain('fn _gpu_nan() -> f32');
-    expect(preamble).toContain('fn _gpu_inf() -> f32');
-    expect(definition(preamble, '_gpu_lerch_phi')).toContain('_gpu_nan()');
   });
 
   test.each(targets)(

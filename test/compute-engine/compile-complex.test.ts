@@ -2652,7 +2652,7 @@ describe('COMPILE COMPLEX - GPU selection ignores a dead complex arm (CE-230.5)'
     ],
     ['If', ['Abs', ['If', ['Greater', 1, 0], 'x', 'ImaginaryUnit']]],
   ];
-  for (const to of ['glsl', 'wgsl'] as const) {
+  for (const to of ['glsl'] as const) {
     for (const [name, json] of cases) {
       it(`${to}: ${name} with a dead complex arm stays real`, () => {
         const engine = new ComputeEngine();

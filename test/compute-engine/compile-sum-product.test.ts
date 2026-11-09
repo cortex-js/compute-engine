@@ -607,7 +607,7 @@ describe('COMPILE SUM/PRODUCT: A BODY THAT WRITES THE INDEX', () => {
   };
 
   test.each(
-    ['javascript', 'interval-js', 'python', 'glsl', 'wgsl'].flatMap((to) =>
+    ['javascript', 'interval-js', 'python', 'glsl'].flatMap((to) =>
       CASES.map(([name, json, index]) => [to, name, json, index] as const)
     )
   )('%s declines %s', (to, _name, json, index) => {
@@ -773,8 +773,6 @@ describe('COMPILE SUM/PRODUCT: A BOUND THAT READS A VARIABLE WITH THE NAME OF TH
     ['glsl', 'Sum', 'j', 3],
     ['glsl', 'Sum', ['Add', 'j', 2], 10],
     ['glsl', 'Product', 'j', 2],
-    ['wgsl', 'Sum', 'j', 3],
-    ['wgsl', 'Product', ['Add', 'j', 2], 24],
   ] as const)('%s: %s, upper bound %j', (to, op, hi, v) => {
     const expr = block(op, 'j', ['Limits', 'j', 1, hi]);
     expect(ce.box(expr as any).evaluate().re).toBe(v);
@@ -837,7 +835,7 @@ describe('COMPILE SUM/PRODUCT: A BOUND THAT IS NOT PURE', () => {
     }
   );
   test.each(
-    ['javascript', 'interval-js', 'python', 'glsl', 'wgsl'].flatMap((to) =>
+    ['javascript', 'interval-js', 'python', 'glsl'].flatMap((to) =>
       exprs.map((e) => [to, JSON.stringify(e), e] as const)
     )
   )('%s declines %s', (to, _name, e) => {

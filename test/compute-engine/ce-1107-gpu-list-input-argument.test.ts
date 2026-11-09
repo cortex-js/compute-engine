@@ -1,5 +1,5 @@
 /**
- * CE-1107. On the GLSL and WGSL targets, a call of a user function with a list
+ * CE-1107. On the GLSL target, a call of a user function with a list
  * input as an argument, `g(H, x)` with `g(H: list<integer>, x: real)`.
  *
  * A shader function has no parameter for a list of the lengths that an input
@@ -8,8 +8,7 @@
  * no enclosing form binds), the call takes a variant of `g` with no parameter
  * `H`, whose body reads the input itself: `_fn_g_bind0_H(x)`. The input is
  * read as at the top level: through the texture helper with the hint
- * `storage: { H: 'sampler2D' }`, through the storage buffer helper with a
- * `storage-buffer` hint, or as a uniform array.
+ * `storage: { H: 'sampler2D' }`, or as a uniform array.
  *
  * Tycho draws a heatmap whose colour formula reads three planes of one list
  * (the showcase entry `buddhabrot`). Without this variant, a colour formula
@@ -19,10 +18,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const glsl = new GLSLTarget();
-const wgsl = new WGSLTarget();
 
 /** A fresh engine with the inputs `H`, `K`, `x`, `y` and the program `src`. */
 function engineWith(src: string, hType = 'list<number^1600>'): ComputeEngine {
@@ -83,27 +80,12 @@ describe('CE-1107: a list input as the argument of a shader function', () => {
     expect(r.preamble).toContain('_gpu_texat90001(H, 90001.0)');
   });
 
-  test('WGSL, the input in a storage buffer', () => {
-    const ce = engineWith(G);
-    const r = wgsl.compile(ce.box(['g', 'H', 'x']), {
-      fallback: false,
-      storage: { H: { kind: 'storage-buffer', group: 0, binding: 0 } },
-    });
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('_fn_g_bind0_H(x)');
-    expect(r.preamble).toContain('fn _fn_g_bind0_H(x: f32) -> f32 {');
-    expect(r.preamble).toContain('_gpu_sbat_H(1600.0)');
-  });
-
-  test('GLSL and WGSL, the input as a uniform array', () => {
+  test('GLSL, the input as a uniform array', () => {
     const ce = engineWith(G);
     const call = ce.box(['g', 'H', 'x']);
     const g = glsl.compile(call, { fallback: false });
     expect(g.code).toBe('_fn_g_bind0_H(x)');
     expect(g.preamble).toContain('return x * H[1599];');
-    const w = wgsl.compile(call, { fallback: false });
-    expect(w.code).toBe('_fn_g_bind0_H(x)');
-    expect(w.preamble).toContain('return x * H[1599];');
   });
 
   test('the calls with the same input share one variant', () => {

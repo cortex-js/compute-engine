@@ -95,7 +95,7 @@ describe('compile mode — option surface (step 1)', () => {
   });
 
   it('a mode the target does not offer is a capability decline, never a silent coercion', () => {
-    for (const to of ['glsl', 'wgsl', 'interval-js'] as const) {
+    for (const to of ['glsl', 'interval-js'] as const) {
       for (const mode of ['complex', 'auto'] as const) {
         // `'auto'` is no longer a `CompileMode`; a host that does not
         // type-check its options can still pass it.

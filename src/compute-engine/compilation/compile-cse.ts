@@ -127,8 +127,7 @@ export function registryLocalName(
   // Shader identifiers cannot contain dollar signs or consecutive
   // underscores. Normalize before collision allocation so distinct
   // function names and specialization keys still get distinct bindings.
-  const shader =
-    registry.root?.language === 'glsl' || registry.root?.language === 'wgsl';
+  const shader = registry.root?.language === 'glsl';
   const base = shader ? raw.replace(/[$_]+/g, '_').replace(/_+$/, '') : raw;
   let name = base;
   for (let k = 2; taken.has(name) || used?.has(name) === true; k++)
@@ -1642,8 +1641,7 @@ export function loopInvariantHoistCandidates(
       !invariant &&
       (target.language === 'javascript' ||
         target.language === 'interval-javascript' ||
-        target.language === 'glsl' ||
-        target.language === 'wgsl') &&
+        target.language === 'glsl') &&
       !_prefixCallOverrides.has(node)
     ) {
       const synthesized = synthesizeInvariantPrefixes(

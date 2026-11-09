@@ -102,16 +102,6 @@ describe('CE-562 — a user-function body shares a call between the condition an
     );
   });
 
-  it('wgsl', () => {
-    const ce = engineWithT4();
-    const r = compile(ce.parse('\\cos(T_4(t))'), { to: 'wgsl' });
-    expect(r.success).toBe(true);
-    const body = definition(r.preamble, 'T_4');
-    expect(count(body, '_fn_T_3(')).toBe(1);
-    // The binding is placed before the `if`, which reads it.
-    expect(body.indexOf('_fn_T_3(')).toBeLessThan(body.indexOf('if ('));
-  });
-
   it('interval-js', () => {
     const ce = engineWithT4();
     const r = compile(ce.parse('\\cos(T_4(t))'), { to: 'interval-js' });
@@ -149,7 +139,7 @@ describe('CE-562 — a top-level When', () => {
   }
   const shared = ['If', ['Less', 0, ['Cos', ['f', 'x']]], ['f', 'x']];
 
-  it.each(['javascript', 'glsl', 'wgsl', 'interval-js'] as const)(
+  it.each(['javascript', 'glsl', 'interval-js'] as const)(
     '%s: the call is emitted once',
     (to) => {
       const ce = engineWithF();
@@ -313,7 +303,7 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
   }
   const VARS = { s_eed: 'u_var_s_5f_eed', N: 'u_var_N' };
 
-  it.each(['glsl', 'wgsl'] as const)(
+  it.each(['glsl'] as const)(
     '%s: each statement calls p_rand once',
     (to) => {
       const ce = engineWithFBm();
@@ -346,7 +336,7 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
   }
   const twice = ['Add', ['f', 'a'], ['Sin', ['f', 'a']]];
 
-  it.each(['glsl', 'wgsl'] as const)(
+  it.each(['glsl'] as const)(
     '%s: a bare identifier is shared',
     (to) => {
       const ce = engineWithF();
@@ -356,7 +346,7 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
     }
   );
 
-  it.each(['glsl', 'wgsl'] as const)(
+  it.each(['glsl'] as const)(
     '%s: a vars source that is an expression stays opaque',
     (to) => {
       const ce = engineWithF();
@@ -377,7 +367,7 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
 
   // Before the refusal, `vars: { a: 'k' }` beside a local `k` emitted
   // `_fn_f(k)` after `k = x + 1.0`: every read of `a` gave the local's value.
-  it.each(['glsl', 'wgsl'] as const)(
+  it.each(['glsl'] as const)(
     '%s: a source that names a Block local is refused',
     (to) => {
       const ce = engineWithF();
@@ -392,7 +382,7 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
     }
   );
 
-  it.each(['glsl', 'wgsl'] as const)(
+  it.each(['glsl'] as const)(
     '%s: a source that names a binder variable or a parameter is refused',
     (to) => {
       const ce = engineWithF();
@@ -412,7 +402,7 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
     }
   );
 
-  it.each(['glsl', 'wgsl'] as const)(
+  it.each(['glsl'] as const)(
     '%s: a renamed uniform that names no variable compiles and is shared',
     (to) => {
       const ce = engineWithF();
@@ -425,7 +415,7 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
     }
   );
 
-  it.each(['glsl', 'wgsl'] as const)(
+  it.each(['glsl'] as const)(
     '%s: a self-mapped entry compiles, and declines when the code writes the symbol',
     (to) => {
       const ce = engineWithF();
@@ -448,7 +438,7 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
     }
   );
 
-  it.each(['glsl', 'wgsl'] as const)(
+  it.each(['glsl'] as const)(
     '%s: a source that names a symbol the code only reads compiles and stays opaque',
     (to) => {
       const ce = engineWithF();
@@ -461,7 +451,7 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
     }
   );
 
-  it.each(['glsl', 'wgsl'] as const)(
+  it.each(['glsl'] as const)(
     '%s: two vars keys with one source stay opaque',
     (to) => {
       const ce = engineWithF();
@@ -476,7 +466,7 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
 
   // A host can pass one `vars` map for many expressions: an entry whose key
   // the code never reads is not refused, even when its source names a local.
-  it.each(['glsl', 'wgsl'] as const)(
+  it.each(['glsl'] as const)(
     '%s: an entry whose key the code does not read is not refused',
     (to) => {
       const ce = engineWithF();
@@ -498,7 +488,7 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
   // emitted code. Before the refusal, `w := Sum(k·a, k, 1, 100000)` with
   // `vars: { a: 'k' }` emitted `_tv1 += k * float(k)` inside
   // `for (int k = 1; …)`: the read of `a` gave the loop variable.
-  it.each(['glsl', 'wgsl'] as const)(
+  it.each(['glsl'] as const)(
     '%s: a source that names a binder in the value of an assigned symbol is refused',
     (to) => {
       const ce = engineWithF();

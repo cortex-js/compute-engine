@@ -27,12 +27,10 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
 const glsl = new GLSLTarget();
-const wgsl = new WGSLTarget();
 
 /**
  * Compile-time constant folding is off: several probes below are all-literal
@@ -47,17 +45,10 @@ function g(expr: any): string {
   return result.code!;
 }
 
-function w(expr: any): string {
-  const result = wgsl.compile(ce.box(expr), NO_FOLD);
-  expect(result.success).toBe(true);
-  return result.code!;
-}
-
 describe('a compound factor of a vector Multiply keeps its grouping', () => {
   test('the minimal shape: (t + 1) · (x, 0)', () => {
     const expr = ['Multiply', ['Add', 't', 1], ['Tuple', 'x', 0]];
     expect(g(expr)).toBe('(t + 1.0) * vec2(x, 0.0)');
-    expect(w(expr)).toBe('(t + 1.0) * vec2f(x, 0.0)');
   });
 
   test('the lerp witness t·P₁ + (1 − t)·P₀', () => {
@@ -67,7 +58,6 @@ describe('a compound factor of a vector Multiply keeps its grouping', () => {
       ['Multiply', ['Add', ['Negate', 't'], 1], ['Tuple', 'x0', 'y0']],
     ];
     expect(g(expr)).toBe('(-t + 1.0) * vec2(x0, y0) + t * vec2(x1, y1)');
-    expect(w(expr)).toBe('(-t + 1.0) * vec2f(x0, y0) + t * vec2f(x1, y1)');
   });
 
   test('the lerp witness with the terms authored in the other order', () => {
@@ -77,13 +67,11 @@ describe('a compound factor of a vector Multiply keeps its grouping', () => {
       ['Multiply', 't', ['Tuple', 'x1', 'y1']],
     ];
     expect(g(expr)).toBe('(-t + 1.0) * vec2(x0, y0) + t * vec2(x1, y1)');
-    expect(w(expr)).toBe('(-t + 1.0) * vec2f(x0, y0) + t * vec2f(x1, y1)');
   });
 
   test('three factors: 2 · (t + 1) · (x, 0)', () => {
     const expr = ['Multiply', ['Add', 't', 1], ['Tuple', 'x', 0], 2];
     expect(g(expr)).toBe('2.0 * (t + 1.0) * vec2(x, 0.0)');
-    expect(w(expr)).toBe('2.0 * (t + 1.0) * vec2f(x, 0.0)');
   });
 
   test('a sum of two POINTS as the factor: s · (P + Q)', () => {
@@ -96,7 +84,6 @@ describe('a compound factor of a vector Multiply keeps its grouping', () => {
       's',
     ];
     expect(g(expr)).toBe('s * (vec2(a, b) + vec2(c, d))');
-    expect(w(expr)).toBe('s * (vec2f(a, b) + vec2f(c, d))');
   });
 
   test('a compound factor on BOTH sides: (t + 1) · (P + Q)', () => {
@@ -106,7 +93,6 @@ describe('a compound factor of a vector Multiply keeps its grouping', () => {
       ['Add', 't', 1],
     ];
     expect(g(expr)).toBe('(t + 1.0) * (vec2(a, b) + vec2(c, d))');
-    expect(w(expr)).toBe('(t + 1.0) * (vec2f(a, b) + vec2f(c, d))');
   });
 
   test('a user function whose body is a sum compiles to an atomic call', () => {
@@ -131,7 +117,6 @@ describe('a single-statement Block keeps its grouping as a sub-expression', () =
   test('as a factor, on every target', () => {
     const expr = ['Multiply', block, 'x'];
     expect(g(expr)).toBe('x * (t + 1.0)');
-    expect(w(expr)).toBe('x * (t + 1.0)');
     const js = compile(ce.box(expr as any), {
       to: 'javascript',
       constantFold: false,
@@ -153,7 +138,6 @@ describe('a single-statement Block keeps its grouping as a sub-expression', () =
 
   test('under a Negate', () => {
     expect(g(['Negate', block])).toBe('-(t + 1.0)');
-    expect(w(['Negate', block])).toBe('-(t + 1.0)');
   });
 
   test('no parentheses where the enclosing operator binds looser', () => {
@@ -169,13 +153,11 @@ describe('controls: emissions that were already correct are unchanged', () => {
   test('a SCALAR multiply takes the infix path and self-parenthesizes', () => {
     const expr = ['Multiply', ['Add', 't', 1], 'x'];
     expect(g(expr)).toBe('x * (t + 1.0)');
-    expect(w(expr)).toBe('x * (t + 1.0)');
   });
 
   test('a Divide by a sum', () => {
     const expr = ['Divide', ['Tuple', 'x', 0], ['Add', 't', 1]];
     expect(g(expr)).toBe('vec2(x / (t + 1.0), 0.0)');
-    expect(w(expr)).toBe('vec2f(x / (t + 1.0), 0.0)');
   });
 
   test('a Negate factor is not re-wrapped', () => {

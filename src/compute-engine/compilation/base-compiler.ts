@@ -61,7 +61,6 @@ import {
   isUserDefinedFunction,
   joinShaderStatements,
   loopBodyTempTarget,
-  shaderExpressionStatement,
   snapshotCseInstances,
   statementLines,
   statementListDeclaredVarTypes,
@@ -1332,7 +1331,6 @@ export class BaseCompiler {
   ) {
     core.shaderSelectionStatement = f;
   }
-  static readonly shaderExpressionStatement = shaderExpressionStatement;
   static readonly withDefineFunctionDeclares = withDefineFunctionDeclares;
   static readonly refuseEffectContractViolations =
     refuseEffectContractViolations;

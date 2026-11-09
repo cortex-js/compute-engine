@@ -3,8 +3,7 @@
 /**
  * Per-function complex arithmetic definitions with dependency metadata.
  *
- * Each entry maps a helper function name to its GLSL source, WGSL source,
- * and the list of other helper functions it calls. The preamble builder
+ * Each entry maps a helper function name to its GLSL source and the list of other helper functions it calls. The preamble builder
  * uses this to emit only the functions actually referenced by compiled code,
  * in topological (dependency) order.
  *
@@ -13,28 +12,25 @@
  */
 interface ComplexFunctionDef {
   glsl: string;
-  wgsl: string;
   deps: string[];
 }
 
 /**
  * The first statements of a complex shader helper whose operand `v` (a
  * `vec2`) may have a NaN part: return the first NaN part in both
- * components. On Apple GPUs (WebGL2 over ANGLE Metal, WebGPU over Metal) the
+ * components. On Apple GPUs (WebGL2 over ANGLE Metal) the
  * built-ins `sin` and `cos` of a NaN give 0, so `exp(z) = e^x (cos y, sin y)`
  * with a NaN `y` gave `(0, 0)`, where the interpreter gives NaN (measured
  * for `exp`, `sin`, `cos`, `sinh` and `cosh`). The test reads the bits (the
  * NaN test of `gpuNaNSafeLibrary`, written out because the complex helpers
  * are placed before that library in the preamble), and the NaN is returned
- * by selection, with no arithmetic, because WGSL refuses a NaN produced by a
- * constant expression.
+ * by selection, with no arithmetic.
  */
-function gpuNaNPartGuard(v: string, isWGSL: boolean): string {
+function gpuNaNPartGuard(v: string): string {
   return ['x', 'y']
-    .map((p) =>
-      isWGSL
-        ? `if ((bitcast<u32>(${v}.${p}) & 0x7FFFFFFFu) > 0x7F800000u) { return vec2f(${v}.${p}); }`
-        : `if ((floatBitsToUint(${v}.${p}) & 0x7FFFFFFFu) > 0x7F800000u) return vec2(${v}.${p});`
+    .map(
+      (p) =>
+        `if ((floatBitsToUint(${v}.${p}) & 0x7FFFFFFFu) > 0x7F800000u) return vec2(${v}.${p});`
     )
     .join('\n  ');
 }
@@ -54,9 +50,6 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
     glsl: `vec2 _gpu_cmul(vec2 a, vec2 b) {
   return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
 }`,
-    wgsl: `fn _gpu_cmul(a: vec2f, b: vec2f) -> vec2f {
-  return vec2f(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
-}`,
   },
   _gpu_cdiv: {
     deps: [],
@@ -64,33 +57,20 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   float d = b.x * b.x + b.y * b.y;
   return vec2((a.x * b.x + a.y * b.y) / d, (a.y * b.x - a.x * b.y) / d);
 }`,
-    wgsl: `fn _gpu_cdiv(a: vec2f, b: vec2f) -> vec2f {
-  let d = b.x * b.x + b.y * b.y;
-  return vec2f((a.x * b.x + a.y * b.y) / d, (a.y * b.x - a.x * b.y) / d);
-}`,
   },
   _gpu_cexp: {
     deps: [],
     glsl: `vec2 _gpu_cexp(vec2 z) {
-  ${gpuNaNPartGuard('z', false)}
+  ${gpuNaNPartGuard('z')}
   float e = exp(z.x);
   return vec2(e * cos(z.y), e * sin(z.y));
-}`,
-    wgsl: `fn _gpu_cexp(z: vec2f) -> vec2f {
-  ${gpuNaNPartGuard('z', true)}
-  let e = exp(z.x);
-  return vec2f(e * cos(z.y), e * sin(z.y));
 }`,
   },
   _gpu_cln: {
     deps: [],
     glsl: `vec2 _gpu_cln(vec2 z) {
-  ${gpuNaNPartGuard('z', false)}
+  ${gpuNaNPartGuard('z')}
   return vec2(log(length(z)), atan(z.y, z.x));
-}`,
-    wgsl: `fn _gpu_cln(z: vec2f) -> vec2f {
-  ${gpuNaNPartGuard('z', true)}
-  return vec2f(log(length(z)), atan2(z.y, z.x));
 }`,
   },
   // `z^w` is `exp(w · ln z)`. At `z = 0`, `ln z` is `(−∞, 0)`, and the
@@ -106,10 +86,6 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   if (z.x == 0.0 && z.y == 0.0 && w.x > 0.0) return vec2(0.0);
   return _gpu_cexp(_gpu_cmul(w, _gpu_cln(z)));
 }`,
-    wgsl: `fn _gpu_cpow(z: vec2f, w: vec2f) -> vec2f {
-  if (z.x == 0.0 && z.y == 0.0 && w.x > 0.0) { return vec2f(0.0); }
-  return _gpu_cexp(_gpu_cmul(w, _gpu_cln(z)));
-}`,
   },
   // `z^e` for a real exponent `e` whose recovered rational has an odd
   // denominator, decided when the shader is generated
@@ -122,46 +98,28 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   if (z.y == 0.0 && z.x < 0.0) return vec2(s * pow(-z.x, e), 0.0);
   return _gpu_cpow(z, vec2(e, 0.0));
 }`,
-    wgsl: `fn _gpu_cpowrr(z: vec2f, e: f32, s: f32) -> vec2f {
-  if (z.y == 0.0 && z.x < 0.0) { return vec2f(s * pow(-z.x, e), 0.0); }
-  return _gpu_cpow(z, vec2f(e, 0.0));
-}`,
   },
   _gpu_csqrt: {
     deps: [],
     glsl: `vec2 _gpu_csqrt(vec2 z) {
-  ${gpuNaNPartGuard('z', false)}
+  ${gpuNaNPartGuard('z')}
   float r = length(z);
   float theta = atan(z.y, z.x);
   return sqrt(r) * vec2(cos(theta * 0.5), sin(theta * 0.5));
-}`,
-    wgsl: `fn _gpu_csqrt(z: vec2f) -> vec2f {
-  ${gpuNaNPartGuard('z', true)}
-  let r = length(z);
-  let theta = atan2(z.y, z.x);
-  return sqrt(r) * vec2f(cos(theta * 0.5), sin(theta * 0.5));
 }`,
   },
   _gpu_csin: {
     deps: [],
     glsl: `vec2 _gpu_csin(vec2 z) {
-  ${gpuNaNPartGuard('z', false)}
+  ${gpuNaNPartGuard('z')}
   return vec2(sin(z.x) * cosh(z.y), cos(z.x) * sinh(z.y));
-}`,
-    wgsl: `fn _gpu_csin(z: vec2f) -> vec2f {
-  ${gpuNaNPartGuard('z', true)}
-  return vec2f(sin(z.x) * cosh(z.y), cos(z.x) * sinh(z.y));
 }`,
   },
   _gpu_ccos: {
     deps: [],
     glsl: `vec2 _gpu_ccos(vec2 z) {
-  ${gpuNaNPartGuard('z', false)}
+  ${gpuNaNPartGuard('z')}
   return vec2(cos(z.x) * cosh(z.y), -sin(z.x) * sinh(z.y));
-}`,
-    wgsl: `fn _gpu_ccos(z: vec2f) -> vec2f {
-  ${gpuNaNPartGuard('z', true)}
-  return vec2f(cos(z.x) * cosh(z.y), -sin(z.x) * sinh(z.y));
 }`,
   },
   _gpu_ctan: {
@@ -169,38 +127,24 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
     glsl: `vec2 _gpu_ctan(vec2 z) {
   return _gpu_cdiv(_gpu_csin(z), _gpu_ccos(z));
 }`,
-    wgsl: `fn _gpu_ctan(z: vec2f) -> vec2f {
-  return _gpu_cdiv(_gpu_csin(z), _gpu_ccos(z));
-}`,
   },
   _gpu_csinh: {
     deps: [],
     glsl: `vec2 _gpu_csinh(vec2 z) {
-  ${gpuNaNPartGuard('z', false)}
+  ${gpuNaNPartGuard('z')}
   return vec2(sinh(z.x) * cos(z.y), cosh(z.x) * sin(z.y));
-}`,
-    wgsl: `fn _gpu_csinh(z: vec2f) -> vec2f {
-  ${gpuNaNPartGuard('z', true)}
-  return vec2f(sinh(z.x) * cos(z.y), cosh(z.x) * sin(z.y));
 }`,
   },
   _gpu_ccosh: {
     deps: [],
     glsl: `vec2 _gpu_ccosh(vec2 z) {
-  ${gpuNaNPartGuard('z', false)}
+  ${gpuNaNPartGuard('z')}
   return vec2(cosh(z.x) * cos(z.y), sinh(z.x) * sin(z.y));
-}`,
-    wgsl: `fn _gpu_ccosh(z: vec2f) -> vec2f {
-  ${gpuNaNPartGuard('z', true)}
-  return vec2f(cosh(z.x) * cos(z.y), sinh(z.x) * sin(z.y));
 }`,
   },
   _gpu_ctanh: {
     deps: ['_gpu_cdiv', '_gpu_csinh', '_gpu_ccosh'],
     glsl: `vec2 _gpu_ctanh(vec2 z) {
-  return _gpu_cdiv(_gpu_csinh(z), _gpu_ccosh(z));
-}`,
-    wgsl: `fn _gpu_ctanh(z: vec2f) -> vec2f {
   return _gpu_cdiv(_gpu_csinh(z), _gpu_ccosh(z));
 }`,
   },
@@ -219,7 +163,7 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   // no overflow below `|z| ≈ 10³⁷`. Above that, a function uses its value at
   // `z/16`, whose logarithmic part differs by `ln 16` (2.7725887…).
   //
-  // A shader cannot rely on the sign of a zero (WGSL does not keep it), so
+  // A shader cannot rely on the sign of a zero, so
   // the side of a branch cut is not read from a zero part. Each kernel
   // passes a third argument `s` (+1 or −1), the sign that a zero part
   // takes, and the kernels pick the same side as the interpreter:
@@ -236,7 +180,7 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   //
   // `_gpu_chypot` is `√(x² + y²)` without an overflow of `x²`;
   // `_gpu_clog1p` is `ln(1 + x)` for `x ≥ 0`, accurate for a small `x`
-  // (neither language has `log1p`, see below); `_gpu_casinhr` is `asinh` of a real
+  // (GLSL has no `log1p`, see below); `_gpu_casinhr` is `asinh` of a real
   // value, accurate for a small and a large value (a driver's `asinh` can
   // be the formula `ln(x + √(x² + 1))`, which loses a small value and
   // overflows for a large one); `_gpu_czsign` is the sign of `y`, with `s`
@@ -253,20 +197,12 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   float n = min(ax, ay) / m;
   return m * sqrt(1.0 + n * n);
 }`,
-    wgsl: `fn _gpu_chypot(x: f32, y: f32) -> f32 {
-  let ax = abs(x);
-  let ay = abs(y);
-  let m = max(ax, ay);
-  if (m == 0.0) { return 0.0; }
-  let n = min(ax, ay) / m;
-  return m * sqrt(1.0 + n * n);
-}`,
   },
   // `ln(1 + x)` for `x ≥ 0` (every caller passes a non-negative value).
   // For `x < 0.5` it is `2·atanh(s)` with `s = x/(2 + x)`, from the series
   // `2s·(1 + s²/3 + s⁴/5 + … + s¹⁰/11)`: `s ≤ 0.2`, so the first omitted
   // term is below `0.04⁶/13 ≈ 3·10⁻¹⁰` of the value. The built-in `log` is
-  // not used there: GLSL.std.450 and WGSL allow it an ABSOLUTE error of 2⁻²¹
+  // not used there: GLSL.std.450 allows it an ABSOLUTE error of 2⁻²¹
   // on [0.5, 2], a relative error of 0.5% for `ln(1 + 10⁻⁴)`, and the
   // classic `log(u)·x/(u − 1)` correction depends on `(1 + x) − 1` not being
   // folded to `x` by a fast-math compiler. For `x ≥ 0.5`, `ln(1 + x) ≥ 0.4`
@@ -279,12 +215,6 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   float t = s * s;
   return 2.0 * s * (1.0 + t * (0.3333333333333333 + t * (0.2 + t * (0.14285714285714285 + t * (0.1111111111111111 + t * 0.09090909090909091)))));
 }`,
-    wgsl: `fn _gpu_clog1p(x: f32) -> f32 {
-  if (x >= 0.5) { return log(1.0 + x); }
-  let s = x / (2.0 + x);
-  let t = s * s;
-  return 2.0 * s * (1.0 + t * (0.3333333333333333 + t * (0.2 + t * (0.14285714285714285 + t * (0.1111111111111111 + t * 0.09090909090909091)))));
-}`,
   },
   _gpu_casinhr: {
     deps: ['_gpu_clog1p'],
@@ -293,19 +223,11 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   float r = a > 1.0e9 ? log(a) + 0.6931471805599453 : _gpu_clog1p(a + a * a / (1.0 + sqrt(1.0 + a * a)));
   return v < 0.0 ? -r : r;
 }`,
-    wgsl: `fn _gpu_casinhr(v: f32) -> f32 {
-  let a = abs(v);
-  let r = select(_gpu_clog1p(a + a * a / (1.0 + sqrt(1.0 + a * a))), log(a) + 0.6931471805599453, a > 1.0e9);
-  return select(r, -r, v < 0.0);
-}`,
   },
   _gpu_czsign: {
     deps: [],
     glsl: `float _gpu_czsign(float y, float s) {
   return (y < 0.0 || (y == 0.0 && s < 0.0)) ? -1.0 : 1.0;
-}`,
-    wgsl: `fn _gpu_czsign(y: f32, s: f32) -> f32 {
-  return select(1.0, -1.0, y < 0.0 || (y == 0.0 && s < 0.0));
 }`,
   },
   _gpu_csqrts: {
@@ -319,16 +241,6 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   }
   float t = sqrt(0.5 * h - 0.5 * x);
   return vec2(abs(y) / (2.0 * t), _gpu_czsign(y, s) * t);
-}`,
-    wgsl: `fn _gpu_csqrts(x: f32, y: f32, s: f32) -> vec2f {
-  if (x == 0.0 && y == 0.0) { return vec2f(0.0); }
-  let h = _gpu_chypot(x, y);
-  if (x >= 0.0) {
-    let t = sqrt(0.5 * x + 0.5 * h);
-    return vec2f(t, y / (2.0 * t));
-  }
-  let t = sqrt(0.5 * h - 0.5 * x);
-  return vec2f(abs(y) / (2.0 * t), _gpu_czsign(y, s) * t);
 }`,
   },
   // `asin(x + iy)`, with `s` the sign of a zero `y`.
@@ -350,28 +262,11 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   float im = _gpu_casinhr(a.x * b.y - a.y * b.x);
   return vec2(atan(x, a.x * b.x - a.y * b.y), im < 0.0 ? im - k : im + k);
 }`,
-    wgsl: `fn _gpu_casin_core(x0: f32, y0: f32, s: f32) -> vec2f {
-  var x = x0;
-  var y = y0;
-  var k = 0.0;
-  if (max(abs(x), abs(y)) > 1.0e37) {
-    x = x * 0.0625;
-    y = y * 0.0625;
-    k = 2.772588722239781;
-  }
-  let a = _gpu_csqrts(1.0 - x, -y, -s);
-  let b = _gpu_csqrts(1.0 + x, y, s);
-  let im = _gpu_casinhr(a.x * b.y - a.y * b.x);
-  return vec2f(atan2(x, a.x * b.x - a.y * b.y), select(im + k, im - k, im < 0.0));
-}`,
   },
   _gpu_casin: {
     deps: ['_gpu_casin_core'],
     glsl: `vec2 _gpu_casin(vec2 z) {
   return _gpu_casin_core(z.x, z.y, z.x > 0.0 ? -1.0 : 1.0);
-}`,
-    wgsl: `fn _gpu_casin(z: vec2f) -> vec2f {
-  return _gpu_casin_core(z.x, z.y, select(1.0, -1.0, z.x > 0.0));
 }`,
   },
   // Re: 2·atan2(Re √(1 − z), Re √(1 + z)).
@@ -392,21 +287,6 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   vec2 b = _gpu_csqrts(1.0 + x, y, s);
   float im = _gpu_casinhr(b.x * a.y - b.y * a.x);
   return vec2(2.0 * atan(a.x, b.x), im < 0.0 ? im - k : im + k);
-}`,
-    wgsl: `fn _gpu_cacos(z: vec2f) -> vec2f {
-  var x = z.x;
-  var y = z.y;
-  var k = 0.0;
-  if (max(abs(x), abs(y)) > 1.0e37) {
-    x = x * 0.0625;
-    y = y * 0.0625;
-    k = 2.772588722239781;
-  }
-  let s = select(1.0, -1.0, z.x > 0.0);
-  let a = _gpu_csqrts(1.0 - x, -y, -s);
-  let b = _gpu_csqrts(1.0 + x, y, s);
-  let im = _gpu_casinhr(b.x * a.y - b.y * a.x);
-  return vec2f(2.0 * atan2(a.x, b.x), select(im + k, im - k, im < 0.0));
 }`,
   },
   // `atanh(x + iy)`, with `s` the sign of a zero `y`.
@@ -433,28 +313,11 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   float im = 2.0 * y == 0.0 ? (m < 0.0 ? _gpu_czsign(y, s) * 1.5707963267948966 : 0.0) : 0.5 * atan(2.0 * y, m);
   return vec2(x < 0.0 ? -re : re, im);
 }`,
-    wgsl: `fn _gpu_catanh_core(x: f32, y: f32, s: f32) -> vec2f {
-  if (_gpu_chypot(x, y) > 1.0e18) {
-    let h4 = _gpu_chypot(0.25 * x, 0.25 * y);
-    let q = y / 8.0 / h4 / h4;
-    return vec2f(x / 16.0 / h4 / h4, select(0.5 * atan2(q, -1.0), _gpu_czsign(y, s) * 1.5707963267948966, q == 0.0));
-  }
-  let ax = abs(x);
-  let u = 1.0 - ax;
-  let d = u * u + y * y;
-  let re = select(0.25 * _gpu_clog1p(4.0 * ax / d), 0.5 * (log(_gpu_chypot(1.0 + ax, y)) - log(_gpu_chypot(u, y))), d < 1.0e-30);
-  let m = u * (1.0 + ax) - y * y;
-  let im = select(0.5 * atan2(2.0 * y, m), select(0.0, _gpu_czsign(y, s) * 1.5707963267948966, m < 0.0), 2.0 * y == 0.0);
-  return vec2f(select(re, -re, x < 0.0), im);
-}`,
   },
   _gpu_catanh: {
     deps: ['_gpu_catanh_core'],
     glsl: `vec2 _gpu_catanh(vec2 z) {
   return _gpu_catanh_core(z.x, z.y, z.x > 0.0 ? -1.0 : 1.0);
-}`,
-    wgsl: `fn _gpu_catanh(z: vec2f) -> vec2f {
-  return _gpu_catanh_core(z.x, z.y, select(1.0, -1.0, z.x > 0.0));
 }`,
   },
   // atan z = −i·atanh(iz), with iz = −y + ix. A zero x takes the sign of y:
@@ -470,11 +333,6 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   vec2 r = _gpu_catanh_core(-z.y, z.x, z.y < 0.0 ? -1.0 : 1.0);
   return vec2(r.y, -r.x);
 }`,
-    wgsl: `fn _gpu_catan(z: vec2f) -> vec2f {
-  if (z.x == 0.0 && abs(z.y) == 1.0) { return vec2f(_gpu_inf(), _gpu_inf()); }
-  let r = _gpu_catanh_core(-z.y, z.x, select(1.0, -1.0, z.y < 0.0));
-  return vec2f(r.y, -r.x);
-}`,
   },
   // asinh z = −i·asin(iz), with iz = −y + ix. A zero x takes the sign of y:
   // the side right of the imaginary axis for y > 1, left of it for y < −1.
@@ -483,10 +341,6 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
     glsl: `vec2 _gpu_casinh(vec2 z) {
   vec2 r = _gpu_casin_core(-z.y, z.x, z.y < 0.0 ? -1.0 : 1.0);
   return vec2(r.y, -r.x);
-}`,
-    wgsl: `fn _gpu_casinh(z: vec2f) -> vec2f {
-  let r = _gpu_casin_core(-z.y, z.x, select(1.0, -1.0, z.y < 0.0));
-  return vec2f(r.y, -r.x);
 }`,
   },
   // Re: asinh(Re(conj(√(z − 1))·√(z + 1))).
@@ -507,19 +361,6 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   vec2 b = _gpu_csqrts(x + 1.0, y, 1.0);
   return vec2(_gpu_casinhr(a.x * b.x + a.y * b.y) + k, 2.0 * atan(a.y, b.x));
 }`,
-    wgsl: `fn _gpu_cacosh(z: vec2f) -> vec2f {
-  var x = z.x;
-  var y = z.y;
-  var k = 0.0;
-  if (max(abs(x), abs(y)) > 1.0e37) {
-    x = x * 0.0625;
-    y = y * 0.0625;
-    k = 2.772588722239781;
-  }
-  let a = _gpu_csqrts(x - 1.0, y, 1.0);
-  let b = _gpu_csqrts(x + 1.0, y, 1.0);
-  return vec2f(_gpu_casinhr(a.x * b.x + a.y * b.y) + k, 2.0 * atan2(a.y, b.x));
-}`,
   },
   // `1/z` by Smith's method: the quotient is formed from the ratio of the
   // smaller part to the larger, so `|z|²` is never computed and does not
@@ -536,16 +377,6 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   float r = z.x / z.y;
   float d = z.x * r + z.y;
   return vec2(r / d, -1.0 / d);
-}`,
-    wgsl: `fn _gpu_cinv(z: vec2f) -> vec2f {
-  if (abs(z.x) >= abs(z.y)) {
-    let r = z.y / z.x;
-    let d = z.x + z.y * r;
-    return vec2f(1.0 / d, -r / d);
-  }
-  let r = z.x / z.y;
-  let d = z.x * r + z.y;
-  return vec2f(r / d, -1.0 / d);
 }`,
   },
   //
@@ -583,9 +414,6 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
     glsl: `float _gpu_cln2z(vec2 z) {
   return 45.054566736396445 - log(_gpu_chypot(z.x * 18446744073709551616.0, z.y * 18446744073709551616.0));
 }`,
-    wgsl: `fn _gpu_cln2z(z: vec2f) -> f32 {
-  return 45.054566736396445 - log(_gpu_chypot(z.x * 18446744073709551616.0, z.y * 18446744073709551616.0));
-}`,
   },
   // `_gpu_cinvpm(z, t)` is `1 + t/z`, for `t` = ±1.
   _gpu_cinvpm: {
@@ -595,12 +423,6 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   if (_gpu_chypot(z.x, z.y) > 2.0) return vec2(1.0 + t * w.x, t * w.y);
   float nx = z.x + t;
   return vec2(nx * w.x - z.y * w.y, nx * w.y + z.y * w.x);
-}`,
-    wgsl: `fn _gpu_cinvpm(z: vec2f, t: f32) -> vec2f {
-  let w = _gpu_cinv(z);
-  if (_gpu_chypot(z.x, z.y) > 2.0) { return vec2f(1.0 + t * w.x, t * w.y); }
-  let nx = z.x + t;
-  return vec2f(nx * w.x - z.y * w.y, nx * w.y + z.y * w.x);
 }`,
   },
   // asin(w): Re atan2(Re w, Re(√(1 − w)·√(1 + w))),
@@ -624,16 +446,6 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   vec2 b = _gpu_csqrts(q.x, q.y, s);
   return vec2(atan(w.x, a.x * b.x - a.y * b.y), _gpu_casinhr(a.x * b.y - a.y * b.x));
 }`,
-    wgsl: `fn _gpu_cacsc(z: vec2f) -> vec2f {
-  let s = select(select(1.0, -1.0, z.y > 0.0), select(1.0, -1.0, z.x > 0.0), z.y == 0.0);
-  if (_gpu_chypot(z.x, z.y) < 1.0e-18 && (z.x != 0.0 || z.y != 0.0)) { return vec2f(atan2(z.x, abs(z.y)), s * _gpu_cln2z(z)); }
-  let w = _gpu_cinv(z);
-  let p = _gpu_cinvpm(z, -1.0);
-  let q = _gpu_cinvpm(z, 1.0);
-  let a = _gpu_csqrts(p.x, p.y, -s);
-  let b = _gpu_csqrts(q.x, q.y, s);
-  return vec2f(atan2(w.x, a.x * b.x - a.y * b.y), _gpu_casinhr(a.x * b.y - a.y * b.x));
-}`,
   },
   // acos(w): Re 2·atan2(Re √(1 − w), Re √(1 + w)),
   // Im asinh(Im(conj(√(1 + w))·√(1 − w))).
@@ -647,15 +459,6 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   vec2 a = _gpu_csqrts(p.x, p.y, -s);
   vec2 b = _gpu_csqrts(q.x, q.y, s);
   return vec2(2.0 * atan(a.x, b.x), _gpu_casinhr(b.x * a.y - b.y * a.x));
-}`,
-    wgsl: `fn _gpu_casec(z: vec2f) -> vec2f {
-  let s = select(select(1.0, -1.0, z.y > 0.0), select(1.0, -1.0, z.x > 0.0), z.y == 0.0);
-  if (_gpu_chypot(z.x, z.y) < 1.0e-18 && (z.x != 0.0 || z.y != 0.0)) { return vec2f(atan2(abs(z.y), z.x), -s * _gpu_cln2z(z)); }
-  let p = _gpu_cinvpm(z, -1.0);
-  let q = _gpu_cinvpm(z, 1.0);
-  let a = _gpu_csqrts(p.x, p.y, -s);
-  let b = _gpu_csqrts(q.x, q.y, s);
-  return vec2f(2.0 * atan2(a.x, b.x), _gpu_casinhr(b.x * a.y - b.y * a.x));
 }`,
   },
   // acosh(w): Re asinh(Re(conj(√(w − 1))·√(w + 1))),
@@ -681,16 +484,6 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   vec2 b = _gpu_csqrts(q.x, q.y, s);
   return vec2(_gpu_casinhr(a.x * b.x + a.y * b.y), 2.0 * atan(a.y, b.x));
 }`,
-    wgsl: `fn _gpu_casech(z: vec2f) -> vec2f {
-  if (z.x == 0.0 && z.y == 0.0) { return vec2f(_gpu_inf(), 0.0); }
-  if (_gpu_chypot(z.x, z.y) < 1.0e-18) { return vec2f(_gpu_cln2z(z), select(-atan2(z.y, z.x), 3.141592653589793, z.y == 0.0 && z.x < 0.0)); }
-  let s = select(1.0, -1.0, z.y > 0.0);
-  let p = _gpu_cinvpm(z, -1.0);
-  let q = _gpu_cinvpm(z, 1.0);
-  let a = _gpu_csqrts(-p.x, -p.y, s);
-  let b = _gpu_csqrts(q.x, q.y, s);
-  return vec2f(_gpu_casinhr(a.x * b.x + a.y * b.y), 2.0 * atan2(a.y, b.x));
-}`,
   },
   // arcoth z = ½·ln((z + 1)/(z − 1)). Re: ¼·ln(1 + 4|x|/|1 − |x| − iy|²),
   // with the sign of x, as in `_gpu_catanh_core`. Im: ½·atan2(−2y,
@@ -714,21 +507,6 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   float im = 2.0 * y == 0.0 ? (m < 0.0 ? (x > 0.0 ? -1.5707963267948966 : 1.5707963267948966) : 0.0) : 0.5 * atan(-2.0 * y, m);
   return vec2(x < 0.0 ? -re : re, im);
 }`,
-    wgsl: `fn _gpu_cacoth(z: vec2f) -> vec2f {
-  let x = z.x;
-  let y = z.y;
-  if (_gpu_chypot(x, y) > 1.0e18) {
-    let h4 = _gpu_chypot(0.25 * x, 0.25 * y);
-    return vec2f(x / 16.0 / h4 / h4, -y / 16.0 / h4 / h4);
-  }
-  let ax = abs(x);
-  let u = 1.0 - ax;
-  let d = u * u + y * y;
-  let re = select(0.25 * _gpu_clog1p(4.0 * ax / d), 0.5 * (log(_gpu_chypot(1.0 + ax, y)) - log(_gpu_chypot(u, y))), d < 1.0e-30);
-  let m = (ax - 1.0) * (ax + 1.0) + y * y;
-  let im = select(0.5 * atan2(-2.0 * y, m), select(0.0, select(1.5707963267948966, -1.5707963267948966, x > 0.0), m < 0.0), 2.0 * y == 0.0);
-  return vec2f(select(re, -re, x < 0.0), im);
-}`,
   },
 };
 
@@ -737,7 +515,7 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
  * actually referenced by `code`, plus their transitive dependencies,
  * emitted in topological (dependency-first) order.
  */
-export function buildComplexPreamble(code: string, language: string): string {
+export function buildComplexPreamble(code: string): string {
   // 1. Find all _gpu_c* calls in the compiled code
   const needed = new Set<string>();
   for (const name of Object.keys(GPU_COMPLEX_FUNCTIONS)) {
@@ -757,10 +535,9 @@ export function buildComplexPreamble(code: string, language: string): string {
   for (const name of needed) resolve(name);
 
   // 3. `resolved` is already in topological order (deps before dependents)
-  const lang = language === 'wgsl' ? 'wgsl' : 'glsl';
   const parts: string[] = [];
   for (const name of resolved) {
-    parts.push(GPU_COMPLEX_FUNCTIONS[name][lang]);
+    parts.push(GPU_COMPLEX_FUNCTIONS[name].glsl);
   }
   return '\n' + parts.join('\n\n') + '\n';
 }

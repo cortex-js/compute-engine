@@ -1724,8 +1724,7 @@ export function operandTypeInContext(
   target: CompileTarget<Expression>,
   depth = 0
 ): Type {
-  if (depth > 32 || (target.language !== 'glsl' && target.language !== 'wgsl'))
-    return expr.type.type;
+  if (depth > 32 || target.language !== 'glsl') return expr.type.type;
   if (isSymbol(expr)) {
     const frame = localShapeFrameOf(expr.symbol)?.get(expr.symbol);
     if (frame === LOCAL_SCALAR) return 'number';
@@ -2031,10 +2030,9 @@ export function boundListArguments(
  * takes. `undefined` when the call has no argument to bind, or when the
  * variant cannot be emitted.
  *
- * A shader function cannot take a list parameter: GLSL and WGSL have no
- * array type of an unknown length, a sampler parameter has no index helper
- * of the width of the argument, and WGSL cannot pass a storage buffer to a
- * function. So `define` declines `g(H: list<integer>, x: real)`. The
+ * A shader function cannot take a list parameter: GLSL has no
+ * array type of an unknown length, and a sampler parameter has no index
+ * helper of the width of the argument. So `define` declines `g(H: list<integer>, x: real)`. The
  * variant has no parameter for such a list: its body reads the argument
  * itself, which is an input of the compiled expression. With the input `H`
  * in a texture, `g(H, x)` compiles to `_fn_g_bind0_H(x)`, and the body reads

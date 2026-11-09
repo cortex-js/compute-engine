@@ -2,7 +2,6 @@ import '../utils'; // For snapshot serializers
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 /**
  * GPU user-defined function emission — Phase 2 of the compile-CSE design
@@ -12,7 +11,7 @@ import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
  * used to fail as an unknown operator, forcing consumers to inline the body at
  * every call site (the dominant duplication source in the Tycho corpus). The
  * GPU targets now host the same `userFunctions` registry the JS/interval-js
- * targets do: the definition is emitted ONCE as a real GLSL/WGSL function and
+ * targets do: the definition is emitted ONCE as a real GLSL function and
  * called by name.
  *
  * Assertions are SHAPE assertions (emitted-source structure) — there is no GPU
@@ -23,7 +22,6 @@ import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
  */
 
 const glsl = new GLSLTarget();
-const wgsl = new WGSLTarget();
 
 /**
  * `constantFold: false` for the emissions pinned below whose ARGUMENTS are
@@ -74,30 +72,6 @@ describe('GPU USER FUNCTIONS — one definition, called by name', () => {
     expect(count(r.preamble!, 'float _fn_f(')).toBe(1);
   });
 
-  it('WGSL: emits the definition once and calls it twice', () => {
-    const ce = engineWithF();
-    const r = wgsl.compile(ce.parse('f(u) + f(2u)'));
-
-    expect(r.code).toMatchInlineSnapshot(`_fn_f(u) + _fn_f(2.0 * u)`);
-    expect(r.code).not.toContain('sin(');
-    expect(r.preamble).toMatchInlineSnapshot(`
-
-      fn _gpu_isnonfinite(x: f32) -> bool {
-        return (bitcast<u32>(x) & 0x7FFFFFFFu) >= 0x7F800000u;
-      }
-      fn _gpu_sin(x: f32) -> f32 {
-        let bits = 0x7fc00000u;
-        return select(sin(x), bitcast<f32>(bits), _gpu_isnonfinite(x));
-      }
-
-      fn _fn_f(x: f32) -> f32 {
-        return (x * x) + _gpu_sin(x);
-      }
-
-    `);
-    expect(count(r.preamble!, 'fn _fn_f(')).toBe(1);
-  });
-
   it('a free symbol of the DEFINITION body is still reported as free', () => {
     // The registry (rather than a `functions`-resolver shim) is what keeps
     // `analyzeReferences` descending into the body: a uniform the consumer
@@ -142,25 +116,6 @@ describe('GPU USER FUNCTIONS — synthesized signatures', () => {
 
       vec2 _fn_p(float t) {
         return vec2(_gpu_cos(t), _gpu_sin(t));
-      }
-
-    `);
-    expect(wgsl.compile(ce.parse('p(u)')).preamble).toMatchInlineSnapshot(`
-
-      fn _gpu_isnonfinite(x: f32) -> bool {
-        return (bitcast<u32>(x) & 0x7FFFFFFFu) >= 0x7F800000u;
-      }
-      fn _gpu_sin(x: f32) -> f32 {
-        let bits = 0x7fc00000u;
-        return select(sin(x), bitcast<f32>(bits), _gpu_isnonfinite(x));
-      }
-      fn _gpu_cos(x: f32) -> f32 {
-        let bits = 0x7fc00000u;
-        return select(cos(x), bitcast<f32>(bits), _gpu_isnonfinite(x));
-      }
-
-      fn _fn_p(t: f32) -> vec2f {
-        return vec2f(_gpu_cos(t), _gpu_sin(t));
       }
 
     `);
@@ -214,8 +169,8 @@ describe('GPU USER FUNCTIONS — synthesized signatures', () => {
 describe('GPU USER FUNCTIONS — a REAL argument to a COMPLEX parameter is lifted', () => {
   /**
    * A complex parameter is a `vec2(re, im)` in the synthesized signature. A
-   * real argument is valid (a real number is a complex number), but GLSL and
-   * WGSL do not convert a scalar to a vector implicitly. The call site used to
+   * real argument is valid (a real number is a complex number), but GLSL
+   * does not convert a scalar to a vector implicitly. The call site used to
    * refuse the call ("lowers to float but parameter is declared vec2"), while
    * the JavaScript target wraps the same argument in `{ re: x, im: 0 }`. The
    * argument is now lifted to `vec2(x, 0.0)` at the call.
@@ -242,18 +197,13 @@ describe('GPU USER FUNCTIONS — a REAL argument to a COMPLEX parameter is lifte
       '_fn_f(V(x, 0.0)) + V(1.0, 0.0)',
     ],
   ];
-  for (const [lang, target, v] of [
-    ['GLSL', glsl, 'vec2'],
-    ['WGSL', wgsl, 'vec2f'],
-  ] as const) {
+  for (const [lang, target, v] of [['GLSL', glsl, 'vec2']] as const) {
     for (const [name, latex, expected] of cases) {
       it(`${lang}: ${name} (parse route)`, () => {
         const ce = engineWithComplexF();
         const r = target.compile(ce.parse(latex));
         expect(r.code).toBe(expected.replaceAll('V(', `${v}(`));
-        expect(r.preamble).toContain(
-          target === glsl ? 'vec2 _fn_f(vec2 z)' : 'fn _fn_f(z: vec2f) -> vec2f'
-        );
+        expect(r.preamble).toContain('vec2 _fn_f(vec2 z)');
       });
     }
 
@@ -346,16 +296,6 @@ describe('GPU USER FUNCTIONS — definition ordering', () => {
       r.preamble!.indexOf('_fn_f(float x)')
     );
   });
-
-  it('WGSL keeps the same ordering', () => {
-    const ce = new ComputeEngine();
-    ce.assign('g', ce.parse('y \\mapsto y + 1'));
-    ce.assign('f', ce.parse('x \\mapsto g(x) * 2'));
-    const r = wgsl.compile(ce.parse('f(u)'));
-    expect(r.preamble!.indexOf('fn _fn_g(')).toBeLessThan(
-      r.preamble!.indexOf('fn _fn_f(')
-    );
-  });
 });
 
 describe('GPU USER FUNCTIONS — delivery on every compile route', () => {
@@ -389,15 +329,6 @@ describe('GPU USER FUNCTIONS — delivery on every compile route', () => {
     );
   });
 
-  it('WGSL compileFunction prepends the definitions too', () => {
-    const ce = engineWithF();
-    const src = wgsl.compileFunction(ce.parse('f(u)'), 'myFn', 'float', [
-      ['u', 'float'],
-    ]);
-    expect(src).toContain('fn _fn_f(x: f32) -> f32');
-    expect(src.indexOf('fn _fn_f(')).toBeLessThan(src.indexOf('fn myFn('));
-  });
-
   it('compileFunction declares a helper used only INSIDE the definition', () => {
     // The route returns a COMPLETE declaration, so it must carry the `_gpu_*`
     // helpers the definition bodies reference too — otherwise the emitted
@@ -419,18 +350,6 @@ describe('GPU USER FUNCTIONS — delivery on every compile route', () => {
     expect(count(src, 'float _fn_f(')).toBe(1);
   });
 
-  it('WGSL compileFunction declares the definition-only helper too', () => {
-    const ce = new ComputeEngine();
-    ce.assign('f', ce.parse('x \\mapsto x^{12}'));
-    const src = wgsl.compileFunction(ce.parse('f(u)'), 'myFn', 'float', [
-      ['u', 'float'],
-    ]);
-    expect(src).toContain('fn _gpu_powi(');
-    expect(src.indexOf('fn _gpu_powi(')).toBeLessThan(src.indexOf('fn _fn_f('));
-    expect(src.indexOf('fn _fn_f(')).toBeLessThan(src.indexOf('fn myFn('));
-    expect(count(src, 'fn _fn_f(')).toBe(1);
-  });
-
   it('compileShader splices the definitions ahead of main()', () => {
     const ce = engineWithF();
     const shader = glsl.compileShader({
@@ -444,20 +363,6 @@ describe('GPU USER FUNCTIONS — delivery on every compile route', () => {
       shader.indexOf('void main()')
     );
     expect(shader).toContain('fragColor.r = _fn_f(u) + _fn_f(2.0 * u);');
-  });
-
-  it('WGSL compileShader splices the definitions ahead of the entry point', () => {
-    const ce = engineWithF();
-    const shader = wgsl.compileShader({
-      type: 'fragment',
-      outputs: [{ name: 'color', type: 'vec4f' }],
-      uniforms: [{ name: 'u', type: 'float' }],
-      body: [{ variable: 'output.color.r', expression: ce.parse('f(u)') }],
-    });
-    expect(count(shader, 'fn _fn_f(')).toBe(1);
-    expect(shader.indexOf('fn _fn_f(')).toBeLessThan(
-      shader.indexOf('fn main(')
-    );
   });
 
   it('compileToSource has no definition channel and keeps failing closed', () => {
@@ -491,7 +396,7 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     // An argument declared an integer, so that the call is not refused for
     // its declared parameter type first.
     ce.declare('u', 'integer');
-    for (const target of [glsl, wgsl]) {
+    for (const target of [glsl]) {
       expect(() => target.compile(ce.expr(['R', 'u']))).toThrow(
         /^Could not compile `R`: a recursive \(or mutually recursive\) user-defined function/
       );
@@ -535,14 +440,9 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     // `constantFold: false`: the argument is a literal list and `f` is pure,
     // so the call would otherwise be evaluated at compile time and emitted as
     // a literal array, bypassing the broadcast gate under test.
-    expect(() =>
-      glsl.compile(ce.expr(['f', ['List', 1, 2, 3, 4, 5]]), {
-        constantFold: false,
-      })
-    ).toThrow(/no runtime broadcast dispatch/);
     // The JS target answers this with `_SYS.bcastFn`; a shader has no analog.
     expect(() =>
-      wgsl.compile(ce.expr(['f', ['List', 1, 2, 3, 4, 5]]), {
+      glsl.compile(ce.expr(['f', ['List', 1, 2, 3, 4, 5]]), {
         constantFold: false,
       })
     ).toThrow(/no runtime broadcast dispatch/);
@@ -620,7 +520,7 @@ describe('GPU USER FUNCTIONS — determinism', () => {
     ce.assign('f', ce.parse('x \\mapsto g(x) * 2 + \\sum_{i=1}^{4} i x'));
     const expr = ce.parse('f(u) + f(2u)');
 
-    for (const target of [glsl, wgsl]) {
+    for (const target of [glsl]) {
       const a = target.compile(expr);
       const b = target.compile(expr);
       expect(a.code).toBe(b.code);
@@ -697,14 +597,6 @@ describe('GPU USER FUNCTIONS — a reserved word as a PARAMETER fails closed', (
     // driver accepts — behind a reported success.
     expect(() => glsl.compile(ce.parse('f(u)'))).toThrow(
       /"discard" is a reserved word in glsl/
-    );
-  });
-
-  it('WGSL: `loop` as a parameter name', () => {
-    const ce = new ComputeEngine();
-    ce.assign('f', ce.expr(['Function', ['Add', 'loop', 1], 'loop']));
-    expect(() => wgsl.compile(ce.parse('f(u)'))).toThrow(
-      /"loop" is a reserved word in wgsl/
     );
   });
 
@@ -799,20 +691,12 @@ describe('GPU USER FUNCTIONS — a vecN needs REAL components', () => {
     );
   });
 
-  it('WGSL: the same', () => {
-    const ce = engineWithImpureBody('(tuple<boolean,boolean>) -> real');
-    expect(() => wgsl.compile(ce.parse('f(p)'))).toThrow(
-      /Could not compile `f`: parameter "b" has no static WGSL type/
-    );
-  });
-
   it('a PURE body over such a parameter is inlined at the call site instead', () => {
     // The argument `p` is typed by the call as a boolean tuple and is a
     // single point, so the call-site inliner substitutes the body, which
     // here never reads the parameter and compiles to its constant.
     const ce = engineWithSignature('(tuple<boolean,boolean>) -> real');
     expect(glsl.compile(ce.parse('f(p)')).code).toBe('1.0');
-    expect(wgsl.compile(ce.parse('f(p)')).code).toBe('1.0');
   });
 
   it('a `tuple<real, real>` parameter still lowers to `vec2`', () => {
@@ -876,20 +760,6 @@ describe('GPU SUM/PRODUCT — an unrolled term keeps its own statement order', (
     expect(term1).toBeGreaterThan(0);
     expect(term1).toBeLessThan(term2Loop);
     expect(code).toMatch(/return \(\(_\w+\) \+ \(_\w+\)\);$/m);
-  });
-
-  it('WGSL: the same ordering', () => {
-    const ce = new ComputeEngine();
-    ce.declare('m', 'real | signed_infinity | nan');
-    const code = wgsl.compile(twoTermUnroll(ce)).code;
-    expect(code.match(/for \(var j:/g)?.length).toBe(2);
-    const term1 = code.search(/^var _\w+: f32 = 1\.0 \* _\w+;$/m);
-    const term2Loop = code.indexOf(
-      'for (var j:',
-      code.indexOf('for (var j:') + 1
-    );
-    expect(term1).toBeGreaterThan(0);
-    expect(term1).toBeLessThan(term2Loop);
   });
 });
 
@@ -979,15 +849,6 @@ describe('GPU USER FUNCTIONS — a vec2 wrapper parameter reaches a vec2 callee'
     expect(src).toContain('float _fn_h(vec2 v)');
     expect(src).toContain('return _fn_h(v);');
   });
-
-  it('WGSL', () => {
-    const ce = engineWithTupleH();
-    const src = wgsl.compileFunction(ce.parse('h(v)'), 'wrap', 'float', [
-      ['v', 'vec2'],
-    ]);
-    expect(src).toContain('fn _fn_h(v: vec2f)');
-    expect(src).toContain('return _fn_h(v);');
-  });
 });
 
 describe('GPU USER FUNCTIONS — the caller-declared parameter types are authoritative', () => {
@@ -1019,17 +880,6 @@ describe('GPU USER FUNCTIONS — the caller-declared parameter types are authori
     );
   });
 
-  it('WGSL: same rejection, in WGSL spelling', () => {
-    const ce = engineWithUndeclaredH();
-    expect(() =>
-      wgsl.compileFunction(ce.parse('h(v)'), 'wrap', 'float', [['v', 'vec2']])
-    ).toThrow(
-      'Could not compile `h`: argument 1 `v` lowers to "vec2f" but parameter "w" is declared ' +
-        '"f32" — WGSL has no implicit conversion between them. Declare a ' +
-        'matching signature for "h".'
-    );
-  });
-
   it('a DECLARED callee whose signature agrees still compiles (GLSL)', () => {
     const ce = new ComputeEngine();
     ce.declare('h', '(tuple<real,real>) -> real');
@@ -1038,17 +888,6 @@ describe('GPU USER FUNCTIONS — the caller-declared parameter types are authori
       ['v', 'vec2'],
     ]);
     expect(src).toContain('float _fn_h(vec2 w)');
-    expect(src).toContain('return _fn_h(v);');
-  });
-
-  it('a DECLARED callee whose signature agrees still compiles (WGSL)', () => {
-    const ce = new ComputeEngine();
-    ce.declare('h', '(tuple<real,real>) -> real');
-    ce.assign('h', ce.expr(['Function', 5, 'w']));
-    const src = wgsl.compileFunction(ce.parse('h(v)'), 'wrap', 'float', [
-      ['v', 'vec2'],
-    ]);
-    expect(src).toContain('fn _fn_h(w: vec2f)');
     expect(src).toContain('return _fn_h(v);');
   });
 
@@ -1061,16 +900,6 @@ describe('GPU USER FUNCTIONS — the caller-declared parameter types are authori
       ['t', 'float'],
     ]);
     expect(src).toContain('float _fn_h(float x)');
-    expect(src).toContain('return _fn_h(t);');
-  });
-
-  it('a scalar parameter into an undeclared callee is NOT rejected (WGSL)', () => {
-    const ce = new ComputeEngine();
-    ce.assign('h', ce.parse('x \\mapsto x^2'));
-    const src = wgsl.compileFunction(ce.parse('h(t)'), 'wrap', 'float', [
-      ['t', 'float'],
-    ]);
-    expect(src).toContain('fn _fn_h(x: f32)');
     expect(src).toContain('return _fn_h(t);');
   });
 });
@@ -1101,17 +930,6 @@ describe('GPU USER FUNCTIONS — a caller-declared `bool` is a BOOLEAN, not a fl
     );
   });
 
-  it('WGSL: same rejection, in WGSL spelling', () => {
-    const ce = engineWithUndeclaredH();
-    expect(() =>
-      wgsl.compileFunction(ce.parse('h(b)'), 'wrap', 'float', [['b', 'bool']])
-    ).toThrow(
-      'Could not compile `h`: argument 1 `b` lowers to "bool" but parameter "w" is declared ' +
-        '"f32" — WGSL has no implicit conversion between them. Declare a ' +
-        'matching signature for "h".'
-    );
-  });
-
   it('a DECLARED boolean callee agrees and compiles (GLSL)', () => {
     const ce = new ComputeEngine();
     ce.declare('h', '(boolean) -> number');
@@ -1120,18 +938,6 @@ describe('GPU USER FUNCTIONS — a caller-declared `bool` is a BOOLEAN, not a fl
       ['b', 'bool'],
     ]);
     expect(src).toContain('float _fn_h(bool w)');
-    expect(src).toContain('return _fn_h(b);');
-  });
-
-  it('a DECLARED boolean callee agrees and compiles (WGSL)', () => {
-    const ce = new ComputeEngine();
-    ce.declare('h', '(boolean) -> number');
-    ce.assign('h', ce.expr(['Function', 5, 'w']));
-    const src = wgsl.compileFunction(ce.parse('h(b)'), 'wrap', 'float', [
-      ['b', 'bool'],
-    ]);
-    // `bool` is spelled the same in both languages.
-    expect(src).toContain('fn _fn_h(w: bool)');
     expect(src).toContain('return _fn_h(b);');
   });
 });
@@ -1180,22 +986,6 @@ describe('GPU USER FUNCTIONS — a shader input/uniform is framed like a paramet
     ).toThrow(/lowers to "vec2" but parameter "w" is declared "float"/);
   });
 
-  it('WGSL: same rejection, in WGSL spelling', () => {
-    const ce = engineWithUndeclaredH();
-    expect(() =>
-      wgsl.compileShader({
-        type: 'fragment',
-        uniforms: [{ name: 'v', type: 'vec2f' }],
-        outputs: [{ name: 'color', type: 'vec4f' }],
-        body: [{ variable: 'output.color.r', expression: ce.parse('h(v)') }],
-      })
-    ).toThrow(
-      'Could not compile `h`: argument 1 `v` lowers to "vec2f" but parameter "w" is declared ' +
-        '"f32" — WGSL has no implicit conversion between them. Declare a ' +
-        'matching signature for "h".'
-    );
-  });
-
   it('a DECLARED callee whose signature agrees emits the same shader as before (GLSL)', () => {
     const ce = new ComputeEngine();
     ce.declare('h', '(tuple<real,real>) -> real');
@@ -1227,37 +1017,6 @@ describe('GPU USER FUNCTIONS — a shader input/uniform is framed like a paramet
     `);
   });
 
-  it('a DECLARED callee whose signature agrees emits the same shader as before (WGSL)', () => {
-    const ce = new ComputeEngine();
-    ce.declare('h', '(tuple<real,real>) -> real');
-    ce.assign('h', ce.expr(['Function', 5, 'w']));
-    const shader = wgsl.compileShader({
-      type: 'fragment',
-      uniforms: [{ name: 'v', type: 'vec2f' }],
-      outputs: [{ name: 'color', type: 'vec4f' }],
-      body: [{ variable: 'output.color.r', expression: ce.parse('h(v)') }],
-    });
-    expect(shader).toMatchInlineSnapshot(`
-      struct FragmentOutput {
-        @location(0) color: vec4f,
-      };
-
-      @group(0) @binding(0) var<uniform> v: vec2f;
-
-      fn _fn_h(w: vec2f) -> f32 {
-        return 5.0;
-      }
-
-      @fragment
-      fn main() -> FragmentOutput {
-        var output: FragmentOutput;
-        output.color.r = _fn_h(v);
-        return output;
-      }
-
-    `);
-  });
-
   it('a SCALAR shader input into an undeclared callee still compiles (GLSL)', () => {
     // float against float: the frame must not manufacture a mismatch where the
     // declaration and the call site already agree.
@@ -1272,19 +1031,6 @@ describe('GPU USER FUNCTIONS — a shader input/uniform is framed like a paramet
     expect(shader).toContain('float _fn_h(float x)');
     expect(shader).toContain('fragColor.r = _fn_h(t);');
   });
-
-  it('a SCALAR shader input into an undeclared callee still compiles (WGSL)', () => {
-    const ce = new ComputeEngine();
-    ce.assign('h', ce.parse('x \\mapsto x^2'));
-    const shader = wgsl.compileShader({
-      type: 'fragment',
-      uniforms: [{ name: 't', type: 'f32' }],
-      outputs: [{ name: 'color', type: 'vec4f' }],
-      body: [{ variable: 'output.color.r', expression: ce.parse('h(t)') }],
-    });
-    expect(shader).toContain('fn _fn_h(x: f32)');
-    expect(shader).toContain('output.color.r = _fn_h(t);');
-  });
 });
 
 describe('GPU USER FUNCTIONS — a declared type is an ELEMENT as well as a width', () => {
@@ -1292,12 +1038,10 @@ describe('GPU USER FUNCTIONS — a declared type is an ELEMENT as well as a widt
    * A shape frame records a component COUNT (plus the scalar/boolean
    * sentinels), which cannot tell `bvec2` from `vec2` or `int` from `float`.
    * With only a width to go on, `ivec2`/`uvec2`/`bvec2` did not match the
-   * spelling table at all (unframed ⇒ float), `vec2<bool>`/`vec2<i32>` matched
-   * but collapsed to "2 components" and were reconstructed as `vec2f`, and
-   * `int`/`u32` collapsed to "scalar" and were reconstructed as `float`/`f32`
-   * — three ways for a declared name to reach a mismatched parameter behind a
-   * reported success. The declared type is now carried whole, normalized to
-   * one element × width space across both languages' spellings.
+   * spelling table at all (unframed ⇒ float), and `int` collapsed to
+   * "scalar" and was reconstructed as `float` — ways for a declared name to
+   * reach a mismatched parameter behind a reported success. The declared
+   * type is now carried whole, normalized to one element × width space.
    */
   function engineWithUndeclaredH(): ComputeEngine {
     const ce = new ComputeEngine();
@@ -1306,7 +1050,7 @@ describe('GPU USER FUNCTIONS — a declared type is an ELEMENT as well as a widt
     return ce;
   }
 
-  /** `h: (tuple<real,real>) -> real`, i.e. a synthesized `vec2`/`vec2f`. */
+  /** `h: (tuple<real,real>) -> real`, i.e. a synthesized `vec2`. */
   function engineWithVec2H(): ComputeEngine {
     const ce = new ComputeEngine();
     ce.declare('h', '(tuple<real,real>) -> real');
@@ -1334,28 +1078,6 @@ describe('GPU USER FUNCTIONS — a declared type is an ELEMENT as well as a widt
     ).toThrow(/lowers to "bvec2" but parameter "w" is declared "vec2"/);
   });
 
-  it('WGSL: a `vec2<i32>` parameter against a synthesized `vec2f` fails closed', () => {
-    const ce = engineWithVec2H();
-    expect(() =>
-      wgsl.compileFunction(ce.parse('h(v)'), 'wrap', 'float', [
-        ['v', 'vec2<i32>'],
-      ])
-    ).toThrow(
-      'Could not compile `h`: argument 1 `v` lowers to "vec2<i32>" but parameter "w" is declared ' +
-        '"vec2f" — WGSL has no implicit conversion between them. Declare a ' +
-        'matching signature for "h".'
-    );
-  });
-
-  it('WGSL: a `vec2<bool>` parameter against a synthesized `vec2f` fails closed', () => {
-    const ce = engineWithVec2H();
-    expect(() =>
-      wgsl.compileFunction(ce.parse('h(v)'), 'wrap', 'float', [
-        ['v', 'vec2<bool>'],
-      ])
-    ).toThrow(/lowers to "vec2<bool>" but parameter "w" is declared "vec2f"/);
-  });
-
   it('GLSL: an `int` scalar parameter into a float callee is converted', () => {
     // The engine emits every GPU number literal with a decimal point and
     // `gpuTypeOfDeclaredType` never synthesizes an integer parameter, so
@@ -1369,14 +1091,6 @@ describe('GPU USER FUNCTIONS — a declared type is an ELEMENT as well as a widt
       ['n', 'int'],
     ]);
     expect(code).toContain('_fn_h(float(n))');
-  });
-
-  it('WGSL: a `u32` scalar parameter into an f32 callee is converted', () => {
-    const ce = engineWithUndeclaredH();
-    const code = wgsl.compileFunction(ce.parse('h(n)'), 'wrap', 'float', [
-      ['n', 'u32'],
-    ]);
-    expect(code).toContain('_fn_h(f32(n))');
   });
 
   it('a declared type with no static value shape fails closed NAMING it', () => {
@@ -1393,38 +1107,6 @@ describe('GPU USER FUNCTIONS — a declared type is an ELEMENT as well as a widt
         'component vectors have one), so it cannot be matched against ' +
         'parameter "w" (declared "float").'
     );
-  });
-
-  it('WGSL: an unsupported declared type on a shader UNIFORM fails closed too', () => {
-    const ce = engineWithUndeclaredH();
-    expect(() =>
-      wgsl.compileShader({
-        type: 'fragment',
-        uniforms: [{ name: 'm', type: 'mat4x4f' }],
-        outputs: [{ name: 'color', type: 'vec4f' }],
-        body: [{ variable: 'output.color.r', expression: ce.parse('h(m)') }],
-      })
-    ).toThrow(/is declared "mat4x4f" by the caller/);
-  });
-
-  it('the GLSL-flavored `vec2` spelling still agrees on the WGSL route', () => {
-    // `compileFunction` accepts GLSL names on the WGSL route (`toWGSLType`
-    // maps them), so the normalization must span both spellings.
-    const ce = engineWithVec2H();
-    const src = wgsl.compileFunction(ce.parse('h(v)'), 'wrap', 'float', [
-      ['v', 'vec2'],
-    ]);
-    expect(src).toContain('fn _fn_h(w: vec2f)');
-    expect(src).toContain('return _fn_h(v);');
-  });
-
-  it('the WGSL `vec2f` spelling agrees against a vec2 callee', () => {
-    const ce = engineWithVec2H();
-    const src = wgsl.compileFunction(ce.parse('h(v)'), 'wrap', 'float', [
-      ['v', 'vec2f'],
-    ]);
-    expect(src).toContain('fn _fn_h(w: vec2f)');
-    expect(src).toContain('return _fn_h(v);');
   });
 });
 
@@ -1448,16 +1130,6 @@ describe('GPU USER FUNCTIONS — a declared name is BOUND, not just shaped', () 
     expect(src).not.toContain('4.0');
   });
 
-  it('WGSL: a `compileFunction` parameter wins over an assigned symbol', () => {
-    const ce = new ComputeEngine();
-    ce.assign('t', 3);
-    const src = wgsl.compileFunction(ce.parse('t + 1'), 'wrap', 'float', [
-      ['t', 'float'],
-    ]);
-    expect(src).toContain('return t + 1.0;');
-    expect(src).not.toContain('4.0');
-  });
-
   it('GLSL: a shader UNIFORM wins over an assigned symbol', () => {
     const ce = new ComputeEngine();
     ce.assign('t', 3);
@@ -1470,91 +1142,10 @@ describe('GPU USER FUNCTIONS — a declared name is BOUND, not just shaped', () 
     expect(shader).toContain('fragColor.r = t + 1.0;');
     expect(shader).not.toContain('4.0');
   });
-
-  it('WGSL: a shader UNIFORM wins over an assigned symbol', () => {
-    const ce = new ComputeEngine();
-    ce.assign('t', 3);
-    const shader = wgsl.compileShader({
-      type: 'fragment',
-      uniforms: [{ name: 't', type: 'f32' }],
-      outputs: [{ name: 'color', type: 'vec4f' }],
-      body: [{ variable: 'output.color.r', expression: ce.parse('t + 1') }],
-    });
-    expect(shader).toContain('output.color.r = t + 1.0;');
-    expect(shader).not.toContain('4.0');
-  });
 });
 
-describe('GPU USER FUNCTIONS — a WGSL shader input is a struct FIELD', () => {
-  /**
-   * WGSL exposes a shader's inputs only through the entry point's
-   * `input: VertexInput` parameter, so a body referencing an input must emit
-   * `input.<name>`. A bare `v` names nothing at all — a pre-existing emission
-   * bug (a shader that fails to compile on the GPU), repaired here by
-   * resolving each input through the same bound-name mechanism the declared
-   * shapes now travel with. Uniforms are module-scope globals and stay bare.
-   */
-  it('an input reaches the emission as `input.<name>`, directly and through a call', () => {
-    const ce = new ComputeEngine();
-    ce.declare('h', '(tuple<real,real>) -> real');
-    ce.assign('h', ce.expr(['Function', 5, 'w']));
-    const shader = wgsl.compileShader({
-      type: 'fragment',
-      inputs: [{ name: 'v', type: 'vec2f' }],
-      outputs: [{ name: 'color', type: 'vec4f' }],
-      body: [
-        { variable: 'output.color.r', expression: ce.parse('h(v)') },
-        { variable: 'output.color.rg', expression: ce.parse('v') },
-      ],
-    });
-    // The shape check agreed (a `vec2f` argument into a `vec2f` parameter)…
-    expect(shader).toContain('fn _fn_h(w: vec2f) -> f32');
-    // …and the emission names the struct field, not a bare `v`.
-    expect(shader).toContain('output.color.r = _fn_h(input.v);');
-    // A target of two components is written one component at a time, which
-    // WGSL accepts without the `swizzle_assignment` extension (CE-580).
-    expect(shader).toContain(
-      '  let _tv1 = input.v;\n' +
-        '  output.color.r = _tv1.x;\n' +
-        '  output.color.g = _tv1.y;\n'
-    );
-    expect(shader).not.toMatch(/= _fn_h\(v\)/);
-    expect(shader).not.toMatch(/= v;/);
-  });
-
-  it('a WGSL uniform stays a bare global', () => {
-    const ce = new ComputeEngine();
-    const shader = wgsl.compileShader({
-      type: 'fragment',
-      uniforms: [{ name: 'v', type: 'f32' }],
-      outputs: [{ name: 'color', type: 'vec4f' }],
-      body: [{ variable: 'output.color.r', expression: ce.parse('v + 1') }],
-    });
-    expect(shader).toContain('output.color.r = v + 1.0;');
-  });
-
-  it('an input and a uniform sharing a name fails closed', () => {
-    // Two storage classes, one name: a redeclaration neither language accepts,
-    // and on WGSL the two do not even resolve to the same identifier
-    // (`input.v` vs the global `v`), so there is no reading to pick.
-    const ce = new ComputeEngine();
-    expect(() =>
-      wgsl.compileShader({
-        type: 'fragment',
-        inputs: [{ name: 'v', type: 'vec2f' }],
-        uniforms: [{ name: 'v', type: 'f32' }],
-        outputs: [{ name: 'color', type: 'vec4f' }],
-        body: [{ variable: 'output.color.r', expression: ce.parse('1') }],
-      })
-    ).toThrow(
-      'Could not compile: the shader declaration `v` is declared more than ' +
-        'once (as an input and as a uniform): two storage classes cannot ' +
-        'share one name, and a body referencing it names neither ' +
-        'unambiguously. Rename one of them.'
-    );
-  });
-
-  it('GLSL: the same collision fails closed', () => {
+describe('GPU USER FUNCTIONS — an input and a uniform sharing a name', () => {
+  it('GLSL: an input and a uniform sharing a name fails closed', () => {
     const ce = new ComputeEngine();
     expect(() =>
       glsl.compileShader({

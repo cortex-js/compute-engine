@@ -143,7 +143,7 @@ s + a`,
 });
 
 /**
- * The Python, GLSL and WGSL targets lower a loop body with their own
+ * The Python and GLSL targets lower a loop body with their own
  * statement routines (`compilePythonStatements`, `compileStatementList`).
  * The Python routine desugared a destructuring declaration in no position,
  * and the shader routine desugared it only inside a `Block` body. A bare
@@ -152,7 +152,7 @@ s + a`,
  * program declined with "Could not compile a destructuring declaration in
  * value position".
  */
-describe('Destructuring let in a loop body on Python, GLSL and WGSL', () => {
+describe('Destructuring let in a loop body on Python and GLSL', () => {
   const loop = (body: unknown): unknown => [
     'Loop',
     body,
@@ -247,7 +247,7 @@ describe('Destructuring let in a loop body on Python, GLSL and WGSL', () => {
     expect(ce.box(json as any).evaluate().re).toBe(expected);
   });
 
-  for (const to of ['python', 'glsl', 'wgsl'] as const)
+  for (const to of ['python', 'glsl'] as const)
     test.each(CASES)(`$name: compiles on ${to}`, ({ json }) => {
       const ce = new ComputeEngine();
       const result = compile(ce.box(json as any), { to, fallback: false });
@@ -262,17 +262,6 @@ describe('Destructuring let in a loop body on Python, GLSL and WGSL', () => {
     }).code.replace(/\s+/g, ' ');
     expect(code).toContain(
       '{ float a; a = float(k); float b; b = 2.0; float c; c = 3.0; }'
-    );
-  });
-
-  test('WGSL declares each leaf in the loop body', () => {
-    const ce = new ComputeEngine();
-    const code = compile(ce.box(CASES[1].json as any), {
-      to: 'wgsl',
-      fallback: false,
-    }).code.replace(/\s+/g, ' ');
-    expect(code).toContain(
-      '{ var a: f32; a = f32(k); var b: f32; b = 2.0; var c: f32; c = 3.0; }'
     );
   });
 
@@ -411,7 +400,7 @@ describe('A destructuring let whose value reads a name of the pattern', () => {
       's',
     ] as any);
     expect(expr.isValid).toBe(false);
-    for (const to of ['javascript', 'python', 'glsl', 'wgsl'] as const)
+    for (const to of ['javascript', 'python', 'glsl'] as const)
       expect(() => compile(expr, { to, fallback: false })).toThrow(
         /invalid expression/
       );
@@ -422,7 +411,7 @@ describe('A destructuring let whose value reads a name of the pattern', () => {
     expect(ce.box(json as any).evaluate().re).toBe(expected);
   });
 
-  for (const to of ['javascript', 'python', 'glsl', 'wgsl'] as const)
+  for (const to of ['javascript', 'python', 'glsl'] as const)
     test.each(CASES)(`$name: declines on ${to}`, ({ json }) => {
       const ce = new ComputeEngine();
       expect(() =>

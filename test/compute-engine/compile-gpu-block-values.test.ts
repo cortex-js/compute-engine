@@ -4,7 +4,7 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 
 // A multi-statement `Block` used as a VALUE on the shader targets — a `with`
 // clause as the term of a `Sum`, or as one operand of an addition — has no
-// expression form in GLSL or WGSL. It now lowers to one compound statement
+// expression form in GLSL. It now lowers to one compound statement
 // `{ … }` in the enclosing statement position, which stores the block's value
 // in a temporary declared ahead of the braces; the temporary stands in for the
 // block. The braces scope the block's locals, so each unrolled term of a `Sum`
@@ -55,11 +55,10 @@ const term: MathJsonExpression = [
   ['Divide', 'x', 'a'],
 ];
 
-describe.each(['glsl', 'wgsl'] as const)(
+describe.each(['glsl'] as const)(
   '%s: a block as a value operand',
   (to) => {
-    const isWGSL = to === 'wgsl';
-    const decl = isWGSL ? 'var a: f32;' : 'float a;';
+    const decl = 'float a;';
 
     test('loop-form Sum: the term is a scoped compound statement in the loop body', () => {
       const ce = engine();
@@ -186,9 +185,7 @@ describe.each(['glsl', 'wgsl'] as const)(
       const code = source(r);
       expectValidShape(code);
       expect(code).toMatch(
-        isWGSL
-          ? /var _tv1: vec2f;\n\s*{\n\s*var p: vec2f;\n\s*p = vec2f\(t, 2\.0 \* t\);\n\s*_tv1 = p;\n\s*}\n\s*return dot\(_tv1, vec2f\(1\.0, 1\.0\)\);/
-          : /vec2 _tv1;\n\s*{\n\s*vec2 p;\n\s*p = vec2\(t, 2\.0 \* t\);\n\s*_tv1 = p;\n\s*}\n\s*return dot\(_tv1, vec2\(1\.0, 1\.0\)\);/
+        /vec2 _tv1;\n\s*{\n\s*vec2 p;\n\s*p = vec2\(t, 2\.0 \* t\);\n\s*_tv1 = p;\n\s*}\n\s*return dot\(_tv1, vec2\(1\.0, 1\.0\)\);/
       );
       expect(compile(expr).run!({ t: 2 })).toBe(6);
     });
@@ -272,7 +269,7 @@ describe.each(['glsl', 'wgsl'] as const)(
   }
 );
 
-describe.each(['glsl', 'wgsl'] as const)(
+describe.each(['glsl'] as const)(
   '%s: statements inside a block get a statement sink of their own',
   (to) => {
     test('a loop-form Sum assigned to a block local was a silent miscompile', () => {
@@ -609,7 +606,7 @@ describe('the Tycho noise kernel (art/hyvhlz4chj)', () => {
     );
   }
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s: compiles with the with-clause as a scoped block in the loop',
     (to) => {
       const r = compile(kernel(), {
@@ -621,11 +618,7 @@ describe('the Tycho noise kernel (art/hyvhlz4chj)', () => {
       expectValidShape(code);
       const fbm = /_fn_f_Bm\([^)]*\)[^{]*{([\s\S]*?)\n}/.exec(code)?.[1] ?? '';
       expect(fbm.match(/for \(/g)).toHaveLength(1);
-      expect(fbm).toMatch(
-        to === 'wgsl'
-          ? /{\n\s*var a: f32;\n\s*a = exp2\(f32\(n\)\);/
-          : /{\n\s*float a;\n\s*a = exp2\(float\(n\)\);/
-      );
+      expect(fbm).toMatch(/{\n\s*float a;\n\s*a = exp2\(float\(n\)\);/);
       expect(fbm).toMatch(/_tv1 \+= _tv2;/);
     }
   );

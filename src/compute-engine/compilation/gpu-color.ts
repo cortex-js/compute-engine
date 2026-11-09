@@ -44,11 +44,10 @@ export const GPU_COLOR_SPACES: ReadonlySet<string> = new Set([
  */
 export function gpuFiniteColorChannels(
   args: ReadonlyArray<Expression>,
-  compile: (expr: Expression) => string,
-  target: CompileTarget<Expression> | undefined
+  compile: (expr: Expression) => string
 ): string {
   const channels = args.slice(0, 3);
-  const code = `${gpuVec3(target)}(${channels.map((x) => compile(x)).join(', ')})`;
+  const code = `${gpuVec3()}(${channels.map((x) => compile(x)).join(', ')})`;
   const finiteLiterals = channels.every(
     (x) => isNumber(x) && x.im === 0 && Number.isFinite(x.re)
   );
@@ -145,8 +144,8 @@ export function gpuColorOperand(
   // lowering, so the shape gate that lowering applies has to be applied here
   // too: a vector-valued component emitted `vec3(1.0, vec2(0.0, 1.0), 0.0)`,
   // which no driver accepts.
-  assertGPUScalarComponents(ops.slice(0, 3), gpuVec3(target));
-  return `_gpu_srgb_to_oklch(${gpuVec3(target)}(${ops
+  assertGPUScalarComponents(ops.slice(0, 3), gpuVec3());
+  return `_gpu_srgb_to_oklch(${gpuVec3()}(${ops
     .slice(0, 3)
     .map((op) => compile(op))
     .join(', ')}))`;

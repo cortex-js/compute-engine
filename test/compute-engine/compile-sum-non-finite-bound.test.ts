@@ -184,7 +184,7 @@ describe('the GPU targets decline a non-finite bound too', () => {
       ['Product', 'i', ['Limits', 'i', 'NegativeInfinity', 5]],
     ],
   ] as const)('%s with a non-finite %s bound', (kind, which, json) => {
-    for (const to of ['glsl', 'wgsl'] as const) {
+    for (const to of ['glsl'] as const) {
       const result = compile(ce.box(json as any), {
         to,
         constantFold: false,
@@ -208,7 +208,7 @@ describe('the GPU targets decline a non-finite bound too', () => {
   ] as const)(
     '%s with a NaN bound declines as an invalid expression',
     (_kind, json) => {
-      for (const to of ['glsl', 'wgsl'] as const) {
+      for (const to of ['glsl'] as const) {
         const result = compile(ce.box(json as any), {
           to,
           constantFold: false,
@@ -219,7 +219,7 @@ describe('the GPU targets decline a non-finite bound too', () => {
     }
   );
 
-  it.each(['glsl', 'wgsl'] as const)(
+  it.each(['glsl'] as const)(
     'the parsed infinite series declines on %s',
     (to) => {
       const result = compile(INFINITE_SUM(), { to, constantFold: false });
@@ -231,10 +231,6 @@ describe('the GPU targets decline a non-finite bound too', () => {
   it.each([
     [
       'glsl',
-      '((1.0) + (2.0) + (3.0) + (4.0) + (5.0) + (6.0) + (7.0) + (8.0) + (9.0) + (10.0))',
-    ],
-    [
-      'wgsl',
       '((1.0) + (2.0) + (3.0) + (4.0) + (5.0) + (6.0) + (7.0) + (8.0) + (9.0) + (10.0))',
     ],
   ] as const)('a finite sum still compiles unchanged on %s', (to, code) => {

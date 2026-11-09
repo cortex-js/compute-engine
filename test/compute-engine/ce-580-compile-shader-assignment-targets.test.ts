@@ -1,6 +1,5 @@
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 // CE-580. `compileShader()` wrote each body statement as
 // `<variable> = <code>;` and did not check the target `variable`. A target
@@ -11,7 +10,6 @@ import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const ce = new ComputeEngine();
 const glsl = new GLSLTarget();
-const wgsl = new WGSLTarget();
 
 describe('CE-580 a valid output assignment compiles as before', () => {
   it('GLSL fragment: a whole output, a component, and gl_FragDepth', () => {
@@ -56,47 +54,6 @@ describe('CE-580 a valid output assignment compiles as before', () => {
         '  vColor.rg = vec2(1.0, 0.5);\n' +
         '}\n'
     );
-  });
-
-  it('WGSL fragment: a field of `output`, and a component of one', () => {
-    const shader = wgsl.compileShader({
-      type: 'fragment',
-      inputs: [{ name: 'x', type: 'f32', location: 0 }],
-      outputs: [
-        { name: 'c', type: 'f32', location: 0 },
-        { name: 'color', type: 'vec4f', location: 1 },
-      ],
-      body: [
-        { variable: 'output.c', expression: ce.box(['Multiply', 2, 'x']) },
-        { variable: 'output.color.r', expression: ce.box('x') },
-      ],
-    });
-    expect(shader).toBe(
-      'struct FragmentInput {\n  @location(0) x: f32,\n};\n\n' +
-        'struct FragmentOutput {\n  @location(0) c: f32,\n' +
-        '  @location(1) color: vec4f,\n};\n\n' +
-        '@fragment\nfn main(input: FragmentInput) -> FragmentOutput {\n' +
-        '  var output: FragmentOutput;\n' +
-        '  output.c = 2.0 * input.x;\n' +
-        '  output.color.r = input.x;\n' +
-        '  return output;\n}\n'
-    );
-  });
-
-  it('WGSL vertex: a built-in output is a field of `output` too', () => {
-    const shader = wgsl.compileShader({
-      type: 'vertex',
-      inputs: [{ name: 'p', type: 'vec4f', location: 0 }],
-      outputs: [{ name: 'pos', type: 'vec4f', builtin: 'position' }],
-      body: [{ variable: 'output.pos', expression: ce.box('p') }],
-    });
-    expect(shader).toContain('  output.pos = input.p;\n');
-  });
-
-  it('WGSL compute: an empty body is valid', () => {
-    expect(
-      wgsl.compileShader({ type: 'compute', workgroupSize: [8], body: [] })
-    ).toBe('@compute\n@workgroup_size(8)\nfn main() {\n}\n');
   });
 
   it('desktop GLSL converts an integer vector to a float vector', () => {
@@ -154,180 +111,10 @@ describe('CE-580 a target that is not an output is refused', () => {
       /"gl_FragDepth" is not an output of the shader\. .* The outputs are "gl_Position" \(`vec4`\), "gl_PointSize" \(`float`\)\./
     );
   });
-
-  it('WGSL: an output name without `output.`', () => {
-    expect(() =>
-      wgsl.compileShader({
-        type: 'fragment',
-        outputs: [{ name: 'c', type: 'f32' }],
-        body: [{ variable: 'c', expression: ce.box(1) }],
-      })
-    ).toThrow(
-      'Could not compile the body statement "c" of `compileShader()`: "c" ' +
-        'is not an output of the shader. A body statement must assign a ' +
-        'declared output, or components of a vector output. The outputs ' +
-        'are "output.c" (`f32`).'
-    );
-  });
-
-  it('WGSL: a uniform is not an output', () => {
-    expect(() =>
-      wgsl.compileShader({
-        type: 'fragment',
-        uniforms: [{ name: 'u', type: 'f32' }],
-        outputs: [{ name: 'c', type: 'f32' }],
-        body: [{ variable: 'u', expression: ce.box(1) }],
-      })
-    ).toThrow(/"u" is not an output of the shader/);
-  });
-
-  it('WGSL: a shader with no outputs', () => {
-    expect(() =>
-      wgsl.compileShader({
-        type: 'fragment',
-        body: [{ variable: 'output.c', expression: ce.box(1) }],
-      })
-    ).toThrow(/This shader declares no outputs\./);
-  });
 });
 
-describe('CE-580 WGSL writes a target of several components one at a time', () => {
-  // WGSL accepts `output.color.rg = v;` only with the `swizzle_assignment`
-  // language extension (WGSL §6.5.4, §9.2.2). A one-component target is a
-  // reference without any extension (WGSL §8.5.1.3), so the value is bound
-  // to a `let` and each component is assigned on its own.
-  const shader = (
-    outputs: Array<{ name: string; type: string; location?: number }>,
-    body: Array<{ variable: string; expression: unknown }>
-  ) =>
-    wgsl.compileShader({
-      type: 'fragment',
-      inputs: [
-        { name: 'uv', type: 'vec2f', location: 0 },
-        { name: 'x', type: 'f32', location: 1 },
-      ],
-      outputs,
-      body: body as never,
-      constantFold: false,
-    });
-  const main = (code: string) =>
-    code.slice(code.indexOf('  var output: FragmentOutput;\n'));
-
-  it('two components', () => {
-    expect(
-      main(
-        shader(
-          [{ name: 'color', type: 'vec4f', location: 0 }],
-          [{ variable: 'output.color.rg', expression: ce.box('uv') }]
-        )
-      )
-    ).toBe(
-      '  var output: FragmentOutput;\n' +
-        '  let _tv1 = input.uv;\n' +
-        '  output.color.r = _tv1.x;\n' +
-        '  output.color.g = _tv1.y;\n' +
-        '  return output;\n}\n'
-    );
-  });
-
-  it('three components, in the order of the letters', () => {
-    expect(
-      main(
-        shader(
-          [{ name: 'p', type: 'vec3f', location: 0 }],
-          [
-            {
-              variable: 'output.p.zyx',
-              expression: ce.box(['Tuple', 'x', 2, 3]),
-            },
-          ]
-        )
-      )
-    ).toBe(
-      '  var output: FragmentOutput;\n' +
-        '  let _tv1 = vec3f(input.x, 2.0, 3.0);\n' +
-        '  output.p.z = _tv1.x;\n' +
-        '  output.p.y = _tv1.y;\n' +
-        '  output.p.x = _tv1.z;\n' +
-        '  return output;\n}\n'
-    );
-  });
-
-  it('four components', () => {
-    expect(
-      main(
-        shader(
-          [{ name: 'color', type: 'vec4f', location: 0 }],
-          [
-            {
-              variable: 'output.color.abgr',
-              expression: ce.box(['Tuple', 1, 0, 0, 'x']),
-            },
-          ]
-        )
-      )
-    ).toBe(
-      '  var output: FragmentOutput;\n' +
-        '  let _tv1 = vec4f(1.0, 0.0, 0.0, input.x);\n' +
-        '  output.color.a = _tv1.x;\n' +
-        '  output.color.b = _tv1.y;\n' +
-        '  output.color.g = _tv1.z;\n' +
-        '  output.color.r = _tv1.w;\n' +
-        '  return output;\n}\n'
-    );
-  });
-
-  it('a value with a hoisted loop: the loop comes first', () => {
-    const bigSum = ['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 1000]];
-    expect(
-      main(
-        shader(
-          [{ name: 'color', type: 'vec4f', location: 0 }],
-          [
-            {
-              variable: 'output.color.rg',
-              expression: ce.box(['Tuple', ['Add', bigSum, 1], 'x']),
-            },
-          ]
-        )
-      )
-    ).toBe(
-      '  var output: FragmentOutput;\n' +
-        '  var _tv1: f32 = 0.0;\n' +
-        '  for (var i: i32 = 1; i <= 1000; i++) {\n' +
-        '    _tv1 += _gpu_sin(f32(i));\n' +
-        '  }\n' +
-        '  let _tv2 = vec2f(_tv1 + 1.0, input.x);\n' +
-        '  output.color.r = _tv2.x;\n' +
-        '  output.color.g = _tv2.y;\n' +
-        '  return output;\n}\n'
-    );
-  });
-
-  it('the temporary does not take the name of an output', () => {
-    expect(
-      main(
-        shader(
-          [{ name: '_tv1', type: 'vec2f', location: 0 }],
-          [{ variable: 'output._tv1.yx', expression: ce.box('uv') }]
-        )
-      )
-    ).toBe(
-      '  var output: FragmentOutput;\n' +
-        '  let _tv2 = input.uv;\n' +
-        '  output._tv1.y = _tv2.x;\n' +
-        '  output._tv1.x = _tv2.y;\n' +
-        '  return output;\n}\n'
-    );
-  });
-
-  it('one component, and GLSL, keep a single assignment', () => {
-    expect(
-      shader(
-        [{ name: 'color', type: 'vec4f', location: 0 }],
-        [{ variable: 'output.color.g', expression: ce.box('x') }]
-      )
-    ).toContain('  output.color.g = input.x;\n');
+describe('CE-580 GLSL writes a target of several components at once', () => {
+  it('a GLSL target of several components is one assignment', () => {
     expect(
       glsl.compileShader({
         type: 'fragment',
@@ -374,38 +161,9 @@ describe('CE-580 a component selection that is not valid is refused', () => {
       /selects the components "x" of the output "o" \(`float`\), but the output is not a vector\./
     );
   });
-
-  it('WGSL has no `stpq` set', () => {
-    expect(() =>
-      wgsl.compileShader({
-        type: 'fragment',
-        outputs: [{ name: 'color', type: 'vec4f' }],
-        body: [{ variable: 'output.color.s', expression: ce.box(1) }],
-      })
-    ).toThrow(
-      /these letters are not all from one of the sets "xyzw", "rgba"\./
-    );
-  });
 });
 
 describe('CE-580 a value of another type than the target is refused', () => {
-  it('WGSL: a vec2f into an f32 output', () => {
-    expect(() =>
-      wgsl.compileShader({
-        type: 'fragment',
-        inputs: [{ name: 'uv', type: 'vec2f', location: 0 }],
-        outputs: [{ name: 'c', type: 'f32', location: 0 }],
-        body: [{ variable: 'output.c', expression: ce.box('uv') }],
-      })
-    ).toThrow(
-      'Could not compile the body statement "output.c" of ' +
-        '`compileShader()`: the value has the type `vec2f`, and the target ' +
-        '"output.c" has the type `f32`. WGSL does not convert the one to ' +
-        'the other in an assignment. Give the value the type of the target, ' +
-        'or declare the output with the type of the value.'
-    );
-  });
-
   it('GLSL: a float into a vec4 output', () => {
     expect(() =>
       glsl.compileShader({
@@ -473,39 +231,19 @@ describe('CE-580 a value of another type than the target is refused', () => {
   });
 });
 
-describe('CE-580 a compute shader cannot assign', () => {
-  it('every body statement is refused, and the message names compile()', () => {
-    expect(() =>
-      wgsl.compileShader({
-        type: 'compute',
-        workgroupSize: [8],
-        uniforms: [{ name: 'uT', type: 'float' }],
-        body: [{ variable: 'r', expression: ce.box(['Multiply', 'uT', 2]) }],
-      })
-    ).toThrow(
-      'Could not compile the body statement "r" of `compileShader()`: a ' +
-        'compute shader from `compileShader()` cannot write a result. It has ' +
-        'no outputs and no storage buffer, so the statement would assign a ' +
-        'name that the shader does not declare. To compute values on the ' +
-        'GPU, use `compile()` or `WGSLTarget.compileFieldFunction()`.'
-    );
-  });
-});
-
 describe('CE-580 a value whose type is not certain is not checked', () => {
   // The emitter gives the width of a compound value operator by operator, so
   // the type of `s * uv` is not known before it is emitted. Such a value is
   // not checked, and the shader is the same as before the check.
-  const cases: Array<[string, unknown, string, string]> = [
-    ['uv * s', ['Multiply', 'uv', 's'], 's * uv', 's * input.uv'],
-    ['uv + uv', ['Add', 'uv', 'uv'], 'uv + uv', 'input.uv + input.uv'],
-    ['-uv', ['Negate', 'uv'], '-uv', '-input.uv'],
-    ['Sin(uv)', ['Sin', 'uv'], '_gpu_sin2(uv)', '_gpu_sin2(input.uv)'],
+  const cases: Array<[string, unknown, string]> = [
+    ['uv * s', ['Multiply', 'uv', 's'], 's * uv'],
+    ['uv + uv', ['Add', 'uv', 'uv'], 'uv + uv'],
+    ['-uv', ['Negate', 'uv'], '-uv'],
+    ['Sin(uv)', ['Sin', 'uv'], '_gpu_sin2(uv)'],
     [
       'If with vector branches',
       ['If', ['Greater', 's', 0], 'uv', ['Negate', 'uv']],
       '((0.0 < s) ? (uv) : (-uv))',
-      'select(-input.uv, input.uv, 0.0 < s)',
     ],
   ];
   const glslShader = (expression: unknown, type = 'vec2') =>
@@ -516,19 +254,10 @@ describe('CE-580 a value whose type is not certain is not checked', () => {
       outputs: [{ name: 'c', type }],
       body: [{ variable: 'c', expression: ce.box(expression as never) }],
     });
-  const wgslShader = (expression: unknown, type = 'vec2f') =>
-    wgsl.compileShader({
-      type: 'fragment',
-      inputs: [{ name: 'uv', type: 'vec2f', location: 0 }],
-      uniforms: [{ name: 's', type: 'f32' }],
-      outputs: [{ name: 'c', type, location: 0 }],
-      body: [{ variable: 'output.c', expression: ce.box(expression as never) }],
-    });
 
-  for (const [name, expression, glslCode, wgslCode] of cases) {
+  for (const [name, expression, glslCode] of cases) {
     it(`${name} into a vec2 output`, () => {
       expect(glslShader(expression)).toContain(`  c = ${glslCode};\n`);
-      expect(wgslShader(expression)).toContain(`  output.c = ${wgslCode};\n`);
     });
   }
 
@@ -553,31 +282,12 @@ describe('CE-580 a value whose type is not certain is not checked', () => {
         '  c = _tv1;\n' +
         '}\n'
     );
-    expect(wgslShader(block)).toBe(
-      'struct FragmentInput {\n  @location(0) uv: vec2f,\n};\n\n' +
-        'struct FragmentOutput {\n  @location(0) c: vec2f,\n};\n\n' +
-        '@group(0) @binding(0) var<uniform> s: f32;\n\n' +
-        '@fragment\nfn main(input: FragmentInput) -> FragmentOutput {\n' +
-        '  var output: FragmentOutput;\n' +
-        '  var _tv1: vec2f;\n' +
-        '  {\n' +
-        '    var q: vec2f;\n' +
-        '    q = 2.0 * input.uv;\n' +
-        '    _tv1 = q;\n' +
-        '  }\n' +
-        '  output.c = _tv1;\n' +
-        '  return output;\n' +
-        '}\n'
-    );
   });
 
   it('a function of a vector expression takes the vector helper', () => {
     // `2·uv` was read as a float, so the `float` helper received a `vec2`.
     expect(glslShader(['Sin', ['Multiply', 2, 'uv']])).toContain(
       '  c = _gpu_sin2(2.0 * uv);\n'
-    );
-    expect(wgslShader(['Sin', ['Multiply', 2, 'uv']])).toContain(
-      '  output.c = _gpu_sin2(2.0 * input.uv);\n'
     );
     expect(
       glsl.compileFunction(
@@ -592,9 +302,6 @@ describe('CE-580 a value whose type is not certain is not checked', () => {
   it('a compound scalar into a vector output is refused', () => {
     expect(() => glslShader(['Multiply', 's', 's'], 'vec4')).toThrow(
       /the value has the type `float`, and the target "c" has the type `vec4`/
-    );
-    expect(() => wgslShader(['Sin', ['Add', 's', 1]], 'vec4f')).toThrow(
-      /the value has the type `f32`, and the target "output\.c" has the type `vec4f`/
     );
   });
 });
@@ -651,19 +358,6 @@ describe('CE-580 a matrix or an array is not a scalar or a vector', () => {
     );
   });
 
-  it('WGSL: a mat2 uniform into two components (no `let` is written)', () => {
-    expect(() =>
-      wgsl.compileShader({
-        type: 'fragment',
-        uniforms: [{ name: 'M', type: 'mat2' }],
-        outputs: [{ name: 'o', type: 'vec4f' }],
-        body: [{ variable: 'output.o.rg', expression: ce.box('M') }],
-      })
-    ).toThrow(
-      /the value has the type `mat2`, and the target "output\.o\.rg" has the type `vec2f`/
-    );
-  });
-
   it('GLSL: an array uniform into a float output', () => {
     expect(() =>
       glsl.compileShader({
@@ -705,15 +399,6 @@ describe('CE-580 review: qualifiers, integer outputs, GLSL compute', () => {
         '`compileShader()` computes float values, and cannot assign an ' +
         'integer output. Declare the output with a float type (`float`).'
     );
-    expect(() =>
-      wgsl.compileShader({
-        type: 'fragment',
-        outputs: [{ name: 'k', type: 'vec2u' }],
-        body: [{ variable: 'output.k', expression: ce.box(['Tuple', 1, 2]) }],
-      })
-    ).toThrow(
-      /cannot assign an integer output\. Declare the output with a float type \(`vec2f`\)\./
-    );
   });
 
   it('GLSL has no compute shader', () => {
@@ -723,8 +408,7 @@ describe('CE-580 review: qualifiers, integer outputs, GLSL compute', () => {
       ).toThrow(
         'Could not compile `compileShader()`: the GLSL target writes only ' +
           'vertex and fragment shaders, not a "compute" shader. GLSL ES 3.00 ' +
-          '(WebGL 2) has no compute stage. For a compute shader, use the ' +
-          'WGSL target.'
+          '(WebGL 2) has no compute stage.'
       );
   });
 });
@@ -784,17 +468,6 @@ describe('CE-580 the GLSL outputs and built-ins are in the shape frame', () => {
       'void main() {\n  o = gl_VertexID;\n}\n'
     );
   });
-
-  it('WGSL: a @builtin(position) input is a vec4f', () => {
-    expect(
-      wgsl.compileShader({
-        type: 'fragment',
-        inputs: [{ name: 'pos', type: 'vec4f', builtin: 'position' }],
-        outputs: [{ name: 'c', type: 'vec4f', location: 0 }],
-        body: [{ variable: 'output.c', expression: ce.box(['Sin', 'pos']) }],
-      })
-    ).toContain('  output.c = _gpu_sin4(input.pos);\n');
-  });
 });
 
 describe('CE-580 a GLSL qualifier does not hide the declared type', () => {
@@ -828,7 +501,7 @@ describe('CE-580 a GLSL qualifier does not hide the declared type', () => {
 });
 
 describe('CE-580 the width of a Block local', () => {
-  const code = (target: GLSLTarget | WGSLTarget, json: unknown) =>
+  const code = (target: GLSLTarget, json: unknown) =>
     target.compile(ce.box(json as never), { constantFold: false }).code;
 
   it('Abs of a point is its length, a scalar', () => {
@@ -836,9 +509,6 @@ describe('CE-580 the width of a Block local', () => {
     const json = ['Block', ['Assign', 'q', ['Abs', ['Tuple', 'x', 1]]], 'q'];
     expect(code(glsl, json)).toBe(
       'float q;\nq = length(vec2(x, 1.0));\nreturn q;'
-    );
-    expect(code(wgsl, json)).toBe(
-      'var q: f32;\nq = length(vec2f(x, 1.0));\nreturn q;'
     );
   });
 
@@ -863,15 +533,11 @@ describe('CE-580 the width of a Block local', () => {
     expect(code(glsl, json)).toBe(
       'vec2 q;\nvec2 p;\np = vec2(1.0, 2.0);\nq = _gpu_sin2(p);\nreturn q;'
     );
-    expect(code(wgsl, json)).toBe(
-      'var q: vec2f;\nvar p: vec2f;\np = vec2f(1.0, 2.0);\nq = _gpu_sin2(p);\nreturn q;'
-    );
   });
 
   // The declared type `real` and the assigned list have different shape
   // classes. The declared type of a local settles its shape, so the
-  // compilation declines on both targets (CE-712.1, the simple rule for
-  // assignments).
+  // compilation declines (CE-712.1, the simple rule for assignments).
   it('a local declared `real` that is assigned a point declines', () => {
     const json = [
       'Block',
@@ -880,33 +546,10 @@ describe('CE-580 the width of a Block local', () => {
       'q',
     ];
     expect(() => code(glsl, json)).toThrow(/different shapes/);
-    expect(() => code(wgsl, json)).toThrow(/different shapes/);
   });
 });
 
 describe('CE-580 a vector value of another width than the target', () => {
-  it('WGSL: a vec3 expression into two components is refused', () => {
-    expect(() =>
-      wgsl.compileShader({
-        type: 'fragment',
-        inputs: [{ name: 'uv', type: 'vec3f', location: 0 }],
-        outputs: [{ name: 'color', type: 'vec4f', location: 0 }],
-        body: [
-          {
-            variable: 'output.color.rg',
-            expression: ce.box(['Multiply', 2, 'uv']),
-          },
-        ],
-      })
-    ).toThrow(
-      'Could not compile the body statement "output.color.rg" of ' +
-        '`compileShader()`: the value has 3 components, and the target ' +
-        '"output.color.rg" has the type `vec2f`. WGSL does not convert the ' +
-        'one to the other in an assignment. Give the value the type of the ' +
-        'target, or declare the output with the type of the value.'
-    );
-  });
-
   it('GLSL: a vec3 expression into two components or a vec2 output', () => {
     const shader = (variable: string, expression: unknown) =>
       glsl.compileShader({
@@ -927,23 +570,6 @@ describe('CE-580 a vector value of another width than the target', () => {
   });
 
   it('a vector expression of the width of the target compiles', () => {
-    expect(
-      wgsl.compileShader({
-        type: 'fragment',
-        inputs: [{ name: 'uv', type: 'vec2f', location: 0 }],
-        outputs: [{ name: 'color', type: 'vec4f', location: 0 }],
-        body: [
-          {
-            variable: 'output.color.rg',
-            expression: ce.box(['Multiply', 2, 'uv']),
-          },
-        ],
-      })
-    ).toContain(
-      '  let _tv1 = 2.0 * input.uv;\n' +
-        '  output.color.r = _tv1.x;\n' +
-        '  output.color.g = _tv1.y;\n'
-    );
     expect(
       glsl.compileShader({
         type: 'fragment',
@@ -1014,10 +640,7 @@ describe('CE-580 complex arithmetic on a vector is refused', () => {
     'representation on the GPU targets (each complex number is a `vec2`), ' +
     'so complex arithmetic on a vector is not supported there.';
 
-  for (const [name, target] of [
-    ['GLSL', glsl],
-    ['WGSL', wgsl],
-  ] as const) {
+  for (const [name, target] of [['GLSL', glsl]] as const) {
     it(`${name}: q + i and q · i`, () => {
       expect(() =>
         target.compile(ce.box(withVector(['Add', 'q', ['Sqrt', -1]]) as never))
@@ -1039,7 +662,7 @@ describe('CE-580 complex arithmetic on a vector is refused', () => {
         ['Add', ['Add', ['List', 'x', 2], 'ImaginaryUnit']],
         ['Multiply', ['Multiply', ['List', 'x', 2], 'ImaginaryUnit']],
       ] as const) {
-        const to = name === 'GLSL' ? 'glsl' : 'wgsl';
+        const to = 'glsl';
         const refusal =
           `Could not compile \`${head}\`: the operand \`[x,2]\` is a vector ` +
           'of 2 components, and the value is complex. A list of complex ' +
@@ -1059,7 +682,7 @@ describe('CE-580 complex arithmetic on a vector is refused', () => {
     });
 
     it(`${name}: a real scalar operand is still promoted`, () => {
-      const v2 = name === 'GLSL' ? 'vec2' : 'vec2f';
+      const v2 = 'vec2';
       expect(target.compile(ce.box(['Add', 'x', 'ImaginaryUnit'])).code).toBe(
         `${v2}(x, 1.0)`
       );
@@ -1070,68 +693,9 @@ describe('CE-580 complex arithmetic on a vector is refused', () => {
   }
 });
 
-describe('CE-580 the width of a selection, a Block, and a WGSL split', () => {
-  const shader = (uvType: string, expression: unknown, variable: string) =>
-    wgsl.compileShader({
-      type: 'fragment',
-      inputs: [{ name: 'uv', type: uvType, location: 0 }],
-      uniforms: [{ name: 's', type: 'f32' }],
-      outputs: [{ name: 'color', type: 'vec4f', location: 0 }],
-      body: [{ variable, expression: ce.box(expression as never) }],
-    });
-  const selection = [
-    'If',
-    ['Greater', 's', 0],
-    ['Sin', 'uv'],
-    ['Negate', 'uv'],
-  ];
-  const block = [
-    'Block',
-    ['Declare', 'q', "'unknown'", ['Multiply', 2, 'uv']],
-    'q',
-  ];
-
-  it('an If of vec3 values into two components is refused', () => {
-    expect(() => shader('vec3f', selection, 'output.color.rg')).toThrow(
-      /the value has 3 components, and the target "output\.color\.rg" has the type `vec2f`/
-    );
-  });
-
-  it('an If of vec2 values into two components compiles', () => {
-    expect(shader('vec2f', selection, 'output.color.rg')).toContain(
-      '  let _tv1 = select(-input.uv, _gpu_sin2(input.uv), 0.0 < s);\n' +
-        '  output.color.r = _tv1.x;\n' +
-        '  output.color.g = _tv1.y;\n'
-    );
-  });
-
-  it('a Block that returns a vec3 into two components is refused', () => {
-    expect(() => shader('vec3f', block, 'output.color.rg')).toThrow(
-      /the value has 3 components, and the target "output\.color\.rg" has the type `vec2f`/
-    );
-  });
-
-  it('a Sum of vectors has the width of its body', () => {
-    const sum = ['Sum', ['Multiply', 'k', 'uv'], ['Limits', 'k', 1, 3]];
-    expect(shader('vec2f', sum, 'output.color.ba')).toContain(
-      '  let _tv1 = ((1.0 * input.uv) + (2.0 * input.uv) + (3.0 * input.uv));\n' +
-        '  output.color.b = _tv1.x;\n' +
-        '  output.color.a = _tv1.y;\n'
-    );
-    expect(() => shader('vec2f', sum, 'output.color.b')).toThrow(
-      /the value has 2 components, and the target "output\.color\.b" has the type `f32`/
-    );
-  });
-
+describe('CE-580 the width of a loop Sum', () => {
   it('a loop Sum of vectors has a vector accumulator', () => {
     // The accumulator was declared `float`, which a `vec2` term does not fit.
-    const sum = ['Sum', ['Multiply', 'k', 'uv'], ['Limits', 'k', 1, 1000]];
-    expect(shader('vec2f', sum, 'output.color.ba')).toContain(
-      '  var _tv1: vec2f = vec2f(0.0);\n' +
-        '  for (var k: i32 = 1; k <= 1000; k++) {\n' +
-        '    _tv1 += f32(k) * input.uv;\n' +
-        '  }\n'
-    );
     expect(
       glsl.compileShader({
         type: 'fragment',
@@ -1173,21 +737,6 @@ describe('CE-580 the width of a selection, a Block, and a WGSL split', () => {
         '  d = _tv2;\n'
     );
   });
-
-  it('a value whose width is not known is refused for a split only', () => {
-    // `Clamp` of a vector is a vector, but no width is read from it here.
-    const clamp = ['Clamp', 'uv', 0, 1];
-    expect(() => shader('vec2f', clamp, 'output.color.ba')).toThrow(
-      'Could not compile the body statement "output.color.ba" of ' +
-        '`compileShader()`: the number of components of the value cannot be ' +
-        'determined, and WGSL assigns a target of 2 components one component ' +
-        'at a time. Assign the whole output, or one component in each ' +
-        'statement (`output.color.b`).'
-    );
-    expect(shader('vec4f', clamp, 'output.color')).toContain(
-      '  output.color = '
-    );
-  });
 });
 
 describe('CE-580 a Matrix literal has the type it is written with', () => {
@@ -1208,21 +757,6 @@ describe('CE-580 a Matrix literal has the type it is written with', () => {
 
   it('a column Matrix is a vector', () => {
     expect(glslShader('vec2', [[1], [2]])).toContain('  c = vec2(1.0, 2.0);\n');
-    expect(
-      wgsl.compileShader({
-        type: 'fragment',
-        outputs: [{ name: 'c', type: 'vec2f' }],
-        body: [
-          {
-            variable: 'output.c',
-            expression: ce.box([
-              'Matrix',
-              ['List', ['List', 1], ['List', 2]],
-            ] as never),
-          },
-        ],
-      })
-    ).toContain('  output.c = vec2f(1.0, 2.0);\n');
   });
 
   it('a row Matrix is an array of one row, and a square one a matrix', () => {
@@ -1235,5 +769,37 @@ describe('CE-580 a Matrix literal has the type it is written with', () => {
         [3, 4],
       ])
     ).toThrow(/the value has the type `mat2`, and the target "c"/);
+  });
+});
+
+describe('a type spelling that is not GLSL in a declaration', () => {
+  // GLSL has no `vec3f` type: writing `uniform vec3f u;` gives a shader that
+  // does not compile on the GPU, so the declaration is refused.
+  const shader = (declared: { uniform?: string; output?: string }) =>
+    glsl.compileShader({
+      type: 'fragment',
+      uniforms: [{ name: 'u', type: declared.uniform ?? 'vec3' }],
+      outputs: [{ name: 'o', type: declared.output ?? 'vec3' }],
+      body: [{ variable: 'o', expression: ce.box(['Multiply', 2, 'u']) }],
+    });
+
+  it('is refused for a uniform', () => {
+    expect(() => shader({ uniform: 'vec3f' })).toThrow(
+      'Could not compile `compileShader()`: the declared type `vec3f` of ' +
+        '"u" is not a GLSL type.'
+    );
+    expect(() => shader({ uniform: 'highp vec3<f32>' })).toThrow(
+      /the declared type `highp vec3<f32>` of "u" is not a GLSL type/
+    );
+  });
+
+  it('is refused for an output', () => {
+    expect(() => shader({ output: 'vec3f' })).toThrow(
+      /the declared type `vec3f` of "o" is not a GLSL type/
+    );
+  });
+
+  it('the GLSL spelling compiles', () => {
+    expect(shader({})).toContain('uniform vec3 u;\n');
   });
 });

@@ -7,7 +7,7 @@ function engine() {
 }
 
 describe('code generation from numeric and representation facts', () => {
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s specializes scalar and vector powers',
     (to) => {
       const ce = engine();
@@ -45,7 +45,7 @@ describe('code generation from numeric and representation facts', () => {
     }
   );
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s color fast path retains domain fallback and alpha rejection',
     (to) => {
       const ce = engine();

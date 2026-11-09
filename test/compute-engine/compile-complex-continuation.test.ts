@@ -181,7 +181,7 @@ describe('The shader targets decline a provably complex value', () => {
     ['HurwitzZeta(2.5, -1.5)', ['HurwitzZeta', 2.5, -1.5]],
   ];
   for (const [label, expr] of declined)
-    for (const to of ['glsl', 'wgsl'] as const)
+    for (const to of ['glsl'] as const)
       test(`${to}: ${label} declines`, () => {
         expect(() =>
           compile(gpu.box(expr), { to, fallback: false } as any)
@@ -197,7 +197,7 @@ describe('The shader targets decline a provably complex value', () => {
     ['LerchPhi(0.5, 2, 1)', ['LerchPhi', 0.5, 2, 1]],
   ];
   for (const [label, expr] of kept)
-    for (const to of ['glsl', 'wgsl'] as const)
+    for (const to of ['glsl'] as const)
       test(`${to}: ${label} compiles`, () => {
         const r = compile(ce.box(expr), { to, fallback: false } as any) as any;
         expect(r.success).toBe(true);

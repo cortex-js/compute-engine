@@ -182,8 +182,8 @@ describe('cross-target compilation', () => {
     ).toEqual({ kind: 'interval', value: { lo: 0, hi: 0.5 } });
   });
 
-  test('glsl/wgsl: map to native clamp/max/min', () => {
-    for (const t of ['glsl', 'wgsl']) {
+  test('glsl: map to native clamp/max/min', () => {
+    for (const t of ['glsl']) {
       expect(compileOn(t, ['Clamp', 'x', 0, 1]).code).toContain('clamp(');
       expect(compileOn(t, ['ElementMax', 'x', 0]).code).toContain('max(');
       expect(compileOn(t, ['ElementMin', 'x', 0]).code).toContain('min(');

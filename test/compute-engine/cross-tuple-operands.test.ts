@@ -48,7 +48,7 @@ describe('Cross over tuple operands', () => {
     const js = compile(expr, { fallback: false });
     expect([js.success, js.error?.message]).toEqual([true, undefined]);
     expect(js.run!({ P: [1, 2, 3], Q: [4, 5, 6], s: 2 })).toEqual([-5, 14, -3]);
-    for (const to of ['glsl', 'wgsl'] as const) {
+    for (const to of ['glsl'] as const) {
       const r = compile(expr, { to, fallback: false });
       expect([to, r.success, r.error?.message]).toEqual([to, true, undefined]);
     }

@@ -707,7 +707,7 @@ export type CompiledExpression = {
  * @category Compiling
  */
 export type OperatorCompileContext = {
-  /** The target language, e.g. `"javascript"`, `"glsl"`, `"wgsl"`, `"python"`.
+  /** The target language, e.g. `"javascript"`, `"glsl"`, `"python"`.
    * Branch on this to emit target-specific source. */
   readonly language: string;
   /** The operand type including facts established by this compilation's local

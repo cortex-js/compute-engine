@@ -226,14 +226,4 @@ describe('broadcastable<T> — GPU targets keep scalar-slot compilation', () => 
     expect(r.code).not.toContain('bcast');
     expect(r.code).toBe('2.0 * b + -1.0');
   });
-
-  test('wgsl compiles a broadcastable operand as a scalar slot (unchanged)', () => {
-    const ce = new ComputeEngine();
-    ce.declare('b', 'broadcastable<number>');
-    const expr = ce.box(['Subtract', ['Multiply', 2, 'b'], 1]);
-    const r = ce._getCompilationTarget('wgsl')!.compile(expr);
-    expect(r.success).toBe(true);
-    expect(r.code).not.toContain('bcast');
-    expect(r.code).toBe('2.0 * b + -1.0');
-  });
 });

@@ -3,7 +3,7 @@ import type { MathJsonExpression } from '../../../src/math-json';
 /**
  * The `voronoi-diagram` row of Tycho's showcase as Tycho's document manager
  * stores it, captured on 2026-10-27 from Tycho's codegen audit
- * (`scripts/audit-ce-codegen.mts --shadow-wgsl`) at the entry of the shader
+ * (`scripts/audit-ce-codegen.mts`) at the entry of the shader
  * targets' root inlining (`compilation/gpu-shared-calls.ts`).
  *
  * Tycho rewrites a document before it stores it: the squared distance `D`

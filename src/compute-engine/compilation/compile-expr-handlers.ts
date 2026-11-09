@@ -250,8 +250,8 @@ export function compileExprElementwiseBroadcast(
 }
 
 /**
- * A relational or logical head over tuple operands on the GLSL and WGSL
- * targets. A case of `compileExpr`: it returns the code, or `undefined` when
+ * A relational or logical head over tuple operands on the GLSL
+ * target. A case of `compileExpr`: it returns the code, or `undefined` when
  * `compileExpr` continues with its next case.
  */
 export function compileExprGpuRelational(
@@ -260,7 +260,7 @@ export function compileExprGpuRelational(
   target: CompileTarget<Expression>
 ): TargetSource | undefined {
   if (
-    (target.language === 'glsl' || target.language === 'wgsl') &&
+    target.language === 'glsl' &&
     (isRelationalOperator(h) || LOGICAL_BROADCAST_HEADS.has(h))
   ) {
     const isTupleShaped = (a: Expression): boolean => {
@@ -289,7 +289,7 @@ export function compileExprGpuRelational(
 }
 
 /**
- * The products and sums of points that the GLSL and WGSL targets refuse. A
+ * The products and sums of points that the GLSL target refuses. A
  * case of `compileExpr`: it returns the code, or `undefined` when
  * `compileExpr` continues with its next case.
  */
@@ -298,7 +298,7 @@ export function compileExprGpuPoint(
   args: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>
 ): TargetSource | undefined {
-  if (target.language === 'glsl' || target.language === 'wgsl') {
+  if (target.language === 'glsl') {
     const isPoint = (a: Expression): boolean =>
       isNumericTuple(a) || isGatedPoint(a);
     if (args.some(isPoint)) {
@@ -879,7 +879,7 @@ export function compileExprAssign(
     // value is the assigned value) was emitted without parentheses:
     // `t = 1 + 2` assigns 3 to `t`, where the interpreter assigns 1. An
     // assignment is an expression in JavaScript and in GLSL, so it is
-    // parenthesized there. In Python and in WGSL an assignment is a
+    // parenthesized there. In Python an assignment is a
     // statement, and it has no expression form: the compilation declines
     // (`assertAssignmentIsStatement`).
     if (prec > 0) {
@@ -968,7 +968,7 @@ export function compileExprTyped(
           // idempotent `_SYS.cplx` settles the representation at run time
           // (see `branchComplexCoercion` for the same class).
           `_SYS.cplx(${code})`;
-    const vec2 = target.language === 'wgsl' ? 'vec2f' : 'vec2';
+    const vec2 = 'vec2';
     return `${vec2}(${code}, 0.0)`;
   }
   return undefined;

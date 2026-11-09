@@ -1,10 +1,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 for (const [language, makeTarget] of [
   ['glsl', () => new GLSLTarget()],
-  ['wgsl', () => new WGSLTarget()],
 ] as const) {
   describe(`${language} folded bounds and integer indices`, () => {
     function fixture(size = 153) {
@@ -48,8 +46,7 @@ for (const [language, makeTarget] of [
         expect(source).not.toContain('floor');
         expect(source).not.toContain('_gpu_at');
         expect(source).toContain('[k - 1]');
-        if (language === 'wgsl') expect(source).toMatch(/var _tv\d+ = A;/);
-        else expect(source).toContain('A[k - 1]');
+        expect(source).toContain('A[k - 1]');
       }
     );
 
@@ -222,24 +219,13 @@ for (const [language, makeTarget] of [
           ['Limits', 'k', 1, ['Add', 'n', 1]],
         ]),
         'f',
-        language === 'wgsl' ? 'f32' : 'float',
+        'float',
         [
-          ['n', language === 'wgsl' ? 'f32' : 'float'],
-          ['x', language === 'wgsl' ? 'f32' : 'float'],
+          ['n', 'float'],
+          ['x', 'float'],
         ]
       );
       expect(source).toContain('floor(n + 1.0)');
-    });
-
-    test('WGSL array reads in lazy branches retain a legal helper call', () => {
-      if (language !== 'wgsl') return;
-      const { code } = fixture();
-      const source = code([
-        'Sum',
-        ['Which', 'flag', ['At', 'A', 'k'], 'True', 0],
-        ['Limits', 'k', 1, 153],
-      ]);
-      expect(source).toContain('_gpu_at153');
     });
   });
 }

@@ -1,10 +1,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const glsl = new GLSLTarget();
-const wgsl = new WGSLTarget();
 
 const occurrences = (code: string, needle: string): number =>
   code.split(needle).length - 1;
@@ -82,15 +80,6 @@ describe('CSE and loop-invariant hoisting in a Sum body (GPU)', () => {
       ce.parse('\\sum_{n=1}^{m} \\frac{\\sin(x)}{n}')
     ).code;
     expect(code).toContain('n <= int(floor(m));');
-  });
-
-  it('WGSL: the same two rewrites', () => {
-    const ce = new ComputeEngine();
-    const code = wgsl.compile(heatMap(ce)).code;
-
-    expect(code).toMatch(/let _\w+: i32 = i32\(floor\(m \+ -1\.0\)\);/);
-    expect(code).toMatch(/for \(var n: i32 = 0; n <= _\w+; n\+\+\)/);
-    expect(loopBody(code)).not.toContain('floor(x)');
   });
 
   it('GLSL: a literal loop bound is left in place', () => {
@@ -184,13 +173,6 @@ describe('CSE inside an emitted user-function body (GPU)', () => {
     const ce = new ComputeEngine();
     const preamble = glsl.compile(repeatedCall(ce)).preamble;
     expect(preamble).toMatch(/float _cse\d+ = _fn_m\(s\);/);
-    expect(occurrences(preamble, '_fn_m(s)')).toBe(1);
-  });
-
-  it('WGSL: the same body-level sharing', () => {
-    const ce = new ComputeEngine();
-    const preamble = wgsl.compile(repeatedCall(ce)).preamble;
-    expect(preamble).toMatch(/let _cse\d+: f32 = _fn_m\(s\);/);
     expect(occurrences(preamble, '_fn_m(s)')).toBe(1);
   });
 

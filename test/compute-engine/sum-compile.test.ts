@@ -356,7 +356,7 @@ describe('§B2 — field access on a variant value', () => {
       ['lit', 7],
       { str: 'num' },
     ] as MathJsonExpression);
-    for (const to of ['python', 'glsl', 'wgsl'] as const)
+    for (const to of ['python', 'glsl'] as const)
       expect(() =>
         compile(e, { to, fallback: false, constantFold: false })
       ).toThrow(/Could not compile/);
@@ -491,7 +491,7 @@ describe('fail closed — out-of-scope targets and non-sugar nominals', () => {
       ['MatchCase', ['lit', '_v'], 'v'],
       ['MatchCase', '_', 0],
     ] as MathJsonExpression);
-    for (const to of ['glsl', 'wgsl'] as const)
+    for (const to of ['glsl'] as const)
       expect(() => compile(m, { to, fallback: false })).toThrow(
         /not compilable/
       );

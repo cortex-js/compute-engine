@@ -16,18 +16,16 @@
  *
  * There is no GPU here, so correctness is checked by EVALUATING the emitted
  * source (the emissions in this file live in the `max`/`min`/literal/swizzle
- * subset, which is identical in GLSL, WGSL and JavaScript) and comparing
+ * subset, which is identical in GLSL and JavaScript) and comparing
  * against the interpreter.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { gpuScalarComponents } from '../../src/compute-engine/compilation/gpu-extrema';
 
 const ce = new ComputeEngine();
 const glsl = new GLSLTarget();
-const wgsl = new WGSLTarget();
 
 /**
  * Compile-time constant folding is off throughout this file. Almost every
@@ -41,7 +39,6 @@ const wgsl = new WGSLTarget();
 const NO_FOLD = { constantFold: false } as const;
 
 const g = (expr: any): string => glsl.compile(ce.box(expr), NO_FOLD).code!;
-const w = (expr: any): string => wgsl.compile(ce.box(expr), NO_FOLD).code!;
 
 /**
  * Evaluate an emitted shader EXPRESSION over the `_gpu_max`/`_gpu_min`/
@@ -64,7 +61,7 @@ function runShader(code: string, env: Record<string, number[]> = {}): number {
 
 const interp = (expr: any): number => ce.box(expr).evaluate().re;
 
-/** Every emission in this table is byte-identical in GLSL and WGSL. */
+/** Collection operands that `Max` and `Min` reduce to one scalar. */
 const REDUCTIONS: Array<[label: string, expr: any]> = [
   ['a 3-element list', ['Max', ['List', 1, 2, 3]]],
   ['a 3-element list (Min)', ['Min', ['List', 4, 1, 9]]],
@@ -74,7 +71,7 @@ const REDUCTIONS: Array<[label: string, expr: any]> = [
   ['two lists (Min)', ['Min', ['List', 1, 2, 3], ['List', 4, 0, 9]]],
   ['a 2-element list', ['Max', ['List', 1, 2]]],
   // 5 elements has no `vecN` reading — it lowers to a shader ARRAY
-  // (`float[5]` / `array<f32, 5>`), which has no arithmetic at all.
+  // (`float[5]`), which has no arithmetic at all.
   ['a 5-element list', ['Max', ['List', 1, 2, 3, 4, 5]]],
   ['a 5-element list (Min)', ['Min', ['List', 9, 2, 8, 4, 5]]],
   ['a 1-element list', ['Max', ['List', 7]]],
@@ -95,18 +92,8 @@ describe('GPU Max/Min over a collection — REDUCES (was: returned a vector)', (
     }
   );
 
-  it.each(REDUCTIONS)(
-    'WGSL reduces %s to the interpreter value',
-    (_label, expr) => {
-      const code = w(expr);
-      expect(code).not.toMatch(/\bvec[234]f?\s*\(|\barray\s*</);
-      expect(runShader(code)).toBe(interp(expr));
-    }
-  );
-
   it('emits a pairwise fold of the elements, not the aggregate', () => {
     expect(g(['Max', ['List', 1, 2, 3]])).toBe('(max(max(1.0, 2.0), 3.0))');
-    expect(w(['Min', ['List', 4, 1, 9]])).toBe('(min(min(4.0, 1.0), 9.0))');
     expect(g(['Max', ['List', 1, 2, 3], 5])).toBe(
       '(max(max(max(1.0, 2.0), 3.0), 5.0))'
     );
@@ -115,7 +102,6 @@ describe('GPU Max/Min over a collection — REDUCES (was: returned a vector)', (
   it('a scalar-only Max/Min is unchanged (no parentheses, no reduction)', () => {
     // Finite operands call the built-in (`gpuProvablyFinite`).
     expect(g(['Max', 1, 2, 3])).toBe('max(max(1.0, 2.0), 3.0)');
-    expect(w(['Min', 1, 2, 3])).toBe('min(min(1.0, 2.0), 3.0)');
     expect(g(['Min', 5])).toBe('5.0');
   });
 
@@ -130,13 +116,8 @@ describe('GPU Max/Min over a collection — REDUCES (was: returned a vector)', (
     // `max(…)`/`_gpu_nan()` call against operand shapes the emission no
     // longer contains:
     //   - a 5-element list is an `array` operand, and no builtin has an array
-    //     overload;
-    //   - on WGSL a `vec3f` mixed with a scalar has no `max` overload;
-    //   - the empty-collection NaN is a `_gpu_nan()` CALL on WGSL.
+    //     overload.
     expect(() => g(['Max', ['List', 1, 2, 3, 4, 5]])).not.toThrow();
-    expect(() => w(['Max', ['List', 1, 2, 3, 4, 5]])).not.toThrow();
-    expect(() => w(['Max', ['List', 1, 2, 3], 5])).not.toThrow();
-    expect(() => w(['Max', ['List']])).not.toThrow();
     expect(runShader(g(['Max', ['List', 1, 2, 3, 4, 5]]))).toBe(
       interp(['Max', ['List', 1, 2, 3, 4, 5]])
     );
@@ -144,8 +125,8 @@ describe('GPU Max/Min over a collection — REDUCES (was: returned a vector)', (
 });
 
 describe('GPU Max/Min over an EMPTY collection — the target NaN', () => {
-  // An empty literal collection has no shader constructor at all (`float[0]()`
-  // / `array<f32, 0>()`), so compiling it first made the whole reduction
+  // An empty literal collection has no shader constructor at all
+  // (`float[0]()`), so compiling it first made the whole reduction
   // decline. It contributes NO components instead: `Max([], 5)` is `5`, and
   // `Max([])` — nothing left to fold — is NaN, which is what the interpreter
   // and the JavaScript target both answer.
@@ -160,7 +141,6 @@ describe('GPU Max/Min over an EMPTY collection — the target NaN', () => {
     'emits the target NaN for %s',
     (_label, expr) => {
       expect(g(expr)).toBe('(_gpu_nan())');
-      expect(w(expr)).toBe('(_gpu_nan())');
     }
   );
 
@@ -188,7 +168,6 @@ describe('GPU Max/Min over an EMPTY collection — the target NaN', () => {
       [['Min', ['List'], ['List', 4, 1, 9]], '(min(min(4.0, 1.0), 9.0))'],
     ] as Array<[any, string]>) {
       expect(g(expr)).toBe(code);
-      expect(w(expr)).toBe(code);
       expect(runShader(code)).toBe(interp(expr));
     }
   });
@@ -198,11 +177,9 @@ describe('GPU Max/Min over a declared vector operand', () => {
   const cev = new ComputeEngine();
   cev.declare('v', 'vector<3>');
   const gv = (expr: any): string => glsl.compile(cev.box(expr), NO_FOLD).code!;
-  const wv = (expr: any): string => wgsl.compile(cev.box(expr), NO_FOLD).code!;
 
   it('reduces a bare vector symbol over its swizzles', () => {
     expect(gv(['Max', 'v'])).toBe('(_gpu_max(_gpu_max(v.x, v.y), v.z))');
-    expect(wv(['Max', 'v'])).toBe('(_gpu_max(_gpu_max(v.x, v.y), v.z))');
   });
 
   it.each([[[1, 2, 3]], [[-4, -1, -9]], [[0.5, 0.25, 0.75]], [[7, 7, 7]]])(
@@ -226,9 +203,6 @@ describe('GPU Max/Min over a declared vector operand', () => {
     expect(gv(['Max', ['Multiply', 2, 'v']])).toBe(
       'vec3 _tv1 = 2.0 * v;\nreturn (_gpu_max(_gpu_max(_tv1.x, _tv1.y), _tv1.z));'
     );
-    expect(wv(['Max', ['Multiply', 2, 'v']])).toBe(
-      'var _tv1: vec3f = 2.0 * v;\nreturn (_gpu_max(_gpu_max(_tv1.x, _tv1.y), _tv1.z));'
-    );
   });
 });
 
@@ -237,7 +211,6 @@ describe('GPU Max/Min — operands with no component list fail closed', () => {
 
   it('a matrix operand declines rather than returning an aggregate', () => {
     expect(() => g(['Max', M2])).toThrow(/no compile-time component list/);
-    expect(() => w(['Max', M2])).toThrow(/no compile-time component list/);
     expect(() => g(['Max', M2])).toThrow(/Could not compile/);
   });
 
@@ -260,9 +233,6 @@ describe('GPU ElementMax/ElementMin stay COMPONENTWISE', () => {
     expect(g(['ElementMax', V3, W3])).toBe(
       'max(vec3(1.0, 2.0, 3.0), vec3(4.0, 0.0, 9.0))'
     );
-    expect(w(['ElementMin', V3, W3])).toBe(
-      'min(vec3f(1.0, 2.0, 3.0), vec3f(4.0, 0.0, 9.0))'
-    );
     // …and the interpreter agrees it is element-wise.
     expect(ce.box(['ElementMax', V3, W3]).evaluate().toString()).toBe(
       '[4,2,9]'
@@ -282,7 +252,6 @@ describe('GPU reductions over a vector splat read every component', () => {
   ces.declare('k', 'integer');
   ces.declare('c', 'boolean');
   const gs = (expr: any): string => glsl.compile(ces.box(expr), NO_FOLD).code!;
-  const ws = (expr: any): string => wgsl.compile(ces.box(expr), NO_FOLD).code!;
   const AT = { y: 2, k: 6, c: true };
   const interpAt = (expr: any): number =>
     ces
@@ -292,9 +261,9 @@ describe('GPU reductions over a vector splat read every component', () => {
 
   /**
    * Evaluate an emission at `AT` by rewriting it to JavaScript. It knows the
-   * forms these tests emit: the splat constructors `vec3`/`vec3f` of one
-   * operand, swizzles, the declarations of temporaries, `if`/`else`, the
-   * GLSL `?:` and the WGSL `select`, and the `_gpu_max`/`_gpu_gcd` helpers.
+   * forms these tests emit: the splat constructor `vec3` of one operand,
+   * swizzles, the declarations of temporaries, `if`/`else`, the GLSL `?:`,
+   * and the `_gpu_max`/`_gpu_gcd` helpers.
    */
   function runSplat(code: string): number {
     let js = code
@@ -307,8 +276,7 @@ describe('GPU reductions over a vector splat read every component', () => {
       'y',
       'k',
       'c',
-      'const vec3 = (s) => [s, s, s], vec3f = vec3;' +
-        'const select = (f, t, cond) => (cond ? t : f);' +
+      'const vec3 = (s) => [s, s, s];' +
         'const _gpu_max = Math.max;' +
         'const _gpu_gcd = (a, b) => (b === 0 ? Math.abs(a) : _gpu_gcd(b, a % b));' +
         js
@@ -333,24 +301,17 @@ describe('GPU reductions over a vector splat read every component', () => {
   ])('%s gives the interpreter value', (_label, expr, value) => {
     expect(interpAt(expr)).toBe(value);
     expect(runSplat(gs(expr))).toBe(value);
-    expect(runSplat(ws(expr))).toBe(value);
   });
 
   it('a splat of a symbol is read through the swizzles of the constructor', () => {
     expect(gs(['Sum', P('y')])).toBe(
       '((vec3(y).x) + (vec3(y).y) + (vec3(y).z))'
     );
-    expect(ws(['Product', P('y')])).toBe(
-      '((vec3f(y).x) * (vec3f(y).y) * (vec3f(y).z))'
-    );
   });
 
   it('a compound splat operand is evaluated once, in a temporary', () => {
     expect(gs(['Sum', P(Y1)])).toBe(
       'vec3 _tv1 = vec3(y + 1.0);\nreturn ((_tv1.x) + (_tv1.y) + (_tv1.z));'
-    );
-    expect(ws(['Sum', P(Y1)])).toBe(
-      'var _tv1: vec3f = vec3f(y + 1.0);\nreturn ((_tv1.x) + (_tv1.y) + (_tv1.z));'
     );
   });
 
@@ -361,10 +322,6 @@ describe('GPU reductions over a vector splat read every component', () => {
       '((c) ? ((_gpu_max(_gpu_max(vec3(y + 1.0).x, vec3(y + 1.0).y), ' +
         'vec3(y + 1.0).z))) : (0.0))'
     );
-    expect(ws(['If', 'c', ['Max', P(Y1)], 0])).toBe(
-      'select(0.0, (_gpu_max(_gpu_max(vec3f(y + 1.0).x, vec3f(y + 1.0).y), ' +
-        'vec3f(y + 1.0).z)), c)'
-    );
   });
 
   it('a constructor written by the caller is not repeated in an arm', () => {
@@ -373,9 +330,7 @@ describe('GPU reductions over a vector splat read every component', () => {
     // two branches of the conditional had different types. Repeating the
     // constructor once per component would run the caller's code three
     // times (`vec3(nextValue())` can count its calls), and an arm has no
-    // place for a temporary, so the reduction declines on GLSL. On WGSL,
-    // where `select` would compute both arms, an arm with caller code takes
-    // the statement form of `If`, whose branch holds the temporary.
+    // place for a temporary, so the reduction declines on GLSL.
     const cev = new ComputeEngine();
     cev.declare('V', 'list<real^3>');
     cev.declare('c', 'boolean');
@@ -384,16 +339,6 @@ describe('GPU reductions over a vector splat read every component', () => {
       const opts = { ...NO_FOLD, vars: { V: source } };
       expect(() => glsl.compile(expr, opts)).toThrow(
         /conditionally-evaluated branch/
-      );
-      expect(wgsl.compile(expr, opts).code).toBe(
-        'var _tv1: f32;\n' +
-          'if (c) {\n' +
-          `  var _tv2 = ${source};\n` +
-          '  _tv1 = (_gpu_max(_gpu_max(_tv2.x, _tv2.y), _tv2.z));\n' +
-          '} else {\n' +
-          '  _tv1 = 0.0;\n' +
-          '}\n' +
-          'return _tv1;'
       );
     }
     // Outside an arm, the constructor is held once in a temporary.
@@ -407,13 +352,12 @@ describe('GPU reductions over a vector splat read every component', () => {
 
   it('a splat of a numeric literal repeats the literal', () => {
     expect(gs(['Sum', P(2)])).toBe('((2.0) + (2.0) + (2.0))');
-    expect(ws(['Sum', P(2)])).toBe('((2.0) + (2.0) + (2.0))');
   });
 
   describe('gpuScalarComponents on a target with no statement sink', () => {
     // A binder that installs no sink of its own has no place for a
     // temporary. These calls use a target with no `hoist` sink.
-    const noSink = (language: 'glsl' | 'wgsl') => ({ language }) as any;
+    const noSink = (language: 'glsl') => ({ language }) as any;
     const s = ces.box('y');
 
     it('a pure compound splat is read through its own swizzles', () => {
@@ -496,17 +440,14 @@ describe('GPU reductions over a vector splat read every component', () => {
     });
 
     it('a constructor of a vector and a scalar is not read as a splat', () => {
-      expect(gpuScalarComponents(s, 'vec3(v, z)', noSink('wgsl'))).toEqual([
+      expect(gpuScalarComponents(s, 'vec3(v, z)', noSink('glsl'))).toEqual([
         'vec3(v, z).x',
         'vec3(v, z).y',
         'vec3(v, z).z',
       ]);
     });
 
-    it('the typed WGSL forms and an integer vector', () => {
-      expect(gpuScalarComponents(s, 'vec3<f32>(y)', noSink('wgsl'))).toEqual(
-        ['vec3<f32>(y).x', 'vec3<f32>(y).y', 'vec3<f32>(y).z']
-      );
+    it('an integer vector', () => {
       expect(gpuScalarComponents(s, 'ivec2(k)', noSink('glsl'))).toEqual([
         'ivec2(k).x',
         'ivec2(k).y',
@@ -546,7 +487,6 @@ describe('GPU code supplied by the caller runs once, in order', () => {
   const both = (expr: any, message: RegExp) => {
     const boxed = cev.box(expr);
     expect(() => glsl.compile(boxed, opts)).toThrow(message);
-    expect(() => wgsl.compile(boxed, opts)).toThrow(message);
   };
   const MOVED = /ahead of the rest of its statement/;
   const REPEATED = /more than once/;
@@ -598,13 +538,11 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     const boxed = cev.box(['Cot', ['F', 'x']]);
     const fopts = { ...NO_FOLD, functions: { F: 'myF' } };
     expect(() => glsl.compile(boxed, fopts)).toThrow(REPEATED);
-    expect(() => wgsl.compile(boxed, fopts)).toThrow(REPEATED);
   });
 
-  it('WGSL computes caller code in a branch only when the branch is taken', () => {
-    // `select(f, t, c)` computes both branches, so on WGSL a branch with
-    // caller code takes the statement form, an `if` statement. GLSL's `?:`
-    // computes one branch and keeps the ternary form.
+  it('GLSL computes caller code in a branch with the ternary form', () => {
+    // GLSL's `?:` computes only the branch that is taken, so a branch with
+    // caller code keeps the ternary form.
     for (const expr of [
       ['If', 'c', 'W', 0],
       ['Which', 'c', 'W', 'True', 0],
@@ -612,27 +550,13 @@ describe('GPU code supplied by the caller runs once, in order', () => {
       ['Match', 'x', ['MatchCase', 1, 'W'], ['MatchCase', '_', 30]],
     ]) {
       const boxed = cev.box(expr);
-      const code = wgsl.compile(boxed, opts).code!;
-      expect(code).toMatch(/^var _tv1: f32;\nif \(/);
-      expect(code).not.toContain('select');
-      expect(code.split('nextValue()').length).toBe(2);
       expect(glsl.compile(boxed, opts).code).toContain('?');
     }
-    expect(wgsl.compile(cev.box(['If', 'c', 'W', 0]), opts).code).toBe(
-      'var _tv1: f32;\n' +
-        'if (c) {\n' +
-        '  _tv1 = nextValue();\n' +
-        '} else {\n' +
-        '  _tv1 = 0.0;\n' +
-        '}\n' +
-        'return _tv1;'
-    );
   });
 
-  it('WGSL declines a branch with caller code when the statement form is refused', () => {
-    // The `if` statement would run ahead of the first `W`, so the statement
-    // form is refused, and `select` would compute the branch when it is not
-    // taken.
+  it('GLSL keeps the ternary form for a branch with caller code after caller code', () => {
+    // GLSL's `?:` computes only the branch that is taken, so a branch with
+    // caller code after a `W` keeps the ternary form.
     for (const expr of [
       ['Add', 'W', ['If', 'c', 'W', 0]],
       ['Add', 'W', ['Which', 'c', 'W', 'True', 0]],
@@ -640,7 +564,6 @@ describe('GPU code supplied by the caller runs once, in order', () => {
       ['Add', 'W', ['Match', 'x', ['MatchCase', 1, 'W'], ['MatchCase', '_', 30]]],
     ]) {
       const boxed = cev.box(expr);
-      expect(() => wgsl.compile(boxed, opts)).toThrow(/computes every branch/);
       expect(glsl.compile(boxed, opts).code).toContain('?');
     }
     expect(
@@ -651,21 +574,6 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     ).toBe('nextValue() + ((x == 1.0) ? (nextValue()) : (30.0))');
   });
 
-  it('WGSL takes the statement form for a function mapped through `functions` in a branch', () => {
-    const boxed = cev.box(['If', ['Greater', 'x', 0], ['f', 'x'], 0]);
-    expect(
-      wgsl.compile(boxed, { ...NO_FOLD, functions: { f: 'myFn' } }).code
-    ).toBe(
-      'var _tv1: f32;\n' +
-        'if (0.0 < x) {\n' +
-        '  _tv1 = myFn(x);\n' +
-        '} else {\n' +
-        '  _tv1 = 0.0;\n' +
-        '}\n' +
-        'return _tv1;'
-    );
-  });
-
   it('a loop in a `Match` case with caller code runs in the branch of the case', () => {
     const boxed = cev.box([
       'Match',
@@ -673,19 +581,6 @@ describe('GPU code supplied by the caller runs once, in order', () => {
       ['MatchCase', 1, ['Sum', ['Multiply', 'W', 'k'], ['Limits', 'k', 1, 'n']]],
       ['MatchCase', '_', 0],
     ]);
-    expect(wgsl.compile(boxed, opts).code).toBe(
-      'var _tv1: f32;\n' +
-        'if (x == 1.0) {\n' +
-        '  var _tv2: f32 = 0.0;\n' +
-        '  for (var k: i32 = 1; k <= i32(floor(n)); k++) {\n' +
-        '    _tv2 += nextValue() * f32(k);\n' +
-        '  }\n' +
-        '  _tv1 = _tv2;\n' +
-        '} else {\n' +
-        '  _tv1 = 0.0;\n' +
-        '}\n' +
-        'return _tv1;'
-    );
     expect(glsl.compile(boxed, opts).code).toContain(
       '    _tv2 += nextValue() * float(k);\n'
     );
@@ -703,17 +598,6 @@ describe('GPU code supplied by the caller runs once, in order', () => {
       ],
       MOVED
     );
-  });
-
-  it('a `Which` checks only the operands behind an emitted `select`', () => {
-    // A leading `True` clause is evaluated with no `select`, and the clauses
-    // after a `True` clause are not emitted.
-    expect(wgsl.compile(cev.box(['Which', 'True', 'W']), opts).code).toBe(
-      '(nextValue())'
-    );
-    expect(
-      wgsl.compile(cev.box(['Which', 'c', 1, 'True', 2, 'c', 'W']), opts).code
-    ).toBe('select((2.0), 1.0, c)');
   });
 
   it('the statement form of a selection is refused when it would move caller code', () => {
@@ -810,7 +694,6 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     const expr = ce2.box(['Add', ['g', 1], ['Max', 'V']]);
     const vopts = { ...NO_FOLD, vars: { V: 'vec3(nextValue())' } };
     expect(() => glsl.compile(expr, vopts)).toThrow(MOVED);
-    expect(() => wgsl.compile(expr, vopts)).toThrow(MOVED);
   });
 
   it('hoisted caller code does not run ahead of an earlier read of a `vars` input', () => {
@@ -824,28 +707,12 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     const forBoth = (expr: any, message: RegExp) => {
       const boxed = cev.box(expr);
       expect(() => glsl.compile(boxed, sopts)).toThrow(message);
-      expect(() => wgsl.compile(boxed, sopts)).toThrow(message);
     };
-    expect(() =>
-      wgsl.compile(cev.box(['Tuple', 'W', ['If', 'c', ['F', 'x'], 0]]), sopts)
-    ).toThrow(/If/);
     forBoth(['Tuple', 'W', ['Max', 'V']], MOVED);
     // A read after the hoisted code runs after it in both orders.
     expect(glsl.compile(cev.box(['Tuple', ['Max', 'V'], 'W']), sopts).code).toBe(
       'vec3 _tv1 = vec3(nextValue());\n' +
         'return vec2((_gpu_max(_gpu_max(_tv1.x, _tv1.y), _tv1.z)), state.value);'
-    );
-    expect(
-      wgsl.compile(cev.box(['Tuple', ['If', 'c', ['F', 'x'], 0], 'W']), sopts)
-        .code
-    ).toBe(
-      'var _tv1: f32;\n' +
-        'if (c) {\n' +
-        '  _tv1 = nextValue(x);\n' +
-        '} else {\n' +
-        '  _tv1 = 0.0;\n' +
-        '}\n' +
-        'return vec2f(_tv1, state.value);'
     );
   });
 
@@ -882,43 +749,15 @@ describe('GPU code supplied by the caller runs once, in order', () => {
         '}\n' +
         'return vec2(((u_t) + _tv2 * ((u_t) - (u_t))), _tv3);'
     );
-    expect(
-      wgsl.compile(expr([['Random', ['Interval', 'a', 'b']]]), aopts).code
-    ).toContain('return vec2f(((u_t) + _tv2 * ((u_t) - (u_t))), _tv3);');
     // The bound draw would run before the call of `W`.
     expect(() =>
       glsl.compile(expr(['W', ['Random', ['Interval', 'a', 'b']]]), aopts)
     ).toThrow(MOVED);
   });
 
-  it('a `Match` whose first case always matches emits no selection', () => {
-    expect(wgsl.compile(cev.box(['Match', 'x', ['MatchCase', '_', 'W']]), opts).code).toBe(
-      'nextValue()'
-    );
-    expect(
-      wgsl.compile(
-        cev.box(['Match', 'x', ['MatchCase', '_', 'W'], ['MatchCase', 1, 'W']]),
-        opts
-      ).code
-    ).toBe('nextValue()');
-    // A case after a case that always matches is not emitted, so it is not
-    // checked.
-    expect(
-      wgsl.compile(
-        cev.box([
-          'Add',
-          'W',
-          ['Match', 'x', ['MatchCase', 1, 10], ['MatchCase', '_', 30], ['MatchCase', 2, 'W']],
-        ]),
-        opts
-      ).code
-    ).toBe('nextValue() + select(30.0, 10.0, x == 1.0)');
-  });
-
   it('a `Match` pin with caller code runs only when the earlier cases fail', () => {
-    // The comparison with the pin of a later case is behind a `select` on
-    // WGSL, so the `Match` takes the statement form; GLSL's `?:` keeps it
-    // in its branch.
+    // GLSL's `?:` computes only the branch that is taken, so the comparison
+    // with the pin of a later case stays in its branch.
     const popts = { ...NO_FOLD, vars: { Pi: 'nextValue()', W: 'nextValue()' } };
     const match = [
       'Match',
@@ -927,26 +766,10 @@ describe('GPU code supplied by the caller runs once, in order', () => {
       ['MatchCase', ['Pin', 'Pi'], 20],
       ['MatchCase', '_', 30],
     ];
-    expect(wgsl.compile(cev.box(match), popts).code).toBe(
-      'var _tv1: f32;\n' +
-        'if (x == 1.0) {\n' +
-        '  _tv1 = 10.0;\n' +
-        '} else {\n' +
-        '  if (x == nextValue()) {\n' +
-        '    _tv1 = 20.0;\n' +
-        '  } else {\n' +
-        '    _tv1 = 30.0;\n' +
-        '  }\n' +
-        '}\n' +
-        'return _tv1;'
-    );
     expect(glsl.compile(cev.box(match), popts).code).toBe(
       '((x == 1.0) ? (10.0) : (((x == nextValue()) ? (20.0) : (30.0))))'
     );
-    // The `if` statement would call the pin before `W`; `select` would call
-    // it when the first case matches.
     const after = cev.box(['Add', 'W', match]);
-    expect(() => wgsl.compile(after, popts)).toThrow(/computes every branch/);
     expect(glsl.compile(after, popts).code).toBe(
       'nextValue() + ((x == 1.0) ? (10.0) : (((x == nextValue()) ? (20.0) : (30.0))))'
     );
@@ -954,20 +777,12 @@ describe('GPU code supplied by the caller runs once, in order', () => {
 
   it('forms with no caller code compile as before', () => {
     const c = (expr: any) => glsl.compile(cev.box(expr), opts).code;
-    const cw = (expr: any) => wgsl.compile(cev.box(expr), opts).code;
     expect(c(['Match', 'x', ['MatchCase', 1, 10], ['MatchCase', 2, 20], ['MatchCase', '_', 30]])).toBe(
       '((x == 1.0) ? (10.0) : (((x == 2.0) ? (20.0) : (30.0))))'
-    );
-    expect(cw(['Match', 'x', ['MatchCase', 1, 'U'], ['MatchCase', '_', 30]])).toBe(
-      'select(30.0, u_u, x == 1.0)'
     );
     expect(c(['Remainder', 'U', 2])).toBe(
       '((u_u) - (2.0) * _gpu_round_up((u_u) / (2.0)))'
     );
-    expect(cw(['Remainder', 'x', 'U'])).toBe(
-      '((x) - (u_u) * _gpu_round_up((x) / (u_u)))'
-    );
-    expect(cw(['Less', 'x', 'U', 3])).toBe('(x < u_u) && (u_u < 3.0)');
     // A block of declarations is a value expression, so it compiles as the
     // operand of an addition.
     expect(
@@ -975,18 +790,6 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     ).toBe(
       'float _tv1;\n{\n  float a;\n  a = (x * x);\n  _tv1 = a;\n}\nreturn x + _tv1;'
     );
-    expect(
-      cw(['Add', 'U', ['Block', ['Declare', 'a', "'unknown'", ['Square', 'x']], 'a']])
-    ).toBe(
-      'var _tv1: f32;\n{\n  var a: f32;\n  a = (x * x);\n  _tv1 = a;\n}\nreturn u_u + _tv1;'
-    );
-    expect(
-      wgsl.compile(cev.box(['Add', 'x', ['Sum', ['Square', 'V']]]), {
-        ...NO_FOLD,
-        vars: { V: 'u_v' },
-      }).code
-    ).toBe('x + dot(u_v, u_v)');
-    expect(cw(['Which', 'True', 'U'])).toBe('(u_u)');
   });
 
   it('caller code with nothing before it is held in a temporary', () => {
@@ -1004,14 +807,12 @@ describe('GPU code supplied by the caller runs once, in order', () => {
 
   it('a plain uniform read and a symbol with no `vars` entry compile as before', () => {
     const c = (expr: any) => glsl.compile(cev.box(expr), opts).code;
-    const cw = (expr: any) => wgsl.compile(cev.box(expr), opts).code;
     expect(c(['Cot', 'U'])).toBe('(_gpu_cos(u_u) / _gpu_sin(u_u))');
     expect(c(['Cot', 'x'])).toBe('(cos(x) / sin(x))');
     expect(c(['Binomial', 'U', 3])).toBe(
       '(((u_u) * ((u_u) - 1.0) * ((u_u) - 2.0)) / 6.0)'
     );
     expect(c(['Less', 'x', 'U', 3])).toBe('(x < u_u) && (u_u < 3.0)');
-    expect(cw(['If', 'c', 'U', 0])).toBe('select(0.0, u_u, c)');
     expect(c(['WithRandomSeed', 1, ['Tuple', 'U', ['Cot', ['Random']]]])).toBe(
       'float _tv1 = _gpu_rnd_draw(uvec2(0x3ff00000u, 0x00000000u), _gpu_rnd_n0);\n' +
         'return vec2(u_u, (_gpu_cos(_tv1) / _gpu_sin(_tv1)));'

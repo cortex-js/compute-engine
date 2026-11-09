@@ -10,13 +10,7 @@ import { ComputeEngine, compile } from '../../src/compute-engine';
 const ce = new ComputeEngine();
 const UNSAFE = '\\sum_{k=9007199254740992}^{9007199254740994} \\sin(x+k)';
 
-const ALL_TARGETS = [
-  'javascript',
-  'glsl',
-  'wgsl',
-  'interval-js',
-  'python',
-] as const;
+const ALL_TARGETS = ['javascript', 'glsl', 'interval-js', 'python'] as const;
 
 /** Compile with no fallback. Answer `success`, and the reason on a decline. */
 function tryCompile(

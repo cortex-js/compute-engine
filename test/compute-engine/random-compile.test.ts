@@ -775,17 +775,16 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
   const ce = new ComputeEngine();
   ce.declare('x', 'real');
   const glsl = () => ce._getCompilationTarget('glsl')!;
-  const wgsl = () => ce._getCompilationTarget('wgsl')!;
-  /** GLSL/WGSL source for `json`, unframed (fragment-stage spatial noise). */
-  const gpuCode = (json: any, lang: 'glsl' | 'wgsl' = 'glsl'): string =>
-    (lang === 'glsl' ? glsl() : wgsl()).compile(ce.box(json) as any, {
+  /** GLSL source for `json`, unframed (fragment-stage spatial noise). */
+  const gpuCode = (json: any): string =>
+    glsl().compile(ce.box(json) as any, {
       // These tests pin emitted GPU source byte for byte (and count the draws
       // in it), so the constant operands and the seeded frames must survive
       // to code generation instead of being folded to a literal.
       constantFold: false,
     }).code ?? '';
-  const gpuDraws = (json: any, lang: 'glsl' | 'wgsl' = 'glsl'): number =>
-    (gpuCode(json, lang).match(/_gpu_rnd_draw/g) ?? []).length;
+  const gpuDraws = (json: any): number =>
+    (gpuCode(json).match(/_gpu_rnd_draw/g) ?? []).length;
   const jsCode = (json: any): string =>
     compile(ce.box(json), {
       fallback: false,
@@ -796,7 +795,7 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
     }).code ?? '';
   const jsDraws = (json: any): number =>
     (jsCode(json).match(/drawNextRandomNumber/g) ?? []).length;
-  /** WGSL has no unframed draw — a seed frame is required there. */
+  /** `body` inside a seed frame. */
   const framed = (body: any) => ['WithRandomSeed', 7, body];
 
   // --- JS: Equal (complex `part()` and the n-ary chain) --------------------
@@ -877,15 +876,11 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
 
   // --- GPU: Binomial ------------------------------------------------------
 
-  test('GLSL/WGSL: Binomial(Random(), k) draws once (k splices)', () => {
+  test('GLSL: Binomial(Random(), k) draws once (k splices)', () => {
     // The falling-factorial unroll splices the first operand k times.
     expect(gpuDraws(['Binomial', ['Random'], 2])).toBe(1);
     expect(gpuCode(['Binomial', ['Random'], 2])).toContain('float _tv1 =');
     expect(gpuDraws(['Binomial', ['Random'], 5])).toBe(1);
-    expect(gpuDraws(framed(['Choose', ['Random'], 4]), 'wgsl')).toBe(1);
-    expect(gpuCode(framed(['Choose', ['Random'], 4]), 'wgsl')).toContain(
-      'var _tv1: f32 ='
-    );
     // k = 1 splices the operand exactly once — no temporary needed.
     expect(gpuDraws(['Binomial', ['Random'], 1])).toBe(1);
     // k = 0 discards the operand, but the interpreter still draws — there is
@@ -1062,13 +1057,6 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
     expect(gpuCode(['Less', 0.1, ['Random'], 0.9])).toContain('float _tv1 =');
   });
 
-  test('WGSL: a chained relation draws its middle operand once', () => {
-    expect(gpuDraws(framed(['Less', 0.1, ['Random'], 0.9]), 'wgsl')).toBe(1);
-    expect(gpuCode(framed(['Less', 0.1, ['Random'], 0.9]), 'wgsl')).toContain(
-      'var _tv1: f32 ='
-    );
-  });
-
   test('GLSL: a chained relation draws its operands in ARGUMENT order', () => {
     // Binding only the MIDDLE ran the middle's draw BEFORE the first operand's
     // (the hoisted temporary precedes the mask/comparison expression), so the
@@ -1205,14 +1193,10 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
     expect(code).toContain('lessThan(vec2(_tv1), vec2(_tv2))');
   });
 
-  test('GLSL/WGSL: an impure Match subject draws once', () => {
+  test('GLSL: an impure Match subject draws once', () => {
     // The subject is spliced once per leaf comparison — three draws before.
     expect(gpuDraws(matchJSON(['Random']))).toBe(1);
     expect(gpuCode(matchJSON(['Random']))).toContain('float _tv1 =');
-    expect(gpuDraws(framed(matchJSON(['Random'])), 'wgsl')).toBe(1);
-    expect(gpuCode(framed(matchJSON(['Random'])), 'wgsl')).toContain(
-      'var _tv1: f32 ='
-    );
     // A RANGE pattern splices the subject twice in one comparison.
     expect(
       gpuDraws([
@@ -1226,14 +1210,8 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
 
   test('chain/Match keep the pure emission (byte-identical pins)', () => {
     expect(gpuCode(['Less', 0.1, 'x', 0.9])).toBe('(0.1 < x) && (x < 0.9)');
-    expect(gpuCode(['Less', 0.1, ['Add', 'x', 1], 0.9], 'wgsl')).toBe(
-      '(0.1 < x + 1.0) && (x + 1.0 < 0.9)'
-    );
     expect(gpuCode(matchJSON('x'))).toBe(
       '(((x == 1.0 || x == 2.0)) ? (10.0) : (((x == 3.0) ? (30.0) : (-1.0))))'
-    );
-    expect(gpuCode(matchJSON('x'), 'wgsl')).toBe(
-      'select(select(-1.0, 30.0, x == 3.0), 10.0, (x == 1.0 || x == 2.0))'
     );
     // The JS chain (a `bindExpr` target) is untouched by the GPU arm.
     expect(jsCode(['Less', 0.1, ['Add', 'x', 1], 0.9])).toBe(

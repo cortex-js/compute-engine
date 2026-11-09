@@ -17,7 +17,7 @@ import { unrollFixedWidthCollections } from '../../src/compute-engine/compilatio
  * The first half pins each rewrite rule and the cases that must stay
  * untouched. The second half is the reason the pass exists: the Voronoi chain
  * from the Desmos state `62urmx2dcm`, whose `PointX` over a nine-element list
- * of points declined on `glsl`, `wgsl` and `interval-js` and ran 6.7 times
+ * of points declined on `glsl` and `interval-js` and ran 6.7 times
  * slower than the interpreter's own scalar form on `javascript`.
  *
  * Two preconditions run through every rule below and shape the fixtures. A
@@ -1046,7 +1046,7 @@ const SAMPLES: Array<[number, number]> = Array.from({ length: 20 }, (_, i) => [
 describe('FIXED-WIDTH UNROLL — Voronoi route parity (inlined)', () => {
   const ce = new ComputeEngine();
 
-  it.each(['javascript', 'glsl', 'wgsl', 'interval-js'] as const)(
+  it.each(['javascript', 'glsl', 'interval-js'] as const)(
     'compiles the inlined `m` on %s',
     (to) => {
       const r: any = compile(ce.box(M('x', 'y') as any), {
@@ -1057,7 +1057,7 @@ describe('FIXED-WIDTH UNROLL — Voronoi route parity (inlined)', () => {
     }
   );
 
-  it.each(['javascript', 'glsl', 'wgsl', 'interval-js'] as const)(
+  it.each(['javascript', 'glsl', 'interval-js'] as const)(
     'compiles the inlined row on %s',
     (to) => {
       const r: any = compile(ce.box(ROW('x', 'y') as any), {
@@ -1069,14 +1069,13 @@ describe('FIXED-WIDTH UNROLL — Voronoi route parity (inlined)', () => {
   );
 
   it('emits scalar shader code for `m`, with no array constructor', () => {
-    for (const to of ['glsl', 'wgsl'] as const) {
+    for (const to of ['glsl'] as const) {
       const r: any = compile(ce.box(M('x', 'y') as any), {
         to,
         fallback: false,
       } as any);
       const source = `${r.preamble ?? ''}${r.code ?? ''}`;
       expect(source).not.toContain('float[');
-      expect(source).not.toContain('array<f32');
     }
   });
 
@@ -1166,7 +1165,7 @@ describe('FIXED-WIDTH UNROLL — Voronoi route parity (by reference)', () => {
     ['Abs', ['Subtract', ['m2', 'x', 'y'], ['m', 'x', 'y']]],
   ]);
 
-  it.each(['glsl', 'wgsl', 'interval-js'] as const)(
+  it.each(['glsl', 'interval-js'] as const)(
     'compiles the by-reference `m(x, y)` on %s',
     (to) => {
       const r: any = compile(ce.box(['m', 'x', 'y']), {
@@ -1177,7 +1176,7 @@ describe('FIXED-WIDTH UNROLL — Voronoi route parity (by reference)', () => {
     }
   );
 
-  it.each(['glsl', 'wgsl', 'interval-js'] as const)(
+  it.each(['glsl', 'interval-js'] as const)(
     'compiles the by-reference `row(x, y)` on %s',
     (to) => {
       // `d2`'s whole body is a `Map`, which BINDS the lambda parameter. A

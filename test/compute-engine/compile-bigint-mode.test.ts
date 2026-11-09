@@ -36,7 +36,7 @@ const ce = new ComputeEngine();
 ce.declare('n', 'integer');
 
 describe('bigint mode: targets other than javascript', () => {
-  it.each(['interval-js', 'glsl', 'wgsl', 'python'] as const)(
+  it.each(['interval-js', 'glsl', 'python'] as const)(
     "a requested 'bigint' on %s is the unsupported-mode decline",
     (to) => {
       const r = compile(ce.parse('x + 1'), { to, mode: 'bigint' });

@@ -71,7 +71,7 @@ import {
  * evaluated once, before the map, and passed whole. The emitted definition
  * receives one point at a time, which is what it is compiled for.
  *
- * Every other target fails closed: on the shader targets (GLSL, WGSL) a
+ * Every other target fails closed: on the shader target (GLSL) a
  * list of points is not a value, and the interval target has no lowering
  * for a call that maps over points. The call also fails closed when more
  * than one argument is a list of points (the interpreter pairs the lists

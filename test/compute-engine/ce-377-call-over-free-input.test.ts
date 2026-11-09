@@ -237,7 +237,7 @@ describe('THE DECLINE NAMES AN OPERAND THAT ONLY MAY BE A LIST (CE-377)', () => 
 });
 
 describe('A SHADER READS THE STATIC LENGTH OF THE CALL THE SAME WAY (CE-377)', () => {
-  for (const to of ['glsl', 'wgsl'] as const)
+  for (const to of ['glsl'] as const)
     test(`${to}: v(x)[2] + 1, v := s ↦ [s, 2s]`, () => {
       // The engine types `v(x)` as `list<unknown>`, which states no length,
       // and the shader declined the index ("the base (type `list<unknown>`)

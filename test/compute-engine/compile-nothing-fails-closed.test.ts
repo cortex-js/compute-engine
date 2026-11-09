@@ -18,7 +18,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
-const TARGETS = ['javascript', 'glsl', 'wgsl', 'python', 'interval-js'] as const;
+const TARGETS = ['javascript', 'glsl', 'python', 'interval-js'] as const;
 
 function compileOn(to: (typeof TARGETS)[number], json: unknown) {
   return compile(ce.box(json as never), { to } as never) as unknown as {

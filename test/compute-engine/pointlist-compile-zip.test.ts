@@ -2,7 +2,6 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
 
@@ -17,7 +16,7 @@ import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/i
  * (D1) instead of failing closed, and `PointX`/`PointY`/`PointZ` compose over
  * it (D4).
  *
- * The shader targets deliberately diverge (ruling 3): GLSL/WGSL have no
+ * The shader targets deliberately diverge (ruling 3): GLSL has no
  * runtime-length expression values, so CONSTRUCTION stays fail-closed there and
  * only the PROJECTION route is added (D3) — the point-list dimension remains
  * the consumer's instancing axis.
@@ -518,7 +517,6 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
 
 describe('PointList — GPU projection (D3)', () => {
   const glsl = new GLSLTarget();
-  const wgsl = new WGSLTarget();
 
   /** A fresh engine with vec-shaped declarations. */
   function gpuEngine(): ComputeEngine {
@@ -544,13 +542,6 @@ describe('PointList — GPU projection (D3)', () => {
     expect(r.code).toBe('vec3(-6.0)');
   });
 
-  it('wgsl spells the broadcast `vecNf`', () => {
-    const ce = gpuEngine();
-    const r = wgsl.compile(ce.box(['PointX', ['PointList', -6, 'v']]));
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('vec3f(-6.0)');
-  });
-
   it('mixed vector<2>/vector<3> sources truncate to the shortest (swizzle)', () => {
     const ce = gpuEngine();
     expect(
@@ -559,9 +550,6 @@ describe('PointList — GPU projection (D3)', () => {
     expect(
       glsl.compile(ce.box(['PointX', ['PointList', 'w2', 'v']])).code
     ).toBe('w2');
-    expect(
-      wgsl.compile(ce.box(['PointY', ['PointList', 'w2', 'v']])).code
-    ).toBe('v.xy');
   });
 
   it('a literal List source of 2–4 elements projects', () => {
@@ -671,7 +659,7 @@ describe('PointList — GPU projection (D3)', () => {
     ce.declare('p2', 'tuple<number, number>');
     ce.declare('p3', 'tuple<number, number, number>');
     expect(ce.box(['PointZ', 'p2']).isValid).toBe(false);
-    for (const target of [glsl, wgsl])
+    for (const target of [glsl])
       expect(() => target.compile(ce.box(['PointZ', 'p2']))).toThrow(
         /incompatible-dimensions/
       );

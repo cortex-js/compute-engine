@@ -10,7 +10,6 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { loadIdentities } from '../../src/identities';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { zeta as zetaReal } from '../../src/compute-engine/numerics/special-functions';
 import { Complex } from 'complex.js';
 import {
@@ -870,10 +869,7 @@ describe('Compiled Zeta / HurwitzZeta match N()', () => {
 describe('GPU Zeta / HurwitzZeta preamble', () => {
   ce.declare('gz_s', 'real');
   ce.declare('gz_a', 'real');
-  const targets = [
-    ['GLSL', new GLSLTarget(), 'float _gpu_gamma('],
-    ['WGSL', new WGSLTarget(), 'fn _gpu_gamma('],
-  ] as const;
+  const targets = [['GLSL', new GLSLTarget(), 'float _gpu_gamma(']] as const;
 
   test.each(targets)(
     '%s: HurwitzZeta(s, a) and Zeta(s, a) define _gpu_gamma',

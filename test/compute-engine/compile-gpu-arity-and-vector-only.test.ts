@@ -1,6 +1,6 @@
 /**
- * Two more GPU lowering defects of the "invalid or WRONG shader source behind
- * `success: true`" class.
+ * A GPU lowering defect of the "invalid or WRONG shader source behind
+ * `success: true`" class, and the shape gate of the geometric builtins.
  *
  *  1. A lowering that consumes FEWER OPERANDS than its head accepts. The
  *     worst kind: no shape is wrong, so no shape gate can catch it, and the
@@ -17,22 +17,17 @@
  *     runtime one. `Gamma(s, z)` is a different function from `Γ(z)`, with no
  *     shader builtin and no preamble helper, so it fails closed.
  *
- *  2. A WGSL builtin with no ALL-SCALAR overload. GLSL declares its geometric
+ *  2. The shape gate of the geometric builtins. GLSL declares its geometric
  *     functions over the genType, which INCLUDES `float`, so
- *     `refract(1.0, 2.0, 0.5)` is valid GLSL; WGSL §17.5 declares
- *     `refract(e1: vecN<T>, e2: vecN<T>, e3: T)` and nothing else. The gate
- *     never saw it, because a call whose operands are ALL scalars returns
- *     early. `GPUShapeRules.vectorOnlySlots` is that obligation, the mirror of
- *     `mandatoryScalarSlots`.
+ *     `refract(1.0, 2.0, 0.5)` is valid GLSL. A MIXED scalar/vector call
+ *     still fails closed with the more specific verdict.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const ce = new ComputeEngine();
 const glsl = new GLSLTarget();
-const wgsl = new WGSLTarget();
 
 /**
  * Compile-time constant folding is off throughout this file. Most probes here
@@ -47,8 +42,6 @@ const NO_FOLD = { constantFold: false } as const;
 
 const g = (expr: any, engine = ce): string =>
   glsl.compile(engine.box(expr), NO_FOLD).code!;
-const w = (expr: any, engine = ce): string =>
-  wgsl.compile(engine.box(expr), NO_FOLD).code!;
 
 const V3 = ['List', 1, 2, 3];
 const W3 = ['List', 4, 5, 6];
@@ -104,7 +97,6 @@ describe('GPU ARITY — `Round(x, step)` rounds to a multiple of the step', () =
       ce.box(['Round', 3.14159, 0.01]).N().re,
       12
     );
-    expect(w(['Round', 3.14159, 0.01])).toBe(code);
   });
 
   it('matches the interpreter on the half-away-from-zero ties and on large steps', () => {
@@ -127,7 +119,6 @@ describe('GPU ARITY — `Round(x, step)` rounds to a multiple of the step', () =
 
   it('the unary form is unchanged', () => {
     expect(g(['Round', 3.14159])).toBe('_gpu_round(3.14159)');
-    expect(w(['Round', 'x'], cen)).toBe('_gpu_round(x)');
     // An integer-valued operand still short-circuits. The lowering is then the
     // OPERAND's own code, with no call wrapped around it, so an operand with
     // an infix head is parenthesized: the shared compiler splices a head's
@@ -146,20 +137,20 @@ describe('GPU ARITY — `Round(x, step)` rounds to a multiple of the step', () =
   });
 
   it('a RUNTIME step compiles', () => {
-    for (const emit of [g, w])
+    for (const emit of [g])
       expect(emit(['Round', 'x', 'n'], cen)).toBe(
         '_gpu_step_fix(_gpu_round(_gpu_half_step_quotient(x, abs(n))) * abs(n), x, abs(n))'
       );
   });
 
   it('a constant zero step fails closed', () => {
-    // The result is NaN, and neither language has a NaN literal.
-    for (const emit of [g, w])
+    // The result is NaN, and GLSL has no NaN literal.
+    for (const emit of [g])
       expect(() => emit(['Round', 3.14, 0])).toThrow(/no NaN literal/);
   });
 
   it('reports `success: false` (no source) through the fallback route', () => {
-    for (const target of [glsl, wgsl]) {
+    for (const target of [glsl]) {
       const r = target.compile(cen.box(['Round', 'x', 0] as any), {
         fallback: true,
       });
@@ -174,7 +165,7 @@ describe('GPU ARITY — `Gamma(s, z)` is the upper INCOMPLETE gamma', () => {
     // Γ(5, 2) = 22.736…, Γ(5) = 24 — a different function, not a variant.
     expect(ce.box(['Gamma', 5, 2]).N().re).toBeCloseTo(22.73632758375093, 9);
     expect(ce.box(['Gamma', 5]).N().re).toBe(24);
-    for (const emit of [g, w])
+    for (const emit of [g])
       expect(() => emit(['Gamma', 5, 2])).toThrow(
         /^Could not compile `Gamma`: the two-operand form is the upper incomplete gamma .*$/s
       );
@@ -182,68 +173,37 @@ describe('GPU ARITY — `Gamma(s, z)` is the upper INCOMPLETE gamma', () => {
 
   it('the one-operand complete Γ is unchanged', () => {
     expect(g(['Gamma', 5])).toBe('_gpu_gamma(5.0)');
-    expect(w(['Gamma', 'x'], cen)).toBe('_gpu_gamma(x)');
   });
 });
 
-describe('GPU SHAPE GATE — WGSL builtins with no ALL-SCALAR overload', () => {
+describe('GPU SHAPE GATE — geometric builtins over scalars and vectors', () => {
   let warn: jest.SpyInstance;
   beforeAll(() => {
     warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
   });
   afterAll(() => warn.mockRestore());
 
-  it('`refract(1.0, 2.0, 0.5)` is valid GLSL and not valid WGSL', () => {
+  it('`refract(1.0, 2.0, 0.5)` is valid GLSL', () => {
     // GLSL ES 3.00 §8.4: `genType refract(genType I, genType N, float eta)`,
-    // and the genType includes `float`. WGSL §17.5: `refract(e1: vecN<T>,
-    // e2: vecN<T>, e3: T)` — no all-scalar form at all.
+    // and the genType includes `float`.
     expect(g(['Refract', 1, 2, 0.5])).toBe('refract(1.0, 2.0, 0.5)');
-    expect(() => w(['Refract', 1, 2, 0.5])).toThrow(
-      /^Could not compile `Refract`: the shader builtin `refract` is declared over the `vecN` genType in arguments 1 and 2 in this language — it has no scalar overload there — but argument 1 lowers to a scalar.*$/s
-    );
   });
 
-  it('the same split for `normalize` and `reflect`', () => {
+  it('`normalize` and `reflect` of scalars are valid GLSL', () => {
     expect(g(['Normalize', 2])).toBe('normalize(2.0)');
-    expect(() => w(['Normalize', 2])).toThrow(
-      /`normalize` is declared over the `vecN` genType in argument 1/
-    );
     expect(g(['Reflect', 1, 2])).toBe('reflect(1.0, 2.0)');
-    expect(() => w(['Reflect', 1, 2])).toThrow(
-      /`reflect` is declared over the `vecN` genType in arguments 1 and 2/
-    );
   });
 
-  it('the valid vector forms still compile in BOTH languages', () => {
+  it('the vector form of `refract` compiles', () => {
     expect(g(['Refract', V3, W3, 0.5])).toBe(
       'refract(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), 0.5)'
     );
-    expect(w(['Refract', V3, W3, 0.5])).toBe(
-      'refract(vec3f(1.0, 2.0, 3.0), vec3f(4.0, 5.0, 6.0), 0.5)'
-    );
-    expect(w(['Normalize', V3])).toBe('normalize(vec3f(1.0, 2.0, 3.0))');
-    expect(w(['Reflect', V3, W3])).toBe(
-      'reflect(vec3f(1.0, 2.0, 3.0), vec3f(4.0, 5.0, 6.0))'
-    );
-    expect(w(['Dot', V3, W3])).toBe(
-      'dot(vec3f(1.0, 2.0, 3.0), vec3f(4.0, 5.0, 6.0))'
-    );
-    expect(w(['Cross', V3, W3])).toBe(
-      'cross(vec3f(1.0, 2.0, 3.0), vec3f(4.0, 5.0, 6.0))'
-    );
-    // A DECLARED vector symbol has no constructor in its source; the operand
-    // SHAPE is what places it, so this stays valid too.
-    const cev = new ComputeEngine();
-    cev.declare('v', 'vector<real^3>');
-    cev.declare('u', 'vector<real^3>');
-    expect(w(['Refract', 'v', 'u', 0.5], cev)).toBe('refract(v, u, 0.5)');
   });
 
   it('the existing obligations keep their (more specific) verdicts', () => {
-    // Nothing above changes what a MIXED scalar/vector call reports: the
-    // permission and mandatory-scalar checks still name the more specific
-    // fault, in both languages.
-    for (const emit of [g, w]) {
+    // A MIXED scalar/vector call reports the permission and mandatory-scalar
+    // checks, which name the more specific fault.
+    for (const emit of [g]) {
       expect(() => emit(['Refract', V3, W3, U3])).toThrow(
         /requires a SCALAR in argument 3/
       );
@@ -253,18 +213,7 @@ describe('GPU SHAPE GATE — WGSL builtins with no ALL-SCALAR overload', () => {
     }
   });
 
-  it('a scalar `length`/`distance` is untouched — both languages declare one', () => {
-    // WGSL §17.5 gives `length(e: T)` and `distance(e1: T, e2: T)` alongside
-    // the `vecN` forms, so they are deliberately absent from the table.
-    expect(w(['Norm', 3])).toBe('length(3.0)');
+  it('a scalar `length` is untouched', () => {
     expect(g(['Norm', 3])).toBe('length(3.0)');
-  });
-
-  it('reports `success: false` (no source) through the fallback route', () => {
-    const r = wgsl.compile(ce.box(['Refract', 1, 2, 0.5] as any), {
-      fallback: true,
-    });
-    expect(r.success).toBe(false);
-    expect(r.code ?? '').toBe('');
   });
 });

@@ -44,12 +44,11 @@ export function readStringLiteral(expr: Expression): string | null {
 
 /** Compile an expression as a GPU integer argument.
  *  Integer constants emit as plain literals (`200`); other expressions
- *  are wrapped in a cast (`int(...)` or `i32(...)`). */
+ *  are wrapped in a cast (`int(...)`). */
 export function compileIntArg(
   head: string,
   expr: Expression,
-  compile: (e: Expression) => string,
-  target?: CompileTarget<Expression>
+  compile: (e: Expression) => string
 ): string {
   const c = tryGetConstant(expr);
   if (c !== undefined && Number.isInteger(c)) return c.toString();
@@ -61,7 +60,7 @@ export function compileIntArg(
       `Could not compile \`${head}\`: the integer operand \`${expr.toString()}\` is complex, and a shader ` +
         `has no conversion from a complex value to an integer.`
     );
-  const intCast = target?.language === 'wgsl' ? 'i32' : 'int';
+  const intCast = 'int';
   return `${intCast}(${compile(expr)})`;
 }
 
@@ -124,7 +123,7 @@ export function gpuFixedPower(
 }
 
 /** Emit only the scalar/vector specializations actually called by the source. */
-export function gpuFixedPowerPreamble(code: string, isWGSL: boolean): string {
+export function gpuFixedPowerPreamble(code: string): string {
   const names = new Set<string>();
   const calls = /(?<![\w$])(_gpu_pow([234])(?:_v([234]))?)\s*\(/g;
   let result = '';
@@ -132,20 +131,14 @@ export function gpuFixedPowerPreamble(code: string, isWGSL: boolean): string {
     const name = match[1];
     if (names.has(name)) continue;
     names.add(name);
-    const type = match[3]
-      ? gpuVecType(Number(match[3]), isWGSL)
-      : isWGSL
-        ? 'f32'
-        : 'float';
+    const type = match[3] ? gpuVecType(Number(match[3])) : 'float';
     const body =
       match[2] === '2'
         ? 'return x * x;'
         : match[2] === '3'
           ? 'return x * x * x;'
-          : `${isWGSL ? 'let' : type} s = x * x; return s * s;`;
-    result += isWGSL
-      ? `\nfn ${name}(x: ${type}) -> ${type} { ${body} }\n`
-      : `\n${type} ${name}(${type} x) { ${body} }\n`;
+          : `${type} s = x * x; return s * s;`;
+    result += `\n${type} ${name}(${type} x) { ${body} }\n`;
   }
   return result;
 }
@@ -290,12 +283,12 @@ export function compileGPUCollectionReduce(
   if (operand.isCollection && operand.count === 0) return identity;
 
   // Summing the components of a SQUARED vector is that vector's dot product
-  // with itself: `v.x² + v.y²` is `dot(v, v)`, one builtin in both languages
+  // with itself: `v.x² + v.y²` is `dot(v, v)`, one GLSL builtin,
   // where the component fold writes the square out and then reads each
   // component back out of it. Only a PURE base takes this route, because the
   // emission names the vector twice — a repeated draw from an impure one
   // would shift every later value in the shader — and the width is bounded at
-  // 2–4 because WGSL declares `dot` over `vecN` alone.
+  // 2–4 because `dot` of a `vecN` is the form that the shape check admits.
   //
   // The rewrite reads the square STRUCTURALLY and then compiles the base
   // alone, so it is valid only while the square head still means the builtin
@@ -328,12 +321,8 @@ export function compileGPUCollectionReduce(
     if (!gpuIsAtomicEmission(v) && BaseCompiler.canHoist(target)) {
       if (caller) gpuAssertHoistKeepsCallerOrder('Sum', [squared], target);
       const tv = BaseCompiler.tempVar(target);
-      const type =
-        target.language === 'wgsl'
-          ? `vec${squaredWidth}f`
-          : `vec${squaredWidth}`;
-      const decl =
-        target.language === 'wgsl' ? `var ${tv}: ${type}` : `${type} ${tv}`;
+      const type = `vec${squaredWidth}`;
+      const decl = `${type} ${tv}`;
       BaseCompiler.hoistStatement(target, `${decl} = ${v};`);
       v = tv;
     }
@@ -507,13 +496,10 @@ export function gpuReadInvariants(
 export function gpuInvariantDeclaration(
   name: string,
   code: string,
-  node: Expression,
-  isWGSL: boolean
+  node: Expression
 ): string {
-  const type = gpuTypeOfValue(node, isWGSL) ?? (isWGSL ? 'f32' : 'float');
-  return isWGSL
-    ? `let ${name}: ${type} = ${code};`
-    : `${type} ${name} = ${code};`;
+  const type = gpuTypeOfValue(node) ?? 'float';
+  return `${type} ${name} = ${code};`;
 }
 
 /**

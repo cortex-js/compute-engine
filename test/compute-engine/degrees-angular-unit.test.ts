@@ -299,7 +299,7 @@ describe('ARGUMENT — compiled output agrees with .N()', () => {
     }
   });
 
-  test.each(UNITS)('%s: glsl, wgsl and python scale the result', (unit) => {
+  test.each(UNITS)('%s: glsl and python scale the result', (unit) => {
     const ce = engine(unit);
     // A declared `number` input is read as is in Python; an inferred one is
     // read through a `None` test (ROADMAP CE-460).
@@ -310,11 +310,9 @@ describe('ARGUMENT — compiled output agrees with .N()', () => {
       ['Add', 'x', ['Multiply', 'ImaginaryUnit', 'y']],
     ]);
     const glsl = ce._getCompilationTarget('glsl')!.compile(z).code;
-    const wgsl = ce._getCompilationTarget('wgsl')!.compile(z).code;
     const py = ce._getCompilationTarget('python')!.compile(z).code;
     if (unit === 'rad') {
       expect(glsl).toBe('atan(y, x)');
-      expect(wgsl).toBe('atan2(y, x)');
       // `np.add(…, 0)` makes a `-0` part `+0` (CE-262).
       expect(py).toBe('np.angle(np.add(x + complex(0, 1) * y, 0))');
       return;
@@ -326,7 +324,6 @@ describe('ARGUMENT — compiled output agrees with .N()', () => {
     ];
     expect(Math.fround(Number(shader))).toBe(Math.fround(FACTOR[unit]));
     expect(glsl).toBe(`${shader} * atan(y, x)`);
-    expect(wgsl).toBe(`${shader} * atan2(y, x)`);
     expect(py).toBe(
       `${FACTOR[unit]} * np.angle(np.add(x + complex(0, 1) * y, 0))`
     );

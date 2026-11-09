@@ -1,5 +1,5 @@
 /**
- * `At` on the shader targets (GLSL / WGSL).
+ * `At` on the shader target (GLSL).
  *
  * `docs/COMPILATION-MODEL.md`. The witness shape is
  * `p_0[i]` — a list with a STATICALLY DECLARED length, indexed by a loop or
@@ -12,13 +12,12 @@
  * interpreter output: the interpreter's position-preserving absence marker
  * (`0` / out-of-range index) and its "no value at all" outcome (a non-integer
  * index leaves `At` unevaluated) both project to `NaN` (`_SYS.at`), and the
- * shader spells that `_gpu_nan()` on both GLSL and WGSL — never a clamp. `at-collection-index-compile.test.ts` holds the
+ * shader spells that `_gpu_nan()` on GLSL — never a clamp. `at-collection-index-compile.test.ts` holds the
  * route-parity half of the story.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const ce = new ComputeEngine();
 ce.declare('v', 'vector<3>');
@@ -42,7 +41,6 @@ ce.declare('vq', 'list<number^?>'); // unknown extent: `dimensions: [-1]`
 ce.declare('_gpu_at5', 'number');
 
 const glsl = new GLSLTarget();
-const wgsl = new WGSLTarget();
 
 /**
  * Compile-time constant folding is off throughout this file. An `At` over a
@@ -55,11 +53,8 @@ const wgsl = new WGSLTarget();
 const NO_FOLD = { constantFold: false } as const;
 
 const g = (expr: any): string => glsl.compile(ce.box(expr), NO_FOLD).code!;
-const w = (expr: any): string => wgsl.compile(ce.box(expr), NO_FOLD).code!;
 const gPre = (expr: any): string =>
   glsl.compile(ce.box(expr), NO_FOLD).preamble ?? '';
-const wPre = (expr: any): string =>
-  wgsl.compile(ce.box(expr), NO_FOLD).preamble ?? '';
 
 /** The decline message a shape produces on GLSL. */
 const why = (expr: any): string => {
@@ -72,7 +67,6 @@ const why = (expr: any): string => {
 };
 
 const GLSL_NAN = '_gpu_nan()';
-const WGSL_NAN = '_gpu_nan()';
 
 const P: any = ['List', 10, 20, 30];
 
@@ -85,29 +79,12 @@ float _gpu_at3(vec3 v, float i) {
   // 1-based; negative counts from the end; anything else → NaN.
   // The guard runs entirely in float space: it rejects NaN, ±∞, huge
   // finite values, non-integers and 0 BEFORE the int cast (undefined
-  // outside int range), and makes both languages' out-of-bounds rules
-  // (GLSL UB / WGSL indeterminate) unreachable.
+  // outside int range), and makes the out-of-bounds index (undefined
+  // behavior in GLSL) unreachable.
   if (!(i >= -3.0 && i <= 3.0) || i != floor(i) || i == 0.0)
     return _gpu_nan();
   int k = int(i);
   return v[(k > 0) ? k - 1 : 3 + k];
-}
-`;
-
-// WGSL uses the INLINE bitcast — there is no `_gpu_nan` on WGSL — and
-// `select(f, t, cond)` in place of `?:`.
-const WGSL_AT3 = `
-fn _gpu_at3(v: vec3f, i: f32) -> f32 {
-  // 1-based; negative counts from the end; anything else → NaN.
-  // The guard runs entirely in float space: it rejects NaN, ±∞, huge
-  // finite values, non-integers and 0 BEFORE the int cast (undefined
-  // outside int range), and makes both languages' out-of-bounds rules
-  // (GLSL UB / WGSL indeterminate) unreachable.
-  if (!(i >= -3.0 && i <= 3.0) || i != floor(i) || i == 0.0) {
-    return _gpu_nan();
-  }
-  let k = i32(i);
-  return v[select(3 + k, k - 1, k > 0)];
 }
 `;
 
@@ -119,12 +96,10 @@ fn _gpu_at3(v: vec3f, i: f32) -> f32 {
 describe('At — static fold of a literal index (D1)', () => {
   test('an in-range positive index is a component swizzle', () => {
     expect(g(['At', 'v', 2])).toBe('v.y');
-    expect(w(['At', 'v', 2])).toBe('v.y');
   });
 
   test('a negative index counts from the end', () => {
     expect(g(['At', 'v', -1])).toBe('v.z');
-    expect(w(['At', 'v', -1])).toBe('v.z');
     expect(g(['At', 'v', -3])).toBe('v.x');
   });
 
@@ -133,27 +108,23 @@ describe('At — static fold of a literal index (D1)', () => {
     // `At` unevaluated (non-integer); `_SYS.at` projects both to NaN.
     for (const i of [0, 5, -4, 1.5]) {
       expect(g(['At', 'v', i])).toBe(GLSL_NAN);
-      expect(w(['At', 'v', i])).toBe(WGSL_NAN);
     }
   });
 
   test('a non-finite literal index folds to NaN too', () => {
     expect(g(['At', 'v', 'PositiveInfinity'])).toBe(GLSL_NAN);
-    expect(w(['At', 'v', 'NaN'])).toBe(WGSL_NAN);
   });
 
   test('a LITERAL base with a literal index folds to the element literal', () => {
     // Not `vec3(10.0, 20.0, 30.0).y` — the element's own compiled literal.
     expect(g(['At', P, 2])).toBe('20.0');
-    expect(w(['At', P, 2])).toBe('20.0');
     expect(g(['At', P, -1])).toBe('30.0');
   });
 
   test('a base wider than a vec4 takes a direct subscript', () => {
-    // A `vector<7>` lowers to `float[7]` / `array<f32, 7>`, which has no
+    // A `vector<7>` lowers to `float[7]`, which has no
     // swizzle — but a constant subscript is provably in range.
     expect(g(['At', 'v7', 3])).toBe('v7[2]');
-    expect(w(['At', 'v7', 3])).toBe('v7[2]');
     expect(g(['At', 'v7', -1])).toBe('v7[6]');
   });
 
@@ -166,27 +137,24 @@ describe('At — static fold of a literal index (D1)', () => {
     // emission atomic for the operand-shape gate (`v.y`); anything else is
     // parenthesized and judged as the compound it is.
     expect(g(['At', ['Add', 'v', 'w'], 2])).toBe('(v + w).y');
-    expect(w(['At', ['Add', 'v', 'w'], 2])).toBe('(v + w).y');
     expect(g(['At', ['Add', 'v', 'w'], ['List', 1, 3]])).toBe('(v + w).xz');
   });
 });
 
 // ---------------------------------------------------------------------------
-// 2. Dynamic index — the census witness. GLSL ES 3.00 and WGSL both permit
-//    runtime indexing of a value-typed vector/array; the helper's guard is
-//    what makes their out-of-bounds rules (UB / indeterminate) unreachable.
+// 2. Dynamic index — the census witness. GLSL ES 3.00 permits runtime
+//    indexing of a value-typed vector/array; the helper's guard is what
+//    makes its out-of-bounds rule (UB) unreachable.
 // ---------------------------------------------------------------------------
 
 describe('At — dynamic index through the `_gpu_atN` helper (D1)', () => {
   test('the emission is one helper call', () => {
     expect(g(['At', 'v', 'k'])).toBe('_gpu_at3(v, k)');
-    expect(w(['At', 'v', 'k'])).toBe('_gpu_at3(v, k)');
   });
 
   test('vec2 and vec4 bases get their own widths', () => {
     expect(g(['At', 'v2', 'k'])).toBe('_gpu_at2(v2, k)');
     expect(g(['At', 'v4', 'k'])).toBe('_gpu_at4(v4, k)');
-    expect(w(['At', 'v4', 'k'])).toBe('_gpu_at4(v4, k)');
   });
 
   test('a wider base gets a per-N helper over `float[N]`, generated on demand', () => {
@@ -196,9 +164,6 @@ describe('At — dynamic index through the `_gpu_atN` helper (D1)', () => {
     );
     expect(gPre(['At', 'v7', 'k'])).toContain(
       'if (!(i >= -7.0 && i <= 7.0) || i != floor(i) || i == 0.0)'
-    );
-    expect(wPre(['At', 'v7', 'k'])).toContain(
-      'fn _gpu_at7(v: array<f32, 7>, i: f32) -> f32 {'
     );
   });
 
@@ -217,29 +182,6 @@ describe('At — dynamic index through the `_gpu_atN` helper (D1)', () => {
 
   test('the GLSL helper body is pinned verbatim (the float-space guard)', () => {
     expect(gPre(['At', 'v', 'k'])).toContain(GLSL_AT3);
-  });
-
-  test('the WGSL helper body is pinned verbatim, with the WGSL NaN helper', () => {
-    // WGSL spells NaN through `_gpu_nan()` too: an inline constant bitcast
-    // to NaN is a shader-creation error. WGSL declarations are
-    // order-independent, so the helper is declared first here.
-    const pre = wPre(['At', 'v', 'k']);
-    expect(pre).toBe(
-      '\nfn _gpu_nan() -> f32 {\n  let bits = 0x7fc00000u;\n  return bitcast<f32>(bits);\n}\n' +
-        WGSL_AT3
-    );
-  });
-
-  test('the WGSL ARRAY helper copies its parameter to a local first', () => {
-    // Indexing a value-typed `array` PARAMETER by a runtime expression has
-    // historically been restricted in WGSL (a `vecN` never was), and jest runs
-    // no shader — so the array forms index a local `var` copy, which is a
-    // reference. The vector forms keep indexing the parameter.
-    const pre = wPre(['At', 'v7', 'k']);
-    expect(pre).toContain(
-      '  var a = v;\n  return a[select(7 + k, k - 1, k > 0)];'
-    );
-    expect(wPre(['At', 'v', 'k'])).not.toContain('var a = v;');
   });
 
   test('the helper scan reads CALL SITES, not any name that starts that way', () => {
@@ -267,12 +209,10 @@ describe('At — dynamic index through the `_gpu_atN` helper (D1)', () => {
 describe('At — composability of the SCALAR form (D1)', () => {
   test('arithmetic over a scalar access compiles', () => {
     expect(g(['Multiply', ['At', 'v', 'k'], 2])).toBe('2.0 * _gpu_at3(v, k)');
-    expect(w(['Multiply', ['At', 'v', 'k'], 2])).toBe('2.0 * _gpu_at3(v, k)');
   });
 
   test('a builtin over a scalar access compiles', () => {
     expect(g(['Sin', ['At', 'v', 'k']])).toBe('_gpu_sin(_gpu_at3(v, k))');
-    expect(w(['Sin', ['At', 'v', 'k']])).toBe('_gpu_sin(_gpu_at3(v, k))');
   });
 
   test('a static fold composes as the scalar it is', () => {
@@ -339,10 +279,10 @@ describe('At — evaluate-once', () => {
   });
 
   test('an impure base AND an impure index decline', () => {
-    // Neither language specifies the order a call evaluates its arguments in,
+    // GLSL does not specify the order a call evaluates its arguments in,
     // so two draws could commute between drivers.
     expect(why(['At', ['List', ['Random'], 1, 2], ['Random']])).toMatch(
-      /neither shader language specifies the order/
+      /GLSL does not specify the order/
     );
   });
 
@@ -398,7 +338,6 @@ describe('At — evaluate-once', () => {
 describe('At — literal integer gather (D2)', () => {
   test('all slots in range over a vec base fold to a swizzle', () => {
     expect(g(['At', 'v', ['List', 1, 3]])).toBe('v.xz');
-    expect(w(['At', 'v', ['List', 1, 3]])).toBe('v.xz');
     expect(g(['At', 'v', ['List', 3, 1, 3]])).toBe('v.zxz');
     expect(g(['At', 'v4', ['List', 1, 4]])).toBe('v4.xw');
   });
@@ -406,12 +345,10 @@ describe('At — literal integer gather (D2)', () => {
   test('an out-of-range slot forces a constructor with the NaN spelling', () => {
     // POSITION-PRESERVING: the result keeps the index list's length.
     expect(g(['At', 'v', ['List', 1, 9]])).toBe('vec2(v.x, _gpu_nan())');
-    expect(w(['At', 'v', ['List', 1, 9]])).toBe(`vec2f(v.x, ${WGSL_NAN})`);
   });
 
   test('an array-shaped base gathers through a constructor of subscripts', () => {
     expect(g(['At', 'v7', ['List', 1, 3]])).toBe('vec2(v7[0], v7[2])');
-    expect(w(['At', 'v7', ['List', 1, 3]])).toBe('vec2f(v7[0], v7[2])');
   });
 
   test('a literal base folds per element', () => {
@@ -485,7 +422,6 @@ describe('At — literal integer gather (D2)', () => {
 describe('At — boolean masks (D2)', () => {
   test('a literal mask of matching length folds through the gather tier', () => {
     expect(g(['At', 'v', ['List', 'True', 'False', 'True']])).toBe('v.xz');
-    expect(w(['At', 'v', ['List', 'True', 'False', 'True']])).toBe('v.xz');
   });
 
   test('a literal mask selecting one element hits the K=1 rule', () => {
@@ -640,7 +576,6 @@ describe('At — index typing', () => {
 
   test('a `Missing`-typed index folds to the NaN spelling', () => {
     expect(g(['At', 'v', 'Missing'])).toBe(GLSL_NAN);
-    expect(w(['At', 'v', 'Missing'])).toBe(WGSL_NAN);
   });
 });
 
@@ -727,13 +662,6 @@ describe('At — bases and indices the CALLER declared', () => {
     expect(
       shader([VEC3_IN, { name: 'ii', type: 'int' }], ['At', 'vin', 'ii'])
     ).toContain('o = _gpu_at3(vin, float(ii));');
-    // WGSL spells the conversion `f32`.
-    expect(
-      wgsl.compileFunction(ce.box(['At', 'vv', 'ii']) as any, 'f', 'f32', [
-        ['vv', 'vec3f'],
-        ['ii', 'i32'],
-      ])
-    ).toContain('return _gpu_at3(vv, f32(ii));');
   });
 });
 

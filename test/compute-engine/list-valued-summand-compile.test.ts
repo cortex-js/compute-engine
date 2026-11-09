@@ -304,7 +304,7 @@ describe('a list-valued call inside a big-op body is element-wise, not scalar (i
 });
 
 // Tycho item 171, residue on the NON-JS targets (2026-08-12). The JS fix above
-// routes the shape into the element-wise `_SYS.bcast` fold, but GLSL/WGSL,
+// routes the shape into the element-wise `_SYS.bcast` fold, but GLSL,
 // Python and interval-js call `BaseCompiler.assertScalarBigOpBody` directly and
 // have NO element-wise arm — correct emission is not on the table there, so the
 // only sound answer is to decline (D6).
@@ -322,7 +322,7 @@ describe('a list-valued call inside a big-op body is element-wise, not scalar (i
 //     }
 //
 // — a `vec2` sum returned from a `float` function, i.e. shader source that does
-// not even compile. WGSL emitted the same shape.
+// not even compile.
 //
 // The fix is a third clause on `assertScalarBigOpBody`
 // (`isCollectionValuedBigOpBodyByLookThrough`), sharing the JS look-through's
@@ -331,7 +331,7 @@ describe('a list-valued call inside a big-op body is element-wise, not scalar (i
 // `Function`-literal body has a type that MATCHES a collection. Absence of
 // evidence stays admitted, per the item-121 closure.
 describe('list-valued big-op bodies decline on the non-JS targets (item 171 residue)', () => {
-  const NON_JS = ['glsl', 'wgsl', 'python', 'interval-js'] as const;
+  const NON_JS = ['glsl', 'python', 'interval-js'] as const;
 
   const setup = (hBody: any = 'i') => {
     const ce = new ComputeEngine();
@@ -433,7 +433,7 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
     }
   );
 
-  test.each(['javascript', 'glsl', 'wgsl', 'interval-js'] as const)(
+  test.each(['javascript', 'glsl', 'interval-js'] as const)(
     '%s still compiles a wide-declared user helper whose body is SCALAR',
     (to) => {
       // The shader idiom the `broadcastable<T>` exemption exists for: an open
@@ -464,7 +464,7 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
 //
 //   javascript  `((_fn_a(0)) + (_fn_a(1)) + (_fn_a(2)))` → the STRING
 //               "1,00.5403…,0.8414…-0.4161…,0.9092…" (JS `+` over arrays)
-//   glsl/wgsl   the same shape → a `vec2` sum returned from a `float` function,
+//   glsl        the same shape → a `vec2` sum returned from a `float` function,
 //               i.e. shader source that does not even compile
 //   python      declined for an unrelated reason ("Unknown operator `a`")
 //   interval-js declined for an unrelated reason (no `List` lowering)
@@ -482,7 +482,7 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
 // affected, because `matches('number')` is disjoint from every one of them.
 // Tycho ledger row 491.
 describe('a declaration contradicted by its body is refused, or declines everywhere through a helper assigned later (2026-08-12 ruling)', () => {
-  const ALL = ['javascript', 'glsl', 'wgsl', 'python', 'interval-js'] as const;
+  const ALL = ['javascript', 'glsl', 'python', 'interval-js'] as const;
   const CONTRADICTED =
     /says it returns a scalar .* but its body constructs a collection/;
 
@@ -572,7 +572,7 @@ describe('a declaration contradicted by its body is refused, or declines everywh
     expect(v[1]).toBeCloseTo(y!, 10);
   });
 
-  test.each(['glsl', 'wgsl', 'python', 'interval-js'] as const)(
+  test.each(['glsl', 'python', 'interval-js'] as const)(
     '%s declines the (formerly open) collection shape on its OWN message, not the contradicted one',
     (to) => {
       const ce = new ComputeEngine();
@@ -611,7 +611,7 @@ describe('a declaration contradicted by its body is refused, or declines everywh
   // must keep compiling. (Python is omitted: it has no user-function lowering
   // at all and declines with "Unknown operator `a`" independently of this
   // change — the same carve-out the exemption tests above use.)
-  test.each(['javascript', 'glsl', 'wgsl', 'interval-js'] as const)(
+  test.each(['javascript', 'glsl', 'interval-js'] as const)(
     '%s still compiles a TRUTHFUL `-> number` scalar body',
     (to) => {
       const ce = new ComputeEngine();
@@ -656,7 +656,7 @@ describe('a declaration contradicted by its body is refused, or declines everywh
     expect(v[1]).toBeCloseTo(y!, 10);
   });
 
-  test.each(['glsl', 'wgsl', 'python', 'interval-js'] as const)(
+  test.each(['glsl', 'python', 'interval-js'] as const)(
     '%s declines a truthful `-> list<number>` on the FIRST clause',
     (to) => {
       const r = compile(
@@ -678,7 +678,7 @@ describe('a declaration contradicted by its body is refused, or declines everywh
 // garbage behind `success: true`. Measured BEFORE the gate, with `a` declared
 // `(number) -> number` and assigned `t ↦ [cos t, sin t]`:
 //
-//   shape              javascript                        glsl / wgsl
+//   shape              javascript                        glsl
 //   -----------------  --------------------------------  ---------------------
 //   `a(u)`             CORRECT (the array is coerced)     `float _fn_a` returning
 //                                                         `vec2` — see the
@@ -704,13 +704,7 @@ describe('a declaration contradicted by its body is refused, or declines everywh
 // A direct assignment of such a body is refused when it is made. The compiler
 // declines are reached through a helper assigned later.
 describe('a contradicted scalar declaration is refused, or declines in every scalar position through a helper assigned later (2026-08-12 ruling, wave 2)', () => {
-  const ALL_TARGETS = [
-    'javascript',
-    'glsl',
-    'wgsl',
-    'python',
-    'interval-js',
-  ] as const;
+  const ALL_TARGETS = ['javascript', 'glsl', 'python', 'interval-js'] as const;
 
   /** The wave-2 message: same two halves, its own second sentence. */
   const CONTRADICTED_SCALAR_POSITION =
@@ -852,7 +846,6 @@ describe('a contradicted scalar declaration is refused, or declines in every sca
 // gate, `compile(a(u))` reported `success: true` with the preamble
 //
 //     glsl:  float _fn_a(float t) { return vec2(cos(t), sin(t)); }
-//     wgsl:  fn _fn_a(t: f32) -> f32 { return vec2f(cos(t), sin(t)); }
 //
 // — a `vec2` returned from a function declared scalar, i.e. shader source no
 // driver accepts, shipped behind a reported success.
@@ -914,7 +907,7 @@ describe('a contradicted scalar declaration is refused, or declines at DEFINITIO
     return ce;
   };
 
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s declines the bare `a(u)` when the list comes from a function assigned later',
     (to) => {
       const r = compile(withLaterList().box(['a', 'u']), {
@@ -940,7 +933,7 @@ describe('a contradicted scalar declaration is refused, or declines at DEFINITIO
   // `list<any>` bodies): a shader function cannot return a run-time list, so
   // the call site receives the body's own `vec2` constructor and no `_fn_a`
   // definition is emitted.
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     'the `-> unknown` control still compiles bare `a(u)` on %s',
     (to) => {
       const ce = withDeclaration('(unknown) -> unknown');
@@ -958,7 +951,7 @@ describe('a contradicted scalar declaration is refused, or declines at DEFINITIO
   // CONTROL: the same honest spelling over a TUPLE body. A point-valued helper
   // keeps its own shared definition on the shader targets, and its return type
   // is synthesized from the body — `vec2`, legal shader source.
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     'the `-> unknown` control over a Tuple body emits a `vec2` definition on %s',
     (to) => {
       const ce = new ComputeEngine();
@@ -983,7 +976,7 @@ describe('a contradicted scalar declaration is refused, or declines at DEFINITIO
 
   // CONTROL: a TRUTHFUL `-> number` head over a scalar body — no contradiction,
   // so the scalar declaration is emitted exactly as before.
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     'a truthful `-> number` scalar body still emits its scalar declaration on %s',
     (to) => {
       const ce = new ComputeEngine();
@@ -1027,7 +1020,7 @@ describe('a contradicted scalar declaration is refused, or declines at DEFINITIO
 //
 // Scope, measured: only JavaScript (and interval-js) ever reached the hole —
 // `tryEmitMultiClauseFunction` declines every other target outright (§8), so a
-// multi-clause application on GLSL/WGSL already failed closed with its own
+// multi-clause application on GLSL already failed closed with its own
 // "no lowering" diagnostic and wave 3's `staticReturnType` route is
 // structurally unreachable for a clause set. The GPU declines below therefore
 // only pin that it STAYS closed, whichever diagnostic speaks first.
@@ -1170,7 +1163,7 @@ describe('a contradicted scalar declaration of a MULTI-CLAUSE function is refuse
         );
       });
 
-      test.each(['glsl', 'wgsl'] as const)('stays closed on %s', (to) => {
+      test.each(['glsl'] as const)('stays closed on %s', (to) => {
         const r = compile(withLaterClauses(kind).box(['Add', ['a', 'u'], 1]), {
           to,
           fallback: true,
@@ -1239,7 +1232,6 @@ describe('a contradicted scalar declaration of a MULTI-CLAUSE function is refuse
 //     JS   sin(a(u))    →  null
 //     JS   Σ a(i)       →  the STRING ",0,0.8414709848078965,0.9092974268256817"
 //     glsl bare a(u)    →  float _fn_a(float t) { w = cos(t); return vec2(w, sin(t)); }
-//     wgsl bare a(u)    →  fn _fn_a(t: f32) -> f32 { … return vec2f(w, sin(t)); }
 //
 // The fix judges the LAST statement of any non-empty block — the block's VALUE —
 // unwrapping the declaration's `Typed` ascription exactly as the single-statement
@@ -1255,13 +1247,7 @@ describe('a contradicted scalar declaration of a MULTI-CLAUSE function is refuse
 // declines are reached through a body whose last statement calls a helper
 // assigned later.
 describe('a contradicted scalar declaration is refused, or seen through a MULTI-STATEMENT body that calls a helper assigned later (2026-08-12 ruling, wave 5)', () => {
-  const ALL_TARGETS = [
-    'javascript',
-    'glsl',
-    'wgsl',
-    'python',
-    'interval-js',
-  ] as const;
+  const ALL_TARGETS = ['javascript', 'glsl', 'python', 'interval-js'] as const;
 
   const CONTRADICTED_SCALAR_POSITION =
     /says it returns a scalar .* but its body constructs a collection.*this scalar position would consume a run-time collection as a number/s;
@@ -1375,7 +1361,7 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
 
   // The definition-emission check reads it too, so the bare call does not
   // ship `float _fn_a(float t) { … return vec2(…); }`.
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s declines the bare `a(u)` at definition emission',
     (to) => {
       const r = compile(withLaterList().box(['a', 'u']), {
@@ -1420,7 +1406,7 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
 
   // CONTROL: a TRUTHFUL multi-statement scalar body — no contradiction, so every
   // target compiles it exactly as before.
-  test.each(['javascript', 'glsl', 'wgsl'] as const)(
+  test.each(['javascript', 'glsl'] as const)(
     '%s still compiles a TRUTHFUL multi-statement scalar body',
     (to) => {
       const ce = new ComputeEngine();
@@ -1460,7 +1446,7 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
 // Measured BEFORE the fix, with `b` declared `(number) -> boolean` and assigned
 // `t ↦ [cos t, sin t]`, all behind `success: true`:
 //
-//   shape                   javascript                    glsl / wgsl
+//   shape                   javascript                    glsl
 //   ----------------------  ----------------------------  ------------------------
 //   `If(b(u), 1, 2)`        `1` — the WRONG branch, off    `bool _fn_b(float t) {
 //                           the truthiness of an ARRAY       return vec2(…); }`
@@ -1489,13 +1475,7 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
 // it is made. The compiler declines are reached through a helper assigned
 // later.
 describe('a contradicted BOOLEAN declaration is refused, or declines in every scalar position through a helper assigned later (2026-08-12 ruling, wave 6)', () => {
-  const ALL_TARGETS = [
-    'javascript',
-    'glsl',
-    'wgsl',
-    'python',
-    'interval-js',
-  ] as const;
+  const ALL_TARGETS = ['javascript', 'glsl', 'python', 'interval-js'] as const;
 
   const CONTRADICTED_CONDITION =
     /says it returns a scalar .* but its body constructs a collection.*this branch condition would select on the truthiness of a run-time collection/s;
@@ -1536,7 +1516,7 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
    *
    * `If` (both forms) is `assertScalarCondition`'s callers on every target.
    * `Which` is listed separately: the GPU lowering is its OWN element-wise
-   * entry and never reaches that guard, so glsl/wgsl close it one gate later
+   * entry and never reaches that guard, so glsl closes it one gate later
    * (the wave-3 DEFINITION backstop, now reading the same `boolean` arm), and
    * interval-js declines earlier still on its pre-existing "no `List` lowering".
    * Measured, not assumed.
@@ -1576,12 +1556,9 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
             fallback: true,
           } as any);
           expect([label, r?.success ?? false]).toEqual([label, false]);
-          // On glsl/wgsl the single-branch `If` is closed by the definition
+          // On glsl the single-branch `If` is closed by the definition
           // check, which words the contradiction without the condition.
-          if (
-            label.startsWith('If(b(u), 1)') &&
-            (to === 'glsl' || to === 'wgsl')
-          )
+          if (label.startsWith('If(b(u), 1)') && to === 'glsl')
             expect((r as any).error).toMatch(CONTRADICTED_DEFINITION);
           else expect((r as any).error).toMatch(CONTRADICTED_CONDITION);
           expect((r as any).error).toMatch(/'b'/);
@@ -1589,7 +1566,7 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
         }
       });
 
-      // On glsl/wgsl the definition check speaks first, because their
+      // On glsl the definition check speaks first, because its
       // element-wise `Which` does not call `assertScalarCondition`. The
       // interval target checks each `Which` condition with
       // `assertScalarCondition`, and gives the condition message like the
@@ -1601,8 +1578,7 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
         } as any);
         expect(r?.success ?? false).toBe(false);
         const error = (r as any).error as string;
-        if (to === 'glsl' || to === 'wgsl')
-          expect(error).toMatch(CONTRADICTED_DEFINITION);
+        if (to === 'glsl') expect(error).toMatch(CONTRADICTED_DEFINITION);
         else expect(error).toMatch(CONTRADICTED_CONDITION);
       });
 
@@ -1620,7 +1596,7 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
       // On the shader targets, the definition of `b` would declare a
       // `bool` return over a `vec2` value, so the compilation declines
       // when it emits the definition.
-      test.each(['glsl', 'wgsl'] as const)(
+      test.each(['glsl'] as const)(
         '%s declines the bare `b(u)` at definition emission',
         (to) => {
           const r = compile(withLaterBody(body).box(['b', 'u']), {
@@ -1656,7 +1632,7 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
       return ce;
     };
 
-    test.each(['javascript', 'glsl', 'wgsl'] as const)(
+    test.each(['javascript', 'glsl'] as const)(
       '%s still compiles the SAME condition and operand shapes',
       (to) => {
         for (const [label, mathjson] of [

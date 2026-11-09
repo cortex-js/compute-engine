@@ -9,7 +9,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
-import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const ce = new ComputeEngine();
 
@@ -635,7 +634,6 @@ describe('GPU LerchPhi preamble', () => {
   ce.declare('gl_a', 'real');
   const targets = [
     ['GLSL', new GLSLTarget(), 'float _gpu_hurwitz_zeta('],
-    ['WGSL', new WGSLTarget(), 'fn _gpu_hurwitz_zeta('],
   ] as const;
 
   test.each(targets)(

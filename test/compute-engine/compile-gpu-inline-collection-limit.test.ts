@@ -21,7 +21,7 @@ const list = (n: number) => ['List', ...Array.from({ length: n }, (_, i) => i)];
  * by throwing; `undefined` when the compile succeeds. */
 function decline(
   expr: unknown,
-  to: 'glsl' | 'wgsl'
+  to: 'glsl'
 ): { code?: string; message: string } | undefined {
   try {
     const r = compile(ce.box(expr as never), { to, fallback: false });
@@ -34,7 +34,7 @@ function decline(
 }
 
 describe('a constant collection above the shader element limit', () => {
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '%s declines a 300-element literal list indexed at run time',
     (to) => {
       const d = decline(['At', list(300), ['Floor', 'x']], to);
@@ -71,7 +71,6 @@ describe('a constant collection above the shader element limit', () => {
   test('the decline names the operator the literal was written with', () => {
     const tuple = ['Tuple', ...Array.from({ length: 300 }, (_, i) => i)];
     expect(decline(tuple, 'glsl')?.message).toContain('`Tuple`');
-    expect(decline(tuple, 'wgsl')?.message).toContain('`Tuple`');
   });
 
   test('a Range above the limit is declined on the same code', () => {

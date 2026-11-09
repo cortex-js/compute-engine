@@ -1,4 +1,4 @@
-// At (indexing) over lists, points, storage buffers and textures, with the
+// At (indexing) over lists, points and textures, with the
 // preambles it needs.
 
 import type { Expression } from '../global-types.js';
@@ -10,27 +10,9 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { formatFloat, gpuNonFiniteLiteral } from './constant-folding.js';
-import type {
-  CompileTarget,
-  InternalStorageKind,
-  StorageBufferLayout,
-  StorageKind,
-} from './types.js';
-import { storageBufferBindings } from './storage-hints.js';
-import { WGSL_PREDECLARED } from './wgsl-predeclared.js';
-import {
-  storageBufferAtHelper,
-  storageBufferDeclarations,
-  storageBufferIsRead,
-  storageBufferLayout,
-  storageBufferReductionHelper,
-  type StorageBufferReduction,
-} from './gpu-storage-buffer.js';
+import type { CompileTarget, StorageKind } from './types.js';
 import { BaseCompiler } from './base-compiler.js';
-import {
-  resolveTypeAlias,
-  resolveTypeForCompiledLanes as resolveTypeForCompilation,
-} from '../../common/type/utils.js';
+import { resolveTypeAlias } from '../../common/type/utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import type { Type } from '../../common/type/types.js';
@@ -73,7 +55,7 @@ type GPUAtBase =
        * in shader storage of this kind: the read then lowers to a fetch from
        * that storage rather than to a subscript of a shader value.
        */
-      storage?: StorageKind | InternalStorageKind;
+      storage?: StorageKind;
     }
   | { decline: string };
 
@@ -169,7 +151,7 @@ function gpuAtFramedBaseElements(
     return (
       `the base is declared "${declared.spelling}" by the caller, whose ` +
       `components are not floats — a positional shader access reads one ` +
-      `float component, and neither language converts between the component ` +
+      `float component, and GLSL does not convert between the component ` +
       `types`
     );
   return undefined;
@@ -198,7 +180,7 @@ export function gpuAtFramedIndex(
       return {
         decline:
           'the index is a shader `bool`, and a positional access indexes by ' +
-          'a number — neither language converts a boolean to one',
+          'a number — GLSL does not convert a boolean to one',
       };
     // A name whose WIDTH lives in the shape frame and nowhere else: a `Block`
     // local bound to a vector, or a parameter of a SYNTHESIZED user-function
@@ -226,7 +208,7 @@ export function gpuAtFramedIndex(
       decline:
         `the index is declared "${declared.spelling}" by the caller, which ` +
         `is not a scalar number — a positional shader access indexes by a ` +
-        `float, and neither language converts to one implicitly`,
+        `float, and GLSL does not convert to one implicitly`,
     };
   // An integer-declared scalar is already referenced through a float
   // conversion (`gpuDeclaredBodyTarget`), so it passes for a float here; the
@@ -261,13 +243,10 @@ export function gpuAtFramedIndex(
  */
 function gpuStorageAtBaseShape(
   base: Expression & { symbol: string },
-  kind: StorageKind | InternalStorageKind
+  kind: StorageKind
 ): GPUAtBase {
   const name = base.symbol;
-  const hinted =
-    kind === 'uniform-struct'
-      ? `the base "${name}" is a list parameter of the uniform parameter struct`
-      : `the base "${name}" is ${kind}-backed (storage hint)`;
+  const hinted = `the base "${name}" is ${kind}-backed (storage hint)`;
   // A name the current shape frame binds — a caller-declared parameter or
   // shader input, a `Block` local, a lambda parameter — is not the free
   // symbol the hint was validated against: a declared name's shape comes from
@@ -428,12 +407,8 @@ export function gpuAtBaseShape(
     // `list<number>` below is owed. The two declines must stay
     // distinguishable — a consumer that falls back to another lane reads
     // them to tell an open type from an unparsed declaration.
-    // The symbol's OWN name, never `declared.ref`: `ref` is the identifier the
-    // emitted source references the name by, which for a WGSL shader input is
-    // a field of the entry point's `input` struct (`input.S`, set by
-    // `compileShaderBody`'s caller). A diagnostic must name what the caller
-    // WROTE, so that the name in the message is the one they can search their
-    // declaration list for.
+    // The message names the symbol as the caller wrote it, so that the caller
+    // can search their declaration list for it.
     if (isSymbol(base)) {
       const declared = gpuDeclaredTypeOf(base);
       if (declared !== undefined && declared.value === undefined)
@@ -442,8 +417,8 @@ export function gpuAtBaseShape(
             `the base is the caller-declared name "${base.symbol}", whose ` +
             `declared shader type \`${declared.spelling}\` is not one this ` +
             `target reads — it parses the scalar spellings and the ` +
-            `two-to-four component vector spellings of both languages ` +
-            `(\`vec3\`, \`ivec3\`, \`vec3f\`, \`vec3<f32>\`), and no array, ` +
+            `two-to-four component vector spellings that GLSL reads ` +
+            `(\`vec3\`, \`ivec3\`), and no array, ` +
             `matrix or struct type. The declaration decides the shape of a ` +
             `declared name, so no static element count reaches the analysis ` +
             `(the engine type \`${base.type.toString()}\` is not consulted ` +
@@ -488,7 +463,7 @@ export function gpuAtBaseShape(
   if (n === 0)
     return {
       decline:
-        'the base is empty, and neither shader language has a zero-length ' +
+        'the base is empty, and GLSL has no zero-length ' +
         'value type',
     };
   if (n === 1)
@@ -597,8 +572,7 @@ export function gpuAtGather(
     const sw = slots.map((s) => 'xyzw'[s!]).join('');
     return gpuIsAtomicEmission(code) ? `${code}.${sw}` : `(${code}).${sw}`;
   }
-  const ctor =
-    target.language === 'wgsl' ? `vec${slots.length}f` : `vec${slots.length}`;
+  const ctor = `vec${slots.length}`;
   const parts = slots.map((s) =>
     s === null ? gpuNaN(target) : gpuAtElement(base, s, n, compile)
   );
@@ -655,15 +629,11 @@ export function gpuAtEntryKind(e: Expression): GPUAtEntry {
  */
 export function gpuPointListAtBase(
   base: Expression,
-  compile: (e: Expression) => string,
-  target: CompileTarget<Expression>
+  compile: (e: Expression) => string
 ): GPUPointListAtBase | { decline: string } | undefined {
-  const isWGSL = target.language === 'wgsl';
-  const vec = (m: number): string => (isWGSL ? `vec${m}f` : `vec${m}`);
+  const vec = (m: number): string => `vec${m}`;
   const array = (m: number, n: number, items: string[]): string =>
-    isWGSL
-      ? `array<vec${m}f, ${n}>(${items.join(', ')})`
-      : `vec${m}[${n}](${items.join(', ')})`;
+    `vec${m}[${n}](${items.join(', ')})`;
 
   if (isFunction(base, 'PointList')) {
     const ops = base.ops;
@@ -792,8 +762,7 @@ export function compileGPUPointListAt(
   decline: (reason: string) => never
 ): string {
   const { m, n } = shape;
-  const isWGSL = target.language === 'wgsl';
-  const absent = `${isWGSL ? `vec${m}f` : `vec${m}`}(${gpuNaN(target)})`;
+  const absent = `vec${m}(${gpuNaN(target)})`;
   if (
     isFunction(index, 'List') ||
     isSubtype(gpuType(index), COLLECTION_SHAPE_TYPE)
@@ -829,49 +798,19 @@ export function compileGPUPointListAt(
   const framed = gpuAtFramedIndex(index);
   if (framed !== undefined && 'decline' in framed) decline(framed.decline);
   const idx = compile(index);
-  const floatIdx =
-    framed === undefined ? idx : `${isWGSL ? 'f32' : 'float'}(${idx})`;
-  // A module-scope array of points whose copy would not fit the
-  // function-scope memory of WGSL is indexed by its name, with no copy
-  // (`gpuWGSLInPlaceArray`). WGSL gives a `vec2f` 8 bytes, and a `vec3f` or
-  // a `vec4f` 16 bytes, in an array.
-  const pointBytes = m === 2 ? 8 : 16;
-  const inPlace = gpuWGSLInPlaceArray(base, n, pointBytes, compile, target);
-  if (inPlace !== undefined && 'name' in inPlace)
-    return `_gpu_atp_${inPlace.name}_${m}_${n}(${floatIdx})`;
-  if (isWGSL) gpuAssertWGSLCopyFits(base, n, pointBytes, decline);
-  const source = inPlace !== undefined ? inPlace.code : shape.source();
-  return `_gpu_atp${m}_${n}(${source}, ${floatIdx})`;
+  const floatIdx = framed === undefined ? idx : `float(${idx})`;
+  return `_gpu_atp${m}_${n}(${shape.source()}, ${floatIdx})`;
 }
 
 /**
  * The `_gpu_atpM_N` helper: the point at a 1-based index of an array of `N`
  * points of arity `M`, a negative index counting from the end, and a vector
  * of `NaN` components for any other index. The index guard is the one of
- * `_gpu_atN` (`gpuAtIndexGuard`). On WGSL the array parameter is copied to a
- * local `var` first, because a value-typed array parameter is not reliably
- * indexable by a run-time expression.
+ * `_gpu_atN` (`gpuAtIndexGuard`).
  */
-export function gpuAtPointPreamble(
-  m: number,
-  n: number,
-  isWGSL: boolean
-): string {
-  const lang = isWGSL ? 'wgsl' : 'glsl';
-  const nan = gpuNonFiniteLiteral(NaN, lang);
-  const { guard, doc } = gpuAtIndexGuard(n, lang);
-  if (isWGSL)
-    return `
-fn _gpu_atp${m}_${n}(v: array<vec${m}f, ${n}>, i: f32) -> vec${m}f {
-${doc}
-  if (${guard}) {
-    return vec${m}f(${nan});
-  }
-  let k = i32(i);
-  var a = v;
-  return a[select(${n} + k, k - 1, k > 0)];
-}
-`;
+export function gpuAtPointPreamble(m: number, n: number): string {
+  const nan = gpuNonFiniteLiteral(NaN, 'glsl');
+  const { guard, doc } = gpuAtIndexGuard(n);
   return `
 vec${m} _gpu_atp${m}_${n}(vec${m} v[${n}], float i) {
 ${doc}
@@ -894,25 +833,6 @@ export function gpuAtPointHelperShapes(code: string): [number, number][] {
 }
 
 /**
- * Is `e` a free symbol that the caller's `storage` hint places in a storage
- * buffer (`{ kind: 'storage-buffer', group, binding }`)? A name that a
- * binding form of the expression binds is not the free symbol of the hint
- * and is not one (`gpuStorageBufferOperand` declines it).
- */
-export function gpuIsStorageBufferSymbol(
-  e: Expression | undefined | null,
-  target: CompileTarget<Expression>
-): e is Expression & { symbol: string } {
-  return (
-    e !== undefined &&
-    e !== null &&
-    isSymbol(e) &&
-    target.storage?.get(e.symbol) === 'storage-buffer' &&
-    !gpuIsBoundName(e.symbol, target)
-  );
-}
-
-/**
  * Does a binding form of the expression bind `name` here (a `Block` local, a
  * loop index, a parameter)? Such a name is not the free symbol that a
  * `storage` hint of the same name applies to.
@@ -925,261 +845,6 @@ export function gpuIsBoundName(
     target.boundVars?.has(name) === true ||
     BaseCompiler.localShapeFrameOf(name) !== undefined
   );
-}
-
-/**
- * The number of f32 components of an element of the storage-buffer list
- * `base`, from its engine type: 1 for a list of real numbers, 2 to 4 for a
- * list of points of real coordinates. Otherwise the reason it has no
- * storage-buffer layout: a complex, boolean, string or nested-list element,
- * or a list of two or more dimensions.
- *
- * The declared length of the list, if any, is not used: the length is the
- * `len` header that the host writes.
- */
-function gpuStorageBufferComponents(
-  base: Expression & { symbol: string }
-): number | { decline: string } {
-  const name = base.symbol;
-  const hinted = `the list "${name}" is in a storage buffer (storage hint)`;
-  const t = resolveTypeAlias(base.type.type);
-  const spelled = base.type.toString();
-  if (typeof t === 'string' || t.kind !== 'list')
-    return {
-      decline: `${hinted}, which requires a list of numbers or of points, but its type is \`${spelled}\``,
-    };
-  if ((t.dimensions?.length ?? 0) > 1)
-    return {
-      decline:
-        `${hinted}, which requires a ONE-dimensional list, but its type ` +
-        `\`${spelled}\` has ${t.dimensions!.length} dimensions`,
-    };
-  const element = resolveTypeForCompilation(t.elements);
-  if (typeof element !== 'string' && element.kind === 'tuple') {
-    const m = element.elements.length;
-    if (
-      m >= 2 &&
-      m <= 4 &&
-      element.elements.every((e) => gpuIsVectorComponentType(e.type))
-    )
-      return m;
-    return {
-      decline:
-        `${hinted}, and its elements (type \`${typeToString(t.elements)}\`) ` +
-        `are not points of 2 to 4 real coordinates, which is the element ` +
-        `shape of a storage-buffer list besides a real number`,
-    };
-  }
-  if (gpuIsVectorComponentType(t.elements)) return 1;
-  return {
-    decline:
-      `${hinted}, and its element type \`${typeToString(t.elements)}\` is ` +
-      `not a real number or a point of 2 to 4 real coordinates; a complex ` +
-      `number, a boolean, a string or a nested list has no storage-buffer ` +
-      `layout`,
-  };
-}
-
-/**
- * The WGSL name of the buffer of the storage-buffer list `base` and the
- * number of components of its elements, or a decline of `head`. The name is
- * the ordinary emission of the symbol: its `vars` mapping when the caller
- * gave one, else its own name. It must be a plain identifier without the
- * reserved prefix `_gpu_`, because the compilation declares the buffer under
- * that name and the helpers carry it in their names and use the prefix for
- * their own locals.
- */
-export function gpuStorageBufferOperand(
-  base: Expression & { symbol: string },
-  compile: (e: Expression) => string,
-  target: CompileTarget<Expression>,
-  head: string
-): { name: string; components: number } {
-  const decline = (reason: string): never => {
-    throw new Error(`Could not compile \`${head}\`: ${reason}.`);
-  };
-  if (target.language !== 'wgsl')
-    decline(
-      `the list "${base.symbol}" is in a storage buffer (storage hint), and ` +
-        `the ${target.language ?? 'GPU'} target has no storage buffers`
-    );
-  // A name that a binding form binds (a `Block` local, a parameter) is not
-  // the free symbol the hint was validated against.
-  if (
-    BaseCompiler.localShapeFrameOf(base.symbol) !== undefined ||
-    target.boundVars?.has(base.symbol)
-  )
-    decline(
-      `the list "${base.symbol}" is in a storage buffer (storage hint), but ` +
-        `here "${base.symbol}" is a local or bound name, not the free symbol ` +
-        `of the expression that the hint applies to`
-    );
-  const components = gpuStorageBufferComponents(base);
-  if (typeof components !== 'number') decline(components.decline);
-  const name = gpuStorageOperandSource(base, compile);
-  if (!/^[A-Za-z_]\w*$/.test(name) || name.startsWith('_gpu_'))
-    decline(
-      `the list "${base.symbol}" is in a storage buffer (storage hint) and ` +
-        `maps to \`${name}\`, which is not a plain identifier without the ` +
-        `reserved prefix \`_gpu_\`; the compilation declares the buffer ` +
-        `under that name`
-    );
-  // The structs of the buffers are named `CE_List_<element type>`, and a
-  // WGSL module cannot declare a struct and a variable with one name.
-  if (name.startsWith('CE_List_'))
-    decline(
-      `the list "${base.symbol}" is in a storage buffer (storage hint) and ` +
-        `maps to \`${name}\`, which starts with \`CE_List_\`, the prefix ` +
-        `of the struct names that the compilation declares for its buffers`
-    );
-  // The buffer is a module-scope variable, and a module-scope declaration
-  // with the name of a built-in function or type (`min`, `f32`) hides that
-  // built-in from the whole module: the read `min(S.len, arrayLength(…))`
-  // of the length would call the variable.
-  if (WGSL_PREDECLARED.has(name))
-    decline(
-      `the list "${base.symbol}" is in a storage buffer (storage hint) and ` +
-        `maps to \`${name}\`, which is a predeclared function or type of ` +
-        `WGSL; a buffer declared under that name hides the built-in that ` +
-        `the compiled code calls`
-    );
-  // Record the list, so that the compilation declares its buffer with this
-  // name and this element shape (`gpuStorageBuffersRead`). Two lists that
-  // map to one name would need two declarations of that name.
-  const read = target.storageBuffersRead;
-  if (read !== undefined) {
-    for (const [other, entry] of read)
-      if (other !== base.symbol && entry.name === name)
-        decline(
-          `the lists "${other}" and "${base.symbol}" are in storage buffers ` +
-            `(storage hint) and both map to \`${name}\`; each buffer needs ` +
-            `its own WGSL name`
-        );
-    read.set(base.symbol, { name, components: components as number });
-  }
-  return { name, components: components as number };
-}
-
-/**
- * `At(S, i)` for a list `S` in a storage buffer: one call of the helper
- * `_gpu_sbat_S` (`_gpu_sbatp<M>_S` for a list of points), which reads the
- * length from the buffer and applies the index rules of `At` against it
- * (`storageBufferHelpers`). The list is indexed where it is, with no copy.
- * A collection index (a gather or a mask) declines: its result has no
- * shader shape when the length is known only at run time.
- */
-export function compileGPUStorageBufferAt(
-  base: Expression & { symbol: string },
-  index: Expression,
-  compile: (e: Expression) => string,
-  target: CompileTarget<Expression>,
-  decline: (reason: string) => never
-): string {
-  if (
-    isFunction(index, 'List') ||
-    (isSubtype(gpuType(index), COLLECTION_SHAPE_TYPE) &&
-      !isSubtype(gpuType(index), 'string'))
-  )
-    decline(
-      `the index is a collection, and the list "${base.symbol}" is in a ` +
-        `storage buffer, whose length is known only at run time; only a ` +
-        `scalar index has a lowering`
-    );
-  if (
-    isSymbol(index, 'Missing') ||
-    BaseCompiler.isComplexValued(index) ||
-    !couldMatch(gpuType(index), 'number')
-  )
-    decline(
-      `the index (type \`${index.type.toString()}\`) is not a real number, ` +
-        `so it selects no element`
-    );
-  const framed = gpuAtFramedIndex(index);
-  if (framed !== undefined && 'decline' in framed) decline(framed.decline);
-  const { name, components } = gpuStorageBufferOperand(
-    base,
-    compile,
-    target,
-    'At'
-  );
-  // A literal index is checked as written, before it is rounded to f32:
-  // `1.0000000001` is not an integer and selects no element, but its f32
-  // spelling `1.0` would read the first one. So would an integer that f32
-  // cannot hold exactly (16777217 is written 16777216.0). Both give NaN, as
-  // the array form does.
-  if (isNumber(index)) {
-    const re = index.re;
-    if (!Number.isInteger(re) || Math.fround(re) !== re) {
-      const nan = gpuNaN(target);
-      return components === 1 ? nan : `vec${components}f(${nan})`;
-    }
-  }
-  const idx = isNumber(index)
-    ? formatFloat(index.re, target.language)
-    : compile(index);
-  const floatIdx = framed === undefined ? idx : `f32(${idx})`;
-  return `${storageBufferAtHelper(name, components)}(${floatIdx})`;
-}
-
-/**
- * `Sum`, `Product`, `Max`, `Min` or `Mean` (`head`) of a list in a storage
- * buffer: one call of the helper that loops over the run-time length of the
- * list (`storageBufferHelpers`). Only the form with the list as its one
- * operand has a lowering, and only for a list of numbers.
- */
-export function compileGPUStorageBufferReduce(
-  head: string,
-  reduction: StorageBufferReduction,
-  args: ReadonlyArray<Expression>,
-  compile: (e: Expression) => string,
-  target: CompileTarget<Expression>
-): string {
-  const operand = args[0];
-  if (args.length !== 1 || !gpuIsStorageBufferSymbol(operand, target))
-    throw new Error(
-      `Could not compile \`${head}\`: an operand is a list in a storage ` +
-        `buffer, and only \`${head}\` of that list alone has a lowering`
-    );
-  const { name, components } = gpuStorageBufferOperand(
-    operand,
-    compile,
-    target,
-    head
-  );
-  if (components !== 1)
-    throw new Error(
-      `Could not compile \`${head}\`: the list "${operand.symbol}" in a ` +
-        `storage buffer holds points, and only a list of numbers has a ` +
-        `reduction; read the points with \`At\``
-    );
-  return `${storageBufferReductionHelper(reduction, name)}()`;
-}
-
-/**
- * The layouts of the storage-buffer lists that `text` (the code and the
- * preamble of a WGSL compilation) reads, in the order of the hints
- * (`bindings`), with their declarations. `read` holds the WGSL name and the
- * element shape of each list as `gpuStorageBufferOperand` validated it
- * while the code was compiled (`CompileTarget.storageBuffersRead`), so the
- * layout is the one the helpers read, whatever scope is current now.
- */
-export function gpuStorageBuffersRead(
-  text: string,
-  bindings: ReturnType<typeof storageBufferBindings>,
-  read: ReadonlyMap<string, { name: string; components: number }>
-): { layouts: StorageBufferLayout[]; declarations: string } {
-  const layouts: StorageBufferLayout[] = [];
-  for (const [symbol, binding] of bindings ?? []) {
-    const entry = read.get(symbol);
-    if (entry === undefined || !storageBufferIsRead(text, entry.name)) continue;
-    layouts.push(
-      storageBufferLayout(symbol, entry.name, binding, entry.components)
-    );
-  }
-  return {
-    layouts,
-    declarations: layouts.length > 0 ? storageBufferDeclarations(layouts) : '',
-  };
 }
 
 /**
@@ -1227,31 +892,11 @@ export function gpuStorageOperandSource(
  */
 export function gpuRefuseStorageReference(
   id: string,
-  storage: ReadonlyMap<string, StorageKind | InternalStorageKind>,
+  storage: ReadonlyMap<string, StorageKind>,
   language: string
 ): void {
   const kind = storage.get(id);
   if (kind === undefined || gpuOpenStorageOperand === id) return;
-  if (kind === 'uniform-struct')
-    throw new Error(
-      `Could not compile \`${id}\`: the list parameter is packed in the ` +
-        `uniform parameter struct of \`compileFieldFunction()\` as an array ` +
-        `of \`vec4f\`, which is not a value of the list's own type: it can ` +
-        `be read only through a positional access (\`At(${id}, i)\`). Here ` +
-        `it is referenced as a whole — as an operand, in a reduction, or as ` +
-        `a bare value — which has no lowering.`
-    );
-  if (kind === 'storage-buffer')
-    throw new Error(
-      `Could not compile \`${id}\`: the symbol is a list in a storage buffer ` +
-        `(compile option \`storage: { ${id}: { kind: 'storage-buffer', … } }\`), ` +
-        `whose length is known only at run time, and a shader value must ` +
-        `have a length known at compile time. On the ${language} target it ` +
-        `can be read only through \`At(${id}, i)\`, \`Length(${id})\`, and ` +
-        `\`Sum\`, \`Product\`, \`Max\`, \`Min\` or \`Mean\` of \`${id}\` ` +
-        `alone. Here it is referenced as a whole (as an operand, an argument ` +
-        `or a bare value), which has no lowering.`
-    );
   throw new Error(
     `Could not compile \`${id}\`: the symbol is ${kind}-backed (compile option ` +
       `\`storage: { ${id}: '${kind}' }\`), and a texture has no shader value ` +
@@ -1263,8 +908,7 @@ export function gpuRefuseStorageReference(
 }
 
 /**
- * The `_gpu_atN` positional-access helper preamble, in the language of
- * `isWGSL`. Generated per N on demand (`preambleFor` scans the emitted code
+ * The `_gpu_atN` positional-access helper preamble. Generated per N on demand (`preambleFor` scans the emitted code
  * for `_gpu_at(\d+)`), so a `vector<7>` base gets a `_gpu_at7` over a
  * `float[7]` with the same body shape as the `vecN` forms.
  *
@@ -1273,29 +917,9 @@ export function gpuRefuseStorageReference(
  * test, and the negated compound (`!(i >= -N && i <= N)`) swallows `NaN` and
  * `±∞` — which `floor` alone would not.
  */
-export function gpuAtPreamble(n: number, isWGSL: boolean): string {
-  const lang = isWGSL ? 'wgsl' : 'glsl';
-  const nan = gpuNonFiniteLiteral(NaN, lang);
-  const { guard, doc } = gpuAtIndexGuard(n, lang);
-  if (isWGSL) {
-    // A value-typed `array` PARAMETER is not reliably indexable by a runtime
-    // expression (the restriction WGSL has never applied to a `vecN`), so the
-    // array forms copy to a local `var` — a reference — first. A vector form
-    // indexes its parameter directly.
-    const param = n <= 4 ? `v: vec${n}f` : `v: array<f32, ${n}>`;
-    const copy = n <= 4 ? '' : '  var a = v;\n';
-    const src = n <= 4 ? 'v' : 'a';
-    return `
-fn _gpu_at${n}(${param}, i: f32) -> f32 {
-${doc}
-  if (${guard}) {
-    return ${nan};
-  }
-  let k = i32(i);
-${copy}  return ${src}[select(${n} + k, k - 1, k > 0)];
-}
-`;
-  }
+export function gpuAtPreamble(n: number): string {
+  const nan = gpuNonFiniteLiteral(NaN, 'glsl');
+  const { guard, doc } = gpuAtIndexGuard(n);
   const param = n <= 4 ? `vec${n} v` : `float v[${n}]`;
   return `
 float _gpu_at${n}(${param}, float i) {
@@ -1306,196 +930,6 @@ ${doc}
   return v[(k > 0) ? k - 1 : ${n} + k];
 }
 `;
-}
-
-/**
- * The number of bytes of function-scope variables that WGSL guarantees to a
- * shader function. An implementation can refuse a function whose `var`s
- * need more.
- */
-export const GPU_WGSL_FUNCTION_SCOPE_BYTES = 8192;
-
-/**
- * How a WGSL positional read of the array `base` of `n` elements of
- * `elementBytes` bytes each reads it: `{ name }` when the read indexes the
- * module-scope declaration `name` IN PLACE, `{ code }` when the test had to
- * compile the base and it is not such a name (the caller reuses `code`, so
- * that the base is not compiled twice: a second compilation can hoist its
- * statements again and repeat a random draw), and `undefined` when the read
- * takes the copying helper (`_gpu_atN`, `_gpu_atpM_N`) and the base was not
- * compiled.
- *
- * The copying helpers take the array as a value parameter and copy it to a
- * function-scope `var`. WGSL guarantees only 8192 bytes of function-scope
- * variables per function, so the copy of a list of more than 2048 numbers
- * can fail to compile (a list of 22 500 numbers needs 90 KB). A free symbol
- * whose copy would need more than 8192 bytes is read in place instead: WGSL
- * lets an expression index a module-scope declaration by its name with a
- * run-time index, so the read copies nothing. The host must then declare the
- * list as a `var<storage>`, or use the `'storage-buffer'` storage kind. A
- * `var<private>` does not do: WGSL gives `private` variables the same
- * 8192-byte guarantee as `function` variables. Nor does a `const` array: its
- * constructor is guaranteed only 2047 elements. A smaller list
- * keeps the copying helper, which is also valid when the host declares the
- * list as a parameter or a local of its own function.
- *
- * The base is read in place when all of these are true:
- *  - the target is WGSL and the copy needs more than 8192 bytes;
- *  - the base is a symbol that no enclosing binding form binds (a `Block`
- *    local is a function-scope name, which a helper at module scope cannot
- *    see), and that has no `storage` hint (a texture has its own helper);
- *  - its emission is a plain identifier that does not start with the
- *    reserved prefix `_gpu_`. A symbol with an assigned value emits that
- *    value, and a `vars` mapping to a field (`u.S`) emits a path; neither is
- *    a name a helper can carry. The helpers name their own parameter and
- *    local with the `_gpu_` prefix, so a binding with that prefix could be
- *    hidden by them.
- */
-export function gpuWGSLInPlaceArray(
-  base: Expression,
-  n: number,
-  elementBytes: number,
-  compile: (e: Expression) => string,
-  target: CompileTarget<Expression>
-): { name: string } | { code: string } | undefined {
-  if (
-    target.language !== 'wgsl' ||
-    n * elementBytes <= GPU_WGSL_FUNCTION_SCOPE_BYTES ||
-    !isSymbol(base)
-  )
-    return undefined;
-  if (target.boundVars?.has(base.symbol)) return undefined;
-  if (target.storage?.get(base.symbol) !== undefined) return undefined;
-  const code = compile(base);
-  return /^[A-Za-z_]\w*$/.test(code) && !code.startsWith('_gpu_')
-    ? { name: code }
-    : { code };
-}
-
-/**
- * The size in bytes of the WGSL array type `type` (`array<f32, 3000>`,
- * `array<vec3f, 10>`), or `undefined` when it is not an array of `f32` or
- * of `vecNf`. A `vec3f` takes 16 bytes in an array.
- */
-export function gpuWGSLArrayBytes(type: string): number | undefined {
-  const m = /^array<(f32|vec([234])f), (\d+)>$/.exec(type);
-  if (m === null) return undefined;
-  const element = m[2] === undefined ? 4 : m[2] === '2' ? 8 : 16;
-  return element * Number(m[3]);
-}
-
-/**
- * Decline a WGSL positional read that would copy the array `base` of `n`
- * elements of `elementBytes` bytes each into a function-scope `var` of more
- * than the 8192 bytes that WGSL guarantees (`gpuWGSLInPlaceArray`). The
- * message names the storage kind `'storage-buffer'`, which reads a list of
- * any length with no copy.
- */
-export function gpuAssertWGSLCopyFits(
-  base: Expression,
-  n: number,
-  elementBytes: number,
-  decline: (reason: string) => never
-): void {
-  const bytes = n * elementBytes;
-  if (bytes <= GPU_WGSL_FUNCTION_SCOPE_BYTES) return;
-  const name = isSymbol(base) ? `"${base.symbol}"` : 'the base';
-  const symbol = isSymbol(base) ? base.symbol : 'S';
-  decline(
-    `the read copies ${name} (${n} elements, ${bytes} bytes) into a ` +
-      `function-scope variable, and WGSL guarantees only ` +
-      `${GPU_WGSL_FUNCTION_SCOPE_BYTES} bytes of them per function. A free ` +
-      `list symbol of this size is read with no copy when it, or the ` +
-      `identifier \`vars\` maps it to, is a \`var<storage>\` declaration; use the ` +
-      `storage kind 'storage-buffer' (\`storage: { ${symbol}: { kind: ` +
-      `'storage-buffer', group, binding } }\`) to read it from a storage ` +
-      `buffer`
-  );
-}
-
-/**
- * The `_gpu_at_<binding>_<N>` positional-access helper on WGSL, for an array
- * of `N` numbers that the host declares at module scope as `binding`
- * (`gpuWGSLInPlaceArray`). It has the guard and the index contract of
- * `_gpu_atN`, but it indexes `binding` by name instead of a copy of it.
- * It is generated per binding, as the texture helper is, because the name of
- * the declaration is in the body. The parameter and the local have the
- * reserved `_gpu_` prefix, so that a binding named `i` or `k` is not
- * shadowed by them.
- */
-export function gpuAtInPlacePreambleWGSL(binding: string, n: number): string {
-  const nan = gpuNonFiniteLiteral(NaN, 'wgsl');
-  const { guard, doc } = gpuAtIndexGuard(n, 'wgsl', '_gpu_i');
-  return `
-fn _gpu_at_${binding}_${n}(_gpu_i: f32) -> f32 {
-${doc}
-  if (${guard}) {
-    return ${nan};
-  }
-  let _gpu_k = i32(_gpu_i);
-  return ${binding}[select(${n} + _gpu_k, _gpu_k - 1, _gpu_k > 0)];
-}
-`;
-}
-
-/**
- * The `_gpu_atp_<binding>_<M>_<N>` helper on WGSL: the point form of
- * `gpuAtInPlacePreambleWGSL`, for an array of `N` points of arity `M` that
- * the host declares at module scope. Same guard and index contract as
- * `_gpu_atpM_N`; an absent point is a vector of NaN components.
- */
-export function gpuAtPointInPlacePreambleWGSL(
-  binding: string,
-  m: number,
-  n: number
-): string {
-  const nan = gpuNonFiniteLiteral(NaN, 'wgsl');
-  const { guard, doc } = gpuAtIndexGuard(n, 'wgsl', '_gpu_i');
-  return `
-fn _gpu_atp_${binding}_${m}_${n}(_gpu_i: f32) -> vec${m}f {
-${doc}
-  if (${guard}) {
-    return vec${m}f(${nan});
-  }
-  let _gpu_k = i32(_gpu_i);
-  return ${binding}[select(${n} + _gpu_k, _gpu_k - 1, _gpu_k > 0)];
-}
-`;
-}
-
-/**
- * The (binding, length) pairs of the `_gpu_at_<binding>_<N>` helpers `code`
- * calls, and the (binding, arity, length) triples of the
- * `_gpu_atp_<binding>_<M>_<N>` helpers, in first-use order and each once.
- * They are read off the helper NAME, as `gpuTexAtBindings` reads the texture
- * helpers: the length is the digits just before the call's parenthesis (and
- * the arity the one digit before them), so the lazy binding match stops
- * there. The names do not match the scans of `_gpu_atN` and `_gpu_atpM_N`,
- * which need a digit right after the prefix.
- */
-export function gpuAtInPlaceBindings(code: string): {
-  numbers: [binding: string, n: number][];
-  points: [binding: string, m: number, n: number][];
-} {
-  const seen = new Set<string>();
-  const numbers: [string, number][] = [];
-  const points: [string, number, number][] = [];
-  const re = /(?<![\w$])_gpu_at_([A-Za-z_]\w*?)_(\d+)\s*\(/g;
-  let r: RegExpExecArray | null;
-  while ((r = re.exec(code)) !== null) {
-    const key = `n:${r[1]}_${r[2]}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    numbers.push([r[1], Number(r[2])]);
-  }
-  const rp = /(?<![\w$])_gpu_atp_([A-Za-z_]\w*?)_([234])_(\d+)\s*\(/g;
-  while ((r = rp.exec(code)) !== null) {
-    const key = `p:${r[1]}_${r[2]}_${r[3]}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    points.push([r[1], Number(r[2]), Number(r[3])]);
-  }
-  return { numbers, points };
 }
 
 /**
@@ -1512,25 +946,23 @@ export function gpuAtInPlaceBindings(code: string): {
  */
 export function gpuAtIndexGuard(
   n: number,
-  lang: 'glsl' | 'wgsl',
   i = 'i'
 ): { guard: string; doc: string } {
-  const b = formatFloat(n, lang);
+  const b = formatFloat(n, 'glsl');
   return {
     guard: `!(${i} >= -${b} && ${i} <= ${b}) || ${i} != floor(${i}) || ${i} == 0.0`,
     doc:
       `  // 1-based; negative counts from the end; anything else → NaN.\n` +
       `  // The guard runs entirely in float space: it rejects NaN, ±∞, huge\n` +
       `  // finite values, non-integers and 0 BEFORE the int cast (undefined\n` +
-      `  // outside int range), and makes both languages' out-of-bounds rules\n` +
-      `  // (GLSL UB / WGSL indeterminate) unreachable.`,
+      `  // outside int range), and makes the out-of-bounds index (undefined\n` +
+      `  // behavior in GLSL) unreachable.`,
   };
 }
 
 /**
  * The `_gpu_texatN` positional-access helper for a SAMPLER-BACKED list of N
- * elements, GLSL (the WGSL form is `gpuTexAtPreambleWGSL`, generated per
- * binding). Generated per N on demand like `_gpu_atN`, and named apart from
+ * elements. Generated per N on demand like `_gpu_atN`, and named apart from
  * it so one shader can carry both lowerings for different lists.
  *
  * The storage contract it reads (plan section 3): a single-channel 32-bit
@@ -1549,7 +981,7 @@ export function gpuAtIndexGuard(
  */
 export function gpuTexAtPreamble(n: number): string {
   const nan = gpuNonFiniteLiteral(NaN, 'glsl');
-  const { guard, doc } = gpuAtIndexGuard(n, 'glsl');
+  const { guard, doc } = gpuAtIndexGuard(n);
   return `
 float _gpu_texat${n}(sampler2D v, float i) {
 ${doc}
@@ -1580,71 +1012,11 @@ export function gpuAtHelperWidths(code: string): number[] {
 }
 
 /**
- * The `_gpu_texat_<binding>_<N>` positional-access helper for a
- * SAMPLER-BACKED list of N elements on WGSL, generated per BINDING: a WGSL
- * texture cannot be an ordinary function parameter the way a GLSL sampler or
- * an array can, so the helper names the module-scope texture `binding`
- * directly (the host declares it, `var S: texture_2d<f32>`). The read is a
- * `textureLoad` with integer coordinates and mip level 0 — no sampler — and
- * the width comes from `textureDimensions`, at run time, exactly as the GLSL
- * form reads it from `textureSize`. Same storage contract, same guard text
- * (`gpuAtIndexGuard`), same index contract.
- */
-export function gpuTexAtPreambleWGSL(binding: string, n: number): string {
-  const nan = gpuNonFiniteLiteral(NaN, 'wgsl');
-  // The parameter and the locals carry the reserved `_gpu_` prefix: the
-  // binding is any plain identifier the caller chose, and one named `i`,
-  // `k` or `w` would otherwise be shadowed by the helper's own names, so
-  // the texture reads would name the parameter instead of the texture.
-  const { guard, doc } = gpuAtIndexGuard(n, 'wgsl', '_gpu_i');
-  return `
-fn _gpu_texat_${binding}_${n}(_gpu_i: f32) -> f32 {
-${doc}
-  if (${guard}) {
-    return ${nan};
-  }
-  var _gpu_k = i32(_gpu_i);
-  _gpu_k = select(${n} + _gpu_k, _gpu_k - 1, _gpu_k > 0);
-  // Row-major in a texture of run-time width; the host guarantees at least
-  // ${n} texels, so the coordinate is in range whenever the guard passed.
-  let _gpu_w = i32(textureDimensions(${binding}, 0).x);
-  return textureLoad(${binding}, vec2i(_gpu_k % _gpu_w, _gpu_k / _gpu_w), 0).r;
-}
-`;
-}
-
-/**
  * The widths of the `_gpu_texatN` texture helpers `code` calls, read the
- * same way. The digits follow `_gpu_texat` directly, so the WGSL helper
- * generated per BINDING (`_gpu_texat_S_1600`, an underscore after the prefix)
- * shares the prefix without ever matching this scan.
+ * same way.
  */
 export function gpuTexAtHelperWidths(code: string): number[] {
   return gpuHelperWidths(code, /(?<![\w$])_gpu_texat(\d+)\s*\(/g);
-}
-
-/**
- * The (binding, length) pairs of the WGSL `_gpu_texat_<binding>_<N>` helpers
- * `code` calls, in first-use order and deduplicated. Both are read off the
- * helper's NAME: the preamble is built from the emitted code alone, like
- * every other helper scan, and a name is the only channel it has. The
- * binding is a plain identifier (the lowering refuses any other), and the
- * length is the digits before the call's parenthesis, so the lazy binding
- * match stops exactly there — `_gpu_texat_u_board_2_1600(` is the binding
- * `u_board_2` of length 1600.
- */
-export function gpuTexAtBindings(code: string): [binding: string, n: number][] {
-  const seen = new Set<string>();
-  const result: [string, number][] = [];
-  const re = /(?<![\w$])_gpu_texat_([A-Za-z_]\w*?)_(\d+)\s*\(/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(code)) !== null) {
-    const key = `${m[1]}_${m[2]}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push([m[1], Number(m[2])]);
-  }
-  return result;
 }
 
 function gpuHelperWidths(code: string, re: RegExp): number[] {

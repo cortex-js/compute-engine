@@ -42,7 +42,7 @@ describe('CE-636: A DECLARATION WITHOUT A VALUE', () => {
 
   test('a block with that declaration does not compile', () => {
     const e = box(LOOP);
-    for (const to of ['javascript', 'python', 'glsl', 'wgsl', 'interval-js']) {
+    for (const to of ['javascript', 'python', 'glsl', 'interval-js']) {
       let compiled = true;
       try {
         compiled = compile(e, { to: to as any, fallback: false }).success;

@@ -341,7 +341,7 @@ describe('A tuple with a list coordinate is a list of points — shader targets'
   // `PointList` shape diagnostic, as it did for the tuple before. The input
   // `P` is a list of unknown length, which no shader can declare, so in
   // `P + (A, B)` the read of `P` declines first.
-  test.each([['glsl'], ['wgsl']])('%s fails closed', (to) => {
+  test.each([['glsl']])('%s fails closed', (to) => {
     for (const latex of ['(A, B)', 'P + (A, B)', '2\\cdot(A, B)'])
       expect(() =>
         compile(declaredEngine().parse(latex), { to, fallback: false } as any)
@@ -708,7 +708,7 @@ describe('A point parameter called with a list of points maps over the points', 
     }
   });
 
-  test.each([['glsl'], ['wgsl'], ['interval-js']])(
+  test.each([['glsl'], ['interval-js']])(
     'the %s target fails closed',
     (to) => {
       // A list of points is not a shader value, and the interval target has
@@ -794,7 +794,7 @@ describe('A parameter with no declared type called with a list of points maps ov
     expect((r.run as any)({ x: [1, 2] })).toEqual([2, 5]);
   });
 
-  test.each([['glsl'], ['wgsl'], ['interval-js']])(
+  test.each([['glsl'], ['interval-js']])(
     'the %s target fails closed',
     (to) => {
       let result: any;

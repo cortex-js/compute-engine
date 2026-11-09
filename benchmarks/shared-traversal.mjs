@@ -89,7 +89,7 @@ fixtures.push({
     const ce = new ComputeEngine({precision: 'machine'});
     ce.declare('x','real'); ce.declare('T','real'); ce.assign('T',2);
     const e=ce.box(['Add',['Sin',['Multiply','T','x']],['Cos',['Multiply','T','x']]]);
-    return {run:()=>compile(e,{to:'wgsl',vars:{T:'T',x:'x'},hideValues:['T']}),check:r=>{assert(r.success);assert.match(r.code,/sin/);assert.match(r.code,/cos/);}};
+    return {run:()=>compile(e,{to:'glsl',vars:{T:'T',x:'x'},hideValues:['T']}),check:r=>{assert(r.success);assert.match(r.code,/sin/);assert.match(r.code,/cos/);}};
   },
 }, {
   id: 'host/map-callback',

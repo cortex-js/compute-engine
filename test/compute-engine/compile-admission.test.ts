@@ -19,7 +19,7 @@ import {
 // - A function body, the root or a `Loop` whose values (each `Return` or
 //   `Break` value and the last value) have conflicting shapes declines.
 
-const TARGETS = ['javascript', 'interval-js', 'glsl', 'wgsl', 'python'];
+const TARGETS = ['javascript', 'interval-js', 'glsl', 'python'];
 
 const silence = jest.spyOn(console, 'warn').mockImplementation(() => {});
 afterAll(() => silence.mockRestore());
@@ -430,13 +430,10 @@ describe('A value with no settled shape declines (R3)', () => {
   // `list<real>` has no static length, so no shader can declare it.
   const OWN_REASON = new Set([
     'If(x > 0, [1, 2], 3) + 1 glsl',
-    'If(x > 0, [1, 2], 3) + 1 wgsl',
     'If(x > 0, [1, 2], 3) + 1 python',
     'If(x > 0, (1, 2), [(1, 2), (3, 4)]) glsl',
-    'If(x > 0, (1, 2), [(1, 2), (3, 4)]) wgsl',
     'If(x > 0, L, x) interval-js',
     'If(x > 0, L, x) glsl',
-    'If(x > 0, L, x) wgsl',
   ]);
 
   describe.each(UNSETTLED)('%s', (label, json) => {
@@ -465,7 +462,7 @@ describe('A value with no settled shape declines (R3)', () => {
       ce.box(['If', ['Greater', 'x', 0], ['Tuple', 1, 2], ['Tuple', 1, 2, 3]]),
       { to }
     );
-    if (to === 'glsl' || to === 'wgsl') {
+    if (to === 'glsl') {
       expect(r.success).toBe(false);
       expect(r.diagnostic?.code).toBe('unsettled-shape');
     } else expect(r.diagnostic?.code).not.toBe('unsettled-shape');
@@ -481,7 +478,7 @@ describe('A value with no settled shape declines (R3)', () => {
   // keeps one branch; an `If` whose condition is the symbol `False`, and a
   // `Which`, keep every branch up to the first `True` clause, so a shader
   // with a `vec2` and a `float` branch would not be valid.
-  test.each(['glsl', 'wgsl'])(
+  test.each(['glsl'])(
     'the branches that the shader code keeps on %s',
     (to) => {
       const ce = engine();
@@ -629,7 +626,7 @@ describe('A condition known at compile time selects its branch (R3)', () => {
 
   // The shader code keeps both branches of an `If` whose condition is the
   // symbol `False`.
-  test.each(['glsl', 'wgsl'])('an If with the symbol False on %s', (to) => {
+  test.each(['glsl'])('an If with the symbol False on %s', (to) => {
     const ce = engine();
     const r = compile(ce.box(['If', 'False', ['Tuple', 1, 2], 0]), { to });
     expect(r.success).toBe(false);
@@ -780,7 +777,7 @@ describe('A branch that the code drops is not checked', () => {
   test.each(TARGETS)('an If with the symbol True on %s', (to) => {
     const ce = engine();
     const r = compile(ce.box(['If', 'True', 0, 'z']), { to });
-    if (to === 'glsl' || to === 'wgsl') {
+    if (to === 'glsl') {
       expect(r.success).toBe(false);
       expect(r.diagnostic?.code).toBe('untyped-input');
       expect(r.unsupported).toContain('z');
@@ -875,7 +872,7 @@ describe('The values of a body with an early Return have one shape (R3)', () => 
     );
     expect(r.success).toBe(false);
     expect(r.diagnostic?.code).toBe(
-      to === 'glsl' || to === 'wgsl' ? 'compile-error' : 'unsettled-shape'
+      to === 'glsl' ? 'compile-error' : 'unsettled-shape'
     );
   });
 
@@ -890,7 +887,7 @@ describe('The values of a body with an early Return have one shape (R3)', () => 
     );
     expect(r.success).toBe(false);
     expect(r.diagnostic?.code).toBe(
-      to === 'glsl' || to === 'wgsl' ? 'compile-error' : 'unsettled-shape'
+      to === 'glsl' ? 'compile-error' : 'unsettled-shape'
     );
   });
 
@@ -1061,7 +1058,7 @@ describe('A conditional in a statement position (R3)', () => {
   // The shader code of a conditional in a statement position is a
   // conditional expression too (`c ? a : b`), whose branches must have the
   // same type.
-  test.each(['glsl', 'wgsl'])('a statement of a block on %s', (to) => {
+  test.each(['glsl'])('a statement of a block on %s', (to) => {
     const r = compile(engine().box(STATEMENTS[0][1]), { to });
     expect(r.success).toBe(false);
     expect(r.diagnostic?.code).toBe('unsettled-shape');
@@ -1387,7 +1384,7 @@ describe('The admission checks of round 2 of the review', () => {
 // the values that a name can have after a conditional are compared with
 // each other.
 describe('Assigned names and the shapes of their values', () => {
-  const SHAPE_TARGETS = ['javascript', 'glsl', 'wgsl'];
+  const SHAPE_TARGETS = ['javascript', 'glsl'];
   const gt: MathJsonExpression = ['Greater', 'x', 0];
 
   /** An engine with `x: real` and the function `f(t) = body`. */
@@ -1529,7 +1526,7 @@ describe('Assigned names and the shapes of their values', () => {
     for (const x of [1, -1])
       expect(r.run!({ x })).toEqual(plain(interpret(json, x, body)));
     expect(interpret(json, 1, body)).toEqual(['List', 2, 4]);
-    for (const to of ['glsl', 'wgsl'])
+    for (const to of ['glsl'])
       expect(compile(withF(body).box(json), { to }).success).toBe(true);
   });
 
@@ -1564,7 +1561,7 @@ describe('Assigned names and the shapes of their values', () => {
       ['If', ['Greater', 't', 0], ['Assign', 'p', ['List', 1, 2]]],
       ['Multiply', 2, 'p'],
     ];
-    for (const to of ['javascript', 'glsl', 'wgsl']) {
+    for (const to of ['javascript', 'glsl']) {
       const s = compile(engine().box(['Function', body, 't']), { to });
       expect(s.success).toBe(false);
       expect(s.error).toMatch(/invalid expression/);
@@ -1627,7 +1624,7 @@ describe('Assigned names and the shapes of their values', () => {
 
   // The `p` that the nested block declares is another variable: its
   // numbers are not compared with the list of the outer `p`.
-  test.each(['javascript', 'glsl', 'wgsl', 'python'])(
+  test.each(['javascript', 'glsl', 'python'])(
     'a nested local of the same name is another variable on %s',
     (to) => {
       const json: MathJsonExpression = [
@@ -1666,7 +1663,7 @@ describe('Assigned names and the shapes of their values', () => {
 });
 
 describe('The paths of the code that meet after a node (R3)', () => {
-  const SHAPE_TARGETS = ['javascript', 'glsl', 'wgsl'];
+  const SHAPE_TARGETS = ['javascript', 'glsl'];
   const gt: MathJsonExpression = ['Greater', 'x', 0];
   const lt: MathJsonExpression = ['Less', 'x', 0];
   const list: MathJsonExpression = ['List', 1, 2];
@@ -1807,7 +1804,7 @@ describe('The paths of the code that meet after a node (R3)', () => {
 
   // The second condition runs only when the first one is false, and it can
   // give `p` a list.
-  test.each(['javascript', 'wgsl'])(
+  test.each(['javascript'])(
     'a Which condition that assigns on %s',
     (to) => {
       declinesInvalid(

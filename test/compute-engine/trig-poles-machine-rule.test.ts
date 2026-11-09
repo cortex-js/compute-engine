@@ -245,14 +245,14 @@ describe('compiled Python has the same rule and constant', () => {
 });
 
 describe('shaders have no pole rule', () => {
-  // GLSL and WGSL compute in 32-bit floats. The largest finite value of
+  // GLSL computes in 32-bit floats. The largest finite value of
   // `tan`, `sec`, `cot` or `csc` there, at the float nearest a pole, is about
   // `2e7` for `|x| ≥ 1`, and `|y·x|` is about 1 near the pole at 0. The
   // machine rule `|y|·min(|x|, 2⁴⁰)·100·2⁻⁵³ ≥ 1` is made for the rounding
   // error of a double, not of a 32-bit float, so the shaders do not apply
   // it, and they have no fixed limit either.
   const ce = new ComputeEngine();
-  test.each(['glsl', 'wgsl'] as const)('%s', (to) => {
+  test.each(['glsl'] as const)('%s', (to) => {
     for (const head of HEADS) {
       const code = compile(ce.box([head, 'x']), { to }).code;
       expect(code).not.toMatch(/1e6|1000000|1\.0e6/);

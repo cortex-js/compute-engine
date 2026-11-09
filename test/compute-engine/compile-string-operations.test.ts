@@ -28,11 +28,11 @@
  * on a span that is not an ascending index range. `throwsAtRuntime` asserts
  * that pair (compiled throw, interpreted error value) cell by cell.
  *
- * JavaScript is the only target with lowerings. Python, GLSL and WGSL decline
- * every Phase-2 operator, and they do so through the DEFAULT: an operator the
+ * JavaScript is the only target with lowerings. Python and GLSL decline every
+ * Phase-2 operator, and they do so through the DEFAULT: an operator the
  * engine knows but the target has no entry for is refused by the compiler
  * itself. The first describe block locks that default, because the whole
- * Python/GLSL/WGSL column of the matrix rests on it.
+ * Python/GLSL column of the matrix rests on it.
  *
  * Test inputs are the D10 set (Phase 1's D15): ASCII, the precomposed and
  * decomposed spellings of `"é"`, one ZWJ emoji family and one regional-indicator
@@ -197,14 +197,14 @@ function failsClosed(expr: Expression): void {
 }
 
 /** `expr` compiled for a non-JavaScript target. */
-function compileTo(expr: Expression, to: 'python' | 'glsl' | 'wgsl') {
+function compileTo(expr: Expression, to: 'python' | 'glsl') {
   return compile(expr, { to, constantFold: false } as never);
 }
 
 // ── The default: an operator with no lowering entry declines ────────────────
 
 describe('D8 lock: an operator with NO lowering entry declines on every target', () => {
-  // The whole Python/GLSL/WGSL column of the Phase-2 matrix — and the
+  // The whole Python/GLSL column of the Phase-2 matrix — and the
   // JavaScript `NumberFrom` cell — rests on this default. `NumberFrom` is the
   // witness: D8 leaves it fail-closed on purpose (its parse contract and its
   // exactness rules — an integer numeral is an exact integer, a fractional one
@@ -213,7 +213,7 @@ describe('D8 lock: an operator with NO lowering entry declines on every target',
   //
   // If this test ever fails, some target has grown a `NumberFrom` entry and the
   // fail-closed cells below stop being guaranteed by the default.
-  test.each(['javascript', 'python', 'glsl', 'wgsl'] as const)(
+  test.each(['javascript', 'python', 'glsl'] as const)(
     '`NumberFrom` declines on the %s target',
     (to) => {
       const r = compile(ce.box(['NumberFrom', { str: '12' }]), {
@@ -1183,7 +1183,7 @@ describe('a `string | character` free variable reads as a string', () => {
   });
 });
 
-// ── Python / GLSL / WGSL ────────────────────────────────────────────────────
+// ── Python / GLSL ───────────────────────────────────────────────────────────
 
 const PHASE_2_OPERATORS: ReadonlyArray<readonly [string, unknown]> = [
   ['RangeOf', ['RangeOf', { str: 'abc' }, { str: 'b' }]],
@@ -1236,10 +1236,10 @@ describe('D8: every Phase-2 operator fails closed on the Python target', () => {
   });
 });
 
-describe('D8: GLSL and WGSL reject the Phase-2 operators', () => {
+describe('D8: GLSL rejects the Phase-2 operators', () => {
   // A shader has no string type at all, so every one of these is refused. The
   // explicit `ToUpperCase` cell is the named lock; the table covers the rest.
-  test.each(['glsl', 'wgsl'] as const)(
+  test.each(['glsl'] as const)(
     '`ToUpperCase` is rejected on the %s target',
     (to) => {
       const r = compileTo(ce.box(['ToUpperCase', { str: 'abc' }]), to);
@@ -1248,11 +1248,8 @@ describe('D8: GLSL and WGSL reject the Phase-2 operators', () => {
     }
   );
 
-  test.each(PHASE_2_OPERATORS)(
-    '%s is rejected on glsl and wgsl',
-    (_name, json) => {
-      for (const to of ['glsl', 'wgsl'] as const)
-        expect(compileTo(ce.box(json as never), to).success).toBe(false);
-    }
-  );
+  test.each(PHASE_2_OPERATORS)('%s is rejected on glsl', (_name, json) => {
+    for (const to of ['glsl'] as const)
+      expect(compileTo(ce.box(json as never), to).success).toBe(false);
+  });
 });

@@ -19,7 +19,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
-const TARGETS = ['glsl', 'wgsl'] as const;
+const TARGETS = ['glsl'] as const;
 type Target = (typeof TARGETS)[number];
 
 const THETA = 'j \\mapsto -1.35 + 2.7\\frac{j - 0.5}{300}';
@@ -192,9 +192,8 @@ describe('CE-480: the kelvin-wake sum on the shader targets', () => {
     'a quotient by 1.0004 + sin(t) keeps the helper (%s)',
     (to) => {
       // The bound 1 of `sin(t)` is the exact bound. The error of the GPU
-      // `sin` is absolute, and can be larger than the margin 4·10⁻⁴: WGSL
-      // specifies 2⁻¹¹ (about 4.9·10⁻⁴) on [-π, π] and nothing outside it,
-      // and GLSL specifies none. So the divisor can be 0 in the shader,
+      // `sin` is absolute, and can be larger than the margin 4·10⁻⁴: GLSL
+      // specifies no bound for it. So the divisor can be 0 in the shader,
       // also for a bounded `t`.
       const latex = '\\sin\\left(\\frac{x}{1.0004 + \\sin(t)}\\right)';
       for (const type of ['real', 'real<-1..1>']) {

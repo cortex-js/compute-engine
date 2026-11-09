@@ -94,7 +94,7 @@ export function compileExprFunctionCall(
     // it is delegated to the target's `broadcastUnary` hook. A target
     // without one fails closed; the base compiler used to emit a
     // JavaScript `.map((v) => …)` arrow here for EVERY target, which is not
-    // valid GLSL, WGSL or Python.
+    // valid GLSL or Python.
     //
     // A tuple operand of a head that declares the `'tuples'` broadcast
     // exemption is NOT a source of cells here: the head owns that shape and
@@ -246,7 +246,7 @@ export function compileExprTupleCall(
       // hold the booleans of a tuple of boolean results, as for
       // `Not((A, B))`.
       if (
-        (target.language === 'glsl' || target.language === 'wgsl') &&
+        target.language === 'glsl' &&
         isFunction(tupleCall) &&
         tupleCall.ops.some((x) => x.type.matches('boolean'))
       )

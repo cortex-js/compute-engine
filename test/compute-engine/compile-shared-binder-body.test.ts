@@ -137,7 +137,7 @@ describe('COMPILE a big operator as a GPU loop near the 32-bit limits', () => {
     ce: ComputeEngine,
     lower: number,
     upper: number,
-    to: 'glsl' | 'wgsl'
+    to: 'glsl'
   ): string {
     const expr = ce.function('Sum', [
       largeBody(ce),
@@ -155,7 +155,7 @@ describe('COMPILE a big operator as a GPU loop near the 32-bit limits', () => {
   // 2147483647, `k++` overflows after the last term and `k <= 2147483647`
   // stays true, so the loop does not end. A bound outside the range of the
   // counter gave shader source that does not compile.
-  for (const to of ['glsl', 'wgsl'] as const) {
+  for (const to of ['glsl'] as const) {
     it(`declines an upper bound whose last increment overflows (${to})`, () => {
       const ce = new ComputeEngine();
       expect(gpu(ce, 2147483600, 2147483647, to)).toMatch(

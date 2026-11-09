@@ -18,7 +18,7 @@ const WITNESS: MathJsonExpression = [
 ];
 
 describe('an Apply whose callee is not a function value declines', () => {
-  test.each(['javascript', 'python', 'interval-js', 'glsl', 'wgsl'])(
+  test.each(['javascript', 'python', 'interval-js', 'glsl'])(
     'the witness on %s',
     (to) => {
       const ce = new ComputeEngine();

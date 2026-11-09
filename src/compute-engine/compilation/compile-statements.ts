@@ -33,13 +33,13 @@ import { newNamingContext, withBoundScope } from './compiler-naming.js';
  *
  * The structural half of the expression-only contract, shared by the GPU and
  * Python targets (each applies its own language policy to the answer: GLSL
- * assignment is an OPERATOR and stays legal, WGSL and Python assignment are
- * STATEMENTS; a declaration is a statement on all three).
+ * assignment is an OPERATOR and stays legal, Python assignment is a
+ * STATEMENT; a declaration is a statement on both GLSL and Python).
  *
  * Structural, on the body BEFORE it is compiled, deliberately — the two
  * emitted-source scans those targets already run (a newline, a `return` token)
  * are blind to both shapes: `Assign(s, x)` emits the single line `s = x` and a
- * root `Declare(s, 'number', x)` emits the single line `float s` / `var s: f32`
+ * root `Declare(s, 'number', x)` emits the single line `float s`
  * (Python: the EMPTY string), each with the initializer silently dropped. A
  * textual `=` scan cannot replace this without re-deriving the emitters'
  * precedence rules — it would false-positive on `==`/`<=`/`>=`/`!=`.
@@ -66,7 +66,7 @@ export function statementBodyHead(
  * or a `Declare` with an initializer: `Block(s ≔ x; t ≔ s)`. The value of
  * such a block is `Nothing`, and a compilation that uses it declines
  * (`'nothing-value'`, `assertAdmitted()`). The function-body entry points of
- * the targets where assignment is a STATEMENT (Python, WGSL) let such a body
+ * the targets where assignment is a STATEMENT (Python) let such a body
  * through their checks before the compilation, so that this decline is the
  * reason that the result reports.
  *
@@ -235,17 +235,16 @@ export function compileValueOperand(
 
 /**
  * Fail closed on a target where an assignment is a statement and has no
- * expression form — Python and WGSL — when an assignment to `name` is
+ * expression form — Python — when an assignment to `name` is
  * compiled as an operand of an expression: an operand of an operator, or
  * an argument of a function. Python read `np.sin(t = 1)` as a keyword
- * argument, and WGSL accepts neither `w = sin(t = 1.0)` nor
- * `_ = t = 1.0 + 2.0`. JavaScript and GLSL have an assignment expression.
+ * argument. JavaScript and GLSL have an assignment expression.
  */
 export function assertAssignmentIsStatement(
   name: string,
   target: CompileTarget<Expression>
 ): void {
-  if (target.language !== 'python' && target.language !== 'wgsl') return;
+  if (target.language !== 'python') return;
   throw new Error(
     `Could not compile \`Assign\`: the assignment to "${name}" is an ` +
       `operand of an expression, and an assignment is a statement in ` +
@@ -497,8 +496,7 @@ export function assertExpressionValue(
  * hoisted statement (`float t = 0.0;`, a `for (…) { … }` loop, a compound
  * `{ … }` block) arrives terminated, while a statement this compiler emits
  * (`float a`, `a = x`, `return v`) does not. A blind `join(';\n')` would
- * leave `;;` and `};` behind, which both languages accept but neither
- * needs.
+ * leave `;;` and `};` behind, which GLSL accepts but does not need.
  */
 export function joinShaderStatements(lines: ReadonlyArray<string>): string {
   return lines
@@ -575,50 +573,6 @@ export function compileRoot(
   // every route crosses.)
   target.beginCompilation?.(target);
   return core.compile(expr, target, prec);
-}
-
-/**
- * The statement for a value `code` (the compiled `stmt`) whose value is
- * discarded, on a shader target. WGSL has no expression statement — `x +
- * 1.0;` is a syntax error there — so the value is written as a phony
- * assignment, `_ = x + 1.0;`, which evaluates it and discards it. GLSL
- * accepts an expression statement, and `code` is kept. A statement
- * (an assignment, a declaration, a loop, a jump, a block, or code that is
- * already a statement or several lines) is kept as well.
- */
-export function shaderExpressionStatement(
-  stmt: Expression,
-  code: string,
-  target: CompileTarget<Expression>
-): string {
-  if (target.language !== 'wgsl' || code === '' || code.includes('\n'))
-    return code;
-  if (isSymbol(stmt, 'Nothing')) return code;
-  if (
-    isFunction(stmt) &&
-    [
-      'Assign',
-      'Declare',
-      'Loop',
-      'Return',
-      'Break',
-      'Continue',
-      'Block',
-      // The `+=` of a compute-shader kernel (`WGSLTarget.compileKernel()`)
-      // is a function call statement: the helper of a list accumulator has
-      // no value, and the value of `atomicAdd` may be discarded, since the
-      // function is not `@must_use`.
-      'AddTo',
-    ].includes(stmt.operator)
-  )
-    return code;
-  if (
-    /^\s*(?:(?:for|while|loop|if|switch|return|break|continue|var|let|const)\b|_\s*=(?!=)|\{)/.test(
-      code
-    )
-  )
-    return code;
-  return `_ = ${code}`;
 }
 
 /**
