@@ -12,6 +12,14 @@
   operator. A call of an operator with no declaration, or one that returns a
   number or an integer, is still read as a real. (CE-1183)
 
+- **A call of a function whose parameter has a name that GLSL reserves
+  compiles to `glsl` when `canCompile()` accepts it.** With
+  `f := filter ↦ filter + 1` and `x: real`, `canCompile(f(x), { to: 'glsl' })`
+  answered `{ ok: true }`, and `compile()` then failed with "`filter` is a
+  reserved word in glsl". The call is now written in place (`x + 1.0`), as it
+  already was when the parameter has a declared type. GLSL also reserves
+  `input`, `output` and `sample`. (CE-1184)
+
 ## 0.185.0 _2026-11-09_
 
 ### Breaking Changes

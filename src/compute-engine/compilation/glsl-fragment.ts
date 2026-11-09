@@ -54,7 +54,7 @@ import {
   bodyWithParallelHeadsLowered,
   sumAssignedNames,
 } from './parallel-lowering.js';
-import { gpuCheckIdentifier } from './gpu-reserved.js';
+import { gpuCheckIdentifier, gpuIsReservedWord } from './gpu-reserved.js';
 import { GPU_BINOMIAL_UNROLL_LIMIT, GPU_UNROLL_LIMIT } from './gpu-reduce.js';
 import { unrollFits, unrolledTermSize } from './unroll-budget.js';
 import { derivativeClosedForm } from './derivative-closed-form.js';
@@ -2123,14 +2123,9 @@ function glslFunctionOf(
   // parameters are bound with no symbol, so the pass does not check their
   // names. The entry has its own key, because another call of the same
   // function may not allow the substitution.
-  const reservedParameter = parameterNames.some((name) => {
-    try {
-      gpuCheckIdentifier(name, 'glsl');
-      return false;
-    } catch {
-      return true;
-    }
-  });
+  const reservedParameter = parameterNames.some((name) =>
+    gpuIsReservedWord(name, 'glsl')
+  );
   const substituted =
     reservedParameter && key === h
       ? inlinedUserFunctionCall(engine, h, args, target)

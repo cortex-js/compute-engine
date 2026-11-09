@@ -143,6 +143,7 @@ import {
   GLSL_STAGE_BUILTIN_OUTPUTS,
   GLSL_STAGE_BUILTIN_TYPES,
   gpuCheckIdentifier,
+  gpuIsReservedWord,
 } from './gpu-reserved.js';
 import {
   gpuAtHelperWidths,
@@ -1071,6 +1072,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       lowering: {
         // GLSL forbids recursion outright.
         noRecursion: true,
+
+        // `define` refuses a parameter named by a reserved word
+        // (`gpuCheckIdentifier()`).
+        refusesParameterName: (name) => gpuIsReservedWord(name, language),
 
         // `define` below synthesizes the return type with `gpuTypeOfValue` on
         // the body, which reads the body's DECLARED (ascribed) type — so a

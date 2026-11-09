@@ -5740,6 +5740,16 @@ export function userCallSpecialization(
   if (params.length !== args.length || !parametersCanBeTyped(literal))
     return undefined;
   const parameterNames = new Set(params.map(functionLiteralParameterName));
+  // A definition with a parameter name that the target refuses (a GLSL
+  // reserved word) cannot be emitted, and neither can a copy of it: the
+  // call takes the ordinary route, which writes the body in place when
+  // the substitution is sound.
+  const refuses = registry.lowering?.refusesParameterName;
+  if (
+    refuses !== undefined &&
+    [...parameterNames].some((n) => n !== undefined && refuses(n))
+  )
+    return undefined;
   const types: Type[] = [];
   const pointWidths: (number | undefined)[] = [];
   let preservesPoints: boolean | undefined;

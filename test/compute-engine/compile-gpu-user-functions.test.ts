@@ -596,9 +596,41 @@ describe('GPU USER FUNCTIONS — a reserved word as a PARAMETER fails closed', (
     const ce = new ComputeEngine();
     ce.assign('f', ce.expr(['Function', ['Add', 'discard', 1], 'discard']));
     // Without the check this emitted `float _fn_f(float discard)` — source no
-    // driver accepts — behind a reported success.
+    // driver accepts — behind a reported success. The definition is refused,
+    // and the call is written in place, so the name is never written
+    // (CE-1184: `canCompile()` answers yes for this call).
+    const result = glsl.compile(ce.parse('f(u)'));
+    expect(result.code).toBe('u + 1.0');
+    expect(result.preamble ?? '').not.toContain('discard');
+  });
+
+  it('GLSL: a call that cannot be written in place still fails closed', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'f',
+      ce.expr([
+        'Function',
+        [
+          'Block',
+          [
+            'Declare',
+            't',
+            [
+              'Dictionary',
+              ['KeyValuePair', { str: 'value' }, ['Multiply', 2, 'discard']],
+            ],
+          ],
+          ['Add', 't', 1],
+        ],
+        'discard',
+      ])
+    );
+    ce.declare('u', 'real');
+    // A body of several statements is not written in place, so the
+    // definition must be emitted, and the typing pass refuses its
+    // parameter name.
     expect(() => glsl.compile(ce.parse('f(u)'))).toThrow(
-      /"discard" is a reserved word in glsl/
+      /`discard` is a reserved word of GLSL/
     );
   });
 

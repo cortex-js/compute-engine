@@ -2152,6 +2152,17 @@ export interface CompileTarget<Expr = unknown> {
       noRecursion?: boolean;
 
       /**
+       * Whether `define` refuses a definition with a parameter named
+       * `name`: a GLSL reserved word (`filter`, `input`, `sample`) cannot
+       * be the name of a parameter, and the language has no renaming. A
+       * call of such a function is written in place when the substitution
+       * is sound (`tryInlineUserFunctionCall()`), and it takes no copy of
+       * the function typed by its arguments (`userCallSpecialization()`),
+       * since `define` would refuse the copy too.
+       */
+      refusesParameterName?: (name: string) => boolean;
+
+      /**
        * `define` synthesizes a STATIC return type for the declaration it emits,
        * and takes it from the body's declared/ascribed type (GLSL does — a shader function declaration must be fully typed).
        *

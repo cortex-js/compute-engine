@@ -141,6 +141,11 @@ function gpuReservedWords(language?: string): ReadonlySet<string> {
   return new Set();
 }
 
+/** Whether `id` is a reserved word in the shader language `language`. */
+export function gpuIsReservedWord(id: string, language?: string): boolean {
+  return gpuReservedWords(language).has(id);
+}
+
 /**
  * Fail closed if `id` is a reserved word in the target shader language.
  * A user variable / loop index carrying a reserved name would emit source that

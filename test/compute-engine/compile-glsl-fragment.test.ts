@@ -741,6 +741,21 @@ describe('review fixes', () => {
     expectIn(['reservedParam', 'x']);
   });
 
+  // CE-1184. A parameter with no declared type, called with a real: the
+  // compiler takes no copy of the function typed by the argument, since
+  // the copy has the same parameter name and cannot be emitted either. The
+  // call is written in place, as `canCompile()` answers.
+  test.each(['filter', 'input', 'output', 'sample'])(
+    'an untyped parameter named `%s` is in when the call is inlined',
+    (name) => {
+      const f = `reservedUntyped_${name}`;
+      ce.assign(f, ce.box(['Function', ['Add', name, 1], name]));
+      expectIn([f, 'x']);
+      const result = compile(ce.box([f, 'x']), { to: 'glsl', fallback: false });
+      expect(result.code).toBe('x + 1.0');
+    }
+  );
+
   test('a gamut that the shader has no helper for is out', () => {
     expectOut(['GamutMap', ['Rgb', 'x', 0, 0], { str: 'rec2020' }], 'GamutMap');
     expectIn(['GamutMap', ['Rgb', 'x', 0, 0], { str: 'display-p3' }]);
