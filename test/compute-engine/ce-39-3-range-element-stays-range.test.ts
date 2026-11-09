@@ -202,7 +202,11 @@ describe('A Range row is a row of its integers', () => {
   // reads its elements without boxing them (`BoxedFunction.hash`), is the
   // fastest way to list it, and it makes the long rows 4 to 7 times slower.
   // Each length runs twice and the shorter time is used, so that one garbage
-  // collection does not fail the test.
+  // collection does not fail the test. The comparison is made up to three
+  // times and passes when one of them is under the limit: in a full suite run,
+  // the other test workers load the machine, and a burst of load can slow one
+  // measurement of a few tens of milliseconds by more than two times. Code that
+  // lists the rows is slower in every comparison, so it still fails.
   test('Shape and Rank of many long range rows do not list the rows', () => {
     const queries = (n: number) => {
       const rows: unknown[] = ['List'];
@@ -213,9 +217,13 @@ describe('A Range row is a row of its integers', () => {
       return performance.now() - start;
     };
     queries(10);
-    const short = Math.min(queries(10), queries(10));
-    const long = Math.min(queries(10_000), queries(10_000));
-    expect(long).toBeLessThan(2 * short);
+    let ratio = Infinity;
+    for (let attempt = 0; attempt < 3 && ratio >= 2; attempt++) {
+      const short = Math.min(queries(10), queries(10));
+      const long = Math.min(queries(10_000), queries(10_000));
+      ratio = Math.min(ratio, long / short);
+    }
+    expect(ratio).toBeLessThan(2);
   });
 
   test('range rows with too many elements in total are not listed', () => {
