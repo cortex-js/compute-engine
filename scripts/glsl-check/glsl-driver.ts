@@ -27,6 +27,23 @@ export type GlslShader = {
   source: string;
 };
 
+/** A fragment shader that writes one `float` output, and the values of its
+ *  `float` uniforms (a number, or an array for a `float[n]` uniform). The
+ *  keys must include the name of each active uniform of the program, or the
+ *  result is `ok: false`. A key with no active uniform is skipped (the GLSL
+ *  compiler can remove a uniform whose value cannot change the output, and
+ *  that depends on the driver); the result lists such keys in `inactive`. */
+export type GlslEvaluation = {
+  name: string;
+  source: string;
+  uniforms: Record<string, number | number[]>;
+};
+
+/** The value that a fragment shader wrote, or the step that failed. */
+export type GlslValue =
+  | { name: string; ok: true; value: number; inactive: string[] }
+  | { name: string; ok: false; log: string };
+
 export type GlslResult = {
   name: string;
   /** True when the shader compiles and links into a program. */
@@ -65,7 +82,8 @@ void main() {
  * `glslCheck.renderer()` gives the unmasked renderer name (`gl.RENDERER`
  * gives only "WebKit WebGL"). `glslCheck.compile()` compiles each shader,
  * links it with the pass-through shader of the other stage, and gives one
- * `GlslResult` per shader.
+ * `GlslResult` per shader. `glslCheck.evaluate()` draws one pixel with each
+ * fragment shader and gives the value that it wrote.
  */
 const PAGE_SCRIPT = `
 window.glslCheck = (() => {
@@ -85,6 +103,112 @@ window.glslCheck = (() => {
       return String(
         gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER)
       );
+    },
+    // Draws one pixel with the fragment shader \`source\` into a 1 by 1
+    // RGBA32F framebuffer, and reads back the red channel, where a
+    // \`float\` output at location 0 is written. The vertex shader makes a
+    // triangle that covers the viewport. The uniform values and the value
+    // read back are numbers, or the strings 'NaN', 'Infinity', '-Infinity'
+    // and '-0', which JSON does not keep (\`encodeNumber()\` in Node).
+    evaluate(items) {
+      const decode = (v) => (typeof v === 'string' ? Number(v) : v);
+      const encode = (v) =>
+        Object.is(v, -0) ? '-0' : Number.isFinite(v) ? v : String(v);
+      if (!gl.getExtension('EXT_color_buffer_float'))
+        return items.map(({ name }) => ({
+          name,
+          ok: false,
+          log: 'no EXT_color_buffer_float',
+        }));
+      const vertex = make(
+        'vertex',
+        '#version 300 es\\nvoid main() {\\n' +
+          '  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\\n' +
+          '  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\\n}\\n'
+      );
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 1, 1, 0, gl.RGBA, gl.FLOAT, null);
+      const framebuffer = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0
+      );
+      const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+      gl.viewport(0, 0, 1, 1);
+      const results = items.map(({ name, source, uniforms }) => {
+        if (status !== gl.FRAMEBUFFER_COMPLETE)
+          return { name, ok: false, log: 'framebuffer status ' + status };
+        const shader = make('fragment', source);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+          const log = gl.getShaderInfoLog(shader) || '';
+          gl.deleteShader(shader);
+          return { name, ok: false, log };
+        }
+        const program = gl.createProgram();
+        gl.attachShader(program, vertex);
+        gl.attachShader(program, shader);
+        gl.linkProgram(program);
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+          const log = gl.getProgramInfoLog(program) || '';
+          gl.deleteProgram(program);
+          gl.deleteShader(shader);
+          return { name, ok: false, log };
+        }
+        // Each active uniform of the program must be a key of
+        // \`uniforms\`: a uniform with no value reads as 0. A key with no
+        // active uniform is skipped and reported in \`inactive\`. The name of
+        // an active array uniform ends with \`[0]\`.
+        const active = [];
+        const count = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
+        for (let i = 0; i < count; i++)
+          active.push(gl.getActiveUniform(program, i).name.replace(/\\[0\\]$/, ''));
+        const missing = active.filter((u) => !Object.hasOwn(uniforms, u));
+        const inactive = Object.keys(uniforms).filter((u) => !active.includes(u));
+        if (missing.length > 0) {
+          gl.deleteProgram(program);
+          gl.deleteShader(shader);
+          return {
+            name,
+            ok: false,
+            log: 'uniforms with no value: [' + missing.join(', ') + ']',
+          };
+        }
+        for (let i = 0; i < 16 && gl.getError() !== gl.NO_ERROR; i++);
+        gl.useProgram(program);
+        for (const [u, v] of Object.entries(uniforms)) {
+          if (!active.includes(u)) continue;
+          const at = gl.getUniformLocation(program, u);
+          if (Array.isArray(v)) gl.uniform1fv(at, v.map(decode));
+          else gl.uniform1f(at, decode(v));
+        }
+        const uniformError = gl.getError();
+        if (uniformError !== gl.NO_ERROR) {
+          gl.deleteProgram(program);
+          gl.deleteShader(shader);
+          return {
+            name,
+            ok: false,
+            log: 'WebGL error ' + uniformError + ' in the uniform step',
+          };
+        }
+        const pixel = new Float32Array([NaN, NaN, NaN, NaN]);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, pixel);
+        const error = gl.getError();
+        gl.deleteProgram(program);
+        gl.deleteShader(shader);
+        if (error !== gl.NO_ERROR)
+          return { name, ok: false, log: 'WebGL error ' + error };
+        return { name, ok: true, value: encode(pixel[0]), inactive };
+      });
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(framebuffer);
+      gl.deleteTexture(texture);
+      gl.deleteShader(vertex);
+      return results;
     },
     compile(shaders, passThrough) {
       return shaders.map(({ name, stage, source }) => {
@@ -113,6 +237,17 @@ window.glslCheck = (() => {
   };
 })();
 `;
+
+/**
+ * A number for the JSON text that `GlslDriver.evaluate()` sends to the page:
+ * `NaN`, `±Infinity` and `-0` become the strings `'NaN'`, `'Infinity'`,
+ * `'-Infinity'` and `'-0'` (JSON writes the first three as `null`, and `-0`
+ * as `0`). `Number()` of the string gives the number again.
+ */
+function encodeNumber(v: number): number | string {
+  if (Object.is(v, -0)) return '-0';
+  return Number.isFinite(v) ? v : String(v);
+}
 
 export class GlslDriver {
   private constructor(
@@ -167,6 +302,35 @@ export class GlslDriver {
     return (await this.page.evaluate(
       `glslCheck.compile(...${args})`
     )) as GlslResult[];
+  }
+
+  /**
+   * Draws one pixel with each fragment shader and returns the value of its
+   * `float` output, in the same order. A value is a float32: NaN, the
+   * infinities and `-0` are kept, in the uniforms and in the result. The
+   * result is `ok: false` when the framebuffer is not complete, when the
+   * active uniform has no key in `uniforms`, or when WebGL gives an error for
+   * the uniform upload or the draw. Keys with no active uniform are listed
+   * in `inactive`.
+   */
+  async evaluate(items: ReadonlyArray<GlslEvaluation>): Promise<GlslValue[]> {
+    const args = JSON.stringify([
+      items.map((item) => ({
+        ...item,
+        uniforms: Object.fromEntries(
+          Object.entries(item.uniforms).map(([u, v]) => [
+            u,
+            Array.isArray(v) ? v.map(encodeNumber) : encodeNumber(v),
+          ])
+        ),
+      })),
+    ]);
+    const values = (await this.page.evaluate(
+      `glslCheck.evaluate(...${args})`
+    )) as (GlslValue | { name: string; ok: true; value: number | string })[];
+    return values.map((v) =>
+      v.ok ? { ...v, value: Number(v.value) } : v
+    ) as GlslValue[];
   }
 
   async stop(): Promise<void> {

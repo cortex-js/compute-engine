@@ -673,6 +673,153 @@ export function fragmentFactsUnder<R>(
   return facts === CONFLICTING_FACTS ? undefined : facts;
 }
 
+/**
+ * The contract of a trusted lowering, as `fragmentReplaceOperands()` checks
+ * it: the heads that a node made by the lowering can have, and the operand
+ * count of the outermost made node.
+ */
+export type FragmentLoweringContract = {
+  /** The name of the lowering, for the message of an internal error. */
+  readonly name: string;
+  /** The heads of the nodes that the lowering makes. `'any'` when the
+   *  lowering copies the heads of another expression (the body of a
+   *  function literal). */
+  readonly operators: readonly string[] | 'any';
+  /** The operand count of the outermost made node: a number, or a range
+   *  `[min, max]`. Absent: any count. */
+  readonly nops?: number | readonly [number, number];
+  /** True when a leaf of the made tree can be a symbol that the lowering
+   *  copied from another expression (a name of a function body). */
+  readonly symbolLeaves?: boolean;
+  /** Names of symbols that no leaf of the made tree can be, also when the
+   *  leaf is accepted otherwise (a symbol of the original). A lowering that
+   *  removes a constant (`Pi`) states it here. */
+  readonly forbiddenSymbols?: readonly string[];
+};
+
+/**
+ * The nodes that `fragmentReplaceOperands()` accepted. A lowering can make a
+ * node whose operand another lowering made (`Multiply(k, Add(u, c'))`), and
+ * the check of the outer node accepts the inner one. A made node is a new
+ * object, and the set holds it weakly, so it is released with the code.
+ */
+const LOWERED_NODES = new WeakSet<Expression>();
+/** Whether `part` is `whole` or a node of the subtree of `whole`, or is
+ *  structurally the same (`isSame()`) as one of them. A constructor of the
+ *  engine can make again a node that it copies (`ce.function('Divide', [u,
+ *  d])` can box `d` again), and that node has the type of the node it
+ *  copies. */
+function isPartOf(part: Expression, whole: Expression): boolean {
+  if (part === whole || part.isSame(whole)) return true;
+  return isFunction(whole) && whole.ops.some((op) => isPartOf(part, op));
+}
+
+/** Whether the pass typed `node` in `scope` or in a scope inside it, with
+ *  any facts (also two different facts in two scopes). */
+function typedUnder<R>(scope: FragmentScope<R>, node: Expression): boolean {
+  if (scope.facts.has(node)) return true;
+  for (const inner of scope.inner.values())
+    if (typedUnder(inner, node)) return true;
+  return false;
+}
+
+/**
+ * The structural check of a trusted lowering: a rewrite that the emitter
+ * makes, after the pass, of an operand `original` of the node that it
+ * writes (or of several operands, as an array), into the new expression
+ * `made` (the design note
+ * `docs/plans/2026-11-08-glsl-fragment-annotation-design.md`, section 3, "A
+ * node that emission makes"). The pass did not type `made`, and
+ * `fragmentFactsOf()` does not type it on request.
+ *
+ * `made` is accepted when it is `original`, a node of `original` (or a
+ * node structurally the same as one of them, `isSame()`), a node
+ * that the pass typed in the scope where the emitter writes code
+ * (`FragmentTargetFields.fragmentScope`), or a number literal. Otherwise
+ * it must be a function expression with a head of `contract.operators` (and,
+ * for the outermost node, `contract.nops` operands), and each operand is
+ * checked in the same way. With `contract.symbolLeaves`, a symbol is also
+ * accepted. A node that fails the check is an internal error: the lowering
+ * made a node that its contract does not state.
+ *
+ * The check rejects a head outside `contract.operators`, a leaf that is
+ * neither part of the original nor a typed node, a non-finite number
+ * literal, and a leaf that is a symbol of `contract.forbiddenSymbols`. It
+ * does not show that the value is kept: the value tests in
+ * `scripts/glsl-check/glsl-driver.test.ts` (`LOWERINGS`) find a wrong value
+ * by running each lowering against the interpreter. A target with no annotation (no
+ * `fragmentScope`) is not checked. Returns `made`.
+ */
+export function fragmentReplaceOperands(
+  original: Expression | readonly Expression[],
+  made: Expression,
+  contract: FragmentLoweringContract,
+  target: unknown
+): Expression {
+  const scope = (target as FragmentTargetFields<unknown> | undefined)
+    ?.fragmentScope;
+  const originals: readonly Expression[] = Array.isArray(original)
+    ? original
+    : [original as Expression];
+  if (scope === undefined || originals.includes(made)) return made;
+  // The nodes of the original, by identity. `isPartOf()` (a structural
+  // comparison) runs only for a node that is not in the set.
+  const nodesOfOriginal = new Set<Expression>();
+  const collect = (e: Expression): void => {
+    nodesOfOriginal.add(e);
+    if (isFunction(e)) for (const op of e.ops) collect(op);
+  };
+  for (const o of originals) collect(o);
+  const ofOriginal = (e: Expression): boolean =>
+    nodesOfOriginal.has(e) || originals.some((o) => isPartOf(e, o));
+  const accepted = (e: Expression): boolean =>
+    LOWERED_NODES.has(e) ||
+    ofOriginal(e) ||
+    typedUnder(scope, e) ||
+    (isNumber(e) && e.isFinite !== false) ||
+    (contract.symbolLeaves === true && isSymbol(e));
+  const fail = (e: Expression, why: string): never => {
+    throw new Error(
+      `Internal error: the lowering "${contract.name}" made ` +
+        `\`${e.toString()}\` from ` +
+        `${originals.map((o) => `\`${o.toString()}\``).join(', ')}, ${why}`
+    );
+  };
+  const check = (e: Expression, outermost: boolean): void => {
+    if (!outermost && accepted(e)) return;
+    if (outermost && (ofOriginal(e) || typedUnder(scope, e))) return;
+    if (outermost && isNumber(e) && e.isFinite !== false) return;
+    if (!isFunction(e)) return void fail(e, 'which is not a typed node');
+    if (
+      contract.operators !== 'any' &&
+      !contract.operators.includes(e.operator)
+    )
+      fail(e, `whose head is not one of ${contract.operators.join(', ')}`);
+    const n = contract.nops;
+    if (
+      outermost &&
+      n !== undefined &&
+      (typeof n === 'number' ? e.nops !== n : e.nops < n[0] || e.nops > n[1])
+    )
+      fail(e, `with ${e.nops} operands`);
+    for (const op of e.ops) check(op, false);
+  };
+  check(made, true);
+  const forbidden = contract.forbiddenSymbols;
+  if (forbidden !== undefined) {
+    // The walk covers the whole made tree, also the parts that the check
+    // accepted without a visit.
+    const walk = (e: Expression): void => {
+      if (isSymbol(e) && forbidden.includes(e.symbol))
+        fail(e, `which is the forbidden symbol \`${e.symbol}\``);
+      if (isFunction(e)) for (const op of e.ops) walk(op);
+    };
+    walk(made);
+  }
+  LOWERED_NODES.add(made);
+  return made;
+}
+
 /** The marker of a node that the pass typed with two representations, or
  *  two kinds of type, in two scopes under one scope. */
 const CONFLICTING_FACTS = Symbol('conflicting facts');

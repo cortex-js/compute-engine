@@ -1131,9 +1131,10 @@ export const GLSL_FRAGMENT_RULES: Readonly<
       sig(['color'], 'color'),
       sig(['color', 'color'], 'color'),
       sig(['color', 'color', 'color'], 'color'),
-      // A tuple alone is colour components, not a colour: the interpreter
-      // and the emitter refuse `ContrastingColor((0.2, 0.4, 0.6))`.
-      sig(['point', 'point', 'point'], 'color', { sizes: [3] }),
+      // A tuple is colour components, not a colour: the interpreter and the
+      // emitter refuse `ContrastingColor((0.2, 0.4, 0.6))`. The interpreter
+      // takes three tuples, but the emitter refuses a tuple operand, so the
+      // fragment does not admit them either.
     ],
   },
   ColorContrast: { signatures: [sig(['color', 'color'], 'real')] },

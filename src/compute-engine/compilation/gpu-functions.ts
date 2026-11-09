@@ -152,8 +152,11 @@ import {
   gpuReciprocalComplex,
 } from './gpu-nan-safe.js';
 import { compilePointSwizzle, gpuSwizzle } from './gpu-points.js';
-import { fragmentFactsUnder } from './fragment.js';
-import type { FragmentTargetFields } from './fragment.js';
+import { fragmentFactsUnder, fragmentReplaceOperands } from './fragment.js';
+import type {
+  FragmentLoweringContract,
+  FragmentTargetFields,
+} from './fragment.js';
 import {
   compileGPUElementExtremum,
   compileGPUExtremum,
@@ -189,6 +192,16 @@ import {
   gpuRandomDraw,
   gpuRandomState,
 } from './gpu-random.js';
+
+/** The contract of the lowering of the exponent of `e` into a real part and
+ *  an angle in half-turns (`Power`). The angle is made as in
+ *  `gpuPiMultiple()`, with the canonical constructors, which can join the
+ *  powers of one base into a `Power`, a `Sqrt` or a `Root` (`(x/y)/√y`
+ *  gives `x / y^{3/2}`, `x·y / y^{3/2}` gives `x / √y`). */
+const GPU_EULER_SPLIT: FragmentLoweringContract = {
+  name: 'the exponent of e in half-turns',
+  operators: ['Add', 'Multiply', 'Divide', 'Negate', 'Power', 'Sqrt', 'Root'],
+};
 
 /**
  * GLSL reserved keywords (ES 3.x + desktop) and reserved-for-future-use words.
@@ -478,8 +491,24 @@ function compileGPUPositional(
       );
     return gpuSwizzle(compile(arg), 'xyzw'[position - 1]);
   }
+  // A trusted lowering (`fragmentReplaceOperands()`). Input: `First(xs)`,
+  // `Last(xs)` (and the other heads that read one fixed position) of a
+  // collection that the shader does not hold as a vector. Output:
+  // `At(xs, n)` with the number literal `n` (`-1` for the last element).
+  // The value is the interpreter's: `At` reads the element at that
+  // position, and `xs` is evaluated once. The call documents the lowering
+  // and cannot fail: the node is built from the operand and a finite
+  // literal, which the contract allows. The value tests "the position of
+  // First" and "the position of Last" in the GLSL lane cover it.
+  const position = arg.engine.number(index);
+  fragmentReplaceOperands(
+    arg,
+    arg.engine._fn('At', [arg, position]),
+    { name: `the position of \`${head}\``, operators: ['At'], nops: 2 },
+    target
+  );
   try {
-    return compileGPUAt([arg, arg.engine.number(index)], compile, target);
+    return compileGPUAt([arg, position], compile, target);
   } catch (err) {
     // The decline of `At` names `At`. Give the name of the operator that
     // the source has, and keep the reason.
@@ -944,10 +973,24 @@ function compileGPUSumProduct(
   // outer aggregate is the aggregate over the other indexes, whose bounds
   // can read the outer index. The value is the sum (or product) of the same
   // terms, which the interpreter visits with the first index outermost too.
+  //
+  // A trusted lowering (`fragmentReplaceOperands()`). Input:
+  // `Sum(body, L1, L2, …)`. Output: `Sum(Sum(body, L2, …), L1)` (the same for
+  // `Product`). Condition: more than one index set. The value is the
+  // interpreter's, as said above; the body and each bound are evaluated as
+  // many times as in the interpreter.
   if (args.length > 2)
     return compileGPUSumProduct(
       kind,
-      [args[0].engine._fn(kind, [args[0], ...args.slice(2)]), args[1]],
+      [
+        fragmentReplaceOperands(
+          args,
+          args[0].engine._fn(kind, [args[0], ...args.slice(2)]),
+          { name: `the nest of a multi-index \`${kind}\``, operators: [kind] },
+          target
+        ),
+        args[1],
+      ],
       _compile,
       target
     );
@@ -955,17 +998,27 @@ function compileGPUSumProduct(
   // A `Range` index set with a step of 1 (`Element(k, Range(a, b))`) is the
   // `Limits(k, a, b)` of the interpreter: the same integers, in the same
   // order.
+  //
+  // A trusted lowering (`fragmentReplaceOperands()`). Input:
+  // `Element(k, Range(a, b))` or `Element(k, Range(a, b, 1))`. Output:
+  // `Limits(k, a, b)`. The bounds `a` and `b` are the operands of the
+  // `Range`, evaluated once each, as before.
   const limitsExpr =
     isFunction(args[1], 'Element') &&
     isSymbol(args[1].op1) &&
     isFunction(args[1].op2, 'Range') &&
     (args[1].op2.nops === 2 ||
       (args[1].op2.nops === 3 && args[1].op2.op3.re === 1))
-      ? args[1].engine._fn('Limits', [
-          args[1].op1,
-          args[1].op2.op1,
-          args[1].op2.op2,
-        ])
+      ? fragmentReplaceOperands(
+          args[1],
+          args[1].engine._fn('Limits', [
+            args[1].op1,
+            args[1].op2.op1,
+            args[1].op2.op2,
+          ]),
+          { name: 'a `Range` index set', operators: ['Limits'], nops: 3 },
+          target
+        )
       : args[1];
   if (!isFunction(limitsExpr, 'Limits'))
     throw new Error(
@@ -1668,7 +1721,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Cos: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_ccos(${compile(args[0])})`;
-    const u = gpuPiMultiple(args[0], 2);
+    const u = gpuPiMultiple(args[0], 2, target);
     if (u !== undefined) return `_gpu_cospi(${compile(u)})`;
     // NaN-safe: the built-in `cos` of a NaN is 0 on Apple GPUs (CE-520).
     return gpuNaNSafeUnary(
@@ -2036,10 +2089,28 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         ) {
           // The angle in half-turns has the period 2: a large constant term
           // is reduced (`gpuReduceTrigOffset`).
-          const u = gpuReduceTrigOffset(split.u, 2, false);
-          return split.a === undefined
+          //
+          // A trusted lowering (`fragmentReplaceOperands()`). Input: the
+          // exponent `Add(a…, i·π·u)` of `e`. Output: `u` (as in
+          // `gpuImaginaryPiMultiple()`) and `a`, the sum of the real terms
+          // (`Add(a…)`, or the one term). Condition: one term is `i·π·u`
+          // with a real `u`, and the other terms are real. The value is the
+          // interpreter's: `e^{a + iπu} = e^a·(cos πu + i·sin πu)`, and each
+          // term of the exponent is evaluated once.
+          const u = gpuReduceTrigOffset(
+            fragmentReplaceOperands(exp!, split.u, GPU_EULER_SPLIT, target),
+            2,
+            false,
+            undefined,
+            target
+          );
+          const a =
+            split.a === undefined
+              ? undefined
+              : fragmentReplaceOperands(exp!, split.a, GPU_EULER_SPLIT, target);
+          return a === undefined
             ? `_gpu_cossinpi(${compile(u)})`
-            : `(exp(${compile(split.a)}) * _gpu_cossinpi(${compile(u)}))`;
+            : `(exp(${compile(a)}) * _gpu_cossinpi(${compile(u)}))`;
         }
         return `_gpu_cexp(${compile(exp)})`;
       }
@@ -2261,7 +2332,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Sin: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_csin(${compile(args[0])})`;
-    const u = gpuPiMultiple(args[0], 2);
+    const u = gpuPiMultiple(args[0], 2, target);
     if (u !== undefined) return `_gpu_sinpi(${compile(u)})`;
     // NaN-safe: the built-in `sin` of a NaN is 0 on Apple GPUs (CE-520).
     return gpuNaNSafeUnary(
@@ -2311,7 +2382,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Tan: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_ctan(${compile(args[0])})`;
-    const u = gpuPiMultiple(args[0], 1);
+    const u = gpuPiMultiple(args[0], 1, target);
     if (u !== undefined) return `_gpu_tanpi(${compile(u)})`;
     // The built-in `tan` of a NaN is NaN on WebGL2 over ANGLE Metal and on
     // WebGPU over Metal (Apple M5 Max, 2026-10-26), unlike `sin` and `cos`,
@@ -2541,25 +2612,25 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // Hyperbolic functions with complex dispatch
-  Sinh: (args, compile) => {
+  Sinh: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0])) {
-      const u = gpuImaginaryPiMultiple(args[0], 2);
+      const u = gpuImaginaryPiMultiple(args[0], 2, target);
       if (u !== undefined) return `_gpu_ipi_sinh(${compile(u)})`;
       return `_gpu_csinh(${compile(args[0])})`;
     }
     return `sinh(${compile(args[0])})`;
   },
-  Cosh: (args, compile) => {
+  Cosh: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0])) {
-      const u = gpuImaginaryPiMultiple(args[0], 2);
+      const u = gpuImaginaryPiMultiple(args[0], 2, target);
       if (u !== undefined) return `_gpu_ipi_cosh(${compile(u)})`;
       return `_gpu_ccosh(${compile(args[0])})`;
     }
     return `cosh(${compile(args[0])})`;
   },
-  Tanh: (args, compile) => {
+  Tanh: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0])) {
-      const u = gpuImaginaryPiMultiple(args[0], 1);
+      const u = gpuImaginaryPiMultiple(args[0], 1, target);
       if (u !== undefined) return `_gpu_ipi_tanh(${compile(u)})`;
       return `_gpu_ctanh(${compile(args[0])})`;
     }
@@ -2570,7 +2641,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Coth: ([x], compile, target) => {
     if (x === null) throw new Error('Could not compile `Coth`: no argument');
     if (BaseCompiler.isComplexValued(x)) {
-      const u = gpuImaginaryPiMultiple(x, 1);
+      const u = gpuImaginaryPiMultiple(x, 1, target);
       if (u !== undefined) return `_gpu_ipi_coth(${compile(u)})`;
       // The complex quotient splices the operand twice: an impure one is
       // bound to a hoisted temporary (see `gpuOperandOnce` and the `Cot`
@@ -2583,20 +2654,20 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // where the true value is ±1. The real operand is spliced once.
     return `(1.0 / ${gpuRealTanh(x, compile)})`;
   },
-  Csch: ([x], compile) => {
+  Csch: ([x], compile, target) => {
     if (x === null) throw new Error('Could not compile `Csch`: no argument');
     if (BaseCompiler.isComplexValued(x)) {
-      const u = gpuImaginaryPiMultiple(x, 2);
+      const u = gpuImaginaryPiMultiple(x, 2, target);
       if (u !== undefined) return `_gpu_ipi_csch(${compile(u)})`;
       const v2 = gpuVec2();
       return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_csinh(${compile(x)}))`;
     }
     return `(1.0 / sinh(${compile(x)}))`;
   },
-  Sech: ([x], compile) => {
+  Sech: ([x], compile, target) => {
     if (x === null) throw new Error('Could not compile `Sech`: no argument');
     if (BaseCompiler.isComplexValued(x)) {
-      const u = gpuImaginaryPiMultiple(x, 2);
+      const u = gpuImaginaryPiMultiple(x, 2, target);
       if (u !== undefined) return `_gpu_ipi_sech(${compile(u)})`;
       const v2 = gpuVec2();
       return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_ccosh(${compile(x)}))`;
@@ -4016,11 +4087,35 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // parent as one operand: a body with an infix head (`9x² + cos x`, the
   // derivative of `x³ + sin x`) is parenthesized, or `3·h'(x)` compiled to
   // `9.0 * (x * x) + cos(x)`.
+  //
+  // A trusted lowering (`fragmentReplaceOperands()`). Input:
+  // `Apply(callee, x…)`, where the callee is a function literal or the
+  // derivative of a function with a closed form. Output: the body of the
+  // literal with each parameter replaced by its argument, or, for a
+  // collection argument, a `List` of such bodies. Condition: the body is
+  // one expression, each argument is pure, and the body binds no name that
+  // an argument reads (`gpuAppliedBody()`). The value is the interpreter's:
+  // the call evaluates the body with the parameters bound to the values of
+  // the arguments, and a pure argument read twice has one value. The check
+  // accepts any head, since the heads are those of the body.
   Apply: (args, compile, target) => {
     const body = gpuAppliedBody(args, target);
     if (typeof body === 'string')
       throw new Error(`Could not compile \`Apply\`: ${body}`);
-    return gpuIdentityPassthrough(body, compile, target);
+    return gpuIdentityPassthrough(
+      fragmentReplaceOperands(
+        args,
+        body,
+        {
+          name: 'the body of an applied function',
+          operators: 'any',
+          symbolLeaves: true,
+        },
+        target
+      ),
+      compile,
+      target
+    );
   },
 
   // Function (lambda) — not supported in GPU

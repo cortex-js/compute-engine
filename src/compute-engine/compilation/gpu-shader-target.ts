@@ -1096,7 +1096,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         }) => {
           // The point values and the point-valued calls of the body written
           // in place, for this compilation only. The fragment pass prepares
-          // the body that it types with the same function.
+          // the body that it types with the same function. The nodes of
+          // this body are new, and the pass did not type them: the body
+          // that the pass typed is `FragmentAnnotation.functions.get(key)`.
+          // The two bodies can differ: the stored body of the definition
+          // has a call of a tuple-valued function already replaced by its
+          // body, where the pass typed the call. So the emitter does not
+          // check that the two are the same.
           const body = shaderFunctionBody(storedBody, target, params);
           // The generated name is emitted bare; a shader reserved word here
           // would be source no driver accepts (D6).

@@ -56,6 +56,8 @@ import {
   gpuTypeOfValue,
 } from './gpu-declared-types.js';
 import type { GPUValueType } from './gpu-declared-types.js';
+import { fragmentReplaceOperands } from './fragment.js';
+import type { FragmentLoweringContract } from './fragment.js';
 
 /**
  * The principal complex power of two real constants, as a shader `vec2(re, im)`
@@ -542,14 +544,51 @@ export function gpuIsComponentwise(
  */
 export function gpuPiMultiple(
   x: Expression | null,
-  period: number
+  period: number,
+  target?: CompileTarget<Expression>
 ): Expression | undefined {
   if (x === null) return undefined;
   const u = BaseCompiler.piMultiple(x);
+  // A trusted lowering (`fragmentReplaceOperands()`). Input: the real
+  // argument `x` of `sin`, `cos`, `tan` (or of their reciprocals). Output:
+  // `u` with `x = π·u`: `Multiply(π, a, b)` gives `Multiply(a, b)`,
+  // `Divide(π·a, d)` gives `Divide(a, d)`, `Negate(π·a)` gives `Negate(a)`,
+  // `π` gives `1`. Condition: `π` is the library constant, one factor of a
+  // product whose other factors are real and have no `π`. The value is the
+  // interpreter's: the emitter computes `sin(π·u)` as `_gpu_sinpi(u)`, and
+  // the factors of `u` are the other operands of the same product, each
+  // evaluated once.
   return u !== undefined && gpuOperandShape(u) === 'scalar'
-    ? gpuReduceTrigOffset(u, period, false)
+    ? gpuReduceTrigOffset(
+        fragmentReplaceOperands(x, u, GPU_PI_MULTIPLE_LOWERING, target),
+        period,
+        false,
+        undefined,
+        target
+      )
     : undefined;
 }
+
+/** The contract of the lowering `x = π·u` → `u` (`gpuPiMultiple()`,
+ *  `gpuImaginaryPiMultiple()`). `u` is made with the canonical
+ *  constructors: `.neg()` distributes over a sum (`−π·(t − 1)` gives
+ *  `Add(−t, 1)`), and a canonical quotient or product joins the powers of
+ *  one base (`(x/y)/√y` gives `x / y^{3/2}`, `x·y / y^{3/2}` gives
+ *  `x / √y`), so a made node can be an `Add`, a `Power`, a `Sqrt` or a
+ *  `Root`. */
+const GPU_PI_MULTIPLE_LOWERING: FragmentLoweringContract = {
+  name: 'the angle in half-turns',
+  operators: ['Multiply', 'Divide', 'Negate', 'Add', 'Power', 'Sqrt', 'Root'],
+  // The lowering removes the factor `π` (and, for `gpuImaginaryPiMultiple()`,
+  // the factor `i`): a leaf that is still one of them gives a wrong angle.
+  forbiddenSymbols: ['Pi', 'ImaginaryUnit'],
+};
+
+/** The contract of the lowering `gpuReduceTrigOffset()`. */
+const GPU_TRIG_OFFSET_LOWERING: FragmentLoweringContract = {
+  name: 'the reduction of the constant term of a periodic argument',
+  operators: ['Add', 'Multiply'],
+};
 
 /**
  * `u` when the complex expression `x` is `i·π·u` with a real scalar `u`
@@ -561,12 +600,27 @@ export function gpuPiMultiple(
  */
 export function gpuImaginaryPiMultiple(
   x: Expression | null,
-  period: number
+  period: number,
+  target?: CompileTarget<Expression>
 ): Expression | undefined {
   if (x === null) return undefined;
   const u = BaseCompiler.imaginaryPiMultiple(x);
+  // A trusted lowering (`fragmentReplaceOperands()`). Input: the complex
+  // argument `x` of `sinh`, `cosh`, `tanh`, `csch`, `sech`, `coth`. Output:
+  // `u` with `x = i·π·u`, as for `gpuPiMultiple()`; an imaginary literal
+  // factor `b·i` gives the real factor `b`. Condition: `i` (or one imaginary
+  // literal) and the library `π` are factors of a product whose other
+  // factors are real. The value is the interpreter's: `sinh(iπu)` is
+  // `i·sin(πu)`, which the emitter computes with the angle `u` in
+  // half-turns.
   return u !== undefined && gpuOperandShape(u) === 'scalar'
-    ? gpuReduceTrigOffset(u, period, false)
+    ? gpuReduceTrigOffset(
+        fragmentReplaceOperands(x, u, GPU_PI_MULTIPLE_LOWERING, target),
+        period,
+        false,
+        undefined,
+        target
+      )
     : undefined;
 }
 
@@ -607,6 +661,33 @@ export function gpuImaginaryPiMultiple(
  * emits the same code as before. Only a real scalar argument is rewritten.
  */
 export function gpuReduceTrigOffset(
+  x: Expression,
+  period: number,
+  inRadians: boolean,
+  target?: CompileTarget<Expression>,
+  /** The target of the emitter, for the structural check only, when the
+   *  caller does not give `target` (`gpuPiMultiple()`). */
+  emitTarget?: CompileTarget<Expression>
+): Expression {
+  // A trusted lowering (`fragmentReplaceOperands()`). Input: the real
+  // scalar argument `x` of a periodic function, `Add(u…, c…)` or
+  // `Multiply(k, Add(u…, c…))` with a number literal `k`. Output:
+  // `Add(u…, c')` (or `Multiply(k, Add(u…, c'))`), or `u` alone, or `0`,
+  // where `c'` is one number literal. Condition: the constant terms `c` add
+  // up to more than half a period `P` (`P/|k|` in the scaled form). The value
+  // is the interpreter's: the function has the period `P`, and
+  // `c' = c − P·round(c/P)`. The terms `u` are operands of `x`, evaluated
+  // once each; a constant term has no effect.
+  const reduced = gpuReduceTrigOffsetOf(x, period, inRadians, target);
+  return fragmentReplaceOperands(
+    x,
+    reduced,
+    GPU_TRIG_OFFSET_LOWERING,
+    emitTarget ?? target
+  );
+}
+
+function gpuReduceTrigOffsetOf(
   x: Expression,
   period: number,
   inRadians: boolean,
