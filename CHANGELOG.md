@@ -212,6 +212,15 @@
   written by hand with `L[c - 1] += 1`, against 1.32 to 1.44 before
   (CE-1098). A list that is updated only outside loops keeps the copy at
   its first update, so a block that does not update it does not copy it.
+- **On the `interval-js` target, a conditional writes the code of its
+  second branch once.** `\begin{cases} A & c \\ B & \top \end{cases}` was
+  compiled to `(t = c) === 'true' ? _IA.res(A) : t === 'false' ?
+  _IA.res(B) : _IA.hull(A, B)`, which holds the code of `B` twice. When `B`
+  is longer than a short call, the code is now
+  `(t = c) === 'true' ? _IA.res(A) : _IA.elseArm(t === 'false', t ===
+  'false' ? null : A, B)`, with the same values. A plot expression that sums
+  20 such terms is 20,580 characters of code and preamble instead of 28,567,
+  and holds 45 arrow functions instead of 89, so it loads faster (CE-1167).
 
 ## 0.184.0 _2026-11-08_
 

@@ -2528,9 +2528,11 @@ function resetIntervalConditionals(target: CompileTarget<Expression>): void {
  * The size, in characters of emitted code, above which a conditional keeps
  * the two closures instead of the ternary chain.
  *
- * The ternary writes each arm TWICE — once in the branch that selects it,
- * once in the hull the undecided condition takes — so a chain of `n` nested
- * conditionals writes its innermost arm 2ⁿ times. Neither copy costs anything
+ * The ternary writes its first arm TWICE — once in the branch that selects
+ * it, once in the hull the undecided condition takes — and its second arm
+ * once or twice (`compileIntervalConditional` keeps the shorter spelling), so
+ * a chain of `n` conditionals nested in the first arm writes its innermost
+ * arm 2ⁿ times. Neither copy costs anything
  * to EVALUATE (a decided condition runs one arm, an undecided one runs each
  * arm once, exactly as the closure form does); the cost is the length of the
  * emitted source, which the limit bounds. Above it the closure form is kept,
@@ -2577,20 +2579,36 @@ function compileIntervalConditional(
       () => (${whenFalse})
     )`;
   if (target === undefined) return lazy;
-  // The chain writes the condition once and each arm twice, plus about eighty
-  // characters of punctuation, the two tri-state comparisons and the calls.
-  const size = condition.length + 2 * (whenTrue.length + whenFalse.length) + 80;
-  if (size > INTERVAL_CONDITIONAL_CODE_LIMIT)
-    return markIntervalResultCode(target, lazy);
   const asResult = (code: string): string =>
     isIntervalResultCode(code, target) ? code : `_IA.res(${code})`;
-  const c = intervalConditionVar(target);
-  return markIntervalResultCode(
-    target,
+  // Two spellings of the same chain, as functions of the name `c` of the
+  // condition temporary. `twice` writes each arm twice. `once` writes the
+  // second arm once, through `_IA.elseArm`, at the cost of about thirty
+  // characters of calls and comparisons. The shorter one is kept: `once`
+  // when the second arm is longer than a symbol or a short call. The arms
+  // are measured as they are now, before `hoistIntervalConstants` replaces a
+  // constant arm with a short name (`_k3`), so a constant list arm can take
+  // `once` although `twice` would be a few characters shorter in the final
+  // code; the values are the same with both spellings. A sum of
+  // many piecewise terms whose second arms are large blocks of code is about
+  // a quarter shorter with `once`, and loads faster. Both read the condition
+  // temporary before they evaluate any arm.
+  const twice = (c: string): string =>
     `((${c} = ${condition}) === 'true' ? ${asResult(whenTrue)} : ` +
-      `${c} === 'false' ? ${asResult(whenFalse)} : ` +
-      `_IA.hull(${whenTrue}, ${whenFalse}))`
-  );
+    `${c} === 'false' ? ${asResult(whenFalse)} : ` +
+    `_IA.hull(${whenTrue}, ${whenFalse}))`;
+  const once = (c: string): string =>
+    `((${c} = ${condition}) === 'true' ? ${asResult(whenTrue)} : ` +
+    `_IA.elseArm(${c} === 'false', ${c} === 'false' ? null : ${whenTrue}, ` +
+    `${whenFalse}))`;
+  // The lengths are measured with a placeholder name of a typical length,
+  // so that a conditional that keeps the closure form allocates no
+  // temporary: every allocated temporary is declared in the emitted code.
+  const probe = '_tv00';
+  const spell = once(probe).length < twice(probe).length ? once : twice;
+  if (spell(probe).length > INTERVAL_CONDITIONAL_CODE_LIMIT)
+    return markIntervalResultCode(target, lazy);
+  return markIntervalResultCode(target, spell(intervalConditionVar(target)));
 }
 
 /**

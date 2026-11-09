@@ -1738,7 +1738,7 @@ describe('Interval target — a selection among list values', () => {
     // this target), so the selection appears at the call site.
     const z = run(ce, ['Z', 'x'], { x: pt(3) });
     expect(z.code).toBe(
-      "((_tv1 = _IA.less(_k1, _.x)) === 'true' ? _IA.res([_.x, _.x]) : _tv1 === 'false' ? _IA.res([_.x, _IA.scale(_k2, _.x)]) : _IA.hull([_.x, _.x], [_.x, _IA.scale(_k2, _.x)]))"
+      "((_tv1 = _IA.less(_k1, _.x)) === 'true' ? _IA.res([_.x, _.x]) : _IA.elseArm(_tv1 === 'false', _tv1 === 'false' ? null : [_.x, _.x], [_.x, _IA.scale(_k2, _.x)]))"
     );
     expect(z.out).toEqual([
       [3, 3],
@@ -1759,7 +1759,7 @@ describe('Interval target — a selection among list values', () => {
     // typed by the argument (`_fn_l_vector_2_`, ROADMAP CE-564).
     const norm = run(ce, 'l(Z(x))', { x: pt(3) });
     expect(norm.code).toBe(
-      "_fn_l_vector_2_(((_tv1 = _IA.less(_k3, _.x)) === 'true' ? _IA.res([_.x, _.x]) : _tv1 === 'false' ? _IA.res([_.x, _IA.scale(_k2, _.x)]) : _IA.hull([_.x, _.x], [_.x, _IA.scale(_k2, _.x)])))"
+      "_fn_l_vector_2_(((_tv1 = _IA.less(_k3, _.x)) === 'true' ? _IA.res([_.x, _.x]) : _IA.elseArm(_tv1 === 'false', _tv1 === 'false' ? null : [_.x, _.x], [_.x, _IA.scale(_k2, _.x)])))"
     );
     expectEncloses(norm.out, Math.hypot(3, 3));
     expectEncloses(
@@ -1791,7 +1791,7 @@ describe('Interval target — a selection among list values', () => {
     // `[1, 2]` is one compact constant (`_k3`); `[x, 1]` holds a variable
     // and stays an array at the read, its `1` a shared scalar constant.
     expect(root.code).toBe(
-      "((_tv1 = _IA.less(_k1, _.x)) === 'true' ? _IA.res([_.x, _k2]) : _tv1 === 'false' ? _IA.res(_k3) : _IA.hull([_.x, _k2], _k3))"
+      "((_tv1 = _IA.less(_k1, _.x)) === 'true' ? _IA.res([_.x, _k2]) : _IA.elseArm(_tv1 === 'false', _tv1 === 'false' ? null : [_.x, _k2], _k3))"
     );
     expect(root.out).toEqual([
       [3, 3],

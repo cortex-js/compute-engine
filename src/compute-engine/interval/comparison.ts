@@ -406,6 +406,34 @@ export function hull(a: unknown, b: unknown): IntervalModelValue {
 }
 
 /**
+ * The value of a conditional whose condition is not `'true'`: the second arm
+ * `b` where the condition is `'false'` (`isFalse`), the hull of both arms
+ * where it is undecided.
+ *
+ * The closure-free lowering of a conditional calls it so that the emitted
+ * code holds the text of the second arm once:
+ *
+ * ```
+ * (t = c) === 'true' ? _IA.res(A)
+ *   : _IA.elseArm(t === 'false', t === 'false' ? null : A, B)
+ * ```
+ *
+ * The caller passes `null` for `a` where the condition is `'false'`, so the
+ * first arm does not run there. The arguments are evaluated left to right,
+ * so the code reads the condition temporary twice before it evaluates any
+ * arm: an arm that calls back into the same compiled code, and so writes the
+ * same temporary, cannot change the branch that is taken.
+ */
+export function elseArm(
+  isFalse: boolean,
+  a: unknown,
+  b: unknown
+): IntervalModelValue {
+  if (isFalse) return asValueResult(b) as IntervalModelValue;
+  return hullValues(a, b) as IntervalModelValue;
+}
+
+/**
  * Domain restriction (the single-branch `If`, a restriction): the value where the condition
  * holds, no value (`empty`) where it does not.
  *

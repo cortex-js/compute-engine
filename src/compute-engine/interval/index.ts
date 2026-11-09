@@ -128,6 +128,7 @@ import {
   decided as _decided,
   piecewise as _piecewise,
   hull as _hull,
+  elseArm as _elseArm,
   asResult as _asResult,
   restrict as _restrict,
   asValueResult as _asValueResult,
@@ -271,6 +272,7 @@ export {
   decided,
   piecewise,
   hull,
+  elseArm,
   hullValues,
   type IntervalModelValue,
   asResult,
@@ -458,6 +460,10 @@ export const IntervalArithmetic = {
   decided: _decided,
   piecewise: _piecewise,
   hull: _hull,
+  // The second arm, or the hull of both arms, of a conditional whose
+  // condition is not `'true'`: the compiled conditional writes the text of
+  // its second arm once.
+  elseArm: _elseArm,
   // `res` wraps an enclosure and passes an array or a verdict through: the
   // compiled conditional spells it around an arm it did not build.
   res: _asValueResult,
