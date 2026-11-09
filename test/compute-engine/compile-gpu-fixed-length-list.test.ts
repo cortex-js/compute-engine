@@ -188,10 +188,8 @@ describe('GPU FIXED-LENGTH LIST — element type gates the vecN reading', () => 
     expect(glsl.compile(ce.box(['Dot', 'p', 'p']), NO_FOLD).code).toBe(
       'dot(p, p)'
     );
-    // `Sum` of a collection, with no index range, is outside the GLSL
-    // fragment.
-    expect(() => glsl.compile(ce.box(['Sum', 'm']), NO_FOLD)).toThrow(
-      /`Sum` is in the GLSL fragment only over one or more integer index ranges/
+    expect(glsl.compile(ce.box(['Sum', 'm']), NO_FOLD).code).toBe(
+      '((m.x) + (m.y) + (m.z))'
     );
   });
 
@@ -248,7 +246,7 @@ describe('GPU FIXED-LENGTH LIST — element type gates the vecN reading', () => 
         [['bb', 'bvec3']],
         NO_FOLD
       )
-    ).toThrow(/`Sum` is in the GLSL fragment only over one or more integer index ranges/);
+    ).toThrow(/The name `bb` is declared `bvec3`, which has no type in the GLSL fragment/);
     expect(() =>
       glsl.compileFunction(
         ce.box(['Sin', 'bb']),
@@ -263,7 +261,7 @@ describe('GPU FIXED-LENGTH LIST — element type gates the vecN reading', () => 
   // Same frame, a float spelling: the width must still come through.
   test('a caller-declared float vector parameter keeps its width', () => {
     const ce = engineWith({ v: 'vector<3>' });
-    expect(() =>
+    expect(
       glsl.compileFunction(
         ce.box(['Sum', 'v']),
         'f',
@@ -271,7 +269,7 @@ describe('GPU FIXED-LENGTH LIST — element type gates the vecN reading', () => 
         [['v', 'vec3']],
         NO_FOLD
       )
-    ).toThrow(/`Sum` is in the GLSL fragment only over one or more integer index ranges/);
+    ).toBe('float f(vec3 v) {\n  return ((v.x) + (v.y) + (v.z));\n}');
   });
 
   // The mask slot is the one place a boolean-celled vector IS the shape
@@ -354,46 +352,51 @@ describe('GPU FIXED-LENGTH LIST — At decline reasons stay distinct', () => {
   });
 });
 
-// The GLSL fragment takes `Sum` and `Product` only over one or more integer
-// index ranges, so the collection form declines before any code is written.
 describe('GPU FIXED-LENGTH LIST — Sum/Product collection form', () => {
   test('folds a list literal', () => {
     const ce = new ComputeEngine();
-    expect(() =>
-      glsl.compile(ce.box(['Sum', ['List', 1, 2, 3]]), NO_FOLD)
-    ).toThrow(/`Sum` is in the GLSL fragment only over one or more integer index ranges/);
-    expect(() =>
-      glsl.compile(ce.box(['Sum', ['List', 1, 2, 3, 4, 5]]), NO_FOLD)
-    ).toThrow(/`Sum` is in the GLSL fragment only over one or more integer index ranges/);
+    expect(glsl.compile(ce.box(['Sum', ['List', 1, 2, 3]]), NO_FOLD).code).toBe(
+      '((1.0) + (2.0) + (3.0))'
+    );
+    // Past `vec4` the literal lowers to `float[5](…)`, whose constructor
+    // arguments are the components just the same.
+    expect(
+      glsl.compile(ce.box(['Sum', ['List', 1, 2, 3, 4, 5]]), NO_FOLD).code
+    ).toBe('((1.0) + (2.0) + (3.0) + (4.0) + (5.0))');
   });
 
   test('folds a tuple literal', () => {
     const ce = new ComputeEngine();
-    expect(() =>
-      glsl.compile(ce.box(['Sum', ['Tuple', 1, 2, 3]]), NO_FOLD)
-    ).toThrow(/`Sum` is in the GLSL fragment only over one or more integer index ranges/);
+    expect(
+      glsl.compile(ce.box(['Sum', ['Tuple', 1, 2, 3]]), NO_FOLD).code
+    ).toBe('((1.0) + (2.0) + (3.0))');
   });
 
-  test('folds a Range, which lowers to an array constructor', () => {
+  // The GLSL fragment has a `Range` only as an index set, not as a value.
+  test('a Range value declines', () => {
     const ce = new ComputeEngine();
     expect(() =>
       glsl.compile(ce.box(['Sum', ['Range', 1, 4]]), NO_FOLD)
-    ).toThrow(/`Sum` is in the GLSL fragment only over one or more integer index ranges/);
+    ).toThrow(
+      /A `Range` is in the GLSL fragment only as the index set of a `Sum`, a `Product` or an `At`, not as a value/
+    );
   });
 
   test('folds a declared vector over its swizzles', () => {
     const ce = engineWith({ v: 'vector<3>' });
-    expect(() => glsl.compile(ce.box(['Sum', 'v']), NO_FOLD)).toThrow(/`Sum` is in the GLSL fragment only over one or more integer index ranges/);
-    expect(() => glsl.compile(ce.box(['Product', 'v']), NO_FOLD)).toThrow(
-      /`Product` is in the GLSL fragment only over one or more integer index ranges/
+    expect(glsl.compile(ce.box(['Sum', 'v']), NO_FOLD).code).toBe(
+      '((v.x) + (v.y) + (v.z))'
+    );
+    expect(glsl.compile(ce.box(['Product', 'v']), NO_FOLD).code).toBe(
+      '((v.x) * (v.y) * (v.z))'
     );
   });
 
   test('the fold is an ordinary subexpression', () => {
     const ce = engineWith({ v: 'vector<3>' });
-    expect(() =>
-      glsl.compile(ce.box(['Sin', ['Sum', 'v']]), NO_FOLD)
-    ).toThrow(/`Sum` is in the GLSL fragment only over one or more integer index ranges/);
+    expect(glsl.compile(ce.box(['Sin', ['Sum', 'v']]), NO_FOLD).code).toBe(
+      '_gpu_sin(((v.x) + (v.y) + (v.z)))'
+    );
   });
 
   // A component is a constructor ARGUMENT compiled at its own precedence, so
@@ -403,12 +406,15 @@ describe('GPU FIXED-LENGTH LIST — Sum/Product collection form', () => {
   test('a compound component cannot be reassociated by its context', () => {
     const ce = new ComputeEngine();
     ce.declare('y', 'real | signed_infinity | nan');
+    // A tuple of one element is not a point of the GLSL fragment.
     expect(() =>
       glsl.compile(
         ce.box(['Multiply', ['Sum', ['Tuple', ['Add', 'x', 1]]], 2]),
         NO_FOLD
       )
-    ).toThrow(/`Sum` is in the GLSL fragment only over one or more integer index ranges/);
+    ).toThrow(
+      /The point `\(x \+ 1\)` has 1 components, and a point of the GLSL fragment has 2 to 4/
+    );
     // The same probe over a LIST never reaches this fold: a reduction over a
     // literal list is made n-ary before any target sees it
     // (`compilation/fixed-width-unroll.ts`), so a one-element `Sum` is just
@@ -419,9 +425,10 @@ describe('GPU FIXED-LENGTH LIST — Sum/Product collection form', () => {
         NO_FOLD
       ).code
     ).toBe('2.0 * (x + 1.0)');
-    expect(() =>
+    expect(
       glsl.compile(ce.box(['Sum', ['Tuple', ['Add', 'x', 1], 'y']]), NO_FOLD)
-    ).toThrow(/`Sum` is in the GLSL fragment only over one or more integer index ranges/);
+        .code
+    ).toBe('((x + 1.0) + (y))');
   });
 
   // A complex value lowers to `vec2(re, im)`, which matches the aggregate
@@ -431,23 +438,17 @@ describe('GPU FIXED-LENGTH LIST — Sum/Product collection form', () => {
     const ce = new ComputeEngine();
     expect(() =>
       glsl.compile(ce.box(['Sum', 'ImaginaryUnit']), NO_FOLD)
-    ).toThrow(/`Sum` is in the GLSL fragment only over one or more integer index ranges/);
+    ).toThrow(
+      /`Sum` of the collection `i` of the type `complex` is not in the GLSL fragment/
+    );
   });
 
-  // `Sum([]) = 0` in the interpreter. Recognized before the operand is
-  // compiled: `[]` lowers to `float[0]()`, which the `vecN` constructor guard
-  // refuses outright, so compiling it first would decline the whole fold.
-  //
-  // Only `Sum` is probed with a literal: `Product` over a LIST LITERAL
-  // canonicalizes to `Reduce(list, Multiply, 1)`, which never reaches the
-  // `Product` lowering at all (the shader targets have no `Reduce`; with
-  // constant folding on — the default — such a subtree is evaluated at
-  // compile time and emitted as one number). `Product` over a SYMBOL stays
-  // `Product` and is covered above.
-  test('the empty collection is the identity', () => {
+  // `Sum([]) = 0` in the interpreter, but the GLSL fragment has no empty
+  // list, so the shader target declines.
+  test('the empty collection declines', () => {
     const ce = new ComputeEngine();
     expect(() => glsl.compile(ce.box(['Sum', ['List']]), NO_FOLD)).toThrow(
-      /`Sum` is in the GLSL fragment only over one or more integer index ranges/
+      /The list `\[\]` is not a list of reals or of points of one size/
     );
   });
 
@@ -458,7 +459,7 @@ describe('GPU FIXED-LENGTH LIST — Sum/Product collection form', () => {
     test('a 5+-wide declared vector', () => {
       const ce = engineWith({ a: 'vector<7>' });
       expect(() => glsl.compile(ce.box(['Sum', 'a']), NO_FOLD)).toThrow(
-        /`Sum` is in the GLSL fragment only over one or more integer index ranges/
+        /`Sum` of the collection `a` of the type `list<real, 7>` is not in the GLSL fragment/
       );
     });
 
@@ -467,14 +468,14 @@ describe('GPU FIXED-LENGTH LIST — Sum/Product collection form', () => {
     test('an unknown-length list', () => {
       const ce = engineWith({ xs: 'list<number>' });
       expect(() => glsl.compile(ce.box(['Sum', 'xs']), NO_FOLD)).toThrow(
-        /`Sum` is in the GLSL fragment only over one or more integer index ranges/
+        /The list `xs` has no static count/
       );
     });
 
     test('a fixed-length list whose elements are not shader floats', () => {
       const ce = engineWith({ c: 'list<complex^3>' });
       expect(() => glsl.compile(ce.box(['Sum', 'c']), NO_FOLD)).toThrow(
-        /`Sum` is in the GLSL fragment only over one or more integer index ranges/
+        /The symbol `c` has the type `vector<complex\^3>`, which has no type in the GLSL fragment/
       );
     });
 
@@ -484,7 +485,7 @@ describe('GPU FIXED-LENGTH LIST — Sum/Product collection form', () => {
     test('a statically scalar operand', () => {
       const ce = new ComputeEngine();
       expect(() => glsl.compile(ce.box(['Sum', 5]), NO_FOLD)).toThrow(
-        /`Sum` is in the GLSL fragment only over one or more integer index ranges/
+        /`Sum` of the collection `5` of the type `integer` is not in the GLSL fragment/
       );
     });
   });

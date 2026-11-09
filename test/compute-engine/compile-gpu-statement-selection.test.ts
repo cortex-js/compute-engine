@@ -103,14 +103,15 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
       /^_gpu_passes = 0;\nfloat _tv\d+;\nif \(1\.0 < t\) \{/
     );
     expect(ifCode).toContain('} else {\n  _tv1 = -1.0;\n}');
-    // The GLSL fragment refuses an `If` that is a value and has one branch,
-    // which is what `When` is.
-    expect(() =>
-      shader(
-        String.raw`\left(\sum_{n=1}^{\lfloor t\rfloor} n\right)\left\{t > 1\right\}`,
-        'glsl'
-      )
-    ).toThrow(/needs both branches/);
+    const whenCode = shader(
+      String.raw`\left(\sum_{n=1}^{\lfloor t\rfloor} n\right)\left\{t > 1\right\}`,
+      'glsl'
+    );
+    expect(whenCode).toMatch(
+      /^_gpu_passes = 0;\nfloat _tv\d+;\nif \(1\.0 < t\) \{/
+    );
+    // The masked branch is NaN, as in the ternary form.
+    expect(whenCode).toMatch(/\} else \{\n  _tv\d+ = _gpu_nan\(\);\n\}/);
   });
 
   test('a nested conditional inside the taken branch keeps its own form', () => {

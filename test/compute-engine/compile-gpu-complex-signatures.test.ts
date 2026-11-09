@@ -304,7 +304,7 @@ describe('GPU: a complex argument to a parameter not declared complex', () => {
     // The fragment gives the parameter one type, from the first call, so a
     // real call and a complex call of the same function decline.
     expect(() => glsl(ce, latex)).toThrow(
-      /The parameter `z` of `f` has no declared type, and it has the type `real` of its argument at the first call/
+      /The parameter `z` of `f` has no declared type in the GLSL fragment, and it has the type `real` of its argument at the first call/
     );
   });
 
@@ -325,7 +325,7 @@ describe('GPU: a complex argument to a parameter not declared complex', () => {
     const latex = '\\arg(g(x+iy)) + g(t)';
     // The fragment refuses the real call `g(t)` next to the complex call.
     expect(() => glsl(ce, latex)).toThrow(
-      /The parameter `w` of `g` has no declared type, and it has the type `real` of its argument at the first call/
+      /The parameter `w` of `g` has no declared type in the GLSL fragment, and it has the type `real` of its argument at the first call/
     );
   });
 

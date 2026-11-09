@@ -1699,9 +1699,7 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
             to,
             fallback: true,
           } as any);
-          // The GLSL fragment refuses a single-branch `If` that is a value.
-          const declined = to === 'glsl' && label === 'If(p(u), 1)';
-          expect([label, r?.success ?? false]).toEqual([label, !declined]);
+          expect([label, r?.success ?? false]).toEqual([label, true]);
         }
       }
     );

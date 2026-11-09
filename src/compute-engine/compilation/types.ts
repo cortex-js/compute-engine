@@ -2514,7 +2514,7 @@ export interface CompilationOptions<Expr = unknown> {
    * expression. Over the cap, the loops stop and the value of the
    * expression is `NaN` (`false` for a boolean value). `Infinity` sets no
    * cap: the code counts no pass. A finite value is floored and kept at
-   * most `2^31 - 2`. On every target, `NaN` or a value of at most 0 is
+   * most `2^30`. On every target, `NaN` or a value of at most 0 is
    * refused: `compile()` throws and `canCompile()` answers `ok: false`.
    * The other GLSL entries
    * (`compileFunction()`, `compileShader()`, `compileToSource()`) do not

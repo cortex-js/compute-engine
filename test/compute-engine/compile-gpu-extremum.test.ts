@@ -510,7 +510,7 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     // `vec3 _tv = vec3(nextValue());` would run before the `W` of the sum.
     both(['Add', 'W', ['Max', 'V']], MOVED);
     // The same through the `dot(v, v)` form of a sum of squares.
-    declinesOutside(['Add', 'W', ['Sum', ['Square', 'V']]]);
+    both(['Add', 'W', ['Sum', ['Square', 'V']]], MOVED);
   });
 
   it('a loop or an unrolled sum does not run ahead of earlier caller code', () => {
@@ -558,12 +558,12 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     for (const expr of [
       ['If', 'c', 'W', 0],
       ['Which', 'c', 'W', 'True', 0],
+      ['If', 'c', 'W'],
     ]) {
       const boxed = cev.box(expr);
       expect(glsl.compile(boxed, opts).code).toContain('?');
     }
-    // A one-branch `If` and a `Match` are outside the fragment.
-    declinesOutside(['If', 'c', 'W']);
+    // A `Match` is outside the fragment.
     declinesOutside(['Match', 'x', ['MatchCase', 1, 'W'], ['MatchCase', '_', 30]]);
   });
 
@@ -573,12 +573,12 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     for (const expr of [
       ['Add', 'W', ['If', 'c', 'W', 0]],
       ['Add', 'W', ['Which', 'c', 'W', 'True', 0]],
+      ['Add', 'W', ['If', 'c', 'W']],
     ]) {
       const boxed = cev.box(expr);
       expect(glsl.compile(boxed, opts).code).toContain('?');
     }
-    // A one-branch `If` and a `Match` are outside the fragment.
-    declinesOutside(['Add', 'W', ['If', 'c', 'W']]);
+    // A `Match` is outside the fragment.
     declinesOutside([
       'Add',
       'W',

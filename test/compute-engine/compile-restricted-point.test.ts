@@ -198,24 +198,14 @@ describe('Shapes the interpreter refuses for a restricted point', () => {
 });
 
 describe('Shader targets keep the supported shapes', () => {
-  // The GLSL fragment needs both branches of an `If` that is a value, so a
-  // restricted point (an `If` with one branch) declines.
   test.each([
     ['a scalar times the point', ['Multiply', 't', gated()]],
     ['the point divided by a scalar', ['Divide', gated(), 't']],
     ['the point plus a point', ['Add', gated(), ['PointList', 2, 't']]],
-  ])('%s is outside the GLSL fragment', (_l, json) => {
-    const r = compile(ce.box(json as never), { to: 'glsl' } as never);
-    expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('outside-fragment');
+    ['two plain points', ['Add', P, ['PointList', 2, 't']]],
+  ])('%s compiles', (_l, json) => {
+    expect(declines(json, 'glsl')).toBe(false);
   });
-
-  test.each([['two plain points', ['Add', P, ['PointList', 2, 't']]]])(
-    '%s compiles',
-    (_l, json) => {
-      expect(declines(json, 'glsl')).toBe(false);
-    }
-  );
 });
 
 /**

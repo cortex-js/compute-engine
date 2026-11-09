@@ -168,16 +168,18 @@ describe('A2 — Multi-restriction GLSL verification', () => {
     expect(expr.op1.ops!.length).toEqual(2);
   });
 
-  test('stacked restrictions are declined by the GLSL fragment (an `If` with one branch)', () => {
+  test('stacked restrictions compile to a single chained ternary in GLSL', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     const target = new GLSLTarget();
     const expr = ce.parse(
       'x^2\\left\\{x > 0\\right\\}\\left\\{x < 5\\right\\}'
     );
-    expect(() => target.compile(expr)).toThrow(
-      /An `If` that is a value needs both branches/
-    );
+    const result = target.compile(expr);
+    expect(result.success).toBe(true);
+    // One ternary, not nested.
+    const ternaryCount = (result.code.match(/\?/g) ?? []).length;
+    expect(ternaryCount).toEqual(1);
   });
 
   test('stacked restrictions evaluate correctly', () => {

@@ -330,8 +330,16 @@ describe('GLSL COMPILATION — structures and control flow', () => {
 
     it('compiles When with the _gpu_nan() helper, never a bare NaN', () => {
       const e = ce.expr(['If', ['Greater', 'x', 0], 'x']);
-      // The fragment refuses an `If` that is a value and has one branch.
-      expect(() => glsl.compile(e)).toThrow(/needs both branches/);
+      const result = glsl.compile(e);
+      // The else branch calls the helper, not a bare `0.0 / 0.0` literal…
+      expect(result.code).toContain('_gpu_nan()');
+      expect(result.code).not.toContain('0.0 / 0.0');
+      expect(/\bNaN\b/.test(result.code)).toBe(false);
+      // …and the helper definition is emitted (selectively) into the preamble.
+      expect(result.preamble ?? '').toContain('float _gpu_nan()');
+      expect(result.preamble ?? '').toContain(
+        'return intBitsToFloat(0x7FC00000);'
+      );
     });
   });
 
@@ -491,13 +499,6 @@ describe('GLSL COMPILATION — structures and control flow', () => {
         ['restriction', ['If', ['Greater', 'x', 0], bigSum]],
       ] as [string, any][]) {
         it(`${label} arm containing a loop-form Sum`, () => {
-          if (label === 'restriction') {
-            // The fragment refuses an `If` that is a value and has one branch.
-            expect(() => glsl.compile(ce.box(expr), NO_FOLD)).toThrow(
-              /needs both branches/
-            );
-            return;
-          }
           const code = glsl.compile(ce.box(expr), NO_FOLD).code;
           expect(code).toMatch(
             /^_gpu_passes = 0;\nfloat _tv\d+;\nif \(0\.0 < x\) \{\n  float/
@@ -751,19 +752,20 @@ describe('GLSL Length/Norm name collision (Tycho round)', () => {
 // sampling path).
 describe('GLSL When/Which NaN branch matches the value shape (Tycho item 49)', () => {
   it('restricted parametric tuple body emits a vec2 NaN branch', () => {
-    // The fragment refuses an `If` that is a value and has one branch.
-    expect(() =>
-      glsl.compile(
-        ce.box(['If', ['And', ['LessEqual', 0, 't'], ['LessEqual', 't', 1]], ['Tuple', ['Cos', 't'], ['Sin', 't']]])
-      )
-    ).toThrow(/needs both branches/);
+    const code = glsl.compile(
+      ce.box(['If', ['And', ['LessEqual', 0, 't'], ['LessEqual', 't', 1]], ['Tuple', ['Cos', 't'], ['Sin', 't']]])
+    ).code;
+    expect(code).toContain('vec2(_gpu_cos(t), _gpu_sin(t))');
+    expect(code).toContain('vec2(_gpu_nan())');
+    expect(code).not.toMatch(/: \(_gpu_nan\(\)\)/);
   });
 
   it('scalar bodies keep the scalar NaN', () => {
-    // The fragment refuses an `If` that is a value and has one branch.
-    expect(() =>
-      glsl.compile(ce.box(['If', ['LessEqual', 't', 1], ['Cos', 't']]))
-    ).toThrow(/needs both branches/);
+    const code = glsl.compile(
+      ce.box(['If', ['LessEqual', 't', 1], ['Cos', 't']])
+    ).code;
+    expect(code).toContain(': (_gpu_nan())');
+    expect(code).not.toContain('vec2(_gpu_nan())');
   });
 
   it('Which fall-through NaN follows the branch value shape', () => {

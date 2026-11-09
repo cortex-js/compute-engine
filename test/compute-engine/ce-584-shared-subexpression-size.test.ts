@@ -359,10 +359,9 @@ describe('CE-584: the size limit of the shader code', () => {
       const e = graph(depth);
       expect(gpuWrittenSize(e, cseRecordingRules(e))).toBeLessThan(20 * depth);
     }
-    // The GLSL fragment refuses an `If` that is a value and has one branch.
     const r = compile(graph(8), { to: 'glsl' });
-    expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('outside-fragment');
+    expect(r.success).toBe(true);
+    expect(r.code.length).toBeLessThan(2_000);
   });
 
   // Below an operator that the caller replaces, the pass shares nothing:

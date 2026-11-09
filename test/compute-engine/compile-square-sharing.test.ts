@@ -117,13 +117,6 @@ describe('small powers and conditional CSE', () => {
         ['Which', condition, 0, ['Greater', value, 0], value, 'True', 0],
       ]) {
         const expr = ce.expr(['List', ['Sin', value], ['Cos', value], branch]);
-        // The GLSL fragment refuses an `If` that is a value and has one branch.
-        if (branch[0] === 'If' && branch.length === 3) {
-          expect(() => compile(expr, { to, fallback: false })).toThrow(
-            /needs both branches/
-          );
-          continue;
-        }
         const result = compile(expr, { to, fallback: false });
         expect(result.code?.match(/floor\(/g)).toHaveLength(1);
         expect(

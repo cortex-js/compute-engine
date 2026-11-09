@@ -202,6 +202,24 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `vec2f(select(t, 1.0 < t, 0.0 < t), 0.0)` (WGSL). The two branches mix a
   boolean and a float, which the shader compiler refuses. The interpreter
   gives an `incompatible-type` error at `x = 2` and `-1` at `x = -1`.
+- `glsl`, caller code in the `vars` option (crafted): with
+  `vars: { V: "vec3(a, b, c)", W: <code> }`, `canCompile()` answers
+  `{ ok: true }` and `compile()` then declines for `W + Max(V)`,
+  `(W, Max(V))`, `W + Sum(V^2)` and `W + Sum(W + k, k, 1, n)`, because the shader code would
+  run the statements of `Max(V)` or of the loop ahead of the code of `W`;
+  and for `If(c, Max(V), 0)`, because a branch that is evaluated on a
+  condition cannot hold statements. A user function with a parameter named
+  `discard` (a word that GLSL reserves) and no declared type is also
+  accepted by `canCompile()` and refused by `compile()`. The pass decides
+  before the code that fixes this order exists. No program compiles to
+  wrong code: `compile()` declined each of these before the fragment pass
+  too. Issue `issues/CE-1176.md`.
+- `glsl`, `Max(L)` and `Min(L)` of a list input held as a uniform array of
+  more than 4 elements (crafted): with `L: list<real^5>`, `canCompile()`
+  answers `{ ok: true }` and `compile()` declines, because the shader code
+  has no list of the elements of a uniform array to fold over. No program
+  compiles to wrong code, and `compile()` declined it before the fragment
+  pass too. `Sum(L)` and `Product(L)` are refused by the pass.
 
 - `javascript`, `x: real | nan`: `Arcsec(x)` and `Arccsc(x)` at `x = 0.5`,
   and `InverseHaversine(x)` at `x = 4`, compile to the real lowering
@@ -1707,6 +1725,172 @@ per-helper result-kind rules for no gain. The measurements and the decision
 are in
 `docs/plans/2026-09-07-numeric-list-store-and-typed-array-boundary.md`.
 
+### The GLSL fragment and `canCompile()`
+
+The `glsl` target compiles a fixed list of forms, the GLSL fragment. A shader
+renders pixels in f32 on each frame and does not compute stored data, so the
+target takes a small language and checks it before it writes code. An
+expression is in the fragment when each node of its canonical, typed tree is
+in this list:
+
+- **Values.** A real scalar (`float`), an integer, a boolean, a complex
+  number (`vec2`), a point or vector of 2 to 4 real components, a color, a
+  constant list of at most 256 reals or points, and a list input. A list
+  input of at most 256 elements is a uniform array. A longer one must be
+  named in the `storage` option with the hint `'sampler2D'`, which has no
+  limit on the length; otherwise it is refused, and the diagnostic gives its
+  length, the limit and the option (`storage: { H: 'sampler2D' }`). Each free
+  symbol has one of these types, declared or inferred. A symbol of type
+  `unknown`, `any`, `expression`, `symbol`, `string`, `function` or `value`,
+  or a collection with no static count, is outside, and the diagnostic names
+  the symbol: the host repairs it with a declaration. The `vars` option is
+  spelling and is accepted, except an entry that is code where the shader
+  code would write that code twice.
+- **Heads.** Arithmetic, the elementary and special functions that the
+  shared GPU table lowers, the parts of a complex number, the operations on
+  points and vectors (`Dot`, `Cross`, `Norm`, `Normalize`, `Distance`,
+  `Reflect`, `Refract`, the components, and `Length`, which is the count of
+  the components), the colors, the comparisons and logical operators on real
+  or boolean operands, and `If` and `Which` when every branch has the same
+  type. An `If` with no else branch is a value. Where its condition fails,
+  the interpreter gives the absence value of the type of the branch, and
+  the shader code gives the same value: `If(x > 0, x)` is
+  `((0.0 < x) ? (x) : (_gpu_nan()))`, a point or a complex number has a
+  `NaN` in each lane, and a boolean branch gives `false`. A color or a
+  list of more than 4 elements has no `NaN` in the shader code, so such an
+  `If`, or a `Which` with no default clause of such a type, is refused.
+- **Aggregates and indexing.** `Sum` and `Product` over one or more integer
+  index ranges (`Limits`, or `Element(k, Range(a, b))` with a step of 1),
+  whose bounds can read an input or an outer index. Each one is a counted
+  loop. A bound of type `real` is floored, as the interpreter floors it:
+  `Sum(k, k, 1, r)` at `r = 2.5` is 3 on both. `At` with a numeric index on
+  a constant list, a list input or a point; an index that is not an integer
+  gives `NaN`, as in the interpreter (`At([10, 20, 30], 1.5)`). `Range` only as an
+  index set. `Sum` and `Product` of one list with no index set add or
+  multiply its elements, which the shader code writes one by one: the list
+  is a point, a list of 2 to 4 numbers or a list literal of at most 256
+  elements (`Sum(L)` with `L: list<real^3>` is
+  `((L.x) + (L.y) + (L.z))`). A list input held as a uniform array of more
+  than 4 elements, or in a texture, is refused there: the shader code has no
+  list of its elements.
+- **User functions.** A call of a user function whose parameters and result
+  have fragment types and whose body is in the fragment, with no recursion.
+  A parameter with no declared type takes the type of its argument at the
+  first call: with `sq(u) := u^2`, `sq(x)` for `x: real` compiles with a
+  `float` parameter and `sq(z)` for `z: complex` with a `vec2` parameter. A
+  later call with an argument of another type (`sq(x) + Re(sq(z))`) is
+  refused, and the diagnostic names the parameter and the two types. A
+  parameter whose type is a list with no length (`list<number>`, the type
+  that the engine infers from the `At` reads of
+  `d(a, b) := a[1] b[1] + a[2] b[2]`) is read the same way: an argument
+  `[x, y]` or `(x, y)` gives a `vec2` parameter. A parameter with no type
+  called with a list is refused: the interpreter applies the function to
+  each element of the list. Another list parameter is admitted only when
+  each call binds it to a list input; the function is then emitted once for
+  each list.
+- **Blocks**, as the body of a user function and at the root: `let` and
+  `const` declarations of scalar, point or complex locals, an assignment to
+  a local, a tuple assignment of locals, a `Loop` over an integer range with
+  `Break`, `If` statements and a final expression. The forms nest. Epsil's
+  `s += e` on a scalar local is in, and so is a `parallel for` over an
+  integer range whose accumulators are scalar locals: the shader runs its
+  passes in order, which gives the value of the interpreter. A list local
+  and a write to an input are outside.
+- **Compile-time work.** Constant folding, the closed-form derivative,
+  common-subexpression elimination, and the unrolling of a comprehension or
+  a `Map` over constant ranges or a constant list of at most 256 elements.
+- **A number beside a declared shader vector.** `Add` and `Subtract` take a
+  number beside a name that `compileShader()` or `compileFunction()`
+  declares with a GLSL vector type, as GLSL does: `gl_FragCoord + 1` compiles
+  to `gl_FragCoord + 1.0`. A point of the expression beside a number stays
+  refused, because the interpreter refuses `(1, 2) + 2`.
+
+Outside the fragment are, among others: random draws (`Random`,
+`WithRandomSeed`), matrices, `Match`, `Return`, `Integrate`, the symbolic
+heads (`Simplify`, `Solve`, `D` at run time), strings, dictionaries and
+records, `Map`, `Filter`, `Reduce` and the other callback forms over a
+collection with no static count, a comprehension whose range reads an input,
+function literals and function values, `Apply` other than the application of
+a derivative with a closed form, and `Range` as a value.
+
+**The predicate.** `canCompile(expr, options)`, exported from
+`@cortex-js/compute-engine/compile` beside `compile()`, tells whether
+`compile(expr, options)` gives code, without writing code. It takes the
+options of `compile()`, runs the preparation of the tree that `compile()`
+runs (constant folding, common-subexpression elimination, the unrolling) and
+then the typing pass, and answers `{ ok: true }` or
+`{ ok: false, diagnostic }`. The diagnostic has the code `outside-fragment`,
+the kind `capability`, a message, the node in `value`, and the head of the
+first node outside the fragment in `operator` (`Integrate`), or a name in
+`binding` (a free symbol with no fragment type, a parameter called with two
+types, a list input over the limit). A host counts declines by head with
+`operator`. The predicate never throws: an invalid expression, an invalid
+option or an error of the preparation gives `ok: false` with the message of
+the error. Its answer depends only on the expression, the options and the
+declarations that the expression reaches (the types of its free symbols, the
+definitions of the functions it calls), so a host can keep it until one of
+those declarations changes. Only `glsl` has a fragment: for another target
+the answer is `ok: false`, with a message that says so.
+
+```js
+canCompile(ce.parse('\\sin(x) + x^2'), { to: 'glsl' });
+// ➔ { ok: true }
+canCompile(ce.parse('\\int_0^x \\sin(t)\\,dt'), { to: 'glsl' }).diagnostic;
+// ➔ { code: 'outside-fragment', kind: 'capability',
+//     message: 'The head `Integrate` is outside the GLSL fragment.',
+//     value: 'int_(0)^(x)(sin(t) dt)', operator: 'Integrate' }
+```
+
+**The compile runs the pass first.** `compile()`, and `compileFunction()`,
+`compileShader()` and `compileToSource()` of the GLSL target, run the same
+pass before they write code. When the pass refuses a node, `compile()`
+declines with the diagnostic of `canCompile()` (`success: false` and the
+interpreter, or an error with `fallback: false`), and the three other entries
+throw an error with its message. When the preparation of the tree fails
+(`1 + Block(acc := x², acc + 1)`, a block with an assignment used as an
+operand), `canCompile()` gives its message with the code `outside-fragment`,
+and `compile()` gives the diagnostic of the preparation (here
+`unsettled-shape`). Emission does not decline an expression that the pass
+accepts, except in the cases of the known limitations below; any other such
+decline is a defect. A compile that succeeds keeps its warnings, such as
+`float32-unsafe-argument`.
+
+**The pass cap.** `compile()` to `glsl` counts the passes of the loops that
+the shader runs: each pass of a `Sum`, a `Product`, a `Loop` and a
+`parallel for`, also in the bodies of user functions, adds one to one count
+for each evaluation of the compiled expression. The count is of the loops in
+the emitted code: two equal sums that common-subexpression elimination
+writes once count once, and with `cse: false` both count. Over the cap, the
+loops stop and the value is `NaN` (`false` for a boolean value), so a slider
+that raises a bound past the cap gives `NaN` pixels and no new compilation.
+The cap is the `iterationBudget` option, with a default of 10,000 passes on
+this target. `Infinity` sets no cap, and the code then counts no pass. A
+finite budget is floored and kept at most 2^30, so that the counter cannot
+overflow an `int`. `NaN` or a budget of at most 0 is refused. Only
+`compile()` reads the option: `compileFunction()`, `compileShader()` and
+`compileToSource()` count no pass.
+
+```glsl
+// Sum(k·x, k, 1, n) with { to: 'glsl', iterationBudget: 100 }
+_gpu_passes = 0;
+float _tv1 = 0.0;
+for (int k = 1; k <= int(floor(n)); k++) {
+  if (++_gpu_passes > 100) break;
+  _tv1 += float(k) * x;
+}
+float _tv2 = _tv1;
+return _gpu_passes > 100 ? _gpu_nan() : _tv2;
+```
+
+The `javascript`, `interval-js` and `python` targets have no fragment: they
+take the whole language with their own declines.
+
+The list and the decisions are in `docs/plans/2026-11-08-glsl-fragment-spec.md`
+(section 2 and decisions 1 to 18); the typing pass is
+`src/compute-engine/compilation/fragment.ts` and
+`src/compute-engine/compilation/glsl-fragment.ts`, and its design is
+`docs/plans/2026-11-08-glsl-fragment-annotation-design.md`.
+
 ### Interval results
 
 The `run` of an `interval-js` compilation gives one shape for each kind of
@@ -2005,8 +2189,9 @@ keep the limit.
 
 **Targets.** Python declines a program with a `Loop` when the option is set,
 because its code has no count. A `Sum` or a `Product` still compiles there, with
-no limit. GLSL and WGSL are unchanged: a shader cannot throw, its loop bounds are
-known at compile time, and a `Loop` with no indexing set already declines.
+no limit. A shader cannot throw, so GLSL has a cap of its own, with a default
+of 10,000 passes and `NaN` over it ("The GLSL fragment and `canCompile()`",
+"The pass cap"); a `Loop` with no indexing set declines there.
 
 **Not covered.**
 

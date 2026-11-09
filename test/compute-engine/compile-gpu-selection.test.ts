@@ -134,7 +134,7 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
       // `[sin x, x{c}]` types `list<number | missing>`: an absent cell is a
       // NaN lane, which the restriction no-match lowering emits, so the shape is
       // admitted.
-      expectOutside(['List', ['Sin', 'x'], ['If', 'c', 'x']]);
+      expect(g(['List', ['Sin', 'x'], ['If', 'c', 'x']])).toMatch(/_gpu_nan/);
       // A default-less `Which` over a list types `missing | list<…>`: the
       // WHOLE list may be absent, and the no-match lowering would pair an
       // array arm with a scalar NaN. That stays fail-closed.

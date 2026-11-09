@@ -29,7 +29,106 @@
   where its length and its walk gave rows; `Tabulate` gives the row
   `[21, 22, 23]`.
 
+- **The `glsl` target compiles only the forms of the GLSL fragment.** Before
+  it writes code, `compile(expr, { to: 'glsl' })` checks the expression
+  against a fixed list of forms: real, integer, boolean and complex scalars,
+  points of 2 to 4 components, colors, lists of at most 256 elements or in a
+  texture, the arithmetic and the functions of the shader library, `Sum` and
+  `Product` over integer ranges, `At`, user functions without recursion, and
+  blocks of scalar, point or complex locals. Outside the list, the
+  compilation declines with the diagnostic code `outside-fragment` (see
+  `canCompile()` in New Features), and `compileFunction()`,
+  `compileShader()` and `compileToSource()` throw. These forms compiled
+  before and now decline:
+  - random draws: `x + Random()` and `WithRandomSeed(5, x + Random())`;
+  - matrices: `Matrix([[1, 2], [3, 4]])` gave
+    `mat2(vec2(1.0, 3.0), vec2(2.0, 4.0))`;
+  - `Apply` of a function literal: `Apply(v ↦ v·x, 2)` gave `(2.0 * x)`;
+  - `Match`: `Match(x, 1 → 2, _ → 3)`;
+  - a list local of a block: `Block(Assign(P, [1, 2, 3, 4, 5]), P[2])`;
+  - a symbol whose type is not numeric: `e + 1` with `e` declared
+    `expression` gave `e + 1.0`. The diagnostic names the symbol in
+    `binding`: declare a numeric type for it;
+  - a list input of more than 256 elements without the `storage` option:
+    `At(H, 2)` with `H: list<real^1600>` gave `H[1]` over a uniform array of
+    1,600 floats, which a GPU can refuse to link. The diagnostic now gives
+    the length, the limit and the option to use,
+    `storage: { H: 'sampler2D' }`;
+  - a user function with a parameter of no declared type, called with
+    arguments of two types: with `sq(u) := u^2`, `sq(x) + Re(sq(z))` for a
+    real `x` and a complex `z` compiled two versions of `sq`. Such a
+    parameter now takes the type of its argument at the first call, and the
+    diagnostic names the parameter and the two types. Declare the type of the
+    parameter, or call the function with arguments of one type. A call with
+    one type compiles as before (`sq(x)` with a `float` parameter, `sq(z)`
+    with a `vec2` parameter). A parameter whose type is a collection with
+    no length (`dictionary<number> | indexed_collection<number>`, the type
+    that the engine infers for `a` from the read `a[k]` of
+    `h(a, k) := a[k] k`) is read the same way: an argument `[x, y]` or
+    `(x, y)` gives a `vec2` parameter.
+
+  These forms are in the fragment and compile as before:
+  - a block at the root of the expression;
+  - an `If` with no else branch used as a value: `If(x > 0, x)` gives
+    `((0.0 < x) ? (x) : (_gpu_nan()))`. The missing branch is `NaN` (a
+    `NaN` in each lane of a point or a complex number), and `false` for a
+    boolean value. A color value, or a list of more than 4 elements, has no
+    `NaN` in GLSL, and such an `If` declines;
+  - the sum or the product of a list of known length: `Sum(L)` with
+    `L: list<real^3>` gives `((L.x) + (L.y) + (L.z))`. The list is a point,
+    a list of 2 to 4 numbers, or a list literal of at most 256 elements;
+  - a number added to a name that `compileShader()` or `compileFunction()`
+    declares as a GLSL vector (`gl_FragCoord + 1`).
+
+- **A loop of a `glsl` compilation stops after 10,000 passes.** The code of
+  `compile()` to `glsl` counts the passes of every loop that the shader runs
+  (a `Sum`, a `Product`, a `Loop`, a `parallel for`, also in the body of a
+  user function), with one count for each evaluation. Over the cap, the
+  loops stop and the value is `NaN` (`false` for a boolean value), where a
+  shader with a large bound could before take so long that the browser lost
+  the WebGL context. The `iterationBudget` option sets the cap, as it sets
+  the limit of a `Loop` on the JavaScript target; `iterationBudget: Infinity`
+  removes the cap and the counter. `Sum(k·x, k, 1, n)` now compiles to:
+
+  ```glsl
+  _gpu_passes = 0;
+  float _tv1 = 0.0;
+  for (int k = 1; k <= int(floor(n)); k++) {
+    if (++_gpu_passes > 10000) break;
+    _tv1 += float(k) * x;
+  }
+  float _tv2 = _tv1;
+  return _gpu_passes > 10000 ? _gpu_nan() : _tv2;
+  ```
+
+  The preamble declares the counter `int _gpu_passes` under the guard
+  `_GPU_PASSES_DECLARED`. `compileFunction()`, `compileShader()` and
+  `compileToSource()` count no pass.
+
 ### New Features
+
+- **`canCompile(expr, options)` tells whether an expression compiles to
+  `glsl`, without writing code.** It is exported from
+  `@cortex-js/compute-engine/compile` beside `compile()` and takes the same
+  options. It answers `{ ok: true }`, or `{ ok: false, diagnostic }` with the
+  code `outside-fragment` and the first node outside the GLSL fragment: its
+  head in the new field `CompileDiagnostic.operator`, or the name of a symbol
+  in `binding`. It never throws, and when it names a node outside the
+  fragment, `compile()` declines with the same diagnostic.
+
+  ```js
+  canCompile(ce.parse('\\sin(x) + x^2'), { to: 'glsl' });
+  // ➔ { ok: true }
+  canCompile(ce.parse('\\int_0^x \\sin(t)\\,dt'), { to: 'glsl' });
+  // ➔ { ok: false, diagnostic: { code: 'outside-fragment',
+  //     message: 'The head `Integrate` is outside the GLSL fragment.',
+  //     operator: 'Integrate', … } }
+  ```
+
+  The answer depends on the expression, the options and the declarations
+  that the expression reaches, so a host can keep it until one of those
+  declarations changes. For a target other than `glsl` the answer is
+  `ok: false`.
 
 - **`Fill(value, d1, d2, …)`, `Zeros(d1, d2, …)` and `Ones(d1, d2, …)`
   create a list or a tensor with each element equal to one value.** Each
@@ -107,6 +206,25 @@
   loop is an `if` statement.** `if e > 0 { for m in 1..e { … } }` compiles to
   `glsl`; before, it declined with "Could not compile `If`: wrong
   number of arguments".
+- **More sums, products and point operations compile to `glsl`.** Each of
+  these declined before:
+  - a sum or product over two or more index ranges, as nested loops:
+    `Sum(i·j·x, i, 1, n, j, 1, n)` ("multi-index (2 indexing sets) is not
+    supported in GPU targets");
+  - a sum or product whose index set is a range, `Sum(k·x, k ∈ 1..n)`
+    ("expected Limits indexing set");
+  - a `parallel for` over an integer range whose accumulators are scalar
+    locals, as a loop that runs its passes in order, which gives the value
+    of the interpreter:
+    `Block(s := 0, ParallelLoop(AddTo(s, k·x), k ∈ 1..10), s)` ("the
+    `parallel for` construct compiles only to the JavaScript target");
+  - `Length` of a point, which is its number of components: `Length(p)` with
+    `p: tuple<real, real, real>` is `3.0` (before: "the 'glsl' 'length()'
+    builtin is the Euclidean norm");
+  - an operation on the result of `Normalize`: `Dot(Normalize(p), p)` is
+    `dot(normalize(p), p)` (before: "the shader builtin `dot` requires
+    MATCHING genType arguments", because the result of `Normalize` was read
+    as a number).
 
 ### Resolved Issues
 

@@ -263,8 +263,8 @@ describe.each(['glsl'] as const)('CE-588 — %s', (to) => {
   };
 
   /** Expect the compilation of `json` to decline with `message`: the GLSL
-   * fragment has no `Missing` value and no `If` with one branch, so the
-   * shader target declines before any code is written. */
+   * fragment has no `Missing` value, so the shader target declines before
+   * any code is written. */
   const expectDeclined = (json: unknown, message: RegExp): void => {
     expect(() =>
       compile(engine().box(json as never), {
@@ -319,11 +319,20 @@ describe.each(['glsl'] as const)('CE-588 — %s', (to) => {
     ],
   ] as [string, unknown, [boolean, boolean]][])(
     'a nested selection: %s',
-    (_label, json) => {
-      expectDeclined(
-        json,
-        /needs both branches|has no type in the GLSL fragment/
-      );
+    (_label, json, [c, d]) => {
+      // The GLSL fragment has no `Missing` value. An `If` with one branch is
+      // a value, with a `vec2` NaN when its condition is false.
+      if (JSON.stringify(json).includes('Missing'))
+        return expectDeclined(json, /has no type in the GLSL fragment/);
+      const { code, f } = shader(json);
+      expectOnlyVectorNaN(code);
+      // The present value at the given `c` and `d`; every other choice of
+      // `c` and `d` selects no value.
+      for (const cc of [true, false])
+        for (const dd of [true, false]) {
+          if (cc === c && dd === d) expect(f(cc, dd)).toEqual({ x: X, y: Y });
+          else expectNaNVector(f(cc, dd));
+        }
     }
   );
 
@@ -372,11 +381,17 @@ describe.each(['glsl'] as const)('CE-588 — %s', (to) => {
   });
 
   it('the else-less If and When over a list of two numbers', () => {
+    const nan = `${vec2}(_gpu_nan())`;
     for (const json of [
       ['If', 'c', LIST],
       ['If', 'c', LIST],
-    ])
-      expectDeclined(json, /needs both branches/);
+    ]) {
+      const { code, f } = shader(json);
+      expect(code).toContain(nan);
+      expect(f(true)).toEqual({ x: X, y: Y });
+      const v = f(false) as { x: number; y: number };
+      expect([Number.isNaN(v.x), Number.isNaN(v.y)]).toEqual([true, true]);
+    }
   });
 
   it('a list of five numbers beside Missing still declines', () => {

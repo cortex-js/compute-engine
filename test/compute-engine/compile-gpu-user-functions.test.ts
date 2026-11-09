@@ -414,17 +414,18 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     );
   });
 
-  it('a parameter with no static shader type fails closed, naming it', () => {
+  it('a list parameter takes the vector type of its argument', () => {
     const ce = new ComputeEngine();
     ce.declare('m', '(list<real>) -> real');
     ce.assign('m', ce.parse('M \\mapsto 1'));
     ce.declare('A', 'list<real^3>');
-    // The argument is a list computed from the input `A`. The input itself as
-    // the argument, `m(A)`, takes the variant of `m` that reads the input in
-    // place of `M` (`ensureBoundListVariantEmitted`).
-    expect(() => glsl.compile(ce.expr(['m', ['Add', 'A', 1]]))).toThrow(
-      /The parameter `M` of `m` has no type in the GLSL fragment/
-    );
+    // The argument is a list of 3 reals computed from the input `A`. The
+    // type `list<real>` of `M` has no GLSL type, so `M` takes the type
+    // `vec3` of the argument at the first call.
+    const r = glsl.compile(ce.expr(['m', ['Add', 'A', 1]]));
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('_fn_m(A + 1.0)');
+    expect(r.preamble).toContain('float _fn_m(vec3 M) {');
   });
 
   it('a return value with no static shader type fails closed', () => {

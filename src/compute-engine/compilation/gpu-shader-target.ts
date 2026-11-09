@@ -1164,7 +1164,17 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
               colors.push(color);
               complexParams.push(complex);
               complexFrame.set(p, complex);
-              const n = complex ? 2 : color ? 3 : t.kind === 'point' ? t.size : 0;
+              // A list parameter is a list of 2 to 4 reals, a `vecN` (the
+              // spec, decision 18).
+              const n = complex
+                ? 2
+                : color
+                  ? 3
+                  : t.kind === 'point'
+                    ? t.size
+                    : t.kind === 'list'
+                      ? (t.count ?? 0)
+                      : 0;
               vectorFrame.set(
                 p,
                 t.kind === 'boolean'

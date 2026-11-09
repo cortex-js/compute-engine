@@ -602,7 +602,8 @@ const realValued = (n: number): FragmentRule<GlslRepresentation> => ({
 /** `Sum` and `Product`: a bound whose constant value is not a safe
  * integer (more than 2^53 - 1 in magnitude) is refused, as the emitter
  * refuses it (`assertSafeBigOpBounds()`): the index could not count
- * through it. */
+ * through it. With one operand and no index set, the aggregate adds or
+ * multiplies the elements of that operand (`walkCollectionAggregate()`). */
 function walkSafeAggregate(
   node: Expression,
   scope: FragmentScope<GlslRepresentation>,
@@ -610,6 +611,8 @@ function walkSafeAggregate(
   w: FragmentWalker<GlslRepresentation>
 ): FragmentFacts<GlslRepresentation> {
   const ops = isFunction(node) ? node.ops : [];
+  if (ops.length === 1)
+    return walkCollectionAggregate(node, ops[0], scope, context, w);
   for (const spec of ops.slice(1)) {
     const bounds = isFunction(spec, 'Limits')
       ? [spec.op2, spec.op3]
@@ -634,6 +637,55 @@ function walkSafeAggregate(
     }
   }
   return walkAggregate(node, scope, context, w);
+}
+
+/**
+ * `Sum(v)` and `Product(v)` of a collection `v` (the spec, section 6,
+ * decision 17): the sum or the product of its elements. The shader code writes the elements one by one
+ * (`compileGPUCollectionReduce()` in `gpu-reduce.ts`), as it unrolls a
+ * comprehension over a constant list, so the count of elements must be
+ * known when the code is compiled: a point of 2 to 4 real components, a
+ * list of 2 to 4 reals or integers (a `vecN`), or a `List` literal of at
+ * most 256 reals or integers (the shader array limit). `Sum((x, y))` is
+ * `x + y`, and `Sum(v^2)` with `v` a point is `dot(v, v)`. A list that the
+ * shader holds as an array and that is not a literal (a list input `L`, as
+ * a uniform array or in a texture, or `2L`) has no such list of elements in
+ * the shader code, and is refused, as is a list whose count is known only
+ * at run time.
+ */
+function walkCollectionAggregate(
+  node: Expression,
+  operand: Expression,
+  scope: FragmentScope<GlslRepresentation>,
+  context: FragmentContext<GlslRepresentation>,
+  w: FragmentWalker<GlslRepresentation>
+): FragmentFacts<GlslRepresentation> {
+  const facts = w.value(operand, scope, context);
+  const t = facts.type;
+  const element: FragmentValueType | undefined =
+    t.kind === 'point'
+      ? { kind: 'real' }
+      : t.kind === 'list' &&
+          (t.element.kind === 'real' || t.element.kind === 'integer') &&
+          t.count !== undefined &&
+          ((t.count >= 2 && t.count <= 4) ||
+            (isFunction(operand, 'List') &&
+              t.count <= GLSL_FRAGMENT_ARRAY_LIMIT))
+        ? t.element
+        : undefined;
+  if (element === undefined)
+    return w.refuse(
+      node,
+      'signature',
+      `\`${node.operator}\` of the collection \`${operand.toString()}\` of ` +
+        `the type \`${fragmentTypeToString(t)}\` is not in the GLSL ` +
+        `fragment: the collection must be a point, a list of 2 to 4 real ` +
+        `numbers, or a list literal of at most ${GLSL_FRAGMENT_ARRAY_LIMIT} ` +
+        `real numbers`
+    );
+  return w.valueFacts(node, element, [
+    { kind: 'none', type: t, representation: facts.representation },
+  ]);
 }
 
 /** `Binomial(n, k)`, `Choose(n, k)`: the shader unrolls the product
@@ -800,10 +852,11 @@ function walkGlslLoop(
  * `Which`: as `walkWhich()`. A `Which` with no default clause has the
  * value `Missing` when no condition holds, and its type has a `missing`
  * arm. The shader code writes that value as `NaN` in each lane of a
- * number, a complex number or a point. A boolean or a shader array has no
- * such lane, so `Which(c, [1, 2, 3, 4, 5])` and `Which(x > 0, True, y > 3,
- * False)` are refused (the absence check of `compileExpression()` in
- * `compiler-core.ts`, `assertObjectAbsenceRepresentable()`).
+ * number, a complex number or a point. A boolean, a color or a shader array
+ * has no such lane, so `Which(c, [1, 2, 3, 4, 5])`, `Which(x < 0, c)` with
+ * `c: color` and `Which(x > 0, True, y > 3, False)` are refused (the
+ * absence check of `compileExpression()` in `compiler-core.ts`,
+ * `assertObjectAbsenceRepresentable()`).
  */
 function walkGlslWhich(
   node: Expression,
@@ -821,7 +874,9 @@ function walkGlslWhich(
     t.count >= 2 &&
     t.count <= 4;
   if (
-    (t.kind === 'boolean' || (t.kind === 'list' && !vector)) &&
+    (t.kind === 'boolean' ||
+      t.kind === 'color' ||
+      (t.kind === 'list' && !vector)) &&
     isSubtype('missing', node.type.type)
   )
     return w.refuse(
@@ -831,6 +886,49 @@ function walkGlslWhich(
         `\`${fragmentTypeToString(t)}\`, which has no ` +
         `representation of \`Missing\` in GLSL: add a last clause with ` +
         `the condition \`True\``
+    );
+  return facts;
+}
+
+/**
+ * `If`: as `walkIf()`. An `If` with no else branch is a value (the spec,
+ * decision 16). Where its condition fails, the interpreter gives the
+ * absence value of the type of the branch, and the shader code gives the
+ * same value: `NaN` for a number, `NaN` in each lane of a complex number, a
+ * point or a list of 2 to 4 reals (`c ? a : _gpu_nan()`). A boolean branch
+ * gives `False` there: `compileExpression()` writes `If(c, r)` as
+ * `If(c, r, False)` (`isBooleanScalarRestriction()` in `compiler-core.ts`).
+ * A color and a shader array have no `NaN` value in the shader code (the
+ * absence check of `compileExpression()`), so `If(c, [1, 2, 3, 4, 5])` and
+ * `If(x < 0, Rgb(x, 0, 0))` are refused.
+ */
+function walkGlslIf(
+  node: Expression,
+  scope: FragmentScope<GlslRepresentation>,
+  context: FragmentContext<GlslRepresentation>,
+  w: FragmentWalker<GlslRepresentation>
+): FragmentFacts<GlslRepresentation> {
+  const facts = walkIf(node, scope, context, w);
+  if (
+    !isFunction(node) ||
+    node.nops !== 2 ||
+    context.place === 'statement'
+  )
+    return facts;
+  const t = facts.type;
+  const vector =
+    t.kind === 'list' &&
+    t.element.kind !== 'point' &&
+    t.count !== undefined &&
+    t.count >= 2 &&
+    t.count <= 4;
+  if (t.kind === 'color' || (t.kind === 'list' && !vector))
+    return w.refuse(
+      node,
+      'signature',
+      `The \`If\` has no else branch, and its value has the type ` +
+        `\`${fragmentTypeToString(t)}\`, which has no ` +
+        `\`NaN\` value in GLSL: add an else branch`
     );
   return facts;
 }
@@ -985,9 +1083,9 @@ export const GLSL_FRAGMENT_RULES: Readonly<
   Sin: ELEMENTARY,
   Cos: ELEMENTARY,
   Tan: ELEMENTARY,
-  Cot: REAL_OR_POINT_1,
-  Sec: REAL_OR_POINT_1,
-  Csc: REAL_OR_POINT_1,
+  Cot: ELEMENTARY,
+  Sec: ELEMENTARY,
+  Csc: ELEMENTARY,
   Sinh: ELEMENTARY,
   Cosh: ELEMENTARY,
   Tanh: ELEMENTARY,
@@ -1009,7 +1107,17 @@ export const GLSL_FRAGMENT_RULES: Readonly<
   Exp: ELEMENTARY,
   Exp2: REAL_OR_POINT_1,
   Ln: ELEMENTARY,
-  Log: { signatures: [sig(['real'], 'real'), sig(['real', 'real'], 'real')] },
+  // `Log` of a complex number, or to a complex base, calls the complex
+  // helper `_gpu_cln`; a real operand beside a complex one is read as a
+  // complex number.
+  Log: {
+    signatures: [
+      sig(['real'], 'real'),
+      sig(['real', 'real'], 'real'),
+      sig(['complex'], 'complex'),
+      sig(['complex', 'complex'], 'complex'),
+    ],
+  },
   Log2: REAL_OR_POINT_1,
   Log10: REAL_1,
   Lb: REAL_1,
@@ -1151,7 +1259,7 @@ export const GLSL_FRAGMENT_RULES: Readonly<
   Not: { signatures: [sig(['boolean'], 'boolean')] },
 
   // Selection, aggregates, indexing
-  If: walk(walkIf),
+  If: walk(walkGlslIf),
   Which: walk(walkGlslWhich),
   Sum: walk(walkSafeAggregate),
   Product: walk(walkSafeAggregate),
@@ -1603,6 +1711,15 @@ export function glslFragmentDefinition(
       if (binding.role === 'index')
         return type.kind === 'integer' ? 'int' : undefined;
       if (type.kind === 'list') {
+        // A parameter of a list of 2 to 4 reals is a `vecN` (the spec,
+        // decision 18). Another list is held only as an input.
+        if (binding.role === 'parameter')
+          return isScalarElement(type) &&
+            type.count !== undefined &&
+            type.count >= 2 &&
+            type.count <= 4
+            ? glslRepresentationOfValue(type)
+            : undefined;
         if (binding.role !== 'input') return undefined;
         if (
           isSymbol(binding.symbol) &&
@@ -1859,17 +1976,29 @@ function glslFunctionOf(
   // function is declared `function`), the type of the parameter in the
   // literal, `Typed(u, 'real')`, is the declared type, as the emitter reads
   // it.
-  const parameterTypes = kept.map((i) => {
+  const declaredTypes = kept.map((i) => {
     let declared = userFunctionParamType(engine, h, i);
     if (declared === undefined || declared === 'unknown' || declared === 'any')
       declared = declaredParamType(params[i]);
     if (declared === undefined || declared === 'unknown' || declared === 'any')
       return undefined;
+    return declared;
+  });
+  const parameterTypes = declaredTypes.map((declared) => {
+    if (declared === undefined) return undefined;
     const fragment = glslFragmentTypeOf(declared);
     return fragment === undefined || fragment.kind === 'list'
       ? undefined
       : fragment;
   });
+  // A parameter whose type is a collection with no fragment type
+  // (`list<number>`) takes a list argument whole (the spec, decision 18).
+  const collectionParameters = declaredTypes.map(
+    (declared, i) =>
+      declared !== undefined &&
+      parameterTypes[i] === undefined &&
+      isSubtype(declared, 'collection')
+  );
 
   // The body that the emitter compiles, prepared by the same two functions
   // as the emission: `definitionBodyExpr()` (the angular unit, the `parallel
@@ -1919,6 +2048,7 @@ function glslFunctionOf(
     name: h,
     parameters: parameterNames,
     parameterTypes,
+    collectionParameters,
     // The symbol of a parameter: `u`, or the `u` of `Typed(u, 'real')`.
     parameterSymbols: kept.map((i) => {
       if (inlined) return undefined;

@@ -94,13 +94,6 @@ describe('CE-595: a node read again in a conditional arm', () => {
         const ce = engine();
         const e = graph(ce, 20);
         const [result, ms] = timed(() => compile(e, { to }));
-        // The GLSL fragment refuses the `If` of a `When` value, which has one
-        // branch.
-        if (name === 'When value' && to === 'glsl') {
-          expect(result.success).toBe(false);
-          expect(result.diagnostic?.code).toBe('outside-fragment');
-          return;
-        }
         expect(result.success).toBe(true);
         // About 2,400 characters; 100 to 120 for each level.
         expect(result.code.length).toBeLessThan(3_000);
@@ -576,11 +569,26 @@ describe('CE-595: the emitted code does not change', () => {
   });
 
   test('When value, GLSL', () => {
-    // The GLSL fragment refuses the `If` of a `When` value, which has one
-    // branch.
-    const r = compile(whenArmGraph(engine(), 3), { to: 'glsl' });
-    expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('outside-fragment');
+    expect(compile(whenArmGraph(engine(), 3), { to: 'glsl' }).code).toBe(
+      [
+        'float _tv1;',
+        'float _tv2;',
+        'float _cse3 = sin(x);',
+        'float _cse4 = ((0.0 < _cse3) ? (sin(_cse3)) : (_gpu_nan()));',
+        'if (1.0 < _cse4) {',
+        '  _tv2 = _gpu_sin(_cse4);',
+        '} else {',
+        '  _tv2 = _gpu_nan();',
+        '}',
+        'float _cse5 = _tv2;',
+        'if (2.0 < _cse5) {',
+        '  _tv1 = _gpu_sin(_cse5);',
+        '} else {',
+        '  _tv1 = _gpu_nan();',
+        '}',
+        'return _tv1;',
+      ].join('\n')
+    );
   });
 
   test('When value, JavaScript', () => {

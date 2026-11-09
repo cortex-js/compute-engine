@@ -123,17 +123,23 @@ describe('CE-1107: a list input as the argument of a shader function', () => {
         'function g(a: list<real^5>, b: list<real^2>, c: list<real^2>) -> real { a[1] * 100 + b[1] * 10 + c[1] }'
       ).diagnostics
     ).toEqual([]);
-    // The GLSL fragment gives a parameter of a user function no list type.
-    expect(() =>
-      glsl.compile(
-        ce.box([
-          'Add',
-          ['g', 'X_1_Y', ['List', 1, 2], 'Z'],
-          ['Multiply', 1000, ['g', 'X', 'Y_2_Z', ['List', 3, 4]]],
-        ]),
-        { fallback: false }
-      )
-    ).toThrow(/The parameter `c` of `g` has no type in the GLSL fragment/);
+    const r = glsl.compile(
+      ce.box([
+        'Add',
+        ['g', 'X_1_Y', ['List', 1, 2], 'Z'],
+        ['Multiply', 1000, ['g', 'X', 'Y_2_Z', ['List', 3, 4]]],
+      ]),
+      { fallback: false }
+    );
+    expect(r.success).toBe(true);
+    const bodies = r.preamble
+      .split('\n')
+      .filter((line) => line.trim().startsWith('return'))
+      .join('\n');
+    expect(bodies).toContain('X_1_Y[0]');
+    expect(bodies).toContain('Z.x');
+    expect(bodies).toContain('X[0]');
+    expect(bodies).toContain('Y_2_Z.x');
   });
 
   test('an input with no static length still declines', () => {
@@ -189,30 +195,34 @@ describe('CE-1107: the calls that still decline', () => {
           fallback: false,
         })
       )
-    ).toMatch(/The parameter `H` of `g` has no type in the GLSL fragment/);
+    ).toMatch(/The index 1600 of `At` is outside the 3 elements of its base/);
   });
+});
 
+describe('CE-1107: an input of 2 to 4 elements is passed as a vector', () => {
+  // The input `K` has 4 elements, so the parameter `H` of `g` takes the
+  // type `vec4` of the argument at the first call. The call passes `K` as
+  // an argument, and no variant reads the input by its name, so a local or
+  // a parameter named `K` in the body does not hide it.
   test('a body that binds the name of the input', () => {
-    // The local `K` of the body would hide the input `K`.
     const ce = engineWith(
       'function g(H: list<integer>, x: real) -> real {\n  const K = 2\n  H[1] * x * K\n}'
     );
-    expect(
-      message(() =>
-        glsl.compile(ce.box(['g', 'K', 'x']), { fallback: false })
-      )
-    ).toMatch(/The parameter `H` of `g` has no type in the GLSL fragment/);
+    const r = glsl.compile(ce.box(['g', 'K', 'x']), { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('_fn_g(K, x)');
+    expect(r.preamble).toContain('float _fn_g(vec4 H, float x) {');
+    expect(r.preamble).toContain('return K * x * H.x;');
   });
 
   test('another parameter with the name of the input', () => {
-    // The parameter `K` would hide the input `K`.
     const ce = engineWith(
       'function g(H: list<integer>, K: real) -> real { H[1] * K }'
     );
-    expect(
-      message(() =>
-        glsl.compile(ce.box(['g', 'K', 'x']), { fallback: false })
-      )
-    ).toMatch(/The parameter `H` of `g` has no type in the GLSL fragment/);
+    const r = glsl.compile(ce.box(['g', 'K', 'x']), { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('_fn_g(K, x)');
+    expect(r.preamble).toContain('float _fn_g(vec4 H, float K) {');
+    expect(r.preamble).toContain('return K * H.x;');
   });
 });

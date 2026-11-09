@@ -981,7 +981,133 @@ describe('decisions 11 to 14', () => {
     expectIn(['g5', 'L', 'x']));
 
   test('14: a list parameter bound to a computed list is out', () => {
-    expectOut(['g5', ['List', 1, 2, 3], 'x']);
+    // A list of 2 to 4 reals is a `vecN` argument (decision 18); a longer
+    // one is not.
+    expectOut(['g5', ['List', 1, 2, 3, 4, 5], 'x']);
+  });
+});
+
+describe('decisions 16 to 18, and the complex reciprocal functions', () => {
+  const glsl = (json: unknown) =>
+    compile(ce.box(json as any), { to: 'glsl', fallback: false });
+
+  test('16: an If with no else branch is a value, NaN where the condition fails', () => {
+    const json = ['If', ['Less', 'x', 0], ['Sin', 'x']];
+    expectIn(json);
+    expect(glsl(json).code).toMatch(/\? \(\w*sin\(x\)\) : \(_gpu_nan\(\)\)/);
+    // The NaN of a point and of a complex number fills each lane.
+    expect(glsl(['If', ['Less', 'x', 0], 'p']).code).toContain('vec3(_gpu_nan())');
+    expect(glsl(['If', ['Less', 'x', 0], 'z']).code).toContain('vec2(_gpu_nan())');
+    // A boolean branch is `False` where the condition fails, as in the
+    // interpreter.
+    expectIn(['If', ['Less', 'x', 0], ['Less', 'x', -1]]);
+    expect(glsl(['If', ['Less', 'x', 0], ['Less', 'x', -1]]).code).toContain(
+      ': (false)'
+    );
+    expect(
+      ce.box(['If', ['Less', 'x', 0], ['Less', 'x', -1]]).subs({ x: 1 }).evaluate()
+        .symbol
+    ).toBe('False');
+  });
+
+  test('16: an If with no else branch and a colour or a long list is out', () => {
+    const r = expectOut(['If', ['Less', 'x', 0], 'c'], 'If');
+    expect(r.diagnostic.message).toMatch(/no else branch.*`color`/);
+    expectOut(['If', ['Less', 'x', 0], ['List', 1, 2, 3, 4, 5]], 'If');
+    // A `Which` with no default clause and a colour value is out too: the
+    // emitter has no `NaN` colour.
+    expectOut(['Which', ['Less', 'x', 0], 'c'], 'Which');
+  });
+
+  test('16: an If with no else branch whose condition is False is a value', () => {
+    // The code writes it as a `Which` of one clause, whose value is the
+    // absence value of the type of the branch, as in the interpreter.
+    const json = ['Add', 1, ['If', 'False', 'x']];
+    expectIn(json);
+    expect(glsl(json).code).toBe('((false) ? (x) : (_gpu_nan())) + 1.0');
+    expect(ce.box(['If', 'False', 'x']).evaluate().isNaN).toBe(true);
+    expectIn(['If', 'False', ['Less', 'x', 1]]);
+    expect(glsl(['If', 'False', ['Less', 'x', 1]]).code).toBe(
+      '((false) ? (x < 1.0) : (false))'
+    );
+  });
+
+  test('17: Sum and Product of a list of known length unroll', () => {
+    expectIn(['Sum', ['List', 'x', 'y', 3]]);
+    expect(glsl(['Sum', ['List', 'x', 'y', 3]]).code).toBe('x + y + 3.0');
+    expectIn(['Product', ['List', 'x', 'y', 3]]);
+    expectIn(['Sum', 'p']);
+    expect(glsl(['Sum', ['Power', 'p', 2]]).code).toBe('dot(p, p)');
+    expectIn(['Sum', ['List', 1, 'x', 3, 4, 5, 6]]);
+  });
+
+  test('17: Sum of a list input held as an array, in a texture or a scalar is out', () => {
+    const r = expectOut(['Sum', 'L'], 'Sum');
+    expect(r.diagnostic.message).toMatch(/list literal of at most 256/);
+    expectOut(['Sum', 'H'], undefined, { storage: { H: 'sampler2D' } });
+    expectOut(['Sum', 'x'], 'Sum');
+    expectOut(['Sum', 'z'], 'Sum');
+  });
+
+  test('18: a parameter typed as a collection takes the type of its argument', () => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    e.declare('y', 'real');
+    // The type that the engine infers from the `At` reads of the body.
+    e.declare('d', '(list<number>, list<number>) -> number');
+    e.assign(
+      'd',
+      e.box([
+        'Function',
+        [
+          'Add',
+          ['Multiply', ['At', 'a', 1], ['At', 'b', 1]],
+          ['Multiply', ['At', 'a', 2], ['At', 'b', 2]],
+        ],
+        'a',
+        'b',
+      ])
+    );
+    const json = ['d', ['List', 'x', 'y'], ['List', 1, 2]];
+    expect(canCompile(e.box(json as any), { to: 'glsl' })).toEqual({ ok: true });
+    const r = compile(e.box(json as any), { to: 'glsl', fallback: false });
+    expect(r.code).toBe('_fn_d(vec2(x, y), vec2(1.0, 2.0))');
+    expect(r.preamble).toContain('float _fn_d(vec2 a, vec2 b)');
+    // A later call with a list of another length is out (decision 11).
+    const out = canCompile(
+      e.box([
+        'Add',
+        json,
+        ['d', ['List', 'x', 'y', 1], ['List', 1, 2, 3]],
+      ] as any),
+      { to: 'glsl' }
+    );
+    expect(out.ok).toBe(false);
+    if (!out.ok)
+      expect(out.diagnostic.message).toMatch(
+        /`a` of `d` has no declared type in the GLSL fragment.*`list<real, 2>`.*`list<real, 3>`/
+      );
+  });
+
+  test('18: a parameter with no type and a list argument is out', () => {
+    // The interpreter applies `f` to each element of the list: the body
+    // read with a `vec2` would give another value.
+    const r = expectOut(['fu', ['List', 'x', 'y']]);
+    expect(r.diagnostic.message).toMatch(/`u` of `fu` has no type in the GLSL fragment/);
+  });
+
+  test.each(['Cot', 'Sec', 'Csc'])('%s of a complex number is in', (h) => {
+    expectIn([h, 'z']);
+    expect(glsl([h, 'z']).code).toMatch(/^_gpu_cdiv\(/);
+  });
+
+  test('Log of a complex number, and to a complex base, is in', () => {
+    expectIn(['Log', 'z']);
+    expectIn(['Log', 'x', 'z']);
+  });
+
+  test.each(['Arccot', 'Arcsch'])('%s of a complex number is out: no complex helper', (h) => {
+    expectOut([h, 'z'], h);
   });
 });
 

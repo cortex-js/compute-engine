@@ -179,9 +179,12 @@ describe('neyret/ra1p9naofs: a scalar function applied to a vec2 list on GLSL', 
   test('d(B(A(P(x, y)))) compiles to the interpreter value', () => {
     const ce = ra1p9naofs();
     const json = ['d', ['B', ['A', ['P', 'x', 'y']]]];
-    // The parameter of `A` has no declared type, and the GLSL fragment
-    // refuses it.
-    expect(() => glsl(ce, json)).toThrow(/The parameter `\w+` of `\w+` has no type in the GLSL fragment/);
+    // The parameter `p` of `f` has no declared type. The GLSL fragment gives
+    // it the type `real` of its argument at the first call, and a later call
+    // passes a point.
+    expect(() => glsl(ce, json)).toThrow(
+      /The parameter `p` of `f` has no declared type in the GLSL fragment, and it has the type `real` of its argument at the first call/
+    );
   });
 
   test('f([x, y]) compiles to the list of the values of f', () => {

@@ -529,10 +529,11 @@ describe.each(TARGETS)('CE-565.4 on %s', (to) => {
     it('calls the built-ins when every call passes a finite scalar', () => {
       const ce = engineWith('R', R_LITERAL, 'function');
       ce.declare('phi', 'real');
-      // The GLSL fragment has a `Sum` only over integer index ranges, and
-      // the body of `R` sums a list.
+      // `R` is declared `function`, so its parameter `V` has no type. The
+      // GLSL fragment does not give a list argument to a parameter with no
+      // type.
       expect(() => shader(ce, rowOf('phi'), to)).toThrow(
-        /`Sum` is in the GLSL fragment only over one or more integer index ranges/
+        /The parameter `V` of `R` has no type in the GLSL fragment/
       );
     });
   });

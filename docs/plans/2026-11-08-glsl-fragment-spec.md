@@ -48,9 +48,10 @@ most 4 × 4 real entries. Every free symbol has one of these types, declared
 or inferred in the engine (`compile()` has no option that gives a type;
 `hideValues` is an option of Tycho's wrapper). A symbol typed `unknown`, `any`, `expression`,
 `symbol`, `string`, `function` or a collection without a static count is
-outside the fragment. A parameter of a user function with no declared type
-is not a free symbol: it takes the type of its argument at the calls
-(decision 11). A free list input of at most 256 elements without a
+outside the fragment. A parameter of a user function with no declared type,
+or whose type is a collection with no declared length, is not a free
+symbol: it takes the type of its argument at the calls (decisions 11 and
+18). A free list input of at most 256 elements without a
 `storage` hint is a uniform array; a longer one is refused with a
 diagnostic that gives its length, the limit and the `storage` option
 (decision 12). The `vars` option, a rename map from the user's
@@ -83,8 +84,15 @@ refuses an entry that is code where the emitter would write that code twice
   `ColorFromColorspace`, `GamutMap`, `ContrastingColor`, `ColorContrast`.
 - Comparison and logic: `Less`, `LessEqual`, `Greater`, `GreaterEqual`,
   `Equal`, `NotEqual`, `And`, `Or`, `Not`, on real or boolean operands only.
-- Selection as an expression: `If` with both branches, `Which`, where every
-  branch has the same fragment type.
+- Selection as an expression: `If` and `Which`, where every branch has the
+  same fragment type. An `If` with no else branch has the type of its
+  branch (decision 16). Where its condition fails, the interpreter gives
+  the absence value of that type, and the shader code gives the same value:
+  `NaN` for a number, `NaN` in each lane of a complex number, a point or a
+  list of 2 to 4 reals (`c ? a : _gpu_nan()`); `False` for a boolean. A
+  color and a longer list have no such value in the shader code, and an
+  `If` with no else branch of such a type is refused; so is a `Which`
+  with no default clause.
 - Aggregates: `Sum` and `Product` over one or more integer index ranges whose
   bounds are integer-valued fragment expressions (a bound may depend on an
   input or on an outer index), with a body in the fragment. They lower to a
@@ -96,6 +104,14 @@ refuses an entry that is code where the emitter would write that code twice
   counts the passes that the emitted code runs, as the JavaScript target
   does: two equal aggregates that the common-subexpression pass writes once
   count once.
+  `Sum` and `Product` of one collection operand, with no index set, add or
+  multiply its elements, and the shader code writes the elements one by
+  one (decision 17): a point, a list of 2 to 4 reals, or a list literal
+  of at most 256 reals (`Sum([x, y, 3])` is `x + y + 3.0`; `Sum(v^2)` of a
+  point `v` is `dot(v, v)`). A list in a texture (`storage`), a list
+  whose count is known only at run time, and a list input held as a
+  uniform array of more than 4 elements are outside: the shader code has no
+  list of their elements.
 - Indexing: `At` with a constant index or an integer-valued fragment index on
   a base that is a constant list, a sampler-backed list input or a point;
   `Range` with integer-valued bounds, as the index set of a `Sum`, `Product`
@@ -105,7 +121,12 @@ refuses an entry that is code where the emitter would write that code twice
   function is emitted once as a GLSL function. A parameter with no declared
   type takes the type of the argument at the first call; a later call with
   an argument of another type is refused, and the diagnostic names the
-  parameter and the two types (decision 11).
+  parameter and the two types (decision 11). A parameter whose type is a
+  collection with no declared length (the engine infers
+  `dictionary<number> | indexed_collection<number>` for `a` from the read
+  `a[k]` of `h(a, k) = a[k] k`, whose index is not a literal) is read the
+  same way (decision 18): a point argument, or a list of 2 to 4 reals,
+  gives a `vecN` parameter.
 - The body of a user function, and the row root (decision 13), may be
   a scalar block (decision 6): `let` and `const`
   declarations of scalar, point or complex locals, assignment to a local, a
@@ -216,6 +237,20 @@ Tycho `9d75660ed`, CE 0.184.0; census script in the scratchpad of session
 | Records whose emitted code has a `for` loop | 18 in 8 documents, every one a `Sum` or `Product` |
 | Records whose emitted code has an `if` statement | 31 in 12 documents, every one a piecewise user function or a `Which` |
 | Records with a head outside the fragment that compile today | none. The two `Map` records with a function literal (`neyret/ac6kkpwrep`, `neyret/lwuwgb9ic5`) decline today (an array operand of `Add`); the comprehension of `neyret/0vlrmhen37` has constant bounds and unrolls, so it is in; the two comprehensions of `neyret/ibmtbbjyzq` have a bound in `t` and decline today. No record of today's run uses a random draw (`WithRandomSeed` appeared in two documents of the September run only). |
+
+The last row is wrong. The audit of 2026-11-09 (Tycho
+`scripts/audit-ce-codegen.mts --all` on the code of `ede66c90d`, compared
+with the same audit on 0.184.0) found 114 plot rows that compile to GLSL on
+0.184.0 and were refused by the fragment as first written, of 953 rows with
+a GPU route: an `If` with no else branch (104 rows in 41 documents, 280
+records), `Sum` of a list with no index set (8 rows in 2 documents), and
+`Cot` of a complex number (2 rows in 2 documents; the rule table did not
+list the complex helper that the emitter has). A fourth form, a parameter
+whose type is a collection with no declared length, was refused in 14
+records of 8 documents, whose rows kept a GPU route through another
+record. Each head of these forms is in the list; the census counted heads,
+not these forms of them. Decisions 16 to 18 and the complex `Cot`, `Sec`
+and `Csc` give these rows their GPU route again.
 
 Of the heads that occur in 10 or more documents, every one is in the
 fragment. The 52 declines are a constant list above the array limit (7, one
@@ -397,6 +432,48 @@ of the implementation plan, phase B):
     must be the declared input: a parameter or a local of the same name is
     not. A point of the user's expression beside a number stays refused,
     because the interpreter refuses `(1, 2) + 2`.
+
+Decisions 16 to 18, approved 2026-11-09, come from the corpus audit of
+2026-11-09 (section 4): each one gives back a GPU route that 0.184.0 had.
+
+16. **An `If` with no else branch is a value** (approved 2026-11-09).
+    `If(x < 0, sin(x))` compiles to
+    `((x < 0.0) ? (sin(x)) : (_gpu_nan()))`, as 0.184.0 wrote it. The
+    missing branch is `NaN`, or the `NaN` point or the `NaN` complex
+    number of the type of the branch. The interpreter gives the same
+    absence value there: `If(False, 1)` is `NaN`, and a point branch
+    gives a point of `NaN` coordinates. A boolean branch gives `False`,
+    as in the interpreter and in 0.184.0 (`If(x < 0, x < -1)` is
+    `((x < 0.0) ? (x < -1.0) : (false))`). A color
+    branch and a list of more than 4 elements have no `NaN` value in the
+    shader code and are refused, as the emitter refuses them. Corpus: 104
+    rows in 41 documents (280 records), for example `neyret/5qn5kcrszu`,
+    `neyret/57muddicpe`, `neyret/1khkviz2ts`, `neyret/3qkygakl9m`.
+17. **`Sum` or `Product` of a list of known length unrolls** (approved
+    2026-11-09), as a comprehension or a `Map` over a constant list does.
+    `Sum([x, y, 3])` compiles to `x + y + 3.0`, and `Sum(v^2)` with `v` a
+    list of 2 reals to `dot(v, v)`. The operand is a point, a list of 2 to
+    4 reals or a list literal of at most 256 elements. A list in a texture
+    (`storage`) or of unknown length stays out. A list input held as a
+    uniform array of more than 4 elements (`Sum(L)` with `L: list<real^5>`)
+    stays out too: the emitter has no list of its elements and declines it,
+    as 0.184.0 did. Corpus: 8 rows in 2 documents (`neyret/1dee4lkte2`,
+    `neyret/pqflulcixs`).
+18. **Decision 11 is extended to a parameter whose type is a collection
+    with no declared length** (approved 2026-11-09). The engine infers
+    such a type from an `At` read whose index is not a literal: in
+    `h(a, k) = a[k] k`, `a` has the type
+    `dictionary<number> | indexed_collection<number>`. (With literal
+    indexes, as in `d(a, b) = a[1] b[1] + a[2] b[2]`, the engine infers
+    `tuple<number, number>`, a point, and decision 11 applies.) Such a
+    parameter takes the type of its argument at the first call: a point or
+    a list of 2 to 4 reals gives a `vecN` parameter (`h([x, y], 2)`
+    compiles to `_fn_h_vector_real_2_number(vec2(x, y), 2.0)`, and the
+    interpreter gives 8 at x = 3, y = 4). A later call with another type is
+    refused, as in decision 11. A longer list argument gives no type, and
+    the call is refused unless decision 8 or 14 admits it. Corpus: 14
+    records in 8 documents (`neyret/0et6fx01id`: "The parameter
+    `ceArg_0` of `d` has no type in the GLSL fragment").
 
 A bound or an index whose type is real (`Limits(k, 1, n)` with `n: real`)
 stays admitted, and the emitted code truncates it with `int()`. This gives

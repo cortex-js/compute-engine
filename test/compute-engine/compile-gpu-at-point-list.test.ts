@@ -240,14 +240,13 @@ describe('GPU: First, Second, Third and Last of other operands', () => {
   test('a conditional point with no absent arm is read with a swizzle', () => {
     // A restriction, `If` with no else branch and `Which` give a vector of NaN
     // when the point is absent, and the interpreter gives NaN.
-    // The fragment refuses an `If` that is a value and has one branch.
     for (const to of ['glsl'] as const) {
-      expect(() =>
+      expect(
         code(to, ['First', ['If', ['Less', 0, 'x'], ['Tuple', 'x', 2]]])
-      ).toThrow(/An `If` that is a value needs both branches/);
-      expect(() =>
+      ).toMatch(/\)\.x$/);
+      expect(
         code(to, ['Second', ['If', ['Less', 0, 'x'], ['Tuple', 'x', 2]]])
-      ).toThrow(/An `If` that is a value needs both branches/);
+      ).toMatch(/\)\.y$/);
     }
   });
 

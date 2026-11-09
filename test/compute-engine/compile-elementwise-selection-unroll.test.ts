@@ -37,19 +37,9 @@ function interpreted(latex: string, x: number): number {
   return ce.parse(latex).subs({ x: ce.number(x) }).N().re as number;
 }
 
-function expectAllTargetsAgree(
-  latex: string,
-  xs: number[],
-  glslDeclines?: RegExp
-): void {
+function expectAllTargetsAgree(latex: string, xs: number[]): void {
   const expr = ce.parse(latex);
   for (const to of ['interval-js', 'javascript', 'glsl'] as const) {
-    if (to === 'glsl' && glslDeclines !== undefined) {
-      expect(() => compile(expr, { to, fallback: false })).toThrow(
-        glslDeclines
-      );
-      continue;
-    }
     const r = compile(expr, { to, fallback: false });
     expect([to, r.success, r.error?.message]).toEqual([to, true, undefined]);
   }
@@ -257,9 +247,7 @@ describe('A literal index pushed through an element-wise selection', () => {
   test('a restriction over a list of conditions compiles at one index on every target', () => {
     expectAllTargetsAgree(
       String.raw`\operatorname{If}(\vert x+\bigl\lbrack3, 2, 1\bigr\rbrack/3\vert\lt1, 7)[2]`,
-      [-0.5, 0.2, -1.5],
-      // The GLSL fragment needs both branches of an `If` that is a value.
-      /An `If` that is a value needs both branches/
+      [-0.5, 0.2, -1.5]
     );
     // At `x = 0.9` the condition fails: the masked number is `NaN` in the
     // interpreter and in the compiled code.

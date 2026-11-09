@@ -77,7 +77,10 @@ export type FragmentType =
   /** A user function that is emitted once as a function of the target. */
   | {
       kind: 'function';
-      parameters: readonly { name: string; type: FragmentValueType }[];
+      parameters: readonly {
+        name: string;
+        type: FragmentValueType | FragmentListType;
+      }[];
       /** A list result has a static count: the compiler writes the body of
        *  such a function at each call. */
       result: FragmentValueType | FragmentListType;
@@ -388,6 +391,14 @@ export type FragmentFunction = {
   /** The type of each parameter, from the declared signature, or
    *  `undefined` when the parameter has no fragment type. */
   readonly parameterTypes: readonly (FragmentValueType | undefined)[];
+  /** For each parameter, `true` when its declared or inferred type is a
+   *  collection with no fragment type (`list<number>`, which the engine
+   *  infers from the `At` reads of the body). Such a parameter takes a
+   *  list argument whole, and a list argument of 2 to 4 numbers gives it
+   *  that list type, held as a `vecN` (the spec, decision 18). A parameter
+   *  with no type, or of a scalar type, does not: the interpreter applies the
+   *  function to each element of a list argument. */
+  readonly collectionParameters?: readonly boolean[];
   /** The symbol of each parameter in the function literal, when the
    *  literal has one. The pass binds the parameter with it, so that the
    *  check of a reserved name and the message of a limit read the name. */
@@ -947,6 +958,37 @@ function makeWalker<R>(
     if (isScalarNumeric(from) && type.kind === 'complex')
       return { kind: 'real-to-complex', type, representation: target };
     return undefined;
+  };
+
+  /** The type that a parameter with no type in the fragment takes from
+   *  an argument of the type `t` (the spec, decisions 11 and 18), or
+   *  `undefined` when it takes none. An integer gives a real, as a local of
+   *  a function body is: the parameter holds a value of the arithmetic of
+   *  the body. For a parameter whose type is a collection (`collection`,
+   *  `FragmentFunction.collectionParameters`), a list of 2 to 4 numbers
+   *  that the target holds as it holds a point (a GLSL `vec2` to `vec4`)
+   *  gives that list type: the parameter `a` of `d(a, b) = a[1] b[1] +
+   *  a[2] b[2]` called with `[x, y]` is a `list<real, 2>`, a `vec2`. The
+   *  body reads it as a list, as the interpreter does (`Abs(a)` is the
+   *  list of the absolute values, not the norm of a point). Another list
+   *  gives no type: a list parameter is admitted only bound to a list
+   *  input, which the variant of the function reads by name. A list
+   *  argument of a parameter that is not a collection gives no type either:
+   *  the interpreter applies the function to each element (`f([x, y])` is
+   *  `[f(x), f(y)]`). */
+  const parameterTypeOf = (
+    t: FragmentValueType | FragmentListType,
+    collection: boolean
+  ): FragmentValueType | FragmentListType | undefined => {
+    if (t.kind !== 'list') return localType(t);
+    if (!collection) return undefined;
+    if (!isScalarNumeric(t.element) || t.count === undefined) return undefined;
+    const representation = definition.representationOfValue(t);
+    return representation !== undefined &&
+      representation ===
+        definition.representationOfValue({ kind: 'point', size: t.count })
+      ? { kind: 'list', element: { kind: 'real' }, count: t.count }
+      : undefined;
   };
 
   const join = (
@@ -1638,15 +1680,20 @@ function makeWalker<R>(
       // the first call. A later call with an argument of another type is
       // refused (the spec, decision 11): the function is emitted once, with
       // that parameter type. An integer and a real are one type here.
+      const fromArgument =
+        inferred?.[i] === true
+          ? parameterTypeOf(a.type, fn.collectionParameters?.[i] === true)
+          : undefined;
       if (
         inferred?.[i] === true &&
-        !sameType(localType(a.type), type.parameters[i].type)
+        (fromArgument === undefined ||
+          !sameType(fromArgument, type.parameters[i].type))
       )
         return refuse(
           fn.arguments[i],
           'signature',
           `The parameter \`${fn.parameters[i]}\` of \`${fn.name}\` has no ` +
-            `declared type, and it has the type ` +
+            `declared type in the ${fragment} fragment, and it has the type ` +
             `\`${fragmentTypeToString(type.parameters[i].type)}\` of its ` +
             `argument at the first call; the argument ` +
             `\`${fn.arguments[i].toString()}\` has the type ` +
@@ -1654,7 +1701,16 @@ function makeWalker<R>(
             `parameter, or call the function with arguments of one type`,
           fn.parameters[i]
         );
-      const c = convert(a, type.parameters[i].type);
+      // A list argument of a list parameter is passed as it is: an
+      // integer list has the representation of a real list of its length.
+      const c =
+        a.type.kind === 'list' && fromArgument !== undefined
+          ? {
+              kind: 'none' as const,
+              type: fromArgument,
+              representation: a.representation,
+            }
+          : convert(a, type.parameters[i].type);
       if (c === undefined)
         return refuse(
           fn.arguments[i],
@@ -1713,19 +1769,18 @@ function makeWalker<R>(
       );
       state.inferred.set(fn.key, inferred);
       const parameters = fn.parameters.map((name, i) => {
-        // A parameter with no declared type takes the type of its argument
-        // at this call, the first one (the spec, decision 11). An integer
-        // argument gives a real parameter, as a local of a function body
-        // is: the parameter holds a value of the arithmetic of the body. A
-        // list argument gives no parameter type: a list parameter is
-        // admitted only bound to a list input, which the variant of the
-        // function reads by name.
+        // A parameter with no type in the fragment takes the type of its
+        // argument at this call, the first one (the spec, decisions 11 and
+        // 18; `parameterTypeOf()`).
         const fromArgument = args[i]?.type;
         const type =
           fn.parameterTypes[i] ??
-          (fromArgument === undefined || fromArgument.kind === 'list'
+          (fromArgument === undefined
             ? undefined
-            : (localType(fromArgument) as FragmentValueType));
+            : parameterTypeOf(
+                fromArgument,
+                fn.collectionParameters?.[i] === true
+              ));
         if (type === undefined)
           return refuse(
             call,
@@ -2327,8 +2382,12 @@ export function walkBlock<R>(
 }
 
 /** `If`: the condition, then the branches, in the current scope. As a
- * value, both branches, of one type. As a statement, the `else` branch is
- * optional. */
+ * value with two branches, the branches have one type. As a value with no
+ * else branch, the `If` has the type of its one branch: the compiler writes
+ * it as the `Which` of one clause, whose value where the condition fails is
+ * the absent value of that type (`NaN`, or `False` for a boolean). The
+ * target rule decides which types have such a value. As a statement, the
+ * `else` branch is optional. */
 export function walkIf<R>(
   node: Expression,
   scope: FragmentScope<R>,
@@ -2382,11 +2441,35 @@ export function walkIf<R>(
     }
     return { type: { kind: 'statement' } };
   }
+  if (ops.length === 2) {
+    // A condition decided false has the type of the branch too: the code
+    // writes the `If` as a `Which` of one clause, whose value is the
+    // absence value of the type of the branch (`NaN` for a number).
+    // One conversion per operand: the condition, then the branch read as
+    // its own type.
+    const value = w.value(ops[1], scope, context);
+    const conversions = [
+      w.convert(condition, { kind: 'boolean' }),
+      w.convert(value, value.type),
+    ];
+    if (conversions.some((c) => c === undefined))
+      return w.refuse(
+        node,
+        'signature',
+        `The branch of the \`If\` has the type ` +
+          `\`${fragmentTypeToString(value.type)}\`, which is not read as itself`
+      );
+    return w.valueFacts(
+      node,
+      value.type,
+      conversions as FragmentConversion<R>[]
+    );
+  }
   if (ops.length !== 3)
     return w.refuse(
       node,
       'signature',
-      `An \`If\` that is a value needs both branches`
+      `An \`If\` needs a condition and one or two branches`
     );
   const a = w.value(ops[1], scope, context);
   const b = w.value(ops[2], scope, context);

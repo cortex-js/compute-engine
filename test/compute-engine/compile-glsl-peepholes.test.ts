@@ -152,24 +152,18 @@ describe('sum of squared components is a dot product', () => {
 
   it('GLSL binds the vector once and calls dot', () => {
     const ce = withPoints();
-    // The GLSL fragment has a `Sum` only over integer index ranges, so the
-    // reduction over a vector declines.
-    expect(() =>
-      new GLSLTarget().compile(
-        ce.parse('\\sum\\left(\\left(x-\\mathrm{PointX}(P)\\right)^2\\right)')
-      )
-    ).toThrow(
-      /`Sum` is in the GLSL fragment only over one or more integer index ranges/
+    const code = new GLSLTarget().compile(
+      ce.parse('\\sum\\left(\\left(x-\\mathrm{PointX}(P)\\right)^2\\right)')
+    ).code;
+    expect(code).toBe(
+      'vec2 _tv1 = x + vec2(1.0, 3.0);\nreturn dot(_tv1, _tv1);'
     );
   });
 
   it('a bare vector symbol is named twice, with no temporary', () => {
     const ce = fresh();
     ce.declare('v', 'vector<2>');
-    // The GLSL fragment has a `Sum` only over integer index ranges.
-    expect(() => glsl(['Sum', ['Power', 'v', 2]], ce)).toThrow(
-      /`Sum` is in the GLSL fragment only over one or more integer index ranges/
-    );
+    expect(glsl(['Sum', ['Power', 'v', 2]], ce).code).toBe('dot(v, v)');
   });
 
   it('a caller-mapped square keeps the component fold', () => {
@@ -193,9 +187,8 @@ describe('sum of squared components is a dot product', () => {
     ce.declare('v', 'vector<2>');
     // The square of a bare vector symbol inlines as `v * v`, and the
     // component fold reads the product's components back out of a temporary.
-    // The GLSL fragment has a `Product` only over integer index ranges.
-    expect(() => glsl(['Product', ['Power', 'v', 2]], ce)).toThrow(
-      /`Product` is in the GLSL fragment only over one or more integer index ranges/
+    expect(glsl(['Product', ['Power', 'v', 2]], ce).code).toBe(
+      'vec2 _tv1 = (v * v);\nreturn ((_tv1.x) * (_tv1.y));'
     );
   });
 });

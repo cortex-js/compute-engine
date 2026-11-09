@@ -91,10 +91,15 @@ describe('CE-562 — a user-function body shares a call between the condition an
   it('glsl', () => {
     const ce = engineWithT4();
     const r = compile(ce.parse('\\cos(T_4(t))'), { to: 'glsl' });
-    // The GLSL fragment needs both branches of an `If` that is a value, and
-    // a `When` has one.
-    expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('outside-fragment');
+    expect(r.success).toBe(true);
+    expect(definition(r.preamble, 'T_4')).toBe(
+      [
+        'float _fn_T_4(float ceArg_0) {',
+        '  float _cse1 = _fn_T_3(ceArg_0);',
+        '  return ((-0.8164966 < _gpu_cos(_cse1)) ? (_cse1) : (_gpu_nan()));',
+        '}',
+      ].join('\n')
+    );
   });
 
   it('interval-js', () => {
@@ -139,12 +144,6 @@ describe('CE-562 — a top-level When', () => {
     (to) => {
       const ce = engineWithF();
       const r = compile(ce.box(shared as never), { to });
-      if (to === 'glsl') {
-        // The GLSL fragment needs both branches of an `If` that is a value.
-        expect(r.success).toBe(false);
-        expect(r.diagnostic?.code).toBe('outside-fragment');
-        return;
-      }
       expect(r.success).toBe(true);
       expect(count(r.code, '_fn_f(')).toBe(1);
     }
