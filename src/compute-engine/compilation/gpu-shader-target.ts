@@ -164,6 +164,33 @@ import {
   GPU_NAN_SAFE_PREAMBLE_GLSL,
 } from './gpu-nan-safe.js';
 
+/**
+ * The result of the prepare stage of a root compilation
+ * (`GPUShaderTarget.prepareRoot()`): the tree that the emit stage walks, and
+ * the state that the emit stage needs to write it.
+ *
+ * The emit stage (`GPUShaderTarget.emitPreparedRoot()`) reads this tree
+ * without a change. A later typing pass reads the same tree between the two
+ * stages, so no rewrite may run between the prepare stage and the emit stage:
+ * a rewrite there would give a tree that the pass did not type.
+ */
+interface GpuPreparedRoot {
+  /** The tree after every rewrite of the prepare stage. */
+  readonly expr: Expression;
+  /** The compile target of the root, made for `expr` by the prepare stage. */
+  readonly target: CompileTarget<Expression>;
+  /**
+   * The options of the common-subexpression pass. The prepare stage checks
+   * the written size with the rules of the pass under these options, and the
+   * emit stage opens the session of the pass with the same options.
+   */
+  readonly cseOptions: {
+    readonly isOverriddenOperator: (name: string) => boolean;
+    readonly isStringVar: (name: string) => boolean;
+    readonly isVarsKey: (name: string) => boolean;
+  };
+}
+
 export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   /** Language identifier (e.g., 'glsl') */
   protected abstract readonly languageId: string;
@@ -1436,11 +1463,46 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     }
   }
 
+  /**
+   * Compile the root expression in two stages: the prepare stage
+   * (`prepareRoot()`) rewrites the tree and checks its written size, and the
+   * emit stage (`emitPreparedRoot()`) writes the code of the prepared tree.
+   * No rewrite may run between the two stages: a later typing pass reads the
+   * prepared tree between them, and the emit stage must write the tree that
+   * the pass typed.
+   */
   private compileOrThrow(
     expr: Expression,
     options: CompilationOptions<Expression> = {},
     storage?: CompileTarget<Expression>['storage']
   ): CompilationResult {
+    return this.emitPreparedRoot(
+      this.prepareRoot(expr, options, storage),
+      options
+    );
+  }
+
+  /**
+   * The prepare stage of a root compilation. It puts `expr` in the radian
+   * convention, unrolls the collections of fixed width, makes the compile
+   * target of the root, writes point values and the bodies of some user
+   * functions in place of their calls, unrolls again, and refuses a tree
+   * whose code would be too large (`gpuWrittenSize()`). It writes no code.
+   *
+   * The rewrites run in this order: `rewriteAngularUnit()`,
+   * `unrollFixedWidthCollections()`, `inlinePointCalls()`,
+   * `inlinePointValues()`, `BaseCompiler.inlineCollectionValuedCallsAtRoot()`,
+   * `inlineSharedUserFunctionCalls()`, `unrollFixedWidthCollections()`.
+   *
+   * The stage throws for an expression that the target cannot compile. A
+   * caller that wants to know only whether the expression compiles can call
+   * this stage without the emit stage.
+   */
+  private prepareRoot(
+    expr: Expression,
+    options: CompilationOptions<Expression>,
+    storage: CompileTarget<Expression>['storage'] | undefined
+  ): GpuPreparedRoot {
     // Reproduce the engine's `angularUnit` semantics in radian-based code.
     expr = rewriteAngularUnit(expr);
     // Turn a collection whose WIDTH is known at compile time into straight-line
@@ -1643,9 +1705,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // with the depth (ROADMAP CE-584), so it is refused here, before it is
     // written (`gpuWrittenSize`, `gpu-written-size.ts`).
     // The check uses the rules of the pass (`cseRecordingRules()`,
-    // `cse.ts`) with the options of the session below, and runs before the
-    // session opens: the harvest of the pass can itself take a time
-    // exponential in the depth of such a graph.
+    // `cse.ts`) with the options of the session that the emit stage opens,
+    // and runs before the session opens: the harvest of the pass can itself
+    // take a time exponential in the depth of such a graph.
     const writtenSize = gpuWrittenSize(expr, {
       ...cseRecordingRules(expr, {
         ...cseOptions,
@@ -1665,7 +1727,22 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           `variable (\`u.c\`), it is not pure, or the \`cse\` option is ` +
           `false.`
       );
+    return { expr, target, cseOptions };
+  }
 
+  /**
+   * The emit stage of a root compilation: it writes the code of the tree
+   * that `prepareRoot()` returned, with its preamble, its warnings and its
+   * references. It changes no node of the tree. The common-subexpression
+   * pass of this stage binds a node to a temporary, and the node keeps its
+   * place in the tree.
+   */
+  private emitPreparedRoot(
+    prepared: GpuPreparedRoot,
+    options: CompilationOptions<Expression>
+  ): CompilationResult {
+    const { expr, target, cseOptions } = prepared;
+    const { vars } = options;
     // A statement position: the emitted `code` is a function body, so a
     // loop-form `Sum`/`Product` nested anywhere inside may hoist its loop ahead
     // of the value (Tycho item 110). With nothing hoisted this is byte-identical
