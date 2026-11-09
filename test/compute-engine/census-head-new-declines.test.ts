@@ -179,20 +179,35 @@ describe('neyret/ra1p9naofs: a scalar function applied to a vec2 list on GLSL', 
   test('d(B(A(P(x, y)))) compiles to the interpreter value', () => {
     const ce = ra1p9naofs();
     const json = ['d', ['B', ['A', ['P', 'x', 'y']]]];
-    // The parameter `p` of `f` has no declared type. The GLSL fragment gives
-    // it the type `real` of its argument at the first call, and a later call
-    // passes a point.
-    expect(() => glsl(ce, json)).toThrow(
-      /The parameter `p` of `f` has no declared type in the GLSL fragment, and it has the type `real` of its argument at the first call/
+    const result = glsl(ce, json);
+    expect(result.success).toBe(true);
+    // `f` is applied to each component of the `vec2` list in the copy of `r`.
+    expect(result.preamble).toMatch(
+      /vec2 _fn_f_each2_1\(vec2 a0\) \{\n {2}return vec2\(_fn_f\(a0\.x\), _fn_f\(a0\.y\)\);/
     );
+    for (const [x, y] of SAMPLES) {
+      const expected = ce
+        .box(json as any)
+        .subs({ x, y })
+        .evaluate().re;
+      expect(evalGLSL(result, { x, y })).toBeCloseTo(expected, 5);
+    }
   });
 
   test('f([x, y]) compiles to the list of the values of f', () => {
     const ce = ra1p9naofs();
     const json = ['f', ['List', 'x', 'y']];
-    // The parameter of `f` has no declared type, and the GLSL fragment
-    // refuses it.
-    expect(() => glsl(ce, json)).toThrow(/The parameter `\w+` of `\w+` has no type in the GLSL fragment/);
+    const result = glsl(ce, json);
+    expect(result.success).toBe(true);
+    for (const [x, y] of SAMPLES) {
+      const expected = ce
+        .box(json as any)
+        .subs({ x, y })
+        .evaluate();
+      const v = evalGLSL(result, { x, y }) as { x: number; y: number };
+      expect(v.x).toBeCloseTo(expected.ops![0].re, 5);
+      expect(v.y).toBeCloseTo(expected.ops![1].re, 5);
+    }
   });
 
   test('the wrapper name does not collide with a user function', () => {
@@ -208,9 +223,16 @@ describe('neyret/ra1p9naofs: a scalar function applied to a vec2 list on GLSL', 
       ['Add', a, b],
       ['Add', b, a],
     ]) {
-      // The parameter of `f` has no declared type, and the GLSL fragment
-      // refuses it.
-      expect(() => glsl(ce, json)).toThrow(/The parameter `\w+` of `\w+` has no type in the GLSL fragment/);
+      const result = glsl(ce, json);
+      expect(result.success).toBe(true);
+      const names = [...result.code.matchAll(/(_fn_\w+)\(/g)].map((m) => m[1]);
+      expect(names).toHaveLength(2);
+      expect(names[0]).not.toBe(names[1]);
+      const user = names.find((n) => /^_fn_f_each2_1$/.test(n));
+      const wrapper = names.find((n) => n !== user);
+      expect(user).toBeDefined();
+      expect(result.preamble).toContain(`float ${user}(float q) {`);
+      expect(result.preamble).toContain(`vec2 ${wrapper}(vec2 a0) {`);
     }
   });
 
@@ -230,9 +252,18 @@ describe('neyret/ra1p9naofs: a scalar function applied to a vec2 list on GLSL', 
       ['g', ['List', 'x', 'y'], 'z'],
       ['g', 'z', ['List', 'x', 'y']],
     ]) {
-      // The parameter of `g` has no declared type, and the GLSL fragment
-      // refuses it.
-      expect(() => glsl(ce, json)).toThrow(/The parameter `\w+` of `\w+` has no type in the GLSL fragment/);
+      const result = glsl(ce, json);
+      expect(result.success).toBe(true);
+      for (const [x, y] of SAMPLES) {
+        const z = x - 2 * y;
+        const expected = ce
+          .box(json as any)
+          .subs({ x, y, z })
+          .evaluate();
+        const v = evalGLSL(result, { x, y, z }) as { x: number; y: number };
+        expect(v.x).toBeCloseTo(expected.ops![0].re, 5);
+        expect(v.y).toBeCloseTo(expected.ops![1].re, 5);
+      }
     }
   });
 
@@ -253,9 +284,23 @@ describe('neyret/ra1p9naofs: a scalar function applied to a vec2 list on GLSL', 
       ['At', ['g', ['List', 'x', 'y'], 'z'], 1],
       ['At', ['g', 'z', ['List', 'x', 'y']], 2],
     ];
-    // The parameters of `g` have no declared type, and the GLSL fragment
-    // refuses them.
-    expect(() => glsl(ce, json)).toThrow(/The parameter `\w+` of `\w+` has no type in the GLSL fragment/);
+    const result = glsl(ce, json);
+    expect(result.success).toBe(true);
+    const preamble = result.preamble ?? '';
+    expect(
+      preamble.match(/vec2 _fn_g_each2_10\(vec2 a0, float a1\) \{/g)
+    ).toHaveLength(1);
+    expect(
+      preamble.match(/vec2 _fn_g_each2_01\(float a0, vec2 a1\) \{/g)
+    ).toHaveLength(1);
+    for (const [x, y] of SAMPLES) {
+      const z = x - 2 * y;
+      const expected = ce
+        .box(json as any)
+        .subs({ x, y, z })
+        .evaluate().re;
+      expect(evalGLSL(result, { x, y, z })).toBeCloseTo(expected, 5);
+    }
   });
 
   test('lists of different widths decline', () => {
@@ -272,7 +317,7 @@ describe('neyret/ra1p9naofs: a scalar function applied to a vec2 list on GLSL', 
     ce.declare('z', 'real');
     const json = ['g', ['List', 'x', 'y'], ['List', 'x', 'y', 'z']];
     expect(() => glsl(ce, json)).toThrow(
-/The parameter `\w+` of `\w+` has no type in the GLSL fragment/
+      /applies `g` to each element of lists of different lengths/
     );
   });
 

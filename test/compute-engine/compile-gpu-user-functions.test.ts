@@ -446,7 +446,7 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
       glsl.compile(ce.expr(['f', ['List', 1, 2, 3, 4, 5]]), {
         constantFold: false,
       })
-    ).toThrow(/The parameter `x` of `f` has no type in the GLSL fragment/);
+    ).toThrow(/the GLSL code maps a list of 2 to 4 reals only/);
   });
 
   it('a tuple at a parameter DECLARED as a number maps over its components', () => {

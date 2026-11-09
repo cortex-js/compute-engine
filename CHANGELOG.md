@@ -78,7 +78,20 @@
     `L: list<real^3>` gives `((L.x) + (L.y) + (L.z))`. The list is a point,
     a list of 2 to 4 numbers, or a list literal of at most 256 elements;
   - a number added to a name that `compileShader()` or `compileFunction()`
-    declares as a GLSL vector (`gl_FragCoord + 1`).
+    declares as a GLSL vector (`gl_FragCoord + 1`);
+  - a call of a user function with a list of 2 to 4 reals, with the value
+    that the interpreter gives. When every parameter of the function is
+    scalar, the interpreter applies the function to each element, and so
+    does the shader code: with `f(u) := u mod 1`, `f([-x, -y])` gives
+    `_fn_f_each2_1(vec2(-x, -y))`, a wrapper that calls `float _fn_f(float u)`
+    on each component. Otherwise the list binds its parameter whole: a
+    parameter with no declared type, or whose type the engine infers from
+    the index reads of the body, is a `vec2` to `vec4`. With
+    `R(V, t) := [Sum(V·[cos t, -sin t]), Sum(V·[sin t, cos t])]`,
+    `R([x, y], 0.5)` gives `_fn_R_vector_real_2_number(vec2(x, y), 0.5)`. A
+    longer list, lists of two lengths in one element-wise call, a complex
+    parameter beside a mapped list, and a list at a point parameter that
+    the body passes to a declared point parameter decline.
 
 - **A loop of a `glsl` compilation stops after 10,000 passes.** The code of
   `compile()` to `glsl` counts the passes of every loop that the shader runs

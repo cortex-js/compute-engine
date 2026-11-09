@@ -26,7 +26,7 @@ use alone is insufficient. Dynamic list calls retain their existing handling.
 Functions that assign to their parameters use the original compile path, so
 specialization cannot turn
 an unannotated assignment target into an enforced type annotation.
-GLSL and WGSL use the same parameter types for helper declarations and calls.
+GLSL uses the same parameter types for helper declarations and calls.
 
 An operator compilation handler can read `context.typeOf(expr)` for facts
 established by the target's local bindings. This does not change `expr.type`.

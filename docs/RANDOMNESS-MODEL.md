@@ -331,7 +331,7 @@ w0, w1, w2 = pcg3d(seedLo, seedHi, n)      // w2 unused by both presentations
 ```
 
 Why this generator, against the constraints above: no u64 exists in JS or in
-GLSL/WGSL, so a 64-bit algorithm would be emulated on both sides; PCG3D fails
+GLSL, so a 64-bit algorithm would be emulated on both sides; PCG3D fails
 **1** TestU01 BigCrush test where PCG2D fails 35; adjacent seeds decorrelate,
 which matters because per-cell seeds are commonly derived (`base + cellIndex`);
 and it is published and citable, so a third party can verify a stored document.
@@ -350,15 +350,15 @@ custom kernels are interpreted-only.
 
 ### Parity is tiered — the GPU cannot be bit-equal
 
-GLSL and WGSL have no f64, and GLSL ES float ops are not IEEE-pinned. A flat
+GLSL has no f64, and GLSL ES float ops are not IEEE-pinned. A flat
 bit-parity contract would promise something no shader can deliver, so the
 contract is tiered around the **integer** stream:
 
 | Tier | Contract |
 |---|---|
-| **Canonical object** | the integer stream `pcg3d(seedLo, seedHi, n)` — u32 ops, exact on ES 3.00 and WGSL |
+| **Canonical object** | the integer stream `pcg3d(seedLo, seedHi, n)` — u32 ops, exact on ES 3.00 |
 | **f64 targets** (interpreted, compiled JS) | bit-identical to each other; present the integer stream as f64 |
-| **GPU targets** (GLSL, WGSL) | present the **same** integer stream as f32 through integer ops and an **exact power-of-two** conversion — never implementation-rounded float math |
+| **GPU target** (GLSL) | present the **same** integer stream as f32 through integer ops and an **exact power-of-two** conversion — never implementation-rounded float math |
 
 The presentations:
 
@@ -738,20 +738,20 @@ A shader invocation cannot share a mutable counter cell with the host, and
 fragments run in parallel, so a shared counter would be nondeterministic by
 construction. **GPU frames are lexically inside the shader**: the seed is an
 expression (typically invocation-varying), the counter is an invocation-local
-u32 global (`var<private>` in WGSL, a `uint` global in GLSL) initialized before
+u32 global (a `uint` global in GLSL) initialized before
 the entry point runs, and every invocation runs each of its frames from `n = 0`.
 
 This is not a compromise — it is how shader randomness already works. Per-pixel
 seeding is `WithRandomSeed(perPixelSeed, Random())`, one frame per fragment.
 
-| Form | GLSL | WGSL |
-|---|---|---|
-| `Random()` inside `WithRandomSeed` | `hash(seed, n)` | `hash(seed, n)` |
-| `Random(Interval/Range)` inside a frame | arithmetic on the draw | same |
-| `Random()` unframed | **fragment** stage: deterministic spatial noise (below); any other stage **throws** | **throws** — no `gl_FragCoord` |
-| `Random(collection)` | **throws** — no general indexing | **throws** |
-| `RandomChoice` / `RandomSample` / `RandomShuffle` | **throws** | **throws** |
-| any draw whose only enclosing frame is on the **host** | **throws** at CE compile time | **throws** |
+| Form | GLSL |
+|---|---|
+| `Random()` inside `WithRandomSeed` | `hash(seed, n)` |
+| `Random(Interval/Range)` inside a frame | arithmetic on the draw |
+| `Random()` unframed | **fragment** stage: deterministic spatial noise (below); any other stage **throws** |
+| `Random(collection)` | **throws** — no general indexing |
+| `RandomChoice` / `RandomSample` / `RandomShuffle` | **throws** |
+| any draw whose only enclosing frame is on the **host** | **throws** at CE compile time |
 
 The last row is the cross-domain rule: a shader draw inside a *host* frame fails
 closed, never a silent live draw.
@@ -770,8 +770,8 @@ inside one. Which fold applies is decided by **where the seed value lives**:
 
 | Seed form | Folding | Stream identity |
 |---|---|---|
-| compile-time constant (number or string — determined by `tryGetConstant` on the boxed value, so `Pi` folds the true f64, never a truncated emission string) | **host** `foldSeed`; `(seedLo, seedHi)` emitted as a `uvec2` / `vec2<u32>` constant | **identical** to the interpreted and JS stream for that seed |
-| bare invocation-varying **symbol** (`perPixelSeed`) — not mapped through `vars` | **in-shader**: `seedLo = floatBitsToUint(seed)` (WGSL `bitcast<u32>`), `seedHi = 0u` | its **own** stream — deterministic given the seed bits, but *not* the stream a host f64 fold of the same real produces |
+| compile-time constant (number or string — determined by `tryGetConstant` on the boxed value, so `Pi` folds the true f64, never a truncated emission string) | **host** `foldSeed`; `(seedLo, seedHi)` emitted as a `uvec2` constant | **identical** to the interpreted and JS stream for that seed |
+| bare invocation-varying **symbol** (`perPixelSeed`) — not mapped through `vars` | **in-shader**: `seedLo = floatBitsToUint(seed)`, `seedHi = 0u` | its **own** stream — deterministic given the seed bits, but *not* the stream a host f64 fold of the same real produces |
 | computed seed **expression** (`x*100 + y`) | **compile error** — the seed source is spliced at every draw site, so once-evaluation cannot be guaranteed without statement emission. Hoist the computation into a varying/symbol and seed with that |
 | seed mapped through the compiler's `vars` option | **compile error**, naming the unimplemented host-uniform ABI row (below) |
 | a string computed at run time | impossible in a shader | **compile error** |
@@ -805,8 +805,7 @@ instead of returning one value.
 
 ### Open: sibling-draw order on the GPU
 
-GLSL and WGSL do not agree on operand evaluation order — WGSL pins left-to-right
-evaluation, GLSL leaves it unspecified. So for two sibling draws in **one
+GLSL leaves the operand evaluation order unspecified. So for two sibling draws in **one
 expression** inside one GLSL frame, which one receives `n = 0` and which `n = 1`
 is not pinned across drivers: `Random() - Random()` in one frame may differ in
 *sign* between GPUs. The set of values drawn is fixed, and each draw is

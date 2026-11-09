@@ -126,7 +126,7 @@ there.
   it.
 - **Plugin bundles**: no `instanceof` or `constructor.name` check across the
   host/plugin boundary; compare names as strings.
-- **Compiled targets** (JavaScript, GLSL, WGSL, Python, interval) give the same
+- **Compiled targets** (JavaScript, GLSL, Python, interval) give the same
   result as `evaluate()`/`.N()` for the same input, or fail closed. A new
   operator or a new case in `evaluate` needs the same change in each target that
   supports the operator, or an explicit refusal there.

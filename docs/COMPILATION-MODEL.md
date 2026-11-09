@@ -11,7 +11,7 @@ when it compiles. A difference that this list does not name is a defect.
 
 **Allowed differences.**
 
-- The precision of the target: `f32` arithmetic on `glsl` and `wgsl`, a
+- The precision of the target: `f32` arithmetic on `glsl`, a
   different order of summation, a different library routine for `Sin`,
   `Exp` or `Gamma`.
 - A value where the interpreter gives no number. Where `evaluate()` gives
@@ -155,16 +155,7 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `atan(y, -x)`, and `atan(0.0, -0.0)` with uniform operands gave `NaN` in WebGL2
   on ANGLE Metal on an Apple M5 Max, where `atan(0.0, 0.0)` gave `0`. That GPU is
   the only one measured.
-- `wgsl`, a `Match` whose case bodies assign a local:
-  `Block(Assign(a, 0), Match(x, MatchCase(1, Block(Assign(a, 2))),
-  MatchCase(_, Block(Assign(a, 3)))), a)` compiles to
-  `_ = select(a = 3.0, a = 2.0, x == 1.0);`, which is not valid WGSL (an
-  assignment is not an expression there, and `select` runs both arms), so
-  the shader does not compile; the `If` form of the same program gives an
-  `if`/`else` statement. The interpreter and the JavaScript target give `2`
-  and `3`. The decline should come from the `Match` lowering of the WGSL
-  target when a case body assigns.
-- `glsl`, `wgsl`, `L: real | list<real>`: `L + 1` compiles to `L + 1.0`, a
+- `glsl`, `L: real | list<real>`: `L + 1` compiles to `L + 1.0`, a
   shader code for a scalar `L`, so a host that gives a list has no
   declaration of `L` that the code accepts. The interpreter at `L = [1, 2]`
   gives `[2, 3]`. A list input of unknown length declines (`list<real>`),
@@ -196,10 +187,9 @@ interpreter's value. A line is removed when the case declines or is fixed.
   the first operand that decides the result, gives `2`, and does not call
   `f`. The condition of an `If` statement in a `Loop` body keeps the order
   of the interpreter.
-- `glsl` and `wgsl`, `s: (real) -> complex` with `s := t ↦ If(t > 0, t > 1,
+- `glsl`, `s: (real) -> complex` with `s := t ↦ If(t > 0, t > 1,
   t)`, `x: real`: `s(x)` compiles with success to
-  `vec2(((0.0 < t) ? (1.0 < t) : (t)), 0.0)` (GLSL) and
-  `vec2f(select(t, 1.0 < t, 0.0 < t), 0.0)` (WGSL). The two branches mix a
+  `vec2(((0.0 < t) ? (1.0 < t) : (t)), 0.0)`. The two branches mix a
   boolean and a float, which the shader compiler refuses. The interpreter
   gives an `incompatible-type` error at `x = 2` and `-1` at `x = -1`.
 - `glsl`, caller code in the `vars` option (crafted): with
@@ -1417,7 +1407,7 @@ operand whose exact value is `~oo` (`1/0`, `(-1)!`, `1/0 + 2`, a symbol
 assigned `1/0`), the comparison compiles to the target's `False` on every
 target, as the interpreter answers (`~oo` has no order, user decision
 2026-10-21): `x < 1/0` at `x = 1` is `false` on `javascript`, `python`,
-`glsl`, `wgsl` and `interval-js` (`'false'`), and so is `0 < 1/0`. This
+`glsl` and `interval-js` (`'false'`), and so is `0 < 1/0`. This
 applies when the other operands are pure and cannot be lists at run time;
 otherwise the comparison keeps its code, with the pole as `Infinity`
 (`constantPoleOrdering` in `base-compiler.ts`, ROADMAP CE-211). The value
@@ -1427,7 +1417,7 @@ interpreter's answers both in an ordering and in arithmetic: `NaN` gives
 interpreter answers `~oo`, which the projection spells `Infinity`. An
 equality is not changed: `x = 1/0` compiles to `x === Infinity`, `false`
 for a finite `x`, as the interpreter answers, and `1/0 = 1/0` folds to
-`false` on `javascript`, `glsl`, `wgsl` and `python`, also under
+`false` on `javascript`, `glsl` and `python`, also under
 `constantFold: false`. `interval-js` does not fold an equality and answers
 `'true'` for `1/0 = 1/0` (`docs/ERROR-MODEL.md`, "a value with no order").
 
@@ -1643,7 +1633,7 @@ it). `run.SYS` is built from the same factory.
 ## Target boundaries
 
 The JavaScript target supports the broadest dynamic representation. Python,
-GLSL, WGSL, interval, and other targets expose narrower capabilities and must
+GLSL, interval, and other targets expose narrower capabilities and must
 decline outside them. A feature implemented for JavaScript is not implicitly a
 cross-target promise.
 
@@ -1783,11 +1773,28 @@ in this list:
   parameter whose type is a list with no length (`list<number>`, the type
   that the engine infers from the `At` reads of
   `d(a, b) := a[1] b[1] + a[2] b[2]`) is read the same way: an argument
-  `[x, y]` or `(x, y)` gives a `vec2` parameter. A parameter with no type
-  called with a list is refused: the interpreter applies the function to
-  each element of the list. Another list parameter is admitted only when
-  each call binds it to a list input; the function is then emitted once for
-  each list.
+  `[x, y]` or `(x, y)` gives a `vec2` parameter. Another list parameter is
+  admitted only when each call binds it to a list input; the function is
+  then emitted once for each list.
+- **User functions called with a list.** A call with a list of 2 to 4 reals
+  has the value that the interpreter gives. When every parameter of the
+  function has a scalar type (or no type), the interpreter applies the
+  function to each element of the list, and the shader code does the same
+  with a wrapper: with `f(u) := u mod 1`, `f([-x, -y])` compiles to
+  `_fn_f_each2_1(vec2(-x, -y))`, which calls `float _fn_f(float u)` on each
+  component. The function must have a real value and no complex or colour
+  parameter, and all the mapped lists of one call must have one length; a
+  point argument is not mapped. When a parameter of the function is not
+  scalar, a list binds its parameter whole, as in the interpreter: a
+  parameter with no declared type, or a point parameter whose type the
+  engine inferred from index reads alone (`l(p) := sqrt(p[1]^2 + p[2]^2)`),
+  takes the list as a `vec2` to `vec4`. With
+  `R(V, t) := [Sum(V·[cos t, -sin t]), Sum(V·[sin t, cos t])]`,
+  `R([x, y], 0.5)` compiles to `_fn_R_vector_real_2_number(vec2(x, y), 0.5)`.
+  A point parameter that is declared, or that a call in the body requires,
+  is a contract that the interpreter checks: a list there is refused. A
+  later call with an argument of another type is refused, as for any
+  parameter with no declared type.
 - **Blocks**, as the body of a user function and at the root: `let` and
   `const` declarations of scalar, point or complex locals, an assignment to
   a local, a tuple assignment of locals, a `Loop` over an integer range with
@@ -1974,7 +1981,7 @@ element by element. `Which(x < 0, 1)` over `x = [−1, 1]` gives
 
 ### Statement order on the shader targets
 
-GLSL and WGSL have no let-expression, so a lowering that needs statements — a
+GLSL has no let-expression, so a lowering that needs statements — a
 loop-form `Sum` or `Product`, a `Block` used as a value, the statement form of
 a conditional, a lowering that binds an impure operand to a temporary — is
 hoisted into the enclosing statement sink, AHEAD of the whole enclosing
@@ -2030,16 +2037,6 @@ before it, or compute it in a branch that is not taken. With
   `cos(u_t) / sin(u_t)`). A random draw can also move ahead of such a read,
   as can a bound draw whose endpoints are such reads. Hoisted caller code
   cannot move ahead of it (next item).
-- On WGSL, `select(f, t, c)` computes both branches. A branch with caller code
-  takes the statement form of the selection when a statement can be placed:
-  `If(c, W, 0)` emits `if (c) { _tv1 = nextValue(); } else { _tv1 = 0.0; }`,
-  and a `Match` case does the same. The statement form keeps the order check
-  above; when it is refused (`W + If(c, W, 0)`), the `select` form declines.
-  Only the operands that the `select` form places behind a `select` count: a
-  leading `True` clause of `Which`, a single `Match` case that always matches,
-  and the clauses after a `True` clause are not checked
-  (`Which(True, W)` is `(nextValue())`). GLSL's `?:` computes one branch and
-  keeps the ternary form.
 - Caller code can also write a variable that a plain read reads. So hoisted
   caller code declines when the interpreter reads a `vars` key (whatever its
   source) before it: with `vars: { W: 'state.value' }`, `(W, Max(V))`
@@ -2055,7 +2052,7 @@ is not implemented. A form with no caller code compiles as before.
 
 ### `Break` and `Continue` on the shader targets
 
-A jump is a statement in GLSL and WGSL. So `Break` and `Continue` compile only
+A jump is a statement in GLSL. So `Break` and `Continue` compile only
 as a statement of a `Loop` body, alone or as the branch of a selection with one
 clause: `If(c, Break())`, `If(c, Break(), Nothing)`, `Which(c, Break())`, or
 `If(c, Block(n ≔ k, Break()))`. With `a` a local of the block,
@@ -2093,7 +2090,7 @@ so `If(v ≠ 4, Break())` jumps.
 
 ### NaN-safe helpers on the shader targets
 
-On GLSL and WGSL, `sin`, `cos`, `sign`, `min`, `max` and `clamp` call a
+On GLSL, `sin`, `cos`, `sign`, `min`, `max` and `clamp` call a
 NaN-safe helper (`_gpu_sin`, `_gpu_min`, …), because a GPU built-in can turn a
 NaN operand into a number. The built-in is emitted only when the operand is
 finite for certain (`gpuProvablyFinite()`,
@@ -2227,7 +2224,7 @@ compiles the same function with the option itself gets the throw.
 
 The `mode` option selects how the compiled code computes numeric values:
 `strict`, `complex` or `bigint`. The `javascript` target offers the three
-modes, `python` offers the first two, and `interval-js`, `glsl` and `wgsl`
+modes, `python` offers the first two, and `interval-js` and `glsl`
 offer `strict` only. A request for a mode that the target does not offer
 declines with the code `'unsupported-mode'`. The default is `strict` on
 every target. The first two modes select how the code handles complex
@@ -2432,7 +2429,7 @@ all integer-typed declines with the `correctness` diagnostic
 (`Floor(k/3 + 1/7)`), a product (`Floor(k·π)`), a constant inside a variable
 term (`Floor(k·√2 + 1)`), a step form, and a `Round` whose constant may be a
 tie. A shape with a variable that is not integer-typed keeps its structural
-code on every target, GLSL and WGSL included: `Floor(π·x)`, `Floor(x + 1/3)`,
+code on every target, GLSL included: `Floor(π·x)`, `Floor(x + 1/3)`,
 `Floor(x/√2)`, `Floor(y/3 + 1/7)` for a real `x` or `y`, and also
 `Floor(k + x + c)` with an integer `k` and a real `x`. There, the double of the
 constant moves the jump by about one unit in the last place, as in any float
@@ -3029,7 +3026,7 @@ this: the function has one body for every call, so `((t: any) ↦ 2t)(x)` with
 `x: real` declines too. An input declared `any` with no value
 is refused before, with `untyped-input`. The host declares the shape
 (`real`, `list<real>`) to compile such a program. A shader gives each input one
-fixed shape, so the GLSL and WGSL targets do not use this decline. An input
+fixed shape, so the GLSL target does not use this decline. An input
 declared `expression` (or with an alias of it) can hold a list too, so the
 JavaScript target declines a read of it as an input, and the interpreter computes the value: with
 `ce.declare("x", "expression")`, `2x` declines, and `run({ x: [1, 2] })`
@@ -3167,7 +3164,7 @@ assignment in a value declines on Python, as in any other operand. The
 values are not operands of the node, so the shared-subexpression pass does
 not enter them, but it records each assignment in them: a subexpression is
 not shared across a write in a value (`recordDictionaryAssignments()` in
-`cse.ts`). The interval-js, GLSL and WGSL targets have no dictionary value,
+`cse.ts`). The interval-js and GLSL targets have no dictionary value,
 and a dictionary declines on them with that reason
 (`CompileTarget.dictionary`, `_compileInner()` in `compiler-core.ts`).
 
@@ -3193,7 +3190,7 @@ integer gathers may fold or lower when every selected element preserves
 evaluation count. A discarded impure element forbids folding.
 
 Dynamic gathers, runtime boolean masks, point-list bases, unknown extents, and
-non-real element/index shapes decline. GLSL/WGSL bounds behavior is never
+non-real element/index shapes decline. GLSL bounds behavior is never
 relied upon: the emitted helper guards before indexing. Aggregate widths and
 index types are read from the GPU declaration frame when the boxed expression
 itself is typed `unknown`.
@@ -3354,7 +3351,7 @@ compiled runner produced is boxed back to the head that names its space when it
 is passed in as a `vars` value, recursively inside arrays, so a color can cross
 from a compiled runner into a declining expression.
 
-On the SHADER targets (GLSL, WGSL) a color is a bare `vec3` with no run-time
+On the SHADER target (GLSL) a color is a bare `vec3` with no run-time
 tag and no alpha, read as OKLCh unless the compiler knows otherwise. The space
 is a COMPILE-TIME fact instead (`colorSpaceOf`,
 `compilation/color-space-fact.ts`): the constructors and the color-producing
@@ -3675,6 +3672,6 @@ A temporary from `BaseCompiler.tempVar` must also be registered as a local of
 the statement list (`BaseCompiler.loopBodyTempTarget` does this), or it is
 emitted as a read of the caller's scope object (`_.name`).
 
-Check such a lowering on `javascript`, `python`, `glsl` and `wgsl` by reading
+Check such a lowering on `javascript`, `python` and `glsl` by reading
 `.code`: a comparison of `run()` with the interpreter checks the JavaScript
 target only.

@@ -191,7 +191,7 @@ part of the Phase 1 contract.
     criterion).** The Phase 1 deliverable includes a target matrix — for
     each of {`Length`, `At`/indexing, iteration-derived operators, list-out
     operators, string-preserving operators, **and the `character` scalar
-    itself**} × {JavaScript, Python, GLSL/WGSL}, each cell is either
+    itself**} × {JavaScript, Python, GLSL}, each cell is either
     implemented grapheme-correctly or fails closed with a diagnostic. The
     `character` row is not implied by the string rows and must be decided
     per target on its own: `CharacterFrom`, narrowed character literals,
@@ -216,7 +216,7 @@ part of the Phase 1 contract.
       with a target-capability diagnostic. Vendoring a segmenter (or
       depending on the third-party `regex` module) is a later upgrade if
       consumer demand appears.
-    - **GLSL/WGSL**: these targets have no string support at all, and that
+    - **GLSL**: this target has no string support at all, and that
       does not change. The requirement is only that string-typed operands
       CONTINUE to be rejected with the existing diagnostics, unaffected by
       the lattice change — add a test locking that in.
@@ -1119,7 +1119,7 @@ count is bounded by the subject length).
    - `character` compile row: JavaScript lowers a character as a one-cluster
      JS string with `===` equality and a code-point-sequence comparator;
      Python fails closed on the whole string-collection AND character rows;
-     GLSL/WGSL now also fail closed on a bare string literal (a pre-existing
+     GLSL now also fails closed on a bare string literal (a pre-existing
      hole: they emitted `"a"` as shader source).
    - Deferred to Phase 2 (filed in `ROADMAP.md`): string arms for
      `RandomShuffle`/`RandomSample`/`DeleteAt`; the inner-string question for
@@ -1175,7 +1175,7 @@ count is bounded by the subject length).
      grapheme-correctly except `NumberFrom` (fails closed) and `DeleteAt`
      (no list lowering exists); operands whose VALUE decides between a
      result and an error value (`from`, `count`, `n`, `pad`, an empty
-     `target`) must be literals or the call declines; Python/GLSL/WGSL fail
+     `target`) must be literals or the call declines; Python/GLSL fail
      closed by the target-capability default, now pinned per operator.
    - Promotions shipped: `RandomShuffle`, `RandomSample`, `DeleteAt` return
      `string` for a string source. Still awaiting a ruling (ROADMAP): inner
@@ -1190,7 +1190,7 @@ count is bounded by the subject length).
      `RandomChoice("abc", 5)` equals
      `StringJoin(RandomChoice(Characters("abc"), 5))`. The JavaScript target
      segments, draws and re-joins, matching the interpreter value for value
-     and draw for draw; GLSL/WGSL throw (no indexing) and Python fails
+     and draw for draw; GLSL throws (no indexing) and Python fails
      closed, both unchanged. `Random(s)` — the single-draw form — keeps
      answering a `character`.
    - Two Phase-1-induced regressions surfaced and were fixed by their

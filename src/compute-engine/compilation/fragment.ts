@@ -195,8 +195,10 @@ export type FragmentAnnotation<R> = {
  * - `integer`: an integer.
  * - `index`: a real or an integer, read as an index (`to-int` when the
  *   representation of the operand is not the representation of an index).
- * - `boolean`, `complex` (a real is converted), `color` (also a point of
- *   size 3, or a string literal, which names a colour at compile time).
+ * - `boolean`, `complex` (a real is converted), `color` (also a literal
+ *   `Tuple` of three reals, read as an sRGB colour, or a string literal,
+ *   which names a colour at compile time; a point input or a computed
+ *   point is not a colour).
  * - `name`: a string literal, which names a colour space or another option
  *   at compile time. It is not a value at run time.
  * - `point`: a point of the size of the signature, or a list of that many
@@ -256,6 +258,12 @@ export type FragmentSignature = {
    *  `incompatible-type` error) and a number divided by a point, but takes
    *  a number added to a list. Absent: the positions of `scalarSlots`. */
   readonly pointScalarSlots?: readonly number[];
+  /** The signature applies only to a node for which `when` is true, in the
+   *  scope where the pass reads it. The GLSL target uses it for a node whose
+   *  value the compiler reads as complex although its operands are real
+   *  (`Arcsin(x)` with `x` real): the emitter writes it with the complex
+   *  helper. Absent: every node. */
+  readonly when?: (node: Expression, scope: FragmentScope<unknown>) => boolean;
 };
 
 /** The place of a use (the design note, section 4). */
@@ -399,6 +407,12 @@ export type FragmentFunction = {
    *  with no type, or of a scalar type, does not: the interpreter applies the
    *  function to each element of a list argument. */
   readonly collectionParameters?: readonly boolean[];
+  /** `true` when the interpreter applies the function to each element of
+   *  a list argument, because every parameter has a scalar type (the
+   *  spec, decision 19). A call with a list of 2 to 4 reals at a scalar
+   *  parameter is then the list of the values of the function at the
+   *  elements, which the emitter writes with an element-wise wrapper. */
+  readonly broadcasts?: boolean;
   /** The symbol of each parameter in the function literal, when the
    *  literal has one. The pass binds the parameter with it, so that the
    *  check of a reserved name and the message of a limit read the name. */
@@ -1408,6 +1422,8 @@ function makeWalker<R>(
         : { kind: 'value', facts: walker.value(op, scope, context), node: op }
     );
     for (const signature of signatures) {
+      if (signature.when !== undefined && !signature.when(node, scope))
+        continue;
       const match = matchSignature(node, operands, signature);
       if (match !== undefined) return match;
     }
@@ -1662,6 +1678,66 @@ function makeWalker<R>(
             : `The interpreter reports an error for a call with more ` +
               `arguments than parameters`)
       );
+    // A function that the interpreter applies to each element of a list
+    // argument (`FragmentFunction.broadcasts`), called with a list of 2 to
+    // 4 reals that the target holds as a point (a GLSL `vec2` to `vec4`):
+    // the value of the call is the list of the values of the function at
+    // the elements (the spec, decision 19). `f(u) := u mod 1` and
+    // `f([-x, -y])` give `[f(-x), f(-y)]`. The function is typed with the
+    // type of an element at such a parameter, and the emitter writes the
+    // call with a wrapper that calls the function on each component. A
+    // point argument is not mapped: the interpreter maps a tuple only when
+    // the signature of the function is declared.
+    const mapped = args.map(
+      (a) =>
+        fn.broadcasts === true &&
+        !fn.key.endsWith('#inlined') &&
+        a.type.kind === 'list' &&
+        isScalarNumeric(a.type.element) &&
+        a.type.count !== undefined &&
+        a.type.count >= 2 &&
+        a.representation ===
+          definition.representationOfValue({
+            kind: 'point',
+            size: a.type.count,
+          })
+    );
+    const unmapped = args.findIndex(
+      (a, i) =>
+        fn.broadcasts === true &&
+        !mapped[i] &&
+        a.type.kind === 'list' &&
+        isScalarNumeric(a.type.element)
+    );
+    if (unmapped >= 0)
+      return refuse(
+        fn.arguments[unmapped],
+        'signature',
+        `The call \`${node.toString()}\` applies \`${fn.name}\` to each ` +
+          `element of \`${fn.arguments[unmapped].toString()}\`, of the type ` +
+          `\`${fragmentTypeToString(args[unmapped].type)}\`: the ${fragment} ` +
+          `code maps a list of 2 to 4 reals only`
+      );
+    const widths = new Set(
+      args.flatMap((a, i) =>
+        mapped[i] && a.type.kind === 'list' ? [a.type.count] : []
+      )
+    );
+    if (widths.size > 1)
+      return refuse(
+        node,
+        'signature',
+        `The call \`${node.toString()}\` applies \`${fn.name}\` to each ` +
+          `element of lists of different lengths`
+      );
+    const elementArgs = args.map((a, i) => {
+      if (!mapped[i] || a.type.kind !== 'list') return a;
+      const element = a.type.element as FragmentValueType;
+      const representation = definition.representationOfValue(element);
+      return representation === undefined
+        ? a
+        : { type: element, representation };
+    });
     let entry = state.functions.get(fn.key);
     if (entry === undefined) {
       if (state.typing.has(fn.key))
@@ -1671,11 +1747,11 @@ function makeWalker<R>(
           `The function \`${fn.name}\` calls itself, directly or through ` +
             `another function: the ${fragment} fragment has no recursion`
         );
-      entry = typeFunction(node, fn, args);
+      entry = typeFunction(node, fn, elementArgs);
     }
     const type = entry.type as Extract<FragmentType, { kind: 'function' }>;
     const inferred = state.inferred.get(fn.key);
-    const conversions = args.map((a, i) => {
+    const conversions = elementArgs.map((a, i) => {
       // A parameter with no declared type has the type of its argument at
       // the first call. A later call with an argument of another type is
       // refused (the spec, decision 11): the function is emitted once, with
@@ -1701,6 +1777,31 @@ function makeWalker<R>(
             `parameter, or call the function with arguments of one type`,
           fn.parameters[i]
         );
+      // A list mapped over a scalar parameter is passed whole to the
+      // element-wise wrapper, which converts no element: the parameter must
+      // be a real or an integer one, both a GLSL `float`, as the wrapper
+      // requires (`elementwiseCall()` in `gpu-shader-target.ts`).
+      const whole = args[i];
+      const parameterType = type.parameters[i].type;
+      if (mapped[i]) {
+        if (
+          !isScalarNumeric(parameterType) ||
+          convert(a, parameterType) === undefined
+        )
+          return refuse(
+            fn.arguments[i],
+            'signature',
+            `The call \`${node.toString()}\` applies \`${fn.name}\` to each ` +
+              `element of \`${fn.arguments[i].toString()}\`, and the ` +
+              `parameter \`${fn.parameters[i]}\` has the type ` +
+              `\`${fragmentTypeToString(parameterType)}\`, not \`real\``
+          );
+        return {
+          kind: 'none' as const,
+          type: whole.type,
+          representation: whole.representation,
+        };
+      }
       // A list argument of a list parameter is passed as it is: an
       // integer list has the representation of a real list of its length.
       const c =
@@ -1710,7 +1811,7 @@ function makeWalker<R>(
               type: fromArgument,
               representation: a.representation,
             }
-          : convert(a, type.parameters[i].type);
+          : convert(a, parameterType);
       if (c === undefined)
         return refuse(
           fn.arguments[i],
@@ -1745,6 +1846,54 @@ function makeWalker<R>(
         'signature',
         `The call \`${node.toString()}\` has the type ` +
           `\`${node.type.toString()}\`, which admits more than one shape`
+      );
+    // A call applied to each element of lists of the length `n` is a list
+    // of `n` reals. The wrapper builds a `vecN` of the values of the
+    // function, so the function must have a real value. The wrapper passes
+    // each other argument unchanged, and a complex or colour parameter
+    // converts its argument at the call, so the emitter declines a wrapper
+    // of a function with such a parameter.
+    const [width] = widths;
+    if (width !== undefined) {
+      const converting = type.parameters.findIndex(
+        (p) => p.type.kind === 'complex' || p.type.kind === 'color'
+      );
+      if (converting >= 0)
+        return refuse(
+          node,
+          'signature',
+          `The call \`${node.toString()}\` applies \`${fn.name}\` to each ` +
+            `element of a list, and the parameter ` +
+            `\`${fn.parameters[converting]}\` has the type ` +
+            `\`${fragmentTypeToString(type.parameters[converting].type)}\`: ` +
+            `the element-wise call has no complex or colour parameter`
+        );
+      if (!isScalarNumeric(result))
+        return refuse(
+          node,
+          'signature',
+          `The call \`${node.toString()}\` applies \`${fn.name}\` to each ` +
+            `element of a list, and the value of \`${fn.name}\` has the ` +
+            `type \`${fragmentTypeToString(result)}\`, not \`real\``
+        );
+      return valueFacts(
+        node,
+        { kind: 'list', element: { kind: 'real' }, count: width },
+        conversions
+      );
+    }
+    // A call whose value is a list here, and whose engine type is not a
+    // list, is refused: the emitter writes the operator that reads the call
+    // by the engine type. `g(p) := p[1] + p[2] + |p|` called with `[x, y]`
+    // is a `vec2` (the interpreter maps `Abs` over the list), but the engine
+    // type of the call is `number | vector<real^2>`, and the emitter then
+    // writes `Sin(g([x, y]))` with the `float` helper of `Sin`.
+    if (result.kind === 'list' && !isSubtype(node.type.type, 'list<any>'))
+      return refuse(
+        node,
+        'signature',
+        `The call \`${node.toString()}\` has a list value, and its type ` +
+          `\`${node.type.toString()}\` is not a list type`
       );
     return valueFacts(node, result, conversions);
   };

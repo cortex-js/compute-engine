@@ -1940,7 +1940,7 @@ disposition so the question is not re-litigated:**
     already emits bodies per artifact, closing the callee set) or put
     uniqueness in the signature, which is the deferred parameter-mode
     discussion above. Keep the tier's existing polarity: **prove
-    uniqueness or copy.** Payoff is JS/Python only — GLSL/WGSL have
+    uniqueness or copy.** Payoff is JS/Python only — GLSL has
     fixed-size arrays and no dynamic collections.
 
   - **Interaction with CSE — sequence this deliberately.** CSE

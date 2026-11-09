@@ -29,6 +29,11 @@ import {
   compile,
 } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSL_FRAGMENT_RULES } from '../../src/compute-engine/compilation/glsl-fragment';
+import type { GPUShaderTarget } from '../../src/compute-engine/compilation/gpu-shader-target';
+import type {
+  FragmentPattern,
+  FragmentSignature,
+} from '../../src/compute-engine/compilation/fragment';
 import { GPU_FUNCTIONS } from '../../src/compute-engine/compilation/gpu-functions';
 import type { Expression } from '../../src/compute-engine/global-types';
 import {
@@ -521,6 +526,169 @@ describe('GlslDriver.evaluate()', () => {
 });
 
 /**
+ * The calls of user functions with a list argument (the spec
+ * `docs/plans/2026-11-08-glsl-fragment-spec.md`, decision 19), reduced from
+ * the Tycho documents `neyret/0et6fx01id`, `neyret/pqflulcixs`,
+ * `neyret/9pal1xuvqq` and `neyret/ra1p9naofs`. A function whose parameters
+ * are all scalar is applied to each element of a list argument (`bf`, `bg`);
+ * a function with a parameter that is not scalar reads the list whole
+ * (`bd2`, `bR`, `bC`, `bl` and the functions that call them). The constant
+ * 0.3 is the slider `T` of `neyret/ra1p9naofs`.
+ */
+const BROADCAST_FUNCTIONS: ReadonlyArray<[string, unknown, ...string[]]> = [
+  ['bf', ['Mod', 'u', 1], 'u'],
+  [
+    'bd2',
+    [
+      'Add',
+      ['Multiply', ['At', 'a', 1], ['At', 'b', 1]],
+      ['Multiply', ['At', 'a', 2], ['At', 'b', 2]],
+    ],
+    'a',
+    'b',
+  ],
+  [
+    'bR',
+    [
+      'List',
+      ['Sum', ['Multiply', 'V', ['List', ['Cos', 't'], ['Negate', ['Sin', 't']]]]],
+      ['Sum', ['Multiply', 'V', ['List', ['Sin', 't'], ['Cos', 't']]]],
+    ],
+    'V',
+    't',
+  ],
+  [
+    'bC',
+    [
+      'Subtract',
+      [
+        'Add',
+        ['Power', ['Subtract', 'p', ['At', 'c', 1]], 2],
+        ['Power', ['Subtract', 'q', ['At', 'c', 2]], 2],
+      ],
+      ['Power', ['At', 'c', 3], 2],
+    ],
+    'c',
+    'p',
+    'q',
+  ],
+  ['bl', ['Sqrt', ['Add', ['Power', ['At', 'p', 1], 2], ['Power', ['At', 'p', 2], 2]]], 'p'],
+  ['bg', ['Subtract', ['Mod', 'p', 1], 0.5], 'p'],
+  [
+    'br',
+    [
+      'Multiply',
+      ['Add', 0.3, ['Floor', ['At', 'p', 1]]],
+      ['Max', 0, ['Subtract', 0.5, ['bl', ['bg', 'p']]]],
+    ],
+    'p',
+  ],
+  [
+    'bA',
+    [
+      'List',
+      ['Add', ['Divide', ['Arctan2', ['At', 'p', 2], ['At', 'p', 1]], ['Multiply', 2, 'Pi']], 0.5],
+      ['bl', 'p'],
+    ],
+    'p',
+  ],
+  [
+    'bB',
+    [
+      'List',
+      [
+        'Subtract',
+        ['Multiply', 2.6, ['Power', ['Add', ['At', 'p', 1], ['Floor', ['Subtract', ['At', 'p', 2], ['At', 'p', 1]]]], 2]],
+        0.3,
+      ],
+      ['Subtract', ['At', 'p', 2], ['At', 'p', 1]],
+    ],
+    'p',
+  ],
+  [
+    'bd',
+    [
+      'Add',
+      ['Multiply', ['bg', ['At', 'p', 1]], ['Sin', ['br', 'p']]],
+      ['Multiply', ['bg', ['At', 'p', 2]], ['Cos', ['br', 'p']]],
+    ],
+    'p',
+  ],
+];
+for (const [name, body, ...params] of BROADCAST_FUNCTIONS)
+  ce.assign(name, ce.box(['Function', body, ...params] as any));
+
+const BROADCAST_CALLS: ReadonlyArray<{ name: string; expr: unknown; marker: RegExp }> = [
+  {
+    name: 'a scalar function applied to each element, then read whole',
+    expr: ['bd2', ['bf', ['List', 'x', 'y']], ['List', 1, 2]],
+    marker: /vec2 _fn_bf_each2_1\(vec2 a0\)/,
+  },
+  {
+    name: 'a negated scalar function of a negated list',
+    expr: ['bd2', ['List', 1, 2], ['Negate', ['bf', ['List', ['Negate', 'x'], ['Negate', 'y']]]]],
+    marker: /float _fn_bf\(float u\)/,
+  },
+  {
+    name: 'a rotation that reads its list whole',
+    expr: [
+      'Sum',
+      ['Power', ['Divide', ['bR', ['Subtract', ['List', 'x', 'y'], ['List', 'z', 1]], 0.5], ['List', 2, 1]], 2],
+    ],
+    marker: /vec2 _fn_bR\w*\(vec2 V, float t\)/,
+  },
+  {
+    name: 'a function of a list of three reals and two reals',
+    expr: ['Multiply', ['bC', ['List', 'y', 'z', 0.5], 'x', 'y'], ['bC', ['List', 'z', 'x', 1], 'x', 'y']],
+    marker: /float _fn_bC\w*\(vec3 c, float p, float q\)/,
+  },
+  {
+    name: 'a chain of functions of a list, with a scalar function of a list inside',
+    expr: ['bd', ['bB', ['bA', ['List', 'x', 'y']]]],
+    marker: /vec2 _fn_bg_each2_1\(vec2 a0\)/,
+  },
+];
+
+describe('the calls of user functions with a list argument', () => {
+  it('give the value of the interpreter', { timeout: TIMEOUT_MS }, async () => {
+    const items: GlslEvaluation[] = [];
+    const expected: number[] = [];
+    const problems: string[] = [];
+    for (const { name, expr, marker } of BROADCAST_CALLS) {
+      const e = ce.box(expr as any);
+      assert.ok(e.isValid, `${name}: ${e.toString()} is not valid`);
+      assert.deepEqual(canCompile(e, { to: 'glsl' }), { ok: true }, name);
+      const source = loweringShader(e);
+      if (!marker.test(source))
+        problems.push(`${name}: the source does not match ${marker}\n${source}`);
+      for (const [k, [x, y, z]] of POINTS.entries()) {
+        expected.push(
+          e.subs({ x: ce.number(x), y: ce.number(y), z: ce.number(z) }).N().re
+        );
+        // A key with no active uniform is skipped (`GlslEvaluation`).
+        items.push({ name: `${name} #${k}`, source, uniforms: { x, y, z } });
+      }
+    }
+    const values = await driver.evaluate(items);
+    for (const [i, result] of values.entries()) {
+      if (!result.ok) {
+        problems.push(`${result.name}: ${result.log}\n${items[i].source}`);
+        continue;
+      }
+      const want = expected[i];
+      assert.ok(Number.isFinite(want), `${result.name}: interpreter ${want}`);
+      const tolerance = 1e-3 * Math.max(1, Math.abs(want));
+      if (!(Math.abs(result.value - want) <= tolerance))
+        problems.push(
+          `${result.name}: GLSL ${result.value}, interpreter ${want}\n` +
+            items[i].source
+        );
+    }
+    assert.deepEqual(problems, []);
+  });
+});
+
+/**
  * The operand types of the generated test of the signatures: the engine
  * type of a declared input of each kind, and its GLSL type.
  */
@@ -559,13 +727,118 @@ function combinations(kinds: readonly string[], n: number): string[][] {
   return combinations(kinds, n - 1).flatMap((c) => kinds.map((k) => [...c, k]));
 }
 
+/** The fragment type of an input of each kind of `KINDS`: the kind, and the
+ *  size of a point or of a list. */
+function kindType(kind: string): { kind: string; size?: number } {
+  const m = /^(point|list)(\d)$/.exec(kind);
+  return m === null ? { kind } : { kind: m[1], size: Number(m[2]) };
+}
+
+/**
+ * Whether one signature of `signatures` takes inputs of the kinds `kinds`,
+ * by the meaning of the patterns that `FragmentPattern` and
+ * `FragmentSignature` in `fragment.ts` state. It is written here again, and
+ * not taken from the pass, so that the test compares the pass with the
+ * table. An input is a symbol, never a literal: a `color` place takes a
+ * colour only, and a `name` place takes nothing. A signature with `when`
+ * applies to `node` only when `when()` is true for it in the root scope,
+ * where the pass reads the root.
+ */
+function signatureAdmits(
+  signatures: readonly FragmentSignature[],
+  kinds: readonly string[],
+  node: Expression
+): boolean {
+  const scalar = (k: string): boolean => k === 'real' || k === 'integer';
+  const root = { bindings: new Map(), facts: new Map(), inner: new Map() };
+  return signatures.some((s) => {
+    if (s.when !== undefined && !s.when(node, root)) return false;
+    const fixed = s.operands.length;
+    if (kinds.length < fixed) return false;
+    if (kinds.length > fixed && s.rest === undefined) return false;
+    const patterns: FragmentPattern[] = kinds.map((_, i) =>
+      i < fixed ? s.operands[i] : s.rest!
+    );
+    const usesPoint =
+      patterns.includes('point') ||
+      patterns.includes('tuple') ||
+      s.result === 'point';
+    const sizes = usesPoint ? (s.sizes ?? [2, 3, 4]) : [0];
+    return sizes.some((size) => {
+      // The vector kinds of the operands, and the positions of a broadcast
+      // scalar.
+      const vectors = new Set<string>();
+      const broadcast: number[] = [];
+      const ok = kinds.every((k, i) => {
+        const t = kindType(k);
+        switch (patterns[i]) {
+          case 'real':
+          case 'index':
+            return scalar(k);
+          case 'integer':
+          case 'boolean':
+          case 'color':
+            return k === patterns[i];
+          case 'complex':
+            return k === 'complex' || scalar(k);
+          case 'name':
+            return false;
+          case 'real-list':
+            return t.kind === 'list';
+          case 'real-or-list':
+            return t.kind === 'list' || scalar(k);
+          case 'tuple':
+            if (t.kind !== 'point' || t.size !== size) return false;
+            vectors.add('point');
+            return true;
+          case 'point':
+            if ((t.kind === 'point' || t.kind === 'list') && t.size === size) {
+              vectors.add(t.kind);
+              return true;
+            }
+            if (
+              s.broadcast === true &&
+              scalar(k) &&
+              (s.scalarSlots === undefined || s.scalarSlots.includes(i))
+            ) {
+              broadcast.push(i);
+              return true;
+            }
+            return false;
+        }
+      });
+      if (!ok) return false;
+      // A point and a list do not mix in a componentwise operation.
+      if (s.broadcast === true && vectors.size > 1) return false;
+      if (
+        s.pointScalarSlots !== undefined &&
+        vectors.has('point') &&
+        broadcast.some((i) => !s.pointScalarSlots!.includes(i))
+      )
+        return false;
+      // A `point` signature needs a point or a list among the operands.
+      if (
+        patterns.includes('point') &&
+        !patterns.includes('tuple') &&
+        vectors.size === 0
+      )
+        return false;
+      return true;
+    });
+  });
+}
+
 /**
  * For each head of `GLSL_FRAGMENT_RULES` that has signatures, and each
  * number of operands that a signature takes (one more for a signature with
  * `rest`), an expression whose operands are declared inputs of each kind,
- * in each order, compiled with `constantFold: false`. When `canCompile()`
- * gives `ok: true`, `compile()` must succeed and the code must compile on
- * WebGL 2 with exactly one return type.
+ * in each order, compiled with `constantFold: false`. `canCompile()` gives
+ * `ok: true` exactly when a signature of the table takes the operand types
+ * (`signatureAdmits()`), and otherwise refuses with the code
+ * `outside-fragment`. When it gives `ok: true`, `compile()` must succeed,
+ * the code must compile on WebGL 2 with exactly one return type, and that
+ * type must be the GLSL representation of the root in the annotation of the
+ * typing pass (`_fragmentAnnotationForTest()`).
  */
 describe('the signatures of the GLSL fragment', () => {
   it(
@@ -575,11 +848,22 @@ describe('the signatures of the GLSL fragment', () => {
       const ce2 = new ComputeEngine();
       const names = (kinds: readonly string[]): string[] =>
         kinds.map((k, i) => `${k}_${i}`);
+      const kindOf = new Map<string, string>();
       for (const k of Object.keys(KINDS))
-        for (let i = 0; i < 3; i++) ce2.declare(`${k}_${i}`, KINDS[k].type);
+        for (let i = 0; i < 3; i++) {
+          ce2.declare(`${k}_${i}`, KINDS[k].type);
+          kindOf.set(`${k}_${i}`, k);
+        }
+      const glslTarget = ce2._getCompilationTarget(
+        'glsl'
+      ) as unknown as GPUShaderTarget;
       const problems: string[] = [];
       const candidates: { name: string; source: string; type: string }[] = [];
+      /** The GLSL representation of the root of each accepted expression in
+       *  the annotation of the typing pass. */
+      const representations = new Map<string, string>();
       let generated = 0;
+      let unchecked = 0;
       let accepted = 0;
       let compiled = 0;
       for (const [head, rule] of Object.entries(GLSL_FRAGMENT_RULES)) {
@@ -597,9 +881,69 @@ describe('the signatures of the GLSL fragment', () => {
             if (!expr.isValid) continue;
             generated += 1;
             const options = { to: 'glsl', constantFold: false } as const;
-            if (!canCompile(expr, options).ok) continue;
-            accepted += 1;
             const label = `${head}(${combo.join(', ')})`;
+            const verdict = canCompile(expr, options);
+            // (a) `canCompile()` accepts exactly when a signature of the
+            // table takes the operands. The canonical form can change the
+            // head or the operands (`Square(x)` is `Power(x, 2)`, `Exp(x)`
+            // is `Power(ExponentialE, x)`): the check then reads the
+            // canonical head and operands, a real constant as an operand of
+            // kind `integer` or `real`, and it is skipped when an operand
+            // is something else or the head has no signatures.
+            const canonicalRule = GLSL_FRAGMENT_RULES[expr.operator];
+            const canonicalKinds = expr.ops?.map((op) => {
+              if (op.symbol !== undefined && kindOf.has(op.symbol))
+                return kindOf.get(op.symbol);
+              if (!op.isConstant || !op.type.matches('real')) return undefined;
+              return op.type.matches('integer') ? 'integer' : 'real';
+            });
+            if (
+              canonicalRule === undefined ||
+              !('signatures' in canonicalRule) ||
+              canonicalKinds === undefined ||
+              canonicalKinds.some((k) => k === undefined)
+            )
+              unchecked += 1;
+            else {
+              const admits = signatureAdmits(
+                canonicalRule.signatures,
+                canonicalKinds as string[],
+                expr
+              );
+              if (admits && !verdict.ok)
+                problems.push(
+                  `${label}: a signature takes ${expr.toString()}, ` +
+                    `canCompile() refuses: ${verdict.diagnostic.message}`
+                );
+              else if (!admits && verdict.ok)
+                problems.push(
+                  `${label}: no signature takes ${expr.toString()}, ` +
+                    `canCompile() accepts`
+                );
+              else if (
+                !verdict.ok &&
+                verdict.diagnostic.code !== 'outside-fragment'
+              )
+                problems.push(
+                  `${label}: canCompile() refuses with the code ` +
+                    `${verdict.diagnostic.code}`
+                );
+            }
+            if (!verdict.ok) continue;
+            accepted += 1;
+            // (b) The GLSL representation of the root in the annotation,
+            // compared below with the return type that the code compiles
+            // with on WebGL 2.
+            const annotation = glslTarget._fragmentAnnotationForTest(
+              expr,
+              options
+            );
+            const facts = annotation.scope.facts.get(annotation.root);
+            if (facts === undefined || !('representation' in facts)) {
+              problems.push(`${label}: the annotation has no facts of the root`);
+              continue;
+            }
+            representations.set(label, facts.representation);
             let r;
             try {
               r = compile(expr, options);
@@ -672,9 +1016,18 @@ describe('the signatures of the GLSL fragment', () => {
             `${name}: the GLSL code compiles with ${found.length} return ` +
               `types (${found.join(', ')}) ${found.length === 0 ? logs.get(name) : ''}`
           );
+        // (b) The one return type that the code compiles with is the GLSL
+        // type of the value that `compile()` writes. The annotation gives
+        // the root the same representation.
+        else if (found.length === 1 && representations.get(name) !== found[0])
+          problems.push(
+            `${name}: the annotation gives the root the representation ` +
+              `${representations.get(name)}, the code has the type ${found[0]}`
+          );
       console.log(
-        `signatures: ${generated} expressions generated, ${accepted} accepted ` +
-          `by canCompile(), ${problems.length} disagreements.`
+        `signatures: ${generated} expressions generated, ${unchecked} not ` +
+          `compared with the table, ${accepted} accepted by canCompile(), ` +
+          `${problems.length} disagreements.`
       );
       assert.deepEqual(problems, []);
       // The test is not vacuous: a change that makes no expression, or
@@ -682,6 +1035,9 @@ describe('the signatures of the GLSL fragment', () => {
       // 2026-11-08, 953 expressions were accepted. Each accepted
       // expression that compiled has its WebGL check, one per value type.
       assert.ok(generated > 5000, `only ${generated} expressions generated`);
+      // On 2026-11-09, 9 expressions were not compared with the table: a
+      // `Multiply` of one operand, whose canonical form is the operand.
+      assert.ok(unchecked <= 20, `${unchecked} not compared with the table`);
       assert.ok(accepted >= 940, `only ${accepted} expressions accepted`);
       assert.equal(compiled, accepted);
       assert.equal(results.length, compiled * VALUE_TYPES.length);

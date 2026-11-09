@@ -530,7 +530,7 @@ evaluated alone; it is now also its value in the condition of an `If` or a
 `Which`, so the branch takes its next arm (the else arm). The rule holds on
 every route: the interpreter, the `javascript` and `python` compile
 targets, and `interval-js` for an operand that is undefined over the WHOLE
-cell (`empty`). The GPU targets (`glsl`, `wgsl`) already selected by the
+cell (`empty`). The GPU target (`glsl`) already selected by the
 IEEE `false` and did not change.
 
 | Input | Before 2026-10-20 | Now |
@@ -756,14 +756,14 @@ the `Infinity` projection in `docs/COMPILATION-MODEL.md`. Measured
 | `\frac{1}{0} = \frac{1}{0}`, closed | `interval-js` | `'true'` (`_IA.equal(_k1, _k1)`; no fold) | `False` |
 
 A closed comparison (no variable) folds to the value of the interpreter on
-`javascript`, `glsl`, `wgsl` and `python`, with or without `constantFold`
+`javascript`, `glsl` and `python`, with or without `constantFold`
 (a comparison folds under the opt-out because its result jumps at a point;
 `closedExactJump`, `compilation/base-compiler.ts`, which reads the pole
 `ComplexInfinity` as a value with no order, not as a float). Measured
 2026-10-21, the same code with `constantFold: true` and `constantFold:
 false`:
 
-| Expression | `javascript` | `glsl`, `wgsl` | `python` | `interval-js` |
+| Expression | `javascript` | `glsl` | `python` | `interval-js` |
 | --- | --- | --- | --- | --- |
 | `0 < \frac{1}{0}` | `false` | `false` | `False` | `'true'` (no fold) |
 | `\frac{1}{0} = \frac{1}{0}` | `false` | `false` | `False` | `'true'` (no fold) |
@@ -2370,7 +2370,7 @@ maps its channels onto it:
   since IEEE propagation is native to every float target; preserving
   per-slot `propagate` costs nothing.
 - Where the target cannot represent an outcome (a boxed `Error` on a
-  numeric-only GLSL/WGSL/interval lane, a `Missing` on a float lane), the
+  numeric-only GLSL/interval lane, a `Missing` on a float lane), the
   compiler *declines* with a structured diagnostic — interpreted fallback
   when enabled, a visible decline otherwise. It does not quietly
   reinterpret an `Error` as a throw, a `NaN`, or a plausible ordinary
@@ -3161,7 +3161,7 @@ document's history):
   y = NaN` is `NaN`, at `x = -1, y = NaN` it is `-1`. A third follow-up
   ruling the same day settles the other compile targets:
   the Python target, which has a real NaN, takes the same operand guard;
-  the GPU targets (GLSL/WGSL) keep JavaScript-style selection for now,
+  the GPU target (GLSL) keeps JavaScript-style selection for now,
   because NaN propagation is not guaranteed on every driver, and stay on
   the ROADMAP item that records that reason. CORRECTION (measured
   2026-09-02): "the interpreter holds such an application inert" is true

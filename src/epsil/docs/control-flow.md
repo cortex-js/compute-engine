@@ -1171,12 +1171,8 @@ which is a lazy collection, a parallel comprehension is evaluated at once.
 and it stays an identifier everywhere else. The statement lowers to
 `["ParallelLoop", body, ["Element", "x", "xs"]]`, and the comprehension to
 `["ParallelComprehension", body, …clauses]`. Compiled to JavaScript, the
-passes run in order, with the same direct draws as the interpreter. Compiled
-to WGSL with `WGSLTarget.compileKernel()`, a loop or a comprehension over an
-integer range `a..b` is a compute shader that runs one pass in each
-invocation, and each `+=` is an atomic addition to an accumulator of
-integers; a pass that reads an accumulator or draws a random value is not
-compiled there. The other compile targets do not compile them.
+passes run in order, with the same direct draws as the interpreter. The
+other compile targets do not compile them.
 
 **On worker threads.** A host that compiles a program to JavaScript can call
 `runAsync()` on the result in place of `run()`. When the engine has a worker

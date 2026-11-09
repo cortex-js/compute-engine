@@ -21,6 +21,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { isValueDef } from '../boxed-expression/definition-guards.js';
+import { isIndexReadTuple } from '../boxed-expression/index-read-tuple.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import {
   isNonRealNumber,
@@ -267,6 +268,48 @@ const sig = (
   extra: Partial<FragmentSignature> = {}
 ): FragmentSignature => ({ operands, result, ...extra });
 
+/**
+ * Whether the compiler reads `node` as complex (`isComplexValued()`) where
+ * the pass reads it, in `scope`. The emitter reads a name that a
+ * parameter, a local or an index binds by the shape frames that it pushes
+ * for these names (`withLocalShapeFrame()`), not by the engine symbol of
+ * the same name: the parameter `i` of `h(i) := Sin(10^4 i)` is a real, not
+ * the imaginary unit. The same frames are built here from the bindings of
+ * the scopes below the root scope. In the root scope, the names are the
+ * inputs, which the emitter reads by their engine symbols too.
+ */
+function complexValuedIn(
+  node: Expression,
+  scope: FragmentScope<unknown>
+): boolean {
+  if (scope.parent === undefined) return core.isComplexValued(node);
+  const complex = new Map<string, boolean>();
+  const vector = new Map<string, number>();
+  for (let s = scope; s.parent !== undefined; s = s.parent)
+    for (const [name, facts] of s.bindings) {
+      // An inner binding hides an outer one of the same name.
+      if (complex.has(name) || !('representation' in facts)) continue;
+      const t = facts.type;
+      complex.set(name, t.kind === 'complex');
+      const n =
+        t.kind === 'complex'
+          ? 2
+          : t.kind === 'color'
+            ? 3
+            : t.kind === 'point'
+              ? t.size
+              : t.kind === 'list'
+                ? t.count
+                : undefined;
+      if (t.kind === 'boolean') vector.set(name, BaseCompiler.LOCAL_BOOLEAN);
+      else if (n !== undefined) vector.set(name, n);
+      else if (t.kind !== 'list') vector.set(name, BaseCompiler.LOCAL_SCALAR);
+    }
+  return core.withLocalShapeFrame(complex, vector, () =>
+    core.isComplexValued(node)
+  );
+}
+
 /** A real function of one real operand. */
 const REAL_1: FragmentRule<GlslRepresentation> = {
   signatures: [sig(['real'], 'real')],
@@ -277,9 +320,15 @@ const REAL_OR_POINT_1: FragmentRule<GlslRepresentation> = {
   signatures: [sig(['real'], 'real'), sig(['point'], 'point')],
 };
 /** A function of one operand with a complex helper too, and that acts on
- * each component of a point. */
+ * each component of a point. A node that the compiler reads as complex
+ * (`isComplexValued()`) is complex, also when its operand is real: the
+ * value of `Arcsin(x)` with `x` real is complex where `|x| > 1`
+ * (`Arcsin(2)` is `1.5708 - 1.3170i`), and the emitter writes the complex
+ * helper, `_gpu_casin(vec2(x, 0.0))`. A head that takes reals only then
+ * refuses it (`Max(Arcsin(x), 0)`), as the emitter declines it. */
 const ELEMENTARY: FragmentRule<GlslRepresentation> = {
   signatures: [
+    sig(['complex'], 'complex', { when: complexValuedIn }),
     sig(['real'], 'real'),
     sig(['complex'], 'complex'),
     sig(['point'], 'point'),
@@ -289,14 +338,15 @@ const ELEMENTARY: FragmentRule<GlslRepresentation> = {
  * complex (`isComplexValued()`, as for `Sqrt(-2)`) is a complex number:
  * the GLSL code writes it as a `vec2`, and a head that takes reals only
  * refuses it
- * (`Mod(Sqrt(-2), 1)`). */
+ * (`Mod(Sqrt(-2), 1)`). The question is asked in the scope of the node
+ * (`complexValuedIn()`). */
 const SQRT: FragmentRule<GlslRepresentation> = {
   walk: (node, scope, context, w) =>
     w.signatures(
       node,
       scope,
       context,
-      core.isComplexValued(node)
+      complexValuedIn(node, scope)
         ? [sig(['complex'], 'complex')]
         : ELEMENTARY.signatures!
     ),
@@ -1984,20 +2034,40 @@ function glslFunctionOf(
       return undefined;
     return declared;
   });
+  // A point type that the engine inferred from index reads alone
+  // (`p[1] + p[2]`, `isIndexReadTuple()`) is not a contract: the interpreter
+  // binds a list argument to that parameter whole, and the emitter writes
+  // the function for the type of the argument. Such a parameter has no type
+  // here, so it takes the type of its argument, as a collection parameter
+  // (decision 19). The body then reads a list argument as a list: in
+  // `g(p) := p[1] + p[2] + |p|` called with `[3, 4]`, `|p|` is `[3, 4]`, not
+  // the norm 5 of a point.
   const parameterTypes = declaredTypes.map((declared) => {
-    if (declared === undefined) return undefined;
+    if (declared === undefined || isIndexReadTuple(declared)) return undefined;
     const fragment = glslFragmentTypeOf(declared);
     return fragment === undefined || fragment.kind === 'list'
       ? undefined
       : fragment;
   });
+  // Whether the interpreter applies the function to each element of a list
+  // argument: it does when every parameter has a scalar type, with the
+  // predicate that the interpreter and the emitter's element-wise wrapper
+  // read (`userFunctionParamsAreScalar()`). Otherwise a list argument binds
+  // its parameter whole (the spec, decision 19).
+  const broadcasts = BaseCompiler.userFunctionParamsAreScalar(engine, h);
   // A parameter whose type is a collection with no fragment type
   // (`list<number>`) takes a list argument whole (the spec, decision 18).
+  // So does a parameter with no fragment type of a function that the
+  // interpreter does not apply to each element, when its type admits a
+  // list of numbers: the engine infers `collection<any> | value` for `V`
+  // in `R(V, t) := [Sum(V [cos t, -sin t]), Sum(V [sin t, cos t])]`, and
+  // the body reads `V` whole (decision 19).
   const collectionParameters = declaredTypes.map(
     (declared, i) =>
-      declared !== undefined &&
       parameterTypes[i] === undefined &&
-      isSubtype(declared, 'collection')
+      ((declared !== undefined && isSubtype(declared, 'collection')) ||
+        (!broadcasts &&
+          (declared === undefined || isSubtype('list<number>', declared))))
   );
 
   // The body that the emitter compiles, prepared by the same two functions
@@ -2049,6 +2119,7 @@ function glslFunctionOf(
     parameters: parameterNames,
     parameterTypes,
     collectionParameters,
+    broadcasts,
     // The symbol of a parameter: `u`, or the `u` of `Typed(u, 'real')`.
     parameterSymbols: kept.map((i) => {
       if (inlined) return undefined;

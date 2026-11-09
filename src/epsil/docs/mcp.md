@@ -147,7 +147,7 @@ and monitoring.
 | `doc`       | Look up a library function by name, or search the library by keywords |
 | `parse`     | Convert Epsil source, or LaTeX with `format: "latex"`, to MathJSON |
 | `serialize` | Convert MathJSON to Epsil source, or to LaTeX with `format: "latex"`; `fancySymbols: true` for the Unicode notations |
-| `compile`   | Show the code a compilation target (JavaScript, GLSL, WGSL, Python, interval JavaScript) generates for a program or a LaTeX expression, or why the target declines it |
+| `compile`   | Show the code a compilation target (JavaScript, GLSL, Python, interval JavaScript) generates for a program or a LaTeX expression, or why the target declines it |
 
 The server also publishes the [language card for AI agents](/epsil/for-agents/)
 as a resource (`epsil://docs/for-agents`), and its setup instructions tell
@@ -200,7 +200,7 @@ The result has `ok`, the generated `code` (`atan(z.y, z.x) + 1.0`), and
 it as (here `vec2`, the uniform to declare), and whether it was declared or
 inferred. When the target declines, `ok` is `false`, there is no `code`, and
 `error` and `diagnostic` give the reason. `to` is `javascript` (the default),
-`glsl`, `wgsl`, `python` or `interval-js`, and `mode` selects the arithmetic
+`glsl`, `python` or `interval-js`, and `mode` selects the arithmetic
 discipline: `strict` (the default), `complex` or, on `javascript` only,
 `bigint`.
 

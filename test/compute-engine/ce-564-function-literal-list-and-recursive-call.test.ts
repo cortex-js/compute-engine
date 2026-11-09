@@ -257,13 +257,17 @@ describe('CE-564.4: a list argument at a parameter bound whole', () => {
       expect(result.run!(at) as number).toBeCloseTo(expected, 10);
     });
 
-    test(`GLSL declines R with an untyped parameter (${route})`, () => {
+    test(`GLSL emits a copy of R with a vec2 parameter (${route})`, () => {
       const ce = engineWithR(route);
       const result = compile(ce.box(row as any) as any, { to: 'glsl' });
-      // The parameter `V` has no declared type, and the GLSL fragment
-      // refuses it.
-      expect(result.success).toBe(false);
-      expect(result.diagnostic?.code).toBe('outside-fragment');
+      // `V` has no declared type, and the body reads it whole, so it takes
+      // the type of its list argument (decision 19 of
+      // `docs/plans/2026-11-08-glsl-fragment-spec.md`).
+      expect(result.success).toBe(true);
+      expect(result.preamble).toMatch(/vec2 _fn_R_\w+\(vec2 V, float t\) \{/);
+      expect(result.code).toMatch(
+        /_fn_R_\w+\(vec2\(x, y\) \+ vec2\(-0\.57, 2\.8\), phi\)/
+      );
     });
 
     // interval-js compiled the generic definition of `R` against the scalar
@@ -342,10 +346,10 @@ describe('CE-564.4: a list argument at a parameter bound whole', () => {
     const result = compile(ce.box(['h', ['List', 'u', 1]]) as any, {
       to: 'glsl',
     });
-    // The parameter `V` has no declared type, and the GLSL fragment refuses
-    // it.
-    expect(result.success).toBe(false);
-    expect(result.diagnostic?.code).toBe('outside-fragment');
+    expect(result.success).toBe(true);
+    expect(result.preamble).toMatch(/\(vec2 V\) \{/);
+    expect(result.preamble).toMatch(/= _gpu_sin\w*\(V\);/);
+    expect(result.preamble).not.toMatch(/= sin\(V\);/);
   });
 
   test('a list of finite reals uses the built-in sin on GLSL', () => {
@@ -353,9 +357,9 @@ describe('CE-564.4: a list argument at a parameter bound whole', () => {
     const result = compile(ce.box(['h', ['List', 'x', 1]]) as any, {
       to: 'glsl',
     });
-    // The parameter `V` has no declared type, and the GLSL fragment refuses
-    // it.
-    expect(result.success).toBe(false);
-    expect(result.diagnostic?.code).toBe('outside-fragment');
+    expect(result.success).toBe(true);
+    expect(result.preamble).toMatch(/\(vec2 V\) \{/);
+    expect(result.preamble).toMatch(/= sin\(V\);/);
+    expect(result.preamble).not.toMatch(/_gpu_sin/);
   });
 });

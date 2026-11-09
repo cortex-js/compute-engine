@@ -529,12 +529,15 @@ describe.each(TARGETS)('CE-565.4 on %s', (to) => {
     it('calls the built-ins when every call passes a finite scalar', () => {
       const ce = engineWith('R', R_LITERAL, 'function');
       ce.declare('phi', 'real');
-      // `R` is declared `function`, so its parameter `V` has no type. The
-      // GLSL fragment does not give a list argument to a parameter with no
-      // type.
-      expect(() => shader(ce, rowOf('phi'), to)).toThrow(
-        /The parameter `V` of `R` has no type in the GLSL fragment/
-      );
+      // `R` is declared `function`, so its parameter `V` has no declared
+      // type. The body reads `V` whole, so `V` takes the type of its list
+      // argument, a `vec2` (decision 19 of
+      // `docs/plans/2026-11-08-glsl-fragment-spec.md`).
+      const { preamble } = shader(ce, rowOf('phi'), to);
+      const body = definition(preamble, '_fn_R_\\w+');
+      expect(body).toMatch(/\bcos\(t\)/);
+      expect(body).toMatch(/\bsin\(t\)/);
+      expect(body).not.toMatch(/_gpu_(cos|sin)\(t\)/);
     });
   });
 

@@ -1089,11 +1089,13 @@ describe('decisions 16 to 18, and the complex reciprocal functions', () => {
       );
   });
 
-  test('18: a parameter with no type and a list argument is out', () => {
-    // The interpreter applies `f` to each element of the list: the body
-    // read with a `vec2` would give another value.
-    const r = expectOut(['fu', ['List', 'x', 'y']]);
-    expect(r.diagnostic.message).toMatch(/`u` of `fu` has no type in the GLSL fragment/);
+  test('19: a parameter with no type and a list argument is mapped, not typed as a list', () => {
+    // The interpreter applies `fu` to each element of the list (decision
+    // 19): the parameter is a `float`, and a wrapper maps it.
+    expectIn(['fu', ['List', 'x', 'y']]);
+    const r = glsl(['fu', ['List', 'x', 'y']]);
+    expect(r.code).toBe('_fn_fu_each2_1(vec2(x, y))');
+    expect(r.preamble).toContain('float _fn_fu(float u)');
   });
 
   test.each(['Cot', 'Sec', 'Csc'])('%s of a complex number is in', (h) => {
@@ -1108,6 +1110,179 @@ describe('decisions 16 to 18, and the complex reciprocal functions', () => {
 
   test.each(['Arccot', 'Arcsch'])('%s of a complex number is out: no complex helper', (h) => {
     expectOut([h, 'z'], h);
+  });
+});
+
+/**
+ * Decision 19 of `docs/plans/2026-11-08-glsl-fragment-spec.md`: a call of a
+ * user function with a list argument has the value that the interpreter
+ * gives. The functions are reduced from the Tycho documents
+ * `neyret/0et6fx01id` (`f(x) = x mod 1` called with `[-x, -y]`),
+ * `neyret/pqflulcixs` (the rotation `R(V, θ)`), `neyret/9pal1xuvqq` (`f(c)`
+ * with `c` a list of three reals) and `neyret/ra1p9naofs` (`l(p)`). The
+ * values of the compiled shaders are compared with the interpreter in the
+ * GLSL lane (`scripts/glsl-check/glsl-driver.test.ts`, "the calls of user
+ * functions with a list argument").
+ */
+describe('decision 19: a call of a user function with a list argument', () => {
+  const glsl = (json: unknown) =>
+    compile(ce.box(json as any), { to: 'glsl', fallback: false });
+  ce.assign('m19', ce.box(['Function', ['Mod', 'u', 1], 'u']));
+  ce.declare('mr19', '(real) -> real');
+  ce.assign('mr19', ce.box(['Function', ['Mod', 'u', 1], 'u']));
+  ce.assign('add19', ce.box(['Function', ['Add', 'a', 'b'], 'a', 'b']));
+  ce.assign('lt19', ce.box(['Function', ['Less', 'u', 0], 'u']));
+  ce.assign(
+    'R19',
+    ce.box([
+      'Function',
+      [
+        'List',
+        ['Sum', ['Multiply', 'V', ['List', ['Cos', 't'], ['Negate', ['Sin', 't']]]]],
+        ['Sum', ['Multiply', 'V', ['List', ['Sin', 't'], ['Cos', 't']]]],
+      ],
+      'V',
+      't',
+    ])
+  );
+  ce.assign(
+    'C19',
+    ce.box([
+      'Function',
+      [
+        'Subtract',
+        [
+          'Add',
+          ['Power', ['Subtract', 'p', ['At', 'c', 1]], 2],
+          ['Power', ['Subtract', 'q', ['At', 'c', 2]], 2],
+        ],
+        ['Power', ['At', 'c', 3], 2],
+      ],
+      'c',
+      'p',
+      'q',
+    ])
+  );
+  ce.assign(
+    'l19',
+    ce.box([
+      'Function',
+      ['Sqrt', ['Add', ['Power', ['At', 'v', 1], 2], ['Power', ['At', 'v', 2], 2]]],
+      'v',
+    ])
+  );
+
+  test('the interpreter maps the scalar functions and reads the others whole', () => {
+    const value = (json: unknown) => ce.box(json as any).evaluate().toString();
+    expect(value(['m19', ['List', -2.25, 3.5]])).toBe('[0.75,0.5]');
+    expect(value(['R19', ['List', 3, 4], 0])).toBe('[3,4]');
+    expect(value(['C19', ['List', 1, 2, 0.5], 3, 4])).toBe('7.75');
+    expect(value(['l19', ['List', 3, 4]])).toBe('5');
+  });
+
+  test('a scalar function called with a list of 2 to 4 reals is applied to each element', () => {
+    for (const [f, param] of [
+      ['m19', 'u'],
+      ['mr19', 'u'],
+    ]) {
+      const json = [f, ['List', ['Negate', 'x'], ['Negate', 'y']]];
+      expectIn(json);
+      const r = glsl(json);
+      expect(r.code).toBe(`_fn_${f}_each2_1(vec2(-x, -y))`);
+      expect(r.preamble).toContain(`float _fn_${f}(float ${param})`);
+      expect(r.preamble).toContain(
+        `vec2 _fn_${f}_each2_1(vec2 a0) {\n  return vec2(_fn_${f}(a0.x), _fn_${f}(a0.y));`
+      );
+    }
+    expectIn(['m19', ['List', 'x', 'y', 1, 2]]);
+    // A scalar call and a list call of one function share its definition.
+    expectIn(['Add', ['m19', 'x'], ['At', ['m19', ['List', 'x', 'y', 1]], 1]]);
+    // A scalar argument beside a list is held whole by the wrapper.
+    expectIn(['add19', ['List', 'x', 'y'], 'x']);
+    expect(glsl(['add19', ['List', 'x', 'y'], 'x']).code).toBe(
+      '_fn_add19_each2_10(vec2(x, y), x)'
+    );
+  });
+
+  test('a scalar function called with a longer list, lists of two lengths or a non-real value is out', () => {
+    const long = expectOut(['m19', ['List', 'x', 'y', 1, 2, 3]]);
+    expect(long.diagnostic.message).toMatch(
+      /applies `m19` to each element of `\[x,y,1,2,3\]`, of the type `list<real, 5>`: the GLSL code maps a list of 2 to 4 reals only/
+    );
+    const mixed = expectOut(['add19', ['List', 'x', 'y'], ['List', 'x', 'y', 1]]);
+    expect(mixed.diagnostic.message).toMatch(/lists of different lengths/);
+    const bool = expectOut(['lt19', ['List', 'x', 'y']]);
+    expect(bool.diagnostic.message).toMatch(/has the type `boolean`, not `real`/);
+    // The wrapper does not convert a complex argument, as a call does.
+    const complex = expectOut(['add19', ['List', 'x', 'y'], 'z']);
+    expect(complex.diagnostic.message).toMatch(/no complex or colour parameter/);
+  });
+
+  test('a parameter that the body reads as a vector takes the list type of its argument', () => {
+    const rotation = ['R19', ['List', 'x', 'y'], 0.5];
+    expectIn(rotation);
+    expect(glsl(rotation).preamble).toMatch(
+      /vec2 _fn_R19_vector_real_2_number\(vec2 V, float t\)/
+    );
+    const circle = ['C19', ['List', 'y', 'x', 0.5], 'x', 'y'];
+    expectIn(circle);
+    expect(glsl(circle).preamble).toMatch(
+      /float _fn_C19\w*\(vec3 c, float p, float q\)/
+    );
+    // A parameter typed as a point by its `At` reads takes a list of reals
+    // of its size whole, and a list built by a mapped call.
+    expectIn(['l19', ['List', 'x', 'y']]);
+    expectIn(['l19', ['m19', ['List', 'x', 'y']]]);
+    expect(glsl(['l19', ['m19', ['List', 'x', 'y']]]).code).toBe(
+      '_fn_l19_vector_real_2(_fn_m19_each2_1(vec2(x, y)))'
+    );
+  });
+
+  test('a parameter typed by index reads that the body also reads whole is read as a list', () => {
+    // `g(p) := p[1] + p[2] + |p|`: the interpreter maps `Abs` over the list,
+    // so the value of the call is a list, not a real (the absolute value of
+    // a point is its norm). The engine type of the call is
+    // `number | vector<real^2>`, which the emitter reads as a real, so the
+    // call is out.
+    ce.assign(
+      'g19',
+      ce.box([
+        'Function',
+        ['Add', ['At', 'p', 1], ['At', 'p', 2], ['Abs', 'p']],
+        'p',
+      ])
+    );
+    expect(ce.box(['g19', ['List', 3, 4]]).evaluate().toString()).toBe(
+      '[10,11]'
+    );
+    const json = [
+      'Add',
+      ['Sin', ['g19', ['List', 'x', 'y']]],
+      ['Cos', ['g19', ['List', 'x', 'y']]],
+    ];
+    const message =
+      /The call `g19\(\[x,y\]\)` has a list value, and its type `number \| vector<real\^2>` is not a list type/;
+    expect(expectOut(json).diagnostic.message).toMatch(message);
+    expect(() => glsl(json)).toThrow(message);
+    // A body that reads the parameter by index only still takes the list.
+    expectIn(['l19', ['List', 'x', 'y']]);
+  });
+
+  test('a list of another length, or a later call with another type, is out', () => {
+    expectOut(['R19', ['List', 'x', 'y', 1, 2, 3], 0.5]);
+    // A parameter typed by its index reads takes the type of its argument:
+    // a list of 3 reals is read by index, as the interpreter reads it.
+    expectIn(['l19', ['List', 'x', 'y', 1]]);
+    // One GLSL function per parameter type is not needed by the witnesses:
+    // the refusal of decision 11 stays.
+    const r = expectOut([
+      'Add',
+      ['At', ['R19', ['List', 'x', 'y'], 0.5], 1],
+      ['At', ['R19', ['List', 'x', 'y', 1], 0.5], 1],
+    ]);
+    expect(r.diagnostic.message).toMatch(
+      /`V` of `R19` has no declared type.*`list<real, 2>`.*`list<real, 3>`/
+    );
   });
 });
 
@@ -1960,4 +2135,85 @@ describe('phase C2, third review fixes', () => {
     inOn(e, ['At', 'P', 'k']);
   });
 
+});
+
+/**
+ * The value of an inverse function of a real operand can be complex
+ * (`Arcsin(2)` is `1.5708 - 1.3170i`), and the compiler then writes the
+ * complex helper (`_gpu_casin(vec2(x, 0.0))`). The pass types such a node
+ * as complex, so that the representation of each node is the GLSL type of
+ * its code, and a head that takes reals only refuses it, as the emitter
+ * declines it.
+ */
+describe('an elementary function whose value on a real is complex', () => {
+  const glsl = ce._getCompilationTarget('glsl') as unknown as {
+    _fragmentAnnotationForTest(
+      expr: Expression,
+      options: Record<string, unknown>
+    ): {
+      root: Expression;
+      scope: { facts: Map<Expression, { representation?: string }> };
+    };
+  };
+  const representationOf = (json: unknown): string | undefined => {
+    const a = glsl._fragmentAnnotationForTest(ce.box(json as any), {
+      to: 'glsl',
+    });
+    return a.scope.facts.get(a.root)?.representation;
+  };
+
+  test.each([
+    [['Arcsin', 'x'], 'vec2'],
+    [['Multiply', 'x', ['Arcsin', 'x']], 'vec2'],
+    [['Sin', ['Arcosh', 'x']], 'vec2'],
+    [['Real', ['Arccos', 'x']], 'float'],
+    // A real operand in [-1, 1] by its type: the value is real.
+    [['Arccos', ['Clamp', 'x', -1, 1]], 'float'],
+  ])('%j is in, with the representation %s', (json, representation) => {
+    expectIn(json);
+    expect(representationOf(json)).toBe(representation);
+  });
+
+  test('the code reads the operand as a complex number', () =>
+    expect(compile(ce.box(['Arcsin', 'x']), { to: 'glsl' }).code).toBe(
+      '_gpu_casin(vec2(x, 0.0))'
+    ));
+
+  test.each([
+    [['Max', ['Arcsin', 'x'], 0], 'Max'],
+    [['Mod', ['Arccos', 'x'], 1], 'Mod'],
+    [['Floor', ['Arcsin', 'x']], 'Floor'],
+    [['Hypot', ['Arcsin', 'x'], 1], 'Hypot'],
+    [['Less', ['Arcsin', 'x'], 1], 'Less'],
+  ])('%j is out, and compile() declines it', (json, operator) => {
+    expectOut(json, operator);
+    expect(
+      compile(ce.box(json as any), { to: 'glsl', fallback: true }).success
+    ).toBe(false);
+  });
+
+  // In the body of a user function, a parameter named `i` is a real, not
+  // the imaginary unit: the question is asked with the parameter bound, as
+  // the emitter asks it. The value is real (`h(2)` is `0.8476`, `s(2)`
+  // is `Sqrt(5) - 2`), and the code reads it as a `float`.
+  test.each([
+    [
+      'h',
+      'h(i)\\coloneq\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)',
+      'float _fn_h(float i)',
+    ],
+    [
+      's',
+      's(i)\\coloneq\\operatorname{mod}(\\sqrt{i^2+1},1)',
+      'float _fn_s(float i)',
+    ],
+  ])('a parameter named `i` in the body of %s is a real', (name, latex, fn) => {
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    e.parse(latex).evaluate();
+    const expr = e.box([name, 'x']);
+    expect(canCompile(expr, { to: 'glsl' })).toEqual({ ok: true });
+    const result = compile(expr, { to: 'glsl', fallback: false });
+    expect(result.preamble).toContain(fn);
+  });
 });

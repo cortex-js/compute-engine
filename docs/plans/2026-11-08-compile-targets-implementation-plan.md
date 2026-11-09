@@ -207,6 +207,119 @@ that emission does and that can run in the preparation moves there. When
 the shader targets push no shape frame, the table of declared types keyed by
 frame goes.
 
+### The measure of step 5
+
+Measured on 2026-11-09 at `5c51b330a`, in a scratch worktree, with the 233
+test files that name GLSL (11,329 tests pass). Line numbers are those of
+that commit. Three methods back the rows:
+
+- **Rule.** The fragment refuses the form: the head has no rule in the
+  table of `glsl-fragment.ts` (lines 1262 to 1277), and `fragment.ts`
+  refuses a head with no rule (lines 1252 to 1257); or a rule refuses the
+  operand (cited in the row).
+- **Coverage.** Istanbul statement and branch coverage of the modules over
+  the 233 files.
+- **Stage probe.** A probe at the entry of each top-level function recorded
+  the stage that was running: the emit stage (`emitPreparedRoot()`, or the
+  `withAnnotation()` emission of `compileFunction()` and `compileShader()`),
+  the prepare stage and the pass (`prepareAndType()`,
+  `typeDeclaredBody()`), or neither. The emit stage runs only after the pass
+  accepted the expression. Thus a function that the emit stage enters serves
+  an admitted form, and a decline that it raises there is a disagreement
+  between the pass and the emitter.
+
+The result: almost every function is entered by the emit stage. The code
+that can go is the code of four refused forms (`Match`, a selection with a
+vector condition, `Return`, a random draw) and the operand-shape check,
+whose declines never run after the pass. Most of the remaining code serves
+admitted forms; it changes in step 5 only when its questions move to the
+annotation (the design note, section 6), not by removal.
+
+| Module | Lines | Can go | Stays, and why | Evidence |
+| --- | --- | --- | --- | --- |
+| `gpu-statements.ts` | 1,330 | About 520 lines. `compileGPUMatchStatement()` and `gpuMatchSelectedPieces()` (105): `Match` has no rule. `compileGPUSelection()`, `gpuSelectionConditionWidth()`, `gpuSelectionMask()`, `gpuMaskAnd()`, `gpuMaskOr()`, `gpuSelectionDecline()` (364), with the `selection` hook in `gpu-shader-target.ts` (lines 592 to 596): the element-wise selection by a vector condition; `walkIf()` and `walkWhich()` of `fragment.ts` admit a `boolean` condition only. `gpuAssertReturnPlacement()` (55), with the `onReturn` hook of the `define` hook: `Return` has no rule. The `Continue` part of `gpuShaderLoopJumps()`: `Continue` has no rule. | The statement form of `If` and `Which` (`compileGPUStatementSelection()`, `compileGPUConditionalArm()`, `gpuArmSharesWork()`, `gpuNeedsStatements()`, `gpuCanPlaceStatement()`, `gpuWritesOutside()`): the `if` statements of a block (decisions 6 and 13); the emit stage enters them 248 to 73,845 times. `gpuAssertExpressionOnly()` and `gpuAssertExpressionBody()`: the routes that write one expression (`compileFunction()`, `compileToSource()`, `compileShaderBody()`) can get an admitted block; their throws ran 9 times. `gpuShaderLoopJumps()`: the pass calls it (135 entries). | Rule; coverage: the two `Match` functions, the three mask functions and `gpuSelectionDecline()` are never entered, `compileGPUSelection()` never passes its `return null` (line 1266), and the throw of `gpuAssertReturnPlacement()` never runs. |
+| `gpu-draw-order.ts` | 724 | The random-draw part, lines 396 to 724 (311 lines: `gpuBindEveryDraw`, `gpuDrawComesAfter()`, `gpuDrawOrderError()`, `gpuCallsAFunctionThatDraws()`, `gpuArmDrawsWhileBinding()`, `gpuRecompileWithBoundDraws()`, `gpuAssertBindingKeepsDrawOrder()`, `gpuRecordBoundDraws()`, `gpuNodeDrawsItself()`, `gpuDrawCount()`), and the draw-count conditions of its callers (`gpu-statements.ts` lines 455 to 470, `gpuHoistKeepsCallerOrder()` line 282, `gpu-extrema.ts`, five sites in `gpu-functions.ts`, `gpu-shader-target.ts` line 569). | The caller-code order, lines 26 to 394 (353 lines: `gpuReachesCallerCode()`, `gpuAssertCallerCodeNotRepeated()`, `gpuAssertHoistKeepsCallerOrder()`, `gpuHoistKeepsCallerOrder()`, `gpuReadsVarsBefore()`, `gpuOperandOnce()` and their helpers): code that the caller supplies (`vars`, `functions`) is admitted, and its order is checked in the emit stage (559 entries of `gpuHoistKeepsCallerOrder()`). It goes only with option (a) of CE-1176 (below). | Rule: `Random` and `WithRandomSeed` have no rule, and an admitted `Assign` writes only a local of its function (`walkAssign()`, `fragment.ts` lines 2958 to 2966). Thus the only impure nodes that reach the emit stage are calls of block-bodied functions, which have no effect outside the function, and caller code. Coverage: `gpuRecompileWithBoundDraws()` never reaches its successful return (lines 549 and 550); the probe found `gpuDrawOrderError()` in one test only, a CE-1176 case (`compile-gpu-extremum.test.ts`, "a constructor written by the caller is not repeated in an arm"). |
+| `gpu-at.ts` | 1,027 | `gpuAtBaseRefs()` (17 lines), never entered; its call in `gpu-functions.ts` line 753 goes with it. | Every other function: the emit stage enters each one (an `At` of a constant list, of a list of points, of a list in a texture, of a uniform array; a literal gather or mask that the pass types as a folded constant). | Coverage and stage probe. 0 of the 6 decline sites ran. The "dynamic and masked forms" that the spec, section 5, names are in the `At` lowering of `gpu-functions.ts`, not in this module, and this measure does not cover them. |
+| `gpu-shapes.ts` | 2,107 | About 550 lines when the readers move to the annotation: `gpuCheckOperandShapes()` (378 lines with its comment) and the helpers that only it uses: `gpuMisplacedScalarArgument()`, `gpuConstructedVectorWidth()`, `gpuWithoutScalarReductions()`, `gpuReshapesOperands()`, `gpuMatrixDims()` (a matrix is outside the fragment, decision 1). Its call in `gpu-shader-target.ts` line 612 goes. The removal session confirms each helper with `findReferences`. | The shape queries (`gpuOperandShape()`, `gpuComponentCount()`, `gpuBinaryVectorWidth()`, `gpuCertainValueType()`): they move to the annotation (the design note, section 6) and are not removed by this measure. The trigonometric and pi-multiple folds (`gpuReduceTrigOffset()`, `gpuPiMultiple()`, about 6,000 entries each), the NaN and complex helpers, the tables that are built at module load (`markAggregateConsuming()`, `markOperandConsuming()`, `gpuAbsorbedConstant()`). | Coverage, branch level: `gpuCheckOperandShapes()` returns nothing and writes no code; the emit stage enters it 30,327 times, and 0 of its 21 decline sites ran (the one decline whose `if` statement ran, line 1903, never took its branch). The pass refuses those forms first. |
+| `compile-blocks.ts` | 1,300 | About 45 lines: the GLSL throws of the local-shape check in `compileBlock()` (lines 388 to 455): a local that holds a list of points, an empty list, a point-or-list union, a matrix, two shapes. | The rest. The shader statement emission of a block (`joinShaderStatements()`, `compileListStatement()`, `shaderSelectionStatement()`) writes every admitted block. `compileStatementList()` lines 132 to 140 (a destructuring statement as a loop body) never ran, but a tuple assignment of locals is admitted: it stays, and needs a test. | Rule: "no list local" and one type per local (`walkDeclare()`, `walkAssign()`). Coverage: none of the five throws ran. |
+| `compile-statements.ts` | 660 | Nothing. | `joinShaderStatements()` (293 entries), `compileListStatement()`, `compileFunctionBody()`: they write the statements of each admitted block. The other functions are shared with the other targets. | Stage probe. |
+| `compile-admission.ts` | 2,756 | Nothing. | The shader options of the shape check R3 (`droppedOperands()`, `conditionalBranches()`, the `arity` flag of `unsettledShapeIn()`). The pass does not replace R3: `canCompile()` runs the same search after the pass, and `throwUnsettledShape()` declined 8 times in the emit stage after the pass had accepted. | Stage probe. |
+
+Outside the listed modules, `gpu-random.ts` (904 lines) serves only the
+random draws. The pass refuses them, but no probe was run in that module:
+its removal is a separate measure.
+
+**Proposed order of the removal sessions** (one module each):
+
+1. CE-1177, before any reader moves (below): the emitter must compile the
+   tree that the pass typed.
+2. `gpu-statements.ts`: `Match`, the vector-condition selection, `Return`,
+   `Continue` (about 520 lines). The removed code is unreachable by the
+   rule and by the tests: one reviewer.
+3. `gpu-draw-order.ts`, the random-draw part (about 311 lines and the
+   draw-count conditions of six callers), and `gpu-random.ts` if its own
+   measure agrees. A draw-count condition is in kept functions, so a dual
+   review. With CE-1176 option (a) in the same session, the caller-code
+   order part goes too (about 353 lines).
+4. `gpu-shapes.ts`: `gpuCheckOperandShapes()` and its helpers (about 550
+   lines), with the shape queries that move to the annotation. A dual
+   review: kept functions change.
+5. `compile-blocks.ts` (about 45 lines) and `gpu-at.ts` (17 lines). They
+   are small, but one module per session still applies.
+
+`compile-statements.ts` and `compile-admission.ts` keep their shader
+branches. The total that can go is about 1,450 lines of the 9,904 lines of
+the seven modules, about 1,800 with CE-1176 option (a), plus
+`gpu-random.ts` if its measure agrees.
+
+**CE-1177: decision (a), extended.** The define hook compiles the body of
+the annotation entry. A trial of (a) in the scratch worktree failed 5 tests
+in 4 files. Their cause:
+
+- Three tests (common subexpressions in a function body): the nested
+  common-subexpression harvest is opened on the stored body `bodyExpr` by
+  `compiler-core.ts` (line 6931), before the hook is called. The hook then
+  compiles another tree, whose nodes are not in that harvest, so nothing is
+  shared. A nested harvest opened on the entry body inside the hook
+  (`withNestedCseHarvest()` around `compileFunctionBody()`) makes the three
+  tests pass.
+- Two tests: `compiler-core.ts` rewrites `bodyExpr` before the hook, and the
+  pass does not see that rewrite. The substitution of a tuple-valued
+  function (`(v, j) := step(j)`, the witness of CE-1177) is not in the
+  entry body, so the emitter declines (`compile-destructuring-from-call.test.ts`).
+  And a call that the pass's preparation writes in place stays a call in
+  `bodyExpr` (`theta = _fn_theta(…)` in
+  `tycho-items-275-289-call-shapes.test.ts`); the value is the same and the
+  code differs.
+
+Thus (a) needs two changes: the nested harvest on the entry body, and the
+rewrites of the definition route of `compiler-core.ts` (the substitution of
+a tuple-valued function, the call writing that the preparation does
+differently) move into the preparation that `glslFunctionOf()` and
+`shaderFunctionBody()` run, so that the pass types the tree that is
+written. Size M. Option (b) (the pass types the copy at the hook) keeps two
+preparations that can differ, types each body twice, and keeps the defect
+that the issue names: the annotation has no facts for the nodes that are
+written. The variants that the pass does not type under their key (an
+invariant-prefix variant, whose code overrides are keyed by nodes of
+`bodyExpr`) keep the current route until their own preparation moves; the
+removal session lists them.
+
+**CE-1176: option (a) is recommended, inside step 5, in the session of
+`gpu-draw-order.ts`.** Each piece of caller code is bound to a local once,
+in the order of the interpreter, at the start of its statement. A piece in
+a conditional branch is bound at the start of that branch, which takes the
+statement form; it cannot be bound before the statement, because the
+interpreter evaluates it only when the branch is taken. The order then does
+not depend on the hoisting, and the code that checks the order goes: the
+caller-code part of `gpu-draw-order.ts` (about 353 lines, which step 5
+otherwise keeps) and `operandsWrittenTwice()` in `glsl-fragment.ts`. It
+removes more code than it adds, and it is the move of a rewrite into
+preparation that step 5 asks for. The `discard` case (a reserved word as a
+parameter name) is separate: the specialization decision moves out of
+`ensureSpecializedUserCallEmitted()` (size S), and it can be done at any
+time.
+
 ## Step 6. Tycho calls the predicate at resolve time
 
 Tycho's work, on the release that has step 3: `compileDeferredGlsl()` and

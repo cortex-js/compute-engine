@@ -319,7 +319,7 @@ Compiled code raises on the absent branch (JavaScript, the interval
 JavaScript target, Python) with the
 message `expected-present: <operand> is absent`; the check is left out when
 the operand's type already excludes absence (a declared length with a literal
-index, a type without `nan`). A shader target (GLSL, WGSL) cannot raise:
+index, a type without `nan`). A shader target (GLSL) cannot raise:
 there the assertion compiles as the identity and the absent value flows on
 as `NaN`, and a later absence test on the value keeps its own rule.
 

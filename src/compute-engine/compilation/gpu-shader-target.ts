@@ -1766,23 +1766,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     options: CompilationOptions<Expression> = {}
   ): CanCompileResult {
     try {
-      const storage =
-        options.storage === undefined
-          ? undefined
-          : resolveStorageHints(options.storage, [expr], this.createTarget(), {
-              vars: options.vars,
-              functions: options.functions,
-            });
-      // The same wrappers as `compile()`: a `vars`-mapped symbol is read as
-      // the valueless input of its declared type, and a call of a user
-      // function that shadows a library operator has a private name.
-      return withVarsValuesHidden(expr, options.vars, () =>
-        withShadowingCallsRenamed(expr, options, (renamed) => {
-          const { prepared, annotation, handlerCode } = this.prepareAndType(
-            renamed,
-            options,
-            storage
-          );
+      return this.preparedAndTypedForCheck(
+        expr,
+        options,
+        ({ prepared, annotation, handlerCode }) => {
           if (annotation.refusal !== undefined)
             return {
               ok: false as const,
@@ -1864,11 +1851,56 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
               binding: error.names[0],
             },
           };
-        })
+        }
       );
     } catch (e) {
       return { ok: false, diagnostic: fragmentErrorDiagnostic(e) };
     }
+  }
+
+  /**
+   * The steps of `canCompile()` before its own checks: the `storage` hints,
+   * the wrappers of `compile()` (a `vars`-mapped symbol is read as the
+   * valueless input of its declared type, and a call of a user function that
+   * shadows a library operator has a private name), the prepare stage and
+   * the typing pass. `check` reads the result inside the wrappers.
+   */
+  private preparedAndTypedForCheck<T>(
+    expr: Expression,
+    options: CompilationOptions<Expression>,
+    check: (typed: ReturnType<GPUShaderTarget['prepareAndType']>) => T
+  ): T {
+    const storage =
+      options.storage === undefined
+        ? undefined
+        : resolveStorageHints(options.storage, [expr], this.createTarget(), {
+            vars: options.vars,
+            functions: options.functions,
+          });
+    return withVarsValuesHidden(expr, options.vars, () =>
+      withShadowingCallsRenamed(expr, options, (renamed) =>
+        check(this.prepareAndType(renamed, options, storage))
+      )
+    );
+  }
+
+  /**
+   * For tests only, not public API: the annotation of the typing pass that
+   * `canCompile()` runs for `expr` with `options` (the same preparation and
+   * the same pass), with the fact of each node that the pass typed. The
+   * checks of `canCompile()` after the pass (the shape search, the size of
+   * the user functions, `strictTypes`) do not run. It throws where
+   * `canCompile()` answers `ok: false` for an error.
+   */
+  _fragmentAnnotationForTest(
+    expr: Expression,
+    options: CompilationOptions<Expression> = {}
+  ): FragmentAnnotation<GlslRepresentation> {
+    return this.preparedAndTypedForCheck(
+      expr,
+      options,
+      ({ annotation }) => annotation
+    );
   }
 
   /**
