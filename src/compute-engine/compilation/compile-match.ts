@@ -1,5 +1,5 @@
-// Pattern matching: case tests, constructor patterns, match statements,
-// switches and ternaries.
+// Pattern matching: case tests, constructor patterns, match statements and
+// switches.
 
 import type {
   Expression,
@@ -28,14 +28,9 @@ import {
 } from '../boxed-expression/match-dispatch.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import { core } from './compiler-core-hooks.js';
-import {
-  _compileParents,
-  canHoist,
-  hoistStatement,
-} from './compile-statements.js';
+import { _compileParents } from './compile-statements.js';
 import { tempVar, withBoundScope } from './compiler-naming.js';
 import { withCseBlind } from './compile-cse.js';
-import type { MatchStatementClause } from './compiler-types.js';
 
 // ───────────────────────────────────────────────────────────────────────
 // `Match` compilation (Epsil structural pattern matching, Phase 4 —
@@ -864,172 +859,4 @@ export function emitMatchSwitch(
     );
   }
   return `switch (${s}) {${nl}${parts.join(nl)}${nl}}`;
-}
-
-/**
- * Compile a `["Match", …]` to a nested ternary via a target-provided
- * `ternary` primitive — the path GPU targets use (they have no statement-level
- * IIFE or `switch`). Only tier 0/1 constant dispatch and a trailing
- * irrefutable case compile; tier 2 destructuring and refutable tier 3 fail
- * closed. The subject is compiled once and inlined into each comparison
- * — once per leaf comparison, twice for a range pattern. That is safe for a
- * PURE subject only: `_gpu_rnd_draw` advances a runtime counter, so an
- * impure (Random-family) subject would be re-drawn per comparison. Such a
- * subject is bound to a hoisted temporary instead (it is evaluated
- * unconditionally, before any case, so hoisting it is sound); with no
- * statement sink to hoist into, this declines (D6).
- */
-export function compileMatchTernary(
-  engine: ComputeEngine,
-  args: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>,
-  opts: {
-    ternary: (cond: string, whenTrue: string, whenFalse: string) => string;
-    eq: string;
-    noMatch: string;
-    allowStrings: boolean;
-    /**
-     * Wrap a CONDITIONALLY-evaluated piece — a case body, a case guard, or a
-     * condition past the first — so a target that forbids hoisting out of a
-     * branch can fail closed on exactly those pieces. The SUBJECT is compiled
-     * outside it: it is evaluated unconditionally, before any case. Defaults
-     * to running the piece unwrapped.
-     */
-    arm?: (compiled: () => string) => string;
-    /**
-     * A STATEMENT form of the selection, for a target that can place
-     * statements (an `if … else` chain that stores the selected value in a
-     * temporary). It receives the reachable cases in order, up to and
-     * including an irrefutable case, and returns the code of the value, or
-     * `undefined` to keep the ternary form. It is not called when a case
-     * has no compiled form (tier-2 destructuring, a refutable tier-3
-     * pattern): the ternary form then declines with its own message.
-     */
-    statement?: (
-      clauses: ReadonlyArray<MatchStatementClause>
-    ) => string | undefined;
-  }
-): TargetSource {
-  const plan = getMatchPlan(engine, args);
-  if (plan.errorAlt !== undefined)
-    throw new Error(
-      `Could not compile \`Match\`: an or-alternative binds the name '${plan.errorAlt.toString()}'; not compilable.`
-    );
-
-  // The subject is UNCONDITIONAL — compiled once, before any case — so it is
-  // deliberately outside `opts.arm`: whatever it hoists runs on every path.
-  let subj = core.compile(args[0], target);
-  // …but it is SPLICED once per comparison (twice for a range pattern), so
-  // an impure (Random-family) subject has to be bound to a temporary first.
-  if (args[0].isPure === false) {
-    if (!canHoist(target))
-      throw new Error(
-        'Could not compile `Match`: an impure (Random) subject cannot be bound to a temporary ' +
-          'at this position — the subject is spliced into every case ' +
-          'comparison, and a repeated draw would shift every later value ' +
-          'in the shader.'
-      );
-    const t = tempVar(target);
-    const decl = `float ${t}`;
-    hoistStatement(target, `${decl} = ${subj};`);
-    subj = t;
-  }
-  const cases = plan.segments.flatMap((seg) => seg.cases);
-  const run = opts.arm ?? ((f: () => string) => f());
-
-  if (opts.statement !== undefined) {
-    const clauses: MatchStatementClause[] = [];
-    let compilable = true;
-    for (const cc of cases) {
-      if (isIrrefutableCase(cc)) {
-        const acc =
-          cc.captureNames.length === 1
-            ? new Map([[cc.captureNames[0], subj]])
-            : undefined;
-        clauses.push({
-          body: cc.body,
-          comparisons: [],
-          compileBody: () => compileMatchBody(cc, acc, target),
-        });
-        // The cases after an irrefutable case are never reached.
-        break;
-      }
-      if (cc.tier !== 0 && cc.tier !== 1) {
-        compilable = false;
-        break;
-      }
-      const guard =
-        cc.hasGuard && cc.guard !== undefined ? cc.guard : undefined;
-      clauses.push({
-        body: cc.body,
-        guard,
-        comparisons: matchCaseComparisons(cc).flatMap((cmp) =>
-          cmp.kind === 'range'
-            ? [cmp.lo, cmp.hi]
-            : [cmp.kind === 'literal' ? cmp.value : cmp.expr]
-        ),
-        test: () => {
-          const cond = matchLeafCondition(
-            engine,
-            cc,
-            subj,
-            opts.eq,
-            opts.allowStrings,
-            target
-          );
-          if (guard === undefined) return cond;
-          const g = run(() => compileMatchGuard(cc, undefined, target)!);
-          return `(${cond}) && (${g})`;
-        },
-        compileBody: () => compileMatchBody(cc, undefined, target),
-      });
-    }
-    if (compilable && clauses.length > 0) {
-      const statement = opts.statement(clauses);
-      if (statement !== undefined) return statement;
-    }
-  }
-
-  const build = (i: number): string => {
-    if (i >= cases.length) return opts.noMatch;
-    const cc = cases[i];
-    // Only a leading irrefutable case is unconditional; anything reached past
-    // an earlier condition sits behind a branch.
-    const armed = i === 0 ? (f: () => string) => f() : run;
-    if (isIrrefutableCase(cc)) {
-      const acc =
-        cc.captureNames.length === 1
-          ? new Map([[cc.captureNames[0], subj]])
-          : undefined;
-      return armed(() => compileMatchBody(cc, acc, target));
-    }
-    if (cc.tier === 0 || cc.tier === 1) {
-      const cond = armed(() =>
-        matchLeafCondition(engine, cc, subj, opts.eq, opts.allowStrings, target)
-      );
-      // The guard sits behind `&&` (short-circuiting) and the body behind the
-      // branch, so both are conditional even in the FIRST case.
-      const guard =
-        cc.hasGuard && cc.guard !== undefined
-          ? run(() => compileMatchGuard(cc, undefined, target)!)
-          : undefined;
-      const full = guard === undefined ? cond : `(${cond}) && (${guard})`;
-      return opts.ternary(
-        full,
-        run(() => compileMatchBody(cc, undefined, target)),
-        build(i + 1)
-      );
-    }
-    if (cc.tier === 2)
-      throw new Error(
-        `Could not compile \`Match\`: list/tuple destructuring is not compilable to "${target.language ?? 'this'}".`
-      );
-    const p = cc.rawPatterns?.[0];
-    throw new Error(
-      `Could not compile \`Match\`: pattern '${p?.toString() ?? '?'}' is not compilable; ` +
-        `rewrite with destructuring or guards.`
-    );
-  };
-
-  return build(0);
 }

@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **The `BaseCompiler` static member `compileMatchTernary` is removed**, with
+  the type `MatchStatementClause` of its `statement` option. It compiled a
+  `Match` to nested conditional expressions for the GLSL target, and GLSL now
+  declines every `Match` before it writes code: `Match` is not in the GLSL
+  fragment. A custom target that compiles `Match` writes its own lowering in
+  its `functions` table.
+
 ### Resolved Issues
 
 - **An edit of a document that pops and pushes a scope no longer takes

@@ -5427,6 +5427,31 @@ function hasReferencedName(
 }
 
 /**
+ * The function literal of `binding` when it is the operator definition of a
+ * user function (`q := (y ↦ …)`, or `DefineFunction`). `undefined` for a
+ * value definition, and for an operator that is not made from a literal (a
+ * library operator).
+ */
+function userFunctionLiteral(binding: BoxedDefinition): Expression | undefined {
+  if (!('operator' in binding)) return undefined;
+  return (binding.operator as { _lambdaLiteral?: Expression })._lambdaLiteral;
+}
+
+/**
+ * The literal of `userFunctionLiteral()`, with the locals of the nested
+ * blocks in use captured (`captureNestedLocals`): the form in which the
+ * literal can leave the scope of its binding.
+ */
+function capturedFunctionLiteral(
+  ce: ComputeEngine,
+  binding: BoxedDefinition
+): Expression | undefined {
+  const literal = userFunctionLiteral(binding);
+  if (literal === undefined) return undefined;
+  return captureNestedLocals(ce, literal) ?? literal;
+}
+
+/**
  * Replace, in the lazy collections of an evaluated ARGUMENT of a call to a
  * function literal, each symbol that the called function would resolve to a
  * different binding than the caller does, with the value of the caller's
@@ -5528,15 +5553,13 @@ function bindLazyArgumentLocals(
   if (isSymbol(arg)) {
     const own = arg.valueDefinition ?? arg.operatorDefinition;
     const live = bindingInContext(ce, arg.symbol, own);
-    if (live === undefined || !('operator' in live)) return arg;
-    const literal = (live.operator as { _lambdaLiteral?: Expression })
-      ._lambdaLiteral;
-    if (literal === undefined) return arg;
+    // The test of the literal comes first: it is one property read, and
+    // most symbol arguments (an unknown `x`) hold no function.
+    if (live === undefined || userFunctionLiteral(live) === undefined)
+      return arg;
     if (bindingInContext(ce, arg.symbol, own, calleeScope) === live) return arg;
-    return rerootOnCreatingFrame(
-      ce,
-      captureNestedLocals(ce, literal) ?? literal
-    );
+    const literal = capturedFunctionLiteral(ce, live);
+    return literal === undefined ? arg : rerootOnCreatingFrame(ce, literal);
   }
 
   // Most arguments have no lazy collection and no function literal: the walk
@@ -5554,23 +5577,35 @@ function bindLazyArgumentLocals(
   // walked once per node and context, not once per path.
   const memo = new Map<Expression, Map<string, Expression>>();
 
+  // The caller's binding of `name` when a read of `name` in the callee
+  // would not give it: `name` is a parameter or a local of the callee, or
+  // the chain of the callee's defining scope does not reach the binding.
+  // `undefined` when the caller has no binding of `name`, or when the callee
+  // reads the same binding. `own` is the definition that the occurrence of
+  // the name carries.
+  const callerOnlyBinding = (
+    name: string,
+    own: Parameters<typeof bindingInContext>[2]
+  ): BoxedDefinition | undefined => {
+    const live = bindingInContext(ce, name, own);
+    if (live === undefined) return undefined;
+    if (
+      !calleeNames().has(name) &&
+      bindingInContext(ce, name, own, calleeScope) === live
+    )
+      return undefined;
+    return live;
+  };
+
   const callerValue = (
     s: Expression & { symbol: string }
   ): Expression | undefined => {
-    const own = s.valueDefinition ?? s.operatorDefinition;
-    const live = bindingInContext(ce, s.symbol, own);
+    const live = callerOnlyBinding(
+      s.symbol,
+      s.valueDefinition ?? s.operatorDefinition
+    );
     if (live === undefined) return undefined;
-    if (
-      !calleeNames().has(s.symbol) &&
-      bindingInContext(ce, s.symbol, own, calleeScope) === live
-    )
-      return undefined;
-    if ('operator' in live) {
-      const literal = (live.operator as { _lambdaLiteral?: Expression })
-        ._lambdaLiteral;
-      if (literal === undefined) return undefined;
-      return captureNestedLocals(ce, literal) ?? literal;
-    }
+    if ('operator' in live) return capturedFunctionLiteral(ce, live);
     if (!('value' in live) || visiting.has(live)) return undefined;
     const value = live.value.value;
     if (value === undefined) return undefined;
@@ -5587,24 +5622,15 @@ function bindLazyArgumentLocals(
   };
 
   // The function that the call `app` applies when its name is a binding of
-  // the caller that the callee would not find (the same test as
-  // `callerValue`), or `undefined`.
+  // the caller that the callee would not find (`callerOnlyBinding`), or
+  // `undefined`.
   const callerFunction = (app: Expression): Expression | undefined => {
-    const name = app.operator;
-    const own = app.valueDefinition ?? app.operatorDefinition;
-    const live = bindingInContext(ce, name, own);
+    const live = callerOnlyBinding(
+      app.operator,
+      app.valueDefinition ?? app.operatorDefinition
+    );
     if (live === undefined) return undefined;
-    if (
-      !calleeNames().has(name) &&
-      bindingInContext(ce, name, own, calleeScope) === live
-    )
-      return undefined;
-    if ('operator' in live) {
-      const literal = (live.operator as { _lambdaLiteral?: Expression })
-        ._lambdaLiteral;
-      if (literal === undefined) return undefined;
-      return captureNestedLocals(ce, literal) ?? literal;
-    }
+    if ('operator' in live) return capturedFunctionLiteral(ce, live);
     if (!('value' in live)) return undefined;
     const value = live.value.value;
     if (value === undefined || !value.type.matches('function'))

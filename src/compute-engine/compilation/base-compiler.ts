@@ -567,7 +567,6 @@ import {
   compileMatchJS,
   compileMatchStatement,
   compileMatchStatementBody,
-  compileMatchTernary,
   emitMatchCaseJS,
   emitMatchConstructorCaseJS,
   emitMatchSwitch,
@@ -1636,7 +1635,6 @@ export class BaseCompiler {
   static readonly walkMatchElement = walkMatchElement;
   static readonly matchSwitchable = matchSwitchable;
   static readonly emitMatchSwitch = emitMatchSwitch;
-  static readonly compileMatchTernary = compileMatchTernary;
   static readonly tryFoldKnownSymbol = tryFoldKnownSymbol;
   static readonly foldedValueInRadians = foldedValueInRadians;
   static readonly _radianValues = _radianValues;
@@ -1935,7 +1933,6 @@ export { installUnrolledBigOpLane } from './compile-lanes.js';
 export type {
   EnclosingDefinition,
   ElementBinder,
-  MatchStatementClause,
   LoopInvariantBinding,
 } from './compiler-types.js';
 export {

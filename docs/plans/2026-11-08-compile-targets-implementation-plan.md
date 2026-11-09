@@ -378,10 +378,12 @@ independent definitions of the preamble change places) and
 common subexpressions of a definition are numbered from `_cse2` instead of
 `_cse1`; the code is otherwise the same).
 
-Open after this session: the GLSL `Match` entry of `gpu-functions.ts` does
-not run, because the pass refuses `Match` on every route; it and
-`BaseCompiler.compileMatchTernary()`, whose only caller it is, can go in a
-later session.
+After this session, the GLSL `Match` entry of `gpu-functions.ts` and
+`BaseCompiler.compileMatchTernary()`, its only callee that no other target
+used, were removed too (243 lines): the pass refuses `Match` on every
+route, so the entry did not run. The 236 GLSL test files pass and
+`npm run test:glsl` reports 0 disagreements. No audit ran: the removed code
+could not write code for any record.
 
 **CE-1176: option (a) is recommended, inside step 5, in the session of
 `gpu-draw-order.ts`.** Each piece of caller code is bound to a local once,

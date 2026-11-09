@@ -2017,40 +2017,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     };
     return build(0);
   },
-  // Epsil `Match`: tier-0/1 constant dispatch as a nested `select`/ternary with
-  // `==` comparisons, the subject inlined into each comparison (safe for a PURE
-  // subject; an impure one is bound to a hoisted temporary instead — see
-  // `BaseCompiler.compileMatchTernary`). Tier-2 destructuring, refutable
-  // tier-3, and string constants (no string type) fail closed.
-  // `compileMatchTernary` compiles the pieces itself, so the no-hoist guard is
-  // handed to it (`arm`) and applied PER PIECE — each case body, each case
-  // guard, and each condition past the first — the way the `If`/`Which`
-  // lowerings do. The SUBJECT stays outside it: it is compiled first and
-  // evaluated unconditionally, so a loop-form `Sum` there is safe to hoist.
-  //
-  // `Match` is not in the GLSL fragment (the rule table of `glsl-fragment.ts`
-  // has no rule for it), so the typing pass refuses it on every route before
-  // emission, and this entry does not run on GLSL. It has no statement form.
-  // The entry and `BaseCompiler.compileMatchTernary()`, whose only caller it
-  // is, can be removed in a later step of the removal of the shader statement
-  // code (`docs/plans/2026-11-08-compile-targets-implementation-plan.md`,
-  // step 5).
-  //
-  // Caller code (`gpuReachesCallerCode`) in the subject would run once per
-  // comparison, so it declines. A subject that draws is bound to a temporary ahead of the statement, so
-  // the statement must have no caller code (`gpuAssertHoistKeepsCallerOrder`).
-  Match: (args, _compile, target) => {
-    gpuAssertCallerCodeNotRepeated('Match', [args[0]!], target);
-    if (args[0]!.isPure === false)
-      gpuAssertHoistKeepsCallerOrder('Match', [args[0]!], target);
-    return BaseCompiler.compileMatchTernary(args[0]!.engine, args, target, {
-      ternary: (c, t, e) => gpuConditional(c, t, e),
-      eq: '==',
-      noMatch: gpuNaN(target),
-      allowStrings: false,
-      arm: (f) => compileGPUConditionalArm('Match', f, target),
-    });
-  },
+  // No `Match` entry: `Match` is not in the GLSL fragment (the rule table of
+  // `glsl-fragment.ts` has no rule for it), so the typing pass refuses it on
+  // every route before emission.
   Power: (args, compile, target) => {
     const base = args[0];
     const exp = args[1];
