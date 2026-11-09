@@ -105,7 +105,8 @@ function expectDeclines(json: MathJsonExpression, message: RegExp): void {
     } catch (e) {
       reason = (e as Error).message;
     }
-    expect(reason).toMatch(message);
+    // The GLSL fragment refuses the form before the emitter runs.
+    expect(reason).toMatch(to === 'glsl' ? /GLSL fragment/ : message);
   }
 }
 
@@ -284,12 +285,13 @@ describe('PARTIAL APPLICATION — a call with every argument compiles', () => {
   });
 
   test.each(['glsl'] as const)('%s', (to) => {
-    const r = compile(engine().box(['Apply', PURE_ADD, 1, 'u']), {
-      to,
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('(u + 1.0)');
+    // The GLSL fragment refuses `Apply` of a function literal.
+    expect(() =>
+      compile(engine().box(['Apply', PURE_ADD, 1, 'u']), {
+        to,
+        fallback: false,
+      })
+    ).toThrow(/`Apply` is in the GLSL fragment only as the application/);
   });
 
   test('python', () => {

@@ -141,9 +141,11 @@ describe('restriction: list-condition broadcast', () => {
       const ce = new ComputeEngine();
       ce.declare('x', 'real');
       const target = new GLSLTarget();
-      const r = target.compile(ce.parse('x^{2}\\left\\{x>0\\right\\}'));
-      expect(r.success).toBe(true);
-      expect(r.code).toContain('?');
+      // The GLSL fragment refuses an `If` that is a value and has one
+      // branch, which is what a restriction is.
+      expect(() =>
+        target.compile(ce.parse('x^{2}\\left\\{x>0\\right\\}'))
+      ).toThrow(/needs both branches/);
     });
   });
 });

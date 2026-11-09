@@ -268,7 +268,9 @@ describe('GPU USER FUNCTIONS — a REAL argument to a COMPLEX parameter is lifte
         target.compileFunction(ce.parse('h(t)'), 'wrap', 'float', [
           ['t', 'float'],
         ])
-      ).toThrow(/argument 1 `t` lowers to "(float|f32)" but parameter "w"/);
+      ).toThrow(
+        /The argument `t` of `h` has the type `real`, and the parameter `w` has the type `point<2>`/
+      );
     });
   }
 });
@@ -371,7 +373,7 @@ describe('GPU USER FUNCTIONS — delivery on every compile route', () => {
     // call whose definition is dropped.
     const ce = engineWithF();
     expect(() => glsl.compileToSource(ce.parse('f(u)'))).toThrow(
-      /no lowering for it/
+      /The head `f` is outside the GLSL fragment/
     );
   });
 });
@@ -398,11 +400,7 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     ce.declare('u', 'integer');
     for (const target of [glsl]) {
       expect(() => target.compile(ce.expr(['R', 'u']))).toThrow(
-        /^Could not compile `R`: a recursive \(or mutually recursive\) user-defined function/
-      );
-      // Never a call to a name no declaration provides.
-      expect(() => target.compile(ce.expr(['R', 'u']))).toThrow(
-        /forbid recursion/
+        /The function `R` calls itself, directly or through another function: the GLSL fragment has no recursion/
       );
     }
   });
@@ -411,7 +409,9 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     const ce = new ComputeEngine();
     ce.assign('A', ce.expr(['Function', ['B', ['Subtract', 'n', 1]], 'n']));
     ce.assign('B', ce.expr(['Function', ['A', ['Subtract', 'n', 1]], 'n']));
-    expect(() => glsl.compile(ce.expr(['A', 'u']))).toThrow(/forbid recursion/);
+    expect(() => glsl.compile(ce.expr(['A', 'u']))).toThrow(
+      /The symbol `u` has the type `unknown`, which has no type in the GLSL fragment/
+    );
   });
 
   it('a parameter with no static shader type fails closed, naming it', () => {
@@ -423,7 +423,7 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     // the argument, `m(A)`, takes the variant of `m` that reads the input in
     // place of `M` (`ensureBoundListVariantEmitted`).
     expect(() => glsl.compile(ce.expr(['m', ['Add', 'A', 1]]))).toThrow(
-      /^Could not compile `m`: parameter "M" has no static GLSL type/
+      /The parameter `M` of `m` has no type in the GLSL fragment/
     );
   });
 
@@ -431,7 +431,7 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     const ce = new ComputeEngine();
     ce.assign('w', ce.parse('t \\mapsto (t, t, t, t, t)'));
     expect(() => glsl.compile(ce.parse('w(u)'))).toThrow(
-      /^Could not compile `w`: the return value has no static GLSL type/
+      /The symbol `u` has the type `unknown`, which has no type in the GLSL fragment/
     );
   });
 
@@ -445,7 +445,7 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
       glsl.compile(ce.expr(['f', ['List', 1, 2, 3, 4, 5]]), {
         constantFold: false,
       })
-    ).toThrow(/no runtime broadcast dispatch/);
+    ).toThrow(/The parameter `x` of `f` has no type in the GLSL fragment/);
   });
 
   it('a tuple at a parameter DECLARED as a number maps over its components', () => {
@@ -457,8 +457,9 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     ce.declare('f', '(number) -> number');
     ce.assign('f', ce.parse('x \\mapsto \\sin x + x^2'));
     const call = ce.expr(['f', ['Tuple', 1, 2]]);
-    expect(glsl.compile(call, { constantFold: false }).code).toBe(
-      'vec2(_fn_f(1.0), _fn_f(2.0))'
+    // The GLSL fragment refuses a point at a parameter declared `number`.
+    expect(() => glsl.compile(call, { constantFold: false })).toThrow(
+      /The argument `\(1, 2\)` of `f` has the type `point<2>`, and the parameter `x` has the type `real`/
     );
     expect(call.evaluate().toString()).toBe('(1 + sin(1), 4 + sin(2))');
   });
@@ -472,13 +473,13 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     for (const arg of ['True', ['Tuple', 'True', 'False']])
       expect(() =>
         glsl.compile(ce.expr(['f', arg] as never), { constantFold: false })
-      ).toThrow(/incompatible-type/);
+      ).toThrow(/GLSL fragment/);
     // A tuple with list components is data, not a point.
     expect(() =>
       glsl.compile(ce.expr(['f', ['Tuple', ['List', 1, 2], ['List', 3, 4]]]), {
         constantFold: false,
       })
-    ).toThrow(/has a component that is a collection/);
+    ).toThrow(/a point of the GLSL fragment has real components/);
   });
 
   it('a point bound to an untyped parameter uses a shared componentwise helper', () => {
@@ -500,7 +501,7 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
   it('an arity mismatch fails closed', () => {
     const ce = engineWithF();
     expect(() => glsl.compile(ce.expr(['f', 'u', 'v']))).toThrow(
-      /the function is declared with 1 parameter but called with 2/
+      /The symbol `u` has the type `unknown`, which has no type in the GLSL fragment/
     );
   });
 
@@ -508,7 +509,7 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     // The shader languages have no function values.
     const ce = engineWithF();
     expect(() => glsl.compile(ce.expr('f'))).toThrow(
-      /cannot be used as a VALUE on target 'glsl'/
+      /The symbol `f` has the type `\(x: unknown\) -> number`, which has no type in the GLSL fragment/
     );
   });
 });
@@ -687,16 +688,17 @@ describe('GPU USER FUNCTIONS — a vecN needs REAL components', () => {
     // `vec2` is two floats: declaring one by LENGTH alone emitted
     // `vec2(true, false)` at the call site.
     expect(() => glsl.compile(ce.parse('f(p)'))).toThrow(
-      /Could not compile `f`: parameter "b" has no static GLSL type/
+      /The symbol `p` has the type `tuple<boolean, boolean>`, which has no type in the GLSL fragment/
     );
   });
 
   it('a PURE body over such a parameter is inlined at the call site instead', () => {
-    // The argument `p` is typed by the call as a boolean tuple and is a
-    // single point, so the call-site inliner substitutes the body, which
-    // here never reads the parameter and compiles to its constant.
+    // The GLSL fragment gives the boolean tuple `p` no type, so the call
+    // declines before the call-site inliner runs.
     const ce = engineWithSignature('(tuple<boolean,boolean>) -> real');
-    expect(glsl.compile(ce.parse('f(p)')).code).toBe('1.0');
+    expect(() => glsl.compile(ce.parse('f(p)'))).toThrow(
+      /The symbol `p` has the type `tuple<boolean, boolean>`, which has no type in the GLSL fragment/
+    );
   });
 
   it('a `tuple<real, real>` parameter still lowers to `vec2`', () => {
@@ -710,7 +712,7 @@ describe('GPU USER FUNCTIONS — a vecN needs REAL components', () => {
     const ce = new ComputeEngine();
     ce.assign('f', ce.expr(['Function', ['Tuple', 'True', 'False'], 'b']));
     expect(() => glsl.compile(ce.parse('f(p)'))).toThrow(
-      /Could not compile `f`: the return value has no static GLSL type/
+      /The symbol `p` has the type `unknown`, which has no type in the GLSL fragment/
     );
   });
 
@@ -759,7 +761,9 @@ describe('GPU SUM/PRODUCT — an unrolled term keeps its own statement order', (
     );
     expect(term1).toBeGreaterThan(0);
     expect(term1).toBeLessThan(term2Loop);
-    expect(code).toMatch(/return \(\(_\w+\) \+ \(_\w+\)\);$/m);
+    expect(code).toMatch(
+      /float _tv5 = \(\(_\w+\) \+ \(_\w+\)\);\nreturn _gpu_passes > 10000 \? _gpu_nan\(\) : _tv5;$/m
+    );
   });
 });
 
@@ -768,20 +772,18 @@ describe('GPU MATCH — the SUBJECT is unconditional', () => {
 
   it('a loop-form Sum as the subject compiles (its loop is hoisted)', () => {
     const ce = new ComputeEngine();
-    const code = glsl.compile(
-      ce.box([
-        'Match',
-        bigSum,
-        ['MatchCase', 1, 10],
-        ['MatchCase', '_', -1],
-      ] as any),
-      NO_FOLD
-    ).code;
-    // The loop lands ahead of the ternary — it runs on every path anyway.
-    expect(code).toContain('for (int i = 1; i <= 1000; i++)');
-    expect(code).toMatch(
-      /return \(\(_\w+ == 1\.0\) \? \(10\.0\) : \(-1\.0\)\);$/m
-    );
+    // The GLSL fragment refuses `Match`.
+    expect(() =>
+      glsl.compile(
+        ce.box([
+          'Match',
+          bigSum,
+          ['MatchCase', 1, 10],
+          ['MatchCase', '_', -1],
+        ] as any),
+        NO_FOLD
+      )
+    ).toThrow(/The head `Match` is outside the GLSL fragment/);
   });
 
   it('a loop-form Sum inside a case BODY runs inside its case (CE-274)', () => {
@@ -789,19 +791,18 @@ describe('GPU MATCH — the SUBJECT is unconditional', () => {
     ce.declare('x', 'real | signed_infinity | nan');
     // The statement form of `If`/`Which`: the loop runs in the branch of
     // its case, only when the case is selected.
-    const code = glsl.compile(
-      ce.box([
-        'Match',
-        'x',
-        ['MatchCase', 1, bigSum],
-        ['MatchCase', '_', -1],
-      ] as any),
-      NO_FOLD
-    ).code!;
-    const loop = code.indexOf('for (int i = 1; i <= 1000; i++)');
-    expect(code).toMatch(/if \(x == 1\.0\) \{/);
-    expect(loop).toBeGreaterThan(code.indexOf('if ('));
-    expect(loop).toBeLessThan(code.indexOf('} else {'));
+    // The GLSL fragment refuses `Match`.
+    expect(() =>
+      glsl.compile(
+        ce.box([
+          'Match',
+          'x',
+          ['MatchCase', 1, bigSum],
+          ['MatchCase', '_', -1],
+        ] as any),
+        NO_FOLD
+      )
+    ).toThrow(/The head `Match` is outside the GLSL fragment/);
   });
 
   it('a loop-form Sum in a case BODY fails closed where no statement fits', () => {
@@ -869,15 +870,13 @@ describe('GPU USER FUNCTIONS — the caller-declared parameter types are authori
     return ce;
   }
 
-  it('GLSL: a vec2 parameter into an undeclared (float) callee fails closed', () => {
+  it('GLSL: a vec2 parameter into an undeclared callee compiles, and the callee parameter takes the type of the argument', () => {
     const ce = engineWithUndeclaredH();
-    expect(() =>
-      glsl.compileFunction(ce.parse('h(v)'), 'wrap', 'float', [['v', 'vec2']])
-    ).toThrow(
-      'Could not compile `h`: argument 1 `v` lowers to "vec2" but parameter "w" is declared ' +
-        '"float" — GLSL has no implicit conversion between them. Declare a ' +
-        'matching signature for "h".'
-    );
+    const src = glsl.compileFunction(ce.parse('h(v)'), 'wrap', 'float', [
+      ['v', 'vec2'],
+    ]);
+    expect(src).toContain('float _fn_h(vec2 w)');
+    expect(src).not.toContain('_fn_h(float w)');
   });
 
   it('a DECLARED callee whose signature agrees still compiles (GLSL)', () => {
@@ -919,15 +918,13 @@ describe('GPU USER FUNCTIONS — a caller-declared `bool` is a BOOLEAN, not a fl
     return ce;
   }
 
-  it('GLSL: a bool parameter into an undeclared (float) callee fails closed', () => {
+  it('GLSL: a bool parameter into an undeclared callee compiles, and the callee parameter takes the type of the argument', () => {
     const ce = engineWithUndeclaredH();
-    expect(() =>
-      glsl.compileFunction(ce.parse('h(b)'), 'wrap', 'float', [['b', 'bool']])
-    ).toThrow(
-      'Could not compile `h`: argument 1 `b` lowers to "bool" but parameter "w" is declared ' +
-        '"float" — GLSL has no implicit conversion between them. Declare a ' +
-        'matching signature for "h".'
-    );
+    const src = glsl.compileFunction(ce.parse('h(b)'), 'wrap', 'float', [
+      ['b', 'bool'],
+    ]);
+    expect(src).toContain('float _fn_h(bool w)');
+    expect(src).not.toContain('_fn_h(float w)');
   });
 
   it('a DECLARED boolean callee agrees and compiles (GLSL)', () => {
@@ -958,32 +955,28 @@ describe('GPU USER FUNCTIONS — a shader input/uniform is framed like a paramet
     return ce;
   }
 
-  it('GLSL: a vec2 UNIFORM into an undeclared (float) callee fails closed', () => {
+  it('GLSL: a vec2 UNIFORM into an undeclared callee compiles, and the callee parameter takes the type of the argument', () => {
     const ce = engineWithUndeclaredH();
-    expect(() =>
-      glsl.compileShader({
-        type: 'fragment',
-        uniforms: [{ name: 'v', type: 'vec2' }],
-        outputs: [{ name: 'fragColor', type: 'vec4' }],
-        body: [{ variable: 'fragColor.r', expression: ce.parse('h(v)') }],
-      })
-    ).toThrow(
-      'Could not compile `h`: argument 1 `v` lowers to "vec2" but parameter "w" is declared ' +
-        '"float" — GLSL has no implicit conversion between them. Declare a ' +
-        'matching signature for "h".'
-    );
+    const shader = glsl.compileShader({
+      type: 'fragment',
+      uniforms: [{ name: 'v', type: 'vec2' }],
+      outputs: [{ name: 'fragColor', type: 'vec4' }],
+      body: [{ variable: 'fragColor.r', expression: ce.parse('h(v)') }],
+    });
+    expect(shader).toContain('float _fn_h(vec2 w)');
+    expect(shader).not.toContain('_fn_h(float w)');
   });
 
   it('GLSL: a vec2 INPUT (varying) is framed too', () => {
     const ce = engineWithUndeclaredH();
-    expect(() =>
-      glsl.compileShader({
-        type: 'fragment',
-        inputs: [{ name: 'v', type: 'vec2' }],
-        outputs: [{ name: 'fragColor', type: 'vec4' }],
-        body: [{ variable: 'fragColor.r', expression: ce.parse('h(v)') }],
-      })
-    ).toThrow(/lowers to "vec2" but parameter "w" is declared "float"/);
+    const shader = glsl.compileShader({
+      type: 'fragment',
+      inputs: [{ name: 'v', type: 'vec2' }],
+      outputs: [{ name: 'fragColor', type: 'vec4' }],
+      body: [{ variable: 'fragColor.r', expression: ce.parse('h(v)') }],
+    });
+    expect(shader).toContain('float _fn_h(vec2 w)');
+    expect(shader).not.toContain('_fn_h(float w)');
   });
 
   it('a DECLARED callee whose signature agrees emits the same shader as before (GLSL)', () => {
@@ -1063,9 +1056,7 @@ describe('GPU USER FUNCTIONS — a declared type is an ELEMENT as well as a widt
     expect(() =>
       glsl.compileFunction(ce.parse('h(v)'), 'wrap', 'float', [['v', 'bvec2']])
     ).toThrow(
-      'Could not compile `h`: argument 1 `v` lowers to "bvec2" but parameter "w" is declared ' +
-        '"float" — GLSL has no implicit conversion between them. Declare a ' +
-        'matching signature for "h".'
+      'The name `v` is declared `bvec2`, which has no type in the GLSL fragment'
     );
   });
 
@@ -1075,7 +1066,9 @@ describe('GPU USER FUNCTIONS — a declared type is an ELEMENT as well as a widt
     const ce = engineWithVec2H();
     expect(() =>
       glsl.compileFunction(ce.parse('h(v)'), 'wrap', 'float', [['v', 'bvec2']])
-    ).toThrow(/lowers to "bvec2" but parameter "w" is declared "vec2"/);
+    ).toThrow(
+      /The name `v` is declared `bvec2`, which has no type in the GLSL fragment/
+    );
   });
 
   it('GLSL: an `int` scalar parameter into a float callee is converted', () => {
@@ -1102,10 +1095,7 @@ describe('GPU USER FUNCTIONS — a declared type is an ELEMENT as well as a widt
     expect(() =>
       glsl.compileFunction(ce.parse('h(m)'), 'wrap', 'float', [['m', 'mat4']])
     ).toThrow(
-      'Could not compile `h`: argument 1 `m` is declared "mat4" by the caller — a type with no ' +
-        'static GLSL value shape here (only scalars, booleans and 2–4 ' +
-        'component vectors have one), so it cannot be matched against ' +
-        'parameter "w" (declared "float").'
+      'The name `m` is declared `mat4`, which has no type in the GLSL fragment'
     );
   });
 });

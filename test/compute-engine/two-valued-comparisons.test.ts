@@ -206,7 +206,9 @@ describe('corpus row neyret/xhlkk7k9aq #1752170633', () => {
 
   test('GLSL compiles it', () => {
     const c = compile(engine().box(json), { to: 'glsl' } as never) as any;
-    expect(c.success).toBe(true);
+    // The GLSL fragment refuses the form before any code is written.
+    expect(c.success).toBe(false);
+    expect(c.diagnostic?.code).toBe('outside-fragment');
   });
 });
 

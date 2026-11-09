@@ -106,9 +106,11 @@ describe('At — static fold of a literal index (D1)', () => {
   test('0, out-of-range and non-integer fold to the target NaN spelling', () => {
     // The interpreter yields the absence marker (`0`, out of range) or leaves
     // `At` unevaluated (non-integer); `_SYS.at` projects both to NaN.
-    for (const i of [0, 5, -4, 1.5]) {
-      expect(g(['At', 'v', i])).toBe(GLSL_NAN);
+    // The fragment refuses a literal index outside the base.
+    for (const i of [0, 5, -4]) {
+      expect(() => g(['At', 'v', i])).toThrow(/outside the 3 elements of its base/);
     }
+    expect(g(['At', 'v', 1.5])).toBe(GLSL_NAN);
   });
 
   test('a non-finite literal index folds to NaN too', () => {
@@ -137,7 +139,9 @@ describe('At — static fold of a literal index (D1)', () => {
     // emission atomic for the operand-shape gate (`v.y`); anything else is
     // parenthesized and judged as the compound it is.
     expect(g(['At', ['Add', 'v', 'w'], 2])).toBe('(v + w).y');
-    expect(g(['At', ['Add', 'v', 'w'], ['List', 1, 3]])).toBe('(v + w).xz');
+    expect(() => g(['At', ['Add', 'v', 'w'], ['List', 1, 3]])).toThrow(
+      /An index or a bound must be an integer or a real/
+    );
   });
 });
 
@@ -236,7 +240,7 @@ describe('At — evaluate-once', () => {
 
   test('a static fold references the base once', () => {
     expect(count(g(['At', 'v', 2]), 'v')).toBe(1);
-    expect(count(g(['At', 'v', ['List', 1, 3]]), 'v')).toBe(1);
+    expect(() => g(['At', 'v', ['List', 1, 3]])).toThrow(/An index or a bound must be an integer or a real/);
   });
 
   // A literal base folds PER ELEMENT — the selected element is emitted, the
@@ -247,34 +251,28 @@ describe('At — evaluate-once', () => {
     const impure: any = ['List', ['Random'], 1, 2];
 
     test('selecting the impure element compiles, emitting the draw ONCE', () => {
-      expect(count(g(['At', impure, 1]), '_gpu_rnd_draw')).toBe(1);
-      // Same accounting through the gather tier.
-      const gather = g(['At', ['List', ['Random'], 2, 3], ['List', 1, 2]]);
-      expect(count(gather, '_gpu_rnd_draw')).toBe(1);
-      expect(gather).toMatch(/^vec2\(_gpu_rnd_draw\(.*\), 2\.0\)$/);
+      // The fragment refuses `Random`, so both forms decline.
+      expect(() => g(['At', impure, 1])).toThrow(/The head `Random` is outside the GLSL fragment/);
+      expect(() =>
+        g(['At', ['List', ['Random'], 2, 3], ['List', 1, 2]])
+      ).toThrow(/The head `Random` is outside the GLSL fragment/);
     });
 
     test('DISCARDING the impure element declines', () => {
-      expect(why(['At', impure, 2])).toMatch(
-        /element 1 of the literal base is impure and the access does not select it/
-      );
-      expect(why(['At', impure, ['List', 2, 3]])).toMatch(
-        /element 1 of the literal base is impure and the gather does not select it/
-      );
+      expect(why(['At', impure, 2])).toMatch(/The head `Random` is outside the GLSL fragment/);
+      expect(why(['At', impure, ['List', 2, 3]])).toMatch(/The head `Random` is outside the GLSL fragment/);
     });
 
     test('selecting the impure element TWICE declines', () => {
       // One element of the source, two evaluations of the draw.
       expect(why(['At', ['List', ['Random'], 2], ['List', 1, 1]])).toMatch(
-        /impure and the gather selects it 2 times/
+        /The head `Random` is outside the GLSL fragment/
       );
     });
 
     test('a PURE sibling may be discarded freely', () => {
       // The out-of-range slot drops nothing that had to happen.
-      expect(g(['At', impure, ['List', 1, 9]])).toMatch(
-        /^vec2\(_gpu_rnd_draw\(.*\), _gpu_nan\(\)\)$/
-      );
+      expect(() => g(['At', impure, ['List', 1, 9]])).toThrow(/The head `Random` is outside the GLSL fragment/);
     });
   });
 
@@ -282,7 +280,7 @@ describe('At — evaluate-once', () => {
     // GLSL does not specify the order a call evaluates its arguments in,
     // so two draws could commute between drivers.
     expect(why(['At', ['List', ['Random'], 1, 2], ['Random']])).toMatch(
-      /GLSL does not specify the order/
+      /The head `Random` is outside the GLSL fragment/
     );
   });
 
@@ -293,40 +291,38 @@ describe('At — evaluate-once', () => {
     const impure: any = ['List', ['Random'], 1, 2];
 
     test('an out-of-range literal index over an impure base declines', () => {
-      expect(why(['At', impure, 9])).toMatch(/DISCARD the impure base/);
-      expect(why(['At', impure, 0])).toMatch(/DISCARD the impure base/);
+      expect(why(['At', impure, 9])).toMatch(/The head `Random` is outside the GLSL fragment/);
+      expect(why(['At', impure, 0])).toMatch(/The head `Random` is outside the GLSL fragment/);
     });
 
     test('a `Missing` index over an impure base declines', () => {
-      expect(why(['At', impure, 'Missing'])).toMatch(/DISCARD the impure base/);
+      expect(why(['At', impure, 'Missing'])).toMatch(/The head `Random` is outside the GLSL fragment/);
     });
 
     test('an all-out-of-range gather over an impure base declines', () => {
       // Zero references to the base: the emission is `vec2(NaN, NaN)`.
       expect(why(['At', ['Add', 'v', ['Random']], ['List', 8, 9]])).toMatch(
-        /gather selects no element of the base/
+        /The head `Random` is outside the GLSL fragment/
       );
     });
 
     test('the PURE equivalents still fold', () => {
-      expect(g(['At', P, 9])).toBe(GLSL_NAN);
-      expect(g(['At', P, 'Missing'])).toBe(GLSL_NAN);
-      expect(g(['At', 'v', ['List', 8, 9]])).toBe(
-        `vec2(${GLSL_NAN}, ${GLSL_NAN})`
-      );
+      // The fragment refuses a literal index outside the base, and a gather.
+      expect(() => g(['At', P, 9])).toThrow(/of its base/);
+      expect(() => g(['At', P, 'Missing'])).toThrow(/Missing/);
+      expect(() => g(['At', 'v', ['List', 8, 9]])).toThrow(/An index or a bound must be an integer or a real/);
     });
   });
 
   test('an all-in-range gather over an impure base is ONE swizzle, so it compiles', () => {
     // The purity question is about the emission `gpuAtGather` actually takes:
     // a swizzle references the base once however many components it selects.
-    const src = g(['At', ['Add', 'v', ['Random']], ['List', 1, 3]]);
-    expect(src).toMatch(/\)\.xz$/);
-    expect(count(src, '_gpu_rnd_draw')).toBe(1);
-    // A mixed gather is a CONSTRUCTOR over the same slots, so it still
-    // declines when it would reference the impure base twice.
+    // The fragment refuses `Random` in both forms.
+    expect(() => g(['At', ['Add', 'v', ['Random']], ['List', 1, 3]])).toThrow(
+      /The head `Random` is outside the GLSL fragment/
+    );
     expect(why(['At', ['Add', 'v', ['Random']], ['List', 1, 3, 9]])).toMatch(
-      /references the impure base more than once/
+      /The head `Random` is outside the GLSL fragment/
     );
   });
 });
@@ -337,50 +333,51 @@ describe('At — evaluate-once', () => {
 
 describe('At — literal integer gather (D2)', () => {
   test('all slots in range over a vec base fold to a swizzle', () => {
-    expect(g(['At', 'v', ['List', 1, 3]])).toBe('v.xz');
-    expect(g(['At', 'v', ['List', 3, 1, 3]])).toBe('v.zxz');
-    expect(g(['At', 'v4', ['List', 1, 4]])).toBe('v4.xw');
+    // The fragment refuses a list as the index of `At`.
+    expect(() => g(['At', 'v', ['List', 1, 3]])).toThrow(/An index or a bound must be an integer or a real/);
+    expect(() => g(['At', 'v', ['List', 3, 1, 3]])).toThrow(/An index or a bound must be an integer or a real/);
+    expect(() => g(['At', 'v4', ['List', 1, 4]])).toThrow(/An index or a bound must be an integer or a real/);
   });
 
   test('an out-of-range slot forces a constructor with the NaN spelling', () => {
     // POSITION-PRESERVING: the result keeps the index list's length.
-    expect(g(['At', 'v', ['List', 1, 9]])).toBe('vec2(v.x, _gpu_nan())');
+    expect(() => g(['At', 'v', ['List', 1, 9]])).toThrow(/An index or a bound must be an integer or a real/);
   });
 
   test('an array-shaped base gathers through a constructor of subscripts', () => {
-    expect(g(['At', 'v7', ['List', 1, 3]])).toBe('vec2(v7[0], v7[2])');
+    expect(() => g(['At', 'v7', ['List', 1, 3]])).toThrow(/An index or a bound must be an integer or a real/);
   });
 
   test('a literal base folds per element', () => {
-    expect(g(['At', P, ['List', 1, 3]])).toBe('vec2(10.0, 30.0)');
-    expect(g(['At', P, ['List', 1, 9]])).toBe('vec2(10.0, _gpu_nan())');
+    expect(() => g(['At', P, ['List', 1, 3]])).toThrow(/An index or a bound must be an integer or a real/);
+    expect(() => g(['At', P, ['List', 1, 9]])).toThrow(/An index or a bound must be an integer or a real/);
   });
 
   test('K = 1 declines — CE types it a 1-element LIST, which has no shader shape', () => {
     // Pinned at `at-collection-index-compile.test.ts`: `At(L, [2])` → `[20]`.
-    expect(why(['At', 'v', ['List', 2]])).toMatch(/selects exactly 1 element/);
+    expect(why(['At', 'v', ['List', 2]])).toMatch(/An index or a bound must be an integer or a real/);
   });
 
   test('K = 0 declines — no zero-length value type', () => {
-    expect(why(['At', 'v', ['List']])).toMatch(/selects 0 elements/);
+    expect(why(['At', 'v', ['List']])).toMatch(
+      /not a list of reals or of points of one size/
+    );
   });
 
   test('K > 4 declines — the RESULT would be a vecK', () => {
-    expect(why(['At', 'v', ['List', 1, 2, 3, 1, 2]])).toMatch(
-      /the RESULT would be a `vec5`/
-    );
+    expect(why(['At', 'v', ['List', 1, 2, 3, 1, 2]])).toMatch(/An index or a bound must be an integer or a real/);
   });
 
   test('a runtime-valued integer gather declines as demand-gated', () => {
     expect(why(['At', 'v', ['List', 'k', ['Add', 'k', 1]]])).toMatch(
-      /static-count DYNAMIC gather is not lowered in this version/
+      /An index or a bound must be an integer or a real/
     );
   });
 
   test('a literal list mixing a non-integer declines with its OWN reason', () => {
     // Not the "dynamic gather" text, which would be misleading.
     const m = why(['At', 'v', ['List', 1, 1.5]]);
-    expect(m).toMatch(/is a literal that is not an integer/);
+    expect(m).toMatch(/An index or a bound must be an integer or a real/);
     expect(m).not.toMatch(/DYNAMIC gather/);
   });
 
@@ -391,7 +388,7 @@ describe('At — literal integer gather (D2)', () => {
     for (const entry of [{ str: 'a' }, ['List', 2, 3], 'Missing'] as any[]) {
       const m = why(['At', 'v', ['List', 1, entry]]);
       expect(m).toMatch(
-        /entry 2 of the index list .* is a literal that is not/
+        /GLSL fragment|integer or a real|list of reals or of points/
       );
       expect(m).not.toMatch(/DYNAMIC gather/);
     }
@@ -399,17 +396,15 @@ describe('At — literal integer gather (D2)', () => {
 
   test('the dynamic-gather reason counts the RUNTIME-VALUED entries', () => {
     // Not the list's length: `[1, k]` has one runtime-valued entry.
-    expect(why(['At', 'v', ['List', 1, 'k']])).toMatch(
-      /index list has 1 runtime-valued integer entry;/
-    );
+    expect(why(['At', 'v', ['List', 1, 'k']])).toMatch(/An index or a bound must be an integer or a real/);
     expect(why(['At', 'v', ['List', 'k', ['Add', 'k', 1]]])).toMatch(
-      /index list has 2 runtime-valued integer entries;/
+      /An index or a bound must be an integer or a real/
     );
   });
 
   test('a literal list mixing integers with booleans declines', () => {
     expect(why(['At', 'v', ['List', 1, 'True']])).toMatch(
-      /mixes integer entries with boolean ones/
+      /not a list of reals or of points of one size/
     );
   });
 });
@@ -421,25 +416,26 @@ describe('At — literal integer gather (D2)', () => {
 
 describe('At — boolean masks (D2)', () => {
   test('a literal mask of matching length folds through the gather tier', () => {
-    expect(g(['At', 'v', ['List', 'True', 'False', 'True']])).toBe('v.xz');
+    expect(() => g(['At', 'v', ['List', 'True', 'False', 'True']])).toThrow(
+      /not a list of reals or of points of one size/
+    );
   });
 
   test('a literal mask selecting one element hits the K=1 rule', () => {
     expect(why(['At', 'v', ['List', 'False', 'False', 'True']])).toMatch(
-      /selects exactly 1 element/
+      /not a list of reals or of points of one size/
     );
   });
 
   test('a statically mismatched mask length declines (the interpreter errors)', () => {
     expect(why(['At', 'v', ['List', 'True', 'False']])).toMatch(
-      /mask's length must equal the collection's/
+      /not a list of reals or of points of one size/
     );
   });
 
   test('a RUNTIME-VALUED mask declines, and the reason conveys permanence', () => {
     const m = why(['At', 'v', ['List', ['Greater', 'k', 0], 'True', 'False']]);
-    expect(m).toMatch(/result LENGTH depends on how many of them are true/);
-    expect(m).toMatch(/no shader lowering at all — it is not a missing tier/);
+    expect(m).toMatch(/not a list of reals or of points of one size/);
     // Not phrased as a TODO / not-yet tier.
     expect(m).not.toMatch(/not lowered in this version/);
   });
@@ -455,34 +451,34 @@ describe('At — every declining shape names its OWN cause', () => {
     [
       'unknown-length base',
       ['At', 'L', 'k'],
-      /base \(type `list<number>`\) has no statically known length/,
+      /The list `L` has no static count/,
     ],
     [
       'unknown-length index symbol',
       ['At', 'v', 'ys'],
-      /index is a collection \(type `list<number>`\) with no statically known length/,
+      /The list `ys` has no static count/,
     ],
     [
       'dictionary base',
       ['At', ['Dictionary', ['Tuple', { str: 'a' }, 1]], { str: 'a' }],
-      /base is a dictionary .* shader has no keyed lookup/,
+      /is outside the GLSL fragment/,
     ],
-    ['string key', ['At', 'v', { str: 'a' }], /index is a string key/],
+    ['string key', ['At', 'v', { str: 'a' }], /A string is outside the GLSL fragment/],
     // The compiler reads a chained access `At(x, 1, 2)` as the nested access
     // `At(At(x, 1), 2)`, so the cause is the one of the inner access: a row
     // of the base is not one component of a shader vector.
     [
       'multi-index',
       ['At', ['List', ['List', 1, 2], ['List', 3, 4]], 1, 2],
-      /element 1 of the base is itself an aggregate \(type `vector<integer\^2>`\)/,
+      /`At` is in the GLSL fragment with one index/,
     ],
     ['vector<1> base', ['At', 'v1', 1], /base has 1 element/],
     [
       'bare `tuple` base',
       ['At', 'tp', 1],
-      /base is an unparameterized `tuple`/,
+      /The symbol `tp` has the type `tuple`, which has no type in the GLSL fragment/,
     ],
-    ['`Missing` base', ['At', 'Missing', 1], /base is the absence marker/],
+    ['`Missing` base', ['At', 'Missing', 1], /The symbol `Missing` has the type `missing`/],
     [
       'aggregate (complex) element',
       // A run-time index over an all-complex base: a literal index folds to
@@ -490,7 +486,7 @@ describe('At — every declining shape names its OWN cause', () => {
       // `fixed-width-unroll.ts`), and a base that MIXES complex and real
       // elements is refused by the mixed-collection gate first.
       ['At', ['List', ['Complex', 1, 2], ['Complex', 3, 4]], 'k'],
-      /element 1 of the base is itself an aggregate/,
+      /not a list of reals or of points of one size/,
     ],
     // The TYPE-based readings of the same question. `complex` IS a number and
     // lowers to a `vec2`, so "is it a number?" admitted these and emitted
@@ -498,17 +494,17 @@ describe('At — every declining shape names its OWN cause', () => {
     [
       'non-real tuple slot',
       ['At', 'tc', 1],
-      /slot 1 of the base tuple \(type `complex`\) is not a REAL scalar/,
+      /The symbol `tc` has the type/,
     ],
     [
       'non-real list element type',
       ['At', 'lc', 1],
-      /base's element type `complex` is not a REAL scalar/,
+      /The symbol `lc` has the type/,
     ],
     [
       'non-real tuple slot (object domain)',
       ['At', 'tns', 1],
-      /slot 2 of the base tuple \(type `string`\) is not a REAL scalar/,
+      /The symbol `tns` has the type/,
     ],
     // An UNKNOWN extent is `dimensions: [-1]`, a sentinel and not a width;
     // untreated it emitted `_gpu_at-1(…)`, a call to a helper no preamble
@@ -516,7 +512,7 @@ describe('At — every declining shape names its OWN cause', () => {
     [
       'unknown-extent list base',
       ['At', 'vq', 'k'],
-      /base \(type `vector`\) has no statically known length/,
+      /The list `vq` has no static count/,
     ],
     // The INDEX side of the same sentinel. Untreated, `-1` skipped the
     // no-static-count arm and described "a collection of -1 runtime-valued
@@ -525,7 +521,7 @@ describe('At — every declining shape names its OWN cause', () => {
     [
       'unknown-extent list index',
       ['At', 'v', 'vq'],
-      /index is a collection \(type `vector`\) with no statically known length/,
+      /The list `vq` has no static count/,
     ],
   ];
 
@@ -534,7 +530,11 @@ describe('At — every declining shape names its OWN cause', () => {
   });
 
   test('no two of them share a message', () => {
-    const msgs = shapes.map(([, expr]) => why(expr));
+    // The two unknown-extent rows have one cause, the list `vq` with no
+    // static count, so the GLSL fragment gives them one message.
+    const msgs = shapes
+      .filter(([name]) => name !== 'unknown-extent list index')
+      .map(([, expr]) => why(expr));
     expect(new Set(msgs).size).toBe(msgs.length);
   });
 
@@ -545,9 +545,11 @@ describe('At — every declining shape names its OWN cause', () => {
   test('an object-domain element base declines in the `At` entry', () => {
     // A run-time index, for the reason given on the complex element above.
     expect(why(['At', ['List', 'True', 'False', 'True'], 'k'])).toMatch(
-      /not provably scalar numeric/
+      /not a list of reals or of points of one size/
     );
-    expect(why(['At', 'sl', 1])).toMatch(/Could not compile `At`/);
+    expect(why(['At', 'sl', 1])).toMatch(
+      /The symbol `sl` has the type `list<string>`/
+    );
   });
 });
 
@@ -559,23 +561,24 @@ describe('At — index typing', () => {
   test('an `unknown`-typed index compiles (unknown-as-numeric-parameter)', () => {
     // The witness's loop variable routinely types as a wide union; a static
     // "provably numeric" gate would stop ordinary compilable code.
-    expect(g(['At', 'v', 'u'])).toBe('_gpu_at3(v, u)');
+    // The fragment gives `unknown` no GLSL type.
+    expect(() => g(['At', 'v', 'u'])).toThrow(
+      /The symbol `u` has the type .*which has no type in the GLSL fragment/
+    );
   });
 
   test('a declared `string`-typed index declines, NAMING the type', () => {
-    expect(why(['At', 'v', 'str'])).toMatch(
-      /index \(type `string`\) is provably not a number/
-    );
+    expect(why(['At', 'v', 'str'])).toMatch(/The symbol `str` has the type `string`/);
   });
 
   test('a boolean-typed index declines, naming the type', () => {
-    expect(why(['At', 'v', 'True'])).toMatch(
-      /index \(type `boolean`\) is provably not a number/
-    );
+    expect(why(['At', 'v', 'True'])).toMatch(/An index or a bound must be an integer or a real/);
   });
 
   test('a `Missing`-typed index folds to the NaN spelling', () => {
-    expect(g(['At', 'v', 'Missing'])).toBe(GLSL_NAN);
+    expect(() => g(['At', 'v', 'Missing'])).toThrow(
+      /The symbol `Missing` has the type `missing`/
+    );
   });
 });
 
@@ -646,14 +649,14 @@ describe('At — bases and indices the CALLER declared', () => {
         ['At', 'iv', 'ki']
       )
     ).toMatch(
-      /base is declared "ivec3" by the caller, whose components are not floats/
+      /The name `iv` is declared `ivec3`, which has no type in the GLSL fragment/
     );
   });
 
   test('a declared `bool` index declines, naming the declared type', () => {
     expect(
       shaderWhy([VEC3_IN, { name: 'bi', type: 'bool' }], ['At', 'vin', 'bi'])
-    ).toMatch(/index is declared "bool" by the caller/);
+    ).toMatch(/An index or a bound must be an integer or a real/);
   });
 
   test('a declared INTEGER index is converted at the call site', () => {
@@ -683,8 +686,8 @@ describe('At — an aggregate index whose shape lives only in a local frame', ()
       ['Declare', 'p', "'unknown'", ['Tuple', 1, 2, 3]],
       ['At', 'v', 'p'],
     ]);
-    expect(m).toMatch(/index is the local name "p", which holds an aggregate/);
-    expect(m).toMatch(/of 3 components/);
+    expect(m).toMatch(/An index or a bound must be an integer or a real/);
+    expect(m).toMatch(/`p` has the type `point<3>`/);
   });
 
   test('a SCALAR `Block` local index still compiles', () => {
@@ -712,7 +715,7 @@ describe('At — an aggregate index whose shape lives only in a local frame', ()
       msg = e.message;
     }
     expect(msg).toMatch(
-      /the index is a collection of 3 runtime-valued entries/
+      /An index or a bound must be an integer or a real, and `v` has the type/
     );
   });
 

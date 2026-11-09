@@ -354,10 +354,12 @@ describe('PointList compile — the all-scalar opaque-slot guard', () => {
     // targets compile no function literal, so the plain point is checked on
     // Python only, with `u` and `v` parameters of the root function.
     const ce = opaqueEngine();
-    for (const target of [new GLSLTarget(), new PythonTarget()])
-      expect(() => target.compile(ce.box(['PointList', 'u', 'v']))).toThrow(
-        /have no type/
-      );
+    expect(() =>
+      new GLSLTarget().compile(ce.box(['PointList', 'u', 'v']))
+    ).toThrow(/has no type in the GLSL fragment/);
+    expect(() =>
+      new PythonTarget().compile(ce.box(['PointList', 'u', 'v']))
+    ).toThrow(/have no type/);
     expect(
       new PythonTarget().compile(
         ce.box([
@@ -493,7 +495,7 @@ describe('Dot over points — compile targets (Tycho item 158)', () => {
       new GLSLTarget().compile(
         ce.box(['Dot', ['Tuple', 'x', 'y'], ['Tuple', 1, 2, 3]])
       )
-    ).toThrow(/different widths/);
+    ).toThrow(/No signature of `Dot` in the GLSL fragment/);
   });
 
   it('glsl: a 5-component point fails closed (no vec5)', () => {
@@ -587,7 +589,7 @@ describe('Dot composed under Dot — GPU shape gate (Tycho item 159)', () => {
       new GLSLTarget().compile(
         ce.box(['Hypot', ['PointList', 'x', 'y'], ['PointList', 1, 2]])
       )
-    ).toThrow(/no room for the aggregate/);
+    ).toThrow(/No signature of `Hypot` in the GLSL fragment/);
   });
 });
 
@@ -620,14 +622,14 @@ describe('GPU point swizzle — the FLAT point spelling (Tycho item 116)', () =>
 
   it('the flat spelling gains the tuple spelling’s static arity check', () => {
     expect(() => glsl(eng().box(['PointZ', ['List', 1, 2]]))).toThrow(
-      /the point has arity 2 — no third coordinate/
+      /No signature of `PointZ` in the GLSL fragment/
     );
   });
 
   it('a list too wide for a vecN is not a point, and still declines', () => {
     // `[1,2,3,4,5]` lowers to a GLSL array, which has no swizzle.
     expect(() => glsl(eng().box(['PointX', ['List', 1, 2, 3, 4, 5]]))).toThrow(
-      /no GPU lowering/
+      /No signature of `PointX` in the GLSL fragment/
     );
   });
 
@@ -637,6 +639,8 @@ describe('GPU point swizzle — the FLAT point spelling (Tycho item 116)', () =>
       ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
       ['List', ['List', 10, 11], ['List', 20, 21]],
     ])
-      expect(() => glsl(ce.box(['PointX', arg]))).toThrow(/no GPU lowering/);
+      expect(() => glsl(ce.box(['PointX', arg]))).toThrow(
+        /No signature of `PointX` in the GLSL fragment|is not a list of reals or of points of one size/
+      );
   });
 });

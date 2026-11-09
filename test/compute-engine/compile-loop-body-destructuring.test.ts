@@ -248,21 +248,25 @@ describe('Destructuring let in a loop body on Python and GLSL', () => {
   });
 
   for (const to of ['python', 'glsl'] as const)
-    test.each(CASES)(`$name: compiles on ${to}`, ({ json }) => {
+    test.each(CASES)(`$name: compiles on ${to}`, ({ name, json }) => {
       const ce = new ComputeEngine();
+      // The GLSL fragment takes a `Declare` only as a statement of a block, so
+      // it declines a bare declare in the loop body.
+      if (to === 'glsl' && name.startsWith('a bare')) {
+        expect(() =>
+          compile(ce.box(json as any), { to, fallback: false })
+        ).toThrow(/GLSL fragment/);
+        return;
+      }
       const result = compile(ce.box(json as any), { to, fallback: false });
       expect(result.success).toBe(true);
     });
 
-  test('GLSL declares each leaf in the loop body', () => {
+  test('GLSL declines a bare declare in the loop body', () => {
     const ce = new ComputeEngine();
-    const code = compile(ce.box(CASES[1].json as any), {
-      to: 'glsl',
-      fallback: false,
-    }).code.replace(/\s+/g, ' ');
-    expect(code).toContain(
-      '{ float a; a = float(k); float b; b = 2.0; float c; c = 3.0; }'
-    );
+    expect(() =>
+      compile(ce.box(CASES[1].json as any), { to: 'glsl', fallback: false })
+    ).toThrow(/`Declare` is in the GLSL fragment only as a statement/);
   });
 
   // The emitted Python runs only with `CE_TEST_PYTHON=1` (`test-python.ts`).
@@ -402,7 +406,7 @@ describe('A destructuring let whose value reads a name of the pattern', () => {
     expect(expr.isValid).toBe(false);
     for (const to of ['javascript', 'python', 'glsl'] as const)
       expect(() => compile(expr, { to, fallback: false })).toThrow(
-        /invalid expression/
+        to === 'glsl' ? /GLSL fragment/ : /invalid expression/
       );
   });
 
@@ -416,7 +420,11 @@ describe('A destructuring let whose value reads a name of the pattern', () => {
       const ce = new ComputeEngine();
       expect(() =>
         compile(ce.box(json as any), { to, fallback: false })
-      ).toThrow(/whose value reads 'a', a name that the pattern declares/);
+      ).toThrow(
+        to === 'glsl'
+          ? /The local `[ab]` is read before its declaration/
+          : /whose value reads 'a', a name that the pattern declares/
+      );
     });
 
   test.each(CASES)(

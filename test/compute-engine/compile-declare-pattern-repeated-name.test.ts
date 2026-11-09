@@ -59,7 +59,13 @@ describe('A destructuring declaration with a repeated name declines', () => {
     for (const json of [FLAT, NESTED]) {
       const r = compileTo(ce, json, to);
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(DECLINE);
+      // The GLSL fragment refuses any pattern that is not a name or a tuple
+      // of names, before the repeated name is found.
+      if (to === 'glsl' && json === NESTED)
+        expect(r.error).toMatch(
+          /declares a pattern that is not a name or a tuple of names/
+        );
+      else expect(r.error).toMatch(DECLINE);
     }
   });
 });

@@ -103,7 +103,10 @@ describe.each(['glsl'] as const)('%s color bindings', (to) => {
     expect(r.success).toBe(true);
     expect(r.code).toContain(declaration('c'));
     expect(r.code).toContain('for (');
-    expect(r.code).toContain('return _gpu_oklch_to_srgb(c);');
+    expect(r.code).toContain('vec3 _tv1 = _gpu_oklch_to_srgb(c);');
+    expect(r.code).toContain(
+      'return _gpu_passes > 10000 ? vec3(_gpu_nan()) : _tv1;'
+    );
   });
 
   test('color parameter receives canonical channels and returns a vector', () => {
@@ -166,6 +169,8 @@ describe.each(['glsl'] as const)('%s color bindings', (to) => {
       { to, constantFold: false }
     );
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/alpha|4th/);
+    // The GLSL fragment has no `Rgb` signature with four channels.
+    expect(r.diagnostic?.code).toBe('outside-fragment');
+    expect(r.error).toMatch(/No signature of `Rgb` in the GLSL fragment/);
   });
 });

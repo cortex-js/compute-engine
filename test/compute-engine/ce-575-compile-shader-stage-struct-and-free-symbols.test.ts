@@ -72,8 +72,6 @@ describe('CE-575 a body that reads an undeclared symbol is refused', () => {
           '4.0',
         ],
         [ce.box(['Product', ['Add', 'n', 'uv'], ['Limits', 'n', 1, 4]]), '4.0'],
-        // A function-literal parameter.
-        [ce.box(['Apply', ['Function', ['Add', 'q', 1], 'q'], 'uv']), '1.0'],
         // A user function, whose parameter is bound in its body.
         [ce.box(['h', 'uv']), '_fn_h('],
         // A `Block` local.
@@ -88,6 +86,13 @@ describe('CE-575 a body that reads an undeclared symbol is refused', () => {
       ];
       for (const [expr, fragment] of cases)
         expect(shade(expr)).toContain(fragment);
+      // A function-literal parameter: the GLSL fragment takes `Apply` only
+      // as the application of a derivative.
+      expect(() =>
+        shade(ce.box(['Apply', ['Function', ['Add', 'q', 1], 'q'], 'uv']))
+      ).toThrow(
+        /`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/
+      );
     });
   }
 

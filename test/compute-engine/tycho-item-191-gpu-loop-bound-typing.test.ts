@@ -149,7 +149,9 @@ describe('Tycho item 191 — GPU Sum/Product loop bounds are int-typed', () => {
       glsl.compileFunction(ce.parse('\\sum_{j=1}^{K}2j'), 'f', 'float', [
         ['K', 'bool'],
       ])
-    ).toThrow(/declared "bool" by the caller, which is not a scalar number/);
+    ).toThrow(
+      /An index or a bound must be an integer or a real, and `K` has the type `boolean`/
+    );
   });
 
   // An integer-declared scalar reaching float ARITHMETIC (the bound

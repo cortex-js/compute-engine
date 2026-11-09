@@ -91,15 +91,10 @@ describe('CE-562 — a user-function body shares a call between the condition an
   it('glsl', () => {
     const ce = engineWithT4();
     const r = compile(ce.parse('\\cos(T_4(t))'), { to: 'glsl' });
-    expect(r.success).toBe(true);
-    expect(definition(r.preamble, 'T_4')).toBe(
-      [
-        'float _fn_T_4(float ceArg_0) {',
-        '  float _cse1 = _fn_T_3(ceArg_0);',
-        '  return ((-0.8164966 < _gpu_cos(_cse1)) ? (_cse1) : (_gpu_nan()));',
-        '}',
-      ].join('\n')
-    );
+    // The GLSL fragment needs both branches of an `If` that is a value, and
+    // a `When` has one.
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('outside-fragment');
   });
 
   it('interval-js', () => {
@@ -144,6 +139,12 @@ describe('CE-562 — a top-level When', () => {
     (to) => {
       const ce = engineWithF();
       const r = compile(ce.box(shared as never), { to });
+      if (to === 'glsl') {
+        // The GLSL fragment needs both branches of an `If` that is a value.
+        expect(r.success).toBe(false);
+        expect(r.diagnostic?.code).toBe('outside-fragment');
+        return;
+      }
       expect(r.success).toBe(true);
       expect(count(r.code, '_fn_f(')).toBe(1);
     }
@@ -211,9 +212,10 @@ describe('CE-562 — a top-level When', () => {
     const js = compile(expr, { to: 'javascript' });
     expect(js.success).toBe(true);
     expect(count(js.code, '_SYS.drawNextRandomNumber()')).toBe(2);
+    // The GLSL fragment refuses `Random`.
     const glsl = compile(expr, { to: 'glsl' });
-    expect(glsl.success).toBe(true);
-    expect(count(glsl.code, '_gpu_rnd_draw(')).toBe(2);
+    expect(glsl.success).toBe(false);
+    expect(glsl.diagnostic?.code).toBe('outside-fragment');
   });
 });
 
@@ -428,7 +430,8 @@ describe('CE-562 — a vars source that is a bare identifier is a plain read on 
         { to, vars: { a: 'a' } }
       );
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/is not a local of the compiled expression/);
+      // The GLSL fragment admits an assignment to a local only.
+      expect(r.error).toMatch(/`Assign` writes `a`, which is not a local/);
       const plain = compile(ce.box(twice as never), {
         to,
         vars: { a: 'a' },

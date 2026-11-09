@@ -368,6 +368,11 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
       } as any
     );
     expect(r?.success ?? false).toBe(false);
+    // The GLSL fragment refuses the Sum before the emitter runs.
+    if (to === 'glsl') {
+      expect((r as any).diagnostic?.code).toBe('outside-fragment');
+      return;
+    }
     expect((r as any).error).toMatch(
       /collection-valued body has no compiled form/
     );
@@ -386,7 +391,10 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
     // user-function lowering at all, so the wrapper declines earlier, at the
     // outer `A` call ("Unknown operator `A`"), and never reaches the big-op
     // gate. That decline is pre-existing and independent of this fix.
-    if (to !== 'python')
+    // The GLSL fragment refuses the untyped `t` first.
+    if (to === 'glsl')
+      expect((r as any).diagnostic?.code).toBe('outside-fragment');
+    else if (to !== 'python')
       expect((r as any).error).toMatch(
         /collection-valued body has no compiled form/
       );
@@ -416,6 +424,12 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
         ce.box(['Sum', ['Greater', 'i', 1], ['Limits', 'i', 1, 3]]),
         { to, fallback: true } as any
       );
+      // The GLSL fragment refuses a boolean summand (an `Error` operand).
+      if (to === 'glsl') {
+        expect(r?.success).toBe(false);
+        expect((r as any).diagnostic?.code).toBe('outside-fragment');
+        return;
+      }
       expect(r?.success).toBe(true);
     }
   );
@@ -525,6 +539,11 @@ describe('a declaration contradicted by its body is refused, or declines everywh
         { to, fallback: true, constantFold: false } as any
       );
       expect([to, r?.success ?? false]).toEqual([to, false]);
+      // The GLSL fragment refuses the Sum of a list before the emitter runs.
+      if (to === 'glsl') {
+        expect((r as any).diagnostic?.code).toBe('outside-fragment');
+        continue;
+      }
       // The message names both halves and suggests the fix.
       expect((r as any).error).toMatch(CONTRADICTED);
       expect((r as any).error).toMatch(/'a'/);
@@ -600,6 +619,12 @@ describe('a declaration contradicted by its body is refused, or declines everywh
       // not regress is the untangling: the decline is never the
       // contradicted-declaration message, which blames the author for a lie
       // they did not write.
+      // The GLSL fragment refuses the Sum before the emitter runs.
+      if (to === 'glsl') {
+        expect((r as any).diagnostic?.code).toBe('outside-fragment');
+        expect((r as any).error).not.toMatch(CONTRADICTED);
+        return;
+      }
       expect((r as any).error).toMatch(
         /collection-valued body has no compiled form/
       );
@@ -664,6 +689,12 @@ describe('a declaration contradicted by its body is refused, or declines everywh
         { to, fallback: true, constantFold: false } as any
       );
       expect(r?.success ?? false).toBe(false);
+      // The GLSL fragment refuses the Sum before the emitter runs.
+      if (to === 'glsl') {
+        expect((r as any).diagnostic?.code).toBe('outside-fragment');
+        expect((r as any).error).not.toMatch(CONTRADICTED);
+        return;
+      }
       expect((r as any).error).toMatch(
         /collection-valued body has no compiled form/
       );
@@ -1348,6 +1379,11 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
       { to, fallback: true, constantFold: false } as any
     );
     expect(r?.success ?? false).toBe(false);
+    // The GLSL fragment refuses the Sum before the emitter runs.
+    if (to === 'glsl') {
+      expect((r as any).diagnostic?.code).toBe('outside-fragment');
+      return;
+    }
     expect((r as any).error).toMatch(
       /says it returns a scalar .* but its body constructs a collection.*the numeric accumulation would produce a wrong value/s
     );
@@ -1542,7 +1578,7 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
 
   describe.each(LYING_BODIES)(
     'with the `%s` body in a helper assigned later',
-    (_bodyName, body) => {
+    (bodyName, body) => {
       test.each(ALL_TARGETS)('%s declines the CONDITION shapes', (to) => {
         for (const [label, mathjson] of CONDITIONS('b')) {
           const r = compile(withLaterBody(body).box(mathjson), {
@@ -1550,11 +1586,12 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
             fallback: true,
           } as any);
           expect([label, r?.success ?? false]).toEqual([label, false]);
-          // On glsl the single-branch `If` is closed by the definition
-          // check, which words the contradiction without the condition.
-          if (label.startsWith('If(b(u), 1)') && to === 'glsl')
-            expect((r as any).error).toMatch(CONTRADICTED_DEFINITION);
-          else expect((r as any).error).toMatch(CONTRADICTED_CONDITION);
+          // The GLSL fragment refuses the condition before the emitter runs.
+          if (to === 'glsl') {
+            expect((r as any).diagnostic?.code).toBe('outside-fragment');
+            continue;
+          }
+          expect((r as any).error).toMatch(CONTRADICTED_CONDITION);
           expect((r as any).error).toMatch(/'b'/);
           expect((r as any).error).toMatch(/-> list<number>/);
         }
@@ -1572,7 +1609,9 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
         } as any);
         expect(r?.success ?? false).toBe(false);
         const error = (r as any).error as string;
-        if (to === 'glsl') expect(error).toMatch(CONTRADICTED_DEFINITION);
+        // The GLSL fragment refuses the condition before the emitter runs.
+        if (to === 'glsl')
+          expect((r as any).diagnostic?.code).toBe('outside-fragment');
         else expect(error).toMatch(CONTRADICTED_CONDITION);
       });
 
@@ -1583,6 +1622,11 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
             fallback: true,
           } as any);
           expect([label, r?.success ?? false]).toEqual([label, false]);
+          // The GLSL fragment refuses the operand before the emitter runs.
+          if (to === 'glsl') {
+            expect((r as any).diagnostic?.code).toBe('outside-fragment');
+            continue;
+          }
           expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
         }
       });
@@ -1598,7 +1642,11 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
             fallback: true,
           } as any);
           expect(r?.success ?? false).toBe(false);
-          expect((r as any).error).toMatch(CONTRADICTED_DEFINITION);
+          // The GLSL fragment refuses the list body of `h` first, but only a
+          // list of booleans; the emitter refuses the other body.
+          if (bodyName === '[t < 1, t < 2]')
+            expect((r as any).diagnostic?.code).toBe('outside-fragment');
+          else expect((r as any).error).toMatch(CONTRADICTED_DEFINITION);
           expect((r as any).preamble ?? '').not.toContain('_fn_b');
         }
       );
@@ -1638,7 +1686,9 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
             to,
             fallback: true,
           } as any);
-          expect([label, r?.success ?? false]).toEqual([label, true]);
+          // The GLSL fragment refuses a single-branch `If` that is a value.
+          const declined = to === 'glsl' && label === 'If(p(u), 1)';
+          expect([label, r?.success ?? false]).toEqual([label, !declined]);
         }
       }
     );

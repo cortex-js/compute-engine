@@ -458,7 +458,8 @@ describe('P2 — compile: absence capability & gates (§3.F)', () => {
     e.declare('S', 'list<string>');
     const r = compile(e.box(['At', 'S', 9]), { to: 'glsl', fallback: true });
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/Could not compile/);
+    expect(r.diagnostic?.code).toBe('outside-fragment');
+    expect(r.error).toMatch(/GLSL fragment/);
   });
 
   test('every executable target exposes the numeric absence capability', () => {
@@ -912,7 +913,7 @@ describe('P3 — compile discharge (§3.F)', () => {
         to: 'glsl',
         fallback: false,
       })
-    ).toThrow(/Could not compile/);
+    ).toThrow(/has no type in the GLSL fragment/);
 
     // JavaScript: a `NaN` is a value, and the comparison is `false`. The
     // compiled value with an absent operand (`undefined`) is not specified
@@ -957,7 +958,8 @@ describe('P3 — compile discharge (§3.F)', () => {
       fallback: true,
     });
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/isAbsent|absence|Could not compile/i);
+    expect(r.diagnostic?.code).toBe('outside-fragment');
+    expect(r.error).toMatch(/outside the GLSL fragment/);
   });
 });
 

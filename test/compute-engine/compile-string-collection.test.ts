@@ -807,7 +807,7 @@ describe('D13: GLSL rejects strings and characters, as before', () => {
       );
       const r = compile(ce.box(['g', 'u']), { to, constantFold: false });
       expect(r.success).toBe(false);
-      expect(r.error ?? '').toMatch(/text-typed, which is not supported/);
+      expect(r.error ?? '').toMatch(/has no type in the GLSL fragment/);
     }
   );
 
@@ -845,7 +845,7 @@ describe('D13: GLSL rejects strings and characters, as before', () => {
     // source no shader driver accepts, behind `success: true`.
     const r = compile(ce.box({ str: 'a' }), { to, constantFold: false });
     expect(r.success).toBe(false);
-    expect(r.error ?? '').toMatch(/string literal .* is not supported/);
+    expect(r.error ?? '').toMatch(/A string is outside the GLSL fragment/);
   });
 
   test.each(['glsl'] as const)(
@@ -862,7 +862,7 @@ describe('D13: GLSL rejects strings and characters, as before', () => {
       ]) {
         const r = compile(ce.box(src as never), { to, constantFold: false });
         expect(r.success).toBe(false);
-        expect(r.error ?? '').toMatch(/string literal .* is not supported/);
+        expect(r.error ?? '').toMatch(/outside the GLSL fragment|in the GLSL fragment/);
       }
     }
   );
@@ -883,7 +883,7 @@ describe('D13: GLSL rejects strings and characters, as before', () => {
       ]) {
         const r = compile(ce.box(src as never), { to, constantFold: false });
         expect(r.success).toBe(false);
-        expect(r.error ?? '').toMatch(/text-typed, which is not supported/);
+        expect(r.error ?? '').toMatch(/has no type in the GLSL fragment/);
       }
     }
   );
@@ -896,6 +896,6 @@ describe('D13: GLSL rejects strings and characters, as before', () => {
       constantFold: false,
     });
     expect(r.success).toBe(false);
-    expect(r.error ?? '').toMatch(/Euclidean norm|not supported/);
+    expect(r.error ?? '').toMatch(/A string is outside the GLSL fragment/);
   });
 });

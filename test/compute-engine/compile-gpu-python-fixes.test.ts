@@ -108,17 +108,16 @@ describe('GPU: a selection with one complex value lifts its real values', () => 
     const ce = engine();
     for (const to of ['glsl'])
       expect(() => run(ce, to, ['If', T_POS, 'z', 'True'])).toThrow(
-        /Could not compile `If`: the value `.*True.*` is not a number/
+        /The branches of `If` have the types `complex` and `boolean`/
       );
   });
 
   test('a real value that is not a scalar beside a complex one fails closed', () => {
-    // A point beside a number: the branches have different shapes. The shape
-    // check runs after the code is generated, so the more specific reason of
-    // the GPU selection is the one that the error reports.
+    // A point beside a number: the branches have different types, and the
+    // GLSL fragment refuses an `If` whose branches differ in type.
     const ce = engine();
     expect(() => run(ce, 'glsl', ['If', T_POS, 'z', ['Tuple', 1, 2]])).toThrow(
-      /the value `\(1, 2\)` is not a scalar, and another value of the selection is complex/
+      /The branches of `If` have the types `complex` and `point<2>`/
     );
   });
 });
@@ -126,13 +125,16 @@ describe('GPU: a selection with one complex value lifts its real values', () => 
 describe('GPU: Norm of a list with complex entries', () => {
   test('the length of the vector of the moduli', () => {
     const ce = engine();
-    expect(run(ce, 'glsl', ['Norm', ['List', 'z', 'z']]).code).toBe(
-      'length(vec2(length(z), length(z)))'
+    // The GLSL fragment has no list with a complex entry, so these decline.
+    expect(() => run(ce, 'glsl', ['Norm', ['List', 'z', 'z']])).toThrow(
+      /is not a list of reals or of points of one size/
     );
-    expect(run(ce, 'glsl', ['Norm', ['List', 'z', 1, 't']]).code).toBe(
-      'length(vec3(length(z), 1.0, t))'
+    expect(() => run(ce, 'glsl', ['Norm', ['List', 'z', 1, 't']])).toThrow(
+      /is not a list of reals or of points of one size/
     );
-    expect(run(ce, 'glsl', ['Norm', ['List', 'z']]).code).toBe('length(z)');
+    expect(() => run(ce, 'glsl', ['Norm', ['List', 'z']])).toThrow(
+      /is not a list of reals or of points of one size/
+    );
   });
 
   test('the value agrees with the interpreter', () => {
@@ -178,7 +180,7 @@ describe('GPU: the real-only shader lowerings', () => {
     ];
     for (const to of ['glsl'])
       for (const expr of cases)
-        expect(() => run(ce, to, expr)).toThrow(/real-only/);
+        expect(() => run(ce, to, expr)).toThrow(/GLSL fragment/);
   });
 
   test('Root of a complex radicand compiles through the complex power', () => {
@@ -189,7 +191,7 @@ describe('GPU: the real-only shader lowerings', () => {
   test('Mean has no shader lowering', () => {
     const ce = engine();
     expect(() => run(ce, 'glsl', ['Mean', ['List', 't', 1]])).toThrow(
-      /Could not compile `Mean`: .* no lowering/
+      /The head `Mean` is outside the GLSL fragment/
     );
   });
 });

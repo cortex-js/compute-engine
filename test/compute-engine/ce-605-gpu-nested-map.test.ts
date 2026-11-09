@@ -124,7 +124,7 @@ describe('CE-605 — a Map inside the lambda of another Map on the GPU', () => {
           to,
           fallback: false,
         } as never)
-      ).toThrow(/Could not compile `Map`: .* has no lowering for it/);
+      ).toThrow(/The head `Map` is outside the GLSL fragment/);
   });
 
   it('nested anonymous parameters: no wrong code on any target', () => {
@@ -166,7 +166,7 @@ describe('CE-605 — a Map inside the lambda of another Map on the GPU', () => {
       for (const to of ['glsl'] as const)
         expect(() =>
           compile(expr, { to, fallback: false } as never)
-        ).toThrow(/Could not compile `Map`: .* has no lowering for it/);
+        ).toThrow(/The head `Map` is outside the GLSL fragment/);
     }
   });
 
@@ -249,7 +249,7 @@ describe('CE-605 — a Map inside the lambda of another Map on the GPU', () => {
       ])
         expect(() =>
           compile(nested(outer, inner), { to, fallback: false } as never)
-        ).toThrow(/Could not compile `Map`: .* has no lowering for it/);
+        ).toThrow(/The head `Map` is outside the GLSL fragment/);
     }
   });
 
@@ -304,7 +304,7 @@ describe('CE-605 — a Map inside the lambda of another Map on the GPU', () => {
     for (const to of ['glsl'] as const)
       expect(() =>
         compile(mapOverComprehension(64), { to, fallback: false } as never)
-      ).toThrow(/Could not compile `Map`: .* has no lowering for it/);
+      ).toThrow(/The head `Map` is outside the GLSL fragment/);
   });
 
   it('an element that an inner binder would capture: the decline stays', () => {
@@ -317,6 +317,6 @@ describe('CE-605 — a Map inside the lambda of another Map on the GPU', () => {
           to,
           fallback: false,
         } as never)
-      ).toThrow(/Could not compile `Map`: .* has no lowering for it/);
+      ).toThrow(/The head `Map` is outside the GLSL fragment/);
   });
 });

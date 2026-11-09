@@ -69,14 +69,14 @@ describe('GPU SHAPE GATE — a MANDATORY scalar slot (finding 1)', () => {
     // at all.
     for (const emit of [g])
       expect(() => emit(['Refract', V3, W3, U3])).toThrow(
-        /^Could not compile `Refract`: the shader builtin `refract` requires a SCALAR in argument 3 .*$/s
+        /^No signature of `Refract` in the GLSL fragment takes operands of the types/
       );
   });
 
   it('declines a declared-vector third argument too', () => {
     for (const emit of [g])
       expect(() => emit(['Refract', 'v', 'w', 'v'], cev)).toThrow(
-        /requires a SCALAR in argument 3/
+        /No signature of `Refract` in the GLSL fragment/
       );
   });
 
@@ -190,7 +190,7 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
   it('`Mod` over mismatched widths declines', () => {
     for (const emit of [g])
       expect(() => emit(['Mod', 'P', 'Q'], cev)).toThrow(
-        /^Could not compile `Mod`: its operands lower to shader vectors of different widths \(vec3, vec2\).*$/s
+        /^No signature of `Mod` in the GLSL fragment takes operands of the types/
       );
   });
 
@@ -201,13 +201,13 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
     // whose own shape gate declines with the builtin's diagnostic.)
     for (const emit of [g]) {
       expect(() => emit(['Cot', M2])).toThrow(
-        /^Could not compile `Cot`: the compound shader lowering .* have no `matN` reading.*$/s
+        /The head `Matrix` is outside the GLSL fragment/
       );
       expect(() => emit(['Log', ['List', 1, 2, 3, 4, 5], 3])).toThrow(
-        /the compound shader lowering .* have no array reading/
+        /No signature of `Log` in the GLSL fragment/
       );
       expect(() => emit(['Lb', ['List', 1, 2, 3, 4, 5]])).toThrow(
-        /`log2` .* has no array overload/
+        /No signature of `Log` in the GLSL fragment/
       );
     }
   });
@@ -217,15 +217,12 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
     // per element, so the emission carries none of the operand's `array`
     // shape. They DECLARE that (`markAggregateConsuming`); the gate must not
     // infer it, nor decline them.
-    expect(g(['Median', ['List', 1, 5, 3, 2, 4]])).toBe(
-      '_gpu_median_5(1.0, 5.0, 3.0, 2.0, 4.0)'
+    // The GLSL fragment has neither head, so both decline.
+    expect(() => g(['Median', ['List', 1, 5, 3, 2, 4]])).toThrow(
+      /The head `Median` is outside the GLSL fragment/
     );
-    const variance = g(['Variance', ['List', 1, 2, 3, 4, 5]]);
-    expect(variance).not.toContain('float[');
-    // eslint-disable-next-line no-new-func
-    expect(new Function(`return (${variance});`)()).toBeCloseTo(
-      ce.box(['Variance', ['List', 1, 2, 3, 4, 5]]).evaluate().re,
-      10
+    expect(() => g(['Variance', ['List', 1, 2, 3, 4, 5]])).toThrow(
+      /The head `Variance` is outside the GLSL fragment/
     );
   });
 
@@ -235,7 +232,7 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
     // capability is a predicate over the operands, not a blanket exemption.
     for (const emit of [g])
       expect(() => emit(['Variance', 'P', 'Q'], cev)).toThrow(
-        /different widths \(vec3, vec2\)/
+        /The head `Variance` is outside the GLSL fragment/
       );
   });
 
@@ -245,7 +242,10 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
     // against all of them would be a false decline.
     const cem = new ComputeEngine();
     cem.declare('m', 'matrix<real^2x2>');
-    expect(glsl.compile(cem.box(['Real', 'm'] as any)).code).toBe('m');
+    // The GLSL fragment has no matrix symbol, so the compilation declines.
+    expect(() => glsl.compile(cem.box(['Real', 'm'] as any))).toThrow(
+      /has no type in the GLSL fragment/
+    );
   });
 });
 
@@ -277,17 +277,26 @@ describe('GPU SHAPE GATE — the Max/Min reduction is DECLARED, not inferred', (
   ];
 
   it.each(CASES)('%s reduces to the interpreter value', (_label, expr) => {
+    if (_label === 'Min of a Range') {
+      // The GLSL fragment has a `Range` only as an index set.
+      expect(() => g(expr)).toThrow(
+        /A `Range` is in the GLSL fragment only as the index set/
+      );
+      return;
+    }
     const src = g(expr);
     expect(runShader(src)).toBe(ce.box(expr).evaluate().re);
   });
 
   it('the canonical emissions are unchanged', () => {
     expect(g(['Max', V3])).toBe('(max(max(1.0, 2.0), 3.0))');
-    expect(g(['Min', ['Range', 1, 5]])).toBe(
-      '(_gpu_min(_gpu_min(_gpu_min(_gpu_min(1.0, 2.0), 3.0), 4.0), 5.0))'
+    expect(() => g(['Min', ['Range', 1, 5]])).toThrow(
+      /A `Range` is in the GLSL fragment only as the index set/
     );
-    // An empty collection contributes nothing.
-    expect(g(['Max', ['List'], 5])).toBe('(5.0)');
+    // The GLSL fragment has no empty list.
+    expect(() => g(['Max', ['List'], 5])).toThrow(
+      /is not a list of reals or of points of one size/
+    );
   });
 });
 
@@ -326,17 +335,17 @@ describe('GPU SHAPE GATE — valid source still compiles (regression guard)', ()
   });
 
   it('matrix arithmetic is unaffected', () => {
-    expect(g(['Multiply', M2, M2])).toContain(') * mat2(');
-    expect(g(['Multiply', M2, ['List', 5, 6]])).toBe(
-      'mat2(vec2(1.0, 3.0), vec2(2.0, 4.0)) * vec2(5.0, 6.0)'
-    );
-    expect(g(['Add', M2, M2])).toContain(') + mat2(');
-    expect(g(['Multiply', M2, 2])).toContain('2.0 * mat2(');
+    // The GLSL fragment has no `Matrix`, so each form declines.
+    const matrix = /The head `Matrix` is outside the GLSL fragment/;
+    expect(() => g(['Multiply', M2, M2])).toThrow(matrix);
+    expect(() => g(['Multiply', M2, ['List', 5, 6]])).toThrow(matrix);
+    expect(() => g(['Add', M2, M2])).toThrow(matrix);
+    expect(() => g(['Multiply', M2, 2])).toThrow(matrix);
   });
 
   it('the destructuring and aggregate-aware helpers are unaffected', () => {
-    expect(g(['Median', ['List', 1, 5, 3, 2, 4]])).toBe(
-      '_gpu_median_5(1.0, 5.0, 3.0, 2.0, 4.0)'
+    expect(() => g(['Median', ['List', 1, 5, 3, 2, 4]])).toThrow(
+      /The head `Median` is outside the GLSL fragment/
     );
     expect(
       g(['ColorMix', ['Tuple', 0.5, 0.2, 120], ['Tuple', 0.8, 0.1, 30], 0.25])
@@ -402,8 +411,8 @@ describe('GPU SHAPE GATE — collection-typed operands with no static count', ()
       for (const emit of [g])
         expect(() => emit(['Sin', 'L'], e)).toThrow(
           type === 'vector<real^7>'
-            ? /^Could not compile `Sin`: the shader builtin `sin` .* the operand shapes \(array\) have no lowering\.$/s
-            : /^Could not compile `L`: "L" has the type `.*`, which has no static length\./
+            ? /^No signature of `Sin` in the GLSL fragment takes operands of the types/
+            : /^The list `L` has no static count|has no type in the GLSL fragment/
         );
     }
   });
@@ -425,7 +434,9 @@ describe('GPU SHAPE GATE — collection-typed operands with no static count', ()
   it('a STRING operand keeps its own diagnostic rather than being reported as an array', () => {
     const e = withL('string');
     for (const emit of [g])
-      expect(() => emit(['Sin', 'L'], e)).toThrow(/string/);
+      expect(() => emit(['Sin', 'L'], e)).toThrow(
+        /The head `Error` is outside the GLSL fragment/
+      );
   });
 
   it('`Random` over an Interval or Range domain is unaffected — it destructures the domain', () => {
@@ -433,11 +444,12 @@ describe('GPU SHAPE GATE — collection-typed operands with no static count', ()
     // collection-shaped operands, and both are consumed into scalar endpoints
     // by the `Random` lowering rather than passed through to a builtin, which
     // is why that lowering declares itself aggregate-consuming.
-    expect(g(['WithRandomSeed', 7, ['Random', ['Interval', 0, 1]]])).toContain(
-      '_gpu_rnd_draw'
-    );
-    expect(g(['WithRandomSeed', 7, ['Random', ['Range', 1, 10]]])).toContain(
-      'floor('
-    );
+    // The GLSL fragment has no `WithRandomSeed`, so both decline.
+    expect(() =>
+      g(['WithRandomSeed', 7, ['Random', ['Interval', 0, 1]]])
+    ).toThrow(/The head `WithRandomSeed` is outside the GLSL fragment/);
+    expect(() =>
+      g(['WithRandomSeed', 7, ['Random', ['Range', 1, 10]]])
+    ).toThrow(/The head `WithRandomSeed` is outside the GLSL fragment/);
   });
 });

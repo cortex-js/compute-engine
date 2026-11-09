@@ -86,7 +86,12 @@ describe('COMPILED BLOCK LOCALS: the programs that decline', () => {
         { to } as any
       ) as any;
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/"u" is not a local of the compiled expression/);
+      // The GLSL fragment refuses the write before the emitter runs.
+      if (to === 'glsl') {
+        expect(r.diagnostic?.code).toBe('outside-fragment');
+        expect(r.error).toMatch(/`Assign` writes `u`, which is not a local/);
+      } else
+        expect(r.error).toMatch(/"u" is not a local of the compiled expression/);
     }
   );
 
@@ -120,7 +125,10 @@ describe('COMPILED BLOCK LOCALS: the programs that decline', () => {
     (to) => {
       const root = compiled(['Block', ['Assign', 'b', ['Add', 'x', 2]]], to);
       expect(root.success).toBe(false);
-      if (to !== 'python')
+      // The GLSL fragment words the refusal of a block with no value itself.
+      if (to === 'glsl')
+        expect(root.error).toMatch(/The block ends with an assignment/);
+      else if (to !== 'python')
         expect(root.error).toMatch(/an assignment or a declaration is a statement/);
       // The JavaScript code gave `[1, 2]`, where the interpreter gives
       // `[1, Nothing]`.
@@ -296,7 +304,12 @@ describe('COMPILED BLOCK LOCALS: the lane of a local follows its static type', (
     expect(r.success).toBe(false);
     // The two shapes of the local (`unsettled-shape`), or the complex
     // literal in the real lane (`lane-mismatch`).
-    expect(r.diagnostic?.code).toMatch(/^(unsettled-shape|lane-mismatch)$/);
+    // On GLSL the fragment can refuse the form first (`outside-fragment`).
+    expect(r.diagnostic?.code).toMatch(
+      to === 'glsl'
+        ? /^(unsettled-shape|lane-mismatch|outside-fragment)$/
+        : /^(unsettled-shape|lane-mismatch)$/
+    );
   });
 
   test('in mode complex, on javascript, it gives the values of the interpreter', () => {

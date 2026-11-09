@@ -222,7 +222,7 @@ describe('a restriction with a list of conditions', () => {
 
   test('a shader target still fails closed on a list-valued condition', () => {
     expect(() => new GLSLTarget().compile(ce.box(['If', COND, 'u']))).toThrow(
-      /object-domain absent/
+      /No signature of `Less` in the GLSL fragment takes operands of the types \(list<real, 3>, integer\)/
     );
   });
 });

@@ -46,13 +46,31 @@ const ESCAPED = ['Greater', 'a', 4];
 
 describe('a jump in a selection with one clause, in a Loop body', () => {
   test.each([
-    ['If(c, Break())', ['If', ESCAPED, ['Break']], 'break'],
-    ['If(c, Break(), Nothing)', ['If', ESCAPED, ['Break'], 'Nothing'], 'break'],
-    ['Which(c, Break())', ['Which', ESCAPED, ['Break']], 'break'],
-    ['If(c, Continue())', ['If', ESCAPED, ['Continue']], 'continue'],
-  ])('%s is an if statement', (_name, first, jump) => {
+    ['If(c, Break())', ['If', ESCAPED, ['Break']], 'break', undefined],
+    [
+      'If(c, Break(), Nothing)',
+      ['If', ESCAPED, ['Break'], 'Nothing'],
+      'break',
+      // The GLSL fragment gives `Nothing` no type.
+      /has no type in the GLSL fragment/,
+    ],
+    ['Which(c, Break())', ['Which', ESCAPED, ['Break']], 'break', undefined],
+    [
+      'If(c, Continue())',
+      ['If', ESCAPED, ['Continue']],
+      'continue',
+      // The GLSL fragment has no `Continue`.
+      /The head `Continue` is outside the GLSL fragment/,
+    ],
+  ])('%s is an if statement', (_name, first, jump, declined) => {
     const ce = engine();
     for (const to of SHADERS) {
+      if (declined !== undefined) {
+        expect(() => compile(counter(ce, first), { to, fallback: false })).toThrow(
+          declined as RegExp
+        );
+        continue;
+      }
       const r = compile(counter(ce, first), { to, fallback: false });
       expect(r.success).toBe(true);
       expect(r.code).toContain(`if (4.0 < a) {\n    ${jump};\n  }\n`);
@@ -86,19 +104,32 @@ describe('a jump in a selection with one clause, in a Loop body', () => {
   });
 
   test.each([
-    ['Block(If(c, Break()))', ['Block', ['If', ESCAPED, ['Break']]]],
-    ['Block(Which(c, Break()))', ['Block', ['Which', ESCAPED, ['Break']]]],
+    ['Block(If(c, Break()))', ['Block', ['If', ESCAPED, ['Break']]], false],
+    [
+      'Block(Which(c, Break()))',
+      ['Block', ['Which', ESCAPED, ['Break']]],
+      false,
+    ],
     [
       'Block(If(c, Break(), Nothing))',
       ['Block', ['If', ESCAPED, ['Break'], 'Nothing']],
+      // The GLSL fragment gives `Nothing` no type.
+      true,
     ],
-    ['If(c, Block(Break()))', ['If', ESCAPED, ['Block', ['Break']]]],
-  ])('%s: a Block of one statement is the same statement', (_name, first) => {
+    ['If(c, Block(Break()))', ['If', ESCAPED, ['Block', ['Break']]], false],
+  ])('%s: a Block of one statement is the same statement', (_name, first, declined) => {
     const ce = engine();
-    for (const to of SHADERS)
+    for (const to of SHADERS) {
+      if (declined) {
+        expect(() => compile(counter(ce, first), { to, fallback: false })).toThrow(
+          /has no type in the GLSL fragment/
+        );
+        continue;
+      }
       expect(compile(counter(ce, first), { to, fallback: false }).code).toMatch(
         /if \(4\.0 < a\) \{\s+break;\s+\}/
       );
+    }
   });
 
   test('a selection in a Block of one statement in a branch', () => {
@@ -134,11 +165,11 @@ describe('a jump in a selection with one clause, in a Loop body', () => {
   test('an If with a Nothing else branch that assigns has no else', () => {
     const ce = engine();
     const first = ['If', ESCAPED, ['Assign', 'n', 100], 'Nothing'];
-    for (const to of SHADERS) {
-      const { code } = compile(counter(ce, first), { to, fallback: false });
-      expect(code).toContain('if (4.0 < a) {\n    n = 100.0;\n  }\n');
-      expect(code).not.toContain('else');
-    }
+    // The GLSL fragment gives `Nothing` no type, so the `If` declines.
+    for (const to of SHADERS)
+      expect(() =>
+        compile(counter(ce, first), { to, fallback: false })
+      ).toThrow(/has no type in the GLSL fragment/);
   });
 });
 
@@ -240,12 +271,29 @@ describe('a jump declines everywhere else', () => {
         ['MatchCase', '_', ['Assign', 's', 'k']],
       ]),
     ],
-  ])('%s', (_name, json) => {
+  ])('%s', (name, json) => {
     const ce = engine();
+    // The GLSL fragment refuses these forms before any code is written. The
+    // other forms pass the fragment, and the emitter refuses them.
+    const refusedByFragment = new Set([
+      'a bare Break with no loop',
+      'a bare Continue with no loop',
+      'If(c, Break()) with no loop',
+      'If(c, Break(), Nothing) with no loop',
+      'a Break as a value',
+      'a Break in a Sum body',
+      'a Return in a branch',
+      'a Break in a Match case',
+      'a Break with a value',
+      'a Break with a value in a branch',
+    ]);
+    const pattern = refusedByFragment.has(name)
+      ? /GLSL fragment|is a statement, and it stands where a value is expected/
+      : /Could not compile/;
     for (const to of SHADERS)
       expect(() =>
         compile(ce.box(json as any), { to, fallback: false })
-      ).toThrow(/Could not compile/);
+      ).toThrow(pattern);
   });
 
   test('a Break in the body of a user function called in a Loop', () => {
@@ -270,7 +318,7 @@ describe('a jump declines everywhere else', () => {
     ] as any);
     for (const to of SHADERS)
       expect(() => compile(expr, { to, fallback: false })).toThrow(
-        /Could not compile/
+        /GLSL fragment/
       );
   });
 });

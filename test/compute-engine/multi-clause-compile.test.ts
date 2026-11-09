@@ -359,7 +359,7 @@ describe('MULTI-CLAUSE COMPILE — whole-function decline (spec §8)', () => {
     clause('f', ['Function', 2, p('x', 'integer')]);
     const glsl = new GLSLTarget();
     expect(() => glsl.compile(ce.box(['f', 'u']))).toThrow(
-      /could not compile/i
+      /The head `f` is outside the GLSL fragment/
     );
   });
 

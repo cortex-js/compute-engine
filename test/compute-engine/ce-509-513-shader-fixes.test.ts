@@ -148,8 +148,10 @@ describe('a shader branch that draws a random value', () => {
     ['Tuple', ['If', ['Less', 'x', 0], ['Mod', ['Random'], 2], 0], ['Random']],
   ];
 
-  it('compiles on GLSL, whose ternary evaluates only the taken branch', () => {
-    expect(shader(json, 'glsl').code).toContain('?');
+  it('is declined by the GLSL fragment, which does not take `WithRandomSeed`', () => {
+    expect(() =>
+      compile(ce.box(json as never), { to: 'glsl', fallback: false } as never)
+    ).toThrow(/outside the GLSL fragment/);
   });
 });
 
@@ -159,7 +161,9 @@ describe('CE-513 (Tycho row 458): an arm that calls a function', () => {
 
   it('keeps the ternary on GLSL', () => {
     expect(shader(piecewise, 'glsl').code).toBe(
-      '((x < 0.0) ? (_fn_g(x)) : ((0.0)))'
+      '_gpu_passes = 0;\n' +
+        'float _tv2 = ((x < 0.0) ? (_fn_g(x)) : ((0.0)));\n' +
+        'return _gpu_passes > 10000 ? _gpu_nan() : _tv2;'
     );
   });
 });

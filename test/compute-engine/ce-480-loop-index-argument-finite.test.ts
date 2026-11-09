@@ -220,7 +220,7 @@ describe('CE-480: the kelvin-wake sum on the shader targets', () => {
       ['Limits', 'j', 1, 300],
     ]);
     expect(() => compile(expr, { to, fallback: false } as never)).toThrow(
-      'the body writes the index `j`'
+      '`Assign` writes `j`, which is not a local of the function'
     );
   });
 

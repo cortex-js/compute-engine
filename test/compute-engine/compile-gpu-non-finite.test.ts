@@ -49,8 +49,10 @@ const INF = { glsl: '_gpu_inf()' };
 describe('GPU non-finite LITERALS route through the bit-pattern mechanism', () => {
   it('a NaN literal is the same symbol a masked branch produces', () => {
     expect(g('NaN')).toBe(NAN.glsl);
-    // The same symbol the restriction else-branch has always used.
-    expect(g(['If', ['Greater', 'x', 0], 'x'])).toContain(NAN.glsl);
+    // The GLSL fragment refuses the restriction (an `If` with one branch).
+    expect(() => g(['If', ['Greater', 'x', 0], 'x'])).toThrow(
+      /An `If` that is a value needs both branches/
+    );
   });
 
   it('±∞ is a BIT PATTERN, never `1.0 / 0.0` (fast-math would fold it)', () => {

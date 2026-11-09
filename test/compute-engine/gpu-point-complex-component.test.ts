@@ -55,14 +55,14 @@ describe('GPU POINT WITH A COMPLEX COMPONENT FAILS CLOSED', () => {
     for (const latex of COMPLEX_COMPONENT_LATEX)
       it(`${to}, parse route: ${latex}`, () => {
         expect(() => run(to, (ce) => ce.parse(latex))).toThrow(
-          /element \d+ \(`.*`\) is itself vector-valued /s
+          /a point of the GLSL fragment has real components/
         );
       });
 
     for (const json of COMPLEX_COMPONENT_MATHJSON)
       it(`${to}, box route: ${JSON.stringify(json)}`, () => {
         expect(() => run(to, (ce) => ce.box(json as any))).toThrow(
-          /element 2 \(`.*`\) is itself vector-valued /s
+          /a point of the GLSL fragment has real components/
         );
       });
   }
@@ -71,7 +71,7 @@ describe('GPU POINT WITH A COMPLEX COMPONENT FAILS CLOSED', () => {
     expect(() =>
       run('glsl', (ce) => ce.parse('\\operatorname{PointList}(t, h(t))'))
     ).toThrow(
-      'Could not compile `vec2`: element 2 (`h(t)`) is itself vector-valued'
+      /The component 2 of the point `PointList\(t, h\(t\)\)` has the type `complex`/
     );
   });
 });
@@ -104,13 +104,13 @@ describe('GPU POINT WITH REAL COMPONENTS STILL COMPILES', () => {
     });
   }
 
-  it('a point with one or five components keeps its array lowering', () => {
-    expect(run('glsl', (ce) => ce.box(['PointList', 't'])).code).toBe(
-      'float[1](t)'
+  it('a point with one or five components is declined: a point of the GLSL fragment has 2 to 4', () => {
+    expect(() => run('glsl', (ce) => ce.box(['PointList', 't']))).toThrow(
+      /a point of the GLSL fragment has 2 to 4/
     );
-    expect(
-      run('glsl', (ce) => ce.box(['PointList', 't', 1, 2, 3, 4])).code
-    ).toBe('float[5](t, 1.0, 2.0, 3.0, 4.0)');
+    expect(() =>
+      run('glsl', (ce) => ce.box(['PointList', 't', 1, 2, 3, 4]))
+    ).toThrow(/a point of the GLSL fragment has 2 to 4/);
   });
 });
 
@@ -227,11 +227,14 @@ describe('A SUM INDEX DOES NOT SHADOW A GLOBAL READ BY A USER FUNCTION', () => {
       vars: { x: 2, n: 3 },
       expected: { re: 6, im: 3 },
       glsl: [
+        '_gpu_passes = 0;',
         'vec2 _tv1 = vec2(0.0, 0.0);',
         'for (int k = 1; k <= int(floor(n)); k++) {',
+        '  if (++_gpu_passes > 10000) break;',
         '  _tv1 += _fn_h(x);',
         '}',
-        'return _tv1;',
+        'vec2 _tv2 = _tv1;',
+        'return _gpu_passes > 10000 ? vec2(_gpu_nan()) : _tv2;',
       ].join('\n'),
     },
     {
@@ -260,7 +263,7 @@ describe('A SUM INDEX DOES NOT SHADOW A GLOBAL READ BY A USER FUNCTION', () => {
       // the base of the index as a list with no known length). The shader
       // now reads the length, and declines at the list itself: its second
       // element is the complex `k`, and a shader vector holds scalars.
-      glsl: /element 2 \(`k`\) is itself vector-valued/,
+      glsl: /is not a list of reals or of points of one size/,
     },
   ];
 
@@ -637,7 +640,7 @@ describe('A TUPLE COMPONENT TYPED indexed_collection IS NOT A SHADER SCALAR (CE-
             to,
             fallback: false,
           } as any)
-        ).toThrow(/vector-valued/);
+        ).toThrow(/GLSL fragment|has no static count/);
       });
     }
   }

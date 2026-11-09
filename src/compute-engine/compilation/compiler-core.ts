@@ -6933,6 +6933,7 @@ export function emitFunctionLiteralDefinition(
               lowering.define({
                 id: h,
                 name,
+                key: prefixed?.key ?? specialization?.key ?? h,
                 params,
                 body: bodyExpr,
                 literal,

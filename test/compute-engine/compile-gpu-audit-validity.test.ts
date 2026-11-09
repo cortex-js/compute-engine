@@ -25,7 +25,11 @@ describe.each(['glsl'] as const)('%s emitted shader validity', (to) => {
               expect(expr.isValid).toBe(false);
               const r = compile(expr, { to, constantFold: false, cse });
               expect(r.success).toBe(false);
-              expect(r.error).toMatch(/return-in-expression-body/);
+              // The GLSL fragment refuses the `Error` head of the invalid
+              // expression.
+              expect(r.error).toMatch(
+                /The head `Error` is outside the GLSL fragment/
+              );
               continue;
             }
             expect(expr.isValid).toBe(true);

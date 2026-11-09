@@ -921,7 +921,7 @@ describe('the JavaScript target', () => {
             }
           ).success;
         } catch (e) {
-          declined = /parallel for/.test(String(e));
+          declined = /parallel for|GLSL fragment/.test(String(e));
         }
         expect(declined).toBe(true);
       }

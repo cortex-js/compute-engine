@@ -7,8 +7,9 @@
  * the list has one case in and one case out here. The walk rules are those
  * of `docs/plans/2026-11-08-glsl-fragment-annotation-design.md`, section 4.
  *
- * `compile()` does not call the predicate yet: these tests check only the
- * answer of `canCompile()`.
+ * `compile()` to `glsl` runs the same pass first (phase C): an expression
+ * outside the fragment declines with the `outside-fragment` diagnostic, and
+ * an expression inside it compiles (`expectIn()` checks both).
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -86,10 +87,96 @@ expect(
       'function sq(x: real) -> real { x * x }',
       'function r(x: real) -> real { if x < 1 { x } else { r(x - 1) } }',
       'function cz(t: complex) -> complex { t * t }',
+      // The showcase entry `multibrot` (Tycho,
+      // `src/graph-paper/onboarding/template-data.js`), as `MB`: `M` is a
+      // matrix input of these tests.
+      'function MB(p: real, q: real, d: real) -> real {',
+      '  let a = p',
+      '  let b = q',
+      '  let n = 1',
+      '  let s = 0.0',
+      '  let t = 0.0',
+      '  let w = 0.0',
+      '  let r = 0.0',
+      '  for k in 1..128 {',
+      '    s = a^2 + b^2',
+      '    if s > 4096 { break }',
+      '    n = n + 1',
+      '    w = if s > 0 { d * arctan2(b, a) } else { 0.0 }',
+      '    r = s^(d/2)',
+      '    t = r * cos(w) + p',
+      '    b = r * sin(w) + q',
+      '    a = t',
+      '  }',
+      '  s = a^2 + b^2',
+      '  if s <= 4096 { 1 } else { min(1, (n + 1 - ln(ln(s) / ln(4096)) / ln(d)) / 128) }',
+      '}',
+      // The showcase entry `julia-set`: the value and the colour functions
+      // (`channel` keeps two of the gradient segments of each branch).
+      'function J(p: real, q: real, u: real, v: real) -> real {',
+      '  const cr = 0.7885 * u',
+      '  const ci = 0.7885 * v',
+      '  let a = p',
+      '  let b = q',
+      '  let n = 0',
+      '  let s = 0.0',
+      '  let t = 0.0',
+      '  let d = 1.0',
+      '  for k in 1..256 {',
+      '    s = a^2 + b^2',
+      '    if s > 65536 { break }',
+      '    n = n + 1',
+      '    t = a^2 - b^2 + cr',
+      '    b = 2*a*b + ci',
+      '    a = t',
+      '    d = min(d, abs(a), abs(b))',
+      '  }',
+      '  s = a^2 + b^2',
+      '  if s <= 65536 {',
+      '    -2 + min(1, ln(max(d, 0.0001) / 0.0001) / ln(300))',
+      '  } else {',
+      '    0.18 * ln(max(n + 1 - ln(ln(s) / ln(65536)) / ln(2), 3.7) / 3.7)^1.6',
+      '  }',
+      '}',
+      'function pick(ch: integer, r: real, g: real, b: real) -> real {',
+      '  if ch == 1 { r } else { if ch == 2 { g } else { b } }',
+      '}',
+      'function seg(w: real, a: real, b: real, c0: real, c1: real) -> real {',
+      '  const u = (w - a) / (b - a)',
+      '  if w < a { 0 } else { if w >= b { 0 } else { c0 + (c1 - c0) * u * u * (3 - 2*u) } }',
+      '}',
+      'function channel(z: real, ch: integer) -> real {',
+      '  const w = z - floor(z)',
+      '  const f = -1 - z',
+      '  if z < 0 {',
+      '    (seg(f, 0, 0.25, pick(ch, 48, 18, 3), pick(ch, 120, 56, 12))',
+      '      + seg(f, 0.25, 0.6, pick(ch, 120, 56, 12), pick(ch, 235, 165, 62))) / 255',
+      '  } else {',
+      '    (seg(w, 0, 0.16, pick(ch, 0, 7, 100), pick(ch, 32, 107, 203))',
+      '      + seg(w, 0.16, 0.42, pick(ch, 32, 107, 203), pick(ch, 237, 255, 255))) / 255',
+      '  }',
+      '}',
+      'function shade(z: real) -> color {',
+      '  rgb(channel(z, 1), channel(z, 2), channel(z, 3))',
+      '}',
+      // The colour formula of the showcase entry `buddhabrot`.
+      'function tone(v: real, lo: real) -> real { min(1, max(lo, max(0, v)^1.5)) }',
+      'function cb(H: list<integer>, x: real, y: real, z: real) -> color {',
+      '  if 0 <= x && x < 150 && 0 <= y && y < 200 {',
+      '    const i = floor(x) + 150 * floor(y)',
+      '    const n = 1 + H[90001]',
+      '    rgb(tone(z, 0.1),',
+      '        tone(1700 * H[max(30001, min(60000, 30001 + i))] / n, 0.16),',
+      '        tone(3600 * H[max(60001, min(90000, 60001 + i))] / n, 0.33))',
+      '  } else {',
+      '    rgb(0.1, 0.16, 0.33)',
+      '  }',
+      '}',
     ].join('\n')
   ).diagnostics
 ).toEqual([]);
 ce.declare('H', 'list<real^1600>');
+ce.declare('H90', 'list<integer^90001>');
 
 /** The attributes of a `Declare` with the value `value` (Epsil's `let`). */
 function valueOf(value: unknown): unknown {
@@ -191,16 +278,13 @@ describe('heads', () => {
     ['Normalize', 'p'],
     ['Cross', 'p', ['Tuple', 0, 0, 1]],
   ];
-  test('points and vectors: in', () =>
-    expect(check(pointsAndVectors)).toEqual({ ok: true }));
-  // `compile()` refuses this expression today: "Could not compile `Dot`:
-  // the shader builtin `dot` requires MATCHING genType arguments, but it is
-  // applied to a vec3 operand and a scalar one". The fragment admits it:
   // `Normalize` and `Cross` of a point of 3 components are points of 3
-  // components. When the emitter compiles it, this test fails, and the
-  // expression moves to the list of cases that are in above.
-  test.failing('points and vectors: compile() gives code', () =>
-    expectIn(pointsAndVectors));
+  // components, so `dot` takes two `vec3`.
+  test('points and vectors: in', () => expectIn(pointsAndVectors));
+  test('`Length` of a point is its static count', () => {
+    expectIn(['Length', 'p']);
+    expect(compile(ce.box(['Length', 'p']), { to: 'glsl' }).code).toBe('3.0');
+  });
 
   test.each([
     ['arithmetic on a boolean', ['Max', 'b', 1], 'Max'],
@@ -244,13 +328,13 @@ describe('Range', () => {
     ['Element', 'k', ['Range', 1, 'n']],
   ];
   test('a Range is in as the index set of a Sum', () =>
-    expect(check(sumOverRange)).toEqual({ ok: true }));
-  // `compile()` refuses this expression today: "Could not compile `Sum`:
-  // expected Limits indexing set". The fragment admits a `Range` as the
-  // index set of a `Sum`. When the emitter compiles it, this test fails,
-  // and the case becomes a plain `expectIn()`.
-  test.failing('a Range as the index set of a Sum: compile() gives code', () =>
     expectIn(sumOverRange));
+  test('a Range with a step is out as the index set of a Sum', () => {
+    expectOut(
+      ['Sum', ['Multiply', 'k', 'x'], ['Element', 'k', ['Range', 1, 'n', 2]]],
+      'Element'
+    );
+  });
   test('a Range is out as a value', () => {
     const r = expectOut(['Add', ['Range', 1, 'n'], 'x']);
     expect(r.diagnostic.operator).toBe('Range');
@@ -276,28 +360,17 @@ describe('the body of a user function', () => {
     expectIn(['B', 'x', 'y']));
   test('locals declared inside a branch are in', () =>
     expectIn(['C', 'x', 'y']));
+  // The shader runs the passes of a `parallel for` in order, as a counted
+  // loop.
   test('a parallel loop with a scalar accumulator is in', () =>
-    expect(check(['S', 'x'])).toEqual({ ok: true }));
-  // `compile()` refuses this call today: "Could not compile
-  // `ParallelLoop`: the `parallel for` construct compiles only to the
-  // JavaScript target, not to 'glsl'". The fragment admits a parallel loop
-  // with a scalar accumulator in the body of a user function. When the
-  // emitter compiles it, this test fails, and the case becomes a plain
-  // `expectIn()`.
-  test.failing('a parallel loop with a scalar accumulator: compile() gives code', () =>
     expectIn(['S', 'x']));
   test('a list parameter bound to a list input in a texture is in', () =>
     expectIn(['g', 'H', 'x'], { storage: { H: 'sampler2D' } }));
   test('a list parameter bound to a list that is not in a texture is out', () => {
     expectOut(['g', 'H', 'x']);
   });
-  test('a block at the root of the expression is out', () => {
-    const r = expectOut(
-      ['Block', ['Declare', 't', valueOf('x')], ['Add', 't', 1]],
-      'Block'
-    );
-    expect(r.diagnostic.message).toMatch(/only in the body of a user function/);
-  });
+  test('a block at the root of the expression is in (decision 13)', () =>
+    expectIn(['Block', ['Declare', 't', valueOf('x')], ['Add', 't', 1]]));
   test('`Break` outside a loop is out', () => {
     ce.assign(
       'brk',
@@ -779,4 +852,361 @@ describe('review fixes, second round', () => {
 
   test('a literal RGB tuple at a colour place is in', () =>
     expectIn(['ColorMix', ['Tuple', 'x', 0, 0], 'c', 0.5]));
+});
+
+describe('phase C: compile() runs the pass first', () => {
+  test.each([
+    ['burning-ship', ['B', 'x', ['Negate', 'y']]],
+    ['multibrot', ['MB', 'x', 'y', 3]],
+    ['julia-set, the value', ['J', 'x', 'y', 1, 0]],
+    ['julia-set, the colour', ['shade', ['J', 'x', 'y', 1, 0]]],
+  ])('the showcase body %s is in', (_, json) => expectIn(json));
+
+  test('the colour formula of buddhabrot is in, with its list in a texture', () =>
+    expectIn(['cb', 'H90', 'x', 'y', 'x'], { storage: { H90: 'sampler2D' } }));
+
+  test('the colour formula of buddhabrot is out without `storage` (decision 12)', () => {
+    const r = expectOut(['cb', 'H90', 'x', 'y', 'x']);
+    expect(r.diagnostic.binding).toBe('H90');
+    expect(r.diagnostic.message).toContain('90001 elements');
+    expect(r.diagnostic.message).toContain('limit of 256');
+    expect(r.diagnostic.message).toContain(`storage: { H90: 'sampler2D' }`);
+  });
+
+  test('an expression outside the fragment declines with the diagnostic of canCompile()', () => {
+    const expr = ce.box(['Add', ['Integrate', ['Sin', 'x'], 'x'], 1]);
+    const result = compile(expr, { to: 'glsl', fallback: true });
+    expect(result.success).toBe(false);
+    expect(result.diagnostic).toEqual(
+      (canCompile(expr, { to: 'glsl' }) as CanCompileResult & { ok: false })
+        .diagnostic
+    );
+    expect(result.diagnostic?.operator).toBe('Integrate');
+    expect(() => compile(expr, { to: 'glsl', fallback: false })).toThrow(
+      /`Integrate` is outside the GLSL fragment/
+    );
+  });
+
+  test('the `vars` option is spelling: a mapped input compiles with its spelling', () => {
+    const json = ['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', 1, 'n']];
+    const vars = { x: 'v_pos.x', n: 'u_n' };
+    expectIn(json, { vars });
+    const code = compile(ce.box(json as any), { to: 'glsl', vars }).code!;
+    expect(code).toContain('v_pos.x');
+    expect(code).toContain('u_n');
+  });
+
+  test('compileFunction() runs the pass: a declared name with no fragment type is out where the body reads it', () => {
+    const glsl = ce._getCompilationTarget('glsl') as unknown as {
+      compileFunction(
+        e: unknown,
+        name: string,
+        ret: string,
+        params: [string, string][]
+      ): string;
+    };
+    expect(
+      glsl.compileFunction(ce.box(['Add', 'u', 1]), 'f', 'float', [
+        ['u', 'float'],
+        ['m', 'mat2'],
+      ])
+    ).toContain('u + 1.0');
+    expect(() =>
+      glsl.compileFunction(ce.box(['Add', 'm', 1]), 'f', 'float', [
+        ['m', 'mat2'],
+      ])
+    ).toThrow(/`m` is declared `mat2`, which has no type in the GLSL fragment/);
+  });
+
+  test('compileToSource() runs the pass: a call of a user function is out', () => {
+    const glsl = ce._getCompilationTarget('glsl') as unknown as {
+      compileToSource(e: unknown): string;
+    };
+    expect(glsl.compileToSource(ce.box(['Add', 'x', 1]))).toBe('x + 1.0');
+    expect(() => glsl.compileToSource(ce.box(['sq', 'x']))).toThrow(
+      /`sq` is outside the GLSL fragment/
+    );
+  });
+});
+
+describe('decisions 11 to 14', () => {
+  ce.declare('t', 'real');
+  ce.assign('fu', ce.box(['Function', ['Power', 'u', 2], 'u']));
+
+  test('11: a parameter with no declared type takes the type of its argument', () => {
+    expectIn(['fu', 'z']);
+    const code = compile(ce.box(['fu', 'z']), { to: 'glsl' });
+    expect(code.preamble).toMatch(/vec2 _fn_fu\w*\(vec2 u\)/);
+  });
+
+  test('11: a later call with another type is out, naming the parameter and both types', () => {
+    const r = expectOut(['Add', ['fu', 't'], ['fu', 'z']]);
+    expect(r.diagnostic.binding).toBe('u');
+    expect(r.diagnostic.message).toMatch(/`u` of `fu` has no declared type/);
+    expect(r.diagnostic.message).toContain('`real`');
+    expect(r.diagnostic.message).toContain('`complex`');
+  });
+
+  test('12: a list input of at most 256 elements without `storage` is a uniform array', () =>
+    expectIn(['At', 'L', ['Floor', 'x']]));
+
+  test('12: a longer list input without `storage` is out, and the diagnostic names the fix', () => {
+    const r = expectOut(['At', 'Big', 2]);
+    expect(r.diagnostic.message).toContain('1600 elements');
+    expect(r.diagnostic.message).toContain('limit of 256');
+    expect(r.diagnostic.message).toContain(`storage: { Big: 'sampler2D' }`);
+  });
+
+  test('13: the row root takes the block forms of a function body', () => {
+    // `acc` is not a symbol of the engine, so the assignment declares a
+    // local of the block.
+    expectIn(['Block', ['Assign', 'acc', 'x'], 'acc']);
+    const code = compile(ce.box(['Block', ['Assign', 'acc', 'x'], 'acc']), {
+      to: 'glsl',
+    }).code;
+    expect(code).toContain('acc = x;');
+  });
+
+  test('13: a write to an input at the root is out', () => {
+    const r = expectOut(['Block', ['Assign', 'x', 1], 'x'], 'Assign');
+    expect(r.diagnostic.message).toMatch(/not a local/);
+  });
+
+  test('14: a list parameter bound to a list input held as a uniform array is in', () =>
+    expectIn(['g5', 'L', 'x']));
+
+  test('14: a list parameter bound to a computed list is out', () => {
+    expectOut(['g5', ['List', 1, 2, 3], 'x']);
+  });
+});
+
+describe('the pass cap (iterationBudget)', () => {
+  // Two equal sums: the common-subexpression pass writes one loop for both.
+  const twoSums = [
+    'Add',
+    ['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', 1, 'n']],
+    ['Multiply', 2, ['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', 1, 'n']]],
+  ];
+  const code = (options: Record<string, unknown>) =>
+    compile(ce.box(twoSums as any), { to: 'glsl', ...options });
+  const loops = (c: string) => c.split('\n').filter((l) => l.startsWith('for (')).length;
+
+  test('the default cap is 10,000 passes per evaluation', () => {
+    const r = code({});
+    expect(r.code).toMatch(/^_gpu_passes = 0;/);
+    expect(r.code).toContain('if (++_gpu_passes > 10000) break;');
+    expect(r.code).toMatch(/return _gpu_passes > 10000 \? _gpu_nan\(\) : _tv\d+;$/);
+    expect(r.preamble).toContain('int _gpu_passes = 0;');
+  });
+
+  test('with `cse`, two equal sums run one loop, so their passes count once', () => {
+    const r = code({ iterationBudget: 50 });
+    expect(loops(r.code!)).toBe(1);
+    expect(r.code).toContain('if (++_gpu_passes > 50) break;');
+  });
+
+  test('with `cse: false`, each sum runs its own loop, and both count', () => {
+    const r = code({ iterationBudget: 50, cse: false });
+    expect(loops(r.code!)).toBe(2);
+    expect(r.code!.split('if (++_gpu_passes > 50) break;').length - 1).toBe(2);
+  });
+
+  // The emitted shader is not run here: these tests read the counter and
+  // the test of the value. A loop of `n` passes with `n` over the cap leaves
+  // its loop at the pass `cap + 1`, and the value of the evaluation is
+  // `_gpu_nan()`; with `n` at most the cap, the test reads the value.
+  test.each([
+    ['under the cap', 100],
+    ['over the cap', 5],
+  ])('a cap %s writes the same guard with its own value', (_, budget) => {
+    for (const cse of [true, false]) {
+      const r = code({ iterationBudget: budget, cse });
+      expect(r.code).toContain(`if (++_gpu_passes > ${budget}) break;`);
+      expect(r.code).toContain(`return _gpu_passes > ${budget} ? _gpu_nan() :`);
+    }
+  });
+
+  test('a loop in a user function counts its passes too', () => {
+    const r = compile(ce.box(['B', 'x', 'y']), { to: 'glsl' });
+    expect(r.preamble).toContain('if (++_gpu_passes > 10000) break;');
+    expect(r.code).toMatch(/^_gpu_passes = 0;/);
+  });
+
+  test('an expression with no loop has no counter', () => {
+    const r = compile(ce.box(['Add', 'x', 1]), { to: 'glsl' });
+    expect(r.code).toBe('x + 1.0');
+    expect(r.preamble ?? '').not.toContain('_gpu_passes');
+  });
+});
+
+describe('phase C, review fixes', () => {
+  ce.declare('L3', 'list<real^3>');
+  // A sum of `n` passes: the code then holds the value of the root in a
+  // temporary of its shader type, which the pass cap tests.
+  const sum = ['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', 1, 'n']];
+  const rootTemporary = (json: unknown): string | undefined =>
+    /^(\w+) _tv\d+ = .*;$/m.exec(
+      compile(ce.box(json as any), { to: 'glsl', fallback: false }).code!
+        .split('\n')
+        .slice(-2)
+        .join('\n')
+    )?.[1];
+
+  test('`Abs` of a list of 3 reals is the list of the absolute values: a vec3', () => {
+    expectIn(['Add', ['Abs', 'L3'], sum]);
+    expect(rootTemporary(['Add', ['Abs', 'L3'], sum])).toBe('vec3');
+    // The absolute value of a point is its norm.
+    expect(rootTemporary(['Add', ['Abs', 'p'], sum])).toBe('float');
+  });
+
+  test('`Max` of a list and a real is the largest element: a float', () => {
+    expectIn(['Multiply', ['Max', 'L3', 'x'], sum]);
+    expect(rootTemporary(['Multiply', ['Max', 'L3', 'x'], sum])).toBe('float');
+    // A point and a real: the largest component, as in the interpreter
+    // (`Max((1, 5, 3), 2)` is 5).
+    expect(rootTemporary(['Multiply', ['Max', 'p', 'x'], sum])).toBe('float');
+    expect(rootTemporary(['Multiply', ['Min', 'L3', 'x'], sum])).toBe('float');
+  });
+
+  test('a `parallel for` at the root is typed in its lowered form, and its value is the value of the interpreter', () => {
+    const json = [
+      'Block',
+      ['Assign', 'acc3', 0],
+      [
+        'ParallelLoop',
+        ['AddTo', 'acc3', ['Multiply', 'k', 'x']],
+        ['Element', 'k', ['Range', 1, 10]],
+      ],
+      'acc3',
+    ];
+    expectIn(json);
+    const code = compile(ce.box(json as any), { to: 'glsl' }).code!;
+    expect(code).toContain('for (int k = 1; k <= 10; k++) {');
+    expect(code).toContain('acc3 = acc3 + float(k) * x;');
+    // The value at x = 0.5: 55 * 0.5.
+    expect(ce.box(json as any).subs({ x: 0.5 }).evaluate().re).toBe(27.5);
+  });
+
+  test('a write with `=` to an outer local in a lowered `parallel for` is out', () => {
+    const r = expectOut(
+      [
+        'Block',
+        ['Assign', 'acc4', 0],
+        [
+          'ParallelLoop',
+          ['Assign', 'acc4', ['Add', 'acc4', 'x']],
+          ['Element', 'k', ['Range', 1, 10]],
+        ],
+        'acc4',
+      ],
+      'Assign'
+    );
+    expect(r.diagnostic.message).toMatch(/only with `\+=`/);
+  });
+
+  test('`iterationBudget: Infinity` sets no cap: the code counts no pass', () => {
+    expect(check(sum, { iterationBudget: Infinity })).toEqual({ ok: true });
+    const r = compile(ce.box(sum as any), {
+      to: 'glsl',
+      iterationBudget: Infinity,
+    });
+    expect(r.code).not.toContain('_gpu_passes');
+    expect(r.preamble ?? '').not.toContain('_gpu_passes');
+  });
+
+  test.each([NaN, -1, 0])(
+    '`iterationBudget: %p` is refused by compile() and canCompile()',
+    (budget) => {
+      const r = check(sum, { iterationBudget: budget });
+      expect(r.ok).toBe(false);
+      expect(() =>
+        compile(ce.box(sum as any), { to: 'glsl', iterationBudget: budget })
+      ).toThrow(/iterationBudget/);
+    }
+  );
+
+  // Each loop entry after the cap adds one to the counter, so the cap keeps
+  // room for them below the largest `int`, 2^31 - 1.
+  test('a budget over 2^30 is kept at 2^30', () => {
+    const r = compile(ce.box(sum as any), { to: 'glsl', iterationBudget: 1e12 });
+    expect(r.code).toContain('if (++_gpu_passes > 1073741824) break;');
+    expect(r.code).not.toContain('1000000000000');
+  });
+
+  test('`Length` of an operand with an effect is out', () => {
+    // The interpreter gives `x`: the block assigns `x` to `s` and then
+    // counts the components. The compiler would write the count only.
+    const json = [
+      'Block',
+      ['Declare', 'acc5', valueOf(0)],
+      ['Length', ['Block', ['Assign', 'acc5', 'x'], ['Tuple', 'x', 'x']]],
+      'acc5',
+    ];
+    expectOut(json, 'Length');
+    expect(compile(ce.box(json as any), { to: 'glsl' }).success).toBe(false);
+    // An operand with no effect is in, and its count is written.
+    expectIn(['Length', ['Tuple', 'x', 'x']]);
+  });
+
+  test('the pass counter is declared under a guard, so two preambles can be joined', () => {
+    const r = compile(ce.box(sum as any), { to: 'glsl' });
+    expect(r.preamble).toContain(
+      '#ifndef _GPU_PASSES_DECLARED\n#define _GPU_PASSES_DECLARED\nint _gpu_passes = 0;\n#endif\n'
+    );
+  });
+});
+
+describe('phase C, second review fixes', () => {
+  // A symbol whose type admits a point and a list of points: the compiler
+  // writes its point value in place of it (`inlinePointValues()`), which
+  // makes new nodes.
+  ce.declare('PU', 'list<tuple<number, number>> | tuple<number, number>');
+  ce.assign('PU', ce.box(['Tuple', 3, 4]));
+  expect(
+    executeEpsil(
+      ce,
+      [
+        'function mapMin(t: real) -> real { min(map(u => u * t, [1, 2, 3])) }',
+        'function normSum(t: real) -> real {',
+        '  let s = 0',
+        '  parallel for k in 1..10 { s += norm(PU) * k * t }',
+        '  s',
+        '}',
+      ].join('\n')
+    ).diagnostics
+  ).toEqual([]);
+
+  test('the body of a user function is prepared as the emitter prepares it: a `Map` over a constant list is unrolled', () => {
+    expectIn(['mapMin', 'x']);
+    const code = compile(ce.box(['mapMin', 'x'] as any), { to: 'glsl' })
+      .preamble!;
+    expect(code).toContain('_gpu_min(_gpu_min(t, 2.0 * t), 3.0 * t)');
+  });
+
+  test('a `+=` in a `parallel for` is in after its value is rewritten; a write with `=` is out', () => {
+    // In the body of a user function: 55 * |(3, 4)| * x.
+    expectIn(['normSum', 'x']);
+    expect(
+      ce.box(['normSum', 'x'] as any).subs({ x: 0.5 }).evaluate().re
+    ).toBe(137.5);
+    // At the root of the expression.
+    const loop = (statement: unknown) => [
+      'Block',
+      ['Assign', 'acc6', 0],
+      ['ParallelLoop', statement, ['Element', 'k', ['Range', 1, 10]]],
+      'acc6',
+    ];
+    const term = ['Multiply', ['Norm', 'PU'], 'k'];
+    expectIn(loop(['AddTo', 'acc6', term]));
+    expect(
+      compile(ce.box(loop(['AddTo', 'acc6', term]) as any), { to: 'glsl' })
+        .code
+    ).toMatch(/acc6 = (float\(k\) \* 5\.0 \+ acc6|acc6 \+ float\(k\) \* 5\.0);/);
+    // The same form written with `=` is out.
+    const r = expectOut(
+      loop(['Assign', 'acc6', ['Add', 'acc6', term]]),
+      'Assign'
+    );
+    expect(r.diagnostic.message).toMatch(/only with `\+=`/);
+  });
 });

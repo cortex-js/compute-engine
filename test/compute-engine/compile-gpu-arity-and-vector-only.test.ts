@@ -167,7 +167,7 @@ describe('GPU ARITY — `Gamma(s, z)` is the upper INCOMPLETE gamma', () => {
     expect(ce.box(['Gamma', 5]).N().re).toBe(24);
     for (const emit of [g])
       expect(() => emit(['Gamma', 5, 2])).toThrow(
-        /^Could not compile `Gamma`: the two-operand form is the upper incomplete gamma .*$/s
+        /No signature of `Gamma` in the GLSL fragment takes operands of the types \(integer, integer\)/
       );
   });
 
@@ -205,10 +205,10 @@ describe('GPU SHAPE GATE — geometric builtins over scalars and vectors', () =>
     // checks, which name the more specific fault.
     for (const emit of [g]) {
       expect(() => emit(['Refract', V3, W3, U3])).toThrow(
-        /requires a SCALAR in argument 3/
+        /No signature of `Refract` in the GLSL fragment takes operands of the types/
       );
       expect(() => emit(['Refract', 0.5, V3, W3])).toThrow(
-        /takes a scalar only in argument 3, but here the scalar stands in argument 1/
+        /No signature of `Refract` in the GLSL fragment takes operands of the types/
       );
     }
   });

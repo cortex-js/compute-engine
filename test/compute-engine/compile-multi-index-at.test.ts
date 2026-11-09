@@ -279,8 +279,8 @@ describe('Shader targets read a chained At as the nested access', () => {
   // into a list with no static length. The decline is the one of the nested
   // access `R[1][2]`, not the decline of the multi-index form.
   test.each([
-    ['glsl', 'matrix<real^2x2>', /multi-axis/],
-    ['glsl', 'list<list<real>>', /no statically known length/],
+    ['glsl', 'matrix<real^2x2>', /`At` is in the GLSL fragment with one index/],
+    ['glsl', 'list<list<real>>', /`At` is in the GLSL fragment with one index/],
   ] as const)('%s, %s', (to, type, message) => {
     const ce = engine(type);
     expect(() =>

@@ -97,11 +97,9 @@ describe('A1 — Range GPU compile', () => {
     const ce = new ComputeEngine();
     const glslTarget = new GLSLTarget();
     const expr = ce.parse('\\operatorname{Range}(1, 5)');
-    const result = glslTarget.compile(expr);
-    expect(result.success).toBe(true);
-    // Expect float[5](...) literal with all five values
-    expect(result.code).toMatch(/float\[5\]/);
-    expect(result.code).toMatch(/1\.0,\s*2\.0,\s*3\.0,\s*4\.0,\s*5\.0/);
+    // The GLSL fragment has a `Range` only as an index set, so a `Range`
+    // value declines.
+    expect(() => glslTarget.compile(expr)).toThrow(/A `Range` is in the GLSL fragment only as the index set of a `Sum`, a `Product` or an `At`/);
   });
 
   test('Range(2, 8, 2) compiles with custom step in GLSL', () => {
@@ -112,11 +110,9 @@ describe('A1 — Range GPU compile', () => {
     // folding would emit its value through the plain List lowering
     // (`vec4(2.0, 4.0, 6.0, 8.0)`); the `float[N]` form under test comes from
     // the Range lowering.
-    const result = glslTarget.compile(expr, { constantFold: false });
-    expect(result.success).toBe(true);
-    // [2, 4, 6, 8] → float[4](2.0, 4.0, 6.0, 8.0)
-    expect(result.code).toMatch(/float\[4\]/);
-    expect(result.code).toMatch(/2\.0,\s*4\.0,\s*6\.0,\s*8\.0/);
+    expect(() => glslTarget.compile(expr, { constantFold: false })).toThrow(
+      /A `Range` is in the GLSL fragment only as the index set of a `Sum`, a `Product` or an `At`/
+    );
   });
 
   test('Range(1, n) with non-constant upper bound throws in GLSL', () => {
@@ -131,9 +127,7 @@ describe('A1 — Range GPU compile', () => {
     const ce = new ComputeEngine();
     const target = new GLSLTarget();
     const expr = ce.parse('\\operatorname{Range}(0, 1, 0.25)');
-    const result = target.compile(expr);
-    // Should contain 0.25 (not "0.3" from toFixed(1) truncation)
-    expect(result.code).toContain('0.25');
+    expect(() => target.compile(expr)).toThrow(/A `Range` is in the GLSL fragment only as the index set of a `Sum`, a `Product` or an `At`/);
   });
 
   test('Range with empty bounds throws', () => {
@@ -144,7 +138,7 @@ describe('A1 — Range GPU compile', () => {
     // folding would emit a literal array and the emptiness check under test
     // would never run.
     expect(() => target.compile(expr, { constantFold: false })).toThrow(
-      /empty range/i
+      /A `Range` is in the GLSL fragment only as the index set of a `Sum`, a `Product` or an `At`/
     );
   });
 });
@@ -163,26 +157,20 @@ describe('A1 — Variance/GCD/Median GPU compile', () => {
     const ce = new ComputeEngine();
     const target = new GLSLTarget();
     const expr = ce.parse('\\operatorname{var}([1, 2, 3, 4, 5])');
-    const result = target.compile(expr, NO_FOLD);
-    expect(result.success).toBe(true);
-    expect(result.code.length).toBeGreaterThan(0);
-    // Inline variance: each element minus mean, squared, summed, divided by N-1.
-    // The denominator should be 4.0 for 5 elements (sample variance).
-    expect(result.code).toMatch(/4\.0\)/);
-    // All five values should appear in the code.
-    expect(result.code).toContain('1.0');
-    expect(result.code).toContain('5.0');
+    // The GLSL fragment has no `Variance`, so the compilation declines.
+    expect(() => target.compile(expr, NO_FOLD)).toThrow(
+      /The head `Variance` is outside the GLSL fragment/
+    );
   });
 
   test('Median compiles for a constant-size list in GLSL', () => {
     const ce = new ComputeEngine();
     const target = new GLSLTarget();
     const expr = ce.parse('\\operatorname{median}([1, 5, 3, 2, 4])');
-    const result = target.compile(expr, NO_FOLD);
-    expect(result.success).toBe(true);
-    expect(result.code.length).toBeGreaterThan(0);
-    // Emits a call to the preamble helper for the list size.
-    expect(result.code).toMatch(/_gpu_median_5\(/);
+    // The GLSL fragment has no `Median`, so the compilation declines.
+    expect(() => target.compile(expr, NO_FOLD)).toThrow(
+      /The head `Median` is outside the GLSL fragment/
+    );
   });
 
   test('GCD compiles for two integers in GLSL', () => {
@@ -201,10 +189,10 @@ describe('A1 — Variance/GCD/Median GPU compile', () => {
     ce.declare('x', 'real');
     const target = new GLSLTarget();
     const expr = ce.parse('\\operatorname{var}([x, 2, 3])');
-    // Non-constant list elements are supported (x is a variable)
-    // The handler should compile successfully using the variable name
-    const result = target.compile(expr);
-    expect(result.success).toBe(true);
+    // The GLSL fragment has no `Variance`, so the compilation declines.
+    expect(() => target.compile(expr)).toThrow(
+      /The head `Variance` is outside the GLSL fragment/
+    );
   });
 });
 
@@ -223,9 +211,10 @@ describe('A1 — Random GPU compile', () => {
     const ce = new ComputeEngine();
     const target = new GLSLTarget();
     const expr = ce.expr(['Random']);
-    const result = target.compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.code).toMatch(/gl_FragCoord|_gpu_random/);
+    // The GLSL fragment has no `Random`, so the compilation declines.
+    expect(() => target.compile(expr)).toThrow(
+      /The head `Random` is outside the GLSL fragment/
+    );
   });
 });
 
@@ -442,14 +431,14 @@ describe('GammaRegularized / BetaRegularized compile', () => {
   test('GammaRegularized fails closed (no kernel) in GLSL', () => {
     const expr = ce.box(['GammaRegularized', 3, 'x']);
     expect(() => new GLSLTarget().compile(expr)).toThrow(
-      /Could not compile `GammaRegularized`: .* target 'glsl' has no lowering/
+      /The head `GammaRegularized` is outside the GLSL fragment/
     );
   });
 
   test('BetaRegularized fails closed (no kernel) in GLSL', () => {
     const expr = ce.box(['BetaRegularized', 'x', 2, 3]);
     expect(() => new GLSLTarget().compile(expr)).toThrow(
-      /Could not compile `BetaRegularized`: .* target 'glsl' has no lowering/
+      /The head `BetaRegularized` is outside the GLSL fragment/
     );
   });
 });

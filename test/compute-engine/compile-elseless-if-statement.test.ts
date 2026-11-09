@@ -165,10 +165,14 @@ describe('an else-less If as a block statement', () => {
   test('the value-form else-less If compiles on every target as a one-clause Which', () => {
     ce.declare('x', 'number');
     const expr = ce.box(['If', ['Greater', 'x', 0], ['Add', 'x', 1]]);
-    for (const to of ['javascript', 'python', 'interval-js', 'glsl'] as const) {
+    for (const to of ['javascript', 'python', 'interval-js'] as const) {
       const r = compile(expr, { to, fallback: false });
       expect([to, r.success]).toEqual([to, true]);
     }
+    // The GLSL fragment needs both branches of an `If` that is a value.
+    expect(() => compile(expr, { to: 'glsl', fallback: false })).toThrow(
+      /An `If` that is a value needs both branches/
+    );
     const js = compile(expr, { fallback: false });
     expect((js.run as any)({ x: 2 })).toBe(3);
     expect((js.run as any)({ x: -2 })).toBeNaN();

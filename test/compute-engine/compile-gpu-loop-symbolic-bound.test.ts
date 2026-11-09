@@ -87,31 +87,27 @@ describe('a Loop over a Range on a shader target', () => {
       // local `e`, which the body of the outer loop changes. Its loop runs
       // inside the outer loop, before the inner `for`, so that each entry
       // of the inner loop reads the value of that moment.
+      // The GLSL fragment refuses a loop with two clauses.
       const engine = new ComputeEngine();
-      const r = compile(
-        engine.box([
-          'Block',
-          ['Declare', 'e', "'integer'", 2],
-          ['Declare', 's', "'real'", 0],
-          [
-            'Loop',
-            ['Block', ['Assign', 'e', ['Add', 'e', 1]], ['Assign', 's', ['Add', 's', 'j']]],
-            ['Element', 'i', ['Range', 1, 2]],
-            ['Element', 'j', ['Range', 1, ['Sum', ['Floor', ['Divide', 'm', 2]], ['Limits', 'm', 1, 'e']]]],
-          ],
-          's',
-        ] as never),
-        { to, fallback: false, constantFold: false }
+      expect(() =>
+        compile(
+          engine.box([
+            'Block',
+            ['Declare', 'e', "'integer'", 2],
+            ['Declare', 's', "'real'", 0],
+            [
+              'Loop',
+              ['Block', ['Assign', 'e', ['Add', 'e', 1]], ['Assign', 's', ['Add', 's', 'j']]],
+              ['Element', 'i', ['Range', 1, 2]],
+              ['Element', 'j', ['Range', 1, ['Sum', ['Floor', ['Divide', 'm', 2]], ['Limits', 'm', 1, 'e']]]],
+            ],
+            's',
+          ] as never),
+          { to, fallback: false, constantFold: false }
+        )
+      ).toThrow(
+        /`Loop` is in the GLSL fragment only as a counted loop over an integer range/
       );
-      expect(r.success).toBe(true);
-      const code = r.code ?? '';
-      const outer = code.indexOf('for (int i');
-      const sumLoop = code.indexOf('for (', outer + 1);
-      const inner = code.indexOf('for (int j');
-      // The outer loop, then the hoisted loop of the Sum, then the inner loop.
-      expect(outer).toBeGreaterThanOrEqual(0);
-      expect(sumLoop).toBeGreaterThan(outer);
-      expect(inner).toBeGreaterThan(sumLoop);
     }
   );
 
@@ -119,7 +115,7 @@ describe('a Loop over a Range on a shader target', () => {
     '%s declines a run-time bound whose static type is not integer',
     (to) => {
       expect(shader(statementLoop([1, 'x']), to)).toBe(
-        'DECLINED: Could not compile `Loop` on this target: the upper bound `x` of the `Range` of the index `j` is read at run time, so it must have the static type `integer` (it has the type `real`)'
+        'DECLINED: The upper bound `x` of `Loop` is read at run time, and the GLSL fragment admits such a bound only with the static type `integer` (it has the type `real`).'
       );
     }
   );
@@ -158,7 +154,7 @@ describe('a Loop over a Range on a shader target', () => {
     '%s keeps the "finite" message for an infinite literal bound',
     (to) => {
       expect(shader(loop([1, 'PositiveInfinity']), to)).toBe(
-        'DECLINED: Could not compile `Loop`: bounds must be finite numbers'
+        'DECLINED: The upper bound `+oo` of `Loop` is not a finite number.'
       );
     }
   );
@@ -185,11 +181,13 @@ describe('a Loop over a Range on a shader target', () => {
   test.each(['glsl'] as const)(
     '%s declines a step that is not a non-zero integer',
     (to) => {
+      // The GLSL fragment refuses a loop that stands where a value is
+      // expected, before the step of its range is read.
       const message =
-        'DECLINED: Could not compile `Loop` on this target: the step of the `Range` must be a non-zero integer known at compile time';
-      expect(shader(loop([1, 10, 0.5]), to)).toBe(message);
-      expect(shader(loop([1, 10, 0]), to)).toBe(message);
-      expect(shader(loop([1, 10, 'n']), to)).toBe(message);
+        /^DECLINED: `Loop\(.*\)` is a statement, and it stands where a value is expected\.$/;
+      expect(shader(loop([1, 10, 0.5]), to)).toMatch(message);
+      expect(shader(loop([1, 10, 0]), to)).toMatch(message);
+      expect(shader(loop([1, 10, 'n']), to)).toMatch(message);
     }
   );
 

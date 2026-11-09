@@ -183,6 +183,12 @@ describe('a body that contradicts the declared result declines', () => {
         fallback: true,
       } as any);
       expect(r.success).toBe(false);
+      // The GLSL fragment refuses the boolean operand of `Add` first.
+      if (to === 'glsl') {
+        expect(r.diagnostic?.code).toBe('outside-fragment');
+        expect(r.error).toMatch(/No signature of `Add` in the GLSL fragment/);
+        return;
+      }
       expect(r.error).toMatch(
         /Could not compile `g`: .* but its body computes a value of type 'boolean'/
       );

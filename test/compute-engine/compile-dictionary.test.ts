@@ -374,7 +374,7 @@ describe('COMPILE A DICTIONARY: TARGETS WITH NO DICTIONARY VALUE', () => {
     for (const expr of [['Dictionary'], MIXED]) {
       for (const to of ['glsl']) {
         expect(() => compiled(expr, to)).toThrow(
-          /the target has no dictionary value/
+          /is outside the GLSL fragment/
         );
       }
       const r = compiled(expr, 'interval-js');

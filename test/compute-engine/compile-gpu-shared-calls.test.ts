@@ -253,10 +253,9 @@ describe('a call shared by two functions', () => {
       ce.box(['WithRandomSeed', 'x', ['Add', ['g', 'x'], ['h', 'x']]]),
       { to: 'glsl' }
     );
-    expect(r.success).toBe(true);
-    const all = `${r.preamble ?? ''}\n${r.code}`;
-    expect(count(all, '_fn_f(x)')).toBe(2);
-    expect(r.code).toMatch(/_fn_g\(x\)/);
+    // The GLSL fragment refuses `Random`.
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('outside-fragment');
   });
 });
 
@@ -273,10 +272,9 @@ describe('the limits of the substitution', () => {
     const r = compile(ce.box(['Tuple', ['g', 'r'], ['h', 'r']]), {
       to: 'glsl',
     });
-    expect(r.success).toBe(true);
-    expect(r.code).toMatch(/_fn_g\(/);
-    expect(r.code).toMatch(/_fn_h\(/);
-    expect(count(r.code, '_gpu_rnd_draw(')).toBe(2);
+    // The GLSL fragment refuses `Random`.
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('outside-fragment');
   });
 
   test('a sum whose bounds are not safe integers is not written out', () => {

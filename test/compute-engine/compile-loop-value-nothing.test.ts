@@ -125,7 +125,13 @@ describe('A Loop whose value is used declines', () => {
     for (const to of TARGETS) {
       const r = compileTo(json, to);
       expect([to, r.success]).toEqual([to, false]);
-      if (reasonTargets.includes(to)) expect(r.error).toMatch(NOTHING);
+      // The GLSL fragment can refuse a loop in a value position first.
+      if (reasonTargets.includes(to))
+        expect(r.error).toMatch(
+          to === 'glsl'
+            ? /evaluates to `Nothing`, the erasure marker|is a statement, and it stands where a value is expected/
+            : NOTHING
+        );
     }
   });
 
@@ -263,6 +269,11 @@ describe('A Loop in a case of a Match', () => {
     for (const to of ['javascript', 'glsl']) {
       const r = compileTo(json, to);
       expect([to, r.success]).toEqual([to, false]);
+      // The GLSL fragment refuses `Match` before the emitter runs.
+      if (to === 'glsl') {
+        expect(r.error).toMatch(/outside the GLSL fragment/);
+        continue;
+      }
       expect(r.error).toMatch(NOTHING);
     }
   });

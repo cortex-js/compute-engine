@@ -124,14 +124,14 @@ describe('CE-519 — Max, Min and Clamp call the NaN-safe helpers', () => {
           to,
           fallback: false,
         } as never)
-      ).toThrow(/Could not compile `Clamp`/);
+      ).toThrow(/No signature of `Clamp` in the GLSL fragment/);
       // Vectors of different widths.
       expect(() =>
         compile(cev.box(['ElementMax', 'v', 'u'] as never), {
           to,
           fallback: false,
         } as never)
-      ).toThrow(/Could not compile `ElementMax`/);
+      ).toThrow(/No signature of `ElementMax` in the GLSL fragment/);
     }
   });
 
@@ -150,13 +150,13 @@ describe('CE-519 — Max, Min and Clamp call the NaN-safe helpers', () => {
     expect(shader(['Sin', ['List', ['Mod', 'x', 2], 0, 1]], 'glsl').code).toBe(
       '_gpu_sin3(vec3(_gpu_fmod(x, 2.0), 0.0, 1.0))'
     );
-    // A helper that the lowering itself calls on the vector still declines.
+    // The GLSL fragment has no `Sinc` signature over a list, so it declines.
     expect(() =>
       compile(ce.box(['Sinc', ['List', 'x', 0, 1]] as never), {
         to: 'glsl',
         fallback: false,
       } as never)
-    ).toThrow(/not componentwise/);
+    ).toThrow(/No signature of `Sinc` in the GLSL fragment/);
   });
 });
 

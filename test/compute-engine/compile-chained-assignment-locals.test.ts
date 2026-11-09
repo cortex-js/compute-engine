@@ -44,7 +44,7 @@ describe('A CHAINED ASSIGNMENT IS A STATIC ERROR', () => {
       const expr = ce.box(program(['Block', chained], 't') as any);
       expect(expr.isValid).toBe(false);
       expect(() => compile(expr, { to, fallback: false })).toThrow(
-        /invalid expression/
+        to === 'glsl' ? /outside the GLSL fragment/ : /invalid expression/
       );
     });
 });
@@ -91,7 +91,7 @@ describe('SHADERS: A WRITE TO A SYMBOL OF THE ENGINE IN A LOOP BODY', () => {
       ];
       expect(() =>
         compile(ce.box(program(body, 't') as any), { to, fallback: false })
-      ).toThrow(/"u" is not a local of the compiled expression/);
+      ).toThrow(/`Assign` writes `u`, which is not a local of the function/);
     });
 });
 
@@ -125,6 +125,6 @@ describe('GLSL compileFunction(): A NESTED BLOCK WITH A TAIL ASSIGNMENT', () => 
     for (const target of [new GLSLTarget()])
       expect(() =>
         target.compileFunction(tail, 'f', 'float', [['x', 'float']])
-      ).toThrow(/its value is used here/);
+      ).toThrow(/The block ends with an assignment, so it has no value/);
   });
 });

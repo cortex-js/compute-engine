@@ -183,7 +183,7 @@ describe('AssertPresent — compiled (JavaScript)', () => {
     expect(String(r.code)).toContain('expected-present');
   });
 
-  test('Python raises; a shader target compiles the identity (P5)', () => {
+  test('Python raises; a shader target declines the head (P5)', () => {
     ce.declare('x', 'number');
     const py = compile(ce.box(['Add', ['AssertPresent', 'x'], 1]), {
       to: 'python',
@@ -192,8 +192,9 @@ describe('AssertPresent — compiled (JavaScript)', () => {
     expect(String(py.code)).toContain('ValueError("expected-present: x is absent")');
     for (const to of ['glsl'] as const) {
       const sh = compile(ce.box(['Add', ['AssertPresent', 'x'], 1]), { to });
-      expect(sh.success).toBe(true);
-      expect(String(sh.code)).toBe('x + 1.0');
+      // The GLSL fragment does not take the `AssertPresent` head.
+      expect(sh.success).toBe(false);
+      expect(sh.diagnostic?.code).toBe('outside-fragment');
     }
     // The identity is not read as a proof: a later absence test on the
     // value keeps its own rule (declined on a shader, kept on JavaScript).

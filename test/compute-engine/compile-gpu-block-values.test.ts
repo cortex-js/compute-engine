@@ -114,7 +114,10 @@ describe.each(['glsl'] as const)(
       const r = compile(expr, { to, constantFold: false });
       expect(r.success).toBe(true);
       expectValidShape(source(r));
-      expect(source(r)).toMatch(/return _tv1 \+ 1\.0;/);
+      expect(source(r)).toMatch(/float _tv3 = _tv1 \+ 1\.0;/);
+      expect(source(r)).toMatch(
+        /return _gpu_passes > 10000 \? _gpu_nan\(\) : _tv3;/
+      );
       expect(compile(expr).run!({ x: 8, N: 3 })).toBe(16);
     });
 
@@ -235,7 +238,7 @@ describe.each(['glsl'] as const)(
           ],
           constantFold: false,
         })
-      ).toThrow(/final statement of a block|EXPRESSION/);
+      ).toThrow(/is a statement, and it stands where a value is expected/);
     });
 
     test('a conditional arm takes the statement form of the conditional', () => {
@@ -294,7 +297,7 @@ describe.each(['glsl'] as const)(
       expectValidShape(code);
       // The loop lands ahead of the assignment, which reads its accumulator.
       expect(code).toMatch(
-        /for \([^\n]*\n[^\n]*\n\s*}\n\s*(?:float a;|var a: f32;)\n\s*a = _tv1;/
+        /for \([^\n]*\n[^\n]*\n[^\n]*\n\s*}\n\s*(?:float a;|var a: f32;)\n\s*a = _tv1;/
       );
       expect(compile(expr).run!({ x: 3 })).toBe(7);
     });

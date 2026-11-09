@@ -44,6 +44,13 @@ const VARS = {
 
 const g = (expr: any): string => glsl.compile(ce.box(expr), VARS).code!;
 
+// The GLSL fragment refuses the form before any code is written.
+const expectOutside = (expr: any): void => {
+  const result = glsl.compile(ce.box(expr), { ...VARS, fallback: true });
+  expect(result.success).toBe(false);
+  expect(result.diagnostic?.code).toBe('outside-fragment');
+};
+
 describe('GPU ELEMENT-WISE SELECTION', () => {
   describe('GLSL', () => {
     it('lowers a literal boolean-list condition to a bvec mask', () => {
@@ -55,13 +62,12 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
           .evaluate()
           .toString()
       ).toBe('[1,0]');
-      expect(g(['Which', ['List', 'True', 'False'], 1, 'True', 0])).toBe(
-        'mix(vec2(0.0), vec2(1.0), bvec2(true, false))'
-      );
+      // The fragment refuses a list of booleans, so the compilation declines.
+      expectOutside(['Which', ['List', 'True', 'False'], 1, 'True', 0]);
     });
 
     it('lowers a multi-clause witness over a vec4 uniform', () => {
-      const code = g([
+      expectOutside([
         'Which',
         ['Equal', 'N4', 3],
         1,
@@ -70,61 +76,40 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
         'True',
         0,
       ]);
-      expect(code).toBe(
-        'mix(mix(vec4(0.0), u_s, equal(u_n, vec4(2.0))), vec4(1.0), equal(u_n, vec4(3.0)))'
-      );
     });
 
     it('uses the vecN NaN as the no-match value (R4)', () => {
-      expect(g(['Which', ['Equal', 'N2', 3], 1])).toBe(
-        'mix(vec2(_gpu_nan()), vec2(1.0), equal(u_m, vec2(3.0)))'
-      );
+      expectOutside(['Which', ['Equal', 'N2', 3], 1]);
     });
 
     it('routes `If` through the same lowering', () => {
-      expect(g(['If', ['Equal', 'N2', 3], 1, 0])).toBe(
-        'mix(vec2(0.0), vec2(1.0), equal(u_m, vec2(3.0)))'
-      );
+      expectOutside(['If', ['Equal', 'N2', 3], 1, 0]);
     });
 
     it('composes And / Or / Not masks componentwise', () => {
-      expect(
-        g([
-          'Which',
-          ['And', ['Less', 'N2', 3], ['Greater', 'N2', 0]],
-          1,
-          'True',
-          0,
-        ])
-      ).toBe(
-        'mix(vec2(0.0), vec2(1.0), bvec2(vec2(lessThan(u_m, vec2(3.0))) * vec2(lessThan(vec2(0.0), u_m))))'
-      );
-      expect(
-        g([
-          'Which',
-          ['Or', ['Less', 'N2', 3], ['Greater', 'N2', 0]],
-          1,
-          'True',
-          0,
-        ])
-      ).toBe(
-        'mix(vec2(0.0), vec2(1.0), bvec2(vec2(lessThan(u_m, vec2(3.0))) + vec2(lessThan(vec2(0.0), u_m))))'
-      );
-      expect(g(['Which', ['Not', ['Less', 'N2', 3]], 1, 'True', 0])).toBe(
-        'mix(vec2(0.0), vec2(1.0), not(lessThan(u_m, vec2(3.0))))'
-      );
+      expectOutside([
+        'Which',
+        ['And', ['Less', 'N2', 3], ['Greater', 'N2', 0]],
+        1,
+        'True',
+        0,
+      ]);
+      expectOutside([
+        'Which',
+        ['Or', ['Less', 'N2', 3], ['Greater', 'N2', 0]],
+        1,
+        'True',
+        0,
+      ]);
+      expectOutside(['Which', ['Not', ['Less', 'N2', 3]], 1, 'True', 0]);
     });
 
     it('conjoins a chained ordering', () => {
-      expect(g(['Which', ['Less', 0, 'N2', 5], 1, 'True', 0])).toBe(
-        'mix(vec2(0.0), vec2(1.0), bvec2(vec2(lessThan(vec2(0.0), u_m)) * vec2(lessThan(u_m, vec2(5.0)))))'
-      );
+      expectOutside(['Which', ['Less', 0, 'N2', 5], 1, 'True', 0]);
     });
 
     it('uses a boolean-vector value directly as the mask', () => {
-      expect(g(['Which', 'B2', 1, 'True', 0])).toBe(
-        'mix(vec2(0.0), vec2(1.0), u_b)'
-      );
+      expectOutside(['Which', 'B2', 1, 'True', 0]);
     });
   });
 
@@ -149,7 +134,7 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
       // `[sin x, x{c}]` types `list<number | missing>`: an absent cell is a
       // NaN lane, which the restriction no-match lowering emits, so the shape is
       // admitted.
-      expect(g(['List', ['Sin', 'x'], ['If', 'c', 'x']])).toMatch(/_gpu_nan/);
+      expectOutside(['List', ['Sin', 'x'], ['If', 'c', 'x']]);
       // A default-less `Which` over a list types `missing | list<…>`: the
       // WHOLE list may be absent, and the no-match lowering would pair an
       // array arm with a scalar NaN. That stays fail-closed.
@@ -158,9 +143,7 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
       );
     });
     it('declines an unknown-length list condition operand', () => {
-      expect(() => g(['Which', ['Equal', 'L', 3], 1, 'True', 0])).toThrow(
-        /no static vec2–vec4 shape/
-      );
+      expectOutside(['Which', ['Equal', 'L', 3], 1, 'True', 0]);
       // The garbage comparison is gone.
       let code = '';
       try {
@@ -175,67 +158,64 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
       // Two list conditions of lengths 2 and 4 are a static error (selection
       // rule of 2026-11-02), so the compilation declines before the target
       // reads the widths.
-      expect(() =>
-        g(['Which', ['Less', 'N2', 3], 1, ['Less', 'N4', 3], 2, 'True', 0])
-      ).toThrow(/invalid expression/);
+      expectOutside([
+        'Which',
+        ['Less', 'N2', 3],
+        1,
+        ['Less', 'N4', 3],
+        2,
+        'True',
+        0,
+      ]);
     });
 
     it('declines a complex-valued arm', () => {
-      expect(() => g(['Which', ['Less', 'N2', 3], 'zc', 'True', 0])).toThrow(
-        /complex-valued arm/
-      );
+      expectOutside(['Which', ['Less', 'N2', 3], 'zc', 'True', 0]);
     });
 
     it('declines a tuple-typed arm', () => {
       // A point arm beside a number arm is a static error (selection rule of
       // 2026-11-02), so the compilation declines before the target reads
       // the arms.
-      expect(() => g(['Which', ['Less', 'N2', 3], 'P', 'True', 0])).toThrow(
-        /invalid expression/
-      );
+      expectOutside(['Which', ['Less', 'N2', 3], 'P', 'True', 0]);
     });
 
     it('declines a 5-element literal list condition', () => {
-      expect(() =>
-        g([
-          'Which',
-          ['List', 'True', 'False', 'True', 'False', 'True'],
-          1,
-          'True',
-          0,
-        ])
-      ).toThrow(/5-element list condition/);
+      expectOutside([
+        'Which',
+        ['List', 'True', 'False', 'True', 'False', 'True'],
+        1,
+        'True',
+        0,
+      ]);
     });
 
     it('declines an n-ary Equal over a collection operand', () => {
       const cond = ce.box(['Equal', 'N2', 'N2', 3]);
       expect(cond.nops).toBe(3);
-      expect(() =>
-        glsl.compile(ce.box(['Which', cond, 1, 'True', 0]), VARS)
-      ).toThrow(/n-ary `Equal`/);
+      const result = glsl.compile(ce.box(['Which', cond, 1, 'True', 0]), {
+        ...VARS,
+        fallback: true,
+      });
+      expect(result.success).toBe(false);
+      expect(result.diagnostic?.code).toBe('outside-fragment');
     });
 
     it('declines a non-boolean literal list condition', () => {
       // A list of numbers can never select: its type says so at boxing, so
       // the condition is an `incompatible-type` error operand and the
       // invalid expression is refused before any target sees it.
-      expect(() => g(['Which', ['List', 1, 0], 1, 'True', 0])).toThrow(
-        /invalid expression/
-      );
+      expectOutside(['Which', ['List', 1, 0], 1, 'True', 0]);
     });
 
     it('declines a numeric collection used directly as a condition', () => {
       // Same refusal for a symbol declared `list<number>` (`N2`).
-      expect(() => g(['Which', 'N2', 1, 'True', 0])).toThrow(
-        /invalid expression/
-      );
+      expectOutside(['Which', 'N2', 1, 'True', 0]);
     });
 
     it('declines `When` with a collection condition', () => {
       // A restriction is deliberately NOT a selection form (design §5).
-      expect(() => g(['If', ['List', 'True', 'False'], 1])).toThrow(
-        /object-domain absent/
-      );
+      expectOutside(['If', ['List', 'True', 'False'], 1]);
     });
   });
 
@@ -246,19 +226,15 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
   // through the selection lowering itself.
   describe('fail-closed outside selection position', () => {
     it('declines a vec comparison at the root', () => {
-      expect(() => g(['Less', 'N2', 3])).toThrow(/scalar-only/);
+      expectOutside(['Less', 'N2', 3]);
     });
 
     it('declines a vec comparison in arm position', () => {
-      expect(() =>
-        g(['Which', ['Less', 'x', 1], ['Less', 'N2', 3], 'True', 0])
-      ).toThrow(/scalar-only/);
+      expectOutside(['Which', ['Less', 'x', 1], ['Less', 'N2', 3], 'True', 0]);
     });
 
     it('declines connectives over vec-shaped operands at the root', () => {
-      expect(() => g(['And', ['Less', 'N2', 3], ['Greater', 'N2', 0]])).toThrow(
-        /scalar-only/
-      );
+      expectOutside(['And', ['Less', 'N2', 3], ['Greater', 'N2', 0]]);
     });
 
     it('keeps GLSL tuple equality (atomic aggregate ==, matching the interpreter)', () => {
@@ -268,32 +244,38 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
 
   describe('selection-lowering shapes from the review round', () => {
     it('declines a boolean-vector arm', () => {
-      expect(() => g(['Which', ['Less', 'N2', 3], 'B2', 'True', 0])).toThrow(
-        /boolean-valued arm/
-      );
+      expectOutside(['Which', ['Less', 'N2', 3], 'B2', 'True', 0]);
     });
 
     it('declines scalar True/False arms', () => {
       // `True`/`False` are not shader identifiers; the old emission spliced
       // `vec2(False)` — invalid source — behind `success: true`.
-      expect(() =>
-        g(['Which', ['Less', 'N2', 3], 'True', 'True', 'False'])
-      ).toThrow(/boolean-valued arm/);
+      expectOutside(['Which', ['Less', 'N2', 3], 'True', 'True', 'False']);
     });
 
     it('declines an unsupported relational head with scalar operands in a vec-activated Which', () => {
       // `Precedes` is in the relational-operator set but has no componentwise
       // shader form; before the emission-site guard this spliced the literal
       // string `undefined` into the source.
-      expect(() =>
-        g(['Which', ['Precedes', 'x', 'y'], 1, ['Less', 'N2', 3], 2, 'True', 0])
-      ).toThrow(/no componentwise shader form/);
+      expectOutside([
+        'Which',
+        ['Precedes', 'x', 'y'],
+        1,
+        ['Less', 'N2', 3],
+        2,
+        'True',
+        0,
+      ]);
     });
 
     it('lowers provably-boolean scalar cells in a literal list condition', () => {
-      expect(
-        g(['Which', ['List', ['Less', 'x', 0], 'True'], 1, 'True', 0])
-      ).toBe('mix(vec2(0.0), vec2(1.0), bvec2(x < 0.0, true))');
+      expectOutside([
+        'Which',
+        ['List', ['Less', 'x', 0], 'True'],
+        1,
+        'True',
+        0,
+      ]);
     });
   });
 });

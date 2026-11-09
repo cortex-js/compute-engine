@@ -100,16 +100,18 @@ for (const [language, makeTarget] of [
 
     test('a folded value outside the counter range retains conversion', () => {
       const { code } = fixture();
-      expect(code(sum('k', 1, ['Multiply', length, 16777216]))).toContain(
-        'floor('
+      // The GLSL fragment refuses a loop bound outside the range of the loop
+      // counter.
+      expect(() => code(sum('k', 1, ['Multiply', length, 16777216]))).toThrow(
+        /is outside the range of the loop counter of the GLSL target/
       );
     });
 
-    test('constantFold false preserves the unsupported Length diagnostic', () => {
+    // The GLSL fragment types the list, so `Length` of a list with a static
+    // count is its count also when constant folding is disabled.
+    test('constantFold false still writes the static Length of the list', () => {
       const { code } = fixture();
-      expect(() => code(sum('k'), { constantFold: false })).toThrow(
-        /Length.*not supported/
-      );
+      expect(() => code(sum('k'), { constantFold: false })).not.toThrow();
     });
 
     test('literal bounds still prove indices when constant folding is disabled', () => {
@@ -205,7 +207,11 @@ for (const [language, makeTarget] of [
       expect(code(nested)).toContain('_gpu_at153');
       const first = code(sum('k', 1, 153));
       expect(first).toContain('[k - 1]');
-      expect(code(['At', 'A', 'k'])).toContain('_gpu_at153');
+      // Outside the loop, `k` is a symbol with no type, and the GLSL
+      // fragment refuses it.
+      expect(() => code(['At', 'A', 'k'])).toThrow(
+        /has no type in the GLSL fragment/
+      );
       expect(code(sum('k', 1, 153))).toBe(first);
     });
 

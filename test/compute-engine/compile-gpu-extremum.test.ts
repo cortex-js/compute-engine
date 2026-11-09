@@ -86,6 +86,14 @@ describe('GPU Max/Min over a collection — REDUCES (was: returned a vector)', (
   it.each(REDUCTIONS)(
     'GLSL reduces %s to the interpreter value',
     (_label, expr) => {
+      // The GLSL fragment takes a `Range` only as an index set, not as a
+      // value, so it declines a reduction over one.
+      if (JSON.stringify(expr).includes('"Range"')) {
+        expect(() => g(expr)).toThrow(
+          /A `Range` is in the GLSL fragment only as the index set/
+        );
+        return;
+      }
       const code = g(expr);
       expect(code).not.toMatch(/\bvec[234]\s*\(|\bfloat\s*\[/);
       expect(runShader(code)).toBe(interp(expr));
@@ -138,9 +146,12 @@ describe('GPU Max/Min over an EMPTY collection — the target NaN', () => {
   ];
 
   it.each(EMPTY.map((e) => [JSON.stringify(e), e]))(
-    'emits the target NaN for %s',
+    'is declined by the GLSL fragment for %s',
     (_label, expr) => {
-      expect(g(expr)).toBe('(_gpu_nan())');
+      // The fragment takes no empty list or empty point.
+      expect(() => g(expr)).toThrow(
+        /is not a list of reals or of points of one size|a point of the GLSL fragment has 2 to 4/
+      );
     }
   );
 
@@ -160,16 +171,17 @@ describe('GPU Max/Min over an EMPTY collection — the target NaN', () => {
   });
 
   it('an empty operand contributes nothing to a MIXED reduction', () => {
-    for (const [expr, code] of [
-      [['Max', ['List'], 5], '(5.0)'],
-      [['Max', 5, ['List']], '(5.0)'],
-      [['Min', ['List'], 5], '(5.0)'],
-      [['Max', ['List'], ['List', 1, 2, 3]], '(max(max(1.0, 2.0), 3.0))'],
-      [['Min', ['List'], ['List', 4, 1, 9]], '(min(min(4.0, 1.0), 9.0))'],
-    ] as Array<[any, string]>) {
-      expect(g(expr)).toBe(code);
-      expect(runShader(code)).toBe(interp(expr));
-    }
+    // The GLSL fragment takes no empty list, so each of these declines.
+    for (const expr of [
+      ['Max', ['List'], 5],
+      ['Max', 5, ['List']],
+      ['Min', ['List'], 5],
+      ['Max', ['List'], ['List', 1, 2, 3]],
+      ['Min', ['List'], ['List', 4, 1, 9]],
+    ])
+      expect(() => g(expr)).toThrow(
+        /is not a list of reals or of points of one size/
+      );
   });
 });
 
@@ -210,8 +222,8 @@ describe('GPU Max/Min — operands with no component list fail closed', () => {
   const M2 = ['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]];
 
   it('a matrix operand declines rather than returning an aggregate', () => {
-    expect(() => g(['Max', M2])).toThrow(/no compile-time component list/);
-    expect(() => g(['Max', M2])).toThrow(/Could not compile/);
+    // The GLSL fragment does not take the `Matrix` head.
+    expect(() => g(['Max', M2])).toThrow(/outside the GLSL fragment/);
   });
 
   it('a runtime-length collection declines', () => {
@@ -220,7 +232,7 @@ describe('GPU Max/Min — operands with no component list fail closed', () => {
     // The input `L` declines before `Max` reads it: no shader can
     // declare a list of unknown length.
     expect(() => glsl.compile(cel.box(['Max', 'L'])).code).toThrow(
-      /"L" has the type `list<number>`, which has no static length/
+      /The list `L` has no static count/
     );
   });
 });
@@ -300,27 +312,24 @@ describe('GPU reductions over a vector splat read every component', () => {
     ['a literal splat', ['Sum', P(2)], 6],
   ])('%s gives the interpreter value', (_label, expr, value) => {
     expect(interpAt(expr)).toBe(value);
-    expect(runSplat(gs(expr))).toBe(value);
+    // The GLSL fragment declines these forms: a point of the fragment has
+    // real components, and `Sum`/`Product` run over integer index ranges.
+    expect(() => gs(expr)).toThrow(/GLSL fragment/);
   });
 
-  it('a splat of a symbol is read through the swizzles of the constructor', () => {
-    expect(gs(['Sum', P('y')])).toBe(
-      '((vec3(y).x) + (vec3(y).y) + (vec3(y).z))'
-    );
+  it('a splat of a symbol is declined by the GLSL fragment', () => {
+    expect(() => gs(['Sum', P('y')])).toThrow(/GLSL fragment/);
   });
 
-  it('a compound splat operand is evaluated once, in a temporary', () => {
-    expect(gs(['Sum', P(Y1)])).toBe(
-      'vec3 _tv1 = vec3(y + 1.0);\nreturn ((_tv1.x) + (_tv1.y) + (_tv1.z));'
-    );
+  it('a compound splat operand is declined by the GLSL fragment', () => {
+    expect(() => gs(['Sum', P(Y1)])).toThrow(/GLSL fragment/);
   });
 
   it('Max reads the swizzles of a pure compound splat in an If arm', () => {
     // No temporary can be placed in a conditionally evaluated arm, so the
     // pure constructor is repeated once per component.
-    expect(gs(['If', 'c', ['Max', P(Y1)], 0])).toBe(
-      '((c) ? ((_gpu_max(_gpu_max(vec3(y + 1.0).x, vec3(y + 1.0).y), ' +
-        'vec3(y + 1.0).z))) : (0.0))'
+    expect(() => gs(['If', 'c', ['Max', P(Y1)], 0])).toThrow(
+      /GLSL fragment/
     );
   });
 
@@ -351,7 +360,7 @@ describe('GPU reductions over a vector splat read every component', () => {
 
 
   it('a splat of a numeric literal repeats the literal', () => {
-    expect(gs(['Sum', P(2)])).toBe('((2.0) + (2.0) + (2.0))');
+    expect(() => gs(['Sum', P(2)])).toThrow(/GLSL fragment/);
   });
 
   describe('gpuScalarComponents on a target with no statement sink', () => {
@@ -488,6 +497,12 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     const boxed = cev.box(expr);
     expect(() => glsl.compile(boxed, opts)).toThrow(message);
   };
+  // The fragment refuses the form before any code is written.
+  const declinesOutside = (expr: any, o: any = opts) => {
+    const result = glsl.compile(cev.box(expr), { ...o, fallback: true });
+    expect(result.success).toBe(false);
+    expect(result.diagnostic?.code).toBe('outside-fragment');
+  };
   const MOVED = /ahead of the rest of its statement/;
   const REPEATED = /more than once/;
 
@@ -495,7 +510,7 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     // `vec3 _tv = vec3(nextValue());` would run before the `W` of the sum.
     both(['Add', 'W', ['Max', 'V']], MOVED);
     // The same through the `dot(v, v)` form of a sum of squares.
-    both(['Add', 'W', ['Sum', ['Square', 'V']]], MOVED);
+    declinesOutside(['Add', 'W', ['Sum', ['Square', 'V']]]);
   });
 
   it('a loop or an unrolled sum does not run ahead of earlier caller code', () => {
@@ -511,25 +526,22 @@ describe('GPU code supplied by the caller runs once, in order', () => {
   });
 
   it('a hoisted draw does not run ahead of earlier caller code', () => {
-    both(['WithRandomSeed', 1, ['Tuple', 'W', ['Cot', ['Random']]]], MOVED);
-    both(
-      [
-        'WithRandomSeed',
-        1,
-        ['Add', 'W', ['Match', ['Random'], ['MatchCase', 1, 10], ['MatchCase', '_', 30]]],
-      ],
-      /Match/
-    );
+    declinesOutside(['WithRandomSeed', 1, ['Tuple', 'W', ['Cot', ['Random']]]]);
+    declinesOutside([
+      'WithRandomSeed',
+      1,
+      ['Add', 'W', ['Match', ['Random'], ['MatchCase', 1, 10], ['MatchCase', '_', 30]]],
+    ]);
   });
 
   it('caller code is not written more than once', () => {
     both(['Cot', 'W'], REPEATED);
-    both(['Cot', ['Complex', 'W', 1]], REPEATED);
+    declinesOutside(['Cot', ['Complex', 'W', 1]]);
     both(['Remainder', 'W', 2], REPEATED);
     both(['Remainder', 2, 'W'], REPEATED);
     both(['Binomial', 'W', 3], REPEATED);
     both(['ContrastingColor', ['Tuple', 'W', 1, 1], ['Rgb', 1, 0, 0], ['Rgb', 0, 0, 1]], REPEATED);
-    both(['Match', 'W', ['MatchCase', 1, 10], ['MatchCase', 2, 20], ['MatchCase', '_', 30]], REPEATED);
+    declinesOutside(['Match', 'W', ['MatchCase', 1, 10], ['MatchCase', 2, 20], ['MatchCase', '_', 30]]);
     // The middle operand of a chained comparison is in two comparisons.
     both(['Less', 'x', 'W', 3], /chained comparison/);
   });
@@ -546,12 +558,13 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     for (const expr of [
       ['If', 'c', 'W', 0],
       ['Which', 'c', 'W', 'True', 0],
-      ['If', 'c', 'W'],
-      ['Match', 'x', ['MatchCase', 1, 'W'], ['MatchCase', '_', 30]],
     ]) {
       const boxed = cev.box(expr);
       expect(glsl.compile(boxed, opts).code).toContain('?');
     }
+    // A one-branch `If` and a `Match` are outside the fragment.
+    declinesOutside(['If', 'c', 'W']);
+    declinesOutside(['Match', 'x', ['MatchCase', 1, 'W'], ['MatchCase', '_', 30]]);
   });
 
   it('GLSL keeps the ternary form for a branch with caller code after caller code', () => {
@@ -560,44 +573,37 @@ describe('GPU code supplied by the caller runs once, in order', () => {
     for (const expr of [
       ['Add', 'W', ['If', 'c', 'W', 0]],
       ['Add', 'W', ['Which', 'c', 'W', 'True', 0]],
-      ['Add', 'W', ['If', 'c', 'W']],
-      ['Add', 'W', ['Match', 'x', ['MatchCase', 1, 'W'], ['MatchCase', '_', 30]]],
     ]) {
       const boxed = cev.box(expr);
       expect(glsl.compile(boxed, opts).code).toContain('?');
     }
-    expect(
-      glsl.compile(
-        cev.box(['Add', 'W', ['Match', 'x', ['MatchCase', 1, 'W'], ['MatchCase', '_', 30]]]),
-        opts
-      ).code
-    ).toBe('nextValue() + ((x == 1.0) ? (nextValue()) : (30.0))');
+    // A one-branch `If` and a `Match` are outside the fragment.
+    declinesOutside(['Add', 'W', ['If', 'c', 'W']]);
+    declinesOutside([
+      'Add',
+      'W',
+      ['Match', 'x', ['MatchCase', 1, 'W'], ['MatchCase', '_', 30]],
+    ]);
   });
 
   it('a loop in a `Match` case with caller code runs in the branch of the case', () => {
-    const boxed = cev.box([
+    // `Match` is outside the GLSL fragment.
+    declinesOutside([
       'Match',
       'x',
       ['MatchCase', 1, ['Sum', ['Multiply', 'W', 'k'], ['Limits', 'k', 1, 'n']]],
       ['MatchCase', '_', 0],
     ]);
-    expect(glsl.compile(boxed, opts).code).toContain(
-      '    _tv2 += nextValue() * float(k);\n'
-    );
-    // In the branch, the loop would run ahead of the first `W` of the case.
-    both(
+    declinesOutside([
+      'Match',
+      'x',
       [
-        'Match',
-        'x',
-        [
-          'MatchCase',
-          1,
-          ['Add', 'W', ['Sum', ['Multiply', 'W', 'k'], ['Limits', 'k', 1, 'n']]],
-        ],
-        ['MatchCase', '_', 0],
+        'MatchCase',
+        1,
+        ['Add', 'W', ['Sum', ['Multiply', 'W', 'k'], ['Limits', 'k', 1, 'n']]],
       ],
-      MOVED
-    );
+      ['MatchCase', '_', 0],
+    ]);
   });
 
   it('the statement form of a selection is refused when it would move caller code', () => {
@@ -622,17 +628,20 @@ describe('GPU code supplied by the caller runs once, in order', () => {
         opts
       ).code
     ).toBe(
-      'float _tv1;\n' +
+      '_gpu_passes = 0;\n' +
+        'float _tv1;\n' +
         'if (c) {\n' +
         '  float _tv2 = 0.0;\n' +
         '  for (int k = 1; k <= int(floor(n)); k++) {\n' +
+        '    if (++_gpu_passes > 10000) break;\n' +
         '    _tv2 += float(k) * x;\n' +
         '  }\n' +
         '  _tv1 = _tv2;\n' +
         '} else {\n' +
         '  _tv1 = 0.0;\n' +
         '}\n' +
-        'return u_u + _tv1;'
+        'float _tv3 = u_u + _tv1;\n' +
+        'return _gpu_passes > 10000 ? _gpu_nan() : _tv3;'
     );
   });
 
@@ -656,16 +665,11 @@ describe('GPU code supplied by the caller runs once, in order', () => {
   });
 
   it('a draw does not run ahead of caller code in its own endpoints', () => {
-    both(['WithRandomSeed', 1, ['Random', ['Interval', 'W', 1]]], /Random/);
-    both(['Random', ['Interval', 'W', 1]], /Random/);
-    both(['Random', ['Interval', 0, 'W']], /Random/);
-    // A plain read in an endpoint compiles as before.
-    expect(
-      glsl.compile(cev.box(['Random', ['Interval', 'U', 1]]), opts).code
-    ).toBe(
-      '((u_u) + _gpu_rnd_draw(uvec2(floatBitsToUint(gl_FragCoord.x), ' +
-        'floatBitsToUint(gl_FragCoord.y)), _gpu_rnd_n0) * ((1.0) - (u_u)))'
-    );
+    // `Random` and `WithRandomSeed` are outside the GLSL fragment.
+    declinesOutside(['WithRandomSeed', 1, ['Random', ['Interval', 'W', 1]]]);
+    declinesOutside(['Random', ['Interval', 'W', 1]]);
+    declinesOutside(['Random', ['Interval', 0, 'W']]);
+    declinesOutside(['Random', ['Interval', 'U', 1]]);
   });
 
   it('an element-wise lowering does not repeat a vector with caller code', () => {
@@ -740,19 +744,15 @@ describe('GPU code supplied by the caller runs once, in order', () => {
         ['Tuple', ...first, ['Sum', ['Random'], ['Limits', 'n', 1, ['Floor', 't']]]],
       ]);
     const aopts = { ...NO_FOLD, vars: { a: 'u_t', b: 'u_t', W: 'nextValue()' } };
-    expect(glsl.compile(expr([['Random', ['Interval', 'a', 'b']]]), aopts).code).toBe(
-      'float _tv2 = _gpu_rnd_draw(uvec2(0x3ff00000u, 0x00000000u), _gpu_rnd_n1);\n' +
-        'float _tv3 = 0.0;\n' +
-        'for (int n = 1; n <= int(floor(floor(t))); n++) {\n' +
-        '  float _tv4 = _gpu_rnd_draw(uvec2(0x3ff00000u, 0x00000000u), _gpu_rnd_n1);\n' +
-        '  _tv3 += _tv4;\n' +
-        '}\n' +
-        'return vec2(((u_t) + _tv2 * ((u_t) - (u_t))), _tv3);'
-    );
-    // The bound draw would run before the call of `W`.
-    expect(() =>
-      glsl.compile(expr(['W', ['Random', ['Interval', 'a', 'b']]]), aopts)
-    ).toThrow(MOVED);
+    // `WithRandomSeed` and `Random` are outside the GLSL fragment.
+    for (const first of [
+      [['Random', ['Interval', 'a', 'b']]],
+      ['W', ['Random', ['Interval', 'a', 'b']]],
+    ]) {
+      const result = glsl.compile(expr(first), { ...aopts, fallback: true });
+      expect(result.success).toBe(false);
+      expect(result.diagnostic?.code).toBe('outside-fragment');
+    }
   });
 
   it('a `Match` pin with caller code runs only when the earlier cases fail', () => {
@@ -766,20 +766,21 @@ describe('GPU code supplied by the caller runs once, in order', () => {
       ['MatchCase', ['Pin', 'Pi'], 20],
       ['MatchCase', '_', 30],
     ];
-    expect(glsl.compile(cev.box(match), popts).code).toBe(
-      '((x == 1.0) ? (10.0) : (((x == nextValue()) ? (20.0) : (30.0))))'
-    );
-    const after = cev.box(['Add', 'W', match]);
-    expect(glsl.compile(after, popts).code).toBe(
-      'nextValue() + ((x == 1.0) ? (10.0) : (((x == nextValue()) ? (20.0) : (30.0))))'
-    );
+    // `Match` is outside the GLSL fragment.
+    declinesOutside(match, popts);
+    declinesOutside(['Add', 'W', match], popts);
   });
 
   it('forms with no caller code compile as before', () => {
     const c = (expr: any) => glsl.compile(cev.box(expr), opts).code;
-    expect(c(['Match', 'x', ['MatchCase', 1, 10], ['MatchCase', 2, 20], ['MatchCase', '_', 30]])).toBe(
-      '((x == 1.0) ? (10.0) : (((x == 2.0) ? (20.0) : (30.0))))'
-    );
+    // `Match` is outside the GLSL fragment.
+    declinesOutside([
+      'Match',
+      'x',
+      ['MatchCase', 1, 10],
+      ['MatchCase', 2, 20],
+      ['MatchCase', '_', 30],
+    ]);
     expect(c(['Remainder', 'U', 2])).toBe(
       '((u_u) - (2.0) * _gpu_round_up((u_u) / (2.0)))'
     );
@@ -813,9 +814,7 @@ describe('GPU code supplied by the caller runs once, in order', () => {
       '(((u_u) * ((u_u) - 1.0) * ((u_u) - 2.0)) / 6.0)'
     );
     expect(c(['Less', 'x', 'U', 3])).toBe('(x < u_u) && (u_u < 3.0)');
-    expect(c(['WithRandomSeed', 1, ['Tuple', 'U', ['Cot', ['Random']]]])).toBe(
-      'float _tv1 = _gpu_rnd_draw(uvec2(0x3ff00000u, 0x00000000u), _gpu_rnd_n0);\n' +
-        'return vec2(u_u, (_gpu_cos(_tv1) / _gpu_sin(_tv1)));'
-    );
+    // `WithRandomSeed` and `Random` are outside the GLSL fragment.
+    declinesOutside(['WithRandomSeed', 1, ['Tuple', 'U', ['Cot', ['Random']]]]);
   });
 });

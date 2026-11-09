@@ -81,7 +81,10 @@ describe('CE-227.1 terms that stay unfolded', () => {
 
   test('a Random() term', () => {
     const e = ce.box(['Sin', ['Add', 'x', ['Multiply', 1e6, ['Random']]]]);
-    expect(compile(e, { to: 'glsl' }).code).toContain('_gpu_rnd_draw');
+    // The GLSL fragment does not take the `Random` head.
+    const r = compile(e, { to: 'glsl' });
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('outside-fragment');
   });
 
   test('a term with a variable', () => {

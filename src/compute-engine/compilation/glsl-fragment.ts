@@ -12,7 +12,7 @@
  * in `gpu-functions.ts` or `glsl-target.ts`, and the two lists must agree.
  */
 
-import type { Expression } from '../global-types.js';
+import type { Expression, FunctionInterface } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import type { CompileTarget } from './types.js';
 import {
@@ -26,14 +26,17 @@ import {
   isNonRealNumber,
   resolveTypeForCompilation,
 } from '../../common/type/utils.js';
-import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import {
+  declaredParamType,
+  functionLiteralParameterName,
+} from '../boxed-expression/function-literal.js';
 import { collectBinderNames } from '../boxed-expression/utils.js';
 import { userFunctionLiteral } from './compile-assignment-checks.js';
 import {
   inlinedUserFunctionCall,
   userFunctionParamType,
 } from './compile-user-calls.js';
-import { userFunctionIsGeneric } from './compile-cse.js';
+import { definitionBodyExpr, userFunctionIsGeneric } from './compile-cse.js';
 import { constantFoldValue } from './compiler-core.js';
 import {
   inlinePointCalls,
@@ -41,12 +44,23 @@ import {
   reachableSymbolNames,
 } from './point-value-inlining.js';
 import { gpuPointCallsOverBudget } from './gpu-points.js';
+import {
+  bodyWithParallelHeadsLowered,
+  sumAssignedNames,
+} from './parallel-lowering.js';
 import { gpuCheckIdentifier } from './gpu-reserved.js';
-import { GPU_BINOMIAL_UNROLL_LIMIT } from './gpu-reduce.js';
+import { GPU_BINOMIAL_UNROLL_LIMIT, GPU_UNROLL_LIMIT } from './gpu-reduce.js';
+import { unrollFits, unrolledTermSize } from './unroll-budget.js';
 import { derivativeClosedForm } from './derivative-closed-form.js';
+import { appliedDerivativeLiteral } from './compile-callbacks.js';
 import { parseColorString } from '../library/colors.js';
 import { GPU_MAX_INLINE_ELEMENTS } from './gpu-functions.js';
 import { GPU_COLOR_SPACES, GPU_GAMUT_HELPERS } from './gpu-color.js';
+import { gpuNormalizeShaderType } from './gpu-declared-types.js';
+import { tryGetConstant } from './constant-folding.js';
+import { assertSafeBigOpBounds } from './compile-folding.js';
+import { complexContinuation } from './complex-continuation.js';
+import { shadowedLibraryLoweringError } from './compile-definitions.js';
 import {
   fragmentScopeBinds,
   walkAggregate,
@@ -121,7 +135,10 @@ export function glslFragmentTypeOf(
   if (t.kind === 'tuple') {
     const n = t.elements.length;
     if (n < 2 || n > 4) return undefined;
-    if (!t.elements.every((e) => isRealType(e.type))) return undefined;
+    if (
+      !t.elements.every((e) => isRealType(resolveTypeForCompilation(e.type)))
+    )
+      return undefined;
     return { kind: 'point', size: n };
   }
   if (t.kind === 'list') {
@@ -145,6 +162,29 @@ export function glslFragmentTypeOf(
     if (element.kind === 'point') return { kind: 'list', element, count };
     return undefined;
   }
+  return undefined;
+}
+
+/**
+ * The fragment type of a name that the caller of `compileFunction()` or
+ * `compileShader()` declares with the GLSL type spelling `spelling`, or
+ * `undefined` when the spelling has no fragment type (`ivec2`, `bvec3`, a
+ * matrix, an array, a struct): `float` is a real, `int` and `uint` are
+ * integers, `bool` is a boolean, `vec2` to `vec4` are points.
+ */
+export function glslFragmentTypeOfSpelling(
+  spelling: string
+): FragmentValueType | undefined {
+  const t = gpuNormalizeShaderType(spelling);
+  if (t === undefined) return undefined;
+  if (t.width === 1) {
+    if (t.element === 'f') return { kind: 'real' };
+    if (t.element === 'i' || t.element === 'u') return { kind: 'integer' };
+    if (t.element === 'b') return { kind: 'boolean' };
+    return undefined;
+  }
+  if (t.element === 'f' && t.width >= 2 && t.width <= 4)
+    return { kind: 'point', size: t.width };
   return undefined;
 }
 
@@ -261,10 +301,15 @@ const COLOR_CONVERSION: FragmentRule<GlslRepresentation> = {
 const COMPARISON: FragmentRule<GlslRepresentation> = {
   signatures: [sig(['real', 'real'], 'boolean', { rest: 'real' })],
 };
+/** An equality of two reals, two booleans or two points: GLSL `==` on two
+ * vectors is `true` when every component is equal, as the interpreter
+ * compares two tuples. A list is not a point here: a comparison with a list
+ * operand is the comparison of each element. */
 const EQUALITY: FragmentRule<GlslRepresentation> = {
   signatures: [
     sig(['real', 'real'], 'boolean'),
     sig(['boolean', 'boolean'], 'boolean'),
+    sig(['tuple', 'tuple'], 'boolean'),
   ],
 };
 const COMPLEX_PART: FragmentRule<GlslRepresentation> = {
@@ -273,6 +318,93 @@ const COMPLEX_PART: FragmentRule<GlslRepresentation> = {
 const POINT_COMPONENT = (sizes: readonly number[]) => ({
   signatures: [sig(['point'], 'real', { sizes })],
 });
+
+/** A rounding function, with an optional step. A constant step of 0, or a
+ * constant step that is not finite, gives `NaN` in the interpreter, and
+ * the emitter declines it (`gpuRoundToStep()`). */
+const ROUNDING: FragmentRule<GlslRepresentation> = {
+  walk: (node, scope, context, w) => {
+    if (roundingStepIsInvalid(node))
+      return w.refuse(
+        node,
+        'limit',
+        `The step of \`${node.operator}\` is 0 or not finite, so the value ` +
+          `is NaN, and the GLSL fragment has no NaN literal`
+      );
+    return w.signatures(node, scope, context, [
+      sig(['real'], 'real'),
+      sig(['real', 'real'], 'real'),
+      sig(['point'], 'point'),
+    ]);
+  },
+};
+/** Whether `node` is a rounding function with a constant step that is 0 or
+ * not finite. */
+function roundingStepIsInvalid(node: Expression): boolean {
+  if (
+    !isFunction(node) ||
+    node.nops !== 2 ||
+    !['Floor', 'Ceil', 'Round', 'Truncate'].includes(node.operator)
+  )
+    return false;
+  const c = tryGetConstant(node.op2);
+  return c !== undefined && (c === 0 || !Number.isFinite(c));
+}
+/** A real function of `n` real operands whose shader helper is real only:
+ * when the value is provably not real for the operands
+ * (`complexContinuation()`), the emitter declines it, since there is no
+ * complex helper. */
+const realValued = (n: number): FragmentRule<GlslRepresentation> => ({
+  walk: (node, scope, context, w) => {
+    const ops = isFunction(node) ? node.ops : [];
+    if (complexContinuation(node.operator, ops) === 'complex')
+      return w.refuse(
+        node,
+        'signature',
+        `The value of \`${node.toString()}\` is not real, and the GLSL ` +
+          `fragment has no complex lane for \`${node.operator}\``
+      );
+    return w.signatures(node, scope, context, [
+      sig(Array(n).fill('real'), 'real'),
+    ]);
+  },
+});
+/** `Sum` and `Product`: a bound whose constant value is not a safe
+ * integer (more than 2^53 - 1 in magnitude) is refused, as the emitter
+ * refuses it (`assertSafeBigOpBounds()`): the index could not count
+ * through it. */
+function walkSafeAggregate(
+  node: Expression,
+  scope: FragmentScope<GlslRepresentation>,
+  context: FragmentContext<GlslRepresentation>,
+  w: FragmentWalker<GlslRepresentation>
+): FragmentFacts<GlslRepresentation> {
+  const ops = isFunction(node) ? node.ops : [];
+  for (const spec of ops.slice(1)) {
+    const bounds = isFunction(spec, 'Limits')
+      ? [spec.op2, spec.op3]
+      : isFunction(spec, 'Element') && isFunction(spec.op2, 'Range')
+        ? [spec.op2.op1, spec.op2.op2]
+        : [];
+    try {
+      // A bound that the compiler folds (`2^53`) is checked by its value.
+      assertSafeBigOpBounds(
+        node.operator,
+        bounds.map((x) => (x === undefined ? x : (w.constant(x, scope) ?? x)))
+      );
+    } catch (e) {
+      // A bound with an effect is refused by the rule of its own head.
+      if (!String((e as Error)?.message).includes('out-of-range')) continue;
+      return w.refuse(
+        node,
+        'limit',
+        `A bound of \`${node.operator}\` is out-of-range: more than ` +
+          `${Number.MAX_SAFE_INTEGER} in magnitude`
+      );
+    }
+  }
+  return walkAggregate(node, scope, context, w);
+}
 
 /** `Binomial(n, k)`, `Choose(n, k)`: the shader unrolls the product
  * `n(n-1)…(n-k+1)/k!`, so `k` is a literal non-negative integer of at most
@@ -287,6 +419,17 @@ function walkBinomial(
   if (ops.length !== 2)
     return w.refuse(node, 'signature', `\`${node.operator}\` takes two operands`);
   const n = w.value(ops[0], scope, context);
+  // A first operand that is a non-finite constant: the interpreter gives
+  // NaN, and the shader unrolling would give another value, so the emitter
+  // declines it.
+  const nValue = isNumber(ops[0]) ? ops[0] : w.constant(ops[0], scope);
+  if (isNumber(nValue) && !Number.isFinite(nValue.re))
+    return w.refuse(
+      node,
+      'limit',
+      `The first operand of \`${node.operator}\` is the non-finite constant ` +
+        `\`${nValue.toString()}\`, which the GLSL fragment does not take`
+    );
   const k = ops[1];
   const kValue = k.re;
   if (
@@ -338,6 +481,38 @@ function walkDerivative(
   return w.type(closed, scope, context);
 }
 
+/** `Apply(Derivative(f, …), x…)`: the body of the closed form
+ * (`appliedDerivativeLiteral()`), with the arguments in place of its
+ * parameters, typed in place of the node. */
+function walkAppliedDerivative(
+  node: Expression,
+  scope: FragmentScope<GlslRepresentation>,
+  context: FragmentContext<GlslRepresentation>,
+  w: FragmentWalker<GlslRepresentation>
+): FragmentFacts<GlslRepresentation> {
+  const ops = isFunction(node) ? node.ops : [];
+  const literal = appliedDerivativeLiteral(ops);
+  const args = ops.slice(1);
+  if (
+    literal === undefined ||
+    !isFunction(literal, 'Function') ||
+    literal.nops - 1 !== args.length
+  )
+    return w.refuse(
+      node,
+      'head',
+      `\`Apply\` is in the GLSL fragment only as the application of a ` +
+        `derivative whose closed form the engine finds at compile time`
+    );
+  const names = literal.ops.slice(1).map((p) => functionLiteralParameterName(p));
+  if (names.some((n) => n === ''))
+    return w.refuse(node, 'head', `\`Apply\` of this derivative is outside the GLSL fragment`);
+  const body = literal.ops[0].subs(
+    Object.fromEntries(names.map((n, i) => [n, args[i]]))
+  );
+  return w.type(body, scope, context);
+}
+
 const walk = (
   fn: (
     node: Expression,
@@ -358,7 +533,11 @@ export const GLSL_FRAGMENT_RULES: Readonly<
   // Arithmetic
   Add: ARITHMETIC_N,
   Multiply: ARITHMETIC_N,
-  Subtract: ARITHMETIC_2,
+  // A `Subtract` of one operand occurs only in a non-canonical tree. It
+  // evaluates to its operand, and the emitter writes it as its operand.
+  Subtract: {
+    signatures: [...ARITHMETIC_2.signatures, ...ELEMENTARY.signatures],
+  },
   Divide: ARITHMETIC_2,
   Negate: ELEMENTARY,
   Power: {
@@ -380,14 +559,21 @@ export const GLSL_FRAGMENT_RULES: Readonly<
     signatures: [
       sig(['real'], 'real'),
       sig(['complex'], 'real'),
+      // The absolute value of a point is its Euclidean norm, as in the
+      // interpreter: `|(3, 4)|` is 5. The compiler writes `Abs` of a point
+      // as `Norm`.
+      sig(['tuple'], 'real'),
+      // The absolute value of a list of reals is the list of the absolute
+      // values of its elements, as in the interpreter: `|[-1, 5, -3]|` is
+      // `[1, 5, 3]`. The compiler writes the componentwise `abs`.
       sig(['point'], 'point'),
     ],
   },
   Sign: REAL_OR_POINT_1,
-  Floor: { signatures: [sig(['real'], 'real'), sig(['real', 'real'], 'real'), sig(['point'], 'point')] },
-  Ceil: { signatures: [sig(['real'], 'real'), sig(['real', 'real'], 'real'), sig(['point'], 'point')] },
-  Round: { signatures: [sig(['real'], 'real'), sig(['real', 'real'], 'real'), sig(['point'], 'point')] },
-  Truncate: { signatures: [sig(['real'], 'real'), sig(['real', 'real'], 'real'), sig(['point'], 'point')] },
+  Floor: ROUNDING,
+  Ceil: ROUNDING,
+  Round: ROUNDING,
+  Truncate: ROUNDING,
   Fract: REAL_OR_POINT_1,
   Mod: componentwise(2, [1]),
   Remainder: real(2),
@@ -399,26 +585,36 @@ export const GLSL_FRAGMENT_RULES: Readonly<
   Max: {
     signatures: [
       sig(['real'], 'real', { rest: 'real' }),
-      sig(['point'], 'point', { rest: 'point', broadcast: true }),
       sig(['real-list'], 'real'),
+      // Lists and reals together: the extremum of all their elements.
+      sig(['real-or-list'], 'real', { rest: 'real-or-list' }),
+      // Points, and points with reals: the extremum of all their components,
+      // as in the interpreter (`Max((1, 5, 3), 2)` is 5). The compiler
+      // writes a fold over the components, not the componentwise `max`.
+      sig(['point'], 'real', { rest: 'point', broadcast: true }),
     ],
   },
   Min: {
     signatures: [
       sig(['real'], 'real', { rest: 'real' }),
-      sig(['point'], 'point', { rest: 'point', broadcast: true }),
       sig(['real-list'], 'real'),
+      // Lists and reals together: the extremum of all their elements.
+      sig(['real-or-list'], 'real', { rest: 'real-or-list' }),
+      // Points, and points with reals: the extremum of all their components,
+      // as in the interpreter (`Min((1, 5, 3), 2)` is 1). The compiler
+      // writes a fold over the components, not the componentwise `min`.
+      sig(['point'], 'real', { rest: 'point', broadcast: true }),
     ],
   },
   ElementMax: {
     signatures: [
-      sig(['real', 'real'], 'real', { rest: 'real' }),
+      sig(['real'], 'real', { rest: 'real' }),
       sig(['point', 'point'], 'point', { rest: 'point', broadcast: true }),
     ],
   },
   ElementMin: {
     signatures: [
-      sig(['real', 'real'], 'real', { rest: 'real' }),
+      sig(['real'], 'real', { rest: 'real' }),
       sig(['point', 'point'], 'point', { rest: 'point', broadcast: true }),
     ],
   },
@@ -426,12 +622,16 @@ export const GLSL_FRAGMENT_RULES: Readonly<
     signatures: [
       sig(['real'], 'real', { rest: 'real' }),
       sig(['real-list'], 'real'),
+      // Lists and reals together: a fold over all their elements.
+      sig(['real-or-list'], 'real', { rest: 'real-or-list' }),
     ],
   },
   LCM: {
     signatures: [
       sig(['real'], 'real', { rest: 'real' }),
       sig(['real-list'], 'real'),
+      // Lists and reals together: a fold over all their elements.
+      sig(['real-or-list'], 'real', { rest: 'real-or-list' }),
     ],
   },
   Factorial: REAL_1,
@@ -440,6 +640,10 @@ export const GLSL_FRAGMENT_RULES: Readonly<
   // The closed-form derivative is compile-time work: a `D` that the engine
   // differentiates has the type of its derivative.
   D: walk(walkDerivative),
+  // `Apply(Derivative(f, …), x…)`: the closed form of the derivative, a
+  // function literal that the engine computes at compile time, applied to
+  // the arguments. Any other `Apply` is outside.
+  Apply: walk(walkAppliedDerivative),
 
   // Elementary and special functions of the shared GPU table
   Sin: ELEMENTARY,
@@ -474,7 +678,10 @@ export const GLSL_FRAGMENT_RULES: Readonly<
   Log10: REAL_1,
   Lb: REAL_1,
   Lg: REAL_1,
-  Arctan2: real(2),
+  // `atan(vecN, vecN)` acts on each component.
+  Arctan2: {
+    signatures: [sig(['real', 'real'], 'real'), sig(['point', 'point'], 'point')],
+  },
   Sinc: REAL_1,
   Erf: REAL_1,
   Erfc: REAL_1,
@@ -486,9 +693,9 @@ export const GLSL_FRAGMENT_RULES: Readonly<
   PolyGamma: real(2),
   Beta: real(2),
   Zeta: { signatures: [sig(['real'], 'real'), sig(['real', 'real'], 'real')] },
-  HurwitzZeta: real(2),
-  PolyLog: real(2),
-  LerchPhi: real(3),
+  HurwitzZeta: realValued(2),
+  PolyLog: realValued(2),
+  LerchPhi: realValued(3),
   BesselJ: real(2),
   FresnelC: REAL_1,
   FresnelS: REAL_1,
@@ -575,7 +782,10 @@ export const GLSL_FRAGMENT_RULES: Readonly<
   },
   // The first operand is the components of a colour in the named space.
   ColorFromColorspace: {
-    signatures: [sig(['point', 'name'], 'color', { sizes: [3] })],
+    signatures: [
+      sig(['point', 'name'], 'color', { sizes: [3] }),
+      sig(['color', 'name'], 'color'),
+    ],
   },
   GamutMap: {
     signatures: [sig(['color'], 'color'), sig(['color', 'name'], 'color')],
@@ -605,8 +815,8 @@ export const GLSL_FRAGMENT_RULES: Readonly<
   // Selection, aggregates, indexing
   If: walk(walkIf),
   Which: walk(walkWhich),
-  Sum: walk(walkAggregate),
-  Product: walk(walkAggregate),
+  Sum: walk(walkSafeAggregate),
+  Product: walk(walkSafeAggregate),
   At: walk(walkAt),
   Range: walk(walkRange),
 
@@ -633,6 +843,9 @@ export type GlslFragmentOptions = {
   /** The `vars` option: an input that it maps is written with the
    *  caller's spelling. */
   readonly vars?: Readonly<Record<string, unknown>>;
+  /** The names `s` of the statements `s = s + e` of the root as the
+   *  program wrote it (`sumAssignedNames()`). */
+  readonly sumAssigned?: ReadonlySet<string>;
 };
 
 /**
@@ -699,9 +912,33 @@ export function glslFragmentDefinition(
     });
     return w.valueFacts(node, { kind: 'real' }, conversions);
   });
-  const rules: Record<string, FragmentRule<GlslRepresentation>> = {
-    ...GLSL_FRAGMENT_RULES,
-  };
+  // A user definition that shadows a library operator which the emitter
+  // lowers by name (`If`, a head of the GPU table) replaces that lowering,
+  // and the emitter declines the call (`shadowedLibraryLoweringError()`).
+  // Each rule checks it first.
+  const shadowChecked = (
+    rule: FragmentRule<GlslRepresentation>
+  ): FragmentRule<GlslRepresentation> => ({
+    walk: (node, scope, context, w) => {
+      if (
+        isFunction(node) &&
+        shadowedLibraryLoweringError(node.engine, node.operator, target, node) !==
+          undefined
+      )
+        return w.refuse(
+          node,
+          'head',
+          `A user definition shadows the library operator ` +
+            `\`${node.operator}\`, which the GLSL fragment then does not take`
+        );
+      return 'walk' in rule
+        ? rule.walk(node, scope, context, w)
+        : w.signatures(node, scope, context, rule.signatures);
+    },
+  });
+  const rules: Record<string, FragmentRule<GlslRepresentation>> = {};
+  for (const [name, rule] of Object.entries(GLSL_FRAGMENT_RULES))
+    rules[name] = shadowChecked(rule);
   for (const name of Object.keys(options.functions ?? {}))
     rules[name] = callerRule;
 
@@ -710,11 +947,20 @@ export function glslFragmentDefinition(
     rules,
 
     typeOfSymbol: (symbol) => {
-      // A list input named by the `storage` option is a list in a texture,
-      // with or without a static count.
+      if (!isSymbol(symbol)) return undefined;
+      return glslFragmentTypeOf(symbol.type.type);
+    },
+
+    // A node of an input boxed before the symbol was declared, or boxed with
+    // no canonical form, keeps the type `unknown`. The compiler reads the
+    // declaration of the name, so the type of the declaration is read.
+    typeOfInput: (symbol) => {
       if (!isSymbol(symbol)) return undefined;
       const t = glslFragmentTypeOf(symbol.type.type);
-      return t;
+      if (t !== undefined) return t;
+      return symbol.engine.lookupDefinition(symbol.symbol) === undefined
+        ? undefined
+        : glslFragmentTypeOf(symbol.engine.symbol(symbol.symbol).type.type);
     },
 
     typeOfType: glslFragmentTypeOf,
@@ -730,9 +976,23 @@ export function glslFragmentDefinition(
     },
 
     representationOfBinding: (type, binding) => {
-      if (reservedName(binding)) return undefined;
-      if (binding.declared === 'int' || binding.declared === 'uint')
-        return type.kind === 'integer' ? binding.declared : undefined;
+      // A name that the caller declares (a parameter of
+      // `compileFunction()`, a declaration or a built-in variable of
+      // `compileShader()`) is the caller's spelling, as written in the
+      // shader: it is not checked as a name of the emitter.
+      if (binding.declared === undefined && reservedName(binding))
+        return undefined;
+      // A name declared `int` or `uint` by the caller is held in that type.
+      const declared =
+        binding.declared === undefined
+          ? undefined
+          : gpuNormalizeShaderType(binding.declared);
+      if (declared?.width === 1 && (declared.element === 'i' || declared.element === 'u'))
+        return type.kind === 'integer'
+          ? declared.element === 'i'
+            ? 'int'
+            : 'uint'
+          : undefined;
       if (binding.role === 'index')
         return type.kind === 'integer' ? 'int' : undefined;
       if (type.kind === 'list') {
@@ -764,19 +1024,25 @@ export function glslFragmentDefinition(
       if (type.count === undefined)
         return (
           `The list \`${name}\` has no static count: name it in the ` +
-          `\`storage\` option (\`'sampler2D'\`) to read it from a texture`
+          `\`storage\` option (\`storage: { ${name}: 'sampler2D' }\`) to ` +
+          `read it from a texture`
         );
       if (type.count > GLSL_FRAGMENT_ARRAY_LIMIT)
         return (
           `The list \`${name}\` has ${type.count} elements, more than the ` +
-          `${GLSL_FRAGMENT_ARRAY_LIMIT} of a shader array: name it in the ` +
-          `\`storage\` option (\`'sampler2D'\`) to read it from a texture`
+          `limit of ${GLSL_FRAGMENT_ARRAY_LIMIT} elements of a shader ` +
+          `array: name it in the \`storage\` option ` +
+          `(\`storage: { ${name}: 'sampler2D' }\`) to read it from a texture`
         );
       return undefined;
     },
 
     constantValue: (node) => {
       if (target.constantFold === false) return undefined;
+      // A rounding function with a step of 0 folds to `NaN`, but the
+      // emitter does not fold it: it declines it. The rule of the head
+      // decides.
+      if (roundingStepIsInvalid(node)) return undefined;
       // A node of a function body that reads a local, a parameter or an
       // index is not constant: `constantFoldValue()` reads the free names
       // of the node.
@@ -807,9 +1073,54 @@ export function glslFragmentDefinition(
     // The loop counter is a signed 32-bit `int`.
     counterRange: [-(2 ** 31), 2 ** 31 - 1],
 
+    // The emitter writes an empty range as the identity and a small
+    // constant range term by term (`compileGPUSumProduct()`, the limit
+    // `GPU_UNROLL_LIMIT`), with no loop.
+    aggregateHasNoLoop: (node, lower, upper) =>
+      lower > upper ||
+      (isFunction(node) &&
+        unrollFits(upper - lower + 1, unrolledTermSize(node.op1), GPU_UNROLL_LIMIT)),
+
+    sumAssigned: options.sumAssigned,
+
     functionOf: (call, scope) =>
       glslFunctionOf(call, scope, target, overridden),
   };
+}
+
+/**
+ * `body`, the body of a user function as `definitionBodyExpr()` gives it,
+ * with the point values and the point-valued calls written in place, as a
+ * shader target compiles it. `params` are the names of its parameters.
+ *
+ * A symbol of the body whose type admits a point and a list of points is
+ * replaced by its point value, as at the root (`inlinePointValues()`). A
+ * call of a user function whose stored signature returns that union, and
+ * whose body is a point, is replaced by that body (`inlinePointCalls()`).
+ * The parameters are local names there, so a callee body cannot capture
+ * them, and the parameters and the names that the body binds are not
+ * replaced. The stored definition does not change.
+ *
+ * The `define` hook of the shader targets (`gpu-shader-target.ts`) and the
+ * fragment pass (`glslFunctionOf()`) both call this function, so that the
+ * pass types the body that the emitter compiles.
+ */
+export function shaderFunctionBody(
+  body: Expression,
+  target: CompileTarget<Expression>,
+  params: readonly string[]
+): Expression {
+  const pointCalls = inlinePointCalls(
+    body,
+    target,
+    { scalarNames: new Set<string>(), localNames: new Set(params) },
+    gpuPointCallsOverBudget
+  );
+  return inlinePointValues(
+    pointCalls,
+    target,
+    new Set([...params, ...reachableSymbolNames(pointCalls).written])
+  );
 }
 
 function isScalarElement(type: FragmentListType): boolean {
@@ -841,6 +1152,9 @@ function glslFunctionOf(
   const names = params.map((p) => functionLiteralParameterName(p));
   const args = call.ops;
   let body = literal.ops[0];
+  // The literal whose body the emitter compiles: `literal`, or the variant
+  // below.
+  let emitted: Expression & FunctionInterface = literal;
   let kept = names.map((_, i) => i);
 
   // The arguments that are list inputs of the expression that the shader
@@ -917,6 +1231,7 @@ function glslFunctionOf(
         isFunction(variant, 'Function')
       ) {
         body = variant.ops[0];
+        emitted = variant;
         kept = kept.filter((i) => !bound[i]);
         key = `${h}#bind${parts.join(',')}`;
       }
@@ -924,32 +1239,41 @@ function glslFunctionOf(
   }
 
   const parameterNames = kept.map((i) => names[i]);
+  // The declared type of each parameter. A parameter with no declared type
+  // (the slot of the signature is `unknown`, as in `f(x) := x^2`) has no
+  // type here: the pass gives it the type of its argument at the first call
+  // (the spec, decision 11). The type of the parameter symbol is not read
+  // for it: the engine infers it from the uses in the body (`number`), not
+  // from the argument. When the signature of the function gives no type (the
+  // function is declared `function`), the type of the parameter in the
+  // literal, `Typed(u, 'real')`, is the declared type, as the emitter reads
+  // it.
   const parameterTypes = kept.map((i) => {
-    const declared = userFunctionParamType(engine, h, i);
-    const own = params[i]?.type?.type;
-    const t =
-      declared === undefined || declared === 'unknown' ? own : declared;
-    const fragment = glslFragmentTypeOf(t);
+    let declared = userFunctionParamType(engine, h, i);
+    if (declared === undefined || declared === 'unknown' || declared === 'any')
+      declared = declaredParamType(params[i]);
+    if (declared === undefined || declared === 'unknown' || declared === 'any')
+      return undefined;
+    const fragment = glslFragmentTypeOf(declared);
     return fragment === undefined || fragment.kind === 'list'
       ? undefined
       : fragment;
   });
 
-  // The preparation of the body, as the `define` hook of the GLSL target
-  // does it (`gpu-shader-target.ts`).
-  const pointCalls = inlinePointCalls(
-    body,
+  // The body that the emitter compiles, prepared by the same two functions
+  // as the emission: `definitionBodyExpr()` (the angular unit, the `parallel
+  // for` heads and `+=` lowered, the collection-valued calls inlined, the
+  // collections of fixed width unrolled), which `prepareUserFunctionBody()`
+  // calls, then `shaderFunctionBody()`, which the `define` hook of the
+  // shader targets calls. With no registry of user functions, the compiler
+  // emits no definition, and the body has the lowering only.
+  const registry = target.userFunctions;
+  const prepared = shaderFunctionBody(
+    registry === undefined
+      ? bodyWithParallelHeadsLowered(body, target)
+      : definitionBodyExpr(emitted, target, registry, h),
     target,
-    {
-      scalarNames: new Set<string>(),
-      localNames: new Set(parameterNames),
-    },
-    gpuPointCallsOverBudget
-  );
-  const prepared = inlinePointValues(
-    pointCalls,
-    target,
-    new Set([...parameterNames, ...reachableSymbolNames(pointCalls).written])
+    parameterNames
   );
 
   // The emitter writes each parameter name unchanged into the shader
@@ -988,7 +1312,11 @@ function glslFunctionOf(
       if (isSymbol(p)) return p;
       return isFunction(p) && isSymbol(p.op1) ? p.op1 : undefined;
     }),
-    arguments: kept.map((i) => args[i]),
+    // A call with another number of arguments than the function has
+    // parameters keeps all its arguments: the pass refuses it by its count.
+    arguments: args.length === params.length ? kept.map((i) => args[i]) : args,
     body: prepared,
+    // Read on the body before its preparation, where a `+=` is an `AddTo`.
+    sumAssigned: sumAssignedNames(body),
   };
 }

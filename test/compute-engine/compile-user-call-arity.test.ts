@@ -52,7 +52,9 @@ describe('A user-function call with the wrong number of arguments', () => {
     const r = compile(ce.parse('a(1, 2, 3, 4)'), { to } as never);
     expect(r.success).toBe(false);
     expect(r.error).toMatch(
-      /Could not compile a call of `a`: the function is declared with 3 parameters but called with 4\. The interpreter reports an error/
+      to === 'glsl'
+        ? /The head `Error` is outside the GLSL fragment/
+        : /Could not compile a call of `a`: the function is declared with 3 parameters but called with 4\. The interpreter reports an error/
     );
   });
 

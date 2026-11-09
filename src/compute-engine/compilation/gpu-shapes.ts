@@ -734,6 +734,11 @@ function gpuReduceSumOffset(
 export function gpuOperandShape(
   expr: Expression
 ): 'scalar' | 'matrix' | 'array' | 2 | 3 | 4 {
+  // `Normalize` has no definition in the engine, so its node has no type
+  // that gives a width; the shader `normalize()` keeps the shape of its
+  // operand.
+  if (isFunction(expr, 'Normalize') && expr.nops === 1)
+    return gpuOperandShape(expr.op1);
   if (BaseCompiler.isComplexValued(expr)) return 'scalar';
   if (!BaseCompiler.isNonScalarShape(expr) && !gpuIsCollectionShaped(expr))
     return 'scalar';

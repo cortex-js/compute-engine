@@ -152,13 +152,12 @@ describe('COMPILE constant folding - constant collections', () => {
 
     expect(compile(many(60)).code).toContain('_SYS.rangeCount('); // JS: structural
     expect(compile(many(60), { to: 'glsl' }).code).toContain('float[60](');
-    expect(compile(many(200), { to: 'glsl' }).code).toContain('float[200](');
-    // The cap is an INCLUSIVE maximum, so each target folds exactly up to its
-    // own limit — 256 here, the same count its `Range` handler inlines. An
-    // exclusive comparison would have refused this one while `Range` accepted
-    // it, which is the off-by-one the two-number arrangement invited.
-    expect(compile(many(256), { to: 'glsl' }).code).toContain('float[256](');
-    // Past that limit it declines, as its Range does.
+    // The GLSL fragment refuses a `Map` over a long range, so these decline.
+    for (const n of [200, 256, 257]) {
+      const r = compile(many(n), { to: 'glsl' });
+      expect(r.success).toBe(false);
+      expect(r.diagnostic?.code).toBe('outside-fragment');
+    }
     expect(() => compile(many(257), { to: 'glsl', fallback: false })).toThrow();
   });
 

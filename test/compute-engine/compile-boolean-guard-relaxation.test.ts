@@ -234,6 +234,6 @@ describe('other targets are unaffected', () => {
     ce.declare('xs', 'list<real>');
     const r = compile(ce.box(['Less', 'xs', 3] as any), { to: 'glsl' } as any)!;
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/scalar-only/);
+    expect(r.error).toMatch(/The list `xs` has no static count/);
   });
 });

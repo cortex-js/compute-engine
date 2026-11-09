@@ -319,7 +319,7 @@ describe('list-building recursion compiles to a loop', () => {
     declareCountUp(ce, 6);
     for (const target of [new GLSLTarget()])
       expect(() => target.compile(ce.box(['F', 0]))).toThrow(
-        /Could not compile/
+        /The head `Join` is outside the GLSL fragment/
       );
   });
 });

@@ -473,7 +473,9 @@ describe('a tuple that is not visible at compile time is declined', () => {
     const e = tupleEngine();
     expect(() =>
       new GLSLTarget().compile(e.expr(expr), NO_FOLD as any)
-    ).toThrow(/a tuple is color COMPONENTS/);
+    ).toThrow(
+      /a tuple is color COMPONENTS|No signature of `\w+` in the GLSL fragment takes operands/
+    );
   });
 
   test('a head that answers COMPONENTS is declined at a color position', () => {
@@ -495,7 +497,7 @@ describe('a tuple that is not visible at compile time is declined', () => {
         e.expr(['ColorMix', 'v', ['Rgb', 0, 0, 1], 0.5]),
         NO_FOLD as any
       )
-    ).toThrow(/AsRgb\(\(r, g, b\)\)[\s\S]*ColorFromColorspace/);
+    ).toThrow(/No signature of `ColorMix` in the GLSL fragment/);
   });
 });
 
@@ -642,7 +644,7 @@ describe('an entry function reads a tuple-typed operand as components', () => {
     e.declare('w', 'tuple<number, number, number, number>');
     expect(() =>
       new GLSLTarget().compile(e.expr(['AsRgb', 'w']), NO_FOLD as any)
-    ).toThrow(/alpha \(4th\) operand is not representable/);
+    ).toThrow(/No signature of `AsRgb` in the GLSL fragment/);
     expect(jsCode(['AsRgb', 'w'], e)).toBe(
       '_SYS.asRgb(_SYS.colorFromSrgbComponents(_.w))'
     );
@@ -1186,6 +1188,6 @@ describe('a shader maps a color into the gamut as the interpreter does', () => {
         ce.expr(['GamutMap', ['Rgb', 1, 0, 0], "'rec2020'"]),
         NO_FOLD as any
       )
-    ).toThrow(/rec2020/);
+    ).toThrow(/No signature of `GamutMap` in the GLSL fragment/);
   });
 });

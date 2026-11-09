@@ -126,11 +126,14 @@ describe('COMPILE deterministic naming', () => {
     expect(second).toBe(first);
     expect(third).toBe(first);
     expect(first).toMatchInlineSnapshot(`
+      _gpu_passes = 0;
       float _tv1 = 0.0;
       for (int i = 1; i <= int(floor(n)); i++) {
+        if (++_gpu_passes > 10000) break;
         _tv1 += _gpu_sin(float(i));
       }
-      return _tv1;
+      float _tv2 = _tv1;
+      return _gpu_passes > 10000 ? _gpu_nan() : _tv2;
     `);
   });
 

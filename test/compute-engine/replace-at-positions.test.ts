@@ -760,7 +760,7 @@ describe('the other targets decline a form with more than one position', () => {
 
   test.each([
     ['python', /this target writes at one position/],
-    ['glsl', /target 'glsl' has no lowering/],
+    ['glsl', /The head `ReplaceAt` is outside the GLSL fragment/],
   ])('%s', (to, message) => {
     expect(() =>
       compile(ce.box(json as never), { to, fallback: false } as never)
@@ -913,7 +913,7 @@ describe('the length in the type', () => {
         ] as never),
         { to: 'glsl', fallback: false } as never
       )
-    ).toThrow(/target 'glsl' has no lowering/);
+    ).toThrow(/a function body of the GLSL fragment has scalar, complex or point locals/);
   });
 });
 

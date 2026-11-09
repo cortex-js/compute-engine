@@ -38,9 +38,10 @@ describe('freeSymbolTypes', () => {
       lowered: 'vec3',
       provenance: 'inferred',
     };
-    const g = run(ce, 'glsl', ['ColorMix', 'a', 'b', 0.5]);
-    expect(g.success).toBe(true);
-    expect(g.freeSymbolTypes).toEqual({ a: colour, b: colour });
+    // The GLSL fragment gives `color | string | tuple` no type.
+    expect(() => run(ce, 'glsl', ['ColorMix', 'a', 'b', 0.5])).toThrow(
+      /GLSL fragment/
+    );
     const js = run(ce, 'javascript', ['ColorMix', 'a', 'b', 0.5]);
     expect(js.freeSymbolTypes.a).toEqual({ ...colour, lowered: 'color' });
   });
@@ -56,7 +57,8 @@ describe('freeSymbolTypes', () => {
       ['AsHsv', 'a'],
     ]) {
       const ce = new ComputeEngine();
-      expect(run(ce, 'glsl', expr).freeSymbolTypes.a.lowered).toBe('vec3');
+      // The GLSL fragment gives `color | string | tuple` no type.
+      expect(() => run(ce, 'glsl', expr)).toThrow(/GLSL fragment/);
     }
   });
 
@@ -90,9 +92,10 @@ describe('freeSymbolTypes', () => {
       lowered: 'vec2',
       provenance: 'declared',
     });
-    expect(
-      run(ce, 'glsl', ['Multiply', 'M', 2]).freeSymbolTypes.M.lowered
-    ).toBe('mat2');
+    // The fragment gives a matrix no type.
+    expect(() => run(ce, 'glsl', ['Multiply', 'M', 2])).toThrow(
+      /The symbol `M` has the type `matrix<2x2>`, which has no type in the GLSL fragment/
+    );
     expect(run(ce, 'glsl', ['At', 'L', 2]).freeSymbolTypes.L.lowered).toBe(
       'float[5]'
     );
@@ -132,7 +135,7 @@ describe('freeSymbolTypes', () => {
           error = (e as Error).message;
         }
         expect(result?.success ?? false).toBe(false);
-        expect(error).toMatch(/^Could not compile/);
+        expect(error).toMatch(/GLSL fragment/);
         // The `At` lowering declines first, with its own reason. `First`
         // compiles as `At` with the index 1, so it declines there too.
         const viaAt = /"(At|First)"/.test(JSON.stringify(input));
@@ -141,7 +144,7 @@ describe('freeSymbolTypes', () => {
         if (!viaAt)
           expect(error).toMatch(
             new RegExp(
-              `"${name}" has the type|a local holding a list of points`
+              `The symbol \`${name}\` has the type|The local \`Q\` is a list`
             )
           );
       }
@@ -159,23 +162,19 @@ describe('freeSymbolTypes', () => {
     ).toBe(1);
     for (const to of ['glsl']) {
       const conv = 'float';
-      expect(run(ce, to, 'b').code).toBe('b');
-      expect(run(ce, to, ['First', 'b']).code).toBe('b.x');
-      expect(run(ce, to, ['If', ['First', 'b'], 1, 0]).code).toBe(
-        `${conv}(b.x)`
-      );
-      expect(run(ce, to, ['If', ['Last', 'b'], 1, 0]).code).toBe(
-        `${conv}(b.y)`
-      );
+      // The fragment gives a tuple of booleans no type.
+      const refusal =
+        /The symbol `b` has the type `tuple<boolean, boolean>`, which has no type in the GLSL fragment/;
+      expect(() => run(ce, to, 'b')).toThrow(refusal);
+      expect(() => run(ce, to, ['First', 'b'])).toThrow(refusal);
+      expect(() => run(ce, to, ['If', ['First', 'b'], 1, 0])).toThrow(refusal);
+      expect(() => run(ce, to, ['If', ['Last', 'b'], 1, 0])).toThrow(refusal);
       // With a name for the input in `vars`.
-      expect(
+      expect(() =>
         run(ce, to, ['If', ['Second', 'b'], 1, 0], { vars: { b: 'u_b' } })
-          .code
-      ).toBe(`${conv}(u_b.y)`);
+      ).toThrow(refusal);
       // A pair has no third element.
-      expect(() => run(ce, to, ['Third', 'b'])).toThrow(
-        /Could not compile `Third`: .*no element at the position 3/
-      );
+      expect(() => run(ce, to, ['Third', 'b'])).toThrow(refusal);
     }
   });
 
@@ -183,9 +182,10 @@ describe('freeSymbolTypes', () => {
     const ce = new ComputeEngine();
     ce.declare('F', 'tuple<real, real, real, real, real>');
     ce.declare('k', 'integer');
-    const g = run(ce, 'glsl', ['At', 'F', 'k']);
-    expect(g.code).toBe('_gpu_at5(F, k)');
-    expect(g.freeSymbolTypes.F.lowered).toBe('float[5]');
+    // The fragment gives a tuple of more than 4 reals no type.
+    expect(() => run(ce, 'glsl', ['At', 'F', 'k'])).toThrow(
+      /The symbol `F` has the type `tuple<real, real, real, real, real>`, which has no type in the GLSL fragment/
+    );
   });
 
   it('a list of points is an array of vectors on the shader targets', () => {
@@ -219,7 +219,7 @@ describe('freeSymbolTypes', () => {
       const points = ['List', ['Tuple', 1, 2], ['Tuple', 3, 4], ['Tuple', 5, 6]];
       expect(() =>
         run(ce, to, ['Block', ['Assign', 'P', points], ['At', 'P', 'k']])
-      ).toThrow(/"P" is not a local of the compiled expression/);
+      ).toThrow(/`Assign` writes `P`, which is not a local of the function/);
     }
   });
 

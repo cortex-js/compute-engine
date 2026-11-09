@@ -27,7 +27,7 @@ const PROGRAMS: [string, any][] = [
   ],
 ];
 
-const DECLINE = /"u" is not a local of the compiled expression/;
+const DECLINE = /`Assign` writes `u`, which is not a local of the function/;
 
 function compiled(src: any, to: 'glsl', options: any = {}): any {
   const ce = new ComputeEngine();

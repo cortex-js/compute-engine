@@ -2064,6 +2064,13 @@ export interface CompileTarget<Expr = unknown> {
         id: MathJsonSymbol;
         /** The generated definition name (`_fn_f`). */
         name: string;
+        /**
+         * The key of the definition in the registry: `id`, or the key of a
+         * variant (`f#bind…` for a variant that reads a list input by name,
+         * `ensureBoundListVariantEmitted`). A shader target finds the entry
+         * of the function in the fragment annotation with it.
+         */
+        key?: string;
         /** Formal parameter names, in order. */
         params: ReadonlyArray<string>;
         /** The body to compile (canonical, angular-unit rewritten). */
@@ -2497,9 +2504,21 @@ export interface CompilationOptions<Expr = unknown> {
    * `Function` literal at the root, declines. Its calls would share one total.
    *
    * The Python target declines a program with a `Loop` when this option is set.
-   * The GLSL target does not change: a `Loop` there has bounds that are
-   * known at compile time. Without the option, the code of a `Loop` has no
-   * check.
+   * Without the option, the code of a `Loop` on the JavaScript and
+   * `interval-js` targets has no check.
+   *
+   * On the GLSL target, `compile()` always caps the passes, with a default
+   * of 10,000. Each pass of each loop that the shader runs (a `Sum`, a
+   * `Product`, a `Loop` and a `parallel for`, also in the bodies of user
+   * functions) adds one to one count for each evaluation of the compiled
+   * expression. Over the cap, the loops stop and the value of the
+   * expression is `NaN` (`false` for a boolean value). `Infinity` sets no
+   * cap: the code counts no pass. A finite value is floored and kept at
+   * most `2^31 - 2`. On every target, `NaN` or a value of at most 0 is
+   * refused: `compile()` throws and `canCompile()` answers `ok: false`.
+   * The other GLSL entries
+   * (`compileFunction()`, `compileShader()`, `compileToSource()`) do not
+   * read the option and count no pass.
    *
    * ```ts
    * const { run } = compile(expr, { iterationBudget: 1e6 });

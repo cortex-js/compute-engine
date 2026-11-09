@@ -80,7 +80,7 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
 
     it('glsl names the target', () => {
       expect(() => new GLSLTarget().compile(listComponent())).toThrow(
-        /collection-valued .* target 'glsl'/
+        /has no type in the GLSL fragment/
       );
     });
 
@@ -134,14 +134,14 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
       expect(() =>
         new GLSLTarget().compile(ce.box(['GammaRegularized', 3, 'x']))
       ).toThrow(
-        /Could not compile `GammaRegularized`: the operator is known to the engine but target 'glsl' has no lowering/
+        /The head `GammaRegularized` is outside the GLSL fragment/
       );
     });
 
     it('glsl: Integrate names the target gap', () => {
       expect(() =>
         new GLSLTarget().compile(ce.parse('\\int_{0}^{1} x^2 \\, dx'))
-      ).toThrow(/Could not compile `Integrate`: .* has no lowering/);
+      ).toThrow(/The head `Integrate` is outside the GLSL fragment/);
     });
 
     it('interval-js: List reports the target gap in `error`', () => {

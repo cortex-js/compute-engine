@@ -83,19 +83,21 @@ describe('CE-1107: a list input as the argument of a shader function', () => {
   test('GLSL, the input as a uniform array', () => {
     const ce = engineWith(G);
     const call = ce.box(['g', 'H', 'x']);
-    const g = glsl.compile(call, { fallback: false });
-    expect(g.code).toBe('_fn_g_bind0_H(x)');
-    expect(g.preamble).toContain('return x * H[1599];');
+    // The GLSL fragment limits a shader array to 256 elements.
+    expect(() => glsl.compile(call, { fallback: false })).toThrow(
+      /The list `H` has 1600 elements, more than the limit of 256 elements of a shader array/
+    );
   });
 
   test('the calls with the same input share one variant', () => {
     const ce = engineWith(G);
-    const r = glsl.compile(
-      ce.box(['Add', ['g', 'H', 'x'], ['g', 'H', 'y'], ['At', 'H', 1]]),
-      { fallback: false }
-    );
-    expect(r.code).toBe('H[0] + _fn_g_bind0_H(x) + _fn_g_bind0_H(y)');
-    expect(r.preamble.split('float _fn_g_bind0_H(').length).toBe(2);
+    // The GLSL fragment limits a shader array to 256 elements.
+    expect(() =>
+      glsl.compile(
+        ce.box(['Add', ['g', 'H', 'x'], ['g', 'H', 'y'], ['At', 'H', 1]]),
+        { fallback: false }
+      )
+    ).toThrow(/The list `H` has 1600 elements, more than the limit of 256 elements of a shader array/);
   });
 
   test('an input with another name than the parameter', () => {
@@ -121,30 +123,24 @@ describe('CE-1107: a list input as the argument of a shader function', () => {
         'function g(a: list<real^5>, b: list<real^2>, c: list<real^2>) -> real { a[1] * 100 + b[1] * 10 + c[1] }'
       ).diagnostics
     ).toEqual([]);
-    const r = glsl.compile(
-      ce.box([
-        'Add',
-        ['g', 'X_1_Y', ['List', 1, 2], 'Z'],
-        ['Multiply', 1000, ['g', 'X', 'Y_2_Z', ['List', 3, 4]]],
-      ]),
-      { fallback: false }
-    );
-    expect(r.success).toBe(true);
-    const bodies = r.preamble
-      .split('\n')
-      .filter((line) => line.trim().startsWith('return'))
-      .join('\n');
-    expect(bodies).toContain('X_1_Y[0]');
-    expect(bodies).toContain('Z.x');
-    expect(bodies).toContain('X[0]');
-    expect(bodies).toContain('Y_2_Z.x');
+    // The GLSL fragment gives a parameter of a user function no list type.
+    expect(() =>
+      glsl.compile(
+        ce.box([
+          'Add',
+          ['g', 'X_1_Y', ['List', 1, 2], 'Z'],
+          ['Multiply', 1000, ['g', 'X', 'Y_2_Z', ['List', 3, 4]]],
+        ]),
+        { fallback: false }
+      )
+    ).toThrow(/The parameter `c` of `g` has no type in the GLSL fragment/);
   });
 
   test('an input with no static length still declines', () => {
     const ce = engineWith(G, 'list<real>');
     expect(
       message(() => glsl.compile(ce.box(['g', 'H', 'x']), { fallback: false }))
-    ).toMatch(/has no statically known length/);
+    ).toMatch(/The list `H` has no static count/);
   });
 
   // The lane of the call `g(L, x)` in `g(L, x) + 1` is read before the call
@@ -153,9 +149,10 @@ describe('CE-1107: a list input as the argument of a shader function', () => {
     const ce = engineWith(
       `${G}\nfunction f(L: list<integer>, x: real) -> real { g(L, x) + 1 }`
     );
-    const r = glsl.compile(ce.box(['f', 'H', 'x']), { fallback: false });
-    expect(r.code).toBe('_fn_f_bind0_H(x)');
-    expect(r.preamble).toContain('return _fn_g_bind0_H(x) + 1.0;');
+    // The GLSL fragment limits a shader array to 256 elements.
+    expect(() =>
+      glsl.compile(ce.box(['f', 'H', 'x']), { fallback: false })
+    ).toThrow(/The list `H` has 1600 elements, more than the limit of 256 elements of a shader array/);
   });
 
   test('a parameter fact is read at the position of the parameter in the declaration', () => {
@@ -166,11 +163,10 @@ describe('CE-1107: a list input as the argument of a shader function', () => {
     const ce = engineWith(
       'function g(H: list<integer>, a: real, b: real) -> real { H[1] + max(a, a * a) + max(b, b * b) }'
     );
-    const r = glsl.compile(ce.box(['g', 'H', 1, 'x']), { fallback: false });
-    expect(r.code).toBe('_fn_g_bind0_H(1.0, x)');
-    expect(r.preamble).toContain(
-      'return H[0] + max(a, a * a) + _gpu_max(b, b * b);'
-    );
+    // The GLSL fragment limits a shader array to 256 elements.
+    expect(() =>
+      glsl.compile(ce.box(['g', 'H', 1, 'x']), { fallback: false })
+    ).toThrow(/The list `H` has 1600 elements, more than the limit of 256 elements of a shader array/);
   });
 });
 
@@ -182,7 +178,7 @@ describe('CE-1107: the calls that still decline', () => {
     );
     expect(
       message(() => glsl.compile(ce.box(['f', 'x']), { fallback: false }))
-    ).toMatch(/parameter "H" has no static GLSL type/);
+    ).toMatch(/The local `L` is a list/);
   });
 
   test('a list literal', () => {
@@ -193,7 +189,7 @@ describe('CE-1107: the calls that still decline', () => {
           fallback: false,
         })
       )
-    ).toMatch(/parameter "H" has no static GLSL type/);
+    ).toMatch(/The parameter `H` of `g` has no type in the GLSL fragment/);
   });
 
   test('a body that binds the name of the input', () => {
@@ -205,7 +201,7 @@ describe('CE-1107: the calls that still decline', () => {
       message(() =>
         glsl.compile(ce.box(['g', 'K', 'x']), { fallback: false })
       )
-    ).toMatch(/parameter "H" has no static GLSL type/);
+    ).toMatch(/The parameter `H` of `g` has no type in the GLSL fragment/);
   });
 
   test('another parameter with the name of the input', () => {
@@ -217,6 +213,6 @@ describe('CE-1107: the calls that still decline', () => {
       message(() =>
         glsl.compile(ce.box(['g', 'K', 'x']), { fallback: false })
       )
-    ).toMatch(/parameter "H" has no static GLSL type/);
+    ).toMatch(/The parameter `H` of `g` has no type in the GLSL fragment/);
   });
 });

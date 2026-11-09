@@ -529,11 +529,11 @@ describe.each(TARGETS)('CE-565.4 on %s', (to) => {
     it('calls the built-ins when every call passes a finite scalar', () => {
       const ce = engineWith('R', R_LITERAL, 'function');
       ce.declare('phi', 'real');
-      const { preamble } = shader(ce, rowOf('phi'), to);
-      const body = definition(preamble, '_fn_R_\\w+');
-      expect(body).toMatch(/\bcos\(t\)/);
-      expect(body).toMatch(/\bsin\(t\)/);
-      expect(body).not.toMatch(/_gpu_(cos|sin)\(t\)/);
+      // The GLSL fragment has a `Sum` only over integer index ranges, and
+      // the body of `R` sums a list.
+      expect(() => shader(ce, rowOf('phi'), to)).toThrow(
+        /`Sum` is in the GLSL fragment only over one or more integer index ranges/
+      );
     });
   });
 

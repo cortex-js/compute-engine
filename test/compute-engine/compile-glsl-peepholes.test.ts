@@ -90,9 +90,10 @@ describe('per-function preamble inclusion', () => {
   });
 
   it('a three-element Median carries one median network', () => {
-    const r = glsl(['Median', ['List', 1.5, 'x', 3.5]]);
-    expect(r.code).toBe('_gpu_median_3(1.5, x, 3.5)');
-    expect(declaredIn(r.preamble)).toEqual(['_gpu_median_3']);
+    // The GLSL fragment has no `Median`, so the compilation declines.
+    expect(() => glsl(['Median', ['List', 1.5, 'x', 3.5]])).toThrow(
+      /The head `Median` is outside the GLSL fragment/
+    );
   });
 
   it('Gamma does not carry the log-gamma approximation', () => {
@@ -151,18 +152,24 @@ describe('sum of squared components is a dot product', () => {
 
   it('GLSL binds the vector once and calls dot', () => {
     const ce = withPoints();
-    const code = new GLSLTarget().compile(
-      ce.parse('\\sum\\left(\\left(x-\\mathrm{PointX}(P)\\right)^2\\right)')
-    ).code;
-    expect(code).toBe(
-      'vec2 _tv1 = x + vec2(1.0, 3.0);\nreturn dot(_tv1, _tv1);'
+    // The GLSL fragment has a `Sum` only over integer index ranges, so the
+    // reduction over a vector declines.
+    expect(() =>
+      new GLSLTarget().compile(
+        ce.parse('\\sum\\left(\\left(x-\\mathrm{PointX}(P)\\right)^2\\right)')
+      )
+    ).toThrow(
+      /`Sum` is in the GLSL fragment only over one or more integer index ranges/
     );
   });
 
   it('a bare vector symbol is named twice, with no temporary', () => {
     const ce = fresh();
     ce.declare('v', 'vector<2>');
-    expect(glsl(['Sum', ['Power', 'v', 2]], ce).code).toBe('dot(v, v)');
+    // The GLSL fragment has a `Sum` only over integer index ranges.
+    expect(() => glsl(['Sum', ['Power', 'v', 2]], ce)).toThrow(
+      /`Sum` is in the GLSL fragment only over one or more integer index ranges/
+    );
   });
 
   it('a caller-mapped square keeps the component fold', () => {
@@ -186,8 +193,9 @@ describe('sum of squared components is a dot product', () => {
     ce.declare('v', 'vector<2>');
     // The square of a bare vector symbol inlines as `v * v`, and the
     // component fold reads the product's components back out of a temporary.
-    expect(glsl(['Product', ['Power', 'v', 2]], ce).code).toBe(
-      'vec2 _tv1 = (v * v);\nreturn ((_tv1.x) * (_tv1.y));'
+    // The GLSL fragment has a `Product` only over integer index ranges.
+    expect(() => glsl(['Product', ['Power', 'v', 2]], ce)).toThrow(
+      /`Product` is in the GLSL fragment only over one or more integer index ranges/
     );
   });
 });
@@ -206,7 +214,7 @@ describe('small emission peepholes', () => {
     // A dividend with no `fract` overload (a matrix) still declines.
     cev.declare('M', 'matrix<real^(2x2)>');
     expect(() => glsl(['Mod', 'M', 1], cev)).toThrow(
-      /`fract` .* has no `matN` overload/
+      /has no type in the GLSL fragment/
     );
   });
 

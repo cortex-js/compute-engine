@@ -449,8 +449,9 @@ describe('COMPILE', () => {
       it('should compile a column vector to GLSL', () => {
         const expr = ce.parse('\\begin{pmatrix}1\\\\ 2\\\\ 3\\end{pmatrix}');
         const compiled = compile(expr, { to: 'glsl' });
-        // Column vector Nx1 is flattened to vecN
-        expect(compiled?.code).toMatchInlineSnapshot(`vec3(1.0, 2.0, 3.0)`);
+        // The GLSL fragment refuses `Matrix`.
+        expect(compiled?.success).toBe(false);
+        expect(compiled?.diagnostic?.code).toBe('outside-fragment');
       });
 
       it('should compile a 2x2 matrix to GLSL with native mat2', () => {
@@ -459,10 +460,9 @@ describe('COMPILE', () => {
           ['List', ['List', 1, 2], ['List', 3, 4]],
         ]);
         const compiled = compile(expr, { to: 'glsl' });
-        // Column-major: col0=(1,3), col1=(2,4)
-        expect(compiled?.code).toMatchInlineSnapshot(
-          `mat2(vec2(1.0, 3.0), vec2(2.0, 4.0))`
-        );
+        // The GLSL fragment refuses `Matrix`.
+        expect(compiled?.success).toBe(false);
+        expect(compiled?.diagnostic?.code).toBe('outside-fragment');
       });
 
       it('should compile a 3x3 matrix to GLSL', () => {
@@ -471,9 +471,9 @@ describe('COMPILE', () => {
           ['List', ['List', 1, 0, 0], ['List', 0, 1, 0], ['List', 0, 0, 1]],
         ]);
         const compiled = compile(expr, { to: 'glsl' });
-        expect(compiled?.code).toMatchInlineSnapshot(
-          `mat3(vec3(1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), vec3(0.0, 0.0, 1.0))`
-        );
+        // The GLSL fragment refuses `Matrix`.
+        expect(compiled?.success).toBe(false);
+        expect(compiled?.diagnostic?.code).toBe('outside-fragment');
       });
     });
   });
@@ -3380,7 +3380,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
           fallback: false,
           constantFold: false,
         })
-      ).toThrow(/Could not compile/);
+      ).toThrow(/is not a list of reals or of points of one size/);
     // The order 2 of a vector is the Euclidean norm.
     expect(runJs(e, ['Norm', ['List', 3, 4], 2])).toBe(5);
     // Entries far from 1: the Gram matrix squares them, so without scaling
@@ -5072,20 +5072,22 @@ describe('GPU loop-body block-locals get the shader type inference', () => {
 
   it('GLSL: an aggregate wider than 4 gets the array type', () => {
     const glsl = new GLSLTarget();
-    const r = glsl.compile(
-      engineWithA(
-        accumulate(
-          [
-            ['Assign', 'p', ['List', 1, 2, 3, 4, 5]],
-            ['Assign', 's', ['Add', 's', ['At', 'p', 2]]],
-          ],
-          ['Assign', 'p', ['List', 0, 0, 0, 0, 0]]
-        )
-      ).box(['a', 'u'])
+    // The GLSL fragment allows only scalar, complex or point locals.
+    expect(() =>
+      glsl.compile(
+        engineWithA(
+          accumulate(
+            [
+              ['Assign', 'p', ['List', 1, 2, 3, 4, 5]],
+              ['Assign', 's', ['Add', 's', ['At', 'p', 2]]],
+            ],
+            ['Assign', 'p', ['List', 0, 0, 0, 0, 0]]
+          )
+        ).box(['a', 'u'])
+      )
+    ).toThrow(
+      /The local `p` is a list: a block of the GLSL fragment has scalar, complex or point locals/
     );
-    expect(r.success).toBe(true);
-    expect(r.preamble).toContain('float[5] p;');
-    expect(r.preamble).toContain('p = float[5](1.0, 2.0, 3.0, 4.0, 5.0);');
   });
 
   it('GPU: a loop-body local bound to disagreeing shapes fails closed', () => {
@@ -5331,7 +5333,8 @@ describe('an Assign to a non-hoisted (outer) name agrees with its reads', () => 
     expect(r.success).toBe(true);
     expect(r.code).toContain('s = 0.0;');
     expect(r.code).toContain('s = s + length(z);');
-    expect(r.code).toContain('return s;');
+    expect(r.code).toContain('float _tv1 = s;');
+    expect(r.code).toContain('return _gpu_passes > 10000 ? _gpu_nan() : _tv1;');
   });
 
   it('a write to a symbol whose value every read BAKES fails closed', () => {
@@ -5518,7 +5521,7 @@ describe('a GPU user-function body with an early `Return`', () => {
     for (const body of [RETURN_SHAPE_MISMATCH, RETURN_COMPLEX_LOCAL])
       for (const target of gpuTargets())
         expect(() => target.compile(engineWithA(body).box(['a', 'u']))).toThrow(
-          /a `Return` in this body yields a "vec2" value, but "a" is declared to return "float"/
+          /The head `Return` is outside the GLSL fragment/
         );
   });
 
@@ -5530,9 +5533,7 @@ describe('a GPU user-function body with an early `Return`', () => {
     for (const target of gpuTargets())
       expect(() =>
         target.compile(engineWithA(RETURN_IN_BRANCH).box(['a', 'u']))
-      ).toThrow(
-        /an early `Return` here has no GLSL lowering .* requires an expression|Could not compile `Return`: a multi-statement construct .* cannot be used as a sub-expression/s
-      );
+      ).toThrow(/The head `Return` is outside the GLSL fragment/);
   });
 
   it('a `Return` in the block VALUE position fails closed', () => {
@@ -5540,7 +5541,7 @@ describe('a GPU user-function body with an early `Return`', () => {
     for (const target of gpuTargets())
       expect(() =>
         target.compile(engineWithA(RETURN_IS_VALUE).box(['a', 'u']))
-      ).toThrow(/requires an expression \(`return return s;`\)/);
+      ).toThrow(/The head `Return` is outside the GLSL fragment/);
   });
 
   it('the decline is reported as `success: false`, not as source', () => {
@@ -5556,13 +5557,10 @@ describe('a GPU user-function body with an early `Return`', () => {
   });
 
   it('an early `Return` of the body’s own shape still compiles', () => {
-    const glsl = new GLSLTarget().compile(
-      engineWithA(EARLY_RETURN_OK).box(['a', 'u'])
-    );
-    expect(glsl.success).toBe(true);
-    expect(glsl.preamble).toContain('float _fn_a(float t)');
-    expect(glsl.preamble).toContain('return 2.0 * t;');
-    expect(glsl.preamble).toContain('return s;');
+    // The GLSL fragment refuses `Return`, also an early one of the right shape.
+    expect(() =>
+      new GLSLTarget().compile(engineWithA(EARLY_RETURN_OK).box(['a', 'u']))
+    ).toThrow(/The head `Return` is outside the GLSL fragment/);
   });
 
   it('JS is unchanged: it lowers every one of these bodies itself', () => {
@@ -5639,8 +5637,7 @@ describe('the expression-only GPU routes decline statement bodies', () => {
 
   /** The decline of a block whose last statement is an assignment or a
    * declaration, where the value of the block is used. */
-  const VALUE_USED =
-    /an assignment or a declaration is a statement, and its value is used here/;
+  const VALUE_USED = /The block ends with an assignment, so it has no value/;
 
   const shaderFor = (
     target: GLSLTarget,
@@ -5663,6 +5660,13 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     for (const body of [DECLARE_ASSIGN_RETURN, ASSIGN_THEN_VALUE])
       for (const target of gpuTargets()) {
         const e = engineWithX();
+        // The GLSL fragment refuses the `Return` of the first body.
+        if (body === DECLARE_ASSIGN_RETURN) {
+          expect(() => target.compileToSource(e.box(body))).toThrow(
+            /The head `Return` is outside the GLSL fragment/
+          );
+          continue;
+        }
         expect(() => target.compileToSource(e.box(body))).toThrow(
           /Could not compile with `compileToSource\(\)`: this route emits a single GLSL EXPRESSION, but the body lowers to a statement sequence/
         );
@@ -5676,16 +5680,14 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     for (const target of gpuTargets())
       expect(() =>
         target.compileToSource(engineWithX().box(BARE_RETURN))
-      ).toThrow(
-        /Could not compile with `compileToSource\(\)`: this route emits a single GLSL EXPRESSION, but the body lowers to a bare `return` statement \(`return x`\)/
-      );
+      ).toThrow(/The head `Return` is outside the GLSL fragment/);
   });
 
   it('compileShader() declines the statement bodies that carry a `Return`', () => {
     for (const body of [DECLARE_ASSIGN_RETURN, BARE_RETURN])
       for (const target of gpuTargets())
         expect(() => shaderFor(target, body, engineWithX())).toThrow(
-          /Could not compile the body statement "fragColor" of `compileShader\(\)`: this route emits a single GLSL EXPRESSION/
+          /Could not compile the body statement "fragColor" of `compileShader\(\)`: The head `Return` is outside the GLSL fragment/
         );
   });
 
@@ -5752,7 +5754,7 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     for (const target of gpuTargets())
       expect(() =>
         target.compileToSource(engineWithX().box(['Declare', 's', 'number']))
-      ).toThrow(/invalid expression/);
+      ).toThrow(/The head `Error` is outside the GLSL fragment/);
   });
 
   it('GLSL declines the same assignment body: its value is used', () => {
@@ -5765,7 +5767,7 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     );
     expect(() =>
       glsl.compileToSource(engineWithX().box(['Assign', 's', 'x']))
-    ).toThrow(/"s" is not a local of the compiled expression/);
+    ).toThrow(/`Assign` writes `s`, which is not a local of the function/);
     expect(() =>
       glsl.compileShader({
         type: 'fragment',
@@ -5796,7 +5798,7 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     ).toThrow(VALUE_USED);
     for (const target of gpuTargets())
       expect(() => target.compile(engineWithX().box(DECLARE_ONLY))).toThrow(
-        VALUE_USED
+        /`Declare` is in the GLSL fragment only as a statement of a block/
       );
   });
 
@@ -5816,7 +5818,7 @@ describe('the expression-only GPU routes decline statement bodies', () => {
         target.compile(
           engineWithX().box(['Block', ['Declare', 'u', 'number', 'x']])
         )
-      ).toThrow(VALUE_USED);
+      ).toThrow(/The block ends with a declaration, so it has no value/);
     }
   });
 
@@ -5855,8 +5857,9 @@ describe('the expression-only GPU routes decline statement bodies', () => {
         'x',
       ])
     );
-    expect(new GLSLTarget().compile(engine.parse('h(u)')).preamble).toContain(
-      'x = x + 1.0;'
+    // The GLSL fragment refuses the write to a parameter.
+    expect(() => new GLSLTarget().compile(engine.parse('h(u)'))).toThrow(
+      /`Assign` writes `x`, which is not a local of the function/
     );
   });
 
@@ -6238,7 +6241,10 @@ describe('COMPILE Apply maps a tuple at a parameter declared as a scalar (a numb
         // and shader targets require.
         if (arg !== 'P') {
           expect(interval.success).toBe(true);
-          new GLSLTarget().compile(expr);
+          // The GLSL fragment refuses `Apply` of a function literal.
+          expect(() => new GLSLTarget().compile(expr)).toThrow(
+            /`Apply` is in the GLSL fragment only as the application of a derivative/
+          );
         }
         const run = interval.success
           ? intervalMidpoints(interval.run!(TUPLE_VALUES as never))
@@ -6357,9 +6363,9 @@ describe('COMPILE Apply maps a tuple at a parameter declared as a scalar (a numb
     expect(
       new JavaScriptTarget().compile(expr).run!({ A: true, B: false } as never)
     ).toEqual([false, true]);
-    // A shader vector holds numbers, not booleans.
+    // The GLSL fragment refuses `Apply` of a function literal.
     expect(() => new GLSLTarget().compile(expr)).toThrow(
-      /tuple of booleans, which target 'glsl' cannot represent/
+      /`Apply` is in the GLSL fragment only as the application of a derivative/
     );
     ce.assign('A', true);
     ce.assign('B', false);
@@ -6439,7 +6445,11 @@ describe('COMPILE a call of a named function maps a tuple at a parameter declare
         if (arg !== 'P') {
           expect(interval.success).toBe(true);
           for (const target of [new GLSLTarget()])
-            expect(target.compile(expr).code).toMatch(/^(vec2|vec2\[2\])\(/);
+            // The GLSL fragment refuses a point at a parameter declared
+            // `real`, by the signature of `k` or by the literal.
+            expect(() => target.compile(expr)).toThrow(
+                /The argument `.*` of `k` has the type `.*`, and the parameter `u` has the type `real`/
+              );
         }
         const run = interval.success
           ? intervalMidpoints(interval.run!(TUPLE_VALUES as never))
@@ -6962,7 +6972,12 @@ describe('COMPILE a call of a block local or a parameter with a library name', (
       for (const to of ['javascript', 'glsl', 'python'] as const)
         expect(() =>
           compile(engine().box(param), { to, fallback: false })
-        ).toThrow(reason);
+        ).toThrow(
+          // The GLSL fragment refuses `Apply` of a function literal first.
+          to === 'glsl'
+            ? /`Apply` is in the GLSL fragment only as the application of a derivative/
+            : reason
+        );
       const interval = compile(engine().box(param), {
         to: 'interval-js',
         fallback: false,

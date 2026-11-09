@@ -384,7 +384,10 @@ describe('compiled: the sign of a zero part, e^{x + iπ}, and sin(πL)', () => {
     try {
       new PythonTarget().compile(engine.box(['Power', 'x', ['Random']]));
     } catch {}
-    new GLSLTarget().compile(engine.box(['Power', 'x', ['Random']]));
+    // The GLSL fragment refuses `Random` before the target reads the exponent.
+    expect(() =>
+      new GLSLTarget().compile(engine.box(['Power', 'x', ['Random']]))
+    ).toThrow(/The head `Random` is outside the GLSL fragment/);
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
   });

@@ -495,7 +495,7 @@ describe('AN ASSIGNMENT THAT IS AN OPERAND', () => {
         const ce = new ComputeEngine();
         expect(ce.box(src).isValid).toBe(false);
         expect(() => compile(ce.box(src), { to, fallback: false })).toThrow(
-          /invalid expression/
+          to === 'glsl' ? /outside the GLSL fragment/ : /invalid expression/
         );
       }
   });
@@ -656,7 +656,7 @@ describe('AN ASSIGNMENT IN A CONDITION', () => {
         ]),
         { to: 'glsl', fallback: false }
       )
-    ).toThrow(/"flag" is not a local of the compiled expression/);
+    ).toThrow(/`Assign` writes `flag`, which is not a local of the function/);
   });
 });
 

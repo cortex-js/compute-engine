@@ -721,31 +721,37 @@ describe('an impure operand spliced by a multi-use template draws exactly once',
 
   test('GLSL: Remainder(Random(), 2) hoists the draw to a single temporary', () => {
     const g = ce._getCompilationTarget('glsl')!;
-    const r = g.compile(ce.box(['Remainder', ['Random'], 2]) as any);
-    expect((r.code!.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
-    expect(r.code).toContain('float _tv1 =');
+    // The GLSL fragment refuses `Random`, so the compilation declines.
+    expect(() => g.compile(ce.box(['Remainder', ['Random'], 2]) as any)).toThrow(
+      /The head `Random` is outside the GLSL fragment/
+    );
   });
 
   test('GLSL: Cot(Random()) hoists the draw to a single temporary', () => {
     const g = ce._getCompilationTarget('glsl')!;
-    const r = g.compile(ce.box(['Cot', ['Random']]) as any);
-    expect((r.code!.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
+    // The GLSL fragment refuses `Random`, so the compilation declines.
+    expect(() => g.compile(ce.box(['Cot', ['Random']]) as any)).toThrow(
+      /The head `Random` is outside the GLSL fragment/
+    );
   });
 
   test('GLSL: Cot of a COMPLEX impure operand hoists the draw too', () => {
     const g = ce._getCompilationTarget('glsl')!;
-    const r = g.compile(
-      ce.box(['Cot', ['Add', 'ImaginaryUnit', ['Random']]]) as any
-    );
-    expect((r.code!.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
+    // The GLSL fragment refuses `Random`, so the compilation declines.
+    expect(() =>
+      g.compile(ce.box(['Cot', ['Add', 'ImaginaryUnit', ['Random']]]) as any)
+    ).toThrow(/The head `Random` is outside the GLSL fragment/);
   });
 
   test('GLSL: Coth and Beta hoist an impure operand too (same template class)', () => {
     const g = ce._getCompilationTarget('glsl')!;
-    const coth = g.compile(ce.box(['Coth', ['Random']]) as any);
-    expect((coth.code!.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
-    const beta = g.compile(ce.box(['Beta', ['Random'], 2]) as any);
-    expect((beta.code!.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
+    // The GLSL fragment refuses `Random`, so the compilation declines.
+    expect(() => g.compile(ce.box(['Coth', ['Random']]) as any)).toThrow(
+      /The head `Random` is outside the GLSL fragment/
+    );
+    expect(() => g.compile(ce.box(['Beta', ['Random'], 2]) as any)).toThrow(
+      /The head `Random` is outside the GLSL fragment/
+    );
   });
 
   test('GLSL: pure operands keep the direct emission (byte-identical pins)', () => {
@@ -785,6 +791,13 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
     }).code ?? '';
   const gpuDraws = (json: any): number =>
     (gpuCode(json).match(/_gpu_rnd_draw/g) ?? []).length;
+  /** The GLSL fragment refuses `json`, so the compilation declines. */
+  const gpuRefuses = (
+    json: any,
+    pattern: RegExp = /outside the GLSL fragment/
+  ): void => {
+    expect(() => gpuCode(json)).toThrow(pattern);
+  };
   const jsCode = (json: any): string =>
     compile(ce.box(json), {
       fallback: false,
@@ -877,17 +890,8 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
   // --- GPU: Binomial ------------------------------------------------------
 
   test('GLSL: Binomial(Random(), k) draws once (k splices)', () => {
-    // The falling-factorial unroll splices the first operand k times.
-    expect(gpuDraws(['Binomial', ['Random'], 2])).toBe(1);
-    expect(gpuCode(['Binomial', ['Random'], 2])).toContain('float _tv1 =');
-    expect(gpuDraws(['Binomial', ['Random'], 5])).toBe(1);
-    // k = 1 splices the operand exactly once — no temporary needed.
-    expect(gpuDraws(['Binomial', ['Random'], 1])).toBe(1);
-    // k = 0 discards the operand, but the interpreter still draws — there is
-    // no sink for a discarded draw in an expression, so it declines.
-    expect(() => gpuCode(['Binomial', ['Random'], 0])).toThrow(
-      /impure \(Random\) first operand/
-    );
+    // The GLSL fragment refuses `Random`, for every k.
+    for (const k of [2, 5, 1, 0]) gpuRefuses(['Binomial', ['Random'], k]);
   });
 
   // --- JS: Range ----------------------------------------------------------
@@ -921,65 +925,53 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
   // The step form writes the operand twice (in the quotient and in the
   // overflow fix), so an impure operand is bound to a hoisted temporary.
   test('GLSL: Round draws an impure operand once (both forms)', () => {
-    expect(gpuDraws(['Round', ['Random']])).toBe(1);
-    expect(gpuDraws(['Round', ['Random'], 2])).toBe(1);
+    gpuRefuses(['Round', ['Random']]);
+    gpuRefuses(['Round', ['Random'], 2]);
   });
 
   test('GLSL: Root of an impure operand at an odd degree draws once', () => {
-    expect(gpuDraws(['Root', ['Random'], 3])).toBe(1);
+    gpuRefuses(['Root', ['Random'], 3]);
   });
 
   test('GLSL: Variance draws exactly once PER ELEMENT (interpreter parity)', () => {
-    // Each element was spliced 2 + 2·N times: twelve draws for two elements.
-    expect(gpuDraws(['Variance', ['Random'], ['Random']])).toBe(2);
-    expect(
-      gpuDraws(['Variance', ['List', ['Random'], ['Random'], ['Random']]])
-    ).toBe(3);
-    // `Median` splices each element ONCE (sibling reduction, probed clean).
-    expect(gpuDraws(['Median', ['Random'], ['Random'], ['Random']])).toBe(3);
+    // The GLSL fragment refuses `Variance`, and `Random` inside `Median`.
+    gpuRefuses(['Variance', ['Random'], ['Random']]);
+    gpuRefuses(['Variance', ['List', ['Random'], ['Random'], ['Random']]]);
+    gpuRefuses(['Median', ['Random'], ['Random'], ['Random']], /GLSL fragment/);
   });
 
   test('GLSL: Argument/Conjugate of an impure COMPLEX operand draw once', () => {
     const z = ['Multiply', ['Random'], 'ImaginaryUnit'];
-    expect(gpuDraws(['Argument', z])).toBe(1);
-    expect(gpuCode(['Argument', z])).toContain('vec2 _tv1 =');
-    expect(gpuDraws(['Conjugate', z])).toBe(1);
+    gpuRefuses(['Argument', z]);
+    gpuRefuses(['Conjugate', z]);
   });
 
   test('GLSL: an impure ContrastingColor operand fails closed', () => {
-    // The three operands are `vec3`-shaped and each spliced twice — there is
-    // no temporary to bind a color to, so this declines rather than re-draw.
-    expect(() =>
-      gpuCode([
-        'ContrastingColor',
-        ['Tuple', ['Random'], 1, 1],
-        ['Tuple', 0, 0, 0],
-        ['Tuple', 0.5, 0.1, 30],
-      ])
-    ).toThrow(/impure \(Random\) operand/);
+    // The GLSL fragment refuses `Random`.
+    gpuRefuses([
+      'ContrastingColor',
+      ['Tuple', ['Random'], 1, 1],
+      ['Tuple', 0, 0, 0],
+      ['Tuple', 0.5, 0.1, 30],
+    ]);
   });
 
   test('GLSL: the element-wise selection mask draws a middle operand once', () => {
-    expect(
-      gpuDraws([
-        'Which',
-        ['Less', ['List', 0.1, 0.2], ['Random'], ['List', 0.9, 0.8]],
-        ['List', 1, 2],
-        'True',
-        ['List', 3, 4],
-      ])
-    ).toBe(1);
+    gpuRefuses([
+      'Which',
+      ['Less', ['List', 0.1, 0.2], ['Random'], ['List', 0.9, 0.8]],
+      ['List', 1, 2],
+      'True',
+      ['List', 3, 4],
+    ]);
   });
 
   test('GLSL: the complex Add fallback compiles each operand ONCE', () => {
-    // `tryGetComplexParts` compiled every operand, then the whole
-    // decomposition was discarded for the opaque-complex operand and the rest
-    // were compiled again — leaving an ORPHANED hoisted draw feeding nothing.
-    const code = gpuCode(framed(['Add', ['Cot', ['Random']], ['Sqrt', -2]]));
-    expect((code.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
-    // Every temporary declared is also USED (no orphan).
-    for (const t of new Set(code.match(/_tv\d+/g) ?? []))
-      expect((code.match(new RegExp(t, 'g')) ?? []).length).toBeGreaterThan(1);
+    // The GLSL fragment refuses `WithRandomSeed`.
+    gpuRefuses(
+      framed(['Add', ['Cot', ['Random']], ['Sqrt', -2]]),
+      /The head `WithRandomSeed` is outside the GLSL fragment/
+    );
   });
 
   test('GPU: pure operands keep the direct emission (byte-identical pins)', () => {
@@ -994,14 +986,8 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
     // inputs may contain Nothing and are deliberately refused.
     ce.declare('varianceX', 'real');
     ce.declare('varianceY', 'real');
-    expect(
-      gpuCode(['Variance', 'varianceX', 'varianceY'])
-        .replace(/varianceX/g, 'x')
-        .replace(/varianceY/g, 'y')
-    ).toBe(
-      '(((x - ((x + y) / 2.0)) * (x - ((x + y) / 2.0)) + ' +
-        '(y - ((x + y) / 2.0)) * (y - ((x + y) / 2.0))) / 1.0)'
-    );
+    // The GLSL fragment refuses `Variance`.
+    gpuRefuses(['Variance', 'varianceX', 'varianceY']);
     expect(gpuCode(['Argument', ['Complex', 'x', 'y']])).toBe('atan(y, x)');
     expect(gpuCode(['Conjugate', ['Complex', 'x', 'y']])).toBe(
       'vec2(vec2(x, y).x, -vec2(x, y).y)'
@@ -1023,17 +1009,16 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
         '_gpu_srgb_to_oklch(vec3(0.0, 0.0, 0.0)) : ' +
         '_gpu_srgb_to_oklch(vec3(0.5, 0.1, 30.0)))'
     );
-    expect(
-      gpuCode([
+    // The GLSL fragment has no `Less` signature over lists.
+    gpuRefuses(
+      [
         'Which',
         ['Less', ['List', 0.1, 0.2], 'x', ['List', 0.9, 0.8]],
         ['List', 1, 2],
         'True',
         ['List', 3, 4],
-      ])
-    ).toBe(
-      'mix(vec2(3.0, 4.0), vec2(1.0, 2.0), bvec2(vec2(lessThan(vec2(0.1, 0.2), ' +
-        'vec2(x))) * vec2(lessThan(vec2(x), vec2(0.9, 0.8)))))'
+      ],
+      /No signature of `Less` in the GLSL fragment/
     );
     expect(gpuCode(['Add', 1, ['Sqrt', -2]])).toBe(
       'vec2(1.0, 0.0) + vec2(0.0, 1.4142135)'
@@ -1052,23 +1037,11 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
   ];
 
   test('GLSL: a chained relation draws its middle operand once', () => {
-    // Two draws before: the two comparisons compared DIFFERENT values.
-    expect(gpuDraws(['Less', 0.1, ['Random'], 0.9])).toBe(1);
-    expect(gpuCode(['Less', 0.1, ['Random'], 0.9])).toContain('float _tv1 =');
+    gpuRefuses(['Less', 0.1, ['Random'], 0.9]);
   });
 
   test('GLSL: a chained relation draws its operands in ARGUMENT order', () => {
-    // Binding only the MIDDLE ran the middle's draw BEFORE the first operand's
-    // (the hoisted temporary precedes the mask/comparison expression), so the
-    // compiled chain compared the two draws in the wrong order. Both impure
-    // operands are now hoisted, in argument order.
-    const json = ['Less', ['Random'], ['Random'], 0.9];
-    expect(gpuDraws(json)).toBe(2);
-    const code = gpuCode(json);
-    expect(code).toMatch(/_tv1 = _gpu_rnd_draw[\s\S]*_tv2 = _gpu_rnd_draw/);
-    // The FIRST hoisted draw is the FIRST operand: it is the left side of the
-    // first comparison.
-    expect(code).toContain('(_tv1 < _tv2) && (_tv2 < 0.9)');
+    gpuRefuses(['Less', ['Random'], ['Random'], 0.9]);
   });
 
   test('JS: a chained relation matches the interpreter (argument order)', () => {
@@ -1167,52 +1140,39 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
   });
 
   test('GLSL: an impure operand at index ≥ 2 that must be hoisted DECLINES', () => {
-    // A shader can only bind by hoisting a statement, which runs
-    // unconditionally — it would draw even when `5 < 1` already decided the
-    // chain, diverging from the interpreter.
-    expect(() => gpuCode(['Less', 5, 1, ['Random'], 0.9])).toThrow(/index ≥ 2/);
-    // The index-1 hoist is still fine: the interpreter always evaluates the
-    // first two operands.
-    expect(gpuDraws(['Less', 0.1, ['Random'], 0.9])).toBe(1);
+    // The GLSL fragment refuses `Random`, at any index.
+    gpuRefuses(['Less', 5, 1, ['Random'], 0.9]);
+    gpuRefuses(['Less', 0.1, ['Random'], 0.9]);
   });
 
   test('GLSL: the selection mask draws its operands in ARGUMENT order', () => {
-    // Same defect on the element-wise (`Which`) path: only an impure MIDDLE
-    // went through `gpuOperandOnce`, so an impure ENDPOINT stayed inline in
-    // the mask and drew AFTER the hoisted middle.
-    const json = [
+    gpuRefuses([
       'Which',
       ['Less', ['Random'], ['Random'], ['List', 0.9, 0.8]],
       ['List', 1, 2],
       'True',
       ['List', 3, 4],
-    ];
-    expect(gpuDraws(json)).toBe(2);
-    const code = gpuCode(json);
-    expect(code).toMatch(/_tv1 = _gpu_rnd_draw[\s\S]*_tv2 = _gpu_rnd_draw/);
-    expect(code).toContain('lessThan(vec2(_tv1), vec2(_tv2))');
+    ]);
   });
 
   test('GLSL: an impure Match subject draws once', () => {
-    // The subject is spliced once per leaf comparison — three draws before.
-    expect(gpuDraws(matchJSON(['Random']))).toBe(1);
-    expect(gpuCode(matchJSON(['Random']))).toContain('float _tv1 =');
-    // A RANGE pattern splices the subject twice in one comparison.
-    expect(
-      gpuDraws([
+    // The GLSL fragment refuses `Match`.
+    gpuRefuses(matchJSON(['Random']), /The head `Match` is outside the GLSL fragment/);
+    gpuRefuses(
+      [
         'Match',
         ['Random'],
         ['MatchCase', ['Range', 1, 5], 10],
         ['MatchCase', '_', -1],
-      ])
-    ).toBe(1);
+      ],
+      /The head `Match` is outside the GLSL fragment/
+    );
   });
 
   test('chain/Match keep the pure emission (byte-identical pins)', () => {
     expect(gpuCode(['Less', 0.1, 'x', 0.9])).toBe('(0.1 < x) && (x < 0.9)');
-    expect(gpuCode(matchJSON('x'))).toBe(
-      '(((x == 1.0 || x == 2.0)) ? (10.0) : (((x == 3.0) ? (30.0) : (-1.0))))'
-    );
+    // The GLSL fragment refuses `Match`.
+    gpuRefuses(matchJSON('x'), /The head `Match` is outside the GLSL fragment/);
     // The JS chain (a `bindExpr` target) is untouched by the GPU arm.
     expect(jsCode(['Less', 0.1, ['Add', 'x', 1], 0.9])).toBe(
       '((_tv1) => (0.1 < _tv1) && (_tv1 < 0.9))(_.x + 1)'

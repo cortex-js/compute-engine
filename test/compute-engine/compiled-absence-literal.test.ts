@@ -180,17 +180,13 @@ describe('the targets with no object absence axis', () => {
   // — but a written `Missing` in a value position lowers to the shader's NaN
   // instead of the undefined identifier `Missing`.
   test('GLSL lowers a written Missing to its NaN spelling', () => {
-    const r = compile(ce.box(['Cos', 'Missing']), {
-      to: 'glsl',
-      fallback: false,
-    } as any);
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('_gpu_cos(_gpu_nan())');
-    expect(r.freeSymbols).toEqual([]);
-    // The preamble scan reads the EMITTED code, so the helper the marker calls
-    // is declared with it — a shader that calls an undeclared function does
-    // not compile in the driver.
-    expect(r.preamble).toContain('float _gpu_nan()');
+    // The GLSL fragment has no `Missing` value, so the compilation declines.
+    expect(() =>
+      compile(ce.box(['Cos', 'Missing']), {
+        to: 'glsl',
+        fallback: false,
+      } as any)
+    ).toThrow(/has no type in the GLSL fragment/);
   });
 
   test('GLSL still declines to DISCHARGE absence', () => {

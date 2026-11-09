@@ -248,11 +248,10 @@ describe('COMPILE Match — GPU targets', () => {
     ['MatchCase', '_', -1],
   ];
 
-  it('compiles tier 0/1 to GLSL ternaries with == comparisons', () => {
-    const r = compile(ce.box(m), { to: 'glsl', fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('==');
-    expect(r.code).toContain('?');
+  it('declines tier 0/1: the GLSL fragment does not take `Match`', () => {
+    const r = compile(ce.box(m), { to: 'glsl', fallback: true });
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('outside-fragment');
   });
 
   it('fails closed on a string constant (no string type)', () => {
@@ -264,7 +263,7 @@ describe('COMPILE Match — GPU targets', () => {
     ];
     expect(() =>
       compile(ce.box(expr), { to: 'glsl', fallback: false })
-    ).toThrow(/string constant/);
+    ).toThrow(/outside the GLSL fragment/);
   });
 
   it('fails closed on tier-2 list destructuring', () => {
@@ -276,7 +275,7 @@ describe('COMPILE Match — GPU targets', () => {
     ];
     expect(() =>
       compile(ce.box(expr), { to: 'glsl', fallback: false })
-    ).toThrow(/destructuring/);
+    ).toThrow(/outside the GLSL fragment/);
   });
 });
 
@@ -376,11 +375,10 @@ describe('COMPILE Match — range patterns', () => {
     ).toBe(-1);
   });
 
-  it('compiles to GLSL (Infinity bounds included)', () => {
-    const glsl = compile(ce.box(expr), { to: 'glsl', fallback: false });
-    expect(glsl.success).toBe(true);
-    expect(glsl.code).toContain('>= 1.0');
-    expect(glsl.code).toContain('<= 10.0');
+  it('declines on GLSL: the fragment does not take `Match`', () => {
+    const glsl = compile(ce.box(expr), { to: 'glsl', fallback: true });
+    expect(glsl.success).toBe(false);
+    expect(glsl.diagnostic?.code).toBe('outside-fragment');
   });
 
   it('fails closed on a `Range` with non-literal bounds (a tier-3 pattern)', () => {

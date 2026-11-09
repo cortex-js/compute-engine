@@ -530,26 +530,28 @@ describe('PointList — GPU projection (D3)', () => {
 
   it('projects the source component to the vector itself', () => {
     const ce = gpuEngine();
-    const r = glsl.compile(ce.box(['PointY', ['PointList', -6, 'v']]));
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('v');
+    // A point of the GLSL fragment has real components, so the fragment
+    // refuses a list source.
+    expect(() =>
+      glsl.compile(ce.box(['PointY', ['PointList', -6, 'v']]))
+    ).toThrow(/a point of the GLSL fragment has real components/);
   });
 
   it('broadcasts a scalar slot to the source width', () => {
     const ce = gpuEngine();
-    const r = glsl.compile(ce.box(['PointX', ['PointList', -6, 'v']]));
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('vec3(-6.0)');
+    expect(() =>
+      glsl.compile(ce.box(['PointX', ['PointList', -6, 'v']]))
+    ).toThrow(/a point of the GLSL fragment has real components/);
   });
 
   it('mixed vector<2>/vector<3> sources truncate to the shortest (swizzle)', () => {
     const ce = gpuEngine();
-    expect(
-      glsl.compile(ce.box(['PointY', ['PointList', 'w2', 'v']])).code
-    ).toBe('v.xy');
-    expect(
-      glsl.compile(ce.box(['PointX', ['PointList', 'w2', 'v']])).code
-    ).toBe('w2');
+    expect(() =>
+      glsl.compile(ce.box(['PointY', ['PointList', 'w2', 'v']]))
+    ).toThrow(/a point of the GLSL fragment has real components/);
+    expect(() =>
+      glsl.compile(ce.box(['PointX', ['PointList', 'w2', 'v']]))
+    ).toThrow(/a point of the GLSL fragment has real components/);
   });
 
   it('a literal List source of 2–4 elements projects', () => {
@@ -568,7 +570,7 @@ describe('PointList — GPU projection (D3)', () => {
     expect(() =>
       glsl.compile(ce.box(['PointY', ['PointList', -6, 'n']]))
     ).toThrow(
-      /source component 2 \(type `list<number>`\) has no statically known length, and a shader vector must have one/
+      /The list `n` has no static count/
     );
   });
 
@@ -589,7 +591,7 @@ describe('PointList — GPU projection (D3)', () => {
         { constantFold: false }
       )
     ).toThrow(
-      /source component 2 has 5 elements, and a shader vector holds 2 to 4/
+/a point of the GLSL fragment has real components/
     );
   });
 
@@ -612,7 +614,7 @@ describe('PointList — GPU projection (D3)', () => {
     expect(() =>
       glsl.compile(ce.box(['PointY', ['PointList', 'u', 'v']]))
     ).toThrow(
-      /component 1 \(type `unknown`\) is neither a list source nor a provably scalar numeric slot/
+      /has no type in the GLSL fragment/
     );
   });
 
@@ -621,7 +623,7 @@ describe('PointList — GPU projection (D3)', () => {
     expect(() =>
       glsl.compile(ce.box(['PointY', ['PointList', ['Random'], 'v']]))
     ).toThrow(
-      /component 1 is impure, and the projection would discard it unevaluated/
+      /The head `Random` is outside the GLSL fragment/
     );
   });
 
@@ -641,7 +643,7 @@ describe('PointList — GPU projection (D3)', () => {
     expect(ce.box(['PointZ', ['PointList', -6, 'v']]).isValid).toBe(false);
     expect(() =>
       glsl.compile(ce.box(['PointZ', ['PointList', -6, 'v']]))
-    ).toThrow(/incompatible-dimensions/);
+    ).toThrow(/outside the GLSL fragment/);
   });
 
   it('PointZ on a SINGLE 2-arity point fails closed too (arity is symmetric)', () => {
@@ -661,7 +663,7 @@ describe('PointList — GPU projection (D3)', () => {
     expect(ce.box(['PointZ', 'p2']).isValid).toBe(false);
     for (const target of [glsl])
       expect(() => target.compile(ce.box(['PointZ', 'p2']))).toThrow(
-        /incompatible-dimensions/
+        /outside the GLSL fragment/
       );
     // An in-range coordinate, and a 3-arity point, still swizzle.
     expect(glsl.compile(ce.box(['PointX', 'p2'])).code).toBe('p2.x');
@@ -676,7 +678,7 @@ describe('PointList — GPU projection (D3)', () => {
     const ce = gpuEngine();
     expect(() =>
       glsl.compile(ce.box(['PointZ', ['PointList', -6, -7]]))
-    ).toThrow(/incompatible-dimensions/);
+    ).toThrow(/outside the GLSL fragment/);
   });
 
   it('an all-collection union component declines as a SLOT, not a source', () => {
@@ -685,7 +687,7 @@ describe('PointList — GPU projection (D3)', () => {
     expect(() =>
       glsl.compile(ce.box(['PointY', ['PointList', -6, 'lt']]))
     ).toThrow(
-      /component 2 .* is neither a list source nor a provably scalar numeric slot/
+      /has no type in the GLSL fragment/
     );
   });
 
@@ -695,7 +697,7 @@ describe('PointList — GPU projection (D3)', () => {
     const expr = ce.box(['PointY', ['PointList', -6, 'bt']]);
     expect(expr.isValid).toBe(false);
     expect(() => glsl.compile(expr)).toThrow(
-      /Could not compile invalid expression/
+      /The head `Error` is outside the GLSL fragment/
     );
   });
 
@@ -704,11 +706,13 @@ describe('PointList — GPU projection (D3)', () => {
     // `PointX` of it types `vector<3>` and the shape gate reads a `vec3`, not
     // an array; the scalar component is repeated per point.
     const ce = gpuEngine();
-    const r = glsl.compile(
-      ce.box(['Multiply', 2, ['PointX', ['PointList', -6, 'v']]])
-    );
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('2.0 * vec3(-6.0)');
+    // A point of the GLSL fragment has real components, so the fragment
+    // refuses the list source.
+    expect(() =>
+      glsl.compile(
+        ce.box(['Multiply', 2, ['PointX', ['PointList', -6, 'v']]])
+      )
+    ).toThrow(/a point of the GLSL fragment has real components/);
   });
 });
 
@@ -719,7 +723,7 @@ describe('PointList — GPU construction and the other targets are unchanged', (
     expect(() =>
       new GLSLTarget().compile(ce.box(['PointList', -6, 'v']))
     ).toThrow(
-      /Could not compile `PointList`: component 2 is collection-valued .* target 'glsl'/
+/a point of the GLSL fragment has real components/
     );
   });
 
@@ -844,21 +848,21 @@ describe('PointList — the source predicate agrees across the two compile route
       const build = () =>
         new GLSLTarget().compile(ce.box(['PointY', ['PointList', 'v3', 'c']]));
       if (refused) {
-        expect(build).toThrow(/Could not compile invalid expression/);
+        expect(build).toThrow(/outside the GLSL fragment/);
         return;
       }
       if (!source) {
-        // Judged as a SLOT — the same classification the JS route reaches.
-        expect(build).toThrow(
-          /is neither a list source nor a provably scalar numeric slot/
-        );
+        // The fragment refuses a symbol of this type before any code is
+        // written.
+        expect(build).toThrow(/has no type in the GLSL fragment/);
         return;
       }
-      // Judged as a SOURCE. The GPU then applies its own extra gate (a shader
-      // vector needs a statically known length of 2–4), which is a lowering
-      // limit, not a disagreement about the class.
-      if (type === 'vector<3>') expect(build().code).toBe('c');
-      else expect(build).toThrow(/has no statically known length/);
+      // A point of the GLSL fragment has real components, so the fragment
+      // refuses a list source. A list without a static count is refused for
+      // that reason first.
+      if (type === 'vector<3>')
+        expect(build).toThrow(/a point of the GLSL fragment has real components/);
+      else expect(build).toThrow(/has no static count/);
     }
   );
 });
@@ -900,8 +904,20 @@ describe('PointList — the scalar/non-scalar split agrees across the two compil
     // atomic, so it is never a source). The GLSL route rejects it instead:
     // the shader targets have no text type, so a text-typed symbol fails
     // closed rather than being emitted as a numeric uniform.
-    { type: 'string', scalar: true, slot: 'ab', glslRejects: /text-typed/ },
-    { type: 'boolean', scalar: true, slot: true },
+    {
+      type: 'string',
+      scalar: true,
+      slot: 'ab',
+      glslRejects: /has no type in the GLSL fragment/,
+    },
+    // A point of the GLSL fragment has real components, so the fragment
+    // refuses a boolean component.
+    {
+      type: 'boolean',
+      scalar: true,
+      slot: true,
+      glslRejects: /a point of the GLSL fragment has real components/,
+    },
   ];
 
   function splitEngine(type: string): ComputeEngine {
@@ -950,11 +966,11 @@ describe('PointList — the scalar/non-scalar split agrees across the two compil
       const glsl = new GLSLTarget();
       const build = () => glsl.compile(ce.box(['PointList', 'x', 'c']));
       if (untyped) {
-        expect(build).toThrow(/the input `c` has no type/);
+        expect(build).toThrow(/has no type in the GLSL fragment/);
         return;
       }
       if (refused) {
-        expect(build).toThrow(/Could not compile invalid expression/);
+        expect(build).toThrow(/outside the GLSL fragment/);
         return;
       }
       if (!scalar) {

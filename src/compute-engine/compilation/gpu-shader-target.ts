@@ -19,15 +19,30 @@ import type {
   CompilationOptions,
   CompilationResult,
 } from './types.js';
-import { compileDiagnosticOf } from './diagnostics.js';
+import { CompileDeclineError, compileDiagnosticOf } from './diagnostics.js';
 import { resolveStorageHints } from './storage-hints.js';
+import {
+  lowerParallelHeads,
+  sumAssignedNames,
+} from './parallel-lowering.js';
 import {
   fragmentErrorDiagnostic,
   fragmentRefusalDiagnostic,
   typeFragment,
 } from './fragment.js';
-import type { CanCompileResult } from './fragment.js';
-import { glslFragmentDefinition } from './glsl-fragment.js';
+import type {
+  CanCompileResult,
+  FragmentAnnotation,
+  FragmentDeclaredInput,
+  FragmentTargetFields,
+} from './fragment.js';
+import {
+  glslFragmentDefinition,
+  glslFragmentTypeOfSpelling,
+  glslRepresentationOfValue,
+  shaderFunctionBody,
+} from './glsl-fragment.js';
+import type { GlslRepresentation } from './glsl-fragment.js';
 import { strictTypesError } from './compile-expression.js';
 import { resolveCompileMode } from './compile-lanes.js';
 import { BaseCompiler, explicitBroadcastPointNorm } from './base-compiler.js';
@@ -62,6 +77,7 @@ import {
   GPU_FUNCTIONS,
   GPU_MAX_INLINE_ELEMENTS,
   compileGPUBroadcastUnary,
+  GPU_PASS_COUNTER,
 } from './gpu-functions.js';
 import {
   gpuCertainValueType,
@@ -198,6 +214,87 @@ interface GpuPreparedRoot {
     readonly isStringVar: (name: string) => boolean;
     readonly isVarsKey: (name: string) => boolean;
   };
+}
+
+/**
+ * The default pass cap of a GLSL evaluation (`CompilationOptions.iterationBudget`
+ * on the `glsl` target): the number of passes that the loops of one
+ * evaluation of the emitted code can run together before its value is NaN.
+ * It covers every GLSL aggregate of the corpus of 2026-11-08. Two nested
+ * sums of 10,000 passes each would be 1e8 passes per fragment, which can make
+ * the browser lose the WebGL context.
+ */
+export const GLSL_DEFAULT_PASS_BUDGET = 10_000;
+
+/** The preprocessor name that guards the declaration of the pass counter in
+ *  the preamble. */
+const GPU_PASS_COUNTER_GUARD = '_GPU_PASSES_DECLARED';
+
+/** The largest pass cap of a GLSL evaluation. The counter is an `int`
+ *  (at most `2^31 - 1`), and `++counter > cap` must not overflow it. A loop
+ *  breaks when the counter passes the cap, and each later entry of a loop
+ *  adds one more before it breaks, so the counter can go far past the cap.
+ *  A cap of `2^30` leaves `2^30 - 1` such entries before an overflow. */
+const GLSL_MAX_PASS_BUDGET = 2 ** 30;
+
+/**
+ * The pass cap of a GLSL evaluation from the `iterationBudget` option, or
+ * `undefined` for no cap. No option gives the default cap. `Infinity` gives
+ * no cap, as on the JavaScript target, where no count of passes exceeds it.
+ * A finite value is floored and kept at most `2^30`. `NaN`, a value of
+ * at most 0 and a value that is not a number are refused with an error, as
+ * the check of the options of `compile()` refuses them for every target
+ * (`assertCompilationOptionsContract()`); this test covers a caller of the
+ * target that does not go through that check.
+ */
+function glslPassBudget(option: unknown): number | undefined {
+  if (option === undefined) return GLSL_DEFAULT_PASS_BUDGET;
+  if (option === Infinity) return undefined;
+  if (typeof option !== 'number' || !(option > 0))
+    throw new Error(
+      `Invalid compilation option "iterationBudget": expected a positive ` +
+        `number, or \`Infinity\` for no cap`
+    );
+  return Math.min(Math.floor(option), GLSL_MAX_PASS_BUDGET);
+}
+
+/**
+ * The entry of the user function `id` in the fragment annotation, under the
+ * registry key `key` of its definition (`f`, or `f#bind…` for a variant that
+ * reads a list input by name). A definition under another key (a
+ * specialization by the types of its arguments, `f_complex`, or an
+ * invariant-prefix variant) has no entry: its parameter types are those of
+ * the specialization, which the `define` hook reads as before.
+ */
+function gpuAnnotationEntry(
+  annotation: FragmentAnnotation<GlslRepresentation> | undefined,
+  id: string,
+  key: string | undefined
+): FragmentAnnotation<GlslRepresentation>['functions'] extends Map<
+  string,
+  infer E
+>
+  ? E | undefined
+  : never {
+  if (annotation === undefined) return undefined;
+  return annotation.functions.get(key ?? id);
+}
+
+/**
+ * The GLSL value of the type `type` that is NaN in each component, for the
+ * value of an evaluation that runs more passes than its cap. A boolean has no
+ * NaN: its value is then `false`.
+ */
+function gpuPassCapValue(type: string): string {
+  if (type === 'bool') return 'false';
+  const nan = '_gpu_nan()';
+  if (type === 'float') return nan;
+  const array = /^(float|vec[234])\[(\d+)\]$/.exec(type);
+  if (array !== null) {
+    const element = array[1] === 'float' ? nan : `${array[1]}(${nan})`;
+    return `${type}(${Array(Number(array[2])).fill(element).join(', ')})`;
+  }
+  return `${type}(${nan})`;
 }
 
 export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
@@ -380,7 +477,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       cseCanMaterialize: gpuCanPlaceStatement,
       cseMaterialize: (expr, name, code, current) => {
         if (!gpuCanPlaceStatement(current)) return false;
-        const type = gpuTypeOfValue(expr);
+        const type = gpuTypeOfValue(expr, current);
         if (type === undefined) return false;
         BaseCompiler.hoistStatement(current, `${type} ${name} = ${code};`);
         return true;
@@ -426,7 +523,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           block === undefined ? undefined : [block],
           current
         );
-        const type = gpuTypeOfValue(valueNode);
+        const type = gpuTypeOfValue(valueNode, current);
         if (type === undefined) return undefined;
         const tv = BaseCompiler.tempVar(current);
         const body = BaseCompiler.joinShaderStatements([
@@ -798,6 +895,14 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   private currentUserFunctions?: CompileTarget<Expression>['userFunctions'];
 
   /**
+   * The fragment annotation of the current compilation (`typeFragment()`),
+   * which the `define` hook of the user functions reads for the signature of
+   * a function. Set and cleared by the routes that run the pass, within one
+   * call, as `currentUserFunctions` is.
+   */
+  private currentAnnotation?: FragmentAnnotation<GlslRepresentation>;
+
+  /**
    * The user-defined function definitions emitted during the current
    * compilation, in dependency order (a callee precedes its caller — which is
    * also what GLSL's declaration-before-use rule requires), or `''`.
@@ -871,7 +976,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         // (`gpuColorOperand`, the `vec2(x, 0.0)` lift), which the wrapper
         // does not do.
         if (sig.complex[i] || sig.colors[i]) return undefined;
-        const t = gpuTypeOfValue(arg);
+        const t = gpuTypeOfValue(arg, target);
         if (t === sig.params[i]) return false;
         if (
           sig.params[i] !== 'float' ||
@@ -942,6 +1047,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         define: ({
           id,
           name,
+          key,
           params,
           body: storedBody,
           literal,
@@ -950,26 +1056,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           parameterPositions,
           extraParams,
         }) => {
-          // A symbol of the body whose type admits a point and a list of
-          // points is replaced by its point value, for this compilation only,
-          // as at the root (`inlinePointValues`). The stored definition
-          // does not change. The parameters and the names that the body binds
-          // are not replaced.
-          // A call in the body of a user function whose stored signature
-          // returns that union, and whose body is a point, is replaced by
-          // the body too (`inlinePointCalls`). The parameters are local
-          // names there, so a callee body cannot capture them.
-          const pointCalls = inlinePointCalls(
-            storedBody,
-            target,
-            { scalarNames: new Set<string>(), localNames: new Set(params) },
-            gpuPointCallsOverBudget
-          );
-          const body = inlinePointValues(
-            pointCalls,
-            target,
-            new Set([...params, ...reachableSymbolNames(pointCalls).written])
-          );
+          // The point values and the point-valued calls of the body written
+          // in place, for this compilation only. The fragment pass prepares
+          // the body that it types with the same function.
+          const body = shaderFunctionBody(storedBody, target, params);
           // The generated name is emitted bare; a shader reserved word here
           // would be source no driver accepts (D6).
           gpuCheckIdentifier(name, language);
@@ -994,7 +1084,53 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           const vectorFrame = new Map<string, number>();
           const colors: boolean[] = [];
           const complexParams: boolean[] = [];
+          // The entry of the function in the fragment annotation of this
+          // compilation: its signature (the type of each parameter and of
+          // the result) and its scope, where the pass bound the parameters.
+          // The signature then comes from the annotation, so that the
+          // emitted declaration is the one that the pass checked each call
+          // against: a parameter with no declared type has the type of its
+          // argument (the spec, decision 11), not a `float`. A definition
+          // that the annotation does not hold (no annotation, or a variant
+          // that the pass did not type under this key) keeps the reading of
+          // the declared signature below.
+          const entry = gpuAnnotationEntry(this.currentAnnotation, id, key);
+          const signature =
+            entry !== undefined &&
+            entry.type.kind === 'function' &&
+            entry.type.parameters.length === params.length
+              ? entry.type
+              : undefined;
           const paramTypes = params.map((p, i) => {
+            const fragmentType = signature?.parameters[i].type;
+            const facts = entry?.scope.bindings.get(p);
+            const annotated =
+              fragmentType === undefined
+                ? undefined
+                : facts !== undefined && 'representation' in facts
+                  ? facts.representation
+                  : glslRepresentationOfValue(fragmentType);
+            // A parameter with no representation in the annotation keeps the
+            // reading of the declared signature below, which records the
+            // frames of the parameter. They are recorded once.
+            if (fragmentType !== undefined && annotated !== undefined) {
+              const t = fragmentType;
+              const complex = t.kind === 'complex';
+              const color = t.kind === 'color';
+              colors.push(color);
+              complexParams.push(complex);
+              complexFrame.set(p, complex);
+              const n = complex ? 2 : color ? 3 : t.kind === 'point' ? t.size : 0;
+              vectorFrame.set(
+                p,
+                t.kind === 'boolean'
+                  ? BaseCompiler.LOCAL_BOOLEAN
+                  : n >= 2
+                    ? n
+                    : BaseCompiler.LOCAL_SCALAR
+              );
+              return annotated;
+            }
             const declared =
               parameterTypes?.[i] ??
               BaseCompiler.userFunctionParamType(engine, id, i);
@@ -1106,7 +1242,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             complexFrame,
             vectorFrame,
             () => {
-              const ret = gpuTypeOfValue(body);
+              const ret =
+                signature !== undefined
+                  ? (glslRepresentationOfValue(signature.result) ??
+                    gpuTypeOfValue(body))
+                  : gpuTypeOfValue(body);
               const pointOrList =
                 ret === undefined
                   ? gpuReadsPointOrPointListSymbol(body)
@@ -1140,12 +1280,18 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
               // once `compileBlock` has popped its frame, which is exactly
               // how `float _fn_a(float t) { … return z; }` went out behind
               // `success: true`.
-              const code = BaseCompiler.compileFunctionBody(body, {
+              const bodyTarget: CompileTarget<Expression> &
+                FragmentTargetFields<GlslRepresentation> = {
                 ...target,
                 gpuParameterFacts: parameterFacts,
+                // The scope of the function in the annotation, where the
+                // pass typed the nodes of the body.
+                fragmentScope: entry?.scope,
                 onReturn: (value) => {
                   const t =
-                    value === undefined ? undefined : gpuTypeOfValue(value);
+                    value === undefined
+                      ? undefined
+                      : gpuTypeOfValue(value, bodyTarget);
                   if (t === ret) return;
                   throw new Error(
                     `Could not compile \`${id}\`: a \`Return\` in this body yields ` +
@@ -1160,7 +1306,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                       `final value — the same shape.`
                   );
                 },
-              });
+              };
+              const code = BaseCompiler.compileFunctionBody(body, bodyTarget);
               // The lane of the value, read by the call sites
               // (`BaseCompiler.userCallLane`): a `vec2` return type is also
               // the type of a two-component point, so the return type alone
@@ -1224,7 +1371,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             if (each !== undefined) return each;
           }
           const code = args.map((arg, i) => {
-            const t = gpuTypeOfValue(arg);
+            const t = gpuTypeOfValue(arg, target);
             // A name the CALLER declared with a spelling this analysis has no
             // value type for (a matrix, an array, a struct, an alias). It is
             // NOT a float — classifying it as one is how a `mat4` uniform
@@ -1357,6 +1504,65 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
    * The parameters are also BOUND (`gpuDeclaredBodyTarget`), so a same-named
    * engine symbol cannot fold over the parameter the signature declares.
    */
+  /**
+   * Type `expr`, a prepared body of `compileFunction()` or a prepared
+   * statement of `compileShader()`, with the GLSL fragment, the names that
+   * the caller declares bound in the root scope. A body outside the fragment
+   * declines with the diagnostic of `canCompile()`. A declared name whose
+   * spelling has no fragment type (`ivec2`, a matrix, an array) is refused
+   * where the body reads it.
+   *
+   * Returns the annotation; the caller emits the body under it
+   * (`withAnnotation()`).
+   */
+  private typeDeclaredBody(
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    declarations: ReadonlyArray<{ name: string; type: string }>,
+    route: string,
+    options: { userFunctions?: boolean } = {}
+  ): FragmentAnnotation<GlslRepresentation> {
+    const inputs: FragmentDeclaredInput[] = declarations.map((d) => ({
+      name: d.name,
+      type: glslFragmentTypeOfSpelling(d.type),
+      declared: d.type.trim(),
+    }));
+    const definition = glslFragmentDefinition(target);
+    const annotation = typeFragment(
+      expr,
+      options.userFunctions === false
+        ? { ...definition, functionOf: () => undefined }
+        : definition,
+      { inputs }
+    );
+    if (annotation.refusal !== undefined) {
+      const diagnostic = fragmentRefusalDiagnostic(annotation.refusal);
+      throw new CompileDeclineError({
+        ...diagnostic,
+        message: `Could not compile ${route}: ${diagnostic.message}`,
+      });
+    }
+    return annotation;
+  }
+
+  /**
+   * Run `fn` with `annotation` as the annotation of the current compilation
+   * (`currentAnnotation`), which the `define` hook of the user functions
+   * reads.
+   */
+  private withAnnotation<T>(
+    annotation: FragmentAnnotation<GlslRepresentation>,
+    fn: () => T
+  ): T {
+    const outer = this.currentAnnotation;
+    this.currentAnnotation = annotation;
+    try {
+      return fn();
+    } finally {
+      this.currentAnnotation = outer;
+    }
+  }
+
   protected compileDeclaredFunctionBody(
     expr: Expression,
     parameters: ReadonlyArray<[name: string, type: string]>,
@@ -1376,35 +1582,48 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     for (const [name] of parameters) naming.usedNames.add(name);
     const target = gpuDeclaredBodyTarget(bodyTarget, declarations);
     BaseCompiler.beginRootPreprocessing(expr, target);
-    const body = BaseCompiler.withLocalShapeFrame(
-      new Map(),
-      gpuDeclaredShapeFrame(declarations),
-      () =>
-        // A function body is a statement position: a nested loop-form
-        // `Sum`/`Product` hoists its loop ahead of the `return` (Tycho item
-        // 110).
-        BaseCompiler.compileFunctionBody(
-          // A point value is written in place of its symbol, as in
-          // `compile()` (`inlinePointValues`). The declared parameters
-          // are bound, so they are not replaced.
-          inlinePointValues(
-            inlinePointCalls(
-              expr,
-              target,
-              {
-                scalarNames: new Set<string>(),
-                localNames: new Set(declarations.map((d) => d.name)),
-              },
-              gpuPointCallsOverBudget
-            ),
-            target,
-            new Set([
-              ...declarations.map((d) => d.name),
-              ...reachableSymbolNames(expr).written,
-            ])
-          ),
-          target
-        )
+    // A point value is written in place of its symbol, as in `compile()`
+    // (`inlinePointValues`). The declared parameters are bound, so they are
+    // not replaced.
+    const prepared = inlinePointValues(
+      inlinePointCalls(
+        expr,
+        target,
+        {
+          scalarNames: new Set<string>(),
+          localNames: new Set(declarations.map((d) => d.name)),
+        },
+        gpuPointCallsOverBudget
+      ),
+      target,
+      new Set([
+        ...declarations.map((d) => d.name),
+        ...reachableSymbolNames(expr).written,
+      ])
+    );
+    // The body is in the fragment, with the declared parameters as its
+    // inputs, before any code is written.
+    const annotation = this.typeDeclaredBody(
+      prepared,
+      target,
+      declarations,
+      '`compileFunction()`'
+    );
+    // The target itself, not a copy, carries the scope: the preprocessing
+    // above recorded its state for this object.
+    Object.assign(target, {
+      fragmentScope: annotation.scope,
+    } satisfies FragmentTargetFields<GlslRepresentation>);
+    const body = this.withAnnotation(annotation, () =>
+      BaseCompiler.withLocalShapeFrame(
+        new Map(),
+        gpuDeclaredShapeFrame(declarations),
+        () =>
+          // A function body is a statement position: a nested loop-form
+          // `Sum`/`Product` hoists its loop ahead of the `return` (Tycho item
+          // 110).
+          BaseCompiler.compileFunctionBody(prepared, target)
+      )
     );
     // The caller's declared return type is not this analysis's to check, but
     // the PLACEMENT of an emitted `return` is: a `Return` in a conditional arm,
@@ -1499,16 +1718,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // function that shadows a library operator has a private name.
       return withVarsValuesHidden(expr, options.vars, () =>
         withShadowingCallsRenamed(expr, options, (renamed) => {
-          const prepared = this.prepareRoot(renamed, options, storage);
-          // A mode that the target does not offer is refused, as
-          // `BaseCompiler.compile` refuses it when it emits.
-          resolveCompileMode(prepared.target);
-          const annotation = typeFragment(
-            prepared.expr,
-            glslFragmentDefinition(prepared.target, {
-              functions: options.functions,
-              vars: options.vars,
-            })
+          const { prepared, annotation } = this.prepareAndType(
+            renamed,
+            options,
+            storage
           );
           if (annotation.refusal !== undefined)
             return {
@@ -1555,10 +1768,52 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     options: CompilationOptions<Expression> = {},
     storage?: CompileTarget<Expression>['storage']
   ): CompilationResult {
-    return this.emitPreparedRoot(
-      this.prepareRoot(expr, options, storage),
-      options
+    const { prepared, annotation } = this.prepareAndType(
+      expr,
+      options,
+      storage
     );
+    // The fragment is the contract of the target: an expression outside it
+    // declines before any code is written, with the diagnostic of
+    // `canCompile()`.
+    if (annotation.refusal !== undefined)
+      throw new CompileDeclineError(
+        fragmentRefusalDiagnostic(annotation.refusal)
+      );
+    return this.emitPreparedRoot(prepared, options, annotation);
+  }
+
+  /**
+   * The prepare stage (`prepareRoot()`) and the typing pass on the prepared
+   * tree. `canCompile()` and `compile()` both call it, so the pass types the
+   * tree that the emit stage writes, and it runs once per compilation.
+   */
+  private prepareAndType(
+    expr: Expression,
+    options: CompilationOptions<Expression>,
+    storage: CompileTarget<Expression>['storage'] | undefined
+  ): {
+    prepared: GpuPreparedRoot;
+    annotation: FragmentAnnotation<GlslRepresentation>;
+  } {
+    // An `iterationBudget` that is not a cap is refused before the tree is
+    // prepared, so that `canCompile()` and `compile()` both refuse it.
+    glslPassBudget(options.iterationBudget);
+    const prepared = this.prepareRoot(expr, options, storage);
+    // A mode that the target does not offer is refused, as
+    // `BaseCompiler.compile` refuses it when it emits.
+    resolveCompileMode(prepared.target);
+    const annotation = typeFragment(
+      prepared.expr,
+      glslFragmentDefinition(prepared.target, {
+        functions: options.functions,
+        vars: options.vars,
+        // Read on the tree as the program wrote it, before the prepare
+        // stage lowers each `+=` to an `Assign`.
+        sumAssigned: sumAssignedNames(expr),
+      })
+    );
+    return { prepared, annotation };
   }
 
   /**
@@ -1584,6 +1839,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   ): GpuPreparedRoot {
     // Reproduce the engine's `angularUnit` semantics in radian-based code.
     expr = rewriteAngularUnit(expr);
+    // A `parallel for` runs its passes in order on the shader, as a counted
+    // loop, and `s += e` is `s = s + e` (`lowerParallelHeads()`): the GLSL
+    // fragment admits both with scalar accumulators.
+    expr = lowerParallelHeads(expr);
     // Turn a collection whose WIDTH is known at compile time into straight-line
     // scalar code, so this target sees the shape the interpreter computes
     // rather than a runtime array (`fixed-width-unroll.ts`). A head the caller
@@ -1818,10 +2077,36 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
    */
   private emitPreparedRoot(
     prepared: GpuPreparedRoot,
-    options: CompilationOptions<Expression>
+    options: CompilationOptions<Expression>,
+    annotation: FragmentAnnotation<GlslRepresentation>
+  ): CompilationResult {
+    const outer = this.currentAnnotation;
+    this.currentAnnotation = annotation;
+    try {
+      return this.emitAnnotatedRoot(prepared, options, annotation);
+    } finally {
+      this.currentAnnotation = outer;
+    }
+  }
+
+  private emitAnnotatedRoot(
+    prepared: GpuPreparedRoot,
+    options: CompilationOptions<Expression>,
+    annotation: FragmentAnnotation<GlslRepresentation>
   ): CompilationResult {
     const { expr, target, cseOptions } = prepared;
     const { vars } = options;
+    // The emitter reads the annotation in the root scope, and each loop that
+    // it writes counts its passes against the cap of the evaluation (the
+    // spec, decision 4). The target is the one of this compilation, made by
+    // the prepare stage, and every target that the emitter derives from it
+    // is a copy that keeps these fields.
+    // With no cap (`iterationBudget: Infinity`), no loop counts its passes.
+    const budget = glslPassBudget(options.iterationBudget);
+    Object.assign(target, {
+      fragmentScope: annotation.scope,
+      fragmentPassBudget: budget,
+    } satisfies FragmentTargetFields<GlslRepresentation>);
     // A statement position: the emitted `code` is a function body, so a
     // loop-form `Sum`/`Product` nested anywhere inside may hoist its loop ahead
     // of the value (Tycho item 110). With nothing hoisted this is byte-identical
@@ -1835,9 +2120,24 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // emitted definitions that every call of the shader passes a finite
     // value (`gpuRecordCallSiteFacts`).
     gpuRecordCallSiteFacts(expr, target);
-    const code = BaseCompiler.compileCseRoot(expr, target, 0, () =>
+    let code = BaseCompiler.compileCseRoot(expr, target, 0, () =>
       BaseCompiler.compileFunctionBody(expr, target)
     );
+    // The pass cap: when a loop of the root or of a user function that it
+    // calls counts its passes, the root sets the counter to zero, computes
+    // its value, and gives NaN when the loops ran more passes than the cap.
+    // The counter is a global of the shader, declared in the preamble.
+    const defs = [...(this.currentUserFunctions?.defs.values() ?? [])];
+    if (
+      budget !== undefined &&
+      [code, ...defs].some((c) => c.includes(GPU_PASS_COUNTER))
+    )
+      code = this.withPassCap(
+        code,
+        annotation.scope.facts.get(expr),
+        budget,
+        target
+      );
     // `code` is spliced into a shader function body by the caller, so the same
     // placement rule applies here as inside an emitted definition (D6).
     gpuAssertReturnPlacement('this expression', code, this.languageId);
@@ -1874,6 +2174,45 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
    * the emitted shader ahead of `main()`, since that route returns a complete
    * shader with no separate preamble channel).
    */
+  /**
+   * The root code `code` with the pass cap: the counter set to zero first,
+   * the value held in a temporary, and NaN in its place when the counter is
+   * over `budget`. `facts` are the facts of the root in the annotation, which
+   * give the shader type of the temporary.
+   */
+  private withPassCap(
+    code: string,
+    facts: ReturnType<FragmentAnnotation<GlslRepresentation>['scope']['facts']['get']>,
+    budget: number,
+    target: CompileTarget<Expression>
+  ): string {
+    const type =
+      facts !== undefined && 'representation' in facts
+        ? facts.representation
+        : undefined;
+    if (type === undefined || type === 'int' || type === 'uint' || type === 'sampler2D')
+      throw new Error(
+        `Could not compile: the value of the expression has no ` +
+          `${this.languageId.toUpperCase()} type that the pass cap can hold.`
+      );
+    const lines = code.split('\n');
+    const last = lines.pop()!;
+    const value =
+      lines.length === 0 ? code : /^return (.*);$/s.exec(last.trim())?.[1];
+    if (value === undefined)
+      throw new Error(
+        `Could not compile: the code of the expression does not end with ` +
+          `its value, so the pass cap cannot test it.`
+      );
+    const result = BaseCompiler.tempVar(target);
+    return [
+      `${GPU_PASS_COUNTER} = 0;`,
+      ...lines,
+      `${type} ${result} = ${value};`,
+      `return ${GPU_PASS_COUNTER} > ${budget} ? ${gpuPassCapValue(type)} : ${result};`,
+    ].join('\n');
+  }
+
   protected preambleFor(code: string): string {
     // The user-defined function definitions this compilation emitted travel to
     // the consumer on the SAME channel as the `_gpu_*` helpers — the returned
@@ -1886,6 +2225,17 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const userDefs = this.userFunctionDefs(code);
     if (userDefs) code = `${code}\n${userDefs}`;
     let preamble = '';
+    // The counter of the pass cap, a global of the shader, set to zero by
+    // the root at the start of each evaluation. It is declared before the
+    // user functions, whose loops count their passes too.
+    // A guard declares it once in a shader that joins the preambles of two
+    // compiled expressions.
+    if (code.includes(GPU_PASS_COUNTER))
+      preamble +=
+        `#ifndef ${GPU_PASS_COUNTER_GUARD}\n` +
+        `#define ${GPU_PASS_COUNTER_GUARD}\n` +
+        `int ${GPU_PASS_COUNTER} = 0;\n` +
+        `#endif\n`;
     // A complex helper can call `_gpu_inf()` from its body (`_gpu_casech` at
     // z = 0). GLSL requires a declaration before its use, so the GLSL
     // Infinity helper then goes BEFORE the complex helpers.
@@ -2102,7 +2452,22 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           `Use \`compile()\`, or assign the subexpression to a variable of ` +
           `its own (\`Block\`).`
       );
-    const code = BaseCompiler.compile(inlined, sourceTarget);
+    // The expression is in the fragment before any code is written. This
+    // route has no definition channel, so a call of a user function is
+    // outside it.
+    const annotation = this.typeDeclaredBody(
+      inlined,
+      sourceTarget,
+      [],
+      '`compileToSource()`',
+      { userFunctions: false }
+    );
+    Object.assign(sourceTarget, {
+      fragmentScope: annotation.scope,
+    } satisfies FragmentTargetFields<GlslRepresentation>);
+    const code = this.withAnnotation(annotation, () =>
+      BaseCompiler.compile(inlined, sourceTarget)
+    );
     // The contract of this route is an EXPRESSION. A body that lowers to
     // statements has no emission here (D6) — this route throws, as it already
     // does for a user-function head with no definition channel.
@@ -2349,6 +2714,14 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             ])
           );
           inlined[i] = expression;
+          // The statement is in the fragment, with the declarations of the
+          // shader as its inputs, before its code is written.
+          const annotation = this.typeDeclaredBody(
+            expression,
+            target,
+            framed,
+            `the body statement "${assignment.variable}" of \`compileShader()\``
+          );
           inlinedSize += gpuWrittenSize(expression, {
             ...cseRecordingRules(expression),
             share: false,
@@ -2363,9 +2736,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 `each path in a body statement. Assign the subexpression to ` +
                 `a variable of its own (\`Block\`).`
             );
-          const compiled = BaseCompiler.compileStatementBody(
-            expression,
-            target
+          // The one target of the body carries the scope of the statement
+          // that it compiles.
+          Object.assign(target, {
+            fragmentScope: annotation.scope,
+          } satisfies FragmentTargetFields<GlslRepresentation>);
+          const compiled = this.withAnnotation(annotation, () =>
+            BaseCompiler.compileStatementBody(expression, target)
           );
           const { stmts } = compiled;
           let { code } = compiled;

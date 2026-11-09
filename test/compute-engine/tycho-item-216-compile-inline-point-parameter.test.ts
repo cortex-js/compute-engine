@@ -164,11 +164,16 @@ describe('Tycho item 216: point calls use shared helpers where supported', () =>
 
   test('the substituted body is not evaluated: an impure body never bakes a draw', () => {
     const ce = engine();
-    // Each target calls a shared helper; the draw stays in its body.
+    // The JavaScript target calls a shared helper; the draw stays in its body.
     const js = code(ce, String.raw`h((x,y))`, 'javascript');
     expect(js).toEqual(expect.stringMatching(/^_fn_h_.*\(\[_\.x, _\.y\]\)$/));
+    // The GLSL fragment refuses `Random` in the body of the function.
     const glsl = code(ce, String.raw`h((x,y))`, 'glsl');
-    expect(glsl).toEqual(expect.stringMatching(/^_fn_h_/));
-    expect(compile(ce.parse('h((x,y))'), {to: 'glsl'}).preamble).toContain('_gpu_rnd_draw(');
+    expect(glsl).toEqual({
+      declined: expect.stringMatching(/outside the GLSL fragment/),
+    });
+    const r = compile(ce.parse('h((x,y))'), { to: 'glsl' });
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('outside-fragment');
   });
 });

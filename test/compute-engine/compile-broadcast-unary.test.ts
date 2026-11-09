@@ -91,7 +91,7 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
 
     it('fails closed on a 5-element list (no vecN shape)', () => {
       expect(() => g(['Sin', ['List', 1, 2, 3, 4, 5]])).toThrow(
-        /no static vec2–vec4 shape/
+        /No signature of `Sin` in the GLSL fragment takes operands of the types \(list<real, 5>\)/
       );
     });
 
@@ -99,14 +99,16 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
       // A nested list lowers as an ARRAY of vectors, which has no static
       // vec2–vec4 shape for a componentwise call.
       const m = ['Sin', ['List', ['List', 1, 2], ['List', 3, 4]]];
-      expect(() => g(m)).toThrow(/has no static vec2–vec4 shape/);
+      expect(() => g(m)).toThrow(
+        /is not a list of reals or of points of one size/
+      );
     });
 
     it('fails closed when the scalar lowering calls a scalar-only preamble helper', () => {
       // `_gpu_sinc` / `_gpu_gamma` are declared `float _gpu_…(float)`, so
       // handing them a `vecN` is source no driver accepts.
       expect(() => g(['Sinc', ['List', 1, 2, 3]])).toThrow(
-        /not componentwise.*preamble helper/s
+        /No signature of `Sinc` in the GLSL fragment takes operands of the types \(list<real, 3>\)/
       );
     });
 
@@ -114,7 +116,7 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
       // `Argument(x)` lowers to `((x >= 0.0) ? 0.0 : π)`; GLSL has no
       // `vecN >= float` and needs a scalar bool condition.
       expect(() => g(['Argument', ['List', 1, 2, 3]])).toThrow(
-        /not componentwise/
+        /No signature of `Argument` in the GLSL fragment takes operands of the types \(list<real, 3>\)/
       );
     });
 
@@ -122,14 +124,14 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
       // `Imaginary(x)` of a real `x` folds to `0.0` — a scalar where the
       // caller is owed a `vecN`.
       expect(() => g(['Imaginary', ['List', 1, 2, 3]])).toThrow(
-        /not componentwise.*does not use the operand/s
+        /No signature of `Imaginary` in the GLSL fragment takes operands of the types \(list<real, 3>\)/
       );
     });
 
     it('fails closed on a complex-valued list (a vec2 of re/im, not cells)', () => {
       expect(() =>
         g(['Sin', ['List', ['Complex', 1, 2], ['Complex', 3, 4]]])
-      ).toThrow(/complex-valued operand/);
+      ).toThrow(/is not a list of reals or of points of one size/);
     });
   });
 

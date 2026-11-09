@@ -4846,6 +4846,15 @@ describe('Norm — the string order "Infinity" compiles as the symbol order', ()
     };
     for (const to of ['glsl', 'interval-js']) {
       const symbol = message(to, 'PositiveInfinity');
+      if (to === 'glsl') {
+        // The GLSL fragment has `Norm` of one operand only. The message
+        // names the type of the second operand, which is not the same for
+        // the two spellings.
+        const pattern = /No signature of `Norm` in the GLSL fragment/;
+        expect(symbol).toMatch(pattern);
+        expect(message(to, { str: 'Infinity' })).toMatch(pattern);
+        continue;
+      }
       expect(symbol).toMatch(/only the default L2 norm compiles/);
       expect(message(to, { str: 'Infinity' })).toBe(symbol);
     }

@@ -38,10 +38,9 @@ describe('a constant collection above the shader element limit', () => {
     '%s declines a 300-element literal list indexed at run time',
     (to) => {
       const d = decline(['At', list(300), ['Floor', 'x']], to);
-      expect(d?.code).toBe('inline-collection-too-large');
-      expect(d?.message).toContain('300 elements');
-      expect(d?.message).toContain('256 elements');
-      expect(d?.message).toContain('sampler2D');
+      expect(d?.code).toBe('outside-fragment');
+      expect(d?.message).toContain('`list<real, 300>`');
+      expect(d?.message).toContain('array limit');
     }
   );
 
@@ -55,7 +54,7 @@ describe('a constant collection above the shader element limit', () => {
       ...Array.from({ length: 300 }, (_, i) => ['Tuple', i, i + 1]),
     ];
     const d = decline(points, 'glsl');
-    expect(d?.code).toBe('inline-collection-too-large');
+    expect(d?.code).toBe('outside-fragment');
   });
 
   test('a column-vector Matrix above the limit is declined on the same code', () => {
@@ -64,20 +63,21 @@ describe('a constant collection above the shader element limit', () => {
       ['List', ...Array.from({ length: 300 }, (_, i) => ['List', i])],
     ];
     const d = decline(matrix, 'glsl');
-    expect(d?.code).toBe('inline-collection-too-large');
+    expect(d?.code).toBe('outside-fragment');
     expect(d?.message).toContain('`Matrix`');
   });
 
   test('the decline names the operator the literal was written with', () => {
     const tuple = ['Tuple', ...Array.from({ length: 300 }, (_, i) => i)];
-    expect(decline(tuple, 'glsl')?.message).toContain('`Tuple`');
+    // The fragment names the literal as a point, not by its head.
+    expect(decline(tuple, 'glsl')?.message).toContain('The point `(0, 1, 2');
   });
 
   test('a Range above the limit is declined on the same code', () => {
     const d = decline(['Range', 1, 300], 'glsl');
-    expect(d?.code).toBe('inline-collection-too-large');
+    expect(d?.code).toBe('outside-fragment');
     expect(d?.message).toContain('`Range`');
-    expect(d?.message).toContain('300 elements');
+    expect(d?.message).toContain('only as the index set');
   });
 
   test('the default compile reports the decline as a result, not a throw', () => {
@@ -85,7 +85,7 @@ describe('a constant collection above the shader element limit', () => {
       to: 'glsl',
     });
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('inline-collection-too-large');
+    expect(r.diagnostic?.code).toBe('outside-fragment');
     expect(r.diagnostic?.kind).toBe('capability');
   });
 

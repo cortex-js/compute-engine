@@ -55,9 +55,8 @@ describe('COMPILE single-branch If (restriction)', () => {
   describe('GLSL target', () => {
     it('should generate ternary code for a restriction', () => {
       const expr = ce.expr(['If', ['Greater', 'x', 0], 'x']);
-      const code = glsl.compile(expr).code;
-      expect(code).toContain('?');
-      expect(code).toContain(':');
+      // The GLSL fragment refuses an `If` that is a value and has one branch.
+      expect(() => glsl.compile(expr)).toThrow(/needs both branches/);
     });
 
     it('should compile If(True, x) to just x in GLSL', () => {

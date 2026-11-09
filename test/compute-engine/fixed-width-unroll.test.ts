@@ -1168,11 +1168,12 @@ describe('FIXED-WIDTH UNROLL — Voronoi route parity (by reference)', () => {
   it.each(['glsl', 'interval-js'] as const)(
     'compiles the by-reference `m(x, y)` on %s',
     (to) => {
-      const r: any = compile(ce.box(['m', 'x', 'y']), {
-        to,
-        fallback: false,
-      } as any);
-      expect(r.success).not.toBe(false);
+      const run = () =>
+        compile(ce.box(['m', 'x', 'y']), {
+          to,
+          fallback: false,
+        } as any) as any;
+      expect(run().success).not.toBe(false);
     }
   );
 
@@ -1185,11 +1186,12 @@ describe('FIXED-WIDTH UNROLL — Voronoi route parity (by reference)', () => {
       // The substitution is capture-safe here — the lambda's `_` is neither a
       // parameter being substituted nor a symbol of an argument — so it
       // inlines.
-      const r: any = compile(ce.box(['row', 'x', 'y']), {
-        to,
-        fallback: false,
-      } as any);
-      expect(r.success).not.toBe(false);
+      const run = () =>
+        compile(ce.box(['row', 'x', 'y']), {
+          to,
+          fallback: false,
+        } as any) as any;
+      expect(run().success).not.toBe(false);
     }
   );
 

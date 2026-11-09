@@ -437,10 +437,15 @@ describe('PARAMETER DEFAULTS: A CONSTANT SYMBOL DEFAULT (GITHUB ISSUE #490)', ()
     // decline the call of `gm`, for a reason that is not the default (GLSL
     // has no type for the parameter `mode`; Python has no lowering for a
     // call of a user function).
-    for (const to of ['interval-js', 'glsl', 'python'] as const)
+    for (const to of ['interval-js', 'python'] as const)
       expect(compiled(ce, ['Apply', modeLiteral, 'u'], { to }).success).toBe(
         true
       );
+    // The GLSL fragment refuses the function literal: its parameter `mode` has
+    // no declared type.
+    const g = compiled(ce, ['Apply', modeLiteral, 'u'], { to: 'glsl' });
+    expect(g.success).toBe(false);
+    expect(g.diagnostic?.code).toBe('outside-fragment');
   });
   test('a function literal with `over = Integers`: compiled code declines on `Element`', () => {
     // No target compiles `Element` with a set operand, so the call declines

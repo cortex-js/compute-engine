@@ -66,17 +66,20 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
     const glsl = shader(MINIMAL, 'glsl');
     expect(glsl).toBe(
       [
+        '_gpu_passes = 0;',
         'float _tv1;',
         'if (1.0 <= t) {',
         '  float _tv2 = 0.0;',
         '  for (int n = 1; n <= int(floor(floor(t))); n++) {',
+        '    if (++_gpu_passes > 10000) break;',
         '    _tv2 += _gpu_cos(float(n) * t);',
         '  }',
         '  _tv1 = _tv2;',
         '} else {',
         '  _tv1 = 0.0;',
         '}',
-        'return _tv1;',
+        'float _tv3 = _tv1;',
+        'return _gpu_passes > 10000 ? _gpu_nan() : _tv3;',
       ].join('\n')
     );
   });
@@ -96,15 +99,18 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
       String.raw`\operatorname{If}(t > 1, \sum_{n=1}^{\lfloor t\rfloor} n, -1)`,
       'glsl'
     );
-    expect(ifCode).toMatch(/^float _tv\d+;\nif \(1\.0 < t\) \{/);
-    expect(ifCode).toContain('} else {\n  _tv1 = -1.0;\n}');
-    const whenCode = shader(
-      String.raw`\left(\sum_{n=1}^{\lfloor t\rfloor} n\right)\left\{t > 1\right\}`,
-      'glsl'
+    expect(ifCode).toMatch(
+      /^_gpu_passes = 0;\nfloat _tv\d+;\nif \(1\.0 < t\) \{/
     );
-    expect(whenCode).toMatch(/^float _tv\d+;\nif \(1\.0 < t\) \{/);
-    // The masked branch is NaN, as in the ternary form.
-    expect(whenCode).toMatch(/\} else \{\n  _tv\d+ = _gpu_nan\(\);\n\}/);
+    expect(ifCode).toContain('} else {\n  _tv1 = -1.0;\n}');
+    // The GLSL fragment refuses an `If` that is a value and has one branch,
+    // which is what `When` is.
+    expect(() =>
+      shader(
+        String.raw`\left(\sum_{n=1}^{\lfloor t\rfloor} n\right)\left\{t > 1\right\}`,
+        'glsl'
+      )
+    ).toThrow(/needs both branches/);
   });
 
   test('a nested conditional inside the taken branch keeps its own form', () => {
@@ -165,35 +171,33 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
     // The selection is the whole statement, so the hoisted `if` makes the
     // one draw of the branch that is taken, as the interpreter does (Tycho
     // row 466).
-    const r = compile(
-      ce.box([
-        'If',
-        ['Greater', 'x', 0],
-        ['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]],
-        ['Random'],
-      ]),
-      { to: 'glsl', fallback: false, constantFold: false }
-    );
-    expect(r.success).toBe(true);
-    expect(r.code).toMatch(/\} else \{\n  _tv\d+ = _gpu_rnd_draw\(/);
-    expect(r.code!.split('_gpu_rnd_draw(').length - 1).toBe(1);
+    // The GLSL fragment has no `Random`, so the compilation declines.
+    expect(() =>
+      compile(
+        ce.box([
+          'If',
+          ['Greater', 'x', 0],
+          ['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]],
+          ['Random'],
+        ]),
+        { to: 'glsl', fallback: false, constantFold: false }
+      )
+    ).toThrow(/The head `Random` is outside the GLSL fragment/);
     // A loop whose step calls a function that draws: the draws run in the
     // taken branch, one per step in order, as in the interpreter.
     ce.declare('g', 'function');
     ce.assign('g', ce.parse(String.raw`n \mapsto n + \operatorname{Random}()`));
-    const loop = compile(
-      ce.box([
-        'If',
-        ['Greater', 'x', 0],
-        ['Sum', ['g', 'n'], ['Limits', 'n', 1, ['Floor', 't']]],
-        0,
-      ]),
-      { to: 'glsl', fallback: false, constantFold: false }
-    );
-    expect(loop.success).toBe(true);
-    expect(loop.code).toMatch(
-      /if \(0\.0 < x\) \{\n  float _tv\d+ = 0\.0;\n  for \(/
-    );
+    expect(() =>
+      compile(
+        ce.box([
+          'If',
+          ['Greater', 'x', 0],
+          ['Sum', ['g', 'n'], ['Limits', 'n', 1, ['Floor', 't']]],
+          0,
+        ]),
+        { to: 'glsl', fallback: false, constantFold: false }
+      )
+    ).toThrow(/The head `Random` is outside the GLSL fragment/);
   });
 
   test('a selection with an effect keeps the ternary form and declines', () => {
@@ -222,55 +226,42 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
         ]),
         { to: 'glsl', fallback: false, constantFold: false }
       )
-    ).toThrow(/conditionally-evaluated branch|multi-statement construct/);
+    ).toThrow(/The head `Random` is outside the GLSL fragment/);
   });
 
   test('a branch with several draws binds each one in order', () => {
     // More than one draw in a branch: the statement is compiled again with
     // every draw bound to a temporary where it is compiled, so the statement
     // form keeps the order of the draws (`gpuRecompileWithBoundDraws`).
-    const draws = (code: string): string[] =>
-      code
-        .split('\n')
-        .filter((line) => line.includes('_gpu_rnd_draw('))
-        .map((line) => line.replace(/\d* = _gpu_rnd_draw\(.*$/, ''));
-    const sum = compile(
-      ce.box([
-        'If',
-        ['Greater', 'x', 0],
-        ['Tuple', ['Random'], ['Sum', ['Random'], ['Limits', 'n', 1, 1000]]],
-        ['Tuple', 0, 0],
-      ]),
-      { to: 'glsl', fallback: false, constantFold: false }
-    ).code;
-    // The first draw of the branch, then the draw inside the loop.
-    expect(draws(sum)).toEqual(['  float _tv', '    float _tv']);
-    const cot = compile(
-      ce.box([
-        'If',
-        ['Greater', 'x', 0],
-        ['Tuple', ['Random'], ['Cot', ['Random']]],
-        ['Tuple', ['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]], 0],
-      ]),
-      { to: 'glsl', fallback: false, constantFold: false }
-    ).code;
-    expect(draws(cot)).toEqual(['  float _tv', '  float _tv']);
-    expect(cot).toContain(
-      '_tv1 = vec2(_tv2, (_gpu_cos(_tv3) / _gpu_sin(_tv3)));'
-    );
-    // A `Block` branch whose local is set by a draw writes nothing outside
-    // the block: it takes the statement form.
-    const block = compile(
-      ce.box([
-        'If',
-        ['Greater', 'x', 0],
-        ['Block', ['Declare', 'q', 'real', ['Random']], 'q'],
-        0,
-      ]),
-      { to: 'glsl', fallback: false, constantFold: false }
-    ).code;
-    expect(block).toMatch(/^float _tv\d+;\nif \(0\.0 < x\) \{\n/);
-    expect(block.split('_gpu_rnd_draw(').length - 1).toBe(1);
+    // The GLSL fragment has no `Random`, so each of these declines.
+    const decline = (expr: unknown): void => {
+      expect(() =>
+        compile(ce.box(expr as never), {
+          to: 'glsl',
+          fallback: false,
+          constantFold: false,
+        })
+      ).toThrow(/The head `Random` is outside the GLSL fragment/);
+    };
+    decline([
+      'If',
+      ['Greater', 'x', 0],
+      ['Tuple', ['Random'], ['Sum', ['Random'], ['Limits', 'n', 1, 1000]]],
+      ['Tuple', 0, 0],
+    ]);
+    decline([
+      'If',
+      ['Greater', 'x', 0],
+      ['Tuple', ['Random'], ['Cot', ['Random']]],
+      ['Tuple', ['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]], 0],
+    ]);
+    // A `Block` branch whose local is set by a draw.
+    decline([
+      'If',
+      ['Greater', 'x', 0],
+      ['Block', ['Declare', 'q', 'real', ['Random']], 'q'],
+      0,
+    ]);
   });
 
   test('a write in an operand beside the selection declines', () => {
@@ -340,7 +331,9 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
           fallback: false,
           constantFold: false,
         })
-      ).toThrow(/invalid expression.*assignment-in-operand/s);
+      ).toThrow(
+        /`Assign` writes `k\w*`, which is not a local of the function|The head `Error` is outside the GLSL fragment/
+      );
     // A write to a symbol declared in the engine, here in a called
     // function, declines.
     expect(() =>
@@ -348,27 +341,28 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
         ce.box(['Tuple', ['setK', 1], ['If', ['Greater', 'k_s', 0], loop, 0]]),
         { to: 'glsl', fallback: false, constantFold: false }
       )
-    ).toThrow(/"k_s" is not a local of the compiled expression/);
+    ).toThrow(/`Assign` writes `k_s`, which is not a local of the function/);
   });
 
   test('a sibling draw beside a selection without effects keeps the statement form', () => {
     // The selection itself draws nothing, so running it ahead of the
     // sibling's draw changes no value and shifts no draw.
-    const r = compile(
-      ce.box([
-        'Tuple',
-        ['Random'],
-        [
-          'If',
-          ['Greater', 'x', 0],
-          ['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]],
-          0,
-        ],
-      ]),
-      { to: 'glsl', fallback: false, constantFold: false }
-    );
-    expect(r.success).toBe(true);
-    expect(r.code).toMatch(/if \(0\.0 < x\) \{/);
+    // The GLSL fragment has no `Random`, so the compilation declines.
+    expect(() =>
+      compile(
+        ce.box([
+          'Tuple',
+          ['Random'],
+          [
+            'If',
+            ['Greater', 'x', 0],
+            ['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]],
+            0,
+          ],
+        ]),
+        { to: 'glsl', fallback: false, constantFold: false }
+      )
+    ).toThrow(/The head `Random` is outside the GLSL fragment/);
   });
 
   test('a statement storing the selection examines only its right side', () => {
@@ -418,22 +412,21 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
     // branch draws.
     ce.declare('r_d', 'real');
     ce.assign('r_d', ce.box(['Random']));
-    const code = compile(
-      ce.box([
-        'Tuple',
-        ['Random'],
-        [
-          'If',
-          ['Greater', 'x', 0],
-          ['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]],
-          'r_d',
-        ],
-      ]),
-      { to: 'glsl', fallback: false, constantFold: false }
-    ).code;
-    expect(code).toMatch(
-      /^float _tv1 = _gpu_rnd_draw\(.*\nfloat _tv2;\nif \(0\.0 < x\) \{\n[^]*\} else \{\n  float _tv4 = _gpu_rnd_draw\(.*\n  _tv2 = _tv4;\n\}\nreturn vec2\(_tv1, _tv2\);$/
-    );
+    expect(() =>
+      compile(
+        ce.box([
+          'Tuple',
+          ['Random'],
+          [
+            'If',
+            ['Greater', 'x', 0],
+            ['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]],
+            'r_d',
+          ],
+        ]),
+        { to: 'glsl', fallback: false, constantFold: false }
+      )
+    ).toThrow(/The head `Random` is outside the GLSL fragment/);
   });
 
   test('a draw behind an assigned symbol inside a called function is an effect', () => {
@@ -455,9 +448,7 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
         ]),
         { to: 'glsl', fallback: false, constantFold: false }
       )
-    ).toThrow(
-      /conditionally-evaluated branch|a draw written before it|a clause needs statements and draws/
-    );
+    ).toThrow(/The head `Random` is outside the GLSL fragment/);
   });
 
   test('the statement-needs scan is linear in the distinct nodes of a shared arm', () => {
@@ -668,7 +659,9 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
       constantFold: false,
     });
     expect(r.success).toBe(true);
-    expect(r.code).toMatch(/^float _tv\d+;\nif \(0\.0 < x\) \{/);
+    expect(r.code).toMatch(
+      /^_gpu_passes = 0;\nfloat _tv\d+;\nif \(0\.0 < x\) \{/
+    );
     expect(r.code!.indexOf('for (')).toBeGreaterThan(r.code!.indexOf('if ('));
   });
 
@@ -698,7 +691,9 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
   test('a vector-valued selection with a loop arm is typed by its arms', () => {
     const latex = String.raw`\begin{cases}\left(\sum_{n=1}^{\lfloor t\rfloor} n, t\right)&1\le t\\(0, 0)&\top\end{cases}`;
     const code = shader(latex, 'glsl');
-    expect(code).toMatch(/^vec2 _tv\d+;\nif \(1\.0 <= t\) \{/);
+    expect(code).toMatch(
+      /^_gpu_passes = 0;\nvec2 _tv\d+;\nif \(1\.0 <= t\) \{/
+    );
   });
 
   test('a boolean selection with no default clause still declines', () => {

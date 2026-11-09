@@ -152,6 +152,8 @@ import {
   gpuReciprocalComplex,
 } from './gpu-nan-safe.js';
 import { compilePointSwizzle, gpuSwizzle } from './gpu-points.js';
+import { fragmentFactsUnder } from './fragment.js';
+import type { FragmentTargetFields } from './fragment.js';
 import {
   compileGPUElementExtremum,
   compileGPUExtremum,
@@ -937,15 +939,34 @@ function compileGPUSumProduct(
   // (the `!args[1]` guard above returns for the reduce form).
   BaseCompiler.assertScalarBigOpBody(kind, args[0]);
 
-  // Multi-index Sum/Product (more than one indexing set) would drop the
-  // trailing clauses. Fail closed rather than emit code with a dangling
-  // index.
+  // A multi-index Sum/Product (more than one indexing set) is the nest of
+  // one aggregate per index, the first index outermost: the body of the
+  // outer aggregate is the aggregate over the other indexes, whose bounds
+  // can read the outer index. The value is the sum (or product) of the same
+  // terms, which the interpreter visits with the first index outermost too.
   if (args.length > 2)
-    throw new Error(
-      `Could not compile \`${kind}\`: multi-index (${args.length - 1} indexing sets) is not supported in GPU targets`
+    return compileGPUSumProduct(
+      kind,
+      [args[0].engine._fn(kind, [args[0], ...args.slice(2)]), args[1]],
+      _compile,
+      target
     );
 
-  const limitsExpr = args[1];
+  // A `Range` index set with a step of 1 (`Element(k, Range(a, b))`) is the
+  // `Limits(k, a, b)` of the interpreter: the same integers, in the same
+  // order.
+  const limitsExpr =
+    isFunction(args[1], 'Element') &&
+    isSymbol(args[1].op1) &&
+    isFunction(args[1].op2, 'Range') &&
+    (args[1].op2.nops === 2 ||
+      (args[1].op2.nops === 3 && args[1].op2.op3.re === 1))
+      ? args[1].engine._fn('Limits', [
+          args[1].op1,
+          args[1].op2.op1,
+          args[1].op2.op2,
+        ])
+      : args[1];
   if (!isFunction(limitsExpr, 'Limits'))
     throw new Error(
       `Could not compile \`${kind}\`: expected Limits indexing set`
@@ -1307,6 +1328,7 @@ function compileGPUSumProduct(
   gpuCheckIdentifier(index, target.language);
   const accDecl = `${valueType} ${acc}`;
   const indexDecl = `${intType} ${index}`;
+  const passCount = gpuPassCountStatement(target);
 
   // A COMPUTED upper bound is bound to a local first. GLSL evaluates
   // the loop condition on every iteration, so leaving the expression there
@@ -1344,6 +1366,8 @@ function compileGPUSumProduct(
     ),
     `${accDecl} = ${identity};`,
     `for (${indexDecl} = ${lowerStr}; ${index} <= ${upperRef}; ${index}++) {`,
+    // The pass cap of the evaluation (`gpuPassCountStatement`).
+    ...(passCount === undefined ? [] : [`  ${passCount}`]),
     ...bodySink.stmts.map((s) =>
       s
         .split('\n')
@@ -1390,6 +1414,25 @@ function compileGPUSumProduct(
 // target defined it. That made `Add(toString, 1)` refuse to compile as a
 // bogus "built-in operator with no fixed arity" instead of compiling
 // `toString` as an ordinary free symbol.
+/** The shader-global counter of the passes of one evaluation (the pass cap
+ * of the GLSL fragment, `CompilationOptions.iterationBudget`). */
+export const GPU_PASS_COUNTER = '_gpu_passes';
+
+/**
+ * The statement at the start of each pass of a loop that the emitter writes,
+ * or `undefined` when the target counts no pass (`fragmentPassBudget` is not
+ * set: `compileFunction()`, `compileShader()`). It adds one to the counter of
+ * the evaluation and leaves the loop when the counter is over the cap; the
+ * root of the evaluation then gives NaN (`GPUShaderTarget.emitPreparedRoot`).
+ */
+export function gpuPassCountStatement(
+  target: CompileTarget<Expression>
+): string | undefined {
+  const budget = (target as FragmentTargetFields<string>).fragmentPassBudget;
+  if (budget === undefined) return undefined;
+  return `if (++${GPU_PASS_COUNTER} > ${budget}) break;`;
+}
+
 export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   __proto__: null as never,
   // Variadic arithmetic (for function-call form, e.g., with vectors)
@@ -3417,8 +3460,20 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // Non-literal operand (e.g. a vec-typed symbol): `length()` applies.
     return `length(${compile(arg)})`;
   }, isBroadcastPointNormOperand),
-  // `markAggregateConsuming`: every operand declines.
-  Length: markAggregateConsuming((_args, _compile, target) => {
+  // `markAggregateConsuming`: the operand is not written. The count of a
+  // point or a list with a static count is a constant: the fragment pass
+  // recorded the type of the operand (`fragmentFactsUnder()`). Any other
+  // operand declines.
+  Length: markAggregateConsuming((args, _compile, target) => {
+    const facts = fragmentFactsUnder(
+      (target as FragmentTargetFields<string>).fragmentScope,
+      args[0]
+    );
+    const t = facts?.type;
+    const count =
+      t?.kind === 'point' ? t.size : t?.kind === 'list' ? t.count : undefined;
+    if (args.length === 1 && count !== undefined)
+      return formatGPUNumber(count);
     throw new Error(
       `Could not compile \`Length\`: the collection element count is not supported on the ` +
         `${target.language ?? 'GPU'} target: the '${target.language ?? 'GPU'}' ` +
@@ -3529,7 +3584,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         );
 
       const indexExpr = indexing.ops[0];
-      const rangeExpr = indexing.ops[1];
+      // The domain of a lowered `parallel for` (`lowerParallelHeads()`) is
+      // marked `ParallelDomain(Range(…))`. The shader runs its passes in
+      // order, as a counted loop over the range.
+      const domain = indexing.ops[1];
+      const rangeExpr =
+        isFunction(domain, 'ParallelDomain') && domain.nops === 1
+          ? domain.op1
+          : domain;
 
       if (!isSymbol(indexExpr))
         throw new Error('Could not compile `Loop`: index must be a symbol');
@@ -3707,9 +3769,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         .map((line) => `  ${line}`)
         .join('\n');
     let code = bodyCode;
+    // Each pass of each `for` statement counts against the pass cap of the
+    // evaluation (`gpuPassCountStatement`), before the guard of its clause.
+    const passCount = gpuPassCountStatement(target);
     for (let k = headers.length - 1; k >= 0; k--) {
       const test = tests[k];
       if (test !== undefined) code = `if (${test}) {\n${indent(code)}\n}`;
+      if (passCount !== undefined) code = `${passCount}\n${code}`;
       code = `${headers[k]}\n${indent(code)}\n}`;
       const prologue = prologues[k];
       if (prologue.length > 0) code = `${prologue.join('\n')}\n${code}`;

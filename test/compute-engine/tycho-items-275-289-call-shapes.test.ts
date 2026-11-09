@@ -117,7 +117,7 @@ test('untyped plot inputs carry scalar shader facts through a local', () => {
     to: 'glsl',
   });
   expect(untyped.success).toBe(false);
-  expect(untyped.diagnostic?.code).toBe('untyped-input');
+  expect(untyped.diagnostic?.code).toBe('outside-fragment');
   expect(untyped.unsupported).toEqual(expect.arrayContaining(['x', 'y']));
   // Declared `real`, they carry the scalar facts through the local.
   ce.declare('x', 'real');

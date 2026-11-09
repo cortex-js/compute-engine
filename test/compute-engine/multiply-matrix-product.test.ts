@@ -481,15 +481,16 @@ describe('compiled code', () => {
     ).toThrow();
   });
 
-  it('GLSL multiplies two square matrices with its matrix product', () => {
+  it('GLSL declines a matrix symbol: the GLSL fragment has no matrix type', () => {
     const ce = new ComputeEngine();
     ce.declare('p', 'matrix<number^(2x2)>');
     ce.declare('q', 'matrix<number^(2x2)>');
     const r = compile(ce.box(['Multiply', 'q', 'p']), {
       to: 'glsl',
-      fallback: false,
+      fallback: true,
     });
-    expect(r.code).toBe('q * p');
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('outside-fragment');
   });
 
   it('interval-js checks the shapes of the values of lists that may be matrices', () => {

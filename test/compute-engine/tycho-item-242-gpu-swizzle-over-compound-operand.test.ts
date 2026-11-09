@@ -82,11 +82,14 @@ describe('a component read over an absent operand', () => {
   for (const op of ['PointX', 'PointY', 'PointZ'])
     for (const arg of ['Missing'])
       test(`${op}(${arg})`, () => {
-        const glsl = compile(ce.box([op, arg]), {
-          to: 'glsl',
-          fallback: false,
-        });
-        expect(glsl.code).toBe('_gpu_nan()');
+        // The GLSL fragment has no `Missing` value, so the compilation
+        // declines.
+        expect(() =>
+          compile(ce.box([op, arg]), {
+            to: 'glsl',
+            fallback: false,
+          })
+        ).toThrow(/has no type in the GLSL fragment/);
       });
 
   // A positional read is `At` with a constant index, which declines an
@@ -98,7 +101,7 @@ describe('a component read over an absent operand', () => {
         for (const to of ['glsl'] as const)
           expect(() =>
             compile(ce.box([op, arg]), { to, fallback: false })
-          ).toThrow(/the base is the absence marker/);
+          ).toThrow(/has no type in the GLSL fragment/);
       });
 });
 
@@ -125,7 +128,7 @@ describe('Last reads the component at the static width', () => {
     expect(() =>
       compile(ce.box(['Last', 'v']), { to: 'glsl', fallback: false })
     ).toThrow(
-      /Could not compile `Last` \(read as `At` with the index -1\): .*no statically known length/
+      /The list `v` has no static count/
     );
   });
 });

@@ -120,7 +120,8 @@ describe('identity lowerings keep the grouping of their operand (CE-251.1)', () 
       ['Choose', X1, 1],
       ['ElementMax', X1],
       ['ElementMin', X1],
-      ['Median', X1],
+      // `Median` is outside the GLSL fragment.
+      ...(to === 'glsl' ? [] : [['Median', X1]]),
     ])
       expect(rawShader(['Multiply', 3, inner], to)).toBe('3.0 * (u + 1.0)');
   });
@@ -148,8 +149,9 @@ describe('the fract and exp2 peepholes apply to a vector operand (CE-254)', () =
   });
 
   test.each(TARGETS)('%s: an operand with no overload still declines', (to) => {
-    declines(['Mod', 'M', 1], to, /`fract` .* no `matN` overload/);
-    declines(['Power', 2, 'M'], to, /`exp2` .* no `matN` overload/);
+    // The GLSL fragment has no matrix type, so it refuses the symbol `M`.
+    declines(['Mod', 'M', 1], to, /`M` has the type .* GLSL fragment/);
+    declines(['Power', 2, 'M'], to, /`M` has the type .* GLSL fragment/);
   });
 });
 
@@ -222,7 +224,7 @@ describe('GCD and LCM fold over the components (CE-280.11)', () => {
     );
     // `GCD(-12)` is 12 in the interpreter.
     expect(shader(['GCD', 'u'], to).code).toBe('abs(u)');
-    declines(['GCD', 'M'], to, /no compile-time component list/);
+    declines(['GCD', 'M'], to, /`M` has the type .* GLSL fragment/);
   });
 
   test('the interpreter values the fold reproduces', () => {
@@ -268,6 +270,7 @@ describe('Match with a loop-form Sum in a case body (CE-274)', () => {
     ['Cos', ['Multiply', 'k', 'u']],
     ['Limits', 'k', 1, ['Floor', 'u']],
   ];
+  // The GLSL fragment does not take the `Match` head, so each form declines.
   test.each(TARGETS)('%s: the loop runs inside its case', (to) => {
     for (const expr of [
       [
@@ -285,30 +288,10 @@ describe('Match with a loop-form Sum in a case body (CE-274)', () => {
         ['MatchCase', '_', 0],
       ],
       ['Match', 'n', ['MatchCase', 1, 10], ['MatchCase', '_', LOOP]],
-    ]) {
-      const { code } = shader(expr, to);
-      const loop = code.indexOf('for (');
-      expect(code).toMatch(/if \(n == 1\.0\) \{/);
-      expect(loop).toBeGreaterThan(code.indexOf('if ('));
-    }
-    const { code } = shader(
-      [
-        'Match',
-        'n',
-        ['MatchCase', 1, LOOP],
-        ['MatchCase', 2, 20],
-        ['MatchCase', '_', 0],
-      ],
-      to
-    );
-    // The loop is in the branch of the first case, before its `else`.
-    expect(code.indexOf('for (')).toBeLessThan(code.indexOf('} else {'));
+    ])
+      declines(expr, to, /outside the GLSL fragment/);
   });
 
-  // A case guard that is the symbol `True` was given to the statement form
-  // as its condition, and the statement form reads a `True` condition as the
-  // default branch: the case body was emitted with no pattern test, and the
-  // later cases were dropped.
   test.each(TARGETS)(
     '%s: a case with a True guard keeps its pattern test',
     (to) => {
@@ -327,18 +310,15 @@ describe('Match with a loop-form Sum in a case body (CE-274)', () => {
           ['MatchCase', 2, LOOP],
           ['MatchCase', '_', 0],
         ],
-      ]) {
-        const { code } = shader(expr, to);
-        expect(code).toMatch(/if \(\(n == 1\.0\) && \(true\)\) \{/);
-        expect(code).toMatch(/if \(n == 2\.0\) \{/);
-      }
+      ])
+        declines(expr, to, /outside the GLSL fragment/);
     }
   );
 
   test.each(TARGETS)(
     '%s: a Match with no such body keeps the ternary',
     (to) => {
-      const { code } = shader(
+      declines(
         [
           'Match',
           'n',
@@ -346,9 +326,9 @@ describe('Match with a loop-form Sum in a case body (CE-274)', () => {
           ['MatchCase', 3, 30],
           ['MatchCase', '_', -1],
         ],
-        to
+        to,
+        /outside the GLSL fragment/
       );
-      expect(code).not.toContain('if (');
     }
   );
 });
@@ -367,6 +347,10 @@ describe('Clamp with fewer than three operands fails closed', () => {
           to,
           fallback: false,
         } as never)
-      ).toThrow(/expected three operands/);
+      ).toThrow(
+        to === 'glsl'
+          ? /No signature of `Clamp` in the GLSL fragment/
+          : /expected three operands/
+      );
   });
 });

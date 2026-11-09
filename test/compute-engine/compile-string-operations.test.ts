@@ -221,8 +221,14 @@ describe('D8 lock: an operator with NO lowering entry declines on every target',
         constantFold: false,
       } as never);
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/Could not compile `NumberFrom`: /);
-      expect(r.error).toMatch(/no lowering for it/);
+      if (to === 'glsl') {
+        // The GLSL fragment refuses the head before any code is written.
+        expect(r.diagnostic?.code).toBe('outside-fragment');
+        expect(r.error).toMatch(/outside the GLSL fragment/);
+      } else {
+        expect(r.error).toMatch(/Could not compile `NumberFrom`: /);
+        expect(r.error).toMatch(/no lowering for it/);
+      }
     }
   );
 
@@ -1244,7 +1250,8 @@ describe('D8: GLSL rejects the Phase-2 operators', () => {
     (to) => {
       const r = compileTo(ce.box(['ToUpperCase', { str: 'abc' }]), to);
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(new RegExp(`target '${to}'`));
+      expect(r.diagnostic?.code).toBe('outside-fragment');
+      expect(r.error).toMatch(/outside the GLSL fragment/);
     }
   );
 

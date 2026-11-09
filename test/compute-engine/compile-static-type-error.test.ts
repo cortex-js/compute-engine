@@ -66,6 +66,14 @@ describe('A valid expression with a sub-expression of type error declines', () =
       // to give its warning for an error in the expression.
       const r = compile(expr, { to });
       expect(r.success).toBe(false);
+      if (to === 'glsl') {
+        // The shader fragment refuses the form before any code is written.
+        expect(r.diagnostic?.code).toBe('outside-fragment');
+        expect(() => compile(expr, { to, fallback: false })).toThrow(
+          /GLSL fragment/
+        );
+        return;
+      }
       expect(r.diagnostic?.code).toBe('static-type-error');
       expect(r.diagnostic?.kind).toBe('correctness');
       expect(r.unsupported).toContain('ErrorCode');
@@ -93,7 +101,9 @@ describe('A valid expression with a sub-expression of type error declines', () =
       const r = compile(expr, { to });
       expect(r.success).toBe(false);
       expect(r.unsupported).toContain('ErrorCode');
-      expect(r.error).toMatch(/invalid expression/);
+      expect(r.error).toMatch(
+        to === 'glsl' ? /outside the GLSL fragment/ : /invalid expression/
+      );
     }
   );
 
@@ -105,6 +115,13 @@ describe('A valid expression with a sub-expression of type error declines', () =
     expect(expr.isValid).toBe(true);
     const r = compile(expr, { to });
     expect(r.success).toBe(false);
+    if (to === 'glsl') {
+      // `Map` over a list input is outside the GLSL fragment, which is
+      // checked first.
+      expect(r.diagnostic?.code).toBe('outside-fragment');
+      expect(r.diagnostic?.operator).toBe('Map');
+      return;
+    }
     expect(r.diagnostic?.code).toBe('static-type-error');
     expect(r.diagnostic?.value).toBe('ADD("ab", x)');
     expect(r.unsupported).toContain('ErrorCode');
@@ -343,7 +360,8 @@ describe('An error next to a bound name still declines', () => {
     for (const to of TARGETS) {
       const r = compile(expr, { to, fallback: true });
       expect(r.success).toBe(false);
-      expect(r.unsupported).toContain('ErrorCode');
+      // The GLSL fragment, checked first, names the head that it refuses.
+      expect(r.unsupported).toContain(to === 'glsl' ? 'ADD' : 'ErrorCode');
     }
   });
 });

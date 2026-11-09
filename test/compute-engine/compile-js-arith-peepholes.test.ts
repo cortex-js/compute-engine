@@ -303,7 +303,11 @@ describe('J5: a complex value built as a + i·b stays on the real lane', () => {
             to,
             fallback: false,
           } as never)
-        ).toThrow(/expected two operands, got one/);
+        ).toThrow(
+          to === 'glsl'
+            ? /No signature of `(Divide|Power)` in the GLSL fragment/
+            : /expected two operands, got one/
+        );
   });
 
   test('an opaque complex value keeps the object-building lowering', () => {

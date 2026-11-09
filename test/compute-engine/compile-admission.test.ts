@@ -39,11 +39,21 @@ describe('An input with no type is refused (R1)', () => {
     });
     expect(ce.box('M').type.toString()).toBe('unknown');
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('untyped-input');
-    expect(r.diagnostic?.kind).toBe('correctness');
+    // The shader fragment refuses a symbol with no type before any code is
+    // written.
+    expect(r.diagnostic?.code).toBe(
+      to === 'glsl' ? 'outside-fragment' : 'untyped-input'
+    );
+    expect(r.diagnostic?.kind).toBe(
+      to === 'glsl' ? 'capability' : 'correctness'
+    );
     expect(r.unsupported).toContain('M');
     expect(r.unsupported).not.toContain('x');
-    expect(r.error).toMatch(/the input `M` has no type/);
+    expect(r.error).toMatch(
+      to === 'glsl'
+        ? /has no type in the GLSL fragment/
+        : /the input `M` has no type/
+    );
   });
 
   test.each(TARGETS)('an input declared `any` on %s', (to) => {
@@ -56,9 +66,15 @@ describe('An input with no type is refused (R1)', () => {
       { to }
     );
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('untyped-input');
+    expect(r.diagnostic?.code).toBe(
+      to === 'glsl' ? 'outside-fragment' : 'untyped-input'
+    );
     expect(r.unsupported).toEqual(expect.arrayContaining(['p', 'q']));
-    expect(r.error).toMatch(/the inputs `p`, `q` have no type/);
+    expect(r.error).toMatch(
+      to === 'glsl'
+        ? /has no type in the GLSL fragment/
+        : /the inputs `p`, `q` have no type/
+    );
   });
 
   test.each(TARGETS)('without the fallback, the refusal throws on %s', (to) => {
@@ -72,7 +88,9 @@ describe('An input with no type is refused (R1)', () => {
       expect(r.error).toMatch(/the input `M` has no type/);
     } else
       expect(() => compile(e, { to, fallback: false })).toThrow(
-        /the input `M` has no type/
+        to === 'glsl'
+          ? /has no type in the GLSL fragment/
+          : /the input `M` has no type/
       );
   });
 
@@ -441,6 +459,11 @@ describe('A value with no settled shape declines (R3)', () => {
       const ce = engine();
       const r = compile(ce.box(json), { to });
       expect(r.success).toBe(false);
+      if (to === 'glsl') {
+        // The shader fragment refuses the form before any code is written.
+        expect(r.diagnostic?.code).toBe('outside-fragment');
+        return;
+      }
       if (OWN_REASON.has(`${label} ${to}`)) {
         expect(r.diagnostic?.code).toBe('compile-error');
         expect(r.error).toMatch(/^Could not compile `(Add|If|L)`/);
@@ -464,7 +487,7 @@ describe('A value with no settled shape declines (R3)', () => {
     );
     if (to === 'glsl') {
       expect(r.success).toBe(false);
-      expect(r.diagnostic?.code).toBe('unsettled-shape');
+      expect(r.diagnostic?.code).toBe('outside-fragment');
     } else expect(r.diagnostic?.code).not.toBe('unsettled-shape');
     if (to === 'javascript') {
       expect(r.success).toBe(true);
@@ -539,7 +562,11 @@ describe('A value with no settled shape declines (R3)', () => {
       // Python declines the arithmetic over a list in the code generation,
       // a more specific reason.
       expect(r.diagnostic?.code).toBe(
-        to === 'python' ? 'compile-error' : 'unsettled-shape'
+        to === 'python'
+          ? 'compile-error'
+          : to === 'glsl'
+            ? 'outside-fragment'
+            : 'unsettled-shape'
       );
     }
   );
@@ -703,7 +730,11 @@ describe('A branch that the code drops is not checked', () => {
     expect(r.success).toBe(false);
     // The interval target cannot read the list, a more specific reason.
     expect(r.diagnostic?.code).toBe(
-      to === 'interval-js' ? 'compile-error' : 'unsettled-shape'
+      to === 'interval-js'
+        ? 'compile-error'
+        : to === 'glsl'
+          ? 'outside-fragment'
+          : 'unsettled-shape'
     );
   });
 
@@ -717,7 +748,11 @@ describe('A branch that the code drops is not checked', () => {
       );
       expect(r.success).toBe(false);
       expect(r.diagnostic?.code).toBe(
-        to === 'python' ? 'compile-error' : 'unsettled-shape'
+        to === 'python'
+          ? 'compile-error'
+          : to === 'glsl'
+            ? 'outside-fragment'
+            : 'unsettled-shape'
       );
     }
   );
@@ -747,7 +782,9 @@ describe('A branch that the code drops is not checked', () => {
     const ce = engine();
     const r = compile(ce.box(['If', ['Less', 3, 2], 0, 'z']), { to });
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('untyped-input');
+    expect(r.diagnostic?.code).toBe(
+      to === 'glsl' ? 'outside-fragment' : 'untyped-input'
+    );
     expect(r.unsupported).toContain('z');
   });
 
@@ -767,7 +804,9 @@ describe('A branch that the code drops is not checked', () => {
       );
       expect(ce.box('z').type.toString()).toBe('unknown');
       expect(r.success).toBe(false);
-      expect(r.diagnostic?.code).toBe('untyped-input');
+      expect(r.diagnostic?.code).toBe(
+        to === 'glsl' ? 'outside-fragment' : 'untyped-input'
+      );
       expect(r.unsupported).toContain('z');
     }
   );
@@ -847,7 +886,9 @@ describe('The values of a body with an early Return have one shape (R3)', () => 
         expect(r.diagnostic?.code).toBe('unsettled-shape');
         expect(r.diagnostic?.kind).toBe('capability');
         expect(r.error).toMatch(/the values that it can give/);
-      } else
+      } else if (to === 'glsl')
+        expect(r.diagnostic?.code).toBe('outside-fragment');
+      else
         expect(r.diagnostic?.code).toMatch(/^(unsettled-shape|compile-error)$/);
     });
   });
@@ -872,7 +913,7 @@ describe('The values of a body with an early Return have one shape (R3)', () => 
     );
     expect(r.success).toBe(false);
     expect(r.diagnostic?.code).toBe(
-      to === 'glsl' ? 'compile-error' : 'unsettled-shape'
+      to === 'glsl' ? 'outside-fragment' : 'unsettled-shape'
     );
   });
 
@@ -887,7 +928,7 @@ describe('The values of a body with an early Return have one shape (R3)', () => 
     );
     expect(r.success).toBe(false);
     expect(r.diagnostic?.code).toBe(
-      to === 'glsl' ? 'compile-error' : 'unsettled-shape'
+      to === 'glsl' ? 'outside-fragment' : 'unsettled-shape'
     );
   });
 
@@ -1242,7 +1283,9 @@ describe('The admission checks of round 2 of the review', () => {
       ];
       const r = compile(ce.box(json), { to });
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/invalid expression/);
+      expect(r.error).toMatch(
+        to === 'glsl' ? /outside the GLSL fragment/ : /invalid expression/
+      );
     }
   );
 
@@ -1349,7 +1392,9 @@ describe('The admission checks of round 2 of the review', () => {
       for (const to of TARGETS) {
         const r = compile(engine().box(json), { to });
         expect(r.success).toBe(false);
-        expect(r.error).toMatch(/invalid expression/);
+        expect(r.error).toMatch(
+          to === 'glsl' ? /outside the GLSL fragment/ : /invalid expression/
+        );
       }
       const declared = engine();
       declared.declare('p', 'list<real>');
@@ -1498,7 +1543,11 @@ describe('Assigned names and the shapes of their values', () => {
         typed.declare('p', type);
         const r = compile(typed.box(json), { to });
         expect(r.success).toBe(false);
-        expect(r.error).toMatch(/"p" is not a local of the compiled/);
+        expect(r.error).toMatch(
+          to === 'glsl'
+            ? /`Assign` writes `p`, which is not a local of the function/
+            : /"p" is not a local of the compiled/
+        );
       }
     }
   );
@@ -1526,8 +1575,12 @@ describe('Assigned names and the shapes of their values', () => {
     for (const x of [1, -1])
       expect(r.run!({ x })).toEqual(plain(interpret(json, x, body)));
     expect(interpret(json, 1, body)).toEqual(['List', 2, 4]);
-    for (const to of ['glsl'])
-      expect(compile(withF(body).box(json), { to }).success).toBe(true);
+    // The shader fragment has no list local, so the shader declines.
+    for (const to of ['glsl']) {
+      const g = compile(withF(body).box(json), { to });
+      expect(g.success).toBe(false);
+      expect(g.diagnostic?.code).toBe('outside-fragment');
+    }
   });
 
   // The branches give the local `p` a list and a number.
@@ -1548,7 +1601,9 @@ describe('Assigned names and the shapes of their values', () => {
       ];
       const r = compile(engine().box(['Function', body, 't']), { to });
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/invalid expression/);
+      expect(r.error).toMatch(
+        to === 'glsl' ? /outside the GLSL fragment/ : /invalid expression/
+      );
     }
   );
 
@@ -1564,7 +1619,9 @@ describe('Assigned names and the shapes of their values', () => {
     for (const to of ['javascript', 'glsl']) {
       const s = compile(engine().box(['Function', body, 't']), { to });
       expect(s.success).toBe(false);
-      expect(s.error).toMatch(/invalid expression/);
+      expect(s.error).toMatch(
+        to === 'glsl' ? /outside the GLSL fragment/ : /invalid expression/
+      );
     }
   });
 
@@ -1581,7 +1638,9 @@ describe('Assigned names and the shapes of their values', () => {
       ];
       const r = compile(engine().box(json), { to });
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/invalid expression/);
+      expect(r.error).toMatch(
+        to === 'glsl' ? /outside the GLSL fragment/ : /invalid expression/
+      );
     }
   );
 
@@ -1638,6 +1697,13 @@ describe('Assigned names and the shapes of their values', () => {
         ],
         ['Multiply', 2, 'p'],
       ];
+      if (to === 'glsl') {
+        // The shader fragment has no list local, so the shader declines.
+        expect(() =>
+          compile(engine().box(json), { to, fallback: false })
+        ).toThrow(/a block of the GLSL fragment has scalar, complex or point locals/);
+        return;
+      }
       const r = compile(engine().box(json), { to, fallback: false });
       expect(r.success).toBe(true);
       if (to === 'javascript') {
@@ -1683,7 +1749,9 @@ describe('The paths of the code that meet after a node (R3)', () => {
   const declinesInvalid = (json: MathJsonExpression, to: string): void => {
     const r = compile(engine().box(json), { to: to as any });
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/invalid expression/);
+    expect(r.error).toMatch(
+      to === 'glsl' ? /the GLSL fragment/ : /invalid expression/
+    );
   };
 
   // The body of a loop can run no time: after the loop, `p` is the number

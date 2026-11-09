@@ -392,8 +392,17 @@ describe('COMPILED PARAMETER DEFAULTS: INTERVAL AND GLSL', () => {
   });
 
   test('GLSL: a saturated call, a completed call and a `Map` callback', () => {
-    expect(run(ce, saturated, 'glsl').code).toBe('(5.0 * y)');
-    expect(run(ce, completed, 'glsl').code).toBe('(2.0 * y)');
+    // The GLSL fragment refuses `Apply` of a function literal.
+    const declined = (expr: Json) => {
+      const r: any = compile(ce.box(expr) as any, {
+        to: 'glsl',
+        fallback: true,
+      } as any);
+      expect(r.success).toBe(false);
+      expect(r.diagnostic?.code).toBe('outside-fragment');
+    };
+    declined(saturated);
+    declined(completed);
     const map = ['Map', defaulted(2), ['List', 'y', 2]];
     expect(run(ce, map, 'glsl').code).toBe('vec2(2.0 * y, 4.0)');
   });

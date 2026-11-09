@@ -468,7 +468,7 @@ describe('CE-564.2: a parameter typed as a tuple by index reads only', () => {
     const ce = engineWithContractCall();
     expect(() =>
       new GLSLTarget().compile(ce.box(['rc', ['List', 'x', 'y']]))
-    ).toThrow(/call of `rc`.*tuple<real, real>/);
+    ).toThrow(/The argument `\[x,y\]` of `rc` has the type `list<real, 2>`/);
   });
 
   test.each(['javascript', 'interval-js'])(

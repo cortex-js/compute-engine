@@ -346,9 +346,10 @@ describe('A tuple with a list coordinate is a list of points — shader targets'
       expect(() =>
         compile(declaredEngine().parse(latex), { to, fallback: false } as any)
       ).toThrow(
+        // The GLSL fragment refuses the list that has no static count.
         latex.startsWith('P')
-          ? /Could not compile `P`: "P" has the type `list<.*>`, which has no static length/
-          : /Could not compile `PointList`: component 1 is collection-valued/
+          ? /The list `P` has no static count/
+          : /The list `A` has no static count/
       );
   });
 });
@@ -729,7 +730,11 @@ describe('A point parameter called with a list of points maps over the points', 
       if (thrown === undefined) {
         expect(result.success).toBe(false);
         expect(result.error).toMatch(/list of points/);
-      } else expect(String(thrown)).toMatch(/Could not compile/);
+      } else
+        // The GLSL fragment refuses the list that has no static count.
+        expect(String(thrown)).toMatch(
+          to === 'glsl' ? /has no static count/ : /Could not compile/
+        );
     }
   );
 });
@@ -812,7 +817,11 @@ describe('A parameter with no declared type called with a list of points maps ov
       if (thrown === undefined) {
         expect(result.success).toBe(false);
         expect(result.error).toMatch(/list of points/);
-      } else expect(String(thrown)).toMatch(/Could not compile/);
+      } else
+        // The GLSL fragment refuses the list that has no static count.
+        expect(String(thrown)).toMatch(
+          to === 'glsl' ? /has no static count/ : /Could not compile/
+        );
     }
   );
 });

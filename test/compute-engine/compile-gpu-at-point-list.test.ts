@@ -22,22 +22,15 @@ ce.declare('P', 'list<tuple<real, real>^3>');
 const glsl = new GLSLTarget();
 
 const PL = ['PointList', ['List', 'x', 2, 3], ['List', 4, 5, 6]];
-const GUARD = '!(i >= -3.0 && i <= 3.0) || i != floor(i) || i == 0.0';
+
+// The GLSL fragment refuses a `PointList` of coordinate lists, so every
+// compilation of `PL` declines before any code is written.
+const FRAGMENT = /GLSL fragment/;
 
 describe('GPU: At over a list of points', () => {
   test('the reported shape compiles with a dynamic index', () => {
     const json = ['At', PL, 'k'];
-    const g = glsl.compile(ce.box(json as any));
-    expect(g.code).toBe(
-      '_gpu_atp2_3(vec2[3](vec2(x, 4.0), vec2(2.0, 5.0), vec2(3.0, 6.0)), k)'
-    );
-    expect(g.preamble).toContain('vec2 _gpu_atp2_3(vec2 v[3], float i) {');
-    expect(g.preamble).toContain(`  if (${GUARD})\n    return vec2(_gpu_nan());`);
-    expect(g.preamble).toContain('  return v[(k > 0) ? k - 1 : 3 + k];');
-    // The NaN helper is declared before the helper that calls it.
-    expect(g.preamble!.indexOf('float _gpu_nan()')).toBeLessThan(
-      g.preamble!.indexOf('_gpu_atp2_3')
-    );
+    expect(() => glsl.compile(ce.box(json as any))).toThrow(FRAGMENT);
   });
 
   test('a literal index folds to the point, or to a vector of NaN', () => {
@@ -47,11 +40,17 @@ describe('GPU: At over a list of points', () => {
         .subs({ x: 1 })
         .evaluate();
       const [a, b] = point.ops!.map((op) => op.re);
+      // A negative index leaves the `PointList` in the tree, which the
+      // fragment refuses.
+      if (k < 0) {
+        expect(() => glsl.compile(ce.box(['At', PL, k] as any))).toThrow(
+          FRAGMENT
+        );
+        continue;
+      }
       const code = glsl.compile(ce.box(['At', PL, k] as any)).code;
       expect(code).toBe(
-        k === 1 || k === -3
-          ? 'vec2(x, 4.0)'
-          : `vec2(${a.toFixed(1)}, ${b.toFixed(1)})`
+        k === 1 ? 'vec2(x, 4.0)' : `vec2(${a.toFixed(1)}, ${b.toFixed(1)})`
       );
     }
     for (const k of [0, 4, -4]) {
@@ -61,39 +60,37 @@ describe('GPU: At over a list of points', () => {
           .evaluate()
           .toString()
       ).toBe('(NaN, NaN)');
-      expect(glsl.compile(ce.box(['At', PL, k] as any)).code).toBe(
-        'vec2(_gpu_nan())'
+      expect(() => glsl.compile(ce.box(['At', PL, k] as any))).toThrow(
+        FRAGMENT
       );
     }
   });
 
   test('the absence marker as the index is a vector of NaN', () => {
-    expect(glsl.compile(ce.box(['At', PL, 'Missing'] as any)).code).toBe(
-      'vec2(_gpu_nan())'
+    expect(() => glsl.compile(ce.box(['At', PL, 'Missing'] as any))).toThrow(
+      FRAGMENT
     );
   });
 
   test('symbol sources zip to the shortest, and a scalar is repeated', () => {
-    expect(glsl.compile(ce.box(['At', ['PointList', 'xs', 'ys'], 'k'])).code).toBe(
-      '_gpu_atp2_3(vec2[3](vec2(xs.x, ys.x), vec2(xs.y, ys.y), vec2(xs.z, ys.z)), k)'
-    );
-    expect(glsl.compile(ce.box(['At', ['PointList', 'xs', 7], 'k'])).code).toBe(
-      '_gpu_atp2_3(vec2[3](vec2(xs.x, 7.0), vec2(xs.y, 7.0), vec2(xs.z, 7.0)), k)'
-    );
+    expect(() =>
+      glsl.compile(ce.box(['At', ['PointList', 'xs', 'ys'], 'k']))
+    ).toThrow(FRAGMENT);
+    expect(() =>
+      glsl.compile(ce.box(['At', ['PointList', 'xs', 7], 'k']))
+    ).toThrow(FRAGMENT);
   });
 
   test('three coordinates, a literal list of points and a declared symbol', () => {
-    expect(
+    expect(() =>
       glsl.compile(
         ce.box([
           'At',
           ['PointList', ['List', 'x', 2, 3], ['List', 4, 5, 6], ['List', 7, 8, 9]],
           'k',
         ])
-      ).code
-    ).toBe(
-      '_gpu_atp3_3(vec3[3](vec3(x, 4.0, 7.0), vec3(2.0, 5.0, 8.0), vec3(3.0, 6.0, 9.0)), k)'
-    );
+      )
+    ).toThrow(FRAGMENT);
     expect(
       glsl.compile(
         ce.box([
@@ -112,9 +109,9 @@ describe('GPU: At over a list of points', () => {
   });
 
   test('a coordinate of the point', () => {
-    expect(glsl.compile(ce.box(['PointX', ['At', PL, 'k']] as any)).code).toBe(
-      '_gpu_atp2_3(vec2[3](vec2(x, 4.0), vec2(2.0, 5.0), vec2(3.0, 6.0)), k).x'
-    );
+    expect(() =>
+      glsl.compile(ce.box(['PointX', ['At', PL, 'k']] as any))
+    ).toThrow(FRAGMENT);
   });
 
   test('a gather of points declines', () => {
@@ -122,7 +119,7 @@ describe('GPU: At over a list of points', () => {
     // shader value.
     expect(() =>
       glsl.compile(ce.box(['At', PL, ['List', 1, 2]] as any))
-    ).toThrow(/Could not compile/);
+    ).toThrow(FRAGMENT);
   });
 });
 
@@ -167,11 +164,14 @@ describe('GPU: First, Second, Third and Last of a list of points', () => {
   test('a position past the end is an absent point', () => {
     ce.declare('Q', 'list<tuple<real, real, real>^2>');
     expect(compileTo('glsl', ['Last', 'Q']).code).toBe('Q[1]');
-    expect(compileTo('glsl', ['Third', 'Q']).code).toBe('vec3(_gpu_nan())');
+    // The fragment refuses a position past the end.
+    expect(() => compileTo('glsl', ['Third', 'Q'])).toThrow(
+      /`Third` reads the element 3, and its operand has 2 element\(s\)/
+    );
   });
 
   test('a literal list of points selects the element', () => {
-    expect(compileTo('glsl', ['Second', PL]).code).toBe('vec2(2.0, 5.0)');
+    expect(() => compileTo('glsl', ['Second', PL])).toThrow(FRAGMENT);
   });
 });
 
@@ -201,7 +201,10 @@ describe('GPU: First, Second, Third and Last of other operands', () => {
     // element of a pair of numbers.
     ce.declare('p', 'tuple<real, real>');
     expect(ce.box(['Third', ['Tuple', 1, 2]]).evaluate().isNaN).toBe(true);
-    expect(code('glsl', ['Third', 'p'])).toBe('_gpu_nan()');
+    // The fragment refuses a position past the end.
+    expect(() => code('glsl', ['Third', 'p'])).toThrow(
+      /`Third` reads the element 3, and its operand has 2 element\(s\)/
+    );
   });
 
   test('a matrix declines', () => {
@@ -210,7 +213,7 @@ describe('GPU: First, Second, Third and Last of other operands', () => {
     ce.declare('M', 'matrix<real^2x2>');
     for (const to of ['glsl'] as const)
       expect(() => code(to, ['First', 'M'])).toThrow(
-        /Could not compile `First` \(read as `At` with the index 1\): .*multi-axis/
+        /The symbol `M` has the type `matrix<real\^\(2x2\)>`, which has no type in the GLSL fragment/
       );
   });
 
@@ -221,10 +224,10 @@ describe('GPU: First, Second, Third and Last of other operands', () => {
     ce.declare('Ls3', 'list<string^3>');
     for (const to of ['glsl'] as const) {
       expect(() => code(to, ['First', 'Ls'])).toThrow(
-        /Could not compile `First` \(read as `At` with the index 1\): the base \(type `list<string>`\) has no statically known length/
+        /The symbol `Ls` has the type `list<string>`, which has no type in the GLSL fragment/
       );
       expect(() => code(to, ['First', 'Ls3'])).toThrow(
-        /Could not compile `First` \(read as `At` with the index 1\): the base's element type `string` is not a REAL scalar/
+        /The symbol `Ls3` has the type/
       );
     }
   });
@@ -237,13 +240,14 @@ describe('GPU: First, Second, Third and Last of other operands', () => {
   test('a conditional point with no absent arm is read with a swizzle', () => {
     // A restriction, `If` with no else branch and `Which` give a vector of NaN
     // when the point is absent, and the interpreter gives NaN.
+    // The fragment refuses an `If` that is a value and has one branch.
     for (const to of ['glsl'] as const) {
-      expect(
+      expect(() =>
         code(to, ['First', ['If', ['Less', 0, 'x'], ['Tuple', 'x', 2]]])
-      ).toMatch(/\)\.x$/);
-      expect(
+      ).toThrow(/An `If` that is a value needs both branches/);
+      expect(() =>
         code(to, ['Second', ['If', ['Less', 0, 'x'], ['Tuple', 'x', 2]]])
-      ).toMatch(/\)\.y$/);
+      ).toThrow(/An `If` that is a value needs both branches/);
     }
   });
 
@@ -256,7 +260,7 @@ describe('GPU: First, Second, Third and Last of other operands', () => {
     for (const to of ['glsl'] as const) {
       expect(() =>
         code(to, ['Not', ['First', ['Tuple', 'Bq', 'Cq']]])
-      ).toThrow(/Could not compile `First`/);
+      ).toThrow(/The component 1 of the point .* has the type `boolean`/);
     }
   });
 
@@ -283,7 +287,10 @@ describe('GPU: First, Second, Third and Last of other operands', () => {
       );
       // A 2-D point has no third component: the read is proved to find
       // nothing, typed `nan`, and compiles to NaN, as the interpreter gives.
-      expect(code(to, ['Third', ['At', 'P', 'k']])).toContain('_gpu_nan()');
+      // The fragment refuses it.
+      expect(() => code(to, ['Third', ['At', 'P', 'k']])).toThrow(
+        /`Third` reads the element 3, and its operand has 2 element\(s\)/
+      );
     }
     // The interpreter: an element of an absent point is NaN.
     expect(
@@ -296,15 +303,19 @@ describe('GPU: First, Second, Third and Last of other operands', () => {
   test('a boolean vector declared by the caller is read with a swizzle', () => {
     // A list of 3 booleans that the caller declares as a `bvec3` uniform.
     ce.declare('B3', 'list<boolean^3>');
-    const shader = new GLSLTarget().compileShader({
-      type: 'fragment',
-      uniforms: [{ name: 'B3', type: 'bvec3' }],
-      outputs: [{ name: 'o', type: 'float' }],
-      body: [
-        { variable: 'o', expression: ce.box(['If', ['First', 'B3'], 1, 0]) },
-      ],
-    });
-    expect(shader).toContain('o = float(B3.x);');
+    // The fragment gives `bvec3` no type.
+    expect(() =>
+      new GLSLTarget().compileShader({
+        type: 'fragment',
+        uniforms: [{ name: 'B3', type: 'bvec3' }],
+        outputs: [{ name: 'o', type: 'float' }],
+        body: [
+          { variable: 'o', expression: ce.box(['If', ['First', 'B3'], 1, 0]) },
+        ],
+      })
+    ).toThrow(
+      /The name `B3` is declared `bvec3`, which has no type in the GLSL fragment/
+    );
   });
 });
 
@@ -319,29 +330,18 @@ describe('GPU: First, Second, Third and Last of an operand with a draw', () => {
 
   for (const to of ['glsl'] as const)
     test(`each draw is kept once, or the compile declines (${to})`, () => {
-      // The selected element is the draw: the other elements are pure.
-      expect(draws(code(to, ['Second', ['Tuple', 'x', R]]))).toBe(1);
-      expect(draws(code(to, ['First', ['List', R, 2, 3]]))).toBe(1);
-      // A draw that is not selected would be left out, so these decline.
-      expect(() => code(to, ['First', ['Tuple', 'x', R]])).toThrow(
-        /Could not compile `First`.*impure/
-      );
-      expect(() => code(to, ['Last', ['List', R, 2]])).toThrow(
-        /Could not compile `Last`/
-      );
-      // A compound vector keeps its draw: the element is a swizzle of it.
-      const sum = code(to, ['First', ['Add', ['Tuple', 'x', 'y'], ['Tuple', R, 1]]]);
-      expect(draws(sum)).toBe(1);
-      expect(sum).toMatch(/\)\.x$/);
-      // A position past the end of a vector with a draw would drop the draw.
+      // The fragment refuses `Random`, so every form with a draw declines.
+      expect(() => code(to, ['Second', ['Tuple', 'x', R]])).toThrow(/The head `Random` is outside the GLSL fragment/);
+      expect(() => code(to, ['First', ['List', R, 2, 3]])).toThrow(/The head `Random` is outside the GLSL fragment/);
+      expect(() => code(to, ['First', ['Tuple', 'x', R]])).toThrow(/The head `Random` is outside the GLSL fragment/);
+      expect(() => code(to, ['Last', ['List', R, 2]])).toThrow(/The head `Random` is outside the GLSL fragment/);
+      expect(() =>
+        code(to, ['First', ['Add', ['Tuple', 'x', 'y'], ['Tuple', R, 1]]])
+      ).toThrow(/The head `Random` is outside the GLSL fragment/);
       expect(() =>
         code(to, ['Third', ['Multiply', R, ['Tuple', 'x', 'y']]])
-      ).toThrow(/Could not compile `Third`/);
-      // A list of points with a draw reads its element with the guarded
-      // helper, which evaluates the whole list once.
+      ).toThrow(/The head `Random` is outside the GLSL fragment/);
       const points = ['List', ['Tuple', R, 2], ['Tuple', 'x', 4]];
-      const third = code(to, ['Third', points]);
-      expect(third).toMatch(/^_gpu_atp2_2\(/);
-      expect(draws(third)).toBe(1);
+      expect(() => code(to, ['Third', points])).toThrow(/The head `Random` is outside the GLSL fragment/);
     });
 });

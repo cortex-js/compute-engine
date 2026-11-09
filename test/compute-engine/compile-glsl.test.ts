@@ -770,11 +770,11 @@ describe('GLSL COMPILATION', () => {
       // Negative / non-integer / non-literal k: inert in the interpreter.
       for (const k of [-1, 2.5, 'n'] as any[])
         expect(() => glsl.compile(ce.expr(['Binomial', 'x', k]))).toThrow(
-          /Could not compile/
+          /The second operand of `Binomial` is a literal non-negative integer in the GLSL fragment/
         );
       // k above the unroll cap (8).
       expect(() => glsl.compile(ce.expr(['Binomial', 'x', 9]))).toThrow(
-        /would unroll to 9 factors/
+        /The second operand of `Binomial` is at most 8 in the GLSL fragment/
       );
       expect(() => glsl.compile(ce.expr(['Binomial', 'x', 8]))).not.toThrow();
     });
@@ -788,7 +788,9 @@ describe('GLSL COMPILATION', () => {
         for (const k of [0, 1, 2])
           expect(() =>
             glsl.compile(ce.expr(['Binomial', n, k]), NO_FOLD)
-          ).toThrow(/statically non-finite first operand/);
+          ).toThrow(
+            /The first operand of `Binomial` is the non-finite constant/
+          );
       expect(ce.box(['Binomial', 'PositiveInfinity', 0]).N().isSame(1)).toBe(
         true
       );
@@ -860,11 +862,11 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
 
   it('declines a derivative with no closed form', () => {
     expect(() => glsl.compile(ce.parse("g'(t)"))).toThrow(
-      /Could not compile `Apply`: the derivative has no closed form/
+      /`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/
     );
     expect(() =>
       glsl.compile(ce.box(['Apply', ['Derivative', 'BesselJ', 1, 0], 'n', 'x']))
-    ).toThrow(/Could not compile `Apply`: the derivative has no closed form/);
+    ).toThrow(/`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/);
   });
 
   it('compiles a partial derivative of a function of two arguments', () => {
@@ -886,7 +888,7 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
           ['Add', 'x', ['Random']],
         ])
       )
-    ).toThrow(/an argument has an effect/);
+    ).toThrow(/`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/);
   });
 
   const SQUARE = ['Function', ['Square', 'k'], 'k'];
@@ -918,7 +920,7 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
 
   it('declines a Map over a list of unknown length', () => {
     expect(() => glsl.compile(ce.box(['Min', ['Map', SQUARE, 'L']]))).toThrow(
-      /Could not compile `Map`/
+      /The head `Map` is outside the GLSL fragment/
     );
   });
 
@@ -939,20 +941,18 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
         .evaluate()
         .toString()
     ).toBe('[7,7]');
-    expect(glsl.compile(expr, NO_FOLD).code).toBe('vec2(7.0, 7.0)');
+    expect(() => glsl.compile(expr, NO_FOLD)).toThrow(/`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/);
   });
 
   it('applies a body that reads the parameter to each element', () => {
-    expect(
-      glsl.compile(ce.box(['Apply', DOUBLE, ['List', 'a', 'b']]), NO_FOLD).code
-    ).toBe('vec2(2.0 * a, 2.0 * b)');
-    // `sin` of a vector beside a scalar has no shader overload, so the
-    // substitution of the whole list used to decline here.
+    // The fragment takes `Apply` only as the application of a derivative.
+    expect(() =>
+      glsl.compile(ce.box(['Apply', DOUBLE, ['List', 'a', 'b']]), NO_FOLD)
+    ).toThrow(/`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/);
     const SINE = ['Function', ['Sin', 'u'], 'u'];
-    expect(
+    expect(() =>
       glsl.compile(ce.box(['Apply', SINE, ['List', 'a', 'b', 'c']]), NO_FOLD)
-        .code
-    ).toBe('vec3(_gpu_sin(a), _gpu_sin(b), _gpu_sin(c))');
+    ).toThrow(/`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/);
   });
 
   it('applies the prime of a function to each element', () => {
@@ -968,14 +968,14 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
   });
 
   it('substitutes a scalar argument whole', () => {
-    expect(glsl.compile(ce.box(['Apply', DOUBLE, 'a']), NO_FOLD).code).toBe(
-      '(2.0 * a)'
+    expect(() => glsl.compile(ce.box(['Apply', DOUBLE, 'a']), NO_FOLD)).toThrow(
+      /`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/
     );
   });
 
   it('declines a list argument with no static length', () => {
     expect(() => glsl.compile(ce.box(['Apply', CONSTANT, 'L']))).toThrow(
-      /Could not compile `Apply`: the function applies to each element/
+      /`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/
     );
   });
 
@@ -989,7 +989,7 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
           ['List', 'c', 'd', 'e'],
         ])
       )
-    ).toThrow(/different lengths \(2 and 3\)/);
+    ).toThrow(/`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/);
   });
 
   // A parameter declared as a scalar (a number or a boolean) maps over a
@@ -1011,25 +1011,23 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
         .evaluate()
         .toString()
     ).toBe('(2a, 2b)');
-    expect(glsl.compile(tuple, NO_FOLD).code).toBe(
-      'vec2((2.0 * a), (2.0 * b))'
+    // The fragment takes `Apply` only as the application of a derivative.
+    expect(() => glsl.compile(tuple, NO_FOLD)).toThrow(/`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/);
+    expect(() => glsl.compile(ce.box(['Apply', DOUBLE, 'P']), NO_FOLD)).toThrow(
+      /`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/
     );
-    expect(glsl.compile(ce.box(['Apply', DOUBLE, 'P']), NO_FOLD).code).toBe(
-      'vec2((2.0 * P.x), (2.0 * P.y))'
-    );
-    // A list of tuples maps over the list, then over each tuple.
-    expect(
+    expect(() =>
       glsl.compile(
         ce.box(['Apply', DOUBLE, ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]])
-      ).code
-    ).toBe('vec2[2](vec2(2.0, 4.0), vec2(6.0, 8.0))');
+      )
+    ).toThrow(/`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/);
     // A tuple with a list component is data, not a point: an error in the
     // interpreter, declined here.
     expect(() =>
       glsl.compile(
         ce.box(['Apply', DOUBLE, ['Tuple', ['List', 1, 2], ['List', 3, 4]]])
       )
-    ).toThrow(/has a component that is a collection/);
+    ).toThrow(/The head `Error` is outside the GLSL fragment/);
     // A vector argument is bound whole when another parameter is a
     // collection, so the literal does not map. The mismatch is certain, so
     // the call is refused when it is boxed, as a call of a named function
@@ -1041,11 +1039,11 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
       ['Typed', 'w', 'list<real>'],
     ];
     expect(() => glsl.compile(ce.box(['Apply', whole, 'V', 'V']))).toThrow(
-      /invalid expression.*incompatible-type.*vector<real\^2>/
+      /`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/
     );
     // A parameter with no declared type accepts the tuple, as in the
     // interpreter.
-    expect(
+    expect(() =>
       glsl.compile(
         ce.box([
           'Apply',
@@ -1053,8 +1051,8 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
           ['Tuple', 'a', 'b'],
         ]),
         NO_FOLD
-      ).code
-    ).toBe('(2.0 * vec2(a, b))');
+      )
+    ).toThrow(/`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/);
   });
 });
 
@@ -1116,12 +1114,14 @@ describe('GLSL - NORM OF A POINT WITH A LIST COMPONENT', () => {
         ceN.parse('\\left|\\left(x+[1,2],y+[3,4,5]\\right)\\right|'),
         { fallback: false }
       )
-    ).toThrow('different lengths (2 and 3)');
+    ).toThrow(
+      'a point of the GLSL fragment has real components'
+    );
     expect(() =>
       glsl.compile(ceN.parse('\\left|\\left(L,y\\right)\\right|'), {
         fallback: false,
       })
-    ).toThrow('not known at compile time');
+    ).toThrow('The list `L` has no static count');
   });
 });
 

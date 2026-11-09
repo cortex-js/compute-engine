@@ -181,7 +181,9 @@ describe('G3 lift — what still declines', () => {
         to: 'glsl',
         fallback: false,
       } as any)
-    ).toThrow(/gd/);
+    ).toThrow(
+      /The symbol `y` has the type `list<real> \| real`, which has no type in the GLSL fragment/
+    );
   });
 
   test('a declared `broadcastable<T>` parameter with a number bound maps to the cells', () => {

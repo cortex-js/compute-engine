@@ -268,8 +268,11 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
     ['Gamma', 'glsl'],
   ])('Derivative(%s, 1, 0) with no closed form declines on %s', (f, to) => {
     const expr = ce.box(['Apply', ['Derivative', f, 1, 0], 's', 'x']);
+    // The GLSL fragment refuses it with its own message.
     expect(declineMessage(expr, to)).toMatch(
-      /Could not compile `Apply`: the derivative has no closed form/
+      to === 'glsl'
+        ? /`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/
+        : /Could not compile `Apply`: the derivative has no closed form/
     );
   });
 
@@ -294,7 +297,9 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
       const expr = ceBig.box(['Apply', ['Derivative', 'H', 2, 1], 'x', 'y']);
       const start = Date.now();
       expect(declineMessage(expr, to)).toMatch(
-        /Could not compile `Apply`: the closed form of the derivative is too large to write out/
+        to === 'glsl'
+          ? /`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/
+          : /Could not compile `Apply`: the closed form of the derivative is too large to write out/
       );
       // The decline with the interpreter fallback does not compute the
       // closed form either.
@@ -329,13 +334,21 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
           ce.box(['Apply', ['Derivative', 'Power', 0, 1], 'x']),
           to
         )
-      ).toContain('takes 2 parameter(s) but 1 argument(s)');
+      ).toContain(
+        to === 'glsl'
+          ? '`Apply` is in the GLSL fragment only as the application of a derivative whose closed form'
+          : 'takes 2 parameter(s) but 1 argument(s)'
+      );
       expect(
         declineMessage(
           ce.box(['Apply', ['Derivative', 'Sin', 1], 'x', 'y']),
           to
         )
-      ).toContain('takes 1 parameter(s) but 2 argument(s)');
+      ).toContain(
+        to === 'glsl'
+          ? '`Apply` is in the GLSL fragment only as the application of a derivative whose closed form'
+          : 'takes 1 parameter(s) but 2 argument(s)'
+      );
     }
     // A third derivative of a large body has a closed form, but it is too
     // large to write out. The javascript target compiles it with
@@ -345,7 +358,9 @@ describe('COMPILE DERIVATIVE — applied derivative of a function of two argumen
     const big = ceBig.box(['Apply', ['Derivative', 'f', 3], 'x']);
     for (const to of ['interval-js', 'glsl'])
       expect(declineMessage(big, to)).toMatch(
-        /the closed form of the derivative is too large to write out/
+        to === 'glsl'
+          ? /`Apply` is in the GLSL fragment only as the application of a derivative whose closed form/
+          : /the closed form of the derivative is too large to write out/
       );
   });
 
@@ -440,7 +455,9 @@ describe('COMPILE DERIVATIVE — no closed form declines cleanly', () => {
     expect(() => new GLSLTarget().compile(expr)).toThrow();
     const result = compile(expr, { to: 'glsl' });
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Could not compile `D`: ');
+    expect(result.error).toContain(
+      '`D` is in the GLSL fragment only when the engine finds a closed form of the derivative at compile time'
+    );
   });
 
   test('a closed form the target cannot lower declines, without throwing', () => {
@@ -458,9 +475,10 @@ describe('COMPILE DERIVATIVE — no closed form declines cleanly', () => {
       result = compile(expr, { to: 'glsl' });
     }).not.toThrow();
     expect(result!.success).toBe(false);
-    expect(result!.error).toContain('Could not compile `D`: ');
-    expect(result!.error).toContain('Could not compile');
-    expect(result!.error).not.toContain('LambertW');
+    // The fragment names the head that it refuses.
+    expect(result!.error).toContain(
+      'The head `LambertW` is outside the GLSL fragment'
+    );
   });
 });
 

@@ -390,7 +390,9 @@ describe('COMPILE Sum/Product - multi-index (P0-43 regression)', () => {
     expect(result.run!({})).toBe(67950);
   });
 
-  test('GPU: multi-index Sum fails closed (not silently wrong)', () => {
+  // A multi-index Sum is the nest of one Sum per index, the first index
+  // outermost: 1·1 + 1·2 + … + 3·3 = 36, every term written.
+  test('GPU: multi-index Sum is the nest of one Sum per index', () => {
     const expr = engine.box([
       'Sum',
       ['Multiply', 'i', 'j'],
@@ -398,7 +400,10 @@ describe('COMPILE Sum/Product - multi-index (P0-43 regression)', () => {
       ['Limits', 'j', 1, 3],
     ]);
     const result = compile(expr, { to: 'glsl', constantFold: false });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+    for (const i of [1, 2, 3])
+      for (const j of [1, 2, 3])
+        expect(result.code).toContain(`${i}.0 * ${j}.0`);
   });
 });
 
@@ -623,7 +628,12 @@ describe('COMPILE SUM/PRODUCT: A BODY THAT WRITES THE INDEX', () => {
     } catch (err) {
       error = String(err);
     }
-    expect(error).toContain(`the body writes the index \`${index}\``);
+    // The GLSL fragment refuses the write before any code is written.
+    expect(error).toContain(
+      to === 'glsl'
+        ? `\`Assign\` writes \`${index}\``
+        : `the body writes the index \`${index}\``
+    );
   });
 
   test('a target with no Sum lowering of its own (the generic loop) declines', () => {
@@ -847,7 +857,10 @@ describe('COMPILE SUM/PRODUCT: A BOUND THAT IS NOT PURE', () => {
         fallback: false,
       }).success;
     } catch (err) {
-      expect(String(err)).toMatch(/has an effect/);
+      // The GLSL fragment refuses the `Random` head before any code is written.
+      expect(String(err)).toMatch(
+        to === 'glsl' ? /outside the GLSL fragment/ : /has an effect/
+      );
       success = false;
     }
     expect(success).toBe(false);

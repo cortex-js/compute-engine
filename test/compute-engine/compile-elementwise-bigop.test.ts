@@ -184,7 +184,9 @@ describe('element-wise Sum/Product: unchanged behavior elsewhere', () => {
         // shader vector literal, bypassing the decline under test.
         { constantFold: false }
       )
-    ).toThrow(/collection-valued body has no compiled form/);
+    ).toThrow(
+      /The body of `Sum` has the type `list<real, 3>`, and an aggregate of the GLSL fragment adds or multiplies/
+    );
   });
 
   test('the interval-js target keeps the fail-closed decline', () => {

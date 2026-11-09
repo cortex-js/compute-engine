@@ -203,7 +203,11 @@ describe('PointList with a broadcastable component', () => {
     for (const to of ['python', 'glsl'] as const) {
       const r = compile(body, { to });
       expect(r.success).toBe(false);
-      expect(String(r.reason ?? r.error)).toContain('scalar or a list depending on its run-time value');
+      expect(String(r.reason ?? r.error)).toContain(
+        to === 'glsl'
+          ? 'which has no type in the GLSL fragment'
+          : 'scalar or a list depending on its run-time value'
+      );
     }
   });
 

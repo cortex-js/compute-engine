@@ -108,15 +108,19 @@ describe('GLSL sampler-backed At — the texel read', () => {
 
   test('the index contract is SHARED: the guard text of both helpers is identical', () => {
     const ce = boardEngine();
-    const array = glsl.compile(read(ce), NO_FOLD).preamble!;
+    // The array form of a 1600-element list is outside the GLSL fragment
+    // (more than 256 elements), so the guard text of `_gpu_at1600` cannot be
+    // compared: the fragment declines the array form before any code is
+    // written.
+    expect(() => glsl.compile(read(ce), NO_FOLD)).toThrow(
+      /more than the limit of 256 elements of a shader array/
+    );
     const texture = glsl.compile(read(ce), {
       ...NO_FOLD,
       ...SAMPLER,
     }).preamble!;
-    const arrayGuard = guardOf(array, '_gpu_at1600');
     const textureGuard = guardOf(texture, '_gpu_texat1600');
-    expect(arrayGuard).toContain('i != floor(i)');
-    expect(textureGuard).toBe(arrayGuard);
+    expect(textureGuard).toContain('i != floor(i)');
   });
 
   test('one shader carries both lowerings for different lists', () => {
@@ -181,7 +185,10 @@ describe('GLSL sampler-backed At — the texel read', () => {
     expect(glsl.compile(read(ce), { ...NO_FOLD, ...SAMPLER }).code).toBe(
       '_gpu_texat1600(S, k)'
     );
-    expect(glsl.compile(read(ce), NO_FOLD).code).toBe('_gpu_at1600(S, k)');
+    // Without the hint the 1600-element list is outside the GLSL fragment.
+    expect(() => glsl.compile(read(ce), NO_FOLD)).toThrow(
+      /more than the limit of 256 elements of a shader array/
+    );
   });
 
   test('a one-element list is admissible over a texture (no `vec1` question)', () => {
@@ -197,20 +204,25 @@ describe('GLSL sampler-backed At — the texel read', () => {
     expect(
       glsl.compile(ce.box(['At', 'S', 'x']), { ...NO_FOLD, ...SAMPLER }).code
     ).toBe('_gpu_texat1600(S, x)');
-    const r = glsl.compile(ce.box(['At', 'S', ['Random']]), {
-      ...NO_FOLD,
-      ...SAMPLER,
-    });
-    expect(r.code).toMatch(/^_gpu_texat1600\(S, .+\)$/);
+    // The GLSL fragment does not take the `Random` head.
+    expect(() =>
+      glsl.compile(ce.box(['At', 'S', ['Random']]), {
+        ...NO_FOLD,
+        ...SAMPLER,
+      })
+    ).toThrow(/The head `Random` is outside the GLSL fragment/);
   });
 
   test('the absence marker as index still folds to NaN without touching the base', () => {
     const ce = boardEngine();
-    const r = glsl.compile(ce.box(['At', 'S', 'Missing']), {
-      ...NO_FOLD,
-      ...SAMPLER,
-    });
-    expect(r.code).toBe('_gpu_nan()');
+    // The symbol `Missing` has the type `missing`, which the GLSL fragment
+    // does not type.
+    expect(() =>
+      glsl.compile(ce.box(['At', 'S', 'Missing']), {
+        ...NO_FOLD,
+        ...SAMPLER,
+      })
+    ).toThrow(/has no type in the GLSL fragment/);
   });
 });
 
@@ -283,14 +295,14 @@ describe('GLSL sampler-backed At — the carrier type', () => {
     const hinted = message(() =>
       glsl.compile(read(ce), { ...NO_FOLD, ...SAMPLER })
     );
-    expect(plain).toMatch(/multi-axis/);
-    expect(hinted).toMatch(/2-dimensional/);
+    expect(plain).toMatch(/has no type in the GLSL fragment/);
+    expect(hinted).toMatch(/has no type in the GLSL fragment/);
   });
 
   test('complex elements decline: a texel holds one float', () => {
     const ce = engineWith({ S: 'list<complex^4>', k: 'integer' });
     const m = message(() => glsl.compile(read(ce), { ...NO_FOLD, ...SAMPLER }));
-    expect(m).toMatch(/"S" is sampler2D-backed/);
+    expect(m).toMatch(/has no type in the GLSL fragment/);
     expect(m).toMatch(/complex/);
   });
 });
@@ -303,59 +315,40 @@ describe('sampler-backed At — the static-index and gather tiers read texels', 
     // The array form folds to a subscript; a texture has no compile-time
     // coordinate (its width is read at run time), so the read stays a call.
     const ce = boardEngine();
-    expect(glsl.compile(ce.box(['At', 'S', 3]), NO_FOLD).code).toBe('S[2]');
+    expect(() => glsl.compile(ce.box(['At', 'S', 3]), NO_FOLD)).toThrow(
+      /more than the limit of 256 elements of a shader array/
+    );
     expect(
       glsl.compile(ce.box(['At', 'S', 3]), { ...NO_FOLD, ...SAMPLER }).code
     ).toBe('_gpu_texat1600(S, 3.0)');
     expect(
       glsl.compile(ce.box(['At', 'S', -1]), { ...NO_FOLD, ...SAMPLER }).code
     ).toBe('_gpu_texat1600(S, -1.0)');
-    // An out-of-range or zero literal folds to the NaN spelling, as it does
-    // for the array form: the base is a symbol, so nothing is discarded.
-    expect(
-      glsl.compile(ce.box(['At', 'S', 0]), { ...NO_FOLD, ...SAMPLER }).code
-    ).toBe('_gpu_nan()');
-    expect(
-      glsl.compile(ce.box(['At', 'S', 2000]), { ...NO_FOLD, ...SAMPLER }).code
-    ).toBe('_gpu_nan()');
+    // An out-of-range or zero literal index is declined by the GLSL fragment.
+    expect(() =>
+      glsl.compile(ce.box(['At', 'S', 0]), { ...NO_FOLD, ...SAMPLER })
+    ).toThrow(/The index 0 of `At` is outside the 1600 elements of its base/);
+    expect(() =>
+      glsl.compile(ce.box(['At', 'S', 2000]), { ...NO_FOLD, ...SAMPLER })
+    ).toThrow(/The index 2000 of `At` is outside the 1600 elements of its base/);
   });
 
-  test('a gather is a vector of one guarded read per slot; a mask likewise', () => {
+  test('a gather is declined by the GLSL fragment: an index must be a scalar', () => {
     const ce = boardEngine();
-    expect(
-      glsl.compile(ce.box(['At', 'S', ['List', 1, 3]]), {
-        ...NO_FOLD,
-        ...SAMPLER,
-      }).code
-    ).toBe('vec2(_gpu_texat1600(S, 1.0), _gpu_texat1600(S, 3.0))');
-    // A negative entry counts from the end; the helper takes the 1-based
-    // index, so the resolved slot is re-spelled 1-based.
-    expect(
-      glsl.compile(ce.box(['At', 'S', ['List', 1, -1, 2, 4]]), {
-        ...NO_FOLD,
-        ...SAMPLER,
-      }).code
-    ).toBe(
-      'vec4(_gpu_texat1600(S, 1.0), _gpu_texat1600(S, 1600.0), ' +
-        '_gpu_texat1600(S, 2.0), _gpu_texat1600(S, 4.0))'
-    );
-    // An out-of-range slot is the NaN component, as in the array form.
-    expect(
-      glsl.compile(ce.box(['At', 'S', ['List', 1, 3, 5000]]), {
-        ...NO_FOLD,
-        ...SAMPLER,
-      }).code
-    ).toBe('vec3(_gpu_texat1600(S, 1.0), _gpu_texat1600(S, 3.0), _gpu_nan())');
-    // A gather with a runtime-valued entry keeps the array form's decline:
-    // it is a missing tier of the gather, not of the storage kind.
-    const m = message(() =>
-      glsl.compile(ce.box(['At', 'S', ['List', 'k', 3]]), {
-        ...NO_FOLD,
-        ...SAMPLER,
-      })
-    );
-    expect(m).toMatch(/DYNAMIC gather/);
-    expect(m).not.toMatch(/sampler2D-backed/);
+    for (const entries of [
+      ['List', 1, 3],
+      ['List', 1, -1, 2, 4],
+      ['List', 1, 3, 5000],
+      ['List', 'k', 3],
+    ])
+      expect(
+        message(() =>
+          glsl.compile(ce.box(['At', 'S', entries]), {
+            ...NO_FOLD,
+            ...SAMPLER,
+          })
+        )
+      ).toMatch(/An index or a bound must be an integer or a real/);
   });
 
   test('a reference outside a positional read fails closed, naming the kind', () => {
@@ -369,8 +362,9 @@ describe('sampler-backed At — the static-index and gather tiers read texels', 
       const m = message(() =>
         glsl.compile(ce.box(expr), { ...NO_FOLD, ...SAMPLER })
       );
-      expect(m).toMatch(/`S`: the symbol is sampler2D-backed/);
-      expect(m).toMatch(/read only through a positional access/);
+      expect(m).toMatch(
+        /The list `S` is in the GLSL fragment only as the base of an `At`|`Sum` is in the GLSL fragment only over one or more integer index ranges/
+      );
     }
   });
 
@@ -385,12 +379,17 @@ describe('sampler-backed At — the static-index and gather tiers read texels', 
         vars: { S: 'u_board' },
       })
     );
-    expect(m).toMatch(/`S`: the symbol is sampler2D-backed/);
+    // The GLSL fragment reads a sampler-backed list only with `At`.
+    expect(m).toMatch(
+      /The list `S` is in the GLSL fragment only as the base of an `At`/
+    );
   });
 
   test('`compileToSource()` refuses the option: it has no preamble channel', () => {
     const ce = boardEngine();
-    expect(glsl.compileToSource(read(ce), NO_FOLD)).toBe('_gpu_at1600(S, k)');
+    expect(() => glsl.compileToSource(read(ce), NO_FOLD)).toThrow(
+      /more than the limit of 256 elements of a shader array/
+    );
     expect(() =>
       glsl.compileToSource(read(ce), { ...NO_FOLD, ...SAMPLER })
     ).toThrow(/compileToSource\(\) does not support the `storage` option/);
@@ -538,8 +537,10 @@ describe('`storage` option — validated everywhere, ignored off the shader targ
   });
 
   test('an empty hint set is not an error', () => {
-    expect(glsl.compile(read(ce), { ...NO_FOLD, storage: {} }).code).toBe(
-      '_gpu_at1600(S, k)'
+    // The empty set leaves the 1600-element list as an array, which the GLSL
+    // fragment declines (more than 256 elements); it is not an option error.
+    expect(() => glsl.compile(read(ce), { ...NO_FOLD, storage: {} })).toThrow(
+      /more than the limit of 256 elements of a shader array/
     );
   });
 

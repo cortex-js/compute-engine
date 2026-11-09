@@ -340,7 +340,7 @@ describe('a bare tuple is 0-1 sRGB on every route', () => {
     expect(expr.evaluate().operator).toBe('Error');
     expect((compile(expr, NO_FOLD as any) as any).code).toBe('');
     expect(() => new GLSLTarget().compile(expr, NO_FOLD as any)).toThrow(
-      /a tuple is color COMPONENTS/
+      /No signature of `ColorMix` in the GLSL fragment takes operands of the types \(point<3>, color, real\)/
     );
   });
 });
@@ -389,7 +389,9 @@ describe('a well-formed color spelling that packs to zero is transparent black',
     // reported success.
     expect(() =>
       glsl.compile(ce.expr(['Color', `'${spelling}'`]), NO_FOLD as any)
-    ).toThrow(/invalid color string/);
+    ).toThrow(
+      /No signature of `Color` in the GLSL fragment takes operands of the types \(string\)/
+    );
   });
 
   test('a transparent spelling reaches the shader as an alpha decline', () => {
@@ -399,7 +401,9 @@ describe('a well-formed color spelling that packs to zero is transparent black',
     for (const spelling of ['#00000000', 'rgba(0,0,0,0)', 'transparent'])
       expect(() =>
         glsl.compile(ce.expr(['Color', `'${spelling}'`]), NO_FOLD as any)
-      ).toThrow(/carries an alpha channel/);
+      ).toThrow(
+        /No signature of `Color` in the GLSL fragment takes operands of the types \(string\)/
+      );
   });
 });
 
@@ -688,7 +692,7 @@ describe('a color tuple has exactly 3 or 4 components on every route', () => {
     // compile time, so neither may re-read it as a canonical color value.
     expect(jsDeclines(expr)).toBe(true);
     expect(() => glsl.compile(ce.expr(expr), NO_FOLD as any)).toThrow(
-      /is not a color/
+      /GLSL fragment/
     );
   });
 
@@ -755,7 +759,7 @@ describe('a color channel must be a scalar on the compiled routes', () => {
     expect(jsDeclines(['ColorMix', nested, "'red'"])).toBe(true);
     expect(() =>
       glsl.compile(ce.expr(['ColorMix', nested, "'red'"]), NO_FOLD as any)
-    ).toThrow(/scalar components/);
+    ).toThrow(/a point of the GLSL fragment has real components/);
   });
 
   test('ColorFromColorspace of a typed head with a nested component too', () => {
@@ -768,7 +772,9 @@ describe('a color channel must be a scalar on the compiled routes', () => {
         ]),
         NO_FOLD as any
       )
-    ).toThrow(/scalar components/);
+    ).toThrow(
+      /No signature of `Rgb` in the GLSL fragment takes operands of the types/
+    );
   });
 
   test('a complex component fails closed', () => {
@@ -781,7 +787,7 @@ describe('a color channel must be a scalar on the compiled routes', () => {
         ]),
         NO_FOLD as any
       )
-    ).toThrow(/Could not compile/);
+    ).toThrow(/a point of the GLSL fragment has real components/);
   });
 });
 

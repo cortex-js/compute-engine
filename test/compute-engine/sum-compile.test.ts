@@ -254,13 +254,17 @@ describe('ERASED policy — a representation-disjoint sum keeps D11 erasure', ()
   });
 
   test('an erased tuple payload keeps its D11 lowering on the GPU target', () => {
-    // Erasure is target-independent: only the TAGGED emission is JS-only.
+    // Only the TAGGED emission is JS-only. The GLSL fragment does not take the
+    // constructor head at all.
     const ce = engine('type shape = dot | seg(a: number, b: number)');
     ce.declare('u', 'number');
     ce.declare('w', 'number');
     const e = ce.box(['seg', 'u', 'w'] as MathJsonExpression);
     expect(compile(e, { fallback: false }).code).toBe('[_.u, _.w]');
-    expect(compile(e, { to: 'glsl', fallback: false }).code).toBe('vec2(u, w)');
+    // The GLSL fragment refuses a user constructor head.
+    expect(() => compile(e, { to: 'glsl', fallback: false })).toThrow(
+      /outside the GLSL fragment/
+    );
   });
 });
 
@@ -359,7 +363,7 @@ describe('§B2 — field access on a variant value', () => {
     for (const to of ['python', 'glsl'] as const)
       expect(() =>
         compile(e, { to, fallback: false, constantFold: false })
-      ).toThrow(/Could not compile/);
+      ).toThrow(to === 'glsl' ? /outside the GLSL fragment/ : /Could not compile/);
   });
 });
 
@@ -493,7 +497,7 @@ describe('fail closed — out-of-scope targets and non-sugar nominals', () => {
     ] as MathJsonExpression);
     for (const to of ['glsl'] as const)
       expect(() => compile(m, { to, fallback: false })).toThrow(
-        /not compilable/
+        /outside the GLSL fragment/
       );
   });
 
@@ -509,7 +513,7 @@ describe('fail closed — out-of-scope targets and non-sugar nominals', () => {
     ] as MathJsonExpression);
     expect(compile(e, { fallback: false }).run!({ u: 2 })).toBe(1);
     expect(() => compile(e, { to: 'glsl', fallback: false })).toThrow(
-      /Could not compile/
+      /outside the GLSL fragment/
     );
   });
 });

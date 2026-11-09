@@ -34,9 +34,11 @@ import { noteLoweredParallelLoop } from './pool-loop.js';
  * unspecified: a target that runs the passes in parallel can give another
  * one.
  *
- * Only the JavaScript target calls this function. The other targets meet the
- * heads themselves and decline them (`compileExpr()` in
- * `compiler-core.ts`).
+ * The JavaScript and GLSL targets call this function. The GLSL fragment
+ * admits a `parallel for` with scalar accumulators and runs its passes in
+ * order (`docs/plans/2026-11-08-glsl-fragment-spec.md`, decision 7). The
+ * other targets meet the heads themselves and decline them (`compileExpr()`
+ * in `compiler-core.ts`).
  */
 export function lowerParallelHeads(expr: Expression): Expression {
   const ce = expr.engine;
@@ -119,6 +121,49 @@ export function lowerParallelHeads(expr: Expression): Expression {
 }
 
 /**
+ * The names `s` of the statements `Assign(s, Add(…, s, …))` of `expr`: the
+ * statements `s = s + e` that the program wrote. `expr` is a tree as the
+ * program wrote it, before `lowerParallelHeads()`.
+ *
+ * `lowerParallelHeads()` writes `s += e` as `Assign(s, Add(s, e))`, the
+ * form of `s = s + e`, and the GLSL fragment types the lowered tree that
+ * the emitter writes. The fragment admits a write to a local outside a
+ * parallel loop only by `+=`, and `+=` only on a scalar local
+ * (`docs/plans/2026-11-08-glsl-fragment-spec.md`, decision 7), so the pass
+ * must tell the two forms apart. The rewrites that run after the lowering
+ * (point values written in place, unrolled collections) make new nodes and
+ * can change the order of the operands of the `Add`, so the pass cannot
+ * tell them apart by their nodes. It tells them apart by these names: in
+ * the lowered tree, `Assign(s, Add(…, s, …))` is a `+=` when `s` is not one
+ * of these names. When the program writes both `s += e` and `s = s + f`,
+ * the pass reads both as `=`, which a parallel loop refuses for a local
+ * outside the loop.
+ */
+export function sumAssignedNames(expr: Expression): Set<string> {
+  const names = new Set<string>();
+  // A tree can share a node between several parents: each node is read
+  // once.
+  const seen = new Set<Expression>();
+  const visit = (e: Expression): void => {
+    if (!isFunction(e) || seen.has(e)) return;
+    seen.add(e);
+    if (
+      e.operator === 'Assign' &&
+      e.nops === 2 &&
+      isSymbol(e.op1) &&
+      isFunction(e.op2, 'Add')
+    ) {
+      const name = e.op1.symbol;
+      if (e.op2.ops.some((op) => isSymbol(op) && op.symbol === name))
+        names.add(name);
+    }
+    for (const op of e.ops) visit(op);
+  };
+  visit(expr);
+  return names;
+}
+
+/**
  * `body`, the body of a user function that the engine defines, with the
  * `parallel for` heads and `+=` lowered when the target is JavaScript
  * (`lowerParallelHeads()`). The JavaScript entry lowers only the expression
@@ -128,12 +173,14 @@ export function lowerParallelHeads(expr: Expression): Expression {
  * compile these heads. The emission of the body (`definitionBodyExpr()` and
  * `substitutedUserFunctionBody()` in `compile-cse.ts`) and the analysis of
  * its inputs (`analyzeReferences()` in `compile-references.ts`) both call
- * this function, so they read the same tree. The other targets keep the
- * heads and decline them.
+ * this function, so they read the same tree. The GLSL target lowers the
+ * heads too; the other targets keep them and decline them.
  */
 export function bodyWithParallelHeadsLowered(
   body: Expression,
   target: CompileTarget<Expression>
 ): Expression {
-  return target.language === 'javascript' ? lowerParallelHeads(body) : body;
+  return target.language === 'javascript' || target.language === 'glsl'
+    ? lowerParallelHeads(body)
+    : body;
 }

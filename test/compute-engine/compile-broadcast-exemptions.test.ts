@@ -112,7 +112,9 @@ describe('BROADCAST EXEMPTION — a tuple operand of an exempt head is ATOMIC', 
         .toString()
     ).toBe('Error("incompatible-type")');
     expect(js(['AsRgb', ['Tuple', 1, 2]]).success).toBe(false);
-    expect(() => g(['AsRgb', ['Tuple', 1, 2]])).toThrow(/is not a color/);
+    expect(() => g(['AsRgb', ['Tuple', 1, 2]])).toThrow(
+      /No signature of `AsRgb` in the GLSL fragment/
+    );
   });
 });
 

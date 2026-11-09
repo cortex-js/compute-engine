@@ -1053,12 +1053,11 @@ describe('GPU compile: typed color heads', () => {
     for (const to of ['glsl'] as const) {
       const compiled = compile(ce.expr(json as any), { to });
       expect(compiled.success).toBe(false);
+      // The GLSL fragment has no signature of the head with a 4th operand.
+      expect(compiled.diagnostic?.code).toBe('outside-fragment');
       expect(compiled.error).toMatch(
-        new RegExp(
-          `Could not compile \`${head}\`: an alpha \\(4th\\) operand is not representable`
-        )
+        new RegExp(`No signature of \`${head}\` in the GLSL fragment`)
       );
-      expect(compiled.error).toMatch(/Could not compile/);
     }
   });
 
@@ -1076,10 +1075,11 @@ describe('GPU compile: typed color heads', () => {
         { to, constantFold: false }
       );
       expect(compiled.success).toBe(false);
+      // The GLSL fragment has no signature of the head with a 4-point.
+      expect(compiled.diagnostic?.code).toBe('outside-fragment');
       expect(compiled.error).toMatch(
-        /Could not compile `ColorFromColorspace`: an alpha \(4th\) operand is not representable/
+        /No signature of `ColorFromColorspace` in the GLSL fragment/
       );
-      expect(compiled.error).toMatch(/Could not compile/);
     }
   });
 
@@ -1087,8 +1087,11 @@ describe('GPU compile: typed color heads', () => {
     for (const to of ['glsl'] as const) {
       const compiled = compile(ce.expr(['Color', "'#ff000080'"]), { to });
       expect(compiled.success).toBe(false);
-      expect(compiled.error).toMatch(/carries an alpha channel/);
-      expect(compiled.error).toMatch(/Could not compile/);
+      // The GLSL fragment has no `Color` signature over this string.
+      expect(compiled.diagnostic?.code).toBe('outside-fragment');
+      expect(compiled.error).toMatch(
+        /No signature of `Color` in the GLSL fragment/
+      );
     }
   });
 

@@ -188,7 +188,7 @@ describe('Real-only lowerings over a statically non-real operand', () => {
           fallback: false,
         } as any)
       ).toThrow(
-        /Could not compile `Erf`: the target's lowering for this head is real-only/
+        /No signature of `Erf` in the GLSL fragment takes operands of the types \(complex\)/
       );
   });
 

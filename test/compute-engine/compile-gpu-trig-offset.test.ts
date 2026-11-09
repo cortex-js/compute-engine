@@ -116,9 +116,10 @@ describe('the value of the emitted shader, in float32', () => {
 describe('terms that are not constants, and other routes', () => {
   test('a Random() term is drawn at run time, not at compile time', () => {
     const e = ce.box(['Sin', ['Add', 'x', ['Multiply', 100, ['Random']]]]);
-    const first = compile(e, { to: 'glsl' }).code;
-    expect(first).toContain('_gpu_rnd_draw');
-    expect(compile(e, { to: 'glsl' }).code).toBe(first);
+    // The GLSL fragment refuses `Random`, so the compilation declines.
+    const r = compile(e, { to: 'glsl' });
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('outside-fragment');
   });
 
   test('a function the caller maps to its own code is kept', () => {

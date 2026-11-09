@@ -372,7 +372,13 @@ describe('AbsArg in degree mode', () => {
 
   for (const [label, json] of CASES)
     test.each(TARGETS)(`${label}: %s refuses`, (to) => {
-      expect(refusal(engineWithK(), json, to)).toMatch(REFUSAL);
+      // The GLSL fragment has no `AbsArg` head, so the refusal of a stored
+      // value reaches that message first.
+      const expected =
+        to === 'glsl' && label === 'a stored value'
+          ? /The head `AbsArg` is outside the GLSL fragment/
+          : REFUSAL;
+      expect(refusal(engineWithK(), json, to)).toMatch(expected);
     });
 
   // The refusal is thrown at the entry of the target, before the outermost

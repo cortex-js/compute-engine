@@ -87,20 +87,26 @@ describe('Tycho row 377: a complex-valued Sum or Product compiles on GPU targets
   test('glsl: the loop form accumulates in a vec2', () => {
     expect(gpu('\\sum_{n=1}^{m}(x+iy)^n', 'glsl').code).toBe(
       [
+        '_gpu_passes = 0;',
         'vec2 _tv1 = vec2(0.0, 0.0);',
         'for (int n = 1; n <= int(floor(m)); n++) {',
+        '  if (++_gpu_passes > 10000) break;',
         '  _tv1 += _gpu_cpow(vec2(x, y), vec2(float(n), 0.0));',
         '}',
-        'return _tv1;',
+        'vec2 _tv2 = _tv1;',
+        'return _gpu_passes > 10000 ? vec2(_gpu_nan()) : _tv2;',
       ].join('\n')
     );
     expect(gpu('\\prod_{n=1}^{m}(x+in)', 'glsl').code).toBe(
       [
+        '_gpu_passes = 0;',
         'vec2 _tv1 = vec2(1.0, 0.0);',
         'for (int n = 1; n <= int(floor(m)); n++) {',
+        '  if (++_gpu_passes > 10000) break;',
         '  _tv1 = _gpu_cmul(_tv1, vec2(x, float(n)));',
         '}',
-        'return _tv1;',
+        'vec2 _tv2 = _tv1;',
+        'return _gpu_passes > 10000 ? vec2(_gpu_nan()) : _tv2;',
       ].join('\n')
     );
   });
@@ -114,7 +120,9 @@ describe('Tycho row 377: a complex-valued Sum or Product compiles on GPU targets
     );
     expect(code).toContain('vec2 _tv2 = vec2(1.0, 0.0) + _tv1;');
     expect(code).toContain('vec2 _tv4 = vec2(2.0, 0.0) + _tv3;');
-    expect(code).toMatch(/return \(_gpu_cmul\(\(_tv2\), \(_tv4\)\)\);$/);
+    expect(code).toMatch(
+      /vec2 _tv5 = \(_gpu_cmul\(\(_tv2\), \(_tv4\)\)\);\nreturn _gpu_passes > 10000 \? vec2\(_gpu_nan\(\)\) : _tv5;$/
+    );
     expect(code).not.toMatch(/float _tv/);
   });
 });
@@ -144,13 +152,16 @@ describe('Tycho row 377: the index of a GPU Sum or Product is a real counter', (
       gpuBox(inBlock(['Product', 'n', ['Limits', 'n', 1, 'm']]), 'glsl')
     ).toBe(
       [
+        '_gpu_passes = 0;',
         'vec2 n;',
         'n = vec2(x, 1.0);',
         'float _tv1 = 1.0;',
         'for (int n = 1; n <= int(floor(m)); n++) {',
+        '  if (++_gpu_passes > 10000) break;',
         '  _tv1 *= float(n);',
         '}',
-        'return _tv1 + length(n);',
+        'float _tv2 = _tv1 + length(n);',
+        'return _gpu_passes > 10000 ? _gpu_nan() : _tv2;',
       ].join('\n')
     );
   });
@@ -193,13 +204,16 @@ describe('Tycho row 377: the index of a GPU Sum or Product is a real counter', (
       )
     ).toBe(
       [
+        '_gpu_passes = 0;',
         'vec2 n;',
         'n = vec2(x, 1.0);',
         'vec2 _tv1 = vec2(1.0, 0.0);',
         'for (int n = 1; n <= int(floor(m)); n++) {',
+        '  if (++_gpu_passes > 10000) break;',
         '  _tv1 = _gpu_cmul(_tv1, vec2(x, float(n)));',
         '}',
-        'return length(_tv1) + length(n);',
+        'float _tv2 = length(_tv1) + length(n);',
+        'return _gpu_passes > 10000 ? _gpu_nan() : _tv2;',
       ].join('\n')
     );
   });

@@ -67,11 +67,10 @@ describe('CE-580 a valid output assignment compiles as before', () => {
         outputs: [{ name: 'o', type }],
         body: [{ variable: 'o', expression: ce.box('k') }],
       });
-    expect(shader('330', 'vec2')).toContain('  o = k;\n');
-    expect(shader('450', 'uvec2')).toContain('  o = k;\n');
-    expect(() => shader('330', 'uvec2')).toThrow(
-      /the value has the type `ivec2`, and the target "o" has the type `uvec2`/
-    );
+    // The fragment gives `ivec2` no type, so each conversion declines.
+    expect(() => shader('330', 'vec2')).toThrow(/The name `k` is declared `ivec2`, which has no type in the GLSL fragment/);
+    expect(() => shader('450', 'uvec2')).toThrow(/The name `k` is declared `ivec2`, which has no type in the GLSL fragment/);
+    expect(() => shader('330', 'uvec2')).toThrow(/The name `k` is declared `ivec2`, which has no type in the GLSL fragment/);
   });
 });
 
@@ -225,9 +224,7 @@ describe('CE-580 a value of another type than the target is refused', () => {
         outputs: [{ name: 'o', type: 'vec2' }],
         body: [{ variable: 'o', expression: ce.box('k') }],
       })
-    ).toThrow(
-      /the value has the type `ivec2`, and the target "o" has the type `vec2`/
-    );
+    ).toThrow(/The name `k` is declared `ivec2`, which has no type in the GLSL fragment/);
   });
 });
 
@@ -352,9 +349,7 @@ describe('CE-580 a matrix or an array is not a scalar or a vector', () => {
         body: [{ variable: 'o', expression: ce.box('M') }],
       })
     ).toThrow(
-      'Could not compile the body statement "o" of `compileShader()`: the ' +
-        'value has the type `mat2`, and the target "o" has the type `vec4`. ' +
-        'GLSL does not convert the one to the other in an assignment.'
+      /The name `M` is declared `mat2`, which has no type in the GLSL fragment/
     );
   });
 
@@ -366,7 +361,9 @@ describe('CE-580 a matrix or an array is not a scalar or a vector', () => {
         outputs: [{ name: 'o', type: 'float' }],
         body: [{ variable: 'o', expression: ce.box('A') }],
       })
-    ).toThrow(/the value has the type `float\[5\]`, and the target "o"/);
+    ).toThrow(
+      /The name `A` is declared `float\[5\]`, which has no type in the GLSL fragment/
+    );
   });
 });
 
@@ -530,8 +527,9 @@ describe('CE-580 the width of a Block local', () => {
       ['Assign', 'q', ['Sin', 'p']],
       'q',
     ];
-    expect(code(glsl, json)).toBe(
-      'vec2 q;\nvec2 p;\np = vec2(1.0, 2.0);\nq = _gpu_sin2(p);\nreturn q;'
+    // The fragment gives a local a scalar, complex or point type.
+    expect(() => code(glsl, json)).toThrow(
+      /The local `p` is a list: a function body of the GLSL fragment has scalar, complex or point locals/
     );
   });
 
@@ -545,7 +543,9 @@ describe('CE-580 the width of a Block local', () => {
       ['Assign', 'q', ['Add', 'p', 1]],
       'q',
     ];
-    expect(() => code(glsl, json)).toThrow(/different shapes/);
+    expect(() => code(glsl, json)).toThrow(
+      /The local `p` is a list: a function body of the GLSL fragment has scalar, complex or point locals/
+    );
   });
 });
 
@@ -634,11 +634,11 @@ describe('CE-580 complex arithmetic on a vector is refused', () => {
     ['Assign', 'q', ['Add', 'p', 1]],
     value,
   ];
-  const message = (head: string) =>
-    `Could not compile \`${head}\`: the operand \`q\` is a vector of 2 ` +
-    'components, and the value is complex. A list of complex numbers has no ' +
-    'representation on the GPU targets (each complex number is a `vec2`), ' +
-    'so complex arithmetic on a vector is not supported there.';
+  // The fragment refuses the local `p`, which is a list, before the complex
+  // arithmetic is reached.
+  const message = (_head: string) =>
+    'The local `p` is a list: a function body of the GLSL fragment has ' +
+    'scalar, complex or point locals.';
 
   for (const [name, target] of [['GLSL', glsl]] as const) {
     it(`${name}: q + i and q · i`, () => {
@@ -663,10 +663,7 @@ describe('CE-580 complex arithmetic on a vector is refused', () => {
         ['Multiply', ['Multiply', ['List', 'x', 2], 'ImaginaryUnit']],
       ] as const) {
         const to = 'glsl';
-        const refusal =
-          `Could not compile \`${head}\`: the operand \`[x,2]\` is a vector ` +
-          'of 2 components, and the value is complex. A list of complex ' +
-          'numbers has no representation on the GPU targets';
+        const refusal = `No signature of \`${head}\` in the GLSL fragment takes operands of the types`;
         expect(() =>
           compile(e.box(json as never), { to, fallback: false })
         ).toThrow(refusal);
@@ -696,7 +693,7 @@ describe('CE-580 complex arithmetic on a vector is refused', () => {
 describe('CE-580 the width of a loop Sum', () => {
   it('a loop Sum of vectors has a vector accumulator', () => {
     // The accumulator was declared `float`, which a `vec2` term does not fit.
-    expect(
+    expect(() =>
       glsl.compileShader({
         type: 'fragment',
         inputs: [{ name: 'uv', type: 'vec2' }],
@@ -724,17 +721,8 @@ describe('CE-580 the width of a loop Sum', () => {
           },
         ],
       })
-    ).toContain(
-      '  vec2 _tv1 = vec2(1.0);\n' +
-        '  for (int k = 1; k <= 1000; k++) {\n' +
-        '    _tv1 *= float(k) * uv;\n' +
-        '  }\n' +
-        '  c = _tv1;\n' +
-        '  float _tv2 = 0.0;\n' +
-        '  for (int k = 1; k <= 1000; k++) {\n' +
-        '    _tv2 += float(k) * s;\n' +
-        '  }\n' +
-        '  d = _tv2;\n'
+    ).toThrow(
+      /The body of `Product` has the type `point<2>`, and an aggregate of the GLSL fragment adds or multiplies/
     );
   });
 });
@@ -756,19 +744,21 @@ describe('CE-580 a Matrix literal has the type it is written with', () => {
     });
 
   it('a column Matrix is a vector', () => {
-    expect(glslShader('vec2', [[1], [2]])).toContain('  c = vec2(1.0, 2.0);\n');
+    expect(() => glslShader('vec2', [[1], [2]])).toThrow(
+      /The head `Matrix` is outside the GLSL fragment/
+    );
   });
 
   it('a row Matrix is an array of one row, and a square one a matrix', () => {
     expect(() => glslShader('vec2', [[1, 2]])).toThrow(
-      /the value has the type `vec2\[1\]`, and the target "c" has the type `vec2`/
+      /The head `Matrix` is outside the GLSL fragment/
     );
     expect(() =>
       glslShader('vec4', [
         [1, 2],
         [3, 4],
       ])
-    ).toThrow(/the value has the type `mat2`, and the target "c"/);
+    ).toThrow(/The head `Matrix` is outside the GLSL fragment/);
   });
 });
 

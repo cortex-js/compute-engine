@@ -15,6 +15,8 @@ import { isSubtype } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import type { Type } from '../../common/type/types.js';
 import { gpuScalarType, gpuType, gpuVecType } from './gpu-emit.js';
+import { fragmentFactsUnder } from './fragment.js';
+import type { FragmentTargetFields } from './fragment.js';
 
 /**
  * The first symbol in `expr` whose type admits a point and a list of points
@@ -428,7 +430,10 @@ export function gpuTypeOfDeclaredType(t: Type | undefined): string | undefined {
  * those to an array constructor, which is not a value a shader function
  * parameter or return slot accepts here.
  */
-export function gpuTypeOfValue(expr: Expression): string | undefined {
+export function gpuTypeOfValue(
+  expr: Expression,
+  target?: CompileTarget<Expression>
+): string | undefined {
   // A name whose shader type the CALLER declared (a `compileFunction`
   // parameter, a shader input/uniform). Asked FIRST and answered in full:
   // nothing else carries that type — `expr.type` for such a name is the
@@ -443,6 +448,20 @@ export function gpuTypeOfValue(expr: Expression): string | undefined {
     // IS a float.
     if (gpuDeclaredIsIntegerScalar(declared.value)) return gpuScalarType();
     return declared.value && gpuSpellValueType(declared.value);
+  }
+  // The representation that the fragment pass recorded for the node, in the
+  // scope where the emitter writes it (`FragmentTargetFields.fragmentScope`).
+  // An integer input held as `int` or `uint` is read through a float
+  // conversion, as a declared one is. An array and a sampler have no shader
+  // value type here, as a list of another width than 2 to 4 has none below.
+  const facts = fragmentFactsUnder(
+    (target as FragmentTargetFields<string> | undefined)?.fragmentScope,
+    expr
+  );
+  if (facts !== undefined) {
+    const r = facts.representation;
+    if (r === 'int' || r === 'uint') return gpuScalarType();
+    if (r === 'float' || r === 'bool' || /^vec[234]$/.test(r)) return r;
   }
   // A name framed `bool` by a synthesized user-function signature.
   if (isSymbol(expr) && BaseCompiler.isLocalBoolean(expr.symbol)) return 'bool';

@@ -113,7 +113,7 @@ describe('GPU Digamma / Trigamma / PolyGamma: emitted text', () => {
       ]) {
         const r = compile(ce.box(expr), { to });
         expect(r.success).toBe(false);
-        expect(r.error).toMatch(/real-only/);
+        expect(r.error).toMatch(/No signature of `\w+` in the GLSL fragment/);
       }
     }
   );

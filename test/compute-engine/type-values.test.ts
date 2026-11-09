@@ -337,14 +337,17 @@ describe('compile fail-closed (plan §3.3)', () => {
   test.each(THROWING_TARGETS)('%s rejects a type value', (name) => {
     const target = (ce as any)._getCompilationTarget(name);
     const value = ce.box(['TypeFrom', { str: 'integer' }]).evaluate();
-    expect(() => target.compile(value)).toThrow(/could not compile/i);
+    // The GLSL fragment refuses the head before any code is written.
+    expect(() => target.compile(value)).toThrow(
+      name === 'glsl' ? /outside the GLSL fragment/ : /could not compile/i
+    );
   });
 
   test.each(THROWING_TARGETS)('%s rejects a non-constant Subtype', (name) => {
     const eng = new ComputeEngine();
     const target = (eng as any)._getCompilationTarget(name);
     expect(() => target.compile(nonConstantSubtype(eng))).toThrow(
-      /could not compile/i
+      name === 'glsl' ? /outside the GLSL fragment/ : /could not compile/i
     );
   });
 
@@ -618,10 +621,13 @@ describe('compile fail-closed: the phase-2 operators', () => {
     const eng = new ComputeEngine();
     eng.declare('gx', 'integer');
     const mt = eng.box(['MatchesType', 'gx', { str: 'integer' }]);
-    for (const name of ['glsl', 'python'])
-      expect(() =>
-        (eng as any)._getCompilationTarget(name).compile(mt)
-      ).toThrow(/could not compile/i);
+    // The GLSL fragment refuses the head before any code is written.
+    expect(() =>
+      (eng as any)._getCompilationTarget('glsl').compile(mt)
+    ).toThrow(/outside the GLSL fragment/);
+    expect(() =>
+      (eng as any)._getCompilationTarget('python').compile(mt)
+    ).toThrow(/could not compile/i);
     const js = (eng as any)._getCompilationTarget('javascript').compile(mt);
     expect(js.success).toBe(true);
     expect(js.code).toContain('Number.isInteger(');
@@ -636,10 +642,13 @@ describe('compile fail-closed: the phase-2 operators', () => {
     // type text or settled type values), so the call must fail closed too.
     executeEpsil(eng, 'protocol MarkerC { }');
     const cf = eng.box(['Conforms', 'gx', { str: 'MarkerC' }]);
-    for (const name of ['javascript', 'glsl', 'python'])
+    for (const name of ['javascript', 'python'])
       expect(() =>
         (eng as any)._getCompilationTarget(name).compile(cf)
       ).toThrow(/could not compile/i);
+    expect(() =>
+      (eng as any)._getCompilationTarget('glsl').compile(cf)
+    ).toThrow(/outside the GLSL fragment/);
     const rc = (eng as any)._getCompilationTarget('interval-js').compile(cf);
     expect(rc.success).toBe(false);
   });

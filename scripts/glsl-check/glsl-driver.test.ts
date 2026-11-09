@@ -79,10 +79,13 @@ const KNOWN_FAILURES = new Map<string, string>([
  * The sweep fails when it builds fewer shaders than this. Without a minimum,
  * a change that makes most operators decline, or that changes the type of the
  * expressions so that the filter drops them, would leave a sweep that passes
- * with almost no shader. The sweep built 68 shaders on 2026-11-08; raise the
- * minimum when the count grows.
+ * with almost no shader. The sweep built 62 shaders on 2026-11-08, after
+ * `compile()` and `compileShader()` to GLSL began to refuse the forms outside
+ * the GLSL fragment (`Matrix`, `Mean`, `Random`, `WithRandomSeed`, and `Sum`
+ * and `Product` of a collection: `docs/plans/2026-11-08-glsl-fragment-spec.md`,
+ * section 2); raise the minimum when the count grows.
  */
-const MIN_SHADERS = 65;
+const MIN_SHADERS = 62;
 
 /**
  * Node's test runner has no default time limit, and a compiler that never

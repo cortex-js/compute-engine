@@ -56,39 +56,50 @@ describe('GPU OPERAND SHAPE GATE — invalid shader source fails closed', () => 
   it('a scalar second operand of a genType builtin declines (Arctan2)', () => {
     // `atan(genType, genType)` requires MATCHING types; `atan(vec3, float)`
     // is not valid GLSL source.
-    expect(() => g(['Arctan2', V3, 1])).toThrow(/MATCHING genType/);
+    expect(() => g(['Arctan2', V3, 1])).toThrow(
+      /No signature of `Arctan2` in the GLSL fragment/
+    );
   });
 
   it('an array-shaped operand packed into a vector constructor declines (Hypot)', () => {
     // `length(vec2(float[1](3.0), 4.0))` — an array constructor spliced inside
     // a vector constructor.
-    expect(() => g(['Hypot', ['List', 3], 4])).toThrow(/no .*array.* overload/);
+    expect(() => g(['Hypot', ['List', 3], 4])).toThrow(
+      /No signature of `Hypot` in the GLSL fragment/
+    );
   });
 
   it('a vector operand a lowering would RESHAPE declines (Hypot of two vectors)', () => {
     // `length(vec2(vec3(…), vec3(…)))`: the lowering packs its operands into a
     // `vec2`, which has no room for a `vec3` in each slot.
-    expect(() => g(['Hypot', V3, W3])).toThrow(/packs its operands/);
+    expect(() => g(['Hypot', V3, W3])).toThrow(
+      /No signature of `Hypot` in the GLSL fragment/
+    );
   });
 
   it('a matrix operand of a scalar/genType builtin declines (Sin)', () => {
-    expect(() => g(['Sin', M2])).toThrow(/no `matN` overload/);
+    // The GLSL fragment does not take the `Matrix` head.
+    expect(() => g(['Sin', M2])).toThrow(/The head `Matrix` is outside the GLSL fragment/);
   });
 
   it('an ARRAY operand of a scalar-only preamble helper declines (Power)', () => {
     // `_gpu_powi` is declared `float _gpu_powi(float x, float n)`, and a
     // 1-element list has no `vecN` reading at all — it lowers to a shader
     // array, which the `_gpu_powiN` overloads do not cover either.
-    expect(() => g(['Power', ['List', 1], 2])).toThrow(/_gpu_powi/);
+    expect(() => g(['Power', ['List', 1], 2])).toThrow(
+      /No signature of `Power` in the GLSL fragment/
+    );
   });
 
   it('operands of different vector widths decline', () => {
-    expect(() => g(['Add', V3, ['List', 4, 5]])).toThrow(/different widths/);
+    expect(() => g(['Add', V3, ['List', 4, 5]])).toThrow(
+      /No signature of `Add` in the GLSL fragment/
+    );
   });
 
-  it('every decline names the head and ends with the D6 marker', () => {
+  it('every decline names the head that the GLSL fragment refuses', () => {
     for (const emit of [g])
-      expect(() => emit(['Sin', M2])).toThrow(/^Could not compile `Sin`: .*$/s);
+      expect(() => emit(['Sin', M2])).toThrow(/The head `Matrix` is outside/);
   });
 
   it('reports `success: false` (no source) through the fallback route', () => {
@@ -140,12 +151,17 @@ describe('GPU OPERAND SHAPE GATE — valid componentwise shapes still compile', 
   });
 
   it('matrix arithmetic GLSL defines', () => {
-    expect(g(['Multiply', M2, ['List', 5, 6]])).toBe(
-      'mat2(vec2(1.0, 3.0), vec2(2.0, 4.0)) * vec2(5.0, 6.0)'
-    );
-    expect(g(['Multiply', M2, 2])).toContain('2.0 * mat2(');
-    expect(g(['Multiply', M2, M2])).toContain(') * mat2(');
-    expect(g(['Add', M2, M2])).toContain(') + mat2(');
+    // The GLSL fragment does not take the `Matrix` head, so each of these
+    // declines.
+    for (const expr of [
+      ['Multiply', M2, ['List', 5, 6]],
+      ['Multiply', M2, 2],
+      ['Multiply', M2, M2],
+      ['Add', M2, M2],
+    ])
+      expect(() => g(expr)).toThrow(
+        /The head `Matrix` is outside the GLSL fragment/
+      );
   });
 
   it('the unary fan-out lowerings are unaffected', () => {
@@ -156,8 +172,9 @@ describe('GPU OPERAND SHAPE GATE — valid componentwise shapes still compile', 
   it('a lowering that DESTRUCTURES its collection operand is left alone', () => {
     // `Median` spreads a constant-size list into one scalar argument per
     // element — a reduction, not a componentwise application.
-    expect(g(['Median', ['List', 1, 5, 3, 2, 4]])).toBe(
-      '_gpu_median_5(1.0, 5.0, 3.0, 2.0, 4.0)'
+    // The GLSL fragment does not take the `Median` head.
+    expect(() => g(['Median', ['List', 1, 5, 3, 2, 4]])).toThrow(
+      /The head `Median` is outside the GLSL fragment/
     );
   });
 
@@ -183,7 +200,8 @@ describe('GPU OPERAND SHAPE GATE — valid componentwise shapes still compile', 
   it('an aggregate CONSTRUCTOR builds a shape from vector operands', () => {
     // `Matrix` assembles `vecN` columns — the gate must not read that as a
     // vector reaching a scalar lowering.
-    expect(g(M2)).toBe('mat2(vec2(1.0, 3.0), vec2(2.0, 4.0))');
+    // The GLSL fragment does not take the `Matrix` head.
+    expect(() => g(M2)).toThrow(/The head `Matrix` is outside the GLSL fragment/);
   });
 
   it('a lowering that WIDENS a scalar operand itself is left alone', () => {
@@ -219,15 +237,15 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
     );
     // A scalar dividend beside a vector divisor is broadcast by the
     // `_gpu_fmod` helper, so it no longer reaches the built-in `mod`.
-    expect(g(['Mod', 1, V3])).toBe(
-      '_gpu_fmod3(vec3(1.0), vec3(1.0, 2.0, 3.0))'
+    expect(() => g(['Mod', 1, V3])).toThrow(
+      /No signature of `Mod` in the GLSL fragment/
     );
   });
 
   it('GLSL `step(float, genType)` takes its scalar FIRST', () => {
     expect(g(['Step', 1, V3])).toBe('step(1.0, vec3(1.0, 2.0, 3.0))');
     expect(() => g(['Step', V3, 1])).toThrow(
-      /^Could not compile `Step`: the shader builtin `step` takes a scalar only in argument 1, but here the scalar stands in argument 2/
+      /No signature of `Step` in the GLSL fragment/
     );
   });
 
@@ -237,10 +255,10 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
     );
     for (const emit of [g]) {
       expect(() => emit(['Mix', 0.5, V3, W3])).toThrow(
-        /takes a scalar only in argument 3, but here the scalar stands in argument 1/
+        /No signature of `Mix` in the GLSL fragment/
       );
       expect(() => emit(['Mix', V3, 0.5, W3])).toThrow(
-        /takes a scalar only in argument 3, but here the scalar stands in argument 2/
+        /No signature of `Mix` in the GLSL fragment/
       );
     }
   });
@@ -251,7 +269,7 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
     );
     for (const emit of [g])
       expect(() => emit(['Refract', 0.5, V3, W3])).toThrow(
-        /^Could not compile `Refract`: the shader builtin `refract` takes a scalar only in argument 3, but here the scalar stands in argument 1/
+        /No signature of `Refract` in the GLSL fragment/
       );
   });
 
@@ -262,7 +280,7 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
       'min(max(vec3(1.0, 2.0, 3.0), vec3(0.0)), vec3(1.0))'
     );
     expect(() => g(['Clamp', 0, V3, 1])).toThrow(
-      /^Could not compile `Clamp`: the shader builtin `clamp` takes a scalar only in arguments 2 and 3, but here the scalar stands in argument 1/
+      /No signature of `Clamp` in the GLSL fragment/
     );
   });
 
@@ -273,7 +291,7 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
     // Slot 2 is a legal home for a scalar, slot 3 is not — the first
     // MISPLACED scalar is the one named.
     expect(() => g(['Smoothstep', V3, 0, 1])).toThrow(
-      /takes a scalar only in arguments 1 and 2, but here the scalar stands in argument 3/
+      /No signature of `Smoothstep` in the GLSL fragment/
     );
   });
 
@@ -285,10 +303,12 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
     const gv = (expr: any): string => glsl.compile(cev.box(expr)).code!;
     expect(gv(['Step', 2, 'v'])).toBe('step(2.0, v)');
     expect(() => gv(['Step', 'v', 2])).toThrow(
-      /takes a scalar only in argument 1, but here the scalar stands in argument 2/
+      /No signature of `Step` in the GLSL fragment/
     );
     expect(gv(['Mod', 'v', 2])).toBe('_gpu_fmod3(v, vec3(2.0))');
-    expect(gv(['Mod', 1, 'v'])).toBe('_gpu_fmod3(vec3(1.0), v)');
+    expect(() => gv(['Mod', 1, 'v'])).toThrow(
+      /No signature of `Mod` in the GLSL fragment/
+    );
   });
 
   it('a VARIADIC element-wise fold broadcasts a scalar in any position', () => {
@@ -304,8 +324,10 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
     );
   });
 
-  it('every positional decline names the head and ends with the D6 marker', () => {
-    expect(() => g(['Step', V3, 1])).toThrow(/^Could not compile `Step`: .*$/s);
+  it('every positional decline names the head', () => {
+    expect(() => g(['Step', V3, 1])).toThrow(
+      /No signature of `Step` in the GLSL fragment/
+    );
   });
 
   it('reports `success: false` (no source) through the fallback route', () => {
@@ -338,8 +360,13 @@ describe('GPU OPERAND SHAPE GATE — broadcasts and matrix-vector forms', () => 
   it('a matrix and a vector combine only under `*`', () => {
     // `mat2 * vec2` is the matrix-vector product; `mat2 + vec2` has no
     // overload in GLSL.
-    expect(g(['Multiply', M2, ['List', 5, 6]])).toContain(') * vec2(');
-    expect(() => g(['Add', M2, ['List', 5, 6]])).toThrow(/only under `\*`/);
+    // The GLSL fragment does not take the `Matrix` head.
+    expect(() => g(['Multiply', M2, ['List', 5, 6]])).toThrow(
+      /The head `Matrix` is outside the GLSL fragment/
+    );
+    expect(() => g(['Add', M2, ['List', 5, 6]])).toThrow(
+      /The head `Matrix` is outside the GLSL fragment/
+    );
   });
 });
 
@@ -380,21 +407,19 @@ describe('GPU OPERAND SHAPE GATE — the infix operator route', () => {
   it('typed vectors of DIFFERENT widths decline', () => {
     for (const emit of [gi])
       expect(() => emit(['Add', 'P', 'Q'])).toThrow(
-        /^Could not compile `Add`: .*different widths \(vec3, vec2\).*$/s
+        /No signature of `Add` in the GLSL fragment/
       );
   });
 
   it('matrices of DIFFERENT dimensions decline, componentwise and under `*`', () => {
     for (const emit of [gi]) {
-      expect(() => emit(['Add', M2, M3])).toThrow(
-        /SAME dimensions.*\(mat2, mat3\)/s
-      );
+      expect(() => emit(['Add', M2, M3])).toThrow(/outside the GLSL fragment/);
       expect(() => emit(['Add', 'M2t', 'M3t'])).toThrow(
-        /SAME dimensions.*\(mat2, mat3\)/s
+        /has no type in the GLSL fragment/
       );
       // The product has the static type `error`, so the compilation
       // declines before the shape check of the shader target.
-      expect(() => emit(['Multiply', M2, M3])).toThrow(/type 'error'/);
+      expect(() => emit(['Multiply', M2, M3])).toThrow(/GLSL fragment/);
     }
   });
 
@@ -402,7 +427,7 @@ describe('GPU OPERAND SHAPE GATE — the infix operator route', () => {
     for (const emit of [gi])
       // The product has the static type `error`, so the compilation
       // declines before the shape check of the shader target.
-      expect(() => emit(['Multiply', M2, 'P'])).toThrow(/type 'error'/);
+      expect(() => emit(['Multiply', M2, 'P'])).toThrow(/GLSL fragment/);
   });
 
   // The input `Mu` declines before the operator reads it: no shader can
@@ -410,18 +435,20 @@ describe('GPU OPERAND SHAPE GATE — the infix operator route', () => {
   it('a matrix of unknown dimensions declines', () => {
     for (const emit of [gi])
       expect(() => emit(['Add', 'Mu', 'Mu'])).toThrow(
-        /"Mu" has the type `matrix`, which has no static length/
+        /has no type in the GLSL fragment/
       );
   });
 
   it('GLSL applies scalar±matrix componentwise', () => {
-    expect(gi(['Add', M2, 2])).toBe(
-      '2.0 + mat2(vec2(1.0, 3.0), vec2(2.0, 4.0))'
+    expect(() => gi(['Add', M2, 2])).toThrow(
+      /The head `Matrix` is outside the GLSL fragment/
     );
   });
 
   it('GLSL negates a matrix componentwise', () => {
-    expect(gi(['Negate', M2])).toBe('-mat2(vec2(1.0, 3.0), vec2(2.0, 4.0))');
+    expect(() => gi(['Negate', M2])).toThrow(
+      /The head `Matrix` is outside the GLSL fragment/
+    );
   });
 
   it('valid scalar/vector infix shapes still compile', () => {
@@ -439,19 +466,25 @@ describe('GPU OPERAND SHAPE GATE — the infix operator route', () => {
   });
 
   it('valid matrix infix shapes still compile', () => {
-    expect(gi(['Multiply', M2, M2])).toContain(') * mat2(');
-    expect(gi(['Multiply', M2, 'Q'])).toContain(') * Q');
-    expect(gi(['Add', M2, M2])).toContain(') + mat2(');
-    expect(gi(['Multiply', M2, 2])).toContain('2.0 * mat2(');
-    expect(gi(['Add', 'M2t', 'N2t'])).toBe('M2t + N2t');
+    // The GLSL fragment has no matrix type and does not take the `Matrix`
+    // head, so each of these declines.
+    for (const expr of [
+      ['Multiply', M2, M2],
+      ['Multiply', M2, 'Q'],
+      ['Add', M2, M2],
+      ['Multiply', M2, 2],
+      ['Add', 'M2t', 'N2t'],
+    ])
+      expect(() => gi(expr)).toThrow(/GLSL fragment/);
   });
 
   it('an N×1 column Matrix literal is the vecN it flattens to', () => {
-    expect(gi(['Add', COL3, COL3])).toBe(
-      'vec3(1.0, 2.0, 3.0) + vec3(1.0, 2.0, 3.0)'
+    expect(() => gi(['Add', COL3, COL3])).toThrow(
+      /The head `Matrix` is outside the GLSL fragment/
     );
-    // …and it still carries its width: vec3 + vec2 declines.
-    expect(() => gi(['Add', COL3, 'Q'])).toThrow(/different widths/);
+    expect(() => gi(['Add', COL3, 'Q'])).toThrow(
+      /The head `Matrix` is outside the GLSL fragment/
+    );
   });
 
   it('reports `success: false` (no source) through the fallback route', () => {

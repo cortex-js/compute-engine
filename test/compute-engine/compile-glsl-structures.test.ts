@@ -85,7 +85,9 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       const expr = e.parse(
         '\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))'
       );
-      expect(() => glsl.compile(expr)).toThrow(/collection-valued body/s);
+      expect(() => glsl.compile(expr)).toThrow(
+        /an aggregate of the GLSL fragment adds or multiplies/s
+      );
     });
   });
 
@@ -132,17 +134,10 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       const expr = ce.expr(multiClause);
       // 123, then 123123: the inner loop is the one over `j`.
       expect(expr.evaluate().re).toBe(123123);
-      expect(glsl.compile(expr).code).toBe(
-        [
-          'float s;',
-          's = 0.0;',
-          'for (int i = 1; i <= 2; i++) {',
-          '  for (int j = 1; j <= 3; j++) {',
-          '    s = float(j) + 10.0 * s;',
-          '  }',
-          '}',
-          'return s;',
-        ].join('\n')
+      // The GLSL fragment has a loop over one integer range only, so a
+      // loop over several `Element` clauses declines.
+      expect(() => glsl.compile(expr)).toThrow(
+        /only as a counted loop over an integer range/
       );
     });
 
@@ -160,7 +155,9 @@ describe('GLSL COMPILATION — structures and control flow', () => {
         ],
         's',
       ]);
-      expect(() => glsl.compile(expr)).toThrow(/reads the outer index `i`/);
+      expect(() => glsl.compile(expr)).toThrow(
+        /only as a counted loop over an integer range/
+      );
     });
 
     it('should decline a multi-clause Loop whose body can Break', () => {
@@ -177,7 +174,9 @@ describe('GLSL COMPILATION — structures and control flow', () => {
         ],
         's',
       ]);
-      expect(() => glsl.compile(expr)).toThrow(/several Element clauses/);
+      expect(() => glsl.compile(expr)).toThrow(
+        /only as a counted loop over an integer range/
+      );
     });
 
     // A guarded clause, `Element(i, Range(1, 5), Greater(i, 2))`, visits an
@@ -197,14 +196,17 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       expect(expr.evaluate().re).toBe(12);
       expect(glsl.compile(expr).code).toBe(
         [
+          '_gpu_passes = 0;',
           'float s;',
           's = 0.0;',
           'for (int i = 1; i <= 5; i++) {',
+          '  if (++_gpu_passes > 10000) break;',
           '  if (2.0 < float(i)) {',
           '    s = float(i) + s;',
           '  }',
           '}',
-          'return s;',
+          'float _tv1 = s;',
+          'return _gpu_passes > 10000 ? _gpu_nan() : _tv1;',
         ].join('\n')
       );
     });
@@ -224,21 +226,8 @@ describe('GLSL COMPILATION — structures and control flow', () => {
         's',
       ]);
       expect(expr.evaluate().re).toBe(10);
-      expect(glsl.compile(expr).code).toBe(
-        [
-          'float s;',
-          's = 0.0;',
-          'for (int i = 1; i <= 3; i++) {',
-          '  if (float(i) < 3.0) {',
-          '    for (int j = 1; j <= 3; j++) {',
-          '      if (1.0 < float(j)) {',
-          '        s = float(j) + s;',
-          '      }',
-          '    }',
-          '  }',
-          '}',
-          'return s;',
-        ].join('\n')
+      expect(() => glsl.compile(expr)).toThrow(
+        /only as a counted loop over an integer range/
       );
     });
 
@@ -295,13 +284,12 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       ]);
       expect(local.evaluate().re).toBe(6);
       expect(() => glsl.compile(assigned)).toThrow(
-        /Could not compile `Assign`: "N" has an assigned value/
+        /only as a counted loop over an integer range/
       );
-      const code = glsl.compile(local).code ?? '';
-      const read = 'int _tv1 = int(M);';
-      // The read of `M` is inside the outer loop, before the inner one.
-      expect(code).toContain(
-        `for (int i = 1; i <= 2; i++) {\n  ${read}\n  for (int j = 1; j <= _tv1; j++) {`
+      // A loop over several `Element` clauses is outside the fragment, so
+      // the loop with a local bound declines too.
+      expect(() => glsl.compile(local)).toThrow(
+        /only as a counted loop over an integer range/
       );
     });
   });
@@ -310,7 +298,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     it('should throw for anonymous functions in GLSL', () => {
       expect(() =>
         glsl.compile(ce.expr(['Function', ['Add', 'x', 1], 'x']))
-      ).toThrow('Anonymous functions (Function) are not supported in GPU');
+      ).toThrow('The head `Function` is outside the GLSL fragment.');
     });
   });
 
@@ -340,16 +328,8 @@ describe('GLSL COMPILATION — structures and control flow', () => {
 
     it('compiles When with the _gpu_nan() helper, never a bare NaN', () => {
       const e = ce.expr(['If', ['Greater', 'x', 0], 'x']);
-      const result = glsl.compile(e);
-      // The else branch calls the helper, not a bare `0.0 / 0.0` literal…
-      expect(result.code).toContain('_gpu_nan()');
-      expect(result.code).not.toContain('0.0 / 0.0');
-      expect(/\bNaN\b/.test(result.code)).toBe(false);
-      // …and the helper definition is emitted (selectively) into the preamble.
-      expect(result.preamble ?? '').toContain('float _gpu_nan()');
-      expect(result.preamble ?? '').toContain(
-        'return intBitsToFloat(0x7FC00000);'
-      );
+      // The fragment refuses an `If` that is a value and has one branch.
+      expect(() => glsl.compile(e)).toThrow(/needs both branches/);
     });
   });
 
@@ -357,18 +337,24 @@ describe('GLSL COMPILATION — structures and control flow', () => {
   // into a nest of 2-argument calls (a variadic `max(a, b, c)` is invalid).
   describe('CO-P1-2 min/max variadic folding', () => {
     it('folds 3-arg Max into nested _gpu_max()', () => {
-      const code = glsl.compile(ce.box(['Max', 'a', 'b', 'c'])).code;
-      expect(code).toBe('_gpu_max(_gpu_max(a, b), c)');
+      // The symbols have no declared type, and the fragment refuses them.
+      expect(() => glsl.compile(ce.box(['Max', 'a', 'b', 'c']))).toThrow(
+        /has no type in the GLSL fragment/
+      );
     });
 
     it('folds 4-arg Min into nested _gpu_min()', () => {
-      const code = glsl.compile(ce.box(['Min', 'a', 'b', 'c', 'd'])).code;
-      expect(code).toBe('_gpu_min(_gpu_min(_gpu_min(a, b), c), d)');
+      // The symbols have no declared type, and the fragment refuses them.
+      expect(() => glsl.compile(ce.box(['Min', 'a', 'b', 'c', 'd']))).toThrow(
+        /has no type in the GLSL fragment/
+      );
     });
 
     it('leaves 2-arg Max unchanged', () => {
-      const code = glsl.compile(ce.box(['Max', 'a', 'b'])).code;
-      expect(code).toBe('_gpu_max(a, b)');
+      // The symbols have no declared type, and the fragment refuses them.
+      expect(() => glsl.compile(ce.box(['Max', 'a', 'b']))).toThrow(
+        /has no type in the GLSL fragment/
+      );
     });
   });
 
@@ -390,7 +376,10 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       // The loop precedes the value, and the value references the accumulator.
       const acc = /float (_\w+) = 0\.0;/.exec(code)?.[1];
       expect(acc).toBeDefined();
-      expect(code.trimEnd().endsWith(`return ${acc} + 1.0;`)).toBe(true);
+      expect(code).toContain(`float _tv2 = ${acc} + 1.0;`);
+      expect(code.trimEnd()).toMatch(
+        /return _gpu_passes > 10000 \? _gpu_nan\(\) : _tv2;$/
+      );
       expect(code.indexOf('for (')).toBeLessThan(code.lastIndexOf('return '));
     });
 
@@ -400,7 +389,10 @@ describe('GLSL COMPILATION — structures and control flow', () => {
         NO_FOLD
       ).code;
       expect(code).toContain('for (int i = 1; i <= 1000; i++)');
-      expect(code).toMatch(/return 0\.03 \* _\w+;$/m);
+      expect(code).toMatch(/float _tv2 = 0\.03 \* _\w+;$/m);
+      expect(code).toMatch(
+        /return _gpu_passes > 10000 \? _gpu_nan\(\) : _tv2;$/m
+      );
     });
 
     it('scopes a NESTED loop inside its enclosing loop body', () => {
@@ -477,7 +469,10 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       // then reads those temporaries.
       expect(code).toMatch(/float _\w+ = 1\.0 \* _\w+;$/m);
       expect(code).toMatch(/float _\w+ = 2\.0 \* _\w+;$/m);
-      expect(code).toMatch(/return \(\(_\w+\) \+ \(_\w+\)\);$/m);
+      expect(code).toMatch(/float _\w+ = \(\(_\w+\) \+ \(_\w+\)\);$/m);
+      expect(code).toMatch(
+        /return _gpu_passes > 10000 \? _gpu_nan\(\) : _\w+;$/m
+      );
     });
 
     // A shader ternary is an EXPRESSION, so an arm has no statement position
@@ -494,12 +489,23 @@ describe('GLSL COMPILATION — structures and control flow', () => {
         ['restriction', ['If', ['Greater', 'x', 0], bigSum]],
       ] as [string, any][]) {
         it(`${label} arm containing a loop-form Sum`, () => {
+          if (label === 'restriction') {
+            // The fragment refuses an `If` that is a value and has one branch.
+            expect(() => glsl.compile(ce.box(expr), NO_FOLD)).toThrow(
+              /needs both branches/
+            );
+            return;
+          }
           const code = glsl.compile(ce.box(expr), NO_FOLD).code;
-          expect(code).toMatch(/^float _tv\d+;\nif \(0\.0 < x\) \{\n  float/);
+          expect(code).toMatch(
+            /^_gpu_passes = 0;\nfloat _tv\d+;\nif \(0\.0 < x\) \{\n  float/
+          );
           // The loop runs inside the selected branch only.
           expect(code.indexOf('if (')).toBeLessThan(code.indexOf('for ('));
           expect(code).toMatch(/\} else \{\n  _tv\d+ = /);
-          expect(code).toMatch(/return _tv\d+;$/);
+          expect(code).toMatch(
+            /return _gpu_passes > 10000 \? _gpu_nan\(\) : _tv\d+;$/
+          );
         });
       }
 
@@ -539,22 +545,22 @@ describe('GLSL COMPILATION — structures and control flow', () => {
               ],
             ] as any)
           )
-        ).toThrow(/or an impure operand bound to a hoisted temporary/);
+        ).toThrow(/The head `WithRandomSeed` is outside the GLSL fragment/);
       });
 
       it('binds the impure temporary in its branch when it can', () => {
         // With branches of one type, the selection is compiled again in its
         // statement form, and the branch binds its own draw (`gpuRecompileWithBoundDraws`).
-        const code = glsl.compile(
-          ce.box([
-            'WithRandomSeed',
-            7,
-            ['Which', ['Less', 'x', 1], ['Cot', ['Random']], 'True', 2],
-          ] as any)
-        ).code;
-        expect(code).toMatch(
-          /^float _tv\d+;\nif \(x < 1\.0\) \{\n  float _tv\d+ = _gpu_rnd_draw\(/
-        );
+        // The fragment has no `WithRandomSeed`, so the compilation declines.
+        expect(() =>
+          glsl.compile(
+            ce.box([
+              'WithRandomSeed',
+              7,
+              ['Which', ['Less', 'x', 1], ['Cot', ['Random']], 'True', 2],
+            ] as any)
+          )
+        ).toThrow(/The head `WithRandomSeed` is outside the GLSL fragment/);
       });
     });
 
@@ -655,10 +661,10 @@ describe('GLSL COMPILATION — structures and control flow', () => {
         glsl.compile(ce.box(['Add', 'x', ['Sin', 'in']]), {
           vars: { in: 'in' },
         })
-      ).toThrow(/"in" is a reserved word in glsl/);
+      ).toThrow(/maps `\w+` to `in`, a reserved word of GLSL/);
       expect(() =>
         glsl.compile(ce.box(['Add', 'x', 'q']), { vars: { q: 'struct' } })
-      ).toThrow(/"struct" is a reserved word in glsl/);
+      ).toThrow(/maps `q` to `struct`, a reserved word of GLSL/);
     });
     // The check is made when the mapped symbol is compiled. A key that the
     // expression does not read must not make the compilation fail: the
@@ -670,7 +676,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       ).toBe('x + 1.0');
       expect(() =>
         glsl.compile(ce.box(['Add', 'x', 'k']), { vars: { k: 'in' } })
-      ).toThrow(/"in" is a reserved word in glsl/);
+      ).toThrow(/maps `\w+` to `in`, a reserved word of GLSL/);
     });
     it('accepts a vars mapping that renames a reserved symbol, or is not a bare identifier', () => {
       expect(
@@ -696,7 +702,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
         ],
       ]);
       expect(() => glsl.compile(expr).code).toThrow(
-        /final statement of a block/
+        /is a statement, and it stands where a value is expected/
       );
     });
 
@@ -713,7 +719,10 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       ]);
       const code = glsl.compile(expr).code;
       expect(code).toContain('for (int a = 1; a <= 5; a++)');
-      expect(code).toContain('return s;');
+      expect(code).toContain('float _tv1 = s;');
+      expect(code).toContain(
+        'return _gpu_passes > 10000 ? _gpu_nan() : _tv1;'
+      );
       expect(code).not.toMatch(/return for/);
     });
   });
@@ -722,11 +731,9 @@ describe('GLSL COMPILATION — structures and control flow', () => {
 // CE `Length` (element count) must NOT lower to the GLSL `length()` builtin,
 // which is the Euclidean NORM. The `length()` mapping now belongs to CE `Norm`.
 describe('GLSL Length/Norm name collision (Tycho round)', () => {
-  it('CE Length fails closed (was: emitted length() = norm, or invalid source)', () => {
+  it('CE Length of a list with a static count is the count (not length(), the norm)', () => {
     const expr = ce.box(['Length', ['List', 1, 2, 3]]);
-    expect(() => glsl.compile(expr, NO_FOLD)).toThrow(
-      /Norm|not supported|Could not compile/
-    );
+    expect(glsl.compile(expr, NO_FOLD).code).toBe('3.0');
   });
 
   it('CE Norm lowers to the length() builtin', () => {
@@ -742,20 +749,19 @@ describe('GLSL Length/Norm name collision (Tycho round)', () => {
 // sampling path).
 describe('GLSL When/Which NaN branch matches the value shape (Tycho item 49)', () => {
   it('restricted parametric tuple body emits a vec2 NaN branch', () => {
-    const code = glsl.compile(
-      ce.box(['If', ['And', ['LessEqual', 0, 't'], ['LessEqual', 't', 1]], ['Tuple', ['Cos', 't'], ['Sin', 't']]])
-    ).code;
-    expect(code).toContain('vec2(_gpu_cos(t), _gpu_sin(t))');
-    expect(code).toContain('vec2(_gpu_nan())');
-    expect(code).not.toMatch(/: \(_gpu_nan\(\)\)/);
+    // The fragment refuses an `If` that is a value and has one branch.
+    expect(() =>
+      glsl.compile(
+        ce.box(['If', ['And', ['LessEqual', 0, 't'], ['LessEqual', 't', 1]], ['Tuple', ['Cos', 't'], ['Sin', 't']]])
+      )
+    ).toThrow(/needs both branches/);
   });
 
   it('scalar bodies keep the scalar NaN', () => {
-    const code = glsl.compile(
-      ce.box(['If', ['LessEqual', 't', 1], ['Cos', 't']])
-    ).code;
-    expect(code).toContain(': (_gpu_nan())');
-    expect(code).not.toContain('vec2(_gpu_nan())');
+    // The fragment refuses an `If` that is a value and has one branch.
+    expect(() =>
+      glsl.compile(ce.box(['If', ['LessEqual', 't', 1], ['Cos', 't']]))
+    ).toThrow(/needs both branches/);
   });
 
   it('Which fall-through NaN follows the branch value shape', () => {
@@ -824,10 +830,10 @@ describe('GLSL vector-valued block locals declare a vecN', () => {
       ['Declare', 'p', "'unknown'", ['Tuple', 1, 2, 3, 4, 5]],
       'p',
     ]);
-    const code = glsl.compile(expr).code;
-    expect(code).toContain('float[5] p;');
-    expect(code).not.toContain('float p;');
-    expect(code).toContain('p = float[5](');
+    // A point of the GLSL fragment has 2 to 4 components.
+    expect(() => glsl.compile(expr)).toThrow(
+      /a point of the GLSL fragment has 2 to 4/
+    );
   });
 
   it('a local assigned a 1-tuple is declared as the matching array type', () => {
@@ -836,9 +842,10 @@ describe('GLSL vector-valued block locals declare a vecN', () => {
       ['Declare', 'p', "'unknown'", ['List', 7]],
       'p',
     ]);
-    const code = glsl.compile(expr).code;
-    expect(code).toContain('float[1] p;');
-    expect(code).toContain('p = float[1](');
+    // A function body of the GLSL fragment has no list local.
+    expect(() => glsl.compile(expr)).toThrow(
+      /a function body of the GLSL fragment has scalar, complex or point locals/
+    );
   });
 
   // Defect C: the width must propagate through a local reference, or the
@@ -877,22 +884,24 @@ describe('GLSL vector-valued block locals declare a vecN', () => {
 describe('GLSL vecN constructor arity (no vector-valued components)', () => {
   it('a tuple with a complex component fails closed', () => {
     const expr = ce.box(['Tuple', 't', ['Multiply', 'ImaginaryUnit', 't']]);
-    expect(() => glsl.compile(expr)).toThrow(/Could not compile/);
+    expect(() => glsl.compile(expr)).toThrow(
+      /a point of the GLSL fragment has real components/
+    );
   });
 
   it('a nested tuple of points of one arity is an array of vectors', () => {
-    // Every element is a 2-D point, so the tuple is an array of `vec2`
-    // (`gpuUniformVectorWidth`), never the invalid `vec2(vec2, vec2)`.
+    // The fragment has no array of points, so the tuple declines (it never
+    // emits the invalid `vec2(vec2, vec2)`).
     const expr = ce.box(['Tuple', ['Tuple', 1, 2], ['Tuple', 3, 4]]);
-    expect(glsl.compile(expr, { constantFold: false }).code).toBe(
-      'vec2[2](vec2(1.0, 2.0), vec2(3.0, 4.0))'
+    expect(() => glsl.compile(expr, { constantFold: false })).toThrow(
+      /a point of the GLSL fragment has real components/
     );
   });
 
   it('a tuple mixing a point and a scalar still fails closed', () => {
     const expr = ce.box(['Tuple', ['Tuple', 1, 2], 't']);
     expect(() => glsl.compile(expr, { constantFold: false })).toThrow(
-      /Could not compile/
+      /a point of the GLSL fragment has real components/
     );
   });
 
@@ -906,12 +915,16 @@ describe('GLSL vecN constructor arity (no vector-valued components)', () => {
   // emitted `vec2(float[1](1.0), 2.0)`.
   it('a 1-element list component fails closed', () => {
     const expr = ce.box(['Tuple', ['List', 1], 2]);
-    expect(() => glsl.compile(expr)).toThrow(/Could not compile/);
+    expect(() => glsl.compile(expr)).toThrow(
+      /a point of the GLSL fragment has real components/
+    );
   });
 
   it('a 5-element list component fails closed', () => {
     const expr = ce.box(['Tuple', ['List', 1, 2, 3, 4, 5], 2]);
-    expect(() => glsl.compile(expr)).toThrow(/Could not compile/);
+    expect(() => glsl.compile(expr)).toThrow(
+      /a point of the GLSL fragment has real components/
+    );
   });
 });
 
@@ -929,7 +942,7 @@ describe('GLSL block local with disagreeing binding shapes fails closed', () => 
       'p',
     ]);
     expect(() => glsl.compile(expr, { vars: { x: 'x', y: 'y' } })).toThrow(
-      /invalid expression.*assignment-type-mismatch/s
+      /The head `Error` is outside the GLSL fragment/
     );
   });
 
@@ -941,7 +954,7 @@ describe('GLSL block local with disagreeing binding shapes fails closed', () => 
       'p',
     ]);
     expect(() => glsl.compile(expr, { vars: { x: 'x', y: 'y' } })).toThrow(
-      /invalid expression.*assignment-type-mismatch/s
+      /The head `Error` is outside the GLSL fragment/
     );
   });
 
@@ -968,7 +981,7 @@ describe('GLSL matrix-valued components are aggregates, not scalars', () => {
       ['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]],
       1,
     ]);
-    expect(() => glsl.compile(expr)).toThrow(/matrix\/tensor value/);
+    expect(() => glsl.compile(expr)).toThrow(/The head `Matrix` is outside the GLSL fragment/);
   });
 
   it('a block local bound to a matrix fails closed', () => {
@@ -977,7 +990,7 @@ describe('GLSL matrix-valued components are aggregates, not scalars', () => {
       ['Declare', 'p', "'unknown'", ['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]]],
       'p',
     ]);
-    expect(() => glsl.compile(expr)).toThrow(/matrix\/tensor-valued local/);
+    expect(() => glsl.compile(expr)).toThrow(/The head `Matrix` is outside the GLSL fragment/);
   });
 });
 
@@ -987,12 +1000,14 @@ describe('GLSL matrix-valued components are aggregates, not scalars', () => {
 describe('GLSL zero-width aggregates fail closed', () => {
   it('an empty Tuple fails closed instead of emitting float[0]()', () => {
     expect(() => glsl.compile(ce.box(['Tuple']))).toThrow(
-      /empty tuple\/list has no GPU lowering/
+      /has 0 components, and a point of the GLSL fragment has 2 to 4/
     );
   });
 
   it('an empty List fails closed', () => {
-    expect(() => glsl.compile(ce.box(['List']))).toThrow(/Could not compile/);
+    expect(() => glsl.compile(ce.box(['List']))).toThrow(
+      /is not a list of reals or of points of one size/
+    );
   });
 
   it('a block local bound to an empty tuple fails closed', () => {
@@ -1002,7 +1017,7 @@ describe('GLSL zero-width aggregates fail closed', () => {
       'p',
     ]);
     expect(() => glsl.compile(expr)).toThrow(
-      /the block local `p`: an empty tuple\/list/
+      /has 0 components, and a point of the GLSL fragment has 2 to 4/
     );
   });
 });
@@ -1079,16 +1094,17 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     // LITERAL operand is already an `incompatible-type` error at boxing and
     // compile refuses the invalid expression — fail-closed at an earlier
     // seam than the target helper's own check, which the two compound
-    // operands above and below still reach.
+    // operands above and below still reach. The fragment refuses the
+    // `Error` form.
     expect(() =>
       glsl.compile(e.box(['Mod', ['Complex', 1, 2], 1]), NO_FOLD)
-    ).toThrow(/invalid expression/);
+    ).toThrow(/The head `Error` is outside the GLSL fragment/);
     // Propagated through a `Multiply`, the head whose type answer this fix
     // replaced with operand recursion.
     expect(() =>
       glsl.compile(e.box(['Mod', ['Multiply', 'ImaginaryUnit', 'x'], 1]))
     ).toThrow(
-      /Could not compile `Mod`: the target's lowering for this head is real-only/
+      /No signature of `Mod` in the GLSL fragment takes operands of the types \(complex, integer\)/
     );
   });
 });
@@ -1137,7 +1153,7 @@ describe('GLSL Tycho item 147: real-by-definition heads read real', () => {
     // `Conjugate` is complex → complex (it emits a `vec2`), so it is
     // deliberately NOT a real-by-definition head.
     expect(() => glsl.compile(e.box(['Mod', ['Conjugate', 'z'], 1]))).toThrow(
-      /Could not compile `Mod`: the target's lowering for this head is real-only/
+      /No signature of `Mod` in the GLSL fragment takes operands of the types \(complex, integer\)/
     );
     // The item-144 pins are unchanged.
     expect(() =>
@@ -1148,7 +1164,7 @@ describe('GLSL Tycho item 147: real-by-definition heads read real', () => {
     expect(() =>
       glsl.compile(e.box(['Mod', ['Multiply', 'ImaginaryUnit', 'x'], 1]))
     ).toThrow(
-      /Could not compile `Mod`: the target's lowering for this head is real-only/
+      /No signature of `Mod` in the GLSL fragment takes operands of the types \(complex, integer\)/
     );
   });
 });

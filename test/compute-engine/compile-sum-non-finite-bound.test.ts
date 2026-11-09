@@ -190,12 +190,12 @@ describe('the GPU targets decline a non-finite bound too', () => {
         constantFold: false,
       });
       expect(result.success).toBe(false);
+      // The GLSL fragment refuses the bound before the emitter runs.
       expect(result.error).toMatch(
         new RegExp(
-          `Could not compile \`${kind}\`: the ${which} bound .* is not a finite number`
+          `The ${which} bound .* of \`${kind}\` is not a finite number`
         )
       );
-      expect(result.error).toMatch(/Could not compile/);
     }
   });
 
@@ -214,7 +214,10 @@ describe('the GPU targets decline a non-finite bound too', () => {
           constantFold: false,
         });
         expect(result.success).toBe(false);
-        expect(result.error).toMatch(/Could not compile invalid expression/);
+        // The GLSL fragment refuses the `Error` operand of the bound.
+        expect(result.error).toMatch(
+          /The head `Error` is outside the GLSL fragment/
+        );
       }
     }
   );

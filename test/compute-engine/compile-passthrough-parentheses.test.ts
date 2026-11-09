@@ -90,7 +90,10 @@ describe('IDENTITY PASSTHROUGH PARENTHESES — GPU (GLSL)', () => {
       3,
       ['WithRandomSeed', 1, ['Add', 'x', 1]],
     ]);
-    expect(glsl.compile(expr, NO_FOLD).code).toBe('3.0 * (x + 1.0)');
+    // The GLSL fragment has no `WithRandomSeed`, so the compilation declines.
+    expect(() => glsl.compile(expr, NO_FOLD)).toThrow(
+      /The head `WithRandomSeed` is outside the GLSL fragment/
+    );
   });
 
   // A postfix swizzle binds tighter than every infix operator, so a complex

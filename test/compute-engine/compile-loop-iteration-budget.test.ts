@@ -663,11 +663,13 @@ describe('COMPILE Loop - iterationBudget on the other targets', () => {
     ).toBe(compile(sum, { to: 'python', fallback: false } as any).code);
   });
 
-  test.each(['glsl'])('%s: the code does not change', (to) => {
+  // On GLSL the budget is the pass cap of the evaluation (default 10,000):
+  // only the cap in the counted code changes.
+  test.each(['glsl'])('%s: only the pass cap changes', (to) => {
     const options = { to, fallback: false } as any;
     expect(
       compile(counted(), { ...options, iterationBudget: 2 }).code
-    ).toBe(compile(counted(), options).code);
+    ).toBe(compile(counted(), options).code.replaceAll('> 10000', '> 2'));
     expect(() =>
       compile(bareLoop(), { ...options, iterationBudget: 2 })
     ).toThrow(/Loop/);

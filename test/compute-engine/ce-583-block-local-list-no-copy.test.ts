@@ -131,21 +131,10 @@ describe('CE-583: a value of the same name is not a block local', () => {
       ['Block', ['Declare', 'U', "'list<real^10>'", 'C'], ['Assign', 'r', SUM_U]],
       ['Add', 'r', 'U'],
     ]);
-    const unrolled = UNROLLED.replace(/\bU\[/g, '_tv1[');
-    const g = glsl.compile(ce.box(['f', 'x']), NO_FOLD);
-    expect(fnText(g.preamble!, 'float _fn_f(')).toBe(
-      'float _fn_f(float U) {\n' +
-        '  float r;\n' +
-        '  r = 0.0;\n' +
-        '  {\n' +
-        '    float[10] _tv1;\n' +
-        '    _tv1 = C;\n' +
-        `    r = ${unrolled};\n` +
-        '  }\n' +
-        '  return U + r;\n' +
-        '}'
+    // The fragment refuses a list local.
+    expect(() => glsl.compile(ce.box(['f', 'x']), NO_FOLD)).toThrow(
+      /The local `U` is a list: a function body of the GLSL fragment has scalar, complex or point locals/
     );
-    expectSameValues(ce, g.preamble!, 55 + 2.5);
   });
 
   test('compileFunction(): a Block local with the name of a parameter', () => {
@@ -157,16 +146,10 @@ describe('CE-583: a value of the same name is not a block local', () => {
       ['Declare', 'U', "'list<real^10>'", 'C'],
       SUM_U,
     ] as any);
-    const unrolled = UNROLLED.replace(/\bU\[/g, '_tv1[');
-    expect(
+    // The fragment refuses a list local.
+    expect(() =>
       glsl.compileFunction(body, 'g', 'float', [['U', 'float']], NO_FOLD)
-    ).toBe(
-      'float g(float U) {\n' +
-        '  float[10] _tv1;\n' +
-        '  _tv1 = C;\n' +
-        `  return ${unrolled};\n` +
-        '}'
-    );
+    ).toThrow(/The local `U` is a list: a function body of the GLSL fragment has scalar, complex or point locals/);
   });
 });
 
@@ -192,30 +175,10 @@ describe('CE-583: a local that hides an outer local and a parameter', () => {
       ],
       ['Add', 'r', 'U'],
     ]);
-    const inner = '((_tv2[1 - 1]) + (_tv2[2 - 1]) + (_tv2[3 - 1]))';
-    const outer = '((_tv1[1 - 1]) + (_tv1[2 - 1]) + (_tv1[3 - 1]))';
-    const g = glsl.compile(ce.box(['f', 'x']), NO_FOLD);
-    expect(fnText(g.preamble!, 'float _fn_f(')).toBe(
-      'float _fn_f(float U) {\n' +
-        '  float r;\n' +
-        '  r = 0.0;\n' +
-        '  {\n' +
-        '    float[10] _tv1;\n' +
-        '    _tv1 = C;\n' +
-        '    float q;\n' +
-        '    q = 0.0;\n' +
-        '    {\n' +
-        '      float[10] _tv2;\n' +
-        '      _tv2 = B;\n' +
-        `      q = ${inner};\n` +
-        '    }\n' +
-        `    r = q + ${outer};\n` +
-        '  }\n' +
-        '  return U + r;\n' +
-        '}'
+    // The fragment refuses a list local.
+    expect(() => glsl.compile(ce.box(['f', 'x']), NO_FOLD)).toThrow(
+      /The local `U` is a list: a function body of the GLSL fragment has scalar, complex or point locals/
     );
-    // B = 100·C, so the sums are 600 and 6.
-    expectSameValues(ce, g.preamble!, 600 + 6 + 2.5);
   });
 });
 
@@ -228,18 +191,10 @@ describe('CE-583: a nested Block in statement position', () => {
   test('it is a compound statement, with no return', () => {
     const ce = engine();
     defineF(ce, ['Block', innerU('U'), ['Add', 'U', 1]]);
-    const g = glsl.compile(ce.box(['f', 'x']), NO_FOLD);
-    expect(fnText(g.preamble!, 'float _fn_f(')).toBe(
-      'float _fn_f(float U) {\n' +
-        '  {\n' +
-        '    float[10] _tv1;\n' +
-        '    _tv1 = C;\n' +
-        '    _tv1;\n' +
-        '  }\n' +
-        '  return U + 1.0;\n' +
-        '}'
+    // The fragment refuses a list local.
+    expect(() => glsl.compile(ce.box(['f', 'x']), NO_FOLD)).toThrow(
+      /The local `U` is a list: a function body of the GLSL fragment has scalar, complex or point locals/
     );
-    expectSameValues(ce, g.preamble!, 2.5 + 1);
   });
 
   test('a scalar block statement is not stored in a temporary', () => {
@@ -260,17 +215,18 @@ describe('CE-583: a nested Block in statement position', () => {
 describe('CE-583: the GLSL output does not change', () => {
   test('a Sum over a Block local', () => {
     const ce = engine();
-    const r = glsl.compile(ce.box(blockLocal(SUM_U) as any), NO_FOLD);
-    expect(r.code).toBe(`float[10] U;\nU = B;\nreturn ${UNROLLED};`);
+    // The fragment refuses a list local.
+    expect(() =>
+      glsl.compile(ce.box(blockLocal(SUM_U) as any), NO_FOLD)
+    ).toThrow(/The local `U` is a list: a function body of the GLSL fragment has scalar, complex or point locals/);
   });
 
   test('a read with a dynamic index', () => {
     const ce = engine();
-    const r = glsl.compile(
-      ce.box(blockLocal(['At', 'U', 'x']) as any),
-      NO_FOLD
-    );
-    expect(r.code).toBe('float[10] U;\nU = B;\nreturn _gpu_at10(U, x);');
+    // The fragment refuses a list local.
+    expect(() =>
+      glsl.compile(ce.box(blockLocal(['At', 'U', 'x']) as any), NO_FOLD)
+    ).toThrow(/The local `U` is a list: a function body of the GLSL fragment has scalar, complex or point locals/);
   });
 });
 
@@ -376,8 +332,12 @@ describe('CE-583: a use of a block local before its Declare declines', () => {
         'Error(ErrorCode("read-before-declaration", "U"))'
       );
       const decline = /read-before-declaration/;
-      for (const to of ['javascript', 'glsl', 'python'])
+      for (const to of ['javascript', 'python'])
         expect(() => compile(expr, { to, fallback: false })).toThrow(decline);
+      // The fragment refuses the invalid expression (an `Error` head).
+      expect(() => compile(expr, { to: 'glsl', fallback: false })).toThrow(
+        /The head `Error` is outside the GLSL fragment/
+      );
       // The interval target gives its decline in the result.
       const interval = compile(expr, { to: 'interval-js', fallback: false });
       expect(interval.success).toBe(false);

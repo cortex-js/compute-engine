@@ -220,10 +220,10 @@ describe('broadcastable<T> — GPU targets keep scalar-slot compilation', () => 
     const ce = new ComputeEngine();
     ce.declare('b', 'broadcastable<number>');
     const expr = ce.box(['Subtract', ['Multiply', 2, 'b'], 1]);
-    const r = ce._getCompilationTarget('glsl')!.compile(expr);
-    expect(r.success).toBe(true);
-    // No _SYS.bcast (a JS-only construct); a plain scalar-slot expression.
-    expect(r.code).not.toContain('bcast');
-    expect(r.code).toBe('2.0 * b + -1.0');
+    // The GLSL fragment has no type for a `broadcastable` symbol, so the
+    // compilation declines.
+    expect(() => ce._getCompilationTarget('glsl')!.compile(expr)).toThrow(
+      /has no type in the GLSL fragment/
+    );
   });
 });

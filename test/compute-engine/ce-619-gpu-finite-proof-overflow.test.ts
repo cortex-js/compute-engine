@@ -156,6 +156,12 @@ describe.each(['glsl'] as const)('CE-619 on %s', (to) => {
 
   describe('CE-619.3: `Random()` is not drawn at compile time', () => {
     const framed = (e: unknown[]) => e;
+    // The GLSL fragment refuses `Random`, so every program below declines
+    // before the finite proof runs.
+    const declinesRandom = (ce: ComputeEngine, e: unknown[]) =>
+      expect(() =>
+        compile(ce.box(e as never), { to, fallback: false } as never)
+      ).toThrow(/The head `Random` is outside the GLSL fragment/);
 
     it('gives the same code on every compilation', () => {
       // `5·Random()·10³⁸` is `+∞` in f32 for a draw above 0.68.
@@ -165,10 +171,7 @@ describe.each(['glsl'] as const)('CE-619 on %s', (to) => {
         'Sin',
         ['Multiply', 5, ['Random'], ['Power', 10, 38]],
       ]);
-      const codes = new Set<string>();
-      for (let i = 0; i < 8; i++) codes.add(shader(ce, expr, to).code);
-      expect(codes.size).toBe(1);
-      expect([...codes][0]).toMatch(/_gpu_sin\(5\.0 \* /);
+      declinesRandom(ce, expr);
     });
 
     it('a symbol assigned `Random()` is not drawn at compile time', () => {
@@ -178,19 +181,14 @@ describe.each(['glsl'] as const)('CE-619 on %s', (to) => {
       ce.declare('n', 'real');
       ce.assign('r', ce.box(['Random']));
       const expr = framed(['Sin', ce.parse('5r10^{38}').json]);
-      const codes = new Set<string>();
-      for (let i = 0; i < 8; i++) codes.add(shader(ce, expr, to).code);
-      expect(codes.size).toBe(1);
-      expect([...codes][0]).toMatch(/^_gpu_sin\(5\.0 \* _gpu_rnd_draw\(/);
+      declinesRandom(ce, expr);
     });
 
     it('a draw of known size beside a finite term uses the built-in', () => {
       const ce = new ComputeEngine();
       ce.declare('n', 'real');
       ce.declare('x', 'real');
-      const { code } = shader(ce, framed(['Sin', ['Add', 'x', ['Random']]]), to);
-      expect(code).toMatch(/\bsin\(x \+ /);
-      expect(code).not.toMatch(/_gpu_sin/);
+      declinesRandom(ce, framed(['Sin', ['Add', 'x', ['Random']]]));
     });
   });
 

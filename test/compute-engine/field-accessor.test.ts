@@ -231,11 +231,15 @@ describe('Field compile lowering (D16/§4.6)', () => {
     ce.declareType('pt', 'tuple<x: number, y: number>');
     ce.declare('p', 'pt');
     const glsl = new GLSLTarget();
-    expect(glsl.compile(ce.box(['Field', 'p', { str: 'y' }])).code).toBe('p.y');
-    // By POSITION, not by name: fields named u/v still hit .x/.y.
+    // The GLSL fragment does not take the `Field` head, so it declines.
+    expect(() => glsl.compile(ce.box(['Field', 'p', { str: 'y' }]))).toThrow(
+      /outside the GLSL fragment/
+    );
     ce.declareType('uv', 'tuple<u: number, v: number>');
     ce.declare('q', 'uv');
-    expect(glsl.compile(ce.box(['Field', 'q', { str: 'u' }])).code).toBe('q.x');
+    expect(() => glsl.compile(ce.box(['Field', 'q', { str: 'u' }]))).toThrow(
+      /outside the GLSL fragment/
+    );
   });
 
   test('JS: a plain dictionary operand declines with At´s own diagnostic (parity)', () => {
@@ -465,7 +469,9 @@ describe('Field at an instantiated parameterized nominal body (§6)', () => {
     ce.declareType('pair', 'tuple<x: T, y: T>', { typeParams: ['T'] });
     ce.declare('p', 'pair<number>');
     const glsl = new GLSLTarget();
-    expect(glsl.compile(ce.box(['Field', 'p', { str: 'y' }])).code).toBe('p.y');
+    expect(() => glsl.compile(ce.box(['Field', 'p', { str: 'y' }]))).toThrow(
+      /outside the GLSL fragment/
+    );
   });
 
   test('regression: a NON-parameterized nominal and a plain named tuple are unchanged', () => {

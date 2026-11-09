@@ -128,7 +128,9 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
       ['List', 1, 2, 3, 4, 5],
     ]) {
       for (const emit of [g])
-        expect(() => emit(['Power', base, 0])).toThrow(/_gpu_powi/);
+        expect(() => emit(['Power', base, 0])).toThrow(
+          /No signature of `Power` in the GLSL fragment takes operands of the types/
+        );
       for (const target of [new GLSLTarget()]) {
         const r = target.compile(fresh().box(['Power', base, 0] as any), {
           fallback: true,
@@ -215,7 +217,7 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
     // Operands of different widths have no ONE genType.
     for (const emit of [g])
       expect(() => emit(['Power', V3, ['List', 4, 5]])).toThrow(
-        /different widths/
+        /No signature of `Power` in the GLSL fragment takes operands of the types/
       );
   });
 

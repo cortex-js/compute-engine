@@ -269,7 +269,7 @@ describe('A SHADER READS THE STATIC LENGTH OF THE CALL THE SAME WAY (CE-377)', (
     const ce = complexListEngine();
     const expr = ce.box(['Add', ['At', ['v', 'x'], 2], 1]);
     expect(() => compile(expr, { to: 'glsl', fallback: false } as any)).toThrow(
-      /element 2 \(`k`\) is itself vector-valued/
+      /The symbol `x` has the type `unknown`, which has no type in the GLSL fragment/
     );
   });
 });

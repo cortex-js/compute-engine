@@ -112,7 +112,7 @@ describe('CE-520 — operands the helpers do not take', () => {
       ])
         expect(() =>
           compile(cz.box(expr as never), { to, fallback: false } as never)
-        ).toThrow(/real-only/);
+        ).toThrow(/No signature of `\w+` in the GLSL fragment/);
     }
   });
 
@@ -124,19 +124,18 @@ describe('CE-520 — operands the helpers do not take', () => {
         to: 'glsl',
         fallback: false,
       } as never)
-    ).toThrow(/draws a random value/);
+    ).toThrow(/outside the GLSL fragment/);
   });
 
-  it('a vector that draws a random value stays inline when used once', () => {
+  it('a vector that draws a random value is outside the GLSL fragment even when used once', () => {
     const V = ['List', 'x', ['Random'], 1];
     for (const expr of [
       ['Sin', V],
       ['If', ['Greater', 'x', 0], ['Sin', V], ['List', 0, 0, 0]],
-    ]) {
-      const code = shader(expr, 'glsl').code;
-      expect(code.split('_gpu_rnd_draw(').length - 1).toBe(1);
-      expect(code).toContain('_gpu_sin3(vec3(x, _gpu_rnd_draw(');
-    }
+    ])
+      expect(() =>
+        compile(ce.box(expr as never), { to: 'glsl', fallback: false } as never)
+      ).toThrow(/outside the GLSL fragment/);
   });
 });
 

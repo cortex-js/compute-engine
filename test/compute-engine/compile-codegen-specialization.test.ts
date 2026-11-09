@@ -41,7 +41,7 @@ describe('code generation from numeric and representation facts', () => {
           constantFold: false,
           fallback: false,
         })
-      ).toThrow(/_gpu_powi/);
+      ).toThrow(/No signature of `Power` in the GLSL fragment/);
     }
   );
 
@@ -68,7 +68,7 @@ describe('code generation from numeric and representation facts', () => {
             to,
             fallback: false,
           })
-        ).toThrow(/alpha/);
+        ).toThrow(/No signature of `(Rgb|Hsv|Hsl)` in the GLSL fragment/);
       }
       const oklch = compile(ce.expr(['AsRgb', ['Oklch', 'x', 'y', 'z']]), {
         to,

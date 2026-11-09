@@ -782,7 +782,7 @@ describe('the rename of the shadowing calls', () => {
     );
     const { result, warnings } = compiled(ce.box(['Gamma', 'x']), 'glsl');
     expect(result.success).toBe(false);
-    expect(warnings.join('\n')).toContain('Could not compile `Gamma`');
+    expect(warnings.join('\n')).toContain('The function `Gamma` calls itself');
     expect(warnings.join('\n')).not.toContain('GammaUser');
   });
 

@@ -868,7 +868,7 @@ describe('COMPILE a `Declare` followed by an `Assign` of a function literal', ()
     for (const to of ['glsl'])
       expect(() =>
         compile(ce.box(inBranch as never), { to, fallback: false } as never)
-      ).toThrow(/Anonymous functions \(Function\) are not supported/);
+      ).toThrow(/outside the GLSL fragment/);
   });
 });
 

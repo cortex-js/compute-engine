@@ -159,14 +159,14 @@ describe('COMPILE a big operator as a GPU loop near the 32-bit limits', () => {
     it(`declines an upper bound whose last increment overflows (${to})`, () => {
       const ce = new ComputeEngine();
       expect(gpu(ce, 2147483600, 2147483647, to)).toMatch(
-        /^DECLINED: .*the upper bound 2147483647 is outside the range of the 32-bit loop counter/
+        /^DECLINED: The upper bound 2147483647 of `Sum` is outside the range of the loop counter of the GLSL target/
       );
     });
 
     it(`declines a lower bound outside the counter range (${to})`, () => {
       const ce = new ComputeEngine();
       expect(gpu(ce, -3_000_000_000, -2_999_999_953, to)).toMatch(
-        /^DECLINED: .*the lower bound -3000000000 is outside the range of the 32-bit loop counter/
+        /^DECLINED: The lower bound -3000000000 of `Sum` is outside the range of the loop counter of the GLSL target/
       );
     });
 

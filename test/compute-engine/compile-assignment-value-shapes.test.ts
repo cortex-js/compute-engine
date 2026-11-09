@@ -121,9 +121,10 @@ describe('an assignment whose value is another assignment', () => {
   test.each(['javascript', 'python', 'glsl'] as const)(
     '%s declines',
     (to) => {
+      // The GLSL fragment refuses the `Error` head before any code is written.
       expect(() =>
         compile(engine().box(json), { to, fallback: false })
-      ).toThrow(/invalid expression/);
+      ).toThrow(to === 'glsl' ? /outside the GLSL fragment/ : /invalid expression/);
     }
   );
 
@@ -192,7 +193,11 @@ describe('a nested block whose last statement is an assignment', () => {
     (to) => {
       expect(() =>
         compile(engine().box(json), { to, fallback: false })
-      ).toThrow(/an assignment or a declaration is a statement, and its value/);
+      ).toThrow(
+        to === 'glsl'
+          ? /The block ends with an assignment, so it has no value/
+          : /an assignment or a declaration is a statement, and its value/
+      );
     }
   );
 
@@ -201,7 +206,7 @@ describe('a nested block whose last statement is an assignment', () => {
       new GLSLTarget().compileFunction(engine().box(json), 'f', 'float', [
         ['x', 'float'],
       ])
-    ).toThrow(/an assignment or a declaration is a statement, and its value/);
+    ).toThrow(/The block ends with an assignment, so it has no value/);
   });
 
   test('a nested block that ends with the name compiles', () => {
@@ -263,8 +268,11 @@ describe('a block local that is read before it has a value', () => {
     (to) => {
       const boxed = compile(new ComputeEngine().box(boxRoute), { to });
       expect(boxed.success).toBe(false);
+      // The GLSL fragment refuses a read of a local before its declaration.
       expect(boxed.error ?? '').toMatch(
-        /reads the block local "x" before any statement gives it a value/
+        to === 'glsl'
+          ? /The local `x` is read before its declaration/
+          : /reads the block local "x" before any statement gives it a value/
       );
       const parsed = compile(
         new ComputeEngine().parse('x \\coloneq x+1; 2x'),
@@ -272,7 +280,9 @@ describe('a block local that is read before it has a value', () => {
       );
       expect(parsed.success).toBe(false);
       expect(parsed.error ?? '').toMatch(
-        /reads the block local "x" before any statement gives it a value/
+        to === 'glsl'
+          ? /The local `x` is read before its declaration/
+          : /reads the block local "x" before any statement gives it a value/
       );
     }
   );

@@ -272,6 +272,14 @@ describe('GPU: a complex argument to a parameter not declared complex', () => {
   for (const signature of ['(unknown) -> unknown', '(number) -> number']) {
     it(`\`${signature}\` calls the complex copy (GLSL)`, () => {
       const ce = engineWith(['f', signature, 'z \\mapsto z^2']);
+      if (signature === '(number) -> number') {
+        // The fragment types the parameter `z` as real, so a complex
+        // argument declines.
+        expect(() => glsl(ce, '\\arg(f(x+iy))')).toThrow(
+          /The argument `x \+ i \* y` of `f` has the type `complex`, and the parameter `z` has the type `real`/
+        );
+        return;
+      }
       const g = glsl(ce, '\\arg(f(x+iy))');
       expect(g.success).toBe(true);
       expect(g.code).toBe(
@@ -293,10 +301,11 @@ describe('GPU: a complex argument to a parameter not declared complex', () => {
   it('a real and a complex call in one expression emit both definitions', () => {
     const ce = engineWith(['f', '(unknown) -> unknown', 'z \\mapsto z^2']);
     const latex = 'f(t) + \\operatorname{Re}(f(x+iy))';
-    const g = glsl(ce, latex);
-    expect(g.code).toBe('_fn_f(t) + (_fn_f_complex(vec2(x, y))).x');
-    expect(g.preamble).toContain('float _fn_f(float z) {');
-    expect(g.preamble).toContain('vec2 _fn_f_complex(vec2 z) {');
+    // The fragment gives the parameter one type, from the first call, so a
+    // real call and a complex call of the same function decline.
+    expect(() => glsl(ce, latex)).toThrow(
+      /The parameter `z` of `f` has no declared type, and it has the type `real` of its argument at the first call/
+    );
   });
 
   it('a function with no declaration gets the complex copy', () => {
@@ -314,15 +323,9 @@ describe('GPU: a complex argument to a parameter not declared complex', () => {
       ['g', '(unknown) -> unknown', 'w \\mapsto f(w) + 1']
     );
     const latex = '\\arg(g(x+iy)) + g(t)';
-    const r = glsl(ce, latex);
-    expect(r.code).toBe(
-      '_fn_g(t) + atan(_fn_g_complex(vec2(x, y)).y, _fn_g_complex(vec2(x, y)).x)'
-    );
-    expect(r.preamble).toContain('return _fn_f(w) + 1.0;');
-    expect(r.preamble).toContain('return _fn_f_complex(w) + vec2(1.0, 0.0);');
-    // GLSL declares a function before its use: the callee copy comes first.
-    expect(r.preamble.indexOf('vec2 _fn_f_complex(')).toBeLessThan(
-      r.preamble.indexOf('vec2 _fn_g_complex(')
+    // The fragment refuses the real call `g(t)` next to the complex call.
+    expect(() => glsl(ce, latex)).toThrow(
+      /The parameter `w` of `g` has no declared type, and it has the type `real` of its argument at the first call/
     );
   });
 
@@ -336,7 +339,7 @@ describe('GPU: a complex argument to a parameter not declared complex', () => {
     const ce = engineWith(['f', '(unknown) -> real', 'z \\mapsto z^2']);
     for (const run of [glsl])
       expect(() => run(ce, 'f(x+iy)')).toThrow(
-        /the value `z\^2` is complex, but its ascribed type `real` says it is real/
+        /The ascribed type `real` says the value is real, and the value `z\^2` is complex/
       );
   });
 
@@ -358,15 +361,18 @@ describe('GPU: a complex argument to a parameter not declared complex', () => {
       '\\arg(f(x+iy))',
       '|f(x+iy)|',
       '\\arg(g(x+iy))',
-      'f(x) + \\operatorname{Re}(f(x+iy))',
     ])
       for (const v of SAMPLES) expectGLSLValue(ce, latex, v);
+    // The fragment refuses a real call next to a complex call.
+    expect(() => glsl(ce, 'f(x) + \\operatorname{Re}(f(x+iy))')).toThrow(
+      /The parameter `z` of `f` has no declared type/
+    );
   });
 
   it('`(real) -> real` fails closed (GLSL)', () => {
     const ce = engineWith(['f', '(real) -> real', 'z \\mapsto z^2']);
     expect(() => glsl(ce, '|f(x+iy)|')).toThrow(
-      'Could not compile `f`: argument 1 `x + i * y` lowers to "vec2" but parameter "z" is declared "float"'
+      'The argument `x + i * y` of `f` has the type `complex`, and the parameter `z` has the type `real`'
     );
     // A real argument compiles.
     expect(glsl(ce, 'f(x)').success).toBe(true);
@@ -428,10 +434,10 @@ describe('GPU: a function declared `(complex) -> complex`', () => {
     );
     for (const run of [glsl]) {
       expect(() => run(ce, '|g(x+iy)|')).toThrow(
-        /Could not compile `Floor`: the target's lowering for this head is real-only/
+        /No signature of `Floor` in the GLSL fragment takes operands of the types/
       );
       expect(() => run(ce, '|h(x+iy)|')).toThrow(
-        /Could not compile `Gamma`: the target's lowering for this head is real-only/
+        /No signature of `Gamma` in the GLSL fragment takes operands of the types/
       );
     }
   });
@@ -486,7 +492,7 @@ describe('GPU: the declared result type and the value of the body', () => {
     // no conversion from a `vec2` to a `float` that keeps the value.
     const ce = engineWith(['s', '(complex) -> real', 'z \\mapsto z^2']);
     expect(() => glsl(ce, 's(x+iy)')).toThrow(
-      /Could not compile `Typed`: the value `\(x \+ i \* y\)\^2` is complex, but its ascribed type `real` says it is real\..*\(unknown\) -> complex/s
+      /The ascribed type `real` says the value is real, and the value `z\^2` is complex/
     );
   });
 
@@ -520,7 +526,7 @@ describe('GPU: the declared result type and the value of the body', () => {
     ]);
     for (const run of [glsl])
       expect(() => run(ce, 's(x)')).toThrow(
-        /Could not compile `Typed`: the ascribed type `complex` says the value is complex, but the value .* is not a number/
+        /The branches of `If` have the types `point<2>` and `real`/
       );
   });
 
@@ -650,14 +656,14 @@ describe('GPU: real-only lowerings reject a complex argument', () => {
     ['Factorial', Z],
   ];
   for (const [cases, message] of [
-    [shared, "the target's lowering for this head is real-only"],
-    [shaderOnly, "the target's lowering for this head is real-only"],
+    [shared, 'in the GLSL fragment takes operands of the types'],
+    [shaderOnly, 'in the GLSL fragment takes operands of the types'],
   ] as const) {
     for (const c of cases) {
       it(`${c[0]} with a complex argument fails closed; a real one compiles`, () => {
         for (const run of [glsl]) {
           expect(() => run(ce, c)).toThrow(
-            `Could not compile \`${c[0]}\`: ${message}`
+            `No signature of \`${c[0]}\` ${message}`
           );
           const real = c.map((a: any) => (a === Z ? 'x' : a));
           expect(run(ce, real).success).toBe(true);
@@ -718,7 +724,7 @@ describe('GPU: Root of a complex radicand', () => {
   it('a complex degree fails closed', () => {
     for (const run of [glsl])
       expect(() => run(ce, ['Root', 'x', Z])).toThrow(
-        'Could not compile `Root`: a complex degree has no shader lowering'
+        'No signature of `Root` in the GLSL fragment takes operands of the types (real, complex)'
       );
   });
 });
@@ -741,10 +747,10 @@ describe('GPU: the iteration count of a fractal is an integer', () => {
   it('a complex count fails closed; a complex point compiles', () => {
     for (const run of [glsl]) {
       expect(() => run(ce, ['Mandelbrot', 'u', Z])).toThrow(
-        'Could not compile `Mandelbrot`: the integer operand `x + i * y` is complex'
+        'No signature of `Mandelbrot` in the GLSL fragment takes operands of the types'
       );
       expect(() => run(ce, ['Julia', Z, 'c', Z])).toThrow(
-        'Could not compile `Julia`: the integer operand `x + i * y` is complex'
+        'No signature of `Julia` in the GLSL fragment takes operands of the types'
       );
       expect(run(ce, ['Mandelbrot', Z, 'u']).success).toBe(true);
       expect(run(ce, ['Julia', Z, Z, 'u']).success).toBe(true);

@@ -279,9 +279,11 @@ describe('CE-584: the size limit of the shader code', () => {
     expect(r.error).toMatch(LIMIT_MESSAGE);
   });
 
-  // An operator with a compile handler of the caller is not shared either:
-  // the handler receives its operands as text. At depth 12 the code has
-  // 4,095 calls of `sin`, one for each path.
+  // An operator that the caller declares with a compile handler is not in
+  // the GLSL fragment, so a small graph declines with the fragment message.
+  // The size limit is checked first, when the tree is prepared, so a large
+  // graph declines with the limit message. (The `functions` option, in the
+  // test above, is the way to give a shader function for a head.)
   test('glsl: a graph through an operator with a compile handler declines', () => {
     const ce = engine();
     ce.declare('G', {
@@ -295,9 +297,10 @@ describe('CE-584: the size limit of the shader code', () => {
         e = ce.function('Add', [e, ce.function('G', [e])]);
       return e;
     };
-    const small = compile(graph(8), { to: 'glsl' });
-    expect(small.success).toBe(true);
-    expect(count(small.code, 'sin(')).toBe(2 ** 8 - 1);
+    const small = compile(graph(8), { to: 'glsl', fallback: true });
+    expect(small.success).toBe(false);
+    expect(small.diagnostic?.code).toBe('outside-fragment');
+    expect(small.error).toBe('The head `G` is outside the GLSL fragment.');
     const r = compile(graph(16), { to: 'glsl', fallback: true });
     expect(r.success).toBe(false);
     expect(r.error).toMatch(LIMIT_MESSAGE);
@@ -356,9 +359,10 @@ describe('CE-584: the size limit of the shader code', () => {
       const e = graph(depth);
       expect(gpuWrittenSize(e, cseRecordingRules(e))).toBeLessThan(20 * depth);
     }
+    // The GLSL fragment refuses an `If` that is a value and has one branch.
     const r = compile(graph(8), { to: 'glsl' });
-    expect(r.success).toBe(true);
-    expect(r.code.length).toBeLessThan(2_000);
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('outside-fragment');
   });
 
   // Below an operator that the caller replaces, the pass shares nothing:
@@ -469,10 +473,8 @@ describe('CE-584: the size limit of the shader code', () => {
     expect(r.error).toMatch(LIMIT_MESSAGE);
   });
 
-  // A call that is written in place of its definition (here because the
-  // parameter `b`, a pair of booleans, has no shader type) is written in
-  // full at each call site. Each body has 1,025 nodes; the limit applies
-  // to their sum.
+  // The argument `p`, a pair of booleans, has no type in the GLSL fragment,
+  // so the expression declines before the size limit applies.
   test('glsl: the bodies written at many call sites decline together', () => {
     const ce = engine();
     ce.declare('p', 'tuple<boolean, boolean>');
@@ -492,18 +494,18 @@ describe('CE-584: the size limit of the shader code', () => {
           ])
         )
       );
-    const few = compile(sites(10), { to: 'glsl', vars: { c: 'f()' } });
-    expect(few.success).toBe(true);
-    expect(few.code).not.toContain('_fn_h');
-    const r = compile(sites(60), {
-      to: 'glsl',
-      vars: { c: 'f()' },
-      fallback: true,
-    });
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(
-      /Could not compile: the GLSL code of the user-defined functions that the expression calls would have more than 50,000 nodes/
-    );
+    for (const n of [10, 60]) {
+      const r = compile(sites(n), {
+        to: 'glsl',
+        vars: { c: 'f()' },
+        fallback: true,
+      });
+      expect(r.success).toBe(false);
+      expect(r.diagnostic?.code).toBe('outside-fragment');
+      expect(r.error).toMatch(
+        /The symbol `p` has the type `tuple<boolean, boolean>`, which has no type in the GLSL fragment/
+      );
+    }
   });
 
   test('the estimate follows the code size', () => {

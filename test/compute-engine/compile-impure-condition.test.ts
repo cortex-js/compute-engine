@@ -145,11 +145,12 @@ describe('an impure branch condition is lowered three-valued', () => {
     ce.declare('x', 'real | signed_infinity | nan');
     // GLSL takes its `If` entry before the decidedness analysis, and a draw
     // there is the shader's own stream — unchanged by this ruling.
-    const r = compile(ce.box(['If', ['Greater', ['Random'], 'x'], 1, -1]), {
-      to: 'glsl',
-      fallback: false,
-    } as any);
-    expect(r?.success).toBe(true);
-    expect(String(r!.code)).toMatch(/\? \(1\.0\) : \(-1\.0\)/);
+    // The GLSL fragment has no `Random`, so the compilation declines.
+    expect(() =>
+      compile(ce.box(['If', ['Greater', ['Random'], 'x'], 1, -1]), {
+        to: 'glsl',
+        fallback: false,
+      } as any)
+    ).toThrow(/The head `Random` is outside the GLSL fragment/);
   });
 });

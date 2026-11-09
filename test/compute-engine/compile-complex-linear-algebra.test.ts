@@ -140,24 +140,22 @@ describe('NORM OF A LIST WITH A COMPLEX ENTRY', () => {
     const vec = 'vec2';
     it(`${to} computes the norm of the moduli, parse route: Norm([x, i])`, () => {
       const ce = engine('real | signed_infinity | nan');
-      const result = compile(
-        ce.parse('\\operatorname{Norm}([x, \\imaginaryI])'),
-        {
+      // The GLSL fragment has no list with a complex entry, so it declines.
+      expect(() =>
+        compile(ce.parse('\\operatorname{Norm}([x, \\imaginaryI])'), {
           to,
           fallback: false,
-        } as any
-      ) as any;
-      expect(result.success).toBe(true);
-      expect(result.code).toBe(`length(${vec}(x, length(${vec}(0.0, 1.0))))`);
+        } as any)
+      ).toThrow(/is not a list of reals or of points of one size/);
     });
     it(`${to} computes the norm of the moduli, box route: Norm([x, i])`, () => {
       const ce = engine('real | signed_infinity | nan');
-      const result = compile(ce.box(['Norm', ['List', 'x', 'ImaginaryUnit']]), {
-        to,
-        fallback: false,
-      } as any) as any;
-      expect(result.success).toBe(true);
-      expect(result.code).toBe(`length(${vec}(x, length(${vec}(0.0, 1.0))))`);
+      expect(() =>
+        compile(ce.box(['Norm', ['List', 'x', 'ImaginaryUnit']]), {
+          to,
+          fallback: false,
+        } as any)
+      ).toThrow(/is not a list of reals or of points of one size/);
     });
   }
 

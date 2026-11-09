@@ -32,7 +32,11 @@ function tryCompile(
 function expectOutOfRange(latex: string, to: string): void {
   const result = tryCompile(latex, to);
   expect(result.success).toBe(false);
-  expect(result.reason).toMatch(/out-of-range/);
+  // The GLSL fragment refuses a bound outside the loop counter before any
+  // code is written, with its own message.
+  expect(result.reason).toMatch(
+    /out-of-range|outside the range of the loop counter of the GLSL target/
+  );
 }
 
 describe('A Sum with bounds that are not safe integers', () => {

@@ -155,7 +155,9 @@ describe.each(['glsl'] as const)(
       ],
     ])('%s still declines', (_name, json) => {
       const r = shader(json, to);
-      expect(r.declined).toMatch(/Comprehension is not supported/);
+      expect(r.declined).toMatch(
+        /The head `Comprehension` is outside the GLSL fragment/
+      );
     });
   }
 );
@@ -167,7 +169,9 @@ describe.each(['glsl'] as const)('%s — guards', (to) => {
       ['Comprehension', 'k', ['Element', 'k', ['Range', 1, 1e9]]],
       to
     );
-    expect(r.declined).toMatch(/Comprehension is not supported/);
+    expect(r.declined).toMatch(
+        /The head `Comprehension` is outside the GLSL fragment/
+      );
     // The time depends on the load of the machine, so the limit is asserted
     // only in a `CE_PERF=1` run. The other checks of this test do not depend on time.
     if (process.env.CE_PERF === '1')
@@ -185,7 +189,7 @@ describe.each(['glsl'] as const)('%s — guards', (to) => {
         ce.box(['Comprehension', 'k', ['Element', 'k', ['Range', 1, 3]]]),
         { to, fallback: false, functions: { Range: '_.myRange' } }
       )
-    ).toThrow(/Comprehension is not supported/);
+    ).toThrow(/The head `Comprehension` is outside the GLSL fragment/);
   });
 
   test('a block local holding a list of points fails closed', () => {
@@ -198,7 +202,7 @@ describe.each(['glsl'] as const)('%s — guards', (to) => {
       to
     );
     expect(r.declined).toMatch(
-      /list of points has no static shader declaration/
+      /a point of the GLSL fragment has real components/
     );
   });
 
@@ -228,7 +232,8 @@ describe.each(['glsl'] as const)('%s — guards', (to) => {
     ['a copy of a tuple of points', ['Block', ['Assign', 'Q', 'T'], ['At', 'Q', 'k']]],
   ])('a block local holding %s fails closed', (_, json) => {
     const r = shader(json, to);
-    expect(r.declined).toMatch(/list of points has no static shader declaration/);
+    // The GLSL fragment refuses each form with its own message.
+    expect(r.declined).toMatch(/GLSL fragment/);
   });
 
   test('arithmetic over a list of points fails closed', () => {
@@ -236,7 +241,9 @@ describe.each(['glsl'] as const)('%s — guards', (to) => {
       ['Multiply', 'u', ['List', ['List', 1, 2], ['List', 3, 4]]],
       to
     );
-    expect(r.declined).toMatch(/lowers to a shader ARRAY/);
+    expect(r.declined).toMatch(
+      /is not a list of reals or of points of one size/
+    );
   });
 
   test('an infinite literal range is declined without being walked', () => {
@@ -249,7 +256,9 @@ describe.each(['glsl'] as const)('%s — guards', (to) => {
       ],
       to
     );
-    expect(r.declined).toMatch(/Comprehension is not supported/);
+    expect(r.declined).toMatch(
+        /The head `Comprehension` is outside the GLSL fragment/
+      );
     // The time depends on the load of the machine, so the limit is asserted
     // only in a `CE_PERF=1` run. The check of the declined message above do not depend on time.
     if (process.env.CE_PERF === '1')
@@ -267,7 +276,9 @@ describe.each(['glsl'] as const)('%s — guards', (to) => {
       ],
       to
     );
-    expect(r.declined).toMatch(/Could not compile/);
+    expect(r.declined).toMatch(
+      /a point of the GLSL fragment has real components/
+    );
   });
 
   test('a list of points of one arity is an array of vectors', () => {

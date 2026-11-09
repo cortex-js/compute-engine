@@ -163,34 +163,32 @@ describe('CE-593: the shader targets read the assigned point', () => {
     // `P` is read as an input of the union type.
     const ce = engine(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]);
     expect(compileError(ce, 'P.x + y', 'glsl')).toMatch(
-      /^Could not compile `PointX`: "P" has the type `list<tuple<number, number>> \| tuple<number, number>`/
+      /^No signature of `PointX` in the GLSL fragment takes operands of the types \(list<point<2>, 2>\)/
     );
   });
 });
 
 describe('CE-593: the shader targets decline when the value is not used', () => {
-  const MESSAGE =
-    'Could not compile `PointX`: "P" has the type ' +
-    '`list<tuple<number, number>> | tuple<number, number>`, which admits a ' +
-    'point and a list of points. A shader value cannot be both: a point is ' +
-    'a vector (`vec2`, `vec3`, `vec4`) and a list of points is an array. ' +
-    "Declare \"P\" as a point (`ce.declare('P', 'tuple<real, real>')`), or " +
-    'assign a point to "P" and do not map it with `vars`, so that the ' +
-    'shader uses its value.';
+
+  // The fragment gives the union type of `P` no GLSL type. A `vars` entry
+  // is spelling only: it does not change the type of `P`.
+  const FRAGMENT_MESSAGE =
+    'The symbol `P` has the type ' +
+    '`list<tuple<number, number>> | tuple<number, number>`, which has no ' +
+    'type in the GLSL fragment: declare a numeric type for `P`.';
 
   test.each(['glsl'] as const)('%s: no value', (to) => {
-    expect(compileError(engine(), 'P.x + y', to)).toBe(MESSAGE);
+    expect(compileError(engine(), 'P.x + y', to)).toBe(FRAGMENT_MESSAGE);
   });
 
   test.each(['glsl'] as const)('%s: a value, and a vars entry for P', (to) => {
     expect(
       compileError(engine(['Tuple', 1, 2]), 'P.x + y', to, { P: 'P' })
-    ).toBe(MESSAGE);
+    ).toBe(FRAGMENT_MESSAGE);
   });
 
-  // A read of `P` as a shader input declines with the same message, with
-  // `P` as the head: a bare `P`, and every whole-vector use of it.
-  const INPUT_MESSAGE = MESSAGE.replace('`PointX`', '`P`');
+  // A read of `P` as a shader input declines with the same message: a bare
+  // `P`, and every whole-vector use of it.
   const WHOLE = [
     'P',
     'P + (y, y)',
@@ -201,9 +199,9 @@ describe('CE-593: the shader targets decline when the value is not used', () => 
 
   test.each(['glsl'] as const)('%s: P as an input', (to) => {
     for (const src of WHOLE) {
-      expect(compileError(engine(), src, to)).toBe(INPUT_MESSAGE);
+      expect(compileError(engine(), src, to)).toBe(FRAGMENT_MESSAGE);
       expect(compileError(engine(['Tuple', 1, 2]), src, to, { P: 'P' })).toBe(
-        INPUT_MESSAGE
+        FRAGMENT_MESSAGE
       );
     }
   });
@@ -289,12 +287,9 @@ describe('CE-593: user functions and locals read the point', () => {
       ce.assign('Q', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
       ce.parse('h(t) := t Q').evaluate();
       expect(compileError(ce, 'h(x).x', to)).toBe(
-        'Could not compile `PointX`: `h(x)` has the type ' +
-          '`list<tuple<number, number>> | tuple<number, number>`, which ' +
-          'admits a point and a list of points. A shader value cannot be ' +
-          'both: a point is a vector (`vec2`, `vec3`, `vec4`) and a list of ' +
-          'points is an array. Make the value a point (a tuple such as ' +
-          '`tuple<real, real>`).'
+        'No signature of `Multiply` in the GLSL fragment takes operands of ' +
+          'the types (list<point<2>, 2>, real) (in the body of the user ' +
+          'function `h`).'
       );
     }
   );
@@ -600,7 +595,7 @@ describe('CE-593: an impure argument is not substituted', () => {
     ce.declare('r', 'real');
     ce.assign('r', ce.box(['Random'], { form: 'raw' }));
     expect(compileError(ce, 'f(r).x', to)).toMatch(
-      /^Could not compile `PointX`: `f\(r\)` has the type/
+      /^The head `Random` is outside the GLSL fragment/
     );
     // A pure argument is substituted.
     ce.assign('r', 3);
@@ -625,7 +620,7 @@ describe('CE-593: the impurity test reads the current values', () => {
     });
     ce.assign('r', ce.box(['Random'], { form: 'raw' }));
     expect(compileError(ce, 'f(r).x', 'glsl')).toMatch(
-      /^Could not compile `PointX`: `f\(r\)` has the type/
+      /^The head `Random` is outside the GLSL fragment/
     );
   });
 });
@@ -685,7 +680,7 @@ describe('CE-593: a refusal before compile() leaves no memo', () => {
     ce.assign('r', ce.box(['Random'], { form: 'raw' }));
     expect(() =>
       compile(ce.box(['PointX', ['f_0', r]]), { to: 'glsl', fallback: false })
-    ).toThrow(/^Could not compile `PointX`: `f_0\(r\)` has the type/);
+    ).toThrow(/^The head `Random` is outside the GLSL fragment/);
   });
 });
 
