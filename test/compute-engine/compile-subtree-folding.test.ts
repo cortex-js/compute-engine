@@ -9,7 +9,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * `constantFold: false` opt-out that codegen-focused tests rely on.
  *
  * Also pins the literal-count peephole in the `Take`/`Drop` (and Python
- * `Tabulate`/`Fill`) handlers, which applies even where the subtree as a
+ * `Tabulate`) handlers, which applies even where the subtree as a
  * whole cannot fold (a list-valued result never folds).
  */
 

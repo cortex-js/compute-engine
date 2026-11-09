@@ -445,6 +445,22 @@ eigenvectors([[2, 1], [1, 2]])
 // ➔ [[1,1],[-1,1]]
 ```
 
+### fill
+
+MathJSON `Fill` · `(value: any, integer+) -> list`
+
+List or tensor with each element equal to a value. Each operand after the value is the length of one axis.
+
+```epsil
+fill(7, 3)
+// ➔ [7,7,7]
+```
+
+```epsil
+fill(7, 2, 3)
+// ➔ [[7,7,7],[7,7,7]]
+```
+
 ### flatten
 
 MathJSON `Flatten` · `(value, integer?) -> list`
@@ -626,6 +642,22 @@ norm([3, 4], 1)
 // ➔ 7
 ```
 
+### ones
+
+MathJSON `Ones` · `(integer+) -> list`
+
+List or tensor filled with ones. Each operand is the length of one axis.
+
+```epsil
+ones(3)
+// ➔ [1,1,1]
+```
+
+```epsil
+ones(2, 3)
+// ➔ [[1,1,1],[1,1,1]]
+```
+
 ### onesMatrix
 
 MathJSON `OnesMatrix` · `(integer, integer?) -> matrix`
@@ -766,5 +798,21 @@ Matrix filled with zeros.
 
 ```epsil
 zeroMatrix(2, 3)
+// ➔ [[0,0,0],[0,0,0]]
+```
+
+### zeros
+
+MathJSON `Zeros` · `(integer+) -> list`
+
+List or tensor filled with zeros. Each operand is the length of one axis.
+
+```epsil
+zeros(3)
+// ➔ [0,0,0]
+```
+
+```epsil
+zeros(2, 3)
 // ➔ [[0,0,0],[0,0,0]]
 ```

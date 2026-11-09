@@ -524,8 +524,8 @@ per-element (or per-cell) callback with `collection.isLazy: () => true` in
 have each been measured doing so — `FlatMap` takes its collection FIRST
 (`FlatMap(Range(1, 3), x ↦ [Random()])`), and the swapped spelling does not
 canonicalize, which is why an earlier attempt to measure it read as
-inconclusive. The signature matches roughly nine heads in total (`Scan`,
-`Iterate` and `Fill` among the unmeasured), and nothing about the mechanism
+inconclusive. The signature matches roughly eight heads in total (`Scan`
+and `Iterate` among the unmeasured), and nothing about the mechanism
 singles out the measured five. Treat the property as belonging to
 lazy-view-ness, not to the particular names written here — a list of names in
 a document goes stale the moment a head is added.

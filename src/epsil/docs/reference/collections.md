@@ -710,17 +710,6 @@ Record types are closed: on an operand of a record type, a field name that the t
 // ➔ 2
 ```
 
-### fill
-
-MathJSON `Fill` · `(function, tuple) -> list`
-
-Produce a 2D list (matrix) by applying a function to each pair of row and column indexes.
-
-```epsil
-fill((i, j) => 10i + j, (2, 3))
-// ➔ [[11,12,13],[21,22,23]]
-```
-
 ### filter
 
 MathJSON `Filter` · `(collection<T>, predicate: (T) any -> boolean) -> collection where T`

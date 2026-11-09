@@ -6539,34 +6539,6 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const m = compile(args[2]);
     return `((_f, _n, _m) => Array.from({ length: Math.max(0, Math.round(_n)) }, (_, _i) => Array.from({ length: Math.max(0, Math.round(_m)) }, (_, _j) => _f(_i + 1, _j + 1))))(${f}, ${n}, ${m})`;
   },
-  // `Fill(f, (rows, cols))` → rows×cols nested list of `f(i, j)` with
-  // 1-based row/column indexes, matching the interpreter. Same hoisting and
-  // dimension normalization as `Tabulate`.
-  Fill: (args, compile, target) => {
-    const dims = args[1];
-    if (args[0] == null || dims == null)
-      throw new Error('Could not compile `Fill`: missing argument');
-    if (!isFunction(dims) || dims.ops.length !== 2)
-      throw new Error(
-        `Could not compile \`Fill\`: only the (function, (rows, cols)) form compiles.`
-      );
-    BaseCompiler.assertCallbackAnnotations(
-      'Fill',
-      args[0],
-      ['integer', 'integer'],
-      target
-    );
-    const f = BaseCompiler.withCheckedCallback(
-      'Fill',
-      args[0],
-      ['integer', 'integer'],
-      target,
-      () => hoistedCallbackLambda(args[0], compile, target)
-    );
-    const rows = compile(dims.ops[0]);
-    const cols = compile(dims.ops[1]);
-    return `((_f, _r, _c) => Array.from({ length: Math.max(0, Math.round(_r)) }, (_, _i) => Array.from({ length: Math.max(0, Math.round(_c)) }, (_, _j) => _f(_i + 1, _j + 1))))(${f}, ${rows}, ${cols})`;
-  },
   // `Repeat(x, n)` → a list of n copies of x. The VALUE is hoisted into an
   // IIFE parameter so it is evaluated exactly ONCE, matching the interpreter:
   // `Repeat(Random(), 3)` is three copies of a SINGLE draw, and the draw
@@ -14643,7 +14615,7 @@ function compileJSPad(
  * an operator symbol — has no body to rewrite here and compiles unchanged.
  *
  * The element-consuming callbacks reach this through `fnArg`/`zipFnArg` and
- * the `Tabulate`/`Fill` lowerings. A `Reduce`/`Scan` COMBINER reaches it
+ * the `Tabulate` lowering. A `Reduce`/`Scan` COMBINER reaches it
  * through `customCombinerWithLanes`, which passes a `compile` that wraps the
  * emission in `BaseCompiler.compileCombinerLiteral`: the literal's own
  * compilation then runs inside the fold's local shape frame, while the

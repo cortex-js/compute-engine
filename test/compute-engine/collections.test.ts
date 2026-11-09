@@ -5248,7 +5248,7 @@ describe('A collection parameter that does not resolve stays indeterminate', () 
   });
 });
 
-describe('Partition and Fill with an unresolved argument', () => {
+describe('Partition and Tabulate with an unresolved argument', () => {
   function fresh() {
     const ce = new ComputeEngine();
     ce.assign('Sy', ce.box(['List', 1, 2, 3, 4, 5, 6]));
@@ -5299,33 +5299,30 @@ describe('Partition and Fill with an unresolved argument', () => {
     );
   });
 
-  test('Fill with a symbolic dimension stays symbolic (was: an empty matrix)', () => {
+  test('Tabulate with a symbolic dimension stays symbolic', () => {
+    // An unresolvable dimension must not be read as 0, which would give `[]`
+    // for `Tabulate(f, n, 3)` and two empty rows for `Tabulate(f, 2, n)`.
     const ce = fresh();
     const f = ce.parse('(i,j) \\mapsto i \\cdot j').json as Expression;
-    // `Fill(f, (n, 3))` answered `[]` and `Fill(f, (2, n))` answered two
-    // EMPTY rows — an unresolvable dimension read as 0.
-    for (const shape of [
-      ['Tuple', 'ny', 3],
-      ['Tuple', 2, 'ny'],
-    ] as Expression[]) {
-      const e = ce.box(['Fill', f, shape]);
+    for (const dims of [
+      ['ny', 3],
+      [2, 'ny'],
+    ] as Expression[][]) {
+      const e = ce.box(['Tabulate', f, ...dims]);
       expect(e.count).toBeUndefined();
-      expect(e.evaluate().operator).toBe('Fill');
-      expect(ce.box(['ListFrom', ['Fill', f, shape]]).evaluate().operator).toBe(
-        'ListFrom'
-      );
+      expect(e.evaluate().operator).toBe('Tabulate');
+      expect(
+        ce.box(['ListFrom', ['Tabulate', f, ...dims]]).evaluate().operator
+      ).toBe('ListFrom');
     }
   });
 
-  test('Fill with resolved dimensions is unchanged', () => {
+  test('Tabulate with resolved dimensions is unchanged', () => {
     const ce = fresh();
     const f = ce.parse('(i,j) \\mapsto i \\cdot j').json as Expression;
-    expect(
-      ce
-        .box(['Fill', f, ['Tuple', 2, 3]])
-        .evaluate()
-        .toString()
-    ).toBe('[[1,2,3],[2,4,6]]');
+    expect(ce.box(['Tabulate', f, 2, 3]).evaluate().toString()).toBe(
+      '[[1,2,3],[2,4,6]]'
+    );
   });
 });
 
@@ -5486,10 +5483,10 @@ describe('BARE SHORTHAND PREDICATE ON THE EAGER FUNCTION-SLOT OPERATORS', () => 
     );
   });
 
-  test('Fill accepts the bare shorthand in its function slot', () => {
+  test('Tabulate accepts the bare shorthand in its function slot', () => {
     expect(
       engine
-        .box(['Fill', ['Add', '_1', '_2'], ['Tuple', 2, 3]])
+        .box(['Tabulate', ['Add', '_1', '_2'], 2, 3])
         .evaluate()
         .toString()
     ).toBe('[[2,3,4],[3,4,5]]');

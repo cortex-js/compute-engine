@@ -459,7 +459,7 @@ function linspaceSample(
  *   collapse class `hasSymbolicRangeBounds` guards for `Range`.
  *
  * `NaN` is deliberately NOT read as absence here, unlike `isAbsentValue`: an
- * operator whose parameter is typed `number` (`Take`, `Slice`, `Fill`) admits
+ * operator whose parameter is typed `number` (`Take`, `Slice`) admits
  * `NaN` through its signature, and treating it as "omitted" put `Take(xs, NaN)`
  * back on the default — answering `[]`. It is a present value that is not an
  * integer, which is exactly the `null` case. (`RotateLeft`/`RotateRight` type
@@ -1950,12 +1950,6 @@ const ITERATE_SUPPLY: ReadonlyArray<CallbackSupply> = [
   { count: 1, describes: 'the previous value' },
   { count: 2, describes: 'the 1-based index and the previous value' },
 ];
-
-/** `Fill(f, (rows, cols))` computes every cell as `f(i, j)`. */
-const FILL_SUPPLY: CallbackSupply = {
-  count: 2,
-  describes: 'the 1-based row and column indexes of the cell',
-};
 
 /**
  * The LAZY route's compatibility gate (Design E §3/§6,
@@ -8496,7 +8490,7 @@ function analyzeLevelD(
  * cell is a value (`nan` is a number type), and a `Nothing` cell is erased
  * when the literal is made canonical, so neither adds an arm.
  */
-function literalElementType(types: ReadonlyArray<Type>): Readonly<Type> {
+export function literalElementType(types: ReadonlyArray<Type>): Readonly<Type> {
   const successes = types.filter((t) => t !== 'error');
   if (successes.length === 0 && types.length > 0) return 'unknown';
   if (successes.some((t) => t === 'unknown')) {
@@ -8595,8 +8589,21 @@ function shapedListTypeD(
       ? null
       : internType({ kind: 'list', elements: 'never', dimensions: dims });
 
-  const widened = widenElementTypes(cells);
+  return cellListType(widenElementTypes(cells), dims, kinds);
+}
 
+/**
+ * The type of a list of shape `dims` whose cells have the type `widened`:
+ * a dimensioned `list` type when such cells may carry dimensions, otherwise
+ * plain lists nested once per dimension. The type of a `List` literal
+ * (`shapedListTypeD()`), and of `Fill(value, d1, d2, …)`, whose cells are
+ * all `value`.
+ */
+export function cellListType(
+  widened: Type,
+  dims: number[],
+  kinds?: KindTypeNames
+): Type {
   // A dimension list is attached only to cells that may carry one
   // (`mayCarryDimensions`: a cell that cannot be a list): `[True, False]` is
   // a `list<boolean^2>`, `[(1, 2), (3, 4)]` is a
@@ -22048,82 +22055,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
   },
 
-  // Fill(f, [n, m])
-  // Fill a nxm matrix with the result of f(i, j)
-  // Fill( Random(5), [3, 3] )
-  Fill: {
-    examples: ['Fill((i, j) => 10i + j, (2, 3))'],
-    description:
-      'Produce a 2D list (matrix) by applying a function to each pair of row and column indexes.',
-    complexity: 8200,
-    signature: '(function, tuple) -> list',
-    canonical: (ops, { engine }) =>
-      canonicalFunctionSlot(engine, 'Fill', ops, 0, FILL_SUPPLY),
-    collection: {
-      isEnumerable: (expr) =>
-        isFunction(expr) && isFunction(expr.op2) && fillDims(expr.op2) !== null,
-      isLazy: (_expr) => true,
-      callsCallbackOnRead: true,
-      count: (expr) => {
-        if (!isFunction(expr)) return undefined;
-        if (!isFunction(expr.op2)) return undefined;
-        const dims = fillDims(expr.op2);
-        if (dims === null) return undefined; // symbolic dimension
-        return dims[0] ?? 0;
-      },
-      iterator: (expr) => {
-        if (!isFunction(expr))
-          return { next: () => ({ value: undefined, done: true }) };
-        const f = applicable(expr.op1);
-        if (!f) return { next: () => ({ value: undefined, done: true }) };
-        if (!isFunction(expr.op2))
-          return { next: () => ({ value: undefined, done: true }) };
-        const dims = fillDims(expr.op2);
-        if (dims === null)
-          return { next: () => ({ value: undefined, done: true }) };
-        const rows = dims[0] ?? 0;
-        const cols = dims[1] ?? 0;
-        const last = rows;
-        let index = 1;
-        return {
-          next: () => {
-            if (index === last + 1) return { value: undefined, done: true };
-            index += 1;
-            const row: Expression[] = [];
-            for (let j = 1; j <= cols; j++) {
-              row.push(
-                f([expr.engine.number(index - 1), expr.engine.number(j)]) ??
-                  absenceMarker(expr.engine, expr)
-              );
-            }
-            return {
-              value: expr.engine.function('List', row),
-              done: false,
-            };
-          },
-        };
-      },
-      at: (expr, index) => {
-        if (typeof index !== 'number' || index < 1) return undefined;
-        if (!isFunction(expr)) return undefined;
-        const f = applicable(expr.op1);
-        if (!f) return undefined;
-        if (!isFunction(expr.op2)) return undefined;
-        const dims = fillDims(expr.op2);
-        if (dims === null) return undefined; // symbolic dimension
-        const rows = dims[0] ?? 0;
-        const cols = dims[1] ?? 0;
-        if (index > rows * cols) return undefined;
-        const row = Math.ceil(index / cols);
-        const col = ((index - 1) % cols) + 1; // 1-based column index
-        return (
-          f([expr.engine.number(row), expr.engine.number(col)]) ??
-          absenceMarker(expr.engine, expr)
-        );
-      },
-    },
-  },
-
   //
   // Create eager collections from other collections.
   //
@@ -27898,26 +27829,6 @@ function takeCount(expr: Expression): number | undefined {
   // every safe integer `n`, so the first `n` elements are all present.
   if (typeof count === 'bigint') return n;
   return Math.min(count, n);
-}
-
-/**
- * The integer dimensions of a `Fill`'s shape tuple, or `null` if any of them
- * is present but does not resolve to an integer.
- *
- * An unresolvable dimension used to read as `0`, so `Fill(f, (n, 3))`
- * answered the empty matrix and `Fill(f, (2, n))` answered two empty rows —
- * the same silent-substitution class as `Take(xs, n)` → `[]`. Every facet
- * bails together on `null`; see {@link integerParam}.
- */
-function fillDims(shape: Expression): number[] | null {
-  if (!isFunction(shape)) return null;
-  const dims: number[] = [];
-  for (const op of shape.ops) {
-    const d = integerParam(op);
-    if (d === null) return null;
-    dims.push(d ?? 0);
-  }
-  return dims;
 }
 
 /**

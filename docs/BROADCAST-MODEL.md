@@ -71,7 +71,7 @@ wrote**, not by the operand shapes:
    (`h(L)`) declines when an argument that can be a collection reaches such
    a parameter. A function VALUE (`compile(h)`, or `h` handed to a consumer)
    declines, because its arguments are not known, except at a callback
-   consumer (`Map`, `Filter`, `Reduce`, `Scan`, `Tabulate`, `Fill`) that
+   consumer (`Map`, `Filter`, `Reduce`, `Scan`, `Tabulate`) that
    passes values whose type cannot be a collection: with `h := (t:
    expression) ↦ 2t`, `Map(h, L)` compiles when `L` is declared
    `list<real>`, and `Map(h, rows)` declines when `rows` is declared

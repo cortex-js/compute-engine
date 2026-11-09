@@ -73,7 +73,13 @@ import {
   describe,
   describeType,
 } from '../boxed-expression/operand-descriptor.js';
-import { hasErrorTypedOperand, operandLiteralValue } from './type-handlers.js';
+import {
+  hasErrorTypedOperand,
+  operandLiteralValue,
+  storedComponentTypeD,
+} from './type-handlers.js';
+import { cellListType, literalElementType } from './collections.js';
+import { kindTypeNames } from '../boxed-expression/value-kinds.js';
 import {
   isAbsentSymbol,
   isCharacter,
@@ -2702,6 +2708,129 @@ function constantMatrixType(
   );
 }
 
+/**
+ * The shape of `Fill(value, d1, d2, …)` (and of `Zeros` and `Ones`) for the
+ * extents `values`, read in order:
+ *
+ * - `'symbolic'` when an extent before the first empty axis is not a number
+ *   literal (`undefined`): the expression stays unevaluated.
+ * - `'lazy'` when an extent before the first empty axis is not a safe
+ *   integer, or when the eager tensor would hold more than
+ *   `MAX_SIZE_EAGER_TENSOR` elements or empty lists.
+ * - Otherwise the extents of the eager tensor. An extent of 0 or less is an
+ *   empty axis, and the axes after it are not reached: `Fill(7, 2, 0, 3)` is
+ *   `[[], []]`, with the shape `[2, 0]`. So a large extent after an empty
+ *   axis makes nothing (`Zeros(0, 10^9)` is `[]`), and a large extent before
+ *   it makes a lazy tensor (`Zeros(10^9, 0)` holds 10^9 empty lists).
+ */
+function constantTensorShape(
+  values: ReadonlyArray<number | undefined>
+): number[] | 'symbolic' | 'lazy' {
+  // Every extent up to the first empty axis is read before the result is
+  // chosen, so that a symbolic extent after a large one still gives
+  // 'symbolic': `Zeros(10001, n)` stays unevaluated, as `Zeros(2, n)` does.
+  const dims: number[] = [];
+  let size = 1;
+  let lazy = false;
+  for (const v of values) {
+    if (v === undefined) return 'symbolic';
+    if (!Number.isSafeInteger(v)) {
+      // A large extent of either sign: a negative one is an empty axis.
+      if (v < 0) {
+        dims.push(0);
+        break;
+      }
+      lazy = true;
+      continue;
+    }
+    const d = Math.max(0, v);
+    dims.push(d);
+    if (d === 0) break;
+    size *= d;
+    if (size > MAX_SIZE_EAGER_TENSOR) lazy = true;
+  }
+  return lazy ? 'lazy' : dims;
+}
+
+/**
+ * The type of `Fill(value, d1, d2, …)`, and of `Zeros` and `Ones`, with
+ * `cell` the type of the value and `extents` the operands `d1, d2, …`.
+ *
+ * When the tensor is eager (`constantTensorShape()`), the type is the type
+ * of a `List` literal of that shape with cells of type `cell`
+ * (`cellListType()`), with the extents up to the first empty axis:
+ * `Fill(7, 2, 0, 3)` is `matrix<integer^(2x0)>`, the type of its value
+ * `[[], []]`. Cells that cannot carry dimensions (a list, as in
+ * `Fill([1, 2], 3)`, or a union such as `integer | boolean`) give plain
+ * lists nested once per axis, as for a literal. Otherwise the type is a
+ * `list` nested once per extent, with no dimensions: the shape of a tensor
+ * with a symbolic extent (`Fill(0, n)`) or of a lazy tensor is not stated.
+ */
+function constantTensorType(
+  cell: Type,
+  extents: ReadonlyArray<OperandDescriptor>,
+  context: TypeHandlerContext
+): BoxedType | undefined {
+  const shape = constantTensorShape(extents.map(operandLiteralValue));
+  if (Array.isArray(shape)) {
+    return BoxedType.forResult(
+      cellListType(cell, shape, kindTypeNames(context.engine)),
+      context.engine._typeResolver
+    );
+  }
+  let type: Type = cell;
+  for (let k = 0; k < extents.length; k++)
+    type = { kind: 'list', elements: type };
+  return BoxedType.forResult(type, context.engine._typeResolver);
+}
+
+/**
+ * The value of `Fill(value, d1, d2, …)`, and of `Zeros` and `Ones`: a tensor
+ * with one axis per extent, each cell `value`. The shape, and the choice
+ * between an eager and a lazy tensor, are those of `constantTensorShape()`.
+ *
+ * An extent of 0 or less gives an empty axis, as `Repeat(x, 0)` does:
+ * `Fill(7, 0)` is `[]` and `Fill(7, 2, 0)` is `[[], []]`. A symbolic extent
+ * (`Fill(7, 2, n)` with `n` valueless) gives `undefined`, so the expression
+ * stays unevaluated.
+ *
+ * A lazy tensor is a nested `Repeat`, `Repeat(Repeat(value, d2), d1)`, so
+ * that no cell is made before it is read. A `Repeat` holds its value as an
+ * operand, so a free symbol of the value is not captured by a parameter (as
+ * it would be by the parameter of a `Tabulate` function). An extent that is
+ * not a safe integer is passed to `Repeat` as it is, and `Repeat` reads it
+ * exactly.
+ */
+function constantTensor(
+  ce: ComputeEngine,
+  extents: ReadonlyArray<Expression>,
+  value: Expression
+): Expression | undefined {
+  const shape = constantTensorShape(
+    extents.map((op) => (isNumber(op) ? op.re : undefined))
+  );
+  if (shape === 'symbolic') return undefined;
+  if (shape === 'lazy') {
+    let lazy = value;
+    for (let k = extents.length - 1; k >= 0; k--)
+      lazy = ce.function('Repeat', [lazy, extents[k]]);
+    return lazy;
+  }
+
+  // Build the innermost lists first, then group them axis by axis. One list
+  // of each level is shared by every position of the level above, so the
+  // eager tensor holds one array per axis.
+  let level: Expression[] = Array.from(
+    { length: shape[shape.length - 1] },
+    () => value
+  );
+  for (let k = shape.length - 2; k >= 0; k--) {
+    const row = ce.function('List', level);
+    level = Array.from({ length: shape[k] }, () => row);
+  }
+  return ce.function('List', level);
+}
+
 export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
   {
     Matrix: {
@@ -5248,6 +5377,61 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         }
         return ce.expr(['List', ...rows]);
       },
+    },
+
+    // Creates a list, or a tensor of any rank, with each cell `value`. The
+    // operands after the value are the extents of the axes: `Fill(7, 3)` is
+    // `[7, 7, 7]` and `Fill(7, 2, 3)` is a 2×3 matrix. The value is an
+    // ordinary operand, evaluated once: `Fill(Random(), 2, 2)` holds four
+    // copies of one number. A function value is a cell; it is not called
+    // (`Tabulate(f, m, n)` calls `f` for each cell). See `constantTensor()`
+    // for the extents.
+    Fill: {
+      examples: ['Fill(7, 3)', 'Fill(7, 2, 3)'],
+      description:
+        'List or tensor with each element equal to a value. Each operand after the value is the length of one axis.',
+      complexity: 8100,
+      // A function value is a cell, held and never called, so the effects
+      // of its body are not effects of `Fill`.
+      invokes: false,
+      signature: '(value: any, integer+) -> list',
+      type: ([value, ...extents], context) =>
+        constantTensorType(
+          literalElementType([storedComponentTypeD(value)]),
+          extents,
+          context
+        ),
+      evaluate: ([value, ...extents], { engine: ce }) =>
+        constantTensor(ce, extents, value),
+    },
+
+    // Creates a list, or a tensor of any rank, filled with zeros:
+    // `Zeros(d1, d2, …)` is `Fill(0, d1, d2, …)`. One operand gives a list,
+    // not a square matrix as `ZeroMatrix(n)` does.
+    Zeros: {
+      examples: ['Zeros(3)', 'Zeros(2, 3)'],
+      description:
+        'List or tensor filled with zeros. Each operand is the length of one axis.',
+      complexity: 8100,
+      signature: '(integer+) -> list',
+      type: (extents, context) =>
+        constantTensorType('integer', extents, context),
+      evaluate: (extents, { engine: ce }) =>
+        constantTensor(ce, extents, ce.Zero),
+    },
+
+    // Creates a list, or a tensor of any rank, filled with ones:
+    // `Ones(d1, d2, …)` is `Fill(1, d1, d2, …)`.
+    Ones: {
+      examples: ['Ones(3)', 'Ones(2, 3)'],
+      description:
+        'List or tensor filled with ones. Each operand is the length of one axis.',
+      complexity: 8100,
+      signature: '(integer+) -> list',
+      type: (extents, context) =>
+        constantTensorType('integer', extents, context),
+      evaluate: (extents, { engine: ce }) =>
+        constantTensor(ce, extents, ce.One),
     },
 
     // Creates an m×n matrix of ones

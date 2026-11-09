@@ -2041,7 +2041,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(() => runJs(e, expr)).toThrow(/invalid expression/);
   });
 
-  it('Tabulate/Fill dimensions are rounded and clamped like the interpreter', () => {
+  it('Tabulate dimensions are rounded and clamped like the interpreter', () => {
     const e = mkEngine();
     e.declare('k', 'integer');
     const r = compile(e.box(['Tabulate', ['Function', 'i', 'i'], 'k']), {
@@ -2053,7 +2053,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(r.run!({ k: NaN })).toEqual([]);
   });
 
-  it('Tabulate/Fill evaluate the function and dimensions once (hoisted)', () => {
+  it('Tabulate evaluates the function and dimensions once (hoisted)', () => {
     const e = mkEngine();
     const r = compile(
       e.box([
@@ -2346,20 +2346,6 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     // General lo/step iterator → Map over Range
     expect(runJs(e, ['Table', 'i', ['Set', 'i', 0, 10, 5]])).toEqual([
       0, 5, 10,
-    ]);
-  });
-
-  it('Fill compiles to a rows×cols matrix of f(i, j), 1-based', () => {
-    const e = mkEngine();
-    expect(
-      runJs(e, [
-        'Fill',
-        ['Function', ['Add', ['Multiply', 10, 'i'], 'j'], 'i', 'j'],
-        ['Tuple', 2, 2],
-      ])
-    ).toEqual([
-      [11, 12],
-      [21, 22],
     ]);
   });
 

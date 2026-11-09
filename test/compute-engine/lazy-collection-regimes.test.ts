@@ -112,7 +112,6 @@ describe('lazy collection regimes', () => {
       'Combinations',
       'Cycle',
       'Drop',
-      'Fill',
       'Iterate',
       'Join',
       'Linspace',
@@ -171,7 +170,7 @@ describe('lazy collection regimes', () => {
 
   test('every collection operator lands in exactly one regime', () => {
     const regimes = collectionRegimes();
-    expect(regimes.size).toBe(49);
+    expect(regimes.size).toBe(48);
     for (const [name, regime] of regimes)
       expect([name, regime]).toEqual([
         name,
@@ -189,7 +188,6 @@ describe('lazy collection regimes', () => {
     Combinations: ['Combinations', ['List', 1, 2, 3], 2],
     Cycle: ['Cycle', ['List', 1, 2, 3]],
     Drop: ['Drop', ['List', 1, 2, 3], 1],
-    Fill: ['Fill', ['Function', ['Add', '_', '_2']], ['Tuple', 3, 3]],
     Iterate: ['Iterate', ['Function', ['Multiply', '_', 2]], 1],
     Join: ['Join', ['Range', 1, 2], ['List', 3, 4]],
     Linspace: ['Linspace', 1, 10, 5],

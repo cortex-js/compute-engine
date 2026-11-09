@@ -269,7 +269,7 @@ describe('callback lambda: loop-invariant hoist (JavaScript target)', () => {
     }
   });
 
-  it('c3: the index-consuming Tabulate and Fill hoist the same way', () => {
+  it('c3: the index-consuming 1-D and 2-D Tabulate hoist the same way', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'number');
     const tabulate = compile(
@@ -289,18 +289,19 @@ describe('callback lambda: loop-invariant hoist (JavaScript target)', () => {
     ]);
 
     // Two parameters: the shim forwards both.
-    const fill = compile(
+    const matrix = compile(
       ce.box([
-        'Fill',
+        'Tabulate',
         ['Function', ['Add', 'i', 'j', ['Sin', 'x']], 'i', 'j'],
-        ['Tuple', 2, 3],
+        2,
+        3,
       ]),
       { to: 'javascript' } as any
     ) as any;
-    expect(fill.success).not.toBe(false);
-    expect(occurrences(fill.code, 'Math.sin')).toBe(1);
-    expect(firstCallInit(fill.code)).toContain('Math.sin');
-    expect(fill.run({ x: 0.5 })).toEqual([
+    expect(matrix.success).not.toBe(false);
+    expect(occurrences(matrix.code, 'Math.sin')).toBe(1);
+    expect(firstCallInit(matrix.code)).toContain('Math.sin');
+    expect(matrix.run({ x: 0.5 })).toEqual([
       [2 + Math.sin(0.5), 3 + Math.sin(0.5), 4 + Math.sin(0.5)],
       [3 + Math.sin(0.5), 4 + Math.sin(0.5), 5 + Math.sin(0.5)],
     ]);

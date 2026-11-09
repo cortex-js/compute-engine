@@ -287,21 +287,6 @@ describe('CALLBACK ARITY — the accumulating family (2 arguments supplied)', ()
         .toString()
     ).toBe('6');
   });
-
-  test('Fill supplies the row and column indexes', () => {
-    const ce = new ComputeEngine();
-    const bad = ce.box(['Fill', UNARY, ['Tuple', 2, 2]]);
-    expect(bad.type.toString()).toBe('error');
-    expect(bad.toString()).toContain(
-      'Fill calls its callback with 2 arguments (the 1-based row and column indexes of the cell); `(p) => 1 < p` declares 1 parameter'
-    );
-    const good = ce.box([
-      'Fill',
-      ['Function', ['Add', 'i', 'j'], 'i', 'j'],
-      ['Tuple', 2, 2],
-    ]);
-    expect(good.evaluate().toString()).toBe('[[2,3],[3,4]]');
-  });
 });
 
 describe('CALLBACK ARITY — a supply count that depends on the call', () => {
@@ -432,7 +417,8 @@ describe('CALLBACK ARITY — the check DECLINES when the arity is not readable',
     // Applying `["Function", 42]` ignores every argument (the historical
     // contract in `function-utils.ts` `invoke`), which is what lets a constant
     // stand in for a predicate or a generator. `timeout.test.ts` relies on it
-    // (`CountIf(Range(100), () => True)` counts 100); Map/Iterate/Fill do too.
+    // (`CountIf(Range(100), () => True)` counts 100); Map/Iterate/Tabulate do
+    // too.
     const ce = new ComputeEngine();
     const TRUE: MathJsonExpression = ['Function', 'True'];
     expect(hasArityError(ce.box(['CountIf', ['Range', 100], TRUE]))).toBe(
@@ -445,11 +431,11 @@ describe('CALLBACK ARITY — the check DECLINES when the arity is not readable',
         .evaluate()
         .toString()
     ).toBe('[7,7,7]');
-    expect(
-      hasArityError(ce.box(['Fill', ['Function', 0], ['Tuple', 2, 2]]))
-    ).toBe(false);
+    expect(hasArityError(ce.box(['Tabulate', ['Function', 0], 2, 2]))).toBe(
+      false
+    );
     // …while a unary literal at a two-argument slot is still caught.
-    expect(hasArityError(ce.box(['Fill', UNARY, ['Tuple', 2, 2]]))).toBe(true);
+    expect(hasArityError(ce.box(['Tabulate', UNARY, 2, 2]))).toBe(true);
   });
 
   test('a bare `function`-typed symbol declines; a bound binary lambda is checked', () => {
@@ -538,7 +524,7 @@ describe('CALLBACK ARITY — the check DECLINES when the arity is not readable',
     // arguments fit `(number, number?)`, at any of the slots that supply them.
     ce.declare('z', '(number, number?) -> number');
     expect(hasArityError(ce.box(['Reduce', LIST, 'z', 0]))).toBe(false);
-    expect(hasArityError(ce.box(['Fill', 'z', ['Tuple', 2, 2]]))).toBe(false);
+    expect(hasArityError(ce.box(['Tabulate', 'z', 2, 2]))).toBe(false);
     // …and one argument still fits it, since the optional slot may go unfilled.
     expect(hasArityError(ce.box(['Map', 'z', LIST]))).toBe(false);
   });

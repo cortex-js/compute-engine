@@ -1850,8 +1850,8 @@ export interface BaseCollectionHandlers {
 
   /**
    * Set on a lazy operator that calls a function operand when its elements
-   * are read, not when it is evaluated (`Map`, `Filter`, `Tabulate`, `Fill`,
-   * …). An instance created during a function call keeps the evaluation
+   * are read, not when it is evaluated (`Map`, `Filter`, `Tabulate`, …).
+   * An instance created during a function call keeps the evaluation
    * context of that call, and each read of the instance runs in it, so that
    * a name that the callback reads by its binding in the context (the symbol
    * default `d` of a parameter `(x, k = d) => x * k`) has the value it had in

@@ -63,6 +63,18 @@
       ]
     },
     {
+      "name": "AddTo",
+      "category": "Control Structures",
+      "arity": "2",
+      "signature": "(expression, any) scope -> any",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Compound assignment: `AddTo(s, e)` is `Assign(s, Add(s, e))`, and `AddTo(At(L, i, …), e)` is `Assign(L, ReplaceAt(L, i, …, Add(At(L, i, …), e)))`, with each position evaluated once, before `e`. In the body of a `ParallelLoop`, it adds a contribution to an accumulator, a variable declared outside the loop."
+    },
+    {
       "name": "Adjoin",
       "category": "Collections",
       "arity": "variadic",
@@ -2085,15 +2097,16 @@
       "name": "DeleteAt",
       "category": "Collections",
       "arity": "1",
-      "signature": "((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T: any)",
+      "signature": "((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T: any) & ((dictionary<V>, string) -> dictionary<V> where V: any)",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return a copy of the indexed collection with the element at the 1-based `index` removed.\n\nA negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.\n\nDeleting from a string yields a string.",
+      "description": "Return a copy of the indexed collection with the element at the 1-based `index` removed.\n\nA negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.\n\nDeleting from a string yields a string.\n\nOn a dictionary or a record, `DeleteAt(d, key)` returns a copy without the entry of the string `key`; `d` does not change. A key that is not there gives the value unchanged. The type of a record loses the field (`record{a: integer, b: string?}` gives `record{a: integer}`); with a key known only at evaluation, every field of the record becomes optional.\n\nA value of a declared (nominal) record type is not a collection, so `DeleteAt` refuses it, as `At` does.",
       "examples": [
-        "DeleteAt([1, 2, 3, 4], 2)"
+        "DeleteAt([1, 2, 3, 4], 2)",
+        "DeleteAt({a -> 1, b -> \"x\"}, \"b\")"
       ]
     },
     {
@@ -3089,24 +3102,25 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Access a named field of a value: `p.x` in Epsil.\n\nOn a record or dictionary value, `Field(d, \"x\")` behaves exactly as `d[\"x\"]` (`At` semantics, including the absence marker for a key a dictionary may not have).\n\nOn a value of a NOMINAL type whose definition body has named fields (a record body, or a named-tuple body), the field is resolved through the type definition — the sanctioned accessor window of the nominal-types design (D6/§4.5b D16). This does not make the value a collection: `First(p)` and `p[\"x\"]` keep rejecting.\n\nA field name that is not in a record/named-tuple definition is a static defect (the result type is `error`); on an unknown-typed operand the expression stays symbolic.",
+      "description": "Access a named field of a value: `p.x` in Epsil.\n\nOn a record or dictionary value, `Field(d, \"x\")` behaves exactly as `d[\"x\"]` (`At` semantics, including the absence marker for a key a dictionary may not have).\n\nOn a value of a NOMINAL type whose definition body has named fields (a record body, or a named-tuple body), the field is resolved through the type definition — the sanctioned accessor window of the nominal-types design (D6/§4.5b D16). This does not make the value a collection: `First(p)` and `p[\"x\"]` keep rejecting.\n\nA field name that is not in a record/named-tuple definition is a static defect (the result type is `error`); on an unknown-typed operand the expression stays symbolic.\n\nRecord types are closed: on an operand of a record type, a field name that the type does not list is refused when the expression is boxed (`unknown-field`). An optional field (`b: string?`) that the value leaves out reads as the absent value of its type: `Missing`, or `NaN` for a numeric field.",
       "examples": [
         "{x -> 1, y -> 2}.y"
       ]
     },
     {
       "name": "Fill",
-      "category": "Collections",
-      "arity": "2",
-      "signature": "(function, tuple) -> list",
+      "category": "Linear Algebra",
+      "arity": "variadic",
+      "signature": "(value: any, integer+) -> list",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Produce a 2D list (matrix) by applying a function to each pair of row and column indexes.",
+      "description": "List or tensor with each element equal to a value. Each operand after the value is the length of one axis.",
       "examples": [
-        "Fill((i, j) => 10i + j, (2, 3))"
+        "Fill(7, 3)",
+        "Fill(7, 2, 3)"
       ]
     },
     {
@@ -5336,6 +5350,22 @@
       ]
     },
     {
+      "name": "Module",
+      "category": "Core",
+      "arity": "1",
+      "signature": "(symbol) -> unknown",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "The definition of a name in the standard library, also where a local definition shadows the name",
+      "examples": [
+        "Module(Pi)",
+        "Apply(Module(Floor), 2.5)"
+      ]
+    },
+    {
       "name": "MoebiusMu",
       "category": "Number Theory",
       "arity": "1",
@@ -6003,6 +6033,22 @@
       "description": "OKLCh color (L 0-1, C 0-~0.4, hue degrees, optional alpha)"
     },
     {
+      "name": "Ones",
+      "category": "Linear Algebra",
+      "arity": "variadic",
+      "signature": "(integer+) -> list",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "List or tensor filled with ones. Each operand is the length of one axis.",
+      "examples": [
+        "Ones(3)",
+        "Ones(2, 3)"
+      ]
+    },
+    {
       "name": "OnesMatrix",
       "category": "Linear Algebra",
       "arity": "optional",
@@ -6149,6 +6195,42 @@
       "examples": [
         "Parallel(l, m)"
       ]
+    },
+    {
+      "name": "ParallelComprehension",
+      "category": "Control Structures",
+      "arity": "variadic",
+      "signature": "(body:expression, iterators:expression+) random -> list",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Parallel comprehension: `ParallelComprehension(body, Element(x, xs), …)` is the list that `Comprehension` with the same operands gives, but the passes of the first clause can run in any order. The other clauses run in order inside each pass. The body changes no variable declared outside it. Inside a `WithRandomSeed` frame, the comprehension consumes one draw index and each pass draws from its own frame (`docs/RANDOMNESS-MODEL.md`). Unlike `Comprehension`, it is evaluated at once to a `List`."
+    },
+    {
+      "name": "ParallelDomain",
+      "category": "Control Structures",
+      "arity": "1",
+      "signature": "(collection:any) random -> any",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "The domain of the passes of a parallel loop (engine-internal)."
+    },
+    {
+      "name": "ParallelLoop",
+      "category": "Control Structures",
+      "arity": "variadic",
+      "signature": "(body:expression, iterators:expression+) random -> any",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Parallel loop, evaluated **for effect**: `ParallelLoop(body, Element(x, coll))` evaluates `body` once for each element of `coll` (a pass), and the passes can run in any order. The body can change a variable declared outside the loop only with `AddTo` (an accumulator). A read of an accumulator in a pass gives an unspecified value. Inside a `WithRandomSeed` frame, the loop consumes one draw index and each pass draws from its own frame (`docs/RANDOMNESS-MODEL.md`). The value is `Nothing`."
     },
     {
       "name": "Parse",
@@ -9286,7 +9368,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "`Which(c1, e1, c2, e2, …)` evaluates to the value of the first `e` whose condition `c` is `True`, and to `Missing` when no condition is `True`. A last clause with the condition `True` is the default. Only the selected expression is evaluated.\nElement-wise selection: when a condition is a flat list of booleans (`L < 3` with `L` a list), the selection is made at each position, as `numpy.select` does, and the value is a list. At each position, the first clause whose condition is `True` there gives the value: an expression that is a list gives its element at that position, any other expression gives its own value. With `L = [1, 3, 5]`, `Which(L < 2, 10, L < 4, L, True, 0)` is `[10, 3, 0]`.\n  - A condition that is not a list applies to every position.\n  - Every expression is a number, a point, or a flat list of numbers or of points with the length of the condition, and all have one kind. A nested list, a list of another length, a string and a list of strings are static errors, as is a condition that is a nested list or holds a `Missing` cell. A relation (a boolean) is accepted.\n  - A position that no clause selects holds `NaN` for a number, a point whose coordinates are `NaN` for a point, and `Missing` for a boolean."
+      "description": "`Which(c1, e1, c2, e2, …)` evaluates to the value of the first `e` whose condition `c` is `True`, and to `Missing` when no condition is `True`. A last clause with the condition `True` is the default. Only the selected expression is evaluated.\nElement-wise selection: when a condition is a flat list of booleans (`L < 3` with `L` a list), the selection is made at each position, as `numpy.select` does, and the value is a list. At each position, the first clause whose condition is `True` there gives the value: an expression that is a list gives its element at that position, any other expression gives its own value. With `L = [1, 3, 5]`, `Which(L < 2, 10, L < 4, L, True, 0)` is `[10, 3, 0]`. A selected expression whose type is a list and whose elements cannot be read yet (`foo(L)` with `foo` undeclared) keeps the `Which` symbolic.\n  - A condition that is not a list applies to every position.\n  - Every expression is a number, a point, or a flat list of numbers or of points with the length of the condition, and all have one kind. A nested list, a list of another length, a string and a list of strings are static errors, as is a condition that is a nested list or holds a `Missing` cell. A relation (a boolean) is accepted.\n  - A position that no clause selects holds `NaN` for a number, a point whose coordinates are `NaN` for a point, and `Missing` for a boolean."
     },
     {
       "name": "Wildcard",
@@ -9374,6 +9456,22 @@
       "description": "Matrix filled with zeros.",
       "examples": [
         "ZeroMatrix(2, 3)"
+      ]
+    },
+    {
+      "name": "Zeros",
+      "category": "Linear Algebra",
+      "arity": "variadic",
+      "signature": "(integer+) -> list",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "List or tensor filled with zeros. Each operand is the length of one axis.",
+      "examples": [
+        "Zeros(3)",
+        "Zeros(2, 3)"
       ]
     },
     {

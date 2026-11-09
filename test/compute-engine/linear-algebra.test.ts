@@ -1568,6 +1568,173 @@ describe('ZeroMatrix', () => {
   });
 });
 
+describe('Fill', () => {
+  it('creates a list, a matrix and a tensor of rank 3', () => {
+    expect(ce.expr(['Fill', 7, 3]).evaluate().toString()).toBe('[7,7,7]');
+    expect(ce.expr(['Fill', 7, 2, 3]).evaluate().toString()).toBe(
+      '[[7,7,7],[7,7,7]]'
+    );
+    expect(ce.expr(['Fill', 'x', 2, 1, 2]).evaluate().toString()).toBe(
+      '[[[x,x]],[[x,x]]]'
+    );
+  });
+
+  it('fills with a list, a string or a boolean', () => {
+    const lists = ce.expr(['Fill', ['List', 1, 2], 2]);
+    expect(lists.evaluate().toString()).toBe('[[1,2],[1,2]]');
+    const strings = ce.expr(['Fill', { str: 'a' }, 2]);
+    expect(strings.evaluate().toString()).toBe('["a","a"]');
+    expect(ce.expr(['Fill', 'True', 2]).evaluate().toString()).toBe(
+      '["True","True"]'
+    );
+  });
+
+  it('holds a function value as a cell and does not call it', () => {
+    // `Tabulate(f, n)` calls `f`; `Fill(f, n)` repeats it.
+    const f = ['Function', ['Multiply', 2, 'k'], 'k'];
+    const result = ce.expr(['Fill', f, 2]).evaluate();
+    expect(result.nops).toBe(2);
+    expect(result.op1.operator).toBe('Function');
+  });
+
+  it('evaluates the value once', () => {
+    const result = ce.expr(['Fill', ['Random'], 3]).evaluate();
+    expect(result.op1.isSame(result.op2)).toBe(true);
+    expect(result.op2.isSame(result.op3)).toBe(true);
+  });
+
+  it('gives an empty axis for an extent of 0 or less', () => {
+    expect(ce.expr(['Fill', 7, 0]).evaluate().toString()).toBe('[]');
+    expect(ce.expr(['Fill', 7, -2]).evaluate().toString()).toBe('[]');
+    expect(ce.expr(['Fill', 7, 0, 3]).evaluate().toString()).toBe('[]');
+    expect(ce.expr(['Fill', 7, 2, 0]).evaluate().toString()).toBe('[[],[]]');
+    // The axes after an empty axis are not reached.
+    expect(ce.expr(['Fill', 7, 2, 0, 3]).evaluate().toString()).toBe('[[],[]]');
+    // A negative extent below -2^53 is an empty axis too, not a lazy one.
+    const negative = { num: '-100000000000000000000' };
+    expect(ce.expr(['Fill', 7, 2, negative]).evaluate().toString()).toBe(
+      '[[],[]]'
+    );
+    expect(ce.expr(['Zeros', 0, 1000000000]).evaluate().toString()).toBe('[]');
+  });
+
+  it('is lazy for a large extent before an empty axis', () => {
+    // 10^9 empty rows: an eager list would allocate them all.
+    const rows = ce.expr(['Zeros', 1000000000, 0]).evaluate();
+    expect(rows.operator).toBe('Repeat');
+    expect(ce.box(['Length', rows]).evaluate().re).toBe(1000000000);
+    expect(ce.box(['At', rows, 5]).evaluate().toString()).toBe('[]');
+    // An extent above 2^53 is not read as 0.
+    const huge = ce
+      .expr(['Fill', 7, { num: '100000000000000000000' }, 0])
+      .evaluate();
+    expect(huge.operator).toBe('Repeat');
+    expect(huge.count).toBe(100000000000000000000n);
+  });
+
+  it('stays unevaluated for a symbolic extent', () => {
+    const e = ce.expr(['Fill', 7, 2, 'n']);
+    expect(e.evaluate().isSame(e)).toBe(true);
+    // Also after an extent large enough for the lazy form.
+    const large = ce.expr(['Fill', 7, 20000, 'n']);
+    expect(large.evaluate().isSame(large)).toBe(true);
+  });
+
+  it('does not take the effects of a function value', () => {
+    // The function is a cell and is never called, so its `Random()` is not
+    // an effect of `Fill`.
+    const f = ['Function', ['Random'], 'k'];
+    expect(ce.box(['Fill', f, 2]).isPure).toBe(ce.box(['List', f, f]).isPure);
+  });
+
+  it('refuses the old form Fill(f, (m, n))', () => {
+    // The old form is `Tabulate(f, m, n)`. A tuple is not an integer extent.
+    const f = ['Function', ['Add', ['Multiply', 10, 'i'], 'j'], 'i', 'j'];
+    const result = ce.expr(['Fill', f, ['Tuple', 2, 3]]).evaluate();
+    expect(result.operator).toBe('Error');
+    expect(result.toString()).toContain('incompatible-type');
+  });
+
+  it('builds a large tensor lazily, without capturing a free symbol', () => {
+    const t = ce.expr(['Fill', 'k', 1000, 1000, 1000]).evaluate();
+    expect(t.operator).toBe('Repeat');
+    expect(ce.box(['Length', t]).evaluate().re).toBe(1000);
+    expect(ce.box(['At', t, 9, 8, 7]).evaluate().toString()).toBe('k');
+  });
+});
+
+describe('Zeros', () => {
+  it('creates a list from one extent', () => {
+    // One extent gives a list, not the square matrix of `ZeroMatrix(n)`.
+    expect(ce.expr(['Zeros', 3]).evaluate().toString()).toBe('[0,0,0]');
+  });
+
+  it('creates a matrix from two extents', () => {
+    expect(ce.expr(['Zeros', 2, 3]).evaluate().toString()).toBe(
+      '[[0,0,0],[0,0,0]]'
+    );
+  });
+
+  it('creates a tensor of rank 3', () => {
+    const result = ce.expr(['Zeros', 2, 1, 3]).evaluate();
+    expect(result.toString()).toBe('[[[0,0,0]],[[0,0,0]]]');
+    expect(ce.box(['Shape', result]).evaluate().toString()).toBe('(2, 1, 3)');
+  });
+
+  it('adds to a matrix of the same shape', () => {
+    const sum = ce.box(['Add', ['Zeros', 2, 2], ['IdentityMatrix', 2]]);
+    expect(sum.evaluate().toString()).toBe('[[1,0],[0,1]]');
+  });
+
+  it('gives an empty axis for an extent of 0 or less', () => {
+    expect(ce.expr(['Zeros', 0]).evaluate().toString()).toBe('[]');
+    expect(ce.expr(['Zeros', 2, -1]).evaluate().toString()).toBe('[[],[]]');
+  });
+
+  it('stays unevaluated for a symbolic extent', () => {
+    const e = ce.expr(['Zeros', 2, 'n']);
+    expect(e.evaluate().isSame(e)).toBe(true);
+  });
+
+  it('builds a large tensor lazily', () => {
+    const v = ce.expr(['Zeros', 100000]).evaluate();
+    expect(v.operator).toBe('Repeat');
+    expect(ce.box(['Length', v]).evaluate().re).toBe(100000);
+    expect(ce.box(['At', v, 99999]).evaluate().re).toBe(0);
+
+    const t = ce.expr(['Zeros', 1000, 1000, 1000]).evaluate();
+    expect(ce.box(['Length', t]).evaluate().re).toBe(1000);
+    expect(ce.box(['At', t, 5, 6, 7]).evaluate().re).toBe(0);
+  });
+});
+
+describe('Ones', () => {
+  it('creates a list, a matrix and a tensor of rank 3', () => {
+    expect(ce.expr(['Ones', 3]).evaluate().toString()).toBe('[1,1,1]');
+    expect(ce.expr(['Ones', 2, 3]).evaluate().toString()).toBe(
+      '[[1,1,1],[1,1,1]]'
+    );
+    expect(ce.expr(['Ones', 2, 1, 2]).evaluate().toString()).toBe(
+      '[[[1,1]],[[1,1]]]'
+    );
+  });
+
+  it('gives an empty axis for an extent of 0', () => {
+    expect(ce.expr(['Ones', 0]).evaluate().toString()).toBe('[]');
+  });
+
+  it('stays unevaluated for a symbolic extent', () => {
+    const e = ce.expr(['Ones', 'n', 2]);
+    expect(e.evaluate().isSame(e)).toBe(true);
+  });
+
+  it('builds a large tensor lazily', () => {
+    const t = ce.expr(['Ones', 1000, 1000]).evaluate();
+    expect(t.operator).toBe('Repeat');
+    expect(ce.box(['At', t, 999, 2]).evaluate().re).toBe(1);
+  });
+});
+
 describe('OnesMatrix', () => {
   it('should create a 2×2 ones matrix', () => {
     const result = ce.expr(['OnesMatrix', 2]).evaluate();

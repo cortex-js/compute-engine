@@ -461,11 +461,6 @@ describe('LAZY VIEW CREATION CONTEXT: EACH LAZY CALLBACK OPERATOR', () => {
     ['Table', ['Table', F, 2], ['List', 10, 20]],
     ['Iterate', ['Take', ['Iterate', F, 1], 3], ['List', 10, 100, 1000]],
     ['Take of Map', ['Take', ['Map', F, 'xs'], 2], ['List', 50, 150]],
-    [
-      'Fill',
-      ['Fill', F2, ['Tuple', 1, 2]],
-      ['List', ['List', 10, 20]],
-    ],
   ];
   for (const [name, body, expected] of cases) {
     test(name, () => {
@@ -480,6 +475,23 @@ describe('LAZY VIEW CREATION CONTEXT: EACH LAZY CALLBACK OPERATOR', () => {
       expect(listed(ce, [outName, ...args])).toEqual(expected);
     });
   }
+
+  test('Tabulate 2-D, with a callback of two arguments', () => {
+    // The rows of a 2-D `Tabulate` are lazy views too, so `ListFrom` lists
+    // the outer level only: each row is listed after the call has returned.
+    ce.assign('outTab2', ce.box(['Function', ['Tabulate', F2, 1, 2], 'd']));
+    ce.assign(
+      'inTab2',
+      ce.box(['Function', ['ListFrom', ['At', ['Tabulate', F2, 1, 2], 1]], 'd'])
+    );
+    expect(ce.box(['inTab2', 10]).evaluate().json).toEqual(['List', 10, 20]);
+    const view = ce.box(['outTab2', 10]).evaluate();
+    expect(view.operator).toBe('Tabulate');
+    const rows = [...view.each()].map(
+      (row) => ce.function('ListFrom', [row]).evaluate().json
+    );
+    expect(rows).toEqual([['List', 10, 20]]);
+  });
 });
 
 describe('LAZY VIEW CREATION CONTEXT: FRAMES, NESTED SCOPES AND HELD VIEWS', () => {

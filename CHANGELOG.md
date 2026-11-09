@@ -19,7 +19,35 @@
   compile to `glsl`; a program that needs WGSL output can stay on version
   0.184.0.
 
+- **`Fill` fills a tensor with one value.** `Fill(value, d1, d2, …)` is a
+  list or a tensor with one axis per extent, each element equal to `value`
+  (see New Features). The old form `Fill(f, (m, n))`, which called `f(i, j)`
+  for each cell of an m×n matrix, is removed: it now gives an
+  `incompatible-type` error, because a tuple is not an integer extent. Write
+  `Tabulate(f, m, n)` instead; it gives the same values, also in compiled
+  code. The old form also gave a cell for `At(Fill(f, (2, 3)), 2)` (`12`),
+  where its length and its walk gave rows; `Tabulate` gives the row
+  `[21, 22, 23]`.
+
 ### New Features
+
+- **`Fill(value, d1, d2, …)`, `Zeros(d1, d2, …)` and `Ones(d1, d2, …)`
+  create a list or a tensor with each element equal to one value.** Each
+  operand after the value is the length of one axis: `Fill(7, 3)` is
+  `[7, 7, 7]`, `Zeros(2, 3)` is a 2×3 matrix of zeros and `Ones(2, 2, 2)` a
+  tensor of rank 3 of ones. One extent gives a list, not the square matrix of
+  `ZeroMatrix(n)` and `OnesMatrix(n)`. In Epsil, the functions are written
+  `fill`, `zeros` and `ones`.
+  - The value of `Fill` is evaluated once: `Fill(Random(), 2, 2)` holds four
+    copies of one number. A function value is an element; it is not called.
+  - An extent of 0 or less gives an empty axis, as `Repeat(x, 0)` does:
+    `Fill(7, 0)` is `[]` and `Fill(7, 2, 0)` is `[[], []]`. The axes after an
+    empty axis are not reached: `Fill(7, 2, 0, 3)` is also `[[], []]`. A
+    symbolic extent leaves the expression unevaluated.
+  - The result type is `list<T^(d1×d2×…)>`, with `T` the type of the value,
+    when every extent is an integer literal and the value is a scalar.
+  - A tensor with more than 10,000 elements is a lazy nested `Repeat`, so its
+    elements are not created before they are read.
 
 - **A `parallel for` runs on the worker pool with `runAsync()`.** A
   `javascript` result called with an object of variables has

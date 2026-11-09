@@ -3329,7 +3329,6 @@ const CHECKED_CALLBACK_CONSUMERS: Readonly<
     sources: (ops) => [undefined, ops[0]],
   },
   Tabulate: { callback: 0, argTypes: () => ['integer', 'integer'] },
-  Fill: { callback: 0, argTypes: () => ['integer', 'integer'] },
 };
 
 /**

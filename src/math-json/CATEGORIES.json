@@ -168,7 +168,6 @@
       "Element",
       "EndsWith",
       "Field",
-      "Fill",
       "Filter",
       "Find",
       "First",
@@ -318,6 +317,7 @@
   "Control Structures": {
     "description": "Conditionals and structural evaluation forms.",
     "operators": [
+      "AddTo",
       "Alternatives",
       "Break",
       "Comprehension",
@@ -328,6 +328,9 @@
       "Loop",
       "Match",
       "MatchCase",
+      "ParallelComprehension",
+      "ParallelDomain",
+      "ParallelLoop",
       "Pin",
       "Which"
     ],
@@ -386,6 +389,7 @@
       "Latex",
       "LatexString",
       "MatchesType",
+      "Module",
       "N",
       "NamedArgument",
       "NSolve",
@@ -479,6 +483,7 @@
       "Eigen",
       "Eigenvalues",
       "Eigenvectors",
+      "Fill",
       "Flatten",
       "HadamardProduct",
       "Hom",
@@ -495,6 +500,7 @@
       "MatrixPower",
       "MatrixRank",
       "Norm",
+      "Ones",
       "OnesMatrix",
       "PseudoInverse",
       "QRDecomposition",
@@ -507,7 +513,8 @@
       "Trace",
       "Transpose",
       "Vector",
-      "ZeroMatrix"
+      "ZeroMatrix",
+      "Zeros"
     ],
     "constants": []
   },

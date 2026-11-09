@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 716 functions and constants of the standard library, by category.
+The 718 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -25,7 +25,7 @@ To search the library by concept rather than by name, use
 - [Core](#core) — 118 definitions · [full reference](/epsil/reference/core/)
 - [Control structures](#control-structures) — 16 definitions · [full reference](/epsil/reference/control-structures/)
 - [Logic](#logic) — 27 definitions · [full reference](/epsil/reference/logic/)
-- [Collections](#collections) — 126 definitions · [full reference](/epsil/reference/collections/)
+- [Collections](#collections) — 125 definitions · [full reference](/epsil/reference/collections/)
 - [Colors](#colors) — 20 definitions · [full reference](/epsil/reference/colors/)
 - [Regular expressions](#regular-expressions) — 4 definitions · [full reference](/epsil/reference/regexp/)
 - [Relations](#relations) — 30 definitions · [full reference](/epsil/reference/relop/)
@@ -37,7 +37,7 @@ To search the library by concept rather than by name, use
 - [Combinatorics](#combinatorics) — 11 definitions · [full reference](/epsil/reference/combinatorics/)
 - [Number theory](#number-theory) — 60 definitions · [full reference](/epsil/reference/number-theory/)
 - [Special functions](#special-functions) — 19 definitions · [full reference](/epsil/reference/special-functions/)
-- [Linear algebra](#linear-algebra) — 43 definitions · [full reference](/epsil/reference/linear-algebra/)
+- [Linear algebra](#linear-algebra) — 46 definitions · [full reference](/epsil/reference/linear-algebra/)
 - [Statistics](#statistics) — 35 definitions · [full reference](/epsil/reference/statistics/)
 - [Units](#units) — 7 definitions · [full reference](/epsil/reference/units/)
 - [Physics](#physics) — 11 definitions · [full reference](/epsil/reference/physics/)
@@ -262,7 +262,6 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | `extendedRationalNumbers` | `ExtendedRationalNumbers` | constant `set<rational \| signed_infinity>` | The set of all rational numbers, including infinities. |
 | `extendedRealNumbers` | `ExtendedRealNumbers` | constant `set<real \| signed_infinity>` | The set of all real numbers, including infinities. |
 | `field` | `Field` | `(value: any, field: string) -> unknown` | Access a named field of a value: `p.x` in Epsil. |
-| `fill` | `Fill` | `(function, tuple) -> list` | Produce a 2D list (matrix) by applying a function to each pair of row and column indexes. |
 | `filter` | `Filter` | `(collection<T>, predicate: (T) any -> boolean) -> collection where T` | Return the elements of the collection for which the predicate function returns True. |
 | `find` | `Find` | `(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T: any` | Return the first element of the collection satisfying the predicate. |
 | `first` | `First` | `(xs: indexed_collection<any>) -> any` | The first element of a collection. |
@@ -787,6 +786,7 @@ The [Linear algebra reference](/epsil/reference/linear-algebra/) has the full de
 | `eigen` | `Eigen` | `(matrix) -> tuple` | Eigenvalue-eigenvector decomposition of a square matrix. |
 | `eigenvalues` | `Eigenvalues` | `(matrix) -> list` | Eigenvalues of a square matrix. |
 | `eigenvectors` | `Eigenvectors` | `(matrix) -> list` | Eigenvectors of a square matrix. |
+| `fill` | `Fill` | `(value: any, integer+) -> list` | List or tensor with each element equal to a value. |
 | `flatten` | `Flatten` | `(value, integer?) -> list` | Flatten a tensor or collection into a list. |
 | `hadamardProduct` | `HadamardProduct` | `(matrix \| vector, matrix \| vector) -> matrix \| vector` | Hadamard (element-wise) product of two vectors or matrices of the same shape. |
 | `hom` | `Hom` | `(value*) -> value` | Hom-set of morphisms between objects |
@@ -803,6 +803,7 @@ The [Linear algebra reference](/epsil/reference/linear-algebra/) has the full de
 | `matrixPower` | `MatrixPower` | `(matrix, real) -> matrix` | Square matrix raised to a power. |
 | `matrixRank` | `MatrixRank` | `(value) -> integer` | Rank of a matrix (number of linearly independent rows/columns). |
 | `norm` | `Norm` | `(list<tuple> \| number \| tensor \| tuple, (+oo \| real \| string)?) -> +oo \| nan \| real` | Vector or matrix norm. |
+| `ones` | `Ones` | `(integer+) -> list` | List or tensor filled with ones. |
 | `onesMatrix` | `OnesMatrix` | `(integer, integer?) -> matrix` | Matrix filled with ones. |
 | `pseudoInverse` | `PseudoInverse` | `(matrix) -> matrix` | Moore-Penrose pseudoinverse of a matrix. |
 | `qrDecomposition` | `QRDecomposition` | `(matrix) -> tuple` | QR decomposition of a matrix. |
@@ -816,6 +817,7 @@ The [Linear algebra reference](/epsil/reference/linear-algebra/) has the full de
 | `transpose` | `Transpose` | `(value, axis1: integer?, axis2: integer?) -> value` | Transpose a matrix or swap two tensor axes. |
 | `vector` | `Vector` | `(any+) -> vector` | Construct a column vector. |
 | `zeroMatrix` | `ZeroMatrix` | `(integer, integer?) -> matrix` | Matrix filled with zeros. |
+| `zeros` | `Zeros` | `(integer+) -> list` | List or tensor filled with zeros. |
 
 ## Statistics
 

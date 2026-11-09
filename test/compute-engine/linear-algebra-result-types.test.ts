@@ -421,6 +421,69 @@ describe('IdentityMatrix, ZeroMatrix, OnesMatrix', () => {
   });
 });
 
+describe('Fill, Zeros, Ones', () => {
+  const ce = engine();
+  test('literal extents', () => {
+    sound(ce, ['Fill', 7, 3], 'vector<integer^3>');
+    sound(ce, ['Fill', 1.5, 2, 3], 'matrix<real^(2x3)>');
+    sound(ce, ['Fill', 'True', 2, 2], 'matrix<boolean^(2x2)>');
+    sound(ce, ['Ones', 2, 3], 'matrix<integer^(2x3)>');
+    sound(ce, ['Zeros', 3], 'vector<integer^3>');
+    sound(ce, ['Zeros', 2, 3], 'matrix<integer^(2x3)>');
+    sound(ce, ['Zeros', 2, 2, 2], 'tensor<integer^(2x2x2)>');
+  });
+  test('an extent of 0 or less', () => {
+    sound(ce, ['Zeros', 0], 'vector<integer^0>');
+    sound(ce, ['Fill', 7, -1], 'vector<integer^0>');
+    sound(ce, ['Fill', 7, 2, 0], 'matrix<integer^(2x0)>');
+    // The axes after an empty axis are not reached: the value of
+    // `Zeros(2, 0, 3)` is `[[], []]`, of rank 2.
+    sound(ce, ['Fill', 7, 0, 3], 'vector<integer^0>');
+    sound(ce, ['Zeros', 2, 0, 3], 'matrix<integer^(2x0)>');
+    // `operandLiteralValue()` does not read an extent below -2^53, so the
+    // type claims no dimensions; the value is `[[], []]`.
+    sound(
+      ce,
+      ['Fill', 7, 2, { num: '-100000000000000000000' }],
+      'list<list<integer>>'
+    );
+    sound(
+      ce,
+      ['Fill', ['List', 1, 2], 2, 0, 3],
+      'list<list<vector<integer^2>>>'
+    );
+  });
+  test('a union cell has the type of a literal of the same cells', () => {
+    // `[[v, v], [v, v]]` with `v: integer | boolean` is
+    // `list<list<boolean | integer>>`: a union of a number and a boolean
+    // carries no dimensions.
+    const ce2 = engine();
+    ce2.declare('v', 'integer | boolean');
+    expect(ce2.box(['Fill', 'v', 2, 2]).type.toString()).toBe(
+      ce2.box(['List', ['List', 'v', 'v'], ['List', 'v', 'v']]).type.toString()
+    );
+  });
+  test('a large extent before an empty axis is lazy', () => {
+    expect(ce.box(['Zeros', 1000000000, 0]).type.toString()).toBe(
+      'list<list<integer>>'
+    );
+  });
+  test('a list cell has no dimensions, a string cell has them', () => {
+    // A dimensioned list type cannot have list cells. A string cell carries
+    // dimensions, as in the literal `["a", "a"]`.
+    sound(ce, ['Fill', ['List', 1, 2], 3], 'list<vector<integer^2>>');
+    sound(ce, ['Fill', { str: 'a' }, 2], 'list<string^2>');
+  });
+  test('a lazy tensor or a symbolic extent has no dimensions', () => {
+    expect(ce.box(['Zeros', 10001]).type.toString()).toBe('list<integer>');
+    // 101 × 100 cells: each extent is small, their product is not.
+    expect(ce.box(['Zeros', 101, 100]).type.toString()).toBe(
+      'list<list<integer>>'
+    );
+    expect(expr(ce, ['Fill', 7, 'n']).type.toString()).toBe('list<integer>');
+  });
+});
+
 describe('Eigenvalues, Eigenvectors, Eigen', () => {
   const ce = engine();
   test('an n×n matrix has n eigenvalues', () => {

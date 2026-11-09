@@ -563,7 +563,7 @@ function pyRangeCount(a: string, b: string, s: string): string {
 }
 
 /**
- * A `Tabulate`/`Fill` dimension: non-negative and ROUNDED, the interpreter's
+ * A `Tabulate` dimension: non-negative and ROUNDED, the interpreter's
  * `toInteger` count contract (`Math.round` semantics, i.e. `floor(x + 0.5)`).
  * The previous emissions used Python's `round()`, which rounds half to EVEN.
  * A compile-time-constant count is normalized now and emitted as a bare
@@ -7053,19 +7053,6 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       return `(lambda _f: [_f(_i + 1) for _i in range(${n})])(${f})`;
     const m = pyClampedCount(args[2]!, compile);
     return `(lambda _f: [[_f(_i + 1, _j + 1) for _j in range(${m})] for _i in range(${n})])(${f})`;
-  },
-  Fill: (args, compile) => {
-    const dims = args[1];
-    if (args[0] == null || dims == null)
-      throw new Error('Could not compile `Fill`: missing argument');
-    if (!isFunction(dims) || dims.ops.length !== 2)
-      throw new Error(
-        `Could not compile \`Fill\`: only the (function, (rows, cols)) form compiles.`
-      );
-    const f = pyFnArg('Fill', args[0], compile, ['integer', 'integer']);
-    const rows = pyClampedCount(dims.ops[0], compile);
-    const cols = pyClampedCount(dims.ops[1], compile);
-    return `(lambda _f: [[_f(_i + 1, _j + 1) for _j in range(${cols})] for _i in range(${rows})])(${f})`;
   },
   // --- Core scalar operators -------------------------------------------------
   Boole: (args, compile) => {

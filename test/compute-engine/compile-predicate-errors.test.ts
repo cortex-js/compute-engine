@@ -276,8 +276,8 @@ describe('a symbol-valued annotated callback', () => {
 /**
  * Combiner- and index-shaped callbacks. `Reduce`/`Scan` pass
  * `(accumulator, element)`: the accumulator's type is the fold's own result and
- * is not provable, so an annotation THERE always declines. `Tabulate`/`Fill`
- * pass 1-based integer indexes, which an `integer` annotation provably
+ * is not provable, so an annotation THERE always declines. `Tabulate` passes
+ * 1-based integer indexes, which an `integer` annotation provably
  * satisfies.
  */
 describe('combiner and index callbacks', () => {
@@ -323,28 +323,29 @@ describe('combiner and index callbacks', () => {
     );
   });
 
-  // Each operator gets a generator of the arity IT applies: `Tabulate(f, n)`
-  // computes `f(i)` while `Fill(f, (rows, cols))` computes `f(i, j)`. The
-  // extra `Fill` parameter is not incidental — a UNARY generator there is an
-  // arity error the interpreter raises the moment an element is produced, and
-  // the static callback-arity check (2026-08-15) now rejects the call before
-  // it can reach the compiler at all. Passing one here tested the compiler
-  // against an expression the interpreter never accepted.
-  for (const op of ['Tabulate', 'Fill'] as const) {
-    const dims = op === 'Tabulate' ? [3] : [['Tuple', 2, 2]];
+  // Each form gets a generator of the arity IT applies: `Tabulate(f, n)`
+  // computes `f(i)` while `Tabulate(f, m, n)` computes `f(i, j)`. The extra
+  // parameter of the 2-D form is not incidental: a UNARY generator there is
+  // an arity error, and the static callback-arity check rejects the call
+  // before it can reach the compiler at all. Passing one here would test the
+  // compiler against an expression the interpreter never accepts.
+  for (const [name, dims] of [
+    ['Tabulate', [3]],
+    ['Tabulate 2-D', [2, 2]],
+  ] as const) {
     const params = (type: string) =>
-      op === 'Tabulate'
+      dims.length === 1
         ? [['Typed', 'i', type]]
         : [
             ['Typed', 'i', type],
             ['Typed', 'j', type],
           ];
-    it(`${op} admits an integer-annotated index parameter`, () => {
+    it(`${name} admits an integer-annotated index parameter`, () => {
       const ce = new ComputeEngine();
       const expr = ce.box([
-        op,
+        'Tabulate',
         ['Function', ['Multiply', 2, 'i'], ...params("'integer'")],
-        ...(dims as any),
+        ...dims,
       ] as any);
       expect(js(expr).success).toBe(true);
     });
@@ -353,12 +354,12 @@ describe('combiner and index callbacks', () => {
     // provides: the interpreter reports the out-of-range index as an Error
     // element (`Tabulate((i: integer<1..2>) ↦ 2i, 3)` → `[2, 4, Error(…)]`),
     // which the compiled index loop cannot reproduce.
-    it(`${op} declines an index parameter annotated narrower than integer`, () => {
+    it(`${name} declines an index parameter annotated narrower than integer`, () => {
       const ce = new ComputeEngine();
       const expr = ce.box([
-        op,
+        'Tabulate',
         ['Function', ['Multiply', 2, 'i'], ...params("'integer<1..2>'")],
-        ...(dims as any),
+        ...dims,
       ] as any);
       expect(() => js(expr)).toThrow(/Could not compile/);
     });
