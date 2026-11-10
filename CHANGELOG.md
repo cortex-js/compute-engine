@@ -31,6 +31,15 @@
   function can now take its statement form (`if`/`else`) where it took the
   conditional expression; the values do not change.
 
+- **On GLSL, a `functions` entry declared `pure: true` is no longer treated
+  as code with side effects.** The declaration had an effect on JavaScript
+  only. With `F: (real) -> real` and
+  `functions: { F: { source: 'myFn', pure: true } }`, `Cot(F(x))` declined
+  on GLSL and now computes `myFn(x)` once; `F(x) + Sum(F(x) + k, k, 1, n)`
+  was accepted by `canCompile()` and declined by `compile()`, and now
+  compiles. An entry with no such declaration (`functions: { F: 'myFn' }`)
+  still declines in these expressions.
+
 - **An edit of a document that pops and pushes a scope no longer takes
   longer than the edit before it.** A function such as `f(x) := h(x) + 1`,
   defined while `h` has no definition, is re-derived when `h` gets one. Since

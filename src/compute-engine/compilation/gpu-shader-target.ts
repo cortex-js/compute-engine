@@ -1,7 +1,7 @@
 // The GPUShaderTarget class: the compile target of the GLSL shader language.
 
 import type { Expression } from '../global-types.js';
-import { entrySource } from './function-purity.js';
+import { entryIsPure, entrySource } from './function-purity.js';
 import {
   cseRecordingRules,
   isCallerMapped,
@@ -203,6 +203,7 @@ interface GpuPreparedRoot {
    */
   readonly cseOptions: {
     readonly isOverriddenOperator: (name: string) => boolean;
+    readonly isPureOverriddenOperator: (name: string) => boolean;
     readonly isStringVar: (name: string) => boolean;
     readonly isVarsKey: (name: string) => boolean;
   };
@@ -2165,9 +2166,22 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       }
     );
 
+    // A `functions` entry that the caller declares pure (`pure: true`) has
+    // no effect other than its value (`entryIsPure()`, `function-purity.ts`;
+    // its inference from the source text recognizes JavaScript function
+    // syntax only, so a shader entry is pure only by declaration). The
+    // common-subexpression pass can then compute it once, and a lowering can
+    // write its call more than once or move it ahead of other code: it does
+    // not count as code that the caller supplies (`reachesCallerCodeOn()`).
+    // This target reads no `operators` option, so a `functions` entry is
+    // always the lowering of its name.
+    const pureFunctions = new Set<string>();
+    for (const [name, entry] of Object.entries(userFunctions ?? {}))
+      if (entryIsPure(entry)) pureFunctions.add(name);
     const cseOptions = {
       isOverriddenOperator: (name: string) =>
         userFunctions !== undefined && Object.hasOwn(userFunctions, name),
+      isPureOverriddenOperator: (name: string) => pureFunctions.has(name),
       isStringVar: opaqueVar,
       isVarsKey: (name: string) =>
         vars !== undefined && Object.hasOwn(vars, name),
