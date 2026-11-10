@@ -24,6 +24,7 @@ import {
   CompileDeclineError,
   compileDiagnosticOf,
   compileSubject,
+  assertNoProfileOption,
 } from './diagnostics.js';
 import {
   BaseCompiler,
@@ -7647,6 +7648,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'python'> {
+    assertNoProfileOption(options);
     // The `storage` hints are shader-only and ignored by this target, but
     // validated on every target (see `javascript-target.ts`).
     if (options.storage !== undefined)

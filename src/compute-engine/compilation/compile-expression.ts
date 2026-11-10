@@ -25,6 +25,7 @@ import { assertCompilationOptionsContract } from '../engine-extension-contracts.
 import { withVarsValuesHidden } from './vars-inputs.js';
 import { fragmentErrorDiagnostic } from './fragment.js';
 import type { CanCompileResult } from './fragment.js';
+import { ScalarFragmentJavaScriptTarget } from './javascript-fragment-target.js';
 
 export type { CanCompileResult } from './fragment.js';
 
@@ -53,7 +54,30 @@ export type CompileExpressionOptions<T extends string = string> = {
   constantFold?: boolean;
   storage?: Readonly<Record<MathJsonSymbol, StorageHint>>;
   strictTypes?: boolean;
+  profile?: 'numeric-kernel';
 };
+
+/**
+ * Throw when the `profile` option is given with a target other than
+ * `javascript`, or with a direct target (`target`): the profile is defined
+ * for the JavaScript target only. It is an error of the options, thrown
+ * whatever `fallback` says, as for the other invalid options.
+ */
+function assertProfileTarget(options: CompileExpressionOptions | undefined) {
+  if (options?.profile === undefined) return;
+  if (options.target !== undefined)
+    throw new Error(
+      'Invalid compilation option "profile": the profile "numeric-kernel" is ' +
+        'defined for the target "javascript" only, not for a direct target ' +
+        '(the `target` option)'
+    );
+  const to = options.to ?? 'javascript';
+  if (to !== 'javascript')
+    throw new Error(
+      `Invalid compilation option "profile": the profile "numeric-kernel" is ` +
+        `defined for the target "javascript" only, not for "${to}"`
+    );
+}
 
 /**
  * Compile a boxed expression.
@@ -71,6 +95,11 @@ export type CompileExpressionOptions<T extends string = string> = {
  * If the expression cannot be compiled, falls back to interpretation
  * (success: false, run: applicableN1) unless `options.fallback` is false,
  * in which case it throws.
+ *
+ * With `profile: 'numeric-kernel'` (experimental, `javascript` only), the
+ * structured compiler of the JavaScript target compiles the expression,
+ * and the result reports `profile`, `pure` and `shippable`
+ * (`CompilationOptions.profile`).
  *
  * ## Real-only special functions (compile targets)
  *
@@ -97,6 +126,7 @@ export function compile<
   options?: CompileExpressionOptions<T>
 ): CompilationResult<T, R> {
   assertCompilationOptionsContract(options);
+  assertProfileTarget(options);
   // (The shared per-compilation budgets — the antiderivative pool — are NOT
   // reset here: this entry is not the only compilation route (a registered
   // target invoked directly bypasses it), so the reset lives at the depth-0
@@ -369,6 +399,19 @@ export function compile<
       constantFold: options?.constantFold,
       storage: options?.storage,
     };
+    // The `numeric-kernel` profile compiles on the structured route of the
+    // JavaScript target (`ScalarFragmentJavaScriptTarget`), with the
+    // assembly of the JavaScript target.
+    if (options?.profile === 'numeric-kernel')
+      return strictTypesChecked(
+        expr,
+        new ScalarFragmentJavaScriptTarget('structured').compile(expr, {
+          ...targetOptions,
+          profile: 'numeric-kernel',
+        }) as unknown as CompilationResult<T, R>,
+        options,
+        languageTarget
+      );
     return strictTypesChecked(
       expr,
       languageTarget.compile(expr, targetOptions) as CompilationResult<T, R>,
@@ -444,6 +487,16 @@ export function compile<
  * has no list of what that target compiles, and a "yes" that `compile()`
  * then contradicts would be wrong.
  *
+ * **Experimental.** With the option `profile: 'numeric-kernel'` (and the
+ * target `javascript`), it answers for the profile: `{ ok: true, pure,
+ * shippable }` exactly when `compile()` with the same options gives code,
+ * with the `pure` and `shippable` fields of that result; otherwise `{ ok:
+ * false, diagnostic }`, with the diagnostic of the decline that `compile()`
+ * gives (`'outside-profile'` with the first node outside the profile, or
+ * the code of another decline), or a `'compile-error'` with the message of
+ * an invalid option. It runs the whole compilation, emission included, so
+ * it costs as much as `compile()`.
+ *
  * It never throws: an invalid expression, an invalid option or an error of
  * the preparation of the tree gives `ok: false` with the message of the
  * error.
@@ -452,6 +505,21 @@ export function canCompile(
   expr: Expression,
   options?: CompileExpressionOptions
 ): CanCompileResult {
+  if (options?.profile !== undefined) {
+    try {
+      // The sets `symbolDeps` and `varsObjectRefs` are filled by a
+      // compilation; the predicate writes nothing that the caller holds.
+      const result = compile(expr, {
+        ...options,
+        symbolDeps: undefined,
+        varsObjectRefs: undefined,
+        fallback: false,
+      });
+      return { ok: true, pure: result.pure, shippable: result.shippable };
+    } catch (e) {
+      return { ok: false, diagnostic: compileDiagnosticOf(e) };
+    }
+  }
   try {
     assertCompilationOptionsContract(options);
     if (!expr.isValid)

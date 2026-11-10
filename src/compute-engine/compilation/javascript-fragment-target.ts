@@ -87,6 +87,13 @@ import {
   type StructuredPreparation,
 } from './javascript-structured-lower.js';
 import { emitStructuredProgram } from './javascript-structured-emit.js';
+import {
+  analyzeExecution,
+  type ExecutionAnalysis,
+} from './structured-execution.js';
+import { CompileDeclineError, isCompileDeclineError } from './diagnostics.js';
+import { CancellationError } from '../../common/interruptible.js';
+import { isShippableCode } from '../kernel-pool.js';
 
 // Each operator states its own rule for a real or a complex result. There
 // is no shared default: a rule that reads "a complex operand gives a complex
@@ -2117,6 +2124,196 @@ function effectFacts(
   return result;
 }
 
+/** The node that a refusal of the admission or of the annotation is about,
+ *  with the head or the name that the diagnostic reports. */
+type RefusedNode = {
+  readonly node: Expression;
+  readonly operator?: string;
+  readonly binding?: string;
+};
+
+/**
+ * The node of each error that the admission or the annotation threw. The
+ * walkers of the admission check a node before its operands, so the
+ * innermost walker that sees an error is the one of the refused node: it
+ * records the node, and the walkers around it keep that record
+ * (`noteRefusedNode()`). The diagnostic of the `numeric-kernel` profile
+ * reads it (`profileDecline()`).
+ */
+const refusedNodes = new WeakMap<object, RefusedNode>();
+
+/** Record `node` as the node of the error `e`, unless an inner walker has
+ *  recorded one. */
+function noteRefusedNode(e: unknown, refused: RefusedNode): void {
+  if (typeof e !== 'object' || e === null || refusedNodes.has(e)) return;
+  refusedNodes.set(e, refused);
+}
+
+/** Run `check(node)` and record `node` as the node of an error that it
+ *  throws (`noteRefusedNode()`). */
+function atNode<T>(node: Expression, check: () => T): T {
+  try {
+    return check();
+  } catch (e) {
+    noteRefusedNode(e, { node });
+    throw e;
+  }
+}
+
+/** The prefix of the message of an admission refusal of this file. */
+const FRAGMENT_PREFIX = 'JS scalar fragment: ';
+
+/** The prefix of the message of a broken invariant of this file: an
+ *  internal error, not a refusal. */
+const INVARIANT_PREFIX = 'JS scalar fragment invariant: ';
+
+/** Whether `e` is a cancellation (a timeout, an abort, an iteration limit),
+ *  which belongs to the caller and is thrown again as it is. */
+function isCancellation(e: unknown): boolean {
+  return (
+    e instanceof CancellationError ||
+    (e as { name?: unknown } | undefined)?.name === 'CancellationError'
+  );
+}
+
+/** The error of an internal failure of the `numeric-kernel` profile in
+ *  `phase`, with the code `'compile-error'`. */
+function profileInternalError(phase: string, e: unknown): CompileDeclineError {
+  const message = e instanceof Error ? e.message : String(e);
+  return new CompileDeclineError({
+    code: 'compile-error',
+    kind: 'capability',
+    message:
+      `Could not compile with the profile 'numeric-kernel': an internal ` +
+      `error in the ${phase} phase: ${message}`,
+  });
+}
+
+/**
+ * The reason of a refusal of this file, `reason`, as the diagnostic of the
+ * `numeric-kernel` profile gives it to a host. The messages of this file
+ * name the structured route and compare it with the existing compiler,
+ * which the internal tests read; a host knows only the profile. "The
+ * structured route" and "the JS scalar fragment" become "the profile", and
+ * a clause that gives the reason in terms of the existing compiler is
+ * removed.
+ */
+function publicReason(reason: string): string {
+  return (
+    reason
+      // `X has the type true, and the existing compiler writes the literal
+      // true in its place: the structured route does not`.
+      .replace(
+        /, and the existing compiler writes the literal \w+ in its place: the structured route does not$/,
+        ': the profile does not admit a node whose value its type fixes'
+      )
+      // A trailing clause about what the existing emitter or compiler does.
+      .replace(/: the existing (emitter|compiler)\b[\s\S]*$/, '')
+      .replace(/the structured route/g, 'the profile')
+      .replace(/the JS scalar fragment/g, 'the profile')
+  );
+}
+
+/**
+ * The error that a compilation with the `numeric-kernel` profile throws for
+ * the error `e` of the preparation, the admission or the annotation. A
+ * cancellation and a decline with its own code (a `CompileDeclineError`
+ * of the preparation of the existing compiler) are thrown as they are. A
+ * refusal of this file is an `Error` whose message starts with
+ * `FRAGMENT_PREFIX` (a refusal of the annotation has it too): it is the
+ * decline `'outside-profile'`, with the reason as a host reads it
+ * (`publicReason()`) and the node that the admission refused
+ * (`refusedNodes`): its head in `operator` when it is a function
+ * expression, or its name in `binding`, and the node in `value`. Every
+ * other error (a broken invariant, a `TypeError` of a defect, an error of
+ * the existing preparation with no code) is an internal error
+ * (`profileInternalError()`).
+ */
+function profileDecline(e: unknown): unknown {
+  if (isCancellation(e) || isCompileDeclineError(e)) return e;
+  const raw = e instanceof Error ? e.message : String(e);
+  if (
+    !(e instanceof Error) ||
+    e.constructor !== Error ||
+    !raw.startsWith(FRAGMENT_PREFIX) ||
+    raw.startsWith(INVARIANT_PREFIX)
+  )
+    return profileInternalError('preparation', e);
+  const reason = publicReason(raw.slice(FRAGMENT_PREFIX.length));
+  const refused = refusedNodes.get(e);
+  const node = refused?.node;
+  // A record with a head or a name keeps them; otherwise the node gives
+  // its head when it is a function expression, or its name when it is a
+  // symbol.
+  const named =
+    refused?.operator !== undefined || refused?.binding !== undefined;
+  const operator = named
+    ? refused?.operator
+    : node !== undefined && isFunction(node)
+      ? node.operator
+      : undefined;
+  const binding = named
+    ? refused?.binding
+    : node !== undefined && isSymbol(node)
+      ? node.symbol
+      : undefined;
+  return new CompileDeclineError({
+    code: 'outside-profile',
+    kind: 'capability',
+    message: `Could not compile with the profile 'numeric-kernel': ${reason}`,
+    ...(operator !== undefined ? { operator } : {}),
+    ...(binding !== undefined ? { binding } : {}),
+    ...(node !== undefined ? { value: node.toString() } : {}),
+  });
+}
+
+/**
+ * The options that the `numeric-kernel` profile does not have, by name, in
+ * `options`: the decline `'outside-profile'` that names the first one, or
+ * `undefined`. `cse` and `constantFold` are not in this list: the profile
+ * ignores them. An empty object of `functions`, `operators` or `vars` is
+ * an absent option (`isGivenOption()`).
+ */
+function profileOptionDecline(
+  options: CompilationOptions<Expression>
+): CompileDeclineError | undefined {
+  const option = isGivenOption(options.functions)
+    ? 'functions'
+    : isGivenOption(options.operators)
+      ? 'operators'
+      : isGivenOption(options.vars)
+        ? 'vars'
+        : options.imports?.length
+          ? 'imports'
+          : options.preamble
+            ? 'preamble'
+            : options.broadcast
+              ? 'broadcast'
+              : options.mode === 'bigint'
+                ? "mode: 'bigint'"
+                : undefined;
+  if (option === undefined) return undefined;
+  return new CompileDeclineError({
+    code: 'outside-profile',
+    kind: 'capability',
+    message:
+      `Could not compile with the profile 'numeric-kernel': the option ` +
+      `\`${option}\` is not in the profile.`,
+  });
+}
+
+/**
+ * Whether the option `value` (`functions`, `operators` or `vars`) is given:
+ * a function, or an object with at least one entry. An empty object gives
+ * the same result as an absent option on the existing route (the same
+ * `calling`, `code` and `run`), so it is treated as absent.
+ */
+function isGivenOption(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  if (typeof value === 'function') return true;
+  return typeof value !== 'object' || Object.keys(value).length > 0;
+}
+
 /** Record the facts of the structured route on the prepared `target`. */
 function recordStructured(
   target: CompileTarget<Expression>,
@@ -2246,6 +2443,94 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'javascript'> {
+    if (options.profile === 'numeric-kernel')
+      return this.compileInProfile(expr, options);
+    return this.compileOnRoute(expr, options);
+  }
+
+  /**
+   * Whether the current compilation has the `numeric-kernel` profile
+   * (`compileInProfile()`): the preparation then declines with
+   * `'outside-profile'`, and an internal error names its phase.
+   */
+  private inProfile = false;
+
+  /** The analysis of the program of the current compilation with the
+   *  profile, set by the emitter of the body (`bodyEmitter()`). */
+  private analysis: ExecutionAnalysis | undefined;
+
+  /** The decline of an option that the profile does not have, found in the
+   *  options of the caller (`compileInProfile()`) and thrown by
+   *  `prepareCompilation()`, inside the catch of `compile()` that applies
+   *  `fallback`. */
+  private optionDecline: CompileDeclineError | undefined;
+
+  /**
+   * A compilation with the `numeric-kernel` profile
+   * (`CompilationOptions.profile`), on the structured route. The options
+   * are checked as the caller gave them: `JavaScriptTarget.compile()` adds
+   * a `functions` entry for each `vars` entry that names a user function,
+   * and a decline must name the option of the caller. The option `profile`
+   * is removed before `JavaScriptTarget.compile()`, which refuses it (a
+   * direct call of a target). The options
+   * `cse` and `constantFold` are ignored: the route does neither. A
+   * successful result reports `profile`, `pure` (the calls are independent,
+   * `analyzeExecution()`) and `shippable` (the code can run on a worker:
+   * the analysis says so, and the checks of the existing assembly, which
+   * look for a random draw in the code, say so too).
+   */
+  private compileInProfile(
+    expr: Expression,
+    options: CompilationOptions<Expression>
+  ): CompilationResult<'javascript'> {
+    if (this.route !== 'structured')
+      throw new Error(
+        "JS scalar fragment: the profile 'numeric-kernel' needs the structured route"
+      );
+    const previous = {
+      inProfile: this.inProfile,
+      analysis: this.analysis,
+      optionDecline: this.optionDecline,
+    };
+    this.inProfile = true;
+    this.analysis = undefined;
+    this.optionDecline = profileOptionDecline(options);
+    try {
+      const { profile: _profile, ...rest } = options;
+      const result = this.compileOnRoute(expr, {
+        ...rest,
+        cse: false,
+        constantFold: false,
+      });
+      const analysis = this.analysis as ExecutionAnalysis | undefined;
+      if (!result.success || analysis === undefined) return result;
+      const code = [
+        result.preamble,
+        result.preambleOnce,
+        result.preamblePerCall,
+        result.callCode,
+        result.code,
+      ].join('\n');
+      result.profile = 'numeric-kernel';
+      result.pure = analysis.independentCalls.holds;
+      // On a result called with a vars object, the existing assembly has
+      // already combined the analysis with its own checks (the emission
+      // gives it `shippable`), and `broadcastAsync()` reads the same value.
+      result.shippable =
+        analysis.workerPortable.holds &&
+        (result.shippable ?? isShippableCode(code));
+      return result;
+    } finally {
+      this.inProfile = previous.inProfile;
+      this.analysis = previous.analysis;
+      this.optionDecline = previous.optionDecline;
+    }
+  }
+
+  private compileOnRoute(
+    expr: Expression,
+    options: CompilationOptions<Expression>
+  ): CompilationResult<'javascript'> {
     const onPhase = this.hooks.onPhase;
     if (this.route !== 'structured' || !onPhase)
       return super.compile(expr, options);
@@ -2278,16 +2563,49 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       }
       for (const name of preparation.helpers.keys())
         target.symbolDeps?.add(name);
-      const program = lowerStructuredProgram(preparation);
+      const program = this.inPhase('lowering', () =>
+        lowerStructuredProgram(preparation)
+      );
       time = this.endPhase('lowering', time);
-      verifyJavaScriptProgram(program, preparedNodesOf(preparation));
+      this.inPhase('verification', () =>
+        verifyJavaScriptProgram(program, preparedNodesOf(preparation))
+      );
       time = this.endPhase('verification', time);
-      const emission = emitStructuredProgram(program, names, {
-        trace: this.hooks.trace,
-      });
+      // With the profile, the facts of the result (`compileInProfile()`).
+      const analysis = this.inProfile
+        ? this.inPhase('analysis', () => analyzeExecution(program))
+        : undefined;
+      this.analysis = analysis;
+      const emission = this.inPhase('emission', () =>
+        emitStructuredProgram(program, names, {
+          trace: this.hooks.trace,
+        })
+      );
       this.endPhase('emission', time);
-      return { ...emission, mode: program.numericPolicy };
+      return {
+        ...emission,
+        mode: program.numericPolicy,
+        ...(analysis !== undefined
+          ? { shippable: analysis.workerPortable.holds }
+          : {}),
+      };
     };
+  }
+
+  /**
+   * Run `step`, a phase of the structured route after the admission. With
+   * the profile, an error of the phase is an internal error that names the
+   * phase (`profileInternalError()`), never a refusal: the admission has
+   * accepted the program. A cancellation is thrown as it is.
+   */
+  private inPhase<T>(phase: string, step: () => T): T {
+    if (!this.inProfile) return step();
+    try {
+      return step();
+    } catch (e) {
+      if (isCancellation(e)) throw e;
+      throw profileInternalError(phase, e);
+    }
   }
 
   /**
@@ -2306,7 +2624,26 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     );
   }
 
+  /**
+   * With the profile, an option that the profile does not have, and every
+   * refusal of the preparation, decline with `'outside-profile'`
+   * (`profileOptionDecline()`, `profileDecline()`).
+   */
   protected prepareCompilation(
+    expr: Expression,
+    options: CompilationOptions<Expression>,
+    batch?: unknown
+  ): { expr: Expression; target: CompileTarget<Expression> } {
+    if (!this.inProfile) return this.prepareFragment(expr, options, batch);
+    if (this.optionDecline !== undefined) throw this.optionDecline;
+    try {
+      return this.prepareFragment(expr, options, batch);
+    } catch (e) {
+      throw profileDecline(e);
+    }
+  }
+
+  private prepareFragment(
     expr: Expression,
     options: CompilationOptions<Expression>,
     batch?: unknown
@@ -2316,9 +2653,9 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     if (
       batch !== undefined ||
       options.broadcast ||
-      options.functions ||
-      options.operators ||
-      options.vars ||
+      isGivenOption(options.functions) ||
+      isGivenOption(options.operators) ||
+      isGivenOption(options.vars) ||
       options.preamble ||
       options.imports?.length ||
       (options.mode !== undefined &&
@@ -2346,7 +2683,15 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     // the helper definitions, is built here, before any emission.
     const registry = structuredRegistry(admission, prepared.target);
     if (isFunction(prepared.expr, 'Function')) {
-      attachBoundFunction(prepared.expr, prepared.target, admission, registry);
+      // A refusal that no inner check records names the function itself.
+      atNode(prepared.expr, () =>
+        attachBoundFunction(
+          prepared.expr,
+          prepared.target,
+          admission,
+          registry
+        )
+      );
       if (structured) this.endPhase('annotation', annotationStart);
       return prepared;
     }
@@ -2358,7 +2703,9 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     let readsSqrt = false;
     /** The indexes of the comprehensions around the node being checked. */
     const indexes = new Set<string>();
-    const check = (node: Expression): void => {
+    const check = (node: Expression): void =>
+      atNode(node, () => checkNode(node));
+    const checkNode = (node: Expression): void => {
       if (seen.has(node)) return;
       seen.add(node);
       refuseListHead(node, admission);
@@ -2576,29 +2923,35 @@ function attachBoundFunction(
   const declaredTypes = new Map<string, Type>();
   for (const parameter of fn.ops.slice(1)) {
     const name = functionLiteralParameterName(parameter);
-    const declared = functionLiteralParameterType(parameter);
-    // The structured route also admits a list parameter
-    // (`structuredListType()`).
-    const type =
-      declared === undefined
-        ? undefined
-        : admission.structured
-          ? structuredParameterType(declared, name)
-          : scalarType(declared);
-    if (
-      !isFunction(parameter, 'Typed') ||
-      parameter.nops !== 2 ||
-      !name ||
-      !type ||
-      name === 'True' ||
-      name === 'False' ||
-      inputs.some((input) => input.name === name)
-    )
-      throw new Error(
-        'JS scalar fragment: explicit distinct scalar parameters required'
-      );
-    inputs.push({ name, type, declared: type.kind });
-    if (declared !== undefined) declaredTypes.set(name, declared);
+    // A refusal of a parameter names the parameter.
+    try {
+      const declared = functionLiteralParameterType(parameter);
+      // The structured route also admits a list parameter
+      // (`structuredListType()`).
+      const type =
+        declared === undefined
+          ? undefined
+          : admission.structured
+            ? structuredParameterType(declared, name)
+            : scalarType(declared);
+      if (
+        !isFunction(parameter, 'Typed') ||
+        parameter.nops !== 2 ||
+        !name ||
+        !type ||
+        name === 'True' ||
+        name === 'False' ||
+        inputs.some((input) => input.name === name)
+      )
+        throw new Error(
+          'JS scalar fragment: explicit distinct scalar parameters required'
+        );
+      inputs.push({ name, type, declared: type.kind });
+      if (declared !== undefined) declaredTypes.set(name, declared);
+    } catch (e) {
+      if (name) noteRefusedNode(e, { node: parameter, binding: name });
+      throw e;
+    }
   }
   const body = fn.op1.canonical;
   // The structured route also admits a block of one value, the form of the
@@ -2694,7 +3047,9 @@ function attachBoundFunction(
   };
   /** `bodyValue`: `node` is the value of the body, where the structured
    *  route admits `Typed(value, T)` (`typedRule()`). */
-  const checkValue = (node: Expression, bodyValue = false): void => {
+  const checkValue = (node: Expression, bodyValue = false): void =>
+    atNode(node, () => checkValueNode(node, bodyValue));
+  const checkValueNode = (node: Expression, bodyValue: boolean): void => {
     refuseListHead(node, admission);
     refuseBooleanClaim(node, admission);
     if (!node.isValid || node.type.type === 'error')
@@ -2825,6 +3180,14 @@ function attachBoundFunction(
    * is admitted, and not a whole branch or a whole loop body.
    */
   const checkStructuredStatement = (
+    statement: Expression,
+    place: 'top' | 'branch' | 'loop',
+    inBlock: boolean
+  ): void =>
+    atNode(statement, () =>
+      checkStructuredStatementNode(statement, place, inBlock)
+    );
+  const checkStructuredStatementNode = (
     statement: Expression,
     place: 'top' | 'branch' | 'loop',
     inBlock: boolean
@@ -3473,9 +3836,28 @@ function annotateStructured(
         : { ...helper.fragment, arguments: call.ops };
     },
   };
-  const annotation = typeFragment(root, definition, { inputs });
-  if (annotation.refusal)
-    throw new Error(`JS scalar fragment: ${annotation.refusal.message}`);
+  // A rule that throws, not refuses, records its node for the diagnostic
+  // of the profile (`noteRefusedNode()`).
+  const rules: Record<string, FragmentRule<ScalarRepresentation>> = {};
+  for (const [head, rule] of Object.entries(definition.rules))
+    rules[head] =
+      'walk' in rule
+        ? {
+            walk: (node, scope, context, w) =>
+              atNode(node, () => rule.walk(node, scope, context, w)),
+          }
+        : rule;
+  const annotation = typeFragment(root, { ...definition, rules }, { inputs });
+  if (annotation.refusal) {
+    const { refusal } = annotation;
+    const e = new Error(`JS scalar fragment: ${refusal.message}`);
+    noteRefusedNode(e, {
+      node: refusal.node,
+      operator: refusal.operator,
+      binding: refusal.binding,
+    });
+    throw e;
+  }
   // No `refuseClosedComplex()` here: the structured route refuses constant
   // folding, and its emitter writes each node in the representation of its
   // fact, so a closed node with a complex fact is written complex.
@@ -3655,7 +4037,9 @@ function resolveHelper(
   const captureSymbols = new Set<Expression>();
   /** The indexes of the comprehensions around the node being checked. */
   const indexes = new Set<string>();
-  const check = (node: Expression, root = false): void => {
+  const check = (node: Expression, root = false): void =>
+    atNode(node, () => checkNode(node, root));
+  const checkNode = (node: Expression, root: boolean): void => {
     refuseListHead(node, admission);
     refuseBooleanClaim(node, admission);
     if (!node.isValid || node.type.type === 'error')

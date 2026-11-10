@@ -1860,7 +1860,8 @@ the error. Its answer depends only on the expression, the options and the
 declarations that the expression reaches (the types of its free symbols, the
 definitions of the functions it calls), so a host can keep it until one of
 those declarations changes. Only `glsl` has a fragment: for another target
-the answer is `ok: false`, with a message that says so.
+the answer is `ok: false`, with a message that says so, except for
+`javascript` with the `numeric-kernel` profile (below).
 
 ```js
 canCompile(ce.parse('\\sin(x) + x^2'), { to: 'glsl' });
@@ -1913,13 +1914,104 @@ return _gpu_passes > 100 ? _gpu_nan() : _tv2;
 ```
 
 The `javascript`, `interval-js` and `python` targets have no fragment: they
-take the whole language with their own declines.
+take the whole language with their own declines. The `numeric-kernel`
+profile of `javascript` (below) is a list of the same kind.
 
 The list and the decisions are in `docs/plans/2026-11-08-glsl-fragment-spec.md`
 (section 2 and decisions 1 to 18); the typing pass is
 `src/compute-engine/compilation/fragment.ts` and
 `src/compute-engine/compilation/glsl-fragment.ts`, and its design is
 `docs/plans/2026-11-08-glsl-fragment-annotation-design.md`.
+
+### The `numeric-kernel` profile of the JavaScript target
+
+**Experimental.** With the option `profile: 'numeric-kernel'`, `compile()`
+to `javascript` uses the structured compiler of the JavaScript target: an
+admission and a typing pass (`javascript-fragment-target.ts`), a lowering
+to a structured representation (`javascript-structured-lower.ts`), a
+verifier, an emitter (`javascript-structured-emit.ts`), and the assembly of
+the existing JavaScript target, which gives the result its `run`,
+`broadcast`, `broadcastAsync` and `runAsync`. For each program it admits,
+the value equals the interpreter's within the caveats of compiled code, and
+the doubles equal those of the existing compiler. Without the option,
+nothing changes.
+
+| Admitted | Examples |
+| --- | --- |
+| Arithmetic of reals, integers and complex numbers | `Add`, `Negate`, `Multiply`, `Divide`, `Power` with the exponent 2, 1.5 (a base proved non-negative) or the base `e` |
+| Functions | `Sqrt`, `Ln`, `Exp`, `Sin`, `Cos`, `Tanh`, `Abs`, `Arctan2`, `Min`, `Max`, `Floor`, `Mod` |
+| Conditions | `If`, `Less`, `LessEqual`, `Equal`, `And`, `Or`, `Not` |
+| Names | inputs of a numeric or boolean type, `list<real>` and `list<integer>` inputs, captured numbers (a snapshot) |
+| Functions of the program | a `Function` literal with typed parameters, a body with locals (`Declare`, `let`), writes to locals, `If` statements, `Loop` over `Element(k, Range(a, b))`; calls of user functions with a declared signature |
+| Lists | `At` and `Length` of a list input or parameter, `Comprehension(body, Element(j, Range(a, b)))`, `ReplaceAt` |
+
+| Declined with `outside-profile` | Example |
+| --- | --- |
+| A head outside the list | `Sinh(x)`, `Integrate(sin(x), x)`, `Random()` (`operator: 'Random'`) |
+| A form the existing emitter writes in a special way | `x^3`, `Mod(x, 1)`, `Sin(z)` in the `complex` mode, a closed comparison |
+| A list or a tuple literal, `First`, `Rest` | `[x, y]` (`operator: 'List'`) |
+| A name with no numeric type | `x + u` with `u` undeclared (`binding: 'u'`), a parameter of the type `tuple<real, real>` (`binding` is its name) |
+| A statement outside the list | `Break` in a `Loop` (`operator: 'Break'`), a `Loop` over a list |
+| An option outside the profile | `functions`, `operators`, `vars`, `imports`, `preamble`, `broadcast`, `mode: 'bigint'` |
+
+The decline follows the `fallback` option, as any other decline: with
+`fallback: true` (the default of `compile()`), `success: false` and the
+interpreter; with `fallback: false`, a `CompileDeclineError`. The diagnostic
+has the code `outside-profile`, the kind `capability`, the message of the
+refusal, the node in `value`, and its head in `operator` or a name in
+`binding`. A decline that the preparation of the existing compiler gives
+first keeps its own code. The existing
+compiler is never used for a part of the program. An error of the lowering,
+the verifier, the analysis or the emitter is not a decline of the profile:
+it is a `compile-error` whose message names the phase.
+
+The message of an `outside-profile` decline names the profile: the
+refusals of the structured compiler say "the profile" for "the structured
+route", and a clause that compares with the existing compiler is removed
+(`publicReason()` in `javascript-fragment-target.ts`). An error of the
+preparation that is not a refusal of the profile (a `TypeError` of a
+defect, for example) is a `compile-error` too.
+
+`cse` and `constantFold` are ignored under the profile: the structured
+compiler does neither, and the code is the same with or without them. An
+empty object of `functions`, `operators` or `vars` is an absent option. With
+another target than `javascript`, with a direct target, or in the
+`compile()` method of a target object (`new JavaScriptTarget().compile()`,
+and the same for the GLSL, Python and interval targets), the option
+is an error, thrown whatever `fallback` says.
+
+**The facts of the result.** A result compiled with the profile has
+`profile: 'numeric-kernel'`, `pure` and `shippable`, from the analysis of
+the structured program (`analyzeExecution()` in `structured-execution.ts`):
+`pure` when no operation of the program or of a function it calls has an
+effect or an effect that its definition does not state, and no array that
+the host passed is written; `shippable` when, in addition, every function
+the code calls is in the program and every captured value is a number, and
+the checks of the existing assembly (no draw from the random stream in the
+code) agree. A `Function` literal has `shippable` too under the profile. The
+kernel pool reads the same value: a result that is not shippable never goes
+to a worker.
+
+**`canCompile()`.** With the profile, `canCompile(expr, options)` runs the
+whole compilation with `fallback: false` and answers `{ ok: true, pure,
+shippable }` when it gives code, or `{ ok: false, diagnostic }` with the
+diagnostic of the decline. Its cost is the cost of `compile()`.
+
+```js
+const ce = new ComputeEngine();
+ce.declare('x', 'real');
+canCompile(ce.box(['Add', 'x', ['Sin', 'x']]), { profile: 'numeric-kernel' });
+// ➔ { ok: true, pure: true, shippable: true }
+canCompile(ce.box(['Add', 'x', ['Random']]), { profile: 'numeric-kernel' })
+  .diagnostic;
+// ➔ { code: 'outside-profile', kind: 'capability',
+//     message: "Could not compile with the profile 'numeric-kernel': unsupported head Random",
+//     operator: 'Random', value: 'Random()' }
+```
+
+The decisions are in `docs/plans/2026-11-10-js-numeric-kernel-profile-spec.md`;
+the rules of each admitted form, with the cases where the existing emitter
+writes other code, are in `docs/plans/2026-11-09-js-pilot-emission-rewrites.md`.
 
 ### Interval results
 

@@ -1,3 +1,42 @@
+## [Unreleased]
+
+### New Features
+
+- **Experimental: the `numeric-kernel` profile of the JavaScript target.**
+  `compile(expr, { to: 'javascript', profile: 'numeric-kernel' })` compiles
+  the expression with the structured compiler of the JavaScript target. It
+  admits scalar arithmetic, conditionals, calls of user functions with
+  declared signatures, captured numbers, loops over an integer range, and
+  lists of numbers made with a comprehension and updated with `ReplaceAt`.
+  A program outside the profile declines with the diagnostic code
+  `outside-profile`, which names the first node outside it (`operator` or
+  `binding`); `fallback` applies as for any other decline, and the ordinary
+  compiler is never used for a part of the program. The options `cse` and
+  `constantFold` are ignored under the profile; `functions`, `operators`,
+  `vars`, `imports`, `preamble`, `broadcast` and `mode: 'bigint'` decline
+  with `outside-profile` (an empty object of `functions`, `operators` or
+  `vars` is an absent option). With another target, or in the `compile()`
+  method of a target object, the option is an error. Without the option,
+  nothing changes.
+
+  A result compiled with the profile reports `profile: 'numeric-kernel'`,
+  the new field `pure` (two calls give the same results in any order or at
+  the same time, and a call changes nothing that the host can observe), and
+  `shippable` (the code can run on a worker of the pool), also for a
+  `Function` literal. `canCompile()` answers for the profile, with the same
+  diagnostic as `compile()`, and its positive answer carries `pure` and
+  `shippable`:
+
+  ```js
+  ce.declare('x', 'real');
+  ce.declare('y', 'real');
+  canCompile(ce.box(['Add', 'x', ['Sin', 'y']]), {
+    to: 'javascript',
+    profile: 'numeric-kernel',
+  });
+  // ➔ { ok: true, pure: true, shippable: true }
+  ```
+
 ## 0.186.0 _2026-11-10_
 
 ### Breaking Changes

@@ -229,6 +229,24 @@ export function bigintLaneError(payload: {
   });
 }
 
+/**
+ * Throw when `options` has the `profile` option, in the `compile()` method
+ * of a target (`JavaScriptTarget`, the shader targets, `PythonTarget`,
+ * `IntervalJavaScriptTarget`). The profile is an option of the function
+ * `compile()` with the target `javascript`, which selects another
+ * compiler: a target called directly would compile with its own compiler
+ * and ignore the option. It is an error of the options, thrown whatever
+ * `fallback` says.
+ */
+export function assertNoProfileOption(options: { profile?: unknown }): void {
+  if (options.profile === undefined) return;
+  throw new Error(
+    'Invalid compilation option "profile": the profile "numeric-kernel" is ' +
+      'an option of the function compile() with the target "javascript"; ' +
+      'the compile() method of a target does not take it'
+  );
+}
+
 /** Whether `e` is a `CompileDeclineError` (name-keyed, bundle-safe). */
 export function isCompileDeclineError(e: unknown): e is CompileDeclineError {
   return (

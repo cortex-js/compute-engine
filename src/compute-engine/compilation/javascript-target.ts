@@ -626,6 +626,7 @@ import {
   nothingOperandDecline,
   UNSETTLED_SHAPE_CODE,
   unsettledShapeDecline,
+  assertNoProfileOption,
 } from './diagnostics.js';
 import {
   offersBigintMode,
@@ -11198,6 +11199,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'javascript'> {
+    assertNoProfileOption(options);
     options = BaseCompiler.withVarsMappedUserFunctionHeads(
       expr.engine,
       options
@@ -12457,6 +12459,11 @@ export type JavaScriptBody = {
   readonly runtime: ReadonlySet<string>;
   /** The compile mode that the result reports (`CompilationResult.mode`). */
   readonly mode: 'strict' | 'complex';
+  /** When present, the result is shippable only when this is `true` and
+   *  the checks of the assembly say so too (`CompilationResult.shippable`):
+   *  the emitter knows facts of the program that the text of the code does
+   *  not show. */
+  readonly shippable?: boolean;
 };
 
 /**
@@ -12487,6 +12494,7 @@ function emitDelegatedBody(
   statementBody: string;
   definitions: string;
   inputs: ReadonlySet<string>;
+  shippable?: boolean;
 } {
   const body = emit({ input, fresh: () => BaseCompiler.tempVar(target) });
   for (const helper of body.runtime)
@@ -12506,6 +12514,7 @@ function emitDelegatedBody(
         : `${statements} return ${body.value};`,
     definitions: body.definitions.map((d) => `${d}\n`).join(''),
     inputs: body.inputs,
+    ...(body.shippable !== undefined ? { shippable: body.shippable } : {}),
   };
 }
 
@@ -12984,7 +12993,8 @@ function compileToTarget(
     shippable:
       target.hostNames !== true &&
       isShippableCode(`${split.hoisted}\n${perCall ?? ''}\n${result.code}`) &&
-      kindCodeIsShippable(kinds?.contracts, entryPlan),
+      kindCodeIsShippable(kinds?.contracts, entryPlan) &&
+      emitted?.shippable !== false,
     iterationLimit: () => engine.iterationLimit,
     slice: (inputs, options, out, slice) => {
       if (kinds !== undefined) throw kindBroadcastError(kinds.kinds);

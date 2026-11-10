@@ -3453,9 +3453,12 @@ export const walkParallelLoop = walkLoop('parallel');
 // The diagnostic (the design note, section 7)
 //
 
-/** The answer of `canCompile()`. */
+/** The answer of `canCompile()`. With the `numeric-kernel` profile, a
+ *  positive answer also carries the `pure` and `shippable` fields of the
+ *  result that `compile()` gives (`CompilationResult`). */
 export type CanCompileResult =
-  { ok: true } | { ok: false; diagnostic: CompileDiagnostic };
+  | { ok: true; pure?: boolean; shippable?: boolean }
+  | { ok: false; diagnostic: CompileDiagnostic };
 
 /** The `outside-fragment` diagnostic of a refusal of the pass. */
 export function fragmentRefusalDiagnostic(

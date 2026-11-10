@@ -153,6 +153,7 @@ import {
   compileDiagnosticOf,
   KindDeclineError,
   unsettledShapeDecline,
+  assertNoProfileOption,
 } from './diagnostics.js';
 import { resolveStorageHints } from './storage-hints.js';
 import {
@@ -6620,6 +6621,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'interval-js', IntervalValue> {
+    assertNoProfileOption(options);
     options = BaseCompiler.withVarsMappedUserFunctionHeads(
       expr.engine,
       options

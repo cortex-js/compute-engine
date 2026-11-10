@@ -7907,6 +7907,11 @@ export type StoredJavaScript = {
    * sends a batch to a worker only when it is `true`: without it, every
    * batch runs on the calling thread (`reason: 'not-shippable'`). */
   shippable?: boolean;
+  /** **Experimental.** The `profile` field of the compilation result: the
+   * code was compiled with `profile: 'numeric-kernel'`. It records how the
+   * code was made, for a host that keeps stored code with its compile
+   * options; the loaders run the code the same way with or without it. */
+  profile?: 'numeric-kernel';
 };
 
 /**

@@ -24,7 +24,11 @@ import type {
   CompilationOptions,
   CompilationResult,
 } from './types.js';
-import { CompileDeclineError, compileDiagnosticOf } from './diagnostics.js';
+import {
+  assertNoProfileOption,
+  CompileDeclineError,
+  compileDiagnosticOf,
+} from './diagnostics.js';
 import { resolveStorageHints } from './storage-hints.js';
 import { lowerParallelHeads, sumAssignedNames } from './parallel-lowering.js';
 import {
@@ -1648,6 +1652,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult {
+    assertNoProfileOption(options);
     // A `vars` entry is not given to the calls of a user function here, as
     // the JavaScript target does (`BaseCompiler.withVarsMappedUserFunctionHeads`).
     // On a shader a `vars` entry names a uniform or an input, which cannot be

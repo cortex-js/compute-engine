@@ -142,7 +142,9 @@ export type CompileDiagnosticKind = 'capability' | 'correctness';
  *   `unknown` or `any`, so its shape is not known; the kind is
  *   `'correctness'`), `'unsettled-shape'` (a value that has no single shape
  *   at compile time, for example an `If` whose branches differ in shape),
- *   `'compile-error'` (the generic fail-closed decline), ….
+ *   `'compile-error'` (the generic fail-closed decline), `'outside-profile'`
+ *   (with the `profile` option, the first node outside the profile, or an
+ *   option that the profile does not have), ….
  * - `kind` — see `CompileDiagnosticKind`.
  * - `message` — the human-readable reason (same text as `error`).
  * - `boundary` — for a lane mismatch, the binding boundary that refused
@@ -157,8 +159,9 @@ export type CompileDiagnosticKind = 'capability' | 'correctness';
  * - `operator` — the head of the node that the diagnostic is about, when it
  *   is a function expression: for an `'outside-fragment'` decline of
  *   `canCompile()`, the head of the first node outside the fragment of the
- *   target (`Integrate`). A host counts declines by head with it, without
- *   parsing `value`.
+ *   target (`Integrate`), and for an `'outside-profile'` decline, the head
+ *   of the first node outside the profile. A host counts declines by head
+ *   with it, without parsing `value`.
  */
 export type CompileDiagnostic = {
   code: string;
@@ -2696,6 +2699,39 @@ export interface CompilationOptions<Expr = unknown> {
    * result of a successful compilation.
    */
   strictTypes?: boolean;
+
+  /**
+   * **Experimental.** The `javascript` target only. With
+   * `'numeric-kernel'`, the expression is compiled by the structured
+   * compiler of the JavaScript target, which admits a list of numeric forms:
+   * scalar arithmetic, conditionals, calls of user functions with declared
+   * signatures, captured numbers, loops over an integer range, and lists of
+   * numbers made with a comprehension and updated with `ReplaceAt`. The
+   * list, with an example of each decline, is in `docs/COMPILATION-MODEL.md`,
+   * "The `numeric-kernel` profile of the JavaScript target".
+   *
+   * A program outside the profile declines with the diagnostic code
+   * `'outside-profile'`, which names the first node outside it (its head in
+   * `operator`, or the name in `binding`); the `fallback` option then
+   * applies as for any other decline. The ordinary compiler is never used
+   * for a part of such a compilation. An internal error of the structured
+   * compiler is a `'compile-error'` whose message names the phase.
+   *
+   * Under the profile, `cse` and `constantFold` are ignored: the structured
+   * compiler does neither. The modes are `'strict'` and `'complex'`. The
+   * options `functions`, `operators`, `vars`, `imports`, `preamble`,
+   * `broadcast` and `mode: 'bigint'` are not in the profile: a compilation
+   * with one of them declines with `'outside-profile'`, and the message names
+   * the option; an empty object of `functions`, `operators` or `vars` is
+   * an absent option. With another target than `javascript`, with a direct
+   * target (`target`), or in the `compile()` method of a target object
+   * (`new JavaScriptTarget().compile()`), the option is an error, thrown
+   * whatever `fallback` says.
+   *
+   * The result reports `profile`, `pure` and `shippable`
+   * (`CompilationResult`). `canCompile()` answers for the profile.
+   */
+  profile?: 'numeric-kernel';
 }
 
 /**
@@ -3772,8 +3808,45 @@ export type CompilationResult<
    * handler; a function or variable given by the name of a host global; a
    * caller `preamble`). A result that is not shippable always runs on the
    * calling thread. Present where `broadcastAsync` is.
+   *
+   * With the `numeric-kernel` profile, it is also present on a result of a
+   * `Function` literal (`calling: 'lambda'`), and it is `true` when every
+   * function that the code calls is compiled into the same program, every
+   * captured value is a number written into the code, and no operation has
+   * an effect or an effect that its definition does not state (an
+   * operation with an unknown effect can call a closure of the host, which
+   * a worker does not have). It does not say that the arguments can be sent
+   * to a worker at a low cost.
    */
   shippable?: boolean;
+
+  /**
+   * **Experimental.** `'numeric-kernel'` on a successful compilation with
+   * the `profile` option (`CompilationOptions.profile`). Absent otherwise,
+   * also on a decline.
+   */
+  profile?: 'numeric-kernel';
+
+  /**
+   * **Experimental.** Present on a result with `profile`. Whether the
+   * compiled function is pure: two calls, with any arguments, give the same
+   * results whether they run one after the other or at the same time in two
+   * workers, and a call changes nothing that the host can observe. It is
+   * `true` when no operation of the program, or of a function that it
+   * calls, has an effect or an effect that its definition does not state,
+   * and no array that the host passed in is written (a list argument is
+   * only read; an update in place writes only into a list that the call
+   * made). A captured value is a number copied at compile time, so no call
+   * can change it.
+   *
+   * It is the meaning of `pure` in a function declaration and of `isPure`
+   * on an expression. It does not say that the host may change an input
+   * array while a call reads it, that calls will run in parallel, or
+   * anything about a function passed at run time. The `iterationBudget`
+   * option does not change it: a call that goes over the budget throws, and
+   * each thread counts the passes of its own calls.
+   */
+  pure?: boolean;
 
   /**
    * Whether `broadcastAsync()` would send a batch of `cells` cells to the

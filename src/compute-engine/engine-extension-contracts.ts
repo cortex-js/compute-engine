@@ -407,6 +407,12 @@ export function assertCompilationOptionsContract(
     );
   }
 
+  if (options.profile !== undefined && options.profile !== 'numeric-kernel') {
+    throw new Error(
+      'Invalid compilation option "profile": expected "numeric-kernel"'
+    );
+  }
+
   if (
     options.quadrature !== undefined &&
     options.quadrature !== 'adaptive' &&
