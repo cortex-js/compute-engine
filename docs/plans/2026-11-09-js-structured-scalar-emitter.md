@@ -1,7 +1,19 @@
 # A structured scalar emitter for JavaScript
 
 **Status: approved 2026-11-09, with effect handling required from the outset.
-No implementation in this change; the step 7 measurement gate remains.**
+No implementation in this change.**
+
+**Revision, approved 2026-11-09.** The
+[status and plan document](2026-11-09-js-compiler-status-and-plan.md), steps 1
+to 4, replaces four parts of this design. The first vocabulary is the one
+that the `heatwall` and `heatcell` fixture needs (comparisons, `And`, `Or`,
+`Multiply`, `Min`, `Max`, one local with one assignment, one resolved helper
+call), not only `Add`, `Negate` and `If`. The annotation is built before
+emission by a rule that does not call `isComplexValued()`. The measure names
+its baselines and says what an inconclusive result means. The verifier accepts
+one effectful operation kind that exists only for tests. The same approval is
+the step 7 decision of the compile-targets plan for this pilot. The rest of
+this design applies as written.
 
 ## Recommendation and decision boundary
 
