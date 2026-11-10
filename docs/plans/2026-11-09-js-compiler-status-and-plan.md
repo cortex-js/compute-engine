@@ -518,7 +518,7 @@ admission boundary before another is added.
 
 **Result of step 6 (2026-11-10).** The three changes of
 [the design of step 6](2026-11-10-structured-ir-loops-and-lists.md) are
-done; the analysis for concurrency is not yet committed.
+done.
 
 - 6a (`111ef6da5`): a `loop` over an integer range, with each carried value
   a parameter of its body region and a result of the loop; a loop with an
@@ -532,7 +532,7 @@ done; the analysis for concurrency is not yet committed.
   decided on the representation (`inPlaceUpdates()` in
   `structured-in-place.ts`). `heatstep` and `heatpaint` compile, with one
   array per call of `heatstep`.
-- 6c part 2: `analyzeExecution()` in `structured-execution.ts`, internal,
+- 6c part 2 (`4afbbd167`): `analyzeExecution()` in `structured-execution.ts`, internal,
   with no compile option: whether two calls can run at the same time,
   whether the code can be sent to a worker, and for each loop whether its
   iterations are a candidate to run in any order (a pure body whose only
