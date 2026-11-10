@@ -408,14 +408,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
    *
    * The default is strict, so a further subclass that forgets to override it
    * fails closed rather than open: only the third slot of `mix` (the blend
-   * factor) and of `refract` (the index) admits a scalar, and only the
-   * matrix arithmetic without unary matrix negation is admitted.
-   *
-   * `mandatoryScalarSlots` and `vectorOnlySlots` are OBLIGATIONS, so their
-   * fail-closed default is the larger set: more obligations is stricter,
-   * where more permissions is laxer. `refract`'s third argument is the one
-   * mandatory scalar slot, and the vector-only table lists the geometric
-   * builtins that a shader language can declare over vectors only.
+   * factor) and of `refract` (the index) admits a scalar.
    */
   protected getShapeRules(): GPUShapeRules {
     return {
@@ -423,18 +416,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         ['mix', new Set([2])],
         ['refract', new Set([2])],
       ]),
-      mandatoryScalarSlots: new Map([['refract', new Set([2])]]),
-      vectorOnlySlots: new Map([
-        ['cross', new Set([0, 1])],
-        ['dot', new Set([0, 1])],
-        ['faceForward', new Set([0, 1, 2])],
-        ['normalize', new Set([0])],
-        ['reflect', new Set([0, 1])],
-        ['refract', new Set([0, 1])],
-      ]),
-      matrixArithmetic: (sym, allMatrix) =>
-        sym === '*' || (allMatrix && (sym === '+' || sym === '-')),
-      matrixNegate: false,
     };
   }
 
@@ -578,10 +559,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // vector shape.
       broadcastUnary: (head, operand, lowering, unaryTarget) =>
         compileGPUBroadcastUnary(head, operand, lowering, unaryTarget),
-      // No `checkOperandShapes` hook: the GLSL fragment pass gives each
-      // operator a signature over the operand types (`glsl-fragment.ts`), and
-      // `compile()` with `to: 'glsl'` runs the pass before the emitter, so
-      // an operand whose shape the shader call cannot take is refused there.
+      // The lowerings do not check operand shapes: the GLSL fragment pass
+      // gives each operator a signature over the operand types
+      // (`glsl-fragment.ts`), and `compile()` runs the pass before the
+      // emitter, so an operand whose shape the shader call cannot take is
+      // refused there.
       operators: (op) => GPU_OPERATORS[op],
       functions: (id) => functions[id],
       constant: (id) =>

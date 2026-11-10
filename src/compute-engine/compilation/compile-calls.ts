@@ -137,10 +137,6 @@ export function compileExprFunctionCall(
     // passes the index for those positions and gets the matching CSE region
     // instance. A handler that omits it compiles exactly as before.
     const code = fn(args, operandCompiler(node, target), target);
-    // A target with a static type system gets to reject the emission for the
-    // operand shapes it was given (`CompileTarget.checkOperandShapes`); it
-    // throws to fail closed. No hook: unchanged.
-    target.checkOperandShapes?.(h, args, code, target);
     // A head that ALSO has an infix spelling gets the same precedence
     // treatment its infix emission would have received. A function handler
     // takes over when the infix path declines — a collection operand, a

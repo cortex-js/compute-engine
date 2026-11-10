@@ -719,37 +719,6 @@ export interface CompileTarget<Expr = unknown> {
   ) => TargetSource | undefined;
 
   /**
-   * Inspect an emitted lowering — the head's own function codegen, or the
-   * `name(args…)` call of a string-mapped helper — BEFORE it is spliced into
-   * the output, and THROW to fail closed when the operand shapes are ones
-   * that lowering cannot accept.
-   *
-   * The complement of `broadcastUnary`: that hook owns the single-collection
-   * fan-out, this one covers every OTHER emission a non-scalar operand can
-   * reach — a second operand (`Arctan2([1,2,3], 1)`), a matrix
-   * (`Sin(Matrix(…))`), a head whose canonical form is not unary
-   * (`Exp([1,2,3])` → `Power(e, […])`). It is for a target whose language
-   * has a static type system that such a lowering can violate
-   * (`atan(vec3, float)`, `pow(float, vec3)`, `sin(mat2)` are not valid GLSL
-   * source); targets whose runtime broadcasts or coerces leave it undefined.
-   *
-   * No built-in target sets it. The GLSL target checks the operand types
-   * in its fragment pass, which `compile()` with `to: 'glsl'` runs before the
-   * emitter: an operator whose signature does not take the operand types is
-   * refused there.
-   *
-   * A hook, not a base-compiler rule, because the answer is a fact about the
-   * target's TYPE SYSTEM: GLSL promotes a scalar into `max(genType, float)`,
-   * and has its own rules for matrix arithmetic.
-   */
-  checkOperandShapes?: (
-    head: MathJsonSymbol,
-    args: ReadonlyArray<Expr>,
-    code: TargetSource,
-    target: CompileTarget<Expr>
-  ) => void;
-
-  /**
    * The heads whose own codegen on this target accepts an operand that may be
    * a COLLECTION at run time, and fails closed itself when it cannot.
    *

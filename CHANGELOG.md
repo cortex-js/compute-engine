@@ -9,6 +9,17 @@
   fragment. A custom target that compiles `Match` writes its own lowering in
   its `functions` table.
 
+- **The `CompileTarget` field `checkOperandShapes` is removed, and the type
+  `GPUShapeRules` keeps only `scalarGenTypeSlots`.** The hook ran on the
+  code of each lowering and could refuse it for its operand shapes; no
+  built-in target sets it since the GLSL fragment check refuses those
+  shapes before any code is written. A custom target that set the hook
+  checks its operand types before it calls `compile()`. The fields
+  `mandatoryScalarSlots`, `vectorOnlySlots`, `matrixArithmetic` and
+  `matrixNegate` of the value returned by `getShapeRules()` had no reader: a
+  subclass of `GPUShaderTarget` or `GLSLTarget` that overrides
+  `getShapeRules()` removes them from the object it returns.
+
 - **The GLSL target no longer compiles a random draw on any route.**
   `Random`, `WithRandomSeed`, `RandomChoice`, `RandomSample` and
   `RandomShuffle` are not in the GLSL fragment, so `compile()` to `glsl`

@@ -14,14 +14,12 @@
  *   length(vec2(float[1](3.0), 4.0))          array constructor in a vector one
  *   sin(mat2(vec2(1.0, 3.0), vec2(2.0, 4.0))) no matrix overload
  *
- * They now fail closed through `CompileTarget.checkOperandShapes`, which
- * derives its verdict from the operand shapes and from the emitted source —
- * never from a list of head names.
+ * They now decline: the GLSL fragment pass gives each operator a signature
+ * over the operand types and refuses these before any code is written.
  *
  * A lowering may also REPAIR a mixed-genType call itself, by writing the
  * broadcast constructor the language does not supply (`Power` emits
- * `pow(v, vec3(y))`); the gate reads the emitted argument, so such a call
- * compiles instead of declining.
+ * `pow(v, vec3(y))`), so such a call compiles instead of declining.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -34,8 +32,8 @@ const glsl = new GLSLTarget();
  * Compile-time constant folding is off throughout this file: the probes are
  * all-literal (`Dot([1,2,3],[4,5,6])`, `Median([1,5,3,2,4])`), i.e. pure
  * subtrees with no free variables that the compiler would otherwise evaluate at
- * compile time and emit as one number. The operand-shape gate under test only
- * runs on the structural lowering.
+ * compile time and emit as one number. The tests check the code of the
+ * structural lowering.
  */
 const NO_FOLD = { constantFold: false } as const;
 
@@ -111,7 +109,7 @@ describe('GPU OPERAND SHAPE GATE — invalid shader source fails closed', () => 
         ['Sin', M2],
       ]) {
         // `...NO_FOLD`: these probes are all-literal, so constant folding would
-        // emit a folded literal instead of reaching the operand-shape gate.
+        // emit a folded literal instead of the code of the lowering.
         const r = target.compile(ce.box(expr as any), {
           fallback: true,
           ...NO_FOLD,
@@ -182,8 +180,8 @@ describe('GPU OPERAND SHAPE GATE — valid componentwise shapes still compile', 
     // `_gpu_color_mix(vec3, vec3, float)`, `_gpu_apca(vec3, vec3)` and
     // `_gpu_srgb_to_oklch(vec3)` are declared over vectors: their operand
     // shapes are the point. A tuple at a color position is 0-1 sRGB on every
-    // route, so each one arrives through that conversion — a second
-    // aggregate-aware helper the shape gate must also leave alone.
+    // route, so each one arrives through that conversion, a second
+    // aggregate-aware helper.
     expect(
       g(['ColorMix', ['Tuple', 0.5, 0.2, 120], ['Tuple', 0.8, 0.1, 30], 0.25])
     ).toBe(
@@ -197,17 +195,15 @@ describe('GPU OPERAND SHAPE GATE — valid componentwise shapes still compile', 
     );
   });
 
-  it('an aggregate CONSTRUCTOR builds a shape from vector operands', () => {
-    // `Matrix` assembles `vecN` columns — the gate must not read that as a
-    // vector reaching a scalar lowering.
+  it('a `Matrix` declines', () => {
     // The GLSL fragment does not take the `Matrix` head.
     expect(() => g(M2)).toThrow(/The head `Matrix` is outside the GLSL fragment/);
   });
 
   it('a lowering that WIDENS a scalar operand itself is left alone', () => {
     // `pow` is declared over ONE genType, so `Power` writes the broadcast
-    // constructor that GLSL does not supply. The CE operand is still a scalar
-    // there; the gate has to read the emitted argument to see the vector.
+    // constructor that GLSL does not supply: the CE operand `e` is a scalar,
+    // and the lowering writes `vec3(2.71828182846)` itself.
     // (`Exp([1,2,3])` canonicalizes to `Power(e, […])`.)
     expect(g(['Exp', V3])).toBe(
       'pow(vec3(2.71828182846), vec3(1.0, 2.0, 3.0))'
@@ -336,7 +332,7 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
       [glsl, ['Clamp', 0, V3, 1]],
     ] as const) {
       // `...NO_FOLD`: these probes are all-literal, so constant folding would
-      // emit a folded literal instead of reaching the operand-shape gate.
+      // emit a folded literal instead of the code of the lowering.
       const r = target.compile(ce.box(expr as any), {
         fallback: true,
         ...NO_FOLD,
@@ -374,10 +370,9 @@ describe('GPU OPERAND SHAPE GATE — the infix operator route', () => {
   // A typed symbol (`P` declared `vector<real^3>`) and a `Matrix` literal are
   // NOT `.isCollection`, so they used to take the raw infix path in the base
   // compiler with no shape check at all: `P + Q` for a vec3/vec2 pair and
-  // `2.0 + mat2(…)` were emitted behind `success: true`. The infix
-  // emission now runs through the same `checkOperandShapes` gate as the
-  // function-call paths, with the DIMENSIONS of each operand, not just its
-  // kind.
+  // `2.0 + mat2(…)` were emitted behind `success: true`. The GLSL fragment
+  // pass now refuses them: `Add` has no signature for a `vec3` and a `vec2`,
+  // and a matrix has no type in the fragment.
   //
   // Spec basis: GLSL 4.60 §5.9 (scalar mixes with a vector or matrix under
   // any of `+ - * /`; `mat±mat` and `mat/mat` componentwise with the same

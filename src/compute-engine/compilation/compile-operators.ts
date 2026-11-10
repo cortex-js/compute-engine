@@ -957,14 +957,6 @@ export function compileExprOperator(
               if (negateFactors) negateResult();
             }
           }
-          // Same shape gate as the function-codegen and string-helper paths
-          // (see `CompileTarget.checkOperandShapes`): the infix arithmetic
-          // operators of a shader language are genType-polymorphic with
-          // their own overload table, and a typed-symbol or `Matrix` operand
-          // — for which `.isCollection` is false — reaches this path with
-          // shapes the operator may have no overload for (`vec3 + vec2`). Throws to fail closed.
-          // No hook (JavaScript, Python, interval-js): unchanged.
-          target.checkOperandShapes?.(h, args, resultStr, target);
           return resultPrec < prec ? `(${resultStr})` : resultStr;
         }
       }

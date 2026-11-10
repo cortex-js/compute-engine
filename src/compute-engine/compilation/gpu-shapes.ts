@@ -1008,15 +1008,10 @@ export function gpuTopLevelCall(
  * broad strokes — the builtins and the arithmetic operators are
  * genType-polymorphic — but not on where a SCALAR may stand in for a `vecN`,
  * so each target supplies its own table (see `GPUShaderTarget.getShapeRules`).
- *
- * The built-in lowerings read only `scalarGenTypeSlots`, in the fold of
- * `ElementMax` and `ElementMin` (`foldNaryBuiltin()` in `gpu-extrema.ts`).
- * The other fields have no reader in the library: the GLSL fragment pass
- * gives each operator a signature over the operand types (`glsl-fragment.ts`)
- * and refuses the operand shapes that these fields describe. They stay
- * because the type is the return type of the protected method
- * `getShapeRules()` of the exported classes `GPUShaderTarget` and
- * `GLSLTarget`.
+ * The fold of `ElementMax` and `ElementMin` reads it (`foldNaryBuiltin()` in
+ * `gpu-extrema.ts`). The other operand shapes that a shader call cannot take
+ * are refused by the GLSL fragment pass, which gives each operator a
+ * signature over the operand types (`glsl-fragment.ts`).
  */
 export type GPUShapeRules = {
   /**
@@ -1037,54 +1032,6 @@ export type GPUShapeRules = {
    * not a list of CE heads.
    */
   readonly scalarGenTypeSlots: ReadonlyMap<string, ReadonlySet<number>>;
-  /**
-   * Shader builtins with an argument that is ALWAYS a scalar — an OBLIGATION,
-   * where `scalarGenTypeSlots` records a PERMISSION.
-   *
-   * The distinction is the overload SET, not the presence of a scalar-tailed
-   * signature. `mix` is declared BOTH `mix(genType, genType, float)` AND
-   * `mix(genType, genType, genType)`, so its third argument MAY be a scalar;
-   * `refract` is declared ONLY `refract(genType I, genType N, float eta)`
-   * (GLSL ES 3.00 §8.4 / GLSL 4.60 §8.5), so its third argument MUST be
-   * one. Every other
-   * builtin in `scalarGenTypeSlots` — `min`, `max`, `clamp`, `step`,
-   * `smoothstep`, `mod` — has a matched all-genType overload alongside its
-   * scalar-tailed one, so none of them belongs here.
-   *
-   * Check this independently of `scalarGenTypeSlots`, including when no
-   * operand is a scalar: `refract(vec3, vec3, vec3)` has no overload at all,
-   * but the permission table is only consulted once a scalar is present, so an
-   * all-vector call must be declined.
-   */
-  readonly mandatoryScalarSlots: ReadonlyMap<string, ReadonlySet<number>>;
-  /**
-   * Shader builtins with an argument that is ALWAYS a `vecN` — the mirror of
-   * `mandatoryScalarSlots`, and the other obligation an ALL-SCALAR call can
-   * fail.
-   *
-   * GLSL declares its geometric functions over the genType, which INCLUDES
-   * `float`: `refract(float, float, float)`, `dot(float, float)` and
-   * `normalize(float)` are all valid GLSL (§8.4 / §8.5 — "genType" is
-   * `float`, `vec2`, `vec3`, `vec4`). `cross` is narrower: it is declared
-   * over `vec3` only. `length` and `distance` are declared over both a
-   * scalar and a `vecN` and are therefore absent.
-   */
-  readonly vectorOnlySlots: ReadonlyMap<string, ReadonlySet<number>>;
-  /**
-   * Does the arithmetic operator `sym` accept a `matN` operand? `allMatrix` is
-   * true when EVERY operand is a matrix (`mat2 * mat2`, `mat2 + mat2`) and
-   * false when a scalar is mixed in (`mat2 * 2.0`). Admissibility of the
-   * KIND pairing only — the dimension constraints (same size under the
-   * componentwise operators, agreeing sizes under `*`) are the same in every
-   * shader language.
-   */
-  matrixArithmetic(sym: string, allMatrix: boolean): boolean;
-  /**
-   * Does the language define unary negation on a `matN`? GLSL does — its
-   * unary operators "operate on integer or floating-point values (including
-   * vectors and matrices)" (GLSL 4.60 §5.9).
-   */
-  readonly matrixNegate: boolean;
 };
 
 /**

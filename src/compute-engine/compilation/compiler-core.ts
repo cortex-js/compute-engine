@@ -4678,16 +4678,9 @@ function compileExprHelperCall(
     );
   }
 
-  const call = `${fn}(${args
+  return `${fn}(${args
     .map((x) => compileValueOperand(x, target))
     .join(', ')})`;
-  // Same shape gate as the function-codegen route
-  // (`compileExprFunctionCall()`): a string-mapped
-  // helper is a scalar/genType signature too (`atan`, `clamp`, `mod`), and
-  // handing it a `vecN`/`matN` operand it has no overload for is invalid
-  // source, not a runtime concern.
-  target.checkOperandShapes?.(h, args, call, target);
-  return call;
 }
 
 /**
