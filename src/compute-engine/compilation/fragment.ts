@@ -34,7 +34,11 @@ import {
   declareTypeOperand,
   declaredTypeSource,
   declareValueOperand,
+  enforcedLocalTargets,
+  leafAlwaysFits,
 } from './compile-declarations.js';
+import type { EnforcedTargets } from './compiler-state.js';
+import type { BoxedType } from '../../common/type/boxed-type.js';
 import { foldCaptureRefusal } from './compile-folded-values.js';
 import { booleanClaim } from './compile-conditions.js';
 import { contradictedDeclaredResult } from './compile-callbacks.js';
@@ -2563,6 +2567,11 @@ export function walkBlock<R>(
   // assignment, also in the value of that assignment (`x ≔ x + 1`), reads
   // a local that has no value yet, and is refused.
   w.collect(inner, [...names, ...implicit]);
+  if (names.length > 0)
+    ENFORCED_LOCALS.set(
+      inner as FragmentScope<unknown>,
+      enforcedLocalTargets(statements)
+    );
   let last: FragmentFacts<R> = { type: { kind: 'statement' } };
   statements.forEach((s, i) => {
     const place = i === statements.length - 1 ? context.place : 'statement';
@@ -3144,9 +3153,37 @@ function loweredAddTo<R>(
   ]);
 }
 
+/** For each block scope whose statements have a `Declare`, the locals that
+ *  a tuple assignment may write only under a condition: a constant, or a
+ *  local with a declared type (`enforcedLocalTargets()`). The compiled
+ *  tuple assignment checks the same map (`assertLeafAssignable()`), so the
+ *  pass refuses what the compilation declines. */
+const ENFORCED_LOCALS = new WeakMap<FragmentScope<unknown>, EnforcedTargets>();
+
+/** The static type of the component `i` of the value of a tuple
+ *  assignment: of the element of a literal `Tuple`, or of the position of a
+ *  value whose static type is a tuple. `undefined` when neither is known. */
+function tupleComponentType(
+  value: Expression,
+  i: number
+): BoxedType | undefined {
+  if (isFunction(value, 'Tuple')) return value.ops[i]?.type;
+  const t = value.type.type;
+  if (typeof t === 'string' || t.kind !== 'tuple') return undefined;
+  const element = t.elements[i];
+  return element === undefined ? undefined : value.engine.type(element.type);
+}
+
 /** `Assign`, `AddTo`, a tuple assignment: the value, then the check that
  * each target is a local of the function with that type. In a parallel
- * loop, a local bound outside the loop is written only by `AddTo`. */
+ * loop, a local bound outside the loop is written only by `AddTo`.
+ *
+ * A tuple assignment to a local that is a constant, or that has a declared
+ * type which the static type of its component does not prove, is refused:
+ * the interpreter checks every component before it writes any and refuses
+ * the whole assignment when one does not fit, and the compiled writes have
+ * no such check. With `a, b: real`, `(a, b) := (b, a + b)` is accepted;
+ * with `a: integer, b: real`, it is refused, because `b` is a `real`. */
 export function walkAssign<R>(
   node: Expression,
   scope: FragmentScope<R>,
@@ -3204,6 +3241,39 @@ export function walkAssign<R>(
           (found === undefined ? '' : ` (it is a ${found.role})`),
         name
       );
+    // Every enclosing block of the function that declares the name is
+    // checked, not only the one that binds it, as the compiled assignment
+    // checks every enclosing frame (`assertLeafAssignable()`): with
+    // `a: integer` in an outer block and `a, b: real` in an inner block,
+    // `(a, b) := (b, a + b)` in the inner block is refused, because `b` does
+    // not prove `integer`. A function scope has the root scope as its
+    // parent, so the walk stays in the function.
+    for (
+      let s: FragmentScope<R> | undefined =
+        targets.length > 1 ? scope : undefined;
+      s !== undefined;
+      s = s.parent
+    ) {
+      const enforced = ENFORCED_LOCALS.get(s as FragmentScope<unknown>);
+      if (enforced?.has(name) === true) {
+        const declared = enforced.get(name);
+        if (
+          declared === undefined ||
+          !leafAlwaysFits(tupleComponentType(ops[1], i), declared)
+        )
+          return w.refuse(
+            shown,
+            'signature',
+            `The tuple assignment writes \`${name}\`, which is ` +
+              (declared === undefined
+                ? `a constant or has a declared type that the compiler ` +
+                  `cannot read`
+                : `declared \`${declared}\`, and the static type of its ` +
+                  `value does not prove that type`),
+            name
+          );
+      }
+    }
     // The innermost parallel loop, also when a counted loop inside it
     // encloses the statement.
     if (

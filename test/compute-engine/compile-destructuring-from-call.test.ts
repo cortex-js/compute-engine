@@ -424,16 +424,27 @@ describe('a destructuring assign the interpreter would refuse fails closed', () 
     expect(result.toString()).toMatch(/assignment-type-mismatch/);
   });
 
-  test('a declared-type target fails closed even when the value FITS', () => {
-    // The gate is on the DECLARATION, not on the values: the lowering has no
-    // way to enforce the type, so it declines regardless. The interpreter
-    // accepts this one, and the fallback answers it.
+  test('a declared-type target compiles when the static type of each value proves the type', () => {
+    // `7` and `4` have the static type `integer`, so the interpreter's check
+    // of each leaf never refuses them, and the per-leaf writes give its
+    // outcome.
     const expr = boxedBlock(
       'do { let x: integer = 1; let y: integer = 2; (x, y) := (7, 4); 100*x + y }'
     );
+    agrees(expr, 704);
+  });
+
+  test('a declared-type target fails closed when the static type of a value does not prove the type', () => {
+    // `y` has the declared type `integer`, and `x / 2` has the static type
+    // `rational`: the interpreter checks the value at run time (here `1`,
+    // which fits), and the compiled write cannot.
+    const expr = boxedBlock(
+      'do { let x: integer = 2; let y: integer = 2; (x, y) := (7, x / 2); 100*x + y }'
+    );
     const r = compile(expr);
     expect(r?.success).toBe(false);
-    expect(expr.evaluate().isSame(704)).toBe(true);
+    expect(r?.error).toMatch(/destructuring assignment/);
+    expect(expr.evaluate().isSame(701)).toBe(true);
   });
 
   test('a CONST target fails closed (it was silently overwritten)', () => {
@@ -460,7 +471,9 @@ describe('a destructuring assign the interpreter would refuse fails closed', () 
     ]);
     const r = compile(expr);
     expect(r?.success).toBe(false);
-    expect(r?.error).toMatch(/declared type of 'gx'/);
+    // `7` has the static type `integer`, which proves the type of `gx`;
+    // `4.5` does not prove the type of `gy`.
+    expect(r?.error).toMatch(/declared type of 'gy'/);
   });
 
   test('the from-CALL path is gated too, before any temporary is minted', () => {

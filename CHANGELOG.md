@@ -131,6 +131,16 @@
   every component is equal, as the interpreter compares two points.
   `NotEqual` and a condition such as `p = q ∧ x < 1` compile too.
 
+- **A tuple assignment to locals with a declared type compiles when the
+  type of each value proves the declared type.** With `a` and `b` declared
+  `real`, the loop `Loop((a, b) := (b, a + b), k ∈ 1..5)` was accepted by
+  `canCompile()` on `glsl`, and then `compile()` declined it on `glsl` and
+  on `javascript`. It now compiles on both and gives `5`, as the
+  interpreter. A value whose type does not prove the declared type (`b`, of
+  type `real`, assigned to `a` declared `integer`) still declines, because
+  the interpreter checks it before it writes any target; on `glsl`,
+  `canCompile()` now refuses it too. (CE-1189)
+
 ## 0.185.1 _2026-11-09_
 
 ### Resolved Issues

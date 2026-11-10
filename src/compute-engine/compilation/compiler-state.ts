@@ -16,6 +16,17 @@ import type {
 } from './compiler-types.js';
 
 /**
+ * The targets of a statement list or of a function literal that a
+ * destructuring assignment may write only under a condition: a name with a
+ * declared type maps to the spelling of that type, and a constant (or a type
+ * spelling the compiler cannot read) maps to `undefined`. A leaf write to a
+ * name with a type is accepted when the static type of its value is a subtype
+ * of the type (`assertLeafAssignable()`); a write to a name mapped to
+ * `undefined` always declines.
+ */
+export type EnforcedTargets = ReadonlyMap<string, string | undefined>;
+
+/**
  * Step budget for one `Integrate` node's antiderivative-first attempt (a
  * step is one `checkDeadline` call on the engine frame; see `StepBudget` in
  * `common/interruptible.ts`).
@@ -337,6 +348,12 @@ export class CompilerState {
    * an all-or-nothing commit — a whole tier, not a gate — so the shapes that
    * need it fail closed instead.
    *
+   * One case needs no run-time test: a target with a declared type whose leaf
+   * value has a static type that is a subtype of the declared type
+   * (`(a, b) := (b, a + b)` over `a, b: real`). Such a leaf always fits, so
+   * the interpreter never refuses the assignment, and the per-leaf writes give
+   * its outcome. `assertLeafAssignable()` accepts that case.
+   *
    * An UNTYPED / inferred-type target keeps compiling byte-identically: nothing
    * is enforced there, so the sequence of writes IS the interpreter's outcome.
    * That is the state-threading idiom `(v, j) := step(j)`, which this must not
@@ -354,7 +371,7 @@ export class CompilerState {
    * Managed exactly like `_localComplex`/`_localVector`: pushed before the
    * statements are compiled, popped in the same `finally`.
    */
-  static _enforcedTargets: ReadonlySet<string>[] = [];
+  static _enforcedTargets: EnforcedTargets[] = [];
   /**
    * The target-language lvalue an `Assign` writes for the variable `name` —
    * the SAME spelling a READ of that name compiles to.

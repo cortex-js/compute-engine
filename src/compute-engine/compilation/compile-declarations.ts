@@ -37,7 +37,8 @@ import {
 } from '../boxed-expression/function-literal.js';
 import type { CompileTarget } from './types.js';
 import { mayBeCollectionType } from './in-place-update.js';
-import { CompilerState } from './compiler-state.js';
+import { CompilerState, type EnforcedTargets } from './compiler-state.js';
+import type { BoxedType } from '../../common/type/boxed-type.js';
 import {
   compilationType,
   possiblyCollectionTypedForCompile,
@@ -252,7 +253,7 @@ export function destructureViaTemp(
   v: Expression | undefined,
   target: CompileTarget<Expression>,
   kind: 'declaration' | 'assignment',
-  enforcedLocals?: ReadonlySet<string>
+  enforcedLocals?: EnforcedTargets
 ): { binds: Expression[]; writes: Expression[] } | null {
   if (v === undefined) return null;
   if (target.language !== 'javascript') return null;
@@ -266,10 +267,12 @@ export function destructureViaTemp(
   // temporary is minted — so a rejection on a later leaf leaves nothing
   // behind: the same all-or-nothing discipline the interpreter's pre-pass
   // has.
-  if (kind === 'assignment')
-    for (const p of pattern.ops) assertLeafAssignable(p, enforcedLocals);
-
   const ce = pattern.engine;
+  if (kind === 'assignment')
+    pattern.ops.forEach((p, i) =>
+      assertLeafAssignable(p, enforcedLocals, ce.type(t.elements[i].type))
+    );
+
   const temp = typedTemp(ce, tempVar(target), v.type.type);
   const binds = [
     ce._fn('Declare', [temp, ce.string('unknown')]),
@@ -290,9 +293,47 @@ export function destructureViaTemp(
   return { binds, writes };
 }
 
+/**
+ * Whether a leaf value of the static type `valueType` always fits the
+ * declared type `declared`: its static type is a subtype of the declared
+ * type. Then the interpreter's check of the leaf never refuses it, and the
+ * compiled write, which has no check, gives the same outcome.
+ *
+ * A static type that is not settled (`unknown`, `any`) or that names an
+ * absent value or an error (`never`, `nothing`, `missing`, `error`) does not
+ * fit: the interpreter can refuse such a value at run time.
+ */
+export function leafAlwaysFits(
+  valueType: BoxedType | undefined,
+  declared: string | BoxedType
+): boolean {
+  if (valueType === undefined) return false;
+  if (
+    /\b(any|unknown|never|nothing|missing|error)\b/.test(valueType.toString())
+  )
+    return false;
+  try {
+    return valueType.matches(declared);
+  } catch {
+    // A declared type spelling that does not parse: declining is the safe
+    // direction.
+    return false;
+  }
+}
+
+/**
+ * Throw when the compiled per-leaf write of a destructuring assignment to the
+ * leaf `p` can differ from the interpreter's write. The interpreter checks
+ * every leaf against its target before it writes any, and refuses the whole
+ * assignment when one leaf does not fit. The compiled writes have no such
+ * check, so a target that is a constant always declines, and a target with a
+ * declared type declines unless `valueType`, the static type of the value of
+ * the leaf, is a subtype of the declared type (`leafAlwaysFits()`).
+ */
 export function assertLeafAssignable(
   p: Expression,
-  enforcedLocals: ReadonlySet<string> | undefined
+  enforcedLocals: EnforcedTargets | undefined,
+  valueType?: BoxedType
 ): void {
   if (!isSymbol(p) || p.symbol === '_') return;
   const name = p.symbol;
@@ -301,18 +342,23 @@ export function assertLeafAssignable(
   // enclosing statement list is the only place its declaration is visible;
   // `compileBlock` harvests it (`enforcedLocalTargets`) and either passes it
   // in (a statement at its own level) or pushes it (a nested loop body).
-  if (
-    enforcedLocals?.has(name) ||
-    CompilerState._enforcedTargets.some((f) => f.has(name))
-  )
+  // Every frame that names the target is checked, not only the innermost:
+  // a value that fits each declaration fits the one that binds the name.
+  for (const frame of [enforcedLocals, ...CompilerState._enforcedTargets]) {
+    if (frame === undefined || !frame.has(name)) continue;
+    const declared = frame.get(name);
+    if (declared !== undefined && leafAlwaysFits(valueType, declared))
+      continue;
     throw new Error(
       `Could not compile a destructuring assignment: the target '${name}' is ` +
         `declared as a constant or with a declared type (a block-local ` +
-        `declaration, or an annotated parameter), and ` +
+        `declaration, or an annotated parameter) that the static type of ` +
+        `its value does not prove, and ` +
         `the compiled per-leaf write can enforce neither. The interpreter ` +
         `validates every leaf before writing any, and rejects the whole ` +
         `assignment when one does not fit. The interpreter evaluates it instead.`
     );
+  }
   // A target declared in an ENCLOSING, already-installed scope (a typed
   // function parameter, an `ce.declare`d symbol). The pattern leaves are
   // boxed structurally — the canonical `Assign` deliberately leaves them
@@ -327,7 +373,11 @@ export function assertLeafAssignable(
         `constant '${name}'. The interpreter rejects the whole ` +
         `assignment; the compiled per-leaf writes have no such check. The interpreter evaluates it instead.`
     );
-  if (!value.inferredType && !value.type.isUnknown)
+  if (
+    !value.inferredType &&
+    !value.type.isUnknown &&
+    !leafAlwaysFits(valueType, value.type)
+  )
     throw new Error(
       `Could not compile a destructuring assignment: the compiled write cannot ` +
         `enforce the declared type of '${name}' ` +
@@ -340,7 +390,10 @@ export function assertLeafAssignable(
 /**
  * The names a statement list declares with an enforcement the compiled
  * per-leaf destructuring write cannot reproduce: `const`, or a declared type
- * other than the `"unknown"` filler.
+ * other than the `"unknown"` filler. A name with a declared type maps to the
+ * spelling of that type; a constant, a type that is not a string or a
+ * symbol, and a name declared twice with different types map to `undefined`
+ * (`EnforcedTargets`).
  *
  * Read straight off the `Declare` statements, because a block-local
  * declaration is HELD — nothing is installed at compile time, so
@@ -352,8 +405,8 @@ export function assertLeafAssignable(
  */
 export function enforcedLocalTargets(
   args: ReadonlyArray<Expression>
-): ReadonlySet<string> {
-  const out = new Set<string>();
+): EnforcedTargets {
+  const out = new Map<string, string | undefined>();
   for (const arg of args) {
     if (!isFunction(arg, 'Declare')) continue;
     const sym = arg.ops[0];
@@ -368,18 +421,22 @@ export function enforcedLocalTargets(
       rest.pop();
     }
     const typeSource = rest[0] ?? attrType;
-    // An unrecognized type spelling counts as enforced: declining is the
-    // safe direction.
-    if (
-      typeSource !== undefined &&
-      declaredTypeSource(typeSource) !== 'unknown'
-    )
-      out.add(sym.symbol);
+    const name = sym.symbol;
+    // An unrecognized type spelling counts as enforced, with no type that a
+    // value can satisfy: declining is the safe direction.
+    if (typeSource !== undefined) {
+      const declared = declaredTypeSource(typeSource);
+      if (declared !== 'unknown')
+        out.set(
+          name,
+          out.has(name) && out.get(name) !== declared ? undefined : declared
+        );
+    }
     if (
       attrConstant !== undefined &&
       !(isSymbol(attrConstant) && attrConstant.symbol === 'False')
     )
-      out.add(sym.symbol);
+      out.set(name, undefined);
   }
   return out;
 }
@@ -404,8 +461,8 @@ export function enforcedLocalTargets(
  */
 export function enforcedParamTargets(
   literal: Expression & FunctionInterface
-): ReadonlySet<string> {
-  const out = new Set<string>();
+): EnforcedTargets {
+  const out = new Map<string, string | undefined>();
   for (const param of literal.ops.slice(1)) {
     // A parameter with a default value is enforced as the parameter it
     // wraps.
@@ -414,9 +471,11 @@ export function enforcedParamTargets(
     const sym = p.ops[0];
     const typeSource = p.ops[1];
     if (!isSymbol(sym) || typeSource === undefined) continue;
-    // An unrecognized type spelling counts as enforced: declining is the
-    // safe direction (as in `enforcedLocalTargets`).
-    if (declaredTypeSource(typeSource) !== 'unknown') out.add(sym.symbol);
+    // An unrecognized type spelling counts as enforced, with no type that a
+    // value can satisfy: declining is the safe direction (as in
+    // `enforcedLocalTargets`).
+    const declared = declaredTypeSource(typeSource);
+    if (declared !== 'unknown') out.set(sym.symbol, declared);
   }
   return out;
 }
@@ -1250,7 +1309,7 @@ export function desugarPatternDeclare(
 export function desugarPatternAssign(
   arg: Expression,
   target: CompileTarget<Expression>,
-  enforcedLocals?: ReadonlySet<string>
+  enforcedLocals?: EnforcedTargets
 ): ReadonlyArray<Expression> | null {
   if (!isFunction(arg, 'Assign') || !isFunction(arg.ops[0], 'Tuple'))
     return null;
@@ -1306,9 +1365,10 @@ export function desugarPatternAssign(
             `is not a symbol.`
         );
       // A target the compiled write cannot hold to its declaration (a
-      // constant, a declared non-inferred type) fails closed. The throw
-      // discards the whole desugar, so no partially-lowered pattern escapes.
-      assertLeafAssignable(p, enforcedLocals);
+      // constant, a declared non-inferred type that the static type of the
+      // element does not prove) fails closed. The throw discards the whole
+      // desugar, so no partially-lowered pattern escapes.
+      assertLeafAssignable(p, enforcedLocals, el.type);
       // Every leaf is read into a temporary before ANY target is written —
       // including a `_` leaf, whose element is still evaluated for effect.
       //
