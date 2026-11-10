@@ -1,6 +1,6 @@
 /**
- * The structured representation of a scalar program: its values, regions,
- * operations and effect facts. The representation names no target: a
+ * The structured representation of a program of scalars and lists that it
+ * reads: its values, regions, operations and effect facts. The representation names no target: a
  * target gives each value a representation (a string that the target
  * chooses, such as `number` on JavaScript or `float` on GLSL), and the
  * verifier (`structured-verify.ts`) checks the representations against the
@@ -42,8 +42,22 @@ import type { Expression } from '../global-types.js';
  */
 export type EffectFact = 'pure' | 'effectful' | 'unknown';
 
-/** The semantic type of a value. */
+/** The semantic type of a scalar value. */
 export type ScalarKind = 'real' | 'integer' | 'boolean' | 'complex';
+
+/** A list of elements of one scalar kind. The length is not part of the
+ *  type: two lists of the same element type and different lengths have one
+ *  type. A list is a value: no operation changes a list. */
+export type ListType = `list<${ScalarKind}>`;
+
+/** The semantic type of a value: a scalar or a list. */
+export type ValueType = ScalarKind | ListType;
+
+/** The kind of the elements of `type`, or `undefined` when `type` is not a
+ *  list type. */
+export function elementOf(type: ValueType): ScalarKind | undefined {
+  return type.startsWith('list<') ? (type.slice(5, -1) as ScalarKind) : undefined;
+}
 
 /** The name of a representation of a target (`RepresentationPolicy`). */
 export type Representation = string;
@@ -54,7 +68,7 @@ export type IRValue = {
   readonly revision: number;
   /** Unique in the program. */
   readonly id: number;
-  readonly type: ScalarKind;
+  readonly type: ValueType;
   readonly representation: Representation;
 };
 
@@ -106,6 +120,24 @@ export type IRArithmetic = OperationBase & {
     | 'mod'
     | 'floor'
     | 'divide';
+};
+
+/**
+ * A read of a list. Both are `pure`: a list is a value, and no operation
+ * changes it.
+ *
+ * - `at`: the operands are a list and an integer index, counted from 1 as in
+ *   the language; a negative index counts from the end (`-1` is the last
+ *   element). The result has the type of an element. An index out of range
+ *   (0, beyond the length, or beyond the length from the end) gives the
+ *   absent value of the target for the element type: every other operation
+ *   applied to that value is unspecified (`docs/COMPILATION-MODEL.md`,
+ *   "Caveats of compiled code").
+ * - `length`: the operand is a list; the result is the number of its
+ *   elements, an integer.
+ */
+export type IRListRead = OperationBase & {
+  readonly kind: 'at' | 'length';
 };
 
 /**
@@ -252,6 +284,7 @@ export type IROperation =
   | IRInputRead
   | IRCaptureRead
   | IRArithmetic
+  | IRListRead
   | IRConvert
   | IRIf
   | IRLoop
@@ -278,8 +311,13 @@ export type IRRegion = {
 
 export type IRInput = {
   readonly name: string;
-  readonly type: ScalarKind;
+  readonly type: ValueType;
   readonly representation: Representation;
+  /** For a list input: the spelling of the element type that the program
+   *  declares (`finite_real` for `list<finite_real>`), which the type
+   *  `list<real>` does not keep. A label for a target that names the
+   *  element type in its code or its messages; no check reads it. */
+  readonly elementLabel?: string;
 };
 
 /** A binding that the program reads as a snapshot (`IRCaptureRead`). */
@@ -302,6 +340,10 @@ export type IRFunction = {
   readonly name: string;
   /** Defined at the entry of the body. */
   readonly parameters: readonly IRValue[];
+  /** For each list parameter, the spelling of the element type that the
+   *  helper declares (`IRInput.elementLabel`); `undefined` for another
+   *  parameter. */
+  readonly parameterElementLabels?: readonly (string | undefined)[];
   readonly result: {
     readonly type: ScalarKind;
     readonly representation: Representation;

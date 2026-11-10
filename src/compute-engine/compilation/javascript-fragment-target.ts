@@ -9,9 +9,12 @@ import type {
 import {
   isFunction,
   isNumber,
+  isString,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { typeToString } from '../../common/type/serialize.js';
+import { indexElementType } from '../../common/type/utils.js';
 import { withoutNaNMember } from './compile-real-analysis.js';
 import { NON_NEGATIVE_REAL_TYPE } from './compiler-naming.js';
 import {
@@ -44,7 +47,9 @@ import {
   walkBlock,
   walkAssign,
   walkCountedLoop,
+  fragmentTypeToString,
   type FragmentDeclaredInput,
+  type FragmentListType,
   type FragmentValueFacts,
   type FragmentDefinition,
   type FragmentRule,
@@ -749,10 +754,10 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
       throw new Error('JS scalar fragment invariant: Sqrt without its compile mode');
     },
   },
-  Add: addRule,
-  Negate: negateRule,
-  If: { walk: walkIf },
-  Multiply: multiplyRule,
+  Add: withListLengthIntegers(addRule),
+  Negate: withListLengthIntegers(negateRule),
+  If: { walk: (node, scope, context, w) => ifRule(node, scope, context, w) },
+  Multiply: withListLengthIntegers(multiplyRule),
   Less: comparisonRule('Less'),
   LessEqual: comparisonRule('LessEqual'),
   Equal: comparisonRule('Equal'),
@@ -765,6 +770,8 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
   Or: logicalRule('Or'),
   Min: extremumRule('Min'),
   Max: extremumRule('Max'),
+  At: { walk: (node, scope, context, w) => atRule(node, scope, context, w) },
+  Length: { walk: (node, scope, context, w) => lengthRule(node, scope, context, w) },
 };
 
 /**
@@ -779,14 +786,26 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
  * the engine infers `real`. A write of a real value to an integer local is
  * refused by the rule of `Assign`. With an integer local, a loop bound
  * (`Range(1, m)`) and an integer parameter of a helper can read the local.
+ *
+ * A `let` local that `isLengthLocal` accepts is an integer too: each value
+ * written to it is an integer computed from the length of a list
+ * (`integerFromListLength()`), or has the type `integer`. The engine infers
+ * `integer | signed_infinity` or `real` for such a local (`let n =
+ * Length(L)`).
  */
-function structuredLocalType(local: {
-  value: { kind: string };
-  declared: string | undefined;
-  inferred: Type | undefined;
-}): { kind: 'integer' } | undefined {
+function structuredLocalType(
+  local: {
+    name: string;
+    value: { kind: string };
+    declared: string | undefined;
+    inferred: Type | undefined;
+  },
+  isLengthLocal: (name: string) => boolean = () => false
+): { kind: 'integer' } | undefined {
   if (local.value.kind !== 'integer') return undefined;
   if (local.declared === 'integer') return { kind: 'integer' };
+  if (local.declared === undefined && isLengthLocal(local.name))
+    return { kind: 'integer' };
   if (
     local.declared === undefined &&
     local.inferred !== undefined &&
@@ -795,6 +814,387 @@ function structuredLocalType(local: {
   )
     return { kind: 'integer' };
   return undefined;
+}
+
+/**
+ * Whether `node` is an integer computed from the length of a list with
+ * integer arithmetic, on the structured route:
+ *
+ * - `Length(L)` (the library operator) of a symbol `L` of a list type of
+ *   the structured route (`structuredListType()`);
+ * - a symbol that `isIntegerName` accepts: at the admission, a local each
+ *   of whose values is such an integer or has the type `integer`; in the
+ *   pass, a name whose fact is `integer`;
+ * - `Add`, `Negate`, `Multiply` or `Mod` (the library operators) whose
+ *   operands each have the type `integer` or are such an integer, one of
+ *   them at least being such an integer.
+ *
+ * Such a node is an integer, although the engine types it otherwise: the
+ * engine types `Length(L)` of a list whose length is not declared as
+ * `integer | signed_infinity` (an infinite collection has an infinite
+ * length), and `Length(L) - 1` as `real | signed_infinity`. A list of the
+ * structured route is a JavaScript array, whose length is a finite integer,
+ * and a sum, a product, a negation and a floored remainder of integers are
+ * integers (`Mod` with a zero divisor gives `NaN`, as the rule of `Mod`
+ * admits for integer operands). The admission (`checkLoop`, `checkWrite`),
+ * the type of a `let` local (`structuredLocalType()`), the fact of `Add`,
+ * `Negate` and `Multiply` (`withListLengthIntegers()`) and the bound of a
+ * loop (`loopBoundFromFact`) read this one rule.
+ */
+function integerFromListLength(
+  node: Expression,
+  isIntegerName: (symbol: Expression & { symbol: string }) => boolean
+): boolean {
+  if (isSymbol(node)) return isIntegerName(node);
+  if (!isFunction(node) || !isLibraryOperator(node, node.operator)) return false;
+  if (node.operator === 'Length')
+    return (
+      node.nops === 1 &&
+      isSymbol(node.op1) &&
+      isAdmittedList(node.op1.type.type)
+    );
+  if (!['Add', 'Negate', 'Multiply', 'Mod'].includes(node.operator)) return false;
+  let found = false;
+  for (const operand of node.ops) {
+    if (integerFromListLength(operand, isIntegerName)) found = true;
+    else if (!isSubtype(operand.type.type, 'integer')) return false;
+  }
+  return found;
+}
+
+/**
+ * The rule `rule` of `Add`, `Negate` or `Multiply`, with an integer fact
+ * for a node computed from the length of a list whose operands all have
+ * integer facts (`integerFromListLength()`): the signatures read the engine
+ * type of the node, which is not `integer` there.
+ */
+function withListLengthIntegers(
+  rule: Extract<FragmentRule<ScalarRepresentation>, { walk: unknown }>
+): FragmentRule<ScalarRepresentation> {
+  return {
+    walk: (node, scope, context, w) => {
+      const facts = rule.walk(node, scope, context, w);
+      if (!('representation' in facts) || facts.type.kind !== 'real') return facts;
+      const operands = operandFacts(node, scope, context, w);
+      if (
+        !operands.every((f) => f.type.kind === 'integer') ||
+        !integerFromListLength(node, (s) => w.value(s, scope, context).type.kind === 'integer')
+      )
+        return facts;
+      return w.valueFacts(
+        node,
+        { kind: 'integer' },
+        operands.map((f) => w.convert(f, f.type)!)
+      );
+    },
+  };
+}
+
+//
+// Lists on the structured route
+//
+// A list input of the program and a list parameter of a helper are read
+// with `At` and `Length`, and passed whole to a helper parameter of the same
+// list type. A list is not a local, a carried value, the value of an `If` or
+// of the program, nor an operand of any other operator: the representation
+// binding refuses a list local, `ifRule()` and `annotateStructured()` refuse
+// a list value, and `withoutListOperands()` refuses a list operand.
+//
+
+/**
+ * The fragment type of a list input or a list parameter of the declared
+ * engine type `type` on the structured route: a list of integers for a
+ * subtype of `list<integer>`, a list of reals for another subtype of
+ * `list<real>`. Each is a JavaScript array of numbers, the value that the
+ * existing emitter reads with `_SYS.atNumeric` and `.length`, and that the
+ * entry check of `run()` accepts as it accepts it for the existing route
+ * (a plain array; a typed array or a string throws). This admits
+ * `list<real>`, `vector<real>`, `list<integer>`, a list with a declared
+ * length (`list<real^5>`: the length is not part of the type, and the code
+ * reads the length of the array, as the existing emitter does) and a list
+ * of a subtype of `real` (`list<finite_real>`).
+ *
+ * A refusal, with its message, for every other list type: a list of lists
+ * or a matrix, a list of complex numbers (its elements are `{re, im}`
+ * objects, and the structured route has no list of them), a list of
+ * booleans (the existing emitter reads it with `_SYS.at`) and `vector` (a
+ * list of `number`, whose elements can be complex). The result is
+ * `undefined` for a type that is not a list type: a tuple (the existing
+ * emitter reads it with `_SYS.at`), `indexed_collection<real>` (a supertype
+ * of a tuple) and a string keep the message of a binding that the route
+ * has no type for.
+ */
+function structuredListType(
+  type: Type
+): FragmentListType | { refusal: string } | undefined {
+  if (isSubtype(type, 'list<integer>'))
+    return { kind: 'list', element: { kind: 'integer' } };
+  if (isSubtype(type, 'list<real>'))
+    return { kind: 'list', element: { kind: 'real' } };
+  // Another list type (`typeof type === 'object'`, of the kind `list`):
+  // a string, a tuple or a set keeps the message of a binding with no type.
+  if (typeof type === 'object' && type.kind === 'list')
+    return {
+      refusal:
+        `the type ${typeToString(type)}, and the structured route admits a ` +
+        `list only of the type list<real> or list<integer> ` +
+        `(a JavaScript array of numbers)`,
+    };
+  return undefined;
+}
+
+/** Whether `type` is a list type of the structured route. */
+function isAdmittedList(type: Type): boolean {
+  const list = structuredListType(type);
+  return list !== undefined && !('refusal' in list);
+}
+
+/** The fragment type of a parameter of the declared engine type `type` on
+ *  the structured route: a scalar type, or a list type
+ *  (`structuredListType()`). Throws for another collection type. */
+function structuredParameterType(type: Type, name: string | undefined) {
+  const scalar = scalarType(type);
+  if (scalar !== undefined) return scalar;
+  const list = structuredListType(type);
+  if (list !== undefined && 'refusal' in list)
+    throw new Error(`JS scalar fragment: the parameter ${name ?? ''} has ${list.refusal}`);
+  return list;
+}
+
+/** How the structured route holds a value of the type `type`: the
+ *  representation of a scalar, and `array` for a list of reals or of
+ *  integers. */
+function structuredRepresentation(type: {
+  readonly kind: string;
+  readonly element?: { readonly kind: string };
+}): ScalarRepresentation | undefined {
+  if (type.kind !== 'list') return representation(type);
+  const element = type.element?.kind;
+  return element === 'real' || element === 'integer' ? 'array' : undefined;
+}
+
+/** The definition of the structured route: the existing definition, with a
+ *  list input (a free symbol of a list type), and a list held as an
+ *  `array` where it is an input or a parameter. A list local, a list index
+ *  and every other list binding have no representation, and the refusal
+ *  says why (`bindingLimit`). */
+const structuredDefinition: Pick<
+  FragmentDefinition<ScalarRepresentation>,
+  | 'typeOfSymbol'
+  | 'representationOfBinding'
+  | 'representationOfValue'
+  | 'bindingLimit'
+  | 'loopBoundFromFact'
+  | 'passesListArgument'
+> = {
+  typeOfSymbol(node) {
+    const scalar = definition.typeOfSymbol(node);
+    if (scalar !== undefined) return scalar;
+    const list = structuredListType(node.type.type);
+    return list === undefined || 'refusal' in list ? undefined : list;
+  },
+  representationOfBinding: (type, binding) =>
+    type.kind === 'list' && binding.role !== 'input' && binding.role !== 'parameter'
+      ? undefined
+      : structuredRepresentation(type),
+  representationOfValue: structuredRepresentation,
+  // A bound computed from the length of a list with integer arithmetic,
+  // whose fact is an integer (`integerFromListLength()`, with the names of
+  // integer facts): the rule that `checkLoop` reads at the admission.
+  loopBoundFromFact: (bound, isInteger) =>
+    isInteger(bound) && integerFromListLength(bound, isInteger),
+  // A list of integers and a list of reals are one JavaScript array of
+  // numbers: the existing route passes the array to the helper, and the
+  // interpreter reads the integers as reals.
+  passesListArgument: (argument, parameter) =>
+    argument.element.kind === 'integer' && parameter.element.kind === 'real',
+  bindingLimit: (type, binding) =>
+    type.kind === 'list'
+      ? `The ${binding.role} \`${isSymbol(binding.symbol) ? binding.symbol.symbol : binding.symbol.toString()}\` ` +
+        `has the type \`${fragmentTypeToString(type)}\`: the structured route admits a list ` +
+        `only as an input or a parameter, read by At and Length, and not as a ${binding.role}`
+      : undefined,
+};
+
+/**
+ * `At(L, i)` on the structured route: `L` is a list input or a list
+ * parameter (the type `list<real>` or `list<integer>`), and `i` one index
+ * with an integer fact. The result has the type of an element. The
+ * lowering writes the read as the existing emitter writes it for such a
+ * list, `_SYS.atNumeric(L, i, "real")`: an index counts from 1, a negative
+ * index from the end (`-1` is the last element), and an index out of range
+ * (0, beyond the length) gives `NaN`, as in the interpreter for a list of
+ * numbers. That `NaN` is the absent value of a numeric type
+ * (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code"): every
+ * operator applied to it other than `At`, `Length` and a discharge is
+ * unspecified in compiled code. The helper also throws when the element is
+ * an array, as on the existing route.
+ *
+ * Refused: an index with a real fact (the existing emitter reads a
+ * fraction as out of range, which the structured route does not copy: it
+ * reads an integer index only; round it with `Floor`), a base that is not
+ * a list input or parameter. The admission refuses, before this rule, more
+ * than one index, a `Range` index (a slice) and a string index
+ * (`structuredListRefusal()`).
+ */
+function atRule(
+  node: Expression,
+  scope: FragmentScope<ScalarRepresentation>,
+  context: FragmentContext<ScalarRepresentation>,
+  w: FragmentWalker<ScalarRepresentation>
+): FragmentFacts<ScalarRepresentation> {
+  if (!isFunction(node) || node.nops !== 2)
+    return w.refuse(
+      node,
+      'signature',
+      'At with other than one index is not in the structured route'
+    );
+  const [base, index] = operandFacts(node, scope, context, w);
+  if (base.type.kind !== 'list' || base.representation !== 'array')
+    return w.refuse(
+      node,
+      'signature',
+      `At in the structured route reads a list input or a list parameter of ` +
+        `reals or integers, and its first operand has the type ` +
+        `\`${fragmentTypeToString(base.type)}\``
+    );
+  if (index.type.kind !== 'integer')
+    return w.refuse(
+      node,
+      'signature',
+      `At with an index of the type \`${fragmentTypeToString(index.type)}\` is ` +
+        `not in the structured route, which reads an index of the type integer`
+    );
+  const element = base.type.element.kind === 'integer' ? 'integer' : 'real';
+  return w.valueFacts(node, { kind: element }, [
+    w.convert(base, base.type)!,
+    w.convert(index, index.type)!,
+  ]);
+}
+
+/**
+ * `Length(L)` on the structured route: `L` is a list input or a list
+ * parameter; the result is an integer, the length of the array, written
+ * `L.length` as the existing emitter writes it. The engine types
+ * `Length(L)` as `integer | signed_infinity` for a list whose length is
+ * not declared (an infinite collection has an infinite length); a
+ * JavaScript array has a finite length.
+ */
+function lengthRule(
+  node: Expression,
+  scope: FragmentScope<ScalarRepresentation>,
+  context: FragmentContext<ScalarRepresentation>,
+  w: FragmentWalker<ScalarRepresentation>
+): FragmentFacts<ScalarRepresentation> {
+  if (!isFunction(node) || node.nops !== 1)
+    return w.refuse(
+      node,
+      'signature',
+      'Length with other than one operand is not in the structured route'
+    );
+  const [base] = operandFacts(node, scope, context, w);
+  if (base.type.kind !== 'list' || base.representation !== 'array')
+    return w.refuse(
+      node,
+      'signature',
+      `Length in the structured route reads a list input or a list parameter ` +
+        `of reals or integers, and its operand has the type ` +
+        `\`${fragmentTypeToString(base.type)}\``
+    );
+  return w.valueFacts(node, { kind: 'integer' }, [w.convert(base, base.type)!]);
+}
+
+/** `If` on the structured route: the rule of the pass (`walkIf()`), and a
+ *  value that is not a list. An `If` whose branches are lists is a list
+ *  that the program makes, which the structured route does not have. */
+function ifRule(
+  node: Expression,
+  scope: FragmentScope<ScalarRepresentation>,
+  context: FragmentContext<ScalarRepresentation>,
+  w: FragmentWalker<ScalarRepresentation>
+): FragmentFacts<ScalarRepresentation> {
+  const facts = walkIf(node, scope, context, w);
+  if (facts.type.kind === 'list')
+    return w.refuse(
+      node,
+      'signature',
+      'an If whose value is a list is not in the structured route'
+    );
+  return facts;
+}
+
+/**
+ * The rule `rule` of `operator`, after a refusal of a list operand: the
+ * interpreter applies an arithmetic operator or a function of a number to
+ * each element of a list (`L + 1` is a list), and compares two lists as
+ * values (`Equal(L, M)`); the structured route has neither. Every rule of
+ * the structured route but those of `If`, `Loop`, `At` and `Length` is
+ * wrapped.
+ */
+function withoutListOperands(
+  operator: string,
+  rule: FragmentRule<ScalarRepresentation>
+): FragmentRule<ScalarRepresentation> {
+  return {
+    walk: (node, scope, context, w) => {
+      const list = (isFunction(node) ? node.ops : []).find(
+        (operand) => w.value(operand, scope, context).type.kind === 'list'
+      );
+      if (list !== undefined)
+        return w.refuse(
+          node,
+          'signature',
+          `${operator} with the list operand ${list.toString()} is not in the ` +
+            `structured route, which reads a list only with At and Length and ` +
+            `passes it whole to a helper`
+        );
+      return 'walk' in rule
+        ? rule.walk(node, scope, context, w)
+        : w.signatures(node, scope, context, rule.signatures);
+    },
+  };
+}
+
+/** The heads that make or read a list in a way that the structured route
+ *  does not have, with the message of each refusal. */
+const LIST_HEAD_REFUSALS: ReadonlyMap<string, string> = new Map([
+  ['First', 'First is not in the structured route, which reads a list with At and Length'],
+  ['Last', 'Last is not in the structured route, which reads a list with At and Length'],
+  ['Rest', 'Rest makes a list, which the structured route does not have'],
+  ['Comprehension', 'Comprehension makes a list, which the structured route does not have'],
+  ['ReplaceAt', 'ReplaceAt makes a list, which the structured route does not have'],
+  ['List', 'a list literal is not in the structured route'],
+  ['Tuple', 'a tuple is not in the structured route'],
+]);
+
+/**
+ * The message of the refusal of `node` on the structured route, for a
+ * library head of `LIST_HEAD_REFUSALS` and for an `At` with other than one
+ * index, a `Range` index (a slice) or a string index; otherwise
+ * `undefined`. The admission checks this before it reads the operands, so
+ * that the message names the list operation, and not an operand that the
+ * route does not have (`Range`, `Element`, a string).
+ */
+function structuredListRefusal(node: Expression): string | undefined {
+  if (!isFunction(node) || !isLibraryOperator(node, node.operator)) return undefined;
+  const message = LIST_HEAD_REFUSALS.get(node.operator);
+  if (message !== undefined) return message;
+  if (node.operator !== 'At') return undefined;
+  if (node.nops !== 2)
+    return `At with ${node.nops - 1} indexes is not in the structured route, which reads one index`;
+  if (isFunction(node.op2, 'Range'))
+    return 'At with a Range index (a slice) is not in the structured route, which reads one integer index';
+  if (isString(node.op2))
+    return 'At with a string index is not in the structured route, which reads one integer index';
+  return undefined;
+}
+
+/** Throw the refusal of `node` (`structuredListRefusal()`) on the
+ *  structured route. */
+function refuseListHead(node: Expression, admission: Admission): void {
+  if (!admission.structured) return;
+  const message = structuredListRefusal(node);
+  if (message !== undefined) throw new Error(`JS scalar fragment: ${message}`);
 }
 
 /**
@@ -828,9 +1228,20 @@ function structuredAdmission(
     rules[name] = {
       signatures: [{ operands: [], rest: 'real', result: 'real' }],
     };
+  // A list is an operand of `At`, `Length` and a helper call only. The
+  // rules of `If` and `Loop` read no list operand: a branch or a body that
+  // reads one is typed by the rule of its own head.
+  for (const [name, rule] of Object.entries(rules))
+    if (!['If', 'Loop', 'At', 'Length'].includes(name))
+      rules[name] = withoutListOperands(name, rule);
   return {
     structured: true,
-    definition: { ...definition, rules, localType: structuredLocalType },
+    definition: {
+      ...definition,
+      ...structuredDefinition,
+      rules,
+      localType: structuredLocalType,
+    },
     heads: new Set(Object.keys(rules)),
     testOperations,
   };
@@ -901,7 +1312,11 @@ function recordStructured(
     helpers: new Map(
       [...registry.helpers].map(([name, helper]) => [
         name,
-        { name, body: helper.body },
+        {
+          name,
+          body: helper.body,
+          parameterElementLabels: helper.parameterElementLabels,
+        },
       ])
     ),
     captures: [...registry.captures.values()],
@@ -1104,15 +1519,20 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
     }
     const named: NamedCalls = { calls: new Set(), structured: registry };
     const seen = new Set<Expression>();
+    /** The declared type of each free symbol, for the label of a list
+     *  input (`elementLabel()`). */
+    const symbolTypes = new Map<string, Type>();
     let readsSqrt = false;
     const check = (node: Expression): void => {
       if (seen.has(node)) return;
       seen.add(node);
+      refuseListHead(node, admission);
       if (!node.isValid || node.type.type === 'error')
         throw new Error('JS scalar fragment: invalid expression');
       if (isNumber(node)) return;
       if (isSymbol(node)) {
         if (node.symbol === 'True' || node.symbol === 'False') return;
+        symbolTypes.set(node.symbol, node.type.type);
         // The structured route reads a captured binding as its snapshot.
         if (
           registry &&
@@ -1120,10 +1540,14 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
           recordCapture(registry, node)
         )
           return;
-        if (
-          node.valueDefinition?.value !== undefined ||
-          definition.typeOfSymbol(node) === undefined
-        )
+        if (node.valueDefinition?.value !== undefined)
+          throw new Error(
+            `JS scalar fragment: unsupported binding ${node.symbol}`
+          );
+        const list = structured ? structuredListType(node.type.type) : undefined;
+        if (list !== undefined && 'refusal' in list)
+          throw new Error(`JS scalar fragment: the input ${node.symbol} has ${list.refusal}`);
+        if (definition.typeOfSymbol(node) === undefined)
           throw new Error(
             `JS scalar fragment: unsupported binding ${node.symbol}`
           );
@@ -1178,7 +1602,7 @@ export class ScalarFragmentJavaScriptTarget extends JavaScriptTarget {
       named,
       inputs: () =>
         [...annotation.scope.bindings].map(([name, facts]) =>
-          structuredInput(name, facts.type)
+          structuredInput(name, facts.type, symbolTypes.get(name))
         ),
     });
     if (structured) this.endPhase('annotation', annotationStart);
@@ -1287,10 +1711,20 @@ function attachBoundFunction(
   if (!isLibraryOperator(fn, 'Function'))
     throw new Error('JS scalar fragment: shadowed function constructor');
   const inputs: FragmentDeclaredInput[] = [];
+  /** The declared type of each parameter, for the label of a list
+   *  (`elementLabel()`). */
+  const declaredTypes = new Map<string, Type>();
   for (const parameter of fn.ops.slice(1)) {
     const name = functionLiteralParameterName(parameter);
     const declared = functionLiteralParameterType(parameter);
-    const type = declared === undefined ? undefined : scalarType(declared);
+    // The structured route also admits a list parameter
+    // (`structuredListType()`).
+    const type =
+      declared === undefined
+        ? undefined
+        : admission.structured
+          ? structuredParameterType(declared, name)
+          : scalarType(declared);
     if (
       !isFunction(parameter, 'Typed') ||
       parameter.nops !== 2 ||
@@ -1304,6 +1738,7 @@ function attachBoundFunction(
         'JS scalar fragment: explicit distinct scalar parameters required'
       );
     inputs.push({ name, type, declared: type.kind });
+    if (declared !== undefined) declaredTypes.set(name, declared);
   }
   const body = fn.op1.canonical;
   if (
@@ -1386,6 +1821,7 @@ function attachBoundFunction(
       throw new Error('JS scalar fragment: helper bindings collide with the root function');
   };
   const checkValue = (node: Expression): void => {
+    refuseListHead(node, admission);
     if (!node.isValid || node.type.type === 'error')
       throw new Error('JS scalar fragment: invalid bound expression');
     if (isNumber(node)) return;
@@ -1432,8 +1868,24 @@ function attachBoundFunction(
   // `real`, so the check of the representation of a write does not refuse a
   // real value. The interpreter refuses it, so the type of each value that
   // is written must prove `integer`.
+  // On the structured route, a value computed from the length of a list
+  // (`integerFromListLength()`) is an integer too. A `let` or `integer`
+  // local each of whose values is such an integer or has the type `integer`
+  // is a length local: `isLengthLocal()`.
+  const lengthWritten = new Set<string>();
+  const notLength = new Set<string>();
+  const isLengthLocal = (name: string): boolean =>
+    lengthWritten.has(name) && !notLength.has(name);
+  const fromLength = (value: Expression): boolean =>
+    admission.structured &&
+    integerFromListLength(value, (symbol) => isLengthLocal(symbol.symbol));
   const checkWrite = (value: Expression, name = local): void => {
-    if (locals.get(name) === 'integer' && !isSubtype(value.type.type, 'integer'))
+    const length = fromLength(value);
+    const declaredType = locals.get(name);
+    if (length && (declaredType === 'let' || declaredType === 'integer'))
+      lengthWritten.add(name);
+    else if (!isSubtype(value.type.type, 'integer')) notLength.add(name);
+    if (declaredType === 'integer' && !length && !isSubtype(value.type.type, 'integer'))
       throw new Error(
         `JS scalar fragment: a value written to the integer local ${name} ` +
           `does not have the type integer`
@@ -1565,7 +2017,11 @@ function attachBoundFunction(
       );
     for (const bound of spec.op2.ops) {
       checkValue(bound);
-      if (!isSubtype(bound.type.type, 'integer'))
+      // A bound computed from the length of a list with integer arithmetic
+      // (`integerFromListLength()`), which the engine does not type
+      // `integer`: the rule that `loopBoundFromFact` reads in the pass, with
+      // the length locals as the integer names.
+      if (!fromLength(bound) && !isSubtype(bound.type.type, 'integer'))
         throw new Error(
           `JS scalar fragment: the bound ${bound.toString()} of a Loop does not have the type integer`
         );
@@ -1608,6 +2064,12 @@ function attachBoundFunction(
       Block: { walk: walkBlock },
       Assign: { walk: walkAssign },
     },
+    ...(admission.structured
+      ? {
+          localType: (l: Parameters<typeof structuredLocalType>[0]) =>
+            structuredLocalType(l, isLengthLocal),
+        }
+      : {}),
   };
   const annotation = (() => {
       const annotation = annotateCalls(body, boundDefinition, named, inputs, body);
@@ -1677,7 +2139,9 @@ function attachBoundFunction(
     annotation,
     named,
     inputs: () =>
-      inputs.map((input) => structuredInput(input.name, input.type!)),
+      inputs.map((input) =>
+        structuredInput(input.name, input.type!, declaredTypes.get(input.name))
+      ),
   });
 }
 
@@ -1698,23 +2162,46 @@ function boundNames(statement: Expression, names: string[] = []): string[] {
   return names;
 }
 
-/** The input `name` of the structured route, with the type `type`. */
+/**
+ * The spelling of the element type of the declared list type `type`, as the
+ * existing emitter writes it as the third argument of `_SYS.atNumeric`
+ * (`typeToString()` of `indexElementType()`): `finite_real` for
+ * `list<finite_real>`, `real` for `vector<real>`. `undefined` for a type
+ * that is not a list of the structured route.
+ */
+function elementLabel(type: Type | undefined): string | undefined {
+  const list = type === undefined ? undefined : structuredListType(type);
+  if (list === undefined || 'refusal' in list) return undefined;
+  const element = indexElementType(type!);
+  return element === undefined ? undefined : typeToString(element);
+}
+
+/** The input `name` of the structured route, with the type `type`: a
+ *  scalar, or a list of reals or of integers. `declared`: the engine type
+ *  of the input, for the label of a list (`elementLabel()`). */
 function structuredInput(
   name: string,
-  type: { readonly kind: string }
+  type: { readonly kind: string; readonly element?: { readonly kind: string } },
+  declared?: Type
 ): StructuredInput {
-  const rep = representation(type);
+  const rep = structuredRepresentation(type);
+  const kind =
+    type.kind === 'list'
+      ? `list<${type.element?.kind}>`
+      : type.kind;
   if (
     rep === undefined ||
-    !(['real', 'integer', 'boolean', 'complex'] as const).some(
-      (kind) => kind === type.kind
+    !(['real', 'integer', 'boolean', 'complex', 'list<real>', 'list<integer>'] as const).some(
+      (k) => k === kind
     )
   )
-    throw new Error(`JS scalar fragment invariant: no scalar input ${name}`);
+    throw new Error(`JS scalar fragment invariant: no scalar or list input ${name}`);
+  const label = type.kind === 'list' ? elementLabel(declared) : undefined;
   return {
     name,
-    type: type.kind as StructuredInput['type'],
+    type: kind as StructuredInput['type'],
     representation: rep,
+    ...(label === undefined ? {} : { elementLabel: label }),
   };
 }
 
@@ -1722,6 +2209,8 @@ type ResolvedHelper = ScalarFragmentHelper & {
   readonly binding: object;
   readonly resultRepresentation: ScalarRepresentation;
   readonly fragment: Omit<FragmentFunction, 'arguments'>;
+  /** The label of each list parameter (`elementLabel()`). */
+  readonly parameterElementLabels?: readonly (string | undefined)[];
 };
 
 /** A captured binding of the structured route (`StructuredCapture`), with
@@ -1976,7 +2465,10 @@ function annotateStructured(
     rules: {
       ...base.rules,
       Block: { walk: walkBlock },
-      Sqrt: structuredSqrtRule(registry.mode, snapshotReader(registry)),
+      Sqrt: withoutListOperands(
+        'Sqrt',
+        structuredSqrtRule(registry.mode, snapshotReader(registry))
+      ),
     },
     storedValue: (node: Expression) => {
       const capture = captureOf(node);
@@ -1995,6 +2487,11 @@ function annotateStructured(
   const annotation = typeFragment(root, definition, { inputs });
   if (annotation.refusal)
     throw new Error(`JS scalar fragment: ${annotation.refusal.message}`);
+  // A list is read, not made: the value of the program is not a list.
+  if (annotation.scope.facts.get(root)?.type.kind === 'list')
+    throw new Error(
+      'JS scalar fragment: the value of the program is a list, which the structured route does not have'
+    );
   // No `refuseClosedComplex()` here: the structured route refuses constant
   // folding, and its emitter writes each node in the representation of its
   // fact, so a closed node with a complex fact is written complex.
@@ -2098,12 +2595,21 @@ function resolveHelper(
       'JS scalar fragment: helper requires one pure scalar signature'
     );
   const parameters: string[] = [];
-  const parameterTypes: NonNullable<ReturnType<typeof scalarType>>[] = [];
+  const parameterTypes: NonNullable<ReturnType<typeof structuredParameterType>>[] = [];
   const parameterSymbols: Expression[] = [];
+  const parameterElementLabels: (string | undefined)[] = [];
+  // The structured route also admits a list parameter
+  // (`structuredListType()`), passed whole to the helper.
+  const typeOf = (type: Type | undefined, name: string | undefined) =>
+    type === undefined
+      ? undefined
+      : registry
+        ? structuredParameterType(type, name)
+        : scalarType(type);
   for (const parameter of literal.ops.slice(1)) {
     const name = functionLiteralParameterName(parameter);
     const type = functionLiteralParameterType(parameter);
-    const scalar = type === undefined ? undefined : scalarType(type);
+    const scalar = typeOf(type, name);
     if (
       !isFunction(parameter, 'Typed') ||
       parameter.nops !== 2 ||
@@ -2117,11 +2623,13 @@ function resolveHelper(
         'JS scalar fragment: helper requires explicit scalar parameters'
       );
     const declared = signature.args?.[parameters.length]?.type;
-    const declaredScalar =
-      declared === undefined ? undefined : scalarType(declared);
+    const declaredScalar = typeOf(declared, name);
     if (
       !declaredScalar ||
-      representation(declaredScalar) !== representation(scalar)
+      structuredRepresentation(declaredScalar) !== structuredRepresentation(scalar) ||
+      (declaredScalar.kind === 'list' &&
+        scalar.kind === 'list' &&
+        declaredScalar.element.kind !== scalar.element.kind)
     )
       throw new Error(
         'JS scalar fragment: helper parameter representation differs from signature'
@@ -2129,6 +2637,7 @@ function resolveHelper(
     parameters.push(name);
     parameterTypes.push(scalar);
     parameterSymbols.push(parameter.op1);
+    parameterElementLabels.push(scalar.kind === 'list' ? elementLabel(type) : undefined);
   }
   if ((signature.args?.length ?? 0) !== parameters.length)
     throw new Error('JS scalar fragment: helper signature arity differs');
@@ -2136,6 +2645,7 @@ function resolveHelper(
   let capture: ScalarFragmentCapture | undefined;
   const captureSymbols = new Set<Expression>();
   const check = (node: Expression, root = false): void => {
+    refuseListHead(node, admission);
     if (!node.isValid || node.type.type === 'error')
       throw new Error('JS scalar fragment: invalid helper body');
     if (isNumber(node)) return;
@@ -2218,6 +2728,7 @@ function resolveHelper(
     binding,
     capture,
     resultRepresentation: representation(result)!,
+    parameterElementLabels,
     fragment: {
       key: call.operator,
       name: call.operator,

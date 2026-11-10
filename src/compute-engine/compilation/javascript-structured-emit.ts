@@ -83,11 +83,22 @@
  *   `_SYS.floorMod`, `floor` is `Math.floor` and `divide` is `/`, as the
  *   existing emitter does. An object literal is in parentheses, so that it
  *   is never read as a block.
+ * - A list is a JavaScript array of numbers. `at` calls the runtime helper
+ *   `_SYS.atNumeric(list, index, element type)` and `length` reads
+ *   `list.length`, as the existing emitter writes a read of a list input or
+ *   parameter (`At` and `Length` in `javascript-target.ts`). The helper
+ *   returns the element at an integer index in range, counts a negative
+ *   index from the end, returns `NaN` for an index out of range, and throws
+ *   when the element is an array. The third argument names the element
+ *   type in the message of that throw: the element type that the program
+ *   declares for the list input or parameter (`IRInput.elementLabel`), as
+ *   the existing emitter writes it.
  *
  * The design is `docs/plans/2026-11-09-js-structured-scalar-emitter.md`,
  * "Integration with existing JavaScript compilation".
  */
 import {
+  elementOf,
   regionsOf,
   yieldedValues,
   type IRFunction,
@@ -261,6 +272,9 @@ class Emitter {
   private readonly plain = new Set<number>();
   readonly inputs = new Set<string>();
   readonly runtime = new Set<string>();
+  /** The declared element type of each list value that is an input or a
+   *  parameter, by its id (`IRInput.elementLabel`). */
+  private readonly elementLabels = new Map<number, string>();
 
   constructor(
     private readonly program: IRProgram,
@@ -282,6 +296,10 @@ class Emitter {
         ...this.program.functions.map(() => this.names.fresh())
       );
     const name = this.functionNames[index];
+    fn.parameters.forEach((p, i) => {
+      const label = fn.parameterElementLabels?.[i];
+      if (label !== undefined) this.elementLabels.set(p.id, label);
+    });
     const parameters = fn.parameters.map((p) => this.bind(p));
     const statements: string[] = [];
     const [value] = this.region(fn.body, statements, false);
@@ -394,6 +412,8 @@ class Emitter {
         const input = this.program.inputs[op.input];
         if (input === undefined) fail(`no input ${op.input}`);
         this.inputs.add(input.name);
+        if (input.elementLabel !== undefined)
+          this.elementLabels.set(op.result.id, input.elementLabel);
         return atom(this.names.input(input.name));
       }
       case 'add': {
@@ -436,6 +456,18 @@ class Emitter {
           return call('Math.sqrt', operands);
         this.runtime.add('csqrt');
         return call('_SYS.csqrt', operands);
+      case 'at':
+        this.runtime.add('atNumeric');
+        return call('_SYS.atNumeric', [
+          ...operands,
+          atom(
+            JSON.stringify(
+              this.elementLabels.get(op.operands[0].id) ?? elementOf(op.operands[0].type)
+            )
+          ),
+        ]);
+      case 'length':
+        return { text: `${operand(operands[0], CALL)}.length`, precedence: CALL };
       case 'min':
         return call('Math.min', operands);
       case 'max':

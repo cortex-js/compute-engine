@@ -19,7 +19,7 @@
  * three where the common-subexpression pass and the constant folding of A
  * matter (`cse-repeat`, `fold`, `local-reads`); the fixtures of step 5
  * (`sqrt-repeat`, `helper-chain`, `capture`, `local-writes`); the
- * fixtures of step 6 (`loop-sum`, `loop-complex-iteration`); two
+ * fixtures of step 6 (`loop-sum`, `loop-complex-iteration`, `heatneighbor`); two
  * generated trees of about 200 operations; and the corpus programs.
  *
  * The ordinary target is called as `new JavaScriptTarget().compile()`, the
@@ -103,7 +103,7 @@ const gc: () => void =
 // Fixtures
 //
 
-type Value = number | boolean | { re: number; im: number };
+type Value = number | boolean | { re: number; im: number } | readonly number[];
 /** The inputs of one call: positional arguments of a `Function` literal,
  *  or the vars object of an expression. */
 type Inputs = Value[] | Record<string, Value>;
@@ -465,8 +465,50 @@ function step6Fixtures(): Fixture[] {
         [{ re: -1.25, im: 0 }],
       ],
     },
+    {
+      // The temperature of a neighbour cell of Tycho's heat showcase
+      // (`showcase-heat.js`): a read of a list input `H` of 32 × 32 cells
+      // in a helper with a list parameter, the capture `N = 32` and a call
+      // of `heatwall`. Change 6b.
+      id: 'heatneighbor',
+      kind: 'named',
+      json: ['heatneighbor', 'H', 'c', 'r', 'center', 'boundary', 'obstacle'],
+      declare: { H: 'list<real>', center: 'real', boundary: 'real' },
+      heatwall: true,
+      setup: (ce) => {
+        ce.declare('N', 'integer');
+        ce.assign('N', 32);
+        install(ce, 'heatneighbor', '(list<real>, integer, integer, real, real, real) -> real', HEATNEIGHBOR_BODY, [
+          typed('H', 'list<real>'),
+          typed('c', 'integer'),
+          typed('r', 'integer'),
+          typed('center', 'real'),
+          typed('boundary', 'real'),
+          typed('obstacle', 'real'),
+        ]);
+      },
+      inputs: product<number>([3, 0, 31, -1, 32, 16], [4, 0, 31, -1, 15], [0, 1], [0, 1]).map(
+        ([c, r, boundary, obstacle]) => ({ H: HEAT_FIELD, c, r, center: 0.75, boundary, obstacle })
+      ),
+    },
   ];
 }
+
+/** The body of `heatneighbor` in Tycho's heat showcase, in the canonical
+ *  form of its Epsil source (`N <= c` for `c >= N`). */
+const HEATNEIGHBOR_BODY: MathJsonExpression = [
+  'If',
+  ['Or', ['Less', 'c', 0], ['LessEqual', 'N', 'c'], ['Less', 'r', 0], ['LessEqual', 'N', 'r']],
+  ['If', ['Less', 0.5, 'boundary'], 0, 'center'],
+  ['If', ['heatwall', 'c', 'r', 'obstacle'], 'center', ['At', 'H', ['Add', 'c', ['Multiply', 'N', 'r'], 1]]],
+];
+
+/** A field of 32 × 32 different temperatures, so that a wrong index gives
+ *  another value. */
+const HEAT_FIELD: readonly number[] = Array.from(
+  { length: 1024 },
+  (_, k) => Math.round((Math.sin(0.37 * (k + 1)) + (k + 1) / 1000) * 2 ** 20) / 2 ** 20
+);
 
 /** The square root that `sqrt-repeat` repeats. */
 const SQRT_REPEATED: MathJsonExpression = [

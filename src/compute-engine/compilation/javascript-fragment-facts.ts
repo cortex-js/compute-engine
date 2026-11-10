@@ -2,7 +2,9 @@
 import { isFunction } from '../boxed-expression/type-guards.js';
 import type { Expression } from '../global-types.js';
 import type { CompileTarget } from './types.js';
-export type ScalarRepresentation = 'number' | 'boolean' | 'complex';
+/** `array`: a list of reals or of integers that the program reads, on the
+ *  structured route only (`javascript-structured-policy.ts`). */
+export type ScalarRepresentation = 'number' | 'boolean' | 'complex' | 'array';
 // The emitter consumes this readonly view of the real fragment annotation.
 // Keeping the view here avoids a dependency on the walker's preparation code.
 type Facts = {

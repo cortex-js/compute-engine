@@ -10,6 +10,7 @@
 import type { Expression } from '../global-types.js';
 import {
   definedValues,
+  elementOf,
   joinEffects,
   operationCanAbort,
   regionsOf,
@@ -23,6 +24,7 @@ import {
   type IRValue,
   type Representation,
   type ScalarKind,
+  type ValueType,
 } from './structured-ir.js';
 
 /** The operations whose operands and result the policy constrains, with no
@@ -42,6 +44,8 @@ export type PolicyOperationKind =
   | 'mod'
   | 'floor'
   | 'divide'
+  | 'at'
+  | 'length'
   | 'trace';
 
 /** The representations of the operands and of the result of an operation
@@ -75,8 +79,10 @@ export type RepresentationPolicy = {
   readonly name: string;
   /** Every representation of the target. */
   readonly representations: ReadonlySet<Representation>;
-  /** The representation of a value of the type `type`. */
-  readonly representationOf: (type: ScalarKind) => Representation;
+  /** The representation of a value of the type `type`, or `undefined` when
+   *  the target holds no value of that type (a list of booleans on
+   *  JavaScript). */
+  readonly representationOf: (type: ValueType) => Representation | undefined;
   /** The conversions of the target by name (`IRConvert.conversion`): the
    *  representation of the operand, and the type and the representation of
    *  the result. */
@@ -113,6 +119,13 @@ export type RepresentationPolicy = {
  * representation, and is `pure`, so two reads of one binding agree on the
  * type and the representation; each origin is one of `preparedNodes`, the
  * nodes of the prepared artifact that the program was lowered from.
+ *
+ * For a list: an `at` reads a list and an integer index and has the type of
+ * an element; a `length` reads a list and has the type `integer`; both are
+ * `pure`. No other operation that computes a value (an arithmetic
+ * operation, a comparison, `and`, `or`, a conversion, a trace) has a list
+ * operand or a list result: the interpreter applies such an operation to
+ * each element of a list, and the representation has no such operation.
  *
  * For a `loop`: its bounds are integers; only the body of a loop has
  * parameters, each defined once, at the entry of the body, and visible in
@@ -163,7 +176,10 @@ export function verifyProgram(
       fail(
         `the value ${value.id} has the representation ${value.representation}, which the target does not have`
       );
-    if (policy.representationOf(value.type) !== value.representation)
+    const representation = policy.representationOf(value.type);
+    if (representation === undefined)
+      fail(`the value ${value.id} has the type ${value.type}, which the target does not hold`);
+    if (representation !== value.representation)
       fail(
         `the value ${value.id} of the type ${value.type} has the representation ${value.representation}`
       );
@@ -329,6 +345,31 @@ export function verifyProgram(
 const isEffect = (e: unknown): e is EffectFact =>
   e === 'pure' || e === 'effectful' || e === 'unknown';
 
+/** The operations that compute a value from scalar operands. The
+ *  interpreter applies each to the elements of a list operand; the
+ *  representation has no such operation, so none has a list operand or a
+ *  list result. */
+const ELEMENTWISE_KINDS: ReadonlySet<IROperation['kind']> = new Set<IROperation['kind']>([
+  'literal',
+  'add',
+  'negate',
+  'multiply',
+  'less',
+  'less-equal',
+  'equal',
+  'min',
+  'max',
+  'sqrt',
+  'mod',
+  'floor',
+  'divide',
+  'and',
+  'or',
+  'convert',
+  'trace',
+  'capture',
+]);
+
 function verifySignature(
   op: IROperation,
   program: IRProgram,
@@ -371,6 +412,15 @@ function verifySignature(
     )
       fail(`the operation ${op.kind} has an integer result and an operand that is not an integer`);
   };
+  // A list is an operand only of `at`, `length`, a call, a loop (as a
+  // carried value) and a yield, and the result only of an input, a call, an
+  // `if` and a loop.
+  if (
+    ELEMENTWISE_KINDS.has(op.kind) &&
+    (op.operands.some((operand) => elementOf(operand.type) !== undefined) ||
+      (op.result !== undefined && elementOf(op.result.type) !== undefined))
+  )
+    fail(`the operation ${op.kind} has a list operand or a list result`);
   switch (op.kind) {
     case 'yield':
       // The number of its operands is checked with its region.
@@ -381,7 +431,7 @@ function verifySignature(
       // The kind of the value agrees with the type of the result; the
       // representation of the result is the one of its type.
       const value = op.value;
-      const types: readonly ScalarKind[] | undefined =
+      const types: readonly ValueType[] | undefined =
         typeof value === 'number'
           ? ['real', 'integer']
           : typeof value === 'boolean'
@@ -531,6 +581,25 @@ function verifySignature(
       });
       return;
     }
+    case 'at':
+    case 'length': {
+      arity(op.kind === 'at' ? 2 : 1);
+      const element = elementOf(op.operands[0].type);
+      if (element === undefined)
+        fail(`the operation ${op.kind} reads a value of the type ${op.operands[0].type}, not a list`);
+      if (op.kind === 'at' && op.operands[1].type !== 'integer')
+        fail(`the index of the operation at has the type ${op.operands[1].type}`);
+      const type = op.kind === 'at' ? element : 'integer';
+      if (op.result.type !== type)
+        fail(
+          `the operation ${op.kind} of a ${op.operands[0].type} has a result of the type ${op.result.type}, not ${type}`
+        );
+      resultIn(policy.operations[op.kind].results);
+      operandsIn(operandRule(op.kind));
+      // A list is a value: no operation changes it, so a read has no effect.
+      if (op.effect !== 'pure') fail(`the operation ${op.kind} is not pure`);
+      return;
+    }
     case 'loop':
       return verifyLoop(op, policy, fail);
     case 'and':
@@ -556,10 +625,13 @@ function verifySignature(
           fail(
             `the argument ${i + 1} of a call of ${fn.name} has another representation than its parameter`
           );
-        // An integer argument is a valid real; a real is not an integer.
+        // An integer argument is a valid real, and a list of integers a
+        // valid list of reals (the representations are equal, checked
+        // above); a real is not an integer.
         if (
           operand.type !== parameter.type &&
-          !(operand.type === 'integer' && parameter.type === 'real')
+          !(operand.type === 'integer' && parameter.type === 'real') &&
+          !(operand.type === 'list<integer>' && parameter.type === 'list<real>')
         )
           fail(
             `the argument ${i + 1} of a call of ${fn.name} has the type ${operand.type}, and its parameter the type ${parameter.type}`

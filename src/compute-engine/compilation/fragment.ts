@@ -408,8 +408,10 @@ export type FragmentFunction = {
   /** The names of the parameters, in order. */
   readonly parameters: readonly string[];
   /** The type of each parameter, from the declared signature, or
-   *  `undefined` when the parameter has no fragment type. */
-  readonly parameterTypes: readonly (FragmentValueType | undefined)[];
+   *  `undefined` when the parameter has no fragment type. A list type is
+   *  bound as it is: the definition decides with
+   *  `representationOfBinding()` whether it holds it. */
+  readonly parameterTypes: readonly (FragmentValueType | FragmentListType | undefined)[];
   /** For each parameter, `true` when its declared or inferred type is a
    *  collection with no fragment type (`list<number>`, which the engine
    *  infers from the `At` reads of the body). Such a parameter takes a
@@ -532,13 +534,34 @@ export type FragmentDefinition<R> = {
    *  spelling of the declared type (`integer`), or `undefined` for a
    *  declaration with no type (the form of a `let`, `Declare(t, {value:
    *  …})`); `inferred`: the type that the engine infers for the local in
-   *  its block, from its value and from every value written to it.
-   *  Absent: the rule of the pass. */
+   *  its block, from its value and from every value written to it;
+   *  `name`: the name of the local. Absent: the rule of the pass. */
   localType?(local: {
+    name: string;
     value: FragmentValueType | FragmentListType;
     declared: string | undefined;
     inferred: Type | undefined;
   }): FragmentValueType | FragmentListType | undefined;
+  /** Whether the target reads the bound `bound` of a counted loop, which
+   *  it does not fold and whose static type is not `integer`, as an
+   *  integer. `isInteger` answers whether the fact of a node of the bound
+   *  is `integer`. The JavaScript structured route admits a bound computed
+   *  from the length of a list with integer arithmetic, which the engine
+   *  types `integer | signed_infinity` or `real`. Absent: such a bound is
+   *  refused, as the shader emitters read the static type of a bound. */
+  loopBoundFromFact?(
+    bound: Expression,
+    isInteger: (node: Expression) => boolean
+  ): boolean;
+  /** Whether a call passes a list argument of the type `argument` to a
+   *  declared list parameter of another type `parameter` as it is, with no
+   *  conversion (a list of integers to a list of reals, when the target
+   *  holds both as one array of numbers). Absent: such an argument is
+   *  refused. */
+  passesListArgument?(
+    argument: FragmentListType,
+    parameter: FragmentListType
+  ): boolean;
 };
 
 //
@@ -1894,7 +1917,15 @@ function makeWalker<R>(
               type: fromArgument,
               representation: a.representation,
             }
-          : convert(a, parameterType);
+          : a.type.kind === 'list' &&
+              parameterType.kind === 'list' &&
+              definition.passesListArgument?.(a.type, parameterType) === true
+            ? {
+                kind: 'none' as const,
+                type: parameterType,
+                representation: a.representation,
+              }
+            : convert(a, parameterType);
       if (c === undefined)
         return refuse(
           fn.arguments[i],
@@ -2288,7 +2319,14 @@ function walkLoop(kind: 'loop' | 'parallel') {
         isNumber(bound) ||
         (isSymbol(bound) && Number.isFinite(bound.re)) ||
         (isFunction(bound) && isNumber(w.constant(bound, scope)));
-      if (!folded && !bound.type.matches('integer'))
+      if (
+        !folded &&
+        !bound.type.matches('integer') &&
+        w.definition.loopBoundFromFact?.(
+          bound,
+          (node) => w.value(node, scope, context).type.kind === 'integer'
+        ) !== true
+      )
         return w.refuse(
           node,
           'signature',
@@ -2485,6 +2523,7 @@ function walkDeclare<R>(
     }
     type =
       w.definition.localType?.({
+        name: name.symbol,
         value: facts.type,
         declared:
           declared === undefined ? undefined : declaredTypeSource(declared),

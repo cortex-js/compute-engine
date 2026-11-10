@@ -12,6 +12,7 @@ import type {
   IRRegion,
   IRValue,
   ScalarKind,
+  ValueType,
 } from '../../src/compute-engine/compilation/structured-ir';
 import type { CompilationResult } from '../../src/compute-engine/compilation/types';
 import type { Expression } from '../../src/compute-engine/global-types';
@@ -681,11 +682,13 @@ describe('the verifier, an if with several results', () => {
 
 /** A policy of a made target, with other names for the representations:
  *  `float` for a real or an integer, `bool` for a boolean, and no complex
- *  number. The core does not depend on the names of JavaScript. */
+ *  number and no list. The core does not depend on the names of
+ *  JavaScript. */
 const FLOAT_POLICY: RepresentationPolicy = {
   name: 'Test',
   representations: new Set(['float', 'bool']),
-  representationOf: (type) => (type === 'boolean' ? 'bool' : 'float'),
+  representationOf: (type) =>
+    type.startsWith('list<') ? undefined : type === 'boolean' ? 'bool' : 'float',
   conversions: {},
   operations: {
     add: { results: ['float'], operands: 'same' },
@@ -701,13 +704,16 @@ const FLOAT_POLICY: RepresentationPolicy = {
     mod: { results: ['float'], operands: ['float'] },
     floor: { results: ['float'], operands: ['float'] },
     divide: { results: ['float'], operands: ['float'] },
+    sqrt: { results: ['float'], operands: 'same' },
+    at: { results: ['float'], operands: ['float'] },
+    length: { results: ['float'], operands: ['float'] },
     trace: { results: ['float'], operands: ['float'] },
   },
 };
 
 describe('a policy that is not the one of JavaScript', () => {
   /** `If(C, x + 1, x) < 2`, with the representations of `FLOAT_POLICY`. */
-  function made(representation: (type: ScalarKind) => string) {
+  function made(representation: (type: ValueType) => string | undefined) {
     const origin = engine().expr('x');
     const owner = {};
     let next = 0;
@@ -716,7 +722,7 @@ describe('a policy that is not the one of JavaScript', () => {
       revision: 1,
       id: next++,
       type,
-      representation: representation(type),
+      representation: representation(type) ?? '',
     });
     const yieldOf = (v: IRValue): IROperation => ({ kind: 'yield', operands: [v], effect: 'pure', origin });
     const region = (operations: IROperation[]): IRRegion => ({ operations, effect: 'pure' });
@@ -727,8 +733,8 @@ describe('a policy that is not the one of JavaScript', () => {
       owner,
       revision: 1,
       inputs: [
-        { name: 'C', type: 'boolean', representation: representation('boolean') },
-        { name: 'x', type: 'real', representation: representation('real') },
+        { name: 'C', type: 'boolean', representation: representation('boolean')! },
+        { name: 'x', type: 'real', representation: representation('real')! },
       ],
       numericPolicy: 'strict',
       captures: [],
@@ -766,6 +772,26 @@ describe('a policy that is not the one of JavaScript', () => {
     const m = made(FLOAT_POLICY.representationOf);
     expect(() => verifyJavaScriptProgram(m.program, m.prepared)).toThrow(
       /JS structured representation: the value 0 has the representation bool, which the target does not have/
+    );
+  });
+
+  test('a list value under a policy that has no list representation', () => {
+    const m = made(FLOAT_POLICY.representationOf);
+    const origin = [...m.prepared][0];
+    const list: IRValue = { owner: m.program.owner, revision: 1, id: 100, type: 'list<real>', representation: 'float' };
+    const program: IRProgram = {
+      ...m.program,
+      inputs: [...m.program.inputs, { name: 'L', type: 'list<real>', representation: 'float' }],
+      root: {
+        ...m.program.root,
+        operations: [
+          { kind: 'input', input: 2, result: list, operands: [], effect: 'pure', origin },
+          ...m.program.root.operations,
+        ],
+      },
+    };
+    expect(() => verifyProgram(program, m.prepared, FLOAT_POLICY)).toThrow(
+      /Test structured representation: the value 100 has the type list<real>, which the target does not hold/
     );
   });
 

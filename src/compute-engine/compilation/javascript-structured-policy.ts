@@ -5,24 +5,31 @@
  *
  * A real and an integer are a JavaScript number (`number`), a boolean is a
  * JavaScript boolean (`boolean`), and a complex number is an `{re, im}`
- * object (`complex`). The one conversion is `real-to-complex`.
+ * object (`complex`). A list of reals or of integers is a JavaScript array
+ * of numbers (`array`), as the existing emitter holds a list input. The
+ * target holds no list of booleans or of complex numbers: no program of the
+ * structured route needs one yet. The one conversion is `real-to-complex`.
  */
 import type { Expression } from '../global-types.js';
 import type { ScalarRepresentation } from './javascript-fragment-facts.js';
-import type { IRProgram, ScalarKind } from './structured-ir.js';
+import { elementOf, type IRProgram, type ValueType } from './structured-ir.js';
 import {
   verifyProgram,
   type RepresentationPolicy,
 } from './structured-verify.js';
 
-/** The representation that holds a value of the type `type`. */
-export function representationOfKind(type: ScalarKind): ScalarRepresentation {
-  return type === 'real' || type === 'integer' ? 'number' : type;
+/** The representation that holds a value of the type `type`, or
+ *  `undefined` for a list of booleans or of complex numbers. */
+export function representationOfKind(type: ValueType): ScalarRepresentation | undefined {
+  const element = elementOf(type);
+  if (element !== undefined)
+    return element === 'real' || element === 'integer' ? 'array' : undefined;
+  return type === 'real' || type === 'integer' ? 'number' : (type as 'boolean' | 'complex');
 }
 
 export const JAVASCRIPT_POLICY: RepresentationPolicy = {
   name: 'JS',
-  representations: new Set<ScalarRepresentation>(['number', 'boolean', 'complex']),
+  representations: new Set<ScalarRepresentation>(['number', 'boolean', 'complex', 'array']),
   representationOf: representationOfKind,
   conversions: {
     'real-to-complex': { from: 'number', to: 'complex', type: 'complex' },
@@ -47,6 +54,10 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     or: { results: ['boolean'], operands: ['boolean'] },
     // `Math.sqrt` of a number, `_SYS.csqrt` of an `{re, im}` object.
     sqrt: { results: ['number', 'complex'], operands: 'same' },
+    // `_SYS.atNumeric(list, index, element type)` and `list.length`, as the
+    // existing emitter writes them for a list input or parameter.
+    at: { results: ['number'], operands: ['array', 'number'] },
+    length: { results: ['number'], operands: ['array'] },
     // The test heads take real operands and have a real value.
     trace: { results: ['number'], operands: ['number'] },
   },

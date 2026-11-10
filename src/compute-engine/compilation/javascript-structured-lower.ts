@@ -42,6 +42,11 @@
  * body that is not carried has no value at the start of an iteration and
  * after the loop: a read of it there throws. A local declared in the body
  * is a value of the body region.
+ *
+ * A list input or a list parameter of a helper is a value of a list type;
+ * `At` and `Length` of it are the operations `at` and `length`. The
+ * admission keeps a list out of every other place (a local, a carried
+ * value, the value of an `If` or of the program, an arithmetic operand).
  */
 import type { Expression } from '../global-types.js';
 import type { CompileTarget } from './types.js';
@@ -71,6 +76,7 @@ import {
   type IRRegion,
   type IRValue,
   type ScalarKind,
+  type ValueType,
 } from './structured-ir.js';
 import { verifyJavaScriptProgram } from './javascript-structured-policy.js';
 
@@ -107,7 +113,12 @@ export type StructuredPreparation = {
    *  the admission refuses recursion. */
   readonly helpers: ReadonlyMap<
     string,
-    { readonly name: string; readonly body: Expression }
+    {
+      readonly name: string;
+      readonly body: Expression;
+      /** `IRFunction.parameterElementLabels`. */
+      readonly parameterElementLabels?: readonly (string | undefined)[];
+    }
   >;
   /** The bindings that the program reads as snapshots, in the order of
    *  their admission. */
@@ -171,6 +182,8 @@ const OPERATIONS: Readonly<
     | 'mod'
     | 'floor'
     | 'divide'
+    | 'at'
+    | 'length'
   >
 > = {
   // The rule of `Sqrt` (`javascript-fragment-target.ts`) records the
@@ -187,6 +200,10 @@ const OPERATIONS: Readonly<
   Mod: 'mod',
   Floor: 'floor',
   Divide: 'divide',
+  // The rules of `At` and `Length` (`javascript-fragment-target.ts`) admit
+  // a list input or parameter and, for `At`, one integer index.
+  At: 'at',
+  Length: 'length',
 };
 
 function scalarKind(type: { readonly kind: string }): ScalarKind {
@@ -198,6 +215,19 @@ function scalarKind(type: { readonly kind: string }): ScalarKind {
   )
     return type.kind;
   return fail(`the type ${type.kind} is not a scalar type`);
+}
+
+/** The type of a value: a scalar type, or a list of reals or of integers,
+ *  whatever its length. */
+function valueType(type: {
+  readonly kind: string;
+  readonly element?: { readonly kind: string };
+}): ValueType {
+  if (type.kind !== 'list') return scalarKind(type);
+  const element = type.element === undefined ? undefined : scalarKind(type.element);
+  if (element !== 'real' && element !== 'integer')
+    return fail(`the list type of elements ${type.element?.kind} is not in the structured route`);
+  return `list<${element}>`;
 }
 
 /** Lower and verify the program that `preparation` describes. */
@@ -266,7 +296,7 @@ class Lowering {
     };
   }
 
-  private newValue(type: ScalarKind, representation: ScalarRepresentation) {
+  private newValue(type: ValueType, representation: ScalarRepresentation) {
     return {
       owner: this.owner,
       revision: this.revision,
@@ -277,7 +307,7 @@ class Lowering {
   }
 
   private resultOf(facts: FragmentValueFacts<ScalarRepresentation>): IRValue {
-    return this.newValue(scalarKind(facts.type), facts.representation);
+    return this.newValue(valueType(facts.type), facts.representation);
   }
 
   /** End `operations` with the yield of `value` (of each value of an
@@ -620,14 +650,15 @@ class Lowering {
   ): IRValue {
     const capture = this.prep.captures.find((c) => c.symbols.has(node));
     if (capture === undefined) return fail(`no binding for the name ${node.symbol}`);
-    const result = this.resultOf(this.facts(node, scope));
+    const facts = this.facts(node, scope);
+    const result = this.resultOf(facts);
     let index = this.captureIndex.get(capture.binding);
     if (index === undefined) {
       index = this.captures.length;
       this.captures.push({
         binding: capture.binding,
         name: capture.name,
-        type: result.type,
+        type: scalarKind(facts.type),
         representation: result.representation,
         snapshot: capture.value,
       });
@@ -1028,7 +1059,7 @@ class Lowering {
     )
       fail(`a call of ${name} does not match its parameters`);
     const parameters = entry.type.parameters.map((p, i) =>
-      this.newValue(scalarKind(p.type), conversions[i].representation)
+      this.newValue(valueType(p.type), conversions[i].representation)
     );
     this.bound.set(
       entry.scope,
@@ -1044,9 +1075,11 @@ class Lowering {
     };
     if (value.representation !== result.representation)
       fail(`the body of ${name} does not have the representation of its result`);
+    const labels = this.prep.helpers.get(name)!.parameterElementLabels;
     this.functions.push({
       name,
       parameters,
+      ...(labels?.some((l) => l !== undefined) ? { parameterElementLabels: labels } : {}),
       result,
       body: this.region(operations, entry.body, value),
       origin: node,
