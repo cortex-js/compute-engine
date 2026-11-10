@@ -1,0 +1,51 @@
+Runs of the section "Second run and causes (2026-11-10)" of
+docs/plans/2026-11-09-js-structured-pilot-measure.md.
+Apple M5 Max, 18 cores, Node v26.13.0. All runs held the box lock
+(owner compute-engine-ec:timing2, or compute-engine-ec:step6d for the first run).
+
+step6-run1.jsonl.gz
+  The first run after step 6 (section "After step 6"), kept here from the
+  scratchpad where it was written. Worktree at 6f4d798e4, with
+  src/compute-engine/compilation/structured-execution.ts uncommitted.
+  node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
+  (order seed 12345, the default of that version of the harness)
+  17:31:54 to 17:33:42 UTC; load 20.76 22.03 17.29 at the start, 6.67 16.33 15.63 at the end.
+
+step6-run2.jsonl.gz
+  Linked worktree at bce12318883b155f6631a77a6fce87022801a5a0 (no src change),
+  with the harness of this section.
+  ORDER_SEED=20261110 node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
+  19:46:19 to 19:48:13 UTC; load 3.94 3.99 6.54 at the start, 5.34 4.58 6.45 at the end.
+
+variants-shared-source.json.gz
+  ORDER_SEED=20261110 MODE=variants node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
+  19:48:13 to 19:48:23 UTC. A first version of the mode: A.raw, A.raw2 and the
+  other functions without a source of their own. Not used: two functions with
+  the same source share their type feedback (see the section).
+
+variants-prior0.json.gz, variants-prior1.json.gz, variants-prior3.json.gz
+  ORDER_SEED=20261110 PRIOR=<0|1|3> MODE=variants node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
+  About 19:49 to 19:50 UTC; load 3.96 4.29 6.17 at the start, 3.26 4.07 6.00 at the end.
+  heatstep and heatpaint; without the run form (argsys), heatseed and constant-step.
+
+variants-run-form.json.gz, step6-run2-heat-only.jsonl.gz
+  ORDER_SEED=777 MODE=variants node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
+  ORDER_SEED=20261110 ONLY=heatstep,heatpaint node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
+  About 19:50 to 19:51 UTC; load 2.50 3.79 5.82 at the start, 2.86 3.76 5.75 at the end.
+
+variants-heatstep-batch2ms.json.gz, variants-heatstep-batch200ms.json.gz
+  VARIANTS=heatstep EXEC_MS=<2|200> MODE=variants node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
+  About 19:51 to 19:53 UTC; load 2.48 3.61 5.65 at the start, 3.51 3.72 5.50 at the end.
+
+variants-final-seed20261110.json.gz, variants-final-seed777.json.gz
+  ORDER_SEED=<20261110|777> MODE=variants node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
+  The harness delivered with this section (heatstep, heatpaint, heatseed).
+  About 19:54 UTC; load 3.43 3.63 5.33 at the start, 3.62 3.67 5.26 at the end.
+
+iife-trace-model.mjs, iife-trace-model.txt
+  node --expose-gc --trace-opt --trace-deopt iife-trace-model.mjs
+  (output filtered to the compilation lines and the times; no lock, an observation only).
+
+step6-run3-new-fixtures.jsonl.gz
+  ORDER_SEED=777 ONLY=heatseed,roadstep,tone,heatpaint node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
+  19:56:19 UTC; load 2.49 3.30 4.95 at the start, 2.85 3.35 4.95 at the end.

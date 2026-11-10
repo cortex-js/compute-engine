@@ -50,6 +50,10 @@
  *            (default 16) in sequence and split over 2 and 4
  *            `worker_threads` workers; values must be equal
  *            (`modeWorkers()`).
+ *   variants the causes of a difference in execution on `heatstep` and
+ *            `heatpaint`: the emitted code of A, B and D, and the time of
+ *            hand-edited variants of the slower code, each with one
+ *            difference to the faster code removed (`modeVariants()`).
  *   cold-child  internal: one first compilation in this process.
  *
  * Other variables: ONLY (comma-separated fixture ids, or `corpus`,
@@ -58,7 +62,8 @@
  * (`batch`: a full collection before each timed batch; default: before each
  * round), RUNS (rounds, default 9), ITERATIONS (compilations per warm
  * batch, default 10), TRIALS (fresh-engine trials, default 9; 3 for the
- * corpus), EXEC_MS (target milliseconds per execution batch, default 2).
+ * corpus), EXEC_MS (target milliseconds per execution batch, default 2),
+ * ORDER_SEED (the seed of the order of the configurations, default 12345).
  *
  *   node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
  *   CORPUS=all COLD_PROCESS=5 node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
@@ -100,7 +105,10 @@ import {
 } from '../src/compute-engine/compilation/javascript-fragment-target';
 import { lowerStructuredFragment } from '../src/compute-engine/compilation/javascript-structured-lower';
 import { analyzeExecution } from '../src/compute-engine/compilation/structured-execution';
-import { SYS_HELPERS } from '../src/compute-engine/compilation/javascript-runtime';
+import {
+  SYS_HELPERS,
+  makeSysHelpers,
+} from '../src/compute-engine/compilation/javascript-runtime';
 import { callPool, type StoredResult } from '../src/compute-engine/kernel-pool';
 import type { Expression } from '../src/compute-engine/global-types';
 import type { MathJsonExpression } from '../src/math-json/types';
@@ -1082,7 +1090,8 @@ function summarize(series: Series): Record<string, Stat> {
   return out;
 }
 
-const orderRandom = random(12345);
+const ORDER_SEED = Number(process.env.ORDER_SEED ?? 12345);
+const orderRandom = random(ORDER_SEED);
 
 /**
  * The order of the configurations in one round: a new random permutation
@@ -1296,6 +1305,7 @@ function environment() {
     runs: RUNS,
     iterations: ITERATIONS,
     execMs: EXEC_MS,
+    orderSeed: ORDER_SEED,
   };
 }
 
@@ -2003,7 +2013,378 @@ async function modeDeps(): Promise<void> {
   );
 }
 
+//
+// Variants of the emitted code (the causes of a difference in execution)
+//
+
+/** One edit of an emitted body: `from` must match exactly `count` times. */
+type BodyEdit = { from: string | RegExp; to: string; count: number };
+
+/** A variant of the body of the slower configuration of a fixture, with one
+ *  difference to the faster configuration removed. */
+type CodeVariant = { id: string; note: string; edits: BodyEdit[] };
+
+/** The variant ids that `all` combines, in order; a variant that another
+ *  one contains (`pow2` in `one-expression`) is left out, and `allEdits`
+ *  replaces the edits of a variant whose text another edit changes. */
+type VariantSpec = {
+  base: Config;
+  other: Config;
+  variants: CodeVariant[];
+  all: string[];
+  allEdits?: Record<string, BodyEdit[]>;
+};
+
+/**
+ * The variants of MODE=variants. `base` is the slower configuration of the
+ * fixture in the runs of `docs/plans/2026-11-09-js-structured-pilot-measure.md`
+ * (A for `heatstep`, D for `heatpaint`); `other` is the faster one. Each
+ * variant removes one difference of the code of `base` to the code of
+ * `other`; `all` removes all of them. The edits are written for the code of
+ * commit bce12318883b155f6631a77a6fce87022801a5a0: an edit that does not
+ * match its count throws, so a change of the emitted code shows here.
+ */
+const CODE_VARIANTS: Record<string, VariantSpec> = {
+  heatstep: {
+    base: 'A',
+    other: 'D',
+    variants: [
+      {
+        id: 'no-owned-copy',
+        note: 'L is the array of the comprehension, not a copy of it (`_SYS.ownedCopy` removed)',
+        edits: [{ from: 'let L = _SYS.ownedCopy((() =>', to: 'let L = ((() =>', count: 1 }],
+      },
+      {
+        id: 'no-body-iife',
+        note: 'the body runs in the function itself, not in an arrow function made and called per call',
+        edits: [
+          { from: 'return (() => {\n', to: '', count: 1 },
+          { from: '\nreturn L\n})();', to: '\nreturn L;', count: 1 },
+        ],
+      },
+      {
+        id: 'no-comprehension-iife',
+        note: 'the comprehension is a loop in the body, not an arrow function made and called per call',
+        edits: [
+          {
+            from: /let L = _SYS\.ownedCopy\(\(\(\) => \{ (const result = \[\]; [^\n]*?) return result; \}\)\(\)\);/,
+            to: '$1 let L = _SYS.ownedCopy(result);',
+            count: 1,
+          },
+        ],
+      },
+      {
+        id: 'function-helpers',
+        note: 'the helpers are function declarations, not `const` arrow functions',
+        edits: [
+          {
+            from: /^const (_fn_\w+) = \(([^)]*)\) => (.*);$/gm,
+            to: 'function $1($2) { return $3; }',
+            count: 2,
+          },
+        ],
+      },
+      {
+        id: 'loop-header',
+        note: 'the loop header of D (index, step and count in the header)',
+        edits: [
+          {
+            from: 'for (let _tv2 = 0; _tv2 < 1024; _tv2++) { const k = 1 + (1) * _tv2;',
+            to: 'for (let k = 1, _s = 1024 < k ? -1 : 1, _n = _s * (1024 - k); _n >= 0; k += _s, _n--) {',
+            count: 1,
+          },
+        ],
+      },
+      {
+        id: 'conditional-expression',
+        note: 'the update is one assignment of a conditional expression, as in D (no `if` statement, no local `neighbors`)',
+        edits: [
+          {
+            from: /if \((_fn_heatwall\([^)]*\))\) \{ L = (_SYS\.replaceAtInPlace\(L, k, v\)) \} else \{ let neighbors = ([^;]*); L = _SYS\.replaceAtInPlace\(L, k, a \* \(neighbors \+ -4 \* v\) \+ v\) \}/,
+            to: 'L = $1 ? $2 : _SYS.replaceAtInPlace(L, k, a * ($3 + -4 * v) + v);',
+            count: 1,
+          },
+        ],
+      },
+    ],
+    // The comprehension moves out of its arrow function first; `L` is then
+    // the array itself, not a copy.
+    all: ['no-comprehension-iife', 'no-body-iife', 'function-helpers', 'loop-header', 'conditional-expression'],
+    allEdits: {
+      'no-comprehension-iife': [
+        {
+          from: /let L = _SYS\.ownedCopy\(\(\(\) => \{ (const result = \[\]; [^\n]*?) return result; \}\)\(\)\);/,
+          to: '$1 let L = result;',
+          count: 1,
+        },
+      ],
+    },
+  },
+  heatpaint: {
+    base: 'D',
+    other: 'A',
+    variants: [
+      {
+        id: 'arrow-helper',
+        note: 'the helper is a `const` arrow function, as in A',
+        edits: [
+          {
+            from: /function (_tv1)\(([^)]*)\) \{ return ([^;]*); \}/,
+            to: 'const $1 = ($2) => $3;',
+            count: 1,
+          },
+        ],
+      },
+      {
+        id: 'loop-header',
+        note: 'the loop header of A (a counter from 0 to 1024, the index computed in the body)',
+        edits: [
+          {
+            from: 'for (let _tv7 = 1, _tv8 = _tv5 < _tv7 ? -1 : 1, _tv9 = _tv8 * (_tv5 - _tv7); _tv9 >= 0; _tv7 += _tv8, _tv9--) {',
+            to: 'for (let _i = 0; _i < 1024; _i++) { const _tv7 = 1 + (1) * _i;',
+            count: 1,
+          },
+        ],
+      },
+      {
+        id: 'constant-step',
+        note: 'the loop header of D with the step and the count written as numbers (1 and 1023), not computed from the bounds',
+        edits: [
+          {
+            from: 'for (let _tv7 = 1, _tv8 = _tv5 < _tv7 ? -1 : 1, _tv9 = _tv8 * (_tv5 - _tv7); _tv9 >= 0; _tv7 += _tv8, _tv9--) {',
+            to: 'for (let _tv7 = 1, _tv9 = 1023; _tv9 >= 0; _tv7 += 1, _tv9--) {',
+            count: 1,
+          },
+        ],
+      },
+      {
+        id: 'pow2',
+        note: 'the squares are calls of `_SYS.pow2`, as in A (the locals stay)',
+        edits: [
+          {
+            from: '_tv10 * _tv10 + _tv11 * _tv11',
+            to: '_SYS.pow2(_tv10) + _SYS.pow2(_tv11)',
+            count: 1,
+          },
+        ],
+      },
+      {
+        id: 'one-expression',
+        note: 'the element is one expression, as in A: `&&` instead of a local and an `if`, `_SYS.pow2` of the differences',
+        edits: [
+          {
+            from: /let _tv12 = (!_tv1\([^;]*\)); if \(_tv12\) \{ const _tv10 = ([^;]*); const _tv11 = ([^;]*); _tv12 = _tv10 \* _tv10 \+ _tv11 \* _tv11 <= 9; \} _tv6\.push\(_tv12 \? 1 : ([^;]*)\);/,
+            to: '_tv6.push(($1 && _SYS.pow2($2) + _SYS.pow2($3) <= 9) ? 1 : $4);',
+            count: 1,
+          },
+        ],
+      },
+    ],
+    all: ['arrow-helper', 'loop-header', 'one-expression'],
+  },
+  heatseed: {
+    base: 'D',
+    other: 'A',
+    variants: [
+      {
+        id: 'loop-header',
+        note: 'the loop header of A (a counter from 0 to 1024, the index computed in the body)',
+        edits: [
+          {
+            from: 'for (let _tv3 = 1, _tv4 = _tv1 < _tv3 ? -1 : 1, _tv5 = _tv4 * (_tv1 - _tv3); _tv5 >= 0; _tv3 += _tv4, _tv5--) {',
+            to: 'for (let _i = 0; _i < 1024; _i++) { const _tv3 = 1 + (1) * _i;',
+            count: 1,
+          },
+        ],
+      },
+      {
+        id: 'pow2',
+        note: 'the squares are calls of `_SYS.pow2`, as in A (the locals stay)',
+        edits: [{ from: '_tv6 * _tv6 + _tv7 * _tv7', to: '_SYS.pow2(_tv6) + _SYS.pow2(_tv7)', count: 1 }],
+      },
+    ],
+    all: ['loop-header', 'pow2'],
+  },
+};
+
+/** The parameters and the body of an emitted `Function` literal,
+ *  `(p, q) => { body }`. */
+function splitEmitted(code: string): { params: string[]; body: string } {
+  const m = /^\(([^)]*)\) => \{ ([\s\S]*) \}$/.exec(code);
+  if (!m) throw new Error(`not a function literal: ${code.slice(0, 80)}`);
+  return { params: m[1].split(',').map((s) => s.trim()).filter((s) => s !== ''), body: m[2] };
+}
+
+function applyEdits(body: string, edits: BodyEdit[], id: string): string {
+  let out = body;
+  for (const e of edits) {
+    const n =
+      typeof e.from === 'string'
+        ? out.split(e.from).length - 1
+        : (out.match(new RegExp(e.from.source, e.from.flags.includes('g') ? e.from.flags : e.from.flags + 'g')) ?? []).length;
+    if (n !== e.count) throw new Error(`variant ${id}: ${String(e.from)} matches ${n} times, not ${e.count}`);
+    out = typeof e.from === 'string' ? out.split(e.from).join(e.to) : out.replace(e.from, e.to);
+  }
+  return out;
+}
+
+/** The runtime source of `engineRuntimeSource()` in `javascript-target.ts`
+ *  (not exported): each variant gets its own `_SYS`, as each compiled
+ *  function does, so that it has its own copy of `atNumeric`. */
+function runtimeSource(ce: ComputeEngine): Parameters<typeof makeSysHelpers>[0] {
+  const engine = ce as unknown as {
+    _liveRandom(): number;
+    _random(): number;
+    _randomFrame: unknown;
+    _deadlineFrame: unknown;
+    iterationLimit: number;
+  };
+  return {
+    random: () => engine._liveRandom(),
+    draw: () => engine._random(),
+    frame: () => engine._randomFrame as never,
+    setFrame: (frame) => {
+      engine._randomFrame = frame;
+    },
+    iterationLimit: () => engine.iterationLimit,
+    deadline: () => engine._deadlineFrame as never,
+  } as Parameters<typeof makeSysHelpers>[0];
+}
+
+/**
+ * MODE=variants: the causes of a difference in execution between the two
+ * routes on `heatstep`, `heatpaint` and `heatseed` (VARIANTS, a
+ * comma-separated subset; default all three). For each fixture it prints the
+ * code of A, B and D, then times, in the same rounds: `run()` of the two
+ * compared configurations; the emitted function of each of them called
+ * directly (`<config>.raw`, made from the emitted source with its own
+ * `_SYS`, without the entry check and the normalization of the result of
+ * `run()`); the same body in the form of `run()`, with `_SYS` as an argument
+ * (`<config>.argsys`); a second copy of the raw function of the slower
+ * configuration (the calibration); and each variant of `CODE_VARIANTS`, and
+ * the combination `all`. Each function must give the value of A on every
+ * input of the fixture before it is timed. The share of a variant is
+ * (base − variant) / (base − other) of the raw functions, per round.
+ * Defaults for this mode: RUNS 15, EXEC_MS 20; PRIOR (default 0) compiles
+ * and calls the configurations that many more times before the timing.
+ */
+function modeVariants(): void {
+  const runs = Number(process.env.RUNS ?? 15);
+  const execMs = Number(process.env.EXEC_MS ?? 20);
+  const wanted = (process.env.VARIANTS ?? 'heatstep,heatpaint,heatseed').split(',');
+  const out: Record<string, unknown> = {
+    mode: 'variants',
+    environment: { ...environment(), runs, execMs, prior: Number(process.env.PRIOR ?? 0) },
+  };
+  for (const fixture of [...step6Fixtures(), ...functionFixtures()].filter((f) => wanted.includes(f.id))) {
+    const spec = CODE_VARIANTS[fixture.id];
+    if (!spec) throw new Error(`no variants for ${fixture.id}`);
+    const p = prepare(fixture);
+    if (p.agreement.differences.length > 0)
+      throw new Error(`values differ on ${fixture.id}: ${p.agreement.differences[0]}`);
+    const code = Object.fromEntries((['A', 'B', 'D'] as Config[]).map((c) => [c, p.results[c]!.code]));
+    // Each function gets a source of its own (the comment names it): V8
+    // gives two `new Function` calls with the same source one compiled
+    // function and one set of type feedback, so two copies with two `_SYS`
+    // objects would make each call of a `_SYS` helper polymorphic.
+    const make = (id: string, source: string, params: string[]) =>
+      new Function('_SYS', `// ${fixture.id} ${id}\nreturn function (${params.join(', ')}) { ${source} };`)(
+        makeSysHelpers(runtimeSource(p.ce))
+      ) as (...a: unknown[]) => unknown;
+    // PRIOR=n: n more compilations of A, A2, B and D, each called on every
+    // input, before the timing, as the check pass and the value check of
+    // the default mode do. They have the source of `run()` of the timed
+    // configurations, and so share its type feedback.
+    for (let k = 0; k < Number(process.env.PRIOR ?? 0); k++) prepare(fixture);
+    const base = splitEmitted(p.results[spec.base]!.code);
+    const other = splitEmitted(p.results[spec.other]!.code);
+    const fns = new Map<string, unknown>();
+    const sources: Record<string, string> = {};
+    fns.set(`${spec.base}.run`, p.results[spec.base]!.run);
+    fns.set(`${spec.other}.run`, p.results[spec.other]!.run);
+    fns.set(`${spec.base}.raw`, make('raw', base.body, base.params));
+    fns.set(`${spec.base}.raw2`, make('raw2', base.body, base.params));
+    fns.set(`${spec.other}.raw`, make('other', other.body, other.params));
+    // The form of `run()` without its entry check and the normalization of
+    // its result: the body is a function of `_SYS` and the parameters, and
+    // `_SYS` is an argument of each call (`ComputeEngineFunction` in
+    // `javascript-target.ts`), not a variable of an enclosing scope.
+    const makeArgSys = (id: string, source: string, params: string[]) => {
+      const g = new Function('_SYS', ...params, `// ${fixture.id} ${id}\n${source}`);
+      return new Function('g', 'sys', `return function (${params.join(', ')}) { return g(sys, ${params.join(', ')}); };`)(
+        g,
+        makeSysHelpers(runtimeSource(p.ce))
+      ) as (...a: unknown[]) => unknown;
+    };
+    fns.set(`${spec.base}.argsys`, makeArgSys('argsys', base.body, base.params));
+    fns.set(`${spec.other}.argsys`, makeArgSys('other-argsys', other.body, other.params));
+    for (const v of spec.variants) {
+      sources[v.id] = applyEdits(base.body, v.edits, v.id);
+      fns.set(v.id, make(v.id, sources[v.id], base.params));
+    }
+    sources.all = applyEdits(
+      base.body,
+      spec.all.flatMap((id) => spec.allEdits?.[id] ?? spec.variants.find((v) => v.id === id)!.edits),
+      'all'
+    );
+    fns.set('all', make('all', sources.all, base.params));
+    // Every function gives the value of A on every input.
+    for (const [id, fn] of fns)
+      for (const inputs of fixture.inputs) {
+        const v = (fn as (...a: unknown[]) => unknown)(...(inputs as unknown[]));
+        if (!sameValue(v, callRun(p.results.A!, inputs)))
+          throw new Error(`${fixture.id} ${id} differs from A on ${JSON.stringify(inputs).slice(0, 80)}`);
+      }
+    const ids = [...fns.keys()];
+    const runners = new Map(ids.map((id) => [id, makeRunner(fixture)]));
+    let n = 1;
+    for (;;) {
+      const t0 = now();
+      sink += runners.get(`${spec.base}.raw`)!(fns.get(`${spec.base}.raw`), fixture.inputs, n);
+      if (now() - t0 >= execMs || n > 1 << 24) break;
+      n *= 2;
+    }
+    for (const id of ids) for (let k = 0; k < 3; k++) sink += runners.get(id)!(fns.get(id), fixture.inputs, n);
+    const series: Record<string, number[]> = Object.fromEntries(ids.map((id) => [id, []]));
+    for (let round = 0; round < runs; round++) {
+      gc();
+      for (const id of roundOrder(ids)) {
+        const t0 = now();
+        sink += runners.get(id)!(fns.get(id), fixture.inputs, n);
+        series[id].push(((now() - t0) * 1e6) / (n * fixture.inputs.length));
+      }
+    }
+    const b = series[`${spec.base}.raw`];
+    const o = series[`${spec.other}.raw`];
+    const results: Record<string, unknown> = {};
+    for (const id of ids)
+      results[id] = {
+        ns: stat(series[id]),
+        [`/${spec.base}.raw`]: stat(series[id].map((x, r) => x / b[r])),
+        shareOfGap: stat(series[id].map((x, r) => (b[r] - x) / (b[r] - o[r]))),
+      };
+    results[`${spec.other}.run/${spec.base}.run`] = stat(
+      series[`${spec.other}.run`].map((x, r) => x / series[`${spec.base}.run`][r])
+    );
+    out[fixture.id] = {
+      base: spec.base,
+      other: spec.other,
+      passes: n,
+      inputs: fixture.inputs.length,
+      code,
+      variants: Object.fromEntries(spec.variants.map((v) => [v.id, { note: v.note, body: sources[v.id] }])),
+      allBody: sources.all,
+      results,
+    };
+  }
+  out.loadavgEnd = loadavg();
+  console.log(JSON.stringify(out, null, 1));
+}
+
 switch (MODE) {
+  case 'variants':
+    modeVariants();
+    break;
   case 'check':
     modeCheck();
     break;

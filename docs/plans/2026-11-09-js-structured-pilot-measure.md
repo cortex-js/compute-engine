@@ -1475,3 +1475,351 @@ sequence.
 Not resolved: whether the cost of D on `heatpaint` against A (6%) is
 reproducible; why D runs the loops faster; a second run of this code; the
 546-program corpus.
+
+## Second run and causes (2026-11-10)
+
+This section repeats the default mode on the code of
+`bce12318883b155f6631a77a6fce87022801a5a0`, with another order of the
+configurations, and finds by experiment why D runs `heatstep` faster than A
+and `heatpaint` slower. No compiler source changed. The harness has two
+additions: `ORDER_SEED` (the seed of the order of the configurations,
+default 12345) and `MODE=variants` (`modeVariants()`).
+
+### The runs
+
+All runs held the box lock, in a linked worktree at `bce12318883b` (the main
+tree had uncommitted changes of other sessions in
+`javascript-target.ts` and `compile-references.ts`, which A and B run). Node
+v26.13.0, Apple M5 Max, 18 cores. Commands, times and load averages are in
+[`2026-11-09-js-structured-pilot-measure/step6-runs-environment.txt`](2026-11-09-js-structured-pilot-measure/step6-runs-environment.txt);
+the raw outputs are in the same directory.
+
+| Run | Code | Seed | Load at start / end | Raw output |
+| --- | --- | --- | --- | --- |
+| First (section "After step 6") | `6f4d798e4` and the analysis | 12345 | 20.8 / 6.7 | `step6-run1.jsonl.gz` |
+| Second, complete | `bce12318883b` | 20261110 | 3.9 / 5.3 | `step6-run2.jsonl.gz` |
+| Third, `heatpaint` and the three new fixtures only | `bce12318883b` | 777 | 2.5 / 2.9 | `step6-run3-new-fixtures.jsonl.gz` |
+
+The load of the second and third runs is from processes outside the lock;
+the first run had a load of about 20 at its start.
+
+**Values.** No value differs between A, A2, B, C and D on the 59 programs
+of the second run (20 fixtures and 39 corpus programs, 1,053 inputs), with
+the sign of each zero. D now declines one program of the 40-program sample,
+`corpus-69` (`x = x`): `bce12318883b` makes the structured route refuse a
+closed comparison, which the existing emitter folds. The corpus totals of
+the second run are over 39 programs, those of the first over 40.
+
+### Warm compilation, both runs
+
+Ratios: the median and the range over the 9 rounds. "Agree" compares the
+medians of the two runs: yes when they differ by less than the calibration,
+the largest distance of A2/A from 1 in either run (in parentheses).
+
+| Fixture | A2/A, 1st | A2/A, 2nd | D/B, 1st | D/B, 2nd | D/A, 1st | D/A, 2nd | Agree (D/B, D/A) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `heatwall` | 1.07 (0.91 to 1.22) | 1.00 (0.76 to 1.30) | 0.66 (0.53 to 0.85) | 0.73 (0.63 to 1.47) | 0.56 (0.49 to 0.65) | 0.52 (0.40 to 1.20) | yes, yes (±0.30) |
+| `heatcell` | 0.94 (0.91 to 1.08) | 0.99 (0.90 to 1.18) | 0.40 (0.36 to 0.46) | 0.37 (0.27 to 0.50) | 0.34 (0.30 to 0.37) | 0.31 (0.23 to 0.40) | yes, yes (±0.18) |
+| `complex-if` | 0.97 (0.76 to 1.17) | 1.07 (0.53 to 1.52) | 0.82 (0.65 to 0.88) | 1.10 (0.61 to 1.44) | 0.64 (0.51 to 0.76) | 0.70 (0.33 to 0.97) | yes, yes (±0.52) |
+| `cse-repeat` | 1.04 (0.91 to 1.13) | 1.06 (0.91 to 1.61) | 0.62 (0.55 to 0.65) | 0.60 (0.51 to 0.73) | 0.60 (0.56 to 0.65) | 0.64 (0.57 to 0.78) | yes, yes (±0.61) |
+| `fold` | 0.84 (0.74 to 1.27) | 0.99 (0.78 to 1.13) | 0.62 (0.45 to 0.71) | 0.64 (0.48 to 0.82) | 0.36 (0.30 to 0.44) | 0.41 (0.35 to 0.48) | yes, yes (±0.27) |
+| `local-reads` | 1.03 (0.78 to 1.23) | 0.93 (0.87 to 1.14) | 0.48 (0.42 to 0.61) | 0.46 (0.39 to 0.63) | 0.41 (0.32 to 0.47) | 0.37 (0.36 to 0.48) | yes, yes (±0.23) |
+| `sqrt-repeat` | 1.08 (0.89 to 1.15) | 0.98 (0.86 to 1.13) | 0.63 (0.57 to 0.70) | 0.65 (0.57 to 0.76) | 0.64 (0.55 to 0.70) | 0.67 (0.57 to 0.76) | yes, yes (±0.15) |
+| `helper-chain` | 1.04 (0.91 to 1.07) | 0.97 (0.90 to 1.13) | 0.42 (0.35 to 0.47) | 0.38 (0.35 to 0.49) | 0.33 (0.29 to 0.35) | 0.31 (0.27 to 0.39) | yes, yes (±0.13) |
+| `capture` | 1.04 (0.90 to 1.30) | 0.93 (0.77 to 1.20) | 0.47 (0.41 to 0.63) | 0.55 (0.35 to 0.65) | 0.42 (0.37 to 0.53) | 0.40 (0.34 to 0.63) | yes, yes (±0.30) |
+| `local-writes` | 1.05 (0.89 to 1.19) | 1.16 (0.94 to 1.30) | 0.49 (0.42 to 0.64) | 0.58 (0.42 to 0.71) | 0.44 (0.36 to 0.57) | 0.47 (0.35 to 0.62) | yes, yes (±0.30) |
+| `loop-sum` | 1.01 (0.84 to 1.24) | 0.95 (0.73 to 1.17) | 0.55 (0.42 to 0.64) | 0.46 (0.41 to 0.48) | 0.41 (0.37 to 0.49) | 0.39 (0.28 to 0.44) | yes, yes (±0.27) |
+| `loop-complex-iteration` | 1.01 (0.87 to 1.19) | 0.86 (0.60 to 1.42) | 0.52 (0.45 to 0.72) | 0.51 (0.33 to 0.60) | 0.46 (0.35 to 0.62) | 0.38 (0.25 to 0.53) | yes, yes (±0.42) |
+| `heatneighbor` | 0.95 (0.89 to 1.05) | 0.92 (0.73 to 1.17) | 0.44 (0.35 to 0.49) | 0.42 (0.39 to 0.49) | 0.36 (0.28 to 0.37) | 0.33 (0.24 to 0.41) | yes, yes (±0.27) |
+| `heatstep` | 0.97 (0.94 to 1.10) | 1.07 (0.57 to 1.69) | 0.42 (0.39 to 0.43) | 0.41 (0.23 to 0.95) | 0.33 (0.30 to 0.36) | 0.33 (0.20 to 0.80) | yes, yes (±0.69) |
+| `heatpaint` | 0.99 (0.87 to 1.10) | 0.96 (0.61 to 1.14) | 0.38 (0.36 to 0.44) | 0.43 (0.38 to 0.57) | 0.29 (0.28 to 0.34) | 0.31 (0.22 to 0.39) | yes, yes (±0.39) |
+| `heatseed` | — | 1.01 (0.90 to 1.12) | — | 0.47 (0.35 to 0.53) | — | 0.29 (0.22 to 0.33) | one run |
+| `roadstep` | — | 1.03 (0.94 to 1.12) | — | 0.46 (0.40 to 0.49) | — | 0.36 (0.33 to 0.39) | one run |
+| `tone` | — | 1.08 (0.77 to 1.35) | — | 0.51 (0.28 to 0.75) | — | 0.43 (0.30 to 0.60) | one run |
+| `deep-full` | 1.02 (0.90 to 1.08) | 0.99 (0.91 to 1.08) | 0.62 (0.56 to 0.66) | 0.59 (0.53 to 0.71) | 0.50 (0.43 to 0.56) | 0.50 (0.45 to 0.55) | yes, yes (±0.10) |
+| `deep-add-if` | 1.02 (0.91 to 1.06) | 0.93 (0.89 to 1.04) | 0.72 (0.66 to 0.77) | 0.72 (0.69 to 0.88) | 0.56 (0.55 to 0.61) | 0.55 (0.51 to 0.65) | yes, yes (±0.11) |
+| Corpus totals | 1.00 (0.92 to 1.08) | 0.99 (0.97 to 1.05) | 0.79 (0.73 to 0.88) | 0.82 (0.77 to 0.90) | 0.65 (0.62 to 0.72) | 0.69 (0.66 to 0.73) | yes, yes (±0.08) |
+
+The third run gives D/B 0.41 to 0.49 for `heatpaint`, `heatseed`,
+`roadstep` and `tone`, with A2/A 0.89 to 1.04 (ranges 0.77 to 1.28). Per
+corpus program in the second run, D/B has the median 0.85 (0.62 to 1.19),
+and 10% of the programs are above 1.07, as in the first run. Cold, on a
+fresh engine, D/B is 0.55 to 0.93 per fixture (first run 0.50 to 0.91).
+
+### Warm execution, both runs (ns per call through `run()`)
+
+| Fixture | A2/A, 1st | A2/A, 2nd | D/B, 1st | D/B, 2nd | D/A, 1st | D/A, 2nd | Agree (D/B, D/A) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `heatwall` | 1.01 (0.96 to 1.03) | 0.91 (0.59 to 1.00) | 0.99 (0.96 to 1.01) | 1.05 (0.88 to 1.16) | 0.99 (0.93 to 1.01) | 0.96 (0.59 to 1.37) | yes, yes (±0.41) |
+| `heatcell` | 1.01 (0.93 to 1.05) | 0.93 (0.84 to 1.20) | 1.02 (0.90 to 1.04) | 0.90 (0.82 to 1.08) | 0.99 (0.93 to 1.07) | 0.96 (0.89 to 1.10) | yes, yes (±0.20) |
+| `complex-if` | 0.98 (0.89 to 1.12) | 0.99 (0.93 to 1.13) | 1.00 (0.90 to 1.12) | 0.99 (0.87 to 1.14) | 0.98 (0.87 to 1.12) | 0.99 (0.82 to 1.14) | yes, yes (±0.13) |
+| `cse-repeat` | 1.00 (0.96 to 1.05) | 1.02 (0.70 to 1.07) | 1.00 (0.97 to 1.03) | 1.00 (0.92 to 1.34) | 1.00 (0.96 to 1.05) | 1.00 (0.94 to 1.11) | yes, yes (±0.30) |
+| `fold` | 1.00 (0.96 to 1.08) | 0.97 (0.92 to 1.03) | 0.98 (0.83 to 1.10) | 0.99 (0.95 to 1.04) | 1.03 (0.73 to 1.10) | 0.95 (0.91 to 1.02) | yes, no (±0.08) |
+| `local-reads` | 1.01 (0.91 to 1.14) | 0.97 (0.88 to 1.14) | 1.01 (0.92 to 1.08) | 1.01 (0.89 to 1.14) | 0.96 (0.88 to 1.12) | 1.01 (0.91 to 1.11) | yes, yes (±0.14) |
+| `sqrt-repeat` | 1.01 (0.98 to 1.04) | 1.10 (0.85 to 1.16) | 1.00 (0.92 to 1.04) | 1.00 (0.93 to 1.14) | 1.05 (0.95 to 1.08) | 0.97 (0.87 to 1.12) | yes, yes (±0.16) |
+| `helper-chain` | 1.01 (0.95 to 1.07) | 0.98 (0.92 to 1.05) | 0.94 (0.89 to 0.98) | 0.94 (0.87 to 0.95) | 0.95 (0.90 to 0.97) | 0.91 (0.86 to 0.92) | yes, yes (±0.08) |
+| `capture` | 1.01 (0.93 to 1.09) | 1.01 (0.94 to 1.12) | 0.98 (0.95 to 1.04) | 0.99 (0.90 to 1.13) | 0.98 (0.94 to 1.05) | 1.02 (0.95 to 1.06) | yes, yes (±0.12) |
+| `local-writes` | 0.97 (0.89 to 1.13) | 0.95 (0.81 to 1.05) | 1.01 (0.89 to 1.12) | 1.04 (0.85 to 1.42) | 0.98 (0.88 to 1.11) | 1.03 (0.81 to 1.30) | yes, yes (±0.19) |
+| `loop-sum` | 1.00 (0.91 to 1.08) | 0.98 (0.91 to 1.10) | 0.56 (0.54 to 0.59) | 0.58 (0.54 to 0.70) | 0.59 (0.54 to 0.61) | 0.59 (0.55 to 0.66) | yes, yes (±0.10) |
+| `loop-complex-iteration` | 1.01 (0.94 to 1.06) | 1.03 (0.98 to 1.12) | 0.76 (0.69 to 0.79) | 0.77 (0.72 to 0.80) | 0.77 (0.72 to 0.80) | 0.78 (0.74 to 0.81) | yes, yes (±0.12) |
+| `heatneighbor` | 1.00 (0.89 to 1.10) | 1.02 (0.90 to 1.16) | 1.01 (0.93 to 1.10) | 1.04 (0.88 to 1.11) | 1.02 (0.91 to 1.10) | 1.04 (0.94 to 1.09) | yes, yes (±0.16) |
+| `heatstep` | 0.93 (0.46 to 2.02) | 0.78 (0.44 to 2.36) | 0.59 (0.38 to 0.70) | 0.59 (0.34 to 0.75) | 0.50 (0.36 to 0.85) | 0.64 (0.38 to 1.59) | yes, yes (±1.36) |
+| `heatpaint` | 1.01 (0.96 to 1.04) | 1.00 (0.95 to 1.04) | 1.02 (0.98 to 1.08) | 1.04 (0.97 to 1.09) | 1.06 (1.01 to 1.10) | 1.03 (0.98 to 1.09) | yes, yes (±0.05) |
+| `heatseed` | — | 0.98 (0.88 to 1.05) | — | 1.06 (0.96 to 1.12) | — | 1.09 (0.93 to 1.18) | one run |
+| `roadstep` | — | 0.61 (0.57 to 1.55) | — | 0.46 (0.43 to 0.98) | — | 0.50 (0.48 to 0.79) | one run |
+| `tone` | — | 1.00 (0.95 to 1.05) | — | 0.99 (0.95 to 1.07) | — | 0.98 (0.92 to 1.05) | one run |
+| `deep-full` | 0.91 (0.80 to 1.09) | 0.99 (0.90 to 1.04) | 1.00 (0.93 to 1.16) | 0.94 (0.90 to 1.12) | 0.90 (0.88 to 1.13) | 1.01 (0.91 to 1.08) | yes, yes (±0.20) |
+| `deep-add-if` | 1.02 (0.91 to 1.11) | 0.99 (0.90 to 1.12) | 1.01 (0.90 to 1.12) | 1.06 (0.94 to 1.12) | 1.03 (0.91 to 1.10) | 1.02 (0.86 to 1.24) | yes, yes (±0.12) |
+| Corpus totals | 0.99 (0.98 to 1.01) | 1.00 (0.98 to 1.05) | 1.00 (0.99 to 1.02) | 1.00 (0.97 to 1.01) | 1.00 (0.98 to 1.02) | 1.00 (0.98 to 1.01) | yes, yes (±0.05) |
+
+The third run (seed 777): `heatpaint` D/B 1.04 (0.94 to 1.07), D/A 1.00
+(0.95 to 1.07), A2/A 0.99 (0.95 to 1.09); `heatseed` D/B 1.08 (1.01 to
+1.12), D/A 1.11 (1.02 to 1.14), A2/A 1.02 (0.92 to 1.10); `roadstep` D/B
+0.47 (0.42 to 0.79), A2/A 1.52 (0.61 to 1.59); `tone` D/B 0.97 (0.94 to
+1.03).
+
+The two complete runs agree on every ratio but one: `fold` D/A, 1.03 and
+0.95, with a calibration of ±0.08; D/B of `fold` agrees (0.98 and 0.99).
+The calibration of `heatstep` and `roadstep` is wide in every run (A2/A
+from 0.44 to 2.36 on `heatstep`): the cause is the first finding below.
+
+### Why D runs `heatstep` faster
+
+The two codes, shortened to the parts that differ (`run()` of A and D;
+`H[k]` stands for the read `_SYS.atNumeric(H, k, "real")`, which is the same
+on both routes):
+
+```js
+// A (the existing emitter, default options)
+(H, diffusivity, boundary, obstacle) => {
+  const _fn_heatwall = (c, r, obstacle) => …;
+  const _fn_heatneighbor = (H, c, r, center, boundary, obstacle) => … _fn_heatwall(c, r, obstacle) … H[c + 32*r + 1] …;
+  return (() => {                                          // (1) the body in an arrow function made and called per call
+    let a = Math.min(0.25, Math.max(0, diffusivity));
+    let L = _SYS.ownedCopy((() => {                        // (2) a copy; (3) the comprehension in an arrow function
+      const result = []; for (let _tv1 = 0; _tv1 < 1024; _tv1++) { const j = 1 + (1) * _tv1; result.push(0); } return result; })());
+    for (let _tv2 = 0; _tv2 < 1024; _tv2++) { const k = 1 + (1) * _tv2;   // (5) the loop header
+      let c = _SYS.floorMod(k + -1, 32); let r = Math.floor((k + -1) / 32); let v = H[k];
+      if (_fn_heatwall(c, r, obstacle)) { L = _SYS.replaceAtInPlace(L, k, v) }      // (6) an if statement and a local
+      else { let neighbors = _fn_heatneighbor(H, c + -1, r, v, boundary, obstacle) + …;
+             L = _SYS.replaceAtInPlace(L, k, a * (neighbors + -4 * v) + v) } }
+    return L
+  })(); }
+
+// D (the structured emitter)
+(H, diffusivity, boundary, obstacle) => {
+  function _tv1(_tv3, _tv4, _tv5) { return …; }            // (4) function declarations
+  function _tv2(_tv6, …, _tv11) { return …; }
+  const _tv12 = Math.min(0.25, Math.max(0, diffusivity)); const _tv13 = 32 * 32;
+  const _tv14 = []; for (let _tv15 = 1, _tv16 = _tv13 < _tv15 ? -1 : 1, _tv17 = _tv16 * (_tv13 - _tv15); _tv17 >= 0; _tv15 += _tv16, _tv17--) { _tv14.push(0); }
+  const _tv18 = 32 * 32; let _tv19 = _tv14;
+  for (let _tv20 = 1, _tv21 = _tv18 < _tv20 ? -1 : 1, _tv22 = _tv21 * (_tv18 - _tv20); _tv22 >= 0; _tv20 += _tv21, _tv22--) {
+    const _tv23 = _SYS.floorMod(_tv20 + -1, 32); const _tv24 = Math.floor((_tv20 + -1) / 32); const _tv25 = H[_tv20];
+    _tv19 = _tv1(_tv23, _tv24, obstacle) ? _SYS.replaceAtInPlace(_tv19, _tv20, _tv25)
+          : _SYS.replaceAtInPlace(_tv19, _tv20, _tv12 * (_tv2(H, _tv23 + -1, _tv24, _tv25, boundary, obstacle) + … + -4 * _tv25) + _tv25); }
+  return _tv19; }
+```
+
+B has the code of A with another loop header (`_SYS.rangeCount` and a test
+of the length). A makes two arrays per call, not one: the section "After
+step 6" counted the `[]` literals and the calls of `replaceAt`, and missed
+the copy of `_SYS.ownedCopy` (2).
+
+**The experiment** (`MODE=variants`). The harness makes, from the emitted
+source, the function of A and of D, each with a `_SYS` of its own and called
+directly (`A.raw`, `D.raw`, without the entry check and the normalization
+of the result of `run()`), a second copy of `A.raw` (the calibration), and
+one variant of A for each difference, with only that difference removed.
+Each function must give the value of A on the 48 inputs before it is timed.
+The share of a variant is (A.raw − variant) / (A.raw − D.raw), per round.
+15 rounds, a full collection before each round, the functions in a new
+random order in each round.
+
+A first version of the mode gave every copy the same source text, and its
+calibration failed (A.raw2/A.raw 0.67 in a short check): V8 gives two
+`new Function` results with the same source one compiled function and one
+set of type feedback, so the two `_SYS` objects made each `_SYS` call
+polymorphic. Each function now has a source of its own (a comment that
+names it). Its output is kept as `variants-shared-source.json.gz`, not used.
+
+Batches of 20 ms, two seeds (`variants-final-seed20261110.json.gz`,
+`variants-final-seed777.json.gz`):
+
+| Function | ns per call, seed 1 | / A.raw, seed 1 | / A.raw, seed 2 | Share of the gap, seed 1 | Share, seed 2 |
+| --- | ---: | --- | --- | --- | --- |
+| `A.raw` | 29,076 | 1 | 1 | 0 | 0 |
+| `A.raw2` (calibration) | 25,092 | 0.99 (0.83 to 1.03) | 1.00 (0.82 to 1.02) | 0.04 (−0.22 to 0.55) | 0.01 (−0.15 to 0.60) |
+| `D.raw` | 20,695 | 0.70 (0.65 to 0.91) | 0.71 (0.69 to 0.89) | 1 | 1 |
+| (1) `no-body-iife` | 20,952 | 0.72 (0.66 to 0.89) | 0.71 (0.69 to 0.90) | **1.00 (0.90 to 1.23)** | **0.98 (0.92 to 1.26)** |
+| (2) `no-owned-copy` | 24,908 | 1.01 (0.83 to 1.15) | 1.00 (0.82 to 1.11) | −0.02 (−0.52 to 0.57) | 0.01 (−0.36 to 0.61) |
+| (3) `no-comprehension-iife` | 26,286 | 1.00 (0.84 to 1.04) | 1.00 (0.83 to 1.02) | −0.01 (−0.29 to 0.51) | 0.01 (−0.16 to 0.56) |
+| (4) `function-helpers` | 25,038 | 1.00 (0.81 to 1.08) | 1.00 (0.82 to 1.08) | −0.00 (−0.26 to 0.62) | −0.02 (−0.26 to 0.59) |
+| (5) `loop-header` (the header of D) | 26,522 | 1.02 (0.87 to 1.06) | 1.04 (0.86 to 1.07) | −0.07 (−0.52 to 0.43) | −0.19 (−0.62 to 0.47) |
+| (6) `conditional-expression` | 25,130 | 1.00 (0.83 to 1.01) | 1.00 (0.82 to 1.01) | 0.01 (−0.10 to 0.57) | 0.01 (−0.05 to 0.61) |
+| `all` (1, 3 without the copy, 4, 5, 6) | 21,248 | 0.73 (0.67 to 0.90) | 0.73 (0.71 to 0.90) | 0.92 (0.77 to 1.08) | 0.93 (0.79 to 1.04) |
+| `A.run` | 29,878 | 1.07 (0.97 to 1.11) | 1.08 (1.03 to 1.11) | | |
+| `D.run` | 22,715 | 0.75 (0.73 to 0.93) | 0.74 (0.73 to 0.94) | | |
+
+`A.raw` runs at one of two speeds, about 23,600 ns or about 29,000 ns per
+call; the medians of the variants without (1) fall on either one, which
+makes their ranges wide. Every function without (1) runs at the time of D.
+
+**The batch length.** The default mode times batches of about 2 ms after a
+full collection; the gap there is larger (D/A 0.50 and 0.64 in the two
+runs). The same variants with batches of 2 ms and of 200 ms
+(`variants-heatstep-batch2ms.json.gz`, `variants-heatstep-batch200ms.json.gz`):
+
+| Batch | `A.raw`, ns | `D.raw` / `A.raw` | `no-body-iife` / `A.raw` | Share of `no-body-iife` | `A.raw2` / `A.raw` |
+| --- | ---: | --- | --- | --- | --- |
+| 2 ms (2 passes over the 48 inputs) | 49,250 (46,526 to 72,228) | 0.53 (0.37 to 0.58) | 0.53 (0.36 to 2.57) | 1.00 (−3.27 to 1.14) | 0.99 (0.51 to 2.27) |
+| 20 ms (seed 1 above) | 29,076 (23,628 to 31,309) | 0.70 (0.65 to 0.91) | 0.72 (0.66 to 0.89) | 1.00 (0.90 to 1.23) | 0.99 (0.83 to 1.03) |
+| 200 ms | 29,517 (29,143 to 31,198) | 0.70 (0.67 to 0.73) | 0.70 (0.66 to 0.77) | 1.00 (0.78 to 1.16) | 0.99 (0.94 to 1.02) |
+
+D takes about 21,000 ns in every batch length, and about 26,000 ns with
+2 ms batches; A takes about 29,000 ns in long batches and about 49,000 ns
+in short batches after a collection. A small model of the two forms, run
+with `--trace-opt` (`iife-trace-model.mjs` and its output
+`iife-trace-model.txt`; an observation, not a timing), shows the mechanism
+that this agrees with: after each full collection V8 compiles the arrow
+function of the body again (Maglev with on-stack replacement, then
+TurboFan), while the function without it stays optimized. The extra
+compilations of `prepare()` (`PRIOR=1` and `PRIOR=3`, as the check pass of
+the default mode makes) change nothing (D.raw/A.raw 0.71 in each), and the
+fixtures that run before `heatstep` in the default mode change nothing
+either: a default-mode run of `heatstep` and `heatpaint` alone gives A
+64,363 ns, D 30,453 ns, D/A 0.46 (0.34 to 0.83).
+
+**Result.** The existing route spends about 30% of its time on `heatstep`
+in the arrow function that it makes and calls on each call around the body
+(`return (() => { … })()`): 0.70 (0.65 to 0.91) in 20 ms batches, 0.70
+(0.67 to 0.73) in 200 ms batches. In 2 ms batches after a full collection,
+as in the default mode, it spends about 47% there (0.53, 0.37 to 0.58).
+Removing that arrow function alone gives the time of D (share 0.98 to
+1.00). The copy of `_SYS.ownedCopy`, the arrow function of the
+comprehension, the `const` arrow helpers, the loop header and the `if`
+statement each account for none of the gap (shares −0.19 to 0.04). The
+same arrow function also explains the wide calibration of `heatstep` in the
+default mode. Not explained: why `A.raw` runs at two speeds in 20 ms
+batches.
+
+`roadstep` has the same arrow function around its body in A (and D/B 0.46
+and 0.47 in the two runs), but no variant of it was timed.
+
+Idea, not done: the existing emitter could write the statements of a block
+body in the function itself, instead of in `return (() => { … })()`.
+
+### Why D runs `heatpaint` slower
+
+```js
+// A
+(H, p, q, obstacle) => { const _fn_heatwall = (c, r, obstacle) => …;     // (1) a const arrow helper
+  { const result = []; for (let _tv1 = 0; _tv1 < 1024; _tv1++) { const k = 1 + (1) * _tv1;   // (2) the loop header
+    result.push((!_fn_heatwall(_SYS.floorMod(k + -1, 32), Math.floor((k + -1) / 32), obstacle)
+                 && _SYS.pow2(-p + _SYS.floorMod(k + -1, 32) + 0.5) + _SYS.pow2(-q + Math.floor((k + -1) / 32) + 0.5) <= 9)   // (3) one expression, (4) pow2
+                ? (1) : (H[k])); } return result; } }
+
+// D
+(H, p, q, obstacle) => { function _tv1(_tv2, _tv3, _tv4) { return …; }
+  const _tv5 = 32 * 32; const _tv6 = [];
+  for (let _tv7 = 1, _tv8 = _tv5 < _tv7 ? -1 : 1, _tv9 = _tv8 * (_tv5 - _tv7); _tv9 >= 0; _tv7 += _tv8, _tv9--) {
+    let _tv12 = !_tv1(_SYS.floorMod(_tv7 + -1, 32), Math.floor((_tv7 + -1) / 32), obstacle);
+    if (_tv12) { const _tv10 = -p + _SYS.floorMod(_tv7 + -1, 32) + 0.5; const _tv11 = -q + Math.floor((_tv7 + -1) / 32) + 0.5;
+                 _tv12 = _tv10 * _tv10 + _tv11 * _tv11 <= 9; }
+    _tv6.push(_tv12 ? 1 : H[_tv7]); } return _tv6; }
+```
+
+The variants change D (the slower code) toward A. The share is
+(D.raw − variant) / (D.raw − A.raw). Batches of 20 ms, two seeds:
+
+| Function | / D.raw, seed 1 | / D.raw, seed 2 | Share, seed 1 | Share, seed 2 |
+| --- | --- | --- | --- | --- |
+| `D.raw2` (calibration) | 0.99 (0.93 to 1.07) | 1.00 (0.95 to 1.01) | 0.15 (−0.21 to 0.92) | 0.01 (−0.22 to 0.47) |
+| `A.raw` | 0.95 (0.89 to 1.13) | 0.93 (0.89 to 0.94) | 1 | 1 |
+| (1) `arrow-helper` | 1.00 (0.94 to 1.04) | 1.00 (0.96 to 1.02) | −0.01 (−1.00 to 0.67) | −0.02 (−0.26 to 0.36) |
+| (2) `loop-header` (the header of A) | 0.96 (0.92 to 0.99) | 0.95 (0.90 to 0.96) | **0.56 (−0.26 to 3.16)** | **0.67 (0.48 to 0.86)** |
+| (2') `constant-step` (the header of D, step 1 and count 1023 written as numbers) | 1.01 (0.98 to 1.07) | 1.00 (0.95 to 1.02) | −0.07 (−2.04 to 0.46) | −0.03 (−0.33 to 0.43) |
+| (4) `pow2` | 1.00 (0.97 to 1.06) | 1.00 (0.98 to 1.02) | −0.04 (−0.68 to 1.59) | 0.04 (−0.27 to 0.26) |
+| (3, 4) `one-expression` | 1.00 (0.98 to 1.06) | 1.01 (0.99 to 1.03) | 0.01 (−0.66 to 0.86) | −0.12 (−0.47 to 0.07) |
+| `all` (1, 2, 3 and 4) | 0.94 (0.88 to 0.99) | 0.93 (0.92 to 0.95) | 0.91 (−0.48 to 3.12) | 0.86 (0.64 to 1.13) |
+| `D.argsys` (the form of `run()`) | 1.06 (0.99 to 1.29) | 1.07 (1.02 to 1.09) | | |
+| `A.argsys` | 0.97 (0.93 to 1.00) | 0.97 (0.96 to 1.00) | | |
+| A.run / D.run | 0.91 (0.84 to 0.98) | 0.92 (0.91 to 0.94) | | |
+
+The three earlier variant runs (`variants-prior0/1/3.json.gz`) give the
+loop header the shares 0.82, 0.74 and 0.64, and every other variant less
+than 0.15.
+
+**`heatseed`**, the same comparison (D slower; its code differs from A in
+the loop header and in the squares, `_tv6 * _tv6` with locals in D,
+`_SYS.pow2(…)` in A):
+
+| Function | / D.raw, seed 1 | / D.raw, seed 2 | Share, seed 1 | Share, seed 2 |
+| --- | --- | --- | --- | --- |
+| `D.raw2` (calibration) | 1.00 (0.96 to 1.02) | 1.00 (0.98 to 1.03) | 0.05 (−0.31 to 0.33) | 0.00 (−0.36 to 0.19) |
+| `A.raw` | 0.91 (0.88 to 0.93) | 0.91 (0.89 to 0.96) | 1 | 1 |
+| `loop-header` (the header of A) | 0.92 (0.90 to 0.94) | 0.91 (0.88 to 0.98) | **0.87 (0.79 to 0.99)** | **0.91 (0.60 to 1.76)** |
+| `pow2` | 0.97 (0.95 to 0.99) | 0.97 (0.94 to 0.99) | 0.32 (0.14 to 0.53) | 0.36 (0.13 to 0.56) |
+| `all` | 0.90 (0.88 to 0.97) | 0.91 (0.89 to 0.93) | 1.01 (0.38 to 1.19) | 1.05 (0.83 to 2.55) |
+
+**Result.** The structured route spends about 4% to 5% of its time on
+`heatpaint` (0.95 to 0.96, ranges 0.90 to 0.99) and about 8% to 9% on
+`heatseed` (0.91 to 0.92, ranges 0.88 to 0.98) in its loop header. Writing
+the step and the count as numbers does not change it (1.00 to 1.01), so the
+cost is the form of the header (the index and a count carried together, the
+index increased by a variable), not the computation of the step from the
+bounds. On `heatpaint`, about a third of the gap (shares 0.56 and 0.67 for
+the header) is not explained by one difference alone; all of them together
+give 0.86 to 0.91 of it. On `heatseed`, the header and the squares together
+give all of it (`pow2` alone 0.32 to 0.36; the shares are not additive).
+Not explained: in the form of `run()` (`_SYS` as an argument) the gap on
+`heatpaint` is larger than between the raw functions: D.argsys / A.argsys
+is about 1.09 to 1.10 (1.06 to 1.07 against 0.97, both relative to
+D.raw), and D.raw / A.raw is 1.05 to 1.08; `run()` itself gives 1.09 to
+1.10. The default mode gives a smaller gap on `heatpaint` (D/A 1.06, 1.03
+and 1.00 in the three runs) than this harness.
+
+Idea, not done: the structured emitter could write the loop header of A (a
+counter from 0, the index computed in the body).
+
+### The decision rules of step 4, applied to both runs
+
+**2b. "A reproducible cost above 5% in warm execution, against the ordinary
+target with the same options" (D/B).**
+
+- `heatpaint`: does not hold. D/B 1.02 (0.98 to 1.08), 1.04 (0.97 to
+  1.09) and 1.04 (0.94 to 1.07) in the three runs; each median is below
+  1.05, and each range includes 1. Against A, the configuration with
+  default options, D/A is 1.06, 1.03 and 1.00, and 1.05 to 1.08 between the
+  raw functions of the variants mode: a cost of up to about 8% against A,
+  above 5% in some runs and not in others. Its cause is the loop header of
+  D (above).
+- `heatseed` (new): holds. D/B 1.06 (0.96 to 1.12) in the second run and
+  1.08 (1.01 to 1.12) in the third, with A2/A 0.98 (0.88 to 1.05) and 1.02
+  (0.92 to 1.10); D/A 1.09 and 1.11; about 1.10 between the raw functions
+  (A.raw / D.raw 0.91 in both seeds). The cause is the loop header of D (shares 0.87 and 0.91 of
+  the gap against A). B was not timed in the variants mode; the loop header
+  of B is a counter from 0, as in A.
+- Every other fixture and the corpus totals: no reproducible cost above 5%
+  in either run (the medians of D/B are 0.46 to 1.06 per fixture, and the
+  ranges of the medians above 1.03 include 1). D is faster on `loop-sum`
+  (0.56, 0.58), `loop-complex-iteration` (0.76, 0.77), `heatstep` (0.59,
+  0.59; the cause is in the existing emitter, above) and `roadstep` (0.46,
+  0.47).
+
+The rule says "revise the design before any expansion". The revision that
+the measure points to is the form of the loop header of the structured
+emitter; this section does not make it.
+
+### What is resolved and what is not
+
+Resolved: the second run agrees with the first within the calibration on
+every ratio except `fold` D/A (D/B agrees); D is faster on `heatstep`
+because the existing emitter runs the body in an arrow function made per
+call, which V8 optimizes again after each full collection; D is slower on
+`heatpaint` and `heatseed` mainly because of its loop header; A makes two
+arrays per call of `heatstep`, not one.
+
+Not resolved: why `A.raw` of `heatstep` runs at two speeds; the part of
+the `heatpaint` gap that no single difference explains; why the form of
+`run()` widens the `heatpaint` gap; a run of the variants with B; the
+546-program corpus.

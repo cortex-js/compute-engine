@@ -860,6 +860,10 @@ node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
 CORPUS=all COLD_PROCESS=5 GC=batch node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
 # Value agreement of all programs, no timing.
 CORPUS=all MODE=check node --import tsx benchmarks/js-structured-pilot.ts
+# The causes of a difference in execution on heatstep, heatpaint and
+# heatseed: hand-edited variants of the slower code, about 15 seconds.
+# ORDER_SEED changes the seeded order of the configurations (default 12345).
+ORDER_SEED=777 MODE=variants node --expose-gc --import tsx benchmarks/js-structured-pilot.ts
 ```
 
 Hold the box lock for a timing run. The configurations of each round run in

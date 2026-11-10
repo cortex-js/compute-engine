@@ -1,0 +1,35 @@
+[completed compiling  <JSFunction (sfi = )> (target MAGLEV) - took 0.000, 0.039, 0.000 ms]
+--- round 0: full collection
+[completed compiling  <JSFunction f (sfi = )> (target MAGLEV) - took 0.000, 0.069, 0.000 ms]
+[completed compiling  <JSFunction at (sfi = )> (target MAGLEV) - took 0.000, 0.065, 0.001 ms]
+[completed compiling  <JSFunction f (sfi = )> (target MAGLEV) - took 0.000, 0.017, 0.001 ms]
+[completed compiling  <JSFunction (sfi = )> (target MAGLEV) OSR - took 0.000, 0.131, 0.001 ms]
+iifeForm: 5413.33 ns per call
+[completed compiling  <JSFunction f (sfi = )> (target MAGLEV) - took 0.000, 0.018, 0.000 ms]
+[completed compiling  <JSFunction f (sfi = )> (target MAGLEV) - took 0.000, 0.017, 0.000 ms]
+[completed compiling  <JSFunction plainForm (sfi = )> (target MAGLEV) OSR - took 0.000, 0.093, 0.001 ms]
+plainForm: 3457.92 ns per call
+--- round 1: full collection
+[completed compiling  <JSFunction (sfi = )> (target TURBOFAN_JS) - took 0.014, 2.070, 0.009 ms]
+[completed optimizing  <JSFunction (sfi = )> (target TURBOFAN_JS)]
+[completed compiling  <JSFunction plainForm (sfi = )> (target TURBOFAN_JS) - took 0.001, 1.694, 0.002 ms]
+[completed optimizing  <JSFunction plainForm (sfi = )> (target TURBOFAN_JS)]
+[completed compiling  <JSFunction at (sfi = )> (target TURBOFAN_JS) - took 0.002, 0.210, 0.001 ms]
+[completed optimizing  <JSFunction at (sfi = )> (target TURBOFAN_JS)]
+iifeForm: 5597.08 ns per call
+[completed compiling  <JSFunction f (sfi = )> (target TURBOFAN_JS) - took 0.000, 0.206, 0.002 ms]
+[completed optimizing  <JSFunction f (sfi = )> (target TURBOFAN_JS)]
+[completed compiling  <JSFunction (sfi = )> (target MAGLEV) OSR - took 0.000, 0.149, 0.001 ms]
+plainForm: 731.25 ns per call
+--- round 2: full collection
+[completed compiling  <JSFunction f (sfi = )> (target TURBOFAN_JS) - took 0.001, 0.176, 0.005 ms]
+[completed optimizing  <JSFunction f (sfi = )> (target TURBOFAN_JS)]
+[completed compiling  <JSFunction (sfi = )> (target MAGLEV) OSR - took 0.000, 0.201, 0.002 ms]
+iifeForm: 7150.83 ns per call
+plainForm: 639.58 ns per call
+--- round 3: full collection
+[completed compiling  <JSFunction (sfi = )> (target TURBOFAN_JS) - took 0.000, 1.458, 0.006 ms]
+[completed optimizing  <JSFunction (sfi = )> (target TURBOFAN_JS)]
+iifeForm: 2066.25 ns per call
+[completed compiling  <JSFunction (sfi = )> (target MAGLEV) OSR - took 0.000, 0.117, 0.001 ms]
+plainForm: 710 ns per call
