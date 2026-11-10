@@ -115,7 +115,9 @@ export type IRInputRead = OperationBase & {
  *  interpreter gives it (`Mod(-7, 3)` is `2`, `Mod(7, -3)` is `-2`,
  *  `Mod(-7.5, 2)` is `0.5`), and a zero divisor gives not a number.
  *  `floor` has an integer result. `divide` has a real result, also for
- *  integer operands. `not` is the negation of one boolean operand. */
+ *  integer operands. `not` is the negation of one boolean operand.
+ *  `not-equal` is the negation of `equal`: true when an operand is not a
+ *  number. */
 export type IRArithmetic = OperationBase & {
   readonly kind:
     | 'add'
@@ -125,6 +127,7 @@ export type IRArithmetic = OperationBase & {
     | 'less'
     | 'less-equal'
     | 'equal'
+    | 'not-equal'
     | 'min'
     | 'max'
     | 'sqrt'

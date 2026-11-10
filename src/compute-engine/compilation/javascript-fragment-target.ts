@@ -7,6 +7,7 @@ import type {
   CompileTarget,
 } from './types.js';
 import {
+  isDictionary,
   isFunction,
   isNumber,
   isString,
@@ -307,16 +308,21 @@ const multiplyRule = {
 } satisfies FragmentRule<ScalarRepresentation>;
 
 /**
- * `Less`, `LessEqual` and `Equal`: two real operands, a boolean result. The
+ * `Less`, `LessEqual`, `Equal` and `NotEqual`: two real operands, a boolean
+ * result. The
  * canonical form writes `GreaterEqual(a, b)` as `LessEqual(b, a)`. A
  * comparison that reads no input, parameter or local is refused
  * (`closedJumpRefusal()`): the existing compiler writes its exact value as
  * a literal also with `constantFold: false`. A comparison of three operands or more is a conjunction of pairs
  * that the existing emitter writes with temporaries. `Equal` is the exact
- * comparison `===` of two numbers; a complex operand needs a comparison per
+ * comparison `===` of two numbers, and `NotEqual` its negation `!==`, which
+ * is true for a `NaN` operand, as the interpreter answers (the existing
+ * emitter, `compileJSEquality()`); a complex operand needs a comparison per
  * component, which the structured route does not have.
  */
-function comparisonRule(operator: 'Less' | 'LessEqual' | 'Equal') {
+function comparisonRule(
+  operator: 'Less' | 'LessEqual' | 'Equal' | 'NotEqual'
+) {
   return {
     walk: (node, scope, context, w) => {
       const nops = isFunction(node) ? node.nops : 0;
@@ -335,7 +341,11 @@ function comparisonRule(operator: 'Less' | 'LessEqual' | 'Equal') {
           'signature',
           `${operator} with a complex operand is not in the structured route`
         );
-      if (operator !== 'Equal' && facts.some((f) => f.type.kind === 'boolean'))
+      if (
+        operator !== 'Equal' &&
+        operator !== 'NotEqual' &&
+        facts.some((f) => f.type.kind === 'boolean')
+      )
         return w.refuse(
           node,
           'signature',
@@ -1208,6 +1218,7 @@ const structuredRules: Record<string, FragmentRule<ScalarRepresentation>> = {
   Less: comparisonRule('Less'),
   LessEqual: comparisonRule('LessEqual'),
   Equal: comparisonRule('Equal'),
+  NotEqual: comparisonRule('NotEqual'),
   Mod: modRule,
   Floor: floorRule,
   Divide: divideRule,
@@ -2973,13 +2984,21 @@ function attachBoundFunction(
   const locals = new Map<string, string>();
   /** The local that `declaration` declares, with its declared type. The
    *  structured route also admits the form of a `let`,
-   *  `Declare(t, {value: …})`, which `parseEpsil()` gives. */
+   *  `Declare(t, {value: …})`, and of a `let` with a type,
+   *  `Declare(t, 'integer', {value: …})`, which `parseEpsil()` gives. A
+   *  `let` with a type and no value, `Declare(t, 'integer')`, is refused. */
   const declareLocal = (declaration: Expression) => {
     const letForm =
       admission.structured &&
       isFunction(declaration, 'Declare') &&
       declaration.nops === 2 &&
       declareTypeOperand(declaration.ops) === undefined &&
+      declareValueOperand(declaration.ops) !== undefined;
+    const typedLetForm =
+      admission.structured &&
+      isFunction(declaration, 'Declare') &&
+      declaration.nops === 3 &&
+      isDictionary(declaration.op3) &&
       declareValueOperand(declaration.ops) !== undefined;
     if (
       !isFunction(declaration, 'Declare') ||
@@ -3009,7 +3028,10 @@ function attachBoundFunction(
     return {
       local,
       declared,
-      value: letForm ? declareValueOperand(declaration.ops)! : declaration.op3,
+      value:
+        letForm || typedLetForm
+          ? declareValueOperand(declaration.ops)!
+          : declaration.op3,
     };
   };
   const names = new Set(inputs.map((input) => input.name));

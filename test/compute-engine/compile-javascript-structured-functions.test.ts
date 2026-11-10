@@ -1393,6 +1393,21 @@ const BRANCH_ROWS: BranchRow[] = [
     /the condition of If has the constant type true/,
   ],
   ['Equal(k, 3)', ['Equal', 'k', 3]],
+  // NotEqual: `!==`, as the existing emitter writes it, with the refusals
+  // of Equal.
+  ['NotEqual(k, 3)', ['NotEqual', 'k', 3]],
+  ['NotEqual(x, y)', ['NotEqual', 'x', 'y']],
+  ['NotEqual(k, x)', ['NotEqual', 'k', 'x']],
+  [
+    'If(nearThird != third, x, -x)',
+    ['If', ['NotEqual', 'nearThird', 'third'], 'x', ['Negate', 'x']],
+    /NotEqual reads no input, parameter or local: the existing compiler folds it/,
+  ],
+  [
+    'NotEqual(z, w)',
+    ['NotEqual', 'z', 'w'],
+    /NotEqual with a complex operand is not in the structured route/,
+  ],
   [
     'And(x < 1, 0 <= p)',
     ['And', ['Less', 'x', 1], ['LessEqual', 0, 'p']],

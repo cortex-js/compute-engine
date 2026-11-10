@@ -646,17 +646,28 @@ function ray(B: list<integer>, k: integer, p: integer, dx: integer, dy: integer)
 }
 `;
 
-/** Reduced copies of Tycho's `hasmove` and `choosecell` (showcase-othello.js).
- *  Each calls `flips`, which needs `NotEqual`, and declares
- *  `let count: integer = …`, which the route declines (the typed `let` form
- *  `Declare(count, 'integer', Dictionary(value: …))`). The copies replace
- *  the call with `B[k] * p` and write `let count = …`. The loops and their
- *  exits are those of the showcase. */
-const OTHELLO_REDUCED = `
+/** Tycho's `flips`, `hasmove` and `choosecell` (showcase-othello.js),
+ *  unreduced, with `ray`. The route declines them: `flips` calls `ray`,
+ *  and `hasmove` and `choosecell` call `flips`, a user function whose body
+ *  is a block of statements, and a helper body of the route is one value. */
+const OTHELLO_PRELUDE = `${RAY_PRELUDE}
+function flips(B: list<integer>, k: integer, p: integer) -> integer {
+  let n = 0
+  if k >= 1 && k <= 64 && p != 0 {
+    if B[k] == 0 {
+      for dx in -1..1 {
+        for dy in -1..1 {
+          if dx != 0 || dy != 0 { n = n + ray(B, k, p, dx, dy) }
+        }
+      }
+    }
+  }
+  n
+}
 function hasmove(B: list<integer>, p: integer) -> boolean {
   let found = false
   for k in 1..64 {
-    let count = B[k] * p
+    let count: integer = flips(B, k, p)
     if count > 0 { found = true; break }
   }
   found
@@ -665,7 +676,49 @@ function choosecell(B: list<integer>, rank: integer) -> integer {
   let n = 0
   let cell = 0
   for k in 1..64 {
-    let count = B[k] * B[65]
+    let count: integer = flips(B, k, B[65])
+    if count > 0 {
+      n = n + 1
+      if n == rank { cell = k; break }
+    }
+  }
+  cell
+}
+`;
+
+/** Reduced copies of Tycho's `flips`, `hasmove` and `choosecell`
+ *  (`OTHELLO_PRELUDE`): each replaces the call of a user function whose
+ *  body is a block (`ray`, `flips`) with an integer expression,
+ *  `p * B[65] + dx - dy` in `flips`, `B[k] * p` and `B[k] * B[65]` in the
+ *  others. The conditions with `NotEqual`, the typed `let`, the loops and
+ *  their exits are those of the showcase. */
+const OTHELLO_REDUCED = `
+function flips(B: list<integer>, k: integer, p: integer) -> integer {
+  let n = 0
+  if k >= 1 && k <= 64 && p != 0 {
+    if B[k] == 0 {
+      for dx in -1..1 {
+        for dy in -1..1 {
+          if dx != 0 || dy != 0 { n = n + p * B[65] + dx - dy }
+        }
+      }
+    }
+  }
+  n
+}
+function hasmove(B: list<integer>, p: integer) -> boolean {
+  let found = false
+  for k in 1..64 {
+    let count: integer = B[k] * p
+    if count > 0 { found = true; break }
+  }
+  found
+}
+function choosecell(B: list<integer>, rank: integer) -> integer {
+  let n = 0
+  let cell = 0
+  for k in 1..64 {
+    let count: integer = B[k] * B[65]
     if count > 0 {
       n = n + 1
       if n == rank { cell = k; break }
@@ -733,6 +786,36 @@ describe('the witnesses', () => {
       for (const p of [1, -1])
         for (const dx of [-1, 0, 1]) for (const dy of [-1, 0, 1]) cases.push([START, k, p, dx, dy]);
     agreeEpsil(RAY_PRELUDE, 'ray', cases, false);
+  });
+
+  test('flips, reduced: NotEqual in a conjunction and in a disjunction', () => {
+    const cases: Value[][] = [];
+    for (const k of [0, 1, 20, 28, 64, 65])
+      for (const p of [1, 0, -1]) cases.push([START, k, p], [board({ 65: -1 }), k, p]);
+    agreeEpsil(OTHELLO_REDUCED, 'flips', cases);
+  });
+
+  test('flips, hasmove and choosecell, reduced, compile on the profile, pure and shippable', () => {
+    const ce = engineWith(OTHELLO_REDUCED);
+    for (const name of ['flips', 'hasmove', 'choosecell']) {
+      const result = compile(literal(ce, name), {
+        profile: 'numeric-kernel',
+        fallback: false,
+      } as never) as CompilationResult<'javascript'> & { pure?: boolean; shippable?: boolean };
+      expect([name, result.success, result.pure, result.shippable]).toEqual([name, true, true, true]);
+    }
+  });
+
+  test('flips, hasmove and choosecell, unreduced: a call of a function whose body is a block declines', () => {
+    const ce = engineWith(OTHELLO_PRELUDE);
+    for (const name of ['flips', 'hasmove', 'choosecell'])
+      expect(() =>
+        compile(literal(ce, name), { profile: 'numeric-kernel', fallback: false } as never)
+      ).toThrow("Could not compile with the profile 'numeric-kernel': unsupported helper body Block");
+    // `ray` itself compiles.
+    expect(
+      compile(literal(ce, 'ray'), { profile: 'numeric-kernel', fallback: false } as never).success
+    ).toBe(true);
   });
 
   test('hasmove, reduced: first pass, middle pass, last pass, never', () => {
@@ -1087,5 +1170,178 @@ describe('admission', () => {
   ];
   test.each(refusals)('%s', (_name, json, reason) => {
     expect(() => structured().prepareStructured(new ComputeEngine().expr(json), OPTIONS)).toThrow(reason);
+  });
+});
+
+//
+// A `let` with a type, and `NotEqual`
+//
+
+/** The form of a `let` that `parseEpsil()` gives: `Declare(t, {value: …})`
+ *  with no type, `Declare(t, 'integer', {value: …})` with a type. */
+const letForm = (name: string, value: MathJsonExpression, type?: string): MathJsonExpression => [
+  'Declare',
+  name,
+  ...(type === undefined ? [] : [`'${type}'`]),
+  ['Dictionary', ['KeyValuePair', { str: 'value' }, value]],
+];
+
+describe('the forms of a let', () => {
+  const ns = [[0], [1], [-3], [7], [64]] as const;
+  test('a let with no type', () => {
+    agreeJson(fn(N, letForm('c', ['Multiply', 2, 'n']), ['Assign', 'c', ['Add', 'c', 1]], 'c'), ns);
+  });
+
+  test('a let of the type integer', () => {
+    agreeJson(fn(N, letForm('c', ['Multiply', 2, 'n'], 'integer'), ['Assign', 'c', ['Add', 'c', 1]], 'c'), ns);
+  });
+
+  test('a let of the type integer, the bound of a loop', () => {
+    agreeJson(
+      fn(
+        N,
+        letForm('m', ['Add', 'n', 2], 'integer'),
+        letForm('s', 0),
+        loop(['Assign', 's', ['Add', 's', 'k']], 'k', 1, 'm'),
+        's'
+      ),
+      ns
+    );
+  });
+
+  test('a let of the type real with an integer value', () => {
+    agreeJson(fn(N, letForm('x', 'n', 'real'), ['Assign', 'x', ['Divide', 'x', 4]], 'x'), ns);
+  });
+
+  test('a let of the type boolean', () => {
+    agreeJson(fn(N, letForm('b', ['Less', 0, 'n'], 'boolean'), ['If', 'b', 'n', ['Negate', 'n']]), ns);
+  });
+
+  test('a let of the type integer in a loop body, read by an exit', () => {
+    agreeJson(
+      fn(
+        N,
+        letForm('found', 0),
+        loop(
+          ['Block', letForm('c', ['Multiply', 'k', 'n'], 'integer'), ['If', ['Less', 10, 'c'], ['Block', ['Assign', 'found', 'k'], BREAK]]],
+          'k',
+          1,
+          8
+        ),
+        'found'
+      ),
+      ns
+    );
+  });
+});
+
+describe('NotEqual', () => {
+  const XY = [typed('x', 'real'), typed('y', 'real')];
+  const KJ = [typed('k', 'integer'), typed('j', 'integer')];
+  const reals: Value[][] = [
+    [0, 0],
+    [0, -0],
+    [1, 2],
+    [0.5, 0.5],
+    [NaN, 1],
+    [NaN, NaN],
+  ];
+  // The engine does not type an infinity `real`: an infinite input is
+  // outside the declared type, and the interpreter refuses it.
+  test('two real operands, NaN and the zeros', () => {
+    agreeJson(fn(XY, ['NotEqual', 'x', 'y']), reals);
+  });
+
+  test('two integer operands', () => {
+    agreeJson(fn(KJ, ['NotEqual', 'k', 'j']), [
+      [0, 0],
+      [1, -1],
+      [3, 3],
+      [-7, 7],
+    ]);
+  });
+
+  test('an integer and a real operand', () => {
+    agreeJson(fn([typed('k', 'integer'), typed('y', 'real')], ['NotEqual', 'k', 'y']), [
+      [1, 1],
+      [1, 1.5],
+      [2, NaN],
+    ]);
+  });
+
+  test('in a condition, in a disjunction, and as a value', () => {
+    agreeJson(
+      fn(KJ, ['If', ['Or', ['NotEqual', 'k', 0], ['NotEqual', 'j', 0]], ['Add', 'k', 'j'], -1]),
+      [
+        [0, 0],
+        [0, 2],
+        [3, 0],
+        [-1, 1],
+      ]
+    );
+  });
+
+  test('a chain of three operands is the conjunction of pairs, in the canonical form', () => {
+    const json = fn(NX, ['If', ['NotEqual', 'n', 'x', 1], 1, 0]);
+    expect(new ComputeEngine().expr(json).json).toEqual(
+      fn(NX, ['If', ['And', ['NotEqual', 'n', 'x'], ['NotEqual', 'x', 1]], 1, 0])
+    );
+    agreeJson(json, [
+      [0, 0],
+      [1, 2],
+      [2, 1],
+      [1, 1],
+      [3, 0.5],
+    ]);
+  });
+
+  test('the representation names the operation not-equal, and the code writes !==', () => {
+    const { program } = lowerJson(fn(XY, ['NotEqual', 'x', 'y']));
+    expect(allOperations(program.root).map((op) => op.kind)).toContain('not-equal');
+    expect(structured().compile(new ComputeEngine().expr(fn(XY, ['NotEqual', 'x', 'y'])), OPTIONS).code).toMatch(
+      /!==/
+    );
+  });
+});
+
+describe('admission, a let with a type and NotEqual', () => {
+  const refusals: [string, MathJsonExpression, RegExp][] = [
+    [
+      // The canonical form of the declaration is an error,
+      // `declaration-without-value`.
+      'a let of the type integer with no value',
+      fn(N, ['Declare', 'c', "'integer'"], ['Assign', 'c', 'n'], 'c'),
+      /the structured route admits no statement Error/,
+    ],
+    [
+      'a let of a type that the route has no local for',
+      fn(N, letForm('c', 'n', 'rational'), 'c'),
+      /unsupported local declaration/,
+    ],
+    [
+      'a let of the type integer with a value that is not an integer',
+      fn(N, letForm('c', ['Divide', 'n', 2], 'integer'), 'c'),
+      /a value written to the integer local c does not have the type integer/,
+    ],
+    [
+      'a let of the type integer, written later with a value that is not an integer',
+      fn(N, letForm('c', 'n', 'integer'), ['Assign', 'c', ['Divide', 'c', 2]], 'c'),
+      /a value written to the integer local c does not have the type integer/,
+    ],
+    [
+      'NotEqual with a complex operand',
+      fn([typed('z', 'complex'), typed('w', 'complex')], ['NotEqual', 'z', 'w']),
+      /NotEqual with a complex operand is not in the structured route/,
+    ],
+    [
+      'NotEqual with boolean operands',
+      fn([typed('a', 'boolean'), typed('b', 'boolean')], ['NotEqual', 'a', 'b']),
+      /No signature of `NotEqual`/,
+    ],
+  ];
+  test.each(refusals)('%s', (_name, json, reason) => {
+    expect(() => structured().compile(new ComputeEngine().expr(json), { ...OPTIONS, fallback: false })).toThrow(
+      reason
+    );
   });
 });

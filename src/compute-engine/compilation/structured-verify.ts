@@ -40,6 +40,7 @@ export type PolicyOperationKind =
   | 'less'
   | 'less-equal'
   | 'equal'
+  | 'not-equal'
   | 'min'
   | 'max'
   | 'and'
@@ -509,6 +510,7 @@ const ELEMENTWISE_KINDS: ReadonlySet<IROperation['kind']> = new Set<
   'less',
   'less-equal',
   'equal',
+  'not-equal',
   'min',
   'max',
   'sqrt',
@@ -830,6 +832,7 @@ function verifySignature(
     case 'less':
     case 'less-equal':
     case 'equal':
+    case 'not-equal':
       arity(2);
       resultIn(policy.operations[op.kind].results);
       operandsIn(operandRule(op.kind));

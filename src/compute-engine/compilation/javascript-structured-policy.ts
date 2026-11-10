@@ -58,6 +58,7 @@ export const JAVASCRIPT_POLICY: RepresentationPolicy = {
     'less': { results: ['boolean'], operands: ['number'] },
     'less-equal': { results: ['boolean'], operands: ['number'] },
     'equal': { results: ['boolean'], operands: ['number'] },
+    'not-equal': { results: ['boolean'], operands: ['number'] },
     // `_SYS.floorMod`, `Math.floor` and `/`, as the existing emitter writes
     // them.
     'mod': { results: ['number'], operands: ['number'] },

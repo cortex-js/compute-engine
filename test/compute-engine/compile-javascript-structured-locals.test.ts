@@ -699,6 +699,7 @@ const FLOAT_POLICY: RepresentationPolicy = {
     less: { results: ['bool'], operands: ['float'] },
     'less-equal': { results: ['bool'], operands: ['float'] },
     equal: { results: ['bool'], operands: ['float'] },
+    'not-equal': { results: ['bool'], operands: ['float'] },
     and: { results: ['bool'], operands: ['bool'] },
     or: { results: ['bool'], operands: ['bool'] },
     mod: { results: ['float'], operands: ['float'] },

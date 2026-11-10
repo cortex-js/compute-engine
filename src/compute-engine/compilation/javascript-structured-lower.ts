@@ -207,6 +207,7 @@ const OPERATIONS: Readonly<
     | 'less'
     | 'less-equal'
     | 'equal'
+    | 'not-equal'
     | 'min'
     | 'max'
     | 'sqrt'
@@ -228,6 +229,7 @@ const OPERATIONS: Readonly<
   Less: 'less',
   LessEqual: 'less-equal',
   Equal: 'equal',
+  NotEqual: 'not-equal',
   Min: 'min',
   Max: 'max',
   Mod: 'mod',

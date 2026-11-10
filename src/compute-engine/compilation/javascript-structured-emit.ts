@@ -652,6 +652,8 @@ class Emitter {
         return leftAssociative(operands, RELATIONAL, '<=');
       case 'equal':
         return leftAssociative(operands, EQUALITY, '===');
+      case 'not-equal':
+        return leftAssociative(operands, EQUALITY, '!==');
       case 'sqrt':
         if (op.result.representation !== 'complex')
           return call('Math.sqrt', operands);

@@ -109,9 +109,9 @@ function roadtrail(H: list<real>, S: list<real>) -> list<real> {
 `;
 
 /** Prelude functions: a draw from the random stream and a list literal,
- *  which the profile declines, a `Break` in a branch, and the function
- *  `tone` of Tycho's Buddhabrot showcase (`template-data.js`), which it
- *  admits. */
+ *  which the profile declines, a `Break` in a branch, the function `tone`
+ *  of Tycho's Buddhabrot showcase (`template-data.js`), and a `let` with a
+ *  type and `!=`, which it admits. */
 const OTHER_PRELUDE = `
 function jitter(x: real) -> real { x + random() }
 function firstover(L: list<real>, t: real) -> real {
@@ -123,6 +123,13 @@ function firstover(L: list<real>, t: real) -> real {
 }
 function pair(x: real) -> list<real> { [x, 2*x] }
 function tone(v: real, lo: real) -> real { min(1, max(lo, max(0, v)^1.5)) }
+function nonzero(L: list<integer>) -> integer {
+  let n: integer = 0
+  for k in 1..length(L) {
+    if L[k] != 0 { n = n + 1 }
+  }
+  n
+}
 `;
 
 /** An engine with machine numbers that has executed `source`. */
@@ -232,6 +239,7 @@ const EXPRESSIONS: [string, MathJsonExpression][] = [
   ['Not(x < y)', ['Not', ['Less', 'x', 'y']]],
   ['C || x < 0', ['Or', 'C', ['Less', 'x', 0]]],
   ['k == 2', ['Equal', 'k', 2]],
+  ['k != 2', ['NotEqual', 'k', 2]],
   ['Mod(k, 3)', ['Mod', 'k', 3]],
   ['Mod(x, 1)', ['Mod', 'x', 1]],
   ['Floor(x)', ['Floor', 'x']],
@@ -365,7 +373,7 @@ const PRELUDES: [string, string, string[]][] = [
     TRAFFIC_PRELUDE,
     ['roadseed', 'roadstart', 'roadstep', 'roadtrail'],
   ],
-  ['other', OTHER_PRELUDE, ['jitter', 'firstover', 'pair', 'tone']],
+  ['other', OTHER_PRELUDE, ['jitter', 'firstover', 'pair', 'tone', 'nonzero']],
 ];
 
 /** What `compile()` gives with `fallback: false`: the result, or the
@@ -572,6 +580,18 @@ describe('the example of the spec', () => {
       ok: false,
       diagnostic: 'diagnostic' in got ? got.diagnostic : undefined,
     });
+  });
+
+  test('a function with a let of the type integer and != compiles, pure and shippable', () => {
+    const nonzero = literal(engineWith(OTHER_PRELUDE), 'nonzero');
+    const got = outcome(nonzero);
+    expect('result' in got && got.result).toMatchObject({
+      success: true,
+      pure: true,
+      shippable: true,
+    });
+    if ('result' in got)
+      expect((got.result.run as unknown as (L: number[]) => number)([0, 3, -1, 0, 2])).toBe(3);
   });
 });
 
